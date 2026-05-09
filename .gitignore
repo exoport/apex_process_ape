@@ -1,0 +1,41 @@
+# Go binaries and build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary built with `go test -c`
+*.test
+
+# Coverage output
+*.out
+coverage.out
+
+# Vendor directory (we don't vendor)
+vendor/
+/vendor/
+
+# goreleaser output
+/dist/
+
+# Local binary output (e.g., from `make build`)
+/ape
+/bin/
+
+# Editor / IDE
+.vscode/
+.VSCodeCounter
+
+# Local logs / scratch
+/logs/
+*/logs/
+*/*/logs/
+*.db
+
+# Temporary local override
+
+# /output/ — matches only a directory named output at the repository root
+#  (e.g., output/), not in subdirectories
+# The leading / anchors the pattern to the root of the repo.
+/output/

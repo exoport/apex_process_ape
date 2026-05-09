@@ -1,0 +1,10 @@
+.bingo/
+.claude/
+.github/
+.vscode/
+node_modules/
+_output/
+output/
+vendor/
+.VSCodeCounter
+CHANGELOG.md

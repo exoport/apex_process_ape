@@ -1,0 +1,10 @@
+name: grpc-transport
+version: v1
+description: gRPC transport layer patterns
+uses:
+  - go-backend-service
+owns_categories:
+  - grpc.service-definition
+  - grpc.error-mapping
+adrs: []
+patterns: []

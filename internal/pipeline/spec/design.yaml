@@ -1,0 +1,29 @@
+name: design
+stages:
+  create-prd:
+    chain:
+      - skill: apex-create-prd
+        agent: apex-agent-pm
+        model: "opus[1m]"
+  shard-prd:
+    chain:
+      - skill: apex-shard-doc
+        args: "--doc prd"
+  create-ux-design:
+    chain:
+      - skill: apex-create-ux-design
+        agent: apex-agent-ux-designer
+        model: "opus[1m]"
+  shard-ux-design:
+    chain:
+      - skill: apex-shard-doc
+        args: "--doc ux-design"
+  create-architecture:
+    chain:
+      - skill: apex-create-architecture
+        agent: apex-agent-architect
+        model: "opus[1m]"
+  shard-architecture:
+    chain:
+      - skill: apex-shard-doc
+        args: "--doc architecture"

@@ -1,0 +1,16 @@
+name: multi-tenancy
+version: v1
+description: Tenant isolation, context propagation, tenant-scoped storage
+owns_categories:
+  - mt.tenant-isolation
+  - mt.context-propagation
+adrs:
+  - id: ADR-0006
+    title: Tenant Isolation Strategy
+    category: mt.tenant-isolation
+    file: ../adrs/adr-0006_tenant-isolation-strategy.md
+patterns:
+  - id: PAT-0005
+    title: Tenant Context Propagation
+    category: mt.context-propagation
+    file: ../patterns/pat-0005_tenant-context-propagation.md

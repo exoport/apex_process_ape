@@ -1,0 +1,29 @@
+name: go-backend-service
+version: v1
+description: Go backend service base (HTTP, logging, config, DI)
+owns_categories:
+  - go.module
+  - go.error-handling
+  - go.dependency-injection
+adrs:
+  - id: ADR-0001
+    title: Go Module Structure
+    category: go.module
+    file: ../adrs/adr-0001_go-module-structure.md
+  - id: ADR-0002
+    title: Error Handling Strategy
+    category: go.error-handling
+    file: ../adrs/adr-0002_error-handling-strategy.md
+  - id: ADR-0003
+    title: Dependency Injection Pattern
+    category: go.dependency-injection
+    file: ../adrs/adr-0003_dependency-injection.md
+patterns:
+  - id: PAT-0001
+    title: Repository Pattern
+    category: go.repository
+    file: ../patterns/pat-0001_repository-pattern.md
+  - id: PAT-0002
+    title: Service Layer
+    category: go.service
+    file: ../patterns/pat-0002_service-layer.md

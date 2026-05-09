@@ -1,0 +1,155 @@
+version: "2"
+run:
+  issues-exit-code: 1
+linters:
+  default: all
+  disable:
+    - cyclop
+    - embeddedstructfieldcheck
+    - err113
+    - exhaustruct
+    - forbidigo
+    - funcorder
+    - funlen
+    - gochecknoglobals
+    - gochecknoinits
+    - gocognit
+    - godot
+    - godox
+    - ireturn
+    - lll
+    - nlreturn
+    - noinlineerr
+    - nonamedreturns
+    - paralleltest
+    - varnamelen
+    - wrapcheck
+    - wsl
+    - wsl_v5
+  settings:
+    depguard:
+      rules:
+        main:
+          files:
+            - $all
+            - "!$test"
+          deny:
+            - pkg: io/ioutil
+              desc: ioutil is deprecated starting with Go 1.16
+            - pkg: github.com/pkg/errors
+              desc: Should be replaced by standard lib errors package
+        test:
+          files:
+            - $test
+          deny:
+            - pkg: io/ioutil
+              desc: ioutil is deprecated starting with Go 1.16
+            - pkg: github.com/pkg/errors
+              desc: Should be replaced by standard lib errors package
+    errcheck:
+      check-type-assertions: true
+    exhaustive:
+      default-signifies-exhaustive: true
+    goconst:
+      min-len: 2
+      min-occurrences: 3
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+    gomoddirectives:
+      replace-local: true
+    mnd:
+      ignored-numbers:
+        - "0o666"
+        - "0o644"
+        - "0o600"
+        - "0o755"
+        - "0o750"
+        - "0o700"
+    nolintlint:
+      require-explanation: false
+      require-specific: true
+    tagliatelle:
+      case:
+        rules:
+          avro: snake
+          bson: camel
+          env: upperSnake
+          json: camel
+          mapstructure: camel
+          xml: camel
+          yaml: camel
+        use-field-name: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - dupl
+          - gocyclo
+          - gosec
+        path: _test\.go
+      - linters:
+          - gocritic
+        text: commentedOutCode
+      - linters:
+          - gocritic
+        text: whyNoLint
+      - linters:
+          - gocritic
+        text: unnecessaryBlock
+      - linters:
+          - gocritic
+        text: todoCommentWithoutDetail
+      - linters:
+          - govet
+        text: declaration of "(err|ctx)" shadows declaration at
+    paths:
+      - .bingo
+      - .chglog
+      - .github
+      - .vscode
+      - bin
+      - build
+      - config
+      - deploy
+      - doc
+      - docs
+      - docker
+      - hot
+      - logs
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - .bingo
+      - .chglog
+      - .github
+      - .vscode
+      - bin
+      - build
+      - config
+      - deploy
+      - doc
+      - docs
+      - docker
+      - hot
+      - logs
+      - third_party$
+      - builtin$
+      - examples$

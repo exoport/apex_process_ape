@@ -1,0 +1,9 @@
+repos:
+  - repo: https://github.com/diegosz/pre-commit-golang
+    rev: v1.0.0-rc.1.bingo
+    hooks:
+      - id: golangci-lint-mod
+  - repo: https://github.com/diegosz/pre-commit-wip
+    rev: v0.0.3
+    hooks:
+      - id: config_secrets

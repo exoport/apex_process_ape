@@ -1,0 +1,26 @@
+name: nats-messaging
+version: v2
+description: NATS messaging patterns (subjects, KV, consumers)
+uses:
+  - go-backend-service
+owns_categories:
+  - nats.subject-naming
+  - nats.kv-design
+adrs:
+  - id: ADR-0004
+    title: NATS Subject Naming Conventions
+    category: nats.subject-naming
+    file: ../adrs/adr-0004_nats-subject-naming.md
+  - id: ADR-0005
+    title: NATS KV Bucket Design
+    category: nats.kv-design
+    file: ../adrs/adr-0005_nats-kv-design.md
+patterns:
+  - id: PAT-0003
+    title: NATS Consumer Pattern
+    category: nats.consumer
+    file: ../patterns/pat-0003_nats-consumer-pattern.md
+  - id: PAT-0004
+    title: NATS Error Handling
+    category: nats.error-handling
+    file: ../patterns/pat-0004_nats-error-handling.md

@@ -1,0 +1,12 @@
+name: flutter-pwa
+version: v1
+description: Flutter PWA frontend governance
+owns_categories:
+  - flutter.state-management
+  - flutter.pwa-structure
+adrs:
+  - id: ADR-0008
+    title: Flutter State Management
+    category: flutter.state-management
+    file: ../adrs/adr-0008_flutter-state-management.md
+patterns: []

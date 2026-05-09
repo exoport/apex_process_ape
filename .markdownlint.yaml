@@ -1,0 +1,58 @@
+default: true
+
+# Details: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+
+# Allow hard tabs in code blocks.
+#
+# Reason: Keep what ever is used in the source, this is good when automatically
+# including code examples from code files.
+MD010:
+  code_blocks: false
+
+# Allow arbitrary line length
+#
+# Reason: We apply the one-sentence-per-line rule. A sentence may get longer
+# than 80 characters, especially if links are contained.
+MD013: false
+
+# Allow duplicate headings
+#
+# Reasons:
+# - Sometimes a title must be repeated in other topics. For example when we use
+#   "Examples" or "Resources" multiple times.
+# - Markdown lint should support the user and not annoy them.
+MD024: false
+
+# Allow inline HTML
+#
+# Reason: We use inline HTML to separate lists inside tables.
+MD033: false
+
+# Allow first line in a file to be a non top-level heading
+#
+# Reason: Sometimes, we want to add an inline HTML, like inserting a link.
+MD041: false
+
+# Use fenced code blocks style
+#
+# Reason: We use fenced code blocks because it's easier to locate the code
+# blocks.
+MD046:
+  style: fenced
+
+# Allow emphasis used instead of a heading
+#
+# Reason: AI tooling uses emphasis for other things than headings.
+MD036: false
+
+# Allow tables with misaligned pipes
+#
+# Reason: When using tables auto-formatted tools they don't always align the
+# pipes correctly when using emojis or wide characters.
+MD060: false
+
+# Allow empty title in front matter
+#
+# Reason: Avoids errors when the title is already defined with an H1 heading.
+MD025:
+  front_matter_title: ""

@@ -1,0 +1,57 @@
+name: governance
+requires:
+  files:
+    - development/planning/architecture.md
+    - development/planning/prd.md
+stages:
+  pattern-governance:
+    chain:
+      - skill: apex-pattern-reconciliation
+        model: "opus[1m]"
+      - skill: apex-pattern-survey
+        model: "opus[1m]"
+      - skill: apex-pattern-generate
+        model: "opus[1m]"
+      - skill: apex-pattern-update
+        model: "opus[1m]"
+        args: "--from-status draft --target-status adopted"
+  adr-governance:
+    chain:
+      - skill: apex-adr-reconciliation
+        model: "opus[1m]"
+      - skill: apex-adr-survey
+        model: "opus[1m]"
+      - skill: apex-adr-adoption
+        model: "opus[1m]"
+      - skill: apex-adr-update
+        model: "opus[1m]"
+        args: "--from-status proposed --target-status accepted"
+      - skill: apex-adr-picking
+        model: "opus[1m]"
+      - skill: apex-adr-adoption
+        model: "opus[1m]"
+      - skill: apex-adr-update
+        model: "opus[1m]"
+        args: "--from-status proposed --target-status accepted"
+  capability-activation:
+    chain:
+      - skill: apex-capability-survey
+        model: "opus[1m]"
+      - skill: apex-capability-create
+        model: "opus[1m]"
+      - skill: apex-capability-update
+        model: "opus[1m]"
+        args: "--from-status proposed --target-status accepted"
+  feature-activation:
+    chain:
+      - skill: apex-feature-survey
+        model: "opus[1m]"
+      - skill: apex-feature-create
+        model: "opus[1m]"
+      - skill: apex-feature-update
+        model: "opus[1m]"
+        args: "--from-status proposed --target-status specified"
+  generate-project-context:
+    chain:
+      - skill: apex-generate-project-context
+        model: sonnet

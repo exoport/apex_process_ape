@@ -1,0 +1,14 @@
+name: postgresql-sor
+version: v2
+description: PostgreSQL sor schema patterns (migrations, sqlc, nayux conventions)
+uses:
+  - go-backend-service
+owns_categories:
+  - postgres.migration-strategy
+  - postgres.schema-design
+adrs:
+  - id: ADR-0007
+    title: PostgreSQL Migration Strategy
+    category: postgres.migration-strategy
+    file: ../adrs/adr-0007_postgresql-migration-strategy.md
+patterns: []

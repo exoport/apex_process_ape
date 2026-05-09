@@ -1,0 +1,36 @@
+traits:
+  - name: go-backend-service
+    version: v1
+    description: Go backend service base (HTTP, logging, config, DI)
+    file: go-backend-service.yaml
+    tags: [backend, go]
+
+  - name: nats-messaging
+    version: v2
+    description: NATS messaging patterns (subjects, KV, consumers)
+    file: nats-messaging.yaml
+    tags: [messaging, nats, go]
+
+  - name: multi-tenancy
+    version: v1
+    description: Tenant isolation, context propagation, tenant-scoped storage
+    file: multi-tenancy.yaml
+    tags: [cross-cutting, tenancy]
+
+  - name: flutter-pwa
+    version: v1
+    description: Flutter PWA frontend governance
+    file: flutter-pwa.yaml
+    tags: [frontend, flutter]
+
+  - name: postgresql-sor
+    version: v2
+    description: PostgreSQL sor schema patterns (migrations, sqlc, nayux conventions)
+    file: postgresql-sor.yaml
+    tags: [storage, postgres, go]
+
+  - name: grpc-transport
+    version: v1
+    description: gRPC transport layer patterns
+    file: grpc-transport.yaml
+    tags: [transport, grpc, go]

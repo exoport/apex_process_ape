@@ -1,0 +1,20 @@
+name: epics
+requires:
+  files:
+    - development/planning/architecture.md
+    - development/project-context.md
+stages:
+  create-epics:
+    chain:
+      - skill: apex-create-epics-and-stories
+        agent: apex-agent-pm
+        model: "opus[1m]"
+        prompt_flag: "--prompt"
+  shard-epics:
+    chain:
+      - skill: apex-shard-doc
+        args: "--doc epics"
+  sprint-planning:
+    chain:
+      - skill: apex-sprint-planning
+        model: "opus[1m]"

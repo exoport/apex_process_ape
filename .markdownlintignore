@@ -1,0 +1,6 @@
+CHANGELOG.md
+.claude/
+.github/
+.vscode/
+node_modules/
+vendor/
