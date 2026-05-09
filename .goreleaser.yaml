@@ -28,6 +28,24 @@ checksum:
   name_template: '{{ .ProjectName }}_checksums.txt'
   algorithm: sha256
 
+# Keyless cosign signing of the checksums file via Sigstore Fulcio.
+# Verifiers fetch ape_checksums.txt + .sig + .pem, run
+# `cosign verify-blob --certificate-identity-regexp …`, then check
+# the tarball's SHA256 against the signed file (sha256sum -c).
+# No keys to provision — OIDC token from GitHub Actions is exchanged
+# for a short-lived Fulcio cert at sign time, recorded in Rekor.
+signs:
+  - cmd: cosign
+    signature: '${artifact}.sig'
+    certificate: '${artifact}.pem'
+    args:
+      - 'sign-blob'
+      - '--yes'
+      - '--output-certificate=${certificate}'
+      - '--output-signature=${signature}'
+      - '${artifact}'
+    artifacts: checksum
+
 release:
   github:
     owner: diegosz

@@ -37,13 +37,17 @@ make install        # → /usr/local/bin/ape
 
 `make install` runs `go build` and copies the binary. Override the destination with `make install INSTALL_DIR=/opt/local/bin` if you don't have write access to `/usr/local/bin`.
 
-## Verifying
+## Verifying the install ran
 
 ```bash
 ape version
 ```
 
 Should print something like `ape v0.1.0 / build date: ... / git commit: ...`. If `ape: command not found`, the install location isn't on your `$PATH` — check `echo $PATH` and either move the binary or extend `PATH` in your shell rc.
+
+## Verifying release authenticity (optional)
+
+Every release tarball is signed with cosign. To confirm the tarball you downloaded was actually built and uploaded by this repo's release workflow (rather than a tampered substitute), see [How to verify a release artifact](verify.md). Required for hardened CI / regulated environments; optional for everyday installs.
 
 ## Uninstalling
 
