@@ -10,16 +10,15 @@ import (
 )
 
 func TestPreflight_AllPresent(t *testing.T) {
+	// governance preflight checks for the sharded directories
+	// produced by apex-shard-doc, not the original docs.
 	dir := t.TempDir()
 	for _, rel := range []string{
-		"development/planning/architecture.md",
-		"development/planning/prd.md",
+		"development/planning/architecture",
+		"development/planning/prd",
 	} {
 		full := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte("ok"), 0o644); err != nil {
+		if err := os.MkdirAll(full, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -150,7 +150,7 @@ func TestLoadSpec_Governance_HasRequires(t *testing.T) {
 	if len(spec.Requires.Files) == 0 {
 		t.Fatal("governance pipeline must declare requires.files")
 	}
-	wantPath := "development/planning/architecture.md"
+	wantPath := "development/planning/architecture"
 	if !slices.Contains(spec.Requires.Files, wantPath) {
 		t.Errorf("requires.files missing %q; got %v", wantPath, spec.Requires.Files)
 	}

@@ -1,8 +1,12 @@
 name: governance
+# After the design pipeline runs, apex-shard-doc rewrites prd.md and
+# architecture.md into prd/ and architecture/ shard directories and
+# deletes the originals. Preflight uses os.Stat (content-agnostic),
+# so checking the sharded directory paths is correct.
 requires:
   files:
-    - development/planning/architecture.md
-    - development/planning/prd.md
+    - development/planning/architecture
+    - development/planning/prd
 stages:
   pattern-governance:
     chain:

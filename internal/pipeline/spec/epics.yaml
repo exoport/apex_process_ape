@@ -1,7 +1,10 @@
 name: epics
+# Post-design + post-governance state: architecture is sharded into a
+# directory; project-context.md is produced by apex-generate-project-
+# context as a single file at development/project-context.md.
 requires:
   files:
-    - development/planning/architecture.md
+    - development/planning/architecture
     - development/project-context.md
 stages:
   create-epics:
