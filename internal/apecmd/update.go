@@ -21,13 +21,12 @@ func newUpdateCmd() *cobra.Command {
 		Use:   "update",
 		Short: "Update ape to the latest version",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			token := os.Getenv("GITHUB_TOKEN")
-			if token == "" {
-				return errors.New("GITHUB_TOKEN is not set (required for private repo)")
-			}
-
+			// GITHUB_TOKEN is optional now that the repo is public; if
+			// set, it raises the GitHub API rate limit (60/h
+			// unauthenticated → 5000/h authenticated). Empty token is
+			// fine — go-selfupdate hits the public API.
 			source, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{
-				APIToken: token,
+				APIToken: os.Getenv("GITHUB_TOKEN"),
 			})
 			if err != nil {
 				return fmt.Errorf("cannot create GitHub source: %w", err)

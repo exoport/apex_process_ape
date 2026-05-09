@@ -46,10 +46,11 @@ func init() {
 }
 
 func checkForUpdatesBackground() {
+	// GITHUB_TOKEN is optional now that the repo is public. When set,
+	// requests use the 5000/h authenticated rate limit; without it,
+	// they use the 60/h unauthenticated limit (per IP), which is
+	// plenty for a once-cached background check.
 	token := os.Getenv("GITHUB_TOKEN")
-	if token == "" {
-		return
-	}
 
 	entry := updatecache.Load()
 	if entry != nil {
