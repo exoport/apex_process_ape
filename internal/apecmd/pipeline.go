@@ -2,13 +2,14 @@ package apecmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/diegosz/apex_process_ape/internal/output"
 	"github.com/diegosz/apex_process_ape/internal/pipeline"
 	"github.com/diegosz/apex_process_ape/internal/tui"
 	"github.com/spf13/cobra"
@@ -24,17 +25,26 @@ func newPipelineCmd() *cobra.Command {
 		cwdFlag    string
 	)
 	cmd := &cobra.Command{
-		Use:       "pipeline [name]",
-		Short:     "Run a named APEX pipeline",
-		Long:      pipelineLongHelp(),
-		Args:      cobra.ExactArgs(1),
-		ValidArgs: pipeline.AvailablePipelines(),
+		Use:   "pipeline [name]",
+		Short: "Run a named APEX pipeline",
+		Long:  pipelineLongHelp(),
+		Args:  cobra.ExactArgs(1),
+		ValidArgsFunction: func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+			if len(args) > 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			projectRoot := cwdFlag
+			if projectRoot == "" {
+				wd, err := os.Getwd()
+				if err != nil {
+					return nil, cobra.ShellCompDirectiveError
+				}
+				projectRoot = wd
+			}
+			return pipeline.AvailablePipelines(projectRoot), cobra.ShellCompDirectiveNoFileComp
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			spec, err := pipeline.LoadSpec(name)
-			if err != nil {
-				return err
-			}
 			projectRoot := cwdFlag
 			if projectRoot == "" {
 				wd, err := os.Getwd()
@@ -42,6 +52,15 @@ func newPipelineCmd() *cobra.Command {
 					return fmt.Errorf("cannot determine working directory: %w", err)
 				}
 				projectRoot = wd
+			}
+			spec, err := pipeline.LoadSpec(name, projectRoot)
+			if err != nil {
+				// Root cmd has SilenceErrors=true, so a bare return
+				// would swallow the actionable "run ape framework
+				// update" hint. Print to stderr explicitly, matching
+				// the convention used elsewhere in apecmd.
+				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
+				return err
 			}
 			useTUI := !noTUI && term.IsTerminal(int(os.Stdout.Fd()))
 			ctx, cancel := context.WithCancel(cmd.Context())
@@ -54,17 +73,19 @@ func newPipelineCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Optional prompt forwarded to skills that accept it (currently: epics)")
 	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable the interactive TUI; print plain status lines instead")
-	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
+	cmd.PersistentFlags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
+	cmd.AddCommand(newPipelineListCmd(&cwdFlag))
 	return cmd
 }
 
 func pipelineLongHelp() string {
-	names := pipeline.AvailablePipelines()
-	return fmt.Sprintf(`Run a named APEX pipeline against the project in the current working
+	return `Run a named APEX pipeline against the project in the current working
 directory.
 
-Available pipelines:
-  %s
+Available pipelines are read from <project>/_apex/pipelines/. To
+install the canonical set (design, governance, epics) from the
+framework repo, run "ape framework update". To list what is currently
+installed, run "ape pipeline list".
 
 Each pipeline is a sequence of stages; each stage is a chain of skill
 invocations dispatched to the local "claude" CLI. Skill invocations
@@ -84,8 +105,68 @@ Skills without an agent skip the passthrough hop:
 The --prompt flag is forwarded only to skills whose pipeline definition
 declares prompt_flag (currently apex-create-epics-and-stories in the
 "epics" pipeline). The prompt value passes through Go's argv directly,
-so embedded quotes/specials survive without shell quoting.`,
-		strings.Join(names, ", "))
+so embedded quotes/specials survive without shell quoting.`
+}
+
+// pipelineListResult is the structured payload for `ape pipeline list`.
+type pipelineListResult struct {
+	ProjectRoot  string   `json:"projectRoot"  yaml:"projectRoot"`
+	PipelinesDir string   `json:"pipelinesDir" yaml:"pipelinesDir"`
+	Names        []string `json:"names"        yaml:"names"`
+}
+
+func newPipelineListCmd(parentCwdFlag *string) *cobra.Command {
+	var outputFormat string
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List pipelines installed at <project>/_apex/pipelines/",
+		Long: `Enumerate pipeline specs found in <project>/_apex/pipelines/.
+
+The list reflects the pipelines currently installed at the resolved
+project root (defaults to the current working directory). To install
+the canonical framework set, run "ape framework update".`,
+		Args: cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			projectRoot := *parentCwdFlag
+			if projectRoot == "" {
+				wd, err := os.Getwd()
+				if err != nil {
+					return fmt.Errorf("cannot determine working directory: %w", err)
+				}
+				projectRoot = wd
+			}
+			res := pipelineListResult{
+				ProjectRoot:  projectRoot,
+				PipelinesDir: pipeline.PipelinesDir(projectRoot),
+				Names:        pipeline.AvailablePipelines(projectRoot),
+			}
+			return printPipelineList(res, output.Format(outputFormat))
+		},
+	}
+	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
+	return cmd
+}
+
+func printPipelineList(res pipelineListResult, format output.Format) error {
+	switch format {
+	case output.FormatJSON:
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(res)
+	case output.FormatYAML:
+		return output.Print(os.Stdout, output.FormatYAML, res)
+	default:
+		if len(res.Names) == 0 {
+			fmt.Printf("No pipelines installed at %s\n", res.PipelinesDir)
+			fmt.Println(`Run "ape framework update" to install the canonical set (design, governance, epics).`)
+			return nil
+		}
+		fmt.Printf("Pipelines installed at %s:\n", res.PipelinesDir)
+		for _, n := range res.Names {
+			fmt.Printf("  %s\n", n)
+		}
+		return nil
+	}
 }
 
 // runPlain runs the pipeline with stdout status lines (no TUI). Used

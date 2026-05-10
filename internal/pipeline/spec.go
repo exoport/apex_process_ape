@@ -1,26 +1,26 @@
 // Package pipeline implements the ape pipeline runner: it loads named
-// pipeline specifications (embedded YAML), validates prerequisites,
-// and drives the underlying claude CLI through each stage's skill chain.
+// pipeline specifications from <projectRoot>/_apex/pipelines/, validates
+// prerequisites, and drives the underlying claude CLI through each
+// stage's skill chain.
 package pipeline
 
 import (
-	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed spec/*.yaml
-var specsFS embed.FS
-
 // Spec describes a named pipeline.
 type Spec struct {
 	Name      string            `yaml:"name"`
 	Requires  Requires          `yaml:"requires,omitempty"`
-	StagesRaw yaml.Node         `yaml:"stages"` //nolint:tagliatelle // embedded YAML files use "stages"; field name includes "Raw" suffix to signal internal use
+	StagesRaw yaml.Node         `yaml:"stages"` //nolint:tagliatelle // on-disk YAML files use "stages"; field name includes "Raw" suffix to signal internal use
 	stages    []Stage           `yaml:"-"`
 	stageMap  map[string]*Stage `yaml:"-"`
 }
@@ -52,7 +52,7 @@ type Step struct {
 	// skill (currently apex-create-epics-and-stories). Passing the
 	// prompt as a structured argv element avoids any shell-quoting
 	// round-trip — argv is never serialized to a shell string.
-	PromptFlag string `yaml:"prompt_flag,omitempty"` //nolint:tagliatelle // embedded spec YAML files use snake_case prompt_flag
+	PromptFlag string `yaml:"prompt_flag,omitempty"` //nolint:tagliatelle // on-disk spec YAML files use snake_case prompt_flag
 }
 
 // Stages returns the pipeline's stages in declaration order.
@@ -60,12 +60,26 @@ func (s *Spec) Stages() []Stage {
 	return s.stages
 }
 
-// LoadSpec reads a pipeline spec by name from the embedded registry.
-// Returns an error if the name is unknown or the YAML fails to parse.
-func LoadSpec(name string) (*Spec, error) {
-	data, err := specsFS.ReadFile("spec/" + name + ".yaml")
+// PipelinesDir returns the absolute path of the pipelines directory
+// inside a project root: <projectRoot>/_apex/pipelines.
+func PipelinesDir(projectRoot string) string {
+	return filepath.Join(projectRoot, "_apex", "pipelines")
+}
+
+// LoadSpec reads a pipeline spec by name from <projectRoot>/_apex/pipelines/<name>.yaml.
+// Returns a wrapped fs.ErrNotExist when the file is missing, with a
+// message that points the user at `ape framework update`.
+func LoadSpec(name, projectRoot string) (*Spec, error) {
+	path := filepath.Join(PipelinesDir(projectRoot), name+".yaml")
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("unknown pipeline %q: %w", name, err)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf(
+				"pipeline %q not found at %s — run \"ape framework update\" to install pipelines from the framework repo",
+				name, path,
+			)
+		}
+		return nil, fmt.Errorf("read pipeline %q: %w", name, err)
 	}
 	var spec Spec
 	if err := yaml.Unmarshal(data, &spec); err != nil {
@@ -86,14 +100,20 @@ func LoadSpec(name string) (*Spec, error) {
 	return &spec, nil
 }
 
-// AvailablePipelines returns the registered pipeline names sorted.
-func AvailablePipelines() []string {
-	entries, err := specsFS.ReadDir("spec")
+// AvailablePipelines returns the pipeline names found in
+// <projectRoot>/_apex/pipelines/, sorted. Returns an empty slice when
+// the directory is missing or unreadable — callers that need a hard
+// error should stat the dir themselves.
+func AvailablePipelines(projectRoot string) []string {
+	entries, err := os.ReadDir(PipelinesDir(projectRoot))
 	if err != nil {
 		return nil
 	}
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
 		n := strings.TrimSuffix(e.Name(), ".yaml")
 		if n == e.Name() {
 			continue

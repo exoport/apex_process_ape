@@ -1,8 +1,11 @@
 package pipeline //nolint:testpackage // tests white-box test unexported buildArgv; moving to pipeline_test would require exporting it
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -10,6 +13,29 @@ const (
 	testAgentPM    = "apex-agent-pm"
 	testPromptFlag = "--prompt"
 )
+
+// setupTestProject materializes a fake project root with the canonical
+// three pipeline yamls under <root>/_apex/pipelines/. Sourced from
+// internal/pipeline/testdata/_apex/pipelines/. Returns the root.
+func setupTestProject(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	dst := filepath.Join(root, "_apex", "pipelines")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dst, err)
+	}
+	for _, name := range []string{"design", "governance", "epics"} {
+		src := filepath.Join("testdata", "_apex", "pipelines", name+".yaml")
+		data, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatalf("read fixture %s: %v", src, err)
+		}
+		if err := os.WriteFile(filepath.Join(dst, name+".yaml"), data, 0o644); err != nil { //nolint:gosec // 0644 is appropriate for test fixture YAML files
+			t.Fatalf("write fixture %s: %v", name, err)
+		}
+	}
+	return root
+}
 
 // promptOf returns the value of the -p flag in argv, plus the trailing
 // flags (after the prompt) joined by spaces. Lets tests assert on the
@@ -120,7 +146,8 @@ func TestBuildArgv_EmptySkill(t *testing.T) {
 }
 
 func TestLoadSpec_Design(t *testing.T) {
-	spec, err := LoadSpec("design")
+	root := setupTestProject(t)
+	spec, err := LoadSpec("design", root)
 	if err != nil {
 		t.Fatalf("LoadSpec: %v", err)
 	}
@@ -143,7 +170,8 @@ func TestLoadSpec_Design(t *testing.T) {
 }
 
 func TestLoadSpec_Governance_HasRequires(t *testing.T) {
-	spec, err := LoadSpec("governance")
+	root := setupTestProject(t)
+	spec, err := LoadSpec("governance", root)
 	if err != nil {
 		t.Fatalf("LoadSpec: %v", err)
 	}
@@ -157,7 +185,8 @@ func TestLoadSpec_Governance_HasRequires(t *testing.T) {
 }
 
 func TestLoadSpec_Epics_PromptFlagWired(t *testing.T) {
-	spec, err := LoadSpec("epics")
+	root := setupTestProject(t)
+	spec, err := LoadSpec("epics", root)
 	if err != nil {
 		t.Fatalf("LoadSpec: %v", err)
 	}
@@ -176,16 +205,54 @@ func TestLoadSpec_Epics_PromptFlagWired(t *testing.T) {
 }
 
 func TestLoadSpec_Unknown(t *testing.T) {
-	_, err := LoadSpec("does-not-exist")
+	root := setupTestProject(t)
+	_, err := LoadSpec("does-not-exist", root)
 	if err == nil {
 		t.Fatal("expected error for unknown pipeline")
 	}
 }
 
+// TestLoadSpec_MissingFile_ActionableError guards the user-facing error
+// string: a missing pipeline file must name the resolved path and tell
+// the user how to fix it (`ape framework update`). This is the contract
+// users will see on a v0.1.0 fresh install before they run framework
+// update; the wording is a regression target.
+func TestLoadSpec_MissingFile_ActionableError(t *testing.T) {
+	root := t.TempDir() // empty project: no _apex/pipelines/ at all
+	_, err := LoadSpec("design", root)
+	if err == nil {
+		t.Fatal("expected error for missing pipeline file")
+	}
+	msg := err.Error()
+	wantSubstrings := []string{
+		`pipeline "design"`,
+		filepath.Join(root, "_apex", "pipelines", "design.yaml"),
+		`ape framework update`,
+	}
+	for _, want := range wantSubstrings {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message missing %q; got: %s", want, msg)
+		}
+	}
+}
+
 func TestAvailablePipelines(t *testing.T) {
-	got := AvailablePipelines()
+	root := setupTestProject(t)
+	got := AvailablePipelines(root)
 	want := []string{"design", "epics", "governance"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("AvailablePipelines = %v, want %v", got, want)
+	}
+}
+
+// TestAvailablePipelines_MissingDir verifies the soft-fail contract:
+// when <projectRoot>/_apex/pipelines/ does not exist, AvailablePipelines
+// returns an empty slice rather than erroring. Callers (cobra completion,
+// help text) rely on this.
+func TestAvailablePipelines_MissingDir(t *testing.T) {
+	root := t.TempDir() // no _apex/pipelines/
+	got := AvailablePipelines(root)
+	if len(got) != 0 {
+		t.Errorf("AvailablePipelines on empty project = %v, want empty slice", got)
 	}
 }
