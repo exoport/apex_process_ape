@@ -59,8 +59,9 @@ sudo rm /usr/local/bin/ape
 
 ## Next steps
 
-ape is just the CLI binary. To run any pipeline you also need the framework assets (skills + pipeline specs) installed in your project:
+ape is just the CLI binary. To run any pipeline you also need the framework assets (skills + pipeline specs) installed in your project. Order of operations:
 
-- **[Install the APEX framework into a project](framework-update.md)** — copy the `apex-*` skills and the canonical pipeline specs from a checked-out `apex_process_framework` repo into `<project>/.claude/skills/` and `<project>/_apex/pipelines/`, and seed `_apex/config.yaml` if absent.
-- [Update ape](update.md) — once installed, keep it current.
-- [Tutorials](../tutorials/) — once a "first pipeline" tutorial exists, that's the next step after install.
+1. **[Set up the APEX framework in a project (first install)](framework-setup.md)** — `ape framework setup` copies the `apex-*` skills and the canonical pipeline specs from a checked-out `apex_process_framework` repo, and seeds `_apex/config.yaml` via an interactive prompt. Run once per project.
+2. **[Refresh the framework](framework-update.md)** — `ape framework update` re-copies skills + pipelines whenever you bump the framework repo to a newer version. Doesn't touch `config.yaml`.
+3. [Update ape itself](update.md) — keep the CLI binary current.
+4. [Tutorials](../tutorials/) — once a "first pipeline" tutorial exists, that's the natural next step after the framework setup.

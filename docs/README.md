@@ -21,16 +21,20 @@ _(none yet — see [tutorials/README.md](tutorials/) for planned content)_
 
 - [How to install ape](how-to/install.md)
 - [How to update ape](how-to/update.md)
-- [How to install the APEX framework into a project](how-to/framework-update.md)
+- [How to set up the APEX framework in a project (first install)](how-to/framework-setup.md)
+- [How to refresh the APEX framework in a project](how-to/framework-update.md)
 
 ### Reference — _technical descriptions_
 
 - [Pipeline spec reference](reference/pipeline-spec.md) — schema for `_apex/pipelines/*.yaml`
 - [`framework.yaml` reference](reference/framework-yaml.md) — schema for `_apex/framework.yaml`
+- [Pipeline TUI keybindings](reference/tui-keybindings.md) — `ape pipeline` three-panel display, modes, and key map
 
 ### Explanation — _the why and the what_
 
 - [Why project-local pipelines](explanation/why-project-local-pipelines.md) — design rationale for moving from embedded to on-disk specs in v0.0.6
+- [Why setup and update are separate](explanation/why-setup-and-update-are-separate.md) — the v0.0.7 split of `framework update` into two commands
+- [Why streaming events](explanation/why-streaming-events.md) — design rationale for live event streaming in the v0.0.7 pipeline TUI
 
 ## Contributing to the docs
 

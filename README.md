@@ -6,7 +6,7 @@
 
 ## Why ape
 
-APEX is a planning-and-implementation framework for Claude Code that breaks software work into a sequence of named skills (`apex-create-prd`, `apex-create-architecture`, `apex-create-epics-and-stories`, etc.). On its own, exercising APEX means invoking each skill manually. `ape` collapses those into named pipelines (`design`, `governance`, `epics`, …) with pre-flight prerequisite checks, prompt-quoting safety, and a two-panel TUI that streams per-skill output as each Claude invocation returns.
+APEX is a planning-and-implementation framework for Claude Code that breaks software work into a sequence of named skills (`apex-create-prd`, `apex-create-architecture`, `apex-create-epics-and-stories`, etc.). On its own, exercising APEX means invoking each skill manually. `ape` collapses those into named pipelines (`design`, `governance`, `epics`, …) with pre-flight prerequisite checks, prompt-quoting safety, and a three-panel Bubble Tea TUI that streams per-skill events live, lets you scroll back through completed stages, and asks for confirmation before quitting.
 
 ## Install
 
@@ -23,7 +23,24 @@ For macOS, Windows, `go install`, or build-from-source paths, see [docs/how-to/i
 
 ## Quickstart
 
-`ape` operates on the working directory. From any APEX-bootstrapped project root:
+`ape` operates on the working directory. The first time you use ape against an APEX-bootstrapped project, install the framework:
+
+```bash
+# One-time: install framework skills + pipelines, seed _apex/config.yaml
+# via an interactive Bubble Tea prompt.
+export APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
+ape framework setup
+```
+
+Subsequent framework version bumps refresh in-place:
+
+```bash
+# Refresh skills + pipelines against the framework repo's current HEAD.
+# Does not touch _apex/config.yaml.
+ape framework update
+```
+
+Then run pipelines:
 
 ```bash
 # Run the design pipeline: prd → ux-design → architecture (with shards).
@@ -41,19 +58,50 @@ ape pipeline design --no-tui
 
 Pre-flight checks run before any Claude invocation. If a pipeline requires upstream artifacts (e.g., `governance` needs `architecture.md`), `ape` fails fast with a message naming the missing file and the upstream pipeline that produces it.
 
+## Pipeline TUI
+
+While a pipeline runs, the TUI shows three regions:
+
+- **Top-left, ~70% width** — live event feed for the active or pinned stage. Streams human-readable summaries of `claude` activity (`🔧 Read foo.md`, `✎ Drafting ADR table`, `↳ ⚠ validation failed`, `✓ skill complete`) as they arrive — no more frozen output between stages.
+- **Top-right, ~30% width** — ordered stage list. Status glyph (✓/✗/▸/⏳), stage name, elapsed time. Cursor row marked `>`.
+- **Bottom strip** — cursor stage's current step, elapsed time, and verdict.
+
+Keybindings:
+
+| Key             | Action                                                                                                                                                               |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `↑` / `k`       | Move cursor up the stage list.                                                                                                                                       |
+| `↓` / `j`       | Move cursor down.                                                                                                                                                    |
+| `Enter`         | Pin the event panel to the cursor's stage (Pinned mode).                                                                                                             |
+| `L` / `Esc`     | Return to Live mode — cursor snaps to the running stage.                                                                                                             |
+| `PgUp` / `PgDn` | Scroll the event panel (Pinned mode only).                                                                                                                           |
+| `Home` / `End`  | Jump to first / latest event (Pinned mode).                                                                                                                          |
+| `q` / `Ctrl+C`  | Open the quit-confirmation modal. `y` aborts the run and SIGKILLs the in-flight `claude` subprocess; `n` / `Esc` dismisses. Two Ctrl+C presses within 1s force-quit. |
+
+`--no-tui` mode (auto-enabled on non-TTY) streams the same human-friendly events to stdout, prefixed with timestamp + stage + skill:
+
+```
+[20:08:42] design · apex-create-architecture · 🔧 Read development/planning/prd/index.md
+[20:08:43] design · apex-create-architecture · ✎ Drafting ADR table: 4 candidates
+[20:09:18] design · apex-create-architecture · ✓ skill complete (3 turns)
+```
+
 ## Commands
 
-| Command         | What it does                                                                 |
-| --------------- | ---------------------------------------------------------------------------- |
-| `ape pipeline`  | Run a named APEX pipeline against the working directory.                     |
-| `ape adr`       | Manage Architecture Decision Records (`list`, `validate`, `new`).            |
-| `ape pattern`   | Manage governance patterns (`list`).                                         |
-| `ape trait`     | Inspect APEX traits (`list`, `show`, `validate`, `conflicts`).               |
-| `ape sync`      | Sync governance artifacts (placeholder — `patterns` and `adrs` coming soon). |
-| `ape bootstrap` | Bootstrap governance artifacts from declared traits.                         |
-| `ape update`    | Self-update to the latest release.                                           |
-| `ape rollback`  | Roll back to the previously installed binary.                                |
-| `ape version`   | Print version, build date, and git commit.                                   |
+| Command                | What it does                                                                             |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| `ape framework setup`  | One-time install: copy skills + pipelines into a project, bootstrap `_apex/config.yaml`. |
+| `ape framework update` | Refresh skills + pipelines against the framework repo (preserves config.yaml).           |
+| `ape framework status` | Inspect the installed framework version + drift report.                                  |
+| `ape pipeline [name]`  | List installed pipelines; with a name, run the named pipeline.                           |
+| `ape adr`              | Manage Architecture Decision Records (`list`, `validate`, `new`).                        |
+| `ape pattern`          | Manage governance patterns (`list`).                                                     |
+| `ape trait`            | Inspect APEX traits (`list`, `show`, `validate`, `conflicts`).                           |
+| `ape sync`             | Sync governance artifacts (placeholder — `patterns` and `adrs` coming soon).             |
+| `ape bootstrap`        | Bootstrap governance artifacts from declared traits.                                     |
+| `ape update`           | Self-update to the latest release.                                                       |
+| `ape rollback`         | Roll back to the previously installed binary.                                            |
+| `ape version`          | Print version, build date, and git commit.                                               |
 
 Run `ape <command> --help` for command-specific flags.
 
