@@ -394,5 +394,6 @@ func TestStatus_NoMetadata_ActionableError(t *testing.T) {
 	_, err := framework.Status(ctx, framework.StatusOptions{ProjectRoot: proj})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "framework metadata not found")
-	require.Contains(t, err.Error(), "ape framework update")
+	require.Contains(t, err.Error(), "ape framework setup")
+	require.NotContains(t, err.Error(), "no such file or directory")
 }

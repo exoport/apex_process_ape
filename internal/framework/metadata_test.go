@@ -1,6 +1,7 @@
 package framework_test
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,7 +65,21 @@ func TestReadMetadata_ActionableErrorOnMissingFile(t *testing.T) {
 	_, err := framework.ReadMetadata(root)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "framework metadata not found")
-	require.Contains(t, err.Error(), "ape framework update")
+	require.Contains(t, err.Error(), "ape framework setup")
+	// Must not leak Go's syscall-level "open …: no such file or directory"
+	// trailer; the actionable hint must be the entire message.
+	require.NotContains(t, err.Error(), "no such file or directory")
+	require.NotContains(t, err.Error(), "open ")
+
+	// Typed error: must satisfy errors.As for callers that want to
+	// branch programmatically.
+	var nie *framework.NotInstalledError
+	require.ErrorAs(t, err, &nie)
+	require.Equal(t, filepath.Join(root, framework.ProjectMetadata), nie.Path)
+
+	// Must also satisfy errors.Is(fs.ErrNotExist) so existing
+	// pattern-matching against the sentinel keeps working.
+	require.ErrorIs(t, err, fs.ErrNotExist)
 }
 
 func TestReadMetadata_ErrorsOnMalformed(t *testing.T) {

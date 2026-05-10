@@ -112,15 +112,33 @@ func WriteMetadata(projectRoot string, m *Metadata) error {
 	return AtomicWriteFile(MetadataPath(projectRoot), full, 0o644)
 }
 
+// NotInstalledError signals that <projectRoot>/_apex/framework.yaml is
+// absent — the canonical "project never had `ape framework setup` run"
+// state. It satisfies errors.Is(err, fs.ErrNotExist) so programmatic
+// callers can still pattern-match on the underlying cause, but the
+// rendered message hides Go's syscall-level "open …: no such file or
+// directory" trailer in favor of the actionable hint.
+type NotInstalledError struct {
+	Path string
+}
+
+func (e *NotInstalledError) Error() string {
+	return fmt.Sprintf(
+		"framework metadata not found at %s — run \"ape framework setup\" to install",
+		e.Path,
+	)
+}
+
+func (e *NotInstalledError) Unwrap() error { return fs.ErrNotExist }
+
 // ReadMetadata loads <projectRoot>/_apex/framework.yaml. Returns a
-// wrapped fs.ErrNotExist when the file is absent (the canonical
-// "project never had framework update run" signal).
+// *NotInstalledError when the file is absent.
 func ReadMetadata(projectRoot string) (*Metadata, error) {
 	path := MetadataPath(projectRoot)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("framework metadata not found at %s — run \"ape framework update\" to install: %w", path, err)
+			return nil, &NotInstalledError{Path: path}
 		}
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
