@@ -85,7 +85,7 @@ func TestUpdate_FreshInstall_HappyPath(t *testing.T) {
 	fakeFramework(t, fw, "v0.0.71")
 	proj := newProject(t)
 
-	res, err := framework.Update(ctx, &framework.UpdateOptions{
+	res, err := framework.Setup(ctx, &framework.UpdateOptions{
 		FrameworkRepo: fw,
 		ProjectRoot:   proj,
 		NoFetch:       true,
@@ -143,33 +143,105 @@ func TestUpdate_FreshInstall_HappyPath(t *testing.T) {
 	require.ElementsMatch(t, []string{"ext-adrs", "ext-features"}, meta.Sources.Config.Extensions)
 }
 
-func TestUpdate_Idempotent_SecondRunSkipsBootstrap(t *testing.T) {
+func TestSetupThenUpdate_UpdatePreservesConfig(t *testing.T) {
 	ctx := context.Background()
 	fw := t.TempDir()
 	fakeFramework(t, fw, "v0.0.71")
 	proj := newProject(t)
 
-	// First run seeds config.
-	_, err := framework.Update(ctx, &framework.UpdateOptions{
+	// Setup seeds config + writes framework.yaml.
+	_, err := framework.Setup(ctx, &framework.UpdateOptions{
 		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
 		ApeVersion: "0.0.6", Bootstrapper: staticBootstrap("first", "ext-adrs"), Now: fixedNow,
 	})
 	require.NoError(t, err)
 
-	// Second run with a different bootstrap value — should NOT touch config.yaml
-	// because it already exists.
+	// Update refreshes skills + pipelines but must NOT touch config.yaml
+	// or alter the project_name + extensions recorded in framework.yaml.
 	res, err := framework.Update(ctx, &framework.UpdateOptions{
 		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
-		ApeVersion: "0.0.6", Bootstrapper: staticBootstrap("DIFFERENT", "ext-features"), Now: fixedNow,
+		ApeVersion: "0.0.6", Now: fixedNow,
 	})
 	require.NoError(t, err)
-	require.False(t, res.Summary.ConfigSeeded, "second run must not re-seed config")
-	require.False(t, res.Summary.ConfigLocalSeeded)
+	require.False(t, res.Summary.ConfigSeeded, "update must not seed config")
+	require.False(t, res.Summary.ConfigLocalSeeded, "update must not seed config.local.example")
 
 	cfg, _ := os.ReadFile(filepath.Join(proj, framework.ProjectConfig))
 	var parsed map[string]any
 	require.NoError(t, yaml.Unmarshal(cfg, &parsed))
-	require.Equal(t, "first", parsed["project_name"], "second run must not change project_name")
+	require.Equal(t, "first", parsed["project_name"], "update must not change project_name")
+
+	// framework.yaml's ConfigSource must still record the Setup-time bootstrap.
+	meta, err := framework.ReadMetadata(proj)
+	require.NoError(t, err)
+	require.True(t, meta.Sources.Config.Seeded)
+	require.Equal(t, "first", meta.Sources.Config.ProjectName)
+	require.ElementsMatch(t, []string{"ext-adrs"}, meta.Sources.Config.Extensions)
+}
+
+func TestSetup_RefusesIfAlreadyInstalled(t *testing.T) {
+	ctx := context.Background()
+	fw := t.TempDir()
+	fakeFramework(t, fw, "v0.0.71")
+	proj := newProject(t)
+
+	// Initial setup succeeds.
+	_, err := framework.Setup(ctx, &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "0.0.6", Bootstrapper: staticBootstrap("first", "ext-adrs"), Now: fixedNow,
+	})
+	require.NoError(t, err)
+
+	// Second setup without --force is refused.
+	_, err = framework.Setup(ctx, &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "0.0.6", Bootstrapper: staticBootstrap("second", "ext-features"), Now: fixedNow,
+	})
+	require.Error(t, err)
+	var aie *framework.AlreadyInstalledError
+	require.ErrorAs(t, err, &aie)
+	require.Contains(t, err.Error(), "framework already installed")
+	require.Contains(t, err.Error(), "ape framework update")
+}
+
+func TestSetup_ForceBypassesAlreadyInstalled(t *testing.T) {
+	ctx := context.Background()
+	fw := t.TempDir()
+	fakeFramework(t, fw, "v0.0.71")
+	proj := newProject(t)
+
+	_, err := framework.Setup(ctx, &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "0.0.6", Bootstrapper: staticBootstrap("first", "ext-adrs"), Now: fixedNow,
+	})
+	require.NoError(t, err)
+
+	// --force re-bootstraps; project_name moves from "first" to "second".
+	_, err = framework.Setup(ctx, &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true, Force: true,
+		ApeVersion: "0.0.6", Bootstrapper: staticBootstrap("second", "ext-features"), Now: fixedNow,
+	})
+	require.NoError(t, err)
+	meta, err := framework.ReadMetadata(proj)
+	require.NoError(t, err)
+	require.Equal(t, "second", meta.Sources.Config.ProjectName)
+}
+
+func TestUpdate_RefusesIfNotInstalled(t *testing.T) {
+	ctx := context.Background()
+	fw := t.TempDir()
+	fakeFramework(t, fw, "v0.0.71")
+	proj := newProject(t)
+
+	_, err := framework.Update(ctx, &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "0.0.6", Now: fixedNow,
+	})
+	require.Error(t, err)
+	var nie *framework.NotInstalledError
+	require.ErrorAs(t, err, &nie)
+	require.Contains(t, err.Error(), "framework metadata not found")
+	require.Contains(t, err.Error(), "ape framework setup")
 }
 
 func TestUpdate_RemovesStaleApexSkills(t *testing.T) {
@@ -189,7 +261,7 @@ func TestUpdate_RemovesStaleApexSkills(t *testing.T) {
 	require.NoError(t, os.MkdirAll(preserve, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(preserve, "SKILL.md"), []byte("user"), 0o644))
 
-	res, err := framework.Update(ctx, &framework.UpdateOptions{
+	res, err := framework.Setup(ctx, &framework.UpdateOptions{
 		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
 		ApeVersion: "0.0.6", Bootstrapper: framework.NoopBootstrapper{}, Now: fixedNow,
 	})
@@ -210,7 +282,7 @@ func TestUpdate_Bootstrap_Cancelled_DoesNotSeedButProceeds(t *testing.T) {
 	fakeFramework(t, fw, "v0.0.71")
 	proj := newProject(t)
 
-	res, err := framework.Update(ctx, &framework.UpdateOptions{
+	res, err := framework.Setup(ctx, &framework.UpdateOptions{
 		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
 		ApeVersion: "0.0.6", Bootstrapper: framework.NoopBootstrapper{}, Now: fixedNow,
 	})
@@ -230,7 +302,7 @@ func TestUpdate_RefusesDirtyFrameworkWithoutForce(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(fw, "dirt.txt"), []byte("x"), 0o644))
 	proj := newProject(t)
 
-	_, err := framework.Update(ctx, &framework.UpdateOptions{
+	_, err := framework.Setup(ctx, &framework.UpdateOptions{
 		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
 		ApeVersion: "0.0.6", Bootstrapper: framework.NoopBootstrapper{}, Now: fixedNow,
 	})
@@ -247,7 +319,7 @@ func TestUpdate_ForceBypassesDirtyFramework(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(fw, "dirt.txt"), []byte("x"), 0o644))
 	proj := newProject(t)
 
-	_, err := framework.Update(ctx, &framework.UpdateOptions{
+	_, err := framework.Setup(ctx, &framework.UpdateOptions{
 		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true, Force: true,
 		ApeVersion: "0.0.6", Bootstrapper: framework.NoopBootstrapper{}, Now: fixedNow,
 	})
@@ -279,7 +351,7 @@ func TestUpdate_RefusesModifiedProjectSkillsWithoutForce(t *testing.T) {
 	mustRun("commit", "-m", "add apex-foo")
 	require.NoError(t, os.WriteFile(skillFile, []byte("v2 — local edit"), 0o644))
 
-	_, err := framework.Update(ctx, &framework.UpdateOptions{
+	_, err := framework.Setup(ctx, &framework.UpdateOptions{
 		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
 		ApeVersion: "0.0.6", Bootstrapper: framework.NoopBootstrapper{}, Now: fixedNow,
 	})
@@ -312,7 +384,7 @@ func TestUpdate_UntrackedProjectApexSkill_ProceedsWithoutForce(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(proj, ".claude", "skills", "apex-old"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(proj, ".claude", "skills", "apex-old", "SKILL.md"), []byte("u"), 0o644))
 
-	_, err := framework.Update(ctx, &framework.UpdateOptions{
+	_, err := framework.Setup(ctx, &framework.UpdateOptions{
 		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
 		ApeVersion: "0.0.6", Bootstrapper: framework.NoopBootstrapper{}, Now: fixedNow,
 	})
@@ -325,7 +397,7 @@ func TestUpdate_RefusesMissingFrameworkSubtree(t *testing.T) {
 	// No fakeFramework call — repo has no framework/_apex/pipelines etc.
 	proj := newProject(t)
 
-	_, err := framework.Update(ctx, &framework.UpdateOptions{
+	_, err := framework.Setup(ctx, &framework.UpdateOptions{
 		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
 		ApeVersion: "0.0.6", Bootstrapper: framework.NoopBootstrapper{}, Now: fixedNow,
 	})
@@ -341,7 +413,7 @@ func TestStatus_NoFrameworkRepoArg_ReturnsInstalledOnly(t *testing.T) {
 	fakeFramework(t, fw, "v0.0.71")
 	proj := newProject(t)
 
-	_, err := framework.Update(ctx, &framework.UpdateOptions{
+	_, err := framework.Setup(ctx, &framework.UpdateOptions{
 		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
 		ApeVersion: "0.0.6", Bootstrapper: framework.NoopBootstrapper{}, Now: fixedNow,
 	})
@@ -361,7 +433,7 @@ func TestStatus_DetectsDriftAfterFrameworkAdvance(t *testing.T) {
 	fakeFramework(t, fw, "v0.0.71")
 	proj := newProject(t)
 
-	_, err := framework.Update(ctx, &framework.UpdateOptions{
+	_, err := framework.Setup(ctx, &framework.UpdateOptions{
 		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
 		ApeVersion: "0.0.6", Bootstrapper: framework.NoopBootstrapper{}, Now: fixedNow,
 	})

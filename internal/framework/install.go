@@ -116,6 +116,22 @@ func (e *ProjectSkillsModifiedError) Error() string {
 	return "uncommitted changes under .claude/skills/apex-* (pass --force to override): " + strings.Join(e.Paths, ", ")
 }
 
+// AlreadyInstalledError signals that <projectRoot>/_apex/framework.yaml
+// already exists when `ape framework setup` was invoked. Pass --force
+// to re-bootstrap (which resets project_name + extensions).
+type AlreadyInstalledError struct {
+	Path string
+}
+
+func (e *AlreadyInstalledError) Error() string {
+	return fmt.Sprintf(
+		"framework already installed at %s — run \"ape framework update\" to refresh, "+
+			"or \"ape framework setup --force\" to re-bootstrap "+
+			"(resets project_name and extensions)",
+		e.Path,
+	)
+}
+
 // repoInfoFromFramework collects the framework repo metadata used to
 // fill the framework.yaml `framework:` block.
 type repoInfo struct {
@@ -125,17 +141,53 @@ type repoInfo struct {
 	origin  string
 }
 
-// Update runs the full install flow. Returns the result on success or
-// a wrapped error on any failure. The caller is expected to surface
-// the structured error code (ValidationError /
-// ProjectSkillsModifiedError) into its output envelope.
-func Update(ctx context.Context, opts *UpdateOptions) (*UpdateResult, error) {
-	if opts.Bootstrapper == nil {
-		return nil, errors.New("UpdateOptions.Bootstrapper is required")
-	}
+// Setup runs the initial-install flow: bootstrap config.yaml (if
+// absent), copy skills + pipelines, write framework.yaml. Refuses to
+// run if framework.yaml already exists unless opts.Force is set.
+//
+// Per PLAN-1 / I3, this is the command users run on a fresh project.
+// Subsequent refreshes use Update, which deliberately omits the
+// bootstrap step so config.yaml stays untouched.
+func Setup(ctx context.Context, opts *UpdateOptions) (*UpdateResult, error) {
 	if opts.ProjectRoot == "" {
 		return nil, errors.New("UpdateOptions.ProjectRoot is required")
 	}
+	if opts.Bootstrapper == nil {
+		return nil, errors.New("UpdateOptions.Bootstrapper is required for setup")
+	}
+	metaPath := MetadataPath(opts.ProjectRoot)
+	if _, err := os.Stat(metaPath); err == nil && !opts.Force {
+		return nil, &AlreadyInstalledError{Path: metaPath}
+	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("stat %s: %w", metaPath, err)
+	}
+	return installCore(ctx, opts, true /* doBootstrap */)
+}
+
+// Update runs the refresh flow: re-copy skills + pipelines, refresh
+// framework.yaml. Does NOT touch config.yaml — that's a one-time
+// bootstrap recorded by Setup. Refuses to run if framework.yaml is
+// absent (no install to refresh).
+//
+// Per PLAN-1 / I3, this is the command users run on every framework
+// version bump after the initial Setup. The Bootstrapper field of
+// opts is ignored.
+func Update(ctx context.Context, opts *UpdateOptions) (*UpdateResult, error) {
+	if opts.ProjectRoot == "" {
+		return nil, errors.New("UpdateOptions.ProjectRoot is required")
+	}
+	// Existence check up-front so users get the actionable not-installed
+	// hint rather than a downstream copy / write failure.
+	if _, err := ReadMetadata(opts.ProjectRoot); err != nil {
+		return nil, err
+	}
+	return installCore(ctx, opts, false /* doBootstrap */)
+}
+
+// installCore is the shared core of Setup and Update. doBootstrap
+// controls whether config.yaml seeding runs; everything else is the
+// same.
+func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*UpdateResult, error) {
 	now := opts.Now
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
@@ -159,9 +211,16 @@ func Update(ctx context.Context, opts *UpdateOptions) (*UpdateResult, error) {
 	if err := checkProjectSkills(ctx, opts); err != nil {
 		return nil, err
 	}
-	bootstrap, configSeeded, configLocalSeeded, err := bootstrapConfig(ctx, opts)
-	if err != nil {
-		return nil, err
+	var (
+		bootstrap         BootstrapValues
+		configSeeded      bool
+		configLocalSeeded bool
+	)
+	if doBootstrap {
+		bootstrap, configSeeded, configLocalSeeded, err = bootstrapConfig(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
 	}
 	skillsDir := filepath.Join(opts.ProjectRoot, ProjectSkillsDir)
 	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
@@ -183,6 +242,21 @@ func Update(ctx context.Context, opts *UpdateOptions) (*UpdateResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// For Update (doBootstrap=false), preserve the existing ConfigSource
+	// values rather than overwriting with zeros. This keeps the
+	// project_name + extensions recorded by the original Setup.
+	cfgSource := ConfigSource{
+		Seeded:      configSeeded,
+		ProjectName: bootstrap.ProjectName,
+		Extensions:  bootstrap.Extensions,
+	}
+	cfgLocalSource := ConfigLocalExampleSource{Seeded: configLocalSeeded}
+	if !doBootstrap {
+		if prior, prErr := ReadMetadata(opts.ProjectRoot); prErr == nil {
+			cfgSource = prior.Sources.Config
+			cfgLocalSource = prior.Sources.ConfigLocalExample
+		}
+	}
 	meta := Metadata{
 		ConfigSchemaVersion: MetadataSchemaVersion,
 		InstalledAt:         now(),
@@ -194,14 +268,10 @@ func Update(ctx context.Context, opts *UpdateOptions) (*UpdateResult, error) {
 		},
 		Ape: ApeInfo{Version: opts.ApeVersion},
 		Sources: Sources{
-			Skills:    SkillsSource{Count: len(installedSkills), Paths: installedSkills},
-			Pipelines: PipelinesSource{Count: len(installedPipelines), Paths: installedPipelines},
-			Config: ConfigSource{
-				Seeded:      configSeeded,
-				ProjectName: bootstrap.ProjectName,
-				Extensions:  bootstrap.Extensions,
-			},
-			ConfigLocalExample: ConfigLocalExampleSource{Seeded: configLocalSeeded},
+			Skills:             SkillsSource{Count: len(installedSkills), Paths: installedSkills},
+			Pipelines:          PipelinesSource{Count: len(installedPipelines), Paths: installedPipelines},
+			Config:             cfgSource,
+			ConfigLocalExample: cfgLocalSource,
 		},
 	}
 	if err := WriteMetadata(opts.ProjectRoot, &meta); err != nil {
@@ -303,12 +373,17 @@ func checkProjectSkills(ctx context.Context, opts *UpdateOptions) error {
 }
 
 // bootstrapConfig runs the config bootstrap when _apex/config.yaml is
-// absent. Returns the values used (empty when skipped), seed flags
-// for both config files, and any non-cancellation error.
+// absent (or when opts.Force is set — Setup --force re-bootstraps,
+// overwriting the existing config.yaml so project_name + extensions
+// can be reset). Returns the values used (empty when skipped), seed
+// flags for both config files, and any non-cancellation error.
 func bootstrapConfig(ctx context.Context, opts *UpdateOptions) (values BootstrapValues, configSeeded, configLocalSeeded bool, err error) {
 	configPath := filepath.Join(opts.ProjectRoot, ProjectConfig)
 	if _, err := os.Stat(configPath); err == nil {
-		return BootstrapValues{}, false, false, nil
+		if !opts.Force {
+			return BootstrapValues{}, false, false, nil
+		}
+		// Force=true with config present: fall through to re-bootstrap.
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return BootstrapValues{}, false, false, fmt.Errorf("stat %s: %w", configPath, err)
 	}
