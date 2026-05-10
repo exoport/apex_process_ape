@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/diegosz/apex_process_ape/internal/pipeline"
 )
+
+// doubleCtrlCWindow is how long a second Ctrl+C must arrive within
+// to bypass the quit-confirmation modal and force-quit immediately.
+// Long enough to catch a deliberate double-tap; short enough that an
+// accidental Ctrl+C followed by a slower re-press still goes through
+// the modal.
+const doubleCtrlCWindow = time.Second
 
 // Bubble Tea two-panel TUI for `ape pipeline`.
 //
@@ -38,6 +46,21 @@ var (
 	stageFailedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
 	stepStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
 	dimStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	modalStyle        = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				Padding(1, 3). //nolint:mnd // (vertical=1, horizontal=3) padding is a deliberate cosmetic choice
+				BorderForeground(lipgloss.Color("11")).
+				Bold(true)
+)
+
+// modalState tracks whether the pipeline TUI is displaying a blocking
+// confirmation overlay. Today only quit-confirmation exists; the
+// enum reserves room for future overlays (e.g. retry-stage, view-raw).
+type modalState int
+
+const (
+	modalNone modalState = iota
+	modalQuitConfirm
 )
 
 type stageState int
@@ -77,6 +100,19 @@ type pipelineModel struct {
 	width        int
 	height       int
 	tick         time.Time
+
+	// modal overlays the underlying view. modalNone means no overlay.
+	modal modalState
+	// lastCtrlC records the timestamp of the most recent Ctrl+C
+	// keypress; a second Ctrl+C within doubleCtrlCWindow bypasses the
+	// quit modal and force-quits.
+	lastCtrlC time.Time
+	// cancelRun is invoked when the user confirms quit mid-run. It
+	// cancels the runner's context, which exec.CommandContext
+	// propagates to the spawned claude subprocess as SIGKILL. May be
+	// nil in tests or in --no-tui paths that wire cancellation
+	// differently; nil-checked at every call site.
+	cancelRun context.CancelFunc
 }
 
 // ─────────── Bubble Tea messages ───────────
@@ -111,7 +147,14 @@ type (
 // NewPipelineModel returns a tea.Model wired to a pipeline spec. The
 // model starts with every stage in the pending state; stages and their
 // chains transition as Observer messages arrive.
-func NewPipelineModel(spec *pipeline.Spec) pipelineModel { //nolint:revive // returning unexported type is intentional; callers receive tea.Model via assignment
+//
+// cancel is invoked when the user confirms quit while the pipeline is
+// running; it should cancel the context that runner.Run is using, so
+// exec.CommandContext can tear down the in-flight claude subprocess.
+// A nil cancel is tolerated (e.g. for tests) — the quit modal still
+// renders, but confirmed quit just exits the TUI without touching the
+// subprocess.
+func NewPipelineModel(spec *pipeline.Spec, cancel context.CancelFunc) pipelineModel { //nolint:revive // returning unexported type is intentional; callers receive tea.Model via assignment
 	rows := make([]stageRow, len(spec.Stages()))
 	idx := make(map[string]int, len(rows))
 	for i, st := range spec.Stages() {
@@ -126,6 +169,7 @@ func NewPipelineModel(spec *pipeline.Spec) pipelineModel { //nolint:revive // re
 		pipelineName: spec.Name,
 		stages:       rows,
 		stageIdx:     idx,
+		cancelRun:    cancel,
 	}
 }
 
@@ -145,15 +189,49 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocri
 		return m, nil
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case keyCtrlC, "q":
-			if m.finished {
+		key := msg.String()
+		// Finished pipeline: any key dismisses. No confirmation needed —
+		// nothing to cancel.
+		if m.finished {
+			return m, tea.Quit
+		}
+		// Modal handling takes precedence over normal navigation. Per
+		// PLAN-1 / I2: y confirms (cancels subprocess + quits); n / Esc
+		// dismisses. Ctrl+C in the modal still respects the double-tap
+		// force-quit window so users can always escape a stuck modal.
+		if m.modal == modalQuitConfirm {
+			switch key {
+			case "y", "Y":
+				m.invokeCancel()
+				return m, tea.Quit
+			case "n", "N", keyEsc:
+				m.modal = modalNone
+				return m, nil
+			case keyCtrlC:
+				if !m.lastCtrlC.IsZero() && time.Since(m.lastCtrlC) <= doubleCtrlCWindow {
+					m.invokeCancel()
+					return m, tea.Quit
+				}
+				m.lastCtrlC = time.Now()
+				return m, nil
+			}
+			return m, nil
+		}
+		// No modal: q / Ctrl+C open the quit-confirmation modal.
+		// A second Ctrl+C within doubleCtrlCWindow bypasses the modal
+		// and force-quits (emergency escape).
+		switch key {
+		case "q":
+			m.modal = modalQuitConfirm
+			return m, nil
+		case keyCtrlC:
+			if !m.lastCtrlC.IsZero() && time.Since(m.lastCtrlC) <= doubleCtrlCWindow {
+				m.invokeCancel()
 				return m, tea.Quit
 			}
-			// Mid-run cancel: leave the cleanup to the runner; just quit
-			// the TUI. The runner's context cancellation is wired by the
-			// caller (cmd.Context()).
-			return m, tea.Quit
+			m.lastCtrlC = time.Now()
+			m.modal = modalQuitConfirm
+			return m, nil
 		}
 
 	case tickMsg:
@@ -229,7 +307,66 @@ func (m pipelineModel) View() string { //nolint:gocritic // Bubble Tea requires 
 	} else {
 		view += "\n" + dimStyle.Render("press q or ctrl+c to quit")
 	}
+	if m.modal == modalQuitConfirm {
+		view = m.overlayQuitModal(view)
+	}
 	return view
+}
+
+// invokeCancel calls the cancellation function for the in-flight
+// pipeline run, if one was provided to NewPipelineModel. Safe to call
+// when the pipeline is already finished or the cancel was never set;
+// the function is idempotent because context.CancelFunc is.
+func (m pipelineModel) invokeCancel() { //nolint:gocritic // Bubble Tea value receivers
+	if m.cancelRun != nil {
+		m.cancelRun()
+	}
+}
+
+// overlayQuitModal renders the quit-confirmation overlay centered on
+// top of the underlying view. lipgloss.Place fills the terminal area
+// with the modal box centered against a whitespace background, which
+// visually replaces the underlying view for the duration of the
+// modal; the underlying string is the caller's responsibility to
+// suppress.
+func (m pipelineModel) overlayQuitModal(_ string) string { //nolint:gocritic // Bubble Tea value receivers
+	running, completed := m.summarizeRunState()
+	body := "Stop pipeline?\n\n"
+	if running != "" {
+		body += dimStyle.Render(running) + "\n"
+	}
+	if completed != "" {
+		body += dimStyle.Render(completed) + "\n"
+	}
+	body += "\nPressing y will cancel the in-flight skill\n"
+	body += "subprocess and abort the run.\n\n"
+	body += "  [y] yes   [n] no  "
+	box := modalStyle.Render(body)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box,
+		lipgloss.WithWhitespaceChars(" "),
+	)
+}
+
+// summarizeRunState returns a short description of the active stage
+// (if any) and a count of completed stages — used inside the quit
+// modal so the user knows what's at risk.
+func (m pipelineModel) summarizeRunState() (running, completed string) { //nolint:gocritic // Bubble Tea value receivers
+	doneCount := 0
+	for i := range m.stages {
+		st := &m.stages[i]
+		switch st.state {
+		case stateRunning:
+			running = fmt.Sprintf("%s in progress (%s)", st.name, elapsedFor(st.state, st.startedAt, st.endedAt, m.tick))
+		case stateDone, stateFailed:
+			doneCount++
+		case statePending:
+			// not yet started — irrelevant to the modal
+		}
+	}
+	if doneCount > 0 {
+		completed = fmt.Sprintf("%d stage(s) already completed", doneCount)
+	}
+	return running, completed
 }
 
 func (m pipelineModel) renderStageTree() string { //nolint:gocritic // Bubble Tea requires value receivers on tea.Model helper methods

@@ -174,16 +174,24 @@ func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt stri
 // runWithTUI runs the pipeline alongside a Bubble Tea program. The
 // pipeline runs in a goroutine; observer events become tea.Msgs that
 // drive the two-panel display. The TUI exits once pipelineDoneMsg
-// arrives (or the user presses q / ctrl+c, in which case the runner's
-// context cancellation tears down the in-flight claude process).
+// arrives, or when the user confirms the quit modal (q / Ctrl+C with
+// y, or double Ctrl+C), in which case runCancel cancels the runner's
+// context — exec.CommandContext then tears down the in-flight claude
+// subprocess.
 func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt string) error {
-	model := tui.NewPipelineModel(spec)
+	// Local cancel scoped to this TUI run. Wrapping the caller's ctx
+	// gives the modal a dedicated cancellation handle without
+	// interfering with the cobra signal-handling on the parent ctx.
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+
+	model := tui.NewPipelineModel(spec, runCancel)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	obs := tui.NewPipelineTUIObserver(program)
 
 	runErrCh := make(chan error, 1)
 	go func() {
-		err := pipeline.Run(ctx, spec, pipeline.RunOptions{
+		err := pipeline.Run(runCtx, spec, pipeline.RunOptions{
 			ProjectRoot: projectRoot,
 			Prompt:      prompt,
 			Observer:    obs,
@@ -199,7 +207,10 @@ func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt st
 	var pfe *pipeline.PreflightError
 	if errors.As(runErr, &pfe) {
 		fmt.Fprintf(os.Stderr, "%s\n", pfe.Error())
-		os.Exit(exitCodePreflightFailed)
+		// os.Exit skips the deferred runCancel; invoke explicitly so
+		// no leaked goroutine or subprocess can survive.
+		runCancel()
+		os.Exit(exitCodePreflightFailed) //nolint:gocritic // explicit runCancel() above neutralizes the defer-skip
 	}
 	return runErr
 }
