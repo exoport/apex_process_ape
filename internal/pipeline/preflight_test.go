@@ -25,7 +25,7 @@ func installPipelines(t *testing.T, root string) {
 		if err != nil {
 			t.Fatalf("read fixture %s: %v", src, err)
 		}
-		if err := os.WriteFile(filepath.Join(dst, name+".yaml"), data, 0o644); err != nil { //nolint:gosec // 0644 is appropriate for test fixture YAML files
+		if err := os.WriteFile(filepath.Join(dst, name+".yaml"), data, 0o644); err != nil {
 			t.Fatalf("write fixture %s: %v", name, err)
 		}
 	}
