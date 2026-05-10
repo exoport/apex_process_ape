@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v0.0.6 (UNRELEASED) ⚠️ BREAKING
+## v0.0.6 (2026-05-10) ⚠️ BREAKING
 
 This release moves pipeline specs out of the binary and adds a first-class
 install path for the framework's skills + pipelines + project bootstrap.
@@ -11,12 +11,10 @@ install path for the framework's skills + pipelines + project bootstrap.
   at `<project>/_apex/pipelines/*.yaml` and must be installed before
   `ape pipeline <name>` will work. Existing v0.0.5 installs that ran
   `ape pipeline design` against bare projects will break with:
-
       pipeline "design" not found at <project>/_apex/pipelines/design.yaml — run
       "ape framework update" to install pipelines from the framework repo
 
   Migration is one command:
-
       export APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
       ape framework update
 
