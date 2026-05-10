@@ -198,3 +198,120 @@ func TestQuitModal_SummarizesRunStateForOverlay(t *testing.T) {
 	require.Contains(t, running, "beta")
 	require.Contains(t, completed, "1 stage", "1 done stage")
 }
+
+// ─────────── PLAN-1 / I4 navigation tests ───────────
+
+func TestNav_StageStartUpdatesCursorInLiveMode(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil)
+	require.Equal(t, modeLive, m.mode)
+	require.Equal(t, 0, m.cursorIdx)
+
+	// Simulate alpha starting then beta starting.
+	res, _ := m.Update(stageStartMsg{stage: "alpha"})
+	m, _ = res.(pipelineModel)
+	require.Equal(t, 0, m.cursorIdx, "cursor follows the first started stage")
+
+	res, _ = m.Update(stageStartMsg{stage: "beta"})
+	m, _ = res.(pipelineModel)
+	require.Equal(t, 1, m.cursorIdx, "cursor follows when next stage starts in live mode")
+}
+
+func TestNav_PinFreezesCursor(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil)
+	// Run alpha; cursor follows.
+	res, _ := m.Update(stageStartMsg{stage: "alpha"})
+	m, _ = res.(pipelineModel)
+	// User pins.
+	m, _ = pressKey(t, &m, "enter")
+	require.Equal(t, modePinned, m.mode)
+	pinned := m.cursorIdx
+
+	// beta starts — cursor MUST NOT follow (we're pinned).
+	res, _ = m.Update(stageStartMsg{stage: "beta"})
+	m, _ = res.(pipelineModel)
+	require.Equal(t, pinned, m.cursorIdx, "cursor must stay pinned while modePinned")
+}
+
+func TestNav_LReturnsToLiveAndFollowsActive(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil)
+
+	// Bring alpha running, beta still pending.
+	res, _ := m.Update(stageStartMsg{stage: "alpha"})
+	m, _ = res.(pipelineModel)
+	// Pin to alpha.
+	m, _ = pressKey(t, &m, "enter")
+	// Manually move cursor down (shouldn't matter — we'll snap to active).
+	m, _ = pressKey(t, &m, "down")
+	// Press L to return to Live.
+	m, _ = pressKey(t, &m, "l")
+	require.Equal(t, modeLive, m.mode)
+	require.Equal(t, 0, m.cursorIdx, "Live mode snaps cursor back to the running stage")
+}
+
+func TestNav_ArrowMovesCursor(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil)
+	m, _ = pressKey(t, &m, "down")
+	require.Equal(t, 1, m.cursorIdx)
+	m, _ = pressKey(t, &m, "up")
+	require.Equal(t, 0, m.cursorIdx)
+	// Can't move past either end.
+	m, _ = pressKey(t, &m, "up")
+	require.Equal(t, 0, m.cursorIdx)
+}
+
+func TestEvents_AppendDisplayableOnly(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil)
+	res, _ := m.Update(stageStartMsg{stage: "alpha"})
+	m, _ = res.(pipelineModel)
+
+	displayable := `{"type":"assistant","message":{"content":[{"type":"text","text":"Drafting"}]}}`
+	noise := `{"type":"user","message":{"content":[{"type":"tool_result","is_error":false,"content":"File created successfully at /tmp/foo"}]}}`
+	malformed := `not json at all`
+
+	for _, line := range []string{displayable, noise, malformed} {
+		res, _ = m.Update(stepLineMsg{stage: "alpha", idx: 0, line: line})
+		m, _ = res.(pipelineModel)
+	}
+	// Expect 2 entries: the displayable text + the malformed fall-through
+	// (rendered as EventUnknown).
+	require.Len(t, m.stages[0].events, 2)
+	require.Equal(t, EventText, m.stages[0].events[0].Kind)
+	require.Equal(t, EventUnknown, m.stages[0].events[1].Kind)
+}
+
+func TestEvents_RunningStepIdxTracksLifecycle(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil)
+	require.Equal(t, -1, m.stages[0].runningStepIdx)
+
+	res, _ := m.Update(stepStartMsg{stage: "alpha", idx: 0})
+	m, _ = res.(pipelineModel)
+	require.Equal(t, 0, m.stages[0].runningStepIdx)
+
+	res, _ = m.Update(stepEndMsg{stage: "alpha", idx: 0})
+	m, _ = res.(pipelineModel)
+	require.Equal(t, -1, m.stages[0].runningStepIdx, "step end clears runningStepIdx")
+}
+
+func TestRenderHeader_TracksLiveSkill(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil)
+	res, _ := m.Update(stageStartMsg{stage: "alpha"})
+	m, _ = res.(pipelineModel)
+	res, _ = m.Update(stepStartMsg{stage: "alpha", idx: 0})
+	m, _ = res.(pipelineModel)
+	require.Equal(t, "apex-fake-skill-a", m.renderHeader())
+}
+
+func TestRenderHeader_PinnedShowsStageName(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil)
+	m, _ = pressKey(t, &m, "enter")
+	require.Equal(t, modePinned, m.mode)
+	require.Equal(t, "pinned: alpha", m.renderHeader())
+}
