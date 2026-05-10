@@ -216,10 +216,15 @@ func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt st
 }
 
 // plainObserver writes one status line per state transition. Used when
-// stdout is non-TTY or --no-tui is set.
+// stdout is non-TTY or --no-tui is set. Per PLAN-1 / I4b, this
+// observer also streams parsed stream-json events through the shared
+// tui.RenderEvent function so log captures and CI runs see the same
+// human-friendly progress feed as the interactive TUI.
 type plainObserver struct {
-	w  *os.File
-	t0 time.Time
+	w            *os.File
+	t0           time.Time
+	currentStage string
+	currentSkill string
 }
 
 func newPlainObserver(w *os.File) *plainObserver {
@@ -227,6 +232,7 @@ func newPlainObserver(w *os.File) *plainObserver {
 }
 
 func (p *plainObserver) OnStageStart(stage string) {
+	p.currentStage = stage
 	fmt.Fprintf(p.w, "[%s] stage start: %s\n", elapsed(p.t0), stage)
 }
 
@@ -238,7 +244,9 @@ func (p *plainObserver) OnStageEnd(stage string, dur time.Duration, err error) {
 	fmt.Fprintf(p.w, "[%s] stage done: %s (%s)\n", elapsed(p.t0), stage, fmtDuration(dur))
 }
 
-func (p *plainObserver) OnStepStart(_ string, idx int, step pipeline.Step) { //nolint:gocritic // Step is passed by value to match the Observer interface signature
+func (p *plainObserver) OnStepStart(stage string, idx int, step pipeline.Step) { //nolint:gocritic // Step is passed by value to match the Observer interface signature
+	p.currentStage = stage
+	p.currentSkill = step.Skill
 	tag := step.Skill
 	if step.Agent != "" {
 		tag = step.Agent + " -> " + step.Skill
@@ -246,17 +254,25 @@ func (p *plainObserver) OnStepStart(_ string, idx int, step pipeline.Step) { //n
 	fmt.Fprintf(p.w, "[%s]   step %d: %s\n", elapsed(p.t0), idx+1, tag)
 }
 
-// OnStepLine is invoked for every newline-delimited chunk the
-// spawned claude subprocess writes to stdout/stderr. Wired in
-// PLAN-1 / I4b. The line renderer (event_renderer.go) is plugged
-// in by a follow-up commit; for now, opt out of the live stream
-// to keep --no-tui output identical to v0.0.6.
-func (p *plainObserver) OnStepLine(_ string, _ int, _ string) {
-	// Intentionally empty until the human-friendly event renderer
-	// lands. Re-enabling unconditional raw-line streaming here would
-	// emit hundreds of stream-json JSON blobs per skill — useful for
-	// debugging but noisy by default. The render-aware streaming
-	// version is wired in the next commit.
+// OnStepLine renders each stream-json event the spawned claude
+// subprocess emits as a single timestamped, prefixed line on stdout.
+// Suppressed events (noisy successful tool_results, etc.) are
+// dropped. Same renderer that powers the interactive TUI lives in
+// internal/tui/event_renderer.go.
+func (p *plainObserver) OnStepLine(stage string, _ int, line string) {
+	r := tui.RenderEvent(line)
+	if !r.IsDisplayable() {
+		return
+	}
+	// Use the runner-supplied stage when we have it (covers race-y
+	// cases where OnStageStart hasn't recorded yet); fall back to
+	// the observer's tracked stage.
+	stageName := stage
+	if stageName == "" {
+		stageName = p.currentStage
+	}
+	fmt.Fprintf(p.w, "[%s] %s · %s · %s %s\n",
+		elapsed(p.t0), stageName, p.currentSkill, r.Glyph, r.Body)
 }
 
 func (p *plainObserver) OnStepEnd(_ string, idx int, step pipeline.Step, dur time.Duration, output string, err error) { //nolint:gocritic // Step is passed by value to match the Observer interface signature

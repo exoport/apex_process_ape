@@ -1,10 +1,4 @@
-// Tests live in package tui (not tui_test) so they can drive the
-// unexported pipelineModel.Update state machine without leaking
-// modal/state internals into the public API. The testpackage lint
-// rule is suppressed at the directive below; the trade-off is
-// deliberate.
-//
-//nolint:testpackage // exercising unexported model state machine
+//nolint:testpackage // exercising the unexported pipelineModel state machine; trade-off is deliberate
 package tui
 
 import (
