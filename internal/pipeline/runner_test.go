@@ -1,12 +1,16 @@
 package pipeline //nolint:testpackage // tests white-box test unexported buildArgv; moving to pipeline_test would require exporting it
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 const (
@@ -254,5 +258,114 @@ func TestAvailablePipelines_MissingDir(t *testing.T) {
 	got := AvailablePipelines(root)
 	if len(got) != 0 {
 		t.Errorf("AvailablePipelines on empty project = %v, want empty slice", got)
+	}
+}
+
+// captureObserver records every Observer event into in-memory slices
+// so tests can assert on the live event stream produced by runClaude.
+type captureObserver struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (c *captureObserver) OnStageStart(_ string)                                                 {}
+func (c *captureObserver) OnStageEnd(_ string, _ time.Duration, _ error)                         {}
+func (c *captureObserver) OnStepStart(_ string, _ int, _ Step)                                   {} //nolint:gocritic // Step is passed by value to match Observer interface
+func (c *captureObserver) OnStepEnd(_ string, _ int, _ Step, _ time.Duration, _ string, _ error) {} //nolint:gocritic // Step is passed by value to match Observer interface
+
+func (c *captureObserver) OnStepLine(_ string, _ int, line string) {
+	c.mu.Lock()
+	c.lines = append(c.lines, line)
+	c.mu.Unlock()
+}
+
+// TestRunClaude_StreamsLineByLine verifies that newline-delimited
+// chunks from the subprocess's stdout reach the Observer via
+// OnStepLine in order, and that the accumulated return value mirrors
+// the full output exactly. The "claude" binary is replaced by a tiny
+// shell script for hermeticity.
+func TestRunClaude_StreamsLineByLine(t *testing.T) {
+	if _, err := exec.LookPath("/bin/sh"); err != nil {
+		t.Skip("/bin/sh required: " + err.Error())
+	}
+	dir := t.TempDir()
+	shim := filepath.Join(dir, "shim.sh")
+	body := "#!/bin/sh\n" +
+		"printf '%s\\n' '{\"type\":\"a\"}' '{\"type\":\"b\"}' '{\"type\":\"c\"}'\n" +
+		"exit 0\n"
+	if err := os.WriteFile(shim, []byte(body), 0o755); err != nil {
+		t.Fatalf("write shim: %v", err)
+	}
+
+	obs := &captureObserver{}
+	out, err := runClaude(context.Background(), []string{shim}, dir, obs, "stage1", 0)
+	if err != nil {
+		t.Fatalf("runClaude: %v", err)
+	}
+
+	want := []string{`{"type":"a"}`, `{"type":"b"}`, `{"type":"c"}`}
+	if !reflect.DeepEqual(obs.lines, want) {
+		t.Errorf("OnStepLine sequence = %v, want %v", obs.lines, want)
+	}
+	const wantOut = "{\"type\":\"a\"}\n{\"type\":\"b\"}\n{\"type\":\"c\"}\n"
+	if out != wantOut {
+		t.Errorf("accumulated output = %q, want %q", out, wantOut)
+	}
+}
+
+// TestRunClaude_InterleavesStderr verifies that lines written to the
+// subprocess's stderr also reach the Observer (currently merged into
+// the same stream as stdout). This guarantees error output isn't
+// silently dropped while we wait for OnStepEnd.
+func TestRunClaude_InterleavesStderr(t *testing.T) {
+	if _, err := exec.LookPath("/bin/sh"); err != nil {
+		t.Skip("/bin/sh required: " + err.Error())
+	}
+	dir := t.TempDir()
+	shim := filepath.Join(dir, "shim.sh")
+	body := "#!/bin/sh\n" +
+		"echo stdout-line\n" +
+		"echo stderr-line 1>&2\n" +
+		"exit 0\n"
+	if err := os.WriteFile(shim, []byte(body), 0o755); err != nil {
+		t.Fatalf("write shim: %v", err)
+	}
+
+	obs := &captureObserver{}
+	if _, err := runClaude(context.Background(), []string{shim}, dir, obs, "stage", 0); err != nil {
+		t.Fatalf("runClaude: %v", err)
+	}
+	if !slices.Contains(obs.lines, "stdout-line") {
+		t.Errorf("stdout line missing from OnStepLine, got %v", obs.lines)
+	}
+	if !slices.Contains(obs.lines, "stderr-line") {
+		t.Errorf("stderr line missing from OnStepLine, got %v", obs.lines)
+	}
+}
+
+// TestRunClaude_PropagatesNonZeroExit verifies that a failing
+// subprocess returns the wait error AND still flushes its captured
+// output to the caller (so callers can render the failure cause).
+func TestRunClaude_PropagatesNonZeroExit(t *testing.T) {
+	if _, err := exec.LookPath("/bin/sh"); err != nil {
+		t.Skip("/bin/sh required: " + err.Error())
+	}
+	dir := t.TempDir()
+	shim := filepath.Join(dir, "shim.sh")
+	body := "#!/bin/sh\necho about-to-fail\nexit 7\n"
+	if err := os.WriteFile(shim, []byte(body), 0o755); err != nil {
+		t.Fatalf("write shim: %v", err)
+	}
+
+	obs := &captureObserver{}
+	out, err := runClaude(context.Background(), []string{shim}, dir, obs, "stage", 0)
+	if err == nil {
+		t.Fatal("expected non-nil error from failing subprocess")
+	}
+	if !strings.Contains(out, "about-to-fail") {
+		t.Errorf("accumulated output must include pre-exit content, got %q", out)
+	}
+	if !slices.Contains(obs.lines, "about-to-fail") {
+		t.Errorf("OnStepLine must fire for output flushed before exit, got %v", obs.lines)
 	}
 }

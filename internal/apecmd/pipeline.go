@@ -246,6 +246,19 @@ func (p *plainObserver) OnStepStart(_ string, idx int, step pipeline.Step) { //n
 	fmt.Fprintf(p.w, "[%s]   step %d: %s\n", elapsed(p.t0), idx+1, tag)
 }
 
+// OnStepLine is invoked for every newline-delimited chunk the
+// spawned claude subprocess writes to stdout/stderr. Wired in
+// PLAN-1 / I4b. The line renderer (event_renderer.go) is plugged
+// in by a follow-up commit; for now, opt out of the live stream
+// to keep --no-tui output identical to v0.0.6.
+func (p *plainObserver) OnStepLine(_ string, _ int, _ string) {
+	// Intentionally empty until the human-friendly event renderer
+	// lands. Re-enabling unconditional raw-line streaming here would
+	// emit hundreds of stream-json JSON blobs per skill — useful for
+	// debugging but noisy by default. The render-aware streaming
+	// version is wired in the next commit.
+}
+
 func (p *plainObserver) OnStepEnd(_ string, idx int, step pipeline.Step, dur time.Duration, output string, err error) { //nolint:gocritic // Step is passed by value to match the Observer interface signature
 	if err != nil {
 		fmt.Fprintf(p.w, "[%s]   step %d FAIL: %s (%s)\n", elapsed(p.t0), idx+1, step.Skill, fmtDuration(dur))

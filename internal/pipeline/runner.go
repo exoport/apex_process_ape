@@ -1,11 +1,14 @@
 package pipeline
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -41,10 +44,17 @@ type RunOptions struct {
 
 // Observer hooks every state transition the runner emits. Methods are
 // called from the runner's goroutine; observers must not block on I/O.
+//
+// PLAN-1 / I4b: OnStepLine is invoked once per newline-delimited
+// chunk the spawned claude subprocess writes to stdout, BEFORE
+// OnStepEnd fires. The line is the raw stream-json event text;
+// observers are responsible for parsing + rendering. Implementations
+// that don't care about live progress can leave OnStepLine empty.
 type Observer interface {
 	OnStageStart(stage string)
 	OnStageEnd(stage string, dur time.Duration, err error)
 	OnStepStart(stage string, idx int, step Step)
+	OnStepLine(stage string, idx int, line string)
 	OnStepEnd(stage string, idx int, step Step, dur time.Duration, output string, err error)
 }
 
@@ -74,7 +84,7 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 				notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), err) })
 				return err
 			}
-			out, runErr := runClaude(ctx, argv, opts.ProjectRoot)
+			out, runErr := runClaude(ctx, argv, opts.ProjectRoot, opts.Observer, stage.Name, i)
 			notify(opts.Observer, func(o Observer) { o.OnStepEnd(stage.Name, i, step, time.Since(stepStart), out, runErr) })
 			if runErr != nil {
 				notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), runErr) })
@@ -137,21 +147,67 @@ func buildArgv(claudeBin string, step Step, prompt string) ([]string, error) { /
 	return argv, nil
 }
 
-// runClaude executes argv with cwd = projectRoot, captures combined
-// stdout+stderr, and returns it. claude does not flush per-line under
-// normal sub-process invocation (per PLAN-7 § Open issues), so this
-// function returns the full captured output once the process exits.
-func runClaude(ctx context.Context, argv []string, projectRoot string) (string, error) {
+// runClaude executes argv with cwd = projectRoot, streams the
+// subprocess's stdout + stderr line-by-line to the Observer via
+// OnStepLine, accumulates the full output into a buffer, and returns
+// it once the process exits.
+//
+// Per PLAN-1 / I4b, claude --output-format stream-json produces NDJSON
+// events on stdout as the model executes; surfacing those as they
+// arrive is what makes the TUI feel live. Stderr is interleaved into
+// the same line stream (with a sentinel prefix not yet used) so
+// failures still surface in the captured output.
+func runClaude(ctx context.Context, argv []string, projectRoot string, observer Observer, stage string, idx int) (string, error) {
 	if len(argv) == 0 {
 		return "", errors.New("empty argv")
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // argv is constructed from embedded pipeline specs and validated step data; intentional subprocess dispatch
 	cmd.Dir = projectRoot
-	var buf strings.Builder
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	if err := cmd.Run(); err != nil {
-		return buf.String(), err
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return "", fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("start claude: %w", err)
+	}
+
+	var (
+		buf strings.Builder
+		mu  sync.Mutex // guards buf — both reader goroutines append concurrently
+		wg  sync.WaitGroup
+	)
+	scan := func(r io.Reader) {
+		defer wg.Done()
+		// Default Scanner buffer is 64KiB; stream-json events from
+		// claude can include long tool_result bodies, so allocate a
+		// larger ceiling (1MiB) to keep Scan() from erroring out.
+		s := bufio.NewScanner(r)
+		s.Buffer(make([]byte, 0, 64*1024), 1024*1024) //nolint:mnd // 64KiB initial / 1MiB ceiling on a Scanner buffer is a documented Bubble-Tea-adjacent norm
+		for s.Scan() {
+			line := s.Text()
+			mu.Lock()
+			buf.WriteString(line)
+			buf.WriteByte('\n')
+			mu.Unlock()
+			notify(observer, func(o Observer) { o.OnStepLine(stage, idx, line) })
+		}
+		// Scanner errors here (token too long, etc.) are absorbed
+		// into the accumulated output via cmd.Wait()'s exit code.
+	}
+	wg.Add(2) //nolint:mnd // exactly two pipe readers (stdout + stderr); not a magic number worth a named constant
+	go scan(stdout)
+	go scan(stderr)
+	wg.Wait()
+
+	waitErr := cmd.Wait()
+	if waitErr != nil {
+		return buf.String(), waitErr
 	}
 	return buf.String(), nil
 }

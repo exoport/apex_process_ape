@@ -131,6 +131,11 @@ type stepStartMsg struct {
 	idx   int
 	step  pipeline.Step
 }
+type stepLineMsg struct {
+	stage string
+	idx   int
+	line  string
+}
 type stepEndMsg struct {
 	stage  string
 	idx    int
@@ -567,6 +572,10 @@ func (o *PipelineTUIObserver) OnStageEnd(stage string, dur time.Duration, err er
 
 func (o *PipelineTUIObserver) OnStepStart(stage string, idx int, step pipeline.Step) { //nolint:gocritic // Step is passed by value to match the Observer interface signature
 	o.program.Send(stepStartMsg{stage: stage, idx: idx, step: step})
+}
+
+func (o *PipelineTUIObserver) OnStepLine(stage string, idx int, line string) {
+	o.program.Send(stepLineMsg{stage: stage, idx: idx, line: line})
 }
 
 func (o *PipelineTUIObserver) OnStepEnd(stage string, idx int, step pipeline.Step, dur time.Duration, output string, err error) { //nolint:gocritic // Step is passed by value to match the Observer interface signature
