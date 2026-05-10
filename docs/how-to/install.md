@@ -13,7 +13,7 @@ curl -fsSL "https://github.com/diegosz/apex_process_ape/releases/download/${VERS
 ape version
 ```
 
-To pin a specific version, set `VERSION` directly: `VERSION=v0.1.0`.
+To pin a specific version, set `VERSION` directly: `VERSION=v0.0.6`.
 
 The Linux asset is `ape_linux_amd64.tar.gz`. Replace with `ape_darwin_amd64.tar.gz`, `ape_darwin_arm64.tar.gz`, or `ape_windows_amd64.zip` as needed (Windows uses zip, not tar.gz).
 
@@ -43,7 +43,7 @@ make install        # → /usr/local/bin/ape
 ape version
 ```
 
-Should print something like `ape v0.1.0 / build date: ... / git commit: ...`. If `ape: command not found`, the install location isn't on your `$PATH` — check `echo $PATH` and either move the binary or extend `PATH` in your shell rc.
+Should print something like `ape v0.0.6 / build date: ... / git commit: ...`. If `ape: command not found`, the install location isn't on your `$PATH` — check `echo $PATH` and either move the binary or extend `PATH` in your shell rc.
 
 ## Verifying release authenticity (optional)
 
@@ -59,5 +59,8 @@ sudo rm /usr/local/bin/ape
 
 ## Next steps
 
+ape is just the CLI binary. To run any pipeline you also need the framework assets (skills + pipeline specs) installed in your project:
+
+- **[Install the APEX framework into a project](framework-update.md)** — copy the `apex-*` skills and the canonical pipeline specs from a checked-out `apex_process_framework` repo into `<project>/.claude/skills/` and `<project>/_apex/pipelines/`, and seed `_apex/config.yaml` if absent.
 - [Update ape](update.md) — once installed, keep it current.
 - [Tutorials](../tutorials/) — once a "first pipeline" tutorial exists, that's the next step after install.

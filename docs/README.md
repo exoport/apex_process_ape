@@ -21,14 +21,16 @@ _(none yet — see [tutorials/README.md](tutorials/) for planned content)_
 
 - [How to install ape](how-to/install.md)
 - [How to update ape](how-to/update.md)
+- [How to install the APEX framework into a project](how-to/framework-update.md)
 
 ### Reference — _technical descriptions_
 
-_(none yet — see [reference/README.md](reference/) for planned content)_
+- [Pipeline spec reference](reference/pipeline-spec.md) — schema for `_apex/pipelines/*.yaml`
+- [`framework.yaml` reference](reference/framework-yaml.md) — schema for `_apex/framework.yaml`
 
 ### Explanation — _the why and the what_
 
-_(none yet — see [explanation/README.md](explanation/) for planned content)_
+- [Why project-local pipelines](explanation/why-project-local-pipelines.md) — design rationale for moving from embedded to on-disk specs in v0.0.6
 
 ## Contributing to the docs
 
