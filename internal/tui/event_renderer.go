@@ -73,11 +73,14 @@ const (
 
 // RenderedEvent is one display row produced from one stream-json line.
 // Callers concatenate Glyph + " " + Body and apply the style mapped
-// from Kind.
+// from Kind. Raw is the original NDJSON line — populated by
+// RenderEventWithRoot so PLAN-2 / F3's raw / both render styles can
+// surface it without re-parsing.
 type RenderedEvent struct {
 	Kind  EventKind
 	Glyph string
 	Body  string
+	Raw   string
 }
 
 // IsDisplayable reports whether the event should be rendered at all.
@@ -122,20 +125,26 @@ func RenderEventWithRoot(line, projectRoot string) RenderedEvent {
 	}
 	var ev map[string]any
 	if err := json.Unmarshal([]byte(line), &ev); err != nil {
-		return RenderedEvent{Kind: EventUnknown, Glyph: "?", Body: line}
+		return RenderedEvent{Kind: EventUnknown, Glyph: "?", Body: line, Raw: line}
 	}
+	var out RenderedEvent
 	switch readString(ev, "type") {
 	case "system":
-		return renderSystemEvent(ev)
+		out = renderSystemEvent(ev)
 	case "assistant":
-		return renderAssistantEvent(ev, projectRoot)
+		out = renderAssistantEvent(ev, projectRoot)
 	case "user":
-		return renderUserEvent(ev)
+		out = renderUserEvent(ev)
 	case "result":
-		return renderResultEvent(ev)
+		out = renderResultEvent(ev)
+	default:
+		// Unknown top-level type; show the line raw rather than swallow.
+		out = RenderedEvent{Kind: EventUnknown, Glyph: "?", Body: line}
 	}
-	// Unknown top-level type; show the line raw rather than swallow.
-	return RenderedEvent{Kind: EventUnknown, Glyph: "?", Body: line}
+	if out.Kind != EventSuppressed {
+		out.Raw = line
+	}
+	return out
 }
 
 // renderSystemEvent surfaces system events as a low-importance row.

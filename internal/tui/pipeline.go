@@ -156,6 +156,18 @@ const (
 	modePinned
 )
 
+// renderStyle controls how event-panel rows render — toggled by the
+// `r` key (PLAN-2 / F3). styleHuman (default) renders the parsed
+// summary like "🔧 Read foo.md"; styleRawJSON renders the original
+// NDJSON line; styleBoth shows both, one per line.
+type renderStyle int
+
+const (
+	styleHuman renderStyle = iota
+	styleRawJSON
+	styleBoth
+)
+
 type pipelineModel struct {
 	pipelineName string
 	// projectRoot is the absolute path of the user's project (the
@@ -208,6 +220,9 @@ type pipelineModel struct {
 	// Cleared by L (return-to-live), End, or moving the cursor to
 	// another stage.
 	userScrolled bool
+	// renderStyle cycles through human / raw-JSON / both forms when
+	// the user presses `r` (PLAN-2 / F3). Default is styleHuman.
+	renderStyle renderStyle
 }
 
 // ─────────── Bubble Tea messages ───────────
@@ -389,6 +404,10 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "end":
 			return m.scrollToBottom(), nil
+		case "r", "R":
+			// PLAN-2 / F3: cycle human → raw → both → human.
+			m.renderStyle = (m.renderStyle + 1) % 3 //nolint:mnd // 3 = number of styles in the renderStyle enum (styleHuman / styleRawJSON / styleBoth)
+			return m, nil
 		case "q":
 			m.modal = modalQuitConfirm
 			return m, nil
@@ -587,10 +606,24 @@ func (m pipelineModel) renderEventPanel(width, height int) string { //nolint:goc
 	var sb strings.Builder
 	for i := start; i < end; i++ {
 		ev := events[i]
-		line := ev.Glyph + " " + ev.Body
 		style := eventKindStyle(ev.Kind)
-		sb.WriteString(style.Render(truncateForWidth(line, width)))
-		sb.WriteString("\n")
+		switch m.renderStyle {
+		case styleRawJSON:
+			sb.WriteString(style.Render(truncateForWidth(ev.Raw, width)))
+			sb.WriteString("\n")
+		case styleBoth:
+			// Both: human row, then a dim raw row beneath it. Each
+			// counts as one rendered line toward the height budget,
+			// which can compress the visible span — accepted as a
+			// per-style cost. PLAN-2 / F3 calls this out.
+			sb.WriteString(style.Render(truncateForWidth(ev.Glyph+" "+ev.Body, width)))
+			sb.WriteString("\n")
+			sb.WriteString(dimStyle.Render(truncateForWidth(ev.Raw, width)))
+			sb.WriteString("\n")
+		default: // styleHuman
+			sb.WriteString(style.Render(truncateForWidth(ev.Glyph+" "+ev.Body, width)))
+			sb.WriteString("\n")
+		}
 	}
 	return sb.String()
 }
@@ -671,9 +704,18 @@ func (m pipelineModel) renderKeybindHint() string { //nolint:gocritic // Bubble 
 	if m.mode == modePinned {
 		mode = "pinned"
 	}
+	style := "human"
+	switch m.renderStyle {
+	case styleRawJSON:
+		style = "raw"
+	case styleBoth:
+		style = "both"
+	case styleHuman:
+		style = "human"
+	}
 	return dimStyle.Render(fmt.Sprintf(
-		" [mode: %s] [↑↓ stage] [Enter pin] [L live] [PgUp/PgDn scroll] [q quit] ",
-		mode,
+		" [mode: %s] [style: %s] [↑↓ stage] [Enter pin] [L live] [PgUp/PgDn scroll] [r style] [q quit] ",
+		mode, style,
 	))
 }
 

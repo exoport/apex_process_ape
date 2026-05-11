@@ -557,3 +557,61 @@ func TestFinalReport_StageListAppendsReportRow(t *testing.T) {
 	list := m.renderStageList()
 	require.Contains(t, list, "📊 final report")
 }
+
+// ─────────── PLAN-2 / F3 render-style cycling ───────────
+
+// TestRenderStyle_RKeyCyclesHumanRawBoth asserts pressing `r`
+// advances the style enum cyclically.
+func TestRenderStyle_RKeyCyclesHumanRawBoth(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	require.Equal(t, styleHuman, m.renderStyle)
+
+	m, _ = pressKey(t, &m, "r")
+	require.Equal(t, styleRawJSON, m.renderStyle)
+
+	m, _ = pressKey(t, &m, "r")
+	require.Equal(t, styleBoth, m.renderStyle)
+
+	m, _ = pressKey(t, &m, "r")
+	require.Equal(t, styleHuman, m.renderStyle, "cycle wraps back to human")
+}
+
+// TestRenderStyle_RawJSONRendersOriginalLine asserts that in
+// styleRawJSON the event panel shows the raw NDJSON line instead of
+// the parsed summary.
+func TestRenderStyle_RawJSONRendersOriginalLine(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	m = setWindowSize(t, &m, 200, 30)
+	res, _ := m.Update(stageStartMsg{stage: "alpha"})
+	m, _ = res.(pipelineModel)
+	raw := `{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}`
+	res, _ = m.Update(stepLineMsg{stage: "alpha", idx: 0, line: raw})
+	m, _ = res.(pipelineModel)
+
+	// Default style (human) shows parsed body.
+	humanBody := m.renderEventPanel(180, 5)
+	require.Contains(t, humanBody, "hello")
+	require.NotContains(t, humanBody, `"type":"assistant"`)
+
+	// After `r`, raw JSON appears.
+	m, _ = pressKey(t, &m, "r")
+	rawBody := m.renderEventPanel(180, 5)
+	require.Contains(t, rawBody, `"type":"assistant"`)
+
+	// One more `r` is both: contains parsed body AND raw line.
+	m, _ = pressKey(t, &m, "r")
+	bothBody := m.renderEventPanel(180, 5)
+	require.Contains(t, bothBody, "hello")
+	require.Contains(t, bothBody, `"type":"assistant"`)
+}
+
+// TestRenderStyle_RawCarriedFromRenderer asserts that the renderer
+// populates Raw on RenderedEvent so styleRawJSON / styleBoth can
+// surface it without re-parsing.
+func TestRenderStyle_RawCarriedFromRenderer(t *testing.T) {
+	raw := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"foo.md"}}]}}`
+	r := RenderEventWithRoot(raw, "")
+	require.Equal(t, raw, r.Raw, "RenderedEvent.Raw must mirror the original NDJSON line")
+}
