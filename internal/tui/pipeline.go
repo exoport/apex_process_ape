@@ -57,6 +57,13 @@ const (
 // constant keeps the keybind useful in tests + pre-resize states.
 const pageStep = 10
 
+// PLAN-2 / F4: terminals narrower than narrowLayoutThreshold drop the
+// right-side stage list and use a horizontal stepper above the event
+// panel instead. The threshold matches the sum of the two columns'
+// width floors (28 + 30 + border overhead) — once we can't fit both
+// columns comfortably, the single-column layout is more readable.
+const narrowLayoutThreshold = 90
+
 // eventPanelHeightFor returns the number of rendered event rows the
 // events panel will show given the current terminal height. Mirrors
 // the formula in View() so the scroll path can clamp scrollOffset to
@@ -522,6 +529,13 @@ func (m pipelineModel) View() string { //nolint:gocritic // Bubble Tea requires 
 	// Layout reservation constants are package-level (top of file) so
 	// the F8 scroll path can recover eventPanelHeight without
 	// duplicating the formula.
+	//
+	// PLAN-2 / F4: narrow terminals (< narrowLayoutThreshold cols) drop
+	// the right column entirely; the stage list collapses to a single
+	// horizontal stepper row above the event panel.
+	if m.width < narrowLayoutThreshold {
+		return m.viewNarrow()
+	}
 	rightWidth := max(m.width/3, stageListWidthMin) //nolint:mnd // 1/3 split: events panel keeps the lion's share
 	leftWidth := max(m.width-rightWidth-panelBorderOverhead, eventPanelWidthMin)
 	panelHeight := max(m.height-statusRowReserve, panelHeightMin)
@@ -624,6 +638,66 @@ func (m pipelineModel) renderEventPanel(width, height int) string { //nolint:goc
 			sb.WriteString(style.Render(truncateForWidth(ev.Glyph+" "+ev.Body, width)))
 			sb.WriteString("\n")
 		}
+	}
+	return sb.String()
+}
+
+// viewNarrow renders the single-column F4 layout for terminals
+// under narrowLayoutThreshold columns. The right-side stage panel is
+// gone; a one-row horizontal stepper sits above the full-width event
+// panel. Cursor, scroll, modal handling are all unchanged — only the
+// rendering layout differs.
+func (m pipelineModel) viewNarrow() string { //nolint:gocritic // Bubble Tea value receivers
+	stepperRow := m.renderStageStepper(m.width)
+	panelWidth := max(m.width, eventPanelWidthMin)
+	// Reserve the stepper row plus its blank separator from the
+	// event-panel height budget.
+	panelHeight := max(m.height-statusRowReserve-2, panelHeightMin) //nolint:mnd // 2 = stepper row + spacer separator inside the narrow layout
+
+	header := m.renderHeader()
+	panel := pipelinePanelStyle.Width(panelWidth).Height(panelHeight).Render(
+		pipelineHeaderStyle.Render(header) + "\n" + m.renderEventPanel(panelWidth-panelBorderOverhead, panelHeight-headerRowReserve),
+	)
+	view := stepperRow + "\n" + panel
+	view += "\n" + m.renderStatusStrip()
+	if m.phase == phaseCompleted {
+		view += "\n" + m.renderCompletionBanner()
+	} else {
+		view += "\n" + m.renderKeybindHint()
+	}
+	if m.modal == modalQuitConfirm {
+		view = m.overlayQuitModal(view)
+	}
+	return view
+}
+
+// renderStageStepper produces the one-row F4 stage strip:
+//
+//	✓ design  ✓ shard  ▸ ux  · arch  · …
+//
+// The cursor stage is wrapped in [ ] for visibility. The 📊 final-
+// report row participates when phase==phaseCompleted.
+func (m pipelineModel) renderStageStepper(_ int) string { //nolint:gocritic // Bubble Tea value receivers
+	var sb strings.Builder
+	for i := range m.stages {
+		st := &m.stages[i]
+		glyph, style := glyphForState(st.state)
+		row := glyph + " " + st.name
+		if i == m.cursorIdx {
+			row = "[" + row + "]"
+		}
+		if i > 0 {
+			sb.WriteString("  ")
+		}
+		sb.WriteString(style.Render(row))
+	}
+	if m.phase == phaseCompleted {
+		row := "📊 report"
+		if m.cursorIdx == len(m.stages) {
+			row = "[" + row + "]"
+		}
+		sb.WriteString("  ")
+		sb.WriteString(stepStyle.Render(row))
 	}
 	return sb.String()
 }

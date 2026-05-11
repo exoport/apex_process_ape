@@ -615,3 +615,57 @@ func TestRenderStyle_RawCarriedFromRenderer(t *testing.T) {
 	r := RenderEventWithRoot(raw, "")
 	require.Equal(t, raw, r.Raw, "RenderedEvent.Raw must mirror the original NDJSON line")
 }
+
+// ─────────── PLAN-2 / F4 narrow-terminal fallback ───────────
+
+// TestNarrowLayout_BelowThresholdUsesStepper asserts that the
+// horizontal stepper appears in the rendered View() when width <
+// narrowLayoutThreshold.
+func TestNarrowLayout_BelowThresholdUsesStepper(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	m = setWindowSize(t, &m, 80, 30)
+	require.Less(t, m.width, narrowLayoutThreshold, "test must run in narrow regime")
+	view := m.View()
+	// The narrow stepper is a single line containing both stages
+	// inline (alpha · beta) with the cursor bracketed.
+	require.Contains(t, view, "[")
+	require.Contains(t, view, "alpha")
+	require.Contains(t, view, "beta")
+}
+
+// TestNarrowLayout_WideRegimeKeepsRightColumn asserts that the
+// wide layout still renders the right-side stages column when
+// width >= narrowLayoutThreshold.
+func TestNarrowLayout_WideRegimeKeepsRightColumn(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	m = setWindowSize(t, &m, 200, 30)
+	view := m.View()
+	// In wide mode the "stages" header text appears (it's the
+	// right-column heading); the narrow layout doesn't render it.
+	require.Contains(t, view, "stages")
+}
+
+// TestNarrowLayout_StepperShowsCursorBracket asserts the F4 stepper
+// renders the cursor stage wrapped in [ ] for visibility.
+func TestNarrowLayout_StepperShowsCursorBracket(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	m.cursorIdx = 1
+	strip := m.renderStageStepper(80)
+	require.Contains(t, strip, "[")
+	require.Contains(t, strip, "beta")
+}
+
+// TestNarrowLayout_StepperIncludesReportRow asserts the final-report
+// row appears in the stepper after pipeline completion (F4 × F7).
+func TestNarrowLayout_StepperIncludesReportRow(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	res, _ := m.Update(pipelineDoneMsg{err: nil})
+	m, _ = res.(pipelineModel)
+
+	strip := m.renderStageStepper(80)
+	require.Contains(t, strip, "📊 report")
+}
