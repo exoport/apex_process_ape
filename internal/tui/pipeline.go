@@ -57,6 +57,14 @@ const (
 // constant keeps the keybind useful in tests + pre-resize states.
 const pageStep = 10
 
+// throttleTickInterval is the F2 render-throttle interval. Incoming
+// stepLineMsg events queue into pendingLines; every interval the
+// queue is drained into per-stage event slices in a single Update
+// pass, capping perceptible refresh rate at ~30 Hz regardless of
+// incoming line rate. 33ms ≈ 30 Hz; comfortable for human eyes and
+// avoids per-event re-render cost on bursty streams.
+const throttleTickInterval = 33 * time.Millisecond
+
 // PLAN-2 / F4: terminals narrower than narrowLayoutThreshold drop the
 // right-side stage list and use a horizontal stepper above the event
 // panel instead. The threshold matches the sum of the two columns'
@@ -230,6 +238,19 @@ type pipelineModel struct {
 	// renderStyle cycles through human / raw-JSON / both forms when
 	// the user presses `r` (PLAN-2 / F3). Default is styleHuman.
 	renderStyle renderStyle
+	// pendingLines queues displayable events between throttle ticks
+	// (PLAN-2 / F2). stepLineMsg appends to this slice; the periodic
+	// throttleTickMsg drains it into each stage's events. Caps the
+	// effective render rate at ~30 Hz even on 1000-event-per-second
+	// bursts.
+	pendingLines []pendingEvent
+}
+
+// pendingEvent is one queued displayable event waiting to be flushed
+// into its target stage's events slice on the next throttle tick.
+type pendingEvent struct {
+	stageIdx int
+	ev       RenderedEvent
 }
 
 // ─────────── Bubble Tea messages ───────────
@@ -264,6 +285,7 @@ type stepEndMsg struct {
 type (
 	pipelineDoneMsg struct{ err error }
 	tickMsg         struct{}
+	throttleTickMsg struct{}
 )
 
 // NewPipelineModel returns a tea.Model wired to a pipeline spec. The
@@ -305,11 +327,16 @@ func NewPipelineModel(spec *pipeline.Spec, cancel context.CancelFunc, projectRoo
 }
 
 func (m pipelineModel) Init() tea.Cmd { //nolint:gocritic // Bubble Tea requires value receivers on tea.Model
-	return tickCmd()
+	return tea.Batch(tickCmd(), throttleTickCmd())
 }
 
 func tickCmd() tea.Cmd {
 	return tea.Tick(time.Second, func(_ time.Time) tea.Msg { return tickMsg{} })
+}
+
+// throttleTickCmd schedules the next F2 render-throttle tick.
+func throttleTickCmd() tea.Cmd {
+	return tea.Tick(throttleTickInterval, func(_ time.Time) tea.Msg { return throttleTickMsg{} })
 }
 
 // Update dispatches one Bubble Tea message and returns the next-state
@@ -464,10 +491,12 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stages[i].runningStepIdx = msg.idx
 		}
 	case stepLineMsg:
-		// Per PLAN-1 / I4b: parse the raw stream-json line and
-		// append the rendered event to the stage's per-stage feed.
-		// Suppressed events (noisy successful tool_results, system
-		// pings) are dropped at this layer.
+		// Per PLAN-1 / I4b: parse the raw stream-json line. PLAN-2 /
+		// F2 then queues the rendered event into pendingLines rather
+		// than appending directly — the next throttleTickMsg (≤33ms)
+		// drains the queue into each stage's events slice. Suppressed
+		// events (noisy successful tool_results, system pings) are
+		// dropped before they hit the queue.
 		i, ok := m.stageIdx[msg.stage]
 		if !ok {
 			return m, nil
@@ -476,15 +505,30 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ev.IsDisplayable() {
 			return m, nil
 		}
-		m.stages[i].events = append(m.stages[i].events, ev)
-		// PLAN-2 / F8: new events at the current cursor stage
-		// auto-tail only when the user hasn't manually scrolled. A
-		// PgUp-while-running freezes the viewport on the older
-		// events the user is reading; pressing End or L rejoins the
-		// tail.
-		if !m.userScrolled && i == m.cursorIdx {
-			m.scrollOffset = 0
+		m.pendingLines = append(m.pendingLines, pendingEvent{stageIdx: i, ev: ev})
+	case throttleTickMsg:
+		// PLAN-2 / F2: flush queued events into their target stages
+		// in a single Update pass, then schedule the next tick. The
+		// per-event work here is identical to pre-F2's inline append;
+		// the throttle simply batches it.
+		for _, p := range m.pendingLines {
+			if p.stageIdx < 0 || p.stageIdx >= len(m.stages) {
+				continue
+			}
+			m.stages[p.stageIdx].events = append(m.stages[p.stageIdx].events, p.ev)
+			// PLAN-2 / F8 auto-tail: keep the user's scroll offset
+			// pinned only when they manually scrolled; otherwise the
+			// rendered window's start auto-advances when more events
+			// land (see renderEventPanel).
+			if !m.userScrolled && p.stageIdx == m.cursorIdx {
+				m.scrollOffset = 0
+			}
 		}
+		m.pendingLines = nil
+		if m.phase == phaseRunning {
+			return m, throttleTickCmd()
+		}
+		return m, nil
 	case stepEndMsg:
 		if i, ok := m.stageIdx[msg.stage]; ok && msg.idx < len(m.stages[i].steps) {
 			step := &m.stages[i].steps[msg.idx]
@@ -505,6 +549,17 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// so the final-report row appears in the stage list, the
 		// banner replaces the keybind hint, and the user can scroll
 		// through stage history before pressing q.
+		//
+		// PLAN-2 / F2: drain any pending throttled events before
+		// transitioning — the final report's per-stage event counts
+		// must reflect the full stream, not whatever was sitting in
+		// the queue at the moment the pipeline goroutine finished.
+		for _, p := range m.pendingLines {
+			if p.stageIdx >= 0 && p.stageIdx < len(m.stages) {
+				m.stages[p.stageIdx].events = append(m.stages[p.stageIdx].events, p.ev)
+			}
+		}
+		m.pendingLines = nil
 		m.phase = phaseCompleted
 		m.finalErr = msg.err
 		// Move the cursor to the synthetic final-report row so the

@@ -278,6 +278,9 @@ func TestEvents_AppendDisplayableOnly(t *testing.T) {
 		res, _ = m.Update(stepLineMsg{stage: "alpha", idx: 0, line: line})
 		m, _ = res.(pipelineModel)
 	}
+	// PLAN-2 / F2: drain the throttle queue before asserting.
+	res, _ = m.Update(throttleTickMsg{})
+	m, _ = res.(pipelineModel)
 	// Expect 2 entries: the displayable text + the malformed fall-through
 	// (rendered as EventUnknown).
 	require.Len(t, m.stages[0].events, 2)
@@ -323,6 +326,10 @@ func TestRenderHeader_PinnedShowsStageName(t *testing.T) {
 // matches pressKey's convention — pipelineModel is heavy enough that
 // gocritic flags by-value parameters.
 //
+// PLAN-2 / F2: stepLineMsg now queues into pendingLines; this helper
+// dispatches a synthetic throttleTickMsg after the burst so the
+// scroll tests can observe the flushed events slice directly.
+//
 //nolint:unparam // stage is parameterized for future multi-stage scroll tests; unused-value warning is intentional now
 func populateEvents(t *testing.T, m *pipelineModel, stage string, n int) pipelineModel {
 	t.Helper()
@@ -335,6 +342,11 @@ func populateEvents(t *testing.T, m *pipelineModel, stage string, n int) pipelin
 		cur, ok = res.(pipelineModel)
 		require.True(t, ok)
 	}
+	// Drain the F2 throttle queue so callers see the flushed state.
+	res, _ := cur.Update(throttleTickMsg{})
+	var ok bool
+	cur, ok = res.(pipelineModel)
+	require.True(t, ok)
 	return cur
 }
 
@@ -589,6 +601,9 @@ func TestRenderStyle_RawJSONRendersOriginalLine(t *testing.T) {
 	raw := `{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}`
 	res, _ = m.Update(stepLineMsg{stage: "alpha", idx: 0, line: raw})
 	m, _ = res.(pipelineModel)
+	// PLAN-2 / F2: drain the throttle queue.
+	res, _ = m.Update(throttleTickMsg{})
+	m, _ = res.(pipelineModel)
 
 	// Default style (human) shows parsed body.
 	humanBody := m.renderEventPanel(180, 5)
@@ -668,4 +683,67 @@ func TestNarrowLayout_StepperIncludesReportRow(t *testing.T) {
 
 	strip := m.renderStageStepper(80)
 	require.Contains(t, strip, "📊 report")
+}
+
+// ─────────── PLAN-2 / F2 render throttle ───────────
+
+// TestThrottle_StepLineQueuesIntoPendingLines asserts stepLineMsg
+// goes into the pendingLines queue, not directly into the stage's
+// events slice. The events surface only on the next throttle tick.
+func TestThrottle_StepLineQueuesIntoPendingLines(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	res, _ := m.Update(stepLineMsg{
+		stage: "alpha", idx: 0,
+		line: `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}`,
+	})
+	m, _ = res.(pipelineModel)
+
+	require.Empty(t, m.stages[0].events, "events must not surface until throttle tick fires")
+	require.Len(t, m.pendingLines, 1, "displayable event must enter the F2 queue")
+
+	// One throttle tick drains everything.
+	res, _ = m.Update(throttleTickMsg{})
+	m, _ = res.(pipelineModel)
+	require.Empty(t, m.pendingLines, "tick drains the queue")
+	require.Len(t, m.stages[0].events, 1)
+}
+
+// TestThrottle_TickBatchesMultipleEvents asserts that a burst of
+// stepLineMsgs between two ticks all land in a single flush.
+func TestThrottle_TickBatchesMultipleEvents(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	for i := range 50 {
+		line := `{"type":"assistant","message":{"content":[{"type":"text","text":"line ` +
+			strconv.Itoa(i) + `"}]}}`
+		res, _ := m.Update(stepLineMsg{stage: "alpha", idx: 0, line: line})
+		m, _ = res.(pipelineModel)
+	}
+	require.Len(t, m.pendingLines, 50)
+	require.Empty(t, m.stages[0].events, "throttling holds events until the tick")
+
+	res, _ := m.Update(throttleTickMsg{})
+	m, _ = res.(pipelineModel)
+	require.Empty(t, m.pendingLines)
+	require.Len(t, m.stages[0].events, 50, "all 50 events flush in one tick")
+}
+
+// TestThrottle_PipelineDoneMsgDrainsQueue asserts that the F7
+// completion transition drains any leftover pendingLines so the
+// final-report row's per-stage event count is accurate.
+func TestThrottle_PipelineDoneMsgDrainsQueue(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	res, _ := m.Update(stepLineMsg{
+		stage: "alpha", idx: 0,
+		line: `{"type":"assistant","message":{"content":[{"type":"text","text":"final"}]}}`,
+	})
+	m, _ = res.(pipelineModel)
+	require.Len(t, m.pendingLines, 1, "event queued, not yet flushed")
+
+	res, _ = m.Update(pipelineDoneMsg{err: nil})
+	m, _ = res.(pipelineModel)
+	require.Empty(t, m.pendingLines, "pipelineDoneMsg must drain the queue")
+	require.Len(t, m.stages[0].events, 1, "the queued event must reach the stage on completion")
 }
