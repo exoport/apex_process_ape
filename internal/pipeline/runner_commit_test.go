@@ -17,17 +17,20 @@ import (
 // write their pipeline spec (and any other fixture state) BEFORE
 // calling initGitRepo so it lands in the baseline commit; otherwise
 // the dirty-tree gate will refuse on entry. Skips when git is absent.
+//
+// Uses t.Setenv so the author/committer env vars apply to every child
+// process spawned during the test — including production code paths
+// like gitCommit that don't set their own cmd.Env and would otherwise
+// inherit a bare environment in CI runners without git config.
 func initGitRepo(t *testing.T, root string) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available on PATH")
 	}
-	env := append(os.Environ(),
-		"GIT_AUTHOR_NAME=ape-test",
-		"GIT_AUTHOR_EMAIL=ape-test@example.com",
-		"GIT_COMMITTER_NAME=ape-test",
-		"GIT_COMMITTER_EMAIL=ape-test@example.com",
-	)
+	t.Setenv("GIT_AUTHOR_NAME", "ape-test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "ape-test@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "ape-test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "ape-test@example.com")
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("_output/\n"), 0o644); err != nil {
 		t.Fatalf("write .gitignore: %v", err)
 	}
@@ -39,7 +42,6 @@ func initGitRepo(t *testing.T, root string) {
 		var buf bytes.Buffer
 		cmd := exec.CommandContext(context.Background(), "git", args...)
 		cmd.Dir = root
-		cmd.Env = env
 		cmd.Stderr = &buf
 		if err := cmd.Run(); err != nil {
 			t.Fatalf("git %v: %v (stderr: %s)", args, err, buf.String())
