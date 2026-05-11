@@ -298,7 +298,7 @@ func TestRunClaude_StreamsLineByLine(t *testing.T) {
 	}
 
 	obs := &captureObserver{}
-	out, err := runClaude(context.Background(), []string{shim}, dir, obs, "stage1", 0)
+	out, err := runClaude(context.Background(), []string{shim}, dir, obs, "stage1", 0, nil)
 	if err != nil {
 		t.Fatalf("runClaude: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestRunClaude_InterleavesStderr(t *testing.T) {
 	}
 
 	obs := &captureObserver{}
-	if _, err := runClaude(context.Background(), []string{shim}, dir, obs, "stage", 0); err != nil {
+	if _, err := runClaude(context.Background(), []string{shim}, dir, obs, "stage", 0, nil); err != nil {
 		t.Fatalf("runClaude: %v", err)
 	}
 	if !slices.Contains(obs.lines, "stdout-line") {
@@ -358,7 +358,7 @@ func TestRunClaude_PropagatesNonZeroExit(t *testing.T) {
 	}
 
 	obs := &captureObserver{}
-	out, err := runClaude(context.Background(), []string{shim}, dir, obs, "stage", 0)
+	out, err := runClaude(context.Background(), []string{shim}, dir, obs, "stage", 0, nil)
 	if err == nil {
 		t.Fatal("expected non-nil error from failing subprocess")
 	}

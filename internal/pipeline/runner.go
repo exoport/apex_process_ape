@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +42,20 @@ type RunOptions struct {
 	// Bubble Tea program; the plain printer installs one that writes
 	// status lines to stdout.
 	Observer Observer
+
+	// ManifestDir overrides the root location for per-run manifest
+	// artifacts. Defaults to <ProjectRoot>/_output/pipelines when empty.
+	// PLAN-3 / M4.
+	ManifestDir string
+
+	// DisableManifest skips writing the run manifest entirely.
+	// Production code never sets this; reserved for test paths that
+	// don't want to litter the temp project tree.
+	DisableManifest bool
+
+	// ApeVersion is recorded in the manifest's ape_version field.
+	// Callers should pass apecmd.Version; empty string falls back to "dev".
+	ApeVersion string
 }
 
 // Observer hooks every state transition the runner emits. Methods are
@@ -62,7 +78,14 @@ type Observer interface {
 // sequentially; within a stage, each step in the chain runs sequentially.
 // Any non-zero claude exit fails the whole pipeline and aborts further
 // stages (per PLAN-7 § Scope — full-fail semantics).
-func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
+//
+// PLAN-3 / M4: each run produces an on-disk manifest under
+// opts.ManifestDir (default <ProjectRoot>/_output/pipelines). The
+// manifest writer is constructed after preflight and finalized on every
+// return path (success, step failure, context cancellation, build-argv
+// error). When opts.DisableManifest is set, the writer is skipped and
+// the runner's behavior is byte-identical to PLAN-2.
+func Run(ctx context.Context, spec *Spec, opts RunOptions) error { //nolint:gocritic // RunOptions is a small configuration struct passed once per pipeline run; pointer would not change semantics and would split the documented API shape
 	if opts.ProjectRoot == "" {
 		opts.ProjectRoot = "."
 	}
@@ -72,24 +95,72 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 	if err := Preflight(spec, opts.ProjectRoot); err != nil {
 		return err
 	}
+
+	mw, err := startManifestWriter(spec, opts)
+	if err != nil {
+		return err
+	}
+
+	runErr := runStages(ctx, spec, opts, mw)
+	finalizeManifest(mw, runErr, opts.Observer)
+	return runErr
+}
+
+// runStages drives the spec's stage/step chain. Separated from Run so
+// the manifest finalization path is a single return point.
+func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWriter) error { //nolint:gocritic // RunOptions mirrors Run's parameter shape; see Run's nolint rationale
 	for _, stage := range spec.Stages() {
 		stageStart := time.Now()
+		var stageIdx int
+		if mw != nil {
+			stageIdx = mw.BeginStage(stage.Name, stageStart)
+		}
 		notify(opts.Observer, func(o Observer) { o.OnStageStart(stage.Name) })
+		stageStatus := StatusCompleted
+
 		for i, step := range stage.Chain {
 			stepStart := time.Now()
 			notify(opts.Observer, func(o Observer) { o.OnStepStart(stage.Name, i, step) })
-			argv, err := buildArgv(opts.ClaudeBin, step, opts.Prompt)
-			if err != nil {
-				notify(opts.Observer, func(o Observer) { o.OnStepEnd(stage.Name, i, step, time.Since(stepStart), "", err) })
-				notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), err) })
-				return err
+
+			argv, argvErr := buildArgv(opts.ClaudeBin, step, opts.Prompt)
+			if argvErr != nil {
+				recordStep(mw, stageIdx, i+1, step, opts.Prompt, stepStart, time.Now(), StatusFailed, 1, "", nil)
+				notify(opts.Observer, func(o Observer) {
+					o.OnStepEnd(stage.Name, i, step, time.Since(stepStart), "", argvErr)
+				})
+				stageStatus = StatusFailed
+				if mw != nil {
+					_ = mw.EndStage(stageIdx, stageStatus, time.Now())
+				}
+				notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), argvErr) })
+				return argvErr
 			}
-			out, runErr := runClaude(ctx, argv, opts.ProjectRoot, opts.Observer, stage.Name, i)
+
+			eventLog, eventsRel := openStepLog(mw, stageIdx, i+1, stage.Name, step.Skill)
+			out, runErr := runClaude(ctx, argv, opts.ProjectRoot, opts.Observer, stage.Name, i, eventLog)
+			closeStepLog(eventLog)
+
+			stepStatus := StatusCompleted
+			exitCode := 0
+			if runErr != nil {
+				stepStatus = StatusFailed
+				exitCode = exitCodeFromErr(runErr)
+			}
+			recordStep(mw, stageIdx, i+1, step, opts.Prompt, stepStart, time.Now(), stepStatus, exitCode, eventsRel, parseResultEvent(out))
+
 			notify(opts.Observer, func(o Observer) { o.OnStepEnd(stage.Name, i, step, time.Since(stepStart), out, runErr) })
 			if runErr != nil {
+				stageStatus = StatusFailed
+				if mw != nil {
+					_ = mw.EndStage(stageIdx, stageStatus, time.Now())
+				}
 				notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), runErr) })
 				return fmt.Errorf("stage %q step %d (%s): %w", stage.Name, i, step.Skill, runErr)
 			}
+		}
+
+		if mw != nil {
+			_ = mw.EndStage(stageIdx, stageStatus, time.Now())
 		}
 		notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), nil) })
 	}
@@ -157,7 +228,7 @@ func buildArgv(claudeBin string, step Step, prompt string) ([]string, error) { /
 // arrive is what makes the TUI feel live. Stderr is interleaved into
 // the same line stream (with a sentinel prefix not yet used) so
 // failures still surface in the captured output.
-func runClaude(ctx context.Context, argv []string, projectRoot string, observer Observer, stage string, idx int) (string, error) {
+func runClaude(ctx context.Context, argv []string, projectRoot string, observer Observer, stage string, idx int, eventLog io.Writer) (string, error) {
 	if len(argv) == 0 {
 		return "", errors.New("empty argv")
 	}
@@ -198,6 +269,10 @@ func runClaude(ctx context.Context, argv []string, projectRoot string, observer 
 			mu.Lock()
 			buf.WriteString(line)
 			buf.WriteByte('\n')
+			if eventLog != nil {
+				_, _ = eventLog.Write([]byte(line))
+				_, _ = eventLog.Write([]byte{'\n'})
+			}
 			mu.Unlock()
 			notify(observer, func(o Observer) { o.OnStepLine(stage, idx, line) })
 		}
@@ -225,4 +300,141 @@ func notify(o Observer, fn func(Observer)) {
 		return
 	}
 	fn(o)
+}
+
+// startManifestWriter constructs the run's manifest writer. Returns
+// (nil, nil) when manifest writing is disabled. Errors propagate to the
+// caller — a failed manifest setup aborts the run before any step
+// executes, so the failure is surfaced loud.
+func startManifestWriter(spec *Spec, opts RunOptions) (*manifestWriter, error) { //nolint:gocritic // RunOptions mirrors Run's shape; see Run's nolint rationale
+	if opts.DisableManifest {
+		return nil, nil //nolint:nilnil // intentional: disabled-manifest path is a documented no-op, not an error
+	}
+	baseDir := opts.ManifestDir
+	if baseDir == "" {
+		baseDir = filepath.Join(opts.ProjectRoot, "_output", "pipelines")
+	}
+	apeVersion := opts.ApeVersion
+	if apeVersion == "" {
+		apeVersion = "dev"
+	}
+	source := filepath.Join(PipelinesDir(opts.ProjectRoot), spec.Name+".yaml")
+	return newManifestWriter(baseDir, spec.Name, opts.ProjectRoot, source, apeVersion, time.Now())
+}
+
+// finalizeManifest writes the terminal manifest + report. Picks the
+// status from runErr; nil → completed, context.Canceled → cancelled,
+// anything else → failed. Emits a single-line report pointer through
+// the observer's OnStageEnd channel only via the existing path — this
+// helper does not synthesize new events.
+func finalizeManifest(mw *manifestWriter, runErr error, _ Observer) {
+	if mw == nil {
+		return
+	}
+	status := StatusCompleted
+	switch {
+	case errors.Is(runErr, context.Canceled), errors.Is(runErr, context.DeadlineExceeded):
+		status = StatusCancelled
+	case runErr != nil:
+		status = StatusFailed
+	}
+	_, _ = mw.Finalize(status, time.Now())
+}
+
+// openStepLog wraps manifestWriter.OpenStepLog with the nil-mw fallback
+// callers need at every step site. Returns (nil, "") when writing is
+// disabled or the log file cannot be opened — the runner tolerates that
+// degradation and proceeds with stream-only output.
+func openStepLog(mw *manifestWriter, stageIdx, stepIdx int, stageName, skill string) (writer io.WriteCloser, relPath string) {
+	if mw == nil {
+		return nil, ""
+	}
+	w, rel, err := mw.OpenStepLog(stageIdx, stepIdx, stageName, skill)
+	if err != nil {
+		return nil, ""
+	}
+	return w, rel
+}
+
+func closeStepLog(w io.WriteCloser) {
+	if w == nil {
+		return
+	}
+	_ = w.Close()
+}
+
+// recordStep appends a StepRecord to the manifest writer, populating
+// metrics from the parsed terminal result event when present.
+func recordStep(
+	mw *manifestWriter,
+	stageIdx, stepIdx int,
+	step Step, //nolint:gocritic // Step mirrors buildArgv's parameter shape; see buildArgv's existing nolint rationale
+	prompt string,
+	startedAt, endedAt time.Time,
+	status RunStatus,
+	exitCode int,
+	eventsPath string,
+	ev *resultEvent,
+) {
+	if mw == nil {
+		return
+	}
+	rec := StepRecord{
+		Index:        stepIdx,
+		Skill:        step.Skill,
+		Agent:        step.Agent,
+		Args:         step.Args,
+		Prompt:       prompt,
+		Model:        step.Model,
+		StartedAt:    startedAt.UTC(),
+		EndedAt:      endedAt.UTC(),
+		DurationSecs: endedAt.Sub(startedAt).Seconds(),
+		Status:       status,
+		ExitCode:     exitCode,
+		EventsPath:   eventsPath,
+	}
+	if ev != nil {
+		rec.CostUSD = ev.TotalCostUSD
+		rec.TokensInput = ev.Usage.InputTokens
+		rec.TokensOutput = ev.Usage.OutputTokens
+		rec.TokensCacheRead = ev.Usage.CacheReadInputTokens
+		rec.TokensCacheCreation = ev.Usage.CacheCreationInputTokens
+		rec.NumTurns = ev.NumTurns
+		if status == StatusCompleted && ev.Subtype != "" && ev.Subtype != "success" {
+			rec.Status = StatusFailed
+		}
+	}
+	_ = mw.RecordStep(stageIdx, rec)
+}
+
+// exitCodeFromErr extracts the OS exit code from an exec error. Falls
+// back to 1 when the underlying error is not an *exec.ExitError.
+func exitCodeFromErr(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return 1
+}
+
+// ReportPathFor returns the pipeline-report.md path that the latest
+// finalized run for the given pipeline wrote to, or "" if no manifest
+// is available. Used by the CLI to print a stable pointer after a run.
+// This wraps the symlink ape maintains at <base>/<pipeline>/latest.
+func ReportPathFor(projectRoot, pipelineName, manifestDir string) string {
+	if manifestDir == "" {
+		manifestDir = filepath.Join(projectRoot, "_output", "pipelines")
+	}
+	link := filepath.Join(manifestDir, pipelineName, "latest")
+	target, err := os.Readlink(link)
+	if err != nil {
+		return ""
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(link), target)
+	}
+	return filepath.Join(target, "pipeline-report.md")
 }

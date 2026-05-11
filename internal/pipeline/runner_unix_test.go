@@ -72,7 +72,7 @@ sleep 30
 		cancel() // give up waiting; let the test report the missing PIDs
 	}()
 
-	_, _ = runClaude(ctx, []string{shim}, dir, obs, "stage", 0)
+	_, _ = runClaude(ctx, []string{shim}, dir, obs, "stage", 0, nil)
 	<-cancelDone
 
 	var parentPID, grandchildPID int

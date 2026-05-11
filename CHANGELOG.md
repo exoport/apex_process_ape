@@ -1,5 +1,69 @@
 # CHANGELOG
 
+## v0.0.9 (2026-05-11)
+
+PLAN-3: every `ape pipeline <name>` invocation now writes a structured
+on-disk record of the run. The artifact unblocks the eval-side
+per-skill metrics work (apex_process_framework_eval PLAN-9) and gives
+real-project users a "what did that run cost" answer that survives the
+TUI closing.
+
+### Behavior changes (no CLI flag breakage)
+
+- **Pipeline runs now leave a manifest on disk.** Every invocation —
+  TUI mode, `--no-tui`, eval-harness mode — writes
+  `<project_root>/_output/pipelines/<name>/<run_id>/manifest.yaml`
+  alongside per-step `.ndjson` captures of the raw claude
+  stream-json events and a human-readable `pipeline-report.md`.
+  Per-step `cost_usd`, `tokens_*`, `num_turns`, and `duration_seconds`
+  are extracted from the terminal `result` event in claude's stream;
+  totals roll up at the run level. A `latest` symlink at
+  `<pipeline_name>/latest` points at the most recent `<run_id>` for
+  easy tailing. PLAN-3 / M1-M5.
+
+- **End-of-run summary prints the report path.** Both the TUI and the
+  plain-printer (`--no-tui`) finish a run with a stable
+  `📊 report: _output/pipelines/<name>/<run_id>/pipeline-report.md`
+  line on stdout. CI logs can link straight to the artifact. PLAN-3
+  / M6.
+
+### New CLI flags
+
+- `ape pipeline <name> --manifest-dir <path>` — override the manifest
+  root (default: `<project>/_output/pipelines`). Used by the eval
+  harness to redirect manifests into its own results tree; available
+  to anyone who wants pipeline runs in a non-default location.
+  PLAN-3 / M6.
+
+### Internals
+
+- `pipeline.RunOptions` gains `ManifestDir`, `DisableManifest`, and
+  `ApeVersion` fields. `DisableManifest` is a library-only escape
+  hatch for tests / embedded use; it is not surfaced on the CLI.
+- Manifest types live in `internal/pipeline/manifest.go`; the
+  on-disk YAML schema is the external contract (the eval reads it).
+  Schema is versioned (`schema_version: 1`); future additions are
+  forward-compatible.
+- `runClaude` accepts an optional `io.Writer` to tee the
+  stream-json events to disk in parallel with the Observer.
+- `pipeline.ReportPathFor(projectRoot, pipelineName, manifestDir)`
+  exposes the most recent report path for embedding callers.
+
+### Docs
+
+- New: [docs/reference/pipeline-run-manifest.md](docs/reference/pipeline-run-manifest.md)
+  — schema, status enum, metric provenance, forward compatibility,
+  cleanup guidance.
+- Updated: [docs/reference/pipeline-spec.md](docs/reference/pipeline-spec.md)
+  cross-links the manifest reference.
+
+### Verification
+
+- `make lint` zero issues. `go test ./...` clean across all
+  packages, including the three new manifest tests
+  (`TestRun_EmitsManifest`, `TestRun_FailedStepCaptured`,
+  `TestRun_DisableManifestSkipsTree`).
+
 ## v0.0.8 (2026-05-11)
 
 A focused follow-up to v0.0.7 that closes every gap the v0.0.7 smoke

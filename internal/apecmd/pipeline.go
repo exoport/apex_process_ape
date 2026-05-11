@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,11 +22,12 @@ const exitCodePreflightFailed = 2
 
 func newPipelineCmd() *cobra.Command {
 	var (
-		promptFlag   string
-		noTUI        bool
-		quietFlag    bool
-		cwdFlag      string
-		outputFormat string
+		promptFlag      string
+		noTUI           bool
+		quietFlag       bool
+		cwdFlag         string
+		outputFormat    string
+		manifestDirFlag string
 	)
 	cmd := &cobra.Command{
 		Use:   "pipeline [name]",
@@ -87,15 +89,16 @@ func newPipelineCmd() *cobra.Command {
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
 			if useTUI {
-				return runWithTUI(ctx, spec, projectRoot, promptFlag)
+				return runWithTUI(ctx, spec, projectRoot, promptFlag, manifestDirFlag)
 			}
-			return runPlain(ctx, spec, projectRoot, promptFlag, quietFlag)
+			return runPlain(ctx, spec, projectRoot, promptFlag, quietFlag, manifestDirFlag)
 		},
 	}
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Optional prompt forwarded to skills that accept it (currently: epics)")
 	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable the interactive TUI; print plain status lines instead")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "With --no-tui: suppress per-event stream; print only stage/step start/end markers")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format for list mode (no positional arg): human|json|yaml")
+	cmd.Flags().StringVar(&manifestDirFlag, "manifest-dir", "", "Override the directory for run manifest artifacts (default: <project>/_output/pipelines)")
 	cmd.PersistentFlags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
 	return cmd
 }
@@ -167,12 +170,14 @@ func printPipelineList(res pipelineListResult, format output.Format) error {
 // when --no-tui is set or stdout is not a terminal. When quiet is true
 // (PLAN-2 / F5) the per-event stream is suppressed; only stage/step
 // start/end markers are emitted, matching the pre-PLAN-1 / I4b shape.
-func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt string, quiet bool) error {
+func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt string, quiet bool, manifestDir string) error {
 	obs := newPlainObserver(os.Stdout, projectRoot, quiet)
 	err := pipeline.Run(ctx, spec, pipeline.RunOptions{
 		ProjectRoot: projectRoot,
 		Prompt:      prompt,
 		Observer:    obs,
+		ApeVersion:  Version,
+		ManifestDir: manifestDir,
 	})
 	if err != nil {
 		var pfe *pipeline.PreflightError
@@ -181,6 +186,13 @@ func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt stri
 			os.Exit(exitCodePreflightFailed)
 		}
 		return err
+	}
+	if path := pipeline.ReportPathFor(projectRoot, spec.Name, manifestDir); path != "" {
+		if rel, relErr := filepath.Rel(projectRoot, path); relErr == nil {
+			fmt.Fprintf(os.Stdout, "📊 report: %s\n", rel)
+		} else {
+			fmt.Fprintf(os.Stdout, "📊 report: %s\n", path)
+		}
 	}
 	return nil
 }
@@ -192,7 +204,7 @@ func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt stri
 // y, or double Ctrl+C), in which case runCancel cancels the runner's
 // context — exec.CommandContext then tears down the in-flight claude
 // subprocess.
-func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt string) error {
+func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt, manifestDir string) error {
 	// Local cancel scoped to this TUI run. Wrapping the caller's ctx
 	// gives the modal a dedicated cancellation handle without
 	// interfering with the cobra signal-handling on the parent ctx.
@@ -209,6 +221,8 @@ func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt st
 			ProjectRoot: projectRoot,
 			Prompt:      prompt,
 			Observer:    obs,
+			ApeVersion:  Version,
+			ManifestDir: manifestDir,
 		})
 		obs.Done(err)
 		runErrCh <- err

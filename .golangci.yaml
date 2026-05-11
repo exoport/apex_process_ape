@@ -112,6 +112,13 @@ linters:
       - linters:
           - govet
         text: declaration of "(err|ctx)" shadows declaration at
+      # PLAN-3: on-disk manifest schema (snake_case is the external
+      # contract for the eval consumer + humans) and upstream stream-json
+      # payload (claude controls the wire format) — tagliatelle has to
+      # yield here.
+      - linters:
+          - tagliatelle
+        path: internal/pipeline/(manifest|result_event)\.go
     paths:
       - .bingo
       - .chglog
