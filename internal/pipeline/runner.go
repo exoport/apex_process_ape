@@ -163,6 +163,10 @@ func runClaude(ctx context.Context, argv []string, projectRoot string, observer 
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // argv is constructed from embedded pipeline specs and validated step data; intentional subprocess dispatch
 	cmd.Dir = projectRoot
+	// PLAN-2 / F1: rewire context-cancel to SIGTERM the whole process
+	// group (not just the direct child) so claude-spawned Task-tool
+	// grandchildren can't outlive a confirmed quit. No-op on Windows.
+	configureProcessGroup(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -203,9 +207,26 @@ func runClaude(ctx context.Context, argv []string, projectRoot string, observer 
 	wg.Add(2) //nolint:mnd // exactly two pipe readers (stdout + stderr); not a magic number worth a named constant
 	go scan(stdout)
 	go scan(stderr)
+
+	// cmd.Wait must be called before draining via wg.Wait so the
+	// exec package's WaitDelay machinery can force-close the stdout
+	// pipe when a grandchild keeps it open after the immediate child
+	// exits. Without this, a SIGTERM-trapping grandchild (the F1
+	// orphan-subagent case) would block the scanner goroutines
+	// forever and the cancellation path would deadlock. cmd.Wait is
+	// documented to be safe to call concurrently with reads on
+	// StdoutPipe / StderrPipe; the readers must finish before this
+	// function returns, which wg.Wait guarantees.
+	waitErr := cmd.Wait()
 	wg.Wait()
 
-	waitErr := cmd.Wait()
+	if ctx.Err() != nil {
+		// PLAN-2 / F1: SIGTERM (via configureProcessGroup) hit the
+		// whole group, but well-behaved grandchildren may still be
+		// flushing or trapping the signal. Defense-in-depth SIGKILL of
+		// the group ensures no orphans survive a cancelled run.
+		finalProcessGroupCleanup(cmd)
+	}
 	if waitErr != nil {
 		return buf.String(), waitErr
 	}
