@@ -9,9 +9,10 @@ tags:
   - perf-tuning
   - narrow-terminals
   - cli-quality-of-life
-summary: Five follow-ups deferred during PLAN-1 implementation. Each is independently shippable. F1 — process-group teardown so confirmed quit kills the whole `claude` subprocess tree (not just the direct child), closing the orphan-subagent gap from PLAN-1 / I2 open issue #1. F2 — 30 Hz render throttle via `tea.Tick(33ms)` flush, in case real-world streaming bursts trip visible lag. F3 — render-style cycling (`r` key, human → raw JSON → both), reserved in docs but not yet implemented. F4 — narrow-terminal fallback (horizontal stepper instead of right-side stage list) for terminals under 90 columns. F5 — `--quiet` flag for `--no-tui` mode that suppresses the live-event stream and prints only the per-stage summary at completion.
+summary: Eight follow-ups deferred during PLAN-1 implementation (five originally captured + three surfaced during the v0.0.7 smoke on 2026-05-11). Each is independently shippable. F1 — process-group teardown so confirmed quit kills the whole `claude` subprocess tree (not just the direct child), closing the orphan-subagent gap from PLAN-1 / I2 open issue #1. F2 — 30 Hz render throttle via `tea.Tick(33ms)` flush, in case real-world streaming bursts trip visible lag. F3 — render-style cycling (`r` key, human → raw JSON → both), reserved in docs but not yet implemented. F4 — narrow-terminal fallback (horizontal stepper instead of right-side stage list) for terminals under 90 columns. F5 — `--quiet` flag for `--no-tui` mode that suppresses the live-event stream and prints only the per-stage summary at completion. F6 — render tool-call file paths relative to the project root so the event-panel truncation eats the prefix, not the filename. F7 — keep the TUI open after the pipeline completes with a completion banner + final-report row so the user can scroll stage output before quitting. F8 — fix PgUp / PgDn scroll in the event panel; the keybinds are documented but the handler doesn't move the viewport in v0.0.7.
 origin:
-  - 2026-05-10 PLAN-1 carry-out — every item was explicitly deferred to "follow-up" in the PLAN-1 plan body or open-issues section, with the rationale documented at the time.
+  - 2026-05-10 PLAN-1 carry-out — F1–F5 were explicitly deferred to "follow-up" in the PLAN-1 plan body or open-issues section, with the rationale documented at the time.
+  - 2026-05-11 v0.0.7 smoke against fixtures/ape-gf-hello-world — F6 (absolute path noise), F7 (TUI tears down on completion, can't inspect outputs), F8 (PgUp/PgDn no-op) surfaced as user-visible gaps.
   - F1 in particular addresses the v0.0.7 caveat in docs/explanation/why-streaming-events.md about orphan subagents surviving Ctrl+C.
 ---
 
@@ -19,7 +20,7 @@ origin:
 
 ## Goal
 
-Resolve the five known gaps deferred from PLAN-1 — each a small, independent change — so that ape's pipeline UX hits "no known cosmetic or behavioral debt" before any v1.0 conversation. None of these block end-to-end use of v0.0.7; each closes a specific edge case that's documented or measured to exist.
+Resolve the eight known gaps deferred from PLAN-1 — each a small, independent change — so that ape's pipeline UX hits "no known cosmetic or behavioral debt" before any v1.0 conversation. None of these block end-to-end use of v0.0.7; each closes a specific edge case that's either documented, measured, or observed during the 2026-05-11 smoke run to exist.
 
 ## Scope — IN
 
@@ -64,6 +65,40 @@ Resolve the five known gaps deferred from PLAN-1 — each a small, independent c
 - **Compatibility.** `--quiet` only meaningful with `--no-tui` (the TUI's panels aren't affected by the flag). Document this in the flag help text. Reject `--quiet` without `--no-tui` with an actionable error.
 - **Tests.** Run a stage with `--no-tui --quiet`; assert stdout contains only start / end markers (no `🔧 / ✎ / ↳` lines).
 
+### F6: Project-relative paths in TUI tool-event lines
+
+- **Problem.** Tool-call events render the absolute path of every file the agent touches. In a sandbox at `/tmp/ape-v007-smoke-c70b/...` the event panel column is dominated by the prefix, and the suffix — the _actually informative_ part — gets cut off:
+  ```
+  🔧 Read /tmp/ape-v007-smoke-c70b/development/planning/prd/index…
+  🔧 Read /tmp/ape-v007-smoke-c70b/development/planning/prd/execu…
+  🔧 Read /tmp/ape-v007-smoke-c70b/development/planning/prd/funct…
+  ```
+  Every line collapses to the same prefix; the user can't tell which file is being read without expanding. Observed during the 2026-05-11 v0.0.7 smoke run.
+- **Fix.** Strip the pipeline working-directory prefix from any path-shaped argument before rendering. Project root is already known to the pipeline runner (it's the cwd it spawns `claude` in). Plumb it into `pipelineModel.projectRoot string` at construction time; the event renderer applies `strings.TrimPrefix(arg, projectRoot+string(os.PathSeparator))` to path-shaped tokens detected in tool args (`Read`, `Write`, `Edit`, `Glob`, `Grep`, `LS`, `NotebookEdit`).
+- **Out of scope.** Paths outside the project root (e.g., system files, `$HOME`-relative, framework-source paths) render as-is — don't try to "smartly" abbreviate `$HOME` or `/usr/...` here. Path detection stays conservative: a token counts as a path only if it (a) starts with `/`, (b) exists on disk or is recognized as a tool's `file_path`-style arg, and (c) shares the project root prefix.
+- **Tests.** Synthetic event `{"tool":"Read","args":{"file_path":"/sandbox/development/planning/prd/index.md"}}` against a model with `projectRoot=/sandbox` renders as `🔧 Read development/planning/prd/index.md`. Same event against `projectRoot=/other` renders the absolute path unchanged.
+
+### F7: Keep the TUI open after pipeline completion
+
+- **Problem.** When the final stage's `OnStageEnd` fires, `Run()` issues `tea.Quit` and the Bubble Tea program tears down. The user drops back to the shell with no opportunity to scroll the event panel, inspect per-stage output, or read a summary — anything they wanted to look at is gone unless they re-run with `--no-tui` and pipe to a file. Observed during the 2026-05-11 smoke; the post-mortem inspectability gap is the most-cited friction point of v0.0.7.
+- **Fix.** Pipeline completion no longer auto-quits. Introduce a `phaseCompleted` model state entered after the last `OnStageEnd`. In that state:
+  - Header banner switches to `Pipeline completed: N/N stages OK · press q to quit` (or `… M/N FAILED · press q to quit` if any stage failed; failure count uses the same red palette as in-flight failures).
+  - A synthetic `📊 Final report` row appends to the stage list (selectable like a real stage). Selecting it populates the event panel with a per-stage summary: status glyph, name, wall-clock duration, event count, last error (if any), output overlay path on disk.
+  - `↑↓`, `Enter` (pin), `PgUp` / `PgDn` (scroll — depends on F8), `r` (cycle render style, F3) all remain wired.
+  - `q` exits directly in `phaseCompleted` — no confirmation modal, because there's nothing to lose at that point. The modal only intercepts `q` while a stage is still running.
+- **Runner change.** `internal/pipeline/runner.go: Run()` waits on the Bubble Tea program's `Wait()` for both the success and failure paths; the observer signals completion to the model rather than to `tea.Quit`. The runner's return value is finalized when the user dismisses the TUI, not when the last stage ends.
+- **Failure semantics.** A failed stage still halts the pipeline (existing behavior). The TUI enters `phaseCompleted` with `failed=true` and the final-report row's summary highlights the failing stage at the top. Exit code on `q` reflects the pipeline result, not the user dismissal.
+- **`--no-tui` parity.** Plain mode is unchanged — it always streamed straight to stdout and exits when the last stage ends. F7 is TUI-only.
+- **Tests.** Drive the model through a synthetic pipeline of 3 stages to completion; assert `m.phase == phaseCompleted`, the header contains "press q to quit", the stage list has a `📊 Final report` row, and pressing `q` returns `tea.Quit`. Repeat with the second stage marked failed; assert the banner shows `1/3 FAILED` and the final-report event panel lists the failing stage first.
+
+### F8: Fix PgUp / PgDn scroll in the event panel
+
+- **Problem.** `docs/reference/tui-keybindings.md` documents PgUp / PgDn for scrolling the event panel. Observed during the 2026-05-11 smoke: pressing PgUp / PgDn produces no visible scroll movement on a pinned stage with > 50 events. The viewport stays anchored to the live tail.
+- **Diagnosis (likely).** Either (a) `Update` matches on `tea.KeyPageUp` / `tea.KeyPageDown` but Bubble Tea emits `tea.KeyPgUp` / `tea.KeyPgDown` (or vice versa) — a name-mismatch typo silently ignores the key; or (b) the scroll offset is applied to a viewport snapshot that's reconstructed on every render, so the offset resets to 0 each frame; or (c) the scroll path branches on `pinned` state but the pinned mode isn't actually entered. Confirm during implementation by adding a debug print or by checking the key name.
+- **Fix.** Bind PgUp / PgDn to `±` one page-height worth of lines (or fall back to ±10 lines if the event panel doesn't track its rendered height). Hold the scroll offset on the model (`pipelineModel.scrollOffset map[stageID]int` keyed by pinned stage) so it survives re-renders. PgUp clamps at 0; PgDn clamps at `len(events) - pageHeight`. Pressing any key that adds a new event resets the offset to the tail only if the user was already at the tail (auto-follow); otherwise the offset is held.
+- **Tests.** Drive the model: populate 100 events, send `tea.KeyMsg{Type: tea.KeyPgUp}` twice, assert the rendered event panel's first visible line index decreased by `2 × pageHeight`. Send a fresh event mid-scroll; assert the offset is preserved (no auto-tail). Press PgDn until clamp; assert auto-tail re-engages.
+- **Interaction with F7.** Once F7 lands, PgUp / PgDn must keep working in `phaseCompleted` against the pinned stage's frozen event history.
+
 ## Scope — OUT
 
 - **JSON output stream for piping.** A `--format json` flag that emits each parsed event as a single NDJSON line on stdout, for piping into observability tools. PLAN-1 § "Out of band" floated this as a Plan-2 candidate; it's a richer feature than what's bundled here, so it stays separate until someone needs it.
@@ -78,10 +113,13 @@ Each item is one commit on `main`, with tests. Order is whatever matches what hu
 ### Suggested ordering
 
 1. **F1 (process-group teardown).** Highest value — closes the orphan-subagent gap. Has the largest blast radius, so land first while the diff is small.
-2. **F5 (`--quiet`).** Tiny scope (one flag + one observer-method early-return). Often-requested.
-3. **F4 (narrow-terminal fallback).** Useful for users running ape inside tmux / kitty / VSCode terminals where width is variable.
-4. **F3 (render-style cycling).** UX nicety; docs already say it works, so closing the gap removes user surprise.
-5. **F2 (render throttle).** Insurance. No measured pain today.
+2. **F8 (PgUp / PgDn fix).** Pure bug fix. Tiny diff. Unblocks F7's "user scrolls through final report" story.
+3. **F6 (project-relative paths).** High-visibility readability win in every TUI run; small diff confined to the event renderer.
+4. **F7 (TUI stays open at completion).** Depends on F8 (scroll has to work for inspectability to matter) and ideally lands after F6 (so the final-report event panel shows clean relative paths).
+5. **F5 (`--quiet`).** Tiny scope (one flag + one observer-method early-return). Often-requested.
+6. **F4 (narrow-terminal fallback).** Useful for users running ape inside tmux / kitty / VSCode terminals where width is variable.
+7. **F3 (render-style cycling).** UX nicety; docs already say it works, so closing the gap removes user surprise.
+8. **F2 (render throttle).** Insurance. No measured pain today.
 
 ### Per-item details
 
@@ -90,6 +128,9 @@ Each item is one commit on `main`, with tests. Order is whatever matches what hu
 - **F3.** Enum + `r` key handler. Renderer change is a single switch on `m.renderStyle` inside `renderEventPanel`.
 - **F4.** New `narrowLayout()` View helper; `View()` branches on `m.width < narrowThreshold`. Update keybind hint footer to reflect the narrow-mode controls.
 - **F5.** Cobra flag + `Validate` hook to refuse `--quiet` without `--no-tui`. `plainObserver` constructor gains a `quiet bool` param.
+- **F6.** `pipelineModel.projectRoot string` set from the pipeline runner's cwd. New helper `relativizePath(projectRoot, raw string) string` in `internal/tui/pipeline.go` (or a small adjacent file `paths.go`). The event renderer calls it on detected path tokens before truncation. Conservative detection: only relativize absolute paths that share the prefix; leave everything else untouched.
+- **F7.** New `phaseCompleted` enum value on `pipelineModel.phase`. Runner publishes a `pipelineCompletedMsg{success bool, summary StageReport[]}` instead of `tea.Quit`. New `renderFinalReport(m)` helper produces the per-stage table for the event panel when the synthetic stage is selected. The quit-modal guard branches on phase: only confirms in `phaseRunning`. Runner's exit code is computed from the captured pipeline result, not from when Bubble Tea returns.
+- **F8.** Inspect `internal/tui/pipeline.go: Update` for the PgUp / PgDn key constants. Replace whatever's wrong with the canonical `tea.KeyPgUp` / `tea.KeyPgDown` (verify against the Bubble Tea version pinned in `go.mod`). Move scroll offset to a model field, not a viewport-local. Auto-follow heuristic: if `offset >= len(events) - pageHeight` before a new event arrives, treat as tailing and keep the user at the tail; otherwise hold the offset.
 
 ## Open issues to resolve during implementation
 
@@ -114,7 +155,10 @@ Each item is one commit on `main`, with tests. Order is whatever matches what hu
 - F3: pressing `r` cycles render style; rendered output matches snapshot for each style.
 - F4: window-resize to 80 cols switches to single-column layout with the horizontal stepper; resize back to 200 restores the wide layout.
 - F5: `ape pipeline design --no-tui --quiet` emits start/end markers only; no per-event lines.
-- All five items shipped, each with tests; `make lint` clean; `go test ./...` clean.
+- F6: a Read event with `file_path=/sandbox/development/planning/prd/index.md` renders as `🔧 Read development/planning/prd/index.md` when `projectRoot=/sandbox`.
+- F7: pipeline completion transitions the model to `phaseCompleted`; the final-report row appears in the stage list; pressing `q` quits with the captured pipeline exit code.
+- F8: pressing PgUp moves the rendered event panel's first visible line back by one page height; PgDn moves it forward; auto-tail re-engages at the bottom.
+- All eight items shipped, each with tests; `make lint` clean; `go test ./...` clean.
 - ape v0.0.8 tagged with the bundle.
 
 ## Verification plan
@@ -124,6 +168,9 @@ Each item is one commit on `main`, with tests. Order is whatever matches what hu
 3. **F3 smoke.** Run any pipeline, press `r` mid-run, observe events shift from `🔧 Read foo.md` to `{"type":"assistant",...}` raw form and back.
 4. **F4 smoke.** Open ape in a 60-col terminal; resize during a pipeline run; expect layout to switch without crashes and the stage cursor to remain on the right row.
 5. **F5 smoke.** `ape pipeline design --no-tui --quiet | wc -l` should be << the same run without `--quiet`.
+6. **F6 smoke.** Run a pipeline against a temp sandbox; visually confirm tool-event lines display `Read development/planning/prd/foo.md` (no `/tmp/...` prefix).
+7. **F7 smoke.** Run a pipeline to completion; expect the TUI to remain on screen with the banner `Pipeline completed: N/N stages OK · press q to quit`. Navigate to the `📊 Final report` row; confirm per-stage summary renders in the event panel; press `q` to exit.
+8. **F8 smoke.** Run a pipeline long enough to produce > 50 events on one stage; pin it with Enter; press PgUp repeatedly until the panel shows the first event; press PgDn to scroll back; expect smooth movement and a return to live-tail at the bottom.
 
 ## Out of band
 
