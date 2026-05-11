@@ -42,8 +42,8 @@ The frozen-screen problem disappears. The same renderer also feeds `--no-tui` mo
 
 - **Backwards compatibility**: the `pipeline.Observer` interface gained `OnStepLine`. All implementations had to add it. In v0.0.7 only `PipelineTUIObserver` and `plainObserver` exist; both were updated. Future external implementations have to do the same.
 - **Slight CPU uptick** during streaming bursts (~1-2% on one core). Negligible on modern hardware.
-- **Render cadence**: bursts of 100+ events/sec from the model can trigger frequent re-renders. Bubble Tea's internal throttling handles this without visible lag, but a future optimization could batch lines into a 33ms flush loop (~30Hz). Not implemented today — measured headroom is comfortable.
-- **No live cancellation of orphans**: when the user confirms quit, the immediate `claude` child is killed via context cancellation + `exec.CommandContext`'s SIGKILL. If that child has spawned sub-agents (the `Task` tool), those orphan to PID 1 until they finish. A process-group teardown would close this gap — flagged as a follow-up plan.
+- **Render cadence**: bursts of 100+ events/sec from the model can trigger frequent re-renders. v0.0.7 leaned on Bubble Tea's internal throttling; v0.0.8 lands an explicit 33ms (~30Hz) flush loop (PLAN-2 / F2) so the headroom is bounded rather than implicit.
+- ~~**No live cancellation of orphans**~~ (closed in v0.0.8): pre-v0.0.8, when the user confirmed quit, the immediate `claude` child was killed via context cancellation + `exec.CommandContext`'s SIGKILL but any sub-agents spawned through the `Task` tool orphaned to PID 1 and continued running until they exited naturally. v0.0.8 (PLAN-2 / F1) makes the child a process-group leader (`Setpgid=true`) and rewires `Cmd.Cancel` to SIGTERM the whole group, with an escalator goroutine that SIGKILLs the group after a 500ms grace. `internal/pipeline/runner_unix_test.go` regresses the bug via a shim that forks a SIGTERM-trapping grandchild and asserts both PIDs are reaped within 1.5s of cancellation. Linux + darwin only; Windows falls back to the pre-v0.0.8 direct-child SIGKILL.
 
 ### What we didn't try
 

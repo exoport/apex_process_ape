@@ -1,8 +1,8 @@
 ---
 plan_id: PLAN-2
 created_at: 2026-05-10
-implemented_at: null
-status: proposed
+implemented_at: 2026-05-11
+status: done
 tags:
   - pipeline-tui
   - subprocess-lifecycle

@@ -1,5 +1,100 @@
 # CHANGELOG
 
+## v0.0.8 (2026-05-11)
+
+A focused follow-up to v0.0.7 that closes every gap the v0.0.7 smoke
+surfaced or that PLAN-1 deferred. Eight independently-shippable
+items; see [development/planning/plan-2_pipeline-ux-followups.md](development/planning/plan-2_pipeline-ux-followups.md)
+for the full rationale.
+
+### Behavior changes (no CLI flag breakage)
+
+- **Confirmed quit now kills the whole `claude` subprocess tree.**
+  Pre-v0.0.8, pressing `q` then `y` (or double-Ctrl+C) SIGKILLed the
+  immediate `claude` child but any sub-agents it had spawned via the
+  `Task` tool were reparented to PID 1 and continued running until
+  they exited naturally — burning Anthropic API budget for minutes
+  after the user thought the pipeline was dead. v0.0.8 makes the
+  child a process-group leader (`Setpgid=true`) and rewires
+  `Cmd.Cancel` to deliver SIGTERM to the whole group, with a
+  detached escalator goroutine that SIGKILLs the group after a
+  500ms grace period. Linux + darwin only; Windows falls back to
+  the existing direct-child SIGKILL. PLAN-2 / F1.
+
+- **The pipeline TUI no longer auto-quits when the pipeline finishes.**
+  Pre-v0.0.8, the TUI tore down on the last stage's `OnStageEnd` and
+  the user dropped back to the shell with no chance to scroll
+  through events. v0.0.8 transitions the model into a
+  `phaseCompleted` state instead: a synthetic `📊 final report` row
+  appends to the stage list, a completion banner replaces the
+  keybind hint (`✓ pipeline complete: N/N stages OK` or
+  `✗ pipeline failed: M/N FAILED`), and selecting the report row
+  populates the event panel with a per-stage summary (glyph · name ·
+  duration · event count · last error). Navigation, scroll, and
+  render-style cycling all stay wired; `q` exits directly (no
+  confirmation modal — there's nothing to cancel). PLAN-2 / F7.
+
+- **Tool-call event lines render paths relative to the project root.**
+  Pre-v0.0.8, sandbox prefixes like `/tmp/ape-v007-smoke-c70b/...`
+  ate the event-panel column and the actually-informative suffix
+  was truncated. v0.0.8 strips the project-root prefix from
+  `Read` / `Edit` / `Write` / `Grep` / `Glob` path arguments at the
+  renderer; system paths, `$HOME`-relative paths, and
+  framework-source paths pass through unchanged. The TUI and
+  `--no-tui` plain mode both apply the same logic. PLAN-2 / F6.
+
+- **`PgUp` / `PgDn` scroll works in any mode.** Pre-v0.0.8, the
+  scroll keys were gated behind `Pinned` mode and were no-ops in
+  the default `Live` mode. v0.0.8 adds a `userScrolled` flag on the
+  model: any scroll key suspends auto-tail, new events arrive
+  silently in the background, pressing `End` (or paging back to the
+  bottom) rejoins the tail. `Enter` (pin) seeds the scroll offset
+  to the tail so the pinned panel opens on the latest events.
+  PLAN-2 / F8.
+
+- **`r` cycles event-render style: human → raw JSON → both.**
+  Documented in `docs/reference/tui-keybindings.md` since v0.0.7,
+  finally wired in v0.0.8. Each rendered event now carries the
+  original NDJSON line so the raw / both views are zero-cost
+  re-renders. The keybind-hint footer surfaces the active style
+  label. PLAN-2 / F3.
+
+- **Single-column layout under width 90.** Narrow terminals (tmux,
+  kitty splits, side-by-side editors) drop the right-side stage
+  column; the stages collapse to a one-row horizontal stepper
+  above the event panel, the event panel takes the full width, the
+  cursor stage gets wrapped in `[ ]` for visibility. Widens back
+  on `WindowSizeMsg` above the threshold. PLAN-2 / F4.
+
+- **`ape pipeline --no-tui --quiet` suppresses the per-event stream.**
+  For CI runs where humans only read the failure summary, the
+  per-event stream from v0.0.7's `plainObserver` was noise. v0.0.8
+  adds `--quiet`, which returns the plain observer to its
+  pre-PLAN-1 / I4b shape: stage / step start+end markers and
+  failure summaries print, `OnStepLine` is a no-op. Combining
+  `--quiet` with the interactive TUI is refused with an actionable
+  error. PLAN-2 / F5.
+
+- **30 Hz render throttle on TUI event flushing.** Pre-v0.0.8 the
+  per-event re-render cadence was implicit (no measured pain on
+  current workloads, but unbounded as terminal multiplexers
+  introduce per-frame latency). v0.0.8 buffers incoming stepLines
+  into a queue and flushes them in a single Update pass every
+  33ms (~30 Hz), independent of incoming line rate. PLAN-2 / F2.
+
+### Notes
+
+- The `docs/explanation/why-streaming-events.md` § "What it cost"
+  caveat about orphan sub-agents surviving Ctrl+C is closed by
+  F1. The new escalator-goroutine cancel path is exercised by
+  `internal/pipeline/runner_unix_test.go` —
+  `TestRunClaude_KillsProcessGroupOnCancel` builds a shell shim
+  that forks a SIGTERM-trapping grandchild and asserts both PIDs
+  are reaped within 1.5s of context cancellation.
+- `NewPipelineModel` gains a trailing `projectRoot string`
+  parameter for F6. Out-of-tree callers will need a one-line
+  update.
+
 ## v0.0.7 (2026-05-10) ⚠️ BREAKING
 
 A pipeline-UX pass driven by real v0.0.6 use. The CLI surface and the
