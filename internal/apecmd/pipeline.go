@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -22,6 +23,7 @@ func newPipelineCmd() *cobra.Command {
 	var (
 		promptFlag   string
 		noTUI        bool
+		quietFlag    bool
 		cwdFlag      string
 		outputFormat string
 	)
@@ -73,16 +75,26 @@ func newPipelineCmd() *cobra.Command {
 				return err
 			}
 			useTUI := !noTUI && term.IsTerminal(int(os.Stdout.Fd()))
+			if quietFlag && useTUI {
+				// PLAN-2 / F5: --quiet only suppresses the live
+				// event stream that plainObserver emits. The TUI's
+				// panels render whether --quiet is set or not, so
+				// combining the flags is almost certainly a
+				// misconception — refuse loudly rather than
+				// silently no-op.
+				return errors.New("--quiet is only meaningful with --no-tui (the TUI panels aren't affected by the flag)")
+			}
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
 			if useTUI {
 				return runWithTUI(ctx, spec, projectRoot, promptFlag)
 			}
-			return runPlain(ctx, spec, projectRoot, promptFlag)
+			return runPlain(ctx, spec, projectRoot, promptFlag, quietFlag)
 		},
 	}
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Optional prompt forwarded to skills that accept it (currently: epics)")
 	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable the interactive TUI; print plain status lines instead")
+	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "With --no-tui: suppress per-event stream; print only stage/step start/end markers")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format for list mode (no positional arg): human|json|yaml")
 	cmd.PersistentFlags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
 	return cmd
@@ -152,9 +164,11 @@ func printPipelineList(res pipelineListResult, format output.Format) error {
 }
 
 // runPlain runs the pipeline with stdout status lines (no TUI). Used
-// when --no-tui is set or stdout is not a terminal.
-func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt string) error {
-	obs := newPlainObserver(os.Stdout, projectRoot)
+// when --no-tui is set or stdout is not a terminal. When quiet is true
+// (PLAN-2 / F5) the per-event stream is suppressed; only stage/step
+// start/end markers are emitted, matching the pre-PLAN-1 / I4b shape.
+func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt string, quiet bool) error {
+	obs := newPlainObserver(os.Stdout, projectRoot, quiet)
 	err := pipeline.Run(ctx, spec, pipeline.RunOptions{
 		ProjectRoot: projectRoot,
 		Prompt:      prompt,
@@ -221,17 +235,21 @@ func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt st
 // tui.RenderEvent function so log captures and CI runs see the same
 // human-friendly progress feed as the interactive TUI.
 type plainObserver struct {
-	w            *os.File
+	w            io.Writer
 	t0           time.Time
 	currentStage string
 	currentSkill string
 	// projectRoot is forwarded to the event renderer so tool-call
 	// file paths display relative to the project (PLAN-2 / F6).
 	projectRoot string
+	// quiet suppresses the per-event stream that OnStepLine emits
+	// (PLAN-2 / F5). Stage / step start+end markers and per-stage
+	// summaries still print so failures and timings remain visible.
+	quiet bool
 }
 
-func newPlainObserver(w *os.File, projectRoot string) *plainObserver {
-	return &plainObserver{w: w, t0: time.Now(), projectRoot: projectRoot}
+func newPlainObserver(w io.Writer, projectRoot string, quiet bool) *plainObserver {
+	return &plainObserver{w: w, t0: time.Now(), projectRoot: projectRoot, quiet: quiet}
 }
 
 func (p *plainObserver) OnStageStart(stage string) {
@@ -263,6 +281,12 @@ func (p *plainObserver) OnStepStart(stage string, idx int, step pipeline.Step) {
 // dropped. Same renderer that powers the interactive TUI lives in
 // internal/tui/event_renderer.go.
 func (p *plainObserver) OnStepLine(stage string, _ int, line string) {
+	if p.quiet {
+		// PLAN-2 / F5: --quiet suppresses the per-event stream. The
+		// stage/step markers in OnStepStart/OnStepEnd still print,
+		// so failure summaries (with captured stdout) remain visible.
+		return
+	}
 	r := tui.RenderEventWithRoot(line, p.projectRoot)
 	if !r.IsDisplayable() {
 		return
