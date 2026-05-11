@@ -43,7 +43,7 @@ make install        # → /usr/local/bin/ape
 ape version
 ```
 
-Should print something like `ape v0.0.6 / build date: ... / git commit: ...`. If `ape: command not found`, the install location isn't on your `$PATH` — check `echo $PATH` and either move the binary or extend `PATH` in your shell rc.
+Should print something like `ape v0.0.7 / build date: ... / git commit: ...`. If `ape: command not found`, the install location isn't on your `$PATH` — check `echo $PATH` and either move the binary or extend `PATH` in your shell rc.
 
 ## Verifying release authenticity (optional)
 

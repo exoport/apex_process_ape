@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v0.0.7 (UNRELEASED) ⚠️ BREAKING
+## v0.0.7 (2026-05-10) ⚠️ BREAKING
 
 A pipeline-UX pass driven by real v0.0.6 use. The CLI surface and the
 Go-API surface both move; see [docs/how-to/framework-setup.md](docs/how-to/framework-setup.md)
