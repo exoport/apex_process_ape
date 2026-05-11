@@ -158,7 +158,7 @@ func TestQuitModal_FinishedPipelineQuitsImmediately(t *testing.T) {
 	spec := fakeSpec(t)
 	cancelled := false
 	m := NewPipelineModel(spec, func() { cancelled = true }, "")
-	m.finished = true
+	m.phase = phaseCompleted
 
 	_, cmd := pressKey(t, &m, "q")
 	require.NotNil(t, cmd, "q after finish must quit immediately")
@@ -458,4 +458,102 @@ func TestScroll_EnterPinSeedsTailOffset(t *testing.T) {
 	require.Equal(t, modePinned, m.mode)
 	require.True(t, m.userScrolled)
 	require.Equal(t, 26, m.scrollOffset, "Enter must seed scrollOffset to tail = len(events) - panelHeight")
+}
+
+// ─────────── PLAN-2 / F7 final-report + linger after completion ───────────
+
+// TestFinalReport_PipelineDoneEntersCompletedPhase asserts the
+// post-completion lifecycle: pipelineDoneMsg no longer quits; the
+// model transitions to phaseCompleted and the cursor moves to the
+// synthetic final-report row.
+func TestFinalReport_PipelineDoneEntersCompletedPhase(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	require.Equal(t, phaseRunning, m.phase)
+
+	res, cmd := m.Update(pipelineDoneMsg{err: nil})
+	m, _ = res.(pipelineModel)
+	require.Nil(t, cmd, "pipelineDoneMsg must NOT auto-quit (F7)")
+	require.Equal(t, phaseCompleted, m.phase)
+	require.Equal(t, len(m.stages), m.cursorIdx, "cursor moves to synthetic final-report row")
+}
+
+// TestFinalReport_QQuitsAfterCompletion asserts that q exits
+// directly in phaseCompleted (no confirmation modal — there's
+// nothing left to cancel).
+func TestFinalReport_QQuitsAfterCompletion(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	res, _ := m.Update(pipelineDoneMsg{err: nil})
+	m, _ = res.(pipelineModel)
+
+	_, cmd := pressKey(t, &m, "q")
+	require.NotNil(t, cmd, "q must quit directly in phaseCompleted")
+	require.Equal(t, modalNone, m.modal, "no confirmation modal after completion")
+}
+
+// TestFinalReport_NavigationStillWorks asserts that ↑↓ still moves
+// the cursor among stages + the report row after completion.
+func TestFinalReport_NavigationStillWorks(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	res, _ := m.Update(pipelineDoneMsg{err: nil})
+	m, _ = res.(pipelineModel)
+	require.Equal(t, len(m.stages), m.cursorIdx, "starts on report row")
+
+	// Up moves back into the stage list.
+	m, _ = pressKey(t, &m, "up")
+	require.Equal(t, len(m.stages)-1, m.cursorIdx)
+
+	// Down returns to the report row.
+	m, _ = pressKey(t, &m, "down")
+	require.Equal(t, len(m.stages), m.cursorIdx)
+
+	// Down again is clamped.
+	m, _ = pressKey(t, &m, "down")
+	require.Equal(t, len(m.stages), m.cursorIdx, "cursor must clamp at report row")
+}
+
+// TestFinalReport_BannerReflectsVerdict asserts the completion banner
+// summarizes pass / fail counts.
+func TestFinalReport_BannerReflectsVerdict(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	m.stages[0].state = stateDone
+	m.stages[1].state = stateFailed
+	res, _ := m.Update(pipelineDoneMsg{err: nil})
+	m, _ = res.(pipelineModel)
+
+	banner := m.renderCompletionBanner()
+	require.Contains(t, banner, "1/2 FAILED", "banner must show failure count")
+}
+
+// TestFinalReport_FinalReportContents asserts that selecting the
+// synthetic report row renders per-stage summary lines.
+func TestFinalReport_FinalReportContents(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	m = setWindowSize(t, &m, 120, 30)
+	m.stages[0].state = stateDone
+	m.stages[1].state = stateDone
+	res, _ := m.Update(pipelineDoneMsg{err: nil})
+	m, _ = res.(pipelineModel)
+
+	body := m.renderFinalReport(80, 10)
+	require.Contains(t, body, "alpha")
+	require.Contains(t, body, "beta")
+	require.Contains(t, body, "event(s)")
+}
+
+// TestFinalReport_StageListAppendsReportRow asserts the right-side
+// stage list renders the synthetic 📊 final report row after
+// completion.
+func TestFinalReport_StageListAppendsReportRow(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	res, _ := m.Update(pipelineDoneMsg{err: nil})
+	m, _ = res.(pipelineModel)
+
+	list := m.renderStageList()
+	require.Contains(t, list, "📊 final report")
 }

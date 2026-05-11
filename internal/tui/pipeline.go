@@ -98,6 +98,17 @@ const (
 	modalQuitConfirm
 )
 
+// pipelinePhase tracks high-level pipeline lifecycle inside the TUI.
+// PLAN-2 / F7: the TUI no longer auto-quits when the pipeline finishes;
+// it transitions to phaseCompleted and presents a final-report row so
+// the user can review per-stage results before pressing q.
+type pipelinePhase int
+
+const (
+	phaseRunning pipelinePhase = iota
+	phaseCompleted
+)
+
 type stageState int
 
 const (
@@ -155,11 +166,16 @@ type pipelineModel struct {
 	projectRoot string
 	stages      []stageRow
 	stageIdx    map[string]int
-	finished    bool
-	finalErr    error
-	width       int
-	height      int
-	tick        time.Time
+	// phase tracks high-level lifecycle. phaseRunning while the
+	// pipeline goroutine is still executing; phaseCompleted after
+	// pipelineDoneMsg arrives — at which point the synthetic
+	// final-report row appears in the stage list and q quits
+	// directly (PLAN-2 / F7).
+	phase    pipelinePhase
+	finalErr error
+	width    int
+	height   int
+	tick     time.Time
 
 	// modal overlays the underlying view. modalNone means no overlay.
 	modal modalState
@@ -290,10 +306,18 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		key := msg.String()
-		// Finished pipeline: any key dismisses. No confirmation needed —
-		// nothing to cancel.
-		if m.finished {
-			return m, tea.Quit
+		// PLAN-2 / F7: pipeline finished — q (or Ctrl+C) quits
+		// directly without the confirmation modal (nothing to
+		// cancel); other keys still navigate so the user can read
+		// the final report. Pre-F7 behavior was "any key quits"
+		// which terminated the TUI before the user could review.
+		if m.phase == phaseCompleted {
+			switch key {
+			case "q", "Q", keyCtrlC:
+				return m, tea.Quit
+			}
+			// Fall through to normal navigation handling so ↑↓ /
+			// Enter / PgUp / PgDn / Home / End still work.
 		}
 		// Modal handling takes precedence over normal navigation. Per
 		// PLAN-1 / I2: y confirms (cancels subprocess + quits); n / Esc
@@ -328,7 +352,13 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "down", "j":
-			if m.cursorIdx < len(m.stages)-1 {
+			// In phaseCompleted, cursor can reach the synthetic
+			// final-report row at index len(m.stages) (PLAN-2 / F7).
+			maxIdx := len(m.stages) - 1
+			if m.phase == phaseCompleted {
+				maxIdx = len(m.stages)
+			}
+			if m.cursorIdx < maxIdx {
 				m.cursorIdx++
 				m.scrollOffset = 0
 				m.userScrolled = false
@@ -374,7 +404,7 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.tick = time.Now()
-		if m.finished {
+		if m.phase == phaseCompleted {
 			return m, nil
 		}
 		return m, tickCmd()
@@ -445,9 +475,18 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case pipelineDoneMsg:
-		m.finished = true
+		// PLAN-2 / F7: don't auto-quit. Transition to phaseCompleted
+		// so the final-report row appears in the stage list, the
+		// banner replaces the keybind hint, and the user can scroll
+		// through stage history before pressing q.
+		m.phase = phaseCompleted
 		m.finalErr = msg.err
-		return m, tea.Quit
+		// Move the cursor to the synthetic final-report row so the
+		// event panel opens on the summary by default. cursorIdx ==
+		// len(m.stages) addresses the report slot.
+		m.cursorIdx = len(m.stages)
+		m.scrollOffset = 0
+		m.userScrolled = false
 	}
 	return m, nil
 }
@@ -478,8 +517,8 @@ func (m pipelineModel) View() string { //nolint:gocritic // Bubble Tea requires 
 
 	view := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
 	view += "\n" + m.renderStatusStrip()
-	if m.finished {
-		view += "\n" + m.renderFooter()
+	if m.phase == phaseCompleted {
+		view += "\n" + m.renderCompletionBanner()
 	} else {
 		view += "\n" + m.renderKeybindHint()
 	}
@@ -491,8 +530,13 @@ func (m pipelineModel) View() string { //nolint:gocritic // Bubble Tea requires 
 
 // renderHeader is the event-panel title row. In modeLive it shows the
 // currently-active skill + step ("apex-create-architecture · step-04");
-// in modePinned it shows "pinned: <stage>".
+// in modePinned it shows "pinned: <stage>"; on the F7 final-report
+// row (cursorIdx == len(stages) in phaseCompleted) it shows
+// "final report".
 func (m pipelineModel) renderHeader() string { //nolint:gocritic // Bubble Tea value receivers
+	if m.cursorIdx == len(m.stages) && m.phase == phaseCompleted {
+		return "final report"
+	}
 	if m.cursorIdx < 0 || m.cursorIdx >= len(m.stages) {
 		return "Pipeline: " + m.pipelineName
 	}
@@ -514,8 +558,13 @@ func (m pipelineModel) renderHeader() string { //nolint:gocritic // Bubble Tea v
 // (userScrolled=false) the panel auto-tails so the latest event stays
 // visible regardless of view mode; once the user presses PgUp / Home /
 // pin via Enter, scrollOffset takes over and the view is held until
-// L (return-to-live) or End rejoins the tail.
+// L (return-to-live) or End rejoins the tail. PLAN-2 / F7: when the
+// cursor sits on the synthetic final-report row, the per-stage summary
+// table replaces the events stream.
 func (m pipelineModel) renderEventPanel(width, height int) string { //nolint:gocritic // Bubble Tea value receivers
+	if m.cursorIdx == len(m.stages) && m.phase == phaseCompleted {
+		return m.renderFinalReport(width, height)
+	}
 	if m.cursorIdx < 0 || m.cursorIdx >= len(m.stages) {
 		return dimStyle.Render("waiting for first stage…")
 	}
@@ -548,13 +597,17 @@ func (m pipelineModel) renderEventPanel(width, height int) string { //nolint:goc
 
 // renderStageList draws the right-side stage list with status glyph,
 // stage name, and elapsed time. The cursor row is marked with ">".
+// PLAN-2 / F7: in phaseCompleted, a synthetic "📊 final report" row
+// appends to the list; selecting it (cursor at len(stages)) populates
+// the event panel with the per-stage summary table.
 func (m pipelineModel) renderStageList() string { //nolint:gocritic // Bubble Tea value receivers
+	const cursorMark, noCursorMark = "> ", "  "
 	var sb strings.Builder
 	for i := range m.stages {
 		st := &m.stages[i]
-		cursor := "  "
+		cursor := noCursorMark
 		if i == m.cursorIdx {
-			cursor = "> "
+			cursor = cursorMark
 		}
 		glyph, style := glyphForState(st.state)
 		row := cursor + glyph + " " + st.name
@@ -564,12 +617,30 @@ func (m pipelineModel) renderStageList() string { //nolint:gocritic // Bubble Te
 		sb.WriteString(style.Render(row))
 		sb.WriteString("\n")
 	}
+	if m.phase == phaseCompleted {
+		cursor := noCursorMark
+		if m.cursorIdx == len(m.stages) {
+			cursor = cursorMark
+		}
+		row := cursor + "📊 final report"
+		sb.WriteString(stepStyle.Render(row))
+		sb.WriteString("\n")
+	}
 	return sb.String()
 }
 
 // renderStatusStrip is the bottom-row summary of the cursor's stage:
 // stage name · running step (if any) · elapsed time · final verdict.
+// PLAN-2 / F7: on the final-report row, summarizes the aggregate result.
 func (m pipelineModel) renderStatusStrip() string { //nolint:gocritic // Bubble Tea value receivers
+	if m.cursorIdx == len(m.stages) && m.phase == phaseCompleted {
+		ok, failed, _ := m.tallyStages()
+		verdict := "✓ all stages passed"
+		if failed > 0 {
+			verdict = fmt.Sprintf("✗ %d stage(s) failed", failed)
+		}
+		return dimStyle.Render(fmt.Sprintf("status: final report · %d ok · %s", ok, verdict))
+	}
 	if m.cursorIdx < 0 || m.cursorIdx >= len(m.stages) {
 		return dimStyle.Render("status: waiting")
 	}
@@ -821,11 +892,70 @@ func formatDur(d time.Duration) string {
 	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60) //nolint:mnd // 60 is seconds-per-minute, a well-known constant
 }
 
-func (m pipelineModel) renderFooter() string { //nolint:gocritic // Bubble Tea requires value receivers on tea.Model helper methods
-	if m.finalErr != nil {
-		return stageFailedStyle.Render("✗ pipeline failed: ") + m.finalErr.Error() + "  " + dimStyle.Render("press any key to exit")
+// renderCompletionBanner replaces the keybind-hint footer once the
+// pipeline finishes (PLAN-2 / F7). The keybind hint is still useful
+// in spirit, but the dominant call to action is "you can quit now"
+// and the dominant fact is "did it pass?" — so a single line carries
+// both.
+func (m pipelineModel) renderCompletionBanner() string { //nolint:gocritic // Bubble Tea requires value receivers on tea.Model helper methods
+	ok, failed, total := m.tallyStages()
+	verdict := stageDoneStyle.Render(fmt.Sprintf("✓ pipeline complete: %d/%d stages OK", ok, total))
+	if failed > 0 {
+		verdict = stageFailedStyle.Render(fmt.Sprintf("✗ pipeline failed: %d/%d FAILED", failed, total))
 	}
-	return stageDoneStyle.Render("✓ pipeline complete") + "  " + dimStyle.Render("press any key to exit")
+	hint := dimStyle.Render("  · [↑↓] stage · [PgUp/PgDn] scroll · [q] quit")
+	return verdict + hint
+}
+
+// renderFinalReport produces the per-stage summary table shown in the
+// event panel when the user selects the synthetic final-report row
+// (PLAN-2 / F7). Layout: one row per stage with status glyph, name,
+// wall-clock duration, displayable event count, and the first line
+// of the failing error if any.
+func (m pipelineModel) renderFinalReport(width, _ int) string { //nolint:gocritic // Bubble Tea value receivers
+	if len(m.stages) == 0 {
+		return dimStyle.Render("(no stages ran)")
+	}
+	var sb strings.Builder
+	for i := range m.stages {
+		st := &m.stages[i]
+		glyph, style := glyphForState(st.state)
+		dur := elapsedFor(st.state, st.startedAt, st.endedAt, m.tick)
+		if dur == "" {
+			dur = "—"
+		}
+		line := fmt.Sprintf("%s %s · %s · %d event(s)", glyph, st.name, dur, len(st.events))
+		if st.err != nil {
+			line += " · ⚠ " + firstLineTruncated(st.err.Error(), maxToolErrorLen)
+		}
+		sb.WriteString(style.Render(truncateForWidth(line, width)))
+		sb.WriteString("\n")
+	}
+	if m.finalErr != nil {
+		sb.WriteString("\n")
+		sb.WriteString(stageFailedStyle.Render(truncateForWidth("pipeline error: "+m.finalErr.Error(), width)))
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+// tallyStages counts passed / failed / total stages for the
+// completion banner and status strip. Pending-but-never-ran stages
+// (a halt-on-failure scenario) count toward total but not toward
+// ok or failed.
+func (m pipelineModel) tallyStages() (ok, failed, total int) { //nolint:gocritic // Bubble Tea value receivers
+	total = len(m.stages)
+	for i := range m.stages {
+		switch m.stages[i].state {
+		case stateDone:
+			ok++
+		case stateFailed:
+			failed++
+		case stateRunning, statePending:
+			// not counted toward either tally
+		}
+	}
+	return ok, failed, total
 }
 
 // truncateOutput keeps the last n non-empty lines of s, prefixed with
