@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -56,6 +58,18 @@ type RunOptions struct {
 	// ApeVersion is recorded in the manifest's ape_version field.
 	// Callers should pass apecmd.Version; empty string falls back to "dev".
 	ApeVersion string
+
+	// NoCommit, when true, suppresses every per-step `git commit`.
+	// Equivalent to the user passing `--no-commit` on the CLI. Wins
+	// over any per-step `commit:` setting in the pipeline YAML.
+	// PLAN-4 / C2.
+	NoCommit bool
+
+	// AllowDirty, when true, bypasses the pre-run dirty-tree gate.
+	// The first committing step's diff will then include any prior
+	// uncommitted changes the project tree had at runner start.
+	// Meaningful only when NoCommit is false. PLAN-4 / C5.
+	AllowDirty bool
 }
 
 // Observer hooks every state transition the runner emits. Methods are
@@ -96,6 +110,10 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error { //nolint:gocr
 		return err
 	}
 
+	if err := dirtyTreeGate(ctx, spec, opts); err != nil {
+		return err
+	}
+
 	mw, err := startManifestWriter(spec, opts)
 	if err != nil {
 		return err
@@ -104,6 +122,55 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error { //nolint:gocr
 	runErr := runStages(ctx, spec, opts, mw)
 	finalizeManifest(mw, runErr, opts.Observer)
 	return runErr
+}
+
+// pipelineWantsCommits returns true when at least one step in spec
+// would normally commit (i.e., its CommitDirective is not Skip) and
+// the global NoCommit kill-switch is unset. Used to gate the dirty-
+// tree check — if nothing will commit, prior dirty state is harmless.
+func pipelineWantsCommits(spec *Spec, opts RunOptions) bool { //nolint:gocritic // RunOptions mirrors Run's parameter shape; see Run's nolint rationale
+	if opts.NoCommit {
+		return false
+	}
+	for _, stage := range spec.Stages() {
+		for _, step := range stage.Chain {
+			if step.Commit.Mode != CommitModeSkip {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// dirtyTreeGate refuses to start a commit-emitting pipeline against a
+// project whose working tree has uncommitted changes. The first
+// committing step's `git add -A` would otherwise conflate user WIP
+// into ape's commit. PLAN-4 / C5.
+//
+// Bypass: opts.AllowDirty (CLI `--commit-allow-dirty`) suppresses the
+// check. opts.NoCommit also short-circuits because the run is going
+// to be commit-free anyway.
+func dirtyTreeGate(ctx context.Context, spec *Spec, opts RunOptions) error { //nolint:gocritic // RunOptions mirrors Run's shape
+	if !pipelineWantsCommits(spec, opts) || opts.AllowDirty {
+		return nil
+	}
+	if err := gitAvailable(ctx, opts.ProjectRoot); err != nil {
+		return err
+	}
+	porcelain, err := gitStatusPorcelain(ctx, opts.ProjectRoot)
+	if err != nil {
+		return err
+	}
+	if porcelain == "" {
+		return nil
+	}
+	return fmt.Errorf(
+		"working tree has uncommitted changes; commit or stash before running `ape pipeline` "+
+			"(commits run by default). Bypass options: --no-commit (leave the entire run uncommitted) or "+
+			"--commit-allow-dirty (commit anyway; prior WIP merges into the first step's commit). "+
+			"Note: `_output/` should be in your .gitignore — ape's manifest tree lives there.\n\n"+
+			"git status --porcelain output:\n%s", porcelain,
+	)
 }
 
 // runStages drives the spec's stage/step chain. Separated from Run so
@@ -148,6 +215,13 @@ func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWri
 			}
 			recordStep(mw, stageIdx, i+1, step, opts.Prompt, stepStart, time.Now(), stepStatus, exitCode, eventsRel, parseResultEvent(out))
 
+			// Commit boundary: PLAN-4 / C4. Runs only after the step's
+			// run-state is recorded so the manifest reflects both the
+			// run outcome and the commit outcome atomically. Failures
+			// here abort the pipeline — a dirty unexpected tree is
+			// worse to silently extend than to fail loudly.
+			commitErr := performStepCommit(ctx, opts, mw, spec.Name, stage.Name, stageIdx, i+1, step, runErr)
+
 			notify(opts.Observer, func(o Observer) { o.OnStepEnd(stage.Name, i, step, time.Since(stepStart), out, runErr) })
 			if runErr != nil {
 				stageStatus = StatusFailed
@@ -156,6 +230,14 @@ func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWri
 				}
 				notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), runErr) })
 				return fmt.Errorf("stage %q step %d (%s): %w", stage.Name, i, step.Skill, runErr)
+			}
+			if commitErr != nil {
+				stageStatus = StatusFailed
+				if mw != nil {
+					_ = mw.EndStage(stageIdx, stageStatus, time.Now())
+				}
+				notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), commitErr) })
+				return fmt.Errorf("stage %q step %d (%s) commit: %w", stage.Name, i, step.Skill, commitErr)
 			}
 		}
 
@@ -407,6 +489,76 @@ func recordStep(
 	_ = mw.RecordStep(stageIdx, rec)
 }
 
+// performStepCommit decides whether to run `git commit` for a step
+// just completed and records the outcome on the manifest. Returns a
+// non-nil error only when the commit itself was attempted and failed
+// (PLAN-4 / C4.4 — that case aborts the pipeline). All "did not
+// commit" outcomes — skipped, cancelled, no-op — are silent.
+func performStepCommit(
+	ctx context.Context,
+	opts RunOptions, //nolint:gocritic // RunOptions mirrors Run's parameter shape; pointer would split the documented API contract
+	mw *manifestWriter,
+	pipelineName, stageName string,
+	stageIdx, stepIdx int,
+	step Step, //nolint:gocritic // Step mirrors buildArgv's parameter shape; see buildArgv's existing nolint rationale
+	stepRunErr error,
+) error {
+	status, msg, sha, errMsg, commitErr := resolveCommitOutcome(ctx, opts, pipelineName, stageName, step, stepRunErr)
+	if mw != nil {
+		_ = mw.RecordStepCommit(stageIdx, stepIdx, sha, msg, status, errMsg)
+	}
+	return commitErr
+}
+
+// resolveCommitOutcome implements the PLAN-4 / C4 decision table:
+//
+//  1. step cancelled (ctx)                  → skipped-cancelled
+//  2. step failed                           → skipped-step-failed
+//  3. --no-commit                           → skipped-by-flag
+//  4. spec said commit: false               → skipped-by-spec
+//  5. clean working tree after step         → no-op
+//  6. dirty → git add -A → git commit       → committed | failed
+//
+// The first matching condition wins. Step-state outcomes (1, 2) come
+// first because a step that failed couldn't have produced a commitable
+// diff in any consistent state.
+func resolveCommitOutcome(
+	ctx context.Context,
+	opts RunOptions, //nolint:gocritic // RunOptions mirrors Run's parameter shape
+	pipelineName, stageName string,
+	step Step, //nolint:gocritic // Step mirrors buildArgv's parameter shape
+	stepRunErr error,
+) (status CommitStatus, message, sha, errMsg string, commitErr error) {
+	switch {
+	case errors.Is(stepRunErr, context.Canceled), errors.Is(stepRunErr, context.DeadlineExceeded):
+		return CommitStatusSkippedCancelled, "", "", "", nil
+	case stepRunErr != nil:
+		return CommitStatusSkippedStepFailed, "", "", "", nil //nolint:nilerr // stepRunErr is the step's error, not a commit error; the commit was intentionally skipped
+	case opts.NoCommit:
+		return CommitStatusSkippedByFlag, "", "", "", nil
+	}
+	msg, skip := step.Commit.Resolve(pipelineName, stageName, step.Skill)
+	if skip {
+		return CommitStatusSkippedBySpec, "", "", "", nil
+	}
+
+	porcelain, err := gitStatusPorcelain(ctx, opts.ProjectRoot)
+	if err != nil {
+		return CommitStatusFailed, msg, "", err.Error(), err
+	}
+	if porcelain == "" {
+		return CommitStatusNoOp, msg, "", "", nil
+	}
+	if err := gitAddAll(ctx, opts.ProjectRoot); err != nil {
+		return CommitStatusFailed, msg, "", err.Error(), err
+	}
+	sha, err = gitCommit(ctx, opts.ProjectRoot, msg)
+	if err != nil {
+		return CommitStatusFailed, msg, "", err.Error(), err
+	}
+	return CommitStatusCommitted, msg, sha, "", nil
+}
+
 // exitCodeFromErr extracts the OS exit code from an exec error. Falls
 // back to 1 when the underlying error is not an *exec.ExitError.
 func exitCodeFromErr(err error) int {
@@ -425,6 +577,38 @@ func exitCodeFromErr(err error) int {
 // is available. Used by the CLI to print a stable pointer after a run.
 // This wraps the symlink ape maintains at <base>/<pipeline>/latest.
 func ReportPathFor(projectRoot, pipelineName, manifestDir string) string {
+	dir := latestRunDir(projectRoot, pipelineName, manifestDir)
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, "pipeline-report.md")
+}
+
+// CommitsMadeFor returns the count of `committed` steps in the latest
+// run's manifest, or 0 when no manifest is available or the read
+// fails. Best-effort: callers should treat a 0 return as "unknown or
+// none" — the CLI uses it only to decide whether to print the
+// `📌 commits:` summary line.
+func CommitsMadeFor(projectRoot, pipelineName, manifestDir string) int {
+	dir := latestRunDir(projectRoot, pipelineName, manifestDir)
+	if dir == "" {
+		return 0
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "manifest.yaml"))
+	if err != nil {
+		return 0
+	}
+	var m Manifest
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return 0
+	}
+	return m.Totals.CommitsMade
+}
+
+// latestRunDir resolves the absolute path of the latest run's
+// directory for a pipeline via the `latest` symlink ape maintains.
+// Returns "" when the symlink is absent (no run finalized yet).
+func latestRunDir(projectRoot, pipelineName, manifestDir string) string {
 	if manifestDir == "" {
 		manifestDir = filepath.Join(projectRoot, "_output", "pipelines")
 	}
@@ -436,5 +620,5 @@ func ReportPathFor(projectRoot, pipelineName, manifestDir string) string {
 	if !filepath.IsAbs(target) {
 		target = filepath.Join(filepath.Dir(link), target)
 	}
-	return filepath.Join(target, "pipeline-report.md")
+	return target
 }

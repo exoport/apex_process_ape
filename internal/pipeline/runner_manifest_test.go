@@ -43,6 +43,7 @@ func TestRun_EmitsManifest(t *testing.T) {
 		ProjectRoot: root,
 		ClaudeBin:   shim,
 		ApeVersion:  "0.0.9-test",
+		NoCommit:    true, // PLAN-3 contract: manifest only, no git
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -152,6 +153,7 @@ func TestRun_FailedStepCaptured(t *testing.T) {
 		ProjectRoot: root,
 		ClaudeBin:   shim,
 		ApeVersion:  "0.0.9-test",
+		NoCommit:    true, // PLAN-3 contract
 	})
 	if err == nil {
 		t.Fatalf("expected non-nil error from failing step")
@@ -201,6 +203,7 @@ func TestRun_DisableManifestSkipsTree(t *testing.T) {
 		ClaudeBin:       shim,
 		DisableManifest: true,
 		ApeVersion:      "0.0.9-test",
+		NoCommit:        true, // PLAN-3 contract
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)

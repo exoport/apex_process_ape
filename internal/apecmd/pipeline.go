@@ -28,6 +28,8 @@ func newPipelineCmd() *cobra.Command {
 		cwdFlag         string
 		outputFormat    string
 		manifestDirFlag string
+		noCommitFlag    bool
+		allowDirtyFlag  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "pipeline [name]",
@@ -88,10 +90,16 @@ func newPipelineCmd() *cobra.Command {
 			}
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
-			if useTUI {
-				return runWithTUI(ctx, spec, projectRoot, promptFlag, manifestDirFlag)
+			runOpts := runConfig{
+				prompt:      promptFlag,
+				manifestDir: manifestDirFlag,
+				noCommit:    noCommitFlag,
+				allowDirty:  allowDirtyFlag,
 			}
-			return runPlain(ctx, spec, projectRoot, promptFlag, quietFlag, manifestDirFlag)
+			if useTUI {
+				return runWithTUI(ctx, spec, projectRoot, runOpts)
+			}
+			return runPlain(ctx, spec, projectRoot, quietFlag, runOpts)
 		},
 	}
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Optional prompt forwarded to skills that accept it (currently: epics)")
@@ -99,6 +107,8 @@ func newPipelineCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "With --no-tui: suppress per-event stream; print only stage/step start/end markers")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format for list mode (no positional arg): human|json|yaml")
 	cmd.Flags().StringVar(&manifestDirFlag, "manifest-dir", "", "Override the directory for run manifest artifacts (default: <project>/_output/pipelines)")
+	cmd.Flags().BoolVar(&noCommitFlag, "no-commit", false, "Do not commit anything during the run; leave the working tree dirty. Overrides any `commit:` field in the pipeline YAML.")
+	cmd.Flags().BoolVar(&allowDirtyFlag, "commit-allow-dirty", false, "Bypass the dirty-tree pre-run gate. The first committing step's diff will include any pre-existing uncommitted changes.")
 	cmd.PersistentFlags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
 	return cmd
 }
@@ -170,14 +180,25 @@ func printPipelineList(res pipelineListResult, format output.Format) error {
 // when --no-tui is set or stdout is not a terminal. When quiet is true
 // (PLAN-2 / F5) the per-event stream is suppressed; only stage/step
 // start/end markers are emitted, matching the pre-PLAN-1 / I4b shape.
-func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt string, quiet bool, manifestDir string) error {
+// runConfig bundles CLI-derived knobs passed to runPlain / runWithTUI.
+// Grouped to keep call-sites stable as new flags land.
+type runConfig struct {
+	prompt      string
+	manifestDir string
+	noCommit    bool
+	allowDirty  bool
+}
+
+func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot string, quiet bool, cfg runConfig) error {
 	obs := newPlainObserver(os.Stdout, projectRoot, quiet)
 	err := pipeline.Run(ctx, spec, pipeline.RunOptions{
 		ProjectRoot: projectRoot,
-		Prompt:      prompt,
+		Prompt:      cfg.prompt,
 		Observer:    obs,
 		ApeVersion:  Version,
-		ManifestDir: manifestDir,
+		ManifestDir: cfg.manifestDir,
+		NoCommit:    cfg.noCommit,
+		AllowDirty:  cfg.allowDirty,
 	})
 	if err != nil {
 		var pfe *pipeline.PreflightError
@@ -187,13 +208,7 @@ func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt stri
 		}
 		return err
 	}
-	if path := pipeline.ReportPathFor(projectRoot, spec.Name, manifestDir); path != "" {
-		if rel, relErr := filepath.Rel(projectRoot, path); relErr == nil {
-			fmt.Fprintf(os.Stdout, "📊 report: %s\n", rel)
-		} else {
-			fmt.Fprintf(os.Stdout, "📊 report: %s\n", path)
-		}
-	}
+	printEndOfRunSummary(spec.Name, projectRoot, cfg)
 	return nil
 }
 
@@ -204,7 +219,7 @@ func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt stri
 // y, or double Ctrl+C), in which case runCancel cancels the runner's
 // context — exec.CommandContext then tears down the in-flight claude
 // subprocess.
-func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt, manifestDir string) error {
+func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot string, cfg runConfig) error {
 	// Local cancel scoped to this TUI run. Wrapping the caller's ctx
 	// gives the modal a dedicated cancellation handle without
 	// interfering with the cobra signal-handling on the parent ctx.
@@ -219,10 +234,12 @@ func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt, m
 	go func() {
 		err := pipeline.Run(runCtx, spec, pipeline.RunOptions{
 			ProjectRoot: projectRoot,
-			Prompt:      prompt,
+			Prompt:      cfg.prompt,
 			Observer:    obs,
 			ApeVersion:  Version,
-			ManifestDir: manifestDir,
+			ManifestDir: cfg.manifestDir,
+			NoCommit:    cfg.noCommit,
+			AllowDirty:  cfg.allowDirty,
 		})
 		obs.Done(err)
 		runErrCh <- err
@@ -240,7 +257,32 @@ func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt, m
 		runCancel()
 		os.Exit(exitCodePreflightFailed) //nolint:gocritic // explicit runCancel() above neutralizes the defer-skip
 	}
+	if runErr == nil {
+		printEndOfRunSummary(spec.Name, projectRoot, cfg)
+	}
 	return runErr
+}
+
+// printEndOfRunSummary emits the post-run pointer lines:
+//   - 📊 report: <path>   (PLAN-3 / M6 — always when manifest written)
+//   - 📌 commits: N (...) (PLAN-4 / C8 — only when commits were made)
+//
+// Path is rendered relative to the project root when possible.
+func printEndOfRunSummary(pipelineName, projectRoot string, cfg runConfig) {
+	reportPath := pipeline.ReportPathFor(projectRoot, pipelineName, cfg.manifestDir)
+	if reportPath == "" {
+		return
+	}
+	displayPath := reportPath
+	if rel, err := filepath.Rel(projectRoot, reportPath); err == nil {
+		displayPath = rel
+	}
+	fmt.Fprintf(os.Stdout, "📊 report: %s\n", displayPath)
+	if !cfg.noCommit {
+		if n := pipeline.CommitsMadeFor(projectRoot, pipelineName, cfg.manifestDir); n > 0 {
+			fmt.Fprintf(os.Stdout, "📌 commits: %d (run `git log --oneline --grep '^ape:%s/'` to inspect)\n", n, pipelineName)
+		}
+	}
 }
 
 // plainObserver writes one status line per state transition. Used when

@@ -7,7 +7,13 @@ import (
 // ManifestSchemaVersion is the current on-disk schema for run manifests.
 // Bumped on any backward-incompatible change. Consumers should reject
 // manifests whose schema_version differs from a version they understand.
-const ManifestSchemaVersion = 1
+//
+// History:
+//   - v1 (ape v0.0.9) — initial PLAN-3 manifest with per-step metrics.
+//   - v2 (ape v0.0.10) — PLAN-4 commit fields on StepRecord
+//     (commit_sha, commit_message, commit_status, commit_error) plus
+//     totals.commits_made.
+const ManifestSchemaVersion = 2
 
 // RunStatus enumerates terminal pipeline / stage / step states.
 type RunStatus string
@@ -17,6 +23,31 @@ const (
 	StatusCompleted RunStatus = "completed"
 	StatusFailed    RunStatus = "failed"
 	StatusCancelled RunStatus = "cancelled"
+)
+
+// CommitStatus enumerates per-step commit outcomes recorded in the
+// manifest. The set is closed; v2 readers should treat any unknown
+// value as opaque (forward-compatible with future ape additions).
+type CommitStatus string
+
+const (
+	// CommitStatusCommitted — git commit succeeded; commit_sha is set.
+	CommitStatusCommitted CommitStatus = "committed"
+	// CommitStatusNoOp — would have committed but `git status --porcelain`
+	// was empty (step produced no diff).
+	CommitStatusNoOp CommitStatus = "no-op"
+	// CommitStatusSkippedByFlag — pipeline-level `--no-commit` was set.
+	CommitStatusSkippedByFlag CommitStatus = "skipped-by-flag"
+	// CommitStatusSkippedBySpec — pipeline YAML had `commit: false` for this step.
+	CommitStatusSkippedBySpec CommitStatus = "skipped-by-spec"
+	// CommitStatusSkippedStepFailed — the underlying step exited non-zero;
+	// no commit attempted.
+	CommitStatusSkippedStepFailed CommitStatus = "skipped-step-failed"
+	// CommitStatusSkippedCancelled — context was cancelled before / during the step.
+	CommitStatusSkippedCancelled CommitStatus = "skipped-cancelled"
+	// CommitStatusFailed — git commit invocation returned non-zero; commit_error
+	// carries the captured stderr.
+	CommitStatusFailed CommitStatus = "failed"
 )
 
 // Manifest is the canonical on-disk record of one ape pipeline run.
@@ -59,6 +90,7 @@ type ManifestTotals struct {
 	TokensCacheCreation int     `yaml:"tokens_cache_creation"`
 	StepsRun            int     `yaml:"steps_run"`
 	StepsFailed         int     `yaml:"steps_failed"`
+	CommitsMade         int     `yaml:"commits_made"`
 }
 
 // StageRecord captures one stage's lifecycle.
@@ -76,22 +108,26 @@ type StageRecord struct {
 // zero if the terminal `result` event was missing or unparseable; status
 // reflects the exit / parse outcome regardless.
 type StepRecord struct {
-	Index               int       `yaml:"index"`
-	Skill               string    `yaml:"skill"`
-	Agent               string    `yaml:"agent,omitempty"`
-	Args                string    `yaml:"args,omitempty"`
-	Prompt              string    `yaml:"prompt,omitempty"`
-	Model               string    `yaml:"model,omitempty"`
-	StartedAt           time.Time `yaml:"started_at"`
-	EndedAt             time.Time `yaml:"ended_at,omitempty"`
-	DurationSecs        float64   `yaml:"duration_seconds"`
-	Status              RunStatus `yaml:"status"`
-	ExitCode            int       `yaml:"exit_code"`
-	CostUSD             float64   `yaml:"cost_usd"`
-	TokensInput         int       `yaml:"tokens_input"`
-	TokensOutput        int       `yaml:"tokens_output"`
-	TokensCacheRead     int       `yaml:"tokens_cache_read"`
-	TokensCacheCreation int       `yaml:"tokens_cache_creation"`
-	NumTurns            int       `yaml:"num_turns"`
-	EventsPath          string    `yaml:"events_path,omitempty"`
+	Index               int          `yaml:"index"`
+	Skill               string       `yaml:"skill"`
+	Agent               string       `yaml:"agent,omitempty"`
+	Args                string       `yaml:"args,omitempty"`
+	Prompt              string       `yaml:"prompt,omitempty"`
+	Model               string       `yaml:"model,omitempty"`
+	StartedAt           time.Time    `yaml:"started_at"`
+	EndedAt             time.Time    `yaml:"ended_at,omitempty"`
+	DurationSecs        float64      `yaml:"duration_seconds"`
+	Status              RunStatus    `yaml:"status"`
+	ExitCode            int          `yaml:"exit_code"`
+	CostUSD             float64      `yaml:"cost_usd"`
+	TokensInput         int          `yaml:"tokens_input"`
+	TokensOutput        int          `yaml:"tokens_output"`
+	TokensCacheRead     int          `yaml:"tokens_cache_read"`
+	TokensCacheCreation int          `yaml:"tokens_cache_creation"`
+	NumTurns            int          `yaml:"num_turns"`
+	EventsPath          string       `yaml:"events_path,omitempty"`
+	CommitSHA           string       `yaml:"commit_sha,omitempty"`
+	CommitMessage       string       `yaml:"commit_message,omitempty"`
+	CommitStatus        CommitStatus `yaml:"commit_status,omitempty"`
+	CommitError         string       `yaml:"commit_error,omitempty"`
 }

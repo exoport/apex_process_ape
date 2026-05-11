@@ -137,6 +137,29 @@ func (w *manifestWriter) RecordStep(stageIdx int, rec StepRecord) error { //noli
 	return w.persist()
 }
 
+// RecordStepCommit updates the just-recorded step's commit fields and
+// bumps totals.commits_made when the commit succeeded. Called by the
+// runner immediately after RecordStep, before the manifest is rewritten
+// to disk. PLAN-4.
+func (w *manifestWriter) RecordStepCommit(stageIdx, stepIdx int, sha, message string, status CommitStatus, errMsg string) error {
+	if stageIdx < 1 || stageIdx > len(w.manifest.Stages) {
+		return fmt.Errorf("invalid stage index %d", stageIdx)
+	}
+	stage := &w.manifest.Stages[stageIdx-1]
+	if stepIdx < 1 || stepIdx > len(stage.Steps) {
+		return fmt.Errorf("invalid step index %d", stepIdx)
+	}
+	step := &stage.Steps[stepIdx-1]
+	step.CommitSHA = sha
+	step.CommitMessage = message
+	step.CommitStatus = status
+	step.CommitError = errMsg
+	if status == CommitStatusCommitted {
+		w.manifest.Totals.CommitsMade++
+	}
+	return w.persist()
+}
+
 // EndStage records the stage's terminal state.
 func (w *manifestWriter) EndStage(stageIdx int, status RunStatus, at time.Time) error {
 	if stageIdx < 1 || stageIdx > len(w.manifest.Stages) {

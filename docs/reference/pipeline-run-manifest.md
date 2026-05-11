@@ -20,11 +20,18 @@ A symlink at `<pipeline_name>/latest` points at the most recent `<run_id>`. On f
 
 `<run_id>` is `YYYYMMDD-HHMMSS-<7-char-hash>` (UTC). The hash mixes the run start time, the pipeline name, and the project root, so concurrent invocations against the same project do not collide.
 
-## Manifest schema (v1)
+## Manifest schema (v2)
+
+Schema history:
+
+- **v1** (ape v0.0.9) — initial PLAN-3 manifest with per-step metrics.
+- **v2** (ape v0.0.10+) — PLAN-4 commit fields on `StepRecord` (`commit_sha`, `commit_message`, `commit_status`, `commit_error`) plus `totals.commits_made`.
+
+Forward-compatible: v2 readers should accept v1 manifests (the new fields are optional `omitempty`).
 
 ```yaml
-schema_version: 1
-ape_version: 0.0.9
+schema_version: 2
+ape_version: 0.1.0
 pipeline:
   name: design
   source: /home/foo/myproject/_apex/pipelines/design.yaml
@@ -43,6 +50,7 @@ totals:
   tokens_cache_creation: 9211
   steps_run: 13
   steps_failed: 0
+  commits_made: 13
 stages:
   - index: 1
     name: prd
@@ -69,6 +77,10 @@ stages:
         tokens_cache_creation: 2811
         num_turns: 47
         events_path: stages/01-prd/step-01-apex-create-prd.ndjson
+        commit_sha: a0d06c8
+        commit_message: "ape:design/prd/apex-create-prd"
+        commit_status: committed
+        commit_error: ""
 ```
 
 ### Status values
@@ -88,20 +100,50 @@ Future ape releases may add fields. Consumers should treat unknown fields as opa
 
 ## Commits during a run
 
-**ape itself does not run `git commit` at any point during a pipeline.** The manifest is the durable record of what happened; the working tree carries the actual file changes. After a pipeline completes you will typically see:
+**ape commits per step by default** (PLAN-4, v0.0.10+). Every successful step that produced a diff lands as its own git commit, with the message `ape:<pipeline>/<stage>/<skill>` unless the pipeline YAML's `commit:` field overrides it. Each commit's SHA is recorded on the corresponding `StepRecord`.
 
-- a clean `git status` if every step's files were already present and the framework's Commit Policy held (the post-framework-v0.0.73 world), or
-- a dirty working tree with all changes from the run, ready for you to inspect and commit yourself.
-
-Framework leaf skills (`apex-create-prd`, `apex-create-architecture`, etc.) are expected to leave their output uncommitted per the framework's Commit Policy — the caller (you, ape, or a future orchestrator) owns the commit boundary. A separate ape proposal (PLAN-4) tracks adding optional per-step boundary commits if you want every step to be its own git commit; until that lands, batch-committing the run's output is the recommended flow.
-
-To inspect what a run produced:
+Opt out with `--no-commit`:
 
 ```bash
-git status                                # files touched across the whole pipeline
-git diff                                  # unstaged changes
-cat _output/pipelines/<name>/latest/pipeline-report.md   # per-step summary
+ape pipeline design --no-commit
 ```
+
+That preserves the pre-PLAN-4 shape: zero commits during the run, dirty working tree at completion, the manifest is the durable record.
+
+### Per-step commit fields
+
+| Field            | When set                                                        |
+| ---------------- | --------------------------------------------------------------- |
+| `commit_sha`     | non-empty only when `commit_status == committed`                |
+| `commit_message` | the message used (derived or YAML-explicit)                     |
+| `commit_status`  | enum, see below                                                 |
+| `commit_error`   | non-empty only when `commit_status == failed` (captured stderr) |
+
+### `commit_status` values
+
+- `committed` — git commit succeeded; `commit_sha` is set.
+- `no-op` — would have committed but the working tree was clean (step produced no diff).
+- `skipped-by-flag` — pipeline-level `--no-commit` was passed.
+- `skipped-by-spec` — pipeline YAML had `commit: false` for this step.
+- `skipped-step-failed` — the underlying step exited non-zero; no commit attempted.
+- `skipped-cancelled` — the run's context was cancelled before this step's commit boundary.
+- `failed` — `git commit` invocation returned non-zero; `commit_error` carries the stderr; pipeline was aborted.
+
+### Inspecting a run's commits
+
+```bash
+git log --oneline --grep '^ape:design/'      # all commits from the latest `design` run (or any pipeline named `design`)
+git show <sha>                                # full diff of one step
+cat _output/pipelines/design/latest/pipeline-report.md
+```
+
+Tip: ape's per-step commit messages are designed for `git log --grep '^ape:<pipeline>/'` to retrieve them. If a project also commits with `ape:` prefixes outside of pipeline runs, narrow the grep to `^ape:<pipeline>/<stage>/`.
+
+### Dirty-tree gate
+
+When commits are enabled, ape refuses to start if `git status --porcelain` is non-empty at runner-start. Bypass with `--commit-allow-dirty` (commits proceed; first committing step's diff includes the prior WIP) or with `--no-commit` (no commits at all; gate is moot).
+
+`_output/` should be in your `.gitignore` so the manifest tree itself never trips the gate.
 
 ## Reading a manifest from code
 

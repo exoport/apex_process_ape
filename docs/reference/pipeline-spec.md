@@ -48,13 +48,60 @@ stages:
 
 ### Step object fields
 
-| Field         | Type   | Required | Description                                                                                                                                                                                             |
-| ------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `skill`       | string | yes      | Name of the skill to invoke (e.g. `apex-create-prd`). Empty/missing is rejected.                                                                                                                        |
-| `agent`       | string | no       | When set, the call goes through PAT-25 agent passthrough: `/{agent} --autonomous -- {skill} --autonomous`. When unset, the call is direct: `/{skill} --autonomous --no-commit`.                         |
-| `model`       | string | no       | Model passed to claude as `--model {value}`, e.g. `"opus[1m]"`. When unset, claude uses its default.                                                                                                    |
-| `args`        | string | no       | Extra literal CLI flags appended to the skill invocation, whitespace-separated. Example: `"--doc prd"`. Use this for fixed flags only.                                                                  |
-| `prompt_flag` | string | no       | When set together with the runner's `--prompt` flag, ape appends `<prompt_flag> <prompt-value>` to the skill argv. Currently used by `apex-create-epics-and-stories` to receive a user-supplied prompt. |
+| Field         | Type           | Required | Description                                                                                                                                                                                             |
+| ------------- | -------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `skill`       | string         | yes      | Name of the skill to invoke (e.g. `apex-create-prd`). Empty/missing is rejected.                                                                                                                        |
+| `agent`       | string         | no       | When set, the call goes through PAT-25 agent passthrough: `/{agent} --autonomous -- {skill} --autonomous`. When unset, the call is direct: `/{skill} --autonomous --no-commit`.                         |
+| `model`       | string         | no       | Model passed to claude as `--model {value}`, e.g. `"opus[1m]"`. When unset, claude uses its default.                                                                                                    |
+| `args`        | string         | no       | Extra literal CLI flags appended to the skill invocation, whitespace-separated. Example: `"--doc prd"`. Use this for fixed flags only.                                                                  |
+| `prompt_flag` | string         | no       | When set together with the runner's `--prompt` flag, ape appends `<prompt_flag> <prompt-value>` to the skill argv. Currently used by `apex-create-epics-and-stories` to receive a user-supplied prompt. |
+| `commit`      | bool or string | no       | Per-step commit boundary control (PLAN-4). See [Commits](#commits) below.                                                                                                                               |
+
+## Commits
+
+Every successful step is committed by default with the message `ape:<pipeline>/<stage>/<skill>`. The pipeline YAML can override this per step via the `commit:` field, and the user can disable commits entirely with the `--no-commit` CLI flag.
+
+`commit:` accepts three shapes (omit it for the default):
+
+```yaml
+stages:
+  prd:
+    chain:
+      # omitted     → commit with `ape:design/prd/apex-create-prd`
+      - skill: apex-create-prd
+        agent: apex-agent-pm
+
+      # string      → commit with this verbatim message (no `ape:` prefix)
+      - skill: apex-shard-doc
+        args: "--doc prd"
+        commit: "docs: shard PRD"
+
+      # false       → skip the commit for this step
+      - skill: apex-validate-prd
+        commit: false
+
+      # true        → synonym for omitting the field
+      - skill: apex-implementation-readiness
+        commit: true
+```
+
+Rejected shapes (load-time errors): multi-line strings, empty strings, mappings, sequences, integers.
+
+### Precedence
+
+The CLI flag `--no-commit` is absolute — it overrides every per-step `commit:` value and turns the whole run into a no-commit run. Run with `--no-commit` to preserve the pre-PLAN-4 dirty-tree shape.
+
+### Dirty-tree gate
+
+When at least one step would commit, ape refuses to start if the working tree has uncommitted changes (`git status --porcelain` is non-empty). Bypass with `--commit-allow-dirty` (commits proceed; first committing step's diff includes the prior WIP) or with `--no-commit` (no commits, gate is moot).
+
+`_output/` should be in your `.gitignore` so ape's manifest tree never trips this gate.
+
+### Failures
+
+If a `git commit` invocation fails (typically a pre-commit hook rejecting the staged content), the pipeline aborts. The step's run-state is recorded as completed, the commit's status is `failed`, the stderr is captured in `commit_error`, and the working tree is left in whatever state git left it. Investigate, clean up, then rerun.
+
+See [Pipeline run manifest](pipeline-run-manifest.md) for the full record of what each commit produced.
 
 ## Worked example: a custom 2-stage pipeline
 

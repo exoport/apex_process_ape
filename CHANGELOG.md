@@ -1,5 +1,102 @@
 # CHANGELOG
 
+## v0.0.10 (2026-05-11)
+
+PLAN-4: per-step boundary commits, on by default. Every successful
+pipeline step now lands as its own git commit with a deterministic
+message, building on PLAN-3's manifest infrastructure. The pipeline-
+spec YAML gains a `commit:` field for per-step overrides; the user
+opts out of all commits with the new `--no-commit` CLI flag.
+
+This is a default-behavior change — pre-v0.0.10, ape never ran git
+commit during a pipeline run. Use `--no-commit` to preserve the old
+shape.
+
+### Behavior changes
+
+- **Pipeline runs commit per step by default.** After each successful
+  step ape runs `git add -A && git commit -m "ape:<pipeline>/<stage>/<skill>"`.
+  Empty diffs are recorded as `no-op` (no empty commits emitted).
+  Failed steps and cancelled runs skip the commit boundary. A failed
+  `git commit` (e.g., pre-commit hook rejection) aborts the pipeline
+  with `commit_status: failed` recorded for the offending step.
+  PLAN-4 / C2–C4.
+
+- **Pre-run dirty-tree gate.** When commits are enabled, ape refuses
+  to start if `git status --porcelain` is non-empty in the project
+  root. The actionable error message lists both bypass options.
+  PLAN-4 / C5.
+
+- **End-of-run summary now shows commit count** when at least one
+  commit was made: `📌 commits: N (run \`git log --oneline --grep '^ape:<pipeline>/'\` to inspect)`.
+  PLAN-4 / C8.
+
+### New CLI flags
+
+- `ape pipeline <name> --no-commit` — pipeline-level kill switch.
+  Suppresses every `git commit`, overrides any per-step `commit:` in
+  the YAML, sets every step's `commit_status` to `skipped-by-flag`.
+- `ape pipeline <name> --commit-allow-dirty` — bypass the dirty-tree
+  gate. The first committing step's diff will include any pre-
+  existing uncommitted changes. Use with caution.
+
+### Pipeline spec schema
+
+- New optional `commit:` field per step accepting `bool` or `string`:
+  - omitted / `true` / `~` → commit with derived message.
+  - `false` → skip this step's commit.
+  - `"explicit message"` → commit with the given message verbatim
+    (no `ape:` prefix added).
+  - Multi-line strings, empty strings, mappings, sequences, and
+    integers are rejected at spec-load with line-number errors.
+
+### Manifest schema (v1 → v2)
+
+- Bumped `schema_version: 1` → `schema_version: 2`. Forward-compatible:
+  v2 readers accept v1 manifests (new fields are `omitempty`).
+- Added to `StepRecord`: `commit_sha`, `commit_message`, `commit_status`,
+  `commit_error`.
+- Added to `Manifest.totals`: `commits_made`.
+- `commit_status` is a closed enum with 7 values; see
+  `docs/reference/pipeline-run-manifest.md` § Commits during a run.
+
+### Internals
+
+- New `internal/pipeline/commit.go` — `CommitDirective` + `CommitMode`
+  + `DerivedCommitMessage`.
+- New `internal/pipeline/git.go` — thin wrappers around `git status
+  --porcelain`, `git add -A`, `git commit -m`, `git rev-parse`. Never
+  passes `--no-verify`; hooks run as configured.
+- `pipeline.RunOptions` gains `NoCommit` and `AllowDirty`.
+- `pipeline.CommitsMadeFor` exposes the latest run's commit count to
+  the CLI.
+
+### Docs
+
+- `docs/reference/pipeline-spec.md` — new "Commits" section + `commit`
+  row in the Step fields table.
+- `docs/reference/pipeline-run-manifest.md` — "Commits during a run"
+  rewritten for the default-on shape, new fields documented, manifest
+  schema version bumped.
+
+### Verification
+
+- `make lint` zero issues. `go test ./...` clean across all packages.
+- New tests: 4 unit suites covering YAML shapes / message derivation
+  / resolve logic; 9 integration suites covering default-commit /
+  explicit-message / skip-by-spec / skip-by-flag / no-op / dirty-tree
+  refusal / allow-dirty bypass / dirty-tree-ignored-when-no-commit /
+  failed-step-no-commit.
+
+### Coordination
+
+- The framework's mode-aware Commit Policy (drafted at
+  `apex_process_framework_eval/_output/framework-prompt-anti-self-commit-clause.md`)
+  is the natural complement: leaf skills won't auto-commit, and ape
+  takes over the commit boundary deterministically. Pipelines work
+  correctly against pre-Commit-Policy framework versions too — if a
+  leaf skill auto-commits, ape sees an empty diff and records `no-op`.
+
 ## v0.0.9 (2026-05-11)
 
 PLAN-3: every `ape pipeline <name>` invocation now writes a structured

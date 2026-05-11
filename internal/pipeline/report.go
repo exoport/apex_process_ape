@@ -42,7 +42,11 @@ func renderReport(m *Manifest) string {
 	fmt.Fprintf(&b, "| cache creation | %s |\n", formatInt(m.Totals.TokensCacheCreation))
 	fmt.Fprintf(&b, "| steps run | %d |\n", m.Totals.StepsRun)
 	fmt.Fprintf(&b, "| steps failed | %d |\n", m.Totals.StepsFailed)
+	if anyCommitRecorded(m) {
+		fmt.Fprintf(&b, "| commits made | %d |\n", m.Totals.CommitsMade)
+	}
 
+	showCommit := anyCommitRecorded(m)
 	for si := range m.Stages {
 		stage := &m.Stages[si]
 		fmt.Fprintf(&b, "\n## Stage %02d — %s\n\n", stage.Index, stage.Name)
@@ -52,20 +56,34 @@ func renderReport(m *Manifest) string {
 			b.WriteString("_(no steps recorded)_\n")
 			continue
 		}
-		b.WriteString("| # | Skill | Agent | Duration | Cost | Tokens (in/out) | Status |\n")
-		b.WriteString("| - | --- | --- | --- | --- | --- | --- |\n")
+		if showCommit {
+			b.WriteString("| # | Skill | Agent | Duration | Cost | Tokens (in/out) | Status | Commit |\n")
+			b.WriteString("| - | --- | --- | --- | --- | --- | --- | --- |\n")
+		} else {
+			b.WriteString("| # | Skill | Agent | Duration | Cost | Tokens (in/out) | Status |\n")
+			b.WriteString("| - | --- | --- | --- | --- | --- | --- |\n")
+		}
 		for pi := range stage.Steps {
 			step := &stage.Steps[pi]
 			agent := step.Agent
 			if agent == "" {
 				agent = "—"
 			}
-			fmt.Fprintf(&b, "| %d | `%s` | `%s` | %s | $%.4f | %s / %s | %s |\n",
-				step.Index, step.Skill, agent,
-				formatDuration(step.DurationSecs), step.CostUSD,
-				formatInt(step.TokensInput), formatInt(step.TokensOutput),
-				step.Status,
-			)
+			if showCommit {
+				fmt.Fprintf(&b, "| %d | `%s` | `%s` | %s | $%.4f | %s / %s | %s | %s |\n",
+					step.Index, step.Skill, agent,
+					formatDuration(step.DurationSecs), step.CostUSD,
+					formatInt(step.TokensInput), formatInt(step.TokensOutput),
+					step.Status, formatCommitCell(step.CommitStatus, step.CommitSHA),
+				)
+			} else {
+				fmt.Fprintf(&b, "| %d | `%s` | `%s` | %s | $%.4f | %s / %s | %s |\n",
+					step.Index, step.Skill, agent,
+					formatDuration(step.DurationSecs), step.CostUSD,
+					formatInt(step.TokensInput), formatInt(step.TokensOutput),
+					step.Status,
+				)
+			}
 		}
 		for pi := range stage.Steps {
 			step := &stage.Steps[pi]
@@ -75,6 +93,43 @@ func renderReport(m *Manifest) string {
 		}
 	}
 	return b.String()
+}
+
+// anyCommitRecorded reports whether at least one step has a non-empty
+// CommitStatus. Used to decide whether the report shows the Commit
+// column / totals row.
+func anyCommitRecorded(m *Manifest) bool {
+	for si := range m.Stages {
+		for pi := range m.Stages[si].Steps {
+			if m.Stages[si].Steps[pi].CommitStatus != "" &&
+				m.Stages[si].Steps[pi].CommitStatus != CommitStatusSkippedByFlag {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// formatCommitCell renders the Commit column for the step table.
+func formatCommitCell(status CommitStatus, sha string) string {
+	switch status {
+	case CommitStatusCommitted:
+		return "`" + sha + "`"
+	case CommitStatusNoOp:
+		return "—"
+	case CommitStatusSkippedBySpec:
+		return "(spec: skip)"
+	case CommitStatusSkippedStepFailed:
+		return "(step failed)"
+	case CommitStatusSkippedCancelled:
+		return "(cancelled)"
+	case CommitStatusFailed:
+		return "✗"
+	case CommitStatusSkippedByFlag:
+		return ""
+	default:
+		return ""
+	}
 }
 
 func formatDuration(secs float64) string {

@@ -53,6 +53,11 @@ type Step struct {
 	// prompt as a structured argv element avoids any shell-quoting
 	// round-trip — argv is never serialized to a shell string.
 	PromptFlag string `yaml:"prompt_flag,omitempty"` //nolint:tagliatelle // on-disk spec YAML files use snake_case prompt_flag
+	// Commit configures the per-step commit boundary (PLAN-4). Omit
+	// to inherit the pipeline-level default (commit with a derived
+	// message); `commit: false` to skip; `commit: "msg"` to override
+	// the message. See CommitDirective.
+	Commit CommitDirective `yaml:"commit,omitempty"`
 }
 
 // Stages returns the pipeline's stages in declaration order.

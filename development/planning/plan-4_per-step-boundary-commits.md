@@ -1,7 +1,8 @@
 ---
 plan_id: PLAN-4
 created_at: 2026-05-11
-status: proposed
+implemented_at: 2026-05-11
+status: done
 tags:
   - pipeline
   - git
@@ -231,5 +232,5 @@ This is a framework-side change that PLAN-4 makes possible but does not require.
 
 - **Order matters**: framework Commit Policy ships → ape PLAN-4 ships → eval PLAN-9 reader bumped to schema_version: 2 → eval drops its `commit_skill_state()` for ape-mode stages.
 - The framework's Commit Policy change should ship **before** this. Until it does, leaf skills can still auto-commit, and ape's per-step commits would race with the model's improvised ones. (Concretely: a step's model emits its own commit, then ape tries to commit and finds an empty diff, records `no-op`. Functional but messy.)
-- Default-behavior change calls for a **minor-version bump** when this ships. Target v0.1.0 (signaling "ape now has opinions about your git history") rather than v0.0.10. Document the prior shape in the CHANGELOG as recoverable via `--no-commit`.
-- Eval-side coordination: PLAN-9's reader should accept both schema_version 1 and 2 (1 is what current ape v0.0.9 writes; 2 is what PLAN-4 will write). Lean on the existing forward-compat clause in the manifest schema doc.
+- Released as **ape v0.0.10** (2026-05-11). Default-behavior change is documented in the CHANGELOG with the `--no-commit` opt-out for users who prefer the pre-PLAN-4 shape. Patch-version bump rather than minor; the manifest's `schema_version: 1 → 2` change is forward-compatible (new fields are `omitempty`).
+- Eval-side coordination: PLAN-9's reader should accept both schema_version 1 and 2 (1 is what ape v0.0.9 writes; 2 is what v0.0.10+ writes). Lean on the existing forward-compat clause in the manifest schema doc.
