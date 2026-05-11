@@ -154,7 +154,7 @@ func printPipelineList(res pipelineListResult, format output.Format) error {
 // runPlain runs the pipeline with stdout status lines (no TUI). Used
 // when --no-tui is set or stdout is not a terminal.
 func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt string) error {
-	obs := newPlainObserver(os.Stdout)
+	obs := newPlainObserver(os.Stdout, projectRoot)
 	err := pipeline.Run(ctx, spec, pipeline.RunOptions{
 		ProjectRoot: projectRoot,
 		Prompt:      prompt,
@@ -185,7 +185,7 @@ func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot, prompt st
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
-	model := tui.NewPipelineModel(spec, runCancel)
+	model := tui.NewPipelineModel(spec, runCancel, projectRoot)
 	program := tea.NewProgram(model, tea.WithAltScreen())
 	obs := tui.NewPipelineTUIObserver(program)
 
@@ -225,10 +225,13 @@ type plainObserver struct {
 	t0           time.Time
 	currentStage string
 	currentSkill string
+	// projectRoot is forwarded to the event renderer so tool-call
+	// file paths display relative to the project (PLAN-2 / F6).
+	projectRoot string
 }
 
-func newPlainObserver(w *os.File) *plainObserver {
-	return &plainObserver{w: w, t0: time.Now()}
+func newPlainObserver(w *os.File, projectRoot string) *plainObserver {
+	return &plainObserver{w: w, t0: time.Now(), projectRoot: projectRoot}
 }
 
 func (p *plainObserver) OnStageStart(stage string) {
@@ -260,7 +263,7 @@ func (p *plainObserver) OnStepStart(stage string, idx int, step pipeline.Step) {
 // dropped. Same renderer that powers the interactive TUI lives in
 // internal/tui/event_renderer.go.
 func (p *plainObserver) OnStepLine(stage string, _ int, line string) {
-	r := tui.RenderEvent(line)
+	r := tui.RenderEventWithRoot(line, p.projectRoot)
 	if !r.IsDisplayable() {
 		return
 	}

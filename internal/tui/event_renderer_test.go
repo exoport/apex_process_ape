@@ -193,3 +193,82 @@ func TestTruncate(t *testing.T) {
 	require.Equal(t, "abcde…", truncate("abcdefghij", 6))
 	require.Equal(t, "ab…", truncate("abcde", 3))
 }
+
+// ─────────── PLAN-2 / F6 project-relative paths ───────────
+
+func TestRelativizePath_StripsProjectPrefix(t *testing.T) {
+	root := "/tmp/ape-v007-smoke-c70b"
+	cases := map[string]string{
+		"/tmp/ape-v007-smoke-c70b/development/planning/prd/index.md": "development/planning/prd/index.md",
+		"/tmp/ape-v007-smoke-c70b":                                   ".",
+		"/tmp/ape-v007-smoke-c70b/":                                  ".",
+		"/tmp/other/development/planning":                            "/tmp/other/development/planning",     // different root
+		"/home/diegos/_dev/foo":                                      "/home/diegos/_dev/foo",               // system path
+		"relative/path/foo.md":                                       "relative/path/foo.md",                // not absolute
+		"":                                                           "",                                    // empty
+		"/tmp/ape-v007-smoke-c70b-not-prefix":                        "/tmp/ape-v007-smoke-c70b-not-prefix", // path-boundary check
+	}
+	for raw, want := range cases {
+		require.Equal(t, want, relativizePath(root, raw), "relativizePath(%q, %q)", root, raw)
+	}
+}
+
+func TestRelativizePath_EmptyRootIsNoOp(t *testing.T) {
+	// When projectRoot is empty F6 is disabled and absolute paths
+	// pass through. Mirrors how RenderEvent (no-root variant) and
+	// the pre-F6 TUI behaved.
+	require.Equal(t, "/abs/path", relativizePath("", "/abs/path"))
+	require.Equal(t, "rel/path", relativizePath("", "rel/path"))
+}
+
+func TestRenderEvent_RelativizesReadFilePath(t *testing.T) {
+	root := "/tmp/ape-v007-smoke-c70b"
+	line := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/ape-v007-smoke-c70b/development/planning/prd/index.md"}}]}}`
+	r := RenderEventWithRoot(line, root)
+	require.Equal(t, EventTool, r.Kind)
+	require.Equal(t, "Read development/planning/prd/index.md", r.Body)
+}
+
+const sandboxRoot = "/sandbox"
+
+func TestRenderEvent_RelativizesEditAndWriteFilePath(t *testing.T) {
+	root := sandboxRoot
+	cases := map[string]string{
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/sandbox/_apex/config.yaml"}}]}}`:                     "Edit _apex/config.yaml",
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"/sandbox/development/functionality/index.yaml"}}]}}`: "Write development/functionality/index.yaml",
+	}
+	for line, want := range cases {
+		r := RenderEventWithRoot(line, root)
+		require.Equal(t, EventTool, r.Kind)
+		require.Equal(t, want, r.Body)
+	}
+}
+
+func TestRenderEvent_RelativizesGrepAndGlobPath(t *testing.T) {
+	root := sandboxRoot
+	line := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Grep","input":{"pattern":"foo","path":"/sandbox/internal"}}]}}`
+	r := RenderEventWithRoot(line, root)
+	require.Equal(t, EventTool, r.Kind)
+	require.Equal(t, `Grep "foo" internal`, r.Body)
+
+	line = `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Glob","input":{"pattern":"**/*.md","path":"/sandbox/docs"}}]}}`
+	r = RenderEventWithRoot(line, root)
+	require.Equal(t, `Glob "**/*.md" docs`, r.Body)
+}
+
+func TestRenderEvent_OutsideRootStaysAbsolute(t *testing.T) {
+	// Tool calls into framework source or system paths shouldn't be
+	// mistakenly stripped — only paths inside the project root.
+	root := sandboxRoot
+	line := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/home/user/.claude/skills/SKILL.md"}}]}}`
+	r := RenderEventWithRoot(line, root)
+	require.Equal(t, "Read /home/user/.claude/skills/SKILL.md", r.Body)
+}
+
+func TestRenderEvent_NoRootBackCompat(t *testing.T) {
+	// RenderEvent (root-less variant) is back-compat and must render
+	// absolute paths unchanged.
+	line := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/abs/foo.md"}}]}}`
+	r := RenderEvent(line)
+	require.Equal(t, "Read /abs/foo.md", r.Body)
+}

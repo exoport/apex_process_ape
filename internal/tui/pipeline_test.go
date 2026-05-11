@@ -75,7 +75,7 @@ func keyMsg(key string) tea.KeyMsg {
 func TestQuitModal_QPressOpensModal(t *testing.T) {
 	spec := fakeSpec(t)
 	cancelled := false
-	m := NewPipelineModel(spec, func() { cancelled = true })
+	m := NewPipelineModel(spec, func() { cancelled = true }, "")
 
 	m, cmd := pressKey(t, &m, "q")
 	require.Equal(t, modalQuitConfirm, m.modal, "q should open the quit-confirmation modal")
@@ -86,7 +86,7 @@ func TestQuitModal_QPressOpensModal(t *testing.T) {
 func TestQuitModal_YConfirmCancelsAndQuits(t *testing.T) {
 	spec := fakeSpec(t)
 	cancelled := false
-	m := NewPipelineModel(spec, func() { cancelled = true })
+	m := NewPipelineModel(spec, func() { cancelled = true }, "")
 
 	m, _ = pressKey(t, &m, "q")    // open modal
 	_, cmd := pressKey(t, &m, "y") // confirm
@@ -101,7 +101,7 @@ func TestQuitModal_YConfirmCancelsAndQuits(t *testing.T) {
 func TestQuitModal_NDismissesModal(t *testing.T) {
 	spec := fakeSpec(t)
 	cancelled := false
-	m := NewPipelineModel(spec, func() { cancelled = true })
+	m := NewPipelineModel(spec, func() { cancelled = true }, "")
 
 	m, _ = pressKey(t, &m, "q")    // open modal
 	m, cmd := pressKey(t, &m, "n") // dismiss
@@ -112,7 +112,7 @@ func TestQuitModal_NDismissesModal(t *testing.T) {
 
 func TestQuitModal_EscDismissesModal(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 
 	m, _ = pressKey(t, &m, "q")
 	m, _ = pressKey(t, &m, keyEsc)
@@ -122,7 +122,7 @@ func TestQuitModal_EscDismissesModal(t *testing.T) {
 func TestQuitModal_DoubleCtrlCForceQuits(t *testing.T) {
 	spec := fakeSpec(t)
 	cancelled := false
-	m := NewPipelineModel(spec, func() { cancelled = true })
+	m := NewPipelineModel(spec, func() { cancelled = true }, "")
 
 	// First Ctrl+C opens the modal (and records the timestamp).
 	m, _ = pressKey(t, &m, keyCtrlC)
@@ -142,7 +142,7 @@ func TestQuitModal_DoubleCtrlCForceQuits(t *testing.T) {
 func TestQuitModal_SlowSecondCtrlCStaysInModal(t *testing.T) {
 	spec := fakeSpec(t)
 	cancelled := false
-	m := NewPipelineModel(spec, func() { cancelled = true })
+	m := NewPipelineModel(spec, func() { cancelled = true }, "")
 
 	m, _ = pressKey(t, &m, keyCtrlC)
 	// Backdate the recorded timestamp to outside the double-tap window.
@@ -157,7 +157,7 @@ func TestQuitModal_SlowSecondCtrlCStaysInModal(t *testing.T) {
 func TestQuitModal_FinishedPipelineQuitsImmediately(t *testing.T) {
 	spec := fakeSpec(t)
 	cancelled := false
-	m := NewPipelineModel(spec, func() { cancelled = true })
+	m := NewPipelineModel(spec, func() { cancelled = true }, "")
 	m.finished = true
 
 	_, cmd := pressKey(t, &m, "q")
@@ -168,7 +168,7 @@ func TestQuitModal_FinishedPipelineQuitsImmediately(t *testing.T) {
 
 func TestQuitModal_NilCancelIsSafe(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 
 	m, _ = pressKey(t, &m, "q")
 	_, cmd := pressKey(t, &m, "y")
@@ -178,7 +178,7 @@ func TestQuitModal_NilCancelIsSafe(t *testing.T) {
 
 func TestQuitModal_SummarizesRunStateForOverlay(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 
 	// Mark stage 1 as running, no stages done.
 	m.stages[0].state = stateRunning
@@ -204,7 +204,7 @@ func TestQuitModal_SummarizesRunStateForOverlay(t *testing.T) {
 
 func TestNav_StageStartUpdatesCursorInLiveMode(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 	require.Equal(t, modeLive, m.mode)
 	require.Equal(t, 0, m.cursorIdx)
 
@@ -220,7 +220,7 @@ func TestNav_StageStartUpdatesCursorInLiveMode(t *testing.T) {
 
 func TestNav_PinFreezesCursor(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 	// Run alpha; cursor follows.
 	res, _ := m.Update(stageStartMsg{stage: "alpha"})
 	m, _ = res.(pipelineModel)
@@ -237,7 +237,7 @@ func TestNav_PinFreezesCursor(t *testing.T) {
 
 func TestNav_LReturnsToLiveAndFollowsActive(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 
 	// Bring alpha running, beta still pending.
 	res, _ := m.Update(stageStartMsg{stage: "alpha"})
@@ -254,7 +254,7 @@ func TestNav_LReturnsToLiveAndFollowsActive(t *testing.T) {
 
 func TestNav_ArrowMovesCursor(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 	m, _ = pressKey(t, &m, "down")
 	require.Equal(t, 1, m.cursorIdx)
 	m, _ = pressKey(t, &m, "up")
@@ -266,7 +266,7 @@ func TestNav_ArrowMovesCursor(t *testing.T) {
 
 func TestEvents_AppendDisplayableOnly(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 	res, _ := m.Update(stageStartMsg{stage: "alpha"})
 	m, _ = res.(pipelineModel)
 
@@ -287,7 +287,7 @@ func TestEvents_AppendDisplayableOnly(t *testing.T) {
 
 func TestEvents_RunningStepIdxTracksLifecycle(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 	require.Equal(t, -1, m.stages[0].runningStepIdx)
 
 	res, _ := m.Update(stepStartMsg{stage: "alpha", idx: 0})
@@ -301,7 +301,7 @@ func TestEvents_RunningStepIdxTracksLifecycle(t *testing.T) {
 
 func TestRenderHeader_TracksLiveSkill(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 	res, _ := m.Update(stageStartMsg{stage: "alpha"})
 	m, _ = res.(pipelineModel)
 	res, _ = m.Update(stepStartMsg{stage: "alpha", idx: 0})
@@ -311,7 +311,7 @@ func TestRenderHeader_TracksLiveSkill(t *testing.T) {
 
 func TestRenderHeader_PinnedShowsStageName(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 	m, _ = pressKey(t, &m, "enter")
 	require.Equal(t, modePinned, m.mode)
 	require.Equal(t, "pinned: alpha", m.renderHeader())
@@ -357,7 +357,7 @@ func setWindowSize(t *testing.T, m *pipelineModel, w, h int) pipelineModel {
 // pageStep events.
 func TestScroll_PgUpInLiveModeBeginsUserScroll(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 	m = setWindowSize(t, &m, 120, 30) // eventPanelHeightFor(30) = 24
 	m = populateEvents(t, &m, "alpha", 50)
 	require.False(t, m.userScrolled, "live mode starts auto-tailing")
@@ -382,7 +382,7 @@ func TestScroll_PgUpInLiveModeBeginsUserScroll(t *testing.T) {
 // resume auto-tailing.
 func TestScroll_PgDnRestoresAutoTailAtBottom(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 	m = setWindowSize(t, &m, 120, 30)
 	m = populateEvents(t, &m, "alpha", 50)
 	m, _ = pressKey(t, &m, "pgup")
@@ -400,7 +400,7 @@ func TestScroll_PgDnRestoresAutoTailAtBottom(t *testing.T) {
 // at the current cursor stage do not move the viewport.
 func TestScroll_NewEventHoldsUserScroll(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 	m = setWindowSize(t, &m, 120, 30)
 	m = populateEvents(t, &m, "alpha", 50)
 	m, _ = pressKey(t, &m, "pgup")
@@ -417,7 +417,7 @@ func TestScroll_NewEventHoldsUserScroll(t *testing.T) {
 // regardless of where the user scrolled to.
 func TestScroll_EndKeyReturnsToAutoTail(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 	m = setWindowSize(t, &m, 120, 30)
 	m = populateEvents(t, &m, "alpha", 50)
 	m, _ = pressKey(t, &m, "pgup")
@@ -433,7 +433,7 @@ func TestScroll_EndKeyReturnsToAutoTail(t *testing.T) {
 // userScrolled, so the panel rejoins auto-tail on the active stage.
 func TestScroll_LKeyReturnsToLive(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 	m = setWindowSize(t, &m, 120, 30)
 	m = populateEvents(t, &m, "alpha", 50)
 	m, _ = pressKey(t, &m, "enter")
@@ -450,7 +450,7 @@ func TestScroll_LKeyReturnsToLive(t *testing.T) {
 // user sees the latest output before scrolling back into history.
 func TestScroll_EnterPinSeedsTailOffset(t *testing.T) {
 	spec := fakeSpec(t)
-	m := NewPipelineModel(spec, nil)
+	m := NewPipelineModel(spec, nil, "")
 	m = setWindowSize(t, &m, 120, 30)
 	m = populateEvents(t, &m, "alpha", 50)
 

@@ -147,13 +147,19 @@ const (
 
 type pipelineModel struct {
 	pipelineName string
-	stages       []stageRow
-	stageIdx     map[string]int
-	finished     bool
-	finalErr     error
-	width        int
-	height       int
-	tick         time.Time
+	// projectRoot is the absolute path of the user's project (the
+	// cwd the pipeline runner spawns claude under). The event
+	// renderer strips this prefix from tool-call path arguments so
+	// the displayed path keeps its informative tail (PLAN-2 / F6).
+	// Empty string disables relativization.
+	projectRoot string
+	stages      []stageRow
+	stageIdx    map[string]int
+	finished    bool
+	finalErr    error
+	width       int
+	height      int
+	tick        time.Time
 
 	// modal overlays the underlying view. modalNone means no overlay.
 	modal modalState
@@ -232,7 +238,11 @@ type (
 // A nil cancel is tolerated (e.g. for tests) — the quit modal still
 // renders, but confirmed quit just exits the TUI without touching the
 // subprocess.
-func NewPipelineModel(spec *pipeline.Spec, cancel context.CancelFunc) pipelineModel { //nolint:revive // returning unexported type is intentional; callers receive tea.Model via assignment
+//
+// projectRoot is the absolute path of the user's project — used by
+// the event renderer to display tool-call file paths relative to the
+// project root (PLAN-2 / F6). Empty string disables relativization.
+func NewPipelineModel(spec *pipeline.Spec, cancel context.CancelFunc, projectRoot string) pipelineModel { //nolint:revive // returning unexported type is intentional; callers receive tea.Model via assignment
 	rows := make([]stageRow, len(spec.Stages()))
 	idx := make(map[string]int, len(rows))
 	for i, st := range spec.Stages() {
@@ -248,6 +258,7 @@ func NewPipelineModel(spec *pipeline.Spec, cancel context.CancelFunc) pipelineMo
 	}
 	return pipelineModel{
 		pipelineName: spec.Name,
+		projectRoot:  projectRoot,
 		stages:       rows,
 		stageIdx:     idx,
 		cancelRun:    cancel,
@@ -405,7 +416,7 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		ev := RenderEvent(msg.line)
+		ev := RenderEventWithRoot(msg.line, m.projectRoot)
 		if !ev.IsDisplayable() {
 			return m, nil
 		}

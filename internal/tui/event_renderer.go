@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 )
 
@@ -100,7 +101,21 @@ const (
 // RenderEvent parses one stream-json line and returns its display
 // representation. Never panics on malformed input: any failure to
 // parse falls through to EventUnknown with the raw line in Body.
+//
+// Equivalent to RenderEventWithRoot(line, "") — paths in tool events
+// render absolute. Callers that know their project root should prefer
+// the with-root variant so PLAN-2 / F6 strips the prefix and keeps
+// the informative tail of long paths visible.
 func RenderEvent(line string) RenderedEvent {
+	return RenderEventWithRoot(line, "")
+}
+
+// RenderEventWithRoot is RenderEvent with a project-root path prefix
+// that path-shaped tool arguments are made relative to (PLAN-2 / F6).
+// When projectRoot is empty, behavior is identical to RenderEvent —
+// no relativization is attempted. Tokens that don't share the prefix
+// (system paths, $HOME-relative, framework files) render as-is.
+func RenderEventWithRoot(line, projectRoot string) RenderedEvent {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return RenderedEvent{Kind: EventSuppressed}
@@ -113,7 +128,7 @@ func RenderEvent(line string) RenderedEvent {
 	case "system":
 		return renderSystemEvent(ev)
 	case "assistant":
-		return renderAssistantEvent(ev)
+		return renderAssistantEvent(ev, projectRoot)
 	case "user":
 		return renderUserEvent(ev)
 	case "result":
@@ -145,7 +160,7 @@ func renderSystemEvent(ev map[string]any) RenderedEvent {
 // usually has one text block + zero or more tool_use blocks; we
 // surface the FIRST non-trivial block to keep the live panel
 // uncluttered.
-func renderAssistantEvent(ev map[string]any) RenderedEvent {
+func renderAssistantEvent(ev map[string]any, projectRoot string) RenderedEvent {
 	blocks := readContentBlocks(ev)
 	if len(blocks) == 0 {
 		return RenderedEvent{Kind: EventSuppressed}
@@ -161,7 +176,7 @@ func renderAssistantEvent(ev map[string]any) RenderedEvent {
 			}
 			return RenderedEvent{Kind: EventText, Glyph: "✎", Body: firstLineTruncated(text, maxTextLen)}
 		case "tool_use":
-			return renderToolUse(b)
+			return renderToolUse(b, projectRoot)
 		case "thinking":
 			// Show abbreviated thinking blocks as text (they're
 			// model reasoning, not user-facing output). Truncate
@@ -179,7 +194,9 @@ func renderAssistantEvent(ev map[string]any) RenderedEvent {
 // renderToolUse maps tool_use content blocks to "🔧 <Name> <args>".
 // Per-tool short summaries make the running output readable; unknown
 // tools fall through to a generic "🔧 <Name>" row with no args.
-func renderToolUse(b map[string]any) RenderedEvent {
+// projectRoot, when non-empty, is stripped from path-shaped arguments
+// (PLAN-2 / F6) so the displayed path keeps its informative tail.
+func renderToolUse(b map[string]any, projectRoot string) RenderedEvent {
 	name := readString(b, "name")
 	if name == "" {
 		return RenderedEvent{Kind: EventTool, Glyph: "🔧", Body: "(unknown tool)"}
@@ -187,24 +204,28 @@ func renderToolUse(b map[string]any) RenderedEvent {
 	input, _ := b["input"].(map[string]any)
 	switch name {
 	case "Read":
-		return RenderedEvent{Kind: EventTool, Glyph: "🔧", Body: "Read " + readString(input, "file_path")}
+		return RenderedEvent{Kind: EventTool, Glyph: "🔧", Body: "Read " + relativizePath(projectRoot, readString(input, "file_path"))}
 	case "Edit":
-		return RenderedEvent{Kind: EventTool, Glyph: "🔧", Body: "Edit " + readString(input, "file_path")}
+		return RenderedEvent{Kind: EventTool, Glyph: "🔧", Body: "Edit " + relativizePath(projectRoot, readString(input, "file_path"))}
 	case "Write":
-		return RenderedEvent{Kind: EventTool, Glyph: "🔧", Body: "Write " + readString(input, "file_path")}
+		return RenderedEvent{Kind: EventTool, Glyph: "🔧", Body: "Write " + relativizePath(projectRoot, readString(input, "file_path"))}
 	case "Bash":
 		cmd := readString(input, "command")
 		return RenderedEvent{Kind: EventTool, Glyph: "🔧", Body: "Bash " + truncate(cmd, maxBashLen)}
 	case "Grep":
 		pat := readString(input, "pattern")
-		path := readString(input, "path")
+		path := relativizePath(projectRoot, readString(input, "path"))
 		body := "Grep \"" + pat + "\""
 		if path != "" {
 			body += " " + path
 		}
 		return RenderedEvent{Kind: EventTool, Glyph: "🔧", Body: body}
 	case "Glob":
-		return RenderedEvent{Kind: EventTool, Glyph: "🔧", Body: "Glob \"" + readString(input, "pattern") + "\""}
+		body := "Glob \"" + readString(input, "pattern") + "\""
+		if path := relativizePath(projectRoot, readString(input, "path")); path != "" {
+			body += " " + path
+		}
+		return RenderedEvent{Kind: EventTool, Glyph: "🔧", Body: body}
 	case "Task":
 		sub := readString(input, "subagent_type")
 		if sub == "" {
@@ -368,6 +389,38 @@ func firstLineTruncated(s string, n int) string {
 		s = strings.TrimRight(s[:i], "\r ")
 	}
 	return truncate(s, n)
+}
+
+// relativizePath strips projectRoot from raw when raw is an absolute
+// path that sits inside the project tree. PLAN-2 / F6: tool-event
+// lines (Read / Edit / Write / Grep path) compete with truncation
+// limits; absolute /tmp/sandbox/... prefixes in temporary fixture
+// directories were eating the informative suffix. Conservative
+// detection: only strip when raw is an absolute path that shares the
+// projectRoot prefix at a path boundary — system paths, $HOME-relative
+// paths, framework-source paths, and any non-absolute string pass
+// through untouched.
+func relativizePath(projectRoot, raw string) string {
+	if projectRoot == "" || raw == "" {
+		return raw
+	}
+	if !strings.HasPrefix(raw, "/") {
+		return raw
+	}
+	sep := string(os.PathSeparator)
+	root := strings.TrimRight(projectRoot, sep)
+	if raw == root {
+		return "."
+	}
+	prefix := root + sep
+	if !strings.HasPrefix(raw, prefix) {
+		return raw
+	}
+	rel := raw[len(prefix):]
+	if rel == "" {
+		return "."
+	}
+	return rel
 }
 
 // hostOf extracts the host portion of a URL for display. Falls back
