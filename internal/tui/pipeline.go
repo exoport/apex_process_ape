@@ -34,6 +34,41 @@ const doubleCtrlCWindow = time.Second
 
 const maxOutputLines = 200
 
+// Pipeline-TUI layout constants. View() composes the screen from a
+// stages panel + an events panel + a status strip + a keybind hint
+// footer; these constants describe how many rows / columns each
+// reserves so PLAN-2 / F8's scroll seeding can recover the same
+// eventPanelHeight value outside the View() function. The set is
+// duplicated below as locals inside View() to keep that path
+// allocation-free, but the canonical definition lives here so the
+// scroll path stays in sync.
+const (
+	panelBorderOverhead = 4
+	stageListWidthMin   = 28
+	eventPanelWidthMin  = 30
+	panelHeightMin      = 6
+	statusRowReserve    = 4
+	headerRowReserve    = 2
+)
+
+// PLAN-2 / F8: PgUp / PgDn move the event-panel viewport by pageStep
+// events. When the model knows its rendered panel height (set on
+// tea.WindowSizeMsg), scrolls page by one panel-height; otherwise the
+// constant keeps the keybind useful in tests + pre-resize states.
+const pageStep = 10
+
+// eventPanelHeightFor returns the number of rendered event rows the
+// events panel will show given the current terminal height. Mirrors
+// the formula in View() so the scroll path can clamp scrollOffset to
+// a valid window without re-deriving the layout.
+func eventPanelHeightFor(termHeight int) int {
+	h := termHeight - statusRowReserve - headerRowReserve
+	if h < 1 {
+		return 1
+	}
+	return h
+}
+
 var (
 	pipelineHeaderStyle = lipgloss.NewStyle().Bold(true).Underline(true).MarginBottom(1)
 	pipelinePanelStyle  = lipgloss.NewStyle().
@@ -141,9 +176,16 @@ type pipelineModel struct {
 	// pinned stage (read-only).
 	cursorIdx int
 	// scrollOffset is the number of events skipped from the top of
-	// the pinned stage's event log when rendering (PgUp / PgDn).
-	// Always 0 in modeLive (auto-scroll keeps the latest visible).
+	// the current stage's event log when rendering. Honored only
+	// when userScrolled is true — otherwise the panel auto-tails so
+	// the latest event stays visible regardless of mode (PLAN-2 / F8).
 	scrollOffset int
+	// userScrolled is set when the user has actively scrolled (PgUp /
+	// PgDn / Home / pin via Enter). New events arriving in live mode
+	// then keep the scroll position stable instead of auto-tailing.
+	// Cleared by L (return-to-live), End, or moving the cursor to
+	// another stage.
+	userScrolled bool
 }
 
 // ─────────── Bubble Tea messages ───────────
@@ -227,7 +269,7 @@ func tickCmd() tea.Cmd {
 // just moves the same branching one call frame deeper and obscures
 // the linear flow.
 //
-//nolint:gocritic,gocyclo // Bubble Tea requires value receivers on tea.Model; Update is intrinsically a wide message switch
+//nolint:gocritic,gocyclo,maintidx // Bubble Tea requires value receivers on tea.Model; Update is intrinsically a wide message switch
 func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -271,21 +313,29 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursorIdx > 0 {
 				m.cursorIdx--
 				m.scrollOffset = 0
+				m.userScrolled = false
 			}
 			return m, nil
 		case "down", "j":
 			if m.cursorIdx < len(m.stages)-1 {
 				m.cursorIdx++
 				m.scrollOffset = 0
+				m.userScrolled = false
 			}
 			return m, nil
 		case keyEnter:
 			m.mode = modePinned
-			m.scrollOffset = 0
+			// Seed scrollOffset so the pinned view opens on the
+			// tail of the pinned stage's events; PgUp from here
+			// scrolls back into history while the cursor stays on
+			// this stage even after a new stage starts.
+			m.scrollOffset = m.tailScrollOffset()
+			m.userScrolled = true
 			return m, nil
 		case "l", "L", keyEsc:
 			m.mode = modeLive
 			m.scrollOffset = 0
+			m.userScrolled = false
 			m = m.followActive()
 			return m, nil
 		case "pgup":
@@ -294,6 +344,7 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.scrollDown(), nil
 		case "home":
 			m.scrollOffset = 0
+			m.userScrolled = true
 			return m, nil
 		case "end":
 			return m.scrollToBottom(), nil
@@ -359,10 +410,12 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.stages[i].events = append(m.stages[i].events, ev)
-		// Live mode auto-scrolls so the latest event is always
-		// visible; pinned mode keeps the user's scroll position
-		// stable so reviewing history isn't disrupted by new lines.
-		if m.mode == modeLive && i == m.cursorIdx {
+		// PLAN-2 / F8: new events at the current cursor stage
+		// auto-tail only when the user hasn't manually scrolled. A
+		// PgUp-while-running freezes the viewport on the older
+		// events the user is reading; pressing End or L rejoins the
+		// tail.
+		if !m.userScrolled && i == m.cursorIdx {
 			m.scrollOffset = 0
 		}
 	case stepEndMsg:
@@ -397,14 +450,9 @@ func (m pipelineModel) View() string { //nolint:gocritic // Bubble Tea requires 
 	//   row 2: bottom status strip
 	//   row 3: keybind hint footer
 	// Borders + padding eat 4 columns total across the horizontal pair.
-	const panelBorderOverhead = 4
-	const (
-		stageListWidthMin  = 28 // floor on the right column
-		eventPanelWidthMin = 30 // floor on the left column
-		panelHeightMin     = 6
-		statusRowReserve   = 4 // status strip + footer + borders
-		headerRowReserve   = 2 // event-panel inner header + spacing
-	)
+	// Layout reservation constants are package-level (top of file) so
+	// the F8 scroll path can recover eventPanelHeight without
+	// duplicating the formula.
 	rightWidth := max(m.width/3, stageListWidthMin) //nolint:mnd // 1/3 split: events panel keeps the lion's share
 	leftWidth := max(m.width-rightWidth-panelBorderOverhead, eventPanelWidthMin)
 	panelHeight := max(m.height-statusRowReserve, panelHeightMin)
@@ -451,8 +499,11 @@ func (m pipelineModel) renderHeader() string { //nolint:gocritic // Bubble Tea v
 }
 
 // renderEventPanel shows the per-stage rendered events for the
-// cursor's stage. In modeLive it auto-scrolls so the last visible row
-// is the latest event; in modePinned PgUp/PgDn moves scrollOffset.
+// cursor's stage. PLAN-2 / F8: when the user hasn't actively scrolled
+// (userScrolled=false) the panel auto-tails so the latest event stays
+// visible regardless of view mode; once the user presses PgUp / Home /
+// pin via Enter, scrollOffset takes over and the view is held until
+// L (return-to-live) or End rejoins the tail.
 func (m pipelineModel) renderEventPanel(width, height int) string { //nolint:gocritic // Bubble Tea value receivers
 	if m.cursorIdx < 0 || m.cursorIdx >= len(m.stages) {
 		return dimStyle.Render("waiting for first stage…")
@@ -464,14 +515,12 @@ func (m pipelineModel) renderEventPanel(width, height int) string { //nolint:goc
 	if len(events) == 0 {
 		return dimStyle.Render("…")
 	}
-	// Compute the window to display: in Live mode anchor the bottom
-	// at len(events); in Pinned mode use scrollOffset.
 	start := 0
 	if len(events) > height {
-		if m.mode == modeLive {
-			start = len(events) - height
-		} else {
+		if m.userScrolled {
 			start = max(min(m.scrollOffset, len(events)-height), 0)
+		} else {
+			start = len(events) - height
 		}
 	}
 	end := min(start+height, len(events))
@@ -566,14 +615,16 @@ func (m pipelineModel) followActive() pipelineModel { //nolint:gocritic // Bubbl
 	return m
 }
 
-// scrollUp / scrollDown / scrollToBottom move the event panel
-// viewport when the user is in modePinned. In modeLive they're
-// no-ops — auto-scroll keeps the latest visible.
+// scrollUp / scrollDown / scrollToBottom move the event-panel
+// viewport. PLAN-2 / F8: dropped the modePinned guard so PgUp / PgDn
+// work in any mode. The first PgUp from auto-tail (userScrolled=false)
+// seeds scrollOffset to the current tail-window so the user sees
+// continuous backwards motion instead of jumping to the top.
 func (m pipelineModel) scrollUp() pipelineModel { //nolint:gocritic // Bubble Tea value receivers
-	if m.mode != modePinned {
-		return m
+	if !m.userScrolled {
+		m.scrollOffset = m.tailScrollOffset()
+		m.userScrolled = true
 	}
-	const pageStep = 5
 	if m.scrollOffset >= pageStep {
 		m.scrollOffset -= pageStep
 	} else {
@@ -583,25 +634,42 @@ func (m pipelineModel) scrollUp() pipelineModel { //nolint:gocritic // Bubble Te
 }
 
 func (m pipelineModel) scrollDown() pipelineModel { //nolint:gocritic // Bubble Tea value receivers
-	if m.mode != modePinned {
+	if !m.userScrolled {
+		// Already auto-tailing; PgDn from tail re-confirms tail.
 		return m
 	}
-	const pageStep = 5
+	tail := m.tailScrollOffset()
 	m.scrollOffset += pageStep
-	if m.cursorIdx >= 0 && m.cursorIdx < len(m.stages) {
-		if total := len(m.stages[m.cursorIdx].events); m.scrollOffset > total {
-			m.scrollOffset = total
-		}
+	if m.scrollOffset >= tail {
+		// Reached the tail — drop back into auto-tail so future
+		// events flow into the panel automatically.
+		m.scrollOffset = 0
+		m.userScrolled = false
 	}
 	return m
 }
 
 func (m pipelineModel) scrollToBottom() pipelineModel { //nolint:gocritic // Bubble Tea value receivers
-	if m.mode != modePinned || m.cursorIdx < 0 || m.cursorIdx >= len(m.stages) {
-		return m
-	}
-	m.scrollOffset = len(m.stages[m.cursorIdx].events)
+	m.scrollOffset = 0
+	m.userScrolled = false
 	return m
+}
+
+// tailScrollOffset returns the scrollOffset value that anchors the
+// rendered window at the tail of the cursor stage's events — i.e.,
+// the latest event is on the bottom row. Falls back to 0 when the
+// terminal hasn't been sized yet (eventPanelHeightFor floors at 1) or
+// when the cursor is out of range.
+func (m pipelineModel) tailScrollOffset() int { //nolint:gocritic // Bubble Tea value receivers
+	if m.cursorIdx < 0 || m.cursorIdx >= len(m.stages) {
+		return 0
+	}
+	total := len(m.stages[m.cursorIdx].events)
+	h := eventPanelHeightFor(m.height)
+	if total <= h {
+		return 0
+	}
+	return total - h
 }
 
 // truncateForWidth shortens a single rendered line if it exceeds the

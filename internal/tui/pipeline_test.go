@@ -4,6 +4,7 @@ package tui
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -314,4 +315,147 @@ func TestRenderHeader_PinnedShowsStageName(t *testing.T) {
 	m, _ = pressKey(t, &m, "enter")
 	require.Equal(t, modePinned, m.mode)
 	require.Equal(t, "pinned: alpha", m.renderHeader())
+}
+
+// populateEvents fills the cursor stage's events slice with n
+// distinct EventText entries so scroll tests can observe viewport
+// movement without rendering real stream-json. Pointer receiver
+// matches pressKey's convention — pipelineModel is heavy enough that
+// gocritic flags by-value parameters.
+//
+//nolint:unparam // stage is parameterized for future multi-stage scroll tests; unused-value warning is intentional now
+func populateEvents(t *testing.T, m *pipelineModel, stage string, n int) pipelineModel {
+	t.Helper()
+	cur := *m
+	for i := range n {
+		line := `{"type":"assistant","message":{"content":[{"type":"text","text":"line ` +
+			strconv.Itoa(i) + `"}]}}`
+		res, _ := cur.Update(stepLineMsg{stage: stage, idx: 0, line: line})
+		var ok bool
+		cur, ok = res.(pipelineModel)
+		require.True(t, ok)
+	}
+	return cur
+}
+
+// setWindowSize delivers a tea.WindowSizeMsg so the model can size
+// its rendered panels — F8's tailScrollOffset depends on m.height.
+//
+//nolint:unparam // width parameter is fixed at 120 today; kept generic for future narrow-mode tests (F4)
+func setWindowSize(t *testing.T, m *pipelineModel, w, h int) pipelineModel {
+	t.Helper()
+	res, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
+	pm, ok := res.(pipelineModel)
+	require.True(t, ok)
+	return pm
+}
+
+// TestScroll_PgUpInLiveModeBeginsUserScroll asserts the F8 fix: PgUp
+// in the default modeLive (with userScrolled=false) is no longer a
+// no-op — it seeds the scrollOffset to the current tail-anchored
+// position, sets userScrolled, and moves the viewport back by
+// pageStep events.
+func TestScroll_PgUpInLiveModeBeginsUserScroll(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil)
+	m = setWindowSize(t, &m, 120, 30) // eventPanelHeightFor(30) = 24
+	m = populateEvents(t, &m, "alpha", 50)
+	require.False(t, m.userScrolled, "live mode starts auto-tailing")
+
+	// Tail window currently anchors at 50-24 = 26. PgUp moves it
+	// back by pageStep (10) to 16.
+	m, _ = pressKey(t, &m, "pgup")
+	require.True(t, m.userScrolled, "PgUp must enable userScrolled")
+	require.Equal(t, 16, m.scrollOffset)
+
+	// Second PgUp: 16 - 10 = 6.
+	m, _ = pressKey(t, &m, "pgup")
+	require.Equal(t, 6, m.scrollOffset)
+
+	// Third PgUp clamps at 0.
+	m, _ = pressKey(t, &m, "pgup")
+	require.Equal(t, 0, m.scrollOffset)
+}
+
+// TestScroll_PgDnRestoresAutoTailAtBottom asserts that paging back
+// down past the tail clears userScrolled so subsequent live events
+// resume auto-tailing.
+func TestScroll_PgDnRestoresAutoTailAtBottom(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil)
+	m = setWindowSize(t, &m, 120, 30)
+	m = populateEvents(t, &m, "alpha", 50)
+	m, _ = pressKey(t, &m, "pgup")
+	require.True(t, m.userScrolled)
+
+	// Page back down. Tail offset is 26 → one PgDn brings us to 26
+	// which is the tail, so userScrolled clears.
+	m, _ = pressKey(t, &m, "pgdown")
+	require.False(t, m.userScrolled, "PgDn to tail must clear userScrolled")
+	require.Equal(t, 0, m.scrollOffset)
+}
+
+// TestScroll_NewEventHoldsUserScroll asserts the auto-tail-suspend
+// contract from F8: while userScrolled is true, new events arriving
+// at the current cursor stage do not move the viewport.
+func TestScroll_NewEventHoldsUserScroll(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil)
+	m = setWindowSize(t, &m, 120, 30)
+	m = populateEvents(t, &m, "alpha", 50)
+	m, _ = pressKey(t, &m, "pgup")
+	scrollBefore := m.scrollOffset
+	require.True(t, m.userScrolled)
+
+	// New event arrives at the current cursor stage.
+	m = populateEvents(t, &m, "alpha", 5)
+	require.Equal(t, scrollBefore, m.scrollOffset, "scroll offset must not move while userScrolled")
+	require.True(t, m.userScrolled)
+}
+
+// TestScroll_EndKeyReturnsToAutoTail asserts End rejoins the tail
+// regardless of where the user scrolled to.
+func TestScroll_EndKeyReturnsToAutoTail(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil)
+	m = setWindowSize(t, &m, 120, 30)
+	m = populateEvents(t, &m, "alpha", 50)
+	m, _ = pressKey(t, &m, "pgup")
+	m, _ = pressKey(t, &m, "pgup")
+	require.NotEqual(t, 0, m.scrollOffset)
+
+	m, _ = pressKey(t, &m, "end")
+	require.False(t, m.userScrolled, "End must clear userScrolled")
+	require.Equal(t, 0, m.scrollOffset)
+}
+
+// TestScroll_LKeyReturnsToLive asserts that L resets both mode and
+// userScrolled, so the panel rejoins auto-tail on the active stage.
+func TestScroll_LKeyReturnsToLive(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil)
+	m = setWindowSize(t, &m, 120, 30)
+	m = populateEvents(t, &m, "alpha", 50)
+	m, _ = pressKey(t, &m, "enter")
+	require.True(t, m.userScrolled, "pin seeds userScrolled")
+
+	m, _ = pressKey(t, &m, "l")
+	require.False(t, m.userScrolled)
+	require.Equal(t, 0, m.scrollOffset)
+	require.Equal(t, modeLive, m.mode)
+}
+
+// TestScroll_EnterPinSeedsTailOffset asserts that pinning a stage
+// opens the viewport on the tail of that stage's events — so the
+// user sees the latest output before scrolling back into history.
+func TestScroll_EnterPinSeedsTailOffset(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil)
+	m = setWindowSize(t, &m, 120, 30)
+	m = populateEvents(t, &m, "alpha", 50)
+
+	m, _ = pressKey(t, &m, "enter")
+	require.Equal(t, modePinned, m.mode)
+	require.True(t, m.userScrolled)
+	require.Equal(t, 26, m.scrollOffset, "Enter must seed scrollOffset to tail = len(events) - panelHeight")
 }
