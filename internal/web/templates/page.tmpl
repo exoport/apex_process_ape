@@ -7,7 +7,9 @@
 <script src="/assets/vendor/htmx.min.js"></script>
 <script src="/assets/vendor/htmx-ext-sse.min.js"></script>
 </head>
-<body hx-ext="sse" sse-connect="/api/events">
+<body hx-ext="sse" sse-connect="/api/events"
+      hx-on::sse-open="document.getElementById('status').textContent='connected'; document.getElementById('status').className='connected'"
+      hx-on::sse-error="document.getElementById('status').textContent='disconnected'; document.getElementById('status').className='disconnected'">
 <header>
   <h1>{{.Title}}</h1>
   <small>{{.Subtitle}}</small>
@@ -23,13 +25,13 @@
      HTMX runs its OOB-swap machinery on the response body. hx-swap="none"
      means this div's own contents are never replaced; the fragments
      target #stages / #hooks / #replies / #decision-gate / #status via
-     hx-swap-oob inside the response. hx-on::sse-{open,error} flip the
-     status banner to connected / disconnected without round-tripping a
-     status fragment. -->
+     hx-swap-oob inside the response. The connected/disconnected status
+     flip lives on <body> because the SSE extension fires its open /
+     error events on the sse-connect host (body), and those events
+     don't bubble down to a descendant. Defence in depth: app.js also
+     attaches a document-level listener. -->
 <div sse-swap="pipeline-init,stage-start,stage-update,stage-end,stage-fail,hook,reply,await-pending,await-resolved,stopped,error"
-     hx-swap="none"
-     hx-on::sse-open="document.getElementById('status').textContent='connected'; document.getElementById('status').className='connected'"
-     hx-on::sse-error="document.getElementById('status').textContent='disconnected'; document.getElementById('status').className='disconnected'"></div>
+     hx-swap="none"></div>
 
 <section>
   <h2>stages</h2>
