@@ -64,10 +64,11 @@ func TestTailer_AppendedLinesProcessed(t *testing.T) {
 checked:
 
 	got := tailer.Totals()
-	// 1M input tokens at $15/M opus = $15
-	// 0.5M output tokens at $75/M opus = $37.50
-	if got.CostUSD < 52.4 || got.CostUSD > 52.6 {
-		t.Errorf("cost = %f, want ~52.50 (opus rates)", got.CostUSD)
+	// 1M input tokens at $5/M (opus 4.7) = $5.00
+	// 0.5M output tokens at $25/M (opus 4.7) = $12.50
+	// Total = $17.50
+	if got.CostUSD < 17.4 || got.CostUSD > 17.6 {
+		t.Errorf("cost = %f, want ~17.50 (opus 4.7 rates: $5 in / $25 out)", got.CostUSD)
 	}
 }
 

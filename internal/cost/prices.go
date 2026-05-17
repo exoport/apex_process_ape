@@ -34,17 +34,32 @@ type ModelPrice struct {
 // models cost $0 with the manifest carrying a `cost_note` (see
 // Tracker for that wiring). PLAN-5 / C7.
 //
-// TODO(PLAN-5 / C7): confirm these per-million-token figures against
-// the current Anthropic price list before shipping. The 1.25× / 2.00×
-// / 0.10× cache multipliers in the formula come from the design doc
-// §11 and are not in this table.
+// Source: https://platform.claude.com/docs/en/docs/about-claude/pricing
+// fetched 2026-05-17. Per-million-tokens, USD. The 1.25× / 2.00× /
+// 0.10× cache multipliers live in formula.go and apply on top of the
+// BaseInput rate here.
+//
+// NOTE: Opus 4.5+ uses **half** the input rate and **one-third** the
+// output rate of Opus 4 / 4.1. A future model bump must update this
+// table — there is no API to fetch live prices. `ape costs update
+// --from <yaml>` (reserved subcommand) is the planned override path.
 var Prices = map[string]ModelPrice{
-	// Claude 4.x family — initial values pending review.
-	"claude-opus-4-7":   {BaseInput: 15.00, Output: 75.00},
-	"claude-opus-4-6":   {BaseInput: 15.00, Output: 75.00},
+	// Claude Opus 4.5+ — new pricing tier ($5 in / $25 out).
+	"claude-opus-4-7": {BaseInput: 5.00, Output: 25.00},
+	"claude-opus-4-6": {BaseInput: 5.00, Output: 25.00},
+	"claude-opus-4-5": {BaseInput: 5.00, Output: 25.00},
+	// Claude Opus 4 / 4.1 — legacy pricing ($15 in / $75 out).
+	"claude-opus-4-1": {BaseInput: 15.00, Output: 75.00},
+	"claude-opus-4":   {BaseInput: 15.00, Output: 75.00},
+	// Claude Sonnet 4.5+ ($3 in / $15 out).
 	"claude-sonnet-4-6": {BaseInput: 3.00, Output: 15.00},
 	"claude-sonnet-4-5": {BaseInput: 3.00, Output: 15.00},
-	"claude-haiku-4-5":  {BaseInput: 1.00, Output: 5.00},
+	"claude-sonnet-4":   {BaseInput: 3.00, Output: 15.00},
+	// Claude Haiku 4.5 ($1 in / $5 out).
+	"claude-haiku-4-5": {BaseInput: 1.00, Output: 5.00},
+	// Claude Haiku 3.5 — retired on first-party API but still
+	// reachable via Bedrock / Vertex; keep for those captures.
+	"claude-haiku-3-5": {BaseInput: 0.80, Output: 4.00},
 }
 
 // Lookup returns the price for model, plus a flag indicating whether
