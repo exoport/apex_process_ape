@@ -120,6 +120,14 @@ func (w *Writer) Call(entry CallEntry) error {
 	return writeJSONLine(w.calls, callOnWire(entry))
 }
 
+// CheckpointKindStep is the pipeline.RunLogger adapter shape:
+// (kind, step, payload, at) → CheckpointEntry. Defined here so the
+// runlog package owns its own wire shape; pipeline calls this via
+// its narrow RunLogger interface to avoid a runlog import.
+func (w *Writer) CheckpointKindStep(kind, step string, payload any, at time.Time) {
+	_ = w.Checkpoint(CheckpointEntry{Timestamp: at, Kind: kind, Step: step, Payload: payload})
+}
+
 // Checkpoint writes one checkpoints.jsonl entry. Kinds: stage-start,
 // stage-end, commit-made, pipeline-end, reply, stopped. PLAN-5 / C6.
 func (w *Writer) Checkpoint(entry CheckpointEntry) error {

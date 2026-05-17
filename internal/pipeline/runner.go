@@ -39,6 +39,31 @@ type RunOptions struct {
 	// (resolved via $PATH). Used by tests to swap in a shim.
 	ClaudeBin string
 
+	// PrependFlags is inserted into every claude invocation after
+	// argv[0] and before --dangerously-skip-permissions. Used by
+	// web mode to attach --strict-mcp-config + --mcp-config + --settings
+	// without coupling the runner to the orchestrator package.
+	// PLAN-5 / C1 + C3 (pipeline web mode).
+	PrependFlags []string
+
+	// OnStageStart / OnStageEnd are extra hooks alongside the
+	// Observer interface. Web mode wires them to broker.Publish so
+	// the SSE schema's stage-start / stage-end events fire. The
+	// existing Observer continues to feed the TUI / plain printer.
+	// Pass nil to skip web-side publishing.
+	OnStageStart func(stage string)
+	OnStageEnd   func(stage string, dur time.Duration, err error)
+
+	// RunLog, when non-nil, captures per-run hook / call / checkpoint
+	// streams alongside PLAN-3's manifest.yaml. Web mode opens one
+	// at the resolved run-dir and passes it through. PLAN-5 / C6.
+	RunLog RunLogger
+
+	// OnRunDir fires once the manifest writer has resolved the run
+	// directory but before any step runs. Web mode uses this to open
+	// runlog.Writer alongside manifest.yaml. PLAN-5 / C6.
+	OnRunDir func(dir string)
+
 	// Observer receives lifecycle events. Nil is allowed — events are
 	// dropped. The TUI installs an Observer that forwards events to a
 	// Bubble Tea program; the plain printer installs one that writes
@@ -118,9 +143,13 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error { //nolint:gocr
 	if err != nil {
 		return err
 	}
+	if mw != nil && opts.OnRunDir != nil {
+		opts.OnRunDir(mw.runDir)
+	}
 
 	runErr := runStages(ctx, spec, opts, mw)
 	finalizeManifest(mw, runErr, opts.Observer)
+	runLog(opts.RunLog, "pipeline-end", spec.Name, map[string]any{"error": errMessage(runErr)})
 	return runErr
 }
 
@@ -183,13 +212,17 @@ func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWri
 			stageIdx = mw.BeginStage(stage.Name, stageStart)
 		}
 		notify(opts.Observer, func(o Observer) { o.OnStageStart(stage.Name) })
+		if opts.OnStageStart != nil {
+			opts.OnStageStart(stage.Name)
+		}
+		runLog(opts.RunLog, "stage-start", stage.Name, nil)
 		stageStatus := StatusCompleted
 
 		for i, step := range stage.Chain {
 			stepStart := time.Now()
 			notify(opts.Observer, func(o Observer) { o.OnStepStart(stage.Name, i, step) })
 
-			argv, argvErr := buildArgv(opts.ClaudeBin, step, opts.Prompt)
+			argv, argvErr := buildArgv(opts.ClaudeBin, step, opts.Prompt, opts.PrependFlags)
 			if argvErr != nil {
 				recordStep(mw, stageIdx, i+1, step, opts.Prompt, stepStart, time.Now(), StatusFailed, 1, "", nil)
 				notify(opts.Observer, func(o Observer) {
@@ -200,6 +233,10 @@ func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWri
 					_ = mw.EndStage(stageIdx, stageStatus, time.Now())
 				}
 				notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), argvErr) })
+				if opts.OnStageEnd != nil {
+					opts.OnStageEnd(stage.Name, time.Since(stageStart), argvErr)
+				}
+				runLog(opts.RunLog, "stage-end", stage.Name, map[string]any{"error": errMessage(argvErr)})
 				return argvErr
 			}
 
@@ -221,6 +258,12 @@ func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWri
 			// here abort the pipeline — a dirty unexpected tree is
 			// worse to silently extend than to fail loudly.
 			commitErr := performStepCommit(ctx, opts, mw, spec.Name, stage.Name, stageIdx, i+1, step, runErr)
+				if commitErr == nil && runErr == nil {
+					// Best-effort checkpoint — the manifest also
+					// records commit_sha, this is for the
+					// streaming SSE / runlog consumer.
+					runLog(opts.RunLog, "commit-made", stage.Name+"/"+step.Skill, nil)
+				}
 
 			notify(opts.Observer, func(o Observer) { o.OnStepEnd(stage.Name, i, step, time.Since(stepStart), out, runErr) })
 			if runErr != nil {
@@ -229,6 +272,10 @@ func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWri
 					_ = mw.EndStage(stageIdx, stageStatus, time.Now())
 				}
 				notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), runErr) })
+				if opts.OnStageEnd != nil {
+					opts.OnStageEnd(stage.Name, time.Since(stageStart), runErr)
+				}
+				runLog(opts.RunLog, "stage-end", stage.Name, map[string]any{"error": errMessage(runErr)})
 				return fmt.Errorf("stage %q step %d (%s): %w", stage.Name, i, step.Skill, runErr)
 			}
 			if commitErr != nil {
@@ -237,6 +284,10 @@ func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWri
 					_ = mw.EndStage(stageIdx, stageStatus, time.Now())
 				}
 				notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), commitErr) })
+				if opts.OnStageEnd != nil {
+					opts.OnStageEnd(stage.Name, time.Since(stageStart), commitErr)
+				}
+				runLog(opts.RunLog, "stage-end", stage.Name, map[string]any{"error": errMessage(commitErr)})
 				return fmt.Errorf("stage %q step %d (%s) commit: %w", stage.Name, i, step.Skill, commitErr)
 			}
 		}
@@ -245,8 +296,30 @@ func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWri
 			_ = mw.EndStage(stageIdx, stageStatus, time.Now())
 		}
 		notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), nil) })
+		if opts.OnStageEnd != nil {
+			opts.OnStageEnd(stage.Name, time.Since(stageStart), nil)
+		}
+		runLog(opts.RunLog, "stage-end", stage.Name, nil)
 	}
 	return nil
+}
+
+// errMessage returns err.Error() for non-nil err, empty string otherwise.
+// Used to fold an error into a runlog payload map without nil-deref.
+func errMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// runLog routes to opts.RunLog if non-nil. Helper so call sites stay
+// terse and consistent.
+func runLog(rl RunLogger, kind, step string, payload any) {
+	if rl == nil {
+		return
+	}
+	rl.CheckpointKindStep(kind, step, payload, time.Now().UTC())
 }
 
 // buildArgv constructs the argv for a single step's claude invocation.
@@ -268,7 +341,7 @@ func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWri
 // "--prompt <value>" inside the prompt string. The value is appended
 // verbatim — argv is never serialized through a shell, so embedded
 // quotes/specials in the user's prompt survive intact.
-func buildArgv(claudeBin string, step Step, prompt string) ([]string, error) { //nolint:gocritic // Step is a small configuration struct; pointer would complicate caller sites without benefit
+func buildArgv(claudeBin string, step Step, prompt string, prependFlags []string) ([]string, error) { //nolint:gocritic // Step is a small configuration struct; pointer would complicate caller sites without benefit
 	if claudeBin == "" {
 		return nil, errors.New("empty claude bin")
 	}
@@ -288,12 +361,18 @@ func buildArgv(claudeBin string, step Step, prompt string) ([]string, error) { /
 		promptParts = append(promptParts, step.PromptFlag, prompt)
 	}
 	promptStr := strings.Join(promptParts, " ")
-	argv := []string{
-		claudeBin, "--dangerously-skip-permissions",
+	argv := []string{claudeBin}
+	// PLAN-5 / C1 + C3 — web mode prepends --strict-mcp-config,
+	// --mcp-config <inline>, --settings <inline> here. The flags
+	// must land before --dangerously-skip-permissions for claude's
+	// argv parser to attach them to the right options table.
+	argv = append(argv, prependFlags...)
+	argv = append(argv,
+		"--dangerously-skip-permissions",
 		"-p", promptStr,
 		flagOutputFormat, flagOutputStreamJSON,
 		flagVerbose,
-	}
+	)
 	if step.Model != "" {
 		argv = append(argv, "--model", step.Model)
 	}
@@ -603,6 +682,13 @@ func CommitsMadeFor(projectRoot, pipelineName, manifestDir string) int {
 		return 0
 	}
 	return m.Totals.CommitsMade
+}
+
+// ResolveLatestRunDir is the exported alias of latestRunDir. The web
+// CLI binds runlog.Writer to this dir once the runner has finalised
+// its manifest path. PLAN-5 / C6.
+func ResolveLatestRunDir(projectRoot, pipelineName, manifestDir string) string {
+	return latestRunDir(projectRoot, pipelineName, manifestDir)
 }
 
 // latestRunDir resolves the absolute path of the latest run's

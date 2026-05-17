@@ -32,6 +32,8 @@ func newPipelineCmd() *cobra.Command {
 		allowDirtyFlag     bool
 		tuiFlag            bool
 		printFlag          bool
+		webFlag            bool
+		openFlag           bool
 		ignoreProjSettings bool
 	)
 	cmd := &cobra.Command{
@@ -81,13 +83,12 @@ func newPipelineCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
 				return err
 			}
-			optOutTUI, err := resolveModeFlags(tuiFlag, printFlag, noTUI, os.Stderr)
+			mode, optOutTUI, err := resolvePipelineMode(tuiFlag, printFlag, noTUI, webFlag, os.Stderr)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error: "+err.Error())
 				os.Exit(exitCodePreflightFailed) //nolint:gocritic // explicit exit; no defers up to this point
 			}
-			useTUI := !optOutTUI && term.IsTerminal(int(os.Stdout.Fd()))
-			_ = ignoreProjSettings // wired into web mode in a later C
+			useTUI := !optOutTUI && term.IsTerminal(int(os.Stdout.Fd())) && mode != PipelineModeWeb
 			if quietFlag && useTUI {
 				// PLAN-2 / F5: --quiet only suppresses the live
 				// event stream that plainObserver emits. The TUI's
@@ -100,10 +101,15 @@ func newPipelineCmd() *cobra.Command {
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
 			runOpts := runConfig{
-				prompt:      promptFlag,
-				manifestDir: manifestDirFlag,
-				noCommit:    noCommitFlag,
-				allowDirty:  allowDirtyFlag,
+				prompt:                promptFlag,
+				manifestDir:           manifestDirFlag,
+				noCommit:              noCommitFlag,
+				allowDirty:            allowDirtyFlag,
+				ignoreProjectSettings: ignoreProjSettings,
+				openOnStart:           openFlag,
+			}
+			if mode == PipelineModeWeb {
+				return runWithWeb(ctx, spec, projectRoot, runOpts)
 			}
 			if useTUI {
 				return runWithTUI(ctx, spec, projectRoot, runOpts)
@@ -115,7 +121,9 @@ func newPipelineCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "Force the interactive Bubble Tea TUI (currently the default; reserved for a future default flip).")
 	cmd.Flags().BoolVar(&printFlag, "print", false, "Print plain status lines instead of the TUI (eval / CI capture path).")
 	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Deprecated alias for --print. Prints a stderr warning when used.")
-	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json (reserved for web mode; no-op today).")
+	cmd.Flags().BoolVar(&webFlag, "web", false, "Run pipeline against the bridged web UI (HTMX + SSE). Opens a localhost broker and routes hooks + tool calls to the browser. PLAN-5 / C1.")
+	cmd.Flags().BoolVar(&openFlag, "open", false, "With --web: xdg-open the browser to the broker URL.")
+	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json. Honoured in --web mode.")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "With --no-tui: suppress per-event stream; print only stage/step start/end markers")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format for list mode (no positional arg): human|json|yaml")
 	cmd.Flags().StringVar(&manifestDirFlag, "manifest-dir", "", "Override the directory for run manifest artifacts (default: <project>/_output/pipelines)")
@@ -195,10 +203,12 @@ func printPipelineList(res pipelineListResult, format output.Format) error {
 // runConfig bundles CLI-derived knobs passed to runPlain / runWithTUI.
 // Grouped to keep call-sites stable as new flags land.
 type runConfig struct {
-	prompt      string
-	manifestDir string
-	noCommit    bool
-	allowDirty  bool
+	prompt                string
+	manifestDir           string
+	noCommit              bool
+	allowDirty            bool
+	ignoreProjectSettings bool
+	openOnStart           bool
 }
 
 func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot string, quiet bool, cfg runConfig) error {

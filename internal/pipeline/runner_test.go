@@ -55,8 +55,30 @@ func promptOf(t *testing.T, argv []string) (prompt string, tail []string) {
 	return "", nil
 }
 
+func TestBuildArgv_PrependFlagsWebMode(t *testing.T) {
+	// PLAN-5 / C1 — web mode prepends --strict-mcp-config + the two
+	// inline blobs after argv[0] and before --dangerously-skip-permissions.
+	prepend := []string{"--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--settings", "{}"}
+	got, err := buildArgv("claude", Step{Skill: "x"}, "", prepend)
+	if err != nil {
+		t.Fatalf("buildArgv: %v", err)
+	}
+	if got[0] != "claude" {
+		t.Errorf("argv[0] = %q, want claude", got[0])
+	}
+	for i, want := range prepend {
+		if got[1+i] != want {
+			t.Errorf("argv[%d] = %q, want %q", 1+i, got[1+i], want)
+		}
+	}
+	pos := 1 + len(prepend)
+	if got[pos] != "--dangerously-skip-permissions" {
+		t.Errorf("argv[%d] = %q, want --dangerously-skip-permissions", pos, got[pos])
+	}
+}
+
 func TestBuildArgv_DirectSkill(t *testing.T) {
-	got, err := buildArgv("claude", Step{Skill: "apex-shard-doc", Args: "--doc prd"}, "")
+	got, err := buildArgv("claude", Step{Skill: "apex-shard-doc", Args: "--doc prd"}, "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -79,7 +101,7 @@ func TestBuildArgv_AgentPassthrough(t *testing.T) {
 		Skill: "apex-create-prd",
 		Agent: testAgentPM,
 		Model: "opus[1m]",
-	}, "")
+	}, "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -100,7 +122,7 @@ func TestBuildArgv_PromptFlag_NoPrompt(t *testing.T) {
 		Agent:      testAgentPM,
 		PromptFlag: testPromptFlag,
 	}
-	got, err := buildArgv("claude", step, "")
+	got, err := buildArgv("claude", step, "", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -117,7 +139,7 @@ func TestBuildArgv_PromptFlag_WithPrompt(t *testing.T) {
 		Agent:      testAgentPM,
 		PromptFlag: testPromptFlag,
 	}
-	got, err := buildArgv("claude", step, "minimal greeter — add settings page")
+	got, err := buildArgv("claude", step, "minimal greeter — add settings page", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -131,7 +153,7 @@ func TestBuildArgv_PromptFlag_WithPrompt(t *testing.T) {
 func TestBuildArgv_PromptFlag_IgnoredWhenAbsent(t *testing.T) {
 	// Step has no prompt_flag — runtime prompt is silently ignored.
 	step := Step{Skill: "apex-shard-doc", Args: "--doc prd"}
-	got, err := buildArgv("claude", step, "ignored")
+	got, err := buildArgv("claude", step, "ignored", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -143,7 +165,7 @@ func TestBuildArgv_PromptFlag_IgnoredWhenAbsent(t *testing.T) {
 }
 
 func TestBuildArgv_EmptySkill(t *testing.T) {
-	_, err := buildArgv("claude", Step{}, "")
+	_, err := buildArgv("claude", Step{}, "", nil)
 	if err == nil {
 		t.Fatal("expected error when skill is empty")
 	}
