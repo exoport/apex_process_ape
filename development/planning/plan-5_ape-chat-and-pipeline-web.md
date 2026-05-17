@@ -2,7 +2,8 @@
 plan_id: PLAN-5
 created_at: 2026-05-17
 approved_at: 2026-05-17
-status: approved
+completed_at: 2026-05-17
+status: done
 tags:
   - bridge
   - web-ui
