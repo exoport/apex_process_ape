@@ -1,5 +1,94 @@
 # CHANGELOG
 
+## Unreleased
+
+PLAN-5: `ape chat` + `ape pipeline` web mode (MCP bridge). Brings the
+validated PoC at `claude_mcp_bridge_poc@4e542d0` into ape as the new
+default UX path. Web UI runs via HTMX 2.x + stdlib `html/template`,
+vendored under `internal/web/assets/vendor/` — no JS toolchain on
+either side.
+
+### Features
+
+- **New `ape chat` subcommand.** One bridged interactive Claude
+  session, web UI is the only surface. Localhost-only bind; the URL
+  prints on stderr at startup. `--open` runs `xdg-open`.
+  `--ignore-project-settings` skips project + local `.claude/settings*.json`.
+  Exit 137 on browser-side Stop, 0 on natural exit, 130 on ctrl-C.
+
+- **New `ape sessions` subcommand.** Lists live sessions tracked in
+  `~/.ape/registry.json` across all projects. `ape sessions prune`
+  drops rows whose PID is gone. `ape sessions open <prefix>`
+  xdg-opens the URL of the matching session.
+
+- **New `ape costs` subcommand.** Reads `_output/ape/cost-rollup.json`
+  and prints per-pipeline + per-day totals. `--output-format json`
+  for machine consumption.
+
+- **Hooks observability.** Six Claude Code hooks wired via inline
+  `--settings`: `PreToolUse`, `PostToolUse`, `UserPromptSubmit`,
+  `SubagentStart`, `SubagentStop`, `Stop`. Hooks fire only in web
+  mode (zero overhead in `--tui` / `--print`). PreToolUse gating
+  uses the new `hookSpecificOutput.permissionDecision` schema —
+  wiring lands here; rule-set is OUT of this release.
+
+- **Run artefacts.** Pipeline runs continue to land at PLAN-3's path
+  (`<project>/_output/pipelines/<name>/<run-id>/`); PLAN-5 adds
+  `hook-events.jsonl`, `bridge-calls.jsonl`, `checkpoints.jsonl`,
+  and `transcripts/` symlinks alongside `manifest.yaml`. Chat
+  sessions land separately at `<project>/_output/ape/chats/<chat-id>/`
+  with a small `session.yaml` in place of the manifest. Run-id
+  collisions fail loud.
+
+- **Cost rollup.** `<project>/_output/ape/cost-rollup.json` aggregates
+  pipeline runs and chat sessions into per-name / per-day buckets.
+  Per-step cost data comes from per-message `usage` blocks in the
+  session JSONL (no schema bump — populates PLAN-3 v2 fields).
+
+### New CLI flags on `ape pipeline`
+
+- `--tui` — currently inert (default). Reserved as the explicit
+  opt-in form so a future release can flip the default with one
+  line.
+- `--print` — plain stdout (the explicit name for what `--no-tui`
+  used to do). Routes through the same code path as today's
+  `--no-tui` so byte equivalence is structural.
+- `--no-tui` — deprecated alias for `--print`. Prints a stderr
+  warning when used; remove after one minor version.
+- `--ignore-project-settings` — reserved for web mode; no-op until
+  pipeline web mode lands.
+- Multiple mode flags simultaneously is an error (`ape pipeline foo --tui --print` → exit 2).
+
+### Internal-only commands (hidden from `ape --help`)
+
+- `ape mcp-bridge` — MCP stdio server, spawned by Claude Code when
+  ape is declared in the inline `--mcp-config` blob.
+- `ape notify --event <EventName>` — hook forwarder. Reads JSON
+  envelope from stdin, dials `APE_BRIDGE_PORT`, NDJSON-encodes a
+  `TypeHook` frame, exits 0.
+
+### TUI default flip
+
+**Deferred.** The TUI remains the default for `ape pipeline <name>`
+in this release. PLAN-5 / C1 surface flags land now so the flip
+becomes a one-line change in a follow-up. See PLAN-5 origin notes
+for why the flip waits until pipeline web mode is at parity-or-better
+with the TUI for the common path.
+
+### Cost-table caveat
+
+`internal/cost/prices.go` ships with starter Anthropic Claude 4.x
+prices marked TODO. Confirm them against the current Anthropic
+price list before the cost path becomes load-bearing for billing
+decisions.
+
+### Docs
+
+- `docs/reference/bridge-ipc.md` — IPC wire schema.
+- `docs/reference/bridge-security.md` — threat model + bind contract.
+- `docs/how-to/run-artefacts.md` — `_output/` layout reference.
+- `docs/explanation/bridge-architecture.md` — design narrative.
+
 ## v0.0.10 (2026-05-11)
 
 PLAN-4: per-step boundary commits, on by default. Every successful
