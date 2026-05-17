@@ -393,6 +393,15 @@ func runClaude(ctx context.Context, argv []string, projectRoot string, observer 
 	if len(argv) == 0 {
 		return "", errors.New("empty argv")
 	}
+	if os.Getenv("APE_DEBUG_ARGV") != "" {
+		// Surface the full argv on stderr for crash diagnosis. The
+		// inline --mcp-config / --settings JSON blobs make this verbose
+		// but they're <1 KB each so it stays readable.
+		fmt.Fprintf(os.Stderr, "[ape-debug] argv:\n")
+		for i, a := range argv {
+			fmt.Fprintf(os.Stderr, "  [%d] %s\n", i, a)
+		}
+	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // argv is constructed from embedded pipeline specs and validated step data; intentional subprocess dispatch
 	cmd.Dir = projectRoot
 	// PLAN-2 / F1: rewire context-cancel to SIGTERM the whole process
