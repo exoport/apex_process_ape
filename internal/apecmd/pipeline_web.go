@@ -216,6 +216,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		publishStageCard(stage, statusClass, glyph, line)
 	}
 
+	runStart := time.Now()
 	runErr := pipeline.Run(ctx, spec, pipeline.RunOptions{
 		ProjectRoot:  projectRoot,
 		Prompt:       cfg.prompt,
@@ -233,6 +234,28 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		// until the runner has resolved the run dir.
 		RunLog: &lazyRunLog{getter: getRunLog},
 	})
+
+	// Publish a terminal banner so the page shows 'completed' (or
+	// 'failed') rather than the htmx 'disconnected' that would fire
+	// when we tear the broker down. Sleep briefly so SSE flush
+	// reaches the browser before hubCancel below shuts the server.
+	dur := time.Since(runStart).Round(time.Second)
+	var bannerHTML string
+	if runErr == nil {
+		bannerHTML = fmt.Sprintf(
+			`<div id="status" class="connected" hx-swap-oob="outerHTML:#status">✓ completed in %s</div>`,
+			htmlEscape(dur.String()),
+		)
+	} else {
+		bannerHTML = fmt.Sprintf(
+			`<div id="status" class="disconnected" hx-swap-oob="outerHTML:#status">✗ failed: %s</div>`,
+			htmlEscape(runErr.Error()),
+		)
+	}
+	hub.Publish("pipeline-end", bannerHTML)
+	// Hide the Stop button — the run is over.
+	hub.Publish("pipeline-end", `<button id="stop-btn" hx-swap-oob="outerHTML:#stop-btn" hidden></button>`)
+	time.Sleep(300 * time.Millisecond)
 
 	// Fold this run's totals into cost-rollup. Easiest path: rebuild
 	// from on-disk artefacts so the rollup also reconciles any prior

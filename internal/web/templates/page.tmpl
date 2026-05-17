@@ -26,7 +26,7 @@
      subscriber and swaps the #status banner deterministically — that
      covers the case where the browser's htmx event names diverge
      from what hx-on:: matches. -->
-<div sse-swap="connected,pipeline-init,stage-start,stage-update,stage-end,stage-fail,hook,reply,await-pending,await-resolved,stopped,error"
+<div sse-swap="connected,pipeline-init,pipeline-end,stage-start,stage-update,stage-end,stage-fail,hook,reply,await-pending,await-resolved,stopped,error"
      hx-swap="none"></div>
 
 <section>
@@ -36,7 +36,7 @@
   </div>
 </section>
 
-<section>
+<section class="activity">
   <h2>activity</h2>
   <ul id="hooks"></ul>
 </section>

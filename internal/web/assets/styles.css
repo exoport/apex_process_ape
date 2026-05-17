@@ -1,10 +1,13 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
 body {
   font-family: system-ui, -apple-system, sans-serif;
   background: #0d1117;
   color: #c9d1d9;
   padding: 16px;
   line-height: 1.4;
+  display: flex;
+  flex-direction: column;
 }
 header {
   display: flex;
@@ -32,6 +35,9 @@ header small { color: #8b949e; font-weight: 400; }
 #stop-btn[hidden] { display: none; }
 
 section { margin-bottom: 20px; }
+/* Activity section fills remaining viewport height. */
+section.activity { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; margin-bottom: 0; }
+section.activity #hooks { flex: 1 1 auto; }
 h2 { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #8b949e; margin-bottom: 8px; }
 
 #stages { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
@@ -67,36 +73,32 @@ h2 { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spa
   border: 1px solid #30363d;
   border-radius: 8px;
   padding: 4px;
-  max-height: 320px;
   overflow-y: auto;
+  overflow-x: hidden;
   font-family: ui-monospace, monospace;
   font-size: 0.78rem;
-  display: flex;
-  flex-direction: column;
+  min-height: 200px;
 }
 #hooks li {
-  display: grid;
-  grid-template-columns: auto auto auto 1fr;
-  gap: 8px;
+  display: flex;
   align-items: baseline;
+  gap: 12px;
   padding: 3px 8px;
   color: #c9d1d9;
   border-bottom: 1px solid #21262d;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 #hooks li:last-child { border-bottom: none; }
 #hooks li:hover { background: #1c2128; }
-#hooks li .ts { color: #6e7681; font-variant-numeric: tabular-nums; }
-#hooks li .event { color: #8b949e; font-weight: 500; min-width: 9rem; }
-#hooks li .tool { color: #d2a8ff; }
-#hooks li .summary { color: #6e7681; overflow: hidden; text-overflow: ellipsis; }
+#hooks li .ts      { color: #6e7681; font-variant-numeric: tabular-nums; flex: 0 0 4.5rem; }
+#hooks li .event   { color: #8b949e; font-weight: 500; flex: 0 0 9.5rem; }
+#hooks li .tool    { color: #d2a8ff; flex: 0 0 5rem; }
+#hooks li .summary { color: #6e7681; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* Accent the event column by hook kind. */
-#hooks li.hook-tool .event { color: #79c0ff; }
-#hooks li.hook-prompt .event { color: #d2a8ff; }
-#hooks li.hook-agent .event { color: #ffa657; }
+#hooks li.hook-tool .event    { color: #79c0ff; }
+#hooks li.hook-prompt .event  { color: #d2a8ff; }
+#hooks li.hook-agent .event   { color: #ffa657; }
 #hooks li.hook-endturn .event { color: #6e7681; font-style: italic; }
 
 #replies { display: flex; flex-direction: column; gap: 8px; }
