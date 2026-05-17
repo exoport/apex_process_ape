@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/diegosz/apex_process_ape/internal/sessions"
 	"github.com/spf13/cobra"
 )
 
@@ -67,11 +70,30 @@ docs/reference/bridge-security.md for the full threat model.`,
 			if openFlag {
 				_ = openBrowser(url)
 			}
-			if err := session.Run(cmd.Context()); err != nil {
-				return err
+
+			// PLAN-5 / C5 — track this session in ~/.ape/registry.json
+			// so `ape sessions` can list / open / prune. Best-effort
+			// on register/deregister; failure is non-fatal.
+			cwd, _ := os.Getwd()
+			row := sessions.Session{
+				PID:       os.Getpid(),
+				CWD:       cwd,
+				Command:   "ape " + strings.Join(os.Args[1:], " "),
+				Port:      session.BrokerPort(),
+				URL:       url,
+				StartedAt: time.Now().UTC(),
+			}
+			regPath := sessions.DefaultPath()
+			_ = sessions.Register(regPath, row)
+
+			runErr := session.Run(cmd.Context())
+			// os.Exit skips defers; deregister explicitly.
+			_ = sessions.Deregister(regPath, row.PID)
+			if runErr != nil {
+				return runErr
 			}
 			if session.ExitCode != 0 {
-				os.Exit(session.ExitCode) //nolint:gocritic // explicit code path; defers (none) need not run
+				os.Exit(session.ExitCode) //nolint:gocritic // explicit code path; deregister above ran already
 			}
 			return nil
 		},
