@@ -23,7 +23,12 @@
 {{end}}
 
 {{define "hook-line"}}
-<li hx-swap-oob="beforeend:#hooks"><span class="ts">{{.TS}}</span> <span class="tool">{{.Tool}}</span> {{.Body}}</li>
+<li hx-swap-oob="beforeend:#hooks" class="hook hook-{{.CSSClass}}">
+  <span class="ts">{{.TS}}</span>
+  <span class="event">{{.Event}}</span>
+  {{if .Tool}}<span class="tool">{{.Tool}}</span>{{end}}
+  {{if .Summary}}<span class="summary">{{.Summary}}</span>{{end}}
+</li>
 {{end}}
 
 {{define "reply-line"}}
@@ -62,8 +67,9 @@
 {{end}}
 
 {{define "pipeline-init"}}
-{{/* Empty scaffold; the body resets via the SSE swap target on #stages.
-     Reply / hook lists rely on hx-swap-oob inside subsequent fragments. */}}
-<div hx-swap-oob="innerHTML:#hooks"></div>
+{{/* Resets #hooks and #replies on every SSE (re)connect. #stages
+     is NOT reset here because runWithWeb seeds it on the initial
+     page render with one card per stage. */}}
+<ul hx-swap-oob="innerHTML:#hooks"></ul>
 <div hx-swap-oob="innerHTML:#replies"></div>
 {{end}}

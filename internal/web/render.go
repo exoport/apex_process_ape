@@ -13,6 +13,21 @@ import (
 type PageData struct {
 	Title    string
 	Subtitle string
+	// Mode is "pipeline" or "chat". Controls whether the
+	// decision-gate / reply form renders (chat only).
+	Mode string
+	// Stages, when non-empty, seeds the #stages scaffold with
+	// pending placeholders so the user sees every stage from the
+	// first page load. Pipeline mode populates this from spec.Stages().
+	Stages []StageSeed
+}
+
+// StageSeed is one stage placeholder for the initial page scaffold.
+// Slug must match the slug used by SSE stage-card fragments so later
+// updates target the same id.
+type StageSeed struct {
+	Slug string
+	Name string
 }
 
 // RenderPage returns the full HTML body for GET /.
@@ -36,9 +51,13 @@ func RenderStageCard(t *template.Template, st *views.Stage) string {
 
 // HookLine is the typed input to the hook-line fragment.
 type HookLine struct {
-	TS   string
-	Tool string
-	Body string
+	TS      string
+	Event   string
+	Tool    string
+	Summary string
+	// CSSClass selects an accent colour by event kind (tool / agent /
+	// prompt / endturn). Optional.
+	CSSClass string
 }
 
 func RenderHookLine(t *template.Template, h HookLine) string {
@@ -79,6 +98,14 @@ func RenderAwaitResolved(t *template.Template) string {
 		return ""
 	}
 	return b.String()
+}
+
+// RenderConnected returns the OOB swap that flips the #status banner
+// from 'connecting…' to 'connected'. Emitted by the hub on every new
+// SSE subscriber so the page state is deterministic regardless of
+// which htmx event names the browser fires. PLAN-5 / C8.
+func RenderConnected(t *template.Template) string {
+	return RenderStatusBanner(t, StatusBanner{Class: "connected", Text: "connected"})
 }
 
 // RenderStatusBanner returns a status banner fragment for the stopped

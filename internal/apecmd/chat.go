@@ -91,6 +91,7 @@ docs/reference/bridge-security.md for the full threat model.`,
 			pageHTML := web.RenderPage(tpl, web.PageData{
 				Title:    "ape chat",
 				Subtitle: chatID,
+				Mode:     "chat",
 			})
 			mountExtras := func(mux *http.ServeMux) {
 				if err := web.MountAssets(mux); err != nil {
@@ -193,10 +194,13 @@ docs/reference/bridge-security.md for the full threat model.`,
 				TokensIn:  int64(totals.InputTokens),
 				TokensOut: int64(totals.OutputTokens),
 			})
+			// Fold chat totals immediately + reconcile from on-disk
+			// artefacts so prior crashed runs also catch up.
 			if r, err := cost.LoadRollup(cwd); err == nil {
 				r.FoldChat(chatID, endedAt, totals)
 				_ = cost.SaveRollup(cwd, r)
 			}
+			_, _ = cost.RebuildRollup(cwd)
 			// os.Exit skips defers; deregister and close explicitly.
 			_ = rl.Close()
 			_ = sessions.Deregister(regPath, row.PID)

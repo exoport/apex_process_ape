@@ -45,6 +45,7 @@ h2 { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spa
   flex-direction: column;
   gap: 6px;
 }
+.stage.pending { border-color: #21262d; opacity: 0.6; }
 .stage.running { border-color: #1f6feb; }
 .stage.done { border-color: #238636; }
 .stage.failed { border-color: #da3633; }
@@ -65,15 +66,38 @@ h2 { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spa
   background: #161b22;
   border: 1px solid #30363d;
   border-radius: 8px;
-  padding: 8px 12px;
-  max-height: 220px;
+  padding: 4px;
+  max-height: 320px;
   overflow-y: auto;
   font-family: ui-monospace, monospace;
   font-size: 0.78rem;
+  display: flex;
+  flex-direction: column;
 }
-#hooks li { padding: 2px 0; color: #8b949e; }
-#hooks li .ts { color: #6e7681; }
+#hooks li {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 8px;
+  color: #c9d1d9;
+  border-bottom: 1px solid #21262d;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#hooks li:last-child { border-bottom: none; }
+#hooks li:hover { background: #1c2128; }
+#hooks li .ts { color: #6e7681; font-variant-numeric: tabular-nums; }
+#hooks li .event { color: #8b949e; font-weight: 500; min-width: 9rem; }
 #hooks li .tool { color: #d2a8ff; }
+#hooks li .summary { color: #6e7681; overflow: hidden; text-overflow: ellipsis; }
+
+/* Accent the event column by hook kind. */
+#hooks li.hook-tool .event { color: #79c0ff; }
+#hooks li.hook-prompt .event { color: #d2a8ff; }
+#hooks li.hook-agent .event { color: #ffa657; }
+#hooks li.hook-endturn .event { color: #6e7681; font-style: italic; }
 
 #replies { display: flex; flex-direction: column; gap: 8px; }
 .reply {

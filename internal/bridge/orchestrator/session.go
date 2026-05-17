@@ -350,16 +350,17 @@ func (s *Session) DeliverHook(hook HookEvent) {
 	if s.opts.OnHook != nil {
 		s.opts.OnHook(hook)
 	}
-	s.Publish("hook", s.fragRenderer().Hook(hook.Event, hook.SessionID, hook.Step))
+	s.Publish("hook", s.fragRenderer().HookFromEvent(hook))
 }
 
 func (s *Session) replayEvents() []broker.Event {
-	// PLAN-5 / C3 — no backlog replay. Just emit a fresh
-	// pipeline-init so the UI resets its lists, plus an await-pending
-	// if one is currently open. C8 will hook into stage state here.
-	frag := s.fragRenderer().PipelineInit()
+	// PLAN-5 / C3 — no backlog replay. Lead with a `connected` status
+	// flip so the page banner becomes "connected" deterministically,
+	// then a fresh pipeline-init to reset the lists. C8 will fold in
+	// stage state here when we track it.
 	return []broker.Event{
-		{Name: "pipeline-init", Data: frag},
+		{Name: "connected", Data: s.fragRenderer().Connected()},
+		{Name: "pipeline-init", Data: s.fragRenderer().PipelineInit()},
 	}
 }
 
@@ -375,14 +376,15 @@ func (s *Session) fragRenderer() FragmentRenderer {
 // C8 web template renderer.
 type defaultRenderer struct{}
 
-func (defaultRenderer) PipelineInit() string             { return `<div id="stages"></div>` }
-func (defaultRenderer) Reply(content string) string      { return `<div class="reply">` + htmlEscape(content) + `</div>` }
-func (defaultRenderer) AwaitPending() string             { return `<form id="decision-gate" enabled></form>` }
-func (defaultRenderer) AwaitResolved() string            { return `<form id="decision-gate" disabled></form>` }
-func (defaultRenderer) Stopped() string                  { return `<div id="status">Stopped by user</div>` }
-func (defaultRenderer) BridgeError(msg string) string    { return `<div id="status">Bridge error: ` + htmlEscape(msg) + `</div>` }
-func (defaultRenderer) Hook(event, sid, step string) string {
-	return `<li>` + htmlEscape(event) + ` ` + htmlEscape(sid) + ` ` + htmlEscape(step) + `</li>`
+func (defaultRenderer) PipelineInit() string          { return `<div id="stages"></div>` }
+func (defaultRenderer) Connected() string             { return `<div id="status" class="connected">connected</div>` }
+func (defaultRenderer) Reply(content string) string   { return `<div class="reply">` + htmlEscape(content) + `</div>` }
+func (defaultRenderer) AwaitPending() string          { return `<form id="decision-gate" enabled></form>` }
+func (defaultRenderer) AwaitResolved() string         { return `<form id="decision-gate" disabled></form>` }
+func (defaultRenderer) Stopped() string               { return `<div id="status">Stopped by user</div>` }
+func (defaultRenderer) BridgeError(msg string) string { return `<div id="status">Bridge error: ` + htmlEscape(msg) + `</div>` }
+func (defaultRenderer) HookFromEvent(h HookEvent) string {
+	return `<li>` + htmlEscape(h.Event) + ` ` + htmlEscape(h.SessionID) + ` ` + htmlEscape(h.Step) + `</li>`
 }
 
 // acceptLoop accepts unlimited connections on the IPC port. The bridge

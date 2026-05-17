@@ -20,6 +20,7 @@ func newWebRenderer(t *template.Template) orchestrator.FragmentRenderer {
 }
 
 func (r *webRenderer) PipelineInit() string  { return web.RenderPipelineInit(r.t) }
+func (r *webRenderer) Connected() string     { return web.RenderConnected(r.t) }
 func (r *webRenderer) AwaitPending() string  { return web.RenderAwaitPending(r.t) }
 func (r *webRenderer) AwaitResolved() string { return web.RenderAwaitResolved(r.t) }
 func (r *webRenderer) Stopped() string {
@@ -31,6 +32,13 @@ func (r *webRenderer) BridgeError(msg string) string {
 func (r *webRenderer) Reply(content string) string {
 	return web.RenderReplyLine(r.t, web.ReplyLine{Content: content})
 }
-func (r *webRenderer) Hook(event, sessionID, step string) string {
-	return web.RenderHookLine(r.t, web.HookLine{Tool: event, Body: step})
+func (r *webRenderer) HookFromEvent(h orchestrator.HookEvent) string {
+	return web.RenderHookFragment(r.t, web.HookFragment{
+		At:        h.At,
+		Event:     h.Event,
+		SessionID: h.SessionID,
+		AgentID:   h.AgentID,
+		Step:      h.Step,
+		Payload:   h.Payload,
+	})
 }

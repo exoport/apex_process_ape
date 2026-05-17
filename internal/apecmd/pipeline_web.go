@@ -33,9 +33,19 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 
 	// Templates + page once.
 	tpl := web.MustTemplates()
+
+	// Seed the page with one pending card per stage so the user
+	// sees the whole pipeline shape from the first paint, not just
+	// the running one. SSE stage-start/end will replace these by id.
+	var stageSeeds []web.StageSeed
+	for _, st := range spec.Stages() {
+		stageSeeds = append(stageSeeds, web.StageSeed{Slug: slugify(st.Name), Name: st.Name})
+	}
 	pageHTML := web.RenderPage(tpl, web.PageData{
 		Title:    "ape pipeline " + spec.Name,
 		Subtitle: projectRoot,
+		Mode:     "pipeline",
+		Stages:   stageSeeds,
 	})
 
 	// Hub state. RunLog binds after the runner picks the run id.
@@ -164,37 +174,23 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	// lazily on the first stage-start callback — the runner has
 	// resolved the run dir by then via manifestWriter, and we can
 	// derive the matching path from <manifestBase>/<pipeline>/latest.
-	// Track which stages we've already published so the first emission
-	// of a stage appends a new card; subsequent emissions replace it.
-	// HTMX hx-swap-oob silently drops fragments whose target #id is
-	// missing, so we must seed the target on first sight.
-	var (
-		seenMu sync.Mutex
-		seen   = map[string]bool{}
-	)
+	// Every stage card is pre-rendered in the page seed, so every
+	// stage event is a straight outerHTML replace by id.
 	publishStageCard := func(stage, statusClass, glyph, line string) {
 		slug := slugify(stage)
-		seenMu.Lock()
-		first := !seen[slug]
-		seen[slug] = true
-		seenMu.Unlock()
-		card := fmt.Sprintf(
-			`<div id="stage-%s" class="stage %s"%s><div class="stage-head"><span class="stage-glyph">%s</span><span class="stage-name">%s</span></div><div class="stage-last-hook">%s</div></div>`,
+		frag := fmt.Sprintf(
+			`<div id="stage-%s" class="stage %s" hx-swap-oob="true"><div class="stage-head"><span class="stage-glyph">%s</span><span class="stage-name">%s</span></div><div class="stage-last-hook">%s</div></div>`,
 			slug, statusClass,
-			"", // OOB attribute placeholder (set below)
 			htmlEscape(glyph), htmlEscape(stage), htmlEscape(line),
 		)
-		if first {
-			// Append a new card to #stages.
-			frag := fmt.Sprintf(`<div hx-swap-oob="beforeend:#stages">%s</div>`, card)
-			hub.Publish("stage-start", frag)
-		} else {
-			// Replace existing card by id. hx-swap-oob="true" =
-			// outerHTML by matching id attribute.
-			frag := strings.Replace(card, `id="stage-`+slug+`" class="stage `+statusClass+`"`,
-				`id="stage-`+slug+`" class="stage `+statusClass+`" hx-swap-oob="true"`, 1)
-			hub.Publish("stage-update", frag)
+		event := "stage-update"
+		switch statusClass {
+		case "running":
+			event = "stage-start"
+		case "done", "failed", "stopped":
+			event = "stage-end"
 		}
+		hub.Publish(event, frag)
 	}
 	onStageStart := func(stage string) {
 		publishStageCard(stage, "running", "⟳", "running…")
@@ -238,10 +234,11 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		RunLog: &lazyRunLog{getter: getRunLog},
 	})
 
-	// Fold totals into cost-rollup.
-	if r, err := cost.LoadRollup(projectRoot); err == nil {
-		r.FoldChat("pipeline-"+spec.Name, time.Now().UTC(), cost.Totals{})
-		_ = cost.SaveRollup(projectRoot, r)
+	// Fold this run's totals into cost-rollup. Easiest path: rebuild
+	// from on-disk artefacts so the rollup also reconciles any prior
+	// runs that didn't fold on exit (crashes, kill -9, etc.).
+	if _, err := cost.RebuildRollup(projectRoot); err != nil {
+		fmt.Fprintf(os.Stderr, "ape pipeline --web: rebuild cost rollup: %v\n", err)
 	}
 
 	if rl := getRunLog(); rl != nil {

@@ -17,25 +17,23 @@
   <button id="stop-btn"
           hx-post="/api/stop"
           hx-confirm="Stop the active step? Step state will be marked stopped and the run will halt."
-          hx-swap="none"
-          hidden>stop</button>
+          hx-swap="none">stop</button>
 </header>
 
-<!-- Sentinel listener. Every named SSE event we emit is listed here so
-     HTMX runs its OOB-swap machinery on the response body. hx-swap="none"
-     means this div's own contents are never replaced; the fragments
-     target #stages / #hooks / #replies / #decision-gate / #status via
-     hx-swap-oob inside the response. The connected/disconnected status
-     flip lives on <body> because the SSE extension fires its open /
-     error events on the sse-connect host (body), and those events
-     don't bubble down to a descendant. Defence in depth: app.js also
-     attaches a document-level listener. -->
-<div sse-swap="pipeline-init,stage-start,stage-update,stage-end,stage-fail,hook,reply,await-pending,await-resolved,stopped,error"
+<!-- Sentinel listener. Every named SSE event is enumerated here so
+     HTMX runs its OOB-swap machinery on the response body. The
+     'connected' event is emitted from ReplayEvents on every new SSE
+     subscriber and swaps the #status banner deterministically — that
+     covers the case where the browser's htmx event names diverge
+     from what hx-on:: matches. -->
+<div sse-swap="connected,pipeline-init,stage-start,stage-update,stage-end,stage-fail,hook,reply,await-pending,await-resolved,stopped,error"
      hx-swap="none"></div>
 
 <section>
   <h2>stages</h2>
-  <div id="stages"></div>
+  <div id="stages">
+    {{range .Stages}}<div id="stage-{{.Slug}}" class="stage pending"><div class="stage-head"><span class="stage-glyph">·</span><span class="stage-name">{{.Name}}</span></div><div class="stage-last-hook">pending</div></div>{{end}}
+  </div>
 </section>
 
 <section>
@@ -43,6 +41,7 @@
   <ul id="hooks"></ul>
 </section>
 
+{{if eq .Mode "chat"}}
 <section>
   <h2>replies</h2>
   <div id="replies"></div>
@@ -56,6 +55,7 @@
   <input type="text" name="content" placeholder="reply…" disabled>
   <button type="submit" disabled>send</button>
 </form>
+{{end}}
 
 <script src="/assets/app.js"></script>
 </body>

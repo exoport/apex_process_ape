@@ -200,11 +200,21 @@ func (h *Hub) handleSend(content string) {
 }
 
 func (h *Hub) replayEvents() []broker.Event {
-	if h.opts.ReplayEvents != nil {
-		return h.opts.ReplayEvents()
+	// Always lead with a `connected` status flip so the page's
+	// "connecting…" banner becomes "connected" deterministically, no
+	// matter which htmx-sse event name the browser fires. PLAN-5 / C8.
+	events := []broker.Event{
+		{Name: "connected", Data: h.fragRenderer().Connected()},
 	}
-	frag := h.fragRenderer().PipelineInit()
-	return []broker.Event{{Name: "pipeline-init", Data: frag}}
+	if h.opts.ReplayEvents != nil {
+		events = append(events, h.opts.ReplayEvents()...)
+		return events
+	}
+	events = append(events, broker.Event{
+		Name: "pipeline-init",
+		Data: h.fragRenderer().PipelineInit(),
+	})
+	return events
 }
 
 func (h *Hub) fragRenderer() FragmentRenderer {
@@ -278,17 +288,18 @@ func (h *Hub) dispatch(m ipc.Message) {
 			}
 		}
 	case ipc.TypeHook:
-		if h.opts.OnHook != nil {
-			h.opts.OnHook(HookEvent{
-				Event:     m.Event,
-				SessionID: m.SessionID,
-				AgentID:   m.AgentID,
-				Step:      m.Step,
-				Payload:   m.Payload,
-				At:        time.Now().UTC(),
-			})
+		evt := HookEvent{
+			Event:     m.Event,
+			SessionID: m.SessionID,
+			AgentID:   m.AgentID,
+			Step:      m.Step,
+			Payload:   m.Payload,
+			At:        time.Now().UTC(),
 		}
-		h.Publish("hook", h.fragRenderer().Hook(m.Event, m.SessionID, m.Step))
+		if h.opts.OnHook != nil {
+			h.opts.OnHook(evt)
+		}
+		h.Publish("hook", h.fragRenderer().HookFromEvent(evt))
 	case ipc.TypeBufferOvf:
 		if h.opts.OnCall != nil {
 			h.opts.OnCall(ToolCall{

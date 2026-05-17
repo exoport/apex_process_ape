@@ -11,10 +11,11 @@ package orchestrator
 // templates.
 type FragmentRenderer interface {
 	PipelineInit() string
+	Connected() string
 	Reply(content string) string
 	AwaitPending() string
 	AwaitResolved() string
 	Stopped() string
 	BridgeError(msg string) string
-	Hook(event, sessionID, step string) string
+	HookFromEvent(h HookEvent) string
 }
