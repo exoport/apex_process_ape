@@ -64,10 +64,16 @@ func TestLookup_OverrideWinsOverBuiltin(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	// Drop any cached overrides from previous tests in the same binary.
-	overridesMu.Lock()
-	loadedOverrides = nil
-	overridesLoaded = false
-	overridesMu.Unlock()
+	resetOverrideCache := func() {
+		overridesMu.Lock()
+		loadedOverrides = nil
+		overridesLoaded = false
+		overridesMu.Unlock()
+	}
+	resetOverrideCache()
+	// Reset again after the test so unrelated tests in the same binary
+	// don't pick up our $99 opus rate.
+	t.Cleanup(resetOverrideCache)
 
 	override := map[string]ModelPrice{
 		"claude-opus-4-7": {BaseInput: 99.00, Output: 200.00},

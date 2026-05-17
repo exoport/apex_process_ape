@@ -167,24 +167,34 @@ docs/reference/bridge-security.md for the full threat model.`,
 
 			runErr := session.Run(cmd.Context())
 			_ = rl.Checkpoint(runlog.CheckpointEntry{Kind: "chat-end", Payload: map[string]any{"exit_code": session.ExitCode}})
-			// PLAN-5 / C7 — chat session cost lands here. The
-			// session-JSONL tail hookup is left for a follow-up
-			// (it needs the claude session id, which we currently
-			// learn only from inbound hook envelopes; the chat
-			// hooks-block fires it, but the wiring path is
-			// non-trivial and outside this PR). For now we write
-			// an empty cost record so the rollup file exists and
-			// the manifest shape is honoured. PLAN-5 / C7 §"Data
-			// source by mode".
+
+			// PLAN-5 / C7 — scan the session JSONL for cost totals.
+			// Claude Code writes ~/.claude/projects/<encoded-cwd>/<sid>.jsonl
+			// during a session; we find the newest one modified
+			// after startedAt and aggregate its usage blocks. Falls
+			// back to zero totals when no file matches (typical of
+			// runs where claude bailed before producing one).
 			endedAt := time.Now().UTC()
+			totals, model, jsonlPath, scanErr := cost.ScanLatestSession("", startedAt)
+			if scanErr != nil {
+				fmt.Fprintf(os.Stderr, "ape chat: cost scan: %v\n", scanErr)
+			}
+			if jsonlPath != "" {
+				// Link the transcript into the run dir so the
+				// runlog references the canonical path. Best-effort.
+				_ = rl.LinkTranscript("transcript.jsonl", jsonlPath)
+			}
 			_ = runlog.WriteSessionYAML(chatDir, runlog.SessionMeta{
 				ChatID:    chatID,
 				StartedAt: startedAt,
 				EndedAt:   endedAt,
-				Model:     "",
+				Model:     model,
+				CostUSD:   totals.CostUSD,
+				TokensIn:  int64(totals.InputTokens),
+				TokensOut: int64(totals.OutputTokens),
 			})
 			if r, err := cost.LoadRollup(cwd); err == nil {
-				r.FoldChat(chatID, endedAt, cost.Totals{})
+				r.FoldChat(chatID, endedAt, totals)
 				_ = cost.SaveRollup(cwd, r)
 			}
 			// os.Exit skips defers; deregister and close explicitly.
