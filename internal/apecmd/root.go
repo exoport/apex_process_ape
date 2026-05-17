@@ -47,6 +47,7 @@ func init() {
 		newMCPBridgeCmd(),
 		newNotifyCmd(),
 		newSessionsCmd(),
+		newCostsCmd(),
 	)
 }
 

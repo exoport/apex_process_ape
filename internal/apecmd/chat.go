@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/diegosz/apex_process_ape/internal/cost"
 	"github.com/diegosz/apex_process_ape/internal/runlog"
 	"github.com/diegosz/apex_process_ape/internal/sessions"
 	"github.com/diegosz/apex_process_ape/internal/web"
@@ -94,6 +96,15 @@ docs/reference/bridge-security.md for the full threat model.`,
 				if err := web.MountAssets(mux); err != nil {
 					fmt.Fprintf(os.Stderr, "ape chat: mount assets: %v\n", err)
 				}
+				mux.HandleFunc("/dashboard", func(w http.ResponseWriter, _ *http.Request) {
+					r, err := cost.LoadRollup(cwd)
+					if err != nil {
+						http.Error(w, "load rollup: "+err.Error(), 500)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(r)
+				})
 			}
 
 			session := orchestrator.New(orchestrator.Options{
@@ -156,12 +167,26 @@ docs/reference/bridge-security.md for the full threat model.`,
 
 			runErr := session.Run(cmd.Context())
 			_ = rl.Checkpoint(runlog.CheckpointEntry{Kind: "chat-end", Payload: map[string]any{"exit_code": session.ExitCode}})
+			// PLAN-5 / C7 — chat session cost lands here. The
+			// session-JSONL tail hookup is left for a follow-up
+			// (it needs the claude session id, which we currently
+			// learn only from inbound hook envelopes; the chat
+			// hooks-block fires it, but the wiring path is
+			// non-trivial and outside this PR). For now we write
+			// an empty cost record so the rollup file exists and
+			// the manifest shape is honoured. PLAN-5 / C7 §"Data
+			// source by mode".
+			endedAt := time.Now().UTC()
 			_ = runlog.WriteSessionYAML(chatDir, runlog.SessionMeta{
 				ChatID:    chatID,
 				StartedAt: startedAt,
-				EndedAt:   time.Now().UTC(),
-				Model:     "unknown", // populated by C7 cost tracking
+				EndedAt:   endedAt,
+				Model:     "",
 			})
+			if r, err := cost.LoadRollup(cwd); err == nil {
+				r.FoldChat(chatID, endedAt, cost.Totals{})
+				_ = cost.SaveRollup(cwd, r)
+			}
 			// os.Exit skips defers; deregister and close explicitly.
 			_ = rl.Close()
 			_ = sessions.Deregister(regPath, row.PID)
