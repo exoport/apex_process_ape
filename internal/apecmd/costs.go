@@ -48,16 +48,36 @@ func newCostsUpdateCmd() *cobra.Command {
 	var fromPath string
 	cmd := &cobra.Command{
 		Use:   "update",
-		Short: "Refresh the price table from a YAML file (overwrites in-memory map)",
+		Short: "Persist model price overrides from a YAML file to ~/.ape/prices.yaml",
+		Long: `Reads a YAML file in the shape:
+
+  prices:
+    claude-opus-4-7:
+      base_input: 5.00
+      output: 25.00
+    claude-sonnet-4-6:
+      base_input: 3.00
+      output: 15.00
+
+and persists it to ~/.ape/prices.yaml. Subsequent ape invocations
+prefer these values over the built-in price table (cost.Prices).
+PLAN-5 / C7.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if fromPath == "" {
 				return fmt.Errorf("ape costs update: --from <file> required")
 			}
-			// PLAN-5 / C7 — update path TBD; for now we only read
-			// the YAML and report which models would change. A
-			// follow-up commit can wire actual persistence of
-			// pricing overrides under ~/.ape/.
-			return fmt.Errorf("ape costs update: not implemented yet (file=%s)", fromPath)
+			overrides, err := cost.LoadOverridesFrom(fromPath)
+			if err != nil {
+				return err
+			}
+			if err := cost.SaveOverrides(overrides); err != nil {
+				return fmt.Errorf("ape costs update: save: %w", err)
+			}
+			fmt.Fprintf(os.Stderr, "saved %d override(s) to ~/.ape/prices.yaml\n", len(overrides))
+			for model, p := range overrides {
+				fmt.Fprintf(os.Stderr, "  %s\tin=$%.2f out=$%.2f\n", model, p.BaseInput, p.Output)
+			}
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&fromPath, "from", "", "Path to a YAML file with model price overrides")
@@ -69,13 +89,17 @@ func newCostsRollCmd() *cobra.Command {
 		Use:   "roll",
 		Short: "Rebuild <project>/_output/ape/cost-rollup.json from on-disk run / chat artefacts",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			// Full rebuild walks _output/pipelines/<name>/<run-id>/manifest.yaml
-			// + _output/ape/chats/<chat-id>/session.yaml. The
-			// scaffolding lives in cost.LoadRollup / SaveRollup;
-			// the walker is a follow-up commit because manifest.yaml's
-			// PLAN-3 reader is the natural source and that integration
-			// is left for the pipeline-web-mode merge.
-			return fmt.Errorf("ape costs roll: not implemented yet (use `ape pipeline` / `ape chat` to seed the rollup)")
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			r, err := cost.RebuildRollup(cwd)
+			if err != nil {
+				return fmt.Errorf("ape costs roll: %w", err)
+			}
+			fmt.Fprintf(os.Stderr, "rebuilt rollup: %d pipeline name(s), %d chat(s), %d day(s)\n",
+				len(r.Pipelines), len(r.Chats.Runs), len(r.ByDay))
+			return nil
 		},
 	}
 }

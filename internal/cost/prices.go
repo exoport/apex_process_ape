@@ -65,7 +65,17 @@ var Prices = map[string]ModelPrice{
 // Lookup returns the price for model, plus a flag indicating whether
 // the model was known. Unknown models return zero price (caller may
 // stamp a `cost_note` on the affected step's manifest record).
+//
+// Lookup consults ~/.ape/prices.yaml first (PLAN-5 / C7 — `ape costs
+// update --from <file>` persists overrides there); the built-in
+// Prices map is the fallback. Overrides are cached after the first
+// Lookup of a process; SaveOverrides drops the cache.
 func Lookup(model string) (ModelPrice, bool) {
+	if overrides := loadOverridesOnce(); overrides != nil {
+		if p, ok := overrides[model]; ok {
+			return p, true
+		}
+	}
 	p, ok := Prices[model]
 	return p, ok
 }
