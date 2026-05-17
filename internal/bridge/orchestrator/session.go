@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -52,9 +53,18 @@ type Options struct {
 	// the parent process's stdout / stderr (caller passes those in).
 	Stdout io.Writer
 	Stderr io.Writer
-	// PageHTML is the body served at GET /. C1 leaves the C8
-	// placeholder when empty.
+	// PageHTML is the body served at GET /. C1 leaves a tiny
+	// placeholder when empty; C8 callers pass the full HTMX page.
 	PageHTML string
+	// MountExtras is forwarded to broker.Options.Mux. The caller
+	// uses it to mount /assets/... (C8) and /dashboard (C7).
+	MountExtras func(mux *http.ServeMux)
+	// FragmentRenderer, when set, is consulted on every internally-
+	// emitted SSE event (reply, await-pending, await-resolved,
+	// stopped, error, hook, pipeline-init) to produce the HTML
+	// payload. Empty / nil renderer falls back to the inline
+	// placeholder strings the orchestrator used before C8.
+	FragmentRenderer FragmentRenderer
 	// OnReply is invoked when the bridge forwards a TypeReply frame
 	// (skill called reply()). The orchestrator passes the content
 	// to the broker as an SSE `reply` event; OnReply lets the
@@ -152,6 +162,7 @@ func (s *Session) Listen() (webURL string, err error) {
 		OnSend:       s.handleSend,
 		OnStop:       s.requestStop,
 		ReplayEvents: s.replayEvents,
+		Mux:          s.opts.MountExtras,
 	})
 	addr, err := s.broker.Listen()
 	if err != nil {
@@ -302,8 +313,7 @@ func (s *Session) requestStop() {
 		if s.cmd != nil && s.cmd.Process != nil {
 			terminateGroup(s.cmd)
 		}
-		// Emit the SSE `stopped` event so the UI updates.
-		s.Publish("stopped", `<div id="status">Stopped by user</div>`)
+		s.Publish("stopped", s.fragRenderer().Stopped())
 	})
 }
 
@@ -340,25 +350,39 @@ func (s *Session) DeliverHook(hook HookEvent) {
 	if s.opts.OnHook != nil {
 		s.opts.OnHook(hook)
 	}
-	// Default broker emission: serialize the envelope as JSON so the
-	// HTMX SSE extension can route it; C8 will replace this with a
-	// pre-rendered HTML fragment.
-	payload, _ := json.Marshal(map[string]any{
-		"event":      hook.Event,
-		"session_id": hook.SessionID,
-		"agent_id":   hook.AgentID,
-		"step":       hook.Step,
-	})
-	s.Publish("hook", string(payload))
+	s.Publish("hook", s.fragRenderer().Hook(hook.Event, hook.SessionID, hook.Step))
 }
 
 func (s *Session) replayEvents() []broker.Event {
 	// PLAN-5 / C3 — no backlog replay. Just emit a fresh
 	// pipeline-init so the UI resets its lists, plus an await-pending
 	// if one is currently open. C8 will hook into stage state here.
+	frag := s.fragRenderer().PipelineInit()
 	return []broker.Event{
-		{Name: "pipeline-init", Data: `<div id="stages"></div>`},
+		{Name: "pipeline-init", Data: frag},
 	}
+}
+
+func (s *Session) fragRenderer() FragmentRenderer {
+	if s.opts.FragmentRenderer != nil {
+		return s.opts.FragmentRenderer
+	}
+	return defaultRenderer{}
+}
+
+// defaultRenderer falls back to the inline placeholders the
+// orchestrator used before C8. Tests use these; production runs the
+// C8 web template renderer.
+type defaultRenderer struct{}
+
+func (defaultRenderer) PipelineInit() string             { return `<div id="stages"></div>` }
+func (defaultRenderer) Reply(content string) string      { return `<div class="reply">` + htmlEscape(content) + `</div>` }
+func (defaultRenderer) AwaitPending() string             { return `<form id="decision-gate" enabled></form>` }
+func (defaultRenderer) AwaitResolved() string            { return `<form id="decision-gate" disabled></form>` }
+func (defaultRenderer) Stopped() string                  { return `<div id="status">Stopped by user</div>` }
+func (defaultRenderer) BridgeError(msg string) string    { return `<div id="status">Bridge error: ` + htmlEscape(msg) + `</div>` }
+func (defaultRenderer) Hook(event, sid, step string) string {
+	return `<li>` + htmlEscape(event) + ` ` + htmlEscape(sid) + ` ` + htmlEscape(step) + `</li>`
 }
 
 // acceptLoop accepts unlimited connections on the IPC port. The bridge
@@ -405,7 +429,7 @@ func (s *Session) onIPCFrame(m ipc.Message) {
 			close(s.bridgeReadyCh)
 		}
 	case ipc.TypeReply:
-		s.Publish("reply", `<div class="reply">`+htmlEscape(m.Content)+`</div>`)
+		s.Publish("reply", s.fragRenderer().Reply(m.Content))
 		if s.opts.OnReply != nil {
 			s.opts.OnReply(m.Content)
 		}
@@ -424,9 +448,9 @@ func (s *Session) onIPCFrame(m ipc.Message) {
 		// decision-gate form toggles in the UI. PLAN-5 / C3.
 		if m.Tool == "await_message" {
 			if isDeferredEntry(m.Params) {
-				s.Publish("await-pending", `<form id="decision-gate" enabled></form>`)
+				s.Publish("await-pending", s.fragRenderer().AwaitPending())
 			} else if isFlushEntry(m.Params) {
-				s.Publish("await-resolved", `<form id="decision-gate" disabled></form>`)
+				s.Publish("await-resolved", s.fragRenderer().AwaitResolved())
 			}
 		}
 	case ipc.TypeHook:

@@ -63,6 +63,11 @@ type Options struct {
 	// list of events to replay; if nil, no replay is performed.
 	// PLAN-5 / C3 "browser-close behaviour".
 	ReplayEvents func() []Event
+	// Mux, if non-nil, is called during Serve so the caller can
+	// mount extra routes before the broker's defaults. Used by C8
+	// to mount /assets/... from the embedded web package, and by
+	// C7 to mount /dashboard.
+	Mux func(mux *http.ServeMux)
 }
 
 // Broker is the HTTP/SSE surface. New construct one; Listen reserves
@@ -121,6 +126,12 @@ func (b *Broker) Serve(ctx context.Context) error {
 		}
 	}
 	mux := http.NewServeMux()
+	if b.opts.Mux != nil {
+		// Caller mounts extra routes first (e.g. /assets/...,
+		// /dashboard). The broker's defaults come last so they
+		// don't shadow user routes.
+		b.opts.Mux(mux)
+	}
 	mux.HandleFunc("/", b.handleRoot)
 	mux.HandleFunc("/api/events", b.handleEvents)
 	mux.HandleFunc("/api/send", b.handleSend)

@@ -3,6 +3,7 @@ package apecmd
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/diegosz/apex_process_ape/internal/runlog"
 	"github.com/diegosz/apex_process_ape/internal/sessions"
+	"github.com/diegosz/apex_process_ape/internal/web"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -81,6 +83,19 @@ docs/reference/bridge-security.md for the full threat model.`,
 			defer rl.Close()
 			_ = rl.Checkpoint(runlog.CheckpointEntry{Kind: "chat-start", Payload: map[string]any{"chat_id": chatID, "cwd": cwd}})
 
+			// C8 — render the HTMX page once at startup and mount
+			// the embedded assets/ subtree onto the broker mux.
+			tpl := web.MustTemplates()
+			pageHTML := web.RenderPage(tpl, web.PageData{
+				Title:    "ape chat",
+				Subtitle: chatID,
+			})
+			mountExtras := func(mux *http.ServeMux) {
+				if err := web.MountAssets(mux); err != nil {
+					fmt.Fprintf(os.Stderr, "ape chat: mount assets: %v\n", err)
+				}
+			}
+
 			session := orchestrator.New(orchestrator.Options{
 				APEBin:                apeBin,
 				SystemPrompt:          chatSystemPrompt,
@@ -88,6 +103,9 @@ docs/reference/bridge-security.md for the full threat model.`,
 				Stdout:                os.Stdout,
 				Stderr:                os.Stderr,
 				IgnoreProjectSettings: ignoreProjectSettingsFlag,
+				PageHTML:              pageHTML,
+				MountExtras:           mountExtras,
+				FragmentRenderer:      newWebRenderer(tpl),
 				OnReply: func(content string) {
 					_ = rl.Checkpoint(runlog.CheckpointEntry{Kind: "reply", Payload: map[string]any{"content": content}})
 				},

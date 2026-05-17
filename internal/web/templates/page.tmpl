@@ -1,0 +1,53 @@
+{{define "page"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="/assets/styles.css">
+<script src="/assets/vendor/htmx.min.js"></script>
+<script src="/assets/vendor/htmx-ext-sse.min.js"></script>
+</head>
+<body hx-ext="sse" sse-connect="/api/events">
+<header>
+  <h1>{{.Title}}</h1>
+  <small>{{.Subtitle}}</small>
+  <div id="status">connecting…</div>
+  <button id="stop-btn"
+          hx-post="/api/stop"
+          hx-confirm="Stop the active step? Step state will be marked stopped and the run will halt."
+          hx-swap="none"
+          hidden>stop</button>
+</header>
+
+<!-- HTMX SSE: each named event triggers the matching sse-swap below.
+     The OOB swaps inside the fragments target #stages, #hooks, #replies,
+     and #decision-gate. The base scaffolding lives here so a reconnect
+     pipeline-init can reset all three lists. -->
+<section>
+  <h2>stages</h2>
+  <div id="stages" sse-swap="pipeline-init,stage-start,stage-update,stage-end" hx-swap="innerHTML"></div>
+</section>
+
+<section>
+  <h2>activity</h2>
+  <ul id="hooks"></ul>
+</section>
+
+<section>
+  <h2>replies</h2>
+  <div id="replies"></div>
+</section>
+
+<form id="decision-gate"
+      hx-post="/api/send"
+      hx-ext="json-enc"
+      hx-swap="none">
+  <span class="gate-label" id="gate-label">(waiting for skill to call await_message)</span>
+  <input type="text" name="content" placeholder="reply…" disabled>
+  <button type="submit" disabled>send</button>
+</form>
+
+<script src="/assets/app.js"></script>
+</body>
+</html>
+{{end}}

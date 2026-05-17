@@ -12,9 +12,13 @@
 *.out
 coverage.out
 
-# Vendor directory (we don't vendor)
+# Vendor directory (we don't vendor) — except internal/web/assets/vendor/,
+# which holds the PLAN-5 / C8 HTMX bundle committed verbatim so
+# `go install` produces a self-contained binary with no toolchain.
 vendor/
 /vendor/
+!internal/web/assets/vendor/
+!internal/web/assets/vendor/**
 
 # goreleaser output
 /dist/

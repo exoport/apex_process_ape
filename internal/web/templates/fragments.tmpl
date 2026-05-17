@@ -1,0 +1,69 @@
+{{/* PLAN-5 / C8 — one {{define}} per SSE event. Each fragment is a
+     self-contained HTMX OOB swap so the browser drops it into the
+     right slot without re-rendering the page. */}}
+
+{{define "stage-card"}}
+<div id="stage-{{.Slug}}" class="stage {{.StatusClass}}" hx-swap-oob="outerHTML:#stage-{{.Slug}}">
+  <div class="stage-head">
+    <span class="stage-glyph">{{.Glyph}}</span>
+    <span class="stage-name">{{.Name}}</span>
+    <span class="stage-duration">{{.Duration}}</span>
+    {{if .Cost}}<span class="stage-cost">{{.Cost}}</span>{{end}}
+  </div>
+  {{if .LastHook}}<div class="stage-last-hook">{{.LastHook}}</div>{{end}}
+  {{if .Hooks}}
+  <details>
+    <summary>{{len .Hooks}} hook(s)</summary>
+    <ul>
+      {{range .Hooks}}<li>{{.}}</li>{{end}}
+    </ul>
+  </details>
+  {{end}}
+</div>
+{{end}}
+
+{{define "hook-line"}}
+<li hx-swap-oob="beforeend:#hooks"><span class="ts">{{.TS}}</span> <span class="tool">{{.Tool}}</span> {{.Body}}</li>
+{{end}}
+
+{{define "reply-line"}}
+<div class="reply" hx-swap-oob="beforeend:#replies">
+  {{if .StageTag}}<span class="stage-tag">{{.StageTag}}</span> {{end}}
+  {{.Content}}
+</div>
+{{end}}
+
+{{define "await-pending"}}
+<form id="decision-gate"
+      hx-swap-oob="outerHTML:#decision-gate"
+      hx-post="/api/send"
+      hx-ext="json-enc"
+      hx-swap="none">
+  <span class="gate-label">skill is awaiting input</span>
+  <input type="text" name="content" placeholder="reply…" autofocus required>
+  <button type="submit">send</button>
+</form>
+{{end}}
+
+{{define "await-resolved"}}
+<form id="decision-gate"
+      hx-swap-oob="outerHTML:#decision-gate"
+      hx-post="/api/send"
+      hx-ext="json-enc"
+      hx-swap="none">
+  <span class="gate-label" id="gate-label">(waiting for skill to call await_message)</span>
+  <input type="text" name="content" placeholder="reply…" disabled>
+  <button type="submit" disabled>send</button>
+</form>
+{{end}}
+
+{{define "status-banner"}}
+<div id="status" class="{{.Class}}" hx-swap-oob="outerHTML:#status">{{.Text}}</div>
+{{end}}
+
+{{define "pipeline-init"}}
+{{/* Empty scaffold; the body resets via the SSE swap target on #stages.
+     Reply / hook lists rely on hx-swap-oob inside subsequent fragments. */}}
+<div hx-swap-oob="innerHTML:#hooks"></div>
+<div hx-swap-oob="innerHTML:#replies"></div>
+{{end}}
