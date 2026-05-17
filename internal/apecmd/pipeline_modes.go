@@ -10,25 +10,28 @@ import (
 type PipelineMode int
 
 const (
-	// PipelineModeTUI is the Bubble Tea TUI (today's default).
-	PipelineModeTUI PipelineMode = iota
-	// PipelineModePrint is plain stdout (today's --no-tui shape).
-	PipelineModePrint
 	// PipelineModeWeb is the bridged web UI (PLAN-5 / C1 + C3).
-	PipelineModeWeb
+	// This is the default as of the PLAN-5 release.
+	PipelineModeWeb PipelineMode = iota
+	// PipelineModeTUI is the Bubble Tea TUI (pre-PLAN-5 default).
+	// Now opt-in via --tui.
+	PipelineModeTUI
+	// PipelineModePrint is plain stdout (eval / CI capture path).
+	PipelineModePrint
 )
 
 // resolvePipelineMode interprets the four pipeline-mode flags and
 // returns the resolved mode plus the optOutTUI boolean that the
-// existing `useTUI := !optOutTUI && term.IsTerminal(...)` check
-// downstream still wants. PLAN-5 / C1.
+// downstream `useTUI := !optOutTUI && term.IsTerminal(...)` check
+// still wants. PLAN-5 / C1.
 //
 // `--no-tui` is a deprecated alias for `--print`; using it prints a
 // stderr warning. Multiple mode flags simultaneously is an error.
 //
-// Today's default is TUI. The eventual flip to web-default is held
-// until a follow-up release per PLAN-5 / C1 phasing — the surface
-// here is ready for that flip to be a one-line change.
+// **Default flipped to web in PLAN-5.** TUI is now opt-in via `--tui`.
+// Plain stdout is opt-in via `--print` (`--no-tui` deprecated alias).
+// The eval consumer should pin `--print` explicitly; the no-flag form
+// `ape pipeline <name>` now spawns a browser.
 func resolvePipelineMode(tui, print, noTUI, web bool, stderr io.Writer) (mode PipelineMode, optOutTUI bool, err error) {
 	count := 0
 	for _, f := range []bool{tui, print, noTUI, web} {
@@ -37,18 +40,21 @@ func resolvePipelineMode(tui, print, noTUI, web bool, stderr io.Writer) (mode Pi
 		}
 	}
 	if count > 1 {
-		return PipelineModeTUI, false, errors.New("--tui, --print, --no-tui, and --web are mutually exclusive")
+		return PipelineModeWeb, true, errors.New("--tui, --print, --no-tui, and --web are mutually exclusive")
 	}
 	if noTUI {
 		fmt.Fprintln(stderr, "warning: --no-tui is deprecated; use --print instead")
 	}
 	switch {
-	case web:
-		return PipelineModeWeb, true, nil
+	case tui:
+		return PipelineModeTUI, false, nil
 	case print || noTUI:
 		return PipelineModePrint, true, nil
+	case web:
+		return PipelineModeWeb, true, nil
 	default:
-		return PipelineModeTUI, false, nil
+		// New default: web. PLAN-5 / C1 — breaking UX change.
+		return PipelineModeWeb, true, nil
 	}
 }
 

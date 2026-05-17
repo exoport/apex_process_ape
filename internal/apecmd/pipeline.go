@@ -118,11 +118,11 @@ func newPipelineCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Optional prompt forwarded to skills that accept it (currently: epics)")
-	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "Force the interactive Bubble Tea TUI (currently the default; reserved for a future default flip).")
-	cmd.Flags().BoolVar(&printFlag, "print", false, "Print plain status lines instead of the TUI (eval / CI capture path).")
+	cmd.Flags().BoolVar(&webFlag, "web", false, "Bridged web UI (now the default). Explicit form for scripts.")
+	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "Bubble Tea TUI (pre-PLAN-5 default; now opt-in).")
+	cmd.Flags().BoolVar(&printFlag, "print", false, "Plain stdout (eval / CI capture path).")
 	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Deprecated alias for --print. Prints a stderr warning when used.")
-	cmd.Flags().BoolVar(&webFlag, "web", false, "Run pipeline against the bridged web UI (HTMX + SSE). Opens a localhost broker and routes hooks + tool calls to the browser. PLAN-5 / C1.")
-	cmd.Flags().BoolVar(&openFlag, "open", false, "With --web: xdg-open the browser to the broker URL.")
+	cmd.Flags().BoolVar(&openFlag, "open", false, "With --web (or default): xdg-open the broker URL on start.")
 	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json. Honoured in --web mode.")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "With --no-tui: suppress per-event stream; print only stage/step start/end markers")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format for list mode (no positional arg): human|json|yaml")

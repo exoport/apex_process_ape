@@ -67,13 +67,20 @@ either side.
   envelope from stdin, dials `APE_BRIDGE_PORT`, NDJSON-encodes a
   `TypeHook` frame, exits 0.
 
-### TUI default flip
+### Breaking UX change: `ape pipeline <name>` defaults to the web UI
 
-**Deferred.** The TUI remains the default for `ape pipeline <name>`
-in this release. PLAN-5 / C1 surface flags land now so the flip
-becomes a one-line change in a follow-up. See PLAN-5 origin notes
-for why the flip waits until pipeline web mode is at parity-or-better
-with the TUI for the common path.
+**`ape pipeline <name>` now spawns a browser by default.** The Bubble
+Tea TUI moves behind `--tui`; plain stdout moves behind `--print`.
+This is the no-flag surface change PLAN-5 set up. Three migration
+paths for callers that relied on the old behaviour:
+
+- **Want the TUI back?** Add `--tui` to your invocation.
+- **Want plain stdout (CI / eval capture)?** Add `--print`.
+- **Stuck on `--no-tui`?** It still works, but prints a deprecation
+  warning. Move to `--print` before the next minor version.
+
+The eval consumer (`apex_process_framework_eval`) pins `--print`
+explicitly; its capture path is unaffected.
 
 ### Cost-table caveat
 
