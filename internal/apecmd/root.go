@@ -45,6 +45,7 @@ func init() {
 		newFrameworkCmd(),
 		newChatCmd(),
 		newMCPBridgeCmd(),
+		newNotifyCmd(),
 	)
 }
 

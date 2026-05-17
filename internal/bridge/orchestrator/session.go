@@ -203,9 +203,13 @@ func (s *Session) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// BridgePort points hooks at the parent's IPC listener (same port
+	// the bridge subprocess dials via APE_IPC_PORT). `ape notify` and
+	// the bridge share the listener; the orchestrator demuxes by
+	// first frame type. PLAN-5 / C4.
 	settings, err := config.BuildSettings(config.SettingsOptions{
 		APEBin:     s.opts.APEBin,
-		BridgePort: s.BrokerPort(),
+		BridgePort: s.ipcPort,
 		Mode:       config.ModeWeb,
 	})
 	if err != nil {
@@ -218,10 +222,9 @@ func (s *Session) Run(ctx context.Context) error {
 	brokerErrCh := make(chan error, 1)
 	go func() { brokerErrCh <- s.broker.Serve(brokerCtx) }()
 
-	// Accept the bridge IPC connection (claude's first MCP message
-	// triggers `ape mcp-bridge` to dial back). Runs concurrent with
-	// claude startup.
-	go s.acceptBridge()
+	// Accept IPC connections (bridge + many `ape notify` invocations).
+	// Runs concurrent with claude startup.
+	go s.acceptLoop()
 
 	// Spawn claude.
 	bin := s.opts.ClaudeBin
@@ -358,20 +361,40 @@ func (s *Session) replayEvents() []broker.Event {
 	}
 }
 
-func (s *Session) acceptBridge() {
-	conn, err := s.ipcLn.Accept()
-	if err != nil {
-		return
+// acceptLoop accepts unlimited connections on the IPC port. The bridge
+// subprocess sends TypeReady as its first frame; we promote that
+// connection to s.bridgeConn so handleSend can target it. Every other
+// connection (one per `ape notify` invocation) is read-only — we never
+// write back, the sender NDJSON-encodes one TypeHook frame and closes.
+func (s *Session) acceptLoop() {
+	for {
+		conn, err := s.ipcLn.Accept()
+		if err != nil {
+			return
+		}
+		go s.handleConn(conn)
 	}
-	s.bridgeMu.Lock()
-	s.bridgeConn = conn
-	s.bridgeMu.Unlock()
+}
 
-	_ = ipc.Read(conn, s.onIPCFrame)
-
-	s.bridgeMu.Lock()
-	s.bridgeConn = nil
-	s.bridgeMu.Unlock()
+func (s *Session) handleConn(conn net.Conn) {
+	defer conn.Close()
+	isBridge := false
+	_ = ipc.Read(conn, func(m ipc.Message) {
+		if m.Type == ipc.TypeReady && !isBridge {
+			isBridge = true
+			s.bridgeMu.Lock()
+			s.bridgeConn = conn
+			s.bridgeMu.Unlock()
+		}
+		s.onIPCFrame(m)
+	})
+	if isBridge {
+		s.bridgeMu.Lock()
+		if s.bridgeConn == conn {
+			s.bridgeConn = nil
+		}
+		s.bridgeMu.Unlock()
+	}
 }
 
 func (s *Session) onIPCFrame(m ipc.Message) {
