@@ -253,6 +253,15 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		fmt.Fprintf(os.Stderr, "%s\n", pfe.Error())
 		os.Exit(exitCodePreflightFailed) //nolint:gocritic // explicit exit
 	}
+	if runErr != nil {
+		// Match the convention used elsewhere in apecmd (see
+		// pipeline.go's LoadSpec handling): print the error to
+		// stderr explicitly because rootCmd has SilenceErrors=true.
+		// Without this, the dirty-tree gate's actionable message
+		// (and any other non-Preflight error from pipeline.Run)
+		// gets swallowed and ape exits 1 with no explanation.
+		fmt.Fprintf(os.Stderr, "Error: %s\n", runErr.Error())
+	}
 	if runErr == nil {
 		printEndOfRunSummary(spec.Name, projectRoot, cfg)
 	}
