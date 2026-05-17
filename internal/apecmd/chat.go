@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/diegosz/apex_process_ape/internal/runlog"
 	"github.com/diegosz/apex_process_ape/internal/sessions"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // chatSystemPrompt is the system prompt used by `ape chat`. Quoted
@@ -54,6 +56,31 @@ docs/reference/bridge-security.md for the full threat model.`,
 			if _, err := exec.LookPath("claude"); err != nil {
 				return errors.New("ape chat: `claude` not found on PATH; install Claude Code first")
 			}
+
+			// PLAN-5 / C6 — open the chat run-dir before spawning
+			// claude so checkpoints capture the chat-start moment.
+			cwd, _ := os.Getwd()
+			startedAt := time.Now().UTC()
+			chatID := runlog.NewChatID(startedAt, cwd, os.Getpid())
+			chatDir := runlog.ChatDir(cwd, chatID)
+			if err := runlog.EnsureNoCollision(chatDir); err != nil {
+				return fmt.Errorf("ape chat: %w", err)
+			}
+			// First-run .gitignore policy.
+			isTTY := term.IsTerminal(int(os.Stdin.Fd()))
+			var askPrompt func(string) bool
+			if isTTY {
+				askPrompt = ttyConfirm
+			}
+			_, _ = runlog.EnsureGitignore(cwd, askPrompt, os.Stderr)
+
+			rl, err := runlog.New(chatDir)
+			if err != nil {
+				return fmt.Errorf("ape chat: open run dir: %w", err)
+			}
+			defer rl.Close()
+			_ = rl.Checkpoint(runlog.CheckpointEntry{Kind: "chat-start", Payload: map[string]any{"chat_id": chatID, "cwd": cwd}})
+
 			session := orchestrator.New(orchestrator.Options{
 				APEBin:                apeBin,
 				SystemPrompt:          chatSystemPrompt,
@@ -61,6 +88,30 @@ docs/reference/bridge-security.md for the full threat model.`,
 				Stdout:                os.Stdout,
 				Stderr:                os.Stderr,
 				IgnoreProjectSettings: ignoreProjectSettingsFlag,
+				OnReply: func(content string) {
+					_ = rl.Checkpoint(runlog.CheckpointEntry{Kind: "reply", Payload: map[string]any{"content": content}})
+				},
+				OnCall: func(c orchestrator.ToolCall) {
+					_ = rl.Call(runlog.CallEntry{
+						Timestamp: c.At,
+						Method:    "tools/call",
+						Tool:      c.Tool,
+						Params:    c.Params,
+						Result:    c.Result,
+						SessionID: c.SessionID,
+						ID:        c.ID,
+					})
+				},
+				OnHook: func(h orchestrator.HookEvent) {
+					_ = rl.Hook(runlog.HookEntry{
+						Timestamp: h.At,
+						Event:     h.Event,
+						Step:      h.Step,
+						SessionID: h.SessionID,
+						AgentID:   h.AgentID,
+						Payload:   h.Payload,
+					})
+				},
 			})
 			url, err := session.Listen()
 			if err != nil {
@@ -74,7 +125,6 @@ docs/reference/bridge-security.md for the full threat model.`,
 			// PLAN-5 / C5 — track this session in ~/.ape/registry.json
 			// so `ape sessions` can list / open / prune. Best-effort
 			// on register/deregister; failure is non-fatal.
-			cwd, _ := os.Getwd()
 			row := sessions.Session{
 				PID:       os.Getpid(),
 				CWD:       cwd,
@@ -87,13 +137,21 @@ docs/reference/bridge-security.md for the full threat model.`,
 			_ = sessions.Register(regPath, row)
 
 			runErr := session.Run(cmd.Context())
-			// os.Exit skips defers; deregister explicitly.
+			_ = rl.Checkpoint(runlog.CheckpointEntry{Kind: "chat-end", Payload: map[string]any{"exit_code": session.ExitCode}})
+			_ = runlog.WriteSessionYAML(chatDir, runlog.SessionMeta{
+				ChatID:    chatID,
+				StartedAt: startedAt,
+				EndedAt:   time.Now().UTC(),
+				Model:     "unknown", // populated by C7 cost tracking
+			})
+			// os.Exit skips defers; deregister and close explicitly.
+			_ = rl.Close()
 			_ = sessions.Deregister(regPath, row.PID)
 			if runErr != nil {
 				return runErr
 			}
 			if session.ExitCode != 0 {
-				os.Exit(session.ExitCode) //nolint:gocritic // explicit code path; deregister above ran already
+				os.Exit(session.ExitCode) //nolint:gocritic // explicit code path; cleanup above ran already
 			}
 			return nil
 		},
