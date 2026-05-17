@@ -164,11 +164,40 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	// lazily on the first stage-start callback — the runner has
 	// resolved the run dir by then via manifestWriter, and we can
 	// derive the matching path from <manifestBase>/<pipeline>/latest.
-	stagePublish := func(stage string, payload any, status string) {
-		hub.Publish("stage-"+status, fmt.Sprintf(`<div hx-swap-oob="outerHTML:#stage-%s">%s · %s</div>`, slugify(stage), htmlEscape(stage), status))
+	// Track which stages we've already published so the first emission
+	// of a stage appends a new card; subsequent emissions replace it.
+	// HTMX hx-swap-oob silently drops fragments whose target #id is
+	// missing, so we must seed the target on first sight.
+	var (
+		seenMu sync.Mutex
+		seen   = map[string]bool{}
+	)
+	publishStageCard := func(stage, statusClass, glyph, line string) {
+		slug := slugify(stage)
+		seenMu.Lock()
+		first := !seen[slug]
+		seen[slug] = true
+		seenMu.Unlock()
+		card := fmt.Sprintf(
+			`<div id="stage-%s" class="stage %s"%s><div class="stage-head"><span class="stage-glyph">%s</span><span class="stage-name">%s</span></div><div class="stage-last-hook">%s</div></div>`,
+			slug, statusClass,
+			"", // OOB attribute placeholder (set below)
+			htmlEscape(glyph), htmlEscape(stage), htmlEscape(line),
+		)
+		if first {
+			// Append a new card to #stages.
+			frag := fmt.Sprintf(`<div hx-swap-oob="beforeend:#stages">%s</div>`, card)
+			hub.Publish("stage-start", frag)
+		} else {
+			// Replace existing card by id. hx-swap-oob="true" =
+			// outerHTML by matching id attribute.
+			frag := strings.Replace(card, `id="stage-`+slug+`" class="stage `+statusClass+`"`,
+				`id="stage-`+slug+`" class="stage `+statusClass+`" hx-swap-oob="true"`, 1)
+			hub.Publish("stage-update", frag)
+		}
 	}
 	onStageStart := func(stage string) {
-		stagePublish(stage, nil, "start")
+		publishStageCard(stage, "running", "⟳", "running…")
 	}
 	onRunDir := func(dir string) {
 		runLogMu.Lock()
@@ -180,11 +209,15 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		}
 	}
 	onStageEnd := func(stage string, dur time.Duration, err error) {
-		status := "end"
+		statusClass := "done"
+		glyph := "✓"
+		line := fmt.Sprintf("done in %s", dur.Round(time.Second))
 		if err != nil {
-			status = "fail"
+			statusClass = "failed"
+			glyph = "✗"
+			line = "failed: " + err.Error()
 		}
-		stagePublish(stage, dur, status)
+		publishStageCard(stage, statusClass, glyph, line)
 	}
 
 	runErr := pipeline.Run(ctx, spec, pipeline.RunOptions{

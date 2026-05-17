@@ -19,13 +19,21 @@
           hidden>stop</button>
 </header>
 
-<!-- HTMX SSE: each named event triggers the matching sse-swap below.
-     The OOB swaps inside the fragments target #stages, #hooks, #replies,
-     and #decision-gate. The base scaffolding lives here so a reconnect
-     pipeline-init can reset all three lists. -->
+<!-- Sentinel listener. Every named SSE event we emit is listed here so
+     HTMX runs its OOB-swap machinery on the response body. hx-swap="none"
+     means this div's own contents are never replaced; the fragments
+     target #stages / #hooks / #replies / #decision-gate / #status via
+     hx-swap-oob inside the response. hx-on::sse-{open,error} flip the
+     status banner to connected / disconnected without round-tripping a
+     status fragment. -->
+<div sse-swap="pipeline-init,stage-start,stage-update,stage-end,stage-fail,hook,reply,await-pending,await-resolved,stopped,error"
+     hx-swap="none"
+     hx-on::sse-open="document.getElementById('status').textContent='connected'; document.getElementById('status').className='connected'"
+     hx-on::sse-error="document.getElementById('status').textContent='disconnected'; document.getElementById('status').className='disconnected'"></div>
+
 <section>
   <h2>stages</h2>
-  <div id="stages" sse-swap="pipeline-init,stage-start,stage-update,stage-end" hx-swap="innerHTML"></div>
+  <div id="stages"></div>
 </section>
 
 <section>
