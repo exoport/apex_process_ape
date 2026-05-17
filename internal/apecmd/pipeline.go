@@ -22,14 +22,17 @@ const exitCodePreflightFailed = 2
 
 func newPipelineCmd() *cobra.Command {
 	var (
-		promptFlag      string
-		noTUI           bool
-		quietFlag       bool
-		cwdFlag         string
-		outputFormat    string
-		manifestDirFlag string
-		noCommitFlag    bool
-		allowDirtyFlag  bool
+		promptFlag         string
+		noTUI              bool
+		quietFlag          bool
+		cwdFlag            string
+		outputFormat       string
+		manifestDirFlag    string
+		noCommitFlag       bool
+		allowDirtyFlag     bool
+		tuiFlag            bool
+		printFlag          bool
+		ignoreProjSettings bool
 	)
 	cmd := &cobra.Command{
 		Use:   "pipeline [name]",
@@ -78,7 +81,13 @@ func newPipelineCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
 				return err
 			}
-			useTUI := !noTUI && term.IsTerminal(int(os.Stdout.Fd()))
+			optOutTUI, err := resolveModeFlags(tuiFlag, printFlag, noTUI, os.Stderr)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Error: "+err.Error())
+				os.Exit(exitCodePreflightFailed) //nolint:gocritic // explicit exit; no defers up to this point
+			}
+			useTUI := !optOutTUI && term.IsTerminal(int(os.Stdout.Fd()))
+			_ = ignoreProjSettings // wired into web mode in a later C
 			if quietFlag && useTUI {
 				// PLAN-2 / F5: --quiet only suppresses the live
 				// event stream that plainObserver emits. The TUI's
@@ -103,7 +112,10 @@ func newPipelineCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Optional prompt forwarded to skills that accept it (currently: epics)")
-	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable the interactive TUI; print plain status lines instead")
+	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "Force the interactive Bubble Tea TUI (currently the default; reserved for a future default flip).")
+	cmd.Flags().BoolVar(&printFlag, "print", false, "Print plain status lines instead of the TUI (eval / CI capture path).")
+	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Deprecated alias for --print. Prints a stderr warning when used.")
+	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json (reserved for web mode; no-op today).")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "With --no-tui: suppress per-event stream; print only stage/step start/end markers")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format for list mode (no positional arg): human|json|yaml")
 	cmd.Flags().StringVar(&manifestDirFlag, "manifest-dir", "", "Override the directory for run manifest artifacts (default: <project>/_output/pipelines)")

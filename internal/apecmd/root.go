@@ -43,6 +43,8 @@ func init() {
 		newRollbackCmd(),
 		newPipelineCmd(),
 		newFrameworkCmd(),
+		newChatCmd(),
+		newMCPBridgeCmd(),
 	)
 }
 
