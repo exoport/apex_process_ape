@@ -68,7 +68,7 @@ h2 { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spa
 .stage details li { color: #8b949e; padding: 1px 0; }
 
 #hooks {
-  display: block;
+  display: block !important;
   background: #161b22;
   border: 1px solid #30363d;
   border-radius: 8px;
@@ -79,15 +79,20 @@ h2 { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spa
   font-size: 0.78rem;
   min-height: 200px;
 }
+/* Every row is a stand-alone block-level flex container. Using !important
+   on display + width so an old cached stylesheet or browser quirk can't
+   coalesce them into inline boxes. */
 .hook-row {
-  display: flex;
+  display: flex !important;
+  flex-direction: row !important;
   align-items: baseline;
   gap: 12px;
   padding: 3px 8px;
   color: #c9d1d9;
   border-bottom: 1px solid #21262d;
   white-space: nowrap;
-  width: 100%;
+  width: 100% !important;
+  box-sizing: border-box;
 }
 .hook-row:last-child { border-bottom: none; }
 .hook-row:hover     { background: #1c2128; }
