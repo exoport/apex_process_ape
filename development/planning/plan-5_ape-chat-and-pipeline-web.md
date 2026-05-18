@@ -426,7 +426,7 @@ The PoC repo continues to exist as the validated reference; subsequent PoC commi
 ## Scope — OUT
 
 - **In-Claude conductor skill** (the abandoned Phase-1 `apex-run-pipeline`). Reasoning documented in `origin:` above and design doc Context section. Do not revisit in this plan.
-- **Backlog replay on reconnect.** Reconnecting after a tab close shows current state only, not the full history of past events. The durable record is the JSONL streams under the run dir; a follow-up plan can render them on reconnect.
+- **Backlog replay on reconnect.** Reconnecting after a tab close shows current state only — `connected` + `pipeline-init` + per-stage status (the stage-state replay landed post-launch in `ad2e508`), not the full history of past hook / call / reply events. The durable record for those streams is the JSONL files under the run dir; a follow-up plan can render them on reconnect.
 - **Bearer-token auth for the web UI.** Localhost-only with documented threat model is the v1 stance; a follow-up plan can add per-session tokens if the threat surfaces.
 - **Remote bridge operation.** "Run `ape` here, view the UI from a different machine" is out. The IPC abstraction (`internal/bridge/ipc/`) is small enough that a future plan can swap TCP NDJSON for stdlib WebSocket or NATS-embedded without touching the SSE broker — codify the wire shape in `docs/reference/bridge-ipc.md` to keep that path open.
 - **NATS-embedded or WebSocket IPC migration.** Defer until fan-out (multiple consumers of one event stream) or remote operation is a concrete deliverable. Design doc §7 records the migration triggers.
@@ -463,6 +463,7 @@ feature work. Commits land on `main`.
 | `7c96773` | C8              | `Cache-Control: no-store` on `/assets/*`. Browsers were serving stale `styles.css` across rebuilds. `!important` on `.hook-row` layout as belt-and-braces. |
 | `47b1c03` | C8              | OOB-carrier fix: `hx-swap-oob="beforeend:X"` strips the carrier element. `.hook-row` wrapped inside another `<div hx-swap-oob>` so it survives.            |
 | `3d0887c` | C8 + C6         | Project-relative paths in the activity feed (`<projectRoot>/` stripped from summaries). Visible centred completion banner above stages on `pipeline-end`.  |
+| `ad2e508` | C3 + C8         | Per-stage state replay on SSE subscribe. First stage's `stage-start` fires ~20 ms after `pipeline.Run`, before any browser subscribes — was silently lost. |
 
 ### Sharp edges remaining (deliberately not blocking)
 
@@ -480,10 +481,11 @@ feature work. Commits land on `main`.
   enhancement could tail the session JSONL in real time and update
   a per-stage cost column over SSE.
 
-- **Backlog replay on reconnect is unchanged from the original C3
-  scope** — reconnect emits a fresh `pipeline-init` plus the
-  `connected` status, no replay of past hook / call events. The
-  durable record is the JSONL streams under the run dir.
+- **Backlog replay on reconnect is partial.** `connected`,
+  `pipeline-init`, and per-stage state are replayed on every new
+  subscription (`ad2e508`); past hook / call / reply events are
+  not. The durable record for the unreplayed streams is the JSONL
+  files under the run dir.
 
 - **The activity feed is unbounded in DOM size.** For a 13-stage
   pipeline the feed routinely hits a few thousand rows. Browser

@@ -12,10 +12,10 @@ This repo is `/home/diegos/_dev/github/diegosz/apex_process_ape`.
 
 PLAN-5 (`ape chat` + `ape pipeline --web` via MCP bridge) shipped
 across 13 commits on `main` ending at `89c525e plan: PLAN-5 → done`,
-then 10 follow-up commits (`7a48fc8` through `3d0887c`) closed the
-UI / wiring gaps that live testing surfaced. The current `main`
-tip is `3d0887c`. `ape pipeline <name>` now defaults to the web
-UI; `--tui` and `--print` are opt-in. All-tests-pass; the sandbox at
+then 11 follow-up commits (`7a48fc8` through `ad2e508`) closed the
+UI / wiring gaps that live testing surfaced. `ape pipeline <name>`
+now defaults to the web UI; `--tui` and `--print` are opt-in.
+All-tests-pass; the sandbox at
 `/home/diegos/_dev/ape-web-sandbox/greeter` has been exercised end
 to end (design pipeline, 6 stages, 6 commits on the project's git).
 
@@ -111,14 +111,15 @@ The user has been driving live tests on the sandbox. After `/clear`
 there's no specific to-do — you're resuming as on-call for whatever
 the user tests next. The likely shape of incoming questions:
 
-| Symptom                                          | First place to look                                                                                                    |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| Page stuck on "connecting…"                      | Browser DevTools → Network → `/api/events` should be 200, `text/event-stream`. Cache-Control: no-store on `/assets/*`. |
-| Activity rows merge into prose                   | DevTools → Elements on `#hooks` — children should be `<div class="hook-row …">`. Bug was OOB carrier; see `47b1c03`.   |
-| Stop button doesn't stop                         | `runCtx` vs `hubCtx`: `runCtx` is what pipeline.Run uses; `stopFn` must cancel it. See `a55ddb9`.                      |
-| Silent `ape exit 1`                              | Cobra `SilenceErrors=true`; check that the failing path explicitly prints to stderr. See `de212ca`.                    |
-| Cost rollup shows $0                             | `runWithWeb` runs `cost.RebuildRollup` on exit; per-step cost lands via PLAN-3's stream-json result event.             |
-| Stage cards / banners don't update on completion | `pipeline-end` SSE event carries three OOB swaps: status, banner, activity row. 300 ms sleep before broker shutdown.   |
+| Symptom                                          | First place to look                                                                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| Page stuck on "connecting…"                      | Browser DevTools → Network → `/api/events` should be 200, `text/event-stream`. Cache-Control: no-store on `/assets/*`.    |
+| Activity rows merge into prose                   | DevTools → Elements on `#hooks` — children should be `<div class="hook-row …">`. Bug was OOB carrier; see `47b1c03`.      |
+| Stop button doesn't stop                         | `runCtx` vs `hubCtx`: `runCtx` is what pipeline.Run uses; `stopFn` must cancel it. See `a55ddb9`.                         |
+| Silent `ape exit 1`                              | Cobra `SilenceErrors=true`; check that the failing path explicitly prints to stderr. See `de212ca`.                       |
+| Cost rollup shows $0                             | `runWithWeb` runs `cost.RebuildRollup` on exit; per-step cost lands via PLAN-3's stream-json result event.                |
+| Stage cards / banners don't update on completion | `pipeline-end` SSE event carries three OOB swaps: status, banner, activity row. 300 ms sleep before broker shutdown.      |
+| Stage cards stuck on "pending" until stage ends  | First `stage-start` fires ~20 ms after `pipeline.Run`, before browser subscribes. Fixed by per-stage replay in `ad2e508`. |
 
 ---
 
@@ -132,8 +133,10 @@ These are known and intentional. Don't "fix" without a real signal:
 - **Live SSE cost ticker for in-flight stages is not wired.**
   Per-step cost lands after each step ends, via PLAN-3 result
   event. Real-time ticker is a future enhancement.
-- **Backlog replay on reconnect is out.** Fresh `pipeline-init` +
-  `connected` only; the durable record is JSONL.
+- **Backlog replay on reconnect is partial.** `connected`,
+  `pipeline-init`, and per-stage state are replayed (`ad2e508`);
+  past hook / call / reply events are not. The durable record
+  for the unreplayed streams is JSONL under the run dir.
 - **Activity feed DOM is unbounded.** Browser is fine in practice
   for a 13-stage pipeline; rolling-window is a future tweak.
 
