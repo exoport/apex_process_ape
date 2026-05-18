@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"strings"
 	"time"
 
 	"github.com/diegosz/apex_process_ape/internal/web/views"
@@ -24,12 +25,17 @@ type HookFragment struct {
 	// Shape varies by event; the renderer extracts tool name + a
 	// short summary appropriate to the event kind.
 	Payload []byte
+	// ProjectRoot, when non-empty, is stripped from any
+	// file-path-shaped summary so the feed shows relative paths
+	// instead of absolute ones.
+	ProjectRoot string
 }
 
-// RenderHookFragment turns a HookFragment into one <li> for the
-// #hooks scrolling list. PLAN-5 / C8.
+// RenderHookFragment turns a HookFragment into one row for the
+// #hooks scrolling feed. PLAN-5 / C8.
 func RenderHookFragment(t *template.Template, hf HookFragment) string {
 	tool, summary := parseHookForFeed(hf.Event, hf.Payload)
+	summary = relativisePath(summary, hf.ProjectRoot)
 	line := HookLine{
 		TS:       hf.At.Local().Format("15:04:05"),
 		Event:    hf.Event,
@@ -42,6 +48,26 @@ func RenderHookFragment(t *template.Template, hf HookFragment) string {
 		return ""
 	}
 	return b.String()
+}
+
+// relativisePath rewrites an absolute-path-shaped summary so it shows
+// the project-relative form. Leaves anything that does not start with
+// the project root alone (commands, prompts, etc. may legitimately
+// reference paths outside the project). PLAN-5 follow-up after first
+// user-facing pass: full /home/user/.../greeter/foo paths drowned out
+// the rest of the feed.
+func relativisePath(summary, projectRoot string) string {
+	if projectRoot == "" || summary == "" {
+		return summary
+	}
+	prefix := projectRoot
+	if !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	// Replace every occurrence — Bash commands and Grep summaries
+	// can mention the same path multiple times. ReplaceAll keeps
+	// the order intact and is cheap.
+	return strings.ReplaceAll(summary, prefix, "")
 }
 
 // parseHookForFeed extracts (tool, summary) from a hook payload by

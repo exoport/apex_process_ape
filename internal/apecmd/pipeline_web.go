@@ -77,7 +77,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	hub := orchestrator.NewHub(orchestrator.HubOptions{
 		PageHTML:         pageHTML,
 		MountExtras:      mountExtras,
-		FragmentRenderer: newWebRenderer(tpl),
+		FragmentRenderer: newWebRenderer(tpl, projectRoot),
 		OnHook: func(h orchestrator.HookEvent) {
 			if rl := getRunLog(); rl != nil {
 				_ = rl.Hook(runlog.HookEntry{
@@ -254,27 +254,42 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	// when we tear the broker down. Sleep briefly so SSE flush
 	// reaches the browser before hubCancel below shuts the server.
 	dur := time.Since(runStart).Round(time.Second)
-	var bannerHTML string
+	var (
+		statusClass string
+		statusGlyph string
+		statusText  string
+		bannerClass string
+	)
 	switch {
 	case runErr == nil:
-		bannerHTML = fmt.Sprintf(
-			`<div id="status" class="connected" hx-swap-oob="outerHTML:#status">✓ completed in %s</div>`,
-			htmlEscape(dur.String()),
-		)
+		statusClass, statusGlyph = "connected", "✓"
+		statusText = fmt.Sprintf("completed in %s", dur)
+		bannerClass = "summary-ok"
 	case errors.Is(runErr, context.Canceled):
-		bannerHTML = fmt.Sprintf(
-			`<div id="status" class="disconnected" hx-swap-oob="outerHTML:#status">⏸ stopped after %s</div>`,
-			htmlEscape(dur.String()),
-		)
+		statusClass, statusGlyph = "disconnected", "⏸"
+		statusText = fmt.Sprintf("stopped after %s", dur)
+		bannerClass = "summary-stopped"
 	default:
-		bannerHTML = fmt.Sprintf(
-			`<div id="status" class="disconnected" hx-swap-oob="outerHTML:#status">✗ failed: %s</div>`,
-			htmlEscape(runErr.Error()),
-		)
+		statusClass, statusGlyph = "disconnected", "✗"
+		statusText = "failed: " + runErr.Error()
+		bannerClass = "summary-fail"
 	}
-	hub.Publish("pipeline-end", bannerHTML)
-	// Hide the Stop button — the run is over.
-	hub.Publish("pipeline-end", `<button id="stop-btn" hx-swap-oob="outerHTML:#stop-btn" hidden></button>`)
+	// Three OOB updates in one event: header banner, page-level
+	// summary block above stages, and a final row in the activity
+	// feed. Multiple top-level OOB elements in one SSE payload all
+	// fire — htmx processes each in turn.
+	finalFrag := fmt.Sprintf(
+		`<div id="status" class="%s" hx-swap-oob="outerHTML:#status">%s %s</div>`+
+			`<div id="pipeline-summary" class="pipeline-summary %s" hx-swap-oob="outerHTML:#pipeline-summary">%s %s</div>`+
+			`<button id="stop-btn" hx-swap-oob="outerHTML:#stop-btn" hidden></button>`+
+			`<div hx-swap-oob="beforeend:#hooks"><div class="hook-row hook-summary"><span class="ts">%s</span><span class="event">%s</span><span class="tool"></span><span class="summary">%s</span></div></div>`,
+		statusClass, statusGlyph, htmlEscape(statusText),
+		bannerClass, statusGlyph, htmlEscape(statusText),
+		time.Now().Local().Format("15:04:05"),
+		statusGlyph+" pipeline",
+		htmlEscape(statusText),
+	)
+	hub.Publish("pipeline-end", finalFrag)
 	time.Sleep(300 * time.Millisecond)
 
 	// Fold this run's totals into cost-rollup. Easiest path: rebuild

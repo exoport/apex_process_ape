@@ -117,7 +117,7 @@ docs/reference/bridge-security.md for the full threat model.`,
 				IgnoreProjectSettings: ignoreProjectSettingsFlag,
 				PageHTML:              pageHTML,
 				MountExtras:           mountExtras,
-				FragmentRenderer:      newWebRenderer(tpl),
+				FragmentRenderer:      newWebRenderer(tpl, cwd),
 				OnReply: func(content string) {
 					_ = rl.Checkpoint(runlog.CheckpointEntry{Kind: "reply", Payload: map[string]any{"content": content}})
 				},
