@@ -68,7 +68,7 @@ h2 { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spa
 .stage details li { color: #8b949e; padding: 1px 0; }
 
 #hooks {
-  list-style: none;
+  display: block;
   background: #161b22;
   border: 1px solid #30363d;
   border-radius: 8px;
@@ -79,7 +79,7 @@ h2 { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spa
   font-size: 0.78rem;
   min-height: 200px;
 }
-#hooks li {
+.hook-row {
   display: flex;
   align-items: baseline;
   gap: 12px;
@@ -87,19 +87,20 @@ h2 { font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spa
   color: #c9d1d9;
   border-bottom: 1px solid #21262d;
   white-space: nowrap;
+  width: 100%;
 }
-#hooks li:last-child { border-bottom: none; }
-#hooks li:hover { background: #1c2128; }
-#hooks li .ts      { color: #6e7681; font-variant-numeric: tabular-nums; flex: 0 0 4.5rem; }
-#hooks li .event   { color: #8b949e; font-weight: 500; flex: 0 0 9.5rem; }
-#hooks li .tool    { color: #d2a8ff; flex: 0 0 5rem; }
-#hooks li .summary { color: #6e7681; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.hook-row:last-child { border-bottom: none; }
+.hook-row:hover     { background: #1c2128; }
+.hook-row .ts      { color: #6e7681; font-variant-numeric: tabular-nums; flex: 0 0 4.5rem; }
+.hook-row .event   { color: #8b949e; font-weight: 500; flex: 0 0 9.5rem; }
+.hook-row .tool    { color: #d2a8ff; flex: 0 0 5rem; }
+.hook-row .summary { color: #6e7681; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* Accent the event column by hook kind. */
-#hooks li.hook-tool .event    { color: #79c0ff; }
-#hooks li.hook-prompt .event  { color: #d2a8ff; }
-#hooks li.hook-agent .event   { color: #ffa657; }
-#hooks li.hook-endturn .event { color: #6e7681; font-style: italic; }
+.hook-row.hook-tool .event    { color: #79c0ff; }
+.hook-row.hook-prompt .event  { color: #d2a8ff; }
+.hook-row.hook-agent .event   { color: #ffa657; }
+.hook-row.hook-endturn .event { color: #6e7681; font-style: italic; }
 
 #replies { display: flex; flex-direction: column; gap: 8px; }
 .reply {

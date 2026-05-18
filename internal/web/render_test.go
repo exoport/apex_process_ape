@@ -89,7 +89,10 @@ func TestRenderHookLine(t *testing.T) {
 	if !strings.Contains(html, `hx-swap-oob="beforeend:#hooks"`) {
 		t.Errorf("missing OOB swap target: %s", html)
 	}
-	for _, want := range []string{"PreToolUse", "Bash", "ls -la", "hook-tool", "10:23:45"} {
+	if !strings.Contains(html, `class="hook-row hook-tool"`) {
+		t.Errorf("expected hook-row + hook-tool class: %s", html)
+	}
+	for _, want := range []string{"PreToolUse", "Bash", "ls -la", "10:23:45"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %q in hook-line html: %s", want, html)
 		}

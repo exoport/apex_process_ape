@@ -117,10 +117,24 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		return fmt.Errorf("ape pipeline --web: hub listen: %w", err)
 	}
 
-	// Stop button → cancel run context.
+	// Two contexts on purpose:
+	//   - runCtx: the context pipeline.Run uses. Stop button cancels
+	//     this, which propagates SIGKILL to the active `claude`
+	//     subprocess via exec.CommandContext, unwinding the runner
+	//     to publish a terminal banner.
+	//   - hubCtx: the broker's lifetime. Kept separate so the
+	//     "stopping…" banner can flush over SSE before the broker
+	//     shuts down. Cancelled after the runner returns (defer).
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
 	hubCtx, hubCancel := context.WithCancel(ctx)
 	defer hubCancel()
-	hub.SetStopFn(hubCancel)
+	stopReq := func() {
+		// Immediate visual feedback even before the next stage end.
+		hub.Publish("pipeline-end", `<div id="status" class="disconnected" hx-swap-oob="outerHTML:#status">stopping…</div>`)
+		runCancel()
+	}
+	hub.SetStopFn(stopReq)
 
 	hubErrCh := make(chan error, 1)
 	go func() { hubErrCh <- hub.Serve(hubCtx) }()
@@ -217,7 +231,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	}
 
 	runStart := time.Now()
-	runErr := pipeline.Run(ctx, spec, pipeline.RunOptions{
+	runErr := pipeline.Run(runCtx, spec, pipeline.RunOptions{
 		ProjectRoot:  projectRoot,
 		Prompt:       cfg.prompt,
 		Observer:     newPlainObserver(os.Stdout, projectRoot, true),
@@ -241,12 +255,18 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	// reaches the browser before hubCancel below shuts the server.
 	dur := time.Since(runStart).Round(time.Second)
 	var bannerHTML string
-	if runErr == nil {
+	switch {
+	case runErr == nil:
 		bannerHTML = fmt.Sprintf(
 			`<div id="status" class="connected" hx-swap-oob="outerHTML:#status">✓ completed in %s</div>`,
 			htmlEscape(dur.String()),
 		)
-	} else {
+	case errors.Is(runErr, context.Canceled):
+		bannerHTML = fmt.Sprintf(
+			`<div id="status" class="disconnected" hx-swap-oob="outerHTML:#status">⏸ stopped after %s</div>`,
+			htmlEscape(dur.String()),
+		)
+	default:
 		bannerHTML = fmt.Sprintf(
 			`<div id="status" class="disconnected" hx-swap-oob="outerHTML:#status">✗ failed: %s</div>`,
 			htmlEscape(runErr.Error()),

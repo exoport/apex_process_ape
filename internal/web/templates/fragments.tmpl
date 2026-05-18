@@ -22,14 +22,7 @@
 </div>
 {{end}}
 
-{{define "hook-line"}}
-<li hx-swap-oob="beforeend:#hooks" class="hook hook-{{.CSSClass}}">
-  <span class="ts">{{.TS}}</span>
-  <span class="event">{{.Event}}</span>
-  {{if .Tool}}<span class="tool">{{.Tool}}</span>{{end}}
-  {{if .Summary}}<span class="summary">{{.Summary}}</span>{{end}}
-</li>
-{{end}}
+{{define "hook-line"}}<div hx-swap-oob="beforeend:#hooks" class="hook-row hook-{{.CSSClass}}"><span class="ts">{{.TS}}</span><span class="event">{{.Event}}</span><span class="tool">{{if .Tool}}{{.Tool}}{{end}}</span><span class="summary">{{if .Summary}}{{.Summary}}{{end}}</span></div>{{end}}
 
 {{define "reply-line"}}
 <div class="reply" hx-swap-oob="beforeend:#replies">
@@ -70,6 +63,6 @@
 {{/* Resets #hooks and #replies on every SSE (re)connect. #stages
      is NOT reset here because runWithWeb seeds it on the initial
      page render with one card per stage. */}}
-<ul hx-swap-oob="innerHTML:#hooks"></ul>
+<div hx-swap-oob="innerHTML:#hooks"></div>
 <div hx-swap-oob="innerHTML:#replies"></div>
 {{end}}
