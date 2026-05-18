@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diegosz/apex_process_ape/internal/bridge/broker"
 	"github.com/diegosz/apex_process_ape/internal/bridge/config"
 	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/diegosz/apex_process_ape/internal/cost"
@@ -59,6 +60,35 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		return runLog
 	}
 
+	// Latest published stage fragment per slug + insertion order. Replayed
+	// on every new SSE subscription so a browser that opens after a stage
+	// has already started (or that refreshes mid-run) restores the live
+	// state instead of seeing a stale "pending" card. The very first
+	// stage's stage-start fires within milliseconds of pipeline.Run and
+	// would otherwise be lost to zero subscribers.
+	var (
+		stageStateMu    sync.Mutex
+		stageStateOrder []string
+		stageStateByKey = map[string]broker.Event{}
+	)
+	rememberStage := func(slug string, ev broker.Event) {
+		stageStateMu.Lock()
+		defer stageStateMu.Unlock()
+		if _, seen := stageStateByKey[slug]; !seen {
+			stageStateOrder = append(stageStateOrder, slug)
+		}
+		stageStateByKey[slug] = ev
+	}
+	replayStages := func() []broker.Event {
+		stageStateMu.Lock()
+		defer stageStateMu.Unlock()
+		out := make([]broker.Event, 0, len(stageStateOrder))
+		for _, slug := range stageStateOrder {
+			out = append(out, stageStateByKey[slug])
+		}
+		return out
+	}
+
 	mountExtras := func(mux *http.ServeMux) {
 		if err := web.MountAssets(mux); err != nil {
 			fmt.Fprintf(os.Stderr, "ape pipeline --web: mount assets: %v\n", err)
@@ -78,6 +108,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		PageHTML:         pageHTML,
 		MountExtras:      mountExtras,
 		FragmentRenderer: newWebRenderer(tpl, projectRoot),
+		ReplayEvents:     replayStages,
 		OnHook: func(h orchestrator.HookEvent) {
 			if rl := getRunLog(); rl != nil {
 				_ = rl.Hook(runlog.HookEntry{
@@ -193,8 +224,8 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	publishStageCard := func(stage, statusClass, glyph, line string) {
 		slug := slugify(stage)
 		frag := fmt.Sprintf(
-			`<div id="stage-%s" class="stage %s" hx-swap-oob="true"><div class="stage-head"><span class="stage-glyph">%s</span><span class="stage-name">%s</span></div><div class="stage-last-hook">%s</div></div>`,
-			slug, statusClass,
+			`<div id="stage-%s" class="stage %s" hx-swap-oob="outerHTML:#stage-%s"><div class="stage-head"><span class="stage-glyph">%s</span><span class="stage-name">%s</span></div><div class="stage-last-hook">%s</div></div>`,
+			slug, statusClass, slug,
 			htmlEscape(glyph), htmlEscape(stage), htmlEscape(line),
 		)
 		event := "stage-update"
@@ -204,6 +235,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		case "done", "failed", "stopped":
 			event = "stage-end"
 		}
+		rememberStage(slug, broker.Event{Name: event, Data: frag})
 		hub.Publish(event, frag)
 	}
 	onStageStart := func(stage string) {
