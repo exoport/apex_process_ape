@@ -22,12 +22,18 @@
 </div>
 {{end}}
 
-{{define "hook-line"}}<div hx-swap-oob="beforeend:#hooks" class="hook-row hook-{{.CSSClass}}"><span class="ts">{{.TS}}</span><span class="event">{{.Event}}</span><span class="tool">{{if .Tool}}{{.Tool}}{{end}}</span><span class="summary">{{if .Summary}}{{.Summary}}{{end}}</span></div>{{end}}
+{{/* hx-swap-oob='beforeend:X' inserts the carrier's CHILDREN into X.
+     The carrier itself is dropped, so the .hook-row div has to be
+     wrapped inside another element that holds the OOB attribute. */}}
+{{define "hook-line"}}<div hx-swap-oob="beforeend:#hooks"><div class="hook-row hook-{{.CSSClass}}"><span class="ts">{{.TS}}</span><span class="event">{{.Event}}</span><span class="tool">{{if .Tool}}{{.Tool}}{{end}}</span><span class="summary">{{if .Summary}}{{.Summary}}{{end}}</span></div></div>{{end}}
 
+{{/* Same beforeend-strips-wrapper rule as hook-line. */}}
 {{define "reply-line"}}
-<div class="reply" hx-swap-oob="beforeend:#replies">
-  {{if .StageTag}}<span class="stage-tag">{{.StageTag}}</span> {{end}}
-  {{.Content}}
+<div hx-swap-oob="beforeend:#replies">
+  <div class="reply">
+    {{if .StageTag}}<span class="stage-tag">{{.StageTag}}</span> {{end}}
+    {{.Content}}
+  </div>
 </div>
 {{end}}
 
