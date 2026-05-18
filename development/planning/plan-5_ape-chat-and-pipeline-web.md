@@ -442,3 +442,51 @@ The PoC repo continues to exist as the validated reference; subsequent PoC commi
 This plan does not prescribe a phase split. A reasonable execution order is C2 → C3 (bridge runtime first, because every other C depends on it being callable from `ape chat`) → C1 (CLI surface, once `ape mcp-bridge` is dial-able) → C4 (hooks) → C5 (port registry) → C6 (run artefacts) → C8 (web UI) → C7 (cost tracking, last because it consumes data the rest produce). C9 (tests) lands incrementally with each piece. The TUI default flip in C1 should land last in the user-visible release — flag it explicitly in the merging order and in CHANGELOG.
 
 The eval harness (`apex_process_framework_eval`) consumes `ape pipeline --print` today and reads from `<project>/_output/pipelines/<name>/<run_id>/`. Both contracts are preserved by this plan; verify with a CI smoke test before merging C1 (byte-equivalence of `--print` output) and C6 (the new files land _alongside_ `manifest.yaml`, not replacing it).
+
+## Implementation appendix — post-launch refinements (2026-05-17)
+
+After `plan: PLAN-5 → done` (`89c525e`), live testing on the
+`/home/diegos/_dev/ape-web-sandbox/greeter` sandbox surfaced a
+batch of UI / wiring fixes. These are in scope of PLAN-5 — every
+item is closing a gap in the originally-scoped surface, not new
+feature work. Commits land on `main`.
+
+| Commit    | Surface         | Note                                                                                                                                                       |
+| --------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `7a48fc8` | C8              | SSE sentinel listener — page stuck on "connecting…" because no element with `sse-swap` listed `hook`/`reply`/`await-*`/etc.                                |
+| `de212ca` | C1              | `runWithWeb` prints `Error: <msg>` on stderr — cobra's `SilenceErrors=true` was swallowing the dirty-tree-gate's actionable message.                       |
+| `86e6906` | C8              | Status-banner flip moved from sentinel `hx-on::sse-open` to `<body>` + JS document-level fallback. Sentinel events don't propagate downward to a sibling.  |
+| `75e5d1d` | C8 + C6         | Pre-populated stage scaffold (all stages from spec on first paint), enriched activity feed (TS · event · tool · summary, colour-coded), mode-aware page.   |
+| `5395159` | C9 (diagnostic) | `APE_DEBUG_ARGV` env var prints the full claude argv before spawn. Stable diagnostic knob alongside `APE_COST_TAIL_INTERVAL_MS`.                           |
+| `1faa1ab` | C8              | Flexbox row layout, auto-scroll activity (MutationObserver), terminal `pipeline-end` banner with "completed in N" / "failed: …".                           |
+| `a55ddb9` | C1 / C8         | Stop button actually cancels pipeline. `runCtx` is split from `hubCtx`; `stopFn` cancels `runCtx`. `<ul>/<li>` → `<div>/<div class=hook-row>` for clarity. |
+| `7c96773` | C8              | `Cache-Control: no-store` on `/assets/*`. Browsers were serving stale `styles.css` across rebuilds. `!important` on `.hook-row` layout as belt-and-braces. |
+| `47b1c03` | C8              | OOB-carrier fix: `hx-swap-oob="beforeend:X"` strips the carrier element. `.hook-row` wrapped inside another `<div hx-swap-oob>` so it survives.            |
+| `3d0887c` | C8 + C6         | Project-relative paths in the activity feed (`<projectRoot>/` stripped from summaries). Visible centred completion banner above stages on `pipeline-end`.  |
+
+### Sharp edges remaining (deliberately not blocking)
+
+- **Session-id discovery is mtime-based.** `ape chat`'s
+  `cost.FindSessionJSONL` picks the newest `*.jsonl` under
+  `~/.claude/projects/` modified after the chat startedAt. If
+  Claude Code ever documents `--session <id>` we can switch to
+  exact-id discovery (`internal/cost/scan.go` comment notes the
+  trigger).
+
+- **Live SSE cost ticker for in-flight stages is not wired.** Per-step
+  cost lands in `manifest.yaml` after each step ends (PLAN-3 result
+  event still works in --web because each step's claude is still
+  spawned with `-p ... --output-format stream-json`). A future
+  enhancement could tail the session JSONL in real time and update
+  a per-stage cost column over SSE.
+
+- **Backlog replay on reconnect is unchanged from the original C3
+  scope** — reconnect emits a fresh `pipeline-init` plus the
+  `connected` status, no replay of past hook / call events. The
+  durable record is the JSONL streams under the run dir.
+
+- **The activity feed is unbounded in DOM size.** For a 13-stage
+  pipeline the feed routinely hits a few thousand rows. Browser
+  performance is fine in practice but a rolling-window (last N
+  rows) might be worth a future tweak if a longer pipeline pushes
+  past comfortable.
