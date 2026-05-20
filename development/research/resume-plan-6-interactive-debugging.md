@@ -1,5 +1,18 @@
 # Continuation Prompt — resume PLAN-6 interactive-mode debugging
 
+> **RESOLVED — 2026-05-20.** The debugging effort below was superseded by
+> a design pivot from PTY + `--system-prompt` + MCP `await_message`
+> prompt delivery to **tmux send-keys** for real REPL keystroke
+> delivery. See the "Implementation pivot — tmux send-keys" section of
+> `development/planning/plan-6_interactive-exec-and-orthogonal-modes.md`
+> for the root cause analysis and shipped design. Sandbox acceptance
+> confirmed against the greeter project on 2026-05-20:
+> `ape pipeline design` (tui), `--web`, and `--no-tui` all complete
+> end-to-end. Commits: `e1584b2` (the pivot) + `3adf420` (defer-order
+> hang fix). This doc is preserved as a record of the failed attempts
+> and the diagnostic path that led to the pivot; do not act on its
+> "What to actually do first" section — that work is done.
+
 Use this prompt to pick up after a `/clear`. PLAN-6 implementation is
 **code-complete** but interactive mode (`ape pipeline <name>` default,
 `--tui`, `--no-tui`, `ape chat`) is **not working end-to-end** in the

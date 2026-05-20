@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+PLAN-6: Interactive pipeline exec + orthogonal UI/exec modes. `ape pipeline <name>` is now **tui + interactive** by default — one persistent `claude` REPL per stage running inside a per-stage `tmux` session, prompts delivered as real REPL keystrokes via `tmux send-keys`. UI choice (`none` / `tui` / `web`) is orthogonal to exec choice (`interactive` / `programmatic`). Pipeline YAML grows pipeline-level and stage-level defaults for `commit` / `model` / `agent` with precedence `step > stage > pipeline > default`. The hooks bridge enforces a per-step contract on the agent-prefixed skill prompt; `/clear` between steps is runner-driven (skip with `no-clear: true`).
+
+### Features
+
+- **`ape pipeline <name>` default flips to `--tui` + `--interactive`.** Old default (per-step `claude -p`) is now `--tui -P` or `--no-tui -P`. `--web` defaults to interactive; `--web -P` is the legacy PLAN-5 web programmatic mode (byte-equivalent preserved).
+- **New `-P` / `--programmatic`** modifier to opt back into per-step `claude -p` spawning.
+- **`--print` is locked.** Byte-equivalent with PLAN-5 `--print`; the eval consumer at `apex_process_framework_eval` depends on this. `--print` admits no exec modifier.
+- **`--no-tui` is now a UI selector**, not an alias for `--print`. Means "no UI, but still interactive exec".
+- **Pipeline YAML grows pipeline-level + stage-level defaults** for `commit`, `model`, `agent`. Precedence: `step > stage > pipeline > default(skip)`. Default commit unit is the stage boundary.
+- **Per-step `no-clear: true`** opts a step out of the inter-step `/clear` for multi-step chains that need shared context (e.g., `apex-create-prd`'s elicit/respond loop).
+- **`ape chat` rewritten** as a thin `tmux` spawn-and-attach helper. ape spawns `claude` in a named tmux session with the bridge wired (hooks captured to `_output/ape/chats/<id>/`), prints attach instructions, and `exec`s `tmux attach`. The Bubble Tea chat TUI from PLAN-5 was removed.
+- **Live debugging via tmux attach.** During an interactive run, `tmux attach -t ape-<stage>-<pid>` shows the live claude session at any time. Detach with Ctrl-B D.
+- **Diataxis docs reorg.** New tutorials, how-tos, and reference docs at `docs/{tutorial,how-to,reference,explanation}/` covering invocation matrix, exec modes, step contract, pipeline YAML schema, run artefacts.
+
+### Breaking changes
+
+- **`tmux` is now required for interactive exec.** ape errors clearly if `tmux` is not on `PATH`. Programmatic exec (`-P`, `--print`) has no tmux dependency.
+- **`--no-tui` no longer aliases `--print`.** Use `--print` explicitly for byte-equivalent stdout, or `--no-tui -P` for "no UI + programmatic exec".
+- **`ape chat` no longer hosts a TUI surface.** The web/Bubble Tea chat UI was removed; `ape chat` is now `tmux attach` to a bridged claude. Pre-existing automation that screen-scraped the chat UI must migrate.
+- **`creack/pty` dependency removed.** Interactive surfaces (pipeline + chat) all route through tmux now.
+
+### Design pivot — tmux send-keys (2026-05-20)
+
+PLAN-6 originally specified interactive exec as PTY + `--system-prompt` + MCP `await_message` / `reply` for prompt delivery. Sandbox bring-up showed that shape was structurally broken: the PAT-25 skill prompt (`/<agent> --autonomous -- <skill> --autonomous`) is a claude-CLI-level slash command; delivered to the model as a tool-result string via `await_message`, the model receives the text but cannot invoke it (the CLI never sees the leading `/`). The fix: spawn `claude` inside a per-stage tmux session and deliver each step's prompt as real REPL keystrokes via `tmux send-keys -l <text>` + Enter, so claude's CLI parses the slash command the normal way. The bridge stays useful for hook observability (`UserPromptSubmit`, `Stop`) but no longer carries prompt delivery. The `/model X` contract rule was dropped (CLI-level switch the model can't self-invoke). Full record at `development/planning/plan-6_interactive-exec-and-orthogonal-modes.md` § "Implementation pivot — tmux send-keys".
+
+---
+
 PLAN-5: `ape chat` + `ape pipeline` web mode (MCP bridge). Brings the
 validated PoC at `claude_mcp_bridge_poc@4e542d0` into ape as the new
 default UX path. Web UI runs via HTMX 2.x + stdlib `html/template`,

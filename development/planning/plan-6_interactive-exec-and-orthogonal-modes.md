@@ -2,7 +2,8 @@
 plan_id: PLAN-6
 created_at: 2026-05-19
 approved_at: 2026-05-19
-status: approved
+completed_at: 2026-05-20
+status: done
 tags:
   - cli-surface
   - interactive-exec
@@ -346,6 +347,35 @@ The fix is to deliver prompts as **real REPL keystrokes** so claude's CLI parses
 - **`/clear` is runner-driven, not verifier-enforced.** The runner sends `/clear` between steps (when `!step.NoClear`); the verifier ignores `/clear` UserPromptSubmit events because they arrive outside any active-step contract window.
 - **`InteractiveSystemPrompt` and `chatSystemPrompt` are deleted.** The prompts they contained ("call await_message in a loop…") instructed the model into a broken pattern; they must not return.
 - **No `creack/pty` import** anywhere in the tree.
+
+## Sandbox acceptance — 2026-05-20
+
+Per the smoke matrix above, against `/home/diegos/_dev/ape-web-sandbox/greeter/` (clean state `git reset --hard 3676580`), after the tmux pivot (commits `e1584b2` + `3adf420`):
+
+| Invocation                           | Result                                                                                                                                                            |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ape pipeline design`                | ✅ **confirmed** — full design pipeline completes end-to-end under the Bubble Tea TUI.                                                                            |
+| `ape pipeline design --web`          | ✅ **confirmed** — browser UI shows stage cards filling in live; pipeline completes end-to-end.                                                                   |
+| `ape pipeline design --no-tui`       | ✅ **confirmed** — plain stdout, full pipeline completes (16m18s including all 6 stages), `pipeline-report.md` written, process exits cleanly.                    |
+| `ape pipeline design --print`        | ⚠️ **not yet smoked** post-pivot — locked path doesn't touch the interactive runner, so structurally unaffected. User to verify byte-equivalence when convenient. |
+| `ape pipeline design --web -P`       | ⚠️ **not yet smoked** post-pivot — uses the unchanged PLAN-5 programmatic path; structurally unaffected.                                                          |
+| `ape chat`                           | ⚠️ **not yet smoked** post-pivot — rewritten as tmux spawn-and-attach. Buildable + help text validates; live attach untested.                                     |
+| Step-contract violation hard-fail    | Covered by `internal/bridge/orchestrator/contract_test.go` (agent-prefix mismatch fires `OnViolation`).                                                           |
+| `/clear` keystroke delivery ordering | Covered by `internal/tmux/tmux_test.go` (TestSendCommandOrderingWithClear) against real tmux + bash.                                                              |
+
+### Bugs found + fixed during acceptance
+
+- **2026-05-20: `--no-tui` hung after `pipeline-end`.** Defers in `runWithInteractive` / `runWithInteractiveTUI` fired LIFO so the `<-rtErrCh` drain blocked before `runCancel()` could unblock `rt.Serve()`. Fixed in `3adf420` by combining cancel + drain into one teardown defer and adding the missing runlog `Close()` call.
+
+### Resolved Open Questions
+
+The "Open questions to resolve during implementation" section above is preserved for historical accuracy. Disposition after the tmux pivot:
+
+- **Throttle layer for TUI hook bursts** — kept the original ~30Hz `tea.Tick` coalescing. Confirmed adequate under live runs.
+- **Stop UX in TUI** — kept the double-Ctrl+C / quit-modal reuse from PLAN-5.
+- **Per-stage MCP subprocess teardown** — now governed by tmux session lifetime; the runner calls `tmux KillSession` in a deferred cleanup at stage end. No tail-event loss observed.
+- **`--no-tui` deprecation hint** — N/A (the alias was removed cleanly in Phase F, no deprecation period needed).
+- **CHANGELOG entry organization** — one consolidated PLAN-6 entry per the original default.
 
 ## Context references
 
