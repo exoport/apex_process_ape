@@ -2,8 +2,10 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -143,6 +145,8 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 			effAgent = step.Agent
 		}
 
+		eventLog, eventsRel := openStepLog(mw, stageIdx, i+1, stage.Name, step.Skill)
+
 		stepInfo := InteractiveStepInfo{
 			Stage:   stage.Name,
 			StepIdx: i,
@@ -164,12 +168,14 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 			if err := tmux.SendCommand(sessionName, "/clear"); err != nil {
 				stageErr = fmt.Errorf("stage %q step %d: send /clear: %w", stage.Name, i, err)
 				stageStatus = StatusFailed
+				closeStepLog(eventLog)
 				break
 			}
 			select {
 			case <-ctx.Done():
 				stageErr = ctx.Err()
 				stageStatus = StatusFailed
+				closeStepLog(eventLog)
 				return stageStatus, stageErr
 			case <-time.After(interactiveClearSettle):
 			}
@@ -185,26 +191,35 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		beforeSnap, _ := tmux.CapturePane(sessionName)
 
 		prompt := assembleInteractivePromptLine(effAgent, step, opts.Prompt)
+		writeInteractiveStepEvent(eventLog, "step-start", map[string]any{
+			"stage":   stage.Name,
+			"step":    i + 1,
+			"skill":   step.Skill,
+			"agent":   effAgent,
+			"model":   effModel,
+			"prompt":  prompt,
+			"no_clear": step.NoClear,
+		})
 		if err := tmux.SendCommand(sessionName, prompt); err != nil {
 			stageErr = fmt.Errorf("stage %q step %d: send prompt: %w", stage.Name, i, err)
 			stageStatus = StatusFailed
 			if opts.OnInteractiveStepEnd != nil {
 				opts.OnInteractiveStepEnd(stepInfo)
 			}
+			closeStepLog(eventLog)
 			break
 		}
 
 		// Wait for the bridge's Stop hook to signal step done.
-		if err := waitStepDone(ctx, opts, stage.Name, i); err != nil {
-			stageErr = fmt.Errorf("stage %q step %d: wait done: %w", stage.Name, i, err)
-			stageStatus = StatusFailed
-			if opts.OnInteractiveStepEnd != nil {
-				opts.OnInteractiveStepEnd(stepInfo)
-			}
-			break
-		}
+		waitErr := waitStepDone(ctx, opts, stage.Name, i)
 		if opts.OnInteractiveStepEnd != nil {
 			opts.OnInteractiveStepEnd(stepInfo)
+		}
+		if waitErr != nil {
+			stageErr = fmt.Errorf("stage %q step %d: wait done: %w", stage.Name, i, waitErr)
+			stageStatus = StatusFailed
+			closeStepLog(eventLog)
+			break
 		}
 
 		afterSnap, _ := tmux.CapturePane(sessionName)
@@ -220,12 +235,55 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 			fmt.Fprintf(os.Stderr, "[tmux/%s/step%d]\n%s\n[/tmux]\n", sessionName, i, stepOut)
 		}
 
+		writeInteractiveStepEvent(eventLog, "step-end", map[string]any{
+			"stage":         stage.Name,
+			"step":          i + 1,
+			"skill":         step.Skill,
+			"duration_secs": time.Since(stepStart).Seconds(),
+		})
+		closeStepLog(eventLog)
+
 		exitCode := 0
-		recordStep(mw, stageIdx, i+1, step, opts.Prompt, stepStart, time.Now(), StatusCompleted, exitCode, "", parseResultEvent(stepOut))
+		recordStep(mw, stageIdx, i+1, step, opts.Prompt, stepStart, time.Now(), StatusCompleted, exitCode, eventsRel, parseResultEvent(stepOut))
+
+		// Commit boundary: same semantics as runStages (PLAN-4 / C4).
+		// Runs only after the step's run-state is recorded so the
+		// manifest reflects both the run outcome and the commit
+		// outcome atomically. Commit failures abort the stage.
+		commitErr := performStepCommit(ctx, opts, mw, spec.Name, stage.Name, stageIdx, i+1, step, nil)
+		if commitErr == nil {
+			runLog(opts.RunLog, "commit-made", stage.Name+"/"+step.Skill, nil)
+		}
+
 		notify(opts.Observer, func(o Observer) { o.OnStepEnd(stage.Name, i, step, time.Since(stepStart), stepOut, nil) })
+
+		if commitErr != nil {
+			stageErr = fmt.Errorf("stage %q step %d (%s) commit: %w", stage.Name, i, step.Skill, commitErr)
+			stageStatus = StatusFailed
+			break
+		}
 	}
 
 	return stageStatus, stageErr
+}
+
+// writeInteractiveStepEvent appends one JSON line to a per-step ndjson
+// file. Best-effort: a nil writer or marshal failure drops silently
+// because the authoritative hook stream lives in hook-events.jsonl.
+func writeInteractiveStepEvent(w io.Writer, kind string, fields map[string]any) {
+	if w == nil {
+		return
+	}
+	if fields == nil {
+		fields = map[string]any{}
+	}
+	fields["type"] = kind
+	fields["ts"] = time.Now().UTC().Format(time.RFC3339Nano)
+	b, err := json.Marshal(fields)
+	if err != nil {
+		return
+	}
+	_, _ = w.Write(append(b, '\n'))
 }
 
 // sanitizeSessionName replaces characters tmux doesn't like in session

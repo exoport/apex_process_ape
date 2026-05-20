@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Post-PLAN-6 interactive-mode parity fixes (2026-05-20)
+
+Discovered during the sandbox invocation-matrix sweep. The interactive runner shipped without four pieces of parity with the programmatic runner; the docs already described the correct behavior, only the code was wrong.
+
+- **Per-step commits now fire in interactive mode.** `runStageInteractive` was missing the `performStepCommit` call that `runStages` makes after every step. Result before fix: a full `design` pipeline run produced zero commits despite `commit: "specs: …"` directives on every step. The interactive path now matches `runStages`' PLAN-4 / C4 commit boundary semantics — commit on dirty tree after step success, skip on step failure, abort the pipeline on commit failure.
+- **Hook events tagged with the active step.** `ape notify` cannot populate `step` on the hook frame (no step-bind plumbing under tmux); `interactiveCore` now tracks `activeStep` (set on `OnStepStart`, cleared on `OnStepEnd`) and `FeedHook` injects it when the frame's `step` is empty. `/clear` between steps still gets `step:null` correctly (fires outside the active-step window).
+- **`stages/<NN>-<stage>/step-NN-<skill>.ndjson` populated in interactive mode.** Each per-step file gets a `step-start` line (slash command prompt + agent + model) and a `step-end` line (duration). `events_path` on the step record now matches programmatic mode.
+- **Web-mode hook-event de-duplication.** `pipeline_web.go`'s Hub `OnHook` callback was writing to runlog twice — once directly and once via `core.FeedHook`. The bug was latent before the step-tagging fix (both writes produced `step:null`). The direct write is now gated on `core == nil` so the interactive core owns the write when active.
+- **Interactive step timeout switched from wall-clock to idle-based.** `WaitStepDone`'s 10-min wall-clock cap was killing legitimately busy steps (e.g., a slow `apex-create-architecture` run that was still emitting tool-use hooks). Now resets on every hook event; trips after **15 min idle** with `interactive step idle for <duration> without Stop hook`. Polling tick is 30s; detection latency ≤ poll interval beyond the threshold.
+
+---
+
 PLAN-6: Interactive pipeline exec + orthogonal UI/exec modes. `ape pipeline <name>` is now **tui + interactive** by default — one persistent `claude` REPL per stage running inside a per-stage `tmux` session, prompts delivered as real REPL keystrokes via `tmux send-keys`. UI choice (`none` / `tui` / `web`) is orthogonal to exec choice (`interactive` / `programmatic`). Pipeline YAML grows pipeline-level and stage-level defaults for `commit` / `model` / `agent` with precedence `step > stage > pipeline > default`. The hooks bridge enforces a per-step contract on the agent-prefixed skill prompt; `/clear` between steps is runner-driven (skip with `no-clear: true`).
 
 ### Features

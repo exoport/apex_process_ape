@@ -24,7 +24,32 @@ type interactiveCore struct {
 	stepDoneCh chan struct{}
 	getRunLog  func() *runlog.Writer
 	runCancel  context.CancelFunc
+
+	// stepMu guards activeStep; FeedHook reads on the bridge accept
+	// goroutine while OnStepStart/End write on the runner goroutine.
+	stepMu     sync.Mutex
+	activeStep string
+
+	// activityMu guards lastActivity, the timestamp of the most
+	// recent hook event seen for the current step. WaitStepDone
+	// uses it as an idle-timeout anchor — a step that has been
+	// silent for interactiveStepIdleTimeout is presumed hung.
+	activityMu   sync.Mutex
+	lastActivity time.Time
 }
+
+// interactiveStepIdleTimeout is the maximum quiet window between
+// hook events before WaitStepDone declares the step hung. Chosen to
+// accommodate skills that legitimately do many minutes of work
+// between user-visible events (apex-create-architecture's heavier
+// branches in particular) while still bounding real stalls.
+const interactiveStepIdleTimeout = 15 * time.Minute
+
+// interactiveStepIdlePoll is the frequency at which WaitStepDone
+// rechecks the idle window. Small enough to keep tail latency near
+// the configured timeout; large enough that the runtime cost is
+// trivial even across long steps.
+const interactiveStepIdlePoll = 30 * time.Second
 
 func newInteractiveCore(runCancel context.CancelFunc, getRunLog func() *runlog.Writer) *interactiveCore {
 	c := &interactiveCore{
@@ -46,11 +71,26 @@ func newInteractiveCore(runCancel context.CancelFunc, getRunLog func() *runlog.W
 // FeedHook is the on-hook fan-out target. Call from a
 // BridgeRuntimeOptions.OnHook or HubOptions.OnHook callback.
 func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
+	// Every hook event counts as activity for the idle-timeout
+	// anchor — Pre/PostToolUse, UserPromptSubmit, Stop, all of it.
+	c.activityMu.Lock()
+	c.lastActivity = time.Now()
+	c.activityMu.Unlock()
+	step := h.Step
+	if step == "" {
+		// Interactive mode: `ape notify` cannot populate Step (no
+		// step-bind plumbing in the tmux-driven runner). Fill it
+		// from the active step so hook-events.jsonl records which
+		// step each event belongs to instead of "step":null.
+		c.stepMu.Lock()
+		step = c.activeStep
+		c.stepMu.Unlock()
+	}
 	if writer := c.getRunLog(); writer != nil {
 		_ = writer.Hook(runlog.HookEntry{
 			Timestamp: h.At,
 			Event:     h.Event,
-			Step:      h.Step,
+			Step:      step,
 			SessionID: h.SessionID,
 			AgentID:   h.AgentID,
 			Payload:   h.Payload,
@@ -101,6 +141,9 @@ func (c *interactiveCore) FeedReply(content string) {
 // drains any stale Stop-hook signals so the next WaitStepDone blocks
 // on this step, not a previous step's leftover.
 func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
+	c.stepMu.Lock()
+	c.activeStep = info.Stage + "/" + info.Skill
+	c.stepMu.Unlock()
 	for {
 		select {
 		case <-c.stepDoneCh:
@@ -122,19 +165,41 @@ func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 // from the previous step doesn't get matched against a fresh contract.
 func (c *interactiveCore) OnStepEnd(_ pipeline.InteractiveStepInfo) {
 	c.verifier.EndStep()
+	c.stepMu.Lock()
+	c.activeStep = ""
+	c.stepMu.Unlock()
 }
 
 // WaitStepDone blocks until the bridge fires a Stop hook for the
-// current step, until ctx cancels, or until a generous upper-bound
-// timeout fires. PLAN-6 / Phase E wires this into RunOptions.
+// current step, until ctx cancels, or until the idle-timeout window
+// elapses without any hook events. PLAN-6 / Phase E wires this into
+// RunOptions.
+//
+// The idle window resets on every FeedHook call, so a busy step
+// (heavy tool use, long apex-create-architecture branches) is never
+// killed for being slow — only for going silent. A truly hung claude
+// session stops emitting Pre/PostToolUse events and trips the timer
+// after interactiveStepIdleTimeout of quiet.
 func (c *interactiveCore) WaitStepDone(ctx context.Context, _ string, _ int) error {
-	select {
-	case <-c.stepDoneCh:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(10 * time.Minute): //nolint:mnd // upper bound for a single step's model response; well above the 5-min cache TTL
-		return fmt.Errorf("interactive step exceeded 10m without Stop hook")
+	c.activityMu.Lock()
+	c.lastActivity = time.Now()
+	c.activityMu.Unlock()
+	ticker := time.NewTicker(interactiveStepIdlePoll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.stepDoneCh:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			c.activityMu.Lock()
+			idle := time.Since(c.lastActivity)
+			c.activityMu.Unlock()
+			if idle > interactiveStepIdleTimeout {
+				return fmt.Errorf("interactive step idle for %v without Stop hook", idle.Round(time.Second))
+			}
+		}
 	}
 }
 

@@ -121,6 +121,14 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		FragmentRenderer: newWebRenderer(tpl, projectRoot),
 		ReplayEvents:     replayStages,
 		OnHook: func(h orchestrator.HookEvent) {
+			// When the interactive core is active it writes to runlog
+			// itself (and applies activeStep tagging). The direct write
+			// below is only for the non-interactive web path
+			// (`--web -P`) where no core exists.
+			if core != nil {
+				core.FeedHook(h)
+				return
+			}
 			if rl := getRunLog(); rl != nil {
 				_ = rl.Hook(runlog.HookEntry{
 					Timestamp: h.At,
@@ -130,9 +138,6 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 					AgentID:   h.AgentID,
 					Payload:   h.Payload,
 				})
-			}
-			if core != nil {
-				core.FeedHook(h)
 			}
 		},
 		OnCall: func(c orchestrator.ToolCall) {
