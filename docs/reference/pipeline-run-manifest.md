@@ -128,6 +128,7 @@ That preserves the pre-PLAN-4 shape: zero commits during the run, dirty working 
 - `skipped-step-failed` — the underlying step exited non-zero; no commit attempted.
 - `skipped-cancelled` — the run's context was cancelled before this step's commit boundary.
 - `failed` — `git commit` invocation returned non-zero; `commit_error` carries the stderr; pipeline was aborted.
+- `deferred-to-stage` — step ran inside a stage-boundary stage (PLAN-6 / C2 stage-level `commit:`). The chain's accumulated diff is folded into the stage-end commit, which is attributed to the last step in the chain. Earlier steps in such a stage all carry this status.
 
 ### Inspecting a run's commits
 

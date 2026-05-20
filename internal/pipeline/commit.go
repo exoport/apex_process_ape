@@ -82,16 +82,30 @@ func (c *CommitDirective) UnmarshalYAML(node *yaml.Node) error {
 }
 
 // DerivedCommitMessage returns the commit message to use for a given
-// step when CommitModeDefault is in effect. Stage and skill names are
-// sanitized identically to the manifest's on-disk directory layout
-// (see sanitizeFsName in manifest_writer.go) so the message is
-// filesystem-safe to grep / pipe through git tooling.
+// step when CommitModeDefault is in effect at the step boundary.
+// Stage and skill names are sanitized identically to the manifest's
+// on-disk directory layout (see sanitizeFsName in manifest_writer.go)
+// so the message is filesystem-safe to grep / pipe through git tooling.
 func DerivedCommitMessage(pipelineName, stageName, skill string) string {
 	return fmt.Sprintf(
 		"ape:%s/%s/%s",
 		sanitizeFsName(pipelineName),
 		sanitizeFsName(stageName),
 		sanitizeFsName(skill),
+	)
+}
+
+// DerivedStageCommitMessage returns the commit message for a
+// stage-boundary CommitModeDefault commit (PLAN-6 / C2). There is no
+// single skill to attribute the commit to — the chain folds into
+// one commit — so the derived form drops the skill component:
+//
+//	ape:<pipeline>/<stage>
+func DerivedStageCommitMessage(pipelineName, stageName string) string {
+	return fmt.Sprintf(
+		"ape:%s/%s",
+		sanitizeFsName(pipelineName),
+		sanitizeFsName(stageName),
 	)
 }
 

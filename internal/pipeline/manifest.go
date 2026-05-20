@@ -48,6 +48,12 @@ const (
 	// CommitStatusFailed — git commit invocation returned non-zero; commit_error
 	// carries the captured stderr.
 	CommitStatusFailed CommitStatus = "failed"
+	// CommitStatusDeferredToStage — step ran inside a stage-boundary stage
+	// (PLAN-6 / C2 stage-level `commit:`). Its diff is folded into the
+	// stage-end commit attributed to the last step in the chain. Recorded
+	// on every step except the last; the last step gets the actual
+	// outcome (committed / no-op / failed) after the stage-end commit runs.
+	CommitStatusDeferredToStage CommitStatus = "deferred-to-stage"
 )
 
 // Manifest is the canonical on-disk record of one ape pipeline run.

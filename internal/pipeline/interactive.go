@@ -101,6 +101,11 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		firstModel = firstStep.Model
 	}
 
+	plan, planErr := spec.PlanStageCommits(stage.Name)
+	if planErr != nil {
+		return StatusFailed, fmt.Errorf("stage %q: plan commits: %w", stage.Name, planErr)
+	}
+
 	argv, argvErr := buildInteractiveArgv(opts.ClaudeBin, firstModel, opts.PrependFlags)
 	if argvErr != nil {
 		return StatusFailed, argvErr
@@ -246,11 +251,12 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		exitCode := 0
 		recordStep(mw, stageIdx, i+1, step, opts.Prompt, stepStart, time.Now(), StatusCompleted, exitCode, eventsRel, parseResultEvent(stepOut))
 
-		// Commit boundary: same semantics as runStages (PLAN-4 / C4).
+		// Commit boundary: same semantics as runStages (PLAN-6 / C2).
 		// Runs only after the step's run-state is recorded so the
 		// manifest reflects both the run outcome and the commit
 		// outcome atomically. Commit failures abort the stage.
-		commitErr := performStepCommit(ctx, opts, mw, spec.Name, stage.Name, stageIdx, i+1, step, nil)
+		isLastStep := i == len(stage.Chain)-1
+		commitErr := performStepCommit(ctx, opts, mw, plan, stageIdx, i+1, isLastStep, nil)
 		if commitErr == nil {
 			runLog(opts.RunLog, "commit-made", stage.Name+"/"+step.Skill, nil)
 		}

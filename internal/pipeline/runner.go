@@ -209,22 +209,15 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error { //nolint:gocr
 	return runErr
 }
 
-// pipelineWantsCommits returns true when at least one step in spec
-// would normally commit (i.e., its CommitDirective is not Skip) and
+// pipelineWantsCommits returns true when at least one stage in the
+// spec would emit a commit under the resolved PLAN-6 / C2 plan and
 // the global NoCommit kill-switch is unset. Used to gate the dirty-
 // tree check — if nothing will commit, prior dirty state is harmless.
 func pipelineWantsCommits(spec *Spec, opts RunOptions) bool { //nolint:gocritic // RunOptions mirrors Run's parameter shape; see Run's nolint rationale
 	if opts.NoCommit {
 		return false
 	}
-	for _, stage := range spec.Stages() {
-		for _, step := range stage.Chain {
-			if step.Commit.Mode != CommitModeSkip {
-				return true
-			}
-		}
-	}
-	return false
+	return spec.PipelineWantsCommits()
 }
 
 // dirtyTreeGate refuses to start a commit-emitting pipeline against a
@@ -274,7 +267,14 @@ func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWri
 		runLog(opts.RunLog, "stage-start", stage.Name, nil)
 		stageStatus := StatusCompleted
 
+		plan, planErr := spec.PlanStageCommits(stage.Name)
+		if planErr != nil {
+			runLog(opts.RunLog, "stage-end", stage.Name, map[string]any{"error": errMessage(planErr)})
+			return planErr
+		}
+
 		for i, step := range stage.Chain {
+			isLastStep := i == len(stage.Chain)-1
 			stepStart := time.Now()
 			notify(opts.Observer, func(o Observer) { o.OnStepStart(stage.Name, i, step) })
 
@@ -308,18 +308,18 @@ func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWri
 			}
 			recordStep(mw, stageIdx, i+1, step, opts.Prompt, stepStart, time.Now(), stepStatus, exitCode, eventsRel, parseResultEvent(out))
 
-			// Commit boundary: PLAN-4 / C4. Runs only after the step's
+			// Commit boundary: PLAN-6 / C2. Runs only after the step's
 			// run-state is recorded so the manifest reflects both the
 			// run outcome and the commit outcome atomically. Failures
 			// here abort the pipeline — a dirty unexpected tree is
 			// worse to silently extend than to fail loudly.
-			commitErr := performStepCommit(ctx, opts, mw, spec.Name, stage.Name, stageIdx, i+1, step, runErr)
-				if commitErr == nil && runErr == nil {
-					// Best-effort checkpoint — the manifest also
-					// records commit_sha, this is for the
-					// streaming SSE / runlog consumer.
-					runLog(opts.RunLog, "commit-made", stage.Name+"/"+step.Skill, nil)
-				}
+			commitErr := performStepCommit(ctx, opts, mw, plan, stageIdx, i+1, isLastStep, runErr)
+			if commitErr == nil && runErr == nil {
+				// Best-effort checkpoint — the manifest also
+				// records commit_sha, this is for the
+				// streaming SSE / runlog consumer.
+				runLog(opts.RunLog, "commit-made", stage.Name+"/"+step.Skill, nil)
+			}
 
 			notify(opts.Observer, func(o Observer) { o.OnStepEnd(stage.Name, i, step, time.Since(stepStart), out, runErr) })
 			if runErr != nil {
@@ -637,40 +637,55 @@ func recordStep(
 // just completed and records the outcome on the manifest. Returns a
 // non-nil error only when the commit itself was attempted and failed
 // (PLAN-4 / C4.4 — that case aborts the pipeline). All "did not
-// commit" outcomes — skipped, cancelled, no-op — are silent.
+// commit" outcomes — skipped, cancelled, no-op, deferred — are silent.
+//
+// PLAN-6 / C2 Phase D — the plan parameter dictates whether this step
+// commits at its own boundary (step-level opt-in), defers to the
+// stage-end commit (stage-level / pipeline-level `commit:`), or skips
+// entirely (`commit: false` somewhere, or nothing set anywhere). For
+// stage-boundary stages, the last step in the chain (isLastStep=true)
+// fires the stage-end commit with the plan's stage directive.
 func performStepCommit(
 	ctx context.Context,
 	opts RunOptions, //nolint:gocritic // RunOptions mirrors Run's parameter shape; pointer would split the documented API contract
 	mw *manifestWriter,
-	pipelineName, stageName string,
+	plan StageCommitPlan, //nolint:gocritic // plan mirrors the other small-struct value-passing on this code path; consistent with Step / RunOptions
 	stageIdx, stepIdx int,
-	step Step, //nolint:gocritic // Step mirrors buildArgv's parameter shape; see buildArgv's existing nolint rationale
+	isLastStep bool,
 	stepRunErr error,
 ) error {
-	status, msg, sha, errMsg, commitErr := resolveCommitOutcome(ctx, opts, pipelineName, stageName, step, stepRunErr)
+	status, msg, sha, errMsg, commitErr := resolveCommitOutcome(ctx, opts, plan, stepIdx, isLastStep, stepRunErr)
 	if mw != nil {
 		_ = mw.RecordStepCommit(stageIdx, stepIdx, sha, msg, status, errMsg)
 	}
 	return commitErr
 }
 
-// resolveCommitOutcome implements the PLAN-4 / C4 decision table:
+// resolveCommitOutcome implements the PLAN-6 / C2 decision table.
+// Skip-state conditions (1–3) fire first because a step that failed
+// or was cancelled can't have produced a commitable diff in any
+// consistent state.
 //
-//  1. step cancelled (ctx)                  → skipped-cancelled
-//  2. step failed                           → skipped-step-failed
-//  3. --no-commit                           → skipped-by-flag
-//  4. spec said commit: false               → skipped-by-spec
-//  5. clean working tree after step         → no-op
-//  6. dirty → git add -A → git commit       → committed | failed
+//  1. step cancelled (ctx)             → skipped-cancelled
+//  2. step failed                      → skipped-step-failed
+//  3. --no-commit                      → skipped-by-flag
+//  4. plan suppressed                  → skipped-by-spec
+//     (some step in the stage has `commit: false`)
+//  5. step has explicit boundary       → attempt commit with step directive
+//     (plan.StepDirectives[stepIdx-1] is set)
+//  6. plan has stage directive
+//     - !isLastStep                    → deferred-to-stage
+//     - isLastStep                     → attempt commit with stage directive
+//  7. no commit configured             → no commit_* fields recorded
 //
-// The first matching condition wins. Step-state outcomes (1, 2) come
-// first because a step that failed couldn't have produced a commitable
-// diff in any consistent state.
+// "attempt commit" steps fall through to the dirty-tree check:
+// clean → no-op, dirty → git add -A → git commit.
 func resolveCommitOutcome(
 	ctx context.Context,
 	opts RunOptions, //nolint:gocritic // RunOptions mirrors Run's parameter shape
-	pipelineName, stageName string,
-	step Step, //nolint:gocritic // Step mirrors buildArgv's parameter shape
+	plan StageCommitPlan, //nolint:gocritic // plan is value-passed alongside opts
+	stepIdx int,
+	isLastStep bool,
 	stepRunErr error,
 ) (status CommitStatus, message, sha, errMsg string, commitErr error) {
 	switch {
@@ -680,27 +695,44 @@ func resolveCommitOutcome(
 		return CommitStatusSkippedStepFailed, "", "", "", nil //nolint:nilerr // stepRunErr is the step's error, not a commit error; the commit was intentionally skipped
 	case opts.NoCommit:
 		return CommitStatusSkippedByFlag, "", "", "", nil
-	}
-	msg, skip := step.Commit.Resolve(pipelineName, stageName, step.Skill)
-	if skip {
+	case plan.Suppressed:
 		return CommitStatusSkippedBySpec, "", "", "", nil
 	}
+	// stepIdx is 1-based in the manifest API; plan.StepDirectives is
+	// keyed by zero-based index (the Effective() convention).
+	if dir, ok := plan.StepDirectives[stepIdx-1]; ok {
+		return attemptCommit(ctx, opts.ProjectRoot, dir.Message)
+	}
+	if plan.StageDirective != nil {
+		if !isLastStep {
+			return CommitStatusDeferredToStage, "", "", "", nil
+		}
+		return attemptCommit(ctx, opts.ProjectRoot, plan.StageDirective.Message)
+	}
+	// No commit configured at any level — leave commit_* fields empty.
+	return "", "", "", "", nil
+}
 
-	porcelain, err := gitStatusPorcelain(ctx, opts.ProjectRoot)
+// attemptCommit runs the dirty-tree → add → commit dance against
+// projectRoot with the given message, returning the resulting
+// CommitStatus / sha / err triple. Used by both the step-boundary
+// path and the stage-boundary (last-step) path.
+func attemptCommit(ctx context.Context, projectRoot, message string) (status CommitStatus, msg, sha, errMsg string, commitErr error) {
+	porcelain, err := gitStatusPorcelain(ctx, projectRoot)
 	if err != nil {
-		return CommitStatusFailed, msg, "", err.Error(), err
+		return CommitStatusFailed, message, "", err.Error(), err
 	}
 	if porcelain == "" {
-		return CommitStatusNoOp, msg, "", "", nil
+		return CommitStatusNoOp, message, "", "", nil
 	}
-	if err := gitAddAll(ctx, opts.ProjectRoot); err != nil {
-		return CommitStatusFailed, msg, "", err.Error(), err
+	if err := gitAddAll(ctx, projectRoot); err != nil {
+		return CommitStatusFailed, message, "", err.Error(), err
 	}
-	sha, err = gitCommit(ctx, opts.ProjectRoot, msg)
+	sha, err = gitCommit(ctx, projectRoot, message)
 	if err != nil {
-		return CommitStatusFailed, msg, "", err.Error(), err
+		return CommitStatusFailed, message, "", err.Error(), err
 	}
-	return CommitStatusCommitted, msg, sha, "", nil
+	return CommitStatusCommitted, message, sha, "", nil
 }
 
 // exitCodeFromErr extracts the OS exit code from an exec error. Falls

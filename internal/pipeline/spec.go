@@ -361,3 +361,84 @@ func resolveCommit(step Step, stage *Stage, spec *Spec) EffectiveCommit {
 	}
 	return EffectiveCommit{Boundary: CommitBoundaryNone}
 }
+
+// StageCommitPlan summarizes the commit decisions for a single
+// stage's chain under PLAN-6 / C2 precedence. It is computed once at
+// stage start and consumed by both runStages (programmatic) and
+// runStageInteractive (interactive) so the two runners stay in step.
+//
+//   - StageDirective, when non-nil, fires one commit at the end of
+//     the stage capturing the chain's accumulated diff.
+//   - StepDirectives maps zero-based step index → directive for steps
+//     that explicitly opted in to a step-boundary commit via
+//     step-level `commit:`. These fire at the step boundary.
+//   - Suppressed is true when at least one step in the chain has an
+//     explicit `commit: false`. Per PLAN-6 / C2 it suppresses only
+//     the stage-end commit (StageDirective is cleared); it does NOT
+//     cancel sibling steps' explicit step-boundary opt-ins.
+type StageCommitPlan struct {
+	StageDirective *CommitDirective
+	StepDirectives map[int]CommitDirective
+	Suppressed     bool
+}
+
+// PlanStageCommits walks the stage's chain once and produces the
+// commit plan the runner should execute against it. Errors only on
+// unknown stageName.
+func (s *Spec) PlanStageCommits(stageName string) (StageCommitPlan, error) {
+	stage, ok := s.stageMap[stageName]
+	if !ok || stage == nil {
+		return StageCommitPlan{}, fmt.Errorf("unknown stage %q", stageName)
+	}
+	plan := StageCommitPlan{StepDirectives: map[int]CommitDirective{}}
+	for i := range stage.Chain {
+		step := stage.Chain[i]
+		if step.CommitSet && step.Commit.Mode == CommitModeSkip {
+			plan.Suppressed = true
+			continue
+		}
+		_, _, eff, err := s.Effective(stageName, i)
+		if err != nil {
+			return StageCommitPlan{}, err
+		}
+		switch eff.Boundary {
+		case CommitBoundaryStep:
+			d := eff.Directive
+			// Resolve CommitModeDefault → derived message here so
+			// attemptCommit (which has no spec/stage context) sees a
+			// ready-to-use message string.
+			if d.Mode == CommitModeDefault {
+				d.Message = DerivedCommitMessage(s.Name, stageName, step.Skill)
+			}
+			plan.StepDirectives[i] = d
+		case CommitBoundaryStage:
+			d := eff.Directive
+			if d.Mode == CommitModeDefault {
+				d.Message = DerivedStageCommitMessage(s.Name, stageName)
+			}
+			plan.StageDirective = &d
+		case CommitBoundaryNone:
+			// nothing to do
+		}
+	}
+	if plan.Suppressed {
+		plan.StageDirective = nil
+	}
+	return plan, nil
+}
+
+// PipelineWantsCommits reports whether any stage's plan would emit a
+// commit. Used by the dirty-tree gate to decide whether to enforce
+// the pre-run clean-tree contract.
+func (s *Spec) PipelineWantsCommits() bool {
+	for _, stage := range s.Stages() {
+		plan, err := s.PlanStageCommits(stage.Name)
+		if err != nil {
+			continue
+		}
+		if plan.StageDirective != nil || len(plan.StepDirectives) > 0 {
+			return true
+		}
+	}
+	return false
+}

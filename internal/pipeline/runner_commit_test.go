@@ -106,7 +106,7 @@ func loadLatestManifest(t *testing.T, root, name string) Manifest {
 func TestRun_CommitDefaultMessage(t *testing.T) {
 	root := t.TempDir()
 	writePipelineSpec(t, root, "smoke",
-		"      - skill: apex-write\n")
+		"      - skill: apex-write\n        commit: true\n")
 	initGitRepo(t, root)
 
 	shim := writeFileShim(t, t.TempDir(),
@@ -239,7 +239,7 @@ func TestRun_NoCommitFlagSkipsAll(t *testing.T) {
 func TestRun_CommitNoOpOnEmptyDiff(t *testing.T) {
 	root := t.TempDir()
 	writePipelineSpec(t, root, "noop",
-		"      - skill: apex-write\n")
+		"      - skill: apex-write\n        commit: true\n")
 	initGitRepo(t, root)
 	shim := writeFileShim(t, t.TempDir(), "") // body does nothing
 
@@ -270,7 +270,7 @@ func TestRun_DirtyTreeGateRefuses(t *testing.T) {
 		t.Fatalf("write WIP: %v", err)
 	}
 	writePipelineSpec(t, root, "dirty",
-		"      - skill: apex-write\n")
+		"      - skill: apex-write\n        commit: true\n")
 	shim := writeFileShim(t, t.TempDir(),
 		"echo 'hello' > '"+root+"/note.md'\n")
 
@@ -297,7 +297,7 @@ func TestRun_AllowDirtyBypassesGate(t *testing.T) {
 		t.Fatalf("write WIP: %v", err)
 	}
 	writePipelineSpec(t, root, "allowdirty",
-		"      - skill: apex-write\n")
+		"      - skill: apex-write\n        commit: true\n")
 	shim := writeFileShim(t, t.TempDir(),
 		"echo 'hello' > '"+root+"/note.md'\n")
 
@@ -367,5 +367,130 @@ func TestRun_CommitOnFailedStep(t *testing.T) {
 	step := m.Stages[0].Steps[0]
 	if step.CommitStatus != CommitStatusSkippedStepFailed {
 		t.Errorf("commit_status = %q, want skipped-step-failed", step.CommitStatus)
+	}
+}
+
+// TestRun_StageBoundaryCommit — PLAN-6 / C2 Phase D: a stage-level
+// `commit: "msg"` directive produces exactly one commit per stage
+// (folding the chain's accumulated diff), attributed to the last
+// step in the chain. Earlier steps are recorded as
+// `deferred-to-stage`. The explicit message wins over any per-step
+// derivation.
+func TestRun_StageBoundaryCommit(t *testing.T) {
+	root := t.TempDir()
+	pipelinesDir := filepath.Join(root, "_apex", "pipelines")
+	if err := os.MkdirAll(pipelinesDir, 0o755); err != nil {
+		t.Fatalf("mkdir pipelines: %v", err)
+	}
+	body := `name: stagecommit
+stages:
+  s1:
+    commit: "specs: stage commit"
+    chain:
+      - skill: step-one
+      - skill: step-two
+      - skill: step-three
+`
+	if err := os.WriteFile(filepath.Join(pipelinesDir, "stagecommit.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	initGitRepo(t, root)
+	// Each step writes a unique file so the working tree is dirty
+	// across the chain. Only one commit should land at stage end.
+	shim := filepath.Join(t.TempDir(), "shim.sh")
+	content := "#!/bin/sh\nset -e\n" +
+		"f=$(mktemp '" + root + "/note-XXXXXX.md')\necho 'change' > \"$f\"\n" +
+		"echo '{\"type\":\"result\",\"subtype\":\"success\",\"duration_ms\":1,\"num_turns\":1,\"total_cost_usd\":0.01,\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}'\n"
+	if err := os.WriteFile(shim, []byte(content), 0o755); err != nil {
+		t.Fatalf("write shim: %v", err)
+	}
+
+	spec, err := LoadSpec("stagecommit", root)
+	if err != nil {
+		t.Fatalf("LoadSpec: %v", err)
+	}
+	if err := Run(context.Background(), spec, RunOptions{
+		ProjectRoot: root,
+		ClaudeBin:   shim,
+		ApeVersion:  "0.1.0-test",
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	m := loadLatestManifest(t, root, "stagecommit")
+	if len(m.Stages) != 1 || len(m.Stages[0].Steps) != 3 {
+		t.Fatalf("bad shape: %+v", m.Stages)
+	}
+	if m.Totals.CommitsMade != 1 {
+		t.Errorf("totals.commits_made = %d, want 1", m.Totals.CommitsMade)
+	}
+	for i, want := range []CommitStatus{
+		CommitStatusDeferredToStage,
+		CommitStatusDeferredToStage,
+		CommitStatusCommitted,
+	} {
+		got := m.Stages[0].Steps[i].CommitStatus
+		if got != want {
+			t.Errorf("step %d commit_status = %q, want %q", i+1, got, want)
+		}
+	}
+	last := m.Stages[0].Steps[2]
+	if last.CommitMessage != "specs: stage commit" {
+		t.Errorf("last step commit_message = %q, want %q", last.CommitMessage, "specs: stage commit")
+	}
+	if last.CommitSHA == "" {
+		t.Errorf("last step commit_sha empty")
+	}
+}
+
+// TestRun_StageBoundaryCommit_Suppressed — PLAN-6 / C2: an explicit
+// step-level `commit: false` suppresses the stage-end commit even
+// when the stage declares one. All steps record skipped-by-spec.
+func TestRun_StageBoundaryCommit_Suppressed(t *testing.T) {
+	root := t.TempDir()
+	pipelinesDir := filepath.Join(root, "_apex", "pipelines")
+	if err := os.MkdirAll(pipelinesDir, 0o755); err != nil {
+		t.Fatalf("mkdir pipelines: %v", err)
+	}
+	body := `name: stagesuppress
+stages:
+  s1:
+    commit: "specs: never fires"
+    chain:
+      - skill: step-one
+      - skill: step-two
+        commit: false
+      - skill: step-three
+`
+	if err := os.WriteFile(filepath.Join(pipelinesDir, "stagesuppress.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	initGitRepo(t, root)
+	shim := filepath.Join(t.TempDir(), "shim.sh")
+	content := "#!/bin/sh\nset -e\n" +
+		"f=$(mktemp '" + root + "/note-XXXXXX.md')\necho 'change' > \"$f\"\n" +
+		"echo '{\"type\":\"result\",\"subtype\":\"success\",\"duration_ms\":1,\"num_turns\":1,\"total_cost_usd\":0,\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}'\n"
+	if err := os.WriteFile(shim, []byte(content), 0o755); err != nil {
+		t.Fatalf("write shim: %v", err)
+	}
+
+	spec, _ := LoadSpec("stagesuppress", root)
+	// dirty-tree gate would refuse a suppressed-but-stage-declared
+	// pipeline because pipelineWantsCommits is false; safe to run.
+	if err := Run(context.Background(), spec, RunOptions{
+		ProjectRoot: root,
+		ClaudeBin:   shim,
+		ApeVersion:  "0.1.0-test",
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	m := loadLatestManifest(t, root, "stagesuppress")
+	if m.Totals.CommitsMade != 0 {
+		t.Errorf("totals.commits_made = %d, want 0", m.Totals.CommitsMade)
+	}
+	for i, st := range m.Stages[0].Steps {
+		if st.CommitStatus != CommitStatusSkippedBySpec {
+			t.Errorf("step %d commit_status = %q, want skipped-by-spec", i+1, st.CommitStatus)
+		}
 	}
 }
