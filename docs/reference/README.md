@@ -6,7 +6,16 @@ For ape, reference is the surface area: every command, every flag, every config 
 
 ## Available reference
 
-_(none yet)_
+- [bridge-ipc.md](bridge-ipc.md) — MCP bridge IPC wire schema.
+- [bridge-security.md](bridge-security.md) — bridge bind + threat model.
+- [claude-spawn-modes.md](claude-spawn-modes.md) — when ape uses `claude -p` vs a tmux-hosted `claude` REPL, per command + flag.
+- [framework-yaml.md](framework-yaml.md) — `_apex/framework.yaml` schema.
+- [invocation-matrix.md](invocation-matrix.md) — every `ape pipeline` UI × Exec combination.
+- [pipeline-run-manifest.md](pipeline-run-manifest.md) — `manifest.yaml` schema written per pipeline run.
+- [pipeline-spec.md](pipeline-spec.md) — internal Go shape of a parsed pipeline.
+- [pipeline-yaml-schema.md](pipeline-yaml-schema.md) — `_apex/pipelines/*.yaml` schema (model/agent/commit defaults, `no-clear`, etc.).
+- [step-contract.md](step-contract.md) — per-step contract enforced by the bridge verifier.
+- [tui-keybindings.md](tui-keybindings.md) — Bubble Tea TUI keybindings.
 
 ## Planned reference
 

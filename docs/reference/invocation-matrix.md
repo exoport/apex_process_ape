@@ -38,6 +38,7 @@ The CLI selects one cell from the matrix. The default is **tui + interactive**.
 
 Related:
 
+- [claude-spawn-modes.md](claude-spawn-modes.md) — which cells of this matrix spawn `claude -p` and which spawn an interactive REPL in tmux
 - [pipeline-yaml-schema.md](pipeline-yaml-schema.md) — pipeline YAML fields
 - [step-contract.md](step-contract.md) — agent-prefix verification + how `/clear` is driven
 - [../explanation/exec-modes.md](../explanation/exec-modes.md) — why interactive vs programmatic

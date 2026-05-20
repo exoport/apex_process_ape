@@ -111,6 +111,7 @@ The trade-off is intentional: `--print` is the captured-for-replay path, not the
 ## Related
 
 - [invocation-matrix.md](../reference/invocation-matrix.md)
+- [claude-spawn-modes.md](../reference/claude-spawn-modes.md) — concrete lookup table for when `claude -p` is used
 - [pipeline-yaml-schema.md](../reference/pipeline-yaml-schema.md)
 - [step-contract.md](../reference/step-contract.md)
 - [bridge-architecture.md](bridge-architecture.md)
