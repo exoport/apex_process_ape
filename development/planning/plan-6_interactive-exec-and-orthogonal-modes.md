@@ -377,6 +377,20 @@ The "Open questions to resolve during implementation" section above is preserved
 - **`--no-tui` deprecation hint** — N/A (the alias was removed cleanly in Phase F, no deprecation period needed).
 - **CHANGELOG entry organization** — one consolidated PLAN-6 entry per the original default.
 
+## Post-ship rename — `--print` → `--eval` (2026-05-20)
+
+The flag this plan calls `--print` throughout shipped under that name and was renamed to `--eval` shortly after. Motivation: the locked byte-equivalence contract for the eval consumer was invisible at the call site — readers had to know that "print" implicitly meant "the eval-harness path". The new name makes the contract self-describing.
+
+Hard rename, no deprecation alias (ape is pre-release):
+
+- CLI flag: `--print` → `--eval`.
+- Internal identifiers: `PipelineModePrint` → `PipelineModeEval`, `PipelineFlags.Print` → `Eval`, `config.ModePrint` → `config.ModeEval`, `(*PipelineMode).IsPrint()` → `IsEval()`.
+- All active docs (reference, how-to, explanation) updated; this plan body is preserved as historical record.
+- Error messages: `--print admits no exec modifier` → `--eval admits no exec modifier`; mutex error names the new flag.
+- Help text: explicit "LOCKED byte-equivalent stdout for the eval harness / CI capture" rather than the prior "Plain stdout (eval / CI capture path)".
+
+Byte-equivalence with the PLAN-5 era `--print` output is unchanged; the rename is surface-only.
+
 ## Context references
 
 | Path                                                       | What                                                                     |

@@ -44,21 +44,21 @@ func TestResolvePipelineMode_PerInvocationMatrix(t *testing.T) {
 		// Web variants.
 		{"--web", PipelineFlags{Web: true}, PipelineModeWebInteractive, true, false},
 		{"--web -P", PipelineFlags{Web: true, Programmatic: true}, PipelineModeWebProgrammatic, true, false},
-		// No-UI variants. --no-tui no longer aliases --print.
+		// No-UI variants. --no-tui no longer aliases --eval.
 		{"--no-tui", PipelineFlags{NoTUI: true}, PipelineModeNoneInteractive, true, false},
 		{"--no-tui -P", PipelineFlags{NoTUI: true, Programmatic: true}, PipelineModeNoneProgrammatic, true, false},
 		// TUI programmatic.
 		{"--tui -P", PipelineFlags{TUI: true, Programmatic: true}, PipelineModeTUIProgrammatic, false, false},
-		// Print is LOCKED — no exec modifiers permitted.
-		{"--print", PipelineFlags{Print: true}, PipelineModePrint, true, false},
+		// Eval is LOCKED — no exec modifiers permitted. Renamed from --print on 2026-05-20.
+		{"--eval", PipelineFlags{Eval: true}, PipelineModeEval, true, false},
 		// Mutex errors.
 		{"--tui --web", PipelineFlags{TUI: true, Web: true}, 0, false, true},
-		{"--tui --print", PipelineFlags{TUI: true, Print: true}, 0, false, true},
-		{"--print --no-tui", PipelineFlags{Print: true, NoTUI: true}, 0, false, true},
-		{"--print --interactive", PipelineFlags{Print: true, Interactive: true}, 0, false, true},
-		{"--print --programmatic", PipelineFlags{Print: true, Programmatic: true}, 0, false, true},
+		{"--tui --eval", PipelineFlags{TUI: true, Eval: true}, 0, false, true},
+		{"--eval --no-tui", PipelineFlags{Eval: true, NoTUI: true}, 0, false, true},
+		{"--eval --interactive", PipelineFlags{Eval: true, Interactive: true}, 0, false, true},
+		{"--eval --programmatic", PipelineFlags{Eval: true, Programmatic: true}, 0, false, true},
 		{"--interactive --programmatic", PipelineFlags{Interactive: true, Programmatic: true}, 0, false, true},
-		{"all-four-ui-flags", PipelineFlags{TUI: true, Web: true, NoTUI: true, Print: true}, 0, false, true},
+		{"all-four-ui-flags", PipelineFlags{TUI: true, Web: true, NoTUI: true, Eval: true}, 0, false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

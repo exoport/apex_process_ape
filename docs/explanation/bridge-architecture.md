@@ -101,7 +101,7 @@ is `async: false` because the parent uses it to flush the per-step
 run-log before the loop returns.
 
 Hooks are injected **only when `Mode == ModeWeb`**. In `--tui` and
-`--print` modes, `BuildSettings` returns `{}` and `ape notify` never
+`--eval` modes, `BuildSettings` returns `{}` and `ape notify` never
 spawns. PLAN-5 / C4.
 
 ## Why this layout
@@ -127,7 +127,7 @@ spawns. PLAN-5 / C4.
 
 - **Pipeline web-mode wiring.** The `ape pipeline <name>` runner
   still uses today's TUI / print path. The web-mode flag plumbing
-  is in place (`--tui` is currently inert default; `--print` is
+  is in place (`--tui` is currently inert default; `--eval` is
   the explicit name for what `--no-tui` used to do); the eventual
   flip is held until a follow-up release-cycle merge. Pipeline web
   mode will mount the runlog Writer + per-step JSONL tail through

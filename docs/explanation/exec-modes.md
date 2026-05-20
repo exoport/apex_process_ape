@@ -49,9 +49,9 @@ Under programmatic mode this kind of check is invisible — every step's process
 
 Two reasons:
 
-### 1. `--print` is locked
+### 1. `--eval` is locked
 
-The eval harness at `apex_process_framework_eval` consumes `ape pipeline <name> --print` output byte-for-byte. Interactive mode injects hooks and changes the stdout stream shape. PLAN-6 invariant #1 locks `--print` to today's programmatic shape forever; future plans cannot violate it without breaking the eval contract.
+The eval harness at `apex_process_framework_eval` consumes `ape pipeline <name> --eval` output byte-for-byte. Interactive mode injects hooks and changes the stdout stream shape. PLAN-6 invariant #1 locks `--eval` to today's programmatic shape forever; future plans cannot violate it without breaking the eval contract.
 
 ### 2. Debugging single-step issues
 
@@ -92,11 +92,11 @@ Hooks fire **before** a tool runs and can block or modify the call (returning no
 
 Tool-call observability proper: stream-json already emits `tool_use` / `tool_result` events with full params + results. `PreToolUse` / `PostToolUse` hooks duplicate that signal but arrive on the bridge channel rather than mixed into the model's output stream. The duplication is structurally cleaner — the runlog writer has one source of truth for `bridge-calls.jsonl` rather than parsing stream-json — and it's what the web SSE surface consumes for its live activity feed. So the tool-call hooks aren't strictly necessary for correctness, but they pay for themselves in cleaner data flow.
 
-### Why `--print` doesn't get hooks
+### Why `--eval` doesn't get hooks
 
-`--print` is byte-equivalence-locked for the eval consumer (PLAN-6 invariant #1). Injecting hooks would spawn an `ape notify` subprocess per tool call, changing the per-step stdout stream shape (subprocess lifetime, ordering of stderr interleaving, timing of stream-json line emission). The eval at `apex_process_framework_eval` reads `--print` output verbatim and would break.
+`--eval` is byte-equivalence-locked for the eval consumer (PLAN-6 invariant #1). Injecting hooks would spawn an `ape notify` subprocess per tool call, changing the per-step stdout stream shape (subprocess lifetime, ordering of stderr interleaving, timing of stream-json line emission). The eval at `apex_process_framework_eval` reads `--eval` output verbatim and would break.
 
-The trade-off is intentional: `--print` is the captured-for-replay path, not the live-observation path. If you need hooks, run interactive (default) or `--web -P`.
+The trade-off is intentional: `--eval` is the captured-for-replay path, not the live-observation path. If you need hooks, run interactive (default) or `--web -P`.
 
 ## When to override the default
 
@@ -104,7 +104,7 @@ The trade-off is intentional: `--print` is the captured-for-replay path, not the
 | ---------------------------------------- | --------------------------- |
 | Today's per-step debugging               | `--tui -P` or `--no-tui -P` |
 | Old `--web` behaviour                    | `--web -P`                  |
-| Locked byte-equivalent stdout (eval)     | `--print`                   |
+| Locked byte-equivalent stdout (eval)     | `--eval`                    |
 | No UI, but still interactive             | `--no-tui`                  |
 | Force interactive even with `-P` context | `--interactive` / `-I`      |
 

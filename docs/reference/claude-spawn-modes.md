@@ -20,13 +20,13 @@ This page is the lookup table for which mode each command + flag combination use
 | `ape pipeline <name> --tui -P`              | tui    | programmatic | **YES**      | TUI panels + per-step `claude -p`                                                   |
 | `ape pipeline <name> --no-tui -P`           | none   | programmatic | **YES**      | plain stdout + per-step `claude -p`                                                 |
 | `ape pipeline <name> --web -P`              | web    | programmatic | **YES**      | PLAN-5 web shape: per-step `claude -p` + bridge for hooks + `await_message`/`reply` |
-| `ape pipeline <name> --print`               | none   | programmatic | **YES**      | locked PLAN-5 byte-equivalent; per-step `claude -p`                                 |
+| `ape pipeline <name> --eval`                | none   | programmatic | **YES**      | locked PLAN-5 byte-equivalent; per-step `claude -p`                                 |
 | `ape chat`                                  | (tmux) | interactive  | **NO**       | user types directly into the tmux REPL after `tmux attach`                          |
 
 ## The rule
 
 ```
-claude -p  ⇔  Exec axis = programmatic  ⇔  -P / --programmatic / --print
+claude -p  ⇔  Exec axis = programmatic  ⇔  -P / --programmatic / --eval
 ```
 
 Anything **interactive** (the default for `ape pipeline`; the only mode for `ape chat`) spawns claude into a tmux session and never passes `-p`.
@@ -34,7 +34,7 @@ Anything **interactive** (the default for `ape pipeline`; the only mode for `ape
 ## Mutual exclusion (`ape pipeline` errors with exit 2)
 
 - `--tui --web` together — multiple UI flags.
-- `--print` with any of `--interactive`, `-P`, `--tui`, `--web`, `--no-tui` — `--print` admits no modifier.
+- `--eval` with any of `--interactive`, `-P`, `--tui`, `--web`, `--no-tui` — `--eval` admits no modifier.
 - `--interactive` and `-P` together — mutually exclusive exec choices.
 
 ## Bridge role by mode
@@ -46,7 +46,7 @@ The MCP bridge (`internal/bridge/orchestrator/`) stays wired in most modes, but 
 | interactive (any UI)          | Hook observability only (`UserPromptSubmit`, `Stop`, `PreToolUse`, `PostToolUse`, …)         |
 | programmatic + `--web -P`     | Hook observability **plus** prompt delivery via `await_message` / `reply` (PLAN-5 web shape) |
 | programmatic + `-P` (non-web) | Hook observability optional; no `await_message`                                              |
-| `--print`                     | Bridge not wired at all (byte-equivalence lock for the eval consumer)                        |
+| `--eval`                      | Bridge not wired at all (byte-equivalence lock for the eval consumer)                        |
 
 ## Source of truth in code
 

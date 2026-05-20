@@ -31,7 +31,7 @@ func newPipelineCmd() *cobra.Command {
 		noCommitFlag       bool
 		allowDirtyFlag     bool
 		tuiFlag            bool
-		printFlag          bool
+		evalFlag           bool
 		webFlag            bool
 		openFlag           bool
 		ignoreProjSettings bool
@@ -89,7 +89,7 @@ func newPipelineCmd() *cobra.Command {
 				TUI:          tuiFlag,
 				Web:          webFlag,
 				NoTUI:        noTUI,
-				Print:        printFlag,
+				Eval:         evalFlag,
 				Interactive:  interactiveFlag,
 				Programmatic: programmaticFlag,
 			}, os.Stderr)
@@ -123,9 +123,9 @@ func newPipelineCmd() *cobra.Command {
 			// the no-UI / TUI interactive variants route through
 			// runWithInteractive; the legacy programmatic-exec paths
 			// preserve the PLAN-5 wiring (runWithTUI / runPlain).
-			// The eval consumer's --print path is preserved verbatim.
+			// The eval consumer's --eval path is preserved verbatim.
 			switch {
-			case mode.IsPrint():
+			case mode.IsEval():
 				return runPlain(ctx, spec, projectRoot, quietFlag, runOpts)
 			case mode == PipelineModeWebInteractive:
 				return runWithWeb(ctx, spec, projectRoot, runOpts, true)
@@ -143,11 +143,11 @@ func newPipelineCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Optional prompt forwarded to skills that accept it (currently: epics)")
 	cmd.Flags().BoolVarP(&interactiveFlag, "interactive", "I", false, "Per-stage interactive `claude` process with bridge step-contract verification (PLAN-6 / C1). Default; explicit form for scripts.")
-	cmd.Flags().BoolVarP(&programmaticFlag, "programmatic", "P", false, "Per-step `claude -p` spawn (pre-PLAN-6 default). Use with --tui / --web / --no-tui to keep today's exec shape; ignored under --print.")
+	cmd.Flags().BoolVarP(&programmaticFlag, "programmatic", "P", false, "Per-step `claude -p` spawn (pre-PLAN-6 default). Use with --tui / --web / --no-tui to keep today's exec shape; ignored under --eval.")
 	cmd.Flags().BoolVar(&webFlag, "web", false, "Bridged web UI (now the default). Explicit form for scripts.")
 	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "Bubble Tea TUI (pre-PLAN-5 default; now opt-in).")
-	cmd.Flags().BoolVar(&printFlag, "print", false, "Plain stdout (eval / CI capture path).")
-	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Deprecated alias for --print. Prints a stderr warning when used.")
+	cmd.Flags().BoolVar(&evalFlag, "eval", false, "LOCKED byte-equivalent stdout for the eval harness / CI capture (no bridge, no hooks, no UI; admits no exec modifier).")
+	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "No UI surface, but still interactive exec (one claude REPL per stage in tmux). Combine with -P for plain-stdout programmatic exec; pass --eval for the locked byte-equivalent path.")
 	cmd.Flags().BoolVar(&openFlag, "open", false, "With --web (or default): xdg-open the broker URL on start.")
 	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json. Honoured in --web mode.")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "With --no-tui: suppress per-event stream; print only stage/step start/end markers")

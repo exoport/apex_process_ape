@@ -9,9 +9,9 @@ import (
 // SettingsOptions configures the inline --settings JSON.
 //
 // Hooks are injected when InjectHooks is true OR when Mode == ModeWeb
-// (back-compat for PLAN-5 callers). For ModePrint the returned blob is
+// (back-compat for PLAN-5 callers). For ModeEval the returned blob is
 // always `{}` regardless of InjectHooks — PLAN-6 invariant #1 locks
-// `--print` byte-equivalence with the eval consumer; injecting hooks
+// `--eval` byte-equivalence with the eval consumer; injecting hooks
 // would change the per-tool-call subprocess spawn shape and break that
 // contract. PLAN-6 / Phase E (TUI parity) adds InjectHooks so TUI and
 // interactive modes can opt in to hook observability without piggy-
@@ -24,7 +24,7 @@ type SettingsOptions struct {
 	// BridgePort is the TCP port `ape notify` dials. Wired into the
 	// hook env as APE_BRIDGE_PORT. Required when hooks are injected.
 	BridgePort int
-	// Mode controls the print-equivalence lock: ModePrint forces an
+	// Mode controls the eval-equivalence lock: ModeEval forces an
 	// empty settings blob regardless of InjectHooks. ModeWeb and
 	// ModeTUI both permit hooks when InjectHooks is set; ModeWeb also
 	// permits hooks for back-compat when InjectHooks is left false.
@@ -55,11 +55,11 @@ type hookCommand struct {
 
 // BuildSettings produces the JSON blob handed to `claude --settings`.
 // Mode == ModeWeb (PLAN-5) or InjectHooks == true (PLAN-6) wires the
-// six events listed in PLAN-5 / C4 (five async, Stop sync). ModePrint
+// six events listed in PLAN-5 / C4 (five async, Stop sync). ModeEval
 // always returns `{}` regardless of InjectHooks (PLAN-6 invariant #1).
 // All other combinations return `{}`.
 func BuildSettings(opts SettingsOptions) (json.RawMessage, error) {
-	if opts.Mode == ModePrint {
+	if opts.Mode == ModeEval {
 		return json.RawMessage(`{}`), nil
 	}
 	if opts.Mode != ModeWeb && !opts.InjectHooks {

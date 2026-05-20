@@ -6,13 +6,15 @@
 package config
 
 // Mode identifies which UX surface the pipeline / chat is running
-// against. The web bridge wires hooks; the TUI and print modes do not
+// against. The web bridge wires hooks; the TUI and eval modes do not
 // (zero overhead in non-web modes per PLAN-5 / C4).
 type Mode int
 
 const (
-	// ModePrint is plain stdout (today's --no-tui shape, opt-in via --print).
-	ModePrint Mode = iota
+	// ModeEval is the locked byte-equivalent stdout path (opt-in via
+	// --eval, renamed from --print on 2026-05-20). No bridge, no
+	// hooks, no per-tool-call subprocess spawn.
+	ModeEval Mode = iota
 	// ModeTUI is the Bubble Tea TUI (today's default; will become
 	// opt-in via --tui once C1's default flip lands).
 	ModeTUI
@@ -25,8 +27,8 @@ const (
 // and the bridge-calls.jsonl `mode` field.
 func (m Mode) String() string {
 	switch m {
-	case ModePrint:
-		return "print"
+	case ModeEval:
+		return "eval"
 	case ModeTUI:
 		return "tui"
 	case ModeWeb:

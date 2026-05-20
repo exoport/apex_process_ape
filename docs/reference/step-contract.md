@@ -2,7 +2,7 @@
 
 PLAN-6 / C4 defines the per-step interaction between the runner and `claude` in interactive exec mode. The runner spawns `claude` inside a tmux session and delivers each step's prompt as real REPL keystrokes via `tmux send-keys`. The bridge observes the resulting `UserPromptSubmit` and `Stop` hooks; the `ContractVerifier` checks each step's prompt shape and fires a hard-fail on mismatch.
 
-The contract only applies under interactive exec. Programmatic exec (`--print`, `--web -P`) spawns a fresh `claude -p` per step, so context/model/agent isolation comes from the process boundary and no in-session verification is needed.
+The contract only applies under interactive exec. Programmatic exec (`--eval`, `--web -P`) spawns a fresh `claude -p` per step, so context/model/agent isolation comes from the process boundary and no in-session verification is needed.
 
 ## What the runner does
 

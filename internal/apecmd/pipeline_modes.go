@@ -12,9 +12,10 @@ import (
 //   - UI    ∈ {none, tui, web}        (where the output renders)
 //   - Exec  ∈ {programmatic, interactive} (how claude is spawned)
 //
-// `--print` collapses the two axes into a single locked mode for the
-// eval consumer (PLAN-6 invariant #1: byte-equivalent with today's
-// `--print` output, no bridge, no hooks).
+// `--eval` collapses the two axes into a single locked mode for the
+// eval consumer (PLAN-6 invariant #1: byte-equivalent stdout, no
+// bridge, no hooks). The flag was renamed from `--print` to make
+// the byte-equivalence contract evident at the call site.
 type PipelineMode int
 
 const (
@@ -27,8 +28,8 @@ const (
 	// the per-stage claude lifetime change.
 	PipelineModeWebInteractive
 	// PipelineModeNoneInteractive is `--no-tui`: no UI, but still
-	// interactive exec. PLAN-6 stops aliasing `--no-tui` to `--print`;
-	// users who want plain stdout programmatic mode must pass `--print`.
+	// interactive exec. PLAN-6 stops aliasing `--no-tui` to `--eval`;
+	// users who want plain stdout programmatic mode must pass `--eval`.
 	PipelineModeNoneInteractive
 	// PipelineModeTUIProgrammatic is `--tui -P`: TUI rendering with
 	// today's per-step claude spawn. The TUI panels behave the same as
@@ -41,10 +42,12 @@ const (
 	// PipelineModeNoneProgrammatic is `--no-tui -P`: no UI, per-step
 	// claude spawn. Plain stdout streaming.
 	PipelineModeNoneProgrammatic
-	// PipelineModePrint is `--print`: LOCKED — no UI, no bridge, no
+	// PipelineModeEval is `--eval`: LOCKED — no UI, no bridge, no
 	// hooks injection, no per-stage spawn, byte-equivalent with the
-	// PLAN-5 `--no-tui` output the eval harness consumes.
-	PipelineModePrint
+	// PLAN-5 `--no-tui` output the eval harness consumes. Renamed
+	// from PipelineModePrint on 2026-05-20 so the byte-equivalence
+	// contract is visible at every call site.
+	PipelineModeEval
 )
 
 // IsInteractive reports whether the mode uses the per-stage interactive
@@ -86,9 +89,9 @@ func (m PipelineMode) IsTUI() bool {
 	return false
 }
 
-// IsPrint reports whether the mode is the LOCKED print path (byte-
+// IsEval reports whether the mode is the LOCKED eval path (byte-
 // equivalence invariant for the eval consumer).
-func (m PipelineMode) IsPrint() bool { return m == PipelineModePrint }
+func (m PipelineMode) IsEval() bool { return m == PipelineModeEval }
 
 // PipelineFlags bundles the user-supplied flag values consumed by
 // resolvePipelineMode. Grouped so the resolver signature stays stable
@@ -97,7 +100,7 @@ type PipelineFlags struct {
 	TUI          bool
 	Web          bool
 	NoTUI        bool
-	Print        bool
+	Eval         bool
 	Interactive  bool
 	Programmatic bool
 }
@@ -109,25 +112,25 @@ type PipelineFlags struct {
 //   - optOutTUI: true when the resolved mode does NOT render the
 //     Bubble Tea TUI (used by the caller's `useTUI := !optOutTUI &&
 //     term.IsTerminal(...)` guard).
-//   - err: non-nil on mutex violations (multiple UI flags, --print
+//   - err: non-nil on mutex violations (multiple UI flags, --eval
 //     with any modifier, --interactive + --programmatic).
 func resolvePipelineMode(flags PipelineFlags, _ io.Writer) (mode PipelineMode, optOutTUI bool, err error) {
 	uiCount := 0
-	for _, f := range []bool{flags.TUI, flags.Web, flags.NoTUI, flags.Print} {
+	for _, f := range []bool{flags.TUI, flags.Web, flags.NoTUI, flags.Eval} {
 		if f {
 			uiCount++
 		}
 	}
 	if uiCount > 1 {
-		return PipelineModeTUIInteractive, false, errors.New("--tui, --web, --no-tui, and --print are mutually exclusive (only one UI selector at a time)")
+		return PipelineModeTUIInteractive, false, errors.New("--tui, --web, --no-tui, and --eval are mutually exclusive (only one UI selector at a time)")
 	}
-	if flags.Print {
+	if flags.Eval {
 		if flags.Interactive || flags.Programmatic {
-			// --print is the LOCKED byte-equivalence path; no exec
+			// --eval is the LOCKED byte-equivalence path; no exec
 			// modifier may apply (PLAN-6 invariant #1).
-			return PipelineModeTUIInteractive, false, errors.New("--print admits no exec modifier: drop --interactive / --programmatic")
+			return PipelineModeTUIInteractive, false, errors.New("--eval admits no exec modifier: drop --interactive / --programmatic")
 		}
-		return PipelineModePrint, true, nil
+		return PipelineModeEval, true, nil
 	}
 	if flags.Interactive && flags.Programmatic {
 		return PipelineModeTUIInteractive, false, errors.New("--interactive and --programmatic are mutually exclusive")
@@ -163,8 +166,8 @@ func resolvePipelineMode(flags PipelineFlags, _ io.Writer) (mode PipelineMode, o
 // directly. The shape returns just the optOutTUI bool for back-compat;
 // the (--interactive, --programmatic) axis is fixed at the default
 // (interactive).
-func resolveModeFlags(tui, print, noTUI bool, stderr io.Writer) (optOutTUI bool, err error) {
-	_, opt, resolveErr := resolvePipelineMode(PipelineFlags{TUI: tui, Print: print, NoTUI: noTUI}, stderr)
+func resolveModeFlags(tui, eval, noTUI bool, stderr io.Writer) (optOutTUI bool, err error) {
+	_, opt, resolveErr := resolvePipelineMode(PipelineFlags{TUI: tui, Eval: eval, NoTUI: noTUI}, stderr)
 	if resolveErr != nil {
 		return opt, resolveErr
 	}
@@ -188,8 +191,8 @@ func describeMode(m PipelineMode) string {
 		return "web + programmatic"
 	case PipelineModeNoneProgrammatic:
 		return "none + programmatic"
-	case PipelineModePrint:
-		return "print (LOCKED)"
+	case PipelineModeEval:
+		return "eval (LOCKED)"
 	}
 	return fmt.Sprintf("unknown(%d)", m)
 }

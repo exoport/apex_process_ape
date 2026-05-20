@@ -7,7 +7,7 @@ import (
 )
 
 func TestBuildSettings_NonWebReturnsEmptyObject(t *testing.T) {
-	for _, mode := range []Mode{ModePrint, ModeTUI} {
+	for _, mode := range []Mode{ModeEval, ModeTUI} {
 		t.Run(mode.String(), func(t *testing.T) {
 			raw, err := BuildSettings(SettingsOptions{Mode: mode})
 			if err != nil {

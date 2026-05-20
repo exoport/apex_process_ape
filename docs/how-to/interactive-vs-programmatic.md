@@ -7,7 +7,7 @@ If you're new to PLAN-6 and wondering whether to use the new interactive default
 | What you're doing                              | Run                                                 |
 | ---------------------------------------------- | --------------------------------------------------- |
 | First-time pipeline run, normal use            | `ape pipeline <name>` (default — tui + interactive) |
-| Eval / CI / stdout-byte-capture pipelines      | `ape pipeline <name> --print`                       |
+| Eval / CI / stdout-byte-capture pipelines      | `ape pipeline <name> --eval`                        |
 | Re-running a known-flaky single-step pipeline  | `ape pipeline <name> --tui -P`                      |
 | Debugging today's `--web` behaviour            | `ape pipeline <name> --web -P`                      |
 | Web UI but with PLAN-6 features                | `ape pipeline <name> --web`                         |
@@ -25,11 +25,11 @@ You can't. Pick the mode at invocation time. `ape pipeline` doesn't resume from 
 - Hooks captured in `<project>/_output/pipelines/<name>/<run_id>/hook-events.jsonl`.
 - TUI panels surface per-stage progress live.
 - Attach for live debugging while a run is in flight: `tmux attach -t ape-<stage>-<pid>`.
-- Requires `tmux` on `PATH`. Programmatic exec (`-P`, `--print`) has no tmux dependency.
+- Requires `tmux` on `PATH`. Programmatic exec (`-P`, `--eval`) has no tmux dependency.
 
 ## What you give up under interactive
 
-- The `--print` byte-equivalence contract — for that, pass `--print` explicitly.
+- The `--eval` byte-equivalence contract — for that, pass `--eval` explicitly.
 - Independence between steps in a stage: if step 1 corrupts the session, step 2 inherits the damage (catch this with `no-clear: true` discipline; see [step-contract.md](../reference/step-contract.md)).
 
 ## Migrating an existing pipeline
@@ -52,7 +52,7 @@ See [pipeline-yaml-schema.md](../reference/pipeline-yaml-schema.md) for the full
 ## Mutual-exclusion errors
 
 - `--tui --web` → "only one UI selector at a time"
-- `--print --interactive` → "--print admits no exec modifier"
+- `--eval --interactive` → "--eval admits no exec modifier"
 - `--interactive --programmatic` → "mutually exclusive"
 
 These all exit with code 2 and a one-line error to stderr.

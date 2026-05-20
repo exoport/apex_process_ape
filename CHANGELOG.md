@@ -8,8 +8,8 @@ PLAN-6: Interactive pipeline exec + orthogonal UI/exec modes. `ape pipeline <nam
 
 - **`ape pipeline <name>` default flips to `--tui` + `--interactive`.** Old default (per-step `claude -p`) is now `--tui -P` or `--no-tui -P`. `--web` defaults to interactive; `--web -P` is the legacy PLAN-5 web programmatic mode (byte-equivalent preserved).
 - **New `-P` / `--programmatic`** modifier to opt back into per-step `claude -p` spawning.
-- **`--print` is locked.** Byte-equivalent with PLAN-5 `--print`; the eval consumer at `apex_process_framework_eval` depends on this. `--print` admits no exec modifier.
-- **`--no-tui` is now a UI selector**, not an alias for `--print`. Means "no UI, but still interactive exec".
+- **`--eval` is locked.** Byte-equivalent stdout for the eval harness at `apex_process_framework_eval`; no bridge, no hooks, no per-stage spawn. Admits no exec modifier. Renamed from `--print` so the byte-equivalence contract is visible at the call site.
+- **`--no-tui` is now a UI selector**, not an alias for the locked path. Means "no UI, but still interactive exec".
 - **Pipeline YAML grows pipeline-level + stage-level defaults** for `commit`, `model`, `agent`. Precedence: `step > stage > pipeline > default(skip)`. Default commit unit is the stage boundary.
 - **Per-step `no-clear: true`** opts a step out of the inter-step `/clear` for multi-step chains that need shared context (e.g., `apex-create-prd`'s elicit/respond loop).
 - **`ape chat` rewritten** as a thin `tmux` spawn-and-attach helper. ape spawns `claude` in a named tmux session with the bridge wired (hooks captured to `_output/ape/chats/<id>/`), prints attach instructions, and `exec`s `tmux attach`. The Bubble Tea chat TUI from PLAN-5 was removed.
@@ -18,8 +18,9 @@ PLAN-6: Interactive pipeline exec + orthogonal UI/exec modes. `ape pipeline <nam
 
 ### Breaking changes
 
-- **`tmux` is now required for interactive exec.** ape errors clearly if `tmux` is not on `PATH`. Programmatic exec (`-P`, `--print`) has no tmux dependency.
-- **`--no-tui` no longer aliases `--print`.** Use `--print` explicitly for byte-equivalent stdout, or `--no-tui -P` for "no UI + programmatic exec".
+- **`--print` renamed to `--eval`.** Hard rename, no deprecation alias. Pre-existing scripts that pass `--print` will error with `unknown flag`; migrate to `--eval`. The byte-equivalent output shape is unchanged.
+- **`tmux` is now required for interactive exec.** ape errors clearly if `tmux` is not on `PATH`. Programmatic exec (`-P`, `--eval`) has no tmux dependency.
+- **`--no-tui` no longer aliases the locked path.** Use `--eval` explicitly for byte-equivalent stdout, or `--no-tui -P` for "no UI + programmatic exec".
 - **`ape chat` no longer hosts a TUI surface.** The web/Bubble Tea chat UI was removed; `ape chat` is now `tmux attach` to a bridged claude. Pre-existing automation that screen-scraped the chat UI must migrate.
 - **`creack/pty` dependency removed.** Interactive surfaces (pipeline + chat) all route through tmux now.
 
