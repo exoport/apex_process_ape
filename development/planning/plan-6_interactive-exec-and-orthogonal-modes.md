@@ -278,7 +278,7 @@ File moves + new files (tutorial, how-tos, reference for invocation matrix / sch
 
 ## Sandbox smoke matrix (acceptance shape)
 
-Test bed: `/home/diegos/_dev/ape-web-sandbox/greeter/` with the `design` pipeline. Clean state: `git reset --hard b1e492b` (was `3676580` before the 2026-05-20 pipeline-commit-message bump).
+Test bed: `/home/diegos/_dev/ape-web-sandbox/greeter/` with the `design` pipeline. Clean state: `git reset --hard 496b58f` (was `3676580` before the 2026-05-20 pipeline-commit-message bumps).
 
 | Invocation                                        | Expected                                                                                                        |
 | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -350,7 +350,7 @@ The fix is to deliver prompts as **real REPL keystrokes** so claude's CLI parses
 
 ## Sandbox acceptance — 2026-05-20
 
-Per the smoke matrix above, against `/home/diegos/_dev/ape-web-sandbox/greeter/` (clean state at the time was `git reset --hard 3676580`; bumped to `b1e492b` on 2026-05-20 when step-level `commit:` was added to the sandbox pipelines), after the tmux pivot (commits `e1584b2` + `3adf420`):
+Per the smoke matrix above, against `/home/diegos/_dev/ape-web-sandbox/greeter/` (clean state at the time was `git reset --hard 3676580`; bumped to `496b58f` on 2026-05-20 when commit fields were added to the sandbox pipelines — step-level on design + epics, stage-level on governance), after the tmux pivot (commits `e1584b2` + `3adf420`):
 
 | Invocation                           | Result                                                                                                                                                            |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -393,6 +393,6 @@ The "Open questions to resolve during implementation" section above is preserved
 | `internal/bridge/config/settings.go`                       | `BuildSettings` — hooks injection rule changes here (PLAN-6 C3).         |
 | `internal/apecmd/pipeline.go` / `pipeline_web.go`          | Mode dispatch + web reference impl. TUI side gets parity in Phase E.     |
 | `internal/runlog/`                                         | JSONL writers; mode-agnostic.                                            |
-| `/home/diegos/_dev/ape-web-sandbox/greeter/`               | Live sandbox (clean state: `git reset --hard b1e492b`).                  |
+| `/home/diegos/_dev/ape-web-sandbox/greeter/`               | Live sandbox (clean state: `git reset --hard 496b58f`).                  |
 | `/home/diegos/_dev/exoar/apex_process_framework_eval/`     | Eval consumer (PLAN-9). `--print` byte-equivalence locked.               |
 | Project memory `feedback_no_claude_attribution.md`         | No `Co-Authored-By: Claude` trailer on commits.                          |
