@@ -42,7 +42,6 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 	}
 
 	runCtx, runCancel := context.WithCancel(ctx)
-	defer runCancel()
 
 	core := newInteractiveCore(runCancel, getRunLog)
 
@@ -68,6 +67,7 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 		OnReply: core.FeedReply,
 	})
 	if err := rt.Listen(); err != nil {
+		runCancel()
 		return fmt.Errorf("ape pipeline (tui + interactive): runtime listen: %w", err)
 	}
 	rt.SetStopFn(runCancel)
@@ -90,7 +90,18 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 
 	rtErrCh := make(chan error, 1)
 	go func() { rtErrCh <- rt.Serve(runCtx) }()
-	defer func() { <-rtErrCh }()
+	// Cancel runCtx before waiting for rt.Serve, otherwise the wait
+	// hangs (defers fire LIFO; the cancel needs to come first).
+	defer func() {
+		runCancel()
+		<-rtErrCh
+		runLogMu.Lock()
+		if rl != nil {
+			_ = rl.Close()
+			rl = nil
+		}
+		runLogMu.Unlock()
+	}()
 
 	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, cfg.ignoreProjectSettings)
 	if err != nil {

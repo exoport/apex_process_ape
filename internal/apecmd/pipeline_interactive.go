@@ -192,7 +192,6 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	}
 
 	runCtx, runCancel := context.WithCancel(ctx)
-	defer runCancel()
 
 	core := newInteractiveCore(runCancel, getRunLog)
 
@@ -202,13 +201,27 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		OnReply: core.FeedReply,
 	})
 	if err := rt.Listen(); err != nil {
+		runCancel()
 		return fmt.Errorf("ape pipeline --interactive: runtime listen: %w", err)
 	}
 	rt.SetStopFn(runCancel)
 
 	rtErrCh := make(chan error, 1)
 	go func() { rtErrCh <- rt.Serve(runCtx) }()
-	defer func() { <-rtErrCh }()
+	// Teardown order matters: cancel runCtx first so rt.Serve returns,
+	// THEN drain rtErrCh. The earlier shape (defer runCancel; defer
+	// <-rtErrCh) ran the drain before the cancel because defers fire
+	// LIFO, leaving the process hung after the last stage completed.
+	defer func() {
+		runCancel()
+		<-rtErrCh
+		runLogMu.Lock()
+		if rl != nil {
+			_ = rl.Close()
+			rl = nil
+		}
+		runLogMu.Unlock()
+	}()
 
 	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, cfg.ignoreProjectSettings)
 	if err != nil {
