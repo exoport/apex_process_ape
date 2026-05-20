@@ -2,85 +2,94 @@ package apecmd
 
 import (
 	"bytes"
-	"strings"
 	"testing"
 )
 
-func TestResolvePipelineMode_DefaultsToWeb(t *testing.T) {
-	// PLAN-5 / C1 — the no-flag form `ape pipeline <name>` now spawns
-	// the bridged web UI. The old test asserted the opposite (TUI by
-	// default); flipped here as part of the release-cycle merge that
-	// shipped the web path.
+// TestResolvePipelineMode_DefaultsToTUIInteractive covers the PLAN-6
+// invocation-matrix default: no flags → tui + interactive. This
+// supersedes PLAN-5's web-by-default era.
+func TestResolvePipelineMode_DefaultsToTUIInteractive(t *testing.T) {
 	var buf bytes.Buffer
-	mode, opt, err := resolvePipelineMode(false, false, false, false, &buf)
+	mode, opt, err := resolvePipelineMode(PipelineFlags{}, &buf)
 	if err != nil {
 		t.Fatalf("resolvePipelineMode: %v", err)
 	}
-	if mode != PipelineModeWeb {
-		t.Errorf("default mode = %d, want PipelineModeWeb (%d)", mode, PipelineModeWeb)
+	if mode != PipelineModeTUIInteractive {
+		t.Errorf("default mode = %s, want PipelineModeTUIInteractive", describeMode(mode))
 	}
-	if !opt {
-		t.Error("default web mode should report optOutTUI=true")
+	if opt {
+		t.Error("tui+interactive default should report optOutTUI=false")
 	}
 	if buf.Len() != 0 {
 		t.Errorf("default should not warn; stderr=%q", buf.String())
 	}
 }
 
-func TestResolveModeFlags_LegacyShim_DefaultsToOptOutTUI(t *testing.T) {
-	// The pre-web shim used by pipeline_modes_test.go. After the
-	// default flip it reports optOutTUI=true because web is the new
-	// default. Existing callers that passed all-false (i.e. no
-	// mode flags) get web semantics — that's the breaking change.
+// TestResolvePipelineMode_PerInvocationMatrix locks the full PLAN-6
+// invocation matrix as a table-driven test. Every row corresponds to a
+// row in development/planning/plan-6_*.md's invocation table.
+func TestResolvePipelineMode_PerInvocationMatrix(t *testing.T) {
+	cases := []struct {
+		name     string
+		flags    PipelineFlags
+		wantMode PipelineMode
+		wantOpt  bool
+		wantErr  bool
+	}{
+		// Default + explicit equivalents.
+		{"default", PipelineFlags{}, PipelineModeTUIInteractive, false, false},
+		{"--tui", PipelineFlags{TUI: true}, PipelineModeTUIInteractive, false, false},
+		{"--interactive", PipelineFlags{Interactive: true}, PipelineModeTUIInteractive, false, false},
+		{"--tui --interactive", PipelineFlags{TUI: true, Interactive: true}, PipelineModeTUIInteractive, false, false},
+		// Web variants.
+		{"--web", PipelineFlags{Web: true}, PipelineModeWebInteractive, true, false},
+		{"--web -P", PipelineFlags{Web: true, Programmatic: true}, PipelineModeWebProgrammatic, true, false},
+		// No-UI variants. --no-tui no longer aliases --print.
+		{"--no-tui", PipelineFlags{NoTUI: true}, PipelineModeNoneInteractive, true, false},
+		{"--no-tui -P", PipelineFlags{NoTUI: true, Programmatic: true}, PipelineModeNoneProgrammatic, true, false},
+		// TUI programmatic.
+		{"--tui -P", PipelineFlags{TUI: true, Programmatic: true}, PipelineModeTUIProgrammatic, false, false},
+		// Print is LOCKED — no exec modifiers permitted.
+		{"--print", PipelineFlags{Print: true}, PipelineModePrint, true, false},
+		// Mutex errors.
+		{"--tui --web", PipelineFlags{TUI: true, Web: true}, 0, false, true},
+		{"--tui --print", PipelineFlags{TUI: true, Print: true}, 0, false, true},
+		{"--print --no-tui", PipelineFlags{Print: true, NoTUI: true}, 0, false, true},
+		{"--print --interactive", PipelineFlags{Print: true, Interactive: true}, 0, false, true},
+		{"--print --programmatic", PipelineFlags{Print: true, Programmatic: true}, 0, false, true},
+		{"--interactive --programmatic", PipelineFlags{Interactive: true, Programmatic: true}, 0, false, true},
+		{"all-four-ui-flags", PipelineFlags{TUI: true, Web: true, NoTUI: true, Print: true}, 0, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			mode, opt, err := resolvePipelineMode(tc.flags, &buf)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr=%v", err, tc.wantErr)
+			}
+			if tc.wantErr {
+				return
+			}
+			if mode != tc.wantMode {
+				t.Errorf("mode = %s, want %s", describeMode(mode), describeMode(tc.wantMode))
+			}
+			if opt != tc.wantOpt {
+				t.Errorf("optOutTUI = %v, want %v", opt, tc.wantOpt)
+			}
+		})
+	}
+}
+
+// TestResolveModeFlags_LegacyShim verifies the back-compat resolver
+// still works for callers that don't yet pass the new exec axis.
+func TestResolveModeFlags_LegacyShim(t *testing.T) {
 	var buf bytes.Buffer
 	opt, err := resolveModeFlags(false, false, false, &buf)
 	if err != nil {
 		t.Fatalf("resolveModeFlags: %v", err)
 	}
-	if !opt {
-		t.Error("post-flip default should report optOutTUI=true")
-	}
-}
-
-func TestResolveModeFlags_PrintAndNoTUI_BothOptOut(t *testing.T) {
-	// `--print` byte-equivalence with today's `--no-tui` rests on
-	// both flags routing through the same value. PLAN-5 / C1.
-	cases := []struct {
-		name      string
-		tui       bool
-		print     bool
-		noTUI     bool
-		wantOut   bool
-		wantWarn  bool
-		wantError bool
-	}{
-		// Post-flip semantics: --tui explicitly chooses Bubble Tea,
-		// which is the only mode where optOutTUI=false. Everything
-		// else (web / print) reports optOutTUI=true.
-		{"tui-only", true, false, false, false, false, false},
-		{"print-only", false, true, false, true, false, false},
-		{"no-tui-only", false, false, true, true, true, false},
-		// Error cases: resolveModeFlags now reports optOutTUI=true on
-		// any mutex error because the new default (web) is opt-out-TUI.
-		{"tui+print", true, true, false, true, false, true},
-		{"tui+no-tui", true, false, true, true, false, true},
-		{"print+no-tui", false, true, true, true, false, true},
-		{"all-three", true, true, true, true, false, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var buf bytes.Buffer
-			opt, err := resolveModeFlags(tc.tui, tc.print, tc.noTUI, &buf)
-			if (err != nil) != tc.wantError {
-				t.Fatalf("err = %v, wantError=%v", err, tc.wantError)
-			}
-			if opt != tc.wantOut {
-				t.Errorf("optOutTUI = %v, want %v", opt, tc.wantOut)
-			}
-			warned := strings.Contains(buf.String(), "deprecated")
-			if warned != tc.wantWarn {
-				t.Errorf("warning printed = %v, want %v (stderr=%q)", warned, tc.wantWarn, buf.String())
-			}
-		})
+	// The new default is tui+interactive, which is NOT optOutTUI.
+	if opt {
+		t.Error("post-PLAN-6 default should report optOutTUI=false")
 	}
 }

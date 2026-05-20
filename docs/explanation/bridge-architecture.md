@@ -1,28 +1,41 @@
 # Bridge architecture
 
-`ape pipeline` (web mode) and `ape chat` connect a browser to a
+`ape pipeline --web -P` (web programmatic) connects a browser to a
 running Claude Code session via three loosely coupled pieces: an
 MCP server (the **bridge**), an SSE broker (the **broker**), and an
 orchestrator that owns the subprocess lifecycle and stitches the
 two together.
 
-This document is the design narrative. For the wire schema, see
+This document is the design narrative for the **web programmatic**
+mode. For the wire schema, see
 [bridge-ipc.md](../reference/bridge-ipc.md). For the security model,
 see [bridge-security.md](../reference/bridge-security.md). PLAN-5 / C3.
+
+> **Note on interactive exec (PLAN-6 tmux pivot, 2026-05-20).** Pipeline
+> interactive mode (`ape pipeline --tui` / `--no-tui` / `--web` without
+> `-P`) and `ape chat` no longer use `await_message` / `reply` as a
+> prompt-delivery channel. They run `claude` inside a per-stage `tmux`
+> session and deliver prompts as real REPL keystrokes via
+> `tmux send-keys -l <slash-command>` + Enter. The bridge is still
+> wired for **hook observability** (`PreToolUse`, `PostToolUse`,
+> `UserPromptSubmit`, `Stop`, etc.) but `await_message`/`reply` are
+> dormant for those modes. The `--web -P` flow described below is
+> unaffected.
 
 ## Why an MCP bridge
 
 Claude Code's MCP support lets us expose tools that block. Two are
-enough for an interactive session:
+enough for the web programmatic interactive session:
 
 - `await_message`: holds the pending request id until a browser
   message arrives over IPC, then responds with the text.
 - `reply`: non-blocking, forwards the content over IPC; the parent
   publishes an SSE `reply` event for the browser.
 
-This is the loop: claude → `await_message` (blocks) → user types in
-browser → `/api/send` → IPC → bridge → response delivered → claude
-calls `reply(...)` → IPC → broker → SSE → browser.
+This is the loop (web programmatic only): claude → `await_message`
+(blocks) → user types in browser → `/api/send` → IPC → bridge →
+response delivered → claude calls `reply(...)` → IPC → broker → SSE
+→ browser.
 
 The pattern was validated by the PoC at
 `/home/diegos/_dev/github/diegosz/claude_mcp_bridge_poc` commit

@@ -17,8 +17,26 @@ import (
 )
 
 // Spec describes a named pipeline.
+//
+// PLAN-6 / C2 adds pipeline-level defaults for Model, Agent, and Commit.
+// These cascade down to stages and steps via the precedence chain
+// `step > stage > pipeline > default` (see Effective). The fields are
+// optional; absence at the pipeline level just means the chain falls
+// through to the stage/step levels with no contribution.
 type Spec struct {
-	Name      string            `yaml:"name"`
+	Name string `yaml:"name"`
+	// Model is the pipeline-level default model passed to claude when a
+	// step does not override at its own or its stage's level. Empty
+	// string means "no pipeline-level default".
+	Model string `yaml:"model,omitempty"`
+	// Agent is the pipeline-level default agent. Same precedence rules
+	// as Model.
+	Agent string `yaml:"agent,omitempty"`
+	// Commit is the pipeline-level commit policy. Nil means "absent"
+	// (no pipeline-level opinion); non-nil values propagate to stages
+	// that don't override. Phase A does not yet wire this into the
+	// runner — the stage-boundary default lights up in Phase D.
+	Commit    *CommitDirective  `yaml:"commit,omitempty"`
 	Requires  Requires          `yaml:"requires,omitempty"`
 	StagesRaw yaml.Node         `yaml:"stages"` //nolint:tagliatelle // on-disk YAML files use "stages"; field name includes "Raw" suffix to signal internal use
 	stages    []Stage           `yaml:"-"`
@@ -33,9 +51,24 @@ type Requires struct {
 // Stage is one logical step inside a pipeline. A stage executes a chain
 // of skill steps in order. Stage boundaries are what the TUI displays
 // as top-level rows.
+//
+// PLAN-6 / C2: Stage carries optional defaults for Model, Agent, and
+// Commit that override the pipeline level and feed into the precedence
+// chain consumed by Effective().
 type Stage struct {
-	Name  string
-	Chain []Step
+	Name string
+	// Model overrides the pipeline-level model for steps within this
+	// stage. Steps may further override with their own Model.
+	Model string
+	// Agent overrides the pipeline-level agent for steps within this
+	// stage. Steps may further override with their own Agent.
+	Agent string
+	// Commit is the stage-level commit policy. Nil means "absent"
+	// (inherit from the pipeline level). When set, fires at the
+	// stage boundary by default; step-level Commit is the escape
+	// hatch for mid-chain commits (see Effective).
+	Commit *CommitDirective
+	Chain  []Step
 }
 
 // Step is one invocation inside a stage's chain.
@@ -57,7 +90,63 @@ type Step struct {
 	// to inherit the pipeline-level default (commit with a derived
 	// message); `commit: false` to skip; `commit: "msg"` to override
 	// the message. See CommitDirective.
+	//
+	// PLAN-6 / C2: when CommitSet is true the step explicitly opted
+	// into a step-boundary commit; when false the stage/pipeline level
+	// applies and the commit (if any) fires at stage boundary instead.
+	// PLAN-4 / runner.go:628 still treats the zero value as
+	// CommitModeDefault, so today's behaviour is preserved until
+	// Phase D rewires the runner.
 	Commit CommitDirective `yaml:"commit,omitempty"`
+	// CommitSet is true when the step's YAML had an explicit `commit:`
+	// field. Populated by Step.UnmarshalYAML; zero-valued in unit tests
+	// that construct Step literals directly. PLAN-6 precedence uses
+	// this to distinguish "step opts in" from "step inherits".
+	CommitSet bool `yaml:"-"`
+	// NoClear opts the step out of the per-step `/clear` that the
+	// bridge step contract (PLAN-6 / C4) enforces by default. Used by
+	// multi-step chains that need to share context within a stage
+	// (e.g., apex-create-prd's elicit/respond loop). Step-level only.
+	NoClear bool `yaml:"no-clear,omitempty"` //nolint:tagliatelle // on-disk spec YAML uses kebab-case "no-clear"
+}
+
+// stepYAML mirrors Step for YAML decoding so Step.UnmarshalYAML can
+// detect which optional fields were present without re-declaring
+// every tag. Keep in sync with Step.
+type stepYAML struct {
+	Skill      string           `yaml:"skill"`
+	Agent      string           `yaml:"agent,omitempty"`
+	Model      string           `yaml:"model,omitempty"`
+	Args       string           `yaml:"args,omitempty"`
+	PromptFlag string           `yaml:"prompt_flag,omitempty"` //nolint:tagliatelle // matches Step.PromptFlag
+	Commit     *CommitDirective `yaml:"commit,omitempty"`
+	NoClear    bool             `yaml:"no-clear,omitempty"` //nolint:tagliatelle // matches Step.NoClear
+}
+
+// UnmarshalYAML decodes a Step and records whether the optional
+// `commit:` field was present. The presence flag is needed by
+// Spec.Effective (PLAN-6 / C2 precedence) to distinguish
+// "step opts in to a step-boundary commit" from
+// "step inherits from stage/pipeline".
+func (s *Step) UnmarshalYAML(node *yaml.Node) error {
+	var raw stepYAML
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	s.Skill = raw.Skill
+	s.Agent = raw.Agent
+	s.Model = raw.Model
+	s.Args = raw.Args
+	s.PromptFlag = raw.PromptFlag
+	s.NoClear = raw.NoClear
+	if raw.Commit != nil {
+		s.Commit = *raw.Commit
+		s.CommitSet = true
+	} else {
+		s.Commit = CommitDirective{}
+		s.CommitSet = false
+	}
+	return nil
 }
 
 // Stages returns the pipeline's stages in declaration order.
@@ -151,7 +240,10 @@ func decodeStages(node *yaml.Node) ([]Stage, error) {
 		}
 		stage := Stage{Name: key.Value}
 		var body struct {
-			Chain []Step `yaml:"chain"`
+			Model  string           `yaml:"model,omitempty"`
+			Agent  string           `yaml:"agent,omitempty"`
+			Commit *CommitDirective `yaml:"commit,omitempty"`
+			Chain  []Step           `yaml:"chain"`
 		}
 		if err := val.Decode(&body); err != nil {
 			return nil, fmt.Errorf("stage %q: %w", stage.Name, err)
@@ -164,8 +256,108 @@ func decodeStages(node *yaml.Node) ([]Stage, error) {
 				return nil, fmt.Errorf("stage %q step %d: missing skill", stage.Name, j)
 			}
 		}
+		stage.Model = body.Model
+		stage.Agent = body.Agent
+		stage.Commit = body.Commit
 		stage.Chain = body.Chain
 		stages = append(stages, stage)
 	}
 	return stages, nil
+}
+
+// EffectiveCommit captures the resolved commit policy for a step under
+// PLAN-6 / C2 precedence. Boundary names which boundary the commit
+// fires on; Directive carries the mode + message to apply when Boundary
+// is not None. Phase D consumes this in the runner.
+type EffectiveCommit struct {
+	Boundary  CommitBoundary
+	Directive CommitDirective
+}
+
+// CommitBoundary tells the runner which boundary an effective commit
+// fires on.
+type CommitBoundary int
+
+const (
+	// CommitBoundaryNone — no commit fires for this step / stage.
+	CommitBoundaryNone CommitBoundary = iota
+	// CommitBoundaryStep — commit fires after this step. Set when the
+	// step itself opts in via step-level `commit:`.
+	CommitBoundaryStep
+	// CommitBoundaryStage — commit fires at the end of the stage,
+	// capturing the chain's accumulated diff. Set when stage or
+	// pipeline level set `commit:` and no step in the stage opted in
+	// to a step-boundary commit.
+	CommitBoundaryStage
+)
+
+// Effective returns the resolved Model, Agent, and EffectiveCommit for
+// a (stage, step) under PLAN-6 / C2 precedence:
+//
+//	model:  step.Model  ?? stage.Model  ?? spec.Model  ?? ""
+//	agent:  step.Agent  ?? stage.Agent  ?? spec.Agent  ?? ""
+//	commit: step.Commit (if CommitSet) → step boundary
+//	        else stage.Commit          → stage boundary
+//	        else spec.Commit           → stage boundary
+//	        else CommitBoundaryNone (no commit)
+//
+// "?? X" means "fall through to X when the higher level is empty/nil".
+//
+// commit precedence also honours `commit: false` at any level as the
+// authoritative "skip" — once a level says skip, lower levels do not
+// re-enable. This matches the plan's "commit: false at any level
+// disables commits at that scope" rule with one practical refinement:
+// because step.Commit only has effect when CommitSet is true,
+// `commit: false` at step level disables the step boundary *and* the
+// stage boundary for that step's stage (the step opted in to "no
+// commit"); at stage or pipeline level, false disables the stage
+// commit unconditionally.
+//
+// Phase A returns the value; runner.go does not yet consume it. The
+// runner switches in Phase D.
+func (s *Spec) Effective(stageName string, stepIdx int) (model, agent string, commit EffectiveCommit, err error) {
+	stage, ok := s.stageMap[stageName]
+	if !ok || stage == nil {
+		return "", "", EffectiveCommit{}, fmt.Errorf("unknown stage %q", stageName)
+	}
+	if stepIdx < 0 || stepIdx >= len(stage.Chain) {
+		return "", "", EffectiveCommit{}, fmt.Errorf("stage %q: step index %d out of range [0,%d)", stageName, stepIdx, len(stage.Chain))
+	}
+	step := stage.Chain[stepIdx]
+
+	model = firstNonEmpty(step.Model, stage.Model, s.Model)
+	agent = firstNonEmpty(step.Agent, stage.Agent, s.Agent)
+	commit = resolveCommit(step, stage, s)
+	return model, agent, commit, nil
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func resolveCommit(step Step, stage *Stage, spec *Spec) EffectiveCommit {
+	if step.CommitSet {
+		if step.Commit.Mode == CommitModeSkip {
+			return EffectiveCommit{Boundary: CommitBoundaryNone}
+		}
+		return EffectiveCommit{Boundary: CommitBoundaryStep, Directive: step.Commit}
+	}
+	if stage.Commit != nil {
+		if stage.Commit.Mode == CommitModeSkip {
+			return EffectiveCommit{Boundary: CommitBoundaryNone}
+		}
+		return EffectiveCommit{Boundary: CommitBoundaryStage, Directive: *stage.Commit}
+	}
+	if spec.Commit != nil {
+		if spec.Commit.Mode == CommitModeSkip {
+			return EffectiveCommit{Boundary: CommitBoundaryNone}
+		}
+		return EffectiveCommit{Boundary: CommitBoundaryStage, Directive: *spec.Commit}
+	}
+	return EffectiveCommit{Boundary: CommitBoundaryNone}
 }

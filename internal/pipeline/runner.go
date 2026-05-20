@@ -95,6 +95,54 @@ type RunOptions struct {
 	// uncommitted changes the project tree had at runner start.
 	// Meaningful only when NoCommit is false. PLAN-4 / C5.
 	AllowDirty bool
+
+	// Interactive, when true, runs the pipeline under PLAN-6 exec
+	// mode: one `claude` process per stage running inside its own
+	// tmux session, with steps fed as real REPL keystrokes via
+	// `tmux send-keys` (instead of one `claude -p` per step). Steps
+	// share the session within a stage and are separated by a
+	// `/clear` slash command; stage boundaries are the process spawn.
+	// Default is false (today's per-step programmatic mode).
+	Interactive bool
+
+	// WaitStepDone is called between steps in interactive mode to
+	// block until the model has finished responding to the step's
+	// prompt. The apecmd wiring layer implements this by subscribing
+	// to the bridge's Stop hook. Nil falls back to a fixed grace
+	// window controlled by InteractiveStepGrace; meaningful only for
+	// smoke tests that don't wire the bridge.
+	WaitStepDone func(ctx context.Context, stage string, stepIdx int) error
+
+	// InteractiveStepGrace is the duration the runner waits between
+	// steps in interactive mode when WaitStepDone is nil. Default is
+	// 2 seconds. Production callers should set WaitStepDone instead
+	// of relying on this grace window.
+	InteractiveStepGrace time.Duration
+
+	// OnInteractiveStepStart fires before the interactive runner
+	// types a step's slash-command prompt into the tmux pane. The
+	// apecmd layer uses this to register a StepContract with the
+	// bridge verifier so the next UserPromptSubmit hook can be
+	// matched against the expected agent-prefix shape.
+	OnInteractiveStepStart func(info InteractiveStepInfo)
+	// OnInteractiveStepEnd fires after WaitStepDone returns for a
+	// step. Used by apecmd to release the StepContract so a stray
+	// late UserPromptSubmit doesn't match the previous step.
+	OnInteractiveStepEnd func(info InteractiveStepInfo)
+}
+
+// InteractiveStepInfo describes a single step in interactive mode for
+// the OnInteractiveStepStart / End callbacks. The apecmd wiring layer
+// translates this into a bridge orchestrator.StepContract.
+type InteractiveStepInfo struct {
+	Stage    string
+	StepIdx  int
+	Skill    string
+	Agent    string
+	// Model is the model the step expects after a `/model` command;
+	// empty means no model switch is expected at this step boundary.
+	Model   string
+	NoClear bool
 }
 
 // Observer hooks every state transition the runner emits. Methods are
@@ -131,6 +179,9 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error { //nolint:gocr
 	if opts.ClaudeBin == "" {
 		opts.ClaudeBin = "claude"
 	}
+	if opts.InteractiveStepGrace == 0 {
+		opts.InteractiveStepGrace = 2 * time.Second //nolint:mnd // smoke-test fallback only; production callers wire WaitStepDone
+	}
 	if err := Preflight(spec, opts.ProjectRoot); err != nil {
 		return err
 	}
@@ -147,7 +198,12 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error { //nolint:gocr
 		opts.OnRunDir(mw.runDir)
 	}
 
-	runErr := runStages(ctx, spec, opts, mw)
+	var runErr error
+	if opts.Interactive {
+		runErr = runStagesInteractive(ctx, spec, opts, mw)
+	} else {
+		runErr = runStages(ctx, spec, opts, mw)
+	}
 	finalizeManifest(mw, runErr, opts.Observer)
 	runLog(opts.RunLog, "pipeline-end", spec.Name, map[string]any{"error": errMessage(runErr)})
 	return runErr

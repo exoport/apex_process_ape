@@ -25,7 +25,7 @@ import (
 // (broker + IPC listener), builds inline configs, prepends them to
 // every per-step claude argv, and routes IPC frames to the runlog
 // writer alongside PLAN-3's manifest path. PLAN-5 / C1 + C3 + C6.
-func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cfg runConfig) error {
+func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cfg runConfig, interactive bool) error {
 	apeBin, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("ape pipeline --web: locate self: %w", err)
@@ -104,6 +104,17 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		})
 	}
 
+	// runCtx is constructed below for the stop-button cancellation
+	// path; under interactive exec we also need it for the contract
+	// verifier's OnViolation hook (which cancels the run). Construct
+	// the core early so the Hub's OnHook can feed it.
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+	var core *interactiveCore
+	if interactive {
+		core = newInteractiveCore(runCancel, getRunLog)
+	}
+
 	hub := orchestrator.NewHub(orchestrator.HubOptions{
 		PageHTML:         pageHTML,
 		MountExtras:      mountExtras,
@@ -119,6 +130,9 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 					AgentID:   h.AgentID,
 					Payload:   h.Payload,
 				})
+			}
+			if core != nil {
+				core.FeedHook(h)
 			}
 		},
 		OnCall: func(c orchestrator.ToolCall) {
@@ -156,8 +170,8 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	//   - hubCtx: the broker's lifetime. Kept separate so the
 	//     "stopping…" banner can flush over SSE before the broker
 	//     shuts down. Cancelled after the runner returns (defer).
-	runCtx, runCancel := context.WithCancel(ctx)
-	defer runCancel()
+	// runCtx is constructed earlier (above the Hub) so the
+	// interactive core can wire OnViolation -> runCancel.
 	hubCtx, hubCancel := context.WithCancel(ctx)
 	defer hubCancel()
 	stopReq := func() {
@@ -263,7 +277,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	}
 
 	runStart := time.Now()
-	runErr := pipeline.Run(runCtx, spec, pipeline.RunOptions{
+	runOptions := pipeline.RunOptions{
 		ProjectRoot:  projectRoot,
 		Prompt:       cfg.prompt,
 		Observer:     newPlainObserver(os.Stdout, projectRoot, true),
@@ -279,7 +293,14 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		// we cannot pass *runlog.Writer here because it doesn't exist
 		// until the runner has resolved the run dir.
 		RunLog: &lazyRunLog{getter: getRunLog},
-	})
+	}
+	if core != nil {
+		runOptions.Interactive = true
+		runOptions.WaitStepDone = core.WaitStepDone
+		runOptions.OnInteractiveStepStart = core.OnStepStart
+		runOptions.OnInteractiveStepEnd = core.OnStepEnd
+	}
+	runErr := pipeline.Run(runCtx, spec, runOptions)
 
 	// Publish a terminal banner so the page shows 'completed' (or
 	// 'failed') rather than the htmx 'disconnected' that would fire

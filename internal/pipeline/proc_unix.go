@@ -52,3 +52,4 @@ func configureProcessGroup(cmd *exec.Cmd) {
 		return termErr
 	}
 }
+

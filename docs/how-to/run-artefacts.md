@@ -31,17 +31,21 @@ PLAN-5 / C6.
 
 ## Chat sessions
 
+`ape chat` runs claude inside a tmux session with the bridge wired
+for hook observability. Artefacts:
+
 ```
 <project>/_output/ape/chats/<chat-id>/
-├── session.yaml         ← small chat-session record (no PLAN-3 manifest)
 ├── hook-events.jsonl    ← same schema as pipeline runs
-├── bridge-calls.jsonl   ← same schema
-├── checkpoints.jsonl    ← kinds: chat-start, reply, chat-end
-└── transcript.jsonl     ← symlink into ~/.claude/projects/
+├── bridge-calls.jsonl   ← same schema (mostly `initialize` calls in chat)
+└── checkpoints.jsonl    ← reserved; chat doesn't write anything here today
 ```
 
-- `<chat-id>` is `YYYYMMDD-HHMMSS-<7-char hash>` where the hash
-  mixes timestamp + cwd + pid for cross-process uniqueness.
+- `<chat-id>` is `YYYYMMDDTHHMMSSZ` (UTC ISO-8601-style).
+- No `session.yaml` and no `transcript.jsonl` symlink today — the
+  chat surface is a thin tmux spawn-and-attach (PLAN-6 tmux pivot,
+  2026-05-20). claude's own transcript still lives at
+  `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`.
 
 ## Cross-project state
 

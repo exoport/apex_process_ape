@@ -1,234 +1,204 @@
 package apecmd
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
-	"strings"
+	"path/filepath"
+	"sync"
 	"time"
 
-	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
-	"github.com/diegosz/apex_process_ape/internal/cost"
-	"github.com/diegosz/apex_process_ape/internal/runlog"
-	"github.com/diegosz/apex_process_ape/internal/sessions"
-	"github.com/diegosz/apex_process_ape/internal/web"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
+
+	"github.com/diegosz/apex_process_ape/internal/bridge/config"
+	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/diegosz/apex_process_ape/internal/runlog"
+	"github.com/diegosz/apex_process_ape/internal/tmux"
 )
 
-// chatSystemPrompt is the system prompt used by `ape chat`. Quoted
-// verbatim from PLAN-5 / C3 ("Bootstrap content — PoC verbatim").
-const chatSystemPrompt = `You are connected to a Web UI. Call await_message() to receive a message from the user. When it returns a non-empty string, process it and call reply() with your response. If await_message() returns an empty string, call it again. Begin by calling await_message() now.`
-
-// chatBootstrapInput is the synthetic user-turn the parent writes to
-// claude's stdin via io.Pipe after the bridge signals ready. Without
-// this first turn, claude idles at the interactive prompt indefinitely
-// and never calls await_message. PLAN-5 / C3.
-const chatBootstrapInput = "Start the await_message loop. Call await_message() now."
-
+// newChatCmd registers `ape chat`. A thin wrapper around `claude` that
+// spawns the REPL inside a named tmux session, attaches the user to
+// it, and captures bridge hooks (PreToolUse / PostToolUse /
+// UserPromptSubmit / Stop / etc.) to a runlog directory for later
+// inspection. Project-bound — must run from a directory with
+// `_apex/config.yaml`.
+//
+// The PLAN-5 / early-PLAN-6 design tried to wrap claude in a Bubble
+// Tea TUI driven by a per-message `await_message` / `reply` MCP loop.
+// That shape was structurally fragile (the model received slash-
+// command-shaped strings via tool-result and couldn't actually invoke
+// them) and was replaced with this simpler shape in PLAN-6 / tmux
+// pivot. The bridge stays useful for hook observability; the chat
+// surface is now claude's own REPL, which the user interacts with
+// directly via tmux.
 func newChatCmd() *cobra.Command {
 	var (
-		openFlag                  bool
-		ignoreProjectSettingsFlag bool
+		modelFlag             string
+		cwdFlag               string
+		ignoreProjectSettings bool
 	)
 	cmd := &cobra.Command{
 		Use:   "chat",
-		Short: "Open a bridged interactive Claude session in a web UI",
-		Long: `Start one bridged interactive Claude session, surfaced via a local
-web UI. The Web UI is the only surface — there is no TUI mode and no
---print mode for chat. The bound URL is printed on startup; pass
---open to also fire xdg-open.
+		Short: "Bridged claude REPL inside a tmux session, with hooks captured to a runlog",
+		Long: `Spawn claude inside a tmux session with the ape bridge attached
+and attach the user to it. Bridge hooks (PreToolUse, PostToolUse,
+UserPromptSubmit, Stop, and friends) are captured to
+<project>/_output/ape/chats/<id>/ alongside pipeline runs.
 
-Closing the browser does not kill the session; reopening it
-reconnects (no backlog replay — the JSONL streams under
-<project>/_output/ape/chats/ are the durable record). The Stop button
-in the page header SIGTERMs the active claude subprocess and exits
-with code 137.
+ape chat must be run from a project root (a directory containing
+_apex/config.yaml).
 
-Authentication: the broker binds to 127.0.0.1 only. Any local user on
-this machine can hit /api/send and inject text into the session; if
-that is a concern, do not run ape chat on a shared-account host. See
-docs/reference/bridge-security.md for the full threat model.`,
+While attached:
+  Ctrl+B D       detach (claude keeps running; runlog keeps writing)
+  /exit, /quit   exit claude (default slash commands)
+  Ctrl+D in claude exits the REPL
+
+ape exits when the tmux session ends. Detaching is fine — ape will
+keep capturing hooks until you re-attach and exit cleanly, or until
+the underlying claude process dies.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			apeBin, err := os.Executable()
-			if err != nil {
-				return fmt.Errorf("ape chat: locate self: %w", err)
-			}
-			if _, err := exec.LookPath("claude"); err != nil {
-				return errors.New("ape chat: `claude` not found on PATH; install Claude Code first")
-			}
-
-			// PLAN-5 / C6 — open the chat run-dir before spawning
-			// claude so checkpoints capture the chat-start moment.
-			cwd, _ := os.Getwd()
-			startedAt := time.Now().UTC()
-			chatID := runlog.NewChatID(startedAt, cwd, os.Getpid())
-			chatDir := runlog.ChatDir(cwd, chatID)
-			if err := runlog.EnsureNoCollision(chatDir); err != nil {
-				return fmt.Errorf("ape chat: %w", err)
-			}
-			// First-run .gitignore policy.
-			isTTY := term.IsTerminal(int(os.Stdin.Fd()))
-			var askPrompt func(string) bool
-			if isTTY {
-				askPrompt = ttyConfirm
-			}
-			_, _ = runlog.EnsureGitignore(cwd, askPrompt, os.Stderr)
-
-			rl, err := runlog.New(chatDir)
-			if err != nil {
-				return fmt.Errorf("ape chat: open run dir: %w", err)
-			}
-			defer rl.Close()
-			_ = rl.Checkpoint(runlog.CheckpointEntry{Kind: "chat-start", Payload: map[string]any{"chat_id": chatID, "cwd": cwd}})
-
-			// C8 — render the HTMX page once at startup and mount
-			// the embedded assets/ subtree onto the broker mux.
-			tpl := web.MustTemplates()
-			pageHTML := web.RenderPage(tpl, web.PageData{
-				Title:    "ape chat",
-				Subtitle: chatID,
-				Mode:     "chat",
-			})
-			mountExtras := func(mux *http.ServeMux) {
-				if err := web.MountAssets(mux); err != nil {
-					fmt.Fprintf(os.Stderr, "ape chat: mount assets: %v\n", err)
+			projectRoot := cwdFlag
+			if projectRoot == "" {
+				wd, err := os.Getwd()
+				if err != nil {
+					return fmt.Errorf("cannot determine working directory: %w", err)
 				}
-				mux.HandleFunc("/dashboard", func(w http.ResponseWriter, _ *http.Request) {
-					r, err := cost.LoadRollup(cwd)
-					if err != nil {
-						http.Error(w, "load rollup: "+err.Error(), 500)
-						return
-					}
-					w.Header().Set("Content-Type", "application/json")
-					_ = json.NewEncoder(w).Encode(r)
-				})
+				projectRoot = wd
 			}
-
-			session := orchestrator.New(orchestrator.Options{
-				APEBin:                apeBin,
-				SystemPrompt:          chatSystemPrompt,
-				BootstrapInput:        chatBootstrapInput,
-				Stdout:                os.Stdout,
-				Stderr:                os.Stderr,
-				IgnoreProjectSettings: ignoreProjectSettingsFlag,
-				PageHTML:              pageHTML,
-				MountExtras:           mountExtras,
-				FragmentRenderer:      newWebRenderer(tpl, cwd),
-				OnReply: func(content string) {
-					_ = rl.Checkpoint(runlog.CheckpointEntry{Kind: "reply", Payload: map[string]any{"content": content}})
-				},
-				OnCall: func(c orchestrator.ToolCall) {
-					_ = rl.Call(runlog.CallEntry{
-						Timestamp: c.At,
-						Method:    "tools/call",
-						Tool:      c.Tool,
-						Params:    c.Params,
-						Result:    c.Result,
-						SessionID: c.SessionID,
-						ID:        c.ID,
-					})
-				},
-				OnHook: func(h orchestrator.HookEvent) {
-					_ = rl.Hook(runlog.HookEntry{
-						Timestamp: h.At,
-						Event:     h.Event,
-						Step:      h.Step,
-						SessionID: h.SessionID,
-						AgentID:   h.AgentID,
-						Payload:   h.Payload,
-					})
-				},
-			})
-			url, err := session.Listen()
-			if err != nil {
-				return fmt.Errorf("ape chat: listen: %w", err)
+			cfgPath := filepath.Join(projectRoot, "_apex", "config.yaml")
+			if _, err := os.Stat(cfgPath); err != nil {
+				return fmt.Errorf("ape chat requires a project root with _apex/config.yaml; not found at %s", cfgPath)
 			}
-			fmt.Fprintf(os.Stderr, "web ui: %s\n", url)
-			if openFlag {
-				_ = openBrowser(url)
-			}
-
-			// PLAN-5 / C5 — track this session in ~/.ape/registry.json
-			// so `ape sessions` can list / open / prune. Best-effort
-			// on register/deregister; failure is non-fatal.
-			row := sessions.Session{
-				PID:       os.Getpid(),
-				CWD:       cwd,
-				Command:   "ape " + strings.Join(os.Args[1:], " "),
-				Port:      session.BrokerPort(),
-				URL:       url,
-				StartedAt: time.Now().UTC(),
-			}
-			regPath := sessions.DefaultPath()
-			_ = sessions.Register(regPath, row)
-
-			runErr := session.Run(cmd.Context())
-			_ = rl.Checkpoint(runlog.CheckpointEntry{Kind: "chat-end", Payload: map[string]any{"exit_code": session.ExitCode}})
-
-			// PLAN-5 / C7 — scan the session JSONL for cost totals.
-			// Claude Code writes ~/.claude/projects/<encoded-cwd>/<sid>.jsonl
-			// during a session; we find the newest one modified
-			// after startedAt and aggregate its usage blocks. Falls
-			// back to zero totals when no file matches (typical of
-			// runs where claude bailed before producing one).
-			endedAt := time.Now().UTC()
-			totals, model, jsonlPath, scanErr := cost.ScanLatestSession("", startedAt)
-			if scanErr != nil {
-				fmt.Fprintf(os.Stderr, "ape chat: cost scan: %v\n", scanErr)
-			}
-			if jsonlPath != "" {
-				// Link the transcript into the run dir so the
-				// runlog references the canonical path. Best-effort.
-				_ = rl.LinkTranscript("transcript.jsonl", jsonlPath)
-			}
-			_ = runlog.WriteSessionYAML(chatDir, runlog.SessionMeta{
-				ChatID:    chatID,
-				StartedAt: startedAt,
-				EndedAt:   endedAt,
-				Model:     model,
-				CostUSD:   totals.CostUSD,
-				TokensIn:  int64(totals.InputTokens),
-				TokensOut: int64(totals.OutputTokens),
-			})
-			// Fold chat totals immediately + reconcile from on-disk
-			// artefacts so prior crashed runs also catch up.
-			if r, err := cost.LoadRollup(cwd); err == nil {
-				r.FoldChat(chatID, endedAt, totals)
-				_ = cost.SaveRollup(cwd, r)
-			}
-			_, _ = cost.RebuildRollup(cwd)
-			// os.Exit skips defers; deregister and close explicitly.
-			_ = rl.Close()
-			_ = sessions.Deregister(regPath, row.PID)
-			if runErr != nil {
-				return runErr
-			}
-			if session.ExitCode != 0 {
-				os.Exit(session.ExitCode) //nolint:gocritic // explicit code path; cleanup above ran already
-			}
-			return nil
+			return runChat(cmd.Context(), projectRoot, modelFlag, ignoreProjectSettings)
 		},
 	}
-	cmd.Flags().BoolVar(&openFlag, "open", false, "Run xdg-open on the web UI URL after startup")
-	cmd.Flags().BoolVar(&ignoreProjectSettingsFlag, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json")
+	cmd.Flags().StringVar(&modelFlag, "model", "", "Initial claude model (e.g. \"opus[1m]\"); falls back to claude's default when empty.")
+	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root (default: current working directory).")
+	cmd.Flags().BoolVar(&ignoreProjectSettings, "ignore-project-settings", false, "Tell claude to skip project + local .claude/settings*.json.")
 	return cmd
 }
 
-// openBrowser tries xdg-open (Linux) / open (macOS) / start (Windows).
-// Best-effort; failure is silent because the user can copy the URL.
-func openBrowser(url string) error {
-	bin := "xdg-open"
-	args := []string{url}
-	switch runtimeGOOS() {
-	case "darwin":
-		bin = "open"
-	case "windows":
-		bin = "rundll32"
-		args = []string{"url.dll,FileProtocolHandler", url}
+// runChat spawns claude inside a tmux session named ape-chat-<id>,
+// wires the bridge for hook observability, exec's `tmux attach` for
+// the user, and tears the session down when the user detaches/exits.
+func runChat(ctx context.Context, projectRoot, modelArg string, ignoreProjectSettings bool) error {
+	apeBin, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("ape chat: locate self: %w", err)
 	}
-	return exec.Command(bin, args...).Start()
+
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
+
+	chatID := time.Now().UTC().Format("20060102T150405Z")
+	runDir := filepath.Join(projectRoot, "_output", "ape", "chats", chatID)
+	if err := os.MkdirAll(runDir, 0o755); err != nil { //nolint:mnd // standard directory perms
+		return fmt.Errorf("ape chat: create runlog dir: %w", err)
+	}
+	var (
+		runLogMu sync.Mutex
+		rl       *runlog.Writer
+	)
+	if w, openErr := runlog.New(runDir); openErr == nil {
+		rl = w
+	}
+	getRunLog := func() *runlog.Writer {
+		runLogMu.Lock()
+		defer runLogMu.Unlock()
+		return rl
+	}
+
+	rt := orchestrator.NewBridgeRuntime(orchestrator.BridgeRuntimeOptions{
+		OnHook: func(h orchestrator.HookEvent) {
+			if writer := getRunLog(); writer != nil {
+				_ = writer.Hook(runlog.HookEntry{
+					Timestamp: h.At,
+					Event:     h.Event,
+					Step:      h.Step,
+					SessionID: h.SessionID,
+					AgentID:   h.AgentID,
+					Payload:   h.Payload,
+				})
+			}
+		},
+		OnCall: func(c orchestrator.ToolCall) {
+			if writer := getRunLog(); writer != nil {
+				_ = writer.Call(runlog.CallEntry{
+					Timestamp: c.At,
+					Method:    "tools/call",
+					Tool:      c.Tool,
+					Params:    c.Params,
+					Result:    c.Result,
+					SessionID: c.SessionID,
+					ID:        c.ID,
+				})
+			}
+		},
+	})
+	if err := rt.Listen(); err != nil {
+		return fmt.Errorf("ape chat: runtime listen: %w", err)
+	}
+
+	rtErrCh := make(chan error, 1)
+	go func() { rtErrCh <- rt.Serve(runCtx) }()
+	defer func() { <-rtErrCh }()
+
+	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, ignoreProjectSettings)
+	if err != nil {
+		return err
+	}
+
+	// Spawn claude inside a tmux session. tmux owns the PTY; the
+	// user attaches to the session below to interact with the REPL.
+	argv := append([]string{"claude"}, prepend...)
+	argv = append(argv, "--dangerously-skip-permissions")
+	if modelArg != "" {
+		argv = append(argv, "--model", modelArg)
+	}
+
+	sessionName := fmt.Sprintf("ape-chat-%s", chatID)
+	_ = tmux.KillSession(sessionName)
+	if err := tmux.NewSession(sessionName, projectRoot, argv); err != nil {
+		return fmt.Errorf("ape chat: %w", err)
+	}
+	defer func() { _ = tmux.KillSession(sessionName) }()
+
+	readyCtx, cancelReady := context.WithTimeout(runCtx, 30*time.Second) //nolint:mnd // claude REPL ready timeout
+	if err := tmux.WaitForReady(readyCtx, sessionName); err != nil {
+		cancelReady()
+		return fmt.Errorf("ape chat: claude REPL not ready in tmux session: %w", err)
+	}
+	cancelReady()
+
+	fmt.Fprintf(os.Stderr, "ape chat: bridged claude in tmux session %s\n", sessionName)
+	fmt.Fprintf(os.Stderr, "  runlog:  %s\n", runDir)
+	fmt.Fprintf(os.Stderr, "  detach:  Ctrl+B D (session keeps running)\n")
+	fmt.Fprintf(os.Stderr, "  exit:    /exit in claude, or Ctrl+D\n\n")
+
+	// Attach the user to the tmux session. exec'ing replaces ape's
+	// process with tmux's so the terminal handoff is clean; the
+	// bridge goroutine is unaffected because tmux is the parent of
+	// the claude child, not us. When the user detaches or claude
+	// exits, control returns here.
+	attach := exec.CommandContext(runCtx, "tmux", "attach", "-t", sessionName) //nolint:gosec // sessionName is ape-generated
+	attach.Stdin = os.Stdin
+	attach.Stdout = os.Stdout
+	attach.Stderr = os.Stderr
+	if err := attach.Run(); err != nil {
+		// tmux attach exits non-zero when claude exits or the
+		// session goes away mid-attach — treat as a clean exit.
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			return fmt.Errorf("ape chat: tmux attach: %w", err)
+		}
+	}
+
+	runCancel()
+	if rl != nil {
+		_ = rl.Close()
+	}
+	fmt.Fprintf(os.Stderr, "ape chat: session ended; runlog at %s\n", runDir)
+	return nil
 }

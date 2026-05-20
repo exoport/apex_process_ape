@@ -35,6 +35,8 @@ func newPipelineCmd() *cobra.Command {
 		webFlag            bool
 		openFlag           bool
 		ignoreProjSettings bool
+		interactiveFlag    bool
+		programmaticFlag   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "pipeline [name]",
@@ -83,12 +85,19 @@ func newPipelineCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
 				return err
 			}
-			mode, optOutTUI, err := resolvePipelineMode(tuiFlag, printFlag, noTUI, webFlag, os.Stderr)
+			mode, optOutTUI, err := resolvePipelineMode(PipelineFlags{
+				TUI:          tuiFlag,
+				Web:          webFlag,
+				NoTUI:        noTUI,
+				Print:        printFlag,
+				Interactive:  interactiveFlag,
+				Programmatic: programmaticFlag,
+			}, os.Stderr)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error: "+err.Error())
 				os.Exit(exitCodePreflightFailed) //nolint:gocritic // explicit exit; no defers up to this point
 			}
-			useTUI := !optOutTUI && term.IsTerminal(int(os.Stdout.Fd())) && mode != PipelineModeWeb
+			useTUI := !optOutTUI && term.IsTerminal(int(os.Stdout.Fd())) && !mode.IsWeb()
 			if quietFlag && useTUI {
 				// PLAN-2 / F5: --quiet only suppresses the live
 				// event stream that plainObserver emits. The TUI's
@@ -108,16 +117,33 @@ func newPipelineCmd() *cobra.Command {
 				ignoreProjectSettings: ignoreProjSettings,
 				openOnStart:           openFlag,
 			}
-			if mode == PipelineModeWeb {
-				return runWithWeb(ctx, spec, projectRoot, runOpts)
-			}
-			if useTUI {
+			// PLAN-6 / C1 dispatch: pick the runner that matches the
+			// resolved (UI × Exec) mode. Web modes route to
+			// runWithWeb (which now takes an `interactive` switch);
+			// the no-UI / TUI interactive variants route through
+			// runWithInteractive; the legacy programmatic-exec paths
+			// preserve the PLAN-5 wiring (runWithTUI / runPlain).
+			// The eval consumer's --print path is preserved verbatim.
+			switch {
+			case mode.IsPrint():
+				return runPlain(ctx, spec, projectRoot, quietFlag, runOpts)
+			case mode == PipelineModeWebInteractive:
+				return runWithWeb(ctx, spec, projectRoot, runOpts, true)
+			case mode == PipelineModeWebProgrammatic:
+				return runWithWeb(ctx, spec, projectRoot, runOpts, false)
+			case mode == PipelineModeTUIInteractive && useTUI:
+				return runWithInteractiveTUI(ctx, spec, projectRoot, runOpts)
+			case mode.IsInteractive():
+				return runWithInteractive(ctx, spec, projectRoot, runOpts)
+			case useTUI:
 				return runWithTUI(ctx, spec, projectRoot, runOpts)
 			}
 			return runPlain(ctx, spec, projectRoot, quietFlag, runOpts)
 		},
 	}
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Optional prompt forwarded to skills that accept it (currently: epics)")
+	cmd.Flags().BoolVarP(&interactiveFlag, "interactive", "I", false, "Per-stage interactive `claude` process with bridge step-contract verification (PLAN-6 / C1). Default; explicit form for scripts.")
+	cmd.Flags().BoolVarP(&programmaticFlag, "programmatic", "P", false, "Per-step `claude -p` spawn (pre-PLAN-6 default). Use with --tui / --web / --no-tui to keep today's exec shape; ignored under --print.")
 	cmd.Flags().BoolVar(&webFlag, "web", false, "Bridged web UI (now the default). Explicit form for scripts.")
 	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "Bubble Tea TUI (pre-PLAN-5 default; now opt-in).")
 	cmd.Flags().BoolVar(&printFlag, "print", false, "Plain stdout (eval / CI capture path).")
