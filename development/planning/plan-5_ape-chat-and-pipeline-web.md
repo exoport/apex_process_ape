@@ -13,11 +13,11 @@ tags:
   - breaking-default
 summary: Bring the Claude MCP bridge into ape as the new default UX. Introduces `ape chat` (one bridged interactive session) and flips `ape pipeline <name>` from "Bubble Tea TUI by default" to "web UI by default" — the TUI moves behind `--tui`, plain stdout moves behind `--print`. Each pipeline step is bridged via two MCP tools (`await_message`, `reply`) ported from the validated PoC at `/home/diegos/_dev/github/diegosz/claude_mcp_bridge_poc/` (commit `4e542d0`); ape stays the orchestrator and spawns one `claude` invocation per step as today. Hooks observability lands via a new `ape notify` subcommand wired through inline `--settings`, no on-disk `.claude/settings.json`. MCP config travels inline via `--mcp-config '<json>'` with `--strict-mcp-config` to keep server visibility deterministic. Per-project random TCP ports + `~/.ape/registry.json` keep cross-project sessions distinguishable; `ape sessions` inspects and prunes. Pipeline run artefacts stay at PLAN-3's path (`<project>/_output/pipelines/<name>/<run_id>/`) and are extended in place with `hook-events.jsonl` / `bridge-calls.jsonl` / `checkpoints.jsonl` / `transcripts/`. `ape chat` artefacts live under `<project>/_output/ape/chats/<id>/` (separate convention, ad-hoc sessions). Per-step cost data is read from the per-session JSONL at `~/.claude/projects/<hash>/<sid>.jsonl` and lands in the existing v2 manifest fields (no schema bump); `ape costs` surfaces them. Web frontend is locked: HTMX 2.x + stdlib `html/template` + handwritten `styles.css`, vendored under `internal/web/assets/vendor/` — no Templ, Tailwind, Alpine, or JS toolchain. Stack and SSE wire schema validated by the UI spike (`/home/diegos/_dev/github/diegosz/claude_mcp_bridge_spike/`).
 origin:
-  - 2026-05-13 → 2026-05-17 research arc captured in `development/research/claude-mcp-bridge.md` (architecture + every contract) and `development/research/claude-channel-bridge.md` (why-not-channels). MCP blocking-tool approach validated by `/home/diegos/_dev/github/diegosz/claude_mcp_bridge_poc/` at commit `4e542d0` — three production-critical fixes (SSE flush, stdin bootstrap for `await_message` loop, inline `--mcp-config` instead of an on-disk `.mcp.json`) landed in that commit and must carry over into the ape port.
+  - 2026-05-13 → 2026-05-17 research arc settled on the MCP blocking-tool approach (validated by `/home/diegos/_dev/github/diegosz/claude_mcp_bridge_poc/` at commit `4e542d0`). Channels-based alternative was ruled out (Claude Code channels protocol is platform-gated and not self-serve activatable on Claude Team / Max plans). Three production-critical fixes from the PoC carry into the ape port: SSE flush after every `Fprintf`, stdin bootstrap for the `await_message` loop, inline `--mcp-config` instead of an on-disk `.mcp.json`.
   - The earlier "Phase 1 — in-Claude `apex-run-pipeline` conductor skill" framing is abandoned. Two reasons, both recorded in the design doc Context section: Claude Code's one-level sub-agent nesting limit blocks `apex-story-batch-dev` / `apex-story-batch-create` / `apex-lift-project` from running under an Agent-tool conductor; and Anthropic dropped the default prompt-cache TTL from 1 h to 5 min around March 2026, dissolving the shared-context benefit a single long-lived session would have given over per-step sessions. ape remains the orchestrator; per-step `claude` invocations remain the model.
-  - 2026-05-17 UI-stack selection spike (`development/research/ui-spike.md`; code now at `/home/diegos/_dev/github/diegosz/claude_mcp_bridge_spike/`) redirected the design doc's previously-expected GOAT-hybrid (Templ + HTMX + Tailwind + Alpine) to htmx-only on bundle-weight, build-step, and diff-per-change evidence. The SSE event schema (`pipeline-init`, `stage-start`, `stage-update`, `stage-end`, `hook`, `reply`) is spike-validated and reused verbatim by this plan, extended with `await-pending` / `await-resolved` / `stopped` per C3.
+  - 2026-05-17 UI-stack selection spike (code at `/home/diegos/_dev/github/diegosz/claude_mcp_bridge_spike/`; rubric preserved in the "UI-stack selection spike result" appendix below) redirected the previously-expected GOAT-hybrid (Templ + HTMX + Tailwind + Alpine) to htmx-only on bundle-weight, build-step, and diff-per-change evidence. The SSE event schema (`pipeline-init`, `stage-start`, `stage-update`, `stage-end`, `hook`, `reply`) is spike-validated and reused verbatim by this plan, extended with `await-pending` / `await-resolved` / `stopped` per C3.
   - PLAN-3 (per-step manifest) and PLAN-4 (boundary commits) supply the per-step infrastructure this plan attaches to. PLAN-3's v2 manifest already carries per-step `cost_usd` + `tokens_*` fields (`internal/pipeline/manifest.go:121–127`); today those are populated from `claude --output-format stream-json`'s terminal `result` event, which is gated by `--print` (per `claude --help`) and therefore unavailable in interactive bridge mode. PLAN-5 adds a second data-source path that reads per-message `usage` blocks from `~/.claude/projects/<hash>/<sid>.jsonl` and populates the same v2 fields — **no manifest schema bump**.
-  - Sibling research docs `development/research/claude-channel-bridge.md`, `development/research/resume-mcp-bridge-plan.md`, `development/research/resume-post-spike.md`, and `development/research/resume-ui-spike.md` are untracked in the working tree as of 2026-05-17 (the bridge research arc was not yet committed when this plan was drafted). Treat their references as authoritative regardless of commit state.
+  - The bridge research arc, spike continuation prompts, and channels-bridge dead-end were originally tracked in `development/research/`. That folder was removed on 2026-05-20 (all valuable findings folded into this plan + into [docs/explanation/bridge-architecture.md](../../docs/explanation/bridge-architecture.md); continuation prompts are inherently ephemeral and discarded).
 ---
 
 # PLAN-5: `ape chat` + `ape pipeline` web mode (MCP bridge)
@@ -343,7 +343,7 @@ Initial values land with the implementation PR (not in this plan). Refresh path:
 
 ### C8: Web UI — HTMX + stdlib `html/template`, vendored assets, no toolchain
 
-Stack locked by the UI spike (`development/research/ui-spike.md`; working reference at `/home/diegos/_dev/github/diegosz/claude_mcp_bridge_spike/variant-htmx/`). Layout:
+Stack locked by the UI spike (rubric preserved in the appendix at the bottom of this plan; working reference at `/home/diegos/_dev/github/diegosz/claude_mcp_bridge_spike/variant-htmx/`). Layout:
 
 ```
 internal/web/
@@ -492,3 +492,27 @@ feature work. Commits land on `main`.
   performance is fine in practice but a rolling-window (last N
   rows) might be worth a future tweak if a longer pipeline pushes
   past comfortable.
+
+## Appendix — UI-stack selection spike result (2026-05-17)
+
+Captured here as historical record (formerly in `development/research/ui-spike.md` before that folder was removed).
+
+**Decision: htmx-only** — HTMX 2.x + stdlib `html/template` + handwritten CSS, with inline `onclick` helpers when client-only interactivity is needed. Templ and Alpine dropped; revisit if the UI surface grows past ~3 screens or component-count makes typed templates pay off.
+
+This contradicted the GOAT-hybrid (Templ + HTMX + Tailwind + Alpine) pick floated in early MCP-bridge research. Reasoning came from a three-variant spike at `/home/diegos/_dev/github/diegosz/claude_mcp_bridge_spike/` (sibling repo), each variant running the same mock pipeline-progress screen:
+
+| Metric                         | vanilla    | **htmx (winner)** | hybrid (templ+tailwind)                       |
+| ------------------------------ | ---------- | ----------------- | --------------------------------------------- |
+| Hand-written Go (LOC)          | 57         | 242               | 193                                           |
+| Hand-written templates (LOC)   | —          | 102               | 231                                           |
+| Hand-written frontend JS (LOC) | 159        | ~10               | ~0                                            |
+| Hand-written CSS (LOC)         | 88         | 88                | 4 (Tailwind input)                            |
+| Build steps                    | `go build` | `go build`        | `templ generate` → `tailwindcss` → `go build` |
+| External tool deps             | 0          | 0                 | `templ` + `tailwindcss`                       |
+| Diff per change (hand-written) | +8 / −1    | **+5 / −0**       | +18 / −0                                      |
+| Gzipped browser bundle         | ~2.5 KB    | ~19.5 KB          | ~37 KB                                        |
+| Binary size                    | 8.9 MB     | 12.3 MB           | 9.4 MB                                        |
+
+Tiebreaker: htmx's diff-per-change of +5/−0 with **zero** build tools and a single binary beat vanilla (more JS in the diff) and hybrid (two extra binaries + 645 LOC of generated `_templ.go` to commit). The 19.5 KB bundle is the price of admission for HTMX + the SSE extension and is paid once.
+
+The SSE event schema (`pipeline-init`, `stage-start`, `stage-update`, `stage-end`, `hook`, `reply`) was spike-validated and carried over verbatim into PLAN-5, extended with `await-pending` / `await-resolved` / `stopped` per C3.

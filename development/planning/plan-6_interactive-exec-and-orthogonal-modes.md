@@ -16,7 +16,7 @@ tags:
 summary: Introduce a true interactive pipeline execution mode (persistent `claude` process per stage, modeled on `orchestrator.Session`) and make it orthogonal to UI choice. Today every mode (`--web`, `--tui`, `--print`) spawns `claude -p` per step (programmatic); `--web` is "programmatic with bridge/hooks layered on", not interactive. PLAN-6 separates the two axes — **UI** (`none` / `tui` / `web`) and **Exec** (`programmatic` / `interactive`) — and makes interactive the default for `ape pipeline`. The Bubble Tea TUI gains hooks observability, `await_message`/`reply`, run-dir artefacts, and stop control by sharing a new `BridgeRuntime` factored out of `orchestrator.Hub` (broker stays web-only). Pipeline YAML grows pipeline-level and stage-level defaults for `commit`, `model`, `agent` with precedence `step > stage > pipeline > default(skip)`; default commit unit is the stage boundary. Hooks-bridge becomes the verification surface for a per-step "step contract": `/clear` is required before every step's skill prompt **unless** the step sets `no-clear: true`; `/model <X>` is required at step boundaries when the model changes; the agent prefix `/{agent} --autonomous -- {skill}` (or plain `/{skill}`) is required at every step's first prompt. All three are hard-fail. `ape chat` is removed; the useful parts of `orchestrator.Session` are absorbed into the per-stage interactive runtime. `--print` byte-equivalence with today's output stays **LOCKED** for the eval consumer. Documentation is reorganized under Diataxis (tutorial / how-to / reference / explanation) to cover the invocation matrix, pipeline YAML schema, interactive exec model, and step contract.
 origin:
   - PLAN-5 shipped the bridged web UI as the default for `ape pipeline <name>` and added every primitive PLAN-6 needs: hooks block in inline `--settings` (`internal/bridge/config/settings.go`), bridge MCP subprocess + IPC + run-dir writers (`internal/bridge/orchestrator/hub.go`, `internal/runlog/`), `await_message`/`reply`, stop control via `runCtx`. The bridge primitives are mode-agnostic by construction; only the Hub's HTTP/SSE broker is web-specific.
-  - The PLAN-6 kickoff doc at `development/research/resume-plan-6-kickoff.md` framed the work narrowly as "bring `--web` parity to `--tui`". That framing was reopened on 2026-05-19 after surveying `runner.go:344-380`: **every** mode today spawns `claude -p` per step, including `--web`. There is no truly-interactive pipeline surface in the repo — only `ape chat` is interactive, via `orchestrator.Session` with `cmd *exec.Cmd` + `io.Pipe` stdin. PLAN-6 therefore needs to *introduce* interactive pipeline execution, not just port a bridge between UIs. The reframed scope adds two orthogonal axes (UI × Exec), a pipeline-YAML schema revision, a hooks-bridge step contract, and the removal of `ape chat`.
+  - The original PLAN-6 kickoff (a continuation prompt drafted 2026-05-19, since discarded with the rest of `development/research/`) framed the work narrowly as "bring `--web` parity to `--tui`". That framing was reopened on 2026-05-19 after surveying `runner.go:344-380`: **every** mode today spawns `claude -p` per step, including `--web`. There is no truly-interactive pipeline surface in the repo — only `ape chat` is interactive, via `orchestrator.Session` with `cmd *exec.Cmd` + `io.Pipe` stdin. PLAN-6 therefore needs to *introduce* interactive pipeline execution, not just port a bridge between UIs. The reframed scope adds two orthogonal axes (UI × Exec), a pipeline-YAML schema revision, a hooks-bridge step contract, and the removal of `ape chat`.
   - The eval harness at `/home/diegos/_dev/exoar/apex_process_framework_eval` reads `--print` output verbatim (PLAN-5 invariant #6). PLAN-6 preserves `--print` byte-equivalence as a hard invariant. The `--no-tui` alias-to-`--print` semantic that PLAN-5 deprecated is fully removed here: `--no-tui` becomes a real UI selector meaning "no UI, but still interactive exec".
   - PLAN-4 boundary commits remain the per-step record-keeping mechanism. PLAN-6 changes *which* boundary the commit fires on (stage by default, not step), but the underlying boundary-commit primitive is unchanged.
   - The Diataxis docs reorganization is debt that PLAN-5 left explicit (`docs/explanation/` and `docs/reference/` exist; `docs/tutorial/` and `docs/how-to/` are sparse). PLAN-6 pays it down where the new surface area lands: invocation matrix, YAML schema, interactive exec model, step contract.
@@ -205,7 +205,7 @@ docs/
 └── explanation/
     ├── bridge-architecture.md      (exists)
     ├── exec-modes.md               NEW — why interactive vs programmatic; per-stage process model
-    └── design-decisions.md         (exists or new; absorb relevant prose from research/)
+    └── design-decisions.md         (deferred; key design rationale captured inline in the relevant plan + this file's pivot/rename appendices)
 ```
 
 **Out of scope:** rewriting `docs/explanation/bridge-architecture.md` or `docs/reference/bridge-ipc.md`. They're current and good; PLAN-6 only adds new files and updates cross-references.
@@ -377,6 +377,26 @@ The "Open questions to resolve during implementation" section above is preserved
 - **`--no-tui` deprecation hint** — N/A (the alias was removed cleanly in Phase F, no deprecation period needed).
 - **CHANGELOG entry organization** — one consolidated PLAN-6 entry per the original default.
 
+## Appendix — interactive-mode debugging attempts that led to the tmux pivot
+
+Captured here as historical record (formerly in `development/research/resume-plan-6-interactive-debugging.md` before that folder was removed). The pivot section above states the conclusion; this appendix preserves the path.
+
+### Attempt 1 — plain stdin pipe
+
+Spawn `claude` without `-p`, write `/clear`, `/model X`, then the agent-prefixed prompt to its stdin. **Did not work.** Symptom: claude process alive but produces zero output; bridge subprocess never spawns; 30s `WaitBridgeReady` timeout. Cause: claude's REPL requires a TTY; with a piped (non-tty) stdin it sits idle and never initializes its MCP servers.
+
+### Attempt 2 — `claude -p <bootstrap>` + bridge
+
+Spawn `claude -p "begin" --output-format stream-json --verbose --system-prompt "..."`. The system prompt tells the model to loop on `await_message` / `reply`. **User rejected** this approach: "the only thing that we could not use is 'claude -p', the whole point of the bridge is to avoid that." Reverted.
+
+### Attempt 3 — PTY (creack/pty) with `--system-prompt`
+
+`pty.Start(cmd)` gives claude a real TTY. Bootstrap `"begin\r"` written to the PTY master 500ms after spawn. `configurePTYCancel` helper replaced `configureProcessGroup` for the PTY path (Setpgid + Setsid combo on the same cmd is rejected as EPERM at fork/exec — `pty.Start` already sets `Setsid: true` which gives the same session-leader semantics).
+
+PTY allocation succeeded; claude painted its full v2.1.145 REPL banner. Bridge ready fired at ~830ms. First step started, sent prompt via `rt.SendMessage`, then within ~150ms the run aborted with `wait done: context canceled`. Iterating on diagnostics (filtering the bootstrap `"begin"` UserPromptSubmit from the verifier; waiting for `RuntimeEventAwaitPending` instead of `BridgeReady`) moved the symptom from instant-abort to indefinite hang — the model received the slash-command-shaped string via `await_message` return value, started "Cogitating…" with high effort, and never produced output. The model could read the prompt but the CLI never saw a `/`, so the skill never loaded.
+
+That third dead-end is what surfaced the root cause and motivated the tmux send-keys design — see "Implementation pivot" above.
+
 ## Post-ship rename — `--print` → `--eval` (2026-05-20)
 
 The flag this plan calls `--print` throughout shipped under that name and was renamed to `--eval` shortly after. Motivation: the locked byte-equivalence contract for the eval consumer was invisible at the call site — readers had to know that "print" implicitly meant "the eval-harness path". The new name makes the contract self-describing.
@@ -393,20 +413,18 @@ Byte-equivalence with the PLAN-5 era `--print` output is unchanged; the rename i
 
 ## Context references
 
-| Path                                                       | What                                                                     |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `development/research/resume-plan-6-kickoff.md`            | Original kickoff (narrower scope; superseded by this plan's reframe).    |
-| `development/planning/plan-5_ape-chat-and-pipeline-web.md` | PLAN-5 — the primitives PLAN-6 builds on.                                |
-| `development/research/claude-mcp-bridge.md`                | Bridge architecture + contracts.                                         |
-| `docs/explanation/bridge-architecture.md`                  | Bridge design narrative.                                                 |
-| `docs/reference/bridge-ipc.md`                             | IPC wire schema.                                                         |
-| `docs/reference/bridge-security.md`                        | Bind + threat model.                                                     |
-| `internal/pipeline/runner.go:344-380`                      | Today's per-step `claude -p` spawn (programmatic mode contract).         |
-| `internal/bridge/orchestrator/hub.go`                      | Bridge IPC accept + replay + stop. Factoring source for `BridgeRuntime`. |
-| `internal/bridge/orchestrator/session.go`                  | `ape chat`'s single-bridge session. Blueprint for per-stage runtime.     |
-| `internal/bridge/config/settings.go`                       | `BuildSettings` — hooks injection rule changes here (PLAN-6 C3).         |
-| `internal/apecmd/pipeline.go` / `pipeline_web.go`          | Mode dispatch + web reference impl. TUI side gets parity in Phase E.     |
-| `internal/runlog/`                                         | JSONL writers; mode-agnostic.                                            |
-| `/home/diegos/_dev/ape-web-sandbox/greeter/`               | Live sandbox (clean state: `git reset --hard 496b58f`).                  |
-| `/home/diegos/_dev/exoar/apex_process_framework_eval/`     | Eval consumer (PLAN-9). `--print` byte-equivalence locked.               |
-| Project memory `feedback_no_claude_attribution.md`         | No `Co-Authored-By: Claude` trailer on commits.                          |
+| Path                                                       | What                                                                                                                               |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `development/planning/plan-5_ape-chat-and-pipeline-web.md` | PLAN-5 — the primitives PLAN-6 builds on; absorbed the bridge research arc when `development/research/` was removed on 2026-05-20. |
+| `docs/explanation/bridge-architecture.md`                  | Bridge design narrative.                                                                                                           |
+| `docs/reference/bridge-ipc.md`                             | IPC wire schema.                                                                                                                   |
+| `docs/reference/bridge-security.md`                        | Bind + threat model.                                                                                                               |
+| `internal/pipeline/runner.go:344-380`                      | Today's per-step `claude -p` spawn (programmatic mode contract).                                                                   |
+| `internal/bridge/orchestrator/hub.go`                      | Bridge IPC accept + replay + stop. Factoring source for `BridgeRuntime`.                                                           |
+| `internal/bridge/orchestrator/session.go`                  | `ape chat`'s single-bridge session. Blueprint for per-stage runtime.                                                               |
+| `internal/bridge/config/settings.go`                       | `BuildSettings` — hooks injection rule changes here (PLAN-6 C3).                                                                   |
+| `internal/apecmd/pipeline.go` / `pipeline_web.go`          | Mode dispatch + web reference impl. TUI side gets parity in Phase E.                                                               |
+| `internal/runlog/`                                         | JSONL writers; mode-agnostic.                                                                                                      |
+| `/home/diegos/_dev/ape-web-sandbox/greeter/`               | Live sandbox (clean state: `git reset --hard 496b58f`).                                                                            |
+| `/home/diegos/_dev/exoar/apex_process_framework_eval/`     | Eval consumer (PLAN-9). `--print` byte-equivalence locked.                                                                         |
+| Project memory `feedback_no_claude_attribution.md`         | No `Co-Authored-By: Claude` trailer on commits.                                                                                    |
