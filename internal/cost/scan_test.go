@@ -37,6 +37,44 @@ func TestScanSessionJSONL_Aggregates(t *testing.T) {
 	}
 }
 
+// TestScanSessionJSONL_DedupesByMessageID locks in the message.id
+// dedup behavior. Claude logs the same assistant message under
+// distinct top-level uuids when a tool turn re-renders or the
+// conversation tree branches; the cost scan must count each unique
+// message.id once, not once per line. Without dedupe a real
+// apex-create-architecture session over-counts cost ~3×.
+func TestScanSessionJSONL_DedupesByMessageID(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	// Three lines: the first two share message.id (the duplicate);
+	// the third is a distinct id. Totals should equal exactly two
+	// turns, not three.
+	content := `{"type":"assistant","uuid":"a","message":{"id":"m1","model":"claude-opus-4-7","usage":{"input_tokens":1000000,"output_tokens":0}}}
+{"type":"assistant","uuid":"b","message":{"id":"m1","model":"claude-opus-4-7","usage":{"input_tokens":1000000,"output_tokens":0}}}
+{"type":"assistant","uuid":"c","message":{"id":"m2","model":"claude-opus-4-7","usage":{"input_tokens":0,"output_tokens":500000}}}
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	totals, _, err := ScanSessionJSONL(path)
+	if err != nil {
+		t.Fatalf("ScanSessionJSONL: %v", err)
+	}
+	if totals.NumTurns != 2 {
+		t.Errorf("num_turns = %d, want 2 (duplicate m1 must collapse)", totals.NumTurns)
+	}
+	if totals.InputTokens != 1_000_000 {
+		t.Errorf("input tokens = %d, want 1M (only one m1 counts)", totals.InputTokens)
+	}
+	if totals.OutputTokens != 500_000 {
+		t.Errorf("output tokens = %d, want 500k", totals.OutputTokens)
+	}
+	// 1M input × $5 + 0.5M output × $25 = 5 + 12.50 = $17.50.
+	if totals.CostUSD < 17.4 || totals.CostUSD > 17.6 {
+		t.Errorf("cost = $%.2f, want ~$17.50 (not ~$22.50 with the duplicate)", totals.CostUSD)
+	}
+}
+
 func TestFindSessionJSONL_PicksNewestAfterSince(t *testing.T) {
 	home := t.TempDir()
 	projects := filepath.Join(home, ".claude", "projects")

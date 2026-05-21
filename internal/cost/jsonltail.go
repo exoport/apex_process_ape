@@ -20,9 +20,18 @@ const DefaultTailInterval = 200 * time.Millisecond
 
 // AssistantLine is the minimal shape Tailer extracts from each JSONL
 // row. Lines that don't have `type:"assistant"` are skipped.
+//
+// Message.ID is the dedupe key. Claude logs the same assistant message
+// multiple times under distinct top-level `uuid` values when a tool
+// turn re-renders or the conversation tree branches (each duplicate
+// shares the same `message.id` but has a different `uuid`).
+// Cost / token totals must count each ID once or the result is 2–4×
+// over-counted; ScanSessionJSONL and Tailer.consumeLines both filter
+// by ID.
 type AssistantLine struct {
 	Type    string `json:"type"`
 	Message struct {
+		ID    string     `json:"id"`
 		Model string     `json:"model"`
 		Usage UsageBlock `json:"usage"`
 	} `json:"message"`
@@ -37,9 +46,10 @@ type Tailer struct {
 
 	cancel context.CancelFunc
 
-	mu       sync.Mutex
-	totals   Totals
+	mu        sync.Mutex
+	totals    Totals
 	lastModel string
+	seenIDs   map[string]struct{} // dedupe by message.id; see AssistantLine doc
 }
 
 // NewTailer opens path lazily — the file does not need to exist at
@@ -53,6 +63,7 @@ func NewTailer(path string, interval time.Duration) *Tailer {
 		path:     path,
 		interval: interval,
 		out:      make(chan AssistantLine, 128),
+		seenIDs:  map[string]struct{}{},
 	}
 }
 
@@ -214,6 +225,13 @@ func (t *Tailer) consumeLines(partial *bytes.Buffer) {
 			continue
 		}
 		t.mu.Lock()
+		if al.Message.ID != "" {
+			if _, dup := t.seenIDs[al.Message.ID]; dup {
+				t.mu.Unlock()
+				continue
+			}
+			t.seenIDs[al.Message.ID] = struct{}{}
+		}
 		t.lastModel = al.Message.Model
 		price, _ := Lookup(al.Message.Model)
 		t.totals.Add(al.Message.Usage, price)

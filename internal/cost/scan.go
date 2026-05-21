@@ -26,6 +26,7 @@ func ScanSessionJSONL(path string) (Totals, string, error) {
 
 	var totals Totals
 	lastModel := ""
+	seenIDs := map[string]struct{}{}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -35,6 +36,15 @@ func ScanSessionJSONL(path string) (Totals, string, error) {
 		}
 		if al.Type != "assistant" {
 			continue
+		}
+		// Dedupe by message.id — claude logs the same assistant
+		// message multiple times under distinct top-level uuids when
+		// a tool turn re-renders. See AssistantLine doc.
+		if al.Message.ID != "" {
+			if _, dup := seenIDs[al.Message.ID]; dup {
+				continue
+			}
+			seenIDs[al.Message.ID] = struct{}{}
 		}
 		lastModel = al.Message.Model
 		price, _ := Lookup(al.Message.Model)
