@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -47,7 +48,10 @@ func runNotify(event string, stdin io.Reader, port string) {
 	}
 	sessionID, agentID := extractIDs(envelope)
 
-	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 200*time.Millisecond)
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer dialCancel()
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(dialCtx, "tcp", "127.0.0.1:"+port)
 	if err != nil {
 		return
 	}

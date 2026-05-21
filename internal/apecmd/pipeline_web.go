@@ -13,6 +13,7 @@ import (
 
 	"github.com/diegosz/apex_process_ape/internal/bridge/broker"
 	"github.com/diegosz/apex_process_ape/internal/bridge/config"
+	"github.com/diegosz/apex_process_ape/internal/bridge/ipc"
 	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/diegosz/apex_process_ape/internal/cost"
 	"github.com/diegosz/apex_process_ape/internal/pipeline"
@@ -66,15 +67,18 @@ func (s *stepTaggingObserver) OnStageStart(stage string) { s.child.OnStageStart(
 func (s *stepTaggingObserver) OnStageEnd(stage string, dur time.Duration, err error) {
 	s.child.OnStageEnd(stage, dur, err)
 }
+
 func (s *stepTaggingObserver) OnStepStart(stage string, idx int, step pipeline.Step) {
 	// idx is 0-based per the Observer contract; StepLabel uses 1-based
 	// to match the manifest's step numbering.
 	s.tracker.set(pipeline.StepLabel(stage, idx+1, step.Skill))
 	s.child.OnStepStart(stage, idx, step)
 }
+
 func (s *stepTaggingObserver) OnStepLine(stage string, idx int, line string) {
 	s.child.OnStepLine(stage, idx, line)
 }
+
 func (s *stepTaggingObserver) OnStepEnd(stage string, idx int, step pipeline.Step, dur time.Duration, out string, err error) {
 	s.tracker.clear()
 	s.child.OnStepEnd(stage, idx, step, dur, out, err)
@@ -84,12 +88,13 @@ func (s *stepTaggingObserver) OnStepEnd(stage string, idx int, step pipeline.Ste
 // (broker + IPC listener), builds inline configs, prepends them to
 // every per-step claude argv, and routes IPC frames to the runlog
 // writer alongside PLAN-3's manifest path. PLAN-5 / C1 + C3 + C6.
+//
+//nolint:gocyclo,maintidx // single-spawn web orchestration: hub setup, runlog wiring, runner integration, and shutdown all need to share state; splitting harms readability more than it helps.
 func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cfg runConfig, interactive bool) error {
 	apeBin, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("ape pipeline --web: locate self: %w", err)
 	}
-
 
 	// Templates + page once.
 	tpl := web.MustTemplates()
@@ -97,8 +102,9 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	// Seed the page with one pending card per stage so the user
 	// sees the whole pipeline shape from the first paint, not just
 	// the running one. SSE stage-start/end will replace these by id.
-	var stageSeeds []web.StageSeed
-	for _, st := range spec.Stages() {
+	stages := spec.Stages()
+	stageSeeds := make([]web.StageSeed, 0, len(stages))
+	for _, st := range stages {
 		stageSeeds = append(stageSeeds, web.StageSeed{Slug: slugify(st.Name), Name: st.Name})
 	}
 	pageHTML := web.RenderPage(tpl, web.PageData{
@@ -155,7 +161,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		mux.HandleFunc("/dashboard", func(w http.ResponseWriter, _ *http.Request) {
 			r, err := cost.LoadRollup(projectRoot)
 			if err != nil {
-				http.Error(w, "load rollup: "+err.Error(), 500)
+				http.Error(w, "load rollup: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
@@ -202,7 +208,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 				// Symlink the claude session transcript into transcripts/
 				// on the first UPS for this step. Per-step sessions in
 				// --web -P mean each link points to a unique target.
-				if h.Event == "UserPromptSubmit" && step != "" {
+				if h.Event == ipc.HookUserPromptSubmit && step != "" {
 					if tp := extractTranscriptPath(h.Payload); tp != "" {
 						_ = rl.LinkTranscript(transcriptLinkName(step), tp)
 					}
@@ -239,7 +245,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 			}
 		},
 	})
-	url, err := hub.Listen()
+	url, err := hub.Listen(ctx)
 	if err != nil {
 		return fmt.Errorf("ape pipeline --web: hub listen: %w", err)
 	}
@@ -272,7 +278,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 
 	fmt.Fprintf(os.Stderr, "web ui: %s\n", url)
 	if cfg.openOnStart {
-		_ = openBrowser(url)
+		_ = openBrowser(ctx, url)
 	}
 
 	// PLAN-5 / C5 — register the session.
@@ -434,7 +440,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 			`<div hx-swap-oob="beforeend:#hooks"><div class="hook-row hook-summary"><span class="ts">%s</span><span class="event">%s</span><span class="tool"></span><span class="summary">%s</span></div></div>`,
 		statusClass, statusGlyph, htmlEscape(statusText),
 		bannerClass, statusGlyph, htmlEscape(statusText),
-		time.Now().Local().Format("15:04:05"),
+		time.Now().Local().Format("15:04:05"), //nolint:gosmopolitan // intentional: status banner shows the user's wall-clock time
 		statusGlyph+" pipeline",
 		htmlEscape(statusText),
 	)

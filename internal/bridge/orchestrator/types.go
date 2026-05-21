@@ -51,13 +51,21 @@ func isFlushEntry(raw json.RawMessage) bool {
 // web runs the C8 web template renderer (see internal/web).
 type defaultRenderer struct{}
 
-func (defaultRenderer) PipelineInit() string          { return `<div id="stages"></div>` }
-func (defaultRenderer) Connected() string             { return `<div id="status" class="connected">connected</div>` }
-func (defaultRenderer) Reply(content string) string   { return `<div class="reply">` + htmlEscape(content) + `</div>` }
-func (defaultRenderer) AwaitPending() string          { return `<form id="decision-gate" enabled></form>` }
-func (defaultRenderer) AwaitResolved() string         { return `<form id="decision-gate" disabled></form>` }
-func (defaultRenderer) Stopped() string               { return `<div id="status">Stopped by user</div>` }
-func (defaultRenderer) BridgeError(msg string) string { return `<div id="status">Bridge error: ` + htmlEscape(msg) + `</div>` }
+func (defaultRenderer) PipelineInit() string { return `<div id="stages"></div>` }
+func (defaultRenderer) Connected() string {
+	return `<div id="status" class="connected">connected</div>`
+}
+
+func (defaultRenderer) Reply(content string) string {
+	return `<div class="reply">` + htmlEscape(content) + `</div>`
+}
+func (defaultRenderer) AwaitPending() string  { return `<form id="decision-gate" enabled></form>` }
+func (defaultRenderer) AwaitResolved() string { return `<form id="decision-gate" disabled></form>` }
+func (defaultRenderer) Stopped() string       { return `<div id="status">Stopped by user</div>` }
+func (defaultRenderer) BridgeError(msg string) string {
+	return `<div id="status">Bridge error: ` + htmlEscape(msg) + `</div>`
+}
+
 func (defaultRenderer) HookFromEvent(h HookEvent) string {
 	return `<li>` + htmlEscape(h.Event) + ` ` + htmlEscape(h.SessionID) + ` ` + htmlEscape(h.Step) + `</li>`
 }

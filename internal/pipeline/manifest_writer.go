@@ -118,7 +118,7 @@ func (w *manifestWriter) OpenStepLog(stageIdx, stepIdx int, stageName, skill str
 
 // RecordStep appends a fully populated StepRecord to the given stage,
 // updates running totals, and persists the manifest atomically.
-func (w *manifestWriter) RecordStep(stageIdx int, rec StepRecord) error { //nolint:gocritic // StepRecord is a small per-step struct passed once per step; pointer-passing here would complicate caller sites without meaningful gain
+func (w *manifestWriter) RecordStep(stageIdx int, rec StepRecord) error {
 	if stageIdx < 1 || stageIdx > len(w.manifest.Stages) {
 		return fmt.Errorf("invalid stage index %d", stageIdx)
 	}

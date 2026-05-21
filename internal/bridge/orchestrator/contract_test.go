@@ -157,7 +157,7 @@ func TestContractVerifier_OnViolationFiresOncePerStep(t *testing.T) {
 		mu    sync.Mutex
 		count int
 	)
-	v.OnViolation = func(c ContractViolation) { mu.Lock(); count++; mu.Unlock() }
+	v.OnViolation = func(_ ContractViolation) { mu.Lock(); count++; mu.Unlock() }
 
 	v.BeginStep(StepContract{Stage: "s", StepIdx: 0, Skill: "x"})
 	v.Consume(promptPayload("/wrong-first"))
@@ -172,8 +172,11 @@ func TestContractVerifier_OnViolationFiresOncePerStep(t *testing.T) {
 }
 
 func promptPayload(prompt string) json.RawMessage {
-	b, _ := json.Marshal(struct {
+	b, err := json.Marshal(struct {
 		Prompt string `json:"prompt"`
 	}{Prompt: prompt})
+	if err != nil {
+		panic(err)
+	}
 	return b
 }

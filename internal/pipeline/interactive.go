@@ -37,7 +37,7 @@ import (
 // per-step reset (skills are written assuming a clean working
 // context). A step may set `NoClear` to opt out — used for skills
 // that need to see the previous step's context (rare).
-func runStagesInteractive(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWriter) error { //nolint:gocritic // RunOptions mirrors Run's parameter shape; see Run's nolint rationale
+func runStagesInteractive(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWriter) error {
 	for _, stage := range spec.Stages() {
 		stageStart := time.Now()
 		var stageIdx int
@@ -86,7 +86,7 @@ const interactiveClearSettle = 500 * time.Millisecond
 // emits per-step manifest records, and tears the session down at the
 // end.
 //
-//nolint:funlen,gocyclo // single-spawn stage orchestration intentionally lives in one function; the keystroke / wait / capture interaction is clearer in one place than fragmented across helpers.
+//nolint:funlen,maintidx // single-spawn stage orchestration intentionally lives in one function; the keystroke / wait / capture interaction is clearer in one place than fragmented across helpers.
 func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunOptions, mw *manifestWriter, stageIdx int) (RunStatus, error) {
 	if len(stage.Chain) == 0 {
 		return StatusCompleted, nil
@@ -113,11 +113,12 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 
 	sessionName := fmt.Sprintf("ape-%s-%d", sanitizeSessionName(stage.Name), os.Getpid())
 	// Ensure no stale session by that name; ignore not-found error.
-	_ = tmux.KillSession(sessionName)
-	if err := tmux.NewSession(sessionName, opts.ProjectRoot, argv); err != nil {
+	_ = tmux.KillSession(ctx, sessionName)
+	if err := tmux.NewSession(ctx, sessionName, opts.ProjectRoot, argv); err != nil {
 		return StatusFailed, fmt.Errorf("stage %q: %w", stage.Name, err)
 	}
-	defer func() { _ = tmux.KillSession(sessionName) }()
+	// Cleanup must run even after ctx is cancelled — Background is intentional.
+	defer func() { _ = tmux.KillSession(context.Background(), sessionName) }() //nolint:contextcheck // cleanup-on-exit; ctx is already done here
 
 	readyCtx, cancelReady := context.WithTimeout(ctx, interactiveReadyTimeout)
 	if err := tmux.WaitForReady(readyCtx, sessionName); err != nil {
@@ -170,7 +171,7 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		// clean session by construction. NoClear opts out for skills
 		// that need the previous step's context.
 		if i > 0 && !step.NoClear {
-			if err := tmux.SendCommand(sessionName, "/clear"); err != nil {
+			if err := tmux.SendCommand(ctx, sessionName, "/clear"); err != nil {
 				stageErr = fmt.Errorf("stage %q step %d: send /clear: %w", stage.Name, i, err)
 				stageStatus = StatusFailed
 				closeStepLog(eventLog)
@@ -193,19 +194,19 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		// Capture the pane state BEFORE we send the prompt so we can
 		// diff against it after WaitStepDone returns and lift just
 		// this step's output into the manifest record.
-		beforeSnap, _ := tmux.CapturePane(sessionName)
+		beforeSnap, _ := tmux.CapturePane(ctx, sessionName)
 
 		prompt := assembleInteractivePromptLine(effAgent, step, opts.Prompt)
 		writeInteractiveStepEvent(eventLog, "step-start", map[string]any{
-			"stage":   stage.Name,
-			"step":    i + 1,
-			"skill":   step.Skill,
-			"agent":   effAgent,
-			"model":   effModel,
-			"prompt":  prompt,
+			"stage":    stage.Name,
+			"step":     i + 1,
+			"skill":    step.Skill,
+			"agent":    effAgent,
+			"model":    effModel,
+			"prompt":   prompt,
 			"no_clear": step.NoClear,
 		})
-		if err := tmux.SendCommand(sessionName, prompt); err != nil {
+		if err := tmux.SendCommand(ctx, sessionName, prompt); err != nil {
 			stageErr = fmt.Errorf("stage %q step %d: send prompt: %w", stage.Name, i, err)
 			stageStatus = StatusFailed
 			if opts.OnInteractiveStepEnd != nil {
@@ -227,10 +228,10 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 			break
 		}
 
-		afterSnap, _ := tmux.CapturePane(sessionName)
+		afterSnap, _ := tmux.CapturePane(ctx, sessionName)
 		stepOut := diffPaneSnapshot(beforeSnap, afterSnap)
 		// Emit per-line for any observer that cares.
-		for _, line := range strings.Split(strings.TrimRight(stepOut, "\n"), "\n") {
+		for line := range strings.SplitSeq(strings.TrimRight(stepOut, "\n"), "\n") {
 			if line == "" {
 				continue
 			}
@@ -412,7 +413,7 @@ func assembleInteractivePromptLine(effAgent string, step Step, prompt string) st
 // either via the caller-supplied WaitStepDone callback (production
 // path, bridge Stop hook) or via a best-effort timeout fallback (used
 // by smoke tests that wire no bridge).
-func waitStepDone(ctx context.Context, opts RunOptions, stage string, stepIdx int) error { //nolint:gocritic // RunOptions matches the runner-wide convention
+func waitStepDone(ctx context.Context, opts RunOptions, stage string, stepIdx int) error {
 	if opts.WaitStepDone != nil {
 		return opts.WaitStepDone(ctx, stage, stepIdx)
 	}

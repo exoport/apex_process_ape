@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -159,7 +160,7 @@ func (v *ContractVerifier) violateLocked(reason string) {
 // deviation is a verifier violation, not a soft warning.
 func extractPrompt(payload json.RawMessage) (string, error) {
 	if len(payload) == 0 {
-		return "", fmt.Errorf("empty payload")
+		return "", errors.New("empty payload")
 	}
 	var body struct {
 		Prompt string `json:"prompt"`
@@ -187,9 +188,9 @@ func skillPromptMatches(prompt, skill, agent string) bool {
 // elide shortens a prompt for inclusion in a violation reason without
 // flooding logs with the full payload.
 func elide(s string) string {
-	const max = 80
-	if len(s) <= max {
+	const maxLen = 80
+	if len(s) <= maxLen {
 		return s
 	}
-	return s[:max] + "…"
+	return s[:maxLen] + "…"
 }

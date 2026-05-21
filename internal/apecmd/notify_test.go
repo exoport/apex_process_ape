@@ -66,13 +66,13 @@ func TestRunNotify_ForwardsHookFrame(t *testing.T) {
 	}
 }
 
-func TestRunNotify_SilentOnMissingPort(t *testing.T) {
+func TestRunNotify_SilentOnMissingPort(_ *testing.T) {
 	// Must not panic, must not error — empty port means "bridge not
 	// running", and the hook loop should keep going. PLAN-5 / C4.
 	runNotify("PreToolUse", strings.NewReader(`{}`), "")
 }
 
-func TestRunNotify_SilentOnDialFailure(t *testing.T) {
+func TestRunNotify_SilentOnDialFailure(_ *testing.T) {
 	// Port 1 is reserved and refuses connections on Linux.
 	runNotify("PreToolUse", strings.NewReader(`{}`), "1")
 }

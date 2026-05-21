@@ -3,12 +3,12 @@
 //
 // Data path varies by mode:
 //
-//   --eval mode     `result` event in stream-json stdout (existing
-//                   PLAN-3 path, unchanged; renamed from --print).
-//   web / --tui     Per-assistant-message `usage` blocks in
-//                   ~/.claude/projects/<hash>/<sid>.jsonl. This package
-//                   tails the symlink that runlog drops under
-//                   <run-dir>/transcripts/.
+//	--eval mode     `result` event in stream-json stdout (existing
+//	                PLAN-3 path, unchanged; renamed from --print).
+//	web / --tui     Per-assistant-message `usage` blocks in
+//	                ~/.claude/projects/<hash>/<sid>.jsonl. This package
+//	                tails the symlink that runlog drops under
+//	                <run-dir>/transcripts/.
 //
 // `ape costs` exposes today / this week / total rollups; the per-run
 // detail comes from the existing PLAN-3 manifest.yaml.

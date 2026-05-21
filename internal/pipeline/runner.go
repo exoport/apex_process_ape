@@ -21,6 +21,7 @@ const (
 	flagOutputFormat     = "--output-format"
 	flagVerbose          = "--verbose"
 	flagOutputStreamJSON = "stream-json"
+	defaultClaudeBin     = "claude"
 )
 
 // RunOptions controls a pipeline invocation.
@@ -159,10 +160,10 @@ type StepTelemetry struct {
 // the OnInteractiveStepStart / End callbacks. The apecmd wiring layer
 // translates this into a bridge orchestrator.StepContract.
 type InteractiveStepInfo struct {
-	Stage    string
-	StepIdx  int
-	Skill    string
-	Agent    string
+	Stage   string
+	StepIdx int
+	Skill   string
+	Agent   string
 	// Model is the model the step expects after a `/model` command;
 	// empty means no model switch is expected at this step boundary.
 	Model   string
@@ -196,15 +197,15 @@ type Observer interface {
 // return path (success, step failure, context cancellation, build-argv
 // error). When opts.DisableManifest is set, the writer is skipped and
 // the runner's behavior is byte-identical to PLAN-2.
-func Run(ctx context.Context, spec *Spec, opts RunOptions) error { //nolint:gocritic // RunOptions is a small configuration struct passed once per pipeline run; pointer would not change semantics and would split the documented API shape
+func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 	if opts.ProjectRoot == "" {
 		opts.ProjectRoot = "."
 	}
 	if opts.ClaudeBin == "" {
-		opts.ClaudeBin = "claude"
+		opts.ClaudeBin = defaultClaudeBin
 	}
 	if opts.InteractiveStepGrace == 0 {
-		opts.InteractiveStepGrace = 2 * time.Second //nolint:mnd // smoke-test fallback only; production callers wire WaitStepDone
+		opts.InteractiveStepGrace = 2 * time.Second
 	}
 	if err := Preflight(spec, opts.ProjectRoot); err != nil {
 		return err
@@ -237,7 +238,7 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error { //nolint:gocr
 // spec would emit a commit under the resolved PLAN-6 / C2 plan and
 // the global NoCommit kill-switch is unset. Used to gate the dirty-
 // tree check — if nothing will commit, prior dirty state is harmless.
-func pipelineWantsCommits(spec *Spec, opts RunOptions) bool { //nolint:gocritic // RunOptions mirrors Run's parameter shape; see Run's nolint rationale
+func pipelineWantsCommits(spec *Spec, opts RunOptions) bool {
 	if opts.NoCommit {
 		return false
 	}
@@ -252,7 +253,7 @@ func pipelineWantsCommits(spec *Spec, opts RunOptions) bool { //nolint:gocritic 
 // Bypass: opts.AllowDirty (CLI `--commit-allow-dirty`) suppresses the
 // check. opts.NoCommit also short-circuits because the run is going
 // to be commit-free anyway.
-func dirtyTreeGate(ctx context.Context, spec *Spec, opts RunOptions) error { //nolint:gocritic // RunOptions mirrors Run's shape
+func dirtyTreeGate(ctx context.Context, spec *Spec, opts RunOptions) error {
 	if !pipelineWantsCommits(spec, opts) || opts.AllowDirty {
 		return nil
 	}
@@ -277,7 +278,7 @@ func dirtyTreeGate(ctx context.Context, spec *Spec, opts RunOptions) error { //n
 
 // runStages drives the spec's stage/step chain. Separated from Run so
 // the manifest finalization path is a single return point.
-func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWriter) error { //nolint:gocritic // RunOptions mirrors Run's parameter shape; see Run's nolint rationale
+func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWriter) error {
 	for _, stage := range spec.Stages() {
 		stageStart := time.Now()
 		var stageIdx int
@@ -421,7 +422,7 @@ func runLog(rl RunLogger, kind, step string, payload any) {
 // "--prompt <value>" inside the prompt string. The value is appended
 // verbatim — argv is never serialized through a shell, so embedded
 // quotes/specials in the user's prompt survive intact.
-func buildArgv(claudeBin string, step Step, prompt string, prependFlags []string) ([]string, error) { //nolint:gocritic // Step is a small configuration struct; pointer would complicate caller sites without benefit
+func buildArgv(claudeBin string, step Step, prompt string, prependFlags []string) ([]string, error) {
 	if claudeBin == "" {
 		return nil, errors.New("empty claude bin")
 	}
@@ -513,7 +514,7 @@ func runClaude(ctx context.Context, argv []string, projectRoot string, observer 
 		// claude can include long tool_result bodies, so allocate a
 		// larger ceiling (1MiB) to keep Scan() from erroring out.
 		s := bufio.NewScanner(r)
-		s.Buffer(make([]byte, 0, 64*1024), 1024*1024) //nolint:mnd // 64KiB initial / 1MiB ceiling on a Scanner buffer is a documented Bubble-Tea-adjacent norm
+		s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for s.Scan() {
 			line := s.Text()
 			mu.Lock()
@@ -529,7 +530,7 @@ func runClaude(ctx context.Context, argv []string, projectRoot string, observer 
 		// Scanner errors here (token too long, etc.) are absorbed
 		// into the accumulated output via cmd.Wait()'s exit code.
 	}
-	wg.Add(2) //nolint:mnd // exactly two pipe readers (stdout + stderr); not a magic number worth a named constant
+	wg.Add(2)
 	go scan(stdout)
 	go scan(stderr)
 	// Per the os/exec docs, all reads from StdoutPipe / StderrPipe
@@ -556,7 +557,7 @@ func notify(o Observer, fn func(Observer)) {
 // (nil, nil) when manifest writing is disabled. Errors propagate to the
 // caller — a failed manifest setup aborts the run before any step
 // executes, so the failure is surfaced loud.
-func startManifestWriter(spec *Spec, opts RunOptions) (*manifestWriter, error) { //nolint:gocritic // RunOptions mirrors Run's shape; see Run's nolint rationale
+func startManifestWriter(spec *Spec, opts RunOptions) (*manifestWriter, error) {
 	if opts.DisableManifest {
 		return nil, nil //nolint:nilnil // intentional: disabled-manifest path is a documented no-op, not an error
 	}
@@ -618,7 +619,7 @@ func closeStepLog(w io.WriteCloser) {
 func recordStep(
 	mw *manifestWriter,
 	stageIdx, stepIdx int,
-	step Step, //nolint:gocritic // Step mirrors buildArgv's parameter shape; see buildArgv's existing nolint rationale
+	step Step,
 	prompt string,
 	startedAt, endedAt time.Time,
 	status RunStatus,
@@ -671,9 +672,9 @@ func recordStep(
 // fires the stage-end commit with the plan's stage directive.
 func performStepCommit(
 	ctx context.Context,
-	opts RunOptions, //nolint:gocritic // RunOptions mirrors Run's parameter shape; pointer would split the documented API contract
+	opts RunOptions,
 	mw *manifestWriter,
-	plan StageCommitPlan, //nolint:gocritic // plan mirrors the other small-struct value-passing on this code path; consistent with Step / RunOptions
+	plan StageCommitPlan,
 	stageIdx, stepIdx int,
 	isLastStep bool,
 	stepRunErr error,
@@ -706,8 +707,8 @@ func performStepCommit(
 // clean → no-op, dirty → git add -A → git commit.
 func resolveCommitOutcome(
 	ctx context.Context,
-	opts RunOptions, //nolint:gocritic // RunOptions mirrors Run's parameter shape
-	plan StageCommitPlan, //nolint:gocritic // plan is value-passed alongside opts
+	opts RunOptions,
+	plan StageCommitPlan,
 	stepIdx int,
 	isLastStep bool,
 	stepRunErr error,

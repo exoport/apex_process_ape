@@ -24,8 +24,7 @@ func TestTailer_AppendedLinesProcessed(t *testing.T) {
 	}
 
 	tailer := NewTailer(path, 30*time.Millisecond)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tailer.Start(ctx)
 
 	// Read the first line.
@@ -79,8 +78,7 @@ func TestTailer_PartialLineRejoined(t *testing.T) {
 		t.Fatal(err)
 	}
 	tailer := NewTailer(path, 20*time.Millisecond)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	tailer.Start(ctx)
 
 	// Write two halves of a JSON line with no trailing newline; then
@@ -110,11 +108,9 @@ func TestTailer_StopWithoutFile(t *testing.T) {
 	tailer.Stop()
 	// Should exit without panic; lines channel closes.
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		<-tailer.Lines() // blocks until close
-	}()
+	})
 	cancel()
 	wg.Wait()
 }

@@ -57,8 +57,9 @@ func (m PipelineMode) IsInteractive() bool {
 	switch m {
 	case PipelineModeTUIInteractive, PipelineModeWebInteractive, PipelineModeNoneInteractive:
 		return true
+	default:
+		return false
 	}
-	return false
 }
 
 // HasUI reports whether the mode uses an interactive UI surface (TUI or
@@ -67,8 +68,9 @@ func (m PipelineMode) HasUI() bool {
 	switch m {
 	case PipelineModeTUIInteractive, PipelineModeTUIProgrammatic, PipelineModeWebInteractive, PipelineModeWebProgrammatic:
 		return true
+	default:
+		return false
 	}
-	return false
 }
 
 // IsWeb reports whether the mode renders via the web broker.
@@ -76,8 +78,9 @@ func (m PipelineMode) IsWeb() bool {
 	switch m {
 	case PipelineModeWebInteractive, PipelineModeWebProgrammatic:
 		return true
+	default:
+		return false
 	}
-	return false
 }
 
 // IsTUI reports whether the mode renders via Bubble Tea.
@@ -85,8 +88,9 @@ func (m PipelineMode) IsTUI() bool {
 	switch m {
 	case PipelineModeTUIInteractive, PipelineModeTUIProgrammatic:
 		return true
+	default:
+		return false
 	}
-	return false
 }
 
 // IsEval reports whether the mode is the LOCKED eval path (byte-

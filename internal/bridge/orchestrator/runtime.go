@@ -106,11 +106,14 @@ func NewBridgeRuntime(opts BridgeRuntimeOptions) *BridgeRuntime {
 }
 
 // Listen reserves the IPC TCP port on 127.0.0.1. Idempotent.
-func (r *BridgeRuntime) Listen() error {
+// ctx scopes the bind operation; the listener itself lives until
+// Serve returns.
+func (r *BridgeRuntime) Listen(ctx context.Context) error {
 	if r.ipcLn != nil {
 		return nil
 	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		return fmt.Errorf("runtime.Listen: ipc: %w", err)
 	}
@@ -127,7 +130,7 @@ func (r *BridgeRuntime) Listen() error {
 // when ctx ends.
 func (r *BridgeRuntime) Serve(ctx context.Context) error {
 	if r.ipcLn == nil {
-		if err := r.Listen(); err != nil {
+		if err := r.Listen(ctx); err != nil {
 			return err
 		}
 	}

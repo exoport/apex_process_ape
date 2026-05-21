@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diegosz/apex_process_ape/internal/bridge/ipc"
 	"github.com/diegosz/apex_process_ape/internal/web/views"
 )
 
@@ -37,7 +38,7 @@ func RenderHookFragment(t *template.Template, hf HookFragment) string {
 	tool, summary := parseHookForFeed(hf.Event, hf.Payload)
 	summary = relativisePath(summary, hf.ProjectRoot)
 	line := HookLine{
-		TS:       hf.At.Local().Format("15:04:05"),
+		TS:       hf.At.Local().Format("15:04:05"), //nolint:gosmopolitan // intentional: hook line timestamps shown in the user's local clock
 		Event:    hf.Event,
 		Tool:     tool,
 		Summary:  summary,
@@ -74,7 +75,7 @@ func relativisePath(summary, projectRoot string) string {
 // event kind. PreToolUse/PostToolUse get tool_name + tool-specific
 // summary; UserPromptSubmit surfaces the prompt; Subagent* surface
 // the agent id.
-func parseHookForFeed(event string, payload []byte) (tool string, summary string) {
+func parseHookForFeed(event string, payload []byte) (tool, summary string) {
 	if len(payload) == 0 {
 		return "", ""
 	}
@@ -83,10 +84,10 @@ func parseHookForFeed(event string, payload []byte) (tool string, summary string
 		return "", ""
 	}
 	switch event {
-	case "PreToolUse", "PostToolUse":
+	case ipc.HookPreToolUse, ipc.HookPostToolUse:
 		tool = stringField(p, "tool_name")
-		summary = summarizeToolCall(tool, p, event == "PostToolUse")
-	case "UserPromptSubmit":
+		summary = summarizeToolCall(tool, p, event == ipc.HookPostToolUse)
+	case ipc.HookUserPromptSubmit:
 		summary = views.TruncateMid(stringField(p, "prompt"), 100)
 	case "SubagentStart":
 		summary = fmt.Sprintf("%s (%s)", stringField(p, "agent_type"), shortID(stringField(p, "agent_id")))
@@ -185,9 +186,9 @@ func shortID(s string) string {
 
 func cssClassForEvent(event string) string {
 	switch event {
-	case "PreToolUse", "PostToolUse":
+	case ipc.HookPreToolUse, ipc.HookPostToolUse:
 		return "tool"
-	case "UserPromptSubmit":
+	case ipc.HookUserPromptSubmit:
 		return "prompt"
 	case "SubagentStart", "SubagentStop":
 		return "agent"

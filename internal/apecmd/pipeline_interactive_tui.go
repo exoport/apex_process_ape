@@ -66,7 +66,7 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 		OnCall:  core.FeedCall,
 		OnReply: core.FeedReply,
 	})
-	if err := rt.Listen(); err != nil {
+	if err := rt.Listen(runCtx); err != nil {
 		runCancel()
 		return fmt.Errorf("ape pipeline (tui + interactive): runtime listen: %w", err)
 	}
@@ -84,6 +84,10 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 				obs.AwaitPending()
 			case orchestrator.RuntimeEventAwaitResolved:
 				obs.AwaitResolved()
+			default:
+				// Reply/Call/Hook/BufferOverflow flow through the
+				// direct OnHook + OnCall/OnReply callbacks; this
+				// subscriber only consumes the await one-shots.
 			}
 		}
 	}()

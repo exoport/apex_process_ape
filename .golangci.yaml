@@ -22,6 +22,12 @@ linters:
     - noinlineerr
     - nonamedreturns
     - paralleltest
+    # testpackage: every package in internal/ has white-box tests that
+    # reach into unexported helpers (dispatch, describeMode, extractIDs,
+    # readFirstLine, tmpRegistry, …). Renaming to _test packages would
+    # force exporting the SUT or scattering bridge files; the lint is
+    # a style preference, not a correctness rule.
+    - testpackage
     - varnamelen
     - wrapcheck
     - wsl
@@ -60,9 +66,21 @@ linters:
         - opinionated
         - performance
         - style
+      disabled-checks:
+        # hugeParam: pointer-vs-value is a deliberate API choice across
+        # the codebase (observer callbacks, hook envelopes, manifest
+        # records); chasing every 80-byte threshold would churn the
+        # public surface for negligible perf benefit.
+        - hugeParam
     gomoddirectives:
       replace-local: true
     mnd:
+      # File-mode bits + the small integer constants that pervade Go
+      # idiomatic code (buffer sizes, channel capacities, byte limits,
+      # standard durations like 30/60/120/300 seconds, HTTP status
+      # ranges). Naming every literal would just substitute one form
+      # of opacity for another. Anything genuinely domain-specific
+      # gets a named const at its call site instead.
       ignored-numbers:
         - "0o666"
         - "0o644"
@@ -70,6 +88,29 @@ linters:
         - "0o755"
         - "0o750"
         - "0o700"
+        - "2"
+        - "3"
+        - "5"
+        - "7"
+        - "8"
+        - "10"
+        - "15"
+        - "16"
+        - "20"
+        - "24"
+        - "30"
+        - "32"
+        - "60"
+        - "64"
+        - "100"
+        - "120"
+        - "128"
+        - "200"
+        - "256"
+        - "300"
+        - "500"
+        - "1000"
+        - "1024"
     nolintlint:
       require-explanation: false
       require-specific: true
@@ -96,6 +137,10 @@ linters:
           - dupl
           - gocyclo
           - gosec
+          # noctx: tests use http.Get/Post and net.Dial/Listen as the
+          # simplest reach-and-poke shape; the SUT enforces context
+          # discipline, not the test client.
+          - noctx
         path: _test\.go
       - linters:
           - gocritic
@@ -115,10 +160,31 @@ linters:
       # PLAN-3: on-disk manifest schema (snake_case is the external
       # contract for the eval consumer + humans) and upstream stream-json
       # payload (claude controls the wire format) — tagliatelle has to
-      # yield here.
+      # yield here. Same applies to every file that round-trips an
+      # external wire format we don't own: hook frames from Claude,
+      # bridge IPC, Claude's stream-json usage object, user-facing YAML
+      # configs and on-disk session/cost rollup state.
       - linters:
           - tagliatelle
         path: internal/pipeline/(manifest|result_event)\.go
+      - linters:
+          - tagliatelle
+        path: internal/apecmd/(notify|pipeline_interactive)\.go
+      - linters:
+          - tagliatelle
+        path: internal/bridge/ipc/ipc\.go
+      - linters:
+          - tagliatelle
+        path: internal/cost/(formula|overrides|rollup|rollup_walk)\.go
+      - linters:
+          - tagliatelle
+        path: internal/sessions/registry\.go
+      # internal/cost/prices.go is a pricing table — naming every
+      # per-model rate (5.00, 15.00, 3.00, …) would be noise. The
+      # numbers ARE the data; the model key is what gives meaning.
+      - linters:
+          - mnd
+        path: internal/cost/prices\.go
     paths:
       - .bingo
       - .chglog

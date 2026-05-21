@@ -57,7 +57,7 @@ func newSessionsOpenCmd() *cobra.Command {
 		Use:   "open [<project-prefix>]",
 		Short: "xdg-open the URL of the live session whose cwd matches <project-prefix>",
 		Args:  cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			rows, err := sessions.Prune(sessions.DefaultPath())
 			if err != nil {
 				return err
@@ -78,7 +78,7 @@ func newSessionsOpenCmd() *cobra.Command {
 			if len(matches) > 1 {
 				return fmt.Errorf("%d sessions match — narrow the prefix", len(matches))
 			}
-			return openBrowser(matches[0].URL)
+			return openBrowser(cmd.Context(), matches[0].URL)
 		},
 	}
 }

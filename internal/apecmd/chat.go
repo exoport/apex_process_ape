@@ -94,7 +94,7 @@ func runChat(ctx context.Context, projectRoot, modelArg string, ignoreProjectSet
 
 	chatID := time.Now().UTC().Format("20060102T150405Z")
 	runDir := filepath.Join(projectRoot, "_output", "ape", "chats", chatID)
-	if err := os.MkdirAll(runDir, 0o755); err != nil { //nolint:mnd // standard directory perms
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return fmt.Errorf("ape chat: create runlog dir: %w", err)
 	}
 	var (
@@ -137,7 +137,7 @@ func runChat(ctx context.Context, projectRoot, modelArg string, ignoreProjectSet
 			}
 		},
 	})
-	if err := rt.Listen(); err != nil {
+	if err := rt.Listen(runCtx); err != nil {
 		return fmt.Errorf("ape chat: runtime listen: %w", err)
 	}
 
@@ -158,14 +158,15 @@ func runChat(ctx context.Context, projectRoot, modelArg string, ignoreProjectSet
 		argv = append(argv, "--model", modelArg)
 	}
 
-	sessionName := fmt.Sprintf("ape-chat-%s", chatID)
-	_ = tmux.KillSession(sessionName)
-	if err := tmux.NewSession(sessionName, projectRoot, argv); err != nil {
+	sessionName := "ape-chat-" + chatID
+	_ = tmux.KillSession(runCtx, sessionName)
+	if err := tmux.NewSession(runCtx, sessionName, projectRoot, argv); err != nil {
 		return fmt.Errorf("ape chat: %w", err)
 	}
-	defer func() { _ = tmux.KillSession(sessionName) }()
+	// Cleanup must run even after runCtx is cancelled — Background is intentional.
+	defer func() { _ = tmux.KillSession(context.Background(), sessionName) }() //nolint:contextcheck // cleanup-on-exit; runCtx is already done here
 
-	readyCtx, cancelReady := context.WithTimeout(runCtx, 30*time.Second) //nolint:mnd // claude REPL ready timeout
+	readyCtx, cancelReady := context.WithTimeout(runCtx, 30*time.Second)
 	if err := tmux.WaitForReady(readyCtx, sessionName); err != nil {
 		cancelReady()
 		return fmt.Errorf("ape chat: claude REPL not ready in tmux session: %w", err)
@@ -182,7 +183,7 @@ func runChat(ctx context.Context, projectRoot, modelArg string, ignoreProjectSet
 	// bridge goroutine is unaffected because tmux is the parent of
 	// the claude child, not us. When the user detaches or claude
 	// exits, control returns here.
-	attach := exec.CommandContext(runCtx, "tmux", "attach", "-t", sessionName) //nolint:gosec // sessionName is ape-generated
+	attach := exec.CommandContext(runCtx, "tmux", "attach", "-t", sessionName)
 	attach.Stdin = os.Stdin
 	attach.Stdout = os.Stdout
 	attach.Stderr = os.Stderr

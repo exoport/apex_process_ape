@@ -292,8 +292,8 @@ type captureObserver struct {
 
 func (c *captureObserver) OnStageStart(_ string)                                                 {}
 func (c *captureObserver) OnStageEnd(_ string, _ time.Duration, _ error)                         {}
-func (c *captureObserver) OnStepStart(_ string, _ int, _ Step)                                   {} //nolint:gocritic // Step is passed by value to match Observer interface
-func (c *captureObserver) OnStepEnd(_ string, _ int, _ Step, _ time.Duration, _ string, _ error) {} //nolint:gocritic // Step is passed by value to match Observer interface
+func (c *captureObserver) OnStepStart(_ string, _ int, _ Step)                                   {}
+func (c *captureObserver) OnStepEnd(_ string, _ int, _ Step, _ time.Duration, _ string, _ error) {}
 
 func (c *captureObserver) OnStepLine(_ string, _ int, line string) {
 	c.mu.Lock()

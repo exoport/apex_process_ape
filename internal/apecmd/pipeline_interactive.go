@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/diegosz/apex_process_ape/internal/bridge/config"
+	"github.com/diegosz/apex_process_ape/internal/bridge/ipc"
 	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/diegosz/apex_process_ape/internal/cost"
 	"github.com/diegosz/apex_process_ape/internal/pipeline"
@@ -103,7 +104,7 @@ const interactiveStepIdlePoll = 30 * time.Second
 func newInteractiveCore(runCancel context.CancelFunc, getRunLog func() *runlog.Writer) *interactiveCore {
 	c := &interactiveCore{
 		verifier:   orchestrator.NewContractVerifier(),
-		stepDoneCh: make(chan struct{}, 64), //nolint:mnd // ample headroom; one Stop hook per step plus a margin for nested skill subagents
+		stepDoneCh: make(chan struct{}, 64),
 		getRunLog:  getRunLog,
 		runCancel:  runCancel,
 	}
@@ -141,7 +142,7 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 		// on the first UPS for this step. Idempotent on same target
 		// (LinkTranscript no-ops); per-step link names point to the
 		// stage's shared session file in interactive mode.
-		if h.Event == "UserPromptSubmit" && step != "" {
+		if h.Event == ipc.HookUserPromptSubmit && step != "" {
 			if tp := extractTranscriptPath(h.Payload); tp != "" {
 				_ = writer.LinkTranscript(transcriptLinkName(step), tp)
 				c.transcriptMu.Lock()
@@ -158,7 +159,7 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 			Payload:   h.Payload,
 		})
 	}
-	if h.Event == "UserPromptSubmit" {
+	if h.Event == ipc.HookUserPromptSubmit {
 		c.verifier.Consume(h.Payload)
 	}
 	if h.Event == "Stop" {
@@ -292,9 +293,7 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 	// Brief flush window. Use a timer instead of time.Sleep so a
 	// concurrent ctx-cancel could in principle short-circuit; today
 	// no cancellation plumbing reaches here, so the timer just runs.
-	select {
-	case <-time.After(transcriptFlushGrace):
-	}
+	time.Sleep(transcriptFlushGrace)
 	totals, _, err := cost.ScanSessionJSONL(path)
 	if err != nil {
 		return nil
@@ -408,7 +407,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		OnCall:  core.FeedCall,
 		OnReply: core.FeedReply,
 	})
-	if err := rt.Listen(); err != nil {
+	if err := rt.Listen(runCtx); err != nil {
 		runCancel()
 		return fmt.Errorf("ape pipeline --interactive: runtime listen: %w", err)
 	}
@@ -471,4 +470,3 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	}
 	return runErr
 }
-

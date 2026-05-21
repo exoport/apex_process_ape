@@ -99,7 +99,8 @@ func Run(ctx context.Context, opts Options) error {
 		addr = "127.0.0.1:" + port
 	}
 
-	conn, err := net.Dial("tcp", addr)
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("mcp.Run: ipc dial %s: %w", addr, err)
 	}
@@ -253,8 +254,7 @@ func (b *bridge) handleLine(line []byte) error {
 	}
 
 	// Notifications: no id, no response.
-	switch req.Method {
-	case "notifications/initialized":
+	if req.Method == "notifications/initialized" {
 		return ipc.Write(b.conn, ipc.Message{Type: ipc.TypeReady})
 	}
 	if req.ID == nil {

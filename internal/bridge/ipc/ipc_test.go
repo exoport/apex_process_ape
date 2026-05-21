@@ -110,7 +110,7 @@ func TestRead_SkipsMalformedLine(t *testing.T) {
 	}
 	conn.Close()
 
-	var got []Message
+	got := make([]Message, 0, cap(gotCh))
 	for m := range gotCh {
 		got = append(got, m)
 	}

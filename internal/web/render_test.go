@@ -164,7 +164,7 @@ func TestMountAssets_ServesEmbeddedVendor(t *testing.T) {
 			t.Fatalf("GET %s: %v", path, err)
 		}
 		resp.Body.Close()
-		if resp.StatusCode != 200 {
+		if resp.StatusCode != http.StatusOK {
 			t.Errorf("GET %s = %d, want 200", path, resp.StatusCode)
 		}
 	}

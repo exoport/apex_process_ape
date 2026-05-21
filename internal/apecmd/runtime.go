@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"context"
 	"os/exec"
 	"runtime"
 )
@@ -17,7 +18,7 @@ func runtimeGOOS() string { return runtime.GOOS }
 // PLAN-6 / Phase G: relocated from internal/apecmd/chat.go (since
 // removed). The web pipeline mode and `ape sessions open` both call
 // this helper.
-func openBrowser(url string) error {
+func openBrowser(ctx context.Context, url string) error {
 	var (
 		bin  string
 		args []string
@@ -33,5 +34,5 @@ func openBrowser(url string) error {
 		bin = "xdg-open"
 		args = []string{url}
 	}
-	return exec.Command(bin, args...).Start() //nolint:gosec // launcher binaries are platform standards, never user-controlled
+	return exec.CommandContext(ctx, bin, args...).Start()
 }

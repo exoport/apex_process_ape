@@ -66,8 +66,10 @@ func NewHub(opts HubOptions) *Hub {
 }
 
 // Listen reserves IPC + broker ports. Idempotent. Returns the web UI URL.
-func (h *Hub) Listen() (string, error) {
-	if err := h.runtime.Listen(); err != nil {
+// ctx scopes the bind operations; the listeners themselves live until
+// Serve returns.
+func (h *Hub) Listen(ctx context.Context) (string, error) {
+	if err := h.runtime.Listen(ctx); err != nil {
 		return "", err
 	}
 	if h.broker != nil {
@@ -80,7 +82,7 @@ func (h *Hub) Listen() (string, error) {
 		ReplayEvents: h.replayEvents,
 		Mux:          h.opts.MountExtras,
 	})
-	addr, err := h.broker.Listen()
+	addr, err := h.broker.Listen(ctx)
 	if err != nil {
 		return "", fmt.Errorf("hub.Listen: broker: %w", err)
 	}
@@ -92,7 +94,7 @@ func (h *Hub) Listen() (string, error) {
 // Blocks until ctx cancels.
 func (h *Hub) Serve(ctx context.Context) error {
 	if h.broker == nil {
-		if _, err := h.Listen(); err != nil {
+		if _, err := h.Listen(ctx); err != nil {
 			return err
 		}
 	}

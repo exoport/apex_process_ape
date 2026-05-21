@@ -458,7 +458,7 @@ func formatFloat(n float64) string {
 	if float64(whole) == n {
 		return intToString(whole)
 	}
-	return intToString(whole) + "." + intToString(int64(n*10)%10) //nolint:mnd // one-decimal split: 10 is the divisor for the tenths digit
+	return intToString(whole) + "." + intToString(int64(n*10)%10)
 }
 
 // intToString is a tiny helper to avoid pulling strconv into the

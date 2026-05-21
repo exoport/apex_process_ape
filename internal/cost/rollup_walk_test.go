@@ -20,7 +20,7 @@ func writeFile(t *testing.T, path, content string) {
 func TestRebuildRollup_WalksPipelinesAndChats(t *testing.T) {
 	root := t.TempDir()
 
-	writeFile(t, filepath.Join(root, "_output/pipelines/design/20260517-101010-aaa1111/manifest.yaml"),
+	writeFile(t, filepath.Join(root, "_output", "pipelines", "design", "20260517-101010-aaa1111", "manifest.yaml"),
 		`schema_version: 2
 run_id: 20260517-101010-aaa1111
 started_at: 2026-05-17T10:10:10Z
@@ -29,7 +29,7 @@ totals:
   tokens_input: 10000
   tokens_output: 2000
 `)
-	writeFile(t, filepath.Join(root, "_output/pipelines/design/20260517-110000-bbb2222/manifest.yaml"),
+	writeFile(t, filepath.Join(root, "_output", "pipelines", "design", "20260517-110000-bbb2222", "manifest.yaml"),
 		`schema_version: 2
 run_id: 20260517-110000-bbb2222
 started_at: 2026-05-17T11:00:00Z
@@ -38,7 +38,7 @@ totals:
   tokens_input: 5000
   tokens_output: 1000
 `)
-	writeFile(t, filepath.Join(root, "_output/ape/chats/20260517-120000-ccc3333/session.yaml"),
+	writeFile(t, filepath.Join(root, "_output", "ape", "chats", "20260517-120000-ccc3333", "session.yaml"),
 		`chat_id: 20260517-120000-ccc3333
 started_at: 2026-05-17T12:00:00Z
 cost_usd: 0.50
@@ -82,10 +82,10 @@ func TestRebuildRollup_EmptyProjectIsNoError(t *testing.T) {
 func TestRebuildRollup_TolerantOfMalformedManifest(t *testing.T) {
 	root := t.TempDir()
 	// Garbage manifest — must skip, not abort.
-	writeFile(t, filepath.Join(root, "_output/pipelines/design/bad-run/manifest.yaml"),
+	writeFile(t, filepath.Join(root, "_output", "pipelines", "design", "bad-run", "manifest.yaml"),
 		"this is not yaml at all: { broken")
 	// Valid manifest alongside.
-	writeFile(t, filepath.Join(root, "_output/pipelines/design/20260517-101010-aaa1111/manifest.yaml"),
+	writeFile(t, filepath.Join(root, "_output", "pipelines", "design", "20260517-101010-aaa1111", "manifest.yaml"),
 		`schema_version: 2
 run_id: 20260517-101010-aaa1111
 started_at: 2026-05-17T10:10:10Z

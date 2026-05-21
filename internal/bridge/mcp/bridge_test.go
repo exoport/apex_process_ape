@@ -103,9 +103,9 @@ func startParentReader(conn net.Conn) *parentReader {
 	return pr
 }
 
-func (pr *parentReader) waitFor(t *testing.T, match func(ipc.Message) bool, timeout time.Duration) ipc.Message {
+func (pr *parentReader) waitFor(t *testing.T, match func(ipc.Message) bool) ipc.Message {
 	t.Helper()
-	deadline := time.After(timeout)
+	deadline := time.After(2 * time.Second)
 	for {
 		select {
 		case m := <-pr.frames:
@@ -130,7 +130,10 @@ type rpcMsg struct {
 func writeRPC(t *testing.T, w io.Writer, m rpcMsg) {
 	t.Helper()
 	m.JSONRPC = "2.0"
-	b, _ := json.Marshal(m)
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal rpc: %v", err)
+	}
 	if _, err := w.Write(append(b, '\n')); err != nil {
 		t.Fatalf("write rpc: %v", err)
 	}
@@ -174,7 +177,7 @@ func driveHandshake(t *testing.T, h *bridgeHarness) *parentReader {
 	}
 	t.Cleanup(func() { conn.Close() })
 	pr := startParentReader(conn)
-	pr.waitFor(t, func(m ipc.Message) bool { return m.Type == ipc.TypeReady }, 2*time.Second)
+	pr.waitFor(t, func(m ipc.Message) bool { return m.Type == ipc.TypeReady })
 	return pr
 }
 
@@ -197,7 +200,7 @@ func TestBridge_InitializeHandshake(t *testing.T) {
 	}
 	defer conn.Close()
 	pr := startParentReader(conn)
-	pr.waitFor(t, func(m ipc.Message) bool { return m.Type == ipc.TypeReady }, 2*time.Second)
+	pr.waitFor(t, func(m ipc.Message) bool { return m.Type == ipc.TypeReady })
 }
 
 func TestBridge_ToolsList(t *testing.T) {
@@ -295,7 +298,7 @@ func TestBridge_BufferOverflow_DropsOldest(t *testing.T) {
 	}
 
 	// Expect at least one TypeBufferOvf frame.
-	pr.waitFor(t, func(m ipc.Message) bool { return m.Type == ipc.TypeBufferOvf }, 2*time.Second)
+	pr.waitFor(t, func(m ipc.Message) bool { return m.Type == ipc.TypeBufferOvf })
 
 	// First await_message should drain m2 (m1 dropped on overflow).
 	writeRPC(t, h.stdin, rpcMsg{
@@ -321,7 +324,7 @@ func TestBridge_Reply_ForwardsOverIPC(t *testing.T) {
 
 	got := pr.waitFor(t, func(m ipc.Message) bool {
 		return m.Type == ipc.TypeReply && m.Content == "hello browser"
-	}, 2*time.Second)
+	})
 	if got.Content != "hello browser" {
 		t.Errorf("reply IPC frame content = %q, want hello browser", got.Content)
 	}
@@ -350,7 +353,7 @@ func TestBridge_StepBind_StoredAndMirrored(t *testing.T) {
 
 	got := pr.waitFor(t, func(m ipc.Message) bool {
 		return m.Type == ipc.TypeCall && m.Tool == "reply"
-	}, 2*time.Second)
+	})
 	if got.SessionID != "sess-abc" {
 		t.Errorf("mirrored call SessionID = %q, want sess-abc", got.SessionID)
 	}
@@ -416,14 +419,14 @@ func TestIntegration_MockClaudeReply(t *testing.T) {
 	writeRPC(t, stdin, rpcMsg{ID: 1, Method: "initialize"})
 	readRPCResponse(t, out, 1)
 	writeRPC(t, stdin, rpcMsg{Method: "notifications/initialized"})
-	pr.waitFor(t, func(m ipc.Message) bool { return m.Type == ipc.TypeReady }, 2*time.Second)
+	pr.waitFor(t, func(m ipc.Message) bool { return m.Type == ipc.TypeReady })
 
 	writeRPC(t, stdin, rpcMsg{
 		ID:     2,
 		Method: "tools/call",
 		Params: json.RawMessage(`{"name":"reply","arguments":{"content":"echo: hi"}}`),
 	})
-	got := pr.waitFor(t, func(m ipc.Message) bool { return m.Type == ipc.TypeReply }, 2*time.Second)
+	got := pr.waitFor(t, func(m ipc.Message) bool { return m.Type == ipc.TypeReply })
 	if got.Content != "echo: hi" {
 		t.Errorf("reply content = %q, want 'echo: hi'", got.Content)
 	}

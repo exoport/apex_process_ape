@@ -35,7 +35,7 @@ const ReadyGlyph = "❯"
 // NewSession creates a detached session running argv in dir. The
 // session is given a fixed window size so capture-pane returns a
 // deterministic shape regardless of the host terminal.
-func NewSession(name, dir string, argv []string) error {
+func NewSession(ctx context.Context, name, dir string, argv []string) error {
 	if len(argv) == 0 {
 		return errors.New("tmux: empty argv")
 	}
@@ -46,7 +46,7 @@ func NewSession(name, dir string, argv []string) error {
 		"-c", dir,
 		"--",
 	}
-	out, err := exec.Command("tmux", append(base, argv...)...).CombinedOutput() //nolint:gosec // argv built from validated spec + caller-supplied prepend flags
+	out, err := exec.CommandContext(ctx, "tmux", append(base, argv...)...).CombinedOutput() //nolint:gosec // argv built from validated spec + caller-supplied prepend flags
 	if err != nil {
 		return fmt.Errorf("tmux new-session %s: %w: %s", name, err, strings.TrimSpace(string(out)))
 	}
@@ -54,28 +54,33 @@ func NewSession(name, dir string, argv []string) error {
 }
 
 // KillSession stops the session. Not-found is treated as success.
-func KillSession(name string) error {
-	out, err := exec.Command("tmux", "kill-session", "-t", name).CombinedOutput()
+func KillSession(ctx context.Context, name string) error {
+	out, err := exec.CommandContext(ctx, "tmux", "kill-session", "-t", name).CombinedOutput()
 	if err != nil {
-		if strings.Contains(string(out), "can't find session") {
+		msg := string(out)
+		// "can't find session" — server is up but the named session
+		// is gone. "no server running" — killing the last session
+		// caused the server to shut down before our call. Both mean
+		// the post-condition "session does not exist" is satisfied.
+		if strings.Contains(msg, "can't find session") || strings.Contains(msg, "no server running") {
 			return nil
 		}
-		return fmt.Errorf("tmux kill-session %s: %w: %s", name, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("tmux kill-session %s: %w: %s", name, err, strings.TrimSpace(msg))
 	}
 	return nil
 }
 
 // HasSession reports whether the session exists.
-func HasSession(name string) bool {
-	err := exec.Command("tmux", "has-session", "-t", name).Run()
+func HasSession(ctx context.Context, name string) bool {
+	err := exec.CommandContext(ctx, "tmux", "has-session", "-t", name).Run()
 	return err == nil
 }
 
 // CapturePane returns the pane contents including scrollback. The
 // caller passes the result through a diff to lift just one step's
 // output, or polls it for marker glyphs.
-func CapturePane(name string) (string, error) {
-	out, err := exec.Command("tmux", "capture-pane", "-p", "-S", "-", "-t", name).Output()
+func CapturePane(ctx context.Context, name string) (string, error) {
+	out, err := exec.CommandContext(ctx, "tmux", "capture-pane", "-p", "-S", "-", "-t", name).Output()
 	if err != nil {
 		return "", fmt.Errorf("tmux capture-pane %s: %w", name, err)
 	}
@@ -85,8 +90,8 @@ func CapturePane(name string) (string, error) {
 // SendText types text into the pane WITHOUT submitting it. The -l
 // flag treats every byte as literal input so leading slashes,
 // quotes, and special chars survive verbatim.
-func SendText(name, text string) error {
-	out, err := exec.Command("tmux", "send-keys", "-t", name, "-l", text).CombinedOutput() //nolint:gosec // name + text from controlled call sites; tmux is the trusted CLI
+func SendText(ctx context.Context, name, text string) error {
+	out, err := exec.CommandContext(ctx, "tmux", "send-keys", "-t", name, "-l", text).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("tmux send-keys -l %s: %w: %s", name, err, strings.TrimSpace(string(out)))
 	}
@@ -96,8 +101,8 @@ func SendText(name, text string) error {
 // SendEnter presses Enter in the pane (C-m). Pair with PromptSettle
 // after SendText to avoid the long-prompt-submit-before-fully-loaded
 // race.
-func SendEnter(name string) error {
-	out, err := exec.Command("tmux", "send-keys", "-t", name, "C-m").CombinedOutput()
+func SendEnter(ctx context.Context, name string) error {
+	out, err := exec.CommandContext(ctx, "tmux", "send-keys", "-t", name, "C-m").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("tmux send-keys C-m %s: %w: %s", name, err, strings.TrimSpace(string(out)))
 	}
@@ -106,12 +111,12 @@ func SendEnter(name string) error {
 
 // SendCommand types text, settles, then presses Enter. The canonical
 // "send a slash command" helper.
-func SendCommand(name, text string) error {
-	if err := SendText(name, text); err != nil {
+func SendCommand(ctx context.Context, name, text string) error {
+	if err := SendText(ctx, name, text); err != nil {
 		return err
 	}
 	time.Sleep(PromptSettle)
-	return SendEnter(name)
+	return SendEnter(ctx, name)
 }
 
 // WaitForReady polls capture-pane until the ❯ glyph appears (claude
@@ -120,7 +125,7 @@ func WaitForReady(ctx context.Context, name string) error {
 	ticker := time.NewTicker(ReadyPollInterval)
 	defer ticker.Stop()
 	for {
-		snap, err := CapturePane(name)
+		snap, err := CapturePane(ctx, name)
 		if err == nil && strings.Contains(snap, ReadyGlyph) {
 			return nil
 		}

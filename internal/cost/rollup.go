@@ -15,17 +15,17 @@ import (
 // Aggregates pipeline runs + chat sessions per name / per date bucket.
 // PLAN-5 / C7.
 type Rollup struct {
-	UpdatedAt time.Time           `json:"updated_at"`
-	Pipelines map[string]Bucket   `json:"pipelines,omitempty"`
-	Chats     Bucket              `json:"chats"`
-	ByDay     map[string]Totals   `json:"by_day,omitempty"` // YYYY-MM-DD → totals
+	UpdatedAt time.Time         `json:"updated_at"`
+	Pipelines map[string]Bucket `json:"pipelines,omitempty"`
+	Chats     Bucket            `json:"chats"`
+	ByDay     map[string]Totals `json:"by_day,omitempty"` // YYYY-MM-DD → totals
 }
 
 // Bucket totals one pipeline name (or all chats) over the lifetime
 // of the project. Runs is the per-run-id breakdown.
 type Bucket struct {
-	Totals Totals             `json:"totals"`
-	Runs   map[string]Totals  `json:"runs,omitempty"`
+	Totals Totals            `json:"totals"`
+	Runs   map[string]Totals `json:"runs,omitempty"`
 }
 
 // RollupPath returns <project>/_output/ape/cost-rollup.json.
@@ -86,7 +86,7 @@ func SaveRollup(projectRoot string, r *Rollup) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, bs, 0o644); err != nil {
+	if err := os.WriteFile(tmp, bs, 0o644); err != nil { //nolint:gosec // shared rollup file; world-readable is intentional
 		return err
 	}
 	return os.Rename(tmp, path)

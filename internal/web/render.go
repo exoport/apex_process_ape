@@ -108,8 +108,8 @@ func RenderConnected(t *template.Template) string {
 	return RenderStatusBanner(t, StatusBanner{Class: "connected", Text: "connected"})
 }
 
-// RenderStatusBanner returns a status banner fragment for the stopped
-// / error / connected SSE events.
+// StatusBanner is the model for the status-banner template fragment
+// rendered on the stopped / error / connected SSE events.
 type StatusBanner struct {
 	Class string // "connected" / "disconnected" / "" (default styling)
 	Text  string

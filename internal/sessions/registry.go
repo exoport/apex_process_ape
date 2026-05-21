@@ -127,7 +127,7 @@ func decode(f *os.File) (registryShape, error) {
 	if err := json.Unmarshal(bs, &reg); err != nil {
 		// Corrupt file → start fresh. Surfacing the error would
 		// block legitimate runs; the registry is best-effort.
-		return registryShape{}, nil
+		return registryShape{}, nil //nolint:nilerr // see comment above
 	}
 	return reg, nil
 }
@@ -146,7 +146,7 @@ func writeBack(f *os.File, reg registryShape) error {
 	if _, err := f.Write(bs); err != nil {
 		return err
 	}
-	if _, err := f.Write([]byte("\n")); err != nil {
+	if _, err := f.WriteString("\n"); err != nil {
 		return err
 	}
 	return nil

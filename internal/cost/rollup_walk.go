@@ -40,7 +40,7 @@ func RebuildRollup(projectRoot string) (*Rollup, error) {
 // pipeline.Manifest. Defined here so the cost package doesn't import
 // pipeline (which would couple the two and complicate testing).
 type manifestForRollup struct {
-	RunID     string `yaml:"run_id"`
+	RunID     string    `yaml:"run_id"`
 	StartedAt time.Time `yaml:"started_at"`
 	Totals    struct {
 		CostUSD             float64 `yaml:"cost_usd"`

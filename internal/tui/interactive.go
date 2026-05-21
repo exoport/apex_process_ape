@@ -12,7 +12,6 @@
 // runtime emits the events (RuntimeEventAwaitPending / Resolved) but
 // only `apex-create-story` and a couple of `lift-project` skills
 // surface them in practice; the modal lands in a focused follow-up.
-
 package tui
 
 import (
@@ -33,10 +32,10 @@ import (
 // the programmatic PipelineModel's stageRow because interactive mode
 // has no per-step intra-stage line tail (chain runs in one claude).
 type interactiveStageState struct {
-	name   string
-	status string // "pending", "running", "done", "failed"
-	start  time.Time
-	dur    time.Duration
+	name    string
+	status  string // "pending", "running", "done", "failed"
+	start   time.Time
+	dur     time.Duration
 	lastErr error
 }
 
@@ -50,6 +49,19 @@ type interactiveHookRow struct {
 // maxHookRows caps the hooks panel buffer. Older rows scroll out the
 // top; cap matches the programmatic TUI's per-stage line tail bound.
 const maxHookRows = 200
+
+// Stage status values. The string form is what gets rendered next to
+// the stage glyph in the top panel.
+const (
+	stageStatusPending = "pending"
+	stageStatusRunning = "running"
+	stageStatusDone    = "done"
+	stageStatusFailed  = "failed"
+)
+
+// stagePendingGlyph is the ⏳ glyph used for the pending state in the
+// stage list.
+const stagePendingGlyph = "⏳"
 
 // hookFlushMsg fires on each throttle tick to drain pendingHooks into
 // the visible hookRows slice. The tick interval matches the existing
@@ -115,7 +127,7 @@ type InteractiveModel struct {
 func NewInteractiveModel(spec *pipeline.Spec, runCancel context.CancelFunc, sendReply awaitReplySender) *InteractiveModel {
 	ti := textinput.New()
 	ti.Placeholder = "type reply, then Enter (Esc to cancel)"
-	ti.CharLimit = 4096 //nolint:mnd // upper bound for a reply line; matches the IPC TypeMessage frame budget
+	ti.CharLimit = 4096
 	m := &InteractiveModel{
 		stageIdx:   make(map[string]int),
 		runCancel:  runCancel,
@@ -125,7 +137,7 @@ func NewInteractiveModel(spec *pipeline.Spec, runCancel context.CancelFunc, send
 	}
 	for _, st := range spec.Stages() {
 		m.stageIdx[st.Name] = len(m.stages)
-		m.stages = append(m.stages, interactiveStageState{name: st.Name, status: "pending"})
+		m.stages = append(m.stages, interactiveStageState{name: st.Name, status: stageStatusPending})
 	}
 	return m
 }
@@ -141,7 +153,7 @@ func tickHookFlush() tea.Cmd {
 // InteractiveObserver; hook events come from PushHook (called from
 // the BridgeRuntime fan-out goroutine).
 //
-//nolint:gocyclo // single dispatch on tea.Msg type; refactor would obscure
+
 func (m *InteractiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -154,7 +166,7 @@ func (m *InteractiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case stageStartMsg:
 		if i, ok := m.stageIdx[msg.stage]; ok {
-			m.stages[i].status = "running"
+			m.stages[i].status = stageStatusRunning
 			m.stages[i].start = time.Now()
 			m.currentStage = msg.stage
 		}
@@ -164,10 +176,10 @@ func (m *InteractiveModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if i, ok := m.stageIdx[msg.stage]; ok {
 			m.stages[i].dur = msg.dur
 			if msg.err != nil {
-				m.stages[i].status = "failed"
+				m.stages[i].status = stageStatusFailed
 				m.stages[i].lastErr = msg.err
 			} else {
-				m.stages[i].status = "done"
+				m.stages[i].status = stageStatusDone
 			}
 		}
 		return m, nil
@@ -293,38 +305,37 @@ func (m *InteractiveModel) View() string {
 		return "initializing..."
 	}
 
-	var stageRows []string
+	stageRows := make([]string, 0, len(m.stages))
 	for _, st := range m.stages {
-		glyph := "⏳"
+		glyph := stagePendingGlyph
 		styled := stagePendingStyle
 		switch st.status {
-		case "running":
+		case stageStatusRunning:
 			glyph, styled = "▶", stageRunningStyle
-		case "done":
+		case stageStatusDone:
 			glyph, styled = "✓", stageDoneStyle
-		case "failed":
+		case stageStatusFailed:
 			glyph, styled = "✗", stageFailedStyle
 		}
 		line := fmt.Sprintf("%s %s", glyph, st.name)
-		if st.status == "done" || st.status == "failed" {
+		if st.status == stageStatusDone || st.status == stageStatusFailed {
 			line += fmt.Sprintf("  %s", st.dur.Round(time.Millisecond))
 		}
 		stageRows = append(stageRows, styled.Render(line))
 	}
 	stagePanel := pipelineHeaderStyle.Render("stages") + "\n" + strings.Join(stageRows, "\n")
 
-	var hookRows []string
-	maxShow := m.termHeight - len(stageRows) - statusRowReserve - headerRowReserve - 4 //nolint:mnd // reserved rows for stage list + footer + hooks panel header
-	if maxShow < 3 {
-		maxShow = 3
-	}
+	maxShow := max(
+		//nolint:mnd // reserved rows for stage list + footer + hooks panel header
+		m.termHeight-len(stageRows)-statusRowReserve-headerRowReserve-4, 3)
 	start := 0
 	if len(m.hookRows) > maxShow {
 		start = len(m.hookRows) - maxShow
 	}
+	hookRows := make([]string, 0, len(m.hookRows)-start)
 	for _, hr := range m.hookRows[start:] {
 		hookRows = append(hookRows, fmt.Sprintf("%s %s %s",
-			dimStyle.Render(hr.ts.Local().Format("15:04:05")),
+			dimStyle.Render(hr.ts.Local().Format("15:04:05")), //nolint:gosmopolitan // intentional: hook-row timestamps shown in the user's local clock
 			hr.event,
 			dimStyle.Render(hr.step),
 		))
@@ -361,7 +372,7 @@ func (m *InteractiveModel) View() string {
 }
 
 // Done is called by the runner once pipeline.Run returns.
-func (m *InteractiveModel) Done(err error) {
+func (m *InteractiveModel) Done(_ error) {
 	// Synchronously enqueue a tea.Msg through the program; safer than
 	// mutating model fields from outside the tea goroutine.
 }
@@ -397,8 +408,8 @@ func (o *InteractiveObserver) OnStageEnd(stage string, dur time.Duration, err er
 // PreToolUse, etc.). Per-line streaming is intentionally suppressed
 // because chain steps share the claude session and there's no clean
 // per-step delineation in the stdout stream.
-func (o *InteractiveObserver) OnStepStart(string, int, pipeline.Step)             {}
-func (o *InteractiveObserver) OnStepLine(string, int, string)                     {}
+func (o *InteractiveObserver) OnStepStart(string, int, pipeline.Step) {}
+func (o *InteractiveObserver) OnStepLine(string, int, string)         {}
 func (o *InteractiveObserver) OnStepEnd(string, int, pipeline.Step, time.Duration, string, error) {
 }
 

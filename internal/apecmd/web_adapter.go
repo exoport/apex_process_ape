@@ -27,12 +27,15 @@ func (r *webRenderer) AwaitResolved() string { return web.RenderAwaitResolved(r.
 func (r *webRenderer) Stopped() string {
 	return web.RenderStatusBanner(r.t, web.StatusBanner{Class: "disconnected", Text: "Stopped by user"})
 }
+
 func (r *webRenderer) BridgeError(msg string) string {
 	return web.RenderStatusBanner(r.t, web.StatusBanner{Class: "disconnected", Text: "Bridge error: " + msg})
 }
+
 func (r *webRenderer) Reply(content string) string {
 	return web.RenderReplyLine(r.t, web.ReplyLine{Content: content})
 }
+
 func (r *webRenderer) HookFromEvent(h orchestrator.HookEvent) string {
 	return web.RenderHookFragment(r.t, web.HookFragment{
 		At:          h.At,

@@ -66,7 +66,7 @@ func checkForUpdatesBackground() {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second) //nolint:mnd // 5 seconds is an arbitrary background-check timeout; short enough not to delay startup
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	latest, err := fetchLatestVersion(ctx, token)

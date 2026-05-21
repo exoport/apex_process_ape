@@ -2,6 +2,7 @@ package apecmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -64,7 +65,7 @@ prefer these values over the built-in price table (cost.Prices).
 PLAN-5 / C7.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if fromPath == "" {
-				return fmt.Errorf("ape costs update: --from <file> required")
+				return errors.New("ape costs update: --from <file> required")
 			}
 			overrides, err := cost.LoadOverridesFrom(fromPath)
 			if err != nil {

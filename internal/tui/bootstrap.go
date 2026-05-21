@@ -23,7 +23,7 @@ var (
 	hintStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Italic(true)
 	borderStyle     = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			Padding(1, 2). //nolint:mnd // UI padding constants: 1 vertical, 2 horizontal
+			Padding(1, 2).
 			BorderForeground(lipgloss.Color("62"))
 )
 
@@ -69,11 +69,11 @@ func initialModel(catalog *trait.Catalog) model {
 	}
 }
 
-func (m model) Init() tea.Cmd { //nolint:gocritic // Bubble Tea requires value receivers on tea.Model
+func (m model) Init() tea.Cmd {
 	return nil
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // Bubble Tea requires value receivers on tea.Model
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok {
 		switch m.screen {
 		case screenSelect:
@@ -87,7 +87,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // B
 	return m, nil
 }
 
-func (m model) updateSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // Bubble Tea requires value receivers; model state is returned by value
+func (m model) updateSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case keyCtrlC, "q", keyEsc:
 		m.cancelled = true
@@ -137,7 +137,7 @@ func (m model) updateSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocr
 	return m, nil
 }
 
-func (m model) updateConflict(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // Bubble Tea requires value receivers; model state is returned by value
+func (m model) updateConflict(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case keyCtrlC, "q", keyEsc:
 		m.cancelled = true
@@ -150,7 +150,7 @@ func (m model) updateConflict(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:go
 	return m, nil
 }
 
-func (m model) updateSummary(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // Bubble Tea requires value receivers; model state is returned by value
+func (m model) updateSummary(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case keyCtrlC, "q", keyEsc:
 		m.cancelled = true
@@ -167,7 +167,7 @@ func (m model) updateSummary(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:goc
 	return m, nil
 }
 
-func (m model) View() string { //nolint:gocritic // Bubble Tea requires value receivers on tea.Model
+func (m model) View() string {
 	switch m.screen {
 	case screenSelect:
 		return m.viewSelect()
@@ -179,7 +179,7 @@ func (m model) View() string { //nolint:gocritic // Bubble Tea requires value re
 	return ""
 }
 
-func (m model) viewSelect() string { //nolint:gocritic // Bubble Tea requires value receivers on tea.Model helper methods
+func (m model) viewSelect() string {
 	var sb strings.Builder
 	sb.WriteString(headerStyle.Render("APE Bootstrap — Select Traits"))
 	sb.WriteString("\n\n")
@@ -213,7 +213,7 @@ func (m model) viewSelect() string { //nolint:gocritic // Bubble Tea requires va
 	return borderStyle.Render(sb.String())
 }
 
-func (m model) viewConflict() string { //nolint:gocritic // Bubble Tea requires value receivers on tea.Model helper methods
+func (m model) viewConflict() string {
 	var sb strings.Builder
 	sb.WriteString(headerStyle.Render("Conflicts Detected"))
 	sb.WriteString("\n\n")
@@ -232,7 +232,7 @@ func (m model) viewConflict() string { //nolint:gocritic // Bubble Tea requires 
 	return borderStyle.Render(sb.String())
 }
 
-func (m model) viewSummary() string { //nolint:gocritic // Bubble Tea requires value receivers on tea.Model helper methods
+func (m model) viewSummary() string {
 	var sb strings.Builder
 	sb.WriteString(headerStyle.Render("Summary"))
 	sb.WriteString("\n\n")

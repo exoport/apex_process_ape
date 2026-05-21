@@ -24,24 +24,24 @@ func requireTmux(t *testing.T) {
 func TestSessionLifecycle(t *testing.T) {
 	requireTmux(t)
 	name := "ape-tmux-test-lifecycle"
-	_ = KillSession(name)
+	_ = KillSession(t.Context(), name)
 
-	if err := NewSession(name, "/tmp", []string{"bash", "--noprofile", "--norc"}); err != nil {
+	if err := NewSession(t.Context(), name, "/tmp", []string{"bash", "--noprofile", "--norc"}); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	t.Cleanup(func() { _ = KillSession(name) })
+	t.Cleanup(func() { _ = KillSession(t.Context(), name) })
 
-	if !HasSession(name) {
+	if !HasSession(t.Context(), name) {
 		t.Fatalf("HasSession returned false after NewSession")
 	}
-	if err := KillSession(name); err != nil {
+	if err := KillSession(t.Context(), name); err != nil {
 		t.Fatalf("KillSession: %v", err)
 	}
-	if HasSession(name) {
+	if HasSession(t.Context(), name) {
 		t.Fatalf("HasSession returned true after KillSession")
 	}
 	// Killing a non-existent session is a no-op error-wise.
-	if err := KillSession(name); err != nil {
+	if err := KillSession(t.Context(), name); err != nil {
 		t.Errorf("KillSession on missing session should be a no-op, got: %v", err)
 	}
 }
@@ -52,8 +52,8 @@ func TestSessionLifecycle(t *testing.T) {
 // types the canonical PLAN-6 sequence the interactive runner would
 // produce for step i>0:
 //
-//   1. /clear  (would reset claude context; bash just echoes "command not found")
-//   2. /apex-some-skill --autonomous  (the skill prompt)
+//  1. /clear  (would reset claude context; bash just echoes "command not found")
+//  2. /apex-some-skill --autonomous  (the skill prompt)
 //
 // The test verifies both lines appear in capture-pane in the right
 // order, with /clear strictly before the skill prompt. This catches
@@ -62,16 +62,16 @@ func TestSessionLifecycle(t *testing.T) {
 func TestSendCommandOrderingWithClear(t *testing.T) {
 	requireTmux(t)
 	name := "ape-tmux-test-clear-order"
-	_ = KillSession(name)
+	_ = KillSession(t.Context(), name)
 
 	// PS1='❯ ' so WaitForReady finds the marker the same way the
 	// runner finds claude's prompt.
-	if err := NewSession(name, "/tmp", []string{
+	if err := NewSession(t.Context(), name, "/tmp", []string{
 		"bash", "--noprofile", "--norc", "-c", "PS1='❯ '; export PS1; exec bash --noprofile --norc",
 	}); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	t.Cleanup(func() { _ = KillSession(name) })
+	t.Cleanup(func() { _ = KillSession(t.Context(), name) })
 
 	readyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -81,17 +81,17 @@ func TestSendCommandOrderingWithClear(t *testing.T) {
 
 	// Drive what runStageInteractive does between step 0 and step 1:
 	// /clear first (with NoClear=false), then the slash command.
-	if err := SendCommand(name, "/clear"); err != nil {
-		t.Fatalf("SendCommand(/clear): %v", err)
+	if err := SendCommand(t.Context(), name, "/clear"); err != nil {
+		t.Fatalf("SendCommand(t.Context(), /clear): %v", err)
 	}
 	// Allow the redraw — same settle the runner uses.
 	time.Sleep(200 * time.Millisecond)
-	if err := SendCommand(name, "/apex-some-skill --autonomous"); err != nil {
-		t.Fatalf("SendCommand(skill): %v", err)
+	if err := SendCommand(t.Context(), name, "/apex-some-skill --autonomous"); err != nil {
+		t.Fatalf("SendCommand(t.Context(), skill): %v", err)
 	}
 	time.Sleep(200 * time.Millisecond)
 
-	pane, err := CapturePane(name)
+	pane, err := CapturePane(t.Context(), name)
 	if err != nil {
 		t.Fatalf("CapturePane: %v", err)
 	}
@@ -115,14 +115,14 @@ func TestSendCommandOrderingWithClear(t *testing.T) {
 func TestSendTextLiteral(t *testing.T) {
 	requireTmux(t)
 	name := "ape-tmux-test-literal"
-	_ = KillSession(name)
+	_ = KillSession(t.Context(), name)
 
-	if err := NewSession(name, "/tmp", []string{
+	if err := NewSession(t.Context(), name, "/tmp", []string{
 		"bash", "--noprofile", "--norc", "-c", "PS1='❯ '; export PS1; exec bash --noprofile --norc",
 	}); err != nil {
 		t.Fatalf("NewSession: %v", err)
 	}
-	t.Cleanup(func() { _ = KillSession(name) })
+	t.Cleanup(func() { _ = KillSession(t.Context(), name) })
 
 	readyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -131,11 +131,11 @@ func TestSendTextLiteral(t *testing.T) {
 	}
 
 	const literal = "/apex-agent-pm --autonomous -- apex-create-prd --autonomous"
-	if err := SendText(name, literal); err != nil {
+	if err := SendText(t.Context(), name, literal); err != nil {
 		t.Fatalf("SendText: %v", err)
 	}
 	time.Sleep(150 * time.Millisecond)
-	pane, err := CapturePane(name)
+	pane, err := CapturePane(t.Context(), name)
 	if err != nil {
 		t.Fatalf("CapturePane: %v", err)
 	}

@@ -44,7 +44,7 @@ func newTraitListCmd() *cobra.Command {
 			case output.FormatJSON, output.FormatYAML:
 				return output.Print(os.Stdout, format, catalog.Traits)
 			default:
-				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0) //nolint:mnd // 2-space column padding is conventional for tabwriter output
+				w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 				fmt.Fprintln(w, "NAME\tVERSION\tDESCRIPTION\tTAGS")
 				for _, t := range catalog.Traits {
 					fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", t.Name, t.Version, t.Description, strings.Join(t.Tags, ","))
@@ -147,7 +147,7 @@ func newTraitConflictsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "conflicts <trait1> <trait2> [...]",
 		Short: "Check for conflicts between traits",
-		Args:  cobra.MinimumNArgs(2), //nolint:mnd // conflict detection requires at least 2 traits
+		Args:  cobra.MinimumNArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			catalog, err := trait.LoadCatalog()
 			if err != nil {

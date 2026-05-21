@@ -93,8 +93,9 @@ func New(opts Options) *Broker {
 // Listen reserves the TCP port and returns the bound address. Idempotent
 // after the first successful call (subsequent calls return the same
 // address). The listener is mandatory 127.0.0.1 — Listen rejects any
-// other bind address. PLAN-5 / C5.
-func (b *Broker) Listen() (string, error) {
+// other bind address. ctx scopes the bind operation only; the
+// listener itself lives until Serve returns. PLAN-5 / C5.
+func (b *Broker) Listen(ctx context.Context) (string, error) {
 	if b.ln != nil {
 		return b.ln.Addr().String(), nil
 	}
@@ -109,7 +110,8 @@ func (b *Broker) Listen() (string, error) {
 	if host != "127.0.0.1" {
 		return "", fmt.Errorf("broker.Listen: refuse to bind on %q (only 127.0.0.1 is allowed)", host)
 	}
-	ln, err := net.Listen("tcp", addr)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return "", fmt.Errorf("broker.Listen: %w", err)
 	}
@@ -121,7 +123,7 @@ func (b *Broker) Listen() (string, error) {
 // listener fails. Call Listen first.
 func (b *Broker) Serve(ctx context.Context) error {
 	if b.ln == nil {
-		if _, err := b.Listen(); err != nil {
+		if _, err := b.Listen(ctx); err != nil {
 			return err
 		}
 	}
@@ -153,9 +155,12 @@ func (b *Broker) Serve(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
+		// Parent ctx is already done; Shutdown needs a fresh
+		// deadline-bounded ctx to give in-flight requests a window
+		// to drain. Background() is intentional here.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = b.srv.Shutdown(shutdownCtx)
+		_ = b.srv.Shutdown(shutdownCtx) //nolint:contextcheck // shutdown ctx is deliberately fresh; see comment above
 		<-errCh
 		return ctx.Err()
 	case err := <-errCh:
@@ -283,7 +288,7 @@ func splitLines(s string) []string {
 	}
 	var out []string
 	start := 0
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] == '\n' {
 			out = append(out, s[start:i])
 			start = i + 1

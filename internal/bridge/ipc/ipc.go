@@ -33,6 +33,18 @@ const (
 	TypeBufferOvf = "buffer-overflow"
 )
 
+// Hook event names emitted by Claude Code's hooks block. The bridge
+// settings register `ape notify --event <name>` for each of these; the
+// parent then routes them via the IPC `hook` frame.
+const (
+	HookPreToolUse       = "PreToolUse"
+	HookPostToolUse      = "PostToolUse"
+	HookUserPromptSubmit = "UserPromptSubmit"
+	HookSubagentStart    = "SubagentStart"
+	HookSubagentStop     = "SubagentStop"
+	HookStop             = "Stop"
+)
+
 // Message is the canonical IPC frame. Fields are populated per the
 // `Type` discriminator; consumers should switch on Type and treat
 // unrelated fields as best-effort. Payload is reserved for opaque

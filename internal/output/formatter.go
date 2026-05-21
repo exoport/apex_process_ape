@@ -29,7 +29,7 @@ func Print(w io.Writer, format Format, data any) error {
 		return enc.Encode(data)
 	case FormatYAML:
 		enc := yaml.NewEncoder(w)
-		enc.SetIndent(2) //nolint:mnd // 2-space YAML indent is conventional
+		enc.SetIndent(2)
 		defer enc.Close()
 		return enc.Encode(data)
 	default:

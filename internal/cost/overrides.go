@@ -39,9 +39,9 @@ type priceRow struct {
 }
 
 var (
-	overridesMu      sync.RWMutex
-	loadedOverrides  map[string]ModelPrice
-	overridesLoaded  bool
+	overridesMu     sync.RWMutex
+	loadedOverrides map[string]ModelPrice
+	overridesLoaded bool
 )
 
 // LoadOverridesFrom reads a price-override YAML file and parses it
@@ -64,7 +64,7 @@ func LoadOverridesFrom(path string) (map[string]ModelPrice, error) {
 		if v.BaseInput < 0 || v.Output < 0 {
 			return nil, fmt.Errorf("cost.LoadOverridesFrom: model %q has negative price", k)
 		}
-		out[k] = ModelPrice{BaseInput: v.BaseInput, Output: v.Output}
+		out[k] = ModelPrice(v)
 	}
 	return out, nil
 }
@@ -74,7 +74,7 @@ func LoadOverridesFrom(path string) (map[string]ModelPrice, error) {
 func SaveOverrides(prices map[string]ModelPrice) error {
 	shape := overridesShape{Prices: make(map[string]priceRow, len(prices))}
 	for k, v := range prices {
-		shape.Prices[k] = priceRow{BaseInput: v.BaseInput, Output: v.Output}
+		shape.Prices[k] = priceRow(v)
 	}
 	bs, err := yaml.Marshal(shape)
 	if err != nil {
@@ -85,7 +85,7 @@ func SaveOverrides(prices map[string]ModelPrice) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, bs, 0o644); err != nil {
+	if err := os.WriteFile(tmp, bs, 0o644); err != nil { //nolint:gosec // user-visible config file; world-readable is intentional
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
@@ -126,7 +126,7 @@ func loadOverridesOnce() map[string]ModelPrice {
 		return loadedOverrides
 	}
 	for k, v := range raw.Prices {
-		loadedOverrides[k] = ModelPrice{BaseInput: v.BaseInput, Output: v.Output}
+		loadedOverrides[k] = ModelPrice(v)
 	}
 	return loadedOverrides
 }

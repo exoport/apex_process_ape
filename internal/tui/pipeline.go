@@ -98,7 +98,7 @@ var (
 	dimStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	modalStyle        = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				Padding(1, 3). //nolint:mnd // (vertical=1, horizontal=3) padding is a deliberate cosmetic choice
+				Padding(1, 3).
 				BorderForeground(lipgloss.Color("11")).
 				Bold(true)
 )
@@ -326,7 +326,7 @@ func NewPipelineModel(spec *pipeline.Spec, cancel context.CancelFunc, projectRoo
 	}
 }
 
-func (m pipelineModel) Init() tea.Cmd { //nolint:gocritic // Bubble Tea requires value receivers on tea.Model
+func (m pipelineModel) Init() tea.Cmd {
 	return tea.Batch(tickCmd(), throttleTickCmd())
 }
 
@@ -345,7 +345,7 @@ func throttleTickCmd() tea.Cmd {
 // just moves the same branching one call frame deeper and obscures
 // the linear flow.
 //
-//nolint:gocritic,gocyclo,maintidx // Bubble Tea requires value receivers on tea.Model; Update is intrinsically a wide message switch
+//nolint:gocyclo,maintidx // Bubble Tea requires value receivers on tea.Model; Update is intrinsically a wide message switch
 func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -440,7 +440,7 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.scrollToBottom(), nil
 		case "r", "R":
 			// PLAN-2 / F3: cycle human → raw → both → human.
-			m.renderStyle = (m.renderStyle + 1) % 3 //nolint:mnd // 3 = number of styles in the renderStyle enum (styleHuman / styleRawJSON / styleBoth)
+			m.renderStyle = (m.renderStyle + 1) % 3
 			return m, nil
 		case "q":
 			m.modal = modalQuitConfirm
@@ -572,7 +572,7 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m pipelineModel) View() string { //nolint:gocritic // Bubble Tea requires value receivers on tea.Model
+func (m pipelineModel) View() string {
 	if m.width == 0 {
 		return "initializing…"
 	}
@@ -591,7 +591,7 @@ func (m pipelineModel) View() string { //nolint:gocritic // Bubble Tea requires 
 	if m.width < narrowLayoutThreshold {
 		return m.viewNarrow()
 	}
-	rightWidth := max(m.width/3, stageListWidthMin) //nolint:mnd // 1/3 split: events panel keeps the lion's share
+	rightWidth := max(m.width/3, stageListWidthMin)
 	leftWidth := max(m.width-rightWidth-panelBorderOverhead, eventPanelWidthMin)
 	panelHeight := max(m.height-statusRowReserve, panelHeightMin)
 
@@ -621,7 +621,7 @@ func (m pipelineModel) View() string { //nolint:gocritic // Bubble Tea requires 
 // in modePinned it shows "pinned: <stage>"; on the F7 final-report
 // row (cursorIdx == len(stages) in phaseCompleted) it shows
 // "final report".
-func (m pipelineModel) renderHeader() string { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) renderHeader() string {
 	if m.cursorIdx == len(m.stages) && m.phase == phaseCompleted {
 		return "final report"
 	}
@@ -649,7 +649,7 @@ func (m pipelineModel) renderHeader() string { //nolint:gocritic // Bubble Tea v
 // L (return-to-live) or End rejoins the tail. PLAN-2 / F7: when the
 // cursor sits on the synthetic final-report row, the per-stage summary
 // table replaces the events stream.
-func (m pipelineModel) renderEventPanel(width, height int) string { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) renderEventPanel(width, height int) string {
 	if m.cursorIdx == len(m.stages) && m.phase == phaseCompleted {
 		return m.renderFinalReport(width, height)
 	}
@@ -702,12 +702,12 @@ func (m pipelineModel) renderEventPanel(width, height int) string { //nolint:goc
 // gone; a one-row horizontal stepper sits above the full-width event
 // panel. Cursor, scroll, modal handling are all unchanged — only the
 // rendering layout differs.
-func (m pipelineModel) viewNarrow() string { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) viewNarrow() string {
 	stepperRow := m.renderStageStepper(m.width)
 	panelWidth := max(m.width, eventPanelWidthMin)
 	// Reserve the stepper row plus its blank separator from the
 	// event-panel height budget.
-	panelHeight := max(m.height-statusRowReserve-2, panelHeightMin) //nolint:mnd // 2 = stepper row + spacer separator inside the narrow layout
+	panelHeight := max(m.height-statusRowReserve-2, panelHeightMin)
 
 	header := m.renderHeader()
 	panel := pipelinePanelStyle.Width(panelWidth).Height(panelHeight).Render(
@@ -732,7 +732,7 @@ func (m pipelineModel) viewNarrow() string { //nolint:gocritic // Bubble Tea val
 //
 // The cursor stage is wrapped in [ ] for visibility. The 📊 final-
 // report row participates when phase==phaseCompleted.
-func (m pipelineModel) renderStageStepper(_ int) string { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) renderStageStepper(_ int) string {
 	var sb strings.Builder
 	for i := range m.stages {
 		st := &m.stages[i]
@@ -762,7 +762,7 @@ func (m pipelineModel) renderStageStepper(_ int) string { //nolint:gocritic // B
 // PLAN-2 / F7: in phaseCompleted, a synthetic "📊 final report" row
 // appends to the list; selecting it (cursor at len(stages)) populates
 // the event panel with the per-stage summary table.
-func (m pipelineModel) renderStageList() string { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) renderStageList() string {
 	const cursorMark, noCursorMark = "> ", "  "
 	var sb strings.Builder
 	for i := range m.stages {
@@ -794,7 +794,7 @@ func (m pipelineModel) renderStageList() string { //nolint:gocritic // Bubble Te
 // renderStatusStrip is the bottom-row summary of the cursor's stage:
 // stage name · running step (if any) · elapsed time · final verdict.
 // PLAN-2 / F7: on the final-report row, summarizes the aggregate result.
-func (m pipelineModel) renderStatusStrip() string { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) renderStatusStrip() string {
 	if m.cursorIdx == len(m.stages) && m.phase == phaseCompleted {
 		ok, failed, _ := m.tallyStages()
 		verdict := "✓ all stages passed"
@@ -828,7 +828,7 @@ func (m pipelineModel) renderStatusStrip() string { //nolint:gocritic // Bubble 
 // renderKeybindHint is the bottom-most row when the pipeline is still
 // running. Lists the canonical keybindings so the user sees them
 // without consulting docs.
-func (m pipelineModel) renderKeybindHint() string { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) renderKeybindHint() string {
 	mode := "live"
 	if m.mode == modePinned {
 		mode = "pinned"
@@ -852,7 +852,7 @@ func (m pipelineModel) renderKeybindHint() string { //nolint:gocritic // Bubble 
 // user returns to modeLive. If no stage is running, the cursor goes
 // to the most recently active row. Returns the modified model so
 // it composes with the Bubble Tea value-receiver Update idiom.
-func (m pipelineModel) followActive() pipelineModel { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) followActive() pipelineModel {
 	for i := range m.stages {
 		if m.stages[i].state == stateRunning {
 			m.cursorIdx = i
@@ -873,7 +873,7 @@ func (m pipelineModel) followActive() pipelineModel { //nolint:gocritic // Bubbl
 // work in any mode. The first PgUp from auto-tail (userScrolled=false)
 // seeds scrollOffset to the current tail-window so the user sees
 // continuous backwards motion instead of jumping to the top.
-func (m pipelineModel) scrollUp() pipelineModel { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) scrollUp() pipelineModel {
 	if !m.userScrolled {
 		m.scrollOffset = m.tailScrollOffset()
 		m.userScrolled = true
@@ -886,7 +886,7 @@ func (m pipelineModel) scrollUp() pipelineModel { //nolint:gocritic // Bubble Te
 	return m
 }
 
-func (m pipelineModel) scrollDown() pipelineModel { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) scrollDown() pipelineModel {
 	if !m.userScrolled {
 		// Already auto-tailing; PgDn from tail re-confirms tail.
 		return m
@@ -902,7 +902,7 @@ func (m pipelineModel) scrollDown() pipelineModel { //nolint:gocritic // Bubble 
 	return m
 }
 
-func (m pipelineModel) scrollToBottom() pipelineModel { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) scrollToBottom() pipelineModel {
 	m.scrollOffset = 0
 	m.userScrolled = false
 	return m
@@ -913,7 +913,7 @@ func (m pipelineModel) scrollToBottom() pipelineModel { //nolint:gocritic // Bub
 // the latest event is on the bottom row. Falls back to 0 when the
 // terminal hasn't been sized yet (eventPanelHeightFor floors at 1) or
 // when the cursor is out of range.
-func (m pipelineModel) tailScrollOffset() int { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) tailScrollOffset() int {
 	if m.cursorIdx < 0 || m.cursorIdx >= len(m.stages) {
 		return 0
 	}
@@ -969,7 +969,7 @@ func eventKindStyle(k EventKind) lipgloss.Style {
 // pipeline run, if one was provided to NewPipelineModel. Safe to call
 // when the pipeline is already finished or the cancel was never set;
 // the function is idempotent because context.CancelFunc is.
-func (m pipelineModel) invokeCancel() { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) invokeCancel() {
 	if m.cancelRun != nil {
 		m.cancelRun()
 	}
@@ -981,7 +981,7 @@ func (m pipelineModel) invokeCancel() { //nolint:gocritic // Bubble Tea value re
 // visually replaces the underlying view for the duration of the
 // modal; the underlying string is the caller's responsibility to
 // suppress.
-func (m pipelineModel) overlayQuitModal(_ string) string { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) overlayQuitModal(_ string) string {
 	running, completed := m.summarizeRunState()
 	body := "Stop pipeline?\n\n"
 	if running != "" {
@@ -1002,7 +1002,7 @@ func (m pipelineModel) overlayQuitModal(_ string) string { //nolint:gocritic // 
 // summarizeRunState returns a short description of the active stage
 // (if any) and a count of completed stages — used inside the quit
 // modal so the user knows what's at risk.
-func (m pipelineModel) summarizeRunState() (running, completed string) { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) summarizeRunState() (running, completed string) {
 	doneCount := 0
 	for i := range m.stages {
 		st := &m.stages[i]
@@ -1060,7 +1060,7 @@ func formatDur(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%.1fs", d.Seconds())
 	}
-	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60) //nolint:mnd // 60 is seconds-per-minute, a well-known constant
+	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
 // renderCompletionBanner replaces the keybind-hint footer once the
@@ -1068,7 +1068,7 @@ func formatDur(d time.Duration) string {
 // in spirit, but the dominant call to action is "you can quit now"
 // and the dominant fact is "did it pass?" — so a single line carries
 // both.
-func (m pipelineModel) renderCompletionBanner() string { //nolint:gocritic // Bubble Tea requires value receivers on tea.Model helper methods
+func (m pipelineModel) renderCompletionBanner() string {
 	ok, failed, total := m.tallyStages()
 	verdict := stageDoneStyle.Render(fmt.Sprintf("✓ pipeline complete: %d/%d stages OK", ok, total))
 	if failed > 0 {
@@ -1083,7 +1083,7 @@ func (m pipelineModel) renderCompletionBanner() string { //nolint:gocritic // Bu
 // (PLAN-2 / F7). Layout: one row per stage with status glyph, name,
 // wall-clock duration, displayable event count, and the first line
 // of the failing error if any.
-func (m pipelineModel) renderFinalReport(width, _ int) string { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) renderFinalReport(width, _ int) string {
 	if len(m.stages) == 0 {
 		return dimStyle.Render("(no stages ran)")
 	}
@@ -1114,7 +1114,7 @@ func (m pipelineModel) renderFinalReport(width, _ int) string { //nolint:gocriti
 // completion banner and status strip. Pending-but-never-ran stages
 // (a halt-on-failure scenario) count toward total but not toward
 // ok or failed.
-func (m pipelineModel) tallyStages() (ok, failed, total int) { //nolint:gocritic // Bubble Tea value receivers
+func (m pipelineModel) tallyStages() (ok, failed, total int) {
 	total = len(m.stages)
 	for i := range m.stages {
 		switch m.stages[i].state {
@@ -1192,7 +1192,7 @@ func (o *PipelineTUIObserver) OnStageEnd(stage string, dur time.Duration, err er
 	o.program.Send(stageEndMsg{stage: stage, dur: dur, err: err})
 }
 
-func (o *PipelineTUIObserver) OnStepStart(stage string, idx int, step pipeline.Step) { //nolint:gocritic // Step is passed by value to match the Observer interface signature
+func (o *PipelineTUIObserver) OnStepStart(stage string, idx int, step pipeline.Step) {
 	o.program.Send(stepStartMsg{stage: stage, idx: idx, step: step})
 }
 
@@ -1200,6 +1200,6 @@ func (o *PipelineTUIObserver) OnStepLine(stage string, idx int, line string) {
 	o.program.Send(stepLineMsg{stage: stage, idx: idx, line: line})
 }
 
-func (o *PipelineTUIObserver) OnStepEnd(stage string, idx int, step pipeline.Step, dur time.Duration, output string, err error) { //nolint:gocritic // Step is passed by value to match the Observer interface signature
+func (o *PipelineTUIObserver) OnStepEnd(stage string, idx int, step pipeline.Step, dur time.Duration, output string, err error) {
 	o.program.Send(stepEndMsg{stage: stage, idx: idx, step: step, dur: dur, output: output, err: err})
 }

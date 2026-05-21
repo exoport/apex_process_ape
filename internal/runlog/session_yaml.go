@@ -41,5 +41,5 @@ func WriteSessionYAML(dir string, m SessionMeta) error {
 		m.TokensIn,
 		m.TokensOut,
 	)
-	return os.WriteFile(path, []byte(contents), 0o644)
+	return os.WriteFile(path, []byte(contents), 0o644) //nolint:gosec // user-visible runlog metadata; world-readable is intentional
 }

@@ -102,7 +102,7 @@ func (r *Resolver) filterTraitsByConflict(traits []string, conflicts []Conflict,
 	excluded := make(map[string]bool)
 
 	for _, c := range conflicts {
-		if len(c.Owners) < 2 { //nolint:mnd // 2 is the minimum conflict threshold: a category must have at least 2 owners to be a conflict
+		if len(c.Owners) < 2 {
 			continue
 		}
 		var drop []string

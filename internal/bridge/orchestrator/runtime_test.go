@@ -16,14 +16,14 @@ import (
 // return the same port and don't allocate a second listener.
 func TestBridgeRuntime_ListenIsIdempotent(t *testing.T) {
 	r := NewBridgeRuntime(BridgeRuntimeOptions{})
-	if err := r.Listen(); err != nil {
+	if err := r.Listen(t.Context()); err != nil {
 		t.Fatalf("first Listen: %v", err)
 	}
 	port := r.IPCPort()
 	if port == 0 {
 		t.Fatal("IPCPort returned 0 after Listen")
 	}
-	if err := r.Listen(); err != nil {
+	if err := r.Listen(t.Context()); err != nil {
 		t.Fatalf("second Listen: %v", err)
 	}
 	if r.IPCPort() != port {
@@ -124,6 +124,9 @@ func TestBridgeRuntime_AwaitMessageEmitsPendingAndResolved(t *testing.T) {
 				sawPending = true
 			case RuntimeEventAwaitResolved:
 				sawResolved = true
+			default:
+				// Reply/Call/Hook/BufferOverflow are unrelated to
+				// the pending/resolved invariant this test guards.
 			}
 		case <-deadline:
 			t.Fatalf("timed out; pending=%v resolved=%v", sawPending, sawResolved)
@@ -134,12 +137,12 @@ func TestBridgeRuntime_AwaitMessageEmitsPendingAndResolved(t *testing.T) {
 // TestBridgeRuntime_SubscriberDropsOnFullBuffer verifies the runtime
 // does not block the dispatch path when a subscriber's channel fills.
 // PLAN-6 / C3 invariant — accept loop must never wedge on a slow UI.
-func TestBridgeRuntime_SubscriberDropsOnFullBuffer(t *testing.T) {
+func TestBridgeRuntime_SubscriberDropsOnFullBuffer(_ *testing.T) {
 	r := NewBridgeRuntime(BridgeRuntimeOptions{})
 	_ = r.Subscribe() // Never drained — should drop.
 
 	// Pump more events than the buffer (32) to force the drop path.
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		r.dispatch(ipc.Message{Type: ipc.TypeReply, Content: "x"})
 	}
 	// If this returns, the drop path is working.
@@ -170,7 +173,7 @@ func TestBridgeRuntime_RequestStopInvokesRegisteredFn(t *testing.T) {
 // Uses a real net.Pipe to exercise the connection path.
 func TestBridgeRuntime_BridgeReadyCloses(t *testing.T) {
 	r := NewBridgeRuntime(BridgeRuntimeOptions{})
-	if err := r.Listen(); err != nil {
+	if err := r.Listen(t.Context()); err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())

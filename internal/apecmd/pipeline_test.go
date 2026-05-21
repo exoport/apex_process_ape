@@ -54,9 +54,9 @@ func TestPlainObserver_VerboseEmitsEvents(t *testing.T) {
 // label into a filesystem-safe symlink basename under transcripts/.
 func TestTranscriptLinkName(t *testing.T) {
 	cases := map[string]string{
-		"create-prd/1-apex-create-prd":          "create-prd-1-apex-create-prd.jsonl",
-		"adr-governance/3-apex-adr-adoption":    "adr-governance-3-apex-adr-adoption.jsonl",
-		"a/b/c":                                 "a-b-c.jsonl", // multi-slash tolerated
+		"create-prd/1-apex-create-prd":       "create-prd-1-apex-create-prd.jsonl",
+		"adr-governance/3-apex-adr-adoption": "adr-governance-3-apex-adr-adoption.jsonl",
+		"a/b/c":                              "a-b-c.jsonl", // multi-slash tolerated
 	}
 	for input, want := range cases {
 		got := transcriptLinkName(input)
@@ -71,10 +71,10 @@ func TestExtractTranscriptPath(t *testing.T) {
 	require.Equal(t, "/home/u/.claude/projects/foo/sess.jsonl", extractTranscriptPath(ok))
 
 	missing := []byte(`{"session_id":"s1","prompt":"/x"}`)
-	require.Equal(t, "", extractTranscriptPath(missing))
+	require.Empty(t, extractTranscriptPath(missing))
 
-	require.Equal(t, "", extractTranscriptPath(nil))
-	require.Equal(t, "", extractTranscriptPath([]byte(`{not json`)))
+	require.Empty(t, extractTranscriptPath(nil))
+	require.Empty(t, extractTranscriptPath([]byte(`{not json`)))
 }
 
 // TestInteractiveCore_StepTelemetry_DeltaFromTranscript writes a
@@ -139,7 +139,7 @@ func TestInteractiveCore_StepTelemetry_ResetsBaselineOnPathChange(t *testing.T) 
 	sess2 := filepath.Join(dir, "sess2.jsonl")
 	turn := func(id string, in, out int) string {
 		return fmt.Sprintf(
-			`{"type":"assistant","message":{"id":"%s","model":"claude-opus-4-7","usage":{"input_tokens":%d,"output_tokens":%d}}}`,
+			`{"type":"assistant","message":{"id":%q,"model":"claude-opus-4-7","usage":{"input_tokens":%d,"output_tokens":%d}}}`,
 			id, in, out)
 	}
 	require.NoError(t, os.WriteFile(sess1, []byte(turn("m1", 100, 200)+"\n"+turn("m2", 50, 60)+"\n"), 0o600))
@@ -175,21 +175,21 @@ func TestStepTaggingObserver_TracksCurrentStep(t *testing.T) {
 	child := newPlainObserver(&buf, "", true)
 	obs := &stepTaggingObserver{child: child, tracker: tracker}
 
-	require.Equal(t, "", tracker.get(), "tracker starts empty")
+	require.Empty(t, tracker.get(), "tracker starts empty")
 
 	obs.OnStageStart("alpha")
 	obs.OnStepStart("alpha", 0, pipeline.Step{Skill: "apex-create-prd"})
 	require.Equal(t, "alpha/1-apex-create-prd", tracker.get(), "OnStepStart sets the label (1-based idx)")
 
 	obs.OnStepEnd("alpha", 0, pipeline.Step{Skill: "apex-create-prd"}, time.Second, "", nil)
-	require.Equal(t, "", tracker.get(), "OnStepEnd clears the label")
+	require.Empty(t, tracker.get(), "OnStepEnd clears the label")
 
 	obs.OnStepStart("alpha", 1, pipeline.Step{Skill: "apex-shard-doc"})
 	require.Equal(t, "alpha/2-apex-shard-doc", tracker.get(), "OnStepStart on next step relabels (1-based idx)")
 
 	obs.OnStepEnd("alpha", 1, pipeline.Step{Skill: "apex-shard-doc"}, time.Second, "", nil)
 	obs.OnStageEnd("alpha", time.Second, nil)
-	require.Equal(t, "", tracker.get(), "tracker remains cleared after stage end")
+	require.Empty(t, tracker.get(), "tracker remains cleared after stage end")
 
 	out := buf.String()
 	require.Contains(t, out, "stage start: alpha")

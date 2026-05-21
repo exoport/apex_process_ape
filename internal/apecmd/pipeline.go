@@ -95,7 +95,7 @@ func newPipelineCmd() *cobra.Command {
 			}, os.Stderr)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error: "+err.Error())
-				os.Exit(exitCodePreflightFailed) //nolint:gocritic // explicit exit; no defers up to this point
+				os.Exit(exitCodePreflightFailed)
 			}
 			useTUI := !optOutTUI && term.IsTerminal(int(os.Stdout.Fd())) && !mode.IsWeb()
 			if quietFlag && useTUI {
@@ -303,7 +303,7 @@ func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		// os.Exit skips the deferred runCancel; invoke explicitly so
 		// no leaked goroutine or subprocess can survive.
 		runCancel()
-		os.Exit(exitCodePreflightFailed) //nolint:gocritic // explicit runCancel() above neutralizes the defer-skip
+		os.Exit(exitCodePreflightFailed) //nolint:gocritic // intentional: explicit runCancel() above neutralises the deferred-cleanup concern
 	}
 	if runErr == nil {
 		printEndOfRunSummary(spec.Name, projectRoot, cfg)
@@ -369,7 +369,7 @@ func (p *plainObserver) OnStageEnd(stage string, dur time.Duration, err error) {
 	fmt.Fprintf(p.w, "[%s] stage done: %s (%s)\n", elapsed(p.t0), stage, fmtDuration(dur))
 }
 
-func (p *plainObserver) OnStepStart(stage string, idx int, step pipeline.Step) { //nolint:gocritic // Step is passed by value to match the Observer interface signature
+func (p *plainObserver) OnStepStart(stage string, idx int, step pipeline.Step) {
 	p.currentStage = stage
 	p.currentSkill = step.Skill
 	tag := step.Skill
@@ -406,11 +406,11 @@ func (p *plainObserver) OnStepLine(stage string, _ int, line string) {
 		elapsed(p.t0), stageName, p.currentSkill, r.Glyph, r.Body)
 }
 
-func (p *plainObserver) OnStepEnd(_ string, idx int, step pipeline.Step, dur time.Duration, output string, err error) { //nolint:gocritic // Step is passed by value to match the Observer interface signature
+func (p *plainObserver) OnStepEnd(_ string, idx int, step pipeline.Step, dur time.Duration, stepOutput string, err error) {
 	if err != nil {
 		fmt.Fprintf(p.w, "[%s]   step %d FAIL: %s (%s)\n", elapsed(p.t0), idx+1, step.Skill, fmtDuration(dur))
-		if output != "" {
-			fmt.Fprintf(p.w, "%s\n", output)
+		if stepOutput != "" {
+			fmt.Fprintf(p.w, "%s\n", stepOutput)
 		}
 		return
 	}
@@ -428,5 +428,5 @@ func fmtDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%.1fs", d.Seconds())
 	}
-	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60) //nolint:mnd // 60 is seconds-per-minute, a well-known constant
+	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }

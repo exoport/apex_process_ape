@@ -1,10 +1,10 @@
 // Package runlog writes the four PLAN-5 / C6 streams that surround
 // the pipeline manifest:
 //
-//   hook-events.jsonl    one JSON per ape-notify forward
-//   bridge-calls.jsonl   one JSON per MCP tool call seen by the bridge
-//   checkpoints.jsonl    ape stage events + skill reply() calls
-//   transcripts/         symlinks into ~/.claude/projects/<hash>/<sid>.jsonl
+//	hook-events.jsonl    one JSON per ape-notify forward
+//	bridge-calls.jsonl   one JSON per MCP tool call seen by the bridge
+//	checkpoints.jsonl    ape stage events + skill reply() calls
+//	transcripts/         symlinks into ~/.claude/projects/<hash>/<sid>.jsonl
 //
 // Pipeline runs use the existing PLAN-3 layout
 // (<project>/_output/pipelines/<name>/<run_id>/) — runlog does not
@@ -16,7 +16,7 @@
 package runlog
 
 import (
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec // sha1 is used here for a short identifier hash, not for cryptographic security
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -156,10 +156,9 @@ func (w *Writer) LinkTranscript(name, target string) error {
 		}
 		return fmt.Errorf("runlog: transcript symlink %s points to %s, want %s", link, existing, target)
 	}
-	if !errors.Is(err, os.ErrNotExist) && !errors.Is(err, os.ErrInvalid) {
-		// some platforms report EINVAL for non-symlinks; we accept
-		// either and proceed to create.
-	}
+	// errors.Is(err, os.ErrNotExist) is the happy "no symlink yet"
+	// branch; os.ErrInvalid is reported by some platforms for
+	// non-symlink targets. Either way, fall through to create.
 	return os.Symlink(target, link)
 }
 
@@ -276,7 +275,7 @@ func ChatDir(projectRoot, chatID string) string {
 // NewChatID generates a chat-id of the shape YYYYMMDD-HHMMSS-<7-char hash>.
 // Hash mixes timestamp + cwd + pid for cross-process uniqueness. PLAN-5 / C6.
 func NewChatID(now time.Time, cwd string, pid int) string {
-	h := sha1.New()
+	h := sha1.New() //nolint:gosec // see import comment — identifier hash, not cryptographic
 	h.Write([]byte(now.Format(time.RFC3339Nano)))
 	h.Write([]byte{0})
 	h.Write([]byte(cwd))

@@ -5,10 +5,10 @@ package cost
 // session captures default to zero — that is the same shape PLAN-3
 // already records via the stream-json `result` path.
 type UsageBlock struct {
-	InputTokens      int `json:"input_tokens"`
-	OutputTokens     int `json:"output_tokens"`
-	CacheRead        int `json:"cache_read_input_tokens"`
-	CacheCreation    CacheCreation `json:"cache_creation"`
+	InputTokens   int           `json:"input_tokens"`
+	OutputTokens  int           `json:"output_tokens"`
+	CacheRead     int           `json:"cache_read_input_tokens"`
+	CacheCreation CacheCreation `json:"cache_creation"`
 }
 
 type CacheCreation struct {
@@ -33,11 +33,11 @@ const (
 // TurnCost returns USD for one assistant turn given its usage block
 // and the model's price record. PLAN-5 / C7 formula:
 //
-//   turn_cost = BaseInput × input_tokens
-//             + BaseInput × 1.25 × cache_creation.ephemeral_5m_input_tokens
-//             + BaseInput × 2.00 × cache_creation.ephemeral_1h_input_tokens
-//             + BaseInput × 0.10 × cache_read_input_tokens
-//             + Output    × output_tokens
+//	turn_cost = BaseInput × input_tokens
+//	          + BaseInput × 1.25 × cache_creation.ephemeral_5m_input_tokens
+//	          + BaseInput × 2.00 × cache_creation.ephemeral_1h_input_tokens
+//	          + BaseInput × 0.10 × cache_read_input_tokens
+//	          + Output    × output_tokens
 //
 // All terms divided by 1M so the per-million-token price table can be
 // used directly. Unknown models (zero ModelPrice) yield $0.00 with no
@@ -58,12 +58,12 @@ func TurnCost(u UsageBlock, p ModelPrice) float64 {
 // spawns; transcript scans of an interactive session need the explicit
 // counter).
 type Totals struct {
-	CostUSD             float64
-	InputTokens         int
-	OutputTokens        int
-	CacheReadTokens     int
-	CacheCreationTokens int
-	NumTurns            int
+	CostUSD             float64 `json:"cost_usd"`
+	InputTokens         int     `json:"input_tokens"`
+	OutputTokens        int     `json:"output_tokens"`
+	CacheReadTokens     int     `json:"cache_read_tokens"`
+	CacheCreationTokens int     `json:"cache_creation_tokens"`
+	NumTurns            int     `json:"num_turns"`
 }
 
 // Add folds one turn's usage + cost into the running totals.

@@ -19,11 +19,12 @@ import (
 func startBroker(t *testing.T, opts Options) (string, *Broker, context.CancelFunc) {
 	t.Helper()
 	b := New(opts)
-	addr, err := b.Listen()
+	ctx, cancel := context.WithCancel(context.Background())
+	addr, err := b.Listen(ctx)
 	if err != nil {
+		cancel()
 		t.Fatalf("Listen: %v", err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		if err := b.Serve(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			// Test goroutine — log via t.Log only if test is still running.
@@ -47,7 +48,7 @@ func startBroker(t *testing.T, opts Options) (string, *Broker, context.CancelFun
 
 func TestBroker_RejectsNon127001Bind(t *testing.T) {
 	b := New(Options{ListenAddr: "0.0.0.0:0"})
-	if _, err := b.Listen(); err == nil {
+	if _, err := b.Listen(t.Context()); err == nil {
 		t.Fatal("expected refuse-to-bind error")
 	}
 }
@@ -199,7 +200,10 @@ func TestBroker_PostSend_64KBLimit(t *testing.T) {
 	for i := range big {
 		big[i] = 'a'
 	}
-	body, _ := json.Marshal(map[string]string{"content": string(big)})
+	body, err := json.Marshal(map[string]string{"content": string(big)})
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
 	resp, err := http.Post(base+"/api/send", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("post: %v", err)
@@ -219,7 +223,7 @@ type sseEvent struct {
 
 func openSSE(t *testing.T, url string) (*http.Response, *bufio.Reader) {
 	t.Helper()
-	req, _ := http.NewRequest("GET", url, nil)
+	req, _ := http.NewRequest(http.MethodGet, url, http.NoBody)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
@@ -247,10 +251,10 @@ func readSSEEvent(t *testing.T, r *bufio.Reader) sseEvent {
 			ev.data = strings.Join(dataLines, "\n")
 			return ev
 		}
-		if strings.HasPrefix(line, "event: ") {
-			ev.event = strings.TrimPrefix(line, "event: ")
-		} else if strings.HasPrefix(line, "data: ") {
-			dataLines = append(dataLines, strings.TrimPrefix(line, "data: "))
+		if after, ok := strings.CutPrefix(line, "event: "); ok {
+			ev.event = after
+		} else if after, ok := strings.CutPrefix(line, "data: "); ok {
+			dataLines = append(dataLines, after)
 		}
 	}
 }
