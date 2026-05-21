@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/diegosz/apex_process_ape/internal/pipeline"
 	"github.com/stretchr/testify/require"
 )
@@ -352,8 +353,9 @@ func populateEvents(t *testing.T, m *pipelineModel, stage string, n int) pipelin
 
 // setWindowSize delivers a tea.WindowSizeMsg so the model can size
 // its rendered panels — F8's tailScrollOffset depends on m.height.
-//
-//nolint:unparam // width parameter is fixed at 120 today; kept generic for future narrow-mode tests (F4)
+// The width parameter now varies across tests (90 for the PLAN-7
+// smoke cases), so the nolint:unparam directive that previously
+// pinned it at 120 is no longer applicable.
 func setWindowSize(t *testing.T, m *pipelineModel, w, h int) pipelineModel {
 	t.Helper()
 	res, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: h})
@@ -566,7 +568,7 @@ func TestFinalReport_StageListAppendsReportRow(t *testing.T) {
 	res, _ := m.Update(pipelineDoneMsg{err: nil})
 	m, _ = res.(pipelineModel)
 
-	list := m.renderStageList()
+	list := m.renderStageList(0)
 	require.Contains(t, list, "📊 final report")
 }
 
@@ -727,6 +729,305 @@ func TestThrottle_TickBatchesMultipleEvents(t *testing.T) {
 	m, _ = res.(pipelineModel)
 	require.Empty(t, m.pendingLines)
 	require.Len(t, m.stages[0].events, 50, "all 50 events flush in one tick")
+}
+
+// ─────────── PLAN-7 / FA unified-model source flag ───────────
+
+// fakeAlphaStep is the step-tag the bridge would emit for stage
+// "alpha" step 0 against the fakeSpec test pipeline. Defined as a
+// constant because several tests synthesize it onto fixture
+// HookEvents whose own Step strings target real-world stage names.
+const fakeAlphaStep = "alpha/0-apex-fake-skill-a"
+
+// TestPipelineModelHookEventSource asserts that a model built with
+// WithEventSource(SourceHookEvents) ingests hookEventMsg into the
+// per-stage events slice through the same throttle queue, and drops
+// stream-json lines (which shouldn't arrive on this source).
+func TestPipelineModelHookEventSource(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "", WithEventSource(SourceHookEvents))
+	require.Equal(t, SourceHookEvents, m.source)
+
+	h := loadHookFixture(t, "pretooluse_read.json")
+	// The fixture's step ("pattern-governance/...") doesn't match the
+	// fakeSpec stages — rewrite to one that does.
+	h.Step = fakeAlphaStep
+
+	res, _ := m.Update(hookEventMsg{hook: h})
+	m, _ = res.(pipelineModel)
+	require.Len(t, m.pendingLines, 1, "hookEventMsg must enter the throttle queue")
+
+	res, _ = m.Update(throttleTickMsg{})
+	m, _ = res.(pipelineModel)
+	require.Empty(t, m.pendingLines)
+	require.Len(t, m.stages[0].events, 1)
+	require.Equal(t, EventTool, m.stages[0].events[0].Kind)
+
+	// Stream-json lines under SourceHookEvents are silently dropped.
+	res, _ = m.Update(stepLineMsg{
+		stage: "alpha", idx: 0,
+		line: `{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}]}}`,
+	})
+	m, _ = res.(pipelineModel)
+	require.Empty(t, m.pendingLines, "stream-json must be ignored under SourceHookEvents")
+}
+
+// TestPipelineModelStreamJSONIgnoresHookEvents is the mirror: under
+// the default SourceStreamJSON, hookEventMsg drops silently.
+func TestPipelineModelStreamJSONIgnoresHookEvents(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "") // default source
+	require.Equal(t, SourceStreamJSON, m.source)
+
+	h := loadHookFixture(t, "pretooluse_read.json")
+	h.Step = fakeAlphaStep
+	res, _ := m.Update(hookEventMsg{hook: h})
+	m, _ = res.(pipelineModel)
+	require.Empty(t, m.pendingLines, "hookEventMsg must be ignored under SourceStreamJSON")
+}
+
+// TestAwaitModalRequiresSender asserts that awaitPendingMsg is a
+// no-op when no sender is wired (programmatic mode never reaches it).
+func TestAwaitModalRequiresSender(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "") // no WithAwaitReplySender
+	res, _ := m.Update(awaitPendingMsg{})
+	m, _ = res.(pipelineModel)
+	require.False(t, m.awaitActive, "no sender ⇒ modal stays closed")
+}
+
+// TestAwaitModalOpensWithSender asserts that the modal lights up
+// when a sender is wired and awaitPendingMsg arrives.
+func TestAwaitModalOpensWithSender(t *testing.T) {
+	spec := fakeSpec(t)
+	called := false
+	m := NewPipelineModel(spec, nil, "", WithAwaitReplySender(func(string) { called = true }))
+	res, _ := m.Update(awaitPendingMsg{})
+	m, _ = res.(pipelineModel)
+	require.True(t, m.awaitActive)
+
+	// Simulate user typing then pressing Enter — sender must fire.
+	m.replyInput.SetValue("approved")
+	m, _ = pressKey(t, &m, "enter")
+	require.True(t, called, "Enter must invoke awaitReplySender")
+	require.False(t, m.awaitActive, "submitting closes the modal locally")
+}
+
+// TestAwaitModalResolvedClosesIt asserts that an upstream
+// awaitResolvedMsg closes the modal idempotently.
+func TestAwaitModalResolvedClosesIt(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "", WithAwaitReplySender(func(string) {}))
+	res, _ := m.Update(awaitPendingMsg{})
+	m, _ = res.(pipelineModel)
+	require.True(t, m.awaitActive)
+
+	res, _ = m.Update(awaitResolvedMsg{})
+	m, _ = res.(pipelineModel)
+	require.False(t, m.awaitActive)
+}
+
+// TestFinalReportHookEventSource asserts that completion lifecycle
+// works identically under the hook-event source. The synthetic
+// final-report row populates with per-stage event counts (sourced
+// from hook events, not stream-json) and q quits cleanly. PLAN-7 / FD.
+func TestFinalReportHookEventSource(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "", WithEventSource(SourceHookEvents))
+	m = setWindowSize(t, &m, 200, 30)
+
+	// Land two hook events for stage alpha, then mark both stages done.
+	h := loadHookFixture(t, "pretooluse_read.json")
+	h.Step = fakeAlphaStep
+	for range 2 {
+		res, _ := m.Update(hookEventMsg{hook: h})
+		m, _ = res.(pipelineModel)
+	}
+	res, _ := m.Update(throttleTickMsg{})
+	m, _ = res.(pipelineModel)
+	m.stages[0].state = stateDone
+	m.stages[1].state = stateDone
+
+	res, cmd := m.Update(pipelineDoneMsg{err: nil})
+	m, _ = res.(pipelineModel)
+	require.Nil(t, cmd, "pipelineDoneMsg must not auto-quit under hook-event source either")
+	require.Equal(t, phaseCompleted, m.phase)
+	require.Equal(t, len(m.stages), m.cursorIdx, "cursor lands on final-report row")
+
+	body := m.renderFinalReport(80, 10)
+	require.Contains(t, body, "alpha")
+	require.Contains(t, body, "2 event(s)", "per-stage event count reflects hook-event ingestion")
+
+	_, cmd = pressKey(t, &m, "q")
+	require.NotNil(t, cmd, "q quits in phaseCompleted")
+}
+
+// TestPrePostCorrelation asserts that a Pre/Post pair on the same
+// tool_use_id renders as two adjacent rows in the events slice. The
+// model preserves arrival order; the bridge delivers Pre and Post
+// adjacently for the same tool, so this is the natural outcome —
+// no explicit reordering is performed. PLAN-7 / FB+FC.
+func TestPrePostCorrelation(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "", WithEventSource(SourceHookEvents))
+
+	pre := loadHookFixture(t, "pretooluse_read.json")
+	pre.Step = fakeAlphaStep
+	post := loadHookFixture(t, "posttooluse_read_ok.json")
+	post.Step = fakeAlphaStep
+
+	for _, h := range []orchestrator.HookEvent{pre, post} {
+		res, _ := m.Update(hookEventMsg{hook: h})
+		m, _ = res.(pipelineModel)
+	}
+	res, _ := m.Update(throttleTickMsg{})
+	m, _ = res.(pipelineModel)
+	require.Len(t, m.stages[0].events, 2, "both Pre and Post must land")
+	require.Equal(t, EventTool, m.stages[0].events[0].Kind, "Pre is first")
+	require.Equal(t, EventToolResult, m.stages[0].events[1].Kind, "Post immediately follows")
+}
+
+// TestOrphanPostStillRenders asserts that a PostToolUse arriving
+// with no matching Pre still produces a renderable row (defensive
+// path for buffer-overflow recovery). PLAN-7 / FB risk R1.
+func TestOrphanPostStillRenders(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "", WithEventSource(SourceHookEvents))
+
+	post := loadHookFixture(t, "posttooluse_read_ok.json")
+	post.Step = fakeAlphaStep
+	res, _ := m.Update(hookEventMsg{hook: post})
+	m, _ = res.(pipelineModel)
+	res, _ = m.Update(throttleTickMsg{})
+	m, _ = res.(pipelineModel)
+	require.Len(t, m.stages[0].events, 1, "orphan Post must still render")
+	require.Equal(t, EventToolResult, m.stages[0].events[0].Kind)
+}
+
+// TestStageFromHookStep covers the step-tag → stage-name parse.
+func TestStageFromHookStep(t *testing.T) {
+	require.Equal(t, "alpha", stageFromHookStep("alpha/1-apex-skill"))
+	require.Equal(t, "pattern-governance", stageFromHookStep("pattern-governance/1-apex-pattern-reconciliation"))
+	require.Equal(t, "bare", stageFromHookStep("bare"))
+	require.Empty(t, stageFromHookStep(""))
+}
+
+// ─────────── PLAN-7 / F0 row-budget invariant ───────────
+
+// TestPanelRowBudget_ComposerExactLines asserts composePanelBody
+// produces exactly budget rows regardless of how many newlines the
+// header or body string carries. Padding fills short input; long
+// input is truncated. The trailing newline is removed so lipgloss
+// doesn't grow the rendered box by one row.
+func TestPanelRowBudget_ComposerExactLines(t *testing.T) {
+	cases := []struct {
+		name   string
+		header string
+		body   string
+		budget int
+	}{
+		{"empty body", "header", "", 5},
+		{"trailing newline body", "header", "a\nb\nc\n", 5},
+		{"short body padded", "header", "a", 8},
+		{"long body truncated", "header", "a\nb\nc\nd\ne\nf\ng", 4},
+		{"header trailing margin", "header\n", "body\n", 4},
+		{"budget one", "h", "b", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := composePanelBody(tc.header, tc.body, tc.budget)
+			// Line count = newline count + 1 when string is non-empty.
+			lineCount := 1
+			if out != "" {
+				for i := range len(out) {
+					if out[i] == '\n' {
+						lineCount++
+					}
+				}
+			}
+			require.Equal(t, tc.budget, lineCount,
+				"budget=%d but rendered to %d lines: %q", tc.budget, lineCount, out)
+		})
+	}
+}
+
+// TestPanelRowBudget_EventPanelHonorsHeight asserts renderEventPanel
+// never returns more than `height` lines, across all three render
+// styles. Regression guard for the F0 root cause — styleBoth was
+// emitting 2 lines per event while the windowing math assumed 1,
+// so 24 events at panelHeight=20 produced 48 lines and grew the
+// box past the right panel.
+func TestPanelRowBudget_EventPanelHonorsHeight(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	m = setWindowSize(t, &m, 200, 30)
+	m = populateEvents(t, &m, "alpha", 100)
+
+	const height = 20
+	for _, style := range []renderStyle{styleHuman, styleRawJSON, styleBoth} {
+		t.Run(strconv.Itoa(int(style)), func(t *testing.T) {
+			m.renderStyle = style
+			body := m.renderEventPanel(180, height)
+			lineCount := 1
+			for i := range len(body) {
+				if body[i] == '\n' {
+					lineCount++
+				}
+			}
+			require.LessOrEqual(t, lineCount, height,
+				"renderEventPanel emitted %d lines for style=%d, budget=%d",
+				lineCount, style, height)
+		})
+	}
+}
+
+// TestPanelRowBudget_LeftRightAlign asserts the rendered View() emits
+// left and right panels of identical height so their bottom borders
+// stay aligned. Counts the newlines in the composed body strings the
+// View passes to lipgloss; equality on those guarantees the
+// resulting box heights match. (We don't render the lipgloss box
+// itself in tests because Render output is platform/terminal-noisy.)
+func TestPanelRowBudget_LeftRightAlign(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	m = setWindowSize(t, &m, 200, 30)
+	// Fill the left panel past the visible window; right panel is
+	// short (just the 2 stages). Pre-F0 this was the misalignment
+	// trigger because the left would grow by 1 row.
+	m = populateEvents(t, &m, "alpha", 100)
+	m.renderStyle = styleBoth
+
+	rightWidth := max(m.width/3, stageListWidthMin)
+	leftWidth := max(m.width-rightWidth-panelBorderOverhead, eventPanelWidthMin)
+	panelHeight := max(m.height-statusRowReserve, panelHeightMin)
+
+	leftBody := composePanelBody(
+		pipelineHeaderStyle.Render(m.renderHeader()),
+		m.renderEventPanel(leftWidth-panelBorderOverhead, panelHeight-headerRowReserve),
+		panelHeight,
+	)
+	rightBody := composePanelBody(
+		pipelineHeaderStyle.Render("stages"),
+		m.renderStageList(0),
+		panelHeight,
+	)
+	leftLines := 1
+	for i := range len(leftBody) {
+		if leftBody[i] == '\n' {
+			leftLines++
+		}
+	}
+	rightLines := 1
+	for i := range len(rightBody) {
+		if rightBody[i] == '\n' {
+			rightLines++
+		}
+	}
+	require.Equal(t, leftLines, rightLines,
+		"left + right panel bodies must have identical line counts: left=%d right=%d",
+		leftLines, rightLines)
+	require.Equal(t, panelHeight, leftLines,
+		"composed body must equal the requested panelHeight")
 }
 
 // TestThrottle_PipelineDoneMsgDrainsQueue asserts that the F7

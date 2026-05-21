@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/diegosz/apex_process_ape/internal/pipeline"
 )
 
@@ -133,6 +135,35 @@ const (
 	stateFailed
 )
 
+// EventSource selects which input the pipeline model ingests for its
+// per-stage event feed. PLAN-7 / FA — single-model unification.
+//
+//   - SourceStreamJSON consumes stepLineMsg from a `claude -p`
+//     stream-json subprocess (the programmatic exec mode).
+//   - SourceHookEvents consumes hookEventMsg from the bridge's hook
+//     fan-out (the interactive REPL exec mode), routed through
+//     RenderHookEvent.
+//
+// Both sources produce the same RenderedEvent shape, so all panel /
+// scroll / render-style machinery is source-agnostic. The default is
+// SourceStreamJSON — existing call sites are unchanged.
+type EventSource int
+
+const (
+	// SourceStreamJSON is the PLAN-1 / I4b stream-json line source —
+	// the default for `--tui -P` and `--web -P`.
+	SourceStreamJSON EventSource = iota
+	// SourceHookEvents is the PLAN-7 / FC bridge-hook source — used
+	// by `--tui` interactive mode where no stream-json is available.
+	SourceHookEvents
+)
+
+// awaitReplySender is the callback the unified model invokes when the
+// user submits a reply in the await-message modal. Wired by
+// runWithInteractiveTUI to BridgeRuntime.SendMessage. Nil disables the
+// modal entirely — awaitPendingMsg becomes a no-op (PLAN-7 / FA).
+type awaitReplySender func(content string)
+
 type stepRow struct {
 	skill     string
 	agent     string
@@ -244,6 +275,25 @@ type pipelineModel struct {
 	// effective render rate at ~30 Hz even on 1000-event-per-second
 	// bursts.
 	pendingLines []pendingEvent
+
+	// source selects which input feeds the per-stage events slice.
+	// PLAN-7 / FA. Default SourceStreamJSON keeps the existing
+	// programmatic-mode behavior; SourceHookEvents enables the
+	// hookEventMsg path used by interactive mode.
+	source EventSource
+	// awaitReplySender is invoked when the user submits text in the
+	// await-message modal. Nil disables the modal entirely (PLAN-7 /
+	// FA — programmatic mode never reaches it).
+	awaitReplySender awaitReplySender
+	// replyInput is the text input rendered inside the await modal.
+	// Zero-value when awaitReplySender is nil — the field is never
+	// touched.
+	replyInput textinput.Model
+	// awaitActive is set when the bridge reports a parked
+	// await_message MCP call and cleared on user submit / bridge
+	// resolve. Mutually exclusive with the quit-confirm modal via
+	// Ctrl+C bypass — Ctrl+C still wins even with the modal open.
+	awaitActive bool
 }
 
 // pendingEvent is one queued displayable event waiting to be flushed
@@ -288,6 +338,52 @@ type (
 	throttleTickMsg struct{}
 )
 
+// hookEventMsg carries a bridge HookEvent into the unified model
+// (PLAN-7 / FA). The model parses h.Step ("stagename/idx-skill") to
+// route the rendered event to the correct stage. Only consumed when
+// source == SourceHookEvents; under SourceStreamJSON it is dropped.
+type hookEventMsg struct {
+	hook orchestrator.HookEvent
+}
+
+// awaitPendingMsg signals the bridge parked an `await_message` MCP
+// tool call — a skill is waiting on user input mid-step. No-op if
+// awaitReplySender is nil. PLAN-7 / FA.
+type awaitPendingMsg struct{}
+
+// awaitResolvedMsg signals the parked await_message was flushed
+// (either by this TUI's reply submit or upstream). PLAN-7 / FA.
+type awaitResolvedMsg struct{}
+
+// PipelineModelOption applies an optional configuration to
+// NewPipelineModel. The default constructor (no opts) reproduces the
+// PLAN-2 behavior exactly — SourceStreamJSON, no await modal —
+// keeping every pre-PLAN-7 call site unchanged.
+type PipelineModelOption func(*pipelineModel)
+
+// WithEventSource selects the event-ingestion source. Default is
+// SourceStreamJSON. PLAN-7 / FA.
+func WithEventSource(s EventSource) PipelineModelOption {
+	return func(m *pipelineModel) { m.source = s }
+}
+
+// WithAwaitReplySender wires the await-message reply path. When set,
+// the model accepts awaitPendingMsg and renders the textinput modal;
+// pressing Enter inside the modal invokes the sender with the input
+// content. Nil (the default) keeps the modal unreachable — the path
+// is dead code in programmatic mode. PLAN-7 / FA.
+func WithAwaitReplySender(fn awaitReplySender) PipelineModelOption {
+	return func(m *pipelineModel) {
+		m.awaitReplySender = fn
+		if fn != nil {
+			ti := textinput.New()
+			ti.Placeholder = "type reply, then Enter (Esc to clear)"
+			ti.CharLimit = 4096
+			m.replyInput = ti
+		}
+	}
+}
+
 // NewPipelineModel returns a tea.Model wired to a pipeline spec. The
 // model starts with every stage in the pending state; stages and their
 // chains transition as Observer messages arrive.
@@ -302,7 +398,10 @@ type (
 // projectRoot is the absolute path of the user's project — used by
 // the event renderer to display tool-call file paths relative to the
 // project root (PLAN-2 / F6). Empty string disables relativization.
-func NewPipelineModel(spec *pipeline.Spec, cancel context.CancelFunc, projectRoot string) pipelineModel { //nolint:revive // returning unexported type is intentional; callers receive tea.Model via assignment
+//
+// opts customize the model further — typically WithEventSource and
+// WithAwaitReplySender for the interactive-mode path (PLAN-7 / FA).
+func NewPipelineModel(spec *pipeline.Spec, cancel context.CancelFunc, projectRoot string, opts ...PipelineModelOption) pipelineModel { //nolint:revive // returning unexported type is intentional; callers receive tea.Model via assignment
 	rows := make([]stageRow, len(spec.Stages()))
 	idx := make(map[string]int, len(rows))
 	for i, st := range spec.Stages() {
@@ -316,14 +415,19 @@ func NewPipelineModel(spec *pipeline.Spec, cancel context.CancelFunc, projectRoo
 	for i := range rows {
 		rows[i].runningStepIdx = -1
 	}
-	return pipelineModel{
+	m := pipelineModel{
 		pipelineName: spec.Name,
 		projectRoot:  projectRoot,
 		stages:       rows,
 		stageIdx:     idx,
 		cancelRun:    cancel,
 		mode:         modeLive,
+		source:       SourceStreamJSON,
 	}
+	for _, opt := range opts {
+		opt(&m)
+	}
+	return m
 }
 
 func (m pipelineModel) Init() tea.Cmd {
@@ -355,6 +459,16 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		key := msg.String()
+		// PLAN-7 / FA: await-message modal is the highest-priority
+		// overlay when active. Ctrl+C still wins (handled inside the
+		// branch); Enter submits the reply; Esc clears the input but
+		// leaves the modal up — the user can either type something
+		// else or wait for the bridge to time out the parked call.
+		if m.awaitActive {
+			if next, cmd, handled := m.handleAwaitKey(msg, key); handled {
+				return next, cmd
+			}
+		}
 		// PLAN-2 / F7: pipeline finished — q (or Ctrl+C) quits
 		// directly without the confirmation modal (nothing to
 		// cancel); other keys still navigate so the user can read
@@ -497,6 +611,12 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// drains the queue into each stage's events slice. Suppressed
 		// events (noisy successful tool_results, system pings) are
 		// dropped before they hit the queue.
+		if m.source != SourceStreamJSON {
+			// Defensive: under a hook-event source, stream-json lines
+			// shouldn't arrive. Dropping them keeps the assumption
+			// "events feed is single-source per run" honest.
+			return m, nil
+		}
 		i, ok := m.stageIdx[msg.stage]
 		if !ok {
 			return m, nil
@@ -506,6 +626,42 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.pendingLines = append(m.pendingLines, pendingEvent{stageIdx: i, ev: ev})
+	case hookEventMsg:
+		// PLAN-7 / FA: hook-event source. Parse the rendered event,
+		// route to the stage named by msg.hook.Step
+		// ("stagename/idx-skill"), and queue into pendingLines so
+		// the throttle (F2) drains it on the next tick alongside
+		// stream-json events under the SourceStreamJSON path.
+		if m.source != SourceHookEvents {
+			return m, nil
+		}
+		stageName := stageFromHookStep(msg.hook.Step)
+		i, ok := m.stageIdx[stageName]
+		if !ok {
+			return m, nil
+		}
+		ev := RenderHookEvent(msg.hook, m.projectRoot)
+		if !ev.IsDisplayable() {
+			return m, nil
+		}
+		m.pendingLines = append(m.pendingLines, pendingEvent{stageIdx: i, ev: ev})
+	case awaitPendingMsg:
+		// No-op if no sender is wired — programmatic mode never
+		// reaches this branch.
+		if m.awaitReplySender == nil {
+			return m, nil
+		}
+		m.awaitActive = true
+		m.replyInput.SetValue("")
+		m.replyInput.Focus()
+		return m, textinput.Blink
+	case awaitResolvedMsg:
+		if m.awaitReplySender == nil {
+			return m, nil
+		}
+		m.awaitActive = false
+		m.replyInput.Blur()
+		return m, nil
 	case throttleTickMsg:
 		// PLAN-2 / F2: flush queued events into their target stages
 		// in a single Update pass, then schedule the next tick. The
@@ -596,11 +752,24 @@ func (m pipelineModel) View() string {
 	panelHeight := max(m.height-statusRowReserve, panelHeightMin)
 
 	header := m.renderHeader()
-	leftPanel := pipelinePanelStyle.Width(leftWidth).Height(panelHeight).Render(
-		pipelineHeaderStyle.Render(header) + "\n" + m.renderEventPanel(leftWidth-panelBorderOverhead, panelHeight-headerRowReserve),
+	// PLAN-7 / F0 follow-up: MaxHeight matches Height so any stray
+	// visual wrap that escapes the per-row truncation can't grow the
+	// box past panelHeight content lines. Width-2 accounts for the
+	// horizontal Padding(0, 1) — the content area lipgloss lays out
+	// each row inside.
+	leftPanel := pipelinePanelStyle.Width(leftWidth).Height(panelHeight).MaxHeight(panelHeight + 2).Render(
+		composePanelBody(
+			pipelineHeaderStyle.Render(header),
+			m.renderEventPanel(leftWidth-panelBorderOverhead, panelHeight-headerRowReserve),
+			panelHeight,
+		),
 	)
-	rightPanel := pipelinePanelStyle.Width(rightWidth).Height(panelHeight).Render(
-		pipelineHeaderStyle.Render("stages") + "\n" + m.renderStageList(),
+	rightPanel := pipelinePanelStyle.Width(rightWidth).Height(panelHeight).MaxHeight(panelHeight + 2).Render(
+		composePanelBody(
+			pipelineHeaderStyle.Render("stages"),
+			m.renderStageList(rightWidth-2),
+			panelHeight,
+		),
 	)
 
 	view := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
@@ -612,6 +781,9 @@ func (m pipelineModel) View() string {
 	}
 	if m.modal == modalQuitConfirm {
 		view = m.overlayQuitModal(view)
+	}
+	if m.awaitActive {
+		view = m.overlayAwaitModal(view)
 	}
 	return view
 }
@@ -663,38 +835,49 @@ func (m pipelineModel) renderEventPanel(width, height int) string {
 	if len(events) == 0 {
 		return dimStyle.Render("…")
 	}
+	// PLAN-7 / F0: linesPerEvent governs how many output rows a single
+	// event consumes — styleBoth emits two (human + raw). The window
+	// math derives maxEvents from height so the rendered line count
+	// never exceeds the budget. scrollOffset and tailScrollOffset
+	// remain in event-index space (PLAN-2 idiom); styleBoth therefore
+	// shows fewer events per page, which is intentional.
+	linesPerEvent := 1
+	if m.renderStyle == styleBoth {
+		linesPerEvent = 2
+	}
+	maxEvents := max(height/linesPerEvent, 1)
 	start := 0
-	if len(events) > height {
+	if len(events) > maxEvents {
 		if m.userScrolled {
-			start = max(min(m.scrollOffset, len(events)-height), 0)
+			start = max(min(m.scrollOffset, len(events)-maxEvents), 0)
 		} else {
-			start = len(events) - height
+			start = len(events) - maxEvents
 		}
 	}
-	end := min(start+height, len(events))
-	var sb strings.Builder
+	end := min(start+maxEvents, len(events))
+	lines := make([]string, 0, maxEvents*linesPerEvent)
 	for i := start; i < end; i++ {
 		ev := events[i]
 		style := eventKindStyle(ev.Kind)
 		switch m.renderStyle {
 		case styleRawJSON:
-			sb.WriteString(style.Render(truncateForWidth(ev.Raw, width)))
-			sb.WriteString("\n")
+			lines = append(lines, style.Render(truncateForWidth(ev.Raw, width)))
 		case styleBoth:
-			// Both: human row, then a dim raw row beneath it. Each
-			// counts as one rendered line toward the height budget,
-			// which can compress the visible span — accepted as a
-			// per-style cost. PLAN-2 / F3 calls this out.
-			sb.WriteString(style.Render(truncateForWidth(ev.Glyph+" "+ev.Body, width)))
-			sb.WriteString("\n")
-			sb.WriteString(dimStyle.Render(truncateForWidth(ev.Raw, width)))
-			sb.WriteString("\n")
+			// Both: human row, then a dim raw row beneath it.
+			lines = append(lines,
+				style.Render(truncateForWidth(ev.Glyph+" "+ev.Body, width)),
+				dimStyle.Render(truncateForWidth(ev.Raw, width)),
+			)
 		default: // styleHuman
-			sb.WriteString(style.Render(truncateForWidth(ev.Glyph+" "+ev.Body, width)))
-			sb.WriteString("\n")
+			lines = append(lines, style.Render(truncateForWidth(ev.Glyph+" "+ev.Body, width)))
 		}
 	}
-	return sb.String()
+	// Belt-and-suspenders: cap line count even if the per-event branch
+	// emitted more than the slice arithmetic predicted.
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // viewNarrow renders the single-column F4 layout for terminals
@@ -710,8 +893,12 @@ func (m pipelineModel) viewNarrow() string {
 	panelHeight := max(m.height-statusRowReserve-2, panelHeightMin)
 
 	header := m.renderHeader()
-	panel := pipelinePanelStyle.Width(panelWidth).Height(panelHeight).Render(
-		pipelineHeaderStyle.Render(header) + "\n" + m.renderEventPanel(panelWidth-panelBorderOverhead, panelHeight-headerRowReserve),
+	panel := pipelinePanelStyle.Width(panelWidth).Height(panelHeight).MaxHeight(panelHeight + 2).Render(
+		composePanelBody(
+			pipelineHeaderStyle.Render(header),
+			m.renderEventPanel(panelWidth-panelBorderOverhead, panelHeight-headerRowReserve),
+			panelHeight,
+		),
 	)
 	view := stepperRow + "\n" + panel
 	view += "\n" + m.renderStatusStrip()
@@ -722,6 +909,9 @@ func (m pipelineModel) viewNarrow() string {
 	}
 	if m.modal == modalQuitConfirm {
 		view = m.overlayQuitModal(view)
+	}
+	if m.awaitActive {
+		view = m.overlayAwaitModal(view)
 	}
 	return view
 }
@@ -762,9 +952,22 @@ func (m pipelineModel) renderStageStepper(_ int) string {
 // PLAN-2 / F7: in phaseCompleted, a synthetic "📊 final report" row
 // appends to the list; selecting it (cursor at len(stages)) populates
 // the event panel with the per-stage summary table.
-func (m pipelineModel) renderStageList() string {
+//
+// PLAN-7 / F0 follow-up: `width` is the visual-cell budget per row
+// (content area inside the panel — leftWidth/rightWidth minus
+// padding). Rows wider than that get truncated; otherwise lipgloss
+// soft-wraps them into a second visual line and the rendered box
+// grows by one row, breaking left/right border alignment. Pass <=0
+// to disable (only used by tests).
+func (m pipelineModel) renderStageList(width int) string {
 	const cursorMark, noCursorMark = "> ", "  "
 	var sb strings.Builder
+	emit := func(row string, style lipgloss.Style) {
+		// Style after truncation: ANSI escapes don't count toward
+		// the visual width lipgloss sees when laying out the panel.
+		sb.WriteString(style.Render(truncateForVisualWidth(row, width)))
+		sb.WriteString("\n")
+	}
 	for i := range m.stages {
 		st := &m.stages[i]
 		cursor := noCursorMark
@@ -774,21 +977,66 @@ func (m pipelineModel) renderStageList() string {
 		glyph, style := glyphForState(st.state)
 		row := cursor + glyph + " " + st.name
 		if dur := elapsedFor(st.state, st.startedAt, st.endedAt, m.tick); dur != "" {
-			row += " " + dimStyle.Render(dur)
+			// Apply the dim style INLINE on the duration suffix —
+			// but emit() truncates the un-styled string first, then
+			// applies the row style. To preserve the dim duration
+			// after truncation, render the row in two pieces only
+			// when the un-styled row fits the budget.
+			full := row + " " + dur
+			if width <= 0 || lipgloss.Width(full) <= width {
+				sb.WriteString(style.Render(row + " " + dimStyle.Render(dur)))
+				sb.WriteString("\n")
+				continue
+			}
+			row = full
 		}
-		sb.WriteString(style.Render(row))
-		sb.WriteString("\n")
+		emit(row, style)
 	}
 	if m.phase == phaseCompleted {
 		cursor := noCursorMark
 		if m.cursorIdx == len(m.stages) {
 			cursor = cursorMark
 		}
-		row := cursor + "📊 final report"
-		sb.WriteString(stepStyle.Render(row))
-		sb.WriteString("\n")
+		emit(cursor+"📊 final report", stepStyle)
 	}
 	return sb.String()
+}
+
+// truncateForVisualWidth truncates s to at most w visual cells (not
+// bytes) so lipgloss's panel-rendering soft-wrap doesn't grow the
+// box. Counterpart to truncateForWidth, which is byte-counted; this
+// one is visual-cell-counted so emoji + CJK + combining marks are
+// handled correctly. PLAN-7 / F0 follow-up.
+func truncateForVisualWidth(s string, w int) string {
+	if w <= 0 || lipgloss.Width(s) <= w {
+		return s
+	}
+	// Walk runes, accumulating visual width until adding the next
+	// rune would exceed the budget; reserve 1 cell for the ellipsis.
+	reserve := 1
+	if w < reserve+1 {
+		// Pathologically narrow — just hard-cut by rune count.
+		out := make([]rune, 0, w)
+		for _, r := range s {
+			if len(out) >= w {
+				break
+			}
+			out = append(out, r)
+		}
+		return string(out)
+	}
+	budget := w - reserve
+	out := make([]rune, 0, len(s))
+	used := 0
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if used+rw > budget {
+			break
+		}
+		out = append(out, r)
+		used += rw
+	}
+	return string(out) + "…"
 }
 
 // renderStatusStrip is the bottom-row summary of the cursor's stage:
@@ -925,6 +1173,81 @@ func (m pipelineModel) tailScrollOffset() int {
 	return total - h
 }
 
+// handleAwaitKey processes one keystroke while the await-message
+// modal is open. Returns the next-state model, any tea.Cmd, and a
+// `handled` flag — when false, Update falls through to the normal
+// keybind switch (so Ctrl+C double-tap force-quit and the q quit
+// modal still work even with the await modal up). PLAN-7 / FA.
+func (m pipelineModel) handleAwaitKey(msg tea.KeyMsg, key string) (pipelineModel, tea.Cmd, bool) {
+	switch key {
+	case keyCtrlC:
+		// Let the outer Update path handle Ctrl+C (quit-confirm /
+		// double-tap force-quit). Returning handled=false routes to
+		// the normal switch below.
+		return m, nil, false
+	case keyEnter:
+		content := strings.TrimRight(m.replyInput.Value(), "\r\n")
+		if content == "" {
+			return m, nil, true
+		}
+		if m.awaitReplySender != nil {
+			m.awaitReplySender(content)
+		}
+		m.awaitActive = false
+		m.replyInput.Blur()
+		m.replyInput.SetValue("")
+		return m, nil, true
+	case keyEsc:
+		m.replyInput.SetValue("")
+		return m, nil, true
+	}
+	var cmd tea.Cmd
+	m.replyInput, cmd = m.replyInput.Update(msg)
+	return m, cmd, true
+}
+
+// stageFromHookStep extracts the stage name from a hook event's Step
+// label. The bridge tags hooks with "<stage>/<idx>-<skill>" (e.g.
+// "pattern-governance/1-apex-pattern-reconciliation"); the
+// post-slash suffix is the chain-internal step index + skill name and
+// is irrelevant for stage routing. PLAN-7 / FA.
+func stageFromHookStep(step string) string {
+	if i := strings.IndexByte(step, '/'); i >= 0 {
+		return step[:i]
+	}
+	return step
+}
+
+// composePanelBody assembles header + body as exactly `budget` lines
+// so the rendered lipgloss box at Height(budget) renders at exactly
+// that height — no border-misalignment growth from a stray trailing
+// newline or styleBoth's 2-lines-per-event overflow.
+//
+// budget is the lipgloss content-height the caller passed to
+// Height() (excludes border + padding rows since lipgloss adds those
+// separately). The body string is concatenated to the header with a
+// single newline; any trailing newline noise from
+// pipelineHeaderStyle.MarginBottom or renderEventPanel is trimmed,
+// then the line list is padded with blank rows if short and
+// truncated if long. PLAN-7 / F0 — was the root cause of the
+// left/right border drift visible once the event panel filled past
+// its visible height.
+func composePanelBody(header, body string, budget int) string {
+	if budget < 1 {
+		budget = 1
+	}
+	combined := header + "\n" + body
+	combined = strings.TrimRight(combined, "\n\r")
+	lines := strings.Split(combined, "\n")
+	if len(lines) > budget {
+		lines = lines[:budget]
+	}
+	for len(lines) < budget {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // truncateForWidth shortens a single rendered line if it exceeds the
 // panel width. Byte-counted; one trailing "…" replaces the tail. The
 // event renderer already enforces per-event ceilings, so this is a
@@ -993,6 +1316,21 @@ func (m pipelineModel) overlayQuitModal(_ string) string {
 	body += "\nPressing y will cancel the in-flight skill\n"
 	body += "subprocess and abort the run.\n\n"
 	body += "  [y] yes   [n] no  "
+	box := modalStyle.Render(body)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box,
+		lipgloss.WithWhitespaceChars(" "),
+	)
+}
+
+// overlayAwaitModal renders the await-message reply modal centered
+// on top of the underlying view. PLAN-7 / FA — interactive mode's
+// only modal type that programmatic mode lacks. The textinput
+// component handles cursor blink + cursor positioning; the surrounding
+// box delivers the framing.
+func (m pipelineModel) overlayAwaitModal(_ string) string {
+	body := "Skill is waiting for input (await_message)\n\n"
+	body += m.replyInput.View() + "\n\n"
+	body += dimStyle.Render("  [Enter] send · [Esc] clear · [Ctrl+C] cancel run  ")
 	box := modalStyle.Render(body)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box,
 		lipgloss.WithWhitespaceChars(" "),

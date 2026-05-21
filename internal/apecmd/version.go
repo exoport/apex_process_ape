@@ -7,6 +7,7 @@ import (
 
 	"github.com/diegosz/apex_process_ape/internal/output"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
@@ -51,9 +52,22 @@ func printVersionResult(res versionResult, format output.Format) error {
 	case output.FormatYAML:
 		return output.Print(os.Stdout, output.FormatYAML, res)
 	default:
+		if term.IsTerminal(int(os.Stdout.Fd())) {
+			fmt.Println(apeMascot)
+		}
 		fmt.Printf("ape %s\n", res.Version)
 		fmt.Printf("  build date: %s\n", res.BuildDate)
 		fmt.Printf("  git commit: %s\n", res.GitCommit)
 		return nil
 	}
 }
+
+// apeMascot is the ASCII-art ape printed by `ape version` on
+// interactive terminals. Pipes / redirects / non-human output
+// formats skip it so machine-readable output stays clean.
+//
+//nolint:gosmopolitan // intentional: Han glyph "三" is part of the mascot art, not a locale concern
+const apeMascot = ` ／三ヽ
+(6(･･|)
+|　( ┴)
+/ ~~~ \`

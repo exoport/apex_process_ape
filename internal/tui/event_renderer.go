@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+
+	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
 )
 
 // Bubble Tea event renderer (PLAN-1 / I4b).
@@ -459,6 +461,173 @@ func formatFloat(n float64) string {
 		return intToString(whole)
 	}
 	return intToString(whole) + "." + intToString(int64(n*10)%10)
+}
+
+// RenderHookEvent converts a bridge HookEvent into a RenderedEvent
+// matching the shape produced by RenderEventWithRoot. The renderer
+// keeps no state; PLAN-7 / FB.
+//
+// Mapping (cross-ref plan-7_unified-pipeline-tui.md § FB):
+//
+//	UserPromptSubmit  → EventText        "?"   prompt first line
+//	PreToolUse        → EventTool        "🔧"  tool_name + first path arg
+//	PostToolUse (ok)  → EventToolResult  "↳"   tool_response first line
+//	PostToolUse (err) → EventToolError   "↳"   "⚠ " + tool_response first line
+//	Stop              → EventSuccess     "✓"   "skill complete" (+ summary if available)
+//	Notification      → EventSystem      "·"   message
+//	(anything else)   → EventSuppressed  —     —
+//
+// projectRoot is stripped from path-shaped tool arguments (same rule
+// the stream-json path uses via PLAN-2 / F6); empty disables.
+func RenderHookEvent(h orchestrator.HookEvent, projectRoot string) RenderedEvent {
+	if len(h.Payload) == 0 {
+		return RenderedEvent{Kind: EventSuppressed}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(h.Payload, &payload); err != nil {
+		// Schema drift fallback — render raw so info isn't lost.
+		return RenderedEvent{Kind: EventUnknown, Glyph: "?", Body: string(h.Payload), Raw: string(h.Payload)}
+	}
+	raw := compactHookRaw(h)
+	var out RenderedEvent
+	switch h.Event {
+	case "UserPromptSubmit":
+		out = renderUserPromptHook(payload)
+	case "PreToolUse":
+		out = renderPreToolUseHook(payload, projectRoot)
+	case "PostToolUse":
+		out = renderPostToolUseHook(payload)
+	case "Stop", "SubagentStop":
+		out = renderStopHook(payload)
+	case "Notification":
+		out = renderNotificationHook(payload)
+	default:
+		out = RenderedEvent{Kind: EventSuppressed}
+	}
+	if out.Kind != EventSuppressed {
+		out.Raw = raw
+	}
+	return out
+}
+
+// compactHookRaw produces a one-line JSON form of the HookEvent for
+// styleRawJSON / styleBoth display. Mirrors what the stream-json
+// renderer puts in RenderedEvent.Raw (the original NDJSON line).
+func compactHookRaw(h orchestrator.HookEvent) string {
+	type compact struct {
+		Event   string          `json:"event"`
+		Step    string          `json:"step,omitempty"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	b, err := json.Marshal(compact{Event: h.Event, Step: h.Step, Payload: h.Payload})
+	if err != nil {
+		return h.Event
+	}
+	return string(b)
+}
+
+func renderUserPromptHook(payload map[string]any) RenderedEvent {
+	prompt := strings.TrimSpace(readString(payload, "prompt"))
+	if prompt == "" {
+		return RenderedEvent{Kind: EventSuppressed}
+	}
+	return RenderedEvent{Kind: EventText, Glyph: "?", Body: firstLineTruncated(prompt, maxTextLen)}
+}
+
+func renderPreToolUseHook(payload map[string]any, projectRoot string) RenderedEvent {
+	name := readString(payload, "tool_name")
+	if name == "" {
+		return RenderedEvent{Kind: EventTool, Glyph: "🔧", Body: "(unknown tool)"}
+	}
+	input, _ := payload["tool_input"].(map[string]any)
+	// Reuse renderToolUse's per-tool argument formatting by faking the
+	// stream-json content-block shape it expects.
+	return renderToolUse(map[string]any{
+		"name":  name,
+		"input": input,
+	}, projectRoot)
+}
+
+func renderPostToolUseHook(payload map[string]any) RenderedEvent {
+	content, isErr := readToolResponse(payload["tool_response"])
+	content = strings.TrimSpace(content)
+	if isErr {
+		body := firstLineTruncated(content, maxToolErrorLen)
+		if body == "" {
+			body = "tool error"
+		}
+		return RenderedEvent{Kind: EventToolError, Glyph: "↳", Body: "⚠ " + body}
+	}
+	if content == "" || isTrivialSuccess(content) {
+		return RenderedEvent{Kind: EventSuppressed}
+	}
+	return RenderedEvent{Kind: EventToolResult, Glyph: "↳", Body: firstLineTruncated(content, maxToolResultLen)}
+}
+
+// readToolResponse normalizes the many shapes tool_response takes in
+// PostToolUse payloads to (text-content, is-error). Known shapes:
+//
+//	"..."                                — string content, success
+//	{"type":"text","text":"..."}         — text wrapper
+//	{"type":"text","file":{"content":...}} — Read tool
+//	{"is_error":true,"content":"..."}    — error envelope
+//	{"stdout":"...","stderr":"..."}      — Bash-ish
+//	(anything else)                       — JSON-encoded for visibility
+func readToolResponse(v any) (string, bool) {
+	switch r := v.(type) {
+	case nil:
+		return "", false
+	case string:
+		return r, false
+	case map[string]any:
+		isErr, _ := r["is_error"].(bool)
+		// Prefer the most readable field, in order.
+		if t := readString(r, "text"); t != "" {
+			return t, isErr
+		}
+		if c := readString(r, "content"); c != "" {
+			return c, isErr
+		}
+		if f, ok := r["file"].(map[string]any); ok {
+			if c := readString(f, "content"); c != "" {
+				return c, isErr
+			}
+		}
+		if so := readString(r, "stdout"); so != "" {
+			return so, isErr
+		}
+		if se := readString(r, "stderr"); se != "" {
+			return se, true
+		}
+		// Last-resort JSON for visibility.
+		b, err := json.Marshal(r)
+		if err != nil {
+			return "", isErr
+		}
+		return string(b), isErr
+	}
+	return "", false
+}
+
+func renderStopHook(payload map[string]any) RenderedEvent {
+	body := "skill complete"
+	if msg := readString(payload, "last_assistant_message"); msg != "" {
+		// First line of the final assistant message tends to be the
+		// most useful signal ("Pattern Reconciliation Complete", ...).
+		head := firstLineTruncated(msg, maxToolResultLen)
+		if head != "" {
+			body = "skill complete · " + head
+		}
+	}
+	return RenderedEvent{Kind: EventSuccess, Glyph: "✓", Body: body}
+}
+
+func renderNotificationHook(payload map[string]any) RenderedEvent {
+	msg := strings.TrimSpace(readString(payload, "message"))
+	if msg == "" {
+		return RenderedEvent{Kind: EventSuppressed}
+	}
+	return RenderedEvent{Kind: EventSystem, Glyph: "·", Body: firstLineTruncated(msg, maxTextLen)}
 }
 
 // intToString is a tiny helper to avoid pulling strconv into the

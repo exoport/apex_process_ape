@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## v0.0.12 (2026-05-21)
+
+### Pipeline TUI
+
+PLAN-7: Unified pipeline TUI. The interactive (`--tui`) and programmatic (`--tui -P`) Bubble Tea models converge on a single implementation — interactive mode gains dual-panel rendering (left = rich event feed, right = stages list), cursor + scroll navigation (`↑↓`, `Enter`, `L`, `PgUp/PgDn/Home/End`), render-style cycling (`r` → human / raw / both), narrow-layout fallback under 90 columns, and the final-report completion row that programmatic mode has had since PLAN-2. The await-message reply modal remains interactive-only (the stream-json source has no `await_message` MCP frames to surface).
+
+- **Hook-event renderer.** New `tui.RenderHookEvent` adapts bridge `HookEvent` payloads (`PreToolUse`, `PostToolUse`, `Stop`, `UserPromptSubmit`, `Notification`) to the same `RenderedEvent` shape the stream-json renderer produces. Interactive mode's left panel now shows `🔧 Read foo.md` / `↳ result excerpt` / `? prompt` / `✓ skill complete` rows tagged to the correct stage via `stageFromHookStep`, instead of the bare `15:04:05 PreToolUse <step>` hook timestamps the legacy `InteractiveModel` produced.
+- **Border misalignment fix under scroll.** The left and right panel borders drifted by one row when the event panel overflowed its visible window — visible since PLAN-2 / F3's `styleBoth` (2 lines per event vs 1-line-per-event slice math) and amplified by `renderEventPanel`'s trailing-newline overhead. New `composePanelBody(header, body, budget)` helper enforces an exact line budget; `renderEventPanel` now caps output at `height` lines across all three render styles. Second-pass fix surfaced under live sandbox testing: long stage-list rows (e.g., `"> ✓ create-architecture 7m36s"` at 29 visual cells against a 28-cell content area) were getting soft-wrapped by lipgloss inside the right panel, growing it past `panelHeight + 2`. `renderStageList(width int)` now truncates each row to fit the content-area width via the new `truncateForVisualWidth` helper (rune-aware, emoji-safe); `MaxHeight(panelHeight + 2)` on both panels acts as a defensive belt-and-suspenders cap. Regression covered by `TestRenderSmoke_DesignPipelineWrap`.
+- **Single-model carve-out.** `tui.NewPipelineModel` grows `WithEventSource(SourceStreamJSON|SourceHookEvents)` and `WithAwaitReplySender(fn)` functional options. The default constructor (no opts) reproduces PLAN-2 behavior byte-for-byte — every existing call site (and the test suite) is unchanged. `InteractiveModel` (PLAN-6 / Phase E) is deleted; `InteractiveObserver` is renamed to `BridgeObserver` and lives in `bridge_observer.go`.
+- **Hook events get their step backfilled before reaching the TUI.** `ape notify` can't populate `HookEvent.Step` under tmux (no step-bind plumbing on the wire). `interactiveCore.FeedHook` was filling it locally for the runlog only — leaving the observer immediately downstream to see `Step=""`, drop the event when routing by stage, and produce a permanently-empty event panel. The `OnHook` callback now backfills `h.Step` from a new `interactiveCore.ActiveStep()` getter before forwarding to the bridge observer.
+
+### CLI
+
+- **`ape version` shows a mascot in interactive terminals.** ASCII-art ape prints above the version block when stdout is a TTY and the output format is `human`; pipes, redirects, and `--output-format=json|yaml` stay clean.
+
 ## v0.0.11 (2026-05-21)
 
 ### Post-PLAN-6 interactive-mode parity fixes (2026-05-20)

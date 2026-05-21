@@ -49,19 +49,34 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 	// rt.SendMessage as its reply sender (the await modal's submit
 	// path round-trips through TypeMessage IPC frame back to the
 	// parked await_message MCP tool call).
+	//
+	// PLAN-7 / FC: interactive mode now builds the unified
+	// pipelineModel — same TUI as `--tui -P` — parameterised with
+	// the bridge-hook event source and the reply-sender callback.
 	var rt *orchestrator.BridgeRuntime
-	model := tui.NewInteractiveModel(spec, runCancel, func(content string) {
-		if rt != nil {
-			rt.SendMessage(content)
-		}
-	})
+	model := tui.NewPipelineModel(spec, runCancel, projectRoot,
+		tui.WithEventSource(tui.SourceHookEvents),
+		tui.WithAwaitReplySender(func(content string) {
+			if rt != nil {
+				rt.SendMessage(content)
+			}
+		}),
+	)
 	program := tea.NewProgram(model, tea.WithAltScreen())
-	obs := tui.NewInteractiveObserver(program, model)
+	obs := tui.NewBridgeObserver(program)
 
 	rt = orchestrator.NewBridgeRuntime(orchestrator.BridgeRuntimeOptions{
 		OnHook: func(h orchestrator.HookEvent) {
 			core.FeedHook(h)
-			obs.HookEventFromBridge(h.At, h.Event, h.Step)
+			// `ape notify` cannot populate h.Step in interactive mode
+			// (no step-bind plumbing under tmux), so the TUI observer
+			// would see h.Step=="" and drop the event when routing by
+			// stage. Backfill from interactiveCore.ActiveStep — the
+			// same value FeedHook already used for its runlog write.
+			if h.Step == "" {
+				h.Step = core.ActiveStep()
+			}
+			obs.HookEventFromBridge(h)
 		},
 		OnCall:  core.FeedCall,
 		OnReply: core.FeedReply,

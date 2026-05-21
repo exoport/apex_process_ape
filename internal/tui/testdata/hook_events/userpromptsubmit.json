@@ -1,0 +1,1 @@
+{"agent_id":"","event":"UserPromptSubmit","payload":{"hook_event_name":"UserPromptSubmit","prompt":"/apex-pattern-reconciliation --autonomous --no-commit"},"step":"pattern-governance/1-apex-pattern-reconciliation","ts":"2026-05-21T13:21:03Z"}

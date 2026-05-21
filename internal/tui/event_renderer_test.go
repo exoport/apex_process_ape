@@ -2,9 +2,13 @@
 package tui
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/stretchr/testify/require"
 )
 
@@ -271,4 +275,106 @@ func TestRenderEvent_NoRootBackCompat(t *testing.T) {
 	line := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/abs/foo.md"}}]}}`
 	r := RenderEvent(line)
 	require.Equal(t, "Read /abs/foo.md", r.Body)
+}
+
+// ─────────── PLAN-7 / FB hook-event renderer ───────────
+
+// hookEventFixture is the JSON wire shape captured in
+// testdata/hook_events/*.json. It maps almost one-to-one to
+// orchestrator.HookEvent but lets payload stay a nested object in
+// the fixture file (human-readable) while the Go struct expects
+// json.RawMessage.
+type hookEventFixture struct {
+	Event   string          `json:"event"`
+	Step    string          `json:"step"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+func loadHookFixture(t *testing.T, name string) orchestrator.HookEvent {
+	t.Helper()
+	path := filepath.Join("testdata", "hook_events", name)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err, "load fixture %s", name)
+	var f hookEventFixture
+	require.NoError(t, json.Unmarshal(data, &f))
+	return orchestrator.HookEvent{Event: f.Event, Step: f.Step, Payload: f.Payload}
+}
+
+func TestRenderHookEvent_UserPromptSubmit(t *testing.T) {
+	h := loadHookFixture(t, "userpromptsubmit.json")
+	r := RenderHookEvent(h, "")
+	require.Equal(t, EventText, r.Kind)
+	require.Equal(t, "?", r.Glyph)
+	require.Contains(t, r.Body, "apex-pattern-reconciliation")
+	require.True(t, r.IsDisplayable())
+	require.NotEmpty(t, r.Raw, "Raw must be populated for styleRawJSON")
+}
+
+func TestRenderHookEvent_PreToolUseReadStripsProjectRoot(t *testing.T) {
+	h := loadHookFixture(t, "pretooluse_read.json")
+	r := RenderHookEvent(h, "/home/diegos/_dev/ape-web-sandbox/greeter")
+	require.Equal(t, EventTool, r.Kind)
+	require.Equal(t, "🔧", r.Glyph)
+	require.Equal(t, "Read _apex/config.yaml", r.Body, "project-root prefix must be stripped (PLAN-2 / F6 reuse)")
+}
+
+func TestRenderHookEvent_PreToolUseAbsoluteWithoutRoot(t *testing.T) {
+	h := loadHookFixture(t, "pretooluse_read.json")
+	r := RenderHookEvent(h, "")
+	require.Equal(t, "Read /home/diegos/_dev/ape-web-sandbox/greeter/_apex/config.yaml", r.Body,
+		"no projectRoot ⇒ render absolute")
+}
+
+func TestRenderHookEvent_PostToolUseSuccess(t *testing.T) {
+	h := loadHookFixture(t, "posttooluse_read_ok.json")
+	r := RenderHookEvent(h, "")
+	require.Equal(t, EventToolResult, r.Kind)
+	require.Equal(t, "↳", r.Glyph)
+	require.Contains(t, r.Body, "Local-only")
+}
+
+func TestRenderHookEvent_PostToolUseError(t *testing.T) {
+	h := loadHookFixture(t, "posttooluse_error.json")
+	r := RenderHookEvent(h, "")
+	require.Equal(t, EventToolError, r.Kind)
+	require.Equal(t, "↳", r.Glyph)
+	require.Contains(t, r.Body, "⚠")
+	require.Contains(t, r.Body, "command failed")
+}
+
+func TestRenderHookEvent_Stop(t *testing.T) {
+	h := loadHookFixture(t, "stop.json")
+	r := RenderHookEvent(h, "")
+	require.Equal(t, EventSuccess, r.Kind)
+	require.Equal(t, "✓", r.Glyph)
+	require.Contains(t, r.Body, "skill complete")
+	require.Contains(t, r.Body, "Pattern Reconciliation Complete")
+}
+
+func TestRenderHookEvent_Notification(t *testing.T) {
+	h := loadHookFixture(t, "notification.json")
+	r := RenderHookEvent(h, "")
+	require.Equal(t, EventSystem, r.Kind)
+	require.Equal(t, "·", r.Glyph)
+	require.Contains(t, r.Body, "permission")
+}
+
+func TestRenderHookEvent_UnknownSuppressed(t *testing.T) {
+	h := loadHookFixture(t, "unknown.json")
+	r := RenderHookEvent(h, "")
+	require.Equal(t, EventSuppressed, r.Kind)
+	require.False(t, r.IsDisplayable())
+}
+
+func TestRenderHookEvent_EmptyPayloadSuppressed(t *testing.T) {
+	r := RenderHookEvent(orchestrator.HookEvent{Event: "PreToolUse"}, "")
+	require.Equal(t, EventSuppressed, r.Kind)
+}
+
+func TestRenderHookEvent_MalformedPayload(t *testing.T) {
+	r := RenderHookEvent(orchestrator.HookEvent{
+		Event:   "PreToolUse",
+		Payload: json.RawMessage("not json"),
+	}, "")
+	require.Equal(t, EventUnknown, r.Kind, "schema drift must not panic — falls through to Unknown")
 }

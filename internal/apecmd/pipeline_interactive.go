@@ -235,6 +235,19 @@ func (c *interactiveCore) OnStepEnd(_ pipeline.InteractiveStepInfo) {
 	c.stepMu.Unlock()
 }
 
+// ActiveStep returns the currently-running step label
+// ("<stage>/<idx>-<skill>") or "" between steps. PLAN-7 / FC: the
+// TUI observer uses this to backfill h.Step on hook events that
+// arrived from `ape notify` with the field empty (the tmux-driven
+// runner has no step-bind plumbing to populate it on the wire).
+// Thread-safe; reads are guarded by stepMu the same way FeedHook
+// reads it for its runlog write.
+func (c *interactiveCore) ActiveStep() string {
+	c.stepMu.Lock()
+	defer c.stepMu.Unlock()
+	return c.activeStep
+}
+
 // ResetStageTelemetry clears the per-stage transcript path and
 // cumulative totals. Wire to RunOptions.OnStageStart so a fresh stage
 // starts from a zero baseline; the first step's delta then equals
