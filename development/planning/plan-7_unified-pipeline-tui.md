@@ -1,7 +1,8 @@
 ---
 plan_id: PLAN-7
 created_at: 2026-05-21
-status: planning
+implemented_at: 2026-05-21
+status: done
 tags:
   - pipeline-tui
   - refactor
@@ -269,3 +270,67 @@ Total: ~700 LOC net change, mostly additive; ~150 LOC deleted in FE.
 - **Tool-call argument syntax highlighting.** Programmatic mode has none either; would benefit both modes. Cross-mode follow-up.
 - **Web renderer unification.** If a future plan wants `--web -P` to share the unified model, the `RenderedEvent` shape is the natural seam — the web renderer would consume the same slice and emit HTMX fragments instead of lipgloss strings. Not in plan-7.
 - **`Notification` event mapping.** FB renders these as `EventSystem`. If they prove useful enough to deserve a dedicated glyph / row type, follow-up.
+
+## Post-implementation addenda (2026-05-21)
+
+Recorded after the v0.0.12 release shipped, capturing the deviations from this plan that surfaced during implementation and live verification. The plan body above is the forward-looking artifact; this section is the historical reconciliation. Full narrative — including dead-ends, the `sed` self-reference incident, and the lipgloss `Height()` misunderstanding — lives in `_output/implementation-notes.html`.
+
+### Deviation 1 — F0 needed a second pass (visual wrap, not just logical lines)
+
+The first-pass fix landed `composePanelBody` enforcing an exact logical-line budget and capped `renderEventPanel` output at `height` lines. Unit tests passed. Live `ape pipeline design --tui` against the greeter sandbox still showed misalignment.
+
+Root cause: `composePanelBody` operates in newline-separated lines and can't see what lipgloss will do with individual rows that overflow the panel's content-area width. The right-panel row `"> ✓ create-architecture 7m36s"` (29 visual cells) against a 28-cell content area soft-wrapped inside lipgloss, growing the right panel one row past `panelHeight + 2`.
+
+Second-pass fix:
+
+- `renderStageList` now takes a `width int` (the visual-cell budget per row) and routes each row through a new `truncateForVisualWidth` helper — rune-aware, emoji-safe via `lipgloss.Width`.
+- `pipelinePanelStyle` is constructed with `.MaxHeight(panelHeight + 2)` on every panel as a defensive cap. Belt-and-suspenders: if any future content sneaks past per-row truncation, lipgloss hard-caps the box.
+- New `TestRenderSmoke_DesignPipelineWrap` reproduces the failure on a 6-stage realistic spec; without the fix it reports `leftPanel=38 rightPanel=39`.
+
+Plan correction: F0's "Diagnosis" identified two causes (trailing newline + `styleBoth` slice math). A third cause — lipgloss soft-wrapping overlong rows — was missed because the original unit tests used synthetic short event bodies and short stage names.
+
+### Deviation 2 — `inFlight` tool-use map dropped
+
+Plan FB called for `pipelineModel.inFlight map[string]map[string]int` to correlate `PreToolUse` and `PostToolUse` events by `tool_use_id`. Implementation found this unnecessary once we accepted append-only ordering (Q6 decision before the plan was written): the bridge delivers Pre and Post adjacently in practice, so the events slice naturally renders them next to each other without any explicit correlation state. The map would only be needed if a future enhancement wants the Post row body to include the Pre row's tool name (e.g. `↳ Read result: ...`); deferred.
+
+`pipelineModel` therefore ships without the `inFlight` field. Plan FA's "Field additions" list is one entry shorter than written.
+
+### Deviation 3 — Hook events drop in interactive mode (caught at live verification)
+
+FC's plan body assumed `HookEvent.Step` would be populated by the time it reached the unified model. It isn't — `ape notify` cannot populate `Step` under tmux because the interactive runner has no step-bind plumbing on the wire. `interactiveCore.FeedHook` was filling `step` locally for its runlog write only, not mutating the caller's `HookEvent` copy. The observer immediately downstream therefore saw `h.Step==""`, `stageFromHookStep("")` returned `""`, and every hook event was dropped on the floor — producing the user-reported empty left panel.
+
+Fix: new `interactiveCore.ActiveStep()` getter (mutex-guarded, mirrors `FeedHook`'s read pattern) plus a two-line backfill in `runWithInteractiveTUI`'s `OnHook` callback:
+
+```go
+OnHook: func(h orchestrator.HookEvent) {
+    core.FeedHook(h)
+    if h.Step == "" {
+        h.Step = core.ActiveStep()
+    }
+    obs.HookEventFromBridge(h)
+},
+```
+
+No unit test was added at the `OnHook` boundary — that path is integration-shaped (bridge runtime + tmux + `ape notify`) and the model-side `TestPipelineModelHookEventSource` already locks in "hookEventMsg with matching step ⇒ event lands in stage's events slice." The bug was in the wiring above the model; the verification path is manual re-run on the sandbox.
+
+Lesson logged: an `apecmd`-level fake-bridge integration test would catch this class of bug. Deferred — would benefit from a broader fake-bridge harness that PLAN-6 also could have used.
+
+### Files & LOC reconciliation
+
+Plan estimated ~700 LOC net. Actual shipped (`dfd19ec`): **21 files changed, +1678 / −485**. Breakdown:
+
+- Plan-7 LOC budget (700): close to plan's estimate at +920 / −472 for the production code.
+- Extra +750 lines: the new `internal/tui/render_smoke_test.go` (visual-wrap reproductions added during the second-pass fix), 7 JSON fixture files under `testdata/hook_events/`, the plan file itself, and CHANGELOG / docs entries.
+
+The deletion count (−485) closely matches the plan's projection (~150 deleted in FE plus stepLineMsg/await-modal refactor displacement in the rewritten pipeline.go).
+
+### Out-of-scope addition: ape version mascot
+
+After PLAN-7 landed, an ASCII-art mascot was added to `ape version` (CLI scope, not pipeline-TUI scope). Captured in CHANGELOG v0.0.12 under "CLI". Mentioned here only because the v0.0.12 release commit (`dfd19ec`) bundles both PLAN-7 and the mascot; separating them would have produced two commits with no functional advantage.
+
+### Release
+
+- Tag: `v0.0.12` (annotated, unsigned — matches v0.0.11 convention).
+- GitHub Actions release workflow: run `26249456127`, completed `success`.
+- Artifacts: 6 platform archives + `ape_checksums.txt` + cosign keyless Fulcio cert + signature.
+- Signature verified against the GitHub OIDC issuer with cosign `verify-blob` — `Verified OK`. Chain: Fulcio cert → checksums signature → binary hashes match.
