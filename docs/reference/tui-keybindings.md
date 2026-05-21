@@ -2,7 +2,7 @@
 
 The `ape pipeline <name>` Bubble Tea TUI has three regions and a small set of keys for navigation, mode switching, and quit. This page is the authoritative reference. For prose orientation, see the [README's Pipeline TUI section](../../README.md#pipeline-tui).
 
-As of v0.0.10 (PLAN-7), both invocation modes — `--tui` (interactive REPL) and `--tui -P` (programmatic stream-json) — render the same TUI. The only behavioral difference is interactive mode's await-message modal, which never opens under `--tui -P` because the source has no `await_message` MCP frames to surface. All keybindings, panel layout, scroll semantics, and completion-phase behavior described below apply identically to both.
+As of v0.0.12 (PLAN-7), both invocation modes — `--tui` (interactive REPL) and `--tui -P` (programmatic stream-json) — render the same TUI. The only behavioral difference is interactive mode's await-message modal, which never opens under `--tui -P` because the source has no `await_message` MCP frames to surface. All keybindings, panel layout, scroll semantics, and completion-phase behavior described below apply identically to both.
 
 ## Layout
 
