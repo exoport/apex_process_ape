@@ -125,6 +125,46 @@ func TestInteractiveCore_StepTelemetry_NoTranscript(t *testing.T) {
 	require.Nil(t, core.StepTelemetry("create-prd", 0))
 }
 
+// TestInteractiveCore_StepTelemetry_ResetsBaselineOnPathChange
+// guards against the bug that produced negative per-step costs in
+// multi-step interactive stages. `/clear` rotates the claude
+// session_id, so each step in a multi-step stage gets its own
+// transcript file. The previous step's cumulative is computed
+// against a different file and is meaningless as a baseline —
+// subtracting it produced negative deltas. The fix resets the
+// baseline to zero when activeTranscript moves to a new path.
+func TestInteractiveCore_StepTelemetry_ResetsBaselineOnPathChange(t *testing.T) {
+	dir := t.TempDir()
+	sess1 := filepath.Join(dir, "sess1.jsonl")
+	sess2 := filepath.Join(dir, "sess2.jsonl")
+	turn := func(id string, in, out int) string {
+		return fmt.Sprintf(
+			`{"type":"assistant","message":{"id":"%s","model":"claude-opus-4-7","usage":{"input_tokens":%d,"output_tokens":%d}}}`,
+			id, in, out)
+	}
+	require.NoError(t, os.WriteFile(sess1, []byte(turn("m1", 100, 200)+"\n"+turn("m2", 50, 60)+"\n"), 0o600))
+	require.NoError(t, os.WriteFile(sess2, []byte(turn("n1", 30, 40)+"\n"), 0o600))
+
+	core := &interactiveCore{}
+
+	// Step 1: scan sess1, baseline is zero. Expect 2 turns / 260 out / etc.
+	core.activeTranscript = sess1
+	t1 := core.StepTelemetry("pattern-governance", 0)
+	require.NotNil(t, t1)
+	require.Equal(t, 2, t1.NumTurns, "step 1 covers two turns")
+	require.Equal(t, 260, t1.TokensOutput)
+
+	// `/clear` rotates: step 2 sees a different transcript_path on
+	// its UPS, so activeTranscript moves. The cumulative for sess1
+	// must NOT be used as a baseline against sess2.
+	core.activeTranscript = sess2
+	t2 := core.StepTelemetry("pattern-governance", 1)
+	require.NotNil(t, t2)
+	require.Equal(t, 1, t2.NumTurns, "step 2 reports its own absolute totals (one turn), not sess2-sess1 (would be -1)")
+	require.Equal(t, 40, t2.TokensOutput, "step 2 output = sess2's only turn (40), not sess2-sess1 (-220)")
+	require.GreaterOrEqual(t, t2.CostUSD, 0.0, "no negative costs from path-change reset")
+}
+
 // TestStepTaggingObserver_TracksCurrentStep verifies the
 // programmatic-web step tagger: tracker starts empty, OnStepStart
 // records `<stage>/<idx>-<skill>`, OnStepEnd clears it. The child

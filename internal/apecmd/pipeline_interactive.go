@@ -67,16 +67,23 @@ type interactiveCore struct {
 	activityMu   sync.Mutex
 	lastActivity time.Time
 
-	// transcriptMu guards activeTranscript + stageCumulative. UPS
-	// hooks (bridge goroutine) set activeTranscript; the telemetry
-	// callback (runner goroutine, fired between steps) reads it and
-	// scans the transcript file. stageCumulative carries the
-	// previous step's running totals so each step's delta can be
-	// attributed individually (one claude session per stage in
-	// interactive mode means N steps share one transcript file).
-	// OnStageStart resets both; OnStageEnd is a no-op here.
+	// transcriptMu guards activeTranscript + cumulativeFor +
+	// stageCumulative. UPS hooks (bridge goroutine) set
+	// activeTranscript; the telemetry callback (runner goroutine,
+	// fired between steps) reads it and scans the transcript file.
+	//
+	// /clear between steps in claude REPL rotates the session_id —
+	// so each interactive step typically has its OWN transcript
+	// file, not a shared per-stage one. The cumulative subtraction
+	// here matters only when a step opts into `NoClear: true` and
+	// keeps writing to the prior step's session. cumulativeFor
+	// tracks which path stageCumulative was computed against;
+	// when activeTranscript moves to a new path, the baseline
+	// resets to zero so the step's delta equals its absolute usage.
+	// OnStageStart clears all three.
 	transcriptMu     sync.Mutex
 	activeTranscript string
+	cumulativeFor    string
 	stageCumulative  cost.Totals
 }
 
@@ -234,6 +241,7 @@ func (c *interactiveCore) OnStepEnd(_ pipeline.InteractiveStepInfo) {
 func (c *interactiveCore) ResetStageTelemetry(_ string) {
 	c.transcriptMu.Lock()
 	c.activeTranscript = ""
+	c.cumulativeFor = ""
 	c.stageCumulative = cost.Totals{}
 	c.transcriptMu.Unlock()
 }
@@ -267,10 +275,19 @@ const transcriptFlushGrace = 500 * time.Millisecond
 func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry {
 	c.transcriptMu.Lock()
 	path := c.activeTranscript
+	prevPath := c.cumulativeFor
 	prev := c.stageCumulative
 	c.transcriptMu.Unlock()
 	if path == "" {
 		return nil
+	}
+	// When `/clear` between steps rotates the session_id, the new
+	// step's UPS payload carries a different transcript_path. The
+	// previous cumulative was computed against a different file —
+	// useless as a baseline — so reset to zero. The step's delta
+	// then equals its absolute usage in the new transcript.
+	if path != prevPath {
+		prev = cost.Totals{}
 	}
 	// Brief flush window. Use a timer instead of time.Sleep so a
 	// concurrent ctx-cancel could in principle short-circuit; today
@@ -284,6 +301,7 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 	}
 	c.transcriptMu.Lock()
 	c.stageCumulative = totals
+	c.cumulativeFor = path
 	c.transcriptMu.Unlock()
 	return &pipeline.StepTelemetry{
 		CostUSD:             totals.CostUSD - prev.CostUSD,
