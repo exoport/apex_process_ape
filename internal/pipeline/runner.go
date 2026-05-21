@@ -129,6 +129,30 @@ type RunOptions struct {
 	// step. Used by apecmd to release the StepContract so a stray
 	// late UserPromptSubmit doesn't match the previous step.
 	OnInteractiveStepEnd func(info InteractiveStepInfo)
+
+	// StepTelemetryFn, when set, is called after each interactive
+	// step's WaitStepDone returns. The apecmd interactive core scans
+	// the just-finished step's window of the claude session transcript
+	// and returns the derived cost / tokens / num_turns. Programmatic
+	// mode (claude -p) ignores this — its stream-json result event
+	// already provides the same information directly via the
+	// recordStep path. nil = no telemetry to record (manifest fields
+	// stay zero).
+	StepTelemetryFn func(stage string, stepIdx int) *StepTelemetry
+}
+
+// StepTelemetry is the apecmd-side computed telemetry for one
+// interactive step, derived from the claude session transcript. The
+// runner adapts it to the same shape the stream-json `result` event
+// produces in programmatic mode, so the manifest writer's recordStep
+// API stays uniform across exec modes.
+type StepTelemetry struct {
+	CostUSD             float64
+	TokensInput         int
+	TokensOutput        int
+	TokensCacheRead     int
+	TokensCacheCreation int
+	NumTurns            int
 }
 
 // InteractiveStepInfo describes a single step in interactive mode for
@@ -318,7 +342,7 @@ func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWri
 				// Best-effort checkpoint — the manifest also
 				// records commit_sha, this is for the
 				// streaming SSE / runlog consumer.
-				runLog(opts.RunLog, "commit-made", stage.Name+"/"+step.Skill, nil)
+				runLog(opts.RunLog, "commit-made", StepLabel(stage.Name, i+1, step.Skill), nil)
 			}
 
 			notify(opts.Observer, func(o Observer) { o.OnStepEnd(stage.Name, i, step, time.Since(stepStart), out, runErr) })

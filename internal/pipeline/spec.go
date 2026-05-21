@@ -427,6 +427,17 @@ func (s *Spec) PlanStageCommits(stageName string) (StageCommitPlan, error) {
 	return plan, nil
 }
 
+// StepLabel returns the canonical `<stage>/<idx>-<skill>` label used to
+// attribute hook events, commit checkpoints, and runlog entries to a
+// specific step. stepIdx is 1-based to match the manifest's step
+// numbering. The 1-based prefix is what makes the label unique when a
+// skill repeats in a stage chain (e.g., adr-governance has
+// `apex-adr-adoption` at step 3 and step 6 — they need distinct
+// labels in hook-events.jsonl).
+func StepLabel(stage string, stepIdx int, skill string) string {
+	return fmt.Sprintf("%s/%d-%s", stage, stepIdx, skill)
+}
+
 // PipelineWantsCommits reports whether any stage's plan would emit a
 // commit. Used by the dirty-tree gate to decide whether to enforce
 // the pre-run clean-tree contract.

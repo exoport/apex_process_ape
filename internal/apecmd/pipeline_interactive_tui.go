@@ -129,11 +129,13 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 			NoCommit:               cfg.noCommit,
 			AllowDirty:             cfg.allowDirty,
 			PrependFlags:           prepend,
+			OnStageStart:           core.ResetStageTelemetry,
 			OnRunDir:               onRunDir,
 			Interactive:            true,
 			WaitStepDone:           core.WaitStepDone,
 			OnInteractiveStepStart: core.OnStepStart,
 			OnInteractiveStepEnd:   core.OnStepEnd,
+			StepTelemetryFn:        core.StepTelemetry,
 			RunLog:                 &lazyRunLog{getter: getRunLog},
 		})
 		obs.PipelineDone(runErr)

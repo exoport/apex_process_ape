@@ -249,7 +249,17 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		closeStepLog(eventLog)
 
 		exitCode := 0
-		recordStep(mw, stageIdx, i+1, step, opts.Prompt, stepStart, time.Now(), StatusCompleted, exitCode, eventsRel, parseResultEvent(stepOut))
+		// In interactive mode the pane snapshot never carries the
+		// stream-json `result` event (claude REPL emits no stream-json
+		// on stdout). Pull telemetry from the session transcript via
+		// the apecmd-supplied callback instead.
+		var ev *resultEvent
+		if opts.StepTelemetryFn != nil {
+			if tele := opts.StepTelemetryFn(stage.Name, i); tele != nil {
+				ev = stepTelemetryToResultEvent(tele)
+			}
+		}
+		recordStep(mw, stageIdx, i+1, step, opts.Prompt, stepStart, time.Now(), StatusCompleted, exitCode, eventsRel, ev)
 
 		// Commit boundary: same semantics as runStages (PLAN-6 / C2).
 		// Runs only after the step's run-state is recorded so the
@@ -258,7 +268,7 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		isLastStep := i == len(stage.Chain)-1
 		commitErr := performStepCommit(ctx, opts, mw, plan, stageIdx, i+1, isLastStep, nil)
 		if commitErr == nil {
-			runLog(opts.RunLog, "commit-made", stage.Name+"/"+step.Skill, nil)
+			runLog(opts.RunLog, "commit-made", StepLabel(stage.Name, i+1, step.Skill), nil)
 		}
 
 		notify(opts.Observer, func(o Observer) { o.OnStepEnd(stage.Name, i, step, time.Since(stepStart), stepOut, nil) })
@@ -271,6 +281,28 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 	}
 
 	return stageStatus, stageErr
+}
+
+// stepTelemetryToResultEvent adapts the apecmd-side StepTelemetry
+// (transcript-derived) onto the unexported resultEvent shape so the
+// existing recordStep / manifestWriter API stays uniform across
+// programmatic (stream-json source) and interactive (transcript scan
+// source) exec modes.
+func stepTelemetryToResultEvent(t *StepTelemetry) *resultEvent {
+	if t == nil {
+		return nil
+	}
+	ev := &resultEvent{
+		Type:         "result",
+		Subtype:      "success",
+		NumTurns:     t.NumTurns,
+		TotalCostUSD: t.CostUSD,
+	}
+	ev.Usage.InputTokens = t.TokensInput
+	ev.Usage.OutputTokens = t.TokensOutput
+	ev.Usage.CacheReadInputTokens = t.TokensCacheRead
+	ev.Usage.CacheCreationInputTokens = t.TokensCacheCreation
+	return ev
 }
 
 // writeInteractiveStepEvent appends one JSON line to a per-step ndjson

@@ -67,7 +67,9 @@ func (s *stepTaggingObserver) OnStageEnd(stage string, dur time.Duration, err er
 	s.child.OnStageEnd(stage, dur, err)
 }
 func (s *stepTaggingObserver) OnStepStart(stage string, idx int, step pipeline.Step) {
-	s.tracker.set(stage + "/" + step.Skill)
+	// idx is 0-based per the Observer contract; StepLabel uses 1-based
+	// to match the manifest's step numbering.
+	s.tracker.set(pipeline.StepLabel(stage, idx+1, step.Skill))
 	s.child.OnStepStart(stage, idx, step)
 }
 func (s *stepTaggingObserver) OnStepLine(stage string, idx int, line string) {
@@ -194,8 +196,16 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 					// `ape notify` cannot populate Step; the runner-side
 					// stepTracker (updated via stepTaggingObserver from
 					// the pipeline's OnStepStart / OnStepEnd) supplies
-					// the active `<stage>/<skill>` label.
+					// the active `<stage>/<idx>-<skill>` label.
 					step = stepTracker.get()
+				}
+				// Symlink the claude session transcript into transcripts/
+				// on the first UPS for this step. Per-step sessions in
+				// --web -P mean each link points to a unique target.
+				if h.Event == "UserPromptSubmit" && step != "" {
+					if tp := extractTranscriptPath(h.Payload); tp != "" {
+						_ = rl.LinkTranscript(transcriptLinkName(step), tp)
+					}
 				}
 				_ = rl.Hook(runlog.HookEntry{
 					Timestamp: h.At,
@@ -326,6 +336,12 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	}
 	onStageStart := func(stage string) {
 		publishStageCard(stage, "running", "⟳", "running…")
+		if core != nil {
+			// Interactive web: reset per-stage transcript scan baseline
+			// so the first step's telemetry delta equals its own
+			// absolute usage. Same hook the no-UI / TUI variants wire.
+			core.ResetStageTelemetry(stage)
+		}
 	}
 	onRunDir := func(dir string) {
 		runLogMu.Lock()
@@ -376,6 +392,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	if core != nil {
 		runOptions.Interactive = true
 		runOptions.WaitStepDone = core.WaitStepDone
+		runOptions.StepTelemetryFn = core.StepTelemetry
 		runOptions.OnInteractiveStepStart = core.OnStepStart
 		runOptions.OnInteractiveStepEnd = core.OnStepEnd
 	}

@@ -52,12 +52,18 @@ func TurnCost(u UsageBlock, p ModelPrice) float64 {
 
 // Totals aggregates multiple TurnCosts plus their token counts so the
 // caller can populate PLAN-3's v2 manifest fields (cost_usd, tokens_*).
+// NumTurns is incremented once per Add call so callers can fill the
+// num_turns manifest field from transcript scans (the stream-json
+// terminal `result` event has the same count for one-shot `claude -p`
+// spawns; transcript scans of an interactive session need the explicit
+// counter).
 type Totals struct {
 	CostUSD             float64
 	InputTokens         int
 	OutputTokens        int
 	CacheReadTokens     int
 	CacheCreationTokens int
+	NumTurns            int
 }
 
 // Add folds one turn's usage + cost into the running totals.
@@ -67,4 +73,5 @@ func (t *Totals) Add(u UsageBlock, p ModelPrice) {
 	t.OutputTokens += u.OutputTokens
 	t.CacheReadTokens += u.CacheRead
 	t.CacheCreationTokens += u.CacheCreation.Ephemeral5m + u.CacheCreation.Ephemeral1h
+	t.NumTurns++
 }

@@ -2,16 +2,46 @@ package apecmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/diegosz/apex_process_ape/internal/bridge/config"
 	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/diegosz/apex_process_ape/internal/cost"
 	"github.com/diegosz/apex_process_ape/internal/pipeline"
 	"github.com/diegosz/apex_process_ape/internal/runlog"
 )
+
+// hookEnvelope is the minimal shape ape needs to extract from a
+// Claude Code hook payload. UserPromptSubmit, Stop, and Pre/PostToolUse
+// events all carry `transcript_path` and `session_id`; we capture them
+// for symlink-into-transcripts/ and (later) per-step telemetry parsing.
+type hookEnvelope struct {
+	TranscriptPath string `json:"transcript_path"`
+	SessionID      string `json:"session_id"`
+}
+
+// extractTranscriptPath pulls transcript_path from a hook payload.
+// Returns "" on absent / malformed (rare; the wire shape is stable).
+func extractTranscriptPath(payload json.RawMessage) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var env hookEnvelope
+	_ = json.Unmarshal(payload, &env)
+	return env.TranscriptPath
+}
+
+// transcriptLinkName converts a step label (`<stage>/<idx>-<skill>`)
+// into a filesystem-safe symlink name under transcripts/. Slashes
+// become hyphens; the `.jsonl` extension is appended for clarity.
+func transcriptLinkName(stepLabel string) string {
+	return strings.ReplaceAll(stepLabel, "/", "-") + ".jsonl"
+}
 
 // interactiveCore bundles the per-step verification + step-done
 // machinery shared by every PLAN-6 interactive runner variant
@@ -36,6 +66,18 @@ type interactiveCore struct {
 	// silent for interactiveStepIdleTimeout is presumed hung.
 	activityMu   sync.Mutex
 	lastActivity time.Time
+
+	// transcriptMu guards activeTranscript + stageCumulative. UPS
+	// hooks (bridge goroutine) set activeTranscript; the telemetry
+	// callback (runner goroutine, fired between steps) reads it and
+	// scans the transcript file. stageCumulative carries the
+	// previous step's running totals so each step's delta can be
+	// attributed individually (one claude session per stage in
+	// interactive mode means N steps share one transcript file).
+	// OnStageStart resets both; OnStageEnd is a no-op here.
+	transcriptMu     sync.Mutex
+	activeTranscript string
+	stageCumulative  cost.Totals
 }
 
 // interactiveStepIdleTimeout is the maximum quiet window between
@@ -86,7 +128,20 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 		step = c.activeStep
 		c.stepMu.Unlock()
 	}
-	if writer := c.getRunLog(); writer != nil {
+	writer := c.getRunLog()
+	if writer != nil {
+		// Symlink the claude session transcript into transcripts/
+		// on the first UPS for this step. Idempotent on same target
+		// (LinkTranscript no-ops); per-step link names point to the
+		// stage's shared session file in interactive mode.
+		if h.Event == "UserPromptSubmit" && step != "" {
+			if tp := extractTranscriptPath(h.Payload); tp != "" {
+				_ = writer.LinkTranscript(transcriptLinkName(step), tp)
+				c.transcriptMu.Lock()
+				c.activeTranscript = tp
+				c.transcriptMu.Unlock()
+			}
+		}
 		_ = writer.Hook(runlog.HookEntry{
 			Timestamp: h.At,
 			Event:     h.Event,
@@ -142,7 +197,9 @@ func (c *interactiveCore) FeedReply(content string) {
 // on this step, not a previous step's leftover.
 func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 	c.stepMu.Lock()
-	c.activeStep = info.Stage + "/" + info.Skill
+	// info.StepIdx is 0-based; StepLabel uses 1-based to match the
+	// manifest's step numbering.
+	c.activeStep = pipeline.StepLabel(info.Stage, info.StepIdx+1, info.Skill)
 	c.stepMu.Unlock()
 	for {
 		select {
@@ -168,6 +225,74 @@ func (c *interactiveCore) OnStepEnd(_ pipeline.InteractiveStepInfo) {
 	c.stepMu.Lock()
 	c.activeStep = ""
 	c.stepMu.Unlock()
+}
+
+// ResetStageTelemetry clears the per-stage transcript path and
+// cumulative totals. Wire to RunOptions.OnStageStart so a fresh stage
+// starts from a zero baseline; the first step's delta then equals
+// that step's absolute usage.
+func (c *interactiveCore) ResetStageTelemetry(_ string) {
+	c.transcriptMu.Lock()
+	c.activeTranscript = ""
+	c.stageCumulative = cost.Totals{}
+	c.transcriptMu.Unlock()
+}
+
+// transcriptFlushGrace is the wait between Stop-hook receipt and the
+// transcript-scan inside StepTelemetry. Claude buffers writes to its
+// per-session JSONL; the Stop hook can fire before the last
+// assistant turn is flushed. 500ms is far above the observed flush
+// latency without meaningfully slowing the pipeline.
+const transcriptFlushGrace = 500 * time.Millisecond
+
+// StepTelemetry returns the just-completed interactive step's
+// transcript-derived telemetry. Returns nil when no UPS has captured
+// a transcript path yet (very first step of the run, or a step that
+// hasn't fired UPS — both edge cases). The wait+scan sequence is:
+//
+//  1. brief sleep so the claude session writer can flush the final
+//     assistant turn into the session JSONL.
+//  2. cost.ScanSessionJSONL reads the whole file and produces fresh
+//     cumulative Totals.
+//  3. delta = totals - stageCumulative (the previous step's
+//     snapshot, or zero at stage start).
+//  4. stageCumulative := totals so the next step's delta is
+//     relative to this one.
+//
+// Wired into pipeline.RunOptions.StepTelemetryFn for both --tui /
+// --no-tui (runWithInteractive*) and --web interactive
+// (runWithWeb with core != nil). Programmatic web (--web -P) does
+// not call this — its claude -p stream-json already carries the
+// per-step result event.
+func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry {
+	c.transcriptMu.Lock()
+	path := c.activeTranscript
+	prev := c.stageCumulative
+	c.transcriptMu.Unlock()
+	if path == "" {
+		return nil
+	}
+	// Brief flush window. Use a timer instead of time.Sleep so a
+	// concurrent ctx-cancel could in principle short-circuit; today
+	// no cancellation plumbing reaches here, so the timer just runs.
+	select {
+	case <-time.After(transcriptFlushGrace):
+	}
+	totals, _, err := cost.ScanSessionJSONL(path)
+	if err != nil {
+		return nil
+	}
+	c.transcriptMu.Lock()
+	c.stageCumulative = totals
+	c.transcriptMu.Unlock()
+	return &pipeline.StepTelemetry{
+		CostUSD:             totals.CostUSD - prev.CostUSD,
+		TokensInput:         totals.InputTokens - prev.InputTokens,
+		TokensOutput:        totals.OutputTokens - prev.OutputTokens,
+		TokensCacheRead:     totals.CacheReadTokens - prev.CacheReadTokens,
+		TokensCacheCreation: totals.CacheCreationTokens - prev.CacheCreationTokens,
+		NumTurns:            totals.NumTurns - prev.NumTurns,
+	}
 }
 
 // WaitStepDone blocks until the bridge fires a Stop hook for the
@@ -313,11 +438,13 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		NoCommit:               cfg.noCommit,
 		AllowDirty:             cfg.allowDirty,
 		PrependFlags:           prepend,
+		OnStageStart:           core.ResetStageTelemetry,
 		OnRunDir:               onRunDir,
 		Interactive:            true,
 		WaitStepDone:           core.WaitStepDone,
 		OnInteractiveStepStart: core.OnStepStart,
 		OnInteractiveStepEnd:   core.OnStepEnd,
+		StepTelemetryFn:        core.StepTelemetry,
 		RunLog:                 &lazyRunLog{getter: getRunLog},
 	})
 
