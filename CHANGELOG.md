@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.0.11 (2026-05-21)
 
 ### Post-PLAN-6 interactive-mode parity fixes (2026-05-20)
 
