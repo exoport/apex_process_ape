@@ -46,3 +46,34 @@ func TestPlainObserver_VerboseEmitsEvents(t *testing.T) {
 	require.Contains(t, out, "Drafting", "OnStepLine must render events when quiet=false")
 	require.Contains(t, out, "✎", "text-event glyph must appear when quiet=false")
 }
+
+// TestStepTaggingObserver_TracksCurrentStep verifies the
+// programmatic-web step tagger: tracker starts empty, OnStepStart
+// records `<stage>/<skill>`, OnStepEnd clears it. The child observer
+// must still see every lifecycle call.
+func TestStepTaggingObserver_TracksCurrentStep(t *testing.T) {
+	tracker := &webHookStepTracker{}
+	var buf bytes.Buffer
+	child := newPlainObserver(&buf, "", true)
+	obs := &stepTaggingObserver{child: child, tracker: tracker}
+
+	require.Equal(t, "", tracker.get(), "tracker starts empty")
+
+	obs.OnStageStart("alpha")
+	obs.OnStepStart("alpha", 0, pipeline.Step{Skill: "apex-create-prd"})
+	require.Equal(t, "alpha/apex-create-prd", tracker.get(), "OnStepStart sets the label")
+
+	obs.OnStepEnd("alpha", 0, pipeline.Step{Skill: "apex-create-prd"}, time.Second, "", nil)
+	require.Equal(t, "", tracker.get(), "OnStepEnd clears the label")
+
+	obs.OnStepStart("alpha", 1, pipeline.Step{Skill: "apex-shard-doc"})
+	require.Equal(t, "alpha/apex-shard-doc", tracker.get(), "OnStepStart on next step relabels")
+
+	obs.OnStepEnd("alpha", 1, pipeline.Step{Skill: "apex-shard-doc"}, time.Second, "", nil)
+	obs.OnStageEnd("alpha", time.Second, nil)
+	require.Equal(t, "", tracker.get(), "tracker remains cleared after stage end")
+
+	out := buf.String()
+	require.Contains(t, out, "stage start: alpha")
+	require.Contains(t, out, "stage done: alpha")
+}
