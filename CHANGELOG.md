@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## v0.0.17 (2026-05-22)
+
+Final post-PLAN-8 CI cleanup. All matrix jobs (Linux + Windows + Lint
++ Vuln) now green.
+
+- **`internal/cost/jsonltail_test.go`** — `TestTailer_AppendedLinesProcessed`
+  and `TestTailer_PartialLineRejoined` close their own test-owned
+  `os.Create(path)` handles via `t.Cleanup(func() { _ = f.Close() })`.
+  On Linux/macOS, `unlink` on an open file is fine (the inode lingers
+  until the last handle closes), so the test passed coincidentally.
+  Windows `RemoveAll` errors with "file is being used by another
+  process" if any handle is still open. v0.0.16's synchronous
+  `Tailer.Stop` had closed the Tailer's reader; this one closes the
+  test's writer.
+
 ## v0.0.16 (2026-05-22)
 
 CI follow-up: surface and fix Windows-specific test failures exposed by
