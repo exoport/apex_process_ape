@@ -60,8 +60,16 @@ func TestLoadOverridesFrom_Errors(t *testing.T) {
 
 func TestLookup_OverrideWinsOverBuiltin(t *testing.T) {
 	// Redirect HOME so SaveOverrides / loadOverridesOnce hit a tmp path.
+	// On Windows, os.UserHomeDir() reads USERPROFILE, not HOME — set
+	// both so the override file lands in t.TempDir() on every platform
+	// and gets cleaned up by the test framework. Without USERPROFILE
+	// set on Windows, the $99/$200 opus override would leak into the
+	// real C:\Users\…\.ape\prices.yaml and poison subsequent tests
+	// (TestScanSessionJSONL_Aggregates would see $5+$12.50 jump to
+	// $99+$100=$199).
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 
 	// Drop any cached overrides from previous tests in the same binary.
 	resetOverrideCache := func() {

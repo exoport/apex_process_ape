@@ -1,3 +1,5 @@
+//go:build !windows
+
 package pipeline //nolint:testpackage // white-box reads internal manifestWriter side effects
 
 import (
@@ -11,6 +13,14 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// Whole file is //go:build !windows because every TestRun_* here
+// drives a bash shim script (.sh) as the synthetic claude binary.
+// Windows can't exec .sh files directly (`fork/exec …shim.sh: %1 is
+// not a valid Win32 application`) and rewriting these shims as .cmd
+// or .ps1 would change the test surface enough to lose the assertion
+// fidelity. The production code paths these tests cover are exercised
+// indirectly on Windows via the smoke step in CI.
 
 // initGitRepo runs `git init`, writes a `_output/`-ignoring `.gitignore`,
 // then stages + commits every file currently in `root`. Tests must

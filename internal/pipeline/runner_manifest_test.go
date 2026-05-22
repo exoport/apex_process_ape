@@ -1,3 +1,5 @@
+//go:build !windows
+
 package pipeline //nolint:testpackage // white-box reads internal manifestWriter side effects
 
 import (
@@ -9,6 +11,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// Whole file is //go:build !windows because every TestRun_* here
+// drives a bash shim script (.sh) as the synthetic claude binary.
+// See runner_commit_test.go header for the rationale.
 
 // TestRun_EmitsManifest exercises the full Run -> manifestWriter -> Finalize
 // path against a claude shim that prints a canned terminal `result`

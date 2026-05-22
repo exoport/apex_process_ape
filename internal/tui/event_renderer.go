@@ -2,7 +2,7 @@ package tui
 
 import (
 	"encoding/json"
-	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
@@ -415,19 +415,24 @@ func relativizePath(projectRoot, raw string) string {
 	if projectRoot == "" || raw == "" {
 		return raw
 	}
-	if !strings.HasPrefix(raw, "/") {
+	// Compare on forward-slash form so the prefix-strip is OS-agnostic.
+	// Pre-PLAN-8 this used os.PathSeparator, which only worked
+	// coincidentally on Linux (where `/` is both the separator and the
+	// path-start character) and broke on Windows when raw is a
+	// Unix-style absolute (`/tmp/...`) because the prefix used `\`.
+	rawSlash := filepath.ToSlash(raw)
+	rootSlash := filepath.ToSlash(strings.TrimRight(projectRoot, `/\`))
+	if !strings.HasPrefix(rawSlash, "/") {
 		return raw
 	}
-	sep := string(os.PathSeparator)
-	root := strings.TrimRight(projectRoot, sep)
-	if raw == root {
+	if rawSlash == rootSlash {
 		return "."
 	}
-	prefix := root + sep
-	if !strings.HasPrefix(raw, prefix) {
+	prefix := rootSlash + "/"
+	if !strings.HasPrefix(rawSlash, prefix) {
 		return raw
 	}
-	rel := raw[len(prefix):]
+	rel := rawSlash[len(prefix):]
 	if rel == "" {
 		return "."
 	}

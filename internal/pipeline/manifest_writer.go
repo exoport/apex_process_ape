@@ -97,7 +97,9 @@ func (w *manifestWriter) BeginStage(name string, at time.Time) int {
 
 // OpenStepLog creates the per-step NDJSON file and returns a WriteCloser
 // the runner tees claude's line stream into. The returned events_path
-// (relative to runDir) is recorded on the StepRecord.
+// (relative to runDir) is recorded on the StepRecord. The path uses
+// forward slashes regardless of host OS so the manifest stays portable
+// between Linux/macOS producers and Windows consumers (web view, etc.).
 func (w *manifestWriter) OpenStepLog(stageIdx, stepIdx int, stageName, skill string) (io.WriteCloser, string, error) {
 	rel := filepath.Join(
 		"stages",
@@ -113,7 +115,7 @@ func (w *manifestWriter) OpenStepLog(stageIdx, stepIdx int, stageName, skill str
 		return nil, "", fmt.Errorf("open step log: %w", err)
 	}
 	w.stepLogs = append(w.stepLogs, f)
-	return f, rel, nil
+	return f, filepath.ToSlash(rel), nil
 }
 
 // RecordStep appends a fully populated StepRecord to the given stage,

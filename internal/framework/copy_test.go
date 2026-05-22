@@ -3,13 +3,26 @@ package framework_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/diegosz/apex_process_ape/internal/framework"
 	"github.com/stretchr/testify/require"
 )
 
+// requirePOSIXMode skips tests that rely on POSIX file-mode bits
+// surviving a write/read round-trip. Windows reports 0o666 for any
+// user-readable file regardless of what Chmod was asked for, so the
+// 0o600 assertion below would always fail there.
+func requirePOSIXMode(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX file-mode round-trip not applicable on Windows")
+	}
+}
+
 func TestCopyFile_PreservesMode(t *testing.T) {
+	requirePOSIXMode(t)
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.txt")
 	dst := filepath.Join(dir, "dst.txt")
@@ -80,6 +93,7 @@ func TestCopyTree_ErrorsOnNonDirectorySrc(t *testing.T) {
 }
 
 func TestAtomicWriteFile_WritesAndCleansUpTemp(t *testing.T) {
+	requirePOSIXMode(t)
 	dir := t.TempDir()
 	target := filepath.Join(dir, "out.txt")
 

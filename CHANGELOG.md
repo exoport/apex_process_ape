@@ -1,5 +1,70 @@
 # CHANGELOG
 
+## v0.0.16 (2026-05-22)
+
+CI follow-up: surface and fix Windows-specific test failures exposed by
+PLAN-8's matrix expansion, drop macOS from the matrix (user request —
+the macOS leg surfaced no new diagnostic value that the Windows leg
+didn't already cover for cross-platform validation).
+
+### Production fixes (cross-platform correctness)
+
+- **`internal/pipeline/manifest_writer.go`** — `OpenStepLog` now returns
+  the per-step events_path via `filepath.ToSlash` so manifest entries
+  use forward slashes regardless of host OS. Manifests produced on
+  Windows are now byte-portable to Linux/macOS consumers (web view,
+  the eval harness).
+- **`internal/cost/jsonltail.go`** — `Tailer.Stop` is now synchronous:
+  it waits for the polling goroutine to drain and close its file
+  handle before returning. Fixes `TestTailer_AppendedLinesProcessed`
+  / `TestTailer_PartialLineRejoined` on Windows where
+  `testing.TempDir`'s cleanup hit `unlinkat: file in use` against the
+  open session.jsonl. Linux/macOS behaviour is unchanged because
+  pumps already cleaned up on `defer` order.
+- **`internal/tui/event_renderer.go`** — `relativizePath` now compares
+  via `filepath.ToSlash` instead of `os.PathSeparator`. The pre-PLAN-8
+  implementation worked coincidentally on Linux (where `/` is both
+  the separator and the path-start byte) but failed on Windows when
+  raw is a Unix-style absolute (`/tmp/...`) because the prefix used
+  `\`. Fixes 5 TUI tests on Windows.
+
+### Test-isolation fix
+
+- **`internal/cost/overrides_test.go`** — `TestLookup_OverrideWinsOverBuiltin`
+  now sets both `HOME` and `USERPROFILE` via `t.Setenv`. Windows's
+  `os.UserHomeDir` reads `USERPROFILE`, not `HOME`, so the test's
+  $99/$200 opus override was leaking into the real
+  `C:\Users\runner\.ape\prices.yaml` and poisoning subsequent tests
+  (1M × $99 + 0.5M × $200 = exactly the $199 the Aggregates test
+  surfaced).
+
+### POSIX-only tests skipped on Windows
+
+- **`internal/framework/copy_test.go`** — `TestCopyFile_PreservesMode`
+  and `TestAtomicWriteFile_WritesAndCleansUpTemp` skip on Windows.
+  Windows reports `0o666` for any user-readable file regardless of
+  the requested mode bits; the 0o600 round-trip assertion is
+  POSIX-only.
+- **`internal/sessions/registry_test.go`** — `TestPrune_DropsDeadPIDs`
+  skips on Windows. The current `pidAlive_windows` probe (Signal nil
+  via os.FindProcess) can return false-positive "alive" for recycled
+  PID slots. A real Windows fix would use OpenProcess +
+  GetExitCodeProcess via `golang.org/x/sys/windows`; deferred.
+- **`internal/pipeline/runner_commit_test.go`** and
+  **`runner_manifest_test.go`** — both files gain
+  `//go:build !windows`. Every `TestRun_*` here drives a bash shim
+  script as the synthetic claude binary; Windows can't exec `.sh`
+  files (`fork/exec …: %1 is not a valid Win32 application`). The
+  production paths these tests cover are exercised on Windows via
+  the smoke step in CI.
+
+### CI
+
+- **Matrix shrunk from {ubuntu, macos, windows} to {ubuntu, windows}**.
+  PLAN-8's FD originally added macOS as defense-in-depth — the user
+  decided that adding macOS coverage wasn't worth the per-OS CI run
+  cost given that Linux already exercises the POSIX path identically.
+
 ## v0.0.15 (2026-05-22)
 
 Post-release follow-up for v0.0.14 CI breakage. The release itself was

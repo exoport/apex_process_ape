@@ -45,6 +45,12 @@ type Tailer struct {
 	out      chan AssistantLine
 
 	cancel context.CancelFunc
+	// done closes when the run goroutine has fully exited and the
+	// open file handle has been released. Stop waits on it before
+	// returning so callers can safely delete the file afterward —
+	// critical on Windows where unlinkat fails while the file is
+	// still open.
+	done chan struct{}
 
 	mu        sync.Mutex
 	totals    Totals
@@ -89,14 +95,23 @@ func TailIntervalFromEnv() time.Duration {
 func (t *Tailer) Start(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	t.cancel = cancel
-	go t.run(ctx)
+	t.done = make(chan struct{})
+	go func() {
+		t.run(ctx)
+		close(t.done)
+	}()
 }
 
-// Stop cancels the tail goroutine and closes the output channel after
-// a final drain attempt. Idempotent.
+// Stop cancels the tail goroutine, waits for it to drain and release
+// the file handle, then returns. Idempotent. Safe to call without a
+// prior Start (no-op in that case).
 func (t *Tailer) Stop() {
-	if t.cancel != nil {
-		t.cancel()
+	if t.cancel == nil {
+		return
+	}
+	t.cancel()
+	if t.done != nil {
+		<-t.done
 	}
 }
 
