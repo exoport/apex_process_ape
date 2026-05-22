@@ -65,10 +65,19 @@ const (
 //
 // Parent IDs in `←CA,DM,ES`-style suffixes deliberately don't match
 // either regex.
+//
+// Agent regex: matches an agent name only when surrounded by
+// non-word, non-hyphen characters (spaces, bullets, newlines). Go's
+// RE2 `\b` treats `-` as a word boundary, which would incorrectly
+// match `arch` inside `create-arch`, `ux` inside `create-ux`, `dev`
+// inside `story-batch-dev`. The `[^\w-]` guards on both sides keep
+// agent personas green in the lane header and legend row while
+// leaving hyphenated skill descriptors untouched. Capture groups 1
+// and 3 preserve the surrounding character in the replacement.
 var (
 	planningActionInBodyRe   = regexp.MustCompile(`◉ ([A-Z]{2})`)
 	planningActionInLegendRe = regexp.MustCompile(`([A-Z]{2}) ([a-z])`)
-	planningAgentRe          = regexp.MustCompile(`\b(?:analyst|pm|ux|arch|modeler|sm|dev)\b`)
+	planningAgentRe          = regexp.MustCompile(`([^\w-])(analyst|pm|ux|arch|modeler|sm|dev)([^\w-])`)
 )
 
 // renderPlanningDiagram returns the swimlanes view, colorized when
@@ -81,7 +90,7 @@ func renderPlanningDiagram(colorize bool) string {
 	}
 	out := planningActionInBodyRe.ReplaceAllString(planningDiagramRaw, "◉ "+ansiBlue+"$1"+ansiReset)
 	out = planningActionInLegendRe.ReplaceAllString(out, ansiBlue+"$1"+ansiReset+" $2")
-	out = planningAgentRe.ReplaceAllString(out, ansiGreen+"$0"+ansiReset)
+	out = planningAgentRe.ReplaceAllString(out, "${1}"+ansiGreen+"${2}"+ansiReset+"${3}")
 	return out
 }
 

@@ -70,3 +70,30 @@ func TestPlanningDiagram_LegendDescriptorsIntact(t *testing.T) {
 	require.Contains(t, got, "event-storming")
 	require.Contains(t, got, "story-batch")
 }
+
+// TestPlanningDiagram_AgentNamesNotColoredInsideHyphenatedSkills
+// locks in the fix where Go's `\b` word boundary used to match `arch`
+// inside `create-arch`, `ux` inside `create-ux`, `dev` inside
+// `story-batch-dev` — coloring those substrings green and breaking
+// the legend's hyphenated descriptors. The new regex requires
+// non-word, non-hyphen surrounds.
+func TestPlanningDiagram_AgentNamesNotColoredInsideHyphenatedSkills(t *testing.T) {
+	got := renderPlanningDiagram(true)
+	// Negative assertions — the bug would have inserted a green wrap
+	// right after a `-`.
+	require.NotContains(t, got, "-"+ansiGreen+"ux"+ansiReset,
+		"`ux` inside `create-ux` must not be green-wrapped")
+	require.NotContains(t, got, "-"+ansiGreen+"arch"+ansiReset,
+		"`arch` inside `create-arch` / `data-arch` must not be green-wrapped")
+	require.NotContains(t, got, "-"+ansiGreen+"dev"+ansiReset,
+		"`dev` inside `story-batch-dev` must not be green-wrapped")
+	// Positive sanity — agents still get colored in the lane header
+	// and the legend's `Lanes` line, where they're space- or
+	// bullet-separated rather than hyphen-prefixed.
+	require.Contains(t, got, " "+ansiGreen+"ux"+ansiReset+" ",
+		"`ux` between spaces in the lane header must stay green")
+	require.Contains(t, got, " "+ansiGreen+"arch"+ansiReset+" ",
+		"`arch` between spaces in the lane header must stay green")
+	require.Contains(t, got, " "+ansiGreen+"dev"+ansiReset,
+		"`dev` after a space in the lane header must stay green")
+}
