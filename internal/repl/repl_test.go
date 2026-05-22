@@ -105,6 +105,51 @@ func TestSendCommandOrderingWithClear(t *testing.T) {
 	}
 }
 
+// TestCapturePaneNoANSI verifies that CapturePane returns the
+// rendered VT grid as plain text — no ANSI escape bytes, no
+// CSI sequences. The session prints text with explicit color escapes
+// and we assert (a) the visible text appears and (b) no ESC (0x1B)
+// byte made it into the output.
+func TestCapturePaneNoANSI(t *testing.T) {
+	requireBash(t)
+	requireUnix(t)
+	name := "ape-repl-test-noansi"
+	_ = KillSession(t.Context(), name)
+
+	// `printf` with explicit color escape so we don't depend on a
+	// host config that ships colored ls/grep. A trailing sleep keeps
+	// bash alive long enough for the pump to drain.
+	if err := NewSession(t.Context(), name, "/tmp", []string{
+		"bash", "--noprofile", "--norc", "-c",
+		"printf '\\033[31mhello-red\\033[0m\\n'; printf '\\033[1;34mhello-bold-blue\\033[0m\\n'; sleep 1",
+	}); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	t.Cleanup(func() { _ = KillSession(t.Context(), name) })
+
+	// Give the pump time to drain bash's stdout.
+	time.Sleep(400 * time.Millisecond)
+
+	pane, err := CapturePane(t.Context(), name)
+	if err != nil {
+		t.Fatalf("CapturePane: %v", err)
+	}
+	if !strings.Contains(pane, "hello-red") {
+		t.Fatalf("expected 'hello-red' in pane, got:\n%s", pane)
+	}
+	if !strings.Contains(pane, "hello-bold-blue") {
+		t.Fatalf("expected 'hello-bold-blue' in pane, got:\n%s", pane)
+	}
+	if strings.ContainsRune(pane, 0x1B) {
+		t.Fatalf("pane contains ESC byte (0x1B) — VT emulator did not strip ANSI escapes:\n%q", pane)
+	}
+	// CSI parameters (digit;digit) are fine on their own; what we
+	// really care about is that the leading ESC[ is gone.
+	if strings.Contains(pane, "\x1b[") {
+		t.Fatalf("pane contains a CSI introducer (ESC['), VT emulator failure:\n%q", pane)
+	}
+}
+
 // TestSendTextLiteral verifies that SendText preserves leading slashes
 // and special chars verbatim through the PTY.
 func TestSendTextLiteral(t *testing.T) {

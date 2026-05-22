@@ -7,21 +7,29 @@
 // consumers compile unchanged.
 //
 // The PTY backend is github.com/aymanbagabas/go-pty, which transparently
-// uses Unix PTYs on Linux/macOS and ConPTY on Windows — so apepty works
+// uses Unix PTYs on Linux/macOS and ConPTY on Windows — so ape works
 // natively under Git Bash on Windows 11 without WSL or a tmux binary
 // on PATH.
 //
+// PTY output is parsed through a github.com/hinshun/vt10x VT100/xterm
+// emulator. CapturePane returns the rendered grid as plain text — no
+// ANSI escape sequences, no cursor-positioning noise. This matches
+// tmux's `capture-pane -p` semantics rather than dumping raw bytes.
+//
 // Trade-offs vs the tmux variant:
 //
-//   - Pane "capture" is the raw PTY output stream, not a rendered VT
-//     grid. The accumulated bytes include ANSI control sequences and
-//     any redraws the child emits; the diff-snapshot logic in the
-//     pipeline runner finds new text by anchoring on the previous
-//     snapshot's tail, which is robust to that noise.
-//   - No external attach: a session lives and dies with the apepty
+//   - No external attach: a session lives and dies with the ape
 //     process. There is no `tmux attach -t …` equivalent for an
 //     in-flight run. Pipeline runs that want live introspection should
 //     tail the per-step ndjson event log instead.
+//   - Visible-grid scrollback only. vt10x's grid is sized to claude's
+//     perceived terminal (200×50), matching the ioctl winsize claude
+//     reads. Lines that scroll off the top via `\n` at the bottom are
+//     gone — tmux's history buffer (default 2000 lines) isn't
+//     reproduced. In practice the manifest's per-step `step-out` field
+//     and the debug stderr mirror are the consumers, and both look at
+//     the most recent screenful; the authoritative stream of model
+//     output flows through the bridge's hook events, not pane capture.
 package repl
 
 import (
@@ -34,6 +42,7 @@ import (
 	"time"
 
 	"github.com/aymanbagabas/go-pty"
+	"github.com/hinshun/vt10x"
 )
 
 // PromptSettle is the wait between typing a command and pressing
@@ -49,26 +58,23 @@ const ReadyPollInterval = 250 * time.Millisecond
 // ReadyGlyph is the prompt glyph claude renders when ready.
 const ReadyGlyph = "❯"
 
-// Pane geometry. Matches the tmux variant so capture snapshots have
-// the same shape — claude's TUI wraps to this width.
+// Pane geometry. Matches the tmux variant's `-x 200 -y 50` so capture
+// snapshots have the same shape — claude's TUI wraps to this width and
+// expects this height from the ioctl winsize.
 const (
 	paneCols = 200
 	paneRows = 50
 )
-
-// scrollbackCap bounds per-session scrollback retention. 1 MiB is far
-// more than any single stage of slash-command output emits, and the
-// trim is from the head so the tail (where the latest output lives)
-// is always present.
-const scrollbackCap = 1 << 20
 
 type session struct {
 	name string
 	ptm  pty.Pty
 	cmd  *pty.Cmd
 
-	mu  sync.Mutex
-	buf []byte
+	// term is the VT100/xterm emulator that turns the PTY byte stream
+	// into a 200×50 rendered grid. It owns its own mutex; Write and
+	// String are both safe to call from independent goroutines.
+	term vt10x.Terminal
 
 	done chan struct{}
 }
@@ -115,6 +121,7 @@ func NewSession(_ context.Context, name, dir string, argv []string) error {
 		name: name,
 		ptm:  ptm,
 		cmd:  cmd,
+		term: vt10x.New(vt10x.WithSize(paneCols, paneRows)),
 		done: make(chan struct{}),
 	}
 	regMu.Lock()
@@ -127,14 +134,16 @@ func NewSession(_ context.Context, name, dir string, argv []string) error {
 	return nil
 }
 
-// pump drains PTY output into the scrollback buffer until the PTY
-// closes (child exited, or KillSession closed the master).
+// pump drains PTY output into the VT emulator until the PTY closes
+// (child exited, or KillSession closed the master). vt10x.Write
+// acquires the terminal's internal lock, so concurrent CapturePane
+// reads are safe.
 func (s *session) pump() {
 	buf := make([]byte, 4096)
 	for {
 		n, err := s.ptm.Read(buf)
 		if n > 0 {
-			s.append(buf[:n])
+			_, _ = s.term.Write(buf[:n])
 		}
 		if err != nil {
 			return
@@ -149,20 +158,21 @@ func (s *session) reap() {
 	close(s.done)
 }
 
-func (s *session) append(p []byte) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.buf = append(s.buf, p...)
-	if len(s.buf) > scrollbackCap {
-		drop := len(s.buf) - scrollbackCap
-		s.buf = s.buf[drop:]
-	}
-}
-
+// snapshot returns the VT grid as plain text — each row trimmed of
+// trailing padding spaces, fully-empty trailing rows removed. vt10x's
+// String() acquires its own lock, so no extra synchronization is
+// needed here.
 func (s *session) snapshot() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return string(s.buf)
+	raw := s.term.String()
+	lines := strings.Split(raw, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \t")
+	}
+	end := len(lines)
+	for end > 0 && lines[end-1] == "" {
+		end--
+	}
+	return strings.Join(lines[:end], "\n")
 }
 
 func lookup(name string) (*session, bool) {
@@ -211,10 +221,8 @@ func HasSession(_ context.Context, name string) bool {
 	}
 }
 
-// CapturePane returns the accumulated PTY output as a string,
-// including any ANSI control sequences. The pipeline runner's diff
-// helper anchors on the previous snapshot's tail to lift just the
-// new bytes, so escape noise is harmless for the manifest path.
+// CapturePane returns the rendered VT grid as plain text. ANSI escape
+// sequences are interpreted, not included in the output.
 func CapturePane(_ context.Context, name string) (string, error) {
 	s, ok := lookup(name)
 	if !ok {
