@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -644,6 +645,19 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ev.IsDisplayable() {
 			return m, nil
 		}
+		// PLAN-7 follow-up: annotate Stop / SubagentStop rows with the
+		// just-completed step's elapsed time. Stop arrives before
+		// OnStepEnd fires (the runner waits on stepDoneCh which Stop
+		// itself signals), so step.endedAt may not be set yet; compute
+		// from time.Since(startedAt) at receive time and freeze the
+		// annotation into the rendered body.
+		if msg.hook.Event == "Stop" || msg.hook.Event == "SubagentStop" {
+			if sIdx, ok := stepIdxFromHookStep(msg.hook.Step); ok && sIdx >= 0 && sIdx < len(m.stages[i].steps) {
+				if started := m.stages[i].steps[sIdx].startedAt; !started.IsZero() {
+					ev.Body += " · " + formatDur(time.Since(started))
+				}
+			}
+		}
 		m.pendingLines = append(m.pendingLines, pendingEvent{stageIdx: i, ev: ev})
 	case awaitPendingMsg:
 		// No-op if no sender is wired — programmatic mode never
@@ -1057,7 +1071,12 @@ func (m pipelineModel) renderStatusStrip() string {
 	st := m.stages[m.cursorIdx]
 	parts := []string{st.name}
 	if st.state == stateRunning && st.runningStepIdx >= 0 && st.runningStepIdx < len(st.steps) {
-		parts = append(parts, fmt.Sprintf("▸ step %d/%d (%s)", st.runningStepIdx+1, len(st.steps), st.steps[st.runningStepIdx].skill))
+		step := st.steps[st.runningStepIdx]
+		label := fmt.Sprintf("▸ step %d/%d (%s)", st.runningStepIdx+1, len(st.steps), step.skill)
+		if dur := elapsedFor(step.state, step.startedAt, step.endedAt, m.tick); dur != "" {
+			label += " · " + dur
+		}
+		parts = append(parts, label)
 	}
 	if dur := elapsedFor(st.state, st.startedAt, st.endedAt, m.tick); dur != "" {
 		parts = append(parts, dur+" elapsed")
@@ -1216,6 +1235,28 @@ func stageFromHookStep(step string) string {
 		return step[:i]
 	}
 	return step
+}
+
+// stepIdxFromHookStep extracts the 0-based step index from a hook
+// event's Step label ("<stage>/<idx>-<skill>"). The on-wire idx is
+// 1-based per pipeline.StepLabel; the model's steps slice is 0-based,
+// so we subtract one before returning. Returns (-1, false) when the
+// label lacks a suffix or the idx isn't parsable.
+func stepIdxFromHookStep(step string) (int, bool) {
+	slash := strings.IndexByte(step, '/')
+	if slash < 0 || slash >= len(step)-1 {
+		return -1, false
+	}
+	suffix := step[slash+1:]
+	dash := strings.IndexByte(suffix, '-')
+	if dash <= 0 {
+		return -1, false
+	}
+	n, err := strconv.Atoi(suffix[:dash])
+	if err != nil || n < 1 {
+		return -1, false
+	}
+	return n - 1, true
 }
 
 // composePanelBody assembles header + body as exactly `budget` lines

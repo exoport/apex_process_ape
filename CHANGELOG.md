@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## v0.0.13 (2026-05-21)
+
+### Pipeline TUI
+
+- **Per-step elapsed time in interactive mode.** PLAN-7 follow-up. The running-step indicator in the status strip (`▸ step N/M (skill)`) now carries the active step's elapsed time, and `Stop` / `SubagentStop` hook rows in the event panel are annotated with the just-completed step's duration. Wiring: `BridgeObserver.OnStepStart` / `OnStepEnd` no longer no-op — they forward `stepStartMsg` / `stepEndMsg` the same way the programmatic observer does, populating `stepRow.startedAt` / `endedAt` so `elapsedFor()` can compute on them. The Stop annotation reads `startedAt` at receive time (Stop arrives before `OnStepEnd` fires, by design — the runner waits on `stepDoneCh` which Stop itself signals) and freezes the duration into the rendered event body. New `stepIdxFromHookStep` parses the 1-based on-wire step idx out of `<stage>/<idx>-<skill>` for stage-step lookup.
+
+### CLI
+
+- **`ape planning` / `ape help planning`** prints an ASCII swimlanes view of the greenfield planning pipeline. Lanes are agent personas; rows are topological depth; each node is rendered `◉ <ID>←<parent>,<parent>` with the action ID in cyan and parents left uncolored so action and dependencies read apart at a glance. Agent personas (analyst, pm, ux, arch, modeler, sm, dev) are green. Colors honor `NO_COLOR` and fall back to plain text when stdout is not a TTY. Source of truth for the dependency edges is `docs/explanation/pipelines/planning-pipeline.md` in `apex_process_docs` — keep both in sync when the planning skill set changes.
+
 ## v0.0.12 (2026-05-21)
 
 ### Pipeline TUI

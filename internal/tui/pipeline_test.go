@@ -912,6 +912,91 @@ func TestStageFromHookStep(t *testing.T) {
 	require.Empty(t, stageFromHookStep(""))
 }
 
+// TestStepIdxFromHookStep covers the step-tag → 0-based step idx parse.
+// On-wire labels are 1-based per pipeline.StepLabel; the helper subtracts
+// one so it can index the model's 0-based steps slice directly.
+func TestStepIdxFromHookStep(t *testing.T) {
+	idx, ok := stepIdxFromHookStep("alpha/1-apex-skill")
+	require.True(t, ok)
+	require.Equal(t, 0, idx)
+	idx, ok = stepIdxFromHookStep("pattern-governance/3-apex-adr-adoption")
+	require.True(t, ok)
+	require.Equal(t, 2, idx)
+	_, ok = stepIdxFromHookStep("bare")
+	require.False(t, ok, "no slash ⇒ no idx")
+	_, ok = stepIdxFromHookStep("alpha/0-apex-skill")
+	require.False(t, ok, "0 idx is out-of-band per StepLabel's 1-based convention")
+	_, ok = stepIdxFromHookStep("alpha/nope-skill")
+	require.False(t, ok, "non-numeric idx prefix rejected")
+	_, ok = stepIdxFromHookStep("")
+	require.False(t, ok)
+}
+
+// TestStatusStrip_RunningStepShowsElapsed asserts (a) — the running
+// step line in renderStatusStrip includes the step's elapsed time
+// once stepStartMsg has stamped startedAt. PLAN-7 follow-up.
+func TestStatusStrip_RunningStepShowsElapsed(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "")
+	res, _ := m.Update(stageStartMsg{stage: "alpha"})
+	m, _ = res.(pipelineModel)
+	res, _ = m.Update(stepStartMsg{stage: "alpha", idx: 0})
+	m, _ = res.(pipelineModel)
+	// Backdate the step start so elapsedFor returns a non-empty value
+	// without sleeping in the test.
+	m.stages[0].steps[0].startedAt = time.Now().Add(-2 * time.Second)
+	m.tick = time.Now()
+	strip := m.renderStatusStrip()
+	require.Contains(t, strip, "▸ step 1/1 (apex-fake-skill-a)")
+	require.Regexp(t, `▸ step 1/1 \(apex-fake-skill-a\) · \d`, strip,
+		"running-step label must carry a `· <elapsed>` suffix")
+}
+
+// TestHookEvent_StopAnnotatesElapsed asserts (b) — when a Stop hook
+// lands on a stage whose matching step has a startedAt timestamp, the
+// rendered event body is suffixed with the step's elapsed time.
+// PLAN-7 follow-up.
+func TestHookEvent_StopAnnotatesElapsed(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "", WithEventSource(SourceHookEvents))
+	res, _ := m.Update(stepStartMsg{stage: "alpha", idx: 0})
+	m, _ = res.(pipelineModel)
+	m.stages[0].steps[0].startedAt = time.Now().Add(-3 * time.Second)
+
+	h := loadHookFixture(t, "stop.json")
+	h.Step = "alpha/1-apex-fake-skill-a"
+	res, _ = m.Update(hookEventMsg{hook: h})
+	m, _ = res.(pipelineModel)
+	res, _ = m.Update(throttleTickMsg{})
+	m, _ = res.(pipelineModel)
+
+	require.Len(t, m.stages[0].events, 1)
+	ev := m.stages[0].events[0]
+	require.Equal(t, EventSuccess, ev.Kind)
+	require.Contains(t, ev.Body, "skill complete")
+	require.Regexp(t, ` · \d`, ev.Body,
+		"Stop body must be suffixed with the step's elapsed duration")
+}
+
+// TestHookEvent_StopWithoutStartedAtSkipsAnnotation asserts the
+// elapsed annotation is a no-op when no matching startedAt was
+// recorded — Stop rows for unknown steps still render their base body.
+func TestHookEvent_StopWithoutStartedAtSkipsAnnotation(t *testing.T) {
+	spec := fakeSpec(t)
+	m := NewPipelineModel(spec, nil, "", WithEventSource(SourceHookEvents))
+
+	h := loadHookFixture(t, "stop.json")
+	h.Step = "alpha/1-apex-fake-skill-a" // no preceding stepStartMsg
+	res, _ := m.Update(hookEventMsg{hook: h})
+	m, _ = res.(pipelineModel)
+	res, _ = m.Update(throttleTickMsg{})
+	m, _ = res.(pipelineModel)
+
+	require.Len(t, m.stages[0].events, 1)
+	require.NotContains(t, m.stages[0].events[0].Body, " · 0ms",
+		"missing startedAt must not produce a zero-elapsed suffix")
+}
+
 // ─────────── PLAN-7 / F0 row-budget invariant ───────────
 
 // TestPanelRowBudget_ComposerExactLines asserts composePanelBody
