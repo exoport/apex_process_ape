@@ -15,8 +15,18 @@ permissions:
 
 jobs:
   test:
-    name: Test
-    runs-on: ubuntu-latest
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        # bash is available on all three runners (MSYS2-provided on
+        # Windows). Pin it so `./ape version` and Makefile invocations
+        # work uniformly across the matrix.
+        shell: bash
     steps:
       - uses: actions/checkout@v6
 
@@ -31,6 +41,14 @@ jobs:
 
       - name: Test
         run: make test
+
+      - name: Smoke — ./ape version
+        # Catches //go:build constraint regressions that would let a
+        # package compile but produce a binary that errors on first
+        # invocation under the matrix OS. The MSYS2 bash on
+        # windows-latest resolves `./ape` to the literal output of
+        # `go build -o ape`, no .exe suffix.
+        run: ./ape version
 
   lint:
     name: Lint
