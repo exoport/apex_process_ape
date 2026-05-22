@@ -133,6 +133,7 @@ Projects that customize pipeline files take responsibility for keeping them comp
 
 ## Related
 
+- [How to pass arguments to skills](../how-to/pass-args-to-skills.md) — task-oriented guide to `args:` vs. `prompt_flag:` + `--prompt`.
 - [How to install the framework](../how-to/framework-update.md) — `ape framework update` is what installs the canonical pipeline set.
 - [Why project-local pipelines](../explanation/why-project-local-pipelines.md) — design rationale for moving from embedded to on-disk specs.
 - [Pipeline run manifest](pipeline-run-manifest.md) — every pipeline run writes a structured manifest to `_output/pipelines/<name>/<run_id>/` capturing per-step cost / tokens / duration.

@@ -7,6 +7,7 @@ How-to guides are **recipes** — they answer "how do I X?" for a reader who alr
 - [How to install ape](install.md)
 - [How to update ape](update.md)
 - [How to verify a release artifact](verify.md)
+- [How to pass arguments to skills](pass-args-to-skills.md)
 
 ## Planned guides
 
