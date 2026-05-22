@@ -1,7 +1,8 @@
 ---
 plan_id: PLAN-8
 created_at: 2026-05-22
-status: proposed
+implemented_at: 2026-05-22
+status: done
 tags:
   - interactive-exec
   - refactor

@@ -2,7 +2,7 @@
 
 | ID     | Title                                                | Status   | Created    |
 | ------ | ---------------------------------------------------- | -------- | ---------- |
-| PLAN-8 | Migrate tmux → in-process PTY                        | proposed | 2026-05-22 |
+| PLAN-8 | Migrate tmux → in-process PTY                        | done     | 2026-05-22 |
 | PLAN-7 | Unified pipeline TUI (interactive ≡ programmatic)    | done     | 2026-05-21 |
 | PLAN-6 | Interactive pipeline exec + orthogonal UI/exec modes | done     | 2026-05-19 |
 | PLAN-5 | `ape chat` + `ape pipeline` web mode                 | done     | 2026-05-17 |

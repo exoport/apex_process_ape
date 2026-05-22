@@ -1,15 +1,20 @@
 # CHANGELOG
 
-## vNext (PLAN-8 — proposed)
+## v0.0.14 (2026-05-22)
 
-### Interactive runner
+### Interactive runner — PLAN-8 tmux → in-process PTY migration
 
 - **Migrate from external `tmux` to in-process PTY.** `ape pipeline <name> --tui` / `--no-tui` / `--web` (interactive exec) and `ape chat` no longer shell out to a `tmux` binary. The pipeline interactive runner now allocates a pseudo-terminal in-process via `github.com/aymanbagabas/go-pty` (Unix PTY on Linux/macOS, ConPTY on Windows incl. Git Bash); slash-command prompts are delivered as real REPL keystrokes by writing bytes to the PTY master end — the same delivery shape `tmux send-keys -l` used. `ape chat` switches to direct `exec.CommandContext(claude, …)` with stdio inheritance; the bridge runtime is unaffected (TCP MCP hooks, no terminal handoff).
 - **`tmux` is no longer required.** `internal/tmux/` is deleted; replaced by `internal/repl/` with the same package-level API (NewSession / KillSession / HasSession / CapturePane / SendText / SendEnter / SendCommand / WaitForReady). The migration's value proposition: native Windows / Git Bash support, no PATH-time external dependency for interactive exec.
 - **`CapturePane` now returns a rendered VT grid.** PTY output is parsed through `github.com/hinshun/vt10x`; capture-pane output is plain text — no ANSI escape sequences, no cursor-positioning noise. Matches tmux's `capture-pane -p` semantics (visible-grid only; tmux's 2000-line history buffer is not reproduced).
+- **Grandchild reaper on Unix.** `KillSession` now SIGTERMs the child's whole process group (go-pty Setsid makes the child a session leader so pgid=pid), with a 500ms SIGKILL escalator. Closes the orphan-grandchild gap the programmatic runner already had via PLAN-2 / F1.
 - **Dropped features.** External live attach (`tmux attach -t ape-<stage>-<pid>`) is gone — the session lives and dies with ape. `ape chat` Ctrl-B-D detach is gone — the chat session is bound to the terminal for its lifetime; wrap `ape chat` in an external `tmux` / `screen` if persistence past terminal disconnect is required.
 
-PLAN-8 commits: F0 (repl package + interactive.go swap) → FA (vt10x VT-grid emulator) → FB (chat rewrite + delete `internal/tmux`) → FC (doc + comment sweep) → FD (CI matrix expansion). Detail in `development/planning/plan-8_tmux-to-pty-migration.md`.
+PLAN-8 commits: F0 (repl package + interactive.go swap) → FA (vt10x VT-grid emulator) → FB (chat rewrite + delete `internal/tmux`) → FC (doc + comment sweep) → FD (CI matrix expansion: Linux/macOS/Windows) → FE (process-group hardening). Detail in `development/planning/plan-8_tmux-to-pty-migration.md` and `_output/implementation-notes.html`.
+
+### CLI
+
+- **`ape planning` / `ape help planning` color refinements.** Action IDs in the swimlanes view now render in **blue** (was bright cyan) for better contrast against the bright-green agent personas. Fixed a regex bug where agent names (`ux`, `arch`, `dev`) were getting green-wrapped inside hyphenated skill descriptors (`create-ux`, `create-arch`, `data-arch`, `story-batch-dev`) in the legend — Go's RE2 `\b` treats `-` as a word boundary, so the new regex requires non-word AND non-hyphen surrounds. Locked in by new test `TestPlanningDiagram_AgentNamesNotColoredInsideHyphenatedSkills`.
 
 ## v0.0.13 (2026-05-21)
 
