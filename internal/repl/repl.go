@@ -201,6 +201,14 @@ func KillSession(_ context.Context, name string) error {
 		return nil
 	}
 	if s.cmd.Process != nil {
+		// On Unix, signal the whole process group so grandchildren
+		// (e.g. a future claude-spawned background task) don't
+		// orphan. terminateGroup is a no-op on Windows. The direct
+		// Process.Kill is the belt-and-suspenders for both
+		// platforms — on Unix, SIGTERM to the group has already
+		// fired and SIGKILL is scheduled; on Windows, this is the
+		// only termination signal.
+		terminateGroup(s.cmd.Process.Pid)
 		_ = s.cmd.Process.Kill()
 	}
 	_ = s.ptm.Close()
