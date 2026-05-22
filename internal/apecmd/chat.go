@@ -15,24 +15,27 @@ import (
 	"github.com/diegosz/apex_process_ape/internal/bridge/config"
 	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/diegosz/apex_process_ape/internal/runlog"
-	"github.com/diegosz/apex_process_ape/internal/tmux"
 )
 
-// newChatCmd registers `ape chat`. A thin wrapper around `claude` that
-// spawns the REPL inside a named tmux session, attaches the user to
-// it, and captures bridge hooks (PreToolUse / PostToolUse /
-// UserPromptSubmit / Stop / etc.) to a runlog directory for later
-// inspection. Project-bound — must run from a directory with
-// `_apex/config.yaml`.
+// newChatCmd registers `ape chat`. A thin wrapper around `claude`
+// that spawns the REPL as a direct child of ape with the terminal
+// (stdin/stdout/stderr) inherited — the user interacts with claude
+// exactly as if they had typed `claude` themselves. Bridge hooks
+// (PreToolUse / PostToolUse / UserPromptSubmit / Stop / etc.) are
+// captured to a runlog directory for later inspection. Project-bound
+// — must run from a directory with `_apex/config.yaml`.
 //
-// The PLAN-5 / early-PLAN-6 design tried to wrap claude in a Bubble
-// Tea TUI driven by a per-message `await_message` / `reply` MCP loop.
-// That shape was structurally fragile (the model received slash-
-// command-shaped strings via tool-result and couldn't actually invoke
-// them) and was replaced with this simpler shape in PLAN-6 / tmux
-// pivot. The bridge stays useful for hook observability; the chat
-// surface is now claude's own REPL, which the user interacts with
-// directly via tmux.
+// This is the PTY variant's equivalent of the tmux-based chat command.
+// The tmux variant spawned claude inside a named tmux session and
+// exec'd `tmux attach`, which supported detach/reattach but required
+// tmux on PATH. The PTY variant drops that dependency by letting the
+// user's existing terminal serve as the PTY for claude directly —
+// claude inherits ape's stdio (which the user's shell already wired
+// up). Detach/reattach is not available; the session ends when claude
+// exits.
+//
+// The bridge still listens on its own TCP port for MCP hook traffic,
+// independent of the terminal handoff.
 func newChatCmd() *cobra.Command {
 	var (
 		modelFlag             string
@@ -41,23 +44,23 @@ func newChatCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "chat",
-		Short: "Bridged claude REPL inside a tmux session, with hooks captured to a runlog",
-		Long: `Spawn claude inside a tmux session with the ape bridge attached
-and attach the user to it. Bridge hooks (PreToolUse, PostToolUse,
-UserPromptSubmit, Stop, and friends) are captured to
-<project>/_output/ape/chats/<id>/ alongside pipeline runs.
+		Short: "Bridged claude REPL with hooks captured to a runlog",
+		Long: `Spawn claude as a child of ape with the ape bridge attached.
+Bridge hooks (PreToolUse, PostToolUse, UserPromptSubmit, Stop, and
+friends) are captured to <project>/_output/ape/chats/<id>/ alongside
+pipeline runs.
 
 ape chat must be run from a project root (a directory containing
 _apex/config.yaml).
 
 While attached:
-  Ctrl+B D       detach (claude keeps running; runlog keeps writing)
-  /exit, /quit   exit claude (default slash commands)
-  Ctrl+D in claude exits the REPL
+  /exit, /quit       exit claude (default slash commands)
+  Ctrl+D in claude   exits the REPL
 
-ape exits when the tmux session ends. Detaching is fine — ape will
-keep capturing hooks until you re-attach and exit cleanly, or until
-the underlying claude process dies.`,
+ape exits when claude exits. Unlike the tmux variant, there is no
+detach/reattach — the chat session is bound to this terminal for its
+lifetime. To run claude in the background, use a real terminal
+multiplexer separately (e.g. wrap ape chat in tmux or screen).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			projectRoot := cwdFlag
 			if projectRoot == "" {
@@ -80,9 +83,9 @@ the underlying claude process dies.`,
 	return cmd
 }
 
-// runChat spawns claude inside a tmux session named ape-chat-<id>,
-// wires the bridge for hook observability, exec's `tmux attach` for
-// the user, and tears the session down when the user detaches/exits.
+// runChat wires the bridge runtime, then exec's claude as a foreground
+// child with stdio inherited so the user can drive the REPL directly.
+// Returns when claude exits.
 func runChat(ctx context.Context, projectRoot, modelArg string, ignoreProjectSettings bool) error {
 	apeBin, err := os.Executable()
 	if err != nil {
@@ -150,49 +153,31 @@ func runChat(ctx context.Context, projectRoot, modelArg string, ignoreProjectSet
 		return err
 	}
 
-	// Spawn claude inside a tmux session. tmux owns the PTY; the
-	// user attaches to the session below to interact with the REPL.
-	argv := append([]string{"claude"}, prepend...)
-	argv = append(argv, "--dangerously-skip-permissions")
+	args := append([]string{}, prepend...)
+	args = append(args, "--dangerously-skip-permissions")
 	if modelArg != "" {
-		argv = append(argv, "--model", modelArg)
+		args = append(args, "--model", modelArg)
 	}
 
-	sessionName := "ape-chat-" + chatID
-	_ = tmux.KillSession(runCtx, sessionName)
-	if err := tmux.NewSession(runCtx, sessionName, projectRoot, argv); err != nil {
-		return fmt.Errorf("ape chat: %w", err)
-	}
-	// Cleanup must run even after runCtx is cancelled — Background is intentional.
-	defer func() { _ = tmux.KillSession(context.Background(), sessionName) }() //nolint:contextcheck // cleanup-on-exit; runCtx is already done here
-
-	readyCtx, cancelReady := context.WithTimeout(runCtx, 30*time.Second)
-	if err := tmux.WaitForReady(readyCtx, sessionName); err != nil {
-		cancelReady()
-		return fmt.Errorf("ape chat: claude REPL not ready in tmux session: %w", err)
-	}
-	cancelReady()
-
-	fmt.Fprintf(os.Stderr, "ape chat: bridged claude in tmux session %s\n", sessionName)
+	fmt.Fprintf(os.Stderr, "ape chat: bridged claude (id %s)\n", chatID)
 	fmt.Fprintf(os.Stderr, "  runlog:  %s\n", runDir)
-	fmt.Fprintf(os.Stderr, "  detach:  Ctrl+B D (session keeps running)\n")
 	fmt.Fprintf(os.Stderr, "  exit:    /exit in claude, or Ctrl+D\n\n")
 
-	// Attach the user to the tmux session. exec'ing replaces ape's
-	// process with tmux's so the terminal handoff is clean; the
-	// bridge goroutine is unaffected because tmux is the parent of
-	// the claude child, not us. When the user detaches or claude
-	// exits, control returns here.
-	attach := exec.CommandContext(runCtx, "tmux", "attach", "-t", sessionName)
-	attach.Stdin = os.Stdin
-	attach.Stdout = os.Stdout
-	attach.Stderr = os.Stderr
-	if err := attach.Run(); err != nil {
-		// tmux attach exits non-zero when claude exits or the
-		// session goes away mid-attach — treat as a clean exit.
+	// Run claude directly with inherited stdio. ape already holds
+	// the user's TTY; claude inherits it as its controlling terminal,
+	// so it sees a real PTY without needing tmux to mediate. When
+	// claude exits, Run returns and ape tears the bridge down.
+	claude := exec.CommandContext(runCtx, "claude", args...)
+	claude.Dir = projectRoot
+	claude.Stdin = os.Stdin
+	claude.Stdout = os.Stdout
+	claude.Stderr = os.Stderr
+	if err := claude.Run(); err != nil {
+		// Non-zero exit from claude itself is treated as a clean exit
+		// — same behaviour as the tmux variant's attach error path.
 		var exitErr *exec.ExitError
 		if !errors.As(err, &exitErr) {
-			return fmt.Errorf("ape chat: tmux attach: %w", err)
+			return fmt.Errorf("ape chat: claude: %w", err)
 		}
 	}
 
