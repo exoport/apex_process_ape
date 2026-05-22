@@ -49,7 +49,7 @@ const planningDiagramRaw = `Planning Pipeline                  (arrows: ← read
 // legible on minimal terminals.
 const (
 	ansiReset   = "\x1b[0m"
-	ansiMagenta = "\x1b[95m" // skill IDs (bright magenta)
+	ansiBlue = "\x1b[95m" // skill IDs (bright magenta)
 	ansiGreen   = "\x1b[92m" // agent personas (bright green)
 )
 
@@ -79,8 +79,8 @@ func renderPlanningDiagram(colorize bool) string {
 	if !colorize {
 		return planningDiagramRaw
 	}
-	out := planningActionInBodyRe.ReplaceAllString(planningDiagramRaw, "◉ "+ansiMagenta+"$1"+ansiReset)
-	out = planningActionInLegendRe.ReplaceAllString(out, ansiMagenta+"$1"+ansiReset+" $2")
+	out := planningActionInBodyRe.ReplaceAllString(planningDiagramRaw, "◉ "+ansiBlue+"$1"+ansiReset)
+	out = planningActionInLegendRe.ReplaceAllString(out, ansiBlue+"$1"+ansiReset+" $2")
 	out = planningAgentRe.ReplaceAllString(out, ansiGreen+"$0"+ansiReset)
 	return out
 }
