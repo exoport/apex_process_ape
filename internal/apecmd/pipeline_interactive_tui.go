@@ -69,10 +69,11 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 		OnHook: func(h orchestrator.HookEvent) {
 			core.FeedHook(h)
 			// `ape notify` cannot populate h.Step in interactive mode
-			// (no step-bind plumbing under tmux), so the TUI observer
-			// would see h.Step=="" and drop the event when routing by
-			// stage. Backfill from interactiveCore.ActiveStep — the
-			// same value FeedHook already used for its runlog write.
+			// (no step-bind plumbing under the PTY-driven runner), so
+			// the TUI observer would see h.Step=="" and drop the
+			// event when routing by stage. Backfill from
+			// interactiveCore.ActiveStep — the same value FeedHook
+			// already used for its runlog write.
 			if h.Step == "" {
 				h.Step = core.ActiveStep()
 			}

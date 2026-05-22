@@ -129,9 +129,11 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 	step := h.Step
 	if step == "" {
 		// Interactive mode: `ape notify` cannot populate Step (no
-		// step-bind plumbing in the tmux-driven runner). Fill it
-		// from the active step so hook-events.jsonl records which
-		// step each event belongs to instead of "step":null.
+		// step-bind plumbing in the PTY-driven runner — the hook
+		// fires under the child claude's environment, not the
+		// runner's). Fill it from the active step so
+		// hook-events.jsonl records which step each event belongs to
+		// instead of "step":null.
 		c.stepMu.Lock()
 		step = c.activeStep
 		c.stepMu.Unlock()
@@ -238,7 +240,7 @@ func (c *interactiveCore) OnStepEnd(_ pipeline.InteractiveStepInfo) {
 // ActiveStep returns the currently-running step label
 // ("<stage>/<idx>-<skill>") or "" between steps. PLAN-7 / FC: the
 // TUI observer uses this to backfill h.Step on hook events that
-// arrived from `ape notify` with the field empty (the tmux-driven
+// arrived from `ape notify` with the field empty (the PTY-driven
 // runner has no step-bind plumbing to populate it on the wire).
 // Thread-safe; reads are guarded by stepMu the same way FeedHook
 // reads it for its runlog write.

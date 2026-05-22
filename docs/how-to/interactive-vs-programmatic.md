@@ -20,12 +20,11 @@ You can't. Pick the mode at invocation time. `ape pipeline` doesn't resume from 
 
 ## What you get under interactive (default)
 
-- One `claude` REPL per stage running inside a per-stage `tmux` session; chain steps share the session within a stage (with `/clear` typed between them unless the step sets `no-clear: true`).
+- One `claude` REPL per stage running inside a per-stage in-process PTY; chain steps share the session within a stage (with `/clear` typed between them unless the step sets `no-clear: true`).
 - Bridge step-contract verification of the agent-prefix shape (catches `/<wrong-agent>` or `/<wrong-skill>` invocations).
 - Hooks captured in `<project>/_output/pipelines/<name>/<run_id>/hook-events.jsonl`.
 - The same Bubble Tea TUI as `--tui -P` (PLAN-7): dual panels — left = rich tool-call / tool-result / assistant-text event feed, right = stages list — cursor + scroll, render-style cycling (`r`), completion-phase final-report row. See [tui-keybindings.md](../reference/tui-keybindings.md) for the full keybind set. Interactive-only addition: an await-message modal that opens when a skill parks an `await_message` MCP call to ask for input.
-- Attach for live debugging while a run is in flight: `tmux attach -t ape-<stage>-<pid>`.
-- Requires `tmux` on `PATH`. Programmatic exec (`-P`, `--eval`) has no tmux dependency.
+- No external runtime dependency. The PTY is allocated in-process via `github.com/aymanbagabas/go-pty`, so interactive exec works on Linux, macOS, and Windows (incl. Git Bash via ConPTY) without `tmux` installed.
 
 ## What you give up under interactive
 

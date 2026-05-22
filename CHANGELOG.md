@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## vNext (PLAN-8 — proposed)
+
+### Interactive runner
+
+- **Migrate from external `tmux` to in-process PTY.** `ape pipeline <name> --tui` / `--no-tui` / `--web` (interactive exec) and `ape chat` no longer shell out to a `tmux` binary. The pipeline interactive runner now allocates a pseudo-terminal in-process via `github.com/aymanbagabas/go-pty` (Unix PTY on Linux/macOS, ConPTY on Windows incl. Git Bash); slash-command prompts are delivered as real REPL keystrokes by writing bytes to the PTY master end — the same delivery shape `tmux send-keys -l` used. `ape chat` switches to direct `exec.CommandContext(claude, …)` with stdio inheritance; the bridge runtime is unaffected (TCP MCP hooks, no terminal handoff).
+- **`tmux` is no longer required.** `internal/tmux/` is deleted; replaced by `internal/repl/` with the same package-level API (NewSession / KillSession / HasSession / CapturePane / SendText / SendEnter / SendCommand / WaitForReady). The migration's value proposition: native Windows / Git Bash support, no PATH-time external dependency for interactive exec.
+- **`CapturePane` now returns a rendered VT grid.** PTY output is parsed through `github.com/hinshun/vt10x`; capture-pane output is plain text — no ANSI escape sequences, no cursor-positioning noise. Matches tmux's `capture-pane -p` semantics (visible-grid only; tmux's 2000-line history buffer is not reproduced).
+- **Dropped features.** External live attach (`tmux attach -t ape-<stage>-<pid>`) is gone — the session lives and dies with ape. `ape chat` Ctrl-B-D detach is gone — the chat session is bound to the terminal for its lifetime; wrap `ape chat` in an external `tmux` / `screen` if persistence past terminal disconnect is required.
+
+PLAN-8 commits: F0 (repl package + interactive.go swap) → FA (vt10x VT-grid emulator) → FB (chat rewrite + delete `internal/tmux`) → FC (doc + comment sweep) → FD (CI matrix expansion). Detail in `development/planning/plan-8_tmux-to-pty-migration.md`.
+
 ## v0.0.13 (2026-05-21)
 
 ### Pipeline TUI

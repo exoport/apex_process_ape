@@ -10,14 +10,15 @@ import (
 
 // StepContract is the per-step verification spec the runner registers
 // with a ContractVerifier before typing the step's slash command into
-// claude's REPL via tmux send-keys. PLAN-6 / C4 step contract:
+// claude's REPL via PTY Write (PLAN-6 / PLAN-8). PLAN-6 / C4 step
+// contract:
 //
 //   - The UserPromptSubmit hook payload must match the agent-prefixed
 //     skill prompt shape (PAT-25):
 //     `/<Agent> --autonomous -- <Skill> --autonomous ...` when Agent != ""
 //     `/<Skill> --autonomous --no-commit ...` when Agent == ""
 //
-// `/clear` between steps is driven by the runner (tmux send-keys) and
+// `/clear` between steps is driven by the runner (PTY Write) and
 // fires its own UserPromptSubmit hook, but that hook arrives BETWEEN
 // the previous step's EndStep and the next step's BeginStep — i.e.,
 // outside any active contract window — so the verifier silently

@@ -99,11 +99,12 @@ type RunOptions struct {
 
 	// Interactive, when true, runs the pipeline under PLAN-6 exec
 	// mode: one `claude` process per stage running inside its own
-	// tmux session, with steps fed as real REPL keystrokes via
-	// `tmux send-keys` (instead of one `claude -p` per step). Steps
-	// share the session within a stage and are separated by a
-	// `/clear` slash command; stage boundaries are the process spawn.
-	// Default is false (today's per-step programmatic mode).
+	// in-process PTY (PLAN-8: `internal/repl/`), with steps fed as
+	// real REPL keystrokes via PTY Write (instead of one `claude -p`
+	// per step). Steps share the session within a stage and are
+	// separated by a `/clear` slash command; stage boundaries are the
+	// process spawn. Default is false (today's per-step programmatic
+	// mode).
 	Interactive bool
 
 	// WaitStepDone is called between steps in interactive mode to
@@ -121,10 +122,10 @@ type RunOptions struct {
 	InteractiveStepGrace time.Duration
 
 	// OnInteractiveStepStart fires before the interactive runner
-	// types a step's slash-command prompt into the tmux pane. The
-	// apecmd layer uses this to register a StepContract with the
-	// bridge verifier so the next UserPromptSubmit hook can be
-	// matched against the expected agent-prefix shape.
+	// types a step's slash-command prompt into the PTY. The apecmd
+	// layer uses this to register a StepContract with the bridge
+	// verifier so the next UserPromptSubmit hook can be matched
+	// against the expected agent-prefix shape.
 	OnInteractiveStepStart func(info InteractiveStepInfo)
 	// OnInteractiveStepEnd fires after WaitStepDone returns for a
 	// step. Used by apecmd to release the StepContract so a stray

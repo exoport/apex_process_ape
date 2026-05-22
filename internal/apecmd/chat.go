@@ -25,14 +25,14 @@ import (
 // captured to a runlog directory for later inspection. Project-bound
 // — must run from a directory with `_apex/config.yaml`.
 //
-// This is the PTY variant's equivalent of the tmux-based chat command.
-// The tmux variant spawned claude inside a named tmux session and
-// exec'd `tmux attach`, which supported detach/reattach but required
-// tmux on PATH. The PTY variant drops that dependency by letting the
-// user's existing terminal serve as the PTY for claude directly —
-// claude inherits ape's stdio (which the user's shell already wired
-// up). Detach/reattach is not available; the session ends when claude
-// exits.
+// PLAN-8 (2026-05-22) replaced the tmux-based chat surface (which
+// spawned claude inside a named tmux session and exec'd `tmux attach`)
+// with this direct-exec shape. The PLAN-6 tmux design supported
+// detach/reattach but required tmux on PATH. The current shape drops
+// that dependency by letting the user's existing terminal serve as
+// the PTY for claude directly — claude inherits ape's stdio (which
+// the user's shell already wired up). Detach/reattach is not
+// available; the session ends when claude exits.
 //
 // The bridge still listens on its own TCP port for MCP hook traffic,
 // independent of the terminal handoff.
@@ -57,10 +57,10 @@ While attached:
   /exit, /quit       exit claude (default slash commands)
   Ctrl+D in claude   exits the REPL
 
-ape exits when claude exits. Unlike the tmux variant, there is no
-detach/reattach — the chat session is bound to this terminal for its
-lifetime. To run claude in the background, use a real terminal
-multiplexer separately (e.g. wrap ape chat in tmux or screen).`,
+ape exits when claude exits. The chat session is bound to this
+terminal for its lifetime — there is no detach/reattach. To run
+claude in the background, use a real terminal multiplexer
+separately (e.g. wrap ape chat in tmux or screen).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			projectRoot := cwdFlag
 			if projectRoot == "" {
@@ -165,8 +165,8 @@ func runChat(ctx context.Context, projectRoot, modelArg string, ignoreProjectSet
 
 	// Run claude directly with inherited stdio. ape already holds
 	// the user's TTY; claude inherits it as its controlling terminal,
-	// so it sees a real PTY without needing tmux to mediate. When
-	// claude exits, Run returns and ape tears the bridge down.
+	// so it sees a real PTY without any in-process multiplexing.
+	// When claude exits, Run returns and ape tears the bridge down.
 	claude := exec.CommandContext(runCtx, "claude", args...)
 	claude.Dir = projectRoot
 	claude.Stdin = os.Stdin
@@ -174,7 +174,7 @@ func runChat(ctx context.Context, projectRoot, modelArg string, ignoreProjectSet
 	claude.Stderr = os.Stderr
 	if err := claude.Run(); err != nil {
 		// Non-zero exit from claude itself is treated as a clean exit
-		// — same behaviour as the tmux variant's attach error path.
+		// — same behaviour the PLAN-6 tmux-era attach path provided.
 		var exitErr *exec.ExitError
 		if !errors.As(err, &exitErr) {
 			return fmt.Errorf("ape chat: claude: %w", err)

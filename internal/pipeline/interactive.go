@@ -14,13 +14,13 @@ import (
 )
 
 // runStagesInteractive drives a pipeline in PLAN-6 interactive exec
-// mode: one `claude` process per stage running inside its own tmux
-// session, prompts delivered as real keystrokes via `tmux send-keys`,
-// the bridge's `Stop` hook signalling step done. Within a stage,
-// steps share the same claude session and use `/clear` between them
-// to reset the model's working context.
+// mode: one `claude` process per stage running inside its own
+// in-process PTY (PLAN-8: `internal/repl/`), prompts delivered as real
+// keystrokes via PTY Write, the bridge's `Stop` hook signalling step
+// done. Within a stage, steps share the same claude session and use
+// `/clear` between them to reset the model's working context.
 //
-// Step contract (PLAN-6 / C4, tmux-driven):
+// Step contract (PLAN-6 / C4, PTY-driven):
 //
 //   - The skill prompt follows PAT-25:
 //     "/{agent} --autonomous -- {skill} --autonomous {args} {promptFlag prompt}"
@@ -32,11 +32,11 @@ import (
 //     command (claude's REPL forwards it); the ContractVerifier
 //     enforces the expected agent + skill prefix.
 //
-// Context isolation between stages comes from a fresh tmux session
-// + claude process spawn; within a stage, `/clear` provides the
-// per-step reset (skills are written assuming a clean working
-// context). A step may set `NoClear` to opt out — used for skills
-// that need to see the previous step's context (rare).
+// Context isolation between stages comes from a fresh PTY + claude
+// process spawn; within a stage, `/clear` provides the per-step reset
+// (skills are written assuming a clean working context). A step may
+// set `NoClear` to opt out — used for skills that need to see the
+// previous step's context (rare).
 func runStagesInteractive(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWriter) error {
 	for _, stage := range spec.Stages() {
 		stageStart := time.Now()
@@ -69,10 +69,9 @@ func runStagesInteractive(ctx context.Context, spec *Spec, opts RunOptions, mw *
 }
 
 // interactiveReadyTimeout bounds the wait for claude's REPL to come
-// up inside the tmux session. The previous PTY design used 30s for
-// the bridge-ready handshake; tmux + claude REPL is typically ready
-// in under 2s, so 30s is plenty of headroom while still bounding the
-// failure mode.
+// up inside the PTY. The PLAN-6-era handshake was typically ready in
+// under 2s under tmux, and the in-process PTY (PLAN-8) is comparable;
+// 30s is plenty of headroom while still bounding the failure mode.
 const interactiveReadyTimeout = 30 * time.Second
 
 // interactiveClearSettle is how long we wait after sending `/clear`
@@ -80,11 +79,10 @@ const interactiveReadyTimeout = 30 * time.Second
 // ~200ms; doubling to 500ms keeps the prompt from racing the redraw.
 const interactiveClearSettle = 500 * time.Millisecond
 
-// runStageInteractive spawns one claude inside a tmux session for the
-// stage, sends each step's prompt as a real REPL slash command via
-// tmux send-keys, waits for the bridge's Stop hook between steps,
-// emits per-step manifest records, and tears the session down at the
-// end.
+// runStageInteractive spawns one claude inside a PTY for the stage,
+// sends each step's prompt as a real REPL slash command via PTY
+// Write, waits for the bridge's Stop hook between steps, emits
+// per-step manifest records, and tears the session down at the end.
 //
 //nolint:funlen,maintidx // single-spawn stage orchestration intentionally lives in one function; the keystroke / wait / capture interaction is clearer in one place than fragmented across helpers.
 func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunOptions, mw *manifestWriter, stageIdx int) (RunStatus, error) {
@@ -123,7 +121,7 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 	readyCtx, cancelReady := context.WithTimeout(ctx, interactiveReadyTimeout)
 	if err := repl.WaitForReady(readyCtx, sessionName); err != nil {
 		cancelReady()
-		return StatusFailed, fmt.Errorf("stage %q: claude REPL not ready in tmux session: %w", stage.Name, err)
+		return StatusFailed, fmt.Errorf("stage %q: claude REPL not ready in PTY: %w", stage.Name, err)
 	}
 	cancelReady()
 
@@ -325,9 +323,11 @@ func writeInteractiveStepEvent(w io.Writer, kind string, fields map[string]any) 
 	_, _ = w.Write(append(b, '\n'))
 }
 
-// sanitizeSessionName replaces characters tmux doesn't like in session
-// names (whitespace, `:`, `.`, `'`) with `-` so the stage name can be
-// used directly without surprises.
+// sanitizeSessionName replaces characters not welcome in a session
+// name (whitespace, `:`, `.`, `'`) with `-` so the stage name can be
+// used directly without surprises. The replacement set is kept
+// identical to the PLAN-6 tmux-era sanitiser so manifest session
+// names stay stable across the PLAN-8 PTY migration.
 func sanitizeSessionName(s string) string {
 	r := strings.NewReplacer(
 		" ", "-",
@@ -341,11 +341,12 @@ func sanitizeSessionName(s string) string {
 }
 
 // diffPaneSnapshot returns the lines present in after but not in
-// before, preserving order. tmux capture-pane returns the full
-// scrollback, so after is a superset of before for the parts the
-// REPL hasn't scrolled out. A line-set diff is good enough for the
-// manifest output buffer — the runlog has the authoritative bridge
-// calls / hooks; capture-pane output is just for human inspection.
+// before, preserving order. CapturePane (PLAN-8: vt10x-rendered
+// grid) returns the visible pane contents; we tail-anchor on the
+// previous snapshot's last meaningful line to lift just the new
+// rows. A line-set diff is good enough for the manifest output
+// buffer — the runlog has the authoritative bridge calls / hooks;
+// capture-pane output is just for human inspection.
 func diffPaneSnapshot(before, after string) string {
 	if before == "" {
 		return after
@@ -365,11 +366,11 @@ func diffPaneSnapshot(before, after string) string {
 }
 
 // buildInteractiveArgv builds the argv for a per-stage claude
-// invocation. claude runs in true REPL mode inside a tmux session —
-// no `-p`, no `--system-prompt`. Prompts arrive as real keystrokes
-// from `tmux send-keys`, so the model parses slash commands exactly
-// as it would for a human user. The MCP bridge is still wired
-// (`--mcp-config`, `--settings`) for hook observability — the
+// invocation. claude runs in true REPL mode inside a PTY — no `-p`,
+// no `--system-prompt`. Prompts arrive as real keystrokes from PTY
+// Write (`internal/repl/`), so the model parses slash commands
+// exactly as it would for a human user. The MCP bridge is still
+// wired (`--mcp-config`, `--settings`) for hook observability — the
 // runner reads UserPromptSubmit / Stop hooks but no longer drives
 // prompts through `await_message`.
 func buildInteractiveArgv(claudeBin, model string, prependFlags []string) ([]string, error) {
@@ -386,7 +387,7 @@ func buildInteractiveArgv(claudeBin, model string, prependFlags []string) ([]str
 }
 
 // assembleInteractivePromptLine returns the PAT-25 slash command the
-// runner types into claude's REPL via tmux:
+// runner types into claude's REPL via PTY Write:
 //
 //	"/<agent> --autonomous -- <skill> --autonomous {args} {prompt}"
 //	"/<skill> --autonomous --no-commit {args} {prompt}"   (no agent)

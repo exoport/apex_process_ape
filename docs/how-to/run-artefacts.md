@@ -31,8 +31,9 @@ PLAN-5 / C6.
 
 ## Chat sessions
 
-`ape chat` runs claude inside a tmux session with the bridge wired
-for hook observability. Artefacts:
+`ape chat` runs claude as a direct child of ape with stdio inherited
+(claude shares ape's controlling terminal); the bridge is wired for
+hook observability over a separate TCP port. Artefacts:
 
 ```
 <project>/_output/ape/chats/<chat-id>/
@@ -43,8 +44,9 @@ for hook observability. Artefacts:
 
 - `<chat-id>` is `YYYYMMDDTHHMMSSZ` (UTC ISO-8601-style).
 - No `session.yaml` and no `transcript.jsonl` symlink today — the
-  chat surface is a thin tmux spawn-and-attach (PLAN-6 tmux pivot,
-  2026-05-20). claude's own transcript still lives at
+  chat surface is a thin direct-exec with stdio inheritance (PLAN-8
+  PTY migration, 2026-05-22; before that, a tmux spawn-and-attach
+  under PLAN-6, 2026-05-20). claude's own transcript still lives at
   `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`.
 
 ## Cross-project state

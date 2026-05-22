@@ -147,7 +147,7 @@ func newPipelineCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&webFlag, "web", false, "Bridged web UI (now the default). Explicit form for scripts.")
 	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "Bubble Tea TUI (pre-PLAN-5 default; now opt-in).")
 	cmd.Flags().BoolVar(&evalFlag, "eval", false, "LOCKED byte-equivalent stdout for the eval harness / CI capture (no bridge, no hooks, no UI; admits no exec modifier).")
-	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "No UI surface, but still interactive exec (one claude REPL per stage in tmux). Combine with -P for plain-stdout programmatic exec; pass --eval for the locked byte-equivalent path.")
+	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "No UI surface, but still interactive exec (one claude REPL per stage in an in-process PTY). Combine with -P for plain-stdout programmatic exec; pass --eval for the locked byte-equivalent path.")
 	cmd.Flags().BoolVar(&openFlag, "open", false, "With --web (or default): xdg-open the broker URL on start.")
 	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json. Honoured in --web mode.")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "With --no-tui: suppress per-event stream; print only stage/step start/end markers")

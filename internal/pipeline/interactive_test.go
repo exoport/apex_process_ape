@@ -6,9 +6,9 @@ import (
 )
 
 // TestAssembleInteractivePromptLine covers the PAT-25 prompt-string
-// shape the runner types into the tmux pane via send-keys. PLAN-6:
-// the prompt is one slash-command line; `/clear` is sent separately
-// between steps by the runner (not assembled here).
+// shape the runner types into the PTY via Write. PLAN-6: the prompt
+// is one slash-command line; `/clear` is sent separately between
+// steps by the runner (not assembled here).
 func TestAssembleInteractivePromptLine(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -54,10 +54,10 @@ func TestAssembleInteractivePromptLine(t *testing.T) {
 }
 
 // TestBuildInteractiveArgv covers the per-stage argv shape for the
-// tmux-driven interactive runner: bridge prepend flags, then
+// PTY-driven interactive runner: bridge prepend flags, then
 // --dangerously-skip-permissions, then optional --model. No -p, no
 // --output-format, no --system-prompt — the model just runs its
-// normal REPL inside the tmux session.
+// normal REPL inside the PTY.
 func TestBuildInteractiveArgv(t *testing.T) {
 	cases := []struct {
 		name         string

@@ -56,7 +56,7 @@ func TestSessionLifecycle(t *testing.T) {
 }
 
 // TestSendCommandOrderingWithClear is the multi-step /clear regression
-// guard. Mirrors the tmux variant's test: drive a bash session with
+// guard. Carries over the PLAN-6 tmux-era test: drive a bash session with
 // PS1='❯ ' as a stand-in for claude (so WaitForReady's glyph matches),
 // then send /clear before a slash-style prompt and assert both lines
 // appear in capture-pane in order.

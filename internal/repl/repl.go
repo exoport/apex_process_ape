@@ -1,10 +1,14 @@
 // Package repl drives a child program (typically `claude`) through an
 // in-process pseudo-terminal so callers can type into it and read its
-// rendered output programmatically. Replaces the previous tmux shim
-// used by ape's interactive runners — the API surface is intentionally
-// the same (NewSession/KillSession/HasSession/CapturePane/SendText/
-// SendEnter/SendCommand/WaitForReady, keyed by session name) so
-// consumers compile unchanged.
+// rendered output programmatically. The interactive runner ships its
+// per-step prompts as PTY keystrokes (Write to the master end + Enter),
+// and reads claude's rendered output through a VT-grid emulator. API
+// surface: NewSession / KillSession / HasSession / CapturePane /
+// SendText / SendEnter / SendCommand / WaitForReady, keyed by session
+// name. PLAN-8 (2026-05-22) replaced the prior `internal/tmux` shim
+// that shelled out to a `tmux` binary; the keystroke-delivery shape is
+// the same (writing bytes to the PTY master is what `tmux send-keys -l`
+// did under the hood), only the PTY ownership moved in-process.
 //
 // The PTY backend is github.com/aymanbagabas/go-pty, which transparently
 // uses Unix PTYs on Linux/macOS and ConPTY on Windows — so ape works
@@ -13,15 +17,15 @@
 //
 // PTY output is parsed through a github.com/hinshun/vt10x VT100/xterm
 // emulator. CapturePane returns the rendered grid as plain text — no
-// ANSI escape sequences, no cursor-positioning noise. This matches
-// tmux's `capture-pane -p` semantics rather than dumping raw bytes.
+// ANSI escape sequences, no cursor-positioning noise — matching tmux's
+// `capture-pane -p` semantics rather than dumping raw bytes.
 //
-// Trade-offs vs the tmux variant:
+// Known limitations:
 //
 //   - No external attach: a session lives and dies with the ape
-//     process. There is no `tmux attach -t …` equivalent for an
-//     in-flight run. Pipeline runs that want live introspection should
-//     tail the per-step ndjson event log instead.
+//     process. There is no equivalent of the old `tmux attach -t …`
+//     for an in-flight run. Pipeline runs that want live introspection
+//     should tail the per-step ndjson event log instead.
 //   - Visible-grid scrollback only. vt10x's grid is sized to claude's
 //     perceived terminal (200×50), matching the ioctl winsize claude
 //     reads. Lines that scroll off the top via `\n` at the bottom are
@@ -58,9 +62,10 @@ const ReadyPollInterval = 250 * time.Millisecond
 // ReadyGlyph is the prompt glyph claude renders when ready.
 const ReadyGlyph = "❯"
 
-// Pane geometry. Matches the tmux variant's `-x 200 -y 50` so capture
-// snapshots have the same shape — claude's TUI wraps to this width and
-// expects this height from the ioctl winsize.
+// Pane geometry. Carries forward the PLAN-6 tmux-era `-x 200 -y 50`
+// so capture snapshots have the same shape across the migration —
+// claude's TUI wraps to this width and expects this height from the
+// ioctl winsize.
 const (
 	paneCols = 200
 	paneRows = 50
@@ -232,7 +237,7 @@ func CapturePane(_ context.Context, name string) (string, error) {
 }
 
 // SendText writes text literally to the PTY input without submitting
-// it. Counterpart of tmux's `send-keys -l`: every byte goes through
+// it. Successor to tmux's `send-keys -l`: every byte goes through
 // verbatim so leading slashes and special chars survive.
 func SendText(_ context.Context, name, text string) error {
 	s, ok := lookup(name)

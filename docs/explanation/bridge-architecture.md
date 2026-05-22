@@ -11,16 +11,18 @@ mode. For the wire schema, see
 [bridge-ipc.md](../reference/bridge-ipc.md). For the security model,
 see [bridge-security.md](../reference/bridge-security.md). PLAN-5 / C3.
 
-> **Note on interactive exec (PLAN-6 tmux pivot, 2026-05-20).** Pipeline
+> **Note on interactive exec (PLAN-6 tmux pivot 2026-05-20 → PLAN-8 PTY migration 2026-05-22).** Pipeline
 > interactive mode (`ape pipeline --tui` / `--no-tui` / `--web` without
 > `-P`) and `ape chat` no longer use `await_message` / `reply` as a
-> prompt-delivery channel. They run `claude` inside a per-stage `tmux`
-> session and deliver prompts as real REPL keystrokes via
-> `tmux send-keys -l <slash-command>` + Enter. The bridge is still
-> wired for **hook observability** (`PreToolUse`, `PostToolUse`,
+> prompt-delivery channel. They run `claude` attached to a PTY and
+> deliver prompts as real REPL keystrokes (`internal/repl/` writes the
+> slash command to the PTY master + Enter). The bridge is still wired
+> for **hook observability** (`PreToolUse`, `PostToolUse`,
 > `UserPromptSubmit`, `Stop`, etc.) but `await_message`/`reply` are
-> dormant for those modes. The `--web -P` flow described below is
-> unaffected.
+> dormant for those modes. Originally implemented over external `tmux`
+> (PLAN-6); PLAN-8 moved the PTY in-process via `go-pty` to drop the
+> `tmux` runtime dependency and add native Windows support. The `--web -P`
+> flow described below is unaffected by either pivot.
 
 ## Why an MCP bridge
 

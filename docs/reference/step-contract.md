@@ -1,6 +1,6 @@
 # Reference — step contract (interactive exec)
 
-PLAN-6 / C4 defines the per-step interaction between the runner and `claude` in interactive exec mode. The runner spawns `claude` inside a tmux session and delivers each step's prompt as real REPL keystrokes via `tmux send-keys`. The bridge observes the resulting `UserPromptSubmit` and `Stop` hooks; the `ContractVerifier` checks each step's prompt shape and fires a hard-fail on mismatch.
+PLAN-6 / C4 defines the per-step interaction between the runner and `claude` in interactive exec mode. The runner spawns `claude` inside an in-process PTY (PLAN-8: `internal/repl/`) and delivers each step's prompt as real REPL keystrokes by writing bytes to the PTY master end. The bridge observes the resulting `UserPromptSubmit` and `Stop` hooks; the `ContractVerifier` checks each step's prompt shape and fires a hard-fail on mismatch.
 
 The contract only applies under interactive exec. Programmatic exec (`--eval`, `--web -P`) spawns a fresh `claude -p` per step, so context/model/agent isolation comes from the process boundary and no in-session verification is needed.
 
@@ -10,10 +10,10 @@ For every step within a stage, the interactive runner produces this sequence:
 
 1. **`/clear`** before the next step's prompt — **default-on for every step after the first**.
    - Opt out with `no-clear: true` at the step level when the step depends on the previous step's context (rare).
-   - The first step of a stage skips `/clear` because the tmux session and `claude` process are fresh by construction.
-   - The slash command is typed into the pane via `tmux send-keys -l` + Enter; claude's REPL parses it and resets context.
+   - The first step of a stage skips `/clear` because the PTY and `claude` process are fresh by construction.
+   - The slash command is typed into the PTY (Write to master + Enter); claude's REPL parses it and resets context.
 
-2. **Agent-prefixed skill prompt** typed via `tmux send-keys -l` + Enter:
+2. **Agent-prefixed skill prompt** typed via PTY Write + Enter:
    - With agent: `/<step.agent> --autonomous -- <step.skill> --autonomous` (then args, then optional `--prompt <user prompt>`)
    - Without agent: `/<step.skill> --autonomous --no-commit` (then args, then optional `--prompt <user prompt>`)
 

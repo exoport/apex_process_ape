@@ -3,7 +3,7 @@
 `ape pipeline` has two ways to drive `claude`:
 
 - **Programmatic** (PLAN-1 through PLAN-5): one `claude -p <prompt>` subprocess per step. Each step spawns claude fresh, prompt is supplied via `-p`, claude exits when the response completes.
-- **Interactive** (PLAN-6): one persistent `claude` REPL per **stage**, running inside a per-stage tmux session. Steps in the stage's chain are delivered as real REPL keystrokes via `tmux send-keys` (e.g., the runner types `/clear` between steps, then the agent-prefixed skill slash command). claude exits when the tmux session is killed at stage end.
+- **Interactive** (PLAN-6 / PLAN-8): one persistent `claude` REPL per **stage**, running inside a per-stage in-process PTY. Steps in the stage's chain are delivered as real REPL keystrokes by writing bytes to the PTY master end (e.g., the runner types `/clear` between steps, then the agent-prefixed skill slash command). claude exits when the PTY is closed at stage end. Originally implemented over an external `tmux` (PLAN-6 / 2026-05-20); PLAN-8 (2026-05-22) moved the PTY allocation in-process via `github.com/aymanbagabas/go-pty` so the runner works on Linux, macOS, and Windows (Git Bash incl.) without `tmux` on `PATH`.
 
 This page explains why both modes exist, what each one is for, and the tradeoffs.
 
@@ -59,12 +59,12 @@ When a skill misbehaves on its own (independent of context), the per-step `claud
 
 ## How the step contract works
 
-For each step within a stage, the runner types into the stage's tmux pane:
+For each step within a stage, the runner types into the stage's PTY:
 
 1. `/clear` between steps (skipped for the first step of a stage, and for any step marked `no-clear: true`).
 2. The skill prompt in PAT-25 shape (`/<agent> --autonomous -- <skill> --autonomous ...`).
 
-Each `tmux send-keys` types the slash command literally, settles 300ms, then presses Enter — claude's REPL parses it as a real user-typed slash command and invokes the matching skill. The bridge observes a `UserPromptSubmit` hook for each line; the `ContractVerifier` checks the agent + skill prefix against what the runner registered via `BeginStep` and hard-fails on mismatch. `/clear` arrives outside any active-step contract window so the verifier ignores it. See [step-contract.md](../reference/step-contract.md) for the full mechanics.
+Each PTY Write types the slash command literally, settles 300ms, then presses Enter — claude's REPL parses it as a real user-typed slash command and invokes the matching skill. The bridge observes a `UserPromptSubmit` hook for each line; the `ContractVerifier` checks the agent + skill prefix against what the runner registered via `BeginStep` and hard-fails on mismatch. `/clear` arrives outside any active-step contract window so the verifier ignores it. See [step-contract.md](../reference/step-contract.md) for the full mechanics.
 
 ## What hooks add over `--output-format stream-json`
 
@@ -80,7 +80,7 @@ This is the reason hooks exist at all in interactive mode. Drop hooks and PLAN-6
 
 ### 2. `Stop` as a step-done signal (load-bearing in interactive)
 
-Under programmatic exec (`claude -p <prompt>`), the process exits when the response completes — `cmd.Wait()` is the natural step boundary, and stream-json's terminal `result` event arrives just before. Under interactive exec (no `-p`), claude **stays alive** between turns waiting for the next keystroke in the tmux pane; the process boundary is now the stage, not the step. The `Stop` hook fires synchronously per claude-loop iteration (one per "user turn ended"), so the runner subscribes to it as the "model finished this step's response — safe to send the next prompt" signal. Stream-json's `result` event isn't emitted in interactive mode, so pane output alone can't tell you when to advance.
+Under programmatic exec (`claude -p <prompt>`), the process exits when the response completes — `cmd.Wait()` is the natural step boundary, and stream-json's terminal `result` event arrives just before. Under interactive exec (no `-p`), claude **stays alive** between turns waiting for the next keystroke from the PTY; the process boundary is now the stage, not the step. The `Stop` hook fires synchronously per claude-loop iteration (one per "user turn ended"), so the runner subscribes to it as the "model finished this step's response — safe to send the next prompt" signal. Stream-json's `result` event isn't emitted in interactive mode, so pane output alone can't tell you when to advance.
 
 `apecmd/pipeline_interactive.go` (FeedHook → stepDoneCh) wires the Stop-hook → `WaitStepDone` path; this is what makes the per-stage interactive runtime work at all.
 
