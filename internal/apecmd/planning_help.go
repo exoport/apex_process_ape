@@ -43,17 +43,17 @@ const planningDiagramRaw = `Planning Pipeline                  (arrows: ← read
             SD story-batch-dev
 `
 
-// ANSI color escapes for the colorized variant. Bright cyan / bright
-// green map to the 16-color palette every modern terminal supports;
-// no 256-color or truecolor escapes so the output remains legible on
-// minimal terminals.
+// ANSI color escapes for the colorized variant. Bright magenta /
+// bright green map to the 16-color palette every modern terminal
+// supports; no 256-color or truecolor escapes so the output remains
+// legible on minimal terminals.
 const (
-	ansiReset = "\x1b[0m"
-	ansiCyan  = "\x1b[96m" // skill IDs (bright cyan)
-	ansiGreen = "\x1b[92m" // agent personas (bright green)
+	ansiReset   = "\x1b[0m"
+	ansiMagenta = "\x1b[95m" // skill IDs (bright magenta)
+	ansiGreen   = "\x1b[92m" // agent personas (bright green)
 )
 
-// Cyan applies only to skill IDs that name the *action* — the node
+// Magenta applies only to skill IDs that name the *action* — the node
 // itself, on the left of `←`. Right-of-arrow IDs are parent references
 // and stay uncolored so the reader can tell the action and its parents
 // apart at a glance.
@@ -79,8 +79,8 @@ func renderPlanningDiagram(colorize bool) string {
 	if !colorize {
 		return planningDiagramRaw
 	}
-	out := planningActionInBodyRe.ReplaceAllString(planningDiagramRaw, "◉ "+ansiCyan+"$1"+ansiReset)
-	out = planningActionInLegendRe.ReplaceAllString(out, ansiCyan+"$1"+ansiReset+" $2")
+	out := planningActionInBodyRe.ReplaceAllString(planningDiagramRaw, "◉ "+ansiMagenta+"$1"+ansiReset)
+	out = planningActionInLegendRe.ReplaceAllString(out, ansiMagenta+"$1"+ansiReset+" $2")
 	out = planningAgentRe.ReplaceAllString(out, ansiGreen+"$0"+ansiReset)
 	return out
 }
