@@ -25,10 +25,14 @@ const planningDiagramRaw = `Planning Pipeline                  (arrows: ← read
  ◉ PB
             ◉ CP←PB
                          ◉ CU←CP     ◉ CA←CP   ◉ ES←CP
+                                     *Govern
+                                     *Funlty
+                                     *PrjCtx
                          ◉ CW←CU                ◉ DM←ES
                          ◉ CM←CW                ◉ DA←CA,DM,ES
             ◉ IR←CA,DA
             ◉ CE←IR
+                                                                ◉ SS←CE
                                                                 ◉ SC←CE
                          ◉ SU←CW,SC             ◉ FM←SC,DM,ES
                                                 ◉ SE←FM
