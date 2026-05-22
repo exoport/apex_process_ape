@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## v0.0.15 (2026-05-22)
+
+Post-release follow-up for v0.0.14 CI breakage. The release itself was
+green and signed; CI on `main` after the v0.0.14 merge was red on three
+of four matrix jobs.
+
+- **Bump `golang.org/x/crypto` to v0.52.0.** Fixes `govulncheck` finding
+  `GO-2026-5018` (DoS via pathological RSA/DSA parameters in
+  `crypto/ssh.ParsePublicKey`). The reachability chain was
+  `orchestrator.BridgeRuntime.Serve → sync.Once.Do → ssh.ParsePublicKey`;
+  we don't call the SSH path in practice but govulncheck is conservative.
+- **Restrict the FE grandchild-reaper test to Linux.** Move
+  `TestKillSession_ReapsGrandchildren` from `repl_test.go` (no build
+  tag) to `repl_linux_test.go` (`//go:build linux`). Fixes the
+  windows-latest CI leg where the test file referenced
+  `procGroupKillGrace` (defined under `linux || darwin`) without a
+  matching tag, breaking compilation. Production reaper code in
+  `proc_unix.go` still covers both Linux and macOS; only the
+  pgrep-based test moved.
+
+CI on macOS (`Test (macos-latest)`) was also red on v0.0.14; details
+weren't surfaced in the failure output. v0.0.15 reduces the test
+surface on darwin (no reaper test); if it stays red, follow-up
+investigation needs CI log access.
+
 ## v0.0.14 (2026-05-22)
 
 ### Interactive runner — PLAN-8 tmux → in-process PTY migration
