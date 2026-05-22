@@ -15,6 +15,11 @@ func TestTailer_AppendedLinesProcessed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The test owns the writer handle. Close it before t.TempDir's
+	// cleanup runs — on Windows, RemoveAll cannot delete a file that
+	// still has an open handle anywhere (Linux/macOS allow it via the
+	// unlink-while-open inode trick).
+	t.Cleanup(func() { _ = f.Close() })
 	// Write one assistant line upfront (the file exists before the
 	// tailer starts — PLAN-5 / C7 read-from-byte-0 contract).
 	if _, err := f.WriteString(
@@ -77,6 +82,8 @@ func TestTailer_PartialLineRejoined(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Same Windows-cleanup reason as TestTailer_AppendedLinesProcessed.
+	t.Cleanup(func() { _ = f.Close() })
 	tailer := NewTailer(path, 20*time.Millisecond)
 	ctx := t.Context()
 	tailer.Start(ctx)
