@@ -71,6 +71,12 @@ const (
 	paneRows = 50
 )
 
+// pumpReadBufSize is the per-read scratch buffer for the PTY pump.
+// 4 KiB matches the default pipe buffer in Linux's kernel and keeps
+// the read syscall count low without holding more than one page in
+// flight.
+const pumpReadBufSize = 4096
+
 type session struct {
 	name string
 	ptm  pty.Pty
@@ -144,7 +150,7 @@ func NewSession(_ context.Context, name, dir string, argv []string) error {
 // acquires the terminal's internal lock, so concurrent CapturePane
 // reads are safe.
 func (s *session) pump() {
-	buf := make([]byte, 4096)
+	buf := make([]byte, pumpReadBufSize)
 	for {
 		n, err := s.ptm.Read(buf)
 		if n > 0 {

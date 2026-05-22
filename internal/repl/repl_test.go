@@ -182,7 +182,7 @@ func TestKillSession_ReapsGrandchildren(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	pre, _ := exec.Command("pgrep", "-f", marker).Output()
-	if len(strings.TrimSpace(string(pre))) == 0 {
+	if strings.TrimSpace(string(pre)) == "" {
 		t.Skipf("could not find spawned grandchild via pgrep -f %s; not exercising reaper", marker)
 	}
 
@@ -195,7 +195,7 @@ func TestKillSession_ReapsGrandchildren(t *testing.T) {
 	time.Sleep(procGroupKillGrace + 500*time.Millisecond)
 
 	post, _ := exec.Command("pgrep", "-f", marker).Output()
-	if len(strings.TrimSpace(string(post))) > 0 {
+	if strings.TrimSpace(string(post)) != "" {
 		// Try to kill it ourselves so a failing test doesn't leak.
 		_ = exec.Command("pkill", "-9", "-f", marker).Run()
 		t.Fatalf("grandchild still alive after KillSession; pgrep -f %s:\n%s", marker, post)
