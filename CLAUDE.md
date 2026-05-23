@@ -19,7 +19,7 @@ Guidance for Claude Code when working in this repository.
 | `internal/trait/`         | Trait inspection helpers.                                                                           |
 | `testdata/`               | Test fixtures consumed by `_test.go` files.                                                         |
 | `docs/`                   | User-facing docs (Diátaxis-structured — see `docs/README.md`).                                      |
-| `.github/workflows/`      | `ci.yml` (build + test + lint + govulncheck on push/PR) and `release.yml` (goreleaser on `v*` tag). |
+| `.github/workflows/`      | `ci.yml` (build + test + lint + govulncheck on push/PR + rc-tag) and `release.yml` (goreleaser on final-semver tag `vX.Y.Z` only). |
 | `.goreleaser.yaml`        | Release build config.                                                                               |
 | `.golangci.yaml`          | Linter config.                                                                                      |
 | `.pre-commit-config.yaml` | Pre-commit hooks (golangci-lint-mod, config_secrets).                                               |
@@ -37,8 +37,10 @@ make test-cover    # with coverage profile
 make lint          # golangci-lint (pinned via bingo)
 make fmt           # gofumpt (pinned via bingo)
 make pre-commit    # run all pre-commit hooks
-make snapshot      # goreleaser snapshot (no upload) — for verifying release builds
+make snapshot      # goreleaser snapshot (no upload, no sign) — for verifying release builds
 make govulncheck   # scan for known vulnerabilities (pinned via bingo)
+make xcompile-windows  # cross-compile + cross-vet for Windows; catches portability compile errors
+make ci-local      # full pre-push gate: test + lint + vuln + xcompile-windows + snapshot
 make tools         # pre-install all bingo-pinned tools
 make tidy          # go mod tidy
 make clean         # remove build artifacts
@@ -54,7 +56,40 @@ make clean         # remove build artifacts
 
 ### Releases
 
-Push a `v*` tag (e.g., `git tag v0.1.0 && git push origin v0.1.0`). The release workflow runs goreleaser, builds linux/darwin/windows × amd64/arm64, and uploads tarballs + checksums to GitHub Releases. No manual release steps.
+Two-step verification flow — see `docs/how-to/pre-tag-release.md` for the full guide.
+
+1. **Local gate** — run `make ci-local`. Runs test + lint + vuln + Windows cross-compile + goreleaser snapshot. ~30–60 s. Catches per-platform compile errors and release-config regressions before push.
+2. **Remote gate** — push commits to `main`, then a pre-release tag:
+   ```bash
+   git push origin main
+   git tag -a v0.0.X-rc1 -m "v0.0.X release candidate 1"
+   git push origin v0.0.X-rc1
+   ```
+   CI re-runs the full Linux + Windows matrix against the exact tagged SHA. **Release.yml is deliberately not triggered** by rc tags (its filter is final-semver only). If the rc CI fails, push a fix and increment the rc number; there's no limit.
+3. **Final tag** — once the rc CI is green:
+   ```bash
+   git tag -a v0.0.X -m "v0.0.X — what changed"
+   git push origin v0.0.X
+   ```
+   `release.yml` builds linux/darwin/windows × amd64/arm64, signs the checksums file via keyless cosign (Sigstore Fulcio), and uploads everything to GitHub Releases. No manual release steps.
+
+Tag filter shape:
+
+| Workflow      | Triggered by                                                          |
+| ------------- | --------------------------------------------------------------------- |
+| `ci.yml`      | push to `main`, pull request, or push of any `vX.Y.Z-*` rc tag        |
+| `release.yml` | push of a final-semver tag `vX.Y.Z` only (no suffix)                  |
+
+Verifying a release locally:
+
+```bash
+cosign verify-blob \
+  --certificate ape_checksums.txt.pem \
+  --signature ape_checksums.txt.sig \
+  --certificate-identity "https://github.com/diegosz/apex_process_ape/.github/workflows/release.yml@refs/tags/vX.Y.Z" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  ape_checksums.txt
+```
 
 ## Conventions
 

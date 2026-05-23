@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.0.20 (2026-05-23)
 
 ### Pre-tag verification workflow
 
