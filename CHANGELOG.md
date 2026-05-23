@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.0.18 (2026-05-23)
 
 ### `ape doctor` — environment health probe
 
