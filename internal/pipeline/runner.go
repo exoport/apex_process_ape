@@ -211,6 +211,9 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 	if err := Preflight(spec, opts.ProjectRoot); err != nil {
 		return err
 	}
+	if err := PreflightSkills(spec, opts.ProjectRoot); err != nil {
+		return err
+	}
 
 	if err := dirtyTreeGate(ctx, spec, opts); err != nil {
 		return err
@@ -449,7 +452,8 @@ func buildArgv(claudeBin string, step Step, prompt string, prependFlags []string
 	// must land before --dangerously-skip-permissions for claude's
 	// argv parser to attach them to the right options table.
 	argv = append(argv, prependFlags...)
-	argv = append(argv,
+	argv = append(
+		argv,
 		"--dangerously-skip-permissions",
 		"-p", promptStr,
 		flagOutputFormat, flagOutputStreamJSON,

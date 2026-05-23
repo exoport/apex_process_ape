@@ -18,6 +18,55 @@ const (
 	testPromptFlag = "--prompt"
 )
 
+// stubSpecSkills writes empty SKILL.md files under
+// <root>/.claude/skills/<name>/ for every skill and agent referenced by
+// the spec's stage chains. Required because PreflightSkills (called at
+// the top of Run) refuses to launch when a referenced skill has no
+// SKILL.md on disk — production behaviour we want, but every TestRun_*
+// in this package uses synthetic skill names like "apex-fake" or
+// "step-one" against a claude shim, so the stubs satisfy the check
+// without exercising the framework.
+func stubSpecSkills(t *testing.T, root string, spec *Spec) {
+	t.Helper()
+	seen := make(map[string]bool)
+	for _, stage := range spec.Stages() {
+		for _, step := range stage.Chain {
+			for _, name := range []string{step.Skill, step.Agent} {
+				if name == "" || seen[name] {
+					continue
+				}
+				seen[name] = true
+				dir := filepath.Join(root, ".claude", "skills", name)
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatalf("stub skill dir %s: %v", dir, err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("stub\n"), 0o644); err != nil {
+					t.Fatalf("stub SKILL.md for %s: %v", name, err)
+				}
+			}
+		}
+	}
+	// Commit the stubs when the test has already initialized a git
+	// repo, so they don't show up as untracked files and trip the
+	// dirty-tree gate that the commit-flow tests rely on. Tests that
+	// don't init git skip this branch silently.
+	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
+		for _, args := range [][]string{
+			{"add", ".claude"},
+			{
+				"-c", "user.email=ape-test@example.com", "-c", "user.name=ape test",
+				"commit", "-m", "test: stub skill SKILL.md files", "--quiet",
+			},
+		} {
+			cmd := exec.Command("git", args...)
+			cmd.Dir = root
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+		}
+	}
+}
+
 // setupTestProject materializes a fake project root with the canonical
 // three pipeline yamls under <root>/_apex/pipelines/. Sourced from
 // internal/pipeline/testdata/_apex/pipelines/. Returns the root.

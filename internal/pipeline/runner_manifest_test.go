@@ -45,6 +45,7 @@ func TestRun_EmitsManifest(t *testing.T) {
 		t.Fatalf("LoadSpec: %v", err)
 	}
 
+	stubSpecSkills(t, root, spec)
 	err = Run(context.Background(), spec, RunOptions{
 		ProjectRoot: root,
 		ClaudeBin:   shim,
@@ -155,6 +156,7 @@ func TestRun_FailedStepCaptured(t *testing.T) {
 	_ = os.WriteFile(shim, []byte("#!/bin/sh\necho '{\"type\":\"error\"}'\nexit 2\n"), 0o755)
 
 	spec, _ := LoadSpec("bad", root)
+	stubSpecSkills(t, root, spec)
 	err := Run(context.Background(), spec, RunOptions{
 		ProjectRoot: root,
 		ClaudeBin:   shim,
@@ -204,6 +206,7 @@ func TestRun_DisableManifestSkipsTree(t *testing.T) {
 	_ = os.WriteFile(shim, []byte("#!/bin/sh\necho done\nexit 0\n"), 0o755)
 
 	spec, _ := LoadSpec("skip", root)
+	stubSpecSkills(t, root, spec)
 	err := Run(context.Background(), spec, RunOptions{
 		ProjectRoot:     root,
 		ClaudeBin:       shim,

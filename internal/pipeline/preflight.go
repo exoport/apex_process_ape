@@ -7,20 +7,42 @@ import (
 	"strings"
 )
 
+// PreflightErrorKind distinguishes which kind of pre-run check produced
+// the *PreflightError. The error message format adapts so users see
+// "required file missing" for file checks and "skill missing" for skill
+// resolution failures.
+type PreflightErrorKind int
+
+const (
+	// PreflightKindFiles — Preflight failed because one or more
+	// `requires.files` paths were absent.
+	PreflightKindFiles PreflightErrorKind = iota
+	// PreflightKindSkills — PreflightSkills failed because one or more
+	// referenced skills (or agents) had no SKILL.md in the project's or
+	// the user's .claude/skills/ tree.
+	PreflightKindSkills
+)
+
 // PreflightError reports a missing prerequisite for a pipeline run.
-// The error names the missing path so the user can take corrective
-// action (typically: run an upstream pipeline first).
+// The error names the missing entries so the user can take corrective
+// action (typically: run an upstream pipeline first, install the
+// framework, or correct a typo'd skill name in the pipeline YAML).
 type PreflightError struct {
 	Pipeline string
 	Missing  []string
+	Kind     PreflightErrorKind
 }
 
 func (e *PreflightError) Error() string {
-	if len(e.Missing) == 1 {
-		return fmt.Sprintf("pipeline %q: required file missing: %s", e.Pipeline, e.Missing[0])
+	label := "required file"
+	if e.Kind == PreflightKindSkills {
+		label = "skill"
 	}
-	return fmt.Sprintf("pipeline %q: %d required files missing:\n  - %s",
-		e.Pipeline, len(e.Missing), strings.Join(e.Missing, "\n  - "))
+	if len(e.Missing) == 1 {
+		return fmt.Sprintf("pipeline %q: %s missing: %s", e.Pipeline, label, e.Missing[0])
+	}
+	return fmt.Sprintf("pipeline %q: %d %ss missing:\n  - %s",
+		e.Pipeline, len(e.Missing), label, strings.Join(e.Missing, "\n  - "))
 }
 
 // Preflight verifies the pipeline's prerequisites against the working
@@ -39,7 +61,66 @@ func Preflight(spec *Spec, projectRoot string) error {
 		}
 	}
 	if len(missing) > 0 {
-		return &PreflightError{Pipeline: spec.Name, Missing: missing}
+		return &PreflightError{Pipeline: spec.Name, Missing: missing, Kind: PreflightKindFiles}
+	}
+	return nil
+}
+
+// PreflightSkills verifies that every skill (and agent) referenced by
+// the pipeline's stage chains resolves to a SKILL.md on disk. The
+// resolver mirrors claude's lookup order: project-scoped
+// `<projectRoot>/.claude/skills/<name>/SKILL.md` first, then
+// user-scoped `~/.claude/skills/<name>/SKILL.md`.
+//
+// This catches typos and missing framework installs before claude is
+// spawned. Without it, an unresolved skill name reaches claude as the
+// prompt body, claude prints a polite "skill does not exist" message,
+// and exits 0 — which the runner records as "completed" because the
+// subprocess succeeded. See the sandbox `sketch` regression for the
+// canonical failure mode this guards against.
+func PreflightSkills(spec *Spec, projectRoot string) error {
+	projDir := filepath.Join(projectRoot, ".claude", "skills")
+	var userDir string
+	if home, err := os.UserHomeDir(); err == nil {
+		userDir = filepath.Join(home, ".claude", "skills")
+	}
+
+	seen := make(map[string]struct{})
+	var missing []string
+
+	check := func(name, where string) {
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+
+		if _, err := os.Stat(filepath.Join(projDir, name, "SKILL.md")); err == nil {
+			return
+		}
+		if userDir != "" {
+			if _, err := os.Stat(filepath.Join(userDir, name, "SKILL.md")); err == nil {
+				return
+			}
+		}
+		missing = append(missing, fmt.Sprintf(
+			"%q (%s): SKILL.md not found in %s or ~/.claude/skills/",
+			name, where, projDir,
+		))
+	}
+
+	for _, stage := range spec.Stages() {
+		for i, step := range stage.Chain {
+			where := fmt.Sprintf("stage %s, step %d", stage.Name, i+1)
+			check(step.Skill, where)
+			check(step.Agent, where)
+		}
+	}
+
+	if len(missing) > 0 {
+		return &PreflightError{Pipeline: spec.Name, Missing: missing, Kind: PreflightKindSkills}
 	}
 	return nil
 }

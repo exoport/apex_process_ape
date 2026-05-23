@@ -3,6 +3,7 @@ package apecmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -109,7 +110,8 @@ func newInteractiveCore(runCancel context.CancelFunc, getRunLog func() *runlog.W
 		runCancel:  runCancel,
 	}
 	c.verifier.OnViolation = func(v orchestrator.ContractViolation) {
-		fmt.Fprintf(os.Stderr,
+		fmt.Fprintf(
+			os.Stderr,
 			"❌ assertion:step-contract — stage=%q step=%d: %s\n",
 			v.Stage, v.StepIdx, v.Reason,
 		)
@@ -480,6 +482,12 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		RunLog:                 &lazyRunLog{getter: getRunLog},
 	})
 
+	var pfe *pipeline.PreflightError
+	if errors.As(runErr, &pfe) {
+		fmt.Fprintf(os.Stderr, "%s\n", pfe.Error())
+		runCancel()
+		os.Exit(exitCodePreflightFailed) //nolint:gocritic // explicit runCancel above; mirrors sibling runners
+	}
 	if runErr == nil {
 		printEndOfRunSummary(spec.Name, projectRoot, cfg)
 	}

@@ -126,6 +126,7 @@ func TestRun_CommitDefaultMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSpec: %v", err)
 	}
+	stubSpecSkills(t, root, spec)
 	err = Run(context.Background(), spec, RunOptions{
 		ProjectRoot: root,
 		ClaudeBin:   shim,
@@ -168,6 +169,7 @@ func TestRun_CommitExplicitMessage(t *testing.T) {
 		"echo 'hello' > '"+root+"/note.md'\n")
 
 	spec, _ := LoadSpec("explicit", root)
+	stubSpecSkills(t, root, spec)
 	if err := Run(context.Background(), spec, RunOptions{
 		ProjectRoot: root,
 		ClaudeBin:   shim,
@@ -195,6 +197,7 @@ func TestRun_CommitSkippedBySpec(t *testing.T) {
 		"echo 'hello' > '"+root+"/note.md'\n")
 
 	spec, _ := LoadSpec("skipspec", root)
+	stubSpecSkills(t, root, spec)
 	if err := Run(context.Background(), spec, RunOptions{
 		ProjectRoot: root,
 		ClaudeBin:   shim,
@@ -226,6 +229,7 @@ func TestRun_NoCommitFlagSkipsAll(t *testing.T) {
 		"echo 'hello' > '"+root+"/note.md'\n")
 
 	spec, _ := LoadSpec("nocommit", root)
+	stubSpecSkills(t, root, spec)
 	if err := Run(context.Background(), spec, RunOptions{
 		ProjectRoot: root,
 		ClaudeBin:   shim,
@@ -254,6 +258,7 @@ func TestRun_CommitNoOpOnEmptyDiff(t *testing.T) {
 	shim := writeFileShim(t, t.TempDir(), "") // body does nothing
 
 	spec, _ := LoadSpec("noop", root)
+	stubSpecSkills(t, root, spec)
 	if err := Run(context.Background(), spec, RunOptions{
 		ProjectRoot: root,
 		ClaudeBin:   shim,
@@ -285,6 +290,7 @@ func TestRun_DirtyTreeGateRefuses(t *testing.T) {
 		"echo 'hello' > '"+root+"/note.md'\n")
 
 	spec, _ := LoadSpec("dirty", root)
+	stubSpecSkills(t, root, spec)
 	err := Run(context.Background(), spec, RunOptions{
 		ProjectRoot: root,
 		ClaudeBin:   shim,
@@ -312,6 +318,7 @@ func TestRun_AllowDirtyBypassesGate(t *testing.T) {
 		"echo 'hello' > '"+root+"/note.md'\n")
 
 	spec, _ := LoadSpec("allowdirty", root)
+	stubSpecSkills(t, root, spec)
 	if err := Run(context.Background(), spec, RunOptions{
 		ProjectRoot: root,
 		ClaudeBin:   shim,
@@ -339,6 +346,7 @@ func TestRun_DirtyTreeIgnoredWhenNoCommit(t *testing.T) {
 	shim := writeFileShim(t, t.TempDir(), "")
 
 	spec, _ := LoadSpec("dirtync", root)
+	stubSpecSkills(t, root, spec)
 	if err := Run(context.Background(), spec, RunOptions{
 		ProjectRoot: root,
 		ClaudeBin:   shim,
@@ -365,6 +373,7 @@ func TestRun_CommitOnFailedStep(t *testing.T) {
 	}
 
 	spec, _ := LoadSpec("fail", root)
+	stubSpecSkills(t, root, spec)
 	err := Run(context.Background(), spec, RunOptions{
 		ProjectRoot: root,
 		ClaudeBin:   shim,
@@ -419,6 +428,7 @@ stages:
 	if err != nil {
 		t.Fatalf("LoadSpec: %v", err)
 	}
+	stubSpecSkills(t, root, spec)
 	if err := Run(context.Background(), spec, RunOptions{
 		ProjectRoot: root,
 		ClaudeBin:   shim,
@@ -487,6 +497,7 @@ stages:
 	spec, _ := LoadSpec("stagesuppress", root)
 	// dirty-tree gate would refuse a suppressed-but-stage-declared
 	// pipeline because pipelineWantsCommits is false; safe to run.
+	stubSpecSkills(t, root, spec)
 	if err := Run(context.Background(), spec, RunOptions{
 		ProjectRoot: root,
 		ClaudeBin:   shim,
