@@ -89,7 +89,8 @@ func TestInteractiveCore_StepTelemetry_DeltaFromTranscript(t *testing.T) {
 	turn := func(in, out int) string {
 		return fmt.Sprintf(
 			`{"type":"assistant","message":{"model":"claude-opus-4-7","usage":{"input_tokens":%d,"output_tokens":%d}}}`,
-			in, out)
+			in, out,
+		)
 	}
 	require.NoError(t, os.WriteFile(transcript, []byte(turn(100, 200)+"\n"+turn(50, 60)+"\n"), 0o600))
 
@@ -140,7 +141,8 @@ func TestInteractiveCore_StepTelemetry_ResetsBaselineOnPathChange(t *testing.T) 
 	turn := func(id string, in, out int) string {
 		return fmt.Sprintf(
 			`{"type":"assistant","message":{"id":%q,"model":"claude-opus-4-7","usage":{"input_tokens":%d,"output_tokens":%d}}}`,
-			id, in, out)
+			id, in, out,
+		)
 	}
 	require.NoError(t, os.WriteFile(sess1, []byte(turn("m1", 100, 200)+"\n"+turn("m2", 50, 60)+"\n"), 0o600))
 	require.NoError(t, os.WriteFile(sess2, []byte(turn("n1", 30, 40)+"\n"), 0o600))

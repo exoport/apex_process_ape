@@ -878,7 +878,8 @@ func (m pipelineModel) renderEventPanel(width, height int) string {
 			lines = append(lines, style.Render(truncateForWidth(ev.Raw, width)))
 		case styleBoth:
 			// Both: human row, then a dim raw row beneath it.
-			lines = append(lines,
+			lines = append(
+				lines,
 				style.Render(truncateForWidth(ev.Glyph+" "+ev.Body, width)),
 				dimStyle.Render(truncateForWidth(ev.Raw, width)),
 			)
@@ -1358,7 +1359,8 @@ func (m pipelineModel) overlayQuitModal(_ string) string {
 	body += "subprocess and abort the run.\n\n"
 	body += "  [y] yes   [n] no  "
 	box := modalStyle.Render(body)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box,
+	return lipgloss.Place(
+		m.width, m.height, lipgloss.Center, lipgloss.Center, box,
 		lipgloss.WithWhitespaceChars(" "),
 	)
 }
@@ -1373,7 +1375,8 @@ func (m pipelineModel) overlayAwaitModal(_ string) string {
 	body += m.replyInput.View() + "\n\n"
 	body += dimStyle.Render("  [Enter] send · [Esc] clear · [Ctrl+C] cancel run  ")
 	box := modalStyle.Render(body)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box,
+	return lipgloss.Place(
+		m.width, m.height, lipgloss.Center, lipgloss.Center, box,
 		lipgloss.WithWhitespaceChars(" "),
 	)
 }

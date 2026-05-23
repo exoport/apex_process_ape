@@ -70,14 +70,16 @@ func renderReport(m *Manifest) string {
 				agent = "—"
 			}
 			if showCommit {
-				fmt.Fprintf(&b, "| %d | `%s` | `%s` | %s | $%.4f | %s / %s | %s | %s |\n",
+				fmt.Fprintf(
+					&b, "| %d | `%s` | `%s` | %s | $%.4f | %s / %s | %s | %s |\n",
 					step.Index, step.Skill, agent,
 					formatDuration(step.DurationSecs), step.CostUSD,
 					formatInt(step.TokensInput), formatInt(step.TokensOutput),
 					step.Status, formatCommitCell(step.CommitStatus, step.CommitSHA),
 				)
 			} else {
-				fmt.Fprintf(&b, "| %d | `%s` | `%s` | %s | $%.4f | %s / %s | %s |\n",
+				fmt.Fprintf(
+					&b, "| %d | `%s` | `%s` | %s | $%.4f | %s / %s | %s |\n",
 					step.Index, step.Skill, agent,
 					formatDuration(step.DurationSecs), step.CostUSD,
 					formatInt(step.TokensInput), formatInt(step.TokensOutput),

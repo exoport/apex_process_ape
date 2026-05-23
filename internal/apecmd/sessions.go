@@ -92,7 +92,8 @@ func printSessions(rows []sessions.Session) error {
 	fmt.Fprintln(tw, "PID\tAGE\tPORT\tURL\tCOMMAND\tCWD")
 	now := time.Now()
 	for _, r := range rows {
-		fmt.Fprintf(tw, "%d\t%s\t%d\t%s\t%s\t%s\n",
+		fmt.Fprintf(
+			tw, "%d\t%s\t%d\t%s\t%s\t%s\n",
 			r.PID,
 			ageOf(now, r.StartedAt),
 			r.Port,

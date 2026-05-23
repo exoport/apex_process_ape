@@ -54,7 +54,8 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 	// pipelineModel — same TUI as `--tui -P` — parameterised with
 	// the bridge-hook event source and the reply-sender callback.
 	var rt *orchestrator.BridgeRuntime
-	model := tui.NewPipelineModel(spec, runCancel, projectRoot,
+	model := tui.NewPipelineModel(
+		spec, runCancel, projectRoot,
 		tui.WithEventSource(tui.SourceHookEvents),
 		tui.WithAwaitReplySender(func(content string) {
 			if rt != nil {

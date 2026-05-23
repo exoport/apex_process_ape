@@ -43,7 +43,7 @@ const (
 // used directly. Unknown models (zero ModelPrice) yield $0.00 with no
 // error — Tracker decides whether to stamp a `cost_note`.
 func TurnCost(u UsageBlock, p ModelPrice) float64 {
-	return p.BaseInput*(float64(u.InputTokens))/perMillion +
+	return p.BaseInput*float64(u.InputTokens)/perMillion +
 		p.BaseInput*CacheCreationEphemeral5mMul*float64(u.CacheCreation.Ephemeral5m)/perMillion +
 		p.BaseInput*CacheCreationEphemeral1hMul*float64(u.CacheCreation.Ephemeral1h)/perMillion +
 		p.BaseInput*CacheReadMul*float64(u.CacheRead)/perMillion +

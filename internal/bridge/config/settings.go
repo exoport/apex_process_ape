@@ -40,8 +40,8 @@ type hookSpec struct {
 	// Matcher is an optional regex against the tool name (PreToolUse /
 	// PostToolUse). Empty matches everything. Unused for non-tool
 	// events (UserPromptSubmit, SubagentStart, etc.).
-	Matcher string         `json:"matcher,omitempty"`
-	Hooks   []hookCommand  `json:"hooks"`
+	Matcher string        `json:"matcher,omitempty"`
+	Hooks   []hookCommand `json:"hooks"`
 }
 
 type hookCommand struct {
