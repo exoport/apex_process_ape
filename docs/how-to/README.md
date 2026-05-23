@@ -9,6 +9,7 @@ How-to guides are **recipes** — they answer "how do I X?" for a reader who alr
 - [How to verify a release artifact](verify.md)
 - [How to pass arguments to skills](pass-args-to-skills.md)
 - [How to run `ape doctor` in CI](run-doctor-in-ci.md)
+- [How to verify a release before tagging](pre-tag-release.md)
 
 ## Planned guides
 

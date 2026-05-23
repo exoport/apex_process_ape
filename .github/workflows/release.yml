@@ -3,7 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      # Only final-semver tags trigger the public release.
+      # Pre-release tags like v0.0.20-rc1 are pushed to verify CI across
+      # the matrix (Linux + Windows) without producing GitHub Releases.
+      # See docs/how-to/pre-tag-release.md for the workflow.
+      - 'v[0-9]+.[0-9]+.[0-9]+'
 
 permissions:
   contents: write

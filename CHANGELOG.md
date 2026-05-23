@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## Unreleased
+
+### Pre-tag verification workflow
+
+Two new gates make it possible to catch the v0.0.18 → v0.0.19 class of
+failure (Windows-only test breakage) before a release tag fires.
+
+- **`make ci-local`** — new Makefile target that runs every gate CI and
+  the release workflow would run: `make test`, `make lint`,
+  `make govulncheck`, `make snapshot`, plus a new
+  `make xcompile-windows` target that cross-compiles + cross-vets for
+  `GOOS=windows GOARCH=amd64` and builds the per-package test binary
+  to `/dev/null`. Catches `//go:build` regressions and per-platform
+  compile errors before push, in ~30–60 s.
+- **`make snapshot` now passes `--skip=sign`** — local snapshot runs
+  no longer trigger the cosign OIDC device-flow that times out without
+  a browser. Real releases continue to sign via `release.yml`, which
+  uses the runner's ambient OIDC token to mint a Fulcio cert.
+- **Release tag filter narrowed** — `release.yml` now triggers only on
+  final-semver tags (`v[0-9]+.[0-9]+.[0-9]+`). Pre-release tags such
+  as `v0.0.20-rc1` no longer produce GitHub Releases; they're reserved
+  for pre-release verification.
+- **CI tag filter broadened** — `ci.yml` now also triggers on
+  pre-release tags (`v[0-9]+.[0-9]+.[0-9]+-*`), re-running the full
+  Linux + Windows matrix against the exact tagged SHA before a final
+  tag is pushed.
+- **`docs/how-to/pre-tag-release.md`** — new how-to documenting the
+  two-step verify-then-release flow with worked examples, the
+  rc-tag retry pattern, and the tag-filter table. Indexed from
+  `docs/how-to/README.md` and `docs/README.md`.
+
 ## v0.0.19 (2026-05-23)
 
 Windows CI follow-up to v0.0.18. Two test failures on `windows-latest`,

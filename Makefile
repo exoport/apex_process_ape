@@ -49,8 +49,12 @@ pre-commit:  ## Run pre-commit hooks across all files.
 	pre-commit run --all-files
 
 .PHONY: snapshot
-snapshot: $(GORELEASER) ## Build release snapshot artifacts via goreleaser (no upload).
-	$(GORELEASER) release --snapshot --clean --skip=publish
+snapshot: $(GORELEASER) ## Build release snapshot artifacts via goreleaser (no upload, no sign).
+	# --skip=sign avoids the cosign OIDC device flow in local runs.
+	# Real releases sign via release.yml, which runs on a GitHub Actions
+	# runner whose ambient OIDC token is automatically exchanged with
+	# Fulcio. Locally we just want to verify the archive layout.
+	$(GORELEASER) release --snapshot --clean --skip=publish --skip=sign
 
 .PHONY: govulncheck
 govulncheck: $(GOVULNCHECK) ## Scan for known vulnerabilities (pinned via bingo).
@@ -68,3 +72,22 @@ tidy:        ## Update go.mod and go.sum.
 clean:       ## Remove build artifacts.
 	rm -f $(BIN) $(COVER_FILE)
 	rm -rf dist/
+
+.PHONY: xcompile-windows
+xcompile-windows: ## Cross-compile + cross-vet for Windows; catches portability compile errors.
+	@echo "==> GOOS=windows go vet ./..."
+	@GOOS=windows GOARCH=amd64 go vet ./...
+	@echo "==> GOOS=windows go build ./..."
+	@GOOS=windows GOARCH=amd64 go build ./...
+	@echo "==> GOOS=windows go test -c (per package, output discarded)"
+	@for pkg in $$(go list ./...); do \
+		GOOS=windows GOARCH=amd64 go test -c -o /dev/null $$pkg \
+		  || { echo "FAIL: $$pkg"; exit 1; }; \
+	done
+
+.PHONY: ci-local
+ci-local: test lint govulncheck xcompile-windows snapshot ## Run every gate CI + release would run (Linux + Windows cross-compile + snapshot).
+	@echo
+	@echo "Local CI gates green. Safe to push + tag."
+	@echo "Catches: Linux test failures, lint, vuln, Windows compile-time portability bugs, release-config regressions."
+	@echo "Does NOT catch: Windows runtime behaviour (use a push-to-branch + GitHub Actions Windows runner for that)."

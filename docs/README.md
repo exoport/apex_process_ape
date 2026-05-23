@@ -25,6 +25,7 @@ _(none yet — see [tutorials/README.md](tutorials/) for planned content)_
 - [How to refresh the APEX framework in a project](how-to/framework-update.md)
 - [How to pass arguments to skills](how-to/pass-args-to-skills.md)
 - [How to run `ape doctor` in CI](how-to/run-doctor-in-ci.md)
+- [How to verify a release before tagging](how-to/pre-tag-release.md)
 
 ### Reference — _technical descriptions_
 
