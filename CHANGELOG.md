@@ -35,6 +35,13 @@ JSON gate.
 - **`docs/how-to/run-doctor-in-ci.md`** — new task-oriented guide with
   a GitHub Actions snippet, exit-code semantics, jq examples, and a
   table of common CI-runner findings.
+- **Colourised human output** — when stdout is a terminal and
+  `NO_COLOR` isn't set, the human renderer prefixes each row with a
+  status emoji (✅ ⚠️ ❌ ℹ️ ⏭️) and colours the STATUS label, the
+  summary counts, and the `$` glyph in fix commands. Pipes, redirects,
+  and CI logs (anything where stdout isn't an `*os.File` TTY) fall
+  back to the existing plain output byte-for-byte — preserves
+  scriptability and `jq` / grep workflows.
 
 ## v0.0.17 (2026-05-22)
 

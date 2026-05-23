@@ -15,8 +15,55 @@ import (
 
 	"github.com/diegosz/apex_process_ape/internal/output"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
+
+// ANSI colour escapes used by the doctor renderer. Kept narrow on
+// purpose — only 16-colour codes so the output is legible on any
+// terminal that survives the NO_COLOR / non-TTY gate in
+// shouldColorizeWriter.
+const (
+	doctorAnsiYellow = "\x1b[33m"
+	doctorAnsiRed    = "\x1b[31m"
+	doctorAnsiDim    = "\x1b[2m"
+	doctorAnsiBold   = "\x1b[1m"
+)
+
+// statusGlyph returns the emoji + ANSI colour to prefix a row with
+// for a given status. Glyphs match the rest of the CLI's status
+// vocabulary (✅ ⚠️ ❌ ⏭️ ℹ️) so screenshots stay consistent.
+func statusGlyph(s DoctorStatus) (emoji, color string) {
+	switch s {
+	case StatusOK:
+		return "✅", ansiGreen
+	case StatusWarn:
+		return "⚠️ ", doctorAnsiYellow
+	case StatusFail:
+		return "❌", doctorAnsiRed
+	case StatusSkip:
+		return "⏭️ ", doctorAnsiDim
+	case StatusInfo:
+		return "ℹ️ ", ansiBlue
+	default:
+		return "•", ""
+	}
+}
+
+// shouldColorizeWriter reports whether ANSI colour escapes are safe to
+// emit. Honours NO_COLOR and falls back to plain text whenever the
+// writer is not an *os.File pointing at a terminal — covers pipes,
+// redirects, CI logs, and the bytes.Buffer instances tests inject.
+func shouldColorizeWriter(w io.Writer) bool {
+	if _, set := os.LookupEnv("NO_COLOR"); set {
+		return false
+	}
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	return term.IsTerminal(int(f.Fd()))
+}
 
 // DoctorStatus is the per-check verdict in the doctor report.
 type DoctorStatus string
@@ -246,13 +293,17 @@ func emitDoctorReport(w io.Writer, r DoctorReport, format output.Format) error {
 		defer enc.Close()
 		return enc.Encode(r)
 	default:
+		if shouldColorizeWriter(w) {
+			return emitDoctorHumanColor(w, r)
+		}
 		return emitDoctorHuman(w, r)
 	}
 }
 
 // emitDoctorHuman writes the aligned table form. Tabwriter handles
 // the column alignment so the status label and check name line up
-// regardless of message length.
+// regardless of message length. This is the plain (non-colour) path
+// used when stdout is not a terminal — CI logs, pipes, redirects.
 func emitDoctorHuman(w io.Writer, r DoctorReport) error {
 	fmt.Fprintln(w, "ape doctor — environment health")
 	fmt.Fprintln(w)
@@ -264,8 +315,48 @@ func emitDoctorHuman(w io.Writer, r DoctorReport) error {
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	// Remediation lines render below the table, only when present, so
-	// they don't widen the status/name columns above.
+	writeRemediationsAndSummary(w, r, false)
+	return nil
+}
+
+// emitDoctorHumanColor mirrors emitDoctorHuman but emits an emoji
+// prefix + ANSI-coloured STATUS label per row. Avoids tabwriter
+// because ANSI escapes and emoji glyphs confuse its width accounting;
+// instead we pre-compute the longest check name and pad manually.
+func emitDoctorHumanColor(w io.Writer, r DoctorReport) error {
+	fmt.Fprintf(w, "%sape doctor%s — environment health\n\n", doctorAnsiBold, ansiReset)
+
+	maxCheck := len("CHECK")
+	for _, c := range r.Checks {
+		if len(c.Name) > maxCheck {
+			maxCheck = len(c.Name)
+		}
+	}
+
+	// Header row. Two leading spaces account for the emoji+space prefix
+	// rows carry below it, so the CHECK header lines up with the check
+	// names.
+	fmt.Fprintf(w, "   %s%-6s %-*s %s%s\n",
+		doctorAnsiDim, "STATUS", maxCheck, "CHECK", "DETAIL", ansiReset)
+
+	for _, c := range r.Checks {
+		emoji, color := statusGlyph(c.Status)
+		label := strings.ToUpper(string(c.Status))
+		// Pad STATUS label to 4 chars (OK/WARN/FAIL/SKIP/INFO max). ANSI
+		// escapes have zero visual width, so the padding inside the
+		// colour wrap still produces aligned columns.
+		fmt.Fprintf(w, "%s %s%-4s%s  %-*s  %s\n",
+			emoji, color, label, ansiReset, maxCheck, c.Name, c.Message)
+	}
+
+	writeRemediationsAndSummary(w, r, true)
+	return nil
+}
+
+// writeRemediationsAndSummary prints the remediation block (if any
+// rows carry one) and the per-status footer. Colour is applied only
+// when colorize is true.
+func writeRemediationsAndSummary(w io.Writer, r DoctorReport, colorize bool) {
 	first := true
 	for _, c := range r.Checks {
 		if c.Remediation == "" && c.FixCommand == "" {
@@ -273,21 +364,45 @@ func emitDoctorHuman(w io.Writer, r DoctorReport) error {
 		}
 		if first {
 			fmt.Fprintln(w)
-			fmt.Fprintln(w, "Remediations:")
+			if colorize {
+				fmt.Fprintf(w, "%sRemediations:%s\n", doctorAnsiBold, ansiReset)
+			} else {
+				fmt.Fprintln(w, "Remediations:")
+			}
 			first = false
 		}
-		fmt.Fprintf(w, "  %s\n", c.Name)
+		emoji, color := statusGlyph(c.Status)
+		if colorize {
+			fmt.Fprintf(w, "  %s %s%s%s\n", emoji, color, c.Name, ansiReset)
+		} else {
+			fmt.Fprintf(w, "  %s\n", c.Name)
+		}
 		if c.Remediation != "" {
 			fmt.Fprintf(w, "    %s\n", c.Remediation)
 		}
 		if c.FixCommand != "" {
-			fmt.Fprintf(w, "    $ %s\n", c.FixCommand)
+			if colorize {
+				fmt.Fprintf(w, "    %s$%s %s\n", doctorAnsiDim, ansiReset, c.FixCommand)
+			} else {
+				fmt.Fprintf(w, "    $ %s\n", c.FixCommand)
+			}
 		}
 	}
+
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "%d ok · %d warn · %d info · %d fail · %d skip\n",
-		r.Summary.OK, r.Summary.Warn, r.Summary.Info, r.Summary.Fail, r.Summary.Skip)
-	return nil
+	if colorize {
+		fmt.Fprintf(w,
+			"%s%d ok%s · %s%d warn%s · %s%d info%s · %s%d fail%s · %s%d skip%s\n",
+			ansiGreen, r.Summary.OK, ansiReset,
+			doctorAnsiYellow, r.Summary.Warn, ansiReset,
+			ansiBlue, r.Summary.Info, ansiReset,
+			doctorAnsiRed, r.Summary.Fail, ansiReset,
+			doctorAnsiDim, r.Summary.Skip, ansiReset,
+		)
+	} else {
+		fmt.Fprintf(w, "%d ok · %d warn · %d info · %d fail · %d skip\n",
+			r.Summary.OK, r.Summary.Warn, r.Summary.Info, r.Summary.Fail, r.Summary.Skip)
+	}
 }
 
 // readOSRelease parses /etc/os-release into a map. Returns an empty

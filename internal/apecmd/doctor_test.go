@@ -214,6 +214,74 @@ func TestEmitDoctorReport_JSONRoundtrips(t *testing.T) {
 	}
 }
 
+// TestEmitDoctorReport_HumanIsPlainOnBufferWriter confirms that the
+// non-TTY fallback runs whenever the writer isn't an *os.File pointed
+// at a terminal. The whole CI / test / pipe path depends on this.
+func TestEmitDoctorReport_HumanIsPlainOnBufferWriter(t *testing.T) {
+	r := DoctorReport{
+		Checks:  []CheckResult{{Name: "x", Status: StatusOK, Message: "fine"}},
+		Summary: DoctorSummary{OK: 1},
+	}
+	var buf bytes.Buffer
+	if err := emitDoctorReport(&buf, r, output.FormatHuman); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	if strings.Contains(buf.String(), "\x1b[") {
+		t.Errorf("non-TTY writer must not receive ANSI escapes; got:\n%s", buf.String())
+	}
+}
+
+// TestEmitDoctorHumanColor_ContainsEscapesAndGlyphs exercises the
+// colourised path directly so we don't need a real TTY in the test
+// harness. The plain-mode test above still guards the default path.
+func TestEmitDoctorHumanColor_ContainsEscapesAndGlyphs(t *testing.T) {
+	r := DoctorReport{
+		Checks: []CheckResult{
+			{Name: "a.ok", Status: StatusOK, Message: "all good"},
+			{Name: "b.warn", Status: StatusWarn, Message: "watch out", Remediation: "do thing", FixCommand: "do_thing --flag"},
+			{Name: "c.fail", Status: StatusFail, Message: "broken"},
+			{Name: "d.info", Status: StatusInfo, Message: "noted"},
+			{Name: "e.skip", Status: StatusSkip, Message: "—"},
+		},
+		Summary: DoctorSummary{OK: 1, Warn: 1, Fail: 1, Info: 1, Skip: 1},
+	}
+	var buf bytes.Buffer
+	if err := emitDoctorHumanColor(&buf, r); err != nil {
+		t.Fatalf("emit color: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "\x1b[") {
+		t.Errorf("colourised output should contain ANSI escapes:\n%s", out)
+	}
+	for _, glyph := range []string{"✅", "⚠️", "❌", "ℹ️", "⏭️"} {
+		if !strings.Contains(out, glyph) {
+			t.Errorf("colour output missing glyph %q:\n%s", glyph, out)
+		}
+	}
+	if !strings.Contains(out, "Remediations:") {
+		t.Errorf("remediation block missing:\n%s", out)
+	}
+}
+
+// TestShouldColorizeWriter_RespectsNoColorEnv locks in the NO_COLOR
+// convention — even on a TTY, NO_COLOR forces the plain path.
+func TestShouldColorizeWriter_RespectsNoColorEnv(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	if shouldColorizeWriter(os.Stdout) {
+		t.Error("NO_COLOR set: shouldColorizeWriter must return false")
+	}
+}
+
+// TestShouldColorizeWriter_BufferWriterIsFalse documents the path
+// tests rely on — a bytes.Buffer can never be a terminal.
+func TestShouldColorizeWriter_BufferWriterIsFalse(t *testing.T) {
+	t.Setenv("NO_COLOR", "") // make sure NO_COLOR isn't inherited
+	os.Unsetenv("NO_COLOR")
+	if shouldColorizeWriter(&bytes.Buffer{}) {
+		t.Error("bytes.Buffer must not be detected as a terminal")
+	}
+}
+
 func TestEmitDoctorReport_HumanContainsHeader(t *testing.T) {
 	r := DoctorReport{
 		Checks:  []CheckResult{{Name: "x", Status: StatusOK, Message: "fine"}},
