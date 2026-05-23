@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## v0.0.19 (2026-05-23)
+
+Windows CI follow-up to v0.0.18. Two test failures on `windows-latest`,
+both pre-existing latent portability bugs that v0.0.18's new test
+surface area happened to expose.
+
+- **`internal/apecmd/doctor_test.go`** — `TestCheckClaudeBinary_PathInjection`
+  wrote a synthetic `claude` shim with no extension. Windows's
+  `exec.LookPath` only resolves names whose extension is on `PATHEXT`
+  (`.EXE`, `.CMD`, …), so the resolver returned "not found" and the
+  test asserted OK against FAIL. Fix: name the shim `claude.exe` when
+  `runtime.GOOS == "windows"`.
+- **`internal/pipeline/preflight_test.go`** — three `PreflightSkills`
+  tests pointed the user-scope fallback at a temp dir via
+  `t.Setenv("HOME", …)`. Windows's `os.UserHomeDir` reads
+  `%USERPROFILE%`, not `$HOME`, so the override was silently dropped
+  and the resolver fell back to the runner's real home. Same fix
+  shape as v0.0.16's `internal/cost/overrides_test.go` — a new
+  `setFakeHome(t, dir)` helper sets both vars.
+
+No production-code change; this is a test-portability patch. Linux
+and macOS behaviour was already correct.
+
 ## v0.0.18 (2026-05-23)
 
 ### `ape doctor` — environment health probe

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -82,9 +83,15 @@ func TestDoctorShouldFail_StrictPromotesWarn(t *testing.T) {
 }
 
 func TestCheckClaudeBinary_PathInjection(t *testing.T) {
-	// Create a synthetic claude on a custom PATH.
+	// Create a synthetic claude on a custom PATH. Windows's exec.LookPath
+	// only resolves names whose extension is on PATHEXT, so the synthetic
+	// binary must be named `claude.exe` there.
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "claude")
+	binName := "claude"
+	if runtime.GOOS == "windows" {
+		binName = "claude.exe"
+	}
+	bin := filepath.Join(dir, binName)
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}

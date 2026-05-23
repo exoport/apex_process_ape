@@ -106,6 +106,17 @@ func installSkillStubs(t *testing.T, root string, names ...string) {
 	}
 }
 
+// setFakeHome points os.UserHomeDir at the given directory portably.
+// Linux/macOS read $HOME; Windows reads %USERPROFILE%. Tests that
+// want the user-scope skill lookup to resolve against a temp dir need
+// both vars set, otherwise the Windows leg of CI falls back to the
+// runner's real home and the test becomes non-deterministic.
+func setFakeHome(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+}
+
 // designSkills lists every skill + agent referenced by the design
 // fixture. Kept in sync with testdata/_apex/pipelines/design.yaml.
 var designSkills = []string{
@@ -121,7 +132,7 @@ func TestPreflightSkills_AllPresent(t *testing.T) {
 	installSkillStubs(t, dir, designSkills...)
 	// Point HOME at an empty dir so the test isn't sensitive to the
 	// host's actual ~/.claude/skills/ contents.
-	t.Setenv("HOME", t.TempDir())
+	setFakeHome(t, t.TempDir())
 
 	spec, err := pipeline.LoadSpec("design", dir)
 	if err != nil {
@@ -145,7 +156,7 @@ func TestPreflightSkills_MissingSkill(t *testing.T) {
 		}
 	}
 	installSkillStubs(t, dir, present...)
-	t.Setenv("HOME", t.TempDir())
+	setFakeHome(t, t.TempDir())
 
 	spec, err := pipeline.LoadSpec("design", dir)
 	if err != nil {
@@ -193,7 +204,7 @@ func TestPreflightSkills_UserScopeFallback(t *testing.T) {
 	// … and stage apex-shard-doc only in the fake HOME.
 	home := t.TempDir()
 	installSkillStubs(t, home, "apex-shard-doc")
-	t.Setenv("HOME", home)
+	setFakeHome(t, home)
 
 	spec, err := pipeline.LoadSpec("design", dir)
 	if err != nil {
@@ -212,7 +223,7 @@ func TestPreflightSkills_AggregatesMultipleMissing(t *testing.T) {
 	dir := t.TempDir()
 	installPipelines(t, dir)
 	// Install nothing — every reference should be flagged.
-	t.Setenv("HOME", t.TempDir())
+	setFakeHome(t, t.TempDir())
 
 	spec, err := pipeline.LoadSpec("design", dir)
 	if err != nil {
