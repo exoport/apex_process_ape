@@ -49,6 +49,7 @@ func init() {
 		newNotifyCmd(),
 		newSessionsCmd(),
 		newCostsCmd(),
+		newDoctorCmd(),
 	)
 }
 

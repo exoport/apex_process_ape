@@ -1,5 +1,41 @@
 # CHANGELOG
 
+## Unreleased
+
+### `ape doctor` — environment health probe
+
+New top-level command that probes the local environment and reports a
+per-check verdict. Designed to catch missing prerequisites *before* a
+pipeline burns tokens on a misconfigured host, and to give CI a clean
+JSON gate.
+
+- **`internal/apecmd/doctor.go`, `doctor_checks.go`, `doctor_test.go`** —
+  cobra command plus 12 probes: `claude.binary`, `git.binary`,
+  `node.binary`, `npx.binary`, `playwright.host_supported`,
+  `playwright.cache`, `framework.metadata`, `skills.project`,
+  `skills.user`, `pipelines.project`, `permissions.home_claude`,
+  `ape.update_available`. Output: human (default), `json`, `yaml`.
+  Flags: `--strict` (treat WARN as failure), `--skip <names>`,
+  `--cwd <path>`.
+- **Playwright probe (`playwright.host_supported`)** — flags Ubuntu
+  versions outside a small allowlist (currently 20.04 / 22.04 / 24.04)
+  and emits the `PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1`
+  workaround as a `fix_command`. Catches the Ubuntu 26.04 / Playwright
+  incompatibility that silently degrades Excalidraw-rendering skills.
+  The allowlist is hard-coded with a `LAST UPDATED:` source comment;
+  bump it when Playwright adds new OS support.
+- **Outside-project behaviour** — `framework.metadata`,
+  `skills.project`, `pipelines.project` degrade to INFO when the user
+  is not in a project, so doctor remains useful on fresh installs.
+- **`internal/framework/skills_discover.go`** — new shared helper
+  (`ResolveSkill`, `ListInstalledSkills`, `ProjectSkillsPath`,
+  `UserSkillsPath`, `IsFrameworkSkill`) consumed by both doctor and
+  the existing `pipeline.PreflightSkills`. The skill-resolution lookup
+  order (project → user) now lives in one place.
+- **`docs/how-to/run-doctor-in-ci.md`** — new task-oriented guide with
+  a GitHub Actions snippet, exit-code semantics, jq examples, and a
+  table of common CI-runner findings.
+
 ## v0.0.17 (2026-05-22)
 
 Final post-PLAN-8 CI cleanup. All matrix jobs (Linux + Windows + Lint

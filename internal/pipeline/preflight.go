@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/diegosz/apex_process_ape/internal/framework"
 )
 
 // PreflightErrorKind distinguishes which kind of pre-run check produced
@@ -79,12 +81,7 @@ func Preflight(spec *Spec, projectRoot string) error {
 // subprocess succeeded. See the sandbox `sketch` regression for the
 // canonical failure mode this guards against.
 func PreflightSkills(spec *Spec, projectRoot string) error {
-	projDir := filepath.Join(projectRoot, ".claude", "skills")
-	var userDir string
-	if home, err := os.UserHomeDir(); err == nil {
-		userDir = filepath.Join(home, ".claude", "skills")
-	}
-
+	projDir := framework.ProjectSkillsPath(projectRoot)
 	seen := make(map[string]struct{})
 	var missing []string
 
@@ -96,14 +93,8 @@ func PreflightSkills(spec *Spec, projectRoot string) error {
 			return
 		}
 		seen[name] = struct{}{}
-
-		if _, err := os.Stat(filepath.Join(projDir, name, "SKILL.md")); err == nil {
+		if _, _, found := framework.ResolveSkill(name, projectRoot); found {
 			return
-		}
-		if userDir != "" {
-			if _, err := os.Stat(filepath.Join(userDir, name, "SKILL.md")); err == nil {
-				return
-			}
 		}
 		missing = append(missing, fmt.Sprintf(
 			"%q (%s): SKILL.md not found in %s or ~/.claude/skills/",
