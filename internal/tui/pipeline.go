@@ -35,7 +35,10 @@ const doubleCtrlCWindow = time.Second
 // The TUI runs as a Bubble Tea program; the pipeline.Run goroutine
 // emits Observer events that are forwarded into the program via Send.
 
-const maxOutputLines = 200
+const (
+	maxOutputLines   = 200
+	maxFinalErrLines = 30 // final pipeline error block in the stages panel
+)
 
 // Pipeline-TUI layout constants. View() composes the screen from a
 // stages panel + an events panel + a status strip + a keybind hint
@@ -1486,8 +1489,22 @@ func (m pipelineModel) renderFinalReport(width, _ int) string {
 	}
 	if m.finalErr != nil {
 		sb.WriteString("\n")
-		sb.WriteString(stageFailedStyle.Render(truncateForWidth("pipeline error: "+m.finalErr.Error(), width)))
-		sb.WriteString("\n")
+		errLines := strings.Split(m.finalErr.Error(), "\n")
+		overflow := len(errLines) - maxFinalErrLines
+		if overflow > 0 {
+			errLines = errLines[:maxFinalErrLines]
+		}
+		for i, l := range errLines {
+			if i == 0 {
+				l = "pipeline error: " + l
+			}
+			sb.WriteString(stageFailedStyle.Render(truncateForWidth(l, width)))
+			sb.WriteString("\n")
+		}
+		if overflow > 0 {
+			sb.WriteString(stageFailedStyle.Render(fmt.Sprintf("… (%d more line(s))", overflow)))
+			sb.WriteString("\n")
+		}
 	}
 	return sb.String()
 }
