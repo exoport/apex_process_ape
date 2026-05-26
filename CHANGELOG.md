@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## v0.0.21 (2026-05-25)
+
+- **TUI final error block now line-limited** —
+  `internal/tui/pipeline.go` previously rendered the whole
+  `m.finalErr.Error()` string as a single truncated line in the
+  stages panel, so multi-line errors (e.g., wrapped failures from a
+  pipeline step) collapsed into one ellipsised row. The final report
+  now splits the error on newlines, renders up to 30 lines styled as
+  failures, and appends `… (N more line(s))` when more remain. Cap
+  lives in a new `maxFinalErrLines` constant.
+- **`release.yml` job-level guard against rc tags** — v0.0.20
+  narrowed the workflow tag filter to `v[0-9]+.[0-9]+.[0-9]+`, but
+  GitHub's tag-filter globs are not end-anchored, so `v0.0.20-rc1`
+  still matched and goreleaser ran against the rc tag. Added an
+  `if: !contains(github.ref, '-')` guard on the release job so it
+  is skipped for any tag containing a dash, leaving final-semver
+  tags as the only trigger.
+- **Release how-to skill** — new
+  `.claude/skills/release/SKILL.md` automating the full
+  pre-flight → `make ci-local` → rc tag → poll CI → final tag →
+  poll release → cosign-verify flow documented in
+  `docs/how-to/pre-tag-release.md`.
+
 ## v0.0.20 (2026-05-23)
 
 ### Pre-tag verification workflow
