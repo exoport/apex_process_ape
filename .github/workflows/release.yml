@@ -3,10 +3,12 @@ name: Release
 on:
   push:
     tags:
-      # Only final-semver tags trigger the public release.
-      # Pre-release tags like v0.0.20-rc1 are pushed to verify CI across
-      # the matrix (Linux + Windows) without producing GitHub Releases.
-      # See docs/how-to/pre-tag-release.md for the workflow.
+      # Only final-semver tags trigger the public release. Pre-release
+      # tags are no longer used (the release skill drove this; the rc
+      # cycle was dropped because rc and final tags landing on the same
+      # SHA confused goreleaser's git-describe tag resolution). The
+      # job-level guard below keeps the workflow safe even if a stray
+      # pre-release tag slips past the glob.
       - 'v[0-9]+.[0-9]+.[0-9]+'
 
 permissions:
@@ -17,6 +19,9 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
+    # Belt-and-suspenders: the push.tags glob isn't end-anchored so a
+    # tag like v0.0.20-rc1 still matches `v[0-9]+.[0-9]+.[0-9]+`.
+    # Skip the job for any tag containing a dash.
     if: "!contains(github.ref_name, '-')"
     steps:
       - name: Checkout

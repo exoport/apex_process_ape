@@ -56,28 +56,28 @@ make clean         # remove build artifacts
 
 ### Releases
 
-Two-step verification flow — see `docs/how-to/pre-tag-release.md` for the full guide.
+Two-step verification flow — see `docs/how-to/pre-tag-release.md` for the full guide. The automated walkthrough lives in `.claude/skills/release/SKILL.md` (`/release vX.Y.Z`).
 
 1. **Local gate** — run `make ci-local`. Runs test + lint + vuln + Windows cross-compile + goreleaser snapshot. ~30–60 s. Catches per-platform compile errors and release-config regressions before push.
-2. **Remote gate** — push commits to `main`, then a pre-release tag:
+2. **Remote gate** — push commits to `main`:
    ```bash
    git push origin main
-   git tag -a v0.0.X-rc1 -m "v0.0.X release candidate 1"
-   git push origin v0.0.X-rc1
    ```
-   CI re-runs the full Linux + Windows matrix against the exact tagged SHA. **Release.yml is deliberately not triggered** by rc tags (its filter is final-semver only). If the rc CI fails, push a fix and increment the rc number; there's no limit.
-3. **Final tag** — once the rc CI is green:
+   The CI workflow re-runs the full Linux + Windows matrix against the pushed SHA. Wait for it to finish green before tagging.
+3. **Final tag** — once main's CI is green:
    ```bash
    git tag -a v0.0.X -m "v0.0.X — what changed"
    git push origin v0.0.X
    ```
    `release.yml` builds linux/darwin/windows × amd64/arm64, signs the checksums file via keyless cosign (Sigstore Fulcio), and uploads everything to GitHub Releases. No manual release steps.
 
+> The earlier flow used a `vX.Y.Z-rcN` pre-release tag as the remote gate. It was dropped after the v0.0.21 incident — rc and final annotated tags landing on the same commit confused goreleaser's `git describe`-based tag resolution and misrouted the build to the rc prerelease. The push-to-`main` CI run replaces that gate; the final tag is the only annotated tag on the commit, so goreleaser cannot pick the wrong one.
+
 Tag filter shape:
 
 | Workflow      | Triggered by                                                          |
 | ------------- | --------------------------------------------------------------------- |
-| `ci.yml`      | push to `main`, pull request, or push of any `vX.Y.Z-*` rc tag        |
+| `ci.yml`      | push to `main`, pull request                                          |
 | `release.yml` | push of a final-semver tag `vX.Y.Z` only (no suffix)                  |
 
 Verifying a release locally:

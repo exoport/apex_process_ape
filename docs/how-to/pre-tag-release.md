@@ -1,10 +1,23 @@
 # How-to — verify a release before tagging
 
-A safe release sequence that catches Windows-runtime and release-config bugs *before* a public release fires. Two complementary gates: a local one (`make ci-local`) that covers most ground in 30–60 seconds, and a remote one (a pre-release tag) that exercises the actual GitHub Windows runner.
+A safe release sequence that catches Windows-runtime and release-config bugs *before* the public Release workflow fires. Two complementary gates: a local one (`make ci-local`) covering most ground in 30–60 seconds, and a remote one (the regular push-to-`main` CI run) that exercises the actual GitHub Linux + Windows runners against the exact SHA you're about to tag.
 
 ## Why this exists
 
-The default release flow (`git tag v0.0.X && git push origin v0.0.X`) triggers the public Release workflow immediately. If the tagged SHA has a Windows-only test bug, you ship a broken release — exactly what happened between v0.0.18 and v0.0.19. This guide describes a two-step gate so that doesn't happen again.
+The naive release flow (`git tag v0.0.X && git push origin v0.0.X`) triggers the public Release workflow immediately. If the tagged SHA has a Windows-only test bug, you ship a broken release — exactly what happened between v0.0.18 and v0.0.19. This guide describes the two-step gate that prevents it.
+
+> **History — why this guide no longer uses an rc tag.** Earlier
+> versions of this flow used a `vX.Y.Z-rcN` pre-release tag to drive
+> the remote CI gate. That was dropped after the v0.0.21 incident:
+> when the rc and final annotated tags landed on the same commit,
+> goreleaser's `git describe`-based tag resolution misrouted the
+> build artifacts to the rc prerelease and no `v0.0.21` GitHub
+> Release was ever created. The same misrouting silently affected
+> v0.0.20. The fix is to skip the rc cycle entirely — push to `main`,
+> wait for the regular CI run to pass on the SHA you'll tag, then
+> push the final tag against the same SHA. The final tag is the only
+> annotated tag on that commit, so goreleaser cannot pick the wrong
+> one.
 
 ## Step 1 — local verification
 
@@ -24,65 +37,50 @@ This expands to:
 
 What `ci-local` catches:
 
-- ✅ Linux test failures, including race conditions.
-- ✅ Lint and vulnerability issues.
-- ✅ Per-package Windows compile errors and `go vet` regressions.
-- ✅ Goreleaser config bugs (archive name collisions, missing build targets, signing config drift).
+- Linux test failures, including race conditions.
+- Lint and vulnerability issues.
+- Per-package Windows compile errors and `go vet` regressions.
+- Goreleaser config bugs (archive name collisions, missing build targets, signing config drift).
 
 What it **does not** catch:
 
-- ❌ Windows runtime behaviour — e.g. `exec.LookPath` needing `.exe`, `os.UserHomeDir` reading `%USERPROFILE%` not `$HOME`, path-separator handling. These only show up when the test binary actually runs on Windows.
+- Windows runtime behaviour — e.g. `exec.LookPath` needing `.exe`, `os.UserHomeDir` reading `%USERPROFILE%` not `$HOME`, path-separator handling. These only show up when the test binary actually runs on Windows.
 
 For those, use step 2.
 
-## Step 2 — remote pre-release tag
+## Step 2 — remote CI on the SHA you'll tag
 
-After local gates pass and `main` is pushed, tag a pre-release and push it:
-
-```bash
-git push origin main
-git tag -a v0.0.20-rc1 -m "v0.0.20 release candidate 1"
-git push origin v0.0.20-rc1
-```
-
-The CI workflow re-runs the full matrix (Linux + Windows + lint + vuln) against the *exact tagged SHA*. The Release workflow is deliberately **not** triggered by this tag — its filter only matches final-semver tags (`v[0-9]+.[0-9]+.[0-9]+`), so no GitHub Release is created.
-
-Wait for that CI run to finish green. Then promote:
-
-```bash
-git tag -a v0.0.20 -m "v0.0.20 — what changed"
-git push origin v0.0.20
-```
-
-The final tag fires the Release workflow against the same SHA you already verified.
-
-If the rc tag's CI fails, **don't** push the final tag. Fix the issue, push the fix to main, then `v0.0.20-rc2` for a second attempt:
+Push your commits to `main`:
 
 ```bash
 git push origin main
-git tag -a v0.0.20-rc2 -m "v0.0.20 release candidate 2"
-git push origin v0.0.20-rc2
 ```
 
-There's no limit on rc numbers. Delete obsolete rc tags afterwards if you want to keep the tag list clean:
+The CI workflow re-runs the full matrix (Linux + Windows + lint + vuln) against the pushed SHA. **Wait for it to finish green** — open `https://github.com/diegosz/apex_process_ape/actions`, find the CI run for that SHA, and confirm `conclusion: success`.
+
+Only then push the final tag:
 
 ```bash
-git push origin :refs/tags/v0.0.20-rc1
-git tag -d v0.0.20-rc1
+git tag -a v0.0.X -m "v0.0.X — what changed"
+git push origin v0.0.X
 ```
+
+The tag fires `release.yml` against the same SHA the CI just verified.
+
+If the push-to-`main` CI fails, **don't** tag. Push more commits to `main` until CI is green, then tag the resulting SHA.
 
 ## Tag-filter mechanics
 
-| Workflow      | Trigger condition                                                          |
-| ------------- | -------------------------------------------------------------------------- |
-| `ci.yml`      | push to `main`, pull request, **or** push of any `vX.Y.Z-*` pre-release tag |
-| `release.yml` | push of a `vX.Y.Z` final-semver tag (no suffix)                             |
+| Workflow      | Trigger condition                                                  |
+| ------------- | ------------------------------------------------------------------ |
+| `ci.yml`      | push to `main`, pull request                                       |
+| `release.yml` | push of a `vX.Y.Z` final-semver tag (no suffix)                    |
 
-Both filters use the `vX.Y.Z` regex shape rather than `v*` so a stray non-semver tag (e.g. `vendor-update`, `v2024`) doesn't trigger either workflow.
+`release.yml`'s `push.tags` glob `v[0-9]+.[0-9]+.[0-9]+` is not end-anchored, so it would still match a stray tag like `v1.2.3-rc1`. A job-level `if: !contains(github.ref_name, '-')` guard keeps the workflow safe even if a pre-release tag slips past the glob.
 
 ## When to skip step 2
 
-If your change is **Go-only** with no OS-conditional code paths (no `runtime.GOOS` switches, no `exec.LookPath`, no `os.UserHomeDir`, no path-separator-sensitive code, no shell-out, no new file I/O patterns), `make ci-local` is sufficient — the rc-tag round-trip is overhead for no benefit.
+If your change is **Go-only** with no OS-conditional code paths (no `runtime.GOOS` switches, no `exec.LookPath`, no `os.UserHomeDir`, no path-separator-sensitive code, no shell-out, no new file I/O patterns), `make ci-local` is sufficient — the round-trip through GitHub Actions is overhead for no benefit.
 
 The bugs that escaped to v0.0.18 were *both* OS-conditional (PATHEXT extension on `exec.LookPath`, `USERPROFILE` vs `$HOME`), so anything touching those primitives is a candidate for step 2.
 
@@ -91,3 +89,4 @@ The bugs that escaped to v0.0.18 were *both* OS-conditional (PATHEXT extension o
 - [How to run `ape doctor` in CI](run-doctor-in-ci.md) — strict JSON invocation, exit codes, GitHub Actions snippet.
 - `.github/workflows/ci.yml` and `.github/workflows/release.yml` — the actual filter definitions live here.
 - `Makefile` — `ci-local`, `xcompile-windows` targets.
+- `.claude/skills/release/SKILL.md` — automated `/release` walkthrough that drives this flow.
