@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## v0.0.23 (2026-05-28)
+
+- **Release flow: rc-tag cycle removed** — earlier releases used a
+  `vX.Y.Z-rcN` pre-release tag as the remote CI gate. When the rc
+  and final annotated tags landed on the same commit, goreleaser's
+  `git describe`-based tag resolution misrouted the build artifacts
+  to the rc prerelease and no final GitHub Release was ever created;
+  v0.0.20 and v0.0.21 both hit this. The new gate is the regular
+  push-to-`main` CI run on the SHA you're about to tag — the final
+  tag is the only annotated tag on the commit, so goreleaser cannot
+  pick the wrong one. Updated:
+  - `.github/workflows/ci.yml` — dropped the `v[0-9]+.[0-9]+.[0-9]+-*`
+    push-tag trigger.
+  - `.github/workflows/release.yml` — kept the job-level
+    `if: !contains(github.ref_name, '-')` guard as belt-and-suspenders
+    against the un-anchored push-tag glob.
+  - `.claude/skills/release/SKILL.md` — rewrote phases 3–4 around
+    push-to-`main` CI; added pre-flight check 1g rejecting HEAD with
+    any pre-release tag; phase 6 also rejects releases landing on the
+    wrong tag name (defense in depth).
+  - `CLAUDE.md` and `docs/how-to/pre-tag-release.md` — rewrote the
+    remote-gate step; added a short history blockquote explaining
+    why the rc cycle was dropped.
+
 ## v0.0.22 (2026-05-28)
 
 > v0.0.21 was abandoned mid-release: goreleaser running on the
