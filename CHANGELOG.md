@@ -1,6 +1,15 @@
 # CHANGELOG
 
-## v0.0.21 (2026-05-25)
+## v0.0.22 (2026-05-28)
+
+> v0.0.21 was abandoned mid-release: goreleaser running on the
+> `v0.0.21` tag resolved the target tag to `v0.0.21-rc1` (both
+> tags pointed at the same commit), uploaded the build artifacts
+> to the rc prerelease, and no `v0.0.21` GitHub Release was ever
+> created. The same misrouting affected `v0.0.20`. The release
+> workflow and skill will be reworked in a follow-up so that the
+> rc-tag CI gate cannot share a SHA with the final tag (or so
+> goreleaser is pinned to the workflow's trigger tag).
 
 - **TUI final error block now line-limited** —
   `internal/tui/pipeline.go` previously rendered the whole
