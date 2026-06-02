@@ -92,7 +92,7 @@ const interactiveClearSettle = 500 * time.Millisecond
 // Write, waits for the bridge's Stop hook between steps, emits
 // per-step manifest records, and tears the session down at the end.
 //
-//nolint:funlen,maintidx // single-spawn stage orchestration intentionally lives in one function; the keystroke / wait / capture interaction is clearer in one place than fragmented across helpers.
+//nolint:funlen,maintidx,gocyclo // single-spawn stage orchestration intentionally lives in one function; the keystroke / wait / capture interaction is clearer in one place than fragmented across helpers.
 func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunOptions, mw *manifestWriter, stageIdx int) (RunStatus, error) {
 	if len(stage.Chain) == 0 {
 		return StatusCompleted, nil
@@ -142,7 +142,7 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		go func() {
 			select {
 			case <-sessionDone:
-				cancelSession(fmt.Errorf("claude process exited without Stop hook"))
+				cancelSession(errors.New("claude process exited without Stop hook"))
 			case <-sessionCtx.Done():
 			}
 		}()
