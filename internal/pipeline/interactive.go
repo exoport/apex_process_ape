@@ -38,7 +38,15 @@ import (
 // set `NoClear` to opt out — used for skills that need to see the
 // previous step's context (rare).
 func runStagesInteractive(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWriter) error {
+	skipping := opts.FromStage != ""
 	for _, stage := range spec.Stages() {
+		if skipping {
+			if stage.Name == opts.FromStage {
+				skipping = false
+			} else {
+				continue
+			}
+		}
 		stageStart := time.Now()
 		var stageIdx int
 		if mw != nil {
@@ -124,6 +132,21 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		return StatusFailed, fmt.Errorf("stage %q: claude REPL not ready in PTY: %w", stage.Name, err)
 	}
 	cancelReady()
+
+	// If the claude process exits before the Stop hook fires, cancel
+	// sessionCtx so waitStepDone returns immediately instead of idling
+	// for the full interactiveStepIdleTimeout.
+	sessionCtx, cancelSession := context.WithCancelCause(ctx)
+	defer cancelSession(nil)
+	if sessionDone := repl.SessionDone(ctx, sessionName); sessionDone != nil {
+		go func() {
+			select {
+			case <-sessionDone:
+				cancelSession(fmt.Errorf("claude process exited without Stop hook"))
+			case <-sessionCtx.Done():
+			}
+		}()
+	}
 
 	// Optional debug mirror — captures the pane state to stderr after
 	// each step so a failing run leaves a trace. Replaces the PTY's
@@ -215,11 +238,23 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		}
 
 		// Wait for the bridge's Stop hook to signal step done.
-		waitErr := waitStepDone(ctx, opts, stage.Name, i)
+		// Use sessionCtx so a dead claude process cancels the wait
+		// immediately instead of idling for interactiveStepIdleTimeout.
+		waitErr := waitStepDone(sessionCtx, opts, stage.Name, i)
+		if errors.Is(waitErr, context.Canceled) {
+			if cause := context.Cause(sessionCtx); cause != nil {
+				waitErr = cause
+			}
+		}
 		if opts.OnInteractiveStepEnd != nil {
 			opts.OnInteractiveStepEnd(stepInfo)
 		}
 		if waitErr != nil {
+			if debugInteractive {
+				if errSnap, _ := repl.CapturePane(ctx, sessionName); errSnap != "" {
+					fmt.Fprintf(os.Stderr, "[pty/%s/step%d/error]\n%s\n[/pty]\n", sessionName, i, errSnap)
+				}
+			}
 			stageErr = fmt.Errorf("stage %q step %d: wait done: %w", stage.Name, i, waitErr)
 			stageStatus = StatusFailed
 			closeStepLog(eventLog)

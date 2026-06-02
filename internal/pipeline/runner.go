@@ -97,6 +97,12 @@ type RunOptions struct {
 	// Meaningful only when NoCommit is false. PLAN-4 / C5.
 	AllowDirty bool
 
+	// FromStage, when non-empty, skips all stages before the named one.
+	// The named stage and everything after it run normally. If the name
+	// does not match any stage in the spec, Run returns an error before
+	// any stage executes. CLI: --from <stage>.
+	FromStage string
+
 	// Interactive, when true, runs the pipeline under PLAN-6 exec
 	// mode: one `claude` process per stage running inside its own
 	// in-process PTY (PLAN-8: `internal/repl/`), with steps fed as
@@ -208,6 +214,11 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 	if opts.InteractiveStepGrace == 0 {
 		opts.InteractiveStepGrace = 2 * time.Second
 	}
+	if opts.FromStage != "" {
+		if err := validateFromStage(spec, opts.FromStage); err != nil {
+			return err
+		}
+	}
 	if err := Preflight(spec, opts.ProjectRoot); err != nil {
 		return err
 	}
@@ -280,10 +291,35 @@ func dirtyTreeGate(ctx context.Context, spec *Spec, opts RunOptions) error {
 	)
 }
 
+// validateFromStage returns an error when name does not match any stage
+// in spec, listing the available names to guide the caller.
+func validateFromStage(spec *Spec, name string) error {
+	for _, s := range spec.Stages() {
+		if s.Name == name {
+			return nil
+		}
+	}
+	stages := spec.Stages()
+	names := make([]string, len(stages))
+	for i, s := range stages {
+		names[i] = s.Name
+	}
+	return fmt.Errorf("--from: stage %q not found in pipeline %q (available: %s)",
+		name, spec.Name, strings.Join(names, ", "))
+}
+
 // runStages drives the spec's stage/step chain. Separated from Run so
 // the manifest finalization path is a single return point.
 func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWriter) error {
+	skipping := opts.FromStage != ""
 	for _, stage := range spec.Stages() {
+		if skipping {
+			if stage.Name == opts.FromStage {
+				skipping = false
+			} else {
+				continue
+			}
+		}
 		stageStart := time.Now()
 		var stageIdx int
 		if mw != nil {

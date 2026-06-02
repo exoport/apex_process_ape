@@ -147,6 +147,7 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 			Observer:               obs,
 			ApeVersion:             Version,
 			ManifestDir:            cfg.manifestDir,
+			FromStage:              cfg.fromStage,
 			NoCommit:               cfg.noCommit,
 			AllowDirty:             cfg.allowDirty,
 			PrependFlags:           prepend,

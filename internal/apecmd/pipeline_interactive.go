@@ -94,7 +94,7 @@ type interactiveCore struct {
 // accommodate skills that legitimately do many minutes of work
 // between user-visible events (apex-create-architecture's heavier
 // branches in particular) while still bounding real stalls.
-const interactiveStepIdleTimeout = 15 * time.Minute
+const interactiveStepIdleTimeout = 60 * time.Minute
 
 // interactiveStepIdlePoll is the frequency at which WaitStepDone
 // rechecks the idle window. Small enough to keep tail latency near
@@ -469,6 +469,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		Observer:               obs,
 		ApeVersion:             Version,
 		ManifestDir:            cfg.manifestDir,
+		FromStage:              cfg.fromStage,
 		NoCommit:               cfg.noCommit,
 		AllowDirty:             cfg.allowDirty,
 		PrependFlags:           prepend,

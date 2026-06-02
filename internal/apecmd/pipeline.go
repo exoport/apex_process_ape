@@ -28,6 +28,7 @@ func newPipelineCmd() *cobra.Command {
 		cwdFlag            string
 		outputFormat       string
 		manifestDirFlag    string
+		fromStageFlag      string
 		noCommitFlag       bool
 		allowDirtyFlag     bool
 		tuiFlag            bool
@@ -112,6 +113,7 @@ func newPipelineCmd() *cobra.Command {
 			runOpts := runConfig{
 				prompt:                promptFlag,
 				manifestDir:           manifestDirFlag,
+				fromStage:             fromStageFlag,
 				noCommit:              noCommitFlag,
 				allowDirty:            allowDirtyFlag,
 				ignoreProjectSettings: ignoreProjSettings,
@@ -153,6 +155,7 @@ func newPipelineCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "With --no-tui: suppress per-event stream; print only stage/step start/end markers")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format for list mode (no positional arg): human|json|yaml")
 	cmd.Flags().StringVar(&manifestDirFlag, "manifest-dir", "", "Override the directory for run manifest artifacts (default: <project>/_output/pipelines)")
+	cmd.Flags().StringVar(&fromStageFlag, "from", "", "Skip stages before the named one and start execution there")
 	cmd.Flags().BoolVar(&noCommitFlag, "no-commit", false, "Do not commit anything during the run; leave the working tree dirty. Overrides any `commit:` field in the pipeline YAML.")
 	cmd.Flags().BoolVar(&allowDirtyFlag, "commit-allow-dirty", false, "Bypass the dirty-tree pre-run gate. The first committing step's diff will include any pre-existing uncommitted changes.")
 	cmd.PersistentFlags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
@@ -231,6 +234,7 @@ func printPipelineList(res pipelineListResult, format output.Format) error {
 type runConfig struct {
 	prompt                string
 	manifestDir           string
+	fromStage             string
 	noCommit              bool
 	allowDirty            bool
 	ignoreProjectSettings bool
@@ -245,6 +249,7 @@ func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot string, quie
 		Observer:    obs,
 		ApeVersion:  Version,
 		ManifestDir: cfg.manifestDir,
+		FromStage:   cfg.fromStage,
 		NoCommit:    cfg.noCommit,
 		AllowDirty:  cfg.allowDirty,
 	})
@@ -286,6 +291,7 @@ func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 			Observer:    obs,
 			ApeVersion:  Version,
 			ManifestDir: cfg.manifestDir,
+			FromStage:   cfg.fromStage,
 			NoCommit:    cfg.noCommit,
 			AllowDirty:  cfg.allowDirty,
 		})

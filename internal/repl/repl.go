@@ -240,6 +240,17 @@ func HasSession(_ context.Context, name string) bool {
 	}
 }
 
+// SessionDone returns a channel that is closed when the session's child
+// process exits. Returns a nil channel if the session is not registered;
+// callers should treat nil as "never closes".
+func SessionDone(_ context.Context, name string) <-chan struct{} {
+	s, ok := lookup(name)
+	if !ok {
+		return nil
+	}
+	return s.done
+}
+
 // CapturePane returns the rendered VT grid as plain text. ANSI escape
 // sequences are interpreted, not included in the output.
 func CapturePane(_ context.Context, name string) (string, error) {

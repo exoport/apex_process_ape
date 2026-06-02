@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## v0.0.24 (2026-06-01)
+
+- **fix(pipeline): detect claude process exit immediately instead of
+  idling for the full timeout** — when the claude REPL process exited
+  unexpectedly between `WaitForReady` and the Stop hook (e.g., due to
+  an API error or OOM on startup), `waitStepDone` had no mechanism to
+  detect it and would block until `interactiveStepIdleTimeout` elapsed.
+  Root cause: `repl.HasSession` and the session's `done` channel existed
+  but were never wired into the pipeline runner. Fix: added
+  `repl.SessionDone` (returns the session's `done` channel) and wrapped
+  the stage context with `context.WithCancelCause` in
+  `runStageInteractive`; a goroutine watches `SessionDone` and cancels
+  the context immediately when the process exits, producing a
+  `"claude process exited without Stop hook"` error in seconds rather
+  than minutes. Also adds `APE_INTERACTIVE_DEBUG` pane capture on step
+  failure so error output from crashed claude sessions is preserved.
+- **fix(pipeline): raise interactive step idle timeout from 15m to
+  60m** — skills that perform long single-turn generation with no
+  intermediate tool calls (no Pre/PostToolUse hooks) were hitting the
+  15-minute ceiling before the session-exit fix. The new ceiling gives
+  legitimate heavy steps enough runway while the session-exit watcher
+  handles the actual hung/crashed case fast.
+- **feat(pipeline): `--from <stage>` flag** — skip all pipeline stages
+  before the named one and start execution there. Useful for resuming a
+  failed run without re-running already-completed stages. Invalid stage
+  names are rejected before any stage executes, with an error listing
+  the available names. Supported across all execution modes (TUI,
+  no-TUI, web, programmatic).
+
 ## v0.0.23 (2026-05-28)
 
 - **Release flow: rc-tag cycle removed** — earlier releases used a
