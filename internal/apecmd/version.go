@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime/debug"
+	"strings"
 
 	"github.com/diegosz/apex_process_ape/internal/output"
 	"github.com/spf13/cobra"
@@ -15,6 +17,30 @@ var (
 	BuildDate = "unknown"
 	GitCommit = "unknown"
 )
+
+func init() {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return
+	}
+	// Use module version when installed via `go install module@vX.Y.Z`.
+	if Version == "dev" && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		Version = strings.TrimPrefix(info.Main.Version, "v")
+	}
+	// Backfill from VCS settings embedded by `go build`/`go install`.
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			if GitCommit == "unknown" {
+				GitCommit = s.Value
+			}
+		case "vcs.time":
+			if BuildDate == "unknown" {
+				BuildDate = s.Value
+			}
+		}
+	}
+}
 
 type versionResult struct {
 	Version   string `json:"version"   yaml:"version"`

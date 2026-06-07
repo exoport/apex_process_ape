@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## v0.0.25 (2026-06-07)
+
+- **fix(version): backfill version info from VCS when built via
+  `go install` or `bingo`** — binaries built outside goreleaser showed
+  `dev / unknown / unknown` for version, build date, and git commit
+  because ldflags were never injected. Fix: `init()` in `version.go`
+  calls `runtime/debug.ReadBuildInfo()` and backfills each field that
+  is still at its default value from the embedded VCS settings
+  (`vcs.revision`, `vcs.time`) and the module version
+  (`info.Main.Version`). Goreleaser builds are unaffected — ldflags
+  win and the defaults are never seen. The `v` prefix is stripped from
+  `info.Main.Version` to match the goreleaser format (`0.0.25`, not
+  `v0.0.25`).
+
 ## v0.0.24 (2026-06-01)
 
 - **fix(pipeline): detect claude process exit immediately instead of
