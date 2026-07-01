@@ -263,8 +263,20 @@ func (b *bridge) handleLine(line []byte) error {
 
 	switch req.Method {
 	case "initialize":
+		// Echo the client's requested protocol version so newer claude-code
+		// builds (which negotiate e.g. 2025-11-25) proceed past the handshake.
+		negotiated := "2024-11-05" // fallback for clients that omit it
+		var initParams struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		}
+		if len(req.Params) > 0 {
+			if err := json.Unmarshal(req.Params, &initParams); err == nil &&
+				initParams.ProtocolVersion != "" {
+				negotiated = initParams.ProtocolVersion
+			}
+		}
 		b.respond(req.ID, map[string]any{
-			"protocolVersion": "2024-11-05",
+			"protocolVersion": negotiated,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "ape-mcp-bridge", "version": "0.1.0"},
 		})

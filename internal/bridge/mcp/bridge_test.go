@@ -183,10 +183,16 @@ func driveHandshake(t *testing.T, h *bridgeHarness) *parentReader {
 
 func TestBridge_InitializeHandshake(t *testing.T) {
 	h := startBridgeWithStdio(t)
-	writeRPC(t, h.stdin, rpcMsg{ID: 1, Method: "initialize"})
+	// Client that negotiates a newer protocol version: the bridge echoes it
+	// back so up-to-date claude-code builds proceed past the handshake.
+	writeRPC(t, h.stdin, rpcMsg{
+		ID:     1,
+		Method: "initialize",
+		Params: json.RawMessage(`{"protocolVersion":"2025-11-25"}`),
+	})
 	resp := readRPCResponse(t, h.stdout, 1)
-	if !strings.Contains(string(resp.Result), `"protocolVersion":"2024-11-05"`) {
-		t.Errorf("initialize response missing protocolVersion: %s", string(resp.Result))
+	if !strings.Contains(string(resp.Result), `"protocolVersion":"2025-11-25"`) {
+		t.Errorf("initialize response did not echo negotiated protocolVersion: %s", string(resp.Result))
 	}
 	if !strings.Contains(string(resp.Result), `"ape-mcp-bridge"`) {
 		t.Errorf("initialize response missing serverInfo: %s", string(resp.Result))
@@ -201,6 +207,16 @@ func TestBridge_InitializeHandshake(t *testing.T) {
 	defer conn.Close()
 	pr := startParentReader(conn)
 	pr.waitFor(t, func(m ipc.Message) bool { return m.Type == ipc.TypeReady })
+}
+
+func TestBridge_InitializeFallbackProtocolVersion(t *testing.T) {
+	h := startBridgeWithStdio(t)
+	// Client that omits protocolVersion: the bridge falls back to the default.
+	writeRPC(t, h.stdin, rpcMsg{ID: 1, Method: "initialize"})
+	resp := readRPCResponse(t, h.stdout, 1)
+	if !strings.Contains(string(resp.Result), `"protocolVersion":"2024-11-05"`) {
+		t.Errorf("initialize response missing fallback protocolVersion: %s", string(resp.Result))
+	}
 }
 
 func TestBridge_ToolsList(t *testing.T) {

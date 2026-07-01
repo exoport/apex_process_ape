@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## v0.0.26 (2026-07-01)
+
+- **fix(bridge/mcp): negotiate the MCP `protocolVersion` instead of
+  hard-coding it** — the `initialize` handler always answered with
+  `protocolVersion: "2024-11-05"`. Current claude-code builds (2.1.197)
+  send `initialize` with `"protocolVersion":"2025-11-25"`; receiving the
+  stale/mismatched version back, claude-code never advanced to
+  `tools/list` and the whole pipeline stalled at the first step. Fix:
+  echo the client's requested `protocolVersion` back (standard MCP
+  server behaviour — agree to the version the client asked for), with a
+  `"2024-11-05"` fallback for clients that omit it. The bridge's tool
+  surface is version-agnostic for this flow, so echoing the negotiated
+  version is safe.
+
 ## v0.0.25 (2026-06-07)
 
 - **fix(version): backfill version info from VCS when built via
