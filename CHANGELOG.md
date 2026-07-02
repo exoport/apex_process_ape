@@ -1,5 +1,41 @@
 # CHANGELOG
 
+## v0.0.30 (2026-07-02)
+
+- **fix(telemetry): capture the interactive transcript during its live
+  window (Pre/PostToolUse), not just at UPS/Stop** — interactive steps
+  still zeroed with `telemetry_note: transcript unavailable at scan
+  time (… gone, no snapshot)`. Root cause: claude removes the
+  interactive session's JSONL from `~/.claude/projects/` before the
+  Stop hook, so both the UPS-time and Stop-time snapshots found nothing
+  to copy and the run dir had no `transcripts/` copy at all. Fix: the
+  run now snapshots the session transcript on **PreToolUse /
+  PostToolUse** hooks — the only window the file demonstrably exists
+  and is being appended — so the accumulated copy survives the source's
+  mid-turn deletion. Sub-agent sessions snapshot on their tool hooks
+  the same way (matched by session_id).
+- **perf(runlog): incremental append-copy for transcript snapshots** —
+  new `Writer.AppendTranscript` copies only the bytes past a tracked
+  per-session offset (full re-copy only on truncation/rotation), so a
+  step with dozens of tool calls over an MB-scale transcript doesn't
+  produce O(n²) copy bytes. The snapshot accumulates across hooks and
+  survives source deletion between them.
+- **fix(telemetry): richer zero-capture diagnostics** — the
+  `telemetry_note` now reports whether the scan used the live source or
+  the snapshot, the line count, and the snapshot-attempt count, so a
+  partial capture (missed only the final post-last-tool turn) is
+  distinguishable from a total miss. Still warns on stderr; never a
+  silent zero.
+- **test: deletion-race regression guard** — a golden test simulates
+  the real lifecycle (transcript present and growing across
+  Pre/PostToolUse, deleted before Stop and before the deferred scan)
+  and asserts a `transcripts/` snapshot exists, telemetry is non-zero
+  with populated `model_usage`, and no `telemetry_note`. The
+  incremental-copy primitive is pinned separately (accumulates without
+  gap/overlap; survives source deletion). The v0.0.28/29 guards
+  (unpriced-model-still-counts-tokens, verifier-skips-non-slash-UPS,
+  bare-Enter dismissal) remain.
+
 ## v0.0.29 (2026-07-02)
 
 - **fix(repl,bridge): folder-trust accept keystroke no longer breaks
