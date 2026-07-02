@@ -309,7 +309,6 @@ func SendCommand(ctx context.Context, name, text string) error {
 // reassigns these.
 var (
 	capturePaneFn = CapturePane
-	sendTextFn    = SendText
 	sendEnterFn   = SendEnter
 )
 
@@ -339,18 +338,17 @@ var blockingModals = []modalSpec{
 			return strings.Contains(s, "trust this folder") ||
 				strings.Contains(s, "Is this a project you")
 		},
-		// Option 1 ("Yes, I trust this folder") is preselected today;
-		// send "1" then Enter so the dismissal stays robust even if the
-		// default selection changes across claude versions.
+		// Dismiss with a BARE Enter — option 1 ("Yes, I trust this
+		// folder") is preselected and the dialog shows "Enter to
+		// confirm", so Enter alone accepts it. Do NOT type a "1"
+		// selection keystroke: in the interactive runtime that "1"
+		// surfaces as a UserPromptSubmit the step-contract verifier
+		// could consume as the skill prompt (got "1" → spurious
+		// stage failure in any untrusted dir). Bare Enter carries no
+		// prompt text, eliminating that leak at the source. (The
+		// verifier also skips non-slash UPS events as defense in
+		// depth — see orchestrator.ContractVerifier.Consume.)
 		accept: func(ctx context.Context, name string) error {
-			if err := sendTextFn(ctx, name, "1"); err != nil {
-				return err
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(PromptSettle):
-			}
 			return sendEnterFn(ctx, name)
 		},
 	},

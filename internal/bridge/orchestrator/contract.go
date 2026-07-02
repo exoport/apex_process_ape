@@ -120,6 +120,18 @@ func (v *ContractVerifier) Consume(payload json.RawMessage) {
 		v.violateLocked(fmt.Sprintf("UserPromptSubmit payload malformed: %v", err))
 		return
 	}
+	// Skip UserPromptSubmit events that are not skill invocations. A
+	// skill prompt always begins with "/" (see skillPromptMatches); a
+	// pre-skill dismissal keystroke — the folder-trust / onboarding
+	// modal accept, or any menu artifact — does not. Such an event can
+	// race into the contract window (its async hook arrives after
+	// BeginStep), but it is noise, not the step's prompt: ignore it and
+	// keep waiting for the real slash command. Without this, the trust
+	// dialog's accept keystroke was consumed as the skill prompt and
+	// failed the stage in any untrusted dir (v0.0.28 regression).
+	if !strings.HasPrefix(prompt, "/") {
+		return
+	}
 	if !skillPromptMatches(prompt, v.active.Skill, v.active.Agent) {
 		v.violateLocked(fmt.Sprintf("expected skill prompt for %q (agent=%q), got %q",
 			v.active.Skill, v.active.Agent, elide(prompt)))

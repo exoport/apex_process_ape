@@ -142,10 +142,26 @@ func TestContractVerifier_MalformedPayloadViolates(t *testing.T) {
 	v.OnViolation = func(c ContractViolation) { fired = append(fired, c) }
 
 	v.BeginStep(StepContract{Stage: "s", StepIdx: 0, Skill: "x"})
-	// Empty prompt field → doesn't match expected skill prefix → violation.
-	v.Consume(json.RawMessage(`{"not-prompt":"foo"}`))
+	// Unparseable JSON is a genuine hook regression → violation.
+	v.Consume(json.RawMessage(`{not valid json`))
 	if len(fired) != 1 {
-		t.Fatalf("expected 1 violation, got %d", len(fired))
+		t.Fatalf("expected 1 violation for unparseable payload, got %d", len(fired))
+	}
+}
+
+// TestContractVerifier_MissingPromptFieldSkipped: a well-formed
+// payload that lacks a `prompt` field (empty prompt) is a non-skill
+// event — skipped, not a violation. A legitimate skill UPS always
+// carries a slash command, so an empty prompt is dismissal/menu noise.
+func TestContractVerifier_MissingPromptFieldSkipped(t *testing.T) {
+	v := NewContractVerifier()
+	var fired []ContractViolation
+	v.OnViolation = func(c ContractViolation) { fired = append(fired, c) }
+
+	v.BeginStep(StepContract{Stage: "s", StepIdx: 0, Skill: "x"})
+	v.Consume(json.RawMessage(`{"not-prompt":"foo"}`))
+	if len(fired) != 0 {
+		t.Fatalf("empty-prompt payload must be skipped, got violation: %+v", fired)
 	}
 }
 
@@ -168,6 +184,44 @@ func TestContractVerifier_OnViolationFiresOncePerStep(t *testing.T) {
 	defer mu.Unlock()
 	if count != 1 {
 		t.Errorf("OnViolation fired %d times, want 1", count)
+	}
+}
+
+// TestContractVerifier_SkipsTrustAcceptKeystroke is the v0.0.29
+// regression guard for the trust-accept leak: in a fresh (untrusted)
+// dir the folder-trust modal's dismissal keystroke can surface as a
+// UserPromptSubmit whose async hook races into the step-contract
+// window. Such a non-slash-command event must be SKIPPED (not consumed
+// as the skill prompt, not a violation) — the first UPS the verifier
+// acts on is the real skill command, never a dismissal keystroke.
+func TestContractVerifier_SkipsTrustAcceptKeystroke(t *testing.T) {
+	v := NewContractVerifier()
+	var fired []ContractViolation
+	v.OnViolation = func(c ContractViolation) { fired = append(fired, c) }
+
+	v.BeginStep(StepContract{
+		Stage:   "create-prd",
+		StepIdx: 0,
+		Skill:   "apex-create-prd",
+		Agent:   "apex-agent-pm",
+	})
+
+	// Dismissal-keystroke leaks that must NOT trip the contract:
+	// a bare "1" selection, an empty submit, a plain "y".
+	for _, noise := range []string{"1", "", "y"} {
+		v.Consume(promptPayload(noise))
+		if len(fired) != 0 {
+			t.Fatalf("non-slash UPS %q must be skipped, got violation: %+v", noise, fired)
+		}
+		if v.HasViolated() {
+			t.Fatalf("verifier marked done on dismissal keystroke %q", noise)
+		}
+	}
+
+	// The real skill command still satisfies the contract afterward.
+	v.Consume(promptPayload("/apex-agent-pm --autonomous -- apex-create-prd --autonomous"))
+	if len(fired) != 0 {
+		t.Fatalf("skill prompt after dismissal noise must not violate: %+v", fired)
 	}
 }
 

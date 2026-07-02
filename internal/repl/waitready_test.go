@@ -30,13 +30,12 @@ const readyFooterPane = `╭─────────────────�
   ⏵⏵ bypass permissions on (shift+tab to cycle)`
 
 // fakePane swaps the WaitForReady seams for a scripted pane. frames
-// are returned in order; the last frame repeats. Sent keystrokes are
-// recorded. Restores the real seams on test cleanup.
+// are returned in order; the last frame repeats. Enter keystrokes are
+// counted. Restores the real seams on test cleanup.
 type fakePane struct {
 	mu     sync.Mutex
 	frames []string
 	calls  int
-	texts  []string
 	enters int
 }
 
@@ -53,12 +52,6 @@ func installFakePane(t *testing.T, frames []string) *fakePane {
 		f.calls++
 		return f.frames[i], nil
 	}
-	sendTextFn = func(_ context.Context, _, text string) error {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		f.texts = append(f.texts, text)
-		return nil
-	}
 	sendEnterFn = func(_ context.Context, _ string) error {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -67,7 +60,6 @@ func installFakePane(t *testing.T, frames []string) *fakePane {
 	}
 	t.Cleanup(func() {
 		capturePaneFn = CapturePane
-		sendTextFn = SendText
 		sendEnterFn = SendEnter
 	})
 	return f
@@ -88,9 +80,8 @@ func TestWaitForReadyDismissesTrustModal(t *testing.T) {
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.texts) == 0 || f.texts[0] != "1" {
-		t.Fatalf("expected dismissal to send \"1\", sent: %v", f.texts)
-	}
+	// Dismissal is a BARE Enter — no "1" selection keystroke that could
+	// leak as a UserPromptSubmit into the step-contract window.
 	if f.enters == 0 {
 		t.Fatalf("expected dismissal to press Enter")
 	}
@@ -163,7 +154,7 @@ func TestDismissBlockingModalsActsAtMostOnce(t *testing.T) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.texts) != 1 {
-		t.Fatalf("expected exactly one dismissal keystroke, got %v", f.texts)
+	if f.enters != 1 {
+		t.Fatalf("expected exactly one dismissal Enter, got %d", f.enters)
 	}
 }
