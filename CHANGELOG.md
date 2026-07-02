@@ -1,5 +1,46 @@
 # CHANGELOG
 
+## v0.0.28 (2026-07-02)
+
+- **fix(telemetry): interactive per-step metrics were zero on live
+  runs** — `ape task` and `ape pipeline --no-tui` manifests showed
+  `cost_usd: 0, tokens_input: 0, num_turns: 0`, tripping the eval's
+  capture guard. Two distinct root causes, both fixed:
+  - **P0a — transcript-read race.** The transcript was captured as a
+    symlink into `~/.claude/projects/…`, and the source session file
+    was observed gone/rotated by post-Stop scan time — a symlink to a
+    removed target scanned after the fact yields nothing. Fix:
+    transcripts are now **snapshotted (copied)** into the run dir on
+    `UserPromptSubmit` and refreshed from the Stop-hook path while the
+    child session is still resident; the telemetry scan prefers the
+    live source and falls back to the snapshot. A step that still
+    yields zero turns stamps a `telemetry_note` breadcrumb on the
+    manifest and warns on stderr — never a silent zero.
+  - **P0b — stale price table.** `claude-opus-4-8`, `claude-sonnet-5`,
+    `claude-fable-5`, `claude-mythos-5` were missing from the price
+    table, so even a successful scan cost $0 on current models. Added;
+    `Lookup` now normalizes `[1m]`-style context-window suffixes and
+    claude's short spawn aliases (`opus`, `sonnet`, …) onto the base
+    model id.
+- **feat(telemetry): per-model + per-session attribution** — the
+  transcript scan now returns a per-model breakdown
+  (`cost.ScanSession`), recorded as `model_usage` on each manifest
+  step and on run totals (additive to schema v2), and as
+  `model_usage` on the `ape task` JSON envelope. Sub-agent sessions
+  (Agent tool) are captured via the `SubagentStart`/`SubagentStop`
+  hooks — each sub-session's transcript is snapshotted and scanned,
+  emitted as per-session records (`sessions: [{session_id,
+  parent_session_id, model_usage, …}]`) and folded into the step's
+  aggregate, restoring true per-agent token totals.
+- **test: permanent eval-regression guards** — a checked-in golden
+  transcript fixture in the exact live claude-code shape (nested
+  `cache_creation`, `requestId`, duplicate `message.id`, `[1m]`
+  model suffix) asserts non-zero tokens/turns/cost; an unpriced-model
+  fixture locks in `Totals.Add`'s price independence (the exact
+  invariant the zero violated); snapshot-fallback, sub-agent-session,
+  manifest round-trip, and envelope tests pin the whole path the eval
+  consumes so the zero cannot silently return.
+
 ## v0.0.27 (2026-07-02)
 
 - **fix(repl): dismiss the folder-trust dialog; harden `WaitForReady`
