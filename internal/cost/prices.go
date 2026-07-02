@@ -14,6 +14,8 @@
 // detail comes from the existing PLAN-3 manifest.yaml.
 package cost
 
+import "strings"
+
 // ModelPrice is the per-million-tokens USD cost for one model. The
 // formula in formula.go consumes these values directly.
 //
@@ -34,17 +36,24 @@ type ModelPrice struct {
 // models cost $0 with the manifest carrying a `cost_note` (see
 // Tracker for that wiring). PLAN-5 / C7.
 //
-// Source: https://platform.claude.com/docs/en/docs/about-claude/pricing
-// fetched 2026-05-17. Per-million-tokens, USD. The 1.25× / 2.00× /
+// Source: https://platform.claude.com/docs/en/about-claude/pricing
+// fetched 2026-07-02. Per-million-tokens, USD. The 1.25× / 2.00× /
 // 0.10× cache multipliers live in formula.go and apply on top of the
 // BaseInput rate here.
 //
 // NOTE: Opus 4.5+ uses **half** the input rate and **one-third** the
 // output rate of Opus 4 / 4.1. A future model bump must update this
 // table — there is no API to fetch live prices. `ape costs update
-// --from <yaml>` (reserved subcommand) is the planned override path.
+// --from <yaml>` persists overrides to ~/.ape/prices.yaml.
 var Prices = map[string]ModelPrice{
-	// Claude Opus 4.5+ — new pricing tier ($5 in / $25 out).
+	// Claude 5 family ($10 in / $50 out).
+	"claude-fable-5":  {BaseInput: 10.00, Output: 50.00},
+	"claude-mythos-5": {BaseInput: 10.00, Output: 50.00},
+	// Claude Sonnet 5 ($3 in / $15 out; intro pricing through
+	// 2026-08-31 is $2/$10 — table carries the standard rate).
+	"claude-sonnet-5": {BaseInput: 3.00, Output: 15.00},
+	// Claude Opus 4.5+ — current pricing tier ($5 in / $25 out).
+	"claude-opus-4-8": {BaseInput: 5.00, Output: 25.00},
 	"claude-opus-4-7": {BaseInput: 5.00, Output: 25.00},
 	"claude-opus-4-6": {BaseInput: 5.00, Output: 25.00},
 	"claude-opus-4-5": {BaseInput: 5.00, Output: 25.00},
@@ -62,15 +71,52 @@ var Prices = map[string]ModelPrice{
 	"claude-haiku-3-5": {BaseInput: 0.80, Output: 4.00},
 }
 
+// NormalizeModel canonicalizes a model identifier for price lookup
+// and per-model attribution:
+//
+//   - strips a `[...]` context-window suffix — the spawn-time forms
+//     `opus[1m]` / `claude-opus-4-8[1m]` bill at the base model's
+//     rate (no 1M-context surcharge on current models);
+//   - resolves claude's short spawn aliases (`opus`, `sonnet`, …) to
+//     the model id the current CLI resolves them to. The transcript
+//     records the full resolved id, so the alias hop only matters for
+//     callers that log the alias form (e.g. a spec's `model:` field).
+func NormalizeModel(model string) string {
+	if i := strings.IndexByte(model, '['); i > 0 {
+		model = model[:i]
+	}
+	model = strings.TrimSpace(model)
+	if full, ok := modelAliases[model]; ok {
+		return full
+	}
+	return model
+}
+
+// modelAliases maps claude's short spawn-time aliases to the full
+// model id the CLI currently resolves them to. Revisit on model bumps
+// — like Prices, there is no API for this; the authoritative id is
+// whatever the transcript's `message.model` records.
+var modelAliases = map[string]string{
+	"opus":   "claude-opus-4-8",
+	"sonnet": "claude-sonnet-5",
+	"haiku":  "claude-haiku-4-5",
+	"fable":  "claude-fable-5",
+	"mythos": "claude-mythos-5",
+}
+
 // Lookup returns the price for model, plus a flag indicating whether
-// the model was known. Unknown models return zero price (caller may
-// stamp a `cost_note` on the affected step's manifest record).
+// the model was known. The model id is normalized first (context-
+// window suffix stripped, spawn aliases resolved) so `opus[1m]` and
+// `claude-opus-4-8` resolve to the same entry. Unknown models return
+// zero price (caller may stamp a note on the affected step's manifest
+// record).
 //
 // Lookup consults ~/.ape/prices.yaml first (PLAN-5 / C7 — `ape costs
 // update --from <file>` persists overrides there); the built-in
 // Prices map is the fallback. Overrides are cached after the first
 // Lookup of a process; SaveOverrides drops the cache.
 func Lookup(model string) (ModelPrice, bool) {
+	model = NormalizeModel(model)
 	if overrides := loadOverridesOnce(); overrides != nil {
 		if p, ok := overrides[model]; ok {
 			return p, true

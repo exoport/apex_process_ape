@@ -11,21 +11,30 @@ import (
 	"time"
 )
 
-// ScanSessionJSONL reads a Claude Code session JSONL file once and
-// returns the aggregated cost / token totals plus the last model seen.
-// Used by `ape chat` (post-run) to populate session.yaml. PLAN-5 / C7.
+// ScanResult is the full outcome of scanning one session transcript:
+// the aggregate totals, the per-model breakdown (keyed by normalized
+// model id — see NormalizeModel), and the last model seen.
+type ScanResult struct {
+	Totals    Totals
+	ByModel   map[string]Totals
+	LastModel string
+}
+
+// ScanSession reads a Claude Code session JSONL file once and returns
+// the aggregated cost / token totals plus a per-model breakdown.
 //
 // Unlike Tailer (which polls a live file), this is a one-shot reader
 // for files that are already complete. Malformed lines are skipped.
-func ScanSessionJSONL(path string) (Totals, string, error) {
+// Tokens and NumTurns accumulate price-independently — an unpriced
+// model still yields non-zero tokens/turns with CostUSD 0.
+func ScanSession(path string) (ScanResult, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return Totals{}, "", fmt.Errorf("cost.ScanSessionJSONL: %w", err)
+		return ScanResult{}, fmt.Errorf("cost.ScanSession: %w", err)
 	}
 	defer f.Close()
 
-	var totals Totals
-	lastModel := ""
+	res := ScanResult{ByModel: map[string]Totals{}}
 	seenIDs := map[string]struct{}{}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -46,14 +55,26 @@ func ScanSessionJSONL(path string) (Totals, string, error) {
 			}
 			seenIDs[al.Message.ID] = struct{}{}
 		}
-		lastModel = al.Message.Model
-		price, _ := Lookup(al.Message.Model)
-		totals.Add(al.Message.Usage, price)
+		model := NormalizeModel(al.Message.Model)
+		res.LastModel = model
+		price, _ := Lookup(model)
+		res.Totals.Add(al.Message.Usage, price)
+		mt := res.ByModel[model]
+		mt.Add(al.Message.Usage, price)
+		res.ByModel[model] = mt
 	}
 	if err := sc.Err(); err != nil {
-		return totals, lastModel, fmt.Errorf("cost.ScanSessionJSONL: scan: %w", err)
+		return res, fmt.Errorf("cost.ScanSession: scan: %w", err)
 	}
-	return totals, lastModel, nil
+	return res, nil
+}
+
+// ScanSessionJSONL is the aggregate-only wrapper around ScanSession,
+// kept for callers that don't need the per-model breakdown.
+// Used by `ape chat` (post-run) to populate session.yaml. PLAN-5 / C7.
+func ScanSessionJSONL(path string) (Totals, string, error) {
+	res, err := ScanSession(path)
+	return res.Totals, res.LastModel, err
 }
 
 // FindSessionJSONL globs ~/.claude/projects/*/*.jsonl and returns the
