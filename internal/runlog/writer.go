@@ -189,6 +189,61 @@ func (w *Writer) SnapshotTranscript(name, src string) (string, error) {
 	return dst, nil
 }
 
+// AppendTranscript incrementally copies the bytes of src beyond
+// fromOffset onto <dir>/transcripts/<name>, returning the destination
+// path and the new byte offset (bytes copied so far). Because the
+// snapshot ACCUMULATES across calls, it survives the source being
+// deleted mid-turn — which is why interactive telemetry must snapshot
+// on Pre/PostToolUse hooks (the only window the session file reliably
+// exists) rather than only at Stop.
+//
+// fromOffset == 0 (re)creates the snapshot from scratch. When src is
+// shorter than fromOffset (truncated or rotated) it also rewrites from
+// scratch. Otherwise it appends exactly src[fromOffset:EOF]; the copy
+// is bounded by the live EOF, so the returned offset never overshoots
+// and successive calls neither gap nor overlap. Claude session JSONL
+// is append-only, so this reconstructs the byte stream faithfully; a
+// final partial line (source deleted mid-write) is skipped by the
+// JSONL scanner.
+func (w *Writer) AppendTranscript(name, src string, fromOffset int64) (dst string, newOffset int64, err error) {
+	dst = filepath.Join(w.dir, "transcripts", name)
+	sf, err := os.Open(src)
+	if err != nil {
+		return dst, fromOffset, fmt.Errorf("runlog: append transcript %s: %w", name, err)
+	}
+	defer sf.Close()
+	info, err := sf.Stat()
+	if err != nil {
+		return dst, fromOffset, fmt.Errorf("runlog: append transcript %s: %w", name, err)
+	}
+
+	full := fromOffset <= 0 || info.Size() < fromOffset
+	flags := os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	start := fromOffset
+	if full {
+		flags = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+		start = 0
+		// A leftover symlink (legacy LinkTranscript) would redirect the
+		// open onto the link target; drop it so we write a real file.
+		_ = os.Remove(dst)
+	}
+	df, err := os.OpenFile(dst, flags, 0o600)
+	if err != nil {
+		return dst, fromOffset, fmt.Errorf("runlog: append transcript %s: %w", name, err)
+	}
+	defer df.Close()
+	if start > 0 {
+		if _, err := sf.Seek(start, io.SeekStart); err != nil {
+			return dst, fromOffset, fmt.Errorf("runlog: append transcript %s: seek: %w", name, err)
+		}
+	}
+	n, err := io.Copy(df, sf)
+	if err != nil {
+		return dst, start + n, fmt.Errorf("runlog: append transcript %s: copy: %w", name, err)
+	}
+	return dst, start + n, nil
+}
+
 // HookEntry is the typed input to Writer.Hook. The on-wire shape is
 // stable but assembled by hookOnWire to keep nil pointers from
 // producing `null` for fields PLAN-5 specifies as empty strings.

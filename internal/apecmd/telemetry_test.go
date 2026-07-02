@@ -124,6 +124,98 @@ func TestStepTelemetry_SubagentSessions(t *testing.T) {
 	require.Equal(t, 4, tele.ModelUsage["claude-haiku-4-5"].NumTurns)
 }
 
+// TestStepTelemetry_DeletionRace is the v0.0.30 regression guard for
+// the real live failure: the session transcript is present and GROWING
+// across Pre/PostToolUse hooks, then DELETED before Stop and before
+// the deferred scan. The tool-hook snapshots must have accumulated a
+// complete copy, so telemetry is non-zero from the snapshot with no
+// note — exactly the case v0.0.28/29 zeroed.
+func TestStepTelemetry_DeletionRace(t *testing.T) {
+	shortFlushGrace(t)
+	dir := t.TempDir()
+	runDir := filepath.Join(dir, "run")
+	require.NoError(t, os.MkdirAll(runDir, 0o755))
+	rl, err := runlog.New(runDir)
+	require.NoError(t, err)
+	defer rl.Close()
+
+	source := filepath.Join(dir, "session.jsonl") // ~/.claude/projects/… stand-in
+	core := newInteractiveCore(func() {}, func() *runlog.Writer { return rl })
+	core.OnStepStart(pipeline.InteractiveStepInfo{Stage: "design", StepIdx: 0, Skill: "apex-create-prd", Agent: "apex-agent-pm"})
+
+	ups := mustJSON(t, map[string]string{
+		"session_id": "sess-1", "transcript_path": source,
+		"prompt": "/apex-agent-pm --autonomous -- apex-create-prd --autonomous",
+	})
+
+	// First UPS: the session file starts with one assistant turn.
+	writeTranscript(t, source, "sess-1", "claude-opus-4-8", 1)
+	core.FeedHook(orchestrator.HookEvent{Event: ipc.HookUserPromptSubmit, Payload: ups})
+
+	// The turn progresses: the file grows across tool hooks. Each
+	// Pre/PostToolUse fires the incremental snapshot while the file
+	// still exists.
+	toolPayload := mustJSON(t, map[string]string{"session_id": "sess-1", "transcript_path": source})
+	for turns := 2; turns <= 5; turns++ {
+		writeTranscript(t, source, "sess-1", "claude-opus-4-8", turns)
+		evt := ipc.HookPreToolUse
+		if turns%2 == 0 {
+			evt = ipc.HookPostToolUse
+		}
+		core.FeedHook(orchestrator.HookEvent{Event: evt, Payload: toolPayload})
+	}
+
+	// The session file vanishes BEFORE Stop (the observed lifecycle).
+	require.NoError(t, os.Remove(source))
+	core.FeedHook(orchestrator.HookEvent{Event: ipc.HookStop})
+
+	// Snapshot must exist and telemetry must be non-zero from it.
+	snap := filepath.Join(runDir, "transcripts", "design-1-apex-create-prd.jsonl")
+	info, statErr := os.Stat(snap)
+	require.NoError(t, statErr, "tool-hook snapshot must exist after source deletion")
+	require.True(t, info.Mode().IsRegular())
+
+	tele := core.StepTelemetry("design", 0)
+	require.NotNil(t, tele)
+	require.Empty(t, tele.Note, "accumulated snapshot must yield a clean scan, got note: %s", tele.Note)
+	require.Equal(t, 5, tele.NumTurns, "all 5 turns captured incrementally before deletion")
+	require.Greater(t, tele.CostUSD, 0.0)
+	require.Len(t, tele.ModelUsage, 1)
+	require.Equal(t, 5, tele.ModelUsage["claude-opus-4-8"].NumTurns)
+}
+
+// TestAppendTranscriptIncremental pins the incremental-copy primitive:
+// repeated appends accumulate without gap/overlap, and the snapshot
+// survives source deletion between appends.
+func TestAppendTranscriptIncremental(t *testing.T) {
+	dir := t.TempDir()
+	runDir := filepath.Join(dir, "run")
+	require.NoError(t, os.MkdirAll(runDir, 0o755))
+	rl, err := runlog.New(runDir)
+	require.NoError(t, err)
+	defer rl.Close()
+
+	src := filepath.Join(dir, "s.jsonl")
+	require.NoError(t, os.WriteFile(src, []byte("line1\n"), 0o600))
+	_, off1, err := rl.AppendTranscript("s.jsonl", src, 0)
+	require.NoError(t, err)
+
+	f, err := os.OpenFile(src, os.O_APPEND|os.O_WRONLY, 0o600)
+	require.NoError(t, err)
+	_, err = f.WriteString("line2\nline3\n")
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+	dst, off2, err := rl.AppendTranscript("s.jsonl", src, off1)
+	require.NoError(t, err)
+	require.Greater(t, off2, off1)
+
+	// Source deleted: the accumulated snapshot is intact and complete.
+	require.NoError(t, os.Remove(src))
+	got, err := os.ReadFile(dst)
+	require.NoError(t, err)
+	require.Equal(t, "line1\nline2\nline3\n", string(got))
+}
+
 // TestStepTelemetry_ZeroTurnsNote: a readable transcript with zero
 // assistant turns must produce the diagnosability note, not a silent
 // zero (P0a no-silent-zero contract).
