@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## v0.0.29 (2026-07-02)
+
+- **fix(repl,bridge): folder-trust accept keystroke no longer breaks
+  the interactive run in an untrusted dir** — a v0.0.28 regression.
+  The trust-dialog was dismissed by typing `1` then Enter; in the
+  interactive runtime that `1` surfaced as the first
+  `UserPromptSubmit`, and its async hook could race past `BeginStep`
+  into the step-contract window, where the verifier consumed it as the
+  skill prompt (`got "1"`) and failed the stage in ~1.4s. Any pipeline
+  or task run started in a fresh (untrusted) directory hit this. Two
+  independent fixes:
+  - **Dismiss with a bare Enter.** Option 1 ("Yes, I trust this
+    folder") is preselected and the dialog shows "Enter to confirm",
+    so Enter alone accepts it — no `1` selection keystroke that could
+    leak as a prompt. Eliminates the leak at the source, timing-
+    independent.
+  - **Verifier skips non-slash-command UserPromptSubmit events.** A
+    skill invocation always begins with `/`; a dismissal keystroke or
+    menu artifact does not. The step-contract verifier now ignores any
+    in-window UPS whose prompt isn't a slash command (defense in depth
+    against any future onboarding-screen leak) and keeps waiting for
+    the real skill prompt. Genuinely malformed (unparseable) payloads
+    still hard-fail.
+  - Regression guards: the verifier skips `1` / empty / `y`
+    keystrokes and still matches the subsequent skill command; the
+    trust-dialog dismissal asserts a bare Enter with no selection
+    keystroke.
+
 ## v0.0.28 (2026-07-02)
 
 - **fix(telemetry): interactive per-step metrics were zero on live
