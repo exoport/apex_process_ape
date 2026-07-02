@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -101,9 +102,15 @@ type interactiveCore struct {
 	activeSessionID  string // step's main claude session id
 	snapAttempts     int    // successful main-session snapshot refreshes this step
 	diag             snapDiag
-	cumulativeFor    string
-	stageCumulative  cost.Totals
-	stageCumByModel  map[string]cost.Totals
+	// snapshotDir is the hook-side capture directory (APE_SNAPSHOT_DIR
+	// injected into the hook commands): `ape notify` writes
+	// <session-id>.jsonl copies there IN CLAUDE'S TURN, the only
+	// window the transcript is guaranteed resident. StepTelemetry
+	// reads these in preference to the ephemeral source. v0.0.32.
+	snapshotDir     string
+	cumulativeFor   string
+	stageCumulative cost.Totals
+	stageCumByModel map[string]cost.Totals
 	// subSessions collects sub-agent (Agent tool) sessions observed
 	// via SubagentStart/Stop hooks for the CURRENT step, keyed by
 	// session_id. Cleared in OnStepStart.
@@ -143,7 +150,8 @@ func (d snapDiag) summary() string {
 		"tool-hooks seen=%d (no-path=%d no-step=%d) routed main=%d sub=%d new=%d; appends ok=%d/%d; stop-copies=%d",
 		d.toolCases, d.guardNoPath, d.guardNoStep,
 		d.routedMain, d.routedSub, d.routedNew,
-		d.appendOK, d.appendTries, d.stopCopies)
+		d.appendOK, d.appendTries, d.stopCopies,
+	)
 	if d.lastErr != "" {
 		s += fmt.Sprintf("; last-err=%q", d.lastErr)
 	}
@@ -482,6 +490,30 @@ func fileSize(path string) int64 {
 	return info.Size()
 }
 
+// newHookSnapshotDir creates the per-run hook-side capture directory
+// handed to `ape notify` via APE_SNAPSHOT_DIR. Returns "" on failure
+// (the feature degrades to the parent-side capture + diagnostics).
+func newHookSnapshotDir() string {
+	dir, err := os.MkdirTemp("", "ape-snapshots-")
+	if err != nil {
+		return ""
+	}
+	return dir
+}
+
+// hookSnapshotPath returns the hook-written snapshot for a session id,
+// or "" when unavailable.
+func (c *interactiveCore) hookSnapshotPath(sessionID string) string {
+	if c.snapshotDir == "" || sessionID == "" {
+		return ""
+	}
+	p := filepath.Join(c.snapshotDir, hookSnapshotFileName(sessionID, ""))
+	if !fileExists(p) {
+		return ""
+	}
+	return p
+}
+
 // subTranscriptName is the transcripts/ filename for a sub-agent
 // session's snapshot: "<step>.sub-<sid8>.jsonl".
 func subTranscriptName(step, sessionID string) string {
@@ -655,19 +687,37 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 	// final assistant turn into the session JSONL.
 	time.Sleep(transcriptFlushGrace)
 
-	// Prefer the live source (most complete after the flush grace);
-	// fall back to the accumulating snapshot, which survives the
-	// source being deleted mid-turn.
+	// Scan-path preference: the live source when it still exists (most
+	// complete after the flush grace) → the HOOK-SIDE snapshot written
+	// by `ape notify` in claude's turn (guaranteed complete at Stop;
+	// v0.0.32 primary) → the parent-side accumulated snapshot (legacy
+	// fallback + diagnostics anchor).
+	hookSnap := c.hookSnapshotPath(parentSID)
 	scanPath := source
 	usingSnapshot := false
 	if scanPath == "" || !fileExists(scanPath) {
-		scanPath = snapshot
+		scanPath = hookSnap
 		usingSnapshot = true
 	}
 	if scanPath == "" || !fileExists(scanPath) {
+		scanPath = snapshot
+	}
+	if scanPath == "" || !fileExists(scanPath) {
 		return telemetryNote(fmt.Sprintf(
-			"transcript unavailable at scan time (source %q gone; snapshot %q missing; %d successful snapshot(s)); %s",
-			source, snapshot, attempts, diag.summary()))
+			"transcript unavailable at scan time (source %q gone; hook snapshot %q; parent snapshot %q; %d successful snapshot(s)); %s",
+			source, hookSnap, snapshot, attempts, diag.summary(),
+		))
+	}
+	// Durable artifact: persist the hook-side capture into the run dir
+	// (local file → local file, no race with claude's deletion).
+	if hookSnap != "" && c.getRunLog != nil {
+		if writer := c.getRunLog(); writer != nil {
+			if dst, err := writer.SnapshotTranscript(hookSnapshotFileName(parentSID, ""), hookSnap); err == nil && snapshot == "" {
+				c.transcriptMu.Lock()
+				c.activeSnapshot = dst
+				c.transcriptMu.Unlock()
+			}
+		}
 	}
 	res, err := cost.ScanSession(scanPath)
 	if err != nil {
@@ -705,6 +755,9 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 	for _, sub := range subs {
 		subPath := sub.transcript
 		if subPath == "" || !fileExists(subPath) {
+			subPath = c.hookSnapshotPath(sub.sessionID)
+		}
+		if subPath == "" || !fileExists(subPath) {
 			subPath = sub.snapshot
 		}
 		if subPath == "" || !fileExists(subPath) {
@@ -741,7 +794,8 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 		// complete assistant turn) from a total miss.
 		tele.Note = fmt.Sprintf(
 			"transcript scan processed zero assistant turns (path %q, source=%t snapshot=%t, %d line(s), %d successful snapshot(s)); %s",
-			scanPath, !usingSnapshot, usingSnapshot, countLines(scanPath), attempts, diag.summary())
+			scanPath, !usingSnapshot, usingSnapshot, countLines(scanPath), attempts, diag.summary(),
+		)
 		fmt.Fprintf(os.Stderr, "⚠ telemetry: %s\n", tele.Note)
 	}
 	return tele
@@ -890,7 +944,7 @@ func (c *interactiveCore) WaitStepDone(ctx context.Context, _ string, _ int) err
 // or Hub's IPC port. Mode picks the settings shape: ModeWeb for
 // web mode (legacy hooks-via-Mode path), ModeTUI for everywhere
 // else (hooks-via-InjectHooks path).
-func buildInteractivePrepend(apeBin string, ipcPort int, mode config.Mode, ignoreProjectSettings bool) ([]string, error) {
+func buildInteractivePrepend(apeBin string, ipcPort int, mode config.Mode, ignoreProjectSettings bool, snapshotDir string) ([]string, error) {
 	mcpCfg, err := config.BuildMCPConfig(config.MCPOptions{APEBin: apeBin, IPCPort: ipcPort})
 	if err != nil {
 		return nil, err
@@ -900,6 +954,7 @@ func buildInteractivePrepend(apeBin string, ipcPort int, mode config.Mode, ignor
 		BridgePort:  ipcPort,
 		Mode:        mode,
 		InjectHooks: mode != config.ModeWeb, // ModeWeb auto-injects; other modes need the explicit flag
+		SnapshotDir: snapshotDir,
 	})
 	if err != nil {
 		return nil, err
@@ -972,7 +1027,12 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		runLogMu.Unlock()
 	}()
 
-	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, cfg.ignoreProjectSettings)
+	snapDir := newHookSnapshotDir()
+	if snapDir != "" {
+		core.snapshotDir = snapDir
+		defer os.RemoveAll(snapDir)
+	}
+	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, cfg.ignoreProjectSettings, snapDir)
 	if err != nil {
 		return err
 	}

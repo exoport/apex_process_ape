@@ -60,7 +60,7 @@ func TestStepTelemetry_BridgeDeliveredLifecycle(t *testing.T) {
 	send := func(event string, envelope map[string]any) {
 		t.Helper()
 		before := delivered.Load()
-		runNotify(event, bytes.NewReader(mustJSON(t, envelope)), port)
+		runNotify(event, bytes.NewReader(mustJSON(t, envelope)), port, "")
 		require.Eventually(t, func() bool { return delivered.Load() > before },
 			5*time.Second, 2*time.Millisecond, "hook %s not delivered through the bridge", event)
 	}
@@ -120,6 +120,118 @@ func TestStepTelemetry_BridgeDeliveredLifecycle(t *testing.T) {
 	require.Greater(t, tele.CostUSD, 0.0)
 	require.Len(t, tele.ModelUsage, 1)
 	require.Equal(t, 4, tele.ModelUsage["claude-opus-4-8"].NumTurns)
+}
+
+// TestHookSideSnapshot_DeletionAtDispatchTime is the v0.0.32 guard for
+// the REAL race the prior tests missed: the source transcript is
+// deleted IMMEDIATELY after each hook dispatches — before the parent
+// process ever handles the frame (the Stop hook only blocks claude
+// until `ape notify` exits, not until FeedHook runs). The parent-side
+// run-log writer is disabled entirely, so the hook-side capture in
+// APE_SNAPSHOT_DIR (written inside runNotify, in the hook process) is
+// the only possible artifact. Asserts: the hook-side snapshot exists
+// and is complete, StepTelemetry reads it, telemetry is non-zero with
+// model_usage, no telemetry_note.
+func TestHookSideSnapshot_DeletionAtDispatchTime(t *testing.T) {
+	shortFlushGrace(t)
+	dir := t.TempDir()
+	snapDir := filepath.Join(dir, "snapshots") // APE_SNAPSHOT_DIR stand-in
+
+	// No run-log writer: every parent-side snapshot path is dead.
+	core := newInteractiveCore(func() {}, func() *runlog.Writer { return nil })
+	core.snapshotDir = snapDir
+
+	var delivered atomic.Int64
+	rt := orchestrator.NewBridgeRuntime(orchestrator.BridgeRuntimeOptions{
+		OnHook: func(h orchestrator.HookEvent) {
+			core.FeedHook(h)
+			delivered.Add(1)
+		},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	require.NoError(t, rt.Listen(ctx))
+	serveDone := make(chan struct{})
+	go func() { _ = rt.Serve(ctx); close(serveDone) }()
+	defer func() { cancel(); <-serveDone }()
+	port := strconv.Itoa(rt.IPCPort())
+
+	source := filepath.Join(dir, "session.jsonl")
+
+	// sendAndDelete dispatches one hook through the real runNotify
+	// (hook-side capture included), then deletes the source BEFORE
+	// waiting for parent delivery — reproducing turn-end deletion
+	// racing the async IPC path.
+	sendAndDelete := func(event string, envelope map[string]any) {
+		t.Helper()
+		before := delivered.Load()
+		runNotify(event, bytes.NewReader(mustJSON(t, envelope)), port, snapDir)
+		if fileExists(source) {
+			require.NoError(t, os.Remove(source))
+		}
+		require.Eventually(t, func() bool { return delivered.Load() > before },
+			5*time.Second, 2*time.Millisecond, "hook %s not delivered", event)
+	}
+
+	core.OnStepStart(pipeline.InteractiveStepInfo{
+		Stage: "design", StepIdx: 0, Skill: "apex-create-prd", Agent: "apex-agent-pm",
+	})
+
+	// UPS before the transcript exists.
+	sendAndDelete("UserPromptSubmit", map[string]any{
+		"session_id":      "sess-1",
+		"transcript_path": source,
+		"prompt":          "/apex-agent-pm --autonomous -- apex-create-prd --autonomous",
+	})
+	// Tool hooks: file present at dispatch, deleted right after each.
+	writeTranscript(t, source, "sess-1", "claude-opus-4-8", 2)
+	sendAndDelete("PreToolUse", map[string]any{"session_id": "sess-1", "transcript_path": source})
+	// Stop: file present at dispatch (full turn), deleted right after
+	// notify returns — before the parent handles the Stop frame.
+	writeTranscript(t, source, "sess-1", "claude-opus-4-8", 4)
+	sendAndDelete("Stop", map[string]any{"session_id": "sess-1", "transcript_path": source})
+
+	// The hook-side snapshot is the only surviving artifact and must
+	// be the COMPLETE Stop-time copy.
+	hookSnap := filepath.Join(snapDir, "sess-1.jsonl")
+	info, statErr := os.Stat(hookSnap)
+	require.NoError(t, statErr, "hook-side snapshot missing")
+	require.Positive(t, info.Size())
+
+	tele := core.StepTelemetry("design", 0)
+	require.NotNil(t, tele)
+	require.Empty(t, tele.Note, "expected clean telemetry from hook-side snapshot, got: %s", tele.Note)
+	require.Equal(t, 4, tele.NumTurns, "Stop-time full copy must be complete")
+	require.Greater(t, tele.CostUSD, 0.0)
+	require.Equal(t, 4, tele.ModelUsage["claude-opus-4-8"].NumTurns)
+}
+
+// TestHookSideSnapshot_StopAloneSuffices: the Stop-hook full copy in
+// runNotify lands even when UPS and all tool-hook appends never ran
+// (simulated total failure of the incremental layer).
+func TestHookSideSnapshot_StopAloneSuffices(t *testing.T) {
+	shortFlushGrace(t)
+	dir := t.TempDir()
+	snapDir := filepath.Join(dir, "snapshots")
+	source := filepath.Join(dir, "session.jsonl")
+	writeTranscript(t, source, "sess-9", "claude-opus-4-8", 3)
+
+	// Only the Stop hook runs hook-side capture; no bridge at all
+	// (port "" — even IPC delivery failed).
+	runNotify("Stop", bytes.NewReader(mustJSON(t, map[string]string{
+		"session_id": "sess-9", "transcript_path": source,
+	})), "", snapDir)
+	require.NoError(t, os.Remove(source))
+
+	core := &interactiveCore{
+		snapshotDir:      snapDir,
+		activeTranscript: source, // recorded but gone
+		activeSessionID:  "sess-9",
+	}
+	tele := core.StepTelemetry("st", 0)
+	require.NotNil(t, tele)
+	require.Empty(t, tele.Note)
+	require.Equal(t, 3, tele.NumTurns)
 }
 
 // TestSyncStopCopy_StopEnvelopeSeedsPath: the guaranteed Stop-time

@@ -172,21 +172,29 @@ func (w *Writer) LinkTranscript(name, target string) error {
 // Replaces a pre-existing symlink of the same name.
 func (w *Writer) SnapshotTranscript(name, src string) (string, error) {
 	dst := filepath.Join(w.dir, "transcripts", name)
+	if err := CopyFileAtomic(dst, src); err != nil {
+		return "", fmt.Errorf("runlog: snapshot transcript %s: %w", name, err)
+	}
+	return dst, nil
+}
+
+// CopyFileAtomic copies src to dst via a tmp file + rename. Replaces a
+// pre-existing symlink at dst with a real file. Exported so `ape
+// notify` can perform the hook-side transcript capture with the same
+// primitive the run-dir snapshots use.
+func CopyFileAtomic(dst, src string) error {
 	data, err := os.ReadFile(src)
 	if err != nil {
-		return "", fmt.Errorf("runlog: snapshot transcript %s: %w", name, err)
+		return err
 	}
 	tmp := dst + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return "", fmt.Errorf("runlog: snapshot transcript %s: %w", name, err)
+		return err
 	}
 	// A symlink from an earlier LinkTranscript-era run dir would make
 	// os.Rename land the copy at the link target; remove it first.
 	_ = os.Remove(dst)
-	if err := os.Rename(tmp, dst); err != nil {
-		return "", fmt.Errorf("runlog: snapshot transcript %s: %w", name, err)
-	}
-	return dst, nil
+	return os.Rename(tmp, dst)
 }
 
 // AppendTranscript incrementally copies the bytes of src beyond
@@ -207,14 +215,28 @@ func (w *Writer) SnapshotTranscript(name, src string) (string, error) {
 // JSONL scanner.
 func (w *Writer) AppendTranscript(name, src string, fromOffset int64) (dst string, newOffset int64, err error) {
 	dst = filepath.Join(w.dir, "transcripts", name)
+	newOffset, err = AppendFile(dst, src, fromOffset)
+	if err != nil {
+		return dst, newOffset, fmt.Errorf("runlog: append transcript %s: %w", name, err)
+	}
+	return dst, newOffset, nil
+}
+
+// AppendFile implements the incremental copy underneath
+// AppendTranscript as a standalone primitive: it appends
+// src[fromOffset:EOF] onto dst, returning the new offset. fromOffset
+// <= 0 or a truncated/rotated source (shorter than fromOffset)
+// rewrites dst from scratch. Exported so `ape notify` can run the
+// hook-side incremental capture with the same logic.
+func AppendFile(dst, src string, fromOffset int64) (newOffset int64, err error) {
 	sf, err := os.Open(src)
 	if err != nil {
-		return dst, fromOffset, fmt.Errorf("runlog: append transcript %s: %w", name, err)
+		return fromOffset, err
 	}
 	defer sf.Close()
 	info, err := sf.Stat()
 	if err != nil {
-		return dst, fromOffset, fmt.Errorf("runlog: append transcript %s: %w", name, err)
+		return fromOffset, err
 	}
 
 	full := fromOffset <= 0 || info.Size() < fromOffset
@@ -229,19 +251,19 @@ func (w *Writer) AppendTranscript(name, src string, fromOffset int64) (dst strin
 	}
 	df, err := os.OpenFile(dst, flags, 0o600)
 	if err != nil {
-		return dst, fromOffset, fmt.Errorf("runlog: append transcript %s: %w", name, err)
+		return fromOffset, err
 	}
 	defer df.Close()
 	if start > 0 {
 		if _, err := sf.Seek(start, io.SeekStart); err != nil {
-			return dst, fromOffset, fmt.Errorf("runlog: append transcript %s: seek: %w", name, err)
+			return fromOffset, fmt.Errorf("seek: %w", err)
 		}
 	}
 	n, err := io.Copy(df, sf)
 	if err != nil {
-		return dst, start + n, fmt.Errorf("runlog: append transcript %s: copy: %w", name, err)
+		return start + n, fmt.Errorf("copy: %w", err)
 	}
-	return dst, start + n, nil
+	return start + n, nil
 }
 
 // HookEntry is the typed input to Writer.Hook. The on-wire shape is
