@@ -1,5 +1,46 @@
 # CHANGELOG
 
+## v0.0.32 (2026-07-02)
+
+- **fix(telemetry): capture the transcript HOOK-SIDE, in `ape
+  notify`** — the definitive fix for zeroed interactive telemetry.
+  Five prior attempts read the session file from the wrong process at
+  the wrong time: claude's Stop hook only blocks until `ape notify`
+  exits, so even v0.0.31's "synchronous" parent-side Stop copy raced
+  turn-end deletion (the IPC frame is processed asynchronously). Now
+  the capture happens inside `ape notify` itself — the hook process
+  that runs in claude's turn, the only context where the transcript is
+  guaranteed resident:
+  - the hook commands gain `APE_SNAPSHOT_DIR=<dir>` alongside
+    `APE_BRIDGE_PORT` (settings builder), pointing at a per-run
+    capture directory;
+  - `Stop`/`SubagentStop` (sync, claude blocks): a **full atomic
+    copy**, guaranteed complete before claude proceeds — the primary
+    guarantee;
+  - UPS / Pre/PostToolUse / SubagentStart: **incremental append**
+    anchored on the destination size (no per-tool-call re-copy; the
+    accumulated copy survives mid-turn deletion); the Stop-time full
+    copy rewrites atomically, so the post-Stop scan always sees a
+    clean artifact;
+  - capture runs BEFORE the bridge dial, so the snapshot lands even
+    when the bridge is unreachable.
+  `StepTelemetry` reads the hook-written snapshot (keyed by
+  session_id) in preference to the ephemeral source, for main and
+  sub-agent sessions, and persists it into the run dir's
+  `transcripts/` as the durable artifact. The v0.0.31 parent-side
+  capture and snapDiag diagnostics remain as fallback + residual-edge
+  reporting. Wired for `--no-tui`, `--tui`, and `--web` interactive.
+- **test: deletion-at-dispatch-time regression guard** — the previous
+  integration test deleted the source only after parent delivery, so
+  it passed while real runs failed. The new guard deletes the source
+  immediately after each hook dispatches (before the parent handles
+  the frame) with the parent-side writer disabled entirely — the
+  hook-side snapshot is the only possible artifact — and asserts it
+  exists, is complete, and yields non-zero telemetry with model_usage
+  and no note. A second guard proves the Stop-hook full copy alone
+  suffices even when the bridge is unreachable and all incremental
+  appends never ran.
+
 ## v0.0.31 (2026-07-02)
 
 - **fix(telemetry): guaranteed synchronous transcript copy at Stop** —
