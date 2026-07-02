@@ -41,6 +41,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -303,19 +304,134 @@ func SendCommand(ctx context.Context, name, text string) error {
 	return SendEnter(ctx, name)
 }
 
-// WaitForReady polls CapturePane until the ❯ glyph appears (claude
-// REPL is up and accepting input) or ctx cancels.
+// Test seams for WaitForReady's poll/dismiss loop so it can be driven
+// against a scripted pane without a live PTY. Production code never
+// reassigns these.
+var (
+	capturePaneFn = CapturePane
+	sendTextFn    = SendText
+	sendEnterFn   = SendEnter
+)
+
+// modalSpec describes a blocking modal claude may render before the
+// REPL accepts input (folder-trust prompt, onboarding screens, …).
+// match tests a pane snapshot for the modal's signature; accept sends
+// the keystrokes that dismiss it.
+type modalSpec struct {
+	name   string
+	match  func(s string) bool
+	accept func(ctx context.Context, name string) error
+}
+
+// blockingModals is the registry of known pre-REPL modals. Keep every
+// modal signature in this one table so a new onboarding screen (theme
+// picker, "what's new") is a one-line addition, not a re-debug.
+//
+// trust-folder: claude-code renders a folder-trust modal on first
+// launch in an untrusted directory. Its menu item prints the ❯ glyph,
+// which the pre-hardening WaitForReady treated as "ready" — the step
+// prompt was then eaten by the modal and the run idled until timeout.
+// --dangerously-skip-permissions does not suppress it interactively.
+var blockingModals = []modalSpec{
+	{
+		name: "trust-folder",
+		match: func(s string) bool {
+			return strings.Contains(s, "trust this folder") ||
+				strings.Contains(s, "Is this a project you")
+		},
+		// Option 1 ("Yes, I trust this folder") is preselected today;
+		// send "1" then Enter so the dismissal stays robust even if the
+		// default selection changes across claude versions.
+		accept: func(ctx context.Context, name string) error {
+			if err := sendTextFn(ctx, name, "1"); err != nil {
+				return err
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(PromptSettle):
+			}
+			return sendEnterFn(ctx, name)
+		},
+	},
+}
+
+// dismissBlockingModals dismisses at most one known modal per call and
+// reports whether it acted. Callers should re-poll the pane after a
+// dismissal before testing readiness.
+func dismissBlockingModals(ctx context.Context, name, snap string) (bool, error) {
+	for _, m := range blockingModals {
+		if !m.match(snap) {
+			continue
+		}
+		if err := m.accept(ctx, name); err != nil {
+			return false, fmt.Errorf("repl: dismiss %s modal: %w", m.name, err)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+// emptyPromptRe matches a prompt line with nothing typed: the ❯ glyph
+// alone on its line (snapshot() strips trailing spaces). A modal menu
+// item renders as `❯ 1. …` and can never match.
+var emptyPromptRe = regexp.MustCompile(`(?m)^\s*` + ReadyGlyph + `\s*$`)
+
+// replReady reports whether the pane shows the live REPL input
+// affordance rather than a menu item that merely contains the glyph.
+// Primary signal: the bypass-permissions footer — ape always launches
+// claude with --dangerously-skip-permissions, so the footer is present
+// whenever the real REPL is up. Fallback: an empty prompt line, which
+// also keeps the bash-based tests (PS1='❯ ') honest.
+func replReady(snap string) bool {
+	if strings.Contains(snap, "bypass permissions on") {
+		return true
+	}
+	return emptyPromptRe.MatchString(snap)
+}
+
+// NotReadyError is returned by WaitForReady when the REPL did not
+// become ready before ctx expired. Pane carries the last captured
+// snapshot so an unrecognized blocking modal is diagnosable from the
+// error text instead of a silent stall (no-silent-caps principle).
+type NotReadyError struct {
+	Name string
+	Pane string
+	Err  error
+}
+
+func (e *NotReadyError) Error() string {
+	return fmt.Sprintf("repl %q not ready before timeout: %v; last pane:\n%s", e.Name, e.Err, e.Pane)
+}
+
+func (e *NotReadyError) Unwrap() error { return e.Err }
+
+// WaitForReady polls CapturePane until the claude REPL is genuinely
+// accepting input or ctx cancels. Known blocking modals (see
+// blockingModals) are dismissed along the way; after a dismissal the
+// loop re-polls before testing readiness. On timeout the returned
+// *NotReadyError includes the last pane snapshot.
 func WaitForReady(ctx context.Context, name string) error {
 	ticker := time.NewTicker(ReadyPollInterval)
 	defer ticker.Stop()
+	var lastSnap string
 	for {
-		snap, err := CapturePane(ctx, name)
-		if err == nil && strings.Contains(snap, ReadyGlyph) {
-			return nil
+		snap, err := capturePaneFn(ctx, name)
+		if err == nil {
+			lastSnap = snap
+			handled, derr := dismissBlockingModals(ctx, name, snap)
+			switch {
+			case derr != nil:
+				return derr
+			case handled:
+				// Modal dismissed — poll again before testing readiness.
+			case replReady(snap):
+				return nil
+			}
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return &NotReadyError{Name: name, Pane: lastSnap, Err: ctx.Err()}
 		case <-ticker.C:
 		}
 	}
