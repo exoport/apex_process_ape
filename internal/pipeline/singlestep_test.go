@@ -124,6 +124,10 @@ func TestSingleStepInteractiveEndToEnd(t *testing.T) {
 		}
 	}
 	git("init")
+	// Repo-local identity: the RUNNER's boundary commit runs without
+	// this test's per-call env vars, and CI has no global git config.
+	git("config", "user.email", "t@t")
+	git("config", "user.name", "t")
 	git("commit", "--allow-empty", "-m", "base")
 
 	// Framework skill so PreflightSkills resolves.
