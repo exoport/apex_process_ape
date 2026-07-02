@@ -17,8 +17,11 @@ import (
 type Rollup struct {
 	UpdatedAt time.Time         `json:"updated_at"`
 	Pipelines map[string]Bucket `json:"pipelines,omitempty"`
-	Chats     Bucket            `json:"chats"`
-	ByDay     map[string]Totals `json:"by_day,omitempty"` // YYYY-MM-DD → totals
+	// Tasks aggregates `ape task` runs, keyed by skill name
+	// (manifests under _output/tasks/<skill>/<run-id>/). PLAN-11.
+	Tasks map[string]Bucket `json:"tasks,omitempty"`
+	Chats Bucket            `json:"chats"`
+	ByDay map[string]Totals `json:"by_day,omitempty"` // YYYY-MM-DD → totals
 }
 
 // Bucket totals one pipeline name (or all chats) over the lifetime
@@ -40,7 +43,7 @@ func LoadRollup(projectRoot string) (*Rollup, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return &Rollup{Pipelines: map[string]Bucket{}, ByDay: map[string]Totals{}}, nil
+			return &Rollup{Pipelines: map[string]Bucket{}, Tasks: map[string]Bucket{}, ByDay: map[string]Totals{}}, nil
 		}
 		return nil, err
 	}
@@ -53,10 +56,13 @@ func LoadRollup(projectRoot string) (*Rollup, error) {
 	if err := json.Unmarshal(bs, &r); err != nil {
 		// Corrupt file: best-effort restart. The durable record is
 		// per-run manifest.yaml / session.yaml — rollup is a cache.
-		return &Rollup{Pipelines: map[string]Bucket{}, ByDay: map[string]Totals{}}, nil
+		return &Rollup{Pipelines: map[string]Bucket{}, Tasks: map[string]Bucket{}, ByDay: map[string]Totals{}}, nil
 	}
 	if r.Pipelines == nil {
 		r.Pipelines = map[string]Bucket{}
+	}
+	if r.Tasks == nil {
+		r.Tasks = map[string]Bucket{}
 	}
 	if r.ByDay == nil {
 		r.ByDay = map[string]Totals{}
@@ -104,6 +110,22 @@ func (r *Rollup) FoldPipelineRun(pipelineName, runID string, day time.Time, tota
 	b.Runs[runID] = totals
 	b.Totals = sumTotals(b.Totals, totals)
 	r.Pipelines[pipelineName] = b
+	r.foldDay(day, totals)
+}
+
+// FoldTaskRun mutates r to include one `ape task` run's totals,
+// keyed by skill name. PLAN-11.
+func (r *Rollup) FoldTaskRun(skill, runID string, day time.Time, totals Totals) {
+	if r.Tasks == nil {
+		r.Tasks = map[string]Bucket{}
+	}
+	b := r.Tasks[skill]
+	if b.Runs == nil {
+		b.Runs = map[string]Totals{}
+	}
+	b.Runs[runID] = totals
+	b.Totals = sumTotals(b.Totals, totals)
+	r.Tasks[skill] = b
 	r.foldDay(day, totals)
 }
 

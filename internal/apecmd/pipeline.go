@@ -239,6 +239,22 @@ type runConfig struct {
 	allowDirty            bool
 	ignoreProjectSettings bool
 	openOnStart           bool
+
+	// progressWriter redirects the plain observer's progress stream.
+	// nil keeps the default (os.Stdout). `ape task --output-format
+	// json` routes progress to stderr so stdout carries only the
+	// result envelope. PLAN-11.
+	progressWriter io.Writer
+	// quiet suppresses the per-event stream in the plain observer
+	// (same semantics as `ape pipeline --quiet` under --no-tui).
+	quiet bool
+	// suppressSummary skips printEndOfRunSummary — `ape task` prints
+	// its own result envelope / summary instead. PLAN-11.
+	suppressSummary bool
+	// idleTimeout overrides the interactive step idle-without-Stop
+	// backstop (default interactiveStepIdleTimeout). PLAN-11:
+	// `ape task --idle-timeout`.
+	idleTimeout time.Duration
 }
 
 func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot string, quiet bool, cfg runConfig) error {

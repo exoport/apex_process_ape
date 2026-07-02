@@ -94,6 +94,7 @@ Keybindings:
 | `ape framework update` | Refresh skills + pipelines against the framework repo (preserves config.yaml).           |
 | `ape framework status` | Inspect the installed framework version + drift report.                                  |
 | `ape pipeline [name]`  | List installed pipelines; with a name, run the named pipeline.                           |
+| `ape task <skill>`     | Run a single framework skill (no pipeline YAML) through the interactive PTY runner.     |
 | `ape adr`              | Manage Architecture Decision Records (`list`, `validate`, `new`).                        |
 | `ape pattern`          | Manage governance patterns (`list`).                                                     |
 | `ape trait`            | Inspect APEX traits (`list`, `show`, `validate`, `conflicts`).                           |

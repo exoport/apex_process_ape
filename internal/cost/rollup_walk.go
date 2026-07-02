@@ -9,8 +9,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// RebuildRollup walks <project>/_output/pipelines/<name>/<run-id>/manifest.yaml
-// and <project>/_output/ape/chats/<chat-id>/session.yaml, folds every row
+// RebuildRollup walks <project>/_output/pipelines/<name>/<run-id>/manifest.yaml,
+// <project>/_output/tasks/<skill>/<run-id>/manifest.yaml (PLAN-11), and
+// <project>/_output/ape/chats/<chat-id>/session.yaml, folds every row
 // into a fresh Rollup, and saves it. Used by `ape costs roll`. PLAN-5 / C7.
 //
 // Best-effort: parse errors on individual artefacts are skipped (so a
@@ -20,11 +21,15 @@ import (
 func RebuildRollup(projectRoot string) (*Rollup, error) {
 	r := &Rollup{
 		Pipelines: map[string]Bucket{},
+		Tasks:     map[string]Bucket{},
 		ByDay:     map[string]Totals{},
 	}
 	r.Chats.Runs = map[string]Totals{}
 
-	if err := walkPipelines(projectRoot, r); err != nil {
+	if err := walkManifestTree(filepath.Join(projectRoot, "_output", "pipelines"), r.FoldPipelineRun); err != nil {
+		return nil, err
+	}
+	if err := walkManifestTree(filepath.Join(projectRoot, "_output", "tasks"), r.FoldTaskRun); err != nil {
 		return nil, err
 	}
 	if err := walkChats(projectRoot, r); err != nil {
@@ -51,8 +56,10 @@ type manifestForRollup struct {
 	} `yaml:"totals"`
 }
 
-func walkPipelines(projectRoot string, r *Rollup) error {
-	root := filepath.Join(projectRoot, "_output", "pipelines")
+// walkManifestTree walks a <root>/<name>/<run-id>/manifest.yaml tree
+// (the shared layout of _output/pipelines and _output/tasks) and folds
+// every readable manifest via fold(name, runID, day, totals).
+func walkManifestTree(root string, fold func(name, runID string, day time.Time, totals Totals)) error {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -64,9 +71,9 @@ func walkPipelines(projectRoot string, r *Rollup) error {
 		if !ent.IsDir() {
 			continue
 		}
-		pipelineName := ent.Name()
-		pipelineDir := filepath.Join(root, pipelineName)
-		runs, err := os.ReadDir(pipelineDir)
+		name := ent.Name()
+		nameDir := filepath.Join(root, name)
+		runs, err := os.ReadDir(nameDir)
 		if err != nil {
 			continue
 		}
@@ -74,7 +81,7 @@ func walkPipelines(projectRoot string, r *Rollup) error {
 			if !runEnt.IsDir() || runEnt.Name() == "latest" {
 				continue
 			}
-			manifestPath := filepath.Join(pipelineDir, runEnt.Name(), "manifest.yaml")
+			manifestPath := filepath.Join(nameDir, runEnt.Name(), "manifest.yaml")
 			m, ok := loadManifestForRollup(manifestPath)
 			if !ok {
 				continue
@@ -95,7 +102,7 @@ func walkPipelines(projectRoot string, r *Rollup) error {
 				CacheReadTokens:     m.Totals.TokensCacheRead,
 				CacheCreationTokens: m.Totals.TokensCacheCreation,
 			}
-			r.FoldPipelineRun(pipelineName, m.RunID, day, totals)
+			fold(name, m.RunID, day, totals)
 		}
 	}
 	return nil

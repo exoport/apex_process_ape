@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	testAgentPM    = "apex-agent-pm"
-	testPromptFlag = "--prompt"
+	testAgentPM     = "apex-agent-pm"
+	testPromptFlag  = "--prompt"
+	testModelOpus1M = "opus[1m]"
 )
 
 // stubSpecSkills writes empty SKILL.md files under

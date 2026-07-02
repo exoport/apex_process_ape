@@ -69,6 +69,11 @@ type interactiveCore struct {
 	activityMu   sync.Mutex
 	lastActivity time.Time
 
+	// idleTimeout is the maximum quiet window WaitStepDone tolerates
+	// before declaring the step hung. Defaults to
+	// interactiveStepIdleTimeout; `ape task --idle-timeout` overrides.
+	idleTimeout time.Duration
+
 	// transcriptMu guards activeTranscript + cumulativeFor +
 	// stageCumulative. UPS hooks (bridge goroutine) set
 	// activeTranscript; the telemetry callback (runner goroutine,
@@ -102,12 +107,18 @@ const interactiveStepIdleTimeout = 60 * time.Minute
 // trivial even across long steps.
 const interactiveStepIdlePoll = 30 * time.Second
 
+// idlePollDivisor scales the poll interval down for short configured
+// idle timeouts (`ape task --idle-timeout`): poll at a quarter of the
+// window so tail latency stays proportional.
+const idlePollDivisor = 4
+
 func newInteractiveCore(runCancel context.CancelFunc, getRunLog func() *runlog.Writer) *interactiveCore {
 	c := &interactiveCore{
-		verifier:   orchestrator.NewContractVerifier(),
-		stepDoneCh: make(chan struct{}, 64),
-		getRunLog:  getRunLog,
-		runCancel:  runCancel,
+		verifier:    orchestrator.NewContractVerifier(),
+		stepDoneCh:  make(chan struct{}, 64),
+		getRunLog:   getRunLog,
+		runCancel:   runCancel,
+		idleTimeout: interactiveStepIdleTimeout,
 	}
 	c.verifier.OnViolation = func(v orchestrator.ContractViolation) {
 		fmt.Fprintf(
@@ -343,7 +354,14 @@ func (c *interactiveCore) WaitStepDone(ctx context.Context, _ string, _ int) err
 	c.activityMu.Lock()
 	c.lastActivity = time.Now()
 	c.activityMu.Unlock()
-	ticker := time.NewTicker(interactiveStepIdlePoll)
+	// Poll at a quarter of the idle window when the caller configured
+	// one shorter than the default poll would resolve — a small
+	// `ape task --idle-timeout` must not gain 30s of tail latency.
+	poll := interactiveStepIdlePoll
+	if quarter := c.idleTimeout / idlePollDivisor; quarter < poll {
+		poll = max(quarter, time.Second)
+	}
+	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
 	for {
 		select {
@@ -355,7 +373,7 @@ func (c *interactiveCore) WaitStepDone(ctx context.Context, _ string, _ int) err
 			c.activityMu.Lock()
 			idle := time.Since(c.lastActivity)
 			c.activityMu.Unlock()
-			if idle > interactiveStepIdleTimeout {
+			if idle > c.idleTimeout {
 				return fmt.Errorf("interactive step idle for %v without Stop hook", idle.Round(time.Second))
 			}
 		}
@@ -418,6 +436,9 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	runCtx, runCancel := context.WithCancel(ctx)
 
 	core := newInteractiveCore(runCancel, getRunLog)
+	if cfg.idleTimeout > 0 {
+		core.idleTimeout = cfg.idleTimeout
+	}
 
 	rt := orchestrator.NewBridgeRuntime(orchestrator.BridgeRuntimeOptions{
 		OnHook:  core.FeedHook,
@@ -462,7 +483,11 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		}
 	}
 
-	obs := newPlainObserver(os.Stdout, projectRoot, false)
+	progressW := cfg.progressWriter
+	if progressW == nil {
+		progressW = os.Stdout
+	}
+	obs := newPlainObserver(progressW, projectRoot, cfg.quiet)
 	runErr := pipeline.Run(runCtx, spec, pipeline.RunOptions{
 		ProjectRoot:            projectRoot,
 		Prompt:                 cfg.prompt,
@@ -489,7 +514,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		runCancel()
 		os.Exit(exitCodePreflightFailed) //nolint:gocritic // explicit runCancel above; mirrors sibling runners
 	}
-	if runErr == nil {
+	if runErr == nil && !cfg.suppressSummary {
 		printEndOfRunSummary(spec.Name, projectRoot, cfg)
 	}
 	return runErr

@@ -24,6 +24,7 @@ _(none yet — see [tutorials/README.md](tutorials/) for planned content)_
 - [How to set up the APEX framework in a project (first install)](how-to/framework-setup.md)
 - [How to refresh the APEX framework in a project](how-to/framework-update.md)
 - [How to pass arguments to skills](how-to/pass-args-to-skills.md)
+- [How to run a single skill with `ape task`](how-to/run-a-single-skill.md)
 - [How to run `ape doctor` in CI](how-to/run-doctor-in-ci.md)
 - [How to verify a release before tagging](how-to/pre-tag-release.md)
 

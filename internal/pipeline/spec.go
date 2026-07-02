@@ -154,6 +154,22 @@ func (s *Spec) Stages() []Stage {
 	return s.stages
 }
 
+// NewSingleStepSpec builds an in-memory Spec containing a single stage
+// with a single step — the `ape task` path (PLAN-11). name doubles as
+// the spec and stage name, so run artifacts land under
+// <manifest-base>/<name>/<run-id>/ exactly like a pipeline run.
+// commit, when non-nil, is the task-layer boundary directive fired at
+// the stage boundary (`--task-commit`); nil means the run makes no
+// ape boundary commit.
+func NewSingleStepSpec(name string, step Step, commit *CommitDirective) *Spec {
+	s := &Spec{
+		Name:   name,
+		stages: []Stage{{Name: name, Commit: commit, Chain: []Step{step}}},
+	}
+	s.stageMap = map[string]*Stage{name: &s.stages[0]}
+	return s
+}
+
 // PipelinesDir returns the absolute path of the pipelines directory
 // inside a project root: <projectRoot>/_apex/pipelines.
 func PipelinesDir(projectRoot string) string {

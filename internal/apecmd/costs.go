@@ -98,8 +98,8 @@ func newCostsRollCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("ape costs roll: %w", err)
 			}
-			fmt.Fprintf(os.Stderr, "rebuilt rollup: %d pipeline name(s), %d chat(s), %d day(s)\n",
-				len(r.Pipelines), len(r.Chats.Runs), len(r.ByDay))
+			fmt.Fprintf(os.Stderr, "rebuilt rollup: %d pipeline name(s), %d task skill(s), %d chat(s), %d day(s)\n",
+				len(r.Pipelines), len(r.Tasks), len(r.Chats.Runs), len(r.ByDay))
 			return nil
 		},
 	}
@@ -111,6 +111,12 @@ func printCostsHuman(r *cost.Rollup) error {
 	// All-time totals per pipeline.
 	for name, b := range r.Pipelines {
 		fmt.Fprintf(tw, "pipeline:%s\t%d\t$%.2f\t%d\t%d\t%d\n",
+			name, len(b.Runs), b.Totals.CostUSD,
+			b.Totals.InputTokens, b.Totals.OutputTokens, b.Totals.CacheReadTokens)
+	}
+	// All-time totals per task skill (PLAN-11).
+	for name, b := range r.Tasks {
+		fmt.Fprintf(tw, "task:%s\t%d\t$%.2f\t%d\t%d\t%d\n",
 			name, len(b.Runs), b.Totals.CostUSD,
 			b.Totals.InputTokens, b.Totals.OutputTokens, b.Totals.CacheReadTokens)
 	}

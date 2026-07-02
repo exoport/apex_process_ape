@@ -109,6 +109,16 @@ func DerivedStageCommitMessage(pipelineName, stageName string) string {
 	)
 }
 
+// DerivedTaskCommitMessage returns the derived message for a bare
+// `--task-commit` on `ape task <skill>` (PLAN-11):
+//
+//	ape:task/<skill>
+//
+// Mirrors the pipeline's derived `ape:<pipeline>/<stage>/<skill>` shape.
+func DerivedTaskCommitMessage(skill string) string {
+	return "ape:task/" + sanitizeFsName(skill)
+}
+
 // Resolve returns the concrete commit message + skip flag for a step,
 // applying CommitDirective semantics. The `skip` return is true when
 // the spec said `commit: false`; the caller still has to check the
