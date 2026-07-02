@@ -1,5 +1,46 @@
 # CHANGELOG
 
+## v0.0.27 (2026-07-02)
+
+- **fix(repl): dismiss the folder-trust dialog; harden `WaitForReady`
+  against modal false-ready** — claude-code (observed on 2.1.198)
+  renders a folder-trust modal on first launch in an untrusted
+  directory, and `--dangerously-skip-permissions` does not suppress it
+  in interactive mode. The modal's menu item prints the `❯` glyph —
+  exactly what the old `WaitForReady` treated as "REPL ready" — so the
+  step prompt was typed into the modal and the run idled for the full
+  60-minute timeout. Fix: (1) a modal registry in `internal/repl`
+  (`blockingModals`) with a dismiss helper — the trust dialog is
+  accepted by selecting option 1 explicitly, and future onboarding
+  screens are a one-line registry addition; (2) `WaitForReady` now
+  requires a real-REPL ready signal a menu item cannot satisfy (the
+  `bypass permissions on` footer, or an empty `❯` prompt line); (3) on
+  timeout the error is a `*repl.NotReadyError` carrying the last pane
+  snapshot, so an unknown blocking modal fails fast at 30s with a
+  readable diagnosis instead of a silent 1-hour stall.
+- **feat(apecmd): `ape task <skill>` — single-skill interactive runs
+  without pipeline YAML** (PLAN-11) — runs one framework skill through
+  the same interactive PTY runner a pipeline step uses (preflight,
+  bridge hooks, Stop-hook completion, transcript telemetry, manifest),
+  with every parameter passed as a flag: `--agent`, `--model`,
+  `--args`, `--prompt`/`--prompt-flag`, `--idle-timeout`. Commit
+  control is two-layered: `--no-commit` maps to the framework skill's
+  own no-commit functionality (slash-line layer, byte-parity with the
+  pipeline convention), while the new opt-in `--task-commit ["<msg>"]`
+  commits the complete task at the end (bare flag derives
+  `ape:task/<skill>`; default off). `--output-format json` emits a
+  stable result envelope on stdout (progress moves to stderr) shaped
+  to replace the stream-json `result` event for eval-harness
+  consumers: success, exit_code, duration, cost_usd, usage
+  (input/output/cache tokens, num_turns), commits made during the run,
+  and manifest path. Exit codes: 0 success · 1 run failure / idle
+  timeout · 2 usage or preflight · 3 REPL never ready (last pane on
+  stderr). Run artifacts land under `_output/tasks/<skill>/<run-id>/`;
+  `ape costs` gains a `task:<skill>` bucket (rebuilt via
+  `ape costs roll`). New exported seam:
+  `pipeline.NewSingleStepSpec` synthesizes a one-stage/one-step spec so
+  the runner, manifest, and commit machinery are reused unchanged.
+
 ## v0.0.26 (2026-07-01)
 
 - **fix(bridge/mcp): negotiate the MCP `protocolVersion` instead of
