@@ -150,7 +150,7 @@ type RunOptions struct {
 }
 
 // StepTelemetry is the apecmd-side computed telemetry for one
-// interactive step, derived from the claude session transcript. The
+// interactive step, derived from the claude session transcript(s). The
 // runner adapts it to the same shape the stream-json `result` event
 // produces in programmatic mode, so the manifest writer's recordStep
 // API stays uniform across exec modes.
@@ -161,6 +161,41 @@ type StepTelemetry struct {
 	TokensCacheRead     int
 	TokensCacheCreation int
 	NumTurns            int
+	// ModelUsage is the per-model breakdown of the aggregate above,
+	// keyed by normalized model id. Restores sub-agent model
+	// attribution (a consumer picking the non-primary model gets the
+	// real sub-agent model, not the step's declared --model).
+	ModelUsage map[string]ModelUsage
+	// Sessions carries per-claude-session usage records: the step's
+	// main session plus any sub-agent (Agent tool) sessions observed
+	// via SubagentStart/Stop hooks.
+	Sessions []SessionUsage
+	// Note is a diagnosability breadcrumb stamped on the manifest when
+	// telemetry could not be derived (transcript unavailable, zero
+	// assistant turns). A zeroed step must be explainable, never
+	// silent.
+	Note string
+}
+
+// ModelUsage is one model's (or one session's) share of a step's
+// usage. Field set mirrors StepTelemetry's aggregate.
+type ModelUsage struct {
+	CostUSD             float64
+	TokensInput         int
+	TokensOutput        int
+	TokensCacheRead     int
+	TokensCacheCreation int
+	NumTurns            int
+}
+
+// SessionUsage is the usage of one claude session that contributed to
+// a step: the main REPL session or a sub-agent session spawned by the
+// Agent tool.
+type SessionUsage struct {
+	SessionID       string
+	ParentSessionID string // empty for the step's main session
+	Usage           ModelUsage
+	ModelUsage      map[string]ModelUsage
 }
 
 // InteractiveStepInfo describes a single step in interactive mode for
@@ -692,11 +727,51 @@ func recordStep(
 		rec.TokensCacheRead = ev.Usage.CacheReadInputTokens
 		rec.TokensCacheCreation = ev.Usage.CacheCreationInputTokens
 		rec.NumTurns = ev.NumTurns
+		rec.TelemetryNote = ev.TelemetryNote
+		rec.ModelUsage = modelUsageToRecords(ev.ModelUsage)
+		rec.Sessions = sessionUsageToRecords(ev.Sessions)
 		if status == StatusCompleted && ev.Subtype != "" && ev.Subtype != "success" {
 			rec.Status = StatusFailed
 		}
 	}
 	_ = mw.RecordStep(stageIdx, rec)
+}
+
+// modelUsageToRecords converts the in-memory per-model map onto the
+// manifest's on-disk shape. Returns nil for empty input so the yaml
+// field stays omitted.
+func modelUsageToRecords(mu map[string]ModelUsage) map[string]ModelUsageRecord {
+	if len(mu) == 0 {
+		return nil
+	}
+	out := make(map[string]ModelUsageRecord, len(mu))
+	for model, u := range mu {
+		// Field sets are identical by construction; a direct type
+		// conversion keeps them lock-stepped at compile time.
+		out[model] = ModelUsageRecord(u)
+	}
+	return out
+}
+
+// sessionUsageToRecords converts per-session usage onto the manifest
+// shape. Returns nil for empty input.
+func sessionUsageToRecords(sessions []SessionUsage) []SessionUsageRecord {
+	if len(sessions) == 0 {
+		return nil
+	}
+	out := make([]SessionUsageRecord, 0, len(sessions))
+	for _, s := range sessions {
+		out = append(out, SessionUsageRecord{
+			SessionID:       s.SessionID,
+			ParentSessionID: s.ParentSessionID,
+			CostUSD:         s.Usage.CostUSD,
+			TokensInput:     s.Usage.TokensInput,
+			TokensOutput:    s.Usage.TokensOutput,
+			NumTurns:        s.Usage.NumTurns,
+			ModelUsage:      modelUsageToRecords(s.ModelUsage),
+		})
+	}
+	return out
 }
 
 // performStepCommit decides whether to run `git commit` for a step

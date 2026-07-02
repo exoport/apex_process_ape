@@ -327,10 +327,13 @@ func stepTelemetryToResultEvent(t *StepTelemetry) *resultEvent {
 		return nil
 	}
 	ev := &resultEvent{
-		Type:         "result",
-		Subtype:      "success",
-		NumTurns:     t.NumTurns,
-		TotalCostUSD: t.CostUSD,
+		Type:          "result",
+		Subtype:       "success",
+		NumTurns:      t.NumTurns,
+		TotalCostUSD:  t.CostUSD,
+		ModelUsage:    t.ModelUsage,
+		Sessions:      t.Sessions,
+		TelemetryNote: t.Note,
 	}
 	ev.Usage.InputTokens = t.TokensInput
 	ev.Usage.OutputTokens = t.TokensOutput

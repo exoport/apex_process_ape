@@ -97,6 +97,33 @@ type ManifestTotals struct {
 	StepsRun            int     `yaml:"steps_run"`
 	StepsFailed         int     `yaml:"steps_failed"`
 	CommitsMade         int     `yaml:"commits_made"`
+	// ModelUsage is the run-level per-model breakdown, summed across
+	// steps. Additive field (schema stays v2 — v2 readers ignore it).
+	ModelUsage map[string]ModelUsageRecord `yaml:"model_usage,omitempty"`
+}
+
+// ModelUsageRecord is the on-disk shape of one model's (or one
+// session's) usage share. Interactive runs derive it from the
+// transcript scan; programmatic runs don't populate it.
+type ModelUsageRecord struct {
+	CostUSD             float64 `yaml:"cost_usd"`
+	TokensInput         int     `yaml:"tokens_input"`
+	TokensOutput        int     `yaml:"tokens_output"`
+	TokensCacheRead     int     `yaml:"tokens_cache_read"`
+	TokensCacheCreation int     `yaml:"tokens_cache_creation"`
+	NumTurns            int     `yaml:"num_turns"`
+}
+
+// SessionUsageRecord is one claude session's usage within a step: the
+// step's main REPL session or a sub-agent (Agent tool) session.
+type SessionUsageRecord struct {
+	SessionID       string                      `yaml:"session_id"`
+	ParentSessionID string                      `yaml:"parent_session_id,omitempty"`
+	CostUSD         float64                     `yaml:"cost_usd"`
+	TokensInput     int                         `yaml:"tokens_input"`
+	TokensOutput    int                         `yaml:"tokens_output"`
+	NumTurns        int                         `yaml:"num_turns"`
+	ModelUsage      map[string]ModelUsageRecord `yaml:"model_usage,omitempty"`
 }
 
 // StageRecord captures one stage's lifecycle.
@@ -136,4 +163,14 @@ type StepRecord struct {
 	CommitMessage       string       `yaml:"commit_message,omitempty"`
 	CommitStatus        CommitStatus `yaml:"commit_status,omitempty"`
 	CommitError         string       `yaml:"commit_error,omitempty"`
+	// ModelUsage breaks the step's aggregate down per model
+	// (interactive runs; transcript-derived).
+	ModelUsage map[string]ModelUsageRecord `yaml:"model_usage,omitempty"`
+	// Sessions carries per-claude-session usage: the step's main
+	// session plus sub-agent sessions observed via SubagentStart/Stop.
+	Sessions []SessionUsageRecord `yaml:"sessions,omitempty"`
+	// TelemetryNote is a diagnosability breadcrumb explaining why the
+	// numeric fields above are zero (transcript unavailable at scan
+	// time, zero assistant turns, …). Empty on healthy steps.
+	TelemetryNote string `yaml:"telemetry_note,omitempty"`
 }

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -129,6 +131,72 @@ func TestGitCommitSubjectsSince(t *testing.T) {
 
 	// Empty `before` (no repo at run start) degrades to empty, not error.
 	require.Empty(t, gitCommitSubjectsSince(ctx, dir, ""))
+}
+
+// TestFillEnvelopeFromManifest is the eval-facing regression guard:
+// a manifest with populated telemetry must surface non-zero
+// cost/usage/turns plus model_usage and sessions on the task envelope
+// — the artifact the eval consumes in place of stream-json.
+func TestFillEnvelopeFromManifest(t *testing.T) {
+	base := t.TempDir()
+	runDir := filepath.Join(base, "apex-x", "20260702-140000-abc1234")
+	require.NoError(t, os.MkdirAll(runDir, 0o755))
+	manifest := `
+schema_version: 2
+run_id: 20260702-140000-abc1234
+status: completed
+totals:
+  cost_usd: 1.25
+  tokens_input: 100
+  tokens_output: 200
+  tokens_cache_read: 300
+  tokens_cache_creation: 400
+  model_usage:
+    claude-opus-4-8:
+      cost_usd: 1.0
+      tokens_input: 80
+      tokens_output: 150
+      num_turns: 2
+    claude-haiku-4-5:
+      cost_usd: 0.25
+      tokens_input: 20
+      tokens_output: 50
+      num_turns: 4
+stages:
+  - index: 1
+    name: apex-x
+    status: completed
+    steps:
+      - index: 1
+        skill: apex-x
+        status: completed
+        num_turns: 6
+        cost_usd: 1.25
+        sessions:
+          - session_id: sess-main
+            cost_usd: 1.0
+            num_turns: 2
+          - session_id: sess-sub
+            parent_session_id: sess-main
+            cost_usd: 0.25
+            num_turns: 4
+`
+	require.NoError(t, os.WriteFile(filepath.Join(runDir, "manifest.yaml"), []byte(manifest), 0o644))
+	require.NoError(t, os.Symlink("20260702-140000-abc1234", filepath.Join(base, "apex-x", "latest")))
+
+	env := taskEnvelope{Skill: "apex-x"}
+	fillEnvelopeFromManifest(&env, base, "apex-x", base)
+
+	// The eval's C5-style guard: cost or turns must be non-zero.
+	require.Greater(t, env.CostUSD, 0.0)
+	require.Equal(t, 6, env.Usage.NumTurns)
+	require.Equal(t, 100, env.Usage.InputTokens)
+
+	require.Len(t, env.ModelUsage, 2)
+	require.Equal(t, 2, env.ModelUsage["claude-opus-4-8"].NumTurns)
+	require.Len(t, env.Sessions, 2)
+	require.Equal(t, "sess-main", env.Sessions[1].ParentSessionID)
+	require.Empty(t, env.TelemetryNote)
 }
 
 // TestTaskCommandFlagSurface asserts the command registers the

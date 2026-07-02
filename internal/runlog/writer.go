@@ -162,6 +162,33 @@ func (w *Writer) LinkTranscript(name, target string) error {
 	return os.Symlink(target, link)
 }
 
+// SnapshotTranscript copies src's bytes to <dir>/transcripts/<name>
+// and returns the destination path. Unlike LinkTranscript, the result
+// survives the source session file being rotated or removed — claude
+// session .jsonl files under ~/.claude/projects/ have been observed
+// gone by post-Stop scan time, which zeroed interactive telemetry.
+// Idempotent: repeat calls refresh the copy (the session file is
+// append-only, so a later copy strictly supersedes an earlier one).
+// Replaces a pre-existing symlink of the same name.
+func (w *Writer) SnapshotTranscript(name, src string) (string, error) {
+	dst := filepath.Join(w.dir, "transcripts", name)
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return "", fmt.Errorf("runlog: snapshot transcript %s: %w", name, err)
+	}
+	tmp := dst + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return "", fmt.Errorf("runlog: snapshot transcript %s: %w", name, err)
+	}
+	// A symlink from an earlier LinkTranscript-era run dir would make
+	// os.Rename land the copy at the link target; remove it first.
+	_ = os.Remove(dst)
+	if err := os.Rename(tmp, dst); err != nil {
+		return "", fmt.Errorf("runlog: snapshot transcript %s: %w", name, err)
+	}
+	return dst, nil
+}
+
 // HookEntry is the typed input to Writer.Hook. The on-wire shape is
 // stable but assembled by hookOnWire to keep nil pointers from
 // producing `null` for fields PLAN-5 specifies as empty strings.

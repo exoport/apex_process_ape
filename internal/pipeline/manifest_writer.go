@@ -136,6 +136,21 @@ func (w *manifestWriter) RecordStep(stageIdx int, rec StepRecord) error {
 	w.manifest.Totals.TokensOutput += rec.TokensOutput
 	w.manifest.Totals.TokensCacheRead += rec.TokensCacheRead
 	w.manifest.Totals.TokensCacheCreation += rec.TokensCacheCreation
+	if len(rec.ModelUsage) > 0 {
+		if w.manifest.Totals.ModelUsage == nil {
+			w.manifest.Totals.ModelUsage = map[string]ModelUsageRecord{}
+		}
+		for model, u := range rec.ModelUsage {
+			t := w.manifest.Totals.ModelUsage[model]
+			t.CostUSD += u.CostUSD
+			t.TokensInput += u.TokensInput
+			t.TokensOutput += u.TokensOutput
+			t.TokensCacheRead += u.TokensCacheRead
+			t.TokensCacheCreation += u.TokensCacheCreation
+			t.NumTurns += u.NumTurns
+			w.manifest.Totals.ModelUsage[model] = t
+		}
+	}
 	return w.persist()
 }
 

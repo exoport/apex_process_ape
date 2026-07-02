@@ -22,6 +22,13 @@ type resultEvent struct {
 		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	} `json:"usage"`
+
+	// Interactive-mode extras carried from StepTelemetry (transcript
+	// scan). Never present on the stream-json wire — json:"-" keeps
+	// parseResultEvent honest about what claude actually emits.
+	ModelUsage    map[string]ModelUsage `json:"-"`
+	Sessions      []SessionUsage        `json:"-"`
+	TelemetryNote string                `json:"-"`
 }
 
 // parseResultEvent scans the accumulated step output (concatenated

@@ -199,22 +199,52 @@ type taskUsage struct {
 	NumTurns                 int `json:"num_turns"`
 }
 
+// taskModelUsage is one model's (or one session's) usage share on the
+// envelope. snake_case is the wire contract.
+//
+//nolint:tagliatelle // envelope mirrors the stream-json result-event field names
+type taskModelUsage struct {
+	CostUSD                  float64 `json:"cost_usd"`
+	InputTokens              int     `json:"input_tokens"`
+	OutputTokens             int     `json:"output_tokens"`
+	CacheReadInputTokens     int     `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int     `json:"cache_creation_input_tokens"`
+	NumTurns                 int     `json:"num_turns"`
+}
+
+// taskSessionUsage is one claude session's usage within the run: the
+// main REPL session or a sub-agent (Agent tool) session.
+//
+//nolint:tagliatelle // envelope mirrors the manifest's snake_case contract
+type taskSessionUsage struct {
+	SessionID       string                    `json:"session_id"`
+	ParentSessionID string                    `json:"parent_session_id,omitempty"`
+	CostUSD         float64                   `json:"cost_usd"`
+	InputTokens     int                       `json:"input_tokens"`
+	OutputTokens    int                       `json:"output_tokens"`
+	NumTurns        int                       `json:"num_turns"`
+	ModelUsage      map[string]taskModelUsage `json:"model_usage,omitempty"`
+}
+
 // taskEnvelope is the `--output-format json` result printed on stdout.
 // snake_case is the wire contract (see taskUsage).
 //
 //nolint:tagliatelle // envelope mirrors the stream-json result-event field names
 type taskEnvelope struct {
-	Skill           string    `json:"skill"`
-	Agent           string    `json:"agent,omitempty"`
-	Model           string    `json:"model,omitempty"`
-	Success         bool      `json:"success"`
-	ExitCode        int       `json:"exit_code"`
-	DurationSeconds float64   `json:"duration_seconds"`
-	CostUSD         float64   `json:"cost_usd"`
-	Usage           taskUsage `json:"usage"`
-	Commits         []string  `json:"commits"`
-	ManifestPath    string    `json:"manifest_path,omitempty"`
-	Error           *string   `json:"error"`
+	Skill           string                    `json:"skill"`
+	Agent           string                    `json:"agent,omitempty"`
+	Model           string                    `json:"model,omitempty"`
+	Success         bool                      `json:"success"`
+	ExitCode        int                       `json:"exit_code"`
+	DurationSeconds float64                   `json:"duration_seconds"`
+	CostUSD         float64                   `json:"cost_usd"`
+	Usage           taskUsage                 `json:"usage"`
+	ModelUsage      map[string]taskModelUsage `json:"model_usage,omitempty"`
+	Sessions        []taskSessionUsage        `json:"sessions,omitempty"`
+	Commits         []string                  `json:"commits"`
+	ManifestPath    string                    `json:"manifest_path,omitempty"`
+	TelemetryNote   string                    `json:"telemetry_note,omitempty"`
+	Error           *string                   `json:"error"`
 }
 
 // taskExitCode maps a run error onto the PLAN-11 exit-code table.
@@ -320,11 +350,47 @@ func fillEnvelopeFromManifest(env *taskEnvelope, projectRoot, skill, manifestDir
 	env.Usage.OutputTokens = m.Totals.TokensOutput
 	env.Usage.CacheReadInputTokens = m.Totals.TokensCacheRead
 	env.Usage.CacheCreationInputTokens = m.Totals.TokensCacheCreation
+	env.ModelUsage = modelUsageRecordsToEnvelope(m.Totals.ModelUsage)
 	for i := range m.Stages {
 		for j := range m.Stages[i].Steps {
-			env.Usage.NumTurns += m.Stages[i].Steps[j].NumTurns
+			step := &m.Stages[i].Steps[j]
+			env.Usage.NumTurns += step.NumTurns
+			if step.TelemetryNote != "" && env.TelemetryNote == "" {
+				env.TelemetryNote = step.TelemetryNote
+			}
+			for _, s := range step.Sessions {
+				env.Sessions = append(env.Sessions, taskSessionUsage{
+					SessionID:       s.SessionID,
+					ParentSessionID: s.ParentSessionID,
+					CostUSD:         s.CostUSD,
+					InputTokens:     s.TokensInput,
+					OutputTokens:    s.TokensOutput,
+					NumTurns:        s.NumTurns,
+					ModelUsage:      modelUsageRecordsToEnvelope(s.ModelUsage),
+				})
+			}
 		}
 	}
+}
+
+// modelUsageRecordsToEnvelope converts manifest model_usage records to
+// the envelope shape. nil in → nil out (field omitted).
+func modelUsageRecordsToEnvelope(mu map[string]pipeline.ModelUsageRecord) map[string]taskModelUsage {
+	if len(mu) == 0 {
+		return nil
+	}
+	out := make(map[string]taskModelUsage, len(mu))
+	for model, u := range mu {
+		out[model] = taskModelUsage{
+			CostUSD:                  u.CostUSD,
+			InputTokens:              u.TokensInput,
+			OutputTokens:             u.TokensOutput,
+			CacheReadInputTokens:     u.TokensCacheRead,
+			CacheCreationInputTokens: u.TokensCacheCreation,
+			NumTurns:                 u.NumTurns,
+		}
+	}
+	return out
 }
 
 // printTaskSummary emits the human-mode post-run lines.

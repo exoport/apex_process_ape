@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -30,12 +31,17 @@ type hookEnvelope struct {
 // extractTranscriptPath pulls transcript_path from a hook payload.
 // Returns "" on absent / malformed (rare; the wire shape is stable).
 func extractTranscriptPath(payload json.RawMessage) string {
-	if len(payload) == 0 {
-		return ""
-	}
+	return parseHookEnvelope(payload).TranscriptPath
+}
+
+// parseHookEnvelope decodes the minimal hook payload shape. Zero-value
+// fields on absent / malformed payloads.
+func parseHookEnvelope(payload json.RawMessage) hookEnvelope {
 	var env hookEnvelope
-	_ = json.Unmarshal(payload, &env)
-	return env.TranscriptPath
+	if len(payload) > 0 {
+		_ = json.Unmarshal(payload, &env)
+	}
+	return env
 }
 
 // transcriptLinkName converts a step label (`<stage>/<idx>-<skill>`)
@@ -74,24 +80,38 @@ type interactiveCore struct {
 	// interactiveStepIdleTimeout; `ape task --idle-timeout` overrides.
 	idleTimeout time.Duration
 
-	// transcriptMu guards activeTranscript + cumulativeFor +
-	// stageCumulative. UPS hooks (bridge goroutine) set
-	// activeTranscript; the telemetry callback (runner goroutine,
-	// fired between steps) reads it and scans the transcript file.
+	// transcriptMu guards the transcript-capture state below. UPS /
+	// Subagent hooks (bridge goroutine) write; the telemetry callback
+	// (runner goroutine, fired between steps) reads and scans.
 	//
 	// /clear between steps in claude REPL rotates the session_id —
 	// so each interactive step typically has its OWN transcript
 	// file, not a shared per-stage one. The cumulative subtraction
 	// here matters only when a step opts into `NoClear: true` and
 	// keeps writing to the prior step's session. cumulativeFor
-	// tracks which path stageCumulative was computed against;
-	// when activeTranscript moves to a new path, the baseline
-	// resets to zero so the step's delta equals its absolute usage.
-	// OnStageStart clears all three.
+	// tracks which path the baselines were computed against; when
+	// activeTranscript moves to a new path, the baseline resets to
+	// zero so the step's delta equals its absolute usage.
+	// OnStageStart clears everything.
 	transcriptMu     sync.Mutex
-	activeTranscript string
+	activeTranscript string // source path from the UPS payload
+	activeSnapshot   string // local copy under <run-dir>/transcripts/
+	activeSessionID  string // step's main claude session id
 	cumulativeFor    string
 	stageCumulative  cost.Totals
+	stageCumByModel  map[string]cost.Totals
+	// subSessions collects sub-agent (Agent tool) sessions observed
+	// via SubagentStart/Stop hooks for the CURRENT step, keyed by
+	// session_id. Cleared in OnStepStart.
+	subSessions map[string]*subSessionCapture
+}
+
+// subSessionCapture tracks one sub-agent claude session's transcript
+// for per-session usage attribution (Imp2).
+type subSessionCapture struct {
+	sessionID  string
+	transcript string // source path from the hook payload
+	snapshot   string // local copy under <run-dir>/transcripts/
 }
 
 // interactiveStepIdleTimeout is the maximum quiet window between
@@ -152,19 +172,42 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 		c.stepMu.Unlock()
 	}
 	writer := c.getRunLog()
-	if writer != nil {
-		// Symlink the claude session transcript into transcripts/
-		// on the first UPS for this step. Idempotent on same target
-		// (LinkTranscript no-ops); per-step link names point to the
-		// stage's shared session file in interactive mode.
-		if h.Event == ipc.HookUserPromptSubmit && step != "" {
-			if tp := extractTranscriptPath(h.Payload); tp != "" {
-				_ = writer.LinkTranscript(transcriptLinkName(step), tp)
-				c.transcriptMu.Lock()
-				c.activeTranscript = tp
-				c.transcriptMu.Unlock()
+	switch h.Event {
+	case ipc.HookUserPromptSubmit:
+		// Capture + SNAPSHOT the claude session transcript on UPS.
+		// The copy (not a symlink) is what survives the session file
+		// being rotated/removed from ~/.claude/projects/ before the
+		// post-Stop scan — the root cause of zeroed interactive
+		// telemetry (P0a). Repeat UPS refreshes the copy.
+		if env := parseHookEnvelope(h.Payload); env.TranscriptPath != "" && step != "" {
+			snapPath := ""
+			if writer != nil {
+				snapPath, _ = writer.SnapshotTranscript(transcriptLinkName(step), env.TranscriptPath)
 			}
+			c.transcriptMu.Lock()
+			c.activeTranscript = env.TranscriptPath
+			if snapPath != "" {
+				c.activeSnapshot = snapPath
+			}
+			if env.SessionID != "" {
+				c.activeSessionID = env.SessionID
+			}
+			c.transcriptMu.Unlock()
 		}
+	case ipc.HookSubagentStart, ipc.HookSubagentStop:
+		// Sub-agent sessions carry their own session_id +
+		// transcript_path (same envelope shape as UPS). Track and
+		// snapshot each so per-session usage records survive the
+		// child session's lifecycle (Imp2).
+		if env := parseHookEnvelope(h.Payload); env.SessionID != "" && env.TranscriptPath != "" {
+			c.captureSubSession(writer, step, env)
+		}
+	case ipc.HookStop:
+		// Refresh every snapshot while the child is still resident —
+		// the source files are guaranteed present at Stop time.
+		c.refreshSnapshots(writer, step)
+	}
+	if writer != nil {
 		_ = writer.Hook(runlog.HookEntry{
 			Timestamp: h.At,
 			Event:     h.Event,
@@ -177,7 +220,7 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 	if h.Event == ipc.HookUserPromptSubmit {
 		c.verifier.Consume(h.Payload)
 	}
-	if h.Event == "Stop" {
+	if h.Event == ipc.HookStop {
 		// Non-blocking send; WaitStepDone is the only consumer and
 		// is expected to drain promptly. Buffer + drop avoids any
 		// chance of blocking the bridge accept loop.
@@ -186,6 +229,75 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 		default:
 		}
 	}
+}
+
+// captureSubSession records (or updates) a sub-agent session's
+// transcript capture and snapshots it.
+func (c *interactiveCore) captureSubSession(writer *runlog.Writer, step string, env hookEnvelope) {
+	name := subTranscriptName(step, env.SessionID)
+	snapPath := ""
+	if writer != nil {
+		snapPath, _ = writer.SnapshotTranscript(name, env.TranscriptPath)
+	}
+	c.transcriptMu.Lock()
+	defer c.transcriptMu.Unlock()
+	if c.subSessions == nil {
+		c.subSessions = map[string]*subSessionCapture{}
+	}
+	sub, ok := c.subSessions[env.SessionID]
+	if !ok {
+		sub = &subSessionCapture{sessionID: env.SessionID}
+		c.subSessions[env.SessionID] = sub
+	}
+	sub.transcript = env.TranscriptPath
+	if snapPath != "" {
+		sub.snapshot = snapPath
+	}
+}
+
+// refreshSnapshots re-copies the main + sub-agent transcripts into the
+// run dir. Called from the Stop hook path, while the source files are
+// still present. Best-effort.
+func (c *interactiveCore) refreshSnapshots(writer *runlog.Writer, step string) {
+	if writer == nil {
+		return
+	}
+	c.transcriptMu.Lock()
+	main := c.activeTranscript
+	subs := make([]*subSessionCapture, 0, len(c.subSessions))
+	for _, s := range c.subSessions {
+		subs = append(subs, s)
+	}
+	c.transcriptMu.Unlock()
+
+	if main != "" && step != "" {
+		if snapPath, err := writer.SnapshotTranscript(transcriptLinkName(step), main); err == nil {
+			c.transcriptMu.Lock()
+			c.activeSnapshot = snapPath
+			c.transcriptMu.Unlock()
+		}
+	}
+	for _, sub := range subs {
+		if snapPath, err := writer.SnapshotTranscript(subTranscriptName(step, sub.sessionID), sub.transcript); err == nil {
+			c.transcriptMu.Lock()
+			sub.snapshot = snapPath
+			c.transcriptMu.Unlock()
+		}
+	}
+}
+
+// subTranscriptName is the transcripts/ filename for a sub-agent
+// session's snapshot: "<step>.sub-<sid8>.jsonl".
+func subTranscriptName(step, sessionID string) string {
+	sid := sessionID
+	if len(sid) > 8 {
+		sid = sid[:8]
+	}
+	base := strings.TrimSuffix(transcriptLinkName(step), ".jsonl")
+	if base == "" {
+		base = "step"
+	}
+	return base + ".sub-" + sid + ".jsonl"
 }
 
 // FeedCall is the OnCall fan-out target — writes the runlog
@@ -224,6 +336,11 @@ func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 	// manifest's step numbering.
 	c.activeStep = pipeline.StepLabel(info.Stage, info.StepIdx+1, info.Skill)
 	c.stepMu.Unlock()
+	// Sub-agent captures are per-step: a fresh step must not re-count
+	// the previous step's sub-sessions.
+	c.transcriptMu.Lock()
+	c.subSessions = map[string]*subSessionCapture{}
+	c.transcriptMu.Unlock()
 	for {
 		select {
 		case <-c.stepDoneCh:
@@ -270,8 +387,12 @@ func (c *interactiveCore) ActiveStep() string {
 func (c *interactiveCore) ResetStageTelemetry(_ string) {
 	c.transcriptMu.Lock()
 	c.activeTranscript = ""
+	c.activeSnapshot = ""
+	c.activeSessionID = ""
 	c.cumulativeFor = ""
 	c.stageCumulative = cost.Totals{}
+	c.stageCumByModel = nil
+	c.subSessions = map[string]*subSessionCapture{}
 	c.transcriptMu.Unlock()
 }
 
@@ -279,64 +400,210 @@ func (c *interactiveCore) ResetStageTelemetry(_ string) {
 // transcript-scan inside StepTelemetry. Claude buffers writes to its
 // per-session JSONL; the Stop hook can fire before the last
 // assistant turn is flushed. 500ms is far above the observed flush
-// latency without meaningfully slowing the pipeline.
-const transcriptFlushGrace = 500 * time.Millisecond
+// latency without meaningfully slowing the pipeline. Variable so
+// tests can shorten it.
+var transcriptFlushGrace = 500 * time.Millisecond
 
 // StepTelemetry returns the just-completed interactive step's
-// transcript-derived telemetry. Returns nil when no UPS has captured
-// a transcript path yet (very first step of the run, or a step that
-// hasn't fired UPS — both edge cases). The wait+scan sequence is:
+// transcript-derived telemetry: aggregate + per-model breakdown +
+// per-session records (main session delta + full sub-agent sessions).
 //
-//  1. brief sleep so the claude session writer can flush the final
-//     assistant turn into the session JSONL.
-//  2. cost.ScanSessionJSONL reads the whole file and produces fresh
-//     cumulative Totals.
-//  3. delta = totals - stageCumulative (the previous step's
-//     snapshot, or zero at stage start).
-//  4. stageCumulative := totals so the next step's delta is
-//     relative to this one.
+// Reliability contract (P0a): the scan prefers the live source file
+// (most complete after the flush grace), falling back to the local
+// snapshot that FeedHook copied on UPS and refreshed on Stop — the
+// source under ~/.claude/projects/ can be rotated/removed before this
+// runs. A step that still yields zero turns returns a telemetry value
+// whose Note explains why (stamped on the manifest as
+// telemetry_note) and warns on stderr — never a silent zero.
 //
 // Wired into pipeline.RunOptions.StepTelemetryFn for both --tui /
 // --no-tui (runWithInteractive*) and --web interactive
-// (runWithWeb with core != nil). Programmatic web (--web -P) does
-// not call this — its claude -p stream-json already carries the
-// per-step result event.
+// (runWithWeb with core != nil).
 func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry {
 	c.transcriptMu.Lock()
-	path := c.activeTranscript
+	source := c.activeTranscript
+	snapshot := c.activeSnapshot
+	parentSID := c.activeSessionID
 	prevPath := c.cumulativeFor
 	prev := c.stageCumulative
+	prevByModel := c.stageCumByModel
+	subs := make([]*subSessionCapture, 0, len(c.subSessions))
+	for _, s := range c.subSessions {
+		subs = append(subs, s)
+	}
 	c.transcriptMu.Unlock()
-	if path == "" {
-		return nil
+
+	if source == "" && snapshot == "" {
+		return telemetryNote("no transcript captured for step (UserPromptSubmit hook carried no transcript_path)")
 	}
 	// When `/clear` between steps rotates the session_id, the new
 	// step's UPS payload carries a different transcript_path. The
 	// previous cumulative was computed against a different file —
 	// useless as a baseline — so reset to zero. The step's delta
 	// then equals its absolute usage in the new transcript.
-	if path != prevPath {
+	if source != prevPath {
 		prev = cost.Totals{}
+		prevByModel = nil
 	}
-	// Brief flush window. Use a timer instead of time.Sleep so a
-	// concurrent ctx-cancel could in principle short-circuit; today
-	// no cancellation plumbing reaches here, so the timer just runs.
+	// Brief flush window so the claude session writer can flush the
+	// final assistant turn into the session JSONL.
 	time.Sleep(transcriptFlushGrace)
-	totals, _, err := cost.ScanSessionJSONL(path)
+
+	// Prefer the live source; fall back to the Stop-time snapshot.
+	scanPath := source
+	if scanPath == "" || !fileExists(scanPath) {
+		scanPath = snapshot
+	}
+	if scanPath == "" || !fileExists(scanPath) {
+		return telemetryNote(fmt.Sprintf("transcript unavailable at scan time (source %q gone, no snapshot)", source))
+	}
+	res, err := cost.ScanSession(scanPath)
 	if err != nil {
+		return telemetryNote(fmt.Sprintf("transcript scan failed: %v (path %q)", err, scanPath))
+	}
+
+	// Main-session step delta against the stage baseline.
+	c.transcriptMu.Lock()
+	c.stageCumulative = res.Totals
+	c.stageCumByModel = res.ByModel
+	c.cumulativeFor = source
+	c.transcriptMu.Unlock()
+	mainUsage := totalsToModelUsage(subTotals(res.Totals, prev))
+	mainByModel := byModelDelta(res.ByModel, prevByModel)
+
+	tele := &pipeline.StepTelemetry{
+		CostUSD:             mainUsage.CostUSD,
+		TokensInput:         mainUsage.TokensInput,
+		TokensOutput:        mainUsage.TokensOutput,
+		TokensCacheRead:     mainUsage.TokensCacheRead,
+		TokensCacheCreation: mainUsage.TokensCacheCreation,
+		NumTurns:            mainUsage.NumTurns,
+		ModelUsage:          mainByModel,
+		Sessions: []pipeline.SessionUsage{{
+			SessionID:  parentSID,
+			Usage:      mainUsage,
+			ModelUsage: mainByModel,
+		}},
+	}
+
+	// Sub-agent sessions: separate transcripts, scanned whole, folded
+	// into the step's aggregate + model breakdown (Imp2). Sorted for
+	// deterministic manifest output.
+	sort.Slice(subs, func(i, j int) bool { return subs[i].sessionID < subs[j].sessionID })
+	for _, sub := range subs {
+		subPath := sub.transcript
+		if subPath == "" || !fileExists(subPath) {
+			subPath = sub.snapshot
+		}
+		if subPath == "" || !fileExists(subPath) {
+			continue
+		}
+		subRes, subErr := cost.ScanSession(subPath)
+		if subErr != nil {
+			continue
+		}
+		subUsage := totalsToModelUsage(subRes.Totals)
+		subByModel := byModelDelta(subRes.ByModel, nil)
+		tele.Sessions = append(tele.Sessions, pipeline.SessionUsage{
+			SessionID:       sub.sessionID,
+			ParentSessionID: parentSID,
+			Usage:           subUsage,
+			ModelUsage:      subByModel,
+		})
+		tele.CostUSD += subUsage.CostUSD
+		tele.TokensInput += subUsage.TokensInput
+		tele.TokensOutput += subUsage.TokensOutput
+		tele.TokensCacheRead += subUsage.TokensCacheRead
+		tele.TokensCacheCreation += subUsage.TokensCacheCreation
+		tele.NumTurns += subUsage.NumTurns
+		if tele.ModelUsage == nil {
+			tele.ModelUsage = map[string]pipeline.ModelUsage{}
+		}
+		for model, u := range subByModel {
+			tele.ModelUsage[model] = addModelUsage(tele.ModelUsage[model], u)
+		}
+	}
+
+	if tele.NumTurns == 0 {
+		tele.Note = fmt.Sprintf("transcript scan processed zero assistant turns (path %q)", scanPath)
+		fmt.Fprintf(os.Stderr, "⚠ telemetry: %s\n", tele.Note)
+	}
+	return tele
+}
+
+// telemetryNote warns on stderr and returns a zeroed StepTelemetry
+// carrying the diagnosability breadcrumb — the manifest records it as
+// telemetry_note so a zeroed step is explainable, never silent.
+func telemetryNote(note string) *pipeline.StepTelemetry {
+	fmt.Fprintf(os.Stderr, "⚠ telemetry: %s\n", note)
+	return &pipeline.StepTelemetry{Note: note}
+}
+
+// fileExists reports whether path exists and is a regular file (or a
+// resolvable symlink to one).
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// subTotals returns a-b field-wise.
+func subTotals(a, b cost.Totals) cost.Totals {
+	return cost.Totals{
+		CostUSD:             a.CostUSD - b.CostUSD,
+		InputTokens:         a.InputTokens - b.InputTokens,
+		OutputTokens:        a.OutputTokens - b.OutputTokens,
+		CacheReadTokens:     a.CacheReadTokens - b.CacheReadTokens,
+		CacheCreationTokens: a.CacheCreationTokens - b.CacheCreationTokens,
+		NumTurns:            a.NumTurns - b.NumTurns,
+	}
+}
+
+// totalsToModelUsage adapts cost.Totals onto the pipeline package's
+// decoupled ModelUsage shape.
+func totalsToModelUsage(t cost.Totals) pipeline.ModelUsage {
+	return pipeline.ModelUsage{
+		CostUSD:             t.CostUSD,
+		TokensInput:         t.InputTokens,
+		TokensOutput:        t.OutputTokens,
+		TokensCacheRead:     t.CacheReadTokens,
+		TokensCacheCreation: t.CacheCreationTokens,
+		NumTurns:            t.NumTurns,
+	}
+}
+
+// byModelDelta subtracts the per-model baseline from the fresh scan
+// and drops all-zero entries. baseline nil means "no baseline".
+func byModelDelta(current, baseline map[string]cost.Totals) map[string]pipeline.ModelUsage {
+	if len(current) == 0 {
 		return nil
 	}
-	c.transcriptMu.Lock()
-	c.stageCumulative = totals
-	c.cumulativeFor = path
-	c.transcriptMu.Unlock()
-	return &pipeline.StepTelemetry{
-		CostUSD:             totals.CostUSD - prev.CostUSD,
-		TokensInput:         totals.InputTokens - prev.InputTokens,
-		TokensOutput:        totals.OutputTokens - prev.OutputTokens,
-		TokensCacheRead:     totals.CacheReadTokens - prev.CacheReadTokens,
-		TokensCacheCreation: totals.CacheCreationTokens - prev.CacheCreationTokens,
-		NumTurns:            totals.NumTurns - prev.NumTurns,
+	out := map[string]pipeline.ModelUsage{}
+	for model, cur := range current {
+		d := cur
+		if base, ok := baseline[model]; ok {
+			d = subTotals(cur, base)
+		}
+		u := totalsToModelUsage(d)
+		if u == (pipeline.ModelUsage{}) {
+			continue
+		}
+		out[model] = u
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// addModelUsage sums two ModelUsage values field-wise.
+func addModelUsage(a, b pipeline.ModelUsage) pipeline.ModelUsage {
+	return pipeline.ModelUsage{
+		CostUSD:             a.CostUSD + b.CostUSD,
+		TokensInput:         a.TokensInput + b.TokensInput,
+		TokensOutput:        a.TokensOutput + b.TokensOutput,
+		TokensCacheRead:     a.TokensCacheRead + b.TokensCacheRead,
+		TokensCacheCreation: a.TokensCacheCreation + b.TokensCacheCreation,
+		NumTurns:            a.NumTurns + b.NumTurns,
 	}
 }
 

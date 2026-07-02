@@ -118,12 +118,17 @@ func TestInteractiveCore_StepTelemetry_DeltaFromTranscript(t *testing.T) {
 	require.Equal(t, 20, t2.TokensOutput)
 }
 
-// TestInteractiveCore_StepTelemetry_NoTranscript returns nil when no
-// UPS has set activeTranscript yet (very first interactive step,
-// pre-first-UPS edge).
+// TestInteractiveCore_StepTelemetry_NoTranscript: when no UPS has set
+// activeTranscript (very first interactive step, pre-first-UPS edge),
+// the telemetry is a zeroed value carrying a diagnosability Note —
+// never a silent nil/zero (P0a "no silent zero" contract; the Note
+// lands on the manifest as telemetry_note).
 func TestInteractiveCore_StepTelemetry_NoTranscript(t *testing.T) {
 	core := &interactiveCore{}
-	require.Nil(t, core.StepTelemetry("create-prd", 0))
+	tele := core.StepTelemetry("create-prd", 0)
+	require.NotNil(t, tele)
+	require.Zero(t, tele.NumTurns)
+	require.Contains(t, tele.Note, "no transcript captured")
 }
 
 // TestInteractiveCore_StepTelemetry_ResetsBaselineOnPathChange
