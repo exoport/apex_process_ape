@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## v0.0.31 (2026-07-02)
+
+- **fix(telemetry): guaranteed synchronous transcript copy at Stop** —
+  v0.0.30's tool-hook snapshots never landed in live runs
+  (`snapAttempts=0`) despite the session file demonstrably existing and
+  growing at every hook. The Stop hook is synchronous (claude blocks on
+  it), so the transcript is guaranteed resident while FeedHook handles
+  Stop: ape now performs a full `SnapshotTranscript` copy inline in the
+  Stop case — independent of the incremental tool-hook path — for the
+  main session and every tracked sub-session, re-anchoring the append
+  offsets afterward. The Stop envelope itself can seed the transcript
+  path, so the copy lands even if UPS and every tool hook failed to
+  deliver a parseable path.
+- **fix(telemetry): the snapshot path is now self-reporting** — the
+  failure survived four releases because `AppendTranscript` errors were
+  swallowed. Every guard, routing decision, and copy on the snapshot
+  path is now counted per step (`snapDiag`: tool-hook cases seen,
+  no-path/no-step guard failures, routed main/sub/new, append
+  successes/attempts, stop-copies, last error) and the summary is
+  folded into `telemetry_note` whenever telemetry is zero or missing —
+  one run yields an exact diagnosis in the artifact, no debug build.
+- **fix(telemetry): tool hooks adopt unmatched sessions instead of
+  dropping them** — a tool hook whose session doesn't match the
+  UPS-time main session no longer falls through silently: an unset main
+  session is adopted (UPS may fire before the transcript exists), and
+  an unseen session_id is auto-tracked as a sub-session (its
+  SubagentStart may have been missed).
+- **test: bridge-delivered integration guard** — the prior unit tests
+  called FeedHook directly and passed while real runs failed; the new
+  guard drives the REAL delivery pipeline (`ape notify` → TCP → IPC
+  framing → BridgeRuntime dispatch → FeedHook) through the observed
+  lifecycle (UPS before the file exists → tool hooks while it grows →
+  Stop while present → deleted before the deferred scan) and asserts
+  snapshots landed, telemetry is non-zero with model_usage, and no
+  telemetry_note. A second guard pins the Stop-envelope-seeds-path
+  fallback.
+
 ## v0.0.30 (2026-07-02)
 
 - **fix(telemetry): capture the interactive transcript during its live
