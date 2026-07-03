@@ -8,12 +8,13 @@ tags:
   - transcripts
   - blob-store
   - content-addressed
-summary: Two shared infrastructure pieces. (1) Progress eventing — an optional NATS connection (URL + .creds file, via flag/env/_apex config) over which every pipeline/task/command run publishes structured JSON progress events (run/stage/step lifecycle with telemetry, hooks, commits, errors), tapped from the existing `pipeline.Observer` and `orchestrator.RuntimeEvent` streams; fire-and-forget, never blocks or fails a run. (2) Transcript blob upload — content-addressed (sha256), zstd-compressed upload of a run's full transcript set (main + subagent sessions, from PLAN-10's discovery/copy), cxdb-style idempotent semantics, behind a pluggable store interface with two backends: NATS JetStream Object Store (staging/quick storage) and a URI-request offload flow (NATS request returns an upload URI; ape performs an HTTPS PUT) so large fleets can land blobs in real object storage while the wire stays NATS+HTTPS.
+summary: Two shared infrastructure pieces. (1) Progress eventing — an optional NATS connection (URL + .creds file, via flags or env vars only — no project-config layer, user decision 2026-07-03) over which every pipeline/task/command run publishes structured JSON progress events (run/stage/step lifecycle with telemetry, hooks, commits, errors), identity-stamped for traceability (the user decoded from the NATS credential's JWT is baked into every subject and payload — PLAN-17 dependency, amended 2026-07-02), tapped from the existing `pipeline.Observer` and `orchestrator.RuntimeEvent` streams; fire-and-forget, never blocks or fails a run. (2) Transcript blob upload — content-addressed (sha256), zstd-compressed upload of a run's full transcript set (main + subagent sessions, from PLAN-10's discovery/copy), cxdb-style idempotent semantics, behind a pluggable store interface with two backends: NATS JetStream Object Store (staging/quick storage) and a URI-request offload flow (NATS request returns an upload URI; ape performs an HTTPS PUT) so large fleets can land blobs in real object storage while the wire stays NATS+HTTPS.
 origin:
   - 2026-07-02 user request — optional NATS credentials for remote-cluster progress events; transcript upload "as blobs in a similar way that is done with github.com/strongdm/cxdb".
   - 2026-07-02 user decisions (Q&A during planning) — concern about blob sizes inside NATS objects; use local session data to dimension; preferred shape: NATS request → Blob URI → HTTPS upload, with NATS Object Store as quick storage and an offload service; pluggable backends sharing cxdb's core concepts.
   - 2026-07-02 dimensioning on this machine — 442 main transcripts, 149 MB total: p50 206 KB, p90 0.5 MB, p99 3.3 MB, max 8.2 MB; 236 subagent files, p50 256 KB, max 0.9 MB. JSONL zstd-compresses ~5–10×, so worst case ~1–2 MB compressed. Comfortably within JetStream Object Store chunking; the URI-offload path is about fleet aggregation, not single-blob size.
   - 2026-07-02 research — cxdb (Apache-2.0): BLAKE3-256 CAS over zstd-compressed payloads, idempotent PUT_BLOB (client precomputes hash, server verifies + dedupes), GET /v1/blobs/:hash; Go client `github.com/strongdm/cxdb/clients/go`. NATS: `.creds` via `nats.UserCredentials`; JetStream Object Store chunks arbitrarily large objects. `internal/bridge/ipc/ipc.go:6-8` already earmarks NATS as a future transport.
+  - 2026-07-03 user decision — no ape config in `_apex/config.yaml`: NATS URL/creds and all related settings resolve from flags and env vars only. Keeps publishing opt-in per invocation/environment (a repo can never force it on whoever runs in it) and keeps credential paths out of committed project config.
 ---
 
 # PLAN-13: NATS progress events + content-addressed transcript blobs
@@ -48,11 +49,14 @@ publisher and blob store as shared infra first keeps the service plan thin.
 
 ### D1: Connection config (shared by events, blobs, and PLAN-14)
 
-Resolution order: flags → env → project config.
+Resolution order: flags → env. **No project-config layer** (user decision
+2026-07-03): `_apex/config.yaml` never carries ape/NATS settings, so a repo
+cannot silently turn on publishing for whoever runs in it, and credential
+paths never land in committed config.
 
 ```
---nats-url  / APE_NATS_URL   / _apex/config.yaml: ape.nats.url
---nats-creds/ APE_NATS_CREDS / _apex/config.yaml: ape.nats.creds
+--nats-url   / APE_NATS_URL
+--nats-creds / APE_NATS_CREDS
 ```
 
 `internal/natsconn`: one small package producing a connected `*nats.Conn`
@@ -61,15 +65,37 @@ capped backoff, `nc.Drain()` on shutdown). New direct dependency:
 `github.com/nats-io/nats.go`. No NATS config → all downstream features
 silently disabled.
 
+**Identity (PLAN-17 dependency, must land here):** `natsconn.Identity()`
+parses the user JWT out of the `.creds` file and decodes its claims locally
+(base64 + JSON, stdlib-only, no server round-trip): `{Name, Subject (user
+public key), SubjectToken}`. `SubjectToken` — the JWT `name` claim slugged
+for subject use (fallback: the public key) — is the `<user>` token baked
+into every subject below, giving full per-user traceability. Because the
+token derives deterministically from the credential, operators can scope
+publish permissions to `ape.*.<token>.>` and the identity becomes
+server-enforced, not self-reported.
+
 ### D2: Event publisher (`internal/eventing`)
 
-Subjects: `ape.evt.<project>.<kind>.<id>.<event>` where `<project>` is a
-sanitized project-root slug, `<kind>` ∈ `pipeline|task|command|script`,
-`<id>` is the run/command id, `<event>` ∈
-`run-start|stage-start|step-start|step-end|stage-end|hook|commit|error|run-end`.
-Prefix `ape.evt` overridable (`--events-subject-prefix`).
+Subjects: `ape.evt.<user>.<project>.<kind>.<id>.<event>` where `<user>` is
+`natsconn.Identity().SubjectToken` (D1), `<project>` is a sanitized
+project-root slug, `<kind>` ∈ `pipeline|task|command|script|session|svc`
+(`session` = standalone/agent-initiated reporting, PLAN-17; `svc` = daemon
+lifecycle events, PLAN-14), `<id>` is the run/command/session/job id,
+`<event>` ∈
+`run-start|stage-start|step-start|step-end|stage-end|hook|commit|error|run-end`
+(plus caller-chosen tokens under kind `session`). Prefix `ape.evt`
+overridable (`--events-subject-prefix`). The user token sits in the subject
+from day one — it cannot be retrofitted into an additive-only taxonomy.
+`ape.log.` and `ape.metrics.` roots (PLAN-17) follow the same
+`<user>.<project>` ordering. Id override: `APE_JOB_ID` env replaces the
+run-generated `<id>` when set (the PLAN-14 daemon injects it so child event
+subjects carry the job id).
 
-Payloads: versioned JSON (`{"v":1, "ts":…, "project":…, "run_id":…, …}`);
+Payloads: versioned JSON (`{"v":1, "ts":…, "user":…, "project":…,
+"run_id":…, "session_id":…, …}`) — `user` (full public key + name) and
+`session_id` (the step/session's claude session, where one is bound) are
+present in every payload for traceability independent of the subject;
 `step-end` carries the PLAN-10 per-model telemetry block; `run-end` carries
 manifest totals + transcript blob hashes (D3). Schemas documented in
 `docs/reference/events.md`.
@@ -84,6 +110,11 @@ Taps (no runner surgery — both interfaces exist):
 Delivery: buffered channel + single publisher goroutine; drop-with-counter on
 overflow (log once at run end: "N events dropped"); publish errors logged,
 never propagated. This mirrors the SSE broker's drop-on-full discipline.
+
+**Stdout discipline:** every eventing/NATS diagnostic (drop counters,
+connect warnings, upload failures) goes to stderr or the runlog — never
+stdout. The eval parses the `ape task --output-format json` envelope from
+stdout; polluting it is a regression.
 
 ### D3: Blob store (`internal/blobstore`)
 
@@ -112,15 +143,17 @@ type Store interface {
   pattern — S3/GCS/azure all fit). The offload service itself is **out of
   ape's tree**; ape ships the client half plus a documented request/reply
   contract. (A reference offload service can live in a sibling repo later.)
-- Backend selection: `_apex/config.yaml: ape.blob.backend: nats-object|uri-offload`
-  + `--transcript-store`. `--upload-transcripts` (or config) turns the
-  feature on.
+- Backend selection: `--transcript-store nats-object|uri-offload` /
+  `APE_TRANSCRIPT_STORE`. `--upload-transcripts` / `APE_UPLOAD_TRANSCRIPTS=1`
+  turns the feature on. Flags/env only, same rationale as D1.
 
 Upload set per run (from PLAN-10's D2/D4): every copied transcript file
 (main + subagents), uploaded at run finalize; resulting
-`{file → digest, uri}` map written into the manifest
-(`transcript_blobs:` block) and the `run-end` event. Failures: warn + record
-`upload_status: failed` — never fail the run.
+`{file → {session_id, digest, uri}}` map (session id from PLAN-10's
+`SessionFile`) written into the manifest (`transcript_blobs:` block) and the
+`run-end` event. Failures: warn + record `upload_status: failed` — never
+fail the run. The store and this upload path are also fronted by PLAN-17's
+standalone `ape transcript upload` for sessions outside any ape run.
 
 ## Steps
 

@@ -53,6 +53,7 @@ discrepancy investigation gets the data it needs to close.
 type TurnRecord struct {
     Timestamp  time.Time // entry `timestamp` (ISO 8601)
     Model      string    // normalized (see D3)
+    SessionID  string    // owning session (main or subagent file's session)
     MessageID  string
     RequestID  string
     StopReason string
@@ -79,9 +80,12 @@ entries as today.
 
 `SessionFiles(mainPath string) []SessionFile` — given the main transcript
 `…/<sid>.jsonl`, also glob `…/<sid>/subagents/*.jsonl` (and tolerate the
-older inline-`isSidechain` layout, which D1 already handles). Used by:
-per-step telemetry (subagent turns attributed to the step whose session they
-belong to), end-of-run transcript copy (D4), and PLAN-13 upload. Note the
+older inline-`isSidechain` layout, which D1 already handles). Each
+`SessionFile` carries its `SessionID` (parsed from the filename) so every
+turn and every uploaded blob stays session-attributable. Used by: per-step
+telemetry (subagent turns attributed to the step whose session they belong
+to), end-of-run transcript copy (D4), PLAN-13 upload, and PLAN-17's
+standalone `ape metrics` / `ape transcript` commands. Note the
 known upstream gap: subagent files carry no parent-session pointer
 (anthropics/claude-code#32175) — our mapping is by directory containment,
 which is exactly what the layout gives us.
@@ -161,6 +165,11 @@ promote the surviving hypothesis with data.
   scanner already tolerates unknown lines; fixtures pin the shapes we rely
   on, and `version` (Claude Code version) is captured per turn so drift is
   diagnosable.
+- **Frozen contract — `hook-events.jsonl`.** The eval reconstructs
+  conversations by reading the run dir's `hook-events.jsonl` and following
+  its `payload.transcript_path` (`apex_eval/runner.py:_task_conversation`).
+  Its event/field shape is additive-only; nothing in this plan touches it,
+  and future plans must not either.
 - Date-aware pricing adds complexity for one model (Sonnet 5 intro); the
   fallback is charging the post-intro rate (conservative over-estimate) if
   the dated lookup is judged not worth it — decide in review.

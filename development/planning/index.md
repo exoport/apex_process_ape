@@ -2,6 +2,7 @@
 
 | ID      | Title                                                   | Status   | Created    |
 | ------- | ------------------------------------------------------- | -------- | ---------- |
+| PLAN-17 | Reporting CLI — event/log/metrics/transcript + identity | proposed | 2026-07-02 |
 | PLAN-16 | gVisor-sandboxed sessions + per-job `~/.claude`         | proposed | 2026-07-02 |
 | PLAN-15 | `ape script` — yaegi orchestration scripts              | proposed | 2026-07-02 |
 | PLAN-14 | `ape service` — NATS micro job daemon                   | proposed | 2026-07-02 |
@@ -29,5 +30,10 @@ them) and before/with PLAN-14's `script.run`;
 PLAN-16 with or immediately after PLAN-14 (its `--isolate` flag also works
 for local runs, but the service is the driving consumer — research in
 `development/pending/sandbox-isolation-20260702.md`).
+PLAN-17 after PLAN-10 + PLAN-13 (it consumes their scan/discovery and
+natsconn/eventing/blobstore), parallel to PLAN-14 — but its identity
+amendments (user token in subjects, `session` kind, payload
+`user`/`session_id`) are folded **into PLAN-13's own PRs**, since the
+subject taxonomy is an additive-only contract from day one.
 Review context: `_output/review-20260702/` (project review + CLI and docs
 improvement proposals).

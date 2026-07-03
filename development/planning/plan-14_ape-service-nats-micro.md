@@ -112,7 +112,9 @@ into a shell string), `cwd = project_root`, process group set (reusing
 itself** publishes PLAN-13 progress events; the daemon injects
 `APE_JOB_ID=<job_id>` so the child's event subjects carry the job's id (small
 PLAN-13 hook: id override via env). The daemon additionally publishes
-`job-accepted|job-rejected|job-end` on `ape.evt.<project>.svc.<job_id>.*`.
+`job-accepted|job-rejected|job-end` on
+`ape.evt.<user>.<project>.svc.<job_id>.*` (`<user>` = the daemon's
+credential identity, per PLAN-13 D2's taxonomy).
 Child stdout/stderr → `_output/ape/service/<job_id>.log`; exit code recorded.
 
 Daemon lifecycle: SIGTERM → stop accepting, optionally `--drain-timeout`
@@ -163,6 +165,15 @@ loudly.
 - The daemon trusts its NATS credential boundary. The how-to must state:
   anyone who can request on the service subjects can run pipelines (and, if
   enabled, arbitrary scripts) on this machine.
+- **Submitter identity vs daemon identity.** Children publish PLAN-13
+  events under the *daemon's* credential, so the subject `<user>` token is
+  the daemon, not the submitter — NATS micro does not expose the caller's
+  identity to the service. For per-submitter traceability, every `*.run`
+  request accepts an advisory `submitted_by` field, echoed into
+  `job-accepted`/`job-end` events and `job.status`; authoritative
+  attribution of who *published the request* is the NATS server's audit
+  domain (per-user creds + subject permissions on the service subjects).
+  Decide before the request schema freezes.
 - Child-publishes-events design means a hung child looks alive; `job.status`
   should include `last_event_at` (cheap: daemon subscribes to its own
   project's event subjects) — stretch goal, noted for review.

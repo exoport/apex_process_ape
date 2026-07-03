@@ -92,6 +92,11 @@ duration, cost_usd, per_model, transcript_paths, session_id}`.
    `--mcp-config`/`--settings` with hooks) + `runlog.New` under
    `_output/ape/commands/<command-id>/` (`command-id` =
    `YYYYMMDD-HHMMSS-<7hex>`, reusing `runlog.NewChatID`'s shape).
+   Layout convention (stated once, applies repo-wide): manifest-bearing
+   runs live under `_output/pipelines/` and `_output/tasks/`;
+   session-style records live under `_output/ape/` beside the existing
+   `_output/ape/chats/` — commands are the latter. The rollup walker
+   enumerates all of these trees.
 2. `repl.NewSession(ctx, "ape-command-<pid>", cwd, argv)` where argv =
    `claude [prepend…] --dangerously-skip-permissions [--model M]` — identical
    to `buildInteractiveArgv`. `WaitForReady` → `SendCommand(<assembled line>)`.
@@ -100,9 +105,12 @@ duration, cost_usd, per_model, transcript_paths, session_id}`.
    `--idle-timeout` and `repl.SessionDone` as backstops. On completion:
    PLAN-10 telemetry scan (main + subagent transcripts), transcript copy,
    `session.yaml`-style record, rollup fold (new `Commands` bucket).
-4. Exit codes: 0 session completed (Stop hook), 3 idle-timeout, 4 claude died
-   before Stop, 2 preflight (agent unresolved / handoff missing) — registered
-   in PLAN-9's exit-code table.
+4. Exit codes — aligned with the **shipped PLAN-11 table**
+   (`internal/apecmd/task.go:21`): 0 session completed (Stop hook), 1
+   idle-timeout / session failed, 2 preflight (agent unresolved / handoff
+   missing), 3 REPL never became ready (PLAN-11 convention — not reusable
+   for anything else), 4 claude died before Stop (new; this plan's
+   addition). Registered in PLAN-9's exit-code table.
 
 ### Refactor note
 

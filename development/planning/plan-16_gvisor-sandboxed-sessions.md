@@ -74,7 +74,11 @@ go-runc preferred, it exposes console sockets and is pure Go):
   `tmpfs` on `/tmp`; a scratch dir for `_output` if the project mount
   doesn't already contain it.
 - **Env:** `HOME` pointed at the staging home; `ANTHROPIC_API_KEY` (mode B);
-  `HTTPS_PROXY`/`NO_PROXY` (D4); NATS env passthrough (PLAN-13/14).
+  `HTTPS_PROXY`/`NO_PROXY` (D4); NATS env passthrough (PLAN-13/14) — and
+  because `APE_NATS_CREDS` is a *file path*, the `.creds` file itself is
+  bind-mounted read-only into the staging home with the env var rewritten
+  to the in-guest path; without it, in-guest eventing and PLAN-17 reporting
+  (`ape event`/`log`/`metrics`/`transcript`) silently disable.
 - **Process:** the job command itself — `ape <kind> … --no-tui --quiet`.
   ape-in-guest allocates its PTYs (`internal/repl`) and its localhost bridge
   IPC exactly as today; nothing about the interactive runner changes.
@@ -201,7 +205,7 @@ script job can have both).
   host, port, decision, duration_ms, bytes_up, bytes_down}`. Hostname-level
   metadata only, never payloads (nothing is decrypted, so nothing more is
   even available). When NATS is configured (PLAN-13), audit entries are
-  also published on `ape.evt.<project>.<kind>.<id>.egress` so a central
+  also published on `ape.evt.<user>.<project>.<kind>.<id>.egress` so a central
   consumer can retain the trail; the `run-end` event carries per-host
   totals.
 - **Layering:** the service (`service.yaml`) may define a superset cap —

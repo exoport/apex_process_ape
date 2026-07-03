@@ -22,13 +22,15 @@ One release in which: the known CLI bugs are gone, the command surface behaves
 consistently (output formats, exit codes, help), the docs index actually
 indexes the docs, and `ape` no longer contains any code path that spawns
 `claude -p`. After PLAN-9, `internal/repl` (PTY) is the only way ape executes
-claude, which is the load-bearing precondition for PLAN-11/12/14/15 (task,
-command, service, script) all being PTY-only by construction.
+claude, which is the load-bearing precondition for PLAN-12/14/15 (command,
+service, script) all being PTY-only by construction. (PLAN-11's `ape task`
+already shipped interactive-only in v0.0.27 and is untouched by this plan.)
 
 ## Why now
 
 - The `-P` removal gets *harder* every release the new commands build on the
-  dual-axis mode resolver. Removing it first shrinks PLAN-11/12 by an axis.
+  dual-axis mode resolver. Removing it before PLAN-12 lands shrinks that
+  plan by an axis (PLAN-11 already shipped without one).
 - The eval audit removed the only reason to hesitate.
 - The bugs (B1–B3 below) are user-visible today.
 
@@ -66,8 +68,9 @@ exec branch (keep pipeline *listing*), `runWithTUI`'s programmatic variant,
 (none | tui | web). `describeMode` simplifies accordingly.
 
 Flag compatibility: `-P`, `-I`, `--eval` are **removed** (error with a
-pointing message: "programmatic mode was removed in v0.0.27; interactive PTY
-is the only exec mode — see docs/explanation/why-pty-only.md"). `--no-tui`,
+pointing message: "programmatic mode was removed in vX.Y.Z; interactive PTY
+is the only exec mode — see docs/explanation/why-pty-only.md" — substitute
+the actual release that ships F2; the repo is already past v0.0.27). `--no-tui`,
 `--tui`, `--web`, `--open` keep their exact semantics.
 
 **Tests.** Existing interactive tests keep passing; add a test that the
@@ -93,7 +96,12 @@ breaks loudly with a clear message. Accepted; CHANGELOG entry documents it.
 3. `bootstrap --no-tui` → `--no-picker` (hidden deprecated alias kept one
    release).
 4. `internal/apecmd/exitcodes.go`: one table of named exit codes; commands
-   reference it; per-command meanings documented in each `Long`.
+   reference it; per-command meanings documented in each `Long`. The table
+   starts from the **shipped PLAN-11 convention** (`0` ok · `1` run
+   failed/idle-timeout · `2` usage/preflight · `3` REPL never ready,
+   `internal/apecmd/task.go:21`); PLAN-12 adds `4` (claude died before
+   Stop) and PLAN-17 registers its reporting codes here — this table is the
+   single reconciliation point.
 5. Populate cobra `Example:` on every runnable command.
 6. Help text: rewrite root `Long` (pipelines/task/chat first); purge plan
    vocabulary from `pipeline` flag help; print the resolved-mode line
@@ -119,8 +127,11 @@ breaks loudly with a clear message. Accepted; CHANGELOG entry documents it.
    contract verification — the standing rationale).
 5. New references: `cli.md` (generated — wire `cobra/doc.GenMarkdownTree`
    behind a make target so it can't drift), `exit-codes.md` (from F3.4),
-   `environment-variables.md`, `cost-model.md` (formula, multipliers,
-   overrides, honest accuracy note pointing at the open discrepancy).
+   `environment-variables.md` (ape's own env vars — the Claude Code side,
+   `CLAUDECODE`/`CLAUDE_CODE_*` and ape's scrub, already landed as
+   `reference/claude-code-env-vars.md`; cross-link, don't duplicate),
+   `cost-model.md` (formula, multipliers, overrides, honest accuracy note
+   pointing at the open discrepancy).
 6. `tutorials/first-pipeline.md`: install → doctor → framework setup →
    `ape pipeline design` → read `_output/pipelines/<name>/<run-id>/` →
    `ape costs`.
@@ -137,7 +148,9 @@ reach every doc from `docs/README.md`.
 ## Sequencing
 
 F1 → F2 → F3 → F4 as four PRs (F4 can start any time; its claude-spawn-modes
-rewrite waits for F2). Everything lands before PLAN-11/12/14/15 start.
+rewrite waits for F2). Everything lands before PLAN-12/14/15 start
+(PLAN-11 shipped first, in v0.0.27 — the original "PLAN-9 first" sequencing
+was reversed to unblock the eval; see PLAN-11's notes).
 
 ## Open questions
 

@@ -96,7 +96,10 @@ func Skills(cwd string) ([]SkillInfo, error)              // resolved skills/age
 // Plumbing:
 func Log(format string, args ...any)      // structured, respects --quiet
 func Args() []string                       // after --
-func PublishEvent(subject string, v any) error // PLAN-13 publisher, if configured
+func PublishEvent(event string, v any) error // PLAN-13 publisher, if configured;
+//   publishes ape.evt.<user>.<project>.script.<run-id>.<event> — the event
+//   token is caller-chosen, the identity-stamped prefix is not (scripts
+//   cannot publish arbitrary subjects, preserving PLAN-13/17 traceability)
 func PutBlob(ctx, r io.Reader) (Digest, string, error) // PLAN-13 store, if configured
 ```
 
