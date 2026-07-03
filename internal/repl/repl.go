@@ -41,6 +41,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -96,6 +97,39 @@ var (
 	registry = map[string]*session{}
 )
 
+// ScrubClaudeCodeEnv returns env with the parent Claude Code session's
+// nesting markers removed, so a spawned claude persists its own
+// session transcript (the source ape scans for telemetry):
+//
+//   - CLAUDECODE — the top-level "running inside Claude Code" flag;
+//   - CLAUDE_CODE_* — the whole parent-injected family
+//     (CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_SESSION_ID,
+//     CLAUDE_CODE_CHILD_SESSION, CLAUDE_CODE_SSE_PORT, …). The
+//     persistence-suppressing marker is in this set; stripping the
+//     family is robust across claude versions;
+//   - CLAUDE_EFFORT — so the child's effort comes from ape's flags,
+//     not the parent session's inherited effort.
+//
+// Everything else — ANTHROPIC_* auth included — passes through
+// untouched. Exported so non-PTY interactive spawns (`ape chat`) can
+// apply the same scrub.
+func ScrubClaudeCodeEnv(env []string) []string {
+	const (
+		envClaudeCode       = "CLAUDECODE"
+		envClaudeEffort     = "CLAUDE_EFFORT"
+		envClaudeCodePrefix = "CLAUDE_CODE_"
+	)
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		k, _, _ := strings.Cut(e, "=")
+		if k == envClaudeCode || k == envClaudeEffort || strings.HasPrefix(k, envClaudeCodePrefix) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 // NewSession spawns argv attached to a PTY, registers it under name,
 // and starts background readers that accumulate pane output for
 // CapturePane / WaitForReady. argv[0] is the program; argv[1:] its
@@ -123,6 +157,16 @@ func NewSession(_ context.Context, name, dir string, argv []string) error {
 
 	cmd := ptm.Command(argv[0], argv[1:]...)
 	cmd.Dir = dir
+	// Scrub the parent Claude Code session's nesting markers so the
+	// spawned claude registers as its own TOP-LEVEL session. When ape
+	// itself runs inside a Claude Code session (ubiquitous in dev),
+	// the inherited CLAUDECODE / CLAUDE_CODE_* markers make the child
+	// claude treat itself as a nested/child session and suppress
+	// session-transcript persistence — ~/.claude/projects/<cwd>/<sid>.jsonl
+	// is never written, zeroing every transcript-derived telemetry
+	// value (the v0.0.28–32 saga's true root cause; verified: strip →
+	// transcript persists, keep → zero).
+	cmd.Env = ScrubClaudeCodeEnv(os.Environ())
 
 	if err := cmd.Start(); err != nil {
 		_ = ptm.Close()

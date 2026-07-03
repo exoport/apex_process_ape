@@ -14,6 +14,7 @@ import (
 
 	"github.com/diegosz/apex_process_ape/internal/bridge/config"
 	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/diegosz/apex_process_ape/internal/repl"
 	"github.com/diegosz/apex_process_ape/internal/runlog"
 )
 
@@ -171,6 +172,11 @@ func runChat(ctx context.Context, projectRoot, modelArg string, ignoreProjectSet
 	// When claude exits, Run returns and ape tears the bridge down.
 	claude := exec.CommandContext(runCtx, "claude", args...)
 	claude.Dir = projectRoot
+	// Scrub the parent Claude Code session's nesting markers — same
+	// reason as repl.NewSession: an inherited CLAUDECODE/CLAUDE_CODE_*
+	// environment makes the child claude suppress session-transcript
+	// persistence.
+	claude.Env = repl.ScrubClaudeCodeEnv(os.Environ())
 	claude.Stdin = os.Stdin
 	claude.Stdout = os.Stdout
 	claude.Stderr = os.Stderr

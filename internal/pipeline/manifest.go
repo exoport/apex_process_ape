@@ -67,8 +67,14 @@ const (
 // exclusion rule for internal/pipeline/(manifest|result_event).go
 // covers tagliatelle on every field below.
 type Manifest struct {
-	SchemaVersion int            `yaml:"schema_version"`
-	ApeVersion    string         `yaml:"ape_version"`
+	SchemaVersion int    `yaml:"schema_version"`
+	ApeVersion    string `yaml:"ape_version"`
+	// ClaudeVersion is the resolved `claude --version` output at run
+	// start (best-effort; empty when unavailable). claude-code
+	// auto-updates silently and its trust-dialog / transcript behavior
+	// shifts across versions — telemetry and repro must be
+	// attributable to the exact version that ran.
+	ClaudeVersion string         `yaml:"claude_version,omitempty"`
 	Pipeline      Ref            `yaml:"pipeline"`
 	ProjectRoot   string         `yaml:"project_root"`
 	RunID         string         `yaml:"run_id"`

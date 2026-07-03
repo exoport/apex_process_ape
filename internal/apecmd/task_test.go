@@ -109,7 +109,8 @@ func TestGitCommitSubjectsSince(t *testing.T) {
 	git := func(args ...string) {
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Dir = dir
-		cmd.Env = append(cmd.Environ(),
+		cmd.Env = append(
+			cmd.Environ(),
 			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
 			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
 		)

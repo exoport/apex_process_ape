@@ -114,7 +114,8 @@ func TestSingleStepInteractiveEndToEnd(t *testing.T) {
 	git := func(args ...string) {
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Dir = root
-		cmd.Env = append(cmd.Environ(),
+		cmd.Env = append(
+			cmd.Environ(),
 			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
 			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
 		)
@@ -154,7 +155,8 @@ func TestSingleStepInteractiveEndToEnd(t *testing.T) {
 	}
 
 	manifestBase := filepath.Join(t.TempDir(), "tasks")
-	spec := NewSingleStepSpec("apex-shard-doc",
+	spec := NewSingleStepSpec(
+		"apex-shard-doc",
 		Step{Skill: "apex-shard-doc", Args: "--doc prd"},
 		&CommitDirective{Mode: CommitModeExplicit, Message: "chore: shard prd"},
 	)

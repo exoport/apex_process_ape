@@ -391,7 +391,8 @@ func writeRemediationsAndSummary(w io.Writer, r DoctorReport, colorize bool) {
 
 	fmt.Fprintln(w)
 	if colorize {
-		fmt.Fprintf(w,
+		fmt.Fprintf(
+			w,
 			"%s%d ok%s · %s%d warn%s · %s%d info%s · %s%d fail%s · %s%d skip%s\n",
 			ansiGreen, r.Summary.OK, ansiReset,
 			doctorAnsiYellow, r.Summary.Warn, ansiReset,

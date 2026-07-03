@@ -269,8 +269,12 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 	if err != nil {
 		return err
 	}
-	if mw != nil && opts.OnRunDir != nil {
-		opts.OnRunDir(mw.runDir)
+	if mw != nil {
+		mw.manifest.ClaudeVersion = claudeVersion(ctx, opts.ClaudeBin)
+		_ = mw.persist()
+		if opts.OnRunDir != nil {
+			opts.OnRunDir(mw.runDir)
+		}
 	}
 
 	var runErr error
@@ -874,6 +878,21 @@ func attemptCommit(ctx context.Context, projectRoot, message string) (status Com
 		return CommitStatusFailed, message, "", err.Error(), err
 	}
 	return CommitStatusCommitted, message, sha, "", nil
+}
+
+// claudeVersion resolves `<claudeBin> --version` for the manifest's
+// claude_version stamp. Best-effort with a short timeout: claude-code
+// auto-updates silently and its behavior (trust dialog, transcript
+// persistence) shifts across versions, so runs must be attributable.
+// Returns "" on any failure (shim binaries in tests, missing claude).
+func claudeVersion(ctx context.Context, claudeBin string) string {
+	vctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(vctx, claudeBin, "--version").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // exitCodeFromErr extracts the OS exit code from an exec error. Falls
