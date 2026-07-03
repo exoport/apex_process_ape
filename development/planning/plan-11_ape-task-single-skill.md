@@ -3,7 +3,7 @@ plan_id: PLAN-11
 created_at: 2026-07-02
 implemented_at: 2026-07-02
 status: done
-implementation_notes: Shipped in v0.0.27. Deferred from scope — UI selectors on `ape task` (--tui/--web; headless-first per plan) and the real-claude build-tagged integration test (the eval repo's fixture run is the acceptance gate; run it against the released binary). The eval passes NO commit flags — default behavior is byte-identical to its `_invoke_skill` convention.
+implementation_notes: Shipped in v0.0.27. Deferred from scope — UI selectors on `ape task` (--tui/--web; headless-first per plan) and the real-claude build-tagged integration test (the eval repo's fixture run is the acceptance gate; run it against the released binary). The eval passes NO commit flags — default behavior is byte-identical to its `_invoke_skill` convention. v0.0.35 errata — no contract change, values-only correction of the telemetry this envelope surfaces: the shipped envelope grew `model_usage` + per-session `sessions[]` beyond the doc example below, and v0.0.35 fixed sub-agent capture in that path (was 2×-main double-count with the sub-transcripts unscanned → now main + Σ subs). Matters here because PLAN-11's ship gate is the eval running `apex-story-batch-dev`, a sub-agent spawner, so pre-v0.0.35 that gate validated wrong numbers; on a real run 72 turns / 5.67M tokens was actually 267 / 22.9M. Sub-agent `sessions[].session_id` carries the `agent_id` (a sub's internal sessionId equals its parent's, so agent_id is the only distinct id). See PLAN-10 D2 for the mechanism.
 tags:
   - new-command
   - single-skill
@@ -137,7 +137,9 @@ combinations.
 ### Result envelope (`--output-format json`, stdout)
 
 Shaped to drop into the eval as the replacement for the stream-json result
-event; all fields map from the existing `stepTelemetryToResultEvent` path:
+event; all fields map from the existing `stepTelemetryToResultEvent` path.
+The shipped envelope (`internal/apecmd/task.go`, since v0.0.27) has grown
+`model_usage` and `sessions[]` beyond the original example — reflected below:
 
 ```json
 {
@@ -153,15 +155,34 @@ event; all fields map from the existing `stepTelemetryToResultEvent` path:
     "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
     "num_turns": 0
   },
+  "model_usage": {
+    "claude-opus-4-8": { "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0,
+      "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0, "num_turns": 0 }
+  },
+  "sessions": [
+    { "session_id": "<main-sid>", "cost_usd": 0.0, "input_tokens": 0,
+      "output_tokens": 0, "num_turns": 0, "model_usage": {} },
+    { "session_id": "<agent-id>", "parent_session_id": "<main-sid>",
+      "cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0, "num_turns": 0,
+      "model_usage": {} }
+  ],
   "commits": ["SKILL:create-prd"],
   "manifest_path": "_output/tasks/apex-create-prd/<run-id>/manifest.yaml",
+  "telemetry_note": null,
   "error": null
 }
 ```
 
 `commits` = subjects of `git rev-list before..after` across the run —
-framework-made commits included, not just ape's boundary commit. PLAN-10
-later adds a `per_model` block additively.
+framework-made commits included, not just ape's boundary commit. `usage` is
+the whole-step aggregate (main + all sub-agent sessions); `sessions[]` breaks
+it down per claude session — the main REPL session plus one entry per
+sub-agent, whose `session_id` is the **agent_id** (a sub's internal sessionId
+equals its parent's, so agent_id is the only distinct id) and whose
+`parent_session_id` is the main session. The `model_usage` per-model block is
+PLAN-10 work landed additively. **v0.0.35 fixed the sub-agent contribution to
+`usage`/`model_usage`/`sessions[]`** — see the implementation_notes errata and
+PLAN-10 D2.
 
 ### Exit codes
 

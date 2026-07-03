@@ -79,16 +79,31 @@ entries as today.
 ### D2: Session-set discovery
 
 `SessionFiles(mainPath string) []SessionFile` — given the main transcript
-`…/<sid>.jsonl`, also glob `…/<sid>/subagents/*.jsonl` (and tolerate the
+`…/<sid>.jsonl`, also glob `…/<sid>/subagents/agent-*.jsonl` (and tolerate the
 older inline-`isSidechain` layout, which D1 already handles). Each
-`SessionFile` carries its `SessionID` (parsed from the filename) so every
-turn and every uploaded blob stays session-attributable. Used by: per-step
-telemetry (subagent turns attributed to the step whose session they belong
-to), end-of-run transcript copy (D4), PLAN-13 upload, and PLAN-17's
-standalone `ape metrics` / `ape transcript` commands. Note the
-known upstream gap: subagent files carry no parent-session pointer
-(anthropics/claude-code#32175) — our mapping is by directory containment,
-which is exactly what the layout gives us.
+`SessionFile` carries its **agent id** (parsed from the `agent-<id>.jsonl`
+filename) as its distinct identifier — NOT a session id: a sub-agent
+transcript's internal `sessionId` equals its parent's, so agent_id is the
+only thing that distinguishes subs. Used by: per-step telemetry (subagent
+turns attributed to the step whose session they belong to), end-of-run
+transcript copy (D4), PLAN-13 upload, and PLAN-17's standalone `ape metrics`
+/ `ape transcript` commands. Note the known upstream gap: subagent files
+carry no parent-session pointer (anthropics/claude-code#32175) — our mapping
+is by directory containment, which is exactly what the layout gives us.
+
+**Reconciliation with the shipped interactive path (v0.0.35).** The
+per-step interactive runner already implements sub-agent discovery, and it
+proved directory-globbing alone is the *fallback*, not the primary source:
+the `SubagentStop` hook carries the sub's own transcript directly as
+`agent_transcript_path` (its `transcript_path` on that envelope is the
+PARENT — folding it was the v0.0.34 2×-main double-count bug). So the
+shipped order is: (1) capture `agent_transcript_path` from `SubagentStop`,
+keyed by `agent_id`, folded once each; (2) a robustness sweep of
+`…/<sid>/subagents/agent-*.jsonl` (mtime-scoped to the step) recovers any
+sub a dropped hook would have lost; (3) a guard never folds a sub whose
+resolved path equals the main transcript. `SessionFiles` here (the batch
+discovery for copy/upload/metrics) is the same glob as the sweep and should
+share the agent-id-from-filename helper. See PLAN-11's v0.0.35 errata.
 
 ### D3: Prices + model normalization
 
