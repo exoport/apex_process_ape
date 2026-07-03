@@ -68,12 +68,16 @@ func TestManifestModelUsageRoundTrip(t *testing.T) {
 	if step.Sessions[1].ParentSessionID != "sess-main" {
 		t.Fatalf("sub session parent = %q", step.Sessions[1].ParentSessionID)
 	}
-	// Run-level totals fold the per-model map.
+	// Run-level totals fold the per-model map AND num_turns (v0.0.34
+	// fix: per-step turns previously never summed into totals).
 	if len(m.Totals.ModelUsage) != 2 {
 		t.Fatalf("totals model_usage entries = %d, want 2", len(m.Totals.ModelUsage))
 	}
 	if m.Totals.ModelUsage["claude-haiku-4-5"].NumTurns != 4 {
 		t.Fatalf("totals haiku turns = %d, want 4", m.Totals.ModelUsage["claude-haiku-4-5"].NumTurns)
+	}
+	if m.Totals.NumTurns != 6 {
+		t.Fatalf("totals num_turns = %d, want 6", m.Totals.NumTurns)
 	}
 }
 

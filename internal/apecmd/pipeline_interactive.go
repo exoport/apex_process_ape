@@ -97,20 +97,10 @@ type interactiveCore struct {
 	// OnStageStart clears everything.
 	transcriptMu     sync.Mutex
 	activeTranscript string // source path from the UPS payload
-	activeSnapshot   string // local copy under <run-dir>/transcripts/
-	activeSnapOffset int64  // bytes of the source already copied into the snapshot
 	activeSessionID  string // step's main claude session id
-	snapAttempts     int    // successful main-session snapshot refreshes this step
-	diag             snapDiag
-	// snapshotDir is the hook-side capture directory (APE_SNAPSHOT_DIR
-	// injected into the hook commands): `ape notify` writes
-	// <session-id>.jsonl copies there IN CLAUDE'S TURN, the only
-	// window the transcript is guaranteed resident. StepTelemetry
-	// reads these in preference to the ephemeral source. v0.0.32.
-	snapshotDir     string
-	cumulativeFor   string
-	stageCumulative cost.Totals
-	stageCumByModel map[string]cost.Totals
+	cumulativeFor    string
+	stageCumulative  cost.Totals
+	stageCumByModel  map[string]cost.Totals
 	// subSessions collects sub-agent (Agent tool) sessions observed
 	// via SubagentStart/Stop hooks for the CURRENT step, keyed by
 	// session_id. Cleared in OnStepStart.
@@ -122,40 +112,6 @@ type interactiveCore struct {
 type subSessionCapture struct {
 	sessionID  string
 	transcript string // source path from the hook payload
-	snapshot   string // local copy under <run-dir>/transcripts/
-	offset     int64  // bytes already copied into the snapshot
-}
-
-// snapDiag is the per-step snapshot-path diagnostics counter (guarded
-// by transcriptMu). It exists because the snapshot path failed four
-// releases in a row with errors swallowed — a zeroed step must carry
-// an exact diagnosis of which link broke, in the artifact itself, with
-// no separate debug build. Reset per step; summarized into the
-// telemetry_note whenever telemetry is zero or missing.
-type snapDiag struct {
-	toolCases   int // Pre/PostToolUse switch cases entered
-	guardNoPath int // tool hook lacked transcript_path
-	guardNoStep int // tool hook arrived with no active step
-	routedMain  int // tool hook matched the step's main session
-	routedSub   int // tool hook matched a tracked sub-session
-	routedNew   int // tool hook adopted/auto-tracked an unseen session
-	appendTries int // AppendTranscript invocations
-	appendOK    int // AppendTranscript successes
-	stopCopies  int // synchronous Stop-time full copies that landed
-	lastErr     string
-}
-
-func (d snapDiag) summary() string {
-	s := fmt.Sprintf(
-		"tool-hooks seen=%d (no-path=%d no-step=%d) routed main=%d sub=%d new=%d; appends ok=%d/%d; stop-copies=%d",
-		d.toolCases, d.guardNoPath, d.guardNoStep,
-		d.routedMain, d.routedSub, d.routedNew,
-		d.appendOK, d.appendTries, d.stopCopies,
-	)
-	if d.lastErr != "" {
-		s += fmt.Sprintf("; last-err=%q", d.lastErr)
-	}
-	return s
 }
 
 // interactiveStepIdleTimeout is the maximum quiet window between
@@ -218,74 +174,48 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 	writer := c.getRunLog()
 	switch h.Event {
 	case ipc.HookUserPromptSubmit:
-		// Record the step's main transcript path/session and take the
-		// first snapshot. The snapshot (an accumulating copy, not a
-		// symlink) is what survives the session file being removed
-		// from ~/.claude/projects/ before scan time.
+		// Record the step's main transcript path + session id. The
+		// transcript persists at the normal path now that the spawned
+		// claude is a top-level session (v0.0.33 env scrub) —
+		// StepTelemetry scans it directly, no copy machinery needed.
 		if env := parseHookEnvelope(h.Payload); env.TranscriptPath != "" && step != "" {
 			c.transcriptMu.Lock()
-			if env.TranscriptPath != c.activeTranscript {
-				// New session for this step (first UPS, or /clear
-				// rotated the id) — restart the snapshot offset.
-				c.activeSnapOffset = 0
-			}
 			c.activeTranscript = env.TranscriptPath
 			if env.SessionID != "" {
 				c.activeSessionID = env.SessionID
 			}
 			c.transcriptMu.Unlock()
-			c.snapshotMain(writer, step, env.TranscriptPath)
-		}
-	case ipc.HookPreToolUse, ipc.HookPostToolUse:
-		// The reliable snapshot window: tool hooks fire mid-turn while
-		// the session file demonstrably exists and is being appended.
-		// The last tool-hook copy is the most complete artifact before
-		// the source is deleted. Route to the main session or a tracked
-		// sub-session by session_id / transcript_path. Every guard
-		// failure is COUNTED (snapDiag) — this path failed invisibly
-		// once; it must never fail silently again.
-		env := parseHookEnvelope(h.Payload)
-		c.transcriptMu.Lock()
-		c.diag.toolCases++
-		if env.TranscriptPath == "" {
-			c.diag.guardNoPath++
-		}
-		if step == "" {
-			c.diag.guardNoStep++
-		}
-		c.transcriptMu.Unlock()
-		if env.TranscriptPath != "" && step != "" {
-			c.snapshotFromToolHook(writer, step, env)
 		}
 	case ipc.HookSubagentStart, ipc.HookSubagentStop:
 		// Sub-agent sessions carry their own session_id +
-		// transcript_path (same envelope shape as UPS). Track and
-		// snapshot each so per-session usage records survive the
-		// child session's lifecycle (Imp2).
+		// transcript_path (same envelope shape as UPS). Track each so
+		// StepTelemetry emits per-session usage records (Imp2).
 		if env := parseHookEnvelope(h.Payload); env.SessionID != "" && env.TranscriptPath != "" {
-			c.captureSubSession(writer, step, env)
+			c.transcriptMu.Lock()
+			if c.subSessions == nil {
+				c.subSessions = map[string]*subSessionCapture{}
+			}
+			sub, ok := c.subSessions[env.SessionID]
+			if !ok {
+				sub = &subSessionCapture{sessionID: env.SessionID}
+				c.subSessions[env.SessionID] = sub
+			}
+			sub.transcript = env.TranscriptPath
+			c.transcriptMu.Unlock()
 		}
 	case ipc.HookStop:
-		// GUARANTEED capture: the Stop hook is synchronous — claude
-		// blocks on it, so the session transcript is resident right
-		// now (probe-verified: exists at Stop even when deleted before
-		// the deferred scan). Do a full copy inline, independent of
-		// the incremental tool-hook path, before FeedHook returns.
-		// The Stop envelope itself can seed the transcript path — the
-		// copy must land even if UPS and every tool hook failed to
-		// deliver a parseable path.
+		// The Stop envelope can seed the transcript path when UPS
+		// didn't carry one — cheap robustness for the scan below.
 		if env := parseHookEnvelope(h.Payload); env.TranscriptPath != "" {
 			c.transcriptMu.Lock()
 			if c.activeTranscript == "" {
 				c.activeTranscript = env.TranscriptPath
-				c.activeSnapOffset = 0
 				if env.SessionID != "" {
 					c.activeSessionID = env.SessionID
 				}
 			}
 			c.transcriptMu.Unlock()
 		}
-		c.syncStopCopy(writer, step)
 	}
 	if writer != nil {
 		_ = writer.Hook(runlog.HookEntry{
@@ -309,223 +239,6 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 		default:
 		}
 	}
-}
-
-// snapshotMain incrementally appends new bytes of the step's main
-// transcript (src) onto its run-dir copy, advancing the tracked
-// offset. Errors are RECORDED (never swallowed — snapDiag.lastErr);
-// every success counts toward snapAttempts.
-func (c *interactiveCore) snapshotMain(writer *runlog.Writer, step, src string) {
-	if writer == nil || step == "" || src == "" {
-		return
-	}
-	c.transcriptMu.Lock()
-	off := c.activeSnapOffset
-	c.diag.appendTries++
-	c.transcriptMu.Unlock()
-
-	dst, newOff, err := writer.AppendTranscript(transcriptLinkName(step), src, off)
-	c.transcriptMu.Lock()
-	defer c.transcriptMu.Unlock()
-	if err != nil {
-		c.diag.lastErr = err.Error()
-		return
-	}
-	c.diag.appendOK++
-	c.activeSnapshot = dst
-	c.activeSnapOffset = newOff
-	c.snapAttempts++
-}
-
-// snapshotSub incrementally appends new bytes of a sub-agent session's
-// transcript onto its run-dir copy. Errors recorded, not swallowed.
-func (c *interactiveCore) snapshotSub(writer *runlog.Writer, step string, sub *subSessionCapture, src string) {
-	if writer == nil || step == "" || src == "" {
-		return
-	}
-	c.transcriptMu.Lock()
-	off := sub.offset
-	c.diag.appendTries++
-	c.transcriptMu.Unlock()
-
-	dst, newOff, err := writer.AppendTranscript(subTranscriptName(step, sub.sessionID), src, off)
-	c.transcriptMu.Lock()
-	defer c.transcriptMu.Unlock()
-	if err != nil {
-		c.diag.lastErr = err.Error()
-		return
-	}
-	c.diag.appendOK++
-	sub.snapshot = dst
-	sub.offset = newOff
-	sub.transcript = src
-}
-
-// snapshotFromToolHook routes a Pre/PostToolUse hook's transcript to
-// the right accumulating snapshot: the step's main session (matched by
-// session_id or transcript_path), a tracked sub-agent session, or —
-// when neither matches — it ADOPTS the session rather than dropping
-// the hook: an unset main session (UPS missed or fired before the
-// transcript existed) adopts as main; an unseen session_id auto-tracks
-// as a sub-session (its SubagentStart may have been missed). Dropping
-// was the v0.0.30 failure mode's blind spot.
-func (c *interactiveCore) snapshotFromToolHook(writer *runlog.Writer, step string, env hookEnvelope) {
-	c.transcriptMu.Lock()
-	isMain := (env.SessionID != "" && env.SessionID == c.activeSessionID) ||
-		(c.activeTranscript != "" && env.TranscriptPath == c.activeTranscript)
-	adoptMain := !isMain && c.activeTranscript == ""
-	if adoptMain {
-		c.activeTranscript = env.TranscriptPath
-		c.activeSnapOffset = 0
-		if env.SessionID != "" {
-			c.activeSessionID = env.SessionID
-		}
-	}
-	var sub *subSessionCapture
-	if !isMain && !adoptMain && env.SessionID != "" {
-		if c.subSessions == nil {
-			c.subSessions = map[string]*subSessionCapture{}
-		}
-		var ok bool
-		sub, ok = c.subSessions[env.SessionID]
-		if !ok {
-			sub = &subSessionCapture{sessionID: env.SessionID, transcript: env.TranscriptPath}
-			c.subSessions[env.SessionID] = sub
-			c.diag.routedNew++
-		}
-	}
-	switch {
-	case isMain:
-		c.diag.routedMain++
-	case adoptMain:
-		c.diag.routedNew++
-	case sub != nil:
-		c.diag.routedSub++
-	}
-	c.transcriptMu.Unlock()
-
-	switch {
-	case isMain, adoptMain:
-		c.snapshotMain(writer, step, env.TranscriptPath)
-	case sub != nil:
-		c.snapshotSub(writer, step, sub, env.TranscriptPath)
-	}
-}
-
-// captureSubSession records (or updates) a sub-agent session's
-// transcript capture and snapshots it.
-func (c *interactiveCore) captureSubSession(writer *runlog.Writer, step string, env hookEnvelope) {
-	c.transcriptMu.Lock()
-	if c.subSessions == nil {
-		c.subSessions = map[string]*subSessionCapture{}
-	}
-	sub, ok := c.subSessions[env.SessionID]
-	if !ok {
-		sub = &subSessionCapture{sessionID: env.SessionID}
-		c.subSessions[env.SessionID] = sub
-	}
-	// Record the source path independent of the snapshot so
-	// StepTelemetry can scan the live source even when no run-log
-	// writer is wired (snapshot is best-effort on top).
-	sub.transcript = env.TranscriptPath
-	c.transcriptMu.Unlock()
-	c.snapshotSub(writer, step, sub, env.TranscriptPath)
-}
-
-// syncStopCopy runs inside FeedHook's Stop case, synchronously, while
-// claude is still blocked on its Stop hook — the one moment the
-// session transcript is guaranteed resident. It does a FULL
-// SnapshotTranscript copy (independent of the incremental append path,
-// so a broken tool-hook pipeline cannot zero the step) for the main
-// session and every tracked sub-session, then re-anchors the append
-// offsets to the copied size. Errors recorded in snapDiag.
-func (c *interactiveCore) syncStopCopy(writer *runlog.Writer, step string) {
-	if writer == nil || step == "" {
-		return
-	}
-	c.transcriptMu.Lock()
-	main := c.activeTranscript
-	subs := make([]*subSessionCapture, 0, len(c.subSessions))
-	for _, s := range c.subSessions {
-		subs = append(subs, s)
-	}
-	c.transcriptMu.Unlock()
-
-	if main != "" {
-		dst, err := writer.SnapshotTranscript(transcriptLinkName(step), main)
-		c.transcriptMu.Lock()
-		if err != nil {
-			c.diag.lastErr = "stop-copy: " + err.Error()
-		} else {
-			c.activeSnapshot = dst
-			c.activeSnapOffset = fileSize(dst)
-			c.snapAttempts++
-			c.diag.stopCopies++
-		}
-		c.transcriptMu.Unlock()
-	}
-	for _, sub := range subs {
-		if sub.transcript == "" {
-			continue
-		}
-		dst, err := writer.SnapshotTranscript(subTranscriptName(step, sub.sessionID), sub.transcript)
-		c.transcriptMu.Lock()
-		if err != nil {
-			c.diag.lastErr = "stop-copy(sub): " + err.Error()
-		} else {
-			sub.snapshot = dst
-			sub.offset = fileSize(dst)
-			c.diag.stopCopies++
-		}
-		c.transcriptMu.Unlock()
-	}
-}
-
-// fileSize returns the size of path, or 0 when it can't be statted.
-func fileSize(path string) int64 {
-	info, err := os.Stat(path)
-	if err != nil {
-		return 0
-	}
-	return info.Size()
-}
-
-// newHookSnapshotDir creates the per-run hook-side capture directory
-// handed to `ape notify` via APE_SNAPSHOT_DIR. Returns "" on failure
-// (the feature degrades to the parent-side capture + diagnostics).
-func newHookSnapshotDir() string {
-	dir, err := os.MkdirTemp("", "ape-snapshots-")
-	if err != nil {
-		return ""
-	}
-	return dir
-}
-
-// hookSnapshotPath returns the hook-written snapshot for a session id,
-// or "" when unavailable.
-func (c *interactiveCore) hookSnapshotPath(sessionID string) string {
-	if c.snapshotDir == "" || sessionID == "" {
-		return ""
-	}
-	p := filepath.Join(c.snapshotDir, hookSnapshotFileName(sessionID, ""))
-	if !fileExists(p) {
-		return ""
-	}
-	return p
-}
-
-// subTranscriptName is the transcripts/ filename for a sub-agent
-// session's snapshot: "<step>.sub-<sid8>.jsonl".
-func subTranscriptName(step, sessionID string) string {
-	sid := sessionID
-	if len(sid) > 8 {
-		sid = sid[:8]
-	}
-	base := strings.TrimSuffix(transcriptLinkName(step), ".jsonl")
-	if base == "" {
-		base = "step"
-	}
-	return base + ".sub-" + sid + ".jsonl"
 }
 
 // FeedCall is the OnCall fan-out target — writes the runlog
@@ -564,15 +277,10 @@ func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 	// manifest's step numbering.
 	c.activeStep = pipeline.StepLabel(info.Stage, info.StepIdx+1, info.Skill)
 	c.stepMu.Unlock()
-	// Per-step capture state: a fresh step must not re-count the
-	// previous step's sub-sessions or reuse its snapshot offset (the
-	// snapshot name is per-step).
+	// Sub-agent captures are per-step: a fresh step must not re-count
+	// the previous step's sub-sessions.
 	c.transcriptMu.Lock()
 	c.subSessions = map[string]*subSessionCapture{}
-	c.activeSnapshot = ""
-	c.activeSnapOffset = 0
-	c.snapAttempts = 0
-	c.diag = snapDiag{}
 	c.transcriptMu.Unlock()
 	for {
 		select {
@@ -620,11 +328,7 @@ func (c *interactiveCore) ActiveStep() string {
 func (c *interactiveCore) ResetStageTelemetry(_ string) {
 	c.transcriptMu.Lock()
 	c.activeTranscript = ""
-	c.activeSnapshot = ""
-	c.activeSnapOffset = 0
 	c.activeSessionID = ""
-	c.snapAttempts = 0
-	c.diag = snapDiag{}
 	c.cumulativeFor = ""
 	c.stageCumulative = cost.Totals{}
 	c.stageCumByModel = nil
@@ -644,13 +348,13 @@ var transcriptFlushGrace = 500 * time.Millisecond
 // transcript-derived telemetry: aggregate + per-model breakdown +
 // per-session records (main session delta + full sub-agent sessions).
 //
-// Reliability contract (P0a): the scan prefers the live source file
-// (most complete after the flush grace), falling back to the local
-// snapshot that FeedHook copied on UPS and refreshed on Stop — the
-// source under ~/.claude/projects/ can be rotated/removed before this
-// runs. A step that still yields zero turns returns a telemetry value
-// whose Note explains why (stamped on the manifest as
-// telemetry_note) and warns on stderr — never a silent zero.
+// Single-source design: the spawned claude is a top-level session
+// (v0.0.33 env scrub), so its transcript persists at
+// ~/.claude/projects/<cwd>/<sid>.jsonl and is scanned directly after a
+// brief flush grace. A step that yields no transcript or zero turns
+// returns a telemetry value whose Note explains why (stamped on the
+// manifest as telemetry_note) and warns on stderr — never a silent
+// zero.
 //
 // Wired into pipeline.RunOptions.StepTelemetryFn for both --tui /
 // --no-tui (runWithInteractive*) and --web interactive
@@ -658,10 +362,7 @@ var transcriptFlushGrace = 500 * time.Millisecond
 func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry {
 	c.transcriptMu.Lock()
 	source := c.activeTranscript
-	snapshot := c.activeSnapshot
 	parentSID := c.activeSessionID
-	attempts := c.snapAttempts
-	diag := c.diag
 	prevPath := c.cumulativeFor
 	prev := c.stageCumulative
 	prevByModel := c.stageCumByModel
@@ -671,8 +372,8 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 	}
 	c.transcriptMu.Unlock()
 
-	if source == "" && snapshot == "" {
-		return telemetryNote("no transcript captured for step (no hook carried a transcript_path); " + diag.summary())
+	if source == "" {
+		return telemetryNote("no transcript captured for step (no hook carried a transcript_path)")
 	}
 	// When `/clear` between steps rotates the session_id, the new
 	// step's UPS payload carries a different transcript_path. The
@@ -687,41 +388,20 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 	// final assistant turn into the session JSONL.
 	time.Sleep(transcriptFlushGrace)
 
-	// Scan-path preference: the live source when it still exists (most
-	// complete after the flush grace) → the HOOK-SIDE snapshot written
-	// by `ape notify` in claude's turn (guaranteed complete at Stop;
-	// v0.0.32 primary) → the parent-side accumulated snapshot (legacy
-	// fallback + diagnostics anchor).
-	hookSnap := c.hookSnapshotPath(parentSID)
-	scanPath := source
-	usingSnapshot := false
-	if scanPath == "" || !fileExists(scanPath) {
-		scanPath = hookSnap
-		usingSnapshot = true
+	if !fileExists(source) {
+		return telemetryNote(fmt.Sprintf("transcript missing at scan time (path %q)", source))
 	}
-	if scanPath == "" || !fileExists(scanPath) {
-		scanPath = snapshot
-	}
-	if scanPath == "" || !fileExists(scanPath) {
-		return telemetryNote(fmt.Sprintf(
-			"transcript unavailable at scan time (source %q gone; hook snapshot %q; parent snapshot %q; %d successful snapshot(s)); %s",
-			source, hookSnap, snapshot, attempts, diag.summary(),
-		))
-	}
-	// Durable artifact: persist the hook-side capture into the run dir
-	// (local file → local file, no race with claude's deletion).
-	if hookSnap != "" && c.getRunLog != nil {
-		if writer := c.getRunLog(); writer != nil {
-			if dst, err := writer.SnapshotTranscript(hookSnapshotFileName(parentSID, ""), hookSnap); err == nil && snapshot == "" {
-				c.transcriptMu.Lock()
-				c.activeSnapshot = dst
-				c.transcriptMu.Unlock()
-			}
-		}
-	}
-	res, err := cost.ScanSession(scanPath)
+	res, err := cost.ScanSession(source)
 	if err != nil {
-		return telemetryNote(fmt.Sprintf("transcript scan failed: %v (path %q); %s", err, scanPath, diag.summary()))
+		return telemetryNote(fmt.Sprintf("transcript scan failed: %v (path %q)", err, source))
+	}
+	// Durable artifact: copy the scanned transcript into the run dir
+	// so the run's record survives ~/.claude/projects/ rotation.
+	// Local read of a persistent file — best-effort, once per step.
+	if c.getRunLog != nil {
+		if writer := c.getRunLog(); writer != nil {
+			_, _ = writer.SnapshotTranscript(filepath.Base(source), source)
+		}
 	}
 
 	// Main-session step delta against the stage baseline.
@@ -753,17 +433,10 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 	// deterministic manifest output.
 	sort.Slice(subs, func(i, j int) bool { return subs[i].sessionID < subs[j].sessionID })
 	for _, sub := range subs {
-		subPath := sub.transcript
-		if subPath == "" || !fileExists(subPath) {
-			subPath = c.hookSnapshotPath(sub.sessionID)
-		}
-		if subPath == "" || !fileExists(subPath) {
-			subPath = sub.snapshot
-		}
-		if subPath == "" || !fileExists(subPath) {
+		if sub.transcript == "" || !fileExists(sub.transcript) {
 			continue
 		}
-		subRes, subErr := cost.ScanSession(subPath)
+		subRes, subErr := cost.ScanSession(sub.transcript)
 		if subErr != nil {
 			continue
 		}
@@ -790,11 +463,11 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 	}
 
 	if tele.NumTurns == 0 {
-		// Distinguish a partial capture (snapshot has lines but no
-		// complete assistant turn) from a total miss.
+		// Distinguish a partial file (lines but no complete assistant
+		// turn) from an empty one.
 		tele.Note = fmt.Sprintf(
-			"transcript scan processed zero assistant turns (path %q, source=%t snapshot=%t, %d line(s), %d successful snapshot(s)); %s",
-			scanPath, !usingSnapshot, usingSnapshot, countLines(scanPath), attempts, diag.summary(),
+			"transcript scan processed zero assistant turns (path %q, %d line(s))",
+			source, countLines(source),
 		)
 		fmt.Fprintf(os.Stderr, "⚠ telemetry: %s\n", tele.Note)
 	}
@@ -944,7 +617,7 @@ func (c *interactiveCore) WaitStepDone(ctx context.Context, _ string, _ int) err
 // or Hub's IPC port. Mode picks the settings shape: ModeWeb for
 // web mode (legacy hooks-via-Mode path), ModeTUI for everywhere
 // else (hooks-via-InjectHooks path).
-func buildInteractivePrepend(apeBin string, ipcPort int, mode config.Mode, ignoreProjectSettings bool, snapshotDir string) ([]string, error) {
+func buildInteractivePrepend(apeBin string, ipcPort int, mode config.Mode, ignoreProjectSettings bool) ([]string, error) {
 	mcpCfg, err := config.BuildMCPConfig(config.MCPOptions{APEBin: apeBin, IPCPort: ipcPort})
 	if err != nil {
 		return nil, err
@@ -954,7 +627,6 @@ func buildInteractivePrepend(apeBin string, ipcPort int, mode config.Mode, ignor
 		BridgePort:  ipcPort,
 		Mode:        mode,
 		InjectHooks: mode != config.ModeWeb, // ModeWeb auto-injects; other modes need the explicit flag
-		SnapshotDir: snapshotDir,
 	})
 	if err != nil {
 		return nil, err
@@ -1027,12 +699,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		runLogMu.Unlock()
 	}()
 
-	snapDir := newHookSnapshotDir()
-	if snapDir != "" {
-		core.snapshotDir = snapDir
-		defer os.RemoveAll(snapDir)
-	}
-	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, cfg.ignoreProjectSettings, snapDir)
+	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, cfg.ignoreProjectSettings)
 	if err != nil {
 		return err
 	}

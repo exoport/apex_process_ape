@@ -46,26 +46,33 @@ func writeTranscript(t *testing.T, path, sessionID, model string, turns int) {
 	}
 }
 
-// TestStepTelemetry_SnapshotFallback is the P0a regression guard for
-// the live failure mode: the source session file under
-// ~/.claude/projects/ is GONE by scan time, but the snapshot copied
-// into the run dir survives — telemetry must be non-zero from the
-// snapshot instead of silently zero.
-func TestStepTelemetry_SnapshotFallback(t *testing.T) {
+// TestStepTelemetry_ScansPersistentSource pins the single-source
+// design: the spawned claude is a top-level session (v0.0.33 env
+// scrub), its transcript persists, and StepTelemetry scans it
+// directly — non-zero aggregate + model_usage + per-session record,
+// no telemetry_note — and copies it into the run dir as the durable
+// artifact.
+func TestStepTelemetry_ScansPersistentSource(t *testing.T) {
 	shortFlushGrace(t)
 	dir := t.TempDir()
+	runDir := filepath.Join(dir, "run")
+	require.NoError(t, os.MkdirAll(runDir, 0o755))
+	rl, err := runlog.New(runDir)
+	require.NoError(t, err)
+	defer rl.Close()
 
-	snapshot := filepath.Join(dir, "step.jsonl")
-	writeTranscript(t, snapshot, "sess-1", "claude-opus-4-8", 3)
+	source := filepath.Join(dir, "sess-1.jsonl")
+	writeTranscript(t, source, "sess-1", "claude-opus-4-8", 3)
 
-	core := &interactiveCore{
-		activeTranscript: filepath.Join(dir, "removed-source.jsonl"), // never existed
-		activeSnapshot:   snapshot,
-		activeSessionID:  "sess-1",
-	}
+	core := newInteractiveCore(func() {}, func() *runlog.Writer { return rl })
+	core.transcriptMu.Lock()
+	core.activeTranscript = source
+	core.activeSessionID = "sess-1"
+	core.transcriptMu.Unlock()
+
 	tele := core.StepTelemetry("stage", 0)
 	require.NotNil(t, tele)
-	require.Empty(t, tele.Note, "healthy fallback must not stamp a note")
+	require.Empty(t, tele.Note)
 	require.Equal(t, 3, tele.NumTurns)
 	require.Equal(t, 300, tele.TokensInput)
 	require.Greater(t, tele.CostUSD, 0.0)
@@ -73,12 +80,19 @@ func TestStepTelemetry_SnapshotFallback(t *testing.T) {
 	require.Equal(t, 3, tele.ModelUsage["claude-opus-4-8"].NumTurns)
 	require.Len(t, tele.Sessions, 1)
 	require.Equal(t, "sess-1", tele.Sessions[0].SessionID)
+
+	// Durable copy in the run dir (survives ~/.claude rotation).
+	copyPath := filepath.Join(runDir, "transcripts", "sess-1.jsonl")
+	info, statErr := os.Stat(copyPath)
+	require.NoError(t, statErr, "durable transcript copy missing")
+	require.True(t, info.Mode().IsRegular())
+	require.Positive(t, info.Size())
 }
 
-// TestStepTelemetry_SubagentSessions is the Imp2 guard: sub-agent
-// transcripts captured via SubagentStart/Stop hooks are scanned and
-// emitted as per-session records, and their usage folds into the
-// step's aggregate + per-model breakdown. Aggregate == sum(sessions).
+// TestStepTelemetry_SubagentSessions: sub-agent transcripts tracked
+// via SubagentStart/Stop hooks are scanned and emitted as per-session
+// records, folding into the step's aggregate + per-model breakdown.
+// Aggregate == sum(sessions).
 func TestStepTelemetry_SubagentSessions(t *testing.T) {
 	shortFlushGrace(t)
 	dir := t.TempDir()
@@ -124,101 +138,9 @@ func TestStepTelemetry_SubagentSessions(t *testing.T) {
 	require.Equal(t, 4, tele.ModelUsage["claude-haiku-4-5"].NumTurns)
 }
 
-// TestStepTelemetry_DeletionRace is the v0.0.30 regression guard for
-// the real live failure: the session transcript is present and GROWING
-// across Pre/PostToolUse hooks, then DELETED before Stop and before
-// the deferred scan. The tool-hook snapshots must have accumulated a
-// complete copy, so telemetry is non-zero from the snapshot with no
-// note — exactly the case v0.0.28/29 zeroed.
-func TestStepTelemetry_DeletionRace(t *testing.T) {
-	shortFlushGrace(t)
-	dir := t.TempDir()
-	runDir := filepath.Join(dir, "run")
-	require.NoError(t, os.MkdirAll(runDir, 0o755))
-	rl, err := runlog.New(runDir)
-	require.NoError(t, err)
-	defer rl.Close()
-
-	source := filepath.Join(dir, "session.jsonl") // ~/.claude/projects/… stand-in
-	core := newInteractiveCore(func() {}, func() *runlog.Writer { return rl })
-	core.OnStepStart(pipeline.InteractiveStepInfo{Stage: "design", StepIdx: 0, Skill: "apex-create-prd", Agent: "apex-agent-pm"})
-
-	ups := mustJSON(t, map[string]string{
-		"session_id": "sess-1", "transcript_path": source,
-		"prompt": "/apex-agent-pm --autonomous -- apex-create-prd --autonomous",
-	})
-
-	// First UPS: the session file starts with one assistant turn.
-	writeTranscript(t, source, "sess-1", "claude-opus-4-8", 1)
-	core.FeedHook(orchestrator.HookEvent{Event: ipc.HookUserPromptSubmit, Payload: ups})
-
-	// The turn progresses: the file grows across tool hooks. Each
-	// Pre/PostToolUse fires the incremental snapshot while the file
-	// still exists.
-	toolPayload := mustJSON(t, map[string]string{"session_id": "sess-1", "transcript_path": source})
-	for turns := 2; turns <= 5; turns++ {
-		writeTranscript(t, source, "sess-1", "claude-opus-4-8", turns)
-		evt := ipc.HookPreToolUse
-		if turns%2 == 0 {
-			evt = ipc.HookPostToolUse
-		}
-		core.FeedHook(orchestrator.HookEvent{Event: evt, Payload: toolPayload})
-	}
-
-	// The session file vanishes BEFORE Stop (the observed lifecycle).
-	require.NoError(t, os.Remove(source))
-	core.FeedHook(orchestrator.HookEvent{Event: ipc.HookStop})
-
-	// Snapshot must exist and telemetry must be non-zero from it.
-	snap := filepath.Join(runDir, "transcripts", "design-1-apex-create-prd.jsonl")
-	info, statErr := os.Stat(snap)
-	require.NoError(t, statErr, "tool-hook snapshot must exist after source deletion")
-	require.True(t, info.Mode().IsRegular())
-
-	tele := core.StepTelemetry("design", 0)
-	require.NotNil(t, tele)
-	require.Empty(t, tele.Note, "accumulated snapshot must yield a clean scan, got note: %s", tele.Note)
-	require.Equal(t, 5, tele.NumTurns, "all 5 turns captured incrementally before deletion")
-	require.Greater(t, tele.CostUSD, 0.0)
-	require.Len(t, tele.ModelUsage, 1)
-	require.Equal(t, 5, tele.ModelUsage["claude-opus-4-8"].NumTurns)
-}
-
-// TestAppendTranscriptIncremental pins the incremental-copy primitive:
-// repeated appends accumulate without gap/overlap, and the snapshot
-// survives source deletion between appends.
-func TestAppendTranscriptIncremental(t *testing.T) {
-	dir := t.TempDir()
-	runDir := filepath.Join(dir, "run")
-	require.NoError(t, os.MkdirAll(runDir, 0o755))
-	rl, err := runlog.New(runDir)
-	require.NoError(t, err)
-	defer rl.Close()
-
-	src := filepath.Join(dir, "s.jsonl")
-	require.NoError(t, os.WriteFile(src, []byte("line1\n"), 0o600))
-	_, off1, err := rl.AppendTranscript("s.jsonl", src, 0)
-	require.NoError(t, err)
-
-	f, err := os.OpenFile(src, os.O_APPEND|os.O_WRONLY, 0o600)
-	require.NoError(t, err)
-	_, err = f.WriteString("line2\nline3\n")
-	require.NoError(t, err)
-	require.NoError(t, f.Close())
-	dst, off2, err := rl.AppendTranscript("s.jsonl", src, off1)
-	require.NoError(t, err)
-	require.Greater(t, off2, off1)
-
-	// Source deleted: the accumulated snapshot is intact and complete.
-	require.NoError(t, os.Remove(src))
-	got, err := os.ReadFile(dst)
-	require.NoError(t, err)
-	require.Equal(t, "line1\nline2\nline3\n", string(got))
-}
-
 // TestStepTelemetry_ZeroTurnsNote: a readable transcript with zero
 // assistant turns must produce the diagnosability note, not a silent
-// zero (P0a no-silent-zero contract).
+// zero.
 func TestStepTelemetry_ZeroTurnsNote(t *testing.T) {
 	shortFlushGrace(t)
 	dir := t.TempDir()
@@ -232,49 +154,17 @@ func TestStepTelemetry_ZeroTurnsNote(t *testing.T) {
 	require.Contains(t, tele.Note, "zero assistant turns")
 }
 
-// TestFeedHookSnapshotsTranscript: UPS snapshots the transcript into
-// the run dir as a REAL FILE (not a symlink), and the Stop hook
-// refreshes it — the P0a capture contract that survives source
-// rotation.
-func TestFeedHookSnapshotsTranscript(t *testing.T) {
-	dir := t.TempDir()
-	runDir := filepath.Join(dir, "run")
-	require.NoError(t, os.MkdirAll(runDir, 0o755))
-	rl, err := runlog.New(runDir)
-	require.NoError(t, err)
-	defer rl.Close()
-
-	source := filepath.Join(dir, "source.jsonl")
-	writeTranscript(t, source, "sess-1", "claude-opus-4-8", 1)
-
-	core := newInteractiveCore(func() {}, func() *runlog.Writer { return rl })
-	core.OnStepStart(pipeline.InteractiveStepInfo{Stage: "st", StepIdx: 0, Skill: "apex-x"})
-	payload := mustJSON(t, map[string]string{"session_id": "sess-1", "transcript_path": source, "prompt": "/apex-x --autonomous --no-commit"})
-	core.FeedHook(orchestrator.HookEvent{Event: ipc.HookUserPromptSubmit, Payload: payload})
-
-	snap := filepath.Join(runDir, "transcripts", "st-1-apex-x.jsonl")
-	info, err := os.Lstat(snap)
-	require.NoError(t, err, "snapshot must exist after UPS")
-	require.True(t, info.Mode().IsRegular(), "snapshot must be a copy, not a symlink")
-
-	// Append a turn, fire Stop → the snapshot must be refreshed.
-	f, err := os.OpenFile(source, os.O_APPEND|os.O_WRONLY, 0o600)
-	require.NoError(t, err)
-	_, err = f.WriteString(`{"type":"assistant","uuid":"u2","sessionId":"sess-1","message":{"id":"msg_late","model":"claude-opus-4-8","usage":{"input_tokens":1,"output_tokens":1}}}` + "\n")
-	require.NoError(t, err)
-	require.NoError(t, f.Close())
-	core.FeedHook(orchestrator.HookEvent{Event: ipc.HookStop})
-
-	srcInfo, err := os.Stat(source)
-	require.NoError(t, err)
-	snapInfo, err := os.Stat(snap)
-	require.NoError(t, err)
-	require.Equal(t, srcInfo.Size(), snapInfo.Size(), "Stop must refresh the snapshot to the full source")
-
-	// Delete the source: telemetry still derives from the snapshot.
-	require.NoError(t, os.Remove(source))
+// TestStepTelemetry_MissingSourceNote: a transcript that vanished
+// before the scan names itself in the note — the diagnostic that
+// would catch any genuine future persistence regression.
+func TestStepTelemetry_MissingSourceNote(t *testing.T) {
 	shortFlushGrace(t)
-	tele := core.StepTelemetry("st", 0)
+	core := &interactiveCore{
+		activeTranscript: filepath.Join(t.TempDir(), "gone.jsonl"),
+		activeSessionID:  "sess-g",
+	}
+	tele := core.StepTelemetry("stage", 0)
 	require.NotNil(t, tele)
-	require.Equal(t, 2, tele.NumTurns)
+	require.Zero(t, tele.NumTurns)
+	require.Contains(t, tele.Note, "transcript missing at scan time")
 }

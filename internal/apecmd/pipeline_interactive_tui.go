@@ -124,12 +124,7 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 		runLogMu.Unlock()
 	}()
 
-	snapDir := newHookSnapshotDir()
-	if snapDir != "" {
-		core.snapshotDir = snapDir
-		defer os.RemoveAll(snapDir)
-	}
-	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, cfg.ignoreProjectSettings, snapDir)
+	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, cfg.ignoreProjectSettings)
 	if err != nil {
 		return err
 	}

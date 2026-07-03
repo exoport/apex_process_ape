@@ -149,9 +149,7 @@ func runChat(ctx context.Context, projectRoot, modelArg string, ignoreProjectSet
 	go func() { rtErrCh <- rt.Serve(runCtx) }()
 	defer func() { <-rtErrCh }()
 
-	// Chat has no per-step telemetry consumer yet; empty snapshot dir
-	// injects no APE_SNAPSHOT_DIR.
-	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, ignoreProjectSettings, "")
+	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, ignoreProjectSettings)
 	if err != nil {
 		return err
 	}

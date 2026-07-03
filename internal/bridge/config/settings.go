@@ -32,15 +32,6 @@ type SettingsOptions struct {
 	// InjectHooks opts into the hooks block independently of Mode.
 	// PLAN-6 / Phase E: TUI + interactive modes set this to true.
 	InjectHooks bool
-	// SnapshotDir, when non-empty, is wired into the hook env as
-	// APE_SNAPSHOT_DIR. `ape notify` then captures the session
-	// transcript into this directory HOOK-SIDE — in claude's turn,
-	// while the file is guaranteed resident. This is the only
-	// timing-safe capture window: the interactive session transcript
-	// under ~/.claude/projects/ is deleted on turn-end, racing both
-	// the async IPC delivery and any parent-process copy (v0.0.30/31
-	// attempts). Optional; empty injects no extra env.
-	SnapshotDir string
 }
 
 // hookSpec is the Claude Code hooks shape, one entry per event in
@@ -89,19 +80,13 @@ func BuildSettings(opts SettingsOptions) (json.RawMessage, error) {
 	// port via the bridge subprocess invocation instead, see below.)
 	bridgePortStr := strconv.Itoa(opts.BridgePort)
 	cmd := func(event string) string {
-		// `env APE_BRIDGE_PORT=<port> [APE_SNAPSHOT_DIR=<dir>] <ape-bin>
-		// notify --event <event>` guarantees the vars reach the
-		// subprocess regardless of how Claude Code propagates env.
-		// `env(1)` is POSIX; on Windows the runner converts the
-		// matcher at execution time, which is fine because hooks
-		// don't fire on the platforms where env(1) is missing.
-		c := "env APE_BRIDGE_PORT=" + bridgePortStr
-		if opts.SnapshotDir != "" {
-			// Single-quoted: temp paths may contain shell-special
-			// characters on some hosts.
-			c += " APE_SNAPSHOT_DIR='" + opts.SnapshotDir + "'"
-		}
-		return c + " " + opts.APEBin + " notify --event " + event
+		// `env APE_BRIDGE_PORT=<port> <ape-bin> notify --event <event>`
+		// guarantees the port reaches the subprocess regardless of
+		// how Claude Code propagates env. `env(1)` is POSIX; on
+		// Windows the runner converts the matcher at execution
+		// time, which is fine because hooks don't fire on the
+		// platforms where env(1) is missing.
+		return "env APE_BRIDGE_PORT=" + bridgePortStr + " " + opts.APEBin + " notify --event " + event
 	}
 
 	hooks := map[string][]hookSpec{

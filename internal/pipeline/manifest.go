@@ -100,6 +100,7 @@ type ManifestTotals struct {
 	TokensOutput        int     `yaml:"tokens_output"`
 	TokensCacheRead     int     `yaml:"tokens_cache_read"`
 	TokensCacheCreation int     `yaml:"tokens_cache_creation"`
+	NumTurns            int     `yaml:"num_turns"`
 	StepsRun            int     `yaml:"steps_run"`
 	StepsFailed         int     `yaml:"steps_failed"`
 	CommitsMade         int     `yaml:"commits_made"`

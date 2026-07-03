@@ -300,18 +300,10 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	if err != nil {
 		return err
 	}
-	snapDir := newHookSnapshotDir()
-	if snapDir != "" {
-		if core != nil {
-			core.snapshotDir = snapDir
-		}
-		defer os.RemoveAll(snapDir)
-	}
 	settings, err := config.BuildSettings(config.SettingsOptions{
-		APEBin:      apeBin,
-		BridgePort:  hub.IPCPort(),
-		Mode:        config.ModeWeb,
-		SnapshotDir: snapDir,
+		APEBin:     apeBin,
+		BridgePort: hub.IPCPort(),
+		Mode:       config.ModeWeb,
 	})
 	if err != nil {
 		return err
