@@ -33,6 +33,7 @@ _(none yet — see [tutorials/README.md](tutorials/) for planned content)_
 - [Pipeline spec reference](reference/pipeline-spec.md) — schema for `_apex/pipelines/*.yaml`
 - [`framework.yaml` reference](reference/framework-yaml.md) — schema for `_apex/framework.yaml`
 - [Pipeline TUI keybindings](reference/tui-keybindings.md) — `ape pipeline` three-panel display, modes, and key map
+- [Claude Code environment variables](reference/claude-code-env-vars.md) — `CLAUDECODE` / `CLAUDE_CODE_*`, nested-session protection, and why ape scrubs them from spawned sessions
 
 ### Explanation — _the why and the what_
 

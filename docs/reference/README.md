@@ -8,6 +8,7 @@ For ape, reference is the surface area: every command, every flag, every config 
 
 - [bridge-ipc.md](bridge-ipc.md) — MCP bridge IPC wire schema.
 - [bridge-security.md](bridge-security.md) — bridge bind + threat model.
+- [claude-code-env-vars.md](claude-code-env-vars.md) — Claude Code's `CLAUDECODE` / `CLAUDE_CODE_*` environment variables, nested-session protection, and ape's env scrub.
 - [claude-spawn-modes.md](claude-spawn-modes.md) — when ape uses `claude -p` vs a PTY-hosted `claude` REPL, per command + flag.
 - [framework-yaml.md](framework-yaml.md) — `_apex/framework.yaml` schema.
 - [invocation-matrix.md](invocation-matrix.md) — every `ape pipeline` UI × Exec combination.
