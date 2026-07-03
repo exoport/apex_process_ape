@@ -25,9 +25,18 @@ import (
 // Claude Code hook payload. UserPromptSubmit, Stop, and Pre/PostToolUse
 // events all carry `transcript_path` and `session_id`; we capture them
 // for symlink-into-transcripts/ and (later) per-step telemetry parsing.
+//
+// SubagentStop additionally carries agent_transcript_path + agent_id.
+// The sub-agent's OWN transcript is agent_transcript_path (a distinct
+// agent-<id>.jsonl); transcript_path on that same envelope is the
+// PARENT session. Folding transcript_path re-scans main and
+// double-counts it as a phantom sub — the v0.0.34 2×-main bug — so sub
+// capture keys on agent_id and reads agent_transcript_path.
 type hookEnvelope struct {
-	TranscriptPath string `json:"transcript_path"`
-	SessionID      string `json:"session_id"`
+	TranscriptPath      string `json:"transcript_path"`
+	SessionID           string `json:"session_id"`
+	AgentTranscriptPath string `json:"agent_transcript_path"`
+	AgentID             string `json:"agent_id"`
 }
 
 // extractTranscriptPath pulls transcript_path from a hook payload.
@@ -103,15 +112,24 @@ type interactiveCore struct {
 	stageCumByModel  map[string]cost.Totals
 	// subSessions collects sub-agent (Agent tool) sessions observed
 	// via SubagentStart/Stop hooks for the CURRENT step, keyed by
-	// session_id. Cleared in OnStepStart.
+	// agent_id (NOT session_id — a sub-agent's internal sessionId
+	// equals its parent's, so session_id collapses every sub into one
+	// phantom pointing at the parent transcript). Cleared in OnStepStart.
 	subSessions map[string]*subSessionCapture
+	// stepStartedAt anchors the robustness sweep's mtime window so a
+	// dropped SubagentStop doesn't lose a sub, and a prior NoClear
+	// step's sub in the same dir isn't re-folded. Set in OnStepStart.
+	stepStartedAt time.Time
 }
 
 // subSessionCapture tracks one sub-agent claude session's transcript
-// for per-session usage attribution (Imp2).
+// for per-session usage attribution (Imp2). Identified by agentID —
+// the only stable per-sub identifier (the sub's internal sessionId is
+// the parent's).
 type subSessionCapture struct {
-	sessionID  string
-	transcript string // source path from the hook payload
+	agentID         string
+	parentSessionID string // the main session that spawned it
+	transcript      string // agent_transcript_path (a distinct agent-<id>.jsonl)
 }
 
 // interactiveStepIdleTimeout is the maximum quiet window between
@@ -187,20 +205,33 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 			c.transcriptMu.Unlock()
 		}
 	case ipc.HookSubagentStart, ipc.HookSubagentStop:
-		// Sub-agent sessions carry their own session_id +
-		// transcript_path (same envelope shape as UPS). Track each so
-		// StepTelemetry emits per-session usage records (Imp2).
-		if env := parseHookEnvelope(h.Payload); env.SessionID != "" && env.TranscriptPath != "" {
+		// Capture the sub-agent's OWN transcript (agent_transcript_path),
+		// keyed by agent_id. transcript_path on this envelope is the
+		// PARENT session — folding it re-scans main and double-counts it
+		// as a phantom sub (v0.0.34's exact 2×-main signature). agent_id
+		// is the only distinct per-sub identifier (the sub's internal
+		// sessionId equals the parent's). SubagentStart carries no
+		// agent_transcript_path — it is presence only; capture lands on
+		// SubagentStop, when the agent-<id>.jsonl is complete on disk.
+		env := parseHookEnvelope(h.Payload)
+		agentID := h.AgentID
+		if agentID == "" {
+			agentID = env.AgentID
+		}
+		if agentID != "" && env.AgentTranscriptPath != "" {
 			c.transcriptMu.Lock()
 			if c.subSessions == nil {
 				c.subSessions = map[string]*subSessionCapture{}
 			}
-			sub, ok := c.subSessions[env.SessionID]
+			sub, ok := c.subSessions[agentID]
 			if !ok {
-				sub = &subSessionCapture{sessionID: env.SessionID}
-				c.subSessions[env.SessionID] = sub
+				sub = &subSessionCapture{agentID: agentID}
+				c.subSessions[agentID] = sub
 			}
-			sub.transcript = env.TranscriptPath
+			sub.transcript = env.AgentTranscriptPath
+			if env.SessionID != "" {
+				sub.parentSessionID = env.SessionID
+			}
 			c.transcriptMu.Unlock()
 		}
 	case ipc.HookStop:
@@ -278,9 +309,11 @@ func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 	c.activeStep = pipeline.StepLabel(info.Stage, info.StepIdx+1, info.Skill)
 	c.stepMu.Unlock()
 	// Sub-agent captures are per-step: a fresh step must not re-count
-	// the previous step's sub-sessions.
+	// the previous step's sub-sessions. stepStartedAt anchors the
+	// robustness sweep's mtime window to this step.
 	c.transcriptMu.Lock()
 	c.subSessions = map[string]*subSessionCapture{}
+	c.stepStartedAt = time.Now()
 	c.transcriptMu.Unlock()
 	for {
 		select {
@@ -333,6 +366,7 @@ func (c *interactiveCore) ResetStageTelemetry(_ string) {
 	c.stageCumulative = cost.Totals{}
 	c.stageCumByModel = nil
 	c.subSessions = map[string]*subSessionCapture{}
+	c.stepStartedAt = time.Time{}
 	c.transcriptMu.Unlock()
 }
 
@@ -366,6 +400,7 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 	prevPath := c.cumulativeFor
 	prev := c.stageCumulative
 	prevByModel := c.stageCumByModel
+	stepStart := c.stepStartedAt
 	subs := make([]*subSessionCapture, 0, len(c.subSessions))
 	for _, s := range c.subSessions {
 		subs = append(subs, s)
@@ -428,23 +463,63 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 		}},
 	}
 
-	// Sub-agent sessions: separate transcripts, scanned whole, folded
-	// into the step's aggregate + model breakdown (Imp2). Sorted for
-	// deterministic manifest output.
-	sort.Slice(subs, func(i, j int) bool { return subs[i].sessionID < subs[j].sessionID })
+	// Sub-agent sessions: separate transcripts (agent-<id>.jsonl),
+	// scanned whole, folded into the step's aggregate + model breakdown
+	// (Imp2). Merge the hook-captured subs with a robustness sweep of
+	// the main session's subagents/ dir (so a dropped SubagentStop
+	// doesn't silently lose a sub), dedup by resolved path, and apply
+	// the double-count guard.
+	cleanMain := filepath.Clean(source)
+	type subCand struct{ agentID, parent, path string }
+	var cands []subCand
+	seenPath := map[string]bool{}
+	addCand := func(agentID, parent, path string) {
+		if path == "" {
+			return
+		}
+		cp := filepath.Clean(path)
+		// Double-count guard (regression lock): a sub whose resolved
+		// transcript equals the main/active transcript is the exact
+		// 2×-main signature — never fold it. With the correct field
+		// (agent_transcript_path) subs point at agent-*.jsonl (≠ main),
+		// so this only trips on future hook-shape drift.
+		if cp == cleanMain || seenPath[cp] {
+			return
+		}
+		seenPath[cp] = true
+		cands = append(cands, subCand{agentID: agentID, parent: parent, path: cp})
+	}
 	for _, sub := range subs {
-		if sub.transcript == "" || !fileExists(sub.transcript) {
+		addCand(sub.agentID, sub.parentSessionID, sub.transcript)
+	}
+	for _, extra := range sweepSubagentTranscripts(source, stepStart) {
+		addCand(agentIDFromTranscript(extra), parentSID, extra)
+	}
+	sort.Slice(cands, func(i, j int) bool {
+		if cands[i].agentID != cands[j].agentID {
+			return cands[i].agentID < cands[j].agentID
+		}
+		return cands[i].path < cands[j].path
+	})
+	for _, cd := range cands {
+		if !fileExists(cd.path) {
 			continue
 		}
-		subRes, subErr := cost.ScanSession(sub.transcript)
+		subRes, subErr := cost.ScanSession(cd.path)
 		if subErr != nil {
 			continue
 		}
+		parent := cd.parent
+		if parent == "" {
+			parent = parentSID
+		}
 		subUsage := totalsToModelUsage(subRes.Totals)
 		subByModel := byModelDelta(subRes.ByModel, nil)
+		// SessionID = agent_id: the sub's internal sessionId equals the
+		// parent's, so agent_id is the only distinct per-sub identifier.
 		tele.Sessions = append(tele.Sessions, pipeline.SessionUsage{
-			SessionID:       sub.sessionID,
-			ParentSessionID: parentSID,
+			SessionID:       cd.agentID,
+			ParentSessionID: parent,
 			Usage:           subUsage,
 			ModelUsage:      subByModel,
 		})
@@ -459,6 +534,13 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 		}
 		for model, u := range subByModel {
 			tele.ModelUsage[model] = addModelUsage(tele.ModelUsage[model], u)
+		}
+		// Durable copy of the sub transcript (survives ~/.claude
+		// rotation), same as the main transcript above.
+		if c.getRunLog != nil {
+			if writer := c.getRunLog(); writer != nil {
+				_, _ = writer.SnapshotTranscript(filepath.Base(cd.path), cd.path)
+			}
 		}
 	}
 
@@ -508,6 +590,50 @@ func telemetryNote(note string) *pipeline.StepTelemetry {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()
+}
+
+// sweepSubagentTranscripts enumerates the sub-agent transcripts of a
+// main session as a safety net for a dropped SubagentStop hook. Claude
+// writes them to <proj>/<sid>/subagents/agent-<id>.jsonl alongside the
+// main transcript <proj>/<sid>.jsonl. Only files modified at/after
+// `since` (the step start) are returned, so a prior NoClear step's subs
+// in the same dir aren't re-folded. Result is path-sorted; callers
+// dedup against hook-captured paths.
+func sweepSubagentTranscripts(mainTranscript string, since time.Time) []string {
+	if mainTranscript == "" {
+		return nil
+	}
+	dir := filepath.Join(strings.TrimSuffix(mainTranscript, ".jsonl"), "subagents")
+	matches, err := filepath.Glob(filepath.Join(dir, "agent-*.jsonl"))
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(matches))
+	for _, p := range matches {
+		info, statErr := os.Stat(p)
+		if statErr != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		// 1s grace absorbs coarse filesystem mtime granularity (a sub
+		// written just after step start can carry a truncated mtime a
+		// fraction before it); still excludes a prior step's minutes-old
+		// subs under NoClear.
+		if !since.IsZero() && info.ModTime().Before(since.Add(-time.Second)) {
+			continue
+		}
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// agentIDFromTranscript derives a sub-agent's id from its transcript
+// filename (agent-<id>.jsonl) so a swept sub matches the id a
+// hook-captured one would carry (keeps the fold's dedup and the
+// manifest's session id consistent regardless of capture path).
+func agentIDFromTranscript(path string) string {
+	name := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+	return strings.TrimPrefix(name, "agent-")
 }
 
 // subTotals returns a-b field-wise.

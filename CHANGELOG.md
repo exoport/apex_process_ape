@@ -1,5 +1,40 @@
 # CHANGELOG
 
+## v0.0.35 (2026-07-03)
+
+- **fix(telemetry): capture real sub-agent transcripts; end the
+  2×-main double-count** — a step that spawned sub-agents recorded
+  exactly twice the main session's usage while the actual sub-agent
+  turns were never scanned. Root cause: the `SubagentStart/Stop` handler
+  tracked a "sub-session" using the hook's `transcript_path`, which is
+  the **parent** session, keyed by `session_id`, which is **also** the
+  parent's (a sub-agent's internal `sessionId` equals its parent's) — so
+  every sub collapsed into one phantom capture pointing at the main
+  transcript, folding main a second time (the precise 2×-main
+  signature). The real sub-agent transcripts
+  (`<sid>/subagents/agent-<id>.jsonl`) were never read; their path is
+  the `agent_transcript_path` field, which ape did not parse. Measured
+  on a 6-sub-agent batch-dev run: ape reported 72 turns / 5.67M tokens;
+  the true total is 267 turns / 22.9M tokens (main 36 + six subs 231).
+  Fix: parse `agent_transcript_path` + `agent_id`; capture sub-sessions
+  on `SubagentStop` via `agent_transcript_path`, keyed by `agent_id`
+  (the only distinct per-sub identifier), each folded exactly once; the
+  step total is now main + Σ subs, and the main `sessions[]` record
+  reports main-only usage. A **double-count guard** never folds a sub
+  whose resolved transcript equals the main/active transcript (belt-and-
+  suspenders against future hook-shape drift — the exact bug signature).
+  A **robustness sweep** at step end enumerates the main session's
+  `subagents/` dir (mtime-scoped to the step) and folds any sub a dropped
+  `SubagentStop` would have lost. Sub transcripts are copied into the run
+  dir alongside the main one (durable through `~/.claude` rotation).
+- **test: sub-agent regression lock** — the integration-shaped guard the
+  CI never had: fixtures plant a main transcript + N `SubagentStop`
+  events whose `transcript_path` all point at main (the real claude
+  shape) with distinct `agent_transcript_path`s, asserting the step total
+  equals main + Σ subs, is **not** 2×main, and `sessions[]` lists the
+  main plus one entry per sub with distinct ids (not the parent id).
+  Additional tests pin the double-count guard and the dropped-Stop sweep.
+
 ## v0.0.34 (2026-07-02)
 
 - **refactor(telemetry): collapse the misdiagnosis-era capture layers**
