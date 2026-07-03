@@ -1,5 +1,41 @@
 # CHANGELOG
 
+## v0.0.33 (2026-07-02)
+
+- **fix(repl): scrub `CLAUDECODE`/`CLAUDE_CODE_*` from the spawned
+  claude's environment** — the verified root cause of the entire
+  zero-telemetry saga. `repl.NewSession` never set `cmd.Env`, so the
+  child claude inherited ape's full environment; when ape itself runs
+  inside a Claude Code session (ubiquitous in dev — and the context of
+  every zero-telemetry run), the inherited `CLAUDECODE=1` and
+  `CLAUDE_CODE_*` markers (notably `CLAUDE_CODE_CHILD_SESSION`) make
+  claude-code treat the spawn as a nested/child session and **suppress
+  session-transcript persistence** — the
+  `~/.claude/projects/<cwd>/<sid>.jsonl` that all telemetry machinery
+  (v0.0.28–32) scans was never written. Proven: strip the markers →
+  transcript persists and usage is captured; keep them → zero. Fix:
+  `repl.ScrubClaudeCodeEnv` removes `CLAUDECODE`, the whole
+  `CLAUDE_CODE_*` family, and `CLAUDE_EFFORT` (so the child's effort
+  comes from ape's flags, not the parent session), keeping
+  `ANTHROPIC_*` auth and everything else. Applied at the single PTY
+  spawn point (`NewSession`, covering pipeline `--no-tui`/`--tui`/
+  `--web` and `ape task`) and at `ape chat`'s inherited-stdio spawn.
+- **feat(manifest): stamp `claude_version`** — the resolved
+  `claude --version` is recorded on every run manifest (best-effort,
+  additive to schema v2). claude-code auto-updated 2.1.198→2.1.199 mid-
+  investigation and its trust-dialog/transcript behavior shifts across
+  versions; telemetry and repro are now attributable to the exact
+  version that ran.
+- **test: nested-context regression guards** — CI never runs under
+  `CLAUDECODE`, which is why three green suites shipped alongside
+  failing live runs. New guards reproduce the nested context
+  explicitly: a unit test pins the scrub (markers removed,
+  `ANTHROPIC_API_KEY` and prefix-lookalikes retained), and a
+  session-spawn test sets `CLAUDECODE=1`/`CLAUDE_CODE_CHILD_SESSION`
+  on the test process and asserts the spawned session's `cmd.Env`
+  contains none of the stripped keys — the leak cannot reach the child
+  regardless of how ape was launched.
+
 ## v0.0.32 (2026-07-02)
 
 - **fix(telemetry): capture the transcript HOOK-SIDE, in `ape
