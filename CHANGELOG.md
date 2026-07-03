@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## v0.0.34 (2026-07-02)
+
+- **refactor(telemetry): collapse the misdiagnosis-era capture layers**
+  — with the v0.0.33 env scrub in place the spawned claude is a
+  top-level session and its transcript persists at the normal path, so
+  the v0.0.28 parent-side scan is sufficient. Removed the machinery
+  built to copy a file the env-leak prevented from existing (~760
+  lines net): the v0.0.32 hook-side capture (`APE_SNAPSHOT_DIR`
+  injection, per-hook file I/O in `ape notify`, dual-source scan
+  logic, per-run temp dir), the v0.0.30 tool-hook incremental
+  snapshots (`AppendTranscript`/offset tracking in FeedHook), the
+  v0.0.31 `syncStopCopy`, and the snapDiag counters that instrumented
+  those paths. The telemetry path is now: scrub env → claude persists
+  transcript → parent scans it → per-model/per-session telemetry.
+  One source, one scan, one diagnostic — with less per-hook overhead.
+  Kept: the env scrub (root-cause fix), the transcript scan with
+  model_usage + per-session records, the `telemetry_note` breadcrumb
+  (simplified to source path / presence / line-count / scan error —
+  enough to name any future zero), and the durable per-step transcript
+  copy into the run dir (one local copy per step, post-scan).
+- **fix(manifest): `totals.num_turns`** — per-step `num_turns` now
+  sums into run-level totals like the token fields (previously
+  per-step showed turns while totals stayed unset).
+- **test: guards realigned to the single-path design** — the
+  bridge-delivered integration guard now runs under the nested context
+  (`CLAUDECODE=1`, the environment every zero-telemetry run had) and
+  asserts non-zero telemetry + model_usage + no note + the durable
+  run-dir copy through the real notify→IPC→dispatch path. The
+  CLAUDECODE-scrub guards (unit + session-spawn) stay; tests
+  exercising the removed snapshot machinery are deleted; new
+  missing-source-note test pins the diagnostic that would catch any
+  genuine future persistence regression.
+
 ## v0.0.33 (2026-07-02)
 
 - **fix(repl): scrub `CLAUDECODE`/`CLAUDE_CODE_*` from the spawned
