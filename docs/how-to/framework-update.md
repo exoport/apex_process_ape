@@ -26,7 +26,7 @@ ape framework update
 What happens:
 
 1. Validates that `_apex/framework.yaml` is **present** (the project is set up). If absent, exits with `Error: framework metadata not found at <path> — run "ape framework setup" to install`.
-2. Validates `$APEX_FRAMEWORK_REPO` (subtree layout, git state, branch, working tree).
+2. Validates `$APEX_FRAMEWORK_REPO` (repo layout, git state, branch, working tree).
 3. Fetches `origin/main` and fast-forwards (skip with `--no-fetch`).
 4. Records the framework's HEAD SHA + tag for the metadata file.
 5. Removes any existing `<project>/.claude/skills/apex-*` (so removed-from-framework skills disappear locally).

@@ -5,13 +5,17 @@
 package framework
 
 // Subtree paths inside a checked-out apex_process_framework repo.
-// Hard-coded for now; if framework layout ever changes we'll lift these
-// to a manifest the framework itself ships.
+// These target the *released* framework layout, where .claude/ and
+// _apex/ sit at the repo root (identical to the shape a project
+// consumes). The earlier build layout nested these under a framework/
+// subfolder (framework/_claude, framework/_apex); that layout is no
+// longer supported. Hard-coded for now; if the layout changes again
+// we'll lift these to a manifest the framework itself ships.
 const (
-	SubtreeSkills             = "framework/_claude/skills"
-	SubtreePipelines          = "framework/_apex/pipelines"
-	SubtreeConfig             = "framework/_apex/config.yaml"
-	SubtreeConfigLocalExample = "framework/_apex/config.local.example.yaml"
+	SubtreeSkills             = ".claude/skills"
+	SubtreePipelines          = "_apex/pipelines"
+	SubtreeConfig             = "_apex/config.yaml"
+	SubtreeConfigLocalExample = "_apex/config.local.example.yaml"
 )
 
 // Project-side paths, relative to the project root the user is

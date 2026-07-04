@@ -3,7 +3,7 @@ package framework
 // Extension is a configurable APEX framework extension that the user
 // chooses among during first-run config bootstrap. The set is
 // hardcoded today; a future framework version may ship a manifest
-// (framework/_apex/extensions.yaml) that this package would parse
+// (_apex/extensions.yaml) that this package would parse
 // instead.
 type Extension struct {
 	ID          string

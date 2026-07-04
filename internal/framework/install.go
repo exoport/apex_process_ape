@@ -449,7 +449,7 @@ func wipeStaleSkills(skillsDir string) ([]string, error) {
 }
 
 // copySkills copies every apex-* directory under
-// <repo>/framework/_claude/skills/ into skillsDir. Returns the
+// <repo>/.claude/skills/ into skillsDir. Returns the
 // relative paths (under the project root) of the installed entries.
 func copySkills(frameworkRepo, skillsDir string) ([]string, error) {
 	srcRoot := filepath.Join(frameworkRepo, SubtreeSkills)
@@ -474,7 +474,7 @@ func copySkills(frameworkRepo, skillsDir string) ([]string, error) {
 }
 
 // copyPipelines copies every *.yaml under
-// <repo>/framework/_apex/pipelines/ into pipelinesDir. Returns the
+// <repo>/_apex/pipelines/ into pipelinesDir. Returns the
 // relative paths of the installed pipelines.
 func copyPipelines(frameworkRepo, pipelinesDir string) ([]string, error) {
 	srcRoot := filepath.Join(frameworkRepo, SubtreePipelines)

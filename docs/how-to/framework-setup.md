@@ -26,7 +26,7 @@ ape framework setup
 What happens:
 
 1. Validates that `_apex/framework.yaml` is **absent** (the not-yet-installed signal). If present, the command exits with `Error: framework already installed at <path> — run "ape framework update" to refresh, or "ape framework setup --force" to re-bootstrap …`.
-2. Validates `$APEX_FRAMEWORK_REPO` (subtree layout, git state, branch, working tree).
+2. Validates `$APEX_FRAMEWORK_REPO` (repo layout, git state, branch, working tree).
 3. Fetches `origin/main` and fast-forwards (skip with `--no-fetch`).
 4. Records the framework's HEAD SHA + tag for the metadata file.
 5. Opens an interactive Bubble Tea prompt for the project name and which extensions to enable. (Skip the TUI with `--project-name` + `--extensions`, or skip seeding entirely with `--no-bootstrap`.)
@@ -39,10 +39,10 @@ What happens:
 
 | Path                              | Source                                      | Behavior             |
 | --------------------------------- | ------------------------------------------- | -------------------- |
-| `.claude/skills/apex-*/`          | `framework/_claude/skills/apex-*/`          | Created              |
-| `_apex/pipelines/*.yaml`          | `framework/_apex/pipelines/*.yaml`          | Created              |
-| `_apex/config.yaml`               | `framework/_apex/config.yaml` (template)    | **Seeded if absent** |
-| `_apex/config.local.example.yaml` | `framework/_apex/config.local.example.yaml` | **Seeded if absent** |
+| `.claude/skills/apex-*/`          | `.claude/skills/apex-*/`                    | Created              |
+| `_apex/pipelines/*.yaml`          | `_apex/pipelines/*.yaml`                    | Created              |
+| `_apex/config.yaml`               | `_apex/config.yaml` (template)              | **Seeded if absent** |
+| `_apex/config.local.example.yaml` | `_apex/config.local.example.yaml`           | **Seeded if absent** |
 | `_apex/framework.yaml`            | _(generated)_                               | Created              |
 
 Non-`apex-*` entries under `.claude/skills/` are never touched — they belong to your project, not the framework.

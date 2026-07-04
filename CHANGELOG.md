@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## v0.0.38 (2026-07-04)
+
+Framework repo layout: `ape framework setup` / `update` / `status --repo`
+now read the **released** framework layout, where `.claude/` and `_apex/`
+sit at the repo root — matching the shape a project consumes. The
+earlier build layout that nested these under a `framework/` subfolder
+(`framework/_claude`, `framework/_apex`) is no longer supported.
+
+- **fix(framework): target root layout of `apex_process_framework`** — the
+  four `Subtree*` path constants in `internal/framework/layout.go` now
+  point at `.claude/skills`, `_apex/pipelines`, `_apex/config.yaml`, and
+  `_apex/config.local.example.yaml` (previously `framework/_claude/…` /
+  `framework/_apex/…`). This follows the framework's move from a build
+  repo (assets nested under `framework/`) to a released repo (assets at
+  the root, alongside the usage docs). Against a released checkout,
+  `ape framework setup`/`update`/`status --repo` previously failed layout
+  validation with `framework_layout_invalid: missing or non-directory:
+  <repo>/framework/_claude/skills`; they now install correctly. **Breaking
+  for anyone still pointing `$APEX_FRAMEWORK_REPO` at an old build-layout
+  checkout** — repoint it at a released checkout. Verified end-to-end
+  against `apex_process_framework` HEAD (89 skills, 8 pipelines). Docs and
+  the generated CLI reference updated to match.
+
 ## v0.0.37 (2026-07-04)
 
 Telemetry: ephemeral cache-write split (PLAN-10 D1), shipped **additively

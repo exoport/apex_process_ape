@@ -13,13 +13,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// fakeFramework builds a self-contained framework repo at root with:
-//   - framework/_apex/pipelines/{design,governance,epics}.yaml
-//   - framework/_apex/config.yaml (template)
-//   - framework/_apex/config.local.example.yaml
-//   - framework/_claude/skills/apex-foo/SKILL.md
-//   - framework/_claude/skills/apex-bar/SKILL.md
-//   - framework/_claude/skills/non-apex/SKILL.md  (must not be touched)
+// fakeFramework builds a self-contained framework repo at root, in the
+// released layout (.claude/ and _apex/ at the repo root):
+//   - _apex/pipelines/{design,governance,epics}.yaml
+//   - _apex/config.yaml (template)
+//   - _apex/config.local.example.yaml
+//   - .claude/skills/apex-foo/SKILL.md
+//   - .claude/skills/apex-bar/SKILL.md
+//   - .claude/skills/non-apex/SKILL.md  (must not be touched)
 //
 // The repo is git-initialized on main with one commit, optionally tagged.
 func fakeFramework(t *testing.T, root, tag string) {
@@ -35,18 +36,18 @@ func fakeFramework(t *testing.T, root, tag string) {
 	}
 
 	// Pipelines
-	mkfile("framework/_apex/pipelines/design.yaml", "name: design\nstages:\n  s1:\n    chain:\n      - skill: apex-foo\n")
-	mkfile("framework/_apex/pipelines/governance.yaml", "name: governance\nstages:\n  s1:\n    chain:\n      - skill: apex-bar\n")
-	mkfile("framework/_apex/pipelines/epics.yaml", "name: epics\nstages:\n  s1:\n    chain:\n      - skill: apex-foo\n")
+	mkfile("_apex/pipelines/design.yaml", "name: design\nstages:\n  s1:\n    chain:\n      - skill: apex-foo\n")
+	mkfile("_apex/pipelines/governance.yaml", "name: governance\nstages:\n  s1:\n    chain:\n      - skill: apex-bar\n")
+	mkfile("_apex/pipelines/epics.yaml", "name: epics\nstages:\n  s1:\n    chain:\n      - skill: apex-foo\n")
 
 	// Config templates
-	mkfile("framework/_apex/config.yaml", "config_schema_version: \"1\"\nproject_name: my-project\nextensions: []\nuser_name: Boss\n")
-	mkfile("framework/_apex/config.local.example.yaml", "# local-only\ngovernance_repository_path: /tmp/gov\n")
+	mkfile("_apex/config.yaml", "config_schema_version: \"1\"\nproject_name: my-project\nextensions: []\nuser_name: Boss\n")
+	mkfile("_apex/config.local.example.yaml", "# local-only\ngovernance_repository_path: /tmp/gov\n")
 
 	// Skills (two apex-*, one non-apex)
-	mkfile("framework/_claude/skills/apex-foo/SKILL.md", "# apex-foo")
-	mkfile("framework/_claude/skills/apex-bar/SKILL.md", "# apex-bar")
-	mkfile("framework/_claude/skills/non-apex/SKILL.md", "# non-apex")
+	mkfile(".claude/skills/apex-foo/SKILL.md", "# apex-foo")
+	mkfile(".claude/skills/apex-bar/SKILL.md", "# apex-bar")
+	mkfile(".claude/skills/non-apex/SKILL.md", "# non-apex")
 
 	ctx := context.Background()
 	mustRun := func(args ...string) {
@@ -394,7 +395,7 @@ func TestUpdate_UntrackedProjectApexSkill_ProceedsWithoutForce(t *testing.T) {
 func TestUpdate_RefusesMissingFrameworkSubtree(t *testing.T) {
 	ctx := context.Background()
 	fw := t.TempDir()
-	// No fakeFramework call — repo has no framework/_apex/pipelines etc.
+	// No fakeFramework call — repo has no _apex/pipelines etc.
 	proj := newProject(t)
 
 	_, err := framework.Setup(ctx, &framework.UpdateOptions{

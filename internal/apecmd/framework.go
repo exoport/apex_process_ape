@@ -73,8 +73,8 @@ func newFrameworkSetupCmd(repoFlag, cwdFlag *string) *cobra.Command {
 		Short: "Initial install of framework skills + pipelines into the project",
 		Long: `Initial install of framework-managed assets into <project>:
 
-  - .claude/skills/apex-*  copied from <repo>/framework/_claude/skills
-  - _apex/pipelines/*.yaml copied from <repo>/framework/_apex/pipelines
+  - .claude/skills/apex-*  copied from <repo>/.claude/skills
+  - _apex/pipelines/*.yaml copied from <repo>/_apex/pipelines
   - _apex/config.yaml      seeded (interactive prompt by default;
                            supply --project-name and --extensions to
                            skip the TUI; --no-bootstrap to skip seeding
@@ -149,8 +149,8 @@ func newFrameworkUpdateCmd(repoFlag, cwdFlag *string) *cobra.Command {
 		Short: "Refresh framework skills and pipelines against the framework repo",
 		Long: `Refresh framework-managed assets in <project>:
 
-  - .claude/skills/apex-*  re-copied from <repo>/framework/_claude/skills
-  - _apex/pipelines/*.yaml re-copied from <repo>/framework/_apex/pipelines
+  - .claude/skills/apex-*  re-copied from <repo>/.claude/skills
+  - _apex/pipelines/*.yaml re-copied from <repo>/_apex/pipelines
   - _apex/framework.yaml   metadata refreshed (preserves project_name +
                            extensions recorded by 'ape framework setup')
 
