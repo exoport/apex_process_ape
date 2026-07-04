@@ -40,6 +40,10 @@ func renderReport(m *Manifest) string {
 	fmt.Fprintf(&b, "| tokens out | %s |\n", formatInt(m.Totals.TokensOutput))
 	fmt.Fprintf(&b, "| cache read | %s |\n", formatInt(m.Totals.TokensCacheRead))
 	fmt.Fprintf(&b, "| cache creation | %s |\n", formatInt(m.Totals.TokensCacheCreation))
+	if m.Totals.TokensCacheCreation5m > 0 || m.Totals.TokensCacheCreation1h > 0 {
+		fmt.Fprintf(&b, "| cache creation (5m) | %s |\n", formatInt(m.Totals.TokensCacheCreation5m))
+		fmt.Fprintf(&b, "| cache creation (1h) | %s |\n", formatInt(m.Totals.TokensCacheCreation1h))
+	}
 	fmt.Fprintf(&b, "| steps run | %d |\n", m.Totals.StepsRun)
 	fmt.Fprintf(&b, "| steps failed | %d |\n", m.Totals.StepsFailed)
 	if anyCommitRecorded(m) {

@@ -449,13 +449,15 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 	mainByModel := byModelDelta(res.ByModel, prevByModel)
 
 	tele := &pipeline.StepTelemetry{
-		CostUSD:             mainUsage.CostUSD,
-		TokensInput:         mainUsage.TokensInput,
-		TokensOutput:        mainUsage.TokensOutput,
-		TokensCacheRead:     mainUsage.TokensCacheRead,
-		TokensCacheCreation: mainUsage.TokensCacheCreation,
-		NumTurns:            mainUsage.NumTurns,
-		ModelUsage:          mainByModel,
+		CostUSD:               mainUsage.CostUSD,
+		TokensInput:           mainUsage.TokensInput,
+		TokensOutput:          mainUsage.TokensOutput,
+		TokensCacheRead:       mainUsage.TokensCacheRead,
+		TokensCacheCreation:   mainUsage.TokensCacheCreation,
+		TokensCacheCreation5m: mainUsage.TokensCacheCreation5m,
+		TokensCacheCreation1h: mainUsage.TokensCacheCreation1h,
+		NumTurns:              mainUsage.NumTurns,
+		ModelUsage:            mainByModel,
 		Sessions: []pipeline.SessionUsage{{
 			SessionID:  parentSID,
 			Usage:      mainUsage,
@@ -528,6 +530,8 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 		tele.TokensOutput += subUsage.TokensOutput
 		tele.TokensCacheRead += subUsage.TokensCacheRead
 		tele.TokensCacheCreation += subUsage.TokensCacheCreation
+		tele.TokensCacheCreation5m += subUsage.TokensCacheCreation5m
+		tele.TokensCacheCreation1h += subUsage.TokensCacheCreation1h
 		tele.NumTurns += subUsage.NumTurns
 		if tele.ModelUsage == nil {
 			tele.ModelUsage = map[string]pipeline.ModelUsage{}
@@ -639,12 +643,14 @@ func agentIDFromTranscript(path string) string {
 // subTotals returns a-b field-wise.
 func subTotals(a, b cost.Totals) cost.Totals {
 	return cost.Totals{
-		CostUSD:             a.CostUSD - b.CostUSD,
-		InputTokens:         a.InputTokens - b.InputTokens,
-		OutputTokens:        a.OutputTokens - b.OutputTokens,
-		CacheReadTokens:     a.CacheReadTokens - b.CacheReadTokens,
-		CacheCreationTokens: a.CacheCreationTokens - b.CacheCreationTokens,
-		NumTurns:            a.NumTurns - b.NumTurns,
+		CostUSD:               a.CostUSD - b.CostUSD,
+		InputTokens:           a.InputTokens - b.InputTokens,
+		OutputTokens:          a.OutputTokens - b.OutputTokens,
+		CacheReadTokens:       a.CacheReadTokens - b.CacheReadTokens,
+		CacheCreationTokens:   a.CacheCreationTokens - b.CacheCreationTokens,
+		CacheCreation5mTokens: a.CacheCreation5mTokens - b.CacheCreation5mTokens,
+		CacheCreation1hTokens: a.CacheCreation1hTokens - b.CacheCreation1hTokens,
+		NumTurns:              a.NumTurns - b.NumTurns,
 	}
 }
 
@@ -652,12 +658,14 @@ func subTotals(a, b cost.Totals) cost.Totals {
 // decoupled ModelUsage shape.
 func totalsToModelUsage(t cost.Totals) pipeline.ModelUsage {
 	return pipeline.ModelUsage{
-		CostUSD:             t.CostUSD,
-		TokensInput:         t.InputTokens,
-		TokensOutput:        t.OutputTokens,
-		TokensCacheRead:     t.CacheReadTokens,
-		TokensCacheCreation: t.CacheCreationTokens,
-		NumTurns:            t.NumTurns,
+		CostUSD:               t.CostUSD,
+		TokensInput:           t.InputTokens,
+		TokensOutput:          t.OutputTokens,
+		TokensCacheRead:       t.CacheReadTokens,
+		TokensCacheCreation:   t.CacheCreationTokens,
+		TokensCacheCreation5m: t.CacheCreation5mTokens,
+		TokensCacheCreation1h: t.CacheCreation1hTokens,
+		NumTurns:              t.NumTurns,
 	}
 }
 
@@ -688,12 +696,14 @@ func byModelDelta(current, baseline map[string]cost.Totals) map[string]pipeline.
 // addModelUsage sums two ModelUsage values field-wise.
 func addModelUsage(a, b pipeline.ModelUsage) pipeline.ModelUsage {
 	return pipeline.ModelUsage{
-		CostUSD:             a.CostUSD + b.CostUSD,
-		TokensInput:         a.TokensInput + b.TokensInput,
-		TokensOutput:        a.TokensOutput + b.TokensOutput,
-		TokensCacheRead:     a.TokensCacheRead + b.TokensCacheRead,
-		TokensCacheCreation: a.TokensCacheCreation + b.TokensCacheCreation,
-		NumTurns:            a.NumTurns + b.NumTurns,
+		CostUSD:               a.CostUSD + b.CostUSD,
+		TokensInput:           a.TokensInput + b.TokensInput,
+		TokensOutput:          a.TokensOutput + b.TokensOutput,
+		TokensCacheRead:       a.TokensCacheRead + b.TokensCacheRead,
+		TokensCacheCreation:   a.TokensCacheCreation + b.TokensCacheCreation,
+		TokensCacheCreation5m: a.TokensCacheCreation5m + b.TokensCacheCreation5m,
+		TokensCacheCreation1h: a.TokensCacheCreation1h + b.TokensCacheCreation1h,
+		NumTurns:              a.NumTurns + b.NumTurns,
 	}
 }
 

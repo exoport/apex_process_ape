@@ -50,7 +50,8 @@ func TestResolveCommitOutcome_SkipStates(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// isLastStep=false; git is never reached for skip states.
 			status, _, sha, _, commitErr := resolveCommitOutcome(
-				context.Background(), tc.opts, tc.plan, 1, false, tc.stepRunErr)
+				context.Background(), tc.opts, tc.plan, 1, false, tc.stepRunErr,
+			)
 			if status != tc.want {
 				t.Errorf("status = %q, want %q", status, tc.want)
 			}

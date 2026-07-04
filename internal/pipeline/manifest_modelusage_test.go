@@ -23,12 +23,15 @@ func TestManifestModelUsageRoundTrip(t *testing.T) {
 	stageIdx := mw.BeginStage("task-x", time.Now())
 
 	tele := &StepTelemetry{
-		CostUSD:      1.25,
-		TokensInput:  100,
-		TokensOutput: 200,
-		NumTurns:     6,
+		CostUSD:               1.25,
+		TokensInput:           100,
+		TokensOutput:          200,
+		TokensCacheCreation:   90,
+		TokensCacheCreation5m: 40,
+		TokensCacheCreation1h: 50,
+		NumTurns:              6,
 		ModelUsage: map[string]ModelUsage{
-			"claude-opus-4-8":  {CostUSD: 1.00, TokensInput: 80, TokensOutput: 150, NumTurns: 2},
+			"claude-opus-4-8":  {CostUSD: 1.00, TokensInput: 80, TokensOutput: 150, TokensCacheCreation: 90, TokensCacheCreation5m: 40, TokensCacheCreation1h: 50, NumTurns: 2},
 			"claude-haiku-4-5": {CostUSD: 0.25, TokensInput: 20, TokensOutput: 50, NumTurns: 4},
 		},
 		Sessions: []SessionUsage{
@@ -78,6 +81,25 @@ func TestManifestModelUsageRoundTrip(t *testing.T) {
 	}
 	if m.Totals.NumTurns != 6 {
 		t.Fatalf("totals num_turns = %d, want 6", m.Totals.NumTurns)
+	}
+	// PLAN-10 D1: the ephemeral cache split flows through to both the
+	// step record and the run totals, additively, with the summed
+	// tokens_cache_creation staying equal to 5m + 1h.
+	if step.TokensCacheCreation5m != 40 || step.TokensCacheCreation1h != 50 {
+		t.Fatalf("step cache split = 5m %d / 1h %d, want 40 / 50",
+			step.TokensCacheCreation5m, step.TokensCacheCreation1h)
+	}
+	if m.Totals.TokensCacheCreation5m != 40 || m.Totals.TokensCacheCreation1h != 50 {
+		t.Fatalf("totals cache split = 5m %d / 1h %d, want 40 / 50",
+			m.Totals.TokensCacheCreation5m, m.Totals.TokensCacheCreation1h)
+	}
+	if m.Totals.TokensCacheCreation5m+m.Totals.TokensCacheCreation1h != m.Totals.TokensCacheCreation {
+		t.Fatalf("totals 5m+1h (%d) != tokens_cache_creation (%d)",
+			m.Totals.TokensCacheCreation5m+m.Totals.TokensCacheCreation1h, m.Totals.TokensCacheCreation)
+	}
+	if opus := m.Totals.ModelUsage["claude-opus-4-8"]; opus.TokensCacheCreation5m != 40 || opus.TokensCacheCreation1h != 50 {
+		t.Fatalf("totals opus cache split = 5m %d / 1h %d, want 40 / 50",
+			opus.TokensCacheCreation5m, opus.TokensCacheCreation1h)
 	}
 }
 

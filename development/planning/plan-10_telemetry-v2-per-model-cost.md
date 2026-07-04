@@ -152,6 +152,32 @@ discrepancy doc already lost one dataset to exactly that rotation.
   ephemeral_1h` into one `CacheCreationTokens` today) and `StepRecord.
   ModelObserved` (per-model attribution lives in the `model_usage` keys
   instead). Reintroduce the 5m/1h split only if D6 needs the tier comparison.
+  **IMPLEMENTED v0.0.37 (2026-07-04) — shipped ADDITIVELY under
+  `schema_version: 2`, NOT a v3 bump.** `Totals`, `StepRecord`,
+  `ManifestTotals`, every `model_usage` entry, and the `ape task` envelope now
+  carry `tokens_cache_creation_5m` / `tokens_cache_creation_1h`
+  (`cache_creation_5m_input_tokens` / `cache_creation_1h_input_tokens` on the
+  envelope) alongside the unchanged summed `tokens_cache_creation`. The scanner
+  already parsed + priced the tiers (`formula.go`); this stops collapsing them
+  in `Totals.Add`. Golden + manifest round-trip tests lock `5m + 1h == sum`. The
+  per-turn `TurnRecord` + H6 (requestId/stop_reason) dedup portion of D1 remains
+  deferred. Original decision rationale follows. Keep `tokens_cache_creation` as the
+  sum (5m + 1h) and add `tokens_cache_creation_5m` / `tokens_cache_creation_1h`
+  alongside it (mirror on the `ape task` envelope's `usage`/`model_usage`/
+  `sessions[]` blocks: keep `cache_creation_input_tokens`, add
+  `cache_creation_5m_input_tokens` / `cache_creation_1h_input_tokens`). Rationale
+  from an eval-side review of the proposed v3 rename (verdict: NO-GO): every eval
+  consumer sums cache-creation into a single quantity
+  (`input_tokens = tokens_input + tokens_cache_read + tokens_cache_creation`,
+  `apex_eval/runner.py`) and would immediately re-add 5m + 1h — the split has
+  zero consumer there. A v3 bump would (a) hard-reject at
+  `ape_manifest.py:read_manifest` (`MAX_SCHEMA_VERSION = 2`), zeroing all ape
+  pipeline-stage telemetry; (b) silently `.get()`-to-zero the renamed field on
+  the ape-task path, under-reporting input tokens 3–16% with no assertion
+  guarding it; and (c) force a permanent v2/v3 normalization shim plus break
+  ~1,310 archived v2 manifests and older pinned binaries. Removing a
+  summed-by-every-consumer field is producer-side tidiness every consumer pays
+  for — additive keeps ape's granularity at zero eval cost.
 - Wire the dead code — **done:** pipeline and `ape task` finalize fold into the
   rollup (`FoldPipelineRun` / `FoldTaskRun`; `RebuildRollup` walks both
   `_output/pipelines` and `_output/tasks`); `ape chat` exit writes `session.yaml`

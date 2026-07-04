@@ -74,7 +74,7 @@ func TestTaskEnvelopeShape(t *testing.T) {
 		ExitCode:        1,
 		DurationSeconds: 142.3,
 		CostUSD:         0.83,
-		Usage:           taskUsage{InputTokens: 1, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4, NumTurns: 5},
+		Usage:           taskUsage{InputTokens: 1, OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4, CacheCreation5mInputTokens: 1, CacheCreation1hInputTokens: 3, NumTurns: 5},
 		Commits:         []string{"SKILL:create-prd"},
 		ManifestPath:    "_output/tasks/apex-create-prd/x/manifest.yaml",
 		Error:           &msg,
@@ -85,6 +85,7 @@ func TestTaskEnvelopeShape(t *testing.T) {
 		`"skill"`, `"agent"`, `"model"`, `"success"`, `"exit_code"`,
 		`"duration_seconds"`, `"cost_usd"`, `"input_tokens"`, `"output_tokens"`,
 		`"cache_read_input_tokens"`, `"cache_creation_input_tokens"`,
+		`"cache_creation_5m_input_tokens"`, `"cache_creation_1h_input_tokens"`,
 		`"num_turns"`, `"commits"`, `"manifest_path"`, `"error"`,
 	} {
 		require.Contains(t, string(bs), key)

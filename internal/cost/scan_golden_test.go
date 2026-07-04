@@ -33,6 +33,19 @@ func TestScanSessionGolden(t *testing.T) {
 	if want := 7341 + 500; res.Totals.CacheCreationTokens != want {
 		t.Fatalf("CacheCreationTokens = %d, want %d", res.Totals.CacheCreationTokens, want)
 	}
+	// PLAN-10 D1: the ephemeral 5m/1h split is retained additively. The
+	// golden fixture has one 1h turn (7341) and one 5m turn (500); the
+	// summed CacheCreationTokens must equal 5m + 1h.
+	if res.Totals.CacheCreation1hTokens != 7341 {
+		t.Fatalf("CacheCreation1hTokens = %d, want 7341", res.Totals.CacheCreation1hTokens)
+	}
+	if res.Totals.CacheCreation5mTokens != 500 {
+		t.Fatalf("CacheCreation5mTokens = %d, want 500", res.Totals.CacheCreation5mTokens)
+	}
+	if res.Totals.CacheCreation5mTokens+res.Totals.CacheCreation1hTokens != res.Totals.CacheCreationTokens {
+		t.Fatalf("5m+1h (%d) != CacheCreationTokens (%d)",
+			res.Totals.CacheCreation5mTokens+res.Totals.CacheCreation1hTokens, res.Totals.CacheCreationTokens)
+	}
 	if res.Totals.CostUSD <= 0 {
 		t.Fatalf("CostUSD = %v, want > 0 for priced models (opus-4-8, haiku-4-5)", res.Totals.CostUSD)
 	}
@@ -61,6 +74,8 @@ func TestScanSessionGolden(t *testing.T) {
 		sum.OutputTokens != res.Totals.OutputTokens ||
 		sum.CacheReadTokens != res.Totals.CacheReadTokens ||
 		sum.CacheCreationTokens != res.Totals.CacheCreationTokens ||
+		sum.CacheCreation5mTokens != res.Totals.CacheCreation5mTokens ||
+		sum.CacheCreation1hTokens != res.Totals.CacheCreation1hTokens ||
 		sum.CostUSD != res.Totals.CostUSD {
 		t.Fatalf("ByModel sums != aggregate:\nsum: %+v\nagg: %+v", sum, res.Totals)
 	}

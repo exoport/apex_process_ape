@@ -13,6 +13,14 @@ import (
 //   - v2 (ape v0.0.10) — PLAN-4 commit fields on StepRecord
 //     (commit_sha, commit_message, commit_status, commit_error) plus
 //     totals.commits_made.
+//
+// Later additions stay ADDITIVE under v2 (new fields, no version bump):
+// v0.0.27–v0.0.35 added num_turns, model_usage, sessions[]; v0.0.37 added
+// the ephemeral cache-write split (tokens_cache_creation_5m/_1h alongside
+// the unchanged tokens_cache_creation sum). The eval reader
+// (apex_process_framework_eval) hard-rejects any schema_version outside
+// [1,2] but tolerates unknown fields, so additive-under-v2 is the only
+// eval-safe path — see PLAN-10 D5.
 const ManifestSchemaVersion = 2
 
 // RunStatus enumerates terminal pipeline / stage / step states.
@@ -100,10 +108,15 @@ type ManifestTotals struct {
 	TokensOutput        int     `yaml:"tokens_output"`
 	TokensCacheRead     int     `yaml:"tokens_cache_read"`
 	TokensCacheCreation int     `yaml:"tokens_cache_creation"`
-	NumTurns            int     `yaml:"num_turns"`
-	StepsRun            int     `yaml:"steps_run"`
-	StepsFailed         int     `yaml:"steps_failed"`
-	CommitsMade         int     `yaml:"commits_made"`
+	// TokensCacheCreation5m / 1h are the ephemeral cache-write split
+	// (PLAN-10 D1). Additive fields — schema stays v2; TokensCacheCreation
+	// remains the sum of the two, so v2 readers are unaffected.
+	TokensCacheCreation5m int `yaml:"tokens_cache_creation_5m"`
+	TokensCacheCreation1h int `yaml:"tokens_cache_creation_1h"`
+	NumTurns              int `yaml:"num_turns"`
+	StepsRun              int `yaml:"steps_run"`
+	StepsFailed           int `yaml:"steps_failed"`
+	CommitsMade           int `yaml:"commits_made"`
 	// ModelUsage is the run-level per-model breakdown, summed across
 	// steps. Additive field (schema stays v2 — v2 readers ignore it).
 	ModelUsage map[string]ModelUsageRecord `yaml:"model_usage,omitempty"`
@@ -112,13 +125,17 @@ type ManifestTotals struct {
 // ModelUsageRecord is the on-disk shape of one model's (or one
 // session's) usage share. Interactive runs derive it from the
 // transcript scan; programmatic runs don't populate it.
+// Field order must stay identical to pipeline.ModelUsage — runner.go's
+// modelUsageToRecords relies on a direct ModelUsageRecord(u) conversion.
 type ModelUsageRecord struct {
-	CostUSD             float64 `yaml:"cost_usd"`
-	TokensInput         int     `yaml:"tokens_input"`
-	TokensOutput        int     `yaml:"tokens_output"`
-	TokensCacheRead     int     `yaml:"tokens_cache_read"`
-	TokensCacheCreation int     `yaml:"tokens_cache_creation"`
-	NumTurns            int     `yaml:"num_turns"`
+	CostUSD               float64 `yaml:"cost_usd"`
+	TokensInput           int     `yaml:"tokens_input"`
+	TokensOutput          int     `yaml:"tokens_output"`
+	TokensCacheRead       int     `yaml:"tokens_cache_read"`
+	TokensCacheCreation   int     `yaml:"tokens_cache_creation"`
+	TokensCacheCreation5m int     `yaml:"tokens_cache_creation_5m"`
+	TokensCacheCreation1h int     `yaml:"tokens_cache_creation_1h"`
+	NumTurns              int     `yaml:"num_turns"`
 }
 
 // SessionUsageRecord is one claude session's usage within a step: the
@@ -148,28 +165,30 @@ type StageRecord struct {
 // zero if the terminal `result` event was missing or unparseable; status
 // reflects the exit / parse outcome regardless.
 type StepRecord struct {
-	Index               int          `yaml:"index"`
-	Skill               string       `yaml:"skill"`
-	Agent               string       `yaml:"agent,omitempty"`
-	Args                string       `yaml:"args,omitempty"`
-	Prompt              string       `yaml:"prompt,omitempty"`
-	Model               string       `yaml:"model,omitempty"`
-	StartedAt           time.Time    `yaml:"started_at"`
-	EndedAt             time.Time    `yaml:"ended_at,omitempty"`
-	DurationSecs        float64      `yaml:"duration_seconds"`
-	Status              RunStatus    `yaml:"status"`
-	ExitCode            int          `yaml:"exit_code"`
-	CostUSD             float64      `yaml:"cost_usd"`
-	TokensInput         int          `yaml:"tokens_input"`
-	TokensOutput        int          `yaml:"tokens_output"`
-	TokensCacheRead     int          `yaml:"tokens_cache_read"`
-	TokensCacheCreation int          `yaml:"tokens_cache_creation"`
-	NumTurns            int          `yaml:"num_turns"`
-	EventsPath          string       `yaml:"events_path,omitempty"`
-	CommitSHA           string       `yaml:"commit_sha,omitempty"`
-	CommitMessage       string       `yaml:"commit_message,omitempty"`
-	CommitStatus        CommitStatus `yaml:"commit_status,omitempty"`
-	CommitError         string       `yaml:"commit_error,omitempty"`
+	Index                 int          `yaml:"index"`
+	Skill                 string       `yaml:"skill"`
+	Agent                 string       `yaml:"agent,omitempty"`
+	Args                  string       `yaml:"args,omitempty"`
+	Prompt                string       `yaml:"prompt,omitempty"`
+	Model                 string       `yaml:"model,omitempty"`
+	StartedAt             time.Time    `yaml:"started_at"`
+	EndedAt               time.Time    `yaml:"ended_at,omitempty"`
+	DurationSecs          float64      `yaml:"duration_seconds"`
+	Status                RunStatus    `yaml:"status"`
+	ExitCode              int          `yaml:"exit_code"`
+	CostUSD               float64      `yaml:"cost_usd"`
+	TokensInput           int          `yaml:"tokens_input"`
+	TokensOutput          int          `yaml:"tokens_output"`
+	TokensCacheRead       int          `yaml:"tokens_cache_read"`
+	TokensCacheCreation   int          `yaml:"tokens_cache_creation"`
+	TokensCacheCreation5m int          `yaml:"tokens_cache_creation_5m"`
+	TokensCacheCreation1h int          `yaml:"tokens_cache_creation_1h"`
+	NumTurns              int          `yaml:"num_turns"`
+	EventsPath            string       `yaml:"events_path,omitempty"`
+	CommitSHA             string       `yaml:"commit_sha,omitempty"`
+	CommitMessage         string       `yaml:"commit_message,omitempty"`
+	CommitStatus          CommitStatus `yaml:"commit_status,omitempty"`
+	CommitError           string       `yaml:"commit_error,omitempty"`
 	// ModelUsage breaks the step's aggregate down per model
 	// (interactive runs; transcript-derived).
 	ModelUsage map[string]ModelUsageRecord `yaml:"model_usage,omitempty"`

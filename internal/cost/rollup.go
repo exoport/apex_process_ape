@@ -161,12 +161,14 @@ func (r *Rollup) foldDay(day time.Time, t Totals) {
 
 func sumTotals(a, b Totals) Totals {
 	return Totals{
-		CostUSD:             a.CostUSD + b.CostUSD,
-		InputTokens:         a.InputTokens + b.InputTokens,
-		OutputTokens:        a.OutputTokens + b.OutputTokens,
-		CacheReadTokens:     a.CacheReadTokens + b.CacheReadTokens,
-		CacheCreationTokens: a.CacheCreationTokens + b.CacheCreationTokens,
-		NumTurns:            a.NumTurns + b.NumTurns,
+		CostUSD:               a.CostUSD + b.CostUSD,
+		InputTokens:           a.InputTokens + b.InputTokens,
+		OutputTokens:          a.OutputTokens + b.OutputTokens,
+		CacheReadTokens:       a.CacheReadTokens + b.CacheReadTokens,
+		CacheCreationTokens:   a.CacheCreationTokens + b.CacheCreationTokens,
+		CacheCreation5mTokens: a.CacheCreation5mTokens + b.CacheCreation5mTokens,
+		CacheCreation1hTokens: a.CacheCreation1hTokens + b.CacheCreation1hTokens,
+		NumTurns:              a.NumTurns + b.NumTurns,
 	}
 }
 

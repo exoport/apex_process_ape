@@ -63,7 +63,14 @@ type Totals struct {
 	OutputTokens        int     `json:"output_tokens"`
 	CacheReadTokens     int     `json:"cache_read_tokens"`
 	CacheCreationTokens int     `json:"cache_creation_tokens"`
-	NumTurns            int     `json:"num_turns"`
+	// CacheCreation5mTokens / CacheCreation1hTokens are the ephemeral
+	// cache-write split (PLAN-10 D1). CacheCreationTokens stays the sum
+	// of the two, so existing consumers are unaffected; the granular
+	// fields are additive. The 5m/1h tiers price differently (1.25× vs
+	// 2.00× base input — see the multiplier constants).
+	CacheCreation5mTokens int `json:"cache_creation_5m_tokens"`
+	CacheCreation1hTokens int `json:"cache_creation_1h_tokens"`
+	NumTurns              int `json:"num_turns"`
 }
 
 // Add folds one turn's usage + cost into the running totals.
@@ -73,5 +80,7 @@ func (t *Totals) Add(u UsageBlock, p ModelPrice) {
 	t.OutputTokens += u.OutputTokens
 	t.CacheReadTokens += u.CacheRead
 	t.CacheCreationTokens += u.CacheCreation.Ephemeral5m + u.CacheCreation.Ephemeral1h
+	t.CacheCreation5mTokens += u.CacheCreation.Ephemeral5m
+	t.CacheCreation1hTokens += u.CacheCreation.Ephemeral1h
 	t.NumTurns++
 }

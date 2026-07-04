@@ -31,6 +31,7 @@ Since v2, additional fields have been added **without bumping the schema version
 
 - `totals.num_turns` and per-step `num_turns` — turn counts derived from the transcript scan.
 - `totals.model_usage` and per-step `model_usage` — per-model cost/token breakdown (PLAN-10 D5, ape v0.0.36+), keyed by model id.
+- `tokens_cache_creation_5m` / `tokens_cache_creation_1h` on `totals`, each step, and every `model_usage` entry — the ephemeral cache-write split (PLAN-10 D1, ape v0.0.37+). `tokens_cache_creation` is unchanged and stays the **sum** of the two tiers, which price differently (5m ≈ 1.25× base input, 1h ≈ 2.00×); the split fields simply expose that breakdown. Consumers that only track total cache creation keep reading `tokens_cache_creation` and ignore the split.
 - per-step `sessions[]` — per-claude-session usage: the step's main REPL session plus any sub-agent (Agent tool) sessions observed via `SubagentStart` / `SubagentStop`.
 - `claude_version` — the resolved `claude --version` at run start (best-effort).
 - per-step `telemetry_note` — a diagnosability breadcrumb explaining why numeric fields are zero.
@@ -55,7 +56,9 @@ totals:
   tokens_input: 412334
   tokens_output: 28910
   tokens_cache_read: 187420
-  tokens_cache_creation: 9211
+  tokens_cache_creation: 9211       # sum of the two tiers below
+  tokens_cache_creation_5m: 3111    # additive split (PLAN-10 D1); 5m + 1h == tokens_cache_creation
+  tokens_cache_creation_1h: 6100
   num_turns: 214
   steps_run: 13
   steps_failed: 0
@@ -67,6 +70,8 @@ totals:
       tokens_output: 24110
       tokens_cache_read: 170220
       tokens_cache_creation: 8100
+      tokens_cache_creation_5m: 2500
+      tokens_cache_creation_1h: 5600
       num_turns: 180
     claude-sonnet-4-6:
       cost_usd: 0.72
@@ -99,6 +104,8 @@ stages:
         tokens_output: 8910
         tokens_cache_read: 41208
         tokens_cache_creation: 2811
+        tokens_cache_creation_5m: 811
+        tokens_cache_creation_1h: 2000
         num_turns: 47
         events_path: stages/01-prd/step-01-apex-create-prd.ndjson
         commit_sha: a0d06c8
@@ -112,6 +119,8 @@ stages:
             tokens_output: 8910
             tokens_cache_read: 41208
             tokens_cache_creation: 2811
+            tokens_cache_creation_5m: 811
+            tokens_cache_creation_1h: 2000
             num_turns: 47
         sessions:                    # per-claude-session usage (main + sub-agents)
           - session_id: 0a675bc4

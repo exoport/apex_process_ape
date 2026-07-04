@@ -2,10 +2,27 @@
 
 ## v0.0.37 (2026-07-04)
 
-Docs completion for PLAN-9 F4 — generated CLI reference, first tutorial,
-and a docs link-check gate. No runtime behaviour change beyond a hidden
-maintenance command.
+Telemetry: ephemeral cache-write split (PLAN-10 D1), shipped **additively
+under manifest `schema_version: 2`** — no schema bump, so the eval reader
+and every archived v2 manifest keep working unchanged. Plus docs
+completion for PLAN-9 F4 (generated CLI reference, first tutorial, docs
+link-check gate).
 
+- **feat(cost): ephemeral cache-creation 5m/1h split (PLAN-10 D1)** — the
+  run manifest, per-step and per-model `model_usage` blocks, and the `ape
+  task --output-format json` envelope now carry
+  `tokens_cache_creation_5m` / `tokens_cache_creation_1h` (envelope:
+  `cache_creation_5m_input_tokens` / `cache_creation_1h_input_tokens`)
+  alongside the existing summed `tokens_cache_creation`. The two tiers
+  price differently (5m ≈ 1.25× base input, 1h ≈ 2.00×); the transcript
+  scanner already parsed and priced them per-tier, this just stops
+  collapsing the breakdown on the way out. **Additive and non-breaking:**
+  the summed field is byte-for-byte unchanged and stays equal to 5m + 1h,
+  `schema_version` remains `2`, and consumers that only track total cache
+  creation need no change. The eval's manifest reader
+  (`apex_process_framework_eval`) hard-rejects any `schema_version`
+  outside `[1,2]` but tolerates unknown fields, so this was deliberately
+  shipped as added v2 fields rather than a v3 bump (see PLAN-10 D5).
 - **docs: generated CLI reference (`docs/reference/cli.md`)** — a new
   hidden `ape gen-docs` command renders a single-file reference for every
   visible command, flag, and default straight from the cobra command

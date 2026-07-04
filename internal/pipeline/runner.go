@@ -143,12 +143,14 @@ type RunOptions struct {
 // produces in programmatic mode, so the manifest writer's recordStep
 // API stays uniform across exec modes.
 type StepTelemetry struct {
-	CostUSD             float64
-	TokensInput         int
-	TokensOutput        int
-	TokensCacheRead     int
-	TokensCacheCreation int
-	NumTurns            int
+	CostUSD               float64
+	TokensInput           int
+	TokensOutput          int
+	TokensCacheRead       int
+	TokensCacheCreation   int
+	TokensCacheCreation5m int
+	TokensCacheCreation1h int
+	NumTurns              int
 	// ModelUsage is the per-model breakdown of the aggregate above,
 	// keyed by normalized model id. Restores sub-agent model
 	// attribution (a consumer picking the non-primary model gets the
@@ -167,13 +169,17 @@ type StepTelemetry struct {
 
 // ModelUsage is one model's (or one session's) share of a step's
 // usage. Field set mirrors StepTelemetry's aggregate.
+// Field order must stay identical to ModelUsageRecord (manifest.go) —
+// modelUsageToRecords relies on a direct ModelUsageRecord(u) conversion.
 type ModelUsage struct {
-	CostUSD             float64
-	TokensInput         int
-	TokensOutput        int
-	TokensCacheRead     int
-	TokensCacheCreation int
-	NumTurns            int
+	CostUSD               float64
+	TokensInput           int
+	TokensOutput          int
+	TokensCacheRead       int
+	TokensCacheCreation   int
+	TokensCacheCreation5m int
+	TokensCacheCreation1h int
+	NumTurns              int
 }
 
 // SessionUsage is the usage of one claude session that contributed to
@@ -456,6 +462,8 @@ func recordStep(
 		rec.TokensOutput = ev.Usage.OutputTokens
 		rec.TokensCacheRead = ev.Usage.CacheReadInputTokens
 		rec.TokensCacheCreation = ev.Usage.CacheCreationInputTokens
+		rec.TokensCacheCreation5m = ev.Usage.CacheCreation5mInputTokens
+		rec.TokensCacheCreation1h = ev.Usage.CacheCreation1hInputTokens
 		rec.NumTurns = ev.NumTurns
 		rec.TelemetryNote = ev.TelemetryNote
 		rec.ModelUsage = modelUsageToRecords(ev.ModelUsage)

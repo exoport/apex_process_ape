@@ -184,7 +184,12 @@ type taskUsage struct {
 	OutputTokens             int `json:"output_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-	NumTurns                 int `json:"num_turns"`
+	// Ephemeral cache-write split (PLAN-10 D1). Additive — the summed
+	// cache_creation_input_tokens above is unchanged; these break it into
+	// the 5m/1h tiers for consumers that price them differently.
+	CacheCreation5mInputTokens int `json:"cache_creation_5m_input_tokens"`
+	CacheCreation1hInputTokens int `json:"cache_creation_1h_input_tokens"`
+	NumTurns                   int `json:"num_turns"`
 }
 
 // taskModelUsage is one model's (or one session's) usage share on the
@@ -192,12 +197,14 @@ type taskUsage struct {
 //
 //nolint:tagliatelle // envelope mirrors the stream-json result-event field names
 type taskModelUsage struct {
-	CostUSD                  float64 `json:"cost_usd"`
-	InputTokens              int     `json:"input_tokens"`
-	OutputTokens             int     `json:"output_tokens"`
-	CacheReadInputTokens     int     `json:"cache_read_input_tokens"`
-	CacheCreationInputTokens int     `json:"cache_creation_input_tokens"`
-	NumTurns                 int     `json:"num_turns"`
+	CostUSD                    float64 `json:"cost_usd"`
+	InputTokens                int     `json:"input_tokens"`
+	OutputTokens               int     `json:"output_tokens"`
+	CacheReadInputTokens       int     `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens   int     `json:"cache_creation_input_tokens"`
+	CacheCreation5mInputTokens int     `json:"cache_creation_5m_input_tokens"`
+	CacheCreation1hInputTokens int     `json:"cache_creation_1h_input_tokens"`
+	NumTurns                   int     `json:"num_turns"`
 }
 
 // taskSessionUsage is one claude session's usage within the run: the
@@ -338,6 +345,8 @@ func fillEnvelopeFromManifest(env *taskEnvelope, projectRoot, skill, manifestDir
 	env.Usage.OutputTokens = m.Totals.TokensOutput
 	env.Usage.CacheReadInputTokens = m.Totals.TokensCacheRead
 	env.Usage.CacheCreationInputTokens = m.Totals.TokensCacheCreation
+	env.Usage.CacheCreation5mInputTokens = m.Totals.TokensCacheCreation5m
+	env.Usage.CacheCreation1hInputTokens = m.Totals.TokensCacheCreation1h
 	env.ModelUsage = modelUsageRecordsToEnvelope(m.Totals.ModelUsage)
 	for i := range m.Stages {
 		for j := range m.Stages[i].Steps {
@@ -370,12 +379,14 @@ func modelUsageRecordsToEnvelope(mu map[string]pipeline.ModelUsageRecord) map[st
 	out := make(map[string]taskModelUsage, len(mu))
 	for model, u := range mu {
 		out[model] = taskModelUsage{
-			CostUSD:                  u.CostUSD,
-			InputTokens:              u.TokensInput,
-			OutputTokens:             u.TokensOutput,
-			CacheReadInputTokens:     u.TokensCacheRead,
-			CacheCreationInputTokens: u.TokensCacheCreation,
-			NumTurns:                 u.NumTurns,
+			CostUSD:                    u.CostUSD,
+			InputTokens:                u.TokensInput,
+			OutputTokens:               u.TokensOutput,
+			CacheReadInputTokens:       u.TokensCacheRead,
+			CacheCreationInputTokens:   u.TokensCacheCreation,
+			CacheCreation5mInputTokens: u.TokensCacheCreation5m,
+			CacheCreation1hInputTokens: u.TokensCacheCreation1h,
+			NumTurns:                   u.NumTurns,
 		}
 	}
 	return out

@@ -66,6 +66,8 @@ Progress streams to stderr; stdout carries only the result envelope:
     "output_tokens": 30682,
     "cache_read_input_tokens": 1703661,
     "cache_creation_input_tokens": 195953,
+    "cache_creation_5m_input_tokens": 61200,
+    "cache_creation_1h_input_tokens": 134753,
     "num_turns": 26
   },
   "commits": ["SKILL:create-prd"],
@@ -77,6 +79,10 @@ Progress streams to stderr; stdout carries only the result envelope:
 `commits` lists every commit made during the run (framework commits
 included), oldest first. Cost and usage come from the session
 transcript scan — the same telemetry pipeline steps record.
+`cache_creation_input_tokens` is the total ephemeral cache-write count;
+`cache_creation_5m_input_tokens` and `cache_creation_1h_input_tokens`
+break it into the two tiers (added in v0.0.37, additive — the total is
+their sum). The same split appears on each `model_usage` entry.
 
 ## Artifacts
 

@@ -15,10 +15,12 @@ type resultEvent struct {
 	NumTurns     int
 	TotalCostUSD float64
 	Usage        struct {
-		InputTokens              int
-		OutputTokens             int
-		CacheReadInputTokens     int
-		CacheCreationInputTokens int
+		InputTokens                int
+		OutputTokens               int
+		CacheReadInputTokens       int
+		CacheCreationInputTokens   int
+		CacheCreation5mInputTokens int
+		CacheCreation1hInputTokens int
 	}
 
 	// Interactive-mode extras carried from StepTelemetry (transcript scan).

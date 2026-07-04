@@ -339,6 +339,8 @@ func stepTelemetryToResultEvent(t *StepTelemetry) *resultEvent {
 	ev.Usage.OutputTokens = t.TokensOutput
 	ev.Usage.CacheReadInputTokens = t.TokensCacheRead
 	ev.Usage.CacheCreationInputTokens = t.TokensCacheCreation
+	ev.Usage.CacheCreation5mInputTokens = t.TokensCacheCreation5m
+	ev.Usage.CacheCreation1hInputTokens = t.TokensCacheCreation1h
 	return ev
 }
 
