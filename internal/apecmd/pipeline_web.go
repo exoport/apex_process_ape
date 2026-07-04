@@ -26,7 +26,7 @@ import (
 // every per-step claude argv, and routes IPC frames to the runlog
 // writer alongside PLAN-3's manifest path. PLAN-5 / C1 + C3 + C6.
 //
-//nolint:gocyclo,maintidx // single-spawn web orchestration: hub setup, runlog wiring, runner integration, and shutdown all need to share state; splitting harms readability more than it helps.
+//nolint:maintidx // single-spawn web orchestration: hub setup, runlog wiring, runner integration, and shutdown all need to share state; splitting harms readability more than it helps.
 func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cfg runConfig) error {
 	apeBin, err := os.Executable()
 	if err != nil {
@@ -355,7 +355,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	var pfe *pipeline.PreflightError
 	if errors.As(runErr, &pfe) {
 		fmt.Fprintf(os.Stderr, "%s\n", pfe.Error())
-		os.Exit(exitCodePreflightFailed) //nolint:gocritic // explicit exit
+		os.Exit(ExitUsage) //nolint:gocritic // explicit exit
 	}
 	if runErr != nil {
 		// Match the convention used elsewhere in apecmd (see

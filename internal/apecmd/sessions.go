@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -9,11 +10,25 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/diegosz/apex_process_ape/internal/output"
 	"github.com/diegosz/apex_process_ape/internal/sessions"
 	"github.com/spf13/cobra"
 )
 
+// sessionsListResult is the structured payload for `ape sessions` in
+// JSON/YAML mode.
+type sessionsListResult struct {
+	Sessions []sessions.Session `json:"sessions" yaml:"sessions"`
+}
+
+// sessionsPruneResult is the structured payload for `ape sessions prune`.
+type sessionsPruneResult struct {
+	Live int `json:"live" yaml:"live"`
+}
+
 func newSessionsCmd() *cobra.Command {
+	var outputFormat string
+
 	cmd := &cobra.Command{
 		Use:   "sessions",
 		Short: "List, prune, or open the URL of live ape sessions",
@@ -25,38 +40,56 @@ func newSessionsCmd() *cobra.Command {
   ape sessions open [<pfx>]  xdg-open the URL of the live session whose
                              cwd starts with <pfx>. Errors if zero or
                              multiple sessions match.`,
+		Example: "  ape sessions\n  ape sessions --output-format json",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			rows, err := sessions.Prune(sessions.DefaultPath())
 			if err != nil {
 				return err
 			}
-			return printSessions(rows)
+			return printSessions(rows, output.Format(outputFormat))
 		},
 	}
+	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
 	cmd.AddCommand(newSessionsPruneCmd(), newSessionsOpenCmd())
 	return cmd
 }
 
 func newSessionsPruneCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "prune",
-		Short: "Drop registry rows whose PID is no longer running",
+	var outputFormat string
+
+	cmd := &cobra.Command{
+		Use:     "prune",
+		Short:   "Drop registry rows whose PID is no longer running",
+		Example: "  ape sessions prune\n  ape sessions prune --output-format json",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			rows, err := sessions.Prune(sessions.DefaultPath())
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "pruned. %d session(s) live.\n", len(rows))
-			return nil
+			res := sessionsPruneResult{Live: len(rows)}
+			switch output.Format(outputFormat) {
+			case output.FormatJSON:
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(res)
+			case output.FormatYAML:
+				return output.Print(os.Stdout, output.FormatYAML, res)
+			default:
+				fmt.Fprintf(os.Stderr, "pruned. %d session(s) live.\n", res.Live)
+				return nil
+			}
 		},
 	}
+	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
+	return cmd
 }
 
 func newSessionsOpenCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "open [<project-prefix>]",
-		Short: "xdg-open the URL of the live session whose cwd matches <project-prefix>",
-		Args:  cobra.MaximumNArgs(1),
+		Use:     "open [<project-prefix>]",
+		Short:   "xdg-open the URL of the live session whose cwd matches <project-prefix>",
+		Example: "  ape sessions open ~/projects/foo",
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			rows, err := sessions.Prune(sessions.DefaultPath())
 			if err != nil {
@@ -83,26 +116,35 @@ func newSessionsOpenCmd() *cobra.Command {
 	}
 }
 
-func printSessions(rows []sessions.Session) error {
-	if len(rows) == 0 {
-		fmt.Fprintln(os.Stderr, "no live sessions.")
-		return nil
+func printSessions(rows []sessions.Session, format output.Format) error {
+	switch format {
+	case output.FormatJSON, output.FormatYAML:
+		res := sessionsListResult{Sessions: rows}
+		if res.Sessions == nil {
+			res.Sessions = []sessions.Session{}
+		}
+		return output.Print(os.Stdout, format, res)
+	default:
+		if len(rows) == 0 {
+			fmt.Fprintln(os.Stderr, "no live sessions.")
+			return nil
+		}
+		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "PID\tAGE\tPORT\tURL\tCOMMAND\tCWD")
+		now := time.Now()
+		for _, r := range rows {
+			fmt.Fprintf(
+				tw, "%d\t%s\t%d\t%s\t%s\t%s\n",
+				r.PID,
+				ageOf(now, r.StartedAt),
+				r.Port,
+				r.URL,
+				r.Command,
+				r.CWD,
+			)
+		}
+		return tw.Flush()
 	}
-	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PID\tAGE\tPORT\tURL\tCOMMAND\tCWD")
-	now := time.Now()
-	for _, r := range rows {
-		fmt.Fprintf(
-			tw, "%d\t%s\t%d\t%s\t%s\t%s\n",
-			r.PID,
-			ageOf(now, r.StartedAt),
-			r.Port,
-			r.URL,
-			r.Command,
-			r.CWD,
-		)
-	}
-	return tw.Flush()
 }
 
 func ageOf(now, t time.Time) string {

@@ -17,8 +17,6 @@ import (
 	"golang.org/x/term"
 )
 
-const exitCodePreflightFailed = 2
-
 func newPipelineCmd() *cobra.Command {
 	var (
 		promptFlag         string
@@ -42,7 +40,11 @@ func newPipelineCmd() *cobra.Command {
 		Use:   "pipeline [name]",
 		Short: "List or run an APEX pipeline",
 		Long:  pipelineLongHelp(),
-		Args:  cobra.MaximumNArgs(1),
+		Example: `  ape pipeline                       # list installed pipelines
+  ape pipeline design                # run the design pipeline (TUI)
+  ape pipeline governance --no-tui   # plain stdout progress
+  ape pipeline epics --web --open    # bridged web UI, open the browser`,
+		Args: cobra.MaximumNArgs(1),
 		ValidArgsFunction: func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 			if len(args) > 0 {
 				return nil, cobra.ShellCompDirectiveNoFileComp
@@ -90,7 +92,7 @@ func newPipelineCmd() *cobra.Command {
 			// flags error with a pointer rather than silently no-op.
 			if programmaticFlag || interactiveFlag || evalFlag {
 				fmt.Fprintln(os.Stderr, "Error: "+removedExecFlagMessage())
-				os.Exit(exitCodePreflightFailed)
+				os.Exit(ExitUsage)
 			}
 			mode, optOutTUI, err := resolvePipelineMode(PipelineFlags{
 				TUI:   tuiFlag,
@@ -99,7 +101,7 @@ func newPipelineCmd() *cobra.Command {
 			}, os.Stderr)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error: "+err.Error())
-				os.Exit(exitCodePreflightFailed)
+				os.Exit(ExitUsage)
 			}
 			useTUI := !optOutTUI && term.IsTerminal(int(os.Stdout.Fd())) && !mode.IsWeb()
 			// PLAN-9 F3: surface the resolved rendering surface on start.

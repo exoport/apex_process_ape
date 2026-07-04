@@ -171,7 +171,7 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 	if errors.As(runErr, &pfe) {
 		fmt.Fprintf(os.Stderr, "%s\n", pfe.Error())
 		runCancel()
-		os.Exit(exitCodePreflightFailed) //nolint:gocritic // explicit runCancel above neutralizes defer-skip
+		os.Exit(ExitUsage) //nolint:gocritic // explicit runCancel above neutralizes defer-skip
 	}
 	if runErr == nil {
 		printEndOfRunSummary(spec.Name, projectRoot, cfg)

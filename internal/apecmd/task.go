@@ -18,20 +18,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// PLAN-11 exit codes for `ape task`.
-const (
-	taskExitOK = 0
-	// taskExitRunFailed — the skill ran but failed, the Stop-hook wait
-	// errored, or the idle-without-Stop timeout fired.
-	taskExitRunFailed = 1
-	// exitCodePreflightFailed (2) — usage / preflight errors; shared
-	// with the pipeline command.
-	//
-	// taskExitNotReady — the claude REPL never became ready in the PTY
-	// (trust-dialog dismissal failed or an unknown modal blocked; the
-	// last pane snapshot is on stderr).
-	taskExitNotReady = 3
-)
+// `ape task` uses the shared exit-code table in exitcodes.go
+// (ExitOK / ExitRunFailed / ExitUsage / ExitREPLNotReady).
 
 // taskCommitDerivedSentinel is the NoOptDefVal for a bare
 // `--task-commit` (no message). Contains a control byte so it cannot
@@ -87,7 +75,7 @@ preflight error · 3 REPL never became ready (last pane on stderr).`,
 			jsonMode := jsonAlias || outputFormat == "json"
 			if !jsonMode && outputFormat != "human" {
 				fmt.Fprintf(os.Stderr, "Error: --output-format must be human or json, got %q\n", outputFormat)
-				os.Exit(exitCodePreflightFailed)
+				os.Exit(ExitUsage)
 			}
 			projectRoot := cwdFlag
 			if projectRoot == "" {
@@ -105,7 +93,7 @@ preflight error · 3 REPL never became ready (last pane on stderr).`,
 				}
 				if strings.TrimSpace(msg) == "" {
 					fmt.Fprintln(os.Stderr, "Error: --task-commit message cannot be empty")
-					os.Exit(exitCodePreflightFailed)
+					os.Exit(ExitUsage)
 				}
 				taskCommit = &pipeline.CommitDirective{Mode: pipeline.CommitModeExplicit, Message: msg}
 			}
@@ -250,13 +238,13 @@ type taskEnvelope struct {
 // taskExitCode maps a run error onto the PLAN-11 exit-code table.
 func taskExitCode(runErr error) int {
 	if runErr == nil {
-		return taskExitOK
+		return ExitOK
 	}
 	var nre *repl.NotReadyError
 	if errors.As(runErr, &nre) {
-		return taskExitNotReady
+		return ExitREPLNotReady
 	}
-	return taskExitRunFailed
+	return ExitRunFailed
 }
 
 func runTask(ctx context.Context, o taskOptions) error {
@@ -313,7 +301,7 @@ func runTask(ctx context.Context, o taskOptions) error {
 	} else {
 		printTaskSummary(env, runErr)
 	}
-	if exitCode != taskExitOK {
+	if exitCode != ExitOK {
 		// exitCode != 0 implies runErr != nil (see taskExitCode). A
 		// NotReadyError's text carries the last pane snapshot, so an
 		// unknown blocking modal is diagnosable straight from stderr.

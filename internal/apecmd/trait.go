@@ -105,10 +105,13 @@ func newTraitShowCmd() *cobra.Command {
 }
 
 func newTraitValidateCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "validate <file>",
-		Short: "Validate a trait YAML file",
-		Args:  cobra.ExactArgs(1),
+	var outputFormat string
+
+	cmd := &cobra.Command{
+		Use:     "validate <file>",
+		Short:   "Validate a trait YAML file",
+		Example: "  ape trait validate ./mytrait.yaml --output-format json",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			file := args[0]
 			t, err := trait.LoadTraitFromFile(file)
@@ -127,18 +130,40 @@ func newTraitValidateCmd() *cobra.Command {
 				errs = append(errs, "missing required field: description")
 			}
 
-			if len(errs) > 0 {
-				fmt.Fprintf(os.Stderr, "validation errors in %s:\n", file)
-				for _, e := range errs {
-					fmt.Fprintf(os.Stderr, "  - %s\n", e)
-				}
-				return fmt.Errorf("validation failed with %d error(s)", len(errs))
+			type validateResult struct {
+				File   string   `json:"file"   yaml:"file"`
+				Valid  bool     `json:"valid"  yaml:"valid"`
+				Errors []string `json:"errors" yaml:"errors"`
 			}
+			res := validateResult{File: file, Valid: len(errs) == 0, Errors: errs}
 
-			fmt.Printf("OK: %s is valid\n", file)
-			return nil
+			format := output.Format(outputFormat)
+			switch format {
+			case output.FormatJSON, output.FormatYAML:
+				if err := output.Print(os.Stdout, format, res); err != nil {
+					return err
+				}
+				if !res.Valid {
+					return fmt.Errorf("validation failed with %d error(s)", len(errs))
+				}
+				return nil
+			default:
+				if len(errs) > 0 {
+					fmt.Fprintf(os.Stderr, "validation errors in %s:\n", file)
+					for _, e := range errs {
+						fmt.Fprintf(os.Stderr, "  - %s\n", e)
+					}
+					return fmt.Errorf("validation failed with %d error(s)", len(errs))
+				}
+
+				fmt.Printf("OK: %s is valid\n", file)
+				return nil
+			}
 		},
 	}
+
+	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
+	return cmd
 }
 
 func newTraitConflictsCmd() *cobra.Command {

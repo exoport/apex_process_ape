@@ -26,23 +26,29 @@ func newBootstrapCmd() *cobra.Command {
 		traitsFlag   string
 		outFlag      string
 		dryRun       bool
+		noPicker     bool
 		noTUI        bool
 		onConflict   string
 		outputFormat string
 	)
 
 	cmd := &cobra.Command{
-		Use:   "bootstrap",
-		Short: "Bootstrap governance artifacts from traits",
-		Long:  "Bootstrap a project's governance artifacts by composing traits from the catalog.",
+		Use:     "bootstrap",
+		Short:   "Bootstrap governance artifacts from traits",
+		Long:    "Bootstrap a project's governance artifacts by composing traits from the catalog.",
+		Example: "  ape bootstrap --traits go-service,http-api\n  ape bootstrap --no-picker --traits go-service --dry-run",
 		RunE: func(_ *cobra.Command, _ []string) error {
+			// --no-tui is a deprecated alias for --no-picker; either one
+			// disables the interactive picker.
+			noPicker = noPicker || noTUI
+
 			catalog, err := trait.LoadCatalog()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "error: catalog not found: %v\n", err)
 				os.Exit(exitCodeCatalogNotFound)
 			}
 
-			selectedTraits, err := selectTraits(catalog, traitsFlag, noTUI)
+			selectedTraits, err := selectTraits(catalog, traitsFlag, noPicker)
 			if err != nil {
 				return err
 			}
@@ -102,7 +108,10 @@ func newBootstrapCmd() *cobra.Command {
 	cmd.Flags().StringVar(&traitsFlag, "traits", "", "Comma-separated list of trait names")
 	cmd.Flags().StringVar(&outFlag, "out", ".", "Output directory for generated artifacts")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print what would be generated without writing files")
-	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable interactive TUI")
+	cmd.Flags().BoolVar(&noPicker, "no-picker", false, "Disable the interactive trait picker (TUI)")
+	// --no-tui is a deprecated alias for --no-picker; kept hidden for one release.
+	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Deprecated: use --no-picker")
+	_ = cmd.Flags().MarkHidden("no-tui")
 	cmd.Flags().StringVar(&onConflict, "on-conflict", "first", "Conflict resolution strategy: first|last|all|error")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
 

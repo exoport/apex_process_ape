@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/diegosz/apex_process_ape/internal/output"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -25,9 +26,12 @@ func newPatternCmd() *cobra.Command {
 }
 
 func newPatternListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   cmdUseList,
-		Short: "List all governance patterns",
+	var outputFormat string
+
+	cmd := &cobra.Command{
+		Use:     cmdUseList,
+		Short:   "List all governance patterns",
+		Example: "  ape pattern list --output-format json",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			patternsDir := findPatternsDir()
 			if patternsDir == "" {
@@ -43,55 +47,53 @@ func newPatternListCmd() *cobra.Command {
 
 			var index struct {
 				Patterns []struct {
-					ID    string `yaml:"id"`
-					Title string `yaml:"title"`
-					File  string `yaml:"file"`
-				} `yaml:"patterns"`
+					ID    string `json:"id"    yaml:"id"`
+					Title string `json:"title" yaml:"title"`
+					File  string `json:"file"  yaml:"file"`
+				} `json:"patterns" yaml:"patterns"`
 			}
 			if err := yaml.Unmarshal(data, &index); err != nil {
 				return fmt.Errorf("cannot parse patterns index: %w", err)
 			}
 
-			for _, p := range index.Patterns {
-				fmt.Printf("%-20s %s\n", p.ID, p.Title)
+			format := output.Format(outputFormat)
+			switch format {
+			case output.FormatJSON, output.FormatYAML:
+				return output.Print(os.Stdout, format, index.Patterns)
+			default:
+				for _, p := range index.Patterns {
+					fmt.Printf("%-20s %s\n", p.ID, p.Title)
+				}
+				return nil
 			}
-			return nil
 		},
 	}
+
+	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
+	return cmd
 }
 
 func newPatternValidateCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "validate",
-		Short: "Validate governance patterns",
+	var outputFormat string
+
+	cmd := &cobra.Command{
+		Use:     "validate",
+		Short:   "Validate governance patterns",
+		Example: "  ape pattern validate --output-format json",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			patternsDir := findPatternsDir()
-			if patternsDir == "" {
-				fmt.Fprintln(os.Stderr, "no patterns directory found")
-				return nil
-			}
-			fmt.Printf("Validating patterns in %s\n", patternsDir)
-			entries, err := os.ReadDir(patternsDir)
-			if err != nil {
-				return fmt.Errorf("cannot read patterns dir: %w", err)
-			}
-			count := 0
-			for _, e := range entries {
-				if !e.IsDir() && filepath.Ext(e.Name()) == ".md" {
-					count++
-					fmt.Printf("  OK: %s\n", e.Name())
-				}
-			}
-			fmt.Printf("Validated %d pattern file(s).\n", count)
-			return nil
+			return runMarkdownDirValidate(findPatternsDir(), "pattern", outputFormat)
 		},
 	}
+
+	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
+	return cmd
 }
 
 func newPatternSyncCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "sync",
-		Short: "Sync patterns (not yet implemented)",
+		Use:    "sync",
+		Short:  "Sync patterns (not yet implemented)",
+		Hidden: true,
 		Run: func(_ *cobra.Command, _ []string) {
 			fmt.Println("sync not yet implemented")
 		},

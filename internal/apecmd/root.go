@@ -18,9 +18,26 @@ const (
 var rootCmd = &cobra.Command{
 	Use:   "ape",
 	Short: "APE — APEX Process Engine CLI",
-	Long: `APE is the APEX Process Engine CLI tool.
-It manages governance artifacts, traits, patterns, and ADRs for your project.`,
-	PersistentPreRun: func(_ *cobra.Command, _ []string) {
+	Long: `ape runs APEX framework work against your project through an
+interactive Claude Code REPL.
+
+Common commands:
+  ape pipeline <name>   Run a multi-stage pipeline (design, governance, epics).
+  ape task <skill>      Run a single framework skill without a pipeline YAML.
+  ape chat              Open an interactive Claude session in the project.
+  ape costs             Show this project's Claude cost rollup.
+
+Also: framework setup/update, doctor, sessions, planning, trait/pattern/adr
+inspection. Every claude invocation runs in an in-process PTY — there is no
+"claude -p" programmatic path.`,
+	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+		// Skip the background update check for hidden / utility commands
+		// (mcp-bridge, notify) — they run inside the spawned claude on
+		// hot paths where a network check is noise, not user-facing.
+		// PLAN-9 F3.
+		if cmd.Hidden {
+			return
+		}
 		go checkForUpdatesBackground()
 	},
 	SilenceUsage:  true,

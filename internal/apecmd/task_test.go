@@ -54,13 +54,13 @@ func TestBuildTaskStep(t *testing.T) {
 
 // TestTaskExitCode pins the PLAN-11 exit-code table.
 func TestTaskExitCode(t *testing.T) {
-	require.Equal(t, taskExitOK, taskExitCode(nil))
-	require.Equal(t, taskExitRunFailed, taskExitCode(errors.New("interactive step idle for 60m0s without Stop hook")))
+	require.Equal(t, ExitOK, taskExitCode(nil))
+	require.Equal(t, ExitRunFailed, taskExitCode(errors.New("interactive step idle for 60m0s without Stop hook")))
 	wrapped := errors.Join(
 		errors.New("stage wrap"),
 		&repl.NotReadyError{Name: "s", Pane: "modal", Err: context.DeadlineExceeded},
 	)
-	require.Equal(t, taskExitNotReady, taskExitCode(wrapped))
+	require.Equal(t, ExitREPLNotReady, taskExitCode(wrapped))
 }
 
 // TestTaskEnvelopeShape locks the JSON field names the eval consumes.

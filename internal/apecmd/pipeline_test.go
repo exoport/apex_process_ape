@@ -171,4 +171,3 @@ func TestInteractiveCore_StepTelemetry_ResetsBaselineOnPathChange(t *testing.T) 
 	require.Equal(t, 40, t2.TokensOutput, "step 2 output = sess2's only turn (40), not sess2-sess1 (-220)")
 	require.GreaterOrEqual(t, t2.CostUSD, 0.0, "no negative costs from path-change reset")
 }
-

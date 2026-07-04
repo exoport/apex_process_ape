@@ -868,7 +868,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	if errors.As(runErr, &pfe) {
 		fmt.Fprintf(os.Stderr, "%s\n", pfe.Error())
 		runCancel()
-		os.Exit(exitCodePreflightFailed) //nolint:gocritic // explicit runCancel above; mirrors sibling runners
+		os.Exit(ExitUsage) //nolint:gocritic // explicit runCancel above; mirrors sibling runners
 	}
 	if runErr == nil && !cfg.suppressSummary {
 		printEndOfRunSummary(spec.Name, projectRoot, cfg)

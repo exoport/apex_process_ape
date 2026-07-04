@@ -26,8 +26,10 @@ func newSyncCmd() *cobra.Command {
 
 func newSyncPatternsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "patterns",
-		Short: "Sync patterns (not yet implemented)",
+		Use:     "patterns",
+		Short:   "Sync patterns (not yet implemented)",
+		Example: "  ape sync patterns",
+		Hidden:  true,
 		Run: func(_ *cobra.Command, _ []string) {
 			fmt.Println("sync patterns not yet implemented")
 		},
@@ -36,8 +38,10 @@ func newSyncPatternsCmd() *cobra.Command {
 
 func newSyncADRsCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "adrs",
-		Short: "Sync ADRs (not yet implemented)",
+		Use:     "adrs",
+		Short:   "Sync ADRs (not yet implemented)",
+		Example: "  ape sync adrs",
+		Hidden:  true,
 		Run: func(_ *cobra.Command, _ []string) {
 			fmt.Println("sync adrs not yet implemented")
 		},

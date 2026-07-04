@@ -621,19 +621,6 @@ func claudeVersion(ctx context.Context, claudeBin string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// exitCodeFromErr extracts the OS exit code from an exec error. Falls
-// back to 1 when the underlying error is not an *exec.ExitError.
-func exitCodeFromErr(err error) int {
-	if err == nil {
-		return 0
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode()
-	}
-	return 1
-}
-
 // ReportPathFor returns the pipeline-report.md path that the latest
 // finalized run for the given pipeline wrote to, or "" if no manifest
 // is available. Used by the CLI to print a stable pointer after a run.

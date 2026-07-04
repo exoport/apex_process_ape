@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diegosz/apex_process_ape/internal/output"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -27,9 +28,12 @@ func newADRCmd() *cobra.Command {
 }
 
 func newADRListCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   cmdUseList,
-		Short: "List all ADRs",
+	var outputFormat string
+
+	cmd := &cobra.Command{
+		Use:     cmdUseList,
+		Short:   "List all ADRs",
+		Example: "  ape adr list --output-format json",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			adrDir := findADRDir()
 			if adrDir == "" {
@@ -45,49 +49,46 @@ func newADRListCmd() *cobra.Command {
 
 			var index struct {
 				ADRs []struct {
-					ID     string `yaml:"id"`
-					Title  string `yaml:"title"`
-					Status string `yaml:"status"`
-				} `yaml:"adrs"` //nolint:tagliatelle // YAML key "adrs" matches index.yaml format; "adRs" would be wrong
+					ID     string `json:"id"     yaml:"id"`
+					Title  string `json:"title"  yaml:"title"`
+					Status string `json:"status" yaml:"status"`
+				} `json:"adrs" yaml:"adrs"` //nolint:tagliatelle // YAML key "adrs" matches index.yaml format; "adRs" would be wrong
 			}
 			if err := yaml.Unmarshal(data, &index); err != nil {
 				return fmt.Errorf("cannot parse ADR index: %w", err)
 			}
 
-			for _, a := range index.ADRs {
-				fmt.Printf("%-15s %-10s %s\n", a.ID, a.Status, a.Title)
+			format := output.Format(outputFormat)
+			switch format {
+			case output.FormatJSON, output.FormatYAML:
+				return output.Print(os.Stdout, format, index.ADRs)
+			default:
+				for _, a := range index.ADRs {
+					fmt.Printf("%-15s %-10s %s\n", a.ID, a.Status, a.Title)
+				}
+				return nil
 			}
-			return nil
 		},
 	}
+
+	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
+	return cmd
 }
 
 func newADRValidateCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "validate",
-		Short: "Validate ADR files",
+	var outputFormat string
+
+	cmd := &cobra.Command{
+		Use:     "validate",
+		Short:   "Validate ADR files",
+		Example: "  ape adr validate --output-format json",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			adrDir := findADRDir()
-			if adrDir == "" {
-				fmt.Fprintln(os.Stderr, "no ADR directory found")
-				return nil
-			}
-			fmt.Printf("Validating ADRs in %s\n", adrDir)
-			entries, err := os.ReadDir(adrDir)
-			if err != nil {
-				return fmt.Errorf("cannot read ADR dir: %w", err)
-			}
-			count := 0
-			for _, e := range entries {
-				if !e.IsDir() && filepath.Ext(e.Name()) == ".md" {
-					count++
-					fmt.Printf("  OK: %s\n", e.Name())
-				}
-			}
-			fmt.Printf("Validated %d ADR file(s).\n", count)
-			return nil
+			return runMarkdownDirValidate(findADRDir(), "ADR", outputFormat)
 		},
 	}
+
+	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
+	return cmd
 }
 
 func newADRNewCmd() *cobra.Command {
