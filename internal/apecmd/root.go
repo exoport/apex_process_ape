@@ -28,6 +28,11 @@ It manages governance artifacts, traits, patterns, and ADRs for your project.`,
 }
 
 func Execute() error {
+	// Set here (not in init) so Version reflects the build-info backfill
+	// applied by version.go's init — cobra reads rootCmd.Version at
+	// Execute time when handling `--version`. A non-empty Version makes
+	// cobra register the `--version` flag automatically.
+	rootCmd.Version = Version
 	return rootCmd.Execute()
 }
 

@@ -13,7 +13,6 @@ import (
 
 	"github.com/diegosz/apex_process_ape/internal/bridge/broker"
 	"github.com/diegosz/apex_process_ape/internal/bridge/config"
-	"github.com/diegosz/apex_process_ape/internal/bridge/ipc"
 	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/diegosz/apex_process_ape/internal/cost"
 	"github.com/diegosz/apex_process_ape/internal/pipeline"
@@ -22,75 +21,13 @@ import (
 	"github.com/diegosz/apex_process_ape/internal/web"
 )
 
-// webHookStepTracker is the programmatic-web analogue of the
-// interactiveCore.activeStep state — a thread-safe `<stage>/<skill>`
-// label tracking the runner's current step so the hub's OnHook
-// callback can tag hook events that arrive with an empty Step
-// (which is every event — `ape notify` cannot populate Step, and
-// only the interactive core handles tagging on its own). The
-// interactive web path doesn't use this; its core.FeedHook tags
-// via core.activeStep.
-type webHookStepTracker struct {
-	mu    sync.Mutex
-	label string
-}
-
-func (t *webHookStepTracker) set(label string) {
-	t.mu.Lock()
-	t.label = label
-	t.mu.Unlock()
-}
-
-func (t *webHookStepTracker) clear() {
-	t.mu.Lock()
-	t.label = ""
-	t.mu.Unlock()
-}
-
-func (t *webHookStepTracker) get() string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.label
-}
-
-// stepTaggingObserver wraps a pipeline.Observer and updates a
-// webHookStepTracker on OnStepStart / OnStepEnd. Used to plumb the
-// runner's current-step state into the hub's OnHook callback in
-// programmatic web mode (`--web -P`). All other observer methods
-// pass through unchanged.
-type stepTaggingObserver struct {
-	child   pipeline.Observer
-	tracker *webHookStepTracker
-}
-
-func (s *stepTaggingObserver) OnStageStart(stage string) { s.child.OnStageStart(stage) }
-func (s *stepTaggingObserver) OnStageEnd(stage string, dur time.Duration, err error) {
-	s.child.OnStageEnd(stage, dur, err)
-}
-
-func (s *stepTaggingObserver) OnStepStart(stage string, idx int, step pipeline.Step) {
-	// idx is 0-based per the Observer contract; StepLabel uses 1-based
-	// to match the manifest's step numbering.
-	s.tracker.set(pipeline.StepLabel(stage, idx+1, step.Skill))
-	s.child.OnStepStart(stage, idx, step)
-}
-
-func (s *stepTaggingObserver) OnStepLine(stage string, idx int, line string) {
-	s.child.OnStepLine(stage, idx, line)
-}
-
-func (s *stepTaggingObserver) OnStepEnd(stage string, idx int, step pipeline.Step, dur time.Duration, out string, err error) {
-	s.tracker.clear()
-	s.child.OnStepEnd(stage, idx, step, dur, out, err)
-}
-
 // runWithWeb runs a pipeline with the bridged web UI. Starts a hub
 // (broker + IPC listener), builds inline configs, prepends them to
 // every per-step claude argv, and routes IPC frames to the runlog
 // writer alongside PLAN-3's manifest path. PLAN-5 / C1 + C3 + C6.
 //
 //nolint:gocyclo,maintidx // single-spawn web orchestration: hub setup, runlog wiring, runner integration, and shutdown all need to share state; splitting harms readability more than it helps.
-func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cfg runConfig, interactive bool) error {
+func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cfg runConfig) error {
 	apeBin, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("ape pipeline --web: locate self: %w", err)
@@ -175,13 +112,10 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	// the core early so the Hub's OnHook can feed it.
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
-	var core *interactiveCore
-	var stepTracker *webHookStepTracker
-	if interactive {
-		core = newInteractiveCore(runCancel, getRunLog)
-	} else {
-		stepTracker = &webHookStepTracker{}
-	}
+	// PLAN-9 F2: web is interactive-only since v0.0.36. The core owns
+	// runlog writes + activeStep tagging via FeedHook; the old
+	// programmatic-web (`--web -P`) direct-write path was removed.
+	core := newInteractiveCore(runCancel, getRunLog)
 
 	hub := orchestrator.NewHub(orchestrator.HubOptions{
 		PageHTML:         pageHTML,
@@ -189,39 +123,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		FragmentRenderer: newWebRenderer(tpl, projectRoot),
 		ReplayEvents:     replayStages,
 		OnHook: func(h orchestrator.HookEvent) {
-			// When the interactive core is active it writes to runlog
-			// itself (and applies activeStep tagging). The direct write
-			// below is the non-interactive web path (`--web -P`).
-			if core != nil {
-				core.FeedHook(h)
-				return
-			}
-			if rl := getRunLog(); rl != nil {
-				step := h.Step
-				if step == "" && stepTracker != nil {
-					// `ape notify` cannot populate Step; the runner-side
-					// stepTracker (updated via stepTaggingObserver from
-					// the pipeline's OnStepStart / OnStepEnd) supplies
-					// the active `<stage>/<idx>-<skill>` label.
-					step = stepTracker.get()
-				}
-				// Symlink the claude session transcript into transcripts/
-				// on the first UPS for this step. Per-step sessions in
-				// --web -P mean each link points to a unique target.
-				if h.Event == ipc.HookUserPromptSubmit && step != "" {
-					if tp := extractTranscriptPath(h.Payload); tp != "" {
-						_ = rl.LinkTranscript(transcriptLinkName(step), tp)
-					}
-				}
-				_ = rl.Hook(runlog.HookEntry{
-					Timestamp: h.At,
-					Event:     h.Event,
-					Step:      step,
-					SessionID: h.SessionID,
-					AgentID:   h.AgentID,
-					Payload:   h.Payload,
-				})
-			}
+			core.FeedHook(h)
 		},
 		OnCall: func(c orchestrator.ToolCall) {
 			if rl := getRunLog(); rl != nil {
@@ -342,12 +244,10 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	}
 	onStageStart := func(stage string) {
 		publishStageCard(stage, "running", "⟳", "running…")
-		if core != nil {
-			// Interactive web: reset per-stage transcript scan baseline
-			// so the first step's telemetry delta equals its own
-			// absolute usage. Same hook the no-UI / TUI variants wire.
-			core.ResetStageTelemetry(stage)
-		}
+		// Reset the per-stage transcript scan baseline so the first
+		// step's telemetry delta equals its own absolute usage. Same
+		// hook the no-UI / TUI variants wire.
+		core.ResetStageTelemetry(stage)
 	}
 	onRunDir := func(dir string) {
 		runLogMu.Lock()
@@ -371,13 +271,9 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	}
 
 	runStart := time.Now()
-	var observer pipeline.Observer = newPlainObserver(os.Stdout, projectRoot, true)
-	if stepTracker != nil {
-		// Programmatic web: wrap so OnStepStart/End updates the
-		// tracker the hub's OnHook callback reads. Interactive web
-		// uses the core's activeStep instead; no wrapper needed.
-		observer = &stepTaggingObserver{child: observer, tracker: stepTracker}
-	}
+	// The interactive core tags hook events via its own activeStep, so
+	// the plain observer needs no step-tracking wrapper.
+	observer := pipeline.Observer(newPlainObserver(os.Stdout, projectRoot, true))
 	runOptions := pipeline.RunOptions{
 		ProjectRoot:  projectRoot,
 		Prompt:       cfg.prompt,
@@ -394,14 +290,11 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		// RunLog is attached lazily via the closure inside OnStageStart;
 		// we cannot pass *runlog.Writer here because it doesn't exist
 		// until the runner has resolved the run dir.
-		RunLog: &lazyRunLog{getter: getRunLog},
-	}
-	if core != nil {
-		runOptions.Interactive = true
-		runOptions.WaitStepDone = core.WaitStepDone
-		runOptions.StepTelemetryFn = core.StepTelemetry
-		runOptions.OnInteractiveStepStart = core.OnStepStart
-		runOptions.OnInteractiveStepEnd = core.OnStepEnd
+		RunLog:                 &lazyRunLog{getter: getRunLog},
+		WaitStepDone:           core.WaitStepDone,
+		StepTelemetryFn:        core.StepTelemetry,
+		OnInteractiveStepStart: core.OnStepStart,
+		OnInteractiveStepEnd:   core.OnStepEnd,
 	}
 	runErr := pipeline.Run(runCtx, spec, runOptions)
 

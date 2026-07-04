@@ -857,7 +857,6 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		PrependFlags:           prepend,
 		OnStageStart:           core.ResetStageTelemetry,
 		OnRunDir:               onRunDir,
-		Interactive:            true,
 		WaitStepDone:           core.WaitStepDone,
 		OnInteractiveStepStart: core.OnStepStart,
 		OnInteractiveStepEnd:   core.OnStepEnd,

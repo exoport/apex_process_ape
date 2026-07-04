@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/diegosz/apex_process_ape/internal/output"
 	"github.com/diegosz/apex_process_ape/internal/pipeline"
 	"github.com/diegosz/apex_process_ape/internal/tui"
@@ -86,19 +85,27 @@ func newPipelineCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
 				return err
 			}
+			// PLAN-9 F2: the programmatic exec axis was removed in
+			// v0.0.36 — interactive PTY is the only exec mode. The old
+			// flags error with a pointer rather than silently no-op.
+			if programmaticFlag || interactiveFlag || evalFlag {
+				fmt.Fprintln(os.Stderr, "Error: "+removedExecFlagMessage())
+				os.Exit(exitCodePreflightFailed)
+			}
 			mode, optOutTUI, err := resolvePipelineMode(PipelineFlags{
-				TUI:          tuiFlag,
-				Web:          webFlag,
-				NoTUI:        noTUI,
-				Eval:         evalFlag,
-				Interactive:  interactiveFlag,
-				Programmatic: programmaticFlag,
+				TUI:   tuiFlag,
+				Web:   webFlag,
+				NoTUI: noTUI,
 			}, os.Stderr)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error: "+err.Error())
 				os.Exit(exitCodePreflightFailed)
 			}
 			useTUI := !optOutTUI && term.IsTerminal(int(os.Stdout.Fd())) && !mode.IsWeb()
+			// PLAN-9 F3: surface the resolved rendering surface on start.
+			if !quietFlag {
+				fmt.Fprintf(os.Stderr, "▸ mode: %s\n", describeMode(mode))
+			}
 			if quietFlag && useTUI {
 				// PLAN-2 / F5: --quiet only suppresses the live
 				// event stream that plainObserver emits. The TUI's
@@ -119,37 +126,35 @@ func newPipelineCmd() *cobra.Command {
 				ignoreProjectSettings: ignoreProjSettings,
 				openOnStart:           openFlag,
 			}
-			// PLAN-6 / C1 dispatch: pick the runner that matches the
-			// resolved (UI × Exec) mode. Web modes route to
-			// runWithWeb (which now takes an `interactive` switch);
-			// the no-UI / TUI interactive variants route through
-			// runWithInteractive; the legacy programmatic-exec paths
-			// preserve the PLAN-5 wiring (runWithTUI / runPlain).
-			// The eval consumer's --eval path is preserved verbatim.
+			// PLAN-9 F2 dispatch: interactive PTY is the only exec mode,
+			// so the switch is purely over the UI surface. Web routes to
+			// the bridged web runner; TUI (when stdout is a terminal) to
+			// the Bubble Tea runner; everything else (--no-tui, or a
+			// non-terminal stdout) to the plain interactive runner.
 			switch {
-			case mode.IsEval():
-				return runPlain(ctx, spec, projectRoot, quietFlag, runOpts)
-			case mode == PipelineModeWebInteractive:
-				return runWithWeb(ctx, spec, projectRoot, runOpts, true)
-			case mode == PipelineModeWebProgrammatic:
-				return runWithWeb(ctx, spec, projectRoot, runOpts, false)
-			case mode == PipelineModeTUIInteractive && useTUI:
+			case mode.IsWeb():
+				return runWithWeb(ctx, spec, projectRoot, runOpts)
+			case mode.IsTUI() && useTUI:
 				return runWithInteractiveTUI(ctx, spec, projectRoot, runOpts)
-			case mode.IsInteractive():
+			default:
 				return runWithInteractive(ctx, spec, projectRoot, runOpts)
-			case useTUI:
-				return runWithTUI(ctx, spec, projectRoot, runOpts)
 			}
-			return runPlain(ctx, spec, projectRoot, quietFlag, runOpts)
 		},
 	}
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Optional prompt forwarded to skills that accept it (currently: epics)")
-	cmd.Flags().BoolVarP(&interactiveFlag, "interactive", "I", false, "Per-stage interactive `claude` process with bridge step-contract verification (PLAN-6 / C1). Default; explicit form for scripts.")
-	cmd.Flags().BoolVarP(&programmaticFlag, "programmatic", "P", false, "Per-step `claude -p` spawn (pre-PLAN-6 default). Use with --tui / --web / --no-tui to keep today's exec shape; ignored under --eval.")
-	cmd.Flags().BoolVar(&webFlag, "web", false, "Bridged web UI (now the default). Explicit form for scripts.")
-	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "Bubble Tea TUI (pre-PLAN-5 default; now opt-in).")
-	cmd.Flags().BoolVar(&evalFlag, "eval", false, "LOCKED byte-equivalent stdout for the eval harness / CI capture (no bridge, no hooks, no UI; admits no exec modifier).")
-	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "No UI surface, but still interactive exec (one claude REPL per stage in an in-process PTY). Combine with -P for plain-stdout programmatic exec; pass --eval for the locked byte-equivalent path.")
+	cmd.Flags().BoolVar(&webFlag, "web", false, "Bridged web UI. Explicit form for scripts.")
+	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "Bubble Tea TUI (the default; explicit form for scripts).")
+	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "No UI surface: plain stdout progress lines. Exec is still the interactive per-stage claude REPL in an in-process PTY.")
+	// PLAN-9 F2: the programmatic exec axis was removed in v0.0.36.
+	// These flags remain registered (hidden) only so an old invocation
+	// gets the actionable removal message instead of cobra's terse
+	// "unknown flag". Remove after one release.
+	cmd.Flags().BoolVarP(&interactiveFlag, "interactive", "I", false, "removed in v0.0.36 (interactive PTY is the only exec mode)")
+	cmd.Flags().BoolVarP(&programmaticFlag, "programmatic", "P", false, "removed in v0.0.36 (interactive PTY is the only exec mode)")
+	cmd.Flags().BoolVar(&evalFlag, "eval", false, "removed in v0.0.36 (interactive PTY is the only exec mode)")
+	_ = cmd.Flags().MarkHidden("interactive")
+	_ = cmd.Flags().MarkHidden("programmatic")
+	_ = cmd.Flags().MarkHidden("eval")
 	cmd.Flags().BoolVar(&openFlag, "open", false, "With --web (or default): xdg-open the broker URL on start.")
 	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json. Honoured in --web mode.")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "With --no-tui: suppress per-event stream; print only stage/step start/end markers")
@@ -175,24 +180,31 @@ install the canonical set (design, governance, epics) from the
 framework repo, run "ape framework update".
 
 Each pipeline is a sequence of stages; each stage is a chain of skill
-invocations dispatched to the local "claude" CLI. Skill invocations
-follow PAT-25 passthrough conventions, with the slash command + args
-sent to claude as a single prompt string via -p:
+invocations. ape runs one interactive "claude" REPL per stage inside an
+in-process PTY (never "claude -p"): steps are typed as real REPL
+keystrokes following PAT-25 passthrough conventions —
 
-    claude --dangerously-skip-permissions \
-        -p "/<agent> --autonomous -- <skill> --autonomous <args>" \
-        --output-format stream-json --verbose [--model M]
+    /<agent> --autonomous -- <skill> --autonomous <args>
 
 Skills without an agent skip the passthrough hop:
 
-    claude --dangerously-skip-permissions \
-        -p "/<skill> --autonomous --no-commit <args>" \
-        ...
+    /<skill> --autonomous --no-commit <args>
+
+Rendering surface: --tui (default) shows the Bubble Tea panels, --web
+serves the bridged web UI, --no-tui prints plain stdout progress lines.
 
 The --prompt flag is forwarded only to skills whose pipeline definition
 declares prompt_flag (currently apex-create-epics-and-stories in the
-"epics" pipeline). The prompt value passes through Go's argv directly,
-so embedded quotes/specials survive without shell quoting.`
+"epics" pipeline). The prompt value passes through as REPL keystrokes
+directly, so embedded quotes/specials survive without shell quoting.`
+}
+
+// removedExecFlagMessage is the actionable error shown when a caller
+// passes one of the exec-axis flags removed in v0.0.36 (PLAN-9 F2).
+func removedExecFlagMessage() string {
+	return "programmatic mode was removed in v0.0.36; interactive PTY is the only exec mode. " +
+		"Drop -P/--programmatic, -I/--interactive, and --eval — the run is interactive by default. " +
+		"See docs/explanation/why-pty-only.md."
 }
 
 // pipelineListResult is the structured payload for `ape pipeline`
@@ -225,12 +237,9 @@ func printPipelineList(res pipelineListResult, format output.Format) error {
 	}
 }
 
-// runPlain runs the pipeline with stdout status lines (no TUI). Used
-// when --no-tui is set or stdout is not a terminal. When quiet is true
-// (PLAN-2 / F5) the per-event stream is suppressed; only stage/step
-// start/end markers are emitted, matching the pre-PLAN-1 / I4b shape.
-// runConfig bundles CLI-derived knobs passed to runPlain / runWithTUI.
-// Grouped to keep call-sites stable as new flags land.
+// runConfig bundles CLI-derived knobs passed to the interactive
+// runners (runWithInteractive / runWithInteractiveTUI / runWithWeb) and
+// to `ape task`. Grouped to keep call-sites stable as new flags land.
 type runConfig struct {
 	prompt                string
 	manifestDir           string
@@ -255,82 +264,6 @@ type runConfig struct {
 	// backstop (default interactiveStepIdleTimeout). PLAN-11:
 	// `ape task --idle-timeout`.
 	idleTimeout time.Duration
-}
-
-func runPlain(ctx context.Context, spec *pipeline.Spec, projectRoot string, quiet bool, cfg runConfig) error {
-	obs := newPlainObserver(os.Stdout, projectRoot, quiet)
-	err := pipeline.Run(ctx, spec, pipeline.RunOptions{
-		ProjectRoot: projectRoot,
-		Prompt:      cfg.prompt,
-		Observer:    obs,
-		ApeVersion:  Version,
-		ManifestDir: cfg.manifestDir,
-		FromStage:   cfg.fromStage,
-		NoCommit:    cfg.noCommit,
-		AllowDirty:  cfg.allowDirty,
-	})
-	if err != nil {
-		var pfe *pipeline.PreflightError
-		if errors.As(err, &pfe) {
-			fmt.Fprintf(os.Stderr, "%s\n", pfe.Error())
-			os.Exit(exitCodePreflightFailed)
-		}
-		return err
-	}
-	printEndOfRunSummary(spec.Name, projectRoot, cfg)
-	return nil
-}
-
-// runWithTUI runs the pipeline alongside a Bubble Tea program. The
-// pipeline runs in a goroutine; observer events become tea.Msgs that
-// drive the two-panel display. The TUI exits once pipelineDoneMsg
-// arrives, or when the user confirms the quit modal (q / Ctrl+C with
-// y, or double Ctrl+C), in which case runCancel cancels the runner's
-// context — exec.CommandContext then tears down the in-flight claude
-// subprocess.
-func runWithTUI(ctx context.Context, spec *pipeline.Spec, projectRoot string, cfg runConfig) error {
-	// Local cancel scoped to this TUI run. Wrapping the caller's ctx
-	// gives the modal a dedicated cancellation handle without
-	// interfering with the cobra signal-handling on the parent ctx.
-	runCtx, runCancel := context.WithCancel(ctx)
-	defer runCancel()
-
-	model := tui.NewPipelineModel(spec, runCancel, projectRoot)
-	program := tea.NewProgram(model, tea.WithAltScreen())
-	obs := tui.NewPipelineTUIObserver(program)
-
-	runErrCh := make(chan error, 1)
-	go func() {
-		err := pipeline.Run(runCtx, spec, pipeline.RunOptions{
-			ProjectRoot: projectRoot,
-			Prompt:      cfg.prompt,
-			Observer:    obs,
-			ApeVersion:  Version,
-			ManifestDir: cfg.manifestDir,
-			FromStage:   cfg.fromStage,
-			NoCommit:    cfg.noCommit,
-			AllowDirty:  cfg.allowDirty,
-		})
-		obs.Done(err)
-		runErrCh <- err
-	}()
-
-	if _, err := program.Run(); err != nil {
-		return fmt.Errorf("TUI: %w", err)
-	}
-	runErr := <-runErrCh
-	var pfe *pipeline.PreflightError
-	if errors.As(runErr, &pfe) {
-		fmt.Fprintf(os.Stderr, "%s\n", pfe.Error())
-		// os.Exit skips the deferred runCancel; invoke explicitly so
-		// no leaked goroutine or subprocess can survive.
-		runCancel()
-		os.Exit(exitCodePreflightFailed) //nolint:gocritic // intentional: explicit runCancel() above neutralises the deferred-cleanup concern
-	}
-	if runErr == nil {
-		printEndOfRunSummary(spec.Name, projectRoot, cfg)
-	}
-	return runErr
 }
 
 // printEndOfRunSummary emits the post-run pointer lines:

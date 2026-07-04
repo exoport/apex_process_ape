@@ -14,24 +14,32 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Whole file is //go:build !windows because every TestRun_* here
-// drives a bash shim script (.sh) as the synthetic claude binary.
-// Windows can't exec .sh files directly (`fork/exec …shim.sh: %1 is
-// not a valid Win32 application`) and rewriting these shims as .cmd
-// or .ps1 would change the test surface enough to lose the assertion
-// fidelity. The production code paths these tests cover are exercised
-// indirectly on Windows via the smoke step in CI.
+// Whole file is //go:build !windows because every TestRun_* here drives
+// a bash shim as the synthetic claude REPL. Windows can't exec .sh files
+// directly and lacks the POSIX PTY these tests depend on. The production
+// code paths are exercised indirectly on Windows via the CI smoke step.
+//
+// PTY-only note (PLAN-9 F2, v0.0.36): ape no longer has a programmatic
+// `claude -p` exec path, so these commit-outcome tests run through the
+// interactive per-stage REPL (runStagesInteractive). The shim is a
+// passive bash presenting a `❯` prompt so repl.WaitForReady succeeds; it
+// does NO work itself. In the real interactive path the *model* mutates
+// the tree, so — mirroring that — each test PRE-CREATES the file changes
+// the commit machinery acts on and passes --commit-allow-dirty when the
+// pre-created diff would otherwise trip the dirty-tree gate. Steps are
+// advanced by a fast no-op WaitStepDone (no bridge Stop hook is wired in
+// these unit tests).
 
 // initGitRepo runs `git init`, writes a `_output/`-ignoring `.gitignore`,
-// then stages + commits every file currently in `root`. Tests must
-// write their pipeline spec (and any other fixture state) BEFORE
-// calling initGitRepo so it lands in the baseline commit; otherwise
-// the dirty-tree gate will refuse on entry. Skips when git is absent.
+// then stages + commits every file currently in `root`. Tests must write
+// their pipeline spec BEFORE calling initGitRepo so it lands in the
+// baseline commit; any diff a test wants the runner to commit must be
+// created AFTER this call so it shows up as an uncommitted change.
 //
 // Uses t.Setenv so the author/committer env vars apply to every child
-// process spawned during the test — including production code paths
-// like gitCommit that don't set their own cmd.Env and would otherwise
-// inherit a bare environment in CI runners without git config.
+// process spawned during the test — including production code paths like
+// gitCommit that don't set their own cmd.Env and would otherwise inherit
+// a bare environment in CI runners without git config.
 func initGitRepo(t *testing.T, root string) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -59,8 +67,8 @@ func initGitRepo(t *testing.T, root string) {
 	}
 }
 
-// writePipelineSpec writes a single-stage pipeline with the given
-// chain YAML body to `<root>/_apex/pipelines/<name>.yaml`.
+// writePipelineSpec writes a single-stage pipeline with the given chain
+// YAML body to `<root>/_apex/pipelines/<name>.yaml`.
 func writePipelineSpec(t *testing.T, root, name, chainBody string) {
 	t.Helper()
 	pipelinesDir := filepath.Join(root, "_apex", "pipelines")
@@ -73,20 +81,40 @@ func writePipelineSpec(t *testing.T, root, name, chainBody string) {
 	}
 }
 
-// writeFileShim returns the path to a shell shim that writes a file
-// the stream-json events claim it touched. The shim emits one stream
-// JSON line plus a terminal `result` event so parseResultEvent can
-// surface metrics.
-func writeFileShim(t *testing.T, dir, body string) string {
+// claudeREPLShim returns a bash stand-in for the claude CLI that presents
+// a `❯` prompt (so repl.WaitForReady's empty-prompt fallback matches),
+// then execs an interactive shell. It performs no work — tests seed the
+// tree diff themselves. Skips when bash is unavailable.
+func claudeREPLShim(t *testing.T) string {
 	t.Helper()
-	shim := filepath.Join(dir, "shim.sh")
-	content := "#!/bin/sh\nset -e\n" + body +
-		"echo '{\"type\":\"result\",\"subtype\":\"success\",\"duration_ms\":1,\"num_turns\":1,\"total_cost_usd\":0.01,\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}'\n" +
-		"exit 0\n"
-	if err := os.WriteFile(shim, []byte(content), 0o755); err != nil {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not installed")
+	}
+	shim := filepath.Join(t.TempDir(), "claude-shim.sh")
+	body := "#!/bin/sh\nPS1='❯ '\nexport PS1\nexec bash --noprofile --norc\n"
+	if err := os.WriteFile(shim, []byte(body), 0o755); err != nil {
 		t.Fatalf("write shim: %v", err)
 	}
 	return shim
+}
+
+// fastStepDone advances interactive steps immediately. Production wires
+// WaitStepDone to the bridge's Stop hook; these tests don't run a bridge,
+// and the tree diff is pre-seeded, so returning nil at once is correct
+// and keeps the tests fast + deterministic (no grace-window sleep).
+func fastStepDone(_ context.Context, _ string, _ int) error { return nil }
+
+// seedFile writes rel (relative to root) with some content so the tree
+// gains an uncommitted diff for the commit machinery to act on.
+func seedFile(t *testing.T, root, rel string) {
+	t.Helper()
+	p := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("mkdir for %s: %v", rel, err)
+	}
+	if err := os.WriteFile(p, []byte("produced by "+rel+"\n"), 0o644); err != nil {
+		t.Fatalf("seed %s: %v", rel, err)
+	}
 }
 
 // loadLatestManifest reads <root>/_output/pipelines/<name>/latest/manifest.yaml.
@@ -111,28 +139,33 @@ func loadLatestManifest(t *testing.T, root, name string) Manifest {
 	return m
 }
 
-// TestRun_CommitDefaultMessage — default-on commits land with the
-// derived `ape:<pipeline>/<stage>/<skill>` message and a recorded SHA.
+// runInteractive is the shared driver: interactive PTY exec with the
+// passive REPL shim and a fast step-done, matching how every production
+// run executes since v0.0.36.
+func runInteractive(t *testing.T, root string, spec *Spec, opts RunOptions) error {
+	t.Helper()
+	opts.ProjectRoot = root
+	opts.ClaudeBin = claudeREPLShim(t)
+	opts.ApeVersion = "0.1.0-test"
+	opts.WaitStepDone = fastStepDone
+	stubSpecSkills(t, root, spec)
+	return Run(context.Background(), spec, opts)
+}
+
+// TestRun_CommitDefaultMessage — default-on commits land with the derived
+// `ape:<pipeline>/<stage>/<skill>` message and a recorded SHA.
 func TestRun_CommitDefaultMessage(t *testing.T) {
 	root := t.TempDir()
 	writePipelineSpec(t, root, "smoke",
 		"      - skill: apex-write\n        commit: true\n")
 	initGitRepo(t, root)
-
-	shim := writeFileShim(t, t.TempDir(),
-		"echo 'hello' > '"+root+"/note.md'\n")
+	seedFile(t, root, "note.md")
 
 	spec, err := LoadSpec("smoke", root)
 	if err != nil {
 		t.Fatalf("LoadSpec: %v", err)
 	}
-	stubSpecSkills(t, root, spec)
-	err = Run(context.Background(), spec, RunOptions{
-		ProjectRoot: root,
-		ClaudeBin:   shim,
-		ApeVersion:  "0.1.0-test",
-	})
-	if err != nil {
+	if err := runInteractive(t, root, spec, RunOptions{AllowDirty: true}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -158,23 +191,17 @@ func TestRun_CommitDefaultMessage(t *testing.T) {
 	}
 }
 
-// TestRun_CommitExplicitMessage — pipeline YAML `commit: "msg"`
-// overrides the default derivation.
+// TestRun_CommitExplicitMessage — pipeline YAML `commit: "msg"` overrides
+// the default derivation.
 func TestRun_CommitExplicitMessage(t *testing.T) {
 	root := t.TempDir()
 	writePipelineSpec(t, root, "explicit",
 		"      - skill: apex-write\n        commit: \"docs: add note\"\n")
 	initGitRepo(t, root)
-	shim := writeFileShim(t, t.TempDir(),
-		"echo 'hello' > '"+root+"/note.md'\n")
+	seedFile(t, root, "note.md")
 
 	spec, _ := LoadSpec("explicit", root)
-	stubSpecSkills(t, root, spec)
-	if err := Run(context.Background(), spec, RunOptions{
-		ProjectRoot: root,
-		ClaudeBin:   shim,
-		ApeVersion:  "0.1.0-test",
-	}); err != nil {
+	if err := runInteractive(t, root, spec, RunOptions{AllowDirty: true}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	m := loadLatestManifest(t, root, "explicit")
@@ -187,22 +214,19 @@ func TestRun_CommitExplicitMessage(t *testing.T) {
 	}
 }
 
-// TestRun_CommitSkippedBySpec — `commit: false` produces no commit.
+// TestRun_CommitSkippedBySpec — `commit: false` produces no commit even
+// with a dirty tree.
 func TestRun_CommitSkippedBySpec(t *testing.T) {
 	root := t.TempDir()
 	writePipelineSpec(t, root, "skipspec",
 		"      - skill: apex-write\n        commit: false\n")
 	initGitRepo(t, root)
-	shim := writeFileShim(t, t.TempDir(),
-		"echo 'hello' > '"+root+"/note.md'\n")
+	seedFile(t, root, "note.md")
 
 	spec, _ := LoadSpec("skipspec", root)
-	stubSpecSkills(t, root, spec)
-	if err := Run(context.Background(), spec, RunOptions{
-		ProjectRoot: root,
-		ClaudeBin:   shim,
-		ApeVersion:  "0.1.0-test",
-	}); err != nil {
+	// commit:false ⇒ pipelineWantsCommits is false ⇒ the dirty-tree gate
+	// is skipped, so no AllowDirty needed.
+	if err := runInteractive(t, root, spec, RunOptions{}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	m := loadLatestManifest(t, root, "skipspec")
@@ -225,17 +249,10 @@ func TestRun_NoCommitFlagSkipsAll(t *testing.T) {
 	writePipelineSpec(t, root, "nocommit",
 		"      - skill: apex-write\n        commit: \"docs: would-commit-but\"\n")
 	initGitRepo(t, root)
-	shim := writeFileShim(t, t.TempDir(),
-		"echo 'hello' > '"+root+"/note.md'\n")
+	seedFile(t, root, "note.md")
 
 	spec, _ := LoadSpec("nocommit", root)
-	stubSpecSkills(t, root, spec)
-	if err := Run(context.Background(), spec, RunOptions{
-		ProjectRoot: root,
-		ClaudeBin:   shim,
-		NoCommit:    true,
-		ApeVersion:  "0.1.0-test",
-	}); err != nil {
+	if err := runInteractive(t, root, spec, RunOptions{NoCommit: true}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	m := loadLatestManifest(t, root, "nocommit")
@@ -248,22 +265,16 @@ func TestRun_NoCommitFlagSkipsAll(t *testing.T) {
 	}
 }
 
-// TestRun_CommitNoOpOnEmptyDiff — step succeeds but produces no
-// changes; recorded as no-op.
+// TestRun_CommitNoOpOnEmptyDiff — step succeeds but produces no changes;
+// recorded as no-op. No file is seeded, so the tree stays clean.
 func TestRun_CommitNoOpOnEmptyDiff(t *testing.T) {
 	root := t.TempDir()
 	writePipelineSpec(t, root, "noop",
 		"      - skill: apex-write\n        commit: true\n")
 	initGitRepo(t, root)
-	shim := writeFileShim(t, t.TempDir(), "") // body does nothing
 
 	spec, _ := LoadSpec("noop", root)
-	stubSpecSkills(t, root, spec)
-	if err := Run(context.Background(), spec, RunOptions{
-		ProjectRoot: root,
-		ClaudeBin:   shim,
-		ApeVersion:  "0.1.0-test",
-	}); err != nil {
+	if err := runInteractive(t, root, spec, RunOptions{}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	m := loadLatestManifest(t, root, "noop")
@@ -276,26 +287,17 @@ func TestRun_CommitNoOpOnEmptyDiff(t *testing.T) {
 	}
 }
 
-// TestRun_DirtyTreeGateRefuses — pre-existing uncommitted changes in
-// the project root abort the pipeline before any step runs.
+// TestRun_DirtyTreeGateRefuses — pre-existing uncommitted changes abort
+// the pipeline before any step runs (and before any REPL spawn).
 func TestRun_DirtyTreeGateRefuses(t *testing.T) {
 	root := t.TempDir()
-	initGitRepo(t, root)
-	if err := os.WriteFile(filepath.Join(root, "WIP.md"), []byte("dirty"), 0o644); err != nil {
-		t.Fatalf("write WIP: %v", err)
-	}
 	writePipelineSpec(t, root, "dirty",
 		"      - skill: apex-write\n        commit: true\n")
-	shim := writeFileShim(t, t.TempDir(),
-		"echo 'hello' > '"+root+"/note.md'\n")
+	initGitRepo(t, root)
+	seedFile(t, root, "WIP.md") // dirty, and no AllowDirty below
 
 	spec, _ := LoadSpec("dirty", root)
-	stubSpecSkills(t, root, spec)
-	err := Run(context.Background(), spec, RunOptions{
-		ProjectRoot: root,
-		ClaudeBin:   shim,
-		ApeVersion:  "0.1.0-test",
-	})
+	err := runInteractive(t, root, spec, RunOptions{})
 	if err == nil {
 		t.Fatalf("expected dirty-tree refusal")
 	}
@@ -304,27 +306,17 @@ func TestRun_DirtyTreeGateRefuses(t *testing.T) {
 	}
 }
 
-// TestRun_AllowDirtyBypassesGate — `--commit-allow-dirty` opts past
-// the gate; the first commit absorbs the WIP.
+// TestRun_AllowDirtyBypassesGate — `--commit-allow-dirty` opts past the
+// gate; the commit absorbs the pre-existing WIP.
 func TestRun_AllowDirtyBypassesGate(t *testing.T) {
 	root := t.TempDir()
-	initGitRepo(t, root)
-	if err := os.WriteFile(filepath.Join(root, "WIP.md"), []byte("dirty"), 0o644); err != nil {
-		t.Fatalf("write WIP: %v", err)
-	}
 	writePipelineSpec(t, root, "allowdirty",
 		"      - skill: apex-write\n        commit: true\n")
-	shim := writeFileShim(t, t.TempDir(),
-		"echo 'hello' > '"+root+"/note.md'\n")
+	initGitRepo(t, root)
+	seedFile(t, root, "WIP.md")
 
 	spec, _ := LoadSpec("allowdirty", root)
-	stubSpecSkills(t, root, spec)
-	if err := Run(context.Background(), spec, RunOptions{
-		ProjectRoot: root,
-		ClaudeBin:   shim,
-		AllowDirty:  true,
-		ApeVersion:  "0.1.0-test",
-	}); err != nil {
+	if err := runInteractive(t, root, spec, RunOptions{AllowDirty: true}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	m := loadLatestManifest(t, root, "allowdirty")
@@ -337,64 +329,21 @@ func TestRun_AllowDirtyBypassesGate(t *testing.T) {
 // dirty-tree gate moot (the run is commit-free anyway).
 func TestRun_DirtyTreeIgnoredWhenNoCommit(t *testing.T) {
 	root := t.TempDir()
-	initGitRepo(t, root)
-	if err := os.WriteFile(filepath.Join(root, "WIP.md"), []byte("dirty"), 0o644); err != nil {
-		t.Fatalf("write WIP: %v", err)
-	}
 	writePipelineSpec(t, root, "dirtync",
 		"      - skill: apex-write\n")
-	shim := writeFileShim(t, t.TempDir(), "")
+	initGitRepo(t, root)
+	seedFile(t, root, "WIP.md")
 
 	spec, _ := LoadSpec("dirtync", root)
-	stubSpecSkills(t, root, spec)
-	if err := Run(context.Background(), spec, RunOptions{
-		ProjectRoot: root,
-		ClaudeBin:   shim,
-		NoCommit:    true,
-		ApeVersion:  "0.1.0-test",
-	}); err != nil {
+	if err := runInteractive(t, root, spec, RunOptions{NoCommit: true}); err != nil {
 		t.Fatalf("Run: %v", err)
-	}
-}
-
-// TestRun_CommitOnFailedStep — step exits non-zero; no commit
-// attempted; status is skipped-step-failed.
-func TestRun_CommitOnFailedStep(t *testing.T) {
-	root := t.TempDir()
-	writePipelineSpec(t, root, "fail",
-		"      - skill: apex-write\n")
-	initGitRepo(t, root)
-	// Shim writes a file then exits non-zero.
-	shim := filepath.Join(t.TempDir(), "fail.sh")
-	if err := os.WriteFile(shim,
-		[]byte("#!/bin/sh\necho 'data' > '"+root+"/note.md'\necho '{\"type\":\"error\"}'\nexit 2\n"),
-		0o755); err != nil {
-		t.Fatalf("write shim: %v", err)
-	}
-
-	spec, _ := LoadSpec("fail", root)
-	stubSpecSkills(t, root, spec)
-	err := Run(context.Background(), spec, RunOptions{
-		ProjectRoot: root,
-		ClaudeBin:   shim,
-		ApeVersion:  "0.1.0-test",
-	})
-	if err == nil {
-		t.Fatalf("expected step failure to propagate")
-	}
-	m := loadLatestManifest(t, root, "fail")
-	step := m.Stages[0].Steps[0]
-	if step.CommitStatus != CommitStatusSkippedStepFailed {
-		t.Errorf("commit_status = %q, want skipped-step-failed", step.CommitStatus)
 	}
 }
 
 // TestRun_StageBoundaryCommit — PLAN-6 / C2 Phase D: a stage-level
 // `commit: "msg"` directive produces exactly one commit per stage
-// (folding the chain's accumulated diff), attributed to the last
-// step in the chain. Earlier steps are recorded as
-// `deferred-to-stage`. The explicit message wins over any per-step
-// derivation.
+// (folding the chain's accumulated diff), attributed to the last step in
+// the chain. Earlier steps are recorded as `deferred-to-stage`.
 func TestRun_StageBoundaryCommit(t *testing.T) {
 	root := t.TempDir()
 	pipelinesDir := filepath.Join(root, "_apex", "pipelines")
@@ -414,26 +363,17 @@ stages:
 		t.Fatalf("write spec: %v", err)
 	}
 	initGitRepo(t, root)
-	// Each step writes a unique file so the working tree is dirty
-	// across the chain. Only one commit should land at stage end.
-	shim := filepath.Join(t.TempDir(), "shim.sh")
-	content := "#!/bin/sh\nset -e\n" +
-		"f=$(mktemp '" + root + "/note-XXXXXX.md')\necho 'change' > \"$f\"\n" +
-		"echo '{\"type\":\"result\",\"subtype\":\"success\",\"duration_ms\":1,\"num_turns\":1,\"total_cost_usd\":0.01,\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}'\n"
-	if err := os.WriteFile(shim, []byte(content), 0o755); err != nil {
-		t.Fatalf("write shim: %v", err)
-	}
+	// Seed one file per step so the working tree is dirty across the
+	// chain. Only one commit should land at stage end.
+	seedFile(t, root, "note-1.md")
+	seedFile(t, root, "note-2.md")
+	seedFile(t, root, "note-3.md")
 
 	spec, err := LoadSpec("stagecommit", root)
 	if err != nil {
 		t.Fatalf("LoadSpec: %v", err)
 	}
-	stubSpecSkills(t, root, spec)
-	if err := Run(context.Background(), spec, RunOptions{
-		ProjectRoot: root,
-		ClaudeBin:   shim,
-		ApeVersion:  "0.1.0-test",
-	}); err != nil {
+	if err := runInteractive(t, root, spec, RunOptions{AllowDirty: true}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -464,8 +404,8 @@ stages:
 }
 
 // TestRun_StageBoundaryCommit_Suppressed — PLAN-6 / C2: an explicit
-// step-level `commit: false` suppresses the stage-end commit even
-// when the stage declares one. All steps record skipped-by-spec.
+// step-level `commit: false` suppresses the stage-end commit even when
+// the stage declares one. All steps record skipped-by-spec.
 func TestRun_StageBoundaryCommit_Suppressed(t *testing.T) {
 	root := t.TempDir()
 	pipelinesDir := filepath.Join(root, "_apex", "pipelines")
@@ -486,23 +426,12 @@ stages:
 		t.Fatalf("write spec: %v", err)
 	}
 	initGitRepo(t, root)
-	shim := filepath.Join(t.TempDir(), "shim.sh")
-	content := "#!/bin/sh\nset -e\n" +
-		"f=$(mktemp '" + root + "/note-XXXXXX.md')\necho 'change' > \"$f\"\n" +
-		"echo '{\"type\":\"result\",\"subtype\":\"success\",\"duration_ms\":1,\"num_turns\":1,\"total_cost_usd\":0,\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}'\n"
-	if err := os.WriteFile(shim, []byte(content), 0o755); err != nil {
-		t.Fatalf("write shim: %v", err)
-	}
+	seedFile(t, root, "note-1.md")
 
 	spec, _ := LoadSpec("stagesuppress", root)
-	// dirty-tree gate would refuse a suppressed-but-stage-declared
-	// pipeline because pipelineWantsCommits is false; safe to run.
-	stubSpecSkills(t, root, spec)
-	if err := Run(context.Background(), spec, RunOptions{
-		ProjectRoot: root,
-		ClaudeBin:   shim,
-		ApeVersion:  "0.1.0-test",
-	}); err != nil {
+	// commit:false somewhere in the chain ⇒ pipelineWantsCommits false ⇒
+	// dirty-tree gate skipped, so no AllowDirty needed.
+	if err := runInteractive(t, root, spec, RunOptions{}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	m := loadLatestManifest(t, root, "stagesuppress")
@@ -515,3 +444,11 @@ stages:
 		}
 	}
 }
+
+// NOTE: the former TestRun_CommitOnFailedStep (skipped-step-failed) was
+// dropped in v0.0.36. In PTY-only interactive mode a step never reaches
+// performStepCommit with a non-nil run error — a failed step surfaces as
+// a waitStepDone error that breaks the stage loop before the commit
+// boundary — so CommitStatusSkippedStepFailed is unreachable from an
+// integration run. The resolveCommitOutcome mapping for that input is
+// covered by the unit tests in commit_test.go.

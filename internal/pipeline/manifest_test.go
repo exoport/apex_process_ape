@@ -10,59 +10,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestParseResultEvent_HappyPath(t *testing.T) {
-	output := strings.Join([]string{
-		`{"type":"system","subtype":"init"}`,
-		`{"type":"assistant","message":"hello"}`,
-		`{"type":"result","subtype":"success","duration_ms":760498,"num_turns":47,"total_cost_usd":1.42,"usage":{"input_tokens":84012,"output_tokens":8910,"cache_read_input_tokens":41208,"cache_creation_input_tokens":2811}}`,
-		``,
-	}, "\n")
-	ev := parseResultEvent(output)
-	if ev == nil {
-		t.Fatalf("expected event, got nil")
-	}
-	if ev.Type != "result" || ev.Subtype != "success" {
-		t.Errorf("type/subtype mismatch: %+v", ev)
-	}
-	if ev.TotalCostUSD != 1.42 || ev.NumTurns != 47 {
-		t.Errorf("cost/turns mismatch: %+v", ev)
-	}
-	if ev.Usage.InputTokens != 84012 || ev.Usage.OutputTokens != 8910 {
-		t.Errorf("usage mismatch: %+v", ev.Usage)
-	}
-	if ev.Usage.CacheReadInputTokens != 41208 || ev.Usage.CacheCreationInputTokens != 2811 {
-		t.Errorf("cache mismatch: %+v", ev.Usage)
-	}
-}
-
-func TestParseResultEvent_AbsentReturnsNil(t *testing.T) {
-	output := `{"type":"system"}` + "\n" + `{"type":"assistant"}` + "\n"
-	if ev := parseResultEvent(output); ev != nil {
-		t.Errorf("expected nil, got %+v", ev)
-	}
-}
-
-func TestParseResultEvent_Empty(t *testing.T) {
-	if ev := parseResultEvent(""); ev != nil {
-		t.Errorf("expected nil for empty input")
-	}
-}
-
-func TestParseResultEvent_MalformedLineSkipped(t *testing.T) {
-	// First line claims type:result but is malformed JSON; the second
-	// line (the real result) wins because we scan back-to-front and
-	// continue past JSON failures.
-	output := strings.Join([]string{
-		`{not json but mentions "result"}`,
-		`{"type":"result","subtype":"success","total_cost_usd":0.5}`,
-		``,
-	}, "\n")
-	ev := parseResultEvent(output)
-	if ev == nil || ev.TotalCostUSD != 0.5 {
-		t.Fatalf("expected real result, got %+v", ev)
-	}
-}
-
 func TestManifestWriter_FullLifecycle(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "_apex", "pipelines", "design.yaml")

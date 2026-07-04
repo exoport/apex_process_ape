@@ -5,10 +5,9 @@ import (
 	"testing"
 )
 
-// TestResolvePipelineMode_DefaultsToTUIInteractive covers the PLAN-6
-// invocation-matrix default: no flags → tui + interactive. This
-// supersedes PLAN-5's web-by-default era.
-func TestResolvePipelineMode_DefaultsToTUIInteractive(t *testing.T) {
+// TestResolvePipelineMode_DefaultsToTUI covers the default: no UI flag →
+// tui. ape is PTY-only since v0.0.36, so exec is always interactive.
+func TestResolvePipelineMode_DefaultsToTUI(t *testing.T) {
 	var buf bytes.Buffer
 	mode, opt, err := resolvePipelineMode(PipelineFlags{}, &buf)
 	if err != nil {
@@ -18,17 +17,16 @@ func TestResolvePipelineMode_DefaultsToTUIInteractive(t *testing.T) {
 		t.Errorf("default mode = %s, want PipelineModeTUIInteractive", describeMode(mode))
 	}
 	if opt {
-		t.Error("tui+interactive default should report optOutTUI=false")
+		t.Error("tui default should report optOutTUI=false")
 	}
 	if buf.Len() != 0 {
 		t.Errorf("default should not warn; stderr=%q", buf.String())
 	}
 }
 
-// TestResolvePipelineMode_PerInvocationMatrix locks the full PLAN-6
-// invocation matrix as a table-driven test. Every row corresponds to a
-// row in development/planning/plan-6_*.md's invocation table.
-func TestResolvePipelineMode_PerInvocationMatrix(t *testing.T) {
+// TestResolvePipelineMode_Matrix locks the (now UI-only) invocation
+// matrix: one selector at a time, mutual exclusion otherwise.
+func TestResolvePipelineMode_Matrix(t *testing.T) {
 	cases := []struct {
 		name     string
 		flags    PipelineFlags
@@ -36,29 +34,14 @@ func TestResolvePipelineMode_PerInvocationMatrix(t *testing.T) {
 		wantOpt  bool
 		wantErr  bool
 	}{
-		// Default + explicit equivalents.
 		{"default", PipelineFlags{}, PipelineModeTUIInteractive, false, false},
 		{"--tui", PipelineFlags{TUI: true}, PipelineModeTUIInteractive, false, false},
-		{"--interactive", PipelineFlags{Interactive: true}, PipelineModeTUIInteractive, false, false},
-		{"--tui --interactive", PipelineFlags{TUI: true, Interactive: true}, PipelineModeTUIInteractive, false, false},
-		// Web variants.
 		{"--web", PipelineFlags{Web: true}, PipelineModeWebInteractive, true, false},
-		{"--web -P", PipelineFlags{Web: true, Programmatic: true}, PipelineModeWebProgrammatic, true, false},
-		// No-UI variants. --no-tui no longer aliases --eval.
 		{"--no-tui", PipelineFlags{NoTUI: true}, PipelineModeNoneInteractive, true, false},
-		{"--no-tui -P", PipelineFlags{NoTUI: true, Programmatic: true}, PipelineModeNoneProgrammatic, true, false},
-		// TUI programmatic.
-		{"--tui -P", PipelineFlags{TUI: true, Programmatic: true}, PipelineModeTUIProgrammatic, false, false},
-		// Eval is LOCKED — no exec modifiers permitted. Renamed from --print on 2026-05-20.
-		{"--eval", PipelineFlags{Eval: true}, PipelineModeEval, true, false},
-		// Mutex errors.
 		{"--tui --web", PipelineFlags{TUI: true, Web: true}, 0, false, true},
-		{"--tui --eval", PipelineFlags{TUI: true, Eval: true}, 0, false, true},
-		{"--eval --no-tui", PipelineFlags{Eval: true, NoTUI: true}, 0, false, true},
-		{"--eval --interactive", PipelineFlags{Eval: true, Interactive: true}, 0, false, true},
-		{"--eval --programmatic", PipelineFlags{Eval: true, Programmatic: true}, 0, false, true},
-		{"--interactive --programmatic", PipelineFlags{Interactive: true, Programmatic: true}, 0, false, true},
-		{"all-four-ui-flags", PipelineFlags{TUI: true, Web: true, NoTUI: true, Eval: true}, 0, false, true},
+		{"--tui --no-tui", PipelineFlags{TUI: true, NoTUI: true}, 0, false, true},
+		{"--web --no-tui", PipelineFlags{Web: true, NoTUI: true}, 0, false, true},
+		{"all-three", PipelineFlags{TUI: true, Web: true, NoTUI: true}, 0, false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -77,19 +60,5 @@ func TestResolvePipelineMode_PerInvocationMatrix(t *testing.T) {
 				t.Errorf("optOutTUI = %v, want %v", opt, tc.wantOpt)
 			}
 		})
-	}
-}
-
-// TestResolveModeFlags_LegacyShim verifies the back-compat resolver
-// still works for callers that don't yet pass the new exec axis.
-func TestResolveModeFlags_LegacyShim(t *testing.T) {
-	var buf bytes.Buffer
-	opt, err := resolveModeFlags(false, false, false, &buf)
-	if err != nil {
-		t.Fatalf("resolveModeFlags: %v", err)
-	}
-	// The new default is tui+interactive, which is NOT optOutTUI.
-	if opt {
-		t.Error("post-PLAN-6 default should report optOutTUI=false")
 	}
 }

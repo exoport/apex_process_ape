@@ -14,6 +14,16 @@ import (
 	"golang.org/x/mod/semver"
 )
 
+// updateResult is the structured outcome of `ape update`, shared by the
+// command and its renderer. Package-scoped so printUpdateResult can type-
+// switch on it (a function-local type never matched, breaking human output).
+type updateResult struct {
+	CurrentVersion string `json:"currentVersion" yaml:"currentVersion"`
+	LatestVersion  string `json:"latestVersion"  yaml:"latestVersion"`
+	Updated        bool   `json:"updated"        yaml:"updated"`
+	Message        string `json:"message"        yaml:"message"`
+}
+
 func newUpdateCmd() *cobra.Command {
 	var outputFormat string
 
@@ -51,13 +61,6 @@ func newUpdateCmd() *cobra.Command {
 
 			latestVersion := rel.Version()
 
-			type updateResult struct {
-				CurrentVersion string `json:"currentVersion"`
-				LatestVersion  string `json:"latestVersion"`
-				Updated        bool   `json:"updated"`
-				Message        string `json:"message"`
-			}
-
 			if !isNewerVersion(Version, latestVersion) {
 				updatecache.Save(latestVersion)
 				res := updateResult{
@@ -90,7 +93,7 @@ func newUpdateCmd() *cobra.Command {
 	return cmd
 }
 
-func printUpdateResult(res any, format output.Format) error {
+func printUpdateResult(res updateResult, format output.Format) error {
 	switch format {
 	case output.FormatJSON:
 		enc := json.NewEncoder(os.Stdout)
@@ -99,18 +102,9 @@ func printUpdateResult(res any, format output.Format) error {
 	case output.FormatYAML:
 		return output.Print(os.Stdout, output.FormatYAML, res)
 	default:
-		if r, ok := res.(struct {
-			CurrentVersion string `json:"currentVersion"`
-			LatestVersion  string `json:"latestVersion"`
-			Updated        bool   `json:"updated"`
-			Message        string `json:"message"`
-		}); ok {
-			fmt.Printf("current: %s\n", r.CurrentVersion)
-			fmt.Printf("latest:  %s\n", r.LatestVersion)
-			fmt.Printf("message: %s\n", r.Message)
-		} else {
-			fmt.Printf("%v\n", res)
-		}
+		fmt.Printf("current: %s\n", res.CurrentVersion)
+		fmt.Printf("latest:  %s\n", res.LatestVersion)
+		fmt.Printf("message: %s\n", res.Message)
 		return nil
 	}
 }

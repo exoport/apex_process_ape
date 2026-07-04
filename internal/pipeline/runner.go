@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -102,16 +100,6 @@ type RunOptions struct {
 	// does not match any stage in the spec, Run returns an error before
 	// any stage executes. CLI: --from <stage>.
 	FromStage string
-
-	// Interactive, when true, runs the pipeline under PLAN-6 exec
-	// mode: one `claude` process per stage running inside its own
-	// in-process PTY (PLAN-8: `internal/repl/`), with steps fed as
-	// real REPL keystrokes via PTY Write (instead of one `claude -p`
-	// per step). Steps share the session within a stage and are
-	// separated by a `/clear` slash command; stage boundaries are the
-	// process spawn. Default is false (today's per-step programmatic
-	// mode).
-	Interactive bool
 
 	// WaitStepDone is called between steps in interactive mode to
 	// block until the model has finished responding to the step's
@@ -277,12 +265,10 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 		}
 	}
 
-	var runErr error
-	if opts.Interactive {
-		runErr = runStagesInteractive(ctx, spec, opts, mw)
-	} else {
-		runErr = runStages(ctx, spec, opts, mw)
-	}
+	// ape is PTY-only since v0.0.36 (PLAN-9 F2): every run executes in
+	// the interactive per-stage claude REPL. The programmatic `claude -p`
+	// path (runStages / buildArgv / runClaude) was removed.
+	runErr := runStagesInteractive(ctx, spec, opts, mw)
 	finalizeManifest(mw, runErr, opts.Observer)
 	runLog(opts.RunLog, "pipeline-end", spec.Name, map[string]any{"error": errMessage(runErr)})
 	return runErr
@@ -347,123 +333,6 @@ func validateFromStage(spec *Spec, name string) error {
 		name, spec.Name, strings.Join(names, ", "))
 }
 
-// runStages drives the spec's stage/step chain. Separated from Run so
-// the manifest finalization path is a single return point.
-func runStages(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWriter) error {
-	skipping := opts.FromStage != ""
-	for _, stage := range spec.Stages() {
-		if skipping {
-			if stage.Name == opts.FromStage {
-				skipping = false
-			} else {
-				continue
-			}
-		}
-		stageStart := time.Now()
-		var stageIdx int
-		if mw != nil {
-			stageIdx = mw.BeginStage(stage.Name, stageStart)
-		}
-		notify(opts.Observer, func(o Observer) { o.OnStageStart(stage.Name) })
-		if opts.OnStageStart != nil {
-			opts.OnStageStart(stage.Name)
-		}
-		runLog(opts.RunLog, "stage-start", stage.Name, nil)
-		stageStatus := StatusCompleted
-
-		plan, planErr := spec.PlanStageCommits(stage.Name)
-		if planErr != nil {
-			runLog(opts.RunLog, "stage-end", stage.Name, map[string]any{"error": errMessage(planErr)})
-			return planErr
-		}
-
-		for i, step := range stage.Chain {
-			isLastStep := i == len(stage.Chain)-1
-			stepStart := time.Now()
-			notify(opts.Observer, func(o Observer) { o.OnStepStart(stage.Name, i, step) })
-
-			argv, argvErr := buildArgv(opts.ClaudeBin, step, opts.Prompt, opts.PrependFlags)
-			if argvErr != nil {
-				recordStep(mw, stageIdx, i+1, step, opts.Prompt, stepStart, time.Now(), StatusFailed, 1, "", nil)
-				notify(opts.Observer, func(o Observer) {
-					o.OnStepEnd(stage.Name, i, step, time.Since(stepStart), "", argvErr)
-				})
-				stageStatus = StatusFailed
-				if mw != nil {
-					_ = mw.EndStage(stageIdx, stageStatus, time.Now())
-				}
-				notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), argvErr) })
-				if opts.OnStageEnd != nil {
-					opts.OnStageEnd(stage.Name, time.Since(stageStart), argvErr)
-				}
-				runLog(opts.RunLog, "stage-end", stage.Name, map[string]any{"error": errMessage(argvErr)})
-				return argvErr
-			}
-
-			eventLog, eventsRel := openStepLog(mw, stageIdx, i+1, stage.Name, step.Skill)
-			out, runErr := runClaude(ctx, argv, opts.ProjectRoot, opts.Observer, stage.Name, i, eventLog)
-			closeStepLog(eventLog)
-
-			stepStatus := StatusCompleted
-			exitCode := 0
-			if runErr != nil {
-				stepStatus = StatusFailed
-				exitCode = exitCodeFromErr(runErr)
-			}
-			recordStep(mw, stageIdx, i+1, step, opts.Prompt, stepStart, time.Now(), stepStatus, exitCode, eventsRel, parseResultEvent(out))
-
-			// Commit boundary: PLAN-6 / C2. Runs only after the step's
-			// run-state is recorded so the manifest reflects both the
-			// run outcome and the commit outcome atomically. Failures
-			// here abort the pipeline — a dirty unexpected tree is
-			// worse to silently extend than to fail loudly.
-			commitErr := performStepCommit(ctx, opts, mw, plan, stageIdx, i+1, isLastStep, runErr)
-			if commitErr == nil && runErr == nil {
-				// Best-effort checkpoint — the manifest also
-				// records commit_sha, this is for the
-				// streaming SSE / runlog consumer.
-				runLog(opts.RunLog, "commit-made", StepLabel(stage.Name, i+1, step.Skill), nil)
-			}
-
-			notify(opts.Observer, func(o Observer) { o.OnStepEnd(stage.Name, i, step, time.Since(stepStart), out, runErr) })
-			if runErr != nil {
-				stageStatus = StatusFailed
-				if mw != nil {
-					_ = mw.EndStage(stageIdx, stageStatus, time.Now())
-				}
-				notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), runErr) })
-				if opts.OnStageEnd != nil {
-					opts.OnStageEnd(stage.Name, time.Since(stageStart), runErr)
-				}
-				runLog(opts.RunLog, "stage-end", stage.Name, map[string]any{"error": errMessage(runErr)})
-				return fmt.Errorf("stage %q step %d (%s): %w", stage.Name, i, step.Skill, runErr)
-			}
-			if commitErr != nil {
-				stageStatus = StatusFailed
-				if mw != nil {
-					_ = mw.EndStage(stageIdx, stageStatus, time.Now())
-				}
-				notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), commitErr) })
-				if opts.OnStageEnd != nil {
-					opts.OnStageEnd(stage.Name, time.Since(stageStart), commitErr)
-				}
-				runLog(opts.RunLog, "stage-end", stage.Name, map[string]any{"error": errMessage(commitErr)})
-				return fmt.Errorf("stage %q step %d (%s) commit: %w", stage.Name, i, step.Skill, commitErr)
-			}
-		}
-
-		if mw != nil {
-			_ = mw.EndStage(stageIdx, stageStatus, time.Now())
-		}
-		notify(opts.Observer, func(o Observer) { o.OnStageEnd(stage.Name, time.Since(stageStart), nil) })
-		if opts.OnStageEnd != nil {
-			opts.OnStageEnd(stage.Name, time.Since(stageStart), nil)
-		}
-		runLog(opts.RunLog, "stage-end", stage.Name, nil)
-	}
-	return nil
-}
-
 // errMessage returns err.Error() for non-nil err, empty string otherwise.
 // Used to fold an error into a runlog payload map without nil-deref.
 func errMessage(err error) string {
@@ -480,149 +349,6 @@ func runLog(rl RunLogger, kind, step string, payload any) {
 		return
 	}
 	rl.CheckpointKindStep(kind, step, payload, time.Now().UTC())
-}
-
-// buildArgv constructs the argv for a single step's claude invocation.
-//
-// The claude CLI takes the slash command + its arguments as a single
-// prompt string via the -p flag, not as discrete argv elements. We
-// build that prompt string per PAT-25 conventions, then assemble the
-// outer argv around it:
-//
-//	claude --dangerously-skip-permissions -p <prompt> \
-//	    --output-format stream-json --verbose [--model M]
-//
-// The prompt string itself follows two PAT-25 shapes:
-//
-//   - With agent:    /{agent} --autonomous -- {skill} --autonomous {step.Args} {step.PromptFlag prompt}
-//   - Without agent: /{skill} --autonomous --no-commit {step.Args} {step.PromptFlag prompt}
-//
-// step.PromptFlag, when set with a non-empty runtime prompt, contributes
-// "--prompt <value>" inside the prompt string. The value is appended
-// verbatim — argv is never serialized through a shell, so embedded
-// quotes/specials in the user's prompt survive intact.
-func buildArgv(claudeBin string, step Step, prompt string, prependFlags []string) ([]string, error) {
-	if claudeBin == "" {
-		return nil, errors.New("empty claude bin")
-	}
-	if step.Skill == "" {
-		return nil, errors.New("step missing skill")
-	}
-	var promptParts []string
-	if step.Agent != "" {
-		promptParts = []string{"/" + step.Agent, flagAutonomous, "--", step.Skill, flagAutonomous}
-	} else {
-		promptParts = []string{"/" + step.Skill, flagAutonomous, "--no-commit"}
-	}
-	if step.Args != "" {
-		promptParts = append(promptParts, strings.Fields(step.Args)...)
-	}
-	if step.PromptFlag != "" && prompt != "" {
-		promptParts = append(promptParts, step.PromptFlag, prompt)
-	}
-	promptStr := strings.Join(promptParts, " ")
-	argv := []string{claudeBin}
-	// PLAN-5 / C1 + C3 — web mode prepends --strict-mcp-config,
-	// --mcp-config <inline>, --settings <inline> here. The flags
-	// must land before --dangerously-skip-permissions for claude's
-	// argv parser to attach them to the right options table.
-	argv = append(argv, prependFlags...)
-	argv = append(
-		argv,
-		"--dangerously-skip-permissions",
-		"-p", promptStr,
-		flagOutputFormat, flagOutputStreamJSON,
-		flagVerbose,
-	)
-	if step.Model != "" {
-		argv = append(argv, "--model", step.Model)
-	}
-	return argv, nil
-}
-
-// runClaude executes argv with cwd = projectRoot, streams the
-// subprocess's stdout + stderr line-by-line to the Observer via
-// OnStepLine, accumulates the full output into a buffer, and returns
-// it once the process exits.
-//
-// Per PLAN-1 / I4b, claude --output-format stream-json produces NDJSON
-// events on stdout as the model executes; surfacing those as they
-// arrive is what makes the TUI feel live. Stderr is interleaved into
-// the same line stream (with a sentinel prefix not yet used) so
-// failures still surface in the captured output.
-func runClaude(ctx context.Context, argv []string, projectRoot string, observer Observer, stage string, idx int, eventLog io.Writer) (string, error) {
-	if len(argv) == 0 {
-		return "", errors.New("empty argv")
-	}
-	if os.Getenv("APE_DEBUG_ARGV") != "" {
-		// Surface the full argv on stderr for crash diagnosis. The
-		// inline --mcp-config / --settings JSON blobs make this verbose
-		// but they're <1 KB each so it stays readable.
-		fmt.Fprintf(os.Stderr, "[ape-debug] argv:\n")
-		for i, a := range argv {
-			fmt.Fprintf(os.Stderr, "  [%d] %s\n", i, a)
-		}
-	}
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // argv is constructed from embedded pipeline specs and validated step data; intentional subprocess dispatch
-	cmd.Dir = projectRoot
-	// PLAN-2 / F1: rewire context-cancel to SIGTERM the whole process
-	// group (not just the direct child) so claude-spawned Task-tool
-	// grandchildren can't outlive a confirmed quit. No-op on Windows.
-	configureProcessGroup(cmd)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", fmt.Errorf("stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return "", fmt.Errorf("stderr pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("start claude: %w", err)
-	}
-
-	var (
-		buf strings.Builder
-		mu  sync.Mutex // guards buf — both reader goroutines append concurrently
-		wg  sync.WaitGroup
-	)
-	scan := func(r io.Reader) {
-		defer wg.Done()
-		// Default Scanner buffer is 64KiB; stream-json events from
-		// claude can include long tool_result bodies, so allocate a
-		// larger ceiling (1MiB) to keep Scan() from erroring out.
-		s := bufio.NewScanner(r)
-		s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for s.Scan() {
-			line := s.Text()
-			mu.Lock()
-			buf.WriteString(line)
-			buf.WriteByte('\n')
-			if eventLog != nil {
-				_, _ = eventLog.Write([]byte(line))
-				_, _ = eventLog.Write([]byte{'\n'})
-			}
-			mu.Unlock()
-			notify(observer, func(o Observer) { o.OnStepLine(stage, idx, line) })
-		}
-		// Scanner errors here (token too long, etc.) are absorbed
-		// into the accumulated output via cmd.Wait()'s exit code.
-	}
-	wg.Add(2)
-	go scan(stdout)
-	go scan(stderr)
-	// Per the os/exec docs, all reads from StdoutPipe / StderrPipe
-	// must complete before Wait. The order here is load-bearing: a
-	// SIGTERM-trapping grandchild (PLAN-2 / F1 scenario) keeps the
-	// pipe write-end open after the immediate child dies; the
-	// SIGKILL-after-grace escalator inside configureProcessGroup's
-	// Cancel hook is what eventually closes that pipe and unblocks
-	// the scanners, letting wg.Wait return.
-	wg.Wait()
-	waitErr := cmd.Wait()
-	return buf.String(), waitErr
 }
 
 // notify safely invokes a callback against an optional Observer.

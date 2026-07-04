@@ -166,7 +166,6 @@ func TestSingleStepInteractiveEndToEnd(t *testing.T) {
 		ClaudeBin:            shim,
 		ManifestDir:          manifestBase,
 		ApeVersion:           "test",
-		Interactive:          true,
 		InteractiveStepGrace: 1200 * time.Millisecond,
 		AllowDirty:           true, // artifact.md is intentionally pre-dirty
 	})

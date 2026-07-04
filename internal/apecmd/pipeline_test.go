@@ -172,33 +172,3 @@ func TestInteractiveCore_StepTelemetry_ResetsBaselineOnPathChange(t *testing.T) 
 	require.GreaterOrEqual(t, t2.CostUSD, 0.0, "no negative costs from path-change reset")
 }
 
-// TestStepTaggingObserver_TracksCurrentStep verifies the
-// programmatic-web step tagger: tracker starts empty, OnStepStart
-// records `<stage>/<idx>-<skill>`, OnStepEnd clears it. The child
-// observer must still see every lifecycle call.
-func TestStepTaggingObserver_TracksCurrentStep(t *testing.T) {
-	tracker := &webHookStepTracker{}
-	var buf bytes.Buffer
-	child := newPlainObserver(&buf, "", true)
-	obs := &stepTaggingObserver{child: child, tracker: tracker}
-
-	require.Empty(t, tracker.get(), "tracker starts empty")
-
-	obs.OnStageStart("alpha")
-	obs.OnStepStart("alpha", 0, pipeline.Step{Skill: "apex-create-prd"})
-	require.Equal(t, "alpha/1-apex-create-prd", tracker.get(), "OnStepStart sets the label (1-based idx)")
-
-	obs.OnStepEnd("alpha", 0, pipeline.Step{Skill: "apex-create-prd"}, time.Second, "", nil)
-	require.Empty(t, tracker.get(), "OnStepEnd clears the label")
-
-	obs.OnStepStart("alpha", 1, pipeline.Step{Skill: "apex-shard-doc"})
-	require.Equal(t, "alpha/2-apex-shard-doc", tracker.get(), "OnStepStart on next step relabels (1-based idx)")
-
-	obs.OnStepEnd("alpha", 1, pipeline.Step{Skill: "apex-shard-doc"}, time.Second, "", nil)
-	obs.OnStageEnd("alpha", time.Second, nil)
-	require.Empty(t, tracker.get(), "tracker remains cleared after stage end")
-
-	out := buf.String()
-	require.Contains(t, out, "stage start: alpha")
-	require.Contains(t, out, "stage done: alpha")
-}

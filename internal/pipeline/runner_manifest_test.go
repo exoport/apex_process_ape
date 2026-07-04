@@ -4,6 +4,7 @@ package pipeline //nolint:testpackage // white-box reads internal manifestWriter
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,14 +13,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Whole file is //go:build !windows because every TestRun_* here
-// drives a bash shim script (.sh) as the synthetic claude binary.
-// See runner_commit_test.go header for the rationale.
+// Whole file is //go:build !windows: every TestRun_* drives the passive
+// bash REPL shim (see runner_commit_test.go header). PTY-only since
+// v0.0.36 — telemetry comes from StepTelemetryFn (transcript scan), not
+// a stream-json result event, so these tests inject canned telemetry.
 
-// TestRun_EmitsManifest exercises the full Run -> manifestWriter -> Finalize
-// path against a claude shim that prints a canned terminal `result`
-// event. Asserts manifest.yaml + the per-step NDJSON file exist with
-// the expected metrics.
+// TestRun_EmitsManifest exercises the full Run -> manifestWriter ->
+// Finalize path in interactive mode. Telemetry is injected via
+// StepTelemetryFn (the apecmd layer's transcript-scan hook); asserts
+// manifest.yaml + the per-step NDJSON event log exist with the expected
+// metrics.
 func TestRun_EmitsManifest(t *testing.T) {
 	root := t.TempDir()
 	pipelinesDir := filepath.Join(root, "_apex", "pipelines")
@@ -31,32 +34,32 @@ func TestRun_EmitsManifest(t *testing.T) {
 		t.Fatalf("write spec: %v", err)
 	}
 
-	shim := filepath.Join(t.TempDir(), "claude-shim.sh")
-	shimBody := "#!/bin/sh\n" +
-		"echo '{\"type\":\"system\",\"subtype\":\"init\"}'\n" +
-		"echo '{\"type\":\"result\",\"subtype\":\"success\",\"duration_ms\":1500,\"num_turns\":3,\"total_cost_usd\":0.05,\"usage\":{\"input_tokens\":100,\"output_tokens\":50,\"cache_read_input_tokens\":25,\"cache_creation_input_tokens\":10}}'\n" +
-		"exit 0\n"
-	if err := os.WriteFile(shim, []byte(shimBody), 0o755); err != nil {
-		t.Fatalf("write shim: %v", err)
-	}
-
 	spec, err := LoadSpec("smoke", root)
 	if err != nil {
 		t.Fatalf("LoadSpec: %v", err)
 	}
-
 	stubSpecSkills(t, root, spec)
+
+	tele := &StepTelemetry{
+		CostUSD:             0.05,
+		TokensInput:         100,
+		TokensOutput:        50,
+		TokensCacheRead:     25,
+		TokensCacheCreation: 10,
+		NumTurns:            3,
+	}
 	err = Run(context.Background(), spec, RunOptions{
-		ProjectRoot: root,
-		ClaudeBin:   shim,
-		ApeVersion:  "0.0.9-test",
-		NoCommit:    true, // PLAN-3 contract: manifest only, no git
+		ProjectRoot:     root,
+		ClaudeBin:       claudeREPLShim(t),
+		ApeVersion:      "0.0.9-test",
+		NoCommit:        true, // PLAN-3 contract: manifest only, no git
+		WaitStepDone:    fastStepDone,
+		StepTelemetryFn: func(_ string, _ int) *StepTelemetry { return tele },
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Manifest tree exists.
 	pipelineDir := filepath.Join(root, "_output", "pipelines", "smoke")
 	entries, err := os.ReadDir(pipelineDir)
 	if err != nil {
@@ -108,12 +111,14 @@ func TestRun_EmitsManifest(t *testing.T) {
 		t.Errorf("step events_path is empty")
 	}
 
+	// Interactive mode writes step-start / step-end lifecycle events to
+	// the per-step NDJSON (not a stream-json result event).
 	ndjson, err := os.ReadFile(filepath.Join(pipelineDir, runID, step.EventsPath))
 	if err != nil {
 		t.Fatalf("read ndjson: %v", err)
 	}
-	if !strings.Contains(string(ndjson), `"type":"result"`) {
-		t.Errorf("ndjson missing result event: %q", string(ndjson))
+	if !strings.Contains(string(ndjson), "step-start") {
+		t.Errorf("ndjson missing step-start event: %q", string(ndjson))
 	}
 
 	reportPath := filepath.Join(pipelineDir, runID, "pipeline-report.md")
@@ -125,7 +130,6 @@ func TestRun_EmitsManifest(t *testing.T) {
 		t.Errorf("report missing skill name: %q", string(report))
 	}
 
-	// latest symlink resolves to runID.
 	link := filepath.Join(pipelineDir, "latest")
 	target, err := os.Readlink(link)
 	if err != nil {
@@ -134,15 +138,17 @@ func TestRun_EmitsManifest(t *testing.T) {
 	if target != runID {
 		t.Errorf("latest -> %q, want %q", target, runID)
 	}
-
-	// ReportPathFor returns the same report file.
 	if got := ReportPathFor(root, "smoke", ""); got != reportPath {
 		t.Errorf("ReportPathFor mismatch:\n  got:  %s\n  want: %s", got, reportPath)
 	}
 }
 
 // TestRun_FailedStepCaptured asserts the manifest still finalizes (with
-// status: failed) when the underlying step exits non-zero.
+// status: failed) when a step fails. In interactive mode a step fails
+// when WaitStepDone returns an error; the stage loop breaks before the
+// step record is written, so the failure surfaces as a failed STAGE and
+// a failed overall run (StepsFailed stays 0 — no per-step record for the
+// aborted step, unlike the removed programmatic path).
 func TestRun_FailedStepCaptured(t *testing.T) {
 	root := t.TempDir()
 	pipelinesDir := filepath.Join(root, "_apex", "pipelines")
@@ -152,22 +158,21 @@ func TestRun_FailedStepCaptured(t *testing.T) {
 	specBody := []byte("name: bad\nstages:\n  only:\n    chain:\n      - skill: apex-fake\n")
 	_ = os.WriteFile(filepath.Join(pipelinesDir, "bad.yaml"), specBody, 0o644)
 
-	shim := filepath.Join(t.TempDir(), "claude-shim.sh")
-	_ = os.WriteFile(shim, []byte("#!/bin/sh\necho '{\"type\":\"error\"}'\nexit 2\n"), 0o755)
-
 	spec, _ := LoadSpec("bad", root)
 	stubSpecSkills(t, root, spec)
 	err := Run(context.Background(), spec, RunOptions{
 		ProjectRoot: root,
-		ClaudeBin:   shim,
+		ClaudeBin:   claudeREPLShim(t),
 		ApeVersion:  "0.0.9-test",
-		NoCommit:    true, // PLAN-3 contract
+		NoCommit:    true,
+		WaitStepDone: func(_ context.Context, _ string, _ int) error {
+			return errors.New("simulated step failure")
+		},
 	})
 	if err == nil {
 		t.Fatalf("expected non-nil error from failing step")
 	}
 
-	// Find the run_id dir.
 	entries, _ := os.ReadDir(filepath.Join(root, "_output", "pipelines", "bad"))
 	var runID string
 	for _, e := range entries {
@@ -185,9 +190,6 @@ func TestRun_FailedStepCaptured(t *testing.T) {
 	if m.Status != StatusFailed {
 		t.Errorf("status %q, want failed", m.Status)
 	}
-	if m.Totals.StepsFailed != 1 {
-		t.Errorf("expected 1 failed step, got %d", m.Totals.StepsFailed)
-	}
 	if len(m.Stages) != 1 || m.Stages[0].Status != StatusFailed {
 		t.Errorf("stage status not propagated: %+v", m.Stages)
 	}
@@ -202,17 +204,15 @@ func TestRun_DisableManifestSkipsTree(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(pipelinesDir, "skip.yaml"),
 		[]byte("name: skip\nstages:\n  only:\n    chain:\n      - skill: apex-fake\n"), 0o644)
 
-	shim := filepath.Join(t.TempDir(), "claude-shim.sh")
-	_ = os.WriteFile(shim, []byte("#!/bin/sh\necho done\nexit 0\n"), 0o755)
-
 	spec, _ := LoadSpec("skip", root)
 	stubSpecSkills(t, root, spec)
 	err := Run(context.Background(), spec, RunOptions{
 		ProjectRoot:     root,
-		ClaudeBin:       shim,
+		ClaudeBin:       claudeREPLShim(t),
 		DisableManifest: true,
 		ApeVersion:      "0.0.9-test",
-		NoCommit:        true, // PLAN-3 contract
+		NoCommit:        true,
+		WaitStepDone:    fastStepDone,
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
