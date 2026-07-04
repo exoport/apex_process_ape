@@ -81,8 +81,12 @@ totals:
 func TestFoldTaskRun(t *testing.T) {
 	r := &Rollup{}
 	day := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
-	r.FoldTaskRun("apex-create-prd", "run-1", day, Totals{CostUSD: 0.5, InputTokens: 1})
-	r.FoldTaskRun("apex-create-prd", "run-2", day, Totals{CostUSD: 0.25, InputTokens: 2})
+	r.FoldTaskRun("apex-create-prd", "run-1", day,
+		Totals{CostUSD: 0.5, InputTokens: 1, NumTurns: 2},
+		map[string]Totals{"claude-opus-4-8": {CostUSD: 0.5, InputTokens: 1, NumTurns: 2}})
+	r.FoldTaskRun("apex-create-prd", "run-2", day,
+		Totals{CostUSD: 0.25, InputTokens: 2, NumTurns: 1},
+		map[string]Totals{"claude-opus-4-8": {CostUSD: 0.25, InputTokens: 2, NumTurns: 1}})
 
 	b := r.Tasks["apex-create-prd"]
 	if len(b.Runs) != 2 {
@@ -91,7 +95,18 @@ func TestFoldTaskRun(t *testing.T) {
 	if b.Totals.CostUSD != 0.75 || b.Totals.InputTokens != 3 {
 		t.Fatalf("fold totals wrong: %+v", b.Totals)
 	}
+	if b.Totals.NumTurns != 3 {
+		t.Fatalf("fold totals num_turns wrong: got %d, want 3", b.Totals.NumTurns)
+	}
 	if r.ByDay["2026-07-02"].CostUSD != 0.75 {
 		t.Fatalf("by-day fold wrong: %+v", r.ByDay)
+	}
+	// PLAN-10 D5: per-model breakdown accumulates on the bucket and
+	// project-wide.
+	if got := b.PerModel["claude-opus-4-8"]; got.CostUSD != 0.75 || got.NumTurns != 3 {
+		t.Fatalf("bucket per-model wrong: %+v", got)
+	}
+	if got := r.PerModel["claude-opus-4-8"]; got.CostUSD != 0.75 || got.NumTurns != 3 {
+		t.Fatalf("rollup per-model wrong: %+v", got)
 	}
 }
