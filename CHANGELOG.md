@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## v0.0.37 (2026-07-04)
+
+Docs completion for PLAN-9 F4 — generated CLI reference, first tutorial,
+and a docs link-check gate. No runtime behaviour change beyond a hidden
+maintenance command.
+
+- **docs: generated CLI reference (`docs/reference/cli.md`)** — a new
+  hidden `ape gen-docs` command renders a single-file reference for every
+  visible command, flag, and default straight from the cobra command
+  tree; `make docs-cli` regenerates it. Hand-rolled (no `cobra/doc`
+  dependency — avoids pulling in `go-md2man`) and deterministic (no
+  timestamps), so the checked-in file can't drift from the code. The
+  command is hidden: it stays out of `ape --help` and changes no other
+  command's behaviour.
+- **docs: first tutorial (`docs/tutorials/first-pipeline.md`)** — a
+  guided greenfield walk-through: install → `ape doctor` → `ape framework
+  setup` → `ape pipeline design` → read `_output/pipelines/<run>/` →
+  `ape costs`.
+- **build: docs link-check gate** — `scripts/check-docs-links.py`
+  verifies every file under `docs/` is reachable from `docs/README.md`
+  and that no relative link is dead (skips fenced code blocks; resolves
+  directory links to their `README.md`). Wired into `make ci-local` as a
+  `docs-check` step, with a standalone `make docs-check` target. Fixed
+  what it surfaced on first run: a dead `authoring-pipelines.md` link and
+  four orphaned docs (`run-artefacts`, `interactive-vs-programmatic`,
+  `cli`, `first-pipeline`), now indexed across the docs README files.
+
 ## v0.0.36 (2026-07-03)
 
 PTY-only consolidation + CLI hygiene (PLAN-9) and per-model cost
