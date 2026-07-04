@@ -9,9 +9,9 @@ For ape, reference is the surface area: every command, every flag, every config 
 - [bridge-ipc.md](bridge-ipc.md) — MCP bridge IPC wire schema.
 - [bridge-security.md](bridge-security.md) — bridge bind + threat model.
 - [claude-code-env-vars.md](claude-code-env-vars.md) — Claude Code's `CLAUDECODE` / `CLAUDE_CODE_*` environment variables, nested-session protection, and ape's env scrub.
-- [claude-spawn-modes.md](claude-spawn-modes.md) — when ape uses `claude -p` vs a PTY-hosted `claude` REPL, per command + flag.
+- [claude-spawn-modes.md](claude-spawn-modes.md) — how ape delivers prompts to the PTY-hosted `claude` REPL, per command.
 - [framework-yaml.md](framework-yaml.md) — `_apex/framework.yaml` schema.
-- [invocation-matrix.md](invocation-matrix.md) — every `ape pipeline` UI × Exec combination.
+- [invocation-matrix.md](invocation-matrix.md) — the `ape pipeline` UI selector (`tui` default, `web`, `no-tui`).
 - [pipeline-run-manifest.md](pipeline-run-manifest.md) — `manifest.yaml` schema written per pipeline run.
 - [pipeline-spec.md](pipeline-spec.md) — internal Go shape of a parsed pipeline.
 - [pipeline-yaml-schema.md](pipeline-yaml-schema.md) — `_apex/pipelines/*.yaml` schema (model/agent/commit defaults, `no-clear`, etc.).

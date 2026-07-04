@@ -1,44 +1,41 @@
 # Reference — `ape pipeline` invocation matrix
 
-PLAN-6 / C1 defines two orthogonal axes for `ape pipeline <name>`:
+Since v0.0.36 (PLAN-9 F2) `ape pipeline <name>` has a single axis:
 
-- **UI** — where output renders: `none` (plain stdout), `tui` (Bubble Tea), `web` (HTTP/SSE)
-- **Exec** — how `claude` is spawned: `programmatic` (one `claude -p` per step) or `interactive` (one `claude` REPL per stage inside an in-process PTY, prompts delivered as real keystrokes by writing to the PTY master end)
+- **UI** — where output renders: `tui` (Bubble Tea, default), `web` (HTTP/SSE), or `none` (plain stdout, `--no-tui`).
 
-The CLI selects one cell from the matrix. The default is **tui + interactive**.
+The exec axis is gone. Every mode executes `claude` as an interactive REPL per stage inside an in-process PTY (prompts delivered as real keystrokes by writing to the PTY master end). The programmatic `claude -p` path and its flags (`-P` / `--programmatic`, `-I` / `--interactive`, `--eval`) were removed — see [why-pty-only.md](../explanation/why-pty-only.md).
+
+The CLI selects one UI. The default is **tui**.
 
 ## Matrix
 
-| Invocation              | UI     | Exec           | Notes                                                                                                                                                        |
-| ----------------------- | ------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ape pipeline <name>`   | `tui`  | `interactive`  | **NEW default** (PLAN-6).                                                                                                                                    |
-| `--tui`                 | `tui`  | `interactive`  | Explicit form of the default.                                                                                                                                |
-| `--interactive` / `-I`  | `tui`  | `interactive`  | Forces interactive when combined with a UI flag.                                                                                                             |
-| `--web`                 | `web`  | `interactive`  | **NEW** (PLAN-6 default). Pre-PLAN-6 `--web` is now `--web -P`.                                                                                              |
-| `--web -P`              | `web`  | `programmatic` | What today's `--web` does (PLAN-5).                                                                                                                          |
-| `--no-tui`              | `none` | `interactive`  | **NEW** (PLAN-6). Stops aliasing `--eval`.                                                                                                                   |
-| `--no-tui -P`           | `none` | `programmatic` | No UI, today's per-step spawn.                                                                                                                               |
-| `--tui -P`              | `tui`  | `programmatic` | TUI panels with PLAN-5 per-step spawn.                                                                                                                       |
-| `-P` / `--programmatic` | (UI)   | `programmatic` | Modifier; combine with `--tui` / `--web` / `--no-tui`.                                                                                                       |
-| `--eval`                | `none` | `programmatic` | **LOCKED** — byte-equivalent stdout for the eval harness. Renamed from `--print` on 2026-05-20 so the byte-equivalence contract is evident at the call site. |
+| Invocation            | UI     | Notes                                              |
+| --------------------- | ------ | -------------------------------------------------- |
+| `ape pipeline <name>` | `tui`  | Default. Bubble Tea panels.                        |
+| `--tui`               | `tui`  | Explicit form of the default.                      |
+| `--web`               | `web`  | Bridged web UI (HTTP/SSE); mirrors the PTY output. |
+| `--no-tui`            | `none` | Plain stdout progress lines (auto on non-TTY).     |
+
+All rows run the same per-stage interactive PTY. The eval harness uses `--no-tui` (and `ape task --output-format json` for single skills); there is no separate byte-locked mode.
 
 ## Mutual exclusion
 
-- Multiple UI flags is an error: `ape pipeline foo --tui --web` → exit 2.
-- `--eval` admits no exec modifier: `--eval --interactive`, `--eval --programmatic` → exit 2.
-- `--interactive` and `--programmatic` together is an error.
+- More than one UI selector is an error: `ape pipeline foo --tui --web` → exit 2. Same for `--tui --no-tui` and `--web --no-tui`.
+- The removed exec flags (`-P` / `--programmatic`, `-I` / `--interactive`, `--eval`) error with the removal message and exit 2.
 
 ## Invariants
 
-1. **`--eval` is locked.** It does not construct a `BridgeRuntime`, does not inject hooks, does not change one byte of stdout vs PLAN-5. The eval consumer at `/home/diegos/_dev/exoar/apex_process_framework_eval` depends on this.
+1. **PTY is the only exec mode.** Every run drives a live `claude` REPL; ape never passes `-p`. There is no captured-for-replay code path to keep in sync.
 2. **Broker (HTTP/SSE) is web-only.** TUI and `none` UI modes must not start an HTTP listener.
-3. **Stage process spawn = clean OS-level context** under interactive exec. Per-step `/clear` is runner-driven (one PTY-typed `/clear` between steps unless the step sets `no-clear: true`); the first step of a stage skips `/clear` because the PTY and `claude` process are fresh by construction.
+3. **Stage process spawn = clean OS-level context.** Per-step `/clear` is runner-driven (one PTY-typed `/clear` between steps unless the step sets `no-clear: true`); the first step of a stage skips `/clear` because the PTY and `claude` process are fresh by construction.
 4. **Step contract is hard-fail** (see [step-contract.md](step-contract.md)).
-5. **No external runtime dependency for interactive exec.** The PTY is allocated in-process (`internal/repl/`, backed by `github.com/aymanbagabas/go-pty`). Programmatic exec (`-P`, `--eval`) is similarly self-contained.
+5. **No external runtime dependency.** The PTY is allocated in-process (`internal/repl/`, backed by `github.com/aymanbagabas/go-pty`), so ape works on Linux, macOS, and Windows (incl. Git Bash via ConPTY) without `tmux` on `PATH`.
 
 Related:
 
-- [claude-spawn-modes.md](claude-spawn-modes.md) — which cells of this matrix spawn `claude -p` and which spawn an interactive REPL in an in-process PTY
-- [pipeline-yaml-schema.md](pipeline-yaml-schema.md) — pipeline YAML fields
-- [step-contract.md](step-contract.md) — agent-prefix verification + how `/clear` is driven
-- [../explanation/exec-modes.md](../explanation/exec-modes.md) — why interactive vs programmatic
+- [claude-spawn-modes.md](claude-spawn-modes.md) — how ape delivers prompts to the PTY-hosted REPL.
+- [pipeline-yaml-schema.md](pipeline-yaml-schema.md) — pipeline YAML fields.
+- [step-contract.md](step-contract.md) — agent-prefix verification + how `/clear` is driven.
+- [../explanation/why-pty-only.md](../explanation/why-pty-only.md) — why the exec axis was removed.
+- [../explanation/exec-modes.md](../explanation/exec-modes.md) — the per-stage interactive runtime in depth.

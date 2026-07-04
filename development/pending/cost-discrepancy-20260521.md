@@ -1,6 +1,6 @@
 ---
 created_at: 2026-05-21
-status: open
+status: open (partially explained — see the 2026-07-03 update; a sub-agent capture bug that skewed ape's numbers was fixed in v0.0.35, but the 5m/1h cache-tier falsification test still needs PLAN-10 D1's per-tier split, which is deferred)
 tags:
   - cost
   - telemetry
@@ -340,3 +340,46 @@ and can be rescanned. Notable sessions:
 If those rotate out of `~/.claude/projects/` before this is picked
 up, re-running `design --tui` against the sandbox produces a fresh
 comparable dataset.
+
+## Update 2026-07-03: sub-agent capture bug (v0.0.35) partially explains the gap
+
+Between this doc and now, two telemetry bugs that directly bias the
+numbers above were found and fixed — both land on the H2 side of the
+ledger (sub-agent / Task-tool turns).
+
+- **v0.0.34–v0.0.35 sub-agent capture (fixed, commit `3c19c85`).** The
+  interactive runner tracked a sub-agent by the `SubagentStop` hook's
+  `transcript_path` — which is the PARENT session, not the sub — keyed by
+  a `session_id` that a sub-agent shares with its parent. Every sub
+  collapsed into one phantom capture pointing at the main transcript, so
+  ape folded **main twice** and never scanned the real sub transcripts
+  (`<sid>/subagents/agent-<id>.jsonl`). On a 6-sub batch-dev run ape
+  reported 72 turns / 5.67M tokens; the true total is **267 turns /
+  22.9M**. The fix captures `agent_transcript_path` keyed by `agent_id`,
+  folds each sub once, guards against re-folding main, and sweeps the
+  `subagents/` dir for dropped hooks.
+
+  Net effect on this investigation: for any skill that dispatches
+  sub-agents, ape's pre-v0.0.35 transcript-scan total was **both**
+  double-counting main and omitting the subs — so the "50–60% high"
+  measurement was taken against a broken pipeline and should not be
+  trusted as-is. H2 ("stream-json reports the orchestrator only") is now
+  the mechanically-confirmed shape of the gap on ape's side: the
+  transcript scan legitimately sees far more turns than the orchestrator
+  `result` event, because it now sees the sub-agents the orchestrator
+  never billed into its own `total_cost_usd`.
+
+- **num_turns now flows into the rollup (v0.0.36).** `sumTotals` had been
+  dropping `NumTurns`, so rollup/day turn counts read zero regardless of
+  the per-run values. Fixed in PLAN-10 D5. This didn't affect per-run
+  cost but did make any turn-based cross-check meaningless.
+
+**What still blocks closure.** The H1 falsification test in
+"Recommended path" — comparing `sum(ephemeral_1h)` vs `sum(ephemeral_5m)`
+for a paired cell — needs the per-tier cache split from PLAN-10 D1
+(`Totals` currently collapses 5m + 1h into one `CacheCreationTokens`).
+D1 is deferred (it would perturb the freshly-validated v0.0.35 math), so
+the multiplier hypothesis remains untested against real per-tier data.
+Re-run the head-to-head on the sandbox with a **v0.0.36** binary first —
+the sub-agent fix alone may move the interactive number enough that the
+residual gap is just the orchestrator-vs-tree turn difference H2 predicts.

@@ -1,5 +1,71 @@
 # CHANGELOG
 
+## v0.0.36 (2026-07-03)
+
+PTY-only consolidation + CLI hygiene (PLAN-9) and per-model cost
+reporting (PLAN-10 D5).
+
+- **feat(cli)!: remove the programmatic exec axis — interactive PTY is
+  the only way ape runs claude** (BREAKING). Deleted the non-PTY
+  `claude -p` path (`pipeline.runStages` / `buildArgv` / `runClaude` and
+  the stream-json stdout parser) and the flags `-P`/`--programmatic`,
+  `-I`/`--interactive`, and `--eval`. Every pipeline and `ape task` run
+  now executes claude as a REPL inside an in-process PTY. The pipeline
+  invocation matrix collapses from (UI × Exec) to a single UI axis:
+  `--tui` (default), `--web`, `--no-tui`. Passing a removed flag errors
+  with a pointer to `docs/explanation/why-pty-only.md` and exits 2. The
+  removed `--eval` path was the eval harness's old entry point; the eval
+  already migrated to `ape task --output-format json` + `ape pipeline
+  --no-tui` (audited 2026-07-03), so nothing depends on it. The resolved
+  rendering mode now prints on every pipeline start.
+- **fix(cli): `ape --version`** — the root command exposed no version
+  flag; it now prints the build version (set at Execute time so it
+  reflects the build-info backfill).
+- **fix(cli): `ape update` human output** — `printUpdateResult`
+  type-asserted against an anonymous struct that never matched the
+  function-local result type, so the human path always fell through to a
+  raw `%v` dump. The result type moved to package scope; the switch now
+  renders the `current:` / `latest:` / `message:` lines. Regression test
+  added.
+- **feat(cli): output-format + help consistency (PLAN-9 F3)** —
+  `--output-format human|json|yaml` added to `pattern list`/`validate`,
+  `adr list`/`validate`, `trait validate`, `sessions`, and `sessions
+  prune`. Unimplemented stubs (`pattern sync`, `sync patterns`, `sync
+  adrs`) are hidden so `ape --help` no longer advertises "not yet
+  implemented" commands. `bootstrap --no-tui` is renamed `--no-picker`
+  (old flag kept hidden as a one-release deprecated alias). New
+  `internal/apecmd/exitcodes.go` is the single source of truth for exit
+  codes (0 ok · 1 run failed/idle · 2 usage/preflight · 3 REPL never
+  ready). The background update check is skipped for hidden/utility
+  commands (`mcp-bridge`, `notify`). Root help now leads with
+  pipelines/task/chat; `Example:` blocks added across the touched
+  commands.
+- **feat(cost): per-model rollup + `ape costs run`/`chat` (PLAN-10 D5)**
+  — the cost rollup and `ape costs` gain a per-model breakdown: the
+  human output has a new "by model" table and `--output-format json`
+  includes a `per_model` map (project-wide and per pipeline/task bucket).
+  `ape costs run <run-id>` (reads a run's manifest, with per-model
+  detail) and `ape costs chat <chat-id>` (reads session.yaml) are now
+  implemented and registered — both were advertised in the help but
+  never wired.
+- **fix(cost): `sumTotals` dropped `NumTurns`** — rollup and per-day
+  totals summed cost and the four token fields but silently omitted turn
+  counts. Fixed so rollup totals carry turns.
+- **docs: PTY-only rationale + reference refresh** — new
+  `explanation/why-pty-only.md` (linked from the removed-flag error);
+  claude-spawn-modes / invocation-matrix / exec-modes updated for the
+  collapsed UI axis; manifest reference documents the additive per-model
+  fields (`totals.num_turns`, `totals.model_usage`, step `model_usage` /
+  `sessions[]`; schema stays v2).
+- **note:** PLAN-10 D1 (per-turn `TurnRecord`, requestId/stop_reason
+  dedup, 5m/1h cache-tier split) and D3 (date-aware pricing) remain
+  deferred — D1 would perturb the v0.0.35-validated telemetry math and
+  D3 depends on D1's per-turn timestamps; the standard-rate price table
+  is the documented conservative fallback. The
+  `cost-discrepancy-20260521` investigation is updated with the v0.0.35
+  sub-agent finding (partially explains the gap; tier falsification still
+  needs D1).
+
 ## v0.0.35 (2026-07-03)
 
 - **fix(telemetry): capture real sub-agent transcripts; end the

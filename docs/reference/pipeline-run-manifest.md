@@ -27,7 +27,15 @@ Schema history:
 - **v1** (ape v0.0.9) — initial PLAN-3 manifest with per-step metrics.
 - **v2** (ape v0.0.10+) — PLAN-4 commit fields on `StepRecord` (`commit_sha`, `commit_message`, `commit_status`, `commit_error`) plus `totals.commits_made`.
 
-Forward-compatible: v2 readers should accept v1 manifests (the new fields are optional `omitempty`).
+Since v2, additional fields have been added **without bumping the schema version** — they are optional (`omitempty`) and v2 readers ignore them:
+
+- `totals.num_turns` and per-step `num_turns` — turn counts derived from the transcript scan.
+- `totals.model_usage` and per-step `model_usage` — per-model cost/token breakdown (PLAN-10 D5, ape v0.0.36+), keyed by model id.
+- per-step `sessions[]` — per-claude-session usage: the step's main REPL session plus any sub-agent (Agent tool) sessions observed via `SubagentStart` / `SubagentStop`.
+- `claude_version` — the resolved `claude --version` at run start (best-effort).
+- per-step `telemetry_note` — a diagnosability breadcrumb explaining why numeric fields are zero.
+
+Forward-compatible: v2 readers should accept v1 manifests (the new fields are optional `omitempty`) and treat unrecognized additive fields as opaque.
 
 ```yaml
 schema_version: 2
@@ -48,9 +56,25 @@ totals:
   tokens_output: 28910
   tokens_cache_read: 187420
   tokens_cache_creation: 9211
+  num_turns: 214
   steps_run: 13
   steps_failed: 0
   commits_made: 13
+  model_usage:                 # per-model breakdown, summed across steps (additive)
+    claude-opus-4-8:
+      cost_usd: 4.11
+      tokens_input: 380012
+      tokens_output: 24110
+      tokens_cache_read: 170220
+      tokens_cache_creation: 8100
+      num_turns: 180
+    claude-sonnet-4-6:
+      cost_usd: 0.72
+      tokens_input: 32322
+      tokens_output: 4800
+      tokens_cache_read: 17200
+      tokens_cache_creation: 1111
+      num_turns: 34
 stages:
   - index: 1
     name: prd
@@ -81,6 +105,26 @@ stages:
         commit_message: "ape:design/prd/apex-create-prd"
         commit_status: committed
         commit_error: ""
+        model_usage:                 # this step's per-model breakdown (additive)
+          claude-opus-4-8:
+            cost_usd: 1.42
+            tokens_input: 84012
+            tokens_output: 8910
+            tokens_cache_read: 41208
+            tokens_cache_creation: 2811
+            num_turns: 47
+        sessions:                    # per-claude-session usage (main + sub-agents)
+          - session_id: 0a675bc4
+            cost_usd: 1.20
+            tokens_input: 72000
+            tokens_output: 7600
+            num_turns: 40
+          - session_id: 9f31ab02     # sub-agent (Agent tool) session
+            parent_session_id: 0a675bc4
+            cost_usd: 0.22
+            tokens_input: 12012
+            tokens_output: 1310
+            num_turns: 7
 ```
 
 ### Status values
@@ -92,7 +136,14 @@ stages:
 
 ### Metric provenance
 
-Per-step `cost_usd`, `tokens_*`, and `num_turns` are extracted from the terminal `{"type":"result", ...}` event in claude's stream-json output. If no such event is present (degraded path), the metrics are zero but the step still appears in the manifest with the correct duration and status.
+Since v0.0.36 every run drives an interactive `claude` REPL inside a PTY (see [why-pty-only.md](../explanation/why-pty-only.md)), so there is no per-step terminal `result` event to read. Per-step `cost_usd`, `tokens_*`, `num_turns`, `model_usage`, and `sessions[]` are derived by scanning the session transcript (`internal/cost/`). Transcript scanning is the single cost source, and it attributes usage per model and per claude session (including sub-agent sessions spawned via the Agent tool). If the transcript is unavailable at scan time, the numeric fields are zero, `telemetry_note` explains why, and the step still appears with the correct duration and status.
+
+### Per-model breakdown and `ape costs`
+
+`totals.model_usage` and per-step `model_usage` feed the project-wide cost rollup (`<project>/_output/ape/cost-rollup.json`). `ape costs` reads that rollup: its human output adds a **by model** table, and `ape costs --output-format json` includes a `per_model` map on the top-level rollup and on each pipeline / task / chat bucket. Two readers inspect a single record directly rather than the aggregate:
+
+- `ape costs run <run-id>` — reads that run's `manifest.yaml` and prints its totals plus per-model breakdown.
+- `ape costs chat <chat-id>` — reads a chat's `session.yaml`.
 
 ### Forward compatibility
 

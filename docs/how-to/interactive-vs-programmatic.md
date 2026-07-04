@@ -1,39 +1,33 @@
-# How-to — choose between interactive and programmatic exec
+# How-to — how ape runs claude (PTY-only)
 
-If you're new to PLAN-6 and wondering whether to use the new interactive default or stick with programmatic, this page gives the quick answers. For the why behind the modes, read [exec-modes.md](../explanation/exec-modes.md).
+Since v0.0.36 ape runs `claude` one way: an interactive REPL per stage inside an in-process PTY. The old programmatic `claude -p` path and its flags (`-P` / `--programmatic`, `-I` / `--interactive`, `--eval`) were removed — passing any of them exits `2` with a message pointing at [why-pty-only.md](../explanation/why-pty-only.md). The only choice left is **where output renders**.
 
-## TL;DR by scenario
+## Pick a UI
 
-| What you're doing                              | Run                                                 |
-| ---------------------------------------------- | --------------------------------------------------- |
-| First-time pipeline run, normal use            | `ape pipeline <name>` (default — tui + interactive) |
-| Eval / CI / stdout-byte-capture pipelines      | `ape pipeline <name> --eval`                        |
-| Re-running a known-flaky single-step pipeline  | `ape pipeline <name> --tui -P`                      |
-| Debugging today's `--web` behaviour            | `ape pipeline <name> --web -P`                      |
-| Web UI but with PLAN-6 features                | `ape pipeline <name> --web`                         |
-| No UI, just plumb to a log                     | `ape pipeline <name> --no-tui`                      |
-| No UI + per-step claude (old `--no-tui` shape) | `ape pipeline <name> --no-tui -P`                   |
+| What you're doing                             | Run                                     |
+| --------------------------------------------- | --------------------------------------- |
+| Normal interactive use                        | `ape pipeline <name>` (default — `tui`) |
+| Explicit TUI                                  | `ape pipeline <name> --tui`             |
+| Web UI (browser, HTTP/SSE)                    | `ape pipeline <name> --web`             |
+| No UI, plumb progress to a log (CI, eval)     | `ape pipeline <name> --no-tui`          |
+| Single skill, structured result for tooling   | `ape task <skill> --output-format json` |
+
+All of these execute the same per-stage interactive PTY; only the rendering surface differs. `--no-tui` is auto-enabled on a non-TTY.
+
+## What you get on every run
+
+- One `claude` REPL per stage in a per-stage in-process PTY; chain steps share the session within a stage (with `/clear` typed between them unless the step sets `no-clear: true`).
+- Bridge step-contract verification of the agent-prefix shape (catches `/<wrong-agent>` or `/<wrong-skill>` invocations).
+- Hooks captured under the run's manifest tree.
+- No external runtime dependency. The PTY is allocated in-process via `github.com/aymanbagabas/go-pty`, so ape works on Linux, macOS, and Windows (incl. Git Bash via ConPTY) without `tmux` installed.
 
 ## Switching mid-run
 
-You can't. Pick the mode at invocation time. `ape pipeline` doesn't resume from a partial run.
-
-## What you get under interactive (default)
-
-- One `claude` REPL per stage running inside a per-stage in-process PTY; chain steps share the session within a stage (with `/clear` typed between them unless the step sets `no-clear: true`).
-- Bridge step-contract verification of the agent-prefix shape (catches `/<wrong-agent>` or `/<wrong-skill>` invocations).
-- Hooks captured in `<project>/_output/pipelines/<name>/<run_id>/hook-events.jsonl`.
-- The same Bubble Tea TUI as `--tui -P` (PLAN-7): dual panels — left = rich tool-call / tool-result / assistant-text event feed, right = stages list — cursor + scroll, render-style cycling (`r`), completion-phase final-report row. See [tui-keybindings.md](../reference/tui-keybindings.md) for the full keybind set. Interactive-only addition: an await-message modal that opens when a skill parks an `await_message` MCP call to ask for input.
-- No external runtime dependency. The PTY is allocated in-process via `github.com/aymanbagabas/go-pty`, so interactive exec works on Linux, macOS, and Windows (incl. Git Bash via ConPTY) without `tmux` installed.
-
-## What you give up under interactive
-
-- The `--eval` byte-equivalence contract — for that, pass `--eval` explicitly.
-- Independence between steps in a stage: if step 1 corrupts the session, step 2 inherits the damage (catch this with `no-clear: true` discipline; see [step-contract.md](../reference/step-contract.md)).
+You can't. `ape pipeline` doesn't resume from a partial run — pick the UI at invocation time.
 
 ## Migrating an existing pipeline
 
-If your pipeline YAML doesn't mention `commit:` at any level, you're now getting **no commits** (PLAN-6 default is skip). To keep the PLAN-4 per-step commit behaviour, either:
+If your pipeline YAML doesn't mention `commit:` at any level, you get **no commits** (PLAN-6 default is skip). To keep the PLAN-4 per-step commit behaviour, either:
 
 - Add `commit: true` at pipeline level for one commit per stage:
   ```yaml
@@ -50,14 +44,14 @@ See [pipeline-yaml-schema.md](../reference/pipeline-yaml-schema.md) for the full
 
 ## Mutual-exclusion errors
 
-- `--tui --web` → "only one UI selector at a time"
-- `--eval --interactive` → "--eval admits no exec modifier"
-- `--interactive --programmatic` → "mutually exclusive"
+- `--tui --web` (or any two UI selectors) → "only one UI selector at a time"
+- `-P` / `--programmatic`, `-I` / `--interactive`, `--eval` → removed-in-v0.0.36 message
 
-These all exit with code 2 and a one-line error to stderr.
+These exit with code 2 and a one-line error to stderr.
 
 ## Related
 
-- [exec-modes.md](../explanation/exec-modes.md)
+- [why-pty-only.md](../explanation/why-pty-only.md) — why PTY is the only exec mode.
+- [exec-modes.md](../explanation/exec-modes.md) — the per-stage interactive runtime in depth.
 - [invocation-matrix.md](../reference/invocation-matrix.md)
 - [pipeline-yaml-schema.md](../reference/pipeline-yaml-schema.md)

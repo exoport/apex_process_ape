@@ -2,7 +2,7 @@
 
 The `ape pipeline <name>` Bubble Tea TUI has three regions and a small set of keys for navigation, mode switching, and quit. This page is the authoritative reference. For prose orientation, see the [README's Pipeline TUI section](../../README.md#pipeline-tui).
 
-As of v0.0.12 (PLAN-7), both invocation modes — `--tui` (interactive REPL) and `--tui -P` (programmatic stream-json) — render the same TUI. The only behavioral difference is interactive mode's await-message modal, which never opens under `--tui -P` because the source has no `await_message` MCP frames to surface. All keybindings, panel layout, scroll semantics, and completion-phase behavior described below apply identically to both.
+The TUI (`--tui`, the default) renders the live output of the per-stage interactive `claude` REPL. Since v0.0.36 the PTY-hosted REPL is the only exec mode (the programmatic `claude -p` path was removed — see [why-pty-only.md](../explanation/why-pty-only.md)), so every `--tui` run behaves identically, including the await-message modal.
 
 ## Layout
 
@@ -103,9 +103,9 @@ The three styles render a single event differently:
 
 In the completion phase (see below) `q` and `Ctrl+C` quit directly — there's no confirmation modal, because nothing is left to cancel.
 
-### Await-message reply modal (interactive mode only)
+### Await-message reply modal
 
-Some skills (`apex-create-story`, parts of `lift-project`) park an `await_message` MCP tool call mid-step to ask the user a clarifying question. Under interactive mode (`--tui`), the bridge surfaces this as a modal overlay with a text input.
+Some skills (`apex-create-story`, parts of `lift-project`) park an `await_message` MCP tool call mid-step to ask the user a clarifying question. The bridge surfaces this as a modal overlay with a text input.
 
 | Key      | Action                                                                                                                |
 | -------- | --------------------------------------------------------------------------------------------------------------------- |
@@ -113,7 +113,7 @@ Some skills (`apex-create-story`, parts of `lift-project`) park an `await_messag
 | `Esc`    | Clear the input but keep the modal open (the user can either type something else or wait for the bridge to time out). |
 | `Ctrl+C` | Falls through to the quit-confirmation modal — double-Ctrl+C still force-quits even when the await modal is up.       |
 
-The modal never opens under `--tui -P`; the stream-json source has no `await_message` frames to deliver.
+The modal only opens when a skill actually parks an `await_message` call; runs whose skills never ask for input never surface it.
 
 ## Completion phase (v0.0.8)
 

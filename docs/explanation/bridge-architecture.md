@@ -1,40 +1,41 @@
 # Bridge architecture
 
-`ape pipeline --web -P` (web programmatic) connects a browser to a
-running Claude Code session via three loosely coupled pieces: an
-MCP server (the **bridge**), an SSE broker (the **broker**), and an
-orchestrator that owns the subprocess lifecycle and stitches the
-two together.
+`ape pipeline --web` connects a browser to a running Claude Code
+session via three loosely coupled pieces: an MCP server (the
+**bridge**), an SSE broker (the **broker**), and an orchestrator that
+owns the subprocess lifecycle and stitches the two together.
 
-This document is the design narrative for the **web programmatic**
-mode. For the wire schema, see
-[bridge-ipc.md](../reference/bridge-ipc.md). For the security model,
-see [bridge-security.md](../reference/bridge-security.md). PLAN-5 / C3.
+This document is the design narrative for **web** mode. For the wire
+schema, see [bridge-ipc.md](../reference/bridge-ipc.md). For the
+security model, see [bridge-security.md](../reference/bridge-security.md).
+PLAN-5 / C3.
 
-> **Note on interactive exec (PLAN-6 tmux pivot 2026-05-20 → PLAN-8 PTY migration 2026-05-22).** Pipeline
-> interactive mode (`ape pipeline --tui` / `--no-tui` / `--web` without
-> `-P`) and `ape chat` no longer use `await_message` / `reply` as a
-> prompt-delivery channel. They run `claude` attached to a PTY and
-> deliver prompts as real REPL keystrokes (`internal/repl/` writes the
-> slash command to the PTY master + Enter). The bridge is still wired
-> for **hook observability** (`PreToolUse`, `PostToolUse`,
-> `UserPromptSubmit`, `Stop`, etc.) but `await_message`/`reply` are
-> dormant for those modes. Originally implemented over external `tmux`
-> (PLAN-6); PLAN-8 moved the PTY in-process via `go-pty` to drop the
-> `tmux` runtime dependency and add native Windows support. The `--web -P`
-> flow described below is unaffected by either pivot.
+> **Note on the PTY runtime (PLAN-6 tmux pivot 2026-05-20 → PLAN-8 PTY migration 2026-05-22 → PLAN-9 PTY-only 2026-06 / v0.0.36).**
+> Since v0.0.36 every run — `ape pipeline --tui` / `--no-tui` / `--web`
+> and `ape chat` — drives a live `claude` REPL attached to a PTY and
+> delivers each step's prompt as real REPL keystrokes (`internal/repl/`
+> writes the slash command to the PTY master + Enter). The old
+> programmatic `claude -p` path was removed (see
+> [why-pty-only.md](why-pty-only.md)). The bridge is still wired for
+> **hook observability** (`PreToolUse`, `PostToolUse`,
+> `UserPromptSubmit`, `Stop`, etc.) in every mode. Under `--web` the
+> bridge additionally carries prompt/reply traffic for the browser via
+> `await_message` / `reply` — the loop described below. Originally
+> implemented over external `tmux` (PLAN-6); PLAN-8 moved the PTY
+> in-process via `go-pty` to drop the `tmux` runtime dependency and add
+> native Windows support.
 
 ## Why an MCP bridge
 
 Claude Code's MCP support lets us expose tools that block. Two are
-enough for the web programmatic interactive session:
+enough for the web session:
 
 - `await_message`: holds the pending request id until a browser
   message arrives over IPC, then responds with the text.
 - `reply`: non-blocking, forwards the content over IPC; the parent
   publishes an SSE `reply` event for the browser.
 
-This is the loop (web programmatic only): claude → `await_message`
+This is the loop (`--web` only): claude → `await_message`
 (blocks) → user types in browser → `/api/send` → IPC → bridge →
 response delivered → claude calls `reply(...)` → IPC → broker → SSE
 → browser.
@@ -102,9 +103,10 @@ The inline `--settings` blob wires six hooks (`PreToolUse`,
 is `async: false` because the parent uses it to flush the per-step
 run-log before the loop returns.
 
-Hooks are injected **only when `Mode == ModeWeb`**. In `--tui` and
-`--eval` modes, `BuildSettings` returns `{}` and `ape notify` never
-spawns. PLAN-5 / C4.
+Hooks are injected in every mode now: `--web` sets `Mode == ModeWeb`,
+and `--tui` / `--no-tui` opt in via `InjectHooks` (PLAN-6 / Phase E) so
+the step contract's `UserPromptSubmit` / `Stop` observability works
+without the browser. PLAN-5 / C4 baseline.
 
 ## Why this layout
 
@@ -127,13 +129,6 @@ spawns. PLAN-5 / C4.
 
 ## What's deferred
 
-- **Pipeline web-mode wiring.** The `ape pipeline <name>` runner
-  still uses today's TUI / print path. The web-mode flag plumbing
-  is in place (`--tui` is currently inert default; `--eval` is
-  the explicit name for what `--no-tui` used to do); the eventual
-  flip is held until a follow-up release-cycle merge. Pipeline web
-  mode will mount the runlog Writer + per-step JSONL tail through
-  the orchestrator the same way `ape chat` does today.
 - **Bearer-token auth.** See [bridge-security.md](../reference/bridge-security.md).
 - **Backlog replay on reconnect.** Tabs that close miss the
   intervening hooks. The durable record is `hook-events.jsonl`;

@@ -37,6 +37,9 @@ _(none yet — see [tutorials/README.md](tutorials/) for planned content)_
 
 ### Explanation — _the why and the what_
 
+- [Why PTY-only execution](explanation/why-pty-only.md) — why every run drives an interactive `claude` REPL inside a PTY, and why the programmatic `claude -p` axis was removed in v0.0.36
+- [The per-stage interactive runtime](explanation/exec-modes.md) — process-spawn cost, context sharing, the step contract, and what hooks add
+- [Bridge architecture](explanation/bridge-architecture.md) — the MCP bridge, SSE broker, and orchestrator behind `--web`
 - [Why project-local pipelines](explanation/why-project-local-pipelines.md) — design rationale for moving from embedded to on-disk specs in v0.0.6
 - [Why setup and update are separate](explanation/why-setup-and-update-are-separate.md) — the v0.0.7 split of `framework update` into two commands
 - [Why streaming events](explanation/why-streaming-events.md) — design rationale for live event streaming in the v0.0.7 pipeline TUI
