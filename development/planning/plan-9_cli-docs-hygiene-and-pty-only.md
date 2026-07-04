@@ -1,7 +1,9 @@
 ---
 plan_id: PLAN-9
 created_at: 2026-07-02
-status: proposed
+implemented_at: 2026-07-04
+status: implemented (v0.0.36)
+implementation_notes: Shipped in v0.0.36. F1 (all three bugs — ape --version, ape update human output, costs help) done. F2 (PTY-only removal) done — deleted runStages/buildArgv/runClaude + the stream-json stdout parse, removed -P/--programmatic, -I/--interactive, --eval (now hidden, error with a pointer to why-pty-only.md), collapsed resolvePipelineMode/describeMode/PipelineMode to the UI axis, deleted runPlain/runWithTUI and the --web -P path, dropped RunOptions.Interactive; programmatic-path tests ported to the interactive PTY shim + a resolveCommitOutcome unit test. F3 substantially done — --output-format on pattern/adr/trait/sessions, hidden stubs, bootstrap --no-picker (deprecated --no-tui alias), exitcodes.go, update-check skip on hidden commands, root Long rewrite, Example blocks; NOT done — cobra Example on *every* command (only touched ones) and costs gaining a yaml output (still human|json). F4 partial (scoped to docs directly affected by the code change) — why-pty-only.md + claude-spawn-modes / invocation-matrix / exec-modes / bridge-architecture / step-contract / tui-keybindings / pipeline-run-manifest refreshed for PTY-only + per-model, indexes updated; DEFERRED F4 items — the first tutorial (tutorials/first-pipeline.md), generated reference/cli.md + its make target, standalone reference/exit-codes.md and cost-model.md, the docs link-check step in make ci-local, and the CHANGELOG v0.0.21 backfill. See v0.0.36 CHANGELOG.
 tags:
   - cli-ux
   - docs
