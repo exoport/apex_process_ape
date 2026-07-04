@@ -8,10 +8,10 @@ tags:
   - bugfix
   - pty-only
   - dependency-removal
-summary: Fix the three shipping CLI bugs (costs help advertises unimplemented subcommands, ape update human output broken by a never-matching type assertion, no root --version), standardize --output-format / exit codes / help text across the command surface, and remove the last non-PTY claude execution path (`buildArgv → runClaude → runStages`, reached via `-P`/`--eval` and the programmatic UI branches). Removal is safe — the apex_process_framework_eval harness was audited on 2026-07-02 and never uses `--eval`/`-P`; it runs `ape pipeline --no-tui` (interactive PTY) and consumes only exit code + manifest.yaml + on-disk artifacts. Companion docs overhaul: fix the ~50%-stale docs index, refresh README, merge duplicate schema references, add CLI/exit-codes/env-vars/cost-model references and the first tutorial.
+summary: Fix the three shipping CLI bugs (costs help advertises unimplemented subcommands, ape update human output broken by a never-matching type assertion, no root --version), standardize --output-format / exit codes / help text across the command surface, and remove the last non-PTY claude execution path (`buildArgv → runClaude → runStages`, reached via `-P`/`--eval` and the programmatic UI branches). Removal is safe — the apex_process_framework_eval harness was audited 2026-07-02 and re-audited 2026-07-03 (post `ape task` migration) and never uses `--eval`/`-P`; it drives ape via `ape task --output-format json` (reads the stdout JSON envelope) and `ape pipeline --no-tui` (interactive PTY; reads manifest.yaml), consuming only the envelope + exit code + manifest.yaml + on-disk artifacts. Companion docs overhaul: fix the ~50%-stale docs index, refresh README, merge duplicate schema references, add CLI/exit-codes/env-vars/cost-model references and the first tutorial.
 origin:
   - 2026-07-02 full project review (see `_output/review-20260702/project-review.md` and companions) — bugs, dead surface, and docs gaps enumerated there.
-  - 2026-07-02 user decision — everything must run through interactive PTY; never `claude -p` nor the SDK. Condition: verify the eval repo first. Verified same day: `/home/diegos/_dev/exoar/apex_process_framework_eval` builds `ape pipeline <name> --no-tui --cwd <tmp>` (`apex_eval/runner.py:792-797`), zero hits for `--eval`/`-P`/`--programmatic`, telemetry read exclusively from `manifest.yaml`. Its own stream-json usage is a direct raw-`claude` path that bypasses ape.
+  - 2026-07-02 user decision — everything must run through interactive PTY; never `claude -p` nor the SDK. Condition: verify the eval repo first. Verified same day, and **re-audited 2026-07-03** after the eval migrated to `ape task` (PLAN-11 / v0.0.27): `/home/diegos/_dev/exoar/apex_process_framework_eval` now drives ape via two surfaces — `ape task <skill> --cwd <tmp> --output-format json` (`apex_eval/runner.py:789`, the primary skill path; consumes the stdout JSON envelope + `returncode == 0`) and `ape pipeline <name> --no-tui --cwd <tmp>` (`runner.py:1072`; consumes exit code + `manifest.yaml`), plus `ape version --output-format json` and `ape framework setup|update`. Repo-wide, **zero** uses of `--eval`/`-P`/`--programmatic`/`--interactive` and no runtime `ape bootstrap`; the eval branches only on 0-vs-non-zero exit codes (never on a specific code), and never parses ape's stream-json stdout (its own stream-json is a direct raw-`claude` path that bypasses ape). The migration made F2 *safer* — `ape task` never carried the removed flags — and F2 preserves `--no-tui` semantics, so the pipeline path is unchanged.
 ---
 
 # PLAN-9: CLI/docs hygiene + PTY-only consolidation
@@ -79,8 +79,9 @@ removed flags produce the pointer error; delete programmatic-path tests.
 **Acceptance.** `grep -rn '"-p"' internal/ | grep -v repl` finds no claude
 spawn with `-p`; the three claude spawn sites reduce to two
 (`internal/repl/repl.go` PTY + `chat.go` inherited-stdio REPL). Eval harness
-still green against the new binary (`ape pipeline <name> --no-tui` on a
-fixture; manifest fields unchanged).
+still green against the new binary — re-run **both** eval surfaces on a
+fixture: `ape task <skill> --output-format json` (JSON envelope + exit 0
+unchanged) and `ape pipeline <name> --no-tui` (manifest fields unchanged).
 
 **Risk.** Anything *outside* the audited eval repo calling `-P`/`--eval`
 breaks loudly with a clear message. Accepted; CHANGELOG entry documents it.
