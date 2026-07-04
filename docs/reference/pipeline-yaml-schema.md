@@ -110,4 +110,5 @@ YAML that doesn't mention `commit:` at any level keeps parsing and now produces 
 
 - [invocation-matrix.md](invocation-matrix.md)
 - [step-contract.md](step-contract.md)
-- [../how-to/authoring-pipelines.md](../how-to/authoring-pipelines.md) (TODO)
+- [pipeline-spec.md](pipeline-spec.md) — the authoring-facing view of the same schema
+- [Your first pipeline](../tutorials/first-pipeline.md) — running a pipeline end to end

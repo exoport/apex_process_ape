@@ -85,8 +85,16 @@ xcompile-windows: ## Cross-compile + cross-vet for Windows; catches portability 
 		  || { echo "FAIL: $$pkg"; exit 1; }; \
 	done
 
+.PHONY: docs-cli
+docs-cli:    ## Regenerate docs/reference/cli.md from the cobra command tree.
+	go run ./cmd/ape gen-docs --out docs/reference/cli.md
+
+.PHONY: docs-check
+docs-check:  ## Verify docs/ links resolve and every doc is reachable from docs/README.md.
+	python3 scripts/check-docs-links.py docs
+
 .PHONY: ci-local
-ci-local: test lint govulncheck xcompile-windows snapshot ## Run every gate CI + release would run (Linux + Windows cross-compile + snapshot).
+ci-local: test lint govulncheck docs-check xcompile-windows snapshot ## Run every gate CI + release would run (Linux + Windows cross-compile + snapshot).
 	@echo
 	@echo "Local CI gates green. Safe to push + tag."
 	@echo "Catches: Linux test failures, lint, vuln, Windows compile-time portability bugs, release-config regressions."

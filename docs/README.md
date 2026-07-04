@@ -15,7 +15,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 
 ### Tutorials — _learning by doing_
 
-_(none yet — see [tutorials/README.md](tutorials/) for planned content)_
+- [Your first pipeline](tutorials/first-pipeline.md) — install → doctor → framework setup → run the `design` pipeline → read the artifacts → `ape costs`
 
 ### How-to guides — _recipes for specific problems_
 
@@ -25,11 +25,14 @@ _(none yet — see [tutorials/README.md](tutorials/) for planned content)_
 - [How to refresh the APEX framework in a project](how-to/framework-update.md)
 - [How to pass arguments to skills](how-to/pass-args-to-skills.md)
 - [How to run a single skill with `ape task`](how-to/run-a-single-skill.md)
+- [How ape runs claude (PTY-only)](how-to/interactive-vs-programmatic.md)
+- [How to read run artefacts](how-to/run-artefacts.md)
 - [How to run `ape doctor` in CI](how-to/run-doctor-in-ci.md)
 - [How to verify a release before tagging](how-to/pre-tag-release.md)
 
 ### Reference — _technical descriptions_
 
+- [CLI reference](reference/cli.md) — every command, flag, and default (generated from the command tree)
 - [Pipeline spec reference](reference/pipeline-spec.md) — schema for `_apex/pipelines/*.yaml`
 - [`framework.yaml` reference](reference/framework-yaml.md) — schema for `_apex/framework.yaml`
 - [Pipeline TUI keybindings](reference/tui-keybindings.md) — `ape pipeline` three-panel display, modes, and key map

@@ -7,7 +7,12 @@ How-to guides are **recipes** — they answer "how do I X?" for a reader who alr
 - [How to install ape](install.md)
 - [How to update ape](update.md)
 - [How to verify a release artifact](verify.md)
+- [How to set up the APEX framework in a project](framework-setup.md)
+- [How to refresh the APEX framework in a project](framework-update.md)
 - [How to pass arguments to skills](pass-args-to-skills.md)
+- [How to run a single skill with `ape task`](run-a-single-skill.md)
+- [How ape runs claude (PTY-only)](interactive-vs-programmatic.md)
+- [How to read run artefacts](run-artefacts.md)
 - [How to run `ape doctor` in CI](run-doctor-in-ci.md)
 - [How to verify a release before tagging](pre-tag-release.md)
 

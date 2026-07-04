@@ -6,11 +6,11 @@ Good ape tutorials hold the reader's hand from "I haven't used ape before" to "I
 
 ## Available tutorials
 
-_(none yet)_
+- [Your first pipeline](first-pipeline.md) — greenfield walk-through: install ape, `ape doctor`, `ape framework setup`, run `ape pipeline design`, read the run artifacts, and `ape costs`.
 
 ## Planned tutorials
 
-- **Your first APEX pipeline.** Greenfield walk-through: install ape, scaffold a tiny project, run `ape pipeline design`, then `governance`, then `epics`. End state: a project with a real PRD, architecture, and an epic story ready to implement.
+- **Beyond design.** Continue the greenfield project through `governance` and `epics`. End state: a project with a real PRD, architecture, and an epic story ready to implement.
 - **Lift a brownfield project.** Use `ape pipeline lift` (when available) on an existing codebase. End state: a brownfield repo with APEX-aware planning artifacts derived from its current state.
 
 ## Writing a tutorial
