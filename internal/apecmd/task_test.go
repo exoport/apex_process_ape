@@ -52,6 +52,24 @@ func TestBuildTaskStep(t *testing.T) {
 	}
 }
 
+// TestResolveHandoffPrompt covers --handoff's mutual exclusion with
+// --prompt, the missing-file case, and the derived pointer prompt.
+func TestResolveHandoffPrompt(t *testing.T) {
+	_, err := resolveHandoffPrompt("some/file.md", true)
+	require.ErrorContains(t, err, "mutually exclusive")
+
+	missing := filepath.Join(t.TempDir(), "does-not-exist.md")
+	_, err = resolveHandoffPrompt(missing, false)
+	require.ErrorContains(t, err, "not found")
+
+	dir := t.TempDir()
+	handoffPath := filepath.Join(dir, "handoff.md")
+	require.NoError(t, os.WriteFile(handoffPath, []byte("# handoff"), 0o644))
+	prompt, err := resolveHandoffPrompt(handoffPath, false)
+	require.NoError(t, err)
+	require.Equal(t, "Read "+handoffPath+" and follow the Resume Protocol inside it.", prompt)
+}
+
 // TestTaskExitCode pins the PLAN-11 exit-code table.
 func TestTaskExitCode(t *testing.T) {
 	require.Equal(t, ExitOK, taskExitCode(nil))
@@ -206,7 +224,7 @@ stages:
 func TestTaskCommandFlagSurface(t *testing.T) {
 	cmd := newTaskCmd()
 	for _, name := range []string{
-		"agent", "model", "args", "prompt", "prompt-flag",
+		"agent", "model", "args", "prompt", "prompt-flag", "handoff",
 		"no-commit", "task-commit", "commit-allow-dirty",
 		"idle-timeout", "output-format", "quiet", "manifest-dir",
 		"ignore-project-settings", "cwd",

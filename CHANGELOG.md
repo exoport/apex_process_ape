@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## v0.0.40 (2026-07-05)
+
+- **feat(cli): `ape task --handoff <file>`** — a shorthand for `--prompt`
+  that points a task at a resumable handoff/context document instead of
+  requiring the caller to type its prompt inline. It checks the file
+  exists and derives the prompt `Read <abs-path> and follow the Resume
+  Protocol inside it.` — the same continuation prompt the `/handoff`
+  skill already suggests when it writes one. It forwards a pointer to
+  the file rather than inlining its contents: the prompt is typed into
+  the `claude` REPL as literal PTY keystrokes, so a multi-line value
+  would risk submitting early. Mutually exclusive with `--prompt`, and
+  still requires `--prompt-flag` to actually reach the skill (exit code
+  2 on either misuse, or when the file doesn't exist). Docs updated:
+  `docs/how-to/run-a-single-skill.md`, `docs/reference/cli.md`.
+
 ## v0.0.39 (2026-07-04)
 
 - **fix(cli): `ape chat` no longer fails silently** — its `RunE` returned

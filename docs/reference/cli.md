@@ -159,6 +159,9 @@ terminal for its lifetime — there is no detach/reattach. To run
 claude in the background, use a real terminal multiplexer
 separately (e.g. wrap ape chat in tmux or screen).
 
+Exit codes: 0 success · 1 claude/bridge failure · 2 usage or preflight
+error (no _apex/config.yaml, bad cwd).
+
 Flags:
 
 | Flag | Type | Default | Description |
@@ -708,6 +711,12 @@ Commit control is two-layered:
 Run artifacts land under <project>/_output/tasks/<skill>/<run-id>/
 (manifest.yaml, per-step ndjson, runlog streams).
 
+--handoff <file> is a shorthand for --prompt: it checks the file
+exists and derives the prompt "Read <abs-path> and follow the Resume
+Protocol inside it." (the same continuation prompt the /handoff skill
+suggests). It still requires --prompt-flag to actually reach the
+skill, and is mutually exclusive with --prompt.
+
 Exit codes: 0 success · 1 run failed or idle timeout · 2 usage or
 preflight error · 3 REPL never became ready (last pane on stderr).
 
@@ -716,6 +725,7 @@ Examples:
 ```
   ape task apex-shard-doc --args "--doc prd"
   ape task apex-create-prd --agent apex-agent-pm --model "opus[1m]" --prompt "a greeter CLI" --prompt-flag --prompt
+  ape task apex-create-prd --agent apex-agent-pm --handoff _output/handoffs/2026-07-05-x.md --prompt-flag --prompt
   ape task apex-shard-doc --task-commit "chore: shard prd"
   ape task apex-create-prd --agent apex-agent-pm --output-format json
 ```
@@ -728,6 +738,7 @@ Flags:
 | `--args` | string | `—` | Verbatim skill args appended to the invocation (whitespace-separated) |
 | `--commit-allow-dirty` | bool | `false` | Bypass the dirty-tree gate (relevant only with --task-commit) |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--handoff` | string | `—` | Path to a handoff/context file; derives a "Read <path> and follow the Resume Protocol" --prompt value (mutually exclusive with --prompt) |
 | `--idle-timeout` | duration | `0s` | Idle-without-Stop backstop (e.g. 15m); default matches pipeline (60m) |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
 | `--manifest-dir` | string | `—` | Override the run-artifact base dir (default: <project>/_output/tasks) |

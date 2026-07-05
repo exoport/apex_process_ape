@@ -30,6 +30,24 @@ ape task apex-create-prd \
 `--prompt-flag` names the skill flag the `--prompt` value is forwarded
 through (the `prompt_flag:` spec field equivalent).
 
+## Resuming from a handoff file
+
+```bash
+ape task apex-create-prd \
+  --agent apex-agent-pm \
+  --handoff _output/handoffs/2026-07-05-x-handoff.md --prompt-flag --prompt
+```
+
+`--handoff <file>` is a shorthand for `--prompt`: it checks the file
+exists and derives the prompt `Read <abs-path> and follow the Resume
+Protocol inside it.` — the same continuation prompt the `/handoff`
+skill itself suggests when it writes a handoff doc. It still needs
+`--prompt-flag` to actually reach the skill, and is mutually exclusive
+with `--prompt` (exit code 2 if both are given, or if the file doesn't
+exist). It intentionally forwards a pointer to the file rather than
+inlining its contents — the prompt is typed into the REPL as literal
+keystrokes, and a multi-line value risks submitting early.
+
 ## Commit control — two independent layers
 
 - `--no-commit` — **skill layer**: tells the skill/framework not to

@@ -33,6 +33,7 @@ func newTaskCmd() *cobra.Command {
 		argsFlag           string
 		promptFlag         string
 		promptFlagName     string
+		handoffFlag        string
 		noCommitFlag       bool
 		taskCommitFlag     string
 		allowDirtyFlag     bool
@@ -64,10 +65,17 @@ Commit control is two-layered:
 Run artifacts land under <project>/_output/tasks/<skill>/<run-id>/
 (manifest.yaml, per-step ndjson, runlog streams).
 
+--handoff <file> is a shorthand for --prompt: it checks the file
+exists and derives the prompt "Read <abs-path> and follow the Resume
+Protocol inside it." (the same continuation prompt the /handoff skill
+suggests). It still requires --prompt-flag to actually reach the
+skill, and is mutually exclusive with --prompt.
+
 Exit codes: 0 success · 1 run failed or idle timeout · 2 usage or
 preflight error · 3 REPL never became ready (last pane on stderr).`,
 		Example: `  ape task apex-shard-doc --args "--doc prd"
   ape task apex-create-prd --agent apex-agent-pm --model "opus[1m]" --prompt "a greeter CLI" --prompt-flag --prompt
+  ape task apex-create-prd --agent apex-agent-pm --handoff _output/handoffs/2026-07-05-x.md --prompt-flag --prompt
   ape task apex-shard-doc --task-commit "chore: shard prd"
   ape task apex-create-prd --agent apex-agent-pm --output-format json`,
 		Args: cobra.ExactArgs(1),
@@ -84,6 +92,14 @@ preflight error · 3 REPL never became ready (last pane on stderr).`,
 					return fmt.Errorf("cannot determine working directory: %w", err)
 				}
 				projectRoot = wd
+			}
+			if handoffFlag != "" {
+				prompt, err := resolveHandoffPrompt(handoffFlag, cmd.Flags().Changed("prompt"))
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+					os.Exit(ExitUsage)
+				}
+				promptFlag = prompt
 			}
 			var taskCommit *pipeline.CommitDirective
 			if cmd.Flags().Changed("task-commit") {
@@ -122,6 +138,7 @@ preflight error · 3 REPL never became ready (last pane on stderr).`,
 	cmd.Flags().StringVar(&argsFlag, "args", "", "Verbatim skill args appended to the invocation (whitespace-separated)")
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Run prompt forwarded via --prompt-flag (same semantics as pipeline --prompt)")
 	cmd.Flags().StringVar(&promptFlagName, "prompt-flag", "", "Skill flag name the --prompt value is forwarded through (spec prompt_flag equivalent)")
+	cmd.Flags().StringVar(&handoffFlag, "handoff", "", "Path to a handoff/context file; derives a \"Read <path> and follow the Resume Protocol\" --prompt value (mutually exclusive with --prompt)")
 	cmd.Flags().BoolVar(&noCommitFlag, "no-commit", false, "Skill layer: tell the skill/framework not to commit (adds skill-level --no-commit on the agent path)")
 	cmd.Flags().StringVar(&taskCommitFlag, "task-commit", "", "Task layer: commit the complete task at the end; bare flag derives \"ape:task/<skill>\"")
 	cmd.Flags().Lookup("task-commit").NoOptDefVal = taskCommitDerivedSentinel
@@ -154,6 +171,25 @@ type taskOptions struct {
 	projectRoot           string
 	manifestDir           string
 	ignoreProjectSettings bool
+}
+
+// resolveHandoffPrompt derives the --prompt value from --handoff: a
+// pointer prompt at the file's absolute path, matching the /handoff
+// skill's own suggested continuation prompt. Embedding the file's full
+// content instead would risk a premature Enter mid-typing, since the
+// prompt is typed into the REPL as literal PTY keystrokes.
+func resolveHandoffPrompt(handoff string, promptChanged bool) (string, error) {
+	if promptChanged {
+		return "", errors.New("--handoff and --prompt are mutually exclusive")
+	}
+	absPath, err := filepath.Abs(handoff)
+	if err != nil {
+		return "", fmt.Errorf("resolve --handoff path: %w", err)
+	}
+	if _, err := os.Stat(absPath); err != nil {
+		return "", fmt.Errorf("--handoff file not found: %s", absPath)
+	}
+	return fmt.Sprintf("Read %s and follow the Resume Protocol inside it.", absPath), nil
 }
 
 // buildTaskStep maps taskOptions onto a pipeline.Step. The skill-layer
