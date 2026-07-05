@@ -1,7 +1,7 @@
 ---
 name: release
 description: 'Full release workflow for ape: pre-flight checks (clean tree, CHANGELOG, no duplicate tag) → local CI gate (make ci-local) → push main → poll push CI → final tag → poll release workflow → cosign signature verification. Use when the user says "/release", "cut a release", "tag a release", or "ship vX.Y.Z".'
-argument-hint: "Optional: version to release (e.g. v0.0.22). Detected from CHANGELOG.md if omitted."
+argument-hint: "Optional: version to release (e.g. v0.0.22) and/or the word \"autonomous\" to skip all confirmation gates. Version is detected from CHANGELOG.md if omitted. Order doesn't matter (e.g. \"v0.0.22 autonomous\" or \"autonomous\")."
 ---
 
 # Release
@@ -15,9 +15,9 @@ The rc-tag pre-release gate that earlier versions of this skill used was dropped
 ## CRITICAL RULES
 
 - MANDATORY: Execute ALL steps in the EXECUTION section IN EXACT ORDER
-- HALT immediately at any HALT-condition; state the reason and what to fix before the user re-runs
-- ASK the user for confirmation at every Phase boundary where specified — never skip a confirmation gate
-- DO NOT push final tags or create GitHub Releases autonomously; always confirm with the user first
+- HALT immediately at any HALT-condition; state the reason and what to fix before the user re-runs — this applies identically in autonomous mode, HALT conditions are never skipped, only confirmation gates are
+- ASK the user for confirmation at every Phase boundary where specified — never skip a confirmation gate — UNLESS `{autonomous}` is true (Phase 0), in which case skip every confirmation gate (Phases 1h, 3, 5) and proceed straight through, still announcing each step as you take it
+- DO NOT push final tags or create GitHub Releases without confirming with the user first, UNLESS the user's invocation explicitly requested autonomous mode (the literal word "autonomous" in the skill arguments) — that is the standing authorization for this run
 - DO NOT amend published commits or tags
 - DO NOT create rc/pre-release tags (`vX.Y.Z-rcN`). The rc cycle has been removed
 - Only use the Bash tool for shell commands
@@ -30,13 +30,15 @@ The rc-tag pre-release gate that earlier versions of this skill used was dropped
 
 ### Phase 0 — Parse arguments and gather constants
 
-1. Read `$ARGUMENTS`. If it matches `v[0-9]+\.[0-9]+\.[0-9]+`, set `{version}` = that value. Otherwise set `{version}` = "" (to be resolved in Phase 1).
-2. Capture the GitHub repo slug:
+1. Read `$ARGUMENTS`. Check case-insensitively for the standalone word `autonomous` (e.g. "autonomous", "release autonomous", "v0.0.22 autonomous"). Set `{autonomous}` = true if present, else false. Remove that word from the string before the next check.
+2. In what remains of `$ARGUMENTS`, if it matches `v[0-9]+\.[0-9]+\.[0-9]+`, set `{version}` = that value. Otherwise set `{version}` = "" (to be resolved in Phase 1).
+3. If `{autonomous}` is true, tell the user up front: "Running in autonomous mode — no confirmation gates, will push main, tag, and publish the release without stopping." This is not a confirmation ask, just a heads-up before Phase 1 starts.
+4. Capture the GitHub repo slug:
    ```bash
    git remote get-url origin
    ```
    Parse `{owner}/{repo}` from the URL (handles both HTTPS and SSH forms). Set `{repo_slug}` = `diegosz/apex_process_ape` (verify against the parsed value; fail loud if they differ).
-3. Set `{api_base}` = `https://api.github.com/repos/{repo_slug}`.
+5. Set `{api_base}` = `https://api.github.com/repos/{repo_slug}`.
 
 ---
 
@@ -129,7 +131,9 @@ Pre-flight checks passed:
   CHANGELOG: <first 80 chars of the matching CHANGELOG line>
 ```
 
-Ask: "Proceed with `make ci-local`? (this takes ~30–60 s)" — wait for confirmation.
+If `{autonomous}` is false: ask "Proceed with `make ci-local`? (this takes ~30–60 s)" — wait for confirmation.
+
+If `{autonomous}` is true: skip the ask, state "Autonomous mode — proceeding with `make ci-local`." and continue immediately.
 
 ---
 
@@ -149,7 +153,9 @@ On success inform the user: "Local CI gate passed."
 
 ### Phase 3 — Push main
 
-Ask: "Local gate passed. Push main?" — wait for confirmation.
+If `{autonomous}` is false: ask "Local gate passed. Push main?" — wait for confirmation.
+
+If `{autonomous}` is true: skip the ask, state "Autonomous mode — pushing main." and continue immediately.
 
 ```bash
 git push origin main
@@ -206,7 +212,9 @@ On CI success inform the user: "Remote CI passed for `{head_sha}` on main."
 
 ### Phase 5 — Final tag
 
-Ask: "CI is green. Create and push the final release tag `{version}`?" — wait for confirmation.
+If `{autonomous}` is false: ask "CI is green. Create and push the final release tag `{version}`?" — wait for confirmation.
+
+If `{autonomous}` is true: skip the ask, state "Autonomous mode — creating and pushing the final tag `{version}`." and continue immediately.
 
 #### 5a — Extract release notes headline from CHANGELOG.md
 
