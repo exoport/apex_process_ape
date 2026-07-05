@@ -1,6 +1,6 @@
 # How to install ape
 
-ape ships as a single static binary. Three install paths cover most environments. Linux x64 is the primary target; macOS and Windows builds are published with each release.
+ape ships as a single static binary. Four install paths cover most environments. Linux x64 is the primary target; macOS and Windows builds are published with each release.
 
 ## Option 1 — Release tarball (recommended)
 
@@ -17,7 +17,19 @@ To pin a specific version, set `VERSION` directly: `VERSION=v0.0.6`.
 
 The Linux asset is `ape_linux_amd64.tar.gz`. Replace with `ape_darwin_amd64.tar.gz`, `ape_darwin_arm64.tar.gz`, or `ape_windows_amd64.zip` as needed (Windows uses zip, not tar.gz).
 
-## Option 2 — `go install`
+## Option 2 — Pin via `bingo` (recommended for project repos)
+
+If you want a specific ape version checked into a project's own tooling (so every contributor and CI run gets the same binary), use [bingo](https://github.com/bwplotka/bingo):
+
+```bash
+# In your project repo:
+bingo get -l github.com/diegosz/apex_process_ape/cmd/ape@latest
+# or a specific release tag, e.g. v0.0.38
+```
+
+This adds a per-tool `.mod` file under `.bingo/` and a `Makefile`-friendly variable for invoking the pinned binary, the same pattern this repo itself uses for its own dev tooling (see `.bingo/Variables.mk`). Commit the generated `.bingo/` files so the pin travels with the repo.
+
+## Option 3 — `go install`
 
 If you have a Go toolchain (1.26 or later):
 
@@ -27,7 +39,7 @@ go install github.com/diegosz/apex_process_ape/cmd/ape@latest
 
 The binary lands at `$(go env GOPATH)/bin/ape`. Make sure that directory is on your `$PATH`. Note that `go install`-built binaries report `Version=dev` from `ape version` rather than a release tag — they're built from source without goreleaser's ldflags.
 
-## Option 3 — Build from source
+## Option 4 — Build from source
 
 ```bash
 git clone https://github.com/diegosz/apex_process_ape.git
