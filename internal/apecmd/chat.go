@@ -61,21 +61,30 @@ While attached:
 ape exits when claude exits. The chat session is bound to this
 terminal for its lifetime — there is no detach/reattach. To run
 claude in the background, use a real terminal multiplexer
-separately (e.g. wrap ape chat in tmux or screen).`,
+separately (e.g. wrap ape chat in tmux or screen).
+
+Exit codes: 0 success · 1 claude/bridge failure · 2 usage or preflight
+error (no _apex/config.yaml, bad cwd).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			projectRoot := cwdFlag
 			if projectRoot == "" {
 				wd, err := os.Getwd()
 				if err != nil {
-					return fmt.Errorf("cannot determine working directory: %w", err)
+					fmt.Fprintf(os.Stderr, "Error: cannot determine working directory: %s\n", err)
+					os.Exit(ExitUsage)
 				}
 				projectRoot = wd
 			}
 			cfgPath := filepath.Join(projectRoot, "_apex", "config.yaml")
 			if _, err := os.Stat(cfgPath); err != nil {
-				return fmt.Errorf("ape chat requires a project root with _apex/config.yaml; not found at %s", cfgPath)
+				fmt.Fprintf(os.Stderr, "Error: ape chat requires a project root with _apex/config.yaml; not found at %s\n", cfgPath)
+				os.Exit(ExitUsage)
 			}
-			return runChat(cmd.Context(), projectRoot, modelFlag, ignoreProjectSettings)
+			if err := runChat(cmd.Context(), projectRoot, modelFlag, ignoreProjectSettings); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+				os.Exit(ExitRunFailed)
+			}
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&modelFlag, "model", "", "Initial claude model (e.g. \"opus[1m]\"); falls back to claude's default when empty.")

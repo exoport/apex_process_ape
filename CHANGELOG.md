@@ -1,6 +1,19 @@
 # CHANGELOG
 
-## v0.0.38 (2026-07-04)
+## v0.0.39 (2026-07-04)
+
+- **fix(cli): `ape chat` no longer fails silently** — its `RunE` returned
+  a bare `error` on the two preflight checks (unresolvable cwd, missing
+  `_apex/config.yaml`), and `cmd/ape/main.go` discarded whatever
+  `Execute()` returned without printing it. Combined with the root
+  command's `SilenceErrors: true`, the result was `exit 1` with zero
+  output — e.g. running `ape chat` outside an APEX project gave no clue
+  why. Fixed at both layers: `chat.go` now prints the message and exits
+  with the correct code from the shared table (`ExitUsage` for the two
+  preflight checks, `ExitRunFailed` for a `runChat` failure), matching
+  the `task`/`pipeline` convention; `main.go` now prints any error that
+  still escapes `Execute()` as a last-resort net, so a future command
+  that forgets to self-report can't fail silently either.
 
 Framework repo layout: `ape framework setup` / `update` / `status --repo`
 now read the **released** framework layout, where `.claude/` and `_apex/`
