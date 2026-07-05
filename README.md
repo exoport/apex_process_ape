@@ -21,6 +21,14 @@ ape version
 
 For macOS, Windows, `go install`, or build-from-source paths, see [docs/how-to/install.md](docs/how-to/install.md).
 
+The other recommended install path is to pin a specific release in your project repo using [bingo](https://github.com/bwplotka/bingo):
+
+```bash
+# In your project repo:
+bingo get -l github.com/diegosz/apex_process_ape/cmd/ape@latest 
+# or a specific release tag, e.g. v0.0.38
+```
+
 ## Quickstart
 
 `ape` operates on the working directory. The first time you use ape against an APEX-bootstrapped project, install the framework:
@@ -88,22 +96,22 @@ Keybindings:
 
 ## Commands
 
-| Command                | What it does                                                                             |
-| ---------------------- | ---------------------------------------------------------------------------------------- |
-| `ape framework setup`  | One-time install: copy skills + pipelines into a project, bootstrap `_apex/config.yaml`. |
-| `ape framework update` | Refresh skills + pipelines against the framework repo (preserves config.yaml).           |
-| `ape framework status` | Inspect the installed framework version + drift report.                                  |
-| `ape pipeline [name]`  | List installed pipelines; with a name, run the named pipeline.                           |
-| `ape task <skill>`     | Run a single framework skill (no pipeline YAML) through the interactive PTY runner.     |
-| `ape adr`              | Manage Architecture Decision Records (`list`, `validate`, `new`).                        |
-| `ape pattern`          | Manage governance patterns (`list`).                                                     |
-| `ape trait`            | Inspect APEX traits (`list`, `show`, `validate`, `conflicts`).                           |
-| `ape sync`             | Sync governance artifacts (placeholder — `patterns` and `adrs` coming soon).             |
-| `ape bootstrap`        | Bootstrap governance artifacts from declared traits.                                     |
+| Command                | What it does                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------------ |
+| `ape framework setup`  | One-time install: copy skills + pipelines into a project, bootstrap `_apex/config.yaml`.   |
+| `ape framework update` | Refresh skills + pipelines against the framework repo (preserves config.yaml).             |
+| `ape framework status` | Inspect the installed framework version + drift report.                                    |
+| `ape pipeline [name]`  | List installed pipelines; with a name, run the named pipeline.                             |
+| `ape task <skill>`     | Run a single framework skill (no pipeline YAML) through the interactive PTY runner.        |
+| `ape adr`              | Manage Architecture Decision Records (`list`, `validate`, `new`).                          |
+| `ape pattern`          | Manage governance patterns (`list`).                                                       |
+| `ape trait`            | Inspect APEX traits (`list`, `show`, `validate`, `conflicts`).                             |
+| `ape sync`             | Sync governance artifacts (placeholder — `patterns` and `adrs` coming soon).               |
+| `ape bootstrap`        | Bootstrap governance artifacts from declared traits.                                       |
 | `ape doctor`           | Probe the local environment for prerequisites; report per-check verdict (human/json/yaml). |
-| `ape update`           | Self-update to the latest release.                                                       |
-| `ape rollback`         | Roll back to the previously installed binary.                                            |
-| `ape version`          | Print version, build date, and git commit.                                               |
+| `ape update`           | Self-update to the latest release.                                                         |
+| `ape rollback`         | Roll back to the previously installed binary.                                              |
+| `ape version`          | Print version, build date, and git commit.                                                 |
 
 Run `ape <command> --help` for command-specific flags.
 
