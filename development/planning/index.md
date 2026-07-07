@@ -3,7 +3,7 @@
 | ID      | Title                                                   | Status   | Created    |
 | ------- | ------------------------------------------------------- | -------- | ---------- |
 | PLAN-17 | Reporting CLI — event/log/metrics/transcript + identity | proposed | 2026-07-02 |
-| PLAN-16 | gVisor-sandboxed sessions + per-job `~/.claude`         | proposed | 2026-07-02 |
+| PLAN-16 | Kata VM workspaces (local dev) — Platform Phase 1       | proposed | 2026-07-02 |
 | PLAN-15 | `ape script` — yaegi orchestration scripts              | proposed | 2026-07-02 |
 | PLAN-14 | `ape service` — NATS micro job daemon                   | proposed | 2026-07-02 |
 | PLAN-13 | NATS progress events + transcript blobs                 | proposed | 2026-07-02 |
@@ -27,9 +27,14 @@ task --output-format json` unblock the eval repo's migration off raw
 `claude -p`; PLAN-9/10 are not prerequisites). Then PLAN-9 → PLAN-10 →
 PLAN-12 → PLAN-13 → PLAN-14; PLAN-15 after PLAN-11/12 (its library wraps
 them) and before/with PLAN-14's `script.run`;
-PLAN-16 with or immediately after PLAN-14 (its `--isolate` flag also works
-for local runs, but the service is the driving consumer — research in
-`development/pending/sandbox-isolation-20260702.md`).
+PLAN-16 (reframed 2026-07-07): **Kata VM workspaces for local dev — Phase 1
+of the APEX Process Platform** (north-star in the separate
+`apex_process_platform` repo, `draft/00-05`). Now independent of PLAN-14
+(the workspace *is* the environment; you run jobs inside it). kata-only;
+reuses the composer/proxy/profile/OCI-spec already built; drops the gVisor
+runner. Research: `development/pending/sandbox-qemu-vs-kata-20260706.md`
+(+ `sandbox-isolation-20260702.md`). Phases 2–4 (in-VM NATS worker, Netbird
+overlays, previews/staging, device tier) live in the platform repo.
 PLAN-17 after PLAN-10 + PLAN-13 (it consumes their scan/discovery and
 natsconn/eventing/blobstore), parallel to PLAN-14 — but its identity
 amendments (user token in subjects, `session` kind, payload

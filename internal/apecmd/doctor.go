@@ -133,6 +133,10 @@ var allChecks = []doctorCheck{
 	{Name: "pipelines.project", Run: checkPipelinesProject},
 	{Name: "permissions.home_claude", Run: checkPermissionsHomeClaude},
 	{Name: "ape.update_available", Run: checkApeUpdateAvailable},
+	{Name: "kvm.available", Run: checkKVMAvailable},
+	{Name: "containerd.running", Run: checkContainerdRunning},
+	{Name: "kata.runtime", Run: checkKataRuntime},
+	{Name: "sandbox.image", Run: checkSandboxImage},
 }
 
 func newDoctorCmd() *cobra.Command {

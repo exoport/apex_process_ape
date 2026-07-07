@@ -51,6 +51,26 @@ plan can layer in per-session bearer tokens. The IPC abstraction is
 small enough that adding a `Authorization: Bearer <token>` header on
 SSE / POST handlers is a one-package change.
 
+## Inside a sandbox workspace
+
+When the bridge runs *inside* an `ape sandbox` Kata VM workspace (PLAN-16),
+the localhost-only bind gets stronger, not weaker: `127.0.0.1` is now the
+workspace VM's own network namespace, so "another process under the same uid"
+means another process **inside that VM** — a hardware boundary (own guest
+kernel, KVM) separates it from the host. The "containers exposing 127.0.0.1
+to the host network namespace" caveat above does not apply — a Kata workspace
+has its own kernel and netstack, not a shared host one.
+
+Public egress from the workspace is governed separately by the
+deny-by-default CONNECT proxy + domain allowlist (`network.authorized_domains`),
+audited to `egress-audit.jsonl`. The two compose: the bridge is a private
+loopback surface inside the VM; the proxy is the public-egress gate.
+
+See [How to run a sandboxed Kata VM workspace](../how-to/sandbox-workspaces.md)
+and the [sandbox profile reference](sandbox-profile.md). Kata workspaces are
+Phase 1 of the APEX Process Platform; later phases (Netbird overlay
+networking, in-VM NATS workers) live in the `apex_process_platform` repo.
+
 ## Reading further
 
 - `docs/reference/bridge-ipc.md` — wire schema between parent and

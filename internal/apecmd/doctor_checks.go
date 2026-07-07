@@ -11,6 +11,7 @@ import (
 
 	"github.com/diegosz/apex_process_ape/internal/framework"
 	"github.com/diegosz/apex_process_ape/internal/pipeline"
+	"github.com/diegosz/apex_process_ape/internal/sandbox"
 	"github.com/diegosz/apex_process_ape/internal/updatecache"
 )
 
@@ -304,6 +305,98 @@ func checkApeUpdateAvailable(_ context.Context, _ doctorEnv) CheckResult {
 	return CheckResult{
 		Status:  StatusOK,
 		Message: fmt.Sprintf("on latest (%s)", entry.LatestVersion),
+	}
+}
+
+// ---- Sandbox (Kata VM workspace) checks -----------------------------------
+//
+// These probe the host prerequisites for `ape sandbox` (PLAN-16 D8). They
+// are non-required and degrade to INFO on non-Linux hosts and when the
+// sandbox toolchain isn't installed, so `ape doctor` stays green for users
+// who don't use workspaces while still surfacing setup gaps for those who do.
+// Probes are deliberately non-blocking (stat + LookPath, no daemon
+// round-trips) so doctor never hangs on an unresponsive containerd.
+
+// checkKVMAvailable verifies /dev/kvm exists and is openable by the current
+// user (the kvm group). Kata microVMs need KVM.
+func checkKVMAvailable(_ context.Context, env doctorEnv) CheckResult {
+	if env.OS != "linux" {
+		return CheckResult{Status: StatusInfo, Message: fmt.Sprintf("sandbox workspaces are Linux-only; not probed on %s", env.OS)}
+	}
+	const dev = "/dev/kvm"
+	if _, err := os.Stat(dev); err != nil {
+		if os.IsNotExist(err) {
+			return CheckResult{Status: StatusInfo, Message: dev + " absent (no KVM; Kata workspaces unavailable on this host)"}
+		}
+		return CheckResult{Status: StatusWarn, Message: fmt.Sprintf("stat %s: %v", dev, err)}
+	}
+	f, err := os.OpenFile(dev, os.O_RDWR, 0)
+	if err != nil {
+		return CheckResult{
+			Status:      StatusWarn,
+			Message:     fmt.Sprintf("%s present but not accessible (%v)", dev, err),
+			Remediation: "Add your user to the kvm group so Kata can open /dev/kvm, then log out and back in.",
+			FixCommand:  "sudo usermod -aG kvm $USER",
+		}
+	}
+	_ = f.Close()
+	return CheckResult{Status: StatusOK, Message: dev + " present and accessible"}
+}
+
+// checkContainerdRunning verifies the nerdctl driver is installed. ape drives
+// Kata by shelling out to nerdctl; containerd is a host prerequisite, not a
+// Go dependency. Presence is checked without a daemon round-trip.
+func checkContainerdRunning(_ context.Context, env doctorEnv) CheckResult {
+	if env.OS != "linux" {
+		return CheckResult{Status: StatusInfo, Message: "not probed on non-Linux"}
+	}
+	path, err := exec.LookPath("nerdctl")
+	if err != nil {
+		return CheckResult{
+			Status:      StatusInfo,
+			Message:     "nerdctl not on PATH (sandbox workspaces need containerd + nerdctl)",
+			Remediation: "Install containerd and nerdctl — ape shells out to nerdctl to drive Kata.",
+		}
+	}
+	return CheckResult{Status: StatusOK, Message: path}
+}
+
+// checkKataRuntime looks for a Kata containerd shim on PATH — the lightweight
+// proxy for "the io.containerd.kata-*.v2 runtime is installed".
+func checkKataRuntime(_ context.Context, env doctorEnv) CheckResult {
+	if env.OS != "linux" {
+		return CheckResult{Status: StatusInfo, Message: "not probed on non-Linux"}
+	}
+	for _, shim := range []string{
+		"containerd-shim-kata-clh-v2",
+		"containerd-shim-kata-qemu-v2",
+		"containerd-shim-kata-v2",
+	} {
+		if p, err := exec.LookPath(shim); err == nil {
+			return CheckResult{Status: StatusOK, Message: p}
+		}
+	}
+	return CheckResult{
+		Status:      StatusInfo,
+		Message:     "no Kata containerd shim on PATH (io.containerd.kata-*.v2)",
+		Remediation: "Install Kata Containers (kata-deploy or distro packages) to provision workspaces.",
+	}
+}
+
+// checkSandboxImage reports how to confirm the official ape-sandbox image is
+// pulled. It stays informational: inspecting the image store needs a
+// containerd round-trip that may require privileges and could hang, which a
+// health probe must not risk.
+func checkSandboxImage(_ context.Context, env doctorEnv) CheckResult {
+	if env.OS != "linux" {
+		return CheckResult{Status: StatusInfo, Message: "not probed on non-Linux"}
+	}
+	if _, err := exec.LookPath("nerdctl"); err != nil {
+		return CheckResult{Status: StatusInfo, Message: "nerdctl absent; cannot locate the ape-sandbox image"}
+	}
+	return CheckResult{
+		Status:  StatusInfo,
+		Message: fmt.Sprintf("confirm with `nerdctl images %s` (or set image: in the profile)", sandbox.DefaultImage),
 	}
 }
 

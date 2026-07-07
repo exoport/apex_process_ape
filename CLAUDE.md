@@ -17,6 +17,8 @@ Guidance for Claude Code when working in this repository.
 | `internal/output/`        | Output-format helpers (human / json / yaml).                                                        |
 | `internal/updatecache/`   | Cache layer for the background update-check.                                                        |
 | `internal/trait/`         | Trait inspection helpers.                                                                           |
+| `internal/sandbox/`       | `ape sandbox` Kata VM workspaces (PLAN-16): profile, `~/.claude`/git composer, OCI-config + nerdctl command builder, CONNECT egress proxy, workspace registry. |
+| `images/ape-sandbox/`     | Dockerfile + entrypoint for the official `ape-sandbox` workspace image (PLAN-16 D6).                |
 | `testdata/`               | Test fixtures consumed by `_test.go` files.                                                         |
 | `docs/`                   | User-facing docs (Diátaxis-structured — see `docs/README.md`).                                      |
 | `.github/workflows/`      | `ci.yml` (build + test + lint + govulncheck on push/PR + rc-tag) and `release.yml` (goreleaser on final-semver tag `vX.Y.Z` only). |

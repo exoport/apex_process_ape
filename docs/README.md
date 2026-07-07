@@ -25,6 +25,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [How to refresh the APEX framework in a project](how-to/framework-update.md)
 - [How to pass arguments to skills](how-to/pass-args-to-skills.md)
 - [How to run a single skill with `ape task`](how-to/run-a-single-skill.md)
+- [How to run a sandboxed Kata VM workspace](how-to/sandbox-workspaces.md)
 - [How ape runs claude (PTY-only)](how-to/interactive-vs-programmatic.md)
 - [How to read run artefacts](how-to/run-artefacts.md)
 - [How to run `ape doctor` in CI](how-to/run-doctor-in-ci.md)
@@ -35,6 +36,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [CLI reference](reference/cli.md) — every command, flag, and default (generated from the command tree)
 - [Pipeline spec reference](reference/pipeline-spec.md) — schema for `_apex/pipelines/*.yaml`
 - [`framework.yaml` reference](reference/framework-yaml.md) — schema for `_apex/framework.yaml`
+- [Sandbox profile reference](reference/sandbox-profile.md) — schema for `_apex/sandbox/*.yaml` (Kata VM workspaces)
 - [Pipeline TUI keybindings](reference/tui-keybindings.md) — `ape pipeline` three-panel display, modes, and key map
 - [Claude Code environment variables](reference/claude-code-env-vars.md) — `CLAUDECODE` / `CLAUDE_CODE_*`, nested-session protection, and why ape scrubs them from spawned sessions
 

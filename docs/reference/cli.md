@@ -37,6 +37,7 @@ Subcommands:
 - `pipeline` — List or run an APEX pipeline
 - `planning` — Show the planning pipeline diagram
 - `rollback` — Rollback ape to the previous version
+- `sandbox` — Provision and operate hardware-isolated Kata VM workspaces
 - `sessions` — List, prune, or open the URL of live ape sessions
 - `sync` — Sync governance artifacts
 - `task` — Run a single framework skill through the interactive PTY runner
@@ -601,6 +602,148 @@ ape rollback
 ```
 
 Restore the backup binary created during the last update.
+
+## ape sandbox
+
+Provision and operate hardware-isolated Kata VM workspaces
+
+```
+ape sandbox
+```
+
+Provision and operate long-lived, hardware-isolated Kata microVM
+workspaces (own guest kernel, KVM) for local development.
+
+A workspace is a durable VM you attach to and reuse — not an ephemeral
+per-command sandbox. It mounts your project (host-fs by default), a
+per-workspace composed ~/.claude, and controlled public egress; you SSH /
+VS Code Remote in and run Claude Code, APEX pipelines, or Playwright inside.
+
+  ape sandbox up <name>      Provision a workspace from a profile
+  ape sandbox ls             List provisioned workspaces
+  ape sandbox attach <name>  Open an interactive shell inside a workspace
+  ape sandbox ssh <name>     SSH into a workspace over its forwarded port
+  ape sandbox exec <name> -- <cmd>...   Run a command inside a workspace
+  ape sandbox pause <name>   Suspend a workspace microVM
+  ape sandbox resume <name>  Resume a paused workspace
+  ape sandbox down <name>    Tear a workspace down
+
+Requires Linux with KVM + containerd + Kata — run 'ape doctor' to check.
+Profiles live in _apex/sandbox/<name>.yaml.
+
+Subcommands:
+
+- `attach` — Open an interactive shell inside a workspace
+- `down` — Tear a workspace down
+- `exec` — Run a command inside a workspace
+- `ls` — List provisioned workspaces
+- `pause` — Suspend a workspace microVM
+- `resume` — Resume a paused workspace
+- `ssh` — SSH into a workspace over its forwarded loopback port
+- `up` — Provision a Kata workspace from a profile
+
+## ape sandbox attach
+
+Open an interactive shell inside a workspace
+
+```
+ape sandbox attach <name> [flags]
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--shell` | string | `/bin/bash` | Login shell to open |
+
+## ape sandbox down
+
+Tear a workspace down
+
+```
+ape sandbox down <name>
+```
+
+Force-remove the workspace container and drop its registry entry and
+composed home. A persistent volume (mount: volume) is left in place — remove
+it manually with 'nerdctl volume rm' if you want to discard its data.
+
+## ape sandbox exec
+
+Run a command inside a workspace
+
+```
+ape sandbox exec <name> -- <cmd>...
+```
+
+## ape sandbox ls
+
+List provisioned workspaces
+
+```
+ape sandbox ls [flags]
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape sandbox pause
+
+Suspend a workspace microVM
+
+```
+ape sandbox pause <name>
+```
+
+## ape sandbox resume
+
+Resume a paused workspace
+
+```
+ape sandbox resume <name>
+```
+
+## ape sandbox ssh
+
+SSH into a workspace over its forwarded loopback port
+
+```
+ape sandbox ssh <name> [flags]
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--user` | string | `ape` | SSH user inside the workspace |
+
+## ape sandbox up
+
+Provision a Kata workspace from a profile
+
+```
+ape sandbox up <name> [flags]
+```
+
+Provision a long-lived Kata workspace named <name>.
+
+The profile (--profile, default <name>) is loaded from
+_apex/sandbox/<profile>.yaml. ape composes a per-workspace ~/.claude
+(credentials, curated skills/agents, git), resolves the image (official
+ape-sandbox unless the profile overrides it), and starts a detached Kata
+container with the project mounted per the profile's mount mode.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root to mount (default: current working directory) |
+| `--profile` | string | `—` | Profile name under _apex/sandbox/ (default: the workspace name) |
+| `--proxy` | string | `—` | host:port of a running CONNECT egress proxy to wire as HTTPS_PROXY |
+| `--ssh-port` | int | `0` | Host loopback port to forward to the workspace's sshd (0: none) |
 
 ## ape sessions
 

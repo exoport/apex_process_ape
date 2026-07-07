@@ -75,7 +75,7 @@ isolation must come from outside, which is what ape would do anyway.
 ## Open items (for a future PLAN-16)
 
 - Choose rung 1 vs 3 (gVisor via go-runc vs shelling to `sbx`) — build-vs-buy.
-- Sandbox as `--isolate <profile>` flag on pipeline/task/command/script +
+- Sandbox as `--sandbox <profile>` flag on pipeline/task/command/script +
   `service.yaml` per-job enforcement (pairs with `force_script_sandbox`).
 - Egress-proxy implementation (tiny CONNECT proxy in the daemon).
 - Skill-set profiles: `_apex/config.yaml` naming curated skill dirs per job

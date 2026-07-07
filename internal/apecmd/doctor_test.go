@@ -377,6 +377,46 @@ func TestCheckPermissionsHomeClaude_WritableOK(t *testing.T) {
 	}
 }
 
+// TestSandboxChecks_NonLinuxInfo confirms the Kata workspace prerequisite
+// probes degrade to INFO off Linux (Kata/KVM is Linux-only) rather than
+// failing doctor for macOS / Windows users.
+func TestSandboxChecks_NonLinuxInfo(t *testing.T) {
+	env := doctorEnv{OS: "darwin", Arch: "arm64"}
+	checks := map[string]func(context.Context, doctorEnv) CheckResult{
+		"kvm.available":      checkKVMAvailable,
+		"containerd.running": checkContainerdRunning,
+		"kata.runtime":       checkKataRuntime,
+		"sandbox.image":      checkSandboxImage,
+	}
+	for name, fn := range checks {
+		res := fn(context.Background(), env)
+		if res.Status != StatusInfo {
+			t.Errorf("%s on darwin: got %q, want info (%s)", name, res.Status, res.Message)
+		}
+	}
+}
+
+// TestCheckKVMAvailable_LinuxProbes exercises the Linux path against the
+// real host: /dev/kvm is either OK, WARN (present-but-inaccessible, with the
+// usermod remediation), or INFO (absent) — never a hard FAIL that would
+// break doctor for a non-sandbox user.
+func TestCheckKVMAvailable_LinuxProbes(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux-only probe")
+	}
+	res := checkKVMAvailable(context.Background(), doctorEnv{OS: "linux"})
+	switch res.Status {
+	case StatusOK, StatusInfo:
+		// fine — accessible or absent
+	case StatusWarn:
+		if res.FixCommand != "sudo usermod -aG kvm $USER" {
+			t.Errorf("inaccessible /dev/kvm must carry the usermod fix; got %q", res.FixCommand)
+		}
+	default:
+		t.Errorf("unexpected status %q (%s)", res.Status, res.Message)
+	}
+}
+
 // ensureFrameworkPackageReadable is a guard against accidental import
 // cycles between apecmd <-> framework while the helper refactor is
 // still settling. If this test ever fails to compile, the package

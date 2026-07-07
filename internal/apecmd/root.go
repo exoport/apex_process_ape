@@ -73,6 +73,7 @@ func init() {
 		newSessionsCmd(),
 		newCostsCmd(),
 		newDoctorCmd(),
+		newSandboxCmd(),
 		newGenDocsCmd(),
 	)
 }
