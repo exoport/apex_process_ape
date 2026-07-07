@@ -246,6 +246,15 @@ type Workspace struct {
 	StagingDir  string `json:"staging_dir"`
 	SSHPort     int    `json:"ssh_port,omitempty"`
 	CreatedAt   string `json:"created_at,omitempty"`
+
+	// Egress-proxy supervisor record (PLAN-16 D4). Set only when `up`
+	// started a managed CONNECT proxy for the workspace (a profile
+	// declaring network.authorized_domains, no explicit --proxy); zero for
+	// open-egress or an externally-supplied --proxy. `down` uses ProxyPID
+	// to stop the daemon.
+	ProxyPID      int    `json:"proxy_pid,omitempty"`
+	ProxyAddr     string `json:"proxy_addr,omitempty"`
+	ProxyAuditLog string `json:"proxy_audit_log,omitempty"`
 }
 
 // Registry is the on-disk index of provisioned workspaces, stored as a

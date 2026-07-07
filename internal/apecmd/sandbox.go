@@ -50,6 +50,7 @@ Profiles live in _apex/sandbox/<name>.yaml.`,
 		newSandboxPauseCmd(),
 		newSandboxResumeCmd(),
 		newSandboxDownCmd(),
+		newSandboxProxyDaemonCmd(),
 	)
 	return cmd
 }
@@ -136,18 +137,38 @@ container with the project mounted per the profile's mount mode.`,
 				return err
 			}
 
-			var proxyURL string
-			if proxyAddr != "" {
+			// Wire public egress. --proxy points at an externally-run proxy;
+			// otherwise a profile allowlist starts a supervised, detached
+			// CONNECT proxy (fail-closed: `up` aborts if it can't start);
+			// otherwise the workspace uses the default (open) network.
+			var (
+				proxyURL   string
+				proxyState sandbox.ProxyState
+				sup        *sandbox.ProxySupervisor
+			)
+			switch sandbox.PlanEgress(proxyAddr, prof.Network.AuthorizedDomains) {
+			case sandbox.EgressExplicit:
 				proxyURL = "http://" + proxyAddr
-			} else if len(prof.Network.AuthorizedDomains) > 0 {
-				// Egress is deny-by-default. The persistent host-side CONNECT
-				// proxy supervisor is a Phase-1 follow-up; until it (or an
-				// explicit --proxy) is supplied, the workspace has no wired
-				// public egress. Say so rather than silently allowing all.
-				fmt.Fprintf(cmd.ErrOrStderr(),
-					"note: profile declares %d authorized egress domain(s) but no CONNECT proxy is wired "+
-						"(pass --proxy host:port to a running proxy; auto-supervision is a follow-up)\n",
-					len(prof.Network.AuthorizedDomains))
+			case sandbox.EgressManaged:
+				sup = &sandbox.ProxySupervisor{}
+				st, serr := sup.Start(cmd.Context(), sandbox.ProxyStartOptions{
+					Workspace: name,
+					Dir:       sandbox.ProxyDirFor(stateDir, name),
+					AuditLog:  sandbox.ProxyAuditLogFor(stateDir, name),
+					Allow:     prof.Network.AuthorizedDomains,
+				})
+				if serr != nil {
+					return fmt.Errorf("sandbox: start egress proxy (fail-closed): %w", serr)
+				}
+				proxyState = st
+				proxyURL = st.ProxyURL()
+				fmt.Fprintf(cmd.OutOrStdout(),
+					"egress proxy up on %s (%d authorized domain(s)); audit: %s\n",
+					st.Addr, len(prof.Network.AuthorizedDomains), st.AuditLog)
+			case sandbox.EgressOpen:
+				// No allowlist and no --proxy: default container network
+				// (unrestricted public egress). Declare
+				// network.authorized_domains to enforce a deny-by-default proxy.
 			}
 
 			image := sandbox.ResolveImage(prof)
@@ -171,24 +192,37 @@ container with the project mounted per the profile's mount mode.`,
 
 			runner := &sandbox.Runner{Stdout: cmd.OutOrStdout(), Stderr: cmd.ErrOrStderr()}
 			if err := runner.Provision(cmd.Context(), spec); err != nil {
+				// Don't leak the proxy we just started for a container that
+				// never came up.
+				if sup != nil && proxyState.PID != 0 {
+					_ = sup.Stop(proxyState)
+				}
 				return err
 			}
 
 			rec := sandbox.Workspace{
-				Name:        name,
-				Container:   spec.Container(),
-				Profile:     profile,
-				Backend:     string(prof.Backend),
-				VMM:         string(prof.VMM),
-				Image:       image,
-				Mount:       string(prof.Mount),
-				ProjectRoot: spec.ProjectRoot,
-				Volume:      spec.Volume,
-				StagingDir:  staging,
-				SSHPort:     sshPort,
-				CreatedAt:   time.Now().UTC().Format(time.RFC3339),
+				Name:          name,
+				Container:     spec.Container(),
+				Profile:       profile,
+				Backend:       string(prof.Backend),
+				VMM:           string(prof.VMM),
+				Image:         image,
+				Mount:         string(prof.Mount),
+				ProjectRoot:   spec.ProjectRoot,
+				Volume:        spec.Volume,
+				StagingDir:    staging,
+				SSHPort:       sshPort,
+				CreatedAt:     time.Now().UTC().Format(time.RFC3339),
+				ProxyPID:      proxyState.PID,
+				ProxyAddr:     proxyState.Addr,
+				ProxyAuditLog: proxyState.AuditLog,
 			}
 			if err := reg.Put(rec); err != nil {
+				// The proxy would be untracked (down can't find it) — stop it
+				// so it doesn't leak. The container is left running; report it.
+				if sup != nil && proxyState.PID != 0 {
+					_ = sup.Stop(proxyState)
+				}
 				return fmt.Errorf("sandbox: workspace started but registry write failed: %w", err)
 			}
 
@@ -377,6 +411,14 @@ it manually with 'nerdctl volume rm' if you want to discard its data.`,
 			runner := &sandbox.Runner{Stdout: cmd.OutOrStdout(), Stderr: cmd.ErrOrStderr()}
 			if err := runner.Down(cmd.Context(), ws.Container); err != nil {
 				return err
+			}
+			// Stop the supervised egress proxy, if any. The audit trail under
+			// the proxy dir is left in place as a forensic record.
+			if ws.ProxyPID != 0 {
+				sup := &sandbox.ProxySupervisor{}
+				if err := sup.Stop(sandbox.ProxyState{Workspace: ws.Name, PID: ws.ProxyPID, Addr: ws.ProxyAddr}); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not stop egress proxy (pid %d): %v\n", ws.ProxyPID, err)
+				}
 			}
 			if ws.StagingDir != "" {
 				_ = os.RemoveAll(ws.StagingDir)
