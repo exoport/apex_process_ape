@@ -20,11 +20,13 @@
 # (VNC + CDP), VS Code Server, terminal, and MCP servers. Build FROM it so
 # workspaces get the browser + editor + MCP layer for free.
 #
-# TODO(publish): pin to a digest, e.g.
-#   ARG BASE_IMAGE=ghcr.io/agent-infra/sandbox@sha256:<resolved-digest>
-# Confirm the exact upstream registry/coordinates against
-# https://github.com/agent-infra/sandbox before the first build.
-ARG BASE_IMAGE=ghcr.io/agent-infra/sandbox:latest
+# PINNED to a digest for reproducibility (never a floating :latest in a
+# published image). This is the multi-arch (linux/amd64 + linux/arm64)
+# manifest-list digest for agent-infra/sandbox 1.11.0; the :1.11.0 tag is
+# kept for human readability but the @sha256 is what's resolved. To bump:
+# pick a newer upstream release, re-resolve its manifest-list digest, and
+# update this ARG + the README (see "Pinning policy").
+ARG BASE_IMAGE=ghcr.io/agent-infra/sandbox:1.11.0@sha256:6328d7fd2f0ff0b4c147c3d05b3df1ce331f4a482eb6e550ecd64ed1fcf906e7
 FROM ${BASE_IMAGE}
 
 # Pinned versions — bump deliberately, rebuild, then re-tag the image.
@@ -65,6 +67,11 @@ RUN set -euo pipefail; \
 # project installs the skills + pipelines from this offline checkout.
 RUN git clone --depth 1 --branch "${FRAMEWORK_REF}" \
       https://github.com/diegosz/apex_process_framework.git /opt/apex-framework
+
+# Default `ape framework setup` to the offline checkout — it resolves the
+# framework repo from $APEX_FRAMEWORK_REPO — so a workspace can install
+# skills + pipelines with no network via `ape framework setup --no-fetch`.
+ENV APEX_FRAMEWORK_REPO=/opt/apex-framework
 
 # Chromium + Playwright (Excalidraw rendering / browser workloads run inside
 # the VM, where a real guest kernel avoids gVisor's syscall-compat gaps).

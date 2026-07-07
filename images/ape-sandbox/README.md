@@ -47,7 +47,7 @@ docker build \
 
 | Arg                    | Default                             | Purpose                                             |
 | ---------------------- | ----------------------------------- | --------------------------------------------------- |
-| `BASE_IMAGE`           | `ghcr.io/agent-infra/sandbox:latest`| Base to build `FROM` — **pin to a digest** (below). |
+| `BASE_IMAGE`           | `ghcr.io/agent-infra/sandbox:1.11.0@sha256:6328d7fd…f906e7` | Base to build `FROM` — pinned to the 1.11.0 multi-arch digest (below). |
 | `APE_VERSION`          | `v0.0.40`                           | ape release tag; installed from the release tarball.|
 | `FRAMEWORK_REF`        | `main`                              | `apex_process_framework` git ref cloned to `/opt`.  |
 | `CLAUDE_CODE_VERSION`  | `latest`                            | `@anthropic-ai/claude-code` npm version.            |
@@ -55,16 +55,27 @@ docker build \
 | `NODE_MAJOR`           | `20`                                | Node LTS major (skipped if the base ships node).    |
 | `TARGETARCH`           | `amd64`                             | Set by buildx; selects the ape release asset arch.  |
 
-## Pinning policy (before publishing)
+## Pinning policy
 
 This image is **versioned with ape + the framework** — a workspace should be
-reproducible. Before the first real publish:
+reproducible.
 
-1. **Pin the base to a digest.** Resolve the `agent-infra/sandbox` reference
-   to a `…@sha256:…` digest and set `BASE_IMAGE` to it. Never ship a
-   published image built on a floating `:latest`. Confirm the exact upstream
-   registry coordinates against the [agent-infra/sandbox](https://github.com/agent-infra/sandbox)
-   repo first.
+1. **Base pinned to a digest.** `BASE_IMAGE` is
+   `ghcr.io/agent-infra/sandbox:1.11.0@sha256:6328d7fd2f0ff0b4c147c3d05b3df1ce331f4a482eb6e550ecd64ed1fcf906e7`
+   — the multi-arch (linux/amd64 + linux/arm64) manifest-list digest for
+   upstream release 1.11.0. Never a floating `:latest` in a published image.
+   To bump the base, re-resolve the digest for a newer release, e.g. with a
+   plain public-registry query (no docker needed):
+
+   ```bash
+   tok=$(curl -sSL "https://ghcr.io/token?scope=repository:agent-infra/sandbox:pull&service=ghcr.io" \
+         | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+   curl -sSI -H "Authorization: Bearer $tok" \
+     -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+     https://ghcr.io/v2/agent-infra/sandbox/manifests/<TAG> | grep -i docker-content-digest
+   ```
+
+   Then update this `ARG` + this section. (Or `crane digest ghcr.io/agent-infra/sandbox:<TAG>`.)
 2. **Tag to match the ape release** (e.g. `ghcr.io/diegosz/ape-sandbox:v0.0.40`).
 3. **Update `sandbox.DefaultImage`** in `internal/sandbox/kata.go` to the new
    tag so `ape sandbox up` (with an empty profile `image:`) resolves to it.
@@ -73,10 +84,17 @@ reproducible. Before the first real publish:
 > the Kata microVM is the security boundary, not the container's seccomp
 > profile.
 
+## Offline framework install
+
+The image sets `ENV APEX_FRAMEWORK_REPO=/opt/apex-framework`, so inside a
+workspace `ape framework setup` resolves the framework from the baked-in
+checkout. Add `--no-fetch` to skip the `git fetch` and install fully offline:
+
+```bash
+ape framework setup --no-fetch     # installs skills + pipelines from /opt/apex-framework
+```
+
 ## Known follow-ups
 
-- **Offline framework install.** `/opt/apex-framework` is a plain checkout;
-  wiring `ape framework setup` to prefer it (no network at provision) is a
-  follow-up.
 - **VMM/device tier.** GPU/USB workspaces (`vmm: qemu`) need host IOMMU +
   `vfio-pci` binding — a later phase; this image is VMM-agnostic.
