@@ -106,6 +106,23 @@ the guest); every connection, allowed or denied, is recorded to
 | ----------------- | ------------- | ------- | ------------------------------------------------------------------ |
 | `mounts.extra_rw` | list\<string> | `[]`    | Extra host paths bind-mounted read-write at the same path in-guest.|
 
+### `access` — inbound SSH (D7)
+
+`ape sandbox ssh` is key-auth-only. List the public key(s) the workspace's
+sshd should accept; the composer writes them to the guest
+`~/.ssh/authorized_keys`. Empty → key auth is unconfigured (use
+`ape sandbox attach`/`exec`, which go through `nerdctl`).
+
+| Field                    | Type          | Default | Description                                                                                          |
+| ------------------------ | ------------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `access.authorized_keys` | list\<string> | `[]`    | Each entry is a public-key literal (`ssh-ed25519 AAAA… me@host`) or a path to a `.pub` / `authorized_keys` file (`~/.ssh/id_ed25519.pub`; a leading `~` expands to the host home). |
+
+```yaml
+access:
+  authorized_keys:
+    - ~/.ssh/id_ed25519.pub
+```
+
 ## Mount modes
 
 | Mode        | Project source                              | Use                                                                 |
@@ -138,6 +155,8 @@ insecure workspace. A profile is rejected when:
 - `hooks:` is non-empty (reserved in v1).
 - an `authorized_domains` entry has a non-leading or double wildcard; a
   `direct_allow` entry lacks `host:port`, has a wildcard, or a non-numeric port.
+- an `access.authorized_keys` entry is empty (a missing key *file* is caught at
+  provision time, not load time — matching `git.deploy_key`).
 
 ## Honest boundaries
 

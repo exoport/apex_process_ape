@@ -90,6 +90,11 @@ Inside the workspace you run Claude Code, APEX pipelines, or Playwright
 exactly as on the host — the in-guest `ape`/`claude` allocate their own PTY.
 VS Code Remote-SSH connects over the same forwarded port.
 
+`ape sandbox ssh` is key-auth-only: provision with `--ssh-port` **and** list
+the public key(s) it should accept under the profile's `access.authorized_keys`
+(a `~/.ssh/*.pub` path or an inline key). Without a key configured, use
+`attach`/`exec`, which go through `nerdctl` and need no SSH setup.
+
 ## 5. Suspend and tear down
 
 ```bash
@@ -105,15 +110,24 @@ remove it with `nerdctl volume rm` if you want to discard it. `host-fs` and
 ## Public egress
 
 Egress is **deny-by-default**. When a profile lists `network.authorized_domains`,
-those hostnames are reachable over a host-side CONNECT proxy on 443; every
-connection (allowed and denied) is audited to `egress-audit.jsonl` — hostnames
-only, never payloads. Wire the proxy with `ape sandbox up --proxy host:port`.
+`ape sandbox up` starts a **detached host-side CONNECT proxy** for the
+workspace, wires `HTTPS_PROXY` to it, and `ape sandbox down` stops it. Only the
+allowlisted hostnames are reachable on 443; every connection (allowed and
+denied) is audited to `egress-audit.jsonl` under the workspace's proxy dir —
+hostnames only, never payloads. It is **fail-closed**: if the proxy can't
+start, `up` aborts rather than bring the workspace up with open egress.
 
-> **Phase-1 limitation.** The persistent host-side proxy *supervisor* (a
-> daemon started/stopped automatically by `up`/`down`) is not wired yet. Until
-> it lands, pass `--proxy` pointing at a proxy you run; without it, a workspace
-> whose profile declares authorized domains has no configured public egress
-> (`ape sandbox up` prints a note).
+- `--proxy host:port` overrides the supervisor and points `HTTPS_PROXY` at a
+  proxy you run yourself.
+- A profile with **no** `authorized_domains` (and no `--proxy`) uses the default
+  container network — unrestricted public egress. Declare an allowlist to
+  enforce the proxy.
+
+> **Phase-1 boundary.** The supervisor guarantees a host-side, deny-by-default
+> proxy plus an audit trail. It does not yet *force* the guest through it — a
+> process that ignores `HTTPS_PROXY` can still use the default network.
+> Kernel-level enforcement (`--network none` + proxy-only reachability) is a
+> later, live-networking task.
 
 ## Security notes
 

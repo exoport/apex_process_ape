@@ -18,7 +18,12 @@ plus:
 - **the APEX framework** — a pinned checkout at `/opt/apex-framework`; run
   `ape framework setup` inside a mounted project to install its skills +
   pipelines from there
-- **sshd** — key-auth-only, for the SSH / VS Code Remote access path
+- **sshd** — key-auth-only, for the SSH / VS Code Remote access path. The
+  `ape` user's home is `/sandbox/home` (where the composed `~/.claude` mounts),
+  so sshd reads the workspace's `~/.ssh/authorized_keys` — written by the
+  composer from the profile's `access.authorized_keys` — and `HOME` is the same
+  for `ssh` and `exec`. `StrictModes` is off (the bind-mount's in-guest
+  ownership needn't match `ape`; the VM is the boundary)
 - **chromium + Playwright** — browser workloads (e.g. Excalidraw rendering)
 
 The composed `~/.claude` (credentials, curated skills/agents, git config) is
@@ -70,10 +75,6 @@ reproducible. Before the first real publish:
 
 ## Known follow-ups
 
-- **authorized_keys wiring.** sshd is key-auth-only; the per-workspace
-  `~/.claude` composer does not yet drop an `authorized_keys` into the staged
-  home. Until it does, use `ape sandbox attach`/`exec` (via nerdctl) rather
-  than `ape sandbox ssh`, or add the key manually.
 - **Offline framework install.** `/opt/apex-framework` is a plain checkout;
   wiring `ape framework setup` to prefer it (no network at provision) is a
   follow-up.

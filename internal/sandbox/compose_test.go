@@ -202,6 +202,58 @@ func findBind(t *testing.T, binds []BindMount, source string) BindMount {
 	return BindMount{}
 }
 
+func TestComposeAuthorizedKeysLiteralAndPath(t *testing.T) {
+	// A .pub file on the host, plus an inline literal key.
+	home := fakeHome(t, nil, nil)
+	pubPath := filepath.Join(home, ".ssh", "id_ed25519.pub")
+	require.NoError(t, os.MkdirAll(filepath.Dir(pubPath), 0o700))
+	require.NoError(t, os.WriteFile(pubPath, []byte("ssh-ed25519 AAAAFROMFILE me@host\n"), 0o600))
+
+	staging := t.TempDir()
+	p := &Profile{
+		Name:        "k",
+		Credentials: CredentialOAuth,
+		Access: AccessPolicy{AuthorizedKeys: []string{
+			"~/.ssh/id_ed25519.pub",          // path (~ expands to host home)
+			"ssh-ed25519 AAAALITERAL me@lit", // inline literal
+		}},
+	}
+	require.NoError(t, p.Validate())
+	_, err := Compose(ComposeOptions{Profile: p, StagingDir: staging, HostHome: home})
+	require.NoError(t, err)
+
+	akPath := filepath.Join(staging, ".ssh", "authorized_keys")
+	data, err := os.ReadFile(akPath)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "ssh-ed25519 AAAAFROMFILE me@host")
+	assert.Contains(t, string(data), "ssh-ed25519 AAAALITERAL me@lit")
+
+	// authorized_keys must be 0600 (sshd refuses loose perms).
+	info, err := os.Stat(akPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+func TestComposeAuthorizedKeysEmptyWritesNoFile(t *testing.T) {
+	staging := t.TempDir()
+	p := &Profile{Name: "k0", Credentials: CredentialOAuth}
+	_, err := Compose(ComposeOptions{Profile: p, StagingDir: staging, HostHome: fakeHome(t, nil, nil)})
+	require.NoError(t, err)
+	assert.NoFileExists(t, filepath.Join(staging, ".ssh", "authorized_keys"))
+}
+
+func TestComposeAuthorizedKeysMissingPathFails(t *testing.T) {
+	staging := t.TempDir()
+	p := &Profile{
+		Name:        "kbad",
+		Credentials: CredentialOAuth,
+		Access:      AccessPolicy{AuthorizedKeys: []string{"~/.ssh/nope.pub"}},
+	}
+	_, err := Compose(ComposeOptions{Profile: p, StagingDir: staging, HostHome: fakeHome(t, nil, nil)})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "authorized_keys")
+}
+
 func TestComposeModeAMissingCredentialsFails(t *testing.T) {
 	staging := t.TempDir()
 	p := &Profile{Name: "a", Credentials: CredentialOAuth}

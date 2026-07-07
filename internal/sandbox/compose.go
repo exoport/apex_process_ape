@@ -102,7 +102,79 @@ func Compose(opts ComposeOptions) (*Composition, error) {
 	if err := composeGit(opts, comp); err != nil {
 		return nil, err
 	}
+	if err := composeSSHAccess(opts, comp); err != nil {
+		return nil, err
+	}
 	return comp, nil
+}
+
+// composeSSHAccess stages the guest ~/.ssh/authorized_keys from the profile's
+// access.authorized_keys so `ape sandbox ssh` can authenticate by key
+// (PLAN-16 D7). Each entry is a public-key literal or a path to a .pub /
+// authorized_keys file (a leading ~ expands to the host home). Empty → no
+// file is written (key auth stays unconfigured; use attach/exec). The keys
+// are copied into the staged home like the rest of ~/.claude — nothing is
+// bound, and nothing from the real ~/.ssh is used unless a path names it.
+func composeSSHAccess(opts ComposeOptions, comp *Composition) error {
+	entries := opts.Profile.Access.AuthorizedKeys
+	if len(entries) == 0 {
+		return nil
+	}
+	var lines []string
+	for _, e := range entries {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		if isSSHPublicKeyLiteral(e) {
+			lines = append(lines, e)
+			continue
+		}
+		path := expandHome(e, opts.HostHome)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("compose authorized_keys: read %s: %w", path, err)
+		}
+		for ln := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+			if ln = strings.TrimSpace(ln); ln != "" {
+				lines = append(lines, ln)
+			}
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	sshDir := filepath.Join(comp.StagingDir, ".ssh")
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		return fmt.Errorf("compose authorized_keys: mkdir .ssh: %w", err)
+	}
+	content := strings.Join(lines, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(sshDir, "authorized_keys"), []byte(content), 0o600); err != nil {
+		return fmt.Errorf("compose authorized_keys: write: %w", err)
+	}
+	return nil
+}
+
+// isSSHPublicKeyLiteral reports whether s is an inline public key (rather
+// than a filesystem path to read one from).
+func isSSHPublicKeyLiteral(s string) bool {
+	for _, prefix := range []string{"ssh-", "ecdsa-sha2-", "sk-ssh-", "sk-ecdsa-"} {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// expandHome resolves a leading ~ or ~/ in path against home (the host home).
+func expandHome(path, home string) string {
+	if path == "~" {
+		return home
+	}
+	if rest, ok := strings.CutPrefix(path, "~/"); ok && home != "" {
+		return filepath.Join(home, rest)
+	}
+	return path
 }
 
 // writeClaudeJSON generates the guest ~/.claude.json. It carries the

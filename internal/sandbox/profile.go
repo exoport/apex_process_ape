@@ -110,9 +110,23 @@ type Profile struct {
 	Network       NetworkPolicy  `yaml:"network"`
 	Git           GitPolicy      `yaml:"git"`
 	Mounts        MountPolicy    `yaml:"mounts"`
+	Access        AccessPolicy   `yaml:"access,omitempty"`
 
 	// path records where the profile was loaded from, for diagnostics.
 	path string `yaml:"-"`
+}
+
+// AccessPolicy configures inbound access to the workspace (PLAN-16 D7).
+//
+//nolint:tagliatelle // snake_case is the stable, documented on-disk profile schema
+type AccessPolicy struct {
+	// AuthorizedKeys lists SSH public keys allowed to `ape sandbox ssh` into
+	// the workspace. Each entry is either a public-key literal ("ssh-ed25519
+	// AAAA… me@host") or a path to a .pub / authorized_keys file
+	// ("~/.ssh/id_ed25519.pub"; a leading ~ expands to the host home). The
+	// composer writes them to the guest ~/.ssh/authorized_keys. Empty → key
+	// auth is unconfigured (use `ape sandbox attach`/`exec`).
+	AuthorizedKeys []string `yaml:"authorized_keys,omitempty"`
 }
 
 // NetworkPolicy is the per-profile egress allowlist (PLAN-16 D4).
@@ -278,6 +292,11 @@ func (p *Profile) Validate() error {
 	for _, d := range p.Network.AuthorizedDomains {
 		if err := validateDomainPattern(d); err != nil {
 			return fmt.Errorf("network.authorized_domains %q: %w", d, err)
+		}
+	}
+	for i, k := range p.Access.AuthorizedKeys {
+		if strings.TrimSpace(k) == "" {
+			return fmt.Errorf("access.authorized_keys[%d] is empty", i)
 		}
 	}
 	return nil
