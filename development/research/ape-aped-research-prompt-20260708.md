@@ -25,7 +25,7 @@ summary: >
 Run this as a **complete, multi-track investigation** (parallel research agents or
 a deep-research pass), then apply the findings as **adjustments** to the design
 doc. **Read first, in order:**
-1. `development/pending/ape-aped-split-20260707.md` — the design doc to refine (it
+1. `development/research/ape-aped-split-20260707.md` — the design doc to refine (it
    already synthesizes an initial 3-agent research pass: security/prior-art,
    NATS/NEX, VM-mechanics/VFIO).
 2. `development/planning/plan-16_kata-vm-workspaces.md` — Phase-1 (Kata VM
@@ -38,7 +38,7 @@ doc. **Read first, in order:**
    `.creds` user JWT + server-enforced `ape.*.<token>.>` subjects + the
    agent-self-reporting mode). The `aped` NATS layer **builds on these; it does not
    reinvent them.**
-3. `development/pending/sandbox-qemu-vs-kata-20260706.md` — backend comparison
+3. `development/research/sandbox-qemu-vs-kata-20260706.md` — backend comparison
    (note: its "kata rootless" premise was disproven — see below).
 4. `_output/2026-07-07-sandbox-host-changes-and-cleanup.md` — what the rootless
    experiments did to the box and why they failed.

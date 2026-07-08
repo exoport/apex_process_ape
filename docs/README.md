@@ -39,6 +39,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [Sandbox profile reference](reference/sandbox-profile.md) — schema for `_apex/sandbox/*.yaml` (Kata VM workspaces)
 - [Pipeline TUI keybindings](reference/tui-keybindings.md) — `ape pipeline` three-panel display, modes, and key map
 - [Claude Code environment variables](reference/claude-code-env-vars.md) — `CLAUDECODE` / `CLAUDE_CODE_*`, nested-session protection, and why ape scrubs them from spawned sessions
+- [NATS subjects & event payloads](reference/events.md) — the `ape.evt`/`log`/`metrics`/`svc`/`vmm`/`audit` subject taxonomy + payload schemas (**proposed** — the single contract for the PLAN-13/14/17/18 NATS work)
 
 ### Explanation — _the why and the what_
 

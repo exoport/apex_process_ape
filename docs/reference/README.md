@@ -18,6 +18,7 @@ For ape, reference is the surface area: every command, every flag, every config 
 - [pipeline-yaml-schema.md](pipeline-yaml-schema.md) — `_apex/pipelines/*.yaml` schema (model/agent/commit defaults, `no-clear`, etc.).
 - [step-contract.md](step-contract.md) — per-step contract enforced by the bridge verifier.
 - [tui-keybindings.md](tui-keybindings.md) — Bubble Tea TUI keybindings.
+- [events.md](events.md) — NATS subject taxonomy + event/log/metrics payload schemas (**proposed contract** for the PLAN-13/14/17/18 NATS work; features not yet built).
 
 ## Planned reference
 

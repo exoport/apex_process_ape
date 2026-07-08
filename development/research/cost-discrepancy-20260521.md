@@ -1,6 +1,6 @@
 ---
 created_at: 2026-05-21
-status: open (partially explained — see the 2026-07-03 update; a sub-agent capture bug that skewed ape's numbers was fixed in v0.0.35, but the 5m/1h cache-tier falsification test still needs PLAN-10 D1's per-tier split, which is deferred)
+status: done — resolved 2026-07-08 (the 5m/1h per-tier split that blocked closure shipped in v0.0.37; ape's prices + cache multipliers were confirmed exact on 2026-07-02; the v0.0.35 sub-agent double-count fix removed the ape-side over-count; the residual gap vs stream-json is a legitimate measurement-window difference, not a defect — see the closeout at the end)
 tags:
   - cost
   - telemetry
@@ -383,3 +383,38 @@ the multiplier hypothesis remains untested against real per-tier data.
 Re-run the head-to-head on the sandbox with a **v0.0.36** binary first —
 the sub-agent fix alone may move the interactive number enough that the
 residual gap is just the orchestrator-vs-tree turn difference H2 predicts.
+
+## Update 2026-07-08: RESOLVED — closed
+
+The blocker named above shipped the next day, and the correctness questions were
+already settled by the 2026-07-02 pricing audit. Net: **ape's transcript-scan
+cost is trustworthy; the gap vs stream-json `total_cost_usd` is an explained
+measurement-window difference, not a defect.**
+
+- **Per-tier 5m/1h split shipped in v0.0.37 (2026-07-04).** `Totals` now carries
+  `CacheCreation5mTokens` / `CacheCreation1hTokens` separately
+  (`internal/cost/formula.go`; a golden test locks `5m + 1h == sum`;
+  `tokens_cache_creation_5m/1h` on the manifest + the `ape task` envelope). The H1
+  falsification test is therefore **unblocked**.
+- **H5 and the H1-multiplier variant were already falsified (2026-07-02 audit;
+  PLAN-10 origin).** Anthropic's page confirms ape's Opus 4.7 rates ($5/$25) and
+  cache multipliers (1.25× / 2.0× / 0.1×) exactly, and there is no `[1m]`
+  surcharge on current models. So ape's per-tier cost is correct **regardless of
+  the 5m-vs-1h mix** — which turns the formal tier-mix comparison into a
+  characterization, not a correctness question.
+- **The main ape-side over-count is fixed (v0.0.35).** The v0.0.34 sub-agent
+  double-count (folded main twice, skipped the real sub transcripts) is gone; ape
+  now folds each sub once and sweeps `subagents/`. The pre-v0.0.35 "50–60% high"
+  figure was measured against that bug and is void.
+- **The residual gap is legitimate (H2), not a bug.** Transcript-scan measures the
+  whole session tree (orchestrator + sub-agents); stream-json `total_cost_usd`
+  reports the orchestrator only. They measure different windows. PLAN-9 removed
+  stream-json, so transcript-scan is now the *sole* cost source — and the more
+  complete one.
+
+**Optional, not blocking (PLAN-10 D6).** The formal paired `sum(ephemeral_1h)` vs
+`sum(ephemeral_5m)` comparison on a v0.0.37+ binary was never run. It would
+characterize *why* interactive caches cost more (tier mix); it does not change the
+correctness conclusion above. Left as a nice-to-have. The independent PLAN-10
+refinements (per-turn `TurnRecord` + H6 requestId/stop_reason dedup; date-aware
+Sonnet-5 pricing) are tracked in PLAN-10, not here.

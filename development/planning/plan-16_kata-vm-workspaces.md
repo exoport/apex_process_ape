@@ -27,9 +27,9 @@ summary: >
   environments, the device tier) live in that repo.
 origin:
   - 2026-07-02 user request — sandbox pipeline/task/command/script sessions with something stronger than Docker (gVisor), mounting folders, no host access; per-session `.claude` skills/hooks. (Original scope; superseded below.)
-  - 2026-07-02..05 — see `development/pending/sandbox-isolation-20260702.md` (isolation-tech research) and this plan's earlier "gVisor-sandboxed sessions" revision.
+  - 2026-07-02..05 — see `development/research/sandbox-isolation-20260702.md` (isolation-tech research) and this plan's earlier "gVisor-sandboxed sessions" revision.
   - 2026-07-05 spike (this repo) — live rootless-runsc findings that blocked the gVisor-job design and drove the reframe (see "Spike findings").
-  - 2026-07-06/07 — deep research (`development/pending/sandbox-qemu-vs-kata-20260706.md`) + user decisions → **kata-only, long-lived VM workspaces, Phase 1 of a broader self-hostable platform.** North-star docs authored in `../../../exoar/apex_process_platform/draft/` (00–05).
+  - 2026-07-06/07 — deep research (`development/research/sandbox-qemu-vs-kata-20260706.md`) + user decisions → **kata-only, long-lived VM workspaces, Phase 1 of a broader self-hostable platform.** North-star docs authored in `../../../exoar/apex_process_platform/draft/` (00–05).
   - 2026-07-07 user decisions — kata-only; VMM kata-clh default / kata-qemu for GPU/USB; GPU **exclusive passthrough** (no consumer-GPU sharing) in v1; official ape images + custom; project-mount supports all three modes; ape stays the CLI operator; Phase 1 ships in this repo.
 ---
 

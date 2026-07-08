@@ -379,7 +379,7 @@ The "Open questions to resolve during implementation" section above is preserved
 
 ## Appendix — interactive-mode debugging attempts that led to the tmux pivot
 
-Captured here as historical record (formerly in `development/research/resume-plan-6-interactive-debugging.md` before that folder was removed). The pivot section above states the conclusion; this appendix preserves the path.
+Captured here as historical record — folded into this plan from the old `development/research/resume-plan-6-interactive-debugging.md` (a one-off debugging note, not re-added when `development/research/` was later re-established for standing design research). The pivot section above states the conclusion; this appendix preserves the path.
 
 ### Attempt 1 — plain stdin pipe
 

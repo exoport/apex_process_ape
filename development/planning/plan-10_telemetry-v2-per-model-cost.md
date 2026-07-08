@@ -1,18 +1,19 @@
 ---
 plan_id: PLAN-10
 created_at: 2026-07-02
+updated_at: 2026-07-08
 status: partially-implemented
-shipped_v0_0_36: D5 rollup/Bucket PerModel + the sumTotals NumTurns bug fix + ape costs MODEL column (human + json) + the ape costs run/chat subcommands (were advertised-but-unregistered). Still deferred after v0.0.36 — D1 per-turn TurnRecord + H6 (requestId/stop_reason) dedup + 5m/1h split (speculative; would perturb v0.0.35-validated telemetry) and D3 date-aware pricing (needs D1's per-turn timestamps; the standard-rate table is the blessed conservative fallback). D6 discrepancy closeout recorded in the pending doc.
-implementation_status: D2 (sub-agent discovery) + D4 (transcript copy) + the per-model manifest/envelope fields (`model_usage`, `sessions[]`, `totals.num_turns`) shipped additively under `schema_version: 2` in v0.0.27–v0.0.35 (see PLAN-11 v0.0.35 errata). Corrected 2026-07-03 against the actual eval contract — NO v3 schema bump (the eval's `apex_eval/ape_manifest.py` hard-rejects any `schema_version` outside `[1,2]` while tolerating unknown fields, so additive-under-v2 is the only eval-safe path); the 5m/1h cache split and `StepRecord.ModelObserved` were dropped from the shipped shape. Still open — D1 per-turn `TurnRecord` + H6 (requestId/stop_reason) dedup; D3 date-aware pricing (sonnet-5 intro window; currently the conservative standard-rate over-estimate); D5 rollup `PerModel` + the `sumTotals` NumTurns bug + `ape costs` MODEL column + the unregistered `ape costs run`/`chat` subcommands (help text already advertises them); D6 discrepancy closeout (`cost-discrepancy-20260521.md` still `status: open` — the v0.0.35 2×-main double-count fix is the leading resolution and should be recorded there).
+shipped_v0_0_36: D5 rollup/Bucket PerModel + the sumTotals NumTurns bug fix + ape costs MODEL column (human + json) + the ape costs run/chat subcommands (were advertised-but-unregistered). Still deferred after v0.0.36 — D1 per-turn TurnRecord + H6 (requestId/stop_reason) dedup (speculative; would perturb v0.0.35-validated telemetry) and D3 date-aware pricing (needs D1's per-turn timestamps; the standard-rate table is the blessed conservative fallback). Update 2026-07-08: the 5m/1h split later shipped in v0.0.37 (PLAN-10 D1), and the D6 discrepancy closeout is RESOLVED (development/research/cost-discrepancy-20260521.md).
+implementation_status: D2 (sub-agent discovery) + D4 (transcript copy) + the per-model manifest/envelope fields (`model_usage`, `sessions[]`, `totals.num_turns`) shipped additively under `schema_version: 2` in v0.0.27–v0.0.35 (see PLAN-11 v0.0.35 errata). Corrected 2026-07-03 against the actual eval contract — NO v3 schema bump (the eval's `apex_eval/ape_manifest.py` hard-rejects any `schema_version` outside `[1,2]` while tolerating unknown fields, so additive-under-v2 is the only eval-safe path); `StepRecord.ModelObserved` was dropped from the shipped shape (the 5m/1h cache split was later re-added in v0.0.37). Still open — D1 per-turn `TurnRecord` + H6 (requestId/stop_reason) dedup; D3 date-aware pricing (sonnet-5 intro window; currently the conservative standard-rate over-estimate); the `cost.NewTailer` dead-code cleanup. Shipped since — D5 rollup `PerModel`, the `sumTotals` NumTurns fix, the `ape costs` MODEL column, and `ape costs run`/`chat` (all v0.0.36) + the 5m/1h split (v0.0.37); D6 discrepancy closeout **DONE** (`development/research/cost-discrepancy-20260521.md`, resolved 2026-07-08: the 5m/1h split + confirmed prices/multipliers + the v0.0.35 double-count fix close it).
 tags:
   - cost
   - telemetry
   - transcripts
   - subagents
   - billing-accuracy
-summary: Rework `internal/cost` from single-aggregate `Totals` to per-turn records carrying timestamp, model, requestId, stop_reason, and the full cache 5m/1h split; dedupe the way ccusage does (message.id + requestId, prefer stop_reason entries); discover and scan subagent transcripts (`<session-id>/subagents/agent-*.jsonl`); copy transcripts into the run dir instead of symlinking; refresh the price table (Fable 5/Mythos 5, Opus 4.8, date-aware Sonnet 5 intro pricing) and normalize `[1m]` model suffixes; add per-model blocks to the manifest (additively, under `schema_version: 2` — a v3 bump would break the eval reader) and `ape costs`; and wire the dead plumbing (chat cost recording, incremental rollup folds). This is the prerequisite for resolving development/pending/cost-discrepancy-20260521.md and for any cost number becoming load-bearing.
+summary: Rework `internal/cost` from single-aggregate `Totals` to per-turn records carrying timestamp, model, requestId, stop_reason, and the full cache 5m/1h split; dedupe the way ccusage does (message.id + requestId, prefer stop_reason entries); discover and scan subagent transcripts (`<session-id>/subagents/agent-*.jsonl`); copy transcripts into the run dir instead of symlinking; refresh the price table (Fable 5/Mythos 5, Opus 4.8, date-aware Sonnet 5 intro pricing) and normalize `[1m]` model suffixes; add per-model blocks to the manifest (additively, under `schema_version: 2` — a v3 bump would break the eval reader) and `ape costs`; and wire the dead plumbing (chat cost recording, incremental rollup folds). This is the prerequisite for resolving development/research/cost-discrepancy-20260521.md and for any cost number becoming load-bearing.
 origin:
-  - development/pending/cost-discrepancy-20260521.md — open since 2026-05-21; its "recommended path" step 4 (per-model breakdown) is this plan.
+  - development/research/cost-discrepancy-20260521.md — open since 2026-05-21; its "recommended path" step 4 (per-model breakdown) is this plan.
   - 2026-07-02 research: Anthropic's current pricing page confirms ape's Opus 4.7 rates ($5/$25) and cache multipliers (1.25×/2.0×/0.1×) exactly — falsifying discrepancy hypotheses H5 and the multiplier variant of H1. No 1M-context surcharge exists on current models (the `[1m]` premium was legacy Sonnet-4-era). Community parsers (ccusage) dedupe by message.id AND requestId and trust only entries with stop_reason — ape dedupes by message.id only (new hypothesis H6: streaming-fragment double count). Subagents write separate files `~/.claude/projects/<proj>/<session-id>/subagents/agent-<id>.jsonl` (`isSidechain: true`) that ape never scans; 236 such files exist on this machine.
   - 2026-07-02 review found the dead plumbing: `cost.NewTailer`, `cost.ScanLatestSession`, `cost.FoldPipelineRun/FoldChat/SaveRollup`, `runlog.WriteSessionYAML` have zero production callers; `ape chat` records no cost; non-web runs never refresh the rollup.
 ---
@@ -184,23 +185,32 @@ discrepancy doc already lost one dataset to exactly that rotation.
   (`runlog.WriteSessionYAML`) and folds `FoldChat`. **Still open:**
   `cost.NewTailer` has zero production callers — default-delete unless the TUI
   wants live cost (`StepTelemetry`'s rescan is adequate).
-- **Still open:** `Rollup`/`Bucket` gain `PerModel`; and `sumTotals` currently
-  drops `NumTurns` (it sums `CostUSD` + the four token fields only, `rollup.go`)
-  — a live bug so rollup totals carry turn counts. Eval-neutral (the eval never
-  reads the rollup).
-- **Still open:** `ape costs` grows a MODEL column; implement `ape costs run
-  <run-id>` (reader over a manifest) and `ape costs chat <chat-id>` (reader over
-  `session.yaml`) — both are already advertised in the command's help text
-  (`internal/apecmd/costs.go`) but never registered, so the help currently lies.
-  Eval-neutral (the eval never runs `ape costs`).
+- **Shipped v0.0.36:** `Rollup`/`Bucket` gained `PerModel`, and the `sumTotals`
+  `NumTurns` drop (it had summed `CostUSD` + the four token fields only,
+  `rollup.go`) is fixed so rollup totals carry turn counts. Eval-neutral (the eval
+  never reads the rollup).
+- **Shipped v0.0.36:** `ape costs` gained a MODEL column, and `ape costs run
+  <run-id>` (reader over a manifest) + `ape costs chat <chat-id>` (reader over
+  `session.yaml`) are now registered (`internal/apecmd/costs.go` —
+  `newCostsRunCmd`/`newCostsChatCmd`), so the help no longer lies. Eval-neutral
+  (the eval never runs `ape costs`).
 
-### D6: Close out the discrepancy investigation
+### D6: Close out the discrepancy investigation — RESOLVED 2026-07-08
 
-With per-tier sums now first-class, run the falsification test from the
-pending doc: for one paired `--tui` vs historical `-P` step, compare
-`sum(ephemeral_1h)` vs `sum(ephemeral_5m)`. Record findings in
-`development/pending/cost-discrepancy-20260521.md` and either close it or
-promote the surviving hypothesis with data.
+**Done.** `development/research/cost-discrepancy-20260521.md` is closed: the
+per-tier 5m/1h split shipped in v0.0.37, ape's prices + cache multipliers were
+confirmed correct (2026-07-02), and the v0.0.35 sub-agent double-count fix removed
+the ape-side over-count — so ape's transcript-scan cost is trustworthy, and the
+residual gap vs stream-json is a legitimate measurement-window difference (H2:
+full session tree vs orchestrator-only), not a defect. The optional per-tier
+falsification test below was **not run** (moot: the multipliers are confirmed, so
+ape's per-tier cost is correct regardless of the 5m/1h mix).
+
+Original plan: with per-tier sums now first-class, run the falsification test from
+the research doc — for one paired `--tui` vs historical `-P` step, compare
+`sum(ephemeral_1h)` vs `sum(ephemeral_5m)`; record findings in
+`development/research/cost-discrepancy-20260521.md` and either close it or promote
+the surviving hypothesis with data.
 
 ## Scope — steps
 
@@ -216,12 +226,15 @@ promote the surviving hypothesis with data.
    PLAN-13/17 need it.
 3. D5 per-model manifest + wiring. **No schema bump** — additive under v2,
    verified against the eval's `ape_manifest.py` (rejects v3, ignores unknown
-   fields). Per-model fields + rollup wiring are shipped; remaining: rollup
-   `PerModel`, the `sumTotals` NumTurns fix, `ape costs` MODEL column, and the
-   `ape costs run`/`chat` subcommands.
-4. D6 analysis + pending-doc update (`cost-discrepancy-20260521.md` still
-   `status: open`; record the v0.0.35 2×-main double-count fix as the leading
-   resolution — the formal 5m/1h tier comparison depends on the D1 split).
+   fields). Per-model fields, rollup wiring, rollup `PerModel`, the `sumTotals`
+   NumTurns fix, the `ape costs` MODEL column, and the `ape costs run`/`chat`
+   subcommands all shipped (v0.0.35–36); the 5m/1h split shipped v0.0.37.
+   Remaining under D5: only the `cost.NewTailer` dead-code cleanup.
+4. D6 analysis + doc update — **DONE 2026-07-08**
+   (`development/research/cost-discrepancy-20260521.md` resolved): the 5m/1h split
+   shipped v0.0.37 and, with prices/multipliers already confirmed correct + the
+   v0.0.35 double-count fix, ape's numbers are trustworthy; the formal tier
+   comparison is optional (moot given the confirmed multipliers).
 5. Docs: `reference/cost-model.md` and `reference/pipeline-run-manifest.md`
    updated (coordinates with PLAN-9 F4).
 
@@ -231,12 +244,12 @@ promote the surviving hypothesis with data.
   step's `model_usage` block and per-session under `sessions[]`, attributed to
   the correct model — **met in v0.0.35** (the `apex-story-batch-dev` sub-agent
   spawner is PLAN-11's ship gate).
-- Re-scanning the two archived sessions named in the pending doc
+- Re-scanning the two archived sessions named in the research doc
   (`0a675bc4…`, `eac5a5c5…`, if still present) produces per-model numbers;
-  per-tier (5m/1h) numbers require the D1 split; results recorded in the pending
-  doc.
-- `ape costs --output-format json` includes per-model breakdowns. *(Still
-  open — D5 rollup `PerModel`.)*
+  per-tier (5m/1h) numbers are available since the v0.0.37 split; results would be
+  recorded in `development/research/cost-discrepancy-20260521.md`.
+- `ape costs --output-format json` includes per-model breakdowns. *(Met — D5
+  rollup `PerModel` shipped v0.0.36.)*
 - **Per-model manifest fields are additive under `schema_version: 2` and the
   eval reads the manifest unmodified.** (Corrected 2026-07-03: the original
   "manifest v3 is additive: the eval reads it unmodified" was wrong — the eval's

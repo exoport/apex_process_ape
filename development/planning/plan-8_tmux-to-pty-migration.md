@@ -157,7 +157,7 @@ Eight docs files reference tmux as a hard dependency or describe interactive mod
 | `internal/pipeline/interactive_test.go`         | Comments referencing "what the runner types into the tmux pane".                       |
 | `internal/repl/repl.go`                         | Already PTY-aware (sandbox-authored). No change.                                       |
 
-**Out of scope** (historical record, deliberately left in place): the `development/planning/plan-6_*.md` body; `_output/implementation-notes-1.html`; `_output/implementation-notes.html` (this work's notes); `development/pending/cost-discrepancy-20260521.md`; any `CHANGELOG.md` history rows below the new PLAN-8 entry.
+**Out of scope** (historical record, deliberately left in place): the `development/planning/plan-6_*.md` body; `_output/implementation-notes-1.html`; `_output/implementation-notes.html` (this work's notes); `development/research/cost-discrepancy-20260521.md`; any `CHANGELOG.md` history rows below the new PLAN-8 entry.
 
 **Acceptance.** `grep -rn "tmux" internal/ docs/ CLAUDE.md README.md` returns no matches outside the historical-record paths above. `grep -rn "send-keys" internal/ docs/` returns zero matches.
 

@@ -495,7 +495,7 @@ feature work. Commits land on `main`.
 
 ## Appendix — UI-stack selection spike result (2026-05-17)
 
-Captured here as historical record (formerly in `development/research/ui-spike.md` before that folder was removed).
+Captured here as historical record — folded into this plan from the old `development/research/ui-spike.md` (a one-off spike note, not re-added when `development/research/` was later re-established for standing design research).
 
 **Decision: htmx-only** — HTMX 2.x + stdlib `html/template` + handwritten CSS, with inline `onclick` helpers when client-only interactivity is needed. Templ and Alpine dropped; revisit if the UI surface grows past ~3 screens or component-count makes typed templates pay off.
 

@@ -2,6 +2,7 @@
 
 | ID      | Title                                                   | Status   | Created    |
 | ------- | ------------------------------------------------------- | -------- | ---------- |
+| PLAN-18 | `ape` + `aped` split — rootful Kata-QEMU VM daemon       | proposed | 2026-07-08 |
 | PLAN-17 | Reporting CLI — event/log/metrics/transcript + identity | proposed | 2026-07-02 |
 | PLAN-16 | Kata VM workspaces (local dev) — Platform Phase 1       | proposed | 2026-07-02 |
 | PLAN-15 | `ape script` — yaegi orchestration scripts              | proposed | 2026-07-02 |
@@ -9,8 +10,8 @@
 | PLAN-13 | NATS progress events + transcript blobs                 | proposed | 2026-07-02 |
 | PLAN-12 | `ape command` — prompt/handoff claude session           | proposed | 2026-07-02 |
 | PLAN-11 | `ape task` — single-skill runs without YAML             | done     | 2026-07-02 |
-| PLAN-10 | Telemetry v2 — per-model cost, timestamps, subagents    | proposed | 2026-07-02 |
-| PLAN-9  | CLI/docs hygiene + PTY-only consolidation               | proposed | 2026-07-02 |
+| PLAN-10 | Telemetry v2 — per-model cost, timestamps, subagents    | partially-implemented | 2026-07-02 |
+| PLAN-9  | CLI/docs hygiene + PTY-only consolidation               | implemented | 2026-07-02 |
 | PLAN-8  | Migrate tmux → in-process PTY                           | done     | 2026-05-22 |
 | PLAN-7  | Unified pipeline TUI (interactive ≡ programmatic)       | done     | 2026-05-21 |
 | PLAN-6  | Interactive pipeline exec + orthogonal UI/exec modes    | done     | 2026-05-19 |
@@ -32,7 +33,7 @@ of the APEX Process Platform** (north-star in the separate
 `apex_process_platform` repo, `draft/00-05`). Now independent of PLAN-14
 (the workspace *is* the environment; you run jobs inside it). kata-only;
 reuses the composer/proxy/profile/OCI-spec already built; drops the gVisor
-runner. Research: `development/pending/sandbox-qemu-vs-kata-20260706.md`
+runner. Research: `development/research/sandbox-qemu-vs-kata-20260706.md`
 (+ `sandbox-isolation-20260702.md`). Phases 2–4 (in-VM NATS worker, Netbird
 overlays, previews/staging, device tier) live in the platform repo.
 PLAN-17 after PLAN-10 + PLAN-13 (it consumes their scan/discovery and
@@ -40,5 +41,16 @@ natsconn/eventing/blobstore), parallel to PLAN-14 — but its identity
 amendments (user token in subjects, `session` kind, payload
 `user`/`session_id`) are folded **into PLAN-13's own PRs**, since the
 subject taxonomy is an additive-only contract from day one.
+PLAN-18 (added 2026-07-08): the prospective **`ape`/`aped` split** — an
+unprivileged CLI plus a rootful Kata-QEMU VM-management daemon with GPU/USB
+(VFIO) passthrough over embedded NATS. **Additive to PLAN-16** (reuses its pure
+layers; refactors only `Runner`/`Registry`/`proxysup` behind a `Backend`
+interface) and **built on PLAN-13/14/17** — which are still `proposed` with zero
+code, so PLAN-18 front-loads a **Phase 0** that implements them first. Design
+research: `development/research/ape-aped-split-20260707.md` (+ the
+`ape-aped-research-prompt-20260708.md` brief and the
+`ape-aped-passthrough-recipe-20260708.md` device-tier recipe). Phase 3 (device
+tier) needs a discrete-GPU box (not available on the dev box — Intel iGPU only).
+
 Review context: `_output/review-20260702/` (project review + CLI and docs
 improvement proposals).
