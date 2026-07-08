@@ -156,4 +156,4 @@ Releases are cut by pushing a `v*` tag; the [release workflow](.github/workflows
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+[Apache License 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
