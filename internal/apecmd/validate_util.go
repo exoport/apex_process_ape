@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/diegosz/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/output"
 )
 
 // mdValidateResult is the structured payload shared by the

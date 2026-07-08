@@ -4,7 +4,7 @@ pattern: repository-pattern
 status: draft
 tags: [go, repository, interface, dependency-injection, testing]
 version: v1
-source_codebase: diegosz/apex_process_ape
+source_codebase: exoport/apex_process_ape
 applicability: every Go service package that performs data access against a persistent store
 changed_at: 2026-03-19
 ---

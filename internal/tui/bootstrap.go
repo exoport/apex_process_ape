@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/diegosz/apex_process_ape/internal/trait"
+	"github.com/exoport/apex_process_ape/internal/trait"
 )
 
 // BootstrapConfig holds the result of the TUI session.

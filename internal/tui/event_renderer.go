@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
 )
 
 // Bubble Tea event renderer (PLAN-1 / I4b).

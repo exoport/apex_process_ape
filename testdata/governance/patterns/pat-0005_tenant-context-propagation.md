@@ -4,7 +4,7 @@ pattern: tenant-context-propagation
 status: draft
 tags: [multi-tenancy, context, go, middleware, isolation]
 version: v1
-source_codebase: diegosz/apex_process_ape
+source_codebase: exoport/apex_process_ape
 applicability: every Go service that handles tenant-scoped requests in a multi-tenant system
 changed_at: 2026-03-19
 ---

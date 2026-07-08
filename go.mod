@@ -1,4 +1,4 @@
-module github.com/diegosz/apex_process_ape
+module github.com/exoport/apex_process_ape
 
 go 1.26
 

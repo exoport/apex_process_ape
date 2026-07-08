@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/diegosz/apex_process_ape/internal/bridge/broker"
+	"github.com/exoport/apex_process_ape/internal/bridge/broker"
 )
 
 // Hub composes a BridgeRuntime with a web-mode HTTP/SSE broker and a

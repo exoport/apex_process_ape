@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install ape
         run: |
-          curl -fsSL https://github.com/diegosz/apex_process_ape/releases/latest/download/ape_linux_amd64.tar.gz \
+          curl -fsSL https://github.com/exoport/apex_process_ape/releases/latest/download/ape_linux_amd64.tar.gz \
             | tar -xz -C /usr/local/bin ape
       - name: Probe environment
         run: ape doctor --strict --output-format json | tee doctor-report.json

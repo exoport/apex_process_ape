@@ -29,7 +29,7 @@ cosign version
 ```bash
 VERSION=v0.1.0
 ASSET=ape_linux_amd64.tar.gz
-BASE="https://github.com/diegosz/apex_process_ape/releases/download/${VERSION}"
+BASE="https://github.com/exoport/apex_process_ape/releases/download/${VERSION}"
 
 # 1. Fetch the archive, the checksums file, and the signature material.
 curl -fsSL -o "${ASSET}"                "${BASE}/${ASSET}"
@@ -42,7 +42,7 @@ cosign verify-blob \
   --certificate ape_checksums.txt.pem \
   --signature   ape_checksums.txt.sig \
   --certificate-identity-regexp \
-    "^https://github\.com/diegosz/apex_process_ape/\.github/workflows/release\.yml@refs/tags/v.*$" \
+    "^https://github\.com/exoport/apex_process_ape/\.github/workflows/release\.yml@refs/tags/v.*$" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   ape_checksums.txt
 

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/diegosz/apex_process_ape/internal/framework"
+	"github.com/exoport/apex_process_ape/internal/framework"
 )
 
 // PreflightErrorKind distinguishes which kind of pre-run check produced

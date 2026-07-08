@@ -3,8 +3,8 @@ package apecmd
 import (
 	"html/template"
 
-	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
-	"github.com/diegosz/apex_process_ape/internal/web"
+	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/exoport/apex_process_ape/internal/web"
 )
 
 // webRenderer adapts internal/web template rendering to the

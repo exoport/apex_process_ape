@@ -6,8 +6,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/diegosz/apex_process_ape/internal/output"
-	"github.com/diegosz/apex_process_ape/internal/trait"
+	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/trait"
 	"github.com/spf13/cobra"
 )
 

@@ -12,7 +12,7 @@ tags:
 summary: Replace ape's external `tmux` dependency with an in-process pseudo-terminal driver (`internal/repl`, backed by `github.com/aymanbagabas/go-pty` — Unix PTY on Linux/macOS, ConPTY on Windows incl. Git Bash). Pipeline interactive exec and `ape chat` both stop shelling out to a `tmux` binary; bytes go `Write → PTY master → kernel → child stdin`, the same delivery path tmux `send-keys` used. `CapturePane` is upgraded to feed PTY output through a VT-grid emulator so the returned text is ANSI-free and byte-equivalent to tmux's rendered output (consumer-facing parity). `ape chat` switches to direct stdio inheritance — it loses Ctrl-B-D detach but gains cross-platform support and removes the tmux dependency. Lands as a single drop-in PR; the proof binary `apepty v0.0.13-pty` already validates the API-compatible package swap end-to-end against a real sandbox project.
 origin:
   - 2026-05-21 user research request — investigate 3mux as a tmux alternative; the deeper finding was that 3mux is structurally unfit (no scripting surface, dormant project, no Windows) but the right question is "do we need a multiplexer at all?" The answer for ape is no — we used tmux as a programmable PTY harness, and an in-process PTY does that better.
-  - 2026-05-22 sandbox proof. Parallel build `/home/diegos/_dev/github/diegosz/apex_process_ape_pty/` mirrors ape with `internal/tmux` → `internal/repl` and renamed binary `apepty`. Compiles, full test suite passes under `-race`, three PTY-driven repl smoke tests pass against a real bash stand-in. User confirmed `apepty v0.0.13-pty` works against a real sandbox project.
+  - 2026-05-22 sandbox proof. Parallel build `/home/diegos/_dev/github/exoport/apex_process_ape_pty/` mirrors ape with `internal/tmux` → `internal/repl` and renamed binary `apepty`. Compiles, full test suite passes under `-race`, three PTY-driven repl smoke tests pass against a real bash stand-in. User confirmed `apepty v0.0.13-pty` works against a real sandbox project.
   - PLAN-6 (the tmux pivot) abandoned an earlier PTY design — but that one delivered prompts as `await_message` MCP **tool-call return values**, so claude's CLI never saw a leading `/`. The new PTY design writes bytes to the master end (= keystrokes on the child's stdin), identical in shape to tmux `send-keys -l`. PLAN-6's failure mode does not apply. Detail in [`_output/implementation-notes.html`](../../_output/implementation-notes.html) under "Surprises".
   - User decisions (2026-05-22, captured during plan drafting): drop external live attach with no replacement; integrate VT-grid emulator in CapturePane now (not deferred); drop `ape chat` detach with no replacement; land as a single drop-in PR.
 ---
@@ -50,7 +50,7 @@ What disappears: external `tmux attach -t ape-<stage>-<pid>` for live debugging 
 
 ### F0: Sandbox proof carryover
 
-Mechanical port of the sandbox proof from `/home/diegos/_dev/github/diegosz/apex_process_ape_pty/` into the main repo. Single commit on a `plan-8-pty-migration` branch. The branch is the PR.
+Mechanical port of the sandbox proof from `/home/diegos/_dev/github/exoport/apex_process_ape_pty/` into the main repo. Single commit on a `plan-8-pty-migration` branch. The branch is the PR.
 
 **Steps.**
 
@@ -303,6 +303,6 @@ The tmux interactive runner took multiple follow-up commits after PLAN-6 to stab
 
 ## Notes
 
-- The sandbox parallel directory `/home/diegos/_dev/github/diegosz/apex_process_ape_pty/` is reference material, not a separate code stream. Once PLAN-8 lands, that directory and its binary `apepty` become historical / debugging tools and can be deleted at the user's convenience.
+- The sandbox parallel directory `/home/diegos/_dev/github/exoport/apex_process_ape_pty/` is reference material, not a separate code stream. Once PLAN-8 lands, that directory and its binary `apepty` become historical / debugging tools and can be deleted at the user's convenience.
 - Detailed pre-implementation decisions, tradeoffs, surprises, and the PLAN-6 archaeology are in [`_output/implementation-notes.html`](../../_output/implementation-notes.html).
 - This plan inherits PLAN-6's interactive runner semantics — the `/clear` between steps, PAT-25 prompt shape, Stop-hook step boundary, idle-timeout, per-step ndjson event log, contract verifier prefix-match. None of those change. The only thing that changes is **who owns the PTY** (in-process Go code via go-pty, vs out-of-process tmux daemon).

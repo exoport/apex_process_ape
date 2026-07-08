@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/diegosz/apex_process_ape/internal/updatecache"
+	"github.com/exoport/apex_process_ape/internal/updatecache"
 	"github.com/spf13/cobra"
 )
 

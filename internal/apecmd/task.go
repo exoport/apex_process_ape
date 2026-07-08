@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/diegosz/apex_process_ape/internal/pipeline"
-	"github.com/diegosz/apex_process_ape/internal/repl"
+	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )

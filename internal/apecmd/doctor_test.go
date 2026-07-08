@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/diegosz/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/output"
 )
 
 // TestRunDoctor_Aggregates exercises the runDoctor harness end-to-end

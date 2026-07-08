@@ -397,7 +397,7 @@ On reconnect (EventSource auto-reconnect handled by the SSE extension), the brok
 
 **No JS framework dependency.** Inline `onclick` for the handful of client-only widgets (copy-to-clipboard, modal toggles); helper functions in a single `<script>` block at page foot, or in `assets/app.js` if it crosses ~50 LOC. **Alpine adoption is explicitly deferred** — not in scope for this plan.
 
-**No build step on the end-user side.** `go install github.com/diegosz/apex_process_ape@latest` produces a working binary; vendored assets embedded via `//go:embed assets/*` in `internal/web/assets.go`. Contributor side has no codegen — `go build` is the whole pipeline.
+**No build step on the end-user side.** `go install github.com/exoport/apex_process_ape@latest` produces a working binary; vendored assets embedded via `//go:embed assets/*` in `internal/web/assets.go`. Contributor side has no codegen — `go build` is the whole pipeline.
 
 ### C9: Test strategy + PoC port mechanics
 

@@ -86,7 +86,7 @@ Verifying a release locally:
 cosign verify-blob \
   --certificate ape_checksums.txt.pem \
   --signature ape_checksums.txt.sig \
-  --certificate-identity "https://github.com/diegosz/apex_process_ape/.github/workflows/release.yml@refs/tags/vX.Y.Z" \
+  --certificate-identity "https://github.com/exoport/apex_process_ape/.github/workflows/release.yml@refs/tags/vX.Y.Z" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   ape_checksums.txt
 ```

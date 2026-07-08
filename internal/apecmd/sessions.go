@@ -10,8 +10,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/diegosz/apex_process_ape/internal/output"
-	"github.com/diegosz/apex_process_ape/internal/sessions"
+	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/sessions"
 	"github.com/spf13/cobra"
 )
 

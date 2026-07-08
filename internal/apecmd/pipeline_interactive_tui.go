@@ -8,11 +8,11 @@ import (
 	"sync"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/diegosz/apex_process_ape/internal/bridge/config"
-	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
-	"github.com/diegosz/apex_process_ape/internal/pipeline"
-	"github.com/diegosz/apex_process_ape/internal/runlog"
-	"github.com/diegosz/apex_process_ape/internal/tui"
+	"github.com/exoport/apex_process_ape/internal/bridge/config"
+	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/runlog"
+	"github.com/exoport/apex_process_ape/internal/tui"
 )
 
 // runWithInteractiveTUI runs the pipeline in PLAN-6 interactive exec

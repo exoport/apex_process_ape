@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/diegosz/apex_process_ape/internal/bridge/ipc"
+	"github.com/exoport/apex_process_ape/internal/bridge/ipc"
 )
 
 // TestBridgeRuntime_ListenIsIdempotent verifies repeated Listen calls

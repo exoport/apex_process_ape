@@ -56,7 +56,7 @@ Push your commits to `main`:
 git push origin main
 ```
 
-The CI workflow re-runs the full matrix (Linux + Windows + lint + vuln) against the pushed SHA. **Wait for it to finish green** — open `https://github.com/diegosz/apex_process_ape/actions`, find the CI run for that SHA, and confirm `conclusion: success`.
+The CI workflow re-runs the full matrix (Linux + Windows + lint + vuln) against the pushed SHA. **Wait for it to finish green** — open `https://github.com/exoport/apex_process_ape/actions`, find the CI run for that SHA, and confirm `conclusion: success`.
 
 Only then push the final tag:
 
