@@ -4,7 +4,7 @@ pattern: service-layer
 status: draft
 tags: [go, service, business-logic, handler, separation-of-concerns]
 version: v1
-source_codebase: diegosz/apex_process_ape
+source_codebase: exoport/apex_process_ape
 applicability: every Go service package that implements business logic beyond simple CRUD
 changed_at: 2026-03-19
 ---

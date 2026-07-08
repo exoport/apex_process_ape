@@ -12,10 +12,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/diegosz/apex_process_ape/internal/bridge/config"
-	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
-	"github.com/diegosz/apex_process_ape/internal/repl"
-	"github.com/diegosz/apex_process_ape/internal/runlog"
+	"github.com/exoport/apex_process_ape/internal/bridge/config"
+	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/exoport/apex_process_ape/internal/repl"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 )
 
 // newChatCmd registers `ape chat`. A thin wrapper around `claude`

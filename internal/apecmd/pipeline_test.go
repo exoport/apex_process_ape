@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/diegosz/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/stretchr/testify/require"
 )
 

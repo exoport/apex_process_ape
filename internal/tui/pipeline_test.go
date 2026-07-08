@@ -9,8 +9,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
-	"github.com/diegosz/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/stretchr/testify/require"
 )
 

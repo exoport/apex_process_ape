@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/diegosz/apex_process_ape/internal/framework"
-	"github.com/diegosz/apex_process_ape/internal/pipeline"
-	"github.com/diegosz/apex_process_ape/internal/sandbox"
-	"github.com/diegosz/apex_process_ape/internal/updatecache"
+	"github.com/exoport/apex_process_ape/internal/framework"
+	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/sandbox"
+	"github.com/exoport/apex_process_ape/internal/updatecache"
 )
 
 // LAST UPDATED: 2026-05-22 — list of Ubuntu majors known to be

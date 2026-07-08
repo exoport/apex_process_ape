@@ -7,7 +7,7 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/diegosz/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/output"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

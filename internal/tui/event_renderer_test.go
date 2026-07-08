@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/stretchr/testify/require"
 )
 

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/diegosz/apex_process_ape/internal/repl"
+	"github.com/exoport/apex_process_ape/internal/repl"
 )
 
 // runStagesInteractive drives a pipeline in PLAN-6 interactive exec

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/diegosz/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/pipeline"
 )
 
 // installPipelines materializes the canonical three pipeline yamls

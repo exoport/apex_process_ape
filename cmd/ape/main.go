@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/diegosz/apex_process_ape/internal/apecmd"
+	"github.com/exoport/apex_process_ape/internal/apecmd"
 )
 
 func main() {

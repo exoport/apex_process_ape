@@ -37,7 +37,7 @@ The rc-tag pre-release gate that earlier versions of this skill used was dropped
    ```bash
    git remote get-url origin
    ```
-   Parse `{owner}/{repo}` from the URL (handles both HTTPS and SSH forms). Set `{repo_slug}` = `diegosz/apex_process_ape` (verify against the parsed value; fail loud if they differ).
+   Parse `{owner}/{repo}` from the URL (handles both HTTPS and SSH forms). Set `{repo_slug}` = `exoport/apex_process_ape` (verify against the parsed value; fail loud if they differ).
 5. Set `{api_base}` = `https://api.github.com/repos/{repo_slug}`.
 
 ---

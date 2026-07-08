@@ -7,8 +7,8 @@ ape ships as a single static binary. Four install paths cover most environments.
 Download the pinned-version tarball for your platform and extract the binary onto your `$PATH`.
 
 ```bash
-VERSION=$(curl -fsSL https://api.github.com/repos/diegosz/apex_process_ape/releases/latest | jq -r .tag_name)
-curl -fsSL "https://github.com/diegosz/apex_process_ape/releases/download/${VERSION}/ape_linux_amd64.tar.gz" \
+VERSION=$(curl -fsSL https://api.github.com/repos/exoport/apex_process_ape/releases/latest | jq -r .tag_name)
+curl -fsSL "https://github.com/exoport/apex_process_ape/releases/download/${VERSION}/ape_linux_amd64.tar.gz" \
   | sudo tar -xz -C /usr/local/bin ape
 ape version
 ```
@@ -23,7 +23,7 @@ If you want a specific ape version checked into a project's own tooling (so ever
 
 ```bash
 # In your project repo:
-bingo get -l github.com/diegosz/apex_process_ape/cmd/ape@latest
+bingo get -l github.com/exoport/apex_process_ape/cmd/ape@latest
 # or a specific release tag, e.g. v0.0.38
 ```
 
@@ -34,7 +34,7 @@ This adds a per-tool `.mod` file under `.bingo/` and a `Makefile`-friendly varia
 If you have a Go toolchain (1.26 or later):
 
 ```bash
-go install github.com/diegosz/apex_process_ape/cmd/ape@latest
+go install github.com/exoport/apex_process_ape/cmd/ape@latest
 ```
 
 The binary lands at `$(go env GOPATH)/bin/ape`. Make sure that directory is on your `$PATH`. Note that `go install`-built binaries report `Version=dev` from `ape version` rather than a release tag — they're built from source without goreleaser's ldflags.
@@ -42,7 +42,7 @@ The binary lands at `$(go env GOPATH)/bin/ape`. Make sure that directory is on y
 ## Option 4 — Build from source
 
 ```bash
-git clone https://github.com/diegosz/apex_process_ape.git
+git clone https://github.com/exoport/apex_process_ape.git
 cd apex_process_ape
 make install        # → /usr/local/bin/ape
 ```

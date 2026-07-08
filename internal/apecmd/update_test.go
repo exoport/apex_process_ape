@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/diegosz/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/output"
 )
 
 // captureStdout runs fn with os.Stdout redirected to a pipe and returns

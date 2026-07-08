@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/diegosz/apex_process_ape/internal/bridge/ipc"
-	"github.com/diegosz/apex_process_ape/internal/web/views"
+	"github.com/exoport/apex_process_ape/internal/bridge/ipc"
+	"github.com/exoport/apex_process_ape/internal/web/views"
 )
 
 // HookFragment is the orchestrator-facing input to the activity-feed

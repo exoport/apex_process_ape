@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
-	"github.com/diegosz/apex_process_ape/internal/pipeline"
-	"github.com/diegosz/apex_process_ape/internal/runlog"
+	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/stretchr/testify/require"
 )
 

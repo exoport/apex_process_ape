@@ -11,14 +11,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/diegosz/apex_process_ape/internal/bridge/broker"
-	"github.com/diegosz/apex_process_ape/internal/bridge/config"
-	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
-	"github.com/diegosz/apex_process_ape/internal/cost"
-	"github.com/diegosz/apex_process_ape/internal/pipeline"
-	"github.com/diegosz/apex_process_ape/internal/runlog"
-	"github.com/diegosz/apex_process_ape/internal/sessions"
-	"github.com/diegosz/apex_process_ape/internal/web"
+	"github.com/exoport/apex_process_ape/internal/bridge/broker"
+	"github.com/exoport/apex_process_ape/internal/bridge/config"
+	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/exoport/apex_process_ape/internal/cost"
+	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/runlog"
+	"github.com/exoport/apex_process_ape/internal/sessions"
+	"github.com/exoport/apex_process_ape/internal/web"
 )
 
 // runWithWeb runs a pipeline with the bridged web UI. Starts a hub

@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/diegosz/apex_process_ape/internal/framework"
+	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/stretchr/testify/require"
 )
 

@@ -8,8 +8,8 @@ import (
 	"os"
 
 	selfupdate "github.com/creativeprojects/go-selfupdate"
-	"github.com/diegosz/apex_process_ape/internal/output"
-	"github.com/diegosz/apex_process_ape/internal/updatecache"
+	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/updatecache"
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/semver"
 )
@@ -50,7 +50,7 @@ func newUpdateCmd() *cobra.Command {
 			}
 
 			ctx := context.Background()
-			rel, found, err := updater.DetectLatest(ctx, selfupdate.ParseSlug("diegosz/apex_process_ape"))
+			rel, found, err := updater.DetectLatest(ctx, selfupdate.ParseSlug("exoport/apex_process_ape"))
 			if err != nil {
 				return fmt.Errorf("cannot detect latest version: %w", err)
 			}
@@ -72,7 +72,7 @@ func newUpdateCmd() *cobra.Command {
 				return printUpdateResult(res, output.Format(outputFormat))
 			}
 
-			rel2, err := updater.UpdateSelf(ctx, Version, selfupdate.ParseSlug("diegosz/apex_process_ape"))
+			rel2, err := updater.UpdateSelf(ctx, Version, selfupdate.ParseSlug("exoport/apex_process_ape"))
 			if err != nil {
 				return fmt.Errorf("update failed: %w", err)
 			}
@@ -124,7 +124,7 @@ func fetchLatestVersion(ctx context.Context, token string) (string, error) {
 		return "", err
 	}
 
-	rel, found, err := updater.DetectLatest(ctx, selfupdate.ParseSlug("diegosz/apex_process_ape"))
+	rel, found, err := updater.DetectLatest(ctx, selfupdate.ParseSlug("exoport/apex_process_ape"))
 	if err != nil {
 		return "", err
 	}

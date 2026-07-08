@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/diegosz/apex_process_ape/internal/output"
-	"github.com/diegosz/apex_process_ape/internal/pipeline"
-	"github.com/diegosz/apex_process_ape/internal/tui"
+	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/tui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

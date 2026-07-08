@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/diegosz/apex_process_ape/internal/bridge/ipc"
+	"github.com/exoport/apex_process_ape/internal/bridge/ipc"
 )
 
 // --- Helpers shared across tests ---

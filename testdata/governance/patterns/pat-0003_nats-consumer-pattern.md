@@ -4,7 +4,7 @@ pattern: nats-consumer-pattern
 status: draft
 tags: [nats, jetstream, consumer, ack, durable, messaging]
 version: v1
-source_codebase: diegosz/apex_process_ape
+source_codebase: exoport/apex_process_ape
 applicability: every Go service that consumes NATS JetStream messages with at-least-once delivery guarantees
 changed_at: 2026-03-19
 ---

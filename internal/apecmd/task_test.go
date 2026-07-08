@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/diegosz/apex_process_ape/internal/repl"
+	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/stretchr/testify/require"
 )
 

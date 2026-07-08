@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/diegosz/apex_process_ape/internal/output"
-	"github.com/diegosz/apex_process_ape/internal/trait"
-	"github.com/diegosz/apex_process_ape/internal/tui"
+	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/trait"
+	"github.com/exoport/apex_process_ape/internal/tui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )

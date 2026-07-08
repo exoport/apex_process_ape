@@ -4,7 +4,7 @@ pattern: nats-error-handling
 status: draft
 tags: [nats, error-handling, transient, permanent, dead-letter, term]
 version: v1
-source_codebase: diegosz/apex_process_ape
+source_codebase: exoport/apex_process_ape
 applicability: every NATS JetStream message handler that must distinguish retriable from non-retriable errors
 changed_at: 2026-03-19
 ---

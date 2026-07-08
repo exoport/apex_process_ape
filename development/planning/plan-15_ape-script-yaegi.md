@@ -75,7 +75,7 @@ printed; panics recovered and reported with the yaegi stack.
 
 ### D3: The `apescript` library
 
-New public package `github.com/diegosz/apex_process_ape/apescript` (public
+New public package `github.com/exoport/apex_process_ape/apescript` (public
 so scripts get editor autocomplete/type-checking by importing the real module
 in their go.mod; at runtime yaegi resolves the import to the in-process
 implementation via yaegi's Use/extract mechanism — this dual nature is the

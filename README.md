@@ -13,8 +13,8 @@ APEX is a planning-and-implementation framework for Claude Code that breaks soft
 The fastest path on Linux x64:
 
 ```bash
-VERSION=$(curl -fsSL https://api.github.com/repos/diegosz/apex_process_ape/releases/latest | jq -r .tag_name)
-curl -fsSL "https://github.com/diegosz/apex_process_ape/releases/download/${VERSION}/ape_linux_amd64.tar.gz" \
+VERSION=$(curl -fsSL https://api.github.com/repos/exoport/apex_process_ape/releases/latest | jq -r .tag_name)
+curl -fsSL "https://github.com/exoport/apex_process_ape/releases/download/${VERSION}/ape_linux_amd64.tar.gz" \
   | sudo tar -xz -C /usr/local/bin ape
 ape version
 ```
@@ -25,7 +25,7 @@ The other recommended install path is to pin a specific release in your project 
 
 ```bash
 # In your project repo:
-bingo get -l github.com/diegosz/apex_process_ape/cmd/ape@latest 
+bingo get -l github.com/exoport/apex_process_ape/cmd/ape@latest 
 # or a specific release tag, e.g. v0.0.38
 ```
 
@@ -137,7 +137,7 @@ Start at [docs/README.md](docs/README.md) for a guided index.
 ## Development
 
 ```bash
-git clone https://github.com/diegosz/apex_process_ape.git
+git clone https://github.com/exoport/apex_process_ape.git
 cd apex_process_ape
 make help          # available targets
 make tools         # build the pinned dev tools (golangci-lint, gofumpt, goreleaser) under $GOBIN

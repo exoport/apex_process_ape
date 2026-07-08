@@ -13,12 +13,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/diegosz/apex_process_ape/internal/bridge/config"
-	"github.com/diegosz/apex_process_ape/internal/bridge/ipc"
-	"github.com/diegosz/apex_process_ape/internal/bridge/orchestrator"
-	"github.com/diegosz/apex_process_ape/internal/cost"
-	"github.com/diegosz/apex_process_ape/internal/pipeline"
-	"github.com/diegosz/apex_process_ape/internal/runlog"
+	"github.com/exoport/apex_process_ape/internal/bridge/config"
+	"github.com/exoport/apex_process_ape/internal/bridge/ipc"
+	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/exoport/apex_process_ape/internal/cost"
+	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 )
 
 // hookEnvelope is the minimal shape ape needs to extract from a

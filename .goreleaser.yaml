@@ -15,9 +15,9 @@ builds:
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
     ldflags:
-      - -X github.com/diegosz/apex_process_ape/internal/apecmd.Version={{.Version}}
-      - -X github.com/diegosz/apex_process_ape/internal/apecmd.BuildDate={{.Date}}
-      - -X github.com/diegosz/apex_process_ape/internal/apecmd.GitCommit={{.Commit}}
+      - -X github.com/exoport/apex_process_ape/internal/apecmd.Version={{.Version}}
+      - -X github.com/exoport/apex_process_ape/internal/apecmd.BuildDate={{.Date}}
+      - -X github.com/exoport/apex_process_ape/internal/apecmd.GitCommit={{.Commit}}
 
 archives:
   - format_overrides:
@@ -50,7 +50,7 @@ signs:
 
 release:
   github:
-    owner: diegosz
+    owner: exoport
     name: apex_process_ape
   prerelease: auto
 

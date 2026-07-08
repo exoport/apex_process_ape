@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/diegosz/apex_process_ape/internal/web/views"
+	"github.com/exoport/apex_process_ape/internal/web/views"
 )
 
 func TestMustTemplates_ParsesAndRendersPage_ChatMode(t *testing.T) {
