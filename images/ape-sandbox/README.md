@@ -37,7 +37,7 @@ workspace, and `HOME` points there at runtime.
 docker build \
   --build-arg APE_VERSION=v0.0.40 \
   --build-arg FRAMEWORK_REF=v0.0.71 \
-  -t ghcr.io/diegosz/ape-sandbox:v0.0.40 \
+  -t ghcr.io/exoport/ape-sandbox:v0.0.40 \
   images/ape-sandbox
 ```
 
@@ -76,7 +76,7 @@ reproducible.
    ```
 
    Then update this `ARG` + this section. (Or `crane digest ghcr.io/agent-infra/sandbox:<TAG>`.)
-2. **Tag to match the ape release** (e.g. `ghcr.io/diegosz/ape-sandbox:v0.0.40`).
+2. **Tag to match the ape release** (e.g. `ghcr.io/exoport/ape-sandbox:v0.0.40`).
 3. **Update `sandbox.DefaultImage`** in `internal/sandbox/kata.go` to the new
    tag so `ape sandbox up` (with an empty profile `image:`) resolves to it.
 

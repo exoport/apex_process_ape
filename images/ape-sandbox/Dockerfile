@@ -59,7 +59,7 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
 # ape — pinned release tarball (mirrors docs/how-to/install.md, option 1).
 RUN set -euo pipefail; \
-    url="https://github.com/diegosz/apex_process_ape/releases/download/${APE_VERSION}/ape_linux_${TARGETARCH}.tar.gz"; \
+    url="https://github.com/exoport/apex_process_ape/releases/download/${APE_VERSION}/ape_linux_${TARGETARCH}.tar.gz"; \
     curl -fsSL "$url" | tar -xz -C /usr/local/bin ape; \
     /usr/local/bin/ape version
 

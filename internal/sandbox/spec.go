@@ -103,7 +103,8 @@ func BuildSpec(opts SpecOptions) (*specs.Spec, error) {
 	// for the strict (root) tier. The synthetic home (/sandbox/home) and
 	// project (/workspace) live outside these dirs, so shadowing is safe.
 	mounts = append(mounts, sensitiveShadowMounts()...)
-	mounts = append(mounts,
+	mounts = append(
+		mounts,
 		// Project root: read-write, so the job can produce _output and commits.
 		specs.Mount{
 			Destination: projectDest,

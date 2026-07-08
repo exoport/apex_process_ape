@@ -26,7 +26,7 @@ const ContainerPrefix = "ape-ws-"
 // profile leaves `image:` empty. It is pinned (never :latest) and tracks
 // ape + framework releases (PLAN-16 D6). The concrete tag is produced by
 // the image pipeline (Step 5); this default is the wiring point.
-const DefaultImage = "ghcr.io/diegosz/ape-sandbox:v0"
+const DefaultImage = "ghcr.io/exoport/ape-sandbox:v0"
 
 // DefaultShell is the login shell `ape sandbox attach` opens inside a
 // workspace when the caller doesn't pick one.

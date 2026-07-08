@@ -1,7 +1,7 @@
 package apecmd
 
 import (
-	"github.com/diegosz/apex_process_ape/internal/sandbox"
+	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 
