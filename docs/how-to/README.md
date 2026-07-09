@@ -14,6 +14,7 @@ How-to guides are **recipes** — they answer "how do I X?" for a reader who alr
 - [How ape runs claude (PTY-only)](interactive-vs-programmatic.md)
 - [How to read run artefacts](run-artefacts.md)
 - [How to publish run progress to NATS](publish-progress-to-nats.md)
+- [How to report from a Claude session (event/log/metrics/transcript)](report-from-a-session.md)
 - [How to upload run transcripts as content-addressed blobs](upload-transcripts.md)
 - [How to run `ape doctor` in CI](run-doctor-in-ci.md)
 - [How to verify a release before tagging](pre-tag-release.md)

@@ -32,7 +32,10 @@ Subcommands:
 - `chat` — Bridged claude REPL with hooks captured to a runlog
 - `costs` — Show this project's Claude cost rollup
 - `doctor` — Probe the local environment for prerequisites
+- `event` — Publish a session progress event over NATS
 - `framework` — Install and inspect APEX framework assets in a project
+- `log` — Publish a structured log record over NATS
+- `metrics` — Scan and publish this session's usage metrics over NATS
 - `pattern` — Manage governance patterns
 - `pipeline` — List or run an APEX pipeline
 - `planning` — Show the planning pipeline diagram
@@ -42,6 +45,7 @@ Subcommands:
 - `sync` — Sync governance artifacts
 - `task` — Run a single framework skill through the interactive PTY runner
 - `trait` — Manage and inspect traits
+- `transcript` — Work with Claude session transcripts
 - `update` — Update ape to the latest version
 - `version` — Print version information
 
@@ -308,6 +312,50 @@ Flags:
 | `--skip` | string | `—` | Comma-separated list of check names to skip (e.g. node.binary,npx.binary) |
 | `--strict` | bool | `false` | Treat WARN-level findings as failures (exit 1) |
 
+## ape event
+
+Publish a session progress event over NATS
+
+```
+ape event <event> [--payload <json>|@file|-] [flags]
+```
+
+Publish a caller-named progress event for the current Claude session on
+ape.evt.<user>.<project>.session.<session-id>.<event>.
+
+The <event> token is caller-chosen (validated [a-z0-9-]+). --payload is
+arbitrary JSON, given inline, as @file, or "-" for stdin; it rides the
+versioned envelope under "payload" alongside the decoded user identity and
+the resolved session id.
+
+The session is resolved as: --session-id → --transcript → APE_SESSION_ID →
+the newest transcript for the current project.
+
+Exit codes: 0 published · 1 publish failed (connected) · 2 usage error,
+no NATS configured, or session unresolvable.
+
+Examples:
+
+```
+  ape event status --payload '{"phase":"implement","pct":60}'
+  ape event build-green
+  echo '{"pr":42}' | ape event pr-opened --payload -
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root for session auto-resolution (default: current working dir). |
+| `--events-subject-prefix` | string | `ape.evt` | Subject root for the published event. |
+| `--nats-creds` | string | `—` | NATS .creds file; its decoded user identity is baked into every subject (env APE_NATS_CREDS). |
+| `--nats-url` | string | `—` | NATS server URL (env APE_NATS_URL). Required — no URL is a usage error (exit 2). |
+| `--output-format` | string | `human` | Output format: human\|json (result object on stdout, diagnostics on stderr). |
+| `--payload` | string | `—` | Event payload as JSON: inline, @file, or "-" for stdin. |
+| `--quiet` | bool | `false` | Suppress the human-mode confirmation line. |
+| `--session-id` | string | `—` | Claude session id to report for (default: auto-resolve the current project's newest). |
+| `--transcript` | string | `—` | Explicit transcript file; the session id is parsed from its name. |
+
 ## ape framework
 
 Install and inspect APEX framework assets in a project
@@ -461,6 +509,88 @@ Global flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
 | `--repo` | string | `—` | Path to a checked-out apex_process_framework repo (default: $APEX_FRAMEWORK_REPO) |
+
+## ape log
+
+Publish a structured log record over NATS
+
+```
+ape log <level> <message> [flags]
+```
+
+Publish one structured log record for the current Claude session on
+ape.log.<user>.<project>.<session-id>.<level>.
+
+<level> is one of debug|info|warn|error. Extra structured context is passed
+as repeated --field key=value pairs. Centralized-logging consumers subscribe
+ape.log.> (or per-user/project subtrees — the subject is the routing key).
+
+Exit codes: 0 published · 1 publish failed (connected) · 2 usage error,
+no NATS configured, or session unresolvable.
+
+Examples:
+
+```
+  ape log info "migration step 3 complete"
+  ape log warn "retrying" --field attempt=2 --field endpoint=api
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root for session auto-resolution (default: current working dir). |
+| `--field` | stringArray | `[]` | Structured field as key=value (repeatable). |
+| `--nats-creds` | string | `—` | NATS .creds file; its decoded user identity is baked into every subject (env APE_NATS_CREDS). |
+| `--nats-url` | string | `—` | NATS server URL (env APE_NATS_URL). Required — no URL is a usage error (exit 2). |
+| `--output-format` | string | `human` | Output format: human\|json (result object on stdout, diagnostics on stderr). |
+| `--quiet` | bool | `false` | Suppress the human-mode confirmation line. |
+| `--session-id` | string | `—` | Claude session id to report for (default: auto-resolve the current project's newest). |
+| `--transcript` | string | `—` | Explicit transcript file; the session id is parsed from its name. |
+
+## ape metrics
+
+Scan and publish this session's usage metrics over NATS
+
+```
+ape metrics [flags]
+```
+
+Scan the resolved Claude session set (main + sub-agents) and publish a
+usage snapshot on ape.metrics.<user>.<project>.<session-id>.
+
+The payload carries per-model token counts (with the ephemeral 5m/1h cache
+split), turn count, first/last turn timestamps, and the Claude Code version
+— everything needed to reprice against Claude Code API rates at any later
+moment (per_model tokens × the price table = cost_usd).
+
+--run-id <id> instead publishes a completed run's manifest totals (a reader
+over the run's manifest.yaml), with run_id populated. Republishing is
+idempotent; consumers key on (session_id, ts).
+
+Exit codes: 0 published · 1 publish failed (connected) · 2 usage error,
+no NATS configured, or the session/run was unresolvable.
+
+Examples:
+
+```
+  ape metrics
+  ape metrics --output-format json
+  ape metrics --run-id 20260709-abc123
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root for session auto-resolution (default: current working dir). |
+| `--nats-creds` | string | `—` | NATS .creds file; its decoded user identity is baked into every subject (env APE_NATS_CREDS). |
+| `--nats-url` | string | `—` | NATS server URL (env APE_NATS_URL). Required — no URL is a usage error (exit 2). |
+| `--output-format` | string | `human` | Output format: human\|json (result object on stdout, diagnostics on stderr). |
+| `--quiet` | bool | `false` | Suppress the human-mode confirmation line. |
+| `--run-id` | string | `—` | Publish a completed run's manifest totals instead of a live session scan. |
+| `--session-id` | string | `—` | Claude session id to report for (default: auto-resolve the current project's newest). |
+| `--transcript` | string | `—` | Explicit transcript file; the session id is parsed from its name. |
 
 ## ape pattern
 
@@ -979,6 +1109,64 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape transcript
+
+Work with Claude session transcripts
+
+```
+ape transcript
+```
+
+Transcript utilities. The upload subcommand blob-uploads a session's transcript set over NATS.
+
+Subcommands:
+
+- `upload` — Upload this session's transcript set as content-addressed blobs
+
+## ape transcript upload
+
+Upload this session's transcript set as content-addressed blobs
+
+```
+ape transcript upload [flags]
+```
+
+Upload the resolved Claude session set (main + sub-agents) as
+deduplicated, content-addressed, zstd-compressed blobs, then publish a
+companion ape.evt.<user>.<project>.session.<session-id>.transcript-uploaded
+event carrying the digest map.
+
+Uploading is idempotent: a blob already present is a cheap no-op (its result
+entry is marked existed=true with the same digest), so re-running is safe.
+
+--store selects the backend: nats-object (a NATS JetStream Object Store,
+default) or uri-offload (a NATS request returns a signed upload URI; ape
+does the HTTPS PUT).
+
+Exit codes: 0 uploaded · 1 upload/publish failed (connected) · 2 usage
+error, no NATS configured, or the session was unresolvable.
+
+Examples:
+
+```
+  ape transcript upload
+  ape transcript upload --store uri-offload --output-format json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root for session auto-resolution (default: current working dir). |
+| `--events-subject-prefix` | string | `ape.evt` | Subject root for the published event. |
+| `--nats-creds` | string | `—` | NATS .creds file; its decoded user identity is baked into every subject (env APE_NATS_CREDS). |
+| `--nats-url` | string | `—` | NATS server URL (env APE_NATS_URL). Required — no URL is a usage error (exit 2). |
+| `--output-format` | string | `human` | Output format: human\|json (result object on stdout, diagnostics on stderr). |
+| `--quiet` | bool | `false` | Suppress the human-mode confirmation line. |
+| `--session-id` | string | `—` | Claude session id to report for (default: auto-resolve the current project's newest). |
+| `--store` | string | `nats-object` | Blob backend: nats-object\|uri-offload (env APE_TRANSCRIPT_STORE). |
+| `--transcript` | string | `—` | Explicit transcript file; the session id is parsed from its name. |
 
 ## ape update
 

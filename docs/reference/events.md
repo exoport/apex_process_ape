@@ -5,17 +5,20 @@
 > blobs), PLAN-14 (`ape service`), PLAN-17 (reporting CLI + identity), and
 > PLAN-18 (`ape`/`aped` VM management).
 >
-> **Shipped (PLAN-13):** the `ape.evt.<user>.<project>.…` progress-event root and
-> the `ape.blob.uri-request` transcript-offload contract, published by `ape
-> pipeline` and `ape task` runs (opt-in via `--nats-url` / `APE_NATS_URL`), with
-> the `<user>` identity token decoded from the `.creds` credential (PLAN-17 D1).
-> See [How to publish progress to NATS](../how-to/publish-progress-to-nats.md)
-> and [How to upload transcripts](../how-to/upload-transcripts.md).
+> **Shipped (PLAN-13 + PLAN-17):** the `ape.evt.<user>.<project>.…` progress-event
+> root and the `ape.blob.uri-request` transcript-offload contract (PLAN-13); the
+> `ape.log.<user>.…` and `ape.metrics.<user>.…` reporting roots and the standalone
+> `ape event`/`log`/`metrics`/`transcript` commands (PLAN-17), including the
+> `session` event kind for agent-initiated reporting. Every subject carries the
+> `<user>` identity token decoded from the `.creds` credential (PLAN-17 D1), and
+> the PTY runners publish the same shapes at finalize. See
+> [How to report from a session](../how-to/report-from-a-session.md),
+> [How to publish progress to NATS](../how-to/publish-progress-to-nats.md), and
+> [How to upload transcripts](../how-to/upload-transcripts.md).
 >
-> **Proposed (not yet built):** the `ape.log` / `ape.metrics` reporting roots and
-> the standalone `ape event`/`log`/`metrics`/`transcript` commands (PLAN-17), the
-> `ape.svc` job-daemon root (PLAN-14), and the `ape.vmm` / `ape.audit` roots
-> (PLAN-18). Each subtree notes the plan that owns it.
+> **Proposed (not yet built):** the `ape.svc` job-daemon root (PLAN-14) and the
+> `ape.vmm` / `ape.audit` roots (PLAN-18). Each subtree notes the plan that owns
+> it.
 >
 > The subject taxonomy is an external contract that **cannot be retrofitted** (a
 > user token baked into a subject can't be added later without breaking
@@ -75,17 +78,30 @@ versioned, additive-only contract otherwise.
 `step-end` carries the per-model telemetry block (PLAN-10); `run-end` carries
 manifest totals + transcript-blob hashes.
 
+Under kind `session` (standalone `ape event`), the `<id>` segment is the
+session id and the payload adds `session_id` + `event` + a caller-supplied
+`payload` (arbitrary JSON), e.g. `ape event status --payload '{"pct":60}'` →
+`ape.evt.<user>.<project>.session.<session-id>.status`. `ape transcript upload`
+publishes a companion `…session.<session-id>.transcript-uploaded` whose `payload`
+is the uploaded blobs' digest map (keyed by transcript file base name).
+
 ### `ape.log` — structured logs (PLAN-17)
 
 `ape.log.<user>.<project>.<session-id>.<level>`, `<level>` ∈
 `debug | info | warn | error`. Consumers subscribe `ape.log.>` (or per-user/project
-subtrees — the subject *is* the routing key).
+subtrees — the subject *is* the routing key). Payload: the common envelope plus
+`"level"`, `"msg"`, and `"fields"` (a string→string map from repeated
+`--field k=v`). Published by `ape log <level> <message>`.
 
 ### `ape.metrics` — usage/cost metrics (PLAN-17)
 
 `ape.metrics.<user>.<project>.<session-id>`. Payload carries per-model token
 counts + timestamps so a consumer can (re)price against Claude Code API rates at
-any later moment. Republishing is idempotent; consumers key on
+any later moment (`per_model` tokens × the price table = `cost_usd`). Published by
+`ape metrics` (a live scan of the session's main + sub-agent transcripts) and by
+the PTY runners at finalize — the payloads are schema-identical, differing only in
+`ts`. `ape metrics --run-id <id>` instead publishes a completed run's manifest
+totals with `run_id` populated. Republishing is idempotent; consumers key on
 `(session_id, ts)`.
 
 ### `ape.blob.uri-request` — transcript-blob offload (PLAN-13)
