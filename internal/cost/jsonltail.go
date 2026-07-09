@@ -29,11 +29,24 @@ const DefaultTailInterval = 200 * time.Millisecond
 // over-counted; ScanSessionJSONL and Tailer.consumeLines both filter
 // by ID.
 type AssistantLine struct {
-	Type    string `json:"type"`
-	Message struct {
-		ID    string     `json:"id"`
-		Model string     `json:"model"`
-		Usage UsageBlock `json:"usage"`
+	Type string `json:"type"`
+	// PLAN-10 D1 per-turn fields. Timestamp/Version stay strings so a
+	// malformed value can never fail the whole line's unmarshal and drop
+	// its usage (the v0.0.28–32 zeroed-telemetry class of bug); the caller
+	// parses Timestamp leniently. requestId + message.stop_reason drive the
+	// H6 dedup (prefer the final, stop_reason-bearing snapshot of a
+	// message.id). isMeta/isSidechain match the transcript's own flags.
+	IsMeta      bool   `json:"isMeta"`
+	IsSidechain bool   `json:"isSidechain"`
+	RequestID   string `json:"requestId"`
+	Timestamp   string `json:"timestamp"`
+	Version     string `json:"version"`
+	SessionID   string `json:"sessionId"`
+	Message     struct {
+		ID         string     `json:"id"`
+		Model      string     `json:"model"`
+		StopReason string     `json:"stop_reason"`
+		Usage      UsageBlock `json:"usage"`
 	} `json:"message"`
 }
 

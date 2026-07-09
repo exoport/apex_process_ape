@@ -14,7 +14,10 @@
 // detail comes from the existing PLAN-3 manifest.yaml.
 package cost
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // ModelPrice is the per-million-tokens USD cost for one model. The
 // formula in formula.go consumes these values directly.
@@ -49,8 +52,10 @@ var Prices = map[string]ModelPrice{
 	// Claude 5 family ($10 in / $50 out).
 	"claude-fable-5":  {BaseInput: 10.00, Output: 50.00},
 	"claude-mythos-5": {BaseInput: 10.00, Output: 50.00},
-	// Claude Sonnet 5 ($3 in / $15 out; intro pricing through
-	// 2026-08-31 is $2/$10 — table carries the standard rate).
+	// Claude Sonnet 5 — the STANDARD (post-intro) rate ($3 in / $15 out).
+	// The $2/$10 intro window through 2026-08-31 is applied date-aware by
+	// LookupAt (datedPrices); this entry is the conservative fallback a
+	// dateless Lookup returns (PLAN-10 D3).
 	"claude-sonnet-5": {BaseInput: 3.00, Output: 15.00},
 	// Claude Opus 4.5+ — current pricing tier ($5 in / $25 out).
 	"claude-opus-4-8": {BaseInput: 5.00, Output: 25.00},
@@ -69,6 +74,34 @@ var Prices = map[string]ModelPrice{
 	// Claude Haiku 3.5 — retired on first-party API but still
 	// reachable via Bedrock / Vertex; keep for those captures.
 	"claude-haiku-3-5": {BaseInput: 0.80, Output: 4.00},
+}
+
+// SonnetIntroEnd is the last instant Claude Sonnet 5 bills at its
+// promotional intro rate ($2 in / $10 out). Turns timestamped at or
+// before this fall in the intro window; after it, the standard
+// Prices["claude-sonnet-5"] rate ($3/$15) applies. Confirmed against
+// Anthropic's pricing page 2026-07-02 (PLAN-10 D3).
+var SonnetIntroEnd = time.Date(2026, 8, 31, 23, 59, 59, 0, time.UTC)
+
+// datedPrice overrides the standard Prices entry for a model when a
+// turn's timestamp falls at/before Until — a promotional/intro window.
+// After Until, LookupAt falls through to Prices. A dateless Lookup
+// (zero ts) never matches a window, so it returns the conservative
+// standard rate (PLAN-10 D3: "the standard-rate table is the blessed
+// conservative fallback").
+type datedPrice struct {
+	Until time.Time
+	Price ModelPrice
+}
+
+// datedPrices carries the built-in promotional windows. Entries are
+// checked oldest-window-first; the first whose Until is at/after the
+// turn timestamp wins. Extend here on future intro pricing — like
+// Prices, there is no API to fetch this.
+var datedPrices = map[string][]datedPrice{
+	"claude-sonnet-5": {
+		{Until: SonnetIntroEnd, Price: ModelPrice{BaseInput: 2.00, Output: 10.00}},
+	},
 }
 
 // NormalizeModel canonicalizes a model identifier for price lookup
@@ -115,11 +148,38 @@ var modelAliases = map[string]string{
 // update --from <file>` persists overrides there); the built-in
 // Prices map is the fallback. Overrides are cached after the first
 // Lookup of a process; SaveOverrides drops the cache.
+//
+// Lookup is the dateless form: it returns the standard (post-intro)
+// rate for date-windowed models — the conservative fallback. Callers
+// with a turn timestamp (the transcript scanner) should use LookupAt
+// so promotional windows (Sonnet 5 intro) price correctly (PLAN-10 D3).
 func Lookup(model string) (ModelPrice, bool) {
+	return LookupAt(model, time.Time{})
+}
+
+// LookupAt is the date-aware price lookup. Resolution order:
+//
+//  1. ~/.ape/prices.yaml overrides (an override with no effective_from
+//     wins unconditionally; one with effective_from applies only when ts
+//     is at/after it — a zero ts never activates a dated override, so the
+//     dateless Lookup stays conservative);
+//  2. a built-in promotional window (datedPrices) matching ts;
+//  3. the standard Prices table.
+//
+// The model id is normalized first so `opus[1m]` and `claude-opus-4-8`
+// resolve identically. Unknown models return the zero price + false.
+func LookupAt(model string, ts time.Time) (ModelPrice, bool) {
 	model = NormalizeModel(model)
-	if overrides := loadOverridesOnce(); overrides != nil {
-		if p, ok := overrides[model]; ok {
-			return p, true
+	if ov, ok := loadOverridesOnce()[model]; ok {
+		if ov.From.IsZero() || (!ts.IsZero() && !ts.Before(ov.From)) {
+			return ov.Price, true
+		}
+	}
+	if !ts.IsZero() {
+		for _, dp := range datedPrices[model] {
+			if !ts.After(dp.Until) {
+				return dp.Price, true
+			}
 		}
 	}
 	p, ok := Prices[model]
