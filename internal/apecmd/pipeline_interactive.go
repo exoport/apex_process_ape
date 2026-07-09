@@ -925,7 +925,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 
 	// PLAN-13: end-of-run eventing — error (on failure), transcript upload +
 	// manifest stamp, then run-end with totals. No-op when NATS is off.
-	finalizeRun(ctx, core.publisher(), eventConn, runDir, projectRoot, cfg, runErr)
+	finalizeRun(ctx, core.publisher(), eventConn, eventIdentity, runDir, projectRoot, cfg, runErr)
 	core.publisher().Close()
 
 	var pfe *pipeline.PreflightError

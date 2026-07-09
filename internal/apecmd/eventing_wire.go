@@ -8,11 +8,15 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/exoport/apex_process_ape/internal/blobstore"
+	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/natsconn"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/reporting"
+	"github.com/exoport/apex_process_ape/internal/sessionref"
 	"github.com/nats-io/nats.go"
 )
 
@@ -32,6 +36,18 @@ func startEventing(ctx context.Context, cfg runConfig) (*nats.Conn, natsconn.Ide
 	nc := natsconn.Resolve(cfg.natsURL, cfg.natsCreds)
 	if !nc.Enabled() {
 		return nil, natsconn.Identity{}
+	}
+	// Export the resolved NATS config into ape's own environment so the
+	// spawned claude child inherits it (repl.NewSession passes os.Environ()
+	// through). This lets an agent inside a supervised run self-report with
+	// `ape event`/`ape log` without re-specifying --nats-url/--nats-creds,
+	// even when this run configured them via flags rather than env. The
+	// session auto-resolves to the child's own (newest) transcript; ape
+	// cannot know the child's session id before claude assigns it, so it
+	// deliberately does not export APE_SESSION_ID (PLAN-17 D4).
+	_ = os.Setenv(natsconn.EnvURL, nc.URL)
+	if nc.CredsFile != "" {
+		_ = os.Setenv(natsconn.EnvCreds, nc.CredsFile)
 	}
 	conn, err := natsconn.Connect(ctx, nc, "ape/"+Version)
 	if err != nil {
@@ -74,7 +90,7 @@ func newEventPublisher(conn *nats.Conn, id natsconn.Identity, projectRoot, runID
 // when upload was requested but NATS is unreachable, the manifest still
 // records upload_status: failed (a local, durable record) even though no
 // run-end event can be published. Warnings go to stderr.
-func finalizeRun(ctx context.Context, pub *eventing.Publisher, conn *nats.Conn, runDir, projectRoot string, cfg runConfig, runErr error) {
+func finalizeRun(ctx context.Context, pub *eventing.Publisher, conn *nats.Conn, id natsconn.Identity, runDir, projectRoot string, cfg runConfig, runErr error) {
 	if runDir == "" {
 		return
 	}
@@ -107,6 +123,46 @@ func finalizeRun(ctx context.Context, pub *eventing.Publisher, conn *nats.Conn, 
 		return
 	}
 	pub.RunEnd(string(m.Status), manifestTotalsToEvent(m.Totals), transcriptBlobsToEvent(blobs), uploadStatus)
+	publishSessionMetrics(conn, id, projectRoot, cfg, m)
+}
+
+// publishSessionMetrics publishes an ape.metrics snapshot for each of the
+// run's main claude sessions, through the SAME reporting builder + scan path
+// a standalone `ape metrics` uses — so a supervised run and a self-reporting
+// agent emit schema-identical metrics payloads (PLAN-17 D4 / the exit gate).
+// Fire-and-forget: any publish error is ignored (runner taps never fail a
+// run); sub-agent session ids don't resolve to a main transcript and are
+// skipped naturally.
+func publishSessionMetrics(conn *nats.Conn, id natsconn.Identity, projectRoot string, cfg runConfig, m pipeline.Manifest) {
+	if conn == nil {
+		return
+	}
+	r := reporting.New(conn, reporting.Options{
+		Identity:  id,
+		Project:   projectRoot,
+		EvtPrefix: cfg.eventsPrefix,
+	})
+	seen := map[string]bool{}
+	for i := range m.Stages {
+		for j := range m.Stages[i].Steps {
+			for _, s := range m.Stages[i].Steps[j].Sessions {
+				if s.ParentSessionID != "" || s.SessionID == "" || seen[s.SessionID] {
+					continue // subs and duplicates: skip (subs live in step-end events)
+				}
+				seen[s.SessionID] = true
+				tp := sessionref.FindTranscript(s.SessionID)
+				if tp == "" {
+					continue
+				}
+				files := cost.SessionFiles(tp, time.Time{})
+				paths := make([]string, 0, len(files))
+				for _, sf := range files {
+					paths = append(paths, sf.Path)
+				}
+				_ = r.Metrics(s.SessionID, reporting.BuildMetrics(cost.ScanPaths(paths), ""))
+			}
+		}
+	}
 }
 
 // uploadEnabled resolves --upload-transcripts / APE_UPLOAD_TRANSCRIPTS.
@@ -124,7 +180,7 @@ func uploadEnabled(cfg runConfig) bool {
 // "ok" | "partial" | "failed". Warnings go to stderr; the run is never
 // failed.
 func uploadRunTranscripts(ctx context.Context, conn *nats.Conn, runDir, projectRoot string, cfg runConfig) (blobs map[string]pipeline.TranscriptBlob, status string) {
-	store, err := newTranscriptStore(ctx, conn, projectRoot, runIDFromDir(runDir), cfg)
+	store, err := newTranscriptStore(ctx, conn, projectRoot, runIDFromDir(runDir), cfg.transcriptStore)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ transcript upload: %v\n", err)
 		return nil, uploadStatusFailed
@@ -165,9 +221,11 @@ func uploadRunTranscripts(ctx context.Context, conn *nats.Conn, runDir, projectR
 }
 
 // newTranscriptStore selects the blob backend (--transcript-store /
-// APE_TRANSCRIPT_STORE).
-func newTranscriptStore(ctx context.Context, conn *nats.Conn, projectRoot, runID string, cfg runConfig) (blobstore.Store, error) {
-	kind := cfg.transcriptStore
+// APE_TRANSCRIPT_STORE). An empty storeKind falls back to the env var then
+// the nats-object default. Shared by the runner finalize path and the
+// standalone `ape transcript upload` command.
+func newTranscriptStore(ctx context.Context, conn *nats.Conn, projectRoot, runID, storeKind string) (blobstore.Store, error) {
+	kind := storeKind
 	if kind == "" {
 		kind = os.Getenv("APE_TRANSCRIPT_STORE")
 	}

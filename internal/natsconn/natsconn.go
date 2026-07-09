@@ -67,7 +67,11 @@ var connectTimeout = 3 * time.Second
 // A configured-but-unreachable cluster returns a non-nil error (dialed with
 // RetryOnFailedConnect off so it fails fast); the caller logs one stderr
 // warning and proceeds local-only.
-func Connect(ctx context.Context, cfg Config, name string) (*nats.Conn, error) {
+//
+// extra options are appended last, so a caller can override a default —
+// e.g. the reporting commands swap the stderr async-error handler for a
+// silent one and detect publish rejections via nc.LastError() instead.
+func Connect(ctx context.Context, cfg Config, name string, extra ...nats.Option) (*nats.Conn, error) {
 	if !cfg.Enabled() {
 		return nil, nil //nolint:nilnil // disabled is a documented no-op, not an error
 	}
@@ -94,6 +98,7 @@ func Connect(ctx context.Context, cfg Config, name string) (*nats.Conn, error) {
 	if cfg.CredsFile != "" {
 		opts = append(opts, nats.UserCredentials(cfg.CredsFile))
 	}
+	opts = append(opts, extra...)
 
 	// Race the (bounded) dial against ctx so a cancelled run doesn't wait
 	// out the connect timeout.

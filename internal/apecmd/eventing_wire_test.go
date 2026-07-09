@@ -180,8 +180,9 @@ func TestFinalizeRunUploadsStampsAndPublishes(t *testing.T) {
 	runDir := writeRun(t, projectRoot)
 	cfg := runConfig{uploadTranscripts: true, transcriptStore: "nats-object"}
 
-	pub := newEventPublisher(conn, natsconn.Identity{SubjectToken: "dev"}, projectRoot, filepath.Base(runDir), cfg)
-	finalizeRun(context.Background(), pub, conn, runDir, projectRoot, cfg, nil)
+	id := natsconn.Identity{SubjectToken: "dev"}
+	pub := newEventPublisher(conn, id, projectRoot, filepath.Base(runDir), cfg)
+	finalizeRun(context.Background(), pub, conn, id, runDir, projectRoot, cfg, nil)
 	pub.Close()
 
 	// Manifest stamped with 2 blobs + upload_status ok.
@@ -217,8 +218,8 @@ func TestFinalizeRunUploadsStampsAndPublishes(t *testing.T) {
 	}
 
 	// Idempotent re-run: dedup no-op, identical digests, still ok.
-	pub2 := newEventPublisher(conn, natsconn.Identity{SubjectToken: "dev"}, projectRoot, filepath.Base(runDir), cfg)
-	finalizeRun(context.Background(), pub2, conn, runDir, projectRoot, cfg, nil)
+	pub2 := newEventPublisher(conn, id, projectRoot, filepath.Base(runDir), cfg)
+	finalizeRun(context.Background(), pub2, conn, id, runDir, projectRoot, cfg, nil)
 	pub2.Close()
 	m2, _ := pipeline.LoadManifest(runDir)
 	if m2.UploadStatus != uploadStatusOK {
@@ -237,7 +238,7 @@ func TestFinalizeRunDegradesWhenNATSUnavailable(t *testing.T) {
 	runDir := writeRun(t, projectRoot)
 
 	// pub nil + conn nil = NATS off/unreachable; upload was requested.
-	finalizeRun(context.Background(), nil, nil, runDir, projectRoot,
+	finalizeRun(context.Background(), nil, nil, natsconn.Identity{}, runDir, projectRoot,
 		runConfig{uploadTranscripts: true}, errors.New("run failed"))
 
 	m, err := pipeline.LoadManifest(runDir)
