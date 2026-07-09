@@ -152,6 +152,32 @@ If a phase doesn't need a given PLAN-10 item, it stays deferred; none of it bloc
 `aped`. (The cost-discrepancy investigation that motivated PLAN-10 is already
 resolved — `development/research/cost-discrepancy-20260521.md`.)
 
+### Folding in PLAN-16 (Phase-1 Kata workspaces) remainder
+
+**PLAN-16** is **code-complete in-repo** (D1–D8 shipped, Tier-1 green, Windows
+cross-compile clean); it is `proposed` only because it lacks live validation + the
+published image. It is **not a from-scratch session** — its code is the *starting
+point* for this plan: **Session 4 (Phase 1)** extracts the `Backend` from PLAN-16's
+`Runner`/`Registry`/`proxysup` and reuses its pure layers
+(compose/gitcred/proxy/match/secret/profile/spec). Its remaining work is a
+**host-provisioning + de-risking** workstream, **not gated by Phase 0 (NATS)**:
+
+- **Host toolchain** — install containerd + Kata + nerdctl on a Linux box with KVM
+  (needs sudo); `ape doctor` surfaces the gaps.
+- **Official `ape-sandbox` image** — build + publish (D6), pin the digest, bump
+  `sandbox.DefaultImage`.
+- **Tier-2/3 live validation** — run the gated
+  `internal/sandbox/integration_linux_test.go` (`APE_SANDBOX_IT=1` + `/dev/kvm` +
+  nerdctl) + the Tier-3 manual checklist.
+
+**When:** anytime a Linux+KVM box exists — ideally **early and in parallel with
+the Phase-0 NATS sessions**, because it de-risks the whole Kata/containerd/nerdctl
++ compose/proxy stack that **PLAN-18 Phase 2 (Session 5) reuses inside `aped`**,
+and it is a hard prerequisite for Session 5's Tier-2 validation. Note: PLAN-18
+retires PLAN-16's *daemonless CLI path* (`ape` always goes through `aped`), but the
+underlying Kata mechanics PLAN-16 validates are exactly what `aped` drives — so the
+validation still pays off.
+
 ## Goal
 
 `ape sandbox up dev` (unprivileged) talks to a rootful `aped` over embedded
