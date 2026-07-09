@@ -92,6 +92,23 @@ type Manifest struct {
 	Status        RunStatus      `yaml:"status"`
 	Totals        ManifestTotals `yaml:"totals"`
 	Stages        []StageRecord  `yaml:"stages"`
+
+	// TranscriptBlobs maps each uploaded transcript's file base name to its
+	// content-addressed reference (PLAN-13 D3). Empty/absent when transcript
+	// upload was off or failed. Additive under schema_version 2 — a consumer
+	// that doesn't know the field ignores it.
+	TranscriptBlobs map[string]TranscriptBlob `yaml:"transcript_blobs,omitempty"`
+	// UploadStatus records the outcome of the transcript upload:
+	// "ok" | "partial" | "failed" (empty when upload was not attempted).
+	UploadStatus string `yaml:"upload_status,omitempty"`
+}
+
+// TranscriptBlob is one uploaded transcript's content-addressed reference.
+type TranscriptBlob struct {
+	SessionID string `yaml:"session_id,omitempty"`
+	Digest    string `yaml:"digest"`
+	URI       string `yaml:"uri,omitempty"`
+	Bytes     int64  `yaml:"bytes,omitempty"`
 }
 
 // Ref identifies the pipeline a run was executed against.

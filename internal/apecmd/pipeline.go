@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/output"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/tui"
@@ -35,6 +36,11 @@ func newPipelineCmd() *cobra.Command {
 		ignoreProjSettings bool
 		interactiveFlag    bool
 		programmaticFlag   bool
+		natsURLFlag        string
+		natsCredsFlag      string
+		eventsPrefixFlag   string
+		uploadTranscripts  bool
+		transcriptStore    string
 	)
 	cmd := &cobra.Command{
 		Use:   "pipeline [name]",
@@ -127,6 +133,11 @@ func newPipelineCmd() *cobra.Command {
 				allowDirty:            allowDirtyFlag,
 				ignoreProjectSettings: ignoreProjSettings,
 				openOnStart:           openFlag,
+				natsURL:               natsURLFlag,
+				natsCreds:             natsCredsFlag,
+				eventsPrefix:          eventsPrefixFlag,
+				uploadTranscripts:     uploadTranscripts,
+				transcriptStore:       transcriptStore,
 			}
 			// PLAN-9 F2 dispatch: interactive PTY is the only exec mode,
 			// so the switch is purely over the UI surface. Web routes to
@@ -166,7 +177,19 @@ func newPipelineCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noCommitFlag, "no-commit", false, "Do not commit anything during the run; leave the working tree dirty. Overrides any `commit:` field in the pipeline YAML.")
 	cmd.Flags().BoolVar(&allowDirtyFlag, "commit-allow-dirty", false, "Bypass the dirty-tree pre-run gate. The first committing step's diff will include any pre-existing uncommitted changes.")
 	cmd.PersistentFlags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
+	addNatsFlags(cmd, &natsURLFlag, &natsCredsFlag, &eventsPrefixFlag, &uploadTranscripts, &transcriptStore)
 	return cmd
+}
+
+// addNatsFlags registers the PLAN-13 NATS eventing + transcript-blob flags
+// shared by the run commands. All are opt-in and resolve flags → env
+// (APE_NATS_URL / APE_NATS_CREDS / …) with no project-config layer.
+func addNatsFlags(cmd *cobra.Command, url, creds, prefix *string, upload *bool, store *string) {
+	cmd.Flags().StringVar(url, "nats-url", "", "NATS server URL for progress events + transcript upload (env APE_NATS_URL). Empty disables both.")
+	cmd.Flags().StringVar(creds, "nats-creds", "", "NATS .creds file; its user identity is baked into every subject (env APE_NATS_CREDS).")
+	cmd.Flags().StringVar(prefix, "events-subject-prefix", "ape.evt", "Subject root for progress events.")
+	cmd.Flags().BoolVar(upload, "upload-transcripts", false, "At run end, upload the transcript set as content-addressed blobs (env APE_UPLOAD_TRANSCRIPTS=1).")
+	cmd.Flags().StringVar(store, "transcript-store", "nats-object", "Transcript blob backend: nats-object|uri-offload (env APE_TRANSCRIPT_STORE).")
 }
 
 func pipelineLongHelp() string {
@@ -266,6 +289,19 @@ type runConfig struct {
 	// backstop (default interactiveStepIdleTimeout). PLAN-11:
 	// `ape task --idle-timeout`.
 	idleTimeout time.Duration
+
+	// NATS progress-eventing + transcript-blob upload (PLAN-13). All
+	// strictly opt-in and resolved flags → env (natsconn.Resolve); with no
+	// URL configured everything below silently disables and a run behaves
+	// exactly as before.
+	natsURL           string
+	natsCreds         string
+	eventsPrefix      string // subject root override (default ape.evt)
+	uploadTranscripts bool
+	transcriptStore   string // nats-object | uri-offload
+	// kind is the <kind> subject segment for events (pipeline/task/…).
+	// Empty defaults to pipeline in newEventPublisher.
+	kind eventing.Kind
 }
 
 // printEndOfRunSummary emits the post-run pointer lines:

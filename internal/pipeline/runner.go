@@ -126,6 +126,14 @@ type RunOptions struct {
 	// late UserPromptSubmit doesn't match the previous step.
 	OnInteractiveStepEnd func(info InteractiveStepInfo)
 
+	// OnStepCommit fires after a step's commit actually lands (committed
+	// only — not skips/no-ops), with the resolved sha + message. The apecmd
+	// layer taps it to publish a PLAN-13 `commit` progress event. Nil skips
+	// the tap. This is the only eventing-related hook the runner exposes;
+	// stage/step lifecycle rides the existing Observer + interactive
+	// callbacks.
+	OnStepCommit func(stage string, stepIdx int, sha, message string)
+
 	// StepTelemetryFn, when set, is called after each interactive
 	// step's WaitStepDone returns. The apecmd interactive core scans
 	// the just-finished step's window of the claude session transcript
@@ -532,12 +540,12 @@ func performStepCommit(
 	stageIdx, stepIdx int,
 	isLastStep bool,
 	stepRunErr error,
-) error {
+) (sha, message string, committed bool, err error) {
 	status, msg, sha, errMsg, commitErr := resolveCommitOutcome(ctx, opts, plan, stepIdx, isLastStep, stepRunErr)
 	if mw != nil {
 		_ = mw.RecordStepCommit(stageIdx, stepIdx, sha, msg, status, errMsg)
 	}
-	return commitErr
+	return sha, msg, status == CommitStatusCommitted, commitErr
 }
 
 // resolveCommitOutcome implements the PLAN-6 / C2 decision table.

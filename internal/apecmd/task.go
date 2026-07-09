@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/spf13/cobra"
@@ -44,6 +45,11 @@ func newTaskCmd() *cobra.Command {
 		quietFlag          bool
 		manifestDirFlag    string
 		ignoreProjSettings bool
+		natsURLFlag        string
+		natsCredsFlag      string
+		eventsPrefixFlag   string
+		uploadTranscripts  bool
+		transcriptStore    string
 	)
 	cmd := &cobra.Command{
 		Use:   "task <skill>",
@@ -129,6 +135,11 @@ preflight error · 3 REPL never became ready (last pane on stderr).`,
 				projectRoot:           projectRoot,
 				manifestDir:           manifestDirFlag,
 				ignoreProjectSettings: ignoreProjSettings,
+				natsURL:               natsURLFlag,
+				natsCreds:             natsCredsFlag,
+				eventsPrefix:          eventsPrefixFlag,
+				uploadTranscripts:     uploadTranscripts,
+				transcriptStore:       transcriptStore,
 			}
 			return runTask(cmd.Context(), opts)
 		},
@@ -151,6 +162,7 @@ preflight error · 3 REPL never became ready (last pane on stderr).`,
 	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json")
 	_ = cmd.Flags().MarkHidden("json")
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
+	addNatsFlags(cmd, &natsURLFlag, &natsCredsFlag, &eventsPrefixFlag, &uploadTranscripts, &transcriptStore)
 	return cmd
 }
 
@@ -171,6 +183,11 @@ type taskOptions struct {
 	projectRoot           string
 	manifestDir           string
 	ignoreProjectSettings bool
+	natsURL               string
+	natsCreds             string
+	eventsPrefix          string
+	uploadTranscripts     bool
+	transcriptStore       string
 }
 
 // resolveHandoffPrompt derives the --prompt value from --handoff: a
@@ -309,6 +326,12 @@ func runTask(ctx context.Context, o taskOptions) error {
 		quiet:                 o.quiet,
 		suppressSummary:       o.jsonMode,
 		idleTimeout:           o.idleTimeout,
+		natsURL:               o.natsURL,
+		natsCreds:             o.natsCreds,
+		eventsPrefix:          o.eventsPrefix,
+		uploadTranscripts:     o.uploadTranscripts,
+		transcriptStore:       o.transcriptStore,
+		kind:                  eventing.KindTask,
 	}
 	if o.jsonMode {
 		// stdout carries only the envelope; progress goes to stderr.

@@ -17,6 +17,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/bridge/ipc"
 	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/exoport/apex_process_ape/internal/cost"
+	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 )
@@ -74,10 +75,19 @@ type interactiveCore struct {
 	getRunLog  func() *runlog.Writer
 	runCancel  context.CancelFunc
 
-	// stepMu guards activeStep; FeedHook reads on the bridge accept
-	// goroutine while OnStepStart/End write on the runner goroutine.
-	stepMu     sync.Mutex
-	activeStep string
+	// stepMu guards activeStep + activeSkill; FeedHook reads on the bridge
+	// accept goroutine while OnStepStart/End write on the runner goroutine.
+	stepMu      sync.Mutex
+	activeStep  string
+	activeSkill string // current step's skill, for the step-end event label
+
+	// pub publishes PLAN-13 progress events. Set once via setPublisher when
+	// the run dir resolves (the run id is the <id> subject segment). Guarded
+	// because FeedHook reads it on the bridge goroutine while setPublisher
+	// writes on the runner goroutine. A nil *eventing.Publisher is a no-op,
+	// so an unconfigured run (no NATS) publishes nothing.
+	pubMu sync.Mutex
+	pub   *eventing.Publisher
 
 	// activityMu guards lastActivity, the timestamp of the most
 	// recent hook event seen for the current step. WaitStepDone
@@ -169,6 +179,48 @@ func newInteractiveCore(runCancel context.CancelFunc, getRunLog func() *runlog.W
 	return c
 }
 
+// setPublisher installs the PLAN-13 event publisher once the run id is
+// known (OnRunDir). Safe to call with nil (NATS off).
+func (c *interactiveCore) setPublisher(p *eventing.Publisher) {
+	c.pubMu.Lock()
+	c.pub = p
+	c.pubMu.Unlock()
+}
+
+// publisher returns the installed publisher (nil-safe: a nil result is a
+// valid no-op publisher).
+func (c *interactiveCore) publisher() *eventing.Publisher {
+	c.pubMu.Lock()
+	defer c.pubMu.Unlock()
+	return c.pub
+}
+
+// emitStepEnd publishes the step-end event from the just-computed
+// telemetry. Called on every StepTelemetry return path (via defer) so a
+// step-end always fires, even when telemetry is a diagnostic note.
+func (c *interactiveCore) emitStepEnd(stage string, stepIdx int, tele *pipeline.StepTelemetry) {
+	pub := c.publisher()
+	if pub == nil {
+		return
+	}
+	c.stepMu.Lock()
+	skill := c.activeSkill
+	c.stepMu.Unlock()
+	c.transcriptMu.Lock()
+	sessionID := c.activeSessionID
+	start := c.stepStartedAt
+	c.transcriptMu.Unlock()
+	var dur float64
+	if !start.IsZero() {
+		dur = time.Since(start).Seconds()
+	}
+	var metrics eventing.StepMetrics
+	if tele != nil {
+		metrics = stepTelemetryToMetrics(tele)
+	}
+	pub.StepEnd(stage, stepIdx+1, skill, sessionID, dur, metrics)
+}
+
 // FeedHook is the on-hook fan-out target. Call from a
 // BridgeRuntimeOptions.OnHook or HubOptions.OnHook callback.
 func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
@@ -258,6 +310,9 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 			Payload:   h.Payload,
 		})
 	}
+	// PLAN-13: mirror the hook onto the progress-event stream (fire-and-
+	// forget; nil publisher is a no-op). Consumers follow tool-use live.
+	c.publisher().Hook(h.Event, h.SessionID, h.AgentID, step)
 	if h.Event == ipc.HookUserPromptSubmit {
 		c.verifier.Consume(h.Payload)
 	}
@@ -307,7 +362,9 @@ func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 	// info.StepIdx is 0-based; StepLabel uses 1-based to match the
 	// manifest's step numbering.
 	c.activeStep = pipeline.StepLabel(info.Stage, info.StepIdx+1, info.Skill)
+	c.activeSkill = info.Skill
 	c.stepMu.Unlock()
+	c.publisher().StepStart(info.Stage, info.StepIdx+1, info.Skill, info.Agent, info.Model)
 	// Sub-agent captures are per-step: a fresh step must not re-count
 	// the previous step's sub-sessions. stepStartedAt anchors the
 	// robustness sweep's mtime window to this step.
@@ -358,7 +415,7 @@ func (c *interactiveCore) ActiveStep() string {
 // cumulative totals. Wire to RunOptions.OnStageStart so a fresh stage
 // starts from a zero baseline; the first step's delta then equals
 // that step's absolute usage.
-func (c *interactiveCore) ResetStageTelemetry(_ string) {
+func (c *interactiveCore) ResetStageTelemetry(stage string) {
 	c.transcriptMu.Lock()
 	c.activeTranscript = ""
 	c.activeSessionID = ""
@@ -368,6 +425,8 @@ func (c *interactiveCore) ResetStageTelemetry(_ string) {
 	c.subSessions = map[string]*subSessionCapture{}
 	c.stepStartedAt = time.Time{}
 	c.transcriptMu.Unlock()
+	// PLAN-13: OnStageStart is where the stage-start event fires (nil-safe).
+	c.publisher().StageStart(stage)
 }
 
 // transcriptFlushGrace is the wait between Stop-hook receipt and the
@@ -393,7 +452,10 @@ var transcriptFlushGrace = 500 * time.Millisecond
 // Wired into pipeline.RunOptions.StepTelemetryFn for both --tui /
 // --no-tui (runWithInteractive*) and --web interactive
 // (runWithWeb with core != nil).
-func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry {
+func (c *interactiveCore) StepTelemetry(stage string, stepIdx int) (tele *pipeline.StepTelemetry) {
+	// PLAN-13: publish step-end from whatever telemetry this returns, on
+	// every path (including the diagnostic-note early returns).
+	defer func() { c.emitStepEnd(stage, stepIdx, tele) }()
 	c.transcriptMu.Lock()
 	source := c.activeTranscript
 	parentSID := c.activeSessionID
@@ -448,7 +510,7 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 	mainUsage := totalsToModelUsage(subTotals(res.Totals, prev))
 	mainByModel := byModelDelta(res.ByModel, prevByModel)
 
-	tele := &pipeline.StepTelemetry{
+	tele = &pipeline.StepTelemetry{
 		CostUSD:               mainUsage.CostUSD,
 		TokensInput:           mainUsage.TokensInput,
 		TokensOutput:          mainUsage.TokensOutput,
@@ -494,8 +556,14 @@ func (c *interactiveCore) StepTelemetry(_ string, _ int) *pipeline.StepTelemetry
 	for _, sub := range subs {
 		addCand(sub.agentID, sub.parentSessionID, sub.transcript)
 	}
-	for _, extra := range sweepSubagentTranscripts(source, stepStart) {
-		addCand(agentIDFromTranscript(extra), parentSID, extra)
+	// Robustness sweep of the main session's subagents/ dir (so a dropped
+	// SubagentStop doesn't silently lose a sub), via the shared enumerator
+	// (cost.SessionFiles, PLAN-10 D2 remainder extracted for PLAN-13/17).
+	for _, sf := range cost.SessionFiles(source, stepStart) {
+		if sf.Kind != cost.SessionSubagent {
+			continue
+		}
+		addCand(sf.SessionID, parentSID, sf.Path)
 	}
 	sort.Slice(cands, func(i, j int) bool {
 		if cands[i].agentID != cands[j].agentID {
@@ -594,50 +662,6 @@ func telemetryNote(note string) *pipeline.StepTelemetry {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()
-}
-
-// sweepSubagentTranscripts enumerates the sub-agent transcripts of a
-// main session as a safety net for a dropped SubagentStop hook. Claude
-// writes them to <proj>/<sid>/subagents/agent-<id>.jsonl alongside the
-// main transcript <proj>/<sid>.jsonl. Only files modified at/after
-// `since` (the step start) are returned, so a prior NoClear step's subs
-// in the same dir aren't re-folded. Result is path-sorted; callers
-// dedup against hook-captured paths.
-func sweepSubagentTranscripts(mainTranscript string, since time.Time) []string {
-	if mainTranscript == "" {
-		return nil
-	}
-	dir := filepath.Join(strings.TrimSuffix(mainTranscript, ".jsonl"), "subagents")
-	matches, err := filepath.Glob(filepath.Join(dir, "agent-*.jsonl"))
-	if err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(matches))
-	for _, p := range matches {
-		info, statErr := os.Stat(p)
-		if statErr != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		// 1s grace absorbs coarse filesystem mtime granularity (a sub
-		// written just after step start can carry a truncated mtime a
-		// fraction before it); still excludes a prior step's minutes-old
-		// subs under NoClear.
-		if !since.IsZero() && info.ModTime().Before(since.Add(-time.Second)) {
-			continue
-		}
-		out = append(out, p)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// agentIDFromTranscript derives a sub-agent's id from its transcript
-// filename (agent-<id>.jsonl) so a swept sub matches the id a
-// hook-captured one would carry (keeps the fold's dedup and the
-// manifest's session id consistent regardless of capture path).
-func agentIDFromTranscript(path string) string {
-	name := strings.TrimSuffix(filepath.Base(path), ".jsonl")
-	return strings.TrimPrefix(name, "agent-")
 }
 
 // subTotals returns a-b field-wise.
@@ -807,6 +831,18 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		core.idleTimeout = cfg.idleTimeout
 	}
 
+	// PLAN-13: optional NATS eventing + transcript upload. Fire-and-forget —
+	// conn is nil when NATS is off or unreachable, and every publish/upload
+	// path is a no-op in that case. The publisher itself is built in
+	// onRunDir once the run id (its <id> subject segment) is known.
+	eventConn, eventIdentity := startEventing(ctx, cfg)
+	defer func() {
+		if eventConn != nil {
+			_ = eventConn.Drain()
+		}
+	}()
+	var runDir string
+
 	rt := orchestrator.NewBridgeRuntime(orchestrator.BridgeRuntimeOptions{
 		OnHook:  core.FeedHook,
 		OnCall:  core.FeedCall,
@@ -842,12 +878,19 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 
 	onRunDir := func(dir string) {
 		runLogMu.Lock()
-		defer runLogMu.Unlock()
 		if rl == nil {
 			if w, openErr := runlog.New(dir); openErr == nil {
 				rl = w
 			}
 		}
+		runLogMu.Unlock()
+		// PLAN-13: the run id is now known — build the publisher (nil when
+		// NATS is off) and emit run-start. onRunDir runs on the runner
+		// goroutine before any stage, so runDir is safely read post-Run.
+		runDir = dir
+		pub := newEventPublisher(eventConn, eventIdentity, projectRoot, runIDFromDir(dir), cfg)
+		core.setPublisher(pub)
+		pub.RunStart(spec.Name, len(spec.Stages()))
 	}
 
 	progressW := cfg.progressWriter
@@ -856,16 +899,22 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	}
 	obs := newPlainObserver(progressW, projectRoot, cfg.quiet)
 	runErr := pipeline.Run(runCtx, spec, pipeline.RunOptions{
-		ProjectRoot:            projectRoot,
-		Prompt:                 cfg.prompt,
-		Observer:               obs,
-		ApeVersion:             Version,
-		ManifestDir:            cfg.manifestDir,
-		FromStage:              cfg.fromStage,
-		NoCommit:               cfg.noCommit,
-		AllowDirty:             cfg.allowDirty,
-		PrependFlags:           prepend,
-		OnStageStart:           core.ResetStageTelemetry,
+		ProjectRoot:  projectRoot,
+		Prompt:       cfg.prompt,
+		Observer:     obs,
+		ApeVersion:   Version,
+		ManifestDir:  cfg.manifestDir,
+		FromStage:    cfg.fromStage,
+		NoCommit:     cfg.noCommit,
+		AllowDirty:   cfg.allowDirty,
+		PrependFlags: prepend,
+		OnStageStart: core.ResetStageTelemetry,
+		OnStageEnd: func(stage string, dur time.Duration, err error) {
+			core.publisher().StageEnd(stage, dur.Seconds(), err != nil)
+		},
+		OnStepCommit: func(stage string, stepIdx int, sha, message string) {
+			core.publisher().Commit(stage, stepIdx, sha, message)
+		},
 		OnRunDir:               onRunDir,
 		WaitStepDone:           core.WaitStepDone,
 		OnInteractiveStepStart: core.OnStepStart,
@@ -873,6 +922,11 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		StepTelemetryFn:        core.StepTelemetry,
 		RunLog:                 &lazyRunLog{getter: getRunLog},
 	})
+
+	// PLAN-13: end-of-run eventing — error (on failure), transcript upload +
+	// manifest stamp, then run-end with totals. No-op when NATS is off.
+	finalizeRun(ctx, core.publisher(), eventConn, runDir, projectRoot, cfg, runErr)
+	core.publisher().Close()
 
 	var pfe *pipeline.PreflightError
 	if errors.As(runErr, &pfe) {

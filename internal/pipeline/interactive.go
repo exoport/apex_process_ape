@@ -300,9 +300,12 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		// manifest reflects both the run outcome and the commit
 		// outcome atomically. Commit failures abort the stage.
 		isLastStep := i == len(stage.Chain)-1
-		commitErr := performStepCommit(ctx, opts, mw, plan, stageIdx, i+1, isLastStep, nil)
+		commitSHA, commitMsg, committed, commitErr := performStepCommit(ctx, opts, mw, plan, stageIdx, i+1, isLastStep, nil)
 		if commitErr == nil {
 			runLog(opts.RunLog, "commit-made", StepLabel(stage.Name, i+1, step.Skill), nil)
+			if committed && opts.OnStepCommit != nil {
+				opts.OnStepCommit(stage.Name, i+1, commitSHA, commitMsg)
+			}
 		}
 
 		notify(opts.Observer, func(o Observer) { o.OnStepEnd(stage.Name, i, step, time.Since(stepStart), stepOut, nil) })
