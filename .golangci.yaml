@@ -179,6 +179,20 @@ linters:
       - linters:
           - tagliatelle
         path: internal/sessions/registry\.go
+      # PLAN-13 NATS wire contract: the ape.evt/log/metrics payloads
+      # (docs/reference/events.md), the ape.blob.uri-request offload
+      # request/reply, and the NATS user-JWT claim names ("sub") are all
+      # external, additive-only contracts — snake_case is fixed by the
+      # taxonomy, not ours to camelCase.
+      - linters:
+          - tagliatelle
+        path: internal/eventing/envelope\.go
+      - linters:
+          - tagliatelle
+        path: internal/blobstore/urioffload\.go
+      - linters:
+          - tagliatelle
+        path: internal/natsconn/identity\.go
       # internal/cost/prices.go is a pricing table — naming every
       # per-model rate (5.00, 15.00, 3.00, …) would be noise. The
       # numbers ARE the data; the model key is what gives meaning.
