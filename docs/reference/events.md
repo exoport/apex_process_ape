@@ -1,14 +1,26 @@
 # NATS subjects & event payloads
 
-> **Status: PROPOSED — this is a *contract*, not a shipped feature.** The subjects
-> and payloads below are the single, authoritative, **additive-only** taxonomy for
-> the NATS work in PLAN-13 (eventing + transcript blobs), PLAN-14 (`ape service`),
-> PLAN-17 (reporting CLI + identity), and PLAN-18 (`ape`/`aped` VM management).
-> Those features are **not yet implemented** (there is no `nats` dependency in
-> `go.mod` yet). This page exists first, on purpose: the subject taxonomy is an
-> external contract that **cannot be retrofitted** (a user token baked into a
-> subject can't be added later without breaking consumers), so it is frozen here
-> before any publisher ships. Each subtree notes the plan that owns it.
+> **Status: PARTIALLY IMPLEMENTED.** This is the single, authoritative,
+> **additive-only** taxonomy for the NATS work in PLAN-13 (eventing + transcript
+> blobs), PLAN-14 (`ape service`), PLAN-17 (reporting CLI + identity), and
+> PLAN-18 (`ape`/`aped` VM management).
+>
+> **Shipped (PLAN-13):** the `ape.evt.<user>.<project>.…` progress-event root and
+> the `ape.blob.uri-request` transcript-offload contract, published by `ape
+> pipeline` and `ape task` runs (opt-in via `--nats-url` / `APE_NATS_URL`), with
+> the `<user>` identity token decoded from the `.creds` credential (PLAN-17 D1).
+> See [How to publish progress to NATS](../how-to/publish-progress-to-nats.md)
+> and [How to upload transcripts](../how-to/upload-transcripts.md).
+>
+> **Proposed (not yet built):** the `ape.log` / `ape.metrics` reporting roots and
+> the standalone `ape event`/`log`/`metrics`/`transcript` commands (PLAN-17), the
+> `ape.svc` job-daemon root (PLAN-14), and the `ape.vmm` / `ape.audit` roots
+> (PLAN-18). Each subtree notes the plan that owns it.
+>
+> The subject taxonomy is an external contract that **cannot be retrofitted** (a
+> user token baked into a subject can't be added later without breaking
+> consumers), which is why the whole taxonomy was frozen here before the first
+> publisher shipped.
 
 This is the routing surface a consumer subscribes to. `ape` is a *publisher* (and,
 for `ape service`/`aped`, a request/reply *responder*); dashboards and collectors
@@ -140,6 +152,33 @@ traceability independent of the subject:
   output_tokens, cache_read_input_tokens, cache_creation_5m, cache_creation_1h,
   turns, cost_usd}}, "first_turn_at", "last_turn_at", "claude_code_version"`.
 - `ape.evt` `run-end`: `+` manifest totals + `transcript_blobs` digest map.
+
+### `ape.evt` per-event payload fields (PLAN-13, implemented)
+
+Every `ape.evt` payload carries the common envelope above plus `"event"` (the
+`<event>` token) and `"run_id"` (the run/command/job id — the `<id>` segment).
+Per-event additions:
+
+| `event` | additional fields |
+| ------- | ----------------- |
+| `run-start` | `pipeline` (name), `stages` (count) |
+| `stage-start` | `stage` |
+| `step-start` | `stage`, `step` (1-based), `skill`, `agent`, `model` |
+| `step-end` | `stage`, `step`, `skill`, `duration_seconds`, `session_id` (when bound), `metrics` (see below) |
+| `hook` | `hook` (Claude Code hook name), `step`, `agent_id`, `session_id` (when present) |
+| `commit` | `stage`, `step`, `sha`, `message` |
+| `error` | `message` |
+| `run-end` | `status`, `totals` (manifest totals), `transcript_blobs` (map, when uploaded), `upload_status` |
+
+`step-end.metrics` mirrors the PLAN-10 transcript-derived telemetry:
+`{cost_usd, tokens_input, tokens_output, tokens_cache_read, tokens_cache_creation,
+num_turns, per_model: {model: {cost_usd, input_tokens, output_tokens,
+cache_read_input_tokens, cache_creation_5m, cache_creation_1h, turns}}}`.
+
+`run-end.transcript_blobs` maps each uploaded transcript's file base name to
+`{session_id, digest, uri, bytes}`; the same map is stamped onto the run
+`manifest.yaml` (`transcript_blobs:` block, additive under `schema_version: 2`)
+alongside `upload_status:` (`ok` | `partial` | `failed`).
 
 ## Rules
 
