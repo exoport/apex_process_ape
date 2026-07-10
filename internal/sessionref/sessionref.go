@@ -128,7 +128,8 @@ func Resolve(opts Options) (Ref, error) {
 	}
 	return Ref{}, &UnresolvedError{msg: fmt.Sprintf(
 		"sessionref: no Claude session transcript found for %s (looked in %s); pass --session-id or --transcript",
-		absCwd, filepath.Join(projectsRoot, ProjectSlug(absCwd)))}
+		absCwd, filepath.Join(projectsRoot, ProjectSlug(absCwd)),
+	)}
 }
 
 // autoDetect returns the newest transcript for cwd: first the project's own
