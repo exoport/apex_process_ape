@@ -19,6 +19,9 @@ Guidance for Claude Code when working in this repository.
 | `internal/trait/`         | Trait inspection helpers.                                                                           |
 | `internal/sandbox/`       | `ape sandbox` Kata VM workspaces (PLAN-16): profile, `~/.claude`/git composer, OCI-config + nerdctl command builder, CONNECT egress proxy, workspace registry. |
 | `images/ape-sandbox/`     | Dockerfile + entrypoint for the official `ape-sandbox` workspace image (PLAN-16 D6).                |
+| `cmd/aped/` + `internal/aped/` + `internal/apedcmd/` | `aped`, the rootful Kata-QEMU VM-management daemon (PLAN-18 Phase 2): two-process split (root executor + de-privileged NATS front), policy authz, `ape.vmm.<node>.>` contract. |
+| `internal/vmmclient/`     | The `ape`-side client of the `ape.vmm` contract (drives `aped` over NATS).                          |
+| `deploy/`                 | `aped` deploy assets (systemd units, tmpfiles, policy, auditd rules) + `tier2-setup.sh`, the idempotent Tier-2 host-stack provisioner (see `docs/how-to/run-aped.md`). |
 | `testdata/`               | Test fixtures consumed by `_test.go` files.                                                         |
 | `docs/`                   | User-facing docs (Diátaxis-structured — see `docs/README.md`).                                      |
 | `.github/workflows/`      | `ci.yml` (build + test + lint + govulncheck on push/PR + rc-tag) and `release.yml` (goreleaser on final-semver tag `vX.Y.Z` only). |

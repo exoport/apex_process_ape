@@ -70,6 +70,20 @@ sudo systemctl enable --now aped-priv.socket aped.service aped-front.service
 it to `/var/lib/aped/creds/operator.creds`. Its log (`journalctl -u
 aped-front`) prints the `APE_NATS_URL` to use.
 
+That file is written `0600` owned by the `aped` service user, so your human
+operator account cannot read it directly. Copy it to a path you own (what
+`deploy/tier2-setup.sh` does, and re-do it after each `aped-front` restart — the
+credential is re-minted on start):
+
+```bash
+sudo install -m 0600 -o "$USER" /var/lib/aped/creds/operator.creds \
+  ~/.config/ape/aped-operator.creds
+```
+
+Alternatively, add your account to the `ape` group and have `aped-front` write
+the credential group-readable — but group `ape` is also the priv-socket gate, so
+only add operators you intend to trust with the executor boundary.
+
 Verify the security posture of both units:
 
 ```bash
@@ -81,7 +95,7 @@ systemd-analyze security aped-front.service   # ~2.5–3.5
 
 ```bash
 export APE_NATS_URL=nats://127.0.0.1:4223
-export APE_NATS_CREDS=/var/lib/aped/creds/operator.creds   # readable by your operator user
+export APE_NATS_CREDS=~/.config/ape/aped-operator.creds     # the copy you own (see above)
 ape sandbox ls --node "$(hostname)"
 ape sandbox up dev --node "$(hostname)"
 ape sandbox exec dev --node "$(hostname)" -- uname -r
@@ -103,20 +117,53 @@ subject and every other VM's subjects — the VM→host-escape barrier. See
 
 ## Tier-2 host stack
 
-Kata-QEMU needs a rootful containerd + Kata + nerdctl. On a fresh Linux + KVM
-box (versions per PLAN-18's currency):
+Kata-QEMU needs a rootful containerd + Kata + nerdctl. The whole bring-up —
+prereqs, the nerdctl-full bundle, Kata, the shim config fix, the containerd
+memlock drop-in, a guest-kernel smoke test, the binaries, the user/group, the
+deploy assets, and the operator credential — is scripted and idempotent:
 
 ```bash
-# containerd + nerdctl + CNI + runc (the "full" bundle)
+sudo bash deploy/tier2-setup.sh     # tunables: NERDCTL_VERSION KATA_VERSION MOUNT_ROOT WITH_AUDIT
+```
+
+If you prefer to do it by hand (versions per PLAN-18's currency), the steps are:
+
+```bash
+# 1. prereqs — note zstd: the Kata static asset is now .tar.zst, not .tar.xz
+sudo apt-get install -y curl tar xz-utils zstd
+
+# 2. containerd + nerdctl + CNI + runc (the "full" bundle)
 curl -fsSLO https://github.com/containerd/nerdctl/releases/download/v2.3.4/nerdctl-full-2.3.4-linux-amd64.tar.gz
 sudo tar Cxzf /usr/local nerdctl-full-2.3.4-linux-amd64.tar.gz
 sudo systemctl enable --now containerd
 
-# Kata Containers (static release) + per-VMM shim symlinks
-curl -fsSLO https://github.com/kata-containers/kata-containers/releases/download/3.32.0/kata-static-3.32.0-amd64.tar.xz
-sudo tar -xf kata-static-3.32.0-amd64.tar.xz -C /
-sudo ln -sf /opt/kata/bin/containerd-shim-kata-v2 /usr/local/bin/containerd-shim-kata-qemu-v2
-sudo ln -sf /opt/kata/bin/containerd-shim-kata-v2 /usr/local/bin/containerd-shim-kata-clh-v2
+# 3. Kata Containers (static release; .tar.zst on current releases)
+curl -fsSLO https://github.com/kata-containers/kata-containers/releases/download/3.32.0/kata-static-3.32.0-amd64.tar.zst
+sudo tar --zstd -xf kata-static-3.32.0-amd64.tar.zst -C /
+```
+
+**Per-VMM shim config resolution (the #1 snag).** `ctr`/`nerdctl` do *not* honor
+the containerd `ConfigPath` shim option — only the CRI/Kubernetes path does — so
+a `ConfigPath` stanza in `config.toml` silently does nothing here, and a plain
+symlink makes *both* the `-qemu` and `-clh` handlers read the default
+`configuration.toml`. Install wrapper shims that export `KATA_CONF_FILE` instead
+(what `deploy/tier2-setup.sh` does):
+
+```bash
+for vmm in qemu clh; do
+  sudo tee /usr/local/bin/containerd-shim-kata-$vmm-v2 >/dev/null <<EOF
+#!/bin/sh
+exec env KATA_CONF_FILE=/opt/kata/share/defaults/kata-containers/configuration-$vmm.toml \\
+  /opt/kata/bin/containerd-shim-kata-v2 "\$@"
+EOF
+  sudo chmod 0755 /usr/local/bin/containerd-shim-kata-$vmm-v2
+done
+
+# containerd memlock (VFIO pins guest RAM; QEMU locks memory)
+sudo install -d /etc/systemd/system/containerd.service.d
+printf '[Service]\nLimitMEMLOCK=infinity\nLimitNOFILE=1048576\n' | \
+  sudo tee /etc/systemd/system/containerd.service.d/10-aped.conf
+sudo systemctl daemon-reload && sudo systemctl restart containerd
 ```
 
 Confirm with `ape doctor` (expects `kvm.available`, `containerd.running`, and
@@ -125,6 +172,29 @@ Confirm with `ape doctor` (expects `kvm.available`, `containerd.running`, and
 ```bash
 sudo nerdctl run --rm --runtime io.containerd.kata-qemu.v2 alpine uname -r  # prints the GUEST kernel
 ```
+
+## Known limitation — executor sandbox vs the nerdctl shellDriver (Phase 2)
+
+The hardened `aped.service` (Appendix A: `ProtectSystem=strict`, empty
+`CapabilityBoundingSet`, `RestrictAddressFamilies=AF_UNIX`) is written for an
+executor that is a **containerd _client_** — it talks to the socket and does no
+host work itself. The current executor, however, shells out to **`nerdctl`**,
+which does client-side CNI networking in the executor's own process. That needs
+things the sandbox denies: writable `/var/lib/nerdctl` + CNI state, `CAP_NET_ADMIN`
+/ `CAP_NET_RAW`, `AF_NETLINK`, and mount syscalls for the network namespace.
+
+Consequence: the **`ape sandbox up` path through the running daemon fails** under
+the shipped units (`nerdctl run: … read-only file system`, then it would fail on
+networking). The lifecycle itself is correct — the `TestTier2Provision`
+acceptance drives create → exec → freeze → unfreeze → destroy against a real
+Kata-QEMU microVM and passes, because `go test` runs the executor in-process
+without the systemd sandbox.
+
+The clean fix is architectural (drive containerd as a client and keep host
+networking out of `aped`, or defer networking to the Phase-3 overlay / run
+workspaces networkless) — not a unit tweak. Do **not** simply widen the unit to
+`ProtectSystem=full` + networking capabilities: that reintroduces exactly the
+"root with power" the two-process split exists to avoid.
 
 ## See also
 
