@@ -39,7 +39,10 @@ func startFullStack(t *testing.T) *fullStack {
 	runner := &sandbox.Runner{}
 	reg := sandbox.OpenRegistry(stateDir)
 	shell := sandbox.NewShellDriver(runner, reg, nil)
-	policy := &Policy{Images: []string{testImage}} // ephemeral mounts need no mount_roots
+	// Allow both the unit-test literal and the live Tier-2 image (below); ephemeral
+	// mounts need no mount_roots. checkImage is an exact string match, so the
+	// allow-list carries the same string the create request sends.
+	policy := &Policy{Images: []string{testImage, liveImage()}}
 	ex := NewExecutor(ExecutorConfig{
 		Backend:     shell,
 		Provision:   NewShellProvisioner(runner, reg),
@@ -113,6 +116,21 @@ func TestFullStackControlPlane(t *testing.T) {
 	}
 }
 
+// liveImage resolves the image the live Tier-2 acceptance provisions. It must be
+// PULLABLE and LONG-LIVED (a detached `nerdctl run` whose command exits — e.g. a
+// bare `alpine`, which defaults to a one-shot shell — stops immediately, so the
+// subsequent exec/freeze would fail on a dead container) and must carry a shell
+// for `exec true`. The default is the production ape-sandbox image
+// (CMD ["sleep","infinity"]); override with APE_APED_IT_IMAGE to point at a
+// locally-built long-running stand-in when that image isn't published/pulled
+// (deploy/tier2-setup.sh builds one and prints the exact command).
+func liveImage() string {
+	if img := os.Getenv("APE_APED_IT_IMAGE"); img != "" {
+		return img
+	}
+	return sandbox.DefaultImage
+}
+
 // TestTier2Provision is the live Tier-2 acceptance: aped provisions a non-device
 // Kata-QEMU workspace over the vmm contract and drives its lifecycle. Gated on
 // APE_APED_IT=1 + /dev/kvm + nerdctl (mirrors internal/sandbox's gated tier).
@@ -130,8 +148,10 @@ func TestTier2Provision(t *testing.T) {
 	fs := startFullStack(t)
 	ctx := context.Background()
 	const name = "aped-it"
+	img := liveImage()
+	t.Logf("Tier-2 acceptance: image=%s runtime=kata-qemu mount=ephemeral", img)
 
-	ws, err := fs.client.Create(ctx, workspace.CreateRequest{Name: name, Image: testImage, Mount: "ephemeral", Runtime: "kata-qemu"})
+	ws, err := fs.client.Create(ctx, workspace.CreateRequest{Name: name, Image: img, Mount: "ephemeral", Runtime: "kata-qemu"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
