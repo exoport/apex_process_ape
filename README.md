@@ -107,6 +107,7 @@ Keybindings:
 | `ape log <level> <msg>`| Publish a structured log record over NATS.                                                 |
 | `ape metrics`          | Scan and publish this session's per-model usage metrics over NATS.                         |
 | `ape transcript upload`| Upload this session's transcript set as content-addressed blobs over NATS.                 |
+| `ape service`          | Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply.             |
 | `ape adr`              | Manage Architecture Decision Records (`list`, `validate`, `new`).                          |
 | `ape pattern`          | Manage governance patterns (`list`).                                                       |
 | `ape trait`            | Inspect APEX traits (`list`, `show`, `validate`, `conflicts`).                             |

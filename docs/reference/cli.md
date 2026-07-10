@@ -41,6 +41,7 @@ Subcommands:
 - `planning` — Show the planning pipeline diagram
 - `rollback` — Rollback ape to the previous version
 - `sandbox` — Provision and operate hardware-isolated Kata VM workspaces
+- `service` — Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply
 - `sessions` — List, prune, or open the URL of live ape sessions
 - `sync` — Sync governance artifacts
 - `task` — Run a single framework skill through the interactive PTY runner
@@ -879,6 +880,73 @@ Flags:
 | `--profile` | string | `—` | Profile name under _apex/sandbox/ (default: the workspace name) |
 | `--proxy` | string | `—` | host:port of a running CONNECT egress proxy to wire as HTTPS_PROXY |
 | `--ssh-port` | int | `0` | Host loopback port to forward to the workspace's sshd (0: none) |
+
+## ape service
+
+Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply
+
+```
+ape service [flags]
+```
+
+Turn this machine into a remotely drivable ape worker (PLAN-14). The
+daemon registers a NATS micro service on
+
+  ape.svc.<name>.<project-slug>.<endpoint>
+
+and accepts JSON request/reply jobs: pipeline.run and task.run dispatch an
+ape child process (headless, PTY-only); job.status / job.list / job.stop
+manage them; status / health report the daemon. NATS-micro $SRV.PING /
+$SRV.INFO / $SRV.STATS discovery is available for free. command.run and
+script.run are registered but rejected (VALIDATION) until their runners
+ship.
+
+Admission is keyed exclusivity, exclusive by default: a job holds its
+exclusivity_key (default "") exclusively unless nonexclusive:true. Conflicts
+are rejected immediately (BUSY_EXCLUSIVE / BUSY_KEY) — never queued. Requests
+naming a project_root outside the allowlist are rejected (PROJECT_NOT_ALLOWED).
+
+The daemon serves the project plus its declared component repositories, read
+from _apex/service.yaml (or ~/.ape/service.yaml, or --config):
+
+  project_root: /abs/path/main-project
+  allow:
+    - /abs/path/main-project
+    - /abs/path/component-repo
+
+SECURITY: anyone who can publish on the service subjects can run pipelines on
+this machine. Scope the NATS credential's publish/subscribe permissions to
+ape.svc.<name>.<project-slug>.> on the server — that is the real trust
+boundary (see docs/how-to/run-ape-as-a-service.md).
+
+Shutdown is graceful: SIGINT/SIGTERM stops accepting new jobs and waits for
+in-flight children (indefinitely by default; bound it with --drain-timeout).
+A second signal terminates them immediately.
+
+Exit codes: 0 clean shutdown · 1 connect/registration failure · 2 usage or
+config error (bad --name, missing/invalid service.yaml, no NATS URL).
+
+Examples:
+
+```
+  ape service --nats-url nats://127.0.0.1:4222 --nats-creds ./ape.creds
+  ape service --name ci --drain-timeout 5m
+  # discovery + a task submission from another host:
+  nats req '$SRV.PING.ape' ''
+  nats req ape.svc.ape.myproject.task.run '{"project_root":"/abs/path/myproject","skill":"apex-shard-doc"}'
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--config` | string | `—` | Path to service.yaml (default: <cwd>/_apex/service.yaml, then ~/.ape/service.yaml). |
+| `--cwd` | string | `—` | Project root for config resolution (default: current working dir). |
+| `--drain-timeout` | duration | `0s` | On shutdown, wait this long for in-flight jobs before terminating them (0 = wait indefinitely; a second signal forces). |
+| `--events-subject-prefix` | string | `ape.evt` | Subject root for daemon job lifecycle events. |
+| `--name` | string | `ape` | Service name — the <name> subject segment and $SRV discovery name (run several daemons on one cluster with distinct names). |
+| `--nats-creds` | string | `—` | NATS .creds file; its user identity is the <user> token on job lifecycle events (env APE_NATS_CREDS). |
+| `--nats-url` | string | `—` | NATS server URL (env APE_NATS_URL). Required. |
 
 ## ape sessions
 

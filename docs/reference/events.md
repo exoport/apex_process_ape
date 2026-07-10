@@ -11,14 +11,16 @@
 > `ape event`/`log`/`metrics`/`transcript` commands (PLAN-17), including the
 > `session` event kind for agent-initiated reporting. Every subject carries the
 > `<user>` identity token decoded from the `.creds` credential (PLAN-17 D1), and
-> the PTY runners publish the same shapes at finalize. See
+> the PTY runners publish the same shapes at finalize. Also shipped: the
+> `ape.svc.<name>.<project-slug>.<endpoint>` job-daemon request/reply root and
+> its `svc`-kind lifecycle events (PLAN-14, `ape service`). See
 > [How to report from a session](../how-to/report-from-a-session.md),
-> [How to publish progress to NATS](../how-to/publish-progress-to-nats.md), and
-> [How to upload transcripts](../how-to/upload-transcripts.md).
+> [How to publish progress to NATS](../how-to/publish-progress-to-nats.md),
+> [How to upload transcripts](../how-to/upload-transcripts.md), and
+> [How to run ape as a service](../how-to/run-ape-as-a-service.md).
 >
-> **Proposed (not yet built):** the `ape.svc` job-daemon root (PLAN-14) and the
-> `ape.vmm` / `ape.audit` roots (PLAN-18). Each subtree notes the plan that owns
-> it.
+> **Proposed (not yet built):** the `ape.vmm` / `ape.audit` roots (PLAN-18).
+> Each subtree notes the plan that owns it.
 >
 > The subject taxonomy is an external contract that **cannot be retrofitted** (a
 > user token baked into a subject can't be added later without breaking
@@ -72,8 +74,9 @@ versioned, additive-only contract otherwise.
 - `<id>` — the run / command / session / job id. `APE_JOB_ID` (env) overrides the
   run-generated id (the PLAN-14 daemon injects it so child events carry the job id).
 - `<event>` ∈ `run-start | stage-start | step-start | step-end | stage-end | hook |
-  commit | error | run-end` (plus caller-chosen tokens under kind `session`,
-  validated `[a-z0-9-]+`).
+  commit | error | run-end` (plus caller-chosen tokens under kind `session` and
+  the daemon lifecycle tokens `job-accepted | job-rejected | job-end` under kind
+  `svc`, all validated `[a-z0-9-]+`).
 
 `step-end` carries the per-model telemetry block (PLAN-10); `run-end` carries
 manifest totals + transcript-blob hashes.
@@ -84,6 +87,16 @@ session id and the payload adds `session_id` + `event` + a caller-supplied
 `ape.evt.<user>.<project>.session.<session-id>.status`. `ape transcript upload`
 publishes a companion `…session.<session-id>.transcript-uploaded` whose `payload`
 is the uploaded blobs' digest map (keyed by transcript file base name).
+
+Under kind `svc` (the PLAN-14 daemon), the `<id>` segment is the **job id** and
+the daemon publishes three lifecycle events: `job-accepted` (a job was admitted;
+payload adds `kind`, `exclusive`, `exclusivity_key`, `submitted_by`),
+`job-rejected` (admission lost an exclusivity race; payload adds `reason` = the
+busy code + `exclusivity_key`), and `job-end` (the child exited; payload adds
+`state` ∈ `done | failed | stopped` + `exit_code`). The dispatched child
+publishes its own `pipeline`/`task` progress events under the **same** job id —
+the daemon injects `APE_JOB_ID` — so a consumer correlates the daemon's
+`svc.<job>` lifecycle with the child's `<kind>.<job>` progress by the shared id.
 
 ### `ape.log` — structured logs (PLAN-17)
 
@@ -113,11 +126,41 @@ half + this contract.
 
 ### `ape.svc` — job daemon (PLAN-14)
 
-Endpoint group rooted at `ape.svc.<name>.<project-slug>`; endpoints
+`ape service` registers a NATS-micro service whose endpoint group is rooted at
+`ape.svc.<name>.<project-slug>` (`<name>` = `--name`, default `ape`;
+`<project-slug>` = the daemon's primary project). Endpoints:
 `pipeline.run | task.run | command.run | script.run | job.status | job.list |
 job.stop | status | health`. NATS-micro `$SRV.{PING,INFO,STATS}` discovery is
-free. Errors use stable codes: `BUSY_EXCLUSIVE`, `BUSY_KEY`, `PROJECT_NOT_ALLOWED`,
-`VALIDATION`, `NOT_FOUND`.
+free (liveness + per-endpoint request/error counters). Errors are returned via
+micro `req.Error` with stable codes: `BUSY_EXCLUSIVE`, `BUSY_KEY`,
+`PROJECT_NOT_ALLOWED`, `VALIDATION`, `NOT_FOUND`.
+
+Every request/reply body is versioned JSON (`"v":1`). Requests:
+
+| Endpoint | Request | Reply (or error) |
+| --- | --- | --- |
+| `pipeline.run` | `{project_root, pipeline, prompt?, from?, no_commit?, commit_allow_dirty?, upload_transcripts?, nonexclusive?, exclusivity_key?, submitted_by?}` | `{job_id, accepted:true}` · `BUSY_EXCLUSIVE`/`BUSY_KEY`/`PROJECT_NOT_ALLOWED`/`VALIDATION` |
+| `task.run` | `{project_root, skill, agent?, model?, args?, prompt?, prompt_flag?, task_commit?, no_commit?, commit_allow_dirty?, upload_transcripts?, nonexclusive?, exclusivity_key?, submitted_by?}` | same |
+| `command.run` / `script.run` | *(registered so `$SRV.INFO` matches this contract)* | `VALIDATION` — no backing runner ships yet (`ape command` / PLAN-15 `ape script`) |
+| `job.status` | `{job_id}` | `{job_id, kind, state, started_at, pid?, exclusivity_key, exclusive, submitted_by?, log_path?, exit_code?}` · `NOT_FOUND` |
+| `job.list` | `{}` | `{jobs:[…]}` |
+| `job.stop` | `{job_id}` | `{stopped:bool}` (SIGTERMs the child's process group; the job's terminal `state` becomes `stopped`) · `NOT_FOUND` |
+| `status` | `{}` | `{running_jobs, held_keys:{key:{exclusive,count}}, uptime_seconds, versions:{ape,claude}, project_root, allowlist, name, draining}` |
+| `health` | `{}` | `{ok, checks:{nats, claude_bin, project_root}}` — a cheap `ape doctor` subset |
+
+`task_commit` is a nullable string: omitted/`null` = no task-layer commit; `""` =
+commit with the derived message `ape:task/<skill>`; a non-empty string = that
+commit message. `state` ∈ `running | done | failed | stopped`.
+
+**Admission** is keyed exclusivity, exclusive by default. Each job holds its
+`exclusivity_key` (default `""`); an exclusive job blocks all others on that key
+(`BUSY_EXCLUSIVE`), and an exclusive request is rejected while nonexclusive jobs
+hold the key (`BUSY_KEY`). `nonexclusive:true` jobs share a key with unlimited
+concurrency. Keys are independent; conflicts are rejected immediately, never
+queued. A request whose `project_root` is not an exact match in the daemon's
+allowlist is rejected `PROJECT_NOT_ALLOWED` — this and the NATS credential's
+subject permissions are the daemon's trust boundary (see
+[How to run ape as a service](../how-to/run-ape-as-a-service.md)).
 
 ### `ape.vmm` — VM management (PLAN-18)
 

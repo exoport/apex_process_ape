@@ -26,6 +26,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [How to pass arguments to skills](how-to/pass-args-to-skills.md)
 - [How to run a single skill with `ape task`](how-to/run-a-single-skill.md)
 - [How to run a sandboxed Kata VM workspace](how-to/sandbox-workspaces.md)
+- [How to run ape as a service (NATS job daemon)](how-to/run-ape-as-a-service.md)
 - [How ape runs claude (PTY-only)](how-to/interactive-vs-programmatic.md)
 - [How to read run artefacts](how-to/run-artefacts.md)
 - [How to run `ape doctor` in CI](how-to/run-doctor-in-ci.md)
