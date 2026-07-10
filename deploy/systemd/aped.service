@@ -3,6 +3,9 @@
 # capability); AF_UNIX only, no network; @system-service syscall filter (already
 # allows the KVM/VFIO ioctl + chown). Measure with:
 #   systemd-analyze security aped.service   (predicted OK band ~3.0–3.8)
+#
+# NOTE: systemd has NO inline comments — a trailing "# ..." becomes part of the
+# value. Every comment here is on its own line for that reason.
 [Unit]
 Description=aped — rootful Kata-QEMU VM-management executor (privileged, narrow)
 After=containerd.service network-pre.target
@@ -13,22 +16,26 @@ Wants=containerd.service
 # Type=exec (not notify): aped does not yet implement sd_notify. The priv socket
 # is inherited from aped-priv.socket (LISTEN_FDS, auto-detected).
 Type=exec
-ExecStart=/usr/bin/aped run --policy /etc/aped/policy.yaml --state-dir /var/lib/aped --audit-log /var/log/aped/audit.jsonl --node %H --allow-user aped
+ExecStart=/usr/local/bin/aped run --policy /etc/aped/policy.yaml --state-dir /var/lib/aped --audit-log /var/log/aped/audit.jsonl --node %H --allow-user aped
 Restart=on-failure
 
 # Identity: root, for the containerd socket + (device tier) sysfs vfio-pci bind.
+# Group=ape is for the priv.sock group; NOT the containerd group.
 User=root
-Group=ape                     # for the priv.sock group; NOT the containerd group
+Group=ape
 NoNewPrivileges=yes
 
 # Capabilities: empty (non-device). Device tier adds only CAP_CHOWN (see PLAN-18 D4).
 CapabilityBoundingSet=
 AmbientCapabilities=
 
-# Filesystem
+# Filesystem. StateDirectoryMode=0770 keeps /var/lib/aped root:ape group-writable
+# so the de-privileged front (User=aped, group ape) shares this tree.
 StateDirectory=aped
+StateDirectoryMode=0770
 LogsDirectory=aped
 RuntimeDirectory=aped
+RuntimeDirectoryMode=0710
 ProtectSystem=strict
 ReadWritePaths=/var/lib/aped /run/aped /var/log/aped
 ProtectHome=yes
@@ -36,7 +43,8 @@ PrivateTmp=yes
 UMask=0077
 ProtectProc=invisible
 ProcSubset=pid
-ProtectKernelTunables=yes      # DEVICE tier omits this (vfio-pci bind writes /sys)
+# ProtectKernelTunables — DEVICE tier omits this (vfio-pci bind writes /sys).
+ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
@@ -52,10 +60,13 @@ RestrictAddressFamilies=AF_UNIX
 IPAddressDeny=any
 
 # Syscalls: @system-service already allows ioctl (KVM/VFIO) + chown + process.
+# The second line is a single denylist (one ~ prefixes the whole space-separated
+# group list — writing ~ before each group makes systemd read "~@swap" as an
+# unknown syscall NAME and silently drop the filter).
 SystemCallArchitectures=native
 SystemCallErrorNumber=EPERM
 SystemCallFilter=@system-service
-SystemCallFilter=~@mount ~@swap ~@reboot ~@module ~@raw-io ~@cpu-emulation ~@obsolete ~@debug ~@privileged
+SystemCallFilter=~@mount @swap @reboot @module @raw-io @cpu-emulation @obsolete @debug @privileged
 
 RestrictSUIDSGID=yes
 RestrictRealtime=yes

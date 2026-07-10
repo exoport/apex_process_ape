@@ -2,6 +2,9 @@
 # guest-reachable attack surface. NOT root, no capability. A compromise here is
 # TELEMETRY-account-scoped and still cannot satisfy the executor's SO_PEERCRED
 # gate. Measure with: systemd-analyze security aped-front.service (~2.5–3.5 OK).
+#
+# NOTE: systemd has NO inline comments — a trailing "# ..." becomes part of the
+# value. Every comment here is on its own line for that reason.
 [Unit]
 Description=aped-front — de-privileged embedded NATS + vmm micro service
 Requires=aped-priv.socket
@@ -12,18 +15,23 @@ Type=exec
 # --guest-nats-url is set to the host↔guest bridge endpoint in production so
 # per-VM creds + telemetry are injected; omitted here (guests boot without an
 # agent — see PLAN-18 D6).
-ExecStart=/usr/bin/aped front --node %H --state-dir /var/lib/aped --mgmt-host 127.0.0.1 --mgmt-port 4223 --operator-creds /var/lib/aped/creds/operator.creds
+ExecStart=/usr/local/bin/aped front --node %H --state-dir /var/lib/aped --mgmt-host 127.0.0.1 --mgmt-port 4223 --operator-creds /var/lib/aped/creds/operator.creds
 Restart=on-failure
 
-# Identity — NOT root.
+# Identity — NOT root. Group=ape so it may connect() /run/aped/priv.sock
+# (0660 root:ape). DynamicUser=no: a stable uid for the executor's SO_PEERCRED gate.
 User=aped
-Group=ape                     # to connect() /run/aped/priv.sock (0660 root:ape)
-DynamicUser=no                # stable uid for the executor's SO_PEERCRED gate
+Group=ape
+DynamicUser=no
 NoNewPrivileges=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
 
-StateDirectory=aped
+# No StateDirectory= here: /var/lib/aped is created + owned root:ape (0770) by
+# aped.service, which starts first (After=aped.service). Declaring it again with
+# User=aped would recursively chown the shared tree to aped and fight the root
+# executor; ReadWritePaths grants the write access the front needs under the
+# shared `ape` group instead.
 ProtectSystem=strict
 ReadWritePaths=/var/lib/aped /run/aped
 ProtectHome=yes
@@ -39,16 +47,20 @@ ProtectHostname=yes
 UMask=0077
 
 # Embeds nats-server: loopback (host ape) + the private host↔guest bridge subnet.
+# 169.254.0.0/16 is an example host↔guest link-local; set it to the real subnet.
 RestrictNamespaces=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 IPAddressDeny=any
 IPAddressAllow=localhost
-IPAddressAllow=169.254.0.0/16       # example host↔guest link-local; set to the real subnet
+IPAddressAllow=169.254.0.0/16
 
+# One ~ prefixes the whole space-separated denylist (see aped.service for why
+# per-group ~ silently drops the filter). @chown is additionally denied here —
+# the front never owns device nodes.
 SystemCallArchitectures=native
 SystemCallErrorNumber=EPERM
 SystemCallFilter=@system-service
-SystemCallFilter=~@mount ~@swap ~@reboot ~@module ~@raw-io ~@cpu-emulation ~@obsolete ~@debug ~@privileged ~@chown
+SystemCallFilter=~@mount @swap @reboot @module @raw-io @cpu-emulation @obsolete @debug @privileged @chown
 RestrictSUIDSGID=yes
 RestrictRealtime=yes
 LockPersonality=yes
