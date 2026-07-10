@@ -1,0 +1,60 @@
+# The de-privileged NATS/telemetry front-end (PLAN-18 D1 / Appendix A): the
+# guest-reachable attack surface. NOT root, no capability. A compromise here is
+# TELEMETRY-account-scoped and still cannot satisfy the executor's SO_PEERCRED
+# gate. Measure with: systemd-analyze security aped-front.service (~2.5–3.5 OK).
+[Unit]
+Description=aped-front — de-privileged embedded NATS + vmm micro service
+Requires=aped-priv.socket
+After=aped.service aped-priv.socket
+
+[Service]
+Type=exec
+# --guest-nats-url is set to the host↔guest bridge endpoint in production so
+# per-VM creds + telemetry are injected; omitted here (guests boot without an
+# agent — see PLAN-18 D6).
+ExecStart=/usr/bin/aped front --node %H --state-dir /var/lib/aped --mgmt-host 127.0.0.1 --mgmt-port 4223 --operator-creds /var/lib/aped/creds/operator.creds
+Restart=on-failure
+
+# Identity — NOT root.
+User=aped
+Group=ape                     # to connect() /run/aped/priv.sock (0660 root:ape)
+DynamicUser=no                # stable uid for the executor's SO_PEERCRED gate
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+StateDirectory=aped
+ProtectSystem=strict
+ReadWritePaths=/var/lib/aped /run/aped
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+UMask=0077
+
+# Embeds nats-server: loopback (host ape) + the private host↔guest bridge subnet.
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressDeny=any
+IPAddressAllow=localhost
+IPAddressAllow=169.254.0.0/16       # example host↔guest link-local; set to the real subnet
+
+SystemCallArchitectures=native
+SystemCallErrorNumber=EPERM
+SystemCallFilter=@system-service
+SystemCallFilter=~@mount ~@swap ~@reboot ~@module ~@raw-io ~@cpu-emulation ~@obsolete ~@debug ~@privileged ~@chown
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+KeyringMode=private
+
+[Install]
+WantedBy=multi-user.target

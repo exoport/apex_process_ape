@@ -1,0 +1,20 @@
+# The internal front↔executor boundary (PLAN-18 D1 / Appendix A). AF_UNIX
+# SEQPACKET so the typed command enum keeps message boundaries. The 0660
+# root:ape gate the design wants belongs HERE (a real local socket where
+# SO_PEERCRED is authoritative), NOT on the loopback NATS listener.
+[Unit]
+Description=aped privileged-executor internal command socket
+# /run/aped is created by tmpfiles.d/aped.conf (systemd-tmpfiles-setup runs
+# before sockets.target).
+After=systemd-tmpfiles-setup.service
+
+[Socket]
+ListenSequentialPacket=/run/aped/priv.sock
+SocketMode=0660
+SocketUser=root
+SocketGroup=ape
+RemoveOnStop=yes
+Service=aped.service
+
+[Install]
+WantedBy=sockets.target

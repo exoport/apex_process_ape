@@ -1,0 +1,13 @@
+## Kernel-level device auditing for aped (PLAN-18 D9 / Appendix A).
+## Install to /etc/audit/rules.d/50-aped.rules, then `augenrules --load`.
+##
+## Path/dir watches fire on path-referencing syscalls (open/openat/chown/chmod),
+## NOT on fd-level ioctl — low-volume (one hit per VM boot / per bind) and do NOT
+## capture QEMU's hot KVM_RUN ioctl loop.
+-a always,exit -F arch=b64 -F path=/dev/kvm -F perm=rwa -k aped_kvm
+-a always,exit -F arch=b32 -F path=/dev/kvm -F perm=rwa -k aped_kvm
+-a always,exit -F arch=b64 -F dir=/dev/vfio -F perm=rwa -k aped_vfio
+-a always,exit -F arch=b32 -F dir=/dev/vfio -F perm=rwa -k aped_vfio
+-a always,exit -F arch=b64 -F dir=/sys/bus/pci/drivers/vfio-pci -F perm=wa -k aped_vfio_bind
+## Immutable until reboot (LAST line): a compromised root can't silently disable it.
+-e 2

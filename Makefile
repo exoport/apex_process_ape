@@ -17,15 +17,18 @@ help:        ## Show this help.
 	  | awk 'BEGIN {FS = ":[^#]*## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: build
-build:       ## Build the ape binary into ./ape.
+build:       ## Build the ape + aped binaries into ./ape and ./aped.
 	go build -o $(BIN) ./cmd/ape
+	go build -o aped ./cmd/aped
 
 .PHONY: install
-install:     ## Build and install ape to INSTALL_DIR (default: /usr/local/bin).
+install:     ## Build and install ape + aped to INSTALL_DIR (default: /usr/local/bin).
 	@go build -o $(BIN) ./cmd/ape
+	@go build -o aped ./cmd/aped
 	@install -m 755 $(BIN) $(INSTALL_DIR)/$(BIN)
-	@rm -f $(BIN)
-	@echo "installed $(BIN) to $(INSTALL_DIR)/$(BIN)"
+	@install -m 755 aped $(INSTALL_DIR)/aped
+	@rm -f $(BIN) aped
+	@echo "installed $(BIN) + aped to $(INSTALL_DIR)/"
 
 .PHONY: test
 test:        ## Run all tests with the race detector.

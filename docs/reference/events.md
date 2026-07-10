@@ -19,7 +19,10 @@
 > [How to upload transcripts](../how-to/upload-transcripts.md), and
 > [How to run ape as a service](../how-to/run-ape-as-a-service.md).
 >
-> **Proposed (not yet built):** the `ape.vmm` / `ape.audit` roots (PLAN-18).
+> **Implemented (PLAN-18 Phase 2):** the `ape.vmm` management service + the
+> `ape.audit` root + per-VM telemetry creds, served by `aped` (see
+> [How to run aped](../how-to/run-aped.md)). Tier-1 (embedded-server) tests are
+> green; Tier-2 live Kata validation is gated on a KVM+containerd+Kata host.
 > Each subtree notes the plan that owns it.
 >
 > The subject taxonomy is an external contract that **cannot be retrofitted** (a
@@ -170,6 +173,14 @@ freeze | unfreeze | suspend | resume | snapshot | list | inspect | destroy`.
 Errors: `BUSY`, `VALIDATION`, `NOT_FOUND`, `UNSUPPORTED`, `DEVICE_UNAVAILABLE`,
 `DENIED`. **The host operator account may publish here; per-VM (telemetry)
 credentials are denied this root entirely** — the VM→host-escape barrier.
+
+The `create` body is the thin `CreateRequest` (`{name, image?, runtime?, mount?,
+mount_source?, profile?, devices?}`); `aped` resolves the composed home, egress,
+and per-VM creds server-side. `mount_source` (additive) is the one caller-context
+path on the wire — the canonical host path for a `host-fs` mount, which `aped`
+symlink-resolves and re-checks against its policy mount-root allow-list before
+binding. The id-verbs take `{id}`; `destroy`/`exec`/`snapshot`/`attach.open`
+take `{id, …options}`.
 
 Interactive exec/attach uses per-session subjects
 `ape.vmm.<node>.exec.<sid>.{stdin,stdout,stderr,resize,control,exit}` with ≤32 KiB

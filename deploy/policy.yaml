@@ -1,0 +1,34 @@
+# aped policy — the default-deny authorization boundary (PLAN-18 D9).
+#
+# The root executor loads this at startup and RE-VALIDATES every fully-resolved
+# command against it (the CVE lesson: authorize the concrete parsed request,
+# never a summary). The de-privileged front-end pre-checks with the same rules.
+# Everything is default-deny: an empty list denies that class entirely.
+#
+# Install to /etc/aped/policy.yaml (root:root, 0644). Unknown keys are rejected
+# at load, so a typo fails closed rather than silently widening policy.
+
+# Allowed image references. Prefer digest-pinned refs. An empty list denies all
+# creates.
+images:
+  - ghcr.io/exoport/ape-sandbox:v0
+  # - ghcr.io/exoport/ape-sandbox@sha256:<digest>   # pin by digest in production
+
+# Canonical host path prefixes a host-fs mount must resolve under (symlinks are
+# resolved and re-checked). Empty denies all host-fs mounts (volume/ephemeral
+# are unaffected).
+mount_roots:
+  - /home
+  - /srv/workspaces
+
+# Optional per-workspace resource ceilings (0 or omitted = no ceiling).
+limits:
+  max_vcpus: 8
+  max_mem_mb: 16384
+  max_workspaces: 16
+
+# Passthrough device allow-list (Phase 3). Empty denies every device request —
+# the correct default for the non-device tier.
+devices:
+  pci: []        # e.g. "0000:01:00.0" — a GPU BDF (whole IOMMU group)
+  usb: []        # e.g. "303a:1001" — a vendor:product forwarded via usb-host

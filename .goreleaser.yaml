@@ -8,7 +8,8 @@ before:
     - go mod tidy
 
 builds:
-  - main: ./cmd/ape
+  - id: ape
+    main: ./cmd/ape
     binary: ape
     env:
       - CGO_ENABLED=0
@@ -18,13 +19,36 @@ builds:
       - -X github.com/exoport/apex_process_ape/internal/apecmd.Version={{.Version}}
       - -X github.com/exoport/apex_process_ape/internal/apecmd.BuildDate={{.Date}}
       - -X github.com/exoport/apex_process_ape/internal/apecmd.GitCommit={{.Commit}}
+  # aped is the rootful VM-management daemon (PLAN-18). It is Linux-only (Kata +
+  # AF_UNIX + KVM); the code cross-compiles but only functions on Linux, so it
+  # ships for linux only.
+  - id: aped
+    main: ./cmd/aped
+    binary: aped
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -X github.com/exoport/apex_process_ape/internal/apedcmd.Version={{.Version}}
+      - -X github.com/exoport/apex_process_ape/internal/apedcmd.BuildDate={{.Date}}
+      - -X github.com/exoport/apex_process_ape/internal/apedcmd.GitCommit={{.Commit}}
 
 archives:
-  - format_overrides:
+  # aped ships for linux only, so the linux archives carry two binaries
+  # (ape + aped) while darwin/windows carry one — intentional, not confusing.
+  - allow_different_binary_count: true
+    format_overrides:
       - goos: windows
         formats: [zip]
     name_template: '{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}'
-    files: [README.md, LICENSE]
+    files:
+      - README.md
+      - LICENSE
+      - src: deploy/policy.yaml
+        dst: deploy
+      - src: deploy/**/*
+        dst: deploy
 
 checksum:
   name_template: '{{ .ProjectName }}_checksums.txt'

@@ -10,15 +10,22 @@ package workspace
 // is deliberately thin: the composed home, egress proxy, ports, and env are
 // resolved by the caller (client-side today; server-side in `aped`), not sent
 // on the wire. Image "" means the backend's pinned default.
+//
+//nolint:tagliatelle // snake_case is the documented vmm NATS wire contract
 type CreateRequest struct {
-	V       int      `json:"v,omitempty"`
-	Name    string   `json:"name"`
-	Image   string   `json:"image,omitempty"`
-	Runtime string   `json:"runtime,omitempty"` // kata-qemu | kata-clh | firecracker
-	Mount   string   `json:"mount,omitempty"`   // host-fs | volume | ephemeral
-	Profile string   `json:"profile,omitempty"`
-	Devices []Device `json:"devices,omitempty"`
-	From    string   `json:"from,omitempty"` // Kata factory template (Kata tier only)
+	V       int    `json:"v,omitempty"`
+	Name    string `json:"name"`
+	Image   string `json:"image,omitempty"`
+	Runtime string `json:"runtime,omitempty"` // kata-qemu | kata-clh | firecracker
+	Mount   string `json:"mount,omitempty"`   // host-fs | volume | ephemeral
+	// MountSource is the canonical host path to mount when Mount is "host-fs".
+	// It is the one caller-context path on the wire; aped canonicalizes it and
+	// re-checks it against the policy mount-root allow-list before binding it
+	// (never trusting the raw path). Empty for volume/ephemeral mounts.
+	MountSource string   `json:"mount_source,omitempty"`
+	Profile     string   `json:"profile,omitempty"`
+	Devices     []Device `json:"devices,omitempty"`
+	From        string   `json:"from,omitempty"` // Kata factory template (Kata tier only)
 }
 
 // Device is one passthrough device request. Exactly one of PCI/USB is set.
