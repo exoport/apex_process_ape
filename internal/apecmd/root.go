@@ -78,6 +78,7 @@ func init() {
 		newTranscriptCmd(),
 		newDoctorCmd(),
 		newSandboxCmd(),
+		newServiceCmd(),
 		newGenDocsCmd(),
 	)
 }
