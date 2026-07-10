@@ -871,6 +871,25 @@ behind the Kata-QEMU tier shipping first.
   Execute=yes` may be incompatible with cgo/plugin paths — verify before enabling.
 - **`ape` self-exec inside workspaces** still runs as the guest user in the VM —
   unchanged; the VM is the boundary.
+- **`shellDriver` vs the D1 executor sandbox (Phase-2 finding, validated live on
+  Ubuntu 26.04 / kernel 7.0).** The Appendix-A executor unit is written for a
+  containerd *client* that does no host work (`ProtectSystem=strict`, empty
+  `CapabilityBoundingSet`, `RestrictAddressFamilies=AF_UNIX`). But Phase 2 ships
+  the **`shellDriver`**, which shells out to `nerdctl`, and `nerdctl` does
+  **client-side CNI in the executor's own process** — creating netns + veth,
+  running the bridge plugin. That needs exactly what the sandbox denies: writable
+  `/var/lib/nerdctl` + CNI state, `CAP_NET_ADMIN`/`CAP_NET_RAW`, `AF_NETLINK`, and
+  `@mount` (persistent-netns bind). So `ape sandbox up` **through the deployed
+  daemon fails** (`nerdctl run: … read-only file system`, then it would fail on
+  networking), even though the lifecycle logic is correct —
+  `TestTier2Provision` passes because `go test` runs the executor in-process with
+  no systemd sandbox. Widening the unit (`ProtectSystem=full` + net caps +
+  `AF_NETLINK`) reintroduces the "root with power" the split exists to avoid, so
+  it is **not** the fix. The clean resolutions are architectural: switch the
+  deployed executor to the **`containerdDriver`** (Go client, no in-process CNI)
+  and/or move networking out of `aped` — run Phase-2 workspaces networkless and
+  let the Phase-3 overlay provide connectivity. Tracked as a known gap in
+  `docs/how-to/run-aped.md`.
 
 ## Appendix A — `aped` systemd units + auditd rules (D4)
 
@@ -913,6 +932,20 @@ executor holds almost no capability and no network address family beyond `AF_UNI
  │            QEMU de-priv: Kata rootless-VMM (kata-NNN) + QEMU -sandbox       │
  └──────────────────────────────────────────────────────────────────────────┘
 ```
+
+> **Deploying these units — read first.** The blocks below are the *design*
+> form and are annotated with inline `# …` for readability, but **systemd has no
+> inline comments**: a trailing `# …` becomes part of the value, so `Group=ape #
+> …` fails to resolve the group (`aped.service` exits `216/GROUP`; the front is
+> rejected as a bad unit file) and `ProtectKernelTunables=yes # …` is silently
+> dropped. The `SystemCallFilter` denylist also needs **one** leading `~` for the
+> whole space-separated list (`~@mount @swap @reboot …`) — repeating `~` per group
+> makes systemd read `~@swap` as an unknown *syscall name* and silently drop the
+> filter, leaving only `@mount` denied. These blocks are also aspirational in
+> shape (`Type=notify` + `--socket-activated` await `sd_notify`; the shipped units
+> use `Type=exec` with explicit flags). Deploy the corrected, `systemd-analyze
+> verify`-clean copies from **`deploy/systemd/`** (installed by
+> `deploy/tier2-setup.sh`), not these.
 
 ### `/etc/systemd/system/aped-priv.socket` — internal front↔root boundary
 
@@ -991,8 +1024,9 @@ IPAddressDeny=any
 SystemCallArchitectures=native
 SystemCallErrorNumber=EPERM
 SystemCallFilter=@system-service
-SystemCallFilter=~@mount ~@swap ~@reboot ~@module ~@raw-io ~@cpu-emulation ~@obsolete ~@debug ~@privileged
-#  @chown is NOT in @privileged on systemd 259, so device-node chown survives.
+SystemCallFilter=~@mount @swap @reboot @module @raw-io @cpu-emulation @obsolete @debug @privileged
+#  One leading ~ denies the whole list (see the caveat above). @chown is NOT in
+#  @privileged on systemd 259, so device-node chown survives.
 
 RestrictSUIDSGID=yes
 RestrictRealtime=yes
@@ -1051,7 +1085,7 @@ IPAddressAllow=169.254.0.0/16       # example host↔guest link-local; set to th
 SystemCallArchitectures=native
 SystemCallErrorNumber=EPERM
 SystemCallFilter=@system-service
-SystemCallFilter=~@mount ~@swap ~@reboot ~@module ~@raw-io ~@cpu-emulation ~@obsolete ~@debug ~@privileged ~@chown
+SystemCallFilter=~@mount @swap @reboot @module @raw-io @cpu-emulation @obsolete @debug @privileged @chown
 RestrictSUIDSGID=yes
 RestrictRealtime=yes
 LockPersonality=yes
