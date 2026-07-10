@@ -70,6 +70,11 @@ const (
 	// CredentialAPIKey (mode B) injects a scoped ANTHROPIC_API_KEY via env;
 	// no credential files touch the guest filesystem.
 	CredentialAPIKey CredentialMode = "api-key"
+	// CredentialNone injects no Anthropic credentials at all. It is the safe
+	// default for server-provisioned (aped) ephemeral/preview workspaces where
+	// the operator supplied no credential config — the guest boots without auth
+	// rather than the daemon guessing at host credentials it does not have.
+	CredentialNone CredentialMode = "none"
 )
 
 // GitMode selects how git credentials (if any) are composed for the job.
@@ -266,10 +271,14 @@ func (p *Profile) Validate() error {
 		if err := validateSecretSource(p.APIKeySource); err != nil {
 			return fmt.Errorf("api_key_source: %w", err)
 		}
+	case CredentialNone:
+		if p.APIKeySource != "" {
+			return errors.New("api_key_source is only valid with credentials: api-key")
+		}
 	case "":
-		return errors.New("credentials is required (oauth | api-key)")
+		return errors.New("credentials is required (oauth | api-key | none)")
 	default:
-		return fmt.Errorf("credentials must be oauth or api-key, got %q", p.Credentials)
+		return fmt.Errorf("credentials must be oauth, api-key or none, got %q", p.Credentials)
 	}
 
 	// The top-level `hooks:` name-list is reserved for a future hook

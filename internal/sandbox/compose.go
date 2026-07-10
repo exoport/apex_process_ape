@@ -298,6 +298,8 @@ func composeCredentials(opts ComposeOptions, comp *Composition, _ string) error 
 			return fmt.Errorf("compose: resolve api key: %w", err)
 		}
 		comp.Env = append(comp.Env, "ANTHROPIC_API_KEY="+key)
+	case CredentialNone:
+		// No Anthropic credentials injected (ephemeral/preview or aped default).
 	default:
 		return fmt.Errorf("compose: unknown credential mode %q", opts.Profile.Credentials)
 	}

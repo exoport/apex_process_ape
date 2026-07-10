@@ -167,6 +167,12 @@ func (r *Resolver) profileFor(req workspace.CreateRequest) (*sandbox.Profile, er
 	if prof.Mount == "" {
 		prof.Mount = sandbox.MountHostFS
 	}
+	if prof.Credentials == "" {
+		// aped provisions server-side with no host credentials; default to
+		// injecting none rather than guessing oauth/api-key the daemon lacks.
+		// A named profile that sets credentials still overrides this.
+		prof.Credentials = sandbox.CredentialNone
+	}
 	return prof, nil
 }
 
