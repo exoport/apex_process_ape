@@ -9,6 +9,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/output"
 	"github.com/exoport/apex_process_ape/internal/sandbox"
+	"github.com/exoport/apex_process_ape/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -34,9 +35,10 @@ VS Code Remote in and run Claude Code, APEX pipelines, or Playwright inside.
   ape sandbox attach <name>  Open an interactive shell inside a workspace
   ape sandbox ssh <name>     SSH into a workspace over its forwarded port
   ape sandbox exec <name> -- <cmd>...   Run a command inside a workspace
-  ape sandbox pause <name>   Suspend a workspace microVM
-  ape sandbox resume <name>  Resume a paused workspace
-  ape sandbox down <name>    Tear a workspace down
+  ape sandbox freeze <name>    Freeze a workspace (cgroup-freeze; RAM stays resident)
+  ape sandbox unfreeze <name>  Unfreeze a frozen workspace
+  ape sandbox suspend <name>   Suspend a workspace microVM (save RAM to disk) — not yet on Kata
+  ape sandbox down <name>      Tear a workspace down
 
 Requires Linux with KVM + containerd + Kata — run 'ape doctor' to check.
 Profiles live in _apex/sandbox/<name>.yaml.`,
@@ -47,8 +49,9 @@ Profiles live in _apex/sandbox/<name>.yaml.`,
 		newSandboxAttachCmd(),
 		newSandboxSSHCmd(),
 		newSandboxExecCmd(),
-		newSandboxPauseCmd(),
-		newSandboxResumeCmd(),
+		newSandboxFreezeCmd(),
+		newSandboxUnfreezeCmd(),
+		newSandboxSuspendCmd(),
 		newSandboxDownCmd(),
 		newSandboxProxyDaemonCmd(),
 	)
@@ -347,30 +350,34 @@ func newSandboxExecCmd() *cobra.Command {
 	return cmd
 }
 
-func newSandboxPauseCmd() *cobra.Command {
+func newSandboxFreezeCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "pause <name>",
-		Short: "Suspend a workspace microVM",
-		Args:  cobra.ExactArgs(1),
+		Use:   "freeze <name>",
+		Short: "Freeze a workspace (cgroup-freeze; guest RAM stays resident)",
+		Long: `Freeze cgroup-freezes the workspace's guest processes (nerdctl pause):
+the guest stops consuming CPU but its RAM stays fully resident, so unfreeze
+resumes instantly. This is a freeze, not a VM suspend (which would save RAM to
+disk — see 'ape sandbox suspend').`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ws, err := lookupWorkspace(args[0])
 			if err != nil {
 				return err
 			}
 			runner := &sandbox.Runner{Stdout: cmd.OutOrStdout(), Stderr: cmd.ErrOrStderr()}
-			if err := runner.Pause(cmd.Context(), ws.Container); err != nil {
+			if err := runner.Freeze(cmd.Context(), ws.Container); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "workspace %q paused\n", ws.Name)
+			fmt.Fprintf(cmd.OutOrStdout(), "workspace %q frozen\n", ws.Name)
 			return nil
 		},
 	}
 }
 
-func newSandboxResumeCmd() *cobra.Command {
+func newSandboxUnfreezeCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "resume <name>",
-		Short: "Resume a paused workspace",
+		Use:   "unfreeze <name>",
+		Short: "Unfreeze a frozen workspace",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ws, err := lookupWorkspace(args[0])
@@ -378,11 +385,37 @@ func newSandboxResumeCmd() *cobra.Command {
 				return err
 			}
 			runner := &sandbox.Runner{Stdout: cmd.OutOrStdout(), Stderr: cmd.ErrOrStderr()}
-			if err := runner.Resume(cmd.Context(), ws.Container); err != nil {
+			if err := runner.Unfreeze(cmd.Context(), ws.Container); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "workspace %q resumed\n", ws.Name)
+			fmt.Fprintf(cmd.OutOrStdout(), "workspace %q unfrozen\n", ws.Name)
 			return nil
+		},
+	}
+}
+
+// newSandboxSuspendCmd is the distinct future verb for a real VM suspend
+// (save guest RAM to disk), kept separate from freeze (PLAN-18 D7). It is not
+// reachable through Kata-via-containerd today — the shim's Checkpoint is
+// unimplemented and the VMM control socket is Kata-owned — so it validates the
+// workspace and returns UNSUPPORTED until a VMM-owning driver or the
+// Firecracker tier lands.
+func newSandboxSuspendCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "suspend <name>",
+		Short: "Suspend a workspace microVM (save guest RAM to disk) — not yet supported on Kata",
+		Long: `Suspend saves the guest's RAM to disk and releases it, unlike 'freeze'
+(which cgroup-freezes the guest with RAM resident). VM save/restore is not
+reachable through Kata-via-containerd today — the shim's Checkpoint is
+unimplemented and the VMM control socket is Kata-owned — so it awaits a
+VMM-owning driver or the Firecracker tier (PLAN-18 D7). Use 'ape sandbox
+freeze' to free CPU while keeping the workspace resident.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if _, err := lookupWorkspace(args[0]); err != nil {
+				return err
+			}
+			return fmt.Errorf("sandbox suspend: %w (Kata guest RAM save/restore needs a VMM-owning driver — PLAN-18 D7; use 'ape sandbox freeze')", workspace.ErrUnsupported)
 		},
 	}
 }

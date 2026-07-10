@@ -147,6 +147,8 @@ func TestExecAndAttachArgs(t *testing.T) {
 func TestLifecycleArgs(t *testing.T) {
 	assert.Equal(t, []string{"pause", "ape-ws-dev"}, PauseArgs("ape-ws-dev"))
 	assert.Equal(t, []string{"unpause", "ape-ws-dev"}, ResumeArgs("ape-ws-dev"))
+	assert.Equal(t, []string{"start", "ape-ws-dev"}, StartArgs("ape-ws-dev"))
+	assert.Equal(t, []string{"stop", "ape-ws-dev"}, StopArgs("ape-ws-dev"))
 	assert.Equal(t, []string{"rm", "-f", "ape-ws-dev"}, DownArgs("ape-ws-dev"))
 }
 

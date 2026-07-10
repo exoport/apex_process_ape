@@ -128,7 +128,7 @@ access:
 | Mode        | Project source                              | Use                                                                 |
 | ----------- | ------------------------------------------- | ------------------------------------------------------------------- |
 | `host-fs`   | The host project, shared over virtio-fs (rw)| **Local-dev default** — edits live-reflect both ways.               |
-| `volume`    | A persistent VM-owned block volume          | Long-lived server workspaces — survives pause/resume, no host coupling. |
+| `volume`    | A persistent VM-owned block volume          | Long-lived server workspaces — survives freeze/unfreeze, no host coupling. |
 | `ephemeral` | Nothing from the host                       | Untrusted / preview work — the workspace clones the repo in-guest and discards it on teardown. |
 
 ## Secret sources

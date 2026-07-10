@@ -16,8 +16,12 @@ func (r *Runner) Exec(_ context.Context, _ string, _ bool, _ []string) error { r
 
 func (r *Runner) Attach(_ context.Context, _, _ string) error { return ErrUnsupported }
 
-func (r *Runner) Pause(_ context.Context, _ string) error { return ErrUnsupported }
+func (r *Runner) Freeze(_ context.Context, _ string) error { return ErrUnsupported }
 
-func (r *Runner) Resume(_ context.Context, _ string) error { return ErrUnsupported }
+func (r *Runner) Unfreeze(_ context.Context, _ string) error { return ErrUnsupported }
+
+func (r *Runner) Start(_ context.Context, _ string) error { return ErrUnsupported }
+
+func (r *Runner) Stop(_ context.Context, _ string) error { return ErrUnsupported }
 
 func (r *Runner) Down(_ context.Context, _ string) error { return ErrUnsupported }

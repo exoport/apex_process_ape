@@ -760,9 +760,10 @@ VS Code Remote in and run Claude Code, APEX pipelines, or Playwright inside.
   ape sandbox attach <name>  Open an interactive shell inside a workspace
   ape sandbox ssh <name>     SSH into a workspace over its forwarded port
   ape sandbox exec <name> -- <cmd>...   Run a command inside a workspace
-  ape sandbox pause <name>   Suspend a workspace microVM
-  ape sandbox resume <name>  Resume a paused workspace
-  ape sandbox down <name>    Tear a workspace down
+  ape sandbox freeze <name>    Freeze a workspace (cgroup-freeze; RAM stays resident)
+  ape sandbox unfreeze <name>  Unfreeze a frozen workspace
+  ape sandbox suspend <name>   Suspend a workspace microVM (save RAM to disk) — not yet on Kata
+  ape sandbox down <name>      Tear a workspace down
 
 Requires Linux with KVM + containerd + Kata — run 'ape doctor' to check.
 Profiles live in _apex/sandbox/<name>.yaml.
@@ -772,10 +773,11 @@ Subcommands:
 - `attach` — Open an interactive shell inside a workspace
 - `down` — Tear a workspace down
 - `exec` — Run a command inside a workspace
+- `freeze` — Freeze a workspace (cgroup-freeze; guest RAM stays resident)
 - `ls` — List provisioned workspaces
-- `pause` — Suspend a workspace microVM
-- `resume` — Resume a paused workspace
 - `ssh` — SSH into a workspace over its forwarded loopback port
+- `suspend` — Suspend a workspace microVM (save guest RAM to disk) — not yet supported on Kata
+- `unfreeze` — Unfreeze a frozen workspace
 - `up` — Provision a Kata workspace from a profile
 
 ## ape sandbox attach
@@ -812,6 +814,19 @@ Run a command inside a workspace
 ape sandbox exec <name> -- <cmd>...
 ```
 
+## ape sandbox freeze
+
+Freeze a workspace (cgroup-freeze; guest RAM stays resident)
+
+```
+ape sandbox freeze <name>
+```
+
+Freeze cgroup-freezes the workspace's guest processes (nerdctl pause):
+the guest stops consuming CPU but its RAM stays fully resident, so unfreeze
+resumes instantly. This is a freeze, not a VM suspend (which would save RAM to
+disk — see 'ape sandbox suspend').
+
 ## ape sandbox ls
 
 List provisioned workspaces
@@ -826,22 +841,6 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
-## ape sandbox pause
-
-Suspend a workspace microVM
-
-```
-ape sandbox pause <name>
-```
-
-## ape sandbox resume
-
-Resume a paused workspace
-
-```
-ape sandbox resume <name>
-```
-
 ## ape sandbox ssh
 
 SSH into a workspace over its forwarded loopback port
@@ -855,6 +854,29 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--user` | string | `ape` | SSH user inside the workspace |
+
+## ape sandbox suspend
+
+Suspend a workspace microVM (save guest RAM to disk) — not yet supported on Kata
+
+```
+ape sandbox suspend <name>
+```
+
+Suspend saves the guest's RAM to disk and releases it, unlike 'freeze'
+(which cgroup-freezes the guest with RAM resident). VM save/restore is not
+reachable through Kata-via-containerd today — the shim's Checkpoint is
+unimplemented and the VMM control socket is Kata-owned — so it awaits a
+VMM-owning driver or the Firecracker tier (PLAN-18 D7). Use 'ape sandbox
+freeze' to free CPU while keeping the workspace resident.
+
+## ape sandbox unfreeze
+
+Unfreeze a frozen workspace
+
+```
+ape sandbox unfreeze <name>
+```
 
 ## ape sandbox up
 

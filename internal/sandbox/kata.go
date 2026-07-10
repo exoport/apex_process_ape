@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -193,10 +194,15 @@ func AttachArgs(container, shell string) []string {
 	return ExecArgs(container, true, []string{shell, "-l"})
 }
 
-// PauseArgs / ResumeArgs / DownArgs build the lifecycle commands. pause
-// suspends the microVM; unpause resumes it; rm -f tears it down.
+// PauseArgs / ResumeArgs / StartArgs / StopArgs / DownArgs build the lifecycle
+// commands. nerdctl "pause" cgroup-freezes the guest — its RAM stays fully
+// resident, so this is a freeze (surfaced as Backend Freeze/Unfreeze), NOT a VM
+// suspend; "unpause" thaws it; "start"/"stop" cycle a stopped/running
+// container; "rm -f" tears it down.
 func PauseArgs(container string) []string  { return []string{"pause", container} }
 func ResumeArgs(container string) []string { return []string{"unpause", container} }
+func StartArgs(container string) []string  { return []string{"start", container} }
+func StopArgs(container string) []string   { return []string{"stop", container} }
 func DownArgs(container string) []string   { return []string{"rm", "-f", container} }
 
 // SSHArgs builds the `ssh` argument vector to reach a workspace over the
@@ -387,9 +393,9 @@ func StagingDirFor(stateDir, name string) string {
 const DefaultNerdctl = "nerdctl"
 
 // Runner executes Kata workspace lifecycle operations by shelling out to
-// nerdctl (provision/exec/attach/pause/resume/down). The struct is defined
-// here (cross-platform); the method bodies live in kata_linux.go, with a
-// portable ErrUnsupported stub in kata_other.go so the Windows CI leg
+// nerdctl (provision/exec/attach/freeze/unfreeze/start/stop/down). The struct
+// is defined here (cross-platform); the method bodies live in kata_linux.go,
+// with portable ErrUnsupported stubs in kata_other.go so the Windows CI leg
 // compiles. Stdin/Stdout/Stderr are wired through for the interactive
 // exec/attach paths; nil falls back to the process's own streams.
 type Runner struct {
@@ -397,6 +403,12 @@ type Runner struct {
 	Stdin   io.Reader // guest stdin for interactive exec/attach
 	Stdout  io.Writer
 	Stderr  io.Writer
+
+	// runFunc, when non-nil, replaces the real exec inside run(). It is a
+	// test seam for asserting the exact argument vector each lifecycle verb
+	// shells out (proving the shellDriver stays byte-identical to the direct
+	// Runner path) — nil in production.
+	runFunc func(ctx context.Context, interactive bool, args []string) error
 }
 
 // bin returns the configured driver binary or the default.

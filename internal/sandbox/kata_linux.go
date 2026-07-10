@@ -32,14 +32,27 @@ func (r *Runner) Attach(ctx context.Context, container, shell string) error {
 	return r.run(ctx, true, AttachArgs(container, shell))
 }
 
-// Pause suspends a running workspace microVM.
-func (r *Runner) Pause(ctx context.Context, container string) error {
+// Freeze cgroup-freezes a running workspace's guest (nerdctl pause): the guest
+// stops but its RAM stays fully resident. This is a freeze, NOT a VM suspend
+// (which would save RAM to disk — unsupported on the Kata backend; see PLAN-18
+// D7 and the `ape sandbox suspend` stub).
+func (r *Runner) Freeze(ctx context.Context, container string) error {
 	return r.run(ctx, false, PauseArgs(container))
 }
 
-// Resume wakes a paused workspace microVM.
-func (r *Runner) Resume(ctx context.Context, container string) error {
+// Unfreeze thaws a cgroup-frozen workspace (nerdctl unpause).
+func (r *Runner) Unfreeze(ctx context.Context, container string) error {
 	return r.run(ctx, false, ResumeArgs(container))
+}
+
+// Start (re)starts a stopped workspace container.
+func (r *Runner) Start(ctx context.Context, container string) error {
+	return r.run(ctx, false, StartArgs(container))
+}
+
+// Stop gracefully stops a running workspace container.
+func (r *Runner) Stop(ctx context.Context, container string) error {
+	return r.run(ctx, false, StopArgs(container))
 }
 
 // Down tears a workspace down (force-remove the container). Removing the
@@ -54,6 +67,9 @@ func (r *Runner) Down(ctx context.Context, container string) error {
 // combined output so a nerdctl failure surfaces its own diagnostics in the
 // returned error rather than vanishing.
 func (r *Runner) run(ctx context.Context, interactive bool, args []string) error {
+	if r.runFunc != nil {
+		return r.runFunc(ctx, interactive, args)
+	}
 	cmd := exec.CommandContext(ctx, r.bin(), args...) //nolint:gosec // binary + args are ape-controlled
 
 	if interactive {

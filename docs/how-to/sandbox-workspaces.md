@@ -95,13 +95,18 @@ the public key(s) it should accept under the profile's `access.authorized_keys`
 (a `~/.ssh/*.pub` path or an inline key). Without a key configured, use
 `attach`/`exec`, which go through `nerdctl` and need no SSH setup.
 
-## 5. Suspend and tear down
+## 5. Freeze and tear down
 
 ```bash
-ape sandbox pause dev     # suspend the microVM (frees CPU/RAM, keeps state)
-ape sandbox resume dev    # wake it back up
+ape sandbox freeze dev    # cgroup-freeze the guest (frees CPU; guest RAM stays resident)
+ape sandbox unfreeze dev  # thaw it — resumes instantly
 ape sandbox down dev      # force-remove the container + drop its home & registry entry
 ```
+
+`freeze` is a cgroup-freeze, not a VM suspend: the guest stops using CPU but its
+RAM stays resident. A real suspend (save guest RAM to disk) is not yet reachable
+on the Kata backend — `ape sandbox suspend` reports that and points you back to
+`freeze`.
 
 `down` leaves a persistent `mount: volume` volume in place (data safety) —
 remove it with `nerdctl volume rm` if you want to discard it. `host-fs` and

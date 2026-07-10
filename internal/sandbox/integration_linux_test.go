@@ -190,9 +190,9 @@ func TestIT_ExecRuns(t *testing.T) {
 	require.Error(t, err, "a non-zero exit must surface as an error")
 }
 
-// TestIT_PauseResumePreservesState suspends and resumes the microVM and
+// TestIT_FreezeUnfreezePreservesState cgroup-freezes and thaws the guest and
 // asserts in-guest (tmpfs) state survives the round-trip.
-func TestIT_PauseResumePreservesState(t *testing.T) {
+func TestIT_FreezeUnfreezePreservesState(t *testing.T) {
 	requireKataIT(t)
 	spec := provisionIT(t, MountHostFS, "", nil)
 	runner := &Runner{}
@@ -200,8 +200,8 @@ func TestIT_PauseResumePreservesState(t *testing.T) {
 	_, err := execCapture(t, spec.Container(), "sh", "-c", "echo persisted > /tmp/it-state")
 	require.NoError(t, err)
 
-	require.NoError(t, runner.Pause(context.Background(), spec.Container()))
-	require.NoError(t, runner.Resume(context.Background(), spec.Container()))
+	require.NoError(t, runner.Freeze(context.Background(), spec.Container()))
+	require.NoError(t, runner.Unfreeze(context.Background(), spec.Container()))
 
 	out, err := execCapture(t, spec.Container(), "cat", "/tmp/it-state")
 	require.NoError(t, err)
