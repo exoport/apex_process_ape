@@ -343,9 +343,17 @@ func checkKVMAvailable(_ context.Context, env doctorEnv) CheckResult {
 	return CheckResult{Status: StatusOK, Message: dev + " present and accessible"}
 }
 
-// checkContainerdRunning verifies the nerdctl driver is installed. ape drives
-// Kata by shelling out to nerdctl; containerd is a host prerequisite, not a
-// Go dependency. Presence is checked without a daemon round-trip.
+// containerdSocket is the default rootful containerd control socket. aped's
+// root executor drives containerd here; its presence is a cheap, non-hanging
+// proxy for "the daemon is up" (a stat, never a daemon round-trip that could
+// block an unresponsive containerd).
+const containerdSocket = "/run/containerd/containerd.sock"
+
+// checkContainerdRunning verifies both halves of the driver ape needs: the
+// nerdctl CLI on PATH (ape shells out to it) AND a live rootful containerd
+// (its control socket present). The check is named containerd.running, so
+// nerdctl-on-PATH alone is not enough — a stopped daemon must not read as OK.
+// Everything is a stat/LookPath: no daemon round-trip, so doctor never hangs.
 func checkContainerdRunning(_ context.Context, env doctorEnv) CheckResult {
 	if env.OS != "linux" {
 		return CheckResult{Status: StatusInfo, Message: "not probed on non-Linux"}
@@ -358,7 +366,15 @@ func checkContainerdRunning(_ context.Context, env doctorEnv) CheckResult {
 			Remediation: "Install containerd and nerdctl — ape shells out to nerdctl to drive Kata.",
 		}
 	}
-	return CheckResult{Status: StatusOK, Message: path}
+	if _, err := os.Stat(containerdSocket); err != nil {
+		return CheckResult{
+			Status:      StatusWarn,
+			Message:     fmt.Sprintf("nerdctl at %s but %s absent (containerd not running?)", path, containerdSocket),
+			Remediation: "Start the rootful containerd daemon so ape/aped can drive Kata.",
+			FixCommand:  "sudo systemctl enable --now containerd",
+		}
+	}
+	return CheckResult{Status: StatusOK, Message: fmt.Sprintf("%s + containerd at %s", path, containerdSocket)}
 }
 
 // checkKataRuntime looks for a Kata containerd shim on PATH — the lightweight
