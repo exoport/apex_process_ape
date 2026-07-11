@@ -165,9 +165,17 @@ func (d *containerdDriver) Provision(ctx context.Context, spec WorkspaceSpec) (w
 	}, nil
 }
 
-// getOrPull returns an already-present image or pulls+unpacks it.
+// getOrPull returns an already-present image or pulls+unpacks it. A found image
+// that was imported WITHOUT unpacking (e.g. `ctr images import`, which does not
+// unpack) has no snapshots, so WithNewSnapshot would fail with an opaque error;
+// unpack it for the default snapshotter first. "" resolves to the same default
+// snapshotter WithNewSnapshot uses. Best-effort: an unpack failure is left to
+// surface at snapshot creation with a clearer message than we could add here.
 func (d *containerdDriver) getOrPull(ctx context.Context, ref string) (client.Image, error) {
 	if img, err := d.cli.GetImage(ctx, ref); err == nil {
+		if unpacked, uerr := img.IsUnpacked(ctx, ""); uerr == nil && !unpacked {
+			_ = img.Unpack(ctx, "")
+		}
 		return img, nil
 	}
 	img, err := d.cli.Pull(ctx, ref, client.WithPullUnpack)
