@@ -119,3 +119,30 @@ func TestShellDriverByteIdenticalArgs(t *testing.T) {
 		})
 	}
 }
+
+// TestRunnerDataRootGlobalFlag locks the executor-sandbox-gap fix (PLAN-18 D1):
+// a Runner with DataRoot set prepends the nerdctl global `--data-root <path>`
+// before every subcommand (so nerdctl's metadata store lands under the
+// executor's writable state dir), while a zero-DataRoot Runner stays
+// byte-identical to the PLAN-16 path.
+func TestRunnerDataRootGlobalFlag(t *testing.T) {
+	ctx := context.Background()
+	var got []string
+	capture := func(r *Runner) *Runner {
+		r.runFunc = func(_ context.Context, _ bool, args []string) error {
+			got = append([]string(nil), args...)
+			return nil
+		}
+		return r
+	}
+
+	// DataRoot set → the two global flags lead, then the subcommand.
+	got = nil
+	require.NoError(t, capture(&Runner{DataRoot: "/var/lib/aped/nerdctl"}).Freeze(ctx, "ape-ws-dev"))
+	assert.Equal(t, []string{"--data-root", "/var/lib/aped/nerdctl", "pause", "ape-ws-dev"}, got)
+
+	// DataRoot empty → no global flags (byte-identical to PLAN-16).
+	got = nil
+	require.NoError(t, capture(&Runner{}).Freeze(ctx, "ape-ws-dev"))
+	assert.Equal(t, []string{"pause", "ape-ws-dev"}, got)
+}

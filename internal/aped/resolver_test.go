@@ -101,6 +101,32 @@ func TestResolverNoNATSSkipsCreds(t *testing.T) {
 	}
 }
 
+// TestResolverNetworkNone locks the executor-sandbox-gap fix (PLAN-18 D1): the
+// resolver defaults provisioned workspaces to NetworkNone so nerdctl's
+// client-side CNI never runs inside the hardened executor, and an explicit
+// Network override is honored.
+func TestResolverNetworkNone(t *testing.T) {
+	r := NewResolver(ResolverConfig{StateDir: t.TempDir(), HostHome: t.TempDir()})
+	r.compose = fakeCompose
+	spec, err := r.Resolve(context.Background(), workspace.CreateRequest{Name: testWS, Mount: "ephemeral"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if spec.Network != sandbox.NetworkNone {
+		t.Errorf("default network = %q, want %q", spec.Network, sandbox.NetworkNone)
+	}
+
+	r2 := NewResolver(ResolverConfig{StateDir: t.TempDir(), HostHome: t.TempDir(), Network: "bridge"})
+	r2.compose = fakeCompose
+	spec2, err := r2.Resolve(context.Background(), workspace.CreateRequest{Name: testWS, Mount: "ephemeral"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if spec2.Network != "bridge" {
+		t.Errorf("override network = %q, want bridge", spec2.Network)
+	}
+}
+
 func TestResolverHostFSRequiresMountSource(t *testing.T) {
 	r := NewResolver(ResolverConfig{StateDir: t.TempDir(), HostHome: t.TempDir()})
 	r.compose = fakeCompose

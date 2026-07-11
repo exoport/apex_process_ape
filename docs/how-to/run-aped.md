@@ -106,6 +106,12 @@ ape sandbox down dev --node "$(hostname)"
 `--node` selects the `ape.vmm.<node>.>` group (default: the local hostname). The
 node token is slugged the same way `<user>` tokens are.
 
+> **Today:** the read-only verbs (`ls`, `inspect`, `capabilities`) work end-to-end
+> through the deployed units. The provisioning verbs (`up`, and the `exec`/
+> `freeze`/`down` that follow it) do **not** yet work through the *hardened*
+> executor — see [Known limitation](#known-limitation--executor-sandbox-vs-the-nerdctl-shelldriver-phase-2)
+> below. The full lifecycle is proven in-process by `TestTier2Provision`.
+
 ## Per-VM credentials
 
 At `create`, `aped` mints a per-VM NATS credential scoped **pub-only** to that
@@ -176,25 +182,46 @@ sudo nerdctl run --rm --runtime io.containerd.kata-qemu.v2 alpine uname -r  # pr
 ## Known limitation — executor sandbox vs the nerdctl shellDriver (Phase 2)
 
 The hardened `aped.service` (Appendix A: `ProtectSystem=strict`, empty
-`CapabilityBoundingSet`, `RestrictAddressFamilies=AF_UNIX`) is written for an
-executor that is a **containerd _client_** — it talks to the socket and does no
-host work itself. The current executor, however, shells out to **`nerdctl`**,
-which does client-side CNI networking in the executor's own process. That needs
-things the sandbox denies: writable `/var/lib/nerdctl` + CNI state, `CAP_NET_ADMIN`
-/ `CAP_NET_RAW`, `AF_NETLINK`, and mount syscalls for the network namespace.
+`CapabilityBoundingSet`, `RestrictAddressFamilies=AF_UNIX`, `@mount` denied) is
+written for an executor that is a **containerd _client_** — it talks to the
+socket and does no host work itself. The current executor, however, shells out to
+**`nerdctl`**, which does real host work in its own process. So **`ape sandbox up`
+through the deployed units still fails** — the lifecycle logic is correct
+(`TestTier2Provision` drives create → exec → freeze → unfreeze → destroy against a
+real Kata-QEMU microVM and passes, because `go test` runs the executor
+in-process, sandbox-free), but the deployed hardened executor cannot run
+`nerdctl`.
 
-Consequence: the **`ape sandbox up` path through the running daemon fails** under
-the shipped units (`nerdctl run: … read-only file system`, then it would fail on
-networking). The lifecycle itself is correct — the `TestTier2Provision`
-acceptance drives create → exec → freeze → unfreeze → destroy against a real
-Kata-QEMU microVM and passes, because `go test` runs the executor in-process
-without the systemd sandbox.
+Three distinct barriers, peeled back in order (live-verified on Ubuntu 26.04 /
+kernel 7.0):
 
-The clean fix is architectural (drive containerd as a client and keep host
-networking out of `aped`, or defer networking to the Phase-3 overlay / run
-workspaces networkless) — not a unit tweak. Do **not** simply widen the unit to
-`ProtectSystem=full` + networking capabilities: that reintroduces exactly the
-"root with power" the two-process split exists to avoid.
+1. **nerdctl metadata store (fixed).** `nerdctl run` writes to `/var/lib/nerdctl`,
+   which `ProtectSystem=strict` makes read-only (`nerdctl run: mkdir
+   /var/lib/nerdctl/…: read-only file system`). **Resolved without touching the
+   unit:** the executor passes `--data-root <state-dir>/nerdctl` (default
+   `/var/lib/aped/nerdctl`), relocating the store into the already-writable
+   `ReadWritePaths=/var/lib/aped`. Override with `aped run --nerdctl-data-root`.
+2. **Client-side CNI (avoided).** nerdctl's default bridge runs CNI (netns/veth/
+   bridge) *in the executor's process*, needing `CAP_NET_ADMIN`/`CAP_NET_RAW`,
+   `AF_NETLINK`, and `@mount`. **Resolved without touching the unit:** aped
+   provisions workspaces **networkless** (`--network none`), so no CNI runs.
+   Overlay connectivity is the Phase-3 job.
+3. **Client-side rootfs mount (the wall).** Even networkless, `nerdctl run` does a
+   `mount(2)` in its own process — `oci.WithImageConfig` → `WithAdditionalGIDs`
+   RO-bind-mounts the image rootfs to a temp dir to read `/etc/group` (strace
+   confirmed: it happens for `USER=root` images and is *not* avoidable with
+   `--user`). The executor denies `@mount` and holds no `CAP_SYS_ADMIN`, so it is
+   `operation not permitted`. **No nerdctl invocation can clear this.**
+
+Barrier 3 is architectural: nerdctl (and containerd's `oci.WithImageConfig`
+helper) resolves the image user/GIDs by mounting the rootfs client-side. The
+**only clean fix is the Phase-3 `containerdDriver`** — the containerd Go client
+builds the OCI spec as a typed object, sets the process user/GIDs *without*
+`mount.WithTempMount`, and leaves all snapshot/rootfs mounting to the containerd
+daemon + Kata shim (their own privileged units). That is exactly the D3
+justification. Do **not** widen the unit (`ProtectSystem=full`, net caps,
+`@mount`) to make nerdctl work: that reintroduces the "root with power" the
+two-process split exists to avoid. Tracked in PLAN-18 (Risks).
 
 ## See also
 

@@ -13,14 +13,15 @@ import (
 
 func newRunCmd() *cobra.Command {
 	var (
-		socket     string
-		policyPath string
-		stateDir   string
-		auditLog   string
-		node       string
-		nerdctl    string
-		allowUsers []string
-		allowUIDs  []int
+		socket      string
+		policyPath  string
+		stateDir    string
+		auditLog    string
+		node        string
+		nerdctl     string
+		nerdctlData string
+		allowUsers  []string
+		allowUIDs   []int
 	)
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -43,14 +44,15 @@ normally just the aped-front user.`,
 				return fmt.Errorf("%w: %w", aped.ErrConfig, err)
 			}
 			return aped.RunExecutor(cmd.Context(), aped.ExecutorRunConfig{
-				Socket:      socket,
-				PolicyPath:  policyPath,
-				StateDir:    stateDir,
-				AuditLog:    auditLog,
-				Node:        node,
-				AllowedUIDs: uids,
-				Nerdctl:     nerdctl,
-				Stderr:      os.Stderr,
+				Socket:          socket,
+				PolicyPath:      policyPath,
+				StateDir:        stateDir,
+				AuditLog:        auditLog,
+				Node:            node,
+				AllowedUIDs:     uids,
+				Nerdctl:         nerdctl,
+				NerdctlDataRoot: nerdctlData,
+				Stderr:          os.Stderr,
 			})
 		},
 	}
@@ -61,6 +63,7 @@ normally just the aped-front user.`,
 	f.StringVar(&auditLog, "audit-log", "/var/log/aped/audit.jsonl", "Append-only audit log path ('' to disable the file sink)")
 	f.StringVar(&node, "node", "", "Node token for audit subjects (default: hostname)")
 	f.StringVar(&nerdctl, "nerdctl", "", "Driver binary override (default: nerdctl)")
+	f.StringVar(&nerdctlData, "nerdctl-data-root", "", "nerdctl --data-root override (default: <state-dir>/nerdctl, under the executor's writable state)")
 	f.StringSliceVar(&allowUsers, "allow-user", []string{"aped"}, "Usernames whose SO_PEERCRED uid may issue commands (the aped-front user)")
 	f.IntSliceVar(&allowUIDs, "allow-uid", nil, "Additional peer uids allowed over the priv socket")
 	return cmd

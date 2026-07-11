@@ -30,6 +30,7 @@ type Resolver struct {
 	natsURL     string
 	credsExpiry time.Duration
 	telemetry   Account
+	network     string // nerdctl --network for provisioned specs (default NetworkNone)
 
 	// Injectable seams (default to the real implementations) so Resolve is
 	// unit-testable without touching a profile file or the compose filesystem.
@@ -44,6 +45,11 @@ type ResolverConfig struct {
 	NatsURL     string        // guest-facing APE_NATS_URL ("" → per-VM creds skipped)
 	CredsExpiry time.Duration // per-VM JWT lifetime (0 → no expiry)
 	Telemetry   Account       // mints per-VM telemetry creds
+	// Network is the nerdctl --network mode for provisioned workspaces. Empty
+	// defaults to sandbox.NetworkNone: Phase-2 workspaces are networkless so
+	// nerdctl's client-side CNI stays out of the hardened executor (PLAN-18 D1).
+	// Overlay connectivity is Phase 3.
+	Network string
 	// LoadProfile is an optional server-side profile source (by name). When nil,
 	// the resolver builds a default profile from the request fields.
 	LoadProfile func(name string) (*sandbox.Profile, error)
@@ -51,12 +57,17 @@ type ResolverConfig struct {
 
 // NewResolver builds a Resolver.
 func NewResolver(cfg ResolverConfig) *Resolver {
+	network := cfg.Network
+	if network == "" {
+		network = sandbox.NetworkNone
+	}
 	return &Resolver{
 		stateDir:    cfg.StateDir,
 		hostHome:    cfg.HostHome,
 		natsURL:     cfg.NatsURL,
 		credsExpiry: cfg.CredsExpiry,
 		telemetry:   cfg.Telemetry,
+		network:     network,
 		loadProfile: cfg.LoadProfile,
 		compose:     sandbox.Compose,
 	}
@@ -89,11 +100,12 @@ func (r *Resolver) Resolve(_ context.Context, req workspace.CreateRequest) (sand
 		image = sandbox.ResolveImage(prof)
 	}
 	spec := sandbox.WorkspaceSpec{
-		Name:  name,
-		Image: image,
-		VMM:   prof.VMM,
-		Mount: prof.Mount,
-		Comp:  comp,
+		Name:    name,
+		Image:   image,
+		VMM:     prof.VMM,
+		Mount:   prof.Mount,
+		Network: r.network,
+		Comp:    comp,
 	}
 	switch prof.Mount {
 	case sandbox.MountHostFS:

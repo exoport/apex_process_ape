@@ -33,6 +33,15 @@ const DefaultImage = "ghcr.io/exoport/ape-sandbox:v0"
 // workspace when the caller doesn't pick one.
 const DefaultShell = "/bin/bash"
 
+// NetworkNone is the WorkspaceSpec.Network value that provisions a workspace
+// with no container networking (nerdctl `--network none`). aped's hardened root
+// executor uses it: nerdctl's default bridge runs client-side CNI (netns/veth/
+// bridge) in the caller's own process, which needs CAP_NET_ADMIN/CAP_NET_RAW,
+// AF_NETLINK, and @mount — exactly what the executor sandbox denies (PLAN-18
+// D1). "none" skips CNI entirely; overlay connectivity is the Phase-3 job. An
+// empty Network keeps nerdctl's default (the retired daemonless path / tests).
+const NetworkNone = "none"
+
 // ContainerName derives the containerd container name for a workspace.
 func ContainerName(workspace string) string { return ContainerPrefix + workspace }
 
@@ -66,6 +75,7 @@ type WorkspaceSpec struct {
 	Comp        *Composition // staging home + binds + env from Compose
 	HTTPSProxy  string       // HTTPS_PROXY value wired into the guest; "" → none
 	SSHPort     int          // host loopback port forwarded to guest :22; 0 → none
+	Network     string       // nerdctl --network value; "" → default (CNI bridge), NetworkNone → networkless
 	Env         []string     // extra KEY=VALUE env beyond Comp.Env / the proxy
 	Command     []string     // container command override; empty → the image default
 }
@@ -99,6 +109,13 @@ func (s WorkspaceSpec) RunArgs() ([]string, error) {
 		"--runtime", runtimeHandler(s.VMM),
 		"--label", "ape.managed=true",
 		"--label", "ape.workspace=" + s.Name,
+	}
+
+	// Networking. Emitted only when set, so the default path stays byte-identical
+	// to PLAN-16. aped provisions workspaces with NetworkNone (see the constant):
+	// it keeps nerdctl's client-side CNI out of the sandboxed executor's process.
+	if s.Network != "" {
+		args = append(args, "--network", s.Network)
 	}
 
 	// Project mount depends on the mode.
@@ -399,10 +416,16 @@ const DefaultNerdctl = "nerdctl"
 // compiles. Stdin/Stdout/Stderr are wired through for the interactive
 // exec/attach paths; nil falls back to the process's own streams.
 type Runner struct {
-	Nerdctl string    // driver binary; default DefaultNerdctl
-	Stdin   io.Reader // guest stdin for interactive exec/attach
-	Stdout  io.Writer
-	Stderr  io.Writer
+	Nerdctl string // driver binary; default DefaultNerdctl
+	// DataRoot, when set, is passed as the nerdctl global `--data-root <path>`
+	// on every invocation, relocating nerdctl's metadata store off the default
+	// /var/lib/nerdctl. aped's executor points it under its own writable state
+	// dir so nerdctl works under ProtectSystem=strict without widening the unit
+	// (PLAN-18 D1 — the executor-sandbox gap). Empty → nerdctl's default.
+	DataRoot string
+	Stdin    io.Reader // guest stdin for interactive exec/attach
+	Stdout   io.Writer
+	Stderr   io.Writer
 
 	// runFunc, when non-nil, replaces the real exec inside run(). It is a
 	// test seam for asserting the exact argument vector each lifecycle verb
@@ -417,4 +440,15 @@ func (r *Runner) bin() string {
 		return r.Nerdctl
 	}
 	return DefaultNerdctl
+}
+
+// globalArgs returns the nerdctl global flags that must precede every
+// subcommand (currently only --data-root). It is kept separate from the pure
+// per-verb arg builders (RunArgs/ExecArgs/…) so those stay byte-identical to
+// the PLAN-16 path; run() prepends these when actually shelling out.
+func (r *Runner) globalArgs() []string {
+	if strings.TrimSpace(r.DataRoot) == "" {
+		return nil
+	}
+	return []string{"--data-root", r.DataRoot}
 }

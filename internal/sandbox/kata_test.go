@@ -93,6 +93,25 @@ func TestRunArgsEphemeralHasNoProjectBind(t *testing.T) {
 	}
 }
 
+// TestRunArgsNetwork locks the networkless flag emission (PLAN-18 D1 executor
+// gap): --network <value> appears only when Network is set, so the default
+// (empty) path stays byte-identical to PLAN-16.
+func TestRunArgsNetwork(t *testing.T) {
+	base := WorkspaceSpec{
+		Name: "eph", Image: "img", VMM: VMMQemu, Mount: MountEphemeral, Comp: specComp(),
+	}
+	// Empty Network → no --network flag anywhere.
+	args, err := base.RunArgs()
+	require.NoError(t, err)
+	assert.NotContains(t, args, "--network")
+
+	// NetworkNone → --network none right after the labels.
+	base.Network = NetworkNone
+	args, err = base.RunArgs()
+	require.NoError(t, err)
+	assert.True(t, hasPair(args, "--network", "none"), "networkless spec must emit --network none: %v", args)
+}
+
 func TestRunArgsNoProxyWhenUnset(t *testing.T) {
 	spec := WorkspaceSpec{
 		Name: "dev", Image: "img", VMM: VMMCloudHypervisor, Mount: MountHostFS,

@@ -25,6 +25,7 @@ vendor/
 
 # Local binary output (e.g., from `make build`)
 /ape
+/aped
 /bin/
 
 # Editor / IDE

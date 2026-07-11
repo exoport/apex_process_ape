@@ -93,7 +93,7 @@ origin:
 - [ ] `ape` becomes a thin NATS client speaking `Backend` over the `vmm` contract.
 
 ### Phase 3 — Device tier (GPU/USB VFIO; **needs a discrete-GPU box**)
-- [ ] `containerdDriver` (containerd 2.x Go client) for the task-event stream + PTY fidelity + typed OCI spec (D3/D5).
+- [ ] `containerdDriver` (containerd 2.x Go client) for the task-event stream + PTY fidelity + typed OCI spec (D3/D5). **Its non-device half is a Phase-2 unblock, not GPU-gated:** it is the only clean fix for the `shellDriver`/nerdctl executor-sandbox dead end (Risks) — build the OCI spec without `mount.WithTempMount` so `ape sandbox up` works through the hardened units. Can land ahead of the VFIO work.
 - [ ] VFIO orchestration (D5): `vfio-pci` bind, IOMMU-group enumeration/isolation check, baked per-tier `kata-qemu-gpu` handler, single-injection cold-plug, destroy+rebind+device reset.
 - [ ] GPU guest-image build/signing workstream (D5): NVIDIA modules signed against the pinned Kata guest kernel + NVRC.
 - [ ] Profile `devices:` (whole-IOMMU-group PCI; per-device USB via QEMU `usb-host`, aped-synthesised from a vendor:product allowlist).
@@ -826,6 +826,14 @@ behind the Kata-QEMU tier shipping first.
   (pub and sub) and on another VM's `_INBOX`. The de-privileged front-end cannot
   reach the root executor (SO_PEERCRED mismatch). `systemd-analyze security`
   lands in the OK band for both units.
+- **Status (live-verified):** the control plane + read-only verbs
+  (`capabilities`/`list`/`inspect`) work end-to-end through the deployed hardened
+  units, and the full create → exec → freeze → unfreeze → destroy lifecycle passes
+  in-process (`TestTier2Provision`). **`ape sandbox up` through the hardened units
+  does NOT yet work** — the `shellDriver`/nerdctl path hits an irreducible
+  client-side `mount(2)` the executor sandbox forbids (see Risks → "the nerdctl
+  path is a dead end"). Unblocking it needs the non-device `containerdDriver`
+  (D3). The networkless + data-root config groundwork has landed.
 
 ### Phase 3 (Tier 3, discrete GPU)
 - `vfio-pci`-bound GPU alone (with its audio function) in its IOMMU group passes
@@ -871,25 +879,49 @@ behind the Kata-QEMU tier shipping first.
   Execute=yes` may be incompatible with cgo/plugin paths — verify before enabling.
 - **`ape` self-exec inside workspaces** still runs as the guest user in the VM —
   unchanged; the VM is the boundary.
-- **`shellDriver` vs the D1 executor sandbox (Phase-2 finding, validated live on
-  Ubuntu 26.04 / kernel 7.0).** The Appendix-A executor unit is written for a
-  containerd *client* that does no host work (`ProtectSystem=strict`, empty
-  `CapabilityBoundingSet`, `RestrictAddressFamilies=AF_UNIX`). But Phase 2 ships
-  the **`shellDriver`**, which shells out to `nerdctl`, and `nerdctl` does
-  **client-side CNI in the executor's own process** — creating netns + veth,
-  running the bridge plugin. That needs exactly what the sandbox denies: writable
-  `/var/lib/nerdctl` + CNI state, `CAP_NET_ADMIN`/`CAP_NET_RAW`, `AF_NETLINK`, and
-  `@mount` (persistent-netns bind). So `ape sandbox up` **through the deployed
-  daemon fails** (`nerdctl run: … read-only file system`, then it would fail on
-  networking), even though the lifecycle logic is correct —
-  `TestTier2Provision` passes because `go test` runs the executor in-process with
-  no systemd sandbox. Widening the unit (`ProtectSystem=full` + net caps +
-  `AF_NETLINK`) reintroduces the "root with power" the split exists to avoid, so
-  it is **not** the fix. The clean resolutions are architectural: switch the
-  deployed executor to the **`containerdDriver`** (Go client, no in-process CNI)
-  and/or move networking out of `aped` — run Phase-2 workspaces networkless and
-  let the Phase-3 overlay provide connectivity. Tracked as a known gap in
-  `docs/how-to/run-aped.md`.
+- **`shellDriver` vs the D1 executor sandbox — the nerdctl path is a dead end
+  (Phase-2 finding, live-verified on Ubuntu 26.04 / kernel 7.0; strace-confirmed).**
+  The Appendix-A executor unit is written for a containerd *client* that does no
+  host work (`ProtectSystem=strict`, empty `CapabilityBoundingSet`,
+  `RestrictAddressFamilies=AF_UNIX`, `@mount` denied). But Phase 2 ships the
+  **`shellDriver`**, which shells out to `nerdctl`, and `nerdctl` does real host
+  work in its own process. `ape sandbox up` **through the deployed daemon fails.**
+  Three distinct barriers, discovered in order by driving the live daemon:
+  1. **nerdctl metadata store → read-only fs.** `nerdctl run` writes
+     `/var/lib/nerdctl`, which `ProtectSystem=strict` makes read-only. **Fixed
+     without touching the unit:** the executor passes `--data-root
+     <state-dir>/nerdctl` (`/var/lib/aped/nerdctl`, under the already-writable
+     `ReadWritePaths`). Landed (`Runner.DataRoot` + `aped run --nerdctl-data-root`).
+  2. **Client-side CNI → net caps / `AF_NETLINK` / `@mount`.** nerdctl's default
+     bridge runs CNI (netns/veth/bridge) in the executor's process. **Avoided
+     without touching the unit:** aped provisions **networkless**
+     (`--network none`, `WorkspaceSpec.Network`/`NetworkNone`, resolver default);
+     overlay connectivity is Phase 3. Landed.
+  3. **Client-side rootfs mount → `@mount`/`CAP_SYS_ADMIN` (the wall).** Even
+     networkless, `nerdctl run` calls `mount(2)` in its own process:
+     `oci.WithImageConfig` → `WithAdditionalGIDs` RO-bind-mounts the image rootfs
+     to a temp dir (`/tmp/initialC…`) to read `/etc/group`. **strace proved this
+     fires for `USER=root` images and is not avoidable with `--user 0:0`** (both
+     do the identical mount). The executor denies `@mount` + holds no
+     `CAP_SYS_ADMIN` → `operation not permitted`. **No nerdctl invocation clears
+     this.**
+
+  Barrier 3 is architectural — nerdctl and containerd's `oci.WithImageConfig`
+  helper resolve the image user/GIDs by mounting the rootfs client-side — so the
+  networkless + data-root config (barriers 1–2) is necessary but **not
+  sufficient**, and the deployed daemon now fails at the true wall rather than an
+  incidental read-only-fs. Widening the unit (`ProtectSystem=full` + net caps +
+  `AF_NETLINK` + `@mount`) reintroduces the "root with power" the split exists to
+  avoid, so it is **not** the fix. **The only clean resolution is the Phase-3
+  `containerdDriver`:** the containerd Go client builds the OCI spec as a typed
+  object, sets the process user/GIDs *without* `mount.WithTempMount`, and leaves
+  all snapshot/rootfs mounting to the containerd daemon + Kata shim (their own
+  privileged units) — exactly the D3 justification (own the OCI spec + task
+  stream). Note this refines D3's "not forced by CNI" wording: even the Go client
+  must be written to **skip `WithAdditionalGIDs`/`mount.WithTempMount`** or it
+  hits barrier 3 in-process too. Non-device workspaces do **not** need the GPU
+  hardware Phase 3 is otherwise blocked on, so a non-device `containerdDriver` can
+  be brought forward to unblock this. Tracked in `docs/how-to/run-aped.md`.
 
 ## Appendix A — `aped` systemd units + auditd rules (D4)
 

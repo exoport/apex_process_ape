@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/exoport/apex_process_ape/internal/sandbox"
 )
@@ -33,7 +34,12 @@ type ExecutorRunConfig struct {
 	AllowedUIDs []uint32
 	// Nerdctl overrides the driver binary (default "nerdctl").
 	Nerdctl string
-	Stderr  io.Writer
+	// NerdctlDataRoot relocates nerdctl's metadata store (global --data-root).
+	// Empty → <StateDir>/nerdctl, which lives under the executor's writable
+	// ReadWritePaths so nerdctl works under ProtectSystem=strict without
+	// widening the unit (PLAN-18 D1 — the executor-sandbox gap).
+	NerdctlDataRoot string
+	Stderr          io.Writer
 }
 
 // RunExecutor is the `aped run` entry point: the network-less root executor. It
@@ -50,7 +56,11 @@ func RunExecutor(ctx context.Context, cfg ExecutorRunConfig) error {
 		return fmt.Errorf("%w: %w", ErrConfig, err)
 	}
 
-	runner := &sandbox.Runner{Nerdctl: cfg.Nerdctl, Stdout: stderr, Stderr: stderr}
+	dataRoot := cfg.NerdctlDataRoot
+	if dataRoot == "" {
+		dataRoot = filepath.Join(cfg.StateDir, "nerdctl")
+	}
+	runner := &sandbox.Runner{Nerdctl: cfg.Nerdctl, DataRoot: dataRoot, Stdout: stderr, Stderr: stderr}
 	reg := sandbox.OpenRegistry(cfg.StateDir)
 	shell := sandbox.NewShellDriver(runner, reg, nil) // id-verbs + list/inspect/capabilities
 

@@ -67,10 +67,14 @@ func (r *Runner) Down(ctx context.Context, container string) error {
 // combined output so a nerdctl failure surfaces its own diagnostics in the
 // returned error rather than vanishing.
 func (r *Runner) run(ctx context.Context, interactive bool, args []string) error {
+	// Global flags (e.g. --data-root) precede the subcommand; args[0] stays the
+	// subcommand name for diagnostics. globalArgs returns a fresh slice, so this
+	// never aliases a shared backing array.
+	argv := append(r.globalArgs(), args...)
 	if r.runFunc != nil {
-		return r.runFunc(ctx, interactive, args)
+		return r.runFunc(ctx, interactive, argv)
 	}
-	cmd := exec.CommandContext(ctx, r.bin(), args...) //nolint:gosec // binary + args are ape-controlled
+	cmd := exec.CommandContext(ctx, r.bin(), argv...) //nolint:gosec // binary + args are ape-controlled
 
 	if interactive {
 		cmd.Stdin = orReader(r.Stdin, os.Stdin)
