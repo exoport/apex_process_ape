@@ -18,8 +18,11 @@ func newRunCmd() *cobra.Command {
 		stateDir    string
 		auditLog    string
 		node        string
+		driver      string
 		nerdctl     string
 		nerdctlData string
+		ctrdAddr    string
+		ctrdNS      string
 		allowUsers  []string
 		allowUIDs   []int
 	)
@@ -44,15 +47,18 @@ normally just the aped-front user.`,
 				return fmt.Errorf("%w: %w", aped.ErrConfig, err)
 			}
 			return aped.RunExecutor(cmd.Context(), aped.ExecutorRunConfig{
-				Socket:          socket,
-				PolicyPath:      policyPath,
-				StateDir:        stateDir,
-				AuditLog:        auditLog,
-				Node:            node,
-				AllowedUIDs:     uids,
-				Nerdctl:         nerdctl,
-				NerdctlDataRoot: nerdctlData,
-				Stderr:          os.Stderr,
+				Socket:              socket,
+				PolicyPath:          policyPath,
+				StateDir:            stateDir,
+				AuditLog:            auditLog,
+				Node:                node,
+				AllowedUIDs:         uids,
+				Driver:              driver,
+				Nerdctl:             nerdctl,
+				NerdctlDataRoot:     nerdctlData,
+				ContainerdAddress:   ctrdAddr,
+				ContainerdNamespace: ctrdNS,
+				Stderr:              os.Stderr,
 			})
 		},
 	}
@@ -62,8 +68,11 @@ normally just the aped-front user.`,
 	f.StringVar(&stateDir, "state-dir", "/var/lib/aped", "State dir (workspace registry)")
 	f.StringVar(&auditLog, "audit-log", "/var/log/aped/audit.jsonl", "Append-only audit log path ('' to disable the file sink)")
 	f.StringVar(&node, "node", "", "Node token for audit subjects (default: hostname)")
-	f.StringVar(&nerdctl, "nerdctl", "", "Driver binary override (default: nerdctl)")
+	f.StringVar(&driver, "driver", "shell", "Workspace backend: shell (nerdctl) | containerd (Go client — barrier-3 fix, opt-in)")
+	f.StringVar(&nerdctl, "nerdctl", "", "Driver binary override for --driver shell (default: nerdctl)")
 	f.StringVar(&nerdctlData, "nerdctl-data-root", "", "nerdctl --data-root override (default: <state-dir>/nerdctl, under the executor's writable state)")
+	f.StringVar(&ctrdAddr, "containerd-address", "", "containerd socket for --driver containerd (default: /run/containerd/containerd.sock)")
+	f.StringVar(&ctrdNS, "containerd-namespace", "", "containerd namespace for --driver containerd (default: aped)")
 	f.StringSliceVar(&allowUsers, "allow-user", []string{"aped"}, "Usernames whose SO_PEERCRED uid may issue commands (the aped-front user)")
 	f.IntSliceVar(&allowUIDs, "allow-uid", nil, "Additional peer uids allowed over the priv socket")
 	return cmd

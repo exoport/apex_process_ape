@@ -233,14 +233,37 @@ kernel 7.0):
    `operation not permitted`. **No nerdctl invocation can clear this.**
 
 Barrier 3 is architectural: nerdctl (and containerd's `oci.WithImageConfig`
-helper) resolves the image user/GIDs by mounting the rootfs client-side. The
-**only clean fix is the Phase-3 `containerdDriver`** — the containerd Go client
-builds the OCI spec as a typed object, sets the process user/GIDs *without*
-`mount.WithTempMount`, and leaves all snapshot/rootfs mounting to the containerd
-daemon + Kata shim (their own privileged units). That is exactly the D3
-justification. Do **not** widen the unit (`ProtectSystem=full`, net caps,
-`@mount`) to make nerdctl work: that reintroduces the "root with power" the
-two-process split exists to avoid. Tracked in PLAN-18 (Risks).
+helper) resolves the image user/GIDs by mounting the rootfs client-side. Do
+**not** widen the unit (`ProtectSystem=full`, net caps, `@mount`) to make nerdctl
+work: that reintroduces the "root with power" the two-process split exists to
+avoid.
+
+### The fix: `aped run --driver containerd` (opt-in)
+
+The clean fix is the non-device **`containerdDriver`** (PLAN-18 D3): the
+containerd Go client builds the OCI spec as a typed object and sets the process
+`user`/`env`/`args`/`cwd` directly from the image config read out of the content
+store — **without** `oci.WithImageConfig` / `WithAdditionalGIDs` / any
+`mount.WithTempMount`. All snapshot + rootfs mounting is left to the containerd
+daemon + Kata shim (their own privileged units), so nothing mounts in the
+executor's process and the hardened unit is untouched.
+
+It is **opt-in** — the default stays the shellDriver:
+
+```bash
+# per-invocation
+aped run --driver containerd  …
+
+# or in aped.service, add `--driver containerd` to ExecStart
+```
+
+The barrier-3-free spec construction is unit-tested
+(`internal/sandbox/imagespec_test.go`: user/env/args/cwd projected from the image
+config, zero mounts added, numeric-uid only, networkless). The **full lifecycle
+through the driver is not yet live-validated** — bring it up on a
+KVM+containerd+Kata host and confirm `ape sandbox up` → `exec` → `freeze` →
+`down` end-to-end. The driver honors numeric `USER` only (a named user would need
+the rootfs read this path avoids). Tracked in PLAN-18 (Risks + Phase 3).
 
 ## See also
 

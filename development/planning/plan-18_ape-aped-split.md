@@ -922,6 +922,19 @@ behind the Kata-QEMU tier shipping first.
   hits barrier 3 in-process too. Non-device workspaces do **not** need the GPU
   hardware Phase 3 is otherwise blocked on, so a non-device `containerdDriver` can
   be brought forward to unblock this. Tracked in `docs/how-to/run-aped.md`.
+  - **Update (2026-07-11): the non-device `containerdDriver` has landed opt-in**
+    behind `aped run --driver containerd` (default stays the shellDriver).
+    `internal/sandbox/containerd_driver_linux.go` drives the containerd v2 Go
+    client (create/start/stop/freeze/unfreeze/exec/destroy/list/inspect) and its
+    Create builds the OCI spec via `applyImageConfig` — process `user`/`env`/
+    `args`/`cwd` projected straight from the content-store image config, **zero
+    mounts, numeric uid only, no `WithAdditionalGIDs`/`mount.WithTempMount`** — so
+    barrier 3 never fires. The pure spec-builder is Tier-1 tested
+    (`internal/sandbox/imagespec_test.go`); the containerd v2 client dep is
+    linux-only (`//go:build linux` + a non-linux stub, goreleaser ships `aped`
+    linux-only). **Full-lifecycle live validation through the driver on a
+    KVM+containerd+Kata host is still pending** (queued). Windows cross-compile +
+    goreleaser snapshot stay green with the dep added.
 
 ## Appendix A — `aped` systemd units + auditd rules (D4)
 

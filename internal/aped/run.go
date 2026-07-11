@@ -9,12 +9,25 @@ import (
 	"path/filepath"
 
 	"github.com/exoport/apex_process_ape/internal/sandbox"
+	"github.com/exoport/apex_process_ape/internal/workspace"
 )
 
 // ErrConfig marks a configuration/usage failure (bad policy, missing paths) the
 // command layer maps to a usage exit; everything else RunExecutor/RunFront
 // return is a runtime failure.
 var ErrConfig = errors.New("aped: configuration error")
+
+// Driver selectors for --driver.
+const (
+	// DriverShell is the default: the PLAN-16 nerdctl shellDriver. Its Create
+	// hits the executor-sandbox wall through the hardened unit (client-side
+	// mount(2) — see PLAN-18 Risks); read-only verbs work.
+	DriverShell = "shell"
+	// DriverContainerd is the opt-in containerd Go-client driver. It builds the
+	// OCI spec without the client-side rootfs mount, so `ape sandbox up` works
+	// through the hardened executor (PLAN-18 D3). Linux-only.
+	DriverContainerd = "containerd"
+)
 
 // ExecutorRunConfig configures the `aped run` root executor.
 type ExecutorRunConfig struct {
@@ -39,7 +52,14 @@ type ExecutorRunConfig struct {
 	// ReadWritePaths so nerdctl works under ProtectSystem=strict without
 	// widening the unit (PLAN-18 D1 — the executor-sandbox gap).
 	NerdctlDataRoot string
-	Stderr          io.Writer
+	// Driver selects the workspace backend: DriverShell (default) or
+	// DriverContainerd (the opt-in barrier-3 fix). Empty → DriverShell.
+	Driver string
+	// ContainerdAddress/ContainerdNamespace configure the containerd driver
+	// ("" → the sandbox package defaults).
+	ContainerdAddress   string
+	ContainerdNamespace string
+	Stderr              io.Writer
 }
 
 // RunExecutor is the `aped run` entry point: the network-less root executor. It
@@ -56,13 +76,12 @@ func RunExecutor(ctx context.Context, cfg ExecutorRunConfig) error {
 		return fmt.Errorf("%w: %w", ErrConfig, err)
 	}
 
-	dataRoot := cfg.NerdctlDataRoot
-	if dataRoot == "" {
-		dataRoot = filepath.Join(cfg.StateDir, "nerdctl")
-	}
-	runner := &sandbox.Runner{Nerdctl: cfg.Nerdctl, DataRoot: dataRoot, Stdout: stderr, Stderr: stderr}
 	reg := sandbox.OpenRegistry(cfg.StateDir)
-	shell := sandbox.NewShellDriver(runner, reg, nil) // id-verbs + list/inspect/capabilities
+	backend, provision, closeDriver, err := buildDriver(cfg, reg, stderr)
+	if err != nil {
+		return err
+	}
+	defer closeDriver()
 
 	var auditW io.Writer
 	if cfg.AuditLog != "" {
@@ -78,8 +97,8 @@ func RunExecutor(ctx context.Context, cfg ExecutorRunConfig) error {
 	auditor := NewAuditor(auditW, nil, cfg.Node)
 
 	ex := NewExecutor(ExecutorConfig{
-		Backend:     shell,
-		Provision:   NewShellProvisioner(runner, reg),
+		Backend:     backend,
+		Provision:   provision,
 		Policy:      policy,
 		Auditor:     auditor,
 		AllowedUIDs: cfg.AllowedUIDs,
@@ -101,10 +120,43 @@ func RunExecutor(ctx context.Context, cfg ExecutorRunConfig) error {
 	}
 	defer func() { _ = l.Close() }()
 
-	fmt.Fprintf(stderr, "▶ aped run (executor) on %s — %d allowed peer uid(s), policy %s\n", l.Addr(), len(cfg.AllowedUIDs), cfg.PolicyPath)
+	driver := cfg.Driver
+	if driver == "" {
+		driver = DriverShell
+	}
+	fmt.Fprintf(stderr, "▶ aped run (executor, driver=%s) on %s — %d allowed peer uid(s), policy %s\n", driver, l.Addr(), len(cfg.AllowedUIDs), cfg.PolicyPath)
 	// The listener is bound (or adopted); tell the service manager we are up and
 	// start the watchdog pinger (both no-ops outside a Type=notify unit).
 	signalReady(ctx)
 	defer signalStopping()
 	return ex.Serve(ctx, l)
+}
+
+// buildDriver selects the workspace backend + provisioner from cfg.Driver. It
+// returns a closer (always non-nil) the caller defers. The shellDriver's
+// Provisioner shells out to nerdctl (the default, but blocked through the
+// hardened unit — PLAN-18 Risks); the containerd driver provisions via the Go
+// client without a client-side rootfs mount (the barrier-3 fix, opt-in).
+func buildDriver(cfg ExecutorRunConfig, reg *sandbox.Registry, stderr io.Writer) (workspace.Backend, Provisioner, func(), error) {
+	switch cfg.Driver {
+	case "", DriverShell:
+		dataRoot := cfg.NerdctlDataRoot
+		if dataRoot == "" {
+			dataRoot = filepath.Join(cfg.StateDir, "nerdctl")
+		}
+		runner := &sandbox.Runner{Nerdctl: cfg.Nerdctl, DataRoot: dataRoot, Stdout: stderr, Stderr: stderr}
+		return sandbox.NewShellDriver(runner, reg, nil), NewShellProvisioner(runner, reg), func() {}, nil
+	case DriverContainerd:
+		cd, err := sandbox.NewContainerdDriver(sandbox.ContainerdConfig{
+			Address:   cfg.ContainerdAddress,
+			Namespace: cfg.ContainerdNamespace,
+			Registry:  reg,
+		})
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("%w: %w", ErrConfig, err)
+		}
+		return cd, cd.Provision, func() { _ = cd.Close() }, nil
+	default:
+		return nil, nil, nil, fmt.Errorf("%w: unknown driver %q (want %s|%s)", ErrConfig, cfg.Driver, DriverShell, DriverContainerd)
+	}
 }
