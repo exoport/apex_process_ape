@@ -13,9 +13,14 @@ func main() {
 	// os.Exit(specificCode) before returning. This is the last-resort
 	// net for anything that instead falls through with a bare `return
 	// err`, so a bug like that fails loud instead of silently (exit 1,
-	// no message).
+	// no message). ExitCode also lets a command forward a specific status
+	// (e.g. `ape sandbox exec` returning the guest's exit code) with defers
+	// still running; silent errors already reported their own outcome.
 	if err := apecmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		os.Exit(1)
+		code, silent := apecmd.ExitCode(err)
+		if !silent {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		}
+		os.Exit(code)
 	}
 }

@@ -8,8 +8,24 @@ func TestExitCodeError(t *testing.T) {
 	if err := exitCodeError(0); err != nil {
 		t.Errorf("exitCodeError(0) = %v, want nil (success)", err)
 	}
-	if err := exitCodeError(3); err == nil {
-		t.Error("exitCodeError(3) = nil, want a non-nil error so ape exits non-zero")
+	err := exitCodeError(3)
+	if err == nil {
+		t.Fatal("exitCodeError(3) = nil, want a non-nil error so ape exits non-zero")
+	}
+	// The exact guest code must propagate as ape's exit status (not a generic 1),
+	// and the error is silent — the guest already streamed its own output.
+	code, silent := ExitCode(err)
+	if code != 3 {
+		t.Errorf("ExitCode = %d, want 3 (the exact guest code)", code)
+	}
+	if !silent {
+		t.Error("ExitCode silent = false, want true (no redundant Error: line)")
+	}
+	if c, s := ExitCode(nil); c != 0 || s {
+		t.Errorf("ExitCode(nil) = (%d,%v), want (0,false)", c, s)
+	}
+	if c, s := ExitCode(errNoAped); c != ExitRunFailed || s {
+		t.Errorf("ExitCode(generic) = (%d,%v), want (%d,false)", c, s, ExitRunFailed)
 	}
 }
 

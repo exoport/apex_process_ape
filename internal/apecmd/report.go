@@ -39,6 +39,22 @@ func (e *exitError) Unwrap() error { return e.err }
 func usageErr(err error) error { return &exitError{code: ExitUsage, err: err} }
 func failErr(err error) error  { return &exitError{code: ExitRunFailed, err: err} }
 
+// ExitCode maps the error Execute returns onto a process exit status for main():
+// 0 for nil, the code carried by an *exitError (e.g. `ape sandbox exec`
+// forwarding the guest's exit status), else 1. silent reports that the error
+// already conveyed its outcome (an *exitError — the command streamed its own
+// output/stderr), so main can skip printing a redundant "Error:" line.
+func ExitCode(err error) (code int, silent bool) {
+	if err == nil {
+		return ExitOK, false
+	}
+	var ee *exitError
+	if errors.As(err, &ee) {
+		return ee.code, true
+	}
+	return ExitRunFailed, false
+}
+
 // runReport runs a reporting command core and maps its error onto the exit
 // table: nil → nil (exit 0); an *exitError → stderr + os.Exit(code); any
 // other error → stderr + exit 1.

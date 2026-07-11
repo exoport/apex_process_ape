@@ -350,13 +350,15 @@ func runSandboxExec(cmd *cobra.Command, name string, argv []string) error {
 	return exitCodeError(code)
 }
 
-// exitCodeError maps a process exit code to a CLI error: nil on 0, else a message
-// that makes the ape process exit non-zero.
+// exitCodeError maps a workspace process exit code to a CLI error that carries
+// the EXACT code, so `ape sandbox exec` exits with the guest's status (ssh-style)
+// rather than a generic 1. nil on 0. main routes it through ExitCode, which also
+// suppresses a redundant "Error:" line — the guest already streamed its output.
 func exitCodeError(code int) error {
-	if code != 0 {
-		return fmt.Errorf("command exited with code %d", code)
+	if code == 0 {
+		return nil
 	}
-	return nil
+	return &exitError{code: code, err: fmt.Errorf("workspace command exited with code %d", code)}
 }
 
 func newSandboxFreezeCmd() *cobra.Command {
