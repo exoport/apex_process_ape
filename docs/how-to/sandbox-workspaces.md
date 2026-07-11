@@ -76,14 +76,21 @@ ape sandbox inspect dev
 ```bash
 ape sandbox exec dev -- ape task apex-create-prd --args "--doc prd"
 ape sandbox exec dev -- uname -r        # prints the GUEST kernel
+ape sandbox attach dev                  # interactive login shell (raw PTY)
 ```
 
-`exec` runs a one-shot command and reports its **exit status**. Bulk
-stdout/stderr streaming (and interactive `attach` / `ssh`) rides the vmm exec
-session subjects (`ape.vmm.<node>.exec.<sid>.{stdin,stdout,…}`), which is wired
-under Tier-2; in Phase 2 those report `UNSUPPORTED` and command output goes to
-the `aped` node's logs. Use `exec` for exit-status checks and side-effecting
-commands until the interactive path lands.
+`exec` **streams** the command's stdout/stderr back to your terminal and returns
+its exit code; `attach` opens an interactive login shell with a raw PTY (window
+resizes forward on `SIGWINCH`). Both ride the vmm exec session subjects
+(`ape.vmm.<node>.exec.<sid>.{stdin,stdout,stderr,resize,control,exit}`) with
+credit-based flow control — bulk stdio never rides request/reply (PLAN-18 D2).
+
+The interactive path needs an `aped` node running the **containerd driver**
+(`aped run --driver containerd`): the network-less executor relays the guest PTY
+to the de-privileged front over the priv socket, and the front bridges it to the
+session subjects. On a shell-driver node `attach` reports `UNSUPPORTED` and `exec`
+falls back to an exit-status-only run (output to the node's logs). The PTY itself
+is live-validated on a KVM+containerd+Kata host (Tier-2).
 
 ## 4. Freeze and tear down
 

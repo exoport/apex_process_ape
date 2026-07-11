@@ -243,7 +243,57 @@ Landed (all Tier-1, `-race`, 5 gates green, local):
    ([1-byte channel][payload]); kernel-buffer backpressure on this leg.
    `TestPrivStreamRelayRoundTrip` over a message-preserving fake conn.
 
-**Next (in progress):** wire the executor `OpAttach` handler (containerd task
-exec cio ↔ priv stream, linux) + the front bridge (`handleAttachOpen` →
-`NewServerSession` over `connToProcess`) + the client (`ape sandbox attach` /
-interactive `exec`). PTY itself is operator-live-validated.
+4. `feat(aped): wire interactive exec/attach through the two-process split` —
+   `2ea5c6b`. `workspace.Process` (shared server-side interactive contract;
+   `vmmstream.Process` aliases it). Executor `OpAttach` (`execstream.go`): reuses
+   the SO_PEERCRED gate + audit, type-asserts `sandbox.InteractiveBackend`
+   (shellDriver → UNSUPPORTED), acks the open with the audit record on the
+   handshake Response, then relays the PTY — **not** holding the dispatch mutex.
+   Front `handleAttachOpen` dials the streaming priv conn, stands up the server
+   session, and answers only after it has subscribed (race-free). Added
+   `AttachRequest.Cmd` (additive). **Authz fix:** `OperatorGrant` now subscribes
+   `ape.vmm.<node>.exec.>` — without it the operator could publish stdin/resize
+   but not RECEIVE stdout/stderr/exit, so live attach would fail a NATS permission
+   check. Full-stack `TestFullStackAttachStream` (fake echo backend, no
+   containerd): client → NATS → front → priv → executor → back; `-race -count=8`.
+5. `feat(sandbox): containerd InteractiveBackend — streamed exec/attach PTY` —
+   `f39b47b`. `OpenExec`/`OpenAttach` via `task.Exec` with a PTY cio
+   (`WithStreams`+`WithTerminal`); `containerdProcess.Wait` drains `IO().Wait()`,
+   closes the pipe writers (EOF to the relay), reaps the exec on a fresh ctx.
+   Linux-only; xcompile-windows green. **Live-only** (the cio can't run without
+   containerd) — queued.
+6. `feat(sandbox): wire ape sandbox attach + streamed exec` — `22cf7f8`.
+   `attach` opens a raw-terminal login shell (SIGWINCH resize forwarding, Unix;
+   Windows no-op); `exec` streams stdout/stderr + exit code, falling back to the
+   request/reply exec verb on a non-interactive node. `dialVMM` exposes the conn.
+
+**Status:** the exec/attach bridge is wired END-TO-END and Tier-1-proven with a
+fake process across the whole control plane. The only unvalidated piece is the
+containerd PTY itself (needs the live host) — queued below.
+
+### VALIDATION QUEUE — exec/attach interactive PTY (Tier-2, needs the live host)
+
+Do after item 5 e2e (same `--driver containerd` drop-in + probe image in the
+`aped` namespace). As the operator (NON-root), against the containerd-driver node:
+
+```bash
+export APE_NATS_URL=nats://127.0.0.1:4223 APE_NATS_CREDS=~/.config/ape/aped-operator.creds
+ape sandbox up dev --node "$(hostname)" --image ape-tier2-probe:latest --mount ephemeral
+# streamed exec — expect the guest kernel line on YOUR terminal + exit 0:
+ape sandbox exec dev --node "$(hostname)" -- uname -r
+# streamed exec exit-code propagation — expect a non-zero ape exit:
+ape sandbox exec dev --node "$(hostname)" -- sh -c 'exit 7'; echo "ape exit=$?"
+# interactive shell — expect a live PTY; type, resize the window, then exit:
+ape sandbox attach dev --node "$(hostname)"
+ape sandbox down dev --node "$(hostname)"
+```
+
+Expected: exec output streams live (not to the node log); a wrong-namespace or
+un-unpacked probe image fails at provision (the item-5 scripts import+unpack into
+`aped`). If attach reports UNSUPPORTED, the node is on the shellDriver — confirm
+the `--driver containerd` drop-in is active. Watch for: raw-mode terminal
+restore on exit, resize taking effect (`stty size` inside), Ctrl-C behavior.
+
+**Deferred robustness (no-sudo, next):** `getOrPull` should `Unpack` a found-but-
+not-unpacked image so a bare `ctr images import` (no `unpack`) still provisions —
+removes a live failure mode for both item 5 and attach.
