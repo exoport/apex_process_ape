@@ -15,7 +15,7 @@ gate — see `ci-local-govulncheck-preexisting` memory).
 | 3 | sd_notify + Type=notify units | ✅ committed (Tier-1; live-validate queued) |
 | 4 | Operator-creds stability | ✅ committed (Tier-1) |
 | 5 | Non-device `containerdDriver` (opt-in) | ✅ committed (Tier-1; live-validate queued) |
-| 6 | Interactive exec/attach streaming | ⬜ optional |
+| 6 | Interactive exec/attach streaming | ✅ committed (Tier-1 scaffold) |
 
 ## Commit log
 
@@ -90,6 +90,18 @@ xcompile-windows + snapshot stay green.
   fails closed). Full race suite (24 pkgs) green; xcompile-windows + snapshot green.
 - **NOT live-validated:** the full lifecycle through the containerd client
   (create/exec/freeze/destroy on a real Kata VM) — queued below.
+
+### 6) `feat(vmmstream): exec/attach framing + credit flow-control scaffold` — `c8c78ac`
+
+The PLAN-18 D2 interactive-stream transport primitives: `internal/vmmstream`
+(SessionSubject + channels, ≤32 KiB Chunks, ControlFrame codec, a
+ctx-cancellable CreditWindow, and a Sender/Receiver pair).
+
+- **Tier-1 verified:** pure codec/credit unit tests + a loopback nats-server
+  integration test pushing a >5-frame payload through a 2-frame credit window
+  (in-order reassembly, no deadlock) — end-to-end flow control. `-race` green.
+- Scaffold only: nothing imports it yet (ape/aped unchanged); binding the server
+  end to a containerd task PTY is the live-validated follow-on.
 
 ## VALIDATION QUEUE (steps needing root / live Tier-2 — hand to operator via `! sudo bash <script>`)
 
