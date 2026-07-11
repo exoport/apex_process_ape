@@ -203,13 +203,15 @@ func (v *VMM) handleAttachOpen(req micro.Request) {
 	}
 
 	// Open the streamed process on the executor (a Cmd opens a streamed exec; else
-	// the login shell). The open-audit record rides the handshake Response.
+	// the login shell). The open-audit record rides the handshake Response — on
+	// both success and a policy/exec failure, so a denied attach is forwarded too
+	// (matching the one-shot verbs' deny-forwarding).
 	conn, audit, err := openExecStream(v.socket, Command{Op: OpAttach, ID: r.ID, Attach: attachStreamFromReq(r.AttachRequest)})
+	forwardAuditRecords(v.publish, v.node, audit)
 	if err != nil {
 		v.respondErr(req, err)
 		return
 	}
-	forwardAuditRecords(v.publish, v.node, audit)
 
 	sid := fmt.Sprintf("s%d", v.session.Add(1))
 	prefix := fmt.Sprintf("%s.exec.%s", v.Group(), sid)

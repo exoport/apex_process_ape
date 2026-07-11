@@ -296,4 +296,18 @@ restore on exit, resize taking effect (`stty size` inside), Ctrl-C behavior.
 
 **Deferred robustness (no-sudo, next):** `getOrPull` should `Unpack` a found-but-
 not-unpacked image so a bare `ctr images import` (no `unpack`) still provisions —
-removes a live failure mode for both item 5 and attach.
+removes a live failure mode for both item 5 and attach. *(Done — `05fdf4d`.)*
+
+### Known follow-up: abandoned-session teardown (Phase-2 refinement)
+
+The NORMAL exec/attach flow tears down cleanly both sides (guest process exits →
+`proc.Wait` returns → EOF sentinels → exit frame → all goroutines end). An
+**abnormal client disconnect** (network drop / `kill -9` the `ape` client) is not
+yet detected: core NATS is subject-oriented, so the front's `sess.Run`
+(`context.Background()`) keeps relaying and the guest exec stays alive (blocked on
+the credit window with no consumer). Not a happy-path bug and not CPU-hot, but it
+leaks a guest exec per abandoned attach. A real fix needs a client keepalive on
+the control channel or a server idle timeout, AND the executor must kill the
+containerd exec (`process.Kill`) when the priv conn drops — deliberately NOT
+half-built here (a partial fix without live testing is worse than a documented
+gap). Tracked for Phase 2 / the live-validation pass.
