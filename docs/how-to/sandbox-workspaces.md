@@ -58,6 +58,10 @@ resolves the composed home, egress, and creds server-side:
 - `--cwd <dir>` — project root to send as the `host-fs` mount source (default: the
   current directory). `aped` canonicalizes it and re-checks it against its policy
   `mount_roots` allow-list before binding — the caller's path is never trusted raw.
+  Note `aped` runs with `ProtectHome=yes`, so a source under `/home` or `/root`
+  is invisible to it (`… is not reachable by aped`); mount from a root outside
+  `/home` or add a `BindPaths=` drop-in — see
+  [Mounting your project under ProtectHome](run-aped.md#mounting-your-project-host-fs-under-protecthome).
 
 The profile *fields* `aped` resolves are documented in the
 [sandbox profile reference](../reference/sandbox-profile.md). For untrusted work

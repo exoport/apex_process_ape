@@ -17,9 +17,16 @@ images:
 # Canonical host path prefixes a host-fs mount must resolve under (symlinks are
 # resolved and re-checked). Empty denies all host-fs mounts (volume/ephemeral
 # are unaffected).
+#
+# IMPORTANT: aped runs with ProtectHome=yes (deploy/systemd), so a root under
+# /home or /root is INVISIBLE to the daemon — a host-fs mount there fails with
+# "not reachable by aped". Use a root OUTSIDE /home (the default below works with
+# no unit changes), or expose a home subdir with a systemd BindPaths= drop-in on
+# aped.service + aped-front.service — see deploy/systemd/aped.service.d/
+# mount-root.conf.example and docs/how-to/run-aped.md.
 mount_roots:
-  - /home
   - /srv/workspaces
+  # - /home/you/projects   # requires a BindPaths= drop-in (see the note above)
 
 # Optional per-workspace resource ceilings (0 or omitted = no ceiling).
 limits:

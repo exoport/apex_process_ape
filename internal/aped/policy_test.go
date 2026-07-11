@@ -2,9 +2,11 @@ package aped
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/workspace"
@@ -109,6 +111,25 @@ func TestPolicyCheckMountUnderRoot(t *testing.T) {
 	// Volume/ephemeral (no mount path) is unaffected.
 	if err := p.CheckCreate(ResolvedCreate{Image: "img", MountPath: ""}, 0); err != nil {
 		t.Errorf("no-mount create rejected: %v", err)
+	}
+}
+
+// TestPolicyMountProtectHomeHint proves a host-fs mount aped cannot see (a source
+// under a ProtectHome-masked root, or a permission failure — the mask's shape)
+// fails with actionable guidance, not a raw lstat error. An unmasked path with a
+// benign error keeps its plain error.
+func TestPolicyMountProtectHomeHint(t *testing.T) {
+	if h := protectHomeHint("/home/dev/proj", os.ErrNotExist); !strings.Contains(h, "ProtectHome") {
+		t.Errorf("mount under /home got no ProtectHome hint: %q", h)
+	}
+	if h := protectHomeHint("/root/proj", os.ErrNotExist); !strings.Contains(h, "ProtectHome") {
+		t.Errorf("mount under /root got no ProtectHome hint: %q", h)
+	}
+	if h := protectHomeHint("/srv/x", fs.ErrPermission); !strings.Contains(h, "ProtectHome") {
+		t.Errorf("permission error got no ProtectHome hint: %q", h)
+	}
+	if h := protectHomeHint("/srv/workspaces/p", os.ErrNotExist); h != "" {
+		t.Errorf("unmasked path with a benign error should get no hint, got %q", h)
 	}
 }
 

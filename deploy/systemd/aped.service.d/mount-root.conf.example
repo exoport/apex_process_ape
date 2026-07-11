@@ -1,0 +1,27 @@
+# EXAMPLE drop-in — expose a host-fs mount root that lives under a ProtectHome-
+# masked path (/home, /root) to aped WITHOUT weakening ProtectHome globally.
+#
+# aped.service and aped-front.service both set ProtectHome=yes, which renders
+# /home and /root empty + inaccessible inside each unit's mount namespace. So
+# `ape sandbox up --mount host-fs` of a project under /home fails with
+# "host-fs mount path ... is not reachable by aped". BindReadOnlyPaths= punches a
+# SINGLE directory back through that mask: read-only is enough because the daemon
+# only lstat's the path for the policy check — the Kata virtiofsd (a separate
+# service, NOT under this namespace) does the actual read/write guest I/O.
+#
+# To use:
+#   1. Pick the directory you keep projects in, e.g. /home/you/projects, and set
+#      it below (edit BOTH the path here and step 3).
+#   2. Copy this file to BOTH units' drop-in dirs (the front pre-checks the mount,
+#      the executor authoritatively re-checks + binds it):
+#        install -D -m0644 mount-root.conf.example \
+#          /etc/systemd/system/aped.service.d/10-mount-root.conf
+#        install -D -m0644 mount-root.conf.example \
+#          /etc/systemd/system/aped-front.service.d/10-mount-root.conf
+#   3. Add that same path to /etc/aped/policy.yaml mount_roots.
+#   4. systemctl daemon-reload, then restart aped socket-first (docs/how-to/run-aped.md).
+#
+# A mount root OUTSIDE /home and /root (e.g. the default /srv/workspaces) needs
+# NONE of this — it is already visible to the daemon.
+[Service]
+BindReadOnlyPaths=/home/you/projects

@@ -134,12 +134,35 @@ ape sandbox freeze dev --node "$(hostname)"
 ape sandbox down dev --node "$(hostname)"
 ```
 
-> **host-fs from `/home`.** The default `up` mount is `host-fs` of your cwd. Both
-> units set `ProtectHome=yes`, so if your cwd is under `/home` the executor cannot
-> even `lstat` it (`mount path …: lstat /home/…: permission denied`) — by design,
-> the root executor must not read operator homes. Use `--mount ephemeral` /
-> `--mount volume`, or a project root outside `/home` (added to the policy
-> `mount_roots` plus a front `BindPaths=` drop-in). Do not relax `ProtectHome`.
+### Mounting your project (`host-fs`) under `ProtectHome`
+
+The default `up` mount is `host-fs` of your cwd. Both units set `ProtectHome=yes`,
+so `/home` and `/root` are **invisible to the daemon** — a project under them
+fails at the policy check with `host-fs mount path … is not reachable by aped`
+(the daemon can't even `lstat` the path to canonicalize it). This is deliberate:
+the root executor must not read operator homes. **Do not relax `ProtectHome`.**
+Instead, pick one:
+
+1. **A mount root outside `/home`** (simplest — no unit changes). Keep projects
+   under e.g. `/srv/workspaces` (the shipped `mount_roots` default; `tier2-setup.sh`
+   creates it). That tree isn't masked, so the daemon canonicalizes it fine and
+   the Kata `virtiofsd` (a separate service) does the guest I/O:
+   ```bash
+   ape sandbox up dev --node "$(hostname)" --cwd /srv/workspaces/dev
+   ```
+2. **Expose one home subdir via a `BindPaths=` drop-in.** Punch a single directory
+   back through the mask on **both** units (read-only is enough — only the daemon's
+   `lstat` needs it), then allow it in policy. See
+   [`deploy/systemd/aped.service.d/mount-root.conf.example`](../../deploy/systemd/aped.service.d/mount-root.conf.example):
+   ```bash
+   sudo install -D -m0644 deploy/systemd/aped.service.d/mount-root.conf.example \
+     /etc/systemd/system/aped.service.d/10-mount-root.conf
+   sudo install -D -m0644 deploy/systemd/aped.service.d/mount-root.conf.example \
+     /etc/systemd/system/aped-front.service.d/10-mount-root.conf
+   # edit both to BindReadOnlyPaths=/home/you/projects, add that path to
+   # /etc/aped/policy.yaml mount_roots, then daemon-reload + restart socket-first.
+   ```
+3. **No host files at all** — `--mount ephemeral` or `--mount volume`.
 
 `--node` selects the `ape.vmm.<node>.>` group (default: the local hostname). The
 node token is slugged the same way `<user>` tokens are.

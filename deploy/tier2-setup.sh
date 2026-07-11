@@ -30,7 +30,7 @@ KATA_VERSION="${KATA_VERSION:-3.32.0}"
 SMOKE_IMAGE="${SMOKE_IMAGE:-alpine:latest}"
 PROBE_IMAGE="${PROBE_IMAGE:-ape-tier2-probe:latest}"   # long-running stand-in for the acceptance test
 APE_NODE="${APE_NODE:-$(hostname)}"
-MOUNT_ROOT="${MOUNT_ROOT:-/home}"          # host-fs mount root allowed by policy
+MOUNT_ROOT="${MOUNT_ROOT:-/srv/workspaces}"  # host-fs mount root allowed by policy (NOT /home — see note in step 8: aped runs ProtectHome=yes)
 WITH_AUDIT="${WITH_AUDIT:-0}"              # 1 → install the immutable auditd rules
 SKIP_SMOKE="${SKIP_SMOKE:-0}"             # 1 → skip the Kata-QEMU guest-kernel smoke test
 KATA_DEFAULTS="/opt/kata/share/defaults/kata-containers"
@@ -270,10 +270,21 @@ if ! grep -qE "^[[:space:]]*-[[:space:]]*${PROBE_IMAGE}[[:space:]]*$" /etc/aped/
   sed -i "/^images:/a\\  - ${PROBE_IMAGE}" /etc/aped/policy.yaml
   ok "added $PROBE_IMAGE to /etc/aped/policy.yaml (validation image)"
 fi
-# ensure the configured mount_root is present in policy (default /home is shipped)
+# host-fs mount root: create it and ensure policy allows it. aped runs with
+# ProtectHome=yes, so a root UNDER /home or /root is invisible to the daemon and
+# a mount there fails ("not reachable by aped"); it needs a systemd BindPaths=
+# drop-in (see deploy/systemd/aped.service.d/mount-root.conf.example +
+# docs/how-to/run-aped.md). A root outside those (the default /srv/workspaces)
+# works with no unit changes.
+mkdir -p "$MOUNT_ROOT" 2>/dev/null || warn "could not create MOUNT_ROOT=$MOUNT_ROOT"
 if ! grep -qE "^\s*-\s*${MOUNT_ROOT//\//\\/}\s*$" /etc/aped/policy.yaml; then
-  warn "MOUNT_ROOT=$MOUNT_ROOT not in /etc/aped/policy.yaml mount_roots — edit it if you need host-fs mounts there"
+  sed -i "/^mount_roots:/a\\  - ${MOUNT_ROOT}" /etc/aped/policy.yaml
+  ok "added $MOUNT_ROOT to /etc/aped/policy.yaml mount_roots"
 fi
+case "$MOUNT_ROOT" in
+  /home | /home/* | /root | /root/*)
+    warn "MOUNT_ROOT=$MOUNT_ROOT is under a ProtectHome-masked path — host-fs mounts there need a BindPaths= drop-in on aped.service + aped-front.service (see deploy/systemd/aped.service.d/mount-root.conf.example)" ;;
+esac
 systemd-tmpfiles --create /etc/tmpfiles.d/aped.conf
 ok "runtime/state dirs created (systemd-tmpfiles)"
 

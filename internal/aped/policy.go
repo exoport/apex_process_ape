@@ -3,6 +3,7 @@ package aped
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -117,6 +118,13 @@ func (p *Policy) checkImage(image string) error {
 	return fmt.Errorf("%w: image %q is not in the policy allow-list", workspace.ErrPolicyDenied, image)
 }
 
+// protectHomeMaskedRoots are the paths systemd ProtectHome=yes renders empty and
+// inaccessible. aped runs under it (deploy/systemd), so a host-fs mount source
+// below one of these is invisible to the daemon — it cannot even canonicalize
+// the path for the policy check, let alone bind it. Kept as a hint source so a
+// mount that hits this fails with actionable guidance, not a raw lstat error.
+var protectHomeMaskedRoots = []string{"/home", "/root"}
+
 // checkMount denies a host-fs mount whose canonical (symlink-resolved) path is
 // not under an allowed root. An empty MountPath (volume/ephemeral) is allowed.
 func (p *Policy) checkMount(mountPath string) error {
@@ -125,6 +133,9 @@ func (p *Policy) checkMount(mountPath string) error {
 	}
 	resolved, err := canonicalPath(mountPath)
 	if err != nil {
+		if hint := protectHomeHint(mountPath, err); hint != "" {
+			return fmt.Errorf("%w: %s", workspace.ErrValidation, hint)
+		}
 		return fmt.Errorf("%w: mount path %q: %s", workspace.ErrValidation, mountPath, err.Error())
 	}
 	for _, root := range p.MountRoots {
@@ -188,6 +199,34 @@ func canonicalPath(p string) (string, error) {
 		return "", err
 	}
 	return filepath.Clean(resolved), nil
+}
+
+// protectHomeHint returns actionable guidance when a host-fs mount source cannot
+// be canonicalized because it lives under a ProtectHome-masked root (/home,
+// /root) — the daemon runs with ProtectHome=yes and literally cannot see it. It
+// fires when the path is under a masked root OR the failure was a permission
+// error (the shape systemd's mask produces), and is empty otherwise so a genuine
+// bad path keeps its raw error.
+func protectHomeHint(mountPath string, err error) string {
+	abs, aerr := filepath.Abs(mountPath)
+	if aerr != nil {
+		abs = mountPath
+	}
+	masked := false
+	for _, root := range protectHomeMaskedRoots {
+		if pathUnder(abs, root) {
+			masked = true
+			break
+		}
+	}
+	if !masked && !errors.Is(err, fs.ErrPermission) {
+		return ""
+	}
+	return fmt.Sprintf("host-fs mount path %q is not reachable by aped (%s): the daemon runs with "+
+		"ProtectHome=yes, so paths under /home and /root are invisible to it. Mount from a root outside "+
+		"/home and add it to policy mount_roots, or expose the directory with a systemd BindPaths= drop-in "+
+		"on aped.service and aped-front.service (see docs/how-to/run-aped.md), or use --mount ephemeral|volume",
+		mountPath, err.Error())
 }
 
 // pathUnder reports whether path is root itself or lies within it, using
