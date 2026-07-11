@@ -278,11 +278,13 @@ aped run --driver containerd  …
 
 The barrier-3-free spec construction is unit-tested
 (`internal/sandbox/imagespec_test.go`: user/env/args/cwd projected from the image
-config, zero mounts added, numeric-uid only, networkless). The **full lifecycle
-through the driver is not yet live-validated** — bring it up on a
-KVM+containerd+Kata host and confirm `ape sandbox up` → `exec` → `freeze` →
-`down` end-to-end. The driver honors numeric `USER` only (a named user would need
-the rootfs read this path avoids). Tracked in PLAN-18 (Risks + Phase 3).
+config, zero mounts added, numeric-uid only, networkless), and the **full
+lifecycle is live-validated** (2026-07-11, Ubuntu 26.04 / kernel 7.0):
+`TestTier2ProvisionContainerd` drives create → exec → freeze → unfreeze → destroy
+on a real Kata-QEMU microVM, and the deployed daemon runs `ape sandbox up` →
+`exec` → `attach` → `down` end-to-end through the hardened unit. The driver honors
+numeric `USER` only (a named user would need the rootfs read this path avoids).
+Tracked in PLAN-18 (Risks + Phase 3).
 
 The containerd driver also enables **interactive `ape sandbox attach` and
 streamed `ape sandbox exec`** (PLAN-18 D2): it opens a task exec with a PTY, and

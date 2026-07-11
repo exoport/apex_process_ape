@@ -119,18 +119,20 @@ overlay connectivity move **inside `aped`**, tied to the VM lifecycle, and land
 with the Phase-3 overlay-networking work. Until then a workspace has no public
 egress; `authorized_domains` in a profile is resolved by `aped`, not the client.
 
-## Known limitation — provisioning through the hardened units
+## Driver choice — provisioning through the hardened units
 
-The read-only verbs (`ls`, `inspect`, and `capabilities`) work end-to-end
-through the deployed hardened `aped` units today. The **provisioning** verbs
-(`up`, and the `exec`/`freeze`/`down` that follow it) do **not** yet work through
-the hardened executor: the shipped `shellDriver` shells out to `nerdctl`, which
+All verbs work end-to-end through the deployed hardened `aped` units **with the
+containerd driver** (`aped run --driver containerd`) — `up`, streamed `exec`,
+interactive `attach`, `freeze`/`unfreeze`, `down` are live-validated on a
+KVM+containerd+Kata host.
+
+The shipped **default `shellDriver`** does not: it shells out to `nerdctl`, which
 does an irreducible client-side `mount(2)` (resolving the image user/GIDs) that
-the executor sandbox (`@mount` denied, empty capability set) forbids. The full
-lifecycle is proven in-process by `TestTier2Provision`; the clean fix is the
-non-device `containerdDriver` (which builds the OCI spec without a client-side
-mount). See the
-[executor-sandbox limitation in run-aped.md](run-aped.md#known-limitation--executor-sandbox-vs-the-nerdctl-shelldriver-phase-2)
+the executor sandbox (`@mount` denied, empty capability set) forbids — so `up`
+fails through the hardened executor (its lifecycle is proven only in-process, by
+`TestTier2Provision`). The `containerdDriver` is the fix: it builds the OCI spec
+without a client-side mount. See the
+[driver comparison in run-aped.md](run-aped.md#known-limitation--executor-sandbox-vs-the-nerdctl-shelldriver-phase-2)
 for the full root-cause. Widening the units to make `nerdctl` work is explicitly
 **not** the fix — it would reintroduce the "root with power" the split exists to
 avoid.

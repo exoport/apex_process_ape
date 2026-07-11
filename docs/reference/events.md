@@ -22,7 +22,8 @@
 > **Implemented (PLAN-18 Phase 2):** the `ape.vmm` management service + the
 > `ape.audit` root + per-VM telemetry creds, served by `aped` (see
 > [How to run aped](../how-to/run-aped.md)). Tier-1 (embedded-server) tests are
-> green; Tier-2 live Kata validation is gated on a KVM+containerd+Kata host.
+> green, and Tier-2 live Kata validation passed on a KVM+containerd+Kata host
+> (2026-07-11: provision + streamed exec + interactive attach via `--driver containerd`).
 > Each subtree notes the plan that owns it.
 >
 > The subject taxonomy is an external contract that **cannot be retrofitted** (a
