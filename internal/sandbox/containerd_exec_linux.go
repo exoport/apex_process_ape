@@ -6,10 +6,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"syscall"
 	"time"
 
 	client "github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/cio"
+	"github.com/containerd/errdefs"
 
 	"github.com/exoport/apex_process_ape/internal/workspace"
 )
@@ -125,6 +127,17 @@ func (p *containerdProcess) Resize(cols, rows uint16) error {
 		return nil // no PTY to resize
 	}
 	return p.proc.Resize(context.Background(), uint32(cols), uint32(rows))
+}
+
+// Kill SIGKILLs the exec so the relay can reap it when the priv conn drops
+// before a clean exit (an abandoned interactive client). The signal makes the
+// exec exit, so the pending Wait returns via statusC and does the normal
+// drain + Delete. A not-found means the exec already exited — treat as done.
+func (p *containerdProcess) Kill(ctx context.Context) error {
+	if err := p.proc.Kill(ctx, syscall.SIGKILL); err != nil && !errdefs.IsNotFound(err) {
+		return err
+	}
+	return nil
 }
 
 // Wait blocks on the exec exit, then drains + tears down the cio so the relay's

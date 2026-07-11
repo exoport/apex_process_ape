@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,11 +17,15 @@ import (
 // fixed non-zero code once the client half-closes stdin (so the test proves the
 // exit code propagates, not just a zero default).
 type echoProcess struct {
-	stdinW  *io.PipeWriter
-	stdoutR *io.PipeReader
-	stderrR *io.PipeReader
-	resizes chan WinSize
-	done    chan struct{}
+	stdinW   *io.PipeWriter
+	stdoutR  *io.PipeReader
+	stdoutW  *io.PipeWriter
+	stderrR  *io.PipeReader
+	stderrW  *io.PipeWriter
+	resizes  chan WinSize
+	done     chan struct{}
+	killed   chan struct{}
+	killOnce sync.Once
 }
 
 func newEchoProcess() *echoProcess {
@@ -30,9 +35,12 @@ func newEchoProcess() *echoProcess {
 	p := &echoProcess{
 		stdinW:  inW,
 		stdoutR: outR,
+		stdoutW: outW,
 		stderrR: errR,
+		stderrW: errW,
 		resizes: make(chan WinSize, 1),
 		done:    make(chan struct{}),
+		killed:  make(chan struct{}),
 	}
 	// stderr: a one-line banner, then EOF.
 	go func() {
@@ -64,9 +72,22 @@ func (p *echoProcess) Wait(ctx context.Context) (int, error) {
 	select {
 	case <-p.done:
 		return 7, nil
+	case <-p.killed:
+		return 137, nil
 	case <-ctx.Done():
 		return 0, ctx.Err()
 	}
+}
+
+// Kill unblocks a running Wait and EOFs the output pipes so Run's pumps stop —
+// modelling connProcess.Kill (the front's real server-side process).
+func (p *echoProcess) Kill(context.Context) error {
+	p.killOnce.Do(func() {
+		close(p.killed)
+		_ = p.stdoutW.Close()
+		_ = p.stderrW.Close()
+	})
+	return nil
 }
 
 // TestSessionRoundTrip drives Serve (server) and Attach (client) against each
@@ -166,5 +187,46 @@ func TestSessionRoundTrip(t *testing.T) {
 	}
 	if stderr.String() != "READY\n" {
 		t.Errorf("stderr = %q, want %q (banner)", stderr.String(), "READY\n")
+	}
+}
+
+// TestServerSessionIdleTimeout proves the server reaps an abandoned session: with
+// no client ever attaching (so no keepalive pings and no credit grants), the idle
+// watchdog fires, cancels the session, and Kills the process — the fix for the
+// leaked-guest-exec gap where a dropped client left the exec running forever
+// (NATS gives the server no disconnect signal — PLAN-18 D2).
+func TestServerSessionIdleTimeout(t *testing.T) {
+	url := natstest.RunServer(t)
+	srvConn, err := nats.Connect(url)
+	if err != nil {
+		t.Fatalf("connect server: %v", err)
+	}
+	defer srvConn.Close()
+
+	const prefix = "ape.vmm.node1.exec.sidle"
+	proc := newEchoProcess() // Wait blocks — nothing half-closes stdin
+
+	srv, err := NewServerSession(srvConn, prefix, proc, 4)
+	if err != nil {
+		t.Fatalf("NewServerSession: %v", err)
+	}
+	srv.idleTimeout = 150 * time.Millisecond // shrink the watchdog for the test
+	_ = srvConn.Flush()
+
+	srvDone := make(chan int, 1)
+	go func() {
+		code, _ := srv.Run(context.Background())
+		srvDone <- code
+	}()
+
+	select {
+	case <-srvDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("idle watchdog did not reap the abandoned session")
+	}
+	select {
+	case <-proc.killed:
+	default:
+		t.Fatal("idle reap did not Kill the process")
 	}
 }

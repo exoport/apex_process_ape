@@ -51,10 +51,17 @@ func relayProcessToConn(ctx context.Context, conn privConn, proc vmmstream.Proce
 	go func() { defer out.Done(); frameCopy(conn, streamStdout, proc.Stdout()) }()
 	go func() { defer out.Done(); frameCopy(conn, streamStderr, proc.Stderr()) }()
 
-	// Inbound stdin/resize until the process exits (we stop after Wait) or conn
-	// closes. Fire-and-forget: the deferred conn.Close by the caller unblocks the
-	// Recv, so this goroutine does not outlive the connection.
-	go readInbound(conn, proc)
+	// Inbound stdin/resize until the process exits or the conn drops. If the conn
+	// drops FIRST — the front tore the session down, e.g. its idle watchdog reaped
+	// an abandoned client — kill the guest exec so it does not leak; the SIGKILL
+	// makes proc exit, which unblocks Wait below and reaps it cleanly. In the
+	// normal flow readInbound returns only once the caller closes the conn (after
+	// this func has already returned), so the Kill lands on an exited exec (a
+	// benign not-found).
+	go func() {
+		readInbound(conn, proc)
+		_ = proc.Kill(ctx)
+	}()
 
 	code, waitErr := proc.Wait(ctx)
 	out.Wait() // stdout/stderr hit EOF once the process fds close
@@ -218,6 +225,15 @@ func (p *connProcess) Wait(ctx context.Context) (int, error) {
 	case <-ctx.Done():
 		return 0, ctx.Err()
 	}
+}
+
+// Kill tears the front side down when the session is abandoned: it finishes the
+// output pipes (so the front's pumps unblock immediately, rather than parking
+// on a Read that has no more producer) and drops the priv conn — which makes the
+// executor's readInbound error out and SIGKILL the guest exec. Idempotent.
+func (p *connProcess) Kill(context.Context) error {
+	p.finish(-1, errStreamClosed)
+	return p.conn.Close()
 }
 
 // frameWriter frames writes to a data channel; Close sends the empty stdin frame

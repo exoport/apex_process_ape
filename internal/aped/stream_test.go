@@ -19,16 +19,19 @@ var errFakeClosed = errors.New("fake priv conn closed")
 // proven by TestPrivSocketRoundTripAndPeer). Each Send delivers exactly one
 // frame, mirroring SEQPACKET boundaries.
 type fakePrivConn struct {
-	tx     chan []byte
-	rx     chan []byte
-	closed chan struct{}
+	tx         chan []byte
+	rx         chan []byte
+	closed     chan struct{}
+	peerClosed chan struct{} // the other end's closed — a peer hangup unblocks us (SEQPACKET EOF)
 }
 
 func newFakePrivPair() (execSide, frontSide *fakePrivConn) {
 	a2b := make(chan []byte, 64)
 	b2a := make(chan []byte, 64)
-	return &fakePrivConn{tx: a2b, rx: b2a, closed: make(chan struct{})},
-		&fakePrivConn{tx: b2a, rx: a2b, closed: make(chan struct{})}
+	exec := &fakePrivConn{tx: a2b, rx: b2a, closed: make(chan struct{})}
+	front := &fakePrivConn{tx: b2a, rx: a2b, closed: make(chan struct{})}
+	exec.peerClosed, front.peerClosed = front.closed, exec.closed
+	return exec, front
 }
 
 func (f *fakePrivConn) Send(b []byte) error {
@@ -38,6 +41,8 @@ func (f *fakePrivConn) Send(b []byte) error {
 		return nil
 	case <-f.closed:
 		return errFakeClosed
+	case <-f.peerClosed:
+		return errFakeClosed
 	}
 }
 
@@ -46,6 +51,8 @@ func (f *fakePrivConn) Recv() ([]byte, error) {
 	case b := <-f.rx:
 		return b, nil
 	case <-f.closed:
+		return nil, io.EOF
+	case <-f.peerClosed:
 		return nil, io.EOF
 	}
 }
@@ -63,13 +70,18 @@ func (f *fakePrivConn) Close() error {
 }
 
 // fakeStreamProcess echoes stdin→stdout, emits a fixed stderr banner, records
-// resizes, and exits 7 once stdin half-closes.
+// resizes, and exits 7 once stdin half-closes. Kill unblocks a still-running
+// Wait and closes the output pipes (modelling containerdProcess/connProcess), so
+// a relay whose conn dropped tears down instead of leaking the exec.
 type fakeStreamProcess struct {
-	stdinW  *io.PipeWriter
-	stdoutR *io.PipeReader
-	stderrR *io.PipeReader
-	resizes chan vmmstream.WinSize
-	done    chan struct{}
+	stdinW   *io.PipeWriter
+	stdoutR  *io.PipeReader
+	stdoutW  *io.PipeWriter
+	stderrR  *io.PipeReader
+	resizes  chan vmmstream.WinSize
+	done     chan struct{}
+	killed   chan struct{}
+	killOnce sync.Once
 }
 
 func newFakeStreamProcess() *fakeStreamProcess {
@@ -77,9 +89,10 @@ func newFakeStreamProcess() *fakeStreamProcess {
 	outR, outW := io.Pipe()
 	errR, errW := io.Pipe()
 	p := &fakeStreamProcess{
-		stdinW: inW, stdoutR: outR, stderrR: errR,
+		stdinW: inW, stdoutR: outR, stdoutW: outW, stderrR: errR,
 		resizes: make(chan vmmstream.WinSize, 1),
 		done:    make(chan struct{}),
+		killed:  make(chan struct{}),
 	}
 	go func() { _, _ = io.WriteString(errW, "READY\n"); _ = errW.Close() }()
 	go func() { _, _ = io.Copy(outW, inR); _ = outW.Close(); close(p.done) }()
@@ -102,9 +115,19 @@ func (p *fakeStreamProcess) Wait(ctx context.Context) (int, error) {
 	select {
 	case <-p.done:
 		return 7, nil
+	case <-p.killed:
+		return 137, nil
 	case <-ctx.Done():
 		return 0, ctx.Err()
 	}
+}
+
+func (p *fakeStreamProcess) Kill(context.Context) error {
+	p.killOnce.Do(func() {
+		close(p.killed)
+		_ = p.stdoutW.Close() // EOF the stdout relay so frameCopy stops
+	})
+	return nil
 }
 
 // TestPrivStreamRelayRoundTrip drives the executor-side relay and the front-side
@@ -176,4 +199,40 @@ func TestPrivStreamRelayRoundTrip(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("relay did not finish")
 	}
+}
+
+// TestRelayKillsProcessOnConnDrop is the executor half of the abandoned-session
+// fix (PLAN-18 D2): when the priv conn drops before the process exits (the front
+// tore the session down — e.g. its idle watchdog reaped a vanished client), the
+// relay must Kill the guest exec rather than block forever on Wait and leak it.
+// The fake process runs until killed (no stdin half-close), so a clean relay
+// teardown depends on the Kill path firing.
+func TestRelayKillsProcessOnConnDrop(t *testing.T) {
+	execConn, frontConn := newFakePrivPair()
+
+	proc := newFakeStreamProcess() // Wait blocks: nothing half-closes stdin
+	relayDone := make(chan int, 1)
+	go func() {
+		code, _ := relayProcessToConn(context.Background(), execConn, proc)
+		relayDone <- code
+	}()
+
+	// Simulate the front dropping the session (abandoned client reaped): the peer
+	// hangup must surface to the executor's inbound reader and trigger the Kill.
+	_ = frontConn.Close()
+
+	select {
+	case code := <-relayDone:
+		if code != 137 {
+			t.Fatalf("relay exit code = %d, want 137 (killed)", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("relay did not tear down after the conn dropped (leaked exec)")
+	}
+	select {
+	case <-proc.killed:
+	default:
+		t.Fatal("relay did not Kill the process on conn drop")
+	}
+	_ = execConn.Close()
 }

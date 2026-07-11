@@ -51,6 +51,7 @@ const (
 	ControlCredit = "credit" // grant N more data frames to the peer (flow control)
 	ControlResize = "resize" // terminal size change
 	ControlExit   = "exit"   // final process exit status
+	ControlPing   = "ping"   // client keepalive — feeds the server's idle watchdog
 )
 
 // ControlFrame is the JSON payload on the control/resize/exit channels: credit

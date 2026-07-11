@@ -161,4 +161,10 @@ type Process interface {
 	Stderr() io.Reader
 	Resize(cols, rows uint16) error
 	Wait(ctx context.Context) (int, error)
+	// Kill force-terminates the process so a relay can reap it when its
+	// transport drops before a clean exit — an abandoned interactive client
+	// (network drop / kill -9) would otherwise leak a live guest exec, since
+	// NATS gives the server no disconnect signal (PLAN-18 D2). It is a no-op
+	// (or a benign not-found) once the process has already exited.
+	Kill(ctx context.Context) error
 }
