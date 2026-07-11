@@ -184,3 +184,66 @@ operator path.
   up` executor-sandbox gap (create still fails through the hardened unit) — the
   read-only verbs don't emit audit records, so a full live audit check waits on
   item 5 (containerdDriver) or the gated in-process `TestTier2Provision`.
+
+---
+
+## Continuation (same day) — exec/attach streaming + validation-script hardening
+
+Picks up from HEAD `b14248e`. Same exit gate (5 green; govulncheck expected-RED).
+
+### Validation scripts rebuilt (namespace fix)
+
+The prior queue's item-5 recipes assumed the probe image was reachable by the
+containerd driver. It is **not** by default: `deploy/tier2-setup.sh` builds
+`ape-tier2-probe:latest` with `nerdctl` (namespace **`default`**), but the
+containerd driver reads only the **`aped`** namespace (`DefaultContainerdNamespace`),
+so `getOrPull`'s `GetImage` misses and the fallback registry `Pull` fails
+(local-only image). Both item-5 scripts now import the probe into `aped` +
+`ctr -n aped images unpack` before running. Rebuilt in the session scratchpad
+(operator runs via `! sudo bash <path>`):
+
+- `validate-item5-containerd-test.sh` — HIGHEST VALUE: ensures probe in `aped` ns,
+  runs `TestTier2ProvisionContainerd`.
+- `validate-items-3-4-redeploy.sh` — socket-first redeploy of shipped units;
+  asserts `Type=notify`/`WatchdogUSec=30000000`/active + operator.creds sha256
+  byte-identical across a restart (item 4 reuse).
+- `validate-item5-driver-e2e.sh` — installs the `--driver containerd` drop-in,
+  restarts, copies the operator cred, prints the non-root `ape sandbox` block.
+
+**Queued for the operator; not yet run this session.** Follow-up code fix to land
+with the driver work: make `getOrPull` **unpack** a found-but-not-unpacked image
+(`img.Unpack`) so a bare `ctr images import` (no unpack) still provisions —
+removes one live failure mode.
+
+### exec/attach streaming (PLAN-18 D2) — transport foundation
+
+Architecture note (reconciling the brief with the hard constraints): the brief
+said "replace the driver's Exec NullIO with a cio that pipes vmmstream over
+NATS." That cannot hold — the executor runs under `RestrictAddressFamilies=AF_UNIX`
+(network-less; hard constraint), so it holds **no NATS conn**. The constraint-
+correct realization: the **front** (which has NATS) runs the vmmstream server
+session; the **executor** relays the containerd task PTY to the front over the
+**priv socket**; the front bridges that to the session subjects. Two byte-relay
+legs, executor stays network-less, hardened units untouched.
+
+Landed (all Tier-1, `-race`, 5 gates green, local):
+
+1. `feat(vmmstream): interactive session layer` — `2182546`. Server `Serve`/
+   client `Attach` over the 6-channel contract; credit is now channel-tagged
+   (`ControlFrame.Ch`) so stdin/stdout/stderr multiplex flow control on the one
+   shared `control` subject. Loopback round-trip test (echo process).
+2. `fix(vmmstream): race-free session startup` — `294e749`. NATS core has no
+   retention, so output could publish before the client subscribed (round-trip
+   passed only by luck). Output senders now start at **zero credit**; the client
+   primes (`Receiver.Prime`) after subscribing. `Serve` split into
+   `NewServerSession` (subscribe) + `Run` (pump), so the front finishes setup
+   before answering `attach.open`. `-race -count=10` green.
+3. `feat(aped): priv-socket exec-stream transport` — `3cfc055`.
+   `relayProcessToConn` (executor) + `connToProcess` (front) over SEQPACKET frames
+   ([1-byte channel][payload]); kernel-buffer backpressure on this leg.
+   `TestPrivStreamRelayRoundTrip` over a message-preserving fake conn.
+
+**Next (in progress):** wire the executor `OpAttach` handler (containerd task
+exec cio ↔ priv stream, linux) + the front bridge (`handleAttachOpen` →
+`NewServerSession` over `connToProcess`) + the client (`ape sandbox attach` /
+interactive `exec`). PTY itself is operator-live-validated.
