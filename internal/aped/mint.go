@@ -128,7 +128,7 @@ func (a Account) MintUser(name string, g Grant, expires time.Duration) (creds []
 // of re-minting, which would churn the operator's 0600 copy the human must then
 // re-copy (PLAN-18 D7). It is false on any parse failure, issuer mismatch,
 // expiry, or a scope that no longer covers requirePub (e.g. the node changed).
-func (a Account) reusableOperatorCreds(creds []byte, now time.Time, requirePub string) bool {
+func (a Account) reusableOperatorCreds(creds []byte, now time.Time, requirePub, requireSub string) bool {
 	jwtStr, err := jwt.ParseDecoratedJWT(creds)
 	if err != nil {
 		return false
@@ -149,7 +149,11 @@ func (a Account) reusableOperatorCreds(creds []byte, now time.Time, requirePub s
 	if uc.Expires != 0 && now.Unix() >= uc.Expires {
 		return false
 	}
-	return slices.Contains(uc.Pub.Allow, requirePub)
+	// Require BOTH the pub verb scope and the sub scope (the interactive
+	// exec/attach session subtree). Checking sub too means a cred minted before a
+	// grant broadening is re-minted, not reused — otherwise attach fails a NATS
+	// permission check live because the stale cred cannot subscribe the streams.
+	return slices.Contains(uc.Pub.Allow, requirePub) && slices.Contains(uc.Sub.Allow, requireSub)
 }
 
 // MintVMCreds mints a per-VM TELEMETRY credential for vmID: pub-only to its own

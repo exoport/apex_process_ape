@@ -45,6 +45,45 @@ func TestEnsureOperatorCredsReuse(t *testing.T) {
 	}
 }
 
+// TestEnsureOperatorCredsReMintOnGrantChange proves a persisted cred that lacks
+// the current grant's SUBSCRIBE scope — e.g. one minted before the interactive
+// exec/attach session subtree (ape.vmm.<node>.exec.>) was added to OperatorGrant
+// — is re-minted, not reused. Otherwise a stale cred is reused and `ape sandbox
+// attach` fails a NATS permission check live (it can publish stdin but not
+// receive stdout/stderr).
+func TestEnsureOperatorCredsReMintOnGrantChange(t *testing.T) {
+	acct, err := NewAccount()
+	if err != nil {
+		t.Fatalf("NewAccount: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "op.creds")
+
+	// A cred with the OLD operator grant: node pub + inbox/discovery sub, but
+	// WITHOUT the exec session subtree.
+	oldGrant := Grant{
+		PubAllow: []string{subjectVMM + ".node1.>", subjectSRV + ".>"},
+		SubAllow: []string{"_INBOX.>", subjectSRV + ".>"},
+	}
+	creds, _, err := acct.MintUser("ape-operator", oldGrant, 0)
+	if err != nil {
+		t.Fatalf("mint old cred: %v", err)
+	}
+	if err := os.WriteFile(path, creds, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reused, err := ensureOperatorCreds(acct, "node1", path)
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if reused {
+		t.Fatal("reused a cred lacking the exec.> sub-allow; want re-mint (attach would fail live)")
+	}
+	if got, _ := os.ReadFile(path); bytes.Equal(got, creds) {
+		t.Fatal("cred not re-minted on grant change")
+	}
+}
+
 // TestEnsureOperatorCredsReMint covers the three cases that must re-mint: a
 // foreign signing account (a wiped/rotated store), a changed node scope, and a
 // corrupt file.

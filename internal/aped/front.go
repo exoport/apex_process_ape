@@ -150,8 +150,9 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 // check and is re-minted, closing the loop. Returns whether it reused.
 func ensureOperatorCreds(hostOps Account, node, path string) (reused bool, err error) {
 	requirePub := subjectVMM + "." + node + ".>"
+	requireSub := subjectVMM + "." + node + ".exec.>" // the interactive session subtree
 	if existing, rerr := os.ReadFile(path); rerr == nil {
-		if hostOps.reusableOperatorCreds(existing, now(), requirePub) {
+		if hostOps.reusableOperatorCreds(existing, now(), requirePub, requireSub) {
 			return true, nil
 		}
 	}
