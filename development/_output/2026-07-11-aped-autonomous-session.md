@@ -109,6 +109,34 @@ operator path.
   sudo sha256sum /var/lib/aped/creds/operator.creds   # note it, restart socket-first, compare
   ```
 
+- **Item 5 (containerd driver), live — EASIEST PATH (gated in-process test):**
+  no systemd reconfig; validates the barrier-3-free Provision + full lifecycle
+  through the containerd Go client. Needs `/dev/kvm` + running containerd + Kata
+  + a pullable long-lived image (the `deploy/tier2-setup.sh` probe or the
+  ape-sandbox image):
+  ```bash
+  # (operator, on the KVM+containerd+Kata box, from the repo root)
+  sudo APE_APED_IT=1 APE_APED_IT_IMAGE=ape-tier2-probe:latest \
+    /usr/local/go/bin/go test ./internal/aped/ -run TestTier2ProvisionContainerd -v
+  # PASS = create/exec/freeze/unfreeze/destroy all worked via the containerd driver.
+  ```
+  Script: `scratchpad/validate-item5-containerd-test.sh`.
+
+- **Item 5 (containerd driver), live — FULL end-to-end through the deployed daemon:**
+  proves `ape sandbox up` works through the HARDENED unit with `--driver
+  containerd` (the whole point — the shellDriver still dies at barrier 3 here).
+  Uses a systemd drop-in so the shipped unit is untouched:
+  ```bash
+  sudo bash scratchpad/validate-item5-driver-e2e.sh   # installs drop-in, restarts socket-first
+  # then, as the operator (non-root):
+  export APE_NATS_URL=nats://127.0.0.1:4223 APE_NATS_CREDS=~/.config/ape/aped-operator.creds
+  ape sandbox up dev --node "$(hostname)" --image ape-tier2-probe:latest --mount ephemeral
+  ape sandbox exec dev --node "$(hostname)" -- true && echo "EXEC OK (barrier 3 cleared!)"
+  ape sandbox inspect dev --node "$(hostname)"   # live state via containerd task
+  ape sandbox down dev --node "$(hostname)"
+  # revert the drop-in when done: sudo rm -rf /etc/systemd/system/aped.service.d/10-driver.conf && sudo systemctl daemon-reload
+  ```
+
 - **Item 3 (Type=notify units), live:** after installing the updated units +
   redeploying the `aped` binary, confirm systemd sees `READY=1` and the watchdog:
   ```bash
