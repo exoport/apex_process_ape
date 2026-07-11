@@ -83,11 +83,19 @@ func (p *privClient) roundTrip(cmd Command) (Response, error) {
 	return resp, nil
 }
 
-// forwardAudit publishes each executor-returned audit record on
+// forwardAudit publishes the executor-returned audit records for this one-shot
+// verb on ape.audit.<node>.<event>.
+func (p *privClient) forwardAudit(records []AuditRecord) {
+	forwardAuditRecords(p.publish, p.node, records)
+}
+
+// forwardAuditRecords publishes each executor-returned audit record on
 // ape.audit.<node>.<event>. It is a no-op without a publish sink; marshal
 // failures are dropped — audit forwarding must never fail the op it records.
-func (p *privClient) forwardAudit(records []AuditRecord) {
-	if p.publish == nil {
+// Shared by the privClient (one-shot verbs) and the vmm attach bridge (the
+// streamed OpAttach, whose open record rides the handshake Response).
+func forwardAuditRecords(publish func(subject string, data []byte), node string, records []AuditRecord) {
+	if publish == nil {
 		return
 	}
 	for i := range records {
@@ -95,7 +103,7 @@ func (p *privClient) forwardAudit(records []AuditRecord) {
 		if err != nil {
 			continue
 		}
-		p.publish(auditSubject(p.node, records[i].Op), data)
+		publish(auditSubject(node, records[i].Op), data)
 	}
 }
 

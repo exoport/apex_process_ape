@@ -145,3 +145,20 @@ type Stream interface {
 	Resize(cols, rows uint16) error
 	CloseWrite() error // half-close stdin
 }
+
+// Process is a running interactive process inside a workspace — an exec command
+// or the attach shell — whose stdio a session relays (PLAN-18 D2). It is the
+// server-side dual of Stream: the relayer WRITES client keystrokes to Stdin,
+// READS process output from Stdout/Stderr, forwards Resize, and blocks on Wait
+// for the exit code. A local driver (the containerd task exec) implements it; the
+// aped front relays it over the priv socket, then bridges to the NATS session
+// subjects (internal/vmmstream). Kept here — the pure contract — so the driver
+// (internal/sandbox) and the transport (internal/vmmstream) share one definition
+// without either importing the other.
+type Process interface {
+	Stdin() io.WriteCloser
+	Stdout() io.Reader
+	Stderr() io.Reader
+	Resize(cols, rows uint16) error
+	Wait(ctx context.Context) (int, error)
+}

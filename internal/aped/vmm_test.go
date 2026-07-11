@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/exoport/apex_process_ape/internal/workspace"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/micro"
@@ -89,6 +90,29 @@ func (f *fakeBackend) Exec(_ context.Context, id string, _ workspace.ExecRequest
 
 func (f *fakeBackend) Attach(context.Context, string, workspace.AttachRequest, workspace.Stream) (workspace.ExitStatus, error) {
 	return workspace.ExitStatus{}, workspace.ErrUnsupported
+}
+
+// The fake is also an InteractiveBackend (like the containerd driver) so the
+// executor's OpAttach handler can be exercised end-to-end without containerd:
+// OpenExec/OpenAttach return the echo Process the stream tests reuse.
+var _ sandbox.InteractiveBackend = (*fakeBackend)(nil)
+
+func (f *fakeBackend) OpenExec(_ context.Context, id string, _ workspace.ExecRequest) (workspace.Process, error) {
+	return f.openInteractive(id)
+}
+
+func (f *fakeBackend) OpenAttach(_ context.Context, id string, _ workspace.AttachRequest) (workspace.Process, error) {
+	return f.openInteractive(id)
+}
+
+func (f *fakeBackend) openInteractive(id string) (workspace.Process, error) {
+	f.mu.Lock()
+	_, ok := f.ws[id]
+	f.mu.Unlock()
+	if !ok {
+		return nil, workspace.ErrNotFound
+	}
+	return newFakeStreamProcess(), nil
 }
 
 // Suspend/Resume/Snapshot mirror the real Kata tier: unsupported.
@@ -309,17 +333,16 @@ func TestVMMErrorCodes(t *testing.T) {
 }
 
 func TestVMMAttachOpen(t *testing.T) {
+	// The lightweight rig dispatches to the fake backend directly (no priv-socket
+	// executor), so it configures no streaming bridge — attach.open fails closed
+	// with UNSUPPORTED rather than handing out a session that nothing can serve.
+	// The full streamed attach (bridge → executor → process → back) is covered
+	// end-to-end by TestFullStackAttachStream.
 	r := startVMMRig(t)
 	_ = r.req(t, "create", workspace.CreateRequest{Name: testWS})
-	var ar workspace.AttachOpenReply
-	if err := json.Unmarshal(r.req(t, "attach.open", workspace.AttachOpenReq{ID: testWS}).Data, &ar); err != nil {
-		t.Fatal(err)
-	}
-	if ar.SessionID == "" {
-		t.Fatal("attach.open returned empty session id")
-	}
-	if ar.SubjectPrefix != "ape.vmm.node1.exec."+ar.SessionID {
-		t.Fatalf("subject prefix = %q, want ape.vmm.node1.exec.%s", ar.SubjectPrefix, ar.SessionID)
+	msg := r.req(t, "attach.open", workspace.AttachOpenReq{ID: testWS})
+	if code := vmmErrCode(msg); code != workspace.CodeUnsupported {
+		t.Fatalf("attach.open error code = %q, want %s (no streaming bridge configured)", code, workspace.CodeUnsupported)
 	}
 }
 

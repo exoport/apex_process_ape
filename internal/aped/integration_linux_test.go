@@ -3,9 +3,11 @@
 package aped
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/exoport/apex_process_ape/internal/vmmclient"
+	"github.com/exoport/apex_process_ape/internal/vmmstream"
 	"github.com/exoport/apex_process_ape/internal/workspace"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/micro"
@@ -24,9 +27,10 @@ import (
 // AF_UNIX priv boundary, and the root Executor driving a Backend — then a
 // vmmclient dialing it as `ape` would. It is the end-to-end integration rig.
 type fullStack struct {
-	client *vmmclient.Client
-	reg    *sandbox.Registry
-	srv    *Server // exposed so a test can mint an audit-consumer cred
+	client     *vmmclient.Client
+	clientConn *nats.Conn // the operator conn, for driving a vmmstream session
+	reg        *sandbox.Registry
+	srv        *Server // exposed so a test can mint an audit-consumer cred
 }
 
 // stackOpts selects the backend the stack's executor drives.
@@ -126,7 +130,16 @@ func newStack(t *testing.T, opts stackOpts) *fullStack {
 		t.Fatalf("AddService: %v", err)
 	}
 	t.Cleanup(func() { _ = svc.Stop() })
-	if err := NewVMM(VMMConfig{Node: "node1", Backend: priv}).Register(svc); err != nil {
+	// NatsConn/Socket/Publish arm the interactive attach bridge exactly as
+	// RunFront does: attach.open dials the same priv socket for a streaming exec
+	// and bridges it to the session subjects on svcConn.
+	if err := NewVMM(VMMConfig{
+		Node:     "node1",
+		Backend:  priv,
+		NatsConn: svcConn,
+		Socket:   sock,
+		Publish:  func(subject string, data []byte) { _ = svcConn.Publish(subject, data) },
+	}).Register(svc); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	_ = svcConn.Flush()
@@ -137,7 +150,7 @@ func newStack(t *testing.T, opts stackOpts) *fullStack {
 		t.Fatalf("mint operator cred: %v", err)
 	}
 	cliConn, _ := connectCreds(t, srv.ClientURL(), opCreds, "")
-	return &fullStack{client: vmmclient.New(cliConn, "node1", 5*time.Second), reg: reg, srv: srv}
+	return &fullStack{client: vmmclient.New(cliConn, "node1", 5*time.Second), clientConn: cliConn, reg: reg, srv: srv}
 }
 
 // TestFullStackControlPlane exercises the entire real stack (NATS → vmm →
@@ -350,5 +363,68 @@ func driveTier2Lifecycle(t *testing.T, fs *fullStack) {
 	}
 	if err := fs.client.Destroy(ctx, name, workspace.DestroyRequest{Force: true}); err != nil {
 		t.Fatalf("destroy: %v", err)
+	}
+}
+
+// TestFullStackAttachStream proves interactive exec/attach end-to-end through the
+// whole real control plane WITHOUT containerd: client → attach.open (NATS) →
+// front dials a streaming priv conn → executor OpAttach → InteractiveBackend
+// (fake echo process) → relay over the priv socket → front bridges to the session
+// subjects → client's vmmstream.Attach. It drives stdin and asserts the echo on
+// stdout, the stderr banner, and the propagated exit code. This is the permanent
+// CI proof of the exec-stream bridge (the containerd PTY itself is Tier-2). It
+// also exercises the race-free startup: attach.open returns only after the server
+// session has subscribed, and output is credit-gated until the client primes.
+func TestFullStackAttachStream(t *testing.T) {
+	fs := newStack(t, stackOpts{fake: true})
+	ctx := context.Background()
+
+	if _, err := fs.client.Create(ctx, workspace.CreateRequest{Name: testWS, Image: testImage, Mount: "ephemeral"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	open, err := fs.client.AttachOpen(ctx, testWS, workspace.AttachRequest{TTY: true})
+	if err != nil {
+		t.Fatalf("attach.open: %v", err)
+	}
+	if open.SubjectPrefix == "" || open.SessionID == "" {
+		t.Fatalf("attach.open reply = %+v, want a session id + prefix", open)
+	}
+
+	stdinR, stdinW := io.Pipe()
+	var stdout, stderr bytes.Buffer
+	type result struct {
+		code int
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		code, aerr := vmmstream.Attach(ctx, fs.clientConn, open.SubjectPrefix, vmmstream.ClientStreams{
+			Stdin: stdinR, Stdout: &stdout, Stderr: &stderr,
+		}, 4)
+		done <- result{code, aerr}
+	}()
+
+	if _, err := io.WriteString(stdinW, "hello"); err != nil {
+		t.Fatalf("write stdin: %v", err)
+	}
+	_ = stdinW.Close() // half-close → echo drains → process exits
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("attach: %v", r.err)
+		}
+		if r.code != 7 {
+			t.Fatalf("attach exit code = %d, want 7", r.code)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("attach session did not complete (bridge deadlock?)")
+	}
+	if stdout.String() != "hello" {
+		t.Errorf("stdout = %q, want %q (echoed through the full bridge)", stdout.String(), "hello")
+	}
+	if stderr.String() != "READY\n" {
+		t.Errorf("stderr = %q, want %q (banner through the full bridge)", stderr.String(), "READY\n")
 	}
 }

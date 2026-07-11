@@ -29,6 +29,17 @@ type ContainerdConfig struct {
 	Resolve SpecResolver
 }
 
+// InteractiveBackend is a Backend that can open an interactive process — an exec
+// command or the attach login shell — whose stdio the caller relays (PLAN-18 D2).
+// Only the containerd driver implements it (a Kata task exec with a PTY); the
+// nerdctl shellDriver does not, so the executor reports UNSUPPORTED there. The
+// returned Process is owned by the caller: relay its stdio, then let Wait clean
+// it up.
+type InteractiveBackend interface {
+	OpenExec(ctx context.Context, id string, req workspace.ExecRequest) (workspace.Process, error)
+	OpenAttach(ctx context.Context, id string, req workspace.AttachRequest) (workspace.Process, error)
+}
+
 // ProvisioningBackend is a workspace.Backend that also provisions a resolved
 // spec and owns a client connection to close. It is the containerd driver's
 // shape: unlike the nerdctl shellDriver (a Backend + a separate Runner), the

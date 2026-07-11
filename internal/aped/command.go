@@ -23,6 +23,7 @@ const (
 	OpSuspend      Op = "suspend"
 	OpResume       Op = "resume"
 	OpExec         Op = "exec"
+	OpAttach       Op = "attach"
 	OpSnapshot     Op = "snapshot"
 	OpList         Op = "list"
 	OpInspect      Op = "inspect"
@@ -37,7 +38,17 @@ type Command struct {
 	Create   *CreateCommand             `json:"create,omitempty"`
 	Destroy  *workspace.DestroyRequest  `json:"destroy,omitempty"`
 	Exec     *workspace.ExecRequest     `json:"exec,omitempty"`
+	Attach   *AttachStreamCommand       `json:"attach,omitempty"`
 	Snapshot *workspace.SnapshotRequest `json:"snapshot,omitempty"`
+}
+
+// AttachStreamCommand opens an interactive streamed process over the priv socket
+// (PLAN-18 D2 OpAttach). Exactly one of Exec (a one-shot command with streamed
+// stdio) or Attach (the interactive login shell) is set — the executor relays the
+// containerd task's PTY over the connection instead of the one-shot reply.
+type AttachStreamCommand struct {
+	Exec   *workspace.ExecRequest   `json:"exec,omitempty"`
+	Attach *workspace.AttachRequest `json:"attach,omitempty"`
 }
 
 // CreateCommand is the resolved create payload. The front resolves the thin

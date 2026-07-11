@@ -89,10 +89,17 @@ func VMInbox(vmID string) string { return vmInboxPrefix + "-" + VMToken(vmID) }
 
 // OperatorGrant returns the scoped HOST_OPS grant for a host `ape` operator on
 // a given node: publish the management verbs + discovery, subscribe its own
-// replies + discovery. This is the credential the local `ape` CLI presents to
-// drive the vmm service. Account isolation already bars a TELEMETRY guest from
-// this account entirely; this grant additionally scopes the operator to one
-// node's management tree.
+// replies + discovery + this node's interactive exec/attach session streams.
+// This is the credential the local `ape` CLI presents to drive the vmm service.
+// Account isolation already bars a TELEMETRY guest from this account entirely;
+// this grant additionally scopes the operator to one node's management tree.
+//
+// The exec-session subtree (ape.vmm.<node>.exec.>) is in SubAllow because an
+// interactive attach RECEIVES the process stdout/stderr/exit + stdin-credit
+// grants on it (bulk stdio does not ride request/reply — PLAN-18 D2); the verb
+// replies still come on _INBOX. Publishing stdin/resize/credit is already
+// covered by the ape.vmm.<node>.> PubAllow. Scoped to this node's exec tree —
+// not a broadening of management-verb access.
 func OperatorGrant(node string) Grant {
 	tok := natsconn.SubjectToken(node)
 	return Grant{
@@ -102,6 +109,7 @@ func OperatorGrant(node string) Grant {
 		},
 		SubAllow: []string{
 			"_INBOX.>",
+			subjectVMM + "." + tok + ".exec.>",
 			subjectSRV + ".>",
 		},
 	}

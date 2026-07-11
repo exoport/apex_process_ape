@@ -120,6 +120,15 @@ func (e *Executor) handleConn(ctx context.Context, conn privConn) {
 		return
 	}
 
+	// Interactive exec/attach takes over the connection as a bidirectional stream
+	// (PLAN-18 D2) — a long-lived relay, not the one-shot dispatch. It must NOT
+	// hold e.mu (which serializes registry writes): an interactive session lasts
+	// minutes and would block every other op.
+	if cmd.Op == OpAttach {
+		e.handleStream(ctx, conn, cmd, peer)
+		return
+	}
+
 	e.mu.Lock()
 	resp, records := e.dispatch(ctx, cmd, peer)
 	e.mu.Unlock()

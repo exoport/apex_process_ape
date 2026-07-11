@@ -99,6 +99,10 @@ type ExecRequest struct {
 type AttachRequest struct {
 	Shell string `json:"shell,omitempty"`
 	TTY   bool   `json:"tty,omitempty"`
+	// Cmd, when set, opens a streamed one-shot command instead of the login shell
+	// — the streaming counterpart of the request/reply exec verb (its stdio rides
+	// the session subjects). Additive to the wire contract.
+	Cmd []string `json:"cmd,omitempty"`
 }
 
 // LogsRequest selects how much output to return.

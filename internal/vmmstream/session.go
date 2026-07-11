@@ -5,6 +5,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/exoport/apex_process_ape/internal/workspace"
 	"github.com/nats-io/nats.go"
 )
 
@@ -13,19 +14,11 @@ import (
 // without letting a fast producer outrun a slow consumer into a NATS drop.
 const DefaultCredit = 16
 
-// Process is the server-side end of an interactive session: a running process
-// (a containerd task exec, or a test fake) whose stdio the session pipes over the
-// NATS session subjects. Run reads Stdout/Stderr and streams them to the client,
-// writes client keystrokes into Stdin, forwards Resize, and blocks on Wait for
-// the exit code. Run closes Stdin when the client half-closes or the session
-// tears down; the caller owns the process itself.
-type Process interface {
-	Stdin() io.WriteCloser
-	Stdout() io.Reader
-	Stderr() io.Reader
-	Resize(cols, rows uint16) error
-	Wait(ctx context.Context) (int, error)
-}
+// Process is the server-side end of an interactive session (the running exec/
+// attach process whose stdio Run pipes over the session subjects). It is the
+// pure workspace.Process contract, re-exported so callers of this transport need
+// not import both packages.
+type Process = workspace.Process
 
 // WinSize is a terminal size for a resize control frame.
 type WinSize struct{ Cols, Rows uint16 }

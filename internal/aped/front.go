@@ -115,10 +115,20 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 	if err != nil {
 		return fmt.Errorf("aped: register vmm service: %w", err)
 	}
+	// NatsConn/Socket/Publish arm the interactive attach bridge: attach.open dials
+	// a streaming priv conn to the executor and bridges the PTY to the session
+	// subjects on this same front conn (the executor is network-less).
+	vmmCfg := VMMConfig{
+		Node:     node,
+		Backend:  backend,
+		NatsConn: nc,
+		Socket:   cfg.Socket,
+		Publish:  func(subject string, data []byte) { _ = nc.Publish(subject, data) },
+	}
 	// The vmm handlers use context.Background() (a micro.Request carries no
 	// context), which contextcheck flags at this call site where a ctx is in
 	// scope — but there is no ctx to thread into a NATS request handler.
-	if err := NewVMM(VMMConfig{Node: node, Backend: backend}).Register(svc); err != nil { //nolint:contextcheck // handlers have no request context
+	if err := NewVMM(vmmCfg).Register(svc); err != nil { //nolint:contextcheck // handlers have no request context
 		return err
 	}
 	_ = nc.Flush()

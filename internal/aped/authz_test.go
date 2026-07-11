@@ -85,6 +85,15 @@ func TestOperatorGrantScopedToNode(t *testing.T) {
 	if !g.PermitsSubscribe("_INBOX.reply") {
 		t.Error("operator should receive its own replies")
 	}
+	if !g.PermitsSubscribe("ape.vmm.node1.exec.s1.stdout") {
+		t.Error("operator should receive its node's interactive session streams (attach)")
+	}
+	if g.PermitsSubscribe("ape.vmm.node2.exec.s1.stdout") {
+		t.Error("operator must not subscribe another node's session streams")
+	}
+	if g.PermitsSubscribe("ape.vmm.node1.create") {
+		t.Error("operator subscribes replies + sessions only, not the management verbs directly")
+	}
 }
 
 func TestServiceGrantUnrestrictedWithinAccount(t *testing.T) {

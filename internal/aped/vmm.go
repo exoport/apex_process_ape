@@ -8,7 +8,9 @@ import (
 	"sync/atomic"
 
 	"github.com/exoport/apex_process_ape/internal/natsconn"
+	"github.com/exoport/apex_process_ape/internal/vmmstream"
 	"github.com/exoport/apex_process_ape/internal/workspace"
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/micro"
 )
 
@@ -25,6 +27,17 @@ type VMMConfig struct {
 	// AF_UNIX priv client (forwarding to the root executor); in tests it is an
 	// in-memory fake. The service is transport-agnostic by construction.
 	Backend workspace.Backend
+	// NatsConn is the front's connection; the interactive attach bridge runs the
+	// session's server side on it. nil disables interactive attach (attach.open →
+	// UNSUPPORTED) — the one-shot verbs need no NATS handle of their own.
+	NatsConn *nats.Conn
+	// Socket is the priv socket the bridge dials for a streaming attach/exec.
+	// Empty disables interactive attach.
+	Socket string
+	// Publish forwards the executor's attach open-audit record on
+	// ape.audit.<node>.>. Mirrors the privClient's forwarding for the one leg
+	// (OpAttach) that does not round-trip through the privClient. nil skips it.
+	Publish func(subject string, data []byte)
 }
 
 // VMM is the ape.vmm NATS-micro service (PLAN-18 D2): one endpoint per
@@ -34,6 +47,9 @@ type VMMConfig struct {
 type VMM struct {
 	node    string
 	backend workspace.Backend
+	nc      *nats.Conn
+	socket  string
+	publish func(subject string, data []byte)
 	session atomic.Uint64 // interactive attach session id counter
 }
 
@@ -43,7 +59,7 @@ func NewVMM(cfg VMMConfig) *VMM {
 	if node == "" {
 		node = "node"
 	}
-	return &VMM{node: node, backend: cfg.Backend}
+	return &VMM{node: node, backend: cfg.Backend, nc: cfg.NatsConn, socket: cfg.Socket, publish: cfg.Publish}
 }
 
 // Group returns the endpoint group subject, ape.vmm.<node>.
@@ -164,11 +180,14 @@ func (v *VMM) handleExec(req micro.Request) {
 	_ = req.RespondJSON(workspace.ExecReply{V: workspace.WireVersion, ExitStatus: status})
 }
 
-// handleAttachOpen allocates an interactive session and returns its id + the
-// subject prefix the client streams over (D2). The bulk-stdio wiring (binding
-// those subjects to Backend.Attach through a NATS Stream) is the interactive
-// path exercised under Tier-2; attach.open itself is the request/reply control
-// step that hands out the session.
+// handleAttachOpen opens an interactive session and returns its id + the subject
+// prefix the client streams over (D2). It is the pivot of the exec/attach bridge:
+// it dials a streaming priv connection to the executor (which starts the
+// containerd task PTY), stands up the vmmstream server session over that
+// connection, and — only after the server has subscribed every inbound channel —
+// answers with the prefix, so the client starts once the server is listening
+// (output is credit-gated until the client primes). The session then runs until
+// the process exits.
 func (v *VMM) handleAttachOpen(req micro.Request) {
 	var r workspace.AttachOpenReq
 	if !v.decode(req, &r) {
@@ -178,13 +197,48 @@ func (v *VMM) handleAttachOpen(req micro.Request) {
 		_ = req.Error(workspace.CodeValidation, "id is required", nil)
 		return
 	}
+	if v.nc == nil || v.socket == "" {
+		v.respondErr(req, fmt.Errorf("%w: interactive attach is not available on this node", workspace.ErrUnsupported))
+		return
+	}
+
+	// Open the streamed process on the executor (a Cmd opens a streamed exec; else
+	// the login shell). The open-audit record rides the handshake Response.
+	conn, audit, err := openExecStream(v.socket, Command{Op: OpAttach, ID: r.ID, Attach: attachStreamFromReq(r.AttachRequest)})
+	if err != nil {
+		v.respondErr(req, err)
+		return
+	}
+	forwardAuditRecords(v.publish, v.node, audit)
+
 	sid := fmt.Sprintf("s%d", v.session.Add(1))
 	prefix := fmt.Sprintf("%s.exec.%s", v.Group(), sid)
+	sess, err := vmmstream.NewServerSession(v.nc, prefix, connToProcess(conn), 0)
+	if err != nil {
+		_ = conn.Close()
+		v.respondErr(req, err)
+		return
+	}
+	_ = v.nc.Flush() // the server is fully subscribed before the client is told
+
 	_ = req.RespondJSON(workspace.AttachOpenReply{
 		V:             workspace.WireVersion,
 		SessionID:     sid,
 		SubjectPrefix: prefix,
 	})
+	go func() {
+		defer func() { _ = conn.Close() }()
+		_, _ = sess.Run(context.Background())
+	}()
+}
+
+// attachStreamFromReq maps the wire AttachRequest to the executor's stream
+// command: a non-empty Cmd opens a streamed exec, otherwise the login shell.
+func attachStreamFromReq(r workspace.AttachRequest) *AttachStreamCommand {
+	if len(r.Cmd) > 0 {
+		return &AttachStreamCommand{Exec: &workspace.ExecRequest{Cmd: r.Cmd, TTY: r.TTY, Env: nil}}
+	}
+	return &AttachStreamCommand{Attach: &r}
 }
 
 func (v *VMM) handleSnapshot(req micro.Request) {
