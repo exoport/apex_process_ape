@@ -3,8 +3,16 @@
 Branch `feat/plan-18-phase2-aped`, starting from `fa97dac`. All commits are
 **local**; nothing pushed/tagged. Exit gate for every commit: `make lint`,
 `make test`, `make xcompile-windows`, `make snapshot`, `make docs-check` — all
-green (govulncheck is expected-RED on 2 pre-existing base vulns; not run as a
-gate — see `ci-local-govulncheck-preexisting` memory).
+green (govulncheck is expected-RED and not run as a gate).
+
+**govulncheck (diligence on the containerd dep):** now **3** base vulns, up from
+2 — the third, **GO-2026-4970** (stdlib `os` root-escape, **fixed in go1.26.5**),
+is freshly disclosed and reached via **pre-existing** `internal/web` code. The
+`aped` containerd-driver dep tree (containerd/v2 + grpc + otel + image-spec,
+linux-only) added **ZERO** new findings — all 3 traces route through
+stdlib/`internal/web`/`update.go`, none through containerd. A go1.26.5 toolchain
+bump clears 2 of the 3 (5856 + 4970); openpgp (5932) still has no upstream fix.
+See the `ci-local-govulncheck-preexisting` memory.
 
 ## Backlog status
 
