@@ -38,6 +38,14 @@ func SessionSubject(node, sid string, ch Channel) string {
 	return fmt.Sprintf("ape.vmm.%s.exec.%s.%s", node, sid, ch)
 }
 
+// ChannelSubject renders <prefix>.<channel>, where prefix is the AttachOpenReply
+// SubjectPrefix (ape.vmm.<node>.exec.<sid>). It is the client-side companion to
+// SessionSubject: a client that only holds the opaque prefix appends the channel
+// with this helper rather than re-deriving node+sid.
+func ChannelSubject(prefix string, ch Channel) string {
+	return prefix + "." + string(ch)
+}
+
 // Control frame types (the JSON `type` on the control/resize/exit channels).
 const (
 	ControlCredit = "credit" // grant N more data frames to the peer (flow control)
@@ -48,12 +56,20 @@ const (
 // ControlFrame is the JSON payload on the control/resize/exit channels: credit
 // grants, terminal resizes, and the exit code. Data channels (stdin/stdout/
 // stderr) carry raw bytes, never a ControlFrame.
+//
+// A full interactive session multiplexes three independent data streams
+// (stdin/stdout/stderr), but the frozen contract gives it a single reverse-
+// direction control channel. Ch tags a credit grant with the data channel it
+// refills so both peers can publish/subscribe the one shared control subject and
+// route grants to the right stream (Sender filters on it). Ch is unset on resize/
+// exit frames (their subject already identifies them).
 type ControlFrame struct {
-	Type   string `json:"type"`
-	Credit int    `json:"credit,omitempty"`
-	Cols   uint16 `json:"cols,omitempty"`
-	Rows   uint16 `json:"rows,omitempty"`
-	Code   int    `json:"code,omitempty"`
+	Type   string  `json:"type"`
+	Ch     Channel `json:"ch,omitempty"`
+	Credit int     `json:"credit,omitempty"`
+	Cols   uint16  `json:"cols,omitempty"`
+	Rows   uint16  `json:"rows,omitempty"`
+	Code   int     `json:"code,omitempty"`
 }
 
 // Encode marshals a control frame to JSON.

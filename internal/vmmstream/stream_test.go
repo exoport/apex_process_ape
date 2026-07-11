@@ -34,12 +34,12 @@ func TestStreamFramingAndFlowControl(t *testing.T) {
 
 	// Credit=2 frames; payload spans 5+ frames → the sender blocks repeatedly.
 	const credit = 2
-	recv, err := NewReceiver(ncRecv, dataSubj, ctrlSubj, credit)
+	recv, err := NewReceiver(ncRecv, dataSubj, ctrlSubj, ChannelStdout, credit)
 	if err != nil {
 		t.Fatalf("receiver: %v", err)
 	}
 	defer func() { _ = recv.Close() }()
-	send, err := NewSender(ncSend, dataSubj, ctrlSubj, credit)
+	send, err := NewSender(ncSend, dataSubj, ctrlSubj, ChannelStdout, credit)
 	if err != nil {
 		t.Fatalf("sender: %v", err)
 	}

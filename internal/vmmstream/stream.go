@@ -13,16 +13,19 @@ import (
 type Sender struct {
 	nc        *nats.Conn
 	dataSubj  string
+	ch        Channel
 	window    *CreditWindow
 	creditSub *nats.Subscription
 }
 
 // NewSender wires a Sender publishing on dataSubj, refilling its credit from
-// creditSubj, starting with initialCredit frames.
-func NewSender(nc *nats.Conn, dataSubj, creditSubj string, initialCredit int) (*Sender, error) {
-	s := &Sender{nc: nc, dataSubj: dataSubj, window: NewCreditWindow(initialCredit)}
+// creditSubj, starting with initialCredit frames. ch is the data channel this
+// Sender produces: the shared control subject carries grants for every stream,
+// so the Sender only consumes grants tagged for its own channel.
+func NewSender(nc *nats.Conn, dataSubj, creditSubj string, ch Channel, initialCredit int) (*Sender, error) {
+	s := &Sender{nc: nc, dataSubj: dataSubj, ch: ch, window: NewCreditWindow(initialCredit)}
 	sub, err := nc.Subscribe(creditSubj, func(m *nats.Msg) {
-		if f, err := DecodeControl(m.Data); err == nil && f.Type == ControlCredit {
+		if f, err := DecodeControl(m.Data); err == nil && f.Type == ControlCredit && f.Ch == ch {
 			s.window.Grant(f.Credit)
 		}
 	})
@@ -71,6 +74,7 @@ func (s *Sender) CloseSend() error {
 type Receiver struct {
 	nc         *nats.Conn
 	creditSubj string
+	ch         Channel
 	frames     chan []byte
 	sub        *nats.Subscription
 	closed     chan struct{}
@@ -79,14 +83,17 @@ type Receiver struct {
 }
 
 // NewReceiver subscribes dataSubj (buffering up to credit frames) and grants
-// credit back on creditSubj as frames are read.
-func NewReceiver(nc *nats.Conn, dataSubj, creditSubj string, credit int) (*Receiver, error) {
+// credit back on creditSubj as frames are read. ch is the data channel this
+// Receiver consumes: grants are tagged with it so the shared control subject can
+// carry every stream's flow control (the peer Sender filters on the tag).
+func NewReceiver(nc *nats.Conn, dataSubj, creditSubj string, ch Channel, credit int) (*Receiver, error) {
 	if credit < 1 {
 		credit = 1
 	}
 	r := &Receiver{
 		nc:         nc,
 		creditSubj: creditSubj,
+		ch:         ch,
 		frames:     make(chan []byte, credit),
 		closed:     make(chan struct{}),
 	}
@@ -129,9 +136,10 @@ func (r *Receiver) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-// grant publishes a credit refill on the control channel.
+// grant publishes a credit refill on the control channel, tagged with this
+// Receiver's channel so the peer Sender routes it to the right stream.
 func (r *Receiver) grant(n int) error {
-	b, err := ControlFrame{Type: ControlCredit, Credit: n}.Encode()
+	b, err := ControlFrame{Type: ControlCredit, Ch: r.ch, Credit: n}.Encode()
 	if err != nil {
 		return err
 	}
