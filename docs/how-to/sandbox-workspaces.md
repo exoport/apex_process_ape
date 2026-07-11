@@ -1,155 +1,164 @@
 # How to run a sandboxed Kata VM workspace
 
 `ape sandbox` provisions a long-lived, hardware-isolated **Kata microVM
-workspace** (own guest kernel, KVM) for a project: your code is mounted
-inside, `~/.claude` is composed per workspace, public egress is
-deny-by-default, and you attach across many sessions to run Claude Code,
-APEX pipelines, or Playwright. The workspace can't touch the rest of the host
-even when every `ape`/`claude` session inside runs with
+workspace** (own guest kernel, KVM) for a project: your code is mounted inside,
+`~/.claude` is composed per workspace, and you attach across many sessions to
+run Claude Code, APEX pipelines, or Playwright. The workspace can't touch the
+rest of the host even when every `ape`/`claude` session inside runs with
 `--dangerously-skip-permissions`.
 
-This is Phase 1 of the APEX Process Platform. It runs on one Linux box with
-KVM; overlay networking, in-VM NATS workers, and preview environments are
-later phases (in the `apex_process_platform` repo).
+**`ape sandbox` is a thin client of `aped`, the rootful VM-management daemon
+(PLAN-18).** Every verb speaks the `ape.vmm.<node>.>` contract over embedded
+NATS; `aped` provisions the microVM, composes the workspace home, mints a per-VM
+telemetry credential, owns the egress and the workspace registry — and is the
+only component that runs as root. **`ape` never runs as root.** The daemonless
+PLAN-16 runner path (where `ape` shelled out to `nerdctl` itself) is retired.
 
-> **Linux + KVM only.** Kata needs `/dev/kvm`. macOS/Windows machines join as
-> SSH / VS Code Remote *clients* to a Linux-hosted workspace, not as hosts.
+> **Linux + KVM only.** Kata needs `/dev/kvm`, and `aped` needs a rootful
+> containerd + Kata. `ape sandbox` (the client) runs anywhere, but it can only
+> drive an `aped` on a Linux+KVM host. macOS/Windows machines join as SSH /
+> VS Code Remote *clients* of a Linux-hosted workspace, not as hosts.
 
-## 1. Check the host prerequisites
+## 1. Stand up (or reach) an `aped` node
+
+The host stack (`aped` + its systemd units + a rootful containerd + Kata) is set
+up once per node — see **[How to run aped](run-aped.md)**, which scripts the whole
+Tier-2 bring-up (`deploy/tier2-setup.sh`) and prints the operator credential and
+`APE_NATS_URL` to use.
+
+Point `ape` at that node:
 
 ```bash
-ape doctor
+export APE_NATS_URL=nats://127.0.0.1:4223            # aped's management listener
+export APE_NATS_CREDS=~/.config/ape/aped-operator.creds  # the operator .creds aped mints
+export APE_APED_NODE="$(hostname)"                   # or pass --node per command
 ```
 
-The sandbox rows must be healthy before `ape sandbox up` can work:
+Without an endpoint configured, `ape sandbox` fails closed with instructions —
+it has no local fallback. `--nats-url` / `--nats-creds` / `--node` override the
+environment per invocation. `--node` selects the `ape.vmm.<node>.>` group and is
+slugged the same way `<user>` tokens are (default: the local hostname).
 
-| Check                | Fix                                                                              |
-| -------------------- | -------------------------------------------------------------------------------- |
-| `kvm.available`      | `/dev/kvm` present and openable. If present-but-inaccessible: `sudo usermod -aG kvm $USER`, then log out and back in. |
-| `containerd.running` | Install containerd + `nerdctl` (ape shells out to it — no Go dependency).        |
-| `kata.runtime`       | Install Kata Containers (`kata-deploy` or distro packages).                      |
-| `sandbox.image`      | The official `ape-sandbox` image (or your profile's `image:`) is pulled.         |
-
-These checks degrade to INFO on non-Linux hosts, so `ape doctor` stays green
-for everyone else. See [How to run `ape doctor` in CI](run-doctor-in-ci.md).
-
-## 2. Write a profile
-
-Profiles live in `_apex/sandbox/<name>.yaml` and are meant to be checked into
-git. A minimal local-dev profile:
-
-```yaml
-# _apex/sandbox/dev.yaml
-name: dev
-credentials: oauth        # bind your host OAuth (mode A)
-mount: host-fs            # share the project rw over virtio-fs (default)
-skills:
-  - apex-create-prd       # only the skills you list reach the guest
-network:
-  authorized_domains:
-    - api.anthropic.com
-    - "*.githubusercontent.com"
-```
-
-Every field, default, and the validation rules are in the
-[sandbox profile reference](../reference/sandbox-profile.md). For untrusted
-work prefer `credentials: api-key` (a scoped key) and `mount: ephemeral`.
-
-## 3. Provision the workspace
+## 2. Provision a workspace
 
 ```bash
 ape sandbox up dev
 ```
 
-This loads `_apex/sandbox/dev.yaml` (override with `--profile <other>`),
-composes a per-workspace `~/.claude`, resolves the image (the official
-`ape-sandbox` unless the profile sets `image:`), and starts a **detached**
-Kata container with the project mounted. Useful flags:
+This sends a `create` on `ape.vmm.<node>.create`; `aped` resolves the workspace,
+composes a per-workspace `~/.claude`, mints a per-VM credential, and starts a
+**detached** Kata microVM. The request carries only thin, typed fields — `aped`
+resolves the composed home, egress, and creds server-side:
 
-- `--cwd <dir>` — project root to mount (default: the current directory).
-- `--ssh-port <n>` — forward a host-loopback port to the workspace's sshd (for
-  `ape sandbox ssh` / VS Code Remote).
-- `--proxy <host:port>` — wire `HTTPS_PROXY` to a running CONNECT egress proxy.
+- `--profile <name>` — a **server-side** profile `aped` resolves by name (falls
+  back to a default derived from the request when the node has no such profile).
+- `--image <ref>` — image override (default: `aped`'s pinned `ape-sandbox` digest).
+- `--runtime kata-qemu | kata-clh` — the runtime handler (default: the node's).
+- `--mount host-fs | volume | ephemeral` — mount mode (default: `host-fs`).
+- `--cwd <dir>` — project root to send as the `host-fs` mount source (default: the
+  current directory). `aped` canonicalizes it and re-checks it against its policy
+  `mount_roots` allow-list before binding — the caller's path is never trusted raw.
 
-List what's provisioned:
+The profile *fields* `aped` resolves are documented in the
+[sandbox profile reference](../reference/sandbox-profile.md). For untrusted work
+prefer `--mount ephemeral` and a scoped API key over a full OAuth token.
+
+List and inspect what's provisioned (read-only verbs):
 
 ```bash
 ape sandbox ls
 ape sandbox ls --output-format json
+ape sandbox inspect dev
 ```
 
-## 4. Work inside
+## 3. Work inside
 
 ```bash
-ape sandbox attach dev              # interactive login shell inside the VM
 ape sandbox exec dev -- ape task apex-create-prd --args "--doc prd"
-ape sandbox ssh dev                 # over the forwarded --ssh-port
+ape sandbox exec dev -- uname -r        # prints the GUEST kernel
 ```
 
-Inside the workspace you run Claude Code, APEX pipelines, or Playwright
-exactly as on the host — the in-guest `ape`/`claude` allocate their own PTY.
-VS Code Remote-SSH connects over the same forwarded port.
+`exec` runs a one-shot command and reports its **exit status**. Bulk
+stdout/stderr streaming (and interactive `attach` / `ssh`) rides the vmm exec
+session subjects (`ape.vmm.<node>.exec.<sid>.{stdin,stdout,…}`), which is wired
+under Tier-2; in Phase 2 those report `UNSUPPORTED` and command output goes to
+the `aped` node's logs. Use `exec` for exit-status checks and side-effecting
+commands until the interactive path lands.
 
-`ape sandbox ssh` is key-auth-only: provision with `--ssh-port` **and** list
-the public key(s) it should accept under the profile's `access.authorized_keys`
-(a `~/.ssh/*.pub` path or an inline key). Without a key configured, use
-`attach`/`exec`, which go through `nerdctl` and need no SSH setup.
-
-## 5. Freeze and tear down
+## 4. Freeze and tear down
 
 ```bash
 ape sandbox freeze dev    # cgroup-freeze the guest (frees CPU; guest RAM stays resident)
 ape sandbox unfreeze dev  # thaw it — resumes instantly
-ape sandbox down dev      # force-remove the container + drop its home & registry entry
+ape sandbox down dev      # destroy the microVM + drop its aped registry entry
+ape sandbox down dev --remove-volume   # also delete a persistent mount:volume
 ```
 
-`freeze` is a cgroup-freeze, not a VM suspend: the guest stops using CPU but its
-RAM stays resident. A real suspend (save guest RAM to disk) is not yet reachable
-on the Kata backend — `ape sandbox suspend` reports that and points you back to
-`freeze`.
+`freeze` is a **cgroup-freeze, not a VM suspend**: the guest stops using CPU but
+its RAM stays resident, so `unfreeze` resumes instantly. A real suspend (save
+guest RAM to disk) is not reachable through Kata-via-containerd today —
+`ape sandbox suspend` returns `UNSUPPORTED` and points you back to `freeze`
+(PLAN-18 D7).
 
-`down` leaves a persistent `mount: volume` volume in place (data safety) —
-remove it with `nerdctl volume rm` if you want to discard it. `host-fs` and
-`ephemeral` workspaces leave nothing behind on the host.
+`down` retains a persistent `mount: volume` volume unless `--remove-volume` is
+set (data safety); `host-fs` and `ephemeral` workspaces leave nothing behind.
 
-## Public egress
+## Networking (Phase 2: networkless)
 
-Egress is **deny-by-default**. When a profile lists `network.authorized_domains`,
-`ape sandbox up` starts a **detached host-side CONNECT proxy** for the
-workspace, wires `HTTPS_PROXY` to it, and `ape sandbox down` stops it. Only the
-allowlisted hostnames are reachable on 443; every connection (allowed and
-denied) is audited to `egress-audit.jsonl` under the workspace's proxy dir —
-hostnames only, never payloads. It is **fail-closed**: if the proxy can't
-start, `up` aborts rather than bring the workspace up with open egress.
+Phase-2 workspaces are provisioned **networkless** (`--network none`): the
+client-side CNI that `nerdctl`'s default bridge would run is kept out of the
+hardened executor (PLAN-18 D1). The deny-by-default CONNECT egress proxy and
+overlay connectivity move **inside `aped`**, tied to the VM lifecycle, and land
+with the Phase-3 overlay-networking work. Until then a workspace has no public
+egress; `authorized_domains` in a profile is resolved by `aped`, not the client.
 
-- `--proxy host:port` overrides the supervisor and points `HTTPS_PROXY` at a
-  proxy you run yourself.
-- A profile with **no** `authorized_domains` (and no `--proxy`) uses the default
-  container network — unrestricted public egress. Declare an allowlist to
-  enforce the proxy.
+## Known limitation — provisioning through the hardened units
 
-> **Phase-1 boundary.** The supervisor guarantees a host-side, deny-by-default
-> proxy plus an audit trail. It does not yet *force* the guest through it — a
-> process that ignores `HTTPS_PROXY` can still use the default network.
-> Kernel-level enforcement (`--network none` + proxy-only reachability) is a
-> later, live-networking task.
+The read-only verbs (`ls`, `inspect`, and `capabilities`) work end-to-end
+through the deployed hardened `aped` units today. The **provisioning** verbs
+(`up`, and the `exec`/`freeze`/`down` that follow it) do **not** yet work through
+the hardened executor: the shipped `shellDriver` shells out to `nerdctl`, which
+does an irreducible client-side `mount(2)` (resolving the image user/GIDs) that
+the executor sandbox (`@mount` denied, empty capability set) forbids. The full
+lifecycle is proven in-process by `TestTier2Provision`; the clean fix is the
+non-device `containerdDriver` (which builds the OCI spec without a client-side
+mount). See the
+[executor-sandbox limitation in run-aped.md](run-aped.md#known-limitation--executor-sandbox-vs-the-nerdctl-shelldriver-phase-2)
+for the full root-cause. Widening the units to make `nerdctl` work is explicitly
+**not** the fix — it would reintroduce the "root with power" the split exists to
+avoid.
 
 ## Security notes
 
-The Kata microVM is the boundary, but a few things live *inside* it — choose
-the profile accordingly (details in the [profile reference](../reference/sandbox-profile.md#honest-boundaries)):
+The Kata microVM is the boundary, but a few things live *inside* it — choose the
+workspace shape accordingly (details in the
+[profile reference](../reference/sandbox-profile.md#honest-boundaries)):
 
 - **`host-fs` mounts are writable by the guest** — an in-VM session can plant
-  `.git/hooks` / `Makefile`s the *host* might later run. Use `mount: ephemeral`
+  `.git/hooks` / `Makefile`s the *host* might later run. Use `--mount ephemeral`
   for untrusted code.
-- **Mode A puts your full OAuth token in the VM.** Use `credentials: api-key`
-  with a scoped key for untrusted work.
+- **A full OAuth token in the VM is a full OAuth token in the VM.** Prefer a
+  scoped API key for untrusted work.
+- A compromised guest can poison **only its own** per-VM telemetry: its
+  credential is scoped pub-only to `ape.{evt,log,metrics}.vm-<id>.>` and is
+  server-denied every management subject and every other VM's subjects — the
+  VM→host-escape barrier (see
+  [per-VM telemetry](../reference/events.md#per-vm-telemetry-plan-18-reuses-apeevtlogmetrics)).
 - The in-guest `--web` bridge still binds `127.0.0.1` — now inside the VM's own
   network namespace. See the [bridge security model](../reference/bridge-security.md).
 
 ## The image
 
 Workspaces run the official `ape-sandbox` image (claude / node / ape / git /
-framework / sshd / chromium + Playwright), or any custom OCI ref via the
-profile's `image:`. The Dockerfile and its build/pin/publish instructions live
-in the repo under `images/ape-sandbox/`.
+framework / sshd / chromium + Playwright), or any custom OCI ref via `--image`
+(or a server-side profile's `image:`). `aped` pulls and pins it node-side. The
+Dockerfile and its build/pin/publish instructions live in the repo under
+`images/ape-sandbox/`.
+
+## See also
+
+- [How to run aped](run-aped.md) — stand up the daemon this client drives.
+- [NATS subjects & event payloads](../reference/events.md) — the frozen
+  `ape.vmm` + `ape.audit` contract.
+- [How to run `ape doctor` in CI](run-doctor-in-ci.md) — the host prerequisite
+  checks (`kvm.available`, `containerd.running`, `kata.runtime`).
