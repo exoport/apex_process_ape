@@ -171,7 +171,8 @@ fi
 # A tiny long-lived image for the TestTier2Provision acceptance (independent of
 # the smoke test, so it is built even with SKIP_SMOKE=1): the real ape-sandbox
 # image is heavy/unpublished, but the test only needs a pullable image that
-# STAYS running (CMD sleep infinity) and has a shell for `exec`.
+# STAYS running and has a shell for `exec`. CMD is `sleep 2147483647` (~68y), not
+# `sleep infinity` — busybox `sleep` wants a number.
 step "  building long-running probe image $PROBE_IMAGE (for TestTier2Provision)"
 nerdctl pull -q "$SMOKE_IMAGE" >/dev/null 2>&1 || true
 # `nerdctl build` needs buildkitd; the nerdctl-full bundle ships the unit but
@@ -180,14 +181,14 @@ systemctl enable --now buildkit.service >/dev/null 2>&1 || true
 pctx="$(mktemp -d)"
 cat > "$pctx/Dockerfile" <<EOF
 FROM $SMOKE_IMAGE
-CMD ["sleep", "infinity"]
+CMD ["sleep", "2147483647"]
 EOF
 if nerdctl build -t "$PROBE_IMAGE" "$pctx" >/tmp/probe-build.err 2>&1; then
   ok "built $PROBE_IMAGE (buildkit)"
 else
   nerdctl rm -f ape-probe-src >/dev/null 2>&1 || true
-  if nerdctl run -d --name ape-probe-src "$SMOKE_IMAGE" sleep infinity >/dev/null 2>&1 && \
-     nerdctl commit --change 'CMD ["sleep", "infinity"]' ape-probe-src "$PROBE_IMAGE" >/dev/null 2>&1; then
+  if nerdctl run -d --name ape-probe-src "$SMOKE_IMAGE" sleep 2147483647 >/dev/null 2>&1 && \
+     nerdctl commit --change 'CMD ["sleep", "2147483647"]' ape-probe-src "$PROBE_IMAGE" >/dev/null 2>&1; then
     ok "built $PROBE_IMAGE (commit fallback)"
   else
     warn "could not build $PROBE_IMAGE — set APE_APED_IT_IMAGE to a pullable long-running image for the test"
@@ -196,6 +197,23 @@ else
   nerdctl rm -f ape-probe-src >/dev/null 2>&1 || true
 fi
 rm -rf "$pctx"
+
+# The opt-in containerd driver (`aped run --driver containerd`) reads its OWN
+# `aped` containerd namespace, not nerdctl's `default`. Stage the probe there too
+# (best-effort) so the barrier-3-free driver + interactive attach work without a
+# manual import. --network none avoids a CNI dependency just to hold a container
+# open for the commit.
+if command -v nerdctl >/dev/null && ! ctr -n aped images ls -q 2>/dev/null | grep -qF "$PROBE_IMAGE"; then
+  nerdctl --namespace aped rm -f ape-probe-src >/dev/null 2>&1 || true
+  if nerdctl --namespace aped run -d --network none --name ape-probe-src "$SMOKE_IMAGE" sleep 2147483647 >/dev/null 2>&1 && \
+     nerdctl --namespace aped commit --change 'CMD ["sleep", "2147483647"]' ape-probe-src "$PROBE_IMAGE" >/dev/null 2>&1; then
+    ctr -n aped images unpack "$PROBE_IMAGE" >/dev/null 2>&1 || true
+    ok "staged $PROBE_IMAGE into the 'aped' namespace (--driver containerd)"
+  else
+    warn "could not stage $PROBE_IMAGE into the 'aped' namespace (needed for --driver containerd)"
+  fi
+  nerdctl --namespace aped rm -f ape-probe-src >/dev/null 2>&1 || true
+fi
 
 # ---- 6. build + install ape + aped -----------------------------------------
 step "6/9 build + install ape + aped → /usr/local/bin"

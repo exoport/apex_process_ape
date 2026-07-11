@@ -311,3 +311,35 @@ the control channel or a server idle timeout, AND the executor must kill the
 containerd exec (`process.Kill`) when the priv conn drops — deliberately NOT
 half-built here (a partial fix without live testing is worse than a documented
 gap). Tracked for Phase 2 / the live-validation pass.
+
+## LIVE RESULTS (2026-07-11, operator)
+
+### ✅ Item 5 (containerd driver) — `TestTier2ProvisionContainerd` PASS (1.38s)
+
+The barrier-3 fix is **live-validated**: create → exec → freeze → unfreeze →
+destroy all worked through the containerd Go client on a real Kata-QEMU microVM
+(`image=ape-tier2-probe:latest runtime=kata-qemu mount=ephemeral`). Two real bugs
+the live run surfaced and I fixed before the pass:
+
+1. **Image-ref normalization (`d356812`).** `getOrPull` did an exact-match
+   `GetImage("ape-tier2-probe:latest")`, but nerdctl/containerd store the
+   canonical `docker.io/library/ape-tier2-probe:latest` → miss → doomed registry
+   pull. Now normalizes via `reference.ParseDockerRef` before GetImage/Pull.
+2. **Probe image absent + un-unpacked.** The probe was never built (the earlier
+   `nerdctl build` needs buildkit). Fixed operationally with
+   `scratchpad/build-probe-image.sh` (nerdctl commit fallback → `aped` namespace)
+   and in code by the `getOrPull` unpack (`05fdf4d`).
+
+Provisioning tooling note: `deploy/tier2-setup.sh`'s probe build should adopt the
+commit-into-`aped` path (buildkit-free) — currently it builds into the `default`
+namespace and needs buildkit; folded into the scratchpad build script for now.
+
+### Still queued for the operator
+
+- **Items 3+4** (notify/watchdog units + operator-cred reuse):
+  `scratchpad/validate-items-3-4-redeploy.sh`.
+- **Item 5 full e2e through the hardened unit** (drop-in) +
+  **interactive PTY** (streamed `exec`, `attach` shell):
+  `scratchpad/validate-item5-driver-e2e.sh` then the PTY block above. The gated
+  in-process pass above already proves the driver lifecycle; the e2e proves it
+  through the deployed hardened `aped.service`.
