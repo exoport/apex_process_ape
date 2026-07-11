@@ -334,10 +334,20 @@ Provisioning tooling note: `deploy/tier2-setup.sh`'s probe build should adopt th
 commit-into-`aped` path (buildkit-free) — currently it builds into the `default`
 namespace and needs buildkit; folded into the scratchpad build script for now.
 
+### ✅ Items 3 + 4 — PASS (live, deployed shipped units)
+
+Redeployed the shipped units (socket-first) from the current tree. **Item 3:**
+both `aped.service` + `aped-front.service` report `Type=notify WatchdogUSec=30s
+ActiveState=active SubState=running`, no watchdog trips over ~2 min — sd_notify
+READY=1 + watchdog confirmed. **Item 4:** front logs `operator creds: … (reused)`
+and `/var/lib/aped/creds/operator.creds` is byte-identical
+(`ac8ab50e…2b1e`) across a restart — cred reuse confirmed, no operator re-copy.
+
+**Backlog status: items 1 (Tier-1) · 2 (docs) · 3 · 4 · 5 all validated.** Only
+the full-stack e2e + interactive PTY through the deployed hardened unit remains.
+
 ### Still queued for the operator
 
-- **Items 3+4** (notify/watchdog units + operator-cred reuse):
-  `scratchpad/validate-items-3-4-redeploy.sh`.
 - **Item 5 full e2e through the hardened unit** (drop-in) +
   **interactive PTY** (streamed `exec`, `attach` shell):
   `scratchpad/validate-item5-driver-e2e.sh` then the PTY block above. The gated
