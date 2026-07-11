@@ -121,8 +121,12 @@ func (e *Executor) handleConn(ctx context.Context, conn privConn) {
 	}
 
 	e.mu.Lock()
-	resp := e.dispatch(ctx, cmd, peer)
+	resp, records := e.dispatch(ctx, cmd, peer)
 	e.mu.Unlock()
+	// Hand the records the executor just wrote to its append-only file back to
+	// the front so it can forward them on ape.audit.<node>.> — the executor is
+	// itself network-less (PLAN-18 D1/D9).
+	resp.Audit = records
 	e.send(conn, resp)
 }
 
@@ -134,13 +138,15 @@ func (e *Executor) send(conn privConn, resp Response) {
 	_ = conn.Send(data)
 }
 
-// dispatch executes one command. Every mutating op is audited; read-only ops
-// (capabilities/list/inspect) are not.
-func (e *Executor) dispatch(ctx context.Context, cmd Command, peer Peer) Response {
+// dispatch executes one command, returning the response plus the audit
+// record(s) it emitted (for the front to forward on ape.audit.<node>.>). Every
+// mutating op is audited; read-only ops (capabilities/list/inspect/snapshot)
+// are not, and return a nil record slice.
+func (e *Executor) dispatch(ctx context.Context, cmd Command, peer Peer) (Response, []AuditRecord) {
 	switch cmd.Op {
 	case OpCapabilities:
 		caps, err := e.backend.Capabilities(ctx)
-		return respondValue(caps, err)
+		return respondValue(caps, err), nil
 	case OpCreate:
 		return e.doCreate(ctx, cmd, peer)
 	case OpStart:
@@ -157,18 +163,18 @@ func (e *Executor) dispatch(ctx context.Context, cmd Command, peer Peer) Respons
 		return e.mutate(peer, "ResumeVM", cmd.ID, func() error { return e.backend.Resume(ctx, cmd.ID) })
 	case OpExec:
 		if cmd.Exec == nil {
-			return errorResponse(fmt.Errorf("%w: exec command missing payload", workspace.ErrValidation))
+			return errorResponse(fmt.Errorf("%w: exec command missing payload", workspace.ErrValidation)), nil
 		}
 		status, err := e.backend.Exec(ctx, cmd.ID, *cmd.Exec)
-		e.audit(peer, "", "ExecVM", ResolvedArgs{WorkspaceID: cmd.ID}, decisionFor(err), outcomeFor(err, cmd.ID))
-		return respondValue(status, err)
+		rec := e.audit(peer, "", "ExecVM", ResolvedArgs{WorkspaceID: cmd.ID}, decisionFor(err), outcomeFor(err, cmd.ID))
+		return respondValue(status, err), []AuditRecord{rec}
 	case OpSnapshot:
 		req := workspace.SnapshotRequest{}
 		if cmd.Snapshot != nil {
 			req = *cmd.Snapshot
 		}
 		ref, err := e.backend.Snapshot(ctx, cmd.ID, req)
-		return respondValue(ref, err)
+		return respondValue(ref, err), nil
 	case OpDestroy:
 		req := workspace.DestroyRequest{}
 		if cmd.Destroy != nil {
@@ -177,21 +183,23 @@ func (e *Executor) dispatch(ctx context.Context, cmd Command, peer Peer) Respons
 		return e.mutate(peer, "DestroyVM", cmd.ID, func() error { return e.backend.Destroy(ctx, cmd.ID, req) })
 	case OpList:
 		list, err := e.backend.List(ctx)
-		return respondValue(list, err)
+		return respondValue(list, err), nil
 	case OpInspect:
 		status, err := e.backend.Inspect(ctx, cmd.ID)
-		return respondValue(status, err)
+		return respondValue(status, err), nil
 	default:
-		return errorResponse(fmt.Errorf("%w: unknown op %q", workspace.ErrValidation, cmd.Op))
+		return errorResponse(fmt.Errorf("%w: unknown op %q", workspace.ErrValidation, cmd.Op)), nil
 	}
 }
 
 // doCreate re-validates the resolved spec against policy (the executor's
 // authoritative check — the CVE lesson) before provisioning, and audits both
-// the decision and the outcome.
-func (e *Executor) doCreate(ctx context.Context, cmd Command, peer Peer) Response {
+// the decision and the outcome. It returns the single audit record it emits so
+// the front forwards it (a denied create is exactly what an audit consumer
+// needs, so the deny record is returned too).
+func (e *Executor) doCreate(ctx context.Context, cmd Command, peer Peer) (Response, []AuditRecord) {
 	if cmd.Create == nil {
-		return errorResponse(fmt.Errorf("%w: create command missing payload", workspace.ErrValidation))
+		return errorResponse(fmt.Errorf("%w: create command missing payload", workspace.ErrValidation)), nil
 	}
 	spec := cmd.Create.Spec
 	caller := cmd.Create.Caller
@@ -202,8 +210,8 @@ func (e *Executor) doCreate(ctx context.Context, cmd Command, peer Peer) Respons
 		count = len(list)
 	}
 	if err := e.policy.CheckCreate(resolvedCreateFromSpec(spec), count); err != nil {
-		e.audit(peer, caller, "CreateVM", resolved, DecisionDeny, Outcome{OK: false, Error: err.Error()})
-		return errorResponse(err)
+		rec := e.audit(peer, caller, "CreateVM", resolved, DecisionDeny, Outcome{OK: false, Error: err.Error()})
+		return errorResponse(err), []AuditRecord{rec}
 	}
 
 	ws, err := e.provision(ctx, spec)
@@ -213,29 +221,31 @@ func (e *Executor) doCreate(ctx context.Context, cmd Command, peer Peer) Respons
 	} else {
 		outcome.VMID = ws.ID
 	}
-	e.audit(peer, caller, "CreateVM", resolved, DecisionAllow, outcome)
+	rec := e.audit(peer, caller, "CreateVM", resolved, DecisionAllow, outcome)
 	if err != nil {
-		return errorResponse(err)
+		return errorResponse(err), []AuditRecord{rec}
 	}
-	return okResponse(ws)
+	return okResponse(ws), []AuditRecord{rec}
 }
 
 // mutate runs a mutating id-verb, audits it, and returns an OK/typed-error
-// response.
-func (e *Executor) mutate(peer Peer, op, id string, fn func() error) Response {
+// response plus the single audit record it emitted.
+func (e *Executor) mutate(peer Peer, op, id string, fn func() error) (Response, []AuditRecord) {
 	if id == "" {
-		return errorResponse(fmt.Errorf("%w: id is required", workspace.ErrValidation))
+		return errorResponse(fmt.Errorf("%w: id is required", workspace.ErrValidation)), nil
 	}
 	err := fn()
-	e.audit(peer, "", op, ResolvedArgs{WorkspaceID: id}, decisionFor(err), outcomeFor(err, id))
+	rec := e.audit(peer, "", op, ResolvedArgs{WorkspaceID: id}, decisionFor(err), outcomeFor(err, id))
 	if err != nil {
-		return errorResponse(err)
+		return errorResponse(err), []AuditRecord{rec}
 	}
-	return okResponse(workspace.OKReply{V: workspace.WireVersion, OK: true})
+	return okResponse(workspace.OKReply{V: workspace.WireVersion, OK: true}), []AuditRecord{rec}
 }
 
-func (e *Executor) audit(peer Peer, caller, op string, resolved ResolvedArgs, decision string, outcome Outcome) {
-	e.auditor.Record(AuditRecord{
+// audit records one privileged op and returns the stamped record (so the caller
+// can attach it to the priv Response for front-side NATS forwarding).
+func (e *Executor) audit(peer Peer, caller, op string, resolved ResolvedArgs, decision string, outcome Outcome) AuditRecord {
+	return e.auditor.Record(AuditRecord{
 		BoundaryPeer: &BoundaryPeer{UID: peer.UID, PID: peer.PID},
 		Caller:       caller,
 		Op:           op,

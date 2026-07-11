@@ -93,17 +93,18 @@ func NewAuditor(w io.Writer, pub func(subject string, data []byte), node string)
 	return &Auditor{w: w, pub: pub, node: natsconn.SubjectToken(node)}
 }
 
-// Record stamps, serializes, and emits an audit record to both sinks. It never
-// returns an error — auditing must not fail the op it records — but a write
-// failure is itself surfaced on the next record's best effort (the file sink
-// error is dropped; callers that need hard-fail auditing wrap the writer).
-func (a *Auditor) Record(rec AuditRecord) {
+// Record stamps, serializes, and emits an audit record to both sinks, and
+// returns the stamped record so a caller can hand it onward (the executor
+// attaches it to the priv Response for the front to forward — PLAN-18 D9). It
+// never fails the op it records — auditing must not — so a marshal/write error
+// is dropped and the (still-stamped) record is returned regardless.
+func (a *Auditor) Record(rec AuditRecord) AuditRecord {
 	if rec.TS == "" {
 		rec.TS = now().Format(time.RFC3339Nano)
 	}
 	data, err := json.Marshal(rec)
 	if err != nil {
-		return
+		return rec
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -113,16 +114,22 @@ func (a *Auditor) Record(rec AuditRecord) {
 	if a.pub != nil {
 		a.pub(a.subject(rec.Op), data)
 	}
+	return rec
 }
 
-// subject renders ape.audit.<node>.<event>, slugging the op into a single event
-// token (so an op string can never inject extra subject levels).
-func (a *Auditor) subject(op string) string {
+// subject renders this Auditor's ape.audit.<node>.<event> subject.
+func (a *Auditor) subject(op string) string { return auditSubject(a.node, op) }
+
+// auditSubject renders ape.audit.<node>.<event>, slugging op into a single event
+// token (so an op string can never inject extra subject levels). node is assumed
+// already slugged. Shared by the Auditor's own NATS sink and the front-end's
+// audit forwarder (privClient.forwardAudit) so both render the identical subject.
+func auditSubject(node, op string) string {
 	event := natsconn.SubjectToken(op)
 	if event == "" {
 		event = "op"
 	}
-	return fmt.Sprintf("%s.%s.%s", subjectAudit, a.node, event)
+	return fmt.Sprintf("%s.%s.%s", subjectAudit, node, event)
 }
 
 // OpenAuditLog opens (creating) the append-only audit log 0600. The parent dir

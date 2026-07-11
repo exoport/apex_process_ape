@@ -58,6 +58,14 @@ type Response struct {
 	Code    string          `json:"code,omitempty"`
 	Error   string          `json:"error,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+	// Audit carries the audit record(s) the executor emitted for this command.
+	// The executor is network-less (RunExecutor builds its Auditor with a nil
+	// NATS sink) and writes them to its own append-only file; it hands them back
+	// here so the de-privileged front — which holds the NATS conn — can forward
+	// them on ape.audit.<node>.> (PLAN-18 D9). Empty for read-only ops and for
+	// the SO_PEERCRED-rejected path (that record stays file-only — a rejected
+	// peer is never the front, so it must not be handed the audit trail).
+	Audit []AuditRecord `json:"audit,omitempty"`
 }
 
 // encode/decode carry a resolved sandbox.WorkspaceSpec, whose fields are

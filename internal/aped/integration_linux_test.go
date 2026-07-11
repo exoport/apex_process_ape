@@ -4,6 +4,7 @@ package aped
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -14,38 +15,69 @@ import (
 	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/exoport/apex_process_ape/internal/vmmclient"
 	"github.com/exoport/apex_process_ape/internal/workspace"
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/micro"
 )
 
 // fullStack wires the whole Phase-2 control plane in one process: the embedded
 // two-account server, the vmm micro service dispatching to a privClient, the
-// AF_UNIX priv boundary, and the root Executor driving a real shellDriver — then
-// a vmmclient dialing it as `ape` would. It is the end-to-end integration rig.
+// AF_UNIX priv boundary, and the root Executor driving a Backend — then a
+// vmmclient dialing it as `ape` would. It is the end-to-end integration rig.
 type fullStack struct {
 	client *vmmclient.Client
 	reg    *sandbox.Registry
+	srv    *Server // exposed so a test can mint an audit-consumer cred
+}
+
+// stackOpts selects the backend the stack's executor drives.
+type stackOpts struct {
+	// fake replaces the real shellDriver + shell provisioner with an in-memory
+	// backend so create/mutate verbs work without containerd — for the pure
+	// control-plane tests (audit forwarding, error mapping) that run in CI.
+	fake bool
 }
 
 func startFullStack(t *testing.T) *fullStack {
 	t.Helper()
+	return newStack(t, stackOpts{})
+}
+
+func newStack(t *testing.T, opts stackOpts) *fullStack {
+	t.Helper()
 	stateDir := t.TempDir()
 	sock := filepath.Join(t.TempDir(), "priv.sock")
 
-	// Root executor over a real priv socket, driving the real shellDriver.
+	// Root executor over a real priv socket.
 	l, err := listenPriv(sock)
 	if err != nil {
 		t.Fatalf("listenPriv: %v", err)
 	}
-	runner := &sandbox.Runner{}
 	reg := sandbox.OpenRegistry(stateDir)
-	shell := sandbox.NewShellDriver(runner, reg, nil)
-	// Allow both the unit-test literal and the live Tier-2 image (below); ephemeral
-	// mounts need no mount_roots. checkImage is an exact string match, so the
-	// allow-list carries the same string the create request sends.
-	policy := &Policy{Images: []string{testImage, liveImage()}}
+	var (
+		backend   workspace.Backend
+		provision Provisioner
+		policy    *Policy
+	)
+	if opts.fake {
+		fake := newFakeBackend()
+		backend = fake
+		provision = func(ctx context.Context, spec sandbox.WorkspaceSpec) (workspace.Workspace, error) {
+			_, _ = fake.Create(ctx, workspace.CreateRequest{Name: spec.Name, Image: spec.Image})
+			return workspace.Workspace{ID: spec.Name, Name: spec.Name, Image: spec.Image}, nil
+		}
+		policy = &Policy{Images: []string{testImage}}
+	} else {
+		runner := &sandbox.Runner{}
+		backend = sandbox.NewShellDriver(runner, reg, nil)
+		provision = NewShellProvisioner(runner, reg)
+		// Allow both the unit-test literal and the live Tier-2 image (below);
+		// ephemeral mounts need no mount_roots. checkImage is an exact string
+		// match, so the allow-list carries the same string the request sends.
+		policy = &Policy{Images: []string{testImage, liveImage()}}
+	}
 	ex := NewExecutor(ExecutorConfig{
-		Backend:     shell,
-		Provision:   NewShellProvisioner(runner, reg),
+		Backend:     backend,
+		Provision:   provision,
 		Policy:      policy,
 		Auditor:     NewAuditor(nil, nil, "node1"),
 		AllowedUIDs: []uint32{selfUID()},
@@ -56,22 +88,29 @@ func startFullStack(t *testing.T) *fullStack {
 	t.Cleanup(func() { cancel(); _ = l.Close() })
 
 	// Embedded server + vmm service on a HOST_OPS service cred, dispatching to
-	// the privClient (front → executor).
+	// the privClient (front → executor). The privClient forwards the executor's
+	// audit records on ape.audit.<node>.> over this same service conn.
 	srv := startTestServer(t)
 	resolver := NewResolver(ResolverConfig{StateDir: stateDir, HostHome: t.TempDir(), Telemetry: srv.Telemetry()})
-	backend := NewPrivClient(sock, resolver.Resolve)
 
 	svcCreds, _, err := srv.HostOps().MintUser("aped", serviceGrant(), 0)
 	if err != nil {
 		t.Fatalf("mint service cred: %v", err)
 	}
 	svcConn, _ := connectCreds(t, srv.ClientURL(), svcCreds, "")
+	priv := NewPrivClient(PrivClientConfig{
+		Socket:  sock,
+		Resolve: resolver.Resolve,
+		Publish: func(subject string, data []byte) { _ = svcConn.Publish(subject, data) },
+		Node:    "node1",
+	})
+
 	svc, err := micro.AddService(svcConn, micro.Config{Name: "ape-vmm", Version: "0.0.0"})
 	if err != nil {
 		t.Fatalf("AddService: %v", err)
 	}
 	t.Cleanup(func() { _ = svc.Stop() })
-	if err := NewVMM(VMMConfig{Node: "node1", Backend: backend}).Register(svc); err != nil {
+	if err := NewVMM(VMMConfig{Node: "node1", Backend: priv}).Register(svc); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	_ = svcConn.Flush()
@@ -82,7 +121,7 @@ func startFullStack(t *testing.T) *fullStack {
 		t.Fatalf("mint operator cred: %v", err)
 	}
 	cliConn, _ := connectCreds(t, srv.ClientURL(), opCreds, "")
-	return &fullStack{client: vmmclient.New(cliConn, "node1", 5*time.Second), reg: reg}
+	return &fullStack{client: vmmclient.New(cliConn, "node1", 5*time.Second), reg: reg, srv: srv}
 }
 
 // TestFullStackControlPlane exercises the entire real stack (NATS → vmm →
@@ -114,6 +153,107 @@ func TestFullStackControlPlane(t *testing.T) {
 	if _, err := fs.client.Inspect(ctx, "ghost"); !errors.Is(err, workspace.ErrNotFound) {
 		t.Fatalf("inspect ghost: got %v, want ErrNotFound", err)
 	}
+}
+
+// TestFullStackAuditForwarding proves the network-less executor's audit records
+// reach ape.audit.<node>.> over NATS: the executor returns them in the priv
+// Response, the front (privClient) forwards them on its HOST_OPS conn, and a
+// HOST_OPS audit consumer receives them with the resolved args + policy decision
+// + outcome. It runs in CI (fake backend → no containerd) and is the permanent
+// proof of the PLAN-18 D9 forwarding leg.
+func TestFullStackAuditForwarding(t *testing.T) {
+	fs := newStack(t, stackOpts{fake: true})
+	ctx := context.Background()
+
+	// An audit consumer in the HOST_OPS account (serviceGrant → may sub ape.audit.>).
+	subCreds, _, err := fs.srv.HostOps().MintUser("audit-sub", serviceGrant(), 0)
+	if err != nil {
+		t.Fatalf("mint audit-sub cred: %v", err)
+	}
+	subConn, _ := connectCreds(t, fs.srv.ClientURL(), subCreds, "")
+	recs := make(chan AuditRecord, 16)
+	sub, err := subConn.Subscribe("ape.audit.node1.>", func(m *nats.Msg) {
+		var rec AuditRecord
+		if json.Unmarshal(m.Data, &rec) == nil {
+			recs <- rec
+		}
+	})
+	if err != nil {
+		t.Fatalf("subscribe audit: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	_ = subConn.Flush()
+
+	// Drive create (allowed) + a mutate (start) + a policy-denied create.
+	if _, err := fs.client.Create(ctx, workspace.CreateRequest{Name: testWS, Image: testImage, Mount: "ephemeral"}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := fs.client.Start(ctx, testWS); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if _, err := fs.client.Create(ctx, workspace.CreateRequest{Name: "evil", Image: "evil:latest", Mount: "ephemeral"}); !errors.Is(err, workspace.ErrPolicyDenied) {
+		t.Fatalf("denied create: got %v, want ErrPolicyDenied", err)
+	}
+
+	got := collectAudit(t, recs, 3)
+
+	createOK := findAudit(got, func(r AuditRecord) bool {
+		return r.Op == "CreateVM" && r.Policy.Decision == DecisionAllow
+	})
+	if createOK == nil {
+		t.Fatalf("no allowed CreateVM audit record in %+v", got)
+	}
+	if createOK.Resolved.Image != testImage {
+		t.Errorf("CreateVM resolved image = %q, want %q", createOK.Resolved.Image, testImage)
+	}
+	if !createOK.Outcome.OK || createOK.Outcome.VMID != testWS {
+		t.Errorf("CreateVM outcome = %+v, want OK vm_id=%s", createOK.Outcome, testWS)
+	}
+	if createOK.BoundaryPeer == nil || createOK.BoundaryPeer.UID != selfUID() {
+		t.Errorf("CreateVM boundary peer = %+v, want uid %d", createOK.BoundaryPeer, selfUID())
+	}
+
+	if start := findAudit(got, func(r AuditRecord) bool { return r.Op == "StartVM" }); start == nil {
+		t.Errorf("no StartVM audit record in %+v", got)
+	} else if !start.Outcome.OK || start.Policy.Decision != DecisionAllow {
+		t.Errorf("StartVM record = %+v, want allow + OK", start)
+	}
+
+	deny := findAudit(got, func(r AuditRecord) bool {
+		return r.Op == "CreateVM" && r.Policy.Decision == DecisionDeny
+	})
+	if deny == nil {
+		t.Fatalf("no denied CreateVM audit record in %+v", got)
+	}
+	if deny.Outcome.OK || deny.Outcome.Error == "" {
+		t.Errorf("denied CreateVM outcome = %+v, want !OK with an error", deny.Outcome)
+	}
+}
+
+// collectAudit gathers n audit records off recs or fails on timeout.
+func collectAudit(t *testing.T, recs <-chan AuditRecord, n int) []AuditRecord {
+	t.Helper()
+	got := make([]AuditRecord, 0, n)
+	deadline := time.After(5 * time.Second)
+	for len(got) < n {
+		select {
+		case rec := <-recs:
+			got = append(got, rec)
+		case <-deadline:
+			t.Fatalf("got %d audit records, want %d: %+v", len(got), n, got)
+		}
+	}
+	return got
+}
+
+// findAudit returns the first record matching pred, or nil.
+func findAudit(recs []AuditRecord, pred func(AuditRecord) bool) *AuditRecord {
+	for i := range recs {
+		if pred(recs[i]) {
+			return &recs[i]
+		}
+	}
+	return nil
 }
 
 // liveImage resolves the image the live Tier-2 acceptance provisions. It must be

@@ -78,7 +78,7 @@ func startExecRig(t *testing.T, policy *Policy, allowedUIDs []uint32) *execRig {
 	resolve := func(_ context.Context, req workspace.CreateRequest) (sandbox.WorkspaceSpec, error) {
 		return sandbox.WorkspaceSpec{Name: req.Name, Image: req.Image, Mount: sandbox.MountEphemeral, Comp: &sandbox.Composition{}}, nil
 	}
-	return &execRig{client: NewPrivClient(sock, resolve), be: be, audit: audit}
+	return &execRig{client: NewPrivClient(PrivClientConfig{Socket: sock, Resolve: resolve}), be: be, audit: audit}
 }
 
 func TestExecutorCreateAllowedAndAudited(t *testing.T) {

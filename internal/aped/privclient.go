@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/exoport/apex_process_ape/internal/natsconn"
 	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/exoport/apex_process_ape/internal/workspace"
 )
@@ -21,18 +22,42 @@ import (
 type privClient struct {
 	socket  string
 	resolve sandbox.SpecResolver
+	publish func(subject string, data []byte) // nil → no ape.audit.<node>.> forwarding
+	node    string                            // slugged <node> for the audit subject
 }
 
-// NewPrivClient returns a workspace.Backend that forwards to the executor at
-// socket. resolve turns a CreateRequest into a resolved spec (front-side); a
-// nil resolver fails Create with ErrValidation.
-func NewPrivClient(socket string, resolve sandbox.SpecResolver) workspace.Backend {
-	return &privClient{socket: socket, resolve: resolve}
+// PrivClientConfig configures NewPrivClient.
+type PrivClientConfig struct {
+	// Socket is the AF_UNIX priv socket the executor serves.
+	Socket string
+	// Resolve turns a wire CreateRequest into a fully-resolved spec (front-side,
+	// de-privileged). A nil resolver fails Create with ErrValidation.
+	Resolve sandbox.SpecResolver
+	// Publish forwards an executor-returned audit record on ape.audit.<node>.>.
+	// The executor is network-less, so it hands back the records it wrote to its
+	// own append-only file (Response.Audit); the front — which holds the NATS
+	// conn — publishes them here (PLAN-18 D9). Nil skips forwarding.
+	Publish func(subject string, data []byte)
+	// Node is the <node> token stamped into forwarded audit subjects.
+	Node string
+}
+
+// NewPrivClient returns a workspace.Backend that forwards to the executor over
+// the priv socket, optionally forwarding executor audit records over NATS.
+func NewPrivClient(cfg PrivClientConfig) workspace.Backend {
+	return &privClient{
+		socket:  cfg.Socket,
+		resolve: cfg.Resolve,
+		publish: cfg.Publish,
+		node:    natsconn.SubjectToken(cfg.Node),
+	}
 }
 
 var _ workspace.Backend = (*privClient)(nil)
 
-// roundTrip sends one command and reads one response over a fresh connection.
+// roundTrip sends one command and reads one response over a fresh connection,
+// forwarding any audit records the executor returned before handing the
+// response back (so a denied/failed op's record is forwarded too).
 func (p *privClient) roundTrip(cmd Command) (Response, error) {
 	conn, err := dialPriv(p.socket)
 	if err != nil {
@@ -50,7 +75,28 @@ func (p *privClient) roundTrip(cmd Command) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	return decodeResponse(raw)
+	resp, err := decodeResponse(raw)
+	if err != nil {
+		return Response{}, err
+	}
+	p.forwardAudit(resp.Audit)
+	return resp, nil
+}
+
+// forwardAudit publishes each executor-returned audit record on
+// ape.audit.<node>.<event>. It is a no-op without a publish sink; marshal
+// failures are dropped — audit forwarding must never fail the op it records.
+func (p *privClient) forwardAudit(records []AuditRecord) {
+	if p.publish == nil {
+		return
+	}
+	for i := range records {
+		data, err := json.Marshal(records[i])
+		if err != nil {
+			continue
+		}
+		p.publish(auditSubject(p.node, records[i].Op), data)
+	}
 }
 
 // call round-trips cmd, maps a Code response to a sentinel error, and unmarshals

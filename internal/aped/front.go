@@ -92,7 +92,15 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 		CredsExpiry: cfg.CredsExpiry,
 		Telemetry:   srv.Telemetry(),
 	})
-	backend := NewPrivClient(cfg.Socket, resolver.Resolve)
+	// The front holds the NATS conn, so it forwards the executor's audit records
+	// on ape.audit.<node>.> (the network-less executor returns them in-band —
+	// PLAN-18 D9). Fire-and-forget: a publish failure must never fail the op.
+	backend := NewPrivClient(PrivClientConfig{
+		Socket:  cfg.Socket,
+		Resolve: resolver.Resolve,
+		Publish: func(subject string, data []byte) { _ = nc.Publish(subject, data) },
+		Node:    node,
+	})
 
 	hostname, _ := os.Hostname()
 	svc, err := micro.AddService(nc, micro.Config{
