@@ -9,8 +9,11 @@ import (
 	"github.com/exoport/apex_process_ape/internal/natsconn"
 	"github.com/exoport/apex_process_ape/internal/output"
 	"github.com/exoport/apex_process_ape/internal/vmmclient"
+	"github.com/exoport/apex_process_ape/internal/vmmstream"
 	"github.com/exoport/apex_process_ape/internal/workspace"
+	"github.com/nats-io/nats.go"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // Sandbox-wide connection flags (persistent on the parent). ape sandbox is a
@@ -81,9 +84,11 @@ Linux host with KVM + containerd + Kata.`,
 	return cmd
 }
 
-// vmmBackend builds the ape.vmm NATS client for the configured node, or returns
-// errNoAped when no endpoint is set. The returned closer drains the connection.
-func vmmBackend(cmd *cobra.Command) (workspace.Backend, func(), error) {
+// dialVMM builds the ape.vmm client for the configured node and returns it along
+// with the underlying NATS connection (the interactive attach/exec path drives
+// the session subjects on it directly) and a closer that drains the connection.
+// It returns errNoAped when no endpoint is configured.
+func dialVMM(cmd *cobra.Command) (*vmmclient.Client, *nats.Conn, func(), error) {
 	node := sandboxNode
 	if node == "" {
 		node = os.Getenv("APE_APED_NODE")
@@ -93,13 +98,44 @@ func vmmBackend(cmd *cobra.Command) (workspace.Backend, func(), error) {
 	}
 	cfg := natsconn.Resolve(sandboxNatsURL, sandboxNatsCreds)
 	if !cfg.Enabled() {
-		return nil, nil, errNoAped
+		return nil, nil, nil, errNoAped
 	}
 	nc, err := natsconn.Connect(cmd.Context(), cfg, "ape-sandbox/"+Version)
 	if err != nil {
+		return nil, nil, nil, err
+	}
+	return vmmclient.New(nc, natsconn.SubjectToken(node), 0), nc, func() { _ = nc.Drain() }, nil
+}
+
+// vmmBackend builds the ape.vmm NATS client for the configured node, or returns
+// errNoAped when no endpoint is set. The returned closer drains the connection.
+func vmmBackend(cmd *cobra.Command) (workspace.Backend, func(), error) {
+	client, _, done, err := dialVMM(cmd)
+	if err != nil {
 		return nil, nil, err
 	}
-	return vmmclient.New(nc, natsconn.SubjectToken(node), 0), func() { _ = nc.Drain() }, nil
+	return client, done, nil
+}
+
+// streamAttach runs the client half of an interactive session: it wires local
+// stdio to the session subjects (raw terminal + SIGWINCH-driven resize when tty
+// and stdin is a real terminal) and returns the process exit code. The server
+// gated its output until we prime, so no early output is lost.
+func streamAttach(cmd *cobra.Command, nc *nats.Conn, prefix string, tty bool) (int, error) {
+	inFd := int(os.Stdin.Fd())
+	var resize <-chan vmmstream.WinSize
+	if tty && term.IsTerminal(inFd) {
+		if old, err := term.MakeRaw(inFd); err == nil {
+			defer func() { _ = term.Restore(inFd, old) }()
+		}
+		resize = watchWinsize(cmd.Context(), inFd)
+	}
+	return vmmstream.Attach(cmd.Context(), nc, prefix, vmmstream.ClientStreams{
+		Stdin:  os.Stdin,
+		Stdout: cmd.OutOrStdout(),
+		Stderr: cmd.ErrOrStderr(),
+		Resize: resize,
+	}, 0)
 }
 
 func newSandboxUpCmd() *cobra.Command {
@@ -226,28 +262,33 @@ func newSandboxInspectCmd() *cobra.Command {
 }
 
 func newSandboxAttachCmd() *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "attach <name>",
 		Short: "Open an interactive shell inside a workspace",
-		Args:  cobra.ExactArgs(1),
+		Long: `Open an interactive shell inside a workspace, wiring your terminal's
+stdin/stdout/stderr to the guest over the aped exec session subjects (PLAN-18 D2,
+credit-based flow control; the terminal goes raw and resizes forward on SIGWINCH).
+
+Requires an aped node running the containerd driver (aped run --driver
+containerd); a shell-driver node reports the session UNSUPPORTED.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			backend, done, err := vmmBackend(cmd)
+			client, nc, done, err := dialVMM(cmd)
 			if err != nil {
 				return err
 			}
 			defer done()
-			// Interactive stdio over the vmm exec session subjects is a Tier-2
-			// addition; today Attach reports UNSUPPORTED. Use exec for one-shots.
-			if _, err := backend.Attach(cmd.Context(), args[0], workspace.AttachRequest{TTY: true}, nil); err != nil {
+			open, err := client.AttachOpen(cmd.Context(), args[0], workspace.AttachRequest{TTY: true})
+			if err != nil {
 				if errors.Is(err, workspace.ErrUnsupported) {
-					return fmt.Errorf("interactive attach over NATS is not yet wired (Tier-2); use 'ape sandbox exec %s -- <cmd>'", args[0])
+					return fmt.Errorf("interactive attach is not available on this aped node (needs 'aped run --driver containerd'); use 'ape sandbox exec %s -- <cmd>'", args[0])
 				}
 				return err
 			}
-			return nil
+			_, err = streamAttach(cmd, nc, open.SubjectPrefix, true)
+			return err
 		},
 	}
-	return cmd
 }
 
 func newSandboxSSHCmd() *cobra.Command {
@@ -265,32 +306,57 @@ func newSandboxSSHCmd() *cobra.Command {
 }
 
 func newSandboxExecCmd() *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "exec <name> -- <cmd>...",
 		Short: "Run a command inside a workspace",
-		Long: `Run a one-shot command inside a workspace and report its exit status.
+		Long: `Run a command inside a workspace, streaming its stdout/stderr back over the
+aped exec session subjects and returning its exit code.
 
-Note: bulk stdout/stderr streaming rides the vmm exec session subjects, wired
-under Tier-2; in Phase 2 exec reports the exit code (output goes to the aped
-node's logs). Use it for exit-status checks and side-effecting commands.`,
+On an aped node without an interactive backend (the nerdctl shell driver) it
+falls back to a request/reply exec that reports only the exit status (output goes
+to the node's logs).`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			backend, done, err := vmmBackend(cmd)
-			if err != nil {
-				return err
-			}
-			defer done()
-			status, err := backend.Exec(cmd.Context(), args[0], workspace.ExecRequest{Cmd: args[1:], TTY: true})
-			if err != nil {
-				return err
-			}
-			if status.Code != 0 {
-				return fmt.Errorf("command exited %d", status.Code)
-			}
-			return nil
+			return runSandboxExec(cmd, args[0], args[1:])
 		},
 	}
-	return cmd
+}
+
+// runSandboxExec streams an exec through the interactive session when the node
+// supports it, else falls back to the exit-status-only exec verb.
+func runSandboxExec(cmd *cobra.Command, name string, argv []string) error {
+	client, nc, done, err := dialVMM(cmd)
+	if err != nil {
+		return err
+	}
+	defer done()
+
+	tty := term.IsTerminal(int(os.Stdin.Fd()))
+	open, err := client.AttachOpen(cmd.Context(), name, workspace.AttachRequest{Cmd: argv, TTY: tty})
+	if err != nil {
+		if errors.Is(err, workspace.ErrUnsupported) {
+			st, xerr := client.Exec(cmd.Context(), name, workspace.ExecRequest{Cmd: argv})
+			if xerr != nil {
+				return xerr
+			}
+			return exitCodeError(st.Code)
+		}
+		return err
+	}
+	code, err := streamAttach(cmd, nc, open.SubjectPrefix, tty)
+	if err != nil {
+		return err
+	}
+	return exitCodeError(code)
+}
+
+// exitCodeError maps a process exit code to a CLI error: nil on 0, else a message
+// that makes the ape process exit non-zero.
+func exitCodeError(code int) error {
+	if code != 0 {
+		return fmt.Errorf("command exited with code %d", code)
+	}
+	return nil
 }
 
 func newSandboxFreezeCmd() *cobra.Command {
