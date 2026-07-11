@@ -371,7 +371,36 @@ Three real bugs the live e2e surfaced, all fixed:
    `ape.vmm.<node>.exec.>` SUB scope → attach would fail a NATS permission check.
    Now requires the sub scope too, forcing a re-mint on the grant change.
 
-**Retry pending (after `redeploy-latest.sh`):** the streamed `exec` (`uname -r`
-live on the terminal, `exit 7` → `ape exit=7`) and the interactive `attach` PTY.
-The daemon-side lifecycle + provisioning is proven; the last unproven bit is the
-PTY stdio itself.
+### ✅✅ Interactive exec/attach PTY — FULL END-TO-END PASS (live)
+
+After `redeploy-latest.sh` (both binaries + re-minted cred), on a Kata-QEMU
+(kata-clh) ephemeral workspace through the hardened `--driver containerd` unit:
+
+- `ape sandbox exec dev -- echo hi` → **`hi`** streamed to the terminal (not the
+  node log — the old behavior).
+- `ape sandbox exec dev -- uname -r` → **`6.18.35`** — the GUEST kernel, streamed;
+  proves the microVM isolation + live stdout over the session subjects.
+- `ape sandbox exec dev -- sh -c 'exit 7'` → `command exited with code 7`
+  (`ape exit=1`) — new client, exit code propagated.
+- `ape sandbox attach dev` → **a live interactive PTY shell** (`/ # ls …`, typed
+  commands, `exit`). The full bidirectional bridge: client raw terminal → NATS
+  session subjects → front `NewServerSession` → priv socket → network-less
+  executor `OpAttach` → containerd task PTY → back.
+
+**Every PLAN-18 Phase-2 backlog item (1–6) AND the exec/attach streaming feature
+is now live-validated on the Tier-2 host.** Five real bugs the live pass caught
+and fixed: image-ref normalization (`d356812`), image unpack (`05fdf4d`), socket
+desync / RuntimeDirectoryPreserve (`be60033`), operator-cred sub-scope re-mint
+(`e7f4f48`), plus the tier2-setup probe staging (`d9dfc83`).
+
+### Known limitation (documented finding): host-fs mount under ProtectHome
+
+The DEFAULT `ape sandbox up <name>` uses `--mount host-fs` of the cwd. From a
+`/home/…` directory this fails: `lstat /home/…: permission denied`, because both
+`aped.service` and `aped-front.service` set `ProtectHome=yes` (a deliberate
+security property — the root executor must not read operator homes), so the
+front cannot even canonicalize the mount source. Workarounds: `--mount ephemeral`
+/ `--mount volume`, or a mount-root outside `/home` (with a matching policy
+`mount_roots` entry, and a front `BindPaths=` drop-in for that root). NOT a code
+bug; a hardening-vs-host-fs tension to resolve in the mount-root design (Phase 3).
+Do not relax `ProtectHome` to "fix" it.

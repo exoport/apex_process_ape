@@ -127,11 +127,19 @@ needed unless `/var/lib/aped` was reset.
 export APE_NATS_URL=nats://127.0.0.1:4223
 export APE_NATS_CREDS=~/.config/ape/aped-operator.creds     # the copy you own (see above)
 ape sandbox ls --node "$(hostname)"
-ape sandbox up dev --node "$(hostname)"
-ape sandbox exec dev --node "$(hostname)" -- uname -r
+ape sandbox up dev --node "$(hostname)" --mount ephemeral
+ape sandbox exec dev --node "$(hostname)" -- uname -r        # streams the GUEST kernel to your terminal
+ape sandbox attach dev --node "$(hostname)"                  # interactive PTY shell (containerd driver)
 ape sandbox freeze dev --node "$(hostname)"
 ape sandbox down dev --node "$(hostname)"
 ```
+
+> **host-fs from `/home`.** The default `up` mount is `host-fs` of your cwd. Both
+> units set `ProtectHome=yes`, so if your cwd is under `/home` the executor cannot
+> even `lstat` it (`mount path …: lstat /home/…: permission denied`) — by design,
+> the root executor must not read operator homes. Use `--mount ephemeral` /
+> `--mount volume`, or a project root outside `/home` (added to the policy
+> `mount_roots` plus a front `BindPaths=` drop-in). Do not relax `ProtectHome`.
 
 `--node` selects the `ape.vmm.<node>.>` group (default: the local hostname). The
 node token is slugged the same way `<user>` tokens are.
