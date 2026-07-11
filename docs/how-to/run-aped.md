@@ -72,13 +72,17 @@ aped-front`) prints the `APE_NATS_URL` to use.
 
 That file is written `0600` owned by the `aped` service user, so your human
 operator account cannot read it directly. Copy it to a path you own (what
-`deploy/tier2-setup.sh` does, and re-do it after each `aped-front` restart — the
-credential is re-minted on start):
+`deploy/tier2-setup.sh` does):
 
 ```bash
 sudo install -m 0600 -o "$USER" /var/lib/aped/creds/operator.creds \
   ~/.config/ape/aped-operator.creds
 ```
+
+`aped` **reuses** this credential across restarts — the signing account seed is
+persisted under `/var/lib/aped/keys`, so a credential minted before the restart
+still validates. The startup log prints `minted` (first start / after the state
+dir is reset) or `reused`; you only re-copy the file when it says `minted`.
 
 Alternatively, add your account to the `ape` group and have `aped-front` write
 the credential group-readable — but group `ape` is also the priv-socket gate, so
@@ -90,6 +94,21 @@ Verify the security posture of both units:
 systemd-analyze security aped.service        # predicted OK band ~3.0–3.8
 systemd-analyze security aped-front.service   # ~2.5–3.5
 ```
+
+## Restarting aped
+
+Restart **socket-first**: bounce `aped-priv.socket` before the services. The
+socket unit owns `/run/aped/priv.sock` (`RemoveOnStop=yes`); restarting only
+`aped.service` can leave the path desynced so the front fails to `connect()` it
+(`dial unixpacket /run/aped/priv.sock: no such file or directory`).
+
+```bash
+sudo systemctl restart aped-priv.socket
+sudo systemctl restart aped.service aped-front.service
+```
+
+The operator credential is reused across the restart (above), so no re-copy is
+needed unless `/var/lib/aped` was reset.
 
 ## Point `ape` at `aped`
 

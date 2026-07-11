@@ -2,6 +2,7 @@ package aped
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/nats-io/jwt/v2"
@@ -117,6 +118,38 @@ func (a Account) MintUser(name string, g Grant, expires time.Duration) (creds []
 		return nil, "", fmt.Errorf("aped: format creds: %w", err)
 	}
 	return creds, upub, nil
+}
+
+// reusableOperatorCreds reports whether creds carries a user JWT this account
+// signed, unexpired at now, that still grants publish on requirePub. It is the
+// reuse gate for the persisted host-operator credential across an aped restart:
+// the HOST_OPS account identity key is persisted (server.loadOrCreateAccount),
+// so a cred minted before the restart still validates — aped reuses it instead
+// of re-minting, which would churn the operator's 0600 copy the human must then
+// re-copy (PLAN-18 D7). It is false on any parse failure, issuer mismatch,
+// expiry, or a scope that no longer covers requirePub (e.g. the node changed).
+func (a Account) reusableOperatorCreds(creds []byte, now time.Time, requirePub string) bool {
+	jwtStr, err := jwt.ParseDecoratedJWT(creds)
+	if err != nil {
+		return false
+	}
+	uc, err := jwt.DecodeUserClaims(jwtStr)
+	if err != nil {
+		return false
+	}
+	// A user signed directly by the account identity key carries iss=account and
+	// an empty issuer_account; a signing-key mint carries issuer_account=account.
+	issuer := uc.IssuerAccount
+	if issuer == "" {
+		issuer = uc.Issuer
+	}
+	if issuer != a.pub {
+		return false
+	}
+	if uc.Expires != 0 && now.Unix() >= uc.Expires {
+		return false
+	}
+	return slices.Contains(uc.Pub.Allow, requirePub)
 }
 
 // MintVMCreds mints a per-VM TELEMETRY credential for vmID: pub-only to its own

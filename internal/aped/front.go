@@ -70,17 +70,20 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 	}
 	defer func() { _ = nc.Drain() }()
 
-	// Provision a scoped host-operator credential for the `ape` CLI.
+	// Provision a scoped host-operator credential for the `ape` CLI, reusing the
+	// existing one across restarts (the account seed persists) so the operator's
+	// copy is not churned every restart.
 	if cfg.OperatorCredsPath != "" {
-		opCreds, _, err := srv.HostOps().MintUser("ape-operator", OperatorGrant(node), 0)
+		reused, err := ensureOperatorCreds(srv.HostOps(), node, cfg.OperatorCredsPath)
 		if err != nil {
 			return err
 		}
-		if err := writeSecret(cfg.OperatorCredsPath, opCreds); err != nil {
-			return err
+		action := "minted"
+		if reused {
+			action = "reused"
 		}
-		fmt.Fprintf(stderr, "  operator creds: %s (point the ape CLI at APE_NATS_URL=%s APE_NATS_CREDS=%s)\n",
-			cfg.OperatorCredsPath, srv.ClientURL(), cfg.OperatorCredsPath)
+		fmt.Fprintf(stderr, "  operator creds: %s (%s; point the ape CLI at APE_NATS_URL=%s APE_NATS_CREDS=%s)\n",
+			cfg.OperatorCredsPath, action, srv.ClientURL(), cfg.OperatorCredsPath)
 	}
 
 	// The vmm service dispatches to the executor over the priv socket; Create is
@@ -125,6 +128,31 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 	// service manager we are up and arm the watchdog (no-ops under Type=exec).
 	signalReady(ctx)
 	return serveUntilSignal(ctx, svc, stderr)
+}
+
+// ensureOperatorCreds writes the scoped host-operator credential for the `ape`
+// CLI at path, REUSING an existing file when it still validates (issued by the
+// current HOST_OPS account, unexpired, and scoped to this node) instead of
+// re-minting. Re-minting on every restart rewrites the file with a fresh user
+// key, churning the operator's 0600 copy — which the human must then re-copy.
+// Reuse is sound only because the account seed is persisted across restart
+// (StartServer StoreDir); with no persisted store the old cred fails the issuer
+// check and is re-minted, closing the loop. Returns whether it reused.
+func ensureOperatorCreds(hostOps Account, node, path string) (reused bool, err error) {
+	requirePub := subjectVMM + "." + node + ".>"
+	if existing, rerr := os.ReadFile(path); rerr == nil {
+		if hostOps.reusableOperatorCreds(existing, now(), requirePub) {
+			return true, nil
+		}
+	}
+	creds, _, err := hostOps.MintUser("ape-operator", OperatorGrant(node), 0)
+	if err != nil {
+		return false, err
+	}
+	if err := writeSecret(path, creds); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 // serveUntilSignal blocks until ctx is cancelled or SIGINT/SIGTERM, then stops

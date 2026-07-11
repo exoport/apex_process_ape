@@ -11,9 +11,9 @@ gate — see `ci-local-govulncheck-preexisting` memory).
 | # | Item | State |
 | - | ---- | ----- |
 | 1 | Audit NATS forwarding on `ape.audit.<node>.>` | ✅ committed (Tier-1) |
-| 2 | Clean up `docs/how-to/sandbox-workspaces.md` | ⏳ in progress |
-| 3 | sd_notify + Type=notify units | ⬜ pending (live-validate) |
-| 4 | Operator-creds stability | ⬜ pending (investigate) |
+| 2 | Clean up `docs/how-to/sandbox-workspaces.md` | ✅ committed (docs) |
+| 3 | sd_notify + Type=notify units | ✅ committed (Tier-1; live-validate queued) |
+| 4 | Operator-creds stability | ⏳ in progress |
 | 5 | Non-device `containerdDriver` (opt-in) | ⬜ pending (stretch) |
 | 6 | Interactive exec/attach streaming | ⬜ optional |
 
@@ -38,6 +38,27 @@ root within HOST_OPS; `VMGrant` already denies it to TELEMETRY — no authz chan
 - The SO_PEERCRED-reject record stays **file-only** by design (a rejected peer is
   never the front, so it is not handed the audit trail).
 
+### 2) `docs(sandbox): rewrite sandbox-workspaces for the aped-client reality` — `1619df5`
+
+Pure docs. `docs/how-to/sandbox-workspaces.md` rewritten for the PLAN-18
+aped-client model (retired daemonless-runner framing, real client flags/verbs,
+networkless Phase-2, executor-sandbox known limitation cross-linking
+run-aped.md). docs-check green. No live validation needed.
+
+### 3) `feat(aped): sd_notify READY=1 + watchdog; Type=notify units` — `5367e51`
+
+Both aped processes signal `READY=1` once serving + `WATCHDOG=1` at
+`WatchdogSec/2`; `STOPPING=1` on drain. Units switched to `Type=notify` +
+`WatchdogSec=30s`. All no-ops without `$NOTIFY_SOCKET`.
+
+- Files: `notify.go` (new — sdNotify/notifyTo/watchdogInterval/startWatchdog,
+  no build tag, Windows-safe), `run.go`/`front.go` (signalReady/Stopping),
+  `deploy/systemd/{aped,aped-front}.service` (Type=notify + WatchdogSec),
+  plan-18 Appendix-A note refresh.
+- **Tier-1 verified:** `notify_test.go` (datagram send against a real AF_UNIX
+  DGRAM listener + WATCHDOG_USEC/PID decision). Both units pass
+  `systemd-analyze verify` (exit 0) locally.
+
 ## VALIDATION QUEUE (steps needing root / live Tier-2 — hand to operator via `! sudo bash <script>`)
 
 Redeploy recipe (socket-first restart — see `aped-live-validation-workflow`
@@ -45,6 +66,23 @@ memory): rebuild, `install -m0755 ./aped /usr/local/bin/aped`, then
 `systemctl restart aped-priv.socket` → `systemctl start aped.service
 aped-front.service`, then re-copy `/var/lib/aped/creds/operator.creds` to the
 operator path.
+
+- **Item 3 (Type=notify units), live:** after installing the updated units +
+  redeploying the `aped` binary, confirm systemd sees `READY=1` and the watchdog:
+  ```bash
+  # (operator) install updated binary + units, then:
+  systemctl daemon-reload
+  systemctl restart aped-priv.socket
+  systemctl start aped.service aped-front.service
+  systemctl show aped.service       -p Type -p WatchdogUSec -p NNotifyAccess -p ActiveState -p SubState
+  systemctl show aped-front.service -p Type -p WatchdogUSec -p ActiveState -p SubState
+  # Expect Type=notify, WatchdogUSec=30s, ActiveState=active, SubState=running.
+  # Then confirm no watchdog restarts over ~1 min:
+  journalctl -u aped.service -u aped-front.service --since "2 min ago" | grep -i watchdog || echo "no watchdog trips (good)"
+  ```
+  Then re-copy the operator cred (see below). Risk if it fails: a unit that never
+  gets READY=1 will be killed at TimeoutStartSec — check `systemctl status` shows
+  `Active: active (running)`, not `activating`/`failed`.
 
 - **Item 1 (audit forwarding), live:** after redeploy, subscribe
   `ape.audit.<node>.>` on the operator cred's account and drive a `create`/
