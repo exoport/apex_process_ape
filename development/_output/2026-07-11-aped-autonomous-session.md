@@ -346,16 +346,32 @@ and `/var/lib/aped/creds/operator.creds` is byte-identical
 **Backlog status: items 1 (Tier-1) · 2 (docs) · 3 · 4 · 5 all validated.** Only
 the full-stack e2e + interactive PTY through the deployed hardened unit remains.
 
-### ⚠️ Item 5 full e2e — socket desync bug found + fixed (retry pending)
+### ✅ Item 5 full e2e — `ape sandbox up`/`down` through the HARDENED unit PASS
 
-The e2e (drop-in installed, `aped.service` active with `--driver containerd`,
-operator cred copied) hit `ape sandbox up` → `dial /run/aped/priv.sock: no such
-file`. Root cause: `aped.service` had `RuntimeDirectory=aped` with the default
-`RuntimeDirectoryPreserve=no`, so `restart aped.service` (after the socket-first
-`restart aped-priv.socket`) **removed /run/aped on stop** — deleting the priv
-socket the socket unit had just created. The documented socket-first restart
-can't help; the service teardown nukes the dir. Fixed: `RuntimeDirectoryPreserve=yes`
-on `aped.service` (a lifecycle setting, not a hardening change) + a doc/recovery
-recipe. `scratchpad/recover-aped-socket.sh` reinstalls the fixed unit + does a
-clean dependency-ordered restart. **Retry the e2e + interactive PTY after
-recovery** (streamed `exec` incl. `exit 7` propagation, `attach` shell + resize).
+After recovery, `ape sandbox up dev --image ape-tier2-probe:latest --mount
+ephemeral` succeeded through the deployed **hardened** `aped.service` with
+`--driver containerd`: `workspace "dev" up (…, kata-clh, mount=ephemeral)`, and
+`down` tore it down. **Barrier 3 is cleared end-to-end through the deployed
+two-process daemon** — the whole point of the containerd driver.
+
+Three real bugs the live e2e surfaced, all fixed:
+
+1. **Socket desync (`be60033`).** `ape sandbox up` first failed `dial
+   /run/aped/priv.sock: no such file`. `aped.service`'s `RuntimeDirectory=aped`
+   (default `RuntimeDirectoryPreserve=no`) removed `/run/aped` on stop, deleting
+   the priv socket the socket unit had created — defeating socket-first restart.
+   Fixed with `RuntimeDirectoryPreserve=yes` + a clean-recovery recipe
+   (`scratchpad/recover-aped-socket.sh`).
+2. **Stale `ape` client.** `validate-items-3-4-redeploy.sh` rebuilt `aped` but not
+   `ape`, so `exec`/`attach` ran the OLD stubs (`attach` → "not yet wired
+   (Tier-2)"; `exec` → old "command exited 7" + no streamed output). Redeploy
+   rebuilds BOTH (`scratchpad/redeploy-latest.sh`).
+3. **Stale operator cred (`e7f4f48`).** `reusableOperatorCreds` only checked the
+   pub-allow, so the cred reused across restart lacked the new
+   `ape.vmm.<node>.exec.>` SUB scope → attach would fail a NATS permission check.
+   Now requires the sub scope too, forcing a re-mint on the grant change.
+
+**Retry pending (after `redeploy-latest.sh`):** the streamed `exec` (`uname -r`
+live on the terminal, `exit 7` → `ape exit=7`) and the interactive `attach` PTY.
+The daemon-side lifecycle + provisioning is proven; the last unproven bit is the
+PTY stdio itself.
