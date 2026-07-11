@@ -35,6 +35,9 @@ type stackOpts struct {
 	// backend so create/mutate verbs work without containerd — for the pure
 	// control-plane tests (audit forwarding, error mapping) that run in CI.
 	fake bool
+	// driver selects a real driver for the gated Tier-2 acceptance: "" → the
+	// nerdctl shellDriver; DriverContainerd → the opt-in containerd client.
+	driver string
 }
 
 func startFullStack(t *testing.T) *fullStack {
@@ -58,7 +61,8 @@ func newStack(t *testing.T, opts stackOpts) *fullStack {
 		provision Provisioner
 		policy    *Policy
 	)
-	if opts.fake {
+	switch {
+	case opts.fake:
 		fake := newFakeBackend()
 		backend = fake
 		provision = func(ctx context.Context, spec sandbox.WorkspaceSpec) (workspace.Workspace, error) {
@@ -66,7 +70,19 @@ func newStack(t *testing.T, opts stackOpts) *fullStack {
 			return workspace.Workspace{ID: spec.Name, Name: spec.Name, Image: spec.Image}, nil
 		}
 		policy = &Policy{Images: []string{testImage}}
-	} else {
+	case opts.driver == DriverContainerd:
+		// The opt-in containerd driver, driven in-process for live Tier-2
+		// validation (needs a real containerd socket; the gated test skips
+		// without one). Backend + Provisioner are the same driver instance.
+		cd, err := sandbox.NewContainerdDriver(sandbox.ContainerdConfig{Registry: reg})
+		if err != nil {
+			t.Fatalf("containerd driver: %v", err)
+		}
+		t.Cleanup(func() { _ = cd.Close() })
+		backend = cd
+		provision = cd.Provision
+		policy = &Policy{Images: []string{testImage, liveImage()}}
+	default:
 		runner := &sandbox.Runner{}
 		backend = sandbox.NewShellDriver(runner, reg, nil)
 		provision = NewShellProvisioner(runner, reg)
@@ -285,7 +301,30 @@ func TestTier2Provision(t *testing.T) {
 		t.Skip("nerdctl not on PATH")
 	}
 
-	fs := startFullStack(t)
+	driveTier2Lifecycle(t, startFullStack(t))
+}
+
+// TestTier2ProvisionContainerd is the same live acceptance driven through the
+// OPT-IN containerd driver (PLAN-18 D3 barrier-3 fix) instead of the nerdctl
+// shellDriver — the in-process validation of `aped run --driver containerd`.
+// Gated on APE_APED_IT=1 + /dev/kvm + a containerd socket + Kata.
+func TestTier2ProvisionContainerd(t *testing.T) {
+	if os.Getenv("APE_APED_IT") != "1" {
+		t.Skip("set APE_APED_IT=1 (needs /dev/kvm + containerd + Kata) to run the containerd Tier-2 acceptance")
+	}
+	if _, err := os.Stat("/dev/kvm"); err != nil {
+		t.Skip("no /dev/kvm")
+	}
+	if _, err := os.Stat(sandbox.DefaultContainerdAddress); err != nil {
+		t.Skip("no containerd socket at " + sandbox.DefaultContainerdAddress)
+	}
+	driveTier2Lifecycle(t, newStack(t, stackOpts{driver: DriverContainerd}))
+}
+
+// driveTier2Lifecycle runs the create → exec → freeze → unfreeze → destroy
+// acceptance against a live stack (shared by the shell + containerd Tier-2 tests).
+func driveTier2Lifecycle(t *testing.T, fs *fullStack) {
+	t.Helper()
 	ctx := context.Background()
 	const name = "aped-it"
 	img := liveImage()

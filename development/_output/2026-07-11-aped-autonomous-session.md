@@ -14,7 +14,7 @@ gate — see `ci-local-govulncheck-preexisting` memory).
 | 2 | Clean up `docs/how-to/sandbox-workspaces.md` | ✅ committed (docs) |
 | 3 | sd_notify + Type=notify units | ✅ committed (Tier-1; live-validate queued) |
 | 4 | Operator-creds stability | ✅ committed (Tier-1) |
-| 5 | Non-device `containerdDriver` (opt-in) | ⏳ in progress (stretch) |
+| 5 | Non-device `containerdDriver` (opt-in) | ✅ committed (Tier-1; live-validate queued) |
 | 6 | Interactive exec/attach streaming | ⬜ optional |
 
 ## Commit log
@@ -71,6 +71,25 @@ seed persists (`StartServer` StoreDir).
   socket-first restart section).
 - **Tier-1 verified:** `front_test.go` — reuse byte-identical across a restart;
   foreign account / changed node / corrupt file each re-mint.
+
+### 5) `feat(aped): opt-in containerd driver (barrier-3-free provisioning)` — `f2c68aa`
+
+The barrier-3 fix, opt-in behind `aped run --driver containerd` (default stays
+shellDriver). The containerd v2 Go client builds the OCI spec via
+`applyImageConfig` — process user/env/args/cwd from the content-store image
+config, **no rootfs mount** — so `ape sandbox up` can work through the hardened
+executor. Deps (containerd/v2 v2.3.3 + image-spec) are linux-only in goreleaser;
+xcompile-windows + snapshot stay green.
+
+- Files: `internal/sandbox/imagespec.go` (+test), `containerd_driver.go`,
+  `containerd_driver_linux.go`, `containerd_driver_other.go` (stub),
+  `internal/aped/run.go` (`buildDriver` + `--driver`), `internal/apedcmd/run.go`
+  (flags), run-aped.md + plan-18 updates.
+- **Tier-1 verified:** `imagespec_test.go` (spec projected with ZERO mounts,
+  numeric-user only, networkless) + `run_test.go` (driver selection; unknown
+  fails closed). Full race suite (24 pkgs) green; xcompile-windows + snapshot green.
+- **NOT live-validated:** the full lifecycle through the containerd client
+  (create/exec/freeze/destroy on a real Kata VM) — queued below.
 
 ## VALIDATION QUEUE (steps needing root / live Tier-2 — hand to operator via `! sudo bash <script>`)
 
