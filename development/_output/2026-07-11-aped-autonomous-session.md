@@ -13,8 +13,8 @@ gate — see `ci-local-govulncheck-preexisting` memory).
 | 1 | Audit NATS forwarding on `ape.audit.<node>.>` | ✅ committed (Tier-1) |
 | 2 | Clean up `docs/how-to/sandbox-workspaces.md` | ✅ committed (docs) |
 | 3 | sd_notify + Type=notify units | ✅ committed (Tier-1; live-validate queued) |
-| 4 | Operator-creds stability | ⏳ in progress |
-| 5 | Non-device `containerdDriver` (opt-in) | ⬜ pending (stretch) |
+| 4 | Operator-creds stability | ✅ committed (Tier-1) |
+| 5 | Non-device `containerdDriver` (opt-in) | ⏳ in progress (stretch) |
 | 6 | Interactive exec/attach streaming | ⬜ optional |
 
 ## Commit log
@@ -59,6 +59,19 @@ Both aped processes signal `READY=1` once serving + `WATCHDOG=1` at
   DGRAM listener + WATCHDOG_USEC/PID decision). Both units pass
   `systemd-analyze verify` (exit 0) locally.
 
+### 4) `feat(aped): reuse the operator credential across restart` — `fb165ce`
+
+aped-front re-minted the operator `.creds` every restart (churning the human's
+copy). It now reuses a persisted-valid cred (issuer + unexpired + node scope),
+minting only when missing/foreign/wrong-node/corrupt. Sound because the account
+seed persists (`StartServer` StoreDir).
+
+- Files: `mint.go` (`Account.reusableOperatorCreds`), `front.go`
+  (`ensureOperatorCreds`; logs `minted`/`reused`), `run-aped.md` (reuse note +
+  socket-first restart section).
+- **Tier-1 verified:** `front_test.go` — reuse byte-identical across a restart;
+  foreign account / changed node / corrupt file each re-mint.
+
 ## VALIDATION QUEUE (steps needing root / live Tier-2 — hand to operator via `! sudo bash <script>`)
 
 Redeploy recipe (socket-first restart — see `aped-live-validation-workflow`
@@ -66,6 +79,16 @@ memory): rebuild, `install -m0755 ./aped /usr/local/bin/aped`, then
 `systemctl restart aped-priv.socket` → `systemctl start aped.service
 aped-front.service`, then re-copy `/var/lib/aped/creds/operator.creds` to the
 operator path.
+
+- **Item 4 (operator-cred reuse), live:** after redeploy, confirm the front logs
+  `operator creds: … (reused; …)` on the **second** restart (and `minted` on the
+  first / after a state-dir reset), and that `~/.config/ape/aped-operator.creds`
+  does **not** need re-copying between restarts:
+  ```bash
+  journalctl -u aped-front --since "1 min ago" | grep "operator creds"   # expect "reused" after 1st start
+  # confirm the file is unchanged across a restart:
+  sudo sha256sum /var/lib/aped/creds/operator.creds   # note it, restart socket-first, compare
+  ```
 
 - **Item 3 (Type=notify units), live:** after installing the updated units +
   redeploying the `aped` binary, confirm systemd sees `READY=1` and the watchdog:
