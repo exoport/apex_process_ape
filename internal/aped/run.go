@@ -102,5 +102,9 @@ func RunExecutor(ctx context.Context, cfg ExecutorRunConfig) error {
 	defer func() { _ = l.Close() }()
 
 	fmt.Fprintf(stderr, "▶ aped run (executor) on %s — %d allowed peer uid(s), policy %s\n", l.Addr(), len(cfg.AllowedUIDs), cfg.PolicyPath)
+	// The listener is bound (or adopted); tell the service manager we are up and
+	// start the watchdog pinger (both no-ops outside a Type=notify unit).
+	signalReady(ctx)
+	defer signalStopping()
 	return ex.Serve(ctx, l)
 }

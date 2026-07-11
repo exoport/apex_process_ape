@@ -973,11 +973,13 @@ executor holds almost no capability and no network address family beyond `AF_UNI
 > dropped. The `SystemCallFilter` denylist also needs **one** leading `~` for the
 > whole space-separated list (`~@mount @swap @reboot …`) — repeating `~` per group
 > makes systemd read `~@swap` as an unknown *syscall name* and silently drop the
-> filter, leaving only `@mount` denied. These blocks are also aspirational in
-> shape (`Type=notify` + `--socket-activated` await `sd_notify`; the shipped units
-> use `Type=exec` with explicit flags). Deploy the corrected, `systemd-analyze
-> verify`-clean copies from **`deploy/systemd/`** (installed by
-> `deploy/tier2-setup.sh`), not these.
+> filter, leaving only `@mount` denied. The shipped units now match the
+> `Type=notify` shape shown below (aped implements `sd_notify`: `READY=1` once
+> serving + a `WATCHDOG=1` ping at `WatchdogSec/2`); the priv socket is inherited
+> via `LISTEN_FDS`, not a `--socket-activated` flag, and the shipped `ExecStart`
+> carries explicit flags. Deploy the corrected, `systemd-analyze verify`-clean
+> copies from **`deploy/systemd/`** (installed by `deploy/tier2-setup.sh`), not
+> these.
 
 ### `/etc/systemd/system/aped-priv.socket` — internal front↔root boundary
 

@@ -121,6 +121,9 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 	_ = nc.Flush()
 
 	fmt.Fprintf(stderr, "▶ aped front — ape.vmm.%s.> on %s (executor via %s)\n", node, srv.ClientURL(), cfg.Socket)
+	// The vmm service is registered and the operator cred is written; tell the
+	// service manager we are up and arm the watchdog (no-ops under Type=exec).
+	signalReady(ctx)
 	return serveUntilSignal(ctx, svc, stderr)
 }
 
@@ -135,6 +138,7 @@ func serveUntilSignal(ctx context.Context, svc micro.Service, stderr io.Writer) 
 	case <-ctx.Done():
 	case <-sigc:
 	}
+	signalStopping() // no-op outside a Type=notify unit
 	fmt.Fprintln(stderr, "⇣ aped front: draining")
 	_ = svc.Stop()
 	return nil

@@ -13,11 +13,14 @@ Requires=aped-priv.socket
 Wants=containerd.service
 
 [Service]
-# Type=exec (not notify): aped does not yet implement sd_notify. The priv socket
-# is inherited from aped-priv.socket (LISTEN_FDS, auto-detected).
-Type=exec
+# Type=notify: aped signals READY=1 once the priv socket is bound/adopted and
+# pings the watchdog on a timer (sd_notify(3), via $NOTIFY_SOCKET — AF_UNIX, so
+# RestrictAddressFamilies=AF_UNIX below already permits it). The priv socket is
+# inherited from aped-priv.socket (LISTEN_FDS, auto-detected).
+Type=notify
 ExecStart=/usr/local/bin/aped run --policy /etc/aped/policy.yaml --state-dir /var/lib/aped --audit-log /var/log/aped/audit.jsonl --node %H --allow-user aped
 Restart=on-failure
+WatchdogSec=30s
 
 # Identity: root, for the containerd socket + (device tier) sysfs vfio-pci bind.
 # Group=ape is for the priv.sock group; NOT the containerd group.

@@ -11,12 +11,16 @@ Requires=aped-priv.socket
 After=aped.service aped-priv.socket
 
 [Service]
-Type=exec
+# Type=notify: aped-front signals READY=1 once the vmm micro service is
+# registered + the operator cred is written, and pings the watchdog on a timer
+# (sd_notify(3) — AF_UNIX, permitted by RestrictAddressFamilies below).
+Type=notify
 # --guest-nats-url is set to the host↔guest bridge endpoint in production so
 # per-VM creds + telemetry are injected; omitted here (guests boot without an
 # agent — see PLAN-18 D6).
 ExecStart=/usr/local/bin/aped front --node %H --state-dir /var/lib/aped --mgmt-host 127.0.0.1 --mgmt-port 4223 --operator-creds /var/lib/aped/creds/operator.creds
 Restart=on-failure
+WatchdogSec=30s
 
 # Identity — NOT root. Group=ape so it may connect() /run/aped/priv.sock
 # (0660 root:ape). DynamicUser=no: a stable uid for the executor's SO_PEERCRED gate.
