@@ -358,6 +358,28 @@ with **≤32 KiB frames + credit-based flow control**. Locally the operator is
 on-host: the `Stream` (D3) is implemented directly over the containerd task-exec
 PTY, so bulk stdio **never touches NATS** — same signature, two impls.
 
+> **As built (Phase 2).** The transport lives in `internal/vmmstream`
+> (`Sender`/`Receiver` + a channel-tagged credit window + `NewServerSession`/
+> `Attach`). Two subtleties the sketch above glosses:
+> 1. **The executor cannot run the NATS side.** It is network-less
+>    (`RestrictAddressFamilies=AF_UNIX`), so it holds no NATS conn — the "pipe the
+>    driver's PTY over the session subjects" shortcut is impossible under the
+>    hardened unit. Instead the **executor relays the PTY to the front over the
+>    priv socket** (`internal/aped/stream.go`, `OpAttach`), and the **front** runs
+>    the `vmmstream` server session, bridging the priv-socket stream to the NATS
+>    subjects. Kernel socket-buffer backpressure on the priv leg; the credit
+>    window governs only the NATS leg. Only the containerd driver implements the
+>    interactive backend; the shell driver → `UNSUPPORTED`.
+> 2. **Race-free startup.** NATS core has no retention, so output senders start at
+>    zero credit and publish nothing until the client primes after subscribing;
+>    the front finishes `NewServerSession` (subscribe) before answering
+>    `attach.open`. `OperatorGrant` had to add `ape.vmm.<node>.exec.>` to its
+>    *sub*-allow (it could publish there but not receive).
+>
+> Tier-1-proven end-to-end with a fake process (`TestFullStackAttachStream`); the
+> containerd PTY itself is Tier-2 (live host). Abnormal-client-disconnect teardown
+> is a tracked follow-up (see the session log).
+
 ### D3: The transport-agnostic `Backend` interface + PLAN-16 migration
 
 One interface (new `internal/workspace`, generalizing today's `Runner`) that a
