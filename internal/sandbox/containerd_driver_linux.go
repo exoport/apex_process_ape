@@ -18,6 +18,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/pkg/oci"
 	"github.com/containerd/errdefs"
+	reference "github.com/distribution/reference"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 
@@ -172,6 +173,7 @@ func (d *containerdDriver) Provision(ctx context.Context, spec WorkspaceSpec) (w
 // snapshotter WithNewSnapshot uses. Best-effort: an unpack failure is left to
 // surface at snapshot creation with a clearer message than we could add here.
 func (d *containerdDriver) getOrPull(ctx context.Context, ref string) (client.Image, error) {
+	ref = normalizeImageRef(ref)
 	if img, err := d.cli.GetImage(ctx, ref); err == nil {
 		if unpacked, uerr := img.IsUnpacked(ctx, ""); uerr == nil && !unpacked {
 			_ = img.Unpack(ctx, "")
@@ -183,6 +185,21 @@ func (d *containerdDriver) getOrPull(ctx context.Context, ref string) (client.Im
 		return nil, fmt.Errorf("containerd driver: pull %s: %w", ref, err)
 	}
 	return img, nil
+}
+
+// normalizeImageRef canonicalizes an image reference the way nerdctl/docker do
+// (bare "alpine" → "docker.io/library/alpine:latest") so the driver's exact-match
+// GetImage lookup agrees with how images are stored and pulled. Without it a
+// present image referenced by its short name is missed — GetImage("foo:latest")
+// does not match the stored "docker.io/library/foo:latest" — and the driver then
+// attempts a doomed registry pull. Falls back to the raw ref on a parse error, so
+// GetImage/Pull still surface a clear error.
+func normalizeImageRef(ref string) string {
+	named, err := reference.ParseDockerRef(ref)
+	if err != nil {
+		return ref
+	}
+	return named.String()
 }
 
 // Start (re)starts a stopped workspace's task; a running one is left as-is.
