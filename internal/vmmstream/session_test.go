@@ -92,9 +92,17 @@ func TestSessionRoundTrip(t *testing.T) {
 	const prefix = "ape.vmm.node1.exec.s1"
 	proc := newEchoProcess()
 
+	// Set up + flush the server (subscribes control/stdin/resize) BEFORE the
+	// client starts, mirroring how the front finishes setup before answering
+	// attach.open. Output stays gated at zero credit until the client primes.
+	srv, err := NewServerSession(srvConn, prefix, proc, 4)
+	if err != nil {
+		t.Fatalf("NewServerSession: %v", err)
+	}
+	_ = srvConn.Flush()
 	srvDone := make(chan int, 1)
 	go func() {
-		code, _ := Serve(context.Background(), srvConn, prefix, proc, 4)
+		code, _ := srv.Run(context.Background())
 		srvDone <- code
 	}()
 

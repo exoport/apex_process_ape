@@ -75,6 +75,7 @@ type Receiver struct {
 	nc         *nats.Conn
 	creditSubj string
 	ch         Channel
+	initial    int
 	frames     chan []byte
 	sub        *nats.Subscription
 	closed     chan struct{}
@@ -94,6 +95,7 @@ func NewReceiver(nc *nats.Conn, dataSubj, creditSubj string, ch Channel, credit 
 		nc:         nc,
 		creditSubj: creditSubj,
 		ch:         ch,
+		initial:    credit,
 		frames:     make(chan []byte, credit),
 		closed:     make(chan struct{}),
 	}
@@ -135,6 +137,14 @@ func (r *Receiver) Read(p []byte) (int, error) {
 	r.pending = r.pending[n:]
 	return n, nil
 }
+
+// Prime releases the peer Sender's whole initial window in one control message.
+// A session's OUTPUT sender is created with zero credit so it cannot publish
+// before its consumer has subscribed — NATS core has no retention, so an early
+// frame would be lost. The consumer calls Prime once, after subscribing +
+// flushing, to open the gate; grant-on-consume (Read) refills from there. Call
+// it exactly once.
+func (r *Receiver) Prime() error { return r.grant(r.initial) }
 
 // grant publishes a credit refill on the control channel, tagged with this
 // Receiver's channel so the peer Sender routes it to the right stream.
