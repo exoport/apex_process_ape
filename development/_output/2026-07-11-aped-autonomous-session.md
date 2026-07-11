@@ -346,10 +346,16 @@ and `/var/lib/aped/creds/operator.creds` is byte-identical
 **Backlog status: items 1 (Tier-1) · 2 (docs) · 3 · 4 · 5 all validated.** Only
 the full-stack e2e + interactive PTY through the deployed hardened unit remains.
 
-### Still queued for the operator
+### ⚠️ Item 5 full e2e — socket desync bug found + fixed (retry pending)
 
-- **Item 5 full e2e through the hardened unit** (drop-in) +
-  **interactive PTY** (streamed `exec`, `attach` shell):
-  `scratchpad/validate-item5-driver-e2e.sh` then the PTY block above. The gated
-  in-process pass above already proves the driver lifecycle; the e2e proves it
-  through the deployed hardened `aped.service`.
+The e2e (drop-in installed, `aped.service` active with `--driver containerd`,
+operator cred copied) hit `ape sandbox up` → `dial /run/aped/priv.sock: no such
+file`. Root cause: `aped.service` had `RuntimeDirectory=aped` with the default
+`RuntimeDirectoryPreserve=no`, so `restart aped.service` (after the socket-first
+`restart aped-priv.socket`) **removed /run/aped on stop** — deleting the priv
+socket the socket unit had just created. The documented socket-first restart
+can't help; the service teardown nukes the dir. Fixed: `RuntimeDirectoryPreserve=yes`
+on `aped.service` (a lifecycle setting, not a hardening change) + a doc/recovery
+recipe. `scratchpad/recover-aped-socket.sh` reinstalls the fixed unit + does a
+clean dependency-ordered restart. **Retry the e2e + interactive PTY after
+recovery** (streamed `exec` incl. `exit 7` propagation, `attach` shell + resize).

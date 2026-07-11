@@ -39,6 +39,13 @@ StateDirectoryMode=0770
 LogsDirectory=aped
 RuntimeDirectory=aped
 RuntimeDirectoryMode=0710
+# PRESERVE /run/aped across restarts. aped-priv.socket binds /run/aped/priv.sock
+# there; without this the default RuntimeDirectoryPreserve=no makes systemd remove
+# /run/aped when aped.service STOPS, taking the priv socket file with it — so a
+# `restart aped-priv.socket` then `restart aped.service` desyncs the socket
+# (front: "dial /run/aped/priv.sock: no such file"). tmpfiles.d owns the dir's
+# existence; this just stops the service teardown from deleting it.
+RuntimeDirectoryPreserve=yes
 ProtectSystem=strict
 ReadWritePaths=/var/lib/aped /run/aped /var/log/aped
 ProtectHome=yes

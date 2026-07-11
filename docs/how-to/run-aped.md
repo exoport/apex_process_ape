@@ -97,14 +97,25 @@ systemd-analyze security aped-front.service   # ~2.5–3.5
 
 ## Restarting aped
 
-Restart **socket-first**: bounce `aped-priv.socket` before the services. The
-socket unit owns `/run/aped/priv.sock` (`RemoveOnStop=yes`); restarting only
-`aped.service` can leave the path desynced so the front fails to `connect()` it
-(`dial unixpacket /run/aped/priv.sock: no such file or directory`).
+Restart **socket-first**: bounce `aped-priv.socket` before the services.
 
 ```bash
 sudo systemctl restart aped-priv.socket
 sudo systemctl restart aped.service aped-front.service
+```
+
+`aped.service` sets `RuntimeDirectoryPreserve=yes` so stopping it does **not**
+remove `/run/aped` (and the `aped-priv.socket`-owned `/run/aped/priv.sock` inside
+it). Without that, the service's `RuntimeDirectory=aped` teardown deletes the
+socket the socket unit just created, and the front fails to `connect()` it (`dial
+unixpacket /run/aped/priv.sock: no such file or directory`) — even with a
+socket-first restart. If you ever land in that state (e.g. an older unit), recover
+with a clean dependency-ordered cycle:
+
+```bash
+sudo systemctl stop aped-front.service aped.service aped-priv.socket
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/aped.conf
+sudo systemctl start aped-priv.socket aped.service aped-front.service
 ```
 
 The operator credential is reused across the restart (above), so no re-copy is
