@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/exoport/apex_process_ape/internal/natsconn"
 	"github.com/exoport/apex_process_ape/internal/vmmstream"
@@ -230,8 +231,42 @@ func (v *VMM) handleAttachOpen(req micro.Request) {
 	})
 	go func() {
 		defer func() { _ = conn.Close() }()
-		_, _ = sess.Run(context.Background())
+		code, runErr := sess.Run(context.Background())
+		// Forward a completion record so live audit consumers see the session end,
+		// not just its open. The OPEN record (executor-attested: SO_PEERCRED peer +
+		// policy) stays the authoritative security event on ape.audit.<node>.<op>;
+		// this correlated <op>Exit record is the front's operational outcome notice.
+		forwardAuditRecords(v.publish, v.node, completionAudit(audit, r.ID, code, runErr))
 	}()
+}
+
+// completionAudit derives the session-completion record the front forwards when
+// an interactive exec/attach ends. The executor's OPEN record (open[0],
+// SO_PEERCRED-attested with its policy decision) is the authoritative security
+// event; this reuses that identity, marks a distinct <op>Exit event, and carries
+// the observed outcome — a clean exit code, or the teardown error when the
+// session was reaped (an abandoned client) rather than exiting on its own.
+func completionAudit(open []AuditRecord, id string, code int, runErr error) []AuditRecord {
+	base := AuditRecord{Op: "AttachVM", Resolved: ResolvedArgs{WorkspaceID: id}}
+	if len(open) > 0 {
+		base = open[0]
+	}
+	outcome := Outcome{OK: true, VMID: id}
+	switch {
+	case runErr != nil:
+		outcome = Outcome{OK: false, VMID: id, Error: "session ended: " + runErr.Error()}
+	case code != 0:
+		outcome = Outcome{OK: false, VMID: id, Error: fmt.Sprintf("exited with code %d", code)}
+	}
+	return []AuditRecord{{
+		TS:           now().Format(time.RFC3339Nano),
+		BoundaryPeer: base.BoundaryPeer,
+		Caller:       base.Caller,
+		Op:           base.Op + "Exit",
+		Resolved:     base.Resolved,
+		Policy:       base.Policy,
+		Outcome:      outcome,
+	}}
 }
 
 // attachStreamFromReq maps the wire AttachRequest to the executor's stream

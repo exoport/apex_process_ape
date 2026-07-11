@@ -193,7 +193,10 @@ disconnects slow consumers).
 `ape.audit.<node>.<event>` — one structured record per privileged `aped` op
 (caller identity, operation, **resolved** args, policy rule + decision, outcome).
 Append-only / forwarded; complements kernel `auditd` rules on `/dev/kvm` +
-`/dev/vfio/*`.
+`/dev/vfio/*`. An interactive exec/attach emits two: the executor-attested open
+(`ExecVM`/`AttachVM`, SO_PEERCRED peer + policy decision) and a correlated
+completion (`ExecVMExit`/`AttachVMExit`) the front forwards with the exit
+outcome when the session ends.
 
 ### Per-VM telemetry (PLAN-18) reuses `ape.evt`/`log`/`metrics`
 

@@ -379,6 +379,26 @@ func TestFullStackAttachStream(t *testing.T) {
 	fs := newStack(t, stackOpts{fake: true})
 	ctx := context.Background()
 
+	// An audit consumer (HOST_OPS) to prove the session's completion record is
+	// forwarded, not just its open (the front emits <op>Exit when Run returns).
+	subCreds, _, err := fs.srv.HostOps().MintUser("audit-sub", serviceGrant(), 0)
+	if err != nil {
+		t.Fatalf("mint audit-sub cred: %v", err)
+	}
+	subConn, _ := connectCreds(t, fs.srv.ClientURL(), subCreds, "")
+	recs := make(chan AuditRecord, 16)
+	sub, err := subConn.Subscribe("ape.audit.node1.>", func(m *nats.Msg) {
+		var rec AuditRecord
+		if json.Unmarshal(m.Data, &rec) == nil {
+			recs <- rec
+		}
+	})
+	if err != nil {
+		t.Fatalf("subscribe audit: %v", err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	_ = subConn.Flush()
+
 	if _, err := fs.client.Create(ctx, workspace.CreateRequest{Name: testWS, Image: testImage, Mount: "ephemeral"}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -426,5 +446,20 @@ func TestFullStackAttachStream(t *testing.T) {
 	}
 	if stderr.String() != "READY\n" {
 		t.Errorf("stderr = %q, want %q (banner through the full bridge)", stderr.String(), "READY\n")
+	}
+
+	// The session's completion record reaches ape.audit.<node>.> with the exit
+	// outcome — an AttachVMExit event correlated to the AttachVM open. Three
+	// records flow: CreateVM, AttachVM (open), then AttachVMExit (completion).
+	got := collectAudit(t, recs, 3)
+	exit := findAudit(got, func(r AuditRecord) bool { return r.Op == "AttachVMExit" })
+	if exit == nil {
+		t.Fatalf("no AttachVMExit completion record forwarded in %+v", got)
+	}
+	if exit.Outcome.OK || exit.Outcome.Error == "" {
+		t.Errorf("completion outcome = %+v, want !OK with the exit-7 error", exit.Outcome)
+	}
+	if exit.Resolved.WorkspaceID != testWS {
+		t.Errorf("completion workspace_id = %q, want %q", exit.Resolved.WorkspaceID, testWS)
 	}
 }
