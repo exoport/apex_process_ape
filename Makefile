@@ -60,8 +60,8 @@ snapshot: $(GORELEASER) ## Build release snapshot artifacts via goreleaser (no u
 	$(GORELEASER) release --snapshot --clean --skip=publish --skip=sign
 
 .PHONY: govulncheck
-govulncheck: $(GOVULNCHECK) ## Scan for known vulnerabilities (pinned via bingo).
-	$(GOVULNCHECK) ./...
+govulncheck: $(GOVULNCHECK) ## Scan for known vulnerabilities (pinned via bingo); allow-lists documented unfixable advisories.
+	python3 scripts/govulncheck-gate.py $(GOVULNCHECK) ./...
 
 .PHONY: tools
 tools: $(GOLANGCI_LINT) $(GOFUMPT) $(GORELEASER) $(GOVULNCHECK) ## Pre-install all bingo-pinned tools.

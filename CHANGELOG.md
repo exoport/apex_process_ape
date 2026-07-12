@@ -2,6 +2,18 @@
 
 ## v0.0.43 (2026-07-12)
 
+- **chore(security): bump Go toolchain to 1.26.5** — clears `GO-2026-5856`
+  (crypto/tls ECH privacy leak) and `GO-2026-4970` (os symlink root-escape) from
+  the shipped binaries.
+- **chore(ci): scope the govulncheck gate with a documented allow-list** —
+  `GO-2026-5932` (`golang.org/x/crypto/openpgp`, "unsafe by design", `Fixed in:
+  N/A`) is pulled transitively by `github.com/creativeprojects/go-selfupdate`;
+  `ape update` sets no PGP validator so it is linked-but-unused. A new
+  `scripts/govulncheck-gate.py` allow-lists exactly that advisory (with
+  justification) while still failing CI on any other or new vulnerability.
+  Tracked follow-up: replace the self-update path with a cosign-verifying
+  updater to drop openpgp entirely.
+
 - **feat(framework): always-on operating-rules fragment + managed `CLAUDE.md`
   block (PLAN-47 Workstream C)** — `ape framework setup`/`update` now install a
   framework-maintained `_apex/apex-operating-rules.md` fragment and ensure the
