@@ -1,7 +1,7 @@
 ---
 plan_id: PLAN-13
 created_at: 2026-07-02
-status: proposed
+status: done
 tags:
   - nats
   - eventing

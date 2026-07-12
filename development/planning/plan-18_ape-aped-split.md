@@ -1,7 +1,7 @@
 ---
 plan_id: PLAN-18
 created_at: 2026-07-08
-status: proposed
+status: partially-implemented
 tags:
   - sandbox
   - kata
@@ -69,31 +69,35 @@ origin:
 
 ## Status / task checklist
 
-> Nothing here is built yet. PLAN-13/14/17 (the NATS foundation `aped` sits on)
-> are `proposed` with **zero code**: no `nats` dependency in `go.mod`, and none
-> of `internal/{natsconn,eventing,reporting,service,blobstore}` exist. Phase 0
-> is a hard gate on everything else.
+> **Phases 0–2 are done + live-validated (2026-07-11/12), plus the non-device
+> `containerdDriver` (Phase 3).** PLAN-13/14/17 (the NATS foundation) and the
+> `Backend` refactor shipped; `aped` runs the full lifecycle (create → exec →
+> attach → freeze → down) through the hardened two-process units on a real
+> KVM+containerd+Kata host. **Remaining:** VFIO/GPU passthrough (Phase 3 device
+> tier — blocked on a discrete-GPU box) and the remote/controller/Firecracker
+> tier (Phase 4 — platform-repo work). All on `feat/plan-18-phase2-aped`,
+> unreleased (targets CHANGELOG v0.0.42).
 
 ### Phase 0 — NATS foundation (prerequisite; PLAN-13 → PLAN-17 → PLAN-14)
-- [ ] Implement **PLAN-13** (`internal/natsconn` + `Identity()`, `internal/eventing`, `internal/blobstore`; the `ape.{evt,log,metrics}.<user>.<project>.…` taxonomy; `ape.blob.uri-request`) — adds the `nats.go` dependency.
-- [ ] Implement **PLAN-17** identity amendments inside PLAN-13's PRs (user token in subjects, `session` kind, `session_id` in payloads) + the reporting commands.
-- [ ] Implement **PLAN-14** (`internal/service` NATS-micro shape: `micro.AddService`, `$SRV`, keyed admission, `req.Error` codes, graceful drain).
+- [x] Implement **PLAN-13** (`internal/natsconn` + `Identity()`, `internal/eventing`, `internal/blobstore`; the `ape.{evt,log,metrics}.<user>.<project>.…` taxonomy; `ape.blob.uri-request`) — adds the `nats.go` dependency.
+- [x] Implement **PLAN-17** identity amendments inside PLAN-13's PRs (user token in subjects, `session` kind, `session_id` in payloads) + the reporting commands.
+- [x] Implement **PLAN-14** (`internal/service` NATS-micro shape: `micro.AddService`, `$SRV`, keyed admission, `req.Error` codes, graceful drain).
 
 ### Phase 1 — Extract the `Backend` interface (pure refactor of PLAN-16; no daemon)
-- [ ] Define `internal/workspace.Backend` (D3) + JSON request/response types that double as the NATS wire contract; `WireVersion` const + sentinel errors mapping to PLAN-14 `req.Error` codes.
-- [ ] `shellDriver` = today's `Runner`/`RunArgs`/`ExecArgs`/`AttachArgs` satisfying `Backend`; non-device happy path, fully Tier-1 testable.
-- [ ] `Suspend`/`Resume`/`Snapshot` declared but return `ErrUnsupported` on the Kata path (D7).
-- [ ] **Correct the pause mislabel** (D7): `kata_linux.go:35`, `kata.go:196-197`, `apecmd/sandbox.go:37` & `:353` — relabel `pause` as a **freeze** (guest cgroup-freeze, RAM resident).
+- [x] Define `internal/workspace.Backend` (D3) + JSON request/response types that double as the NATS wire contract; `WireVersion` const + sentinel errors mapping to PLAN-14 `req.Error` codes.
+- [x] `shellDriver` = today's `Runner`/`RunArgs`/`ExecArgs`/`AttachArgs` satisfying `Backend`; non-device happy path, fully Tier-1 testable.
+- [x] `Suspend`/`Resume`/`Snapshot` declared but return `ErrUnsupported` on the Kata path (D7).
+- [x] **Correct the pause mislabel** (D7): `kata_linux.go:35`, `kata.go:196-197`, `apecmd/sandbox.go:37` & `:353` — relabel `pause` as a **freeze** (guest cgroup-freeze, RAM resident).
 
 ### Phase 2 — `aped` local (rootful daemon, non-device Kata-QEMU)
-- [ ] Three-process architecture (D1): network-less **root executor** + de-privileged **NATS surface** joined by an `SO_PEERCRED`-guarded typed-command AF_UNIX boundary.
-- [ ] Embedded NATS + the **`vmm` NATS-micro service** on `ape.vmm.<node>.>` (D2), built on PLAN-14's shape.
-- [ ] Per-credential subject authz (HOST_OPS vs TELEMETRY), per-VM cred minting at Create (D2).
-- [ ] Policy engine + default-deny allowlists + structured audit (D9); minimal-cap hardened systemd unit(s) (D4).
-- [ ] `ape` becomes a thin NATS client speaking `Backend` over the `vmm` contract.
+- [x] Three-process architecture (D1): network-less **root executor** + de-privileged **NATS surface** joined by an `SO_PEERCRED`-guarded typed-command AF_UNIX boundary.
+- [x] Embedded NATS + the **`vmm` NATS-micro service** on `ape.vmm.<node>.>` (D2), built on PLAN-14's shape.
+- [x] Per-credential subject authz (HOST_OPS vs TELEMETRY), per-VM cred minting at Create (D2).
+- [x] Policy engine + default-deny allowlists + structured audit (D9); minimal-cap hardened systemd unit(s) (D4).
+- [x] `ape` becomes a thin NATS client speaking `Backend` over the `vmm` contract.
 
 ### Phase 3 — Device tier (GPU/USB VFIO; **needs a discrete-GPU box**)
-- [ ] `containerdDriver` (containerd 2.x Go client) for the task-event stream + PTY fidelity + typed OCI spec (D3/D5). **Its non-device half is a Phase-2 unblock, not GPU-gated:** it is the only clean fix for the `shellDriver`/nerdctl executor-sandbox dead end (Risks) — build the OCI spec without `mount.WithTempMount` so `ape sandbox up` works through the hardened units. Can land ahead of the VFIO work.
+- [x] `containerdDriver` (containerd 2.x Go client) for the task-event stream + PTY fidelity + typed OCI spec (D3/D5). **Non-device half done + live-validated** (VFIO half is the next box). **Its non-device half is a Phase-2 unblock, not GPU-gated:** it is the only clean fix for the `shellDriver`/nerdctl executor-sandbox dead end (Risks) — build the OCI spec without `mount.WithTempMount` so `ape sandbox up` works through the hardened units. Can land ahead of the VFIO work.
 - [ ] VFIO orchestration (D5): `vfio-pci` bind, IOMMU-group enumeration/isolation check, baked per-tier `kata-qemu-gpu` handler, single-injection cold-plug, destroy+rebind+device reset.
 - [ ] GPU guest-image build/signing workstream (D5): NVIDIA modules signed against the pinned Kata guest kernel + NVRC.
 - [ ] Profile `devices:` (whole-IOMMU-group PCI; per-device USB via QEMU `usb-host`, aped-synthesised from a vendor:product allowlist).

@@ -1,8 +1,8 @@
 ---
 plan_id: PLAN-16
 created_at: 2026-07-02
-updated_at: 2026-07-07
-status: proposed
+updated_at: 2026-07-12
+status: partially-implemented
 tags:
   - sandbox
   - kata

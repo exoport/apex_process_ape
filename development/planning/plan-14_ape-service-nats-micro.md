@@ -1,7 +1,7 @@
 ---
 plan_id: PLAN-14
 created_at: 2026-07-02
-status: proposed
+status: partially-implemented
 tags:
   - new-command
   - service
