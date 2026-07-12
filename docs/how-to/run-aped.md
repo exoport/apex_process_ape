@@ -150,9 +150,11 @@ Instead, pick one:
    ```bash
    ape sandbox up dev --node "$(hostname)" --cwd /srv/workspaces/dev
    ```
-2. **Expose one home subdir via a `BindPaths=` drop-in.** Punch a single directory
-   back through the mask on **both** units (read-only is enough — only the daemon's
-   `lstat` needs it), then allow it in policy. See
+2. **Expose one home subdir via a `BindPaths=` drop-in** (a drop-in is a `.conf`
+   fragment under `<unit>.d/` that systemd merges onto the shipped unit — no edit
+   to the packaged unit). Punch a single directory back through the mask on
+   **both** units (read-only is enough — only the daemon's `lstat` needs it), then
+   allow it in policy. See
    [`deploy/systemd/aped.service.d/mount-root.conf.example`](../../deploy/systemd/aped.service.d/mount-root.conf.example):
    ```bash
    sudo install -D -m0644 deploy/systemd/aped.service.d/mount-root.conf.example \

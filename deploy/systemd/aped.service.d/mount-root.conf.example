@@ -9,6 +9,10 @@
 # only lstat's the path for the policy check — the Kata virtiofsd (a separate
 # service, NOT under this namespace) does the actual read/write guest I/O.
 #
+# A "drop-in" is a .conf fragment under <unit>.d/ that systemd merges on top of
+# the shipped unit — so this adds BindReadOnlyPaths= WITHOUT editing the packaged
+# aped.service / aped-front.service.
+#
 # To use:
 #   1. Pick the directory you keep projects in, e.g. /home/you/projects, and set
 #      it below (edit BOTH the path here and step 3).
