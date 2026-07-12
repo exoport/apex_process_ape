@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -140,6 +141,12 @@ func (c *Config) Validate() error {
 		}
 		info, err := os.Stat(a)
 		if err != nil {
+			// Portable message: the OS-specific stat error text ("no such
+			// file" on Unix, "cannot find the file specified" on Windows)
+			// is unstable to assert on, so name the condition ourselves.
+			if errors.Is(err, fs.ErrNotExist) {
+				return fmt.Errorf("allow entry %q does not exist: %w", a, err)
+			}
 			return fmt.Errorf("allow entry %q: %w", a, err)
 		}
 		if !info.IsDir() {

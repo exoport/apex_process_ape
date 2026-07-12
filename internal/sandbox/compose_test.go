@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -228,10 +229,14 @@ func TestComposeAuthorizedKeysLiteralAndPath(t *testing.T) {
 	assert.Contains(t, string(data), "ssh-ed25519 AAAAFROMFILE me@host")
 	assert.Contains(t, string(data), "ssh-ed25519 AAAALITERAL me@lit")
 
-	// authorized_keys must be 0600 (sshd refuses loose perms).
+	// authorized_keys must be 0600 (sshd refuses loose perms). Windows does
+	// not honour Unix mode bits, so the perm assertion is Linux/macOS-only;
+	// the guest that consumes this file is Linux regardless.
 	info, err := os.Stat(akPath)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 }
 
 func TestComposeAuthorizedKeysEmptyWritesNoFile(t *testing.T) {

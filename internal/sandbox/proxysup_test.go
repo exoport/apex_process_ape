@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +92,11 @@ func TestWorkspaceProxyFieldsRoundTrip(t *testing.T) {
 // CONNECT, and appends the decision to the audit log. The allowed-tunnel
 // path is covered by the proxy tests (TestProxyAllowsAuthorizedHost).
 func TestRunProxyDaemon(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// The egress proxy daemon is Linux-only, and this harness sets a
+		// read deadline on an os.Pipe, which Windows does not support.
+		t.Skip("Linux-only: egress proxy daemon + os.Pipe read deadlines")
+	}
 	auditLog := filepath.Join(t.TempDir(), "egress-audit.jsonl")
 	pr, pw, err := os.Pipe()
 	require.NoError(t, err)

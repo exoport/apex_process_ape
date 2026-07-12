@@ -13,6 +13,14 @@
   justification) while still failing CI on any other or new vulnerability.
   Tracked follow-up: replace the self-update path with a cosign-verifying
   updater to drop openpgp entirely.
+- **fix(portability): green the Windows `go test` job** — the first CI run over
+  the full Phase-2 history surfaced Windows-only test failures in Linux-only
+  components. Guest bind paths now use `path.Join` (POSIX) instead of
+  `filepath.Join` (which emitted backslashes on Windows); the `ape service`
+  allow-list missing-entry error is portable (`fs.ErrNotExist` → "does not
+  exist") rather than asserting OS-specific stat text; and three inherently
+  Linux tests (systemd ProtectHome hint, egress-proxy `os.Pipe` deadline, Unix
+  0600 mode bits) skip or guard on Windows.
 
 - **feat(framework): always-on operating-rules fragment + managed `CLAUDE.md`
   block (PLAN-47 Workstream C)** — `ape framework setup`/`update` now install a

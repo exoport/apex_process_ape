@@ -67,7 +67,7 @@ func TestValidateRejects(t *testing.T) {
 	}{
 		{"no project_root", Config{Allow: []string{realRepo}}, "project_root is required"},
 		{"relative project_root", Config{ProjectRoot: "rel/path"}, "absolute path"},
-		{"missing allow entry", Config{ProjectRoot: realRepo, Allow: []string{realRepo, filepath.Join(realRepo, "nope")}}, "no such file"},
+		{"missing allow entry", Config{ProjectRoot: realRepo, Allow: []string{realRepo, filepath.Join(realRepo, "nope")}}, "does not exist"},
 		{"allow entry not a git repo", Config{ProjectRoot: realRepo, Allow: []string{notARepo}}, "not a git repository"},
 		{"force sandbox without allow_script_source", Config{ProjectRoot: realRepo, Allow: []string{realRepo}, ForceScriptSandbox: true}, "force_script_sandbox"},
 	}

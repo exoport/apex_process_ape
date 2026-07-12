@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -143,7 +144,10 @@ func (r *Resolver) injectVMCreds(name string, comp *sandbox.Composition) error {
 	if err := writeSecret(credsPath, creds); err != nil {
 		return err
 	}
-	guestPath := filepath.Join(comp.GuestHome, guestCredsRel)
+	// The bind Dest is a guest (Linux) path — always POSIX-separated,
+	// regardless of the host OS aped is analysed/built on. Use path.Join,
+	// not filepath.Join (which would emit backslashes on Windows).
+	guestPath := path.Join(comp.GuestHome, guestCredsRel)
 	comp.Binds = append(comp.Binds, sandbox.BindMount{Source: credsPath, Dest: guestPath, ReadOnly: true})
 	comp.Env = append(
 		comp.Env,

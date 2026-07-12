@@ -119,6 +119,12 @@ func TestPolicyCheckMountUnderRoot(t *testing.T) {
 // fails with actionable guidance, not a raw lstat error. An unmasked path with a
 // benign error keeps its plain error.
 func TestPolicyMountProtectHomeHint(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// ProtectHome is a systemd/Linux concept and the hint logic resolves
+		// Linux absolute mount roots (/home, /root) via filepath.Abs, which
+		// mangles POSIX paths on Windows. aped only runs on Linux.
+		t.Skip("Linux-only: systemd ProtectHome path masking")
+	}
 	if h := protectHomeHint("/home/dev/proj", os.ErrNotExist); !strings.Contains(h, "ProtectHome") {
 		t.Errorf("mount under /home got no ProtectHome hint: %q", h)
 	}
