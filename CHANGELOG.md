@@ -1,5 +1,69 @@
 # CHANGELOG
 
+## v0.0.42 (unreleased)
+
+Large feature drop — everything on `feat/plan-18-phase2-aped` since v0.0.41
+(PLAN-10 / 13 / 14 / 16 / 17 / 18). Headline: hardware-isolated Kata VM
+workspaces driven by a new rootful daemon (`aped`), plus NATS telemetry /
+reporting and a job daemon.
+
+- **feat(aped): rootful Kata-QEMU VM-management daemon (PLAN-18 Phase 2)** — a
+  new single-binary daemon (`cmd/aped`) that provisions and operates
+  hardware-isolated Kata microVMs. It runs as a **two-process split**: a root
+  **executor** that is "root without power" (empty `CapabilityBoundingSet`,
+  `RestrictAddressFamilies=AF_UNIX`, `@mount` denied, `ProtectHome`/
+  `ProtectSystem=strict`), reachable only over an AF_UNIX **SO_PEERCRED-gated**
+  priv socket; and a de-privileged **front** that embeds NATS and serves the
+  frozen `ape.vmm.<node>.>` micro-service contract. A **default-deny policy**
+  authorizes every fully-resolved command — allowed image refs, host-fs mount
+  roots re-checked after symlink resolution, resource ceilings, and a device
+  allow-list. Every privileged op is audited to an append-only log and forwarded
+  on `ape.audit.<node>.>` (open **and** completion records for interactive
+  sessions). Ships with hardened systemd units, tmpfiles, policy, auditd rules,
+  and `deploy/tier2-setup.sh` (an idempotent Kata host-stack provisioner). See
+  `docs/how-to/run-aped.md`.
+
+- **feat(sandbox): `ape sandbox` is now a thin `aped` client** — the PLAN-16
+  daemonless runner is retired; `ape sandbox up/ls/inspect/exec/attach/freeze/
+  unfreeze/suspend/down` drive `aped` over the `ape.vmm` NATS contract and `ape`
+  never runs as root. Interactive `exec`/`attach` stream stdio over per-session
+  NATS subjects with credit-based flow control (`internal/vmmstream`): a real
+  guest PTY, SIGWINCH resize, exact exit-code propagation, and abandoned-session
+  reap (client keepalive + server idle watchdog + guest-exec kill). An opt-in
+  `aped run --driver containerd` provisions through the containerd Go client
+  **without** a client-side rootfs mount, so the full lifecycle runs through the
+  hardened executor; a host-fs mount under `ProtectHome` now fails with an
+  actionable error (use a root outside `/home`, a `BindPaths=` drop-in, or
+  `--mount ephemeral|volume`).
+
+- **feat(sandbox): Kata VM workspace mechanics (PLAN-16 Phase 1)** — the
+  server-side building blocks `aped` composes: per-workspace `~/.claude` +
+  git/authorized_keys composition, a CONNECT egress-proxy supervisor, an OCI/
+  nerdctl command builder, and the official `ape-sandbox` workspace image
+  (digest-pinned base, offline framework).
+
+- **feat(reporting): NATS telemetry + reporting (PLAN-13 / PLAN-17)** — an
+  optional NATS connection with credential-derived identity (`internal/natsconn`);
+  a fire-and-forget progress-event publisher (`internal/eventing`) and
+  content-addressed transcript blob upload (`internal/blobstore`); runs publish
+  progress events and upload transcripts; and `ape event | log | metrics |
+  transcript` report over NATS with a four-step Claude-session resolver. Per-VM
+  telemetry credentials reuse the existing `ape.{evt,log,metrics}` roots.
+
+- **feat(service): `ape service` job daemon (PLAN-14)** — a NATS-micro job daemon.
+
+- **feat(cost): date-aware pricing + per-turn dedup (PLAN-10)** — cost accounting
+  with per-turn deduplication and date-aware model pricing.
+
+## v0.0.41 (2026-07-08)
+
+- **chore: module + repo rename to `exoport/apex_process_ape`** — the Go module
+  path and all repo references moved to `github.com/exoport/apex_process_ape`.
+- **feat(release skill): autonomous mode** — the `/release` skill gained an
+  autonomous mode that drives the pre-tag flow end-to-end.
+
+> Retro-filled: v0.0.41 was tagged without a CHANGELOG entry.
+
 ## v0.0.40 (2026-07-05)
 
 - **feat(cli): `ape task --handoff <file>`** — a shorthand for `--prompt`
