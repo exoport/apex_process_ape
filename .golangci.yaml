@@ -175,7 +175,7 @@ linters:
         path: internal/bridge/ipc/ipc\.go
       - linters:
           - tagliatelle
-        path: internal/cost/(formula|jsonltail|overrides|rollup|rollup_walk)\.go
+        path: internal/cost/(formula|line|overrides|rollup|rollup_walk)\.go
       - linters:
           - tagliatelle
         path: internal/sessions/registry\.go

@@ -53,8 +53,8 @@ type ScanResult struct {
 // ScanSession reads a Claude Code session JSONL file once and returns
 // the aggregated cost / token totals plus a per-model breakdown.
 //
-// Unlike Tailer (which polls a live file), this is a one-shot reader
-// for files that are already complete. Malformed lines are skipped.
+// This is a one-shot reader for files that are already complete.
+// Malformed lines are skipped.
 // Tokens and NumTurns accumulate price-independently — an unpriced
 // model still yields non-zero tokens/turns with CostUSD 0.
 func ScanSession(path string) (ScanResult, error) {

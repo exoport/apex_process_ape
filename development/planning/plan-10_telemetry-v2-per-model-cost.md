@@ -4,7 +4,7 @@ created_at: 2026-07-02
 updated_at: 2026-07-12
 status: done
 shipped_v0_0_36: D5 rollup/Bucket PerModel + the sumTotals NumTurns bug fix + ape costs MODEL column (human + json) + the ape costs run/chat subcommands (were advertised-but-unregistered). Still deferred after v0.0.36 — D1 per-turn TurnRecord + H6 (requestId/stop_reason) dedup (speculative; would perturb v0.0.35-validated telemetry) and D3 date-aware pricing (needs D1's per-turn timestamps; the standard-rate table is the blessed conservative fallback). Update 2026-07-08: the 5m/1h split later shipped in v0.0.37 (PLAN-10 D1), and the D6 discrepancy closeout is RESOLVED (development/research/cost-discrepancy-20260521.md).
-implementation_status: D2 (sub-agent discovery) + D4 (transcript copy) + the per-model manifest/envelope fields (`model_usage`, `sessions[]`, `totals.num_turns`) shipped additively under `schema_version: 2` in v0.0.27–v0.0.35 (see PLAN-11 v0.0.35 errata). Corrected 2026-07-03 against the actual eval contract — NO v3 schema bump (the eval's `apex_eval/ape_manifest.py` hard-rejects any `schema_version` outside `[1,2]` while tolerating unknown fields, so additive-under-v2 is the only eval-safe path); `StepRecord.ModelObserved` was dropped from the shipped shape (the 5m/1h cache split was later re-added in v0.0.37). Still open — only the optional `cost.NewTailer` dead-code deletion (zero production callers). Shipped since — D1 per-turn `TurnRecord` + H6 (requestId/stop_reason) dedup, D2 `SessionFiles` extraction, and D3 date-aware pricing (Sonnet-5 intro window + `[1m]` normalization) all landed on the branch (v0.0.42); earlier: D5 rollup `PerModel`, the `sumTotals` NumTurns fix, the `ape costs` MODEL column, and `ape costs run`/`chat` (all v0.0.36) + the 5m/1h split (v0.0.37); D6 discrepancy closeout **DONE** (`development/research/cost-discrepancy-20260521.md`, resolved 2026-07-08: the 5m/1h split + confirmed prices/multipliers + the v0.0.35 double-count fix close it).
+implementation_status: D2 (sub-agent discovery) + D4 (transcript copy) + the per-model manifest/envelope fields (`model_usage`, `sessions[]`, `totals.num_turns`) shipped additively under `schema_version: 2` in v0.0.27–v0.0.35 (see PLAN-11 v0.0.35 errata). Corrected 2026-07-03 against the actual eval contract — NO v3 schema bump (the eval's `apex_eval/ape_manifest.py` hard-rejects any `schema_version` outside `[1,2]` while tolerating unknown fields, so additive-under-v2 is the only eval-safe path); `StepRecord.ModelObserved` was dropped from the shipped shape (the 5m/1h cache split was later re-added in v0.0.37). Nothing open — the last loose end, the optional `cost.NewTailer` live-file poller (zero production callers), was deleted on the branch (v0.0.42); `AssistantLine` was preserved (relocated to `internal/cost/line.go`) since `scanTurns` still parses it. Shipped since — D1 per-turn `TurnRecord` + H6 (requestId/stop_reason) dedup, D2 `SessionFiles` extraction, and D3 date-aware pricing (Sonnet-5 intro window + `[1m]` normalization) all landed on the branch (v0.0.42); earlier: D5 rollup `PerModel`, the `sumTotals` NumTurns fix, the `ape costs` MODEL column, and `ape costs run`/`chat` (all v0.0.36) + the 5m/1h split (v0.0.37); D6 discrepancy closeout **DONE** (`development/research/cost-discrepancy-20260521.md`, resolved 2026-07-08: the 5m/1h split + confirmed prices/multipliers + the v0.0.35 double-count fix close it).
 tags:
   - cost
   - telemetry
@@ -182,9 +182,10 @@ discrepancy doc already lost one dataset to exactly that rotation.
 - Wire the dead code — **done:** pipeline and `ape task` finalize fold into the
   rollup (`FoldPipelineRun` / `FoldTaskRun`; `RebuildRollup` walks both
   `_output/pipelines` and `_output/tasks`); `ape chat` exit writes `session.yaml`
-  (`runlog.WriteSessionYAML`) and folds `FoldChat`. **Still open:**
-  `cost.NewTailer` has zero production callers — default-delete unless the TUI
-  wants live cost (`StepTelemetry`'s rescan is adequate).
+  (`runlog.WriteSessionYAML`) and folds `FoldChat`. **Done (v0.0.42):**
+  `cost.NewTailer` had zero production callers, so it was default-deleted (the TUI
+  never wanted live cost — `StepTelemetry`'s rescan is adequate). `AssistantLine`,
+  the one symbol `scanTurns` still parses, was relocated to `internal/cost/line.go`.
 - **Shipped v0.0.36:** `Rollup`/`Bucket` gained `PerModel`, and the `sumTotals`
   `NumTurns` drop (it had summed `CostUSD` + the four token fields only,
   `rollup.go`) is fixed so rollup totals carry turn counts. Eval-neutral (the eval
@@ -229,7 +230,7 @@ the surviving hypothesis with data.
    fields). Per-model fields, rollup wiring, rollup `PerModel`, the `sumTotals`
    NumTurns fix, the `ape costs` MODEL column, and the `ape costs run`/`chat`
    subcommands all shipped (v0.0.35–36); the 5m/1h split shipped v0.0.37.
-   Remaining under D5: only the `cost.NewTailer` dead-code cleanup.
+   The last item under D5, the `cost.NewTailer` dead-code cleanup, shipped v0.0.42.
 4. D6 analysis + doc update — **DONE 2026-07-08**
    (`development/research/cost-discrepancy-20260521.md` resolved): the 5m/1h split
    shipped v0.0.37 and, with prices/multipliers already confirmed correct + the
