@@ -12,6 +12,10 @@ import (
 	"github.com/exoport/apex_process_ape/internal/workspace"
 )
 
+// goosWindows is the runtime.GOOS value for Windows, named once so the
+// Linux-only test skips below don't trip goconst on the repeated literal.
+const goosWindows = "windows"
+
 func TestLoadPolicyRejectsUnknownKeys(t *testing.T) {
 	dir := t.TempDir()
 	good := filepath.Join(dir, "good.yaml")
@@ -119,7 +123,7 @@ func TestPolicyCheckMountUnderRoot(t *testing.T) {
 // fails with actionable guidance, not a raw lstat error. An unmasked path with a
 // benign error keeps its plain error.
 func TestPolicyMountProtectHomeHint(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		// ProtectHome is a systemd/Linux concept and the hint logic resolves
 		// Linux absolute mount roots (/home, /root) via filepath.Abs, which
 		// mangles POSIX paths on Windows. aped only runs on Linux.
@@ -143,7 +147,7 @@ func TestPolicyMountProtectHomeHint(t *testing.T) {
 // target (the CVE lesson): a symlink that lives under an allowed root but points
 // outside it is denied.
 func TestPolicyMountSymlinkEscape(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		t.Skip("symlink semantics differ on Windows")
 	}
 	root := t.TempDir()

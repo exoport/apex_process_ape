@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -82,7 +83,9 @@ func TestResolverInjectsVMCreds(t *testing.T) {
 	if uc.Name != "vm-dev" {
 		t.Errorf("minted cred name = %q, want vm-dev", uc.Name)
 	}
-	if info, _ := os.Stat(credsFile); info.Mode().Perm() != 0o600 {
+	// Unix mode bits are meaningless on Windows (files read back 0666); the
+	// creds are consumed by a Linux guest, and aped only runs on Linux.
+	if info, _ := os.Stat(credsFile); runtime.GOOS != goosWindows && info.Mode().Perm() != 0o600 {
 		t.Errorf("creds mode = %v, want 0600", info.Mode().Perm())
 	}
 }
