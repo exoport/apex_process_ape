@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v0.0.43 (unreleased)
+## v0.0.43 (2026-07-12)
 
 - **feat(framework): always-on operating-rules fragment + managed `CLAUDE.md`
   block (PLAN-47 Workstream C)** — `ape framework setup`/`update` now install a
