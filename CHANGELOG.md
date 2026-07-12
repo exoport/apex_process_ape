@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v0.0.42 (unreleased)
+## v0.0.42 (2026-07-12)
 
 Large feature drop — everything on `feat/plan-18-phase2-aped` since v0.0.41
 (PLAN-10 / 13 / 14 / 16 / 17 / 18). Headline: hardware-isolated Kata VM
