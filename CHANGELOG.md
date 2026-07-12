@@ -22,6 +22,9 @@
   only when a managing install has lost the artifacts, and degrade to INFO/WARN
   outside a project, on legacy installs, or against an older framework — so a
   plain repo stays green. `framework.yaml` records `sources.operating_rules.managed`.
+  An opt-in live smoke test (`APE_OPRULES_LIVE=1`) spawns a real `claude -p`
+  session to prove the managed `@import` actually resolves at runtime — the
+  semantic guarantee the syntactic doctor check can't give.
 
 ## v0.0.42 (2026-07-12)
 
