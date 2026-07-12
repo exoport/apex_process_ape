@@ -127,10 +127,47 @@ Redeploy per the `aped-live-validation-workflow` memory (rebuild BOTH `ape` +
    probe stages into the `aped` namespace with no buildkit, and
    `TestTier2ProvisionContainerd` passes.
 
+## LIVE RESULTS (2026-07-12, deployed daemon, node "mmq4")
+
+This session's binaries were deployed to the Tier-2 host and the high-value items
+validated live, driven directly as the operator on the same host (which sidestepped
+a terminal paste-corruption issue that mangled multi-line pastes).
+
+- **Polish (a) exit-code — PASS.** `ape sandbox exec dev -- sh -c 'exit 7'` → ape
+  exit=7 (was 1); `exit 0` → 0; `true` → 0.
+- **Limitation 2 teardown — PASS.** Instrumented run: `kill -9` the exec client
+  (verified dead via `kill -0`), guest `sleep 3600` present at +10/+20/+30s,
+  **REAPED at ~40s** — right at the 45s idle-watchdog window.
+- **Limitation 2 idle-survival — PASS.** An idle exec client (`sleep 3601`, no
+  output) survived >55s, kept warm by keepalive pings (would have been reaped at
+  ~45s without them).
+- **Limitation 1 error — PASS.** host-fs `up` from a `/home` cwd →
+  `host-fs mount path "/home/diegos" is not reachable by aped (lstat …: permission
+  denied): the daemon runs with ProtectHome=yes …` + the workarounds; no workspace
+  created (fails at the policy check).
+- **Limitation 1 positive — PASS.** `ape sandbox up wtest --cwd /srv/workspaces
+  --mount host-fs` succeeded through the hardened daemon (`mount=host-fs`, `/workspace`
+  present in-guest), then `down`.
+- **Polish (b) completion audit — Tier-1-proven; live deferred.** Needs a HOST_OPS
+  cred to subscribe `ape.audit.<node>.>` (the operator cred cannot); the front-only
+  `<op>Exit` record is not in the executor's local file. `TestFullStackAttachStream`
+  proves the forwarding leg end-to-end.
+- **Polish (c) tier2 probe — proven by proxy.** The `--driver containerd` path it
+  targets is proven live (both `dev` and `wtest` run from `ape-tier2-probe:latest`
+  in the `aped` namespace); the full acceptance `TestTier2ProvisionContainerd`
+  needs sudo.
+
+Redeploy gotchas (folded into `scratchpad/install-restart.sh`): `make install`
+needs `go` on PATH, which sudo strips — pre-build as the user, then install the
+binaries with a go-free script; restart socket-first.
+
 ## State / next
 
 - Clean tree; 5 gates green; everything **local** on `feat/plan-18-phase2-aped`.
-- **Push/release decision is the operator's.** Phase-2 is complete + (prior
-  session) live-validated, so pushing to `main` + cutting a release is a real
-  option — default is to KEEP LOCAL until the operator says otherwise.
+- **Live-validated (2026-07-12):** limitation 1 (both paths), limitation 2 (both
+  halves), and polish (a) all pass on the deployed hardened daemon; (b) is
+  Tier-1-proven; (c)'s target path is proven live.
+- **Push/release now defensible.** With the high-value changes live-green, pushing
+  `feat/plan-18-phase2-aped` → `main` and/or cutting a release is a real option —
+  still the operator's call.
 - Phase 3 (device/GPU passthrough tier) stays BLOCKED (no discrete-GPU box).
