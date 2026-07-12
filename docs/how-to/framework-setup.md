@@ -31,9 +31,10 @@ What happens:
 4. Records the framework's HEAD SHA + tag for the metadata file.
 5. Opens an interactive Bubble Tea prompt for the project name and which extensions to enable. (Skip the TUI with `--project-name` + `--extensions`, or skip seeding entirely with `--no-bootstrap`.)
 6. Removes any pre-existing `<project>/.claude/skills/apex-*` (so leftover skills from a prior install disappear).
-7. Copies all `apex-*` skill directories into `<project>/.claude/skills/`.
+7. Copies all `apex-*` skill directories into `<project>/.claude/skills/` (including the `apex-orchestrator` persona skill).
 8. Copies all framework pipeline YAMLs into `<project>/_apex/pipelines/`.
-9. Writes `<project>/_apex/framework.yaml` recording what was installed.
+9. Installs the always-on operating-rules fragment (`_apex/apex-operating-rules.md`) and ensures the repo-root `CLAUDE.md` imports it inside a managed block — see [Operating rules](#operating-rules-always-on-apex-discipline) below. Skipped with a warning if the framework repo predates the fragment.
+10. Writes `<project>/_apex/framework.yaml` recording what was installed.
 
 ## What gets installed
 
@@ -43,9 +44,45 @@ What happens:
 | `_apex/pipelines/*.yaml`          | `_apex/pipelines/*.yaml`                    | Created              |
 | `_apex/config.yaml`               | `_apex/config.yaml` (template)              | **Seeded if absent** |
 | `_apex/config.local.example.yaml` | `_apex/config.local.example.yaml`           | **Seeded if absent** |
+| `_apex/apex-operating-rules.md`   | `_apex/apex-operating-rules.md`             | Created (if shipped) |
+| `CLAUDE.md` (repo root)           | _(managed block written in place)_          | Created or updated   |
 | `_apex/framework.yaml`            | _(generated)_                               | Created              |
 
 Non-`apex-*` entries under `.claude/skills/` are never touched — they belong to your project, not the framework.
+
+## Operating rules (always-on APEX discipline)
+
+Every ape-installed project gets a framework-maintained
+`_apex/apex-operating-rules.md` fragment, and the repo-root `CLAUDE.md` is
+given a managed block that imports it:
+
+```text
+<!-- apex:managed:begin -->
+@_apex/apex-operating-rules.md
+<!-- apex:managed:end -->
+```
+
+Because Claude Code loads `CLAUDE.md` (and its `@import`s) into every session,
+this means any session in the project picks up the APEX operating rules with no
+hooks and no manual playbook hand-over.
+
+- **If `CLAUDE.md` is absent**, setup silently creates a minimal one containing
+  only the managed block (no prompt — headless-safe).
+- **Content outside the markers is yours** and is preserved byte-for-byte across
+  every `setup`/`update`. Only the bytes *between* the markers are ape-owned; do
+  not hand-edit inside them, as `update` refreshes that region wholesale.
+- **The block must live in the repo-root `CLAUDE.md`** — the `@import` path is
+  resolved relative to it.
+- **Version skew:** if your framework checkout predates the fragment, setup skips
+  fragment + block management and prints a warning naming the file to upgrade
+  toward, rather than failing. `ape doctor` reports the skip as a WARN nudge, not
+  a hard failure.
+
+`ape doctor` gains required checks that the fragment, the managed `CLAUDE.md`
+import, and the `apex-orchestrator` skill are all present once a project manages
+them. Note the import check is *syntactic* — it confirms the line is in the file;
+it can't prove Claude resolved it. Use `/memory` inside a live session (or drive
+a real session) to confirm the rules actually loaded.
 
 ## Headless / scripted contexts
 

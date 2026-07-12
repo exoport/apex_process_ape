@@ -126,6 +126,7 @@ For subsequent refreshes against a framework version bump, use
 			if err != nil {
 				return handleSetupError(err)
 			}
+			warnOperatingRulesSkew(res.Summary)
 			return printFrameworkUpdate(&frameworkUpdateOutput{Metadata: res.Metadata, Summary: res.Summary}, format)
 		},
 	}
@@ -188,6 +189,7 @@ Refuses to run when:
 			if err != nil {
 				return handleUpdateError(err)
 			}
+			warnOperatingRulesSkew(res.Summary)
 			return printFrameworkUpdate(&frameworkUpdateOutput{Metadata: res.Metadata, Summary: res.Summary}, format)
 		},
 	}
@@ -236,6 +238,18 @@ version_tag against current.`,
 	cmd.Flags().BoolVar(&noFetch, "no-fetch", false, "Skip the best-effort 'git fetch' against the framework repo")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
 	return cmd
+}
+
+// warnOperatingRulesSkew emits a stderr note (in every output format) when
+// the framework repo predates the operating-rules fragment, so the skip is
+// visible to scripts that only read stdout for the JSON/YAML payload.
+func warnOperatingRulesSkew(s framework.UpdateSummary) {
+	if s.OperatingRulesSkipped {
+		fmt.Fprintf(os.Stderr,
+			"⚠ operating-rules: framework repo predates %s — skipped the fragment + %s managed block. "+
+				"Upgrade the framework to a version that ships it to enable the always-on APEX rules.\n",
+			framework.SubtreeOperatingRules, framework.ProjectClaudeMd)
+	}
 }
 
 func resolveFrameworkRepo(flagValue string) (string, error) {
@@ -383,6 +397,19 @@ func printFrameworkUpdate(out *frameworkUpdateOutput, format output.Format) erro
 			)
 		} else {
 			fmt.Println("Config:    not seeded (already exists or bootstrap skipped)")
+		}
+		switch {
+		case out.Summary.OperatingRulesInstalled:
+			state := "already current"
+			switch {
+			case out.Summary.ClaudeMdCreated:
+				state = "created"
+			case out.Summary.ManagedBlockUpdated:
+				state = "updated"
+			}
+			fmt.Printf("Op-rules:  fragment installed; %s managed block %s\n", framework.ProjectClaudeMd, state)
+		case out.Summary.OperatingRulesSkipped:
+			fmt.Println("Op-rules:  skipped (framework predates the operating-rules fragment)")
 		}
 		fmt.Printf("Metadata:  %s\n", framework.ProjectMetadata)
 		return nil

@@ -30,9 +30,10 @@ What happens:
 3. Fetches `origin/main` and fast-forwards (skip with `--no-fetch`).
 4. Records the framework's HEAD SHA + tag for the metadata file.
 5. Removes any existing `<project>/.claude/skills/apex-*` (so removed-from-framework skills disappear locally).
-6. Copies all `apex-*` skill directories into `<project>/.claude/skills/`.
+6. Copies all `apex-*` skill directories into `<project>/.claude/skills/` (including `apex-orchestrator`).
 7. Copies all framework pipeline YAMLs into `<project>/_apex/pipelines/`.
-8. Rewrites `<project>/_apex/framework.yaml` — preserving the `sources.config` block recorded by the original `setup` so `project_name` + `extensions` stay intact.
+8. Refreshes the operating-rules fragment (`_apex/apex-operating-rules.md`) and the managed block in the repo-root `CLAUDE.md`. Skipped with a warning if the framework repo predates the fragment.
+9. Rewrites `<project>/_apex/framework.yaml` — preserving the `sources.config` block recorded by the original `setup` so `project_name` + `extensions` stay intact.
 
 ## What gets touched
 
@@ -40,11 +41,13 @@ What happens:
 | --------------------------------- | ---------------------------------- |
 | `.claude/skills/apex-*/`          | Wiped + reinstalled                |
 | `_apex/pipelines/*.yaml`          | Overwritten                        |
+| `_apex/apex-operating-rules.md`   | Overwritten (if framework ships it) |
+| `CLAUDE.md` (repo root)           | Managed block refreshed in place; content outside the markers untouched |
 | `_apex/config.yaml`               | **NOT touched** (that's setup)     |
 | `_apex/config.local.example.yaml` | **NOT touched**                    |
 | `_apex/framework.yaml`            | Rewritten (config block preserved) |
 
-Non-`apex-*` entries under `.claude/skills/` are never touched.
+Non-`apex-*` entries under `.claude/skills/` are never touched. In `CLAUDE.md`, only the bytes *between* the `<!-- apex:managed:begin -->` / `<!-- apex:managed:end -->` markers are ape-owned — everything else is preserved byte-for-byte. Do not hand-edit inside the markers; `update` refreshes that region wholesale, so in-marker edits are discarded.
 
 ## Idempotency
 
@@ -52,6 +55,7 @@ Running `update` twice on a steady-state project is safe and cheap:
 
 - Skills: wiped + reinstalled. Net effect identical when the framework HEAD is unchanged.
 - Pipelines: overwritten. Net effect identical.
+- Operating rules: fragment overwritten; the `CLAUDE.md` managed block is rewritten only when its bytes actually change, so a steady-state `update` leaves `CLAUDE.md` byte-identical.
 - `framework.yaml`: rewritten with a fresh `installed_at` timestamp.
 
 The destructive operation that matters — wiping `apex-*` skills — is git-safe: if the project is a git repo and you have uncommitted edits to a tracked `apex-*` skill file, the command refuses without `--force`. Untracked `apex-*` paths are treated as leftovers and get clobbered.
@@ -100,6 +104,14 @@ You have local edits to one or more committed framework skills. Either:
 - Stash them somewhere outside `.claude/skills/apex-*`.
 
 Untracked `apex-*` paths don't trip this check — only tracked-and-modified ones do.
+
+### `operating-rules: framework repo predates _apex/apex-operating-rules.md`
+
+Your framework checkout is older than the operating-rules feature. `update`
+skipped installing the fragment + `CLAUDE.md` managed block (a version-skew
+suppression, not a failure). Upgrade the framework repo to a version that ships
+`_apex/apex-operating-rules.md`, then re-run `ape framework update`. Until then
+`ape doctor` reports the operating-rules checks as a WARN nudge, not a failure.
 
 ### `framework branch "main" diverged from origin`
 

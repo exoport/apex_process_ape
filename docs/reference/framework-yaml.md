@@ -40,6 +40,8 @@ sources:
       - ext-features
   config_local_example:
     seeded: true
+  operating_rules:
+    managed: true
 ```
 
 ## Top-level fields
@@ -98,6 +100,12 @@ What was installed. Each subblock is the contract for `ape framework status` dri
 | Field    | Type    | Description                                                                                                                                              |
 | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `seeded` | boolean | `true` when this run wrote `_apex/config.local.example.yaml`. Only seeded when `sources.config.seeded` is also true and the destination file was absent. |
+
+### `sources.operating_rules`
+
+| Field     | Type    | Description                                                                                                                                                                                                                             |
+| --------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `managed` | boolean | `true` when this install manages the always-on operating-rules fragment (`_apex/apex-operating-rules.md`) + the repo-root `CLAUDE.md` managed block. `false` when the framework repo predates the fragment (version-skew suppression) or the project was installed before the feature. `ape doctor` self-gates its required operating-rules checks on this flag — see [How to run doctor in CI](../how-to/run-doctor-in-ci.md). |
 
 ## Contract for downstream tooling
 

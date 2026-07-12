@@ -67,6 +67,34 @@ func fakeFramework(t *testing.T, root, tag string) {
 	}
 }
 
+// fakeFrameworkOpRules builds a fake framework repo that ALSO ships the
+// PLAN-47 operating-rules fragment (_apex/apex-operating-rules.md) and the
+// apex-orchestrator skill, on top of fakeFramework's assets. The extras go
+// in a second commit so the tree stays clean; the tag lands last.
+func fakeFrameworkOpRules(t *testing.T, root, tag string) {
+	t.Helper()
+	fakeFramework(t, root, "") // base assets, no tag yet
+	mkfile := func(rel, body string) {
+		full := filepath.Join(root, rel)
+		require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o755))
+		require.NoError(t, os.WriteFile(full, []byte(body), 0o644))
+	}
+	mkfile("_apex/apex-operating-rules.md", "# APEX Operating Rules\n\nRoute planning through `ape task`.\n")
+	mkfile(".claude/skills/apex-orchestrator/SKILL.md", "# apex-orchestrator")
+	ctx := context.Background()
+	mustRun := func(args ...string) {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+	mustRun("add", ".")
+	mustRun("commit", "-m", "add operating rules + orchestrator")
+	if tag != "" {
+		mustRun("tag", tag)
+	}
+}
+
 func newProject(t *testing.T) string {
 	t.Helper()
 	return t.TempDir()
@@ -459,6 +487,104 @@ func TestStatus_DetectsDriftAfterFrameworkAdvance(t *testing.T) {
 	require.True(t, res.Drift.HashDrift)
 	require.True(t, res.Drift.TagDrift)
 	require.NotEmpty(t, res.Drift.Notes)
+}
+
+func TestSetup_InstallsOperatingRules(t *testing.T) {
+	ctx := context.Background()
+	fw := t.TempDir()
+	fakeFrameworkOpRules(t, fw, "v0.0.80")
+	proj := newProject(t)
+
+	res, err := framework.Setup(ctx, &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "0.0.6", Bootstrapper: framework.NoopBootstrapper{}, Now: fixedNow,
+	})
+	require.NoError(t, err)
+	require.True(t, res.Summary.OperatingRulesInstalled)
+	require.False(t, res.Summary.OperatingRulesSkipped)
+	require.True(t, res.Summary.ClaudeMdCreated)
+	require.True(t, res.Summary.ManagedBlockUpdated)
+
+	// Fragment copied into the project.
+	_, err = os.Stat(filepath.Join(proj, "_apex", "apex-operating-rules.md"))
+	require.NoError(t, err)
+
+	// Repo-root CLAUDE.md created with the managed block + import.
+	claude, err := os.ReadFile(filepath.Join(proj, "CLAUDE.md"))
+	require.NoError(t, err)
+	require.Contains(t, string(claude), framework.ManagedBlockBegin)
+	require.Contains(t, string(claude), framework.OperatingRulesImport)
+	require.Contains(t, string(claude), framework.ManagedBlockEnd)
+
+	// Metadata records managed=true.
+	meta, err := framework.ReadMetadata(proj)
+	require.NoError(t, err)
+	require.True(t, meta.Sources.OperatingRules.Managed)
+
+	// Orchestrator skill rode the generic apex-* skill-copy path.
+	_, err = os.Stat(filepath.Join(proj, ".claude", "skills", "apex-orchestrator"))
+	require.NoError(t, err)
+}
+
+func TestSetup_PreservesUserClaudeMdAndIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	fw := t.TempDir()
+	fakeFrameworkOpRules(t, fw, "v0.0.80")
+	proj := newProject(t)
+
+	userContent := "# My Project\n\nHouse rules that must survive.\n"
+	require.NoError(t, os.WriteFile(filepath.Join(proj, "CLAUDE.md"), []byte(userContent), 0o644))
+
+	res, err := framework.Setup(ctx, &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "0.0.6", Bootstrapper: framework.NoopBootstrapper{}, Now: fixedNow,
+	})
+	require.NoError(t, err)
+	require.False(t, res.Summary.ClaudeMdCreated, "existing CLAUDE.md must not report created")
+	require.True(t, res.Summary.ManagedBlockUpdated)
+
+	afterSetup, err := os.ReadFile(filepath.Join(proj, "CLAUDE.md"))
+	require.NoError(t, err)
+	require.Contains(t, string(afterSetup), "House rules that must survive.")
+	require.Contains(t, string(afterSetup), framework.OperatingRulesImport)
+
+	// A subsequent update must be byte-identical (no diff) and report no
+	// managed-block change.
+	res2, err := framework.Update(ctx, &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "0.0.6", Now: fixedNow,
+	})
+	require.NoError(t, err)
+	require.False(t, res2.Summary.ManagedBlockUpdated, "steady-state update must not rewrite the block")
+	afterUpdate, err := os.ReadFile(filepath.Join(proj, "CLAUDE.md"))
+	require.NoError(t, err)
+	require.Equal(t, afterSetup, afterUpdate, "CLAUDE.md must be byte-identical across a no-op update")
+}
+
+func TestSetup_VersionSkew_SkipsOperatingRules(t *testing.T) {
+	ctx := context.Background()
+	fw := t.TempDir()
+	fakeFramework(t, fw, "v0.0.71") // framework WITHOUT the fragment
+	proj := newProject(t)
+
+	res, err := framework.Setup(ctx, &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "0.0.6", Bootstrapper: framework.NoopBootstrapper{}, Now: fixedNow,
+	})
+	require.NoError(t, err, "an older framework without the fragment must still install cleanly")
+	require.False(t, res.Summary.OperatingRulesInstalled)
+	require.True(t, res.Summary.OperatingRulesSkipped)
+	require.False(t, res.Summary.ClaudeMdCreated)
+
+	// No CLAUDE.md and no fragment were created.
+	_, err = os.Stat(filepath.Join(proj, "CLAUDE.md"))
+	require.True(t, os.IsNotExist(err))
+	_, err = os.Stat(filepath.Join(proj, "_apex", "apex-operating-rules.md"))
+	require.True(t, os.IsNotExist(err))
+
+	meta, err := framework.ReadMetadata(proj)
+	require.NoError(t, err)
+	require.False(t, meta.Sources.OperatingRules.Managed)
 }
 
 func TestStatus_NoMetadata_ActionableError(t *testing.T) {

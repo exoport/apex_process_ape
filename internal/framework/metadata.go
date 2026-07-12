@@ -53,6 +53,18 @@ type Sources struct {
 	Pipelines          PipelinesSource          `json:"pipelines"          yaml:"pipelines"`
 	Config             ConfigSource             `json:"config"             yaml:"config"`
 	ConfigLocalExample ConfigLocalExampleSource `json:"configLocalExample" yaml:"config_local_example"`
+	OperatingRules     OperatingRulesSource     `json:"operatingRules"     yaml:"operating_rules"`
+}
+
+// OperatingRulesSource records whether this install manages the always-on
+// operating-rules fragment + CLAUDE.md managed block (PLAN-47 Workstream
+// C). Managed is false when the framework repo predates the fragment
+// (version-skew suppression) or the project was installed before this
+// feature — `ape doctor` self-gates its required operating-rules checks
+// on this flag so it only hard-fails when ape-managed content genuinely
+// went missing.
+type OperatingRulesSource struct {
+	Managed bool `json:"managed" yaml:"managed"`
 }
 
 // SkillsSource records the skills installed on this run.

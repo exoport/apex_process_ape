@@ -90,6 +90,15 @@ type UpdateSummary struct {
 	PipelinesInstalled int      `json:"pipelinesInstalled"           yaml:"pipelinesInstalled"`
 	ConfigSeeded       bool     `json:"configSeeded"                 yaml:"configSeeded"`
 	ConfigLocalSeeded  bool     `json:"configLocalSeeded"            yaml:"configLocalSeeded"`
+
+	// Operating-rules fragment + repo-root CLAUDE.md managed block
+	// (PLAN-47 Workstream C). OperatingRulesInstalled and
+	// OperatingRulesSkipped are mutually exclusive: Skipped is set when
+	// the framework repo predates the fragment (version-skew suppression).
+	OperatingRulesInstalled bool `json:"operatingRulesInstalled" yaml:"operatingRulesInstalled"`
+	OperatingRulesSkipped   bool `json:"operatingRulesSkipped"   yaml:"operatingRulesSkipped"`
+	ClaudeMdCreated         bool `json:"claudeMdCreated"         yaml:"claudeMdCreated"`
+	ManagedBlockUpdated     bool `json:"managedBlockUpdated"     yaml:"managedBlockUpdated"`
 }
 
 // ValidationError signals the framework repo is in a state that
@@ -242,6 +251,10 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if err != nil {
 		return nil, err
 	}
+	opRules, err := installOperatingRules(opts.FrameworkRepo, opts.ProjectRoot)
+	if err != nil {
+		return nil, err
+	}
 	// For Update (doBootstrap=false), preserve the existing ConfigSource
 	// values rather than overwriting with zeros. This keeps the
 	// project_name + extensions recorded by the original Setup.
@@ -272,6 +285,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			Pipelines:          PipelinesSource{Count: len(installedPipelines), Paths: installedPipelines},
 			Config:             cfgSource,
 			ConfigLocalExample: cfgLocalSource,
+			OperatingRules:     OperatingRulesSource{Managed: opRules.Managed},
 		},
 	}
 	if err := WriteMetadata(opts.ProjectRoot, &meta); err != nil {
@@ -280,14 +294,68 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	return &UpdateResult{
 		Metadata: meta,
 		Summary: UpdateSummary{
-			SkillsInstalled:    len(installedSkills),
-			SkillsRemoved:      len(removed),
-			SkillsRemovedPaths: removed,
-			PipelinesInstalled: len(installedPipelines),
-			ConfigSeeded:       configSeeded,
-			ConfigLocalSeeded:  configLocalSeeded,
+			SkillsInstalled:         len(installedSkills),
+			SkillsRemoved:           len(removed),
+			SkillsRemovedPaths:      removed,
+			PipelinesInstalled:      len(installedPipelines),
+			ConfigSeeded:            configSeeded,
+			ConfigLocalSeeded:       configLocalSeeded,
+			OperatingRulesInstalled: opRules.Managed,
+			OperatingRulesSkipped:   opRules.Skipped,
+			ClaudeMdCreated:         opRules.ClaudeMdCreated,
+			ManagedBlockUpdated:     opRules.BlockUpdated,
 		},
 	}, nil
+}
+
+// operatingRulesResult reports what installOperatingRules did. Managed
+// and Skipped are mutually exclusive.
+type operatingRulesResult struct {
+	Managed         bool // framework carried the fragment; installed/refreshed it
+	Skipped         bool // framework repo predates the fragment (version skew)
+	ClaudeMdCreated bool // repo-root CLAUDE.md did not exist and was created
+	BlockUpdated    bool // the managed block's bytes changed this run
+}
+
+// installOperatingRules copies the operating-rules fragment into the
+// project and upserts the repo-root CLAUDE.md managed @import (PLAN-47
+// Workstream C). When the framework repo does not ship the fragment
+// (older versions), it is a no-op reporting Skipped — a version-skew
+// suppression, NOT an error, so setup/update still succeed against an
+// older framework. In-marker CLAUDE.md content is ape-owned and refreshed
+// wholesale; content outside the markers is preserved byte-for-byte.
+func installOperatingRules(frameworkRepo, projectRoot string) (operatingRulesResult, error) {
+	src := filepath.Join(frameworkRepo, SubtreeOperatingRules)
+	if _, err := os.Stat(src); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return operatingRulesResult{Skipped: true}, nil
+		}
+		return operatingRulesResult{}, fmt.Errorf("stat operating-rules fragment: %w", err)
+	}
+	dst := filepath.Join(projectRoot, ProjectOperatingRules)
+	if err := CopyFile(src, dst); err != nil {
+		return operatingRulesResult{}, fmt.Errorf("copy operating-rules fragment: %w", err)
+	}
+
+	claudePath := filepath.Join(projectRoot, ProjectClaudeMd)
+	existing, err := os.ReadFile(claudePath)
+	created := false
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return operatingRulesResult{}, fmt.Errorf("read %s: %w", claudePath, err)
+		}
+		created = true // absent → silently create a minimal one
+	}
+	out, changed, err := UpsertManagedBlock(existing, OperatingRulesImport)
+	if err != nil {
+		return operatingRulesResult{}, fmt.Errorf("manage %s block: %w", ProjectClaudeMd, err)
+	}
+	if changed {
+		if err := AtomicWriteFile(claudePath, out, 0o644); err != nil {
+			return operatingRulesResult{}, fmt.Errorf("write %s: %w", claudePath, err)
+		}
+	}
+	return operatingRulesResult{Managed: true, ClaudeMdCreated: created, BlockUpdated: changed}, nil
 }
 
 // validateFrameworkRepo runs the framework-side preconditions: subtree
