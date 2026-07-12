@@ -19,16 +19,13 @@ import sys
 
 # OSV ids that are known, reachable, and have no upstream fix. Every entry
 # MUST carry a justification and be re-reviewed on each dependency bump.
-ALLOW = {
-    # GO-2026-5932: golang.org/x/crypto/openpgp is frozen/unmaintained
-    # ("unsafe by design", Fixed in: N/A) — no version fixes it. Pulled in
-    # transitively by github.com/creativeprojects/go-selfupdate; ape's
-    # updater sets no PGP Validator, so the package is linked but never
-    # exercised (govulncheck flags only its package init). Excepted until
-    # the self-update path is reworked to drop openpgp (tracked follow-up:
-    # replace go-selfupdate with a cosign-verifying updater).
-    "GO-2026-5932",
-}
+#
+# Empty: the sole former entry (GO-2026-5932, golang.org/x/crypto/openpgp) was
+# retired once `ape update` dropped github.com/creativeprojects/go-selfupdate
+# for a cosign-verifying updater (github.com/sigstore/sigstore-go +
+# github.com/minio/selfupdate). openpgp is no longer in ape's compiled build
+# graph, so govulncheck no longer flags it.
+ALLOW = set()
 
 
 def called_vulns(stream):

@@ -54,21 +54,23 @@ checksum:
   name_template: '{{ .ProjectName }}_checksums.txt'
   algorithm: sha256
 
-# Keyless cosign signing of the checksums file via Sigstore Fulcio.
-# Verifiers fetch ape_checksums.txt + .sig + .pem, run
-# `cosign verify-blob --certificate-identity-regexp …`, then check
-# the tarball's SHA256 against the signed file (sha256sum -c).
-# No keys to provision — OIDC token from GitHub Actions is exchanged
-# for a short-lived Fulcio cert at sign time, recorded in Rekor.
+# Keyless cosign signing of the checksums file via Sigstore Fulcio, emitted as
+# a self-contained Sigstore bundle (--new-bundle-format): the Fulcio cert,
+# the signature, the certificate-transparency SCT, and the Rekor inclusion
+# proof in one ape_checksums.txt.bundle file. `ape update` verifies it fully
+# offline against an embedded Sigstore trusted root (no cosign binary needed);
+# humans verify with `cosign verify-blob --bundle ape_checksums.txt.bundle
+# --new-bundle-format --certificate-identity … --certificate-oidc-issuer …`.
+# No keys to provision — the GitHub Actions OIDC token is exchanged for a
+# short-lived Fulcio cert at sign time and recorded in Rekor.
 signs:
   - cmd: cosign
-    signature: '${artifact}.sig'
-    certificate: '${artifact}.pem'
+    signature: '${artifact}.bundle'
     args:
       - 'sign-blob'
       - '--yes'
-      - '--output-certificate=${certificate}'
-      - '--output-signature=${signature}'
+      - '--new-bundle-format'
+      - '--bundle=${signature}'
       - '${artifact}'
     artifacts: checksum
 

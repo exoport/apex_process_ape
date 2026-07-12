@@ -276,19 +276,24 @@ If cosign is not found: warn the user with the manual verification command (see 
 ```bash
 tmp_dir=$(mktemp -d)
 base_url="https://github.com/{repo_slug}/releases/download/{version}"
-curl -sfL "${base_url}/ape_checksums.txt"     -o "${tmp_dir}/ape_checksums.txt"
-curl -sfL "${base_url}/ape_checksums.txt.sig" -o "${tmp_dir}/ape_checksums.txt.sig"
-curl -sfL "${base_url}/ape_checksums.txt.pem" -o "${tmp_dir}/ape_checksums.txt.pem"
+curl -sfL "${base_url}/ape_checksums.txt"        -o "${tmp_dir}/ape_checksums.txt"
+curl -sfL "${base_url}/ape_checksums.txt.bundle" -o "${tmp_dir}/ape_checksums.txt.bundle"
 ```
 
 HALT if any curl fails (non-zero exit or empty file). Message: "Failed to download release artifacts. The release may still be uploading — try again in a minute."
 
 #### 7c — Verify signature
 
+Releases from v0.0.44 ship a Sigstore bundle (`ape_checksums.txt.bundle`:
+cert + signature + SCT + Rekor inclusion proof), verified with
+`--bundle … --new-bundle-format`. (Releases ≤ v0.0.43 shipped detached
+`ape_checksums.txt.sig` + `.pem`; verify those with `--certificate … --signature …`
+and no `--bundle`/`--new-bundle-format`.)
+
 ```bash
 cosign verify-blob \
-  --certificate "${tmp_dir}/ape_checksums.txt.pem" \
-  --signature   "${tmp_dir}/ape_checksums.txt.sig" \
+  --bundle "${tmp_dir}/ape_checksums.txt.bundle" \
+  --new-bundle-format \
   --certificate-identity "https://github.com/{repo_slug}/.github/workflows/release.yml@refs/tags/{version}" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   "${tmp_dir}/ape_checksums.txt"
@@ -321,8 +326,8 @@ If cosign was skipped, also display the manual verification command ready to cop
 
 ```bash
 cosign verify-blob \
-  --certificate ape_checksums.txt.pem \
-  --signature   ape_checksums.txt.sig \
+  --bundle ape_checksums.txt.bundle \
+  --new-bundle-format \
   --certificate-identity "https://github.com/{repo_slug}/.github/workflows/release.yml@refs/tags/{version}" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   ape_checksums.txt

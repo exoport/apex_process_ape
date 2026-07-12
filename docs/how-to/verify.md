@@ -10,10 +10,11 @@ Each release publishes:
 
 - `ape_<os>_<arch>.tar.gz` (or `.zip` on Windows) — the binary archive.
 - `ape_checksums.txt` — SHA-256 of every archive.
-- **`ape_checksums.txt.sig`** — Cosign signature of the checksums file.
-- **`ape_checksums.txt.pem`** — short-lived Fulcio cert that minted the signature.
+- **`ape_checksums.txt.bundle`** — a Sigstore bundle over the checksums file: the short-lived Fulcio certificate, the signature, the certificate-transparency SCT, and the Rekor inclusion proof, all in one file. Verifiable **fully offline** against the Sigstore public-good trusted root.
 
 The pattern matches kubectl, gh CLI, and most goreleaser projects: sign the checksums file, then verify each tarball's hash against the signed file. One signature covers the whole release.
+
+> Releases up to and including `v0.0.43` shipped the older detached pair `ape_checksums.txt.sig` + `ape_checksums.txt.pem` instead of the bundle. To verify one of those, use the pre-bundle form: `cosign verify-blob --certificate ape_checksums.txt.pem --signature ape_checksums.txt.sig …` (no `--bundle`/`--new-bundle-format`).
 
 ## Prerequisites
 
@@ -31,16 +32,15 @@ VERSION=v0.1.0
 ASSET=ape_linux_amd64.tar.gz
 BASE="https://github.com/exoport/apex_process_ape/releases/download/${VERSION}"
 
-# 1. Fetch the archive, the checksums file, and the signature material.
+# 1. Fetch the archive, the checksums file, and the signature bundle.
 curl -fsSL -o "${ASSET}"                "${BASE}/${ASSET}"
 curl -fsSL -o ape_checksums.txt         "${BASE}/ape_checksums.txt"
-curl -fsSL -o ape_checksums.txt.sig     "${BASE}/ape_checksums.txt.sig"
-curl -fsSL -o ape_checksums.txt.pem     "${BASE}/ape_checksums.txt.pem"
+curl -fsSL -o ape_checksums.txt.bundle  "${BASE}/ape_checksums.txt.bundle"
 
-# 2. Verify the signature on the checksums file.
+# 2. Verify the signature bundle on the checksums file.
 cosign verify-blob \
-  --certificate ape_checksums.txt.pem \
-  --signature   ape_checksums.txt.sig \
+  --bundle ape_checksums.txt.bundle \
+  --new-bundle-format \
   --certificate-identity-regexp \
     "^https://github\.com/exoport/apex_process_ape/\.github/workflows/release\.yml@refs/tags/v.*$" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
@@ -51,6 +51,8 @@ sha256sum -c ape_checksums.txt --ignore-missing
 ```
 
 If both steps print `Verified OK` and `<asset>: OK`, the binary is authentic.
+
+`ape update` performs this exact chain automatically on every self-update — it downloads the archive, the checksums file, and the bundle; verifies the bundle offline against an embedded copy of the Sigstore trusted root (pinning this repo's `release.yml` identity + the GitHub Actions OIDC issuer for the resolved tag); then verifies the archive's SHA-256 against the trusted checksums before replacing the binary. No `cosign` binary is needed for `ape update`.
 
 ## What the verify command checks
 

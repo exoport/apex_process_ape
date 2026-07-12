@@ -8,7 +8,12 @@ ape ships with self-update built in. `ape update` checks the latest GitHub relea
 ape update
 ```
 
-This compares your installed version against the latest published release. If you're already current, ape exits with `already up to date` and no changes are made. If a newer version exists, ape downloads the matching tarball, verifies it, and swaps the binary atomically. The replaced binary is kept as a backup so `ape rollback` can restore it.
+This compares your installed version against the latest published release. If you're already current, ape exits with `already up to date` and no changes are made. If a newer version exists, ape downloads the matching archive plus the release's signed `ape_checksums.txt` and its Sigstore bundle, then **verifies before applying**:
+
+1. The bundle is cosign-verified **offline** against an embedded Sigstore trusted root — pinning this repository's `release.yml` workflow identity and the GitHub Actions OIDC issuer for the exact tag. No `cosign` binary is required.
+2. The downloaded archive's SHA-256 is checked against the now-trusted checksums file.
+
+Only then is the binary extracted and swapped in atomically. If any verification step fails — or the release has no signature bundle — ape aborts and leaves the running binary untouched. The replaced binary is kept as a backup so `ape rollback` can restore it. (`GITHUB_TOKEN` is optional; when set it raises the GitHub API rate limit.)
 
 For scripted environments, machine-readable output:
 

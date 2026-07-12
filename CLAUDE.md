@@ -86,16 +86,23 @@ Tag filter shape:
 | `ci.yml`      | push to `main`, pull request                                          |
 | `release.yml` | push of a final-semver tag `vX.Y.Z` only (no suffix)                  |
 
-Verifying a release locally:
+Verifying a release locally (releases ship `ape_checksums.txt.bundle`, a
+Sigstore bundle — cert + signature + SCT + Rekor proof — verifiable offline;
+`ape update` does this same check automatically via embedded `sigstore-go`, no
+`cosign` binary required):
 
 ```bash
 cosign verify-blob \
-  --certificate ape_checksums.txt.pem \
-  --signature ape_checksums.txt.sig \
+  --bundle ape_checksums.txt.bundle \
+  --new-bundle-format \
   --certificate-identity "https://github.com/exoport/apex_process_ape/.github/workflows/release.yml@refs/tags/vX.Y.Z" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   ape_checksums.txt
 ```
+
+> Releases ≤ `v0.0.43` shipped detached `ape_checksums.txt.sig` +
+> `ape_checksums.txt.pem` instead; verify those with `--certificate … --signature …`
+> (no `--bundle`/`--new-bundle-format`).
 
 ## Conventions
 

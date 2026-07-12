@@ -1371,6 +1371,15 @@ Update ape to the latest version
 ape update [flags]
 ```
 
+Download and install the latest ape release from GitHub.
+
+Downloads are verified before they are applied: the release's signed
+SHA256 manifest is checked against its keyless-cosign Sigstore bundle
+(pinning this repository's release workflow identity and the Fulcio
+issuer), then the downloaded archive is checked against that trusted
+manifest. Verification is fully offline against an embedded Sigstore
+trusted root — no cosign binary is required.
+
 Flags:
 
 | Flag | Type | Default | Description |

@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## v0.0.44 (2026-07-12)
+
+- **feat(update): cosign-verify self-updates and drop `golang.org/x/crypto/openpgp`** —
+  `ape update` now downloads the platform archive plus the release's signed
+  `ape_checksums.txt` and its Sigstore bundle, and **verifies before applying**:
+  the bundle is cosign-verified fully offline against an embedded Sigstore
+  public-good trusted root, pinning this repo's `release.yml` workflow identity
+  and the GitHub Actions OIDC issuer for the resolved tag; then the archive's
+  SHA-256 is checked against the now-trusted manifest. Any failure — or a
+  release with no signature bundle — aborts before the running binary is
+  touched. Previously the updater linked
+  `github.com/creativeprojects/go-selfupdate` (which hard-imports the frozen
+  `golang.org/x/crypto/openpgp`) but set no validator, so `ape update` verified
+  nothing. The self-update path now uses `github.com/sigstore/sigstore-go`
+  (pure-Go verification) + `github.com/minio/selfupdate` (binary swap); openpgp
+  is no longer in the compiled binary. `ape update`, its `--output-format`, the
+  background update-available check, `ape doctor`'s update check, and
+  `ape rollback` are unchanged.
+- **build(release): ship `ape_checksums.txt.bundle`** — releases now sign the
+  checksums file as a self-contained Sigstore bundle (`cosign sign-blob
+  --new-bundle-format`: Fulcio cert + signature + certificate-transparency SCT
+  + Rekor inclusion proof in one file), so `ape update` and `cosign verify-blob
+  --bundle … --new-bundle-format` verify it offline. Supersedes the detached
+  `ape_checksums.txt.sig` + `ape_checksums.txt.pem` shipped through v0.0.43 (see
+  [docs/how-to/verify.md](docs/how-to/verify.md) for verifying older releases).
+- **chore(ci): remove the `GO-2026-5932` govulncheck allow-list** — with openpgp
+  out of the build graph the advisory is no longer flagged, so
+  `scripts/govulncheck-gate.py` now runs with **zero** allow-listed exceptions.
+
 ## v0.0.43 (2026-07-12)
 
 - **chore(security): bump Go toolchain to 1.26.5** — clears `GO-2026-5856`
@@ -12,7 +41,8 @@
   `scripts/govulncheck-gate.py` allow-lists exactly that advisory (with
   justification) while still failing CI on any other or new vulnerability.
   Tracked follow-up: replace the self-update path with a cosign-verifying
-  updater to drop openpgp entirely.
+  updater to drop openpgp entirely — **done in v0.0.44**, which removed
+  go-selfupdate and retired this allow-list entry.
 - **fix(portability): green the Windows `go test` job** — the first CI run over
   the full Phase-2 history surfaced Windows-only test failures in Linux-only
   components. Guest bind paths now use `path.Join` (POSIX) instead of
