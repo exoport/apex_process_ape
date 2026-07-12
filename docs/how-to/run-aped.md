@@ -167,11 +167,12 @@ Instead, pick one:
 `--node` selects the `ape.vmm.<node>.>` group (default: the local hostname). The
 node token is slugged the same way `<user>` tokens are.
 
-> **Today:** the read-only verbs (`ls`, `inspect`, `capabilities`) work end-to-end
-> through the deployed units. The provisioning verbs (`up`, and the `exec`/
-> `freeze`/`down` that follow it) do **not** yet work through the *hardened*
-> executor — see [Known limitation](#known-limitation--executor-sandbox-vs-the-nerdctl-shelldriver-phase-2)
-> below. The full lifecycle is proven in-process by `TestTier2Provision`.
+> **Provisioning through the hardened executor works with `aped run --driver
+> containerd`** (the barrier-3 fix, live-validated): `up` → `exec` → `attach` →
+> `freeze` → `down` all run end-to-end through the deployed hardened units. The
+> DEFAULT nerdctl shellDriver cannot (it does a client-side rootfs mount the unit
+> forbids) — see [Known limitation](#known-limitation--executor-sandbox-vs-the-nerdctl-shelldriver-phase-2)
+> below. The lifecycle is also proven in-process by `TestTier2ProvisionContainerd`.
 
 ## Per-VM credentials
 
@@ -247,11 +248,11 @@ The hardened `aped.service` (Appendix A: `ProtectSystem=strict`, empty
 written for an executor that is a **containerd _client_** — it talks to the
 socket and does no host work itself. The current executor, however, shells out to
 **`nerdctl`**, which does real host work in its own process. So **`ape sandbox up`
-through the deployed units still fails** — the lifecycle logic is correct
-(`TestTier2Provision` drives create → exec → freeze → unfreeze → destroy against a
-real Kata-QEMU microVM and passes, because `go test` runs the executor
-in-process, sandbox-free), but the deployed hardened executor cannot run
-`nerdctl`.
+through the deployed units fails on the DEFAULT shellDriver** — the lifecycle logic
+is correct (`TestTier2Provision` drives create → exec → freeze → unfreeze → destroy
+against a real Kata-QEMU microVM and passes, because `go test` runs the executor
+in-process, sandbox-free), but the deployed hardened executor cannot run `nerdctl`.
+This is **resolved by `aped run --driver containerd`** ([below](#the-fix-aped-run---driver-containerd-opt-in)) — the live-validated provisioning path.
 
 Three distinct barriers, peeled back in order (live-verified on Ubuntu 26.04 /
 kernel 7.0):

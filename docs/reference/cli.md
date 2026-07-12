@@ -40,7 +40,7 @@ Subcommands:
 - `pipeline` — List or run an APEX pipeline
 - `planning` — Show the planning pipeline diagram
 - `rollback` — Rollback ape to the previous version
-- `sandbox` — Provision and operate hardware-isolated Kata VM workspaces
+- `sandbox` — Provision and operate hardware-isolated Kata VM workspaces (via aped)
 - `service` — Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply
 - `sessions` — List, prune, or open the URL of live ape sessions
 - `sync` — Sync governance artifacts
@@ -741,32 +741,31 @@ Restore the backup binary created during the last update.
 
 ## ape sandbox
 
-Provision and operate hardware-isolated Kata VM workspaces
+Provision and operate hardware-isolated Kata VM workspaces (via aped)
 
 ```
 ape sandbox
 ```
 
 Provision and operate long-lived, hardware-isolated Kata microVM
-workspaces (own guest kernel, KVM) for local development.
+workspaces (own guest kernel, KVM) through a rootful aped daemon.
 
-A workspace is a durable VM you attach to and reuse — not an ephemeral
-per-command sandbox. It mounts your project (host-fs by default), a
-per-workspace composed ~/.claude, and controlled public egress; you SSH /
-VS Code Remote in and run Claude Code, APEX pipelines, or Playwright inside.
+ape drives aped over embedded NATS using the ape.vmm.<node>.> contract; aped
+provisions the microVM, composes the workspace home, mints a per-VM telemetry
+credential, and owns the workspace registry. ape never runs as root.
 
-  ape sandbox up <name>      Provision a workspace from a profile
+  ape sandbox up <name>      Provision a workspace
   ape sandbox ls             List provisioned workspaces
-  ape sandbox attach <name>  Open an interactive shell inside a workspace
-  ape sandbox ssh <name>     SSH into a workspace over its forwarded port
+  ape sandbox inspect <name> Show a workspace's live state
   ape sandbox exec <name> -- <cmd>...   Run a command inside a workspace
-  ape sandbox freeze <name>    Freeze a workspace (cgroup-freeze; RAM stays resident)
+  ape sandbox freeze <name>    Freeze a workspace (cgroup-freeze; RAM resident)
   ape sandbox unfreeze <name>  Unfreeze a frozen workspace
-  ape sandbox suspend <name>   Suspend a workspace microVM (save RAM to disk) — not yet on Kata
+  ape sandbox suspend <name>   Suspend a workspace microVM — not yet on Kata
   ape sandbox down <name>      Tear a workspace down
 
-Requires Linux with KVM + containerd + Kata — run 'ape doctor' to check.
-Profiles live in _apex/sandbox/<name>.yaml.
+Point ape at your aped node with APE_NATS_URL + APE_NATS_CREDS (the operator
+credential aped mints at startup) and --node. Requires a running aped on a
+Linux host with KVM + containerd + Kata.
 
 Subcommands:
 
@@ -774,37 +773,69 @@ Subcommands:
 - `down` — Tear a workspace down
 - `exec` — Run a command inside a workspace
 - `freeze` — Freeze a workspace (cgroup-freeze; guest RAM stays resident)
+- `inspect` — Show a workspace's live state
 - `ls` — List provisioned workspaces
-- `ssh` — SSH into a workspace over its forwarded loopback port
+- `ssh` — SSH into a workspace (Tier-2)
 - `suspend` — Suspend a workspace microVM (save guest RAM to disk) — not yet supported on Kata
 - `unfreeze` — Unfreeze a frozen workspace
-- `up` — Provision a Kata workspace from a profile
+- `up` — Provision a Kata workspace
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
 
 ## ape sandbox attach
 
 Open an interactive shell inside a workspace
 
 ```
-ape sandbox attach <name> [flags]
+ape sandbox attach <name>
 ```
 
-Flags:
+Open an interactive shell inside a workspace, wiring your terminal's
+stdin/stdout/stderr to the guest over the aped exec session subjects (PLAN-18 D2,
+credit-based flow control; the terminal goes raw and resizes forward on SIGWINCH).
+
+Requires an aped node running the containerd driver (aped run --driver
+containerd); a shell-driver node reports the session UNSUPPORTED.
+
+Global flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--shell` | string | `/bin/bash` | Login shell to open |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
 
 ## ape sandbox down
 
 Tear a workspace down
 
 ```
-ape sandbox down <name>
+ape sandbox down <name> [flags]
 ```
 
-Force-remove the workspace container and drop its registry entry and
-composed home. A persistent volume (mount: volume) is left in place — remove
-it manually with 'nerdctl volume rm' if you want to discard its data.
+Destroy the workspace microVM and drop its aped registry entry. A
+persistent volume (mount: volume) is retained unless --remove-volume is set.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--force` | bool | `false` | Force teardown |
+| `--remove-volume` | bool | `false` | Also remove the persistent volume (mount: volume) |
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
 
 ## ape sandbox exec
 
@@ -814,6 +845,21 @@ Run a command inside a workspace
 ape sandbox exec <name> -- <cmd>...
 ```
 
+Run a command inside a workspace, streaming its stdout/stderr back over the
+aped exec session subjects and returning its exit code.
+
+On an aped node without an interactive backend (the nerdctl shell driver) it
+falls back to a request/reply exec that reports only the exit status (output goes
+to the node's logs).
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
 ## ape sandbox freeze
 
 Freeze a workspace (cgroup-freeze; guest RAM stays resident)
@@ -822,10 +868,39 @@ Freeze a workspace (cgroup-freeze; guest RAM stays resident)
 ape sandbox freeze <name>
 ```
 
-Freeze cgroup-freezes the workspace's guest processes (nerdctl pause):
-the guest stops consuming CPU but its RAM stays fully resident, so unfreeze
-resumes instantly. This is a freeze, not a VM suspend (which would save RAM to
-disk — see 'ape sandbox suspend').
+Freeze cgroup-freezes the workspace's guest processes: the guest stops
+consuming CPU but its RAM stays fully resident, so unfreeze resumes instantly.
+This is a freeze, not a VM suspend (see 'ape sandbox suspend').
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox inspect
+
+Show a workspace's live state
+
+```
+ape sandbox inspect <name> [flags]
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
 
 ## ape sandbox ls
 
@@ -841,19 +916,29 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
-## ape sandbox ssh
-
-SSH into a workspace over its forwarded loopback port
-
-```
-ape sandbox ssh <name> [flags]
-```
-
-Flags:
+Global flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--user` | string | `ape` | SSH user inside the workspace |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox ssh
+
+SSH into a workspace (Tier-2)
+
+```
+ape sandbox ssh <name>
+```
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
 
 ## ape sandbox suspend
 
@@ -863,12 +948,13 @@ Suspend a workspace microVM (save guest RAM to disk) — not yet supported on Ka
 ape sandbox suspend <name>
 ```
 
-Suspend saves the guest's RAM to disk and releases it, unlike 'freeze'
-(which cgroup-freezes the guest with RAM resident). VM save/restore is not
-reachable through Kata-via-containerd today — the shim's Checkpoint is
-unimplemented and the VMM control socket is Kata-owned — so it awaits a
-VMM-owning driver or the Firecracker tier (PLAN-18 D7). Use 'ape sandbox
-freeze' to free CPU while keeping the workspace resident.
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
 
 ## ape sandbox unfreeze
 
@@ -878,30 +964,46 @@ Unfreeze a frozen workspace
 ape sandbox unfreeze <name>
 ```
 
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
 ## ape sandbox up
 
-Provision a Kata workspace from a profile
+Provision a Kata workspace
 
 ```
 ape sandbox up <name> [flags]
 ```
 
-Provision a long-lived Kata workspace named <name>.
+Provision a long-lived Kata workspace named <name> on the target aped node.
 
-The profile (--profile, default <name>) is loaded from
-_apex/sandbox/<profile>.yaml. ape composes a per-workspace ~/.claude
-(credentials, curated skills/agents, git), resolves the image (official
-ape-sandbox unless the profile overrides it), and starts a detached Kata
-container with the project mounted per the profile's mount mode.
+aped resolves the profile, composes a per-workspace ~/.claude, mints a per-VM
+telemetry credential, and starts the detached microVM. For a host-fs mount the
+project at --cwd is sent as the mount source; aped canonicalizes it and
+re-checks it against its policy mount-root allow-list before binding it.
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root to mount (default: current working directory) |
-| `--profile` | string | `—` | Profile name under _apex/sandbox/ (default: the workspace name) |
-| `--proxy` | string | `—` | host:port of a running CONNECT egress proxy to wire as HTTPS_PROXY |
-| `--ssh-port` | int | `0` | Host loopback port to forward to the workspace's sshd (0: none) |
+| `--cwd` | string | `—` | Project root to mount for host-fs (default: current working directory) |
+| `--image` | string | `—` | Image ref override (default: aped's pinned image) |
+| `--mount` | string | `—` | Mount mode: host-fs \| volume \| ephemeral (default: host-fs) |
+| `--profile` | string | `—` | Profile name aped resolves (default: derived from the request) |
+| `--runtime` | string | `—` | Runtime handler: kata-qemu \| kata-clh |
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
 
 ## ape service
 
