@@ -162,9 +162,17 @@ fronts; the PTY runners call the same functions:
   session + run totals, `reporting.TranscriptUpload` when
   `--upload-transcripts` (PLAN-13's flag becomes a front for this),
   lifecycle events as PLAN-13 D2 already specifies.
-- Runners export `APE_SESSION_ID` (and existing NATS env) into the claude
-  child's environment, so an agent *inside a supervised run* that calls
-  `ape event`/`ape log` reports into the correct session without flags.
+- Runners export the resolved NATS env (`APE_NATS_URL` / `APE_NATS_CREDS`) into
+  the claude child's environment, so an agent *inside a supervised run* that
+  calls `ape event`/`ape log` reports without re-specifying
+  `--nats-url` / `--nats-creds`.
+  **Refinement (shipped):** runners deliberately do *not* export
+  `APE_SESSION_ID`. ape cannot know the child's session id before claude assigns
+  it, so the child's reporting commands auto-resolve to the newest transcript
+  (their own) instead — see `internal/apecmd/eventing_wire.go` (`startEventing`,
+  which cites this D4) + the `internal/sessionref` resolution order. An operator
+  who wants a pinned id in a *plain* (unsupervised) session still sets
+  `APE_SESSION_ID` via a SessionStart hook — see the how-to.
 - Subjects from supervised runs use the run's kind and id; standalone use
   kind `session`. Payload schemas are identical — documented once in
   `docs/reference/events.md`.
@@ -190,9 +198,10 @@ config, or session unresolvable. Registered in PLAN-9's exit-code table.
    round-trip: payload × price table = scanner cost).
 5. `ape transcript upload` (embedded object-store tests; idempotent re-run;
    companion event).
-6. Runner integration (D4): `APE_SESSION_ID` export + finalize calls; assert
-   a supervised run and a standalone invocation produce schema-identical
-   payloads.
+6. Runner integration (D4): NATS-env export into the claude child (the child's
+   session id auto-resolves — see the D4 refinement, `APE_SESSION_ID` is not
+   exported) + finalize calls; assert a supervised run and a standalone
+   invocation produce schema-identical payloads.
 7. Docs: `how-to/report-from-a-session.md` (agent usage — the "plain local
    claude session with only ape + creds" walkthrough, including the
    server-side `ape.*.<token>.>` permission pattern),

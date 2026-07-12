@@ -73,8 +73,10 @@ Each command resolves the target session in this order, first match wins:
 
 1. `--session-id <uuid>` — explicit.
 2. `--transcript <path>` — explicit transcript file; the id is parsed from its name.
-3. `APE_SESSION_ID` (env) — set by ape's own runners inside a supervised run, or
-   by a hook/wrapper in a plain session.
+3. `APE_SESSION_ID` (env) — set by a SessionStart hook or wrapper in a plain
+   session. (ape's own runners deliberately do *not* set it — they can't know
+   the child's session id up front, so a nested `ape` call auto-resolves via
+   step 4 instead; see below.)
 4. **Auto-detect** — the newest transcript for the current project
    (`~/.claude/projects/<cwd-slug>/`, falling back to matching the recorded `cwd`).
 
