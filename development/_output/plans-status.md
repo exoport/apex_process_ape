@@ -101,12 +101,16 @@ the deployed hardened units. Pending:
 
 ## 3. Minor / optional follow-ups on otherwise-done plans
 
-- **PLAN-10** (done): the optional `cost.NewTailer` dead-code deletion — zero
-  production callers; the plan itself frames it as "default-delete unless the TUI
-  wants live cost". Not a deliverable.
-- **PLAN-17** (done): the design specified exporting `APE_SESSION_ID` into the
-  claude child; the code instead relies on session auto-resolution (ape can't know
-  the child's session id up front). A documented design refinement, not a gap.
+Both follow-ups were closed on `feat/plan-18-phase2-aped` (v0.0.42) — nothing
+open here:
+
+- **PLAN-10** (done): the optional `cost.NewTailer` dead-code deletion shipped —
+  the unused live-file poller was deleted; `AssistantLine`, the one symbol
+  `scanTurns` still parses, was relocated to `internal/cost/line.go`.
+- **PLAN-17** (done): the `APE_SESSION_ID` design-vs-behaviour mismatch was
+  reconciled in the plan doc (D4 refinement) and the report-from-a-session
+  how-to — the runner intentionally exports only the NATS env and lets the
+  child's session auto-resolve; ape can't know the child's session id up front.
 
 ---
 
