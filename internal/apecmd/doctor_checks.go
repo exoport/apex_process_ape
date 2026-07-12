@@ -194,6 +194,116 @@ func checkFrameworkMetadata(_ context.Context, env doctorEnv) CheckResult {
 	}
 }
 
+// operatingRulesManaged reads framework.yaml and reports whether this
+// project's install manages the operating-rules fragment
+// (Sources.OperatingRules.Managed). The operating_rules.* checks self-gate
+// on it: only a managed install can hard-FAIL (the fragment / import /
+// skill genuinely went missing). Non-projects, framework versions that
+// predate the fragment, and legacy installs that predate this feature all
+// return managed=false, keeping `ape doctor` green (INFO/WARN, not FAIL).
+func operatingRulesManaged(root string) (managed, inProject bool) {
+	if !isProjectRoot(root) {
+		return false, false
+	}
+	meta, err := framework.ReadMetadata(root)
+	if err != nil {
+		return false, true // framework.metadata check surfaces the real state
+	}
+	return meta.Sources.OperatingRules.Managed, true
+}
+
+// checkOperatingRulesFragment verifies the always-on operating-rules
+// fragment (PLAN-47 Workstream C) is present. Required, but only hard-fails
+// when the install records it as managed yet the file is gone.
+func checkOperatingRulesFragment(_ context.Context, env doctorEnv) CheckResult {
+	managed, inProject := operatingRulesManaged(env.ProjectRoot)
+	if !inProject {
+		return CheckResult{Status: StatusInfo, Message: "not in a framework project — operating-rules check skipped"}
+	}
+	if !managed {
+		return CheckResult{
+			Status:      StatusWarn,
+			Message:     "operating-rules fragment not managed by this install",
+			Remediation: "Run `ape framework update` against a framework that ships _apex/apex-operating-rules.md to install the always-on APEX rules.",
+			FixCommand:  "ape framework update",
+		}
+	}
+	path := filepath.Join(env.ProjectRoot, framework.ProjectOperatingRules)
+	if _, err := os.Stat(path); err != nil {
+		return CheckResult{
+			Status:      StatusFail,
+			Message:     fmt.Sprintf("managed fragment missing at %s", framework.ProjectOperatingRules),
+			Remediation: "Run `ape framework update` to reinstall the operating-rules fragment.",
+			FixCommand:  "ape framework update",
+		}
+	}
+	return CheckResult{Status: StatusOK, Message: framework.ProjectOperatingRules}
+}
+
+// checkOperatingRulesImport verifies the repo-root CLAUDE.md carries the
+// managed @import of the fragment. This is a syntactic check — it proves
+// the import line is present inside the markers, not that Claude Code
+// resolved it at runtime (drive a real session to verify that).
+func checkOperatingRulesImport(_ context.Context, env doctorEnv) CheckResult {
+	managed, inProject := operatingRulesManaged(env.ProjectRoot)
+	if !inProject {
+		return CheckResult{Status: StatusInfo, Message: "not in a framework project — CLAUDE.md import check skipped"}
+	}
+	if !managed {
+		return CheckResult{Status: StatusInfo, Message: "operating-rules not managed on this install (see operating_rules.fragment)"}
+	}
+	path := filepath.Join(env.ProjectRoot, framework.ProjectClaudeMd)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return CheckResult{
+			Status:      StatusFail,
+			Message:     fmt.Sprintf("repo-root %s unreadable: %v", framework.ProjectClaudeMd, err),
+			Remediation: "Run `ape framework update` to recreate the CLAUDE.md managed block.",
+			FixCommand:  "ape framework update",
+		}
+	}
+	body, ok, err := framework.FindManagedBlock(data)
+	if err != nil {
+		return CheckResult{
+			Status:      StatusFail,
+			Message:     fmt.Sprintf("%s has malformed apex:managed markers: %v", framework.ProjectClaudeMd, err),
+			Remediation: "Fix or remove the apex:managed markers in CLAUDE.md, then run `ape framework update`.",
+		}
+	}
+	if !ok || !strings.Contains(body, framework.OperatingRulesImport) {
+		return CheckResult{
+			Status:      StatusFail,
+			Message:     fmt.Sprintf("%s is missing the managed operating-rules import", framework.ProjectClaudeMd),
+			Remediation: "Run `ape framework update` to write the managed block.",
+			FixCommand:  "ape framework update",
+		}
+	}
+	return CheckResult{Status: StatusOK, Message: fmt.Sprintf("%s imports %s", framework.ProjectClaudeMd, framework.OperatingRulesImport)}
+}
+
+// checkOrchestratorSkill verifies the apex-orchestrator persona skill is
+// installed. It rides the generic skill-install path; this check ties it
+// into the operating-rules contract.
+func checkOrchestratorSkill(_ context.Context, env doctorEnv) CheckResult {
+	managed, inProject := operatingRulesManaged(env.ProjectRoot)
+	if !inProject {
+		return CheckResult{Status: StatusInfo, Message: "not in a framework project — orchestrator-skill check skipped"}
+	}
+	if !managed {
+		return CheckResult{Status: StatusInfo, Message: "operating-rules not managed on this install (see operating_rules.fragment)"}
+	}
+	dir := filepath.Join(framework.ProjectSkillsPath(env.ProjectRoot), framework.OrchestratorSkill)
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return CheckResult{
+			Status:      StatusFail,
+			Message:     fmt.Sprintf("%s skill not installed at %s", framework.OrchestratorSkill, dir),
+			Remediation: "Run `ape framework update` to install the apex-orchestrator persona skill.",
+			FixCommand:  "ape framework update",
+		}
+	}
+	return CheckResult{Status: StatusOK, Message: framework.OrchestratorSkill + " installed"}
+}
+
 func checkSkillsProject(_ context.Context, env doctorEnv) CheckResult {
 	if !isProjectRoot(env.ProjectRoot) {
 		return CheckResult{Status: StatusInfo, Message: "not in a project — project skill check skipped"}

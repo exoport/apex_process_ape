@@ -131,6 +131,9 @@ var allChecks = []doctorCheck{
 	{Name: "skills.project", Run: checkSkillsProject},
 	{Name: "skills.user", Run: checkSkillsUser},
 	{Name: "pipelines.project", Run: checkPipelinesProject},
+	{Name: "operating_rules.fragment", Required: true, Run: checkOperatingRulesFragment},
+	{Name: "operating_rules.import", Required: true, Run: checkOperatingRulesImport},
+	{Name: "operating_rules.orchestrator_skill", Required: true, Run: checkOrchestratorSkill},
 	{Name: "permissions.home_claude", Run: checkPermissionsHomeClaude},
 	{Name: "ape.update_available", Run: checkApeUpdateAvailable},
 	{Name: "kvm.available", Run: checkKVMAvailable},
@@ -156,8 +159,11 @@ verdict.
 Doctor runs a fixed set of checks against the host (claude / git /
 node / npx binaries, Playwright host compatibility, ~/.claude
 writability) and the project at --cwd (framework metadata, installed
-skills + pipelines). Project-scoped checks degrade to INFO when run
-outside a project root.
+skills + pipelines, and the always-on operating-rules fragment +
+CLAUDE.md managed block). Project-scoped checks degrade to INFO when run
+outside a project root; the operating-rules checks only hard-fail when a
+framework install that manages them has lost the fragment, import, or
+apex-orchestrator skill.
 
 Exit codes:
   0  every required check passed (warnings allowed unless --strict)

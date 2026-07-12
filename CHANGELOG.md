@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## v0.0.43 (unreleased)
+
+- **feat(framework): always-on operating-rules fragment + managed `CLAUDE.md`
+  block (PLAN-47 Workstream C)** — `ape framework setup`/`update` now install a
+  framework-maintained `_apex/apex-operating-rules.md` fragment and ensure the
+  repo-root `CLAUDE.md` imports it inside a marker-delimited managed block
+  (`<!-- apex:managed:begin -->` … `<!-- apex:managed:end -->`), so every Claude
+  Code session in the project loads the APEX discipline rules with no hooks and
+  no manual playbook hand-over. Content outside the markers is preserved
+  byte-for-byte; an absent `CLAUDE.md` is created silently (headless-safe); the
+  refresh is idempotent (a steady-state `update` leaves `CLAUDE.md`
+  byte-identical). The `apex-orchestrator` persona skill installs via the
+  existing generic skill path.
+
+  **Version-skew safe (option B):** if the framework checkout predates the
+  fragment, setup/update skip fragment + block management with a warning rather
+  than failing — so this ape release is independent of the framework release
+  order. `ape doctor` gains required-but-self-gating checks
+  (`operating_rules.fragment` / `.import` / `.orchestrator_skill`): they hard-fail
+  only when a managing install has lost the artifacts, and degrade to INFO/WARN
+  outside a project, on legacy installs, or against an older framework — so a
+  plain repo stays green. `framework.yaml` records `sources.operating_rules.managed`.
+
 ## v0.0.42 (2026-07-12)
 
 Large feature drop — everything on `feat/plan-18-phase2-aped` since v0.0.41

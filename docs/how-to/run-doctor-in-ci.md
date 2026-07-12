@@ -89,7 +89,24 @@ ape doctor --output-format json | jq -e '.checks[] | select(.name == "ape.update
 | `claude.binary FAIL`                   | claude not installed on the runner                                      | Install Claude Code in a setup step, or pin a base image that already has it.                          |
 | `playwright.host_supported WARN`       | Runner OS not yet on the allowlist (e.g. fresh Ubuntu LTS)              | Skip the check if you don't run Excalidraw-rendering pipelines; otherwise pin to an older `ubuntu-*`. |
 | `framework.metadata WARN`              | Repo doesn't have `_apex/framework.yaml` committed                       | Run `ape framework setup` in a prior step or commit the metadata.                                     |
+| `operating_rules.fragment FAIL`        | A project that manages operating rules lost `_apex/apex-operating-rules.md` or the `CLAUDE.md` managed import | Run `ape framework update`. (Legacy / older-framework installs report WARN, not FAIL — see below.)   |
 | `permissions.home_claude WARN`         | Container runs as a user without write access to `~/.claude`            | Mount or create the dir owned by the runner UID.                                                      |
+
+## Operating-rules checks (required, but self-gating)
+
+The `operating_rules.fragment`, `operating_rules.import`, and
+`operating_rules.orchestrator_skill` checks are **required** — a FAIL exits `1`
+even without `--strict`. But they self-gate on `sources.operating_rules.managed`
+in `framework.yaml`, so they only hard-fail when an install that *manages* the
+operating rules has lost the fragment, the `CLAUDE.md` import, or the
+`apex-orchestrator` skill (a real regression). Outside a framework project they
+are INFO; on a legacy install or an older framework that predates the fragment
+they are a WARN nudge (run `ape framework update`), never a hard failure. So a
+plain repo without APEX installed stays green.
+
+The `operating_rules.import` check is *syntactic* — it confirms the managed
+`@import` line is present in `CLAUDE.md`; it does not prove Claude Code resolved
+it at runtime. To verify resolution, drive a real session and check `/memory`.
 
 ## Related
 

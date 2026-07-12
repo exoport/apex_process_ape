@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/output"
 )
 
@@ -194,6 +195,100 @@ func TestCheckFrameworkMetadata_OutsideProjectInfo(t *testing.T) {
 	res := checkFrameworkMetadata(context.Background(), doctorEnv{ProjectRoot: t.TempDir()})
 	if res.Status != StatusInfo {
 		t.Errorf("outside-project status: got %q, want info", res.Status)
+	}
+}
+
+// writeManagedProject writes a minimal framework-installed project whose
+// framework.yaml records Sources.OperatingRules.Managed = managed. Used to
+// drive the self-gated operating_rules.* checks.
+func writeManagedProject(t *testing.T, managed bool) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "_apex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	meta := &framework.Metadata{
+		Sources: framework.Sources{
+			OperatingRules: framework.OperatingRulesSource{Managed: managed},
+		},
+	}
+	if err := framework.WriteMetadata(root, meta); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func TestCheckOperatingRules_OutsideProjectInfo(t *testing.T) {
+	env := doctorEnv{ProjectRoot: t.TempDir()} // no _apex/.git/.claude
+	for name, fn := range map[string]func(context.Context, doctorEnv) CheckResult{
+		"fragment":     checkOperatingRulesFragment,
+		"import":       checkOperatingRulesImport,
+		"orchestrator": checkOrchestratorSkill,
+	} {
+		if res := fn(context.Background(), env); res.Status != StatusInfo {
+			t.Errorf("%s outside a project: got %q, want info", name, res.Status)
+		}
+	}
+}
+
+// TestCheckOperatingRules_UnmanagedNudges covers the version-skew / legacy
+// install case: framework installed but not managing operating-rules. The
+// fragment check WARNs (actionable nudge); import + skill stay INFO.
+func TestCheckOperatingRules_UnmanagedNudges(t *testing.T) {
+	root := writeManagedProject(t, false)
+	if res := checkOperatingRulesFragment(context.Background(), doctorEnv{ProjectRoot: root}); res.Status != StatusWarn {
+		t.Errorf("unmanaged fragment: got %q, want warn", res.Status)
+	} else if res.FixCommand != "ape framework update" {
+		t.Errorf("unmanaged fragment fix: got %q", res.FixCommand)
+	}
+	if res := checkOperatingRulesImport(context.Background(), doctorEnv{ProjectRoot: root}); res.Status != StatusInfo {
+		t.Errorf("unmanaged import: got %q, want info", res.Status)
+	}
+	if res := checkOrchestratorSkill(context.Background(), doctorEnv{ProjectRoot: root}); res.Status != StatusInfo {
+		t.Errorf("unmanaged skill: got %q, want info", res.Status)
+	}
+}
+
+// TestCheckOperatingRules_ManagedAllPresentOK is the healthy steady state.
+func TestCheckOperatingRules_ManagedAllPresentOK(t *testing.T) {
+	root := writeManagedProject(t, true)
+	if err := os.WriteFile(filepath.Join(root, "_apex", "apex-operating-rules.md"), []byte("# rules"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	claude, _, err := framework.UpsertManagedBlock(nil, framework.OperatingRulesImport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "CLAUDE.md"), claude, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".claude", "skills", "apex-orchestrator"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, fn := range map[string]func(context.Context, doctorEnv) CheckResult{
+		"fragment":     checkOperatingRulesFragment,
+		"import":       checkOperatingRulesImport,
+		"orchestrator": checkOrchestratorSkill,
+	} {
+		if res := fn(context.Background(), doctorEnv{ProjectRoot: root}); res.Status != StatusOK {
+			t.Errorf("%s (managed, all present): got %q, want ok (%s)", name, res.Status, res.Message)
+		}
+	}
+}
+
+// TestCheckOperatingRules_ManagedButMissingFails confirms a managed install
+// with the artifacts deleted hard-fails (the regression the required checks
+// exist to catch).
+func TestCheckOperatingRules_ManagedButMissingFails(t *testing.T) {
+	root := writeManagedProject(t, true) // metadata says managed, nothing on disk
+	if res := checkOperatingRulesFragment(context.Background(), doctorEnv{ProjectRoot: root}); res.Status != StatusFail {
+		t.Errorf("managed+missing fragment: got %q, want fail", res.Status)
+	}
+	if res := checkOperatingRulesImport(context.Background(), doctorEnv{ProjectRoot: root}); res.Status != StatusFail {
+		t.Errorf("managed+missing import: got %q, want fail", res.Status)
+	}
+	if res := checkOrchestratorSkill(context.Background(), doctorEnv{ProjectRoot: root}); res.Status != StatusFail {
+		t.Errorf("managed+missing skill: got %q, want fail", res.Status)
 	}
 }
 

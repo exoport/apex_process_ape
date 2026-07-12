@@ -297,8 +297,11 @@ verdict.
 Doctor runs a fixed set of checks against the host (claude / git /
 node / npx binaries, Playwright host compatibility, ~/.claude
 writability) and the project at --cwd (framework metadata, installed
-skills + pipelines). Project-scoped checks degrade to INFO when run
-outside a project root.
+skills + pipelines, and the always-on operating-rules fragment +
+CLAUDE.md managed block). Project-scoped checks degrade to INFO when run
+outside a project root; the operating-rules checks only hard-fail when a
+framework install that manages them has lost the fragment, import, or
+apex-orchestrator skill.
 
 Exit codes:
   0  every required check passed (warnings allowed unless --strict)
