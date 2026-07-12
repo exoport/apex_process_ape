@@ -1,0 +1,7 @@
+# The `ape update` verification fixtures are byte-exact: the release signature
+# covers the SHA-256 of ape_checksums.txt, and the Sigstore bundle embeds that
+# digest. A line-ending conversion (e.g. a Windows autocrlf checkout rewriting
+# LF -> CRLF) would change the bytes and break the offline cosign-verify tests.
+# Treat them as binary so git never touches their contents.
+internal/apecmd/testdata/update/** -text
+internal/apecmd/trusted_root.json -text
