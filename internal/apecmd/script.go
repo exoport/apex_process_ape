@@ -319,21 +319,31 @@ func buildScriptInterp(sandbox bool, stdout io.Writer) (*interp.Interpreter, *ta
 	return i, tail
 }
 
-// sandboxSymbolHint rewrites yaegi's opaque "unable to find source" import
-// error into a clear symbol-not-allowed message when running --sandbox, so a
-// script reaching for os/exec (or another restricted package) gets an
-// actionable explanation instead of a GOPATH suggestion.
+// sandboxSymbolHint rewrites yaegi's opaque import error into a clear
+// symbol-not-allowed message when running --sandbox, so a script reaching for
+// os/exec (or another restricted package) gets an actionable explanation
+// instead of a raw source-resolution error.
+//
+// yaegi renders a blocked/unresolvable import as
+//
+//	<file>:<line>:<col>: import "<pkg>" error: <reason>
+//
+// where <reason> is OS-specific: Linux says "unable to find source related to
+// … GoPath", Windows fails the source-load fallback with an "open <path>: The
+// filename … is incorrect". We key the rewrite on the stable `import "<pkg>"
+// error:` prefix, not the platform-specific reason, so it fires on every OS.
+// In --sandbox mode any import that fails to resolve is a package outside the
+// restricted symbol set, which is exactly what we want to report as blocked.
 func sandboxSymbolHint(err error, sandbox bool) string {
 	msg := err.Error()
-	if !sandbox || !strings.Contains(msg, "unable to find source related to") {
+	impIdx := strings.Index(msg, `import "`)
+	if !sandbox || impIdx < 0 || !strings.Contains(msg[impIdx:], `" error:`) {
 		return msg
 	}
 	pkg := ""
-	if i := strings.Index(msg, `import "`); i >= 0 {
-		rest := msg[i+len(`import "`):]
-		if j := strings.Index(rest, `"`); j >= 0 {
-			pkg = rest[:j]
-		}
+	rest := msg[impIdx+len(`import "`):]
+	if j := strings.Index(rest, `"`); j >= 0 {
+		pkg = rest[:j]
 	}
 	// yaegi's message is "<file>:<line>:<col>: import "pkg" error: …"; the
 	// text before `: import "` is the source location.

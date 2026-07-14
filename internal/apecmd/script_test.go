@@ -209,14 +209,24 @@ func TestScriptRunner_RunTaskAgainstBashStandin(t *testing.T) {
 }
 
 func TestSandboxSymbolHint(t *testing.T) {
-	raw := `/x/foo.go:6:2: import "os/exec" error: unable to find source related to: "os/exec". Either the GOPATH environment variable, or the Interpreter.Options.GoPath needs to be set`
-	// Non-sandbox leaves it verbatim.
-	require.Equal(t, raw, sandboxSymbolHint(stubError(raw), false))
-	// Sandbox rewrites to the clear message with location + package.
-	got := sandboxSymbolHint(stubError(raw), true)
-	require.Contains(t, got, "/x/foo.go:6:2:")
-	require.Contains(t, got, `package "os/exec" is not allowed`)
-	require.NotContains(t, got, "GOPATH")
+	// The reason after `import "<pkg>" error:` is OS-specific; the rewrite
+	// must fire on both. Linux: the "unable to find source / GoPath" form.
+	// Windows: yaegi's source-load fallback fails with a filesystem error.
+	linux := `/x/foo.go:6:2: import "os/exec" error: unable to find source related to: "os/exec". Either the GOPATH environment variable, or the Interpreter.Options.GoPath needs to be set`
+	windows := `C:\x\foo.go:6:2: import "os/exec" error: open src\D:\a\repo\repo\testdata\vendor: The filename, directory name, or volume label syntax is incorrect.`
+
+	for name, raw := range map[string]string{"linux": linux, "windows": windows} {
+		t.Run(name, func(t *testing.T) {
+			// Non-sandbox leaves it verbatim.
+			require.Equal(t, raw, sandboxSymbolHint(stubError(raw), false))
+			// Sandbox rewrites to the clear message with package + the
+			// actionable --sandbox explanation, dropping the raw reason.
+			got := sandboxSymbolHint(stubError(raw), true)
+			require.Contains(t, got, `package "os/exec" is not allowed in --sandbox mode`)
+			require.NotContains(t, got, "GOPATH")
+			require.NotContains(t, got, "syntax is incorrect")
+		})
+	}
 }
 
 func TestScriptCommandFlagSurface(t *testing.T) {
