@@ -728,8 +728,10 @@ Flags:
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
 | `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
 | `--from` | string | `—` | Skip stages before the named one and start execution there |
+| `--idle-timeout` | duration | `0s` | Per-step idle backstop: cancel a step only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 90m). Default 60m. |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json. Honoured in --web mode. |
 | `--manifest-dir` | string | `—` | Override the directory for run manifest artifacts (default: <project>/_output/pipelines) |
+| `--max-duration` | duration | `3h0m0s` | Hard wall-clock ceiling per step regardless of progress (e.g. 3h). 0 disables the cap. |
 | `--nats-creds` | string | `—` | NATS .creds file; its user identity is baked into every subject (env APE_NATS_CREDS). |
 | `--nats-url` | string | `—` | NATS server URL for progress events + transcript upload (env APE_NATS_URL). Empty disables both. |
 | `--no-commit` | bool | `false` | Do not commit anything during the run; leave the working tree dirty. Overrides any `commit:` field in the pipeline YAML. |
@@ -806,8 +808,9 @@ Flags:
 | `--agent` | string | `—` | Framework agent fronting the session: /<agent> --autonomous -- <prompt> |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
 | `--handoff` | string | `—` | Handoff document to seed the session with (mutually exclusive with the positional prompt) |
-| `--idle-timeout` | duration | `0s` | Idle-without-Stop completion backstop (e.g. 15m); default matches the pipeline (60m) |
+| `--idle-timeout` | duration | `0s` | Idle backstop: end the session only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default matches the pipeline (60m) |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
+| `--max-duration` | duration | `3h0m0s` | Hard wall-clock ceiling regardless of progress (e.g. 3h). 0 disables the cap. |
 | `--model` | string | `—` | Claude model for the session (e.g. "opus[1m]") |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml (json/yaml = result envelope on stdout, progress on stderr) |
 | `--quiet` | bool | `false` | Suppress the progress stream on stderr |
@@ -1347,9 +1350,10 @@ Flags:
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
 | `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
 | `--handoff` | string | `—` | Path to a handoff/context file; derives a "Read <path> and follow the Resume Protocol" --prompt value (mutually exclusive with --prompt) |
-| `--idle-timeout` | duration | `0s` | Idle-without-Stop backstop (e.g. 15m); default matches pipeline (60m) |
+| `--idle-timeout` | duration | `0s` | Idle backstop: cancel only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default matches pipeline (60m) |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
 | `--manifest-dir` | string | `—` | Override the run-artifact base dir (default: <project>/_output/tasks) |
+| `--max-duration` | duration | `3h0m0s` | Hard wall-clock ceiling regardless of progress (e.g. 3h). 0 disables the cap. |
 | `--model` | string | `—` | Claude model for the session (e.g. "opus[1m]") |
 | `--nats-creds` | string | `—` | NATS .creds file; its user identity is baked into every subject (env APE_NATS_CREDS). |
 | `--nats-url` | string | `—` | NATS server URL for progress events + transcript upload (env APE_NATS_URL). Empty disables both. |

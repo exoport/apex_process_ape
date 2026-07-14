@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/repl"
+	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 	"github.com/stretchr/testify/require"
 )
 
@@ -226,7 +227,7 @@ func TestTaskCommandFlagSurface(t *testing.T) {
 	for _, name := range []string{
 		"agent", "model", "args", "prompt", "prompt-flag", "handoff",
 		"no-commit", "task-commit", "commit-allow-dirty",
-		"idle-timeout", "output-format", "quiet", "manifest-dir",
+		"idle-timeout", "max-duration", "output-format", "quiet", "manifest-dir",
 		"ignore-project-settings", "cwd",
 	} {
 		require.NotNil(t, cmd.Flags().Lookup(name), "missing flag --%s", name)
@@ -235,4 +236,28 @@ func TestTaskCommandFlagSurface(t *testing.T) {
 	require.Equal(t, taskCommitDerivedSentinel, tc.NoOptDefVal)
 	require.True(t, strings.HasPrefix(taskCommitDerivedSentinel, "\x01"),
 		"sentinel must be non-typeable")
+	// PLAN-19 D2/D3: --max-duration ships ON with the 3h default.
+	md := cmd.Flags().Lookup("max-duration")
+	require.Equal(t, sessiondriver.DefaultMaxDuration.String(), md.DefValue)
+}
+
+// TestPipelineCommandTimeoutFlags asserts PLAN-19 D3 closed the pipeline
+// flag gap: --idle-timeout is registered (was missing) and --max-duration
+// ships with the 3h default.
+func TestPipelineCommandTimeoutFlags(t *testing.T) {
+	cmd := newPipelineCmd()
+	require.NotNil(t, cmd.Flags().Lookup("idle-timeout"), "pipeline must expose --idle-timeout (D3)")
+	md := cmd.Flags().Lookup("max-duration")
+	require.NotNil(t, md, "pipeline must expose --max-duration (D3)")
+	require.Equal(t, sessiondriver.DefaultMaxDuration.String(), md.DefValue)
+}
+
+// TestPromptCommandTimeoutFlags asserts ape prompt carries the 3h
+// --max-duration default alongside --idle-timeout (D3).
+func TestPromptCommandTimeoutFlags(t *testing.T) {
+	cmd := newPromptCmd()
+	require.NotNil(t, cmd.Flags().Lookup("idle-timeout"))
+	md := cmd.Flags().Lookup("max-duration")
+	require.NotNil(t, md)
+	require.Equal(t, sessiondriver.DefaultMaxDuration.String(), md.DefValue)
 }

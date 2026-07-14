@@ -50,6 +50,7 @@ const (
 	promptStatusCompleted   = "completed"
 	promptStatusFailed      = "failed"
 	promptStatusIdleTimeout = "idle_timeout"
+	promptStatusMaxDuration = "max_duration"
 	promptStatusClaudeDied  = "claude_died"
 )
 
@@ -62,6 +63,7 @@ type promptOptions struct {
 	workflow              bool
 	ultracode             bool
 	idleTimeout           time.Duration
+	maxDuration           time.Duration
 	projectRoot           string
 	quiet                 bool
 	ignoreProjectSettings bool
@@ -76,6 +78,7 @@ func newPromptCmd() *cobra.Command {
 		workflowFlag       bool
 		ultracodeFlag      bool
 		idleTimeoutFlag    time.Duration
+		maxDurationFlag    time.Duration
 		cwdFlag            string
 		quietFlag          bool
 		ignoreProjSettings bool
@@ -163,6 +166,7 @@ failed · 2 usage or preflight error (no _apex/config.yaml, unresolved
 				workflow:              workflowFlag,
 				ultracode:             ultracodeFlag,
 				idleTimeout:           idleTimeoutFlag,
+				maxDuration:           maxDurationFlag,
 				projectRoot:           projectRoot,
 				quiet:                 quietFlag,
 				ignoreProjectSettings: ignoreProjSettings,
@@ -175,7 +179,8 @@ failed · 2 usage or preflight error (no _apex/config.yaml, unresolved
 	cmd.Flags().StringVar(&modelFlag, "model", "", "Claude model for the session (e.g. \"opus[1m]\")")
 	cmd.Flags().BoolVar(&workflowFlag, "workflow", false, "Append a directive to run the task through a Claude Code workflow")
 	cmd.Flags().BoolVar(&ultracodeFlag, "ultracode", false, "Prepend the ultracode keyword (session runs workflows by default)")
-	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Idle-without-Stop completion backstop (e.g. 15m); default matches the pipeline (60m)")
+	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Idle backstop: end the session only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default matches the pipeline (60m)")
+	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Hard wall-clock ceiling regardless of progress (e.g. 3h). 0 disables the cap.")
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "Suppress the progress stream on stderr")
 	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json")
@@ -323,6 +328,7 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	}
 
 	driver := sessiondriver.NewDriver(getRunLog, o.idleTimeout)
+	driver.SetMaxDuration(o.maxDuration)
 
 	rt := orchestrator.NewBridgeRuntime(orchestrator.BridgeRuntimeOptions{
 		OnHook:  driver.FeedHook,
@@ -370,6 +376,15 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 		return promptResult{}, ExitRunFailed, fmt.Errorf("ape prompt: spawn claude: %w", err)
 	}
 	defer func() { _ = repl.KillSession(context.Background(), sessionName) }() //nolint:contextcheck // cleanup-on-exit
+
+	// PLAN-19 D1/D4: feed the Driver the PTY-output progress signal and the
+	// child-liveness probe now that the session exists. The transcript-growth
+	// anchor binds itself from the UserPromptSubmit hook (driver.FeedHook).
+	driver.SetPTYProbe(func() (time.Time, bool) { return repl.LastOutputAt(sessionName) })
+	driver.SetChildAliveProbe(func() (int, bool) { //nolint:contextcheck // liveness snapshot; the probe takes no ctx
+		pid, _ := repl.SessionPID(sessionName)
+		return pid, repl.HasSession(context.Background(), sessionName)
+	})
 
 	driver.Begin()
 
@@ -436,13 +451,19 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 }
 
 // promptStatus maps the wait outcome onto a (status, exit-code) pair.
+// The idle vs max-duration split (PLAN-19 D2) surfaces on the record +
+// envelope so an operator can tell a stall from a hit ceiling.
 func promptStatus(waitErr error) (status string, code int) {
+	var ite *sessiondriver.IdleTimeoutError
+	var mde *sessiondriver.MaxDurationError
 	switch {
 	case waitErr == nil:
 		return promptStatusCompleted, ExitOK
 	case errors.Is(waitErr, errClaudeDied):
 		return promptStatusClaudeDied, ExitClaudeDied
-	case strings.Contains(waitErr.Error(), "idle for"):
+	case errors.As(waitErr, &mde):
+		return promptStatusMaxDuration, ExitRunFailed
+	case errors.As(waitErr, &ite):
 		return promptStatusIdleTimeout, ExitRunFailed
 	default:
 		return promptStatusFailed, ExitRunFailed

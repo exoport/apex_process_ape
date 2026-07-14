@@ -15,6 +15,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/repl"
+	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -39,6 +40,7 @@ func newTaskCmd() *cobra.Command {
 		taskCommitFlag     string
 		allowDirtyFlag     bool
 		idleTimeoutFlag    time.Duration
+		maxDurationFlag    time.Duration
 		outputFormat       string
 		jsonAlias          bool
 		cwdFlag            string
@@ -130,6 +132,7 @@ preflight error · 3 REPL never became ready (last pane on stderr).`,
 				taskCommit:            taskCommit,
 				allowDirty:            allowDirtyFlag,
 				idleTimeout:           idleTimeoutFlag,
+				maxDuration:           maxDurationFlag,
 				jsonMode:              jsonMode,
 				quiet:                 quietFlag,
 				projectRoot:           projectRoot,
@@ -154,7 +157,8 @@ preflight error · 3 REPL never became ready (last pane on stderr).`,
 	cmd.Flags().StringVar(&taskCommitFlag, "task-commit", "", "Task layer: commit the complete task at the end; bare flag derives \"ape:task/<skill>\"")
 	cmd.Flags().Lookup("task-commit").NoOptDefVal = taskCommitDerivedSentinel
 	cmd.Flags().BoolVar(&allowDirtyFlag, "commit-allow-dirty", false, "Bypass the dirty-tree gate (relevant only with --task-commit)")
-	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Idle-without-Stop backstop (e.g. 15m); default matches pipeline (60m)")
+	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Idle backstop: cancel only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default matches pipeline (60m)")
+	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Hard wall-clock ceiling regardless of progress (e.g. 3h). 0 disables the cap.")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json (json = result envelope on stdout, progress on stderr)")
 	cmd.Flags().BoolVar(&jsonAlias, "json", false, "Alias for --output-format json")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "Suppress the per-event progress stream")
@@ -178,6 +182,7 @@ type taskOptions struct {
 	taskCommit            *pipeline.CommitDirective
 	allowDirty            bool
 	idleTimeout           time.Duration
+	maxDuration           time.Duration
 	jsonMode              bool
 	quiet                 bool
 	projectRoot           string
@@ -326,6 +331,7 @@ func runTask(ctx context.Context, o taskOptions) error {
 		quiet:                 o.quiet,
 		suppressSummary:       o.jsonMode,
 		idleTimeout:           o.idleTimeout,
+		maxDuration:           o.maxDuration,
 		natsURL:               o.natsURL,
 		natsCreds:             o.natsCreds,
 		eventsPrefix:          o.eventsPrefix,

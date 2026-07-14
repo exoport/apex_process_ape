@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,13 +46,64 @@ type hookEnvelope struct {
 // a single pipeline step.
 const DefaultIdleTimeout = 60 * time.Minute
 
+// DefaultMaxDuration is the hard wall-clock ceiling WaitStepDone enforces
+// per step regardless of progress (PLAN-19 D2). The cap ships ON; a value
+// of 0 disables it. Bounds a genuinely stuck-but-noisy step that the
+// activity anchor would otherwise keep alive forever.
+const DefaultMaxDuration = 3 * time.Hour
+
 // idlePoll is the base recheck frequency; idlePollDivisor scales it
 // down for short configured idle timeouts so tail latency stays
-// proportional.
+// proportional. longRunThreshold/longRunPoll implement the PLAN-19 D6
+// two-phase cadence: tight (30s) early polling for responsive stall
+// detection, relaxed (60s) once a step is clearly long-lived.
 const (
-	idlePoll        = 30 * time.Second
-	idlePollDivisor = 4
+	idlePoll         = 30 * time.Second
+	idlePollDivisor  = 4
+	longRunThreshold = 60 * time.Minute
+	longRunPoll      = 60 * time.Second
 )
+
+// Progress-source labels for the D4 termination diagnostic. Each names a
+// signal WaitStepDone watches to keep a step alive (PLAN-19 D1).
+const (
+	progressHook       = "hook"
+	progressTranscript = "transcript"
+	progressPTY        = "pty"
+	progressNone       = "none"
+)
+
+// IdleTimeoutError reports that WaitStepDone tripped the idle backstop:
+// no progress across any watched signal (hook / transcript / PTY) for a
+// full idle window. Diagnostic carries the per-source ages + child
+// liveness (PLAN-19 D4).
+type IdleTimeoutError struct {
+	Label      string        // "interactive step" / "session"
+	Idle       time.Duration // time since the last progress signal
+	Window     time.Duration // the configured idle window
+	LastSource string        // most-recently-advanced source, or "none"
+	Diagnostic string        // per-source ages + child liveness
+}
+
+func (e *IdleTimeoutError) Error() string {
+	return fmt.Sprintf("%s idle for %v without progress (window %v): %s → stopping",
+		e.Label, e.Idle.Round(time.Second), e.Window.Round(time.Second), e.Diagnostic)
+}
+
+// MaxDurationError reports that WaitStepDone hit the hard wall-clock cap
+// (PLAN-19 D2) — a distinct termination from the idle path: the step may
+// still have been making progress when the ceiling tripped.
+type MaxDurationError struct {
+	Label      string        // "interactive step" / "session"
+	Elapsed    time.Duration // wall-clock the step ran
+	Max        time.Duration // the configured ceiling
+	Diagnostic string        // last progress source + child liveness
+}
+
+func (e *MaxDurationError) Error() string {
+	return fmt.Sprintf("%s exceeded max-duration %v (ran %v): %s → stopping",
+		e.Label, e.Max.Round(time.Second), e.Elapsed.Round(time.Second), e.Diagnostic)
+}
 
 // Driver drives a single standalone Claude session end-to-end: it fans
 // hook / call / reply events out to the runlog, binds the session's
@@ -59,10 +113,23 @@ const (
 type Driver struct {
 	getRunLog   func() *runlog.Writer
 	idleTimeout time.Duration
-	// idleErrLabel is the noun WaitStepDone uses in its idle-timeout
-	// error ("<label> idle for %v without Stop hook"). Defaults to
-	// "session"; the pipeline runner sets "interactive step".
+	// maxDuration is the hard wall-clock per-step ceiling (PLAN-19 D2).
+	// 0 disables the cap. Defaults to DefaultMaxDuration.
+	maxDuration time.Duration
+	// idleErrLabel is the noun WaitStepDone uses in its termination
+	// diagnostics ("<label> idle for …" / "<label> exceeded max-duration
+	// …"). Defaults to "session"; the pipeline runner sets
+	// "interactive step".
 	idleErrLabel string
+
+	// childAliveProbe, when set, reports the child claude process's pid
+	// and liveness for the D4 termination diagnostic (PLAN-19 D4). nil →
+	// "child liveness unknown".
+	childAliveProbe func() (pid int, alive bool)
+	// ptyProbe, when set, reports the timestamp of the last PTY output
+	// byte seen — a progress signal orthogonal to hooks + transcript
+	// (PLAN-19 D1, optional). nil → the PTY signal is not watched.
+	ptyProbe func() (at time.Time, ok bool)
 
 	stepDoneCh chan struct{}
 
@@ -88,6 +155,7 @@ func NewDriver(getRunLog func() *runlog.Writer, idleTimeout time.Duration) *Driv
 	return &Driver{
 		getRunLog:    getRunLog,
 		idleTimeout:  idleTimeout,
+		maxDuration:  DefaultMaxDuration,
 		idleErrLabel: "session",
 		stepDoneCh:   make(chan struct{}, 64),
 		subSessions:  map[string]*SubCapture{},
@@ -110,6 +178,37 @@ func (d *Driver) SetIdleTimeout(t time.Duration) {
 // idle-timeout error. Defaults to "session"; the pipeline runner sets
 // "interactive step" so a cancelled pipeline step reads naturally.
 func (d *Driver) SetIdleErrLabel(label string) { d.idleErrLabel = label }
+
+// SetMaxDuration sets the hard wall-clock per-step ceiling (PLAN-19 D2).
+// A value of 0 disables the cap; any positive value overrides the
+// DefaultMaxDuration the constructor installs.
+func (d *Driver) SetMaxDuration(t time.Duration) { d.maxDuration = t }
+
+// SetChildAliveProbe installs the child-liveness reporter used in the D4
+// termination diagnostic. nil (the default) yields "child liveness
+// unknown".
+func (d *Driver) SetChildAliveProbe(fn func() (pid int, alive bool)) { d.childAliveProbe = fn }
+
+// SetPTYProbe installs the optional PTY-output progress signal (PLAN-19
+// D1): fn reports the timestamp of the last output byte the PTY reader
+// saw. nil (the default) leaves the PTY signal unwatched — transcript
+// growth + hooks then carry the anchor alone.
+func (d *Driver) SetPTYProbe(fn func() (at time.Time, ok bool)) { d.ptyProbe = fn }
+
+// SetActiveTranscript binds the session's active transcript path so
+// WaitStepDone's transcript-growth anchor (PLAN-19 D1) can stat it. The
+// prompt path's FeedHook sets this from the UserPromptSubmit payload;
+// the pipeline runner (interactiveCore, which keeps its own richer
+// transcript state) calls this to mirror the path onto the Driver. An
+// empty path is ignored so a hookless Stop doesn't clear a live path.
+func (d *Driver) SetActiveTranscript(path string) {
+	if path == "" {
+		return
+	}
+	d.mu.Lock()
+	d.activeTranscript = path
+	d.mu.Unlock()
+}
 
 // RecordActivity resets the idle-timeout anchor to now. Every observed
 // hook event counts as activity, so a busy session is never killed for
@@ -247,32 +346,208 @@ func (d *Driver) FeedReply(content string) {
 }
 
 // WaitStepDone blocks until the bridge fires a Stop hook, until ctx
-// cancels, or until the idle-timeout window elapses without any hook
-// events. The idle window resets on every FeedHook call, so a busy
-// session is never killed for being slow — only for going silent.
+// cancels, until the idle window elapses with no progress across ANY
+// watched signal, or until the hard max-duration ceiling trips.
+//
+// PLAN-19 D1: the idle anchor resets on real progress — a hook event
+// (FeedHook → RecordActivity), the active transcript growing (size /
+// mtime, or the transcript directory's mtime for /clear rotation), and
+// (when a probe is installed) PTY output bytes. A step that is genuinely
+// working is never killed for being slow; only silence across every
+// signal for a full idle window trips it.
+//
+// PLAN-19 D2: an independent wall-clock ceiling (maxDuration) bounds a
+// stuck-but-noisy step and returns a distinct MaxDurationError.
+//
+// PLAN-19 D6: polls at idlePoll (30s) for the first hour, then longRunPoll
+// (60s), still honouring the idlePollDivisor scaling for short windows.
 func (d *Driver) WaitStepDone(ctx context.Context) error {
 	d.RecordActivity()
-	poll := idlePoll
-	if quarter := d.idleTimeout / idlePollDivisor; quarter < poll {
-		poll = max(quarter, time.Second)
-	}
+	stepStart := time.Now()
+
+	// Progress baselines. Only this goroutine touches them, so they need
+	// no lock (the hook anchor lastActivity is the exception — it is read
+	// under activityMu since FeedHook writes it on the bridge goroutine).
+	lastTranscript := stepStart
+	lastPTY := stepStart
+	tSize, tMtime, tDir, _ := d.transcriptSig()
+	ptySeen, _ := d.ptyOutputAt()
+
+	poll := d.pollInterval(0)
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-d.stepDoneCh:
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ticker.C:
+		case now := <-ticker.C:
+			// Transcript growth (size, file mtime, or dir mtime for a
+			// /clear-driven session rotation) counts as activity.
+			if s, m, dir, ok := d.transcriptSig(); ok {
+				if s != tSize || m.After(tMtime) || dir.After(tDir) {
+					lastTranscript = now
+					tSize, tMtime, tDir = s, m, dir
+				}
+			}
+			// PTY output bytes (optional signal).
+			if at, ok := d.ptyOutputAt(); ok && at.After(ptySeen) {
+				ptySeen = at
+				lastPTY = now
+			}
 			d.activityMu.Lock()
-			idle := time.Since(d.lastActivity)
+			lastHook := d.lastActivity
 			d.activityMu.Unlock()
-			if idle > d.idleTimeout {
-				return fmt.Errorf("%s idle for %v without Stop hook", d.idleErrLabel, idle.Round(time.Second))
+
+			elapsed := now.Sub(stepStart)
+			// Hard ceiling first: it is the absolute stop even for a step
+			// that is still making progress (a stalled step would have
+			// tripped the idle path far earlier).
+			if d.maxDuration > 0 && elapsed > d.maxDuration {
+				_, diag := d.diagnose(now, stepStart, lastHook, lastTranscript, lastPTY)
+				return &MaxDurationError{
+					Label:      d.idleErrLabel,
+					Elapsed:    elapsed,
+					Max:        d.maxDuration,
+					Diagnostic: diag,
+				}
+			}
+			lastProgress := latest(lastHook, lastTranscript, lastPTY)
+			if idle := now.Sub(lastProgress); idle > d.idleTimeout {
+				src, diag := d.diagnose(now, stepStart, lastHook, lastTranscript, lastPTY)
+				return &IdleTimeoutError{
+					Label:      d.idleErrLabel,
+					Idle:       idle,
+					Window:     d.idleTimeout,
+					LastSource: src,
+					Diagnostic: diag,
+				}
+			}
+			// Relax / tighten the cadence as the step crosses the
+			// long-run threshold (D6).
+			if np := d.pollInterval(elapsed); np != poll {
+				poll = np
+				ticker.Reset(poll)
 			}
 		}
 	}
+}
+
+// pollInterval selects the recheck cadence for a step that has been
+// running for elapsed (PLAN-19 D6): idlePoll (30s) for the first hour,
+// longRunPoll (60s) thereafter. A short configured idle window still
+// polls at a quarter of the window (idlePollDivisor), floored at 1s, so
+// tail latency stays proportional for small --idle-timeout values.
+func (d *Driver) pollInterval(elapsed time.Duration) time.Duration {
+	poll := idlePoll
+	if elapsed >= longRunThreshold {
+		poll = longRunPoll
+	}
+	if quarter := d.idleTimeout / idlePollDivisor; quarter < poll {
+		poll = max(quarter, time.Second)
+	}
+	return poll
+}
+
+// transcriptSig returns the active transcript's size + mtime and its
+// parent directory's mtime, the trio WaitStepDone diffs across polls to
+// detect progress. ok is false when no transcript path is bound yet. The
+// dir mtime covers /clear rotation: the live path stops growing while a
+// new session .jsonl appears in the same dir, bumping the dir mtime.
+func (d *Driver) transcriptSig() (size int64, mtime, dirMtime time.Time, ok bool) {
+	d.mu.Lock()
+	path := d.activeTranscript
+	d.mu.Unlock()
+	if path == "" {
+		return 0, time.Time{}, time.Time{}, false
+	}
+	if fi, err := os.Stat(path); err == nil {
+		size, mtime, ok = fi.Size(), fi.ModTime(), true
+	}
+	if di, err := os.Stat(filepath.Dir(path)); err == nil {
+		dirMtime = di.ModTime()
+		ok = true
+	}
+	return size, mtime, dirMtime, ok
+}
+
+// ptyOutputAt proxies the installed PTY probe (nil → not watched).
+func (d *Driver) ptyOutputAt() (time.Time, bool) {
+	if d.ptyProbe == nil {
+		return time.Time{}, false
+	}
+	return d.ptyProbe()
+}
+
+// diagnose builds the D4 termination diagnostic: which source advanced
+// most recently (and how long ago), each watched source's age, and the
+// child claude process's liveness. It reports whether transcript / PTY
+// are even monitored so an operator can tell "silent" from "unwatched".
+func (d *Driver) diagnose(now, stepStart, lastHook, lastTranscript, lastPTY time.Time) (source, diagnostic string) {
+	d.mu.Lock()
+	transcriptWatched := d.activeTranscript != ""
+	d.mu.Unlock()
+	ptyWatched := d.ptyProbe != nil
+
+	best := stepStart
+	source = progressNone
+	if lastHook.After(best) {
+		best, source = lastHook, progressHook
+	}
+	if transcriptWatched && lastTranscript.After(best) {
+		best, source = lastTranscript, progressTranscript
+	}
+	if ptyWatched && lastPTY.After(best) {
+		best, source = lastPTY, progressPTY
+	}
+
+	var b strings.Builder
+	if source == progressNone {
+		b.WriteString("no progress across any signal")
+	} else {
+		fmt.Fprintf(&b, "last progress %s %v ago", source, now.Sub(best).Round(time.Second))
+	}
+	fmt.Fprintf(&b, " (hook %s; transcript %s; pty %s)",
+		sourceAge(now, stepStart, lastHook, true),
+		sourceAge(now, stepStart, lastTranscript, transcriptWatched),
+		sourceAge(now, stepStart, lastPTY, ptyWatched))
+	if d.childAliveProbe != nil {
+		pid, alive := d.childAliveProbe()
+		state := "alive"
+		if !alive {
+			state = "exited"
+		}
+		fmt.Fprintf(&b, "; child pid %d %s", pid, state)
+	} else {
+		b.WriteString("; child liveness unknown")
+	}
+	return source, b.String()
+}
+
+// sourceAge renders one progress source's age for the diagnostic:
+// "n/a" when the source is not watched, "none for <elapsed>" when it is
+// watched but never advanced since the step started, else "<age> ago".
+func sourceAge(now, stepStart, last time.Time, watched bool) string {
+	if !watched {
+		return "n/a"
+	}
+	if !last.After(stepStart) {
+		return fmt.Sprintf("none for %v", now.Sub(stepStart).Round(time.Second))
+	}
+	return fmt.Sprintf("%v ago", now.Sub(last).Round(time.Second))
+}
+
+// latest returns the most recent of the given times.
+func latest(ts ...time.Time) time.Time {
+	var m time.Time
+	for _, t := range ts {
+		if t.After(m) {
+			m = t
+		}
+	}
+	return m
 }
 
 // SessionID returns the main claude session id captured from a hook, or

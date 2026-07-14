@@ -58,6 +58,9 @@ type PipelineOpts struct {
 	From string
 	// NoCommit tells the pipeline not to make boundary commits.
 	NoCommit bool
+	// MaxDuration is the hard wall-clock per-step ceiling (PLAN-19 D2).
+	// Zero uses the 3h default; set a negative or huge value to loosen it.
+	MaxDuration time.Duration
 	// Cwd overrides the project root. Empty uses the script's project root.
 	Cwd string
 }
@@ -85,6 +88,9 @@ type TaskOpts struct {
 	AllowDirty bool
 	// IdleTimeout overrides the idle-without-Stop backstop.
 	IdleTimeout time.Duration
+	// MaxDuration is the hard wall-clock per-step ceiling (PLAN-19 D2).
+	// Zero uses the 3h default.
+	MaxDuration time.Duration
 	// Cwd overrides the project root. Empty uses the script's project root.
 	Cwd string
 }
@@ -106,6 +112,9 @@ type PromptOpts struct {
 	Ultracode bool
 	// IdleTimeout overrides the idle-without-Stop backstop.
 	IdleTimeout time.Duration
+	// MaxDuration is the hard wall-clock per-step ceiling (PLAN-19 D2).
+	// Zero uses the 3h default.
+	MaxDuration time.Duration
 	// Cwd overrides the project root. Empty uses the script's project root.
 	Cwd string
 }

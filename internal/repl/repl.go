@@ -89,6 +89,13 @@ type session struct {
 	// String are both safe to call from independent goroutines.
 	term vt10x.Terminal
 
+	// outMu guards lastOutput, the timestamp of the most recent non-empty
+	// PTY read. The pump goroutine writes it; LastOutputAt reads it. A
+	// lock-guarded timestamp keeps the accessor race-free without
+	// touching the vt10x reader path (PLAN-19 D1 optional PTY signal).
+	outMu      sync.Mutex
+	lastOutput time.Time
+
 	done chan struct{}
 }
 
@@ -200,6 +207,9 @@ func (s *session) pump() {
 		n, err := s.ptm.Read(buf)
 		if n > 0 {
 			_, _ = s.term.Write(buf[:n])
+			s.outMu.Lock()
+			s.lastOutput = time.Now()
+			s.outMu.Unlock()
 		}
 		if err != nil {
 			return
@@ -294,6 +304,34 @@ func SessionDone(_ context.Context, name string) <-chan struct{} {
 		return nil
 	}
 	return s.done
+}
+
+// LastOutputAt returns the timestamp of the most recent non-empty PTY
+// read for the session. ok is false when the session is unknown or has
+// produced no output yet. Lock-guarded and safe to call concurrently
+// with the reader goroutine (PLAN-19 D1 optional PTY progress signal).
+func LastOutputAt(name string) (time.Time, bool) {
+	s, ok := lookup(name)
+	if !ok {
+		return time.Time{}, false
+	}
+	s.outMu.Lock()
+	defer s.outMu.Unlock()
+	if s.lastOutput.IsZero() {
+		return time.Time{}, false
+	}
+	return s.lastOutput, true
+}
+
+// SessionPID returns the child process's pid, or (0, false) when the
+// session is unknown or never started. Used by the termination
+// diagnostic's child-liveness line (PLAN-19 D4).
+func SessionPID(name string) (int, bool) {
+	s, ok := lookup(name)
+	if !ok || s.cmd.Process == nil {
+		return 0, false
+	}
+	return s.cmd.Process.Pid, true
 }
 
 // CapturePane returns the rendered VT grid as plain text. ANSI escape

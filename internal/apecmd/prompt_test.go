@@ -2,6 +2,7 @@ package apecmd //nolint:testpackage // white-box: exercises unexported prompt-as
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,6 +79,17 @@ func TestPromptStatus(t *testing.T) {
 
 	s, code = promptStatus(context.DeadlineExceeded)
 	require.Equal(t, "failed", s)
+	require.Equal(t, ExitRunFailed, code)
+
+	// PLAN-19 D2/D4: idle vs max-duration terminations surface distinctly
+	// on the record, both mapping to ExitRunFailed. errors.As unwraps a
+	// wrapped diagnostic too (the pipeline path wraps with %w).
+	s, code = promptStatus(&sessiondriver.IdleTimeoutError{Label: "session", Idle: time.Hour})
+	require.Equal(t, promptStatusIdleTimeout, s)
+	require.Equal(t, ExitRunFailed, code)
+
+	s, code = promptStatus(fmt.Errorf("wrap: %w", &sessiondriver.MaxDurationError{Label: "session", Max: 3 * time.Hour}))
+	require.Equal(t, promptStatusMaxDuration, s)
 	require.Equal(t, ExitRunFailed, code)
 }
 

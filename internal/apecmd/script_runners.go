@@ -14,7 +14,19 @@ import (
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 )
+
+// resolveMaxDuration mirrors the CLI's --max-duration default for the
+// apescript paths, which carry no flag: a zero MaxDuration means "not
+// configured" and resolves to the 3h ceiling (PLAN-19 D2). A script that
+// truly wants no cap sets a very large value.
+func resolveMaxDuration(d time.Duration) time.Duration {
+	if d == 0 {
+		return sessiondriver.DefaultMaxDuration
+	}
+	return d
+}
 
 // scriptRunner implements the apescript orchestration hooks (RunPipeline /
 // RunTask / RunPrompt) by driving the exact same interactive runners the
@@ -85,6 +97,7 @@ func (r *scriptRunner) runTask(ctx context.Context, o apescript.TaskOpts) (apesc
 	cfg.prompt = o.Prompt
 	cfg.allowDirty = o.AllowDirty
 	cfg.idleTimeout = o.IdleTimeout
+	cfg.maxDuration = resolveMaxDuration(o.MaxDuration)
 
 	headBefore := gitHeadFull(ctx, root)
 	start := time.Now()
@@ -106,6 +119,7 @@ func (r *scriptRunner) runPipeline(ctx context.Context, o apescript.PipelineOpts
 	cfg.prompt = o.Prompt
 	cfg.fromStage = o.From
 	cfg.noCommit = o.NoCommit
+	cfg.maxDuration = resolveMaxDuration(o.MaxDuration)
 
 	headBefore := gitHeadFull(ctx, root)
 	start := time.Now()
@@ -127,6 +141,7 @@ func (r *scriptRunner) runPrompt(ctx context.Context, o apescript.PromptOpts) (a
 		workflow:    o.Workflow,
 		ultracode:   o.Ultracode,
 		idleTimeout: o.IdleTimeout,
+		maxDuration: resolveMaxDuration(o.MaxDuration),
 		projectRoot: root,
 		quiet:       r.quiet,
 		format:      "human",

@@ -168,6 +168,16 @@ func newInteractiveCore(runCancel context.CancelFunc, getRunLog func() *runlog.W
 	return c
 }
 
+// applyTimeouts threads the runConfig's idle-window + hard max-duration
+// ceiling onto the composed Driver (PLAN-19 D3). SetIdleTimeout ignores a
+// ≤0 window (keeps the 60m pipeline default); SetMaxDuration takes the
+// value verbatim (0 disables the cap). Called by every interactive runner
+// variant (no-UI / TUI / web) so all three honour the flags identically.
+func (c *interactiveCore) applyTimeouts(cfg runConfig) {
+	c.driver.SetIdleTimeout(cfg.idleTimeout)
+	c.driver.SetMaxDuration(cfg.maxDuration)
+}
+
 // setPublisher installs the PLAN-13 event publisher once the run id is
 // known (OnRunDir). Safe to call with nil (NATS off).
 func (c *interactiveCore) setPublisher(p *eventing.Publisher) {
@@ -243,6 +253,9 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 				c.activeSessionID = env.SessionID
 			}
 			c.transcriptMu.Unlock()
+			// PLAN-19 D1: mirror the active transcript onto the Driver so
+			// WaitStepDone's transcript-growth anchor can stat it.
+			c.driver.SetActiveTranscript(env.TranscriptPath)
 		}
 	case ipc.HookSubagentStart, ipc.HookSubagentStop:
 		// Capture the sub-agent's OWN transcript (agent_transcript_path),
@@ -286,6 +299,7 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 				}
 			}
 			c.transcriptMu.Unlock()
+			c.driver.SetActiveTranscript(env.TranscriptPath)
 		}
 	}
 	if writer != nil {
@@ -609,7 +623,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	runCtx, runCancel := context.WithCancel(ctx)
 
 	core := newInteractiveCore(runCancel, getRunLog)
-	core.driver.SetIdleTimeout(cfg.idleTimeout)
+	core.applyTimeouts(cfg)
 
 	// PLAN-13: optional NATS eventing + transcript upload. Fire-and-forget —
 	// conn is nil when NATS is off or unreachable, and every publish/upload

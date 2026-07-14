@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **feat(pipeline): activity-aware step completion — progress-anchored idle
+  window + hard cap (PLAN-19)** — an interactive step (pipeline stage step,
+  `ape task`, `ape prompt`) is now cancelled only when it genuinely stops making
+  progress, not merely because the bridge emitted no hook for a fixed window.
+  The idle anchor resets on any of three signals: bridge hooks (unchanged), the
+  active claude transcript growing (size/mtime, plus the transcript directory's
+  mtime so a `/clear` session rotation counts as activity), and — on the
+  `ape prompt` path — PTY output bytes. A new hard wall-clock ceiling
+  `--max-duration` (default **3h**, `0` disables) bounds a stuck-but-noisy step
+  and reports a distinct `max-duration exceeded` termination. `--idle-timeout`
+  is now wired onto `ape pipeline` (the field existed but had no flag), and
+  `--max-duration` onto `ape pipeline` / `ape task` / `ape prompt`. Terminations
+  now carry a structured diagnostic — which limit tripped, the child claude
+  process's liveness, and each progress source's age — instead of the old bare
+  "idle for X without Stop hook". The poll cadence is 30s for the first hour of
+  a step, then 60s. The smart wait loop lives once in `internal/sessiondriver`;
+  both `interactiveCore` (pipeline/task) and the prompt Driver inherit it.
+
 - **feat(service): `ape service` now dispatches `prompt.run` and `script.run`
   (PLAN-14)** — the two remaining job-daemon endpoints spawn real headless `ape`
   children now that `ape prompt` (PLAN-12) and `ape script` (PLAN-15) exist.

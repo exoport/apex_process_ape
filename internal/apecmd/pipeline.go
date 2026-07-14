@@ -13,6 +13,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/output"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 	"github.com/exoport/apex_process_ape/internal/tui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -29,6 +30,8 @@ func newPipelineCmd() *cobra.Command {
 		fromStageFlag      string
 		noCommitFlag       bool
 		allowDirtyFlag     bool
+		idleTimeoutFlag    time.Duration
+		maxDurationFlag    time.Duration
 		tuiFlag            bool
 		evalFlag           bool
 		webFlag            bool
@@ -138,6 +141,8 @@ func newPipelineCmd() *cobra.Command {
 				eventsPrefix:          eventsPrefixFlag,
 				uploadTranscripts:     uploadTranscripts,
 				transcriptStore:       transcriptStore,
+				idleTimeout:           idleTimeoutFlag,
+				maxDuration:           maxDurationFlag,
 			}
 			// PLAN-9 F2 dispatch: interactive PTY is the only exec mode,
 			// so the switch is purely over the UI surface. Web routes to
@@ -176,6 +181,8 @@ func newPipelineCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fromStageFlag, "from", "", "Skip stages before the named one and start execution there")
 	cmd.Flags().BoolVar(&noCommitFlag, "no-commit", false, "Do not commit anything during the run; leave the working tree dirty. Overrides any `commit:` field in the pipeline YAML.")
 	cmd.Flags().BoolVar(&allowDirtyFlag, "commit-allow-dirty", false, "Bypass the dirty-tree pre-run gate. The first committing step's diff will include any pre-existing uncommitted changes.")
+	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Per-step idle backstop: cancel a step only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 90m). Default 60m.")
+	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Hard wall-clock ceiling per step regardless of progress (e.g. 3h). 0 disables the cap.")
 	cmd.PersistentFlags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
 	addNatsFlags(cmd, &natsURLFlag, &natsCredsFlag, &eventsPrefixFlag, &uploadTranscripts, &transcriptStore)
 	return cmd
@@ -287,8 +294,13 @@ type runConfig struct {
 	suppressSummary bool
 	// idleTimeout overrides the interactive step idle-without-Stop
 	// backstop (default interactiveStepIdleTimeout). PLAN-11:
-	// `ape task --idle-timeout`.
+	// `ape task --idle-timeout`; PLAN-19 D3: `ape pipeline --idle-timeout`.
 	idleTimeout time.Duration
+	// maxDuration is the hard wall-clock per-step ceiling (PLAN-19 D2).
+	// Flag default 3h; 0 disables. A zero value here (e.g. an apescript
+	// run that never set it) is resolved to the 3h default by the caller,
+	// so the cap is only disabled by an explicit --max-duration 0.
+	maxDuration time.Duration
 
 	// NATS progress-eventing + transcript-blob upload (PLAN-13). All
 	// strictly opt-in and resolved flags → env (natsconn.Resolve); with no

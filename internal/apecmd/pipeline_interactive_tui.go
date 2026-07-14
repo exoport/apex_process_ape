@@ -44,6 +44,7 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 	runCtx, runCancel := context.WithCancel(ctx)
 
 	core := newInteractiveCore(runCancel, getRunLog)
+	core.applyTimeouts(cfg)
 
 	// Construct the BridgeRuntime first so the model can capture
 	// rt.SendMessage as its reply sender (the await modal's submit

@@ -116,6 +116,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	// runlog writes + activeStep tagging via FeedHook; the old
 	// programmatic-web (`--web -P`) direct-write path was removed.
 	core := newInteractiveCore(runCancel, getRunLog)
+	core.applyTimeouts(cfg)
 
 	hub := orchestrator.NewHub(orchestrator.HubOptions{
 		PageHTML:         pageHTML,
