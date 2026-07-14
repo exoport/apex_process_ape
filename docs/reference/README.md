@@ -19,6 +19,7 @@ For ape, reference is the surface area: every command, every flag, every config 
 - [step-contract.md](step-contract.md) — per-step contract enforced by the bridge verifier.
 - [tui-keybindings.md](tui-keybindings.md) — Bubble Tea TUI keybindings.
 - [events.md](events.md) — NATS subject taxonomy + event/log/metrics payload schemas (PLAN-13 `ape.evt` + `ape.blob` shipped; PLAN-14/17-CLI/18 subtrees proposed).
+- [service-api.md](service-api.md) — the `ape service` (PLAN-14) `ape.svc` endpoint contract: every endpoint subject, request/reply body, error code, admission, and the allowlist/script security boundary.
 - [blob-offload.md](blob-offload.md) — the `ape.blob.uri-request` transcript-offload request/reply contract (for building an offload service).
 
 ## Planned reference
