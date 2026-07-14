@@ -1,7 +1,7 @@
 ---
 plan_id: PLAN-16
 created_at: 2026-07-02
-updated_at: 2026-07-12
+updated_at: 2026-07-14
 status: partially-implemented
 tags:
   - sandbox
@@ -17,11 +17,13 @@ summary: >
   made available inside (host-fs share / persistent volume / ephemeral clone), a
   per-workspace composed `~/.claude` (credential modes A/B, curated
   skills/hooks/agents, git modes), deny-by-default public egress via a CONNECT
-  proxy + allowlist + audit, and lifecycle `up → attach/ssh/exec → pause/resume
+  proxy + allowlist + audit, and lifecycle `up → attach/ssh/exec → freeze/unfreeze
   → down`. Inside the VM you run Claude Code, APEX pipelines, or Playwright; you
   attach via SSH / VS Code Remote. Backend is **kata-only** (kata-clh default,
-  kata-qemu for GPU/USB device workspaces); ape drives it via containerd
-  (`nerdctl`/`ctr`, no heavy Go dep). This is **Phase 1 of the APEX Process
+  kata-qemu for GPU/USB device workspaces). **As shipped (PLAN-18), `aped` — not
+  `ape` — drives Kata via the containerd Go client (`--driver containerd`); the
+  daemonless `nerdctl`/`ctr` shell-out with no Go dep described below is
+  retired.** This is **Phase 1 of the APEX Process
   Platform** (north-star: `../../../exoar/apex_process_platform/draft/`);
   Phases 2–4 (in-VM NATS worker, Netbird overlay networking, preview/staging
   environments, the device tier) live in that repo.
@@ -45,12 +47,43 @@ origin:
 > KVM). Phases 2–4 (in-VM NATS worker, Netbird two-overlay networking,
 > preview/staging environments, the GPU/USB device tier) are the platform repo's.
 
+> **Reconciliation (2026-07-14).** This Phase-1 plan describes a **daemonless
+> `ape sandbox` runner** — an unprivileged `ape` that shells out to
+> `nerdctl`/`ctr` itself and exposes a `pause`/`resume` lifecycle. **That is not
+> what shipped.** PLAN-18 (`plan-18_ape-aped-split.md`) split the work into an
+> unprivileged **`ape`** client and a single rootful daemon, **`aped`**. Read the
+> design/spike narrative below through this note; the operational truth lives in
+> `docs/how-to/sandbox-workspaces.md` and `docs/how-to/run-aped.md`.
+>
+> - **Control plane, not a local runner.** `ape sandbox` is a thin `aped` client
+>   speaking the `ape.vmm.<node>.>` NATS contract; `aped` owns provisioning,
+>   `~/.claude` composition, per-VM credential minting, egress, and the workspace
+>   registry, and is the only root component. `ape` never touches containerd. The
+>   daemonless `ape`→containerd path described below is **retired**.
+> - **Verbs (`internal/apecmd/sandbox.go`, `internal/workspace.Backend`):**
+>   `up | ls | inspect | exec | attach | ssh | freeze | unfreeze | suspend | down`.
+>   There is **no `pause`/`resume`.** `freeze`/`unfreeze` are a guest
+>   **cgroup-freeze** (RAM stays resident, `unfreeze` thaws instantly), **not** a
+>   VM suspend; the distinct `suspend` verb returns `UNSUPPORTED` because
+>   Kata-via-containerd can't save guest RAM today (PLAN-18 D7). `ssh` is a
+>   placeholder that defers to `aped` networking (Tier-2).
+> - **Driver.** The live-validated provisioning path is the containerd **Go
+>   client** (`aped run --driver containerd`), which builds the OCI spec as a
+>   typed object with no client-side `mount(2)`. The `nerdctl`/`ctr` shell-out
+>   described below is the default `shellDriver`, which **cannot** run through
+>   `aped`'s hardened root executor (its client-side rootfs mount is denied) — see
+>   PLAN-18's Risks and `run-aped.md`.
+>
+> Everything below is kept as the Phase-1 historical record; inline
+> `*(PLAN-18: …)*` markers flag the specific spots a reader would otherwise be
+> misled.
+
 ## Status / task checklist
 
 ### Phase 1 — Kata VM workspaces, local dev (this repo)
 
-- [x] **`ape sandbox` command surface:** `up | ls | attach | ssh | exec | pause | resume | down <name>` (`internal/apecmd/sandbox.go`, registered in `root.go`)
-- [x] **D1 workspace runner** — `internal/sandbox` (`kata.go` pure nerdctl command construction + on-disk registry; `kata_linux.go` exec methods; `kata_other.go` Windows stub); **kata-clh default** VMM via `io.containerd.kata-<vmm>.v2` runtime handler. Live provision/exec/pause validated only under Tier-2 (no KVM in CI / on this box yet).
+- [x] **`ape sandbox` command surface:** *(PLAN-18)* shipped as `up | ls | inspect | exec | attach | ssh | freeze | unfreeze | suspend | down <name>` (`internal/apecmd/sandbox.go`) — **not** the `pause | resume` originally listed here. `freeze`/`unfreeze` are a cgroup-freeze; `suspend` returns `UNSUPPORTED` on Kata; `ssh` defers to `aped` networking (Tier-2).
+- [x] **D1 workspace runner** — `internal/sandbox` (`kata.go` pure nerdctl command construction + on-disk registry; `kata_linux.go` exec methods; `kata_other.go` Windows stub); **kata-clh default** VMM via `io.containerd.kata-<vmm>.v2` runtime handler. Live provision/exec/pause validated only under Tier-2 (no KVM in CI / on this box yet). *(PLAN-18: refactored into the `shellDriver` behind `internal/workspace.Backend`; `ape` no longer runs it — `aped` does, and the live-validated driver is the containerd-Go-client `containerdDriver` (`--driver containerd`), which the `shellDriver` cannot match through the hardened root executor. `pause` → `freeze`.)*
 - [x] **D6 official `ape-sandbox` image** — `images/ape-sandbox/` (Dockerfile `FROM` agent-infra/sandbox + claude/node/`ape`/git/framework/sshd/chromium+playwright; entrypoint; README with build/pin/publish + versioning). `sandbox.DefaultImage` is the wiring point; `image:` override supported. **Base pinned (step 9):** `BASE_IMAGE` = `ghcr.io/agent-infra/sandbox:1.11.0@sha256:6328d7fd…f906e7` (verified multi-arch amd64+arm64 manifest-list digest). **Offline framework (step 9):** `ENV APEX_FRAMEWORK_REPO=/opt/apex-framework` so `ape framework setup --no-fetch` installs from the baked-in checkout. *Remaining: the actual build/publish needs the container toolchain (docker/nerdctl), not yet installed here.*
 - [x] **project-mount modes** — host-fs (default) · volume · ephemeral wired in `WorkspaceSpec.RunArgs` + `sandbox up`
 - [x] **D2 per-workspace `~/.claude` composition** — reused composer, invoked per-workspace at `up` into a per-workspace staging home
@@ -107,8 +140,11 @@ boundary (own guest kernel + KVM), the project available inside (host-fs by
 default), a `~/.claude` containing exactly what the profile says, and
 deny-by-default public egress. You then `ape sandbox ssh dev` (or VS Code
 Remote) and work inside — run Claude Code, APEX pipelines, or Playwright —
-across many sessions; `ape sandbox pause dev` suspends it; `ape sandbox down
-dev` tears it down. The workspace cannot touch the rest of the host even though
+across many sessions; `ape sandbox freeze dev` cgroup-freezes it (guest RAM
+stays resident; `unfreeze` thaws instantly — a real VM suspend isn't available on
+Kata-via-containerd, so the distinct `suspend` verb returns `UNSUPPORTED`, PLAN-18
+D7); `ape sandbox down dev` tears it down. The workspace cannot touch the rest of
+the host even though
 every ape/claude session inside runs with `--dangerously-skip-permissions`.
 
 ## Why (Kata workspaces, not gVisor jobs)
@@ -139,7 +175,11 @@ every ape/claude session inside runs with `--dangerously-skip-permissions`.
   Remote clients (overlay in Phase 3). Apple `container`/Virtualization.framework
   is a separate future backend.
 - **containerd is a host prerequisite, not a Go dependency** — ape shells out to
-  `nerdctl`/`ctr`, keeping the CLI a single binary.
+  `nerdctl`/`ctr`, keeping the CLI a single binary. *(PLAN-18 superseded this: the
+  live-validated path is `aped` driving the containerd **Go client** (`--driver
+  containerd`); the `nerdctl` shell-out is the retired default `shellDriver`, which
+  can't run through `aped`'s hardened root executor. `ape` stays a single binary
+  and no longer touches containerd — `aped`, as root, does.)*
 
 ## Backend decision: kata-only
 
@@ -150,6 +190,12 @@ every ape/claude session inside runs with `--dangerously-skip-permissions`.
 - ape drives Kata through **containerd** (`nerdctl run --runtime
   io.containerd.kata.v2 …` / `ctr`), shelling out — no containerd Go client in
   `go.mod`. Docker Engine 23+ is a fallback (`--runtime` works there too).
+  > **[2026-07-14 — superseded by PLAN-18].** `ape` no longer drives containerd;
+  > `aped` does, as root. The live-validated driver is the containerd **Go
+  > client** (`aped run --driver containerd`), which builds the OCI spec as a
+  > typed object with no client-side `mount(2)`. The `nerdctl`/`ctr` shell-out
+  > became the default `shellDriver`, which the hardened root executor forbids
+  > (its client-side rootfs mount is denied).
 - Requires **KVM / nested virt** on the host (see doctor + risks). This gates
   deployability: many cloud VMs don't expose nested virt (a platform-phase
   concern; local bare-metal dev boxes have it).
@@ -167,10 +213,16 @@ every ape/claude session inside runs with `--dangerously-skip-permissions`.
   `ape`/`claude` allocate their own PTY + bridge IPC exactly as on the host.
 - **Lifecycle:** `pause`/`resume` (suspend idle), `down` (teardown with a
   persistence policy per mount mode); a small on-disk registry tracks running
-  workspaces (name → container id, profile, mount).
+  workspaces (name → container id, profile, mount). *(Shipped as `freeze`/`unfreeze`
+  — a guest cgroup-freeze, RAM resident, not a VM suspend; a distinct `suspend`
+  returns `UNSUPPORTED` on Kata, PLAN-18 D7. The registry now lives in `aped`.)*
 - **Driver:** shell out to `nerdctl`/`ctr`; the OCI config is built by the
   existing spec builder (Kata consumes an OCI bundle). The gVisor/runsc rootless
-  runner from the spike is **retired**.
+  runner from the spike is **retired**. *(PLAN-18: the shipped, live-validated
+  driver is the containerd **Go client** — `aped run --driver containerd` —
+  building the OCI spec as a typed object with no client-side `mount(2)`; the
+  `nerdctl`/`ctr` shell-out became the default `shellDriver`, which can't run
+  through `aped`'s hardened executor.)*
 
 ### D2: Per-workspace `~/.claude` composition (reuse)
 
@@ -334,6 +386,12 @@ without the rootless-gofer limitations.
 
 ## Steps
 
+> **[2026-07-14].** These are the Phase-1 steps as authored. Shipped reality
+> (PLAN-18): the verbs are `freeze`/`unfreeze` (not `pause`/`resume`) plus
+> `inspect`/`suspend`; `ape` is a thin `aped` client, not a local runner; and the
+> live driver is the containerd Go client (`--driver containerd`), not a
+> client-side `nerdctl` shell-out. See the reconciliation banner and PLAN-18.
+
 1. **Retire the gVisor runner** from the spike; keep the pure layers (profile,
    composer, git-cred, OCI-config builder, proxy).
 2. **`internal/sandbox` kata runner** — containerd/`nerdctl` shell-out:
@@ -368,7 +426,8 @@ without the rootless-gofer limitations.
 - Public egress: an allowlisted host succeeds + is audited `allowed`; a
   non-allowlisted host is refused + audited `denied`.
 - `pause`/`resume` preserve in-guest state; `down` leaves no leaked container /
-  staging / registry entry.
+  staging / registry entry. *(Shipped as `freeze`/`unfreeze` — cgroup-freeze, RAM
+  resident; `down` drops the `aped` registry entry.)*
 
 ### Tier 3 (manual)
 - Mode A OAuth session authenticates and sees only the profile's skills.
