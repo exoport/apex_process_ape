@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **feat(script): new `ape script <file.go>` — yaegi-interpreted orchestration
+  scripts (PLAN-15)** — `ape script ops/nightly.go -- args…` runs a plain Go
+  file in-process under the [yaegi](https://github.com/traefik/yaegi)
+  interpreter with a new public library, `apescript`
+  (`github.com/exoport/apex_process_ape/apescript`), injected. A script defines
+  `func Main(ctx context.Context) error`; ape evaluates the file then calls
+  `Main`. SIGINT cancels `ctx`; a returned error or a recovered panic (reported
+  with the yaegi source-position stack) exits 1; a compile error reports
+  `file:line` and exits 1 **before any claude spawns**. `ape script -` reads the
+  source from stdin; everything after `--` is exposed as `apescript.Args()`.
+  The v1 `apescript` surface: `RunPipeline`/`RunTask`/`RunPrompt` (thin
+  PTY-backed facades over the exact runners the CLI uses), `ReadManifest`,
+  `ScanTranscript`, `Skills`, `Log` (respects `--quiet`), `Args`,
+  `PublishEvent` (identity-stamped `ape.evt.<user>.<project>.script.<run-id>.<event>`
+  only) and `PutBlob`. Default mode is unrestricted (full stdlib, arbitrary
+  trusted code); `--sandbox` uses yaegi's restricted symbol set — blocking
+  `os/exec`, `os.Exit`, `syscall`, `unsafe` — while the apescript orchestration
+  functions stay available in both modes. `--output-format json|yaml` wraps the
+  invocation in `{result, duration, cost_usd}`. The interpreter symbol table is
+  generated (`make apescript-symbols`) and committed under
+  `internal/apescriptsym/`. Docs: `docs/how-to/write-ape-scripts.md`,
+  `docs/reference/apescript.md`. **Binary size** grows ~13.5 MB (yaegi + its
+  stdlib symbols): the release `ape` binary went from ~37.6 MB to ~51.2 MB —
+  accepted for a single-binary tool per PLAN-15.
+
 - **feat(prompt): new `ape prompt` — prompt/handoff-driven Claude session** —
   `ape prompt [<text>]` (or `ape prompt --handoff <file>`) drives one
   unattended Claude Code session end-to-end through the in-process PTY: it

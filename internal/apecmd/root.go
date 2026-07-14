@@ -66,6 +66,7 @@ func init() {
 		newPipelineCmd(),
 		newTaskCmd(),
 		newPromptCmd(),
+		newScriptCmd(),
 		newPlanningCmd(),
 		newFrameworkCmd(),
 		newChatCmd(),

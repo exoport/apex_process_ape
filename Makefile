@@ -92,6 +92,10 @@ xcompile-windows: ## Cross-compile + cross-vet for Windows; catches portability 
 docs-cli:    ## Regenerate docs/reference/cli.md from the cobra command tree.
 	go run ./cmd/ape gen-docs --out docs/reference/cli.md
 
+.PHONY: apescript-symbols
+apescript-symbols:  ## Regenerate the yaegi symbol table for the public apescript package (PLAN-15).
+	go generate ./internal/apescriptsym/
+
 .PHONY: docs-check
 docs-check:  ## Verify docs/ links resolve and every doc is reachable from docs/README.md.
 	python3 scripts/check-docs-links.py docs

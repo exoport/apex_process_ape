@@ -26,6 +26,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [How to pass arguments to skills](how-to/pass-args-to-skills.md)
 - [How to run a single skill with `ape task`](how-to/run-a-single-skill.md)
 - [How to run an unattended session with `ape prompt`](how-to/run-a-prompt-session.md)
+- [How to write and run an `ape script`](how-to/write-ape-scripts.md)
 - [How to run a sandboxed Kata VM workspace](how-to/sandbox-workspaces.md)
 - [How to run ape as a service (NATS job daemon)](how-to/run-ape-as-a-service.md)
 - [How to run aped (the VM-management daemon)](how-to/run-aped.md)
@@ -37,6 +38,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 ### Reference — _technical descriptions_
 
 - [CLI reference](reference/cli.md) — every command, flag, and default (generated from the command tree)
+- [`apescript` library reference](reference/apescript.md) — the public v1 surface `ape script` files import (orchestration, introspection, plumbing, sandbox rules)
 - [Pipeline spec reference](reference/pipeline-spec.md) — schema for `_apex/pipelines/*.yaml`
 - [`framework.yaml` reference](reference/framework-yaml.md) — schema for `_apex/framework.yaml`
 - [Sandbox profile reference](reference/sandbox-profile.md) — schema for `_apex/sandbox/*.yaml` (Kata VM workspaces)

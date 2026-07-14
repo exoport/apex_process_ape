@@ -302,6 +302,12 @@ type runConfig struct {
 	// kind is the <kind> subject segment for events (pipeline/task/…).
 	// Empty defaults to pipeline in newEventPublisher.
 	kind eventing.Kind
+
+	// claudeBin overrides the claude executable the interactive runner
+	// spawns. Empty defaults to "claude" (pipeline.RunOptions default). A
+	// test seam — `apescript` orchestration runs set it to a bash stand-in
+	// so a RunTask can be exercised without a real claude.
+	claudeBin string
 }
 
 // printEndOfRunSummary emits the post-run pointer lines:

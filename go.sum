@@ -462,6 +462,8 @@ github.com/tink-crypto/tink-go/v2 v2.6.0 h1:+KHNBHhWH33Vn+igZWcsgdEPUxKwBMEe0QC6
 github.com/tink-crypto/tink-go/v2 v2.6.0/go.mod h1:2WbBA6pfNsAfBwDCggboaHeB2X29wkU8XHtGwh2YIk8=
 github.com/titanous/rocacheck v0.0.0-20171023193734-afe73141d399 h1:e/5i7d4oYZ+C1wj2THlRK+oAhjeS/TRQwMfkIuet3w0=
 github.com/titanous/rocacheck v0.0.0-20171023193734-afe73141d399/go.mod h1:LdwHTNJT99C5fTAzDz0ud328OgXz+gierycbcIx2fRs=
+github.com/traefik/yaegi v0.16.1 h1:f1De3DVJqIDKmnasUF6MwmWv1dSEEat0wcpXhD2On3E=
+github.com/traefik/yaegi v0.16.1/go.mod h1:4eVhbPb3LnD2VigQjhYbEJ69vDRFdT2HQNrXx8eEwUY=
 github.com/transparency-dev/formats v0.1.1 h1:4bVHJc+KdBgpA1OJD1yjI+g0i5Z1graCppTMH8lWKJI=
 github.com/transparency-dev/formats v0.1.1/go.mod h1:qtZ8goRuJ8FTBG9c9+Bj0rn2rUG7eG/AUTkr+Aw3jFw=
 github.com/transparency-dev/merkle v0.0.2 h1:Q9nBoQcZcgPamMkGn7ghV8XiTZ/kRxn1yCG81+twTK4=

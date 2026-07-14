@@ -230,32 +230,73 @@ type promptResult struct {
 	PerModel        map[string]cost.Totals `json:"per_model,omitempty" yaml:"per_model,omitempty"`
 	TranscriptPaths []string               `json:"transcript_paths"    yaml:"transcript_paths"`
 	SessionID       string                 `json:"session_id"          yaml:"session_id"`
+
+	// Unexported carry-fields for the CLI summary printer; never serialized.
+	telemetry *sessiondriver.Telemetry
+	runDir    string
+	waitErr   error
 }
 
-// runPrompt scaffolds the bridge + runlog like `ape chat`, spawns claude
-// in the in-process PTY, delivers the assembled prompt, waits on the
-// Stop hook (with idle-timeout and process-death backstops), then scans
-// telemetry, writes the session record, folds the cost rollup, and exits
-// with the PLAN-12 status code.
+// runPrompt is the `ape prompt` CLI entrypoint: it runs the session core,
+// prints the human summary or the structured envelope, and exits with the
+// PLAN-12 status code. All the session machinery lives in runPromptCore so
+// `apescript.RunPrompt` can drive the identical path without os.Exit or CLI
+// printing.
 func runPrompt(ctx context.Context, o promptOptions) error {
+	res, exitCode, outcomeErr := runPromptCore(ctx, o)
+
+	if exitCode == ExitUsage || exitCode == ExitREPLNotReady {
+		// Preflight / never-ready: no result envelope, just the error + exit.
+		if outcomeErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", outcomeErr.Error())
+		}
+		os.Exit(exitCode)
+	}
+	if res.PromptID == "" && outcomeErr != nil {
+		// Setup error before a session id existed (e.g. spawn failure).
+		return outcomeErr
+	}
+
+	if o.format == output.FormatHuman {
+		printPromptSummary(res, res.telemetry, res.runDir, o.projectRoot, res.waitErr)
+	} else if err := output.Print(os.Stdout, o.format, res); err != nil {
+		return err
+	}
+
+	if exitCode != ExitOK {
+		if res.waitErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", res.waitErr.Error())
+		}
+		os.Exit(exitCode)
+	}
+	return nil
+}
+
+// runPromptCore scaffolds the bridge + runlog like `ape chat`, spawns claude
+// in the in-process PTY, delivers the assembled prompt, waits on the Stop
+// hook (with idle-timeout and process-death backstops), scans telemetry,
+// writes the session record, folds the cost rollup, and returns the result
+// plus a PLAN-12 exit code. It never calls os.Exit and never prints a summary
+// — the caller (CLI or apescript facade) owns those. The returned exit code is
+// ExitUsage (preflight), ExitREPLNotReady (REPL never ready), or the mapping
+// of the wait outcome via promptStatus.
+func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, error) {
 	// Preflight (exit 2): agent must resolve; handoff/prompt derivation
 	// must succeed. Detected before any claude process spawns.
 	if o.agent != "" {
 		if _, _, found := framework.ResolveSkill(o.agent, o.projectRoot); !found {
-			fmt.Fprintf(os.Stderr, "Error: --agent %q did not resolve under .claude/skills (project or user)\n", o.agent)
-			os.Exit(ExitUsage)
+			return promptResult{}, ExitUsage, fmt.Errorf("--agent %q did not resolve under .claude/skills (project or user)", o.agent)
 		}
 	}
 	delivered, err := resolveDeliveredPrompt(o)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		os.Exit(ExitUsage)
+		return promptResult{}, ExitUsage, err
 	}
 	promptLine := assemblePromptLine(o.agent, delivered)
 
 	apeBin, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("ape prompt: locate self: %w", err)
+		return promptResult{}, ExitRunFailed, fmt.Errorf("ape prompt: locate self: %w", err)
 	}
 
 	runCtx, runCancel := context.WithCancel(ctx)
@@ -265,7 +306,7 @@ func runPrompt(ctx context.Context, o promptOptions) error {
 	promptID := runlog.NewChatID(start, o.projectRoot, os.Getpid())
 	runDir := filepath.Join(o.projectRoot, "_output", "ape", "prompts", promptID)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
-		return fmt.Errorf("ape prompt: create record dir: %w", err)
+		return promptResult{}, ExitRunFailed, fmt.Errorf("ape prompt: create record dir: %w", err)
 	}
 
 	var (
@@ -289,7 +330,7 @@ func runPrompt(ctx context.Context, o promptOptions) error {
 		OnReply: driver.FeedReply,
 	})
 	if err := rt.Listen(runCtx); err != nil {
-		return fmt.Errorf("ape prompt: runtime listen: %w", err)
+		return promptResult{}, ExitRunFailed, fmt.Errorf("ape prompt: runtime listen: %w", err)
 	}
 	rt.SetStopFn(runCancel)
 	rtErrCh := make(chan error, 1)
@@ -307,7 +348,7 @@ func runPrompt(ctx context.Context, o promptOptions) error {
 
 	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, o.ignoreProjectSettings)
 	if err != nil {
-		return err
+		return promptResult{}, ExitRunFailed, err
 	}
 	args := append([]string{}, prepend...)
 	args = append(args, "--dangerously-skip-permissions")
@@ -326,7 +367,7 @@ func runPrompt(ctx context.Context, o promptOptions) error {
 	sessionName := fmt.Sprintf("ape-prompt-%d", os.Getpid())
 	_ = repl.KillSession(runCtx, sessionName)
 	if err := repl.NewSession(runCtx, sessionName, o.projectRoot, argv); err != nil {
-		return fmt.Errorf("ape prompt: spawn claude: %w", err)
+		return promptResult{}, ExitRunFailed, fmt.Errorf("ape prompt: spawn claude: %w", err)
 	}
 	defer func() { _ = repl.KillSession(context.Background(), sessionName) }() //nolint:contextcheck // cleanup-on-exit
 
@@ -338,9 +379,7 @@ func runPrompt(ctx context.Context, o promptOptions) error {
 	if readyErr != nil {
 		// The claude REPL never became ready (exit 3). The NotReadyError
 		// carries the last pane snapshot for diagnosis.
-		fmt.Fprintf(os.Stderr, "Error: %s\n", readyErr.Error())
-		//nolint:gocritic // preflight exit; the deferred bridge/session teardown is best-effort and the process is exiting anyway (mirrors the sibling interactive runners)
-		os.Exit(ExitREPLNotReady)
+		return promptResult{}, ExitREPLNotReady, readyErr
 	}
 
 	// If claude exits before the Stop hook, cancel the wait immediately
@@ -359,7 +398,7 @@ func runPrompt(ctx context.Context, o promptOptions) error {
 
 	progressf("ape prompt: delivering prompt…\n")
 	if err := repl.SendCommand(runCtx, sessionName, promptLine); err != nil {
-		return fmt.Errorf("ape prompt: deliver prompt: %w", err)
+		return promptResult{}, ExitRunFailed, fmt.Errorf("ape prompt: deliver prompt: %w", err)
 	}
 
 	waitErr := driver.WaitStepDone(sessionCtx)
@@ -389,21 +428,11 @@ func runPrompt(ctx context.Context, o promptOptions) error {
 		PerModel:        perModel,
 		TranscriptPaths: collectTranscriptPaths(o.projectRoot, runDir),
 		SessionID:       driver.SessionID(),
+		telemetry:       tele,
+		runDir:          runDir,
+		waitErr:         waitErr,
 	}
-
-	if o.format == output.FormatHuman {
-		printPromptSummary(res, tele, runDir, o.projectRoot, waitErr)
-	} else if err := output.Print(os.Stdout, o.format, res); err != nil {
-		return err
-	}
-
-	if exitCode != ExitOK {
-		if waitErr != nil {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", waitErr.Error())
-		}
-		os.Exit(exitCode)
-	}
-	return nil
+	return res, exitCode, waitErr
 }
 
 // promptStatus maps the wait outcome onto a (status, exit-code) pair.

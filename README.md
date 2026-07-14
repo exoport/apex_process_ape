@@ -104,6 +104,7 @@ Keybindings:
 | `ape pipeline [name]`  | List installed pipelines; with a name, run the named pipeline.                             |
 | `ape task <skill>`     | Run a single framework skill (no pipeline YAML) through the interactive PTY runner.        |
 | `ape prompt [text]`    | Drive an unattended Claude session from a prompt or `--handoff` file; Stop-hook completion. |
+| `ape script <file.go>` | Run a Go orchestration script through the yaegi interpreter with the `apescript` library injected. |
 | `ape event <event>`    | Publish a session progress event over NATS (identity + session id baked in).               |
 | `ape log <level> <msg>`| Publish a structured log record over NATS.                                                 |
 | `ape metrics`          | Scan and publish this session's per-model usage metrics over NATS.                         |

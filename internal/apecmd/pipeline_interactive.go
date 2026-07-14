@@ -724,6 +724,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		ProjectRoot:  projectRoot,
 		Prompt:       cfg.prompt,
 		Observer:     obs,
+		ClaudeBin:    cfg.claudeBin,
 		ApeVersion:   Version,
 		ManifestDir:  cfg.manifestDir,
 		FromStage:    cfg.fromStage,

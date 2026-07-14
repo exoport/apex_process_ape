@@ -42,6 +42,7 @@ Subcommands:
 - `prompt` — Drive an unattended Claude session from a prompt or a handoff file
 - `rollback` — Rollback ape to the previous version
 - `sandbox` — Provision and operate hardware-isolated Kata VM workspaces (via aped)
+- `script` — Run a Go orchestration script through the yaegi interpreter
 - `service` — Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply
 - `sessions` — List, prune, or open the URL of live ape sessions
 - `sync` — Sync governance artifacts
@@ -1088,6 +1089,58 @@ Global flags:
 | `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
 | `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
 | `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape script
+
+Run a Go orchestration script through the yaegi interpreter
+
+```
+ape script <file.go> [flags] [-- script-args...]
+```
+
+Run a plain Go file inside ape's process under the yaegi interpreter,
+with the apescript library injected so the script can drive ape's
+primitives — run a pipeline, task, or prompt (all PTY-backed, the same
+runners the CLI uses), read manifests, scan transcripts, log, publish
+events, and upload blobs — as one deterministic, version-controlled Go
+file instead of a shell wrapper around the CLI.
+
+The file must define:
+
+    func Main(ctx context.Context) error
+
+ape evaluates the file, then calls Main. A non-nil error (or a panic,
+which is recovered and reported with the yaegi stack) exits 1; SIGINT
+cancels the context so the in-flight run tears down cleanly.
+
+Use "-" as the file to read the script from stdin. Everything after a
+"--" separator is exposed to the script as apescript.Args().
+
+  ape script ops/nightly.go -- --target ./component-a
+  cat ops/nightly.go | ape script -
+
+By default the interpreter is unrestricted (full stdlib — arbitrary
+trusted code, same trust level as your shell). --sandbox switches to
+yaegi's restricted symbol set, which blocks os/exec, os.Exit, syscall,
+and unsafe while keeping the apescript orchestration surface fully
+available. See docs/reference/apescript.md for the per-group rules.
+
+Exit codes: 0 success · 1 the script returned an error, panicked, or a
+launched run failed · 2 usage or read error (no file, bad flags).
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
+| `--nats-creds` | string | `—` | NATS .creds file; its user identity is baked into every subject (env APE_NATS_CREDS). |
+| `--nats-url` | string | `—` | NATS server URL for progress events + transcript upload (env APE_NATS_URL). Empty disables both. |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml (json/yaml wrap the run in {result, duration, cost_usd}) |
+| `--quiet` | bool | `false` | Suppress apescript.Log output |
+| `--sandbox` | bool | `false` | Run the script in the restricted interpreter (blocks os/exec, os.Exit, syscall, unsafe) |
+| `--transcript-store` | string | `nats-object` | Transcript blob backend: nats-object\|uri-offload (env APE_TRANSCRIPT_STORE). |
+| `--upload-transcripts` | bool | `false` | At run end, upload the transcript set as content-addressed blobs (env APE_UPLOAD_TRANSCRIPTS=1). |
 
 ## ape service
 
