@@ -5,6 +5,7 @@ Explanation docs answer "why" — design rationale, conceptual background, the s
 ## Available explanation
 
 - [why-pty-only.md](why-pty-only.md) — why every run drives an interactive `claude` REPL inside a PTY, and why the programmatic `claude -p` axis was removed in v0.0.36.
+- [chat-task-prompt.md](chat-task-prompt.md) — the three ways ape drives a Claude session (`ape chat` / `ape task` / `ape prompt`) and how to choose between them.
 - [exec-modes.md](exec-modes.md) — the per-stage interactive runtime: process-spawn cost, context sharing, the step contract, and what hooks add.
 - [bridge-architecture.md](bridge-architecture.md) — design narrative for the MCP bridge, SSE broker, and orchestrator behind `--web`.
 - [why-project-local-pipelines.md](why-project-local-pipelines.md) — moving from embedded to on-disk specs in v0.0.6.

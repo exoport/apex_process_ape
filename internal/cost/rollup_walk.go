@@ -25,6 +25,7 @@ func RebuildRollup(projectRoot string) (*Rollup, error) {
 		ByDay:     map[string]Totals{},
 	}
 	r.Chats.Runs = map[string]Totals{}
+	r.Prompts.Runs = map[string]Totals{}
 
 	if err := walkManifestTree(filepath.Join(projectRoot, "_output", "pipelines"), r.FoldPipelineRun); err != nil {
 		return nil, err
@@ -33,6 +34,9 @@ func RebuildRollup(projectRoot string) (*Rollup, error) {
 		return nil, err
 	}
 	if err := walkChats(projectRoot, r); err != nil {
+		return nil, err
+	}
+	if err := walkPrompts(projectRoot, r); err != nil {
 		return nil, err
 	}
 	if err := SaveRollup(projectRoot, r); err != nil {
@@ -183,6 +187,93 @@ func walkChats(projectRoot string, r *Rollup) error {
 		r.FoldChat(s.ChatID, day, totals, nil)
 	}
 	return nil
+}
+
+// promptForRollup mirrors the cost-relevant subset of a prompt-session
+// record (_output/ape/prompts/<id>/prompt.yaml). PLAN-12.
+type promptForRollup struct {
+	PromptID  string                      `yaml:"prompt_id"`
+	StartedAt time.Time                   `yaml:"started_at"`
+	CostUSD   float64                     `yaml:"cost_usd"`
+	TokensIn  int                         `yaml:"tokens_input"`
+	TokensOut int                         `yaml:"tokens_output"`
+	NumTurns  int                         `yaml:"num_turns"`
+	PerModel  map[string]modelUsageRecord `yaml:"per_model"`
+}
+
+func (p promptForRollup) totals() Totals {
+	return Totals{
+		CostUSD:      p.CostUSD,
+		InputTokens:  p.TokensIn,
+		OutputTokens: p.TokensOut,
+		NumTurns:     p.NumTurns,
+	}
+}
+
+func walkPrompts(projectRoot string, r *Rollup) error {
+	root := filepath.Join(projectRoot, "_output", "ape", "prompts")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, ent := range entries {
+		if !ent.IsDir() {
+			continue
+		}
+		p, ok := loadPromptForRollup(filepath.Join(root, ent.Name(), "prompt.yaml"))
+		if !ok {
+			continue
+		}
+		day := p.StartedAt
+		if day.IsZero() {
+			day = time.Now().UTC()
+		}
+		r.FoldPrompt(p.PromptID, day, p.totals(), perModelTotals(p.PerModel))
+	}
+	return nil
+}
+
+func loadPromptForRollup(path string) (promptForRollup, bool) {
+	var p promptForRollup
+	bs, err := os.ReadFile(path)
+	if err != nil {
+		return p, false
+	}
+	if err := yaml.Unmarshal(bs, &p); err != nil {
+		return p, false
+	}
+	if p.PromptID == "" {
+		return p, false
+	}
+	return p, true
+}
+
+// PromptSession is one prompt session's cost summary, read by
+// `ape costs prompt <id>`. PLAN-12.
+type PromptSession struct {
+	PromptID string            `json:"prompt_id"`
+	Totals   Totals            `json:"totals"`
+	Started  time.Time         `json:"started_at"`
+	PerModel map[string]Totals `json:"per_model,omitempty"`
+}
+
+// FindPromptSession reads _output/ape/prompts/<id>/prompt.yaml.
+// ok=false when the session is absent. PLAN-12.
+func FindPromptSession(projectRoot, promptID string) (PromptSession, bool) {
+	path := filepath.Join(projectRoot, "_output", "ape", "prompts", promptID, "prompt.yaml")
+	p, ok := loadPromptForRollup(path)
+	if !ok {
+		return PromptSession{}, false
+	}
+	return PromptSession{
+		PromptID: p.PromptID,
+		Started:  p.StartedAt,
+		Totals:   p.totals(),
+		PerModel: perModelTotals(p.PerModel),
+	}, true
 }
 
 // RunManifest is one run's cost summary, read by `ape costs run <id>`.

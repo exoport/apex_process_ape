@@ -25,6 +25,7 @@ totals — today, this week, all-time — broken down per pipeline + chat.
   ape costs                          Project rollup (human / json).
   ape costs run <run-id>             Single pipeline run (reads manifest.yaml).
   ape costs chat <chat-id>           Single chat session (reads session.yaml).
+  ape costs prompt <prompt-id>       Single prompt session (reads prompt.yaml).
   ape costs update --from <file>     Refresh the price table from a YAML file.
   ape costs roll                     Force a project rollup rebuild from all
                                      run / chat directories.`,
@@ -43,7 +44,37 @@ totals — today, this week, all-time — broken down per pipeline + chat.
 		},
 	}
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "human | json")
-	cmd.AddCommand(newCostsRunCmd(), newCostsChatCmd(), newCostsUpdateCmd(), newCostsRollCmd())
+	cmd.AddCommand(newCostsRunCmd(), newCostsChatCmd(), newCostsPromptCmd(), newCostsUpdateCmd(), newCostsRollCmd())
+	return cmd
+}
+
+// newCostsPromptCmd implements `ape costs prompt <prompt-id>` — a reader
+// over a single prompt session.yaml-analogue (prompt.yaml). PLAN-12.
+func newCostsPromptCmd() *cobra.Command {
+	var outputFormat string
+	cmd := &cobra.Command{
+		Use:     "prompt <prompt-id>",
+		Short:   "Show cost for a single prompt session (reads its prompt.yaml)",
+		Example: "  ape costs prompt 20260713-120102-a1b2c3d",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cwd, _ := os.Getwd()
+			s, ok := cost.FindPromptSession(cwd, args[0])
+			if !ok {
+				return fmt.Errorf("no prompt session found for prompt-id %q under _output/ape/prompts", args[0])
+			}
+			if output.Format(outputFormat) == output.FormatJSON {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(s)
+			}
+			fmt.Printf("prompt %s\n", s.PromptID)
+			printTotalsLine("total", s.Totals)
+			printPerModel(s.PerModel)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "human | json")
 	return cmd
 }
 
@@ -186,6 +217,12 @@ func printCostsHuman(r *cost.Rollup) error {
 		fmt.Fprintf(tw, "chats\t%d\t$%.2f\t%d\t%d\t%d\n",
 			len(r.Chats.Runs), r.Chats.Totals.CostUSD,
 			r.Chats.Totals.InputTokens, r.Chats.Totals.OutputTokens, r.Chats.Totals.CacheReadTokens)
+	}
+	// All-time totals for `ape prompt` sessions (PLAN-12).
+	if r.Prompts.Totals.CostUSD > 0 || len(r.Prompts.Runs) > 0 {
+		fmt.Fprintf(tw, "prompts\t%d\t$%.2f\t%d\t%d\t%d\n",
+			len(r.Prompts.Runs), r.Prompts.Totals.CostUSD,
+			r.Prompts.Totals.InputTokens, r.Prompts.Totals.OutputTokens, r.Prompts.Totals.CacheReadTokens)
 	}
 	tw.Flush()
 

@@ -57,7 +57,8 @@ func verifyChecksums(checksums, bundleJSON []byte, tag string) error {
 		return fmt.Errorf("load embedded trusted root: %w", err)
 	}
 
-	verifier, err := verify.NewVerifier(trustedRoot,
+	verifier, err := verify.NewVerifier(
+		trustedRoot,
 		verify.WithSignedCertificateTimestamps(1),
 		verify.WithObserverTimestamps(1),
 		verify.WithTransparencyLog(1),

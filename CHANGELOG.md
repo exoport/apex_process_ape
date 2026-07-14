@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## Unreleased
+
+- **feat(prompt): new `ape prompt` — prompt/handoff-driven Claude session** —
+  `ape prompt [<text>]` (or `ape prompt --handoff <file>`) drives one
+  unattended Claude Code session end-to-end through the in-process PTY: it
+  spawns claude under the ape bridge, delivers the prompt, detects completion
+  via the Stop hook (with `--idle-timeout` and process-death backstops),
+  scans per-model telemetry, copies the transcript, and writes a
+  `prompt.yaml` session record under `_output/ape/prompts/<prompt-id>/`.
+  Exactly one of the positional `<text>` or `--handoff` must be given.
+  `--agent A` fronts the session with the PAT-25 `/A --autonomous -- …`
+  prefix; `--ultracode` prepends the ultracode keyword and `--workflow`
+  appends a run-via-workflow directive (independent, composable). It makes
+  no commits of its own. `--output-format human|json|yaml` emits a
+  `{prompt_id, status, duration, cost_usd, per_model, transcript_paths,
+  session_id}` envelope. Exit codes: 0 completed · 1 idle-timeout/failed ·
+  2 preflight (no `_apex/config.yaml`, unresolved `--agent`, missing
+  `--handoff`) · 3 REPL never ready · 4 claude died before Stop. Prompt
+  sessions fold into a new `prompts` bucket in `ape costs` (readable per
+  session with `ape costs prompt <id>`).
+- **refactor(sessiondriver): extract the reusable interactive-session slice** —
+  the transcript-binding + telemetry-scan machinery (main-session delta,
+  sub-agent sessions, the v0.0.34 double-count guard, the dropped-SubagentStop
+  robustness sweep, durable snapshots) plus Stop-hook step-done signalling
+  with an idle backstop now live in `internal/sessiondriver`, shared by the
+  pipeline interactive runner and `ape prompt`. Pipeline behavior is
+  unchanged.
+
 ## v0.0.44 (2026-07-12)
 
 - **feat(update): cosign-verify self-updates and drop `golang.org/x/crypto/openpgp`** —

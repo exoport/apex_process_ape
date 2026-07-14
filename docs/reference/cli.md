@@ -39,6 +39,7 @@ Subcommands:
 - `pattern` — Manage governance patterns
 - `pipeline` — List or run an APEX pipeline
 - `planning` — Show the planning pipeline diagram
+- `prompt` — Drive an unattended Claude session from a prompt or a handoff file
 - `rollback` — Rollback ape to the previous version
 - `sandbox` — Provision and operate hardware-isolated Kata VM workspaces (via aped)
 - `service` — Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply
@@ -190,6 +191,7 @@ totals — today, this week, all-time — broken down per pipeline + chat.
   ape costs                          Project rollup (human / json).
   ape costs run <run-id>             Single pipeline run (reads manifest.yaml).
   ape costs chat <chat-id>           Single chat session (reads session.yaml).
+  ape costs prompt <prompt-id>       Single prompt session (reads prompt.yaml).
   ape costs update --from <file>     Refresh the price table from a YAML file.
   ape costs roll                     Force a project rollup rebuild from all
                                      run / chat directories.
@@ -197,6 +199,7 @@ totals — today, this week, all-time — broken down per pipeline + chat.
 Subcommands:
 
 - `chat` — Show cost for a single chat session (reads its session.yaml)
+- `prompt` — Show cost for a single prompt session (reads its prompt.yaml)
 - `roll` — Rebuild <project>/_output/ape/cost-rollup.json from on-disk run / chat artefacts
 - `run` — Show cost for a single pipeline or task run (reads its manifest.yaml)
 - `update` — Persist model price overrides from a YAML file to ~/.ape/prices.yaml
@@ -219,6 +222,26 @@ Examples:
 
 ```
   ape costs chat 0a675bc4
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--output-format` | string | `human` | human \| json |
+
+## ape costs prompt
+
+Show cost for a single prompt session (reads its prompt.yaml)
+
+```
+ape costs prompt <prompt-id> [flags]
+```
+
+Examples:
+
+```
+  ape costs prompt 20260713-120102-a1b2c3d
 ```
 
 Flags:
@@ -731,6 +754,64 @@ Print an ASCII swimlanes view of the greenfield planning pipeline.
 Lanes are agent personas; rows are topological depth; `←` lists each
 skill's upstream dependencies. Source of truth for edges: the
 apex_process_docs planning-pipeline explanation.
+
+## ape prompt
+
+Drive an unattended Claude session from a prompt or a handoff file
+
+```
+ape prompt [text] [flags]
+```
+
+Run one unattended Claude Code session end-to-end: spawn claude in
+an in-process PTY, deliver a prompt (or seed the session from a handoff
+document), let it work under the ape bridge's hook supervision, detect
+completion via the Stop hook, capture the transcript + per-model
+telemetry, and exit with a meaningful status.
+
+Exactly one of the positional <text> or --handoff <file> must be given.
+
+  ape prompt "add a CHANGELOG entry for the latest release"
+  ape prompt --handoff development/handoffs/2026-07-13-resume.md
+  ape prompt "refactor the parser" --agent apex-agent-dev --workflow
+  ape prompt "big refactor" --ultracode --model "opus[1m]"
+
+Prompt assembly:
+  --agent A        the delivered line is "/A --autonomous -- <prompt>"
+                   (no agent: the prompt is sent as a plain message).
+  --handoff F      the prompt becomes "Read the handoff document at
+                   <abs F> and continue the work it describes."
+  --ultracode      prepends the "ultracode" keyword to the prompt
+                   (session runs workflows by default).
+  --workflow       appends an explicit "run this via a workflow"
+                   directive. Independent of --ultracode; both compose.
+
+Records land under <project>/_output/ape/prompts/<prompt-id>/ (runlog
+streams + copied transcript + prompt.yaml session record) and fold into
+the project cost rollup's Prompts bucket.
+
+ape prompt must run from a project root (a directory with
+_apex/config.yaml). It makes no commits of its own.
+
+Exit codes: 0 session completed (Stop hook) · 1 idle-timeout or session
+failed · 2 usage or preflight error (no _apex/config.yaml, unresolved
+--agent, missing --handoff file) · 3 the claude REPL never became ready
+· 4 claude exited before the Stop hook.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--agent` | string | `—` | Framework agent fronting the session: /<agent> --autonomous -- <prompt> |
+| `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--handoff` | string | `—` | Handoff document to seed the session with (mutually exclusive with the positional prompt) |
+| `--idle-timeout` | duration | `0s` | Idle-without-Stop completion backstop (e.g. 15m); default matches the pipeline (60m) |
+| `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
+| `--model` | string | `—` | Claude model for the session (e.g. "opus[1m]") |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml (json/yaml = result envelope on stdout, progress on stderr) |
+| `--quiet` | bool | `false` | Suppress the progress stream on stderr |
+| `--ultracode` | bool | `false` | Prepend the ultracode keyword (session runs workflows by default) |
+| `--workflow` | bool | `false` | Append a directive to run the task through a Claude Code workflow |
 
 ## ape rollback
 

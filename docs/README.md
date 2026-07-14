@@ -25,6 +25,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [How to refresh the APEX framework in a project](how-to/framework-update.md)
 - [How to pass arguments to skills](how-to/pass-args-to-skills.md)
 - [How to run a single skill with `ape task`](how-to/run-a-single-skill.md)
+- [How to run an unattended session with `ape prompt`](how-to/run-a-prompt-session.md)
 - [How to run a sandboxed Kata VM workspace](how-to/sandbox-workspaces.md)
 - [How to run ape as a service (NATS job daemon)](how-to/run-ape-as-a-service.md)
 - [How to run aped (the VM-management daemon)](how-to/run-aped.md)
@@ -46,6 +47,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 ### Explanation — _the why and the what_
 
 - [Why PTY-only execution](explanation/why-pty-only.md) — why every run drives an interactive `claude` REPL inside a PTY, and why the programmatic `claude -p` axis was removed in v0.0.36
+- [Choosing between `ape chat`, `ape task`, and `ape prompt`](explanation/chat-task-prompt.md) — the three ways ape drives a Claude session and how to pick one
 - [The per-stage interactive runtime](explanation/exec-modes.md) — process-spawn cost, context sharing, the step contract, and what hooks add
 - [Bridge architecture](explanation/bridge-architecture.md) — the MCP bridge, SSE broker, and orchestrator behind `--web`
 - [Why project-local pipelines](explanation/why-project-local-pipelines.md) — design rationale for moving from embedded to on-disk specs in v0.0.6

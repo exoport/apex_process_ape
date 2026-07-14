@@ -1,14 +1,11 @@
 package apecmd
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +17,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/runlog"
+	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 )
 
 // hookEnvelope is the minimal shape ape needs to extract from a
@@ -457,225 +455,72 @@ func (c *interactiveCore) StepTelemetry(stage string, stepIdx int) (tele *pipeli
 	// every path (including the diagnostic-note early returns).
 	defer func() { c.emitStepEnd(stage, stepIdx, tele) }()
 	c.transcriptMu.Lock()
-	source := c.activeTranscript
-	parentSID := c.activeSessionID
-	prevPath := c.cumulativeFor
-	prev := c.stageCumulative
-	prevByModel := c.stageCumByModel
-	stepStart := c.stepStartedAt
-	subs := make([]*subSessionCapture, 0, len(c.subSessions))
+	subs := make([]sessiondriver.SubCapture, 0, len(c.subSessions))
 	for _, s := range c.subSessions {
-		subs = append(subs, s)
-	}
-	c.transcriptMu.Unlock()
-
-	if source == "" {
-		return telemetryNote("no transcript captured for step (no hook carried a transcript_path)")
-	}
-	// When `/clear` between steps rotates the session_id, the new
-	// step's UPS payload carries a different transcript_path. The
-	// previous cumulative was computed against a different file —
-	// useless as a baseline — so reset to zero. The step's delta
-	// then equals its absolute usage in the new transcript.
-	if source != prevPath {
-		prev = cost.Totals{}
-		prevByModel = nil
-	}
-	// Brief flush window so the claude session writer can flush the
-	// final assistant turn into the session JSONL.
-	time.Sleep(transcriptFlushGrace)
-
-	if !fileExists(source) {
-		return telemetryNote(fmt.Sprintf("transcript missing at scan time (path %q)", source))
-	}
-	res, err := cost.ScanSession(source)
-	if err != nil {
-		return telemetryNote(fmt.Sprintf("transcript scan failed: %v (path %q)", err, source))
-	}
-	// Durable artifact: copy the scanned transcript into the run dir
-	// so the run's record survives ~/.claude/projects/ rotation.
-	// Local read of a persistent file — best-effort, once per step.
-	if c.getRunLog != nil {
-		if writer := c.getRunLog(); writer != nil {
-			_, _ = writer.SnapshotTranscript(filepath.Base(source), source)
-		}
-	}
-
-	// Main-session step delta against the stage baseline.
-	c.transcriptMu.Lock()
-	c.stageCumulative = res.Totals
-	c.stageCumByModel = res.ByModel
-	c.cumulativeFor = source
-	c.transcriptMu.Unlock()
-	mainUsage := totalsToModelUsage(subTotals(res.Totals, prev))
-	mainByModel := byModelDelta(res.ByModel, prevByModel)
-
-	tele = &pipeline.StepTelemetry{
-		CostUSD:               mainUsage.CostUSD,
-		TokensInput:           mainUsage.TokensInput,
-		TokensOutput:          mainUsage.TokensOutput,
-		TokensCacheRead:       mainUsage.TokensCacheRead,
-		TokensCacheCreation:   mainUsage.TokensCacheCreation,
-		TokensCacheCreation5m: mainUsage.TokensCacheCreation5m,
-		TokensCacheCreation1h: mainUsage.TokensCacheCreation1h,
-		NumTurns:              mainUsage.NumTurns,
-		ModelUsage:            mainByModel,
-		Sessions: []pipeline.SessionUsage{{
-			SessionID:  parentSID,
-			Usage:      mainUsage,
-			ModelUsage: mainByModel,
-		}},
-	}
-
-	// Sub-agent sessions: separate transcripts (agent-<id>.jsonl),
-	// scanned whole, folded into the step's aggregate + model breakdown
-	// (Imp2). Merge the hook-captured subs with a robustness sweep of
-	// the main session's subagents/ dir (so a dropped SubagentStop
-	// doesn't silently lose a sub), dedup by resolved path, and apply
-	// the double-count guard.
-	cleanMain := filepath.Clean(source)
-	type subCand struct{ agentID, parent, path string }
-	var cands []subCand
-	seenPath := map[string]bool{}
-	addCand := func(agentID, parent, path string) {
-		if path == "" {
-			return
-		}
-		cp := filepath.Clean(path)
-		// Double-count guard (regression lock): a sub whose resolved
-		// transcript equals the main/active transcript is the exact
-		// 2×-main signature — never fold it. With the correct field
-		// (agent_transcript_path) subs point at agent-*.jsonl (≠ main),
-		// so this only trips on future hook-shape drift.
-		if cp == cleanMain || seenPath[cp] {
-			return
-		}
-		seenPath[cp] = true
-		cands = append(cands, subCand{agentID: agentID, parent: parent, path: cp})
-	}
-	for _, sub := range subs {
-		addCand(sub.agentID, sub.parentSessionID, sub.transcript)
-	}
-	// Robustness sweep of the main session's subagents/ dir (so a dropped
-	// SubagentStop doesn't silently lose a sub), via the shared enumerator
-	// (cost.SessionFiles, PLAN-10 D2 remainder extracted for PLAN-13/17).
-	for _, sf := range cost.SessionFiles(source, stepStart) {
-		if sf.Kind != cost.SessionSubagent {
-			continue
-		}
-		addCand(sf.SessionID, parentSID, sf.Path)
-	}
-	sort.Slice(cands, func(i, j int) bool {
-		if cands[i].agentID != cands[j].agentID {
-			return cands[i].agentID < cands[j].agentID
-		}
-		return cands[i].path < cands[j].path
-	})
-	for _, cd := range cands {
-		if !fileExists(cd.path) {
-			continue
-		}
-		subRes, subErr := cost.ScanSession(cd.path)
-		if subErr != nil {
-			continue
-		}
-		parent := cd.parent
-		if parent == "" {
-			parent = parentSID
-		}
-		subUsage := totalsToModelUsage(subRes.Totals)
-		subByModel := byModelDelta(subRes.ByModel, nil)
-		// SessionID = agent_id: the sub's internal sessionId equals the
-		// parent's, so agent_id is the only distinct per-sub identifier.
-		tele.Sessions = append(tele.Sessions, pipeline.SessionUsage{
-			SessionID:       cd.agentID,
-			ParentSessionID: parent,
-			Usage:           subUsage,
-			ModelUsage:      subByModel,
+		subs = append(subs, sessiondriver.SubCapture{
+			AgentID:         s.agentID,
+			ParentSessionID: s.parentSessionID,
+			Transcript:      s.transcript,
 		})
-		tele.CostUSD += subUsage.CostUSD
-		tele.TokensInput += subUsage.TokensInput
-		tele.TokensOutput += subUsage.TokensOutput
-		tele.TokensCacheRead += subUsage.TokensCacheRead
-		tele.TokensCacheCreation += subUsage.TokensCacheCreation
-		tele.TokensCacheCreation5m += subUsage.TokensCacheCreation5m
-		tele.TokensCacheCreation1h += subUsage.TokensCacheCreation1h
-		tele.NumTurns += subUsage.NumTurns
-		if tele.ModelUsage == nil {
-			tele.ModelUsage = map[string]pipeline.ModelUsage{}
-		}
-		for model, u := range subByModel {
-			tele.ModelUsage[model] = addModelUsage(tele.ModelUsage[model], u)
-		}
-		// Durable copy of the sub transcript (survives ~/.claude
-		// rotation), same as the main transcript above.
-		if c.getRunLog != nil {
-			if writer := c.getRunLog(); writer != nil {
-				_, _ = writer.SnapshotTranscript(filepath.Base(cd.path), cd.path)
-			}
-		}
 	}
+	params := sessiondriver.ScanParams{
+		Source:          c.activeTranscript,
+		ParentSessionID: c.activeSessionID,
+		PrevPath:        c.cumulativeFor,
+		PrevTotals:      c.stageCumulative,
+		PrevByModel:     c.stageCumByModel,
+		StepStart:       c.stepStartedAt,
+		Subs:            subs,
+		GetRunLog:       c.getRunLog,
+		FlushGrace:      transcriptFlushGrace,
+	}
+	c.transcriptMu.Unlock()
 
-	if tele.NumTurns == 0 {
-		// Distinguish a partial file (lines but no complete assistant
-		// turn) from an empty one.
-		tele.Note = fmt.Sprintf(
-			"transcript scan processed zero assistant turns (path %q, %d line(s))",
-			source, countLines(source),
-		)
-		fmt.Fprintf(os.Stderr, "⚠ telemetry: %s\n", tele.Note)
+	// The transcript scan (main delta + sub-agent sessions, double-count
+	// guard, dropped-SubagentStop sweep, durable snapshots) is the
+	// reusable slice extracted into sessiondriver and shared with
+	// `ape prompt`.
+	st := sessiondriver.ScanStep(params)
+	if st.Advance != nil {
+		// Advance the per-stage baseline for the next step's delta.
+		c.transcriptMu.Lock()
+		c.stageCumulative = st.Advance.Totals
+		c.stageCumByModel = st.Advance.ByModel
+		c.cumulativeFor = st.Advance.Path
+		c.transcriptMu.Unlock()
+	}
+	if st.Note != "" {
+		// Preserve the runner's no-silent-zero stderr breadcrumb.
+		fmt.Fprintf(os.Stderr, "⚠ telemetry: %s\n", st.Note)
+	}
+	return telemetryFromScan(st)
+}
+
+// telemetryFromScan adapts the neutral sessiondriver.Telemetry onto the
+// pipeline package's StepTelemetry shape (the manifest's contract).
+func telemetryFromScan(st *sessiondriver.Telemetry) *pipeline.StepTelemetry {
+	agg := totalsToModelUsage(st.Totals)
+	tele := &pipeline.StepTelemetry{
+		CostUSD:               agg.CostUSD,
+		TokensInput:           agg.TokensInput,
+		TokensOutput:          agg.TokensOutput,
+		TokensCacheRead:       agg.TokensCacheRead,
+		TokensCacheCreation:   agg.TokensCacheCreation,
+		TokensCacheCreation5m: agg.TokensCacheCreation5m,
+		TokensCacheCreation1h: agg.TokensCacheCreation1h,
+		NumTurns:              agg.NumTurns,
+		ModelUsage:            byModelToPipeline(st.ByModel),
+		Note:                  st.Note,
+	}
+	for _, s := range st.Sessions {
+		tele.Sessions = append(tele.Sessions, pipeline.SessionUsage{
+			SessionID:       s.SessionID,
+			ParentSessionID: s.ParentSessionID,
+			Usage:           totalsToModelUsage(s.Totals),
+			ModelUsage:      byModelToPipeline(s.ByModel),
+		})
 	}
 	return tele
-}
-
-// countLines returns the newline count of path, or -1 when it can't be
-// read. Used only to enrich a zero-turn telemetry note, so a partial
-// capture is distinguishable from an empty one.
-func countLines(path string) int {
-	f, err := os.Open(path)
-	if err != nil {
-		return -1
-	}
-	defer f.Close()
-	n := 0
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		n++
-	}
-	if sc.Err() != nil {
-		return -1
-	}
-	return n
-}
-
-// telemetryNote warns on stderr and returns a zeroed StepTelemetry
-// carrying the diagnosability breadcrumb — the manifest records it as
-// telemetry_note so a zeroed step is explainable, never silent.
-func telemetryNote(note string) *pipeline.StepTelemetry {
-	fmt.Fprintf(os.Stderr, "⚠ telemetry: %s\n", note)
-	return &pipeline.StepTelemetry{Note: note}
-}
-
-// fileExists reports whether path exists and is a regular file (or a
-// resolvable symlink to one).
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.Mode().IsRegular()
-}
-
-// subTotals returns a-b field-wise.
-func subTotals(a, b cost.Totals) cost.Totals {
-	return cost.Totals{
-		CostUSD:               a.CostUSD - b.CostUSD,
-		InputTokens:           a.InputTokens - b.InputTokens,
-		OutputTokens:          a.OutputTokens - b.OutputTokens,
-		CacheReadTokens:       a.CacheReadTokens - b.CacheReadTokens,
-		CacheCreationTokens:   a.CacheCreationTokens - b.CacheCreationTokens,
-		CacheCreation5mTokens: a.CacheCreation5mTokens - b.CacheCreation5mTokens,
-		CacheCreation1hTokens: a.CacheCreation1hTokens - b.CacheCreation1hTokens,
-		NumTurns:              a.NumTurns - b.NumTurns,
-	}
 }
 
 // totalsToModelUsage adapts cost.Totals onto the pipeline package's
@@ -693,42 +538,17 @@ func totalsToModelUsage(t cost.Totals) pipeline.ModelUsage {
 	}
 }
 
-// byModelDelta subtracts the per-model baseline from the fresh scan
-// and drops all-zero entries. baseline nil means "no baseline".
-func byModelDelta(current, baseline map[string]cost.Totals) map[string]pipeline.ModelUsage {
-	if len(current) == 0 {
+// byModelToPipeline converts a cost.Totals per-model map to the
+// pipeline ModelUsage shape. nil in → nil out.
+func byModelToPipeline(m map[string]cost.Totals) map[string]pipeline.ModelUsage {
+	if len(m) == 0 {
 		return nil
 	}
-	out := map[string]pipeline.ModelUsage{}
-	for model, cur := range current {
-		d := cur
-		if base, ok := baseline[model]; ok {
-			d = subTotals(cur, base)
-		}
-		u := totalsToModelUsage(d)
-		if u == (pipeline.ModelUsage{}) {
-			continue
-		}
-		out[model] = u
-	}
-	if len(out) == 0 {
-		return nil
+	out := make(map[string]pipeline.ModelUsage, len(m))
+	for model, t := range m {
+		out[model] = totalsToModelUsage(t)
 	}
 	return out
-}
-
-// addModelUsage sums two ModelUsage values field-wise.
-func addModelUsage(a, b pipeline.ModelUsage) pipeline.ModelUsage {
-	return pipeline.ModelUsage{
-		CostUSD:               a.CostUSD + b.CostUSD,
-		TokensInput:           a.TokensInput + b.TokensInput,
-		TokensOutput:          a.TokensOutput + b.TokensOutput,
-		TokensCacheRead:       a.TokensCacheRead + b.TokensCacheRead,
-		TokensCacheCreation:   a.TokensCacheCreation + b.TokensCacheCreation,
-		TokensCacheCreation5m: a.TokensCacheCreation5m + b.TokensCacheCreation5m,
-		TokensCacheCreation1h: a.TokensCacheCreation1h + b.TokensCacheCreation1h,
-		NumTurns:              a.NumTurns + b.NumTurns,
-	}
 }
 
 // WaitStepDone blocks until the bridge fires a Stop hook for the
@@ -777,6 +597,8 @@ func (c *interactiveCore) WaitStepDone(ctx context.Context, _ string, _ int) err
 // or Hub's IPC port. Mode picks the settings shape: ModeWeb for
 // web mode (legacy hooks-via-Mode path), ModeTUI for everywhere
 // else (hooks-via-InjectHooks path).
+//
+//nolint:unparam // mode is a genuine settings-shape selector; ModeWeb is a supported value even though every current caller passes ModeTUI
 func buildInteractivePrepend(apeBin string, ipcPort int, mode config.Mode, ignoreProjectSettings bool) ([]string, error) {
 	mcpCfg, err := config.BuildMCPConfig(config.MCPOptions{APEBin: apeBin, IPCPort: ipcPort})
 	if err != nil {

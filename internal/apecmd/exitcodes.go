@@ -14,9 +14,13 @@ package apecmd
 //	3  the claude REPL never became ready inside the PTY — the
 //	   trust-dialog dismissal failed or an unknown modal blocked input;
 //	   the last pane snapshot is written to stderr for diagnosis
+//	4  claude exited before the Stop hook fired (PLAN-12 `ape prompt`) —
+//	   the process died mid-session, so the run neither completed nor
+//	   idled out
 const (
 	ExitOK           = 0
 	ExitRunFailed    = 1
 	ExitUsage        = 2
 	ExitREPLNotReady = 3
+	ExitClaudeDied   = 4
 )

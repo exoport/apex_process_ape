@@ -21,7 +21,11 @@ type Rollup struct {
 	// (manifests under _output/tasks/<skill>/<run-id>/). PLAN-11.
 	Tasks map[string]Bucket `json:"tasks,omitempty"`
 	Chats Bucket            `json:"chats"`
-	ByDay map[string]Totals `json:"by_day,omitempty"` // YYYY-MM-DD → totals
+	// Prompts aggregates `ape prompt` sessions, keyed by prompt-id
+	// (records under _output/ape/prompts/<prompt-id>/prompt.yaml).
+	// PLAN-12.
+	Prompts Bucket            `json:"prompts"`
+	ByDay   map[string]Totals `json:"by_day,omitempty"` // YYYY-MM-DD → totals
 	// PerModel is the project-wide per-model breakdown, keyed by
 	// normalized model id (see NormalizeModel). PLAN-10 D5.
 	PerModel map[string]Totals `json:"per_model,omitempty"`
@@ -74,6 +78,9 @@ func LoadRollup(projectRoot string) (*Rollup, error) {
 	}
 	if r.Chats.Runs == nil {
 		r.Chats.Runs = map[string]Totals{}
+	}
+	if r.Prompts.Runs == nil {
+		r.Prompts.Runs = map[string]Totals{}
 	}
 	return &r, nil
 }
@@ -147,6 +154,19 @@ func (r *Rollup) FoldChat(chatID string, day time.Time, totals Totals, perModel 
 	r.Chats.Runs[chatID] = totals
 	r.Chats.Totals = sumTotals(r.Chats.Totals, totals)
 	r.Chats.PerModel = sumPerModel(r.Chats.PerModel, perModel)
+	r.foldDay(day, totals)
+	r.PerModel = sumPerModel(r.PerModel, perModel)
+}
+
+// FoldPrompt mutates r to include one `ape prompt` session's totals,
+// keyed by prompt-id. PLAN-12.
+func (r *Rollup) FoldPrompt(promptID string, day time.Time, totals Totals, perModel map[string]Totals) {
+	if r.Prompts.Runs == nil {
+		r.Prompts.Runs = map[string]Totals{}
+	}
+	r.Prompts.Runs[promptID] = totals
+	r.Prompts.Totals = sumTotals(r.Prompts.Totals, totals)
+	r.Prompts.PerModel = sumPerModel(r.Prompts.PerModel, perModel)
 	r.foldDay(day, totals)
 	r.PerModel = sumPerModel(r.PerModel, perModel)
 }
