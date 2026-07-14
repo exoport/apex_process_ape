@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.0.45 (2026-07-14)
 
 - **feat(pipeline): activity-aware step completion — progress-anchored idle
   window + hard cap (PLAN-19)** — an interactive step (pipeline stage step,
