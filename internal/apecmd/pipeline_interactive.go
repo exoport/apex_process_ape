@@ -68,10 +68,18 @@ func transcriptLinkName(stepLabel string) string {
 // FeedHook; the core handles UserPromptSubmit-against-contract,
 // runlog write-out, and Stop-hook → step-done signalling.
 type interactiveCore struct {
-	verifier   *orchestrator.ContractVerifier
-	stepDoneCh chan struct{}
-	getRunLog  func() *runlog.Writer
-	runCancel  context.CancelFunc
+	verifier  *orchestrator.ContractVerifier
+	getRunLog func() *runlog.Writer
+	runCancel context.CancelFunc
+
+	// driver is the single owner of the activity-anchor + step-done
+	// signalling + idle-wait loop (PLAN-19 D5). interactiveCore composes
+	// it and delegates: FeedHook records activity + signals step-done on
+	// Stop, OnStepStart drains stale signals, and WaitStepDone runs the
+	// idle-wait loop. The Driver's own transcript-capture state is unused
+	// here — interactiveCore keeps its own richer per-stage telemetry
+	// state (cumulative baselines, sub-session sweep) below.
+	driver *sessiondriver.Driver
 
 	// stepMu guards activeStep + activeSkill; FeedHook reads on the bridge
 	// accept goroutine while OnStepStart/End write on the runner goroutine.
@@ -86,18 +94,6 @@ type interactiveCore struct {
 	// so an unconfigured run (no NATS) publishes nothing.
 	pubMu sync.Mutex
 	pub   *eventing.Publisher
-
-	// activityMu guards lastActivity, the timestamp of the most
-	// recent hook event seen for the current step. WaitStepDone
-	// uses it as an idle-timeout anchor — a step that has been
-	// silent for interactiveStepIdleTimeout is presumed hung.
-	activityMu   sync.Mutex
-	lastActivity time.Time
-
-	// idleTimeout is the maximum quiet window WaitStepDone tolerates
-	// before declaring the step hung. Defaults to
-	// interactiveStepIdleTimeout; `ape task --idle-timeout` overrides.
-	idleTimeout time.Duration
 
 	// transcriptMu guards the transcript-capture state below. UPS /
 	// Subagent hooks (bridge goroutine) write; the telemetry callback
@@ -147,24 +143,19 @@ type subSessionCapture struct {
 // branches in particular) while still bounding real stalls.
 const interactiveStepIdleTimeout = 60 * time.Minute
 
-// interactiveStepIdlePoll is the frequency at which WaitStepDone
-// rechecks the idle window. Small enough to keep tail latency near
-// the configured timeout; large enough that the runtime cost is
-// trivial even across long steps.
-const interactiveStepIdlePoll = 30 * time.Second
-
-// idlePollDivisor scales the poll interval down for short configured
-// idle timeouts (`ape task --idle-timeout`): poll at a quarter of the
-// window so tail latency stays proportional.
-const idlePollDivisor = 4
-
 func newInteractiveCore(runCancel context.CancelFunc, getRunLog func() *runlog.Writer) *interactiveCore {
+	// The Driver owns the activity anchor + step-done channel + idle-wait
+	// loop (PLAN-19 D5). Seed it with the pipeline's 60m default and the
+	// "interactive step" idle-error noun so a cancelled step reads
+	// naturally; runWithInteractive overrides the window from
+	// `--idle-timeout` after construction.
+	driver := sessiondriver.NewDriver(getRunLog, interactiveStepIdleTimeout)
+	driver.SetIdleErrLabel("interactive step")
 	c := &interactiveCore{
-		verifier:    orchestrator.NewContractVerifier(),
-		stepDoneCh:  make(chan struct{}, 64),
-		getRunLog:   getRunLog,
-		runCancel:   runCancel,
-		idleTimeout: interactiveStepIdleTimeout,
+		verifier:  orchestrator.NewContractVerifier(),
+		getRunLog: getRunLog,
+		runCancel: runCancel,
+		driver:    driver,
 	}
 	c.verifier.OnViolation = func(v orchestrator.ContractViolation) {
 		fmt.Fprintf(
@@ -224,9 +215,8 @@ func (c *interactiveCore) emitStepEnd(stage string, stepIdx int, tele *pipeline.
 func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 	// Every hook event counts as activity for the idle-timeout
 	// anchor — Pre/PostToolUse, UserPromptSubmit, Stop, all of it.
-	c.activityMu.Lock()
-	c.lastActivity = time.Now()
-	c.activityMu.Unlock()
+	// The anchor lives on the composed Driver (PLAN-19 D5).
+	c.driver.RecordActivity()
 	step := h.Step
 	if step == "" {
 		// Interactive mode: `ape notify` cannot populate Step (no
@@ -315,13 +305,10 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 		c.verifier.Consume(h.Payload)
 	}
 	if h.Event == ipc.HookStop {
-		// Non-blocking send; WaitStepDone is the only consumer and
-		// is expected to drain promptly. Buffer + drop avoids any
+		// Signal step-done through the Driver's channel; WaitStepDone
+		// is the only consumer. Non-blocking buffer + drop avoids any
 		// chance of blocking the bridge accept loop.
-		select {
-		case c.stepDoneCh <- struct{}{}:
-		default:
-		}
+		c.driver.SignalStepDone()
 	}
 }
 
@@ -370,21 +357,18 @@ func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 	c.subSessions = map[string]*subSessionCapture{}
 	c.stepStartedAt = time.Now()
 	c.transcriptMu.Unlock()
-	for {
-		select {
-		case <-c.stepDoneCh:
-		default:
-			c.verifier.BeginStep(orchestrator.StepContract{
-				Stage:   info.Stage,
-				StepIdx: info.StepIdx,
-				Skill:   info.Skill,
-				Agent:   info.Agent,
-				Model:   info.Model,
-				NoClear: info.NoClear,
-			})
-			return
-		}
-	}
+	// Drain any stale Stop signal so the next WaitStepDone blocks on
+	// this step, not a previous step's leftover (PLAN-19 D5: the
+	// step-done channel lives on the Driver).
+	c.driver.DrainStepDone()
+	c.verifier.BeginStep(orchestrator.StepContract{
+		Stage:   info.Stage,
+		StepIdx: info.StepIdx,
+		Skill:   info.Skill,
+		Agent:   info.Agent,
+		Model:   info.Model,
+		NoClear: info.NoClear,
+	})
 }
 
 // OnStepEnd releases the active contract so a late UserPromptSubmit
@@ -556,39 +540,15 @@ func byModelToPipeline(m map[string]cost.Totals) map[string]pipeline.ModelUsage 
 // elapses without any hook events. PLAN-6 / Phase E wires this into
 // RunOptions.
 //
-// The idle window resets on every FeedHook call, so a busy step
-// (heavy tool use, long apex-create-architecture branches) is never
-// killed for being slow — only for going silent. A truly hung claude
-// session stops emitting Pre/PostToolUse events and trips the timer
-// after interactiveStepIdleTimeout of quiet.
+// PLAN-19 D5: the wait loop (activity anchor + poll cadence + idle
+// backstop) is implemented once on the composed Driver; interactiveCore
+// delegates. The idle window resets on every FeedHook call (via
+// Driver.RecordActivity), so a busy step (heavy tool use, long
+// apex-create-architecture branches) is never killed for being slow —
+// only for going silent. A truly hung claude session stops emitting
+// Pre/PostToolUse events and trips the timer after the idle window.
 func (c *interactiveCore) WaitStepDone(ctx context.Context, _ string, _ int) error {
-	c.activityMu.Lock()
-	c.lastActivity = time.Now()
-	c.activityMu.Unlock()
-	// Poll at a quarter of the idle window when the caller configured
-	// one shorter than the default poll would resolve — a small
-	// `ape task --idle-timeout` must not gain 30s of tail latency.
-	poll := interactiveStepIdlePoll
-	if quarter := c.idleTimeout / idlePollDivisor; quarter < poll {
-		poll = max(quarter, time.Second)
-	}
-	ticker := time.NewTicker(poll)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-c.stepDoneCh:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			c.activityMu.Lock()
-			idle := time.Since(c.lastActivity)
-			c.activityMu.Unlock()
-			if idle > c.idleTimeout {
-				return fmt.Errorf("interactive step idle for %v without Stop hook", idle.Round(time.Second))
-			}
-		}
-	}
+	return c.driver.WaitStepDone(ctx)
 }
 
 // buildInteractivePrepend constructs the --strict-mcp-config /
@@ -649,9 +609,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	runCtx, runCancel := context.WithCancel(ctx)
 
 	core := newInteractiveCore(runCancel, getRunLog)
-	if cfg.idleTimeout > 0 {
-		core.idleTimeout = cfg.idleTimeout
-	}
+	core.driver.SetIdleTimeout(cfg.idleTimeout)
 
 	// PLAN-13: optional NATS eventing + transcript upload. Fire-and-forget —
 	// conn is nil when NATS is off or unreachable, and every publish/upload

@@ -59,6 +59,10 @@ const (
 type Driver struct {
 	getRunLog   func() *runlog.Writer
 	idleTimeout time.Duration
+	// idleErrLabel is the noun WaitStepDone uses in its idle-timeout
+	// error ("<label> idle for %v without Stop hook"). Defaults to
+	// "session"; the pipeline runner sets "interactive step".
+	idleErrLabel string
 
 	stepDoneCh chan struct{}
 
@@ -82,15 +86,62 @@ func NewDriver(getRunLog func() *runlog.Writer, idleTimeout time.Duration) *Driv
 		idleTimeout = DefaultIdleTimeout
 	}
 	return &Driver{
-		getRunLog:   getRunLog,
-		idleTimeout: idleTimeout,
-		stepDoneCh:  make(chan struct{}, 64),
-		subSessions: map[string]*SubCapture{},
+		getRunLog:    getRunLog,
+		idleTimeout:  idleTimeout,
+		idleErrLabel: "session",
+		stepDoneCh:   make(chan struct{}, 64),
+		subSessions:  map[string]*SubCapture{},
 	}
 }
 
 // SetFlushGrace overrides the Stop→scan flush window. Test seam.
 func (d *Driver) SetFlushGrace(g time.Duration) { d.flushGrace = g }
+
+// SetIdleTimeout overrides the idle-timeout window when t > 0. A value
+// ≤ 0 is ignored so the constructor's default (or the NewDriver
+// argument) stands.
+func (d *Driver) SetIdleTimeout(t time.Duration) {
+	if t > 0 {
+		d.idleTimeout = t
+	}
+}
+
+// SetIdleErrLabel customizes the noun WaitStepDone reports in its
+// idle-timeout error. Defaults to "session"; the pipeline runner sets
+// "interactive step" so a cancelled pipeline step reads naturally.
+func (d *Driver) SetIdleErrLabel(label string) { d.idleErrLabel = label }
+
+// RecordActivity resets the idle-timeout anchor to now. Every observed
+// hook event counts as activity, so a busy session is never killed for
+// being slow — only for going silent for a full idleTimeout window.
+func (d *Driver) RecordActivity() {
+	d.activityMu.Lock()
+	d.lastActivity = time.Now()
+	d.activityMu.Unlock()
+}
+
+// SignalStepDone posts a non-blocking step-done signal (the Stop hook).
+// WaitStepDone is the only consumer; the buffered channel + drop-on-full
+// avoids any chance of blocking the bridge accept loop.
+func (d *Driver) SignalStepDone() {
+	select {
+	case d.stepDoneCh <- struct{}{}:
+	default:
+	}
+}
+
+// DrainStepDone discards any buffered step-done signals so the next
+// WaitStepDone blocks on a fresh Stop, not a stale one left over from a
+// prior step.
+func (d *Driver) DrainStepDone() {
+	for {
+		select {
+		case <-d.stepDoneCh:
+		default:
+			return
+		}
+	}
+}
 
 // Begin marks the session's start: it anchors the sub-agent sweep's
 // mtime window and drains any stale Stop signals so WaitStepDone blocks
@@ -101,22 +152,14 @@ func (d *Driver) Begin() {
 	d.startedAt = now
 	d.subSessions = map[string]*SubCapture{}
 	d.mu.Unlock()
-	for {
-		select {
-		case <-d.stepDoneCh:
-		default:
-			return
-		}
-	}
+	d.DrainStepDone()
 }
 
 // FeedHook is the OnHook fan-out target: it records activity for the
 // idle-timeout anchor, captures the main/sub transcript paths, writes
 // the runlog hook entry, and signals step-done on Stop.
 func (d *Driver) FeedHook(h orchestrator.HookEvent) {
-	d.activityMu.Lock()
-	d.lastActivity = time.Now()
-	d.activityMu.Unlock()
+	d.RecordActivity()
 
 	env := parseHookEnvelope(h.Payload)
 	switch h.Event {
@@ -174,12 +217,7 @@ func (d *Driver) FeedHook(h orchestrator.HookEvent) {
 		})
 	}
 	if h.Event == ipc.HookStop {
-		// Non-blocking send; WaitStepDone is the only consumer. Buffer +
-		// drop avoids blocking the bridge accept loop.
-		select {
-		case d.stepDoneCh <- struct{}{}:
-		default:
-		}
+		d.SignalStepDone()
 	}
 }
 
@@ -213,9 +251,7 @@ func (d *Driver) FeedReply(content string) {
 // events. The idle window resets on every FeedHook call, so a busy
 // session is never killed for being slow — only for going silent.
 func (d *Driver) WaitStepDone(ctx context.Context) error {
-	d.activityMu.Lock()
-	d.lastActivity = time.Now()
-	d.activityMu.Unlock()
+	d.RecordActivity()
 	poll := idlePoll
 	if quarter := d.idleTimeout / idlePollDivisor; quarter < poll {
 		poll = max(quarter, time.Second)
@@ -233,7 +269,7 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 			idle := time.Since(d.lastActivity)
 			d.activityMu.Unlock()
 			if idle > d.idleTimeout {
-				return fmt.Errorf("session idle for %v without Stop hook", idle.Round(time.Second))
+				return fmt.Errorf("%s idle for %v without Stop hook", d.idleErrLabel, idle.Round(time.Second))
 			}
 		}
 	}
