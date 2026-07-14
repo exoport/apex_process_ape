@@ -22,8 +22,8 @@
 | PLAN-1  | Pipeline UX and framework setup separation              | done                  | 2026-05-10 |
 
 > **Status note (2026-07-12):** the proposed wave has largely landed on
-> `feat/plan-18-phase2-aped` (targets CHANGELOG v0.0.42). See the table above and
-> `../_output/plans-status.md` for what's implemented vs pending. The rationale
+> `feat/plan-18-phase2-aped` (targets CHANGELOG v0.0.42). See the table above
+> for what's implemented vs pending. The rationale
 > below is the original 2026-07-02 sequencing record.
 
 ## Proposed-wave dependency order (2026-07-02)
