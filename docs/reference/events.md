@@ -139,6 +139,11 @@ free (liveness + per-endpoint request/error counters). Errors are returned via
 micro `req.Error` with stable codes: `BUSY_EXCLUSIVE`, `BUSY_KEY`,
 `PROJECT_NOT_ALLOWED`, `VALIDATION`, `NOT_FOUND`.
 
+> The tables below summarise the request/reply shapes as they relate to the
+> subject taxonomy. The **full endpoint contract** — every field, the exact
+> field→argv mapping, and the error set per endpoint — is
+> [`ape service` API reference](service-api.md).
+
 Every request/reply body is versioned JSON (`"v":1`). Requests:
 
 | Endpoint | Request | Reply (or error) |
