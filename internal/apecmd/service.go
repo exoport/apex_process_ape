@@ -42,7 +42,7 @@ daemon registers a NATS micro service on
 and accepts JSON request/reply jobs: pipeline.run and task.run dispatch an
 ape child process (headless, PTY-only); job.status / job.list / job.stop
 manage them; status / health report the daemon. NATS-micro $SRV.PING /
-$SRV.INFO / $SRV.STATS discovery is available for free. command.run and
+$SRV.INFO / $SRV.STATS discovery is available for free. prompt.run and
 script.run are registered but rejected (VALIDATION) until their runners
 ship.
 

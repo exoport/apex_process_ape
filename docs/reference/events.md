@@ -72,10 +72,10 @@ versioned, additive-only contract otherwise.
 `ape.evt.<user>.<project>.<kind>.<id>.<event>` where:
 
 - `<project>` — sanitized project-root slug.
-- `<kind>` ∈ `pipeline | task | command | script | session | svc`.
+- `<kind>` ∈ `pipeline | task | prompt | script | session | svc`.
   `session` = standalone/agent-initiated reporting (PLAN-17); `svc` = daemon
   lifecycle (PLAN-14).
-- `<id>` — the run / command / session / job id. `APE_JOB_ID` (env) overrides the
+- `<id>` — the run / prompt / session / job id. `APE_JOB_ID` (env) overrides the
   run-generated id (the PLAN-14 daemon injects it so child events carry the job id).
 - `<event>` ∈ `run-start | stage-start | step-start | step-end | stage-end | hook |
   commit | error | run-end` (plus caller-chosen tokens under kind `session` and
@@ -133,7 +133,7 @@ half + this contract.
 `ape service` registers a NATS-micro service whose endpoint group is rooted at
 `ape.svc.<name>.<project-slug>` (`<name>` = `--name`, default `ape`;
 `<project-slug>` = the daemon's primary project). Endpoints:
-`pipeline.run | task.run | command.run | script.run | job.status | job.list |
+`pipeline.run | task.run | prompt.run | script.run | job.status | job.list |
 job.stop | status | health`. NATS-micro `$SRV.{PING,INFO,STATS}` discovery is
 free (liveness + per-endpoint request/error counters). Errors are returned via
 micro `req.Error` with stable codes: `BUSY_EXCLUSIVE`, `BUSY_KEY`,
@@ -145,7 +145,7 @@ Every request/reply body is versioned JSON (`"v":1`). Requests:
 | --- | --- | --- |
 | `pipeline.run` | `{project_root, pipeline, prompt?, from?, no_commit?, commit_allow_dirty?, upload_transcripts?, nonexclusive?, exclusivity_key?, submitted_by?}` | `{job_id, accepted:true}` · `BUSY_EXCLUSIVE`/`BUSY_KEY`/`PROJECT_NOT_ALLOWED`/`VALIDATION` |
 | `task.run` | `{project_root, skill, agent?, model?, args?, prompt?, prompt_flag?, task_commit?, no_commit?, commit_allow_dirty?, upload_transcripts?, nonexclusive?, exclusivity_key?, submitted_by?}` | same |
-| `command.run` / `script.run` | *(registered so `$SRV.INFO` matches this contract)* | `VALIDATION` — no backing runner ships yet (`ape command` / PLAN-15 `ape script`) |
+| `prompt.run` / `script.run` | *(registered so `$SRV.INFO` matches this contract)* | `VALIDATION` — no backing runner ships yet (`ape prompt` / PLAN-15 `ape script`) |
 | `job.status` | `{job_id}` | `{job_id, kind, state, started_at, pid?, exclusivity_key, exclusive, submitted_by?, log_path?, exit_code?}` · `NOT_FOUND` |
 | `job.list` | `{}` | `{jobs:[…]}` |
 | `job.stop` | `{job_id}` | `{stopped:bool}` (SIGTERMs the child's process group; the job's terminal `state` becomes `stopped`) · `NOT_FOUND` |
@@ -230,7 +230,7 @@ traceability independent of the subject:
 ### `ape.evt` per-event payload fields (PLAN-13, implemented)
 
 Every `ape.evt` payload carries the common envelope above plus `"event"` (the
-`<event>` token) and `"run_id"` (the run/command/job id — the `<id>` segment).
+`<event>` token) and `"run_id"` (the run/prompt/job id — the `<id>` segment).
 Per-event additions:
 
 | `event` | additional fields |

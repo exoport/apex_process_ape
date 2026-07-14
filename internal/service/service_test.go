@@ -104,7 +104,7 @@ func TestDiscovery(t *testing.T) {
 	for _, e := range info.Endpoints {
 		subjects[e.Subject] = true
 	}
-	for _, want := range []string{"pipeline.run", "task.run", "command.run", "script.run", "job.status", "job.list", "job.stop", "status", "health"} {
+	for _, want := range []string{"pipeline.run", "task.run", "prompt.run", "script.run", "job.status", "job.list", "job.stop", "status", "health"} {
 		if !subjects[r.base+"."+want] {
 			t.Errorf("INFO missing endpoint subject %s.%s", r.base, want)
 		}
@@ -132,7 +132,7 @@ func TestRejectionCodes(t *testing.T) {
 		{"missing pipeline name", "pipeline.run", RunRequest{ProjectRoot: root}, CodeValidation},
 		{"missing skill", "task.run", RunRequest{ProjectRoot: root}, CodeValidation},
 		{"project not allowed", "pipeline.run", RunRequest{ProjectRoot: "/not/allowed", Pipeline: "p"}, CodeProjectNotAllowed},
-		{"command unavailable", "command.run", RunRequest{ProjectRoot: root, Prompt: "hi"}, CodeValidation},
+		{"prompt unavailable", "prompt.run", RunRequest{ProjectRoot: root, Prompt: "hi"}, CodeValidation},
 		{"script unavailable", "script.run", RunRequest{ProjectRoot: root, ScriptPath: "x.star"}, CodeValidation},
 	}
 	for _, tc := range tests {

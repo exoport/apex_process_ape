@@ -160,5 +160,5 @@ was reversed to unblock the eval; see PLAN-11's notes).
 - Delete the stub commands instead of hiding? (Recommend delete; `sync`'s
   intent is preserved in the framework repo's roadmap.)
 - Should `ape chat` also move from inherited-stdio to `internal/repl` for
-  uniformity? Not required here; PLAN-12 (`ape command`) will share its
+  uniformity? Not required here; PLAN-12 (`ape prompt`) will share its
   scaffold either way.

@@ -19,7 +19,7 @@ var (
 	// otherwise malformed.
 	ErrValidation = errors.New("service: invalid request")
 	// ErrKindUnavailable: the endpoint is registered but its backing `ape`
-	// runner is not shipped on this build (command.run, script.run).
+	// runner is not shipped on this build (prompt.run, script.run).
 	ErrKindUnavailable = errors.New("service: job kind not available on this build")
 )
 
@@ -29,9 +29,9 @@ var (
 // elements, never concatenated into a shell string — so a hostile field
 // value cannot inject extra flags or shell metacharacters.
 //
-// command.run and script.run return ErrKindUnavailable: their endpoints are
+// prompt.run and script.run return ErrKindUnavailable: their endpoints are
 // registered so the advertised $SRV contract matches the frozen taxonomy,
-// but no `ape command` / `ape script` runner exists yet.
+// but no `ape prompt` / `ape script` runner exists yet.
 func BuildArgs(kind Kind, req RunRequest) ([]string, error) {
 	if strings.TrimSpace(req.ProjectRoot) == "" {
 		return nil, fmt.Errorf("%w: project_root is required", ErrValidation)
@@ -41,8 +41,8 @@ func BuildArgs(kind Kind, req RunRequest) ([]string, error) {
 		return buildPipelineArgs(req)
 	case KindTask:
 		return buildTaskArgs(req)
-	case KindCommand:
-		return nil, fmt.Errorf("%w: command jobs are not available on this build (no backing `ape command` runner yet)", ErrKindUnavailable)
+	case KindPrompt:
+		return nil, fmt.Errorf("%w: prompt jobs are not available on this build (no backing `ape prompt` runner yet)", ErrKindUnavailable)
 	case KindScript:
 		return nil, fmt.Errorf("%w: script jobs are not available on this build (PLAN-15 `ape script` not shipped)", ErrKindUnavailable)
 	default:

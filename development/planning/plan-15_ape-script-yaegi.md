@@ -7,7 +7,7 @@ tags:
   - scripting
   - yaegi
   - orchestration
-summary: New `ape script <file.go>` — run arbitrary Go code in-process via the yaegi interpreter (github.com/traefik/yaegi) with a predefined ape function library injected. Scripts orchestrate ape's primitives deterministically — RunPipeline / RunTask / RunCommand (all PTY-backed, calling the same internal runner the CLI uses), plus logging, args, cost scanning, event publishing, and blob upload — turning multi-run workflows (loops, conditionals, fan-out across component repos) into version-controlled .go files instead of shell scripts around the CLI. Supports an optional `--sandbox` mode that restricts the interpreter to yaegi's sandboxed stdlib symbol set (no os/exec, os.Exit, syscall, unsafe) while keeping the apescript orchestration surface. Exposed through the service as the `script.run` job kind with the same keyed-exclusivity admission; the service can force sandbox mode for remotely submitted scripts.
+summary: New `ape script <file.go>` — run arbitrary Go code in-process via the yaegi interpreter (github.com/traefik/yaegi) with a predefined ape function library injected. Scripts orchestrate ape's primitives deterministically — RunPipeline / RunTask / RunPrompt (all PTY-backed, calling the same internal runner the CLI uses), plus logging, args, cost scanning, event publishing, and blob upload — turning multi-run workflows (loops, conditionals, fan-out across component repos) into version-controlled .go files instead of shell scripts around the CLI. Supports an optional `--sandbox` mode that restricts the interpreter to yaegi's sandboxed stdlib symbol set (no os/exec, os.Exit, syscall, unsafe) while keeping the apescript orchestration surface. Exposed through the service as the `script.run` job kind with the same keyed-exclusivity admission; the service can force sandbox mode for remotely submitted scripts.
 origin:
   - 2026-07-02 user request (added mid-planning) — "another command 'script' that we are able to run yaegi Go code with a library of predefined functions included in ape, this is for running any arbitrary code."
   - 2026-07-02 user addition — "scripts should support sandbox as an option": default stays unrestricted (arbitrary code), `--sandbox` opts in to the restricted interpreter.
@@ -85,7 +85,7 @@ standard yaegi embedding pattern). v1 surface (assumptions; trim in review):
 // Orchestration — all PTY-backed, thin facades over the internal runner:
 func RunPipeline(ctx, PipelineOpts) (RunResult, error) // name, prompt, from, noCommit, cwd…
 func RunTask(ctx, TaskOpts) (RunResult, error)         // PLAN-11 semantics
-func RunCommand(ctx, CommandOpts) (RunResult, error)   // PLAN-12 semantics
+func RunPrompt(ctx, PromptOpts) (RunResult, error)     // PLAN-12 semantics
 // RunResult: {RunID, ManifestPath, Status, CostUSD, PerModel, CommitSHAs, Duration}
 
 // Introspection:

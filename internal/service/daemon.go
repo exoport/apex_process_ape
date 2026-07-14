@@ -142,7 +142,7 @@ func (d *Daemon) Register(svc micro.Service) error {
 	}{
 		{"pipeline-run", "pipeline.run", d.runHandler(KindPipeline)},
 		{"task-run", "task.run", d.runHandler(KindTask)},
-		{"command-run", "command.run", d.runHandler(KindCommand)},
+		{"prompt-run", "prompt.run", d.runHandler(KindPrompt)},
 		{"script-run", "script.run", d.runHandler(KindScript)},
 		{"job-status", "job.status", d.handleJobStatus},
 		{"job-list", "job.list", d.handleJobList},
@@ -180,7 +180,7 @@ func (d *Daemon) handleRun(kind Kind, req micro.Request) {
 		return
 	}
 	// Shape + kind availability (catches missing skill/pipeline and the
-	// not-shipped command.run / script.run kinds → VALIDATION).
+	// not-shipped prompt.run / script.run kinds → VALIDATION).
 	if _, err := BuildArgs(kind, rr); err != nil {
 		_ = req.Error(CodeValidation, err.Error(), nil)
 		return

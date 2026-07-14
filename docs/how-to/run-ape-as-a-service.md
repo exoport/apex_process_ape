@@ -91,8 +91,8 @@ nats sub 'ape.evt.*.main-project.svc.>'         # daemon: job-accepted/job-rejec
 nats sub 'ape.evt.*.main-project.*.>'           # + the child's run/stage/step progress
 ```
 
-`command.run` and `script.run` are registered (so `$SRV.INFO` matches the frozen
-contract) but rejected with `VALIDATION` — their backing runners (`ape command`,
+`prompt.run` and `script.run` are registered (so `$SRV.INFO` matches the frozen
+contract) but rejected with `VALIDATION` — their backing runners (`ape prompt`,
 PLAN-15 `ape script`) don't ship yet.
 
 ## Exclusivity: what runs alongside what

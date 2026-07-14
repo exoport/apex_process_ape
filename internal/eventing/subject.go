@@ -18,7 +18,7 @@ type Kind string
 const (
 	KindPipeline Kind = "pipeline"
 	KindTask     Kind = "task"
-	KindCommand  Kind = "command"
+	KindPrompt   Kind = "prompt"
 	KindScript   Kind = "script"
 	KindSession  Kind = "session" // standalone / agent-initiated reporting (PLAN-17)
 	KindSvc      Kind = "svc"     // daemon lifecycle (PLAN-14)

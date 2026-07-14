@@ -55,7 +55,7 @@ running several daemons on one cluster. Endpoint group rooted at
 | --- | --- | --- |
 | `pipeline.run` | `{project_root, pipeline, prompt?, from?, no_commit?, commit_allow_dirty?, nonexclusive?, exclusivity_key?, upload_transcripts?}` | `{job_id, accepted:true}` or busy/validation error |
 | `task.run` | `{project_root, skill, agent?, model?, args?, prompt?, prompt_flag?, task_commit?, no_commit?, nonexclusive?, exclusivity_key?, …}` | same |
-| `command.run` | `{project_root, prompt? \| handoff?, agent?, model?, workflow?, nonexclusive?, exclusivity_key?, …}` | same |
+| `prompt.run` | `{project_root, prompt? \| handoff?, agent?, model?, workflow?, nonexclusive?, exclusivity_key?, …}` | same |
 | `script.run` | `{project_root, script_path \| script_source, args?, nonexclusive?, exclusivity_key?}` (PLAN-15; see security note) | same |
 | `job.status` | `{job_id}` | `{job_id, kind, state: running\|done\|failed\|stopped, started_at, pid, exclusivity_key, exclusive, manifest_path?, exit_code?}` |
 | `job.list` | `{}` | `{jobs: […]}` |

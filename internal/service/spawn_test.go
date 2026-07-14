@@ -81,8 +81,8 @@ func TestBuildArgs(t *testing.T) {
 			wantErr: ErrValidation,
 		},
 		{
-			name:    "command kind unavailable",
-			kind:    KindCommand,
+			name:    "prompt kind unavailable",
+			kind:    KindPrompt,
 			req:     RunRequest{ProjectRoot: "/p", Prompt: "hi"},
 			wantErr: ErrKindUnavailable,
 		},

@@ -8,7 +8,7 @@
 | PLAN-15 | `ape script` — yaegi orchestration scripts              | proposed              | 2026-07-02 |
 | PLAN-14 | `ape service` — NATS micro job daemon                   | partially-implemented | 2026-07-02 |
 | PLAN-13 | NATS progress events + transcript blobs                 | done                  | 2026-07-02 |
-| PLAN-12 | `ape command` — prompt/handoff claude session           | proposed              | 2026-07-02 |
+| PLAN-12 | `ape prompt` — prompt/handoff claude session            | proposed              | 2026-07-02 |
 | PLAN-11 | `ape task` — single-skill runs without YAML             | done                  | 2026-07-02 |
 | PLAN-10 | Telemetry v2 — per-model cost, timestamps, subagents    | done                  | 2026-07-02 |
 | PLAN-9  | CLI/docs hygiene + PTY-only consolidation               | implemented           | 2026-07-02 |

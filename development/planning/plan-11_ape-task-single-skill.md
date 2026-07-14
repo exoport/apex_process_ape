@@ -39,7 +39,7 @@ authoring required.
   modal false-triggers `WaitForReady`, turning first runs in untrusted dirs
   into 1h idle stalls — pipelines included.
 - It is the smallest new command and it forges the seam (exported single-step
-  Spec) that `ape command` (PLAN-12), the service (PLAN-14), and scripts
+  Spec) that `ape prompt` (PLAN-12), the service (PLAN-14), and scripts
   (PLAN-15) all build on.
 - It will become the natural "hello world" for the framework (see the
   tutorials note in the docs proposal).
@@ -47,7 +47,7 @@ authoring required.
 ## Non-goals
 
 - No multi-step chains on the CLI (that's what pipeline YAML is for).
-- No raw-prompt sessions without a skill (`ape command`, PLAN-12).
+- No raw-prompt sessions without a skill (`ape prompt`, PLAN-12).
 - No programmatic exec (removed by PLAN-9).
 
 ## Design

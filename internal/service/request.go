@@ -37,7 +37,7 @@ type Kind string
 const (
 	KindPipeline Kind = "pipeline"
 	KindTask     Kind = "task"
-	KindCommand  Kind = "command"
+	KindPrompt   Kind = "prompt"
 	KindScript   Kind = "script"
 )
 
@@ -69,7 +69,7 @@ type RunRequest struct {
 	// the daemon derives "ape:task/<skill>").
 	TaskCommit *string `json:"task_commit,omitempty"`
 
-	// Command job selectors (command.run — reserved; see the endpoint note).
+	// Prompt job selectors (prompt.run — reserved; see the endpoint note).
 	Handoff  string `json:"handoff,omitempty"`
 	Workflow string `json:"workflow,omitempty"`
 
