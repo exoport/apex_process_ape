@@ -31,10 +31,20 @@ type testRig struct {
 // the (fake) child binary, and returns a separate client connection.
 func startRig(t *testing.T, apeBin string) *testRig {
 	t.Helper()
+	return startRigWith(t, apeBin, nil)
+}
+
+// startRigWith is startRig with a hook to adjust the daemon config (e.g. flip
+// the D5 script gates) before it is validated and registered.
+func startRigWith(t *testing.T, apeBin string, mutate func(*Config)) *testRig {
+	t.Helper()
 	url := natstest.RunServer(t)
 
 	root := gitRepo(t, t.TempDir())
 	cfg := &Config{ProjectRoot: root, Allow: []string{root}}
+	if mutate != nil {
+		mutate(cfg)
+	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("config: %v", err)
 	}
@@ -132,8 +142,10 @@ func TestRejectionCodes(t *testing.T) {
 		{"missing pipeline name", "pipeline.run", RunRequest{ProjectRoot: root}, CodeValidation},
 		{"missing skill", "task.run", RunRequest{ProjectRoot: root}, CodeValidation},
 		{"project not allowed", "pipeline.run", RunRequest{ProjectRoot: "/not/allowed", Pipeline: "p"}, CodeProjectNotAllowed},
-		{"prompt unavailable", "prompt.run", RunRequest{ProjectRoot: root, Prompt: "hi"}, CodeValidation},
-		{"script unavailable", "script.run", RunRequest{ProjectRoot: root, ScriptPath: "x.star"}, CodeValidation},
+		{"prompt missing selector", "prompt.run", RunRequest{ProjectRoot: root}, CodeValidation},
+		{"prompt both selectors", "prompt.run", RunRequest{ProjectRoot: root, Prompt: "hi", Handoff: "h.md"}, CodeValidation},
+		{"script missing selector", "script.run", RunRequest{ProjectRoot: root}, CodeValidation},
+		{"script source disabled by default", "script.run", RunRequest{ProjectRoot: root, ScriptSource: "package main\n"}, CodeValidation},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -319,6 +331,115 @@ func TestGracefulDrainPrimitives(t *testing.T) {
 	}
 	if info, _ := r.d.reg.Get(jobID); info.State != StateDone {
 		t.Fatalf("drained job state = %q, want done", info.State)
+	}
+}
+
+// echoArgsAndStdin is a fake-ape body that records its argv and stdin to the
+// per-job log, then exits 0. A nil child stdin (pipeline/task/prompt) reads
+// EOF immediately, so `cat` never blocks.
+const echoArgsAndStdin = `echo "ARGS=$*"
+echo "STDIN=$(cat)"
+exit 0
+`
+
+func readJobLog(t *testing.T, r *testRig, jobID string) string {
+	t.Helper()
+	logPath := filepath.Join(r.cfg.ProjectRoot, "_output", "ape", "service", jobID+".log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read job log: %v", err)
+	}
+	return string(data)
+}
+
+// TestPromptRunAccepted proves prompt.run now spawns a real `ape prompt`
+// child: the job is accepted, runs, transitions to done, and the child sees
+// the strict positional-prompt argv.
+func TestPromptRunAccepted(t *testing.T) {
+	r := startRig(t, fakeApe(t, echoArgsAndStdin))
+	root := r.cfg.ProjectRoot
+
+	jobID := acceptedJobID(t, r, "prompt.run", RunRequest{
+		ProjectRoot: root, Prompt: "add a CHANGELOG entry", Agent: "apex-agent-dev", Workflow: true,
+	})
+	info := pollJobTerminal(t, r, jobID)
+	if info.State != StateDone || info.Kind != KindPrompt {
+		t.Fatalf("job = %+v, want done prompt", info)
+	}
+	log := readJobLog(t, r, jobID)
+	want := "ARGS=prompt add a CHANGELOG entry --quiet --cwd " + root + " --agent apex-agent-dev --workflow"
+	if !strings.Contains(log, want) {
+		t.Fatalf("prompt argv mismatch\n want substring: %q\n got log:\n%s", want, log)
+	}
+}
+
+// TestScriptRunSourceAccepted proves script.run accepts an inline
+// script_source when allow_script_source is on, delivering the source on the
+// child's stdin (never on the argv).
+func TestScriptRunSourceAccepted(t *testing.T) {
+	r := startRigWith(t, fakeApe(t, echoArgsAndStdin), func(c *Config) { c.AllowScriptSource = true })
+	root := r.cfg.ProjectRoot
+
+	const src = "package main\n// nightly\n"
+	jobID := acceptedJobID(t, r, "script.run", RunRequest{ProjectRoot: root, ScriptSource: src})
+	info := pollJobTerminal(t, r, jobID)
+	if info.State != StateDone || info.Kind != KindScript {
+		t.Fatalf("job = %+v, want done script", info)
+	}
+	log := readJobLog(t, r, jobID)
+	if !strings.Contains(log, "ARGS=script - --quiet --cwd "+root) {
+		t.Fatalf("script argv mismatch, got log:\n%s", log)
+	}
+	if !strings.Contains(log, "STDIN=package main") {
+		t.Fatalf("script source not delivered on stdin, got log:\n%s", log)
+	}
+}
+
+// TestScriptRunForceSandbox proves force_script_sandbox injects --sandbox onto
+// every script job.
+func TestScriptRunForceSandbox(t *testing.T) {
+	r := startRigWith(t, fakeApe(t, echoArgsAndStdin), func(c *Config) {
+		c.AllowScriptSource = true
+		c.ForceScriptSandbox = true
+	})
+	root := r.cfg.ProjectRoot
+
+	jobID := acceptedJobID(t, r, "script.run", RunRequest{ProjectRoot: root, ScriptSource: "package main\n"})
+	pollJobTerminal(t, r, jobID)
+	log := readJobLog(t, r, jobID)
+	if !strings.Contains(log, "ARGS=script - --quiet --cwd "+root+" --sandbox") {
+		t.Fatalf("force_script_sandbox did not inject --sandbox, got log:\n%s", log)
+	}
+}
+
+// TestScriptRunPathAllowlist proves a script_path inside an allowlisted root
+// is accepted while one outside every root is rejected VALIDATION — the D2
+// filesystem boundary, enforced even with allow_script_source off.
+func TestScriptRunPathAllowlist(t *testing.T) {
+	r := startRig(t, fakeApe(t, echoArgsAndStdin))
+	root := r.cfg.ProjectRoot
+
+	script := filepath.Join(root, "ops", "nightly.go")
+	if err := os.MkdirAll(filepath.Dir(script), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	jobID := acceptedJobID(t, r, "script.run", RunRequest{ProjectRoot: root, ScriptPath: script})
+	info := pollJobTerminal(t, r, jobID)
+	if info.State != StateDone {
+		t.Fatalf("in-root script_path state = %q, want done", info.State)
+	}
+
+	// A real file outside every allowlisted root is rejected.
+	outside := filepath.Join(t.TempDir(), "evil.go")
+	if err := os.WriteFile(outside, []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if m := r.req(t, "script.run", RunRequest{ProjectRoot: root, ScriptPath: outside}); errCode(m) != CodeValidation {
+		t.Fatalf("outside-root script_path: code = %q, want VALIDATION", errCode(m))
 	}
 }
 

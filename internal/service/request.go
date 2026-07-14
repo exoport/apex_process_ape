@@ -69,13 +69,20 @@ type RunRequest struct {
 	// the daemon derives "ape:task/<skill>").
 	TaskCommit *string `json:"task_commit,omitempty"`
 
-	// Prompt job selectors (prompt.run — reserved; see the endpoint note).
+	// Prompt job selectors + options (prompt.run). Exactly one of Prompt
+	// (the shared field below) or Handoff must be set. Workflow appends the
+	// "run this via a workflow" directive (ape prompt --workflow).
 	Handoff  string `json:"handoff,omitempty"`
-	Workflow string `json:"workflow,omitempty"`
+	Workflow bool   `json:"workflow,omitempty"`
 
-	// Script job selectors (script.run — reserved; see D5 + the endpoint note).
-	ScriptPath   string `json:"script_path,omitempty"`
-	ScriptSource string `json:"script_source,omitempty"`
+	// Script job selectors + options (script.run — see D5). Exactly one of
+	// ScriptPath (must resolve to a file inside an allowlisted root) or
+	// ScriptSource (piped to `ape script -` stdin; gated by
+	// allow_script_source) must be set. ScriptArgs are exposed to the script
+	// as apescript.Args() (after the `--` separator).
+	ScriptPath   string   `json:"script_path,omitempty"`
+	ScriptSource string   `json:"script_source,omitempty"`
+	ScriptArgs   []string `json:"script_args,omitempty"`
 
 	// Fields shared across kinds.
 	Agent             string `json:"agent,omitempty"`

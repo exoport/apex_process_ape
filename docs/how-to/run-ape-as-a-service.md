@@ -70,6 +70,18 @@ nats req ape.svc.ape.main-project.task.run \
 
 nats req ape.svc.ape.main-project.pipeline.run \
   '{"project_root":"/abs/path/main-project","pipeline":"design","prompt":"a greeter CLI"}'
+
+# prompt.run dispatches a headless `ape prompt` session. Provide EXACTLY ONE
+# of "prompt" (positional text) or "handoff" (a handoff document); optional
+# "agent", "model", and "workflow":true.
+nats req ape.svc.ape.main-project.prompt.run \
+  '{"project_root":"/abs/path/main-project","prompt":"add a CHANGELOG entry","agent":"apex-agent-dev","workflow":true}'
+
+# script.run dispatches `ape script`. Provide EXACTLY ONE of "script_path"
+# (a file inside an allowlisted root) or "script_source" (inline Go, gated —
+# see below); "script_args" are exposed to the script as apescript.Args().
+nats req ape.svc.ape.main-project.script.run \
+  '{"project_root":"/abs/path/main-project","script_path":"ops/nightly.go","script_args":["--target","./component-a"]}'
 ```
 
 Manage them:
@@ -91,9 +103,39 @@ nats sub 'ape.evt.*.main-project.svc.>'         # daemon: job-accepted/job-rejec
 nats sub 'ape.evt.*.main-project.*.>'           # + the child's run/stage/step progress
 ```
 
-`prompt.run` and `script.run` are registered (so `$SRV.INFO` matches the frozen
-contract) but rejected with `VALIDATION` — their backing runners (`ape prompt`,
-PLAN-15 `ape script`) don't ship yet.
+All four `*.run` kinds — `pipeline.run`, `task.run`, `prompt.run`, `script.run` —
+spawn a real headless `ape` child. `prompt.run` requires exactly one of `prompt`
+or `handoff`; `script.run` requires exactly one of `script_path` or
+`script_source` and is subject to the script gates below.
+
+## Script jobs are code execution — gate them (D5)
+
+`script.run` runs a Go orchestration script on the daemon host. Two
+`service.yaml` flags (both default `false`) bound the blast radius:
+
+```yaml
+project_root: /abs/path/main-project
+allow:
+  - /abs/path/main-project
+allow_script_source: false   # accept inline `script_source` (arbitrary code) — off by default
+force_script_sandbox: false  # force `ape script --sandbox` on every script job
+```
+
+- **`script_path`** is always allowed, but the path (relative paths resolve
+  against `project_root`) must resolve to an existing file **inside an
+  allowlisted root** — anything outside is rejected `VALIDATION`.
+- **`script_source`** (inline Go piped to `ape script -` on stdin) is arbitrary
+  code execution on the daemon host. It is rejected `VALIDATION` unless
+  `allow_script_source: true`.
+- **`force_script_sandbox: true`** forces PLAN-15's interpreter-level `--sandbox`
+  (blocks `os/exec`, `os.Exit`, `syscall`, `unsafe`; the apescript orchestration
+  functions stay available) onto every script job. Setting it without
+  `allow_script_source` is a config error. **Recommended whenever
+  `allow_script_source` is enabled.**
+
+`ape prompt` publishes no PLAN-13 progress events of its own, so a `prompt.run`
+job is observable only through the daemon's `svc` lifecycle events and
+`job.status`; `pipeline`/`task`/`script` children publish their own progress.
 
 ## Exclusivity: what runs alongside what
 

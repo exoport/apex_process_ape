@@ -12,16 +12,15 @@ import (
 	"time"
 )
 
-// Argv-builder sentinel errors. The daemon maps both to CodeValidation
-// (the error text carries the specific reason).
-var (
-	// ErrValidation: the request is missing a required field or is
-	// otherwise malformed.
-	ErrValidation = errors.New("service: invalid request")
-	// ErrKindUnavailable: the endpoint is registered but its backing `ape`
-	// runner is not shipped on this build (prompt.run, script.run).
-	ErrKindUnavailable = errors.New("service: job kind not available on this build")
-)
+// ErrValidation: the request is missing a required field, names a path
+// outside the allowlist, uses a disabled feature, or is otherwise
+// malformed. The daemon maps it to CodeValidation (the error text carries
+// the specific reason).
+var ErrValidation = errors.New("service: invalid request")
+
+// scriptStdinArg is the `ape script` positional that switches it to read
+// the Go source from stdin (mirrors apecmd.scriptStdinArg).
+const scriptStdinArg = "-"
 
 // BuildArgs maps a validated request to the `ape` child-process argv for
 // the given kind (the subcommand + flags, without the leading binary). The
@@ -29,10 +28,10 @@ var (
 // elements, never concatenated into a shell string — so a hostile field
 // value cannot inject extra flags or shell metacharacters.
 //
-// prompt.run and script.run return ErrKindUnavailable: their endpoints are
-// registered so the advertised $SRV contract matches the frozen taxonomy,
-// but no `ape prompt` / `ape script` runner exists yet.
-func BuildArgs(kind Kind, req RunRequest) ([]string, error) {
+// cfg is consulted only by the script builder (allowlist membership of
+// script_path plus the allow_script_source / force_script_sandbox gates);
+// it may be nil for the other kinds.
+func BuildArgs(kind Kind, req RunRequest, cfg *Config) ([]string, error) {
 	if strings.TrimSpace(req.ProjectRoot) == "" {
 		return nil, fmt.Errorf("%w: project_root is required", ErrValidation)
 	}
@@ -42,12 +41,123 @@ func BuildArgs(kind Kind, req RunRequest) ([]string, error) {
 	case KindTask:
 		return buildTaskArgs(req)
 	case KindPrompt:
-		return nil, fmt.Errorf("%w: prompt jobs are not available on this build (no backing `ape prompt` runner yet)", ErrKindUnavailable)
+		return buildPromptArgs(req)
 	case KindScript:
-		return nil, fmt.Errorf("%w: script jobs are not available on this build (PLAN-15 `ape script` not shipped)", ErrKindUnavailable)
+		return buildScriptArgs(req, cfg)
 	default:
 		return nil, fmt.Errorf("%w: unknown job kind %q", ErrValidation, kind)
 	}
+}
+
+// buildPromptArgs maps a prompt.run request to `ape prompt` argv: exactly
+// one of the positional prompt (req.Prompt) or --handoff (req.Handoff),
+// plus optional --agent/--model/--workflow, always headless via --quiet.
+func buildPromptArgs(req RunRequest) ([]string, error) {
+	hasPrompt := strings.TrimSpace(req.Prompt) != ""
+	hasHandoff := strings.TrimSpace(req.Handoff) != ""
+	if hasPrompt == hasHandoff {
+		return nil, fmt.Errorf("%w: prompt.run requires exactly one of prompt or handoff", ErrValidation)
+	}
+	var args []string
+	if hasPrompt {
+		// Positional prompt precedes the flags (ape prompt [text]).
+		args = []string{"prompt", req.Prompt, "--quiet", "--cwd", req.ProjectRoot}
+	} else {
+		args = []string{"prompt", "--handoff", req.Handoff, "--quiet", "--cwd", req.ProjectRoot}
+	}
+	if req.Agent != "" {
+		args = append(args, "--agent", req.Agent)
+	}
+	if req.Model != "" {
+		args = append(args, "--model", req.Model)
+	}
+	if req.Workflow {
+		args = append(args, "--workflow")
+	}
+	return args, nil
+}
+
+// buildScriptArgs maps a script.run request to `ape script` argv. Exactly
+// one of script_path or script_source must be set:
+//
+//   - script_path must resolve (absolute, or relative to project_root) to an
+//     existing file inside an allowlisted root — the D2 filesystem boundary.
+//   - script_source is arbitrary code on the daemon host (D5): it is gated by
+//     cfg.AllowScriptSource and delivered via `ape script -` stdin (Spawn
+//     wires the source onto the child's stdin), never onto the argv.
+//
+// force_script_sandbox forces PLAN-15's interpreter-level --sandbox onto
+// every script job.
+func buildScriptArgs(req RunRequest, cfg *Config) ([]string, error) {
+	hasPath := strings.TrimSpace(req.ScriptPath) != ""
+	hasSource := strings.TrimSpace(req.ScriptSource) != ""
+	if hasPath == hasSource {
+		return nil, fmt.Errorf("%w: script.run requires exactly one of script_path or script_source", ErrValidation)
+	}
+
+	positional := scriptStdinArg
+	if hasPath {
+		p, err := resolveAllowedScriptPath(req, cfg)
+		if err != nil {
+			return nil, err
+		}
+		positional = p
+	} else if cfg == nil || !cfg.AllowScriptSource {
+		// D5 gate: inline source is disabled unless the operator opts in.
+		return nil, fmt.Errorf("%w: script_source is disabled on this daemon (set allow_script_source: true in service.yaml)", ErrValidation)
+	}
+
+	args := []string{"script", positional, "--quiet", "--cwd", req.ProjectRoot}
+	if cfg != nil && cfg.ForceScriptSandbox {
+		args = append(args, "--sandbox")
+	}
+	if len(req.ScriptArgs) > 0 {
+		args = append(args, "--")
+		args = append(args, req.ScriptArgs...)
+	}
+	return args, nil
+}
+
+// resolveAllowedScriptPath resolves req.ScriptPath (absolute, or relative to
+// project_root), verifies it is an existing file inside an allowlisted root,
+// and returns the cleaned path. Any failure is an ErrValidation.
+func resolveAllowedScriptPath(req RunRequest, cfg *Config) (string, error) {
+	if cfg == nil {
+		return "", fmt.Errorf("%w: script.run requires a service config", ErrValidation)
+	}
+	p := req.ScriptPath
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(req.ProjectRoot, p)
+	}
+	p = filepath.Clean(p)
+	info, err := os.Stat(p)
+	if err != nil || info.IsDir() {
+		return "", fmt.Errorf("%w: script_path %q does not resolve to a file", ErrValidation, req.ScriptPath)
+	}
+	if !underAnyRoot(cfg.Allow, p) {
+		return "", fmt.Errorf("%w: script_path %q resolves outside every allowlisted root", ErrValidation, req.ScriptPath)
+	}
+	return p, nil
+}
+
+// underAnyRoot reports whether p (already cleaned) is one of, or nested
+// inside, any of the cleaned allowlist roots.
+func underAnyRoot(roots []string, p string) bool {
+	for _, root := range roots {
+		root = filepath.Clean(root)
+		if p == root {
+			return true
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			continue
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func buildPipelineArgs(req RunRequest) ([]string, error) {
@@ -125,12 +235,14 @@ type Spawner struct {
 	apeBin       string
 	natsURL      string
 	natsCreds    string
-	eventsPrefix string // "" → child uses its default (ape.evt)
+	eventsPrefix string  // "" → child uses its default (ape.evt)
+	cfg          *Config // consulted by the script argv builder (allowlist + D5 gates)
 }
 
 // NewSpawner builds a Spawner. A blank apeBin falls back to the running
-// executable.
-func NewSpawner(apeBin, natsURL, natsCreds, eventsPrefix string) (*Spawner, error) {
+// executable. cfg supplies the allowlist and script gates to BuildArgs (may
+// be nil when only pipeline/task/prompt jobs are spawned, e.g. in tests).
+func NewSpawner(apeBin, natsURL, natsCreds, eventsPrefix string, cfg *Config) (*Spawner, error) {
 	if strings.TrimSpace(apeBin) == "" {
 		exe, err := os.Executable()
 		if err != nil {
@@ -138,7 +250,7 @@ func NewSpawner(apeBin, natsURL, natsCreds, eventsPrefix string) (*Spawner, erro
 		}
 		apeBin = exe
 	}
-	return &Spawner{apeBin: apeBin, natsURL: natsURL, natsCreds: natsCreds, eventsPrefix: eventsPrefix}, nil
+	return &Spawner{apeBin: apeBin, natsURL: natsURL, natsCreds: natsCreds, eventsPrefix: eventsPrefix, cfg: cfg}, nil
 }
 
 // Spawn assembles the argv, opens the per-job log, and starts the child in
@@ -151,11 +263,14 @@ func NewSpawner(apeBin, natsURL, natsCreds, eventsPrefix string) (*Spawner, erro
 // request handler, and the daemon controls its lifetime explicitly via
 // terminateGroup (job.stop / drain).
 func (s *Spawner) Spawn(kind Kind, jobID string, req RunRequest, onExit func(exitCode int)) (pid int, logPath string, err error) {
-	args, err := BuildArgs(kind, req)
+	args, err := BuildArgs(kind, req, s.cfg)
 	if err != nil {
 		return 0, "", err
 	}
-	if s.eventsPrefix != "" {
+	// `ape prompt` has no NATS/eventing flags (it does not publish PLAN-13
+	// events), so only forward a non-default prefix to the kinds that accept
+	// it — otherwise the prompt child rejects an unknown flag.
+	if s.eventsPrefix != "" && kind != KindPrompt {
 		args = append(args, "--events-subject-prefix", s.eventsPrefix)
 	}
 
@@ -168,6 +283,11 @@ func (s *Spawner) Spawn(kind Kind, jobID string, req RunRequest, onExit func(exi
 	cmd.Dir = req.ProjectRoot
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
+	// A script_source job delivers its Go source on stdin (`ape script -`);
+	// the source never rides the argv.
+	if kind == KindScript && strings.TrimSpace(req.ScriptSource) != "" && strings.TrimSpace(req.ScriptPath) == "" {
+		cmd.Stdin = strings.NewReader(req.ScriptSource)
+	}
 	cmd.Env = s.childEnv(jobID)
 	configureProcessGroup(cmd)
 

@@ -145,7 +145,8 @@ Every request/reply body is versioned JSON (`"v":1`). Requests:
 | --- | --- | --- |
 | `pipeline.run` | `{project_root, pipeline, prompt?, from?, no_commit?, commit_allow_dirty?, upload_transcripts?, nonexclusive?, exclusivity_key?, submitted_by?}` | `{job_id, accepted:true}` · `BUSY_EXCLUSIVE`/`BUSY_KEY`/`PROJECT_NOT_ALLOWED`/`VALIDATION` |
 | `task.run` | `{project_root, skill, agent?, model?, args?, prompt?, prompt_flag?, task_commit?, no_commit?, commit_allow_dirty?, upload_transcripts?, nonexclusive?, exclusivity_key?, submitted_by?}` | same |
-| `prompt.run` / `script.run` | *(registered so `$SRV.INFO` matches this contract)* | `VALIDATION` — no backing runner ships yet (`ape prompt` / PLAN-15 `ape script`) |
+| `prompt.run` | `{project_root, prompt? \| handoff?, agent?, model?, workflow?, nonexclusive?, exclusivity_key?, submitted_by?}` — exactly one of `prompt`/`handoff` | same |
+| `script.run` | `{project_root, script_path? \| script_source?, script_args?, nonexclusive?, exclusivity_key?, submitted_by?}` — exactly one of `script_path`/`script_source` (see the script gates below) | same |
 | `job.status` | `{job_id}` | `{job_id, kind, state, started_at, pid?, exclusivity_key, exclusive, submitted_by?, log_path?, exit_code?}` · `NOT_FOUND` |
 | `job.list` | `{}` | `{jobs:[…]}` |
 | `job.stop` | `{job_id}` | `{stopped:bool}` (SIGTERMs the child's process group; the job's terminal `state` becomes `stopped`) · `NOT_FOUND` |
@@ -155,6 +156,16 @@ Every request/reply body is versioned JSON (`"v":1`). Requests:
 `task_commit` is a nullable string: omitted/`null` = no task-layer commit; `""` =
 commit with the derived message `ape:task/<skill>`; a non-empty string = that
 commit message. `state` ∈ `running | done | failed | stopped`.
+
+**Script job gates (D5).** `script.run` spawns `ape script` and is guarded by two
+`service.yaml` flags (both default `false`): `script_path` must resolve to an
+existing file **inside an allowlisted root** (relative paths resolve against
+`project_root`); `script_source` is arbitrary code on the daemon host and is
+rejected `VALIDATION` unless `allow_script_source: true` (the source is piped to
+`ape script -` on stdin, never onto the argv). `force_script_sandbox: true` forces
+PLAN-15's interpreter-level `--sandbox` onto every script job — recommended
+whenever `allow_script_source` is on. See
+[How to run ape as a service](../how-to/run-ape-as-a-service.md).
 
 **Admission** is keyed exclusivity, exclusive by default. Each job holds its
 `exclusivity_key` (default `""`); an exclusive job blocks all others on that key

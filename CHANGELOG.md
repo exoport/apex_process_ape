@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **feat(service): `ape service` now dispatches `prompt.run` and `script.run`
+  (PLAN-14)** — the two remaining job-daemon endpoints spawn real headless `ape`
+  children now that `ape prompt` (PLAN-12) and `ape script` (PLAN-15) exist.
+  `prompt.run` maps `{prompt | handoff, agent?, model?, workflow?}` to
+  `ape prompt` (exactly one of `prompt`/`handoff`). `script.run` maps
+  `{script_path | script_source, script_args?}` to `ape script`, gated by two
+  `service.yaml` flags (both default off): `script_path` must resolve to a file
+  **inside an allowlisted root**; inline `script_source` (piped to `ape script -`
+  on stdin, never onto the argv) is rejected `VALIDATION` unless
+  `allow_script_source: true`; `force_script_sandbox: true` forces
+  `ape script --sandbox` onto every script job. Field-to-flag mapping stays
+  strict and typed — request fields are never concatenated into a shell string.
+  Docs: `docs/how-to/run-ape-as-a-service.md`, `docs/reference/events.md`.
+
 - **feat(script): new `ape script <file.go>` — yaegi-interpreted orchestration
   scripts (PLAN-15)** — `ape script ops/nightly.go -- args…` runs a plain Go
   file in-process under the [yaegi](https://github.com/traefik/yaegi)

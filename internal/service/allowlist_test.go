@@ -56,6 +56,31 @@ func TestLoadConfigValidAndMatch(t *testing.T) {
 	}
 }
 
+func TestLoadConfigScriptGates(t *testing.T) {
+	root := gitRepo(t, t.TempDir())
+	// Both D5 gates on: force_script_sandbox is valid because
+	// allow_script_source is also set.
+	p := writeConfig(t, t.TempDir(), "project_root: "+root+
+		"\nallow_script_source: true\nforce_script_sandbox: true\n")
+	c, err := LoadConfigFile(p)
+	if err != nil {
+		t.Fatalf("LoadConfigFile: %v", err)
+	}
+	if !c.AllowScriptSource || !c.ForceScriptSandbox {
+		t.Fatalf("D5 gates not parsed: %+v", c)
+	}
+
+	// Both default to false when omitted.
+	def := writeConfig(t, t.TempDir(), "project_root: "+root+"\n")
+	c2, err := LoadConfigFile(def)
+	if err != nil {
+		t.Fatalf("LoadConfigFile default: %v", err)
+	}
+	if c2.AllowScriptSource || c2.ForceScriptSandbox {
+		t.Fatalf("D5 gates should default off: %+v", c2)
+	}
+}
+
 func TestValidateRejects(t *testing.T) {
 	realRepo := gitRepo(t, t.TempDir())
 	notARepo := t.TempDir() // exists, but no .git

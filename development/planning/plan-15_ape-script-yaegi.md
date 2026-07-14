@@ -1,7 +1,7 @@
 ---
 plan_id: PLAN-15
 created_at: 2026-07-02
-status: proposed
+status: done
 tags:
   - new-command
   - scripting

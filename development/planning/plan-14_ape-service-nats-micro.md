@@ -1,7 +1,10 @@
 ---
 plan_id: PLAN-14
 created_at: 2026-07-02
-status: partially-implemented
+status: done
+# All four *.run kinds (pipeline/task/prompt/script) dispatch real headless
+# `ape` children; admission, allowlist, D5 script gates, endpoints, graceful
+# drain, and docs shipped. Stretch goal only (Risks): job.status last_event_at.
 tags:
   - new-command
   - service

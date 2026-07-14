@@ -31,7 +31,7 @@ echo "PWD=$(pwd)"
 exit 0
 `)
 	project := t.TempDir()
-	sp, err := NewSpawner(bin, "nats://127.0.0.1:4222", "", "")
+	sp, err := NewSpawner(bin, "nats://127.0.0.1:4222", "", "", nil)
 	if err != nil {
 		t.Fatalf("NewSpawner: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestSpawnTerminateGroupKillsChild(t *testing.T) {
 	// A long sleeper: terminateGroup must take it (and any descendant) down.
 	bin := fakeApe(t, "sleep 30\n")
 	project := t.TempDir()
-	sp, err := NewSpawner(bin, "", "", "")
+	sp, err := NewSpawner(bin, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("NewSpawner: %v", err)
 	}

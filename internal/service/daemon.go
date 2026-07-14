@@ -84,7 +84,7 @@ func NewDaemon(ctx context.Context, dc DaemonConfig) (*Daemon, error) {
 	if prefix == "" {
 		prefix = eventing.DefaultPrefix
 	}
-	sp, err := NewSpawner(dc.ApeBin, dc.NatsURL, dc.NatsCreds, spawnPrefix(prefix))
+	sp, err := NewSpawner(dc.ApeBin, dc.NatsURL, dc.NatsCreds, spawnPrefix(prefix), dc.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -179,9 +179,10 @@ func (d *Daemon) handleRun(kind Kind, req micro.Request) {
 		_ = req.Error(CodeProjectNotAllowed, fmt.Sprintf("project_root %q is not in this daemon's allowlist", rr.ProjectRoot), nil)
 		return
 	}
-	// Shape + kind availability (catches missing skill/pipeline and the
-	// not-shipped prompt.run / script.run kinds → VALIDATION).
-	if _, err := BuildArgs(kind, rr); err != nil {
+	// Shape + kind validation (missing skill/pipeline, the prompt/handoff and
+	// script_path/script_source XOR rules, the allow_script_source gate, and
+	// script_path allowlist membership all surface here → VALIDATION).
+	if _, err := BuildArgs(kind, rr, d.cfg); err != nil {
 		_ = req.Error(CodeValidation, err.Error(), nil)
 		return
 	}
