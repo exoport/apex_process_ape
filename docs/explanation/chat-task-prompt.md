@@ -11,13 +11,21 @@ two orthogonal axes: **who drives** (a human vs ape, unattended) and
 | **PTY**               | your terminal (inherited stdio)   | in-process `internal/repl`          | in-process `internal/repl`            |
 | **Input**             | live keystrokes, freeform         | a **skill** (required) + args       | a positional prompt or `--handoff`    |
 | **Skill / agent**     | neither                           | skill required, agent optional      | no skill; agent optional              |
-| **Completion**        | when claude exits                 | Stop hook + idle backstop           | Stop hook + idle backstop             |
+| **Completion**        | when claude exits                 | Stop hook + progress-aware backstop | Stop hook + progress-aware backstop   |
 | **Prompt injection**  | none                              | yes                                 | yes                                   |
 | **Commits**           | none                              | two-layer (`--no-commit` / `--task-commit`) | none                          |
 | **Telemetry scan**    | no — runlog hooks/calls only      | yes                                 | yes                                   |
 | **`--output-format`** | no (interactive)                  | human/json                          | human/json/yaml                       |
 | **Artifacts**         | `_output/ape/chats/<id>/` (runlog) | `_output/tasks/<skill>/<run-id>/` (**manifest**) | `_output/ape/prompts/<id>/` (session record) |
 | **Exit codes**        | 0/1/2                             | 0/1/2/3                             | 0/1/2/3/**4**                         |
+
+Both `ape task` and `ape prompt` end on the bridge Stop hook. Behind that,
+a **progress-aware backstop** (PLAN-19) cancels a step only after a full idle
+window (`--idle-timeout`, default 60m) with no progress across *any* signal —
+bridge hooks, the transcript growing, or PTY output — not just the old
+hook-only 60m timer. A step that is actively working is never cancelled for
+being slow; a hard `--max-duration` ceiling (default 3h) is the absolute stop.
+See [How to tune long-running steps](../how-to/tune-long-running-steps.md).
 
 ## Lineage
 

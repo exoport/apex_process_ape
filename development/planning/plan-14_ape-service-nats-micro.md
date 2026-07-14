@@ -1,10 +1,9 @@
 ---
 plan_id: PLAN-14
 created_at: 2026-07-02
+implemented_at: 2026-07-14
 status: done
-# All four *.run kinds (pipeline/task/prompt/script) dispatch real headless
-# `ape` children; admission, allowlist, D5 script gates, endpoints, graceful
-# drain, and docs shipped. Stretch goal only (Risks): job.status last_event_at.
+implementation_notes: Shipped on the `dev` branch (unreleased). All four `*.run` kinds (pipeline/task/prompt/script) now dispatch real headless `ape` children — the NATS-micro service, the 9-endpoint group, the `_apex/service.yaml` allowlist, keyed-exclusivity admission, typed-argv job spawn (`APE_JOB_ID` + NATS env), lifecycle events, and graceful drain all land. Sequencing deviation: `pipeline.run`/`task.run` executed from the start, but `prompt.run` and `script.run` were registered-but-rejecting (`ErrKindUnavailable`) until their underlying verbs existed — they were wired to real children once PLAN-12 (`ape prompt`) and PLAN-15 (`ape script`) shipped, together with the `command.run`→`prompt.run`/`KindCommand`→`KindPrompt` rename and the D5 script gates (`allow_script_source`, `force_script_sandbox`; inline source piped to stdin, never onto argv). Deferred (Risks stretch only): `last_event_at` on `job.status`.
 tags:
   - new-command
   - service

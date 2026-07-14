@@ -12,6 +12,7 @@ How-to guides are **recipes** — they answer "how do I X?" for a reader who alr
 - [How to pass arguments to skills](pass-args-to-skills.md)
 - [How to run a single skill with `ape task`](run-a-single-skill.md)
 - [How to run an unattended session with `ape prompt`](run-a-prompt-session.md)
+- [How to tune long-running steps](tune-long-running-steps.md)
 - [How ape runs claude (PTY-only)](interactive-vs-programmatic.md)
 - [How to read run artefacts](run-artefacts.md)
 - [How to publish run progress to NATS](publish-progress-to-nats.md)

@@ -1,7 +1,9 @@
 ---
 plan_id: PLAN-19
 created_at: 2026-07-14
-status: proposed
+implemented_at: 2026-07-14
+status: done
+implementation_notes: Shipped on the `dev` branch (unreleased; CHANGELOG `## Unreleased`). All of D1–D6 landed. D5 is the load-bearing change — the smart `WaitStepDone` (progress anchor + poll cadence + hard cap + diagnostic) now lives once in `internal/sessiondriver` and `interactiveCore` (pipeline/task) delegates to it, finishing the extraction PLAN-12 left shallow. D1 anchors on hooks + transcript size/mtime + transcript-dir mtime (the `/clear`-rotation fallback) and, on the `ape prompt` path only, a PTY-output probe; the pipeline/task path does not install the PTY probe (transcript growth carries the anchor there). D2/D6: `--max-duration` default 3h (`0` disables), 30s→60s poll cadence at the 60m threshold. D3: `--idle-timeout` now wired on `ape pipeline` (was an unused runConfig field), `--max-duration` on pipeline/task/prompt; apescript runners resolve a zero MaxDuration to the 3h default via `resolveMaxDuration`. D4: structured `IdleTimeoutError`/`MaxDurationError` diagnostics naming the tripped limit, per-source ages, and child liveness. Deferred (per Non-goals): no `/proc`/CPU sampling for the pure-silent long tool — `--idle-timeout`/`--max-duration` are the operator's lever. Docs (Step 5) delivered: cli.md regenerated, pipeline-spec "Step completion backstop" section, `docs/how-to/tune-long-running-steps.md`, `chat-task-prompt.md` reconciled, CHANGELOG entry.
 tags:
   - pipeline-runner
   - pty

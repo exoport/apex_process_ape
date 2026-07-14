@@ -1,7 +1,9 @@
 ---
 plan_id: PLAN-12
 created_at: 2026-07-02
+implemented_at: 2026-07-14
 status: done
+implementation_notes: Shipped on the `dev` branch (unreleased). Landed as `ape prompt` (renamed 2026-07-13 from the planned `ape command`): positional prompt arg or `--handoff`, optional `--agent`/`--model`, `--workflow`/`--ultracode`, `--idle-timeout`, exit code 4, records under `_output/ape/prompts/<id>/`, rollup `prompts` bucket. Reuses the bridge/runlog/Stop-hook/telemetry scaffold via a new `internal/sessiondriver.Driver`. Deviation from the original plan: the sessiondriver extraction was **shallow at first** — `interactiveCore` kept its own duplicate idle-wait loop and shared only the telemetry scan with the Driver. PLAN-19 D5 later consolidated the wait loop into `sessiondriver` as the single owner, so the extraction this plan started is now complete. The service-side `prompt.run` contract rename (`command.run`→`prompt.run`, `KindCommand`→`KindPrompt`) and its wiring landed with PLAN-14.
 tags:
   - new-command
   - pty

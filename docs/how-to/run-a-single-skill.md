@@ -114,6 +114,6 @@ newest run). Task runs appear in `ape costs` under `task:<skill>` after
 | Code | Meaning                                                                  |
 | ---- | ------------------------------------------------------------------------ |
 | 0    | Success.                                                                 |
-| 1    | Skill ran but failed, Stop-wait error, or idle timeout (`--idle-timeout`). |
+| 1    | Skill ran but failed, Stop-wait error, or a backstop fired — the progress-aware idle window (`--idle-timeout`, default 60m) or the hard ceiling (`--max-duration`, default 3h). |
 | 2    | Usage or preflight error (unknown skill/agent, bad flags).               |
 | 3    | REPL never became ready — trust-dialog dismissal failed or an unknown modal blocked; the last pane snapshot is on stderr. |

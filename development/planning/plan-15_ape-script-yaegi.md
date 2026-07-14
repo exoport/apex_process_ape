@@ -1,7 +1,9 @@
 ---
 plan_id: PLAN-15
 created_at: 2026-07-02
+implemented_at: 2026-07-14
 status: done
+implementation_notes: Shipped on the `dev` branch (unreleased). `ape script <file.go>` (plus stdin `ape script -`) runs Go under the yaegi interpreter (`github.com/traefik/yaegi`, added to `go.mod`/`go.sum`) with a new **public** `apescript` package exposing the orchestration surface (RunPipeline/RunTask/RunPrompt over the same internal PTY runner, logging, args, cost scan, event publish, blob upload). `--sandbox` restricts the interpreter to yaegi's sandboxed stdlib symbol set. Exposed via the service as `script.run` with keyed exclusivity and a service-forced sandbox (`force_script_sandbox`), wired in with PLAN-14. Notable cost: pulling in yaegi grew the binary by roughly +13.5MB. Reference: `docs/reference/apescript.md`, how-to `docs/how-to/write-ape-scripts.md`.
 tags:
   - new-command
   - scripting

@@ -57,6 +57,17 @@ stages:
 | `prompt_flag` | string         | no       | When set together with the runner's `--prompt` flag, ape appends `<prompt_flag> <prompt-value>` to the skill argv. Currently used by `apex-create-epics-and-stories` to receive a user-supplied prompt. |
 | `commit`      | bool or string | no       | Per-step commit boundary control (PLAN-4). See [Commits](#commits) below.                                                                                                                               |
 
+## Step completion backstop
+
+A step normally ends when the bridge fires its Stop hook. Two backstops protect against a step that never signals Stop — a stall or a runaway — without cancelling a step that is legitimately still working (PLAN-19).
+
+- **Idle window (`--idle-timeout`, default 60m).** A step is cancelled only after this long with **no progress across any signal**. Progress is anchored on three things, not just hooks: a bridge hook event, the active claude transcript growing (its size or mtime, plus the transcript directory's mtime so a `/clear` session rotation counts as activity), and — on the `ape prompt` path — PTY output bytes. A step that is actively writing its transcript or streaming to the PTY resets the anchor on every poll, so it is **never** cancelled for being slow, no matter how long a single tool call or reasoning span takes. Only genuine silence across every watched signal for the full window trips it. Set `--idle-timeout 0` to fall back to the default; raise it for pathologically silent tools.
+- **Hard ceiling (`--max-duration`, default 3h).** An absolute wall-clock cap per step, independent of progress. It bounds a step that stays noisy but never actually finishes. `--max-duration 0` disables the cap.
+
+The poll cadence is 30s for the first hour of a step, then relaxes to 60s for the remainder (a long-lived step's progress signals change slowly at that scale). When either backstop trips, the runner emits a structured diagnostic — which limit fired, whether the child `claude` process is still alive, and each progress source's age — instead of a bare timeout error.
+
+`ape task` and `ape prompt` share the same backstop and flags; see [How to tune long-running steps](../how-to/tune-long-running-steps.md).
+
 ## Commits
 
 Every successful step is committed by default with the message `ape:<pipeline>/<stage>/<skill>`. The pipeline YAML can override this per step via the `commit:` field, and the user can disable commits entirely with the `--no-commit` CLI flag.

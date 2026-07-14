@@ -108,7 +108,7 @@ are readable with `ape costs prompt <prompt-id>`.
 | Code | Meaning                                                                  |
 | ---- | ------------------------------------------------------------------------ |
 | 0    | Session completed — the Stop hook fired.                                 |
-| 1    | Session failed or the idle-without-Stop timeout fired (`--idle-timeout`, default 60m). |
+| 1    | Session failed, or a backstop fired — the progress-aware idle window (`--idle-timeout`, default 60m) or the hard ceiling (`--max-duration`, default 3h). |
 | 2    | Usage or preflight error — no `_apex/config.yaml`, unresolved `--agent`, missing `--handoff` file, or both/neither of `<text>`/`--handoff`. |
 | 3    | The claude REPL never became ready in the PTY — the last pane snapshot is on stderr. |
 | 4    | claude exited before the Stop hook fired.                                |
