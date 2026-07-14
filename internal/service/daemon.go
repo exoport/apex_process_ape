@@ -201,7 +201,7 @@ func (d *Daemon) handleRun(kind Kind, req micro.Request) {
 		if errors.Is(err, ErrBusyExclusive) {
 			code = CodeBusyExclusive
 		}
-		d.emitJobEvent(projectSlug, jobID, "job-rejected", map[string]any{
+		d.emitJobEvent(projectSlug, jobID, "job-rejected", now(), map[string]any{
 			"kind":            string(kind),
 			"reason":          code,
 			"exclusivity_key": rr.ExclusivityKey,
@@ -210,15 +210,18 @@ func (d *Daemon) handleRun(kind Kind, req micro.Request) {
 		return
 	}
 
+	// One timestamp for both the registry StartedAt and the job-accepted event
+	// so a just-accepted job reports last_event_at == started_at.
+	startedAt := now()
 	d.reg.Add(JobInfo{
 		JobID:          jobID,
 		Kind:           kind,
-		StartedAt:      now(),
+		StartedAt:      startedAt,
 		ExclusivityKey: rr.ExclusivityKey,
 		Exclusive:      exclusive,
 		SubmittedBy:    rr.SubmittedBy,
 	})
-	d.emitJobEvent(projectSlug, jobID, "job-accepted", map[string]any{
+	d.emitJobEvent(projectSlug, jobID, "job-accepted", startedAt, map[string]any{
 		"kind":            string(kind),
 		"exclusivity_key": rr.ExclusivityKey,
 		"exclusive":       exclusive,
@@ -235,8 +238,9 @@ func (d *Daemon) handleRun(kind Kind, req micro.Request) {
 	if err != nil {
 		d.jobs.Done()
 		release()
-		d.reg.Finish(jobID, -1)
-		d.emitJobEvent(projectSlug, jobID, "job-end", map[string]any{"kind": string(kind), "state": StateFailed, "error": err.Error()})
+		endedAt := now()
+		d.reg.Finish(jobID, -1, endedAt)
+		d.emitJobEvent(projectSlug, jobID, "job-end", endedAt, map[string]any{"kind": string(kind), "state": StateFailed, "error": err.Error()})
 		_ = req.Error(CodeValidation, "could not start job: "+err.Error(), nil)
 		return
 	}
@@ -250,10 +254,11 @@ func (d *Daemon) handleRun(kind Kind, req micro.Request) {
 // once per accepted job.
 func (d *Daemon) onJobExit(projectSlug, jobID string, release func(), code int) {
 	defer d.jobs.Done()
-	d.reg.Finish(jobID, code)
+	endedAt := now()
+	d.reg.Finish(jobID, code, endedAt)
 	release()
 	info, _ := d.reg.Get(jobID)
-	d.emitJobEvent(projectSlug, jobID, "job-end", map[string]any{
+	d.emitJobEvent(projectSlug, jobID, "job-end", endedAt, map[string]any{
 		"kind":      string(info.Kind),
 		"state":     info.State,
 		"exit_code": code,
@@ -326,10 +331,12 @@ func (d *Daemon) handleHealth(req micro.Request) {
 }
 
 // emitJobEvent publishes a daemon-side job lifecycle event on
-// <prefix>.<user>.<project>.svc.<job_id>.<event> (kind "svc", PLAN-14). It
-// is fire-and-forget; a nil conn or marshal error is silently dropped (the
-// child's own events remain the primary progress stream).
-func (d *Daemon) emitJobEvent(projectSlug, jobID, event string, extra map[string]any) {
+// <prefix>.<user>.<project>.svc.<job_id>.<event> (kind "svc", PLAN-14). ts is
+// the caller-stamped event time (the same value the caller records via
+// reg.Touch for a registered job). It is fire-and-forget; a nil conn or
+// marshal error is silently dropped (the child's own events remain the primary
+// progress stream).
+func (d *Daemon) emitJobEvent(projectSlug, jobID, event string, ts time.Time, extra map[string]any) {
 	if d.nc == nil {
 		return
 	}
@@ -338,7 +345,7 @@ func (d *Daemon) emitJobEvent(projectSlug, jobID, event string, extra map[string
 	}, ".")
 	m := map[string]any{
 		"v":       eventing.SchemaVersion,
-		"ts":      now().Format(time.RFC3339Nano),
+		"ts":      ts.Format(time.RFC3339Nano),
 		"user":    d.userBlk,
 		"project": projectSlug,
 		"event":   event,

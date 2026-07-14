@@ -147,7 +147,7 @@ Every request/reply body is versioned JSON (`"v":1`). Requests:
 | `task.run` | `{project_root, skill, agent?, model?, args?, prompt?, prompt_flag?, task_commit?, no_commit?, commit_allow_dirty?, upload_transcripts?, nonexclusive?, exclusivity_key?, submitted_by?}` | same |
 | `prompt.run` | `{project_root, prompt? \| handoff?, agent?, model?, workflow?, nonexclusive?, exclusivity_key?, submitted_by?}` — exactly one of `prompt`/`handoff` | same |
 | `script.run` | `{project_root, script_path? \| script_source?, script_args?, nonexclusive?, exclusivity_key?, submitted_by?}` — exactly one of `script_path`/`script_source` (see the script gates below) | same |
-| `job.status` | `{job_id}` | `{job_id, kind, state, started_at, pid?, exclusivity_key, exclusive, submitted_by?, log_path?, exit_code?}` · `NOT_FOUND` |
+| `job.status` | `{job_id}` | `{job_id, kind, state, started_at, last_event_at, pid?, exclusivity_key, exclusive, submitted_by?, log_path?, exit_code?}` · `NOT_FOUND` |
 | `job.list` | `{}` | `{jobs:[…]}` |
 | `job.stop` | `{job_id}` | `{stopped:bool}` (SIGTERMs the child's process group; the job's terminal `state` becomes `stopped`) · `NOT_FOUND` |
 | `status` | `{}` | `{running_jobs, held_keys:{key:{exclusive,count}}, uptime_seconds, versions:{ape,claude}, project_root, allowlist, name, draining}` |
@@ -156,6 +156,11 @@ Every request/reply body is versioned JSON (`"v":1`). Requests:
 `task_commit` is a nullable string: omitted/`null` = no task-layer commit; `""` =
 commit with the derived message `ape:task/<skill>`; a non-empty string = that
 commit message. `state` ∈ `running | done | failed | stopped`.
+
+`last_event_at` (additive; `job.status`/`job.list`) is the RFC3339 timestamp of
+the job's most recent daemon lifecycle event: it equals `started_at` for a
+just-accepted job and advances to the `job-end` time once the job goes terminal
+(same instant stamped on the corresponding `svc` event's `ts`).
 
 **Script job gates (D5).** `script.run` spawns `ape script` and is guarded by two
 `service.yaml` flags (both default `false`): `script_path` must resolve to an

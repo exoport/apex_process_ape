@@ -226,6 +226,66 @@ exit 0
 	}
 }
 
+// TestLastEventAtTracksLifecycle proves job.status / job.list carry
+// last_event_at: it equals started_at for a just-accepted (still-running) job
+// and advances to the job-end time once the job goes terminal.
+func TestLastEventAtTracksLifecycle(t *testing.T) {
+	bin := fakeApe(t, "sleep 5\n") // stays running until stopped
+	r := startRig(t, bin)
+	root := r.cfg.ProjectRoot
+
+	jobID := acceptedJobID(t, r, "task.run", RunRequest{ProjectRoot: root, Skill: "s"})
+
+	// While running, last_event_at is the acceptance time == started_at.
+	var running JobStatusReply
+	if err := json.Unmarshal(r.req(t, "job.status", JobIDRequest{JobID: jobID}).Data, &running); err != nil {
+		t.Fatalf("job.status unmarshal: %v", err)
+	}
+	if running.State != StateRunning {
+		t.Fatalf("state = %q, want running", running.State)
+	}
+	if running.LastEventAt.IsZero() {
+		t.Fatal("last_event_at not set on a running job")
+	}
+	if !running.LastEventAt.Equal(running.StartedAt) {
+		t.Fatalf("last_event_at = %v, want == started_at %v for a just-accepted job", running.LastEventAt, running.StartedAt)
+	}
+
+	// job.list carries the same field.
+	var list JobListReply
+	if err := json.Unmarshal(r.req(t, "job.list", struct{}{}).Data, &list); err != nil {
+		t.Fatalf("job.list unmarshal: %v", err)
+	}
+	found := false
+	for _, j := range list.Jobs {
+		if j.JobID == jobID {
+			found = true
+			if j.LastEventAt.IsZero() {
+				t.Fatal("job.list entry missing last_event_at")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("job %s absent from job.list", jobID)
+	}
+
+	// Stop it: job-end fires, advancing last_event_at past the acceptance time.
+	if m := r.req(t, "job.stop", JobIDRequest{JobID: jobID}); errCode(m) != "" {
+		t.Fatalf("job.stop rejected: %s", errCode(m))
+	}
+	terminal := pollJobTerminal(t, r, jobID)
+	if terminal.State != StateStopped {
+		t.Fatalf("state = %q, want stopped", terminal.State)
+	}
+	if !terminal.LastEventAt.After(running.LastEventAt) {
+		t.Fatalf("last_event_at did not advance on job-end: terminal %v not after accepted %v", terminal.LastEventAt, running.LastEventAt)
+	}
+	// started_at is stable across the job's life.
+	if !terminal.StartedAt.Equal(running.StartedAt) {
+		t.Fatalf("started_at changed: %v → %v", running.StartedAt, terminal.StartedAt)
+	}
+}
+
 func TestExclusivityOverNATS(t *testing.T) {
 	bin := fakeApe(t, "sleep 5\n") // holds its key until stopped
 	r := startRig(t, bin)

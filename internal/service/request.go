@@ -126,10 +126,14 @@ type JobIDRequest struct {
 //
 //nolint:tagliatelle // snake_case is the stable, documented NATS wire contract
 type JobInfo struct {
-	JobID          string    `json:"job_id"`
-	Kind           Kind      `json:"kind"`
-	State          string    `json:"state"` // running | done | failed | stopped
-	StartedAt      time.Time `json:"started_at"`
+	JobID     string    `json:"job_id"`
+	Kind      Kind      `json:"kind"`
+	State     string    `json:"state"` // running | done | failed | stopped
+	StartedAt time.Time `json:"started_at"`
+	// LastEventAt is the timestamp of the job's most recent lifecycle event
+	// (advances on job-accepted/job-end); equals StartedAt for a just-accepted
+	// job. Additive → WireVersion stays 1.
+	LastEventAt    time.Time `json:"last_event_at"`
 	PID            int       `json:"pid,omitempty"`
 	ExclusivityKey string    `json:"exclusivity_key"`
 	Exclusive      bool      `json:"exclusive"`
