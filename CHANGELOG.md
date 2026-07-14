@@ -18,7 +18,14 @@
   process's liveness, and each progress source's age — instead of the old bare
   "idle for X without Stop hook". The poll cadence is 30s for the first hour of
   a step, then 60s. The smart wait loop lives once in `internal/sessiondriver`;
-  both `interactiveCore` (pipeline/task) and the prompt Driver inherit it.
+  both `interactiveCore` (pipeline/task) and the prompt Driver inherit it. The
+  termination diagnostic reports the claude process's liveness on the
+  pipeline/task path too (not just `ape prompt`) — `interactiveCore` installs a
+  child-liveness probe from the stage's PTY session, so a killed step reads
+  `child pid N alive|exited` instead of `child liveness unknown`. (The
+  PTY-output progress anchor stays `ape prompt`-only by design: on the
+  pipeline/task path transcript growth carries the anchor, and a raw-PTY anchor
+  would risk masking a real stall behind the REPL's cosmetic repaints.)
 
 - **feat(service): `ape service` now dispatches `prompt.run` and `script.run`
   (PLAN-14)** — the two remaining job-daemon endpoints spawn real headless `ape`

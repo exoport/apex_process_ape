@@ -16,6 +16,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 )
@@ -364,6 +365,20 @@ func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 	c.activeSkill = info.Skill
 	c.stepMu.Unlock()
 	c.publisher().StepStart(info.Stage, info.StepIdx+1, info.Skill, info.Agent, info.Model)
+	// PLAN-19 D4: point the Driver's child-liveness probe at this stage's
+	// PTY session so a step-termination diagnostic reports whether the
+	// claude process is still alive instead of "unknown". The session is
+	// per-stage; re-installing per step is a cheap idempotent assignment,
+	// and OnStepStart/WaitStepDone run on the same goroutine sequentially,
+	// so the write never races the diagnose() read. Only diagnostic — never
+	// a keep-alive signal (a wedged-but-alive process must still time out).
+	if info.SessionName != "" {
+		name := info.SessionName
+		c.driver.SetChildAliveProbe(func() (int, bool) {
+			pid, _ := repl.SessionPID(name)
+			return pid, repl.HasSession(context.Background(), name)
+		})
+	}
 	// Sub-agent captures are per-step: a fresh step must not re-count
 	// the previous step's sub-sessions. stepStartedAt anchors the
 	// robustness sweep's mtime window to this step.

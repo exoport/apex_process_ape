@@ -212,6 +212,11 @@ type InteractiveStepInfo struct {
 	// empty means no model switch is expected at this step boundary.
 	Model   string
 	NoClear bool
+	// SessionName is the repl PTY session driving this stage (empty for
+	// non-interactive callers). PLAN-19 D4: lets the interactive core
+	// install a child-liveness probe so a step-termination diagnostic can
+	// report whether the claude process is still alive instead of "unknown".
+	SessionName string
 }
 
 // Observer hooks every state transition the runner emits. Methods are

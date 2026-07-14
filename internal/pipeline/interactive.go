@@ -175,12 +175,13 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		eventLog, eventsRel := openStepLog(mw, stageIdx, i+1, stage.Name, step.Skill)
 
 		stepInfo := InteractiveStepInfo{
-			Stage:   stage.Name,
-			StepIdx: i,
-			Skill:   step.Skill,
-			Agent:   effAgent,
-			Model:   effModel,
-			NoClear: step.NoClear,
+			Stage:       stage.Name,
+			StepIdx:     i,
+			Skill:       step.Skill,
+			Agent:       effAgent,
+			Model:       effModel,
+			NoClear:     step.NoClear,
+			SessionName: sessionName,
 		}
 
 		// Between steps within a stage: send `/clear` so the next
