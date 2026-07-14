@@ -88,7 +88,7 @@ origin:
 - [x] **project-mount modes** — host-fs (default) · volume · ephemeral wired in `WorkspaceSpec.RunArgs` + `sandbox up`
 - [x] **D2 per-workspace `~/.claude` composition** — reused composer, invoked per-workspace at `up` into a per-workspace staging home
 - [x] **D5 git-credential composition** — token / deploy-key / agent (reused composer, unchanged)
-- [x] **D4 public egress** — `ProxyEnv` wires `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` into the guest; `sandbox up --proxy host:port` points it at an externally-run proxy. **Supervisor (done, step 7):** a profile declaring `network.authorized_domains` makes `up` start a **detached** host-side CONNECT proxy (`internal/sandbox/proxysup.go` + `proxysup_linux.go`; a hidden `ape sandbox _proxyd` re-exec, `setsid`, fd-3 readiness handshake), dial-check it (**fail-closed** — `up` aborts if it can't come up), wire `HTTPS_PROXY`, and record its `pid`/`addr`/audit-log path in the registry; `down` SIGTERMs it. `--proxy` still wins; no allowlist ⇒ open (default) egress. `PlanEgress` picks the mode. Live guest→proxy reachability (bridge routing / `--network none` enforcement) is Tier-2.
+- [x] **D4 public egress** — `ProxyEnv` wires `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` into the guest; `sandbox up --proxy host:port` points it at an externally-run proxy. **Supervisor (done, step 7):** a profile declaring `network.authorized_domains` makes `up` start a **detached** host-side CONNECT proxy (`internal/sandbox/proxysup.go` + `proxysup_linux.go`; a hidden `ape sandbox _proxyd` re-exec, `setsid`, fd-3 readiness handshake), dial-check it (**fail-closed** — `up` aborts if it can't come up), wire `HTTPS_PROXY`, and record its `pid`/`addr`/audit-log path in the registry; `down` SIGTERMs it. `--proxy` still wins; no allowlist ⇒ open (default) egress. `PlanEgress` picks the mode. Live guest→proxy reachability (bridge routing / `--network none` enforcement) is Tier-2. *(PLAN-18: this host-side supervisor is the daemonless PLAN-16 design and was **not** carried into the shipped client — `ape sandbox up` is a pure `aped` client (`internal/apecmd/sandbox.go`) and no longer spawns a proxy; `aped` owns egress server-side, and Phase-2 workspaces are currently networkless. The `proxy.go`/`match.go`/`proxysup.go` + hidden `_proxyd` layers are retained but unwired from `up`.)*
 - [x] **D7 access** — sshd is in the image (key-auth-only, over the forwarded `--ssh-port` loopback); `sandbox ssh` builds the `ssh` invocation. **authorized_keys (done, step 8):** the composer stages the guest `~/.ssh/authorized_keys` from the profile's `access.authorized_keys` (public-key literals or `~/.ssh/*.pub` paths; `composeSSHAccess`); the image sets the `ape` user's home to `/sandbox/home` (so sshd reads the composed keys and `HOME` matches `exec`) with `StrictModes no` (virtio-fs bind ownership needn't match `ape`). *Image change needs a rebuild to take effect; end-to-end key-auth is Tier-2/3.*
 - [x] **D8 `ape doctor` checks** — `kvm.available` (+ `kvm` group remediation), `containerd.running`, `kata.runtime`, `sandbox.image` (`doctor_checks.go`, registered in `doctor.go`). Non-required; degrade to INFO off-Linux / when the toolchain is absent.
 - [x] **D3 profile** — extended the loader with `backend`, `vmm`, `image`, `mount` (+ defaults + validation)
@@ -293,6 +293,15 @@ the guest gets `HTTPS_PROXY`. Deny-by-default; `network.authorized_domains`
 `egress-audit.jsonl` (per-connection metadata; hostnames only, never payloads).
 Private/overlay reachability (NATS, project peers) is a **Phase-3 Netbird**
 concern and composes with this proxy (overlay = private, proxy = public).
+
+> *(PLAN-18 reconciliation.)* This host-side, `ape`-launched egress model is the
+> daemonless PLAN-16 design. In the shipped `ape`/`aped` split, **`aped` owns
+> egress server-side** and `ape sandbox up` never launches a proxy; the pure
+> matcher/proxy/audit layers survive and are reused by `aped`. Phase-2 workspaces
+> are currently **networkless** (nerdctl's client-side CNI needs caps the hardened
+> root executor lacks — "barrier 2"), so the deny-by-default allowlist is not yet
+> exercised end-to-end. See the reconciliation banner at the top and
+> `docs/how-to/sandbox-workspaces.md`.
 
 ### D5: Git credentials (reuse)
 
