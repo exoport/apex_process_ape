@@ -78,13 +78,44 @@ origin:
 > `*(PLAN-18: …)*` markers flag the specific spots a reader would otherwise be
 > misled.
 
+> **D6 image — live-validated + relocating to a private repo (2026-07-15).** The
+> official `ape-sandbox` image was **built and validated end-to-end for the first
+> time** on the Tier-2 box (KVM + containerd + Kata 3.32 + `aped`): `ape sandbox
+> up → exec → down` through `aped`'s containerd driver on kata-clh, in a real
+> guest kernel (6.18.35 ≠ host), with the baked `ape` 0.0.45 / `node` v22.23 /
+> `claude` 2.1.209 present and running as numeric root. The build toolchain is
+> present (`nerdctl` + `buildkitd`); the build itself needs a root-capable
+> operator (the daemons are rootful). Three findings surfaced, all to be folded
+> into the productionised image:
+>
+> 1. **The framework repo is private**, so the Dockerfile's anonymous `git clone`
+>    (line ~68) cannot read it in the build. `ape framework setup` does **not**
+>    fix this — it is the *runtime* per-project installer (reads an already-present
+>    local checkout; it does not fetch). The build needs an **authenticated fetch**
+>    — a BuildKit `--mount=type=secret` PAT with a **pinned release tarball** (or
+>    an authenticated shallow clone of the pinned tag).
+> 2. **The image `USER` must be numeric** (`USER 0`, not `root`) — `aped`'s
+>    containerd driver resolves the user without mounting the rootfs.
+> 3. **`aped`'s policy has an image allow-list** (`/etc/aped/policy.yaml`) gating
+>    which refs can run; a **private** image additionally needs `aped`/containerd
+>    **pull credentials**.
+>
+> **Decision (2026-07-15): the framework stays private, so a framework-baking
+> image must not be public.** The canonical `ape-sandbox` image **moves to a
+> private `exoar` repo** — built with the authenticated framework fetch + numeric
+> `USER`, published to a **private `ghcr.io/exoar/ape-sandbox`** package; `aped`
+> gets pull creds; `sandbox.DefaultImage` (`internal/sandbox/kata.go`) and
+> `deploy/policy.yaml` update to the `exoar` ref. This repo's `images/ape-sandbox/`
+> is **removed** (a one-line pointer is left) so the public repo does not carry a
+> second, framework-bearing Dockerfile that would drift or leak the framework.
+
 ## Status / task checklist
 
 ### Phase 1 — Kata VM workspaces, local dev (this repo)
 
 - [x] **`ape sandbox` command surface:** *(PLAN-18)* shipped as `up | ls | inspect | exec | attach | ssh | freeze | unfreeze | suspend | down <name>` (`internal/apecmd/sandbox.go`) — **not** the `pause | resume` originally listed here. `freeze`/`unfreeze` are a cgroup-freeze; `suspend` returns `UNSUPPORTED` on Kata; `ssh` defers to `aped` networking (Tier-2).
 - [x] **D1 workspace runner** — `internal/sandbox` (`kata.go` pure nerdctl command construction + on-disk registry; `kata_linux.go` exec methods; `kata_other.go` Windows stub); **kata-clh default** VMM via `io.containerd.kata-<vmm>.v2` runtime handler. Live provision/exec/pause validated only under Tier-2 (no KVM in CI / on this box yet). *(PLAN-18: refactored into the `shellDriver` behind `internal/workspace.Backend`; `ape` no longer runs it — `aped` does, and the live-validated driver is the containerd-Go-client `containerdDriver` (`--driver containerd`), which the `shellDriver` cannot match through the hardened root executor. `pause` → `freeze`.)*
-- [x] **D6 official `ape-sandbox` image** — `images/ape-sandbox/` (Dockerfile `FROM` agent-infra/sandbox + claude/node/`ape`/git/framework/sshd/chromium+playwright; entrypoint; README with build/pin/publish + versioning). `sandbox.DefaultImage` is the wiring point; `image:` override supported. **Base pinned (step 9):** `BASE_IMAGE` = `ghcr.io/agent-infra/sandbox:1.11.0@sha256:6328d7fd…f906e7` (verified multi-arch amd64+arm64 manifest-list digest). **Offline framework (step 9):** `ENV APEX_FRAMEWORK_REPO=/opt/apex-framework` so `ape framework setup --no-fetch` installs from the baked-in checkout. *Remaining: the actual build/publish needs the container toolchain (docker/nerdctl), not yet installed here.*
+- [x] **D6 official `ape-sandbox` image** — `images/ape-sandbox/` (Dockerfile `FROM` agent-infra/sandbox + claude/node/`ape`/git/framework/sshd/chromium+playwright; entrypoint; README with build/pin/publish + versioning). `sandbox.DefaultImage` is the wiring point; `image:` override supported. **Base pinned (step 9):** `BASE_IMAGE` = `ghcr.io/agent-infra/sandbox:1.11.0@sha256:6328d7fd…f906e7` (verified multi-arch amd64+arm64 manifest-list digest). **Offline framework (step 9):** `ENV APEX_FRAMEWORK_REPO=/opt/apex-framework` so `ape framework setup --no-fetch` installs from the baked-in checkout. *(2026-07-15: toolchain is present and the image was live-validated end-to-end through `aped`; the Dockerfile is now **removed from this repo** and the canonical framework-baking image relocates to a private `exoar` repo — see the D6 note above for the three findings + the private-image decision.)*
 - [x] **project-mount modes** — host-fs (default) · volume · ephemeral wired in `WorkspaceSpec.RunArgs` + `sandbox up`
 - [x] **D2 per-workspace `~/.claude` composition** — reused composer, invoked per-workspace at `up` into a per-workspace staging home
 - [x] **D5 git-credential composition** — token / deploy-key / agent (reused composer, unchanged)

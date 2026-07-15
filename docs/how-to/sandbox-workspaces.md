@@ -164,9 +164,10 @@ workspace shape accordingly (details in the
 
 Workspaces run the official `ape-sandbox` image (claude / node / ape / git /
 framework / sshd / chromium + Playwright), or any custom OCI ref via `--image`
-(or a server-side profile's `image:`). `aped` pulls and pins it node-side. The
-Dockerfile and its build/pin/publish instructions live in the repo under
-`images/ape-sandbox/`.
+(or a server-side profile's `image:`). `aped` pulls and pins it node-side.
+Because the image bakes the **private** APEX framework, its Dockerfile + build
+pipeline live in the private **`exoar/ape-sandbox`** repo (published to a private
+`ghcr.io/exoar/ape-sandbox` package), not in this repo.
 
 ## See also
 
