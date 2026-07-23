@@ -25,9 +25,11 @@ const ContainerPrefix = "ape-ws-"
 
 // DefaultImage is the official ape-sandbox image reference used when a
 // profile leaves `image:` empty. It is pinned (never :latest) and tracks
-// ape + framework releases (PLAN-16 D6). The concrete tag is produced by
-// the image pipeline (Step 5); this default is the wiring point.
-const DefaultImage = "ghcr.io/exoport/ape-sandbox:v0"
+// ape + framework releases (PLAN-16 D6). The image is PRIVATE — it bakes the
+// private APEX framework — built + published by the exoar/ape-sandbox repo to
+// ghcr.io/exoar/ape-sandbox; aped needs a read:packages pull credential (or a
+// locally-staged copy in its containerd namespace) to resolve it.
+const DefaultImage = "ghcr.io/exoar/ape-sandbox:v0.0.45"
 
 // DefaultShell is the login shell `ape sandbox attach` opens inside a
 // workspace when the caller doesn't pick one.
