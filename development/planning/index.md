@@ -2,6 +2,7 @@
 
 | ID      | Title                                                   | Status                | Created    |
 | ------- | ------------------------------------------------------- | --------------------- | ---------- |
+| PLAN-20 | Sandbox mounts (general model) + framework delivery     | proposed              | 2026-07-23 |
 | PLAN-19 | Activity-aware step timeout — progress anchor + hard cap | done                  | 2026-07-14 |
 | PLAN-18 | `ape` + `aped` split — rootful Kata-QEMU VM daemon       | partially-implemented | 2026-07-08 |
 | PLAN-17 | Reporting CLI — event/log/metrics/transcript + identity | done                  | 2026-07-02 |
