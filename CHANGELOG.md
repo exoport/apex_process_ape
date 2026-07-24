@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.0.47 (2026-07-24)
 
 - **fix(sessiondriver): the `--max-duration` ceiling is now per batch item, not
   per batch** — the hard wall-clock ceiling (PLAN-19 D2, default 3h) previously
