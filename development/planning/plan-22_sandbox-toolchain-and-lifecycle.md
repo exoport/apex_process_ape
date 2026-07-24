@@ -19,9 +19,12 @@ summary: >
   bingo; per-project toolchain state (asdf installs, ~/go incl. bingo tools,
   ~/.cargo, build caches) lives in DURABLE mounts (host caches and/or a
   per-project persistent volume), never the ephemeral rootfs; the initial fetch
-  needs egress (PLAN-21), everything after is offline. Also fixes the workspace
-  lifecycle gap — the only RAM-freeing verb today is destructive `down` — by
-  adding a `stop`/`start` that frees guest RAM while keeping the rootfs + state.
+  needs egress (PLAN-21), everything after is offline. Also closes the node
+  lifecycle gaps: EXPOSE the already-implemented `Stop`/`Start` (backend/contract/
+  client done — only the CLI verb is missing) so RAM can be freed while keeping
+  the rootfs+state, add an optional idle reaper / TTL, and reconcile the registry
+  to containerd reality after a restart. Workspaces are node-pinned and reusable
+  across many sessions.
 origin:
   - 2026-07-23 design conversation — projects need different toolchains (a pinned Go
     version + Go tools via bingo, sometimes Flutter, sometimes Rust). "Do we support
@@ -29,11 +32,13 @@ origin:
     `image:` override. Decision — declared per-project toolchains via asdf (runtimes)
     + bingo (Go tools), a hybrid of a lean base image + version manager + durable
     cached mounts + egress.
-  - 2026-07-23 lifecycle finding — workspaces are long-lived/reusable, but the VM
-    rootfs is destroyed on `down`, and the only RAM-freeing option is `down` (`freeze`
-    keeps RAM resident; `suspend` is UNSUPPORTED on Kata-via-containerd). So toolchain
-    state must be externalized to durable storage, and a non-destructive `stop` is
-    worth adding.
+  - 2026-07-24 lifecycle finding — workspaces are long-lived/reusable and node-pinned;
+    the VM rootfs is destroyed on `down`. `Stop`/`Start` (free RAM, keep rootfs+state)
+    are ALREADY implemented in the driver/`Backend`/`ape.vmm` contract/`vmmclient` — only
+    the `ape sandbox stop`/`start` CLI verb is missing. `freeze` keeps RAM resident and
+    does not survive a reboot; `suspend` is UNSUPPORTED. There is no idle reaper/TTL and
+    no restart reconciliation. So: externalize toolchain state to durable storage, expose
+    stop/start, and add node lifecycle management (reaper/TTL + reconcile-on-startup).
   - Assumptions marked inline were made at authoring time; flag at review.
 ---
 
@@ -126,19 +131,44 @@ mount model:
   neutralize cross-project version drift); per-project volume as an opt-in for
   isolation.
 
-### 5. Workspace lifecycle — reuse, rebuild, and a `stop`/`start` verb
+### 5. Workspace lifecycle — reuse, rebuild, and node management
 
-- Workspaces stay **long-lived/reusable per project**. Two cheap reuse modes:
-  **keep warm** (`freeze`/`unfreeze`) or **rebuild** (`down`/`up`, cheap because
-  state is durable).
-- **Gap to fix:** the only way to free a workspace's RAM today is destructive
-  `down` (`freeze` keeps RAM resident; `suspend` is UNSUPPORTED). Propose a
-  **`stop`/`start`** pair: stop the guest task (free guest RAM) while **retaining
-  the container + snapshot rootfs + durable state**, and `start` to bring it back
-  (the containerd driver already has a `Start` for a stopped task —
-  `internal/sandbox/containerd_driver_linux.go`). This gives a third,
-  non-destructive, RAM-freeing state — important on RAM-constrained laptops
-  running several project workspaces.
+**States available today** (all node-local; a workspace is pinned to its
+`ape.vmm.<node>` node — no migration):
+
+| State | Verb | RAM | Rootfs/state | Notes |
+| --- | --- | --- | --- | --- |
+| running | `up` | in use | live | reused across sessions via `exec`/`attach` |
+| frozen | `freeze`/`unfreeze` | **resident** | kept | cgroup pause; instant resume; **does not survive a reboot** |
+| stopped | `Stop`/`Start` | **freed** | kept | task killed, container+snapshot retained; **survives reboot**; `start` revives |
+| suspended | `suspend`/`resume` | — | — | **UNSUPPORTED** on Kata-via-containerd |
+| destroyed | `down` | freed | **deleted** | drops the registry entry; `--remove-volume` also deletes a `volume` |
+
+**Correction (2026-07-24):** `Stop`/`Start` are **already implemented** end-to-end
+— `internal/sandbox/containerd_driver_linux.go` (`Stop` kills+deletes the task,
+keeps container+snapshot; `Start` revives), the `workspace.Backend` interface,
+the `ape.vmm` contract (`internal/workspace/vmmwire.go`), and `vmmclient`
+(`Start`/`Stop`). The **only gap is CLI exposure** — no `ape sandbox
+stop`/`start` subcommand (`internal/apecmd/sandbox.go` registers up/ls/inspect/
+attach/ssh/exec/freeze/unfreeze/suspend/down only). So this is *expose*, not
+*build*.
+
+**Reuse modes:** keep warm (`freeze`), free RAM but keep state (`stop`, best on
+busy nodes/laptops), or rebuild (`down`/`up`, cheap because state is durable).
+
+**Node lifecycle gaps to close (there is no automatic management today):**
+- **No idle reaper / TTL.** Workspaces live until an explicit `down`; nothing
+  reclaims RAM or disk. Add an optional per-node policy: auto-`stop` after N idle
+  (reclaim RAM — use `stop`, not `freeze`, since freeze holds RAM), auto-`down`
+  after M (reclaim disk), and/or a per-workspace TTL. Ephemeral/preview
+  workspaces should default to a short TTL; a developer's project workspace to
+  none.
+- **No restart reconciliation.** After an aped/host reboot the container+snapshot
+  persist but any running/frozen task is gone; nothing reconciles the registry to
+  reality or restarts "keep-alive" workspaces. Add a reconcile-on-startup that
+  marks vanished tasks `stopped` and optionally auto-`start`s flagged ones.
+- **Node affinity is implicit** (per-node contract, node-local state); no
+  scheduler/placement. Document it; cross-node is out of scope (Phase 4).
 
 ## Deliverables
 
@@ -151,8 +181,14 @@ mount model:
 - [ ] **D4 — Durable state mounts.** Standard host-cache mount presets (asdf dir,
   `~/go`, `~/.cargo`, …) via the PLAN-20 mount model; per-project `volume`
   option; docs on shared-vs-isolated.
-- [ ] **D5 — Lifecycle `stop`/`start`.** Non-destructive RAM-freeing stop +
-  start; reuse/rebuild docs; keep `freeze`/`down` semantics distinct.
+- [ ] **D5 — Lifecycle.** (a) **Expose** the existing `Stop`/`Start` as `ape
+  sandbox stop`/`start` CLI verbs (backend/contract/client already done — CLI
+  only). (b) **Idle reaper / TTL** — optional per-node policy: auto-`stop` after
+  N idle, auto-`down` after M, per-workspace TTL (short default for
+  ephemeral/preview, none for dev project workspaces). (c) **Restart
+  reconciliation** — on aped startup, reconcile the registry to containerd
+  reality (vanished task → `stopped`) and optionally auto-`start` flagged
+  keep-alive workspaces. Keep `freeze`/`stop`/`down` semantics distinct + documented.
 - [ ] **D6 — Optional image variants.** Document building heavy-stack variants
   (e.g. Flutter) via `image:` for teams that want them pre-baked.
 - [ ] **D7 — Docs.** Devcontainer how-to; toolchain config reference; caching /
