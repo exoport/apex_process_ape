@@ -158,7 +158,7 @@ preflight error · 3 REPL never became ready (last pane on stderr).`,
 	cmd.Flags().Lookup("task-commit").NoOptDefVal = taskCommitDerivedSentinel
 	cmd.Flags().BoolVar(&allowDirtyFlag, "commit-allow-dirty", false, "Bypass the dirty-tree gate (relevant only with --task-commit)")
 	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Idle backstop: cancel only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default matches pipeline (60m)")
-	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Hard wall-clock ceiling regardless of progress (e.g. 3h). 0 disables the cap.")
+	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Hard wall-clock ceiling regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item, not per batch. 0 disables the cap.")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json (json = result envelope on stdout, progress on stderr)")
 	cmd.Flags().BoolVar(&jsonAlias, "json", false, "Alias for --output-format json")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "Suppress the per-event progress stream")

@@ -47,9 +47,17 @@ type hookEnvelope struct {
 const DefaultIdleTimeout = 60 * time.Minute
 
 // DefaultMaxDuration is the hard wall-clock ceiling WaitStepDone enforces
-// per step regardless of progress (PLAN-19 D2). The cap ships ON; a value
-// of 0 disables it. Bounds a genuinely stuck-but-noisy step that the
-// activity anchor would otherwise keep alive forever.
+// regardless of progress (PLAN-19 D2). The cap ships ON; a value of 0
+// disables it. Bounds a genuinely stuck-but-noisy step that the activity
+// anchor would otherwise keep alive forever.
+//
+// The ceiling clock is NOT measured from step start unconditionally: it
+// resets on each sub-agent boundary (SubagentStart/SubagentStop). A
+// sequential batch skill (apex-story-batch-dev/-create/-review,
+// apex-lift-project) spawns one sub-agent per item, so the cap bounds each
+// individual item rather than the whole multi-item batch. A step that
+// spawns no sub-agents sees a flat wall-clock cap from step start, exactly
+// as before.
 const DefaultMaxDuration = 3 * time.Hour
 
 // idlePoll is the base recheck frequency; idlePollDivisor scales it
@@ -95,7 +103,7 @@ func (e *IdleTimeoutError) Error() string {
 // still have been making progress when the ceiling tripped.
 type MaxDurationError struct {
 	Label      string        // "interactive step" / "session"
-	Elapsed    time.Duration // wall-clock the step ran
+	Elapsed    time.Duration // wall-clock since the last item boundary (== step start when none)
 	Max        time.Duration // the configured ceiling
 	Diagnostic string        // last progress source + child liveness
 }
@@ -135,6 +143,13 @@ type Driver struct {
 
 	activityMu   sync.Mutex
 	lastActivity time.Time
+	// maxDurationAnchor is the reset point for the hard wall-clock ceiling
+	// (WaitStepDone). It advances to now on each sub-agent boundary
+	// (RecordItemBoundary) so the cap bounds an individual batch ITEM — a
+	// sequential batch skill spawns one sub-agent per item — rather than the
+	// whole multi-item step. Written on the bridge goroutine, read by
+	// WaitStepDone; guarded by activityMu alongside lastActivity.
+	maxDurationAnchor time.Time
 
 	mu               sync.Mutex
 	activeTranscript string
@@ -219,6 +234,23 @@ func (d *Driver) RecordActivity() {
 	d.activityMu.Unlock()
 }
 
+// RecordItemBoundary advances the hard max-duration anchor to now. A
+// sub-agent lifecycle event (SubagentStart/SubagentStop) is unambiguous
+// real progress — a batch item just started or finished — and a stronger
+// signal than the transcript-growth bytes the idle anchor already trusts.
+// Resetting the ceiling on it bounds the NEXT item rather than the whole
+// batch, so a sequential batch skill runs as long as each item completes
+// within max-duration. Both driver paths call it: the prompt path from
+// Driver.FeedHook, the pipeline/task path from interactiveCore.FeedHook.
+func (d *Driver) RecordItemBoundary() { d.resetMaxDurationAnchor(time.Now()) }
+
+// resetMaxDurationAnchor sets the ceiling reset point under activityMu.
+func (d *Driver) resetMaxDurationAnchor(t time.Time) {
+	d.activityMu.Lock()
+	d.maxDurationAnchor = t
+	d.activityMu.Unlock()
+}
+
 // SignalStepDone posts a non-blocking step-done signal (the Stop hook).
 // WaitStepDone is the only consumer; the buffered channel + drop-on-full
 // avoids any chance of blocking the bridge accept loop.
@@ -272,6 +304,11 @@ func (d *Driver) FeedHook(h orchestrator.HookEvent) {
 			d.mu.Unlock()
 		}
 	case ipc.HookSubagentStart, ipc.HookSubagentStop:
+		// A sub-agent boundary is a batch-item boundary — reset the hard
+		// ceiling so it bounds each item, not the whole batch (unconditional:
+		// SubagentStart is presence-only and carries no transcript, but it
+		// still marks a fresh item beginning).
+		d.RecordItemBoundary()
 		agentID := h.AgentID
 		if agentID == "" {
 			agentID = env.AgentID
@@ -357,13 +394,21 @@ func (d *Driver) FeedReply(content string) {
 // signal for a full idle window trips it.
 //
 // PLAN-19 D2: an independent wall-clock ceiling (maxDuration) bounds a
-// stuck-but-noisy step and returns a distinct MaxDurationError.
+// stuck-but-noisy step and returns a distinct MaxDurationError. The
+// ceiling clock resets on each sub-agent boundary (RecordItemBoundary),
+// so a sequential batch skill — one sub-agent per item — is bounded per
+// item; a step spawning no sub-agents sees a flat cap from step start.
 //
 // PLAN-19 D6: polls at idlePoll (30s) for the first hour, then longRunPoll
 // (60s), still honouring the idlePollDivisor scaling for short windows.
 func (d *Driver) WaitStepDone(ctx context.Context) error {
 	d.RecordActivity()
 	stepStart := time.Now()
+	// Seed the ceiling anchor to step start. It advances on each sub-agent
+	// boundary (RecordItemBoundary) so the cap bounds an individual batch
+	// item; with no sub-agents it never moves and the cap is a flat
+	// wall-clock ceiling from step start (PLAN-19 D2 behaviour).
+	d.resetMaxDurationAnchor(stepStart)
 
 	// Progress baselines. Only this goroutine touches them, so they need
 	// no lock (the hook anchor lastActivity is the exception — it is read
@@ -399,17 +444,19 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 			}
 			d.activityMu.Lock()
 			lastHook := d.lastActivity
+			capAnchor := d.maxDurationAnchor
 			d.activityMu.Unlock()
 
-			elapsed := now.Sub(stepStart)
 			// Hard ceiling first: it is the absolute stop even for a step
 			// that is still making progress (a stalled step would have
-			// tripped the idle path far earlier).
-			if d.maxDuration > 0 && elapsed > d.maxDuration {
+			// tripped the idle path far earlier). Measured since the last
+			// sub-agent boundary (== step start when the step spawns none),
+			// so a sequential batch is bounded per item, not per batch.
+			if capElapsed := now.Sub(capAnchor); d.maxDuration > 0 && capElapsed > d.maxDuration {
 				_, diag := d.diagnose(now, stepStart, lastHook, lastTranscript, lastPTY)
 				return &MaxDurationError{
 					Label:      d.idleErrLabel,
-					Elapsed:    elapsed,
+					Elapsed:    capElapsed,
 					Max:        d.maxDuration,
 					Diagnostic: diag,
 				}
@@ -425,9 +472,10 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 					Diagnostic: diag,
 				}
 			}
-			// Relax / tighten the cadence as the step crosses the
-			// long-run threshold (D6).
-			if np := d.pollInterval(elapsed); np != poll {
+			// Relax / tighten the cadence as the step crosses the long-run
+			// threshold (D6) — on TOTAL step time, not the per-item anchor,
+			// so a long batch still relaxes to the cheap 60s poll.
+			if np := d.pollInterval(now.Sub(stepStart)); np != poll {
 				poll = np
 				ticker.Reset(poll)
 			}

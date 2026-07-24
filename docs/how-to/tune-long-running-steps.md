@@ -49,9 +49,9 @@ only internally, so pipelines were stuck at the 60m default with no knob).
 
 ## Adjust or disable the hard ceiling
 
-The hard ceiling (`--max-duration`, default `3h`) is an absolute wall-clock cap
-per step, independent of progress. It bounds a step that stays noisy but never
-actually finishes, keeping the worst-case per-step wall clock predictable.
+The hard ceiling (`--max-duration`, default `3h`) is an absolute wall-clock cap,
+independent of progress. It bounds a step that stays noisy but never actually
+finishes, keeping the worst-case wall clock predictable.
 
 ```bash
 # raise the ceiling for an exceptionally long step
@@ -60,6 +60,33 @@ ape pipeline design --max-duration 8h
 # disable the ceiling entirely (rely on the idle window alone)
 ape pipeline design --max-duration 0
 ```
+
+## The ceiling is per batch item, not per batch
+
+The ceiling clock **resets on every sub-agent boundary** (a `SubagentStart` or
+`SubagentStop`). A sub-agent completing is unambiguous real progress — a whole
+unit of work just finished — so the cap starts counting again for the next one.
+
+This matters for the sequential **batch skills**, which spawn one sub-agent per
+item:
+
+- `apex-story-batch-dev`, `apex-story-batch-create`, `apex-story-batch-review`
+- `apex-lift-project`
+
+Running `apex-story-batch-dev` over an epic with ten stories is **one** step
+from ape's point of view, but each story is developed in its own sub-agent. The
+`3h` ceiling therefore bounds **each story**, not the ten-story batch — so a
+long batch runs to completion as long as no single story exceeds the cap, while
+a single wedged-but-noisy story is still stopped after `--max-duration`.
+
+A step that spawns **no** sub-agents (an ordinary single-skill step) sees a flat
+wall-clock cap from step start, exactly as before — nothing changed there.
+
+There is no flag or spec field to set: the per-item behaviour is automatic
+wherever sub-agents appear, on `ape pipeline`, `ape task`, and `ape prompt`
+alike. The one residual gap: a step that spins sub-agents in a *noisy infinite
+loop* will not trip the ceiling (each boundary resets it) — but the idle window
+still catches a step that goes genuinely silent.
 
 ## Reading a termination diagnostic
 

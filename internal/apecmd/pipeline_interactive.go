@@ -267,6 +267,13 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 		// sessionId equals the parent's). SubagentStart carries no
 		// agent_transcript_path — it is presence only; capture lands on
 		// SubagentStop, when the agent-<id>.jsonl is complete on disk.
+		//
+		// A sub-agent boundary is also a batch-item boundary: reset the hard
+		// max-duration ceiling so it bounds each item, not the whole batch
+		// (a sequential batch skill spawns one sub-agent per item). The idle
+		// anchor already resets via RecordActivity above; this handles the
+		// hard cap. Unconditional — SubagentStart is presence-only.
+		c.driver.RecordItemBoundary()
 		env := parseHookEnvelope(h.Payload)
 		agentID := h.AgentID
 		if agentID == "" {

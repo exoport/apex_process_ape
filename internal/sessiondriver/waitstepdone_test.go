@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/bridge/ipc"
+	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/stretchr/testify/require"
 )
@@ -127,6 +129,53 @@ func TestWaitStepDone_MaxDurationTerminatesProgressingStep(t *testing.T) {
 
 	var ite *IdleTimeoutError
 	require.NotErrorAs(t, err, &ite, "cap must not be reported as an idle timeout")
+}
+
+// TestWaitStepDone_SubagentBoundaryResetsCeiling: a step that keeps
+// finishing sub-agents (batch items) more often than the hard cap is NOT
+// killed by max-duration — each SubagentStop resets the ceiling anchor via
+// FeedHook, so the cap bounds an individual item, not the whole batch. The
+// only way out is ctx expiry. Contrast
+// TestWaitStepDone_MaxDurationTerminatesProgressingStep, where a
+// progressing-but-boundary-less step DOES trip the same cap.
+func TestWaitStepDone_SubagentBoundaryResetsCeiling(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "sess.jsonl")
+	require.NoError(t, os.WriteFile(src, []byte(turnLine(10, 10)+"\n"), 0o600))
+
+	d := newTestDriver(2 * time.Second) // idle window wide; poll floors at 1s
+	d.SetActiveTranscript(src)
+	d.SetMaxDuration(2 * time.Second) // hard cap ~2s — a boundary-less step would trip
+	d.Begin()
+
+	// Fire a sub-agent boundary every 600ms (well under the 2s cap) through
+	// the real FeedHook path, and grow the transcript so the idle anchor
+	// stays happy independently of the boundaries.
+	stop := make(chan struct{})
+	appendEvery(t, src, 400*time.Millisecond, stop)
+	go func() {
+		tk := time.NewTicker(600 * time.Millisecond)
+		defer tk.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tk.C:
+				d.FeedHook(orchestrator.HookEvent{Event: ipc.HookSubagentStop, At: time.Now()})
+			}
+		}
+	}()
+	defer close(stop)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+	defer cancel()
+	err := d.WaitStepDone(ctx)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded,
+		"sub-agent boundaries must keep resetting the per-item ceiling")
+	var mde *MaxDurationError
+	require.NotErrorAs(t, err, &mde,
+		"per-item boundary reset must prevent the batch-wide cap from tripping")
 }
 
 // TestWaitStepDone_PTYProbeCountsAsProgress: with a flat transcript but a

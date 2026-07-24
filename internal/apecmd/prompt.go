@@ -180,7 +180,7 @@ failed · 2 usage or preflight error (no _apex/config.yaml, unresolved
 	cmd.Flags().BoolVar(&workflowFlag, "workflow", false, "Append a directive to run the task through a Claude Code workflow")
 	cmd.Flags().BoolVar(&ultracodeFlag, "ultracode", false, "Prepend the ultracode keyword (session runs workflows by default)")
 	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Idle backstop: end the session only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default matches the pipeline (60m)")
-	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Hard wall-clock ceiling regardless of progress (e.g. 3h). 0 disables the cap.")
+	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Hard wall-clock ceiling regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a batch of sub-agents is bounded per item, not overall. 0 disables the cap.")
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "Suppress the progress stream on stderr")
 	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json")

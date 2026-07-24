@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Unreleased
+
+- **fix(sessiondriver): the `--max-duration` ceiling is now per batch item, not
+  per batch** — the hard wall-clock ceiling (PLAN-19 D2, default 3h) previously
+  measured from step start, so a sequential batch skill —
+  `apex-story-batch-dev` / `-create` / `-review`, `apex-lift-project` — that
+  spawns one sub-agent per item was killed mid-batch once the *whole* batch
+  crossed 3h, even while each item was progressing. The ceiling clock now
+  **resets on every sub-agent boundary** (`SubagentStart` / `SubagentStop`) — a
+  completed sub-agent is unambiguous real progress, a stronger signal than the
+  transcript-growth bytes the idle anchor already trusts — so the cap bounds an
+  individual item rather than the batch. A step that spawns no sub-agents is
+  unchanged: a flat cap from step start. Automatic on `ape pipeline`, `ape task`,
+  and `ape prompt`; no flag or pipeline-spec change (the reset applies wherever
+  sub-agents appear). The idle window (`--idle-timeout`, default 60m) still
+  catches a step that goes genuinely silent.
+
 ## v0.0.46 (2026-07-24)
 
 - **feat(service): report `last_event_at` on `job.status` / `job.list`** — the
