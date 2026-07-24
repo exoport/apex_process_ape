@@ -114,8 +114,11 @@ var (
 //     CLAUDE_CODE_CHILD_SESSION, CLAUDE_CODE_SSE_PORT, …). The
 //     persistence-suppressing marker is in this set; stripping the
 //     family is robust across claude versions;
-//   - CLAUDE_EFFORT — so the child's effort comes from ape's flags,
-//     not the parent session's inherited effort.
+//   - CLAUDE_CODE_EFFORT_LEVEL (via the CLAUDE_CODE_ prefix) — so the
+//     child's reasoning effort comes from ape's resolved config
+//     (NewSessionWithEnv re-injects it), not the parent session's
+//     inherited level. CLAUDE_EFFORT is stripped too as a harmless legacy
+//     alias.
 //
 // Everything else — ANTHROPIC_* auth included — passes through
 // untouched. Exported so non-PTY interactive spawns (`ape chat`) can
@@ -137,11 +140,48 @@ func ScrubClaudeCodeEnv(env []string) []string {
 	return out
 }
 
+// EnvClaudeEffortLevel is the environment variable the spawned claude reads
+// to set its reasoning-effort level (low|medium|high|xhigh|max). ape sets it
+// from the resolved --effort flag / pipeline `effort:` field (default
+// DefaultEffort). Setting it via the env — rather than claude's --effort CLI
+// flag — makes it propagate to sub-agents the session spawns (e.g. a batch
+// skill's per-item sub-agents) and take precedence over any inherited value.
+// ScrubClaudeCodeEnv strips the inherited one first (via the CLAUDE_CODE_
+// prefix) so the value re-injected here is authoritative — no duplicate key.
+const EnvClaudeEffortLevel = "CLAUDE_CODE_EFFORT_LEVEL"
+
+// DefaultEffort is the reasoning effort ape applies to a spawned claude when
+// nothing else sets one — no --effort flag, and (for pipelines) no
+// step/stage/pipeline `effort:` field. Exported so every spawn path shares a
+// single default: the pipeline/task runner, `ape prompt`, and `ape chat`.
+const DefaultEffort = "xhigh"
+
+// EffortEnv returns the CLAUDE_CODE_EFFORT_LEVEL entry for the resolved
+// effort, substituting DefaultEffort when effort is empty. Append it to a
+// spawned claude's scrubbed environment (NewSessionWithEnv, or ape chat's
+// direct exec) so effort propagates to sub-agents and overrides any inherited
+// level. Always returns exactly one entry (the default guarantees non-empty).
+func EffortEnv(effort string) []string {
+	if effort == "" {
+		effort = DefaultEffort
+	}
+	return []string{EnvClaudeEffortLevel + "=" + effort}
+}
+
 // NewSession spawns argv attached to a PTY, registers it under name,
 // and starts background readers that accumulate pane output for
 // CapturePane / WaitForReady. argv[0] is the program; argv[1:] its
 // arguments. dir becomes the child's working directory.
-func NewSession(_ context.Context, name, dir string, argv []string) error {
+func NewSession(ctx context.Context, name, dir string, argv []string) error {
+	return NewSessionWithEnv(ctx, name, dir, argv, nil)
+}
+
+// NewSessionWithEnv is NewSession with extra "KEY=VALUE" environment entries
+// appended to the spawned claude's scrubbed environment. The interactive
+// runner uses it to inject CLAUDE_CODE_EFFORT_LEVEL (see EnvClaudeEffortLevel)
+// from ape's resolved effort. Because the scrub has already removed any
+// inherited value, an appended entry is the sole occurrence of its key.
+func NewSessionWithEnv(_ context.Context, name, dir string, argv, extraEnv []string) error {
 	if len(argv) == 0 {
 		return errors.New("repl: empty argv")
 	}
@@ -172,8 +212,10 @@ func NewSession(_ context.Context, name, dir string, argv []string) error {
 	// session-transcript persistence — ~/.claude/projects/<cwd>/<sid>.jsonl
 	// is never written, zeroing every transcript-derived telemetry
 	// value (the v0.0.28–32 saga's true root cause; verified: strip →
-	// transcript persists, keep → zero).
-	cmd.Env = ScrubClaudeCodeEnv(os.Environ())
+	// transcript persists, keep → zero). extraEnv (e.g. the resolved
+	// CLAUDE_CODE_EFFORT_LEVEL) is appended after the scrub so it survives
+	// and is authoritative.
+	cmd.Env = append(ScrubClaudeCodeEnv(os.Environ()), extraEnv...)
 
 	if err := cmd.Start(); err != nil {
 		_ = ptm.Close()

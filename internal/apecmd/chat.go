@@ -40,6 +40,7 @@ import (
 func newChatCmd() *cobra.Command {
 	var (
 		modelFlag             string
+		effortFlag            string
 		cwdFlag               string
 		ignoreProjectSettings bool
 	)
@@ -80,7 +81,7 @@ error (no _apex/config.yaml, bad cwd).`,
 				fmt.Fprintf(os.Stderr, "Error: ape chat requires a project root with _apex/config.yaml; not found at %s\n", cfgPath)
 				os.Exit(ExitUsage)
 			}
-			if err := runChat(cmd.Context(), projectRoot, modelFlag, ignoreProjectSettings); err != nil {
+			if err := runChat(cmd.Context(), projectRoot, modelFlag, effortFlag, ignoreProjectSettings); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 				os.Exit(ExitRunFailed)
 			}
@@ -88,6 +89,7 @@ error (no _apex/config.yaml, bad cwd).`,
 		},
 	}
 	cmd.Flags().StringVar(&modelFlag, "model", "", "Initial claude model (e.g. \"opus[1m]\"); falls back to claude's default when empty.")
+	cmd.Flags().StringVar(&effortFlag, "effort", "", "Reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Defaults to claude's native effort when unset.")
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root (default: current working directory).")
 	cmd.Flags().BoolVar(&ignoreProjectSettings, "ignore-project-settings", false, "Tell claude to skip project + local .claude/settings*.json.")
 	return cmd
@@ -96,7 +98,7 @@ error (no _apex/config.yaml, bad cwd).`,
 // runChat wires the bridge runtime, then exec's claude as a foreground
 // child with stdio inherited so the user can drive the REPL directly.
 // Returns when claude exits.
-func runChat(ctx context.Context, projectRoot, modelArg string, ignoreProjectSettings bool) error {
+func runChat(ctx context.Context, projectRoot, modelArg, effortArg string, ignoreProjectSettings bool) error {
 	apeBin, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("ape chat: locate self: %w", err)
@@ -184,6 +186,14 @@ func runChat(ctx context.Context, projectRoot, modelArg string, ignoreProjectSet
 	// environment makes the child claude suppress session-transcript
 	// persistence.
 	claude.Env = repl.ScrubClaudeCodeEnv(os.Environ())
+	// Interactive chat keeps claude's NATIVE effort when --effort is unset —
+	// unlike the autonomous pipeline/task/prompt paths, which default to
+	// repl.DefaultEffort. Only inject CLAUDE_CODE_EFFORT_LEVEL (after the
+	// scrub, so it's authoritative and propagates to sub-agents) when the user
+	// asked for a specific level.
+	if effortArg != "" {
+		claude.Env = append(claude.Env, repl.EnvClaudeEffortLevel+"="+effortArg)
+	}
 	claude.Stdin = os.Stdin
 	claude.Stdout = os.Stdout
 	claude.Stderr = os.Stderr

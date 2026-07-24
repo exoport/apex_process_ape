@@ -118,62 +118,73 @@ func TestStep_UnmarshalRecordsCommitSet(t *testing.T) {
 	}
 }
 
-// TestSpec_Effective_ModelAgentPrecedence covers PLAN-6 / C2 precedence
-// for the Model and Agent fields: step > stage > pipeline > "".
-func TestSpec_Effective_ModelAgentPrecedence(t *testing.T) {
+// TestSpec_Effective_ModelEffortAgentPrecedence covers PLAN-6 / C2
+// precedence for the Model, Effort, and Agent fields: step > stage >
+// pipeline > "". Effort follows the identical cascade as Model.
+func TestSpec_Effective_ModelEffortAgentPrecedence(t *testing.T) {
 	cases := []struct {
-		name      string
-		yamlText  string
-		wantModel string
-		wantAgent string
+		name       string
+		yamlText   string
+		wantModel  string
+		wantEffort string
+		wantAgent  string
 	}{
 		{
 			name: "pipeline-only",
 			yamlText: `
 name: design
 model: "opus[1m]"
+effort: medium
 agent: apex-agent-pm
 stages:
   s1:
     chain:
       - skill: foo
 `,
-			wantModel: "opus[1m]",
-			wantAgent: "apex-agent-pm",
+			wantModel:  "opus[1m]",
+			wantEffort: "medium",
+			wantAgent:  "apex-agent-pm",
 		},
 		{
 			name: "stage-overrides-pipeline",
 			yamlText: `
 name: design
 model: "opus[1m]"
+effort: medium
 agent: apex-agent-pm
 stages:
   s1:
     model: "sonnet[1m]"
+    effort: high
     agent: apex-agent-ux-designer
     chain:
       - skill: foo
 `,
-			wantModel: "sonnet[1m]",
-			wantAgent: "apex-agent-ux-designer",
+			wantModel:  "sonnet[1m]",
+			wantEffort: "high",
+			wantAgent:  "apex-agent-ux-designer",
 		},
 		{
 			name: "step-overrides-stage-and-pipeline",
 			yamlText: `
 name: design
 model: "opus[1m]"
+effort: medium
 agent: apex-agent-pm
 stages:
   s1:
     model: "sonnet[1m]"
+    effort: high
     agent: apex-agent-ux-designer
     chain:
       - skill: foo
         model: "haiku"
+        effort: low
         agent: apex-agent-dev
 `,
-			wantModel: "haiku",
-			wantAgent: "apex-agent-dev",
+			wantModel:  "haiku",
+			wantEffort: "low",
+			wantAgent:  "apex-agent-dev",
 		},
 		{
 			name: "all-empty",
@@ -184,19 +195,23 @@ stages:
     chain:
       - skill: foo
 `,
-			wantModel: "",
-			wantAgent: "",
+			wantModel:  "",
+			wantEffort: "",
+			wantAgent:  "",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			spec := mustLoadInline(t, tc.yamlText)
-			model, agent, _, err := spec.Effective("s1", 0)
+			model, effort, agent, _, err := spec.Effective("s1", 0)
 			if err != nil {
 				t.Fatalf("Effective: %v", err)
 			}
 			if model != tc.wantModel {
 				t.Errorf("model = %q, want %q", model, tc.wantModel)
+			}
+			if effort != tc.wantEffort {
+				t.Errorf("effort = %q, want %q", effort, tc.wantEffort)
 			}
 			if agent != tc.wantAgent {
 				t.Errorf("agent = %q, want %q", agent, tc.wantAgent)
@@ -331,7 +346,7 @@ stages:
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			spec := mustLoadInline(t, tc.yamlText)
-			_, _, eff, err := spec.Effective("s1", 0)
+			_, _, _, eff, err := spec.Effective("s1", 0)
 			if err != nil {
 				t.Fatalf("Effective: %v", err)
 			}
@@ -360,10 +375,10 @@ stages:
     chain:
       - skill: foo
 `)
-	if _, _, _, err := spec.Effective("missing", 0); err == nil || !strings.Contains(err.Error(), "unknown stage") {
+	if _, _, _, _, err := spec.Effective("missing", 0); err == nil || !strings.Contains(err.Error(), "unknown stage") {
 		t.Errorf("expected 'unknown stage' error, got %v", err)
 	}
-	if _, _, _, err := spec.Effective("s1", 5); err == nil || !strings.Contains(err.Error(), "step index") {
+	if _, _, _, _, err := spec.Effective("s1", 5); err == nil || !strings.Contains(err.Error(), "step index") {
 		t.Errorf("expected 'step index' error, got %v", err)
 	}
 }

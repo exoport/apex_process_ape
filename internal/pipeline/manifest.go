@@ -188,6 +188,7 @@ type StepRecord struct {
 	Args                  string       `yaml:"args,omitempty"`
 	Prompt                string       `yaml:"prompt,omitempty"`
 	Model                 string       `yaml:"model,omitempty"`
+	Effort                string       `yaml:"effort,omitempty"`
 	StartedAt             time.Time    `yaml:"started_at"`
 	EndedAt               time.Time    `yaml:"ended_at,omitempty"`
 	DurationSecs          float64      `yaml:"duration_seconds"`

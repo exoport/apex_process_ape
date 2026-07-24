@@ -99,13 +99,20 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 	}
 
 	firstStep := stage.Chain[0]
-	firstModel, _, _, err := spec.Effective(stage.Name, 0)
+	firstModel, firstEffort, _, _, err := spec.Effective(stage.Name, 0)
 	if err != nil {
 		return StatusFailed, fmt.Errorf("stage %q: resolve effective values: %w", stage.Name, err)
 	}
 	if firstModel == "" {
 		firstModel = firstStep.Model
 	}
+	// Reasoning effort is a per-stage LAUNCH setting, exported to the
+	// spawned claude via CLAUDE_CODE_EFFORT_LEVEL (it propagates to any
+	// sub-agents the session spawns) — the same launch-time shape as
+	// --model. Resolve it from the first step's cascade, then the run-level
+	// --effort (opts.Effort), then repl.DefaultEffort so a run always has an
+	// explicit effort.
+	stageEffort := firstNonEmpty(firstEffort, opts.Effort, repl.DefaultEffort)
 
 	plan, planErr := spec.PlanStageCommits(stage.Name)
 	if planErr != nil {
@@ -117,10 +124,12 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		return StatusFailed, argvErr
 	}
 
+	stageEnv := repl.EffortEnv(stageEffort)
+
 	sessionName := fmt.Sprintf("ape-%s-%d", sanitizeSessionName(stage.Name), os.Getpid())
 	// Ensure no stale session by that name; ignore not-found error.
 	_ = repl.KillSession(ctx, sessionName)
-	if err := repl.NewSession(ctx, sessionName, opts.ProjectRoot, argv); err != nil {
+	if err := repl.NewSessionWithEnv(ctx, sessionName, opts.ProjectRoot, argv, stageEnv); err != nil {
 		return StatusFailed, fmt.Errorf("stage %q: %w", stage.Name, err)
 	}
 	// Cleanup must run even after ctx is cancelled — Background is intentional.
@@ -155,11 +164,12 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 
 	stageStatus := StatusCompleted
 	var stageErr error
-	for i, step := range stage.Chain {
+	for i := range stage.Chain {
+		step := stage.Chain[i] // indexed to avoid a per-iteration copy of the 128-byte Step in the range clause
 		stepStart := time.Now()
 		notify(opts.Observer, func(o Observer) { o.OnStepStart(stage.Name, i, step) })
 
-		effModel, effAgent, _, effErr := spec.Effective(stage.Name, i)
+		effModel, _, effAgent, _, effErr := spec.Effective(stage.Name, i)
 		if effErr != nil {
 			stageErr = fmt.Errorf("stage %q step %d: resolve effective values: %w", stage.Name, i, effErr)
 			stageStatus = StatusFailed
@@ -225,6 +235,7 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 			"skill":    step.Skill,
 			"agent":    effAgent,
 			"model":    effModel,
+			"effort":   stageEffort,
 			"prompt":   prompt,
 			"no_clear": step.NoClear,
 		})

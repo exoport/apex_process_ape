@@ -151,6 +151,7 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 			FromStage:              cfg.fromStage,
 			NoCommit:               cfg.noCommit,
 			AllowDirty:             cfg.allowDirty,
+			Effort:                 cfg.effort,
 			PrependFlags:           prepend,
 			OnStageStart:           core.ResetStageTelemetry,
 			OnRunDir:               onRunDir,

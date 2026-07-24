@@ -28,7 +28,8 @@ func stubSpecSkills(t *testing.T, root string, spec *Spec) {
 	t.Helper()
 	seen := make(map[string]bool)
 	for _, stage := range spec.Stages() {
-		for _, step := range stage.Chain {
+		for i := range stage.Chain {
+			step := &stage.Chain[i]
 			for _, name := range []string{step.Skill, step.Agent} {
 				if name == "" || seen[name] {
 					continue

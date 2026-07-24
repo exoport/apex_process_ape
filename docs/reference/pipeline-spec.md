@@ -53,9 +53,33 @@ stages:
 | `skill`       | string         | yes      | Name of the skill to invoke (e.g. `apex-create-prd`). Empty/missing is rejected.                                                                                                                        |
 | `agent`       | string         | no       | When set, the call goes through PAT-25 agent passthrough: `/{agent} --autonomous -- {skill} --autonomous`. When unset, the call is direct: `/{skill} --autonomous --no-commit`.                         |
 | `model`       | string         | no       | Model passed to claude as `--model {value}`, e.g. `"opus[1m]"`. When unset, claude uses its default.                                                                                                    |
+| `effort`      | string         | no       | Reasoning effort exported to claude via `CLAUDE_CODE_EFFORT_LEVEL`: `low`, `medium`, `high`, `xhigh`, or `max`. Propagates to sub-agents the step spawns. When unset at every level, the runner falls back to the `--effort` flag, then the built-in default **`xhigh`**.                                    |
 | `args`        | string         | no       | Extra literal CLI flags appended to the skill invocation, whitespace-separated. Example: `"--doc prd"`. Use this for fixed flags only.                                                                  |
 | `prompt_flag` | string         | no       | When set together with the runner's `--prompt` flag, ape appends `<prompt_flag> <prompt-value>` to the skill argv. Currently used by `apex-create-epics-and-stories` to receive a user-supplied prompt. |
 | `commit`      | bool or string | no       | Per-step commit boundary control (PLAN-4). See [Commits](#commits) below.                                                                                                                               |
+
+## Reasoning effort
+
+`effort` sets the reasoning/thinking budget the spawned `claude` runs at. Like `model` and `agent`, it may be declared at three levels and cascades **step > stage > pipeline**; the runner then falls back to the `--effort` CLI flag and finally the built-in default **`xhigh`**:
+
+```
+effort = step.effort ?? stage.effort ?? pipeline.effort ?? --effort ?? "xhigh"
+```
+
+```yaml
+name: design
+effort: high            # pipeline-level default for every stage/step
+stages:
+  wireframes:
+    effort: medium      # this stage runs at medium…
+    chain:
+      - skill: apex-create-wireframes
+        agent: apex-agent-ux-designer
+      - skill: apex-quick-check
+        effort: low     # …except this step, which runs at low
+```
+
+Valid values: `low`, `medium`, `high`, `xhigh`, `max`. ape exports the resolved value to `claude` via the `CLAUDE_CODE_EFFORT_LEVEL` environment variable, so it also **propagates to any sub-agents** the session spawns — a batch skill's per-item sub-agents inherit the same effort. Because effort is applied when the stage's `claude` process launches (the same launch-time shape as `--model`), a multi-step stage runs its whole chain at the first step's resolved effort.
 
 ## Step completion backstop
 

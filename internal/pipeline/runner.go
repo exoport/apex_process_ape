@@ -38,6 +38,13 @@ type RunOptions struct {
 	// (resolved via $PATH). Used by tests to swap in a shim.
 	ClaudeBin string
 
+	// Effort is the run-level reasoning effort (--effort) applied when the
+	// pipeline files don't set one at the step/stage/pipeline level. It sits
+	// below the spec's `effort:` and above repl.DefaultEffort in the
+	// resolution chain (see runStageInteractive). Empty means "no run-level
+	// override"; the runner then falls back to repl.DefaultEffort.
+	Effort string
+
 	// PrependFlags is inserted into every claude invocation after
 	// argv[0] and before --dangerously-skip-permissions. Used by
 	// web mode to attach --strict-mcp-config + --mcp-config + --settings
@@ -462,6 +469,7 @@ func recordStep(
 		Args:         step.Args,
 		Prompt:       prompt,
 		Model:        step.Model,
+		Effort:       step.Effort,
 		StartedAt:    startedAt.UTC(),
 		EndedAt:      endedAt.UTC(),
 		DurationSecs: endedAt.Sub(startedAt).Seconds(),

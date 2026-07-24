@@ -21,6 +21,7 @@ func TestNewSingleStepSpecEffective(t *testing.T) {
 		Skill:      "apex-create-prd",
 		Agent:      testAgentPM,
 		Model:      testModelOpus1M,
+		Effort:     "xhigh",
 		Args:       "--from-status draft",
 		PromptFlag: "--prompt",
 	}
@@ -33,12 +34,15 @@ func TestNewSingleStepSpecEffective(t *testing.T) {
 		t.Fatalf("expected 1 step, got %d", got)
 	}
 
-	model, agent, commit, err := spec.Effective("apex-create-prd", 0)
+	model, effort, agent, commit, err := spec.Effective("apex-create-prd", 0)
 	if err != nil {
 		t.Fatalf("Effective: %v", err)
 	}
 	if model != testModelOpus1M || agent != testAgentPM {
 		t.Fatalf("Effective returned model=%q agent=%q", model, agent)
+	}
+	if effort != "xhigh" {
+		t.Fatalf("Effective returned effort=%q, want xhigh", effort)
 	}
 	if commit.Boundary != CommitBoundaryNone {
 		t.Fatalf("nil commit directive must resolve to no boundary, got %v", commit.Boundary)

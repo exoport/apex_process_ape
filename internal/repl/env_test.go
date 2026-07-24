@@ -7,6 +7,9 @@ import (
 	"testing"
 )
 
+// goosWindows names the GOOS these POSIX-PTY tests skip on.
+const goosWindows = "windows"
+
 // TestScrubClaudeCodeEnv pins the v0.0.33 nesting-marker scrub: the
 // parent Claude Code session's markers are removed (they make a
 // spawned claude suppress session-transcript persistence — the true
@@ -54,7 +57,7 @@ func TestScrubClaudeCodeEnv(t *testing.T) {
 // which is exactly why three green suites shipped alongside failing
 // live runs; this guard reproduces the nested context explicitly.
 func TestNewSessionScrubsNestedClaudeEnv(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == goosWindows {
 		t.Skip("POSIX PTY test; skipping on Windows")
 	}
 	if _, err := exec.LookPath("bash"); err != nil {
@@ -87,5 +90,59 @@ func TestNewSessionScrubsNestedClaudeEnv(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(s.cmd.Env, "\n"), "ANTHROPIC_API_KEY=keep-me") {
 		t.Fatalf("child env lost ANTHROPIC_API_KEY (auth must pass through)")
+	}
+}
+
+// TestEffortEnv covers the default substitution (empty → DefaultEffort) and
+// explicit pass-through, and that the entry is keyed on EnvClaudeEffortLevel.
+func TestEffortEnv(t *testing.T) {
+	if got := EffortEnv(""); len(got) != 1 || got[0] != EnvClaudeEffortLevel+"="+DefaultEffort {
+		t.Fatalf("EffortEnv(%q) = %v, want [%s=%s]", "", got, EnvClaudeEffortLevel, DefaultEffort)
+	}
+	if got := EffortEnv("low"); len(got) != 1 || got[0] != EnvClaudeEffortLevel+"=low" {
+		t.Fatalf("EffortEnv(%q) = %v, want [%s=low]", "low", got, EnvClaudeEffortLevel)
+	}
+}
+
+// TestNewSessionWithEnvInjectsEffort proves the effort injection path: an
+// inherited CLAUDE_CODE_EFFORT_LEVEL is scrubbed (via the CLAUDE_CODE_
+// prefix) and the value ape passes via extraEnv is the sole surviving
+// occurrence — so ape's resolved effort is authoritative and not shadowed
+// by whatever the parent Claude Code session had set.
+func TestNewSessionWithEnvInjectsEffort(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("POSIX PTY test; skipping on Windows")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not installed")
+	}
+	t.Setenv(EnvClaudeEffortLevel, "inherited-medium") // parent session's level
+
+	name := "ape-repl-test-effort"
+	_ = KillSession(t.Context(), name)
+	if err := NewSessionWithEnv(
+		t.Context(), name, "/tmp",
+		[]string{"bash", "--noprofile", "--norc", "-c", "sleep 2"},
+		[]string{EnvClaudeEffortLevel + "=xhigh"},
+	); err != nil {
+		t.Fatalf("NewSessionWithEnv: %v", err)
+	}
+	t.Cleanup(func() { _ = KillSession(t.Context(), name) })
+
+	s, ok := lookup(name)
+	if !ok {
+		t.Fatalf("session not registered")
+	}
+	var got []string
+	for _, e := range s.cmd.Env {
+		if k, _, _ := strings.Cut(e, "="); k == EnvClaudeEffortLevel {
+			got = append(got, e)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("want exactly one %s entry, got %v", EnvClaudeEffortLevel, got)
+	}
+	if got[0] != EnvClaudeEffortLevel+"=xhigh" {
+		t.Fatalf("effort entry = %q, want %s=xhigh (inherited value must be scrubbed)", got[0], EnvClaudeEffortLevel)
 	}
 }

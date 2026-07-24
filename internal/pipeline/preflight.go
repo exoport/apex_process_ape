@@ -103,7 +103,8 @@ func PreflightSkills(spec *Spec, projectRoot string) error {
 	}
 
 	for _, stage := range spec.Stages() {
-		for i, step := range stage.Chain {
+		for i := range stage.Chain {
+			step := &stage.Chain[i] // pointer: avoid copying the 128-byte Step per iteration
 			where := fmt.Sprintf("stage %s, step %d", stage.Name, i+1)
 			check(step.Skill, where)
 			check(step.Agent, where)

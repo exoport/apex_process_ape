@@ -284,6 +284,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		FromStage:    cfg.fromStage,
 		NoCommit:     cfg.noCommit,
 		AllowDirty:   cfg.allowDirty,
+		Effort:       cfg.effort,
 		PrependFlags: prepend,
 		OnStageStart: onStageStart,
 		OnStageEnd:   onStageEnd,

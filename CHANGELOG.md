@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Unreleased
+
+- **feat: configurable reasoning `effort` (default `xhigh`)** — `ape pipeline`,
+  `ape task`, `ape prompt`, and `ape chat` now all accept an `--effort` flag
+  (`low|medium|high|xhigh|max`), and pipeline YAML files accept an `effort:`
+  field at the pipeline, stage, and step levels. Effort resolves as
+  `step ?? stage ?? pipeline ?? --effort ?? "xhigh"` (pipelines) or
+  `--effort ?? "xhigh"` (task/prompt) — so those autonomous paths always run at
+  an explicit effort. `ape chat` is interactive: it applies `--effort` only when
+  given and otherwise keeps claude's native effort. ape exports the resolved
+  value to the spawned
+  `claude` via the `CLAUDE_CODE_EFFORT_LEVEL` env var (injected after the
+  `CLAUDE_CODE_*` scrub, so ape's value is authoritative and not shadowed by the
+  parent session's inherited level), which also makes it **propagate to
+  sub-agents** — a batch skill's per-item sub-agents inherit the same effort.
+  Like `--model`, effort is applied when the `claude` process launches. For
+  pipelines/tasks the step-level value is recorded in the run manifest
+  (`steps[].effort`) and the per-step event log.
+
 ## v0.0.47 (2026-07-24)
 
 - **fix(sessiondriver): the `--max-duration` ceiling is now per batch item, not

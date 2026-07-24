@@ -29,6 +29,12 @@ type Spec struct {
 	// step does not override at its own or its stage's level. Empty
 	// string means "no pipeline-level default".
 	Model string `yaml:"model,omitempty"`
+	// Effort is the pipeline-level default reasoning effort
+	// (low|medium|high|xhigh|max) exported to the spawned claude via the
+	// CLAUDE_CODE_EFFORT_LEVEL env var. Same precedence rules as Model; when
+	// empty at every level the runner falls back to the --effort flag, then
+	// the built-in default (repl.DefaultEffort).
+	Effort string `yaml:"effort,omitempty"`
 	// Agent is the pipeline-level default agent. Same precedence rules
 	// as Model.
 	Agent string `yaml:"agent,omitempty"`
@@ -60,6 +66,9 @@ type Stage struct {
 	// Model overrides the pipeline-level model for steps within this
 	// stage. Steps may further override with their own Model.
 	Model string
+	// Effort overrides the pipeline-level reasoning effort for steps
+	// within this stage. Steps may further override with their own Effort.
+	Effort string
 	// Agent overrides the pipeline-level agent for steps within this
 	// stage. Steps may further override with their own Agent.
 	Agent string
@@ -76,6 +85,10 @@ type Step struct {
 	Skill string `yaml:"skill"`
 	Agent string `yaml:"agent,omitempty"`
 	Model string `yaml:"model,omitempty"`
+	// Effort is the step-level reasoning effort (low|medium|high|xhigh|max)
+	// exported to the spawned claude via CLAUDE_CODE_EFFORT_LEVEL. Highest
+	// precedence in the step > stage > pipeline > default(xhigh) chain.
+	Effort string `yaml:"effort,omitempty"`
 	// Args is a whitespace-separated string of literal CLI flags.
 	// Use this for fixed flags like "--from-status draft".
 	Args string `yaml:"args,omitempty"`
@@ -117,6 +130,7 @@ type stepYAML struct {
 	Skill      string           `yaml:"skill"`
 	Agent      string           `yaml:"agent,omitempty"`
 	Model      string           `yaml:"model,omitempty"`
+	Effort     string           `yaml:"effort,omitempty"`
 	Args       string           `yaml:"args,omitempty"`
 	PromptFlag string           `yaml:"prompt_flag,omitempty"` //nolint:tagliatelle // matches Step.PromptFlag
 	Commit     *CommitDirective `yaml:"commit,omitempty"`
@@ -136,6 +150,7 @@ func (s *Step) UnmarshalYAML(node *yaml.Node) error {
 	s.Skill = raw.Skill
 	s.Agent = raw.Agent
 	s.Model = raw.Model
+	s.Effort = raw.Effort
 	s.Args = raw.Args
 	s.PromptFlag = raw.PromptFlag
 	s.NoClear = raw.NoClear
@@ -257,6 +272,7 @@ func decodeStages(node *yaml.Node) ([]Stage, error) {
 		stage := Stage{Name: key.Value}
 		var body struct {
 			Model  string           `yaml:"model,omitempty"`
+			Effort string           `yaml:"effort,omitempty"`
 			Agent  string           `yaml:"agent,omitempty"`
 			Commit *CommitDirective `yaml:"commit,omitempty"`
 			Chain  []Step           `yaml:"chain"`
@@ -267,12 +283,13 @@ func decodeStages(node *yaml.Node) ([]Stage, error) {
 		if len(body.Chain) == 0 {
 			return nil, fmt.Errorf("stage %q: chain is empty", stage.Name)
 		}
-		for j, step := range body.Chain {
-			if step.Skill == "" {
+		for j := range body.Chain {
+			if body.Chain[j].Skill == "" {
 				return nil, fmt.Errorf("stage %q step %d: missing skill", stage.Name, j)
 			}
 		}
 		stage.Model = body.Model
+		stage.Effort = body.Effort
 		stage.Agent = body.Agent
 		stage.Commit = body.Commit
 		stage.Chain = body.Chain
@@ -307,10 +324,11 @@ const (
 	CommitBoundaryStage
 )
 
-// Effective returns the resolved Model, Agent, and EffectiveCommit for
-// a (stage, step) under PLAN-6 / C2 precedence:
+// Effective returns the resolved Model, Effort, Agent, and EffectiveCommit
+// for a (stage, step) under PLAN-6 / C2 precedence:
 //
 //	model:  step.Model  ?? stage.Model  ?? spec.Model  ?? ""
+//	effort: step.Effort ?? stage.Effort ?? spec.Effort ?? ""
 //	agent:  step.Agent  ?? stage.Agent  ?? spec.Agent  ?? ""
 //	commit: step.Commit (if CommitSet) → step boundary
 //	        else stage.Commit          → stage boundary
@@ -331,20 +349,21 @@ const (
 //
 // Phase A returns the value; runner.go does not yet consume it. The
 // runner switches in Phase D.
-func (s *Spec) Effective(stageName string, stepIdx int) (model, agent string, commit EffectiveCommit, err error) {
+func (s *Spec) Effective(stageName string, stepIdx int) (model, effort, agent string, commit EffectiveCommit, err error) {
 	stage, ok := s.stageMap[stageName]
 	if !ok || stage == nil {
-		return "", "", EffectiveCommit{}, fmt.Errorf("unknown stage %q", stageName)
+		return "", "", "", EffectiveCommit{}, fmt.Errorf("unknown stage %q", stageName)
 	}
 	if stepIdx < 0 || stepIdx >= len(stage.Chain) {
-		return "", "", EffectiveCommit{}, fmt.Errorf("stage %q: step index %d out of range [0,%d)", stageName, stepIdx, len(stage.Chain))
+		return "", "", "", EffectiveCommit{}, fmt.Errorf("stage %q: step index %d out of range [0,%d)", stageName, stepIdx, len(stage.Chain))
 	}
 	step := stage.Chain[stepIdx]
 
 	model = firstNonEmpty(step.Model, stage.Model, s.Model)
+	effort = firstNonEmpty(step.Effort, stage.Effort, s.Effort)
 	agent = firstNonEmpty(step.Agent, stage.Agent, s.Agent)
 	commit = resolveCommit(step, stage, s)
-	return model, agent, commit, nil
+	return model, effort, agent, commit, nil
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -413,7 +432,7 @@ func (s *Spec) PlanStageCommits(stageName string) (StageCommitPlan, error) {
 			plan.Suppressed = true
 			continue
 		}
-		_, _, eff, err := s.Effective(stageName, i)
+		_, _, _, eff, err := s.Effective(stageName, i)
 		if err != nil {
 			return StageCommitPlan{}, err
 		}

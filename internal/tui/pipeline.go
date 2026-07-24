@@ -410,8 +410,8 @@ func NewPipelineModel(spec *pipeline.Spec, cancel context.CancelFunc, projectRoo
 	idx := make(map[string]int, len(rows))
 	for i, st := range spec.Stages() {
 		steps := make([]stepRow, len(st.Chain))
-		for j, s := range st.Chain {
-			steps[j] = stepRow{skill: s.Skill, agent: s.Agent}
+		for j := range st.Chain {
+			steps[j] = stepRow{skill: st.Chain[j].Skill, agent: st.Chain[j].Agent}
 		}
 		rows[i] = stageRow{name: st.Name, steps: steps}
 		idx[st.Name] = i

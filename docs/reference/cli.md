@@ -175,6 +175,7 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root (default: current working directory). |
+| `--effort` | string | `—` | Reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Defaults to claude's native effort when unset. |
 | `--ignore-project-settings` | bool | `false` | Tell claude to skip project + local .claude/settings*.json. |
 | `--model` | string | `—` | Initial claude model (e.g. "opus[1m]"); falls back to claude's default when empty. |
 
@@ -726,6 +727,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--commit-allow-dirty` | bool | `false` | Bypass the dirty-tree pre-run gate. The first committing step's diff will include any pre-existing uncommitted changes. |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--effort` | string | `—` | Reasoning effort (low\|medium\|high\|xhigh\|max) applied when a step/stage/pipeline doesn't set `effort:` in the YAML. Propagates to sub-agents. Default xhigh when unset everywhere. |
 | `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
 | `--from` | string | `—` | Skip stages before the named one and start execution there |
 | `--idle-timeout` | duration | `0s` | Per-step idle backstop: cancel a step only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 90m). Default 60m. |
@@ -807,6 +809,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--agent` | string | `—` | Framework agent fronting the session: /<agent> --autonomous -- <prompt> |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--effort` | string | `—` | Reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Default xhigh when unset. |
 | `--handoff` | string | `—` | Handoff document to seed the session with (mutually exclusive with the positional prompt) |
 | `--idle-timeout` | duration | `0s` | Idle backstop: end the session only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default matches the pipeline (60m) |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
@@ -1348,6 +1351,7 @@ Flags:
 | `--args` | string | `—` | Verbatim skill args appended to the invocation (whitespace-separated) |
 | `--commit-allow-dirty` | bool | `false` | Bypass the dirty-tree gate (relevant only with --task-commit) |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--effort` | string | `—` | Reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Default xhigh when unset. |
 | `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
 | `--handoff` | string | `—` | Path to a handoff/context file; derives a "Read <path> and follow the Resume Protocol" --prompt value (mutually exclusive with --prompt) |
 | `--idle-timeout` | duration | `0s` | Idle backstop: cancel only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default matches pipeline (60m) |

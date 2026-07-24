@@ -32,6 +32,7 @@ func newTaskCmd() *cobra.Command {
 	var (
 		agentFlag          string
 		modelFlag          string
+		effortFlag         string
 		argsFlag           string
 		promptFlag         string
 		promptFlagName     string
@@ -125,6 +126,7 @@ preflight error · 3 REPL never became ready (last pane on stderr).`,
 				skill:                 args[0],
 				agent:                 agentFlag,
 				model:                 modelFlag,
+				effort:                effortFlag,
 				args:                  argsFlag,
 				prompt:                promptFlag,
 				promptFlagName:        promptFlagName,
@@ -149,6 +151,7 @@ preflight error · 3 REPL never became ready (last pane on stderr).`,
 	}
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "Framework agent (slash-command) fronting the skill: /<agent> --autonomous -- <skill> ...")
 	cmd.Flags().StringVar(&modelFlag, "model", "", "Claude model for the session (e.g. \"opus[1m]\")")
+	cmd.Flags().StringVar(&effortFlag, "effort", "", "Reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Default xhigh when unset.")
 	cmd.Flags().StringVar(&argsFlag, "args", "", "Verbatim skill args appended to the invocation (whitespace-separated)")
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Run prompt forwarded via --prompt-flag (same semantics as pipeline --prompt)")
 	cmd.Flags().StringVar(&promptFlagName, "prompt-flag", "", "Skill flag name the --prompt value is forwarded through (spec prompt_flag equivalent)")
@@ -175,6 +178,7 @@ type taskOptions struct {
 	skill                 string
 	agent                 string
 	model                 string
+	effort                string
 	args                  string
 	prompt                string
 	promptFlagName        string
@@ -223,6 +227,7 @@ func buildTaskStep(o taskOptions) pipeline.Step {
 		Skill:      o.skill,
 		Agent:      o.agent,
 		Model:      o.model,
+		Effort:     o.effort,
 		Args:       o.args,
 		PromptFlag: o.promptFlagName,
 	}

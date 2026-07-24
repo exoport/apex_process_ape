@@ -32,6 +32,7 @@ func newPipelineCmd() *cobra.Command {
 		allowDirtyFlag     bool
 		idleTimeoutFlag    time.Duration
 		maxDurationFlag    time.Duration
+		effortFlag         string
 		tuiFlag            bool
 		evalFlag           bool
 		webFlag            bool
@@ -143,6 +144,7 @@ func newPipelineCmd() *cobra.Command {
 				transcriptStore:       transcriptStore,
 				idleTimeout:           idleTimeoutFlag,
 				maxDuration:           maxDurationFlag,
+				effort:                effortFlag,
 			}
 			// PLAN-9 F2 dispatch: interactive PTY is the only exec mode,
 			// so the switch is purely over the UI surface. Web routes to
@@ -183,6 +185,7 @@ func newPipelineCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&allowDirtyFlag, "commit-allow-dirty", false, "Bypass the dirty-tree pre-run gate. The first committing step's diff will include any pre-existing uncommitted changes.")
 	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Per-step idle backstop: cancel a step only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 90m). Default 60m.")
 	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Hard wall-clock ceiling per step regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a sequential batch step is bounded per item, not per batch. 0 disables the cap.")
+	cmd.Flags().StringVar(&effortFlag, "effort", "", "Reasoning effort (low|medium|high|xhigh|max) applied when a step/stage/pipeline doesn't set an effort field in the YAML. Propagates to sub-agents. Default xhigh when unset everywhere.")
 	cmd.PersistentFlags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
 	addNatsFlags(cmd, &natsURLFlag, &natsCredsFlag, &eventsPrefixFlag, &uploadTranscripts, &transcriptStore)
 	return cmd
@@ -301,6 +304,11 @@ type runConfig struct {
 	// run that never set it) is resolved to the 3h default by the caller,
 	// so the cap is only disabled by an explicit --max-duration 0.
 	maxDuration time.Duration
+	// effort is the run-level reasoning effort (--effort). Threaded onto
+	// RunOptions.Effort; sits below the pipeline files' `effort:` and above
+	// repl.DefaultEffort in the resolution chain. Empty means "no run-level
+	// override".
+	effort string
 
 	// NATS progress-eventing + transcript-blob upload (PLAN-13). All
 	// strictly opt-in and resolved flags → env (natsconn.Resolve); with no

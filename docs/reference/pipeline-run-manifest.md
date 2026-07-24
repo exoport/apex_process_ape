@@ -94,6 +94,7 @@ stages:
         args: ""
         prompt: ""
         model: ""
+        effort: ""               # step-level `effort:`; omitted when unset (resolved default is xhigh)
         started_at: 2026-05-11T09:45:30Z
         ended_at: 2026-05-11T09:58:11Z
         duration_seconds: 760.5
