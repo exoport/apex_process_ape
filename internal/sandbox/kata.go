@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/exoport/apex_process_ape/internal/workspace"
 )
 
 // ErrUnsupported is returned when a Kata workspace operation is attempted
@@ -47,7 +49,7 @@ const DefaultShell = "/bin/bash"
 const NetworkNone = "none"
 
 // ContainerName derives the containerd container name for a workspace.
-func ContainerName(workspace string) string { return ContainerPrefix + workspace }
+func ContainerName(name string) string { return ContainerPrefix + name }
 
 // runtimeHandler maps a VMM to its containerd runtime handler. kata-deploy
 // registers one handler per VMM (io.containerd.kata-<vmm>.v2); clh is the
@@ -82,6 +84,16 @@ type WorkspaceSpec struct {
 	Network     string       // nerdctl --network value; "" → default (CNI bridge), NetworkNone → networkless
 	Env         []string     // extra KEY=VALUE env beyond Comp.Env / the proxy
 	Command     []string     // container command override; empty → the image default
+
+	// Mounts is the workspace's full, ordered bind list (PLAN-20): the SYSTEM
+	// mounts aped applies on its own authority (the read-only framework, the
+	// project repos) followed by the policy-checked USER mounts. It is assembled
+	// server-side as `system ++ validated(user)`; a user entry can never occupy a
+	// reserved destination, so it can only ever add.
+	Mounts []workspace.MountSpec
+	// Cwd is the guest working directory — the main repo's mount point in a
+	// multi-repo workspace. Empty keeps the image's WORKDIR.
+	Cwd string
 
 	// EgressDomains is the GRANTED allowlist the workspace's CONNECT proxy
 	// enforces (policy ∩ request — PLAN-21 D1). Empty means no egress was granted;
@@ -169,6 +181,19 @@ func (s WorkspaceSpec) RunArgs() ([]string, error) {
 		args = append(args, "-v", bindVolumeArg(b))
 	}
 
+	// The resolved mount list (PLAN-20): system mounts then user mounts, in the
+	// order aped assembled them.
+	for _, m := range s.Mounts {
+		v := m.Source + ":" + m.Dest
+		if m.ReadOnly {
+			v += ":" + bindOptRO
+		}
+		args = append(args, "-v", v)
+	}
+	if strings.TrimSpace(s.Cwd) != "" {
+		args = append(args, "-w", s.Cwd)
+	}
+
 	// Env: HOME, then egress proxy vars, then the composition env
 	// (credentials/git token), then any extra. Deterministic order for tests.
 	args = append(args, "-e", "HOME="+s.Comp.GuestHome)
@@ -197,7 +222,7 @@ func (s WorkspaceSpec) RunArgs() ([]string, error) {
 func bindVolumeArg(b BindMount) string {
 	v := b.Source + ":" + b.Dest
 	if b.ReadOnly {
-		v += ":ro"
+		v += ":" + bindOptRO
 	}
 	return v
 }

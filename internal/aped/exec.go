@@ -357,6 +357,7 @@ func resolvedCreateFromSpec(spec sandbox.WorkspaceSpec) ResolvedCreate {
 	return ResolvedCreate{
 		Image: spec.Image, MountPath: mount, Devices: nil,
 		EgressDomains: spec.EgressDomains,
+		Mounts:        spec.Mounts,
 	}
 }
 

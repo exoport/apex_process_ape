@@ -15,7 +15,18 @@ var GitCmd = "git"
 
 // runGit executes `git <args...>` inside repoDir and returns trimmed
 // stdout. Stderr is captured and embedded in the error on failure.
+//
+// Every invocation carries `-c safe.directory=<repoDir>`: inside a sandbox
+// workspace the framework repo is a read-only host mount whose files are owned by
+// the host user, while the guest process runs as root. Git refuses to operate on a
+// repo it considers "dubiously owned", which would break `ape framework setup`
+// against the mounted framework for a reason that has nothing to do with the
+// user's project. Scoping the exemption to this one directory (not `*`) keeps it
+// narrow, and it is a no-op in the normal same-owner case.
 func runGit(ctx context.Context, repoDir string, args ...string) (string, error) {
+	if repoDir != "" {
+		args = append([]string{"-c", "safe.directory=" + repoDir}, args...)
+	}
 	cmd := exec.CommandContext(ctx, GitCmd, args...)
 	cmd.Dir = repoDir
 	var stdout, stderr bytes.Buffer

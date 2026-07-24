@@ -727,7 +727,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--commit-allow-dirty` | bool | `false` | Bypass the dirty-tree pre-run gate. The first committing step's diff will include any pre-existing uncommitted changes. |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
-| `--effort` | string | `—` | Reasoning effort (low\|medium\|high\|xhigh\|max) applied when a step/stage/pipeline doesn't set `effort:` in the YAML. Propagates to sub-agents. Default xhigh when unset everywhere. |
+| `--effort` | string | `—` | Reasoning effort (low\|medium\|high\|xhigh\|max) applied when a step/stage/pipeline doesn't set an effort field in the YAML. Propagates to sub-agents. Default xhigh when unset everywhere. |
 | `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
 | `--from` | string | `—` | Skip stages before the named one and start execution there |
 | `--idle-timeout` | duration | `0s` | Per-step idle backstop: cancel a step only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 90m). Default 60m. |
@@ -853,6 +853,7 @@ credential, and owns the workspace registry. ape never runs as root.
   ape sandbox unfreeze <name>  Unfreeze a frozen workspace
   ape sandbox suspend <name>   Suspend a workspace microVM — not yet on Kata
   ape sandbox down <name>      Tear a workspace down
+  ape sandbox framework …      Materialize the framework refs a node can mount
 
 Point ape at your aped node with APE_NATS_URL + APE_NATS_CREDS (the operator
 credential aped mints at startup) and --node. Requires a running aped on a
@@ -863,6 +864,7 @@ Subcommands:
 - `attach` — Open an interactive shell inside a workspace
 - `down` — Tear a workspace down
 - `exec` — Run a command inside a workspace
+- `framework` — Manage the APEX framework refs a sandbox node can mount
 - `freeze` — Freeze a workspace (cgroup-freeze; guest RAM stays resident)
 - `inspect` — Show a workspace's live state
 - `ls` — List provisioned workspaces
@@ -942,6 +944,98 @@ aped exec session subjects and returning its exit code.
 On an aped node without an interactive backend (the nerdctl shell driver) it
 falls back to a request/reply exec that reports only the exit status (output goes
 to the node's logs).
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox framework
+
+Manage the APEX framework refs a sandbox node can mount
+
+```
+ape sandbox framework
+```
+
+Manage the materialized APEX framework refs on this host.
+
+A sandbox workspace gets the framework as a READ-ONLY mount at /opt/apex-framework
+rather than a baked image layer, so the public ape-sandbox image stays
+framework-free and credential-free. This command is the host-side, credentialed
+half: it copies one pinned ref out of your local framework checkout into the
+node's framework root.
+
+  ape sandbox framework materialize v0.3.1
+  ape sandbox framework ls
+  ape sandbox up dev --framework-ref v0.3.1
+
+aped never fetches the framework itself: if a requested ref is not materialized,
+'ape sandbox up' fails with the command to run. Inside the workspace, consume it
+with 'ape framework setup --no-fetch --repo /opt/apex-framework'.
+
+Subcommands:
+
+- `ls` — List the framework refs materialized on this host
+- `materialize` — Materialize a framework ref into the node's framework root
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox framework ls
+
+List the framework refs materialized on this host
+
+```
+ape sandbox framework ls [flags]
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--root` | string | `—` | Framework root to list (default: $APE_FRAMEWORK_ROOT or /srv/apex-framework) |
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox framework materialize
+
+Materialize a framework ref into the node's framework root
+
+```
+ape sandbox framework materialize <ref> [flags]
+```
+
+Materialize one framework ref (tag, branch, or commit) as a self-contained,
+mountable checkout under the framework root.
+
+The ref must ALREADY be present in the local framework repo — this command does
+not fetch, so a stale checkout fails loudly instead of silently materializing an
+older commit. Fetch first with your own credentials:
+  git -C <repo> fetch --tags
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--force` | bool | `false` | Replace an already-materialized ref |
+| `--repo` | string | `—` | Local apex_process_framework checkout (default: $APEX_FRAMEWORK_REPO) |
+| `--root` | string | `—` | Framework root the node mounts from (default: $APE_FRAMEWORK_ROOT or /srv/apex-framework) |
 
 Global flags:
 
@@ -1078,15 +1172,28 @@ telemetry credential, and starts the detached microVM. For a host-fs mount the
 project at --cwd is sent as the mount source; aped canonicalizes it and
 re-checks it against its policy mount-root allow-list before binding it.
 
+A committed .apesandbox.yaml at the project root describes the rest of the
+workspace — the repos to mount (each at /workspace/<name>, one flagged main),
+extra mounts, and the egress domains to request. --mount flags merge on top of it
+(CLI wins by destination). Everything there is a REQUEST: aped re-checks every
+source against its mount roots, refuses reserved destinations, and intersects the
+egress domains with its own policy, so a project can narrow what a node permits
+but never widen it.
+
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root to mount for host-fs (default: current working directory) |
+| `--egress-domain` | stringArray | `[]` | Request an egress domain (repeatable; still gated by the node's policy) |
+| `--framework-ref` | string | `—` | APEX framework ref to mount read-only (must be materialized on the node) |
 | `--image` | string | `—` | Image ref override (default: aped's pinned image) |
 | `--mount` | string | `—` | Mount mode: host-fs \| volume \| ephemeral (default: host-fs) |
+| `--mount-path` | stringArray | `[]` | Extra mount <source>[:<dest>][:ro\|:rw] (repeatable; ro by default; merges with .apesandbox.yaml) |
+| `--no-sandbox-config` | bool | `false` | Ignore any .apesandbox.yaml in the project |
 | `--profile` | string | `—` | Profile name aped resolves (default: derived from the request) |
 | `--runtime` | string | `—` | Runtime handler: kata-qemu \| kata-clh |
+| `--sandbox-config` | string | `—` | Path to a non-default .apesandbox.yaml |
 
 Global flags:
 

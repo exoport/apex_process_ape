@@ -32,6 +32,12 @@ type Policy struct {
 	// under. Empty means host-fs mounts are refused (default-deny); volume and
 	// ephemeral mounts are unaffected.
 	MountRoots []string `yaml:"mount_roots"`
+	// MountRootsRO are roots that may only ever be mounted READ-ONLY: a request for
+	// a writable bind under one of them is denied (PLAN-20 D4). It lets an operator
+	// export a shared directory to every workspace without letting any of them
+	// write to it. Entries here do NOT need to be repeated in MountRoots — being
+	// listed authorizes the root, read-only.
+	MountRootsRO []string `yaml:"mount_roots_ro"`
 	// Limits are optional resource ceilings; a zero field means "no ceiling".
 	Limits Limits `yaml:"limits"`
 	// Devices is the passthrough allow-list (Phase 3). Empty → every device
@@ -69,6 +75,9 @@ type Limits struct {
 	MaxVCPUs      int `yaml:"max_vcpus"`
 	MaxMemMB      int `yaml:"max_mem_mb"`
 	MaxWorkspaces int `yaml:"max_workspaces"`
+	// MaxMounts caps the resolved mount list per workspace (0 → no ceiling). It
+	// bounds fan-out when a project commits a sprawling `.apesandbox.yaml`.
+	MaxMounts int `yaml:"max_mounts"`
 }
 
 // DevicePolicy is the passthrough allow-list: which PCI BDFs and which USB
@@ -92,6 +101,11 @@ type ResolvedCreate struct {
 	// The executor re-checks it against policy rather than trusting the front's
 	// intersection — same lesson as the mount path: authorize the concrete value.
 	EgressDomains []string
+	// Mounts is the resolved bind list (PLAN-20), checked PER ENTRY: each source
+	// against the mount-root allow-list, each destination against the reserved set,
+	// and each writable request against the read-only roots. MountPath above stays
+	// the primary project bind, so a pre-PLAN-20 create is authorized identically.
+	Mounts []workspace.MountSpec
 }
 
 // LoadPolicy reads and validates a policy.yaml. A missing or malformed file is
@@ -116,7 +130,7 @@ func LoadPolicy(path string) (*Policy, error) {
 // Validate checks the policy is internally sane (non-negative ceilings). An
 // empty policy is valid — it simply denies everything.
 func (p *Policy) Validate() error {
-	if p.Limits.MaxVCPUs < 0 || p.Limits.MaxMemMB < 0 || p.Limits.MaxWorkspaces < 0 {
+	if p.Limits.MaxVCPUs < 0 || p.Limits.MaxMemMB < 0 || p.Limits.MaxWorkspaces < 0 || p.Limits.MaxMounts < 0 {
 		return errors.New("aped: policy limits must be non-negative")
 	}
 	if p.Egress.MaxDomains < 0 {
@@ -141,6 +155,9 @@ func (p *Policy) CheckCreate(rc ResolvedCreate, currentCount int) error {
 		return err
 	}
 	if err := p.checkMount(rc.MountPath); err != nil {
+		return err
+	}
+	if err := p.checkMounts(rc.Mounts); err != nil {
 		return err
 	}
 	if err := p.checkLimits(rc, currentCount); err != nil {
@@ -201,7 +218,10 @@ func (p *Policy) checkMount(mountPath string) error {
 		}
 		return fmt.Errorf("%w: mount path %q: %s", workspace.ErrValidation, mountPath, err.Error())
 	}
-	for _, root := range p.MountRoots {
+	// A read-only root authorizes the path too — just not a writable bind of it
+	// (checkMounts enforces that separately), so an operator can export a shared
+	// directory without also having to list it in mount_roots.
+	for _, root := range append(append([]string(nil), p.MountRoots...), p.MountRootsRO...) {
 		croot, err := canonicalPath(root)
 		if err != nil {
 			continue // a broken configured root cannot authorize anything
@@ -211,6 +231,66 @@ func (p *Policy) checkMount(mountPath string) error {
 		}
 	}
 	return fmt.Errorf("%w: mount path %q (resolved %q) is not under an allowed root", workspace.ErrPolicyDenied, mountPath, resolved)
+}
+
+// checkMounts authorizes the resolved bind list entry by entry (PLAN-20 D4).
+//
+// Nothing here trusts the front's own merge: every source is re-canonicalized and
+// re-checked against the mount roots, every destination against the reserved set,
+// and a writable bind under a read-only root is denied. The framework mount is
+// exempt from the mount-root check ONLY when it is read-only and lands on its
+// reserved destination — it is a system mount whose source aped resolved itself,
+// not a caller path.
+func (p *Policy) checkMounts(mounts []workspace.MountSpec) error {
+	if p.Limits.MaxMounts > 0 && len(mounts) > p.Limits.MaxMounts {
+		return fmt.Errorf("%w: %d mounts exceeds the ceiling of %d",
+			workspace.ErrPolicyDenied, len(mounts), p.Limits.MaxMounts)
+	}
+	seen := make(map[string]bool, len(mounts))
+	for _, m := range mounts {
+		if strings.TrimSpace(m.Dest) == "" {
+			return fmt.Errorf("%w: mount of %q has no destination", workspace.ErrValidation, m.Source)
+		}
+		if seen[m.Dest] {
+			return fmt.Errorf("%w: duplicate mount destination %q", workspace.ErrValidation, m.Dest)
+		}
+		seen[m.Dest] = true
+
+		if m.Dest == sandbox.FrameworkDest {
+			if !m.ReadOnly {
+				return fmt.Errorf("%w: the framework mount %q must be read-only", workspace.ErrPolicyDenied, m.Dest)
+			}
+			continue
+		}
+		if err := p.checkMount(m.Source); err != nil {
+			return err
+		}
+		if !m.ReadOnly {
+			if root, ro := p.readOnlyRootFor(m.Source); ro {
+				return fmt.Errorf("%w: mount %q is under the read-only root %q and cannot be writable",
+					workspace.ErrPolicyDenied, m.Source, root)
+			}
+		}
+	}
+	return nil
+}
+
+// readOnlyRootFor reports whether a source falls under a read-only mount root.
+func (p *Policy) readOnlyRootFor(source string) (string, bool) {
+	resolved, err := canonicalPath(source)
+	if err != nil {
+		return "", false // an unresolvable path is already denied by checkMount
+	}
+	for _, root := range p.MountRootsRO {
+		croot, err := canonicalPath(root)
+		if err != nil {
+			continue
+		}
+		if pathUnder(resolved, croot) {
+			return root, true
+		}
+	}
+	return "", false
 }
 
 func (p *Policy) checkLimits(rc ResolvedCreate, currentCount int) error {

@@ -27,6 +27,8 @@ func newFrontCmd() *cobra.Command {
 		egressIP    string
 		egressLow   int
 		egressHigh  int
+		fwRoot      string
+		fwRef       string
 	)
 	cmd := &cobra.Command{
 		Use:   "front",
@@ -63,6 +65,8 @@ injected into each VM as APE_NATS_URL alongside its minted per-VM .creds.`,
 				EgressBindIP:      egressIP,
 				EgressPortLow:     egressLow,
 				EgressPortHigh:    egressHigh,
+				FrameworkRoot:     fwRoot,
+				FrameworkRef:      fwRef,
 				Stderr:            os.Stderr,
 			})
 		},
@@ -81,5 +85,7 @@ injected into each VM as APE_NATS_URL alongside its minted per-VM .creds.`,
 	f.StringVar(&egressIP, "egress-bridge-ip", "", "Bridge address the per-workspace CONNECT proxies listen on (default: the aped-netbr bridge address)")
 	f.IntVar(&egressLow, "egress-port-low", 0, "Lowest proxy listen port (must match the host nftables chain)")
 	f.IntVar(&egressHigh, "egress-port-high", 0, "Highest proxy listen port")
+	f.StringVar(&fwRoot, "framework-root", "", "Host dir holding materialized APEX framework refs, one subdir per ref ('' → no framework mount)")
+	f.StringVar(&fwRef, "framework-ref", "", "Default framework ref to mount read-only at /opt/apex-framework")
 	return cmd
 }

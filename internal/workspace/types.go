@@ -31,6 +31,51 @@ type CreateRequest struct {
 	// a project can narrow what policy permits but never widen it. Nil/empty means
 	// no egress — the workspace stays networkless.
 	Egress *EgressRequest `json:"egress,omitempty"`
+	// Repos are the project repositories to mount, each at /workspace/<name>, with
+	// exactly one flagged Main (it sets the workspace's working directory). Empty
+	// degenerates to a single repo derived from MountSource — the pre-PLAN-20 shape.
+	Repos []RepoMount `json:"repos,omitempty"`
+	// Mounts are ADDITIVE user mounts (PLAN-20): extra host paths a project asks
+	// for beyond the system mounts. They can only ever add: aped re-checks every
+	// source against its mount-root allow-list and refuses any entry targeting a
+	// reserved destination, so a committed file can never redirect the framework,
+	// the composed home, or a repo.
+	Mounts []MountSpec `json:"mounts,omitempty"`
+	// FrameworkRef selects which materialized APEX framework ref to mount read-only
+	// at /opt/apex-framework. It names a ref the NODE already has; aped resolves it
+	// under its own framework root and errors if absent — it never fetches, and the
+	// request can never point the mount somewhere else.
+	FrameworkRef string `json:"framework_ref,omitempty"`
+}
+
+// MountSpec is one host→guest bind: a canonical host source, a guest destination,
+// and its read-only flag. It is the single mount shape shared by the wire, the
+// resolved spec, and the OCI bind layer.
+//
+//nolint:tagliatelle // snake_case is the documented vmm NATS wire contract
+type MountSpec struct {
+	// Source is a canonical, absolute host path. Relative paths are resolved
+	// client-side against the project root before they reach the wire — aped never
+	// sees, nor trusts, a relative path.
+	Source string `json:"source"`
+	// Dest is the guest mount point (absolute).
+	Dest string `json:"dest"`
+	// ReadOnly is the guest-side bind option. User-declared mounts default to true
+	// (opt in to write); the framework is always true; project repos default false.
+	ReadOnly bool `json:"readonly,omitempty"`
+}
+
+// RepoMount is one project repository in a possibly-multi-repo workspace. Each is
+// mounted at /workspace/<Name> — always, even for a single repo — and exactly one
+// is Main, which sets the default working directory and the target for framework
+// setup and boundary commits.
+//
+//nolint:tagliatelle // snake_case is the documented vmm NATS wire contract
+type RepoMount struct {
+	Source   string `json:"source"` // canonical host path to the repo
+	Name     string `json:"name"`   // mount name → /workspace/<name>
+	Main     bool   `json:"main,omitempty"`
+	ReadOnly bool   `json:"readonly,omitempty"`
 }
 
 // EgressRequest is the requested allowlist for a workspace's public egress. It

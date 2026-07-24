@@ -33,6 +33,11 @@ type Resolver struct {
 	telemetry   Account
 	network     string // nerdctl --network for provisioned specs (default NetworkNone)
 	egress      EgressPlanner
+	// frameworkRoot/frameworkRef locate the APEX framework this node serves: a host
+	// directory holding one materialized checkout per ref. Empty root → the node
+	// serves no framework and the mount is simply absent.
+	frameworkRoot string
+	frameworkRef  string
 
 	// Injectable seams (default to the real implementations) so Resolve is
 	// unit-testable without touching a profile file or the compose filesystem.
@@ -64,6 +69,11 @@ type ResolverConfig struct {
 	// egress request: a workspace asking for domains on a node with no egress
 	// support is told so, rather than silently booting networkless.
 	Egress EgressPlanner
+	// FrameworkRoot is the host directory holding materialized framework refs, one
+	// subdirectory per ref (PLAN-20 D5). Empty disables the framework mount.
+	FrameworkRoot string
+	// FrameworkRef is the default ref to mount when a request names none.
+	FrameworkRef string
 	// LoadProfile is an optional server-side profile source (by name). When nil,
 	// the resolver builds a default profile from the request fields.
 	LoadProfile func(name string) (*sandbox.Profile, error)
@@ -76,15 +86,17 @@ func NewResolver(cfg ResolverConfig) *Resolver {
 		network = sandbox.NetworkNone
 	}
 	return &Resolver{
-		stateDir:    cfg.StateDir,
-		hostHome:    cfg.HostHome,
-		natsURL:     cfg.NatsURL,
-		credsExpiry: cfg.CredsExpiry,
-		telemetry:   cfg.Telemetry,
-		network:     network,
-		egress:      cfg.Egress,
-		loadProfile: cfg.LoadProfile,
-		compose:     sandbox.Compose,
+		stateDir:      cfg.StateDir,
+		hostHome:      cfg.HostHome,
+		natsURL:       cfg.NatsURL,
+		credsExpiry:   cfg.CredsExpiry,
+		telemetry:     cfg.Telemetry,
+		network:       network,
+		egress:        cfg.Egress,
+		frameworkRoot: cfg.FrameworkRoot,
+		frameworkRef:  cfg.FrameworkRef,
+		loadProfile:   cfg.LoadProfile,
+		compose:       sandbox.Compose,
 	}
 }
 
@@ -136,6 +148,10 @@ func (r *Resolver) Resolve(_ context.Context, req workspace.CreateRequest) (sand
 		return sandbox.WorkspaceSpec{}, fmt.Errorf("%w: unknown mount mode %q", workspace.ErrValidation, prof.Mount)
 	}
 
+	if err := r.resolveMounts(&spec, req); err != nil {
+		return sandbox.WorkspaceSpec{}, err
+	}
+
 	if err := r.resolveEgress(&spec, prof, req); err != nil {
 		return sandbox.WorkspaceSpec{}, err
 	}
@@ -144,6 +160,112 @@ func (r *Resolver) Resolve(_ context.Context, req workspace.CreateRequest) (sand
 		return sandbox.WorkspaceSpec{}, err
 	}
 	return spec, nil
+}
+
+// resolveMounts assembles the workspace's bind list as `system ++ user` (PLAN-20).
+//
+// SYSTEM mounts are aped's own: the read-only APEX framework (its source resolved
+// from THIS DAEMON's framework root, never from the request) and the project
+// repos. USER mounts are the additive requests from the project's
+// `.apesandbox.yaml` and `--mount` flags. The two are kept in that order and the
+// system entries are appended first, so a user entry can never shadow one — and
+// the executor re-checks the whole list against policy regardless.
+func (r *Resolver) resolveMounts(spec *sandbox.WorkspaceSpec, req workspace.CreateRequest) error {
+	// 1. The framework: present by default, read-only, independent of any request.
+	fw, served, err := r.frameworkMount(req.FrameworkRef)
+	if err != nil {
+		return err
+	}
+	if served {
+		spec.Mounts = append(spec.Mounts, fw)
+	}
+
+	// 2. Project repos, each at /workspace/<name>. A single-repo request (the
+	// pre-PLAN-20 shape) is derived from the host-fs mount source, so an old client
+	// keeps working unchanged.
+	repos := req.Repos
+	if len(repos) == 0 && spec.Mount == sandbox.MountHostFS && strings.TrimSpace(spec.ProjectRoot) != "" {
+		repos = []workspace.RepoMount{{
+			Source: spec.ProjectRoot,
+			Name:   filepath.Base(filepath.Clean(spec.ProjectRoot)),
+			Main:   true,
+		}}
+	}
+	mainSeen := false
+	for i := range repos {
+		rp := &repos[i]
+		if strings.TrimSpace(rp.Source) == "" {
+			return fmt.Errorf("%w: repo %q has no source", workspace.ErrValidation, rp.Name)
+		}
+		name := strings.TrimSpace(rp.Name)
+		if name == "" {
+			name = filepath.Base(filepath.Clean(rp.Source))
+		}
+		if err := sandbox.ValidateMountName(name); err != nil {
+			return fmt.Errorf("%w: %w", workspace.ErrValidation, err)
+		}
+		dest := sandbox.RepoDest(name)
+		spec.Mounts = append(spec.Mounts, workspace.MountSpec{Source: rp.Source, Dest: dest, ReadOnly: rp.ReadOnly})
+		if rp.Main || len(repos) == 1 {
+			if mainSeen {
+				return fmt.Errorf("%w: more than one repo is flagged main", workspace.ErrValidation)
+			}
+			mainSeen = true
+			spec.Cwd = dest
+			// Keep ProjectRoot pointing at the main repo: it is what the policy check,
+			// the registry record, and `ape sandbox ls` report as the workspace's project.
+			spec.ProjectRoot = rp.Source
+		}
+	}
+	if len(repos) > 1 && !mainSeen {
+		return fmt.Errorf("%w: a multi-repo workspace must flag exactly one repo main", workspace.ErrValidation)
+	}
+
+	// 3. User mounts — additive only. Reserved destinations are refused here as well
+	// as client-side, so a hand-crafted wire request cannot slip one through.
+	for _, m := range req.Mounts {
+		if err := sandbox.ValidateUserMountDest(m.Dest); err != nil {
+			return fmt.Errorf("%w: %w", workspace.ErrPolicyDenied, err)
+		}
+		if !filepath.IsAbs(m.Source) {
+			return fmt.Errorf("%w: mount source %q must be an absolute host path", workspace.ErrValidation, m.Source)
+		}
+		spec.Mounts = append(spec.Mounts, m)
+	}
+	return nil
+}
+
+// frameworkMount resolves the read-only framework system mount for a requested
+// ref, or nil when this node serves no framework.
+//
+// The ref is a REQUEST for one of the refs the node has already materialized; the
+// SOURCE is always <frameworkRoot>/<ref>, resolved here. That is what makes the
+// mount unforgeable: a project can ask for a different version, never a different
+// path. A missing ref is a clear, actionable error — aped never fetches (it holds
+// no credentials, and a workspace must be buildable offline).
+func (r *Resolver) frameworkMount(ref string) (mount workspace.MountSpec, served bool, err error) {
+	if strings.TrimSpace(r.frameworkRoot) == "" {
+		return workspace.MountSpec{}, false, nil // this node does not serve the framework
+	}
+	want := strings.TrimSpace(ref)
+	if want == "" {
+		want = r.frameworkRef
+	}
+	if want == "" {
+		return workspace.MountSpec{}, false, nil
+	}
+	if err := sandbox.ValidateMountName(want); err != nil {
+		return workspace.MountSpec{}, false, fmt.Errorf("%w: framework ref: %w", workspace.ErrValidation, err)
+	}
+	src := filepath.Join(r.frameworkRoot, want)
+	st, serr := os.Stat(src)
+	if serr != nil || !st.IsDir() {
+		return workspace.MountSpec{}, false, fmt.Errorf(
+			"%w: framework ref %q is not materialized on this node (expected %s). "+
+				"Materialize it host-side: ape sandbox framework materialize %s",
+			workspace.ErrValidation, want, src, want)
+	}
+	return workspace.MountSpec{Source: src, Dest: sandbox.FrameworkDest, ReadOnly: true}, true, nil
 }
 
 // resolveEgress folds the workspace's granted egress into the spec (PLAN-21 D1).

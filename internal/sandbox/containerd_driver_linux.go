@@ -122,7 +122,7 @@ func (d *containerdDriver) Provision(ctx context.Context, spec WorkspaceSpec) (w
 		oci.WithDefaultSpec(),
 		oci.WithDefaultUnixDevices,
 		oci.WithMounts(containerdMounts(spec)),
-		withImageConfigNoMount(cfg, spec.Command, containerdEnv(spec), spec.Network == NetworkNone, spec.NetnsPath),
+		withImageConfigNoMount(cfg, spec.Command, containerdEnv(spec), spec.Network == NetworkNone, spec.NetnsPath, spec.Cwd),
 	}
 	container, err := d.cli.NewContainer(
 		ctx, id,
@@ -431,10 +431,11 @@ func (d *containerdDriver) regRemove(id string) {
 // withImageConfigNoMount adapts the pure applyImageConfig into an oci.SpecOpts —
 // the barrier-3-free replacement for oci.WithImageConfig. netnsPath, when set,
 // joins the pre-wired egress namespace (PLAN-21) instead of an empty private one.
-func withImageConfigNoMount(cfg ocispec.ImageConfig, args, env []string, networkless bool, netnsPath string) oci.SpecOpts {
+func withImageConfigNoMount(cfg ocispec.ImageConfig, args, env []string, networkless bool, netnsPath, cwd string) oci.SpecOpts {
 	return func(_ context.Context, _ oci.Client, _ *containers.Container, s *specs.Spec) error {
 		return applyImageConfig(s, ContainerdSpecOptions{
-			Config: cfg, Args: args, Env: env, Networkless: networkless, NetnsPath: netnsPath,
+			Config: cfg, Args: args, Env: env, Cwd: cwd,
+			Networkless: networkless, NetnsPath: netnsPath,
 		})
 	}
 }
@@ -464,7 +465,8 @@ func containerdMounts(spec WorkspaceSpec) []specs.Mount {
 	if dest == "" {
 		dest = DefaultProjectDest
 	}
-	var mounts []specs.Mount
+	// 1 project bind + home + composition binds + the resolved mount list.
+	mounts := make([]specs.Mount, 0, 2+len(spec.Mounts))
 	switch spec.Mount {
 	case MountHostFS:
 		if strings.TrimSpace(spec.ProjectRoot) != "" {
@@ -483,13 +485,19 @@ func containerdMounts(spec WorkspaceSpec) []specs.Mount {
 			mounts = append(mounts, bindMount(b.Dest, b.Source, b.ReadOnly))
 		}
 	}
+	// The resolved PLAN-20 mount list: system mounts (framework, repos) then the
+	// policy-checked user mounts, in the order aped assembled them. The kata
+	// shim/agent mounts these IN-GUEST, so there is still no client-side mount(2).
+	for _, m := range spec.Mounts {
+		mounts = append(mounts, bindMount(m.Dest, m.Source, m.ReadOnly))
+	}
 	return mounts
 }
 
 func bindMount(dest, src string, ro bool) specs.Mount {
-	opt := "rw"
+	opt := bindOptRW
 	if ro {
-		opt = "ro"
+		opt = bindOptRO
 	}
 	return specs.Mount{Destination: dest, Source: src, Type: "bind", Options: []string{"rbind", opt}}
 }

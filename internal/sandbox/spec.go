@@ -6,6 +6,13 @@ import (
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
 
+// Bind option strings shared by the OCI-spec, nerdctl-args, and containerd-driver
+// mount builders, so the three renderings of the same mount cannot drift.
+const (
+	bindOptRO = "ro"
+	bindOptRW = "rw"
+)
+
 // DefaultProjectDest is where the project root is bind-mounted inside the
 // guest. It is a fixed path (not the host path) so it never collides with
 // the masked /home tree even when the project lives under the user's home.
@@ -128,9 +135,9 @@ func BuildSpec(opts SpecOptions) (*specs.Spec, error) {
 		},
 	)
 	for _, b := range opts.Comp.Binds {
-		opt := "rw"
+		opt := bindOptRW
 		if b.ReadOnly {
-			opt = "ro"
+			opt = bindOptRO
 		}
 		mounts = append(mounts, specs.Mount{
 			Destination: b.Dest,

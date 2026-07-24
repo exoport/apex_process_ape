@@ -41,6 +41,11 @@ type FrontConfig struct {
 	// EgressBindIP is the bridge host address the per-workspace CONNECT proxies
 	// listen on — where guests reach them. Empty → sandbox's default bridge address.
 	EgressBindIP string
+	// FrameworkRoot is the host directory holding materialized APEX framework refs,
+	// one subdirectory per ref. Empty → this node serves no framework mount.
+	FrameworkRoot string
+	// FrameworkRef is the default framework ref mounted when a request names none.
+	FrameworkRef string
 	// EgressPortLow/High bound the proxy listen ports. They MUST match the host
 	// nftables chain's accepted range (both come from deploy/dev-host.sh). 0 → the
 	// sandbox defaults.
@@ -131,13 +136,19 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 	// The vmm service dispatches to the executor over the priv socket; Create is
 	// resolved here (de-privileged) before it crosses the boundary.
 	resolver := NewResolver(ResolverConfig{
-		StateDir:    cfg.StateDir,
-		HostHome:    cfg.HostHome,
-		NatsURL:     cfg.GuestNatsURL,
-		CredsExpiry: cfg.CredsExpiry,
-		Telemetry:   srv.Telemetry(),
-		Egress:      egressPlannerOrNil(egress),
+		StateDir:      cfg.StateDir,
+		HostHome:      cfg.HostHome,
+		NatsURL:       cfg.GuestNatsURL,
+		CredsExpiry:   cfg.CredsExpiry,
+		Telemetry:     srv.Telemetry(),
+		Egress:        egressPlannerOrNil(egress),
+		FrameworkRoot: cfg.FrameworkRoot,
+		FrameworkRef:  cfg.FrameworkRef,
 	})
+	if cfg.FrameworkRoot != "" {
+		fmt.Fprintf(stderr, "  framework: %s (default ref %q) mounted read-only at %s\n",
+			cfg.FrameworkRoot, cfg.FrameworkRef, sandbox.FrameworkDest)
+	}
 	// The front holds the NATS conn, so it forwards the executor's audit records
 	// on ape.audit.<node>.> (the network-less executor returns them in-band —
 	// PLAN-18 D9). Fire-and-forget: a publish failure must never fail the op.
