@@ -12,7 +12,7 @@ summary: >
   Replace the sandbox's single host-fs project mount with a general,
   policy-checked mount model — a list of {source, dest, readonly} entries — and
   make the APEX framework a built-in read-only entry rather than a baked image
-  layer. Mounts are declared by a committable `.apemount.yaml` in the project
+  layer. Mounts are declared by a committable `.apesandbox.yaml` in the project
   and/or repeatable `--mount` CLI flags (both merge). These are additive USER
   mounts; the framework, composed ~/.claude, and primary project are always-on
   SYSTEM mounts that aped applies independently of — and that user input can
@@ -39,7 +39,7 @@ origin:
     the image); mount the framework read-only at /opt; the host user's own credentials fetch
     the framework host-side; pin the framework version and STOP with a clear error if the pin
     is absent from the local repo; works on user machines and nodes; declare mounts via a
-    committable file (`.apemount.yaml`) and/or CLI flags; per-mount read-only vs read-write.
+    committable file (`.apesandbox.yaml`) and/or CLI flags; per-mount read-only vs read-write.
   - Assumptions marked inline were made at authoring time; flag at review.
 ---
 
@@ -52,7 +52,7 @@ A workspace's host mounts are a single, uniform, **policy-checked list** of
 `~/.claude`, and the **APEX framework** are all just entries in that list —
 the framework a **built-in, read-only** one — instead of the framework being a
 baked image layer. A developer declares extra mounts in a **committable
-`.apemount.yaml`** in their project and/or with repeatable `--mount` flags; the
+`.apesandbox.yaml`** in their project and/or with repeatable `--mount` flags; the
 two merge. `aped` re-checks every resolved source against its mount-root
 allow-list, so a committed file can never escalate to an unauthorized host
 path. The `ape-sandbox` image becomes **public and framework-free**, so any
@@ -80,7 +80,7 @@ A workspace's binds come from **two distinct categories** that share one
 MountSpec = { Source, Dest string; ReadOnly bool }
 ```
 
-- **Source** — a canonical host path. Relative paths in `.apemount.yaml` resolve
+- **Source** — a canonical host path. Relative paths in `.apesandbox.yaml` resolve
   against the **project root on the client** and are canonicalized to an
   absolute path *before* they hit the wire (aped never sees, nor trusts, a
   relative path).
@@ -93,7 +93,7 @@ MountSpec = { Source, Dest string; ReadOnly bool }
 The **framework** (`/opt/apex-framework`, ro), the composed **`~/.claude`**
 (`/sandbox/home`), and the **project repos** (see "Multi-repo" below — each at
 `/workspace/<name>`, rw) are injected by aped/the profile itself. They are
-**not** declared in, affected by, or removable via `.apemount.yaml` or
+**not** declared in, affected by, or removable via `.apesandbox.yaml` or
 `--mount`. In particular the **framework mount is present by default regardless
 of what the user requests**, and its *source* (the pinned host-repo ref) is
 resolved server-side/by the profile — a project can never set, omit, redirect,
@@ -107,12 +107,12 @@ single repo mounts at `/workspace/<name>`, not bare `/workspace`), and exactly
 one is flagged **`main`**. The main repo sets the workspace's **default working
 directory** (`WORKDIR` / where `attach`/`exec`/claude open) and the default
 target for APE operations (`ape framework setup`, boundary commits). The repo
-set + `main` is declared in `.apemount.yaml` (`repos:`), or degenerates to a
+set + `main` is declared in `.apesandbox.yaml` (`repos:`), or degenerates to a
 single main repo from `--cwd`. Repos are project mounts (rw by default, per-repo
 `readonly` allowed); `/workspace` itself is a reserved root a user mount cannot
 occupy or shadow.
 
-**2. User mounts — additive requests via `.apemount.yaml` and `--mount`.**
+**2. User mounts — additive requests via `.apesandbox.yaml` and `--mount`.**
 These only ever *add* extra binds. They are merged with each other (CLI wins by
 `Dest`), then policy-checked, and can never collide with or override a system
 mount (see Security → reserved dests). Absence of any user mount changes nothing
@@ -133,46 +133,62 @@ reserved dest (see Security):
 1. **Profile-declared user mounts** (server-side, aped-resolved) — optional extra
    binds a profile wants for every workspace of its kind. *(These are still
    policy-checked; distinct from the always-on system mounts.)*
-2. **`.apemount.yaml`** committed in the project (client-read).
+2. **`.apesandbox.yaml`** committed in the project (client-read).
 3. **`--mount` CLI flags** (client, repeatable): ad-hoc additions/overrides.
 
-### `.apemount.yaml` (committable project config)
+### `.apesandbox.yaml` — the project sandbox descriptor
 
-Lives at the project root; committed with the repo so a project's expected
-mounts travel with it.
+**One committable per-project file** (at the main repo root) describes the whole
+sandbox — a devcontainer-style descriptor. This plan defines its **skeleton** and
+owns the **`repos:`/`mounts:`** sections; other sandbox concerns land in the same
+file under their own keys, each owned by its plan:
+
+- `repos:` / `mounts:` — this plan (PLAN-20).
+- `egress:` — PLAN-21 (`authorized_domains` / `direct_allow`).
+- `toolchain:` — PLAN-22 (asdf `.tool-versions` + bingo; inline or by reference).
+- future sandbox settings (image/profile selection, lifecycle, resource hints)
+  extend the same file — no new dotfiles per concern.
+
+**Every section is a request, never a grant** — the trust boundary (below)
+applies uniformly: mount sources are re-checked against `mount_roots`, egress
+domains against the aped egress policy, etc. A committed file can declare intent
+but cannot exceed server-side policy.
 
 ```yaml
-# .apemount.yaml — the repos + extra host folders for the sandbox workspace.
-# Sources are host paths; RELATIVE paths resolve against this file's directory
-# on the CLIENT and are canonicalized before being sent. aped re-checks every
-# resolved path against its mount-root allow-list (a request here is NOT trust).
+# .apesandbox.yaml — the project's sandbox descriptor (committed with the repo).
+# RELATIVE paths resolve against this file's dir on the CLIENT and are
+# canonicalized before the wire. Everything here is a REQUEST; aped re-checks it.
 version: 1
 
-# Project repos — each mounted at /workspace/<name>. Exactly one is `main`
-# (sets the default cwd + the default target for `ape framework setup`/commits).
+# --- repos (PLAN-20): each mounted at /workspace/<name>; exactly one `main`
+#     (sets default cwd + the default target for `ape framework setup`/commits).
 repos:
-  - source: .                       # the repo holding this file
-    name: app                       # → /workspace/app
-    main: true
-  - source: ../shared-libs
-    name: shared-libs               # → /workspace/shared-libs
-    readonly: false
+  - { source: ., name: app, main: true }          # → /workspace/app
+  - { source: ../shared-libs, name: shared-libs, readonly: false }
 
-# Extra non-repo mounts (data, host toolchain caches — see PLAN-22).
+# --- extra non-repo mounts (PLAN-20): data, host toolchain caches, etc.
 mounts:
-  - source: /srv/data/fixtures      # absolute host path
-    dest: /data/fixtures
-    readonly: true                  # default; opt into `readonly: false` for write
+  - { source: /srv/data/fixtures, dest: /data/fixtures, readonly: true }
+
+# --- egress (PLAN-21): deny-by-default; requested domains still gated by aped policy.
+egress:
+  authorized_domains: ["github.com", "*.githubusercontent.com", "proxy.golang.org"]
+
+# --- toolchain (PLAN-22): asdf runtimes + bingo Go tools (or reference the
+#     native .tool-versions / .bingo files instead of inlining).
+toolchain:
+  tool_versions: .tool-versions     # asdf
+  bingo: true                       # install the repo's pinned Go tools
 ```
 
-CLI equivalent / override, repeatable:
+CLI equivalents / overrides (repeatable; merge with the file, CLI wins by dest):
 
 ```
 ape sandbox up dev \
   --mount ../shared-protos:/workspace/shared-protos:ro \
   --mount /srv/data/fixtures:/data/fixtures:rw
-# --mount-file <path>   # point at a non-default file
-# --no-mount-file       # ignore any .apemount.yaml
+# --sandbox-config <path>   # point at a non-default .apesandbox.yaml
+# --no-sandbox-config       # ignore any .apesandbox.yaml
 ```
 
 Flags and file **both** apply and merge (CLI wins by dest). Syntax:
@@ -180,7 +196,7 @@ Flags and file **both** apply and merge (CLI wins by dest). Syntax:
 
 ### Security / trust boundary (load-bearing)
 
-`.apemount.yaml` and `--mount` are **requests, not grants**. The client
+`.apesandbox.yaml` and `--mount` are **requests, not grants**. The client
 canonicalizes sources; **`aped` (the executor) authoritatively re-checks every
 entry** against the policy mount-root allow-list — the existing
 `internal/aped/policy.go` `checkMount` / `MountRoots`, applied **per entry**. A
@@ -194,7 +210,7 @@ because it is not under an allowed root. Additions:
   remove, or make-writable the framework, the composed home, or a project repo.
   The framework mount and its (pinned host-repo) source are resolved server-side
   and applied **independently of any user request** — the default with or without an
-  `.apemount.yaml`.
+  `.apesandbox.yaml`.
 - **`max_mounts`** policy ceiling (default e.g. 16) to bound fan-out.
 - **`mount_roots` may mark a root ro-only** — a `readonly: false` request under
   an ro-only root is denied (lets an operator export a shared dir read-only to
@@ -228,7 +244,7 @@ because it is not under an allowed root. Additions:
   aped-mountable path (a `git worktree` for the ref, on a local `main` branch so
   the `ape framework setup` branch check is satisfied) and applied by aped as a
   **system mount** — the built-in **`/opt/apex-framework` ro** entry, present by
-  default and independent of `.apemount.yaml`/`--mount` (see the mount model).
+  default and independent of `.apesandbox.yaml`/`--mount` (see the mount model).
 - **Consume in-guest:** `ape framework setup --no-fetch` reads the RO mount and
   installs into the project (rw). `--no-fetch` is required (a fetch would write
   to the repo, which RO forbids — and no network is available anyway). Guard the
@@ -243,12 +259,15 @@ because it is not under an allowed root. Additions:
   keep `--cwd`/mode as sugar that injects the primary project entry. Update the
   `Workspace` record + `inspect`.
 - [ ] **D2 — Client resolve + merge.** `ape sandbox up`: assemble the list from
-  built-ins + profile + `.apemount.yaml` + `--mount` flags; canonicalize
-  relative sources against the project root; dedupe by dest with the documented
-  precedence; enforce reserved dests client-side (fail fast, aped re-checks).
-- [ ] **D3 — `.apemount.yaml` + flags.** Schema (`version`, `mounts[]`) + client
-  parser; `--mount src[:dest][:ro|:rw]` (repeatable), `--mount-file`,
-  `--no-mount-file`.
+  built-ins + profile + `.apesandbox.yaml` (`repos:`/`mounts:`) + `--mount`
+  flags; canonicalize relative sources against the main-repo root; dedupe by dest
+  with the documented precedence; enforce reserved dests client-side (fail fast,
+  aped re-checks).
+- [ ] **D3 — `.apesandbox.yaml` skeleton + flags.** Define the versioned
+  descriptor + a client parser owning `repos:`/`mounts:` (other sections are
+  parsed by their plans); `--mount src[:dest][:ro|:rw]` (repeatable),
+  `--sandbox-config <path>`, `--no-sandbox-config`. The parser must ignore
+  unknown top-level keys so PLAN-21/22 can add `egress:`/`toolchain:` additively.
 - [ ] **D4 — aped policy.** Per-entry `checkMount` against `mount_roots`;
   reserved dests; `max_mounts`; optional ro-only roots; honor `ReadOnly` in the
   OCI bind. Extend `deploy/policy.yaml` + docs.
@@ -256,7 +275,7 @@ because it is not under an allowed root. Additions:
   exoport; host-repo pinned-ref materialize + verify-or-error + RO
   `/opt/apex-framework` built-in mount; `ape framework setup --no-fetch` glue
   (branch/RO-repo guards). Optional `ape sandbox framework fetch` convenience.
-- [ ] **D6 — Docs.** `.apemount.yaml` reference; the `/home` `BindReadOnlyPaths`
+- [ ] **D6 — Docs.** `.apesandbox.yaml` reference; the `/home` `BindReadOnlyPaths`
   prerequisite; the framework update workflow (host-side fetch + pin);
   regenerate `cli.md`; reconcile PLAN-16 D6 + `sandbox-workspaces.md`.
 - [ ] **D7 — Migration (see below).**

@@ -102,9 +102,13 @@ to "allow established + new → proxyIP:port, drop the rest."
 
 ## Deliverables
 
-- [ ] **D1 — Resolver + policy wiring (S).** Thread the profile's
-  `AuthorizedDomains` through; set `WorkspaceSpec.HTTPSProxy`; add egress keys to
-  `deploy/policy.yaml` (allow/deny defaults, per-profile domain caps).
+- [ ] **D1 — Resolver + policy wiring (S).** Thread the requested
+  `authorized_domains` through — from the profile **and** the project's
+  `.apesandbox.yaml` `egress:` section (PLAN-20's descriptor) — set
+  `WorkspaceSpec.HTTPSProxy`; add egress keys to `deploy/policy.yaml` (allow/deny
+  defaults, per-profile domain caps). The `.apesandbox.yaml` domains are a
+  **request**: aped intersects them with the policy's allowed set (a project can
+  narrow, never widen, what policy permits).
 - [ ] **D2 — aped front runs the proxy (S).** Run `RunProxyDaemon`/`NewProxy`
   in-process in the de-privileged front, bound to the bridge IP, per-VM lifecycle
   (start at Create, stop at Destroy), audit to the per-VM NATS telemetry subject.

@@ -75,10 +75,16 @@ first warm-up**. Backbone: **asdf** (the Go rewrite) for languages/runtimes,
 
 - **Go CLI tools → bingo** (unchanged; `.bingo/` already pins go-installable
   tools to a version-stamped `$GOBIN`).
-- Both are **committed with the repo**, like `.apemount.yaml` — the toolchain
-  travels with the project. (An optional `.apebox.yaml` umbrella may later
-  reference both, but reusing the native `.tool-versions` + `.bingo/` avoids a
-  new format.)
+- Both are **committed with the repo** — the toolchain travels with the project.
+  The **`.apesandbox.yaml`** descriptor (PLAN-20) carries a **`toolchain:`**
+  section that either inlines the versions or (preferred) **references the native
+  `.tool-versions` + `.bingo/`** so there is no duplicate source of truth:
+
+  ```yaml
+  toolchain:
+    tool_versions: .tool-versions   # asdf
+    bingo: true                     # install the repo's pinned Go tools
+  ```
 
 ### 2. Lean base image + version manager (no baked languages, no runtime layers)
 
