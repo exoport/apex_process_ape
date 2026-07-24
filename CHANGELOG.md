@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## v0.0.46 (2026-07-24)
+
+- **feat(service): report `last_event_at` on `job.status` / `job.list`** — the
+  `ape service` job daemon now reports a `last_event_at` timestamp for each job:
+  it equals `started_at` for a just-accepted job and advances to the `job-end`
+  time once the job goes terminal. The timestamp is stamped **atomically with the
+  terminal-state transition** inside the registry, so a consumer polling
+  `job.status` can never observe a terminal state paired with a stale
+  acceptance-time `last_event_at`. Additive to the wire contract (WireVersion
+  stays 1).
+- **docs(reference): `ape service` endpoint-contract reference** — new
+  `docs/reference/service-api.md` documents all nine `ape.svc` endpoints
+  (`pipeline.run` / `task.run` / `prompt.run` / `script.run`, `job.status` /
+  `job.list` / `job.stop`, `status` / `health`): subjects, request/reply shapes,
+  the field→argv mapping, the stable error codes, keyed exclusivity, and the
+  allowlist trust boundary. Cross-linked with the event-stream reference
+  (`events.md`).
+- **chore(sandbox): public, framework-free `ape-sandbox` image** — the official
+  workspace image is now **public and framework-free**, built from the separate
+  public `exoport/ape-sandbox` repo (`ghcr.io/exoport/ape-sandbox`). The private
+  APEX framework is no longer baked; `aped` mounts a pinned host-side checkout
+  read-only at `/opt/apex-framework` at runtime (PLAN-20). `sandbox.DefaultImage`
+  and the aped policy allow-list reference the public image.
+- **docs:** PLAN-16 narrative + D4 egress reconciled to the shipped `ape`/`aped`
+  split; the sandbox mount / egress / toolchain roadmap captured as PLAN-20 /
+  PLAN-21 / PLAN-22.
+
 ## v0.0.45 (2026-07-14)
 
 - **feat(pipeline): activity-aware step completion — progress-anchored idle
