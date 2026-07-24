@@ -78,6 +78,14 @@ origin:
 > `*(PLAN-18: …)*` markers flag the specific spots a reader would otherwise be
 > misled.
 
+> **SUPERSEDED (2026-07-24) by PLAN-20.** The private-baked-image decision below
+> was reversed: baking the private framework forced a private image whose pull
+> credential is uncomfortable team-wide (aped runs on laptops too). The image is
+> now **public + framework-free** in this repo (`images/ape-sandbox/`), and the
+> private framework is mounted read-only at runtime. See
+> `plan-20_sandbox-mounts-and-framework-delivery.md`. The 2026-07-15 note is kept
+> as the historical record of what was tried.
+
 > **D6 image — live-validated + relocating to a private repo (2026-07-15).** The
 > official `ape-sandbox` image was **built and validated end-to-end for the first
 > time** on the Tier-2 box (KVM + containerd + Kata 3.32 + `aped`): `ape sandbox
@@ -115,7 +123,7 @@ origin:
 
 - [x] **`ape sandbox` command surface:** *(PLAN-18)* shipped as `up | ls | inspect | exec | attach | ssh | freeze | unfreeze | suspend | down <name>` (`internal/apecmd/sandbox.go`) — **not** the `pause | resume` originally listed here. `freeze`/`unfreeze` are a cgroup-freeze; `suspend` returns `UNSUPPORTED` on Kata; `ssh` defers to `aped` networking (Tier-2).
 - [x] **D1 workspace runner** — `internal/sandbox` (`kata.go` pure nerdctl command construction + on-disk registry; `kata_linux.go` exec methods; `kata_other.go` Windows stub); **kata-clh default** VMM via `io.containerd.kata-<vmm>.v2` runtime handler. Live provision/exec/pause validated only under Tier-2 (no KVM in CI / on this box yet). *(PLAN-18: refactored into the `shellDriver` behind `internal/workspace.Backend`; `ape` no longer runs it — `aped` does, and the live-validated driver is the containerd-Go-client `containerdDriver` (`--driver containerd`), which the `shellDriver` cannot match through the hardened root executor. `pause` → `freeze`.)*
-- [x] **D6 official `ape-sandbox` image** — `images/ape-sandbox/` (Dockerfile `FROM` agent-infra/sandbox + claude/node/`ape`/git/framework/sshd/chromium+playwright; entrypoint; README with build/pin/publish + versioning). `sandbox.DefaultImage` is the wiring point; `image:` override supported. **Base pinned (step 9):** `BASE_IMAGE` = `ghcr.io/agent-infra/sandbox:1.11.0@sha256:6328d7fd…f906e7` (verified multi-arch amd64+arm64 manifest-list digest). **Offline framework (step 9):** `ENV APEX_FRAMEWORK_REPO=/opt/apex-framework` so `ape framework setup --no-fetch` installs from the baked-in checkout. *(2026-07-15: toolchain is present and the image was live-validated end-to-end through `aped`; the Dockerfile is now **removed from this repo** and the canonical framework-baking image relocates to a private `exoar` repo — see the D6 note above for the three findings + the private-image decision.)*
+- [x] **D6 official `ape-sandbox` image** — `images/ape-sandbox/` (Dockerfile `FROM` agent-infra/sandbox + claude/node/`ape`/git/framework/sshd/chromium+playwright; entrypoint; README with build/pin/publish + versioning). `sandbox.DefaultImage` is the wiring point; `image:` override supported. **Base pinned (step 9):** `BASE_IMAGE` = `ghcr.io/agent-infra/sandbox:1.11.0@sha256:6328d7fd…f906e7` (verified multi-arch amd64+arm64 manifest-list digest). **Offline framework (step 9):** `ENV APEX_FRAMEWORK_REPO=/opt/apex-framework` so `ape framework setup --no-fetch` installs from the baked-in checkout. *(2026-07-24, PLAN-20: the image is **public + framework-free** in `images/ape-sandbox/`; the private framework is mounted read-only at runtime, not baked. This supersedes the 2026-07-15 private-`exoar` relocation — see the D6 notes above.)*
 - [x] **project-mount modes** — host-fs (default) · volume · ephemeral wired in `WorkspaceSpec.RunArgs` + `sandbox up`
 - [x] **D2 per-workspace `~/.claude` composition** — reused composer, invoked per-workspace at `up` into a per-workspace staging home
 - [x] **D5 git-credential composition** — token / deploy-key / agent (reused composer, unchanged)

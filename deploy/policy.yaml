@@ -11,8 +11,8 @@
 # Allowed image references. Prefer digest-pinned refs. An empty list denies all
 # creates.
 images:
-  - ghcr.io/exoar/ape-sandbox:v0.0.45
-  # - ghcr.io/exoar/ape-sandbox@sha256:<digest>   # pin by digest in production (preferred)
+  - ghcr.io/exoport/ape-sandbox:v0
+  # - ghcr.io/exoport/ape-sandbox@sha256:<digest>   # pin by digest in production (preferred)
 
 # Canonical host path prefixes a host-fs mount must resolve under (symlinks are
 # resolved and re-checked). Empty denies all host-fs mounts (volume/ephemeral

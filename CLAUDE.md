@@ -18,7 +18,7 @@ Guidance for Claude Code when working in this repository.
 | `internal/updatecache/`   | Cache layer for the background update-check.                                                        |
 | `internal/trait/`         | Trait inspection helpers.                                                                           |
 | `internal/sandbox/`       | `ape sandbox` Kata VM workspaces (PLAN-16): profile, `~/.claude`/git composer, OCI-config + nerdctl command builder, CONNECT egress proxy, workspace registry. |
-| `images/ape-sandbox/`     | Pointer only (README stub) — the official `ape-sandbox` image (PLAN-16 D6) is built from the private `exoar/ape-sandbox` repo, since it bakes the private framework. See the plan-16 D6 note. |
+| `images/ape-sandbox/`     | Dockerfile + entrypoint for the official **public, framework-free** `ape-sandbox` workspace image (PLAN-16 D6 / PLAN-20). The private framework is not baked — `aped` mounts it read-only at runtime. |
 | `cmd/aped/` + `internal/aped/` + `internal/apedcmd/` | `aped`, the rootful Kata-QEMU VM-management daemon (PLAN-18 Phase 2): two-process split (root executor + de-privileged NATS front), policy authz, `ape.vmm.<node>.>` contract. |
 | `internal/vmmclient/`     | The `ape`-side client of the `ape.vmm` contract (drives `aped` over NATS).                          |
 | `internal/vmmstream/`     | Interactive exec/attach stream transport (PLAN-18 D2): per-session NATS subjects, ≤32 KiB frames, channel-tagged credit flow control, server/client session halves. |
