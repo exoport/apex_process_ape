@@ -284,14 +284,18 @@ because it is not under an allowed root. Additions:
 
 The private route we just built is reverted/repurposed as part of D5:
 
-- **Image:** publish a **public, framework-free** `ape-sandbox` in exoport (fold
-  the Dockerfile back into `apex_process_ape/images/ape-sandbox/`, public, no
-  build secret; or a public `exoport/ape-sandbox` repo). Retire the private
-  `exoar/ape-sandbox` build (or keep it dormant) — it is no longer the source of
-  truth. Delete/mark-private-obsolete the `ghcr.io/exoar/ape-sandbox` package.
-- **apex_process_ape:** revert `sandbox.DefaultImage` (`internal/sandbox/kata.go`)
-  and `deploy/policy.yaml` from the private `ghcr.io/exoar/...` ref (commit
-  `7dd21e2`) to the **public** ref. No aped pull credential is needed anymore.
+- **Image home = a separate public `exoport/ape-sandbox` repo** (decided
+  2026-07-24). `apex_process_ape` stays a CLI only (per its charter) — no
+  Dockerfile in it, just an `images/ape-sandbox/README.md` pointer. The public,
+  framework-free image (no build secret) is built + published from
+  `exoport/ape-sandbox` to the public `ghcr.io/exoport/ape-sandbox` package
+  (adapt the scaffolding already built for `exoar/ape-sandbox`: drop the
+  framework clone + secret, publish public, keep numeric `USER 0`). Retire the
+  private `exoar/ape-sandbox` repo + delete/mark-obsolete its
+  `ghcr.io/exoar/ape-sandbox` package.
+- **apex_process_ape:** `sandbox.DefaultImage` (`internal/sandbox/kata.go`) +
+  `deploy/policy.yaml` point at the **public** `ghcr.io/exoport/ape-sandbox` ref
+  (done — commit `8aa6cb9`, image-home follow-up); no aped pull credential needed.
 - The `internal/sandbox` CONNECT-proxy/composer layers are unaffected.
 
 ## Non-goals

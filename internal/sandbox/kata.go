@@ -28,9 +28,9 @@ const ContainerPrefix = "ape-ws-"
 // (PLAN-16 D6). The image is PUBLIC and framework-free (PLAN-20): the private
 // APEX framework is not baked — aped mounts a pinned host checkout at
 // /opt/apex-framework at runtime — so any node/laptop pulls it with no
-// credential. Built from images/ape-sandbox/ and published to the public
-// ghcr.io/exoport package; this is the placeholder tag until the first public
-// build (PLAN-20 D5).
+// credential. Built + published from the separate public exoport/ape-sandbox
+// repo to the public ghcr.io/exoport package; this is the placeholder tag until
+// the first public build (PLAN-20 D5).
 const DefaultImage = "ghcr.io/exoport/ape-sandbox:v0"
 
 // DefaultShell is the login shell `ape sandbox attach` opens inside a

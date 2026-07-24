@@ -165,11 +165,11 @@ workspace shape accordingly (details in the
 Workspaces run the official `ape-sandbox` image (claude / node / ape / git /
 sshd / chromium + Playwright), or any custom OCI ref via `--image` (or a
 server-side profile's `image:`). `aped` pulls and pins it node-side. The image
-is **public and framework-free** — its Dockerfile lives in this repo under
-`images/ape-sandbox/` and publishes to the public `ghcr.io/exoport` package. The
-**private** APEX framework is **not** baked; `aped` mounts a pinned host-side
-framework checkout read-only at `/opt/apex-framework` at runtime (PLAN-20), and a
-workspace installs it with `ape framework setup --no-fetch`.
+is **public and framework-free** — built from the separate public
+**`exoport/ape-sandbox`** repo and published to the public `ghcr.io/exoport`
+package. The **private** APEX framework is **not** baked; `aped` mounts a pinned
+host-side framework checkout read-only at `/opt/apex-framework` at runtime
+(PLAN-20), and a workspace installs it with `ape framework setup --no-fetch`.
 
 ## See also
 
