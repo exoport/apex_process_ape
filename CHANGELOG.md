@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.0.48 (2026-07-24)
 
 - **feat: configurable reasoning `effort` (default `xhigh`)** — `ape pipeline`,
   `ape task`, `ape prompt`, and `ape chat` now all accept an `--effort` flag
