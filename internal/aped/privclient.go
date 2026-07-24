@@ -20,10 +20,11 @@ import (
 // CreateRequest is turned into a fully-resolved spec (compose/proxy/mint) here,
 // de-privileged, and only the resolved spec crosses the boundary.
 type privClient struct {
-	socket  string
-	resolve sandbox.SpecResolver
-	publish func(subject string, data []byte) // nil → no ape.audit.<node>.> forwarding
-	node    string                            // slugged <node> for the audit subject
+	socket    string
+	resolve   sandbox.SpecResolver
+	publish   func(subject string, data []byte) // nil → no ape.audit.<node>.> forwarding
+	node      string                            // slugged <node> for the audit subject
+	onDestroy func(id string)                   // front-side cleanup after a successful destroy
 }
 
 // PrivClientConfig configures NewPrivClient.
@@ -40,16 +41,22 @@ type PrivClientConfig struct {
 	Publish func(subject string, data []byte)
 	// Node is the <node> token stamped into forwarded audit subjects.
 	Node string
+	// OnDestroy runs front-side after a destroy the executor accepted — the hook
+	// the egress supervisor uses to stop that workspace's proxy and release its
+	// port. Nil skips it. It is deliberately front-side: the executor tears down
+	// the namespace, the front owns the proxy.
+	OnDestroy func(id string)
 }
 
 // NewPrivClient returns a workspace.Backend that forwards to the executor over
 // the priv socket, optionally forwarding executor audit records over NATS.
 func NewPrivClient(cfg PrivClientConfig) workspace.Backend {
 	return &privClient{
-		socket:  cfg.Socket,
-		resolve: cfg.Resolve,
-		publish: cfg.Publish,
-		node:    natsconn.SubjectToken(cfg.Node),
+		socket:    cfg.Socket,
+		resolve:   cfg.Resolve,
+		publish:   cfg.Publish,
+		node:      natsconn.SubjectToken(cfg.Node),
+		onDestroy: cfg.OnDestroy,
 	}
 }
 
@@ -167,7 +174,14 @@ func (p *privClient) Resume(_ context.Context, id string) error {
 }
 
 func (p *privClient) Destroy(_ context.Context, id string, req workspace.DestroyRequest) error {
-	return p.call(Command{Op: OpDestroy, ID: id, Destroy: &req}, nil)
+	err := p.call(Command{Op: OpDestroy, ID: id, Destroy: &req}, nil)
+	// Run the front-side cleanup even when the executor reported a failure: a
+	// half-destroyed workspace must not keep a live proxy (and its port) forever.
+	// The hook is idempotent for unknown ids.
+	if p.onDestroy != nil {
+		p.onDestroy(id)
+	}
+	return err
 }
 
 func (p *privClient) Exec(_ context.Context, id string, req workspace.ExecRequest) (workspace.ExitStatus, error) {

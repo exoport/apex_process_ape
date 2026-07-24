@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/natsconn"
+	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/nats-io/nats.go/micro"
 )
 
@@ -32,7 +33,19 @@ type FrontConfig struct {
 	OperatorCredsPath string
 	CredsExpiry       time.Duration
 	ApeVersion        string
-	Stderr            io.Writer
+	// PolicyPath is the same policy.yaml the executor loads. The front reads it to
+	// pre-check egress requests and to build each workspace's proxy allowlist
+	// (PLAN-21 D1/D2) — the executor still re-validates authoritatively. Empty
+	// disables egress entirely (fail-closed: no policy, no egress).
+	PolicyPath string
+	// EgressBindIP is the bridge host address the per-workspace CONNECT proxies
+	// listen on — where guests reach them. Empty → sandbox's default bridge address.
+	EgressBindIP string
+	// EgressPortLow/High bound the proxy listen ports. They MUST match the host
+	// nftables chain's accepted range (both come from deploy/dev-host.sh). 0 → the
+	// sandbox defaults.
+	EgressPortLow, EgressPortHigh int
+	Stderr                        io.Writer
 }
 
 // RunFront is the `aped front` entry point: it embeds the two-account NATS
@@ -86,6 +99,35 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 			cfg.OperatorCredsPath, action, srv.ClientURL(), cfg.OperatorCredsPath)
 	}
 
+	// Egress (PLAN-21 D2): the front — de-privileged, but the only aped process
+	// allowed AF_INET — hosts one deny-by-default CONNECT proxy per workspace. The
+	// policy it intersects requests against is the same file the executor
+	// re-validates against; with no policy configured, egress stays off.
+	var egress *EgressSupervisor
+	if cfg.PolicyPath != "" {
+		policy, perr := LoadPolicy(cfg.PolicyPath)
+		if perr != nil {
+			return fmt.Errorf("%w: %w", ErrConfig, perr)
+		}
+		egress = NewEgressSupervisor(EgressConfig{
+			BindIP:   cfg.EgressBindIP,
+			PortLow:  cfg.EgressPortLow,
+			PortHigh: cfg.EgressPortHigh,
+			StateDir: cfg.StateDir,
+			Policy:   &policy.Egress,
+			Publish:  func(subject string, data []byte) { _ = nc.Publish(subject, data) },
+			Node:     node,
+			Stderr:   stderr,
+		})
+		defer egress.StopAll()
+		if policy.Egress.Enabled {
+			fmt.Fprintf(stderr, "  egress: enabled — %d allowed domain(s), proxies on %s\n",
+				len(policy.Egress.AllowedDomains), egressBindNote(cfg.EgressBindIP))
+		} else {
+			fmt.Fprintln(stderr, "  egress: disabled by policy (egress.enabled: false) — workspaces stay networkless")
+		}
+	}
+
 	// The vmm service dispatches to the executor over the priv socket; Create is
 	// resolved here (de-privileged) before it crosses the boundary.
 	resolver := NewResolver(ResolverConfig{
@@ -94,6 +136,7 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 		NatsURL:     cfg.GuestNatsURL,
 		CredsExpiry: cfg.CredsExpiry,
 		Telemetry:   srv.Telemetry(),
+		Egress:      egressPlannerOrNil(egress),
 	})
 	// The front holds the NATS conn, so it forwards the executor's audit records
 	// on ape.audit.<node>.> (the network-less executor returns them in-band —
@@ -103,6 +146,14 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 		Resolve: resolver.Resolve,
 		Publish: func(subject string, data []byte) { _ = nc.Publish(subject, data) },
 		Node:    node,
+		// A destroyed workspace's proxy must go with it: the port is returned to the
+		// allocator and the guest's only route out disappears with the netns the
+		// executor tore down.
+		OnDestroy: func(id string) {
+			if egress != nil {
+				egress.Stop(id)
+			}
+		},
 	})
 
 	hostname, _ := os.Hostname()
@@ -138,6 +189,24 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 	// service manager we are up and arm the watchdog (no-ops under Type=exec).
 	signalReady(ctx)
 	return serveUntilSignal(ctx, svc, stderr)
+}
+
+// egressPlannerOrNil returns the supervisor as an EgressPlanner, or a nil
+// interface when there is none. Returning a typed nil pointer would make the
+// resolver's `r.egress == nil` guard false and NPE on the first request.
+func egressPlannerOrNil(s *EgressSupervisor) EgressPlanner {
+	if s == nil {
+		return nil
+	}
+	return s
+}
+
+// egressBindNote renders the proxy bind address for the startup line.
+func egressBindNote(bindIP string) string {
+	if strings.TrimSpace(bindIP) != "" {
+		return bindIP
+	}
+	return sandbox.DefaultEgressHostCIDR + " (default bridge address)"
 }
 
 // ensureOperatorCreds writes the scoped host-operator credential for the `ape`

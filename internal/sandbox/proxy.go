@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -151,12 +152,26 @@ func (p *Proxy) ProxyURL() string {
 	return "http://" + p.ln.Addr().String()
 }
 
-// Close stops serving.
+// Close stops serving and closes the listener.
+//
+// The listener is closed DIRECTLY as well as through the server: http.Server
+// only closes listeners its Serve goroutine has already registered, so a Close
+// that races a just-started proxy would return with the socket still accepting
+// until that goroutine caught up. Callers that stop a proxy and immediately
+// rebind its port (the per-workspace egress supervisor does exactly this) need
+// the close to be complete when Close returns. Both closes are idempotent; an
+// already-closed listener is not an error.
 func (p *Proxy) Close() error {
-	if p.srv == nil {
-		return nil
+	var err error
+	if p.srv != nil {
+		err = p.srv.Close()
 	}
-	return p.srv.Close()
+	if p.ln != nil {
+		if cerr := p.ln.Close(); cerr != nil && err == nil && !errors.Is(cerr, net.ErrClosed) {
+			err = cerr
+		}
+	}
+	return err
 }
 
 // handle processes one proxied request. Only CONNECT is supported; the

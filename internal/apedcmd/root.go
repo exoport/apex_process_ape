@@ -6,6 +6,7 @@
 //
 //	aped run    the network-less root executor (privileged)
 //	aped front  the de-privileged NATS surface + vmm micro service
+//	aped netd   the narrow privileged netns/veth helper for egress (PLAN-21 D3)
 //
 // See deploy/systemd for the hardened units that run these (Appendix A).
 package apedcmd
@@ -43,7 +44,7 @@ units in deploy/systemd (Appendix A of PLAN-18).`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(newRunCmd(), newFrontCmd())
+	root.AddCommand(newRunCmd(), newFrontCmd(), newNetdCmd())
 	return root
 }
 

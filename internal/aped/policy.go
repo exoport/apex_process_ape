@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/exoport/apex_process_ape/internal/workspace"
 	"gopkg.in/yaml.v3"
 )
@@ -36,6 +37,29 @@ type Policy struct {
 	// Devices is the passthrough allow-list (Phase 3). Empty → every device
 	// request is denied (correct default-deny for the non-device tier).
 	Devices DevicePolicy `yaml:"devices"`
+	// Egress bounds public network egress (PLAN-21). Absent/disabled → every
+	// workspace stays networkless, the pre-PLAN-21 behaviour.
+	Egress EgressPolicy `yaml:"egress"`
+}
+
+// EgressPolicy is the node's egress authorization: whether workspaces may have
+// public egress at all, and the outer bound on which domains they may reach. A
+// project's `.apesandbox.yaml` / profile asks for domains; aped intersects the
+// request with AllowedDomains, so a project can narrow this set, never widen it.
+//
+//nolint:tagliatelle // snake_case is the on-disk policy.yaml contract
+type EgressPolicy struct {
+	// Enabled turns proxied egress on for this node. False (the default) denies
+	// every egress request — the fail-closed posture.
+	Enabled bool `yaml:"enabled"`
+	// AllowedDomains is the outer allow-list. Entries are exact hostnames or a
+	// single leading wildcard ("*.githubusercontent.com"); a wildcard entry
+	// authorizes anything inside its suffix. Empty denies every domain even when
+	// Enabled is true (default-deny, so enabling egress alone grants nothing).
+	AllowedDomains []string `yaml:"allowed_domains"`
+	// MaxDomains caps how many domains one workspace may be granted (0 → no cap).
+	// It bounds blast radius when a project commits a sprawling allowlist.
+	MaxDomains int `yaml:"max_domains"`
 }
 
 // Limits are per-workspace resource ceilings (0 = unlimited).
@@ -64,6 +88,10 @@ type ResolvedCreate struct {
 	VCPUs     int
 	MemMB     int
 	Devices   []workspace.Device
+	// EgressDomains is the GRANTED allowlist the resolved spec carries (PLAN-21).
+	// The executor re-checks it against policy rather than trusting the front's
+	// intersection — same lesson as the mount path: authorize the concrete value.
+	EgressDomains []string
 }
 
 // LoadPolicy reads and validates a policy.yaml. A missing or malformed file is
@@ -91,6 +119,16 @@ func (p *Policy) Validate() error {
 	if p.Limits.MaxVCPUs < 0 || p.Limits.MaxMemMB < 0 || p.Limits.MaxWorkspaces < 0 {
 		return errors.New("aped: policy limits must be non-negative")
 	}
+	if p.Egress.MaxDomains < 0 {
+		return errors.New("aped: policy egress.max_domains must be non-negative")
+	}
+	// A malformed pattern must fail at load, not silently authorize nothing (or,
+	// worse, look like it authorizes something it does not).
+	for _, d := range p.Egress.AllowedDomains {
+		if err := sandbox.ValidateDomainPattern(d); err != nil {
+			return fmt.Errorf("aped: policy egress.allowed_domains %q: %w", d, err)
+		}
+	}
 	return nil
 }
 
@@ -108,7 +146,32 @@ func (p *Policy) CheckCreate(rc ResolvedCreate, currentCount int) error {
 	if err := p.checkLimits(rc, currentCount); err != nil {
 		return err
 	}
+	if err := p.checkEgress(rc.EgressDomains); err != nil {
+		return err
+	}
 	return p.checkDevices(rc.Devices)
+}
+
+// checkEgress denies a resolved create whose granted allowlist exceeds policy:
+// egress disabled, a domain outside the allowed set, or more domains than the cap.
+// No egress requested is always allowed (a networkless workspace needs nothing).
+func (p *Policy) checkEgress(domains []string) error {
+	if len(domains) == 0 {
+		return nil
+	}
+	if !p.Egress.Enabled {
+		return fmt.Errorf("%w: network egress is disabled on this node (policy egress.enabled)", workspace.ErrPolicyDenied)
+	}
+	if p.Egress.MaxDomains > 0 && len(domains) > p.Egress.MaxDomains {
+		return fmt.Errorf("%w: %d egress domains exceeds the ceiling of %d",
+			workspace.ErrPolicyDenied, len(domains), p.Egress.MaxDomains)
+	}
+	_, refused := sandbox.IntersectDomains(domains, p.Egress.AllowedDomains)
+	if len(refused) > 0 {
+		return fmt.Errorf("%w: egress domain(s) %s are not in the policy allow-list",
+			workspace.ErrPolicyDenied, strings.Join(refused, ", "))
+	}
+	return nil
 }
 
 func (p *Policy) checkImage(image string) error {

@@ -82,6 +82,23 @@ type WorkspaceSpec struct {
 	Network     string       // nerdctl --network value; "" → default (CNI bridge), NetworkNone → networkless
 	Env         []string     // extra KEY=VALUE env beyond Comp.Env / the proxy
 	Command     []string     // container command override; empty → the image default
+
+	// EgressDomains is the GRANTED allowlist the workspace's CONNECT proxy
+	// enforces (policy ∩ request — PLAN-21 D1). Empty means no egress was granted;
+	// it is what the executor re-checks against policy, not the raw request.
+	EgressDomains []string
+	// NetnsPath is a pre-wired network namespace the guest joins, created by the
+	// privileged netns helper (PLAN-21 D3) and referenced by path so neither the
+	// executor nor the driver touches the network. Empty → no pre-wired netns, and
+	// Network decides the posture (fail-safe: a failed wire-up leaves the workspace
+	// networkless rather than on an open bridge).
+	NetnsPath string
+}
+
+// HasEgress reports whether the spec was granted proxied egress: an allowlist and
+// a proxy to reach it through.
+func (s WorkspaceSpec) HasEgress() bool {
+	return len(s.EgressDomains) > 0 && strings.TrimSpace(s.HTTPSProxy) != ""
 }
 
 // Container returns the containerd container name for the workspace.
@@ -118,7 +135,12 @@ func (s WorkspaceSpec) RunArgs() ([]string, error) {
 	// Networking. Emitted only when set, so the default path stays byte-identical
 	// to PLAN-16. aped provisions workspaces with NetworkNone (see the constant):
 	// it keeps nerdctl's client-side CNI out of the sandboxed executor's process.
-	if s.Network != "" {
+	// A pre-wired netns (PLAN-21) wins: `ns:<path>` joins the namespace the
+	// privileged helper already built, so nerdctl runs no CNI here either.
+	switch {
+	case strings.TrimSpace(s.NetnsPath) != "":
+		args = append(args, "--network", "ns:"+s.NetnsPath)
+	case s.Network != "":
 		args = append(args, "--network", s.Network)
 	}
 

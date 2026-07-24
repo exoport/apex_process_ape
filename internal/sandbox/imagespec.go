@@ -26,6 +26,12 @@ type ContainerdSpecOptions struct {
 	// process runs in a private network namespace with only loopback. Overlay
 	// connectivity is Phase 3.
 	Networkless bool
+	// NetnsPath joins a PRE-WIRED network namespace by path (PLAN-21): the
+	// privileged netns helper created the namespace, veth and wall; the Kata shim
+	// enters it and taps the interface it finds. It wins over Networkless — and
+	// because it is a path, neither this builder nor the executor touches the
+	// network. Empty → Networkless decides.
+	NetnsPath string
 }
 
 // applyImageConfig sets spec.Process from an OCI image config + overrides while
@@ -80,8 +86,34 @@ func applyImageConfig(spec *specs.Spec, opts ContainerdSpecOptions) error {
 	spec.Process.User.AdditionalGids = nil
 	spec.Process.Terminal = opts.Terminal
 
-	applyNetworkless(spec, opts.Networkless)
+	applyNetns(spec, opts.Networkless, opts.NetnsPath)
 	return nil
+}
+
+// applyNetns sets the spec's network-namespace posture. A netns PATH wins: the
+// namespace already exists (helper-created), so the spec references it and the
+// Kata shim enters it. With no path it falls back to applyNetworkless.
+func applyNetns(spec *specs.Spec, networkless bool, netnsPath string) {
+	if strings.TrimSpace(netnsPath) == "" {
+		applyNetworkless(spec, networkless)
+		return
+	}
+	if spec.Linux == nil {
+		spec.Linux = &specs.Linux{}
+	}
+	filtered := spec.Linux.Namespaces[:0:0]
+	replaced := false
+	for _, ns := range spec.Linux.Namespaces {
+		if ns.Type == specs.NetworkNamespace {
+			ns.Path = netnsPath
+			replaced = true
+		}
+		filtered = append(filtered, ns)
+	}
+	if !replaced {
+		filtered = append(filtered, specs.LinuxNamespace{Type: specs.NetworkNamespace, Path: netnsPath})
+	}
+	spec.Linux.Namespaces = filtered
 }
 
 // applyNetworkless makes spec's network posture match networkless: when true the

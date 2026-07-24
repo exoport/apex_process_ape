@@ -1,0 +1,86 @@
+# aped-netd.service — the narrow privileged network helper for workspace egress
+# (PLAN-21 D3). It wires ONE network namespace + veth pair per workspace onto the
+# host↔guest bridge so the Kata shim can tap it, and removes it again on teardown.
+#
+# Why this exists as a THIRD unit instead of a capability added to aped.service:
+# the root executor is deliberately powerless — empty CapabilityBoundingSet,
+# RestrictAddressFamilies=AF_UNIX, RestrictNamespaces=yes, SystemCallFilter=~@mount
+# — and the ape/aped split's charter forbids widening it to run container
+# networking ("barrier 2"). So the privilege lives here, in a single-purpose unit
+# that: speaks two verbs over a root-only AF_UNIX socket, never touches containerd,
+# holds no policy, and cannot be reached from the network at all.
+#
+# Scope of the privilege it does hold:
+#   CAP_NET_ADMIN  create/configure veth pairs, enslave a bridge port, load nft rules
+#   CAP_SYS_ADMIN  create a network namespace and mount it at /run/netns/<name>
+# Both are unavoidable for netns creation; nothing else is granted.
+#
+# MountFlags=shared is LOAD-BEARING, not hardening noise: `ip netns add` mounts the
+# new namespace at /run/netns/<name>, and containerd (a different unit) must see
+# that mount to enter the namespace. With systemd's default per-unit mount
+# namespace the bind would stay private and every workspace would fail to start
+# with an opaque "no such file or directory" on the netns path. For the same
+# reason this unit does NOT set ProtectSystem/PrivateTmp/ProtectHome-style
+# sandboxing that would re-privatize its mount namespace.
+#
+# NOTE: systemd has NO inline comments — a trailing "# ..." becomes part of the
+# value. Every comment here is on its own line for that reason.
+[Unit]
+Description=aped-netd — privileged netns/veth helper for sandbox egress
+Documentation=https://github.com/exoport/apex_process_ape/blob/main/docs/how-to/run-aped.md
+Requires=aped-netbr.service
+After=aped-netbr.service network-pre.target
+Before=aped.service
+
+[Service]
+ExecStart=/usr/local/bin/aped netd --socket /run/aped/netd.sock --lease-file /run/aped/netd-leases.json
+Restart=on-failure
+RestartSec=1s
+
+# Identity: root, because netns creation needs CAP_SYS_ADMIN and the socket must be
+# root-only. The socket it binds is 0600, so the ONLY peer that can command it is
+# the root executor — the de-privileged front cannot.
+User=root
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN
+
+# Mount propagation must reach the host so containerd can enter the netns.
+MountFlags=shared
+RuntimeDirectory=aped
+RuntimeDirectoryMode=0710
+RuntimeDirectoryPreserve=yes
+
+# Namespaces: this unit's whole job is creating NET namespaces, so RestrictNamespaces
+# is narrowed to exactly that one rather than denied.
+RestrictNamespaces=net
+# AF_NETLINK is how iproute2/nft program the kernel; AF_UNIX is the command socket.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+# No IP networking of its own: the helper never dials anything.
+IPAddressDeny=any
+
+ProtectHome=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+ProcSubset=pid
+PrivateTmp=no
+UMask=0077
+
+# @mount is REQUIRED here (unlike the executor): `ip netns add` bind-mounts the new
+# namespace into /run/netns. @module/@reboot/@swap/@raw-io and friends stay denied.
+SystemCallArchitectures=native
+SystemCallErrorNumber=EPERM
+SystemCallFilter=@system-service @mount
+SystemCallFilter=~@swap @reboot @module @cpu-emulation @obsolete @debug
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+KeyringMode=private
+
+[Install]
+WantedBy=multi-user.target

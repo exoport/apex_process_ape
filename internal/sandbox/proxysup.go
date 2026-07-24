@@ -167,6 +167,11 @@ type DaemonOptions struct {
 // audit log, reports the bound loopback address on the readiness fd (so the
 // parent learns the ephemeral port), and serves until SIGTERM/SIGINT or ctx
 // cancellation. It is the process body ProxySupervisor.Start re-execs.
+//
+// It takes OWNERSHIP of ReadyFD: the fd is closed once the address is reported.
+// That is correct for the real caller (a re-exec'd child inheriting fd 3), so an
+// in-process caller must not keep its own os.File over the same descriptor alive
+// as a second owner.
 func RunProxyDaemon(ctx context.Context, o DaemonOptions) error {
 	var sink AuditSink
 	if strings.TrimSpace(o.AuditLog) != "" {

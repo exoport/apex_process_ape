@@ -23,6 +23,7 @@ func newRunCmd() *cobra.Command {
 		nerdctlData string
 		ctrdAddr    string
 		ctrdNS      string
+		netdSocket  string
 		allowUsers  []string
 		allowUIDs   []int
 	)
@@ -58,6 +59,7 @@ normally just the aped-front user.`,
 				NerdctlDataRoot:     nerdctlData,
 				ContainerdAddress:   ctrdAddr,
 				ContainerdNamespace: ctrdNS,
+				NetdSocket:          netdSocket,
 				Stderr:              os.Stderr,
 			})
 		},
@@ -73,6 +75,7 @@ normally just the aped-front user.`,
 	f.StringVar(&nerdctlData, "nerdctl-data-root", "", "nerdctl --data-root override (default: <state-dir>/nerdctl, under the executor's writable state)")
 	f.StringVar(&ctrdAddr, "containerd-address", "", "containerd socket for --driver containerd (default: /run/containerd/containerd.sock)")
 	f.StringVar(&ctrdNS, "containerd-namespace", "", "containerd namespace for --driver containerd (default: aped)")
+	f.StringVar(&netdSocket, "netd-socket", "", "Privileged network-helper socket for workspace egress (default: off; typical /run/aped/netd.sock)")
 	f.StringSliceVar(&allowUsers, "allow-user", []string{"aped"}, "Usernames whose SO_PEERCRED uid may issue commands (the aped-front user)")
 	f.IntSliceVar(&allowUIDs, "allow-uid", nil, "Additional peer uids allowed over the priv socket")
 	return cmd

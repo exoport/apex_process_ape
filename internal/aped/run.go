@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/exoport/apex_process_ape/internal/netd"
 	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/exoport/apex_process_ape/internal/workspace"
 )
@@ -59,7 +60,11 @@ type ExecutorRunConfig struct {
 	// ("" → the sandbox package defaults).
 	ContainerdAddress   string
 	ContainerdNamespace string
-	Stderr              io.Writer
+	// NetdSocket is the privileged network helper's AF_UNIX socket (PLAN-21 D3).
+	// Empty disables egress support in this executor: a create whose spec was
+	// granted egress is refused rather than provisioned without a network.
+	NetdSocket string
+	Stderr     io.Writer
 }
 
 // RunExecutor is the `aped run` entry point: the network-less root executor. It
@@ -96,6 +101,13 @@ func RunExecutor(ctx context.Context, cfg ExecutorRunConfig) error {
 	// here; NATS forwarding on ape.audit.<node>.> is done front-side (follow-up).
 	auditor := NewAuditor(auditW, nil, cfg.Node)
 
+	// The network helper is a separate privileged unit reached over its own
+	// AF_UNIX socket — the executor never programs the network itself (PLAN-21 D3).
+	var netnsProvider NetnsProvider
+	if cfg.NetdSocket != "" {
+		netnsProvider = &netd.Client{Socket: cfg.NetdSocket}
+	}
+
 	ex := NewExecutor(ExecutorConfig{
 		Backend:     backend,
 		Provision:   provision,
@@ -103,6 +115,7 @@ func RunExecutor(ctx context.Context, cfg ExecutorRunConfig) error {
 		Auditor:     auditor,
 		AllowedUIDs: cfg.AllowedUIDs,
 		Node:        cfg.Node,
+		Netns:       netnsProvider,
 	})
 
 	l, activated, err := socketActivatedListener()
@@ -124,7 +137,12 @@ func RunExecutor(ctx context.Context, cfg ExecutorRunConfig) error {
 	if driver == "" {
 		driver = DriverShell
 	}
-	fmt.Fprintf(stderr, "▶ aped run (executor, driver=%s) on %s — %d allowed peer uid(s), policy %s\n", driver, l.Addr(), len(cfg.AllowedUIDs), cfg.PolicyPath)
+	netdNote := "egress: off (no --netd-socket)"
+	if cfg.NetdSocket != "" {
+		netdNote = "egress helper: " + cfg.NetdSocket
+	}
+	fmt.Fprintf(stderr, "▶ aped run (executor, driver=%s) on %s — %d allowed peer uid(s), policy %s, %s\n",
+		driver, l.Addr(), len(cfg.AllowedUIDs), cfg.PolicyPath, netdNote)
 	// The listener is bound (or adopted); tell the service manager we are up and
 	// start the watchdog pinger (both no-ops outside a Type=notify unit).
 	signalReady(ctx)

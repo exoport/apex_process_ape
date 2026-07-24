@@ -18,7 +18,11 @@ Type=notify
 # --guest-nats-url is set to the host↔guest bridge endpoint in production so
 # per-VM creds + telemetry are injected; omitted here (guests boot without an
 # agent — see PLAN-18 D6).
-ExecStart=/usr/local/bin/aped front --node %H --state-dir /var/lib/aped --mgmt-host 127.0.0.1 --mgmt-port 4223 --operator-creds /var/lib/aped/creds/operator.creds
+# --policy is the SAME file the executor re-validates against; the front reads it
+# to pre-check egress requests and build each workspace's proxy allowlist (PLAN-21
+# D2). Egress stays off until policy sets egress.enabled, so passing it here is
+# safe on a node that wants no egress.
+ExecStart=/usr/local/bin/aped front --node %H --state-dir /var/lib/aped --mgmt-host 127.0.0.1 --mgmt-port 4223 --operator-creds /var/lib/aped/creds/operator.creds --policy /etc/aped/policy.yaml
 Restart=on-failure
 WatchdogSec=30s
 
@@ -51,7 +55,15 @@ ProtectHostname=yes
 UMask=0077
 
 # Embeds nats-server: loopback (host ape) + the private host↔guest bridge subnet.
-# 169.254.0.0/16 is an example host↔guest link-local; set it to the real subnet.
+# 169.254.0.0/16 covers the aped-netbr bridge (169.254.42.1/24 by default), so the
+# per-workspace CONNECT proxies are reachable from guests with no change here.
+#
+# NOTE for egress (PLAN-21): those proxies must also dial UPSTREAM, which this
+# IPAddressDeny=any forbids. Because the allowlist is by DOMAIN — something a
+# cgroup IP filter cannot express — enforcement lives in the proxy itself
+# (deny-by-default + audited), and a node that wants egress adds a drop-in with
+# IPAddressAllow=any. deploy/dev-host.sh writes that drop-in; it is deliberately
+# NOT baked in here, so the shipped posture stays closed.
 RestrictNamespaces=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 IPAddressDeny=any

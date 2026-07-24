@@ -101,6 +101,14 @@ func TestRunProxyDaemon(t *testing.T) {
 	pr, pw, err := os.Pipe()
 	require.NoError(t, err)
 	defer pr.Close()
+	// RunProxyDaemon takes OWNERSHIP of ReadyFD (in production it is fd 3, inherited
+	// by a re-exec'd child, and the daemon closes it after reporting its address).
+	// In-process that makes `pw` a second owner of the same descriptor: once the last
+	// use of pw is past, its finalizer can close a descriptor number the runtime has
+	// already recycled for another socket — which surfaces as a spurious "bad file
+	// descriptor" on an unrelated connection. Keeping pw reachable for the whole test
+	// prevents that; the daemon still owns and closes the fd.
+	defer runtime.KeepAlive(pw)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

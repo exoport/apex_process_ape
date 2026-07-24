@@ -26,6 +26,31 @@ type CreateRequest struct {
 	Profile     string   `json:"profile,omitempty"`
 	Devices     []Device `json:"devices,omitempty"`
 	From        string   `json:"from,omitempty"` // Kata factory template (Kata tier only)
+	// Egress is the workspace's REQUESTED network egress (PLAN-21). It is a
+	// request, never a grant: aped intersects it with the node's egress policy, so
+	// a project can narrow what policy permits but never widen it. Nil/empty means
+	// no egress — the workspace stays networkless.
+	Egress *EgressRequest `json:"egress,omitempty"`
+}
+
+// EgressRequest is the requested allowlist for a workspace's public egress. It
+// carries the same two shapes as a profile's network policy: HTTPS domains
+// reached through the CONNECT proxy, and fixed host:port pairs for non-HTTP
+// endpoints. Domains may be exact ("github.com") or single leading-wildcard
+// ("*.githubusercontent.com").
+//
+//nolint:tagliatelle // snake_case is the documented vmm NATS wire contract
+type EgressRequest struct {
+	AuthorizedDomains []string `json:"authorized_domains,omitempty"`
+	DirectAllow       []string `json:"direct_allow,omitempty"`
+}
+
+// Domains returns the requested domains (nil-safe).
+func (e *EgressRequest) Domains() []string {
+	if e == nil {
+		return nil
+	}
+	return e.AuthorizedDomains
 }
 
 // Device is one passthrough device request. Exactly one of PCI/USB is set.

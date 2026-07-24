@@ -39,3 +39,27 @@ limits:
 devices:
   pci: []        # e.g. "0000:01:00.0" — a GPU BDF (whole IOMMU group)
   usb: []        # e.g. "303a:1001" — a vendor:product forwarded via usb-host
+
+# Public network egress for workspaces (PLAN-21). Deny-by-default in two
+# independent ways: `enabled: false` refuses every egress request, and an empty
+# `allowed_domains` grants nothing even when enabled.
+#
+# A project's `.apesandbox.yaml` (egress.authorized_domains) and its profile ASK
+# for domains; aped intersects the request with allowed_domains, so a project can
+# only ever narrow this list — never widen it. Every granted domain is recorded in
+# the create audit record, and every individual CONNECT (allowed or denied) in the
+# per-workspace egress-audit.jsonl plus ape.audit.<node>.egress.
+#
+# Enabling this needs host support as well as policy: aped-netbr.service (the
+# host↔guest bridge + nftables wall), aped-netd.service (the netns helper), and
+# `aped front --policy` so the front can build each workspace's allowlist. See
+# deploy/dev-host.sh and docs/how-to/run-aped.md.
+egress:
+  enabled: false
+  allowed_domains: []
+  # - github.com
+  # - "*.githubusercontent.com"
+  # - proxy.golang.org
+  # - registry.npmjs.org
+  # - api.anthropic.com
+  max_domains: 32   # per-workspace ceiling (0 = no ceiling)

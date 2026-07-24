@@ -17,6 +17,16 @@ import (
 // (the production impl wraps sandbox.Runner + Registry — see NewShellProvisioner).
 type Provisioner func(ctx context.Context, spec sandbox.WorkspaceSpec) (workspace.Workspace, error)
 
+// NetnsProvider is the executor's view of the privileged network helper
+// (internal/netd, PLAN-21 D3): the one thing the hardened executor cannot do
+// itself. EnsureNetns wires a workspace's egress namespace and returns its PATH —
+// the executor only ever handles that string, never a socket, netlink handle, or
+// namespace of its own. reuse asks for an existing link to be returned untouched.
+type NetnsProvider interface {
+	EnsureNetns(ctx context.Context, workspace string, proxyPort int, reuse bool) (string, error)
+	DeleteNetns(ctx context.Context, workspace string) error
+}
+
 // Executor is the network-less root command server (PLAN-18 D1, `aped run`). It
 // serves the AF_UNIX priv socket, gates every connection on SO_PEERCRED,
 // re-validates every resolved command against policy, drives the workspace
@@ -29,6 +39,7 @@ type Executor struct {
 	auditor     *Auditor
 	allowedUIDs map[uint32]bool
 	node        string
+	netns       NetnsProvider
 
 	mu sync.Mutex // serializes dispatch (registry writes are not concurrency-safe)
 }
@@ -41,6 +52,10 @@ type ExecutorConfig struct {
 	Auditor     *Auditor
 	AllowedUIDs []uint32 // peer uids permitted over the priv socket (the aped-front uid)
 	Node        string
+	// Netns is the privileged network helper. Nil means this executor cannot
+	// provide egress: a create whose spec was granted egress is REFUSED rather than
+	// provisioned networkless behind a proxy env var that would silently hang.
+	Netns NetnsProvider
 }
 
 // NewExecutor builds an Executor. A nil Auditor is replaced with a no-op one.
@@ -60,6 +75,7 @@ func NewExecutor(cfg ExecutorConfig) *Executor {
 		auditor:     auditor,
 		allowedUIDs: allowed,
 		node:        cfg.Node,
+		netns:       cfg.Netns,
 	}
 }
 
@@ -189,7 +205,18 @@ func (e *Executor) dispatch(ctx context.Context, cmd Command, peer Peer) (Respon
 		if cmd.Destroy != nil {
 			req = *cmd.Destroy
 		}
-		return e.mutate(peer, "DestroyVM", cmd.ID, func() error { return e.backend.Destroy(ctx, cmd.ID, req) })
+		return e.mutate(peer, "DestroyVM", cmd.ID, func() error {
+			err := e.backend.Destroy(ctx, cmd.ID, req)
+			// Tear the egress namespace down whether or not the container went away
+			// cleanly: a leaked netns would hold an address lease and a bridge port.
+			// Unknown/absent workspaces are a no-op in the helper.
+			if e.netns != nil {
+				if derr := e.netns.DeleteNetns(ctx, cmd.ID); derr != nil {
+					e.auditor.Note("netns teardown for " + cmd.ID + ": " + derr.Error())
+				}
+			}
+			return err
+		})
 	case OpList:
 		list, err := e.backend.List(ctx)
 		return respondValue(list, err), nil
@@ -223,7 +250,20 @@ func (e *Executor) doCreate(ctx context.Context, cmd Command, peer Peer) (Respon
 		return errorResponse(err), []AuditRecord{rec}
 	}
 
+	// Egress was authorized above; now wire it. The netns is created by the
+	// privileged helper AFTER the policy decision and BEFORE provisioning, so a
+	// denied create never touches the network — and the spec the driver receives
+	// carries only a path (PLAN-21 D3/D4).
+	if err := e.attachEgressNetns(ctx, &spec); err != nil {
+		rec := e.audit(peer, caller, "CreateVM", resolved, DecisionAllow, Outcome{OK: false, Error: err.Error()})
+		return errorResponse(err), []AuditRecord{rec}
+	}
+
 	ws, err := e.provision(ctx, spec)
+	if err != nil {
+		// A failed provision must not leave a dangling namespace behind.
+		e.releaseEgressNetns(ctx, spec)
+	}
 	outcome := Outcome{OK: err == nil}
 	if err != nil {
 		outcome.Error = err.Error()
@@ -235,6 +275,42 @@ func (e *Executor) doCreate(ctx context.Context, cmd Command, peer Peer) (Respon
 		return errorResponse(err), []AuditRecord{rec}
 	}
 	return okResponse(ws), []AuditRecord{rec}
+}
+
+// attachEgressNetns asks the privileged helper for the workspace's pre-wired
+// network namespace and records its path on the spec. A spec without granted
+// egress is left untouched (the workspace stays networkless). A spec WITH granted
+// egress on an executor that has no helper is refused: provisioning it would hand
+// the guest an HTTPS_PROXY it cannot route to, which fails as a hang rather than
+// an error.
+func (e *Executor) attachEgressNetns(ctx context.Context, spec *sandbox.WorkspaceSpec) error {
+	if !spec.HasEgress() {
+		return nil
+	}
+	if e.netns == nil {
+		return fmt.Errorf("%w: egress was granted but this executor has no network helper "+
+			"(start aped-netd.service and pass --netd-socket)", workspace.ErrUnsupported)
+	}
+	_, port, err := sandbox.ParseProxyHostPort(spec.HTTPSProxy)
+	if err != nil {
+		return fmt.Errorf("%w: %w", workspace.ErrValidation, err)
+	}
+	path, err := e.netns.EnsureNetns(ctx, spec.Name, port, false)
+	if err != nil {
+		return err
+	}
+	spec.NetnsPath = path
+	return nil
+}
+
+// releaseEgressNetns removes a namespace wired for a create that then failed.
+func (e *Executor) releaseEgressNetns(ctx context.Context, spec sandbox.WorkspaceSpec) {
+	if e.netns == nil || spec.NetnsPath == "" {
+		return
+	}
+	if err := e.netns.DeleteNetns(ctx, spec.Name); err != nil {
+		e.auditor.Note("netns rollback for " + spec.Name + ": " + err.Error())
+	}
 }
 
 // mutate runs a mutating id-verb, audits it, and returns an OK/typed-error
@@ -278,16 +354,24 @@ func resolvedCreateFromSpec(spec sandbox.WorkspaceSpec) ResolvedCreate {
 	if spec.Mount == sandbox.MountHostFS {
 		mount = spec.ProjectRoot
 	}
-	return ResolvedCreate{Image: spec.Image, MountPath: mount, Devices: nil}
+	return ResolvedCreate{
+		Image: spec.Image, MountPath: mount, Devices: nil,
+		EgressDomains: spec.EgressDomains,
+	}
 }
 
-// auditResolved builds the audit args for a create from its spec.
+// auditResolved builds the audit args for a create from its spec. The granted
+// egress allowlist is part of the record: "which domains did this VM get" is
+// exactly what an auditor needs, and it is a resolved value, not a request.
 func auditResolved(spec sandbox.WorkspaceSpec) ResolvedArgs {
 	mount := ""
 	if spec.Mount == sandbox.MountHostFS {
 		mount = spec.ProjectRoot
 	}
-	return ResolvedArgs{WorkspaceID: spec.Name, Image: spec.Image, Mount: mount}
+	return ResolvedArgs{
+		WorkspaceID: spec.Name, Image: spec.Image, Mount: mount,
+		EgressDomains: spec.EgressDomains,
+	}
 }
 
 func decisionFor(err error) string {

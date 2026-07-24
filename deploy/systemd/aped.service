@@ -11,6 +11,11 @@ Description=aped — rootful Kata-QEMU VM-management executor (privileged, narro
 After=containerd.service network-pre.target
 Requires=aped-priv.socket
 Wants=containerd.service
+# The netns helper is WANTED, not required: without it the executor still runs and
+# every non-egress workspace works — an egress-granted create then fails with a
+# clear "no network helper" error instead of the whole daemon refusing to start.
+Wants=aped-netd.service
+After=aped-netd.service
 
 [Service]
 # Type=notify: aped signals READY=1 once the priv socket is bound/adopted and
@@ -18,7 +23,7 @@ Wants=containerd.service
 # RestrictAddressFamilies=AF_UNIX below already permits it). The priv socket is
 # inherited from aped-priv.socket (LISTEN_FDS, auto-detected).
 Type=notify
-ExecStart=/usr/local/bin/aped run --policy /etc/aped/policy.yaml --state-dir /var/lib/aped --audit-log /var/log/aped/audit.jsonl --node %H --allow-user aped
+ExecStart=/usr/local/bin/aped run --policy /etc/aped/policy.yaml --state-dir /var/lib/aped --audit-log /var/log/aped/audit.jsonl --node %H --allow-user aped --netd-socket /run/aped/netd.sock
 Restart=on-failure
 WatchdogSec=30s
 

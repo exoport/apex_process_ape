@@ -23,6 +23,10 @@ func newFrontCmd() *cobra.Command {
 		guestNats   string
 		operatorCr  string
 		credsExpiry time.Duration
+		policyPath  string
+		egressIP    string
+		egressLow   int
+		egressHigh  int
 	)
 	cmd := &cobra.Command{
 		Use:   "front",
@@ -55,6 +59,10 @@ injected into each VM as APE_NATS_URL alongside its minted per-VM .creds.`,
 				OperatorCredsPath: operatorCr,
 				CredsExpiry:       credsExpiry,
 				ApeVersion:        Version,
+				PolicyPath:        policyPath,
+				EgressBindIP:      egressIP,
+				EgressPortLow:     egressLow,
+				EgressPortHigh:    egressHigh,
 				Stderr:            os.Stderr,
 			})
 		},
@@ -69,5 +77,9 @@ injected into each VM as APE_NATS_URL alongside its minted per-VM .creds.`,
 	f.StringVar(&guestNats, "guest-nats-url", "", "APE_NATS_URL injected into guests ('' disables per-VM creds)")
 	f.StringVar(&operatorCr, "operator-creds", "/var/lib/aped/creds/operator.creds", "Where to write the host-operator .creds for the ape CLI")
 	f.DurationVar(&credsExpiry, "creds-expiry", 24*time.Hour, "Per-VM credential lifetime (0 = no expiry)")
+	f.StringVar(&policyPath, "policy", "", "policy.yaml to read egress policy from ('' → egress disabled; normally /etc/aped/policy.yaml)")
+	f.StringVar(&egressIP, "egress-bridge-ip", "", "Bridge address the per-workspace CONNECT proxies listen on (default: the aped-netbr bridge address)")
+	f.IntVar(&egressLow, "egress-port-low", 0, "Lowest proxy listen port (must match the host nftables chain)")
+	f.IntVar(&egressHigh, "egress-port-high", 0, "Highest proxy listen port")
 	return cmd
 }

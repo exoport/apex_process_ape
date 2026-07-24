@@ -32,11 +32,20 @@ type Resolver struct {
 	credsExpiry time.Duration
 	telemetry   Account
 	network     string // nerdctl --network for provisioned specs (default NetworkNone)
+	egress      EgressPlanner
 
 	// Injectable seams (default to the real implementations) so Resolve is
 	// unit-testable without touching a profile file or the compose filesystem.
 	loadProfile func(name string) (*sandbox.Profile, error)
 	compose     func(sandbox.ComposeOptions) (*sandbox.Composition, error)
+}
+
+// EgressPlanner intersects a workspace's requested egress domains with node
+// policy and stands up the CONNECT proxy that serves them (implemented by
+// EgressSupervisor). It is an interface so the resolver is testable without
+// binding a listener.
+type EgressPlanner interface {
+	Plan(name string, requested []string) (EgressPlan, error)
 }
 
 // ResolverConfig configures NewResolver.
@@ -51,6 +60,10 @@ type ResolverConfig struct {
 	// nerdctl's client-side CNI stays out of the hardened executor (PLAN-18 D1).
 	// Overlay connectivity is Phase 3.
 	Network string
+	// Egress plans + supervises proxied egress (PLAN-21 D1/D2). Nil denies every
+	// egress request: a workspace asking for domains on a node with no egress
+	// support is told so, rather than silently booting networkless.
+	Egress EgressPlanner
 	// LoadProfile is an optional server-side profile source (by name). When nil,
 	// the resolver builds a default profile from the request fields.
 	LoadProfile func(name string) (*sandbox.Profile, error)
@@ -69,6 +82,7 @@ func NewResolver(cfg ResolverConfig) *Resolver {
 		credsExpiry: cfg.CredsExpiry,
 		telemetry:   cfg.Telemetry,
 		network:     network,
+		egress:      cfg.Egress,
 		loadProfile: cfg.LoadProfile,
 		compose:     sandbox.Compose,
 	}
@@ -122,10 +136,43 @@ func (r *Resolver) Resolve(_ context.Context, req workspace.CreateRequest) (sand
 		return sandbox.WorkspaceSpec{}, fmt.Errorf("%w: unknown mount mode %q", workspace.ErrValidation, prof.Mount)
 	}
 
+	if err := r.resolveEgress(&spec, prof, req); err != nil {
+		return sandbox.WorkspaceSpec{}, err
+	}
+
 	if err := r.injectVMCreds(name, comp); err != nil {
 		return sandbox.WorkspaceSpec{}, err
 	}
 	return spec, nil
+}
+
+// resolveEgress folds the workspace's granted egress into the spec (PLAN-21 D1).
+//
+// The request is the union of what the server-side profile declares and what the
+// project asked for on the wire (its `.apesandbox.yaml` egress: section). Both are
+// REQUESTS: EgressPlanner intersects them with node policy, so the spec only ever
+// carries domains policy already permits — and the executor re-checks that set
+// again before provisioning.
+//
+// spec.Network stays NetworkNone even with egress granted: the guest reaches the
+// world through the pre-wired netns the executor attaches, so if that wiring ever
+// fails the workspace boots NETWORKLESS instead of falling back to an open bridge.
+func (r *Resolver) resolveEgress(spec *sandbox.WorkspaceSpec, prof *sandbox.Profile, req workspace.CreateRequest) error {
+	requested := sandbox.SortedDomains(append(append([]string(nil), prof.Network.AuthorizedDomains...), req.Egress.Domains()...))
+	if len(requested) == 0 {
+		return nil
+	}
+	if r.egress == nil {
+		return fmt.Errorf("%w: this node does not provide workspace egress "+
+			"(aped front --egress-bridge-ip / policy egress.enabled)", workspace.ErrPolicyDenied)
+	}
+	plan, err := r.egress.Plan(spec.Name, requested)
+	if err != nil {
+		return err
+	}
+	spec.EgressDomains = plan.Domains
+	spec.HTTPSProxy = plan.ProxyURL
+	return nil
 }
 
 // injectVMCreds mints a per-VM telemetry credential and injects it as a

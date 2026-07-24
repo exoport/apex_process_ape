@@ -51,6 +51,11 @@ type ResolvedArgs struct {
 	PCIBDF      string `json:"pci_bdf,omitempty"`
 	USB         string `json:"usb,omitempty"`
 	VMMUID      string `json:"vmm_uid,omitempty"`
+	// EgressDomains is the GRANTED egress allowlist (PLAN-21) — policy ∩ request,
+	// the concrete set the workspace's proxy will enforce. Per-connection egress
+	// decisions ride their own trail (egress-audit.jsonl / ape.audit.<node>.egress);
+	// this records what the VM was authorized for at create time.
+	EgressDomains []string `json:"egress_domains,omitempty"`
 }
 
 // PolicyDecision records which rule fired and whether it allowed the op.
@@ -115,6 +120,14 @@ func (a *Auditor) Record(rec AuditRecord) AuditRecord {
 		a.pub(a.subject(rec.Op), data)
 	}
 	return rec
+}
+
+// Note records a non-authorization operational remark (e.g. a best-effort
+// teardown that failed) as its own record, so a leak the executor could not fix
+// is visible in the same trail as the ops that caused it. It is deliberately
+// distinct from Record's authorized-op shape: no peer, no policy decision.
+func (a *Auditor) Note(msg string) {
+	a.Record(AuditRecord{Op: "Note", Outcome: Outcome{OK: false, Error: msg}})
 }
 
 // subject renders this Auditor's ape.audit.<node>.<event> subject.

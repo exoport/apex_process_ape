@@ -122,7 +122,7 @@ func (d *containerdDriver) Provision(ctx context.Context, spec WorkspaceSpec) (w
 		oci.WithDefaultSpec(),
 		oci.WithDefaultUnixDevices,
 		oci.WithMounts(containerdMounts(spec)),
-		withImageConfigNoMount(cfg, spec.Command, containerdEnv(spec), spec.Network == NetworkNone),
+		withImageConfigNoMount(cfg, spec.Command, containerdEnv(spec), spec.Network == NetworkNone, spec.NetnsPath),
 	}
 	container, err := d.cli.NewContainer(
 		ctx, id,
@@ -429,11 +429,12 @@ func (d *containerdDriver) regRemove(id string) {
 }
 
 // withImageConfigNoMount adapts the pure applyImageConfig into an oci.SpecOpts —
-// the barrier-3-free replacement for oci.WithImageConfig.
-func withImageConfigNoMount(cfg ocispec.ImageConfig, args, env []string, networkless bool) oci.SpecOpts {
+// the barrier-3-free replacement for oci.WithImageConfig. netnsPath, when set,
+// joins the pre-wired egress namespace (PLAN-21) instead of an empty private one.
+func withImageConfigNoMount(cfg ocispec.ImageConfig, args, env []string, networkless bool, netnsPath string) oci.SpecOpts {
 	return func(_ context.Context, _ oci.Client, _ *containers.Container, s *specs.Spec) error {
 		return applyImageConfig(s, ContainerdSpecOptions{
-			Config: cfg, Args: args, Env: env, Networkless: networkless,
+			Config: cfg, Args: args, Env: env, Networkless: networkless, NetnsPath: netnsPath,
 		})
 	}
 }
