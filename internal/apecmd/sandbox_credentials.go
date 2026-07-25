@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/output"
@@ -69,6 +71,22 @@ const (
 //
 //nolint:gosec // G101 false positive: a marker file NAME, not a credential
 const credentialMarkerName = ".ape-credential-publish.json"
+
+// credentialGroup is the group granted access to the shared credential: the same
+// group aped-front runs as. The operator is already a member (tier2-setup adds them),
+// so this needs no privilege.
+const credentialGroup = "ape"
+
+// credentialSharedMode is what the credential's inode must be for the daemon to take
+// part in the shared session: group read+write.
+//
+// This is the one unavoidable cost of sharing ONE live OAuth session with a daemon
+// that runs as another user. A hard link shares its inode's owner and mode, so there
+// is no way to expose the published name without exposing the file — and read alone is
+// not enough, because a workspace's refresh has to be written back through it. Group
+// `ape` is the aped boundary group, not a general-purpose one, so nothing else on the
+// box gains anything. `revoke` restores the original group and mode.
+const credentialSharedMode = 0o660
 
 // credentialDirMode is traverse-only for others: the daemon must reach the path, but
 // only the owner may list it, and the credential file itself stays 0600.
@@ -189,6 +207,10 @@ they are torn down.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dest := credentialDest(root)
+			// Restore the operator's own file first: with a hard link the grant lives on
+			// the shared inode, so removing only the extra name would leave their
+			// credential group-writable for no reason.
+			restored := restoreOwnership(dest)
 			if err := os.Remove(dest); err != nil {
 				if os.IsNotExist(err) {
 					fmt.Fprintf(cmd.OutOrStdout(), "nothing published at %s\n", dest)
@@ -196,7 +218,11 @@ they are torn down.`,
 				}
 				return fmt.Errorf("remove %s: %w", dest, err)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "revoked %s (your ~/.claude credential is untouched)\n", dest)
+			_ = os.Remove(markerPath(dest))
+			fmt.Fprintf(cmd.OutOrStdout(), "revoked %s\n", dest)
+			if restored {
+				fmt.Fprintf(cmd.OutOrStdout(), "restored the original group and mode on your credential\n")
+			}
 			fmt.Fprintln(cmd.OutOrStdout(), "note: workspaces already running keep what was composed into them until 'down'")
 			return nil
 		},
@@ -220,13 +246,13 @@ func credentialRoot(flagValue string) string {
 // <root>/<user>/.claude/.credentials.json. The per-user directory keeps two
 // operators on one node from publishing over each other.
 func credentialDest(rootFlag string) string {
-	user := os.Getenv("USER")
-	if user == "" {
-		if u, err := os.UserHomeDir(); err == nil {
-			user = filepath.Base(u)
+	name := os.Getenv("USER")
+	if name == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			name = filepath.Base(home)
 		}
 	}
-	return filepath.Join(credentialRoot(rootFlag), user, credentialRelPath)
+	return filepath.Join(credentialRoot(rootFlag), name, credentialRelPath)
 }
 
 // resolveCredentialSource returns the credential file to publish, confirming it
@@ -254,6 +280,9 @@ func resolveCredentialSource(flagValue string) (string, error) {
 // publishCredential links (or copies) src to dest, creating the directories the
 // daemon needs to traverse. Re-publishing repairs a decoupled link.
 func publishCredential(src, dest string, copyMode bool) (string, error) {
+	// Captured BEFORE the grant so a re-publish does not record the granted mode as if
+	// it were the original.
+	prior := priorMarkerOwnership(dest, src)
 	dir := filepath.Dir(dest)
 	// 0751 — traverse-only for others, deliberately, and it is the crux of this design
 	// working without touching group membership: this command runs as YOU, so anything
@@ -281,14 +310,55 @@ func publishCredential(src, dest string, copyMode bool) (string, error) {
 		if err := copyFile(src, dest); err != nil {
 			return "", err
 		}
-		writeCredentialMarker(dest, credentialModeCopy, src)
+		if err := grantDaemonAccess(dest); err != nil {
+			return "", err
+		}
+		writeCredentialMarker(dest, credentialModeCopy, src, prior)
 		return fmt.Sprintf("published a COPY of %s → %s", src, dest), nil
 	}
 	if err := os.Link(src, dest); err != nil {
 		return "", fmt.Errorf("hard link %s → %s: %w (different filesystems? use --copy)", src, dest, err)
 	}
-	writeCredentialMarker(dest, credentialModeLink, src)
+	// The grant is applied to the shared INODE, so it covers the operator's own file
+	// too — see credentialSharedMode for why there is no narrower option.
+	if err := grantDaemonAccess(dest); err != nil {
+		return "", err
+	}
+	writeCredentialMarker(dest, credentialModeLink, src, prior)
 	return fmt.Sprintf("published %s → %s (hard link: one live credential, shared with workspaces)", src, dest), nil
+}
+
+// daemonGID resolves the group publishing grants access to. It is a seam so tests can
+// use their own group: chgrp to a group the calling process is not an ACTIVE member of
+// is EPERM, regardless of /etc/group.
+var daemonGID = func() (int, error) { return lookupGroupID(credentialGroup) }
+
+// grantDaemonAccess gives the aped group read+write on the credential so aped-front can
+// take part in the shared session. Ownership stays with the operator.
+func grantDaemonAccess(path string) error {
+	gid, err := daemonGID()
+	if err != nil {
+		return fmt.Errorf("group %q not found — is aped installed on this host? %w", credentialGroup, err)
+	}
+	if err := os.Chown(path, -1, gid); err != nil {
+		return fmt.Errorf("grant group %s access to %s: %w\n"+
+			"  chgrp needs %s in your ACTIVE group list, not just /etc/group — a shell opened before you were "+
+			"added to it will fail here. Start a new login session (or run `newgrp %s`) and re-publish",
+			credentialGroup, path, err, credentialGroup, credentialGroup)
+	}
+	if err := os.Chmod(path, credentialSharedMode); err != nil {
+		return fmt.Errorf("set mode on %s: %w", path, err)
+	}
+	return nil
+}
+
+// lookupGroupID resolves a group name to its gid.
+func lookupGroupID(name string) (int, error) {
+	g, err := user.LookupGroup(name)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(g.Gid)
 }
 
 // fileExists reports whether path is a readable existing file.
@@ -301,6 +371,26 @@ func fileExists(path string) bool {
 type credentialMarker struct {
 	Mode   string `json:"mode"`
 	Source string `json:"source"`
+	// Prior is the credential's group and mode before publishing granted the daemon
+	// access, so `revoke` can restore them instead of leaving the operator's file
+	// permanently group-writable.
+	Prior *credentialOwnership `json:"prior,omitempty"`
+}
+
+// credentialOwnership is a file's group + permission bits.
+type credentialOwnership struct {
+	GID  int    `json:"gid"`
+	Mode uint32 `json:"mode"`
+}
+
+// priorMarkerOwnership returns the ownership to record: the one already recorded (so a
+// re-publish keeps the ORIGINAL, not the granted state), else the source file's current
+// ownership.
+func priorMarkerOwnership(dest, src string) *credentialOwnership {
+	if m, ok := readCredentialMarker(dest); ok && m.Prior != nil {
+		return m.Prior
+	}
+	return priorOwnership(src)
 }
 
 // markerPath returns the marker beside a published credential.
@@ -308,8 +398,8 @@ func markerPath(dest string) string { return filepath.Join(filepath.Dir(dest), c
 
 // writeCredentialMarker records the publication mode. Best-effort: losing it degrades
 // `status` to "cannot tell link from copy", never the credential itself.
-func writeCredentialMarker(dest, mode, source string) {
-	data, err := json.Marshal(credentialMarker{Mode: mode, Source: source})
+func writeCredentialMarker(dest, mode, source string, prior *credentialOwnership) {
+	data, err := json.Marshal(credentialMarker{Mode: mode, Source: source, Prior: prior})
 	if err == nil {
 		_ = os.WriteFile(markerPath(dest), data, 0o600)
 	}
@@ -326,6 +416,20 @@ func readCredentialMarker(dest string) (credentialMarker, bool) {
 		return credentialMarker{}, false
 	}
 	return m, true
+}
+
+// restoreOwnership puts back the group and mode recorded before publishing granted the
+// daemon access. Best-effort: reporting a failure here would be noise on a teardown the
+// operator can repeat.
+func restoreOwnership(dest string) bool {
+	m, ok := readCredentialMarker(dest)
+	if !ok || m.Prior == nil {
+		return false
+	}
+	if err := os.Chown(dest, -1, m.Prior.GID); err != nil {
+		return false
+	}
+	return os.Chmod(dest, os.FileMode(m.Prior.Mode)) == nil
 }
 
 // RepairCredentialPublication re-links an EXISTING publication whose link decoupled,
@@ -364,7 +468,12 @@ func RepairCredentialPublication(rootFlag, sourceFlag string) (repaired bool, er
 		return false, nil //nolint:nilerr // an unreadable pair means "cannot repair", not "create failed"
 	}
 	if os.SameFile(si, di) {
-		return false, nil // still live
+		// Still the same inode, but a login may have reset the mode on it; re-assert the
+		// grant so the daemon does not silently lose access.
+		if st, serr := os.Stat(dest); serr == nil && st.Mode().Perm() != credentialSharedMode {
+			return false, grantDaemonAccess(dest)
+		}
+		return false, nil
 	}
 	if _, err := publishCredential(src, dest, false); err != nil {
 		return false, err

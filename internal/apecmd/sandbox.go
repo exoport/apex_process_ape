@@ -111,6 +111,15 @@ func dialVMM(cmd *cobra.Command) (*vmmclient.Client, *nats.Conn, func(), error) 
 	if node == "" {
 		node, _ = os.Hostname()
 	}
+	// A host `claude /login` REPLACES the credential file, which decouples a published
+	// hard link and leaves the node — and every workspace — on the pre-login token.
+	// Repairing here means any sandbox command puts it right, rather than the operator
+	// having to remember a re-publish after every login. It only ever refreshes an
+	// EXISTING publication, never creates one.
+	if repaired, rerr := RepairCredentialPublication("", ""); rerr == nil && repaired {
+		fmt.Fprintln(cmd.ErrOrStderr(), "re-published the host credential (it had been replaced since the last publish)")
+	}
+
 	cfg := natsconn.Resolve(sandboxNatsURL, sandboxNatsCreds)
 	if !cfg.Enabled() {
 		return nil, nil, nil, errNoAped
@@ -201,12 +210,6 @@ but never widen it.`,
 			}
 			if req.Mount == "" || req.Mount == "host-fs" {
 				req.MountSource = root
-			}
-			// A host `claude /login` replaces the credential file, decoupling a published
-			// hard link and leaving workspaces with the pre-login token. Repair it here so
-			// the common case just works; this only ever refreshes an EXISTING publication.
-			if repaired, rerr := RepairCredentialPublication("", ""); rerr == nil && repaired {
-				fmt.Fprintln(cmd.ErrOrStderr(), "re-published the host credential (it had been replaced since the last publish)")
 			}
 			if err := applySandboxConfig(cmd, &req, root, sandboxConfigOptions{
 				Path: configPath, Disabled: noConfig, MountFlags: mountFlags,

@@ -10,8 +10,16 @@ import (
 )
 
 // credFixture writes a fake host credential and returns (source, publishDest).
+//
+// It also points the daemon-group grant at the test process's OWN group: chgrp to a
+// group the process is not an active member of is EPERM, so using the real `ape` group
+// would make these tests depend on the developer's session groups rather than on the
+// code.
 func credFixture(t *testing.T) (source, dest string) {
 	t.Helper()
+	restore := daemonGID
+	daemonGID = func() (int, error) { return os.Getgid(), nil }
+	t.Cleanup(func() { daemonGID = restore })
 	home := t.TempDir()
 	source = filepath.Join(home, ".claude", ".credentials.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(source), 0o700))
@@ -40,7 +48,9 @@ func TestPublishCredentialHardLinkSharesOneInode(t *testing.T) {
 	assert.Contains(t, string(back), "refreshed")
 
 	// And the source's permissions are untouched — the daemon only stat()s this path.
-	assert.Equal(t, os.FileMode(0o600), si.Mode().Perm())
+	// Publishing grants the daemon group access on the shared inode — the unavoidable
+	// cost of one live session shared with a daemon running as another user.
+	assert.Equal(t, os.FileMode(credentialSharedMode), si.Mode().Perm())
 	// The parent directory must be TRAVERSABLE by the daemon's service user, which is
 	// not in the publishing user's primary group — hence traverse-only for others,
 	// while the credential itself stays unreadable.
@@ -61,7 +71,8 @@ func TestPublishCredentialCopyIsIndependent(t *testing.T) {
 	di, err := os.Stat(dest)
 	require.NoError(t, err)
 	assert.False(t, os.SameFile(si, di))
-	assert.Equal(t, os.FileMode(0o600), di.Mode().Perm(), "a copy must be no more readable than the original")
+	assert.Equal(t, os.FileMode(credentialSharedMode), di.Mode().Perm(),
+		"even a copy must be group-accessible, or the daemon cannot read it")
 
 	// Divergence is the documented consequence, so pin it: writing one leaves the
 	// other alone.
@@ -191,4 +202,41 @@ func TestRepairLeavesACopyPublicationAlone(t *testing.T) {
 	content, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	assert.NotContains(t, string(content), "post-login", "a copy stays as the user left it")
+}
+
+func TestRevokeRestoresTheOriginalGroupAndMode(t *testing.T) {
+	// Publishing has to loosen the credential's mode so the daemon can join the session;
+	// revoke must put that back, or "revoke" would leave the operator's own file
+	// permanently group-writable for no reason.
+	src, dest := credFixture(t)
+	before, err := os.Stat(src)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), before.Mode().Perm(), "fixture starts private")
+
+	_, err = publishCredential(src, dest, false)
+	require.NoError(t, err)
+	granted, err := os.Stat(src)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(credentialSharedMode), granted.Mode().Perm(),
+		"the grant lands on the shared inode, so it covers the operator's file too")
+
+	assert.True(t, restoreOwnership(dest), "the prior mode was recorded")
+	after, err := os.Stat(src)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), after.Mode().Perm(), "revoke restores the original mode")
+}
+
+func TestRepublishKeepsTheOriginalOwnershipRecord(t *testing.T) {
+	// A second publish must not record the ALREADY-GRANTED mode as if it were the
+	// original — that would make revoke a no-op and silently leave the file exposed.
+	src, dest := credFixture(t)
+	_, err := publishCredential(src, dest, false)
+	require.NoError(t, err)
+	_, err = publishCredential(src, dest, false)
+	require.NoError(t, err)
+
+	m, ok := readCredentialMarker(dest)
+	require.True(t, ok)
+	require.NotNil(t, m.Prior)
+	assert.Equal(t, uint32(0o600), m.Prior.Mode, "the recorded prior mode is the pre-grant one")
 }

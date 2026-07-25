@@ -78,6 +78,22 @@
   running a long job with nobody reaching in looks untouched), so an automatic reaper
   built on this signal would be an age-based killer wearing a policy's name. ape reports
   it and leaves `stop`/`down` to the operator.
+- **feat: ONE Claude OAuth session shared by the host and every workspace** — the hard
+  part is not access to the credential, it is identity of session: OAuth refresh tokens
+  **rotate**, so the moment any party refreshes, every other party's token is dead. A
+  per-workspace copy is therefore not a lesser form of sharing, it is a session that
+  breaks hours after it is created. aped-front now keeps the operator's published
+  credential and every workspace's copy **converged**: a refresh or `/login` inside a
+  workspace is written *in place* to the published file — a hard link to the operator's
+  real `~/.claude/.credentials.json`, so the host sees it — and out to every other
+  workspace; a host login propagates the other way. The in-place write is load-bearing
+  (a temp-file-plus-rename would create a new inode and silently sever that link), while
+  workspace copies are replaced by rename so a reader never sees a partial file. It
+  never creates a credential where none exists (a revoked one stays revoked) and never
+  propagates content that is not valid JSON (a torn read must not reach every
+  workspace). Publishing now also grants the aped group read+write on the credential —
+  unavoidable for a daemon running as another user to take part, and `revoke` restores
+  the original group and mode.
 - **fix(sandbox): each workspace gets its own writable credential COPY, not a bind
   mount** — `claude` replaces its credential file by rename (a login does this, and a
   token refresh takes the same path), and a single-file bind mount cannot be renamed

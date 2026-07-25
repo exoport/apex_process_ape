@@ -7,6 +7,21 @@ import (
 	"syscall"
 )
 
+// priorOwnership records a file's group and mode before publishing grants the daemon
+// access, so `revoke` can put them back rather than leaving the operator's credential
+// permanently group-writable. Unix-only: it reads the stat gid.
+func priorOwnership(path string) *credentialOwnership {
+	st, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	sys, ok := st.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+	return &credentialOwnership{GID: int(sys.Gid), Mode: uint32(st.Mode().Perm())}
+}
+
 // linkCount returns a file's hard-link count. It is used only to distinguish a
 // DECOUPLED hard link (count > 1, but no longer sharing the source's inode — the
 // shape left behind when the host replaced its credential file) from a deliberate

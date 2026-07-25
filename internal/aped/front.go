@@ -50,9 +50,13 @@ type FrontConfig struct {
 	// Empty → cache requests are ignored and toolchain state stays in the rootfs.
 	CacheRoot string
 	// Credentials is the credential mode composed into workspaces by default:
-	// "oauth" binds the credential published under HostHome (see
-	// `ape sandbox credentials publish`), "none" injects nothing. Empty → none.
+	// "oauth" copies the credential published under HostHome into each workspace and
+	// keeps them converged (see `ape sandbox credentials publish`), "none" injects
+	// nothing. Empty → none.
 	Credentials string
+	// CredSyncInterval is how often the shared-credential sync loop runs; 0 → the
+	// package default. Only used with the oauth mode.
+	CredSyncInterval time.Duration
 	// EgressPortLow/High bound the proxy listen ports. They MUST match the host
 	// nftables chain's accepted range (both come from deploy/dev-host.sh). 0 → the
 	// sandbox defaults.
@@ -162,6 +166,19 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 	if mode := sandbox.CredentialMode(cfg.Credentials); mode != "" && mode != sandbox.CredentialNone {
 		fmt.Fprintf(stderr, "  credentials: %s from %s (publish with 'ape sandbox credentials publish')\n",
 			mode, cfg.HostHome)
+	}
+	// Keep the operator's credential and every workspace's copy converged, so ONE OAuth
+	// session is shared: a refresh or login in a workspace reaches the host (through the
+	// published hard link) and the other workspaces, and vice versa. Without this each
+	// workspace would hold a copy that dies at the first token rotation.
+	if sandbox.CredentialMode(cfg.Credentials) == sandbox.CredentialOAuth && cfg.HostHome != "" {
+		syncer := &CredentialSync{
+			Published: filepath.Join(cfg.HostHome, ".claude", ".credentials.json"),
+			StateDir:  cfg.StateDir,
+			Interval:  cfg.CredSyncInterval,
+			Stderr:    stderr,
+		}
+		go syncer.Run(ctx)
 	}
 	if cfg.FrameworkRoot != "" {
 		fmt.Fprintf(stderr, "  framework: %s (default ref %q) mounted read-only at %s\n",

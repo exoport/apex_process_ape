@@ -31,6 +31,7 @@ func newFrontCmd() *cobra.Command {
 		fwRef       string
 		cacheRoot   string
 		credentials string
+		credSyncInt time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "front",
@@ -71,6 +72,7 @@ injected into each VM as APE_NATS_URL alongside its minted per-VM .creds.`,
 				FrameworkRef:      fwRef,
 				CacheRoot:         cacheRoot,
 				Credentials:       credentials,
+				CredSyncInterval:  credSyncInt,
 				Stderr:            os.Stderr,
 			})
 		},
@@ -92,6 +94,7 @@ injected into each VM as APE_NATS_URL alongside its minted per-VM .creds.`,
 	f.StringVar(&fwRoot, "framework-root", "", "Host dir holding materialized APEX framework refs, one subdir per ref ('' → no framework mount)")
 	f.StringVar(&fwRef, "framework-ref", "", "Default framework ref to mount read-only at /opt/apex-framework")
 	f.StringVar(&cacheRoot, "cache-root", "", "Host dir holding durable tool caches (asdf/go/cargo/...); '' → no cache mounts")
-	f.StringVar(&credentials, "credentials", "", "Credential mode composed into workspaces: oauth | api-key | none (default none). oauth binds <host-home>/.claude/.credentials.json")
+	f.StringVar(&credentials, "credentials", "", "Credential mode composed into workspaces: oauth | api-key | none (default none). oauth copies <host-home>/.claude/.credentials.json into each workspace and keeps them converged")
+	f.DurationVar(&credSyncInt, "cred-sync-interval", 0, "How often to converge the shared credential across host + workspaces (default 3s)")
 	return cmd
 }

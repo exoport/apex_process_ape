@@ -41,6 +41,11 @@ AmbientCapabilities=
 # executor; ReadWritePaths grants the write access the front needs under the
 # shared `ape` group instead.
 ProtectSystem=strict
+# A node that shares the operator's Claude session must ALSO list its credential root
+# here (e.g. ReadWritePaths=/srv/ape-credentials): the shared-credential syncer writes
+# the published credential in place when a workspace refreshes its token, and
+# ProtectSystem=strict makes everything outside these paths read-only. Read access alone
+# is not enough. deploy/dev-host.sh adds it as a drop-in.
 ReadWritePaths=/var/lib/aped /run/aped
 ProtectHome=yes
 PrivateTmp=yes
