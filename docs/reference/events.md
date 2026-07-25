@@ -196,13 +196,24 @@ Errors: `BUSY`, `VALIDATION`, `NOT_FOUND`, `UNSUPPORTED`, `DEVICE_UNAVAILABLE`,
 `DENIED`. **The host operator account may publish here; per-VM (telemetry)
 credentials are denied this root entirely** — the VM→host-escape barrier.
 
-The `create` body is the thin `CreateRequest` (`{name, image?, runtime?, mount?,
-mount_source?, profile?, devices?}`); `aped` resolves the composed home, egress,
-and per-VM creds server-side. `mount_source` (additive) is the one caller-context
-path on the wire — the canonical host path for a `host-fs` mount, which `aped`
-symlink-resolves and re-checks against its policy mount-root allow-list before
-binding. The id-verbs take `{id}`; `destroy`/`exec`/`snapshot`/`attach.open`
-take `{id, …options}`.
+The `create` body is the `CreateRequest` (`{name, image?, runtime?, mount?,
+mount_source?, profile?, devices?, repos?, mounts?, caches?, egress?,
+framework_ref?}`); `aped` resolves the composed home, the proxy, and per-VM creds
+server-side. Every caller-supplied path or name in it is a **request, not a grant** —
+`aped` canonicalizes and re-checks each one, and the executor validates the resolved
+values again before provisioning:
+
+| Field | Added | Semantics |
+| --- | --- | --- |
+| `mount_source` | PLAN-18 | canonical host path for a `host-fs` mount; symlink-resolved and re-checked against `mount_roots` |
+| `repos[]` | PLAN-20 | `{source, name, main?, readonly?}` — each mounted at `/workspace/<name>`; the `main` one sets the working directory |
+| `mounts[]` | PLAN-20 | `{source, dest, readonly?}` additive user mounts; a reserved `dest` (`/workspace`, `/opt/apex-framework`, `/sandbox/home`) is refused, and `limits.max_mounts` caps the list |
+| `caches[]` | PLAN-22 | durable tool-cache NAMES (`go`, `asdf`, …) from a closed table; the host source, guest path and toolchain env are resolved server-side, so a caller cannot redirect `GOPATH` |
+| `egress` | PLAN-21 | `{authorized_domains[], direct_allow[]}` — intersected with the node's `egress.allowed_domains`; a project narrows, never widens |
+| `framework_ref` | PLAN-20 | which materialized framework ref to mount read-only; resolved under the node's own framework root, so it selects a *version*, never a *path* |
+
+The id-verbs take `{id}`; `destroy`/`exec`/`snapshot`/`attach.open` take
+`{id, …options}`.
 
 Interactive exec/attach uses per-session subjects
 `ape.vmm.<node>.exec.<sid>.{stdin,stdout,stderr,resize,control,exit}` with ≤32 KiB
@@ -213,6 +224,10 @@ disconnects slow consumers).
 
 `ape.audit.<node>.<event>` — one structured record per privileged `aped` op
 (caller identity, operation, **resolved** args, policy rule + decision, outcome).
+A create's resolved args include `egress_domains` — the granted allowlist, so "which
+domains did this VM get" is answerable from the trail. Per-CONNECT egress decisions
+ride their own event, `ape.audit.<node>.egress` (workspace, host, port, decision,
+reason, bytes), mirroring the per-workspace `egress-audit.jsonl`.
 Append-only / forwarded; complements kernel `auditd` rules on `/dev/kvm` +
 `/dev/vfio/*`. An interactive exec/attach emits two: the executor-attested open
 (`ExecVM`/`AttachVM`, SO_PEERCRED peer + policy decision) and a correlated

@@ -114,14 +114,41 @@ guest RAM to disk) is not reachable through Kata-via-containerd today —
 `down` retains a persistent `mount: volume` volume unless `--remove-volume` is
 set (data safety); `host-fs` and `ephemeral` workspaces leave nothing behind.
 
-## Networking (Phase 2: networkless)
+## Networking — allowlisted, deny-by-default egress
 
-Phase-2 workspaces are provisioned **networkless** (`--network none`): the
-client-side CNI that `nerdctl`'s default bridge would run is kept out of the
-hardened executor (PLAN-18 D1). The deny-by-default CONNECT egress proxy and
-overlay connectivity move **inside `aped`**, tied to the VM lifecycle, and land
-with the Phase-3 overlay-networking work. Until then a workspace has no public
-egress; `authorized_domains` in a profile is resolved by `aped`, not the client.
+A workspace is **networkless until it asks for domains and the node's policy grants
+them** (PLAN-21). It never gets general L3: the only route out is a per-workspace
+CONNECT proxy on the host↔guest bridge, and the guest has no DNS at all — the proxy
+resolves each hostname itself.
+
+```yaml
+# .apesandbox.yaml — a request, intersected with the node's policy
+egress:
+  authorized_domains: ["github.com", "*.githubusercontent.com", "proxy.golang.org"]
+```
+
+```bash
+ape sandbox up dev --egress-domain github.com     # or ad hoc
+```
+
+A project can **narrow** what the node permits, never widen it: `aped` intersects the
+request with `egress.allowed_domains` in its own `policy.yaml`, and the executor
+re-checks the granted set before provisioning. Every CONNECT — allowed or denied — is
+recorded in `<state>/proxies/<ws>/egress-audit.jsonl` and on
+`ape.audit.<node>.egress`.
+
+**Where enforcement lives**, stated plainly because one layer is weaker than it looks:
+the host nftables chain (from the bridge, only the proxy port range is reachable) and
+**bridge port isolation** (no workspace↔workspace traffic) are the load-bearing walls,
+together with the proxy's own domain allowlist — the only layer that can reason about
+domains. The per-netns ruleset the helper also installs is defence in depth only,
+because Kata's default `internetworking_model=tcfilter` bypasses netfilter inside the
+pod netns.
+
+Verified live on a Kata host: an allowed domain tunnels (`200 Connection
+Established`), a denied one is refused (`403`), and direct-to-internet, a non-proxy
+host port, and UDP DNS are all blocked — as is reaching another workspace. Setting the
+node up is in [How to run aped](run-aped.md#workspace-egress-allowlisted-deny-by-default).
 
 ## Driver choice — provisioning through the hardened units
 
