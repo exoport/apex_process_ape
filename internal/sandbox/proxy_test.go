@@ -174,3 +174,49 @@ func TestJSONLSink(t *testing.T) {
 	assert.Equal(t, "a.com", e0.Host)
 	assert.Equal(t, decisionAllowed, e0.Decision)
 }
+
+// TestProxyDialSurvivesClientHalfClose pins the CONNECT-handshake behaviour that a
+// live run caught: a client that half-closes its write side after the request line
+// (a shell `printf … | nc` does exactly this, and it is legal — CONNECT clients send
+// nothing until they see the 200) must not have its upstream dial cancelled.
+//
+// It is asserted through the audit REASON, which makes the difference observable
+// without a dial seam: with the request context still attached, the dial dies
+// instantly with "operation was canceled"; detached, it runs to the dial timeout and
+// reports a timeout instead. The upstream here is a black-holed TEST-NET-1 address
+// (RFC 5737), so the dial can never succeed either way and the test never touches a
+// real network.
+func TestProxyDialSurvivesClientHalfClose(t *testing.T) {
+	sink := &capSink{}
+	p := NewProxy(ProxyConfig{
+		Matcher:      NewMatcher([]string{"192.0.2.1"}),
+		Sink:         sink,
+		DialTimeout:  700 * time.Millisecond,
+		AllowedPorts: []string{"443"},
+	})
+	require.NoError(t, p.Start("127.0.0.1:0"))
+	defer p.Close()
+
+	c, err := net.Dial("tcp", p.Addr())
+	require.NoError(t, err)
+	defer c.Close()
+	_, err = fmt.Fprint(c, "CONNECT 192.0.2.1:443 HTTP/1.1\r\nHost: 192.0.2.1:443\r\n\r\n")
+	require.NoError(t, err)
+	// The half-close net/http turns into a request-context cancellation.
+	tcp, ok := c.(*net.TCPConn)
+	require.True(t, ok)
+	require.NoError(t, tcp.CloseWrite())
+
+	// Read the status so we know the handler finished.
+	status, err := bufio.NewReader(c).ReadString('\n')
+	require.NoError(t, err)
+	assert.Contains(t, status, "502", "an unreachable upstream is still a 502")
+
+	entries := sink.all()
+	require.Len(t, entries, 1)
+	assert.Equal(t, decisionDenied, entries[0].Decision)
+	assert.NotContains(t, entries[0].Reason, "canceled",
+		"the client's half-close must not cancel the dial — that is the bug this pins")
+	assert.Contains(t, entries[0].Reason, "timeout",
+		"the dial should run to its own timeout instead")
+}

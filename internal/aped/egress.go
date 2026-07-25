@@ -14,6 +14,11 @@ import (
 	"github.com/exoport/apex_process_ape/internal/workspace"
 )
 
+// egressAuditMode is the per-workspace egress trail's permission: readable by the
+// operator group (`ape`), written by the front. It records hostnames, ports,
+// decisions and byte counts — no secrets — and it exists to be read.
+const egressAuditMode = 0o640
+
 // EgressSupervisor runs the per-workspace CONNECT proxies IN-PROCESS in the
 // de-privileged aped front (PLAN-21 D2).
 //
@@ -164,9 +169,17 @@ func (s *EgressSupervisor) startLocked(name string, domains []string) (*egressPr
 	if err := os.MkdirAll(filepath.Dir(auditLog), 0o700); err != nil {
 		return nil, fmt.Errorf("aped: egress audit dir for %s: %w", name, err)
 	}
-	f, err := os.OpenFile(auditLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(auditLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, egressAuditMode)
 	if err != nil {
 		return nil, fmt.Errorf("aped: open egress audit log for %s: %w", name, err)
+	}
+	// Chmod explicitly: the unit sets UMask=0077, which would strip the group bit off
+	// the mode passed to OpenFile and leave the trail readable only by the front's own
+	// user. An audit trail the operator cannot read is not much of an audit trail —
+	// and group `ape` is already the priv-socket gate, so its members are trusted at a
+	// strictly higher level than "may read hostnames this workspace connected to".
+	if err := f.Chmod(egressAuditMode); err != nil {
+		fmt.Fprintf(s.stderr(), "! aped egress %s: could not relax audit log mode: %v\n", name, err)
 	}
 
 	proxy := sandbox.NewProxy(sandbox.ProxyConfig{

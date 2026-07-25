@@ -116,7 +116,7 @@ func warnIfNetnsNotShared(stderr io.Writer) {
 	if err != nil {
 		return // cannot tell; stay quiet rather than cry wolf
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		// mountinfo: <id> <parent> <maj:min> <root> <mountpoint> <opts> <optional...> - ...
 		fields := strings.Fields(line)
 		if len(fields) < 6 || fields[4] != sandbox.NetnsRunDir {
@@ -150,7 +150,7 @@ func warnIfNetnsNotShared(stderr io.Writer) {
 
 // masterTag extracts the "master:N" field from a mountinfo line, for the diagnostic.
 func masterTag(line string) string {
-	for _, f := range strings.Fields(line) {
+	for f := range strings.FieldsSeq(line) {
 		if strings.HasPrefix(f, "master:") {
 			return f
 		}

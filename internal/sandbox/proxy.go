@@ -202,7 +202,20 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 func (p *Proxy) tunnel(ctx context.Context, w http.ResponseWriter, host, port string) {
 	start := p.now()
 	dialer := net.Dialer{Timeout: p.dialTimeout}
-	upstream, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
+	// Detach the dial from the REQUEST's cancellation, keeping only the dial timeout.
+	//
+	// CONNECT is a handshake: the client sends its request line and then legitimately
+	// sends nothing until it sees "200 Connection Established". Clients that pipe a
+	// fixed request in (a shell `printf … | nc`, some agents) half-close their write
+	// side at that point, and net/http reacts to the FIN by cancelling the request
+	// context — which aborted the upstream dial mid-flight and turned a perfectly good
+	// tunnel into a 502 ("lookup …: operation was canceled", observed live
+	// 2026-07-24). The client can still RECEIVE, so its half-close says nothing about
+	// whether it wants the tunnel.
+	//
+	// The dial stays bounded by dialer.Timeout, so a genuinely abandoned request costs
+	// at most that, not an unbounded goroutine.
+	upstream, err := dialer.DialContext(context.WithoutCancel(ctx), "tcp", net.JoinHostPort(host, port))
 	if err != nil {
 		p.record(EgressAudit{Host: host, Port: port, Decision: decisionDenied, Reason: "dial failed: " + err.Error()})
 		http.Error(w, "upstream dial failed", http.StatusBadGateway)
