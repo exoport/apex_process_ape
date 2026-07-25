@@ -393,9 +393,11 @@ do_redeploy() {
   for b in ape aped; do
     [ -x "$REPO_DIR/$b" ] || die "$REPO_DIR/$b missing — run 'make build' as your user first"
   done
+  # Only NON-test sources can make the binary stale; flagging a _test.go edit cries
+  # wolf, and a warning that is usually wrong is a warning people stop reading.
   local newest_src
-  newest_src="$(find "$REPO_DIR" -name '*.go' -newer "$REPO_DIR/aped" -print -quit 2>/dev/null || true)"
-  [ -z "$newest_src" ] || warn "$newest_src is newer than ./aped — is the build stale?"
+  newest_src="$(find "$REPO_DIR" -name '*.go' ! -name '*_test.go' -newer "$REPO_DIR/aped" -print -quit 2>/dev/null || true)"
+  [ -z "$newest_src" ] || warn "$newest_src is newer than ./aped — is the build stale? (run 'make build')"
   install -m 0755 "$REPO_DIR/ape" /usr/local/bin/ape
   install -m 0755 "$REPO_DIR/aped" /usr/local/bin/aped
   ok "/usr/local/bin/{ape,aped} installed ($("$REPO_DIR/aped" version 2>/dev/null | head -1))"
