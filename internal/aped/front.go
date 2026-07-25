@@ -128,6 +128,11 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 			Stderr:   stderr,
 		})
 		defer egress.StopAll()
+		// Rebuild the proxies of workspaces that are still running from a previous
+		// front: restarting this process must not silently strip their egress. The
+		// proxies deliberately outlive this ctx — they are torn down by StopAll on
+		// shutdown (deferred above), not by request cancellation.
+		egress.RestoreAll() //nolint:contextcheck // the proxies are lifetime-managed by StopAll, not ctx
 		if policy.Egress.Enabled {
 			fmt.Fprintf(stderr, "  egress: enabled — %d allowed domain(s), proxies on %s\n",
 				len(policy.Egress.AllowedDomains), egressBindNote(cfg.EgressBindIP))

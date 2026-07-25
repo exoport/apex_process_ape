@@ -2,6 +2,7 @@ package aped
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -18,6 +19,14 @@ import (
 // operator group (`ape`), written by the front. It records hostnames, ports,
 // decisions and byte counts — no secrets — and it exists to be read.
 const egressAuditMode = 0o640
+
+// egressDirMode lets the operator group TRAVERSE to the trail. Fixing only the file
+// mode is not enough: a 0700 parent hides a 0640 file just as effectively.
+const egressDirMode = 0o750
+
+// egressStateName is the per-workspace file that records what a live proxy was
+// serving, so the front can restore it after a restart (see RestoreAll).
+const egressStateName = "egress.json"
 
 // EgressSupervisor runs the per-workspace CONNECT proxies IN-PROCESS in the
 // de-privileged aped front (PLAN-21 D2).
@@ -149,7 +158,7 @@ func (s *EgressSupervisor) Plan(name string, requested []string) (EgressPlan, er
 		if equalDomains(p.domains, granted) {
 			return EgressPlan{Domains: granted, ProxyURL: "http://" + p.addr}, nil
 		}
-		s.stopLocked(name)
+		s.stopLocked(name, forgetState)
 	}
 	p, err := s.startLocked(name, granted)
 	if err != nil {
@@ -160,14 +169,28 @@ func (s *EgressSupervisor) Plan(name string, requested []string) (EgressPlan, er
 
 // startLocked binds and starts one workspace's proxy. Caller holds s.mu.
 func (s *EgressSupervisor) startLocked(name string, domains []string) (*egressProxy, error) {
-	port, err := sandbox.AllocatePort(s.cfg.PortLow, s.cfg.PortHigh, s.ports)
-	if err != nil {
-		return nil, err
+	// A port already reserved for this name wins: RestoreAll pins the port a running
+	// guest's HTTPS_PROXY already points at. Otherwise take the lowest free one.
+	port, reserved := s.ports[name]
+	if !reserved {
+		var err error
+		if port, err = sandbox.AllocatePort(s.cfg.PortLow, s.cfg.PortHigh, s.ports); err != nil {
+			return nil, err
+		}
 	}
 
 	auditLog := sandbox.ProxyAuditLogFor(s.cfg.StateDir, name)
-	if err := os.MkdirAll(filepath.Dir(auditLog), 0o700); err != nil {
+	dir := filepath.Dir(auditLog)
+	if err := os.MkdirAll(dir, egressDirMode); err != nil {
 		return nil, fmt.Errorf("aped: egress audit dir for %s: %w", name, err)
+	}
+	// Chmod both levels for the same reason as the file below: UMask=0077 strips the
+	// group bit off MkdirAll's mode, and a 0700 parent makes a group-readable trail
+	// unreachable anyway.
+	for _, d := range []string{filepath.Dir(dir), dir} {
+		if err := os.Chmod(d, egressDirMode); err != nil {
+			fmt.Fprintf(s.stderr(), "! aped egress %s: could not relax %s mode: %v\n", name, d, err)
+		}
 	}
 	f, err := os.OpenFile(auditLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, egressAuditMode)
 	if err != nil {
@@ -197,19 +220,33 @@ func (s *EgressSupervisor) startLocked(name string, domains []string) (*egressPr
 	p := &egressProxy{proxy: proxy, addr: proxy.Addr(), port: port, domains: domains, auditLog: auditLog, file: f}
 	s.running[name] = p
 	s.ports[name] = port
+	// Record what this proxy serves so a front restart can rebuild it on the SAME
+	// port — the guest's HTTPS_PROXY is baked into its container spec and cannot be
+	// renegotiated while it runs.
+	s.writeStateLocked(name, domains, port)
 	fmt.Fprintf(s.stderr(), "▶ aped egress %s: proxy on %s, %d domain(s), audit %s\n", name, p.addr, len(domains), auditLog)
 	return p, nil
 }
 
-// Stop tears down a workspace's proxy (called on Destroy). Unknown names are a
-// no-op so teardown is idempotent.
+// Whether stopping a proxy also forgets that the workspace should have one. The
+// distinction is load-bearing: DESTROYING a workspace must forget it, or a later
+// front would revive a proxy for something that no longer exists — while SHUTTING
+// DOWN the front must remember, or every restart would silently strip egress from
+// workspaces that are still running.
+const (
+	forgetState = true
+	keepState   = false
+)
+
+// Stop tears down a workspace's proxy and forgets it (called on Destroy). Unknown
+// names are a no-op so teardown is idempotent.
 func (s *EgressSupervisor) Stop(name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.stopLocked(name)
+	s.stopLocked(name, forgetState)
 }
 
-func (s *EgressSupervisor) stopLocked(name string) {
+func (s *EgressSupervisor) stopLocked(name string, forget bool) {
 	p, ok := s.running[name]
 	if !ok {
 		return
@@ -220,15 +257,23 @@ func (s *EgressSupervisor) stopLocked(name string) {
 	}
 	delete(s.running, name)
 	delete(s.ports, name)
+	if forget {
+		// The state file means "this workspace should have a live proxy", so a destroy
+		// drops it. The audit trail stays: it is the durable record of what the
+		// workspace reached.
+		_ = os.Remove(filepath.Join(sandbox.ProxyDirFor(s.cfg.StateDir, name), egressStateName))
+	}
 	fmt.Fprintf(s.stderr(), "⇣ aped egress %s: proxy stopped\n", name)
 }
 
-// StopAll tears down every proxy (front shutdown).
+// StopAll closes every proxy but REMEMBERS them, because its caller is the front
+// shutting down — the workspaces themselves are untouched and a successor front
+// restores their proxies (see RestoreAll).
 func (s *EgressSupervisor) StopAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for name := range s.running {
-		s.stopLocked(name)
+		s.stopLocked(name, keepState)
 	}
 }
 
@@ -289,4 +334,101 @@ func equalDomains(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// ---- restart restoration ---------------------------------------------------
+
+// egressState is the on-disk record of one live proxy: what it serves and where.
+type egressState struct {
+	Domains []string `json:"domains"`
+	Port    int      `json:"port"`
+}
+
+// writeStateLocked persists a live proxy's allowlist + port. Best-effort: failing to
+// record it costs restoration after a restart, which must not fail the create that
+// is otherwise fine. Caller holds s.mu.
+func (s *EgressSupervisor) writeStateLocked(name string, domains []string, port int) {
+	path := filepath.Join(sandbox.ProxyDirFor(s.cfg.StateDir, name), egressStateName)
+	data, err := json.Marshal(egressState{Domains: domains, Port: port})
+	if err == nil {
+		err = os.WriteFile(path, data, egressAuditMode)
+	}
+	if err != nil {
+		fmt.Fprintf(s.stderr(), "! aped egress %s: could not record proxy state (%v); "+
+			"a front restart will not restore this workspace's egress\n", name, err)
+	}
+}
+
+// RestoreAll rebuilds the proxies recorded by a previous run of the front.
+//
+// It exists because restarting the front — which every redeploy does — otherwise
+// strips egress from workspaces that are still RUNNING: their HTTPS_PROXY points at
+// a port nothing listens on any more, and nothing in the create path re-runs for a
+// workspace that already exists. The guest's proxy address is baked into its
+// container spec, so each proxy must come back on exactly the port it had.
+//
+// Restored allowlists are RE-INTERSECTED with current policy, so a policy that
+// tightened while the front was down narrows (or removes) a workspace's egress
+// rather than being bypassed by a stale record.
+func (s *EgressSupervisor) RestoreAll() {
+	root := filepath.Join(s.cfg.StateDir, "proxies")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return // nothing recorded yet
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		path := filepath.Join(root, name, egressStateName)
+		data, rerr := os.ReadFile(path)
+		if rerr != nil {
+			continue // no live proxy was recorded for this workspace
+		}
+		var st egressState
+		if jerr := json.Unmarshal(data, &st); jerr != nil || st.Port == 0 || len(st.Domains) == 0 {
+			fmt.Fprintf(s.stderr(), "! aped egress %s: unreadable proxy state, skipping restore\n", name)
+			continue
+		}
+		if err := s.restoreOne(name, st); err != nil {
+			fmt.Fprintf(s.stderr(), "! aped egress %s: could not restore proxy on port %d: %v\n", name, st.Port, err)
+		}
+	}
+}
+
+// restoreOne re-binds one recorded proxy on its original port.
+func (s *EgressSupervisor) restoreOne(name string, st egressState) error {
+	if s.cfg.Policy == nil || !s.cfg.Policy.Enabled {
+		return errors.New("egress is disabled by current policy")
+	}
+	granted, refused := sandbox.IntersectDomains(st.Domains, s.cfg.Policy.AllowedDomains)
+	if len(granted) == 0 {
+		return fmt.Errorf("current policy allows none of the recorded domains (%v)", refused)
+	}
+	if len(refused) > 0 {
+		fmt.Fprintf(s.stderr(), "! aped egress %s: policy tightened while the front was down — dropping %v\n", name, refused)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, live := s.running[name]; live {
+		return nil
+	}
+	// Pin the recorded port: startLocked allocates the lowest free one, so hand it the
+	// exact port by reserving it for this name first.
+	s.ports[name] = st.Port
+	p, err := s.startLocked(name, granted)
+	if err != nil {
+		delete(s.ports, name)
+		return err
+	}
+	if p.port != st.Port {
+		// The recorded port was taken; the guest cannot be told the new one, so this
+		// workspace has no usable egress and a half-working proxy would only confuse.
+		s.stopLocked(name, keepState)
+		return fmt.Errorf("port %d is no longer available (got %d)", st.Port, p.port)
+	}
+	fmt.Fprintf(s.stderr(), "▶ aped egress %s: proxy restored on %s, %d domain(s)\n", name, p.addr, len(granted))
+	return nil
 }

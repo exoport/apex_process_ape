@@ -176,3 +176,103 @@ func TestEgressSupervisorPublishesAuditRows(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "blocked.example.com")
 }
+
+func TestEgressSupervisorRestoresProxiesAfterRestart(t *testing.T) {
+	stateDir := t.TempDir()
+	policy := &EgressPolicy{Enabled: true, AllowedDomains: []string{"github.com", "*.example.com"}}
+	newSup := func() *EgressSupervisor {
+		return NewEgressSupervisor(EgressConfig{
+			BindIP: "127.0.0.1", StateDir: stateDir, Policy: policy,
+			Node: "testnode", Stderr: &strings.Builder{},
+		})
+	}
+
+	// A first front starts a proxy, then goes away WITHOUT destroying the workspace —
+	// exactly what a redeploy does to a running workspace.
+	first := newSup()
+	plan, err := first.Plan("dev", []string{"github.com"})
+	require.NoError(t, err)
+	first.StopAll()
+
+	// The successor rebuilds it on the SAME port: the guest's HTTPS_PROXY is baked
+	// into its container spec and cannot be renegotiated while it runs.
+	second := newSup()
+	second.RestoreAll()
+	defer second.StopAll()
+	active := second.Active()
+	require.Len(t, active, 1)
+	assert.Equal(t, strings.TrimPrefix(plan.ProxyURL, "http://"), active["dev"])
+
+	// And it is really listening again.
+	conn, err := net.Dial("tcp", active["dev"])
+	require.NoError(t, err)
+	_ = conn.Close()
+}
+
+func TestEgressSupervisorDoesNotRestoreDestroyedWorkspaces(t *testing.T) {
+	stateDir := t.TempDir()
+	policy := &EgressPolicy{Enabled: true, AllowedDomains: []string{"github.com"}}
+	first := NewEgressSupervisor(EgressConfig{
+		BindIP: "127.0.0.1", StateDir: stateDir, Policy: policy, Node: "n", Stderr: &strings.Builder{},
+	})
+	_, err := first.Plan("dev", []string{"github.com"})
+	require.NoError(t, err)
+	first.Stop("dev") // a real teardown, not a restart
+
+	second := NewEgressSupervisor(EgressConfig{
+		BindIP: "127.0.0.1", StateDir: stateDir, Policy: policy, Node: "n", Stderr: &strings.Builder{},
+	})
+	second.RestoreAll()
+	defer second.StopAll()
+	assert.Empty(t, second.Active(), "a destroyed workspace must not get its proxy back")
+	// The audit trail survives regardless — it is the durable record.
+	assert.FileExists(t, filepath.Join(sandbox.ProxyDirFor(stateDir, "dev"), "egress-audit.jsonl"))
+}
+
+func TestEgressSupervisorRestoreRespectsTightenedPolicy(t *testing.T) {
+	stateDir := t.TempDir()
+	first := NewEgressSupervisor(EgressConfig{
+		BindIP: "127.0.0.1", StateDir: stateDir, Node: "n", Stderr: &strings.Builder{},
+		Policy: &EgressPolicy{Enabled: true, AllowedDomains: []string{"github.com", "extra.example.com"}},
+	})
+	_, err := first.Plan("dev", []string{"github.com", "extra.example.com"})
+	require.NoError(t, err)
+	first.StopAll()
+
+	// Policy tightened while the front was down: the stale record must not reinstate
+	// what policy no longer allows.
+	narrowed := NewEgressSupervisor(EgressConfig{
+		BindIP: "127.0.0.1", StateDir: stateDir, Node: "n", Stderr: &strings.Builder{},
+		Policy: &EgressPolicy{Enabled: true, AllowedDomains: []string{"github.com"}},
+	})
+	narrowed.RestoreAll()
+	defer narrowed.StopAll()
+	require.Len(t, narrowed.Active(), 1)
+
+	// Egress disabled entirely → nothing comes back.
+	off := NewEgressSupervisor(EgressConfig{
+		BindIP: "127.0.0.1", StateDir: stateDir, Node: "n", Stderr: &strings.Builder{},
+		Policy: &EgressPolicy{Enabled: false},
+	})
+	off.RestoreAll()
+	assert.Empty(t, off.Active())
+}
+
+func TestEgressAuditTrailIsOperatorReadable(t *testing.T) {
+	s := testSupervisor(t, &EgressPolicy{Enabled: true, AllowedDomains: []string{"github.com"}})
+	defer s.StopAll()
+	_, err := s.Plan("dev", []string{"github.com"})
+	require.NoError(t, err)
+
+	// The trail exists to be read by an operator, so both the file AND every directory
+	// leading to it must be group-traversable — a 0700 parent hides a 0640 file.
+	dir := sandbox.ProxyDirFor(s.cfg.StateDir, "dev")
+	for _, p := range []string{filepath.Dir(dir), dir} {
+		info, serr := os.Stat(p)
+		require.NoError(t, serr)
+		assert.Equal(t, os.FileMode(egressDirMode), info.Mode().Perm(), "dir %s", p)
+	}
+	info, err := os.Stat(filepath.Join(dir, "egress-audit.jsonl"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(egressAuditMode), info.Mode().Perm())
+}
