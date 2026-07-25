@@ -52,19 +52,39 @@ func TestComposeModeAOAuth(t *testing.T) {
 	assert.FileExists(t, filepath.Join(staging, ".claude", "skills", "apex-create-prd", "SKILL.md"))
 	assert.NoFileExists(t, filepath.Join(staging, ".claude", "skills", "other-skill", "SKILL.md"))
 
-	// Mode A binds the real credentials file rw; no API key env.
-	require.Len(t, comp.Binds, 1)
-	assert.Equal(t, filepath.Join(home, ".claude", ".credentials.json"), comp.Binds[0].Source)
-	assert.False(t, comp.Binds[0].ReadOnly, "credentials bind must be rw for refresh")
+	// Mode A COPIES the credential into the composed home rather than bind-mounting it,
+	// because `claude` replaces its credential file by rename and a single-file bind
+	// cannot be renamed over (EBUSY) — a bound credential could never be refreshed. No
+	// bind, no API key env.
+	assert.Empty(t, comp.Binds, "the credential must not be bind-mounted")
 	assert.Empty(t, comp.Env)
+	staged := filepath.Join(staging, ".claude", ".credentials.json")
+	require.FileExists(t, staged)
+	hostBytes, err := os.ReadFile(filepath.Join(home, ".claude", ".credentials.json"))
+	require.NoError(t, err)
+	stagedBytes, err := os.ReadFile(staged)
+	require.NoError(t, err)
+	assert.Equal(t, hostBytes, stagedBytes, "the workspace starts from the host session")
+	info, err := os.Stat(staged)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+
+	// It is a COPY: writing the workspace's file must not touch the host's.
+	require.NoError(t, os.WriteFile(staged, []byte(`{"access_token":"workspace-refreshed"}`), 0o600))
+	hostAfter, err := os.ReadFile(filepath.Join(home, ".claude", ".credentials.json"))
+	require.NoError(t, err)
+	assert.Equal(t, hostBytes, hostAfter, "the host session is unaffected by the workspace")
 
 	// settings.json carries the preferences.
 	var settings map[string]any
 	readJSON(t, filepath.Join(staging, ".claude", "settings.json"), &settings)
 	assert.Equal(t, "opus", settings["model"])
 
-	// No API key material anywhere in the staged fs.
-	assert.NoFileExists(t, filepath.Join(staging, ".claude", ".credentials.json"))
+	// Mode A must not also inject an API key: the two credential modes are exclusive,
+	// and the OAuth copy is asserted above.
+	for _, kv := range comp.Env {
+		assert.NotContains(t, kv, "ANTHROPIC_API_KEY", "mode A must inject no API key")
+	}
 }
 
 func TestComposeModeBAPIKey(t *testing.T) {
@@ -264,7 +284,8 @@ func TestComposeModeAMissingCredentialsFails(t *testing.T) {
 	p := &Profile{Name: "a", Credentials: CredentialOAuth}
 	_, err := Compose(ComposeOptions{Profile: p, StagingDir: staging, HostHome: t.TempDir()})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "credentials file not found")
+	assert.Contains(t, err.Error(), "credentials file not readable")
+	assert.Contains(t, err.Error(), "ape sandbox credentials publish", "the error must say how to fix it")
 }
 
 func readJSON(t *testing.T, path string, v any) {

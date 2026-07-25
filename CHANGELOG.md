@@ -78,6 +78,17 @@
   running a long job with nobody reaching in looks untouched), so an automatic reaper
   built on this signal would be an age-based killer wearing a policy's name. ape reports
   it and leaves `stop`/`down` to the operator.
+- **fix(sandbox): each workspace gets its own writable credential COPY, not a bind
+  mount** — `claude` replaces its credential file by rename (a login does this, and a
+  token refresh takes the same path), and a single-file bind mount cannot be renamed
+  over: the guest gets `Resource busy` (measured). A bound credential therefore meant a
+  workspace could never refresh its own access token — it would stop working within
+  hours — and a host login left it holding a dead token. The copy lands in the composed
+  home, an ordinary file in an ordinary directory, so login and refresh inside a
+  workspace work. What no mount trick can fix, and is now documented rather than
+  implied: OAuth refresh tokens rotate, so a host and a workspace cannot share one live
+  session — use `--credentials api-key` for autonomous work, or log in inside the
+  workspace for a session it owns.
 - **feat: workspaces can use the host's Claude session (`ape sandbox credentials`)** —
   `aped-front` runs as its own service user with `ProtectHome=yes`, so it cannot read
   `~/.claude`, and widening a home for a daemon (or trusting a caller-supplied

@@ -396,18 +396,17 @@ hardening slack.
 
 ## Giving workspaces your Claude session
 
-A workspace can use the host's Claude OAuth credential, but not by reading your home:
-`aped-front` runs as its own service user with `ProtectHome=yes`, and a `0750` home is
-not traversable by a service user even when a bind exposes it. Widening your home for
-a daemon is the wrong trade, and letting a caller name the credential path would let
-it bind *any* root-readable file into its own workspace as `.credentials.json`.
+Two separate hops, and it is worth keeping them apart because they fail differently:
 
-So the **client publishes** — running as you, with your permissions — into a directory
-the daemon may read, and the node is pointed at it:
+1. **host → node.** `aped-front` runs as its own service user with `ProtectHome=yes`, so
+   it cannot read `/home/<you>/.claude`. You publish the credential where the daemon can
+   read it; nothing about your home changes.
+2. **node → workspace.** Each workspace gets its **own writable copy** in its composed
+   home. It is a copy, not a mount, for a concrete reason (below).
 
 ```bash
-ape sandbox credentials publish     # hard link (default): one live credential
-ape sandbox credentials status      # present? still live?
+ape sandbox credentials publish     # hard link into /srv/ape-credentials/<user>
+ape sandbox credentials status
 ape sandbox credentials revoke
 ```
 
@@ -415,43 +414,39 @@ ape sandbox credentials revoke
 aped front … --host-home /srv/ape-credentials/<user> --credentials oauth
 ```
 
-| Mode | What the workspace gets | The catch |
-| --- | --- | --- |
-| `publish` (hard link) | the SAME inode as your credential, so a refresh on either side is immediately valid on the other | the workspace shares your live Anthropic session |
-| `publish --copy` | an independent copy | the two DIVERGE the first time either side refreshes — OAuth refresh tokens rotate, so the loser holds an invalid token |
+### Why each workspace gets a copy
 
-The link works because `/home` and `/srv` are normally one filesystem, and your file's
-permissions never change (still `0600`): the daemon only `stat`s the path, while
-Kata's virtiofsd does the I/O as root. Published directories are `0751` —
-traverse-only — because a command running as you creates files with *your* group,
-which the daemon's user is not in; traversal exposes a path, not a secret.
+`claude` does not edit its credential file — it writes a new one and **renames** over
+it, which is what a login does and, on the same code path, a token refresh. A
+single-file bind mount cannot be renamed over: the guest gets `Resource busy`
+(measured). So a *bound* credential would mean a workspace could never refresh its own
+access token — it would stop working within hours — and a host login would leave it
+holding a dead token with no way to replace it.
 
-### Logging in again
+A copy in the composed home is an ordinary file in an ordinary directory, so **login and
+refresh inside a workspace work**.
 
-**A host `claude /login` replaces the credential file** (verified: the inode changes and
-the link count drops to 1), so a published hard link is left pointing at the
-**pre-login** credential and workspaces would keep using a dead token. Two things
-handle it:
+### The part no mount trick can fix
 
-- `ape sandbox up` **repairs an existing publication automatically** before creating a
-  workspace, and says so. It never *creates* a publication — no publication means no
-  grant.
-- `ape sandbox credentials status` reports `STALE` with the reason, and `publish`
-  repairs it on demand.
+OAuth refresh tokens **rotate**. Whichever side refreshes first invalidates the token
+the other side is holding. So a host and a workspace cannot share one live OAuth session,
+however it is wired. Pick deliberately:
 
-Workspaces that are already running keep the credential composed into them until
-`down`; restart them to pick up a new one.
+| Situation | Use |
+| --- | --- |
+| Autonomous / long-running work | `--credentials api-key` — keys do not rotate, so nothing collides |
+| Interactive work in one workspace | the copy bootstraps you; if it refreshes, re-login on the host when you next need it |
+| Several long-lived workspaces | log in **inside** each one (its own session) — needs the auth domains in its egress allowlist |
 
-**Logging in from INSIDE a workspace does not work** with the link mode, and cannot: the
-credential is a single-file bind mount, so the write + rename a login performs fails
-with `Resource busy` (an in-place write would work, but that is not what the login
-does). Log in on the host and let `up` re-publish. If you need a session a workspace can
-re-authenticate on its own, publish with `--copy` — then the workspace has its own file
-to replace, at the cost of diverging from the host.
+`publish` keeps the *node's* view of your credential current: a hard link tracks your
+file, and because a host login replaces that file (verified — the inode changes),
+`ape sandbox up` re-publishes automatically before creating a workspace, while `status`
+reports a decoupled link as `STALE`. Workspaces already running keep the copy they were
+created with.
 
-**The credential MODE is node configuration, never a request field** — which host
-identity a workspace may receive is an operator grant, not a caller's ask. The default
-is `none`.
+Published directories are `0751` — traverse-only — because a command running as you
+creates files with *your* group, which the daemon's user is not in; traversal exposes a
+path, not a secret. The credential itself stays `0600` at every hop.
 
 ## The framework mount + durable tool caches
 

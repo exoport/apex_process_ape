@@ -273,25 +273,46 @@ func composeNamedDir(items []string, userDir, destDir, kind string, cp func(src,
 	return nil
 }
 
-// composeCredentials wires the credential mode. Mode A records a rw bind
-// of the host's real .credentials.json into the guest home (refresh
-// writes back). Mode B resolves the scoped API key and injects it via
-// env — no credential file touches the guest.
+// composeCredentials wires the credential mode.
+//
+// Mode A COPIES the host credential into the staging home rather than bind-mounting
+// it, and that choice is load-bearing rather than incidental. `claude` does not edit
+// its credential file — it writes a new one and renames over it, which is what a login
+// and (on the same code path) a token refresh do. A single-file bind mount cannot be
+// renamed over: the guest gets EBUSY (measured 2026-07-25). With a bind, a workspace
+// could therefore never refresh its own access token and would stop working within
+// hours of being created, and a host login would decouple the shared inode and leave
+// the workspace holding a dead token with no way to replace it.
+//
+// A copy in the composed home is an ordinary file in an ordinary directory, so rename
+// works and the workspace can log in and refresh on its own. The cost is honest and
+// unavoidable rather than chosen: OAuth refresh tokens ROTATE, so once either side
+// refreshes, the other's copy of that token is dead. Host and workspace cannot share
+// one live OAuth session — no mount trick changes that. For autonomous work prefer
+// `credentials: api-key`, which does not rotate; for interactive work, log in inside
+// the workspace and let it own its session.
+//
+// Mode B resolves the scoped API key and injects it via env — no credential file
+// touches the guest at all.
 func composeCredentials(opts ComposeOptions, comp *Composition, _ string) error {
 	switch opts.Profile.Credentials {
 	case CredentialOAuth:
 		if opts.HostHome == "" {
-			return errors.New("compose: credentials: oauth needs a host home to bind the credentials file")
+			return errors.New("compose: credentials: oauth needs a host home to read the credentials file")
 		}
 		hostCred := filepath.Join(opts.HostHome, ".claude", ".credentials.json")
-		if _, err := os.Stat(hostCred); err != nil {
-			return fmt.Errorf("compose: mode-A credentials file not found at %s: %w", hostCred, err)
+		data, err := os.ReadFile(hostCred)
+		if err != nil {
+			return fmt.Errorf("compose: mode-A credentials file not readable at %s: %w "+
+				"(publish it with `ape sandbox credentials publish`)", hostCred, err)
 		}
-		comp.Binds = append(comp.Binds, BindMount{
-			Source:   hostCred,
-			Dest:     filepath.Join(comp.GuestHome, ".claude", ".credentials.json"),
-			ReadOnly: false, // token refresh writes back
-		})
+		dest := filepath.Join(opts.StagingDir, ".claude", ".credentials.json")
+		if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+			return fmt.Errorf("compose: create credential dir: %w", err)
+		}
+		if err := os.WriteFile(dest, data, 0o600); err != nil {
+			return fmt.Errorf("compose: write workspace credential: %w", err)
+		}
 	case CredentialAPIKey:
 		key, err := ResolveSecret(opts.Profile.APIKeySource)
 		if err != nil {
