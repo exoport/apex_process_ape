@@ -217,9 +217,23 @@ add` is visible to containerd) and `CAP_SYS_ADMIN` (netns creation), which is wi
 than the executor but confined to one single-purpose unit with a root-only socket,
 two verbs, no containerd access and no policy.
 
-**Deferred, deliberately:** re-Ensure on `start` after a REBOOT (the netns lives in
-/run and the container spec references its path). The helper already supports it
-(`Reuse: true`); wiring it to the start verb belongs with PLAN-22's reconciliation.
-Note this is narrower than it sounds after the restart work above: a front restart is
-handled, an aped/netd restart leaves the netns intact (it lives in the host), and only
-a host reboot loses it.
+**Follow-ups DONE 2026-07-25** (validated live on mmq4):
+
+- **Cold-start netns rebuild.** `start` rebuilds the workspace's namespace instead of
+  reusing it, which covers two cases that look different and need the same answer: after
+  a host reboot the namespace is GONE (verified by `ip netns del` + `start` → recreated
+  at the same path/address, tunnel back to 200), and after `stop` it is DIRTY — Kata's
+  `internetworking_model=tcfilter` adds a tc qdisc to the veth on boot and does not
+  remove it when the task is killed, so reuse failed with "Failed to add qdisc for
+  network index N : file exists". A persistent namespace is our design choice, so
+  cleaning up after the previous boot is our job. Ordering in `Start` is load-bearing: a
+  RUNNING workspace returns before anything touches its namespace (rewiring a live one
+  would cut its network — a latent bug in the first cut of this code).
+- **`ape sandbox egress set`** re-points a LIVE workspace's allowlist by restarting the
+  host-side proxy on the same port; the guest keeps its `HTTPS_PROXY`. Verified live:
+  swapped `github.com` → `proxy.golang.org` on a running workspace (200/403 flipped
+  accordingly, no restart), the change persisted across a `stop`/`start`, and a domain
+  outside node policy was refused. It reuses the resolver's `EgressPlanner`, so a live
+  change and a create grant cannot drift apart on policy.
+- **Proxy restoration across a front restart** (`RestoreAll`) observed in production
+  during a redeploy: "proxy restored on 169.254.42.1:3128".

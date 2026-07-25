@@ -61,12 +61,17 @@
   `set` with no `--domain` revokes egress entirely). Mounts deliberately cannot change
   this way — they are fixed in the container's OCI spec — so those need `down` + `up`,
   which is cheap because repos, caches and the framework live in durable host mounts.
-- **feat: `start` recovers an egress namespace lost to a host reboot** — the named netns
-  lives in `/run`, so a reboot leaves a workspace whose container still references
-  `/run/netns/ape-<name>`; starting it used to fail deep in the Kata shim. The driver
-  now re-creates it from the container's own spec, which records both the path and the
-  proxy port the guest was told to use, so a rebooted host does not need workspaces
-  recreated.
+- **feat/fix: `start` rebuilds a workspace's egress namespace** — covering two cases
+  that need the same answer. After a **host reboot** the namespace is gone (it lives in
+  `/run`) while the container still references it, so starting failed deep in the Kata
+  shim. After **`stop`** it survives but is *dirty*: Kata's default
+  `internetworking_model=tcfilter` adds a tc qdisc to the veth on boot and does not
+  remove it when the task is killed, so `start` failed with "Failed to add qdisc for
+  network index N : file exists" — a persistent namespace is ape's design choice, so
+  cleaning up after the previous boot is ape's job. The namespace is rebuilt at the same
+  path, address and proxy port (read from the container's own spec, because a guest
+  about to start already has that address baked in). A workspace that is already running
+  is returned before anything touches its namespace.
 - **feat: `ape sandbox ls` reports AGE and LAST-USED (`--idle 24h`)** — last use is
   stamped on exec/attach/start, so "is this workspace still in use?" is answerable from
   data. There is deliberately **no automatic reaper**: use is not idleness (a workspace
