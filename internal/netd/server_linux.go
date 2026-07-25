@@ -98,9 +98,10 @@ func Serve(ctx context.Context, cfg ServerConfig) error {
 // makes its work visible to containerd.
 //
 // Why it earns a dedicated check: `ip netns add` bind-mounts the namespace over a
-// placeholder file. This helper runs with a private mount namespace (its
-// hardening), so if /run/netns is not already a shared mount, the bind never
-// leaves this process's view. Everything here still SUCCEEDS — the netns is real,
+// placeholder file, so that bind must be visible to containerd. Two ways it is not:
+// /run/netns is not a shared mount at all (aped-netbr.service establishes it), or
+// this unit was given a private mount namespace, which systemd makes a SLAVE of the
+// host — propagation then runs host→unit only. In both cases everything here SUCCEEDS — the netns is real,
 // the veth is wired, the reply carries a path — and the failure surfaces much later
 // as the Kata shim reporting "failed to set into network namespace N while creating
 // netlink socket: invalid argument", because containerd opened the placeholder file
@@ -121,17 +122,40 @@ func warnIfNetnsNotShared(stderr io.Writer) {
 		if len(fields) < 6 || fields[4] != sandbox.NetnsRunDir {
 			continue
 		}
-		if strings.Contains(line, " shared:") {
-			return // correctly set up
+		switch {
+		case strings.Contains(line, " master:"):
+			// The mount is a SLAVE of the host's peer group: propagation is host→here
+			// only, so a netns bind made here cannot reach containerd. This is what
+			// systemd gives any unit with a private mount namespace, even with
+			// MountFlags=shared — so the fix is to remove the namespacing options, not
+			// to remount anything.
+			fmt.Fprintf(stderr, "! netd: %s is SLAVE to the host mount namespace (%s) — netns binds made here "+
+				"cannot reach containerd, and the Kata shim will fail with \"failed to set into network "+
+				"namespace\". This unit must run in the HOST mount namespace: remove ProtectHome=/ProtectProc=/"+
+				"ProtectSystem=/PrivateTmp= and friends from aped-netd.service.\n",
+				sandbox.NetnsRunDir, strings.TrimSpace(masterTag(line)))
+		case strings.Contains(line, " shared:"):
+			return // correctly set up: shared with the host, no master
+		default:
+			fmt.Fprintf(stderr, "! netd: %s is a mount but NOT shared — netns binds will not reach containerd; "+
+				"run `mount --make-shared %s` (aped-netbr.service does this)\n", sandbox.NetnsRunDir, sandbox.NetnsRunDir)
 		}
-		fmt.Fprintf(stderr, "! netd: %s is a mount but NOT shared — netns binds will not reach containerd; "+
-			"run `mount --make-shared %s` (aped-netbr.service does this)\n", sandbox.NetnsRunDir, sandbox.NetnsRunDir)
 		return
 	}
 	fmt.Fprintf(stderr, "! netd: %s is not a mountpoint in this namespace — netns binds will stay private to this "+
 		"process and the Kata shim will fail with \"failed to set into network namespace\". Start "+
 		"aped-netbr.service (it bind-mounts %s onto itself and marks it shared) and restart this unit.\n",
 		sandbox.NetnsRunDir, sandbox.NetnsRunDir)
+}
+
+// masterTag extracts the "master:N" field from a mountinfo line, for the diagnostic.
+func masterTag(line string) string {
+	for _, f := range strings.Fields(line) {
+		if strings.HasPrefix(f, "master:") {
+			return f
+		}
+	}
+	return "master:?"
 }
 
 // server holds the helper's small mutable state: the lease set, serialized by a

@@ -15,13 +15,33 @@
 #   CAP_SYS_ADMIN  create a network namespace and mount it at /run/netns/<name>
 # Both are unavoidable for netns creation; nothing else is granted.
 #
-# MountFlags=shared is LOAD-BEARING, not hardening noise: `ip netns add` mounts the
-# new namespace at /run/netns/<name>, and containerd (a different unit) must see
-# that mount to enter the namespace. With systemd's default per-unit mount
-# namespace the bind would stay private and every workspace would fail to start
-# with an opaque "no such file or directory" on the netns path. For the same
-# reason this unit does NOT set ProtectSystem/PrivateTmp/ProtectHome-style
-# sandboxing that would re-privatize its mount namespace.
+# THIS UNIT RUNS IN THE HOST MOUNT NAMESPACE, DELIBERATELY. Do not add
+# ProtectSystem=, ProtectHome=, PrivateTmp=, ProtectProc=, ProcSubset=,
+# ProtectControlGroups=, ProtectKernelTunables=, ReadOnlyPaths= or any other option
+# that gives the unit a private mount namespace. Here is why, measured rather than
+# assumed (2026-07-24):
+#
+#   `ip netns add` bind-mounts the new namespace over /run/netns/<name>, and
+#   containerd — a different unit — must SEE that mount to enter the namespace.
+#   systemd sets a unit's private mount namespace up as a SLAVE of the host's peer
+#   group, even with MountFlags=shared: mountinfo showed the host with `shared:13`
+#   and this helper with `shared:769 master:13`. Slave means host→unit propagation
+#   only. So a bind created inside the helper can never reach containerd, and the
+#   Kata shim fails with "failed to set into network namespace N while creating
+#   netlink socket: invalid argument" — because it opened the placeholder FILE that
+#   `ip netns add` leaves behind, not a namespace.
+#
+# The alternative (referencing /proc/<holder-pid>/ns/net instead of a bind mount)
+# would keep the private namespace, but ties every workspace's network to a child
+# process of this daemon: restarting the helper would strip the network from running
+# workspaces. A named netns in the host outlives the helper, which is worth more
+# than the mount-namespace protections lost here.
+#
+# What is NOT lost: no network of its own (IPAddressDeny=any), AF_UNIX/AF_NETLINK
+# only, a two-capability bounding set, NoNewPrivileges, a syscall denylist,
+# RestrictNamespaces=mnt net, MemoryDenyWriteExecute, and a root-only socket. The
+# protections dropped are the filesystem-view ones, on a daemon whose only file
+# access is its own socket and lease file.
 #
 # NOTE: systemd has NO inline comments — a trailing "# ..." becomes part of the
 # value. Every comment here is on its own line for that reason.
@@ -52,8 +72,10 @@ NoNewPrivileges=yes
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
 AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN
 
-# Mount propagation must reach the host so containerd can enter the netns.
-MountFlags=shared
+# PrivateMounts=no is explicit, not redundant: it documents that this unit must keep
+# the host's mount namespace (see the block above) so a future edit has to argue
+# with the comment rather than silently break every workspace.
+PrivateMounts=no
 RuntimeDirectory=aped
 RuntimeDirectoryMode=0710
 RuntimeDirectoryPreserve=yes
@@ -69,14 +91,15 @@ RestrictAddressFamilies=AF_UNIX AF_NETLINK
 # No IP networking of its own: the helper never dials anything.
 IPAddressDeny=any
 
-ProtectHome=yes
+# Only the protections that do NOT require a private mount namespace remain.
+# ProtectHome/ProtectProc/ProcSubset/ProtectControlGroups/ProtectKernelTunables/
+# ProtectHostname/ProtectKernelModules all do (they work by mounting over paths), so
+# they are absent by necessity — see the block above. ProtectClock is
+# capability+seccomp only, so it stays.
+#
+# Module loading is still blocked twice over without ProtectKernelModules: the
+# capability bounding set above excludes CAP_SYS_MODULE, and @module is denied below.
 ProtectClock=yes
-ProtectHostname=yes
-ProtectKernelLogs=yes
-ProtectControlGroups=yes
-ProtectProc=invisible
-ProcSubset=pid
-PrivateTmp=no
 UMask=0077
 
 # @mount is REQUIRED here (unlike the executor): `ip netns add` bind-mounts the new
