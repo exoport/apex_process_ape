@@ -53,6 +53,17 @@
   keeping the rootfs, unlike `freeze`, and survive a reboot), and aped
   reconciles its registry with containerd at startup so a workspace destroyed
   out-of-band stops haunting `ape sandbox ls`. An idle reaper / TTL is still open.
+- **fix(sandbox/aped): six defects found by live-validating egress on a Tier-2 host**
+  — the deploy script wrote ExecStart drop-ins using flags the installed binary
+  lacked (now capability-probed); the netns helper needed the `mnt` namespace for
+  `ip -n`; `/run/netns` had to be a shared host mount; a unit with any
+  private-mount-namespace option is a *slave* of the host peer group, so the helper
+  now runs in the host mount namespace; a CONNECT client that half-closes had its
+  upstream dial cancelled (now detached from request cancellation); and restarting
+  `aped-front` silently stripped egress from running workspaces (proxies are now
+  restored on the same port, re-intersected with current policy). The per-workspace
+  egress audit trail is also operator-readable (`0640`, with the parent directories
+  traversable — `UMask=0077` strips group bits from both).
 - **fix(sandbox): `Proxy.Close` now closes its listener deterministically** —
   `http.Server.Close` only closes listeners its `Serve` goroutine has already
   registered, so stopping a just-started proxy could return while the socket was

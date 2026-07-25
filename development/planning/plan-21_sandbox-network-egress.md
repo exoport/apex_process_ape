@@ -128,9 +128,10 @@ to "allow established + new → proxyIP:port, drop the rest."
   network, so a failed wire-up leaves a workspace networkless instead of on an
   open bridge. Stop defaulting egress-enabled profiles to
   `NetworkNone`; attach the netns path; flip `Networkless` off.
-- [ ] **D5 — Tier-2 live validation (M).** NOT DONE — needs root on the Tier-2
-  host: `sudo bash deploy/dev-host.sh redeploy`, then allow + deny + audit rows
-  against a real workspace, and confirm the guest is *forced* through the proxy. On a KVM+containerd+Kata host: allow +
+- [x] **D5 — Tier-2 live validation (M).** DONE 2026-07-24 on mmq4 (Ubuntu 26.04,
+  kernel 7.0, Kata-CLH via containerd). Results in "Live validation" below —
+  including the guest being *forced* through the proxy, which closes the honest-
+  boundary gap inherited from PLAN-16:138. On a KVM+containerd+Kata host: allow +
   deny + audit rows; confirm the guest is *forced* through the proxy (closes the
   "honest boundary" gap, `plan-16:138`).
 
@@ -156,9 +157,47 @@ interim only.
 - **PLAN-20** (mounts) — orthogonal; the framework mount is deliberately network-free.
 - **PLAN-18** (`ape`/`aped` split) — the executor hardening this plan must respect.
 
-## Delivery notes (2026-07-24)
+## Live validation (2026-07-24, node mmq4)
 
-Implemented D1–D4; D5 (live validation) is the remaining work and needs root.
+Driven end-to-end against the deployed daemon with the `ape` CLI as the operator:
+
+| Property | Evidence |
+| --- | --- |
+| Pre-wired netns reaches the guest | `169.254.42.0/24 dev apeg46b94a8d src 169.254.42.2` inside the VM; Kata replicated the netns config |
+| No DNS in the guest (by design) | empty `/etc/resolv.conf`; the proxy resolves |
+| Allowed domain tunnels | `CONNECT github.com:443` → `HTTP/1.1 200 Connection Established` |
+| Denied domain refused | `CONNECT evil.example.com:443` → `403 Forbidden`, audit row `denied / domain not authorized` |
+| Guest cannot bypass the proxy | direct `4.228.31.150:443`, host port 4223, and UDP `1.1.1.1:53` all blocked |
+| Workspace↔workspace isolation | ws2 (`.3`) → ws1 (`.2`) blocked at ICMP **and** TCP (bridge port isolation) |
+| Per-workspace allocation | second workspace got `169.254.42.3` + proxy port 3129, separate audit trail |
+| Framework + cache system mounts | `/opt/apex-framework` carries the v0.3.1 tree; `/cache/go` mounted with `GOPATH=/cache/go` |
+| Proxy survives a front restart | `systemctl restart aped-front` → "proxy restored on 169.254.42.1:3128"; the running workspace's tunnel still returns 200 |
+
+Five defects were found by running it, each fixed with the reason recorded in the
+unit or code it belongs to:
+
+1. `dev-host.sh` wrote ExecStart drop-ins referencing flags the INSTALLED binary
+   lacked, so a config step became an outage. Drop-ins are now capability-probed.
+2. `RestrictNamespaces=net` blocked `ip -n` — iproute2 unshares a MOUNT namespace to
+   bind the per-netns /sys. Now `mnt net`.
+3. `/run/netns` was not a shared mount in the host, so the netns bind never reached
+   containerd. `aped-netbr.service` establishes it.
+4. Even then, a unit with ANY private-mount-namespace option is a SLAVE of the host
+   peer group (measured: host `shared:13`, helper `shared:769 master:13`), so
+   unit→host propagation is impossible. The helper now runs in the host mount
+   namespace; the filesystem-view protections are gone by necessity and the unit says
+   why.
+5. A CONNECT client that half-closes (a piped `nc`) had its upstream dial cancelled
+   by net/http's request-context cancellation — a legal client turned into a 502. The
+   dial is now detached from request cancellation, bounded by the dial timeout.
+
+Two more came out of using it rather than testing it: restarting the front silently
+stripped egress from RUNNING workspaces (now restored from a per-workspace record, on
+the same port, re-intersected with current policy), and the audit trail was
+unreadable by the operator group (file *and* directory modes, both fighting
+`UMask=0077`).
+
+## Delivery notes (2026-07-24)
 
 **Enforcement boundary, stated honestly.** The load-bearing walls are the HOST nft
 input chain (`table inet ape_egress`: from the bridge, only the proxy port range),
@@ -178,6 +217,9 @@ add` is visible to containerd) and `CAP_SYS_ADMIN` (netns creation), which is wi
 than the executor but confined to one single-purpose unit with a root-only socket,
 two verbs, no containerd access and no policy.
 
-**Deferred, deliberately:** re-Ensure on `start` after a reboot (the netns lives in
+**Deferred, deliberately:** re-Ensure on `start` after a REBOOT (the netns lives in
 /run and the container spec references its path). The helper already supports it
 (`Reuse: true`); wiring it to the start verb belongs with PLAN-22's reconciliation.
+Note this is narrower than it sounds after the restart work above: a front restart is
+handled, an aped/netd restart leaves the netns intact (it lives in the host), and only
+a host reboot loses it.

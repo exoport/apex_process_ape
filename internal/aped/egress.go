@@ -28,6 +28,12 @@ const egressDirMode = 0o750
 // serving, so the front can restore it after a restart (see RestoreAll).
 const egressStateName = "egress.json"
 
+// egressStateMode keeps the restore record private to the front (0600). Unlike the
+// audit trail it is not an operator artifact but this daemon's own bookkeeping, so it
+// gets no group bit — and stating that here avoids the trap of passing 0640 and
+// silently receiving 0600 anyway, because the unit's UMask=0077 strips it.
+const egressStateMode = 0o600
+
 // EgressSupervisor runs the per-workspace CONNECT proxies IN-PROCESS in the
 // de-privileged aped front (PLAN-21 D2).
 //
@@ -351,7 +357,7 @@ func (s *EgressSupervisor) writeStateLocked(name string, domains []string, port 
 	path := filepath.Join(sandbox.ProxyDirFor(s.cfg.StateDir, name), egressStateName)
 	data, err := json.Marshal(egressState{Domains: domains, Port: port})
 	if err == nil {
-		err = os.WriteFile(path, data, egressAuditMode)
+		err = os.WriteFile(path, data, egressStateMode)
 	}
 	if err != nil {
 		fmt.Fprintf(s.stderr(), "! aped egress %s: could not record proxy state (%v); "+
