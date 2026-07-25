@@ -193,13 +193,14 @@ func workspaceFromSpec(req workspace.CreateRequest, spec WorkspaceSpec) workspac
 // workspaceFromRecord maps an on-disk Registry row to the wire record.
 func workspaceFromRecord(r Workspace) workspace.Workspace {
 	return workspace.Workspace{
-		ID:        r.Name,
-		Name:      r.Name,
-		Image:     r.Image,
-		Runtime:   runtimeName(VMM(r.VMM)),
-		Mount:     r.Mount,
-		Profile:   r.Profile,
-		CreatedAt: r.CreatedAt,
+		ID:         r.Name,
+		Name:       r.Name,
+		Image:      r.Image,
+		Runtime:    runtimeName(VMM(r.VMM)),
+		Mount:      r.Mount,
+		Profile:    r.Profile,
+		CreatedAt:  r.CreatedAt,
+		LastUsedAt: r.LastUsedAt,
 	}
 }
 

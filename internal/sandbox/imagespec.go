@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -141,6 +142,38 @@ func applyNetworkless(spec *specs.Spec, networkless bool) {
 		filtered = append(filtered, specs.LinuxNamespace{Type: specs.NetworkNamespace})
 	}
 	spec.Linux.Namespaces = filtered
+}
+
+// NetnsPathFromSpec returns the network-namespace PATH an existing container's spec
+// references, or "" when it has none (a path-less private netns, or host networking).
+// It is how a stopped workspace's egress wiring is recovered: the path is the only
+// record of it, and it is deterministic per workspace.
+func NetnsPathFromSpec(spec *specs.Spec) string {
+	if spec == nil || spec.Linux == nil {
+		return ""
+	}
+	for _, ns := range spec.Linux.Namespaces {
+		if ns.Type == specs.NetworkNamespace {
+			return ns.Path
+		}
+	}
+	return ""
+}
+
+// ProxyPortFromEnv recovers the workspace's CONNECT-proxy port from its container
+// env (HTTPS_PROXY). The container spec is the durable record of the address the
+// guest was told to use — and it must be honoured exactly, because a running guest
+// cannot be told a new one.
+func ProxyPortFromEnv(env []string) (int, error) {
+	for _, kv := range env {
+		name, value, ok := strings.Cut(kv, "=")
+		if !ok || !strings.EqualFold(name, "HTTPS_PROXY") {
+			continue
+		}
+		_, port, err := ParseProxyHostPort(value)
+		return port, err
+	}
+	return 0, errors.New("sandbox: no HTTPS_PROXY in the container env")
 }
 
 // parseNumericUser parses an image-config User of the form "", "uid", or

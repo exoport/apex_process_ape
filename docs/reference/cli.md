@@ -858,6 +858,7 @@ credential, and owns the workspace registry. ape never runs as root.
   ape sandbox down <name>      Tear a workspace down
   ape sandbox framework …      Materialize the framework refs a node can mount
   ape sandbox credentials …    Publish your Claude credentials for workspaces
+  ape sandbox egress set …     Change a running workspace's egress allowlist
 
 Point ape at your aped node with APE_NATS_URL + APE_NATS_CREDS (the operator
 credential aped mints at startup) and --node. Requires a running aped on a
@@ -868,6 +869,7 @@ Subcommands:
 - `attach` — Open an interactive shell inside a workspace
 - `credentials` — Publish your Claude credentials for workspaces to use
 - `down` — Tear a workspace down
+- `egress` — Inspect and change a workspace's egress allowlist
 - `exec` — Run a command inside a workspace
 - `framework` — Manage the APEX framework refs a sandbox node can mount
 - `freeze` — Freeze a workspace (cgroup-freeze; guest RAM stays resident)
@@ -1066,6 +1068,67 @@ Global flags:
 | `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
 | `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
 
+## ape sandbox egress
+
+Inspect and change a workspace's egress allowlist
+
+```
+ape sandbox egress
+```
+
+Change which domains a RUNNING workspace may reach, without recreating it.
+
+The allowlist is enforced by a host-side CONNECT proxy on a fixed port, so re-pointing
+it is a proxy restart on that same port — the workspace keeps running and its
+HTTPS_PROXY stays valid. The request is intersected with the node's egress policy
+exactly as at create time, so this can narrow or re-shape a grant but never exceed
+what the node permits.
+
+  ape sandbox egress set dev --domain github.com --domain proxy.golang.org
+
+Mounts cannot be changed this way (they are fixed in the container's OCI spec at
+creation) — use 'down' then 'up', which is cheap because repos, caches and the
+framework all live in durable host mounts.
+
+Subcommands:
+
+- `set` — Replace a running workspace's egress allowlist
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox egress set
+
+Replace a running workspace's egress allowlist
+
+```
+ape sandbox egress set <name> [flags]
+```
+
+Replace the domains a running workspace may reach. The list is REPLACED, not
+added to, so it is also how you revoke access: 'set <name>' with no --domain leaves the
+workspace with no egress at all.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--domain` | stringArray | `[]` | Domain to allow (repeatable; replaces the current list) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
 ## ape sandbox exec
 
 Run a command inside a workspace
@@ -1231,10 +1294,20 @@ List provisioned workspaces
 ape sandbox ls [flags]
 ```
 
+List provisioned workspaces with their age and last use.
+
+LAST-USED is the last exec, attach or start — a USE signal, not proof of idleness: a
+workspace running a long job without anyone reaching in looks untouched. That is
+exactly why ape reports it instead of reaping automatically; you decide what to stop
+(frees RAM, keeps state) or tear down.
+
+  ape sandbox ls --idle 24h    # only workspaces nobody has touched in 24h
+
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--idle` | duration | `0s` | Only workspaces not used for at least this long (e.g. 24h) |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
 Global flags:

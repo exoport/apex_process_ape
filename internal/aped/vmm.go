@@ -35,6 +35,11 @@ type VMMConfig struct {
 	// Socket is the priv socket the bridge dials for a streaming attach/exec.
 	// Empty disables interactive attach.
 	Socket string
+	// Egress re-points a live workspace's allowlist (the egress.set verb). It is the
+	// same EgressPlanner the resolver uses at create time — one seam, so a change made
+	// live and a grant made at create go through identical policy intersection. Nil
+	// makes the endpoint report UNSUPPORTED, correct for a node with no egress.
+	Egress EgressPlanner
 	// Publish forwards the executor's attach open-audit record on
 	// ape.audit.<node>.>. Mirrors the privClient's forwarding for the one leg
 	// (OpAttach) that does not round-trip through the privClient. nil skips it.
@@ -48,6 +53,7 @@ type VMMConfig struct {
 type VMM struct {
 	node    string
 	backend workspace.Backend
+	egress  EgressPlanner
 	nc      *nats.Conn
 	socket  string
 	publish func(subject string, data []byte)
@@ -60,7 +66,7 @@ func NewVMM(cfg VMMConfig) *VMM {
 	if node == "" {
 		node = "node"
 	}
-	return &VMM{node: node, backend: cfg.Backend, nc: cfg.NatsConn, socket: cfg.Socket, publish: cfg.Publish}
+	return &VMM{node: node, backend: cfg.Backend, egress: cfg.Egress, nc: cfg.NatsConn, socket: cfg.Socket, publish: cfg.Publish}
 }
 
 // Group returns the endpoint group subject, ape.vmm.<node>.
@@ -89,6 +95,7 @@ func (v *VMM) Register(svc micro.Service) error {
 		{"list", "list", v.handleList},
 		{"inspect", "inspect", v.handleInspect},
 		{"destroy", "destroy", v.handleDestroy},
+		{"egress-set", "egress.set", v.handleEgressSet},
 	}
 	for _, e := range endpoints {
 		if err := grp.AddEndpoint(e.name, e.h, micro.WithEndpointSubject(e.subject)); err != nil {
@@ -319,6 +326,44 @@ func (v *VMM) handleInspect(req micro.Request) {
 		return
 	}
 	_ = req.RespondJSON(workspace.InspectReply{V: workspace.WireVersion, Status: status})
+}
+
+// handleEgressSet re-points a live workspace's egress allowlist.
+//
+// Front-side on purpose, and it does NOT weaken the executor boundary: the proxy that
+// enforces the allowlist already runs here, so a compromised front could tunnel
+// whatever it liked regardless — the executor's authority is over provisioning
+// (images, mounts, namespaces), not over which domains a proxy it does not run
+// forwards. Policy is still applied: Plan intersects the request with the node's
+// allowed set, so this can narrow or re-shape a grant but never exceed policy.
+//
+// The workspace must exist (checked against the backend) so this cannot be used to
+// stand up a proxy for a workspace that was never created.
+func (v *VMM) handleEgressSet(req micro.Request) {
+	var r workspace.EgressSetReq
+	if !v.decode(req, &r) {
+		return
+	}
+	if strings.TrimSpace(r.ID) == "" {
+		_ = req.Error(workspace.CodeValidation, "id is required", nil)
+		return
+	}
+	if v.egress == nil {
+		v.respondErr(req, fmt.Errorf("%w: this node does not provide workspace egress", workspace.ErrUnsupported))
+		return
+	}
+	if _, err := v.backend.Inspect(context.Background(), r.ID); err != nil {
+		v.respondErr(req, err)
+		return
+	}
+	plan, err := v.egress.Plan(r.ID, r.AuthorizedDomains)
+	if err != nil {
+		v.respondErr(req, err)
+		return
+	}
+	_ = req.RespondJSON(workspace.EgressSetReply{
+		V: workspace.WireVersion, Domains: plan.Domains, ProxyURL: plan.ProxyURL,
+	})
 }
 
 // decode unmarshals the request body into dst, answering VALIDATION on malformed

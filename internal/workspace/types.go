@@ -127,6 +127,9 @@ type Workspace struct {
 	Profile   string   `json:"profile,omitempty"`
 	Devices   []Device `json:"devices,omitempty"`
 	CreatedAt string   `json:"created_at,omitempty"`
+	// LastUsedAt is the last exec/attach/start on this workspace (PLAN-22 D5b), so an
+	// operator can see which workspaces are actually in use before reclaiming any.
+	LastUsedAt string `json:"last_used_at,omitempty"`
 }
 
 // State is a workspace's lifecycle state, reported by Inspect.

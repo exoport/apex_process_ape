@@ -129,6 +129,7 @@ func RunExecutor(ctx context.Context, cfg ExecutorRunConfig) error {
 		AllowedUIDs: cfg.AllowedUIDs,
 		Node:        cfg.Node,
 		Netns:       netnsProvider,
+		Registry:    reg,
 	})
 
 	l, activated, err := socketActivatedListener()
@@ -178,10 +179,17 @@ func buildDriver(cfg ExecutorRunConfig, reg *sandbox.Registry, stderr io.Writer)
 		runner := &sandbox.Runner{Nerdctl: cfg.Nerdctl, DataRoot: dataRoot, Stdout: stderr, Stderr: stderr}
 		return sandbox.NewShellDriver(runner, reg, nil), NewShellProvisioner(runner, reg), func() {}, nil
 	case DriverContainerd:
+		// The driver gets the netns helper too, so Start can repair a namespace a host
+		// reboot took with it (PLAN-21 follow-up); nil when no helper is configured.
+		var ensurer sandbox.NetnsEnsurer
+		if cfg.NetdSocket != "" {
+			ensurer = &netd.Client{Socket: cfg.NetdSocket}
+		}
 		cd, err := sandbox.NewContainerdDriver(sandbox.ContainerdConfig{
 			Address:   cfg.ContainerdAddress,
 			Namespace: cfg.ContainerdNamespace,
 			Registry:  reg,
+			Netns:     ensurer,
 		})
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("%w: %w", ErrConfig, err)

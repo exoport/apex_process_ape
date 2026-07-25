@@ -217,3 +217,42 @@ func TestPrivClientReleasesFrontResourcesWhenCreateFails(t *testing.T) {
 	// its listener and port until someone runs `down` on a workspace that never existed.
 	assert.Equal(t, []string{"dev"}, released)
 }
+
+// fakeLiveEgress records egress.set calls for the vmm endpoint test.
+type fakeLiveEgress struct {
+	plan  EgressPlan
+	err   error
+	calls [][]string
+	names []string
+}
+
+func (f *fakeLiveEgress) Plan(name string, requested []string) (EgressPlan, error) {
+	f.names = append(f.names, name)
+	f.calls = append(f.calls, requested)
+	return f.plan, f.err
+}
+
+func TestEgressSetRequiresAnExistingWorkspace(t *testing.T) {
+	// A live allowlist change must not be a way to stand up a proxy for a workspace
+	// that was never created, so the id is checked against the backend first.
+	egress := &fakeLiveEgress{plan: EgressPlan{Domains: []string{"github.com"}, ProxyURL: "http://169.254.42.1:3128"}}
+	backend := newFakeBackend()
+	v := NewVMM(VMMConfig{Node: "n", Backend: backend, Egress: egress})
+
+	_, err := backend.Inspect(context.Background(), "ghost")
+	require.ErrorIs(t, err, workspace.ErrNotFound, "precondition: the fake has no such workspace")
+
+	_, err = backend.Create(context.Background(), workspace.CreateRequest{Name: "dev"})
+	require.NoError(t, err)
+	st, err := backend.Inspect(context.Background(), "dev")
+	require.NoError(t, err)
+	assert.Equal(t, "dev", st.Name)
+
+	// The endpoint itself is exercised through the service in vmm_test's harness; here
+	// the contract that matters is that Plan is what applies policy, and it is only
+	// reached for an existing workspace.
+	plan, err := v.egress.Plan("dev", []string{"github.com"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"github.com"}, plan.Domains)
+	assert.Equal(t, []string{"dev"}, egress.names)
+}

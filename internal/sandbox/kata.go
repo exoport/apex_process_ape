@@ -338,6 +338,16 @@ type Workspace struct {
 	StagingDir  string `json:"staging_dir"`
 	SSHPort     int    `json:"ssh_port,omitempty"`
 	CreatedAt   string `json:"created_at,omitempty"`
+	// LastUsedAt is the last time someone actually worked in this workspace — an
+	// exec, an attach, or a start (PLAN-22 D5b). It exists so "is this workspace
+	// still in use?" is answerable from data instead of guessed from age: a
+	// workspace can be days old and busy, or minutes old and abandoned.
+	//
+	// It is a USE signal, not an idleness proof: a long-running process inside the
+	// guest keeps working without any exec, so a stale LastUsedAt means "nobody has
+	// reached in recently", which is why this drives a REPORT for a human rather
+	// than an automatic reaper.
+	LastUsedAt string `json:"last_used_at,omitempty"`
 
 	// Egress-proxy supervisor record (PLAN-16 D4). Set only when `up`
 	// started a managed CONNECT proxy for the workspace (a profile
@@ -439,6 +449,24 @@ func (r *Registry) Put(w Workspace) error {
 		return err
 	}
 	m[w.Name] = w
+	return r.save(m)
+}
+
+// Touch stamps a workspace's LastUsedAt. An unknown name is a no-op (the caller may
+// be operating on something already destroyed), and a write failure is returned so the
+// caller can decide — the executor treats it as non-fatal, since losing a usage stamp
+// must never fail the op the user asked for.
+func (r *Registry) Touch(name, when string) error {
+	m, err := r.load()
+	if err != nil {
+		return err
+	}
+	w, ok := m[name]
+	if !ok {
+		return nil
+	}
+	w.LastUsedAt = when
+	m[name] = w
 	return r.save(m)
 }
 

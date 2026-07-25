@@ -215,17 +215,26 @@ func TestVMMDiscovery(t *testing.T) {
 	if err := json.Unmarshal(msg.Data, &info); err != nil {
 		t.Fatalf("unmarshal info: %v", err)
 	}
-	if len(info.Endpoints) != 14 {
-		t.Fatalf("endpoint count = %d, want 14", len(info.Endpoints))
+	// The contract is additive-only, so this asserts the expected set is PRESENT and
+	// that the count matches it — a count alone would fail on every addition without
+	// saying which subject changed.
+	want := []string{
+		"capabilities", "create", "start", "stop", "exec", "attach.open", "freeze",
+		"unfreeze", "suspend", "resume", "snapshot", "list", "inspect", "destroy",
+		"egress.set",
 	}
 	subjects := map[string]bool{}
 	for _, e := range info.Endpoints {
 		subjects[e.Subject] = true
 	}
-	for _, want := range []string{"capabilities", "create", "start", "stop", "exec", "attach.open", "freeze", "unfreeze", "suspend", "resume", "snapshot", "list", "inspect", "destroy"} {
-		if !subjects[r.base+"."+want] {
-			t.Errorf("INFO missing endpoint subject %s.%s", r.base, want)
+	for _, w := range want {
+		if !subjects[r.base+"."+w] {
+			t.Errorf("INFO missing endpoint subject %s.%s", r.base, w)
 		}
+	}
+	if len(info.Endpoints) != len(want) {
+		t.Fatalf("endpoint count = %d, want %d (a new endpoint must be added to `want`)",
+			len(info.Endpoints), len(want))
 	}
 }
 

@@ -27,6 +27,10 @@ type ContainerdConfig struct {
 	// Resolve turns a wire CreateRequest into a resolved spec for Backend.Create.
 	// aped drives the driver via Provision (the front resolves), so it passes nil.
 	Resolve SpecResolver
+	// Netns re-creates a workspace's egress namespace when Start finds it missing
+	// (after a host reboot). nil → no recovery: Start on such a workspace fails in
+	// the shim, as it did before this existed.
+	Netns NetnsEnsurer
 }
 
 // InteractiveBackend is a Backend that can open an interactive process — an exec
@@ -52,6 +56,20 @@ type ProvisioningBackend interface {
 	Provision(ctx context.Context, spec WorkspaceSpec) (workspace.Workspace, error)
 	// Close releases the containerd client connection.
 	Close() error
+}
+
+// NetnsEnsurer re-creates a workspace's egress network namespace on demand. It is
+// declared HERE, not imported from the netd package, because netd imports this one —
+// aped wires its netd client in at construction.
+//
+// Why the driver needs it at all: a named netns lives in /run, so it survives an aped
+// or helper restart but NOT a host reboot. After a reboot the container and its
+// snapshot are still there, and its spec still names /run/netns/ape-<name> — which no
+// longer exists, so starting it would fail deep in the Kata shim ("failed to set into
+// network namespace … invalid argument"). Re-ensuring on Start turns that into a
+// recoverable workspace.
+type NetnsEnsurer interface {
+	EnsureNetns(ctx context.Context, workspace string, proxyPort int, reuse bool) (string, error)
 }
 
 // Reconciler is implemented by a backend that can re-align its workspace registry

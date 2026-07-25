@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/exoport/apex_process_ape/internal/natsconn"
 	"github.com/exoport/apex_process_ape/internal/output"
@@ -65,6 +66,7 @@ credential, and owns the workspace registry. ape never runs as root.
   ape sandbox down <name>      Tear a workspace down
   ape sandbox framework …      Materialize the framework refs a node can mount
   ape sandbox credentials …    Publish your Claude credentials for workspaces
+  ape sandbox egress set …     Change a running workspace's egress allowlist
 
 Point ape at your aped node with APE_NATS_URL + APE_NATS_CREDS (the operator
 credential aped mints at startup) and --node. Requires a running aped on a
@@ -91,6 +93,7 @@ Linux host with KVM + containerd + Kata.`,
 		newSandboxDownCmd(),
 		newSandboxFrameworkCmd(),
 		newSandboxCredentialsCmd(),
+		newSandboxEgressCmd(),
 		newSandboxProxyDaemonCmd(),
 	)
 	return cmd
@@ -331,11 +334,22 @@ func applySandboxConfig(cmd *cobra.Command, req *workspace.CreateRequest, projec
 }
 
 func newSandboxLsCmd() *cobra.Command {
-	var outputFormat string
+	var (
+		outputFormat string
+		idleFor      time.Duration
+	)
 	cmd := &cobra.Command{
 		Use:   "ls",
 		Short: "List provisioned workspaces",
-		Args:  cobra.NoArgs,
+		Long: `List provisioned workspaces with their age and last use.
+
+LAST-USED is the last exec, attach or start — a USE signal, not proof of idleness: a
+workspace running a long job without anyone reaching in looks untouched. That is
+exactly why ape reports it instead of reaping automatically; you decide what to stop
+(frees RAM, keeps state) or tear down.
+
+  ape sandbox ls --idle 24h    # only workspaces nobody has touched in 24h`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			backend, done, err := vmmBackend(cmd)
 			if err != nil {
@@ -345,6 +359,9 @@ func newSandboxLsCmd() *cobra.Command {
 			list, err := backend.List(cmd.Context())
 			if err != nil {
 				return err
+			}
+			if idleFor > 0 {
+				list = filterIdle(list, idleFor, time.Now())
 			}
 			format := output.Format(outputFormat)
 			switch format {
@@ -356,17 +373,63 @@ func newSandboxLsCmd() *cobra.Command {
 					return nil
 				}
 				tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-				fmt.Fprintln(tw, "NAME\tPROFILE\tRUNTIME\tMOUNT\tIMAGE")
+				fmt.Fprintln(tw, "NAME\tRUNTIME\tMOUNT\tAGE\tLAST-USED\tIMAGE")
+				now := time.Now()
 				for i := range list {
 					w := &list[i]
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", w.Name, w.Profile, w.Runtime, w.Mount, w.Image)
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
+						w.Name, w.Runtime, w.Mount, since(w.CreatedAt, now), since(w.LastUsedAt, now), w.Image)
 				}
 				return tw.Flush()
 			}
 		},
 	}
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
+	cmd.Flags().DurationVar(&idleFor, "idle", 0, "Only workspaces not used for at least this long (e.g. 24h)")
 	return cmd
+}
+
+// since renders an RFC3339 stamp as a compact age ("3h", "2d"), or "never" when the
+// stamp is absent — which for LAST-USED means "created but never worked in", a
+// materially different thing from "used a moment ago" and worth showing as such.
+func since(stamp string, now time.Time) string {
+	if strings.TrimSpace(stamp) == "" {
+		return "never"
+	}
+	t, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		return "?"
+	}
+	d := now.Sub(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
+
+// filterIdle keeps workspaces whose last use is older than d (or which were never
+// used). A workspace with no stamp counts as idle since CREATION, so an old workspace
+// nobody ever touched does show up.
+func filterIdle(list []workspace.Workspace, d time.Duration, now time.Time) []workspace.Workspace {
+	out := make([]workspace.Workspace, 0, len(list))
+	for i := range list {
+		w := list[i]
+		ref := w.LastUsedAt
+		if strings.TrimSpace(ref) == "" {
+			ref = w.CreatedAt
+		}
+		t, err := time.Parse(time.RFC3339, ref)
+		if err != nil || now.Sub(t) >= d {
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 func newSandboxInspectCmd() *cobra.Command {

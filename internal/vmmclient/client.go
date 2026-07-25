@@ -142,6 +142,17 @@ func (c *Client) AttachOpen(_ context.Context, id string, req workspace.AttachRe
 	return r, err
 }
 
+// EgressSet re-points a live workspace's egress allowlist. It is not part of
+// workspace.Backend: only a node running the proxy can serve it, and the verb changes
+// host-side state rather than the workspace itself.
+func (c *Client) EgressSet(_ context.Context, id string, domains []string) (workspace.EgressSetReply, error) {
+	var r workspace.EgressSetReply
+	err := c.call("egress.set", workspace.EgressSetReq{
+		V: workspace.WireVersion, ID: id, AuthorizedDomains: domains,
+	}, &r)
+	return r, err
+}
+
 // Attach's bulk stdio streaming over NATS is a Tier-2 addition; use ssh/exec for
 // interactive access in Phase 2.
 func (c *Client) Attach(context.Context, string, workspace.AttachRequest, workspace.Stream) (workspace.ExitStatus, error) {

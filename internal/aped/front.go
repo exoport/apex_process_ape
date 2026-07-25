@@ -201,6 +201,7 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 	vmmCfg := VMMConfig{
 		Node:     node,
 		Backend:  backend,
+		Egress:   egressPlannerOrNil(egress),
 		NatsConn: nc,
 		Socket:   cfg.Socket,
 		Publish:  func(subject string, data []byte) { _ = nc.Publish(subject, data) },

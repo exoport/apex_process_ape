@@ -54,6 +54,31 @@ type AttachOpenReq struct {
 	AttachRequest
 }
 
+// EgressSetReq re-points a LIVE workspace's egress allowlist (PLAN-21 follow-up).
+//
+// It is a front-side operation by nature: the CONNECT proxy that enforces the
+// allowlist runs in the front, on a port the guest already has baked into its
+// HTTPS_PROXY, so the set can be changed by restarting that proxy on the same port —
+// no new container, no re-wired namespace, no restart of the workspace. The requested
+// domains are intersected with the node's policy exactly as at create time.
+//
+//nolint:tagliatelle // snake_case is the documented vmm NATS wire contract
+type EgressSetReq struct {
+	V                 int      `json:"v,omitempty"`
+	ID                string   `json:"id"`
+	AuthorizedDomains []string `json:"authorized_domains"`
+}
+
+// EgressSetReply reports what the workspace ended up with.
+//
+//nolint:tagliatelle // snake_case is the documented vmm NATS wire contract
+type EgressSetReply struct {
+	V        int      `json:"v,omitempty"`
+	Domains  []string `json:"domains"`
+	ProxyURL string   `json:"proxy_url,omitempty"`
+	Refused  []string `json:"refused,omitempty"`
+}
+
 // AttachOpenReply returns the interactive-session id and the subject prefix the
 // client then streams over: ape.vmm.<node>.exec.<sid>.{stdin,stdout,stderr,
 // resize,control,exit} (PLAN-18 D2). Bulk stdio rides those session subjects

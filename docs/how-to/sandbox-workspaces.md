@@ -150,6 +150,50 @@ Established`), a denied one is refused (`403`), and direct-to-internet, a non-pr
 host port, and UDP DNS are all blocked — as is reaching another workspace. Setting the
 node up is in [How to run aped](run-aped.md#workspace-egress-allowlisted-deny-by-default).
 
+## What can change on a live workspace, and what needs a rebuild
+
+The dividing line is **where the thing lives**: host-side state can be re-pointed
+under a running workspace; anything baked into the container's OCI spec cannot.
+
+| Change | Live? | How |
+| --- | --- | --- |
+| Egress allowlist | **yes** | `ape sandbox egress set <ws> --domain …` — the proxy is host-side on a fixed port, so this restarts it on that same port; the guest keeps its `HTTPS_PROXY` |
+| Published host credential | **yes** for new workspaces; running ones keep what was composed | `ape sandbox credentials publish` / `revoke` |
+| Framework ref | no | `down` + `up --framework-ref <ref>` |
+| Mounts (repos, extra mounts, caches) | no | `down` + `up` |
+| Image, runtime, mount mode | no | `down` + `up` |
+
+Rebuilding is cheap by design, which is why the line sits where it does: the rootfs is
+ephemeral and everything of value lives in durable host mounts — the repos in
+`/srv/workspaces`, the caches in `/cache/*`, the framework read-only — so `down` + `up`
+costs a boot and loses nothing. `stop`/`start` keep the container and its snapshot, so
+they cannot change either: same spec, same mounts, same netns path.
+
+If a **host reboot** takes the egress namespace with it (it lives in `/run`), `start`
+re-creates it from the container's own spec — the path and the proxy port are both
+recorded there — so a rebooted host does not need workspaces recreated.
+
+## Reclaiming resources — reported, not reaped
+
+`ape sandbox ls` shows AGE and LAST-USED so you can decide:
+
+```bash
+ape sandbox ls                 # NAME RUNTIME MOUNT AGE LAST-USED IMAGE
+ape sandbox ls --idle 24h      # only what nobody has touched in 24h
+```
+
+LAST-USED is stamped on exec, attach and start — a **use** signal, not proof of
+idleness: a workspace running a long job with nobody reaching in looks untouched, and a
+days-old workspace someone touched a minute ago is not idle at all. There is
+deliberately **no automatic reaper**: with only this signal an "idle reaper" would in
+practice be an age-based killer wearing a policy's name, and it would eventually stop a
+workspace mid-task. Reclaim explicitly, cheapest first:
+
+```bash
+ape sandbox stop <ws>    # frees RAM, keeps rootfs + state, survives a reboot
+ape sandbox down <ws>    # frees disk too; state lives in host mounts anyway
+```
+
 ## Driver choice — provisioning through the hardened units
 
 All verbs work end-to-end through the deployed hardened `aped` units **with the

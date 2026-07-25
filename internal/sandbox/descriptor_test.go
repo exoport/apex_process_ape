@@ -204,3 +204,19 @@ func TestRepoDestAndMountNameValidation(t *testing.T) {
 		require.Error(t, ValidateMountName(bad), bad)
 	}
 }
+
+func TestRegistryTouchStampsLastUsed(t *testing.T) {
+	reg := OpenRegistry(t.TempDir())
+	require.NoError(t, reg.Put(Workspace{Name: "dev", Container: "ape-ws-dev"}))
+
+	// An unknown workspace is a no-op, not an error: the caller may be stamping
+	// something that was just destroyed.
+	require.NoError(t, reg.Touch("ghost", "2026-07-25T12:00:00Z"))
+
+	require.NoError(t, reg.Touch("dev", "2026-07-25T12:00:00Z"))
+	got, ok, err := reg.Get("dev")
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, "2026-07-25T12:00:00Z", got.LastUsedAt)
+	assert.Equal(t, "ape-ws-dev", got.Container, "touching must not clobber the rest of the record")
+}

@@ -137,6 +137,16 @@ exact command to run. Inside the workspace, consume it read-only:
 ape framework setup --no-fetch --repo /opt/apex-framework
 ```
 
+## Changing a descriptor after `up`
+
+Editing `.apesandbox.yaml` does not affect a running workspace: its mounts are fixed in
+the container's OCI spec at creation. Re-read it with `down` + `up`, which is cheap —
+repos, caches and the framework all live in durable host mounts, so nothing is lost.
+
+The one exception is `egress:`, because that is enforced by a host-side proxy rather
+than by the container: `ape sandbox egress set <ws> --domain …` re-points a running
+workspace, and the guest keeps the same `HTTPS_PROXY`.
+
 ## Mounting a project under `/home`
 
 aped runs with `ProtectHome=yes`, so paths under `/home` and `/root` are invisible

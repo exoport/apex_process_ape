@@ -37,6 +37,7 @@ type Executor struct {
 	provision   Provisioner       // resolved-spec create
 	policy      *Policy
 	auditor     *Auditor
+	registry    *sandbox.Registry // usage stamping (PLAN-22 D5b); nil disables it
 	allowedUIDs map[uint32]bool
 	node        string
 	netns       NetnsProvider
@@ -52,6 +53,11 @@ type ExecutorConfig struct {
 	Auditor     *Auditor
 	AllowedUIDs []uint32 // peer uids permitted over the priv socket (the aped-front uid)
 	Node        string
+	// Registry, when set, is stamped with a workspace's last use on exec/attach/start
+	// so an operator can tell a busy workspace from an abandoned one. It is the SAME
+	// registry the driver writes; the executor is the only place that sees every
+	// mutating verb, which is why the stamp lives here.
+	Registry *sandbox.Registry
 	// Netns is the privileged network helper. Nil means this executor cannot
 	// provide egress: a create whose spec was granted egress is REFUSED rather than
 	// provisioned networkless behind a proxy env var that would silently hang.
@@ -76,6 +82,7 @@ func NewExecutor(cfg ExecutorConfig) *Executor {
 		allowedUIDs: allowed,
 		node:        cfg.Node,
 		netns:       cfg.Netns,
+		registry:    cfg.Registry,
 	}
 }
 
@@ -141,6 +148,9 @@ func (e *Executor) handleConn(ctx context.Context, conn privConn) {
 	// hold e.mu (which serializes registry writes): an interactive session lasts
 	// minutes and would block every other op.
 	if cmd.Op == OpAttach {
+		// An interactive session is the strongest "in use" signal there is, so stamp it
+		// at open rather than at exit: a session that is still running matters most.
+		e.touchUsage(cmd.ID, nil)
 		e.handleStream(ctx, conn, cmd, peer)
 		return
 	}
@@ -175,7 +185,11 @@ func (e *Executor) dispatch(ctx context.Context, cmd Command, peer Peer) (Respon
 	case OpCreate:
 		return e.doCreate(ctx, cmd, peer)
 	case OpStart:
-		return e.mutate(peer, "StartVM", cmd.ID, func() error { return e.backend.Start(ctx, cmd.ID) })
+		return e.mutate(peer, "StartVM", cmd.ID, func() error {
+			err := e.backend.Start(ctx, cmd.ID)
+			e.touchUsage(cmd.ID, err)
+			return err
+		})
 	case OpStop:
 		return e.mutate(peer, "StopVM", cmd.ID, func() error { return e.backend.Stop(ctx, cmd.ID) })
 	case OpFreeze:
@@ -191,6 +205,7 @@ func (e *Executor) dispatch(ctx context.Context, cmd Command, peer Peer) (Respon
 			return errorResponse(fmt.Errorf("%w: exec command missing payload", workspace.ErrValidation)), nil
 		}
 		status, err := e.backend.Exec(ctx, cmd.ID, *cmd.Exec)
+		e.touchUsage(cmd.ID, err)
 		rec := e.audit(peer, "", "ExecVM", ResolvedArgs{WorkspaceID: cmd.ID}, decisionFor(err), outcomeFor(err, cmd.ID))
 		return respondValue(status, err), []AuditRecord{rec}
 	case OpSnapshot:
@@ -275,6 +290,18 @@ func (e *Executor) doCreate(ctx context.Context, cmd Command, peer Peer) (Respon
 		return errorResponse(err), []AuditRecord{rec}
 	}
 	return okResponse(ws), []AuditRecord{rec}
+}
+
+// touchUsage stamps a workspace's last-use time after a verb that means someone
+// actually worked in it. Failures are swallowed on purpose: losing a usage stamp is a
+// worse-report problem, and must never fail the exec or start the user asked for.
+func (e *Executor) touchUsage(id string, opErr error) {
+	if e.registry == nil || opErr != nil || id == "" {
+		return
+	}
+	if err := e.registry.Touch(id, now().Format(time.RFC3339)); err != nil {
+		e.auditor.Note("usage stamp for " + id + ": " + err.Error())
+	}
 }
 
 // attachEgressNetns asks the privileged helper for the workspace's pre-wired

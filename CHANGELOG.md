@@ -53,6 +53,26 @@
   keeping the rootfs, unlike `freeze`, and survive a reboot), and aped
   reconciles its registry with containerd at startup so a workspace destroyed
   out-of-band stops haunting `ape sandbox ls`. An idle reaper / TTL is still open.
+- **feat: `ape sandbox egress set` re-points a RUNNING workspace's allowlist** — the
+  CONNECT proxy is host-side on a fixed port, so a new allowlist is a proxy restart on
+  that port: the workspace keeps running, its `HTTPS_PROXY` stays valid, and the netns
+  is untouched. The request goes through the same policy intersection as at create
+  time, so it can narrow or re-shape a grant but never exceed the node's policy (and
+  `set` with no `--domain` revokes egress entirely). Mounts deliberately cannot change
+  this way — they are fixed in the container's OCI spec — so those need `down` + `up`,
+  which is cheap because repos, caches and the framework live in durable host mounts.
+- **feat: `start` recovers an egress namespace lost to a host reboot** — the named netns
+  lives in `/run`, so a reboot leaves a workspace whose container still references
+  `/run/netns/ape-<name>`; starting it used to fail deep in the Kata shim. The driver
+  now re-creates it from the container's own spec, which records both the path and the
+  proxy port the guest was told to use, so a rebooted host does not need workspaces
+  recreated.
+- **feat: `ape sandbox ls` reports AGE and LAST-USED (`--idle 24h`)** — last use is
+  stamped on exec/attach/start, so "is this workspace still in use?" is answerable from
+  data. There is deliberately **no automatic reaper**: use is not idleness (a workspace
+  running a long job with nobody reaching in looks untouched), so an automatic reaper
+  built on this signal would be an age-based killer wearing a policy's name. ape reports
+  it and leaves `stop`/`down` to the operator.
 - **feat: workspaces can use the host's Claude session (`ape sandbox credentials`)** —
   `aped-front` runs as its own service user with `ProtectHome=yes`, so it cannot read
   `~/.claude`, and widening a home for a daemon (or trusting a caller-supplied
