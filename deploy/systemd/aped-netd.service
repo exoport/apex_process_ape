@@ -40,7 +40,14 @@ RestartSec=1s
 # Identity: root, because netns creation needs CAP_SYS_ADMIN and the socket must be
 # root-only. The socket it binds is 0600, so the ONLY peer that can command it is
 # the root executor — the de-privileged front cannot.
+#
+# Group=ape is LOAD-BEARING even though this unit's own socket is root-only:
+# RuntimeDirectory= re-applies ownership on every start, so without it a netd
+# restart would chown the SHARED /run/aped to root:root and the de-privileged front
+# would lose the traversal it needs to reach priv.sock (0660 root:ape). It matches
+# aped.service exactly so any start order converges on root:ape 0710.
 User=root
+Group=ape
 NoNewPrivileges=yes
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
 AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN
