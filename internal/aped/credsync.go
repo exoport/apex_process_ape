@@ -258,7 +258,7 @@ func writeInPlace(path string, data []byte) error {
 	f, err := os.OpenFile(path, os.O_WRONLY, credFileMode)
 	if err != nil {
 		return fmt.Errorf("aped: open published credential %s: %w "+
-			"(does the aped group have write access? see `ape sandbox credentials publish`)", path, err)
+			"(two causes: the unit needs ReadWritePaths for this directory — ProtectSystem=strict makes it read-only otherwise — or the ACL grant is missing; see `ape sandbox credentials status`)", path, err)
 	}
 	defer func() { _ = f.Close() }()
 	n, err := f.Write(data)
