@@ -202,6 +202,12 @@ but never widen it.`,
 			if req.Mount == "" || req.Mount == "host-fs" {
 				req.MountSource = root
 			}
+			// A host `claude /login` replaces the credential file, decoupling a published
+			// hard link and leaving workspaces with the pre-login token. Repair it here so
+			// the common case just works; this only ever refreshes an EXISTING publication.
+			if repaired, rerr := RepairCredentialPublication("", ""); rerr == nil && repaired {
+				fmt.Fprintln(cmd.ErrOrStderr(), "re-published the host credential (it had been replaced since the last publish)")
+			}
 			if err := applySandboxConfig(cmd, &req, root, sandboxConfigOptions{
 				Path: configPath, Disabled: noConfig, MountFlags: mountFlags,
 				EgressDomains: egressDomain, Caches: caches,

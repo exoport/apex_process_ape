@@ -426,8 +426,28 @@ Kata's virtiofsd does the I/O as root. Published directories are `0751` —
 traverse-only — because a command running as you creates files with *your* group,
 which the daemon's user is not in; traversal exposes a path, not a secret.
 
-If the host ever replaces the credential file instead of editing it (write + rename),
-the link decouples. `status` reports it `STALE`; re-running `publish` repairs it.
+### Logging in again
+
+**A host `claude /login` replaces the credential file** (verified: the inode changes and
+the link count drops to 1), so a published hard link is left pointing at the
+**pre-login** credential and workspaces would keep using a dead token. Two things
+handle it:
+
+- `ape sandbox up` **repairs an existing publication automatically** before creating a
+  workspace, and says so. It never *creates* a publication — no publication means no
+  grant.
+- `ape sandbox credentials status` reports `STALE` with the reason, and `publish`
+  repairs it on demand.
+
+Workspaces that are already running keep the credential composed into them until
+`down`; restart them to pick up a new one.
+
+**Logging in from INSIDE a workspace does not work** with the link mode, and cannot: the
+credential is a single-file bind mount, so the write + rename a login performs fails
+with `Resource busy` (an in-place write would work, but that is not what the login
+does). Log in on the host and let `up` re-publish. If you need a session a workspace can
+re-authenticate on its own, publish with `--copy` — then the workspace has its own file
+to replace, at the cost of diverging from the host.
 
 **The credential MODE is node configuration, never a request field** — which host
 identity a workspace may receive is an operator grant, not a caller's ask. The default

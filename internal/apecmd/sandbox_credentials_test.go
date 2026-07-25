@@ -115,3 +115,80 @@ func TestCredentialRootPrecedence(t *testing.T) {
 	t.Setenv("APE_CREDENTIAL_ROOT", "")
 	assert.Equal(t, DefaultCredentialRoot, credentialRoot(""))
 }
+
+// TestStaleLinkIsReportedAsStaleNotAsACopy pins the diagnostic a real `claude /login`
+// exposed: the login REPLACES the credential file, so the published link keeps the old
+// inode — which by stat alone (one link, different inode) is indistinguishable from a
+// deliberate copy. Reporting "copy" there gave the user no reason to re-publish while
+// their workspaces silently held the pre-login token.
+func TestStaleLinkIsReportedAsStaleNotAsACopy(t *testing.T) {
+	src, dest := credFixture(t)
+	_, err := publishCredential(src, dest, false)
+	require.NoError(t, err)
+	require.True(t, credentialStatus(src, dest).Live)
+
+	// Replace the source the way a login does: write a new file, rename over it.
+	tmp := src + ".new"
+	require.NoError(t, os.WriteFile(tmp, []byte(`{"access_token":"post-login"}`), 0o600))
+	require.NoError(t, os.Rename(tmp, src))
+
+	st := credentialStatus(src, dest)
+	require.True(t, st.Present)
+	assert.False(t, st.Live)
+	assert.Equal(t, credentialModeLink, st.Mode, "a decoupled link must not be reported as a copy")
+	assert.Contains(t, st.summary(), "STALE")
+	assert.Contains(t, st.summary(), "old credential")
+}
+
+func TestRepairRelinksAStalePublicationButNeverCreatesOne(t *testing.T) {
+	src, dest := credFixture(t)
+	root := filepath.Dir(filepath.Dir(filepath.Dir(dest))) // <root>/<user>/.claude/file
+	t.Setenv("APE_CREDENTIAL_ROOT", root)
+	t.Setenv("USER", filepath.Base(filepath.Dir(filepath.Dir(dest))))
+
+	// Nothing published yet: repair must NOT invent a grant.
+	repaired, err := RepairCredentialPublication("", src)
+	require.NoError(t, err)
+	assert.False(t, repaired)
+	assert.NoFileExists(t, dest)
+
+	// Published and live → nothing to do.
+	_, err = publishCredential(src, dest, false)
+	require.NoError(t, err)
+	repaired, err = RepairCredentialPublication("", src)
+	require.NoError(t, err)
+	assert.False(t, repaired)
+
+	// Replaced source → repaired back to live.
+	tmp := src + ".new"
+	require.NoError(t, os.WriteFile(tmp, []byte(`{"access_token":"post-login"}`), 0o600))
+	require.NoError(t, os.Rename(tmp, src))
+	repaired, err = RepairCredentialPublication("", src)
+	require.NoError(t, err)
+	assert.True(t, repaired)
+	assert.True(t, credentialStatus(src, dest).Live)
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "post-login", "the repaired link must carry the NEW credential")
+}
+
+func TestRepairLeavesACopyPublicationAlone(t *testing.T) {
+	// --copy is a deliberate choice for isolation; silently re-linking would undo it.
+	src, dest := credFixture(t)
+	root := filepath.Dir(filepath.Dir(filepath.Dir(dest)))
+	t.Setenv("APE_CREDENTIAL_ROOT", root)
+	t.Setenv("USER", filepath.Base(filepath.Dir(filepath.Dir(dest))))
+
+	_, err := publishCredential(src, dest, true)
+	require.NoError(t, err)
+	tmp := src + ".new"
+	require.NoError(t, os.WriteFile(tmp, []byte(`{"access_token":"post-login"}`), 0o600))
+	require.NoError(t, os.Rename(tmp, src))
+
+	repaired, err := RepairCredentialPublication("", src)
+	require.NoError(t, err)
+	assert.False(t, repaired)
+	content, err := os.ReadFile(dest)
+	require.NoError(t, err)
+	assert.NotContains(t, string(content), "post-login", "a copy stays as the user left it")
+}

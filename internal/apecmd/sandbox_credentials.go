@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -57,6 +58,15 @@ const (
 	credentialModeLink = "link"
 	credentialModeCopy = "copy"
 )
+
+// credentialMarkerName records HOW the credential was published, next to it.
+//
+// It exists because a STALE LINK and a real COPY are indistinguishable by stat alone:
+// once the host replaces its credential file, the published inode has one link and no
+// longer matches the source — exactly like a copy. Without this marker `status` reports
+// "copy" for a decoupled link and gives the user no reason to re-publish. Measured
+// against a real `claude /login` (2026-07-25), which DOES replace the file.
+const credentialMarkerName = ".ape-credential-publish.json"
 
 // credentialDirMode is traverse-only for others: the daemon must reach the path, but
 // only the owner may list it, and the credential file itself stays 0600.
@@ -269,12 +279,83 @@ func publishCredential(src, dest string, copyMode bool) (string, error) {
 		if err := copyFile(src, dest); err != nil {
 			return "", err
 		}
+		writeCredentialMarker(dest, credentialModeCopy, src)
 		return fmt.Sprintf("published a COPY of %s → %s", src, dest), nil
 	}
 	if err := os.Link(src, dest); err != nil {
 		return "", fmt.Errorf("hard link %s → %s: %w (different filesystems? use --copy)", src, dest, err)
 	}
+	writeCredentialMarker(dest, credentialModeLink, src)
 	return fmt.Sprintf("published %s → %s (hard link: one live credential, shared with workspaces)", src, dest), nil
+}
+
+// credentialMarker is the recorded publication.
+type credentialMarker struct {
+	Mode   string `json:"mode"`
+	Source string `json:"source"`
+}
+
+// markerPath returns the marker beside a published credential.
+func markerPath(dest string) string { return filepath.Join(filepath.Dir(dest), credentialMarkerName) }
+
+// writeCredentialMarker records the publication mode. Best-effort: losing it degrades
+// `status` to "cannot tell link from copy", never the credential itself.
+func writeCredentialMarker(dest, mode, source string) {
+	data, err := json.Marshal(credentialMarker{Mode: mode, Source: source})
+	if err == nil {
+		_ = os.WriteFile(markerPath(dest), data, 0o600)
+	}
+}
+
+// readCredentialMarker returns the recorded publication, if any.
+func readCredentialMarker(dest string) (credentialMarker, bool) {
+	data, err := os.ReadFile(markerPath(dest))
+	if err != nil {
+		return credentialMarker{}, false
+	}
+	var m credentialMarker
+	if err := json.Unmarshal(data, &m); err != nil || m.Mode == "" {
+		return credentialMarker{}, false
+	}
+	return m, true
+}
+
+// RepairCredentialPublication re-links an EXISTING publication whose link decoupled,
+// and reports whether it did anything.
+//
+// This runs from `ape sandbox up` because a host `claude /login` REPLACES the
+// credential file (verified), which silently leaves every workspace holding the
+// pre-login token. Requiring a manual re-publish after each login would make the
+// feature quietly wrong most of the time.
+//
+// It deliberately never CREATES a publication — no publication means no grant, and
+// `up` must not invent one. It also leaves a `--copy` publication alone: the user chose
+// isolation, and silently re-linking would undo that choice.
+func RepairCredentialPublication(rootFlag, sourceFlag string) (repaired bool, err error) {
+	dest := credentialDest(rootFlag)
+	if _, statErr := os.Stat(dest); statErr != nil {
+		return false, nil // nothing published → nothing to repair
+	}
+	marker, ok := readCredentialMarker(dest)
+	if !ok || marker.Mode != credentialModeLink {
+		return false, nil // a copy (or unknown provenance) is left as the user left it
+	}
+	src, serr := resolveCredentialSource(sourceFlag)
+	if serr != nil {
+		return false, serr
+	}
+	si, serr := os.Stat(src)
+	di, derr := os.Stat(dest)
+	if serr != nil || derr != nil {
+		return false, nil
+	}
+	if os.SameFile(si, di) {
+		return false, nil // still live
+	}
+	if _, err := publishCredential(src, dest, false); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // copyFile copies src to dest with 0600, so a published copy is no more readable
@@ -315,8 +396,9 @@ func (s CredentialStatus) summary() string {
 	case s.Mode == credentialModeLink && s.Live:
 		return fmt.Sprintf("published as a live hard link: %s ↔ %s", s.Published, s.Source)
 	case s.Mode == credentialModeLink:
-		return fmt.Sprintf("published link is STALE (%s no longer shares an inode with %s): re-run "+
-			"'ape sandbox credentials publish'", s.Published, s.Source)
+		return fmt.Sprintf("published link is STALE — %s. Workspaces would get the old credential; "+
+			"re-run 'ape sandbox credentials publish' (or just 'ape sandbox up', which repairs it)",
+			s.Detail)
 	default:
 		return fmt.Sprintf("published as a copy: %s (%s)", s.Published, s.Detail)
 	}
@@ -336,21 +418,36 @@ func credentialStatus(sourceFlag, dest string) CredentialStatus {
 		return st
 	}
 	st.Present = true
-	// A hard link is detectable without reading either file: same device + inode.
+	marker, haveMarker := readCredentialMarker(dest)
+	if haveMarker {
+		st.Mode = marker.Mode
+	}
 	if src != "" {
 		si, serr := os.Stat(src)
+		// A LIVE link is provable without the marker: same device + inode.
 		if serr == nil && os.SameFile(si, di) {
 			st.Mode, st.Live = credentialModeLink, true
 			return st
 		}
-		if serr == nil && sameInodeCount(di) > 1 {
+		// Not the same file. Whether that is a decoupled link or a deliberate copy is
+		// NOT decidable from stat — both have one link and a different inode — so the
+		// recorded mode is what distinguishes them.
+		if st.Mode == credentialModeLink {
+			st.Detail = "the host credential was replaced (a login does this), so this link points at the OLD one"
+			return st
+		}
+		if !haveMarker && sameInodeCount(di) > 1 {
 			st.Mode = credentialModeLink
 			st.Detail = "link no longer shares an inode with the source"
 			return st
 		}
 	}
-	st.Mode = credentialModeCopy
-	st.Detail = fmt.Sprintf("%d bytes, modified %s", di.Size(), di.ModTime().Format("2006-01-02 15:04"))
+	if st.Mode == "" {
+		st.Mode = credentialModeCopy
+	}
+	if st.Detail == "" {
+		st.Detail = fmt.Sprintf("%d bytes, modified %s", di.Size(), di.ModTime().Format("2006-01-02 15:04"))
+	}
 	return st
 }
 

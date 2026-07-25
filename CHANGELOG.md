@@ -84,8 +84,14 @@
   on the host, and your file's permissions never change (`0600`) because the daemon
   only `stat`s it while Kata's virtiofsd does the I/O as root. `--copy` isolates the
   workspace instead but diverges once either side refreshes (OAuth refresh tokens
-  rotate); `status` reports a decoupled link as STALE and `revoke` takes access back.
-  The credential mode is node configuration, never a request field.
+  rotate); `revoke` takes access back. The credential mode is node configuration, never
+  a request field. Because a host `claude /login` **replaces** the credential file
+  (verified — the inode changes), which would leave a published link pointing at the
+  pre-login token, `ape sandbox up` repairs an existing publication automatically and
+  `status` reports a decoupled one as STALE with the reason. Logging in from inside a
+  workspace is not supported in link mode: the credential is a single-file bind mount,
+  so the login's write+rename fails with `Resource busy` — log in on the host, or
+  publish `--copy` to give the workspace its own file.
 - **fix(sandbox): the project is no longer mounted twice** — with PLAN-20's per-repo
   mounts at `/workspace/<name>`, both driver paths were still also applying the legacy
   single-project bind at bare `/workspace`, so the main repo appeared twice and its
