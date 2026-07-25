@@ -53,6 +53,23 @@
   keeping the rootfs, unlike `freeze`, and survive a reboot), and aped
   reconciles its registry with containerd at startup so a workspace destroyed
   out-of-band stops haunting `ape sandbox ls`. An idle reaper / TTL is still open.
+- **feat: workspaces can use the host's Claude session (`ape sandbox credentials`)** —
+  `aped-front` runs as its own service user with `ProtectHome=yes`, so it cannot read
+  `~/.claude`, and widening a home for a daemon (or trusting a caller-supplied
+  credential path, which would let it bind any root-readable file into its own
+  workspace) are both worse than the problem. Instead the **client** publishes —
+  running as you — into a directory the daemon may read, and `aped front
+  --credentials oauth --host-home <root>/<user>` composes it. The default is a **hard
+  link**: the same inode, so a token refresh inside a workspace is immediately valid
+  on the host, and your file's permissions never change (`0600`) because the daemon
+  only `stat`s it while Kata's virtiofsd does the I/O as root. `--copy` isolates the
+  workspace instead but diverges once either side refreshes (OAuth refresh tokens
+  rotate); `status` reports a decoupled link as STALE and `revoke` takes access back.
+  The credential mode is node configuration, never a request field.
+- **fix(sandbox): the project is no longer mounted twice** — with PLAN-20's per-repo
+  mounts at `/workspace/<name>`, both driver paths were still also applying the legacy
+  single-project bind at bare `/workspace`, so the main repo appeared twice and its
+  files sat loose in the root its siblings live under.
 - **fix(sandbox/aped): six defects found by live-validating egress on a Tier-2 host**
   — the deploy script wrote ExecStart drop-ins using flags the installed binary
   lacked (now capability-probed); the netns helper needed the `mnt` namespace for

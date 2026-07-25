@@ -394,6 +394,45 @@ unit — delete the file to revert. And `aped-netd.service` sets `MountFlags=sha
 because `ip netns add` must be visible to containerd; that is functional, not
 hardening slack.
 
+## Giving workspaces your Claude session
+
+A workspace can use the host's Claude OAuth credential, but not by reading your home:
+`aped-front` runs as its own service user with `ProtectHome=yes`, and a `0750` home is
+not traversable by a service user even when a bind exposes it. Widening your home for
+a daemon is the wrong trade, and letting a caller name the credential path would let
+it bind *any* root-readable file into its own workspace as `.credentials.json`.
+
+So the **client publishes** — running as you, with your permissions — into a directory
+the daemon may read, and the node is pointed at it:
+
+```bash
+ape sandbox credentials publish     # hard link (default): one live credential
+ape sandbox credentials status      # present? still live?
+ape sandbox credentials revoke
+```
+
+```
+aped front … --host-home /srv/ape-credentials/<user> --credentials oauth
+```
+
+| Mode | What the workspace gets | The catch |
+| --- | --- | --- |
+| `publish` (hard link) | the SAME inode as your credential, so a refresh on either side is immediately valid on the other | the workspace shares your live Anthropic session |
+| `publish --copy` | an independent copy | the two DIVERGE the first time either side refreshes — OAuth refresh tokens rotate, so the loser holds an invalid token |
+
+The link works because `/home` and `/srv` are normally one filesystem, and your file's
+permissions never change (still `0600`): the daemon only `stat`s the path, while
+Kata's virtiofsd does the I/O as root. Published directories are `0751` —
+traverse-only — because a command running as you creates files with *your* group,
+which the daemon's user is not in; traversal exposes a path, not a secret.
+
+If the host ever replaces the credential file instead of editing it (write + rename),
+the link decouples. `status` reports it `STALE`; re-running `publish` repairs it.
+
+**The credential MODE is node configuration, never a request field** — which host
+identity a workspace may receive is an operator grant, not a caller's ask. The default
+is `none`.
+
 ## The framework mount + durable tool caches
 
 The `ape-sandbox` image is public and framework-free, so the framework arrives as a
