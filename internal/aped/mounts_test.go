@@ -274,3 +274,55 @@ func TestPolicyFrameworkMountMustBeReadOnly(t *testing.T) {
 	rc.Mounts[0].ReadOnly = false
 	require.ErrorIs(t, p.CheckCreate(rc, 0), workspace.ErrPolicyDenied)
 }
+
+// ---- durable tool caches (PLAN-22 D4) --------------------------------------
+
+func TestResolveCachesMountsAndSetsEnv(t *testing.T) {
+	cacheRoot := t.TempDir()
+	r := NewResolver(ResolverConfig{StateDir: t.TempDir(), CacheRoot: cacheRoot})
+	r.compose = func(sandbox.ComposeOptions) (*sandbox.Composition, error) {
+		return &sandbox.Composition{StagingDir: t.TempDir(), GuestHome: sandbox.DefaultGuestHome}, nil
+	}
+
+	spec, err := r.Resolve(context.Background(), workspace.CreateRequest{
+		Name: "dev", MountSource: t.TempDir(), Caches: []string{"go", "asdf"},
+	})
+	require.NoError(t, err)
+
+	goCache, ok := mountByDest(spec.Mounts, "/cache/go")
+	require.True(t, ok)
+	assert.Equal(t, filepath.Join(cacheRoot, "go"), goCache.Source)
+	assert.False(t, goCache.ReadOnly, "a cache must be writable to be a cache")
+	assert.DirExists(t, goCache.Source, "the cache dir is created on demand")
+	_, ok = mountByDest(spec.Mounts, "/cache/asdf")
+	assert.True(t, ok)
+
+	// The env comes from aped's table, not the request.
+	assert.Contains(t, spec.Env, "GOPATH=/cache/go")
+	assert.Contains(t, spec.Env, "ASDF_DATA_DIR=/cache/asdf")
+}
+
+func TestResolveCachesIgnoredWithoutCacheRoot(t *testing.T) {
+	r := NewResolver(ResolverConfig{StateDir: t.TempDir()})
+	r.compose = func(sandbox.ComposeOptions) (*sandbox.Composition, error) {
+		return &sandbox.Composition{StagingDir: t.TempDir(), GuestHome: sandbox.DefaultGuestHome}, nil
+	}
+	spec, err := r.Resolve(context.Background(), workspace.CreateRequest{
+		Name: "dev", MountSource: t.TempDir(), Caches: []string{"go"},
+	})
+	require.NoError(t, err, "a node without caching must not fail the create")
+	_, ok := mountByDest(spec.Mounts, "/cache/go")
+	assert.False(t, ok)
+	assert.Empty(t, spec.Env)
+}
+
+func TestResolveCachesRejectsUnknownName(t *testing.T) {
+	r := NewResolver(ResolverConfig{StateDir: t.TempDir(), CacheRoot: t.TempDir()})
+	r.compose = func(sandbox.ComposeOptions) (*sandbox.Composition, error) {
+		return &sandbox.Composition{StagingDir: t.TempDir(), GuestHome: sandbox.DefaultGuestHome}, nil
+	}
+	_, err := r.Resolve(context.Background(), workspace.CreateRequest{
+		Name: "dev", MountSource: t.TempDir(), Caches: []string{"../../etc"},
+	})
+	require.ErrorIs(t, err, workspace.ErrValidation)
+}

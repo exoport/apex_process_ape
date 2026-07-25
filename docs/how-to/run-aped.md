@@ -321,8 +321,95 @@ so `attach` reports `UNSUPPORTED` there and `exec` degrades to exit-status-only.
 The bridge is Tier-1-proven end-to-end with a fake process; the containerd PTY is
 live-validated on the Tier-2 host.
 
+## Workspace egress (allowlisted, deny-by-default)
+
+Workspaces are networkless until a node opts in. Egress is deliberately split
+across three actors so the hardened executor never touches the network:
+
+| Actor | Unit | What it does |
+| --- | --- | --- |
+| bridge + host wall | `aped-netbr.service` | creates `apebr0` (`169.254.42.1/24`) and loads `table inet ape_egress`: from the bridge, only the proxy port range is reachable, and nothing is forwarded |
+| netns helper | `aped-netd.service` | per workspace, one netns + veth enslaved to the bridge with **bridge port isolation** (so workspaces cannot reach each other), `CAP_NET_ADMIN` + `CAP_SYS_ADMIN`, root-only socket, two verbs |
+| CONNECT proxy | in `aped-front` | one deny-by-default proxy per workspace, never decrypting TLS, every decision audited to `egress-audit.jsonl` **and** `ape.audit.<node>.egress` |
+
+The executor's only involvement is passing the netns **path** into the OCI spec.
+
+Turn it on:
+
+```bash
+# 1. host config: bridge, nft wall, modules, mount roots, drop-ins (idempotent)
+sudo bash deploy/dev-host.sh prereqs
+
+# 2. policy: enable egress and set the outer allow-list
+#    /etc/aped/policy.yaml
+#    egress:
+#      enabled: true
+#      allowed_domains: ["github.com", "*.githubusercontent.com", "proxy.golang.org"]
+#      max_domains: 32
+
+# 3. install the helper + restart (needs ./ape and ./aped built first)
+make build && sudo bash deploy/dev-host.sh redeploy
+```
+
+Then a project **requests** domains, and aped intersects the request with policy —
+a project can narrow the node's list, never widen it:
+
+```yaml
+# .apesandbox.yaml
+egress:
+  authorized_domains: ["github.com", "proxy.golang.org"]
+```
+
+```bash
+ape sandbox up dev --egress-domain github.com   # or ad hoc from the CLI
+```
+
+**Where enforcement actually lives** (stated plainly, because one layer is weaker
+than it looks): the host nft input chain and bridge port isolation are the
+load-bearing walls, plus the proxy's own domain allowlist — the only layer that can
+reason about *domains*. The per-netns ruleset the helper also installs is defence in
+depth only: Kata's default `internetworking_model=tcfilter` redirects packets
+between the veth and the guest tap at the tc layer, which bypasses netfilter inside
+that namespace.
+
+**Two deliberate posture notes.** The front needs `IPAddressAllow=any` to dial
+upstream (an allowlist is by hostname, which a cgroup IP filter cannot express), so
+`dev-host.sh` installs that as a drop-in rather than baking it into the shipped
+unit — delete the file to revert. And `aped-netd.service` sets `MountFlags=shared`
+because `ip netns add` must be visible to containerd; that is functional, not
+hardening slack.
+
+## The framework mount + durable tool caches
+
+The `ape-sandbox` image is public and framework-free, so the framework arrives as a
+read-only mount at `/opt/apex-framework` (PLAN-20) and toolchain state lives in
+durable host caches (PLAN-22):
+
+```bash
+# host-side, with YOUR git credentials — aped never fetches
+ape sandbox framework materialize v0.3.1
+ape sandbox framework ls
+
+ape sandbox up dev --framework-ref v0.3.1
+ape sandbox setup dev            # asdf install + bingo get, into /cache
+```
+
+Point the daemon at both roots (`dev-host.sh` writes this drop-in):
+
+```
+aped front … --framework-root /srv/apex-framework --framework-ref v0.3.1 \
+             --cache-root /srv/ape-caches
+```
+
+A ref that is not materialized fails `up` with the exact command to run. The mount
+is always read-only and always present when the node serves a framework — a project
+cannot redirect, remove, or make it writable. See
+[.apesandbox.yaml](../reference/apesandbox-yaml.md).
+
 ## See also
 
+- [.apesandbox.yaml](../reference/apesandbox-yaml.md) — the per-project descriptor
+  (repos, mounts, egress, toolchain) and the request-vs-grant boundary.
 - [NATS subjects & event payloads](../reference/events.md) — the frozen `ape.vmm`
   contract.
 - [How to run ape as a service](run-ape-as-a-service.md) — the PLAN-14 job

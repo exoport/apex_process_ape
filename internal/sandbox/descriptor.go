@@ -111,6 +111,11 @@ type DescriptorToolchain struct {
 	// Tools inlines "plugin version" pairs when a project prefers not to commit a
 	// separate .tool-versions.
 	Tools []string `yaml:"tools,omitempty"`
+	// Caches names the durable host caches this project wants mounted (see
+	// toolchain.go). Empty with a toolchain declared → DefaultToolCaches. The names
+	// are validated against a closed table; the guest paths and env they imply are
+	// resolved server-side.
+	Caches []string `yaml:"caches,omitempty"`
 }
 
 // Path returns the file the descriptor was loaded from ("" when synthesized).
@@ -210,6 +215,12 @@ func (d *Descriptor) Validate() error {
 			if err := validateGuestDest(m.Dest); err != nil {
 				return fmt.Errorf("mounts[%d]: %w", i, err)
 			}
+		}
+	}
+
+	if d.Toolchain != nil {
+		if _, err := NormalizeToolCaches(d.Toolchain.Caches); err != nil {
+			return fmt.Errorf("toolchain.caches: %w", err)
 		}
 	}
 

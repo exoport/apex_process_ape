@@ -1,5 +1,68 @@
 # CHANGELOG
 
+## Unreleased
+
+- **feat: `ape sandbox` workspaces get allowlisted, audited network egress
+  (PLAN-21 D1–D4)** — workspaces were `--network none` because aped's root
+  executor cannot create container networking (empty capability set, AF_UNIX
+  only, `RestrictNamespaces`, `@mount` denied) and widening it is forbidden by the
+  ape/aped split's charter. Egress now comes from two actors *outside* the
+  executor, which only ever handles a namespace **path**: a new narrow privileged
+  helper (`aped netd` / `aped-netd.service` — two verbs over a root-only AF_UNIX
+  socket, `CAP_NET_ADMIN` + `CAP_SYS_ADMIN`, no containerd access, no policy)
+  wires one netns + veth per workspace onto a host bridge with **bridge port
+  isolation**, and the de-privileged `aped-front` runs one **deny-by-default
+  CONNECT proxy per workspace** (never decrypting TLS) whose every decision is
+  audited to `egress-audit.jsonl` and `ape.audit.<node>.egress`. `policy.yaml`
+  gains `egress:` (`enabled`, `allowed_domains`, `max_domains`); a project's
+  request is intersected with it front-side and **re-checked by the executor**, so
+  a project can narrow what a node permits and never widen it. Fail-safe by
+  construction: the resolved spec stays networkless and only the helper-created
+  netns grants a network, so a failed wire-up yields a networkless workspace
+  rather than an open bridge. New `aped-netbr.service` (bridge + host nftables
+  wall) and `deploy/dev-host.sh` (one idempotent root script for the host config)
+  ship with it. Live Tier-2 validation is still open.
+- **feat: a general mount model + committable `.apesandbox.yaml` (PLAN-20)** — the
+  single host-fs project mount is replaced by a uniform, policy-checked list.
+  A project declares its **repos** (each mounted at `/workspace/<name>`, one
+  flagged `main`, which sets the working directory), extra **mounts**, its
+  **egress** request, and its **toolchain** in one committed file, with repeatable
+  `--mount-path` flags merging on top (CLI wins by destination). Everything there
+  is a *request*: aped re-canonicalizes every source against `mount_roots`, adds
+  read-only-only roots (`mount_roots_ro`) and a `limits.max_mounts` ceiling, and
+  **refuses reserved destinations** (`/workspace`, `/opt/apex-framework`,
+  `/sandbox/home`) even from a hand-crafted wire request — so a committed file can
+  never redirect, shadow, or make-writable a system mount. See
+  [docs/reference/apesandbox-yaml.md](docs/reference/apesandbox-yaml.md).
+- **feat: the APEX framework is a read-only runtime mount, not a baked image layer
+  (PLAN-20 D5)** — the `ape-sandbox` image becomes public and framework-free, so
+  no node (or laptop) needs a registry credential. `ape sandbox framework
+  materialize <ref>` copies one pinned ref out of your local checkout, with your
+  own git credentials, into the node's framework root; aped mounts
+  `<root>/<ref>` read-only at `/opt/apex-framework` and **errors with the exact
+  command** when a ref is absent — it never fetches. Inside a workspace,
+  `ape framework setup --no-fetch` installs from the mount.
+- **feat: declared toolchains + durable caches + `stop`/`start` (PLAN-22)** —
+  `.apesandbox.yaml`'s `toolchain:` section references the project's native
+  `.tool-versions` / `.bingo` files, and `ape sandbox setup <name>` runs an
+  idempotent `asdf install` + `bingo get` inside the workspace (`--dry-run` prints
+  the script). Toolchain state lives in **durable host caches** mounted at
+  `/cache/<tool>`, with the environment that points each tool at its cache derived
+  server-side from a closed table — a caller picks a cache *name*, never a
+  `GOPATH`. `ape sandbox stop`/`start` are now exposed (they free guest RAM while
+  keeping the rootfs, unlike `freeze`, and survive a reboot), and aped
+  reconciles its registry with containerd at startup so a workspace destroyed
+  out-of-band stops haunting `ape sandbox ls`. An idle reaper / TTL is still open.
+- **fix(sandbox): `Proxy.Close` now closes its listener deterministically** —
+  `http.Server.Close` only closes listeners its `Serve` goroutine has already
+  registered, so stopping a just-started proxy could return while the socket was
+  still accepting. The per-workspace egress supervisor stops a proxy and rebinds
+  its port immediately, which surfaced it.
+- **fix(framework): git calls carry a scoped `-c safe.directory=<repo>`** — inside
+  a workspace the framework repo is a read-only host mount owned by the host user
+  while the guest runs as root, and git refuses "dubiously owned" repos, which
+  would have broken `ape framework setup` against the mount.
+
 ## v0.0.48 (2026-07-24)
 
 - **feat: configurable reasoning `effort` (default `xhigh`)** — `ape pipeline`,

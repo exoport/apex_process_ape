@@ -29,6 +29,7 @@ func newFrontCmd() *cobra.Command {
 		egressHigh  int
 		fwRoot      string
 		fwRef       string
+		cacheRoot   string
 	)
 	cmd := &cobra.Command{
 		Use:   "front",
@@ -67,6 +68,7 @@ injected into each VM as APE_NATS_URL alongside its minted per-VM .creds.`,
 				EgressPortHigh:    egressHigh,
 				FrameworkRoot:     fwRoot,
 				FrameworkRef:      fwRef,
+				CacheRoot:         cacheRoot,
 				Stderr:            os.Stderr,
 			})
 		},
@@ -87,5 +89,6 @@ injected into each VM as APE_NATS_URL alongside its minted per-VM .creds.`,
 	f.IntVar(&egressHigh, "egress-port-high", 0, "Highest proxy listen port")
 	f.StringVar(&fwRoot, "framework-root", "", "Host dir holding materialized APEX framework refs, one subdir per ref ('' → no framework mount)")
 	f.StringVar(&fwRef, "framework-ref", "", "Default framework ref to mount read-only at /opt/apex-framework")
+	f.StringVar(&cacheRoot, "cache-root", "", "Host dir holding durable tool caches (asdf/go/cargo/...); '' → no cache mounts")
 	return cmd
 }

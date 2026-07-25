@@ -101,6 +101,19 @@ func RunExecutor(ctx context.Context, cfg ExecutorRunConfig) error {
 	// here; NATS forwarding on ape.audit.<node>.> is done front-side (follow-up).
 	auditor := NewAuditor(auditW, nil, cfg.Node)
 
+	// Reconcile the registry with containerd before serving (PLAN-22 D5c): a
+	// workspace destroyed while aped was down must not keep showing up in `ls`.
+	// Best-effort by design — a reconciliation failure is worth reporting but must
+	// never stop the daemon from coming up.
+	if rec, ok := backend.(sandbox.Reconciler); ok {
+		if report, rerr := rec.Reconcile(ctx); rerr != nil {
+			fmt.Fprintf(stderr, "! reconcile: %v\n", rerr)
+		} else if len(report.Dropped) > 0 {
+			fmt.Fprintf(stderr, "  reconciled %d workspace(s): dropped %v (container gone)\n",
+				report.Checked, report.Dropped)
+		}
+	}
+
 	// The network helper is a separate privileged unit reached over its own
 	// AF_UNIX socket — the executor never programs the network itself (PLAN-21 D3).
 	var netnsProvider NetnsProvider

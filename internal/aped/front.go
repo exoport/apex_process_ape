@@ -46,6 +46,9 @@ type FrontConfig struct {
 	FrameworkRoot string
 	// FrameworkRef is the default framework ref mounted when a request names none.
 	FrameworkRef string
+	// CacheRoot is the host directory holding durable tool caches (PLAN-22 D4).
+	// Empty → cache requests are ignored and toolchain state stays in the rootfs.
+	CacheRoot string
 	// EgressPortLow/High bound the proxy listen ports. They MUST match the host
 	// nftables chain's accepted range (both come from deploy/dev-host.sh). 0 → the
 	// sandbox defaults.
@@ -144,6 +147,7 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 		Egress:        egressPlannerOrNil(egress),
 		FrameworkRoot: cfg.FrameworkRoot,
 		FrameworkRef:  cfg.FrameworkRef,
+		CacheRoot:     cfg.CacheRoot,
 	})
 	if cfg.FrameworkRoot != "" {
 		fmt.Fprintf(stderr, "  framework: %s (default ref %q) mounted read-only at %s\n",

@@ -1,7 +1,7 @@
 ---
 plan_id: PLAN-22
 created_at: 2026-07-23
-status: proposed
+status: in-progress
 tags:
   - sandbox
   - toolchain
@@ -172,16 +172,16 @@ busy nodes/laptops), or rebuild (`down`/`up`, cheap because state is durable).
 
 ## Deliverables
 
-- [ ] **D1 — Toolchain config resolution.** Read `.tool-versions` (+ `.bingo/`)
+- [x] **D1 — Toolchain config resolution.** DONE 2026-07-24 — the descriptor's `toolchain:` section (references `.tool-versions` / `.bingo` rather than duplicating versions). Read `.tool-versions` (+ `.bingo/`)
   from the main repo; surface it to the workspace.
-- [ ] **D2 — Base image.** Add asdf (Go) + bingo to the lean base (PLAN-20);
+- [x] **D2 — Base image.** DONE 2026-07-24 in the exoport/ape-sandbox tree (asdf + bingo + a bootstrap Go, no language runtimes). Publishing is the open step. Add asdf (Go) + bingo to the lean base (PLAN-20);
   keep it language-agnostic.
-- [ ] **D3 — Install step.** `ape sandbox setup` / entrypoint hook →
+- [x] **D3 — Install step.** DONE 2026-07-24 — `ape sandbox setup <name>` renders an idempotent script (`asdf install` + `bingo get`) and runs it in the guest; `--dry-run` prints it. `ape sandbox setup` / entrypoint hook →
   `asdf install` + `bingo get`; idempotent; offline when caches are warm.
-- [ ] **D4 — Durable state mounts.** Standard host-cache mount presets (asdf dir,
+- [x] **D4 — Durable state mounts.** DONE 2026-07-24 — a CLOSED cache table (asdf/go/cargo/npm/pub) mounted at `/cache/<name>` with the toolchain env derived SERVER-SIDE, so a caller picks a cache name and never a GOPATH. Caches live outside the guest home on purpose (`/sandbox/home` is a system mount). Standard host-cache mount presets (asdf dir,
   `~/go`, `~/.cargo`, …) via the PLAN-20 mount model; per-project `volume`
   option; docs on shared-vs-isolated.
-- [ ] **D5 — Lifecycle.** (a) **Expose** the existing `Stop`/`Start` as `ape
+- [~] **D5 — Lifecycle.** PARTIAL 2026-07-24: (a) `ape sandbox stop`/`start` exposed. (c) reconcile-on-startup drops registry rows whose container is gone (conservative: a non-not-found containerd error aborts rather than pruning on a bad read). (b) idle reaper / TTL NOT DONE — there is no workspace activity signal to reap on yet; auto-start of flagged keep-alive workspaces is also open. (a) **Expose** the existing `Stop`/`Start` as `ape
   sandbox stop`/`start` CLI verbs (backend/contract/client already done — CLI
   only). (b) **Idle reaper / TTL** — optional per-node policy: auto-`stop` after
   N idle, auto-`down` after M, per-workspace TTL (short default for
@@ -189,9 +189,9 @@ busy nodes/laptops), or rebuild (`down`/`up`, cheap because state is durable).
   reconciliation** — on aped startup, reconcile the registry to containerd
   reality (vanished task → `stopped`) and optionally auto-`start` flagged
   keep-alive workspaces. Keep `freeze`/`stop`/`down` semantics distinct + documented.
-- [ ] **D6 — Optional image variants.** Document building heavy-stack variants
+- [x] **D6 — Optional image variants.** Documented in the image README (`image:` override). Document building heavy-stack variants
   (e.g. Flutter) via `image:` for teams that want them pre-baked.
-- [ ] **D7 — Docs.** Devcontainer how-to; toolchain config reference; caching /
+- [~] **D7 — Docs.** PARTIAL — the descriptor reference + run-aped sections cover the toolchain/cache/lifecycle model; a dedicated devcontainer how-to is open. Devcontainer how-to; toolchain config reference; caching /
   offline / pre-warm workflow; lifecycle (freeze vs stop vs down).
 
 ## Non-goals

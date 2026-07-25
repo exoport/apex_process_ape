@@ -41,6 +41,11 @@ type CreateRequest struct {
 	// reserved destination, so a committed file can never redirect the framework,
 	// the composed home, or a repo.
 	Mounts []MountSpec `json:"mounts,omitempty"`
+	// Caches names the durable tool caches to mount (PLAN-22 D4): "go", "asdf", …
+	// The NAMES are the request; the host source, guest path, and the environment
+	// that points each toolchain at it are all resolved server-side from a closed
+	// table, so a caller can never redirect GOPATH or ASDF_DATA_DIR itself.
+	Caches []string `json:"caches,omitempty"`
 	// FrameworkRef selects which materialized APEX framework ref to mount read-only
 	// at /opt/apex-framework. It names a ref the NODE already has; aped resolves it
 	// under its own framework root and errors if absent — it never fetches, and the

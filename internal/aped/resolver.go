@@ -21,6 +21,11 @@ import (
 //nolint:gosec // G101 false positive: a bind-mount path, not a credential
 const guestCredsRel = ".config/ape/vm.creds"
 
+// cacheDirMode is the mode a durable tool cache dir is created with: group-writable
+// so the host operator (in the `ape` group) can pre-warm a cache the guest — which
+// writes as root through virtiofsd — also uses.
+const cacheDirMode = 0o775
+
 // Resolver turns a thin wire CreateRequest into a fully-resolved WorkspaceSpec,
 // de-privileged, in aped-front (PLAN-18 D1). It reuses the PLAN-16 pure layers
 // (Compose) and mints + injects a per-VM telemetry credential (D2/D6). Only the
@@ -38,6 +43,9 @@ type Resolver struct {
 	// serves no framework and the mount is simply absent.
 	frameworkRoot string
 	frameworkRef  string
+	// cacheRoot is the host directory holding the durable tool caches (PLAN-22 D4).
+	// Empty → this node offers no caching and a cache request is ignored.
+	cacheRoot string
 
 	// Injectable seams (default to the real implementations) so Resolve is
 	// unit-testable without touching a profile file or the compose filesystem.
@@ -74,6 +82,9 @@ type ResolverConfig struct {
 	FrameworkRoot string
 	// FrameworkRef is the default ref to mount when a request names none.
 	FrameworkRef string
+	// CacheRoot is the host directory holding durable tool caches, one subdir per
+	// cache (PLAN-22 D4). Empty disables cache mounts.
+	CacheRoot string
 	// LoadProfile is an optional server-side profile source (by name). When nil,
 	// the resolver builds a default profile from the request fields.
 	LoadProfile func(name string) (*sandbox.Profile, error)
@@ -95,6 +106,7 @@ func NewResolver(cfg ResolverConfig) *Resolver {
 		egress:        cfg.Egress,
 		frameworkRoot: cfg.FrameworkRoot,
 		frameworkRef:  cfg.FrameworkRef,
+		cacheRoot:     cfg.CacheRoot,
 		loadProfile:   cfg.LoadProfile,
 		compose:       sandbox.Compose,
 	}
@@ -221,7 +233,15 @@ func (r *Resolver) resolveMounts(spec *sandbox.WorkspaceSpec, req workspace.Crea
 		return fmt.Errorf("%w: a multi-repo workspace must flag exactly one repo main", workspace.ErrValidation)
 	}
 
-	// 3. User mounts — additive only. Reserved destinations are refused here as well
+	// 3. Durable tool caches (PLAN-22 D4). The request is a set of NAMES; the host
+	// source, guest path, and the env that points each toolchain at it come from
+	// aped's own table + cache root, so a caller cannot redirect GOPATH or
+	// ASDF_DATA_DIR at a path of its choosing.
+	if err := r.resolveCaches(spec, req.Caches); err != nil {
+		return err
+	}
+
+	// 4. User mounts — additive only. Reserved destinations are refused here as well
 	// as client-side, so a hand-crafted wire request cannot slip one through.
 	for _, m := range req.Mounts {
 		if err := sandbox.ValidateUserMountDest(m.Dest); err != nil {
@@ -231,6 +251,39 @@ func (r *Resolver) resolveMounts(spec *sandbox.WorkspaceSpec, req workspace.Crea
 			return fmt.Errorf("%w: mount source %q must be an absolute host path", workspace.ErrValidation, m.Source)
 		}
 		spec.Mounts = append(spec.Mounts, m)
+	}
+	return nil
+}
+
+// resolveCaches mounts the requested durable tool caches read-write and appends
+// the environment that points each toolchain at its cache.
+//
+// The caches are created on demand under the node's cache root: a node that offers
+// caching should not fail a create because nobody has run a Go build there yet.
+// A node with no cache root configured ignores the request — the workspace simply
+// keeps its state in the (ephemeral) rootfs, which is the pre-PLAN-22 behaviour.
+func (r *Resolver) resolveCaches(spec *sandbox.WorkspaceSpec, requested []string) error {
+	if len(requested) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(r.cacheRoot) == "" {
+		return nil
+	}
+	names, err := sandbox.NormalizeToolCaches(requested)
+	if err != nil {
+		return fmt.Errorf("%w: %w", workspace.ErrValidation, err)
+	}
+	for _, name := range names {
+		tc, err := sandbox.LookupToolCache(name)
+		if err != nil {
+			return fmt.Errorf("%w: %w", workspace.ErrValidation, err)
+		}
+		src := filepath.Join(r.cacheRoot, tc.SubDir)
+		if err := os.MkdirAll(src, cacheDirMode); err != nil {
+			return fmt.Errorf("aped: create tool cache %s: %w", src, err)
+		}
+		spec.Mounts = append(spec.Mounts, workspace.MountSpec{Source: src, Dest: tc.Dest, ReadOnly: false})
+		spec.Env = append(spec.Env, tc.Env...)
 	}
 	return nil
 }

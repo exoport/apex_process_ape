@@ -1,7 +1,7 @@
 ---
 plan_id: PLAN-21
 created_at: 2026-07-23
-status: proposed
+status: in-progress
 tags:
   - sandbox
   - aped
@@ -102,25 +102,35 @@ to "allow established + new → proxyIP:port, drop the rest."
 
 ## Deliverables
 
-- [ ] **D1 — Resolver + policy wiring (S).** Thread the requested
+- [x] **D1 — Resolver + policy wiring (S).** DONE 2026-07-24. Thread the requested
   `authorized_domains` through — from the profile **and** the project's
   `.apesandbox.yaml` `egress:` section (PLAN-20's descriptor) — set
   `WorkspaceSpec.HTTPSProxy`; add egress keys to `deploy/policy.yaml` (allow/deny
   defaults, per-profile domain caps). The `.apesandbox.yaml` domains are a
   **request**: aped intersects them with the policy's allowed set (a project can
   narrow, never widen, what policy permits).
-- [ ] **D2 — aped front runs the proxy (S).** Run `RunProxyDaemon`/`NewProxy`
+- [x] **D2 — aped front runs the proxy (S).** DONE 2026-07-24 (in-process
+  `EgressSupervisor`, per-workspace port from the nft-permitted range, audit to
+  both the JSONL trail and `ape.audit.<node>.egress`). Run `RunProxyDaemon`/`NewProxy`
   in-process in the de-privileged front, bound to the bridge IP, per-VM lifecycle
   (start at Create, stop at Destroy), audit to the per-VM NATS telemetry subject.
-- [ ] **D3 — NEW privileged netns/nft helper (L — the effort driver).** A narrow
+- [x] **D3 — NEW privileged netns/nft helper (L — the effort driver).** DONE
+  2026-07-24 as `internal/netd` + `aped netd` + `aped-netd.service`, plus
+  `aped-netbr.service` for the host bridge + host nft wall. Tier-1 tested
+  end-to-end with recorder binaries (socket, peer gate, allocation, command order). A narrow
   root unit (only `CAP_NET_ADMIN` + `AF_NETLINK`, `RestrictNamespaces` relaxed to
   net, `@mount` only for the netns bind) that, on a typed command from the
   executor over the AF_UNIX boundary, creates the per-VM netns + veth-to-bridge +
   route + nft "only reach the proxy" wall and returns the netns path. Teardown on
   Destroy.
-- [ ] **D4 — Resolver flip (S).** Stop defaulting egress-enabled profiles to
+- [x] **D4 — Resolver flip (S).** DONE 2026-07-24 — with a fail-SAFE twist: the
+  spec keeps `NetworkNone` and only the helper-created netns path grants a
+  network, so a failed wire-up leaves a workspace networkless instead of on an
+  open bridge. Stop defaulting egress-enabled profiles to
   `NetworkNone`; attach the netns path; flip `Networkless` off.
-- [ ] **D5 — Tier-2 live validation (M).** On a KVM+containerd+Kata host: allow +
+- [ ] **D5 — Tier-2 live validation (M).** NOT DONE — needs root on the Tier-2
+  host: `sudo bash deploy/dev-host.sh redeploy`, then allow + deny + audit rows
+  against a real workspace, and confirm the guest is *forced* through the proxy. On a KVM+containerd+Kata host: allow +
   deny + audit rows; confirm the guest is *forced* through the proxy (closes the
   "honest boundary" gap, `plan-16:138`).
 
@@ -145,3 +155,29 @@ interim only.
   fetch (`asdf`/`bingo`/registries); offline-after-warm via cached mounts.
 - **PLAN-20** (mounts) — orthogonal; the framework mount is deliberately network-free.
 - **PLAN-18** (`ape`/`aped` split) — the executor hardening this plan must respect.
+
+## Delivery notes (2026-07-24)
+
+Implemented D1–D4; D5 (live validation) is the remaining work and needs root.
+
+**Enforcement boundary, stated honestly.** The load-bearing walls are the HOST nft
+input chain (`table inet ape_egress`: from the bridge, only the proxy port range),
+bridge **port isolation** on each workspace veth (no workspace↔workspace traffic),
+and the proxy's own deny-by-default domain allowlist. The per-netns ruleset the
+helper installs is defence in depth only, because Kata's default
+`internetworking_model=tcfilter` redirects packets between veth and tap at the tc
+layer and bypasses netfilter inside that namespace. This closes the "honest
+boundary" gap the plan inherited from PLAN-16:138 by naming which layer enforces
+what, rather than implying the netns rules do the work.
+
+**Two posture changes a reviewer should see.** (1) `aped-front` needs
+`IPAddressAllow=any` to dial upstream — an allowlist is by hostname, which a cgroup
+IP filter cannot express — so it ships as a `dev-host.sh`-installed drop-in, not in
+the packaged unit. (2) `aped-netd.service` needs `MountFlags=shared` (so `ip netns
+add` is visible to containerd) and `CAP_SYS_ADMIN` (netns creation), which is wider
+than the executor but confined to one single-purpose unit with a root-only socket,
+two verbs, no containerd access and no policy.
+
+**Deferred, deliberately:** re-Ensure on `start` after a reboot (the netns lives in
+/run and the container spec references its path). The helper already supports it
+(`Reuse: true`); wiring it to the start verb belongs with PLAN-22's reconciliation.

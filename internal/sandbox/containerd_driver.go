@@ -53,3 +53,25 @@ type ProvisioningBackend interface {
 	// Close releases the containerd client connection.
 	Close() error
 }
+
+// Reconciler is implemented by a backend that can re-align its workspace registry
+// with the container runtime's actual state (PLAN-22 D5c). aped runs it once at
+// startup: containerd survives an aped restart, but a workspace destroyed
+// out-of-band would otherwise linger in `ape sandbox ls` forever.
+//
+// It is a SEPARATE interface, not a ProvisioningBackend method, because only the
+// containerd driver can implement it — the nerdctl shellDriver has no cheap,
+// reliable way to enumerate container existence, and forcing a stub on it would
+// invite a no-op that silently looks like reconciliation.
+type Reconciler interface {
+	Reconcile(ctx context.Context) (ReconcileReport, error)
+}
+
+// ReconcileReport is what one reconciliation pass did.
+type ReconcileReport struct {
+	// Checked is how many registry rows were examined.
+	Checked int
+	// Dropped names the workspaces whose container was gone, so their registry row
+	// was removed.
+	Dropped []string
+}

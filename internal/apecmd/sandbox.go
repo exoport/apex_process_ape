@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/exoport/apex_process_ape/internal/natsconn"
@@ -55,6 +56,9 @@ credential, and owns the workspace registry. ape never runs as root.
   ape sandbox ls             List provisioned workspaces
   ape sandbox inspect <name> Show a workspace's live state
   ape sandbox exec <name> -- <cmd>...   Run a command inside a workspace
+  ape sandbox setup <name>     Materialize the project's declared toolchain
+  ape sandbox stop <name>      Stop a workspace (free RAM, keep rootfs + state)
+  ape sandbox start <name>     Start a stopped workspace
   ape sandbox freeze <name>    Freeze a workspace (cgroup-freeze; RAM resident)
   ape sandbox unfreeze <name>  Unfreeze a frozen workspace
   ape sandbox suspend <name>   Suspend a workspace microVM — not yet on Kata
@@ -77,6 +81,9 @@ Linux host with KVM + containerd + Kata.`,
 		newSandboxAttachCmd(),
 		newSandboxSSHCmd(),
 		newSandboxExecCmd(),
+		newSandboxStopCmd(),
+		newSandboxStartCmd(),
+		newSandboxSetupCmd(),
 		newSandboxFreezeCmd(),
 		newSandboxUnfreezeCmd(),
 		newSandboxSuspendCmd(),
@@ -153,6 +160,7 @@ func newSandboxUpCmd() *cobra.Command {
 		noConfig     bool
 		frameworkRef string
 		egressDomain []string
+		caches       []string
 	)
 	cmd := &cobra.Command{
 		Use:   "up <name>",
@@ -190,7 +198,8 @@ but never widen it.`,
 				req.MountSource = root
 			}
 			if err := applySandboxConfig(cmd, &req, root, sandboxConfigOptions{
-				Path: configPath, Disabled: noConfig, MountFlags: mountFlags, EgressDomains: egressDomain,
+				Path: configPath, Disabled: noConfig, MountFlags: mountFlags,
+				EgressDomains: egressDomain, Caches: caches,
 			}); err != nil {
 				return err
 			}
@@ -220,6 +229,7 @@ but never widen it.`,
 	cmd.Flags().BoolVar(&noConfig, "no-sandbox-config", false, "Ignore any .apesandbox.yaml in the project")
 	cmd.Flags().StringVar(&frameworkRef, "framework-ref", "", "APEX framework ref to mount read-only (must be materialized on the node)")
 	cmd.Flags().StringArrayVar(&egressDomain, "egress-domain", nil, "Request an egress domain (repeatable; still gated by the node's policy)")
+	cmd.Flags().StringSliceVar(&caches, "cache", nil, "Durable tool caches to mount: "+strings.Join(sandbox.ToolCacheNames(), "|")+" (adds to the descriptor's toolchain.caches)")
 	return cmd
 }
 
@@ -229,6 +239,7 @@ type sandboxConfigOptions struct {
 	Disabled      bool
 	MountFlags    []string
 	EgressDomains []string
+	Caches        []string
 }
 
 // applySandboxConfig folds the project descriptor and the CLI mount/egress flags
@@ -271,6 +282,9 @@ func applySandboxConfig(cmd *cobra.Command, req *workspace.CreateRequest, projec
 		req.Repos = resolved.Repos
 		fileMounts = resolved.Mounts
 		req.Egress = resolved.Egress
+		// The toolchain section decides which durable caches the workspace asks for;
+		// naming none but declaring a toolchain takes the defaults.
+		req.Caches = desc.ToolchainCaches()
 		// A descriptor with repos supersedes --cwd as the project source: the main repo
 		// is the project, and aped derives ProjectRoot from it.
 		for i := range resolved.Repos {
@@ -295,6 +309,14 @@ func applySandboxConfig(cmd *cobra.Command, req *workspace.CreateRequest, projec
 		return err
 	}
 	req.Mounts = merged
+
+	if len(opts.Caches) > 0 {
+		caches, err := sandbox.NormalizeToolCaches(append(req.Caches, opts.Caches...))
+		if err != nil {
+			return err
+		}
+		req.Caches = caches
+	}
 
 	if len(opts.EgressDomains) > 0 {
 		domains := opts.EgressDomains

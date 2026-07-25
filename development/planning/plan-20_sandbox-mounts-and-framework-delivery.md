@@ -1,7 +1,7 @@
 ---
 plan_id: PLAN-20
 created_at: 2026-07-23
-status: proposed
+status: in-progress
 tags:
   - sandbox
   - aped
@@ -254,31 +254,31 @@ because it is not under an allowed root. Additions:
 
 ## Deliverables
 
-- [ ] **D1 — Contract.** `internal/workspace`: replace the single
+- [x] **D1 — Contract.** DONE 2026-07-24 — `workspace.MountSpec`/`RepoMount` + `CreateRequest.{Repos,Mounts,Caches,FrameworkRef}`; `MountSource` kept so a pre-PLAN-20 client is unchanged. `internal/workspace`: replace the single
   `Mount`/`MountSource` with `Mounts []MountSpec` (`{Source, Dest, ReadOnly}`);
   keep `--cwd`/mode as sugar that injects the primary project entry. Update the
   `Workspace` record + `inspect`.
-- [ ] **D2 — Client resolve + merge.** `ape sandbox up`: assemble the list from
+- [x] **D2 — Client resolve + merge.** DONE 2026-07-24. `ape sandbox up`: assemble the list from
   built-ins + profile + `.apesandbox.yaml` (`repos:`/`mounts:`) + `--mount`
   flags; canonicalize relative sources against the main-repo root; dedupe by dest
   with the documented precedence; enforce reserved dests client-side (fail fast,
   aped re-checks).
-- [ ] **D3 — `.apesandbox.yaml` skeleton + flags.** Define the versioned
+- [x] **D3 — `.apesandbox.yaml` skeleton + flags.** DONE 2026-07-24. Deviation: the repeatable bind flag is `--mount-path`, because `--mount` already selects the mount MODE (host-fs|volume|ephemeral). Define the versioned
   descriptor + a client parser owning `repos:`/`mounts:` (other sections are
   parsed by their plans); `--mount src[:dest][:ro|:rw]` (repeatable),
   `--sandbox-config <path>`, `--no-sandbox-config`. The parser must ignore
   unknown top-level keys so PLAN-21/22 can add `egress:`/`toolchain:` additively.
-- [ ] **D4 — aped policy.** Per-entry `checkMount` against `mount_roots`;
+- [x] **D4 — aped policy.** DONE 2026-07-24 — per-entry `checkMount`, reserved dests, `limits.max_mounts`, and read-only roots as a separate `mount_roots_ro` list (a plain string list keeps the existing schema). Per-entry `checkMount` against `mount_roots`;
   reserved dests; `max_mounts`; optional ro-only roots; honor `ReadOnly` in the
   OCI bind. Extend `deploy/policy.yaml` + docs.
-- [ ] **D5 — Framework delivery.** Make the image public + framework-free in
+- [x] **D5 — Framework delivery.** DONE 2026-07-24 — `ape sandbox framework materialize/ls` + the read-only system mount, verified-or-actionable-error. Materialization is a CLONE, not a worktree: the tree must be self-contained once mounted (a worktree's .git points outside the mount) and must sit on a local `main` branch, which a worktree cannot check out while the primary repo has it. The public image tree is authored in exoport/ape-sandbox; PUBLISHING it is the open step. Make the image public + framework-free in
   exoport; host-repo pinned-ref materialize + verify-or-error + RO
   `/opt/apex-framework` built-in mount; `ape framework setup --no-fetch` glue
   (branch/RO-repo guards). Optional `ape sandbox framework fetch` convenience.
-- [ ] **D6 — Docs.** `.apesandbox.yaml` reference; the `/home` `BindReadOnlyPaths`
+- [x] **D6 — Docs.** DONE 2026-07-24 — `docs/reference/apesandbox-yaml.md`, the run-aped egress/framework sections, regenerated `cli.md`. `.apesandbox.yaml` reference; the `/home` `BindReadOnlyPaths`
   prerequisite; the framework update workflow (host-side fetch + pin);
   regenerate `cli.md`; reconcile PLAN-16 D6 + `sandbox-workspaces.md`.
-- [ ] **D7 — Migration (see below).**
+- [x] **D7 — Migration (see below).** DONE for this repo (pointer README + public placeholder ref); retiring the private `ghcr.io/exoar/ape-sandbox` package is an owner action.
 
 ## Migration — supersede the private-baked-image route
 

@@ -166,6 +166,41 @@ func (d *containerdDriver) Provision(ctx context.Context, spec WorkspaceSpec) (w
 	}, nil
 }
 
+// Reconcile brings the registry back in line with containerd reality (PLAN-22
+// D5c). After an aped or host restart the container + snapshot of a stopped
+// workspace persist, but a workspace someone destroyed out-of-band (or whose
+// containerd state was wiped) leaves a registry row that `ls` still reports and
+// `attach` then fails on. This drops exactly those rows and reports what it did.
+//
+// It is deliberately conservative: a workspace whose container still exists is
+// left alone whatever its task state (Inspect reports that live), and a containerd
+// error other than not-found aborts rather than pruning on a bad read — losing the
+// registry to a transient failure would be far worse than a stale row.
+func (d *containerdDriver) Reconcile(ctx context.Context) (ReconcileReport, error) {
+	if d.reg == nil {
+		return ReconcileReport{}, nil
+	}
+	recs, err := d.reg.List()
+	if err != nil {
+		return ReconcileReport{}, err
+	}
+	ctx = d.nsctx(ctx)
+	report := ReconcileReport{Checked: len(recs)}
+	for i := range recs {
+		name := recs[i].Name
+		if _, err := d.cli.LoadContainer(ctx, ContainerName(name)); err != nil {
+			if !errdefs.IsNotFound(err) {
+				return report, fmt.Errorf("containerd driver: reconcile %s: %w", name, err)
+			}
+			if rerr := d.reg.Remove(name); rerr != nil {
+				return report, fmt.Errorf("containerd driver: reconcile drop %s: %w", name, rerr)
+			}
+			report.Dropped = append(report.Dropped, name)
+		}
+	}
+	return report, nil
+}
+
 // getOrPull returns an already-present image or pulls+unpacks it. A found image
 // that was imported WITHOUT unpacking (e.g. `ctr images import`, which does not
 // unpack) has no snapshots, so WithNewSnapshot would fail with an opaque error;
