@@ -6,6 +6,8 @@ import (
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
+
+	"github.com/exoport/apex_process_ape/internal/workspace"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -117,4 +119,37 @@ func TestProxyCloseIsDeterministic(t *testing.T) {
 	require.NoError(t, p2.Start(addr), "the port must be free the moment Close returns")
 	require.NoError(t, p2.Close())
 	require.NoError(t, p2.Close(), "Close is idempotent")
+}
+
+func TestRunArgsSkipsLegacyProjectBindWhenReposArePresent(t *testing.T) {
+	// PLAN-20 mounts each repo at /workspace/<name>. Keeping the old bare-/workspace
+	// bind as well put the main repo's files loose in /workspace next to the repo
+	// directories — caught live on the Tier-2 host, hence this test.
+	comp := &Composition{StagingDir: "/staging", GuestHome: "/sandbox/home"}
+	spec := WorkspaceSpec{
+		Name: "dev", Image: "img", Mount: MountHostFS, ProjectRoot: "/srv/workspaces/demo",
+		Network: NetworkNone, Comp: comp,
+		Mounts: []workspace.MountSpec{
+			{Source: "/srv/workspaces/demo", Dest: "/workspace/demo"},
+			{Source: "/srv/workspaces/shared", Dest: "/workspace/shared", ReadOnly: true},
+		},
+		Cwd: "/workspace/demo",
+	}
+	assert.True(t, spec.HasRepoMounts())
+
+	args, err := spec.RunArgs()
+	require.NoError(t, err)
+	joined := strings.Join(args, " ")
+	assert.Contains(t, joined, "/srv/workspaces/demo:/workspace/demo")
+	assert.NotContains(t, joined, "/srv/workspaces/demo:/workspace ",
+		"the legacy bare-/workspace bind must not be emitted alongside the repo mounts")
+	assert.Contains(t, joined, "-w /workspace/demo")
+
+	// Without repo mounts (a pre-PLAN-20 client) the legacy bind is still the project.
+	legacy := spec
+	legacy.Mounts, legacy.Cwd = nil, ""
+	assert.False(t, legacy.HasRepoMounts())
+	args, err = legacy.RunArgs()
+	require.NoError(t, err)
+	assert.Contains(t, strings.Join(args, " "), "/srv/workspaces/demo:/workspace")
 }

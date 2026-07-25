@@ -504,7 +504,10 @@ func containerdMounts(spec WorkspaceSpec) []specs.Mount {
 	mounts := make([]specs.Mount, 0, 2+len(spec.Mounts))
 	switch spec.Mount {
 	case MountHostFS:
-		if strings.TrimSpace(spec.ProjectRoot) != "" {
+		// Skipped when the resolved list already mounts the repos at /workspace/<name>:
+		// binding the main repo at bare /workspace as well would duplicate it and
+		// shadow the root those per-repo mounts live under (PLAN-20, HasRepoMounts).
+		if strings.TrimSpace(spec.ProjectRoot) != "" && !spec.HasRepoMounts() {
 			mounts = append(mounts, bindMount(dest, spec.ProjectRoot, false))
 		}
 	case MountVolume:

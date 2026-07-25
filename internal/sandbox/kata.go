@@ -107,6 +107,20 @@ type WorkspaceSpec struct {
 	NetnsPath string
 }
 
+// HasRepoMounts reports whether the resolved mount list already places the project's
+// repositories under /workspace (PLAN-20). When it does, the legacy single-project
+// bind at /workspace must NOT also be applied: it would mount the main repo a second
+// time AND shadow the /workspace root the per-repo mounts live under, so the guest
+// would see the repo's files loose in /workspace next to the repo directories.
+func (s WorkspaceSpec) HasRepoMounts() bool {
+	for _, m := range s.Mounts {
+		if m.Dest == WorkspaceRoot || strings.HasPrefix(m.Dest, WorkspaceRoot+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // HasEgress reports whether the spec was granted proxied egress: an allowlist and
 // a proxy to reach it through.
 func (s WorkspaceSpec) HasEgress() bool {
@@ -156,13 +170,17 @@ func (s WorkspaceSpec) RunArgs() ([]string, error) {
 		args = append(args, "--network", s.Network)
 	}
 
-	// Project mount depends on the mode.
+	// Project mount depends on the mode. With PLAN-20 repo mounts present the project
+	// is already mounted at /workspace/<name>, so the legacy bare-/workspace bind is
+	// skipped (see HasRepoMounts).
 	switch s.Mount {
 	case MountHostFS:
 		if strings.TrimSpace(s.ProjectRoot) == "" {
 			return nil, errors.New("workspace: mount host-fs requires a project root")
 		}
-		args = append(args, "-v", s.ProjectRoot+":"+dest)
+		if !s.HasRepoMounts() {
+			args = append(args, "-v", s.ProjectRoot+":"+dest)
+		}
 	case MountVolume:
 		if strings.TrimSpace(s.Volume) == "" {
 			return nil, errors.New("workspace: mount volume requires a volume name")
