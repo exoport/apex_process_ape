@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"syscall"
 	"time"
@@ -45,7 +44,6 @@ type containerdDriver struct {
 	reg     *Registry
 	resolve SpecResolver
 	netns   NetnsEnsurer
-	stderr  io.Writer
 }
 
 var _ ProvisioningBackend = (*containerdDriver)(nil)
@@ -242,25 +240,28 @@ func normalizeImageRef(ref string) string {
 
 // Start (re)starts a stopped workspace's task; a running one is left as-is.
 //
-// Before starting it repairs the workspace's egress namespace if it went away, which
-// is what a HOST REBOOT does: the container and snapshot persist, but the named netns
-// lived in /run. Without this, starting such a workspace fails deep in the Kata shim
-// with "failed to set into network namespace … invalid argument".
+// The order here is load-bearing. A workspace that is ALREADY RUNNING is returned
+// immediately, before anything touches its network namespace — rewiring the netns of a
+// live workspace would cut the network out from under it. Only a COLD start (no task:
+// after `stop`, or after a host reboot) rewires, and it must.
 func (d *containerdDriver) Start(ctx context.Context, id string) error {
 	ctx = d.nsctx(ctx)
 	container, err := d.cli.LoadContainer(ctx, ContainerName(id))
 	if err != nil {
 		return mapContainerdErr(err)
 	}
-	if err := d.recoverNetns(ctx, id, container); err != nil {
-		return err
-	}
-	if task, err := container.Task(ctx, nil); err == nil {
+	if task, terr := container.Task(ctx, nil); terr == nil {
 		st, serr := task.Status(ctx)
 		if serr == nil && st.Status == client.Running {
-			return nil // already running
+			return nil // already running — do NOT disturb its namespace
 		}
+		// A task object still exists (created/paused): the shim owns its network state,
+		// so start it as it stands rather than rewiring underneath it.
 		return task.Start(ctx)
+	}
+	// Cold start: no task, so the namespace can be safely rebuilt.
+	if err := d.rewireNetns(ctx, id, container); err != nil {
+		return err
 	}
 	task, err := container.NewTask(ctx, cio.NullIO)
 	if err != nil {
@@ -269,20 +270,29 @@ func (d *containerdDriver) Start(ctx context.Context, id string) error {
 	return task.Start(ctx)
 }
 
-// recoverNetns re-creates the workspace's egress namespace when the container's spec
-// references one that no longer exists.
+// rewireNetns rebuilds the workspace's egress namespace from scratch before a cold
+// start. It handles two situations that look different but need the same answer:
 //
-// The container spec is the only durable record of both facts it needs: WHICH path the
-// guest was wired to (deterministic per workspace, but read from the spec rather than
-// recomputed, so the two can never disagree) and WHICH proxy port it was told to use
-// (HTTPS_PROXY) — which must be reproduced exactly, because a guest that is about to
-// start already has that address baked in.
+//   - After a HOST REBOOT the namespace is GONE (it lived in /run) while the container
+//     still references /run/netns/ape-<name>, so starting would fail deep in the Kata
+//     shim with "failed to set into network namespace … invalid argument".
+//   - After `stop` the namespace is still there but DIRTY: Kata's default
+//     internetworking_model=tcfilter adds a tc qdisc + filters to the veth when the VM
+//     boots and does not remove them when the task is killed. Reusing it as-is fails
+//     with "Failed to add qdisc for network index N : file exists" (observed live,
+//     2026-07-25). A persistent namespace is our design choice, so cleaning up after
+//     the previous boot is our job.
 //
-// A workspace with no netns path, or a path that is still there, is untouched. Every
-// failure here is returned rather than swallowed: starting a workspace whose egress
+// Rebuilding is safe here precisely because the caller established there is no task:
+// nothing is attached to the interface. The namespace comes back at the SAME path
+// (derived from the workspace name) with the SAME address (the helper's lease), and on
+// the SAME proxy port — read from the container's own env rather than recomputed,
+// because a guest about to start already has that address baked in.
+//
+// Every failure is returned, never swallowed: starting a workspace whose egress
 // silently did not come back would look like working isolation while being a broken
 // network.
-func (d *containerdDriver) recoverNetns(ctx context.Context, id string, container client.Container) error {
+func (d *containerdDriver) rewireNetns(ctx context.Context, id string, container client.Container) error {
 	if d.netns == nil {
 		return nil
 	}
@@ -292,10 +302,7 @@ func (d *containerdDriver) recoverNetns(ctx context.Context, id string, containe
 	}
 	path := NetnsPathFromSpec(spec)
 	if path == "" {
-		return nil // networkless or host networking — nothing to recover
-	}
-	if _, statErr := os.Stat(path); statErr == nil {
-		return nil // still wired
+		return nil // networkless or host networking — nothing to rewire
 	}
 	var env []string
 	if spec.Process != nil {
@@ -303,19 +310,18 @@ func (d *containerdDriver) recoverNetns(ctx context.Context, id string, containe
 	}
 	port, err := ProxyPortFromEnv(env)
 	if err != nil {
-		return fmt.Errorf("containerd driver: cannot recover the egress namespace for %s "+
+		return fmt.Errorf("containerd driver: cannot rebuild the egress namespace for %s "+
 			"(its container references %s but carries no usable HTTPS_PROXY): %w", id, path, err)
 	}
-	recovered, err := d.netns.EnsureNetns(ctx, id, port, true)
+	// reuse=false: always rebuild. See the doc comment — a surviving namespace is the
+	// dirty case, not the safe one.
+	rewired, err := d.netns.EnsureNetns(ctx, id, port, false)
 	if err != nil {
-		return fmt.Errorf("containerd driver: re-create the egress namespace for %s: %w", id, err)
+		return fmt.Errorf("containerd driver: rebuild the egress namespace for %s: %w", id, err)
 	}
-	if recovered != path {
+	if rewired != path {
 		return fmt.Errorf("containerd driver: egress namespace for %s came back at %s but its container "+
-			"expects %s", id, recovered, path)
-	}
-	if d.stderr != nil {
-		fmt.Fprintf(d.stderr, "  recovered egress namespace %s for %s (proxy port %d)\n", path, id, port)
+			"expects %s", id, rewired, path)
 	}
 	return nil
 }
