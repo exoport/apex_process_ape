@@ -934,6 +934,7 @@ YOU — publishes the credential into a directory the daemon may read
   ape sandbox credentials publish     # hard link: one live credential, shared
   ape sandbox credentials publish --copy   # independent copy: isolated, diverges
   ape sandbox credentials status
+  ape sandbox credentials watch      # re-publish automatically after a /login
   ape sandbox credentials revoke
 
 Both modes give a workspace your Anthropic identity — that is what "use my
@@ -944,6 +945,7 @@ Subcommands:
 - `publish` — Publish the host credential to the node's credential root
 - `revoke` — Remove the published credential so workspaces stop getting it
 - `status` — Show whether a published credential is present and still live
+- `watch` — Re-publish automatically whenever your credential is replaced
 
 Global flags:
 
@@ -1033,6 +1035,56 @@ Flags:
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--root` | string | `—` | Credential root the node reads |
 | `--source` | string | `—` | Credential file to compare against (default: ~/.claude/.credentials.json) |
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox credentials watch
+
+Re-publish automatically whenever your credential is replaced
+
+```
+ape sandbox credentials watch [flags]
+```
+
+Watch your credential and re-publish it the moment it is replaced.
+
+This closes the one gap in credential sharing that nothing on the node can close. A
+`claude /login` REPLACES the credential file rather than editing it, so the published
+hard link is left pointing at the old one — and aped cannot notice, because it runs as
+another user with ProtectHome=yes and can never read your home. Until something
+re-publishes, every workspace keeps using the pre-login token.
+
+Any 'ape sandbox' command re-publishes as a side effect, so in normal use this is already
+handled. Run this watcher when you want it handled with no command at all — typically as a
+user service:
+
+  # ~/.config/systemd/user/ape-credentials-watch.service
+  [Unit]
+  Description=Re-publish the Claude credential for ape sandbox workspaces
+  [Service]
+  ExecStart=%h/.local/bin/ape sandbox credentials watch
+  Restart=on-failure
+  [Install]
+  WantedBy=default.target
+
+  systemctl --user enable --now ape-credentials-watch
+
+It runs as YOU (that is the point — only your own session can read your home) and does
+nothing until the file it is watching is replaced.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--interval` | duration | `2s` | How often to check for a replacement |
+| `--root` | string | `—` | Credential root the node reads |
+| `--source` | string | `—` | Credential file to watch (default: ~/.claude/.credentials.json) |
 
 Global flags:
 

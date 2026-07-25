@@ -78,6 +78,14 @@
   running a long job with nobody reaching in looks untouched), so an automatic reaper
   built on this signal would be an age-based killer wearing a policy's name. ape reports
   it and leaves `stop`/`down` to the operator.
+- **feat: `ape sandbox credentials watch`** — a host `claude /login` replaces the
+  credential file, and aped cannot notice (it runs as another user with `ProtectHome=yes`
+  and can never read your home), so until something re-publishes, workspaces keep the
+  pre-login token. Every `ape sandbox` command re-publishes as a side effect; this watcher
+  covers the case where you run none, as a `systemd --user` service. A re-published
+  credential is also treated as **authoritative** for one sync pass, overriding
+  timestamps — a login starts a new session, so a token a still-running workspace
+  refreshed from the old one is dead however recently it was written.
 - **feat: ONE Claude OAuth session shared by the host and every workspace** — the hard
   part is not access to the credential, it is identity of session: OAuth refresh tokens
   **rotate**, so the moment any party refreshes, every other party's token is dead. A

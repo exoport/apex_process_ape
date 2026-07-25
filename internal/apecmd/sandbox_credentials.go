@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/exoport/apex_process_ape/internal/output"
 	"github.com/spf13/cobra"
@@ -110,12 +111,14 @@ YOU — publishes the credential into a directory the daemon may read
   ape sandbox credentials publish     # hard link: one live credential, shared
   ape sandbox credentials publish --copy   # independent copy: isolated, diverges
   ape sandbox credentials status
+  ape sandbox credentials watch      # re-publish automatically after a /login
   ape sandbox credentials revoke
 
 Both modes give a workspace your Anthropic identity — that is what "use my
 credentials" means. Use 'revoke' to take it back.`,
 	}
-	cmd.AddCommand(newCredentialsPublishCmd(), newCredentialsStatusCmd(), newCredentialsRevokeCmd())
+	cmd.AddCommand(newCredentialsPublishCmd(), newCredentialsStatusCmd(),
+		newCredentialsWatchCmd(), newCredentialsRevokeCmd())
 	return cmd
 }
 
@@ -173,6 +176,89 @@ the host rewrites the credential by replacing the file rather than editing it.`,
 	cmd.Flags().StringVar(&source, "source", "", "Credential file to publish (default: ~/.claude/.credentials.json)")
 	cmd.Flags().BoolVar(&copyMode, "copy", false, "Publish an independent copy instead of a hard link (isolated, but diverges on token refresh)")
 	return cmd
+}
+
+func newCredentialsWatchCmd() *cobra.Command {
+	var (
+		root     string
+		source   string
+		interval time.Duration
+	)
+	cmd := &cobra.Command{
+		Use:   "watch",
+		Short: "Re-publish automatically whenever your credential is replaced",
+		Long: `Watch your credential and re-publish it the moment it is replaced.
+
+This closes the one gap in credential sharing that nothing on the node can close. A
+` + "`claude /login`" + ` REPLACES the credential file rather than editing it, so the published
+hard link is left pointing at the old one — and aped cannot notice, because it runs as
+another user with ProtectHome=yes and can never read your home. Until something
+re-publishes, every workspace keeps using the pre-login token.
+
+Any 'ape sandbox' command re-publishes as a side effect, so in normal use this is already
+handled. Run this watcher when you want it handled with no command at all — typically as a
+user service:
+
+  # ~/.config/systemd/user/ape-credentials-watch.service
+  [Unit]
+  Description=Re-publish the Claude credential for ape sandbox workspaces
+  [Service]
+  ExecStart=%h/.local/bin/ape sandbox credentials watch
+  Restart=on-failure
+  [Install]
+  WantedBy=default.target
+
+  systemctl --user enable --now ape-credentials-watch
+
+It runs as YOU (that is the point — only your own session can read your home) and does
+nothing until the file it is watching is replaced.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if interval <= 0 {
+				interval = 2 * time.Second
+			}
+			dest := credentialDest(root)
+			if !fileExists(dest) {
+				return fmt.Errorf("nothing published at %s — run 'ape sandbox credentials publish' first "+
+					"(watch refreshes an existing publication, it does not create one)", dest)
+			}
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "watching %s (checking every %s; Ctrl-C to stop)\n", credentialSourceLabel(source), interval)
+
+			t := time.NewTicker(interval)
+			defer t.Stop()
+			for {
+				select {
+				case <-cmd.Context().Done():
+					return nil
+				case <-t.C:
+					repaired, err := RepairCredentialPublication(cmd.Context(), root, source)
+					if err != nil {
+						// Keep watching: a transient failure (the file mid-replacement) must not
+						// end the watch and silently stop sharing for the rest of the session.
+						fmt.Fprintf(cmd.ErrOrStderr(), "! re-publish failed: %v\n", err)
+						continue
+					}
+					if repaired {
+						fmt.Fprintf(out, "%s re-published (your credential had been replaced)\n",
+							time.Now().Format("15:04:05"))
+					}
+				}
+			}
+		},
+	}
+	cmd.Flags().StringVar(&root, "root", "", "Credential root the node reads")
+	cmd.Flags().StringVar(&source, "source", "", "Credential file to watch (default: ~/.claude/.credentials.json)")
+	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "How often to check for a replacement")
+	return cmd
+}
+
+// credentialSourceLabel renders the watched source for the startup line.
+func credentialSourceLabel(sourceFlag string) string {
+	if src, err := resolveCredentialSource(sourceFlag); err == nil {
+		return src
+	}
+	return "~/" + credentialRelPath
 }
 
 func newCredentialsStatusCmd() *cobra.Command {

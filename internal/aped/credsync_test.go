@@ -192,3 +192,57 @@ func TestCredSyncWorkspaceWriteIsAtomicForReaders(t *testing.T) {
 	assert.False(t, os.SameFile(before, after), "a workspace copy is replaced, not overwritten")
 	assert.Equal(t, os.FileMode(credFileMode), after.Mode().Perm())
 }
+
+func TestCredSyncARepublishedCredentialBeatsANewerWorkspaceToken(t *testing.T) {
+	// The scenario: the operator runs `claude /login` (a NEW session), then a workspace
+	// that was still running refreshes a token from the OLD session. The workspace's file
+	// has the newer mtime, but its token belongs to a session the login already replaced —
+	// so "newest wins" would clobber the operator's fresh credential with a dead one.
+	// A re-publish must therefore win on authority, not timestamp.
+	sync, published, ws := credRig(t, "alpha")
+	base := time.Now().Add(-time.Hour)
+	touchWith(t, published, `{"accessToken":"pre-login"}`, base)
+	touchWith(t, ws["alpha"], `{"accessToken":"pre-login"}`, base)
+
+	// Establish the baseline identity (what a first tick does).
+	_, err := sync.SyncOnce()
+	require.NoError(t, err)
+
+	// The workspace refreshes from the old session — NEWER mtime.
+	touchWith(t, ws["alpha"], `{"accessToken":"refreshed-from-old-session"}`, base.Add(2*time.Minute))
+	// And the operator re-publishes after a login: a NEW file at the same path, older mtime.
+	require.NoError(t, os.Remove(published))
+	touchWith(t, published, `{"accessToken":"post-login"}`, base.Add(time.Minute))
+
+	n, err := sync.SyncOnce()
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	data, err := os.ReadFile(ws["alpha"])
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"accessToken":"post-login"}`, string(data),
+		"the re-published credential must win over a newer token from the session it replaced")
+}
+
+func TestCredSyncInPlaceUpdatesAreNotMistakenForARepublish(t *testing.T) {
+	// This component updates the published file IN PLACE, which keeps its inode. If that
+	// were read as a re-publish, every workspace refresh would make the publication
+	// authoritative and immediately undo itself.
+	sync, published, ws := credRig(t, "alpha")
+	base := time.Now().Add(-time.Hour)
+	touchWith(t, published, `{"accessToken":"v1"}`, base)
+	touchWith(t, ws["alpha"], `{"accessToken":"v1"}`, base)
+	_, err := sync.SyncOnce()
+	require.NoError(t, err)
+
+	touchWith(t, ws["alpha"], `{"accessToken":"v2-from-workspace"}`, base.Add(time.Minute))
+	_, err = sync.SyncOnce() // writes the published file in place
+	require.NoError(t, err)
+
+	n, err := sync.SyncOnce() // the tick after: must be a no-op, not a reversal
+	require.NoError(t, err)
+	assert.Zero(t, n)
+	data, err := os.ReadFile(published)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"accessToken":"v2-from-workspace"}`, string(data),
+		"the workspace's refresh must stick, not be undone by a false republish detection")
+}

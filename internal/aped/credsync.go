@@ -76,6 +76,14 @@ type CredentialSync struct {
 	Interval time.Duration
 	// Stderr receives one line per propagation; nil → os.Stderr.
 	Stderr io.Writer
+
+	// lastPublished is the published file's identity as of the previous tick. A CHANGE
+	// means the operator re-published — which only happens because their credential was
+	// replaced, i.e. a `claude /login` — and that makes the publication authoritative for
+	// one tick regardless of modification times. Without this, a workspace that refreshed
+	// a token AFTER the login would have a newer mtime and would overwrite the operator's
+	// brand-new session with a token belonging to the session the login just replaced.
+	lastPublished os.FileInfo
 }
 
 // Run syncs until ctx is cancelled. It is resilient by construction: every error is
@@ -136,6 +144,12 @@ func (c *CredentialSync) SyncOnce() (int, error) {
 	if newest == nil {
 		return 0, errors.New("no peer holds parseable credential JSON — refusing to propagate")
 	}
+	// A freshly re-published credential wins on authority, not on timestamp: a login
+	// starts a NEW session, so any token a workspace refreshed from the old one is dead
+	// however recently it was written.
+	if p := c.republishedPeer(peers); p != nil {
+		newest = p
+	}
 
 	written := 0
 	for i := range peers {
@@ -149,6 +163,42 @@ func (c *CredentialSync) SyncOnce() (int, error) {
 		written++
 	}
 	return written, nil
+}
+
+// republishedPeer returns the published peer when it has been REPLACED since the last
+// tick (a different file at the same path), and nil otherwise. It also records the
+// current identity for the next comparison.
+//
+// os.SameFile is the check rather than an mtime or a hash: re-publishing re-links the
+// path to the operator's new inode, and identity is exactly what changes. A rewrite in
+// place — which is how this component itself updates the published file — keeps the same
+// inode and correctly does NOT count as a re-publish.
+func (c *CredentialSync) republishedPeer(peers []credPeer) *credPeer {
+	var published *credPeer
+	for i := range peers {
+		if peers[i].published {
+			published = &peers[i]
+			break
+		}
+	}
+	if published == nil {
+		c.lastPublished = nil
+		return nil
+	}
+	fi, err := os.Stat(published.path)
+	if err != nil {
+		return nil
+	}
+	prev := c.lastPublished
+	c.lastPublished = fi
+	if prev == nil || os.SameFile(prev, fi) {
+		return nil
+	}
+	if !json.Valid(published.data) {
+		return nil // never make a torn read authoritative
+	}
+	fmt.Fprintf(c.stderr(), "  credential sync: publication was replaced — it is authoritative this tick\n")
+	return published
 }
 
 // peers gathers the published credential and every workspace copy that EXISTS.
