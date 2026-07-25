@@ -75,6 +75,7 @@ func Serve(ctx context.Context, cfg ServerConfig) error {
 	s := &server{cfg: cfg, leases: leases, allowed: allowed, stderr: stderr}
 	fmt.Fprintf(stderr, "▶ aped netd — %s (bridge %s %s, proxy ports %d-%d, %d lease(s))\n",
 		sock, s.bridge(), s.hostCIDR(), s.portLow(), s.portHigh(), len(leases.All()))
+	warnIfNetnsNotShared(stderr)
 
 	go func() {
 		<-ctx.Done()
@@ -90,6 +91,47 @@ func Serve(ctx context.Context, cfg ServerConfig) error {
 		}
 		go s.handle(ctx, conn)
 	}
+}
+
+// warnIfNetnsNotShared checks, at startup, that /run/netns is a SHARED mount this
+// helper's namespace has in common with the host — the single prerequisite that
+// makes its work visible to containerd.
+//
+// Why it earns a dedicated check: `ip netns add` bind-mounts the namespace over a
+// placeholder file. This helper runs with a private mount namespace (its
+// hardening), so if /run/netns is not already a shared mount, the bind never
+// leaves this process's view. Everything here still SUCCEEDS — the netns is real,
+// the veth is wired, the reply carries a path — and the failure surfaces much later
+// as the Kata shim reporting "failed to set into network namespace N while creating
+// netlink socket: invalid argument", because containerd opened the placeholder file
+// instead of a namespace. One log line at startup is worth more than a debugging
+// session at create time.
+//
+// It only warns: the check is advisory (the operator may be mid-setup), and a
+// helper that refused to start would be harder to recover from than one that says
+// what is wrong.
+func warnIfNetnsNotShared(stderr io.Writer) {
+	data, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return // cannot tell; stay quiet rather than cry wolf
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		// mountinfo: <id> <parent> <maj:min> <root> <mountpoint> <opts> <optional...> - ...
+		fields := strings.Fields(line)
+		if len(fields) < 6 || fields[4] != sandbox.NetnsRunDir {
+			continue
+		}
+		if strings.Contains(line, " shared:") {
+			return // correctly set up
+		}
+		fmt.Fprintf(stderr, "! netd: %s is a mount but NOT shared — netns binds will not reach containerd; "+
+			"run `mount --make-shared %s` (aped-netbr.service does this)\n", sandbox.NetnsRunDir, sandbox.NetnsRunDir)
+		return
+	}
+	fmt.Fprintf(stderr, "! netd: %s is not a mountpoint in this namespace — netns binds will stay private to this "+
+		"process and the Kata shim will fail with \"failed to set into network namespace\". Start "+
+		"aped-netbr.service (it bind-mounts %s onto itself and marks it shared) and restart this unit.\n",
+		sandbox.NetnsRunDir, sandbox.NetnsRunDir)
 }
 
 // server holds the helper's small mutable state: the lease set, serialized by a

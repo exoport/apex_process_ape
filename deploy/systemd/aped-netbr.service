@@ -28,6 +28,22 @@ Before=aped.service aped-front.service
 Type=oneshot
 RemainAfterExit=yes
 EnvironmentFile=/etc/aped/egress.env
+# /run/netns must be a SHARED mountpoint in the HOST mount namespace before the
+# netns helper runs. This is not hygiene — it is the difference between working and
+# a baffling failure:
+#
+#   `ip netns add` creates /run/netns/<name> as an empty file and bind-mounts the
+#   namespace onto it. aped-netd has a private mount namespace (its hardening), so
+#   if /run/netns is not already a shared mount in the host, that bind stays inside
+#   the helper: containerd then opens the placeholder FILE and the Kata shim dies
+#   with "failed to set into network namespace N while creating netlink socket:
+#   invalid argument" (observed live, 2026-07-24).
+#
+# This unit is the right place for it because it runs in the host mount namespace
+# (no namespacing options), and it is ordered Before= the helper. The bind is
+# guarded by mountpoint(1) so a re-run does not stack mounts, and it is never
+# unmounted on stop — CNI and other tooling use /run/netns too.
+ExecStart=/bin/sh -c 'mkdir -p /run/netns; mountpoint -q /run/netns || mount --bind /run/netns /run/netns; mount --make-shared /run/netns'
 # "-" prefixes make the create steps idempotent: `ip link add` and `ip addr add`
 # exit non-zero when the bridge/address already exist, which is the steady state
 # on every re-run and after a manual `systemctl restart`.
