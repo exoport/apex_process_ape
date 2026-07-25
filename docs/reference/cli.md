@@ -849,11 +849,15 @@ credential, and owns the workspace registry. ape never runs as root.
   ape sandbox ls             List provisioned workspaces
   ape sandbox inspect <name> Show a workspace's live state
   ape sandbox exec <name> -- <cmd>...   Run a command inside a workspace
+  ape sandbox setup <name>     Materialize the project's declared toolchain
+  ape sandbox stop <name>      Stop a workspace (free RAM, keep rootfs + state)
+  ape sandbox start <name>     Start a stopped workspace
   ape sandbox freeze <name>    Freeze a workspace (cgroup-freeze; RAM resident)
   ape sandbox unfreeze <name>  Unfreeze a frozen workspace
   ape sandbox suspend <name>   Suspend a workspace microVM — not yet on Kata
   ape sandbox down <name>      Tear a workspace down
   ape sandbox framework …      Materialize the framework refs a node can mount
+  ape sandbox credentials …    Publish your Claude credentials for workspaces
 
 Point ape at your aped node with APE_NATS_URL + APE_NATS_CREDS (the operator
 credential aped mints at startup) and --node. Requires a running aped on a
@@ -862,13 +866,17 @@ Linux host with KVM + containerd + Kata.
 Subcommands:
 
 - `attach` — Open an interactive shell inside a workspace
+- `credentials` — Publish your Claude credentials for workspaces to use
 - `down` — Tear a workspace down
 - `exec` — Run a command inside a workspace
 - `framework` — Manage the APEX framework refs a sandbox node can mount
 - `freeze` — Freeze a workspace (cgroup-freeze; guest RAM stays resident)
 - `inspect` — Show a workspace's live state
 - `ls` — List provisioned workspaces
+- `setup` — Materialize the project's declared toolchain inside a workspace
 - `ssh` — SSH into a workspace (Tier-2)
+- `start` — Start a stopped workspace
+- `stop` — Stop a workspace (free its RAM, keep its rootfs + state)
 - `suspend` — Suspend a workspace microVM (save guest RAM to disk) — not yet supported on Kata
 - `unfreeze` — Unfreeze a frozen workspace
 - `up` — Provision a Kata workspace
@@ -895,6 +903,134 @@ credit-based flow control; the terminal goes raw and resizes forward on SIGWINCH
 
 Requires an aped node running the containerd driver (aped run --driver
 containerd); a shell-driver node reports the session UNSUPPORTED.
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox credentials
+
+Publish your Claude credentials for workspaces to use
+
+```
+ape sandbox credentials
+```
+
+Publish the host's Claude OAuth credential where the aped node can read it, so
+workspaces get your Anthropic session instead of asking you to log in again.
+
+aped-front runs as its own service user with ProtectHome=yes and cannot read
+/home/<you>/.claude. Rather than widening your home, this command — which runs as
+YOU — publishes the credential into a directory the daemon may read
+(/srv/ape-credentials/<user>), and the node is pointed at it with
+'aped front --host-home'.
+
+  ape sandbox credentials publish     # hard link: one live credential, shared
+  ape sandbox credentials publish --copy   # independent copy: isolated, diverges
+  ape sandbox credentials status
+  ape sandbox credentials revoke
+
+Both modes give a workspace your Anthropic identity — that is what "use my
+credentials" means. Use 'revoke' to take it back.
+
+Subcommands:
+
+- `publish` — Publish the host credential to the node's credential root
+- `revoke` — Remove the published credential so workspaces stop getting it
+- `status` — Show whether a published credential is present and still live
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox credentials publish
+
+Publish the host credential to the node's credential root
+
+```
+ape sandbox credentials publish [flags]
+```
+
+Publish ~/.claude/.credentials.json where aped can read it.
+
+Default is a HARD LINK: the workspace and the host share one inode, so a token
+refresh on either side is immediately valid on the other, and your file's
+permissions are unchanged (the daemon only stat()s it; Kata's virtiofsd does the
+I/O as root). --copy makes an independent copy instead, which isolates the
+workspace but DIVERGES the first time either side refreshes, because OAuth refresh
+tokens rotate.
+
+Re-running is safe and is how you repair a link that decoupled — which happens if
+the host rewrites the credential by replacing the file rather than editing it.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--copy` | bool | `false` | Publish an independent copy instead of a hard link (isolated, but diverges on token refresh) |
+| `--root` | string | `—` | Credential root the node reads (default: $APE_CREDENTIAL_ROOT or /srv/ape-credentials) |
+| `--source` | string | `—` | Credential file to publish (default: ~/.claude/.credentials.json) |
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox credentials revoke
+
+Remove the published credential so workspaces stop getting it
+
+```
+ape sandbox credentials revoke [flags]
+```
+
+Remove the published credential. With a hard link this only drops the extra
+name — your ~/.claude/.credentials.json is untouched, since a file survives until
+its last link is gone. With a copy it deletes the copy.
+
+Workspaces already running keep the credential that was composed into them until
+they are torn down.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--root` | string | `—` | Credential root the node reads |
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox credentials status
+
+Show whether a published credential is present and still live
+
+```
+ape sandbox credentials status [flags]
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--root` | string | `—` | Credential root the node reads |
+| `--source` | string | `—` | Credential file to compare against (default: ~/.claude/.credentials.json) |
 
 Global flags:
 
@@ -1109,6 +1245,40 @@ Global flags:
 | `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
 | `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
 
+## ape sandbox setup
+
+Materialize the project's declared toolchain inside a workspace
+
+```
+ape sandbox setup <name> [flags]
+```
+
+Run the project's toolchain install step inside a running workspace: 'asdf
+install' for the runtime versions the project declares, then 'bingo get' for its
+pinned Go tools.
+
+The toolchain comes from the .apesandbox.yaml toolchain: section, which should
+reference the native files (.tool-versions, .bingo/) rather than duplicate the
+versions. The step is idempotent and becomes a no-op — fully offline — once the
+durable tool caches are warm; the FIRST run needs the workspace to have egress
+(the registries it downloads from must be in its allowlist).
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root holding the descriptor (default: current working directory) |
+| `--dry-run` | bool | `false` | Print the setup script instead of running it in the workspace |
+| `--sandbox-config` | string | `—` | Path to a non-default .apesandbox.yaml |
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
 ## ape sandbox ssh
 
 SSH into a workspace (Tier-2)
@@ -1116,6 +1286,53 @@ SSH into a workspace (Tier-2)
 ```
 ape sandbox ssh <name>
 ```
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox start
+
+Start a stopped workspace
+
+```
+ape sandbox start <name>
+```
+
+Start a stopped workspace from its retained container + snapshot. A workspace
+that is already running is left alone.
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox stop
+
+Stop a workspace (free its RAM, keep its rootfs + state)
+
+```
+ape sandbox stop <name>
+```
+
+Stop a workspace: kill the guest task while keeping the container and its
+snapshot, so 'ape sandbox start' revives it with its filesystem intact.
+
+Choosing between the three:
+  freeze  cgroup-freeze — RAM stays RESIDENT, instant unfreeze, lost on reboot
+  stop    task killed  — RAM FREED, rootfs + state kept, survives a reboot
+  down    destroyed    — rootfs deleted (a 'volume' mount survives unless
+                        --remove-volume)
+
+Toolchain and dependency state lives in durable cache mounts, so a stopped —
+or even a destroyed — workspace loses nothing that a warm cache can restore.
 
 Global flags:
 
@@ -1184,6 +1401,7 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--cache` | stringSlice | `[]` | Durable tool caches to mount: asdf\|cargo\|go\|npm\|pub (adds to the descriptor's toolchain.caches) |
 | `--cwd` | string | `—` | Project root to mount for host-fs (default: current working directory) |
 | `--egress-domain` | stringArray | `[]` | Request an egress domain (repeatable; still gated by the node's policy) |
 | `--framework-ref` | string | `—` | APEX framework ref to mount read-only (must be materialized on the node) |

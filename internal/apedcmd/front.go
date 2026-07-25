@@ -30,6 +30,7 @@ func newFrontCmd() *cobra.Command {
 		fwRoot      string
 		fwRef       string
 		cacheRoot   string
+		credentials string
 	)
 	cmd := &cobra.Command{
 		Use:   "front",
@@ -69,6 +70,7 @@ injected into each VM as APE_NATS_URL alongside its minted per-VM .creds.`,
 				FrameworkRoot:     fwRoot,
 				FrameworkRef:      fwRef,
 				CacheRoot:         cacheRoot,
+				Credentials:       credentials,
 				Stderr:            os.Stderr,
 			})
 		},
@@ -90,5 +92,6 @@ injected into each VM as APE_NATS_URL alongside its minted per-VM .creds.`,
 	f.StringVar(&fwRoot, "framework-root", "", "Host dir holding materialized APEX framework refs, one subdir per ref ('' → no framework mount)")
 	f.StringVar(&fwRef, "framework-ref", "", "Default framework ref to mount read-only at /opt/apex-framework")
 	f.StringVar(&cacheRoot, "cache-root", "", "Host dir holding durable tool caches (asdf/go/cargo/...); '' → no cache mounts")
+	f.StringVar(&credentials, "credentials", "", "Credential mode composed into workspaces: oauth | api-key | none (default none). oauth binds <host-home>/.claude/.credentials.json")
 	return cmd
 }

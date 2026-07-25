@@ -64,6 +64,7 @@ credential, and owns the workspace registry. ape never runs as root.
   ape sandbox suspend <name>   Suspend a workspace microVM — not yet on Kata
   ape sandbox down <name>      Tear a workspace down
   ape sandbox framework …      Materialize the framework refs a node can mount
+  ape sandbox credentials …    Publish your Claude credentials for workspaces
 
 Point ape at your aped node with APE_NATS_URL + APE_NATS_CREDS (the operator
 credential aped mints at startup) and --node. Requires a running aped on a
@@ -89,6 +90,7 @@ Linux host with KVM + containerd + Kata.`,
 		newSandboxSuspendCmd(),
 		newSandboxDownCmd(),
 		newSandboxFrameworkCmd(),
+		newSandboxCredentialsCmd(),
 		newSandboxProxyDaemonCmd(),
 	)
 	return cmd

@@ -49,6 +49,10 @@ type FrontConfig struct {
 	// CacheRoot is the host directory holding durable tool caches (PLAN-22 D4).
 	// Empty → cache requests are ignored and toolchain state stays in the rootfs.
 	CacheRoot string
+	// Credentials is the credential mode composed into workspaces by default:
+	// "oauth" binds the credential published under HostHome (see
+	// `ape sandbox credentials publish`), "none" injects nothing. Empty → none.
+	Credentials string
 	// EgressPortLow/High bound the proxy listen ports. They MUST match the host
 	// nftables chain's accepted range (both come from deploy/dev-host.sh). 0 → the
 	// sandbox defaults.
@@ -153,7 +157,12 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 		FrameworkRoot: cfg.FrameworkRoot,
 		FrameworkRef:  cfg.FrameworkRef,
 		CacheRoot:     cfg.CacheRoot,
+		Credentials:   sandbox.CredentialMode(cfg.Credentials),
 	})
+	if mode := sandbox.CredentialMode(cfg.Credentials); mode != "" && mode != sandbox.CredentialNone {
+		fmt.Fprintf(stderr, "  credentials: %s from %s (publish with 'ape sandbox credentials publish')\n",
+			mode, cfg.HostHome)
+	}
 	if cfg.FrameworkRoot != "" {
 		fmt.Fprintf(stderr, "  framework: %s (default ref %q) mounted read-only at %s\n",
 			cfg.FrameworkRoot, cfg.FrameworkRef, sandbox.FrameworkDest)

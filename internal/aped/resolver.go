@@ -46,6 +46,11 @@ type Resolver struct {
 	// cacheRoot is the host directory holding the durable tool caches (PLAN-22 D4).
 	// Empty → this node offers no caching and a cache request is ignored.
 	cacheRoot string
+	// credentials is the credential mode this node composes into workspaces when the
+	// resolved profile does not state one. It is NODE configuration, never a request
+	// field: which host identity a workspace gets is the operator's decision, not the
+	// caller's. Empty → CredentialNone (inject nothing).
+	credentials sandbox.CredentialMode
 
 	// Injectable seams (default to the real implementations) so Resolve is
 	// unit-testable without touching a profile file or the compose filesystem.
@@ -85,6 +90,10 @@ type ResolverConfig struct {
 	// CacheRoot is the host directory holding durable tool caches, one subdir per
 	// cache (PLAN-22 D4). Empty disables cache mounts.
 	CacheRoot string
+	// Credentials is the default credential mode for provisioned workspaces
+	// ("oauth" composes the host credential published under HostHome; "none" injects
+	// nothing). Empty → none, the fail-closed default.
+	Credentials sandbox.CredentialMode
 	// LoadProfile is an optional server-side profile source (by name). When nil,
 	// the resolver builds a default profile from the request fields.
 	LoadProfile func(name string) (*sandbox.Profile, error)
@@ -107,6 +116,7 @@ func NewResolver(cfg ResolverConfig) *Resolver {
 		frameworkRoot: cfg.FrameworkRoot,
 		frameworkRef:  cfg.FrameworkRef,
 		cacheRoot:     cfg.CacheRoot,
+		credentials:   cfg.Credentials,
 		loadProfile:   cfg.LoadProfile,
 		compose:       sandbox.Compose,
 	}
@@ -406,10 +416,14 @@ func (r *Resolver) profileFor(req workspace.CreateRequest) (*sandbox.Profile, er
 		prof.Mount = sandbox.MountHostFS
 	}
 	if prof.Credentials == "" {
-		// aped provisions server-side with no host credentials; default to
-		// injecting none rather than guessing oauth/api-key the daemon lacks.
-		// A named profile that sets credentials still overrides this.
-		prof.Credentials = sandbox.CredentialNone
+		// The node decides which host identity a workspace may receive, because that is
+		// an operator grant and not something a caller should be able to ask for. With
+		// nothing configured this stays CredentialNone — aped guesses no credentials it
+		// was not told to hand out. A named profile that sets credentials still wins.
+		prof.Credentials = r.credentials
+		if prof.Credentials == "" {
+			prof.Credentials = sandbox.CredentialNone
+		}
 	}
 	return prof, nil
 }
