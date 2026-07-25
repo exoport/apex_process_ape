@@ -280,6 +280,40 @@ because it is not under an allowed root. Additions:
   regenerate `cli.md`; reconcile PLAN-16 D6 + `sandbox-workspaces.md`.
 - [x] **D7 — Migration (see below).** DONE for this repo (pointer README + public placeholder ref); retiring the private `ghcr.io/exoar/ape-sandbox` package is an owner action.
 
+## Credential delivery — one shared OAuth session (added 2026-07-25)
+
+D5 delivered the framework mount; the credential half needed a design of its own, and
+two obvious approaches are both WRONG for reasons that only showed up live:
+
+| Approach | Why it fails |
+| --- | --- |
+| bind-mount the shared credential file | `claude` replaces it by RENAME (a login changes the inode; a refresh takes the same path), and a single-file bind cannot be renamed over — EBUSY. A workspace could never write the token it just refreshed, so it dies within hours. |
+| give each workspace its own copy | OAuth refresh tokens ROTATE: the first refresh anywhere invalidates every other copy. Not a weaker share — a session that breaks the same day. |
+
+What works, and is live-validated: each workspace gets a real **writable copy** (rename
+works in an ordinary directory, so login/refresh work in-guest) and `aped-front`
+**converges** every copy with the published credential — writing the published file IN
+PLACE, because it is a hard link to the operator's real `~/.claude/.credentials.json` and
+a rename there would sever exactly that link.
+
+Access is granted with a **POSIX ACL for one user** (`setfacl -m u:aped:rw`), no
+fallback: a group grant would share the credential with everyone in group `ape` (also the
+priv-socket gate), and `chgrp` needs the group in the caller's ACTIVE session, failing
+with EPERM in a shell opened before `usermod`. `ape doctor` reports the tooling as
+`sandbox.credential-acl`.
+
+**Live results (mmq4, 2026-07-25):** published from a shell lacking the `ape` group (ACL
+needs only ownership); grant is `user:aped:rw-` with `group::---`; two workspaces both
+matched the host; a write+rename inside wsA — impossible under a bind mount — propagated
+to the host AND wsB within one 3s tick ("propagated to 2 peer(s)"), with the host inode
+preserved (`links=2`); an in-place host write propagated back to both workspaces; the
+credential ended byte-identical to the original.
+
+Two defects the live run caught: the front could not even READ a 0600 publication (hence
+the ACL grant), and `ProtectSystem=strict` made the credential root read-only so the
+syncer could not write it (hence `ReadWritePaths`) — it failed safely and logged the exact
+cause every tick rather than corrupting anything.
+
 ## Migration — supersede the private-baked-image route
 
 The private route we just built is reverted/repurposed as part of D5:
