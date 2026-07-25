@@ -444,6 +444,34 @@ file, and because a host login replaces that file (verified — the inode change
 reports a decoupled link as `STALE`. Workspaces already running keep the copy they were
 created with.
 
+### Logging in again
+
+A `claude /login` **replaces** the credential file rather than editing it (verified: the
+inode changes). That asymmetry is the one thing to know:
+
+| Who logs in / refreshes | Reaches the others? |
+| --- | --- |
+| **a workspace** | **automatically, within one sync tick (~3s)** — its copy is written back to the published file, which is a hard link to your real credential |
+| **the host** | **only once something re-publishes.** aped cannot notice on its own: it runs as another user with `ProtectHome=yes` and can never read your home, and the published link still points at the *old* inode |
+
+Every `ape sandbox` command re-publishes as a side effect, so in normal use a host login
+is handled the next time you touch a workspace. To need no command at all, run the
+watcher — as **you**, because only your own session can read your home:
+
+```bash
+ape sandbox credentials watch     # re-publishes the moment the file is replaced
+```
+
+`ape sandbox credentials watch --help` carries a ready-made `systemd --user` unit.
+
+A re-published credential is treated as **authoritative** for one sync pass, overriding
+timestamps: a login starts a new session, so a token a still-running workspace refreshed
+from the *old* one is dead however recently it was written.
+
+**Logging in from INSIDE a workspace works** — there the credential is an ordinary file in
+an ordinary directory, so the login's write+rename succeeds, and the sync carries the new
+session out to the host and every other workspace.
+
 ### The access grant
 
 `publish` adds a **POSIX ACL entry** granting exactly the `aped` user read+write:
