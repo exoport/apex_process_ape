@@ -1,13 +1,14 @@
 package apecmd
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/user"
+	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/output"
@@ -72,21 +73,22 @@ const (
 //nolint:gosec // G101 false positive: a marker file NAME, not a credential
 const credentialMarkerName = ".ape-credential-publish.json"
 
-// credentialGroup is the group granted access to the shared credential: the same
-// group aped-front runs as. The operator is already a member (tier2-setup adds them),
-// so this needs no privilege.
-const credentialGroup = "ape"
-
-// credentialSharedMode is what the credential's inode must be for the daemon to take
-// part in the shared session: group read+write.
+// credentialACLUser is the account granted access to the shared credential: the user
+// aped-front runs as. The grant is a POSIX ACL entry for exactly that user, which is
+// narrower than a group grant in two ways that both matter:
 //
-// This is the one unavoidable cost of sharing ONE live OAuth session with a daemon
-// that runs as another user. A hard link shares its inode's owner and mode, so there
-// is no way to expose the published name without exposing the file — and read alone is
-// not enough, because a workspace's refresh has to be written back through it. Group
-// `ape` is the aped boundary group, not a general-purpose one, so nothing else on the
-// box gains anything. `revoke` restores the original group and mode.
-const credentialSharedMode = 0o660
+//   - Only that ONE account gains access. Group `ape` is also the priv-socket gate, so
+//     granting the group would silently hand the credential to every operator added
+//     there later.
+//   - `setfacl` only requires that you OWN the file, whereas `chgrp` requires the target
+//     group in the caller's ACTIVE group list — so a shell opened before `usermod -aG
+//     ape` fails with EPERM. Publishing must not depend on which session you happen to
+//     be in.
+//
+// The cost is transparency: `ls -l` shows a mode with a trailing `+` and no hint of who
+// the extra entry is for, so `ape sandbox credentials status` prints the effective grant
+// and `ape doctor` checks the tooling is present.
+const credentialACLUser = "aped"
 
 // credentialDirMode is traverse-only for others: the daemon must reach the path, but
 // only the owner may list it, and the credential file itself stays 0600.
@@ -144,8 +146,15 @@ the host rewrites the credential by replacing the file rather than editing it.`,
 				return err
 			}
 			dest := credentialDest(root)
-			res, err := publishCredential(src, dest, copyMode)
+			res, err := publishCredential(cmd.Context(), src, dest, copyMode)
 			if err != nil {
+				if errors.Is(err, ErrNoACLTooling) {
+					// Fail rather than publish something aped cannot read: a publication
+					// without the grant looks successful and then breaks every `up`.
+					return fmt.Errorf("%w\n  ape grants access with a POSIX ACL for exactly the `%s` user; there is "+
+						"no group fallback, because group `ape` is also the priv-socket gate and would share your "+
+						"credential with every operator added to it", err, credentialACLUser)
+				}
 				return err
 			}
 			out := cmd.OutOrStdout()
@@ -178,7 +187,7 @@ func newCredentialsStatusCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dest := credentialDest(root)
-			st := credentialStatus(source, dest)
+			st := credentialStatus(cmd.Context(), source, dest)
 			format := output.Format(outputFormat)
 			if format == output.FormatJSON || format == output.FormatYAML {
 				return output.Print(cmd.OutOrStdout(), format, st)
@@ -207,10 +216,10 @@ they are torn down.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dest := credentialDest(root)
-			// Restore the operator's own file first: with a hard link the grant lives on
-			// the shared inode, so removing only the extra name would leave their
-			// credential group-writable for no reason.
-			restored := restoreOwnership(dest)
+			// Drop the ACL entry first: with a hard link the grant lives on the shared
+			// inode, so removing only the extra name would leave the operator's own
+			// credential readable by the daemon for no reason.
+			restored := revokeDaemonAccess(cmd.Context(), dest)
 			if err := os.Remove(dest); err != nil {
 				if os.IsNotExist(err) {
 					fmt.Fprintf(cmd.OutOrStdout(), "nothing published at %s\n", dest)
@@ -221,7 +230,7 @@ they are torn down.`,
 			_ = os.Remove(markerPath(dest))
 			fmt.Fprintf(cmd.OutOrStdout(), "revoked %s\n", dest)
 			if restored {
-				fmt.Fprintf(cmd.OutOrStdout(), "restored the original group and mode on your credential\n")
+				fmt.Fprintf(cmd.OutOrStdout(), "removed the %s access grant from your credential\n", aclUser())
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), "note: workspaces already running keep what was composed into them until 'down'")
 			return nil
@@ -279,10 +288,7 @@ func resolveCredentialSource(flagValue string) (string, error) {
 
 // publishCredential links (or copies) src to dest, creating the directories the
 // daemon needs to traverse. Re-publishing repairs a decoupled link.
-func publishCredential(src, dest string, copyMode bool) (string, error) {
-	// Captured BEFORE the grant so a re-publish does not record the granted mode as if
-	// it were the original.
-	prior := priorMarkerOwnership(dest, src)
+func publishCredential(ctx context.Context, src, dest string, copyMode bool) (string, error) {
 	dir := filepath.Dir(dest)
 	// 0751 — traverse-only for others, deliberately, and it is the crux of this design
 	// working without touching group membership: this command runs as YOU, so anything
@@ -310,10 +316,10 @@ func publishCredential(src, dest string, copyMode bool) (string, error) {
 		if err := copyFile(src, dest); err != nil {
 			return "", err
 		}
-		if err := grantDaemonAccess(dest); err != nil {
+		if err := grantDaemonAccess(ctx, dest); err != nil {
 			return "", err
 		}
-		writeCredentialMarker(dest, credentialModeCopy, src, prior)
+		writeCredentialMarker(dest, credentialModeCopy, src)
 		return fmt.Sprintf("published a COPY of %s → %s", src, dest), nil
 	}
 	if err := os.Link(src, dest); err != nil {
@@ -321,76 +327,105 @@ func publishCredential(src, dest string, copyMode bool) (string, error) {
 	}
 	// The grant is applied to the shared INODE, so it covers the operator's own file
 	// too — see credentialSharedMode for why there is no narrower option.
-	if err := grantDaemonAccess(dest); err != nil {
+	if err := grantDaemonAccess(ctx, dest); err != nil {
 		return "", err
 	}
-	writeCredentialMarker(dest, credentialModeLink, src, prior)
+	writeCredentialMarker(dest, credentialModeLink, src)
 	return fmt.Sprintf("published %s → %s (hard link: one live credential, shared with workspaces)", src, dest), nil
 }
 
-// daemonGID resolves the group publishing grants access to. It is a seam so tests can
-// use their own group: chgrp to a group the calling process is not an ACTIVE member of
-// is EPERM, regardless of /etc/group.
-var daemonGID = func() (int, error) { return lookupGroupID(credentialGroup) }
+// aclUser is a seam: tests grant their own account, since granting `aped` requires that
+// account to exist on the machine running the tests.
+var aclUser = func() string { return credentialACLUser }
 
-// grantDaemonAccess gives the aped group read+write on the credential so aped-front can
-// take part in the shared session. Ownership stays with the operator.
-func grantDaemonAccess(path string) error {
-	gid, err := daemonGID()
+// ErrNoACLTooling reports that setfacl is unavailable. There is deliberately NO fallback
+// to a group grant: the two differ in WHO gains access, so silently substituting the
+// broader one would hand the credential to every member of group `ape` while the
+// operator believed they had granted a single account.
+var ErrNoACLTooling = errors.New("setfacl not found: the acl package is required to share a credential with aped")
+
+// grantDaemonAccess adds a POSIX ACL entry giving the aped user read+write on the
+// credential, leaving owner, group and mode untouched.
+func grantDaemonAccess(ctx context.Context, path string) error {
+	if _, err := exec.LookPath("setfacl"); err != nil {
+		return fmt.Errorf("%w\n  install it: sudo apt install acl", ErrNoACLTooling)
+	}
+	out, err := exec.CommandContext(ctx, "setfacl", "-m", "u:"+aclUser()+":rw", path).CombinedOutput() //nolint:gosec // fixed argv; path is ape-derived
 	if err != nil {
-		return fmt.Errorf("group %q not found — is aped installed on this host? %w", credentialGroup, err)
-	}
-	if err := os.Chown(path, -1, gid); err != nil {
-		return fmt.Errorf("grant group %s access to %s: %w\n"+
-			"  chgrp needs %s in your ACTIVE group list, not just /etc/group — a shell opened before you were "+
-			"added to it will fail here. Start a new login session (or run `newgrp %s`) and re-publish",
-			credentialGroup, path, err, credentialGroup, credentialGroup)
-	}
-	if err := os.Chmod(path, credentialSharedMode); err != nil {
-		return fmt.Errorf("set mode on %s: %w", path, err)
+		msg := strings.TrimSpace(string(out))
+		if strings.Contains(strings.ToLower(msg), "not supported") {
+			return fmt.Errorf("grant %s access to %s: %s\n"+
+				"  the filesystem holding it is mounted without ACL support — mount it with `acl`, or keep "+
+				"credentials on a filesystem that has it", aclUser(), path, msg)
+		}
+		return fmt.Errorf("grant %s access to %s: %s", aclUser(), path, msg)
 	}
 	return nil
 }
 
-// lookupGroupID resolves a group name to its gid.
-func lookupGroupID(name string) (int, error) {
-	g, err := user.LookupGroup(name)
-	if err != nil {
-		return 0, err
+// revokeDaemonAccess removes the ACL entry, returning the credential to exactly the
+// permissions it had before publishing.
+func revokeDaemonAccess(ctx context.Context, path string) bool {
+	if _, err := exec.LookPath("setfacl"); err != nil {
+		return false
 	}
-	return strconv.Atoi(g.Gid)
+	return exec.CommandContext(ctx, "setfacl", "-x", "u:"+aclUser(), path).Run() == nil //nolint:gosec // fixed argv
 }
 
-// fileExists reports whether path is a readable existing file.
+// groupHasNoAccess reports whether the OWNING GROUP still has no access.
+//
+// It exists because of a genuinely confusing detail of POSIX ACLs: adding a user entry
+// creates an ACL MASK, and the mask is stored in the mode's group bits — so `ls -l`
+// starts showing `-rw-rw----+` even though `group::---` means the owning group can do
+// nothing. Reading the mode alone would suggest the grant is far broader than it is, in
+// either direction, so the narrowness of the grant is asserted here rather than inferred
+// from permissions.
+func groupHasNoAccess(ctx context.Context, path string) bool {
+	if _, err := exec.LookPath("getfacl"); err != nil {
+		return false
+	}
+	out, err := exec.CommandContext(ctx, "getfacl", "-cE", path).Output()
+	if err != nil {
+		return false
+	}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		if strings.TrimSpace(line) == "group::---" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasDaemonAccess reports whether the ACL entry is present. `status` shows this because
+// `ls -l` renders only a bare `+` and says nothing about who the entry is for.
+func hasDaemonAccess(ctx context.Context, path string) bool {
+	if _, err := exec.LookPath("getfacl"); err != nil {
+		return false
+	}
+	out, err := exec.CommandContext(ctx, "getfacl", "-cE", path).Output()
+	if err != nil {
+		return false
+	}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		t := strings.TrimSpace(line)
+		if strings.HasPrefix(t, "user:"+aclUser()+":") && strings.Contains(t, "r") && strings.Contains(t, "w") {
+			return true
+		}
+	}
+	return false
+}
+
+// fileExists reports whether path is an existing regular file.
 func fileExists(path string) bool {
 	st, err := os.Stat(path)
 	return err == nil && !st.IsDir()
 }
 
-// credentialMarker is the recorded publication.
+// credentialMarker is the recorded publication: how it was published (which is the only
+// way to tell a decoupled link from a deliberate copy) and what it came from.
 type credentialMarker struct {
 	Mode   string `json:"mode"`
 	Source string `json:"source"`
-	// Prior is the credential's group and mode before publishing granted the daemon
-	// access, so `revoke` can restore them instead of leaving the operator's file
-	// permanently group-writable.
-	Prior *credentialOwnership `json:"prior,omitempty"`
-}
-
-// credentialOwnership is a file's group + permission bits.
-type credentialOwnership struct {
-	GID  int    `json:"gid"`
-	Mode uint32 `json:"mode"`
-}
-
-// priorMarkerOwnership returns the ownership to record: the one already recorded (so a
-// re-publish keeps the ORIGINAL, not the granted state), else the source file's current
-// ownership.
-func priorMarkerOwnership(dest, src string) *credentialOwnership {
-	if m, ok := readCredentialMarker(dest); ok && m.Prior != nil {
-		return m.Prior
-	}
-	return priorOwnership(src)
 }
 
 // markerPath returns the marker beside a published credential.
@@ -398,8 +433,8 @@ func markerPath(dest string) string { return filepath.Join(filepath.Dir(dest), c
 
 // writeCredentialMarker records the publication mode. Best-effort: losing it degrades
 // `status` to "cannot tell link from copy", never the credential itself.
-func writeCredentialMarker(dest, mode, source string, prior *credentialOwnership) {
-	data, err := json.Marshal(credentialMarker{Mode: mode, Source: source, Prior: prior})
+func writeCredentialMarker(dest, mode, source string) {
+	data, err := json.Marshal(credentialMarker{Mode: mode, Source: source})
 	if err == nil {
 		_ = os.WriteFile(markerPath(dest), data, 0o600)
 	}
@@ -418,20 +453,6 @@ func readCredentialMarker(dest string) (credentialMarker, bool) {
 	return m, true
 }
 
-// restoreOwnership puts back the group and mode recorded before publishing granted the
-// daemon access. Best-effort: reporting a failure here would be noise on a teardown the
-// operator can repeat.
-func restoreOwnership(dest string) bool {
-	m, ok := readCredentialMarker(dest)
-	if !ok || m.Prior == nil {
-		return false
-	}
-	if err := os.Chown(dest, -1, m.Prior.GID); err != nil {
-		return false
-	}
-	return os.Chmod(dest, os.FileMode(m.Prior.Mode)) == nil
-}
-
 // RepairCredentialPublication re-links an EXISTING publication whose link decoupled,
 // and reports whether it did anything.
 //
@@ -443,7 +464,7 @@ func restoreOwnership(dest string) bool {
 // It deliberately never CREATES a publication — no publication means no grant, and
 // `up` must not invent one. It also leaves a `--copy` publication alone: the user chose
 // isolation, and silently re-linking would undo that choice.
-func RepairCredentialPublication(rootFlag, sourceFlag string) (repaired bool, err error) {
+func RepairCredentialPublication(ctx context.Context, rootFlag, sourceFlag string) (repaired bool, err error) {
 	dest := credentialDest(rootFlag)
 	// "Nothing published" is the normal case, not a failure: most workspaces never use
 	// a host credential, so an absent publication means there is simply nothing to
@@ -468,14 +489,15 @@ func RepairCredentialPublication(rootFlag, sourceFlag string) (repaired bool, er
 		return false, nil //nolint:nilerr // an unreadable pair means "cannot repair", not "create failed"
 	}
 	if os.SameFile(si, di) {
-		// Still the same inode, but a login may have reset the mode on it; re-assert the
-		// grant so the daemon does not silently lose access.
-		if st, serr := os.Stat(dest); serr == nil && st.Mode().Perm() != credentialSharedMode {
-			return false, grantDaemonAccess(dest)
+		// Same inode, but the grant may have been dropped (a login creates a fresh inode
+		// with no ACL, and a re-published link inherits whatever it has); re-assert it so
+		// the daemon does not silently lose access.
+		if !hasDaemonAccess(ctx, dest) {
+			return false, grantDaemonAccess(ctx, dest)
 		}
 		return false, nil
 	}
-	if _, err := publishCredential(src, dest, false); err != nil {
+	if _, err := publishCredential(ctx, src, dest, false); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -508,16 +530,22 @@ type CredentialStatus struct {
 	Present   bool   `json:"present"`
 	Mode      string `json:"mode,omitempty"` // link | copy
 	Live      bool   `json:"live"`           // link still points at the source inode
+	Granted   bool   `json:"granted"`        // the aped user has the ACL entry it needs
 	Detail    string `json:"detail,omitempty"`
 }
 
 // summary renders the human line.
 func (s CredentialStatus) summary() string {
+	if s.Present && !s.Granted {
+		return fmt.Sprintf("published at %s but %s has NO access to it — workspaces will fail to start; "+
+			"re-run 'ape sandbox credentials publish'", s.Published, credentialACLUser)
+	}
 	switch {
 	case !s.Present:
 		return fmt.Sprintf("not published (%s) — run 'ape sandbox credentials publish'", s.Published)
 	case s.Mode == credentialModeLink && s.Live:
-		return fmt.Sprintf("published as a live hard link: %s ↔ %s", s.Published, s.Source)
+		return fmt.Sprintf("published as a live hard link: %s ↔ %s (%s granted rw via ACL)",
+			s.Published, s.Source, credentialACLUser)
 	case s.Mode == credentialModeLink:
 		return fmt.Sprintf("published link is STALE — %s. Workspaces would get the old credential; "+
 			"re-run 'ape sandbox credentials publish' (or just 'ape sandbox up', which repairs it)",
@@ -528,7 +556,7 @@ func (s CredentialStatus) summary() string {
 }
 
 // credentialStatus inspects the published path and compares it with the source.
-func credentialStatus(sourceFlag, dest string) CredentialStatus {
+func credentialStatus(ctx context.Context, sourceFlag, dest string) CredentialStatus {
 	st := CredentialStatus{Published: dest}
 	src, err := resolveCredentialSource(sourceFlag)
 	if err != nil {
@@ -541,6 +569,7 @@ func credentialStatus(sourceFlag, dest string) CredentialStatus {
 		return st
 	}
 	st.Present = true
+	st.Granted = hasDaemonAccess(ctx, dest)
 	marker, haveMarker := readCredentialMarker(dest)
 	if haveMarker {
 		st.Mode = marker.Mode

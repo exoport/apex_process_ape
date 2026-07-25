@@ -91,9 +91,16 @@
   workspace copies are replaced by rename so a reader never sees a partial file. It
   never creates a credential where none exists (a revoked one stays revoked) and never
   propagates content that is not valid JSON (a torn read must not reach every
-  workspace). Publishing now also grants the aped group read+write on the credential —
-  unavoidable for a daemon running as another user to take part, and `revoke` restores
-  the original group and mode.
+  workspace). Publishing grants access with a **POSIX ACL entry for exactly the `aped`
+  user** (`setfacl -m u:aped:rw`), which read-only cannot replace because a workspace's
+  refreshed token has to be written back through that file. A group grant was rejected
+  deliberately: group `ape` is also the priv-socket gate, so it would share the
+  credential with every operator added there, and `chgrp` additionally fails with EPERM
+  in any shell opened before you joined the group. There is **no fallback** — `ape
+  doctor` reports a host without `setfacl` as `sandbox.credential-acl`, `publish` fails
+  with that reason, and a workspace whose credential the daemon cannot read fails with
+  the ACL as the named cause. `revoke` removes the entry. (Note `ls -l` then shows
+  `-rw-rw----+`: those group bits are the ACL mask, not group access.)
 - **fix(sandbox): each workspace gets its own writable credential COPY, not a bind
   mount** — `claude` replaces its credential file by rename (a login does this, and a
   token refresh takes the same path), and a single-file bind mount cannot be renamed

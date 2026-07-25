@@ -1,7 +1,10 @@
 package apecmd
 
 import (
+	"context"
 	"os"
+	"os/exec"
+	"os/user"
 	"path/filepath"
 	"testing"
 
@@ -11,26 +14,30 @@ import (
 
 // credFixture writes a fake host credential and returns (source, publishDest).
 //
-// It also points the daemon-group grant at the test process's OWN group: chgrp to a
-// group the process is not an active member of is EPERM, so using the real `ape` group
-// would make these tests depend on the developer's session groups rather than on the
-// code.
-func credFixture(t *testing.T) (source, dest string) {
+// It also points the ACL grant at the CURRENT user, because granting `aped` requires
+// that account to exist on whatever machine runs the tests. What is under test is the
+// grant mechanism, not the account name.
+func credFixture(t *testing.T) (ctx context.Context, source, dest string) {
 	t.Helper()
-	restore := daemonGID
-	daemonGID = func() (int, error) { return os.Getgid(), nil }
-	t.Cleanup(func() { daemonGID = restore })
+	if _, err := exec.LookPath("setfacl"); err != nil {
+		t.Skip("setfacl not installed: the credential grant is ACL-only by design")
+	}
+	me, err := user.Current()
+	require.NoError(t, err)
+	restore := aclUser
+	aclUser = func() string { return me.Username }
+	t.Cleanup(func() { aclUser = restore })
 	home := t.TempDir()
 	source = filepath.Join(home, ".claude", ".credentials.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(source), 0o700))
 	require.NoError(t, os.WriteFile(source, []byte(`{"access_token":"live-1"}`), 0o600))
-	return source, filepath.Join(t.TempDir(), "diegos", credentialRelPath)
+	return t.Context(), source, filepath.Join(t.TempDir(), "diegos", credentialRelPath)
 }
 
 func TestPublishCredentialHardLinkSharesOneInode(t *testing.T) {
-	src, dest := credFixture(t)
+	ctx, src, dest := credFixture(t)
 
-	msg, err := publishCredential(src, dest, false)
+	msg, err := publishCredential(ctx, src, dest, false)
 	require.NoError(t, err)
 	assert.Contains(t, msg, "hard link")
 
@@ -48,9 +55,13 @@ func TestPublishCredentialHardLinkSharesOneInode(t *testing.T) {
 	assert.Contains(t, string(back), "refreshed")
 
 	// And the source's permissions are untouched — the daemon only stat()s this path.
-	// Publishing grants the daemon group access on the shared inode — the unavoidable
-	// cost of one live session shared with a daemon running as another user.
-	assert.Equal(t, os.FileMode(credentialSharedMode), si.Mode().Perm())
+	// The grant is exactly one user. Note what `ls -l` will show: adding a user ACL
+	// creates a MASK, and the mask lives in the mode's group bits, so the file reads as
+	// 0660 (`-rw-rw----+`) even though the owning GROUP has no access at all. Asserting
+	// the mode would therefore assert the confusing artefact; assert the real grant.
+	assert.Equal(t, os.FileMode(0o660), si.Mode().Perm(), "group bits carry the ACL mask, not group access")
+	assert.True(t, hasDaemonAccess(ctx, dest), "the publication must carry the ACL entry the daemon needs")
+	assert.True(t, groupHasNoAccess(ctx, src), "the owning group gains nothing — this is what a group grant would not give us")
 	// The parent directory must be TRAVERSABLE by the daemon's service user, which is
 	// not in the publishing user's primary group — hence traverse-only for others,
 	// while the credential itself stays unreadable.
@@ -61,9 +72,9 @@ func TestPublishCredentialHardLinkSharesOneInode(t *testing.T) {
 }
 
 func TestPublishCredentialCopyIsIndependent(t *testing.T) {
-	src, dest := credFixture(t)
+	ctx, src, dest := credFixture(t)
 
-	msg, err := publishCredential(src, dest, true)
+	msg, err := publishCredential(ctx, src, dest, true)
 	require.NoError(t, err)
 	assert.Contains(t, msg, "COPY")
 
@@ -71,8 +82,8 @@ func TestPublishCredentialCopyIsIndependent(t *testing.T) {
 	di, err := os.Stat(dest)
 	require.NoError(t, err)
 	assert.False(t, os.SameFile(si, di))
-	assert.Equal(t, os.FileMode(credentialSharedMode), di.Mode().Perm(),
-		"even a copy must be group-accessible, or the daemon cannot read it")
+	assert.True(t, hasDaemonAccess(ctx, dest), "a copy needs the grant too, or the daemon cannot read it")
+	assert.True(t, groupHasNoAccess(ctx, dest), "still only one user, never the group")
 
 	// Divergence is the documented consequence, so pin it: writing one leaves the
 	// other alone.
@@ -83,10 +94,10 @@ func TestPublishCredentialCopyIsIndependent(t *testing.T) {
 }
 
 func TestPublishCredentialIsIdempotentAndRepairsAStaleLink(t *testing.T) {
-	src, dest := credFixture(t)
-	_, err := publishCredential(src, dest, false)
+	ctx, src, dest := credFixture(t)
+	_, err := publishCredential(ctx, src, dest, false)
 	require.NoError(t, err)
-	_, err = publishCredential(src, dest, false)
+	_, err = publishCredential(ctx, src, dest, false)
 	require.NoError(t, err, "re-publishing must not fail on an existing target")
 
 	// Simulate the host replacing its credential file (write temp + rename), which
@@ -95,20 +106,20 @@ func TestPublishCredentialIsIdempotentAndRepairsAStaleLink(t *testing.T) {
 	require.NoError(t, os.WriteFile(tmp, []byte(`{"access_token":"rotated"}`), 0o600))
 	require.NoError(t, os.Rename(tmp, src))
 
-	st := credentialStatus(src, dest)
+	st := credentialStatus(ctx, src, dest)
 	assert.True(t, st.Present)
 	assert.False(t, st.Live, "a decoupled link must be reported as not live")
 
-	_, err = publishCredential(src, dest, false)
+	_, err = publishCredential(ctx, src, dest, false)
 	require.NoError(t, err)
-	st = credentialStatus(src, dest)
+	st = credentialStatus(ctx, src, dest)
 	assert.True(t, st.Live, "re-publishing repairs it")
 	assert.Equal(t, credentialModeLink, st.Mode)
 }
 
 func TestCredentialStatusWhenNothingPublished(t *testing.T) {
-	src, dest := credFixture(t)
-	st := credentialStatus(src, dest)
+	ctx, src, dest := credFixture(t)
+	st := credentialStatus(ctx, src, dest)
 	assert.False(t, st.Present)
 	assert.Contains(t, st.summary(), "not published")
 }
@@ -133,17 +144,17 @@ func TestCredentialRootPrecedence(t *testing.T) {
 // deliberate copy. Reporting "copy" there gave the user no reason to re-publish while
 // their workspaces silently held the pre-login token.
 func TestStaleLinkIsReportedAsStaleNotAsACopy(t *testing.T) {
-	src, dest := credFixture(t)
-	_, err := publishCredential(src, dest, false)
+	ctx, src, dest := credFixture(t)
+	_, err := publishCredential(ctx, src, dest, false)
 	require.NoError(t, err)
-	require.True(t, credentialStatus(src, dest).Live)
+	require.True(t, credentialStatus(ctx, src, dest).Live)
 
 	// Replace the source the way a login does: write a new file, rename over it.
 	tmp := src + ".new"
 	require.NoError(t, os.WriteFile(tmp, []byte(`{"access_token":"post-login"}`), 0o600))
 	require.NoError(t, os.Rename(tmp, src))
 
-	st := credentialStatus(src, dest)
+	st := credentialStatus(ctx, src, dest)
 	require.True(t, st.Present)
 	assert.False(t, st.Live)
 	assert.Equal(t, credentialModeLink, st.Mode, "a decoupled link must not be reported as a copy")
@@ -152,21 +163,21 @@ func TestStaleLinkIsReportedAsStaleNotAsACopy(t *testing.T) {
 }
 
 func TestRepairRelinksAStalePublicationButNeverCreatesOne(t *testing.T) {
-	src, dest := credFixture(t)
+	ctx, src, dest := credFixture(t)
 	root := filepath.Dir(filepath.Dir(filepath.Dir(dest))) // <root>/<user>/.claude/file
 	t.Setenv("APE_CREDENTIAL_ROOT", root)
 	t.Setenv("USER", filepath.Base(filepath.Dir(filepath.Dir(dest))))
 
 	// Nothing published yet: repair must NOT invent a grant.
-	repaired, err := RepairCredentialPublication("", src)
+	repaired, err := RepairCredentialPublication(ctx, "", src)
 	require.NoError(t, err)
 	assert.False(t, repaired)
 	assert.NoFileExists(t, dest)
 
 	// Published and live → nothing to do.
-	_, err = publishCredential(src, dest, false)
+	_, err = publishCredential(ctx, src, dest, false)
 	require.NoError(t, err)
-	repaired, err = RepairCredentialPublication("", src)
+	repaired, err = RepairCredentialPublication(ctx, "", src)
 	require.NoError(t, err)
 	assert.False(t, repaired)
 
@@ -174,10 +185,10 @@ func TestRepairRelinksAStalePublicationButNeverCreatesOne(t *testing.T) {
 	tmp := src + ".new"
 	require.NoError(t, os.WriteFile(tmp, []byte(`{"access_token":"post-login"}`), 0o600))
 	require.NoError(t, os.Rename(tmp, src))
-	repaired, err = RepairCredentialPublication("", src)
+	repaired, err = RepairCredentialPublication(ctx, "", src)
 	require.NoError(t, err)
 	assert.True(t, repaired)
-	assert.True(t, credentialStatus(src, dest).Live)
+	assert.True(t, credentialStatus(ctx, src, dest).Live)
 	content, err := os.ReadFile(dest)
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "post-login", "the repaired link must carry the NEW credential")
@@ -185,18 +196,18 @@ func TestRepairRelinksAStalePublicationButNeverCreatesOne(t *testing.T) {
 
 func TestRepairLeavesACopyPublicationAlone(t *testing.T) {
 	// --copy is a deliberate choice for isolation; silently re-linking would undo it.
-	src, dest := credFixture(t)
+	ctx, src, dest := credFixture(t)
 	root := filepath.Dir(filepath.Dir(filepath.Dir(dest)))
 	t.Setenv("APE_CREDENTIAL_ROOT", root)
 	t.Setenv("USER", filepath.Base(filepath.Dir(filepath.Dir(dest))))
 
-	_, err := publishCredential(src, dest, true)
+	_, err := publishCredential(ctx, src, dest, true)
 	require.NoError(t, err)
 	tmp := src + ".new"
 	require.NoError(t, os.WriteFile(tmp, []byte(`{"access_token":"post-login"}`), 0o600))
 	require.NoError(t, os.Rename(tmp, src))
 
-	repaired, err := RepairCredentialPublication("", src)
+	repaired, err := RepairCredentialPublication(ctx, "", src)
 	require.NoError(t, err)
 	assert.False(t, repaired)
 	content, err := os.ReadFile(dest)
@@ -204,39 +215,53 @@ func TestRepairLeavesACopyPublicationAlone(t *testing.T) {
 	assert.NotContains(t, string(content), "post-login", "a copy stays as the user left it")
 }
 
-func TestRevokeRestoresTheOriginalGroupAndMode(t *testing.T) {
-	// Publishing has to loosen the credential's mode so the daemon can join the session;
-	// revoke must put that back, or "revoke" would leave the operator's own file
-	// permanently group-writable for no reason.
-	src, dest := credFixture(t)
-	before, err := os.Stat(src)
+func TestRevokeRemovesTheACLGrant(t *testing.T) {
+	// Revoke must take the grant off the shared inode, not just unlink the extra name —
+	// otherwise the operator's own credential stays readable by the daemon after they
+	// explicitly revoked it.
+	ctx, src, dest := credFixture(t)
+	_, err := publishCredential(ctx, src, dest, false)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), before.Mode().Perm(), "fixture starts private")
+	require.True(t, hasDaemonAccess(ctx, src), "the grant lands on the shared inode, so it covers the source too")
 
-	_, err = publishCredential(src, dest, false)
-	require.NoError(t, err)
-	granted, err := os.Stat(src)
-	require.NoError(t, err)
-	require.Equal(t, os.FileMode(credentialSharedMode), granted.Mode().Perm(),
-		"the grant lands on the shared inode, so it covers the operator's file too")
+	assert.True(t, revokeDaemonAccess(ctx, dest))
+	assert.False(t, hasDaemonAccess(ctx, src), "revoke removes it from the operator's file as well")
 
-	assert.True(t, restoreOwnership(dest), "the prior mode was recorded")
-	after, err := os.Stat(src)
+	info, err := os.Stat(src)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), after.Mode().Perm(), "revoke restores the original mode")
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
+		"removing the ACL removes the mask too, so the mode returns to plain 0600")
 }
 
-func TestRepublishKeepsTheOriginalOwnershipRecord(t *testing.T) {
-	// A second publish must not record the ALREADY-GRANTED mode as if it were the
-	// original — that would make revoke a no-op and silently leave the file exposed.
-	src, dest := credFixture(t)
-	_, err := publishCredential(src, dest, false)
-	require.NoError(t, err)
-	_, err = publishCredential(src, dest, false)
+func TestRepairReassertsTheGrantWhenItIsMissing(t *testing.T) {
+	// A login creates a fresh inode with no ACL. Re-publishing must restore the grant, or
+	// workspaces silently stop being able to read the credential.
+	ctx, src, dest := credFixture(t)
+	root := filepath.Dir(filepath.Dir(filepath.Dir(dest)))
+	t.Setenv("APE_CREDENTIAL_ROOT", root)
+	t.Setenv("USER", filepath.Base(filepath.Dir(filepath.Dir(dest))))
+	_, err := publishCredential(ctx, src, dest, false)
 	require.NoError(t, err)
 
-	m, ok := readCredentialMarker(dest)
-	require.True(t, ok)
-	require.NotNil(t, m.Prior)
-	assert.Equal(t, uint32(0o600), m.Prior.Mode, "the recorded prior mode is the pre-grant one")
+	require.True(t, revokeDaemonAccess(ctx, dest)) // simulate the grant being lost
+	require.False(t, hasDaemonAccess(ctx, dest))
+
+	_, err = RepairCredentialPublication(ctx, "", src)
+	require.NoError(t, err)
+	assert.True(t, hasDaemonAccess(ctx, dest), "repair re-asserts the grant even when the link is still live")
+}
+
+func TestStatusReportsAMissingGrant(t *testing.T) {
+	// `ls -l` shows only a bare `+`, so status is where an operator learns the grant is
+	// absent — before a workspace fails to start for a reason that looks unrelated.
+	ctx, src, dest := credFixture(t)
+	_, err := publishCredential(ctx, src, dest, false)
+	require.NoError(t, err)
+	require.True(t, credentialStatus(ctx, src, dest).Granted)
+
+	require.True(t, revokeDaemonAccess(ctx, dest))
+	st := credentialStatus(ctx, src, dest)
+	assert.False(t, st.Granted)
+	assert.Contains(t, st.summary(), "NO access")
+	assert.Contains(t, st.summary(), "credentials publish")
 }

@@ -116,7 +116,11 @@ func dialVMM(cmd *cobra.Command) (*vmmclient.Client, *nats.Conn, func(), error) 
 	// Repairing here means any sandbox command puts it right, rather than the operator
 	// having to remember a re-publish after every login. It only ever refreshes an
 	// EXISTING publication, never creates one.
-	if repaired, rerr := RepairCredentialPublication("", ""); rerr == nil && repaired {
+	if repaired, rerr := RepairCredentialPublication(cmd.Context(), "", ""); rerr != nil {
+		// Worth a warning, not a hard failure: read-only verbs (`ls`, `inspect`) work
+		// fine without a credential, and `up` fails with its own precise error.
+		fmt.Fprintf(cmd.ErrOrStderr(), "! could not refresh the published Claude credential: %v\n", rerr)
+	} else if repaired {
 		fmt.Fprintln(cmd.ErrOrStderr(), "re-published the host credential (it had been replaced since the last publish)")
 	}
 

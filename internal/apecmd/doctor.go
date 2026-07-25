@@ -140,6 +140,7 @@ var allChecks = []doctorCheck{
 	{Name: "containerd.running", Run: checkContainerdRunning},
 	{Name: "kata.runtime", Run: checkKataRuntime},
 	{Name: "sandbox.image", Run: checkSandboxImage},
+	{Name: "sandbox.credential-acl", Run: checkSandboxCredentialACL},
 }
 
 func newDoctorCmd() *cobra.Command {

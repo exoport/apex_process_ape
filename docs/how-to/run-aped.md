@@ -444,9 +444,34 @@ file, and because a host login replaces that file (verified — the inode change
 reports a decoupled link as `STALE`. Workspaces already running keep the copy they were
 created with.
 
-Published directories are `0751` — traverse-only — because a command running as you
-creates files with *your* group, which the daemon's user is not in; traversal exposes a
-path, not a secret. The credential itself stays `0600` at every hop.
+### The access grant
+
+`publish` adds a **POSIX ACL entry** granting exactly the `aped` user read+write:
+
+```bash
+getfacl -cE ~/.claude/.credentials.json
+#   user::rw-
+#   user:aped:rw-      ← the grant
+#   group::---         ← the group gains NOTHING
+```
+
+Read-only would not be enough — a workspace's refreshed token has to be written *back*
+through that file — and a group grant was rejected on purpose: group `ape` is also the
+priv-socket gate, so it would hand your credential to every operator added there later.
+`setfacl` also works from any shell, whereas `chgrp` needs the group in your *active*
+session and fails with `EPERM` in a shell opened before you were added to it.
+
+There is **no fallback**. A host without the `acl` package cannot share a session, and
+`ape doctor` reports that as `sandbox.credential-acl` rather than letting it surface as a
+workspace that mysteriously fails to start.
+
+> `ls -l` will show the credential as `-rw-rw----+`. The group bits are the ACL **mask**,
+> not group access — `group::---` above is the truth. Use `getfacl`, or
+> `ape sandbox credentials status`, which prints the effective grant.
+
+`revoke` removes the entry, returning the file to plain `0600`. Published directories are
+`0751` (traverse-only) because a command running as you creates files with *your* group;
+traversal exposes a path, not a secret.
 
 ## The framework mount + durable tool caches
 

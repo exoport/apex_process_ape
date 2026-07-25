@@ -303,8 +303,16 @@ func composeCredentials(opts ComposeOptions, comp *Composition, _ string) error 
 		hostCred := filepath.Join(opts.HostHome, ".claude", ".credentials.json")
 		data, err := os.ReadFile(hostCred)
 		if err != nil {
-			return fmt.Errorf("compose: mode-A credentials file not readable at %s: %w "+
-				"(publish it with `ape sandbox credentials publish`)", hostCred, err)
+			// Distinguish the two failures deliberately: "not there" and "there but this
+			// daemon may not read it" have different fixes, and the second is the one an
+			// operator hits after a login replaced the credential and dropped its ACL.
+			hint := "publish it with `ape sandbox credentials publish`"
+			if _, statErr := os.Stat(hostCred); statErr == nil {
+				hint = "the file exists but this daemon cannot read it — the ACL grant for its user is " +
+					"missing (a `claude /login` replaces the credential and drops it). " +
+					"Re-run `ape sandbox credentials publish`, then check `ape sandbox credentials status`"
+			}
+			return fmt.Errorf("compose: workspace credential unavailable at %s: %w\n  %s", hostCred, err, hint)
 		}
 		dest := filepath.Join(opts.StagingDir, ".claude", ".credentials.json")
 		if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {

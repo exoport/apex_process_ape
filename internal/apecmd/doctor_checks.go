@@ -513,6 +513,44 @@ func checkKataRuntime(_ context.Context, env doctorEnv) CheckResult {
 // pulled. It stays informational: inspecting the image store needs a
 // containerd round-trip that may require privileges and could hang, which a
 // health probe must not risk.
+// checkSandboxCredentialACL verifies the host can grant aped access to a shared Claude
+// credential, which is ACL-only by design: a group grant would hand the credential to
+// every member of group `ape` (also the priv-socket gate), and `chgrp` additionally needs
+// the group in the caller's ACTIVE session. There is no fallback, so a host without
+// `setfacl` simply cannot share a session — better surfaced here than as a workspace that
+// fails to start.
+func checkSandboxCredentialACL(ctx context.Context, env doctorEnv) CheckResult {
+	if env.OS != "linux" {
+		return CheckResult{Status: StatusInfo, Message: "sandbox credential sharing is Linux-only; not probed on " + env.OS}
+	}
+	if _, err := exec.LookPath("setfacl"); err != nil {
+		return CheckResult{
+			Status:      StatusWarn,
+			Message:     "setfacl not found — 'ape sandbox credentials publish' cannot grant aped access to your Claude session",
+			Remediation: "Install the acl package. Without it, workspaces cannot share your OAuth session (there is deliberately no broader fallback).",
+			FixCommand:  "sudo apt install acl",
+		}
+	}
+	// Present, but the filesystem holding the credential must also support ACLs — a
+	// mount without them fails at publish time with "Operation not supported".
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return CheckResult{Status: StatusOK, Message: "setfacl present"}
+	}
+	probe := filepath.Join(home, ".claude")
+	if _, serr := os.Stat(probe); serr != nil {
+		return CheckResult{Status: StatusOK, Message: "setfacl present (no ~/.claude yet to probe)"}
+	}
+	if out, gerr := exec.CommandContext(ctx, "getfacl", "-cE", probe).CombinedOutput(); gerr != nil {
+		return CheckResult{
+			Status:      StatusWarn,
+			Message:     fmt.Sprintf("ACLs unavailable on %s: %s", probe, strings.TrimSpace(string(out))),
+			Remediation: "Mount the filesystem holding ~/.claude with the `acl` option, or keep credentials on one that has it.",
+		}
+	}
+	return CheckResult{Status: StatusOK, Message: "setfacl present and ~/.claude supports ACLs"}
+}
+
 func checkSandboxImage(_ context.Context, env doctorEnv) CheckResult {
 	if env.OS != "linux" {
 		return CheckResult{Status: StatusInfo, Message: "not probed on non-Linux"}

@@ -284,7 +284,7 @@ func TestComposeModeAMissingCredentialsFails(t *testing.T) {
 	p := &Profile{Name: "a", Credentials: CredentialOAuth}
 	_, err := Compose(ComposeOptions{Profile: p, StagingDir: staging, HostHome: t.TempDir()})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "credentials file not readable")
+	assert.Contains(t, err.Error(), "workspace credential unavailable")
 	assert.Contains(t, err.Error(), "ape sandbox credentials publish", "the error must say how to fix it")
 }
 
