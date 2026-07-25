@@ -146,6 +146,13 @@ func (p *privClient) Create(ctx context.Context, req workspace.CreateRequest) (w
 	}
 	var ws workspace.Workspace
 	err = p.call(Command{Op: OpCreate, Create: &CreateCommand{Spec: spec}}, &ws)
+	if err != nil && p.onDestroy != nil {
+		// Resolving already allocated front-side resources (the workspace's egress
+		// proxy holds a listener and a port). A create the executor then refused would
+		// otherwise leak them until someone ran `down` on a workspace that never
+		// existed. The hook is idempotent.
+		p.onDestroy(spec.Name)
+	}
 	return ws, err
 }
 

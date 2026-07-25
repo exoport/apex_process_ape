@@ -13,6 +13,19 @@
 # the shipped unit — so this adds BindReadOnlyPaths= WITHOUT editing the packaged
 # aped.service / aped-front.service.
 #
+# NOT SUFFICIENT ON ITS OWN (found live, 2026-07-24): the bind makes the directory
+# VISIBLE, but the executor is root with an EMPTY capability set, so it has no
+# CAP_DAC_READ_SEARCH and cannot traverse a home whose mode denies "other" — a
+# typical /home/you is 0750. The mount then fails with
+# "lstat /home/you: permission denied". Make the home traversable (execute only, so
+# its contents stay unlistable) as its owner:
+#
+#   chmod o+x /home/you          # 0750 -> 0751; no sudo needed, you own it
+#
+# Granting the executor CAP_DAC_READ_SEARCH instead would work, but it widens the
+# "root without power" executor for a convenience — prefer the chmod, or keep
+# projects under a root outside /home.
+#
 # To use:
 #   1. Pick the directory you keep projects in, e.g. /home/you/projects, and set
 #      it below (edit BOTH the path here and step 3).
@@ -23,6 +36,7 @@
 #        install -D -m0644 mount-root.conf.example \
 #          /etc/systemd/system/aped-front.service.d/10-mount-root.conf
 #   3. Add that same path to /etc/aped/policy.yaml mount_roots.
+#   3b. Ensure every parent directory is traversable by the daemon (see above).
 #   4. systemctl daemon-reload, then restart aped socket-first (docs/how-to/run-aped.md).
 #
 # A mount root OUTSIDE /home and /root (e.g. the default /srv/workspaces) needs

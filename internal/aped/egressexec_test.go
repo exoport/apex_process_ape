@@ -198,3 +198,22 @@ func TestExecutorWithoutEgressSkipsHelper(t *testing.T) {
 	require.Empty(t, resp.Code, resp.Error)
 	assert.Empty(t, helper.ensured)
 }
+
+// stubResolveBackend is a privClient wired to a fake executor socket path so
+// Create fails, letting the front-side cleanup hook be observed.
+func TestPrivClientReleasesFrontResourcesWhenCreateFails(t *testing.T) {
+	var released []string
+	backend := NewPrivClient(PrivClientConfig{
+		Socket: "/nonexistent/priv.sock",
+		Resolve: func(context.Context, workspace.CreateRequest) (sandbox.WorkspaceSpec, error) {
+			return sandbox.WorkspaceSpec{Name: "dev", Image: "img"}, nil
+		},
+		OnDestroy: func(id string) { released = append(released, id) },
+	})
+
+	_, err := backend.Create(context.Background(), workspace.CreateRequest{Name: "dev"})
+	require.Error(t, err, "the executor is unreachable, so the create must fail")
+	// Resolving started the workspace's egress proxy; a refused create must not leak
+	// its listener and port until someone runs `down` on a workspace that never existed.
+	assert.Equal(t, []string{"dev"}, released)
+}

@@ -58,9 +58,12 @@ RuntimeDirectory=aped
 RuntimeDirectoryMode=0710
 RuntimeDirectoryPreserve=yes
 
-# Namespaces: this unit's whole job is creating NET namespaces, so RestrictNamespaces
-# is narrowed to exactly that one rather than denied.
-RestrictNamespaces=net
+# Namespaces: this unit's whole job is creating NET namespaces. `mnt` is required
+# too, and not as slack: `ip -n <ns> …` / `ip netns exec` enter the target namespace
+# and then unshare a MOUNT namespace to bind the per-netns /sys — with only `net`
+# allowed, every in-namespace command fails with "unshare failed: Operation not
+# permitted" (found live, 2026-07-24). Everything else stays denied.
+RestrictNamespaces=mnt net
 # AF_NETLINK is how iproute2/nft program the kernel; AF_UNIX is the command socket.
 RestrictAddressFamilies=AF_UNIX AF_NETLINK
 # No IP networking of its own: the helper never dials anything.

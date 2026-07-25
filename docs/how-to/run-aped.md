@@ -136,6 +136,21 @@ ape sandbox down dev --node "$(hostname)"
 
 ### Mounting your project (`host-fs`) under `ProtectHome`
 
+> **Two things are needed, not one.** The `BindReadOnlyPaths=` drop-in below makes
+> the directory *visible* to the daemon; it does not make it *traversable*. The
+> executor is root with an **empty capability set**, so it has no
+> `CAP_DAC_READ_SEARCH` and a `0750` home stops it exactly as it would stop any
+> other user (`lstat /home/you: permission denied`). Make the home execute-only for
+> others — contents stay unlistable — as its owner, no sudo required:
+>
+> ```bash
+> chmod o+x /home/you        # 0750 → 0751
+> ```
+>
+> The alternative, granting the executor `CAP_DAC_READ_SEARCH`, widens the "root
+> without power" model for a convenience; prefer the `chmod`, or keep projects under
+> a root outside `/home`.
+
 The default `up` mount is `host-fs` of your cwd. Both units set `ProtectHome=yes`,
 so `/home` and `/root` are **invisible to the daemon** — a project under them
 fails at the policy check with `host-fs mount path … is not reachable by aped`
