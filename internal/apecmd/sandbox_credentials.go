@@ -196,34 +196,32 @@ another user with ProtectHome=yes and can never read your home. Until something
 re-publishes, every workspace keeps using the pre-login token.
 
 Any 'ape sandbox' command re-publishes as a side effect, so in normal use this is already
-handled. Run this watcher when you want it handled with no command at all — typically as a
-user service:
+handled. Run this watcher when you want it handled with no command at all — as a user
+service:
 
-  # ~/.config/systemd/user/ape-credentials-watch.service
-  [Unit]
-  Description=Re-publish the Claude credential for ape sandbox workspaces
-  [Service]
-  ExecStart=%h/.local/bin/ape sandbox credentials watch
-  Restart=on-failure
-  [Install]
-  WantedBy=default.target
-
+  install -D -m0644 deploy/user/ape-credentials-watch.service \
+    ~/.config/systemd/user/ape-credentials-watch.service
   systemctl --user enable --now ape-credentials-watch
+  sudo loginctl enable-linger $USER   # start at BOOT, not just at first login
 
-It runs as YOU (that is the point — only your own session can read your home) and does
-nothing until the file it is watching is replaced.`,
+It runs as YOU — that is the point: only your own session can read your home. It needs no
+aped node, no running workspace, and no publication (with nothing published it idles), so
+it is safe to enable before ever publishing.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if interval <= 0 {
 				interval = 2 * time.Second
 			}
 			dest := credentialDest(root)
-			if !fileExists(dest) {
-				return fmt.Errorf("nothing published at %s — run 'ape sandbox credentials publish' first "+
-					"(watch refreshes an existing publication, it does not create one)", dest)
-			}
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "watching %s (checking every %s; Ctrl-C to stop)\n", credentialSourceLabel(source), interval)
+			// Nothing published is an IDLE state, not an error. This is meant to run as a
+			// boot service: exiting here would crash-loop under Restart=on-failure on any
+			// machine where the operator has not published yet (or has revoked), and would
+			// then need re-enabling by hand once they did. Idling costs two stats a tick.
+			if !fileExists(dest) {
+				fmt.Fprintf(out, "nothing published at %s yet — idle until 'ape sandbox credentials publish' runs\n", dest)
+			}
 
 			t := time.NewTicker(interval)
 			defer t.Stop()

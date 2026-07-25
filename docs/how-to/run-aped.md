@@ -459,10 +459,20 @@ is handled the next time you touch a workspace. To need no command at all, run t
 watcher — as **you**, because only your own session can read your home:
 
 ```bash
-ape sandbox credentials watch     # re-publishes the moment the file is replaced
+install -D -m0644 deploy/user/ape-credentials-watch.service \
+  ~/.config/systemd/user/ape-credentials-watch.service
+systemctl --user enable --now ape-credentials-watch
+sudo loginctl enable-linger $USER      # start at BOOT, not just at first login
 ```
 
-`ape sandbox credentials watch --help` carries a ready-made `systemd --user` unit.
+**Not a shell rc file.** Putting it in `.zshrc` would start one watcher per terminal, each
+dying with its shell, and none running when no terminal is open — a service supervised by
+systemd is one process, restarted on failure, alive without a session.
+
+The `enable-linger` line is what makes it a *boot* service: without it a user manager only
+exists while you have a login session. It needs **no aped node, no running workspace, and
+no publication** — with nothing published it simply idles, so enabling it before you ever
+publish is safe.
 
 A re-published credential is treated as **authoritative** for one sync pass, overriding
 timestamps: a login starts a new session, so a token a still-running workspace refreshed
