@@ -7,6 +7,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -264,4 +265,63 @@ func TestStatusReportsAMissingGrant(t *testing.T) {
 	assert.False(t, st.Granted)
 	assert.Contains(t, st.summary(), "NO access")
 	assert.Contains(t, st.summary(), "credentials publish")
+}
+
+func TestApeBinaryPathPrefersTheInvokedPathOverTheResolvedTarget(t *testing.T) {
+	// A typical install is a STABLE symlink onto a version-stamped binary
+	// (~/go/bin/ape → ape-v0.0.48, which is what `go install` leaves). A generated unit
+	// must point at the symlink: baking in the resolved target pins it to today's version
+	// and breaks the service at the next update. /proc/self/exe resolves, so os.Args[0]
+	// via LookPath is what preserves it.
+	dir := t.TempDir()
+	versioned := filepath.Join(dir, "ape-v9.9.9")
+	require.NoError(t, os.WriteFile(versioned, []byte("#!/bin/sh\n"), 0o755))
+	link := filepath.Join(dir, "ape")
+	require.NoError(t, os.Symlink(versioned, link))
+
+	orig := os.Args
+	t.Cleanup(func() { os.Args = orig })
+	os.Args = []string{link}
+
+	got, err := apeBinaryPath()
+	require.NoError(t, err)
+	assert.Equal(t, link, got, "the unit must reference the stable symlink, not the versioned target")
+}
+
+func TestWatchUnitFileRefusesATemporaryBinary(t *testing.T) {
+	// A unit pointing into a temp dir (e.g. `go run`) breaks the moment it is cleaned up,
+	// which would show up much later as a service that mysteriously stopped working.
+	orig := os.Args
+	t.Cleanup(func() { os.Args = orig })
+	tmpBin := filepath.Join(os.TempDir(), "ape-transient")
+	require.NoError(t, os.WriteFile(tmpBin, []byte("#!/bin/sh\n"), 0o755))
+	t.Cleanup(func() { _ = os.Remove(tmpBin) })
+	os.Args = []string{tmpBin}
+
+	_, err := watchUnitFile(2 * time.Second)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "temporary path")
+}
+
+func TestWatchUnitFileCarriesANonDefaultInterval(t *testing.T) {
+	orig := os.Args
+	t.Cleanup(func() { os.Args = orig })
+	// The fixture lives under the real temp dir, which the transient-binary guard would
+	// (correctly) reject, so point the guard elsewhere for this test.
+	restoreTmp := unitTempDir
+	unitTempDir = func() string { return "/not-a-real-temp-prefix" }
+	t.Cleanup(func() { unitTempDir = restoreTmp })
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "ape")
+	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755))
+	os.Args = []string{bin}
+
+	unit, err := watchUnitFile(10 * time.Second)
+	require.NoError(t, err)
+	assert.Contains(t, unit, "ExecStart="+bin+" sandbox credentials watch --interval 10s")
+
+	// The default is left implicit, so the unit does not pin a value that may change.
+	unit, err = watchUnitFile(2 * time.Second)
+	require.NoError(t, err)
+	assert.Contains(t, unit, "ExecStart="+bin+" sandbox credentials watch\n")
 }

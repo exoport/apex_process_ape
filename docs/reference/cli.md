@@ -1061,28 +1061,24 @@ another user with ProtectHome=yes and can never read your home. Until something
 re-publishes, every workspace keeps using the pre-login token.
 
 Any 'ape sandbox' command re-publishes as a side effect, so in normal use this is already
-handled. Run this watcher when you want it handled with no command at all — typically as a
-user service:
+handled. Run this watcher when you want it handled with no command at all — as a user
+service:
 
-  # ~/.config/systemd/user/ape-credentials-watch.service
-  [Unit]
-  Description=Re-publish the Claude credential for ape sandbox workspaces
-  [Service]
-  ExecStart=%h/.local/bin/ape sandbox credentials watch
-  Restart=on-failure
-  [Install]
-  WantedBy=default.target
-
+  install -D -m0644 deploy/user/ape-credentials-watch.service \
+    ~/.config/systemd/user/ape-credentials-watch.service
   systemctl --user enable --now ape-credentials-watch
+  sudo loginctl enable-linger $USER   # start at BOOT, not just at first login
 
-It runs as YOU (that is the point — only your own session can read your home) and does
-nothing until the file it is watching is replaced.
+It runs as YOU — that is the point: only your own session can read your home. It needs no
+aped node, no running workspace, and no publication (with nothing published it idles), so
+it is safe to enable before ever publishing.
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--interval` | duration | `2s` | How often to check for a replacement |
+| `--print-unit` | bool | `false` | Print a systemd --user unit for this watcher (with THIS binary's path) and exit |
 | `--root` | string | `—` | Credential root the node reads |
 | `--source` | string | `—` | Credential file to watch (default: ~/.claude/.credentials.json) |
 

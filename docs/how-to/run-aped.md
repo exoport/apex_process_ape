@@ -459,11 +459,15 @@ is handled the next time you touch a workspace. To need no command at all, run t
 watcher — as **you**, because only your own session can read your home:
 
 ```bash
-install -D -m0644 deploy/user/ape-credentials-watch.service \
-  ~/.config/systemd/user/ape-credentials-watch.service
+ape sandbox credentials watch --print-unit > ~/.config/systemd/user/ape-credentials-watch.service
+systemctl --user daemon-reload
 systemctl --user enable --now ape-credentials-watch
 sudo loginctl enable-linger $USER      # start at BOOT, not just at first login
 ```
+
+`--print-unit` writes the unit with **this** binary's path, because a hand-written one is
+easy to get wrong: it points at the path you INVOKED (e.g. `~/go/bin/ape`) rather than what
+that resolves to (`ape-v0.0.48`), so the service keeps working after the next `ape` update.
 
 **Not a shell rc file.** Putting it in `.zshrc` would start one watcher per terminal, each
 dying with its shell, and none running when no terminal is open — a service supervised by
