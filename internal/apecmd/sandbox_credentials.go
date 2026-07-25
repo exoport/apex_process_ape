@@ -66,6 +66,8 @@ const (
 // longer matches the source — exactly like a copy. Without this marker `status` reports
 // "copy" for a decoupled link and gives the user no reason to re-publish. Measured
 // against a real `claude /login` (2026-07-25), which DOES replace the file.
+//
+//nolint:gosec // G101 false positive: a marker file NAME, not a credential
 const credentialMarkerName = ".ape-credential-publish.json"
 
 // credentialDirMode is traverse-only for others: the daemon must reach the path, but
@@ -289,6 +291,12 @@ func publishCredential(src, dest string, copyMode bool) (string, error) {
 	return fmt.Sprintf("published %s → %s (hard link: one live credential, shared with workspaces)", src, dest), nil
 }
 
+// fileExists reports whether path is a readable existing file.
+func fileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
+}
+
 // credentialMarker is the recorded publication.
 type credentialMarker struct {
 	Mode   string `json:"mode"`
@@ -333,8 +341,11 @@ func readCredentialMarker(dest string) (credentialMarker, bool) {
 // isolation, and silently re-linking would undo that choice.
 func RepairCredentialPublication(rootFlag, sourceFlag string) (repaired bool, err error) {
 	dest := credentialDest(rootFlag)
-	if _, statErr := os.Stat(dest); statErr != nil {
-		return false, nil // nothing published → nothing to repair
+	// "Nothing published" is the normal case, not a failure: most workspaces never use
+	// a host credential, so an absent publication means there is simply nothing to
+	// repair — and it must NOT be turned into an error that fails `up`.
+	if !fileExists(dest) {
+		return false, nil
 	}
 	marker, ok := readCredentialMarker(dest)
 	if !ok || marker.Mode != credentialModeLink {
@@ -347,7 +358,10 @@ func RepairCredentialPublication(rootFlag, sourceFlag string) (repaired bool, er
 	si, serr := os.Stat(src)
 	di, derr := os.Stat(dest)
 	if serr != nil || derr != nil {
-		return false, nil
+		// Either side vanished between the checks above and here. Repair is a
+		// best-effort convenience on the way into `up`; `status` is where a user asks
+		// for a diagnosis, so stay quiet rather than failing the create.
+		return false, nil //nolint:nilerr // an unreadable pair means "cannot repair", not "create failed"
 	}
 	if os.SameFile(si, di) {
 		return false, nil // still live
