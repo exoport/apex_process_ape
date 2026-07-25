@@ -268,8 +268,13 @@ EOF
   ok "nft table inet ape_egress loaded"
 
   step "3/6 host dirs (framework worktrees, durable caches, mount root)"
-  mkdir -p "$MOUNT_ROOT"
-  ok "$MOUNT_ROOT"
+  # The mount root must be writable by the OPERATOR, not just root: projects are
+  # cloned there by a human, and the whole point of keeping them outside /home is to
+  # avoid needing root (or a home-permission change) to mount them. The daemon reads
+  # it as root-without-capabilities, which a 0755 dir already permits.
+  install -d -m 0755 "$MOUNT_ROOT"
+  if [ -n "$OP_USER" ]; then chown "$OP_USER:$(id -gn "$OP_USER")" "$MOUNT_ROOT"; fi
+  ok "$MOUNT_ROOT (owner ${OP_USER:-root})"
   # The framework worktree is materialized by the CLIENT (your user), so this root
   # is user-owned, not root-owned.
   install -d -m 0755 "$FW_ROOT"
