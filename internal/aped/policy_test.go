@@ -11,6 +11,8 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/exoport/apex_process_ape/internal/workspace"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // goosWindows is the runtime.GOOS value for Windows, named once so the
@@ -183,4 +185,23 @@ func TestShippedPolicyAllowsTheCompiledInDefaultImage(t *testing.T) {
 			"they are compared by EXACT string match, so both must move in the same commit",
 			sandbox.DefaultImage, p.Images)
 	}
+}
+
+func TestPolicyTreatsTheDeliveredApeAsASystemMount(t *testing.T) {
+	// Live validation caught this: the staged ape lives under aped's own state dir, which is
+	// not (and should not have to be) in mount_roots. Without the exemption EVERY create is
+	// denied on a node that never asked for anything unusual.
+	p := &Policy{Images: []string{"img"}, MountRoots: []string{t.TempDir()}}
+	apeMount := workspace.MountSpec{Source: "/var/lib/aped/apebin", Dest: sandbox.ApeBinDest, ReadOnly: true}
+
+	require.NoError(t, p.CheckCreate(ResolvedCreate{Image: "img", Mounts: []workspace.MountSpec{apeMount}}, 0),
+		"a read-only ape mount on its reserved destination is aped's own, not a caller path")
+
+	// Writable is refused: the exemption is not a blank cheque, and a workspace that could
+	// rewrite the binary would control what every later exec in it runs.
+	writable := apeMount
+	writable.ReadOnly = false
+	err := p.CheckCreate(ResolvedCreate{Image: "img", Mounts: []workspace.MountSpec{writable}}, 0)
+	require.ErrorIs(t, err, workspace.ErrPolicyDenied)
+	assert.Contains(t, err.Error(), "must be read-only")
 }

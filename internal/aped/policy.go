@@ -237,10 +237,15 @@ func (p *Policy) checkMount(mountPath string) error {
 //
 // Nothing here trusts the front's own merge: every source is re-canonicalized and
 // re-checked against the mount roots, every destination against the reserved set,
-// and a writable bind under a read-only root is denied. The framework mount is
-// exempt from the mount-root check ONLY when it is read-only and lands on its
-// reserved destination — it is a system mount whose source aped resolved itself,
-// not a caller path.
+// and a writable bind under a read-only root is denied.
+//
+// Two SYSTEM mounts are exempt from the mount-root check, each ONLY when it is
+// read-only and lands on its own reserved destination: the framework, and the `ape`
+// binary aped delivers (PLAN-23). Both are sources this daemon resolved from its own
+// configuration rather than caller paths — the ape one out of its state dir — and a
+// user mount can never claim either destination (they are reserved subtrees). Without
+// the exemption an operator would have to allow-list aped's own state dir in
+// `mount_roots`, and forgetting it would deny every single create.
 func (p *Policy) checkMounts(mounts []workspace.MountSpec) error {
 	if p.Limits.MaxMounts > 0 && len(mounts) > p.Limits.MaxMounts {
 		return fmt.Errorf("%w: %d mounts exceeds the ceiling of %d",
@@ -259,6 +264,13 @@ func (p *Policy) checkMounts(mounts []workspace.MountSpec) error {
 		if m.Dest == sandbox.FrameworkDest {
 			if !m.ReadOnly {
 				return fmt.Errorf("%w: the framework mount %q must be read-only", workspace.ErrPolicyDenied, m.Dest)
+			}
+			continue
+		}
+		if m.Dest == sandbox.ApeBinDest {
+			if !m.ReadOnly {
+				return fmt.Errorf("%w: the delivered ape mount %q must be read-only — a workspace "+
+					"must not be able to rewrite the binary the node handed it", workspace.ErrPolicyDenied, m.Dest)
 			}
 			continue
 		}

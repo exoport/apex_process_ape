@@ -242,3 +242,14 @@ func TestStageApeBinaryNeedsAStateDir(t *testing.T) {
 	_, err := StageApeBinary("", ApeBinary{Path: "/usr/local/bin/ape", Dir: "/usr/local/bin"})
 	require.ErrorIs(t, err, ErrNoApeBinary)
 }
+
+func TestApeBinaryStringDoesNotPrintTheCommitTwice(t *testing.T) {
+	// A pseudo-version already ends in the commit, and the startup line printed it again.
+	rev := "0de99a9fd52b1111111111111111111111111111"
+	pseudo := ApeBinary{Path: "/x/ape", Version: "0.0.50-0.20260726225711-0de99a9fd52b", Revision: rev}
+	assert.Equal(t, "/x/ape (0.0.50-0.20260726225711-0de99a9fd52b)", pseudo.String())
+
+	// A released build's version carries no commit, so there the revision is worth adding.
+	tagged := ApeBinary{Path: "/x/ape", Version: "0.0.50", Revision: rev}
+	assert.Equal(t, "/x/ape (0.0.50+0de99a9fd52b)", tagged.String())
+}

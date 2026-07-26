@@ -68,10 +68,14 @@ type ApeBinary struct {
 }
 
 // String renders the identity an operator needs to see in a log line.
+//
+// The revision is appended only when the version does not already carry it: an unstamped
+// local build reports a pseudo-version that ENDS in the commit, and printing it twice
+// ("0.0.50-0.20260726225711-0de99a9fd52b+0de99a9fd52b") reads as a bug in the daemon.
 func (a ApeBinary) String() string {
 	s := a.Path + " (" + a.Version
-	if a.Revision != "" {
-		s += "+" + shortRev(a.Revision)
+	if rev := shortRev(a.Revision); rev != "" && !strings.Contains(a.Version, rev) {
+		s += "+" + rev
 	}
 	return s + ")"
 }
