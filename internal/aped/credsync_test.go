@@ -3,6 +3,7 @@ package aped
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -190,7 +191,11 @@ func TestCredSyncWorkspaceWriteIsAtomicForReaders(t *testing.T) {
 	after, err := os.Stat(ws["alpha"])
 	require.NoError(t, err)
 	assert.False(t, os.SameFile(before, after), "a workspace copy is replaced, not overwritten")
-	assert.Equal(t, os.FileMode(credFileMode), after.Mode().Perm())
+	if runtime.GOOS != goosWindows {
+		// Windows has no POSIX mode bits — Go reports 0666 there whatever was requested —
+		// and the guarantee (only the owner reads a credential) is a POSIX one anyway.
+		assert.Equal(t, os.FileMode(credFileMode), after.Mode().Perm())
+	}
 }
 
 func TestCredSyncARepublishedCredentialBeatsANewerWorkspaceToken(t *testing.T) {
@@ -221,6 +226,45 @@ func TestCredSyncARepublishedCredentialBeatsANewerWorkspaceToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"accessToken":"post-login"}`, string(data),
 		"the re-published credential must win over a newer token from the session it replaced")
+}
+
+func TestCredSyncARepublishThatReusesTheInodeStillWins(t *testing.T) {
+	// The scenario above, plus the one filesystem behaviour that defeats an identity-only
+	// check: `credentials publish` unlinks the path and re-creates it, and the create can
+	// be handed back the inode number the unlink just freed — os.SameFile then reports the
+	// same file and the re-publish goes unnoticed. Not hypothetical: CI hit exactly this
+	// while the developer's ext4 handed out a fresh inode and the bug stayed invisible.
+	//
+	// Rewriting the published file IN PLACE reproduces it deterministically on every
+	// filesystem — same inode, content the syncer did not write — which is precisely what
+	// inode reuse looks like from here.
+	sync, published, ws := credRig(t, "alpha")
+	base := time.Now().Add(-time.Hour)
+	touchWith(t, published, `{"accessToken":"pre-login"}`, base)
+	touchWith(t, ws["alpha"], `{"accessToken":"pre-login"}`, base)
+
+	_, err := sync.SyncOnce()
+	require.NoError(t, err)
+	beforeID, err := os.Stat(published)
+	require.NoError(t, err)
+
+	// The workspace refreshes from the old session — NEWER mtime.
+	touchWith(t, ws["alpha"], `{"accessToken":"refreshed-from-old-session"}`, base.Add(2*time.Minute))
+	// The operator's post-login credential lands on the same inode, with an older mtime.
+	touchWith(t, published, `{"accessToken":"post-login"}`, base.Add(time.Minute))
+
+	afterID, err := os.Stat(published)
+	require.NoError(t, err)
+	require.True(t, os.SameFile(beforeID, afterID),
+		"the rig must preserve the inode, or this is not exercising the reuse case")
+
+	n, err := sync.SyncOnce()
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	data, err := os.ReadFile(ws["alpha"])
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"accessToken":"post-login"}`, string(data),
+		"a re-publish must win even when the new credential reuses the old inode number")
 }
 
 func TestCredSyncInPlaceUpdatesAreNotMistakenForARepublish(t *testing.T) {

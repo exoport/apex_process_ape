@@ -84,6 +84,14 @@ type CredentialSync struct {
 	// a token AFTER the login would have a newer mtime and would overwrite the operator's
 	// brand-new session with a token belonging to the session the login just replaced.
 	lastPublished os.FileInfo
+	// lastPublishedData is what the publication held once the previous tick had converged
+	// it — that is, the last content this component itself put there (or saw and agreed
+	// with). Identity alone is NOT sufficient to detect a re-publish: filesystems RECYCLE
+	// inode numbers, so `credentials publish` unlinking the path and re-linking it can land
+	// on the very inode just freed, and os.SameFile then reports the same file. Content that
+	// changed without this component writing it is the signal that survives that, and it is
+	// the one that matters anyway — the whole point is a credential we did not put there.
+	lastPublishedData []byte
 }
 
 // Run syncs until ctx is cancelled. It is resilient by construction: every error is
@@ -162,36 +170,65 @@ func (c *CredentialSync) SyncOnce() (int, error) {
 		}
 		written++
 	}
+	// Record what the publication now holds, so the next tick can tell a credential this
+	// component put there from one the operator did. It is set only on a fully converged
+	// tick: a tick that failed partway leaves the previous value, which at worst makes the
+	// publication authoritative for one tick while it already holds the newest content.
+	if publishedPeer(peers) != nil {
+		c.lastPublishedData = newest.data
+	}
 	return written, nil
 }
 
-// republishedPeer returns the published peer when it has been REPLACED since the last
-// tick (a different file at the same path), and nil otherwise. It also records the
-// current identity for the next comparison.
-//
-// os.SameFile is the check rather than an mtime or a hash: re-publishing re-links the
-// path to the operator's new inode, and identity is exactly what changes. A rewrite in
-// place — which is how this component itself updates the published file — keeps the same
-// inode and correctly does NOT count as a re-publish.
-func (c *CredentialSync) republishedPeer(peers []credPeer) *credPeer {
-	var published *credPeer
+// publishedPeer returns the operator's peer, or nil when there is no publication.
+func publishedPeer(peers []credPeer) *credPeer {
 	for i := range peers {
 		if peers[i].published {
-			published = &peers[i]
-			break
+			return &peers[i]
 		}
 	}
+	return nil
+}
+
+// republishedPeer returns the published peer when the operator has replaced it since the
+// last tick, and nil otherwise. It also records the current identity for the next
+// comparison.
+//
+// Two independent signals, because either one alone has a blind spot:
+//
+//   - IDENTITY (os.SameFile): re-publishing re-links the path to the operator's new
+//     inode. This catches a replacement even when the new credential's bytes happen to
+//     match. Its blind spot is inode RECYCLING — the unlink frees an inode number that
+//     the immediately following create can be handed straight back, and then the new
+//     file compares equal to the old one. Measured on a GitHub Actions runner; the local
+//     ext4 filesystem did not reuse it, which is exactly why this needed two signals.
+//   - CONTENT: bytes at the published path that differ from what the previous tick
+//     converged it to were not written by this component, so the operator's tooling put
+//     them there. This is immune to inode allocation.
+//
+// A rewrite in place — which is how this component itself updates the published file —
+// keeps the same inode AND matches the recorded content, so it correctly does NOT count
+// as a re-publish. That distinction is load-bearing: read as a re-publish, every
+// workspace refresh would make the publication authoritative and undo itself.
+func (c *CredentialSync) republishedPeer(peers []credPeer) *credPeer {
+	published := publishedPeer(peers)
 	if published == nil {
 		c.lastPublished = nil
+		c.lastPublishedData = nil
 		return nil
 	}
 	fi, err := os.Stat(published.path)
 	if err != nil {
 		return nil
 	}
-	prev := c.lastPublished
+	prev, prevData := c.lastPublished, c.lastPublishedData
 	c.lastPublished = fi
-	if prev == nil || os.SameFile(prev, fi) {
+	if prev == nil {
+		return nil // first tick: establish the baseline, claim nothing
+	}
+	replaced := !os.SameFile(prev, fi)
+	rewritten := prevData != nil && !bytesEqual(published.data, prevData)
+	if !replaced && !rewritten {
 		return nil
 	}
 	if !json.Valid(published.data) {
