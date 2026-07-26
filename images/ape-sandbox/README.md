@@ -12,10 +12,11 @@ workspace installs it with `ape framework setup --no-fetch` (PLAN-20).
 
 `ape sandbox` resolves the image via `aped`'s pinned default
 (`sandbox.DefaultImage` in `internal/sandbox/kata.go` — currently
-`ghcr.io/exoport/ape-sandbox:v1.0.0`) or a per-request `--image` / profile
-`image:` override. The `aped` policy `images:` allow-list in `deploy/policy.yaml`
-is checked **independently** of that default, so bumping one without the other
-produces a policy denial rather than a pull error.
+`ghcr.io/exoport/ape-sandbox:v1.0.0`, **digest-pinned** to the OCI index so
+re-pushing the tag cannot change what workspaces run) or a per-request `--image`
+/ profile `image:` override. The `aped` policy `images:` allow-list in
+`deploy/policy.yaml` is matched by **exact string** against the resolved ref, so
+bumping one without the other produces a policy denial rather than a pull error.
 
 The image carries its **own version line** — it changes for reasons `ape` does
 not (a new base, a newer asdf/bingo, a Playwright bump), so the two are ordinary

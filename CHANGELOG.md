@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Unreleased
+
+- **The default sandbox image is digest-pinned** — `sandbox.DefaultImage` and the
+  `images:` allow-list in `deploy/policy.yaml` now both name
+  `ghcr.io/exoport/ape-sandbox:v1.0.0@sha256:a5f8ca0f…`. A tag is mutable: re-pushing
+  `v1.0.0` would silently change what every workspace runs, and nothing in the pipeline
+  would notice. The tag is kept alongside the digest so the version stays legible in
+  errors and `ape doctor` output — containerd reduces `tag@digest` to the digest when it
+  resolves, so the tag is documentation and the digest is the pin. The digest is the OCI
+  image **index**, so it still resolves per architecture. Both places had to move in the
+  same commit: the policy check is an exact string match on the resolved ref, so a
+  mismatch surfaces as a policy denial rather than a pull error.
+
 ## v0.0.49 (2026-07-26)
 
 - **`ape sandbox` is now usable out of the box** — `sandbox.DefaultImage` pointed at

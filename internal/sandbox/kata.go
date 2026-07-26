@@ -34,12 +34,20 @@ const ContainerPrefix = "ape-ws-"
 // This is a DEPENDENCY PIN on that image's own version line, not a mirror of ape's:
 // the image changes for reasons ape does not (a new base, a newer asdf/bingo, a
 // Playwright bump), so the two versions move independently and each is bumped
-// deliberately. Prefer a digest in production — see the note in deploy/policy.yaml.
+// deliberately.
 //
-// Keep this in step with the `images:` allow-list in deploy/policy.yaml: a create is
-// refused unless the resolved ref is listed there, so bumping one without the other
-// turns every default `ape sandbox up` into a policy denial.
-const DefaultImage = "ghcr.io/exoport/ape-sandbox:v1.0.0"
+// The ref carries BOTH the tag and the digest. The digest is what makes it a pin — a
+// tag is mutable, and re-pushing it would silently change what every workspace runs —
+// while the tag keeps the version legible in errors, logs and `ape doctor` output. The
+// digest is the OCI image INDEX, not a per-platform manifest, so it still resolves per
+// architecture. containerd reduces `tag@digest` to the digest alone when it resolves
+// (reference.ParseDockerRef), which is the intended behaviour: the tag is documentation.
+//
+// Keep this in step with the `images:` allow-list in deploy/policy.yaml: the check is an
+// EXACT string match on the resolved ref, so bumping one without the other turns every
+// default `ape sandbox up` into a policy denial — not a pull error, which is the
+// confusing part.
+const DefaultImage = "ghcr.io/exoport/ape-sandbox:v1.0.0@sha256:a5f8ca0f67313fe6779fe3ec62def05afa783d2424f57f774bb3bf6401cd1ff5"
 
 // DefaultShell is the login shell `ape sandbox attach` opens inside a
 // workspace when the caller doesn't pick one.

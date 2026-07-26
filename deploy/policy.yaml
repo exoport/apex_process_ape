@@ -9,13 +9,17 @@
 # at load, so a typo fails closed rather than silently widening policy.
 
 # Allowed image references. Prefer digest-pinned refs. An empty list denies all
-# creates.
+# creates. The check is an EXACT string match on the resolved ref — not a prefix or a
+# repository match — so an entry here has to be byte-identical to what is requested.
 images:
-  # Must match sandbox.DefaultImage (internal/sandbox/kata.go), or a default
-  # `ape sandbox up` is refused here. The image has its own version line, independent
-  # of ape's — bump both together when you move it.
-  - ghcr.io/exoport/ape-sandbox:v1.0.0
-  # - ghcr.io/exoport/ape-sandbox@sha256:<digest>   # pin by digest in production (preferred)
+  # Must match sandbox.DefaultImage (internal/sandbox/kata.go) EXACTLY, or a default
+  # `ape sandbox up` is refused here — as a policy denial, not a pull error. The image
+  # has its own version line, independent of ape's — bump both together when you move it.
+  #
+  # Digest-pinned: the tag is mutable and re-pushing it would change what every workspace
+  # runs, so the digest is the actual pin and the tag is there to keep the version legible.
+  # The digest is the OCI image index, so it still resolves per architecture.
+  - ghcr.io/exoport/ape-sandbox:v1.0.0@sha256:a5f8ca0f67313fe6779fe3ec62def05afa783d2424f57f774bb3bf6401cd1ff5
 
 # Canonical host path prefixes a host-fs mount must resolve under (symlinks are
 # resolved and re-checked). Empty denies all host-fs mounts (volume/ephemeral
