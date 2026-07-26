@@ -426,23 +426,36 @@ holding a dead token with no way to replace it.
 A copy in the composed home is an ordinary file in an ordinary directory, so **login and
 refresh inside a workspace work**.
 
-### The part no mount trick can fix
+### How rotation is handled
 
-OAuth refresh tokens **rotate**. Whichever side refreshes first invalidates the token
-the other side is holding. So a host and a workspace cannot share one live OAuth session,
-however it is wired. Pick deliberately:
+OAuth refresh tokens **rotate**: whichever party refreshes invalidates the token every
+other party holds. That is why a per-workspace copy on its own would be a session that
+breaks within hours, and why aped-front keeps every copy **converged** instead:
 
-| Situation | Use |
-| --- | --- |
-| Autonomous / long-running work | `--credentials api-key` — keys do not rotate, so nothing collides |
-| Interactive work in one workspace | the copy bootstraps you; if it refreshes, re-login on the host when you next need it |
-| Several long-lived workspaces | log in **inside** each one (its own session) — needs the auth domains in its egress allowlist |
+```
+a workspace refreshes or logs in
+  → its copy changes
+  → written IN PLACE to the published file, a hard link to your real
+    ~/.claude/.credentials.json — so the host has it too
+  → and out to every other workspace          (~3s, one sync tick)
+```
 
-`publish` keeps the *node's* view of your credential current: a hard link tracks your
-file, and because a host login replaces that file (verified — the inode changes),
-`ape sandbox up` re-publishes automatically before creating a workspace, while `status`
-reports a decoupled link as `STALE`. Workspaces already running keep the copy they were
-created with.
+The in-place write is load-bearing: a temp-file-plus-rename there would create a new
+inode and silently sever the link that makes host-side sharing work at all. Workspace
+copies are replaced by rename, so a guest reading concurrently never sees a partial file.
+
+Three bounds it keeps: it never **creates** a credential where none exists (a revoked one
+stays revoked), never propagates content that is not valid JSON (a torn read must not
+reach every workspace), and never rewrites identical content.
+
+`--cred-sync-interval` tunes the tick (default 3s).
+
+> **Known race.** If a workspace refreshes at the same instant as a host login, one side
+> briefly holds the losing token and recovers on its next attempt after re-reading. The
+> window is one tick and refreshes are hours apart, but it is real rather than eliminated.
+
+`--credentials api-key` remains available and does not rotate at all — worth preferring
+for unattended workloads where you would rather not share the interactive session.
 
 ### Logging in again
 

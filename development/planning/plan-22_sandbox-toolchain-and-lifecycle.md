@@ -181,7 +181,10 @@ busy nodes/laptops), or rebuild (`down`/`up`, cheap because state is durable).
 - [x] **D4 — Durable state mounts.** DONE 2026-07-24 — a CLOSED cache table (asdf/go/cargo/npm/pub) mounted at `/cache/<name>` with the toolchain env derived SERVER-SIDE, so a caller picks a cache name and never a GOPATH. Caches live outside the guest home on purpose (`/sandbox/home` is a system mount). Standard host-cache mount presets (asdf dir,
   `~/go`, `~/.cargo`, …) via the PLAN-20 mount model; per-project `volume`
   option; docs on shared-vs-isolated.
-- [~] **D5 — Lifecycle.** PARTIAL 2026-07-24: (a) `ape sandbox stop`/`start` exposed. (c) reconcile-on-startup drops registry rows whose container is gone (conservative: a non-not-found containerd error aborts rather than pruning on a bad read). (b) idle reaper / TTL NOT DONE — there is no workspace activity signal to reap on yet; auto-start of flagged keep-alive workspaces is also open. (a) **Expose** the existing `Stop`/`Start` as `ape
+- [~] **D5 — Lifecycle.** PARTIAL 2026-07-24: (a) `ape sandbox stop`/`start` exposed. (c) reconcile-on-startup drops registry rows whose container is gone (conservative: a non-not-found containerd error aborts rather than pruning on a bad read). (b) idle reaper / TTL NOT DONE, deliberately — see "Why no reaper" below. The
+  *signal* now exists (`last_used_at`, stamped on exec/attach/start and surfaced as
+  `ape sandbox ls --idle`), so the decision is reported to an operator rather than
+  automated. Auto-start of flagged keep-alive workspaces is also open. (a) **Expose** the existing `Stop`/`Start` as `ape
   sandbox stop`/`start` CLI verbs (backend/contract/client already done — CLI
   only). (b) **Idle reaper / TTL** — optional per-node policy: auto-`stop` after
   N idle, auto-`down` after M, per-workspace TTL (short default for
@@ -214,3 +217,27 @@ busy nodes/laptops), or rebuild (`down`/`up`, cheap because state is durable).
 **M–L.** D2/D3 (image + install step) and D4 (cache mount presets) are the bulk;
 D5 (`stop`/`start`) is small (the driver already supports a stopped task).
 Gated on PLAN-21 for the online path.
+
+## Why no reaper (2026-07-25)
+
+D5(b) asks for "auto-stop after N idle". Building it on the only available signal would
+have produced a **timer wearing a policy's name**: `last_used_at` records the last
+exec/attach/start, so a workspace running a long job with nobody reaching in looks
+untouched, and it would eventually be stopped mid-task. Age is worse still — a 13-day-old
+workspace someone touched a minute ago is not idle at all.
+
+So the signal is now *reported* instead: `ape sandbox ls` shows AGE and LAST-USED
+(distinguishing `never` from an age), `--idle 24h` filters, and the operator chooses
+`stop` (frees RAM, keeps state) or `down`. An honest reaper additionally needs guest-side
+liveness — containerd task CPU, or a heartbeat from the in-VM agent — so that "no one has
+exec'd" and "nothing is happening" stop being conflated. That is the gate on doing it.
+
+## Live validation (2026-07-25, node mmq4)
+
+- `stop`/`start` exercised on an egress workspace, which found a real bug: Kata's
+  `tcfilter` model leaves a tc qdisc on the veth after the task is killed, so reusing our
+  PERSISTENT netns failed with "Failed to add qdisc for network index N : file exists".
+  A cold start now rebuilds the namespace, which also covers the host-reboot case (proven
+  by deleting the netns out-of-band and starting).
+- Reconcile-on-startup, durable caches (`/cache/go` writes landing in `/srv/ape-caches`),
+  the toolchain descriptor section, and `ls --idle` reporting all verified.

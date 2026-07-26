@@ -78,71 +78,41 @@
   running a long job with nobody reaching in looks untouched), so an automatic reaper
   built on this signal would be an age-based killer wearing a policy's name. ape reports
   it and leaves `stop`/`down` to the operator.
-- **feat: `ape sandbox credentials watch`** — a host `claude /login` replaces the
-  credential file, and aped cannot notice (it runs as another user with `ProtectHome=yes`
-  and can never read your home), so until something re-publishes, workspaces keep the
-  pre-login token. Every `ape sandbox` command re-publishes as a side effect; this watcher
-  covers the case where you run none, as a `systemd --user` service. A re-published
-  credential is also treated as **authoritative** for one sync pass, overriding
-  timestamps — a login starts a new session, so a token a still-running workspace
-  refreshed from the old one is dead however recently it was written.
-- **feat: ONE Claude OAuth session shared by the host and every workspace** — the hard
-  part is not access to the credential, it is identity of session: OAuth refresh tokens
-  **rotate**, so the moment any party refreshes, every other party's token is dead. A
-  per-workspace copy is therefore not a lesser form of sharing, it is a session that
-  breaks hours after it is created. aped-front now keeps the operator's published
-  credential and every workspace's copy **converged**: a refresh or `/login` inside a
-  workspace is written *in place* to the published file — a hard link to the operator's
-  real `~/.claude/.credentials.json`, so the host sees it — and out to every other
-  workspace; a host login propagates the other way. The in-place write is load-bearing
-  (a temp-file-plus-rename would create a new inode and silently sever that link), while
-  workspace copies are replaced by rename so a reader never sees a partial file. It
-  never creates a credential where none exists (a revoked one stays revoked) and never
-  propagates content that is not valid JSON (a torn read must not reach every
-  workspace). Publishing grants access with a **POSIX ACL entry for exactly the `aped`
-  user** (`setfacl -m u:aped:rw`), which read-only cannot replace because a workspace's
-  refreshed token has to be written back through that file. A group grant was rejected
-  deliberately: group `ape` is also the priv-socket gate, so it would share the
-  credential with every operator added there, and `chgrp` additionally fails with EPERM
-  in any shell opened before you joined the group. There is **no fallback** — `ape
-  doctor` reports a host without `setfacl` as `sandbox.credential-acl`, `publish` fails
-  with that reason, and a workspace whose credential the daemon cannot read fails with
-  the ACL as the named cause. `revoke` removes the entry. (Note `ls -l` then shows
-  `-rw-rw----+`: those group bits are the ACL mask, not group access.)
-- **fix(sandbox): each workspace gets its own writable credential COPY, not a bind
-  mount** — `claude` replaces its credential file by rename (a login does this, and a
-  token refresh takes the same path), and a single-file bind mount cannot be renamed
-  over: the guest gets `Resource busy` (measured). A bound credential therefore meant a
-  workspace could never refresh its own access token — it would stop working within
-  hours — and a host login left it holding a dead token. The copy lands in the composed
-  home, an ordinary file in an ordinary directory, so login and refresh inside a
-  workspace work. What no mount trick can fix, and is now documented rather than
-  implied: OAuth refresh tokens rotate, so a host and a workspace cannot share one live
-  session — use `--credentials api-key` for autonomous work, or log in inside the
-  workspace for a session it owns.
-- **feat: workspaces can use the host's Claude session (`ape sandbox credentials`)** —
-  `aped-front` runs as its own service user with `ProtectHome=yes`, so it cannot read
-  `~/.claude`, and widening a home for a daemon (or trusting a caller-supplied
-  credential path, which would let it bind any root-readable file into its own
-  workspace) are both worse than the problem. Instead the **client** publishes —
-  running as you — into a directory the daemon may read, and `aped front
-  --credentials oauth --host-home <root>/<user>` composes it. The default is a **hard
-  link**: the same inode, so a token refresh inside a workspace is immediately valid
-  on the host, and your file's permissions never change (`0600`) because the daemon
-  only `stat`s it while Kata's virtiofsd does the I/O as root. `--copy` isolates the
-  workspace instead but diverges once either side refreshes (OAuth refresh tokens
-  rotate); `revoke` takes access back. The credential mode is node configuration, never
-  a request field. Because a host `claude /login` **replaces** the credential file
-  (verified — the inode changes), which would leave a published link pointing at the
-  pre-login token, `ape sandbox up` repairs an existing publication automatically and
-  `status` reports a decoupled one as STALE with the reason. Logging in from inside a
-  workspace is not supported in link mode: the credential is a single-file bind mount,
-  so the login's write+rename fails with `Resource busy` — log in on the host, or
-  publish `--copy` to give the workspace its own file.
-- **fix(sandbox): the project is no longer mounted twice** — with PLAN-20's per-repo
-  mounts at `/workspace/<name>`, both driver paths were still also applying the legacy
-  single-project bind at bare `/workspace`, so the main repo appeared twice and its
-  files sat loose in the root its siblings live under.
+- **feat: ONE Claude OAuth session shared by the host and every workspace
+  (`ape sandbox credentials`)** — the hard part is not access to the credential but
+  identity of session: OAuth refresh tokens **rotate**, so the moment any party refreshes,
+  every other party's token is dead. Two obvious designs are therefore both broken, not
+  merely weaker — bind-mounting one shared file means a workspace can never write the token
+  it just refreshed (`claude` replaces the file by *rename*, and a single-file bind cannot
+  be renamed over: EBUSY, measured), and independent per-workspace copies die at the first
+  rotation. What ships instead: each workspace gets a real writable copy (so login and
+  refresh work in-guest) and `aped-front` keeps every copy **converged** — a refresh or
+  `/login` anywhere is written *in place* to the published credential, a hard link to your
+  real `~/.claude/.credentials.json`, and out to every other workspace within a sync tick
+  (`--cred-sync-interval`, default 3s). The in-place write is load-bearing: a
+  temp-file-plus-rename would create a new inode and silently sever that link. It never
+  creates a credential where none exists (a revoked one stays revoked) and never propagates
+  invalid JSON (a torn read must not reach every workspace).
+  Access is granted with a **POSIX ACL for exactly the `aped` user** (`setfacl -m
+  u:aped:rw`) — read-only cannot replace it, because a workspace's refreshed token has to
+  be written *back* through that file. A group grant was rejected deliberately: group `ape`
+  is also the priv-socket gate, so it would share the credential with every operator added
+  there, and `chgrp` additionally fails with EPERM in any shell opened before you joined
+  the group. There is **no fallback** — `ape doctor` reports a host without `setfacl` as
+  `sandbox.credential-acl`, `publish` fails with that reason, and a workspace whose
+  credential the daemon cannot read fails naming the ACL as the cause. (`ls -l` will show
+  `-rw-rw----+`: those group bits are the ACL *mask*, not group access.)
+  Because a host `/login` **replaces** the file — which aped cannot notice, running as
+  another user under `ProtectHome=yes` — every `ape sandbox` command re-publishes as a side
+  effect, and `ape sandbox credentials watch --install-unit` installs a `systemd --user`
+  service for the case where none is run (`loginctl enable-linger` for boot start). A
+  re-published credential is **authoritative for one sync pass**, overriding timestamps: a
+  login starts a new session, so a token a still-running workspace refreshed from the old
+  one is dead however recently it was written.
+  Validated live in all four directions, including a real host `/login` propagating to two
+  running workspaces hands-off in ~1s. **Known race:** a workspace refresh in the same
+  instant as a host login leaves one side holding the losing token for a tick, recovering
+  on its next attempt.
 - **fix(sandbox/aped): six defects found by live-validating egress on a Tier-2 host**
   — the deploy script wrote ExecStart drop-ins using flags the installed binary
   lacked (now capability-probed); the netns helper needed the `mnt` namespace for

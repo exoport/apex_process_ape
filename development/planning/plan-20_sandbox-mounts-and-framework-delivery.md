@@ -302,17 +302,33 @@ priv-socket gate), and `chgrp` needs the group in the caller's ACTIVE session, f
 with EPERM in a shell opened before `usermod`. `ape doctor` reports the tooling as
 `sandbox.credential-acl`.
 
-**Live results (mmq4, 2026-07-25):** published from a shell lacking the `ape` group (ACL
-needs only ownership); grant is `user:aped:rw-` with `group::---`; two workspaces both
-matched the host; a write+rename inside wsA — impossible under a bind mount — propagated
-to the host AND wsB within one 3s tick ("propagated to 2 peer(s)"), with the host inode
-preserved (`links=2`); an in-place host write propagated back to both workspaces; the
-credential ended byte-identical to the original.
+**Live results (mmq4, 2026-07-25) — all four directions verified:**
 
-Two defects the live run caught: the front could not even READ a 0600 publication (hence
-the ACL grant), and `ProtectSystem=strict` made the credential root read-only so the
-syncer could not write it (hence `ReadWritePaths`) — it failed safely and logged the exact
-cause every tick rather than corrupting anything.
+| Direction | Evidence |
+| --- | --- |
+| publish from a shell lacking the `ape` group | ACL needs only ownership; `chgrp` fails EPERM there |
+| the grant | `user:aped:rw-` with `group::---` — one account, not the group |
+| workspace refresh → host + other workspace | `propagated to 2 peer(s)`; host inode preserved (`links=2`) |
+| host in-place write → workspaces | both converged |
+| **host `/login` → workspaces, hands-off** | watcher `re-published` at 21:46:12, front `propagated to 2 peer(s)` at 21:46:13; inode re-linked 37228638 → 37231486; all three md5s equal; ACL re-applied to the new inode |
+
+A host login needs a re-publish because the daemon cannot see the operator's home
+(`ProtectHome=yes`, different user). Every `ape sandbox` command re-publishes as a side
+effect; `ape sandbox credentials watch --install-unit` covers the case where none is run,
+as a `systemd --user` service (with `loginctl enable-linger` for boot start). A
+re-published credential is **authoritative for one sync pass**, overriding mtimes — without
+that, a still-running workspace that refreshed from the OLD session would clobber the
+operator's new one.
+
+**Known race:** a workspace refresh in the same instant as a host login leaves one side
+holding the losing token for a tick; it recovers on the next attempt.
+
+**Defects the live run caught:** the front could not READ a 0600 publication (→ the ACL
+grant); `ProtectSystem=strict` made the credential root read-only so the syncer could not
+write it (→ `ReadWritePaths`, which failed safely and logged the cause every tick); and a
+shipped systemd unit with a guessed binary path failed `203/EXEC` (→ `--install-unit`
+generates it from the binary's own location, and writes via temp+rename because
+`--print-unit > file` truncates the target before the command runs).
 
 ## Migration — supersede the private-baked-image route
 

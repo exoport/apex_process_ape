@@ -158,7 +158,7 @@ under a running workspace; anything baked into the container's OCI spec cannot.
 | Change | Live? | How |
 | --- | --- | --- |
 | Egress allowlist | **yes** | `ape sandbox egress set <ws> --domain …` — the proxy is host-side on a fixed port, so this restarts it on that same port; the guest keeps its `HTTPS_PROXY` |
-| Published host credential | **yes** for new workspaces; running ones keep what was composed | `ape sandbox credentials publish` / `revoke` |
+| Claude credential | **yes, live** — a login or token refresh anywhere (host or any workspace) converges everywhere within a sync tick | `ape sandbox credentials publish` once; `revoke` to withdraw |
 | Framework ref | no | `down` + `up --framework-ref <ref>` |
 | Mounts (repos, extra mounts, caches) | no | `down` + `up` |
 | Image, runtime, mount mode | no | `down` + `up` |
