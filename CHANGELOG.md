@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **`ape sandbox` is now usable out of the box** — `sandbox.DefaultImage` pointed at
+  `ghcr.io/exoport/ape-sandbox:v0`, a placeholder tag that was never published, so any
+  `up` without an `--image` override or a profile failed on the pull. It now points at the
+  published image, and `deploy/policy.yaml`'s allow-list matches it (they are checked
+  independently, so a mismatch turns every default create into a policy denial).
+  The image carries its **own version line**, independent of ape's: it changes for reasons
+  ape does not — a new base, a newer asdf/bingo, a Playwright bump — so tying the two
+  would mean either cutting a meaningless ape release to ship an image fix, or a tag that
+  lies about what changed. The two directions are ordinary dependency pins, one each way
+  (`ARG APE_VERSION` in the image, `DefaultImage` here).
+- **README documents the sandbox** — the workspace flow, the committed descriptor, and the
+  three properties that matter (allowlisted egress, a shared Claude session, declared
+  toolchains into durable caches), with the Linux + KVM + Kata prerequisite stated up
+  front.
+
 - **feat: `ape sandbox` workspaces get allowlisted, audited network egress
   (PLAN-21 D1–D4)** — workspaces were `--network none` because aped's root
   executor cannot create container networking (empty capability set, AF_UNIX

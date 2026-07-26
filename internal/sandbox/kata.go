@@ -25,15 +25,21 @@ var ErrUnsupported = errors.New("sandbox: Kata workspaces require Linux with con
 // user's own containers.
 const ContainerPrefix = "ape-ws-"
 
-// DefaultImage is the official ape-sandbox image reference used when a profile
-// leaves `image:` empty. It is pinned (never :latest) and tracks ape releases
-// (PLAN-16 D6). The image is PUBLIC and framework-free (PLAN-20): the private
-// APEX framework is not baked — aped mounts a pinned host checkout at
-// /opt/apex-framework at runtime — so any node/laptop pulls it with no
-// credential. Built + published from the separate public exoport/ape-sandbox
-// repo to the public ghcr.io/exoport package; this is the placeholder tag until
-// the first public build (PLAN-20 D5).
-const DefaultImage = "ghcr.io/exoport/ape-sandbox:v0"
+// DefaultImage is the official ape-sandbox image used when a profile leaves
+// `image:` empty. It is PUBLIC and framework-free (PLAN-20): the private APEX
+// framework is not baked — aped mounts a pinned host checkout at
+// /opt/apex-framework at runtime — so any node or laptop pulls it with no
+// credential. Built + published from the separate public exoport/ape-sandbox repo.
+//
+// This is a DEPENDENCY PIN on that image's own version line, not a mirror of ape's:
+// the image changes for reasons ape does not (a new base, a newer asdf/bingo, a
+// Playwright bump), so the two versions move independently and each is bumped
+// deliberately. Prefer a digest in production — see the note in deploy/policy.yaml.
+//
+// Keep this in step with the `images:` allow-list in deploy/policy.yaml: a create is
+// refused unless the resolved ref is listed there, so bumping one without the other
+// turns every default `ape sandbox up` into a policy denial.
+const DefaultImage = "ghcr.io/exoport/ape-sandbox:v1.0.0"
 
 // DefaultShell is the login shell `ape sandbox attach` opens inside a
 // workspace when the caller doesn't pick one.

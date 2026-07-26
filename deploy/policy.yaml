@@ -11,7 +11,10 @@
 # Allowed image references. Prefer digest-pinned refs. An empty list denies all
 # creates.
 images:
-  - ghcr.io/exoport/ape-sandbox:v0
+  # Must match sandbox.DefaultImage (internal/sandbox/kata.go), or a default
+  # `ape sandbox up` is refused here. The image has its own version line, independent
+  # of ape's — bump both together when you move it.
+  - ghcr.io/exoport/ape-sandbox:v1.0.0
   # - ghcr.io/exoport/ape-sandbox@sha256:<digest>   # pin by digest in production (preferred)
 
 # Canonical host path prefixes a host-fs mount must resolve under (symlinks are

@@ -94,6 +94,37 @@ Keybindings:
 [20:09:18] design · apex-create-architecture · ✓ skill complete (3 turns)
 ```
 
+## Isolated dev workspaces
+
+`ape sandbox` provisions a **hardware-isolated Kata microVM per project** — its own guest
+kernel over KVM — and works inside it across many sessions:
+
+```bash
+ape sandbox up dev            # provision (repos mounted, egress allowlisted)
+ape sandbox attach dev        # interactive shell in the VM
+ape sandbox exec dev -- go test ./...
+ape sandbox stop dev          # free RAM, keep the rootfs + state
+ape sandbox down dev          # tear down
+```
+
+A committed [`.apesandbox.yaml`](docs/reference/apesandbox-yaml.md) describes the
+workspace: which repos to mount (each at `/workspace/<name>`), extra mounts, the egress
+domains to request, and the toolchain to materialize. Everything in it is a **request** —
+the daemon re-checks every path against its own policy, so a committed file can never
+reach a host path an operator has not allowed.
+
+- **Allowlisted egress.** Deny-by-default through an audited CONNECT proxy: no DNS in the
+  guest, no route out except that proxy, and every connection recorded.
+- **Your Claude session, shared.** A login or token refresh on the host or in any workspace
+  converges everywhere — one OAuth session, not a copy per VM.
+- **Declared toolchains.** `.tool-versions` + `.bingo` materialize into durable host
+  caches, so a rebuild is offline and a workspace is disposable.
+
+Needs a Linux host with KVM + containerd + Kata, and the `aped` daemon: see
+[How to run aped](docs/how-to/run-aped.md) and
+[How to use sandbox workspaces](docs/how-to/sandbox-workspaces.md). `ape doctor` reports
+what is missing.
+
 ## Commands
 
 | Command                | What it does                                                                               |
@@ -110,6 +141,7 @@ Keybindings:
 | `ape metrics`          | Scan and publish this session's per-model usage metrics over NATS.                         |
 | `ape transcript upload`| Upload this session's transcript set as content-addressed blobs over NATS.                 |
 | `ape service`          | Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply.             |
+| `ape sandbox`          | Provision hardware-isolated Kata microVM dev workspaces through `aped` (Linux + KVM).      |
 | `ape adr`              | Manage Architecture Decision Records (`list`, `validate`, `new`).                          |
 | `ape pattern`          | Manage governance patterns (`list`).                                                       |
 | `ape trait`            | Inspect APEX traits (`list`, `show`, `validate`, `conflicts`).                             |
