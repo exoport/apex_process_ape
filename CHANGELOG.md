@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.0.49 (2026-07-26)
 
 - **`ape sandbox` is now usable out of the box** — `sandbox.DefaultImage` pointed at
   `ghcr.io/exoport/ape-sandbox:v0`, a placeholder tag that was never published, so any
