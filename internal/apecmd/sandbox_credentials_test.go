@@ -14,6 +14,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// requireSystemdHost skips a test that exercises the watcher's generated systemd --user
+// unit. The unit is a Linux artifact, and none of the machinery behind it survives
+// translation to Windows: exec.LookPath insists on a PATHEXT extension, so an `ape`
+// fixture without `.exe` is never found and apeBinaryPath falls back to the test binary;
+// os.UserHomeDir reads USERPROFILE and ignores the HOME a test sets; and os.TempDir
+// returns the 8.3 short form of the path while os.Executable returns the long one, so the
+// transient-binary guard cannot match its own prefix.
+func requireSystemdHost(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == goosWindows {
+		t.Skip("Linux-only: the watcher's systemd --user unit and the path semantics behind it")
+	}
+}
+
 // credFixture writes a fake host credential and returns (source, publishDest).
 //
 // It also points the ACL grant at the CURRENT user, because granting `aped` requires
@@ -274,6 +288,7 @@ func TestApeBinaryPathPrefersTheInvokedPathOverTheResolvedTarget(t *testing.T) {
 	// must point at the symlink: baking in the resolved target pins it to today's version
 	// and breaks the service at the next update. /proc/self/exe resolves, so os.Args[0]
 	// via LookPath is what preserves it.
+	requireSystemdHost(t)
 	dir := t.TempDir()
 	versioned := filepath.Join(dir, "ape-v9.9.9")
 	require.NoError(t, os.WriteFile(versioned, []byte("#!/bin/sh\n"), 0o755))
@@ -292,6 +307,7 @@ func TestApeBinaryPathPrefersTheInvokedPathOverTheResolvedTarget(t *testing.T) {
 func TestWatchUnitFileRefusesATemporaryBinary(t *testing.T) {
 	// A unit pointing into a temp dir (e.g. `go run`) breaks the moment it is cleaned up,
 	// which would show up much later as a service that mysteriously stopped working.
+	requireSystemdHost(t)
 	orig := os.Args
 	t.Cleanup(func() { os.Args = orig })
 	tmpBin := filepath.Join(os.TempDir(), "ape-transient")
@@ -305,6 +321,7 @@ func TestWatchUnitFileRefusesATemporaryBinary(t *testing.T) {
 }
 
 func TestWatchUnitFileCarriesANonDefaultInterval(t *testing.T) {
+	requireSystemdHost(t)
 	orig := os.Args
 	t.Cleanup(func() { os.Args = orig })
 	// The fixture lives under the real temp dir, which the transient-binary guard would
@@ -332,13 +349,7 @@ func TestInstallWatchUnitWritesCompleteFileAtomically(t *testing.T) {
 	// runs, so a failure leaves an empty unit that systemd refuses to load — which is
 	// exactly what happened on the dev host with an older binary. Writing via temp+rename
 	// means the file is either untouched or complete.
-	if runtime.GOOS == goosWindows {
-		// A systemd user unit is a Linux artifact, and installWatchUnit resolves the
-		// destination with os.UserHomeDir(), which on Windows reads USERPROFILE and so
-		// ignores the HOME set below — the test would write into the real profile and
-		// then assert a path that cannot match. The 0644 check has no meaning there either.
-		t.Skip("Linux-only: systemd user unit, and os.UserHomeDir ignores HOME on Windows")
-	}
+	requireSystemdHost(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
