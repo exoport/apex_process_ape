@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **`framework setup`/`status` now say WHICH git failure they hit** — a framework
+  directory whose files are all present but which git will not read as a repository
+  failed with `<dir> is not a git repository`. That reads as a broken mount, and in an
+  `ape sandbox` workspace the mount is usually fine: git is *refusing* it, because a
+  read-only host-owned checkout looks "dubiously owned" to a guest running as root. The
+  message now separates **absence** (no `.git` — the files were copied rather than
+  materialized, so `ape sandbox framework materialize <ref>` is the fix) from **refusal**
+  (git's own `dubious ownership`), quotes git verbatim instead of paraphrasing it, and
+  names the in-guest `ape` floor — **v0.0.49**, the release that scoped the
+  `safe.directory` exemption — as the cheapest cause to rule out. This cannot change what
+  an *older* baked `ape` prints, since that binary contains none of this code; it ends the
+  guessing from here on, which matters now that variant images can bake any `ape`.
 - **The default sandbox image is digest-pinned** — `sandbox.DefaultImage` and the
   `images:` allow-list in `deploy/policy.yaml` now both name
   `ghcr.io/exoport/ape-sandbox:v1.0.0@sha256:a5f8ca0f…`. A tag is mutable: re-pushing

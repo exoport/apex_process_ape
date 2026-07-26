@@ -40,8 +40,16 @@ func runGit(ctx context.Context, repoDir string, args ...string) (string, error)
 
 // IsGitRepo reports whether dir is the working tree of a git repo.
 func IsGitRepo(ctx context.Context, dir string) bool {
+	return GitRepoError(ctx, dir) == nil
+}
+
+// GitRepoError returns nil when dir is a git working tree, and git's OWN error when it is
+// not. The distinction the bool loses is the one that matters: "there is no repo here" and
+// "there is a repo here and I refuse to touch it" are different problems with different
+// fixes, and git says which in its stderr ("not a git repository" vs "dubious ownership").
+func GitRepoError(ctx context.Context, dir string) error {
 	_, err := runGit(ctx, dir, "rev-parse", "--git-dir")
-	return err == nil
+	return err
 }
 
 // CurrentBranch returns the abbreviated branch name (e.g., "main"),

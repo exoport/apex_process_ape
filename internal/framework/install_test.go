@@ -596,3 +596,50 @@ func TestStatus_NoMetadata_ActionableError(t *testing.T) {
 	require.Contains(t, err.Error(), "ape framework setup")
 	require.NotContains(t, err.Error(), "no such file or directory")
 }
+
+// frameworkLayoutOnly creates the two subtrees validateFrameworkLayout requires, and
+// nothing else — the shape a framework mount has when the files are present but the
+// checkout is not usable. Returns the directory.
+func frameworkLayoutOnly(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git not on PATH: %v", err)
+	}
+	dir := t.TempDir()
+	for _, sub := range []string{".claude/skills", "_apex/pipelines"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, sub), 0o755))
+	}
+	return dir
+}
+
+// The bare "<dir> is not a git repository" this replaced cost real time in a sandbox
+// workspace: it reads as a broken mount, while the mount is fine and git is refusing it.
+// These lock in that the message says WHICH of the two happened, quotes git, and names
+// the in-guest `ape` floor — the cheapest thing to rule out.
+func TestFrameworkNotGitRepoDistinguishesAbsenceFromRefusal(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("no .git — the files were copied, not checked out", func(t *testing.T) {
+		fw := frameworkLayoutOnly(t)
+		_, err := framework.Setup(ctx, &framework.UpdateOptions{ProjectRoot: newProject(t), FrameworkRepo: fw, Bootstrapper: staticBootstrap("proj")})
+		require.Error(t, err)
+		var ve *framework.ValidationError
+		require.ErrorAs(t, err, &ve)
+		require.Equal(t, "framework_not_git_repo", ve.Code)
+		require.Contains(t, ve.Detail, "has no .git")
+		require.Contains(t, ve.Detail, "materialize")
+	})
+
+	t.Run("a .git that git will not use", func(t *testing.T) {
+		fw := frameworkLayoutOnly(t)
+		require.NoError(t, os.MkdirAll(filepath.Join(fw, ".git"), 0o755)) // present, unusable
+		_, err := framework.Setup(ctx, &framework.UpdateOptions{ProjectRoot: newProject(t), FrameworkRepo: fw, Bootstrapper: staticBootstrap("proj")})
+		require.Error(t, err)
+		var ve *framework.ValidationError
+		require.ErrorAs(t, err, &ve)
+		require.Equal(t, "framework_not_git_repo", ve.Code)
+		require.Contains(t, ve.Detail, "has a .git")
+		require.Contains(t, ve.Detail, "v0.0.49", "the version floor is the cheapest cause to rule out")
+		require.Contains(t, ve.Detail, "git:", "git's own words, not a guess about them")
+	})
+}

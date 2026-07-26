@@ -358,14 +358,65 @@ func installOperatingRules(frameworkRepo, projectRoot string) (operatingRulesRes
 	return operatingRulesResult{Managed: true, ClaudeMdCreated: created, BlockUpdated: changed}, nil
 }
 
+// notAGitRepoError explains why git would not read a framework directory as a repository,
+// rather than only reporting that it would not.
+//
+// The layout check has already passed everywhere this is called, so the framework's files
+// ARE there — which is what made the old bare "is not a git repository" actively
+// misleading: it reads as a wrong path when the usual cause is git refusing a repo it
+// considers dubiously owned. In an `ape sandbox` workspace the framework is a read-only
+// mount owned by the host user while the guest process runs as root, so git refuses unless
+// the caller exempts that directory. runGit does exactly that (see gitcmd.go) — but only
+// since v0.0.49. An image baking an older `ape` therefore fails here every single time,
+// and the message it prints sends people to inspect a mount that is perfectly fine.
+// Naming the floor is the difference between one `ape version` and an afternoon.
+func notAGitRepoError(dir string, gitErr error) *ValidationError {
+	const (
+		code  = "framework_not_git_repo"
+		floor = "`ape` scopes a safe.directory exemption to the framework directory, but only since " +
+			"v0.0.49 — run `ape version` where this failed (INSIDE the workspace, if that is where " +
+			"it ran) and replace anything older, including an image that bakes it."
+	)
+	msg := ""
+	if gitErr != nil {
+		msg = gitErr.Error()
+	}
+
+	// git names this case outright, so trust it over any guess: the repo is there and git
+	// declined to use it because it belongs to another user. That is the normal state of a
+	// sandbox workspace's framework mount — host-owned files, guest running as root.
+	if strings.Contains(msg, "dubious ownership") {
+		return &ValidationError{Code: code, Detail: fmt.Sprintf(
+			"git refuses %s as a repository because it belongs to another user (\"dubious ownership\") — "+
+				"the repo is intact, this is a refusal. A sandbox workspace's framework mount is always "+
+				"in that state: read-only and host-owned. %s (git: %v)", dir, floor, gitErr)}
+	}
+
+	// No .git at all: a copy of the files, not a checkout, so there is no version to read.
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return &ValidationError{Code: code, Detail: fmt.Sprintf(
+			"%s holds framework content but has no .git, so the framework version it pins cannot be "+
+				"read. In an `ape sandbox` workspace this mount is produced by `ape sandbox framework "+
+				"materialize <ref>`, which delivers a real checkout — a plain copy of the files is not "+
+				"enough. (git: %v)", dir, gitErr)}
+	}
+
+	// A .git is present and git still would not use it. Report git's own words rather than
+	// asserting a cause, and name the version floor because that is the cheapest thing to
+	// rule out when this happens inside a workspace.
+	return &ValidationError{Code: code, Detail: fmt.Sprintf(
+		"%s has a .git, but git would not read it as a repository — so this is a refusal or a broken "+
+			"checkout, not a missing one. If it ran in a sandbox workspace: %s (git: %v)", dir, floor, gitErr)}
+}
+
 // validateFrameworkRepo runs the framework-side preconditions: subtree
 // layout, git repo, branch + clean check, optional fetch.
 func validateFrameworkRepo(ctx context.Context, opts *UpdateOptions) error {
 	if err := validateFrameworkLayout(opts.FrameworkRepo); err != nil {
 		return err
 	}
-	if !IsGitRepo(ctx, opts.FrameworkRepo) {
-		return &ValidationError{Code: "framework_not_git_repo", Detail: opts.FrameworkRepo + " is not a git repository"}
+	if gitErr := GitRepoError(ctx, opts.FrameworkRepo); gitErr != nil {
+		return notAGitRepoError(opts.FrameworkRepo, gitErr)
 	}
 	branch, err := CurrentBranch(ctx, opts.FrameworkRepo)
 	if err != nil {
@@ -671,8 +722,8 @@ func Status(ctx context.Context, opts StatusOptions) (*StatusResult, error) {
 	if err := validateFrameworkLayout(opts.FrameworkRepo); err != nil {
 		return nil, err
 	}
-	if !IsGitRepo(ctx, opts.FrameworkRepo) {
-		return nil, &ValidationError{Code: "framework_not_git_repo", Detail: opts.FrameworkRepo + " is not a git repository"}
+	if gitErr := GitRepoError(ctx, opts.FrameworkRepo); gitErr != nil {
+		return nil, notAGitRepoError(opts.FrameworkRepo, gitErr)
 	}
 	if !opts.NoFetch {
 		// Best-effort fetch — don't ff-merge for a status read.
