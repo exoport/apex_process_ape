@@ -39,6 +39,7 @@ make help          # available targets
 make build         # → ./ape
 make install       # → /usr/local/bin/ape (override INSTALL_DIR=...)
 make test          # go test -race ./...
+make test-portable # tests that are meaningful off Linux — the Windows CI gate (skips internal/aped, internal/netd)
 make test-cover    # with coverage profile
 make lint          # golangci-lint (pinned via bingo)
 make fmt           # gofumpt (pinned via bingo)

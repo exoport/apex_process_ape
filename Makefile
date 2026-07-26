@@ -34,6 +34,18 @@ install:     ## Build and install ape + aped to INSTALL_DIR (default: /usr/local
 test:        ## Run all tests with the race detector.
 	go test -race ./...
 
+# Packages whose SUBJECT is the Linux host stack: the rootful Kata VM daemon and its
+# privileged network helper. Both still get COMPILED everywhere — the Windows CI job
+# builds them and xcompile-windows links their test binaries, which is what catches
+# portability breaks — but RUNNING their tests off Linux only asserts things the platform
+# has no equivalent of (POSIX mode bits, /run/netns paths, systemd units), so a failure
+# there describes the runner rather than ape.
+NON_PORTABLE_PKG_RE := /internal/(aped|netd)$$
+
+.PHONY: test-portable
+test-portable: ## Run the tests that are meaningful off Linux (the Windows CI gate).
+	go test -race $$(go list ./... | grep -vE '$(NON_PORTABLE_PKG_RE)')
+
 .PHONY: test-cover
 test-cover:  ## Run tests and produce a coverage profile.
 	go test -race -coverprofile=$(COVER_FILE) ./...
