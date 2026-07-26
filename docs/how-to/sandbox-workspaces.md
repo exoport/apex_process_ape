@@ -53,7 +53,7 @@ resolves the composed home, egress, and creds server-side:
 - `--profile <name>` — a **server-side** profile `aped` resolves by name (falls
   back to a default derived from the request when the node has no such profile).
 - `--image <ref>` — image override. The default is **digest-pinned**:
-  `ghcr.io/exoport/ape-sandbox:v1.0.0@sha256:…` (the full ref is `sandbox.DefaultImage`
+  `ghcr.io/exoport/ape-sandbox:v1.1.0@sha256:…` (the full ref is `sandbox.DefaultImage`
   in `internal/sandbox/kata.go`). The digest is the pin, so re-pushing the tag cannot
   change what a workspace runs; the tag is there to keep the version legible. A node's
   policy `images:` allow-list is matched by **exact string** against the resolved ref,
