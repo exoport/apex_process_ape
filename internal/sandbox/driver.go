@@ -201,6 +201,7 @@ func workspaceFromRecord(r Workspace) workspace.Workspace {
 		Profile:    r.Profile,
 		CreatedAt:  r.CreatedAt,
 		LastUsedAt: r.LastUsedAt,
+		ApeVersion: r.ApeVersion,
 	}
 }
 

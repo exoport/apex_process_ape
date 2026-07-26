@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/exoport/apex_process_ape/internal/updatecache"
 	"github.com/minio/selfupdate"
 	"github.com/spf13/cobra"
@@ -52,6 +55,9 @@ func newUpdateCmd() *cobra.Command {
 // binary, downloads + verifies + applies it. GITHUB_TOKEN is optional (raises
 // the API rate limit when set).
 func runUpdate(ctx context.Context, current string, format output.Format) error {
+	if err := refuseDeliveredSelfUpdate(); err != nil {
+		return err
+	}
 	token := os.Getenv("GITHUB_TOKEN")
 
 	rel, err := latestRelease(ctx, token)
@@ -193,4 +199,37 @@ func isNewerVersion(current, latest string) bool {
 		lat = "v" + lat
 	}
 	return semver.Compare(lat, cur) > 0
+}
+
+// refuseDeliveredSelfUpdate stops an in-guest `ape update` before it fails on a
+// read-only mount.
+//
+// Inside an `ape sandbox` workspace, `ape` is not installed — aped mounts it read-only
+// from the node (PLAN-23), so the workspace runs the version matching the daemon that
+// provisioned it. Self-updating there is not merely blocked, it is the wrong operation:
+// even if the write succeeded it would last until the workspace was recreated, and it
+// would put the guest out of step with its node on purpose. Left alone, selfupdate
+// reports a permission error on a path the user never chose, which explains nothing.
+//
+// Detected by LOCATION rather than by trying the write: the mount point is aped's, and a
+// binary running from it can only have got there one way.
+func refuseDeliveredSelfUpdate() error {
+	// An unresolvable path is not an error to report: it only means we cannot tell where
+	// this binary lives, so the update proceeds and fails on its own terms if it must.
+	exe, _ := os.Executable()
+	if exe == "" {
+		return nil
+	}
+	if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
+		exe = resolved
+	}
+	if exe != filepath.Join(sandbox.ApeBinDest, "ape") &&
+		!strings.HasPrefix(exe, sandbox.ApeBinDest+string(filepath.Separator)) {
+		return nil
+	}
+	return fmt.Errorf("this ape is delivered by aped, not installed here: it is mounted "+
+		"read-only at %s so the workspace runs the same version as the node that provisioned "+
+		"it. Update the NODE's ape instead (and its aped — they ship together), then recreate "+
+		"or restart the workspace to pick it up. To pin a specific ape for THIS project, add it "+
+		"to .bingo and call it by its version-stamped path", sandbox.ApeBinDest)
 }

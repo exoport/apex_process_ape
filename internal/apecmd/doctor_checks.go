@@ -564,6 +564,50 @@ func checkSandboxImage(_ context.Context, env doctorEnv) CheckResult {
 	}
 }
 
+// checkSandboxApeDelivery reports whether this node can hand an `ape` to a workspace.
+//
+// aped mounts the `ape` beside itself into every workspace (PLAN-23) and refuses to start
+// without one, so this check exists to answer the question BEFORE a failed restart: an
+// operator who installs only `aped` gets a daemon that will not come up, and the fastest
+// way to see why is `ape doctor` rather than journalctl.
+//
+// Deliberately shallow — it looks for the sibling, not for a matching version. Only the
+// node's own aped knows its build identity, and duplicating that comparison here would
+// give a second, weaker answer to a question the daemon already answers definitively.
+func checkSandboxApeDelivery(_ context.Context, env doctorEnv) CheckResult {
+	if env.OS != "linux" {
+		return CheckResult{Status: StatusInfo, Message: "not probed on non-Linux (aped is Linux-only)"}
+	}
+	apedPath, err := exec.LookPath("aped")
+	if err != nil {
+		return CheckResult{Status: StatusInfo, Message: "aped not on PATH; delivery is a node-side concern"}
+	}
+	if resolved, rerr := filepath.EvalSymlinks(apedPath); rerr == nil {
+		apedPath = resolved
+	}
+	sibling := filepath.Join(filepath.Dir(apedPath), "ape")
+	st, err := os.Stat(sibling)
+	if err != nil {
+		return CheckResult{
+			Status:  StatusWarn,
+			Message: fmt.Sprintf("no ape beside %s — aped will refuse to start", apedPath),
+			Remediation: fmt.Sprintf("Install both binaries together (the release archive ships both): "+
+				"copy ape next to %s, or point the daemon at one with `aped front --ape-binary <path>`.", apedPath),
+		}
+	}
+	if st.Mode().Perm()&0o002 != 0 {
+		return CheckResult{
+			Status:      StatusWarn,
+			Message:     fmt.Sprintf("%s is world-writable (mode %v); aped will refuse it", sibling, st.Mode().Perm()),
+			Remediation: fmt.Sprintf("chmod 0755 %s — it is executed inside every workspace on this node.", sibling),
+		}
+	}
+	return CheckResult{
+		Status:  StatusOK,
+		Message: fmt.Sprintf("%s will be delivered to workspaces at %s", sibling, sandbox.ApeBinDest),
+	}
+}
+
 // isProjectRoot uses a lightweight heuristic: the directory contains
 // at least one of _apex/, .git, or .claude/. Lets doctor degrade
 // project-scoped checks to INFO without false positives on the user's

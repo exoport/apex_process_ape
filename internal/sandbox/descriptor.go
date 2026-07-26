@@ -39,15 +39,27 @@ const (
 	WorkspaceRoot = "/workspace"
 	// FrameworkDest is where the pinned APEX framework is mounted read-only.
 	FrameworkDest = "/opt/apex-framework"
+	// ApeBinRoot is the guest subtree aped owns for the `ape` it delivers (PLAN-23).
+	// Reserved as a whole subtree so it can grow (completions, docs) without minting
+	// another reserved destination.
+	ApeBinRoot = "/opt/ape"
+	// ApeBinDest is where aped mounts the directory holding the `ape` binary, read-only.
+	// The image creates it empty and puts it FIRST on PATH, so `ape` in a workspace is
+	// the one the node delivered rather than one baked months ago. A project's
+	// bingo-pinned `ape` is unaffected: bingo invokes version-stamped names by absolute
+	// path, so it never resolves through PATH.
+	ApeBinDest = ApeBinRoot + "/bin"
 	// UserMountRoot is the default parent for a user mount that declares no dest:
 	// /mnt/<basename of source>.
 	UserMountRoot = "/mnt"
 )
 
 // reservedDests are guest paths a USER mount may never target: they are system
-// mounts aped applies on its own authority. /workspace is reserved as a whole
-// subtree (a repo's path lives under it), the others exactly.
-var reservedDests = []string{WorkspaceRoot, FrameworkDest, DefaultGuestHome}
+// mounts aped applies on its own authority. Each is reserved as a whole SUBTREE —
+// /workspace because a repo's path lives under it, /opt/ape because the delivered
+// binary sits in a bin/ below it — so a user mount can neither replace one nor slip
+// underneath it.
+var reservedDests = []string{WorkspaceRoot, FrameworkDest, ApeBinRoot, DefaultGuestHome}
 
 // Descriptor is the parsed `.apesandbox.yaml`.
 //
@@ -473,7 +485,8 @@ func validateGuestDest(dest string) error {
 	for _, res := range reservedDests {
 		if clean == res || strings.HasPrefix(clean, res+"/") {
 			return fmt.Errorf("mount dest %q is reserved: %s is a system mount aped applies itself "+
-				"(the framework, the composed home, and project repos cannot be redirected)", dest, res)
+				"(the framework, the delivered ape, the composed home, and project repos "+
+				"cannot be redirected)", dest, res)
 		}
 	}
 	return nil

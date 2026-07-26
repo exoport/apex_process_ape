@@ -233,6 +233,13 @@ but never widen it.`,
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "workspace %q up (%s, %s, mount=%s)\n", ws.Name, ws.Image, ws.Runtime, ws.Mount)
+			if ws.ApeVersion != "" {
+				// The NODE's ape, which is what the workspace runs — not necessarily this
+				// client's. Saying so here means a mismatch is noticed now rather than after
+				// something behaves unexpectedly inside the workspace.
+				fmt.Fprintf(cmd.OutOrStdout(), "ape in workspace: %s (delivered by the node; this client is %s)\n",
+					ws.ApeVersion, Version)
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "exec: ape sandbox exec %s -- <cmd>\n", ws.Name)
 			return nil
 		},
@@ -386,12 +393,16 @@ exactly why ape reports it instead of reaping automatically; you decide what to 
 					return nil
 				}
 				tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
-				fmt.Fprintln(tw, "NAME\tRUNTIME\tMOUNT\tAGE\tLAST-USED\tIMAGE")
+				// APE is the ape the NODE delivered into the workspace, which is not
+				// necessarily the one running this command: driving a remote node from a laptop
+				// gets you the node's. Shown so that difference is visible rather than surprising.
+				fmt.Fprintln(tw, "NAME\tRUNTIME\tMOUNT\tAGE\tLAST-USED\tAPE\tIMAGE")
 				now := time.Now()
 				for i := range list {
 					w := &list[i]
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-						w.Name, w.Runtime, w.Mount, since(w.CreatedAt, now), since(w.LastUsedAt, now), w.Image)
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+						w.Name, w.Runtime, w.Mount, since(w.CreatedAt, now), since(w.LastUsedAt, now),
+						orDash(w.ApeVersion), w.Image)
 				}
 				return tw.Flush()
 			}
@@ -662,4 +673,14 @@ persistent volume (mount: volume) is retained unless --remove-volume is set.`,
 	cmd.Flags().BoolVar(&force, "force", false, "Force teardown")
 	cmd.Flags().BoolVar(&removeVolume, "remove-volume", false, "Also remove the persistent volume (mount: volume)")
 	return cmd
+}
+
+// orDash renders an absent optional field as "-" rather than an empty column, which in a
+// tab-aligned table reads as a rendering bug. Empty here means a workspace created before
+// the node delivered `ape` at all (PLAN-23).
+func orDash(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "-"
+	}
+	return s
 }

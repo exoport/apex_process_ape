@@ -108,6 +108,11 @@ type WorkspaceSpec struct {
 	// Cwd is the guest working directory — the main repo's mount point in a
 	// multi-repo workspace. Empty keeps the image's WORKDIR.
 	Cwd string
+	// ApeVersion is the version of the `ape` aped delivered into this workspace
+	// (PLAN-23). Recorded so an operator can see which `ape` a workspace actually runs
+	// without attaching to it — it is the NODE's, not necessarily the one they drove
+	// `ape sandbox up` with. Empty → no delivery (an older node, or a test).
+	ApeVersion string
 
 	// EgressDomains is the GRANTED allowlist the workspace's CONNECT proxy
 	// enforces (policy ∩ request — PLAN-21 D1). Empty means no egress was granted;
@@ -362,6 +367,11 @@ type Workspace struct {
 	// reached in recently", which is why this drives a REPORT for a human rather
 	// than an automatic reaper.
 	LastUsedAt string `json:"last_used_at,omitempty"`
+	// ApeVersion is the `ape` the node delivered into this workspace at create time
+	// (PLAN-23). Recorded rather than derived on read: the node's `ape` may be upgraded
+	// while a long-lived workspace keeps running the one it was given, and the answer to
+	// "which ape is in there?" has to be the truth, not today's default.
+	ApeVersion string `json:"ape_version,omitempty"`
 
 	// Egress-proxy supervisor record (PLAN-16 D4). Set only when `up`
 	// started a managed CONNECT proxy for the workspace (a profile

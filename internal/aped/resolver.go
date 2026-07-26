@@ -46,6 +46,12 @@ type Resolver struct {
 	// cacheRoot is the host directory holding the durable tool caches (PLAN-22 D4).
 	// Empty → this node offers no caching and a cache request is ignored.
 	cacheRoot string
+	// apeBin is the verified `ape` this node delivers into every workspace (PLAN-23).
+	// Resolved and checked once at startup, so a create never has to wonder. Zero value →
+	// no delivery, which only happens in tests: the daemon refuses to start without one,
+	// since a workspace with no `ape` is broken rather than degraded.
+	apeBin        ApeBinary
+	apeBinRecheck func() (ApeBinary, error)
 	// credentials is the credential mode this node composes into workspaces when the
 	// resolved profile does not state one. It is NODE configuration, never a request
 	// field: which host identity a workspace gets is the operator's decision, not the
@@ -90,6 +96,13 @@ type ResolverConfig struct {
 	// CacheRoot is the host directory holding durable tool caches, one subdir per
 	// cache (PLAN-22 D4). Empty disables cache mounts.
 	CacheRoot string
+	// ApeBin is the verified `ape` binary this node delivers into workspaces (PLAN-23),
+	// resolved once at startup by ResolveApeBinary. The zero value disables delivery and
+	// exists for tests only — the daemon will not start without a verified binary.
+	ApeBin ApeBinary
+	// ApeBinRecheck re-verifies the delivered binary at create time. Nil skips the
+	// re-check and delivers ApeBin as resolved at startup.
+	ApeBinRecheck func() (ApeBinary, error)
 	// Credentials is the default credential mode for provisioned workspaces
 	// ("oauth" composes the host credential published under HostHome; "none" injects
 	// nothing). Empty → none, the fail-closed default.
@@ -116,6 +129,8 @@ func NewResolver(cfg ResolverConfig) *Resolver {
 		frameworkRoot: cfg.FrameworkRoot,
 		frameworkRef:  cfg.FrameworkRef,
 		cacheRoot:     cfg.CacheRoot,
+		apeBin:        cfg.ApeBin,
+		apeBinRecheck: cfg.ApeBinRecheck,
 		credentials:   cfg.Credentials,
 		loadProfile:   cfg.LoadProfile,
 		compose:       sandbox.Compose,
@@ -181,6 +196,15 @@ func (r *Resolver) Resolve(_ context.Context, req workspace.CreateRequest) (sand
 	if err := r.injectVMCreds(name, comp); err != nil {
 		return sandbox.WorkspaceSpec{}, err
 	}
+
+	// Hand the same environment to LOGIN shells (PLAN-23 D9). exec/attach inherit the
+	// container env; an ssh or VS Code Remote session does not, because sshd builds a fresh
+	// one — so without this a workspace reached over ssh has no GOPATH/GOBIN and quietly
+	// writes to the ephemeral rootfs instead of the durable caches. Written last, once the
+	// spec's env is complete, and allowlisted so credential material stays out of a file.
+	if err := sandbox.WriteGuestProfileEnv(comp.StagingDir, append(append([]string(nil), comp.Env...), spec.Env...)); err != nil {
+		return sandbox.WorkspaceSpec{}, err
+	}
 	return spec, nil
 }
 
@@ -200,6 +224,29 @@ func (r *Resolver) resolveMounts(spec *sandbox.WorkspaceSpec, req workspace.Crea
 	}
 	if served {
 		spec.Mounts = append(spec.Mounts, fw)
+	}
+
+	// 1b. The `ape` binary: read-only, from THIS daemon's installation, never the request
+	// (PLAN-23). Delivered at runtime rather than baked into the image so a workspace runs
+	// the ape that matches the daemon provisioning it — the image would otherwise carry
+	// whatever release was current when it was built, which is not the one whose fix you
+	// upgraded for. The directory is mounted, not the file: it is what the rest of this
+	// stack does, and it leaves room to add completions without a new reserved dest.
+	if r.apeBin.Dir != "" {
+		bin := r.apeBin
+		if r.apeBinRecheck != nil {
+			fresh, rerr := r.apeBinRecheck()
+			if rerr != nil {
+				return rerr
+			}
+			bin = fresh
+		}
+		spec.Mounts = append(spec.Mounts, workspace.MountSpec{
+			Source:   bin.Dir,
+			Dest:     sandbox.ApeBinDest,
+			ReadOnly: true,
+		})
+		spec.ApeVersion = bin.Version
 	}
 
 	// 2. Project repos, each at /workspace/<name>. A single-repo request (the

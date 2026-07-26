@@ -33,6 +33,13 @@ type FrontConfig struct {
 	OperatorCredsPath string
 	CredsExpiry       time.Duration
 	ApeVersion        string
+	// ApeGitCommit is this daemon's own build revision. It separates two local builds that
+	// carry the same version string, which is what a partial `make build` produces.
+	ApeGitCommit string
+	// ApeBinary overrides which `ape` is delivered into workspaces (PLAN-23). Empty means
+	// the one beside this aped, which is the matching build by construction: they ship in a
+	// single release archive.
+	ApeBinary string
 	// PolicyPath is the same policy.yaml the executor loads. The front reads it to
 	// pre-check egress requests and to build each workspace's proxy allowlist
 	// (PLAN-21 D1/D2) — the executor still re-validates authoritatively. Empty
@@ -149,6 +156,20 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 		}
 	}
 
+	// The `ape` every workspace runs (PLAN-23). Resolved and verified BEFORE the service
+	// starts answering, and fatal when it fails: a workspace with no `ape` — or with one
+	// that does not match this daemon — is broken, not degraded, and discovering that as
+	// `command not found` inside a guest costs far more than refusing here.
+	apeBin, err := ResolveApeBinary(cfg.ApeBinary, cfg.ApeVersion, cfg.ApeGitCommit)
+	if err != nil {
+		return err
+	}
+	for _, w := range apeBin.Warnings {
+		fmt.Fprintf(stderr, "! ape delivery: %s\n", w)
+	}
+	fmt.Fprintf(stderr, "  ape delivery: %s → %s (read-only, first on PATH)\n",
+		apeBin, sandbox.ApeBinDest)
+
 	// The vmm service dispatches to the executor over the priv socket; Create is
 	// resolved here (de-privileged) before it crosses the boundary.
 	resolver := NewResolver(ResolverConfig{
@@ -161,7 +182,14 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 		FrameworkRoot: cfg.FrameworkRoot,
 		FrameworkRef:  cfg.FrameworkRef,
 		CacheRoot:     cfg.CacheRoot,
-		Credentials:   sandbox.CredentialMode(cfg.Credentials),
+		ApeBin:        apeBin,
+		// Re-verified per create, not just at startup: the file can be replaced under a
+		// running daemon, which is exactly what a redeploy does. A create landing in that
+		// window would otherwise deliver a binary nothing has checked.
+		ApeBinRecheck: func() (ApeBinary, error) {
+			return ResolveApeBinary(cfg.ApeBinary, cfg.ApeVersion, cfg.ApeGitCommit)
+		},
+		Credentials: sandbox.CredentialMode(cfg.Credentials),
 	})
 	if mode := sandbox.CredentialMode(cfg.Credentials); mode != "" && mode != sandbox.CredentialNone {
 		fmt.Fprintf(stderr, "  credentials: %s from %s (publish with 'ape sandbox credentials publish')\n",

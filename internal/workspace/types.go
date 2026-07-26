@@ -130,6 +130,11 @@ type Workspace struct {
 	// LastUsedAt is the last exec/attach/start on this workspace (PLAN-22 D5b), so an
 	// operator can see which workspaces are actually in use before reclaiming any.
 	LastUsedAt string `json:"last_used_at,omitempty"`
+	// ApeVersion is the `ape` the node delivered into this workspace (PLAN-23). Worth
+	// recording because it is the NODE's ape, not necessarily the one the operator ran
+	// `ape sandbox up` with — a laptop driving a remote node gets the node's. Empty for
+	// workspaces created before delivery existed.
+	ApeVersion string `json:"ape_version,omitempty"`
 }
 
 // State is a workspace's lifecycle state, reported by Inspect.

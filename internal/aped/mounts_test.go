@@ -178,7 +178,12 @@ func TestResolveMountsRefusesReservedUserDest(t *testing.T) {
 	project := t.TempDir()
 	// A hand-crafted wire request bypassing the client's own check must still be
 	// refused: aped is the authority on the trust boundary.
-	for _, dest := range []string{sandbox.FrameworkDest, "/workspace/app", sandbox.DefaultGuestHome} {
+	// /opt/ape covers the delivered binary as a SUBTREE: shadowing /opt/ape/bin would let a
+	// project choose the `ape` its own workspace runs, which is the point of delivering it.
+	for _, dest := range []string{
+		sandbox.FrameworkDest, "/workspace/app", sandbox.DefaultGuestHome,
+		sandbox.ApeBinRoot, sandbox.ApeBinDest,
+	} {
 		_, err := r.Resolve(context.Background(), workspace.CreateRequest{
 			Name: "dev", MountSource: project,
 			Mounts: []workspace.MountSpec{{Source: project, Dest: dest, ReadOnly: false}},
@@ -328,4 +333,67 @@ func TestResolveCachesRejectsUnknownName(t *testing.T) {
 		Name: "dev", MountSource: t.TempDir(), Caches: []string{"../../etc"},
 	})
 	require.ErrorIs(t, err, workspace.ErrValidation)
+}
+
+// ---- delivered ape (PLAN-23) ------------------------------------------------
+
+func TestResolveDeliversTheNodesApeReadOnly(t *testing.T) {
+	// The workspace must run the ape matching the daemon that provisioned it, so the
+	// binary's DIRECTORY is mounted read-only from this node's own installation. Not from
+	// the request: a caller that could name the path would choose what runs in its guest.
+	r, _ := mountResolver(t, "")
+	apeDir := t.TempDir()
+	r.apeBin = ApeBinary{Path: filepath.Join(apeDir, "ape"), Dir: apeDir, Version: "0.0.50"}
+
+	spec, err := r.Resolve(context.Background(), workspace.CreateRequest{
+		Name: "dev", MountSource: t.TempDir(),
+	})
+	require.NoError(t, err)
+
+	m, ok := mountByDest(spec.Mounts, sandbox.ApeBinDest)
+	require.True(t, ok, "every workspace gets the delivered ape")
+	assert.Equal(t, apeDir, m.Source, "the directory, not the file")
+	assert.True(t, m.ReadOnly, "the guest must not be able to rewrite the node's binary")
+	assert.Equal(t, "0.0.50", spec.ApeVersion, "recorded so `ls` can report what is in there")
+}
+
+func TestResolveRefusesWhenTheRecheckFails(t *testing.T) {
+	// The binary can be replaced under a running daemon — which is exactly what a redeploy
+	// does — so a create re-verifies rather than trusting the startup result. A create
+	// landing in that window must fail, not deliver something unchecked.
+	r, _ := mountResolver(t, "")
+	apeDir := t.TempDir()
+	r.apeBin = ApeBinary{Path: filepath.Join(apeDir, "ape"), Dir: apeDir, Version: "0.0.50"}
+	r.apeBinRecheck = func() (ApeBinary, error) { return ApeBinary{}, ErrNoApeBinary }
+
+	_, err := r.Resolve(context.Background(), workspace.CreateRequest{
+		Name: "dev", MountSource: t.TempDir(),
+	})
+	require.ErrorIs(t, err, ErrNoApeBinary)
+}
+
+func TestResolveWritesTheLoginShellEnv(t *testing.T) {
+	// ssh / VS Code Remote sessions do not inherit the container env, so the derived env is
+	// also written into the composed home for /etc/profile.d to source (PLAN-23 D9).
+	staging := t.TempDir()
+	r, _ := mountResolver(t, "")
+	r.compose = func(sandbox.ComposeOptions) (*sandbox.Composition, error) {
+		return &sandbox.Composition{
+			StagingDir: staging,
+			GuestHome:  sandbox.DefaultGuestHome,
+			Env:        []string{"ANTHROPIC_API_KEY=sk-secret"},
+		}, nil
+	}
+	r.cacheRoot = t.TempDir()
+
+	_, err := r.Resolve(context.Background(), workspace.CreateRequest{
+		Name: "dev", MountSource: t.TempDir(), Caches: []string{"go"},
+	})
+	require.NoError(t, err)
+
+	body, rerr := os.ReadFile(filepath.Join(staging, sandbox.GuestProfileEnvFile))
+	require.NoError(t, rerr)
+	assert.Contains(t, string(body), "export GOBIN='"+sandbox.CacheRoot+"/go/bin'",
+		"a shell over ssh needs the durable cache, or go writes to the ephemeral rootfs")
+	assert.NotContains(t, string(body), "sk-secret", "credentials stay out of the file")
 }

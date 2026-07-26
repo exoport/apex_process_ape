@@ -4,9 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"runtime/debug"
-	"strings"
 
+	"github.com/exoport/apex_process_ape/internal/buildident"
 	"github.com/exoport/apex_process_ape/internal/output"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -19,27 +18,10 @@ var (
 )
 
 func init() {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return
-	}
-	// Use module version when installed via `go install module@vX.Y.Z`.
-	if Version == "dev" && info.Main.Version != "" && info.Main.Version != "(devel)" {
-		Version = strings.TrimPrefix(info.Main.Version, "v")
-	}
-	// Backfill from VCS settings embedded by `go build`/`go install`.
-	for _, s := range info.Settings {
-		switch s.Key {
-		case "vcs.revision":
-			if GitCommit == "unknown" {
-				GitCommit = s.Value
-			}
-		case "vcs.time":
-			if BuildDate == "unknown" {
-				BuildDate = s.Value
-			}
-		}
-	}
+	// Shared with aped on purpose: aped compares its own version against the `ape` it
+	// delivers into workspaces, so the two must derive identity by identical rules.
+	id := buildident.Resolve(Version, BuildDate, GitCommit)
+	Version, BuildDate, GitCommit = id.Version, id.BuildDate, id.GitCommit
 }
 
 type versionResult struct {

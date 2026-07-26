@@ -95,7 +95,12 @@ func BuildSpec(opts SpecOptions) (*specs.Spec, error) {
 
 	env := []string{
 		"HOME=" + opts.Comp.GuestHome,
-		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+		// ApeBinDest leads, because aped delivers `ape` there at runtime (PLAN-23) and this
+		// builder sets PATH outright rather than extending the image's. The containerd path
+		// takes PATH from the image config instead (imagespec.go), which is where the
+		// equivalent entry lives for Kata workspaces — miss either one and `ape` is simply
+		// not on PATH under that driver.
+		"PATH=" + ApeBinDest + ":/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"TERM=xterm-256color",
 	}
 	env = append(env, opts.Comp.Env...)

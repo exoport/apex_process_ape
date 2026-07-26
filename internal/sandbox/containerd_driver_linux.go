@@ -153,6 +153,9 @@ func (d *containerdDriver) Provision(ctx context.Context, spec WorkspaceSpec) (w
 			VMM: string(spec.VMM), Image: spec.Image, Mount: string(spec.Mount),
 			ProjectRoot: spec.ProjectRoot, Volume: spec.Volume,
 			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+			// The ape delivered into this workspace, recorded at create: the node's ape can
+			// move on while this workspace keeps the one it was given.
+			ApeVersion: spec.ApeVersion,
 		}
 		if spec.Comp != nil {
 			rec.StagingDir = spec.Comp.StagingDir
@@ -164,6 +167,7 @@ func (d *containerdDriver) Provision(ctx context.Context, spec WorkspaceSpec) (w
 	return workspace.Workspace{
 		ID: spec.Name, Name: spec.Name, Image: spec.Image,
 		Runtime: runtimeName(spec.VMM), Mount: string(spec.Mount),
+		ApeVersion: spec.ApeVersion,
 	}, nil
 }
 

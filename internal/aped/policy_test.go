@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/exoport/apex_process_ape/internal/workspace"
 )
 
@@ -159,5 +160,27 @@ func TestPolicyMountSymlinkEscape(t *testing.T) {
 	p := &Policy{Images: []string{"img"}, MountRoots: []string{root}}
 	if !errors.Is(p.CheckCreate(ResolvedCreate{Image: "img", MountPath: link}, 0), workspace.ErrPolicyDenied) {
 		t.Error("a symlink under the root pointing outside must be denied (resolved-path check)")
+	}
+}
+
+// TestShippedPolicyAllowsTheCompiledInDefaultImage pins the two halves of the image
+// pin together.
+//
+// checkImage is an exact string match (slices.Contains), so deploy/policy.yaml's
+// `images:` entry and sandbox.DefaultImage have to be byte-identical. When they drift,
+// nothing fails to build and nothing fails to pull — every default `ape sandbox up` is
+// refused as a POLICY DENIAL instead, which reads as a misconfigured node rather than a
+// stale constant. Bumping one and forgetting the other is a one-character mistake with a
+// confusing symptom, so it is worth a test rather than a comment.
+func TestShippedPolicyAllowsTheCompiledInDefaultImage(t *testing.T) {
+	p, err := LoadPolicy(filepath.FromSlash("../../deploy/policy.yaml"))
+	if err != nil {
+		t.Fatalf("load shipped policy: %v", err)
+	}
+	if err := p.checkImage(sandbox.DefaultImage); err != nil {
+		t.Errorf("the shipped deploy/policy.yaml does not allow sandbox.DefaultImage:\n"+
+			"  DefaultImage: %s\n  policy images: %v\n"+
+			"they are compared by EXACT string match, so both must move in the same commit",
+			sandbox.DefaultImage, p.Images)
 	}
 }

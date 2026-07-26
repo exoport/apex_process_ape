@@ -398,14 +398,24 @@ do_redeploy() {
   for b in ape aped; do
     [ -x "$REPO_DIR/$b" ] || die "$REPO_DIR/$b missing — run 'make build' as your user first"
   done
-  # Only NON-test sources can make the binary stale; flagging a _test.go edit cries
+  # Only NON-test sources can make a binary stale; flagging a _test.go edit cries
   # wolf, and a warning that is usually wrong is a warning people stop reading.
-  local newest_src
-  newest_src="$(find "$REPO_DIR" -name '*.go' ! -name '*_test.go' -newer "$REPO_DIR/aped" -print -quit 2>/dev/null || true)"
-  [ -z "$newest_src" ] || warn "$newest_src is newer than ./aped — is the build stale? (run 'make build')"
+  #
+  # BOTH binaries are checked, not just aped: aped delivers the installed `ape` into
+  # every workspace (PLAN-23), so a stale ./ape is not a local inconvenience — it is
+  # the binary your sandboxes run. aped refuses to start on a version mismatch, but
+  # two `dev` builds from different commits carry the SAME version string, so this
+  # mtime check is the only thing that catches that case.
+  local b newest_src
+  for b in ape aped; do
+    newest_src="$(find "$REPO_DIR" -name '*.go' ! -name '*_test.go' -newer "$REPO_DIR/$b" -print -quit 2>/dev/null || true)"
+    [ -z "$newest_src" ] || warn "$newest_src is newer than ./$b — is the build stale? (run 'make build')"
+  done
   install -m 0755 "$REPO_DIR/ape" /usr/local/bin/ape
   install -m 0755 "$REPO_DIR/aped" /usr/local/bin/aped
-  ok "/usr/local/bin/{ape,aped} installed ($("$REPO_DIR/aped" version 2>/dev/null | head -1))"
+  # `aped version` is not a subcommand (cobra exposes --version), so the old form printed
+  # nothing at all — the one line meant to confirm WHAT was installed was silently empty.
+  ok "/usr/local/bin/{ape,aped} installed ($("$REPO_DIR/aped" --version 2>/dev/null | head -1))"
 
   step "2/5 units + tmpfiles"
   local f n

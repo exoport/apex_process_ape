@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/aped"
+	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/spf13/cobra"
 )
 
@@ -32,6 +33,7 @@ func newFrontCmd() *cobra.Command {
 		cacheRoot   string
 		credentials string
 		credSyncInt time.Duration
+		apeBinary   string
 	)
 	cmd := &cobra.Command{
 		Use:   "front",
@@ -64,6 +66,8 @@ injected into each VM as APE_NATS_URL alongside its minted per-VM .creds.`,
 				OperatorCredsPath: operatorCr,
 				CredsExpiry:       credsExpiry,
 				ApeVersion:        Version,
+				ApeGitCommit:      GitCommit,
+				ApeBinary:         apeBinary,
 				PolicyPath:        policyPath,
 				EgressBindIP:      egressIP,
 				EgressPortLow:     egressLow,
@@ -96,5 +100,8 @@ injected into each VM as APE_NATS_URL alongside its minted per-VM .creds.`,
 	f.StringVar(&cacheRoot, "cache-root", "", "Host dir holding durable tool caches (asdf/go/cargo/...); '' → no cache mounts")
 	f.StringVar(&credentials, "credentials", "", "Credential mode composed into workspaces: oauth | api-key | none (default none). oauth copies <host-home>/.claude/.credentials.json into each workspace and keeps them converged")
 	f.DurationVar(&credSyncInt, "cred-sync-interval", 0, "How often to converge the shared credential across host + workspaces (default 3s)")
+	// The default (the `ape` beside this aped) is what makes delivery need no configuration:
+	// both binaries ship in one release archive. The flag is for installs that split them.
+	f.StringVar(&apeBinary, "ape-binary", "", "The `ape` binary delivered read-only into every workspace at "+sandbox.ApeBinDest+" (default: the ape beside this aped)")
 	return cmd
 }
