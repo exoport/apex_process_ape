@@ -538,6 +538,25 @@ workspace that mysteriously fails to start.
 `0751` (traverse-only) because a command running as you creates files with *your* group;
 traversal exposes a path, not a secret.
 
+## Pre-pull the workspace image (the executor cannot)
+
+The root executor is **network-less by design** — AF_UNIX only, so it can't even
+resolve DNS (PLAN-18 D1). A registry pull from inside it therefore cannot succeed;
+it fails with `socket: address family not supported by protocol`, which reads like a
+broken host rather than a deliberate restriction. The image has to be in the node's
+containerd namespace *before* the first create:
+
+```bash
+# the digest form, exactly as sandbox.DefaultImage names it
+sudo nerdctl --namespace aped pull ghcr.io/exoport/ape-sandbox@sha256:<digest>
+```
+
+**Use the digest form**, not the tag. containerd stores an image under the name it was
+pulled with, and the driver's lookup is an exact match on the normalized (digest) ref —
+pulling `:v1.1.0` instead leaves that lookup missing and the create fails the same way.
+`ape doctor` reports the expected ref, and the create error now prints the command with
+the right ref filled in.
+
 ## The framework mount + durable tool caches
 
 The `ape-sandbox` image is public and framework-free, so the framework arrives as a

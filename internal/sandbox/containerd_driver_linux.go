@@ -222,9 +222,38 @@ func (d *containerdDriver) getOrPull(ctx context.Context, ref string) (client.Im
 	}
 	img, err := d.cli.Pull(ctx, ref, client.WithPullUnpack)
 	if err != nil {
-		return nil, fmt.Errorf("containerd driver: pull %s: %w", ref, err)
+		return nil, fmt.Errorf("containerd driver: pull %s: %w%s", ref, err, pullHint(err, d.ns, ref))
 	}
 	return img, nil
+}
+
+// pullHint turns a network failure during a pull into the instruction that actually
+// resolves it.
+//
+// aped's root executor is network-less BY DESIGN (PLAN-18 D1: AF_UNIX only), so a registry
+// pull from inside it cannot work — DNS surfaces as "socket: address family not supported
+// by protocol", which reads like a broken host rather than a deliberate restriction. The
+// image has to be present in the node's containerd namespace before a create, so say that
+// instead of leaving an operator to discover the executor's sandbox from a udp error.
+func pullHint(err error, ns, ref string) string {
+	msg := err.Error()
+	for _, probe := range []string{
+		"address family not supported",
+		"no such host",
+		"connection refused",
+		"i/o timeout",
+		"network is unreachable",
+	} {
+		if strings.Contains(msg, probe) {
+			return fmt.Sprintf(" — aped's executor has NO network by design (AF_UNIX only), so it "+
+				"cannot pull. Pre-pull the image on the node instead:\n"+
+				"    sudo nerdctl --namespace %s pull %s\n"+
+				"Use that EXACT ref: containerd stores an image under the name it was pulled with, "+
+				"and this lookup is an exact match on the digest form — pulling the tag instead "+
+				"leaves it missing and lands you back here", ns, ref)
+		}
+	}
+	return ""
 }
 
 // normalizeImageRef canonicalizes an image reference the way nerdctl/docker do
