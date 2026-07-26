@@ -35,6 +35,13 @@ func requireSystemdHost(t *testing.T) {
 // grant mechanism, not the account name.
 func credFixture(t *testing.T) (ctx context.Context, source, dest string) {
 	t.Helper()
+	if runtime.GOOS == goosWindows {
+		// Not covered by the LookPath check below: Git for Windows ships a setfacl of its
+		// own, so one IS found on PATH — it just is not the POSIX tool, and it rejects the
+		// entries with "illegal acl entries". The grant being tested is a POSIX ACL on the
+		// Linux node that runs aped, so there is nothing here for Windows to exercise.
+		t.Skip("POSIX ACLs are a Linux mechanism (the setfacl Git for Windows ships is a different tool)")
+	}
 	if _, err := exec.LookPath("setfacl"); err != nil {
 		t.Skip("setfacl not installed: the credential grant is ACL-only by design")
 	}
