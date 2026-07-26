@@ -459,7 +459,7 @@ is handled the next time you touch a workspace. To need no command at all, run t
 watcher — as **you**, because only your own session can read your home:
 
 ```bash
-ape sandbox credentials watch --print-unit > ~/.config/systemd/user/ape-credentials-watch.service
+ape sandbox credentials watch --install-unit    # writes it; --print-unit just shows it
 systemctl --user daemon-reload
 systemctl --user enable --now ape-credentials-watch
 sudo loginctl enable-linger $USER      # start at BOOT, not just at first login

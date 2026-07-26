@@ -325,3 +325,35 @@ func TestWatchUnitFileCarriesANonDefaultInterval(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, unit, "ExecStart="+bin+" sandbox credentials watch\n")
 }
+
+func TestInstallWatchUnitWritesCompleteFileAtomically(t *testing.T) {
+	// This exists because `--print-unit > file` truncates the target BEFORE the command
+	// runs, so a failure leaves an empty unit that systemd refuses to load — which is
+	// exactly what happened on the dev host with an older binary. Writing via temp+rename
+	// means the file is either untouched or complete.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	path, err := installWatchUnit("[Unit]\nDescription=test\n")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(home, ".config", "systemd", "user", "ape-credentials-watch.service"), path)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "Description=test")
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+
+	// No stray temp files left behind.
+	entries, err := os.ReadDir(filepath.Dir(path))
+	require.NoError(t, err)
+	assert.Len(t, entries, 1)
+
+	// Re-installing replaces it rather than failing (it is a generated file).
+	_, err = installWatchUnit("[Unit]\nDescription=second\n")
+	require.NoError(t, err)
+	data, err = os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "Description=second")
+}

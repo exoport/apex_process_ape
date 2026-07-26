@@ -180,10 +180,11 @@ the host rewrites the credential by replacing the file rather than editing it.`,
 
 func newCredentialsWatchCmd() *cobra.Command {
 	var (
-		root      string
-		source    string
-		interval  time.Duration
-		printUnit bool
+		root        string
+		source      string
+		interval    time.Duration
+		printUnit   bool
+		installUnit bool
 	)
 	cmd := &cobra.Command{
 		Use:   "watch",
@@ -213,12 +214,24 @@ it is safe to enable before ever publishing.`,
 			if interval <= 0 {
 				interval = 2 * time.Second
 			}
-			if printUnit {
+			if printUnit || installUnit {
 				unit, err := watchUnitFile(interval)
 				if err != nil {
 					return err
 				}
-				fmt.Fprint(cmd.OutOrStdout(), unit)
+				if printUnit {
+					fmt.Fprint(cmd.OutOrStdout(), unit)
+					return nil
+				}
+				path, err := installWatchUnit(unit)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "wrote %s\n", path)
+				fmt.Fprintln(cmd.OutOrStdout(), "enable it:")
+				fmt.Fprintln(cmd.OutOrStdout(), "  systemctl --user daemon-reload")
+				fmt.Fprintln(cmd.OutOrStdout(), "  systemctl --user enable --now ape-credentials-watch")
+				fmt.Fprintln(cmd.OutOrStdout(), "  sudo loginctl enable-linger $USER   # start at boot, not just at login")
 				return nil
 			}
 			dest := credentialDest(root)
@@ -258,6 +271,7 @@ it is safe to enable before ever publishing.`,
 	cmd.Flags().StringVar(&source, "source", "", "Credential file to watch (default: ~/.claude/.credentials.json)")
 	cmd.Flags().DurationVar(&interval, "interval", 2*time.Second, "How often to check for a replacement")
 	cmd.Flags().BoolVar(&printUnit, "print-unit", false, "Print a systemd --user unit for this watcher (with THIS binary's path) and exit")
+	cmd.Flags().BoolVar(&installUnit, "install-unit", false, "Write that unit to ~/.config/systemd/user/ and exit (safer than redirecting --print-unit)")
 	return cmd
 }
 
@@ -284,6 +298,46 @@ func apeBinaryPath() (string, error) {
 // unitTempDir is a seam: a test binary's own fixtures live under the real temp dir, so
 // exercising the non-temp path needs this overridable.
 var unitTempDir = os.TempDir
+
+// installWatchUnit writes the rendered unit into the user's systemd directory.
+//
+// It exists because `--print-unit > file` is a trap: the shell TRUNCATES the target
+// before the command runs, so an ape that cannot render the unit — an older build without
+// the flag, say — leaves an empty unit file behind and systemd then refuses to load it.
+// Rendering first and writing via temp+rename means the file is either untouched or
+// complete.
+func installWatchUnit(unit string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home: %w", err)
+	}
+	dir := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create %s: %w", dir, err)
+	}
+	path := filepath.Join(dir, "ape-credentials-watch.service")
+	tmp, err := os.CreateTemp(dir, "ape-credentials-watch.*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("stage unit: %w", err)
+	}
+	name := tmp.Name()
+	defer func() { _ = os.Remove(name) }()
+	if _, err := tmp.WriteString(unit); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("write unit: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("chmod unit: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("close unit: %w", err)
+	}
+	if err := os.Rename(name, path); err != nil {
+		return "", fmt.Errorf("install unit: %w", err)
+	}
+	return path, nil
+}
 
 // watchUnitFile renders a systemd --user unit for the watcher.
 func watchUnitFile(interval time.Duration) (string, error) {
