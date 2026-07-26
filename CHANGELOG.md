@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+- **feat: a workspace runs the `ape` that provisioned it, not the one its image was
+  built with (PLAN-23)** — `ape` is no longer baked into the sandbox image. `aped`
+  mounts the binary installed beside it **read-only at `/opt/ape/bin`**, first on
+  `PATH`. The old arrangement was a lag in the wrong direction: the image carried
+  whatever release was current when it was built, and since project work happens
+  *inside* workspaces, an `ape` upgrade made to unblock that work never reached the
+  place the work happens. Delivery removes it by construction — the two binaries ship
+  in one release archive, so "the `ape` beside this `aped`" is the matching build with
+  no fetch and no pin.
+  - **Verified by reading the binary, never by running it.** `debug/buildinfo` gives
+    the main package path (which catches a *different program* named `ape` — no version
+    string could), `GOOS`/`GOARCH` (so an unusable binary is refused at create instead
+    of failing as `exec format error` inside the VM), the ldflags version, and
+    `vcs.revision`. Checked at daemon start *and* re-checked per create, because the
+    file can be replaced under a running daemon — which is what a redeploy does.
+    World-writable is fatal; group-writable warns, since `go build` under a `002` umask
+    emits `0775` and refusing that would make `--ape-binary` unusable in development.
+  - **Your bingo pins are untouched.** bingo installs version-stamped names and calls
+    them by absolute path, so a project's pinned `ape` never resolves through `PATH`;
+    bare `ape` is the delivered one. Don't `bingo get -l ape` in a workspace, though —
+    the unstamped link lands in `$GOBIN`, which is a node-wide shared cache, so two
+    projects pinning different versions would contend for one name.
+  - `ape sandbox ls` gains an `APE` column and `up` prints the delivered version beside
+    the client's, because a laptop driving a remote node gets the **node's** `ape`.
+    `ape update` inside a workspace now explains that instead of failing on a read-only
+    mount. `ape doctor` gains `sandbox.ape-delivery`. `/opt/ape` is a reserved mount
+    subtree, so a committed `.apesandbox.yaml` cannot choose its own workspace's `ape`.
+  - Retires the in-guest version floor (a delivered `ape` cannot predate its own
+    daemon) and the image's dependency on an `ape` release entirely.
+- **fix: `go`/`asdf` in an ssh or VS Code Remote session used the ephemeral rootfs
+  instead of the durable caches** — a bug that predates the above and had nothing to do
+  with it. The per-workspace toolchain env (`GOPATH`, `GOBIN`, `GOMODCACHE`, `GOCACHE`,
+  `ASDF_DATA_DIR`, the egress proxy) is *container* environment, which `exec` and
+  `attach` inherit — and `sshd` does not, because it builds a fresh environment per
+  session. So anyone working over ssh silently lost PLAN-22's offline-after-warmup
+  property, in a way that reads as "the cache isn't working". `aped` now also writes
+  that env to a file the image's `/etc/profile.d` entry sources. It carries an
+  **allowlist**: credential material legitimately lives in the process env (mode B
+  injects `ANTHROPIC_API_KEY`) and has no business in a host-side file.
+- **`ape` and `aped` derive their version identically** (`internal/buildident`) —
+  previously `ape` backfilled from Go build info and `aped` did not, so a locally built
+  pair reported a pseudo-version beside a bare `"dev"`. Harmless until the daemon began
+  comparing the two, at which point a perfectly matched pair would have refused itself.
 - **`framework setup`/`status` now say WHICH git failure they hit** — a framework
   directory whose files are all present but which git will not read as a repository
   failed with `<dir> is not a git repository`. That reads as a broken mount, and in an

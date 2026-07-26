@@ -1,7 +1,7 @@
 ---
 plan_id: PLAN-23
 created_at: 2026-07-26
-status: proposed
+status: done
 tags:
   - sandbox
   - image
@@ -187,37 +187,37 @@ Two rules, both consequences of that shared GOBIN:
 
 ## Deliverables
 
-- [ ] **D1 — Guest mount + reserved destination.** `aped` mounts the resolved `ape`'s
+- [x] **D1 — Guest mount + reserved destination.** DONE 2026-07-26 — `/opt/ape/bin` mounted read-only from the daemon's own install; `/opt/ape` reserved as a subtree. Original scope: `aped` mounts the resolved `ape`'s
   directory read-only at `/opt/ape/bin`; `/opt/ape` added to `reservedDests` as a
   subtree. Resolved server-side like every other system mount — never accepted from the
   wire.
-- [ ] **D2 — Resolution + verification.** Resolve beside `os.Executable()`, with a
+- [x] **D2 — Resolution + verification.** DONE 2026-07-26 — `internal/aped/apebin.go`: resolved beside `os.Executable()`, verified via `debug/buildinfo` (main path → GOOS/GOARCH → version → vcs.revision → writability), fatal at start and re-checked per create. World-writable fatal, group-writable warns (a blanket check rejected ordinary `go build` output). Original scope: Resolve beside `os.Executable()`, with a
   flag/policy override. Verify via `debug/buildinfo.ReadFile` per the table above
   (identity → arch → version → vcs → ownership), never by executing the candidate.
   Refuse at daemon start AND at create, with a message naming the resolved path and both
   versions. A node that cannot produce a deliverable `ape` must not create a workspace.
-- [ ] **D3 — Image: drop `ape`.** Remove the download layer, `ARG APE_VERSION`, the
+- [x] **D3 — Image: drop `ape`.** DONE 2026-07-26 in exoport/ape-sandbox (`0cf57f9`) — download layer, `ARG APE_VERSION`, workflow `DEFAULT_APE_VERSION`/`ape_version` input and the floor note all removed; mountpoint created and first on PATH; `make smoke` checks the mountpoint + PATH and a new `make smoke-delivery` mounts an ape in and resolves it. Original scope: Remove the download layer, `ARG APE_VERSION`, the
   `ape version` build smoke, and the floor note. Create `/opt/ape/bin` empty and put it
   first on `PATH`. `make smoke` changes from "run `ape version`" to "mount an `ape` in
   and check it runs" — a better test, since it exercises delivery. New image version
   (own line; the change is the image's, not `ape`'s).
-- [ ] **D4 — In-guest `ape update`.** A read-only mount makes self-update fail on a
+- [x] **D4 — In-guest `ape update`.** DONE 2026-07-26 — detected by location (the mount is aped's), refusing with the operation that actually helps: update the node's ape. Original scope: A read-only mount makes self-update fail on a
   write error. Detect the delivered case and say so instead: this `ape` is delivered by
   `aped`; update the node's `ape`.
-- [ ] **D5 — Observability.** Record the delivered version in the workspace registry;
+- [x] **D5 — Observability.** DONE 2026-07-26 — recorded on the registry row and the wire record, `APE` column in `ls`, printed by `up` beside the client's version, plus the `sandbox.ape-delivery` doctor check. Original scope: Record the delivered version in the workspace registry;
   surface it in `ape sandbox ls` and in the `up` output. This is what tells a laptop
   operator that their workspace runs the NODE's `ape`, not theirs. Add a `doctor` check
   for "node can resolve a deliverable `ape`".
-- [ ] **D6 — The other spec builder.** `spec.go:98` hardcodes
+- [x] **D6 — The other spec builder.** DONE 2026-07-26 — `spec.go` now leads its hardcoded PATH with `ApeBinDest`. Original scope: `spec.go:98` hardcodes
   `PATH=/usr/local/sbin:/usr/local/bin:…`. Either add `/opt/ape/bin` there too or record
   that this driver is out of scope for delivery — otherwise `/opt/ape/bin` is silently
   absent under it.
-- [ ] **D7 — Guardrails that outlive this plan.** (a) A test asserting
+- [x] **D7 — Guardrails that outlive this plan.** DONE 2026-07-26 — a test asserts the shipped `deploy/policy.yaml` allows `sandbox.DefaultImage`; `dev-host.sh` checks BOTH binaries for staleness (and its version line no longer prints nothing — `aped version` is not a subcommand). Original scope: (a) A test asserting
   `deploy/policy.yaml`'s `images:` contains `sandbox.DefaultImage` — the exact-match trap
   turns drift into a policy denial rather than a pull error. (b) `dev-host.sh` installs
   BOTH binaries and extends its staleness warning to `ape`, since D2's version check is
   only as good as what the deploy script puts in place.
-- [ ] **D9 — Login-shell environment (ssh / VS Code Remote).** `attach`/`exec` inherit the
+- [x] **D9 — Login-shell environment (ssh / VS Code Remote).** DONE 2026-07-26 — `internal/sandbox/profileenv.go` writes an ALLOWLISTED, shell-quoted env file into the composed home (quoting asserted by sourcing it in `sh`); the image ships `/etc/profile.d/ape-sandbox.sh` to re-establish PATH and source it. Original scope: `attach`/`exec` inherit the
   container spec's env; `sshd` does not — it builds a fresh session env, so nothing set as
   container `ENV` reaches an ssh session. Two parts:
   (a) the image ships `/etc/profile.d/ape.sh` putting `/opt/ape/bin` first on PATH, so the
@@ -230,7 +230,7 @@ Two rules, both consequences of that shared GOBIN:
   `asdf` at ephemeral rootfs paths instead of the durable caches, silently defeating
   PLAN-22 D4 for anyone working over that path. Keep the file server-side-derived (a
   caller must never be able to inject `GOPATH`).
-- [ ] **D8 — Docs + CHANGELOG.** `README.md` (sandbox section), `docs/how-to/
+- [x] **D8 — Docs + CHANGELOG.** DONE 2026-07-26 — README, sandbox-workspaces (incl. the bingo rules), run-aped (both binaries required), apesandbox-yaml (reserved subtree), the image pointer, both repos' READMEs, CHANGELOG; `cli.md` regenerated (it was already stale). Original scope: `README.md` (sandbox section), `docs/how-to/
   sandbox-workspaces.md` (the image section, `--image`, the bingo rules), `docs/how-to/
   run-aped.md` (node prerequisite: `ape` beside `aped`), `docs/reference/
   apesandbox-yaml.md` (new reserved destination), `images/ape-sandbox/README.md`, and the

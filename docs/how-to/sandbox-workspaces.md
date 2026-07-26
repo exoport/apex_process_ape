@@ -239,14 +239,38 @@ workspace shape accordingly (details in the
 
 ## The image
 
-Workspaces run the official `ape-sandbox` image (claude / node / ape / git /
-sshd / chromium + Playwright), or any custom OCI ref via `--image` (or a
-server-side profile's `image:`). `aped` pulls and pins it node-side. The image
-is **public and framework-free** — built from the separate public
-**`exoport/ape-sandbox`** repo and published to the public `ghcr.io/exoport`
-package. The **private** APEX framework is **not** baked; `aped` mounts a pinned
-host-side framework checkout read-only at `/opt/apex-framework` at runtime
-(PLAN-20), and a workspace installs it with `ape framework setup --no-fetch`.
+Workspaces run the official `ape-sandbox` image (claude / node / git / sshd /
+chromium + Playwright), or any custom OCI ref via `--image` (or a server-side
+profile's `image:`). `aped` pulls and pins it node-side. The image is **public
+and framework-free** — built from the separate public **`exoport/ape-sandbox`**
+repo and published to the public `ghcr.io/exoport` package. The **private** APEX
+framework is **not** baked; `aped` mounts a pinned host-side framework checkout
+read-only at `/opt/apex-framework` at runtime (PLAN-20), and a workspace installs
+it with `ape framework setup --no-fetch`.
+
+### `ape` inside a workspace
+
+`ape` is **not baked into the image either**. `aped` mounts the `ape` installed
+beside it read-only at `/opt/ape/bin`, first on `PATH`, so a workspace runs the
+version matching the daemon that provisioned it. A baked `ape` was always the
+release that was current when the image was built — and since project work happens
+*inside* workspaces, an `ape` upgrade never reached the place the work happens.
+
+Two consequences worth knowing:
+
+- **It is the NODE's `ape`, not your client's.** Driving a remote node from a laptop
+  gets you the node's version. `ape sandbox up` prints both, and `ape sandbox ls`
+  has an `APE` column, so a difference is visible rather than surprising.
+- **`ape update` inside a workspace refuses**, and says why: the binary is a
+  read-only mount, and updating the node's `ape` (with its `aped` — they ship
+  together) is the operation that actually changes what workspaces run.
+
+A project that needs a **specific** `ape` version pins it with `bingo` and calls it
+by its version-stamped path (`$(APE)` from `.bingo/Variables.mk`), exactly as it
+would any other pinned tool. That never resolves through `PATH`, so it does not
+compete with the delivered one. Avoid `bingo get -l ape`, though: the `-l` link
+creates an unstamped `$GOBIN/ape`, and `$GOBIN` is a **node-wide shared cache**, so
+two projects pinning different versions would contend for that one name.
 
 ## See also
 

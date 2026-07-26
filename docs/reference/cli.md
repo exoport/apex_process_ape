@@ -1077,6 +1077,7 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--install-unit` | bool | `false` | Write that unit to ~/.config/systemd/user/ and exit (safer than redirecting --print-unit) |
 | `--interval` | duration | `2s` | How often to check for a replacement |
 | `--print-unit` | bool | `false` | Print a systemd --user unit for this watcher (with THIS binary's path) and exit |
 | `--root` | string | `—` | Credential root the node reads |

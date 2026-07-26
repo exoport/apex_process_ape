@@ -119,6 +119,9 @@ reach a host path an operator has not allowed.
   converges everywhere — one OAuth session, not a copy per VM.
 - **Declared toolchains.** `.tool-versions` + `.bingo` materialize into durable host
   caches, so a rebuild is offline and a workspace is disposable.
+- **The `ape` you upgraded to.** The daemon mounts its own `ape` into the workspace, so the
+  version you work with inside is the version driving it — not whatever the image was built
+  with. A project that wants a specific one still pins it with `bingo`.
 
 Needs a Linux host with KVM + containerd + Kata, and the `aped` daemon: see
 [How to run aped](docs/how-to/run-aped.md) and

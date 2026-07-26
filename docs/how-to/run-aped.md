@@ -30,6 +30,16 @@ management subject or satisfy the executor's `SO_PEERCRED` gate.
    make install          # → /usr/local/bin/ape and /usr/local/bin/aped
    ```
 
+   **Both, not just `aped`.** The daemon delivers the `ape` sitting beside it into
+   every workspace (read-only at `/opt/ape/bin`), so a node with only `aped`
+   installed refuses to start — deliberately, since a workspace with no `ape` is
+   broken rather than degraded. It also refuses when the two do not come from the
+   same build: the delivered binary is verified by main-package path, architecture,
+   version and commit, so a half-finished upgrade fails here instead of inside a
+   guest. `ape doctor` reports the same thing as `sandbox.ape-delivery` if you would
+   rather find out before a restart. Override the location with
+   `aped front --ape-binary <path>` for installs that split them.
+
 2. Create the `ape` group and the `aped` service user:
 
    ```bash

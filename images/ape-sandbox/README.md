@@ -10,6 +10,12 @@ The private APEX framework is **not** baked; `aped` mounts a pinned host-side
 framework checkout **read-only** at `/opt/apex-framework` at runtime, and a
 workspace installs it with `ape framework setup --no-fetch` (PLAN-20).
 
+Neither is **`ape`** (PLAN-23): `aped` mounts the binary installed beside it
+read-only at `/opt/ape/bin`, first on `PATH`, so a workspace runs the version
+matching the daemon that provisioned it instead of whatever release the image was
+built with. That is also why this image no longer references an `ape` release at
+all — the build has no dependency on `apex_process_ape`.
+
 `ape sandbox` resolves the image via `aped`'s pinned default
 (`sandbox.DefaultImage` in `internal/sandbox/kata.go` — currently
 `ghcr.io/exoport/ape-sandbox:v1.0.0`, **digest-pinned** to the OCI index so

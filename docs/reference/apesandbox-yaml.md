@@ -38,7 +38,7 @@ review, so nothing in it is trusted:
 | What it asks for | What actually decides |
 | --- | --- |
 | a mount source | aped re-canonicalizes it and re-checks it against `mount_roots` in its own `policy.yaml`; a path outside them is denied |
-| a mount destination | reserved destinations (`/workspace`, `/opt/apex-framework`, `/sandbox/home`) are refused outright — a project cannot redirect, shadow, or make-writable a system mount |
+| a mount destination | reserved destinations (`/workspace`, `/opt/apex-framework`, `/opt/ape`, `/sandbox/home`) are refused outright, each as a whole SUBTREE — a project cannot redirect, shadow, or make-writable a system mount, nor slip underneath one. `/opt/ape` covers the `ape` binary aped delivers: a project that could shadow it would choose which `ape` its own workspace runs |
 | a writable mount | a source under a `mount_roots_ro` root is denied write |
 | how many mounts | `limits.max_mounts` caps the resolved list |
 | egress domains | aped intersects them with `egress.allowed_domains`; a project can **narrow** what the node permits, never widen it |
