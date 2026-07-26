@@ -130,7 +130,12 @@ func TestResolveRejectsMissingSource(t *testing.T) {
 }
 
 func TestParseMountFlag(t *testing.T) {
-	root := t.TempDir()
+	// ParseMountFlag canonicalizes the source through filepath.EvalSymlinks (see
+	// resolveSource), so the expectations have to be built from the canonical root — on
+	// Windows that call also expands the 8.3 short name t.TempDir() returns
+	// (…\RUNNER~1\… → …\runneradmin\…), and on any host it resolves a symlinked temp dir.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "data"), 0o755))
 
 	// source only → /mnt/<basename>, read-only.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/sandbox"
@@ -214,7 +215,9 @@ func TestPolicyCheckMountsPerEntry(t *testing.T) {
 		}
 		err := p.CheckCreate(r, 0)
 		require.ErrorIs(t, err, workspace.ErrPolicyDenied)
-		assert.Contains(t, err.Error(), outside)
+		// The denial quotes the offending path with %q, which escapes the separators in a
+		// Windows path, so the raw path is not a substring there. Compare the quoted form.
+		assert.Contains(t, err.Error(), strconv.Quote(outside))
 	})
 
 	t.Run("allowed roots pass", func(t *testing.T) {

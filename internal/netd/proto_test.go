@@ -3,6 +3,7 @@ package netd
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -66,7 +67,10 @@ func TestLeasesPersistAcrossOpen(t *testing.T) {
 	assert.False(t, ok)
 
 	// The lease file holds no secrets but does describe live topology: keep it 0600.
-	info, err := os.Stat(path)
-	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	// Windows has no POSIX mode bits (Go reports 0666), and netd is Linux-only anyway.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 }

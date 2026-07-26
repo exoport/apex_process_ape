@@ -12,6 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// goosWindows names the platform whose semantics several tests here have to account for:
+// it has no POSIX mode bits, and the Linux-only pieces of the sandbox do not run there.
+const goosWindows = "windows"
+
 // fakeHome builds a host ~/.claude with the given skills (name→SKILL.md
 // body), agents (name→body), and a credentials file (mode-A source).
 // Returns the home dir.
@@ -67,7 +71,10 @@ func TestComposeModeAOAuth(t *testing.T) {
 	assert.Equal(t, hostBytes, stagedBytes, "the workspace starts from the host session")
 	info, err := os.Stat(staged)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	if runtime.GOOS != goosWindows {
+		// No POSIX mode bits on Windows: Go reports 0666 whatever was requested.
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	}
 
 	// It is a COPY: writing the workspace's file must not touch the host's.
 	require.NoError(t, os.WriteFile(staged, []byte(`{"access_token":"workspace-refreshed"}`), 0o600))
@@ -254,7 +261,7 @@ func TestComposeAuthorizedKeysLiteralAndPath(t *testing.T) {
 	// the guest that consumes this file is Linux regardless.
 	info, err := os.Stat(akPath)
 	require.NoError(t, err)
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != goosWindows {
 		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -331,6 +332,13 @@ func TestInstallWatchUnitWritesCompleteFileAtomically(t *testing.T) {
 	// runs, so a failure leaves an empty unit that systemd refuses to load — which is
 	// exactly what happened on the dev host with an older binary. Writing via temp+rename
 	// means the file is either untouched or complete.
+	if runtime.GOOS == goosWindows {
+		// A systemd user unit is a Linux artifact, and installWatchUnit resolves the
+		// destination with os.UserHomeDir(), which on Windows reads USERPROFILE and so
+		// ignores the HOME set below — the test would write into the real profile and
+		// then assert a path that cannot match. The 0644 check has no meaning there either.
+		t.Skip("Linux-only: systemd user unit, and os.UserHomeDir ignores HOME on Windows")
+	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 

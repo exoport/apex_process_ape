@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -259,6 +260,12 @@ func TestEgressSupervisorRestoreRespectsTightenedPolicy(t *testing.T) {
 }
 
 func TestEgressAuditTrailIsOperatorReadable(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		// The whole assertion here is POSIX mode bits: Windows has none, so Go reports
+		// 0777 for directories and 0666 for files whatever was requested. The trail this
+		// guards is written by aped, which is Linux-only.
+		t.Skip("POSIX mode bits: the audit trail's operator-readability is a Linux guarantee")
+	}
 	s := testSupervisor(t, &EgressPolicy{Enabled: true, AllowedDomains: []string{"github.com"}})
 	defer s.StopAll()
 	_, err := s.Plan("dev", []string{"github.com"})
