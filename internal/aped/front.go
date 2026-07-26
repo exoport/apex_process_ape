@@ -160,7 +160,7 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 	// starts answering, and fatal when it fails: a workspace with no `ape` — or with one
 	// that does not match this daemon — is broken, not degraded, and discovering that as
 	// `command not found` inside a guest costs far more than refusing here.
-	apeBin, err := ResolveApeBinary(cfg.ApeBinary, cfg.ApeVersion, cfg.ApeGitCommit)
+	apeBin, err := resolveAndStageApe(cfg)
 	if err != nil {
 		return err
 	}
@@ -186,10 +186,8 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 		// Re-verified per create, not just at startup: the file can be replaced under a
 		// running daemon, which is exactly what a redeploy does. A create landing in that
 		// window would otherwise deliver a binary nothing has checked.
-		ApeBinRecheck: func() (ApeBinary, error) {
-			return ResolveApeBinary(cfg.ApeBinary, cfg.ApeVersion, cfg.ApeGitCommit)
-		},
-		Credentials: sandbox.CredentialMode(cfg.Credentials),
+		ApeBinRecheck: func() (ApeBinary, error) { return resolveAndStageApe(cfg) },
+		Credentials:   sandbox.CredentialMode(cfg.Credentials),
 	})
 	if mode := sandbox.CredentialMode(cfg.Credentials); mode != "" && mode != sandbox.CredentialNone {
 		fmt.Fprintf(stderr, "  credentials: %s from %s (publish with 'ape sandbox credentials publish')\n",
@@ -338,4 +336,18 @@ func microVersion(v string) string {
 		return v
 	}
 	return "0.0.0"
+}
+
+// resolveAndStageApe verifies the node's `ape` and stages it into a directory of its own.
+//
+// The staging step is not incidental: the mount is a directory, and the directory an `ape`
+// is installed in is /usr/local/bin, which on a real node also holds containerd, the Kata
+// shims and aped itself. Mounting that into every workspace first on PATH would expose all
+// of it and shadow the image's own tooling with the host's.
+func resolveAndStageApe(cfg FrontConfig) (ApeBinary, error) {
+	bin, err := ResolveApeBinary(cfg.ApeBinary, cfg.ApeVersion, cfg.ApeGitCommit)
+	if err != nil {
+		return ApeBinary{}, err
+	}
+	return StageApeBinary(cfg.StateDir, bin)
 }

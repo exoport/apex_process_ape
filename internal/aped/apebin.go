@@ -4,6 +4,7 @@ import (
 	"debug/buildinfo"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -233,4 +234,82 @@ func apeBinaryVersion(info *buildinfo.BuildInfo, settings map[string]string) str
 		return strings.TrimPrefix(v, "v")
 	}
 	return "dev"
+}
+
+// apeBinStageDir is the directory under the state dir holding the staged copy.
+const apeBinStageDir = "apebin"
+
+// StageApeBinary copies a verified `ape` into a directory of its OWN and returns the
+// binary rebased onto it.
+//
+// This exists because the mount is a DIRECTORY and the directory an `ape` is installed in
+// is /usr/local/bin — 48 entries on the dev node, including containerd, the Kata shims,
+// buildkitd and aped itself. Mounting that into every workspace, FIRST on PATH, would not
+// only expose all of it: it would shadow the image's own tooling with the host's, so a
+// workspace's `bingo` and `asdf` would silently become the host's copies rather than the
+// versions the image pins. The delivered binary therefore gets a directory containing
+// nothing but itself.
+//
+// Copied rather than linked: the state dir and /usr/local/bin are usually different
+// filesystems. The copy is also a feature — it pins what a workspace runs at stage time, so
+// replacing the host binary cannot swap the ape under a workspace that is already running.
+func StageApeBinary(stateDir string, bin ApeBinary) (ApeBinary, error) {
+	if strings.TrimSpace(stateDir) == "" {
+		return ApeBinary{}, fmt.Errorf("%w: no state dir to stage into", ErrNoApeBinary)
+	}
+	dir := filepath.Join(stateDir, apeBinStageDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ApeBinary{}, fmt.Errorf("%w: create %s: %w", ErrNoApeBinary, dir, err)
+	}
+	dest := filepath.Join(dir, "ape")
+	if err := copyIfChanged(bin.Path, dest); err != nil {
+		return ApeBinary{}, fmt.Errorf("%w: stage %s: %w", ErrNoApeBinary, bin.Path, err)
+	}
+	staged := bin
+	staged.Path, staged.Dir = dest, dir
+	return staged, nil
+}
+
+// copyIfChanged copies src to dest unless dest already matches it in size and modification
+// time, and preserves the source mtime so that comparison keeps working. Size+mtime rather
+// than a hash: this runs on every create, and rehashing ~50MB to discover nothing changed
+// would be a cost paid for no information.
+func copyIfChanged(src, dest string) error {
+	si, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if di, derr := os.Stat(dest); derr == nil &&
+		di.Size() == si.Size() && di.ModTime().Equal(si.ModTime()) {
+		return nil
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+
+	// temp + rename, so a workspace created while this runs sees either the old binary or
+	// the new one and never a half-written file.
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".ape.*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer func() { _ = os.Remove(name) }()
+	if _, err := io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o755); err != nil { // executed inside the guest
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chtimes(name, si.ModTime(), si.ModTime()); err != nil {
+		return err
+	}
+	return os.Rename(name, dest)
 }

@@ -187,7 +187,7 @@ Two rules, both consequences of that shared GOBIN:
 
 ## Deliverables
 
-- [x] **D1 — Guest mount + reserved destination.** DONE 2026-07-26 — `/opt/ape/bin` mounted read-only from the daemon's own install; `/opt/ape` reserved as a subtree. Original scope: `aped` mounts the resolved `ape`'s
+- [x] **D1 — Guest mount + reserved destination.** DONE 2026-07-26 — `/opt/ape/bin` mounted read-only from a STAGED copy under the state dir, not from the host bin directory: mounting `filepath.Dir(apePath)` would have exposed all of `/usr/local/bin` (48 entries on the dev node — containerd, the Kata shims, aped itself) into every workspace FIRST on PATH, shadowing the image's own `bingo`/`asdf` with the host's. Found by inspecting the real node before live validation. `/opt/ape` reserved as a subtree. Original scope: `aped` mounts the resolved `ape`'s
   directory read-only at `/opt/ape/bin`; `/opt/ape` added to `reservedDests` as a
   subtree. Resolved server-side like every other system mount — never accepted from the
   wire.

@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -178,4 +179,66 @@ func TestResolveApeBinaryOnWritability(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, bin.Warnings)
 	})
+}
+
+func TestStageApeBinaryGivesItADirectoryOfItsOwn(t *testing.T) {
+	// The reason staging exists. An installed `ape` lives in /usr/local/bin beside
+	// containerd, the Kata shims and aped itself — 48 entries on the dev node. Mounting THAT
+	// directory into every workspace, first on PATH, would expose all of it and shadow the
+	// image's own tooling with the host's: a workspace's `bingo` would become the host's.
+	src := buildFakeApe(t, "0.0.50")
+	// Give the source dir a neighbour, the way a real bin directory has 47 of them.
+	require.NoError(t, os.WriteFile(filepath.Join(filepath.Dir(src), "bingo"), []byte("#!/bin/sh\n"), 0o755))
+
+	bin, err := ResolveApeBinary(src, "0.0.50", "")
+	require.NoError(t, err)
+
+	state := t.TempDir()
+	staged, err := StageApeBinary(state, bin)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, filepath.Dir(src), staged.Dir, "the host bin directory must NOT be the mount source")
+	entries, rerr := os.ReadDir(staged.Dir)
+	require.NoError(t, rerr)
+	require.Len(t, entries, 1, "the mounted directory holds nothing but ape")
+	assert.Equal(t, "ape", entries[0].Name())
+	assert.Equal(t, "0.0.50", staged.Version, "identity survives staging")
+
+	info, err := os.Stat(staged.Path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o755), info.Mode().Perm(), "the guest has to be able to execute it")
+}
+
+func TestStageApeBinaryOnlyRecopiesWhenTheSourceChanges(t *testing.T) {
+	// Staging runs on every create, so an unchanged binary must not be re-copied — and a
+	// changed one must be, or a redeploy would leave workspaces on the previous build.
+	src := buildFakeApe(t, "0.0.50")
+	bin, err := ResolveApeBinary(src, "0.0.50", "")
+	require.NoError(t, err)
+	state := t.TempDir()
+
+	staged, err := StageApeBinary(state, bin)
+	require.NoError(t, err)
+	first, err := os.Stat(staged.Path)
+	require.NoError(t, err)
+
+	_, err = StageApeBinary(state, bin)
+	require.NoError(t, err)
+	second, err := os.Stat(staged.Path)
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(first, second), "an unchanged source must not be re-copied")
+
+	// Replace the source: a new size and mtime, which is what a rebuild looks like.
+	require.NoError(t, os.WriteFile(src, append([]byte("\x7fELF"), make([]byte, 4096)...), 0o755))
+	require.NoError(t, os.Chtimes(src, first.ModTime().Add(time.Hour), first.ModTime().Add(time.Hour)))
+	_, err = StageApeBinary(state, bin)
+	require.NoError(t, err)
+	third, err := os.Stat(staged.Path)
+	require.NoError(t, err)
+	assert.False(t, os.SameFile(second, third), "a replaced source must be re-staged")
+}
+
+func TestStageApeBinaryNeedsAStateDir(t *testing.T) {
+	_, err := StageApeBinary("", ApeBinary{Path: "/usr/local/bin/ape", Dir: "/usr/local/bin"})
+	require.ErrorIs(t, err, ErrNoApeBinary)
 }

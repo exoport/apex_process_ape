@@ -19,6 +19,13 @@
     file can be replaced under a running daemon — which is what a redeploy does.
     World-writable is fatal; group-writable warns, since `go build` under a `002` umask
     emits `0775` and refusing that would make `--ape-binary` unusable in development.
+  - **The binary is staged into a directory of its own** under the state dir rather than
+    mounted from where it is installed. `/usr/local/bin` holds 48 entries on a real node
+    (containerd, the Kata shims, `aped` itself), and mounting that directory into every
+    workspace first on `PATH` would both expose all of it and shadow the image's own
+    tooling with the host's — a workspace's `bingo` and `asdf` would silently become the
+    host's copies instead of the versions the image pins. The copy also pins what a
+    running workspace executes, so replacing the host binary cannot swap it underneath.
   - **Your bingo pins are untouched.** bingo installs version-stamped names and calls
     them by absolute path, so a project's pinned `ape` never resolves through `PATH`;
     bare `ape` is the delivered one. Don't `bingo get -l ape` in a workspace, though —
