@@ -25,7 +25,7 @@ Guidance for Claude Code when working in this repository.
 | `deploy/`                 | `aped` deploy assets (systemd units, tmpfiles, policy, auditd rules) + `tier2-setup.sh`, the idempotent Tier-2 host-stack provisioner (see `docs/how-to/run-aped.md`). |
 | `testdata/`               | Test fixtures consumed by `_test.go` files.                                                         |
 | `docs/`                   | User-facing docs (Diátaxis-structured — see `docs/README.md`).                                      |
-| `.github/workflows/`      | `ci.yml` (build + test + lint + govulncheck on push/PR + rc-tag) and `release.yml` (goreleaser on final-semver tag `vX.Y.Z` only). |
+| `.github/workflows/`      | `ci.yml` (build + test + lint + govulncheck on push to `main` / PR; the Windows job builds everything but runs `make test-portable`) and `release.yml` (goreleaser on final-semver tag `vX.Y.Z` only). |
 | `.goreleaser.yaml`        | Release build config.                                                                               |
 | `.golangci.yaml`          | Linter config.                                                                                      |
 | `.pre-commit-config.yaml` | Pre-commit hooks (golangci-lint-mod, config_secrets).                                               |

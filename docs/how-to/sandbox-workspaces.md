@@ -52,7 +52,10 @@ resolves the composed home, egress, and creds server-side:
 
 - `--profile <name>` — a **server-side** profile `aped` resolves by name (falls
   back to a default derived from the request when the node has no such profile).
-- `--image <ref>` — image override (default: `aped`'s pinned `ape-sandbox` digest).
+- `--image <ref>` — image override (default: `aped`'s pinned
+  `ghcr.io/exoport/ape-sandbox:v1.0.0` — a tag, not a digest). A node's policy
+  `images:` allow-list is checked **independently** of this default, so the two have
+  to move together: a mismatch is a policy denial, not a pull error.
 - `--runtime kata-qemu | kata-clh` — the runtime handler (default: the node's).
 - `--mount host-fs | volume | ephemeral` — mount mode (default: `host-fs`).
 - `--cwd <dir>` — project root to send as the `host-fs` mount source (default: the

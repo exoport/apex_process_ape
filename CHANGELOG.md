@@ -16,6 +16,25 @@
   three properties that matter (allowlisted egress, a shared Claude session, declared
   toolchains into durable caches), with the Linux + KVM + Kata prerequisite stated up
   front.
+- **A re-published credential can no longer lose to a token from the session it
+  replaced** — the "publication was replaced" check compared inode identity only
+  (`os.SameFile`), and filesystems RECYCLE inode numbers: `credentials publish`
+  unlinks the path and re-creates it, and the create can be handed straight back the
+  inode the unlink freed. A `claude /login` then looked like no change at all, and a
+  workspace that had refreshed from the *old* session won on modification time —
+  overwriting the operator's fresh credential with a dead one. Detection now also
+  compares the published bytes against what the previous tick converged them to,
+  which no inode allocation can fool. The credential sharing this belongs to is new
+  in this release, so nothing shipped broken; it was caught by CI, on a runner whose
+  filesystem reused the inode where the development host never did.
+- **The Windows CI job runs only the portable packages** (`make test-portable`). It
+  still *builds* everything — that is what catches portability breaks — but
+  `internal/aped` and `internal/netd` assert POSIX mode bits, `/run/netns` paths and
+  systemd units, so running them on Windows reports on the runner rather than on ape.
+  Assertions elsewhere were made platform-aware rather than skipped: `%q`-quoted paths
+  (which escape a Windows separator), 8.3 short names versus `EvalSymlinks`
+  canonicalization, and the `setfacl` that Git for Windows ships — which is not the
+  POSIX tool and silently defeated a `LookPath`-based skip.
 
 - **feat: `ape sandbox` workspaces get allowlisted, audited network egress
   (PLAN-21 D1–D4)** — workspaces were `--network none` because aped's root
