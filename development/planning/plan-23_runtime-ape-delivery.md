@@ -98,6 +98,20 @@ Facts confirmed while designing (each one decides part of the shape):
   this here at runtime, read-only, on its own authority*.
 - **PATH precedence is set in the image**: `ENV PATH="/opt/ape/bin:${PATH}"`, and the
   image creates the directory empty so the entry is never dangling.
+- **Container `ENV` is not enough on its own.** It covers `attach`/`exec`, whose env comes
+  from the container spec, but the entrypoint also starts `sshd` (the ssh / VS Code Remote
+  path) and sshd builds a FRESH session environment rather than passing its own on. Today
+  `ape` survives that only by accident: `/usr/local/bin` happens to be in sshd's default
+  PATH. Moving it to `/opt/ape/bin` breaks ssh sessions unless the image also exports it
+  for login shells — see D9.
+- **The mount must stay exec-allowed.** System binds are built `{"rbind", "ro"}`
+  (`containerd_driver_linux.go:608`); `noexec` appears only on `/dev/pts`, `/dev/shm` and
+  tmpfs. If system mounts are ever hardened with `noexec`, this breaks and presents as an
+  unexplained "Permission denied" on a file that is plainly executable.
+- **The guest runs as uid 0** (`USER 0`; `parseNumericUser("")` → `0:0`), so there is no
+  unprivileged guest user to grant access to. What matters host-side is that the file is
+  readable and executable by the identity `virtiofsd` runs as — an `install -m 755`
+  root-owned binary satisfies that and the D2 ownership check together.
 - **`/opt/ape` joins `reservedDests`** as a whole subtree (like `/workspace`), so a
   committed `.apesandbox.yaml` can neither shadow it nor make it writable.
 
@@ -203,6 +217,19 @@ Two rules, both consequences of that shared GOBIN:
   turns drift into a policy denial rather than a pull error. (b) `dev-host.sh` installs
   BOTH binaries and extends its staleness warning to `ape`, since D2's version check is
   only as good as what the deploy script puts in place.
+- [ ] **D9 — Login-shell environment (ssh / VS Code Remote).** `attach`/`exec` inherit the
+  container spec's env; `sshd` does not — it builds a fresh session env, so nothing set as
+  container `ENV` reaches an ssh session. Two parts:
+  (a) the image ships `/etc/profile.d/ape.sh` putting `/opt/ape/bin` first on PATH, so the
+  delivered `ape` is reachable over ssh (today `/usr/local/bin` is in sshd's default PATH
+  by luck, which is the only reason the baked `ape` works there);
+  (b) `aped` writes the per-workspace env it derives — `GOPATH`, `GOBIN`, `GOMODCACHE`,
+  `GOCACHE`, `ASDF_DATA_DIR` — into a file under the composed home that the profile
+  sources. This is a **pre-existing** bug, not one this plan introduces: those variables
+  are container env today, so an ssh or VS Code Remote session currently points `go` and
+  `asdf` at ephemeral rootfs paths instead of the durable caches, silently defeating
+  PLAN-22 D4 for anyone working over that path. Keep the file server-side-derived (a
+  caller must never be able to inject `GOPATH`).
 - [ ] **D8 — Docs + CHANGELOG.** `README.md` (sandbox section), `docs/how-to/
   sandbox-workspaces.md` (the image section, `--image`, the bingo rules), `docs/how-to/
   run-aped.md` (node prerequisite: `ape` beside `aped`), `docs/reference/
@@ -241,6 +268,10 @@ Two rules, both consequences of that shared GOBIN:
   from different commits. Mitigated by `vcs.revision` and by D7(b).
 - **Trusting a writable directory** — "mount whatever is beside me" is only as safe as
   that directory's permissions. Mitigated by D2's ownership check.
+- **Env that does not reach ssh sessions** — moving `ape` off `/usr/local/bin` removes the
+  accident that made it work over ssh. D9(a) is therefore not optional polish; without it
+  the VS Code Remote path loses `ape` entirely. D9(b) fixes the same class of gap that
+  already affects the toolchain env.
 - **Old `aped` + new image** — nothing mounts, so the guest has no `ape` at all
   (`command not found`). Accepted per the single-phase decision; D2 makes the node-side
   half fail loudly, and the pair ships together.
