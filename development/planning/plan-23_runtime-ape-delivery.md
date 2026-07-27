@@ -275,3 +275,55 @@ Two rules, both consequences of that shared GOBIN:
 - **Old `aped` + new image** — nothing mounts, so the guest has no `ape` at all
   (`command not found`). Accepted per the single-phase decision; D2 makes the node-side
   half fail loudly, and the pair ships together.
+
+## Live validation (2026-07-27, node mmq4)
+
+Redeployed the pair, provisioned `ape23` on `/srv/workspaces/demo` (2 repos + 1 user
+mount + asdf/go caches + egress), and probed from inside.
+
+Confirmed working:
+
+| Check | Result |
+| --- | --- |
+| `command -v ape` in a workspace | `/opt/ape/bin/ape` |
+| in-guest version vs node | identical (`0.0.50-…795753475fcc`) |
+| `/opt/ape/bin` contents | `ape` only — the staging fix, verified |
+| PATH precedence | `/opt/ape/bin` first |
+| `ape sandbox up` output | reports the delivered version beside the client's |
+| `ape sandbox ls` | `APE` column populated; the pre-delivery workspace shows `-` |
+| `ape doctor` | `OK sandbox.ape-delivery` |
+| `ape update` in a workspace (D4) | refuses, naming the node as the thing to update |
+| login shell, ZERO inherited env (D9) | `go`, `ape`, `GOBIN=/cache/go/bin`, `HTTPS_PROXY` all present |
+| egress from that login shell | `github.com` → 200 (allowlisted), `example.com` → 000 (denied) |
+
+**Five defects, none reachable from unit tests.** Four needed the node; one needed only
+looking at it. Roughly the same ratio as PLAN-21's live pass, and again weighted toward
+the seams between components rather than the logic inside them:
+
+1. **The mount source was the host bin directory.** `filepath.Dir(apePath)` is
+   `/usr/local/bin` — 48 entries here, including containerd, the Kata shims and `aped`
+   itself — so every workspace would have received all of it, FIRST on PATH, shadowing the
+   image's own `bingo`/`asdf` with the host's. Found by listing the directory before
+   running anything. Fixed by staging into `<state-dir>/apebin`.
+2. **Policy denied aped's own mount.** The staged dir is under the state dir, which is not
+   in `mount_roots`, so EVERY create was refused. The framework mount already had the
+   exemption this needed; the two are now uniform. The alternative — making operators
+   allow-list aped's state dir — fails closed in the most confusing possible way.
+3. **The pull error explained nothing.** The executor is AF_UNIX only by design, so a
+   registry pull from inside it cannot work; it surfaced as
+   `dial udp 127.0.0.53:53: socket: address family not supported by protocol`. Now prints
+   the pre-pull command with namespace and ref, including that the DIGEST form is required
+   (containerd stores an image under the name it was pulled with).
+4. **A login shell had no proxy.** The caches arrived, the proxy did not: the driver
+   derives it at provision time (`containerdEnv` → `ProxyEnv`) rather than putting it in
+   `spec.Env`, so the profile file never saw it. An ssh session therefore had NO network in
+   a workspace that had been granted egress — which would have read as the egress policy
+   denying traffic.
+5. **A login shell had no `go`.** Pre-existing, and invisible: the image adds
+   `/usr/local/go/bin` via `ENV` only, so it reached `exec`/`attach` and not ssh. The
+   profile drop-in now re-establishes every PATH entry the image adds.
+
+Worth recording about method: the first D9 probe reported `GOBIN=` and looked like the env
+file had failed, when in fact the probe called `go env GOBIN` and `go` was the thing
+missing. Reading a variable directly (`${GOBIN}`) separated the two failures. A probe that
+depends on the thing it is testing will mislead you about which half is broken.
