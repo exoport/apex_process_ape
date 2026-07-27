@@ -202,7 +202,15 @@ func (r *Resolver) Resolve(_ context.Context, req workspace.CreateRequest) (sand
 	// one — so without this a workspace reached over ssh has no GOPATH/GOBIN and quietly
 	// writes to the ephemeral rootfs instead of the durable caches. Written last, once the
 	// spec's env is complete, and allowlisted so credential material stays out of a file.
-	if err := sandbox.WriteGuestProfileEnv(comp.StagingDir, append(append([]string(nil), comp.Env...), spec.Env...)); err != nil {
+	//
+	// The proxy vars are added from spec.HTTPSProxy rather than read out of spec.Env,
+	// because that is where they live: the driver derives them at provision time
+	// (containerdEnv → ProxyEnv), so they are not in the env assembled here. Live
+	// validation caught the omission — an ssh session had the caches but no proxy, which
+	// means no network at all in a workspace that HAS egress.
+	profileEnv := append(append([]string(nil), comp.Env...), spec.Env...)
+	profileEnv = append(profileEnv, sandbox.ProxyEnv(spec.HTTPSProxy)...)
+	if err := sandbox.WriteGuestProfileEnv(comp.StagingDir, profileEnv); err != nil {
 		return sandbox.WorkspaceSpec{}, err
 	}
 	return spec, nil

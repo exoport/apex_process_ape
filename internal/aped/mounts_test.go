@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/sandbox"
@@ -396,4 +397,11 @@ func TestResolveWritesTheLoginShellEnv(t *testing.T) {
 	assert.Contains(t, string(body), "export GOBIN='"+sandbox.CacheRoot+"/go/bin'",
 		"a shell over ssh needs the durable cache, or go writes to the ephemeral rootfs")
 	assert.NotContains(t, string(body), "sk-secret", "credentials stay out of the file")
+
+	// The proxy has to come from spec.HTTPSProxy, not spec.Env — the driver derives it at
+	// provision time, so a login shell would otherwise have the caches but NO network in a
+	// workspace that has egress. Found live.
+	spec := sandbox.WorkspaceSpec{HTTPSProxy: "http://169.254.42.1:3200"}
+	lines := sandbox.ProfileEnvLines(append(sandbox.ProxyEnv(spec.HTTPSProxy), "GOPATH=/cache/go"))
+	assert.Contains(t, strings.Join(lines, "\n"), "export HTTPS_PROXY='http://169.254.42.1:3200'")
 }
