@@ -18,7 +18,7 @@ all — the build has no dependency on `apex_process_ape`.
 
 `ape sandbox` resolves the image via `aped`'s pinned default
 (`sandbox.DefaultImage` in `internal/sandbox/kata.go` — currently
-`ghcr.io/exoport/ape-sandbox:v1.1.0`, **digest-pinned** to the OCI index so
+`ghcr.io/exoport/ape-sandbox:v1.1.1`, **digest-pinned** to the OCI index so
 re-pushing the tag cannot change what workspaces run) or a per-request `--image`
 / profile `image:` override. The `aped` policy `images:` allow-list in
 `deploy/policy.yaml` is matched by **exact string** against the resolved ref, so

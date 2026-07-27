@@ -47,7 +47,7 @@ const ContainerPrefix = "ape-ws-"
 // EXACT string match on the resolved ref, so bumping one without the other turns every
 // default `ape sandbox up` into a policy denial — not a pull error, which is the
 // confusing part.
-const DefaultImage = "ghcr.io/exoport/ape-sandbox:v1.1.0@sha256:be34bd9697abdab2c68e6267eb2a8dc8440608a5de1d1a75bb2687e359a9a99e"
+const DefaultImage = "ghcr.io/exoport/ape-sandbox:v1.1.1@sha256:b45a0674983d0d5de02dca4efa24193ba985b59f51e354de3421ac882677ec20"
 
 // DefaultShell is the login shell `ape sandbox attach` opens inside a
 // workspace when the caller doesn't pick one.
