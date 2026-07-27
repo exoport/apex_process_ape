@@ -1,7 +1,7 @@
 ---
 plan_id: PLAN-20
 created_at: 2026-07-23
-status: in-progress
+status: done
 tags:
   - sandbox
   - aped

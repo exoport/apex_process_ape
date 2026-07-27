@@ -1,7 +1,7 @@
 ---
 plan_id: PLAN-22
 created_at: 2026-07-23
-status: in-progress
+status: partially-implemented
 tags:
   - sandbox
   - toolchain
@@ -174,7 +174,7 @@ busy nodes/laptops), or rebuild (`down`/`up`, cheap because state is durable).
 
 - [x] **D1 — Toolchain config resolution.** DONE 2026-07-24 — the descriptor's `toolchain:` section (references `.tool-versions` / `.bingo` rather than duplicating versions). Read `.tool-versions` (+ `.bingo/`)
   from the main repo; surface it to the workspace.
-- [x] **D2 — Base image.** DONE 2026-07-24 in the exoport/ape-sandbox tree (asdf + bingo + a bootstrap Go, no language runtimes). Publishing is the open step. Add asdf (Go) + bingo to the lean base (PLAN-20);
+- [x] **D2 — Base image.** DONE 2026-07-24 in the exoport/ape-sandbox tree (asdf + bingo + a bootstrap Go, no language runtimes); PUBLISHED 2026-07-26 as `ghcr.io/exoport/ape-sandbox` (public, anonymously pullable; `v1.1.1` current). Add asdf (Go) + bingo to the lean base (PLAN-20);
   keep it language-agnostic.
 - [x] **D3 — Install step.** DONE 2026-07-24 — `ape sandbox setup <name>` renders an idempotent script (`asdf install` + `bingo get`) and runs it in the guest; `--dry-run` prints it. `ape sandbox setup` / entrypoint hook →
   `asdf install` + `bingo get`; idempotent; offline when caches are warm.

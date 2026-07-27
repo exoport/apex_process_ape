@@ -2,9 +2,10 @@
 
 | ID      | Title                                                   | Status                | Created    |
 | ------- | ------------------------------------------------------- | --------------------- | ---------- |
-| PLAN-22 | Sandbox toolchain / devcontainer model + lifecycle      | proposed              | 2026-07-23 |
-| PLAN-21 | Sandbox network egress (allowlisted, deny-by-default)   | proposed              | 2026-07-23 |
-| PLAN-20 | Sandbox mounts (general model) + framework delivery     | proposed              | 2026-07-23 |
+| PLAN-23 | Runtime `ape` delivery into sandbox workspaces           | done                  | 2026-07-26 |
+| PLAN-22 | Sandbox toolchain / devcontainer model + lifecycle      | partially-implemented | 2026-07-23 |
+| PLAN-21 | Sandbox network egress (allowlisted, deny-by-default)   | done                  | 2026-07-23 |
+| PLAN-20 | Sandbox mounts (general model) + framework delivery     | done                  | 2026-07-23 |
 | PLAN-19 | Activity-aware step timeout — progress anchor + hard cap | done                  | 2026-07-14 |
 | PLAN-18 | `ape` + `aped` split — rootful Kata-QEMU VM daemon       | partially-implemented | 2026-07-08 |
 | PLAN-17 | Reporting CLI — event/log/metrics/transcript + identity | done                  | 2026-07-02 |
@@ -25,10 +26,16 @@
 | PLAN-2  | Pipeline UX follow-ups (v0.0.7 carry-out)               | done                  | 2026-05-10 |
 | PLAN-1  | Pipeline UX and framework setup separation              | done                  | 2026-05-10 |
 
-> **Status note (2026-07-12):** the proposed wave has largely landed on
-> `feat/plan-18-phase2-aped` (targets CHANGELOG v0.0.42). See the table above
-> for what's implemented vs pending. The rationale
-> below is the original 2026-07-02 sequencing record.
+> **Status note (2026-07-27, v0.0.50):** the whole sandbox wave has landed on `main` and is
+> **live-validated on node `mmq4`** — PLAN-20 (mounts + framework delivery), PLAN-21
+> (allowlisted egress), PLAN-22 (toolchain + lifecycle, minus the deliberately-unbuilt idle
+> reaper), PLAN-23 (runtime `ape` delivery). PLAN-16/18 remain
+> `partially-implemented` for one reason only: the **device (GPU/USB VFIO), overlay
+> (Netbird) and fleet/controller tiers**, which need hardware or a second node that does not
+> exist yet. What is pending, deduplicated across plans, is inventoried in
+> `_output/2026-07-26-plan-review-pending.md`.
+>
+> The rationale below is the original 2026-07-02 sequencing record.
 
 ## Proposed-wave dependency order (2026-07-02)
 

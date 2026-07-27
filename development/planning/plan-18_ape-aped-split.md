@@ -166,13 +166,21 @@ point* for this plan: **Session 4 (Phase 1)** extracts the `Backend` from PLAN-1
 (compose/gitcred/proxy/match/secret/profile/spec). Its remaining work is a
 **host-provisioning + de-risking** workstream, **not gated by Phase 0 (NATS)**:
 
-- **Host toolchain** — install containerd + Kata + nerdctl on a Linux box with KVM
-  (needs sudo); `ape doctor` surfaces the gaps.
-- **Official `ape-sandbox` image** — build + publish (D6), pin the digest, bump
-  `sandbox.DefaultImage`.
-- **Tier-2/3 live validation** — run the gated
+**All three are now DONE (2026-07-27); kept for the record rather than deleted.**
+
+- ~~**Host toolchain** — install containerd + Kata + nerdctl on a Linux box with KVM
+  (needs sudo); `ape doctor` surfaces the gaps.~~ Node `mmq4`, provisioned by
+  `deploy/tier2-setup.sh`.
+- ~~**Official `ape-sandbox` image** — build + publish (D6), pin the digest, bump
+  `sandbox.DefaultImage`.~~ Published public + framework-free, and since PLAN-23 also
+  **ape-free**: `ghcr.io/exoport/ape-sandbox:v1.1.1@sha256:b45a0674…`, digest-pinned in
+  `sandbox.DefaultImage` AND the aped policy allow-list — both in one commit, since the
+  policy check is an exact string match.
+- ~~**Tier-2/3 live validation** — run the gated
   `internal/sandbox/integration_linux_test.go` (`APE_SANDBOX_IT=1` + `/dev/kvm` +
-  nerdctl) + the Tier-3 manual checklist.
+  nerdctl) + the Tier-3 manual checklist.~~ PLAN-20/21/22 live-validated 2026-07-25,
+  PLAN-23 on 2026-07-27. Between them they found 20+ defects Tier-1 could not reach,
+  roughly half in the deploy assets rather than product code.
 
 **When:** anytime a Linux+KVM box exists — ideally **early and in parallel with
 the Phase-0 NATS sessions**, because it de-risks the whole Kata/containerd/nerdctl

@@ -155,8 +155,14 @@ origin:
 > **Session note (2026-07-07, step 9 — image finalization / D6).**
 > 1. **Base pinned.** Confirmed the upstream coordinates via the agent-infra/sandbox README: `ghcr.io/agent-infra/sandbox` (current release 1.11.0; CN mirror also exists). Resolved the `1.11.0` manifest-list digest over the public GHCR API (anon token → manifest HEAD, no docker needed): `sha256:6328d7fd2f0ff0b4c147c3d05b3df1ce331f4a482eb6e550ecd64ed1fcf906e7`, a multi-arch list covering `linux/amd64` + `linux/arm64` (matches the Dockerfile's buildx `TARGETARCH`). Pinned `ARG BASE_IMAGE=ghcr.io/agent-infra/sandbox:1.11.0@sha256:6328d7fd…`. README documents a docker-free re-resolve recipe.
 > 2. **Offline framework.** No Go change needed — `ape framework setup` already resolves the repo from `$APEX_FRAMEWORK_REPO`. Added `ENV APEX_FRAMEWORK_REPO=/opt/apex-framework` to the image; `ape framework setup --no-fetch` installs offline.
-> 3. **Blocked here:** building/publishing the image needs docker or nerdctl (none installed on this box; installing them + containerd/Kata is the outstanding host-toolchain step — needs the user + sudo). Once built, tag to the ape release and bump `sandbox.DefaultImage`.
-> 4. **Phase-1 status:** all in-repo Phase-1 deliverables (D1–D8) are code-complete; what remains is host-toolchain provisioning + Tier-2/3 live validation, and the Phase-2–4 platform-repo work.
+> 3. ~~**Blocked here:**~~ **UNBLOCKED 2026-07-26** — the image is built, published and
+> digest-pinned (`ghcr.io/exoport/ape-sandbox:v1.1.1@sha256:b45a0674…`); PLAN-23 also
+> removed `ape` from it, so the image no longer tracks an ape release at all. Original
+> note: building/publishing the image needs docker or nerdctl (none installed on this box; installing them + containerd/Kata is the outstanding host-toolchain step — needs the user + sudo). Once built, tag to the ape release and bump `sandbox.DefaultImage`.
+> 4. **Phase-1 status (updated 2026-07-27):** all in-repo Phase-1 deliverables (D1–D8) are
+> code-complete, and host-toolchain provisioning + Tier-2/3 live validation are now DONE on
+> node `mmq4`. What remains is only the Phase-2–4 platform-repo work (in-VM NATS worker,
+> Netbird overlays, previews/staging, device tier) — see `_output/2026-07-26-plan-review-pending.md`.
 
 ### Reuse — already built + unit-tested in this repo (`internal/sandbox`)
 
