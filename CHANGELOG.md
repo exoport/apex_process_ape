@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.0.50 (2026-07-26)
 
 - **feat: a workspace runs the `ape` that provisioned it, not the one its image was
   built with (PLAN-23)** — `ape` is no longer baked into the sandbox image. `aped`
@@ -36,6 +36,9 @@
     `ape update` inside a workspace now explains that instead of failing on a read-only
     mount. `ape doctor` gains `sandbox.ape-delivery`. `/opt/ape` is a reserved mount
     subtree, so a committed `.apesandbox.yaml` cannot choose its own workspace's `ape`.
+  - The delivered mount is treated as a **system mount** by policy, like the framework:
+    exempt from `mount_roots` only when read-only and on its own reserved destination, so
+    an operator never has to allow-list `aped`'s state dir.
   - Retires the in-guest version floor (a delivered `ape` cannot predate its own
     daemon) and the image's dependency on an `ape` release entirely.
 - **fix: `go`/`asdf` in an ssh or VS Code Remote session used the ephemeral rootfs
@@ -48,6 +51,12 @@
   that env to a file the image's `/etc/profile.d` entry sources. It carries an
   **allowlist**: credential material legitimately lives in the process env (mode B
   injects `ANTHROPIC_API_KEY`) and has no business in a host-side file.
+  Two further holes in the same path, both measured in a real workspace rather than
+  reasoned about: the **egress proxy** was absent, so an ssh session had no network at all
+  in a workspace that HAD been granted egress (it would have read as the egress policy
+  denying traffic); and **`go` itself** was missing, because the image adds
+  `/usr/local/go/bin` via `ENV` only — so it reached `exec`/`attach` and not ssh. Image
+  `v1.1.1` re-establishes every `PATH` entry it adds for login shells.
 - **`ape` and `aped` derive their version identically** (`internal/buildident`) —
   previously `ape` backfilled from Go build info and `aped` did not, so a locally built
   pair reported a pseudo-version beside a bare `"dev"`. Harmless until the daemon began
@@ -65,15 +74,41 @@
   an *older* baked `ape` prints, since that binary contains none of this code; it ends the
   guessing from here on, which matters now that variant images can bake any `ape`.
 - **The default sandbox image is digest-pinned** — `sandbox.DefaultImage` and the
-  `images:` allow-list in `deploy/policy.yaml` now both name
-  `ghcr.io/exoport/ape-sandbox:v1.0.0@sha256:a5f8ca0f…`. A tag is mutable: re-pushing
-  `v1.0.0` would silently change what every workspace runs, and nothing in the pipeline
-  would notice. The tag is kept alongside the digest so the version stays legible in
-  errors and `ape doctor` output — containerd reduces `tag@digest` to the digest when it
-  resolves, so the tag is documentation and the digest is the pin. The digest is the OCI
-  image **index**, so it still resolves per architecture. Both places had to move in the
-  same commit: the policy check is an exact string match on the resolved ref, so a
-  mismatch surfaces as a policy denial rather than a pull error.
+  `images:` allow-list in `deploy/policy.yaml` both name
+  `ghcr.io/exoport/ape-sandbox:v1.1.1@sha256:b45a0674…`. A tag is mutable: re-pushing it
+  would silently change what every workspace runs, and nothing in the pipeline would
+  notice. The tag is kept alongside the digest so the version stays legible in errors and
+  `ape doctor` output — containerd reduces `tag@digest` to the digest when it resolves, so
+  the tag is documentation and the digest is the pin. The digest is the OCI image **index**,
+  so it still resolves per architecture. Both places move in one commit: the policy check is
+  an exact string match, so a mismatch surfaces as a policy **denial** rather than a pull
+  error, and a test now asserts the shipped policy allows the compiled-in default.
+- **fix: a node could not provision at all with the delivered `ape`** — the staged binary
+  lives under `aped`'s own state dir, and the policy's mount check treated it like a
+  caller-supplied host path, so **every** create was refused as a policy denial. The
+  framework mount already had exactly the exemption this needed — read-only, on its own
+  reserved destination, a source the daemon resolved itself — so the two are now uniform.
+  The alternative, making operators allow-list `aped`'s state dir in `mount_roots`, fails
+  closed in the most confusing way available.
+- **A pull that cannot succeed now says why** — `aped`'s root executor is network-less by
+  design (AF_UNIX only), so a registry pull from inside it fails with
+  `socket: address family not supported by protocol`, which reads like a broken host rather
+  than a deliberate restriction. A create failing on a network error now prints the
+  pre-pull command with the namespace and the exact ref, including the part that costs a
+  second attempt: containerd stores an image under the name it was pulled with, and the
+  lookup is an exact match on the **digest** form, so pulling the tag leaves it missing.
+
+### Upgrading a node
+
+Two steps, both root, both new with this release:
+
+1. **Install `ape` and `aped` together.** `aped` delivers the `ape` beside it into every
+   workspace and refuses to start without one — or with one that does not match its own
+   build. The release archive ships both; `deploy/dev-host.sh redeploy` installs both.
+2. **Pre-pull the workspace image in digest form**, because the executor cannot:
+   `sudo nerdctl --namespace aped pull ghcr.io/exoport/ape-sandbox@sha256:b45a0674…`
+
+`ape doctor` reports both (`sandbox.ape-delivery`, `sandbox.image`).
 
 ## v0.0.49 (2026-07-26)
 

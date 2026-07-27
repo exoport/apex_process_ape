@@ -645,11 +645,18 @@ driver-in-guest UVM/NVRC, multi-GPU NVSwitch, attestation.
 
 ### D6: Guest agent — the in-VM `ape`
 
-- **Delivery = baked, not injected.** The agent is the **same `ape` binary
-  already in the `ape-sandbox` image** (PLAN-16 D6, `Dockerfile` pins
-  `ARG APE_VERSION`). Baked beats inject-at-create: reproducible, offline,
-  digest-pinned, and it matches NEX (whose agent resides in the rootfs, never
-  user-launched).
+- **Delivery = baked, not injected.** ~~The agent is the same `ape` binary already in
+  the `ape-sandbox` image (PLAN-16 D6, `Dockerfile` pins `ARG APE_VERSION`). Baked beats
+  inject-at-create: reproducible, offline, digest-pinned, and it matches NEX (whose agent
+  resides in the rootfs, never user-launched).~~
+  **SUPERSEDED by PLAN-23 (2026-07-26): delivered at runtime, not baked.** The reasoning
+  above held on its own terms and still missed the decisive property: a baked `ape` is
+  whatever release was current when the IMAGE was built, and since project work happens
+  inside workspaces, an `ape` upgrade made to unblock that work never reached the place the
+  work happens. `aped` now mounts the `ape` installed beside it read-only at `/opt/ape/bin`.
+  Reproducibility and offline operation survive intact — the binary comes from the node's
+  own installation, not a fetch — and the image stopped depending on an `ape` release at
+  all. See `plan-23_runtime-ape-delivery.md`.
 - **Startup = the OCI entrypoint, not systemd.** A Kata container-image VM has no
   init managing the entrypoint; the kata-agent spawns the image ENTRYPOINT
   directly. Add a best-effort background `ape sandbox-agent` launch to
