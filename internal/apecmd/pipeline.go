@@ -97,6 +97,7 @@ func newPipelineCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
 				return err
 			}
+			warnSpecModels(spec)
 			// PLAN-9 F2: the programmatic exec axis was removed in
 			// v0.0.36 — interactive PTY is the only exec mode. The old
 			// flags error with a pointer rather than silently no-op.
@@ -448,4 +449,21 @@ func fmtDuration(d time.Duration) string {
 		return fmt.Sprintf("%.1fs", d.Seconds())
 	}
 	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+}
+
+// warnSpecModels surfaces `model:` values in a spec that ape cannot attribute
+// to a known family, before anything spawns.
+//
+// A typo on the command line already warns via resolveModelArg; without this,
+// the same typo in a checked-in spec stayed silent until claude rejected it
+// part-way through a run. Not fatal — claude, not ape, decides which models
+// exist — so the run continues.
+func warnSpecModels(spec *pipeline.Spec) {
+	for _, w := range spec.ModelWarnings() {
+		fmt.Fprintf(os.Stderr,
+			"⚠ %s: model %q is not one ape recognizes — passing it to claude unchanged.\n"+
+				"  Accepted: a bare family (sonnet, opus, haiku) for its current generation,\n"+
+				"  or an explicit id (sonnet-5, claude-sonnet-5, opus[1m]).\n",
+			w.Location, w.Model)
+	}
 }

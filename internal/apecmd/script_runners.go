@@ -115,6 +115,7 @@ func (r *scriptRunner) runPipeline(ctx context.Context, o apescript.PipelineOpts
 	if err != nil {
 		return apescript.RunResult{}, err
 	}
+	warnSpecModels(spec)
 	cfg := r.runCfg("", eventing.KindPipeline)
 	cfg.prompt = o.Prompt
 	cfg.fromStage = o.From

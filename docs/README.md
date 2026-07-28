@@ -32,6 +32,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [How to run aped (the VM-management daemon)](how-to/run-aped.md)
 - [How ape runs claude (PTY-only)](how-to/interactive-vs-programmatic.md)
 - [How to read run artefacts](how-to/run-artefacts.md)
+- [How to keep cost pricing current](how-to/keep-cost-pricing-current.md)
 - [How to run `ape doctor` in CI](how-to/run-doctor-in-ci.md)
 - [How to verify a release before tagging](how-to/pre-tag-release.md)
 

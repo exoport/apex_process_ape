@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -30,6 +31,10 @@ type TurnRecord struct {
 	Version    string // Claude Code version that wrote the turn
 	Usage      UsageBlock
 	CostUSD    float64
+	// PriceSource records how CostUSD was priced. PriceNone means the turn
+	// contributed $0 because no rate was found — NOT because it was free.
+	// Never read CostUSD without it.
+	PriceSource PriceSource
 }
 
 // ScanResult is the full outcome of scanning one session transcript:
@@ -48,6 +53,60 @@ type ScanResult struct {
 	FirstTurnAt   time.Time
 	LastTurnAt    time.Time
 	ClaudeVersion string
+
+	// UnpricedModels and EstimatedModels count turns whose cost could not
+	// be priced exactly, keyed by normalized model id. Both are empty on a
+	// healthy scan. They exist so no consumer can report a total without
+	// being able to tell that part of it is missing or approximate — the
+	// failure this package shipped in v0.0.45..50 was a correct token count
+	// multiplied by a silently absent price.
+	UnpricedModels  map[string]int
+	EstimatedModels map[string]int
+}
+
+// PricingNote returns a one-line human breadcrumb when any turn was priced
+// inexactly, or "" when every turn had an exact rate. Callers stamp it onto
+// a record or print it next to the total.
+func (r ScanResult) PricingNote() string {
+	var parts []string
+	if s := describeModelCounts("unpriced", r.UnpricedModels); s != "" {
+		parts = append(parts, s)
+	}
+	if s := describeModelCounts("estimated at family rate", r.EstimatedModels); s != "" {
+		parts = append(parts, s)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "; ") +
+		" — cost is a lower bound; run `ape costs coverage` for the price-table gap"
+}
+
+// describeModelCounts renders "<label>: model (N turns), model (N turns)"
+// with model ids sorted for stable output. Empty input yields "".
+func describeModelCounts(label string, counts map[string]int) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	models := make([]string, 0, len(counts))
+	for m := range counts {
+		models = append(models, m)
+	}
+	sort.Strings(models)
+	parts := make([]string, 0, len(models))
+	for _, m := range models {
+		parts = append(parts, fmt.Sprintf("%s (%d turn(s))", m, counts[m]))
+	}
+	return label + ": " + strings.Join(parts, ", ")
+}
+
+// mergeModelCounts folds src into dst. dst must be non-nil; ScanResult
+// allocates both health maps up front so every consumer can index them
+// without a nil check.
+func mergeModelCounts(dst, src map[string]int) {
+	for model, n := range src {
+		dst[model] += n
+	}
 }
 
 // ScanSession reads a Claude Code session JSONL file once and returns
@@ -66,7 +125,13 @@ func ScanSession(path string) (ScanResult, error) {
 
 	turns, err := scanTurns(f)
 	if err != nil {
-		return ScanResult{ByModel: map[string]Totals{}}, err
+		// Same shape as the success path: every map allocated, so a caller
+		// that folds this result cannot hit a nil-map write.
+		return ScanResult{
+			ByModel:         map[string]Totals{},
+			UnpricedModels:  map[string]int{},
+			EstimatedModels: map[string]int{},
+		}, err
 	}
 	return aggregateTurns(turns), nil
 }
@@ -94,18 +159,19 @@ func scanTurns(r io.Reader) ([]TurnRecord, error) {
 		}
 		model := NormalizeModel(al.Message.Model)
 		ts := parseTurnTime(al.Timestamp)
-		price, _ := LookupAt(model, ts)
+		price, src := LookupSourceAt(model, ts)
 		tr := TurnRecord{
-			Timestamp:  ts,
-			Model:      model,
-			SessionID:  al.SessionID,
-			MessageID:  al.Message.ID,
-			RequestID:  al.RequestID,
-			StopReason: al.Message.StopReason,
-			Sidechain:  al.IsSidechain,
-			Version:    al.Version,
-			Usage:      al.Message.Usage,
-			CostUSD:    TurnCost(al.Message.Usage, price),
+			Timestamp:   ts,
+			Model:       model,
+			SessionID:   al.SessionID,
+			MessageID:   al.Message.ID,
+			RequestID:   al.RequestID,
+			StopReason:  al.Message.StopReason,
+			Sidechain:   al.IsSidechain,
+			Version:     al.Version,
+			Usage:       al.Message.Usage,
+			CostUSD:     TurnCost(al.Message.Usage, price),
+			PriceSource: src,
 		}
 		if al.Message.ID == "" {
 			turns = append(turns, tr)
@@ -133,13 +199,25 @@ func scanTurns(r io.Reader) ([]TurnRecord, error) {
 // model totals, the last model, the per-turn records (chronological), and
 // the first/last turn timestamps + Claude Code version (PLAN-10 D1).
 func aggregateTurns(turns []TurnRecord) ScanResult {
-	res := ScanResult{ByModel: map[string]Totals{}, Turns: turns}
+	res := ScanResult{
+		ByModel:         map[string]Totals{},
+		Turns:           turns,
+		UnpricedModels:  map[string]int{},
+		EstimatedModels: map[string]int{},
+	}
 	sort.SliceStable(res.Turns, func(i, j int) bool {
 		return res.Turns[i].Timestamp.Before(res.Turns[j].Timestamp)
 	})
 	for i := range res.Turns {
 		tr := &res.Turns[i]
-		price, _ := LookupAt(tr.Model, tr.Timestamp)
+		price, src := LookupSourceAt(tr.Model, tr.Timestamp)
+		tr.PriceSource = src
+		switch {
+		case !src.Priced():
+			res.UnpricedModels[tr.Model]++
+		case src.Estimated():
+			res.EstimatedModels[tr.Model]++
+		}
 		res.LastModel = tr.Model
 		res.Totals.Add(tr.Usage, price)
 		mt := res.ByModel[tr.Model]
@@ -181,7 +259,11 @@ func parseTurnTime(s string) time.Time {
 // never zeroes the whole set. Used by PLAN-17 `ape metrics` / `ape
 // transcript` for a session's full main+subagent usage.
 func ScanPaths(paths []string) ScanResult {
-	merged := ScanResult{ByModel: map[string]Totals{}}
+	merged := ScanResult{
+		ByModel:         map[string]Totals{},
+		UnpricedModels:  map[string]int{},
+		EstimatedModels: map[string]int{},
+	}
 	for _, p := range paths {
 		res, err := ScanSession(p)
 		if err != nil {
@@ -190,6 +272,8 @@ func ScanPaths(paths []string) ScanResult {
 		merged.Totals = sumTotals(merged.Totals, res.Totals)
 		merged.ByModel = sumPerModel(merged.ByModel, res.ByModel)
 		merged.Turns = append(merged.Turns, res.Turns...)
+		mergeModelCounts(merged.UnpricedModels, res.UnpricedModels)
+		mergeModelCounts(merged.EstimatedModels, res.EstimatedModels)
 		if !res.FirstTurnAt.IsZero() && (merged.FirstTurnAt.IsZero() || res.FirstTurnAt.Before(merged.FirstTurnAt)) {
 			merged.FirstTurnAt = res.FirstTurnAt
 		}

@@ -177,7 +177,7 @@ Flags:
 | `--cwd` | string | `—` | Project root (default: current working directory). |
 | `--effort` | string | `—` | Reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Defaults to claude's native effort when unset. |
 | `--ignore-project-settings` | bool | `false` | Tell claude to skip project + local .claude/settings*.json. |
-| `--model` | string | `—` | Initial claude model (e.g. "opus[1m]"); falls back to claude's default when empty. |
+| `--model` | string | `—` | Initial claude model. A bare family (sonnet, opus, haiku) resolves to its current generation; sonnet-5 / opus[1m] pin explicitly. Empty falls back to claude's default. |
 
 ## ape costs
 
@@ -195,13 +195,19 @@ totals — today, this week, all-time — broken down per pipeline + chat.
   ape costs chat <chat-id>           Single chat session (reads session.yaml).
   ape costs prompt <prompt-id>       Single prompt session (reads prompt.yaml).
   ape costs update --from <file>     Refresh the price table from a YAML file.
+  ape costs coverage                 Check the price table against the models
+                                     Claude Code is actually emitting locally.
+  ape costs reprice                  Recompute stored costs from on-disk tokens
+                                     using the current price table.
   ape costs roll                     Force a project rollup rebuild from all
                                      run / chat directories.
 
 Subcommands:
 
 - `chat` — Show cost for a single chat session (reads its session.yaml)
+- `coverage` — Check the built-in price table against the models Claude Code is actually emitting
 - `prompt` — Show cost for a single prompt session (reads its prompt.yaml)
+- `reprice` — Recompute stored costs from on-disk token counts using the current price table
 - `roll` — Rebuild <project>/_output/ape/cost-rollup.json from on-disk run / chat artefacts
 - `run` — Show cost for a single pipeline or task run (reads its manifest.yaml)
 - `update` — Persist model price overrides from a YAML file to ~/.ape/prices.yaml
@@ -232,6 +238,42 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--output-format` | string | `human` | human \| json |
 
+## ape costs coverage
+
+Check the built-in price table against the models Claude Code is actually emitting
+
+```
+ape costs coverage [flags]
+```
+
+Sweep the local Claude Code transcripts (~/.claude/projects) and report
+how this ape binary prices every model id it finds.
+
+Each observed model resolves to one of:
+
+  exact      a rate for this exact model id (built-in table, an override
+             in ~/.ape/prices.yaml, or a dated promotional window)
+  family     no exact row — priced from the model's family tier. Close,
+             but an approximation, and flagged as one everywhere.
+  unpriced   nothing matched. Those turns contribute $0.00 to every
+             total, which is not the same as being free.
+
+--strict exits 2 when any observed model is not exactly priced. A sweep
+that finds no transcripts exits 0 and says so: absence of evidence is not
+coverage, so CI (which has no transcripts) skips rather than passes.
+
+Exit codes:
+  0  every observed model exactly priced, or nothing observed
+  2  --strict and at least one model is estimated or unpriced
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--days` | int | `30` | Only read transcripts modified in the last N days (0 = all) |
+| `--output-format` | string | `human` | human \| json \| yaml |
+| `--strict` | bool | `false` | Exit 2 when any observed model is not exactly priced |
+
 ## ape costs prompt
 
 Show cost for a single prompt session (reads its prompt.yaml)
@@ -251,6 +293,45 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--output-format` | string | `human` | human \| json |
+
+## ape costs reprice
+
+Recompute stored costs from on-disk token counts using the current price table
+
+```
+ape costs reprice [flags]
+```
+
+Walk this project's run artefacts and recompute every cost_usd from the
+per-model token counts stored alongside it.
+
+Use this after correcting the price table (a new model id added to
+internal/cost/prices.yaml, or an override persisted via
+`ape costs update --from`) to fix runs that were recorded while the
+table was stale.
+
+Artefacts covered:
+  _output/{pipelines,tasks}/<name>/<run-id>/manifest.yaml
+  _output/ape/prompts/<prompt-id>/prompt.yaml
+
+Chat session.yaml has no per-model breakdown, so there is nothing to
+reprice from — those are skipped.
+
+Dry run by default: it prints what would change and touches nothing. Pass
+--write to apply, then run `ape costs roll` to refresh the rollup cache.
+Only cost_usd scalars are rewritten; key order, comments, and every other
+field survive the round-trip.
+
+A model that is STILL unpriced cannot be fixed by repricing — its stored
+cost is left alone and the model is listed in the report so you know the
+total remains a lower bound.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--output-format` | string | `human` | human \| json \| yaml |
+| `--write` | bool | `false` | Apply the recomputed costs (default: dry run) |
 
 ## ape costs roll
 
@@ -814,7 +895,7 @@ Flags:
 | `--idle-timeout` | duration | `0s` | Idle backstop: end the session only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default matches the pipeline (60m) |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
 | `--max-duration` | duration | `3h0m0s` | Hard wall-clock ceiling regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a batch of sub-agents is bounded per item, not overall. 0 disables the cap. |
-| `--model` | string | `—` | Claude model for the session (e.g. "opus[1m]") |
+| `--model` | string | `—` | Claude model. A bare family (sonnet, opus, haiku) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml (json/yaml = result envelope on stdout, progress on stderr) |
 | `--quiet` | bool | `false` | Suppress the progress stream on stderr |
 | `--ultracode` | bool | `false` | Prepend the ultracode keyword (session runs workflows by default) |
@@ -1805,7 +1886,7 @@ Flags:
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
 | `--manifest-dir` | string | `—` | Override the run-artifact base dir (default: <project>/_output/tasks) |
 | `--max-duration` | duration | `3h0m0s` | Hard wall-clock ceiling regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item, not per batch. 0 disables the cap. |
-| `--model` | string | `—` | Claude model for the session (e.g. "opus[1m]") |
+| `--model` | string | `—` | Claude model. A bare family (sonnet, opus, haiku) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly |
 | `--nats-creds` | string | `—` | NATS .creds file; its user identity is baked into every subject (env APE_NATS_CREDS). |
 | `--nats-url` | string | `—` | NATS server URL for progress events + transcript upload (env APE_NATS_URL). Empty disables both. |
 | `--no-commit` | bool | `false` | Skill layer: tell the skill/framework not to commit (adds skill-level --no-commit on the agent path) |

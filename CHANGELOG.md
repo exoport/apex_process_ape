@@ -1,5 +1,118 @@
 # CHANGELOG
 
+## v0.0.51 (2026-07-28)
+
+- **chore(deps): bump google.golang.org/grpc to v1.82.1** — clears GO-2026-6061
+  (xDS RBAC authorization engine + HTTP/2 transport server), reachable through
+  containerd's client in `internal/sandbox`. An indirect-only patch bump; the
+  govulncheck gate keeps its zero-exception allow-list.
+
+- **fix: an unpriced model reported $0.00 instead of saying it had no price** —
+  `opus[1m]` began resolving to `claude-opus-5` on 2026-07-14; the price table had no
+  such row, so every cost from that day on was `$0.00` while token counts stayed
+  perfectly correct. The row is added, but the row was never the real defect:
+  `LookupAt` already returned an `ok` flag and both call sites in the scanner
+  discarded it, which made "no price for this model" and "this model is free"
+  the same value everywhere downstream. That is what let it run 13 days unnoticed.
+  - **Nothing prices silently any more.** Pricing now resolves through
+    `LookupSourceAt`, which returns *how* a price was reached — `exact`, `override`,
+    `dated`, `family`, or `none` — and that source rides with the number. A step that
+    used an unpriced model says so on stderr and in its manifest `telemetry_note` as
+    it finishes; `ape costs`, `ape costs run`, and `ape costs prompt` warn from the
+    per-model keys the rollup already carries. `Lookup`/`LookupAt` keep their exact-match
+    contract unchanged, so no existing caller shifted behaviour.
+  - **A model newer than your `ape` no longer prices at zero.** An id with no exact
+    row falls back to its family tier (`claude-opus-*` → Opus rate, and so on),
+    flagged as an estimate everywhere it surfaces — the right order of magnitude
+    instead of a wrong zero, never presented as authoritative. Dated snapshot ids
+    (`claude-haiku-4-5-20251001`) now attribute to their base rate, and `<synthetic>`
+    — Claude Code's sentinel for locally-generated turns, whose usage is all zeros —
+    is priced as the real zero it is rather than reported as a gap.
+  - **`ape costs coverage`** reads the transcripts the locally-installed Claude Code
+    is writing right now and reports every model id the table does not cover exactly.
+    This is the detector the incident needed: Claude Code ships independently, so the
+    only correct time to ask is at scan time, not at release time. Also wired as the
+    `cost.price_table_coverage` doctor check and, as `make check-prices`, into
+    `make ci-local` and the `/release` pre-flight. With no transcripts (CI) it reports
+    a **skip, never a pass** — absence of evidence is not coverage.
+  - **`ape costs reprice`** recomputes stored costs from the per-model tokens already
+    on disk, so runs recorded during a gap are recoverable rather than written off.
+    Dry run by default; `--write` rewrites only `cost_usd` scalars, preserving
+    comments and key order. A still-unpriced model is left alone and named.
+  - **Model names are resilient across every entry point.** `--model` on `ape task` /
+    `ape prompt` / `ape chat`, the `apescript` task/prompt runners, and `model:` at step,
+    stage, or pipeline level in a spec now accept
+    `sonnet`, `Sonnet`, `claude-sonnet`, `sonnet-5`, `claude-sonnet-5`,
+    `claude-sonnet-4.6`, and `claude_sonnet_4_6`. **A bare family word resolves to that
+    family's current generation** — `model: sonnet` in a spec spawns
+    `claude-sonnet-5` — so a run records a concrete id and its per-model attribution
+    matches the transcript's. An explicit generation is honoured as written; the
+    `[1m]` suffix rides along. An unrecognized name is passed through with a warning
+    rather than rejected — a model newer than this binary must not be blocked by it.
+  - **Alias drift is detected, because resolving means a stale table picks the wrong
+    model.** `ape costs coverage` compares the `aliases:` block against the
+    generations the local Claude Code is actually emitting and reports any family
+    where a **strictly newer** generation is in use than the alias names. Drift fails
+    `--strict`, so `make check-prices` and the release gate block on it, and `ape
+    doctor` warns. The condition is "newer generation in use", not "target absent" —
+    pinning `claude-opus-4-8` everywhere means `claude-opus-5` never appears, and
+    flagging that would fail the gate over a deliberate choice. Ordering parses the
+    numeric segments of `claude-<family>-<major>[-<minor>]`, so `claude-opus-5`
+    outranks `claude-opus-4-8` (the pair a string sort gets backwards); an id that
+    does not parse yields no comparison and no claim.
+  - **The price table is data, not Go literals.** It moved to an embedded
+    `internal/cost/prices.yaml` in the same schema `ape costs update --from` accepts,
+    so a correction can be applied locally without waiting for a release.
+  - `ape costs reprice` dedupes the `latest` symlink every pipeline/task name
+    carries. Without it the manifest glob matched each recent run twice and the
+    dry-run preview reported double the real delta — misleading the very decision
+    it exists to inform.
+  - A build-time invariant (`TestAliasPointsAtNewestTabledGeneration`) fails when
+    `prices:` gains a newer generation than `aliases:` names. That combination is
+    otherwise invisible: the new model is exactly priced so coverage stays clean,
+    drift only fires on a machine that has run it, and meanwhile every spec saying
+    `model: opus` quietly selects the older model.
+  - **A typo'd `model:` in a spec is no longer silent.** `Spec.ModelWarnings()`
+    reports every pipeline/stage/step model ape cannot attribute to a known family;
+    `ape pipeline`, the apescript pipeline runner, and the `pipelines.project` doctor
+    check all surface it. Previously a `--model` typo warned instantly while the same
+    typo in a checked-in spec stayed hidden until claude rejected it mid-run. Still
+    not fatal — claude, not ape, decides which models exist.
+  - **`ape doctor` is fast again.** The coverage check was 2342 ms of a 2346 ms
+    doctor run — 99.8% of the command. Two fixes: a `bytes.Contains` pre-filter
+    skips lines that cannot name a model before the JSON decode (2342 → 1028 ms,
+    and the sweep is now I/O-bound at ~240 MB/s over ~242 MB), and doctor reads a
+    1-hour cache keyed on the price table's own stamp, so an ape upgrade invalidates
+    it immediately (→ 2 ms warm). A cached verdict always says so in the message.
+    `ape costs coverage`, `--strict`, and `make check-prices` never use the cache.
+  - `ape costs coverage` now lists every distinct raw spelling seen for a model
+    (a dated snapshot alongside the bare id), not just the first one encountered —
+    the interesting case is exactly when one model arrives under two names.
+  - **`ape costs update --from` no longer discards `effective_from`.** It was
+    validated and then dropped, so a dated override persisted as unconditional —
+    silently repricing history the file explicitly excluded. The load → save
+    round-trip now carries the date.
+  - **A zero or negative price row is rejected rather than applied.** A misspelled
+    key (`base_imput:`) unmarshals to zero, which would price those tokens at $0 —
+    the same silent zero this release fixes, arriving through a typo. The built-in
+    table refuses to load such a row; an override file has the row **dropped** and
+    the built-in rate used instead (an override outranks the table, so applying it
+    would be the dangerous direction), with the rejection reported by
+    `ape costs coverage` and `ape doctor`. A `<synthetic>`-style sentinel id is
+    still allowed a genuine zero. **If `~/.ape/prices.yaml` has a zero-rate row it
+    now stops taking effect** — run `ape costs coverage` to see it named.
+  - Docs: the [pipeline-spec reference](docs/reference/pipeline-spec.md) described `model`
+    as "passed to claude as `--model {value}`" — no longer true now that ape canonicalizes
+    before spawning. Corrected, with a new **Model values** section covering every accepted
+    spelling, why the bare family word is the recommendation, and that `opus[1m]` is
+    redundant on current models (their 1M window is the default) and meaningless on `haiku`.
+    Examples across the docs moved off `opus[1m]`.
+  - Docs: the [run-manifest reference](docs/reference/pipeline-run-manifest.md)
+    now states that a zero `cost_usd` beside non-zero `tokens_*` means *unpriced*,
+    not free, and what `telemetry_note` can say; `ape costs` joins the README
+    command table; `internal/cost/` joins the CLAUDE.md directory map.
+  - New: [How to keep cost pricing current](docs/how-to/keep-cost-pricing-current.md).
+
 ## v0.0.50 (2026-07-26)
 
 - **feat: a workspace runs the `ape` that provisioned it, not the one its image was

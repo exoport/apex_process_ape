@@ -15,6 +15,7 @@ Guidance for Claude Code when working in this repository.
 | `internal/pipeline/`      | Pipeline runner, embedded YAML specs, pre-flight checks.                                            |
 | `internal/tui/`           | Bubble Tea two-panel TUI.                                                                           |
 | `internal/output/`        | Output-format helpers (human / json / yaml).                                                        |
+| `internal/cost/`          | Transcript → USD: the embedded price table (`prices.yaml`), model-id normalization + family aliases, per-run rollups, price-table coverage, and `reprice`. Prices are hand-curated — there is no price API — so `prices.yaml` is data, not Go literals, and `make check-prices` gates it against the local Claude Code. |
 | `internal/updatecache/`   | Cache layer for the background update-check.                                                        |
 | `internal/trait/`         | Trait inspection helpers.                                                                           |
 | `internal/sandbox/`       | `ape sandbox` Kata VM workspaces (PLAN-16): profile, `~/.claude`/git composer, OCI-config + nerdctl command builder, CONNECT egress proxy, workspace registry. |
@@ -47,7 +48,8 @@ make pre-commit    # run all pre-commit hooks
 make snapshot      # goreleaser snapshot (no upload, no sign) — for verifying release builds
 make govulncheck   # scan for known vulnerabilities (pinned via bingo)
 make xcompile-windows  # cross-compile + cross-vet for Windows; catches portability compile errors
-make ci-local      # full pre-push gate: test + lint + vuln + xcompile-windows + snapshot
+make ci-local      # full pre-push gate: test + lint + vuln + prices + xcompile-windows + snapshot
+make check-prices  # verify the price table covers the models the local Claude Code emits
 make tools         # pre-install all bingo-pinned tools
 make tidy          # go mod tidy
 make clean         # remove build artifacts
@@ -65,7 +67,7 @@ make clean         # remove build artifacts
 
 Two-step verification flow — see `docs/how-to/pre-tag-release.md` for the full guide. The automated walkthrough lives in `.claude/skills/release/SKILL.md` (`/release vX.Y.Z`).
 
-1. **Local gate** — run `make ci-local`. Runs test + lint + vuln + Windows cross-compile + goreleaser snapshot. ~30–60 s. Catches per-platform compile errors and release-config regressions before push.
+1. **Local gate** — run `make ci-local`. Runs test + lint + vuln + price-table coverage + Windows cross-compile + goreleaser snapshot. ~30–60 s. Catches per-platform compile errors, release-config regressions, and a model price table that has gone stale against the locally-installed Claude Code.
 2. **Remote gate** — push commits to `main`:
    ```bash
    git push origin main

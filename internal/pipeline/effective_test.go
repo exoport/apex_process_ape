@@ -121,6 +121,12 @@ func TestStep_UnmarshalRecordsCommitSet(t *testing.T) {
 // TestSpec_Effective_ModelEffortAgentPrecedence covers PLAN-6 / C2
 // precedence for the Model, Effort, and Agent fields: step > stage >
 // pipeline > "". Effort follows the identical cascade as Model.
+//
+// wantModel values are the CANONICALIZED form: whichever level wins the
+// cascade, Effective then resolves a bare family word to that family's
+// current generation ("haiku" → "claude-haiku-4-5") and preserves any
+// context-window suffix. Precedence and canonicalization are orthogonal —
+// these cases pin the first while showing the second.
 func TestSpec_Effective_ModelEffortAgentPrecedence(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -141,7 +147,7 @@ stages:
     chain:
       - skill: foo
 `,
-			wantModel:  "opus[1m]",
+			wantModel:  "claude-opus-5[1m]",
 			wantEffort: "medium",
 			wantAgent:  "apex-agent-pm",
 		},
@@ -160,7 +166,7 @@ stages:
     chain:
       - skill: foo
 `,
-			wantModel:  "sonnet[1m]",
+			wantModel:  "claude-sonnet-5[1m]",
 			wantEffort: "high",
 			wantAgent:  "apex-agent-ux-designer",
 		},
@@ -182,7 +188,7 @@ stages:
         effort: low
         agent: apex-agent-dev
 `,
-			wantModel:  "haiku",
+			wantModel:  "claude-haiku-4-5",
 			wantEffort: "low",
 			wantAgent:  "apex-agent-dev",
 		},

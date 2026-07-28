@@ -11,9 +11,14 @@ import (
 )
 
 const (
-	testAgentPM     = "apex-agent-pm"
-	testPromptFlag  = "--prompt"
+	testAgentPM    = "apex-agent-pm"
+	testPromptFlag = "--prompt"
+	// testModelOpus1M is the bare-family spawn form a spec/flag carries.
 	testModelOpus1M = "opus[1m]"
+	// testModelOpus1MResolved is what Effective canonicalizes it to: a bare
+	// family word resolves to that family's current generation, keeping the
+	// context-window suffix.
+	testModelOpus1MResolved = "claude-opus-5[1m]"
 )
 
 // stubSpecSkills writes empty SKILL.md files under

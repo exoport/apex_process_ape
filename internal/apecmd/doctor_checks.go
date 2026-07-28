@@ -8,7 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/sandbox"
@@ -362,6 +364,28 @@ func checkPipelinesProject(_ context.Context, env doctorEnv) CheckResult {
 			Remediation: "Run `ape framework setup` or `ape framework update` to install the canonical pipelines.",
 		}
 	}
+	// Validate each spec's `model:` values while we are here. A typo in a
+	// checked-in spec otherwise stays invisible until a run reaches that step
+	// and claude rejects it — which can be many minutes in.
+	var modelIssues []string
+	for _, name := range names {
+		spec, err := pipeline.LoadSpec(name, env.ProjectRoot)
+		if err != nil {
+			continue // spec-load failures are the loader's story, not this check's
+		}
+		for _, w := range spec.ModelWarnings() {
+			modelIssues = append(modelIssues, fmt.Sprintf("%s → %s: %q", name, w.Location, w.Model))
+		}
+	}
+	if len(modelIssues) > 0 {
+		return CheckResult{
+			Status:  StatusWarn,
+			Message: fmt.Sprintf("%d pipelines at %s; unrecognized model(s): %s", len(names), dir, strings.Join(modelIssues, "; ")),
+			Remediation: "Those `model:` values are not ones ape recognizes — likely typos. Accepted forms: a bare " +
+				"family (sonnet, opus, haiku) for its current generation, or an explicit id " +
+				"(sonnet-5, claude-sonnet-5, opus[1m]). A model newer than this ape build is passed through unchanged.",
+		}
+	}
 	return CheckResult{
 		Status:  StatusOK,
 		Message: fmt.Sprintf("%d pipelines at %s: %s", len(names), dir, strings.Join(names, ", ")),
@@ -429,6 +453,72 @@ func checkApeUpdateAvailable(_ context.Context, _ doctorEnv) CheckResult {
 
 // checkKVMAvailable verifies /dev/kvm exists and is openable by the current
 // user (the kvm group). Kata microVMs need KVM.
+// checkPriceTableCoverage compares ape's built-in price table against the
+// model ids the locally-installed Claude Code is actually writing into its
+// transcripts.
+//
+// ape's prices are hand-curated (Anthropic publishes no price API) and
+// Claude Code releases on a schedule ape does not control, so a model id
+// can change under a shipped ape binary at any time. When it does, token
+// counts stay correct and cost silently goes to zero — the failure mode
+// that went unnoticed from 2026-07-14. A release-time check cannot catch a
+// model that ships afterwards; this one runs against whatever Claude Code
+// is installed at the moment it is invoked, which is the only place the
+// answer is current.
+//
+// WARN, not FAIL: an out-of-date price table misreports cost, it does not
+// stop any pipeline from running.
+func checkPriceTableCoverage(_ context.Context, env doctorEnv) CheckResult {
+	// Cached: a full sweep reads every transcript in the window — hundreds of
+	// megabytes on an active machine — and doctor reports rather than gates.
+	// `ape costs coverage` and `make check-prices` always sweep fresh.
+	rep, age, fromCache, err := cost.ObserveModelsCached(env.Home, time.Now().Add(-cost.DefaultCoverageWindow))
+	if err != nil {
+		return CheckResult{Status: StatusSkip, Message: fmt.Sprintf("could not read transcripts: %v", err)}
+	}
+	// Never let a cached verdict pass as a fresh one — keyed on fromCache, not
+	// on age, which is ~0 for a cache hit written moments ago.
+	cached := ""
+	if fromCache {
+		cached = fmt.Sprintf(" [cached %s ago; `ape costs coverage` re-checks]", age.Round(time.Second))
+	}
+	// A dropped override row is worth reporting even when no transcripts were
+	// found: it is a fact about the local config, not about observed usage.
+	badOverrides := cost.RejectedOverrides()
+	if !rep.Observed() && len(badOverrides) == 0 {
+		return CheckResult{
+			Status:  StatusSkip,
+			Message: "no Claude Code transcripts in the last 30 days — coverage not verified",
+		}
+	}
+	if rep.OK() && len(badOverrides) == 0 {
+		return CheckResult{
+			Status:  StatusOK,
+			Message: rep.Summary() + cached,
+		}
+	}
+	gaps := rep.Gaps()
+	names := make([]string, 0, len(gaps)+len(rep.AliasDrifts)+len(badOverrides))
+	names = append(names, badOverrides...)
+	for _, g := range gaps {
+		names = append(names, fmt.Sprintf("%s (%s, %d turns)", g.Model, g.Source, g.Turns))
+	}
+	for _, d := range rep.AliasDrifts {
+		names = append(names, fmt.Sprintf("alias %s→%s superseded by %s",
+			d.Alias, d.Target, strings.Join(d.Newer, "/")))
+	}
+	return CheckResult{
+		Status:  StatusWarn,
+		Message: strings.Join(names, ", ") + cached,
+		Remediation: "ape's price table does not cover these exactly, so reported costs are estimated or zero. " +
+			"An alias drift additionally means a bare `sonnet` / `opus` in a spec or --model resolves to a " +
+			"generation you are not running. Confirm rates at https://platform.claude.com/docs/en/about-claude/pricing, " +
+			"then upgrade ape, or persist rates locally with `ape costs update --from <file>` and " +
+			"`ape costs reprice --write`.",
+		FixCommand: "ape costs coverage",
+	}
+}
+
 func checkKVMAvailable(_ context.Context, env doctorEnv) CheckResult {
 	if env.OS != "linux" {
 		return CheckResult{Status: StatusInfo, Message: fmt.Sprintf("sandbox workspaces are Linux-only; not probed on %s", env.OS)}

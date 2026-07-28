@@ -16,7 +16,7 @@ The rc-tag pre-release gate that earlier versions of this skill used was dropped
 
 - MANDATORY: Execute ALL steps in the EXECUTION section IN EXACT ORDER
 - HALT immediately at any HALT-condition; state the reason and what to fix before the user re-runs — this applies identically in autonomous mode, HALT conditions are never skipped, only confirmation gates are
-- ASK the user for confirmation at every Phase boundary where specified — never skip a confirmation gate — UNLESS `{autonomous}` is true (Phase 0), in which case skip every confirmation gate (Phases 1h, 3, 5) and proceed straight through, still announcing each step as you take it
+- ASK the user for confirmation at every Phase boundary where specified — never skip a confirmation gate — UNLESS `{autonomous}` is true (Phase 0), in which case skip every confirmation gate (Phases 1i, 3, 5) and proceed straight through, still announcing each step as you take it
 - DO NOT push final tags or create GitHub Releases without confirming with the user first, UNLESS the user's invocation explicitly requested autonomous mode (the literal word "autonomous" in the skill arguments) — that is the standing authorization for this run
 - DO NOT amend published commits or tags
 - DO NOT create rc/pre-release tags (`vX.Y.Z-rcN`). The rc cycle has been removed
@@ -119,7 +119,26 @@ git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-' || true
 
 If output is non-empty: HALT. Message: "Pre-release tag(s) point at HEAD: <list>. The rc cycle was dropped — these tags can confuse goreleaser. Delete them (`git tag -d <tag> && git push origin :refs/tags/<tag>`) before releasing."
 
-#### 1h — Report pre-flight summary
+#### 1h — Price table covers the locally-running Claude Code
+
+ape's model price table is hand-curated — Anthropic publishes no price API — and Claude Code ships on a schedule this repo does not control. A model id can therefore change under a released ape binary at any time, and when it does, token counts stay correct while every cost silently reports $0.00. That is exactly what happened between 2026-07-14 and 2026-07-27, when `opus[1m]` began resolving to `claude-opus-5` and the table had no such row.
+
+This check reads the transcripts the Claude Code on THIS machine is writing right now and verifies every model id it finds has an exact rate:
+
+```bash
+make check-prices
+```
+
+HALT if the exit code is non-zero. Message: "The price table does not cover the models the local Claude Code is emitting. Run `ape costs coverage` for the gap, confirm each rate at https://platform.claude.com/docs/en/about-claude/pricing, add the rows to `internal/cost/prices.yaml`, and commit before releasing."
+
+Two outcomes that are **not** failures:
+
+- **"no Claude Code transcripts found in the window"** — the check exits 0 and reports a skip. Say so explicitly in the pre-flight summary rather than reporting it as passed; coverage was not verified, only unverifiable.
+- A model reported as **`family`** rather than `exact` — still a HALT under `--strict`, because a family estimate is a guess at the right order of magnitude, not a published rate.
+
+> This gate can only prove the table is current **as of now**. A Claude Code release the day after this tag can still invalidate it — that is inherent, not a gap in the check. The durable protections are the ones that run continuously: every step's `telemetry_note`, the `cost.price_table_coverage` doctor check, and `ape costs reprice` to repair the record afterwards.
+
+#### 1i — Report pre-flight summary
 
 Display to the user:
 
@@ -129,6 +148,7 @@ Pre-flight checks passed:
   repo:      {repo_slug}
   HEAD:      <output of `git rev-parse --short HEAD`>
   CHANGELOG: <first 80 chars of the matching CHANGELOG line>
+  prices:    <"N models exactly priced" | "SKIPPED — no local transcripts">
 ```
 
 If `{autonomous}` is false: ask "Proceed with `make ci-local`? (this takes ~30–60 s)" — wait for confirmation.

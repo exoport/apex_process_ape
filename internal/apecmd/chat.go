@@ -81,14 +81,14 @@ error (no _apex/config.yaml, bad cwd).`,
 				fmt.Fprintf(os.Stderr, "Error: ape chat requires a project root with _apex/config.yaml; not found at %s\n", cfgPath)
 				os.Exit(ExitUsage)
 			}
-			if err := runChat(cmd.Context(), projectRoot, modelFlag, effortFlag, ignoreProjectSettings); err != nil {
+			if err := runChat(cmd.Context(), projectRoot, resolveModelArg(modelFlag), effortFlag, ignoreProjectSettings); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 				os.Exit(ExitRunFailed)
 			}
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&modelFlag, "model", "", "Initial claude model (e.g. \"opus[1m]\"); falls back to claude's default when empty.")
+	cmd.Flags().StringVar(&modelFlag, "model", "", "Initial claude model. A bare family (sonnet, opus, haiku) resolves to its current generation; sonnet-5 / opus[1m] pin explicitly. Empty falls back to claude's default.")
 	cmd.Flags().StringVar(&effortFlag, "effort", "", "Reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Defaults to claude's native effort when unset.")
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root (default: current working directory).")
 	cmd.Flags().BoolVar(&ignoreProjectSettings, "ignore-project-settings", false, "Tell claude to skip project + local .claude/settings*.json.")

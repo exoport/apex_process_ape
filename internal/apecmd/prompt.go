@@ -164,7 +164,7 @@ failed · 2 usage or preflight error (no _apex/config.yaml, unresolved
 				text:                  text,
 				handoff:               handoffFlag,
 				agent:                 agentFlag,
-				model:                 modelFlag,
+				model:                 modelFlag, // canonicalized in runPromptCore
 				effort:                effortFlag,
 				workflow:              workflowFlag,
 				ultracode:             ultracodeFlag,
@@ -179,7 +179,7 @@ failed · 2 usage or preflight error (no _apex/config.yaml, unresolved
 	}
 	cmd.Flags().StringVar(&handoffFlag, "handoff", "", "Handoff document to seed the session with (mutually exclusive with the positional prompt)")
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "Framework agent fronting the session: /<agent> --autonomous -- <prompt>")
-	cmd.Flags().StringVar(&modelFlag, "model", "", "Claude model for the session (e.g. \"opus[1m]\")")
+	cmd.Flags().StringVar(&modelFlag, "model", "", "Claude model. A bare family (sonnet, opus, haiku) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly")
 	cmd.Flags().StringVar(&effortFlag, "effort", "", "Reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Default xhigh when unset.")
 	cmd.Flags().BoolVar(&workflowFlag, "workflow", false, "Append a directive to run the task through a Claude Code workflow")
 	cmd.Flags().BoolVar(&ultracodeFlag, "ultracode", false, "Prepend the ultracode keyword (session runs workflows by default)")
@@ -290,6 +290,12 @@ func runPrompt(ctx context.Context, o promptOptions) error {
 // ExitUsage (preflight), ExitREPLNotReady (REPL never ready), or the mapping
 // of the wait outcome via promptStatus.
 func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, error) {
+	// Canonicalize here rather than at the flag: `ape script`'s prompt runner
+	// builds promptOptions directly, so the choke point is the only place that
+	// covers every entry point. Idempotent, so a caller that already resolved
+	// the value loses nothing.
+	o.model = resolveModelArg(o.model)
+
 	// Preflight (exit 2): agent must resolve; handoff/prompt derivation
 	// must succeed. Detected before any claude process spawns.
 	if o.agent != "" {

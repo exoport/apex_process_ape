@@ -33,7 +33,7 @@ stages:
     chain:
       - skill: apex-create-prd
         agent: apex-agent-pm
-        model: "opus[1m]"
+        model: opus
   shard-prd:
     chain:
       - skill: apex-shard-doc
@@ -52,7 +52,7 @@ stages:
 | ------------- | -------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `skill`       | string         | yes      | Name of the skill to invoke (e.g. `apex-create-prd`). Empty/missing is rejected.                                                                                                                        |
 | `agent`       | string         | no       | When set, the call goes through PAT-25 agent passthrough: `/{agent} --autonomous -- {skill} --autonomous`. When unset, the call is direct: `/{skill} --autonomous --no-commit`.                         |
-| `model`       | string         | no       | Model passed to claude as `--model {value}`, e.g. `"opus[1m]"`. When unset, claude uses its default.                                                                                                    |
+| `model`       | string         | no       | Model for the step. **Canonicalized before spawn**, not passed through verbatim: a bare family word (`opus`, `sonnet`, `haiku`, `fable`) resolves to that family's current generation, case and separators are folded (`Claude_Sonnet_4.6` → `claude-sonnet-4-6`), and a `[1m]`-style context suffix is preserved. An explicit id (`claude-sonnet-5`) is honoured as written. A value ape cannot attribute is passed to claude unchanged **with a warning** — claude, not ape, decides which models exist. When unset, claude uses its default. See [Model values](#model-values).                                    |
 | `effort`      | string         | no       | Reasoning effort exported to claude via `CLAUDE_CODE_EFFORT_LEVEL`: `low`, `medium`, `high`, `xhigh`, or `max`. Propagates to sub-agents the step spawns. When unset at every level, the runner falls back to the `--effort` flag, then the built-in default **`xhigh`**.                                    |
 | `args`        | string         | no       | Extra literal CLI flags appended to the skill invocation, whitespace-separated. Example: `"--doc prd"`. Use this for fixed flags only.                                                                  |
 | `prompt_flag` | string         | no       | When set together with the runner's `--prompt` flag, ape appends `<prompt_flag> <prompt-value>` to the skill argv. Currently used by `apex-create-epics-and-stories` to receive a user-supplied prompt. |
@@ -91,6 +91,34 @@ A step normally ends when the bridge fires its Stop hook. Two backstops protect 
 The poll cadence is 30s for the first hour of a step, then relaxes to 60s for the remainder (a long-lived step's progress signals change slowly at that scale). When either backstop trips, the runner emits a structured diagnostic — which limit fired, whether the child `claude` process is still alive, and each progress source's age — instead of a bare timeout error.
 
 `ape task` and `ape prompt` share the same backstop and flags; see [How to tune long-running steps](../how-to/tune-long-running-steps.md).
+
+### Model values
+
+`model` is accepted at pipeline, stage, and step level with the usual
+precedence (step > stage > pipeline). Every level goes through the same
+canonicalization, and so does `--model` on `ape pipeline` / `ape task` /
+`ape prompt` / `ape chat`.
+
+| Write | Resolves to | Notes |
+|---|---|---|
+| `opus` · `Opus` · `claude-opus` | the Opus family's current generation | **Recommended.** Survives a model release without editing the spec. |
+| `sonnet` · `haiku` · `fable` | that family's current generation | Same. `mythos` exists for Project Glasswing only. |
+| `claude-sonnet-5` · `sonnet-5` | `claude-sonnet-5` | Pins the generation. Use when you need reproducibility. |
+| `claude-sonnet-4.6` · `claude_sonnet_4_6` | `claude-sonnet-4-6` | Separators and case are folded. |
+| `opus[1m]` | `claude-opus-5[1m]` | Suffix preserved. **Redundant on current models** — the 1M window is their default — and meaningless on `haiku`, which caps at 200K. |
+| anything else | unchanged, with a warning | A model newer than your `ape` build still runs. A typo is surfaced before the spawn. |
+
+Prefer the bare family word. Which generation each resolves to lives in the
+`aliases:` block of `internal/cost/prices.yaml`; if it falls behind what the
+locally-installed Claude Code is running, `ape costs coverage` and `ape doctor`
+report it as **alias drift** and `make check-prices` fails the release gate.
+
+Avoid dated snapshot ids (`claude-haiku-4-5-20251001`): ape normalizes them for
+pricing, but they pin the spec to a snapshot with no upgrade path.
+
+`effort` is usually the better cost lever than downgrading the model — it
+scales deliberation without changing capability. See the `effort` row above for
+the precedence chain and the `xhigh` default.
 
 ## Commits
 
@@ -151,7 +179,7 @@ stages:
     chain:
       - skill: apex-create-prd
         agent: apex-agent-pm
-        model: "opus[1m]"
+        model: opus
   shard-prd:
     chain:
       - skill: apex-shard-doc

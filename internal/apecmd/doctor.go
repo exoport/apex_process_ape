@@ -136,6 +136,7 @@ var allChecks = []doctorCheck{
 	{Name: "operating_rules.orchestrator_skill", Required: true, Run: checkOrchestratorSkill},
 	{Name: "permissions.home_claude", Run: checkPermissionsHomeClaude},
 	{Name: "ape.update_available", Run: checkApeUpdateAvailable},
+	{Name: "cost.price_table_coverage", Run: checkPriceTableCoverage},
 	{Name: "kvm.available", Run: checkKVMAvailable},
 	{Name: "containerd.running", Run: checkContainerdRunning},
 	{Name: "kata.runtime", Run: checkKataRuntime},

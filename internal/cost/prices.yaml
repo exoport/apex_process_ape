@@ -1,0 +1,139 @@
+# Built-in Claude model price table for `ape`.
+#
+# Embedded into the binary via go:embed (see prices.go). Keeping the table
+# as data rather than Go literals means a price correction can ship as a
+# file — `ape costs update --from <this-file>` persists it to
+# ~/.ape/prices.yaml, which wins over the built-in table, with no new ape
+# release required.
+#
+# Source: https://platform.claude.com/docs/en/about-claude/pricing
+# All rates are USD per 1M tokens. The 1.25x / 2.00x / 0.10x cache
+# multipliers live in formula.go and apply on top of base_input.
+#
+# WHEN A NEW MODEL SHIPS: add its exact id under `prices:` and repoint the
+# family alias under `aliases:`. Until you do, `families:` prices it as a
+# flagged estimate and every surface that reports cost says so — it is a
+# safety net, not a substitute for the exact row. `make check-prices`
+# fails the release gate while any locally-observed model is inexact.
+
+version: 1
+updated: "2026-07-28"
+
+# Exact per-model rates, keyed by the `model` field on each assistant-line
+# `usage` block in the session JSONL (after NormalizeModel).
+prices:
+  # Claude 5 family — top tier.
+  claude-fable-5:
+    base_input: 10.00
+    output: 50.00
+  claude-mythos-5:
+    base_input: 10.00
+    output: 50.00
+  # Claude Opus 5 — same tier as Opus 4.5+.
+  # NOTE: fast mode (speed: "fast") bills at 10.00 / 50.00. The transcript
+  # usage block carries no speed marker, so fast-mode turns price low here.
+  claude-opus-5:
+    base_input: 5.00
+    output: 25.00
+  # Claude Sonnet 5 — the STANDARD (post-intro) rate. The 2.00/10.00 intro
+  # window through 2026-08-31 is applied date-aware via dated_prices; this
+  # entry is the conservative fallback a dateless Lookup returns (PLAN-10 D3).
+  claude-sonnet-5:
+    base_input: 3.00
+    output: 15.00
+  # Claude Opus 4.5+ — current pricing tier.
+  claude-opus-4-8:
+    base_input: 5.00
+    output: 25.00
+  claude-opus-4-7:
+    base_input: 5.00
+    output: 25.00
+  claude-opus-4-6:
+    base_input: 5.00
+    output: 25.00
+  claude-opus-4-5:
+    base_input: 5.00
+    output: 25.00
+  # Claude Opus 4 / 4.1 — legacy pricing (half the input rate and one third
+  # the output rate arrived with Opus 4.5).
+  claude-opus-4-1:
+    base_input: 15.00
+    output: 75.00
+  claude-opus-4:
+    base_input: 15.00
+    output: 75.00
+  # Claude Sonnet 4.5+.
+  claude-sonnet-4-6:
+    base_input: 3.00
+    output: 15.00
+  claude-sonnet-4-5:
+    base_input: 3.00
+    output: 15.00
+  claude-sonnet-4:
+    base_input: 3.00
+    output: 15.00
+  # Claude Haiku 4.5.
+  claude-haiku-4-5:
+    base_input: 1.00
+    output: 5.00
+  # Claude Haiku 3.5 — retired on the first-party API but still reachable
+  # via Bedrock / Vertex; keep for those captures.
+  claude-haiku-3-5:
+    base_input: 0.80
+    output: 4.00
+  # `<synthetic>` is Claude Code's sentinel for an assistant message it
+  # generated locally rather than sampling from a model — an interrupt
+  # notice, an injected error. Its usage block is all zeros, so this is a
+  # REAL zero, not a missing price. Listing it explicitly is what keeps it
+  # out of the unpriced-model report.
+  "<synthetic>":
+    base_input: 0.00
+    output: 0.00
+
+# Promotional / intro windows. Checked before the standard table when the
+# turn carries a timestamp; the first entry whose `until` is at/after the
+# turn wins. A dateless lookup never matches a window, so it stays on the
+# conservative standard rate (PLAN-10 D3).
+dated_prices:
+  claude-sonnet-5:
+    - until: 2026-08-31T23:59:59Z
+      base_input: 2.00
+      output: 10.00
+
+# Claude's short spawn-time aliases → the full model id the CLI currently
+# resolves them to. The transcript records the resolved id, so this hop only
+# matters for callers that log the alias form (a spec's `model:` field, an
+# `opus[1m]` spawn argument). An alias that goes stale now degrades to its
+# family tier rather than to zero.
+aliases:
+  opus: claude-opus-5
+  sonnet: claude-sonnet-5
+  haiku: claude-haiku-4-5
+  fable: claude-fable-5
+  mythos: claude-mythos-5
+
+# Family tiers — the estimate of last resort. Consulted only when no exact
+# row, override, or dated window matches, so that a model id that appears
+# before the table catches up prices approximately instead of at zero. A
+# turn priced this way is tagged PriceFamily and reported as an estimate
+# everywhere cost is surfaced; it is never presented as exact.
+#
+# Matching (see familyTier.matches): the bare family word, or the
+# `claude-<family>-...` prefix. `fictional-model` matches nothing and stays
+# unpriced, which is the correct answer for an id we know nothing about.
+families:
+  - family: fable
+    base_input: 10.00
+    output: 50.00
+  - family: mythos
+    base_input: 10.00
+    output: 50.00
+  - family: opus
+    base_input: 5.00
+    output: 25.00
+  - family: sonnet
+    base_input: 3.00
+    output: 15.00
+  - family: haiku
+    base_input: 1.00
+    output: 5.00

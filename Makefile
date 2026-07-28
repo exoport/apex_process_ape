@@ -112,8 +112,18 @@ apescript-symbols:  ## Regenerate the yaegi symbol table for the public apescrip
 docs-check:  ## Verify docs/ links resolve and every doc is reachable from docs/README.md.
 	python3 scripts/check-docs-links.py docs
 
+.PHONY: check-prices
+check-prices:  ## Verify the built-in price table covers the models the locally-installed Claude Code emits.
+	@# ape's price table is hand-curated (no price API exists) and Claude Code
+	@# ships independently, so a model id can change under a released ape at
+	@# any time — tokens keep counting, cost silently goes to zero. This gate
+	@# reads the transcripts the LOCAL Claude Code is writing, so it is only
+	@# meaningful on a developer machine. With no transcripts (CI) it prints a
+	@# skip and exits 0: absence of evidence is not coverage.
+	go run ./cmd/ape costs coverage --strict
+
 .PHONY: ci-local
-ci-local: test lint govulncheck docs-check xcompile-windows snapshot ## Run every gate CI + release would run (Linux + Windows cross-compile + snapshot).
+ci-local: test lint govulncheck docs-check check-prices xcompile-windows snapshot ## Run every gate CI + release would run (Linux + Windows cross-compile + snapshot).
 	@echo
 	@echo "Local CI gates green. Safe to push + tag."
 	@echo "Catches: Linux test failures, lint, vuln, Windows compile-time portability bugs, release-config regressions."

@@ -21,7 +21,7 @@ code 2 before any claude spawn.
 ```bash
 ape task apex-create-prd \
   --agent apex-agent-pm \
-  --model "opus[1m]" \
+  --model opus \
   --prompt "a greeter CLI" --prompt-flag --prompt
 ```
 
@@ -74,7 +74,7 @@ Progress streams to stderr; stdout carries only the result envelope:
 {
   "skill": "apex-create-prd",
   "agent": "apex-agent-pm",
-  "model": "opus[1m]",
+  "model": "claude-opus-5",
   "success": true,
   "exit_code": 0,
   "duration_seconds": 142.3,

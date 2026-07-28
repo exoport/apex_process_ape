@@ -91,6 +91,7 @@ ape doctor --output-format json | jq -e '.checks[] | select(.name == "ape.update
 | `framework.metadata WARN`              | Repo doesn't have `_apex/framework.yaml` committed                       | Run `ape framework setup` in a prior step or commit the metadata.                                     |
 | `operating_rules.fragment FAIL`        | A project that manages operating rules lost `_apex/apex-operating-rules.md` or the `CLAUDE.md` managed import | Run `ape framework update`. (Legacy / older-framework installs report WARN, not FAIL — see below.)   |
 | `permissions.home_claude WARN`         | Container runs as a user without write access to `~/.claude`            | Mount or create the dir owned by the runner UID.                                                      |
+| `cost.price_table_coverage SKIP`       | No Claude Code transcripts on the runner — the price table cannot be checked against real usage | Expected in CI, and SKIP never fails `--strict`. This check is meaningful on a developer machine; the release gate runs it as `make check-prices`. |
 
 ## Operating-rules checks (required, but self-gating)
 

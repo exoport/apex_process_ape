@@ -151,6 +151,13 @@ func ScanStep(p ScanParams) *Telemetry {
 	}
 	snapshot(p.GetRunLog, p.Source)
 
+	// Pricing health accumulates across the main transcript and every
+	// sub-agent one, and is folded into Note at the end. Deliberately NOT
+	// routed through note(): that returns a ZEROED Telemetry, and an
+	// unpriced model must never cost the caller its (correct) token counts.
+	pricing := cost.ScanResult{}
+	mergePricingHealth(&pricing, res)
+
 	mainDelta := subTotals(res.Totals, prev)
 	mainByModel := byModelDelta(res.ByModel, prevByModel)
 
@@ -211,6 +218,7 @@ func ScanStep(p ScanParams) *Telemetry {
 		if subErr != nil {
 			continue
 		}
+		mergePricingHealth(&pricing, subRes)
 		parent := cd.parent
 		if parent == "" {
 			parent = p.ParentSessionID
@@ -237,12 +245,49 @@ func ScanStep(p ScanParams) *Telemetry {
 	if tele.Totals.NumTurns == 0 {
 		// Distinguish a partial file (lines but no complete assistant
 		// turn) from an empty one.
-		tele.Note = fmt.Sprintf(
+		appendNote(tele, fmt.Sprintf(
 			"transcript scan processed zero assistant turns (path %q, %d line(s))",
 			p.Source, countLines(p.Source),
-		)
+		))
 	}
+	// A model with no price yields correct tokens and a $0 cost. That must
+	// be said out loud on the step that produced it — the 2026-07-14
+	// pricing gap went 13 days unnoticed precisely because nothing did.
+	appendNote(tele, pricing.PricingNote())
 	return tele
+}
+
+// appendNote joins a breadcrumb onto Telemetry.Note instead of replacing
+// it. Note is single-valued and more than one condition can hold at once
+// (zero turns AND an unpriced model); an assignment would silently drop
+// whichever diagnostic ran second.
+func appendNote(t *Telemetry, msg string) {
+	if msg == "" {
+		return
+	}
+	if t.Note == "" {
+		t.Note = msg
+		return
+	}
+	t.Note += "; " + msg
+}
+
+// mergePricingHealth folds one scan's unpriced/estimated model counts into
+// a running tally. Only the two health maps are merged — totals are
+// aggregated separately with the double-count guard.
+func mergePricingHealth(dst *cost.ScanResult, src cost.ScanResult) {
+	for model, n := range src.UnpricedModels {
+		if dst.UnpricedModels == nil {
+			dst.UnpricedModels = map[string]int{}
+		}
+		dst.UnpricedModels[model] += n
+	}
+	for model, n := range src.EstimatedModels {
+		if dst.EstimatedModels == nil {
+			dst.EstimatedModels = map[string]int{}
+		}
+		dst.EstimatedModels[model] += n
+	}
 }
 
 // snapshot copies a scanned transcript into the run dir so the run's

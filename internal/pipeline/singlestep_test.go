@@ -38,7 +38,7 @@ func TestNewSingleStepSpecEffective(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Effective: %v", err)
 	}
-	if model != testModelOpus1M || agent != testAgentPM {
+	if model != testModelOpus1MResolved || agent != testAgentPM {
 		t.Fatalf("Effective returned model=%q agent=%q", model, agent)
 	}
 	if effort != "xhigh" {

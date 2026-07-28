@@ -125,7 +125,7 @@ preflight error · 3 REPL never became ready (last pane on stderr).`,
 			opts := taskOptions{
 				skill:                 args[0],
 				agent:                 agentFlag,
-				model:                 modelFlag,
+				model:                 resolveModelArg(modelFlag),
 				effort:                effortFlag,
 				args:                  argsFlag,
 				prompt:                promptFlag,
@@ -150,7 +150,7 @@ preflight error · 3 REPL never became ready (last pane on stderr).`,
 		},
 	}
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "Framework agent (slash-command) fronting the skill: /<agent> --autonomous -- <skill> ...")
-	cmd.Flags().StringVar(&modelFlag, "model", "", "Claude model for the session (e.g. \"opus[1m]\")")
+	cmd.Flags().StringVar(&modelFlag, "model", "", "Claude model. A bare family (sonnet, opus, haiku) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly")
 	cmd.Flags().StringVar(&effortFlag, "effort", "", "Reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Default xhigh when unset.")
 	cmd.Flags().StringVar(&argsFlag, "args", "", "Verbatim skill args appended to the invocation (whitespace-separated)")
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Run prompt forwarded via --prompt-flag (same semantics as pipeline --prompt)")

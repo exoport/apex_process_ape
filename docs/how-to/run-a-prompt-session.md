@@ -67,7 +67,7 @@ They compose (`--ultracode` subsumes `--workflow` in practice; passing
 both is allowed and harmless):
 
 ```bash
-ape prompt "big refactor" --ultracode --workflow --model "opus[1m]"
+ape prompt "big refactor" --ultracode --workflow --model opus
 # delivers: ultracode big refactor Run this task using a Claude Code workflow.
 ```
 

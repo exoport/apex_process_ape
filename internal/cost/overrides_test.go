@@ -3,7 +3,9 @@ package cost
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadOverridesFrom_HappyPath(t *testing.T) {
@@ -26,11 +28,15 @@ func TestLoadOverridesFrom_HappyPath(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("len = %d, want 2", len(got))
 	}
-	if got["claude-opus-4-7"].BaseInput != 5.00 {
-		t.Errorf("opus input = %f, want 5", got["claude-opus-4-7"].BaseInput)
+	if got["claude-opus-4-7"].Price.BaseInput != 5.00 {
+		t.Errorf("opus input = %f, want 5", got["claude-opus-4-7"].Price.BaseInput)
 	}
-	if got["custom-model"].Output != 30.00 {
-		t.Errorf("custom-model output = %f, want 30", got["custom-model"].Output)
+	if got["custom-model"].Price.Output != 30.00 {
+		t.Errorf("custom-model output = %f, want 30", got["custom-model"].Price.Output)
+	}
+	// A row without effective_from applies unconditionally.
+	if !got["claude-opus-4-7"].From.IsZero() {
+		t.Errorf("undated row gained a date: %v", got["claude-opus-4-7"].From)
 	}
 }
 
@@ -83,8 +89,8 @@ func TestLookup_OverrideWinsOverBuiltin(t *testing.T) {
 	// don't pick up our $99 opus rate.
 	t.Cleanup(resetOverrideCache)
 
-	override := map[string]ModelPrice{
-		"claude-opus-4-7": {BaseInput: 99.00, Output: 200.00},
+	override := map[string]OverrideEntry{
+		"claude-opus-4-7": {Price: ModelPrice{BaseInput: 99.00, Output: 200.00}},
 	}
 	if err := SaveOverrides(override); err != nil {
 		t.Fatalf("SaveOverrides: %v", err)
@@ -95,5 +101,126 @@ func TestLookup_OverrideWinsOverBuiltin(t *testing.T) {
 	}
 	if got.BaseInput != 99.00 {
 		t.Errorf("override ignored: BaseInput=%f, want 99", got.BaseInput)
+	}
+}
+
+// TestOverrideEffectiveFromSurvivesSaveRoundTrip locks the load → save
+// round-trip. LoadOverridesFrom used to validate effective_from and then
+// discard it, so `ape costs update --from a-dated-file` persisted an
+// override that applied unconditionally — silently repricing history the
+// file explicitly excluded.
+func TestOverrideEffectiveFromSurvivesSaveRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	resetOverrideCache := func() {
+		overridesMu.Lock()
+		loadedOverrides = nil
+		overridesLoaded = false
+		overridesMu.Unlock()
+	}
+	resetOverrideCache()
+	t.Cleanup(resetOverrideCache)
+
+	src := filepath.Join(dir, "src.yaml")
+	if err := os.WriteFile(src, []byte(`prices:
+  claude-opus-4-7:
+    base_input: 99.00
+    output: 990.00
+    effective_from: 2026-10-01
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadOverridesFrom(src)
+	if err != nil {
+		t.Fatalf("LoadOverridesFrom: %v", err)
+	}
+	if loaded["claude-opus-4-7"].From.IsZero() {
+		t.Fatal("effective_from dropped on load")
+	}
+	if err := SaveOverrides(loaded); err != nil {
+		t.Fatalf("SaveOverrides: %v", err)
+	}
+
+	before := time.Date(2026, 9, 15, 0, 0, 0, 0, time.UTC)
+	after := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	if p, _ := LookupAt("claude-opus-4-7", before); p.BaseInput == 99.00 {
+		t.Error("persisted override applied before its effective_from — the date was lost on save")
+	}
+	if p, _ := LookupAt("claude-opus-4-7", after); p.BaseInput != 99.00 {
+		t.Error("persisted override did not apply at/after its effective_from")
+	}
+}
+
+// TestPriceRowValidationRejectsTypos locks the guard against reintroducing a
+// silent zero through a misspelled key in the table itself.
+func TestPriceRowValidationRejectsTypos(t *testing.T) {
+	cases := map[string]string{
+		"misspelled base_input": "prices:\n  claude-typo-5:\n    base_imput: 5.0\n    output: 25.0\n",
+		"both zero":             "prices:\n  claude-typo-5:\n    base_input: 0\n    output: 0\n",
+		"output only":           "prices:\n  claude-typo-5:\n    base_input: 5.0\n    output: 0\n",
+	}
+	for name, doc := range cases {
+		if _, err := parsePriceTable([]byte(doc)); err == nil {
+			t.Errorf("%s: accepted a zero rate; a typo would price those tokens at $0", name)
+		}
+	}
+	// A sentinel id is allowed a genuine zero.
+	if _, err := parsePriceTable([]byte("prices:\n  \"<synthetic>\":\n    base_input: 0\n    output: 0\n")); err != nil {
+		t.Errorf("sentinel row rejected: %v", err)
+	}
+}
+
+// TestInvalidOverrideRowIsDroppedNotApplied locks the read path. An override
+// wins over the built-in table, so honouring a typo'd row would price that
+// model at $0 — the original silent-zero bug arriving through the override file
+// rather than the table. Dropping the row falls back to the good built-in rate.
+func TestInvalidOverrideRowIsDroppedNotApplied(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+	reset := func() {
+		overridesMu.Lock()
+		loadedOverrides = nil
+		overridesLoaded = false
+		rejectedOverrides = nil
+		overridesMu.Unlock()
+	}
+	reset()
+	t.Cleanup(reset)
+
+	if err := os.MkdirAll(filepath.Join(dir, ".ape"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// `base_imput` is a typo: it unmarshals to base_input == 0.
+	doc := "prices:\n" +
+		"  claude-opus-4-7:\n    base_imput: 5.0\n    output: 25.0\n" +
+		"  claude-sonnet-4-6:\n    base_input: 7.5\n    output: 30.0\n"
+	if err := os.WriteFile(filepath.Join(dir, ".ape", "prices.yaml"), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The typo'd row must NOT apply — the built-in $5/$25 stands.
+	p, ok := Lookup("claude-opus-4-7")
+	if !ok {
+		t.Fatal("expected the built-in rate to remain available")
+	}
+	if p.BaseInput == 0 {
+		t.Error("a zero-rate override was applied; that model would report as free")
+	}
+	if p.BaseInput != 5.00 {
+		t.Errorf("BaseInput = %v, want the built-in 5.00", p.BaseInput)
+	}
+	// A valid row alongside it still applies — one bad row must not void the file.
+	if v, _ := Lookup("claude-sonnet-4-6"); v.BaseInput != 7.5 {
+		t.Errorf("valid override not applied: BaseInput = %v, want 7.5", v.BaseInput)
+	}
+	// And the rejection is reported rather than lost.
+	bad := RejectedOverrides()
+	if len(bad) != 1 {
+		t.Fatalf("RejectedOverrides() = %v, want exactly one entry", bad)
+	}
+	if !strings.Contains(bad[0], "claude-opus-4-7") {
+		t.Errorf("rejection reason %q does not name the offending model", bad[0])
 	}
 }

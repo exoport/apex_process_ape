@@ -34,7 +34,7 @@ Since v2, additional fields have been added **without bumping the schema version
 - `tokens_cache_creation_5m` / `tokens_cache_creation_1h` on `totals`, each step, and every `model_usage` entry — the ephemeral cache-write split (PLAN-10 D1, ape v0.0.37+). `tokens_cache_creation` is unchanged and stays the **sum** of the two tiers, which price differently (5m ≈ 1.25× base input, 1h ≈ 2.00×); the split fields simply expose that breakdown. Consumers that only track total cache creation keep reading `tokens_cache_creation` and ignore the split.
 - per-step `sessions[]` — per-claude-session usage: the step's main REPL session plus any sub-agent (Agent tool) sessions observed via `SubagentStart` / `SubagentStop`.
 - `claude_version` — the resolved `claude --version` at run start (best-effort).
-- per-step `telemetry_note` — a diagnosability breadcrumb explaining why numeric fields are zero.
+- per-step `telemetry_note` — a diagnosability breadcrumb explaining why a numeric field is zero or approximate. Two causes: the transcript was unavailable / had no complete assistant turn (everything zero), or a model had no price in the table (tokens and turns correct, `cost_usd` a lower bound). More than one cause is joined with `; `.
 
 Forward-compatible: v2 readers should accept v1 manifests (the new fields are optional `omitempty`) and treat unrecognized additive fields as opaque.
 
@@ -147,6 +147,8 @@ stages:
 ### Metric provenance
 
 Since v0.0.36 every run drives an interactive `claude` REPL inside a PTY (see [why-pty-only.md](../explanation/why-pty-only.md)), so there is no per-step terminal `result` event to read. Per-step `cost_usd`, `tokens_*`, `num_turns`, `model_usage`, and `sessions[]` are derived by scanning the session transcript (`internal/cost/`). Transcript scanning is the single cost source, and it attributes usage per model and per claude session (including sub-agent sessions spawned via the Agent tool). If the transcript is unavailable at scan time, the numeric fields are zero, `telemetry_note` explains why, and the step still appears with the correct duration and status.
+
+Cost and tokens can also disagree in the other direction. Pricing uses a table compiled into `ape` (`internal/cost/prices.yaml`), and Claude Code can introduce a model id that table does not carry. When that happens the token counts stay exact while `cost_usd` is either **estimated** from the model's family tier or **zero** — and the step's `telemetry_note` says which, naming the model and the turn count. A zero `cost_usd` beside non-zero `tokens_*` therefore means *unpriced*, not free. `ape costs reprice` recomputes those figures from the stored per-model tokens once the table is corrected; see [how to keep cost pricing current](../how-to/keep-cost-pricing-current.md).
 
 ### Per-model breakdown and `ape costs`
 

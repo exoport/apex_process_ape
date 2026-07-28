@@ -8,7 +8,7 @@ This page documents every field, the [precedence rules](#precedence), and migrat
 
 ```yaml
 name: design # required; must equal the filename without .yaml
-model: "opus[1m]" # pipeline-level default (PLAN-6 / C2)
+model: opus # pipeline-level default (PLAN-6 / C2); bare family → current generation
 agent: apex-agent-pm # pipeline-level default (PLAN-6 / C2)
 commit: true # pipeline-level commit policy (PLAN-6 / C2)
 requires: # optional pre-flight check
@@ -34,7 +34,7 @@ Accepts the same shapes as PLAN-4's step-level `commit`:
 ```yaml
 stages:
   create-prd:
-    model: "opus[1m]" # stage-level override (PLAN-6 / C2)
+    model: sonnet # stage-level override (PLAN-6 / C2)
     agent: apex-agent-pm # stage-level override (PLAN-6 / C2)
     commit: "feat: PRD" # stage-level override (PLAN-6 / C2)
     chain:
@@ -50,7 +50,7 @@ Stage-level `model` / `agent` / `commit` override the pipeline-level defaults fo
 chain:
   - skill: apex-create-prd # required
     agent: apex-agent-pm # optional; overrides stage+pipeline
-    model: "opus[1m]" # optional; overrides stage+pipeline
+    model: claude-sonnet-5 # optional; overrides stage+pipeline (explicit id pins the generation)
     args: "--doc prd" # fixed CLI flags appended to skill prompt
     prompt_flag: "--prompt" # forwards user-supplied --prompt
     commit: true # step-level commit (PLAN-4 / C1)

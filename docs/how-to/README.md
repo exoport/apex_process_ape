@@ -15,6 +15,7 @@ How-to guides are **recipes** — they answer "how do I X?" for a reader who alr
 - [How to tune long-running steps](tune-long-running-steps.md)
 - [How ape runs claude (PTY-only)](interactive-vs-programmatic.md)
 - [How to read run artefacts](run-artefacts.md)
+- [How to keep cost pricing current](keep-cost-pricing-current.md)
 - [How to publish run progress to NATS](publish-progress-to-nats.md)
 - [How to report from a Claude session (event/log/metrics/transcript)](report-from-a-session.md)
 - [How to upload run transcripts as content-addressed blobs](upload-transcripts.md)

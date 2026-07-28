@@ -48,7 +48,7 @@ type PipelineOpts struct {
 type TaskOpts struct {
 	Skill       string        // required
 	Agent       string        // PAT-25 passthrough agent
-	Model       string        // e.g. "opus[1m]"
+	Model       string        // e.g. "opus" (bare family) or "claude-opus-5" (pinned)
 	Args        string        // verbatim skill args
 	Prompt      string        // forwarded via PromptFlag
 	PromptFlag  string

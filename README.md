@@ -150,6 +150,7 @@ what is missing.
 | `ape trait`            | Inspect APEX traits (`list`, `show`, `validate`, `conflicts`).                             |
 | `ape sync`             | Sync governance artifacts (placeholder — `patterns` and `adrs` coming soon).               |
 | `ape bootstrap`        | Bootstrap governance artifacts from declared traits.                                       |
+| `ape costs`            | Show this project's Claude cost rollup; `coverage` audits the price table, `reprice` recomputes stored costs. |
 | `ape doctor`           | Probe the local environment for prerequisites; report per-check verdict (human/json/yaml). |
 | `ape update`           | Self-update to the latest release.                                                         |
 | `ape rollback`         | Roll back to the previously installed binary.                                              |

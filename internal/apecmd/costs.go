@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -27,6 +28,10 @@ totals — today, this week, all-time — broken down per pipeline + chat.
   ape costs chat <chat-id>           Single chat session (reads session.yaml).
   ape costs prompt <prompt-id>       Single prompt session (reads prompt.yaml).
   ape costs update --from <file>     Refresh the price table from a YAML file.
+  ape costs coverage                 Check the price table against the models
+                                     Claude Code is actually emitting locally.
+  ape costs reprice                  Recompute stored costs from on-disk tokens
+                                     using the current price table.
   ape costs roll                     Force a project rollup rebuild from all
                                      run / chat directories.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -35,16 +40,22 @@ totals — today, this week, all-time — broken down per pipeline + chat.
 			if err != nil {
 				return err
 			}
+			defer warnPricingGaps(r.PerModel)
 			if output.Format(outputFormat) == output.FormatJSON {
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
 				return enc.Encode(r)
 			}
-			return printCostsHuman(r)
+			printCostsHuman(r)
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "human | json")
-	cmd.AddCommand(newCostsRunCmd(), newCostsChatCmd(), newCostsPromptCmd(), newCostsUpdateCmd(), newCostsRollCmd())
+	cmd.AddCommand(
+		newCostsRunCmd(), newCostsChatCmd(), newCostsPromptCmd(),
+		newCostsUpdateCmd(), newCostsRollCmd(),
+		newCostsCoverageCmd(), newCostsRepriceCmd(),
+	)
 	return cmd
 }
 
@@ -63,6 +74,7 @@ func newCostsPromptCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("no prompt session found for prompt-id %q under _output/ape/prompts", args[0])
 			}
+			defer warnPricingGaps(s.PerModel)
 			if output.Format(outputFormat) == output.FormatJSON {
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
@@ -94,6 +106,7 @@ func newCostsRunCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("no run manifest found for run-id %q under _output/{pipelines,tasks}", args[0])
 			}
+			defer warnPricingGaps(m.PerModel)
 			if output.Format(outputFormat) == output.FormatJSON {
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
@@ -168,8 +181,14 @@ PLAN-5 / C7.`,
 				return fmt.Errorf("ape costs update: save: %w", err)
 			}
 			fmt.Fprintf(os.Stderr, "saved %d override(s) to ~/.ape/prices.yaml\n", len(overrides))
-			for model, p := range overrides {
-				fmt.Fprintf(os.Stderr, "  %s\tin=$%.2f out=$%.2f\n", model, p.BaseInput, p.Output)
+			for _, model := range sortedOverrideKeys(overrides) {
+				e := overrides[model]
+				when := ""
+				if !e.From.IsZero() {
+					when = "\tfrom " + e.From.Format("2006-01-02")
+				}
+				fmt.Fprintf(os.Stderr, "  %s\tin=$%.2f out=$%.2f%s\n",
+					model, e.Price.BaseInput, e.Price.Output, when)
 			}
 			return nil
 		},
@@ -198,7 +217,7 @@ func newCostsRollCmd() *cobra.Command {
 	}
 }
 
-func printCostsHuman(r *cost.Rollup) error {
+func printCostsHuman(r *cost.Rollup) {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "BUCKET\tRUNS\tCOST\tINPUT\tOUTPUT\tCACHE-R")
 	// All-time totals per pipeline.
@@ -265,7 +284,6 @@ func printCostsHuman(r *cost.Rollup) error {
 	} else {
 		fmt.Fprintf(os.Stderr, "rollup updated %s\n", r.UpdatedAt.Format(time.RFC3339))
 	}
-	return nil
 }
 
 // printTotalsLine renders one labelled totals row for the single-run /
@@ -289,11 +307,60 @@ func printPerModel(perModel map[string]cost.Totals) {
 	}
 }
 
+// warnPricingGaps inspects a per-model breakdown and warns when any model
+// in it lacks an exact rate in the price table.
+//
+// This is the aggregate half of the no-silent-zero rule. The per-run half
+// lands live, as a step's telemetry_note; this one reads the model ids the
+// rollup already carries, so a stale price table is visible in `ape costs`
+// without re-scanning transcripts or changing any on-disk schema.
+//
+// Always writes to stderr, never stdout — `--output-format json` must stay
+// machine-parseable.
+func warnPricingGaps(perModel map[string]cost.Totals) {
+	var unpriced, estimated []string
+	for _, model := range sortedModelKeys(perModel) {
+		// Dateless lookup: a rollup has no per-turn timestamps. Promotional
+		// windows still resolve as exact via the standard table, so this
+		// cannot raise a false warning.
+		_, src := cost.LookupSourceAt(model, time.Time{})
+		switch {
+		case !src.Priced():
+			unpriced = append(unpriced, model)
+		case src.Estimated():
+			estimated = append(estimated, model)
+		}
+	}
+	if len(unpriced) == 0 && len(estimated) == 0 {
+		return
+	}
+	if len(unpriced) > 0 {
+		fmt.Fprintf(os.Stderr, "⚠ unpriced model(s): %s — their turns contributed $0.00; the totals above are a lower bound\n",
+			strings.Join(unpriced, ", "))
+	}
+	if len(estimated) > 0 {
+		fmt.Fprintf(os.Stderr, "⚠ estimated model(s): %s — priced at the family rate, not an exact published rate\n",
+			strings.Join(estimated, ", "))
+	}
+	fmt.Fprintln(os.Stderr, "  run `ape costs coverage` for the gap, then `ape costs update --from <file>` and `ape costs reprice --write`")
+}
+
 // sortedModelKeys returns the model ids of a per-model map in ascending
 // order for stable rendering.
 func sortedModelKeys(perModel map[string]cost.Totals) []string {
 	out := make([]string, 0, len(perModel))
 	for k := range perModel {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sortedOverrideKeys returns override model ids in ascending order so the
+// confirmation output is stable.
+func sortedOverrideKeys(m map[string]cost.OverrideEntry) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
 		out = append(out, k)
 	}
 	sort.Strings(out)

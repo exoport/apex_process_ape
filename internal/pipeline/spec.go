@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/exoport/apex_process_ape/internal/cost"
 	"gopkg.in/yaml.v3"
 )
 
@@ -359,11 +360,61 @@ func (s *Spec) Effective(stageName string, stepIdx int) (model, effort, agent st
 	}
 	step := stage.Chain[stepIdx]
 
-	model = firstNonEmpty(step.Model, stage.Model, s.Model)
+	// Canonicalize the winning model spelling. A spec's `model:` is written
+	// by hand, so `Sonnet`, `claude-sonnet`, `sonnet-5`, and
+	// `claude-sonnet-4.6` all reach here and all mean a real model; folding
+	// them keeps the spawned `--model` argument valid and the manifest's
+	// per-model attribution consistent with the transcript's. An id ape
+	// does not recognize passes through unchanged — claude, not ape, is the
+	// authority on which models exist.
+	model, _ = cost.CanonicalModelArg(firstNonEmpty(step.Model, stage.Model, s.Model))
 	effort = firstNonEmpty(step.Effort, stage.Effort, s.Effort)
 	agent = firstNonEmpty(step.Agent, stage.Agent, s.Agent)
 	commit = resolveCommit(step, stage, s)
 	return model, effort, agent, commit, nil
+}
+
+// ModelWarning is one spec location whose `model:` value ape could not
+// attribute to a known Claude model family.
+type ModelWarning struct {
+	// Location identifies where in the spec the value was written, e.g.
+	// `stage "review" step 2 (apex-review-code)`.
+	Location string
+	// Model is the value exactly as the spec wrote it.
+	Model string
+}
+
+// ModelWarnings reports every `model:` value in the spec — pipeline, stage,
+// and step level — that ape cannot attribute to a known family.
+//
+// This closes an asymmetry: `--model` on the command line warns about a typo
+// immediately, while the same typo in a checked-in spec was silent until
+// claude rejected it mid-run. Effective canonicalizes but deliberately does
+// not warn, because a library writing to stderr is worse than one returning
+// data; this is the data, and the caller decides how loudly to say it.
+//
+// A warning is NOT an error. Claude Code may know models this ape binary does
+// not, so an unrecognized value still runs — the point is that a genuine typo
+// becomes visible before the spawn rather than after it.
+func (s *Spec) ModelWarnings() []ModelWarning {
+	var out []ModelWarning
+	check := func(location, model string) {
+		if model == "" {
+			return
+		}
+		if _, recognized := cost.CanonicalModelArg(model); !recognized {
+			out = append(out, ModelWarning{Location: location, Model: model})
+		}
+	}
+	check("pipeline", s.Model)
+	for _, stage := range s.Stages() {
+		check(fmt.Sprintf("stage %q", stage.Name), stage.Model)
+		for i := range stage.Chain {
+			step := stage.Chain[i]
+			check(fmt.Sprintf("stage %q step %d (%s)", stage.Name, i, step.Skill), step.Model)
+		}
+	}
+	return out
 }
 
 func firstNonEmpty(vals ...string) string {
