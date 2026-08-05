@@ -248,6 +248,9 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 		NatsConn: nc,
 		Socket:   cfg.Socket,
 		Publish:  func(subject string, data []byte) { _ = nc.Publish(subject, data) },
+		// Cost reporting reads the composed homes this process owns (PLAN-24 D3) —
+		// the operator's `ape` cannot, they are 0700 and aped-owned.
+		Costs: &WorkspaceCosts{StateDir: cfg.StateDir, Backend: backend},
 	}
 	// The vmm handlers use context.Background() (a micro.Request carries no
 	// context), which contextcheck flags at this call site where a ctx is in

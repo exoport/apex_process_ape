@@ -44,6 +44,10 @@ type VMMConfig struct {
 	// ape.audit.<node>.>. Mirrors the privClient's forwarding for the one leg
 	// (OpAttach) that does not round-trip through the privClient. nil skips it.
 	Publish func(subject string, data []byte)
+	// Costs rolls up each workspace's Claude usage from the composed homes this
+	// daemon owns (PLAN-24 D3). Nil makes the endpoint report UNSUPPORTED, which
+	// is correct for a node that composes no homes.
+	Costs CostReporter
 }
 
 // VMM is the ape.vmm NATS-micro service (PLAN-18 D2): one endpoint per
@@ -54,6 +58,7 @@ type VMM struct {
 	node    string
 	backend workspace.Backend
 	egress  EgressPlanner
+	costs   CostReporter
 	nc      *nats.Conn
 	socket  string
 	publish func(subject string, data []byte)
@@ -66,7 +71,10 @@ func NewVMM(cfg VMMConfig) *VMM {
 	if node == "" {
 		node = "node"
 	}
-	return &VMM{node: node, backend: cfg.Backend, egress: cfg.Egress, nc: cfg.NatsConn, socket: cfg.Socket, publish: cfg.Publish}
+	return &VMM{
+		node: node, backend: cfg.Backend, egress: cfg.Egress, costs: cfg.Costs,
+		nc: cfg.NatsConn, socket: cfg.Socket, publish: cfg.Publish,
+	}
 }
 
 // Group returns the endpoint group subject, ape.vmm.<node>.
@@ -96,6 +104,7 @@ func (v *VMM) Register(svc micro.Service) error {
 		{"inspect", "inspect", v.handleInspect},
 		{"destroy", "destroy", v.handleDestroy},
 		{"egress-set", "egress.set", v.handleEgressSet},
+		{"costs", "costs", v.handleCosts},
 	}
 	for _, e := range endpoints {
 		if err := grp.AddEndpoint(e.name, e.h, micro.WithEndpointSubject(e.subject)); err != nil {
@@ -364,6 +373,33 @@ func (v *VMM) handleEgressSet(req micro.Request) {
 	_ = req.RespondJSON(workspace.EgressSetReply{
 		V: workspace.WireVersion, Domains: plan.Domains, ProxyURL: plan.ProxyURL,
 	})
+}
+
+// handleCosts reports the Claude usage each workspace accumulated, read from the
+// composed homes this daemon owns (PLAN-24 D3).
+//
+// Front-side like egress.set, and for the same kind of reason: the artifact being
+// read is the front's own — the staging homes it composed — so routing this
+// through the root executor would move a filesystem read of untrusted JSONL into
+// the privileged process for no gain. It grants no new authority either: the
+// caller already holds the management credential, and every workspace's usage is
+// its own operator's.
+func (v *VMM) handleCosts(req micro.Request) {
+	var r workspace.CostsReq
+	if !v.decode(req, &r) {
+		return
+	}
+	if v.costs == nil {
+		v.respondErr(req, fmt.Errorf("%w: this node does not report workspace costs", workspace.ErrUnsupported))
+		return
+	}
+	reply, err := v.costs.Costs(context.Background(), r.ID)
+	if err != nil {
+		v.respondErr(req, err)
+		return
+	}
+	reply.V = workspace.WireVersion
+	_ = req.RespondJSON(reply)
 }
 
 // decode unmarshals the request body into dst, answering VALIDATION on malformed
