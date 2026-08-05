@@ -49,11 +49,19 @@ var _ workspace.Backend = (*Client)(nil)
 // matching workspace sentinel, and unmarshals the reply into out (out may be
 // nil for ack-only verbs).
 func (c *Client) call(verb string, req, out any) error {
+	return c.callWithin(c.timeout, verb, req, out)
+}
+
+// callWithin is call with an explicit deadline, for the one verb whose work is
+// unbounded by the others' standards (costs walks every workspace's
+// transcripts). The Client's own timeout is left alone — it is shared, and a
+// concurrent caller must not inherit another's deadline.
+func (c *Client) callWithin(timeout time.Duration, verb string, req, out any) error {
 	data, err := json.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("vmm %s: marshal request: %w", verb, err)
 	}
-	msg, err := c.nc.Request(c.base+"."+verb, data, c.timeout)
+	msg, err := c.nc.Request(c.base+"."+verb, data, timeout)
 	if err != nil {
 		return fmt.Errorf("vmm %s: %w", verb, err)
 	}
@@ -141,6 +149,42 @@ func (c *Client) AttachOpen(_ context.Context, id string, req workspace.AttachRe
 	err := c.call("attach.open", workspace.AttachOpenReq{V: workspace.WireVersion, ID: id, AttachRequest: req}, &r)
 	return r, err
 }
+
+// ForwardOpen opens a port-forward session to a TCP port inside a workspace and
+// returns the subject prefix the caller pipes bytes over (PLAN-24 D2).
+//
+// Not part of workspace.Backend: it needs a node that runs the session
+// transport, and it is an access verb rather than a lifecycle one.
+func (c *Client) ForwardOpen(_ context.Context, id string, port int) (workspace.ForwardOpenReply, error) {
+	var r workspace.ForwardOpenReply
+	err := c.call("forward.open", workspace.ForwardOpenReq{
+		V: workspace.WireVersion, ID: id, ForwardRequest: workspace.ForwardRequest{Port: port},
+	}, &r)
+	return r, err
+}
+
+// Costs reports each workspace's Claude usage rollup, scanned by the node from
+// the composed homes it owns (PLAN-24 D3). An empty id reports every workspace.
+//
+// Not part of workspace.Backend: the artifact it reads — a per-workspace
+// composed home — exists only on a node that composes them, and it is a
+// reporting read rather than a lifecycle verb.
+//
+// The timeout is stretched because the node walks every workspace's transcripts;
+// a busy node with a dozen long-lived workspaces legitimately takes longer than
+// a lifecycle verb, and timing out mid-scan would report nothing instead of a
+// number the caller waited for.
+func (c *Client) Costs(_ context.Context, id string) (workspace.CostsReply, error) {
+	var r workspace.CostsReply
+	err := c.callWithin(max(c.timeout, costsTimeout), "costs",
+		workspace.CostsReq{V: workspace.WireVersion, ID: id}, &r)
+	return r, err
+}
+
+// costsTimeout bounds the costs verb. The node's own scan is capped below this,
+// so a client that waits this long gets the node's partial answer rather than a
+// bare NATS timeout.
+const costsTimeout = 120 * time.Second
 
 // EgressSet re-points a live workspace's egress allowlist. It is not part of
 // workspace.Backend: only a node running the proxy can serve it, and the verb changes

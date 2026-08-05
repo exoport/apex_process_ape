@@ -91,6 +91,29 @@ type AttachOpenReply struct {
 	SubjectPrefix string `json:"subject_prefix"`
 }
 
+// ForwardOpenReq is the body of forward.open: an id plus the guest port.
+type ForwardOpenReq struct {
+	V  int    `json:"v,omitempty"`
+	ID string `json:"id"`
+	ForwardRequest
+}
+
+// ForwardOpenReply returns the forward session's id and the subject prefix the
+// client pipes bytes over.
+//
+// It is the SAME subject shape as an interactive attach
+// (ape.vmm.<node>.exec.<sid>.{stdin,stdout,stderr,control,exit}) and the same
+// credit-flow framing — a forward is that transport carrying raw bytes to a
+// guest-local socket instead of to a PTY. Nothing about the protocol changes, so
+// a forward cannot perturb a live exec or attach.
+//
+//nolint:tagliatelle // snake_case is the documented vmm NATS wire contract
+type ForwardOpenReply struct {
+	V             int    `json:"v"`
+	SessionID     string `json:"session_id"`
+	SubjectPrefix string `json:"subject_prefix"`
+}
+
 // SnapshotReq is the body of snapshot: an id plus the snapshot name.
 type SnapshotReq struct {
 	V  int    `json:"v,omitempty"`
@@ -120,4 +143,25 @@ type InspectReply struct {
 type CapabilitiesReply struct {
 	V int `json:"v"`
 	Capabilities
+}
+
+// CostsReq is the body of costs: an optional id narrowing the report to one
+// workspace. An empty id reports every workspace the node carries.
+type CostsReq struct {
+	V  int    `json:"v,omitempty"`
+	ID string `json:"id,omitempty"`
+}
+
+// CostsReply carries the per-workspace Claude usage rollups (PLAN-24 D3).
+//
+// The verb is served by the NODE rather than read client-side, and that is a
+// permission fact rather than a design preference: the composed homes holding
+// the transcripts are 0700 aped-owned and the workspace registry is 0600
+// root-owned, so an operator's `ape` can read neither. The daemon that owns them
+// does the scan and returns the rollup.
+type CostsReply struct {
+	V          int    `json:"v"`
+	Workspaces []Cost `json:"workspaces"`
+	// Totals is the node-wide sum across every workspace in the report.
+	Totals UsageTotals `json:"totals"`
 }

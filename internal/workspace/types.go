@@ -51,6 +51,14 @@ type CreateRequest struct {
 	// under its own framework root and errors if absent — it never fetches, and the
 	// request can never point the mount somewhere else.
 	FrameworkRef string `json:"framework_ref,omitempty"`
+	// IdleStop is this workspace's idle-stop preference (PLAN-24 D7): a Go
+	// duration, or "off" to exempt it from the node's idle reaper. Empty takes the
+	// node's default.
+	//
+	// It can only narrow or disable. A node whose reaper is off ignores it entirely,
+	// and no value here can make the node stop a workspace it would otherwise leave
+	// alone — so this is a request like every other field, not a grant.
+	IdleStop string `json:"idle_stop,omitempty"`
 }
 
 // MountSpec is one host→guest bind: a canonical host source, a guest destination,
@@ -135,6 +143,56 @@ type Workspace struct {
 	// `ape sandbox up` with — a laptop driving a remote node gets the node's. Empty for
 	// workspaces created before delivery existed.
 	ApeVersion string `json:"ape_version,omitempty"`
+	// IdleStop is the idle-stop setting this workspace was created with (PLAN-24
+	// D7): a duration, "off", or empty for the node's default. Reported so an
+	// operator can see WHY a workspace is or is not being auto-stopped without
+	// reading the project's descriptor.
+	IdleStop string `json:"idle_stop,omitempty"`
+}
+
+// UsageTotals is one bucket of Claude usage: cost and the token split behind it
+// (PLAN-24 D3). It mirrors the shape internal/cost produces, restated here
+// because this package is the pure wire contract — vmmclient links it and must
+// not pull the price table in with it.
+//
+//nolint:tagliatelle // snake_case is the documented vmm NATS wire contract
+type UsageTotals struct {
+	CostUSD             float64 `json:"cost_usd"`
+	InputTokens         int     `json:"input_tokens"`
+	OutputTokens        int     `json:"output_tokens"`
+	CacheReadTokens     int     `json:"cache_read_tokens"`
+	CacheCreationTokens int     `json:"cache_creation_tokens"`
+	NumTurns            int     `json:"num_turns"`
+}
+
+// Cost is one workspace's all-time Claude usage rollup, read from the
+// transcripts its composed home already holds on the host.
+//
+// UnpricedModels/EstimatedModels are not decoration: a total computed from a
+// price table with a gap in it is a LOWER BOUND, and a consumer that cannot tell
+// the two apart will report a confident wrong number. They travel with the
+// total for exactly that reason.
+//
+//nolint:tagliatelle // snake_case is the documented vmm NATS wire contract
+type Cost struct {
+	Name string `json:"name"`
+	// Sessions is how many Claude sessions ran in this workspace.
+	Sessions int         `json:"sessions"`
+	Totals   UsageTotals `json:"totals"`
+	// PerModel breaks the total down by normalized model id.
+	PerModel map[string]UsageTotals `json:"per_model,omitempty"`
+	// FirstTurnAt/LastTurnAt bound the work, RFC3339. Empty when no turns were
+	// found — which is what an unused workspace looks like.
+	FirstTurnAt string `json:"first_turn_at,omitempty"`
+	LastTurnAt  string `json:"last_turn_at,omitempty"`
+	// UnpricedModels contributed $0 because no rate was found — NOT because they
+	// were free. EstimatedModels were priced at their family rate rather than an
+	// exact published one.
+	UnpricedModels  []string `json:"unpriced_models,omitempty"`
+	EstimatedModels []string `json:"estimated_models,omitempty"`
+	// Error explains why THIS workspace could not be read, while the rest of the
+	// report still stands. Empty on a clean read.
+	Error string `json:"error,omitempty"`
 }
 
 // State is a workspace's lifecycle state, reported by Inspect.
@@ -188,6 +246,24 @@ type AttachRequest struct {
 	Cmd []string `json:"cmd,omitempty"`
 }
 
+// ForwardRequest opens a byte pipe to a TCP port inside a workspace (PLAN-24
+// D2).
+//
+// It carries a PORT and nothing else. The command that runs in the guest is
+// built by the node from its own delivered `ape`, so this cannot become
+// arbitrary in-guest execution however it is crafted — which is the point of it
+// being a separate verb rather than an exec the caller fills in.
+//
+// Nothing about it opens the workspace to the network. The guest end dials
+// 127.0.0.1 INSIDE the guest, where loopback is the one thing the workspace's
+// ruleset accepts; the bytes ride the same authenticated NATS session transport
+// as exec and attach. There is no listener on the workspace and no change to
+// either firewall.
+type ForwardRequest struct {
+	// Port is the guest-local TCP port to connect to (1..65535).
+	Port int `json:"port"`
+}
+
 // LogsRequest selects how much output to return.
 type LogsRequest struct {
 	Follow bool `json:"follow,omitempty"`
@@ -224,7 +300,7 @@ type Event struct {
 	ExitCode    *int      `json:"exit_code,omitempty"`
 }
 
-// Capabilities reports what a backend/node can provision (scheduler input).
+// Capabilities reports what a backend/node can provision.
 //
 //nolint:tagliatelle // snake_case is the documented vmm NATS wire contract
 type Capabilities struct {
@@ -236,6 +312,36 @@ type Capabilities struct {
 	IOMMU    IOMMUState    `json:"iommu"`
 	Mem      MemInfo       `json:"mem"`
 	Factory  FactoryState  `json:"factory"`
+	// Capacity answers "does another workspace fit on this node?" for a HUMAN
+	// (PLAN-24 D4). It is deliberately not scheduler input: placement across nodes
+	// is a fleet concern, and a node whose workspaces are pinned to the disk holding
+	// their repos cannot be scheduled against anyway.
+	Capacity CapacityInfo `json:"capacity"`
+}
+
+// CapacityInfo is the node's headroom, reported as the numbers an operator
+// actually reasons with: how many cores it has, how many workspaces it already
+// carries, how big a workspace is assumed to be, and how many more the free
+// memory holds.
+//
+// Fits is an ESTIMATE and says so: a workspace is a real VM whose guest memory
+// is set by the runtime's configuration, not by this daemon, so the divisor is an
+// assumption (WorkspaceMemBytes) rather than a measurement. It is reported
+// alongside the raw memory numbers precisely so a reader can disagree with it.
+//
+//nolint:tagliatelle // snake_case is the documented vmm NATS wire contract
+type CapacityInfo struct {
+	// Cores is the number of logical CPUs visible to the node.
+	Cores int `json:"cores"`
+	// Workspaces is how many workspaces this node has provisioned (running or not).
+	Workspaces int `json:"workspaces"`
+	// Running is how many of them currently hold a live task (and therefore RAM).
+	Running int `json:"running"`
+	// WorkspaceMemBytes is the per-workspace guest memory Fits divides by.
+	WorkspaceMemBytes int64 `json:"workspace_mem_bytes"`
+	// Fits is how many additional workspaces the node's AVAILABLE memory holds at
+	// WorkspaceMemBytes each. Zero means the next one does not fit.
+	Fits int `json:"fits"`
 }
 
 // RuntimeInfo describes a containerd runtime handler the node offers.
