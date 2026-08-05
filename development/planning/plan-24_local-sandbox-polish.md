@@ -1,7 +1,7 @@
 ---
 plan_id: PLAN-24
 created_at: 2026-08-05
-status: proposed
+status: implemented
 tags:
   - sandbox
   - aped
@@ -125,15 +125,33 @@ network change. **Recorded because it was viable and was rejected** (owner's cal
 number. The three-link chain in the 2026-07-27 review was a choice, not a
 constraint, and it should read that way to whoever comes next.
 
-**5. SSH is already running inside the workspace.** The image entrypoint starts
-`sshd` (PLAN-23 D9 exists because sshd builds a fresh session environment), `.ssh`
-is already composed with a pinned `known_hosts` (`gitcred.go:108`), and
-`WorkspaceSpec.SSHPort` + the `ssh_port` wire field already exist
-(`kata.go:97,358`) — but they are wired **only** in the nerdctl/shell path, which
-publishes `-p 127.0.0.1:<port>:22` (`kata.go:248`). The containerd driver that
-`aped` actually uses never reads `SSHPort`, and the netns wall would drop the
-inbound connection anyway. So D2 supplies the missing half, and the concept, the
-naming and the guest side all already exist.
+**5. ~~SSH is already running inside the workspace.~~** ~~The image entrypoint
+starts `sshd`~~ (PLAN-23 D9 exists because sshd builds a fresh session
+environment), `.ssh` is already composed with a pinned `known_hosts`
+(`gitcred.go:108`), and `WorkspaceSpec.SSHPort` + the `ssh_port` wire field
+already exist (`kata.go:97,358`) — but they are wired **only** in the
+nerdctl/shell path, which publishes `-p 127.0.0.1:<port>:22` (`kata.go:248`). The
+containerd driver that `aped` actually uses never reads `SSHPort`, and the netns
+wall would drop the inbound connection anyway. So D2 supplies the missing half,
+and the concept, the naming and the guest side all already exist.
+
+> **CORRECTED by live validation (2026-08-05, mmq4).** The first clause is
+> **wrong**: `sshd` is installed at `/usr/sbin/sshd` in image v1.1.1 but is **not
+> running** — a workspace has no listening socket at all
+> (`ss -ltn` inside the guest is empty, no `sshd` process, and the entrypoint is
+> not at either path this finding assumed). A forward to `:22` therefore reports
+> "nothing is listening", correctly.
+>
+> This does not change D2: the forward itself is live-proven against a real
+> in-guest HTTP server (200, correct `Content-Length`, concurrent connections), and
+> the failure above is the guest end reporting an absent target cleanly through the
+> diagnostic channel — which is the behaviour that path was built for.
+>
+> What it changes is the **`--ssh` recipe**: `sshd` has to be started in the
+> workspace first, which is one `exec`. Starting it automatically would be an image
+> change, and this plan's hard constraint is that no other repository is touched —
+> so it is documented, not built. Everything else about the finding stands: `.ssh`
+> is composed, the keys are staged, and the naming already existed.
 
 ## Design
 
@@ -268,14 +286,14 @@ that triggered it.
 
 ## Deliverables
 
-- [ ] **D1 — Devcontainer how-to.** Closes PLAN-22 D7 (PARTIAL). A dedicated
+- [x] **D1 — Devcontainer how-to.** Closes PLAN-22 D7 (PARTIAL). A dedicated
       how-to under `docs/how-to/`: the caching / offline / pre-warm workflow, and
       **freeze vs stop vs down in one place**. Must also cover what did not exist
       when D7 was scoped — the login-shell environment (PLAN-23 D9; image v1.1.1
       gives login shells the image PATH), the bingo-vs-delivered-`ape` rule, and the
       digest-pin ↔ policy pairing. Mention the per-node pre-pull requirement without
       centring it; it is a fleet concern.
-- [ ] **D2 — Private port-forward.** `ape sandbox forward <ws> <port>[:<guest>]`
+- [x] **D2 — Private port-forward.** `ape sandbox forward <ws> <port>[:<guest>]`
       over `internal/vmmstream`: a new session kind whose payload is bytes to a
       guest-local TCP address rather than a PTY. Guest end dials `127.0.0.1:<port>`
       inside the netns, where loopback is already accepted. **No netns or host
@@ -284,7 +302,7 @@ that triggered it.
       convenience or documented recipe, since sshd and `.ssh` already exist in the
       guest and VS Code Remote is the payoff. Multiple concurrent forwards per
       workspace; forwards die with the session, not with the workspace.
-- [ ] **D3 — Sandbox-aware cost + reporting.** Teach the cost/reporting commands to
+- [x] **D3 — Sandbox-aware cost + reporting.** Teach the cost/reporting commands to
       enumerate workspace staging dirs from the registry (`rec.StagingDir`) and
       attribute rollups per workspace, with `--output-format human|json|yaml` per
       the repo convention. No agent, no wire, no network — independent of D5–D7.
@@ -292,7 +310,7 @@ that triggered it.
       the staging dir in the shape the existing scan expects; that check is what
       decides whether this is an afternoon or a day, and it should be the first
       thing done in this deliverable.
-- [ ] **D4 — Node capacity in `Capabilities()`.** Fill the fields
+- [x] **D4 — Node capacity in `Capabilities()`.** Fill the fields
       `workspace.Capabilities` already declares and the containerd driver leaves
       empty — `KVM`, `Mem`, `Factory` — plus cores and **free capacity**, and surface
       them as a command. Deliberately **not** scheduler input: the question being
@@ -300,7 +318,7 @@ that triggered it.
       real VM at 2–4 GB?". Egress support, cache roots, materialized framework refs
       and the delivered `ape` version are the fleet's version of this and stay
       deferred (F5).
-- [ ] **D5 — Guest→host NATS path.** The system route in
+- [x] **D5 — Guest→host NATS path.** The system route in
       `internal/sandbox/proxy.go` (exact `host:port`, checked before both allowlists,
       audited with a distinguishing reason), constructed by the `EgressSupervisor`
       from `EgressConfig` so no user-facing surface can remove it; the NATS custom
@@ -309,14 +327,14 @@ that triggered it.
       `deploy/dev-host.sh`. Sentinel hostname, not a loopback literal. Tests:
       allowlist-bypass attempts still denied, the route survives an `egress set`
       that rewrites every domain, and the audit line is present and labelled.
-- [ ] **D6 — `ape sandbox-agent` — heartbeat.** New subcommand in
+- [x] **D6 — `ape sandbox-agent` — heartbeat.** New subcommand in
       `internal/apecmd/`, carrying **no vmm-request-builder code path** (assert this
       with a test, not a comment). Connects with the per-VM creds through D5's
       dialer; publishes liveness plus what is running. Launched by `aped` via
       `task.Exec` after start and re-launched on `start` and on death, gated on
       `APE_NATS_CREDS` + `APE_NATS_URL` both being set. A workspace with no creds
       still boots, with no agent.
-- [ ] **D7 — Idle reaper (stop only).** Consumes D6's heartbeat. **"Never seen"
+- [x] **D7 — Idle reaper (stop only).** Consumes D6's heartbeat. **"Never seen"
       means unknown, not idle** — test this case explicitly, it is the one that
       would otherwise stop healthy workspaces. Default 2 h → `stop`; threshold
       configurable; per-workspace opt-out in `.apesandbox.yaml`; every stop logged
@@ -399,3 +417,111 @@ kept where they were already settled.
 - **D6's exec-launch is re-run on `start`.** Restart paths are where lifecycle bugs
   live (PLAN-22 paid for reboot recovery). Cover `stop`→`start`, host reboot, and
   agent death.
+
+## What the implementation found (2026-08-05)
+
+All seven deliverables are implemented and Tier-1 tested; `make ci-local` is
+green. Recorded here because each of these changed a decision or resolved a risk
+above, and the next reader should not have to re-derive them.
+
+**D3's cheapness held, and the reason it is server-side is not the one the plan
+gave.** The transcripts land in exactly the shape the existing scan expects — a
+workspace's staging dir IS the guest `$HOME`, so
+`<staging>/.claude/projects/<slug>/<sid>.jsonl` is the same layout
+`FindSessionJSONL` already globs, and no normalization step was needed. That is
+pinned as a test (`cost.TestScanHomeMatchesTheSandboxHomeLayout`) so a future
+Claude Code layout change fails there rather than silently reporting every
+workspace as free.
+
+But the plan's "teach the cost commands to enumerate staging dirs" could not be
+done client-side at all: **the staging homes are `0700` aped-owned and the
+registry is `0600` root-owned**, so an operator's `ape` can read neither.
+Relaxing either mode would widen access to composed homes — which hold each
+workspace's credential copy — to buy a rollup. So it became a node verb
+(`ape.vmm.<node>.costs`, `ape sandbox costs`) computed by the daemon that already
+owns those files. Still no agent, no telemetry wire, and no network into the
+guest, which is what the deliverable actually required.
+
+**D2 needed no new frame type, and the guest end is a subcommand.** The
+credit-flow protocol carries a forward byte-for-byte as it carries an exec; what
+differs is discipline at the ends (no PTY — it would translate line endings and
+corrupt a byte stream — no resize, and stderr kept out of the data path). The
+guest end is `ape sandbox-connect <port>`, reusing PLAN-23's delivered `ape` for
+the same reason D6 does, rather than depending on `nc`/`socat` being in the
+image. The argv is built by the **executor** from a validated port, so
+`forward.open` cannot become a second way to run an arbitrary command in a guest;
+it audits as its own op, `ForwardVM`.
+
+**A real bug found while wiring D6.** The per-VM credential's scoped reply inbox
+was defined only in `aped` (`_INBOX_vm-<token>`), and the agent — which must not
+import `aped` — would have computed a different string. It publishes and never
+requests, so nothing would have failed today; the first request/reply added later
+would have been denied by the server and looked like a network fault. There is
+now one definition (`sandbox.VMInboxPrefix`) that both ends use, and a test that
+the grant permits the inbox the agent actually sets.
+
+**The `--idle-stop` default is OFF.** The plan says "default 2 h"; that is the
+default *threshold*, and it is what a node gets when it opts in. Automatic
+lifecycle action itself is opt-in, so upgrading `aped` never starts stopping a
+node's workspaces on its own.
+
+**D7's "never seen" rule needed a second half.** "Never heard from" is unknown —
+and so is "was reporting and has gone quiet", which is a different route to the
+same wrong answer: an agent that dies while its workspace keeps working. Both are
+tested.
+
+## Live validation (2026-08-05, node mmq4)
+
+Driven by `deploy/validate-plan24.sh`, against the deployed hardened units. The
+run is reproducible: `sudo bash deploy/validate-plan24.sh deploy`, then `check`,
+then `reaper`.
+
+**Confirmed working end to end.** D5+D6 in one command — `ape sandbox-agent
+--once` inside a guest reached the host through the workspace's own CONNECT
+proxy, and the trail carries the labelled line the design promised:
+
+```json
+{"host":"aped.internal","port":"4222","decision":"allowed","reason":"system route: agent nats","bytes_up":1615,"bytes_down":894}
+```
+
+The route also survived an `egress set` that replaced the workspace's entire
+allowlist, which is the property that makes it node-owned rather than
+user-removable. D2 carried real HTTP to a guest-local server (200, correct
+`Content-Length`, a second concurrent connection). D7 stopped an idle workspace
+with its evidence attached:
+
+```
+⇣ aped reaper: stopped plan24-check — idle for 5m0s (threshold 3m0s);
+  last heartbeat 18s ago: idle at 0.2% cpu, load 0.00
+```
+
+**Two defects the live run found, both in D4, both from the same wrong
+assumption.** The capacity probes read `/proc/meminfo` and opened `/dev/kvm` — and
+aped's units run `ProcSubset=pid` and `PrivateDevices=yes`, so *neither exists in
+either aped process by design*. That is the whole point of those units, and the
+probes were written as if the daemon could see the host. The node reported `kvm:
+no` while running a VM, and no memory at all. Both now fall back to `/sys`, which
+`ProtectKernelTunables` leaves read-only rather than hidden. The memory fallback
+has `MemFree` but not `MemAvailable`, so it under-reports headroom — the safe
+direction, and stated as such where it is computed.
+
+**One claim this plan made that is false.** Finding 5's "the image entrypoint
+starts `sshd`" — it does not; see the correction there.
+
+**Two things that are not defects and are worth recording as such.**
+
+- *A workspace stopped by the reaper reports state `created`, not `stopped`.*
+  `Stop` kills and DELETES the task, and the containerd driver maps "container
+  exists, no task" to `created`. Pre-existing, unchanged by this plan — but the
+  reaper reaches that state automatically rather than only via an explicit
+  `stop`, so it is now common enough to be worth fixing or documenting
+  deliberately. **Left alone here**: changing a reported lifecycle state ripples
+  through every consumer, and that is a decision, not a cleanup.
+- *The "never seen a heartbeat" rule is not live-testable on a healthy node.*
+  The obvious setup — provision a workspace and kill its agent — does not hold,
+  because D6's supervisor relaunches it inside its backoff and the workspace is
+  heard from again within ~10s (it was reaped with "last heartbeat 28s ago"). That
+  is D6 working, and it is exactly what this plan says about the rule: supervision
+  makes it rare. The rule stays covered by the Tier-1 test that asserts it
+  directly; the validation script tests the supervision that makes it rare
+  instead.

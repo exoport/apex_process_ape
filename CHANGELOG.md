@@ -1,5 +1,65 @@
 # CHANGELOG
 
+## Unreleased
+
+- **feat(sandbox): finish the single-node workspace story (PLAN-24)** — seven
+  deliverables that make a Kata VM workspace somewhere you can actually live:
+  look at what you are building, know what it cost, know whether another one
+  fits, and have idle VMs stop themselves honestly. Everything stays in this
+  repo — no image bump, no digest re-pin.
+  - **`ape sandbox forward <ws> <port>`** — reach a port inside a workspace. A
+    workspace has *zero* inbound reachability by design, and this does not change
+    that: the guest end dials its own loopback and the bytes ride the same
+    authenticated, audited session transport as `exec`, so no listener is opened
+    and neither firewall moves. `--ssh` makes it a plain ssh (and VS Code Remote)
+    target, since `sshd` and `~/.ssh` already existed inside every workspace with
+    no way to reach them. The transport is unchanged — a forward is the exec
+    session carrying raw bytes rather than a PTY — so `exec`/`attach` are
+    untouched. `ape sandbox ssh` now says how to do this instead of reporting
+    "Tier-2".
+  - **`ape sandbox costs [name]`** — what Claude sessions inside workspaces cost,
+    per workspace. The transcripts were already on the host the whole time (a
+    workspace's `$HOME` is a bind from its composed home), so this needed no
+    agent, no telemetry wire, and no network into the guest — only something to
+    read them. The node does the scan because the composed homes are private to
+    the daemon; an unpriced model is called out rather than counted as free.
+  - **`ape sandbox capacity`** — cores, memory, how many workspaces the node
+    carries, how many are *running* (only those hold RAM), and roughly how many
+    more fit. `Capabilities()` had declared `KVM`, `Mem` and `Factory` since
+    PLAN-18 and left all three empty.
+  - **Automatic idle-stop, off by default** (`aped front --idle-stop 2h`).
+    PLAN-22 deliberately shipped no reaper because the only signal available was
+    `last_used_at` — "when did someone last reach in" — which would have stopped a
+    three-hour build with nobody attached. The signal is now guest CPU sampled
+    *inside* the workspace by a new `ape sandbox-agent`, so idle means idle. It
+    **stops, never destroys**, and a workspace the node has never heard a
+    heartbeat from is **never** reaped: silence is unknown, not idle. Opt out or
+    retune per project with `lifecycle.idle_stop` in `.apesandbox.yaml`, visible
+    as the `IDLE-STOP` column in `ape sandbox ls`.
+  - **The in-guest agent reaches the host through the proxy it already has.**
+    PLAN-16/18 assumed a bridge-IP NATS listener behind a new firewall hole; none
+    was needed. The CONNECT proxy and the NATS server live in the same `aped`
+    process, so a *system route* (exact `aped.internal:4222`, checked before both
+    allowlists, audited with a distinguishing reason, and unremovable by
+    `egress set`) reaches it via a loopback dial the daemon makes to itself. The
+    per-VM credential minting built in PLAN-18 D6 and dormant since now has an
+    endpoint to turn on. The agent is a subcommand of the `ape` PLAN-23 already
+    delivers into every workspace, carries no path that could build a management
+    request (asserted by a test, not a comment), and is launched and supervised by
+    `aped` rather than the image entrypoint.
+  - **Live-validated on a real Kata host**, which found two defects in the capacity
+    probes: they read `/proc/meminfo` and `/dev/kvm`, and aped's units run
+    `ProcSubset=pid` + `PrivateDevices=yes`, so neither exists in either aped
+    process *by design*. A node running a VM reported `kvm: no` and no memory at
+    all. Both now fall back to `/sys`, which the hardening leaves readable. Also
+    corrected a claim this work was planned on: the image ships `sshd` but does
+    **not** start it, so `forward --ssh` needs one `exec` first and now says so.
+    `deploy/validate-plan24.sh` reproduces the whole run.
+  - **Docs**: a new [devcontainer how-to](docs/how-to/devcontainer-workspaces.md)
+    closing PLAN-22 D7 — toolchain, the durable caches, pre-warm and offline
+    rebuilds, the login-shell environment, the bingo-vs-delivered-`ape` rule, the
+    image-pin ↔ policy pairing, and freeze/stop/down/idle-stop in one table.
+
 ## v0.0.51 (2026-07-28)
 
 - **chore(deps): bump google.golang.org/grpc to v1.82.1** — clears GO-2026-6061
