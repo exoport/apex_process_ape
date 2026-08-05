@@ -56,6 +56,7 @@ credential, and owns the workspace registry. ape never runs as root.
   ape sandbox up <name>      Provision a workspace
   ape sandbox ls             List provisioned workspaces
   ape sandbox inspect <name> Show a workspace's live state
+  ape sandbox capacity       Show the node's headroom (does another one fit?)
   ape sandbox exec <name> -- <cmd>...   Run a command inside a workspace
   ape sandbox setup <name>     Materialize the project's declared toolchain
   ape sandbox stop <name>      Stop a workspace (free RAM, keep rootfs + state)
@@ -82,6 +83,7 @@ Linux host with KVM + containerd + Kata.`,
 		newSandboxLsCmd(),
 		newSandboxInspectCmd(),
 		newSandboxAttachCmd(),
+		newSandboxCapacityCmd(),
 		newSandboxSSHCmd(),
 		newSandboxExecCmd(),
 		newSandboxStopCmd(),

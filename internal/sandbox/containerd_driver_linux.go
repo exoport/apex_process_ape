@@ -74,16 +74,59 @@ func (d *containerdDriver) nsctx(ctx context.Context) context.Context {
 // Close releases the client connection.
 func (d *containerdDriver) Close() error { return d.cli.Close() }
 
-// Capabilities reports the Kata runtime handlers this tier can drive (device/
-// IOMMU probing is the Phase-3 device work).
-func (d *containerdDriver) Capabilities(context.Context) (workspace.Capabilities, error) {
+// Capabilities reports the Kata runtime handlers this tier can drive plus the
+// node's own headroom (PLAN-24 D4). Device/IOMMU probing stays Phase-3 work, so
+// GPUs/USB/IOMMU are still empty here and say so by being absent.
+//
+// Every probe is best-effort: capabilities is a read verb an operator runs to
+// decide something, and failing it because /proc/meminfo was unreadable would
+// withhold the runtime list too. A failed probe reports the conservative value
+// (no KVM, no memory, no factory), never a guess.
+func (d *containerdDriver) Capabilities(ctx context.Context) (workspace.Capabilities, error) {
+	registered, running := d.countWorkspaces(ctx)
+	mem := ProbeMem()
 	return workspace.Capabilities{
+		KVM: ProbeKVM(),
 		Runtimes: []workspace.RuntimeInfo{
 			{Name: runtimeHandler(VMMCloudHypervisor), VMM: string(VMMCloudHypervisor), Default: true},
 			{Name: runtimeHandler(VMMQemu), VMM: string(VMMQemu)},
 		},
-		HostFS: true,
+		HostFS:   true,
+		Mem:      mem,
+		Factory:  ProbeFactory(),
+		Capacity: PlanCapacity(ProbeCores(), mem, registered, running, DefaultWorkspaceMemBytes),
 	}, nil
+}
+
+// countWorkspaces reports how many workspaces this node carries and how many of
+// them hold a live task.
+//
+// RUNNING is what costs memory, and it is asked of containerd rather than of the
+// registry because the registry records that a workspace exists, not that it is
+// up: a stopped workspace keeps its container and its snapshot and frees its RAM,
+// which is exactly the distinction a capacity number has to get right. A
+// workspace containerd cannot account for counts as not running — the
+// conservative direction is to report headroom that is already spoken for, not
+// headroom that is not there.
+func (d *containerdDriver) countWorkspaces(ctx context.Context) (registered, running int) {
+	if d.reg == nil {
+		return 0, 0
+	}
+	recs, err := d.reg.List()
+	if err != nil {
+		return 0, 0
+	}
+	ctx = d.nsctx(ctx)
+	for i := range recs {
+		task, terr := d.loadTask(ctx, recs[i].Name)
+		if terr != nil {
+			continue
+		}
+		if st, serr := task.Status(ctx); serr == nil && st.Status == client.Running {
+			running++
+		}
+	}
+	return len(recs), running
 }
 
 // Create resolves a wire request to a spec and provisions it. aped drives the
