@@ -80,6 +80,12 @@ func init() {
 		newTranscriptCmd(),
 		newDoctorCmd(),
 		newSandboxCmd(),
+		// A top-level sibling of `sandbox`, not a child of it: this one runs INSIDE a
+		// workspace and is launched by aped, while every `ape sandbox …` verb runs
+		// outside and drives aped. Nesting it would put a command that needs a per-VM
+		// credential under a group whose flags are all about reaching a node.
+		newSandboxAgentCmd(),
+		newSandboxConnectCmd(),
 		newServiceCmd(),
 		newGenDocsCmd(),
 	)

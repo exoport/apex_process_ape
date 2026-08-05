@@ -44,6 +44,7 @@ type containerdDriver struct {
 	reg     *Registry
 	resolve SpecResolver
 	netns   NetnsEnsurer
+	agents  *agentSupervisor
 }
 
 var _ ProvisioningBackend = (*containerdDriver)(nil)
@@ -63,7 +64,10 @@ func NewContainerdDriver(cfg ContainerdConfig) (ProvisioningBackend, error) {
 	if err != nil {
 		return nil, fmt.Errorf("containerd driver: connect %s: %w", addr, err)
 	}
-	return &containerdDriver{cli: cli, ns: ns, reg: cfg.Registry, resolve: cfg.Resolve, netns: cfg.Netns}, nil
+	return &containerdDriver{
+		cli: cli, ns: ns, reg: cfg.Registry, resolve: cfg.Resolve, netns: cfg.Netns,
+		agents: newAgentSupervisor(cfg.Stderr),
+	}, nil
 }
 
 // nsctx binds the containerd namespace onto ctx (every client call needs it).
@@ -71,8 +75,18 @@ func (d *containerdDriver) nsctx(ctx context.Context) context.Context {
 	return namespaces.WithNamespace(ctx, d.ns)
 }
 
-// Close releases the client connection.
-func (d *containerdDriver) Close() error { return d.cli.Close() }
+// Close stops every supervised in-guest agent and releases the client
+// connection.
+//
+// Stopping supervision does NOT stop the workspaces: their tasks keep running,
+// exactly as they do across a front restart. What ends is this process's
+// bookkeeping, and a successor re-establishes it on the next start — or, for a
+// workspace that stays up across the restart, on the next `start` (which is a
+// no-op for the task and re-arms the agent).
+func (d *containerdDriver) Close() error {
+	d.agents.stopAll()
+	return d.cli.Close()
+}
 
 // Capabilities reports the Kata runtime handlers this tier can drive plus the
 // node's own headroom (PLAN-24 D4). Device/IOMMU probing stays Phase-3 work, so
@@ -207,6 +221,10 @@ func (d *containerdDriver) Provision(ctx context.Context, spec WorkspaceSpec) (w
 			return workspace.Workspace{}, fmt.Errorf("containerd driver: registry write for %s: %w", spec.Name, err)
 		}
 	}
+	// The in-guest agent starts AFTER the workload (PLAN-24 D6) and never affects
+	// whether this create succeeded: a workspace with no agent is a workspace whose
+	// idleness is unknown, which is a supported state, not a broken one.
+	d.startAgent(spec.Name) //nolint:contextcheck // supervision outlives this request; it owns a per-workspace context cancelled by stop/destroy
 	return workspace.Workspace{
 		ID: spec.Name, Name: spec.Name, Image: spec.Image,
 		Runtime: runtimeName(spec.VMM), Mount: string(spec.Mount),
@@ -329,11 +347,19 @@ func (d *containerdDriver) Start(ctx context.Context, id string) error {
 	if task, terr := container.Task(ctx, nil); terr == nil {
 		st, serr := task.Status(ctx)
 		if serr == nil && st.Status == client.Running {
-			return nil // already running — do NOT disturb its namespace
+			// Already running, so nothing about the workspace changes — but the agent
+			// may still be absent (this daemon was restarted under a live workspace).
+			// startAgent is a no-op when one is already supervised.
+			d.startAgent(id) //nolint:contextcheck // supervision outlives this request; it owns a per-workspace context cancelled by stop/destroy
+			return nil       // already running — do NOT disturb its namespace
 		}
 		// A task object still exists (created/paused): the shim owns its network state,
 		// so start it as it stands rather than rewiring underneath it.
-		return task.Start(ctx)
+		if err := task.Start(ctx); err != nil {
+			return err
+		}
+		d.startAgent(id) //nolint:contextcheck // supervision outlives this request; it owns a per-workspace context cancelled by stop/destroy
+		return nil
 	}
 	// Cold start: no task, so the namespace can be safely rebuilt.
 	if err := d.rewireNetns(ctx, id, container); err != nil {
@@ -343,7 +369,15 @@ func (d *containerdDriver) Start(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("containerd driver: new task %s: %w", id, err)
 	}
-	return task.Start(ctx)
+	if err := task.Start(ctx); err != nil {
+		return err
+	}
+	// Re-launched on EVERY start, because a stop killed the previous one with the
+	// task it lived in. This is the restart path PLAN-22 paid for once already, so
+	// it gets the same treatment: the agent is (re)established here, not assumed to
+	// have survived.
+	d.startAgent(id) //nolint:contextcheck // supervision outlives this request; it owns a per-workspace context cancelled by stop/destroy
+	return nil
 }
 
 // rewireNetns rebuilds the workspace's egress namespace from scratch before a cold
@@ -405,6 +439,10 @@ func (d *containerdDriver) rewireNetns(ctx context.Context, id string, container
 // Stop kills and deletes the task, leaving the container + snapshot so Start can
 // bring it back.
 func (d *containerdDriver) Stop(ctx context.Context, id string) error {
+	// Cancel supervision BEFORE killing the task: the agent lives inside that task,
+	// so a supervisor still running would see its exec die and try to relaunch it
+	// into a workspace that is going away.
+	d.agents.stop(id)
 	ctx = d.nsctx(ctx)
 	task, err := d.loadTask(ctx, id)
 	if err != nil {
@@ -434,6 +472,7 @@ func (d *containerdDriver) Unfreeze(ctx context.Context, id string) error {
 
 // Destroy kills the task and deletes the container + its snapshot.
 func (d *containerdDriver) Destroy(ctx context.Context, id string, _ workspace.DestroyRequest) error {
+	d.agents.stop(id)
 	ctx = d.nsctx(ctx)
 	container, err := d.cli.LoadContainer(ctx, ContainerName(id))
 	if err != nil {

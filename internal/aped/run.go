@@ -190,6 +190,9 @@ func buildDriver(cfg ExecutorRunConfig, reg *sandbox.Registry, stderr io.Writer)
 			Namespace: cfg.ContainerdNamespace,
 			Registry:  reg,
 			Netns:     ensurer,
+			// The in-guest agent supervisor's notes go to the executor's log, which is
+			// where an operator already looks when a workspace misbehaves (PLAN-24 D6).
+			Stderr: stderr,
 		})
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("%w: %w", ErrConfig, err)

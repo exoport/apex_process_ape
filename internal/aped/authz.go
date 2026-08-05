@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/natsconn"
+	"github.com/exoport/apex_process_ape/internal/sandbox"
 )
 
 // Subject roots — the frozen ape.* taxonomy (docs/reference/events.md).
@@ -19,11 +20,10 @@ const (
 	subjectSRV     = "$SRV" // NATS-micro discovery
 )
 
-// vmInboxPrefix is the scoped reply-inbox token a per-VM credential uses in
-// place of the default _INBOX. A distinct top-level token (not "_INBOX.<vm>")
-// so a deny on the default "_INBOX.>" cannot reach it and one VM cannot name
-// another VM's inbox. The in-VM ape agent sets nats.CustomInboxPrefix to this.
-const vmInboxPrefix = "_INBOX_vm"
+// The scoped reply-inbox prefix a per-VM credential uses in place of the default
+// _INBOX comes from internal/sandbox, which the in-VM agent also imports — one
+// definition, because the grant written here and the prefix the agent sets on
+// its connection must be the same string or its first request/reply is denied.
 
 // Grant is a transport-agnostic description of a credential's subject
 // permissions with default-deny + deny-wins semantics — the same model NATS
@@ -72,7 +72,7 @@ func VMGrant(vmID string) Grant {
 		},
 		SubAllow: []string{
 			subjectSvc + "." + tok + ".>",
-			vmInboxPrefix + "-" + tok + ".>",
+			sandbox.VMInboxPrefix(tok) + ".>",
 		},
 		SubDeny: []string{
 			subjectVMM + ".>",
@@ -85,7 +85,7 @@ func VMGrant(vmID string) Grant {
 // VMInbox returns the scoped reply-inbox prefix for a per-VM credential
 // (feed to nats.CustomInboxPrefix on the in-VM client). It matches the
 // SubAllow entry VMGrant issues.
-func VMInbox(vmID string) string { return vmInboxPrefix + "-" + VMToken(vmID) }
+func VMInbox(vmID string) string { return sandbox.VMInboxPrefix(VMToken(vmID)) }
 
 // OperatorGrant returns the scoped HOST_OPS grant for a host `ape` operator on
 // a given node: publish the management verbs + discovery, subscribe its own

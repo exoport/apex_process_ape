@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"io"
 
 	"github.com/exoport/apex_process_ape/internal/workspace"
 )
@@ -31,6 +32,11 @@ type ContainerdConfig struct {
 	// (after a host reboot). nil → no recovery: Start on such a workspace fails in
 	// the shim, as it did before this existed.
 	Netns NetnsEnsurer
+	// Stderr receives the in-guest agent supervisor's operational notes (PLAN-24
+	// D6): launches, exits, and the one that matters — giving up on a workspace,
+	// which is what makes its idleness permanently unknown. nil discards them,
+	// which is right for tests and wrong for a daemon.
+	Stderr io.Writer
 }
 
 // InteractiveBackend is a Backend that can open an interactive process — an exec

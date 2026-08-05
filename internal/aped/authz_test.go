@@ -1,6 +1,10 @@
 package aped
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/exoport/apex_process_ape/internal/sandbox"
+)
 
 func TestVMTokenSlug(t *testing.T) {
 	for in, want := range map[string]string{
@@ -101,5 +105,33 @@ func TestServiceGrantUnrestrictedWithinAccount(t *testing.T) {
 	g := serviceGrant()
 	if !g.PermitsSubscribe("ape.vmm.node1.create") || !g.PermitsPublish("_INBOX.x") {
 		t.Error("service grant should be unrestricted within HOST_OPS")
+	}
+}
+
+// The agent's reply-inbox prefix and this grant's subscribe entry must be the
+// same string. They are produced by two different processes from one shared
+// helper; if that ever forks, the agent's first request/reply is denied by the
+// server and looks like a network fault rather than a permissions bug.
+func TestVMInboxMatchesTheGrant(t *testing.T) {
+	const vmID = "dev"
+	g := VMGrant(vmID)
+	inbox := VMInbox(vmID)
+
+	if !g.PermitsSubscribe(inbox + ".7") {
+		t.Fatalf("the per-VM grant does not permit subscribing to its own inbox %q: SubAllow=%v", inbox, g.SubAllow)
+	}
+	// And it is derived from the VM TOKEN, not from the raw id — the token is what
+	// the credential's name claim carries, and therefore what the agent computes.
+	if want := sandbox.VMInboxPrefix(VMToken(vmID)); inbox != want {
+		t.Errorf("VMInbox = %q, want %q", inbox, want)
+	}
+	// The default inbox stays denied, so one workspace cannot sniff another's
+	// replies by simply not setting a custom prefix.
+	if g.PermitsSubscribe("_INBOX.abc") {
+		t.Error("the per-VM grant permits the DEFAULT inbox")
+	}
+	// ...and it cannot name another VM's.
+	if g.PermitsSubscribe(sandbox.VMInboxPrefix(VMToken("other")) + ".7") {
+		t.Error("the per-VM grant permits another workspace's inbox")
 	}
 }
