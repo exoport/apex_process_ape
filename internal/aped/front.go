@@ -126,34 +126,15 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 	// allowed AF_INET — hosts one deny-by-default CONNECT proxy per workspace. The
 	// policy it intersects requests against is the same file the executor
 	// re-validates against; with no policy configured, egress stays off.
-	var egress *EgressSupervisor
-	if cfg.PolicyPath != "" {
-		policy, perr := LoadPolicy(cfg.PolicyPath)
-		if perr != nil {
-			return fmt.Errorf("%w: %w", ErrConfig, perr)
-		}
-		egress = NewEgressSupervisor(EgressConfig{
-			BindIP:   cfg.EgressBindIP,
-			PortLow:  cfg.EgressPortLow,
-			PortHigh: cfg.EgressPortHigh,
-			StateDir: cfg.StateDir,
-			Policy:   &policy.Egress,
-			Publish:  func(subject string, data []byte) { _ = nc.Publish(subject, data) },
-			Node:     node,
-			Stderr:   stderr,
-		})
+	// The proxies it starts deliberately outlive this ctx: they serve workspaces
+	// that keep running, and are torn down by the deferred StopAll on shutdown
+	// rather than by request cancellation.
+	egress, err := startEgress(cfg, srv, node, nc.Publish, stderr) //nolint:contextcheck // proxies are lifetime-managed by StopAll, not ctx
+	if err != nil {
+		return err
+	}
+	if egress != nil {
 		defer egress.StopAll()
-		// Rebuild the proxies of workspaces that are still running from a previous
-		// front: restarting this process must not silently strip their egress. The
-		// proxies deliberately outlive this ctx — they are torn down by StopAll on
-		// shutdown (deferred above), not by request cancellation.
-		egress.RestoreAll() //nolint:contextcheck // the proxies are lifetime-managed by StopAll, not ctx
-		if policy.Egress.Enabled {
-			fmt.Fprintf(stderr, "  egress: enabled — %d allowed domain(s), proxies on %s\n",
-				len(policy.Egress.AllowedDomains), egressBindNote(cfg.EgressBindIP))
-		} else {
-			fmt.Fprintln(stderr, "  egress: disabled by policy (egress.enabled: false) — workspaces stay networkless")
-		}
 	}
 
 	// The `ape` every workspace runs (PLAN-23). Resolved and verified BEFORE the service
@@ -265,6 +246,62 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 	// service manager we are up and arm the watchdog (no-ops under Type=exec).
 	signalReady(ctx)
 	return serveUntilSignal(ctx, svc, stderr)
+}
+
+// startEgress builds the per-workspace egress supervisor and restores the
+// proxies a previous front left running. It returns nil (and no error) on a node
+// with no policy configured — egress is fail-closed, so no policy means no
+// egress rather than open egress.
+//
+// The caller defers StopAll: the proxies deliberately outlive any request
+// context, because the workspaces they serve do.
+func startEgress(cfg FrontConfig, srv *Server, node string, publish func(string, []byte) error, stderr io.Writer) (*EgressSupervisor, error) {
+	// The in-guest agent's route home (PLAN-24 D5). Built from THIS daemon's own
+	// configuration — the URL it hands guests and the listener it already holds —
+	// so it is a node grant rather than anything a workspace can ask for. An
+	// unusable configuration is fatal here rather than at the first heartbeat: a
+	// route that silently does not exist looks exactly like an agent that never
+	// started, and D7 is built to read that as "unknown", so it would degrade
+	// quietly and forever.
+	agentRoute, err := sandbox.AgentNatsRoute(cfg.GuestNatsURL, cfg.MgmtHost, srv.Port())
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrConfig, err)
+	}
+	var systemRoutes []sandbox.SystemRoute
+	if agentRoute.Host != "" {
+		systemRoutes = append(systemRoutes, agentRoute)
+		fmt.Fprintf(stderr, "  agent endpoint: %s → %s (system route, audited as %q)\n",
+			cfg.GuestNatsURL, agentRoute.Target, agentRoute.Reason)
+	}
+	if cfg.PolicyPath == "" {
+		return nil, nil //nolint:nilnil // "this node has no egress" is a configuration, not an error
+	}
+
+	policy, err := LoadPolicy(cfg.PolicyPath)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrConfig, err)
+	}
+	egress := NewEgressSupervisor(EgressConfig{
+		BindIP:       cfg.EgressBindIP,
+		PortLow:      cfg.EgressPortLow,
+		PortHigh:     cfg.EgressPortHigh,
+		StateDir:     cfg.StateDir,
+		Policy:       &policy.Egress,
+		SystemRoutes: systemRoutes,
+		Publish:      func(subject string, data []byte) { _ = publish(subject, data) },
+		Node:         node,
+		Stderr:       stderr,
+	})
+	// Rebuild the proxies of workspaces that are still running from a previous
+	// front: restarting this process must not silently strip their egress.
+	egress.RestoreAll()
+	if policy.Egress.Enabled {
+		fmt.Fprintf(stderr, "  egress: enabled — %d allowed domain(s), proxies on %s\n",
+			len(policy.Egress.AllowedDomains), egressBindNote(cfg.EgressBindIP))
+	} else {
+		fmt.Fprintln(stderr, "  egress: disabled by policy (egress.enabled: false) — workspaces stay networkless")
+	}
+	return egress, nil
 }
 
 // egressPlannerOrNil returns the supervisor as an EgressPlanner, or a nil

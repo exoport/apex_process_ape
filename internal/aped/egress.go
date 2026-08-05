@@ -71,6 +71,17 @@ type EgressConfig struct {
 	// Policy is the node's egress policy — the outer bound every request is
 	// intersected with. Nil denies all egress (fail-closed).
 	Policy *EgressPolicy
+	// SystemRoutes are the node-granted exact destinations every workspace's proxy
+	// carries in addition to its own allowlist (PLAN-24 D5) — today, the in-guest
+	// agent's NATS endpoint.
+	//
+	// They live on the SUPERVISOR's config rather than in per-workspace state, and
+	// that is what makes them survive `egress set`: the set verb rewrites a
+	// workspace's `domains` and nothing else, writeStateLocked persists only
+	// domains + port, and every proxy — first start, allowlist change, or restore
+	// after a front restart — is built here from this same config. There is no
+	// user-facing surface that names a system route, so none can remove one.
+	SystemRoutes []sandbox.SystemRoute
 	// Publish forwards each egress decision on ape.audit.<node>.egress. Nil keeps
 	// the audit trail file-only.
 	Publish func(subject string, data []byte)
@@ -215,6 +226,11 @@ func (s *EgressSupervisor) startLocked(name string, domains []string) (*egressPr
 		Matcher: sandbox.NewMatcher(domains),
 		JobID:   "ws:" + name,
 		Sink:    s.sinkFor(name, f),
+		// Re-applied on EVERY start, including the one `egress set` triggers when it
+		// replaces a proxy carrying a stale allowlist, and including RestoreAll after
+		// a front restart. That is the mechanism by which a system route cannot be
+		// deleted by a caller: it is not stored per workspace, it is rebuilt here.
+		SystemRoutes: s.cfg.SystemRoutes,
 	})
 	listen := net.JoinHostPort(s.bindIP(), strconv.Itoa(port))
 	if err := proxy.Start(listen); err != nil {

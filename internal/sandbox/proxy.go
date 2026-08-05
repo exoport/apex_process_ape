@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -65,6 +66,45 @@ func (s *JSONLSink) Record(e EgressAudit) {
 	_, _ = s.w.Write(append(data, '\n'))
 }
 
+// SystemRoute is one exact host:port the NODE grants every workspace through
+// its proxy, independent of that workspace's own allowlist (PLAN-24 D5).
+//
+// It exists because the guest→host path the in-VM agent needs cannot be
+// expressed as a domain grant. The alternative — widening ProxyConfig.AllowedPorts
+// to admit 4222 — would let the guest reach ANY allowlisted domain on that port,
+// which is a real widening; and putting the endpoint in the domain allowlist
+// would put it under `egress set`, where the next allowlist rewrite would delete
+// the agent's only route home. So it is a separate concept: an exact pair,
+// checked before both allowlists, constructed by the daemon from its own
+// configuration, with no user-facing surface that can remove it.
+//
+// It is NOT an audit exemption. A system-route tunnel writes an ordinary
+// decision line carrying Reason, so it is visible and filterable in
+// egress-audit.jsonl and on ape.audit.<node>.egress like everything else.
+type SystemRoute struct {
+	// Host is the exact CONNECT authority host. Use a SENTINEL NAME
+	// (aped.internal), never a loopback literal: inside the guest "127.0.0.1"
+	// means the guest's own loopback, so anything that dials it directly instead
+	// of through the proxy fails silently.
+	Host string
+	// Port is the exact CONNECT authority port.
+	Port string
+	// Target is the host:port the proxy actually dials, resolved in the PROXY's
+	// network namespace. For the agent route this is the front's own loopback:
+	// the same process holds the NATS listener, so the far end is a dial it makes
+	// to itself.
+	Target string
+	// Reason is the audit reason recorded for tunnels on this route. It must
+	// DISTINGUISH the route ("system route: agent nats"), because being able to
+	// tell node-granted traffic from workspace-granted traffic in the trail is
+	// the whole basis for accepting the grant.
+	Reason string
+}
+
+// key is the exact-match lookup key for a route (host:port, host lowercased —
+// CONNECT authorities are not case-normalized by clients).
+func (r SystemRoute) key() string { return strings.ToLower(r.Host) + ":" + r.Port }
+
 // Proxy is a deny-by-default HTTP CONNECT proxy that runs on the host,
 // outside the sandbox. The guest is pointed at it via HTTPS_PROXY. It
 // authorises each CONNECT against the domain allowlist, tunnels the
@@ -75,6 +115,7 @@ type Proxy struct {
 	jobID        string
 	sink         AuditSink
 	allowedPorts map[string]struct{}
+	systemRoutes map[string]SystemRoute
 	dialTimeout  time.Duration
 
 	srv *http.Server
@@ -88,6 +129,9 @@ type ProxyConfig struct {
 	JobID        string
 	Sink         AuditSink
 	AllowedPorts []string // default: {"443"}
+	// SystemRoutes are node-granted exact destinations checked BEFORE both
+	// allowlists (see SystemRoute). Empty is the normal case.
+	SystemRoutes []SystemRoute
 	DialTimeout  time.Duration
 }
 
@@ -100,6 +144,13 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 	pset := make(map[string]struct{}, len(ports))
 	for _, p := range ports {
 		pset[p] = struct{}{}
+	}
+	routes := make(map[string]SystemRoute, len(cfg.SystemRoutes))
+	for _, r := range cfg.SystemRoutes {
+		if r.Host == "" || r.Port == "" || r.Target == "" {
+			continue // an incomplete route grants nothing rather than everything
+		}
+		routes[r.key()] = r
 	}
 	dt := cfg.DialTimeout
 	if dt == 0 {
@@ -114,6 +165,7 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 		jobID:        cfg.JobID,
 		sink:         cfg.Sink,
 		allowedPorts: pset,
+		systemRoutes: routes,
 		dialTimeout:  dt,
 		now:          time.Now,
 	}
@@ -183,6 +235,16 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	host, port := splitHostPort(r.Host)
 
+	// System routes are checked FIRST, before the port set and the domain
+	// matcher, because they exist precisely to reach a destination neither can
+	// express: AllowedPorts defaults to {"443"} and nothing overrides it, so a
+	// CONNECT to the agent endpoint would die on the port check below before the
+	// matcher was ever consulted.
+	if route, ok := p.systemRoutes[strings.ToLower(host)+":"+port]; ok {
+		p.tunnel(r.Context(), w, host, port, route.Target, route.Reason)
+		return
+	}
+
 	if _, ok := p.allowedPorts[port]; !ok {
 		p.record(EgressAudit{Host: host, Port: port, Decision: decisionDenied, Reason: "port not allowed"})
 		http.Error(w, "port not allowed", http.StatusForbidden)
@@ -193,13 +255,19 @@ func (p *Proxy) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "domain not authorized", http.StatusForbidden)
 		return
 	}
-	p.tunnel(r.Context(), w, host, port)
+	p.tunnel(r.Context(), w, host, port, net.JoinHostPort(host, port), "")
 }
 
-// tunnel dials the target, hijacks the client conn, and copies bytes both
-// ways, recording an allowed entry with per-connection byte totals when
-// the tunnel closes.
-func (p *Proxy) tunnel(ctx context.Context, w http.ResponseWriter, host, port string) {
+// tunnel dials dialAddr, hijacks the client conn, and copies bytes both ways,
+// recording an allowed entry with per-connection byte totals when the tunnel
+// closes.
+//
+// dialAddr is separate from host/port because a system route's far end is not
+// the authority the guest asked for: the guest CONNECTs to a sentinel name the
+// proxy resolves to a destination of the node's choosing. host/port stay the
+// REQUESTED authority so the audit trail records what the guest asked for, and
+// reason records why it was granted.
+func (p *Proxy) tunnel(ctx context.Context, w http.ResponseWriter, host, port, dialAddr, reason string) {
 	start := p.now()
 	dialer := net.Dialer{Timeout: p.dialTimeout}
 	// Detach the dial from the REQUEST's cancellation, keeping only the dial timeout.
@@ -215,7 +283,7 @@ func (p *Proxy) tunnel(ctx context.Context, w http.ResponseWriter, host, port st
 	//
 	// The dial stays bounded by dialer.Timeout, so a genuinely abandoned request costs
 	// at most that, not an unbounded goroutine.
-	upstream, err := dialer.DialContext(context.WithoutCancel(ctx), "tcp", net.JoinHostPort(host, port))
+	upstream, err := dialer.DialContext(context.WithoutCancel(ctx), "tcp", dialAddr)
 	if err != nil {
 		p.record(EgressAudit{Host: host, Port: port, Decision: decisionDenied, Reason: "dial failed: " + err.Error()})
 		http.Error(w, "upstream dial failed", http.StatusBadGateway)
@@ -249,6 +317,7 @@ func (p *Proxy) tunnel(ctx context.Context, w http.ResponseWriter, host, port st
 		Host:       host,
 		Port:       port,
 		Decision:   decisionAllowed,
+		Reason:     reason,
 		DurationMs: p.now().Sub(start).Milliseconds(),
 		BytesUp:    up,
 		BytesDown:  down,

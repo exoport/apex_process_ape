@@ -15,14 +15,19 @@ After=aped.service aped-priv.socket
 # registered + the operator cred is written, and pings the watchdog on a timer
 # (sd_notify(3) — AF_UNIX, permitted by RestrictAddressFamilies below).
 Type=notify
-# --guest-nats-url is set to the host↔guest bridge endpoint in production so
-# per-VM creds + telemetry are injected; omitted here (guests boot without an
-# agent — see PLAN-18 D6).
+# --guest-nats-url is the endpoint each workspace is handed as APE_NATS_URL, and
+# setting it is also what turns per-VM credential minting on (PLAN-18 D6, PLAN-24
+# D5). It is a SENTINEL NAME, not an address: the front resolves it to its own
+# loopback management listener through a system route in each workspace's CONNECT
+# proxy, so nothing new binds and no firewall hole opens. Do NOT replace it with
+# 127.0.0.1 — inside a guest that is the GUEST's loopback, and the daemon refuses
+# to start rather than hand out an address that means something else where it
+# lands. Remove the flag entirely to run guests with no agent.
 # --policy is the SAME file the executor re-validates against; the front reads it
 # to pre-check egress requests and build each workspace's proxy allowlist (PLAN-21
 # D2). Egress stays off until policy sets egress.enabled, so passing it here is
 # safe on a node that wants no egress.
-ExecStart=/usr/local/bin/aped front --node %H --state-dir /var/lib/aped --mgmt-host 127.0.0.1 --mgmt-port 4223 --operator-creds /var/lib/aped/creds/operator.creds --policy /etc/aped/policy.yaml
+ExecStart=/usr/local/bin/aped front --node %H --state-dir /var/lib/aped --mgmt-host 127.0.0.1 --mgmt-port 4223 --operator-creds /var/lib/aped/creds/operator.creds --policy /etc/aped/policy.yaml --guest-nats-url nats://aped.internal:4222
 Restart=on-failure
 WatchdogSec=30s
 

@@ -44,9 +44,12 @@ run the vmm micro service on ape.vmm.<node>.>, resolve create requests
 the priv socket. Runs de-privileged (User=aped); a compromise here is
 TELEMETRY-scoped and still cannot satisfy the executor's SO_PEERCRED gate.
 
-Management NATS binds --mgmt-host (default 127.0.0.1, guest-unreachable). Guest
-telemetry reaches a bridge-IP endpoint set with --guest-nats-url, which is
-injected into each VM as APE_NATS_URL alongside its minted per-VM .creds.`,
+Management NATS binds --mgmt-host (default 127.0.0.1, guest-unreachable) and
+STAYS guest-unreachable. Guests reach it through the CONNECT proxy they already
+use: --guest-nats-url names a sentinel authority the front installs as a system
+route in every workspace's proxy, whose far end is a loopback dial this process
+makes to itself. No second listener, no firewall hole, and every use of it lands
+in the workspace's egress audit trail with a distinguishing reason.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if node == "" {
@@ -88,7 +91,10 @@ injected into each VM as APE_NATS_URL alongside its minted per-VM .creds.`,
 	f.IntVar(&mgmtPort, "mgmt-port", defaultMgmtPort, "Management NATS listen port")
 	f.StringVar(&stateDir, "state-dir", "/var/lib/aped", "State dir (keys, staging homes, per-VM creds)")
 	f.StringVar(&hostHome, "host-home", "", "Home to compose ~/.claude from (default: current user home)")
-	f.StringVar(&guestNats, "guest-nats-url", "", "APE_NATS_URL injected into guests ('' disables per-VM creds)")
+	f.StringVar(&guestNats, "guest-nats-url", "",
+		"APE_NATS_URL injected into guests — use the sentinel "+sandbox.AgentNatsURL+
+			", which the front routes to its own listener through each workspace's CONNECT proxy "+
+			"('' disables per-VM creds, so guests boot with no agent)")
 	f.StringVar(&operatorCr, "operator-creds", "/var/lib/aped/creds/operator.creds", "Where to write the host-operator .creds for the ape CLI")
 	f.DurationVar(&credsExpiry, "creds-expiry", 24*time.Hour, "Per-VM credential lifetime (0 = no expiry)")
 	f.StringVar(&policyPath, "policy", "", "policy.yaml to read egress policy from ('' → egress disabled; normally /etc/aped/policy.yaml)")

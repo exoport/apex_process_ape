@@ -3,6 +3,7 @@ package aped
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -118,6 +119,26 @@ func StartServer(cfg ServerConfig) (*Server, error) {
 
 // ClientURL is the management server's client URL.
 func (s *Server) ClientURL() string { return s.url }
+
+// Port is the port the management listener actually bound.
+//
+// It is read back from the server rather than taken from the config because a
+// configured port of -1 (tests) means "pick a free one", and callers that need
+// to point something AT this listener — the guest agent's system route does —
+// must have the real number, not the request.
+func (s *Server) Port() int {
+	if s.ns == nil {
+		return 0
+	}
+	addr := s.ns.Addr()
+	if addr == nil {
+		return 0
+	}
+	if tcp, ok := addr.(*net.TCPAddr); ok {
+		return tcp.Port
+	}
+	return 0
+}
 
 // HostOps returns the HOST_OPS account (mints management identities).
 func (s *Server) HostOps() Account { return s.hostOps }
