@@ -74,6 +74,7 @@ type Descriptor struct {
 	Mounts    []DescriptorMount    `yaml:"mounts,omitempty"`
 	Egress    *DescriptorEgress    `yaml:"egress,omitempty"`
 	Toolchain *DescriptorToolchain `yaml:"toolchain,omitempty"`
+	Lifecycle *DescriptorLifecycle `yaml:"lifecycle,omitempty"`
 
 	// path records where the descriptor was loaded from (diagnostics + relative
 	// source resolution).
@@ -128,6 +129,30 @@ type DescriptorToolchain struct {
 	// are validated against a closed table; the guest paths and env they imply are
 	// resolved server-side.
 	Caches []string `yaml:"caches,omitempty"`
+}
+
+// DescriptorLifecycle is the lifecycle section (PLAN-24 D7): what the node's
+// automatic housekeeping may do to this workspace.
+//
+//nolint:tagliatelle // snake_case is the stable, documented on-disk schema
+type DescriptorLifecycle struct {
+	// IdleStop overrides the node's idle-stop threshold for this workspace: a Go
+	// duration ("4h"), or "off" to exempt it entirely. Empty takes the node's
+	// default.
+	//
+	// A project sets this when it knows something the node cannot see — a workspace
+	// that hosts a long-running service rather than a session, or one whose work is
+	// I/O-bound enough to read as idle. It can only narrow or disable what the node
+	// would do; it cannot make the node reap a workspace the node would not.
+	IdleStop string `yaml:"idle_stop,omitempty"`
+}
+
+// IdleStop returns the descriptor's idle-stop request (nil-safe).
+func (d *Descriptor) IdleStop() string {
+	if d == nil || d.Lifecycle == nil {
+		return ""
+	}
+	return d.Lifecycle.IdleStop
 }
 
 // Path returns the file the descriptor was loaded from ("" when synthesized).
@@ -233,6 +258,16 @@ func (d *Descriptor) Validate() error {
 	if d.Toolchain != nil {
 		if _, err := NormalizeToolCaches(d.Toolchain.Caches); err != nil {
 			return fmt.Errorf("toolchain.caches: %w", err)
+		}
+	}
+
+	if d.Lifecycle != nil {
+		// Validated here, at the committed file, because this is the only place the
+		// author can be told which line is wrong. A bad value reaching the node falls
+		// back to the node default rather than disabling reaping, so catching it here
+		// is what makes "off" mean off.
+		if _, _, err := ParseIdleStop(d.Lifecycle.IdleStop); err != nil {
+			return fmt.Errorf("lifecycle.%w", err)
 		}
 	}
 

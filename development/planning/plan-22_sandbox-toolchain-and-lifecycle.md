@@ -262,6 +262,23 @@ exec'd" and "nothing is happening" stop being conflated. That is the gate on doi
 > destroy costs work. Default 2 h, configurable, per-workspace opt-out in
 > `.apesandbox.yaml`, every stop logged with its triggering evidence. The `auto-down
 > after M` half of D5(b) is therefore **not** being built.
+>
+> **BUILT — PLAN-24 D7 (2026-08-05).** `internal/aped/reaper.go`. D5(b)'s "auto-stop
+> after N idle" is therefore closed; its "auto-down after M" stays cancelled. What
+> shipped, against the constraints above:
+>
+> - The signal is D6's in-guest heartbeat. `last_used_at` is not consulted at
+>   all — not as a fallback, not as a tiebreak. It remains what it always was: a
+>   report for a human (`ape sandbox ls`).
+> - **"Never seen" means unknown**, and so does "was reporting and went quiet": an
+>   agent that dies while its workspace keeps working must not read as idleness
+>   either. Both are covered by tests that fail if the rule is ever inverted
+>   (`reaper_test.go`).
+> - **Off by default** (`aped front --idle-stop 0`). Automatic lifecycle action is
+>   opt-in, so upgrading aped never starts stopping a node's workspaces on its own.
+> - Per-workspace opt-out is `lifecycle.idle_stop` in `.apesandbox.yaml` (`off`, or a
+>   shorter/longer duration), surfaced as the IDLE-STOP column in `ape sandbox ls`
+>   so an operator can see why a workspace is or is not being reaped.
 
 ## Live validation (2026-07-25, node mmq4)
 

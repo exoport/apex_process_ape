@@ -185,6 +185,7 @@ func newSandboxUpCmd() *cobra.Command {
 		frameworkRef string
 		egressDomain []string
 		caches       []string
+		idleStop     string
 	)
 	cmd := &cobra.Command{
 		Use:   "up <name>",
@@ -223,7 +224,7 @@ but never widen it.`,
 			}
 			if err := applySandboxConfig(cmd, &req, root, sandboxConfigOptions{
 				Path: configPath, Disabled: noConfig, MountFlags: mountFlags,
-				EgressDomains: egressDomain, Caches: caches,
+				EgressDomains: egressDomain, Caches: caches, IdleStop: idleStop,
 			}); err != nil {
 				return err
 			}
@@ -261,6 +262,9 @@ but never widen it.`,
 	cmd.Flags().StringVar(&frameworkRef, "framework-ref", "", "APEX framework ref to mount read-only (must be materialized on the node)")
 	cmd.Flags().StringArrayVar(&egressDomain, "egress-domain", nil, "Request an egress domain (repeatable; still gated by the node's policy)")
 	cmd.Flags().StringSliceVar(&caches, "cache", nil, "Durable tool caches to mount: "+strings.Join(sandbox.ToolCacheNames(), "|")+" (adds to the descriptor's toolchain.caches)")
+	cmd.Flags().StringVar(&idleStop, "idle-stop", "",
+		"Stop this workspace after it has been idle this long (e.g. 4h), or \"off\" to exempt it "+
+			"(default: the node's; overrides .apesandbox.yaml lifecycle.idle_stop)")
 	return cmd
 }
 
@@ -271,6 +275,7 @@ type sandboxConfigOptions struct {
 	MountFlags    []string
 	EgressDomains []string
 	Caches        []string
+	IdleStop      string
 }
 
 // applySandboxConfig folds the project descriptor and the CLI mount/egress flags
@@ -316,6 +321,9 @@ func applySandboxConfig(cmd *cobra.Command, req *workspace.CreateRequest, projec
 		// The toolchain section decides which durable caches the workspace asks for;
 		// naming none but declaring a toolchain takes the defaults.
 		req.Caches = desc.ToolchainCaches()
+		// The project's idle-stop preference (PLAN-24 D7). A request the node's
+		// reaper honours; a node with no reaper ignores it.
+		req.IdleStop = desc.IdleStop()
 		// A descriptor with repos supersedes --cwd as the project source: the main repo
 		// is the project, and aped derives ProjectRoot from it.
 		for i := range resolved.Repos {
@@ -356,6 +364,16 @@ func applySandboxConfig(cmd *cobra.Command, req *workspace.CreateRequest, projec
 		}
 		req.Egress = &workspace.EgressRequest{AuthorizedDomains: sandbox.SortedDomains(domains)}
 	}
+
+	// The flag wins over the descriptor, like every other CLI override here.
+	// Validated client-side so a typo fails before a workspace is provisioned;
+	// aped re-validates, because a wire request is caller input.
+	if v := strings.TrimSpace(opts.IdleStop); v != "" {
+		if _, _, err := sandbox.ParseIdleStop(v); err != nil {
+			return fmt.Errorf("--idle-stop: %w", err)
+		}
+		req.IdleStop = v
+	}
 	return nil
 }
 
@@ -370,9 +388,14 @@ func newSandboxLsCmd() *cobra.Command {
 		Long: `List provisioned workspaces with their age and last use.
 
 LAST-USED is the last exec, attach or start — a USE signal, not proof of idleness: a
-workspace running a long job without anyone reaching in looks untouched. That is
-exactly why ape reports it instead of reaping automatically; you decide what to stop
-(frees RAM, keeps state) or tear down.
+workspace running a long job without anyone reaching in looks untouched. Use it to
+decide what to stop (frees RAM, keeps state) or tear down, and read --idle in the
+same spirit.
+
+IDLE-STOP is what the node's automatic reaper will do to each workspace: a
+duration it asked for, "off" if it is exempt, or "node" for the node's own
+setting. The reaper reads the in-guest agent's heartbeat, not LAST-USED, and it
+never stops a workspace it has no heartbeat for.
 
   ape sandbox ls --idle 24h    # only workspaces nobody has touched in 24h`,
 		Args: cobra.NoArgs,
@@ -402,13 +425,13 @@ exactly why ape reports it instead of reaping automatically; you decide what to 
 				// APE is the ape the NODE delivered into the workspace, which is not
 				// necessarily the one running this command: driving a remote node from a laptop
 				// gets you the node's. Shown so that difference is visible rather than surprising.
-				fmt.Fprintln(tw, "NAME\tRUNTIME\tMOUNT\tAGE\tLAST-USED\tAPE\tIMAGE")
+				fmt.Fprintln(tw, "NAME\tRUNTIME\tMOUNT\tAGE\tLAST-USED\tIDLE-STOP\tAPE\tIMAGE")
 				now := time.Now()
 				for i := range list {
 					w := &list[i]
-					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 						w.Name, w.Runtime, w.Mount, since(w.CreatedAt, now), since(w.LastUsedAt, now),
-						orDash(w.ApeVersion), w.Image)
+						idleStopLabel(w.IdleStop), orDash(w.ApeVersion), w.Image)
 				}
 				return tw.Flush()
 			}
@@ -691,6 +714,19 @@ persistent volume (mount: volume) is retained unless --remove-volume is set.`,
 	cmd.Flags().BoolVar(&force, "force", false, "Force teardown")
 	cmd.Flags().BoolVar(&removeVolume, "remove-volume", false, "Also remove the persistent volume (mount: volume)")
 	return cmd
+}
+
+// idleStopLabel renders a workspace's idle-stop setting for the table.
+//
+// An empty value is shown as "node" rather than "-": it means "whatever the node
+// does", which is materially different from "off" and from a duration, and an
+// operator asking why a workspace was (or was not) auto-stopped needs to tell
+// the three apart at a glance.
+func idleStopLabel(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "node"
+	}
+	return v
 }
 
 // orDash renders an absent optional field as "-" rather than an empty column, which in a

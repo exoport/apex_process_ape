@@ -202,6 +202,7 @@ func workspaceFromRecord(r Workspace) workspace.Workspace {
 		CreatedAt:  r.CreatedAt,
 		LastUsedAt: r.LastUsedAt,
 		ApeVersion: r.ApeVersion,
+		IdleStop:   r.IdleStop,
 	}
 }
 

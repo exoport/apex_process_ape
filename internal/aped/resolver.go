@@ -170,6 +170,12 @@ func (r *Resolver) Resolve(_ context.Context, req workspace.CreateRequest) (sand
 		Mount:   prof.Mount,
 		Network: r.network,
 		Comp:    comp,
+		// Carried through verbatim, validated below. It is a request the reaper reads
+		// later, not a capability — a node with no reaper ignores it entirely.
+		IdleStop: strings.TrimSpace(req.IdleStop),
+	}
+	if _, _, err := sandbox.ParseIdleStop(spec.IdleStop); err != nil {
+		return sandbox.WorkspaceSpec{}, fmt.Errorf("%w: %w", workspace.ErrValidation, err)
 	}
 	switch prof.Mount {
 	case sandbox.MountHostFS:

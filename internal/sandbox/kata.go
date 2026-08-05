@@ -113,6 +113,11 @@ type WorkspaceSpec struct {
 	// without attaching to it — it is the NODE's, not necessarily the one they drove
 	// `ape sandbox up` with. Empty → no delivery (an older node, or a test).
 	ApeVersion string
+	// IdleStop is the workspace's idle-stop setting (PLAN-24 D7): a duration, "off",
+	// or empty for the node default. It is recorded at create because that is when
+	// the project's descriptor was read; the reaper consults it later, from the
+	// registry, long after the request is gone.
+	IdleStop string
 
 	// EgressDomains is the GRANTED allowlist the workspace's CONNECT proxy
 	// enforces (policy ∩ request — PLAN-21 D1). Empty means no egress was granted;
@@ -372,6 +377,11 @@ type Workspace struct {
 	// while a long-lived workspace keeps running the one it was given, and the answer to
 	// "which ape is in there?" has to be the truth, not today's default.
 	ApeVersion string `json:"ape_version,omitempty"`
+	// IdleStop is this workspace's idle-stop setting (PLAN-24 D7): a duration,
+	// "off", or empty for the node default. Recorded at create — the reaper runs
+	// hours later, when the project descriptor that expressed it is long out of
+	// scope.
+	IdleStop string `json:"idle_stop,omitempty"`
 
 	// Egress-proxy supervisor record (PLAN-16 D4). Set only when `up`
 	// started a managed CONNECT proxy for the workspace (a profile

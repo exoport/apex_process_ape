@@ -34,6 +34,7 @@ func newFrontCmd() *cobra.Command {
 		credentials string
 		credSyncInt time.Duration
 		apeBinary   string
+		idleStop    time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "front",
@@ -80,6 +81,7 @@ in the workspace's egress audit trail with a distinguishing reason.`,
 				CacheRoot:         cacheRoot,
 				Credentials:       credentials,
 				CredSyncInterval:  credSyncInt,
+				IdleStop:          idleStop,
 				Stderr:            os.Stderr,
 			})
 		},
@@ -109,5 +111,13 @@ in the workspace's egress audit trail with a distinguishing reason.`,
 	// The default (the `ape` beside this aped) is what makes delivery need no configuration:
 	// both binaries ship in one release archive. The flag is for installs that split them.
 	f.StringVar(&apeBinary, "ape-binary", "", "The `ape` binary delivered read-only into every workspace at "+sandbox.ApeBinDest+" (default: the ape beside this aped)")
+	// Off by default, deliberately: automatic lifecycle action is opt-in, so
+	// upgrading aped never starts stopping a node's workspaces on its own. The
+	// reaper also never touches a workspace it has no heartbeat for — silence is
+	// unknown, not idle — so enabling it cannot reap a workspace whose agent is
+	// absent (see PLAN-24 D7).
+	f.DurationVar(&idleStop, "idle-stop", 0,
+		"Stop workspaces whose in-guest agent reports them idle for this long (0 = never; suggested "+
+			sandbox.DefaultIdleStop.String()+"). Stops only — state is kept and 'ape sandbox start' revives it")
 	return cmd
 }

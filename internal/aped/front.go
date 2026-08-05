@@ -14,6 +14,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/natsconn"
 	"github.com/exoport/apex_process_ape/internal/sandbox"
+	"github.com/exoport/apex_process_ape/internal/workspace"
 	"github.com/nats-io/nats.go/micro"
 )
 
@@ -68,7 +69,12 @@ type FrontConfig struct {
 	// nftables chain's accepted range (both come from deploy/dev-host.sh). 0 → the
 	// sandbox defaults.
 	EgressPortLow, EgressPortHigh int
-	Stderr                        io.Writer
+	// IdleStop is the node-wide idle-stop threshold (PLAN-24 D7). Zero disables
+	// the reaper, which is the default: automatic lifecycle action is opt-in, and a
+	// node that has not opted in must not start stopping workspaces after an
+	// upgrade.
+	IdleStop time.Duration
+	Stderr   io.Writer
 }
 
 // RunFront is the `aped front` entry point: it embeds the two-account NATS
@@ -241,6 +247,15 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 	}
 	_ = nc.Flush()
 
+	// The idle reaper (PLAN-24 D7). Started AFTER the service is registered so a
+	// node that fails to come up never stops anything on its way down.
+	if rerr := startReaper(ctx, cfg, srv, backend, stderr); rerr != nil {
+		// A reaper that cannot start is worth failing on: the alternative is a node
+		// that silently never reclaims memory, which is discovered weeks later as
+		// "the box filled up" rather than as a startup error.
+		return rerr
+	}
+
 	fmt.Fprintf(stderr, "▶ aped front — ape.vmm.%s.> on %s (executor via %s)\n", node, srv.ClientURL(), cfg.Socket)
 	// The vmm service is registered and the operator cred is written; tell the
 	// service manager we are up and arm the watchdog (no-ops under Type=exec).
@@ -302,6 +317,49 @@ func startEgress(cfg FrontConfig, srv *Server, node string, publish func(string,
 		fmt.Fprintln(stderr, "  egress: disabled by policy (egress.enabled: false) — workspaces stay networkless")
 	}
 	return egress, nil
+}
+
+// startReaper wires and launches the idle reaper, or explains why it is off.
+//
+// It needs its OWN connection, on the TELEMETRY account: heartbeats are
+// published by per-VM credentials, which live in TELEMETRY, and the front's
+// service connection is in HOST_OPS. Account isolation is the boundary that
+// keeps a compromised guest away from management — so the reaper crosses it the
+// only legitimate way, with a read-only ingest credential that can subscribe
+// every VM's telemetry and publish nothing.
+func startReaper(ctx context.Context, cfg FrontConfig, srv *Server, backend workspace.Backend, stderr io.Writer) error {
+	if cfg.IdleStop <= 0 {
+		fmt.Fprintln(stderr, "  idle reaper: off (--idle-stop 0) — workspaces are stopped by hand")
+		return nil
+	}
+	creds, _, err := srv.Telemetry().MintUser("aped-reaper", telemetryIngestGrant(), 0)
+	if err != nil {
+		return err
+	}
+	credsPath := filepath.Join(cfg.StateDir, "creds", "reaper.creds")
+	if err := writeSecret(credsPath, creds); err != nil {
+		return err
+	}
+	conn, err := natsconn.Connect(ctx,
+		natsconn.Config{URL: srv.ClientURL(), CredsFile: credsPath}, "aped-reaper/"+cfg.ApeVersion)
+	if err != nil {
+		return fmt.Errorf("aped: reaper telemetry connection: %w", err)
+	}
+	reaper := NewReaper(ReaperConfig{
+		Backend:   backend,
+		Conn:      conn,
+		IdleAfter: cfg.IdleStop,
+		Stderr:    stderr,
+	})
+	go func() {
+		defer func() { _ = conn.Drain() }()
+		if rerr := reaper.Run(ctx); rerr != nil {
+			fmt.Fprintf(stderr, "! aped reaper: stopped: %v\n", rerr)
+		}
+	}()
+	fmt.Fprintf(stderr, "  idle reaper: workspaces idle for %s are STOPPED (state kept); "+
+		"a workspace with no heartbeat is never reaped\n", cfg.IdleStop)
+	return nil
 }
 
 // egressPlannerOrNil returns the supervisor as an EgressPlanner, or a nil

@@ -225,3 +225,70 @@ func TestRegistryTouchStampsLastUsed(t *testing.T) {
 	assert.Equal(t, "2026-07-25T12:00:00Z", got.LastUsedAt)
 	assert.Equal(t, "ape-ws-dev", got.Container, "touching must not clobber the rest of the record")
 }
+
+// The lifecycle section (PLAN-24 D7). It is validated at the COMMITTED FILE
+// because that is the only place the author can be told which line is wrong: by
+// the time a bad value reaches the node's reaper it falls back to the node
+// default, which is safe but silent.
+func TestDescriptorLifecycleIdleStop(t *testing.T) {
+	root := writeDescriptor(t, `
+version: 1
+repos:
+  - { source: ., name: app, main: true }
+lifecycle:
+  idle_stop: "4h"
+`)
+	d, err := LoadDescriptor(DescriptorPath(root))
+	require.NoError(t, err)
+	assert.Equal(t, "4h", d.IdleStop())
+}
+
+func TestDescriptorLifecycleOptOut(t *testing.T) {
+	root := writeDescriptor(t, `
+version: 1
+repos:
+  - { source: ., name: app, main: true }
+lifecycle:
+  idle_stop: "off"
+`)
+	d, err := LoadDescriptor(DescriptorPath(root))
+	require.NoError(t, err)
+	after, ok := ResolveIdleStop(d.IdleStop(), DefaultIdleStop)
+	assert.False(t, ok, "a workspace that opted out must not be reaped")
+	assert.Zero(t, after)
+}
+
+func TestDescriptorRejectsABadIdleStop(t *testing.T) {
+	root := writeDescriptor(t, `
+version: 1
+repos:
+  - { source: ., name: app, main: true }
+lifecycle:
+  idle_stop: "soon"
+`)
+	_, err := LoadDescriptor(DescriptorPath(root))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "idle_stop", "the error must name the offending key")
+}
+
+// No lifecycle section at all is the common case and must mean "the node's
+// default", not "exempt".
+func TestDescriptorWithoutLifecycleTakesTheNodeDefault(t *testing.T) {
+	root := writeDescriptor(t, `
+version: 1
+repos:
+  - { source: ., name: app, main: true }
+`)
+	d, err := LoadDescriptor(DescriptorPath(root))
+	require.NoError(t, err)
+	assert.Empty(t, d.IdleStop())
+	after, ok := ResolveIdleStop(d.IdleStop(), DefaultIdleStop)
+	assert.True(t, ok)
+	assert.Equal(t, DefaultIdleStop, after)
+}
+
+// A nil descriptor is the "no .apesandbox.yaml" path and must be safe to ask.
+func TestNilDescriptorIdleStop(t *testing.T) {
+	var d *Descriptor
+	assert.Empty(t, d.IdleStop())
+}

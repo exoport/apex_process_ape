@@ -23,6 +23,9 @@ type fakeBackend struct {
 	mu        sync.Mutex
 	ws        map[string]workspace.State
 	createErr error
+	// idleStop is stamped onto every listed workspace, so the reaper tests can
+	// exercise the per-workspace opt-out without a registry.
+	idleStop string
 }
 
 func newFakeBackend() *fakeBackend { return &fakeBackend{ws: map[string]workspace.State{}} }
@@ -135,7 +138,7 @@ func (f *fakeBackend) List(context.Context) ([]workspace.Workspace, error) {
 	defer f.mu.Unlock()
 	out := make([]workspace.Workspace, 0, len(f.ws))
 	for name := range f.ws {
-		out = append(out, workspace.Workspace{ID: name, Name: name})
+		out = append(out, workspace.Workspace{ID: name, Name: name, IdleStop: f.idleStop})
 	}
 	return out, nil
 }

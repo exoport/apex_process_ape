@@ -213,6 +213,8 @@ func (d *containerdDriver) Provision(ctx context.Context, spec WorkspaceSpec) (w
 			// The ape delivered into this workspace, recorded at create: the node's ape can
 			// move on while this workspace keeps the one it was given.
 			ApeVersion: spec.ApeVersion,
+			// Likewise the idle-stop setting: the reaper reads it from here, hours later.
+			IdleStop: spec.IdleStop,
 		}
 		if spec.Comp != nil {
 			rec.StagingDir = spec.Comp.StagingDir
