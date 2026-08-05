@@ -191,10 +191,17 @@ subject permissions are the daemon's trust boundary (see
 
 `aped`'s NATS-micro `vmm` service, group `ape.vmm.<node>`; one endpoint per
 `Backend` verb: `capabilities | create | start | stop | exec | attach.open |
-freeze | unfreeze | suspend | resume | snapshot | list | inspect | destroy`.
+freeze | unfreeze | suspend | resume | snapshot | list | inspect | destroy`, plus
+the node-side verbs `egress.set` (PLAN-21), `forward.open` and `costs` (PLAN-24).
 Errors: `BUSY`, `VALIDATION`, `NOT_FOUND`, `UNSUPPORTED`, `DEVICE_UNAVAILABLE`,
 `DENIED`. **The host operator account may publish here; per-VM (telemetry)
 credentials are denied this root entirely** — the VM→host-escape barrier.
+
+| Verb | Added | Body → reply |
+| --- | --- | --- |
+| `egress.set` | PLAN-21 | `{id, authorized_domains[]}` → `{domains[], proxy_url}` — re-points a LIVE workspace's allowlist by restarting its proxy on the same port |
+| `forward.open` | PLAN-24 | `{id, port}` → `{session_id, subject_prefix}` — opens a byte pipe to a guest-local TCP port over the session subjects below. The body carries a PORT; the in-guest command is built by the executor, so this cannot become arbitrary in-guest execution. Audited as `ForwardVM` |
+| `costs` | PLAN-24 | `{id?}` → `{workspaces[], totals}` — per-workspace Claude usage, scanned by the node from the composed homes it owns. An empty `id` reports every workspace |
 
 The `create` body is the `CreateRequest` (`{name, image?, runtime?, mount?,
 mount_source?, profile?, devices?, repos?, mounts?, caches?, egress?,
@@ -211,6 +218,7 @@ values again before provisioning:
 | `caches[]` | PLAN-22 | durable tool-cache NAMES (`go`, `asdf`, …) from a closed table; the host source, guest path and toolchain env are resolved server-side, so a caller cannot redirect `GOPATH` |
 | `egress` | PLAN-21 | `{authorized_domains[], direct_allow[]}` — intersected with the node's `egress.allowed_domains`; a project narrows, never widens |
 | `framework_ref` | PLAN-20 | which materialized framework ref to mount read-only; resolved under the node's own framework root, so it selects a *version*, never a *path* |
+| `idle_stop` | PLAN-24 | a duration or `"off"` — this workspace's idle-stop preference. It narrows or disables what the node's reaper would do; it can never make a node stop a workspace it otherwise would not |
 
 The id-verbs take `{id}`; `destroy`/`exec`/`snapshot`/`attach.open` take
 `{id, …options}`.
@@ -219,6 +227,13 @@ Interactive exec/attach uses per-session subjects
 `ape.vmm.<node>.exec.<sid>.{stdin,stdout,stderr,resize,control,exit}` with ≤32 KiB
 frames + credit-based flow control (bulk stdio must not ride request/reply, which
 disconnects slow consumers).
+
+A **port-forward** (`forward.open`) uses the SAME subjects and the same framing —
+it is that transport carrying raw bytes to a guest-local TCP socket instead of to
+a PTY, so the protocol is unchanged. Its ends differ only in discipline: no
+terminal is allocated (a PTY would translate line endings and corrupt an
+arbitrary byte stream), the `resize` channel is unused, and `stderr` carries the
+guest end's diagnostics rather than data.
 
 ### `ape.audit` — privileged-op audit (PLAN-18)
 
@@ -242,6 +257,26 @@ its telemetry flows on the **existing** roots — `ape.evt.vm-<id>.…`,
 new taxonomy**. Its credential is scoped pub-only to `ape.{evt,log,metrics}.vm-<id>.>`
 (+ `allow_responses`) and sub-only to `ape.svc.vm-<id>.>` + a scoped inbox; it is
 **denied `ape.vmm.>`** and every other VM's `ape.*.vm-*.>`.
+
+**Liveness heartbeat (PLAN-24 D6).** `ape sandbox-agent` runs inside each
+workspace and publishes on `ape.metrics.vm-<id>.heartbeat` — inside the grant
+above, so it needs no new authority. Payload:
+`{v, workspace, ts, uptime_seconds, busy, cpu_percent, load1, top[], agent}`.
+`busy` is guest CPU over the sample window against a threshold, and `top[]` names
+the processes that produced it, so a consumer can see *what* was running rather
+than infer it from a number.
+
+It reaches the host through the workspace's own CONNECT proxy: `aped` installs a
+**system route** (an exact `aped.internal:4222` → its own loopback listener) in
+each workspace's proxy, checked before both allowlists and recorded in the egress
+trail with reason `system route: agent nats`. No listener binds on the bridge and
+neither firewall changes. The route is built from the daemon's configuration, so
+no `egress set` can remove it.
+
+The idle reaper (PLAN-24 D7) is the one consumer: it attributes each heartbeat by
+its **subject** (which the server authorized) rather than by the payload's
+`workspace` field (which a compromised guest could forge), and it never acts on a
+workspace it has not heard from.
 
 ## Payload envelope
 

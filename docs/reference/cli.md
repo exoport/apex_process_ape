@@ -929,7 +929,10 @@ credential, and owns the workspace registry. ape never runs as root.
   ape sandbox up <name>      Provision a workspace
   ape sandbox ls             List provisioned workspaces
   ape sandbox inspect <name> Show a workspace's live state
+  ape sandbox capacity       Show the node's headroom (does another one fit?)
+  ape sandbox costs [name]   What Claude sessions inside workspaces cost
   ape sandbox exec <name> -- <cmd>...   Run a command inside a workspace
+  ape sandbox forward <name> <port>     Reach a port inside a workspace
   ape sandbox setup <name>     Materialize the project's declared toolchain
   ape sandbox stop <name>      Stop a workspace (free RAM, keep rootfs + state)
   ape sandbox start <name>     Start a stopped workspace
@@ -948,16 +951,19 @@ Linux host with KVM + containerd + Kata.
 Subcommands:
 
 - `attach` — Open an interactive shell inside a workspace
+- `capacity` — Show the node's workspace headroom (cores, memory, how many more fit)
+- `costs` — Show what Claude sessions inside workspaces cost
 - `credentials` — Publish your Claude credentials for workspaces to use
 - `down` — Tear a workspace down
 - `egress` — Inspect and change a workspace's egress allowlist
 - `exec` — Run a command inside a workspace
+- `forward` — Forward a local port to a port inside a workspace
 - `framework` — Manage the APEX framework refs a sandbox node can mount
 - `freeze` — Freeze a workspace (cgroup-freeze; guest RAM stays resident)
 - `inspect` — Show a workspace's live state
 - `ls` — List provisioned workspaces
 - `setup` — Materialize the project's declared toolchain inside a workspace
-- `ssh` — SSH into a workspace (Tier-2)
+- `ssh` — How to ssh into a workspace (use 'ape sandbox forward --ssh')
 - `start` — Start a stopped workspace
 - `stop` — Stop a workspace (free its RAM, keep its rootfs + state)
 - `suspend` — Suspend a workspace microVM (save guest RAM to disk) — not yet supported on Kata
@@ -986,6 +992,76 @@ credit-based flow control; the terminal goes raw and resizes forward on SIGWINCH
 
 Requires an aped node running the containerd driver (aped run --driver
 containerd); a shell-driver node reports the session UNSUPPORTED.
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox capacity
+
+Show the node's workspace headroom (cores, memory, how many more fit)
+
+```
+ape sandbox capacity [flags]
+```
+
+Report what the target aped node can still take: its cores and memory, how
+many workspaces it already carries, how many of those are RUNNING (only those
+hold RAM — a stopped workspace keeps its state and frees its memory), and how
+many more the free memory holds.
+
+FITS is an estimate, and the number it divides by is printed next to it: guest
+memory is set by the node's Kata configuration, which aped does not own, so the
+per-workspace size is an assumption rather than a measurement. Disagree with it
+by redoing the division on the memory numbers above it.
+
+This is a report, not placement. Choosing which node a workspace lands on is a
+fleet concern and is not what this answers.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox costs
+
+Show what Claude sessions inside workspaces cost
+
+```
+ape sandbox costs [name] [flags]
+```
+
+Report the Claude usage accumulated inside the node's workspaces, per
+workspace, all-time. With a name, report only that workspace.
+
+The numbers come from the session transcripts each workspace's composed home
+already holds on the node — there is no agent, no telemetry wire, and nothing
+to enable. The node does the scan because it owns those homes: they are private
+to the daemon, and an operator's ape cannot read them.
+
+A model with no rate in the price table contributes $0 and is called out, so a
+total that is a LOWER BOUND is never mistaken for an exact one. The table doing
+the pricing is the NODE's, embedded in its aped at build time — so a gap is
+fixed by upgrading aped there, not by 'ape costs update' here.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
 Global flags:
 
@@ -1282,6 +1358,51 @@ Global flags:
 | `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
 | `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
 
+## ape sandbox forward
+
+Forward a local port to a port inside a workspace
+
+```
+ape sandbox forward <name> <local>[:<guest>] [flags]
+```
+
+Forward a port on THIS machine to a TCP port inside a workspace, so you can
+open a browser (or point a client) at something running in there.
+
+  ape sandbox forward dev 8080          # localhost:8080 → workspace :8080
+  ape sandbox forward dev 3000:8080     # localhost:3000 → workspace :8080
+  ape sandbox forward dev --ssh         # localhost:2222 → workspace :22
+
+Nothing is exposed. The workspace gets no listener and neither firewall changes:
+the guest end dials its OWN loopback and the bytes ride the same authenticated
+session transport as exec and attach, which aped audits. The forward is private
+to you, it is not a public URL, and it does not connect workspaces to each other.
+
+Forwards live with this command, not with the workspace: Ctrl-C ends them and
+the workspace is untouched. Run several at once in separate terminals, or the
+same command twice for two ports.
+
+With --ssh you get a working ssh (and therefore VS Code Remote) target, since
+sshd and ~/.ssh already exist inside the workspace:
+
+  ape sandbox forward dev --ssh &
+  ssh -p 2222 root@127.0.0.1
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--bind` | string | `127.0.0.1` | Local address to listen on (0.0.0.0 exposes the forward to your network) |
+| `--ssh` | bool | `false` | Forward the workspace's sshd (guest :22, local :2222 unless a local port is given) |
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
 ## ape sandbox framework
 
 Manage the APEX framework refs a sandbox node can mount
@@ -1427,9 +1548,14 @@ ape sandbox ls [flags]
 List provisioned workspaces with their age and last use.
 
 LAST-USED is the last exec, attach or start — a USE signal, not proof of idleness: a
-workspace running a long job without anyone reaching in looks untouched. That is
-exactly why ape reports it instead of reaping automatically; you decide what to stop
-(frees RAM, keeps state) or tear down.
+workspace running a long job without anyone reaching in looks untouched. Use it to
+decide what to stop (frees RAM, keeps state) or tear down, and read --idle in the
+same spirit.
+
+IDLE-STOP is what the node's automatic reaper will do to each workspace: a
+duration it asked for, "off" if it is exempt, or "node" for the node's own
+setting. The reaper reads the in-guest agent's heartbeat, not LAST-USED, and it
+never stops a workspace it has no heartbeat for.
 
   ape sandbox ls --idle 24h    # only workspaces nobody has touched in 24h
 
@@ -1484,7 +1610,7 @@ Global flags:
 
 ## ape sandbox ssh
 
-SSH into a workspace (Tier-2)
+How to ssh into a workspace (use 'ape sandbox forward --ssh')
 
 ```
 ape sandbox ssh <name>
@@ -1608,6 +1734,7 @@ Flags:
 | `--cwd` | string | `—` | Project root to mount for host-fs (default: current working directory) |
 | `--egress-domain` | stringArray | `[]` | Request an egress domain (repeatable; still gated by the node's policy) |
 | `--framework-ref` | string | `—` | APEX framework ref to mount read-only (must be materialized on the node) |
+| `--idle-stop` | string | `—` | Stop this workspace after it has been idle this long (e.g. 4h), or "off" to exempt it (default: the node's; overrides .apesandbox.yaml lifecycle.idle_stop) |
 | `--image` | string | `—` | Image ref override (default: aped's pinned image) |
 | `--mount` | string | `—` | Mount mode: host-fs \| volume \| ephemeral (default: host-fs) |
 | `--mount-path` | stringArray | `[]` | Extra mount <source>[:<dest>][:ro\|:rw] (repeatable; ro by default; merges with .apesandbox.yaml) |

@@ -210,6 +210,54 @@ as a read-only `.creds` bind plus `APE_NATS_URL`/`APE_NATS_CREDS`. The in-VM
 subject and every other VM's subjects — the VM→host-escape barrier. See
 [NATS subjects & event payloads](../reference/events.md#per-vm-telemetry-plan-18-reuses-apeevtlogmetrics).
 
+Minting is gated on `--guest-nats-url` being set — with no endpoint, guests boot
+with no credential and no agent, which is a supported configuration. Set it to the
+**sentinel**, not to an address:
+
+```
+aped front … --guest-nats-url nats://aped.internal:4222
+```
+
+The management listener stays on `127.0.0.1` and stays guest-unreachable. What the
+sentinel resolves to is a **system route** the front installs in every workspace's
+CONNECT proxy — an exact `aped.internal:4222` whose far end is a loopback dial this
+same process makes to itself, since the proxy and the NATS server live in one
+process. So the guest reaches the endpoint through the one hole it already has, no
+second listener binds, and no firewall rule changes. Each use writes an ordinary
+line in the workspace's egress trail with reason `system route: agent nats`, so it
+is visible and filterable rather than exempt.
+
+Do **not** substitute `127.0.0.1` here: inside a guest that names the *guest's*
+loopback, so anything dialling it directly would fail silently. `aped` refuses to
+start on a loopback literal rather than hand one out.
+
+## Stopping idle workspaces automatically
+
+Off by default. Enable it per node:
+
+```
+aped front … --idle-stop 2h
+```
+
+A workspace whose in-guest agent reports it idle for that long is **stopped** —
+state kept, `ape sandbox start` revives it. It is never destroyed; disk is
+reclaimed by a human.
+
+Three properties worth knowing before you turn it on:
+
+- The signal is **guest CPU sampled inside the workspace**, not `last_used_at`. A
+  three-hour build with nobody attached is busy and is left alone.
+- A workspace the node has **never heard a heartbeat from is never reaped**. The
+  agent is best-effort, so silence means *unknown*, not *idle* — reading it as
+  idleness would stop healthy workspaces.
+- A project can opt out or set its own threshold
+  (`lifecycle.idle_stop` in `.apesandbox.yaml`), and can only narrow or disable
+  what this flag does — never extend it to a workspace the node would leave alone.
+
+`ape sandbox ls` shows the effective setting per workspace in its `IDLE-STOP`
+column, and every automatic stop is logged with the heartbeat evidence that
+triggered it.
+
 ## Tier-2 host stack
 
 Kata-QEMU needs a rootful containerd + Kata + nerdctl. The whole bring-up —

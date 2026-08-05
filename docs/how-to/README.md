@@ -19,6 +19,8 @@ How-to guides are **recipes** — they answer "how do I X?" for a reader who alr
 - [How to publish run progress to NATS](publish-progress-to-nats.md)
 - [How to report from a Claude session (event/log/metrics/transcript)](report-from-a-session.md)
 - [How to upload run transcripts as content-addressed blobs](upload-transcripts.md)
+- [How to run a sandboxed Kata VM workspace](sandbox-workspaces.md)
+- [How to use a workspace as your dev container](devcontainer-workspaces.md)
 - [How to run ape as a service (NATS job daemon)](run-ape-as-a-service.md)
 - [How to run aped (the VM-management daemon)](run-aped.md)
 - [How to run `ape doctor` in CI](run-doctor-in-ci.md)

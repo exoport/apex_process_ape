@@ -102,6 +102,24 @@ session subjects. On a shell-driver node `attach` reports `UNSUPPORTED` and `exe
 falls back to an exit-status-only run (output to the node's logs). The PTY itself
 is live-validated on a KVM+containerd+Kata host (Tier-2).
 
+Nothing about a workspace is reachable from the network — the ruleset drops
+inbound traffic and the host bridge drops forwarding, so `exec` and `attach` work
+only because they ride `containerd`'s own channel. To look at something running
+inside (a dev server, or `sshd` for an editor), forward a port:
+
+```bash
+ape sandbox forward dev 8080     # localhost:8080 → workspace :8080
+ape sandbox forward dev --ssh    # localhost:2222 → workspace :22
+```
+
+(`--ssh` needs `sshd` started in the workspace first — the image ships it but does
+not run it. See the [devcontainer how-to](devcontainer-workspaces.md).)
+
+The guest end dials its own loopback and the bytes ride the same session
+transport, so this opens no listener on the workspace and changes neither
+firewall. It is private to you: not a public URL, and not a route between
+workspaces.
+
 ## 4. Freeze and tear down
 
 ```bash
@@ -179,26 +197,36 @@ If a **host reboot** takes the egress namespace with it (it lives in `/run`), `s
 re-creates it from the container's own spec — the path and the proxy port are both
 recorded there — so a rebooted host does not need workspaces recreated.
 
-## Reclaiming resources — reported, not reaped
+## Reclaiming resources
 
-`ape sandbox ls` shows AGE and LAST-USED so you can decide:
+`ape sandbox ls` shows AGE, LAST-USED and IDLE-STOP so you can decide:
 
 ```bash
-ape sandbox ls                 # NAME RUNTIME MOUNT AGE LAST-USED IMAGE
+ape sandbox ls                 # NAME RUNTIME MOUNT AGE LAST-USED IDLE-STOP APE IMAGE
 ape sandbox ls --idle 24h      # only what nobody has touched in 24h
+ape sandbox capacity           # cores, memory, and whether another one fits
 ```
 
 LAST-USED is stamped on exec, attach and start — a **use** signal, not proof of
 idleness: a workspace running a long job with nobody reaching in looks untouched, and a
-days-old workspace someone touched a minute ago is not idle at all. There is
-deliberately **no automatic reaper**: with only this signal an "idle reaper" would in
-practice be an age-based killer wearing a policy's name, and it would eventually stop a
-workspace mid-task. Reclaim explicitly, cheapest first:
+days-old workspace someone touched a minute ago is not idle at all. It is a report for
+a human, and it is deliberately **not** what any automatic action reads.
+
+Reclaim explicitly, cheapest first:
 
 ```bash
 ape sandbox stop <ws>    # frees RAM, keeps rootfs + state, survives a reboot
 ape sandbox down <ws>    # frees disk too; state lives in host mounts anyway
 ```
+
+If the node's operator enabled **idle-stop** (`aped front --idle-stop 2h`), a workspace
+the in-guest agent reports as idle is stopped automatically — `stop`, never `down`, so
+nothing is lost and `start` brings it back. The signal is guest CPU sampled inside the
+workspace, so a long build with nobody attached counts as busy; and a workspace the node
+has never heard a heartbeat from is **never** reaped, because silence is unknown rather
+than idle. Opt out per workspace with `lifecycle.idle_stop: "off"` in `.apesandbox.yaml`
+or `--idle-stop off` on `up`. See
+[How to use a workspace as your dev container](devcontainer-workspaces.md).
 
 ## Driver choice — provisioning through the hardened units
 
@@ -274,6 +302,9 @@ two projects pinning different versions would contend for that one name.
 
 ## See also
 
+- [How to use a workspace as your dev container](devcontainer-workspaces.md) —
+  toolchain, caches, offline rebuilds, login-shell environment, port-forwarding,
+  and the full lifecycle table.
 - [How to run aped](run-aped.md) — stand up the daemon this client drives.
 - [NATS subjects & event payloads](../reference/events.md) — the frozen
   `ape.vmm` + `ape.audit` contract.
