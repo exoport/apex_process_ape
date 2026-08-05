@@ -44,11 +44,18 @@ type Command struct {
 
 // AttachStreamCommand opens an interactive streamed process over the priv socket
 // (PLAN-18 D2 OpAttach). Exactly one of Exec (a one-shot command with streamed
-// stdio) or Attach (the interactive login shell) is set — the executor relays the
-// containerd task's PTY over the connection instead of the one-shot reply.
+// stdio), Attach (the interactive login shell), or Forward (a byte pipe to a
+// guest-local TCP port) is set — the executor relays the containerd task's
+// process over the connection instead of the one-shot reply.
 type AttachStreamCommand struct {
 	Exec   *workspace.ExecRequest   `json:"exec,omitempty"`
 	Attach *workspace.AttachRequest `json:"attach,omitempty"`
+	// Forward opens a port-forward (PLAN-24 D2). It carries a PORT, not a command:
+	// the executor builds the guest argv itself from the delivered `ape`, so the
+	// forward verb cannot be turned into arbitrary in-guest execution however the
+	// request is crafted. That is why it is a distinct kind rather than an Exec the
+	// front fills in — and it audits as its own op.
+	Forward *workspace.ForwardRequest `json:"forward,omitempty"`
 }
 
 // CreateCommand is the resolved create payload. The front resolves the thin

@@ -99,6 +99,7 @@ func (v *VMM) Register(svc micro.Service) error {
 		{"resume", "resume", v.idVerb((*VMM).resume)},
 		{"exec", "exec", v.handleExec},
 		{"attach-open", "attach.open", v.handleAttachOpen},
+		{"forward-open", "forward.open", v.handleForwardOpen},
 		{"snapshot", "snapshot", v.handleSnapshot},
 		{"list", "list", v.handleList},
 		{"inspect", "inspect", v.handleInspect},
@@ -252,6 +253,70 @@ func (v *VMM) handleAttachOpen(req micro.Request) {
 		// not just its open. The OPEN record (executor-attested: SO_PEERCRED peer +
 		// policy) stays the authoritative security event on ape.audit.<node>.<op>;
 		// this correlated <op>Exit record is the front's operational outcome notice.
+		forwardAuditRecords(v.publish, v.node, completionAudit(audit, r.ID, code, runErr))
+	}()
+}
+
+// handleForwardOpen opens a port-forward session and returns the subject prefix
+// the client pipes bytes over (PLAN-24 D2).
+//
+// It is deliberately the same machinery as attach.open — the same streamed
+// process over the priv socket, the same vmmstream server session, the same
+// credit-flow framing — with one difference: the payload is bytes to a
+// guest-local TCP socket rather than a PTY, so no terminal is allocated and no
+// resize is meaningful. Keeping the transport identical is what makes a forward
+// unable to perturb a live exec or attach.
+//
+// The port crosses to the EXECUTOR as a number. The guest command is built
+// there, so this endpoint cannot be used to run something of the caller's
+// choosing inside a workspace.
+func (v *VMM) handleForwardOpen(req micro.Request) {
+	var r workspace.ForwardOpenReq
+	if !v.decode(req, &r) {
+		return
+	}
+	if strings.TrimSpace(r.ID) == "" {
+		_ = req.Error(workspace.CodeValidation, "id is required", nil)
+		return
+	}
+	if r.Port < 1 || r.Port > 65535 {
+		_ = req.Error(workspace.CodeValidation,
+			fmt.Sprintf("port %d is not a TCP port (1..65535)", r.Port), nil)
+		return
+	}
+	if v.nc == nil || v.socket == "" {
+		v.respondErr(req, fmt.Errorf("%w: port-forwarding is not available on this node", workspace.ErrUnsupported))
+		return
+	}
+
+	conn, audit, err := openExecStream(v.socket, Command{
+		Op: OpAttach, ID: r.ID,
+		Attach: &AttachStreamCommand{Forward: &workspace.ForwardRequest{Port: r.Port}},
+	})
+	forwardAuditRecords(v.publish, v.node, audit)
+	if err != nil {
+		v.respondErr(req, err)
+		return
+	}
+
+	sid := fmt.Sprintf("f%d", v.session.Add(1))
+	prefix := fmt.Sprintf("%s.exec.%s", v.Group(), sid)
+	sess, err := vmmstream.NewServerSession(v.nc, prefix, connToProcess(conn), 0)
+	if err != nil {
+		_ = conn.Close()
+		v.respondErr(req, err)
+		return
+	}
+	_ = v.nc.Flush() // fully subscribed before the client is told
+
+	_ = req.RespondJSON(workspace.ForwardOpenReply{
+		V:             workspace.WireVersion,
+		SessionID:     sid,
+		SubjectPrefix: prefix,
+	})
+	go func() {
+		defer func() { _ = conn.Close() }()
+		code, runErr := sess.Run(context.Background())
 		forwardAuditRecords(v.publish, v.node, completionAudit(audit, r.ID, code, runErr))
 	}()
 }

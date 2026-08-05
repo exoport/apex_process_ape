@@ -59,6 +59,7 @@ credential, and owns the workspace registry. ape never runs as root.
   ape sandbox capacity       Show the node's headroom (does another one fit?)
   ape sandbox costs [name]   What Claude sessions inside workspaces cost
   ape sandbox exec <name> -- <cmd>...   Run a command inside a workspace
+  ape sandbox forward <name> <port>     Reach a port inside a workspace
   ape sandbox setup <name>     Materialize the project's declared toolchain
   ape sandbox stop <name>      Stop a workspace (free RAM, keep rootfs + state)
   ape sandbox start <name>     Start a stopped workspace
@@ -86,6 +87,7 @@ Linux host with KVM + containerd + Kata.`,
 		newSandboxCapacityCmd(),
 		newSandboxCostsCmd(),
 		newSandboxAttachCmd(),
+		newSandboxForwardCmd(),
 		newSandboxSSHCmd(),
 		newSandboxExecCmd(),
 		newSandboxStopCmd(),
@@ -518,18 +520,30 @@ containerd); a shell-driver node reports the session UNSUPPORTED.`,
 	}
 }
 
+// newSandboxSSHCmd is a signpost, not a verb.
+//
+// It stays because `ape sandbox ssh` is the obvious thing to reach for, and
+// because the answer is now concrete rather than "Tier-2": sshd and ~/.ssh have
+// existed inside every workspace for a while, and what was missing was a way to
+// reach them. `forward --ssh` is that way, and it is a plain ssh target
+// afterwards — which is worth being than a wrapper that hides which ssh options
+// you can use.
 func newSandboxSSHCmd() *cobra.Command {
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "ssh <name>",
-		Short: "SSH into a workspace (Tier-2)",
+		Short: "How to ssh into a workspace (use 'ape sandbox forward --ssh')",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			// Port forwarding is resolved by aped per-VM networking (Phase 2
-			// leaves the overlay to Tier-2/Phase-3).
-			return fmt.Errorf("ssh access is resolved by aped networking (Tier-2); use 'ape sandbox exec %s -- <cmd>'", args[0])
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Fprintf(cmd.ErrOrStderr(),
+				"A workspace has no inbound reachability by design, so ssh goes through a forward:\n\n"+
+					"  ape sandbox forward %s --ssh &\n"+
+					"  ssh -p %d root@127.0.0.1\n\n"+
+					"That is also the VS Code Remote target. For a one-off command, "+
+					"'ape sandbox exec %s -- <cmd>' needs no forward at all.\n",
+				args[0], defaultSSHLocalPort, args[0])
+			return nil
 		},
 	}
-	return cmd
 }
 
 func newSandboxExecCmd() *cobra.Command {

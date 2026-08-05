@@ -62,8 +62,9 @@ func (e *Executor) handleStream(ctx context.Context, conn privConn, cmd Command,
 		e.send(conn, errorResponse(fmt.Errorf("%w: interactive attach requires the containerd driver", workspace.ErrUnsupported)))
 		return
 	}
-	if cmd.ID == "" || cmd.Attach == nil || (cmd.Attach.Exec == nil && cmd.Attach.Attach == nil) {
-		e.send(conn, errorResponse(fmt.Errorf("%w: attach requires an id and an exec or attach payload", workspace.ErrValidation)))
+	if cmd.ID == "" || cmd.Attach == nil ||
+		(cmd.Attach.Exec == nil && cmd.Attach.Attach == nil && cmd.Attach.Forward == nil) {
+		e.send(conn, errorResponse(fmt.Errorf("%w: attach requires an id and an exec, attach or forward payload", workspace.ErrValidation)))
 		return
 	}
 
@@ -72,10 +73,23 @@ func (e *Executor) handleStream(ctx context.Context, conn privConn, cmd Command,
 		proc workspace.Process
 		err  error
 	)
-	if cmd.Attach.Exec != nil {
+	switch {
+	case cmd.Attach.Forward != nil:
+		// A forward carries a PORT, and the argv is built HERE, in the root
+		// executor, from that port and this node's own delivered `ape`. The front
+		// never supplies it. That keeps the forward verb from being a second way to
+		// run an arbitrary command in a guest, however the wire request is crafted —
+		// and it audits under its own op, so a forward is distinguishable from an
+		// exec in the trail rather than hiding inside one.
+		op = "ForwardVM"
+		var argv []string
+		if argv, err = sandbox.ForwardArgv(cmd.Attach.Forward.Port); err == nil {
+			proc, err = ib.OpenExec(ctx, cmd.ID, workspace.ExecRequest{Cmd: argv})
+		}
+	case cmd.Attach.Exec != nil:
 		op = "ExecVM"
 		proc, err = ib.OpenExec(ctx, cmd.ID, *cmd.Attach.Exec)
-	} else {
+	default:
 		proc, err = ib.OpenAttach(ctx, cmd.ID, *cmd.Attach.Attach)
 	}
 	if err != nil {

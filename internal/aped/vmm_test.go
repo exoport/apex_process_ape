@@ -221,7 +221,7 @@ func TestVMMDiscovery(t *testing.T) {
 	want := []string{
 		"capabilities", "create", "start", "stop", "exec", "attach.open", "freeze",
 		"unfreeze", "suspend", "resume", "snapshot", "list", "inspect", "destroy",
-		"egress.set", "costs",
+		"egress.set", "costs", "forward.open",
 	}
 	subjects := map[string]bool{}
 	for _, e := range info.Endpoints {
