@@ -2,6 +2,7 @@
 
 | ID      | Title                                                   | Status                | Created    |
 | ------- | ------------------------------------------------------- | --------------------- | ---------- |
+| PLAN-24 | Local sandbox polish — port-forward, reporting, capacity, agent, reaper | proposed | 2026-08-05 |
 | PLAN-23 | Runtime `ape` delivery into sandbox workspaces           | done                  | 2026-07-26 |
 | PLAN-22 | Sandbox toolchain / devcontainer model + lifecycle      | partially-implemented | 2026-07-23 |
 | PLAN-21 | Sandbox network egress (allowlisted, deny-by-default)   | done                  | 2026-07-23 |
@@ -34,6 +35,30 @@
 > (Netbird) and fleet/controller tiers**, which need hardware or a second node that does not
 > exist yet. What is pending, deduplicated across plans, is inventoried in
 > `_output/2026-07-26-plan-review-pending.md`.
+>
+> **Amended 2026-08-05 (PLAN-24).** "Needs hardware or a second node" was too broad. The
+> pending work splits by *what a single host can do*, and the local half is now **PLAN-24**
+> in this repo:
+>
+> - **PLAN-16 Phase 2's local half → PLAN-24 D5–D7.** The guest→host transport, the
+>   `ape sandbox-agent` heartbeat and an honest idle reaper are all one-host work. Two of
+>   Phase 2's assumptions were superseded: the bridge-IP NATS listener (PLAN-24 D5 tunnels
+>   through the existing CONNECT proxy to a loopback NATS in the same process — no new
+>   listener, no new firewall hole) and a separate agent binary (PLAN-23 already mounts
+>   `ape` into every workspace, so the agent is a subcommand). PLAN-18 D6's
+>   entrypoint launch is **reversed** — `aped` execs it, keeping the work in one repo.
+> - **PLAN-22 D5b (reaper) and D7 (devcontainer how-to) → PLAN-24 D7 and D1.** Both were
+>   the only non-hardware items left on that plan.
+> - **PLAN-18's Firecracker tier is CLOSED**, not deferred: no host-fs means the mount
+>   model the product became does not port. The answer was already in PLAN-18 D8.
+> - **Genuinely deferred** (PLAN-24 F1–F8, each with a written unpark trigger): live
+>   telemetry, Netbird overlay (shape pre-decided: host as routing peer), public previews,
+>   manual multi-node (**already works** via `ape sandbox --node`, needs only docs +
+>   credential distribution), the fleet hub/controller (blocked on a shared-storage
+>   decision, not on hardware — workspaces are not portable), the GPU/USB device tier,
+>   per-tenant isolation, and image-pin generation + multi-arch.
+>
+> Decision record: `_output/2026-08-04-unified-roadmap-decided.html`.
 >
 > The rationale below is the original 2026-07-02 sequencing record.
 

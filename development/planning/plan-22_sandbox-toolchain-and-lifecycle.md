@@ -196,6 +196,12 @@ busy nodes/laptops), or rebuild (`down`/`up`, cheap because state is durable).
   (e.g. Flutter) via `image:` for teams that want them pre-baked.
 - [~] **D7 — Docs.** PARTIAL — the descriptor reference + run-aped sections cover the toolchain/cache/lifecycle model; a dedicated devcontainer how-to is open. Devcontainer how-to; toolchain config reference; caching /
   offline / pre-warm workflow; lifecycle (freeze vs stop vs down).
+  **Being closed as PLAN-24 D1 (2026-08-05).** Cheaper than when scoped — every
+  mechanism it describes is now settled and live-validated — but larger: it must also
+  cover the **login-shell environment** (PLAN-23 D9; image v1.1.1 gives login shells the
+  image PATH), the **bingo-vs-delivered-`ape`** rule, and the **digest-pin ↔ policy
+  pairing**, none of which existed when D7 was written. The per-node digest pre-pull
+  requirement gets a mention, not a section: it is a fleet concern (PLAN-24 F5).
 
 ## Non-goals
 
@@ -231,6 +237,31 @@ So the signal is now *reported* instead: `ape sandbox ls` shows AGE and LAST-USE
 `stop` (frees RAM, keeps state) or `down`. An honest reaper additionally needs guest-side
 liveness — containerd task CPU, or a heartbeat from the in-VM agent — so that "no one has
 exec'd" and "nothing is happening" stop being conflated. That is the gate on doing it.
+
+> **The gate is being opened — PLAN-24 D7 (2026-08-05).** This section is the reason
+> the reaper exists as a *decision* rather than a default, so it is kept as written; what
+> follows is what changed.
+>
+> Both candidate signals named above turned out to be real. **Containerd task CPU** was
+> reachable with no agent at all — the driver already loads tasks
+> (`containerd_driver_linux.go:531`) — and was **rejected in favour of the in-VM
+> heartbeat** (owner's call, 2026-08-05), because the heartbeat knows *what* is running
+> rather than inferring it from a number. So PLAN-24 D7 consumes PLAN-24 D6's heartbeat,
+> which in turn needs PLAN-24 D5's transport.
+>
+> Two constraints this section's reasoning implies, made explicit in PLAN-24 D7 because
+> they are how a reaper goes wrong:
+>
+> - **`last_used_at` is not the signal, ever.** Not as a fallback, not as a tiebreak.
+> - **"Never seen a heartbeat" must mean *unknown, do not reap*** — not "idle". The agent
+>   is best-effort, so a workspace whose agent never started emits nothing, and reading
+>   that as idle would stop healthy workspaces at the threshold: a worse failure than the
+>   one the reaper fixes.
+>
+> Scope, decided: **`stop` only, never `down`** — a wrong stop costs ~30 s, a wrong
+> destroy costs work. Default 2 h, configurable, per-workspace opt-out in
+> `.apesandbox.yaml`, every stop logged with its triggering evidence. The `auto-down
+> after M` half of D5(b) is therefore **not** being built.
 
 ## Live validation (2026-07-25, node mmq4)
 

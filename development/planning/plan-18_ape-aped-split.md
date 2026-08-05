@@ -97,15 +97,53 @@ origin:
 - [x] `ape` becomes a thin NATS client speaking `Backend` over the `vmm` contract.
 
 ### Phase 3 — Device tier (GPU/USB VFIO; **needs a discrete-GPU box**)
+
+> **PLAN-24 F6 (2026-08-05) — still hardware-blocked, but cheaper than when written.**
+> `devices:` should copy PLAN-20's request-∩-node-side-closed-table pattern
+> (re-canonicalized and re-checked by the executor, reserved entries a caller cannot
+> claim) with PLAN-23's system-entry exemption shape; and a GPU variant image no longer
+> tracks an `ape` release, since PLAN-23 removed `ape` from the image entirely. Unpark
+> trigger: a discrete-GPU box **and** an `intel_iommu=on` reboot — `mmq4` has neither.
+> The warning below stands: validate cold-plug on real hardware before committing the
+> design.
 - [x] `containerdDriver` (containerd 2.x Go client) for the task-event stream + PTY fidelity + typed OCI spec (D3/D5). **Non-device half done + live-validated** (VFIO half is the next box). **Its non-device half is a Phase-2 unblock, not GPU-gated:** it is the only clean fix for the `shellDriver`/nerdctl executor-sandbox dead end (Risks) — build the OCI spec without `mount.WithTempMount` so `ape sandbox up` works through the hardened units. Can land ahead of the VFIO work.
 - [ ] VFIO orchestration (D5): `vfio-pci` bind, IOMMU-group enumeration/isolation check, baked per-tier `kata-qemu-gpu` handler, single-injection cold-plug, destroy+rebind+device reset.
 - [ ] GPU guest-image build/signing workstream (D5): NVIDIA modules signed against the pinned Kata guest kernel + NVRC.
 - [ ] Profile `devices:` (whole-IOMMU-group PCI; per-device USB via QEMU `usb-host`, aped-synthesised from a vendor:product allowlist).
 
 ### Phase 4 — Remote agent + controller + Firecracker tier (platform repo)
+
+> **Re-scoped by PLAN-24 (2026-08-05).** The "remote agent" half is not remote work at
+> all — it is host↔guest on one box, and it moved into this repo as **PLAN-24 D5–D7**.
+> The controller half stays deferred (PLAN-24 F5) with a prerequisite it did not have.
+> The Firecracker tier is **closed**, not deferred.
+
 - [ ] Leaf-node topology to the company hub; per-tenant accounts; the same `Backend`/subjects/schemas (D8).
+      **PLAN-24 F5** (hub + accounts) and **F7** (per-tenant cache + credential
+      isolation — `/cache/*` is node-wide shared and the published OAuth session is
+      single-operator, both by design). Worth recording: **no overlay is needed for
+      this** — leaf links are outbound-only to `:7422`, so nodes behind NAT reach a
+      publicly-addressable hub directly.
 - [ ] Controller: scheduling/placement from `Capabilities()`, drain, image distribution, overlays — scheduling stays **out** of the per-node API.
-- [ ] Firecracker dense/no-device tier as a **separate** node-local `firecracker-containerd` 1.7.x stack behind a third `firecrackerDriver` (D8).
+      **PLAN-24 F5.** Two facts added since: `Capabilities()` currently reports only
+      runtimes + `HostFS` (`containerd_driver_linux.go:80`) so a scheduler would be
+      blind — PLAN-24 D4 fills the *capacity* half for local use, the scheduler half
+      stays here — and image distribution must **pre-pull by digest per node**, because
+      the executor has no network. **The real blocker is not hardware:**
+      **workspaces are not portable** (host-fs mounts pin one to the disk holding its
+      repo), so elasticity needs a shared-storage decision before a controller assumes
+      today's shape. Capacity alone already works with `ape sandbox --node`
+      (PLAN-24 F4, no code — `apecmd/sandbox.go:76`).
+- [ ] ~~Firecracker dense/no-device tier as a **separate** node-local `firecracker-containerd` 1.7.x stack behind a third `firecrackerDriver` (D8).~~
+      **CLOSED by PLAN-24 (2026-08-05) — architecturally incompatible, not deferred.**
+      D8 already records that Firecracker has no PCI/VFIO and **no host-fs**, and that
+      `Create` would reject `Mount: host-fs` at admission. Since D8 was written the
+      product *became* mounts: the read-only framework (PLAN-20), `/opt/ape/bin`
+      (PLAN-23), `/cache/*` and the composed home (PLAN-22), and
+      `/workspace/<name>` — all virtio-fs binds. None of it ports, so this is not a
+      "verify virtio-fs upstream" task; the answer was already in this plan. Unpark
+      only if a dense no-host-fs workload tier is ever genuinely wanted, in which case
+      it is a different project from the one described here.
 
 ## Execution order & session handoffs (PLAN-18 is the coordinator)
 
@@ -653,6 +691,29 @@ driver-in-guest UVM/NVRC, multi-GPU NVSwitch, attestation.
 
 ### D6: Guest agent — the in-VM `ape`
 
+> **Being built as PLAN-24 D5–D7 (2026-08-05).** Three parts of the design below
+> changed; the rest stands and is carried forward verbatim.
+>
+> 1. **The transport this section assumes no longer exists.** D6 was written before
+>    PLAN-21, which walled the guest off: the netns ruleset is `policy drop` on
+>    `input`, `output` *and* `forward` (`egressnet.go:227-246`) and the host bridge
+>    table drops forwarding both ways. The replacement needs **no new listener and no
+>    new firewall hole**: the per-workspace CONNECT proxies run in-process in the
+>    de-privileged front (`egress.go:37`), which is also where the embedded NATS
+>    server listens on `127.0.0.1` (`front.go:24`, commented "guest-unreachable") — so
+>    the guest CONNECT-tunnels to a **loopback dial the front makes to itself**. See
+>    PLAN-24 D5, which also covers the system allowlist route `egress set` cannot
+>    delete, and the NATS custom dialer.
+> 2. **The startup mechanism is reversed** — see the annotation on that bullet.
+> 3. **The two hats are split across two plans.** The heartbeat half is PLAN-24 D6
+>    (it is what makes an honest idle reaper possible); *live* telemetry is PLAN-24 F1,
+>    deferred because PLAN-24 D3 gets cost/reporting from transcripts already sitting
+>    on the host (`spec.go:128-133`).
+>
+> Unchanged and load-bearing: **the subcommand form** (PLAN-23 made its delivery free
+> — `ape` is mounted into every workspace and build-info-verified, so a separate agent
+> binary is closed), **both safety belts**, and **the threat table**.
+
 - **Delivery = baked, not injected.** ~~The agent is the same `ape` binary already in
   the `ape-sandbox` image (PLAN-16 D6, `Dockerfile` pins `ARG APE_VERSION`). Baked beats
   inject-at-create: reproducible, offline, digest-pinned, and it matches NEX (whose agent
@@ -667,11 +728,22 @@ driver-in-guest UVM/NVRC, multi-GPU NVSwitch, attestation.
   all. See `plan-23_runtime-ape-delivery.md`.
 - **Startup = the OCI entrypoint, not systemd.** A Kata container-image VM has no
   init managing the entrypoint; the kata-agent spawns the image ENTRYPOINT
-  directly. Add a best-effort background `ape sandbox-agent` launch to
-  `entrypoint.sh` before `exec "$@"` (like sshd), **gated on per-VM creds
+  directly. ~~Add a best-effort background `ape sandbox-agent` launch to
+  `entrypoint.sh` before `exec "$@"` (like sshd),~~ **gated on per-VM creds
   presence** (`APE_NATS_CREDS`+`APE_NATS_URL` set). No creds → agent skipped → a
   workspace booted without per-VM creds (e.g. the image run in a test harness)
   still boots; the agent just doesn't start.
+  **REVERSED by PLAN-24 D6 (2026-08-05): `aped` launches it via `task.Exec` after
+  start, not the image entrypoint.** `entrypoint.sh` lives in the separate public
+  `exoport/ape-sandbox` repo, so the entrypoint route costs a cross-repo change, a new
+  image version, a digest re-pin and a policy update *before the agent can be tested
+  once* — and it gets no supervision. `aped` already has the exec path
+  (`containerd_driver_linux.go:422-440`) and already owns lifecycle, so it can
+  re-launch a dead agent, which is what keeps the reaper's worst failure mode
+  ("never seen a heartbeat" read as "idle") rare. The creds gate is kept exactly as
+  written above. Accepted trade-off: the agent starts *after* the workload rather than
+  before, and re-launch on `start` is `aped`'s bookkeeping. Revisit the entrypoint
+  only if something needs the agent running before the workload.
 - **Two hats over one per-VM credential.** PLAN-17 reporting (event/log/metrics/
   transcript) + PLAN-14 `ape service` (accept jobs → spawn child `ape`). Because
   both connect with the same `.creds`, `natsconn.Identity().SubjectToken` = the

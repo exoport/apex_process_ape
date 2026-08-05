@@ -150,6 +150,42 @@ interim only.
 - Netbird / private overlay (PLAN-18 Phase 4 / platform repo).
 - Re-granting network capabilities to the executor (charter-forbidden).
 
+## Extended by PLAN-24 D5 — the system route (2026-08-05)
+
+This plan's wall is what closed the transport PLAN-16 Phase 2 / PLAN-18 D6 assumed for
+the in-VM agent, and the resolution **extends this design rather than relaxing it** —
+recorded here because a reader of this plan alone would not otherwise know a second
+allowlist concept exists.
+
+**No new firewall rule and no new listener.** The proxies run in-process in the
+de-privileged front (`egress.go:37`), which is also where the embedded NATS server
+listens on `127.0.0.1` (`front.go:24`, "guest-unreachable"). The guest CONNECT-tunnels
+through the proxy port it already reaches, and the proxy's upstream dial is a **loopback
+dial the front makes to itself**. The two walls are untouched: the netns ruleset stays
+`policy drop` on `input`/`output`/`forward`, and the host table keeps dropping bridge
+forwarding both ways.
+
+What is added is a **system route**: one exact `host:port`, checked *before* both
+allowlists, constructed by the `EgressSupervisor` from `EgressConfig`.
+
+- **Why it cannot be a config change.** `ProxyConfig.AllowedPorts` defaults to
+  `{"443"}` (`proxy.go:90`) and `egress.go` never overrides it, so `CONNECT …:4222`
+  dies at `proxy.go:186`. Adding the port to `AllowedPorts` would let the guest reach
+  **any allowlisted domain** on it — a genuine widening, which is precisely what this
+  plan exists to prevent.
+- **Why the operator cannot remove it.** `egress set` rewrites the workspace's
+  `domains` list and `writeStateLocked` persists only that; a route built from
+  `EgressConfig` has no user-facing surface. Same exemption shape PLAN-23 used for
+  reserved destinations.
+- **It is not exempt from audit.** It records an ordinary decision line with a
+  distinguishing reason, so it is visible and filterable in
+  `egress-audit.jsonl` / `ape.audit.<node>.egress` — the property that makes this
+  acceptable at all.
+- **Accepted, recorded:** guest→proxy crosses the host bridge in **plaintext**
+  (`nats-server` is plaintext by default; proxy→NATS is loopback within one process).
+  Sniffing it requires root on the host, which already owns everything; per-VM
+  credentials do the authentication.
+
 ## Related
 
 - **PLAN-22** (toolchains) — depends on this for the initial toolchain/dependency

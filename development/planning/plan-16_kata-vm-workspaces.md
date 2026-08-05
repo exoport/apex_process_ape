@@ -161,8 +161,13 @@ origin:
 > note: building/publishing the image needs docker or nerdctl (none installed on this box; installing them + containerd/Kata is the outstanding host-toolchain step — needs the user + sudo). Once built, tag to the ape release and bump `sandbox.DefaultImage`.
 > 4. **Phase-1 status (updated 2026-07-27):** all in-repo Phase-1 deliverables (D1–D8) are
 > code-complete, and host-toolchain provisioning + Tier-2/3 live validation are now DONE on
-> node `mmq4`. What remains is only the Phase-2–4 platform-repo work (in-VM NATS worker,
-> Netbird overlays, previews/staging, device tier) — see `_output/2026-07-26-plan-review-pending.md`.
+> node `mmq4`. ~~What remains is only the Phase-2–4 platform-repo work (in-VM NATS worker,
+> Netbird overlays, previews/staging, device tier)~~ — see `_output/2026-07-26-plan-review-pending.md`.
+> **Corrected 2026-08-05 (PLAN-24):** "only platform-repo work" was wrong. Phase 2's
+> local half — transport, agent heartbeat, idle reaper — needs no platform repo, no
+> second node and no hardware, and is now **PLAN-24 D5–D7** in this repo. What is
+> genuinely deferred is what needs a *second host, another network product, or
+> hardware*: PLAN-24 F1–F8. See `_output/2026-08-04-unified-roadmap-decided.html`.
 
 ### Reuse — already built + unit-tested in this repo (`internal/sandbox`)
 
@@ -173,10 +178,46 @@ origin:
 
 ### Deferred to the platform repo (Phases 2–4)
 
-- [ ] **Phase 2** — in-VM `ape` **NATS worker** (folds PLAN-13/14 into the workspace); infra-network enrollment
-- [ ] **Phase 3** — **Netbird** two-overlay networking (infra + per-project, setup keys, default-deny policy); SSH/VS Code Remote over the overlay
+> **Re-scoped by PLAN-24 (2026-08-05).** The 2026-08-05 decision session split this
+> list by what a single host can do. **Phase 2's local half moved INTO this repo as
+> PLAN-24 D5–D7** — the transport, the `ape sandbox-agent` heartbeat, and the honest
+> idle reaper — because host↔guest work needs no platform repo, no second node and no
+> hardware. Two of Phase 2's assumptions were superseded in the process: the
+> bridge-IP NATS listener (PLAN-24 D5 tunnels through the existing CONNECT proxy to a
+> loopback NATS in the same process, so no new listener and no new firewall hole) and
+> a separate agent binary (PLAN-23 already mounts `ape` into every workspace, so the
+> agent is a subcommand). Phase 3's *shape* was also decided in advance — see the
+> annotation below — and Phase 4 gained a prerequisite it did not have.
+
+- [~] **Phase 2** — in-VM `ape` **NATS worker** (folds PLAN-13/14 into the workspace); ~~infra-network enrollment~~
+      **SPLIT by PLAN-24.** Local half → **PLAN-24 D5–D7** (proxy-tunnelled transport,
+      `ape sandbox-agent` heartbeat, reaper). *Live* telemetry streaming stays deferred
+      as PLAN-24 F1 — PLAN-24 D3 gets cost/reporting from transcripts that are already
+      on the host (`spec.go:128-133`: the guest `$HOME` is a rw bind from a
+      per-workspace host staging dir), so streaming is a refinement, not the gap it was
+      filed as. Infra-network enrollment belongs with Phase 3.
+- [ ] **Phase 3** — **Netbird** two-overlay networking (infra + per-project, setup keys, default-deny policy); ~~SSH/VS Code Remote over the overlay~~
+      **PLAN-24 F2, shape pre-decided:** the *host* joins as a Netbird routing peer
+      advertising the workspace subnet — the guest runs no agent, gets no UDP and no
+      DNS, and keeps PLAN-21's egress wall. Enrolling the *guest* is closed: it needs
+      outbound UDP, DNS and reachability to Netbird's coordination servers, and the
+      guest has none of the three. **SSH/VS Code Remote no longer needs the overlay** —
+      PLAN-24 D2 forwards ports over `vmmstream` for the operator, and sshd plus a
+      composed `.ssh` already exist in the guest. Unpark trigger: a second human needs
+      into a workspace.
 - [ ] **Phase 4** — preview/demo/staging environments (ephemeral per branch, auto-idle-stop, shareable); fleet scheduling; BYOC control/data-plane packaging
+      **PLAN-24 F3 + F5.** Two facts added since: *auto-idle-stop needs PLAN-24 D7*,
+      and **Netbird alone does not give public URLs** — a public preview also needs
+      wildcard DNS, TLS, a reverse proxy and register/unregister on workspace
+      lifecycle. For fleet scheduling the blocker is not hardware: **workspaces are not
+      portable**, because host-fs mounts pin one to the disk holding its repo, so
+      elasticity needs a shared-storage decision first. Capacity alone already works
+      via `ape sandbox --node` (PLAN-24 F4, no code).
 - [ ] **Device tier** — GPU (exclusive VFIO passthrough via `kata-qemu`) + USB passthrough; host IOMMU/`vfio-pci` setup; profile `devices:`
+      **PLAN-24 F6.** Cheaper than when written: `devices:` copies PLAN-20's
+      request-∩-node-table pattern with PLAN-23's system-entry exemption shape, and a
+      GPU variant image no longer tracks an `ape` release. Unpark trigger: a
+      discrete-GPU box **and** an `intel_iommu=on` reboot — `mmq4` has neither.
 
 ## Goal
 
