@@ -196,17 +196,28 @@ origin:
       on the host (`spec.go:128-133`: the guest `$HOME` is a rw bind from a
       per-workspace host staging dir), so streaming is a refinement, not the gap it was
       filed as. Infra-network enrollment belongs with Phase 3.
+      **That local half is now BUILT and live-validated (2026-08-05).** A guest reaches
+      the host through the CONNECT proxy it already has — no bridge-IP listener and no
+      firewall hole, which is what this phase assumed it would need — and
+      `ape sandbox-agent` publishes on it. What remains of Phase 2 is the rest of the
+      *worker*: `ape.svc.vm-<id>` job intake folding PLAN-13/14 into the workspace. The
+      credential already grants it; nothing subscribes yet.
 - [ ] **Phase 3** — **Netbird** two-overlay networking (infra + per-project, setup keys, default-deny policy); ~~SSH/VS Code Remote over the overlay~~
       **PLAN-24 F2, shape pre-decided:** the *host* joins as a Netbird routing peer
       advertising the workspace subnet — the guest runs no agent, gets no UDP and no
       DNS, and keeps PLAN-21's egress wall. Enrolling the *guest* is closed: it needs
       outbound UDP, DNS and reachability to Netbird's coordination servers, and the
       guest has none of the three. **SSH/VS Code Remote no longer needs the overlay** —
-      PLAN-24 D2 forwards ports over `vmmstream` for the operator, and sshd plus a
-      composed `.ssh` already exist in the guest. Unpark trigger: a second human needs
-      into a workspace.
+      PLAN-24 D2 forwards ports over `vmmstream` for the operator, and a composed
+      `.ssh` already exists in the guest. (Correction, 2026-08-05: the image *ships*
+      sshd but does **not start** it — a fresh workspace has no listening socket at
+      all — so `forward --ssh` needs one `exec` first. Documented rather than fixed:
+      starting it automatically is an image change.) Unpark trigger: a second human
+      needs into a workspace.
 - [ ] **Phase 4** — preview/demo/staging environments (ephemeral per branch, auto-idle-stop, shareable); fleet scheduling; BYOC control/data-plane packaging
-      **PLAN-24 F3 + F5.** Two facts added since: *auto-idle-stop needs PLAN-24 D7*,
+      **PLAN-24 F3 + F5.** Two facts added since: *auto-idle-stop needs PLAN-24 D7*
+      (**built 2026-08-05**, so that dependency is now satisfied — what a preview
+      environment still lacks is the public URL, not the reclaim),
       and **Netbird alone does not give public URLs** — a public preview also needs
       wildcard DNS, TLS, a reverse proxy and register/unregister on workspace
       lifecycle. For fleet scheduling the blocker is not hardware: **workspaces are not

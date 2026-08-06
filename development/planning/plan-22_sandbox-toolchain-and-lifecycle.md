@@ -181,7 +181,14 @@ busy nodes/laptops), or rebuild (`down`/`up`, cheap because state is durable).
 - [x] **D4 — Durable state mounts.** DONE 2026-07-24 — a CLOSED cache table (asdf/go/cargo/npm/pub) mounted at `/cache/<name>` with the toolchain env derived SERVER-SIDE, so a caller picks a cache name and never a GOPATH. Caches live outside the guest home on purpose (`/sandbox/home` is a system mount). Standard host-cache mount presets (asdf dir,
   `~/go`, `~/.cargo`, …) via the PLAN-20 mount model; per-project `volume`
   option; docs on shared-vs-isolated.
-- [~] **D5 — Lifecycle.** PARTIAL 2026-07-24: (a) `ape sandbox stop`/`start` exposed. (c) reconcile-on-startup drops registry rows whose container is gone (conservative: a non-not-found containerd error aborts rather than pruning on a bad read). (b) idle reaper / TTL NOT DONE, deliberately — see "Why no reaper" below. The
+- [~] **D5 — Lifecycle.** PARTIAL 2026-07-24, **(b) CLOSED 2026-08-05 by PLAN-24 D7** —
+  the idle reaper shipped once a signal existed that was not `last_used_at`
+  (`internal/aped/reaper.go`; `aped front --idle-stop`, off by default, per-workspace
+  `lifecycle.idle_stop`). It **stops only**: the `auto-down after M` half of (b) is
+  cancelled, not pending — a wrong stop costs ~30 s, a wrong destroy costs work.
+  Per-workspace TTL is likewise not built; the threshold override covers the case it
+  was invented for. **Still open in D5: auto-start of flagged keep-alive workspaces.**
+  Original text follows. (a) `ape sandbox stop`/`start` exposed. (c) reconcile-on-startup drops registry rows whose container is gone (conservative: a non-not-found containerd error aborts rather than pruning on a bad read). (b) idle reaper / TTL NOT DONE, deliberately — see "Why no reaper" below. The
   *signal* now exists (`last_used_at`, stamped on exec/attach/start and surfaced as
   `ape sandbox ls --idle`), so the decision is reported to an operator rather than
   automated. Auto-start of flagged keep-alive workspaces is also open. (a) **Expose** the existing `Stop`/`Start` as `ape
@@ -194,7 +201,13 @@ busy nodes/laptops), or rebuild (`down`/`up`, cheap because state is durable).
   keep-alive workspaces. Keep `freeze`/`stop`/`down` semantics distinct + documented.
 - [x] **D6 — Optional image variants.** Documented in the image README (`image:` override). Document building heavy-stack variants
   (e.g. Flutter) via `image:` for teams that want them pre-baked.
-- [~] **D7 — Docs.** PARTIAL — the descriptor reference + run-aped sections cover the toolchain/cache/lifecycle model; a dedicated devcontainer how-to is open. Devcontainer how-to; toolchain config reference; caching /
+- [x] **D7 — Docs.** **CLOSED 2026-08-05 by PLAN-24 D1** —
+  [docs/how-to/devcontainer-workspaces.md](../../docs/how-to/devcontainer-workspaces.md).
+  It covers what D7 asked for (caching / offline / pre-warm, freeze vs stop vs down in
+  one table) plus the three things that did not exist when D7 was written: the
+  login-shell environment, the bingo-vs-delivered-`ape` rule, and the digest-pin ↔
+  policy pairing. The idle-stop row was added to that table by PLAN-24 D7, and
+  `lifecycle.idle_stop` to the descriptor reference. Original text follows. Devcontainer how-to; toolchain config reference; caching /
   offline / pre-warm workflow; lifecycle (freeze vs stop vs down).
   **Being closed as PLAN-24 D1 (2026-08-05).** Cheaper than when scoped — every
   mechanism it describes is now settled and live-validated — but larger: it must also

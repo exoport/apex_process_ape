@@ -691,8 +691,16 @@ driver-in-guest UVM/NVRC, multi-GPU NVSwitch, attestation.
 
 ### D6: Guest agent — the in-VM `ape`
 
-> **Being built as PLAN-24 D5–D7 (2026-08-05).** Three parts of the design below
-> changed; the rest stands and is carried forward verbatim.
+> **BUILT and live-validated as PLAN-24 D5–D7 (2026-08-05).** Three parts of the
+> design below changed; the rest stands and is carried forward verbatim.
+>
+> What shipped: `ape sandbox-agent` (`internal/apecmd/sandbox_agent.go`), the system
+> route + CONNECT dialer that carry it (`internal/sandbox/agentroute.go`,
+> `internal/natsconn/proxydial.go`), and `aped`-side supervision
+> (`internal/sandbox/containerd_agent_linux.go`). D6's **threat table stands
+> unchanged**, and both safety belts are in place — the server denies `ape.vmm.>` to
+> every per-VM credential, and the subcommand carries no vmm-request-builder code
+> path, asserted by a test that parses the source rather than by a comment.
 >
 > 1. **The transport this section assumes no longer exists.** D6 was written before
 >    PLAN-21, which walled the guest off: the netns ruleset is `policy drop` on

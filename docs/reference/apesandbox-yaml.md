@@ -28,6 +28,10 @@ egress:
 toolchain:
   tool_versions: .tool-versions
   bingo: true
+
+# --- lifecycle: what the node's automatic housekeeping may do to this workspace
+lifecycle:
+  idle_stop: "4h"   # or "off" — the node's threshold applies if omitted
 ```
 
 ## Everything here is a request, never a grant
@@ -118,6 +122,41 @@ toolchain:
 
 Prefer referencing the native files so there is one source of truth for versions.
 
+### `lifecycle`
+
+```yaml
+lifecycle:
+  idle_stop: "4h"   # a duration, or "off" to exempt this workspace
+```
+
+What the node's automatic housekeeping may do to this workspace.
+
+`idle_stop` overrides the node's idle-stop threshold. Omit it and the node's own
+setting applies; set `"off"` and this workspace is never auto-stopped. The reaper
+**stops**, never destroys — state is kept and `ape sandbox start` revives it.
+
+| Value | Meaning |
+| --- | --- |
+| absent | Use the node's threshold (`aped front --idle-stop`), whatever it is. |
+| a duration (`30m`, `4h`) | Use this instead of the node's — shorter or longer. |
+| `"off"` (also `never`, `false`) | Never auto-stop this workspace. |
+
+`0` is rejected rather than treated as "off": it most plausibly means "never", and
+reading it as "stop immediately" would reap the workspace the moment it went quiet.
+
+Set it when you know something the node cannot see — a workspace hosting a
+long-running service rather than a session, or one whose work is I/O-bound enough
+to read as idle. Like everything else here it is a **request**: it can only narrow
+or disable what the node would do, never make a node stop a workspace it would
+otherwise leave alone, and a node with its reaper off ignores it entirely.
+
+The signal is guest CPU sampled *inside* the workspace, not "when did someone last
+exec" — so a long build with nobody attached counts as busy. A workspace the node
+has never heard a heartbeat from is never reaped: silence is unknown, not idle.
+
+`--idle-stop` on `ape sandbox up` overrides this file, and `ape sandbox ls` shows
+the effective setting per workspace in its `IDLE-STOP` column.
+
 ## The framework mount
 
 The framework is **not** declared here — it is a system mount aped applies on its
@@ -146,6 +185,10 @@ repos, caches and the framework all live in durable host mounts, so nothing is l
 The one exception is `egress:`, because that is enforced by a host-side proxy rather
 than by the container: `ape sandbox egress set <ws> --domain …` re-points a running
 workspace, and the guest keeps the same `HTTPS_PROXY`.
+
+`lifecycle.idle_stop` is read at create and recorded with the workspace, because
+the reaper consults it hours later — long after the request is gone. Changing it
+therefore needs `down` + `up` (or `--idle-stop` on the next `up`).
 
 ## Mounting a project under `/home`
 
