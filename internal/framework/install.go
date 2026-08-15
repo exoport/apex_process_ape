@@ -99,6 +99,12 @@ type UpdateSummary struct {
 	OperatingRulesSkipped   bool `json:"operatingRulesSkipped"   yaml:"operatingRulesSkipped"`
 	ClaudeMdCreated         bool `json:"claudeMdCreated"         yaml:"claudeMdCreated"`
 	ManagedBlockUpdated     bool `json:"managedBlockUpdated"     yaml:"managedBlockUpdated"`
+
+	// TerminalContractsInstalled reports whether the framework carried a
+	// per-skill terminal-contract table (PLAN-25 Gate C). False means the
+	// framework predates it — version-skew suppression, not a failure;
+	// ape then runs no contract check.
+	TerminalContractsInstalled bool `json:"terminalContractsInstalled" yaml:"terminalContractsInstalled"`
 }
 
 // ValidationError signals the framework repo is in a state that
@@ -255,6 +261,10 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if err != nil {
 		return nil, err
 	}
+	contractsInstalled, err := installTerminalContracts(opts.FrameworkRepo, opts.ProjectRoot)
+	if err != nil {
+		return nil, err
+	}
 	// For Update (doBootstrap=false), preserve the existing ConfigSource
 	// values rather than overwriting with zeros. This keeps the
 	// project_name + extensions recorded by the original Setup.
@@ -304,8 +314,34 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			OperatingRulesSkipped:   opRules.Skipped,
 			ClaudeMdCreated:         opRules.ClaudeMdCreated,
 			ManagedBlockUpdated:     opRules.BlockUpdated,
+
+			TerminalContractsInstalled: contractsInstalled,
 		},
 	}, nil
+}
+
+// installTerminalContracts copies the framework's per-skill terminal-
+// contract table into the project (PLAN-25 Gate C). Reports whether the
+// framework repo carried one.
+//
+// A framework that predates the file is a no-op, not an error — the same
+// version-skew suppression installOperatingRules uses. That is what lets
+// the two repos ship in either order: a framework carrying the table
+// before ape reads it is inert, and an ape reading it before the
+// framework ships it finds nothing and runs no check.
+func installTerminalContracts(frameworkRepo, projectRoot string) (bool, error) {
+	src := filepath.Join(frameworkRepo, SubtreeTerminalContracts)
+	if _, err := os.Stat(src); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat terminal-contracts table: %w", err)
+	}
+	dst := filepath.Join(projectRoot, ProjectTerminalContracts)
+	if err := CopyFile(src, dst); err != nil {
+		return false, fmt.Errorf("copy terminal-contracts table: %w", err)
+	}
+	return true, nil
 }
 
 // operatingRulesResult reports what installOperatingRules did. Managed

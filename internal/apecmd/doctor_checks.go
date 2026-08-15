@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/contract"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/framework"
+	"github.com/exoport/apex_process_ape/internal/hookdrift"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/exoport/apex_process_ape/internal/updatecache"
@@ -516,6 +518,91 @@ func checkPriceTableCoverage(_ context.Context, env doctorEnv) CheckResult {
 			"then upgrade ape, or persist rates locally with `ape costs update --from <file>` and " +
 			"`ape costs reprice --write`.",
 		FixCommand: "ape costs coverage",
+	}
+}
+
+// checkTerminalContracts reports whether the framework's per-skill
+// terminal-contract table is installed, and how many skills it enrols.
+//
+// The check itself is silent at run time — an absent table simply enrols
+// nothing — which is the right default (most projects have no table) but
+// leaves no way to tell an inactive check from a passing one. That is the
+// same "believed-present protection" trap checkHookContractDrift exists
+// to avoid, so the answer lives here: silent during runs, discoverable on
+// demand.
+func checkTerminalContracts(_ context.Context, env doctorEnv) CheckResult {
+	if env.ProjectRoot == "" || !isProjectRoot(env.ProjectRoot) {
+		return CheckResult{Status: StatusInfo, Message: "no project root resolved"}
+	}
+	tbl, err := contract.Load(env.ProjectRoot)
+	if err != nil {
+		return CheckResult{
+			Status:      StatusWarn,
+			Message:     fmt.Sprintf("%s unreadable: %v", contract.TableFile, err),
+			Remediation: "Terminal-contract checks are disabled until the table parses. Re-run `ape framework update` to restore it.",
+			FixCommand:  "ape framework update",
+		}
+	}
+	if tbl.Len() == 0 {
+		return CheckResult{
+			Status: StatusInfo,
+			Message: fmt.Sprintf("%s not installed — no run is checked for a terminal contract",
+				contract.TableFile),
+			Remediation: "The framework declares which skills end a run with a machine-readable " +
+				"return block. Without the table ape cannot tell a batch that finished from one " +
+				"that silently stopped early. `ape framework update` installs it, if your " +
+				"framework version ships one.",
+			FixCommand: "ape framework update",
+		}
+	}
+	msg := fmt.Sprintf("%d skill(s) enrolled: %s", tbl.Len(), strings.Join(tbl.Skills(), ", "))
+	if len(tbl.Warnings) > 0 {
+		return CheckResult{
+			Status:      StatusWarn,
+			Message:     msg + " — " + strings.Join(tbl.Warnings, "; "),
+			Remediation: "Rows that do not parse are skipped, so those skills are unchecked.",
+		}
+	}
+	return CheckResult{Status: StatusOK, Message: msg}
+}
+
+// checkHookContractDrift reports whether the hook-payload fields ape's
+// step-completion gates depend on are still present in the events the
+// locally-installed Claude Code is emitting.
+//
+// The failure this guards against is silent: a renamed field does not
+// error, it just stops the gate firing, and ape goes back to reporting
+// success on runs that did nothing. That is strictly worse than having no
+// gate, because it turns an absent protection into a believed-present
+// one. Same shape of problem as the price table drifting under a released
+// binary, and the same answer — read what the harness is actually
+// emitting rather than what it emitted at release time.
+func checkHookContractDrift(_ context.Context, env doctorEnv) CheckResult {
+	rep, err := hookdrift.Observe(env.ProjectRoot, time.Now().Add(-hookdrift.DefaultWindow))
+	if err != nil {
+		return CheckResult{Status: StatusSkip, Message: fmt.Sprintf("could not read run logs: %v", err)}
+	}
+	if !rep.Observed() {
+		return CheckResult{
+			Status:  StatusSkip,
+			Message: "no interactive runs in the last 30 days — hook contract not verified",
+		}
+	}
+	if rep.OK() {
+		return CheckResult{Status: StatusOK, Message: rep.Summary()}
+	}
+	names := make([]string, 0, 2)
+	for _, o := range rep.Drifted() {
+		names = append(names, fmt.Sprintf("%s absent from all %d %s payload(s)", o.Field, o.Seen, o.Event))
+	}
+	return CheckResult{
+		Status:  StatusWarn,
+		Message: strings.Join(names, "; ") + " — " + rep.Summary(),
+		Remediation: "Claude Code no longer sends a hook field ape's step-completion gates rely on. " +
+			"Those gates are now silently inactive: a run whose agent yields while a spawned " +
+			"agent is still outstanding can again be reported as a success having done nothing. " +
+			"Upgrade ape; if this persists on the latest ape, report it — the hook contract has moved.",
+		FixCommand: "ape update",
 	}
 }
 

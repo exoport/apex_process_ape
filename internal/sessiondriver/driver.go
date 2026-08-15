@@ -32,12 +32,21 @@ func parseHookEnvelope(payload json.RawMessage) hookEnvelope {
 // transcript_path there re-scans main and double-counts it as a
 // phantom sub, the v0.0.34 2×-main signature).
 //
+// BackgroundTasks / LastAssistantMessage ride on Stop + SubagentStop;
+// ToolName / ToolResponse on Pre/PostToolUse. BackgroundTasks is a
+// pointer so an absent field stays distinguishable from an empty one —
+// both complete the step, but only "absent" is contract drift.
+//
 //nolint:tagliatelle // decodes Claude Code's snake_case hook payload; the wire shape is fixed
 type hookEnvelope struct {
-	TranscriptPath      string `json:"transcript_path"`
-	SessionID           string `json:"session_id"`
-	AgentTranscriptPath string `json:"agent_transcript_path"`
-	AgentID             string `json:"agent_id"`
+	TranscriptPath       string            `json:"transcript_path"`
+	SessionID            string            `json:"session_id"`
+	AgentTranscriptPath  string            `json:"agent_transcript_path"`
+	AgentID              string            `json:"agent_id"`
+	BackgroundTasks      *[]BackgroundTask `json:"background_tasks"`
+	LastAssistantMessage string            `json:"last_assistant_message"`
+	ToolName             string            `json:"tool_name"`
+	ToolResponse         json.RawMessage   `json:"tool_response"`
 }
 
 // DefaultIdleTimeout is the maximum quiet window WaitStepDone tolerates
@@ -140,6 +149,24 @@ type Driver struct {
 	ptyProbe func() (at time.Time, ok bool)
 
 	stepDoneCh chan struct{}
+	// fatalCh carries a condition WaitStepDone must fail on immediately
+	// rather than wait out: today, a detached agent that can never report
+	// back (PLAN-25 Gates A/B). Buffered + drop-on-full like stepDoneCh so
+	// the bridge accept goroutine never blocks; the first fatal wins,
+	// which is the right one — later ones are consequences of it.
+	fatalCh chan error
+
+	// stopMu guards the deferred-stop bookkeeping below.
+	stopMu sync.Mutex
+	// deferredStops counts Stop hooks withheld from stepDoneCh because
+	// work was still outstanding, and deferredTasks holds the most recent
+	// blocking set. Diagnostics only — the gate itself is stateless, and
+	// each Stop re-decides from its own payload snapshot.
+	deferredStops int
+	deferredTasks []BackgroundTask
+	// stepSkill labels the running step in a DetachedAgentError. Empty on
+	// the `ape prompt` path, which has no skill.
+	stepSkill string
 
 	activityMu   sync.Mutex
 	lastActivity time.Time
@@ -173,8 +200,27 @@ func NewDriver(getRunLog func() *runlog.Writer, idleTimeout time.Duration) *Driv
 		maxDuration:  DefaultMaxDuration,
 		idleErrLabel: "session",
 		stepDoneCh:   make(chan struct{}, 64),
+		fatalCh:      make(chan error, 1),
 		subSessions:  map[string]*SubCapture{},
 	}
+}
+
+// SetStepSkill labels the currently-running step so a detached-agent
+// failure names the skill that spawned it. The pipeline runner sets it
+// per step; `ape prompt` leaves it empty.
+func (d *Driver) SetStepSkill(skill string) {
+	d.stopMu.Lock()
+	d.stepSkill = skill
+	d.stopMu.Unlock()
+}
+
+// DeferredStops reports how many Stop hooks this step withheld because
+// work was still outstanding, plus the most recent blocking set. Used by
+// the step-end diagnostic; zero on every normal run.
+func (d *Driver) DeferredStops() (n int, tasks []BackgroundTask) {
+	d.stopMu.Lock()
+	defer d.stopMu.Unlock()
+	return d.deferredStops, d.deferredTasks
 }
 
 // SetFlushGrace overrides the Stop→scan flush window. Test seam.
@@ -261,17 +307,101 @@ func (d *Driver) SignalStepDone() {
 	}
 }
 
+// SignalStepFatal posts a condition WaitStepDone must fail on at once
+// instead of waiting out. Non-blocking; the first fatal wins.
+func (d *Driver) SignalStepFatal(err error) {
+	if err == nil {
+		return
+	}
+	select {
+	case d.fatalCh <- err:
+	default:
+	}
+}
+
 // DrainStepDone discards any buffered step-done signals so the next
 // WaitStepDone blocks on a fresh Stop, not a stale one left over from a
-// prior step.
+// prior step. It also clears any pending fatal and the deferred-stop
+// bookkeeping, so one step's detached agent cannot fail the next.
 func (d *Driver) DrainStepDone() {
-	for {
+	for drained := false; !drained; {
 		select {
 		case <-d.stepDoneCh:
 		default:
-			return
+			drained = true
 		}
 	}
+	select {
+	case <-d.fatalCh:
+	default:
+	}
+	d.stopMu.Lock()
+	d.deferredStops = 0
+	d.deferredTasks = nil
+	d.stopMu.Unlock()
+}
+
+// NoteHook applies the completion gates to one hook event. Both driver
+// paths call it — `ape prompt` via Driver.FeedHook, the pipeline/task
+// runner via interactiveCore.FeedHook — so the two share one
+// implementation rather than drifting apart.
+//
+// Stop is the interesting case. ape used to treat every Stop as step
+// completion, which meant an orchestrator that ended its turn while a
+// spawned agent was still outstanding tore the run down and reported
+// success with no work done. The harness already says otherwise in the
+// payload: `background_tasks` lists what was still running when the turn
+// ended, with foreground work already filtered out. So a Stop completes
+// the step only when nothing blocking is outstanding.
+//
+// PostToolUse catches the same defect one step earlier and with better
+// context, at the spawn that caused it.
+func (d *Driver) NoteHook(event string, payload json.RawMessage) {
+	switch event {
+	case ipc.HookPostToolUse:
+		if err := classifyAgentSpawn(parseHookEnvelope(payload)); err != nil {
+			err.Skill = d.skill()
+			d.SignalStepFatal(err)
+		}
+	case ipc.HookStop:
+		d.noteStop(parseHookEnvelope(payload))
+	}
+}
+
+// noteStop applies the Stop-time gate. Stateless by design: each Stop
+// re-decides from its own snapshot, so a dropped or reordered hook
+// cannot leave the gate stuck.
+func (d *Driver) noteStop(env hookEnvelope) {
+	verdict, blocking := classifyStop(env.BackgroundTasks)
+	switch verdict {
+	case stopFatal:
+		d.SignalStepFatal(&DetachedAgentError{
+			Source: DetectedAtStop,
+			Skill:  d.skill(),
+			Kind:   taskTeammate,
+			Tasks:  blocking,
+		})
+	case stopDefer:
+		// Withhold the step-done signal. The work in `blocking` may still
+		// report: the harness notifies the parent, a new turn starts, and a
+		// later Stop arrives with a clean snapshot. If it never does, the
+		// idle backstop bounds the wait — correct here, because a
+		// backgrounded sub-agent may legitimately run for hours and no
+		// short timer could tell "still working" from "never coming back".
+		d.stopMu.Lock()
+		d.deferredStops++
+		d.deferredTasks = blocking
+		d.stopMu.Unlock()
+	case stopComplete:
+		d.SignalStepDone()
+	}
+}
+
+// skill reads the active step's skill under stopMu.
+func (d *Driver) skill() string {
+	d.stopMu.Lock()
+	defer d.stopMu.Unlock()
+	return d.stepSkill
 }
 
 // Begin marks the session's start: it anchors the sub-agent sweep's
@@ -352,9 +482,7 @@ func (d *Driver) FeedHook(h orchestrator.HookEvent) {
 			Payload:   h.Payload,
 		})
 	}
-	if h.Event == ipc.HookStop {
-		d.SignalStepDone()
-	}
+	d.NoteHook(h.Event, h.Payload)
 }
 
 // FeedCall is the OnCall fan-out target — writes bridge-calls.jsonl.
@@ -426,6 +554,9 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 		select {
 		case <-d.stepDoneCh:
 			return nil
+		case err := <-d.fatalCh:
+			// Decidable the moment it was observed — never wait it out.
+			return err
 		case <-ctx.Done():
 			return ctx.Err()
 		case now := <-ticker.C:

@@ -385,7 +385,7 @@ func accumulateModels(path string, emit func(model, raw string, ts time.Time, ve
 		if err := json.Unmarshal(line, &al); err != nil {
 			continue
 		}
-		if al.Type != "assistant" || al.IsMeta || al.Message.Model == "" {
+		if al.Type != AssistantRowType || al.IsMeta || al.Message.Model == "" {
 			continue
 		}
 		emit(NormalizeModel(al.Message.Model), al.Message.Model, parseTurnTime(al.Timestamp), al.Version)

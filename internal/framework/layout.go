@@ -22,6 +22,13 @@ const (
 	// (setup/update skip fragment + CLAUDE.md management rather than
 	// failing), so it is deliberately NOT part of validateFrameworkLayout.
 	SubtreeOperatingRules = "_apex/apex-operating-rules.md"
+	// SubtreeTerminalContracts is the framework-owned table of per-skill
+	// terminal contracts (PLAN-25 Gate C): which skills end a run with a
+	// machine-readable return block, and the pattern that recognises it.
+	// Optional in the framework repo, on the same version-skew terms as
+	// SubtreeOperatingRules — a framework that predates it installs
+	// nothing and ape simply runs no contract check.
+	SubtreeTerminalContracts = "_apex/terminal-contracts.csv"
 )
 
 // Project-side paths, relative to the project root the user is
@@ -37,6 +44,9 @@ const (
 	// the repo-root file carrying the managed @import of it.
 	ProjectOperatingRules = "_apex/apex-operating-rules.md"
 	ProjectClaudeMd       = "CLAUDE.md"
+	// ProjectTerminalContracts is where the per-skill terminal-contract
+	// table lands in the project. Absent = no contract check runs.
+	ProjectTerminalContracts = "_apex/terminal-contracts.csv"
 )
 
 // SkillPrefix is the filename prefix that identifies framework-managed

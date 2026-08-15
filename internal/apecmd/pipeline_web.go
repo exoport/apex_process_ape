@@ -117,6 +117,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	// programmatic-web (`--web -P`) direct-write path was removed.
 	core := newInteractiveCore(runCancel, getRunLog)
 	core.applyTimeouts(cfg)
+	core.setContracts(projectRoot)
 
 	hub := orchestrator.NewHub(orchestrator.HubOptions{
 		PageHTML:         pageHTML,

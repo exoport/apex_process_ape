@@ -13,6 +13,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/bridge/config"
 	"github.com/exoport/apex_process_ape/internal/bridge/ipc"
 	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/exoport/apex_process_ape/internal/contract"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
@@ -125,6 +126,12 @@ type interactiveCore struct {
 	// dropped SubagentStop doesn't lose a sub, and a prior NoClear
 	// step's sub in the same dir isn't re-folded. Set in OnStepStart.
 	stepStartedAt time.Time
+
+	// contracts is the framework-owned per-skill terminal-contract table
+	// (PLAN-25 Gate C), loaded once per run. nil / empty enrols nothing,
+	// which is the behaviour on any project whose framework predates the
+	// table. Read-only after setContracts, which runs before any step.
+	contracts *contract.Table
 }
 
 // subSessionCapture tracks one sub-agent claude session's transcript
@@ -167,6 +174,50 @@ func newInteractiveCore(runCancel context.CancelFunc, getRunLog func() *runlog.W
 		runCancel()
 	}
 	return c
+}
+
+// setContracts loads the framework's terminal-contract table for the
+// project under test. Failure is never fatal: a missing table disables
+// the check (older framework), and a malformed one warns and disables it
+// rather than failing a run over a file ape does not own.
+func (c *interactiveCore) setContracts(projectRoot string) {
+	tbl, err := contract.Load(projectRoot)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ terminal-contract table unreadable: %v — contract checks disabled\n", err)
+		return
+	}
+	for _, w := range tbl.Warnings {
+		fmt.Fprintf(os.Stderr, "⚠ terminal-contract table: %s\n", w)
+	}
+	c.contracts = tbl
+}
+
+// checkTerminalContract reports whether the just-finished step reached
+// its declared summary step, by matching the closing assistant message of
+// its own transcript against the framework's per-skill pattern.
+//
+// Warn-only in this release. The failure mode it guards against is real,
+// but so is the failure mode it could introduce: the check depends on a
+// dispatching agent relaying its sub-skill's contract block verbatim, and
+// an agent that paraphrases would turn a framework-side quality problem
+// into a hard ape-side run failure. One release of warning-only telemetry
+// establishes the base rate first; the exit-code path lands next.
+func (c *interactiveCore) checkTerminalContract() {
+	if c.contracts.Len() == 0 {
+		return
+	}
+	c.stepMu.Lock()
+	skill := c.activeSkill
+	c.stepMu.Unlock()
+	c.transcriptMu.Lock()
+	source := c.activeTranscript
+	c.transcriptMu.Unlock()
+
+	text, ok := cost.LastAssistantText(source)
+	res := c.contracts.Check(skill, text, ok)
+	if diag := res.Diagnostic(); diag != "" {
+		fmt.Fprintf(os.Stderr, "⚠ contract: %s\n", diag)
+	}
 }
 
 // applyTimeouts threads the runConfig's idle-window + hard max-duration
@@ -326,12 +377,13 @@ func (c *interactiveCore) FeedHook(h orchestrator.HookEvent) {
 	if h.Event == ipc.HookUserPromptSubmit {
 		c.verifier.Consume(h.Payload)
 	}
-	if h.Event == ipc.HookStop {
-		// Signal step-done through the Driver's channel; WaitStepDone
-		// is the only consumer. Non-blocking buffer + drop avoids any
-		// chance of blocking the bridge accept loop.
-		c.driver.SignalStepDone()
-	}
+	// Apply the completion gates. A Stop completes the step only when the
+	// payload reports nothing blocking still outstanding, and an Agent-tool
+	// spawn that detached into a teammate fails the step at once. Signalling
+	// happens inside NoteHook through the Driver's channels; WaitStepDone is
+	// the only consumer, and the non-blocking buffered sends mean the bridge
+	// accept loop can never stall here.
+	c.driver.NoteHook(h.Event, h.Payload)
 }
 
 // FeedCall is the OnCall fan-out target — writes the runlog
@@ -371,6 +423,9 @@ func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 	c.activeStep = pipeline.StepLabel(info.Stage, info.StepIdx+1, info.Skill)
 	c.activeSkill = info.Skill
 	c.stepMu.Unlock()
+	// Label the step on the Driver so a detached-agent failure names the
+	// skill that spawned it, not just the stage/step index the runner adds.
+	c.driver.SetStepSkill(info.Skill)
 	c.publisher().StepStart(info.Stage, info.StepIdx+1, info.Skill, info.Agent, info.Model)
 	// PLAN-19 D4: point the Driver's child-liveness probe at this stage's
 	// PTY session so a step-termination diagnostic reports whether the
@@ -501,6 +556,11 @@ func (c *interactiveCore) StepTelemetry(stage string, stepIdx int) (tele *pipeli
 	// reusable slice extracted into sessiondriver and shared with
 	// `ape prompt`.
 	st := sessiondriver.ScanStep(params)
+	// Gate C runs here rather than at Stop-hook receipt because ScanStep
+	// has just paid the transcript flush grace — claude buffers its JSONL
+	// writes, so the closing assistant turn may not be on disk when the
+	// Stop fires.
+	c.checkTerminalContract()
 	if st.Advance != nil {
 		// Advance the per-stage baseline for the next step's delta.
 		c.transcriptMu.Lock()
@@ -646,6 +706,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 
 	core := newInteractiveCore(runCancel, getRunLog)
 	core.applyTimeouts(cfg)
+	core.setContracts(projectRoot)
 
 	// PLAN-13: optional NATS eventing + transcript upload. Fire-and-forget —
 	// conn is nil when NATS is off or unreachable, and every publish/upload

@@ -1,5 +1,9 @@
 package cost
 
+// AssistantRowType is the transcript `type` of a row carrying an
+// assistant turn. Every reader in this package filters on it.
+const AssistantRowType = "assistant"
+
 // AssistantLine is the minimal shape scanTurns extracts from each JSONL
 // row. Lines that don't have `type:"assistant"` are skipped.
 //

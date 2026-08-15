@@ -154,7 +154,7 @@ func scanTurns(r io.Reader) ([]TurnRecord, error) {
 		if err := json.Unmarshal(sc.Bytes(), &al); err != nil {
 			continue
 		}
-		if al.Type != "assistant" || al.IsMeta {
+		if al.Type != AssistantRowType || al.IsMeta {
 			continue
 		}
 		model := NormalizeModel(al.Message.Model)

@@ -523,3 +523,59 @@ func TestFrameworkImportEdge(t *testing.T) {
 		t.Fatal(errors.New("doctor_checks.go missing"))
 	}
 }
+
+// mustWriteContracts materialises _apex/terminal-contracts.csv (or just
+// the _apex/ dir when body is empty) and returns the project root.
+func mustWriteContracts(t *testing.T, body string) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "_apex"), 0o755); err != nil {
+		t.Fatalf("mkdir _apex: %v", err)
+	}
+	if body != "" {
+		if err := os.WriteFile(filepath.Join(root, "_apex", "terminal-contracts.csv"), []byte(body), 0o600); err != nil {
+			t.Fatalf("write table: %v", err)
+		}
+	}
+	return root
+}
+
+// TestCheckTerminalContracts_NotInstalled: an absent table disables the
+// terminal-contract check entirely, and doctor is the only place that
+// says so. INFO, not WARN — most projects legitimately have no table.
+func TestCheckTerminalContracts_NotInstalled(t *testing.T) {
+	res := checkTerminalContracts(context.Background(), doctorEnv{ProjectRoot: mustWriteContracts(t, "")})
+	if res.Status != StatusInfo {
+		t.Fatalf("absent table should be INFO; got %q (%s)", res.Status, res.Message)
+	}
+	if !strings.Contains(res.Message, "not installed") || !strings.Contains(res.Message, "no run is checked") {
+		t.Errorf("message must say the check is inactive; got %q", res.Message)
+	}
+}
+
+// TestCheckTerminalContracts_Enrolled reports what is actually covered,
+// so an operator can tell an active check from an inactive one.
+func TestCheckTerminalContracts_Enrolled(t *testing.T) {
+	root := mustWriteContracts(t, "skill,pattern\napex-story-batch-dev,^run_status:\napex-epic-batch-review,^epics:\n")
+	res := checkTerminalContracts(context.Background(), doctorEnv{ProjectRoot: root})
+	if res.Status != StatusOK {
+		t.Fatalf("an installed table should be OK; got %q (%s)", res.Status, res.Message)
+	}
+	if !strings.Contains(res.Message, "2 skill(s) enrolled") ||
+		!strings.Contains(res.Message, "apex-epic-batch-review") {
+		t.Errorf("message must name the enrolled skills; got %q", res.Message)
+	}
+}
+
+// A row that does not parse leaves that skill unchecked; say so rather
+// than reporting full coverage.
+func TestCheckTerminalContracts_BadRowWarns(t *testing.T) {
+	root := mustWriteContracts(t, "skill,pattern\ngood,^ok:\nbroken,^(unclosed\n")
+	res := checkTerminalContracts(context.Background(), doctorEnv{ProjectRoot: root})
+	if res.Status != StatusWarn {
+		t.Fatalf("an unparsable row should WARN; got %q (%s)", res.Status, res.Message)
+	}
+	if !strings.Contains(res.Message, "1 skill(s) enrolled") || !strings.Contains(res.Message, "broken") {
+		t.Errorf("message must name the skipped row; got %q", res.Message)
+	}
+}

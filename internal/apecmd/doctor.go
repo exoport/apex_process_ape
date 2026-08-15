@@ -137,6 +137,8 @@ var allChecks = []doctorCheck{
 	{Name: "permissions.home_claude", Run: checkPermissionsHomeClaude},
 	{Name: "ape.update_available", Run: checkApeUpdateAvailable},
 	{Name: "cost.price_table_coverage", Run: checkPriceTableCoverage},
+	{Name: "hooks.contract_drift", Run: checkHookContractDrift},
+	{Name: "framework.terminal_contracts", Run: checkTerminalContracts},
 	{Name: "kvm.available", Run: checkKVMAvailable},
 	{Name: "containerd.running", Run: checkContainerdRunning},
 	{Name: "kata.runtime", Run: checkKataRuntime},
@@ -167,6 +169,21 @@ CLAUDE.md managed block). Project-scoped checks degrade to INFO when run
 outside a project root; the operating-rules checks only hard-fail when a
 framework install that manages them has lost the fragment, import, or
 apex-orchestrator skill.
+
+Two checks report on the step-completion gates rather than on
+prerequisites, because both protect against a failure that is otherwise
+silent:
+
+  hooks.contract_drift          whether Claude Code still sends the hook
+                                fields the gates read. If it stops, the
+                                gates stop firing without erroring.
+  framework.terminal_contracts  whether _apex/terminal-contracts.csv is
+                                installed, and which skills it enrols. No
+                                table means no run is checked for a
+                                terminal contract.
+
+Both SKIP or report INFO when there is nothing to judge — absence of
+evidence is not coverage.
 
 Exit codes:
   0  every required check passed (warnings allowed unless --strict)
