@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.0.52 (2026-08-15)
 
 - **feat(sandbox): finish the single-node workspace story (PLAN-24)** — seven
   deliverables that make a Kata VM workspace somewhere you can actually live:
@@ -59,6 +59,65 @@
     closing PLAN-22 D7 — toolchain, the durable caches, pre-warm and offline
     rebuilds, the login-shell environment, the bingo-vs-delivered-`ape` rule, the
     image-pin ↔ policy pairing, and freeze/stop/down/idle-stop in one table.
+
+- **feat: fail a step whose agent detached instead of finishing** — ape derived
+  step completion from the `Stop` hook alone, so an orchestrating skill that
+  spawned a sub-agent, said it was waiting for the result, and ended its turn was
+  indistinguishable from one that had finished. The run was torn down, a manifest
+  written, and the whole thing reported a **success with zero work done**. Two
+  captured instances on different Claude Code versions: a detached teammate under
+  2.1.232, and a still-running `subagent` under 2.1.220 that exited 0 having
+  stopped after its second story.
+  - **The harness was already saying so.** Every `Stop` payload carries
+    `background_tasks` — what was still running when the turn ended, foreground
+    work already filtered out. Across **16,965 captured `Stop` events spanning
+    Claude Code 2.1.199–2.1.233, exactly one was non-empty**, and it is the
+    2026-07-31 incident: a measured false-positive rate of zero. That beat
+    tracking `SubagentStart`/`SubagentStop` pairs, which needs cross-event
+    bookkeeping vulnerable to reordering and dropped hooks — and which would not
+    have fired at all for a teammate.
+  - **A `Stop` now completes a step only when nothing blocking is outstanding.**
+    A teammate fails it immediately; a backgrounded sub-agent or an unrecognised
+    task kind defers the signal and re-decides on the next `Stop`; shells,
+    monitors, workflows and scans are ignored. An Agent-tool result of
+    `teammate_spawned` fails at the spawn instead, naming the agent — redundant on
+    purpose, so losing one signal upstream costs redundancy, not correctness.
+  - **Teammates fail in milliseconds because non-resolvability is provable** — the
+    harness delivers their result by mailbox, never as a tool result. A
+    backgrounded sub-agent may legitimately run for hours, so that branch is
+    bounded by the existing idle backstop instead: killing a healthy sub-agent
+    abandons real work, while waiting too long only costs time. No path reaches a
+    timeout for a condition decidable at the `Stop`.
+  - **Terminal-contract check, warning-only this release.** Skills that end a run
+    with a machine-readable block are declared by the framework in
+    `_apex/terminal-contracts.csv`, matched against the closing assistant message
+    of the step's own transcript — not a hook field, so it survives the harness
+    renaming one. `ape` never learns the word `run_status`; the vocabulary stays
+    framework-owned. Warning-only because it depends on a dispatching agent
+    relaying its sub-skill's block verbatim, and a paraphrase would turn a
+    framework-side quality problem into a hard failure here.
+  - **Two new `ape doctor` checks, because a silent gate is worse than no gate.**
+    `hooks.contract_drift` sweeps the project's own `hook-events.jsonl` and reports
+    whether the fields the gates read are still present — a renamed field would not
+    error, it would just stop the gates firing. `framework.terminal_contracts`
+    reports whether the table is installed and which skills it enrols. Same
+    reasoning as `costs coverage`: the change lands on the harness's schedule,
+    under an already-released binary, where no release-time check can see it.
+  - Every input degrades safely — an absent `background_tasks`, an absent contract
+    table, an unenrolled skill and an unreadable transcript all behave exactly as
+    before, and the regression locks assert it. New fixtures under
+    `testdata/hookpayloads/` are real captures; the detached shape is no longer
+    reproducible on demand now that the framework forbids the spawn that caused it.
+    Full rationale in
+    [step-completion-gates.md](docs/explanation/step-completion-gates.md).
+
+- **chore(deps): require Go 1.26.6** — six standard-library advisories were failing
+  the govulncheck gate against 1.26.5: GO-2026-5026 (`x/net/idna` via `net/http`),
+  GO-2026-5972 (`encoding/asn1`), GO-2026-6089 (`net/http`), GO-2026-6090
+  (`crypto/tls`), GO-2026-6091 (`html/template`) and GO-2026-6218 (`net/url`). All
+  six are fixed in 1.26.6 with no workaround short of the bump. Both workflows
+  resolve Go via `go-version-file: go.mod`, so one directive covers CI and the
+  release build; the gate keeps its zero-exception allow-list.
 
 ## v0.0.51 (2026-07-28)
 
