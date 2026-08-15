@@ -53,6 +53,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [Why PTY-only execution](explanation/why-pty-only.md) — why every run drives an interactive `claude` REPL inside a PTY, and why the programmatic `claude -p` axis was removed in v0.0.36
 - [Choosing between `ape chat`, `ape task`, and `ape prompt`](explanation/chat-task-prompt.md) — the three ways ape drives a Claude session and how to pick one
 - [The per-stage interactive runtime](explanation/exec-modes.md) — process-spawn cost, context sharing, the step contract, and what hooks add
+- [Why a `Stop` hook is not proof a step finished](explanation/step-completion-gates.md) — detached agents, the four completion gates, and why they degrade safely on an older Claude Code
 - [Bridge architecture](explanation/bridge-architecture.md) — the MCP bridge, SSE broker, and orchestrator behind `--web`
 - [Why project-local pipelines](explanation/why-project-local-pipelines.md) — design rationale for moving from embedded to on-disk specs in v0.0.6
 - [Why setup and update are separate](explanation/why-setup-and-update-are-separate.md) — the v0.0.7 split of `framework update` into two commands

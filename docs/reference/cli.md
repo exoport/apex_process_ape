@@ -409,6 +409,21 @@ outside a project root; the operating-rules checks only hard-fail when a
 framework install that manages them has lost the fragment, import, or
 apex-orchestrator skill.
 
+Two checks report on the step-completion gates rather than on
+prerequisites, because both protect against a failure that is otherwise
+silent:
+
+  hooks.contract_drift          whether Claude Code still sends the hook
+                                fields the gates read. If it stops, the
+                                gates stop firing without erroring.
+  framework.terminal_contracts  whether _apex/terminal-contracts.csv is
+                                installed, and which skills it enrols. No
+                                table means no run is checked for a
+                                terminal contract.
+
+Both SKIP or report INFO when there is nothing to judge — absence of
+evidence is not coverage.
+
 Exit codes:
   0  every required check passed (warnings allowed unless --strict)
   1  at least one required check failed (or any warning under --strict)
@@ -1382,9 +1397,11 @@ Forwards live with this command, not with the workspace: Ctrl-C ends them and
 the workspace is untouched. Run several at once in separate terminals, or the
 same command twice for two ports.
 
-With --ssh you get a working ssh (and therefore VS Code Remote) target, since
-sshd and ~/.ssh already exist inside the workspace:
+--ssh gives you an ssh (and therefore VS Code Remote) target. The image ships
+sshd and aped composes ~/.ssh, but nothing starts sshd for you, so start it once
+per workspace first:
 
+  ape sandbox exec dev -- sh -c 'mkdir -p /run/sshd && /usr/sbin/sshd'
   ape sandbox forward dev --ssh &
   ssh -p 2222 root@127.0.0.1
 

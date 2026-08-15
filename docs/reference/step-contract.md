@@ -30,6 +30,10 @@ The `ContractVerifier` subscribes to `UserPromptSubmit` hook events via the brid
 
 `/clear` between steps fires its own `UserPromptSubmit` hook, but the runner sends it **outside** any active-step window (between the previous step's `EndStep` and the next step's `BeginStep`). The verifier sees `active == nil` and silently ignores it.
 
+## When a step is considered done
+
+`WaitStepDone` returns on the bridge's `Stop` hook — but since v0.0.52 a `Stop` completes the step only when the payload reports no blocking work still outstanding, and an Agent-tool spawn that detached into a teammate fails the step outright. See [step-completion-gates.md](../explanation/step-completion-gates.md) for the verdict table, the terminal-contract check, and how all of it degrades on an older Claude Code.
+
 ## Failure mode
 
 On the first violation, the verifier:
