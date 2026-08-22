@@ -8,22 +8,48 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/registry"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
 func newADRCmd() *cobra.Command {
+	family, err := registry.FamilyByName("adrs")
+	if err != nil {
+		panic(err) // the family table is a compile-time constant
+	}
 	cmd := &cobra.Command{
-		Use:   "adr",
-		Short: "Manage Architecture Decision Records",
+		Use:     "adr",
+		Aliases: []string{"adrs"},
+		Short:   "Manage Architecture Decision Records",
 	}
 
 	cmd.AddCommand(
 		newADRListCmd(),
-		newADRValidateCmd(),
 		newADRNewCmd(),
+		newLegacyValidateCmd(family),
 	)
+	cmd.AddCommand(registryVerbs(family)...)
 
+	return cmd
+}
+
+// newLegacyValidateCmd keeps `ape <family> validate` working after the
+// verb was renamed to `verify`. Hidden rather than a cobra alias, because
+// an alias appears in help and this spelling is on its way out: one
+// release as a hidden pointer, then deleted.
+//
+// It is NOT a behaviour-preserving shim. The old implementation
+// (runMarkdownDirValidate) listed .md files and printed "OK:" for each
+// without opening one; this runs the real checks. The exit code is
+// unchanged — still 0 without --strict — but the JSON payload changes
+// from {dir,count,files[]} to findings[].
+func newLegacyValidateCmd(family registry.Family) *cobra.Command {
+	cmd := newFamilyVerifyCmd(family)
+	cmd.Use = "validate"
+	cmd.Hidden = true
+	cmd.Short = "Deprecated alias for `verify`"
+	cmd.Long = "Deprecated: use `ape " + family.Singular + " verify`.\n\n" + verifyLong
 	return cmd
 }
 
@@ -69,22 +95,6 @@ func newADRListCmd() *cobra.Command {
 				}
 				return nil
 			}
-		},
-	}
-
-	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
-	return cmd
-}
-
-func newADRValidateCmd() *cobra.Command {
-	var outputFormat string
-
-	cmd := &cobra.Command{
-		Use:     "validate",
-		Short:   "Validate ADR files",
-		Example: "  ape adr validate --output-format json",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return runMarkdownDirValidate(findADRDir(), "ADR", outputFormat)
 		},
 	}
 

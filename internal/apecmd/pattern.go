@@ -6,21 +6,30 @@ import (
 	"path/filepath"
 
 	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/registry"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
 func newPatternCmd() *cobra.Command {
+	family, err := registry.FamilyByName("patterns")
+	if err != nil {
+		panic(err)
+	}
 	cmd := &cobra.Command{
-		Use:   "pattern",
-		Short: "Manage governance patterns",
+		Use:     "pattern",
+		Aliases: []string{"patterns"},
+		Short:   "Manage governance patterns",
 	}
 
 	cmd.AddCommand(
 		newPatternListCmd(),
-		newPatternValidateCmd(),
-		newPatternSyncCmd(),
+		newLegacyValidateCmd(family),
 	)
+	// This is where the third stub went: `ape pattern sync` printed "not
+	// yet implemented" alongside `ape sync patterns`, two paths to one
+	// verb. registryVerbs supplies the real one.
+	cmd.AddCommand(registryVerbs(family)...)
 
 	return cmd
 }
@@ -72,33 +81,6 @@ func newPatternListCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
 	return cmd
-}
-
-func newPatternValidateCmd() *cobra.Command {
-	var outputFormat string
-
-	cmd := &cobra.Command{
-		Use:     "validate",
-		Short:   "Validate governance patterns",
-		Example: "  ape pattern validate --output-format json",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			return runMarkdownDirValidate(findPatternsDir(), "pattern", outputFormat)
-		},
-	}
-
-	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
-	return cmd
-}
-
-func newPatternSyncCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:    "sync",
-		Short:  "Sync patterns (not yet implemented)",
-		Hidden: true,
-		Run: func(_ *cobra.Command, _ []string) {
-			fmt.Println("sync not yet implemented")
-		},
-	}
 }
 
 // findPatternsDir resolves through the project config (PLAN-25 D1); see

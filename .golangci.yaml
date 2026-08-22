@@ -187,6 +187,9 @@ linters:
       - linters:
           - tagliatelle
         path: internal/apexcfg/apexcfg\.go
+      - linters:
+          - tagliatelle
+        path: internal/registry/(registry|sync)\.go
       # PLAN-13 NATS wire contract: the ape.evt/log/metrics payloads
       # (docs/reference/events.md), the ape.blob.uri-request offload
       # request/reply, and the NATS user-JWT claim names ("sub") are all
