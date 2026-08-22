@@ -98,7 +98,7 @@ ape doctor --output-format json | jq -e '.checks[] | select(.name == "ape.update
 | `memory.size WARN`                     | Over the 40 KiB soft budget                                             | Compaction is due at the next epic close. Nothing is broken yet.                                        |
 | `registry.drift WARN`                  | A record is on disk but absent from `index.yaml`, or vice versa          | `ape registry verify --all` lists them; `ape registry sync --all` repairs what a tool can.              |
 | `story.frontmatter WARN`               | Stories are missing extension-gated keys, or carry a type mismatch      | `ape story verify` lists them. Frontmatter is authored, so these are fixed by hand.                    |
-| `sprint.divergence WARN`               | A tracker row and a story file disagree                                 | `ape sprint check` names both sides. Neither is assumed correct — a person decides, which is why this can never be more than a warn. |
+| `sprint.divergence WARN`               | A tracker row and a story file disagree, or a row key is non-conforming | `ape sprint check` names both sides. Neither is assumed correct — a person decides, which is why this can never be more than a warn. A `sprint.nonstandard_row_key` finding is the one with a mechanical fix: the row is keyed `N-M` with no slug, so it names no story file *and* the two live epic-projection implementations count it differently. |
 | `migration.pending WARN`               | A legacy `deferred-work.md` has not been converted to record files      | `ape framework update` runs it, or `ape deferred migrate --dry-run` to look first. Nothing is committed either way. |
 
 ## Project-data checks

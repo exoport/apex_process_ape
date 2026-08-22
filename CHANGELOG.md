@@ -59,6 +59,134 @@
     makes them testable at all. `gen-docs` now emits cobra aliases, which it
     never did.
 
+- **fix: the project-data commands were wrong on real projects, and the tests
+  agreed with them** — a post-implementation review of PLAN-25 against real
+  project shapes and against the Python scripts being retired. Every fixture
+  in the original tests was written alongside the code, so it agreed with the
+  code rather than with the framework.
+  - **`ape sprint check` joined on the wrong key.** A tracker rows on the
+    STORY KEY — the story file's stem — while a story's frontmatter carries a
+    separate, dotted `story_id` (`1-1_greet-a-name` vs `"1.1"`). Matching
+    rows against `story_id` matched nothing: on a real project it reported
+    every row as having no story file and every story as having no row — 24
+    findings, all false, and it could never surface the status divergence it
+    exists to find. `ape doctor`'s `sprint.divergence` row WARNed on every
+    healthy project as a result.
+  - **`ape registry verify` demanded a `file:` from every capability.**
+    `capability-index-schema.json` defines no `file` property — a capability
+    record is located by id + slug — so the check emitted one
+    `registry.file_unresolved` per entry on every project with the extension
+    on, and no `sync` could ever clear it. `sync` no longer writes a `file:`
+    into a capability entry either, which would have produced an index the
+    framework's own schema rejects.
+  - **`ape sprint reconcile --file <path>` silently stopped stamping.** The
+    timestamp was resolved only on the branch that had no `--file`, so the
+    form the framework's call sites use left `updated_at` untouched on
+    mutation. `--file` also keeps working outside a project, as the script it
+    replaces does.
+  - **`ape story verify` accepted an empty required key.** `story_id: ""`
+    passed, where `verify-story-frontmatter.py` exits 3 — exactly the
+    half-completed write a post-write gate exists to catch. An empty
+    frontmatter block is now a parse failure (2), matching the Python.
+  - **`ape sprint verify` returned four wrong exit codes.** An empty or
+    comment-only tracker gave 3 where the Python gives 2; a
+    `development_status` that is present but not a mapping gave 2 where it
+    gives 3; and the exit-5 backwards-write comparison ran on values that
+    are not 14-digit stamps, so a malformed `updated_at` on either side
+    produced a spurious 5 — whose documented repair is "re-write updated_at
+    as the value this reports", i.e. a instruction to write the malformed
+    value into the tracker. It still catches one real backwards write the
+    Python misses, where the committed value is unquoted.
+  - **`ape sprint reconcile` now verifies its write and restores on
+    failure.** The line-level edit that preserves comments is also the one
+    that can cross a line boundary; the script it replaces re-reads, asserts
+    every untouched row is unchanged, and puts the original bytes back if
+    not. That guard was lost in the port.
+  - **`ape sandbox capacity` reported an unreadable `/proc/meminfo` as a box
+    with no RAM.** PLAN-25 generalised `humanBytes` — which `ape sandbox
+    capacity` owns — so a 0-byte `team-memory.md` would render as `0 B`, and
+    that turned the capacity table's "not reported" dash into `0 B total,
+    0 B available`, three lines above a verdict that carefully distinguishes
+    the two. Capacity readings render through their own helper again.
+  - **New: `testdata/apexproject`**, a committed project fixture in the
+    shapes a real one has, and `TestContract_*` in `internal/apecmd` — the
+    framework usage contract as tests: config-variable parity with the
+    framework's own template, the install/migration disjointness derived from
+    the framework package's constants rather than a copied list, a lock test
+    proving `ape framework update` writes no commit, and the sandbox
+    framework-delivery handoff (`/opt/apex-framework`, its reserved status,
+    and the `--no-fetch --repo` pair the docs tell operators to type).
+  - **New: `TestParity_*`**, the retirement gate PLAN-25 D15 promised. It runs
+    the real Python scripts out of a framework checkout beside the commands
+    that replace them and compares exit codes, bytes and the JSON fields the
+    calling skills read. Opt-in via `APEX_FRAMEWORK_REPO`, since CI has no
+    sibling checkout.
+
+- **fix: act on the framework's PLAN-25 defect report** — five findings handed
+  over from the framework repo's own call-site audit. Its Finding 1 was the
+  `sprint check` correlation bug above, found independently on both sides.
+  - **Empty JSON arrays marshal as `[]`, never `null`.** Six payloads emitted
+    `null` on a clean run — `findings` on `story verify`, `sprint check`,
+    `deferred verify` and `registry verify`, and `changes` on
+    `sprint reconcile` and `registry sync`. `apex-defer-repair` is explicitly
+    told to take its work list from `ape deferred verify --output-format json`
+    rather than globbing, so a clean store handed it a `null` where it expects
+    a list.
+  - **Each record family's `update` help shows its own example.** All four
+    printed `ape adr update` with an `ADR-0001` id, because the families are
+    one descriptor-driven code path — so `ape feature update --help` told the
+    reader to run the wrong command with the wrong id shape against the one
+    index whose layout actually differs. Now built from the descriptor
+    (`PAT-0001`, `FEAT-1-1`, `CAP-1`).
+  - **The five commands without `--cwd` now say why.** `sprint verify` and the
+    four `doc` verbs resolve nothing from the project — every input is an
+    explicit path — so there is no project for `--cwd` to select. That is a
+    rule, not an oversight; it was just never stated. Decision 1 amended to
+    match.
+  - **The memory index size field stays `bytes`,** and ape's own prose stops
+    calling it `size`. It is what `os.Stat` returns, what the 256 KiB Read cap
+    is measured in, and what `ape memory check` already emits — a `size` in
+    one and a `bytes` in the other would be worse than either.
+
+- **feat(sprint): report a tracker row key the two epic-projection
+  implementations count differently** — new `sprint.nonstandard_row_key`
+  finding. A story row keyed `2-1`, with no separator and slug, is wrong
+  twice: it names no story file (`apex-create-story` writes
+  `{story_key}.md`, and a story key carries a slug), and
+  `reconcile-epic-status.py` does not count it toward its epic while
+  `ape sprint reconcile` does. Both readings are defensible; they are not the
+  same, so until the Python is retired the same tracker reconciles
+  differently depending on which one ran, and neither one's output would tell
+  you. Now: `ape sprint check` reports it as its own finding with the fix in
+  the message (not as a missing story file, which would send a reader off to
+  create the wrong thing), `ape doctor` surfaces it through
+  `sprint.divergence`, and `ape sprint reconcile` names the rows on every run
+  that reads one — including a no-op, because the divergence is in what was
+  counted, not in what was written — and carries them as `bare_row_keys` plus
+  a `bare_row_key_remediation` string in its JSON.
+  - **The finding names the actual rename.** When exactly one story file
+    matches the row's ordinal prefix (`7-3` and `7-3_payment-retry.md`),
+    `ape sprint check` says `rename the row \`7-3\` to \`7-3_payment-retry\``
+    rather than quoting a generic example, and suppresses the
+    `story_without_row` that file would otherwise get — one misnamed row is
+    one finding, and telling the reader to add a tracker row for a story that
+    already has one is the same misdirection as telling them to create the
+    missing file. Two candidate files is a different problem: the message
+    names both, picks neither, and suppresses nothing.
+    `ape sprint reconcile` keeps the generic form, because it is tracker-only
+    by design and never reads a story file — it says so and points at
+    `sprint check`.
+  - **When nothing matches, the finding says so.** That branch used to fall
+    back to the generic advice, whose tail points at `ape sprint check` — the
+    command printing it, having already searched and found nothing. It now
+    reports the search ("no story file matches this row") and names the two
+    real options: the story is filed under an unrelated name, or the row is
+    stale.
+  - **`candidates[]` is a field, not just prose.** Declining to pick between
+    two possible story files is a deliberate refusal; making the decider parse
+    a sentence to learn what the options were is not. Populated in the
+    one-candidate case too, so a consumer reads one field either way.
+
 ## v0.0.52 (2026-08-15)
 
 - **feat(sandbox): finish the single-node workspace story (PLAN-24)** — seven

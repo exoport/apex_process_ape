@@ -360,6 +360,17 @@ subcommand takes:
 --strict                         on every `verify` only: promote findings to exit 1
 ```
 
+**Amended 2026-08-22, after the framework's call-site audit:** `--cwd` goes on
+every subcommand *that resolves something from the project*. Five do not —
+`ape sprint verify` (its required `--file` names the tracker outright) and the
+four `ape doc` verbs (every input is an explicit path argument) — and there is
+no project for the flag to select on any of them. Adding it anyway would give
+one flag two meanings: "which project" on eleven commands and "what relative
+paths are relative to" on five. Each of the five states the omission and its
+reason in its own `Long` help, which is the part the original wording missed —
+the rule was right, it was just never written down, so a reader checking
+`ape doc shard --help` found an exception with no explanation.
+
 Diagnostics go to **stderr**; stdout carries only the payload — the stdout discipline
 PLAN-13/17 already established, and the reason a skill can pipe any of these into `jq`.
 Where the upstream plan gives a command a second format axis (`ape defer list --format
@@ -1680,6 +1691,187 @@ existed.
 | `--active-extensions` stays on `story verify --file` | The caller already has the list, it makes the gate reproducible against a file outside any project, and a drop-in replacement that quietly changed where its gating came from is the one difference nobody tests for. Falls back to D1 when absent. |
 | `runProjectMigrations` has no dry-run mode | `--dry-run` is answered by the framework-level reporter, which shows the drift alongside the pending migrations. A second dry-run path would have been an always-false parameter. |
 | `internal/apexdoc`, not `internal/doc` | `doc` reads as a package of documentation. |
+
+## What the post-implementation review found (2026-08-22)
+
+A review of this plan against the tree, and of the tree against the ten Python
+scripts it retires. **Seven defects, and one common cause: every fixture was
+written alongside the code it tests, so it agreed with the code rather than
+with the framework.** Two of the seven made a shipped command 100% false
+positives on a real project while its own test suite was green.
+
+The corrective is `testdata/apexproject` — a committed project in the shapes a
+real one has — plus `TestContract_*` (the framework usage contract) and
+`TestParity_*` (the Python differential D15 asked for and did not get).
+
+| # | Defect | Where |
+| - | ------ | ----- |
+| R1 | **`ape sprint check` joined tracker rows to story files on `story_id`.** A tracker rows on the STORY KEY (the file stem, `1-1_greet-a-name`); frontmatter carries a dotted `story_id` (`"1.1"`). They are never equal on a real project, so the command reported every row and every story as unmatched — 24 findings on a healthy fixture, and the status divergence it exists to find was unreachable. `ape doctor`'s `sprint.divergence` WARNed on every project. | `internal/sprint/check.go` |
+| R2 | **`registry.file_unresolved` on every capability entry.** `capability-index-schema.json` defines no `file` property. `sync` would also have written one, producing a schema-invalid index. D2's "zero false positives on the other 63" was asserted only against ADRs. | `internal/registry/{verify,sync}.go` |
+| R3 | **`ape sprint reconcile --file` never refreshed `updated_at`.** The timestamp was resolved only on the no-`--file` branch — and `--file` is the form the retired script's call sites use. | `internal/apecmd/sprint.go` |
+| R4 | **`ape story verify` accepted `story_id: ""`.** The Python's check is `val is None or val == ""`; the port dropped the second half — the half that catches a half-completed write. Empty frontmatter also returned 3 where the Python returns 2. | `internal/story/verify.go` |
+| R5 | **Four wrong exit codes in `ape sprint verify`.** Empty/comment-only tracker: 3 vs the Python's 2. `development_status` present but not a mapping: 2 vs 3. And the exit-5 comparison ran on non-14-digit values, so a malformed `updated_at` on either side produced a spurious 5 — whose documented repair instructs the skill to write the reported clamp, i.e. to write the malformed value into the tracker. | `internal/sprint/verify.go` |
+| R6 | **`ape sprint reconcile` dropped the post-write verification and restore.** The Python re-reads, asserts every untouched row is unchanged and the row count is stable, and puts the original bytes back on failure. The plan named three load-bearing properties for D12 and this was the missing fourth. | `internal/sprint/reconcile.go` |
+| R7 | **`ape sandbox capacity` regressed.** Generalising `humanBytes` for a 0-byte `team-memory.md` turned the capacity table's "not reported" dash into `0 B total, 0 B available` — an unreadable `/proc/meminfo` now reading as a box with no RAM, three lines above a verdict that separates the two. The comment added at the time claimed the callers "gate on presence"; the memory row did not. | `internal/apecmd/sandbox_capacity.go` |
+
+### Claims in this plan that were not true
+
+- **No golden byte-compare against any Python script existed.** D15 gates
+  every retirement on one; what shipped was expectations transcribed by hand
+  into Go tests. `TestParity_*` is the real thing, and it found R4 and R5.
+- **Two of the promised byte-goldens are unachievable, and that is fine.**
+  `<family> update` cannot be byte-identical to `render-index-update.py`
+  because the Python rewrites through `yaml.dump` and **destroys the
+  comments** — including a real ADR index's schema notes — while ape edits the
+  node tree and keeps them. `ape doc analyze`'s JSON differs in `doc_type`
+  vocabulary, `group_key`, a per-group `filename` field and the token
+  aggregation (the Python divides total chars by four; ape sums per-file
+  estimates). Neither difference reaches a field `apex-distillator` reads. The
+  acceptance criteria claiming byte-identity for these two are wrong as
+  written; the parity tests assert what is actually required instead.
+- **The `git log` lock test for D10's no-commit rule did not exist.** What
+  existed was an assertion that no `--no-commit` flag is offered.
+  `TestContract_FrameworkUpdateWritesNoCommits` runs a real install plus
+  migration in a git repo and compares `git log` byte for byte.
+- **The install/migration disjointness test asserted against a copied
+  literal list**, so it could not catch the regression it was written for — a
+  future install that writes under `development/` changes
+  `framework.Project*`, not the copy. Now derived from those constants.
+- **`ape doc shard`/`assemble` do NOT round-trip relative links in the
+  preamble.** A link in the text above the first heading is rewritten into
+  `index.md` on the way out and not rewritten back on the way in. The Python
+  does exactly the same, so this is a faithful port and not a regression — but
+  the acceptance line "byte-identical to the source" holds for section bodies
+  only. D13's finding 8 (fragment links) is confirmed: ape's assemble is
+  strictly better there.
+- **`ape <family> update` is not a drop-in "command name only" edit.** It
+  drops `--index` and `--list-key` and resolves the index from the project,
+  so the call sites need more than a rename. The behaviour — fail-fast on an
+  unknown id, before any write, with the same `OK: … round-trip parse
+  verified` line — is preserved.
+
+### Decisions left open by the review
+
+- **`ape story verify --file` accepts a UTF-8 BOM the Python rejects.** The
+  asymmetry is one-directional and safe — nothing the Python accepts is
+  rejected by ape — and the parity test states it as such rather than
+  papering over it.
+
+### R8 · The bare row key, and how a divergence gets reported instead of decided
+
+`ape sprint reconcile` counts bare `N-M` story rows; `reconcile-epic-status.py`
+matches `^(\d+)-\d+[-_]` and does not. Both readings are defensible, so for as
+long as both implementations ship, the same tracker reconciles differently
+depending on which one ran — and **neither one's output would tell you that
+happened**. That last part is the actual defect. A behavioural difference
+between two live implementations is a fact about the project, and a command
+that knows it and stays quiet is worse than one that is merely wrong.
+
+The first instinct was to pick a winner, or to gate the behaviour on the
+retirement. Both are wrong for the same reason: they hide the decision in
+`ape`. Two better framings, and the second is what shipped:
+
+**It is a compat problem.** Build a `compat.*` finding class and a registry of
+every ape/Python behavioural difference, deleted wholesale when the Python
+goes. Rejected: it is a framework for a set with one member that matters, and
+it dies on the day of the retirement — so the work is thrown away exactly when
+the codebase is most churned.
+
+**It is a tracker hygiene problem that also causes a compat difference.** A
+bare row key is *already* non-conforming against the framework's own
+convention: a row key IS a story key IS a file stem, and
+`apex-create-story` writes `{story_key}.md` with a slug. So the finding is
+durable — it stays true and useful after the Python is gone, because a bare
+row key still names no story file — and the compat difference is the *reason
+it is urgent now*, carried in the message rather than in a separate taxonomy.
+
+Reported at all three surfaces a consumer might be standing at:
+
+| Surface | What it does |
+| --- | --- |
+| `ape sprint check` | `sprint.nonstandard_row_key`, one finding per row, naming the **actual** rename when one story file matches the row's ordinal prefix. Emitted **instead of** `row_without_story` for the row *and* `story_without_row` for that file. |
+| `ape doctor` | picked up through the existing `sprint.divergence` row, no new check. |
+| `ape sprint reconcile` | names the rows on every run that reads one — **including a no-op**, because the divergence is in what was counted, not in what was written — and carries `bare_row_keys` + `bare_row_key_remediation` in the JSON. |
+
+**Not** a `--strict` failure, and not a refusal to reconcile: which name is
+right — rename the row, or rename the file — is judgment about which one the
+project meant, which is exactly the class of thing this plan's Non-goals put
+out of scope.
+
+#### R8.1 · Two corrections from the framework's second pass
+
+The first cut of R8 shipped two faults, and **one fixture coincidence hid
+both** — the same failure mode this whole review exists to call out, landing in
+the review's own new code. Its fixture used a bare row `2-1` with no story file
+beside it. The reporter's used `7-3`, with `7-3_payment-retry.md` on disk.
+
+- **The remediation was a constant carrying a worked example.** `2-1` →
+  `2-1_refuse-an-over-long-name` reads as specific, so on any project whose bare
+  row is not `2-1` the reader is handed a rename for a row that appears nowhere
+  in the finding beside it. Worse, the exact answer was already known: the same
+  run had identified the file. `sprint check` now interpolates the real pair via
+  `RemediationFor`; the constant survives, with a deliberately **generic**
+  example (`N-M` → `N-M_slug`), for the one caller that cannot do better.
+  `ape sprint reconcile` is tracker-only by design (D12: no story-file reads),
+  so it does not know what the row should have been called — it uses the generic
+  form and points at `sprint check`. That split is the design working, not a
+  gap: reconcile touches one file and is not going to start walking a folder to
+  improve a warning.
+- **The suppression covered the row side and not the story side.** `7-3`
+  correctly produced `nonstandard_row_key` rather than `row_without_story`, but
+  `7-3_payment-retry.md` still produced `story_without_row` — telling the reader
+  to add a tracker row for a story that already has one. The same misdirection,
+  arriving from the other direction, and visible only when the fix is most
+  actionable. One unambiguous candidate is now claimed by the
+  `nonstandard_row_key` finding, which carries that file's `path`, `story_id`
+  and status so both sides stay visible.
+
+Two candidates is a *different* problem rather than a worse one: the row cannot
+be renamed to both, so the message names them, picks neither, and suppresses
+nothing — each file genuinely lacks a row of its own name. The separator check
+in `MatchesBareRowKey` is what keeps `1-10_ten` from being claimed by row `1-1`;
+a prefix test alone would have.
+
+#### R8.2 · Two more from the framework's third pass, both in the same branch
+
+- **The no-candidate branch pointed at itself.** It returned
+  `BareRowKeyRemediation`, whose tail is "`ape sprint check` names the specific
+  pair" — printed *by* `ape sprint check`, which had already searched and found
+  nothing. A reader following it re-runs the command they are reading the output
+  of and gets the same sentence. The three branches of `RemediationFor` now all
+  report a fact the run established, the zero case included: "no story file
+  matches this row", plus the two real options (filed under an unrelated name,
+  or the row is stale). The constant keeps its pointer, because its one caller —
+  `ape sprint reconcile`, tracker-only by design — genuinely cannot look, and
+  the tail is honest exactly there. `RemediationFor` never returns it, and a
+  test asserts that rather than leaving it to a comment.
+- **The candidate names lived only in the message.** Declining to pick between
+  two files is a deliberate refusal to make a judgment call; making the decider
+  parse prose to learn what the options were is not the same thing, and is not
+  defensible just because the first part is. `Finding.Candidates []string` now
+  carries them — populated in the one-candidate case too, so a consumer reads
+  one field regardless of which branch it landed in.
+
+Both were wording-and-shape rather than behaviour, and both were found the same
+way as R8.1: a fixture that did not happen to exercise the branch.
+
+## What the framework's own defect report found (2026-08-22)
+
+`apex_process_framework@dac36c2` (branch `plan-57-bounded-artifacts`) audited
+~30 `ape` call sites it had authored against PLAN-25's *specified* signatures,
+by building `ape` from `7ba73c7` and running every one. **The call-site audit
+passed** — every flag exists, every positional order is right, every exit-code
+assumption holds. Five findings came out alongside it; all five are addressed.
+
+| # | Finding | Resolution |
+| - | ------- | ---------- |
+| 1 | `sprint check` correlates on `story_id` — 100% false positives | Same as R1. Found independently on both sides, which is the strongest evidence either review produced. |
+| 2 | `findings` marshals as `null`, not `[]`, on the verify payloads | Fixed, and wider than reported: six payloads, not four (`registry verify` also emitted `null`, and `changes` on `sprint reconcile` / `registry sync` had the same defect). `apex-defer-repair` reads one of these as a work list. |
+| 3 | All four family `update` commands print one hardcoded `ape adr update` example | Fixed — the example is built from the family descriptor. |
+| 4 | `--cwd` missing on 5 of 16 new subcommands | **Decision 1 amended** rather than the flag added. The five are exactly the five that resolve nothing from the project, so `--cwd` would have no referent; giving it one would mean "project root" on eleven commands and "path base" on five. Each of the five now says so in its `Long`. |
+| 5 | The memory index size field is `bytes`; three surfaces call it `size` | **Keep `bytes`** — it is what `os.Stat` returns, what the 256 KiB Read cap is measured in, and what `ape memory check` already emits. ape's own two prose sites corrected here; the framework's nine are its to change. |
+
+
 
 ### What is NOT done
 

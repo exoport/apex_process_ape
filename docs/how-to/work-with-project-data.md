@@ -114,6 +114,64 @@ no `--strict`: which side is right is judgment, and wiring it into a build
 loop would stop runs over something no tool can fix. It belongs in
 `ape doctor` and nowhere else.
 
+The join is the **story key** — the story file's stem, which is what the
+tracker rows on. A story's frontmatter `story_id` is a *different* string
+(`1-1_greet-a-name` vs `"1.1"`); it travels in the finding for legibility
+and is never correlated on.
+
+### `sprint.nonstandard_row_key`, and why it exists
+
+A story row keyed `7-3`, with no separator and slug, is reported on its own
+rather than as a missing story file:
+
+```console
+$ ape sprint check
+sprint.nonstandard_row_key  7-3  done  done
+  row key has no separator and slug, so it names no story file — and
+  `ape sprint reconcile` counts it toward epic 7 while the
+  reconcile-epic-status.py it replaces does not. rename the row `7-3` to
+  `7-3_payment-retry` to match the story file, or rename
+  `7-3_payment-retry.md` to `7-3.md`
+```
+
+Two things are wrong with such a row, and the second one is invisible
+without this check. It names no story file, because
+`apex-create-story` writes `{story_key}.md` and a story key carries a slug.
+And **the two live implementations of the epic projection disagree about
+it**: `reconcile-epic-status.py` matches story rows with `^(\d+)-\d+[-_]`,
+which requires the separator, so a bare row contributes nothing to its
+epic; `ape sprint reconcile` counts it. Until the Python is retired the
+same tracker reconciles differently depending on which one ran.
+
+**One misnamed row is one finding.** When exactly one story file could be
+the row — its stem is the row key plus a separator and a slug —
+`sprint check` names that rename outright and suppresses both of the
+findings it stands in for: no `row_without_story` for the row, and no
+`story_without_row` for the file. Either one would send the reader off to
+create something that should not exist. The finding carries the file's
+`path`, `story_id` and status so both sides are still visible.
+
+Two candidate files is a different problem, not a worse one: the row cannot
+be renamed to both, so the message names them and picks neither, and each
+file keeps its own `story_without_row`. Whichever branch it lands in, the
+candidates are in the finding's `candidates[]` field — not deciding which
+file a row meant is deliberate, but making the decider parse prose to learn
+what the options were is not.
+
+When nothing on disk matches, the finding says exactly that — "no story file
+matches this row" — and names the two real options: the story is filed under
+an unrelated name, or the row is stale. It does **not** fall back to the
+generic advice, which ends by pointing at `ape sprint check` and would be
+this command sending the reader to re-run itself.
+
+`ape sprint reconcile` reports the same rows on its own output — including
+on a run that changed nothing, because the divergence is in what was
+*counted*, not in what was written — and carries them as `bare_row_keys`
+plus a `bare_row_key_remediation` string in its JSON. Its remediation is
+the **generic** form (`N-M` → `N-M_slug`), because reconcile is
+tracker-only by design and never reads a story file, so it cannot know what
+the row should have been called. It says so, and points at `sprint check`.
+
 `verify` asserts one row landed as written, including against the last
 committed value — the comparison that actually catches a backwards write,
 since `updated_at` against `created_at` passes trivially when both are

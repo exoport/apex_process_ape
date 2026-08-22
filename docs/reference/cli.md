@@ -350,7 +350,7 @@ Exit codes:
 Examples:
 
 ```
-  echo '{"ADR-0001":{"status":"superseded"}}' | ape adr update --updates -
+  echo '{"CAP-1":{"status":"superseded"}}' | ape capability update --updates -
 ```
 
 Flags:
@@ -1044,6 +1044,11 @@ nothing gates on it. The three thresholds are flags so the boundaries are
 testable without building a 15k-token fixture; the defaults are the ones
 the framework has always used.
 
+This command carries no --cwd. It resolves nothing from the project's
+config — every input is an explicit path argument — so there is no
+project for --cwd to select. Relative paths resolve against the
+working directory, as they would for any other tool.
+
 Examples:
 
 ```
@@ -1077,6 +1082,11 @@ one level up.
 
 A section file named in the index but missing on disk is reported and
 skipped rather than fatal — an incomplete assembly you can see beats none.
+
+This command carries no --cwd. It resolves nothing from the project's
+config — every input is an explicit path argument — so there is no
+project for --cwd to select. Relative paths resolve against the
+working directory, as they would for any other tool.
 
 Examples:
 
@@ -1114,6 +1124,11 @@ written in that case — fix the source document.
 A document with no headings at the requested level becomes index.md whole,
 so 'assemble' still has something to work from.
 
+This command carries no --cwd. It resolves nothing from the project's
+config — every input is an explicit path argument — so there is no
+project for --cwd to select. Relative paths resolve against the
+working directory, as they would for any other tool.
+
 Examples:
 
 ```
@@ -1148,6 +1163,11 @@ would silently break them; the source document has to be fixed instead.
 Exit codes:
   0  no duplicate slugs
   1  duplicates found (each pair is printed with its line numbers)
+
+This command carries no --cwd. It resolves nothing from the project's
+config — every input is an explicit path argument — so there is no
+project for --cwd to select. Relative paths resolve against the
+working directory, as they would for any other tool.
 
 Examples:
 
@@ -1363,7 +1383,7 @@ Exit codes:
 Examples:
 
 ```
-  echo '{"ADR-0001":{"status":"superseded"}}' | ape adr update --updates -
+  echo '{"FEAT-1-1":{"status":"superseded"}}' | ape feature update --updates -
 ```
 
 Flags:
@@ -1918,7 +1938,7 @@ Exit codes:
 Examples:
 
 ```
-  echo '{"ADR-0001":{"status":"superseded"}}' | ape adr update --updates -
+  echo '{"PAT-0001":{"status":"superseded"}}' | ape pattern update --updates -
 ```
 
 Flags:
@@ -3400,6 +3420,10 @@ Exit 1 is deliberately unreachable. In the Python it meant "PyYAML is not
 installed" — an environment failure that forced apex-review-story and
 apex-code-review to carry an eye-check fallback. A static binary cannot
 produce it, which is what lets those fallback branches be deleted.
+
+This command carries no --cwd. --file is required and names the tracker
+outright, so nothing is resolved from the project's config and there is no
+project for --cwd to select.
 
 Examples:
 
