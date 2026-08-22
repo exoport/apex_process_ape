@@ -140,6 +140,36 @@ check-claude:  ## Spawn the LOCAL Claude Code and verify it still honours the PT
 	APE_CLAUDE_LIVE=1 go test ./internal/repl/ \
 	  -run TestLive_ClaudeCodeContract -v -count=1 -timeout 20m
 
+# The project whose runlogs `check-hooks` reads. Hook drift is observed from
+# the hook-events.jsonl files ape itself wrote under <project>/_output/tasks,
+# so it can only be judged against a project ape has actually run interactive
+# pipelines in — NOT against this repo, which has no runlogs and will always
+# report a skip. Point it at a real one:
+#   make check-hooks HOOK_PROJECT=~/work/some-apex-project
+HOOK_PROJECT ?= .
+
+.PHONY: check-hooks
+check-hooks:  ## Verify Claude Code still sends the hook fields ape's completion gates read (set HOOK_PROJECT).
+	@# ape's step-completion gates read fields off Claude Code's hook payloads:
+	@# `background_tasks` on Stop decides whether a turn boundary really means
+	@# the step is done, and an Agent-tool `tool_response` catches a spawn that
+	@# detached. Claude Code makes no compatibility promise about payload shape.
+	@#
+	@# If one is renamed or dropped, nothing errors — the gate just stops firing,
+	@# and ape silently returns to reporting success on runs that did nothing.
+	@# That is worse than having no gate, because it turns an absent protection
+	@# into a believed-present one.
+	@#
+	@# Exits 0 with "hook contract not verified" when the project has no recent
+	@# runlogs. That is a SKIP, not a pass: absence of evidence is not coverage.
+	go run ./cmd/ape doctor --only hooks.contract_drift --strict --cwd $(HOOK_PROJECT)
+
+.PHONY: check-harness
+check-harness: check-prices check-hooks check-claude ## All local-only gates against the installed Claude Code (prices + hooks + PTY/model).
+	@echo
+	@echo "Harness sweep complete against Claude Code $$(claude --version 2>/dev/null || echo 'unknown')."
+	@echo "Read the output above: any gate that reported a SKIP was NOT verified — it found no evidence to judge."
+
 .PHONY: ci-local
 ci-local: test lint govulncheck docs-check check-prices xcompile-windows snapshot ## Run every gate CI + release would run (Linux + Windows cross-compile + snapshot).
 	@echo

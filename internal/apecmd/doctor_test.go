@@ -422,6 +422,74 @@ func TestParseSkipList(t *testing.T) {
 	}
 }
 
+// TestSelectChecks covers --only's narrowing and, more importantly, its
+// refusal to accept a name it does not know.
+func TestSelectChecks(t *testing.T) {
+	reg := []doctorCheck{
+		{Name: "a.one"},
+		{Name: "b.two"},
+		{Name: "c.three"},
+	}
+
+	t.Run("empty selection means all", func(t *testing.T) {
+		got, err := selectChecks(reg, parseSkipList(""))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(got) != len(reg) {
+			t.Errorf("got %d checks, want all %d", len(got), len(reg))
+		}
+	})
+
+	t.Run("narrows and preserves registry order", func(t *testing.T) {
+		got, err := selectChecks(reg, parseSkipList("c.three,a.one"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []string{"a.one", "c.three"}
+		if len(got) != len(want) {
+			t.Fatalf("got %d checks, want %d", len(got), len(want))
+		}
+		for i, name := range want {
+			if got[i].Name != name {
+				t.Errorf("position %d: got %q, want %q", i, got[i].Name, name)
+			}
+		}
+	})
+
+	// The load-bearing case. A typo that silently selected nothing would run
+	// zero checks and exit 0 — a gate reporting success while checking
+	// nothing, which is the exact failure mode --only exists to script
+	// against.
+	t.Run("unknown name is an error, not an empty run", func(t *testing.T) {
+		got, err := selectChecks(reg, parseSkipList("a.one,b.twoo"))
+		if err == nil {
+			t.Fatalf("want an error for an unknown check name, got %d checks", len(got))
+		}
+		if !strings.Contains(err.Error(), "b.twoo") {
+			t.Errorf("error should name the offending check, got: %v", err)
+		}
+		// It must also tell the caller what the valid names are.
+		if !strings.Contains(err.Error(), "a.one") {
+			t.Errorf("error should list the valid checks, got: %v", err)
+		}
+	})
+}
+
+// TestSelectChecks_HookDriftIsSelectable pins the check name `make
+// check-hooks` scripts against. Renaming the registry entry without
+// updating the Makefile would leave the release gate erroring out on an
+// unknown check — loudly, thanks to selectChecks, but still broken.
+func TestSelectChecks_HookDriftIsSelectable(t *testing.T) {
+	got, err := selectChecks(allChecks, parseSkipList("hooks.contract_drift"))
+	if err != nil {
+		t.Fatalf("hooks.contract_drift is not selectable: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "hooks.contract_drift" {
+		t.Fatalf("got %v, want exactly hooks.contract_drift", got)
+	}
+}
+
 // TestCheckNames_StableSorted documents that the list of check names
 // is alphabetically sorted — useful for shell completion and for
 // downstream tools that want a deterministic enumeration.

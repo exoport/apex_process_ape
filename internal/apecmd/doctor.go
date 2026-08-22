@@ -162,6 +162,7 @@ func newDoctorCmd() *cobra.Command {
 		outputFormat string
 		strict       bool
 		skipCSV      string
+		onlyCSV      string
 		cwdFlag      string
 	)
 
@@ -207,17 +208,32 @@ silent:
 Both SKIP or report INFO when there is nothing to judge — absence of
 evidence is not coverage.
 
+--only runs just the named checks, so one gate can be scripted on its own:
+
+  ape doctor --only hooks.contract_drift --strict --cwd <project>
+
+That is what "make check-hooks" runs. Note the --cwd: hook drift is
+observed from the runlogs ape itself wrote (<project>/_output/tasks), so it
+can only be judged against a project ape has actually run pipelines in, not
+against the ape repo. An unknown name in --only is an error rather than a
+silent no-op — a typo that ran zero checks would exit 0 and read as a pass.
+
 Exit codes:
   0  every required check passed (warnings allowed unless --strict)
-  1  at least one required check failed (or any warning under --strict)`,
+  1  at least one required check failed, any warning under --strict, or
+     --only named a check that does not exist`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			env, err := resolveDoctorEnv(cwdFlag)
 			if err != nil {
 				return err
 			}
+			checks, err := selectChecks(allChecks, parseSkipList(onlyCSV))
+			if err != nil {
+				return err
+			}
 			skip := parseSkipList(skipCSV)
-			report := runDoctor(cmd.Context(), allChecks, env, skip)
+			report := runDoctor(cmd.Context(), checks, env, skip)
 			format := output.Format(outputFormat)
 			if err := emitDoctorReport(cmd.OutOrStdout(), report, format); err != nil {
 				return err
@@ -232,6 +248,7 @@ Exit codes:
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
 	cmd.Flags().BoolVar(&strict, "strict", false, "Treat WARN-level findings as failures (exit 1)")
 	cmd.Flags().StringVar(&skipCSV, "skip", "", "Comma-separated list of check names to skip (e.g. node.binary,npx.binary)")
+	cmd.Flags().StringVar(&onlyCSV, "only", "", "Run ONLY these checks (comma-separated). Errors on an unknown name; applied before --skip")
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root to probe (default: current working directory)")
 	return cmd
 }
@@ -270,6 +287,45 @@ func parseSkipList(csv string) map[string]struct{} {
 		}
 	}
 	return out
+}
+
+// selectChecks narrows the registry to the named checks, preserving
+// registry order. An empty selection means "all of them".
+//
+// Unlike --skip, an unrecognised name here is a hard error rather than a
+// no-op. A typo in --skip costs nothing — the check simply runs. A typo in
+// --only would run ZERO checks and exit 0, which is the worst possible
+// outcome for a flag whose entire purpose is scripting a single gate: the
+// gate would report success while checking nothing. The same reasoning is
+// why `ape costs coverage` refuses to call an empty sweep a pass.
+func selectChecks(checks []doctorCheck, only map[string]struct{}) ([]doctorCheck, error) {
+	if len(only) == 0 {
+		return checks, nil
+	}
+	known := make(map[string]struct{}, len(checks))
+	names := make([]string, 0, len(checks))
+	for _, c := range checks {
+		known[c.Name] = struct{}{}
+		names = append(names, c.Name)
+	}
+	unknown := make([]string, 0, len(only))
+	for name := range only {
+		if _, ok := known[name]; !ok {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return nil, fmt.Errorf("--only: unknown check(s) %s\nvalid checks:\n  %s",
+			strings.Join(unknown, ", "), strings.Join(names, "\n  "))
+	}
+	out := make([]doctorCheck, 0, len(only))
+	for _, c := range checks {
+		if _, want := only[c.Name]; want {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 // runDoctor executes each check (or marks it skipped) and aggregates

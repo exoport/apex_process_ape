@@ -1236,15 +1236,27 @@ silent:
 Both SKIP or report INFO when there is nothing to judge — absence of
 evidence is not coverage.
 
+--only runs just the named checks, so one gate can be scripted on its own:
+
+  ape doctor --only hooks.contract_drift --strict --cwd <project>
+
+That is what "make check-hooks" runs. Note the --cwd: hook drift is
+observed from the runlogs ape itself wrote (<project>/_output/tasks), so it
+can only be judged against a project ape has actually run pipelines in, not
+against the ape repo. An unknown name in --only is an error rather than a
+silent no-op — a typo that ran zero checks would exit 0 and read as a pass.
+
 Exit codes:
   0  every required check passed (warnings allowed unless --strict)
-  1  at least one required check failed (or any warning under --strict)
+  1  at least one required check failed, any warning under --strict, or
+     --only named a check that does not exist
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root to probe (default: current working directory) |
+| `--only` | string | `—` | Run ONLY these checks (comma-separated). Errors on an unknown name; applied before --skip |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--skip` | string | `—` | Comma-separated list of check names to skip (e.g. node.binary,npx.binary) |
 | `--strict` | bool | `false` | Treat WARN-level findings as failures (exit 1) |
