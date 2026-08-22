@@ -98,8 +98,13 @@ func printCapacityHuman(cmd *cobra.Command, caps workspace.Capabilities) {
 
 // humanBytes renders a byte count in binary units. Sizes here are memory, which
 // is quoted in GiB by every tool an operator will cross-check against.
+//
+// A negative value means "not reported" and renders as "-"; zero is a real
+// measurement (a 0-byte file) and renders as "0 B". Capacity fields that are
+// simply absent arrive as 0 from an unfilled capability struct, so callers there
+// gate on presence before formatting.
 func humanBytes(n int64) string {
-	if n <= 0 {
+	if n < 0 {
 		return "-"
 	}
 	const unit = 1024

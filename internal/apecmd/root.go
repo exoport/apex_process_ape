@@ -64,6 +64,7 @@ func init() {
 		newFeatureCmd(),
 		newCapabilityCmd(),
 		newRegistryCmd(),
+		newMemoryCmd(),
 		newSyncCmd(),
 		newUpdateCmd(),
 		newRollbackCmd(),
