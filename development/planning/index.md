@@ -2,7 +2,7 @@
 
 | ID      | Title                                                   | Status                | Created    |
 | ------- | ------------------------------------------------------- | --------------------- | ---------- |
-| PLAN-25 | Project-data commands — config resolution, registries, stories, memory, deferred work, Python retirement | draft | 2026-08-21 |
+| PLAN-25 | Project-data commands — config resolution, registries, stories, memory, deferred work, Python retirement | implemented | 2026-08-21 |
 | PLAN-24 | Local sandbox polish — port-forward, reporting, capacity, agent, reaper | implemented | 2026-08-05 |
 | PLAN-23 | Runtime `ape` delivery into sandbox workspaces           | done                  | 2026-07-26 |
 | PLAN-22 | Sandbox toolchain / devcontainer model + lifecycle      | partially-implemented | 2026-07-23 |

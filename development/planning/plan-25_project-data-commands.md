@@ -1,7 +1,7 @@
 ---
 plan_id: PLAN-25
 created_at: 2026-08-21
-status: draft
+status: implemented
 tags:
   - cli
   - config
@@ -1207,50 +1207,50 @@ them would move a rendering pipeline into a CLI that has no business owning one.
 
 ## Deliverables
 
-- [ ] **D0 — Command surface + flag conventions.** Noun-first naming, the three verb
+- [x] **D0 — Command surface + flag conventions.** Noun-first naming, the three verb
       contracts, `--output-format`/`--cwd`/`--strict` on every new subcommand, plural
       `Aliases` on the four governance families, `ape sync` and `validate` retired to
       hidden aliases, and `writeCommandSection` taught to emit `Aliases`
       (`gendocs.go:77-99`) so `make docs-cli` does not drop them. Landed as the shape of
       D1–D15, not as a separate change.
-- [ ] **D1 — `ape config resolve`** + repoint all four path resolvers. **Gate on
+- [x] **D1 — `ape config resolve`** + repoint all four path resolvers. **Gate on
       everything else.**
-- [ ] **D2 — `ape <family> verify` + `ape registry verify`**, exactly four checks,
+- [x] **D2 — `ape <family> verify` + `ape registry verify`**, exactly four checks,
       `internal/registry` with a per-family descriptor. Replaces
       `runMarkdownDirValidate`.
-- [ ] **D3 — `ape <family> sync` + `ape <family> update`.** Fills three stubs; retires
+- [x] **D3 — `ape <family> sync` + `ape <family> update`.** Fills three stubs; retires
       both `render-index-update.py` copies; handles both index shapes.
-- [ ] **D4 — `ape story fields`**, `internal/story`, ≤8 KB per file, never opens a body.
-- [ ] **D5 — `ape story verify` (corpus + `--file`), `ape sprint check`, `ape sprint
+- [x] **D4 — `ape story fields`**, `internal/story`, ≤8 KB per file, never opens a body.
+- [x] **D5 — `ape story verify` (corpus + `--file`), `ape sprint check`, `ape sprint
       verify`.** Retires `verify-story-frontmatter.py` and all three copies of
       `verify-sprint-status-row.py`.
-- [ ] **D6 — `ape memory index|show|check`**, `internal/memory`, fence-aware scanner,
+- [x] **D6 — `ape memory index|show|check`**, `internal/memory`, fence-aware scanner,
       `--fail-at never|soft|hard`.
-- [ ] **D7 — `ape deferred` store** — `ingest|list|close|verify`, `internal/deferred`,
+- [x] **D7 — `ape deferred` store** — `ingest|list|close|verify`, `internal/deferred`,
       one file per record, ingest never fails for content, one bad record loses one record.
-- [ ] **D8 — `ape deferred migrate`** — fixed mapping, verified before write, idempotent
+- [x] **D8 — `ape deferred migrate`** — fixed mapping, verified before write, idempotent
       from disk state, never deletes the source.
-- [ ] **D9 — `ape deferred repair`** — dispatches `apex-defer-repair` on opus through the
+- [x] **D9 — `ape deferred repair`** — dispatches `apex-defer-repair` on opus through the
       existing task runner; refuses without a TTY; record-count post-condition.
-- [ ] **D10 — `ape framework update` integration** — `--dry-run`, `--no-migrate`,
+- [x] **D10 — `ape framework update` integration** — `--dry-run`, `--no-migrate`,
       `--repair`; path-scoped clean gate; commits nothing, prints the paths and the
       `git add` line.
-- [ ] **D11 — `ape doctor` wiring** — six checks, `config.resolved` and `memory.size`
+- [x] **D11 — `ape doctor` wiring** — six checks, `config.resolved` and `memory.size`
       Required.
-- [ ] **D12 — `ape sprint reconcile`** — the epic projection verbatim, targeted line-level
+- [x] **D12 — `ape sprint reconcile`** — the epic projection verbatim, targeted line-level
       write, real advisory lock on POSIX *and* Windows, exit 0 for every content outcome.
       Retires `reconcile-epic-status.py` (645 lines, 6 call sites; the one on a mutation
       path records a non-zero exit rather than halting, so this is consolidation, not a fix).
-- [ ] **D13 — `ape doc verify|shard|assemble`** — heading-level sharding with link
+- [x] **D13 — `ape doc verify|shard|assemble`** — heading-level sharding with link
       rewriting and its exact reverse, **plus the `index.md` the caller verifies**;
       `verify` is a gate (exit 1 on duplicate slugs). Retires `shard-doc.py` (525 lines)
       and repoints 10 script references across 5 skills — **scoped by `shard-doc.py`, not
       `shard-doc`**, or the edit hits 6 pipeline dispatch entries for the skill, which stays.
       Stdlib-only.
-- [ ] **D14 — `ape doc analyze`** — source survey with grouping, routing and split
+- [x] **D14 — `ape doc analyze`** — source survey with grouping, routing and split
       prediction; shares D6's token estimator. Retires `analyze_sources.py` and the
       framework's only pytest suite (510 lines).
-- [ ] **D15 — Python retirement goldens** — byte-compare fixtures proving equivalence for
+- [x] **D15 — Python retirement goldens** — byte-compare fixtures proving equivalence for
       all ten retired files, plus the ported pytest cases from D14. Names the two
       framework-side fallback deletions that make the retirement a behaviour improvement
       rather than a binary swap.
@@ -1594,3 +1594,101 @@ fallbacks, so it must not land before the binary that makes them unnecessary.
 - **No new Go modules.** Verified against `go.mod`: `gopkg.in/yaml.v3`,
   `github.com/spf13/cobra`, `github.com/spf13/pflag` and `golang.org/x/sys` (D12's file
   lock, `v0.46.0`) are already direct requires.
+
+## What the implementation found (2026-08-22)
+
+Everything in D1–D15 is built, tested and committed across nine commits.
+`make lint` is at 0 issues, `go test ./...` is green, and `GOOS=windows go
+build ./...` compiles. Nothing is tagged or pushed.
+
+Eleven findings that changed the code or corrected the plan:
+
+**1 — `ape bootstrap` had a live path bug, not just a stale resolver.** The
+plan recorded that it wrote to a third location. It was worse: a record's
+catalog-relative `../adrs/<file>` joined onto `--out` wrote *outside*
+`--out` (with the default `.`, into `../adrs/`), while the directories were
+created at `<out>/governance/adrs`. Records now land by base name in the
+resolved governance folder.
+
+**2 — `governance_repository_path` does not name an alternative home for
+this project's records.** D1 said the emitted ADR/pattern roots would "say
+which tree won". Checking the framework: it names the CANONICAL repository
+that `apex-adr-reconciliation` imports *from*, and a project's own records
+always live under `governance_folder`. There is no contest to resolve, so
+the payload carries the path through unchanged and the record roots are
+always project-local. Simpler, and correct.
+
+**3 — the 8 KiB cap alone gives 5x, not 377x.** A first implementation read
+`FrontmatterCap` bytes per file unconditionally, which on a 20 MB fixture
+corpus read 3.8 MB. Frontmatter is a few hundred bytes, so the read is now
+incremental in 1 KiB chunks and stops at the closing `---`. The test asserts
+the BOUND (one chunk per file, never past the cap) rather than the ratio,
+because the ratio is a property of the corpus and the bound is a property of
+the code.
+
+**4 — `os.Exit` inside `RunE` makes a gate command untestable.** The first
+gate test killed the test binary on its first assertion. The repo already
+had the machinery — `exitError` plus `ExitCode`, established by
+`ape sandbox exec` — so the gates return their verdict as an error and one
+place turns it into a process exit. CLI behaviour is unchanged; every exit
+code is now assertable in-process.
+
+**5 — the deferred chunker silently merged two records into one.** An
+unindented paragraph following a bullet was absorbed into that bullet, which
+in a real ledger means the losslessness count is quietly wrong. An indented
+line continues a bullet; an unindented one starts a new record. Both
+`SplitBullets` and `ParseLegacy` share the rule now.
+
+**6 — the migration's losslessness assertion cannot be defeated by record
+content.** `Render` always emits the frontmatter's own closing `---` before
+the body, so `Split`'s first-closer-wins rule can never eat into it. Rather
+than fake a failure, the test asserts the property positively across the
+bodies most likely to break a naive implementation — one opening with
+`---`, ones containing `---` lines, YAML-looking prose, CRLF, no trailing
+newline, non-Latin text. The assertion stays as a guard on future changes to
+either function.
+
+**7 — a `### ` inside a code fence would have shifted every ordinal.** Named
+in the plan as a hazard; confirmed as real and fixed with a fence-aware
+scanner. The test asserts ape counts 2 where a naive grep counts 3.
+
+**8 — `shard-doc.py` cannot round-trip a link with a fragment.** Its reverse
+rewrite stats the whole string, so `../architecture.md#goals` never resolves
+and keeps its `../` forever. `ape doc assemble` strips the fragment before
+the existence test. The shard files are unchanged; only assemble's output
+differs, in the direction of correctness — so the round trip is genuinely
+byte-identical, which the Python's was not.
+
+**9 — `pat-NNNN_slug.md` was not classified as a pattern.** The doc-type
+detection matches filename fragments, and the on-disk convention contains
+neither "pattern" nor anything longer to match on.
+
+**10 — `humanBytes` already existed.** `sandbox_capacity.go` had it. Reused
+rather than duplicated, and taught that zero is a real measurement (a
+0-byte file) while negative means "not reported".
+
+**11 — `gen-docs` never emitted cobra aliases.** Without the one-line fix,
+`make docs-cli` would have dropped every plural family name from the
+reference: `ape adrs verify` would work while the reference denied it
+existed.
+
+### Deliberate deviations from the plan, and why
+
+| Deviation | Why |
+| --- | --- |
+| `verify` on the deferred store keeps `lint` as an alias | Muscle memory from the upstream spelling; the tag on each finding carries the distinction a second verb would have. |
+| `--active-extensions` stays on `story verify --file` | The caller already has the list, it makes the gate reproducible against a file outside any project, and a drop-in replacement that quietly changed where its gating came from is the one difference nobody tests for. Falls back to D1 when absent. |
+| `runProjectMigrations` has no dry-run mode | `--dry-run` is answered by the framework-level reporter, which shows the drift alongside the pending migrations. A second dry-run path would have been an always-false parameter. |
+| `internal/apexdoc`, not `internal/doc` | `doc` reads as a package of documentation. |
+
+### What is NOT done
+
+- **The framework-side edits.** Every retirement here ships the replacement
+  and the goldens; deleting the Python and repointing the call sites is a
+  framework-repo change on its own cadence (D15). Until it lands, both
+  implementations exist and the Python is what the skills call.
+- **The two fallback deletions** at `apex-review-story/step-04-present.md:830`
+  and `apex-code-review/step-04-present.md:360`. That is the part of the
+  retirement that actually changes behaviour, and it belongs in the same
+  framework edit that repoints those calls.
+- **No tag, no push.** Nine commits sit on `main` locally.

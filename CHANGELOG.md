@@ -1,5 +1,64 @@
 # CHANGELOG
 
+## Unreleased
+
+- **feat: the project-data commands the framework skills call (PLAN-25)** —
+  33 new subcommands under nine new groups, five new packages, and ten of the
+  framework's seventeen Python scripts replaced. The headline is that `ape`
+  could not previously see a project's artifacts at all: no `.go` file read
+  `_apex/config.yaml`'s folder variables, so `ape adr list` reported "no ADR
+  directory found" against a project with 64 ADRs on disk.
+  - **`ape config resolve`** resolves the seventeen framework variables, the
+    `config.local.yaml` overlay (key-wise), the four `ext_*` flags and the
+    absolute paths they denote. Everything else routes through it, including
+    `findADRDir`, `findPatternsDir`, `adr new` and `ape bootstrap` — which had
+    a live bug of its own: a record's catalog-relative `../adrs/<file>` joined
+    onto `--out` wrote *outside* `--out`. A malformed `config.local.yaml` is
+    now a loud exit 2, not a silent fall-back to base values.
+  - **`ape adr|pattern|feature|capability verify|sync|update`** plus
+    `ape registry verify|sync` as the fan-out. Exactly four checks: set
+    equality both ways, `file:` resolution, duplicate ids, and whether a
+    record parses at all. It replaces `runMarkdownDirValidate`, which printed
+    "OK:" for every `.md` without ever calling `os.Open`. Each family answers
+    to its plural. `ape sync adrs` becomes `ape adr sync`; the verb-first
+    spelling and `validate` survive one release as hidden pointers.
+  - **`ape story fields|verify`** — frontmatter projection that reads at most
+    8 KiB per file and never opens a body, and a verifier with three check
+    classes and no enum checks. `ape sprint check|verify|reconcile` —
+    divergence reporting that never picks a winner, a row gate with five
+    preserved exit codes, and the epic projection with a targeted two-line
+    write and a real advisory lock on POSIX *and* Windows.
+  - **`ape memory index|show|check`** — `team-memory.md` is 431,950 bytes on
+    the reference project, past the 256 KiB Read cap, so the retrospective
+    that writes it can no longer read it. `check` stats rather than reads, and
+    exits 0 even over the hard ceiling: a failing exit would abort the
+    retrospective at exactly the moment compaction is due. `ape doctor` fails
+    on that state instead.
+  - **`ape deferred`** — a one-file-per-record store replacing a
+    456,144-byte ledger whose only eviction mechanism was deletion. `ingest`
+    cannot fail for a content reason (a non-zero exit there demotes a story
+    two skills away), one malformed record loses exactly that record, and
+    `close` moves to `closed/` rather than deleting. `migrate` verifies
+    before it writes, is idempotent from disk state, and never deletes the
+    source; `repair` dispatches the judgment phase on opus through the
+    existing task runner, refuses without a TTY, and asserts no record was
+    lost.
+  - **`ape doc verify|shard|assemble|analyze`** — markdown sharding with the
+    `index.md` contract its caller verifies, and a byte-identical round trip.
+  - **`ape framework update`** gains `--dry-run`, `--no-migrate` and
+    `--repair`, and runs pending project-data migrations. It still commits
+    nothing: the result sits in the working tree and the run prints the
+    `git add` line. Its clean gate is scoped to the migration's own paths,
+    which are disjoint from the install's — so the two are order-independent.
+  - **`ape doctor`** gains six project-data rows. `config.resolved` and
+    `memory.size` are the only required ones, because a non-required FAIL is
+    downgraded to WARN and those two are the states that must not be
+    ignorable.
+  - Gate commands now return their exit code as an error through the existing
+    `ExitCode` path instead of calling `os.Exit` inside `RunE`, which is what
+    makes them testable at all. `gen-docs` now emits cobra aliases, which it
+    never did.
+
 ## v0.0.52 (2026-08-15)
 
 - **feat(sandbox): finish the single-node workspace story (PLAN-24)** — seven
