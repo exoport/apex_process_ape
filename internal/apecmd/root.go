@@ -68,6 +68,7 @@ func init() {
 		newStoryCmd(),
 		newSprintCmd(),
 		newDeferredCmd(),
+		newDocCmd(),
 		newSyncCmd(),
 		newUpdateCmd(),
 		newRollbackCmd(),
