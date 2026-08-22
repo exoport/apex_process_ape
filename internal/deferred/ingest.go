@@ -25,22 +25,29 @@ type IngestResult struct {
 	Count    int      `json:"count"              yaml:"count"`
 }
 
-// SplitBullets divides an input blob into one chunk per top-level list
-// item, keeping indented continuation lines with their bullet.
+// SplitBullets divides an input blob into one chunk per record, keeping
+// indented continuation lines with their bullet.
 //
-// Anything before the first bullet, or any non-indented non-bullet block,
-// becomes its own chunk rather than being dropped — the store never
-// discards input it did not understand.
+// The rule that matters: an INDENTED line continues the current bullet,
+// while an UNINDENTED non-bullet line starts a new chunk. Without that
+// second half, a paragraph following a bullet is silently absorbed into
+// it — which in a real ledger means two records become one, and the
+// losslessness count is quietly wrong.
+//
+// Anything before the first bullet becomes its own chunk rather than being
+// dropped: the store never discards input it did not understand.
 func SplitBullets(data []byte) []string {
 	var (
-		chunks  []string
-		current strings.Builder
+		chunks      []string
+		current     strings.Builder
+		startedList bool
 	)
 	flush := func() {
 		if strings.TrimSpace(current.String()) != "" {
 			chunks = append(chunks, current.String())
 		}
 		current.Reset()
+		startedList = false
 	}
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	// Real bodies run long; the default 64 KiB token limit is not enough
@@ -55,22 +62,30 @@ func SplitBullets(data []byte) []string {
 		switch {
 		case topLevelBulletRe.MatchString(line):
 			flush()
-			current.WriteString(line)
-			current.WriteString("\n")
+			startedList = true
 		case strings.TrimSpace(line) == "":
-			// A blank line inside a bullet's continuation is content; a
-			// blank line between bullets is separation. Keeping it either
-			// way preserves the body byte-for-byte.
+			// A blank line is kept either way, so the body stays
+			// byte-for-byte: inside a bullet's continuation it is content,
+			// between records it is separation.
 			if current.Len() > 0 {
 				current.WriteString("\n")
 			}
-		default:
-			current.WriteString(line)
-			current.WriteString("\n")
+			continue
+		case startedList && !isIndented(line):
+			// An unindented paragraph after a bullet is its own record.
+			flush()
 		}
+		current.WriteString(line)
+		current.WriteString("\n")
 	}
 	flush()
 	return chunks
+}
+
+// isIndented reports whether a line is a continuation of the bullet above
+// it. One space is enough — the framework indents continuations by two.
+func isIndented(line string) bool {
+	return strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")
 }
 
 // topLevelBulletRe matches an unindented (or single-space-indented) list

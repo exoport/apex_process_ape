@@ -37,6 +37,8 @@ under that folder would feed every one of them.`,
 		newDeferredListCmd(),
 		newDeferredCloseCmd(),
 		newDeferredVerifyCmd(),
+		newDeferredMigrateCmd(),
+		newDeferredRepairCmd(),
 	)
 	return cmd
 }
