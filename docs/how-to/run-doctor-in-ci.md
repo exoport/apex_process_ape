@@ -92,6 +92,44 @@ ape doctor --output-format json | jq -e '.checks[] | select(.name == "ape.update
 | `operating_rules.fragment FAIL`        | A project that manages operating rules lost `_apex/apex-operating-rules.md` or the `CLAUDE.md` managed import | Run `ape framework update`. (Legacy / older-framework installs report WARN, not FAIL — see below.)   |
 | `permissions.home_claude WARN`         | Container runs as a user without write access to `~/.claude`            | Mount or create the dir owned by the runner UID.                                                      |
 | `cost.price_table_coverage SKIP`       | No Claude Code transcripts on the runner — the price table cannot be checked against real usage | Expected in CI, and SKIP never fails `--strict`. This check is meaningful on a developer machine; the release gate runs it as `make check-prices`. |
+| `config.resolved FAIL`                 | `_apex/config.yaml` or `_apex/config.local.yaml` exists but does not parse | Fix the YAML the message names. This one is **required**: every other project-data check resolves its paths through it, so a broken config would otherwise make five checks report clean against the wrong tree. |
+| `config.resolved INFO`                 | The checkout is not an APEX project                                     | Expected outside a project. INFO never fails.                                                          |
+| `memory.size FAIL`                     | `team-memory.md` is past the 200 KiB hard ceiling                       | **Required, and intended to fail.** The file is approaching Claude Code's 256 KiB Read cap, past which the retrospective that writes it can no longer read it. Compact it; the soft gate should have caught this several runs earlier. |
+| `memory.size WARN`                     | Over the 40 KiB soft budget                                             | Compaction is due at the next epic close. Nothing is broken yet.                                        |
+| `registry.drift WARN`                  | A record is on disk but absent from `index.yaml`, or vice versa          | `ape registry verify --all` lists them; `ape registry sync --all` repairs what a tool can.              |
+| `story.frontmatter WARN`               | Stories are missing extension-gated keys, or carry a type mismatch      | `ape story verify` lists them. Frontmatter is authored, so these are fixed by hand.                    |
+| `sprint.divergence WARN`               | A tracker row and a story file disagree                                 | `ape sprint check` names both sides. Neither is assumed correct — a person decides, which is why this can never be more than a warn. |
+| `migration.pending WARN`               | A legacy `deferred-work.md` has not been converted to record files      | `ape framework update` runs it, or `ape deferred migrate --dry-run` to look first. Nothing is committed either way. |
+
+## Project-data checks
+
+Six checks report on the project's own records rather than on the host:
+`config.resolved`, `registry.drift`, `story.frontmatter`,
+`sprint.divergence`, `memory.size` and `migration.pending`. All six degrade
+to INFO outside a project root — absence of a project is not a finding.
+
+Two are **required**, and both for a mechanical reason. `runDoctor`
+downgrades a non-required FAIL to WARN, so:
+
+- `memory.size` has to be required or nothing could surface a
+  `team-memory.md` that has passed the Read cap. `ape memory check`
+  deliberately exits 0 in that state — a failing exit there would abort the
+  retrospective at exactly the moment compaction is due — so this row is
+  where the breach becomes non-ignorable.
+- `config.resolved` has to be required because the other five resolve their
+  paths through it. A malformed `config.local.yaml` would otherwise send
+  them all at the wrong tree, reporting clean.
+
+The other four are warns by design. Registry drift, frontmatter gaps and
+tracker divergence are findings a person acts on; a project that has some
+should still be able to run `ape doctor` in CI without a red build. Add
+`--strict` when you want them to gate.
+
+To keep a CI gate to host prerequisites only:
+
+```bash
+ape doctor --skip config.resolved,registry.drift,story.frontmatter,sprint.divergence,memory.size,migration.pending
+```
 
 ## Operating-rules checks (required, but self-gating)
 

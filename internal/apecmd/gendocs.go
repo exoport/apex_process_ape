@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -80,6 +81,12 @@ func writeCommandSection(w io.Writer, c *cobra.Command) {
 		fmt.Fprintf(w, "%s\n\n", c.Short)
 	}
 	fmt.Fprintf(w, "```\n%s\n```\n\n", c.UseLine())
+	// Aliases have to appear here or `make docs-cli` silently drops them:
+	// the four governance families each answer to their plural, and a
+	// reference that omits that is a reference that lies (PLAN-25 D0).
+	if len(c.Aliases) > 0 {
+		fmt.Fprintf(w, "Aliases: `%s`\n\n", strings.Join(c.Aliases, "`, `"))
+	}
 	if long := c.Long; long != "" && long != c.Short {
 		fmt.Fprintf(w, "%s\n\n", long)
 	}

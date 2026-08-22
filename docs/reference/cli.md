@@ -29,23 +29,31 @@ Subcommands:
 
 - `adr` — Manage Architecture Decision Records
 - `bootstrap` — Bootstrap governance artifacts from traits
+- `capability` — Inspect and maintain the capability registry
 - `chat` — Bridged claude REPL with hooks captured to a runlog
+- `config` — Resolve the project's APEX configuration
 - `costs` — Show this project's Claude cost rollup
+- `deferred` — The deferred-work record store
+- `doc` — Shard, assemble and survey Markdown documents
 - `doctor` — Probe the local environment for prerequisites
 - `event` — Publish a session progress event over NATS
+- `feature` — Inspect and maintain the feature registry
 - `framework` — Install and inspect APEX framework assets in a project
 - `log` — Publish a structured log record over NATS
+- `memory` — Read the team-memory file without loading it whole
 - `metrics` — Scan and publish this session's usage metrics over NATS
 - `pattern` — Manage governance patterns
 - `pipeline` — List or run an APEX pipeline
 - `planning` — Show the planning pipeline diagram
 - `prompt` — Drive an unattended Claude session from a prompt or a handoff file
+- `registry` — Verify or reconcile every record registry at once
 - `rollback` — Rollback ape to the previous version
 - `sandbox` — Provision and operate hardware-isolated Kata VM workspaces (via aped)
 - `script` — Run a Go orchestration script through the yaegi interpreter
 - `service` — Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply
 - `sessions` — List, prune, or open the URL of live ape sessions
-- `sync` — Sync governance artifacts
+- `sprint` — Inspect and maintain sprint-status.yaml
+- `story` — Project and verify story frontmatter
 - `task` — Run a single framework skill through the interactive PTY runner
 - `trait` — Manage and inspect traits
 - `transcript` — Work with Claude session transcripts
@@ -60,11 +68,15 @@ Manage Architecture Decision Records
 ape adr
 ```
 
+Aliases: `adrs`
+
 Subcommands:
 
 - `list` — List all ADRs
 - `new` — Scaffold a new ADR file
-- `validate` — Validate ADR files
+- `sync` — Reconcile the adrs index against records on disk
+- `update` — Apply field deltas to existing adrs index entries
+- `verify` — Verify the adrs registry against its index
 
 ## ape adr list
 
@@ -94,25 +106,123 @@ Scaffold a new ADR file
 ape adr new <title>
 ```
 
-## ape adr validate
+## ape adr sync
 
-Validate ADR files
+Reconcile the adrs index against records on disk
 
 ```
-ape adr validate [flags]
+ape adr sync [flags]
 ```
+
+Reconcile index.yaml against the records on disk: records with no entry
+are added, entries whose id no record claims are removed, and an entry
+whose file: no longer resolves is repointed at the record claiming its id.
+
+This is the repair for the findings `verify` reports, and nothing more —
+it copies what a record's own frontmatter states and invents no titles,
+statuses or any other field. A renamed record keeps its authored entry
+rather than being dropped and re-added.
+
+--check makes it a dry run: the same diff, nothing written. generated_at
+moves only when something else did.
 
 Examples:
 
 ```
-  ape adr validate --output-format json
+  ape adr sync --check
 ```
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | Report the diff without writing |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape adr update
+
+Apply field deltas to existing adrs index entries
+
+```
+ape adr update [flags]
+```
+
+Apply per-entry field deltas to index.yaml and refresh generated_at.
+
+--updates takes {"<id>": {"<field>": "<value>"}} as a file path or '-' for
+stdin. Only entries ALREADY listed may be updated: an unknown id is an
+error raised before anything is written, because creating an index entry
+is the job of the skill that authors the document it points at.
+
+The rendered index is round-trip parsed before it replaces the file, and
+the write is atomic — a crash mid-write cannot truncate an index. Key
+order and comments survive, which a PyYAML round trip does not manage.
+
+Exit codes:
+  0  applied
+  1  unknown id, unreadable updates, or an unwritable index (nothing written)
+
+Examples:
+
+```
+  echo '{"ADR-0001":{"status":"superseded"}}' | ape adr update --updates -
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--generated-at` | string | `—` | Timestamp to write as generated_at (default: resolved config timestamp) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--updates` | string | `-` | JSON file with per-entry field deltas, or '-' for stdin |
+
+## ape adr verify
+
+Verify the adrs registry against its index
+
+```
+ape adr verify [flags]
+```
+
+Exactly four checks, and no others:
+
+  1. registry.orphan_record / registry.phantom_entry
+     set equality between the record directory and index.yaml, both
+     directions
+  2. registry.file_unresolved
+     every index file: resolves, relative to the index's own directory
+  3. registry.duplicate_id
+     duplicate ids, in the index and on disk
+  4. registry.record_unparseable
+     the record parses as frontmatter at all
+
+No schema validation, no field drift, no tag comparison, no updated_at
+comparison — those are judgment, and a verifier that wanders into them
+stops being trustworthy.
+
+An index.yaml that is absent while records exist is reported once, as
+registry.index_missing: the degenerate case of check 1, not a fifth check.
+One finding beats one orphan per record, which would bury the only fact
+that matters.
+
+Findings travel in the payload. Exit is 0 even with findings unless
+--strict is passed, so this is safe to call from anywhere.
+
+Examples:
+
+```
+  ape adr verify --output-format json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) |
 
 ## ape bootstrap
 
@@ -141,6 +251,162 @@ Flags:
 | `--out` | string | `.` | Output directory for generated artifacts |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--traits` | string | `—` | Comma-separated list of trait names |
+
+## ape capability
+
+Inspect and maintain the capability registry
+
+```
+ape capability
+```
+
+Aliases: `capabilities`
+
+Subcommands:
+
+- `list` — List capabilities from the registry index
+- `sync` — Reconcile the capabilities index against records on disk
+- `update` — Apply field deltas to existing capabilities index entries
+- `verify` — Verify the capabilities registry against its index
+
+## ape capability list
+
+List capabilities from the registry index
+
+```
+ape capability list [flags]
+```
+
+Examples:
+
+```
+  ape capability list --output-format json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape capability sync
+
+Reconcile the capabilities index against records on disk
+
+```
+ape capability sync [flags]
+```
+
+Reconcile index.yaml against the records on disk: records with no entry
+are added, entries whose id no record claims are removed, and an entry
+whose file: no longer resolves is repointed at the record claiming its id.
+
+This is the repair for the findings `verify` reports, and nothing more —
+it copies what a record's own frontmatter states and invents no titles,
+statuses or any other field. A renamed record keeps its authored entry
+rather than being dropped and re-added.
+
+--check makes it a dry run: the same diff, nothing written. generated_at
+moves only when something else did.
+
+Examples:
+
+```
+  ape capability sync --check
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | Report the diff without writing |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape capability update
+
+Apply field deltas to existing capabilities index entries
+
+```
+ape capability update [flags]
+```
+
+Apply per-entry field deltas to index.yaml and refresh generated_at.
+
+--updates takes {"<id>": {"<field>": "<value>"}} as a file path or '-' for
+stdin. Only entries ALREADY listed may be updated: an unknown id is an
+error raised before anything is written, because creating an index entry
+is the job of the skill that authors the document it points at.
+
+The rendered index is round-trip parsed before it replaces the file, and
+the write is atomic — a crash mid-write cannot truncate an index. Key
+order and comments survive, which a PyYAML round trip does not manage.
+
+Exit codes:
+  0  applied
+  1  unknown id, unreadable updates, or an unwritable index (nothing written)
+
+Examples:
+
+```
+  echo '{"ADR-0001":{"status":"superseded"}}' | ape adr update --updates -
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--generated-at` | string | `—` | Timestamp to write as generated_at (default: resolved config timestamp) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--updates` | string | `-` | JSON file with per-entry field deltas, or '-' for stdin |
+
+## ape capability verify
+
+Verify the capabilities registry against its index
+
+```
+ape capability verify [flags]
+```
+
+Exactly four checks, and no others:
+
+  1. registry.orphan_record / registry.phantom_entry
+     set equality between the record directory and index.yaml, both
+     directions
+  2. registry.file_unresolved
+     every index file: resolves, relative to the index's own directory
+  3. registry.duplicate_id
+     duplicate ids, in the index and on disk
+  4. registry.record_unparseable
+     the record parses as frontmatter at all
+
+No schema validation, no field drift, no tag comparison, no updated_at
+comparison — those are judgment, and a verifier that wanders into them
+stops being trustworthy.
+
+An index.yaml that is absent while records exist is reported once, as
+registry.index_missing: the degenerate case of check 1, not a fifth check.
+One finding beats one orphan per record, which would bury the only fact
+that matters.
+
+Findings travel in the payload. Exit is 0 even with findings unless
+--strict is passed, so this is safe to call from anywhere.
+
+Examples:
+
+```
+  ape capability verify --output-format json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) |
 
 ## ape chat
 
@@ -178,6 +444,61 @@ Flags:
 | `--effort` | string | `—` | Reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Defaults to claude's native effort when unset. |
 | `--ignore-project-settings` | bool | `false` | Tell claude to skip project + local .claude/settings*.json. |
 | `--model` | string | `—` | Initial claude model. A bare family (sonnet, opus, haiku) resolves to its current generation; sonnet-5 / opus[1m] pin explicitly. Empty falls back to claude's default. |
+
+## ape config
+
+Resolve the project's APEX configuration
+
+```
+ape config
+```
+
+Subcommands:
+
+- `resolve` — Resolve _apex/config.yaml + the config.local.yaml overlay
+
+## ape config resolve
+
+Resolve _apex/config.yaml + the config.local.yaml overlay
+
+```
+ape config resolve [flags]
+```
+
+Walk up from --cwd for _apex/config.yaml, overlay _apex/config.local.yaml
+key-wise, and emit the seventeen folder/name variables every framework
+skill resolves on activation — plus the four derived ext_* flags, the
+absolute paths those folders denote, and the local date/timestamp.
+
+An absent config.local.yaml is a normal outcome (local_overlay_applied:
+false). A config.local.yaml that exists but does not parse is a hard
+failure, not a fall-back to base values: this resolution is the first act
+of every skill, so one typo'd override would otherwise run a whole
+pipeline against folders nobody chose.
+
+governance_repository_path names the CANONICAL governance repository that
+apex-adr-reconciliation / apex-pattern-reconciliation import from. It is
+not an alternative home for this project's own records — those always
+live under governance_folder, which is what paths.adrs and paths.patterns
+report.
+
+Exit codes:
+  0  resolved
+  2  a config file exists but is malformed (the message names it)
+  4  no _apex/config.yaml in --cwd or any parent
+
+Examples:
+
+```
+  ape config resolve --output-format json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root to resolve from (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
 ## ape costs
 
@@ -389,6 +710,458 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--from` | string | `—` | Path to a YAML file with model price overrides |
 
+## ape deferred
+
+The deferred-work record store
+
+```
+ape deferred
+```
+
+One file per deferred record under {development_folder}/deferred/, with
+YAML frontmatter and a verbatim Markdown body.
+
+This replaces a single 456,144-byte deferred-work.md whose only eviction
+mechanism was deletion — git shows 524 records removed in one commit — and
+which had grown too large for the skills that append to it to read.
+
+One file per record is not a style choice: the single-store alternative
+returns ZERO records when handed one malformed entry, while this shape
+loses exactly the one bad file.
+
+The store sits OUTSIDE {implementation_folder} deliberately. Ten skills
+glob {implementation_folder}/**/*.md across 17 sites, and 227 record files
+under that folder would feed every one of them.
+
+Subcommands:
+
+- `close` — Discharge a record, moving it to closed/
+- `ingest` — Store defer bullets as records (bullets on stdin)
+- `list` — List deferred records (open by default)
+- `migrate` — Convert the legacy deferred-work.md into record files
+- `repair` — Complete or retire free-form records (judgment, on opus)
+- `verify` — Check the store: invariants, and candidates for a human
+
+## ape deferred close
+
+Discharge a record, moving it to closed/
+
+```
+ape deferred close <id> [flags]
+```
+
+Mark a record closed and move it to closed/. The record is NEVER deleted:
+deletion is what destroyed the audit trail the first time, and an LLM that
+cannot see a closed defer re-files it.
+
+The body gains a discharge marker in the shape apex-pattern-reconciliation
+established, and keeps everything it already said.
+
+Closing is judgment — it requires re-verifying the record's premises
+against HEAD — so this is invoked by a person or a skill, never
+automatically. 'ape deferred verify' flags CANDIDATES and never closes one.
+
+Examples:
+
+```
+  ape deferred close DW-20260822-a1b2c3 --by "54-2"
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--by` | string | `—` | Story key or reason that discharged it (required) |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape deferred ingest
+
+Store defer bullets as records (bullets on stdin)
+
+```
+ape deferred ingest [flags]
+```
+
+Read defer bullets and write one record per bullet.
+
+Input comes from --body-file or stdin, NEVER from an argv string: 108 of
+109 real bodies contain backticks, which shell-expand inside an argument.
+--body-file is the form the framework calls, because
+apex-review-story/steps/step-04-present.md:13 restricts shell constructs
+inside code blocks and a plain path argument sidesteps the question
+entirely. The skill writes the bullets with the Write tool (never a
+heredoc) and passes the path.
+
+EXIT-CODE CONTRACT — this command is reachable from apex-review-story's
+emit path, where a non-zero exit converts a defer into a patch, raises
+unfixed_patches, and DEMOTES THE STORY to in-progress. Therefore:
+
+  - a bullet whose shape is unrecognised is stored verbatim as free-form,
+    with a warning on stderr;
+  - empty input is a rc-0 no-op;
+  - only a genuine setup failure (an unwritable store) fails.
+
+Nothing about the CONTENT of a defer can make this command exit non-zero.
+
+Examples:
+
+```
+  ape deferred ingest --story 54-1 --skill apex-review-story --body-file /tmp/defer-54-1.txt
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--body-file` | string | `—` | File holding the bullets (default: stdin) |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--cycle` | int | `0` | Review cycle number |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--skill` | string | `—` | Skill that filed it (e.g. apex-review-story) |
+| `--story` | string | `—` | Story key this defer was filed from |
+
+## ape deferred list
+
+List deferred records (open by default)
+
+```
+ape deferred list [flags]
+```
+
+Project the record set. Open records only unless --status says otherwise:
+closed records stay on disk but leave the working set, which is what stops
+an LLM re-filing work it already did.
+
+--detail picks how much the human rendering shows; --output-format picks
+the encoding. They are separate axes.
+
+Examples:
+
+```
+  ape deferred list --owner platform
+  ape deferred list --status all --output-format json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--detail` | string | `brief` | Human rendering detail: brief\|full |
+| `--group` | string | `—` | Only records in this group |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--owner` | string | `—` | Only records with this owner |
+| `--path` | string | `—` | Only records anchored under this path prefix |
+| `--status` | string | `open` | Which records: open\|closed\|all |
+| `--story` | string | `—` | Only records filed from this story |
+
+## ape deferred migrate
+
+Convert the legacy deferred-work.md into record files
+
+```
+ape deferred migrate [flags]
+```
+
+Convert a single-file deferred-work.md into one file per record.
+
+Four properties, all asserted rather than assumed:
+
+  VERIFIED BEFORE WRITE   N records parsed must equal N files written and
+                          every body must survive byte-for-byte, or NOTHING
+                          is written. A lossy conversion that passed
+                          silently is the one failure here that git cannot
+                          undo.
+  IDEMPOTENT              detected from disk state — does the store hold
+                          records, is the legacy file already a stub. No
+                          version marker is stored, so nothing can drift.
+  NEVER DELETES THE SOURCE  the legacy file becomes a short signpost; its
+                          content stays in git.
+  NO COMMIT               the files land in the working tree. You commit
+                          them, as one commit or two, however you like.
+
+A record whose tail does not match the expected shape keeps its full text
+as the body and takes its title from the first line — 26 of 109 records in
+the reference ledger are free-form, so that path always runs. Nothing is
+dropped and nothing is guessed at; 'ape deferred verify' flags them, and
+'ape deferred repair' completes or retires them.
+
+--recover-deleted mines the ledger's git history for records removed from
+it and writes them straight to closed/. The ledger's own preamble
+documents 'git log -p' as the recovery route; this automates exactly that.
+Failure to read history is a warning, never fatal.
+
+Examples:
+
+```
+  ape deferred migrate --dry-run
+  ape deferred migrate --recover-deleted
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--dry-run` | bool | `false` | Parse and verify, writing nothing |
+| `--from` | string | `—` | Legacy ledger path (default: resolved from config) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--recover-deleted` | bool | `false` | Also recover records removed from the ledger, from git history, into closed/ |
+
+## ape deferred repair
+
+Complete or retire free-form records (judgment, on opus)
+
+```
+ape deferred repair [flags]
+```
+
+Dispatch the free-form records to a framework skill for completion.
+
+The deterministic migration cannot finish a record that has no fields to
+read. Deciding whether a messy note is real work, what it points at, and
+whether it is already dead is JUDGMENT — so an LLM does it, in its own
+phase, never inside the verified migration. That separation is what keeps
+the migration assertable and revertible: a model's output can never
+invalidate a byte-identity check.
+
+Mechanism: this spawns apex-defer-repair on opus through
+the same PTY task runner `ape task` uses. The prompt lives in the
+framework as a versioned, reviewable skill rather than a Go string
+literal, so ape gains no HTTP client, no credentials and no model
+constant.
+
+Two guards this command adds:
+
+  It REFUSES without a TTY unless --force. It spends real money, and it
+  should not do that from a script that did not ask — the same refusal
+  'ape framework setup' already makes rather than seeding silently.
+
+  The on-disk record count MUST NOT FALL. "discard never deletes" is an
+  absolute rule that otherwise lives only in a prompt, and a prompt is not
+  an enforcement mechanism. If records vanish, this says so and names
+  them, so you can restore those paths before committing anything.
+
+Nothing is committed.
+
+Examples:
+
+```
+  ape deferred repair --dry-run
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--dry-run` | bool | `false` | Show the plan without spawning a session |
+| `--force` | bool | `false` | Spawn the session even without a TTY |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape deferred verify
+
+Check the store: invariants, and candidates for a human
+
+```
+ape deferred verify [flags]
+```
+
+Aliases: `lint`
+
+Two kinds of finding, and the tag on each is the important part:
+
+  confidence: certain    a fact. Schema problems, and related[]/supersedes[]
+                         pointing at records that do not exist.
+  confidence: candidate  a heuristic, NEVER auto-actionable. A dead anchor
+                         (the record may be moot, or the code may just have
+                         moved), a trigger naming a story that is now done
+                         (the closing condition MAY have fired), a
+                         near-duplicate title, a free-form record.
+
+Nothing here ever closes a record. Closing requires re-verifying the
+premises against HEAD, which is judgment — and on the reference ledger an
+unbiased sample of 20 records found 5 already delivered, including its own
+flagship entry, whose defect had been eliminated four weeks earlier.
+
+Exit 0 even with findings; --strict makes it 1.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) |
+
+## ape doc
+
+Shard, assemble and survey Markdown documents
+
+```
+ape doc
+```
+
+Aliases: `docs`
+
+Markdown document operations.
+
+  verify    refuse-to-shard gate: duplicate heading slugs at a level
+  shard     split a document into section files, rewriting relative links
+  assemble  concatenate the shards back, reversing the rewrite
+  analyze   survey a set of source documents: sizes, groups, routing
+
+Subcommands:
+
+- `analyze` — Survey source documents: sizes, groups, routing
+- `assemble` — Concatenate shards back into one document
+- `shard` — Split a document into section files
+- `verify` — Check a document for duplicate heading slugs
+
+## ape doc analyze
+
+Survey source documents: sizes, groups, routing
+
+```
+ape doc analyze <path|dir|glob>... [flags]
+```
+
+Enumerate source documents and report sizes, estimated tokens, detected
+types, suggested groupings, a routing recommendation and a split
+prediction.
+
+Inputs may be file paths, directories (walked for .md/.txt/.yaml/.yml/
+.json) or glob patterns. node_modules, .git, __pycache__, .venv, .claude,
+.cursor and .vscode are never source documents.
+
+Routing is 'single' when the corpus is BOTH at or under the file limit and
+at or under the token limit; otherwise 'fan-out'. The split prediction
+estimates a distillate at a third of its sources.
+
+Every token number here is bytes/4 — an estimate, labelled as one, and
+nothing gates on it. The three thresholds are flags so the boundaries are
+testable without building a 15k-token fixture; the defaults are the ones
+the framework has always used.
+
+Examples:
+
+```
+  ape doc analyze _output/handoffs --output-format json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--single-max-files` | int | `0` | File count at or below which routing is single (default 3) |
+| `--single-max-tokens` | int64 | `0` | Estimated tokens at or below which routing is single (default 15000) |
+| `--split-min-tokens` | int64 | `0` | Estimated distillate tokens above which a split is likely (default 5000) |
+
+## ape doc assemble
+
+Concatenate shards back into one document
+
+```
+ape doc assemble <dir> <file> [flags]
+```
+
+Reverse a shard: concatenate the section files in index.md order and
+strip the ../ that sharding added.
+
+index.md supplies the ordering and its preamble, and is never itself
+concatenated as a section. A ../ link that predated the shard survives
+untouched, because the strip only applies when the target actually resolves
+one level up.
+
+A section file named in the index but missing on disk is reported and
+skipped rather than fatal — an incomplete assembly you can see beats none.
+
+Examples:
+
+```
+  ape doc assemble development/planning/prd development/planning/prd.md
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape doc shard
+
+Split a document into section files
+
+```
+ape doc shard <file> <dir> [flags]
+```
+
+Split a document at a heading level, one file per section, and rewrite
+relative links to account for the extra directory depth.
+
+It ALWAYS writes an index.md listing and linking every section file. That
+is a contract, not a convenience: apex-shard-doc treats a missing index.md
+as proof the command did not complete, and verifies it in its own step. A
+replacement that split and rewrote links perfectly but omitted the index
+would pass a round-trip test and then fail its real caller.
+
+It REFUSES when two headings slugify to the same value, rather than writing
+'foo-2.md' siblings that hardcoded consumers cannot distinguish. Nothing is
+written in that case — fix the source document.
+
+A document with no headings at the requested level becomes index.md whole,
+so 'assemble' still has something to work from.
+
+Examples:
+
+```
+  ape doc shard development/planning/prd.md development/planning/prd
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--level` | int | `2` | Heading level to split at |
+| `--numbered` | bool | `false` | Prefix filenames with a zero-padded ordinal |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape doc verify
+
+Check a document for duplicate heading slugs
+
+```
+ape doc verify <file> [flags]
+```
+
+Scan a document for two headings at the same level that slugify to the
+same value.
+
+This is a GATE, not a report — the one exception to the verify contract,
+and for the same reason as 'ape story verify --file': its caller relies on
+the non-zero exit to stop before writing anything. Downstream skills
+reference shard files by exact slug, so a deduplicated 'foo-2.md' sibling
+would silently break them; the source document has to be fixed instead.
+
+Exit codes:
+  0  no duplicate slugs
+  1  duplicates found (each pair is printed with its line numbers)
+
+Examples:
+
+```
+  ape doc verify development/planning/prd.md --level 2
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--level` | int | `2` | Heading level to check |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
 ## ape doctor
 
 Probe the local environment for prerequisites
@@ -408,6 +1181,17 @@ CLAUDE.md managed block). Project-scoped checks degrade to INFO when run
 outside a project root; the operating-rules checks only hard-fail when a
 framework install that manages them has lost the fragment, import, or
 apex-orchestrator skill.
+
+Six checks report on PROJECT DATA rather than on the host: whether the
+config resolves at all (nothing else can see the project's artifacts
+without it), registry drift, story frontmatter, tracker divergence,
+team-memory size, and any pending project-data migration. All six degrade
+to INFO outside a project root.
+
+memory.size is one of only two Required checks in that group, deliberately:
+a non-required FAIL is downgraded to WARN, so nothing else could surface a
+team-memory.md that has passed the Read cap and become unreadable by its
+own writer.
 
 Two checks report on the step-completion gates rather than on
 prerequisites, because both protect against a failure that is otherwise
@@ -481,6 +1265,162 @@ Flags:
 | `--session-id` | string | `—` | Claude session id to report for (default: auto-resolve the current project's newest). |
 | `--transcript` | string | `—` | Explicit transcript file; the session id is parsed from its name. |
 
+## ape feature
+
+Inspect and maintain the feature registry
+
+```
+ape feature
+```
+
+Aliases: `features`
+
+Subcommands:
+
+- `list` — List features from the registry index
+- `sync` — Reconcile the features index against records on disk
+- `update` — Apply field deltas to existing features index entries
+- `verify` — Verify the features registry against its index
+
+## ape feature list
+
+List features from the registry index
+
+```
+ape feature list [flags]
+```
+
+Examples:
+
+```
+  ape feature list --output-format json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape feature sync
+
+Reconcile the features index against records on disk
+
+```
+ape feature sync [flags]
+```
+
+Reconcile index.yaml against the records on disk: records with no entry
+are added, entries whose id no record claims are removed, and an entry
+whose file: no longer resolves is repointed at the record claiming its id.
+
+This is the repair for the findings `verify` reports, and nothing more —
+it copies what a record's own frontmatter states and invents no titles,
+statuses or any other field. A renamed record keeps its authored entry
+rather than being dropped and re-added.
+
+--check makes it a dry run: the same diff, nothing written. generated_at
+moves only when something else did.
+
+Examples:
+
+```
+  ape feature sync --check
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | Report the diff without writing |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape feature update
+
+Apply field deltas to existing features index entries
+
+```
+ape feature update [flags]
+```
+
+Apply per-entry field deltas to index.yaml and refresh generated_at.
+
+--updates takes {"<id>": {"<field>": "<value>"}} as a file path or '-' for
+stdin. Only entries ALREADY listed may be updated: an unknown id is an
+error raised before anything is written, because creating an index entry
+is the job of the skill that authors the document it points at.
+
+The rendered index is round-trip parsed before it replaces the file, and
+the write is atomic — a crash mid-write cannot truncate an index. Key
+order and comments survive, which a PyYAML round trip does not manage.
+
+Exit codes:
+  0  applied
+  1  unknown id, unreadable updates, or an unwritable index (nothing written)
+
+Examples:
+
+```
+  echo '{"ADR-0001":{"status":"superseded"}}' | ape adr update --updates -
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--generated-at` | string | `—` | Timestamp to write as generated_at (default: resolved config timestamp) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--updates` | string | `-` | JSON file with per-entry field deltas, or '-' for stdin |
+
+## ape feature verify
+
+Verify the features registry against its index
+
+```
+ape feature verify [flags]
+```
+
+Exactly four checks, and no others:
+
+  1. registry.orphan_record / registry.phantom_entry
+     set equality between the record directory and index.yaml, both
+     directions
+  2. registry.file_unresolved
+     every index file: resolves, relative to the index's own directory
+  3. registry.duplicate_id
+     duplicate ids, in the index and on disk
+  4. registry.record_unparseable
+     the record parses as frontmatter at all
+
+No schema validation, no field drift, no tag comparison, no updated_at
+comparison — those are judgment, and a verifier that wanders into them
+stops being trustworthy.
+
+An index.yaml that is absent while records exist is reported once, as
+registry.index_missing: the degenerate case of check 1, not a fifth check.
+One finding beats one orphan per record, which would bury the only fact
+that matters.
+
+Findings travel in the payload. Exit is 0 even with findings unless
+--strict is passed, so this is safe to call from anywhere.
+
+Examples:
+
+```
+  ape feature verify --output-format json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) |
+
 ## ape framework
 
 Install and inspect APEX framework assets in a project
@@ -507,7 +1447,7 @@ Subcommands:
 
 - `setup` — Initial install of framework skills + pipelines into the project
 - `status` — Inspect the installed framework version + drift report
-- `update` — Refresh framework skills and pipelines against the framework repo
+- `update` — Refresh framework skills and pipelines, and run pending project-data migrations
 
 Flags:
 
@@ -598,7 +1538,7 @@ Global flags:
 
 ## ape framework update
 
-Refresh framework skills and pipelines against the framework repo
+Refresh framework skills and pipelines, and run pending project-data migrations
 
 ```
 ape framework update [flags]
@@ -611,8 +1551,28 @@ Refresh framework-managed assets in <project>:
   - _apex/framework.yaml   metadata refreshed (preserves project_name +
                            extensions recorded by 'ape framework setup')
 
+Then any pending PROJECT-DATA migration (PLAN-25 D10). Migrations run here
+rather than as a separate command a skill has to police, so no skill ever
+meets an un-migrated project and no skill needs a migration failure path.
+This is the right transaction boundary: explicitly invoked, at the moment
+framework expectations change, outside the build loop.
+
+THIS COMMAND COMMITS NOTHING — not the install, not the migration, not the
+repair. It never has, and that property is worth more than the
+convenience: the whole result sits in the working tree for one 'git diff',
+and you group it into however many commits you want. The run prints the
+paths and the 'git add' line.
+
 Does NOT touch _apex/config.yaml — that's the one-time bootstrap from
 'ape framework setup'. To re-bootstrap, pass --force to 'setup'.
+
+  --dry-run     show the framework drift AND the pending migrations,
+                writing nothing
+  --no-migrate  install framework files only; migrations stay pending, and
+                'ape doctor' reports them so the state is visible
+  --repair      also run the judgment phase over free-form deferred
+                records. OFF by default: it spawns a paid opus session, and
+                a file-copying verb should not start doing that silently.
 
 Refuses to run when:
   - _apex/framework.yaml is absent (run 'ape framework setup' first)
@@ -620,13 +1580,21 @@ Refuses to run when:
     .claude/skills/apex-* subtree has uncommitted changes (pass
     --force to bypass)
 
+A migration is skipped (never forced) when ITS OWN paths have uncommitted
+changes. The gate is path-scoped rather than whole-tree: those paths are
+disjoint from what the install writes, so the two are order-independent,
+and unrelated work-in-progress elsewhere does not block anything.
+
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--dry-run` | bool | `false` | Show the framework diff and pending migrations, writing nothing |
 | `--force` | bool | `false` | Bypass safety checks (dirty framework, non-main branch, modified project skills) |
 | `--no-fetch` | bool | `false` | Skip 'git fetch && merge --ff-only' on the framework repo before reading its state |
+| `--no-migrate` | bool | `false` | Install framework files only; leave migrations pending |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--repair` | bool | `false` | Also run the opus judgment phase over free-form deferred records (spends money) |
 
 Global flags:
 
@@ -672,6 +1640,142 @@ Flags:
 | `--quiet` | bool | `false` | Suppress the human-mode confirmation line. |
 | `--session-id` | string | `—` | Claude session id to report for (default: auto-resolve the current project's newest). |
 | `--transcript` | string | `—` | Explicit transcript file; the session id is parsed from its name. |
+
+## ape memory
+
+Read the team-memory file without loading it whole
+
+```
+ape memory
+```
+
+team-memory.md outgrew whole-file reading: at 431,950 bytes on the
+reference project a Read fails outright ("exceeds maximum allowed size
+(256KB)") — including for the retrospective that is instructed to re-read
+it before editing it.
+
+  index  what is in there: ordinal, section, date, size, title
+  show   the verbatim body of named entries
+  check  size against two budgets, from a stat alone
+
+Subcommands:
+
+- `check` — Report team-memory size against the soft budget and hard ceiling
+- `index` — List every team-memory entry
+- `show` — Print the verbatim body of the named entries
+
+## ape memory check
+
+Report team-memory size against the soft budget and hard ceiling
+
+```
+ape memory check [flags]
+```
+
+Classify team-memory.md against two budgets, from an os.Stat alone —
+the file is never read, which is what makes this cheap enough to run on
+every retrospective.
+
+  state: absent      no team-memory.md yet (a fresh project, not a problem)
+  state: ok          under the soft budget
+  state: over-soft   compaction is due; schedule it at the next epic close
+  state: over-hard   approaching Claude Code's 256 KiB Read cap — the file
+                     is about to become unreadable by its own writer
+
+EXIT 0 BY DEFAULT, whatever the state. The verdict is the 'state' field,
+not the exit code, and that is deliberate: the framework's prose
+convention is "on non-zero exit: HALT", so a failing exit here would abort
+the retrospective at exactly the moment compaction is most needed — the
+gate would break the ceremony it exists to trigger.
+
+--fail-at opts into a non-zero exit for CI, which wants one:
+  never  (default) always exit 0
+  soft   exit 1 at over-soft or worse
+  hard   exit 1 at over-hard
+
+'ape doctor' maps the state to WARN/FAIL itself, so a hard-ceiling breach
+is still visible and non-ignorable without this flag.
+
+The token count in the output is bytes/4, an estimate, and nothing gates
+on it.
+
+Examples:
+
+```
+  ape memory check
+  ape memory check --fail-at hard
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--fail-at` | string | `never` | Exit 1 at this state or worse: never\|soft\|hard |
+| `--hard` | int64 | `0` | Hard ceiling in bytes (default 204800) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--soft` | int64 | `0` | Soft budget in bytes (default 40960) |
+
+## ape memory index
+
+List every team-memory entry
+
+```
+ape memory index [flags]
+```
+
+One line per '### ' entry: ordinal, section, date, byte size, title.
+
+Structurally lossless, and carrying no filter, ranking or predicate —
+deliberately. Most call sites sit inside '## On Activation', which runs
+BEFORE the story is identified, so no predicate keyed on "this story's
+domain" could work there. Selection has to be possible from ordinal,
+section, date, size and title alone.
+
+A '### ' line inside a fenced code block is content, not an entry. That
+matters more than it sounds: counting one would shift every ordinal after
+it, and 'show <n>' would then hand back the wrong entry with nothing to
+signal the mistake.
+
+Examples:
+
+```
+  ape memory index --output-format json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape memory show
+
+Print the verbatim body of the named entries
+
+```
+ape memory show <n>[,<n>,...] [flags]
+```
+
+Print entries by ordinal, in the order asked for, byte-for-byte as they
+appear in the file.
+
+Exit codes:
+  0  printed
+  2  an ordinal the file does not have
+
+Examples:
+
+```
+  ape memory show 3,7,12
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
 
 ## ape metrics
 
@@ -725,10 +1829,14 @@ Manage governance patterns
 ape pattern
 ```
 
+Aliases: `patterns`
+
 Subcommands:
 
 - `list` — List all governance patterns
-- `validate` — Validate governance patterns
+- `sync` — Reconcile the patterns index against records on disk
+- `update` — Apply field deltas to existing patterns index entries
+- `verify` — Verify the patterns registry against its index
 
 ## ape pattern list
 
@@ -750,25 +1858,123 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
-## ape pattern validate
+## ape pattern sync
 
-Validate governance patterns
+Reconcile the patterns index against records on disk
 
 ```
-ape pattern validate [flags]
+ape pattern sync [flags]
 ```
+
+Reconcile index.yaml against the records on disk: records with no entry
+are added, entries whose id no record claims are removed, and an entry
+whose file: no longer resolves is repointed at the record claiming its id.
+
+This is the repair for the findings `verify` reports, and nothing more —
+it copies what a record's own frontmatter states and invents no titles,
+statuses or any other field. A renamed record keeps its authored entry
+rather than being dropped and re-added.
+
+--check makes it a dry run: the same diff, nothing written. generated_at
+moves only when something else did.
 
 Examples:
 
 ```
-  ape pattern validate --output-format json
+  ape pattern sync --check
 ```
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | Report the diff without writing |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape pattern update
+
+Apply field deltas to existing patterns index entries
+
+```
+ape pattern update [flags]
+```
+
+Apply per-entry field deltas to index.yaml and refresh generated_at.
+
+--updates takes {"<id>": {"<field>": "<value>"}} as a file path or '-' for
+stdin. Only entries ALREADY listed may be updated: an unknown id is an
+error raised before anything is written, because creating an index entry
+is the job of the skill that authors the document it points at.
+
+The rendered index is round-trip parsed before it replaces the file, and
+the write is atomic — a crash mid-write cannot truncate an index. Key
+order and comments survive, which a PyYAML round trip does not manage.
+
+Exit codes:
+  0  applied
+  1  unknown id, unreadable updates, or an unwritable index (nothing written)
+
+Examples:
+
+```
+  echo '{"ADR-0001":{"status":"superseded"}}' | ape adr update --updates -
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--generated-at` | string | `—` | Timestamp to write as generated_at (default: resolved config timestamp) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--updates` | string | `-` | JSON file with per-entry field deltas, or '-' for stdin |
+
+## ape pattern verify
+
+Verify the patterns registry against its index
+
+```
+ape pattern verify [flags]
+```
+
+Exactly four checks, and no others:
+
+  1. registry.orphan_record / registry.phantom_entry
+     set equality between the record directory and index.yaml, both
+     directions
+  2. registry.file_unresolved
+     every index file: resolves, relative to the index's own directory
+  3. registry.duplicate_id
+     duplicate ids, in the index and on disk
+  4. registry.record_unparseable
+     the record parses as frontmatter at all
+
+No schema validation, no field drift, no tag comparison, no updated_at
+comparison — those are judgment, and a verifier that wanders into them
+stops being trustworthy.
+
+An index.yaml that is absent while records exist is reported once, as
+registry.index_missing: the degenerate case of check 1, not a fifth check.
+One finding beats one orphan per record, which would bury the only fact
+that matters.
+
+Findings travel in the payload. Exit is 0 even with findings unless
+--strict is passed, so this is safe to call from anywhere.
+
+Examples:
+
+```
+  ape pattern verify --output-format json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) |
 
 ## ape pipeline
 
@@ -915,6 +2121,102 @@ Flags:
 | `--quiet` | bool | `false` | Suppress the progress stream on stderr |
 | `--ultracode` | bool | `false` | Prepend the ultracode keyword (session runs workflows by default) |
 | `--workflow` | bool | `false` | Append a directive to run the task through a Claude Code workflow |
+
+## ape registry
+
+Verify or reconcile every record registry at once
+
+```
+ape registry
+```
+
+Cross-family fan-out over the four record registries — ADRs, patterns,
+features and capabilities. Each family also carries these verbs on its own
+noun (`ape adr verify`); this is the whole-project view.
+
+Subcommands:
+
+- `sync` — Reconcile every record index against records on disk
+- `verify` — Verify every record registry (or a named subset)
+
+## ape registry sync
+
+Reconcile every record index against records on disk
+
+```
+ape registry sync [flags]
+```
+
+Reconcile index.yaml against the records on disk: records with no entry
+are added, entries whose id no record claims are removed, and an entry
+whose file: no longer resolves is repointed at the record claiming its id.
+
+This is the repair for the findings `verify` reports, and nothing more —
+it copies what a record's own frontmatter states and invents no titles,
+statuses or any other field. A renamed record keeps its authored entry
+rather than being dropped and re-added.
+
+--check makes it a dry run: the same diff, nothing written. generated_at
+moves only when something else did.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--all` | bool | `false` | Reconcile every family (the default when --family is not given) |
+| `--check` | bool | `false` | Report the diff without writing |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--family` | stringSlice | `[]` | Families to reconcile: adrs,patterns,features,capabilities |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape registry verify
+
+Verify every record registry (or a named subset)
+
+```
+ape registry verify [flags]
+```
+
+Exactly four checks, and no others:
+
+  1. registry.orphan_record / registry.phantom_entry
+     set equality between the record directory and index.yaml, both
+     directions
+  2. registry.file_unresolved
+     every index file: resolves, relative to the index's own directory
+  3. registry.duplicate_id
+     duplicate ids, in the index and on disk
+  4. registry.record_unparseable
+     the record parses as frontmatter at all
+
+No schema validation, no field drift, no tag comparison, no updated_at
+comparison — those are judgment, and a verifier that wanders into them
+stops being trustworthy.
+
+An index.yaml that is absent while records exist is reported once, as
+registry.index_missing: the degenerate case of check 1, not a fifth check.
+One finding beats one orphan per record, which would bury the only fact
+that matters.
+
+Findings travel in the payload. Exit is 0 even with findings unless
+--strict is passed, so this is safe to call from anywhere.
+
+Examples:
+
+```
+  ape registry verify --all --output-format json
+  ape registry verify --family adrs,patterns
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--all` | bool | `false` | Verify every family (the default when --family is not given) |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--family` | stringSlice | `[]` | Families to verify: adrs,patterns,features,capabilities |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) |
 
 ## ape rollback
 
@@ -1957,19 +3259,274 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
-## ape sync
+## ape sprint
 
-Sync governance artifacts
+Inspect and maintain sprint-status.yaml
 
 ```
-ape sync
+ape sprint
+```
+
+Three operations on the tracker, with deliberately different contracts:
+
+  check      compare tracker rows against story files; report divergence,
+             never pick a winner, always exit 0
+  verify     assert one row landed as written (a gate, exit 0/2/3/4/5)
+  reconcile  project an epic's row from its story rows (a mutation)
+
+Subcommands:
+
+- `check` — Report divergence between the tracker and story files
+- `reconcile` — Project epic rows from their story rows
+- `verify` — Verify one tracker row landed as written
+
+## ape sprint check
+
+Report divergence between the tracker and story files
+
+```
+ape sprint check [flags]
+```
+
+Set-compare sprint-status.yaml's story rows against story files on disk,
+and compare each row's status against that story's own frontmatter.
+
+epic-* and *-retrospective rows are classified out: they have no story
+file to diverge from. The tracker's 'drafted' is normalised to a story
+file's 'ready-for-dev' for comparison only — neither file is touched — or
+every drafted story would report a false divergence.
+
+ALWAYS EXITS 0, even with findings, and there is no --strict. Which side of
+a divergence is right is judgment, so this reports both values and picks
+neither; wiring it into a build loop would stop runs over something no tool
+can resolve. It belongs in 'ape doctor' and nowhere else.
+
+Examples:
+
+```
+  ape sprint check --output-format json
 ```
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--check` | bool | `false` | Check sync status without applying changes |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape sprint reconcile
+
+Project epic rows from their story rows
+
+```
+ape sprint reconcile [flags]
+```
+
+An epic's status is not a fact any skill asserts — it is a projection of
+the story rows beneath it. This is the single implementation of that
+projection, tracker-only, with no story-file reads:
+
+  rows   = development_status keys matching ^{N}-\d+[-_]
+  active = rows whose status is not 'cancelled'
+
+  no rows              -> leave unchanged (never close an epic with none)
+  no active rows       -> leave unchanged (all-cancelled is a scope call)
+  all active 'done'    -> done
+  all active 'backlog' -> backlog
+  otherwise            -> in-progress
+
+'blocked' lands in the final clause, so a blocked story holds its epic
+open. An unrecognised status can only ever hold an epic open, never close
+it, and is named in the output rather than swallowed.
+
+The write is TARGETED: only the matched epic-N line and the body
+updated_at change. Comments, key order, story rows and the sync-generated
+header are untouched. updated_at moves only on mutation and never
+backwards — it is clamped, reported, and never fatal.
+
+The read-modify-write takes an exclusive lock on a sidecar file, because
+concurrent per-epic sub-agents reconcile the same tracker and the last
+writer would otherwise silently drop a sibling's update.
+
+Exit 0 for every content outcome, including an unrecognised status.
+Non-zero only for a genuine I/O failure.
+
+Examples:
+
+```
+  ape sprint reconcile --epic 12
+  ape sprint reconcile --all --check
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--all` | bool | `false` | Reconcile every epic with rows |
+| `--check` | bool | `false` | Report the projection without writing |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--epic` | int | `0` | Reconcile one epic by number |
+| `--file` | string | `—` | Tracker path (default: resolved from config) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape sprint verify
+
+Verify one tracker row landed as written
+
+```
+ape sprint verify [flags]
+```
+
+Re-read the tracker from disk and confirm the write landed: the row
+equals --expected, updated_at does not precede created_at, and updated_at
+is not earlier than the value in the last committed revision.
+
+That last comparison is the one that matters. A row write can silently
+fail to land, and comparing updated_at against created_at alone passes
+trivially because both are written in the same operation.
+
+Exit codes, preserved exactly from verify-sprint-status-row.py because two
+review skills branch on them:
+  0  the row matches and the timestamps are ordered
+  2  file unreadable or YAML malformed
+  3  key missing from development_status, or its value differs
+  4  updated_at precedes created_at (a corrupt write)
+  5  updated_at is earlier than the last committed value (a backwards
+     write). Deterministically repairable: re-write the field as the
+     reported clamp value or later, re-run, and report the clamp. NEVER a
+     reason to stop the run.
+
+Exit 1 is deliberately unreachable. In the Python it meant "PyYAML is not
+installed" — an environment failure that forced apex-review-story and
+apex-code-review to carry an eye-check fallback. A static binary cannot
+produce it, which is what lets those fallback branches be deleted.
+
+Examples:
+
+```
+  ape sprint verify --file development/implementation/sprint-status.yaml --key 1-1 --expected done
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--expected` | string | `—` | Status the row must equal (required) |
+| `--file` | string | `—` | Path to sprint-status.yaml (required) |
+| `--key` | string | `—` | development_status row key (required) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape story
+
+Project and verify story frontmatter
+
+```
+ape story
+```
+
+Aliases: `stories`
+
+Subcommands:
+
+- `fields` — Project named frontmatter keys across every story
+- `verify` — Verify story frontmatter (corpus report, or a single-file gate)
+
+## ape story fields
+
+Project named frontmatter keys across every story
+
+```
+ape story fields [flags]
+```
+
+Walk the implementation folder, read at most 8 KiB per .md file, stop at
+the closing '---', and emit only the named top-level keys plus their
+nested blocks. A body is never opened.
+
+A file counts as a story only if it has a story_id — which is what keeps
+retrospectives, epic briefs and the deferred-work stub out of the result
+without teaching this command about each of them.
+
+The trailer carries files_scanned, stories_matched, per-field presence
+counts and bytes_read. Those numbers are the point: "this field is absent
+everywhere" and "this field was never looked for" are different answers,
+and only the trailer distinguishes them. A field present in zero stories
+reports 0 and exits 0.
+
+One unreadable file loses that file and nothing else — it is named in
+warnings and the rest are still returned.
+
+Examples:
+
+```
+  ape story fields --select story_id,epic,status,features --output-format json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--select` | string | `—` | Comma-separated frontmatter keys to emit (required) |
+
+## ape story verify
+
+Verify story frontmatter (corpus report, or a single-file gate)
+
+```
+ape story verify [flags]
+```
+
+Three check classes over story frontmatter, and no others:
+
+  1. presence  the four required keys, plus the extension-gated ones
+               (governance.adrs, governance.patterns, features,
+               capabilities) for whichever ext_* flags are set
+  2. type      features items must be objects, not bare strings;
+               depends_on items must be strings, not YAML floats
+  3. refs      every cited ADR / pattern / feature / capability id
+               resolves to a record on disk
+
+No enum checks, no contribution vocabulary, no JSON Schema engine. The
+contribution field has no normative source, so coercing it would fabricate
+a lifecycle edge — a test asserts this command reports nothing for any
+value of it.
+
+TWO MODES, with deliberately different contracts:
+
+  corpus (default)  a REPORT. Exit 0 even with findings; --strict makes it
+                    1. --strict must never be set from inside
+                    apex-review-story, apex-code-review or
+                    apex-epic-batch-review: a non-zero exit on those paths
+                    converts a defer into a patch and demotes the story.
+
+  --file <path>     a GATE, replacing verify-story-frontmatter.py with its
+                    exit codes intact:
+                      0  valid
+                      2  parse failure (bad YAML, or no --- delimiters)
+                      3  a required or extension-conditional key is absent,
+                         or an optional key is present but malformed
+                    Referential integrity is not asserted here — a single
+                    file cannot see the corpus, exactly as the Python
+                    could not.
+
+Examples:
+
+```
+  ape story verify --output-format json
+  ape story verify --file development/implementation/1-1_thing.md --active-extensions ext-adrs
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--active-extensions` | string | `—` | Comma-separated active extensions for --file mode (e.g. ext-adrs,ext-features) |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--file` | string | `—` | Verify one story file as a gate (exit 0/2/3) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) — NEVER set this from apex-review-story, apex-code-review or apex-epic-batch-review |
 
 ## ape task
 

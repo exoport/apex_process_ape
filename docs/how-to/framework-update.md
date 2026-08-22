@@ -117,8 +117,46 @@ suppression, not a failure). Upgrade the framework repo to a version that ships
 
 `git merge --ff-only` failed because the framework repo's local main has commits not on the remote. Either rebase manually or pass `--no-fetch` to skip the pull.
 
+## Project-data migrations
+
+`update` also runs any pending **project-data** migration — converting a
+legacy single-file `deferred-work.md` into one record file each. Migrations
+run here rather than in a command a skill has to police, so no skill ever
+meets an un-migrated project and no skill needs a migration failure path.
+This is the right transaction boundary: explicitly invoked, at the moment
+framework expectations change, outside the build loop.
+
+**This command commits nothing** — not the framework files, not the
+migration, not the repair. It never has. The whole result sits in the
+working tree for one `git diff`, and the run prints the paths plus the
+`git add` line so you can group it into however many commits you want.
+
+```bash
+ape framework update --dry-run     # framework drift AND pending migrations; writes nothing
+ape framework update               # install, then migrate
+ape framework update --no-migrate  # install only; migrations stay pending
+ape framework update --repair      # also run the opus judgment phase (spends money)
+```
+
+`--repair` is opt-in, not opt-out. It spawns a paid session, and a verb
+whose contract has always been "copy some files" should not start doing
+that by default. It also refuses without a TTY.
+
+A migration is **skipped, never forced**, when its own paths have
+uncommitted changes — the message names them. The gate is scoped to those
+paths rather than the whole tree: they are disjoint from what the install
+writes (`.claude/skills`, `_apex/*`, `CLAUDE.md`), so the install and the
+migration are order-independent, and unrelated work in progress elsewhere
+does not block anything.
+
+With `--no-migrate`, `ape doctor`'s `migration.pending` check reports the
+outstanding work, so the state is visible rather than silent. See
+[How to work with project data](work-with-project-data.md) for what the
+migration does and how to run it on its own.
+
 ## Related
 
+- [How to work with project data](work-with-project-data.md) — the commands the migration uses.
 - [How to set up the framework (first install)](framework-setup.md) — run this before `update`.
 - [Pipeline spec reference](../reference/pipeline-spec.md) — the YAML shape of `_apex/pipelines/*.yaml`.
 - [framework.yaml reference](../reference/framework-yaml.md) — the metadata file written on every install.

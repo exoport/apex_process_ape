@@ -1,0 +1,250 @@
+# Work with project data
+
+The APEX framework's skills read and write a project's own records: ADRs,
+patterns, features, capabilities, stories, the sprint tracker, team memory
+and the deferred-work ledger. `ape` gives them deterministic commands for
+the parts that are mechanical, so a skill does not have to load a corpus
+into a context window to answer a question a directory scan can answer.
+
+Every command here follows the same shape: **measure or assert, report
+findings, and leave judgment to the caller.** None of them decides what a
+defer means, which of two divergent statuses is right, or whether one
+memory entry supersedes another.
+
+## Start here: does `ape` see your project?
+
+```bash
+ape config resolve
+```
+
+This walks up for `_apex/config.yaml`, overlays `_apex/config.local.yaml`
+key-wise, and prints the seventeen folder/name variables, the four derived
+`ext_*` flags, and the absolute paths those folders denote.
+
+Run it first when anything below reports "no records". Before it existed,
+`ape adr list` printed `no ADR directory found (looking for
+development/adrs/)` on a project with 64 ADRs in
+`development/governance/adrs/` — because nothing in `ape` read
+`governance_folder`. Every command below resolves its paths through this
+one, so if `ape config resolve` is wrong, everything is wrong in the same
+direction.
+
+| Exit | Means |
+| ---- | ----- |
+| 0 | resolved |
+| 2 | a config file exists but is malformed — the message names it |
+| 4 | no `_apex/config.yaml` here or in any parent |
+
+A malformed `config.local.yaml` is a hard failure on purpose. This
+resolution is the first act of every skill, so a silent fall-back to base
+values would let one typo'd override run a whole pipeline against folders
+nobody chose.
+
+## Registries: ADRs, patterns, features, capabilities
+
+Each family carries the same four verbs, and answers to its plural
+(`ape adrs verify` is `ape adr verify`):
+
+```bash
+ape adr verify                  # four checks, exit 0 with findings
+ape adr sync --check            # what reconciling would change
+ape adr sync                    # reconcile the index against disk
+ape registry verify --all       # every family at once
+```
+
+`verify` does **exactly four checks and no others**: set equality between
+the directory and `index.yaml` in both directions, every index `file:`
+resolving against the index's own directory, duplicate ids on both sides,
+and whether a record parses as frontmatter at all. No schema validation, no
+field drift, no tag comparison, no `updated_at` comparison — those are
+judgment, and a verifier that wanders into them stops being trustworthy.
+
+An `index.yaml` that is absent while records exist is one finding
+(`registry.index_missing`), not one per record.
+
+`sync` is the repair for what `verify` reports, and nothing more: it copies
+what a record's own frontmatter already states and invents no titles or
+statuses. A renamed record keeps its authored index entry rather than being
+dropped and re-added with less.
+
+`ape <family> update --updates -` applies field deltas to entries that are
+already listed, and fails before writing anything if it is handed an id
+that is not — creating an entry is the job of the skill that authors the
+document it points at.
+
+## Stories
+
+```bash
+ape story fields --select story_id,epic,status,features
+ape story verify                                  # corpus report, exit 0
+ape story verify --file path/to/1-1_thing.md      # gate, exit 0/2/3
+```
+
+`fields` reads at most 8 KiB per file, stops at the closing `---`, and
+never opens a body. A file counts as a story only if it has a `story_id`,
+which is what keeps retrospectives, epic briefs and the deferred-work stub
+out of the result.
+
+The trailer is part of the answer: `files_scanned`, `stories_matched`,
+per-field presence counts and `bytes_read`. "This field is absent
+everywhere" and "this field was never looked for" are different results,
+and only the trailer distinguishes them.
+
+`verify` has two modes with deliberately different contracts. The corpus
+mode is a **report** — exit 0 even with findings, `--strict` to make it 1.
+`--file` is a **gate**, with the exit codes its callers already branch on:
+0 valid, 2 parse failure, 3 a required or extension-conditional key absent.
+
+> `--strict` must never be set from inside `apex-review-story`,
+> `apex-code-review` or `apex-epic-batch-review`. A non-zero exit on those
+> paths converts a defer into a patch, raises `unfixed_patches`, and demotes
+> the story.
+
+## Sprint tracker
+
+```bash
+ape sprint check                                  # divergence, always exit 0
+ape sprint verify --file … --key 1-1 --expected done
+ape sprint reconcile --epic 12
+```
+
+`check` compares tracker rows against story files and **reports both sides
+of every divergence without picking a winner**. It always exits 0 and has
+no `--strict`: which side is right is judgment, and wiring it into a build
+loop would stop runs over something no tool can fix. It belongs in
+`ape doctor` and nowhere else.
+
+`verify` asserts one row landed as written, including against the last
+committed value — the comparison that actually catches a backwards write,
+since `updated_at` against `created_at` passes trivially when both are
+written in the same operation. Exit 5 means "deterministically repairable":
+re-write the field as the reported clamp value or later, re-run, report the
+clamp, and never stop the run.
+
+`reconcile` projects an epic's row from its story rows. It changes exactly
+two lines — the `epic-N:` value and the body `updated_at` — leaving every
+comment, the row ordering and the sync-generated header byte-identical, and
+it takes an exclusive lock because concurrent per-epic sub-agents reconcile
+the same file.
+
+## Team memory
+
+```bash
+ape memory index          # ordinal, section, date, size, title
+ape memory show 3,7,12    # verbatim bodies
+ape memory check          # size against two budgets
+```
+
+`team-memory.md` outgrew whole-file reading: at 431,950 bytes a `Read`
+fails outright, including for the retrospective that is told to re-read it
+before editing it.
+
+`index` is structurally lossless and carries no filter or ranking, because
+most call sites sit inside `## On Activation` — which runs *before* the
+story is identified, so no predicate keyed on "this story's domain" could
+work there.
+
+`check` never reads the file; it stats it. That is what makes it cheap
+enough to run on every retrospective:
+
+| state | means |
+| ----- | ----- |
+| `absent` | no `team-memory.md` yet — a fresh project, not a problem |
+| `ok` | under the soft budget |
+| `over-soft` | compaction is due at the next epic close |
+| `over-hard` | approaching the 256 KiB Read cap; the soft gate was missed |
+
+**It exits 0 whatever the state.** The verdict is the `state` field, not
+the exit code — a failing exit would abort the retrospective at exactly the
+moment compaction is most needed. `--fail-at soft|hard` opts CI into a
+non-zero exit, and `ape doctor` fails on `over-hard` so a real breach stays
+non-ignorable either way.
+
+## Deferred work
+
+```bash
+ape deferred ingest --story 54-1 --skill apex-review-story --body-file /tmp/d.txt
+ape deferred list --owner platform
+ape deferred verify
+ape deferred close DW-20260822-a1b2c3 --by "54-2"
+```
+
+One file per record under `{development_folder}/deferred/`. The store sits
+outside `implementation_folder` deliberately: ten skills glob
+`{implementation_folder}/**/*.md` across 17 sites, and record files under
+that folder would feed every one of them.
+
+`ingest` takes bullets from `--body-file` or stdin, never argv — 108 of 109
+real bodies contain backticks, which shell-expand inside an argument. It
+**never exits non-zero for a content reason**: an unrecognised bullet is
+stored verbatim as free-form with a warning, and empty input is a no-op.
+Only an unwritable store fails.
+
+`verify` (alias `lint`) tags each finding:
+
+- `confidence: certain` — a fact. Schema problems; `related[]` /
+  `supersedes[]` pointing at records that do not exist.
+- `confidence: candidate` — a heuristic, never auto-actionable. A dead
+  anchor, a trigger naming a now-done story, a near-duplicate title, a
+  free-form record.
+
+Nothing here ever closes a record. Closing requires re-verifying the
+premises against HEAD, and on the reference ledger an unbiased sample of 20
+records found 5 already delivered.
+
+`close` moves a record to `closed/` and never deletes it. Closed records
+leave the working set but stay on disk, which is what stops an LLM
+re-filing work it already did.
+
+### Migrating an existing ledger
+
+```bash
+ape deferred migrate --dry-run           # parse and verify, write nothing
+ape deferred migrate --recover-deleted   # plus records mined from git history
+```
+
+The migration verifies before it writes — N records parsed must equal N
+files written, with every body byte-identical, or nothing lands. It is
+idempotent from disk state, never deletes the source (the ledger becomes a
+short signpost), and **commits nothing**: it prints the paths and the
+`git add` line, and you group the change into however many commits you want.
+
+`ape framework update` runs it for you; `--no-migrate` leaves it pending,
+and `ape doctor` reports that so the state is visible rather than silent.
+
+`ape deferred repair` is the judgment half: it dispatches a framework skill
+on opus to complete or retire the free-form records. It is opt-in, refuses
+without a TTY (it spends real money), and asserts the on-disk record count
+did not fall afterwards.
+
+## Documents
+
+```bash
+ape doc verify prd.md              # gate: duplicate heading slugs
+ape doc shard prd.md prd/          # split, rewriting relative links
+ape doc assemble prd/ prd.md       # concatenate back
+ape doc analyze _output/handoffs   # sizes, groups, routing
+```
+
+`shard` always writes an `index.md` listing every section file — the
+calling skill treats its absence as proof the command did not complete. It
+refuses when two headings slugify to the same value rather than writing
+`foo-2.md` siblings that consumers cannot distinguish.
+
+## Checking all of it at once
+
+```bash
+ape doctor
+```
+
+Six rows report project data: `config.resolved`, `registry.drift`,
+`story.frontmatter`, `sprint.divergence`, `memory.size` and
+`migration.pending`. All degrade to INFO outside a project. `memory.size`
+and `config.resolved` are the only two that can fail the run — see
+[Run doctor in CI](run-doctor-in-ci.md).
+
+## Related
+
+- [Framework update](framework-update.md) — where migrations run
+- [Run doctor in CI](run-doctor-in-ci.md) — what each check means on a runner
+- [CLI reference](../reference/cli.md) — every flag

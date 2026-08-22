@@ -35,6 +35,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [How to read run artefacts](how-to/run-artefacts.md)
 - [How to keep cost pricing current](how-to/keep-cost-pricing-current.md)
 - [How to run `ape doctor` in CI](how-to/run-doctor-in-ci.md)
+- [How to work with project data (registries, stories, memory, deferred work)](how-to/work-with-project-data.md)
 - [How to verify a release before tagging](how-to/pre-tag-release.md)
 
 ### Reference — _technical descriptions_
