@@ -1,0 +1,22 @@
+# created_at: 20260817021455
+# updated_at: 20260817021455
+# project: greeter
+# tracking_system: file-system
+# story_location: development/implementation
+#
+# Epic Status Transitions (DERIVED — never edit an epic row by hand):
+#   Epic status is a projection of this epic's story rows.
+created_at: "20260817021455"
+updated_at: "20260817021455"
+
+development_status:
+  epic-1: done
+  1-1_greet-a-name-from-the-domain: done
+  1-2_present-the-greeting-form: done
+  epic-1-retrospective: optional
+
+  epic-2: in-progress
+  # `drafted` is the tracker's spelling of a story file's `ready-for-dev`.
+  2-1_refuse-an-over-long-name: drafted
+  2-2_answer-unknown-paths: backlog
+  epic-2-retrospective: optional

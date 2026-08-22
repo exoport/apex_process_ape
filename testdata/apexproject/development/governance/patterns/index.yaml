@@ -1,0 +1,11 @@
+generated_at: "20260817004537"
+project_name: greeter
+patterns:
+  - id: PAT-0001
+    slug: handler-shape
+    file: pat-0001_handler-shape.md
+    category: structural
+    version: v1
+    status: accepted
+    created_at: "20260817003935"
+    updated_at: "20260817004537"

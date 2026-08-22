@@ -106,6 +106,84 @@ func findingsOf(report *Report, check string) []Finding {
 	return out
 }
 
+// capabilityIndex writes the capability index in its REAL shape: entries
+// with no `file:` key, because capability-index-schema.json defines none.
+// Every capability test below uses it, so a verifier or a sync that starts
+// demanding or writing a file: fails here rather than on someone's project.
+func (f *fixture) capabilityIndex(ids ...string) {
+	f.t.Helper()
+	var b strings.Builder
+	b.WriteString("generated_at: '20260821120000'\ncapabilities:\n")
+	for _, id := range ids {
+		fmt.Fprintf(&b, "  - id: %s\n    slug: cap-%s\n    name: Capability %s\n"+
+			"    status: accepted\n    components: []\n", id, strings.ToLower(id), id)
+	}
+	f.raw("capabilities", IndexFileName, b.String())
+}
+
+// TestVerify_CapabilitiesNeedNoFileField is the false-positive that shipped:
+// capabilities are the one family whose index schema has no `file` property,
+// so demanding one reports a finding per entry on every project with the
+// extension on — and `ape doctor` then shows registry drift that no sync can
+// ever clear.
+func TestVerify_CapabilitiesNeedNoFileField(t *testing.T) {
+	f := newFixture(t)
+	f.record("capabilities", "cap-1_greeting.md", "CAP-1")
+	f.record("capabilities", "cap-2_service.md", "CAP-2")
+	f.capabilityIndex("CAP-1", "CAP-2")
+
+	report := f.verify("capabilities")
+	require.Empty(t, report.Findings, "a schema-conformant capability index is clean: %+v", report.Findings)
+
+	// The other three families DO require one, and still say so.
+	f.record("adrs", "adr-0001_first.md", "ADR-0001")
+	f.raw("adrs", IndexFileName,
+		"generated_at: '20260821120000'\nadrs:\n  - id: ADR-0001\n    status: accepted\n")
+	require.Len(t, findingsOf(f.verify("adrs"), CheckFileUnresolved), 1,
+		"an ADR entry without file: is still a finding")
+}
+
+// TestSync_NeverWritesAFileFieldToCapabilities: a sync that "helpfully"
+// added one would produce an index the framework's own schema rejects.
+func TestSync_NeverWritesAFileFieldToCapabilities(t *testing.T) {
+	f := newFixture(t)
+	f.record("capabilities", "cap-1_greeting.md", "CAP-1")
+	f.record("capabilities", "cap-2_service.md", "CAP-2")
+	f.capabilityIndex("CAP-1") // CAP-2 is an orphan sync must adopt
+
+	res, err := Sync(f.cfg, SyncOptions{Only: []string{"capabilities"}, GeneratedAt: "20260822120000"})
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Changes)
+
+	body, err := os.ReadFile(filepath.Join(f.dir("capabilities"), IndexFileName))
+	require.NoError(t, err)
+	require.NotContains(t, string(body), "file:",
+		"capabilities locate their record by id + slug; a file: key is schema-invalid")
+	require.Empty(t, f.verify("capabilities").Findings)
+}
+
+// TestSync_RepairsAnEmptyFileField: an entry whose file: is the empty string
+// is unresolved, not resolved. The naive check stats
+// filepath.Join(dir, "") — the directory — which always succeeds, so the one
+// entry that most needs repointing is the one that gets skipped.
+func TestSync_RepairsAnEmptyFileField(t *testing.T) {
+	f := newFixture(t)
+	f.record("adrs", "adr-0001_first.md", "ADR-0001")
+	f.raw("adrs", IndexFileName, "generated_at: '20260821120000'\nadrs:\n"+
+		"  - id: ADR-0001\n    status: accepted\n    file: ''\n")
+
+	require.Len(t, findingsOf(f.verify("adrs"), CheckFileUnresolved), 1)
+
+	res, err := Sync(f.cfg, SyncOptions{Only: []string{"adrs"}, GeneratedAt: "20260822120000"})
+	require.NoError(t, err)
+	require.NotEmpty(t, res.Changes, "an empty file: is repairable and must be repaired")
+
+	body, err := os.ReadFile(filepath.Join(f.dir("adrs"), IndexFileName))
+	require.NoError(t, err)
+	require.Contains(t, string(body), "file: adr-0001_first.md")
+	require.Empty(t, f.verify("adrs").Findings)
+}
+
 // TestVerify_CleanCorpusHasNoFindings is the false-positive gate, and the
 // fixture is the point: everything that is NOT a record sits in the
 // directory alongside the records. The real corpus has 54 changelog

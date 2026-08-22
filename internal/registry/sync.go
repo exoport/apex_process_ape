@@ -65,7 +65,8 @@ func Sync(cfg *apexcfg.Resolved, opts SyncOptions) (*SyncResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := &SyncResult{Check: opts.Check}
+	// Non-nil so an in-sync run marshals as `"changes": []`, not `null`.
+	result := &SyncResult{Check: opts.Check, Changes: []SyncChange{}}
 	for _, family := range families {
 		famResult, changes, syncErr := syncFamily(cfg, family, opts)
 		if syncErr != nil {
@@ -129,6 +130,11 @@ func syncFamily(cfg *apexcfg.Resolved, family Family, opts SyncOptions) (SyncFam
 	// disk. Done before removals so a renamed record is repaired rather
 	// than dropped and re-added.
 	for _, e := range entries {
+		if !family.HasFileField {
+			// This family's index schema has no `file` property. Adding one
+			// would make every entry fail the framework's own schema.
+			break
+		}
 		rec, present := onDisk[e.ID]
 		if !present {
 			continue
@@ -136,8 +142,14 @@ func syncFamily(cfg *apexcfg.Resolved, family Family, opts SyncOptions) (SyncFam
 		if e.File == rec.Name {
 			continue
 		}
-		if _, statErr := os.Stat(filepath.Join(dir, filepath.FromSlash(e.File))); statErr == nil {
-			continue
+		// An EMPTY file: is unresolved, not resolved. Without this guard the
+		// stat below runs on filepath.Join(dir, "") — the directory itself —
+		// which always succeeds, so the one entry that most needs repairing
+		// is the one entry sync would skip.
+		if e.File != "" {
+			if _, statErr := os.Stat(filepath.Join(dir, filepath.FromSlash(e.File))); statErr == nil {
+				continue
+			}
 		}
 		setMappingValue(idx.entryNode(e), "file", scalar(rec.Name))
 		changes = append(changes, SyncChange{
@@ -252,7 +264,9 @@ func addEntry(idx *Index, family Family, rec Record, fields map[string]string) {
 			setMappingValue(body, key, scalar(v))
 		}
 	}
-	setMappingValue(body, "file", scalar(rec.Name))
+	if family.HasFileField {
+		setMappingValue(body, "file", scalar(rec.Name))
+	}
 
 	if family.Shape == ShapeMapping {
 		idx.entries.Content = append(idx.entries.Content, scalar(rec.ID), body)

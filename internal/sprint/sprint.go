@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -58,6 +59,13 @@ var (
 	// `12-3-slug`, `12-3_slug`. Mirrors reconcile-epic-status.py's
 	// `^{N}-\d+[-_]` plus the bare `N-M` form.
 	storyRowRe = regexp.MustCompile(`^(\d+)-(\d+)([-_].*)?$`)
+	// canonicalStoryRowRe is storyRowRe's stricter half: the shape the
+	// framework actually writes, `N-M` followed by a separator and a slug,
+	// because a row key IS a story key and a story key IS a file stem.
+	//
+	// The gap between the two patterns is deliberate and is a live hazard
+	// while the Python it replaces still ships — see BareStoryRowKeys.
+	canonicalStoryRowRe = regexp.MustCompile(`^\d+-\d+[-_].+$`)
 	// retroRowRe matches a retrospective row.
 	retroRowRe = regexp.MustCompile(`(?i)retrospective`)
 )
@@ -162,6 +170,135 @@ func atoi(s string) int {
 		n = n*10 + int(r-'0')
 	}
 	return n
+}
+
+// IsBareStoryRowKey reports a story row key written as `N-M` with no
+// separator and slug after it — `2-1` rather than `2-1_refuse-a-long-name`.
+//
+// Such a key is non-conforming twice over, and the second one is invisible:
+//
+//  1. A row key IS the story file's stem, so `2-1` claims a file named
+//     `2-1.md`. On a framework-authored project no such file exists, because
+//     `apex-create-story` writes `{story_key}.md` and a story key carries a
+//     slug.
+//  2. **ape and the script it is replacing disagree about it.**
+//     `reconcile-epic-status.py` matches story rows with `^(\d+)-\d+[-_]`,
+//     which REQUIRES the separator, so a bare row is invisible to it and
+//     contributes nothing to its epic's projection. ape's pattern makes the
+//     separator optional, so the same row does contribute. Both are
+//     defensible; they are not the same. Until the retirement lands, the
+//     same tracker reconciles differently depending on which one ran — and
+//     nothing about the output of either would tell you that happened.
+//
+// So ape says it, rather than quietly being the more useful of the two.
+func IsBareStoryRowKey(key string) bool {
+	return storyRowRe.MatchString(key) && !canonicalStoryRowRe.MatchString(key)
+}
+
+// BareStoryRowKeys lists the story rows whose keys are bare, in row order.
+func BareStoryRowKeys(rows []Row) []string {
+	var out []string
+	for _, r := range rows {
+		if r.Kind == KindStory && IsBareStoryRowKey(r.Key) {
+			out = append(out, r.Key)
+		}
+	}
+	return out
+}
+
+// BareRowKeyRemediation is the fix for a caller that CANNOT LOOK — the one
+// that has not read the implementation folder and so does not know whether a
+// story file matches the row.
+//
+// That is exactly one caller: `ape sprint reconcile`, which is tracker-only
+// by design (no story-file reads, D12). Its "ask sprint check" tail is honest
+// there and only there, which is why RemediationFor never returns this
+// constant — a command that has already looked and found nothing must say so,
+// not send the reader to re-run the command they are already reading the
+// output of.
+//
+// The example is `N-M` and not a real-looking key on purpose. An earlier
+// version carried a worked example (`2-1` -> `2-1_refuse-an-over-long-name`),
+// which read as specific and was therefore wrong on every project whose bare
+// row was not `2-1`: the reader was handed a rename for a row that appears
+// nowhere in the finding beside it.
+const BareRowKeyRemediation = "rename the row to its story file's stem " +
+	"(`N-M` -> `N-M_slug`), or rename the story file to match the row; " +
+	"`ape sprint check` names the specific pair"
+
+// MatchesBareRowKey reports whether a story file's stem is a slugged form of
+// a bare row key — `7-3_payment-retry` for `7-3`.
+//
+// The separator check is what keeps `1-10_x` from matching `1-1`: a prefix
+// test alone would claim epic 1 story 10 as a candidate for story 1.
+func MatchesBareRowKey(rowKey, stem string) bool {
+	if !strings.HasPrefix(stem, rowKey) || len(stem) <= len(rowKey) {
+		return false
+	}
+	sep := stem[len(rowKey)]
+	return sep == '-' || sep == '_'
+}
+
+// RemediationFor states the fix for one bare row key, for a caller that HAS
+// looked — so all three of its branches report a fact this run established,
+// including the branch where the fact is "nothing matches".
+//
+// This is the difference between a payload a caller can act on and one it has
+// to re-derive: the same run already knows that `7-3` and
+// `7-3_payment-retry.md` are one story, so saying so costs nothing and saying
+// something generic instead throws that away.
+//
+// Two candidates is not a worse version of one — it is a different problem.
+// The row cannot be renamed to both, so the answer is a judgment about which
+// story it meant (or that both need their own row), and the message says that
+// rather than picking.
+func RemediationFor(rowKey string, candidates []string) string {
+	switch len(candidates) {
+	case 0:
+		// NOT BareRowKeyRemediation. That constant ends by pointing at
+		// `ape sprint check`, which is the command printing this — having
+		// already searched and found nothing. Promising a specific pair from
+		// a re-run that will say the same thing is worse than saying less.
+		return fmt.Sprintf(
+			"no story file matches this row — nothing under the implementation folder has a "+
+				"stem of `%s` plus a separator and slug. Either the story is filed under an "+
+				"unrelated name, in which case rename the row to that file's stem, or the "+
+				"story does not exist and the row is stale",
+			rowKey)
+	case 1:
+		return fmt.Sprintf(
+			"rename the row `%s` to `%s` to match the story file, or rename `%s.md` to `%s.md`",
+			rowKey, candidates[0], candidates[0], rowKey)
+	default:
+		return fmt.Sprintf(
+			"%d story files could be this row (%s) — rename the row to whichever it means, "+
+				"and give the others a row of their own",
+			len(candidates), strings.Join(candidates, ", "))
+	}
+}
+
+// StoryKeyFromPath derives a story's tracker key from its file path.
+//
+// This is the join between the two halves of a project's story state, and
+// getting it wrong is silent: the tracker keys its rows on the STORY KEY —
+// the file's stem, because the framework writes stories to
+// `{implementation_folder}/{{story_key}}.md` and rows the tracker on the
+// same `{{story_key}}` — while a story file's frontmatter carries a
+// separate, DOTTED `story_id`:
+//
+//	development_status:
+//	  1-1_greet-a-name-from-the-domain: done     # the story key
+//
+//	---
+//	story_id: "1.1"                              # NOT the story key
+//
+// Joining on `story_id` matches nothing on a real project, so every row
+// reports as having no story file and every story as having no row: a
+// checker that is 100% false positives and can never find the status
+// divergence it exists to find.
+func StoryKeyFromPath(path string) string {
+	base := filepath.Base(filepath.FromSlash(path))
+	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
 // NormalizeStatus maps the tracker's vocabulary onto a story file's.

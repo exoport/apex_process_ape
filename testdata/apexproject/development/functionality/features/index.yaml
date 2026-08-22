@@ -1,0 +1,23 @@
+generated_at: "20260817011701"
+features:
+  FEAT-1-1:
+    name: Greeting Form
+    slug: greeting-form
+    file: feat-1-1_greeting-form.md
+    capability: CAP-1
+    status: specified
+    depends_on: []
+    depended_on_by: []
+    created_at: "20260817010238"
+    updated_at: "20260817011701"
+  FEAT-1-2:
+    name: Greeting Rendering
+    slug: greeting-rendering
+    file: feat-1-2_greeting-rendering.md
+    capability: CAP-1
+    status: specified
+    depends_on:
+      - FEAT-1-1
+    depended_on_by: []
+    created_at: "20260817010238"
+    updated_at: "20260817011701"

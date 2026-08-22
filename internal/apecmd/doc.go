@@ -45,7 +45,12 @@ would silently break them; the source document has to be fixed instead.
 
 Exit codes:
   0  no duplicate slugs
-  1  duplicates found (each pair is printed with its line numbers)`,
+  1  duplicates found (each pair is printed with its line numbers)
+
+This command carries no --cwd. It resolves nothing from the project's
+config — every input is an explicit path argument — so there is no
+project for --cwd to select. Relative paths resolve against the
+working directory, as they would for any other tool.`,
 		Args:    cobra.ExactArgs(1),
 		Example: "  ape doc verify development/planning/prd.md --level 2",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -101,7 +106,12 @@ It REFUSES when two headings slugify to the same value, rather than writing
 written in that case — fix the source document.
 
 A document with no headings at the requested level becomes index.md whole,
-so 'assemble' still has something to work from.`,
+so 'assemble' still has something to work from.
+
+This command carries no --cwd. It resolves nothing from the project's
+config — every input is an explicit path argument — so there is no
+project for --cwd to select. Relative paths resolve against the
+working directory, as they would for any other tool.`,
 		Args:    cobra.ExactArgs(2),
 		Example: "  ape doc shard development/planning/prd.md development/planning/prd",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -154,7 +164,12 @@ untouched, because the strip only applies when the target actually resolves
 one level up.
 
 A section file named in the index but missing on disk is reported and
-skipped rather than fatal — an incomplete assembly you can see beats none.`,
+skipped rather than fatal — an incomplete assembly you can see beats none.
+
+This command carries no --cwd. It resolves nothing from the project's
+config — every input is an explicit path argument — so there is no
+project for --cwd to select. Relative paths resolve against the
+working directory, as they would for any other tool.`,
 		Args:    cobra.ExactArgs(2),
 		Example: "  ape doc assemble development/planning/prd development/planning/prd.md",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -202,7 +217,12 @@ estimates a distillate at a third of its sources.
 Every token number here is bytes/4 — an estimate, labelled as one, and
 nothing gates on it. The three thresholds are flags so the boundaries are
 testable without building a 15k-token fixture; the defaults are the ones
-the framework has always used.`,
+the framework has always used.
+
+This command carries no --cwd. It resolves nothing from the project's
+config — every input is an explicit path argument — so there is no
+project for --cwd to select. Relative paths resolve against the
+working directory, as they would for any other tool.`,
 		Args:    cobra.MinimumNArgs(1),
 		Example: "  ape doc analyze _output/handoffs --output-format json",
 		RunE: func(cmd *cobra.Command, args []string) error {

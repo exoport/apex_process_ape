@@ -1,0 +1,21 @@
+config_schema_version: "1"
+project_name: greeter
+extensions:
+  - ext-adrs
+  - ext-patterns
+  - ext-capabilities
+  - ext-features
+user_name: Boss
+communication_language: English
+document_output_language: English
+user_skill_level: intermediate
+apex_folder: _apex
+output_folder: _output
+development_folder: development
+docs_folder: docs
+implementation_folder: development/implementation
+planning_folder: development/planning
+governance_repository_path: ""
+governance_folder: development/governance
+governance_staleness: warn
+functionality_folder: development/functionality

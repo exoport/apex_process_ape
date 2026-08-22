@@ -1,0 +1,24 @@
+generated_at: "20260817004537"
+capabilities:
+  - id: CAP-1
+    slug: greeting-experience
+    name: Greeting Experience
+    status: accepted
+    components:
+      - internal/greeting
+    related_epics: []
+    related_capabilities:
+      - CAP-2
+    created_at: "20260817003935"
+    updated_at: "20260817004537"
+  - id: CAP-2
+    slug: service-operation
+    name: Service Operation
+    status: accepted
+    components:
+      - cmd/greeter
+    related_epics: []
+    related_capabilities:
+      - CAP-1
+    created_at: "20260817003935"
+    updated_at: "20260817004537"

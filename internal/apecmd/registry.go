@@ -263,6 +263,23 @@ func runRegistrySync(w io.Writer, cwdFlag, outputFormat string, check bool, only
 	return tw.Flush()
 }
 
+// familyExampleID is a representative record id per family, for help text.
+// The shapes are the framework's own: ADR-0001 and PAT-0001 are
+// zero-padded four-digit, FEAT ids are epic-scoped (FEAT-1-1), CAP ids are
+// a bare ordinal.
+func familyExampleID(family registry.Family) string {
+	switch family.Name {
+	case "patterns":
+		return "PAT-0001"
+	case "features":
+		return "FEAT-1-1"
+	case "capabilities":
+		return "CAP-1"
+	default:
+		return "ADR-0001"
+	}
+}
+
 func newFamilyUpdateCmd(family registry.Family) *cobra.Command {
 	var (
 		cwdFlag      string
@@ -287,8 +304,15 @@ order and comments survive, which a PyYAML round trip does not manage.
 Exit codes:
   0  applied
   1  unknown id, unreadable updates, or an unwritable index (nothing written)`,
-		Args:    cobra.NoArgs,
-		Example: `  echo '{"ADR-0001":{"status":"superseded"}}' | ape adr update --updates -`,
+		Args: cobra.NoArgs,
+		// The example is built from the descriptor, not hardcoded. The four
+		// families are ONE code path — that is the point of D3 — so a literal
+		// here prints `ape adr update` with an `ADR-` id under
+		// `ape feature update --help`, telling a reader to run the wrong
+		// command with the wrong id shape against the one index whose layout
+		// actually differs.
+		Example: "  echo '{\"" + familyExampleID(family) + "\":{\"status\":\"superseded\"}}' | ape " +
+			family.Singular + " update --updates -",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg := resolveProjectConfig(cwdFlag)
 			data, err := readUpdatesInput(cmd.InOrStdin(), updatesPath)

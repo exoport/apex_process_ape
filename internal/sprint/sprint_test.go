@@ -330,6 +330,96 @@ func TestReconcile_EpicNumberBoundaries(t *testing.T) {
 	require.Contains(t, string(body), "epic-12: backlog", "epic-12 is untouched")
 }
 
+// TestReconcile_BareStoryKeysCount documents a DELIBERATE divergence from
+// reconcile-epic-status.py, so it is a decision on the record rather than an
+// accident found later on someone's tracker.
+//
+// The Python's story-row pattern is `^(\d+)-\d+[-_]` — it requires a
+// separator after the second number, so a bare `2-1` row is invisible to it
+// and its epic is left unchanged. ape's pattern makes the suffix optional,
+// so a bare row counts. ape's reading is the useful one (a bare key is still
+// a story row, and an epic whose only rows are bare would otherwise never
+// close), but it means a tracker carrying bare keys reconciles differently
+// under the two implementations. Trackers written by the framework always
+// carry the `_slug` suffix, so this only reaches hand-edited files.
+func TestReconcile_BareStoryKeysCount(t *testing.T) {
+	path := writeTracker(t, `development_status:
+  epic-2: backlog
+  2-1: done
+  2-2: done
+`)
+	res, err := Reconcile(path, ReconcileOptions{Epic: 2, Timestamp: "20260401090000"})
+	require.NoError(t, err)
+	require.Len(t, res.Changes, 1,
+		"a bare N-M row is a story row here; reconcile-epic-status.py ignores it")
+	require.Equal(t, StatusDone, res.Changes[0].To)
+
+	// And it says so, rather than silently being the more useful of the two.
+	require.Equal(t, []string{"2-1", "2-2"}, res.BareRowKeys)
+	require.NotEmpty(t, res.BareRowKeyRemediation)
+}
+
+// TestReconcile_BareRowKeysReportedEvenOnANoOp: the divergence is in what was
+// COUNTED, not in what was written. A run that changes nothing can still have
+// reached that answer differently from the script it replaces, so a no-op
+// must report it too — otherwise the warning appears only on the runs that
+// happened to mutate, which is the subset least in need of it.
+func TestReconcile_BareRowKeysReportedEvenOnANoOp(t *testing.T) {
+	path := writeTracker(t, `development_status:
+  epic-2: done
+  2-1: done
+`)
+	res, err := Reconcile(path, ReconcileOptions{Epic: 2, Timestamp: "20260401090000"})
+	require.NoError(t, err)
+	require.False(t, res.Changed(), "epic-2 is already done")
+	require.Equal(t, []string{"2-1"}, res.BareRowKeys)
+	require.Contains(t, res.BareRowKeyRemediation, "rename the row")
+}
+
+func TestReconcile_CanonicalKeysReportNothing(t *testing.T) {
+	path := writeTracker(t, `development_status:
+  epic-2: backlog
+  2-1_refuse-a-long-name: done
+`)
+	res, err := Reconcile(path, ReconcileOptions{Epic: 2, Timestamp: "20260401090000"})
+	require.NoError(t, err)
+	require.Empty(t, res.BareRowKeys)
+	require.Empty(t, res.BareRowKeyRemediation)
+}
+
+// TestReconcile_RoundTripVerificationRestoresOnCorruption is the guard the
+// Python carries and a port loses easily: after the targeted write, re-read
+// and prove nothing but the named rows moved. If the check fails the
+// original bytes go back, because a tracker left corrupt on disk is read by
+// every later writer.
+func TestReconcile_RoundTripVerificationRestoresOnCorruption(t *testing.T) {
+	original := `development_status:
+  epic-1: backlog
+  1-1_x: done
+`
+	path := writeTracker(t, original)
+
+	// A row whose value is rewritten to something that re-reads as a
+	// DIFFERENT value than the projection asked for is the shape of a
+	// line-edit that went wrong. Simulate it by verifying directly against a
+	// tracker snapshot that claims a change the file does not carry.
+	before, err := Load(path)
+	require.NoError(t, err)
+	err = verifyWriteLanded(path, before, []ReconcileChange{{Key: "epic-1", To: "done"}})
+	require.Error(t, err, "the file still says backlog, so the claimed change did not land")
+	require.Contains(t, err.Error(), "round-trip verification failed")
+
+	// A dropped row is caught too.
+	require.NoError(t, os.WriteFile(path, []byte("development_status:\n  epic-1: done\n"), 0o644))
+	err = verifyWriteLanded(path, before, []ReconcileChange{{Key: "epic-1", To: "done"}})
+	require.ErrorContains(t, err, "row count changed 2 -> 1")
+
+	// And a clean write passes.
+	require.NoError(t, os.WriteFile(path,
+		[]byte("development_status:\n  epic-1: done\n  1-1_x: done\n"), 0o644))
+	require.NoError(t, verifyWriteLanded(path, before, []ReconcileChange{{Key: "epic-1", To: "done"}}))
+}
+
 func TestReconcile_RequiresScope(t *testing.T) {
 	path := writeTracker(t, realTracker)
 	_, err := Reconcile(path, ReconcileOptions{})
@@ -547,10 +637,21 @@ func newCheckFixture(t *testing.T) (cfg *apexcfg.Resolved, write func(name, body
 	return cfg, write
 }
 
+// storyFile writes a story the way the framework does: the file STEM is the
+// story key the tracker rows on, and the frontmatter `story_id` is the
+// separate dotted form. Every RunCheck fixture below uses it, so a
+// regression to joining on story_id fails these tests rather than passing
+// them — which is how the join bug survived the first time round.
+func storyFile(t *testing.T, write func(name, body string), key, dottedID, status string) {
+	t.Helper()
+	write(key+".md", "---\nstory_id: \""+dottedID+"\"\nepic: \"1\"\nstatus: "+status+
+		"\noutput_document: development/implementation/"+key+".md\n---\n\nx\n")
+}
+
 func TestRunCheck_Clean(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  1-1: done\n")
-	write("1-1_x.md", "---\nstory_id: 1-1\nstatus: done\n---\n\nx\n")
+	write("sprint-status.yaml", "development_status:\n  1-1_greet-a-name: done\n")
+	storyFile(t, write, "1-1_greet-a-name", "1.1", "done")
 
 	report, err := RunCheck(cfg)
 	require.NoError(t, err)
@@ -561,33 +662,35 @@ func TestRunCheck_Clean(t *testing.T) {
 
 func TestRunCheck_RowWithoutStory(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  1-1: done\n  9-9: backlog\n")
-	write("1-1_x.md", "---\nstory_id: 1-1\nstatus: done\n---\n\nx\n")
+	write("sprint-status.yaml", "development_status:\n  1-1_greet-a-name: done\n  9-9_ghost: backlog\n")
+	storyFile(t, write, "1-1_greet-a-name", "1.1", "done")
 
 	report, err := RunCheck(cfg)
 	require.NoError(t, err)
 	require.Len(t, report.Findings, 1)
 	require.Equal(t, CheckRowWithoutStory, report.Findings[0].Check)
-	require.Equal(t, "9-9", report.Findings[0].Key)
+	require.Equal(t, "9-9_ghost", report.Findings[0].Key)
 }
 
 func TestRunCheck_StoryWithoutRow(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  1-1: done\n")
-	write("1-1_x.md", "---\nstory_id: 1-1\nstatus: done\n---\n\nx\n")
-	write("1-2_x.md", "---\nstory_id: 1-2\nstatus: backlog\n---\n\nx\n")
+	write("sprint-status.yaml", "development_status:\n  1-1_greet-a-name: done\n")
+	storyFile(t, write, "1-1_greet-a-name", "1.1", "done")
+	storyFile(t, write, "1-2_present-the-form", "1.2", "backlog")
 
 	report, err := RunCheck(cfg)
 	require.NoError(t, err)
 	require.Len(t, report.Findings, 1)
 	require.Equal(t, CheckStoryWithoutRow, report.Findings[0].Check)
-	require.Equal(t, "1-2", report.Findings[0].Key)
+	require.Equal(t, "1-2_present-the-form", report.Findings[0].Key)
+	require.Equal(t, "1.2", report.Findings[0].StoryID,
+		"the dotted id travels alongside the key, because they are different strings")
 }
 
 func TestRunCheck_StatusDivergenceNamesBothSides(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  1-1: done\n")
-	write("1-1_x.md", "---\nstory_id: 1-1\nstatus: in-progress\n---\n\nx\n")
+	write("sprint-status.yaml", "development_status:\n  1-1_greet-a-name: done\n")
+	storyFile(t, write, "1-1_greet-a-name", "1.1", "in-progress")
 
 	report, err := RunCheck(cfg)
 	require.NoError(t, err)
@@ -603,8 +706,8 @@ func TestRunCheck_StatusDivergenceNamesBothSides(t *testing.T) {
 // a divergence on every drafted story.
 func TestRunCheck_DraftedIsNotADivergence(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  1-1: drafted\n")
-	write("1-1_x.md", "---\nstory_id: 1-1\nstatus: ready-for-dev\n---\n\nx\n")
+	write("sprint-status.yaml", "development_status:\n  1-1_greet-a-name: drafted\n")
+	storyFile(t, write, "1-1_greet-a-name", "1.1", "ready-for-dev")
 
 	report, err := RunCheck(cfg)
 	require.NoError(t, err)
@@ -616,15 +719,211 @@ func TestRunCheck_EpicAndRetroRowsClassifiedOut(t *testing.T) {
 	write("sprint-status.yaml", `development_status:
   epic-1: done
   epic-1-retrospective: done
-  1-1: done
+  1-1_greet-a-name: done
 `)
-	write("1-1_x.md", "---\nstory_id: 1-1\nstatus: done\n---\n\nx\n")
+	storyFile(t, write, "1-1_greet-a-name", "1.1", "done")
 
 	report, err := RunCheck(cfg)
 	require.NoError(t, err)
 	require.True(t, report.OK(), "epic and retro rows have no story file to diverge from")
 	require.Equal(t, 1, report.Summary.EpicRows)
 	require.Equal(t, 1, report.Summary.RetroRows)
+}
+
+// TestStoryKeyFromPath pins the join key itself.
+func TestStoryKeyFromPath(t *testing.T) {
+	require.Equal(t, "1-1_greet-a-name", StoryKeyFromPath("1-1_greet-a-name.md"))
+	require.Equal(t, "1-1_greet-a-name", StoryKeyFromPath("development/implementation/1-1_greet-a-name.md"))
+	require.Equal(t, "1-1", StoryKeyFromPath("1-1.md"))
+	require.Equal(t, "no-extension", StoryKeyFromPath("no-extension"))
+}
+
+// TestRunCheck_BareRowKeyIsItsOwnFinding: `2-1` names no story file AND is
+// counted differently by the two live reconcile implementations. One finding
+// carries both halves plus the fix — reporting it as row_without_story would
+// send a reader off to create `2-1.md` when the row is what is wrong.
+func TestRunCheck_BareRowKeyIsItsOwnFinding(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml", "development_status:\n  epic-2: backlog\n  2-1: done\n")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	require.Len(t, report.Findings, 1, "one finding, not two: %+v", report.Findings)
+
+	f := report.Findings[0]
+	require.Equal(t, CheckNonStandardRowKey, f.Check)
+	require.Equal(t, "2-1", f.Key)
+	require.Contains(t, f.Message, "reconcile-epic-status.py",
+		"the message names the other implementation, because that is why it matters now")
+	require.Contains(t, f.Message, "rename the row", "and it names the fix")
+	require.Empty(t, findingsWithCheck(report.Findings, CheckRowWithoutStory),
+		"the bare key IS why the file lookup failed; saying both would mislead")
+}
+
+// TestRunCheck_BareRowKeyNamesItsActualStory is the case the first cut of
+// this check got wrong twice, and both times because the fixture's bare row
+// was `2-1` — the same string the hardcoded example used, so a generic
+// message read as a specific one, and no story file matched it, so the
+// second finding never fired.
+//
+// With `7-3` and `7-3_payment-retry.md` on disk, both faults appear: the
+// message must name THIS rename and not some other row's, and the story file
+// must not also be reported as having no tracker row when it plainly has one.
+func TestRunCheck_BareRowKeyNamesItsActualStory(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml", "development_status:\n  epic-7: backlog\n  7-3: done\n")
+	storyFile(t, write, "7-3_payment-retry", "7.3", "done")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	require.Len(t, report.Findings, 1,
+		"one misnamed row is one problem, not two: %+v", report.Findings)
+
+	f := report.Findings[0]
+	require.Equal(t, CheckNonStandardRowKey, f.Check)
+	require.Contains(t, f.Message, "rename the row `7-3` to `7-3_payment-retry`",
+		"the fix names the pair this run already identified")
+	require.NotContains(t, f.Message, "2-1", "no other project's row may appear in this message")
+	require.NotContains(t, f.Message, "N-M",
+		"the generic form is for callers that cannot know the answer; this one can")
+
+	// The finding stands in for the two it suppressed, so it carries both sides.
+	require.Equal(t, "7.3", f.StoryID)
+	require.Equal(t, "7-3_payment-retry.md", f.Path)
+	require.Equal(t, "done", f.Tracker)
+	require.Equal(t, "done", f.Story)
+	require.Equal(t, []string{"7-3_payment-retry"}, f.Candidates,
+		"one candidate populates the same field two do, so a consumer reads one place")
+	require.Empty(t, findingsWithCheck(report.Findings, CheckStoryWithoutRow),
+		"the story HAS a row — it is just misnamed. Telling the reader to add one is "+
+			"the same misdirection as telling them to create the missing file.")
+}
+
+// TestRunCheck_BareRowKeyWithNoCandidateReportsTheSearch: nothing on disk
+// claims the row. The honest sentence states THAT — the fact this run
+// established — rather than the generic advice, and above all it must not end
+// by pointing at `ape sprint check`, which is the command printing it. A
+// reader told to run the command they are already reading the output of gets
+// the same answer twice.
+func TestRunCheck_BareRowKeyWithNoCandidateReportsTheSearch(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml", "development_status:\n  epic-7: backlog\n  7-3: done\n")
+	storyFile(t, write, "8-1_unrelated", "8.1", "done")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	nonstandard := findingsWithCheck(report.Findings, CheckNonStandardRowKey)
+	require.Len(t, nonstandard, 1)
+
+	msg := nonstandard[0].Message
+	require.Contains(t, msg, "no story file matches this row")
+	require.Contains(t, msg, "the row is stale", "the second real option is named too")
+	require.NotContains(t, msg, "ape sprint check",
+		"this IS sprint check; it already looked and found nothing")
+	require.Empty(t, nonstandard[0].Candidates)
+
+	require.Len(t, findingsWithCheck(report.Findings, CheckStoryWithoutRow), 1,
+		"8-1_unrelated genuinely has no row, and nothing suppressed that")
+}
+
+// TestRunCheck_BareRowKeyWithTwoCandidatesPicksNeither: two files could be
+// this row. The rename target is a judgment, so the message names both and
+// nothing is suppressed — each file really does lack a row of its own name.
+func TestRunCheck_BareRowKeyWithTwoCandidatesPicksNeither(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml", "development_status:\n  epic-7: backlog\n  7-3: done\n")
+	storyFile(t, write, "7-3_payment-retry", "7.3", "done")
+	storyFile(t, write, "7-3_payment-refund", "7.3", "done")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	nonstandard := findingsWithCheck(report.Findings, CheckNonStandardRowKey)
+	require.Len(t, nonstandard, 1)
+	require.Contains(t, nonstandard[0].Message, "7-3_payment-refund")
+	require.Contains(t, nonstandard[0].Message, "7-3_payment-retry")
+	require.Empty(t, nonstandard[0].Path, "no single owner was claimed")
+	// Not deciding which file the row meant is a deliberate refusal. Making
+	// the decider parse prose to learn what the options were is not.
+	require.Equal(t, []string{"7-3_payment-refund", "7-3_payment-retry"},
+		nonstandard[0].Candidates,
+		"the options reach a consumer as data, not only as a sentence")
+	require.Len(t, findingsWithCheck(report.Findings, CheckStoryWithoutRow), 2,
+		"neither file was claimed, and both genuinely lack a row of their own name")
+}
+
+func TestMatchesBareRowKey(t *testing.T) {
+	require.True(t, MatchesBareRowKey("7-3", "7-3_payment-retry"))
+	require.True(t, MatchesBareRowKey("7-3", "7-3-payment-retry"))
+	require.False(t, MatchesBareRowKey("1-1", "1-10_ten"),
+		"a prefix test alone would claim epic 1 story 10 as a candidate for story 1")
+	require.False(t, MatchesBareRowKey("7-3", "7-3"), "identical is not a rename")
+	require.False(t, MatchesBareRowKey("7-3", "8-3_other"))
+}
+
+func TestRemediationFor(t *testing.T) {
+	none := RemediationFor("7-3", nil)
+	require.Contains(t, none, "no story file matches this row")
+	require.Contains(t, none, "7-3", "it names the row it searched for")
+	require.NotEqual(t, BareRowKeyRemediation, none,
+		"RemediationFor is for a caller that HAS looked; the constant is for the one that has not")
+	require.NotContains(t, none, "ape sprint check",
+		"a caller that already searched must not defer to the command doing the searching")
+
+	require.Contains(t, RemediationFor("7-3", []string{"7-3_payment-retry"}),
+		"rename the row `7-3` to `7-3_payment-retry`")
+
+	two := RemediationFor("7-3", []string{"7-3_a", "7-3_b"})
+	require.Contains(t, two, "2 story files could be this row")
+	require.Contains(t, two, "give the others a row of their own")
+}
+
+// TestBareRowKeyRemediation_IsForTheCallerThatCannotLook: the constant keeps
+// its pointer at `ape sprint check` because `ape sprint reconcile` is
+// tracker-only and genuinely cannot resolve the pair itself. That tail is
+// honest there and nowhere else.
+func TestBareRowKeyRemediation_IsForTheCallerThatCannotLook(t *testing.T) {
+	require.Contains(t, BareRowKeyRemediation, "`N-M` -> `N-M_slug`",
+		"generic, so it cannot be misread as naming a specific row")
+	require.Contains(t, BareRowKeyRemediation, "ape sprint check")
+
+	path := writeTracker(t, "development_status:\n  epic-7: backlog\n  7-3: done\n")
+	res, err := Reconcile(path, ReconcileOptions{Epic: 7, Timestamp: "20260401090000"})
+	require.NoError(t, err)
+	require.Equal(t, BareRowKeyRemediation, res.BareRowKeyRemediation)
+}
+
+// TestRunCheck_CanonicalKeyWithNoFileIsStillRowWithoutStory keeps the two
+// findings distinct: a well-formed key that names a missing file is a
+// genuinely different problem from a malformed key.
+func TestRunCheck_CanonicalKeyWithNoFileIsStillRowWithoutStory(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml", "development_status:\n  2-1_refuse-a-long-name: done\n")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	require.Len(t, report.Findings, 1)
+	require.Equal(t, CheckRowWithoutStory, report.Findings[0].Check)
+}
+
+func TestIsBareStoryRowKey(t *testing.T) {
+	for _, key := range []string{"2-1", "12-34"} {
+		require.True(t, IsBareStoryRowKey(key), "%q is bare", key)
+	}
+	for _, key := range []string{
+		"2-1_slug", "2-1-slug", "epic-2", "epic-2-retrospective", "not-a-story", "2",
+	} {
+		require.False(t, IsBareStoryRowKey(key), "%q is not a bare STORY row key", key)
+	}
+}
+
+func findingsWithCheck(findings []Finding, check string) []Finding {
+	var out []Finding
+	for i := range findings {
+		if findings[i].Check == check {
+			out = append(out, findings[i])
+		}
+	}
+	return out
 }
 
 func TestRunCheck_MalformedTrackerIsOneFindingNotAnError(t *testing.T) {

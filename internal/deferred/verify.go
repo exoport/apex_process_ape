@@ -72,7 +72,10 @@ func (s *Store) Verify(opts VerifyOptions) (*VerifyReport, error) {
 	if err != nil {
 		return nil, err
 	}
-	report := &VerifyReport{}
+	// Non-nil so a clean store marshals as `"findings": []`, not `null`.
+	// apex-defer-repair is explicitly told to take its work list from this
+	// payload rather than globbing the directory.
+	report := &VerifyReport{Findings: []Finding{}}
 	for _, w := range res.Warnings {
 		report.Findings = append(report.Findings, Finding{
 			Check: CheckUnparsable, Confidence: ConfidenceCertain, Message: w,

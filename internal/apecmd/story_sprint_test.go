@@ -213,8 +213,9 @@ func TestGateErr(t *testing.T) {
 
 func TestSprintCheck_AlwaysExitsZeroAndNamesBothSides(t *testing.T) {
 	root := newTestProject(t, realProjectConfig)
-	writeStory(t, root, "sprint-status.yaml", "development_status:\n  1-1: done\n")
-	writeStory(t, root, "1-1_thing.md", "---\nstory_id: 1-1\nstatus: in-progress\n---\n\nx\n")
+	// The row key is the story file's STEM; story_id is the dotted form.
+	writeStory(t, root, "sprint-status.yaml", "development_status:\n  1-1_thing: done\n")
+	writeStory(t, root, "1-1_thing.md", "---\nstory_id: \"1.1\"\nstatus: in-progress\n---\n\nx\n")
 
 	out := runCmd(t, newSprintCheckCmd(), "--output-format", "json")
 	var report sprint.CheckReport
@@ -235,8 +236,8 @@ func TestSprintCheck_NoStrictFlagExists(t *testing.T) {
 
 func TestSprintCheck_Clean(t *testing.T) {
 	root := newTestProject(t, realProjectConfig)
-	writeStory(t, root, "sprint-status.yaml", "development_status:\n  1-1: drafted\n")
-	writeStory(t, root, "1-1_thing.md", "---\nstory_id: 1-1\nstatus: ready-for-dev\n---\n\nx\n")
+	writeStory(t, root, "sprint-status.yaml", "development_status:\n  1-1_thing: drafted\n")
+	writeStory(t, root, "1-1_thing.md", "---\nstory_id: \"1.1\"\nstatus: ready-for-dev\n---\n\nx\n")
 
 	out := runCmd(t, newSprintCheckCmd())
 	require.Contains(t, out, "no divergence", "drafted normalises to ready-for-dev")
@@ -292,6 +293,41 @@ development_status:
 	require.Contains(t, text, "# generated header")
 	require.Equal(t, strings.Count(tracker, "\n"), strings.Count(text, "\n"),
 		"no lines added or removed")
+}
+
+// TestSprintReconcile_FileFlagStillStampsUpdatedAt: --file is how the
+// framework's call sites name the tracker (the script it replaces takes
+// --sprint-status <path>), and refreshing the body updated_at on mutation is
+// part of what reconcile IS. Resolving the timestamp only on the
+// no---file branch made a --file run silently stop stamping, so every
+// reconciled tracker claimed it had not changed since its last full sync.
+func TestSprintReconcile_FileFlagStillStampsUpdatedAt(t *testing.T) {
+	root := newTestProject(t, realProjectConfig)
+	body := "created_at: '20260101000000'\nupdated_at: '20260101000000'\n" +
+		"development_status:\n  epic-1: backlog\n  1-1_x: done\n"
+	path := writeStory(t, root, "sprint-status.yaml", body)
+
+	runCmd(t, newSprintReconcileCmd(), "--file", path, "--epic", "1")
+
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Contains(t, string(after), "epic-1: done")
+	require.NotContains(t, string(after), "updated_at: '20260101000000'",
+		"a mutation refreshes updated_at whether the tracker was named or resolved")
+}
+
+// TestSprintReconcile_FileFlagWorksOutsideAProject: the script this replaces
+// takes a path and needs no project, and a workspace that reconciles a
+// tracker sitting outside any _apex/ tree must keep working.
+func TestSprintReconcile_FileFlagWorksOutsideAProject(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	path := filepath.Join(dir, "sprint-status.yaml")
+	require.NoError(t, os.WriteFile(path,
+		[]byte("development_status:\n  epic-1: backlog\n  1-1_x: done\n"), 0o644))
+
+	out := runCmd(t, newSprintReconcileCmd(), "--file", path, "--epic", "1")
+	require.Contains(t, out, "reconciled epic-1: backlog -> done")
 }
 
 func TestSprintReconcile_CheckAndAll(t *testing.T) {

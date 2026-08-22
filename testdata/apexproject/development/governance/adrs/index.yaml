@@ -1,0 +1,22 @@
+# ADR Index — auto-maintained. These comments are load-bearing schema notes and
+# must survive every write ape makes to this file.
+generated_at: "20260817004537"
+adrs:
+  - id: ADR-0001
+    slug: use-markdown-adrs
+    file: adr-0001_use-markdown-adrs.md
+    status: accepted
+    type: pattern
+    tags: [adrs, governance]
+    version: v1
+    created_at: "20260817003935"
+    updated_at: "20260817004537"
+  - id: ADR-0002
+    slug: serve-over-http
+    file: adr-0002_serve-over-http.md
+    status: accepted
+    type: pattern
+    tags: []
+    version: v1
+    created_at: "20260817003935"
+    updated_at: "20260817004537"

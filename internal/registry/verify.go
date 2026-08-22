@@ -103,7 +103,8 @@ func Verify(cfg *apexcfg.Resolved, opts VerifyOptions) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	report := &Report{}
+	// Non-nil so a clean registry marshals as `"findings": []`, not `null`.
+	report := &Report{Findings: []Finding{}}
 	for _, family := range families {
 		result, findings := verifyFamily(cfg, family, opts.IgnoreExt)
 		report.Families = append(report.Families, result)
@@ -323,10 +324,18 @@ func checkSetEquality(family Family, records []Record, entries []Entry) []Findin
 
 // checkFilesResolve is check 2: every index `file:` must stat, resolved
 // against the index's own directory.
+//
+// A family whose schema defines no `file` property is exempt from the
+// "must have one" half — capabilities locate their record by id and slug,
+// so demanding a file: there is a false positive per entry, not a finding.
+// The stat half still runs on any entry that does carry one.
 func checkFilesResolve(family Family, dir string, entries []Entry) []Finding {
 	var findings []Finding
 	for _, e := range entries {
 		if e.File == "" {
+			if !family.HasFileField {
+				continue
+			}
 			findings = append(findings, Finding{
 				Check:   CheckFileUnresolved,
 				Family:  family.Name,

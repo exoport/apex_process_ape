@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -64,12 +65,27 @@ func VerifyRow(ctx context.Context, path, key, expected string) VerifyResult {
 
 	tracker, err := Load(path)
 	if err != nil {
-		res.Code, res.Message = VerifyUnreadable, err.Error()
+		// A development_status that is present but not a mapping is a ROW
+		// problem (3), not a read problem (2) — the file parsed fine, it
+		// just cannot answer the question. That split is the Python's and
+		// the two codes route to different branches in the calling skills.
+		res.Code = VerifyUnreadable
+		if errors.Is(err, ErrNotMapping) {
+			res.Code = VerifyMismatch
+		}
+		res.Message = err.Error()
 		return res
 	}
 	if tracker.Missing {
 		res.Code = VerifyUnreadable
 		res.Message = path + " does not exist"
+		return res
+	}
+	if tracker.Raw == nil {
+		// Empty, or nothing but comments: it did not parse to a mapping, so
+		// there is no tracker here to verify against.
+		res.Code = VerifyUnreadable
+		res.Message = path + " did not parse to a mapping"
 		return res
 	}
 
@@ -97,7 +113,13 @@ func VerifyRow(ctx context.Context, path, key, expected string) VerifyResult {
 	committed, found := committedUpdatedAt(ctx, path)
 	if found {
 		res.Committed = committed
-		if updated != "" && updated < committed {
+		// BOTH sides must be well-formed stamps before they are compared.
+		// A lexicographic compare against anything else is meaningless and
+		// dangerous in one specific direction: exit 5 tells the caller to
+		// re-write updated_at AS THE REPORTED CLAMP, so comparing against a
+		// malformed committed value would instruct a skill to write that
+		// malformed value into the tracker.
+		if isStamp(updated) && isStamp(committed) && updated < committed {
 			res.Code = VerifyBackwardsWrite
 			res.Clamp = committed
 			res.Message = fmt.Sprintf(
@@ -111,6 +133,12 @@ func VerifyRow(ctx context.Context, path, key, expected string) VerifyResult {
 	res.Message = fmt.Sprintf("row %q is %q; timestamps ordered", key, actual)
 	return res
 }
+
+// stampRe is the YYYYMMDDHHMMSS form these fields are specified to use.
+// A value in any other shape is not compared at all.
+var stampRe = regexp.MustCompile(`^\d{14}$`)
+
+func isStamp(s string) bool { return stampRe.MatchString(s) }
 
 // committedUpdatedAt reads updated_at from HEAD's version of the tracker.
 // Absence is a normal outcome — an uncommitted tracker, a fresh repo, or

@@ -89,7 +89,8 @@ func VerifyCorpus(cfg *apexcfg.Resolved) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	report := &Report{}
+	// Non-nil so a clean corpus marshals as `"findings": []`, not `null`.
+	report := &Report{Findings: []Finding{}}
 	for _, h := range heads {
 		report.Summary.FilesScanned++
 		if h.Err != nil {
@@ -134,12 +135,17 @@ func checkStory(h Head, ext apexcfg.Ext, known map[string]map[string]bool) []Fin
 	var findings []Finding
 	id := h.StoryID()
 
-	// Class 1a: the four unconditional keys.
+	// Class 1a: the four unconditional keys. Present-but-empty counts as
+	// absent, exactly as verify-story-frontmatter.py's `val is None or val
+	// == ""` does — a `story_id: ""` is what a half-completed write leaves
+	// behind, and it is precisely the failure a post-write gate exists to
+	// catch. Note `0` is NOT empty: `epic: 0` is a real value.
 	for _, key := range RequiredKeys {
-		if v, ok := h.Raw[key]; !ok || v == nil {
+		v, ok := h.Raw[key]
+		if !ok || v == nil || fmt.Sprintf("%v", v) == "" {
 			findings = append(findings, Finding{
 				Check: CheckRequiredKeyMissing, Story: id, Path: h.Path, Field: key,
-				Message: "required key is absent",
+				Message: "required key is absent or empty",
 			})
 		}
 	}
@@ -407,6 +413,19 @@ func VerifyFile(path string, ext apexcfg.Ext) FileVerdict {
 			Path: rel, Code: FileParseFailure,
 			Findings: []Finding{{
 				Check: CheckUnparsable, Path: rel, Message: h.Err.Error(),
+			}},
+		}
+	}
+	if len(h.Raw) == 0 {
+		// `---\n---` or a block of nothing but comments. The Python calls
+		// this a parse failure ("YAML block did not produce a mapping", 2)
+		// rather than four missing keys (3), and the two codes route
+		// differently in the calling prose, so the distinction is kept.
+		return FileVerdict{
+			Path: rel, Code: FileParseFailure,
+			Findings: []Finding{{
+				Check: CheckUnparsable, Path: rel,
+				Message: "frontmatter block did not produce a mapping",
 			}},
 		}
 	}

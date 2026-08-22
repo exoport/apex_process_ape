@@ -64,7 +64,7 @@ func printCapacityHuman(cmd *cobra.Command, caps workspace.Capabilities) {
 	c := caps.Capacity
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "cores\t%d\n", c.Cores)
-	fmt.Fprintf(tw, "memory\t%s total, %s available\n", humanBytes(caps.Mem.TotalBytes), humanBytes(caps.Mem.AvailableBytes))
+	fmt.Fprintf(tw, "memory\t%s total, %s available\n", memBytes(caps.Mem.TotalBytes), memBytes(caps.Mem.AvailableBytes))
 	fmt.Fprintf(tw, "kvm\t%s\n", yesNo(caps.KVM))
 	fmt.Fprintf(tw, "host-fs\t%s\n", yesNo(caps.HostFS))
 	fmt.Fprintf(tw, "workspaces\t%d provisioned, %d running\n", c.Workspaces, c.Running)
@@ -96,13 +96,26 @@ func printCapacityHuman(cmd *cobra.Command, caps workspace.Capabilities) {
 	}
 }
 
+// memBytes renders a NODE CAPACITY figure. Here a zero means "the node did
+// not report it" — an unfilled capability struct arrives as zero, and a real
+// machine never has zero bytes of RAM — so it renders as "-", which is what
+// this table printed before humanBytes was generalised for `ape memory check`.
+// Losing that distinction would make an unreadable /proc/meminfo look like a
+// box with no memory, three lines above a verdict that carefully separates
+// the two.
+func memBytes(n int64) string {
+	if n <= 0 {
+		return "-"
+	}
+	return humanBytes(n)
+}
+
 // humanBytes renders a byte count in binary units. Sizes here are memory, which
 // is quoted in GiB by every tool an operator will cross-check against.
 //
 // A negative value means "not reported" and renders as "-"; zero is a real
-// measurement (a 0-byte file) and renders as "0 B". Capacity fields that are
-// simply absent arrive as 0 from an unfilled capability struct, so callers there
-// gate on presence before formatting.
+// measurement — `ape memory check` on a 0-byte team-memory.md — and renders as
+// "0 B". Capacity readings where zero means "absent" use memBytes instead.
 func humanBytes(n int64) string {
 	if n < 0 {
 		return "-"

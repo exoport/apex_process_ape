@@ -31,8 +31,18 @@ type ReconcileResult struct {
 	// can only hold an epic open, never close it, and are named rather
 	// than swallowed.
 	Unrecognised []string `json:"unrecognised_statuses,omitempty" yaml:"unrecognised_statuses,omitempty"`
-	Written      bool     `json:"written"                         yaml:"written"`
-	UpdatedAt    string   `json:"updated_at,omitempty"            yaml:"updated_at,omitempty"`
+	// BareRowKeys names story rows written as `N-M` with no separator and
+	// slug, which THIS projection counted and the reconcile-epic-status.py
+	// it replaces would not have. Reported on every run that reads such a
+	// row — including a no-op — because the divergence is in what was
+	// counted, not in what was written, and a run that changed nothing can
+	// still have reached that answer differently from the script.
+	BareRowKeys []string `json:"bare_row_keys,omitempty" yaml:"bare_row_keys,omitempty"`
+	// BareRowKeyRemediation is the fix, carried in the payload so a caller
+	// acting on BareRowKeys does not have to know it.
+	BareRowKeyRemediation string `json:"bare_row_key_remediation,omitempty" yaml:"bare_row_key_remediation,omitempty"`
+	Written               bool   `json:"written"                            yaml:"written"`
+	UpdatedAt             string `json:"updated_at,omitempty"               yaml:"updated_at,omitempty"`
 	// Clamped reports that updated_at was held at its existing value
 	// because the supplied timestamp was earlier. Never fatal.
 	Clamped bool `json:"clamped" yaml:"clamped"`
@@ -78,7 +88,8 @@ func Reconcile(path string, opts ReconcileOptions) (*ReconcileResult, error) {
 	if !opts.All && opts.Epic <= 0 {
 		return nil, errors.New("reconcile needs --epic <N> or --all")
 	}
-	res := &ReconcileResult{Tracker: path}
+	// Non-nil so a no-op run marshals as `"changes": []`, not `null`.
+	res := &ReconcileResult{Tracker: path, Changes: []ReconcileChange{}}
 
 	unlock, err := lockFile(path)
 	if err != nil {
@@ -101,6 +112,12 @@ func Reconcile(path string, opts ReconcileOptions) (*ReconcileResult, error) {
 	epics := []int{opts.Epic}
 	if opts.All {
 		epics = EpicNumbers(tracker.Rows)
+	}
+
+	// Say what was counted differently, before saying what was written.
+	if bare := BareStoryRowKeys(tracker.Rows); len(bare) > 0 {
+		res.BareRowKeys = bare
+		res.BareRowKeyRemediation = BareRowKeyRemediation
 	}
 
 	edited := data
@@ -177,8 +194,71 @@ func Reconcile(path string, opts ReconcileOptions) (*ReconcileResult, error) {
 	if err := writeFileAtomic(path, edited); err != nil {
 		return nil, err
 	}
+	if err := verifyWriteLanded(path, tracker, res.Changes); err != nil {
+		// RESTORE. A tracker left corrupt on disk is the failure this whole
+		// command is built to avoid — every later writer reads it, and the
+		// build loop's source of truth is gone. Exiting non-zero over a
+		// broken file is not a safe landing; putting the original bytes back
+		// and saying so is.
+		if restoreErr := writeFileAtomic(path, data); restoreErr != nil {
+			return nil, fmt.Errorf(
+				"%w; CRITICAL: restore also failed (%w) — recover %s from git",
+				err, restoreErr, path)
+		}
+		return nil, fmt.Errorf("%w; the file was restored to its pre-edit content", err)
+	}
 	res.Written = true
 	return res, nil
+}
+
+// verifyWriteLanded re-reads the tracker and asserts this run changed
+// exactly the rows it named and nothing else.
+//
+// The write is a line-level text edit, which is what preserves comments and
+// ordering — and which is also why it needs checking: a regex that crossed a
+// line boundary would produce a file that still parses and no longer means
+// what it did. A targeted edit that alters a row it never named has
+// corrupted the tracker, which is worse than not having run.
+func verifyWriteLanded(path string, before *Tracker, changes []ReconcileChange) error {
+	after, err := Load(path)
+	if err != nil {
+		return fmt.Errorf("round-trip verification failed: %w", err)
+	}
+	if after.Missing {
+		return fmt.Errorf("round-trip verification failed: %s vanished", path)
+	}
+	applied := make(map[string]string, len(changes))
+	for _, c := range changes {
+		applied[c.Key] = c.To
+	}
+	for key, want := range applied {
+		got, ok := after.RowStatus(key)
+		if !ok {
+			return fmt.Errorf("round-trip verification failed: row %q disappeared", key)
+		}
+		if got != want {
+			return fmt.Errorf("round-trip verification failed: row %q reads %q, expected %q", key, got, want)
+		}
+	}
+	if len(after.Rows) != len(before.Rows) {
+		return fmt.Errorf("round-trip verification failed: row count changed %d -> %d",
+			len(before.Rows), len(after.Rows))
+	}
+	for _, row := range before.Rows {
+		if _, touched := applied[row.Key]; touched {
+			continue
+		}
+		got, ok := after.RowStatus(row.Key)
+		if !ok {
+			return fmt.Errorf("round-trip verification failed: untouched row %q disappeared", row.Key)
+		}
+		if got != row.Status {
+			return fmt.Errorf(
+				"round-trip verification failed: untouched row %q changed %q -> %q",
+				row.Key, row.Status, got)
+		}
+	}
+	return nil
 }
 
 // lineRe builds a matcher for one `key: value` line, splitting the parts

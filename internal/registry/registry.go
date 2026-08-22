@@ -50,16 +50,28 @@ const (
 )
 
 // Family describes one record family: where its records live, what its
-// index calls them, which shape that index has, and which extension flag
-// gates it.
+// index calls them, which shape that index has, whether its entries name
+// their record file, and which extension flag gates it.
 type Family struct {
 	// Name is the plural family name and the index's top-level list key.
 	Name string
 	// Singular is the command noun (`adr`, `pattern`, …).
 	Singular string
 	Shape    Shape
-	dir      func(apexcfg.Paths) string
-	ext      func(apexcfg.Ext) bool
+	// HasFileField records whether this family's index schema defines a
+	// `file:` key at all.
+	//
+	// Three of the four require one; capabilities do not. `capability-index-
+	// schema.json` lists exactly id, slug, name, status, components,
+	// related_epics, related_capabilities, created_at and updated_at — there
+	// is no `file` property to populate, because a capability record's
+	// filename is derived from its id and slug. Demanding one anyway emits a
+	// registry.file_unresolved per capability on every project that has the
+	// extension on, which is a false positive that never clears and which
+	// `ape doctor` reports as registry drift forever.
+	HasFileField bool
+	dir          func(apexcfg.Paths) string
+	ext          func(apexcfg.Ext) bool
 }
 
 // Dir returns the family's record directory, or "" when the folder it
@@ -73,23 +85,25 @@ func (f Family) Enabled(e apexcfg.Ext) bool { return f.ext(e) }
 // output is deterministic.
 var Families = []Family{
 	{
-		Name: "adrs", Singular: "adr", Shape: ShapeList,
+		Name: "adrs", Singular: "adr", Shape: ShapeList, HasFileField: true,
 		dir: func(p apexcfg.Paths) string { return p.ADRs },
 		ext: func(e apexcfg.Ext) bool { return e.ADRs },
 	},
 	{
-		Name: "patterns", Singular: "pattern", Shape: ShapeList,
+		Name: "patterns", Singular: "pattern", Shape: ShapeList, HasFileField: true,
 		dir: func(p apexcfg.Paths) string { return p.Patterns },
 		ext: func(e apexcfg.Ext) bool { return e.Patterns },
 	},
 	{
 		// features is the mapping-shaped outlier.
-		Name: "features", Singular: "feature", Shape: ShapeMapping,
+		Name: "features", Singular: "feature", Shape: ShapeMapping, HasFileField: true,
 		dir: func(p apexcfg.Paths) string { return p.Features },
 		ext: func(e apexcfg.Ext) bool { return e.Features },
 	},
 	{
-		Name: "capabilities", Singular: "capability", Shape: ShapeList,
+		// capabilities is the no-file-field outlier: its schema defines no
+		// `file` property, so the record is located by id + slug.
+		Name: "capabilities", Singular: "capability", Shape: ShapeList, HasFileField: false,
 		dir: func(p apexcfg.Paths) string { return p.Capabilities },
 		ext: func(e apexcfg.Ext) bool { return e.Capabilities },
 	},

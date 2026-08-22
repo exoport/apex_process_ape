@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"text/tabwriter"
+	"time"
 
+	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/output"
 	"github.com/exoport/apex_process_ape/internal/sprint"
 	"github.com/spf13/cobra"
@@ -78,7 +80,8 @@ func emitSprintCheckHuman(w io.Writer, report *sprint.CheckReport) {
 	fmt.Fprintf(w, "\n%d divergence(s) — neither side is assumed correct:\n", len(report.Findings))
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "  CHECK\tKEY\tTRACKER\tSTORY")
-	for _, f := range report.Findings {
+	for i := range report.Findings {
+		f := &report.Findings[i]
 		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", f.Check, f.Key, dashIfEmpty(f.Tracker), dashIfEmpty(f.Story))
 	}
 	_ = tw.Flush()
@@ -123,7 +126,11 @@ review skills branch on them:
 Exit 1 is deliberately unreachable. In the Python it meant "PyYAML is not
 installed" — an environment failure that forced apex-review-story and
 apex-code-review to carry an eye-check fallback. A static binary cannot
-produce it, which is what lets those fallback branches be deleted.`,
+produce it, which is what lets those fallback branches be deleted.
+
+This command carries no --cwd. --file is required and names the tracker
+outright, so nothing is resolved from the project's config and there is no
+project for --cwd to select.`,
 		Args: cobra.NoArgs,
 		Example: "  ape sprint verify --file development/implementation/sprint-status.yaml " +
 			"--key 1-1 --expected done",
@@ -196,12 +203,29 @@ Non-zero only for a genuine I/O failure.`,
 		Args:    cobra.NoArgs,
 		Example: "  ape sprint reconcile --epic 12\n  ape sprint reconcile --all --check",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			path := fileFlag
+			// The timestamp is resolved whether or not --file was passed.
+			// Refreshing the body updated_at on mutation is part of what
+			// reconcile IS, so it must not depend on how the tracker was
+			// located: `--file` is how the framework's call sites name the
+			// tracker, and a --file run that quietly stopped stamping would
+			// leave every reconciled tracker claiming it had not changed
+			// since its last full sync.
+			//
+			// tryResolve, not resolve: `--file` has to keep working against
+			// a tracker outside any project, exactly as the script it
+			// replaces does. Absent a config, the clock is the fallback —
+			// local wall-clock either way, per D1.
+			cfg := tryResolveProjectConfig(cwdFlag)
 			timestamp := ""
-			if path == "" {
-				cfg := resolveProjectConfig(cwdFlag)
-				path = cfg.Paths.SprintStatus
+			path := fileFlag
+			if cfg != nil {
 				timestamp = cfg.Timestamp
+				if path == "" {
+					path = cfg.Paths.SprintStatus
+				}
+			}
+			if timestamp == "" {
+				timestamp = time.Now().Format(apexcfg.TimestampLayout)
 			}
 			if path == "" {
 				return usageErr(errors.New("no sprint-status.yaml resolved; pass --file"))
@@ -246,6 +270,15 @@ func emitReconcileHuman(w io.Writer, res *sprint.ReconcileResult, check bool) {
 	if len(res.Unrecognised) > 0 {
 		fmt.Fprintf(w, "unrecognised status value(s), which can only hold an epic open: %v\n",
 			res.Unrecognised)
+	}
+	if len(res.BareRowKeys) > 0 {
+		// Stderr would be the tidier home, but the calling skills are
+		// instructed to record "the command's output line", and a warning a
+		// skill does not read is a warning that does not exist.
+		fmt.Fprintf(w, "warning: %d story row(s) keyed as N-M with no slug — counted here, "+
+			"NOT counted by the reconcile-epic-status.py this replaces, so the two disagree "+
+			"on these epics: %v\n", len(res.BareRowKeys), res.BareRowKeys)
+		fmt.Fprintf(w, "         fix: %s\n", sprint.BareRowKeyRemediation)
 	}
 	if res.Clamped {
 		fmt.Fprintf(w, "updated_at clamped to %s (the supplied timestamp was earlier)\n", res.UpdatedAt)

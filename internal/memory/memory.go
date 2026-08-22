@@ -6,14 +6,19 @@
 // project a `Read` fails outright ("exceeds maximum allowed size
 // (256KB)"), including for the retrospective that is instructed to
 // re-read it before editing it. So this package offers three operations:
-// an index of what is in there (ordinal, section, date, size, title), the
+// an index of what is in there (ordinal, section, date, bytes, title), the
 // verbatim body of a named entry, and a size check against two budgets.
+//
+// The size field is called `bytes`, in both the index and the check, and
+// the name is deliberate: it is what os.Stat returns and what the 256 KB
+// Read cap is measured in. Prose that calls it `size` is describing the
+// same field loosely — the JSON key is `bytes` everywhere.
 //
 // The index is structurally lossless and carries no filter, ranking or
 // predicate — deliberately. Most call sites sit inside `## On Activation`,
 // which runs BEFORE the story is identified, so no predicate keyed on
 // "this story's domain" could work there. Selection has to be possible
-// from ordinal, section, date, size and title alone.
+// from ordinal, section, date, bytes and title alone.
 package memory
 
 import (
