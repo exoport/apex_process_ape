@@ -12,12 +12,20 @@ Guidance for Claude Code when working in this repository.
 | ------------------------- | --------------------------------------------------------------------------------------------------- |
 | `cmd/ape/`                | Binary entry point (`main.go`).                                                                     |
 | `internal/apecmd/`        | Cobra command definitions: pipeline, adr, pattern, trait, update, etc.                              |
-| `internal/pipeline/`      | Pipeline runner, embedded YAML specs, pre-flight checks.                                            |
+| `internal/pipeline/`      | Pipeline runner and pre-flight checks. Specs are **not** embedded — they load from `<projectRoot>/_apex/pipelines/*.yaml` (v0.0.6; see `docs/explanation/why-project-local-pipelines.md`). |
+| `internal/repl/`          | The PTY that drives `claude`: spawn + keystrokes + a vt10x-rendered pane. Owns the ready-signal vocabulary (`bypass permissions on`, `❯`), the pre-REPL modal table, `ScrubClaudeCodeEnv`, and `CLAUDE_CODE_EFFORT_LEVEL`. `TestLive_ClaudeCodeContract` (opt-in, `make check-claude`) checks all of it against the installed Claude Code. |
+| `internal/hookdrift/`     | Detects Claude Code dropping the hook-payload fields the step-completion gates read, from a project's own runlogs. Surfaced by `ape doctor` and gated by `make check-hooks`. |
+| `internal/contract/`      | The framework-owned *terminal* contract (`_apex/terminal-contracts.csv`) — did a run reach its summary step. Unrelated to the PTY contract above, despite the name. |
 | `internal/tui/`           | Bubble Tea two-panel TUI.                                                                           |
 | `internal/output/`        | Output-format helpers (human / json / yaml).                                                        |
 | `internal/cost/`          | Transcript → USD: the embedded price table (`prices.yaml`), model-id normalization + family aliases, per-run rollups, price-table coverage, and `reprice`. Prices are hand-curated — there is no price API — so `prices.yaml` is data, not Go literals, and `make check-prices` gates it against the local Claude Code. |
 | `internal/updatecache/`   | Cache layer for the background update-check.                                                        |
 | `internal/trait/`         | Trait inspection helpers.                                                                           |
+| `internal/apexcfg/`       | Resolves `_apex/config.yaml` + the `config.local.yaml` overlay into the framework's folder variables. Every project-data command routes through it. |
+| `internal/registry/`      | The record registries (ADRs, patterns, features, capabilities): verify, sync, update.               |
+| `internal/story/` · `internal/sprint/` | Story frontmatter projection/verification, and `sprint-status.yaml` divergence reporting, row gating, and epic reconciliation. |
+| `internal/memory/` · `internal/deferred/` | Bounded team-memory reads, and the deferred-work record store.                          |
+| `internal/apexdoc/` · `internal/frontmatter/` | Markdown shard/assemble/analyze, and the shared frontmatter parser.             |
 | `internal/sandbox/`       | `ape sandbox` Kata VM workspaces (PLAN-16): profile, `~/.claude`/git composer, OCI-config + nerdctl command builder, CONNECT egress proxy, workspace registry. Also the PLAN-24 local-polish pieces: node capacity probes, the proxy's node-owned system route, the in-guest heartbeat + sampler, and the idle-stop vocabulary. |
 | `images/ape-sandbox/`     | Pointer only (README) — the official **public, framework-free** `ape-sandbox` image (PLAN-16 D6 / PLAN-20) is built from the separate public `exoport/ape-sandbox` repo. The private framework is not baked; `aped` mounts it read-only at runtime. |
 | `cmd/aped/` + `internal/aped/` + `internal/apedcmd/` | `aped`, the rootful Kata-QEMU VM-management daemon (PLAN-18 Phase 2): two-process split (root executor + de-privileged NATS front), policy authz, `ape.vmm.<node>.>` contract. |
@@ -116,7 +124,7 @@ cosign verify-blob \
 ## Conventions
 
 - **Cobra command files** live under `internal/apecmd/<command>.go`. One command per file. Each file exports a `new<Command>Cmd()` constructor returning `*cobra.Command`.
-- **Pipeline YAML specs** live under `internal/pipeline/spec/<name>.yaml` and are embedded via `go:embed` — they ship inside the binary, not loaded from the user's filesystem.
+- **Pipeline YAML specs are project-local**, not embedded: they load from `<projectRoot>/_apex/pipelines/<name>.yaml`, installed there by `ape framework setup|update`. They are *not* compiled into the binary — the embedded-spec design was dropped in v0.0.6 so a project can pin its own pipelines without an ape release ([rationale](docs/explanation/why-project-local-pipelines.md)).
 - **Output formatting**: commands that emit structured data accept `--output-format human|json|yaml` and route through `internal/output`. Match the existing pattern in `update.go` rather than rolling your own.
 - **Version pinning** for invoked tooling (linters, formatters, release machinery) lives in the top-level `Makefile`. Change there, not scattered across CI configs.
 - **No vendor directory.** Modules are fetched on demand. `go.mod` and `go.sum` are the source of truth.

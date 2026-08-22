@@ -130,33 +130,75 @@ what is missing.
 
 ## Commands
 
+**Framework and pipelines**
+
 | Command                | What it does                                                                               |
 | ---------------------- | ------------------------------------------------------------------------------------------ |
 | `ape framework setup`  | One-time install: copy skills + pipelines into a project, bootstrap `_apex/config.yaml`.   |
 | `ape framework update` | Refresh skills + pipelines against the framework repo (preserves config.yaml).             |
 | `ape framework status` | Inspect the installed framework version + drift report.                                    |
 | `ape pipeline [name]`  | List installed pipelines; with a name, run the named pipeline.                             |
+| `ape planning`         | Show the planning pipeline diagram.                                                        |
+
+**Driving Claude**
+
+| Command                | What it does                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------------ |
 | `ape task <skill>`     | Run a single framework skill (no pipeline YAML) through the interactive PTY runner.        |
 | `ape prompt [text]`    | Drive an unattended Claude session from a prompt or `--handoff` file; Stop-hook completion. |
+| `ape chat`             | Bridged `claude` REPL with hooks captured to a runlog.                                     |
 | `ape script <file.go>` | Run a Go orchestration script through the yaegi interpreter with the `apescript` library injected. |
-| `ape event <event>`    | Publish a session progress event over NATS (identity + session id baked in).               |
-| `ape log <level> <msg>`| Publish a structured log record over NATS.                                                 |
-| `ape metrics`          | Scan and publish this session's per-model usage metrics over NATS.                         |
-| `ape transcript upload`| Upload this session's transcript set as content-addressed blobs over NATS.                 |
-| `ape service`          | Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply.             |
-| `ape sandbox`          | Provision hardware-isolated Kata microVM dev workspaces through `aped` (Linux + KVM).      |
-| `ape adr`              | Manage Architecture Decision Records (`list`, `validate`, `new`).                          |
-| `ape pattern`          | Manage governance patterns (`list`).                                                       |
-| `ape trait`            | Inspect APEX traits (`list`, `show`, `validate`, `conflicts`).                             |
-| `ape sync`             | Sync governance artifacts (placeholder — `patterns` and `adrs` coming soon).               |
-| `ape bootstrap`        | Bootstrap governance artifacts from declared traits.                                       |
-| `ape costs`            | Show this project's Claude cost rollup; `coverage` audits the price table, `reprice` recomputes stored costs. |
-| `ape doctor`           | Probe the local environment for prerequisites; report per-check verdict (human/json/yaml). |
-| `ape update`           | Self-update to the latest release.                                                         |
-| `ape rollback`         | Roll back to the previously installed binary.                                              |
-| `ape version`          | Print version, build date, and git commit.                                                 |
+| `ape sessions`         | List, prune, or open the URL of live ape sessions (`open`, `prune`).                       |
 
-Run `ape <command> --help` for command-specific flags.
+See [Choosing between `ape chat`, `ape task`, and `ape prompt`](docs/explanation/chat-task-prompt.md) to pick one.
+
+**Project data** — the records the framework skills read and write. Full guide: [How to work with project data](docs/how-to/work-with-project-data.md).
+
+| Command          | What it does                                                                                     |
+| ---------------- | -------------------------------------------------------------------------------------------------- |
+| `ape config`     | `resolve` the project's APEX configuration — the folder variables everything else routes through. |
+| `ape adr`        | Architecture Decision Records (`list`, `new`, `verify`, `sync`, `update`).                        |
+| `ape pattern`    | Governance patterns (`list`, `verify`, `sync`, `update`).                                         |
+| `ape feature`    | The feature registry (`list`, `verify`, `sync`, `update`).                                        |
+| `ape capability` | The capability registry (`list`, `verify`, `sync`, `update`).                                     |
+| `ape registry`   | `verify` or `sync` every record registry at once.                                                 |
+| `ape story`      | Story frontmatter projection and verification (`fields`, `verify`).                               |
+| `ape sprint`     | Inspect and maintain `sprint-status.yaml` (`check`, `verify`, `reconcile`).                       |
+| `ape memory`     | Read the team-memory file without loading it whole (`check`, `index`, `show`).                    |
+| `ape deferred`   | The deferred-work record store (`list`, `ingest`, `close`, `verify`, `repair`, `migrate`).        |
+| `ape doc`        | Shard, assemble and survey Markdown documents (`shard`, `assemble`, `analyze`, `verify`).         |
+| `ape trait`      | Inspect APEX traits (`list`, `show`, `validate`, `conflicts`).                                    |
+| `ape bootstrap`  | Bootstrap governance artifacts from declared traits.                                              |
+
+**Sandbox workspaces**
+
+| Command       | What it does                                                                          |
+| ------------- | --------------------------------------------------------------------------------------- |
+| `ape sandbox` | Provision hardware-isolated Kata microVM dev workspaces through `aped` (Linux + KVM). |
+
+**Telemetry and NATS**
+
+| Command                 | What it does                                                                    |
+| ----------------------- | --------------------------------------------------------------------------------- |
+| `ape event <event>`     | Publish a session progress event over NATS (identity + session id baked in).    |
+| `ape log <level> <msg>` | Publish a structured log record over NATS.                                      |
+| `ape metrics`           | Scan and publish this session's per-model usage metrics over NATS.              |
+| `ape transcript upload` | Upload this session's transcript set as content-addressed blobs over NATS.      |
+| `ape service`           | Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply. |
+
+**Diagnostics and maintenance**
+
+| Command        | What it does                                                                                                 |
+| -------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `ape costs`    | This project's Claude cost rollup; `coverage` audits the price table, `reprice` recomputes stored costs.     |
+| `ape doctor`   | Probe the environment and the project; per-check verdict (human/json/yaml). `--only` / `--skip` narrow the run. |
+| `ape update`   | Self-update to the latest release.                                                                           |
+| `ape rollback` | Roll back to the previously installed binary.                                                                |
+| `ape version`  | Print version, build date, and git commit.                                                                   |
+
+Run `ape <command> --help` for command-specific flags, or see the generated [CLI reference](docs/reference/cli.md) for every command, flag, and default.
+
+> `ape sync adrs` / `ape sync patterns` are now `ape adr sync` / `ape pattern sync`. The verb-first spellings still work as hidden pointers.
 
 ## Updating
 
@@ -184,14 +226,27 @@ git clone https://github.com/exoport/apex_process_ape.git
 cd apex_process_ape
 make help          # available targets
 make tools         # build the pinned dev tools (golangci-lint, gofumpt, goreleaser) under $GOBIN
-make build         # build ./ape
+make build         # build ./ape and ./aped
 make test          # run tests with -race
 make lint          # golangci-lint (pinned via bingo)
 make govulncheck   # scan dependencies for known vulnerabilities
 make pre-commit    # run all pre-commit hooks
+make ci-local      # the full pre-push gate — everything CI and the release run
 ```
 
-CI runs build + test + lint + govulncheck on every push to `main` and every pull request — see [.github/workflows/ci.yml](.github/workflows/ci.yml).
+CI runs build + test + lint + govulncheck on every push to `main` and every pull request — see [.github/workflows/ci.yml](.github/workflows/ci.yml). The Windows job builds everything but runs `make test-portable`.
+
+### Checking ape against the Claude Code you have
+
+`make ci-local` proves ape is internally consistent. It cannot prove ape still *works*, because ape's real dependency is not a library it pins — it is the `claude` binary on your machine, which auto-updates on a schedule this repo does not control and makes no compatibility promise about its TUI, its flags, its hook payloads, or its transcript format. When one of those moves, nothing errors: ape keeps running and silently stops doing the thing the coupling bought.
+
+```bash
+make check-harness HOOK_PROJECT=~/work/some-apex-project
+```
+
+Three gates, each reading what the installed Claude Code is *actually* doing: `check-prices` (model ids in local transcripts), `check-hooks` (the hook fields ape's step-completion gates read, from a project's runlogs), and `check-claude` (a live PTY session — ready signals, spawn flags, effort level, model aliases, transcript persistence).
+
+None of them run in GitHub CI, which has no `claude`, no auth, no network and no runlogs. Each reports "not verified" rather than green when it finds no evidence — **read the output, not the exit code**. Details: [How to verify a release before tagging](docs/how-to/pre-tag-release.md).
 
 Tooling is pinned via [bingo](https://github.com/bwplotka/bingo) — the `.bingo/` directory contains a per-tool `.mod` file, and `make lint` / `make fmt` / `make snapshot` build the pinned binary on first use. Bumping a version: `go install github.com/bwplotka/bingo@v0.10.0` (one-time), then `bingo get <module>@<version>`.
 

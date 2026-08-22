@@ -53,6 +53,18 @@ The canonical names are stable across minor releases. Inspect the current set wi
 ape doctor --output-format json | jq -r '.checks[].name'
 ```
 
+## Running one check on its own
+
+`--only` is the inverse: it runs just the checks you name, so a single verdict can be scripted as its own gate.
+
+```bash
+ape doctor --only hooks.contract_drift --strict --cwd "$PROJECT"
+```
+
+That is exactly what `make check-hooks` runs. The two flags compose — `--only` selects, then `--skip` removes from the selection.
+
+The asymmetry between them is deliberate: an unknown name in `--skip` is ignored (the check simply runs, which costs nothing), but an unknown name in `--only` is a **hard error** listing the valid names. A typo there would otherwise select nothing, run zero checks, and exit 0 — a gate reporting success while checking nothing, which is the one outcome a single-check flag must never produce.
+
 ## Parsing the JSON
 
 The report's shape is stable:
@@ -92,6 +104,8 @@ ape doctor --output-format json | jq -e '.checks[] | select(.name == "ape.update
 | `operating_rules.fragment FAIL`        | A project that manages operating rules lost `_apex/apex-operating-rules.md` or the `CLAUDE.md` managed import | Run `ape framework update`. (Legacy / older-framework installs report WARN, not FAIL — see below.)   |
 | `permissions.home_claude WARN`         | Container runs as a user without write access to `~/.claude`            | Mount or create the dir owned by the runner UID.                                                      |
 | `cost.price_table_coverage SKIP`       | No Claude Code transcripts on the runner — the price table cannot be checked against real usage | Expected in CI, and SKIP never fails `--strict`. This check is meaningful on a developer machine; the release gate runs it as `make check-prices`. |
+| `hooks.contract_drift SKIP`            | No runlogs in `_output/tasks` from the last 30 days — the hook contract cannot be checked | Expected in CI, and SKIP never fails `--strict`. Only a project ape has actually run pipelines in can answer this; the release gate runs it as `make check-hooks HOOK_PROJECT=…`. |
+| `hooks.contract_drift WARN`            | Claude Code has stopped sending a hook field ape's step-completion gates read | The gates are now silently inactive — a run whose agent yields while a spawned agent is outstanding can again be reported as a success having done nothing. `ape update`; if it persists on the latest ape, report it. |
 | `config.resolved FAIL`                 | `_apex/config.yaml` or `_apex/config.local.yaml` exists but does not parse | Fix the YAML the message names. This one is **required**: every other project-data check resolves its paths through it, so a broken config would otherwise make five checks report clean against the wrong tree. |
 | `config.resolved INFO`                 | The checkout is not an APEX project                                     | Expected outside a project. INFO never fails.                                                          |
 | `memory.size FAIL`                     | `team-memory.md` is past the 200 KiB hard ceiling                       | **Required, and intended to fail.** The file is approaching Claude Code's 256 KiB Read cap, past which the retrospective that writes it can no longer read it. Compact it; the soft gate should have caught this several runs earlier. |
