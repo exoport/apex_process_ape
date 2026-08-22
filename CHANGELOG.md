@@ -148,6 +148,26 @@
     is measured in, and what `ape memory check` already emits — a `size` in
     one and a `bytes` in the other would be worse than either.
 
+- **feat(doctor): report a `sprint-status.yaml.lock` that git is not
+  ignoring** — new `sprint.lock_ignored` row. `ape sprint reconcile` takes an
+  advisory lock on that sidecar and never unlinks it: releasing a lock and
+  deleting the file are different acts, and deleting one another process may
+  be waiting on is how the mutual exclusion is lost. So the file stays, the
+  framework reconciles at six boundaries, and an untracked runtime artifact
+  sits beside the tracker waiting to be swept up by a `git add -A`. That is
+  not hypothetical — it is how one reached a commit in *this* repository
+  while the check was being written. `reconcile-epic-status.py` leaves the
+  same file, so it is not a regression ape introduced; it is a hygiene
+  problem neither side had noticed. WARN, never a write: `.gitignore` is the
+  operator's file. Already-committed is reported as the worse state it is,
+  with `git rm --cached` as the fix, because ignoring a tracked file changes
+  nothing. The check asks `git check-ignore` rather than matching patterns
+  against `.gitignore` by hand — nested ignore files, `.git/info/exclude`,
+  `core.excludesFile` and later negations all decide this, and only git
+  agrees with what git will do. `*.lock` added to ape's own `.gitignore`,
+  and `sprint.LockPath` is now one definition shared by the locker, the
+  check and the remediation text.
+
 - **feat(sprint): report a tracker row key the two epic-projection
   implementations count differently** — new `sprint.nonstandard_row_key`
   finding. A story row keyed `2-1`, with no separator and slug, is wrong

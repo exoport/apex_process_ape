@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
+	"github.com/exoport/apex_process_ape/internal/sprint"
 	"github.com/stretchr/testify/require"
 )
 
@@ -122,19 +124,40 @@ func TestProjectDataChecks_DegradeOutsideAProject(t *testing.T) {
 	ctx := context.Background()
 	env := projectDataEnv(t.TempDir())
 	checks := map[string]func(context.Context, doctorEnv) CheckResult{
-		"config.resolved":   checkConfigResolved,
-		"registry.drift":    checkRegistryDrift,
-		"story.frontmatter": checkStoryFrontmatter,
-		"sprint.divergence": checkSprintDivergence,
-		"memory.size":       checkMemorySize,
-		"migration.pending": checkMigrationPending,
+		"config.resolved":     checkConfigResolved,
+		"registry.drift":      checkRegistryDrift,
+		"story.frontmatter":   checkStoryFrontmatter,
+		"sprint.divergence":   checkSprintDivergence,
+		"sprint.lock_ignored": checkSprintLockIgnored,
+		"memory.size":         checkMemorySize,
+		"migration.pending":   checkMigrationPending,
 	}
+	// The table has to hold every project-data check, or a new one degrades
+	// however it happens to and nobody notices until it fires on a host.
+	require.Len(t, checks, countProjectDataChecks(t),
+		"a project-data check was added to the registry and not to this table")
 	for name, fn := range checks {
 		t.Run(name, func(t *testing.T) {
 			res := fn(ctx, env)
 			require.Equal(t, StatusInfo, res.Status, "%s must degrade to INFO: %s", name, res.Message)
 		})
 	}
+}
+
+// countProjectDataChecks counts the registry entries this family owns, by
+// the name prefixes it uses.
+func countProjectDataChecks(t *testing.T) int {
+	t.Helper()
+	n := 0
+	for _, c := range allChecks {
+		for _, prefix := range []string{"config.", "registry.", "story.", "sprint.", "memory.", "migration."} {
+			if strings.HasPrefix(c.Name, prefix) {
+				n++
+				break
+			}
+		}
+	}
+	return n
 }
 
 func TestCheckRegistryDrift(t *testing.T) {
@@ -171,6 +194,95 @@ func TestCheckStoryFrontmatterAndSprintDivergence(t *testing.T) {
 	res = checkSprintDivergence(ctx, projectDataEnv(root))
 	require.Equal(t, StatusWarn, res.Status)
 	require.Contains(t, res.Message, "divergence")
+}
+
+// TestCheckSprintLockIgnored walks every state, because the one that
+// matters — the sidecar already committed — is the one a project reaches by
+// accident and never notices. ape's own repository reached it while this
+// check was being written: `ape sprint reconcile` ran against a test
+// fixture, left the lock behind, and `git add` swept it into a commit.
+func TestCheckSprintLockIgnored(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	ctx := context.Background()
+	root := projectFor(t, realProjectConfig)
+	dir := filepath.Join(root, "development", "implementation")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	tracker := filepath.Join(dir, "sprint-status.yaml")
+	lock := sprint.LockPath(tracker)
+	rel := filepath.Join("development", "implementation", "sprint-status.yaml.lock")
+
+	// No tracker: reconcile has nothing to lock, so a warning here would be
+	// about a file that cannot yet exist.
+	res := checkSprintLockIgnored(ctx, projectDataEnv(root))
+	require.Equal(t, StatusOK, res.Status, res.Message)
+	require.Contains(t, res.Message, "nothing to lock")
+
+	require.NoError(t, os.WriteFile(tracker,
+		[]byte("development_status:\n  epic-1: backlog\n  1-1_x: done\n"), 0o644))
+
+	// A tracker but no repository: nothing to ignore into, and nothing that
+	// can accidentally commit it either.
+	res = checkSprintLockIgnored(ctx, projectDataEnv(root))
+	require.Equal(t, StatusInfo, res.Status, res.Message)
+	require.Contains(t, res.Message, "not a git repository")
+
+	gitInit(t, root)
+	res = checkSprintLockIgnored(ctx, projectDataEnv(root))
+	require.Equal(t, StatusWarn, res.Status)
+	require.Contains(t, res.Message, "not ignored")
+	require.Contains(t, res.Remediation, "never unlinks it",
+		"the remediation says WHY the file keeps coming back")
+
+	// Reconcile really does leave it behind — the premise of the check.
+	_, err := sprint.Reconcile(tracker, sprint.ReconcileOptions{Epic: 1, Timestamp: "20260401090000"})
+	require.NoError(t, err)
+	require.FileExists(t, lock, "the lock sidecar outlives the run that took it")
+
+	// Swept into a commit by a routine `git add -A`.
+	gitCommitAll(t, root, "everything")
+	res = checkSprintLockIgnored(ctx, projectDataEnv(root))
+	require.Equal(t, StatusWarn, res.Status)
+	require.Contains(t, res.Message, "COMMITTED",
+		"already in history is a worse state than merely unignored, and says so")
+	require.Contains(t, res.FixCommand, "git rm --cached",
+		"ignoring it now changes nothing until it is also untracked")
+
+	// Untracked and ignored: clean.
+	untrack := exec.CommandContext(ctx, "git", "rm", "--cached", "-q", "--", rel)
+	untrack.Dir = root
+	require.NoError(t, untrack.Run())
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".gitignore"),
+		[]byte("*"+sprint.LockSuffix+"\n"), 0o644))
+	res = checkSprintLockIgnored(ctx, projectDataEnv(root))
+	require.Equal(t, StatusOK, res.Status, res.Message)
+	require.Contains(t, res.Message, "is ignored")
+}
+
+// TestGitIgnores_DistinguishesNotIgnoredFromNoAnswer: git says "not
+// ignored" with exit 1 and "not a repository" with 128. Collapsing the two
+// would report a finding about the environment as one about the project.
+func TestGitIgnores_DistinguishesNotIgnoredFromNoAnswer(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	ctx := context.Background()
+	root := t.TempDir()
+	require.Equal(t, ignoreNotARepo, gitIgnores(ctx, root, filepath.Join(root, "x.lock")))
+
+	gitInit(t, root)
+	require.Equal(t, ignoreNo, gitIgnores(ctx, root, filepath.Join(root, "x.lock")))
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".gitignore"), []byte("*.lock\n"), 0o644))
+	require.Equal(t, ignoreYes, gitIgnores(ctx, root, filepath.Join(root, "x.lock")))
+
+	// A nested .gitignore and a later negation are why this asks git rather
+	// than matching patterns by hand.
+	nested := filepath.Join(root, "sub")
+	require.NoError(t, os.MkdirAll(nested, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(nested, ".gitignore"), []byte("!keep.lock\n"), 0o644))
+	require.Equal(t, ignoreNo, gitIgnores(ctx, root, filepath.Join(nested, "keep.lock")))
 }
 
 func TestCheckMigrationPending(t *testing.T) {

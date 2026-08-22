@@ -931,7 +931,8 @@ output formats.
 
 ### D11 · `ape doctor` wiring
 
-Six checks appended to the `allChecks` registry (`doctor.go:123-148`):
+Seven checks appended to the `allChecks` registry (`doctor.go:123-148`) —
+six here plus `sprint.lock_ignored`, which the post-implementation review added:
 
 | Check                  | Backed by | Required                              |
 | ---------------------- | --------- | ------------------------------------- |
@@ -939,6 +940,7 @@ Six checks appended to the `allChecks` registry (`doctor.go:123-148`):
 | `registry.drift`       | D2        | no (WARN)                             |
 | `story.frontmatter`    | D5        | no (WARN)                             |
 | `sprint.divergence`    | D5        | no (WARN)                             |
+| `sprint.lock_ignored`  | D12       | no (WARN) — added by the review, see R9 |
 | `memory.size`          | D6        | **yes** — see below                   |
 | `migration.pending`    | D8/D10    | no (WARN)                             |
 
@@ -946,7 +948,7 @@ Six checks appended to the `allChecks` registry (`doctor.go:123-148`):
 silently downgrades a non-required check's FAIL to WARN (`doctor.go:276-278`). It maps
 `state: over-hard` → FAIL, `over-soft` → WARN, `ok`/`absent` → OK.
 
-All six return INFO outside a project root, matching `checkFrameworkMetadata`
+All seven return INFO outside a project root, matching `checkFrameworkMetadata`
 (`doctor_checks.go:168-177`). `docs/how-to/run-doctor-in-ci.md` carries a per-check table
 that needs the new rows.
 
@@ -1854,6 +1856,50 @@ a prefix test alone would have.
 
 Both were wording-and-shape rather than behaviour, and both were found the same
 way as R8.1: a fixture that did not happen to exercise the branch.
+
+### R9 · The lock sidecar nobody ignores
+
+D12 specifies the advisory lock and says nothing about the file it leaves.
+Nothing unlinks it, and that is correct — releasing a lock and deleting the
+file are different acts, and deleting one another process may be waiting on
+is how the mutual exclusion is lost. But the consequence was never followed
+through: the framework reconciles at **six boundaries**, so every project that
+runs a batch ends up with an untracked `sprint-status.yaml.lock` beside its
+tracker, waiting for a `git add -A`.
+
+This is not hypothetical. One reached a commit in **this repository** during
+the review — `ape sprint reconcile` was run against `testdata/apexproject`
+while surveying JSON payloads, and `git add internal/ testdata/apexproject`
+swept the sidecar in. It was caught reading the commit output, which is not a
+mechanism.
+
+`reconcile-epic-status.py` leaves the same file, so this is not a regression
+ape introduced. It is a hygiene problem neither side had noticed, and the
+kind only a tool looking for it will find — which is the argument for a
+`ape doctor` row rather than a note in a doc nobody re-reads.
+
+Three decisions in the check:
+
+- **WARN, never a write.** `.gitignore` is the operator's file. A tool that
+  edits it uninvited is worse than one that points at it — and this plan's
+  whole posture is that ape reports and the operator decides.
+- **Already-committed is a different, worse state, and says so.** Ignoring a
+  tracked file changes nothing, so that branch reports the file as being in
+  the project's history and offers `git rm --cached` instead of a
+  `.gitignore` line.
+- **It asks `git check-ignore`, not `.gitignore`.** The answer can come from a
+  nested ignore file, `.git/info/exclude`, `core.excludesFile`, or a negation
+  later in the file. Pattern-matching by hand is wrong in ways nobody notices
+  until it matters, and git is the only implementation that agrees with what
+  git will do — which is the thing being predicted. Exit 1 means "not
+  ignored"; anything else (128 for "not a repository", or git absent) is not
+  an answer, and reporting "not ignored" for it would dress an environment
+  fact up as a project finding.
+
+`sprint.LockPath` and `sprint.LockSuffix` are now one definition shared by the
+two build-tagged lockers, the check and the remediation text, so the path
+cannot drift from what the check looks for. `*.lock` is in ape's own
+`.gitignore`, so the accident cannot recur here either.
 
 ## What the framework's own defect report found (2026-08-22)
 

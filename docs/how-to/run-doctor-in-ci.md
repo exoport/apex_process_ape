@@ -99,14 +99,16 @@ ape doctor --output-format json | jq -e '.checks[] | select(.name == "ape.update
 | `registry.drift WARN`                  | A record is on disk but absent from `index.yaml`, or vice versa          | `ape registry verify --all` lists them; `ape registry sync --all` repairs what a tool can.              |
 | `story.frontmatter WARN`               | Stories are missing extension-gated keys, or carry a type mismatch      | `ape story verify` lists them. Frontmatter is authored, so these are fixed by hand.                    |
 | `sprint.divergence WARN`               | A tracker row and a story file disagree, or a row key is non-conforming | `ape sprint check` names both sides. Neither is assumed correct — a person decides, which is why this can never be more than a warn. A `sprint.nonstandard_row_key` finding is the one with a mechanical fix: the row is keyed `N-M` with no slug, so it names no story file *and* the two live epic-projection implementations count it differently. |
+| `sprint.lock_ignored WARN`             | `sprint-status.yaml.lock` is not gitignored, or is already committed    | `ape sprint reconcile` takes an advisory lock on that sidecar and never unlinks it, so it sits beside the tracker waiting for a `git add -A`. Add `*.lock` to `.gitignore`; if it is already committed, `git rm --cached` it too, because ignoring a tracked file changes nothing. |
 | `migration.pending WARN`               | A legacy `deferred-work.md` has not been converted to record files      | `ape framework update` runs it, or `ape deferred migrate --dry-run` to look first. Nothing is committed either way. |
 
 ## Project-data checks
 
-Six checks report on the project's own records rather than on the host:
+Seven checks report on the project's own records rather than on the host:
 `config.resolved`, `registry.drift`, `story.frontmatter`,
-`sprint.divergence`, `memory.size` and `migration.pending`. All six degrade
-to INFO outside a project root — absence of a project is not a finding.
+`sprint.divergence`, `sprint.lock_ignored`, `memory.size` and
+`migration.pending`. All seven degrade to INFO outside a project root —
+absence of a project is not a finding.
 
 Two are **required**, and both for a mechanical reason. `runDoctor`
 downgrades a non-required FAIL to WARN, so:
@@ -128,7 +130,7 @@ should still be able to run `ape doctor` in CI without a red build. Add
 To keep a CI gate to host prerequisites only:
 
 ```bash
-ape doctor --skip config.resolved,registry.drift,story.frontmatter,sprint.divergence,memory.size,migration.pending
+ape doctor --skip config.resolved,registry.drift,story.frontmatter,sprint.divergence,sprint.lock_ignored,memory.size,migration.pending
 ```
 
 ## Operating-rules checks (required, but self-gating)

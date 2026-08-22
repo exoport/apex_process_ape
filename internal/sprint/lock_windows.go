@@ -18,7 +18,7 @@ import (
 // there. LockFileEx gives the same exclusive semantics as flock, so the
 // guarantee is platform-independent.
 func lockFile(path string) (unlock func(), err error) {
-	lockPath := path + ".lock"
+	lockPath := LockPath(path)
 	f, openErr := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
 	if openErr != nil {
 		// Unwritable directory: proceed unlocked and let the tracker read

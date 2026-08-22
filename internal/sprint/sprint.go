@@ -277,6 +277,21 @@ func RemediationFor(rowKey string, candidates []string) string {
 	}
 }
 
+// LockSuffix is appended to the tracker path to name the advisory-lock
+// sidecar. Exported because the file OUTLIVES the run that made it: nothing
+// unlinks it — releasing the lock and deleting the file are different acts,
+// and deleting one another process may be waiting on is how you lose the
+// mutual exclusion the lock exists for — so it lands in the project as a
+// permanent, untracked artifact that wants a `.gitignore` entry.
+//
+// `ape doctor`'s sprint.lock_ignored row is what makes that visible. One
+// definition here so the locker, the doctor check and the remediation text
+// cannot drift apart.
+const LockSuffix = ".lock"
+
+// LockPath is the advisory-lock sidecar for a tracker.
+func LockPath(trackerPath string) string { return trackerPath + LockSuffix }
+
 // StoryKeyFromPath derives a story's tracker key from its file path.
 //
 // This is the join between the two halves of a project's story state, and

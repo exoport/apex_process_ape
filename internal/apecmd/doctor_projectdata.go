@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/memory"
@@ -206,6 +208,116 @@ func checkMigrationPending(_ context.Context, env doctorEnv) CheckResult {
 		Remediation: "`ape framework update` runs them, or `ape deferred migrate --dry-run` to look first. Nothing is committed either way.",
 		FixCommand:  "ape deferred migrate --dry-run",
 	}
+}
+
+// checkSprintLockIgnored reports a `sprint-status.yaml.lock` that git is
+// not ignoring.
+//
+// `ape sprint reconcile` takes an advisory lock on that sidecar and does
+// NOT unlink it — releasing a lock and deleting the file are different
+// acts, and deleting one another process may be waiting on is how the
+// mutual exclusion is lost. So the file stays, and the framework invokes
+// reconcile at six boundaries, so it appears on essentially every project
+// that runs a batch.
+//
+// It is a runtime artifact and belongs in nobody's history. Left
+// unignored it sits in `git status` waiting to be swept up by a
+// `git add -A` — which is exactly how it reached a commit in ape's own
+// repository while this check was being written. `reconcile-epic-status.py`
+// leaves the same file, so this is not a regression ape introduced; it is a
+// hygiene problem neither side had noticed and that only a tool looking for
+// it will surface.
+//
+// Never more than a WARN, and never a write: `.gitignore` is the operator's
+// file, and a tool that edits it uninvited is worse than one that points.
+func checkSprintLockIgnored(ctx context.Context, env doctorEnv) CheckResult {
+	cfg, res := projectDataConfig(env)
+	if res != nil {
+		return *res
+	}
+	tracker := cfg.Paths.SprintStatus
+	if tracker == "" {
+		return CheckResult{Status: StatusInfo, Message: "implementation_folder is not configured"}
+	}
+	lock := sprint.LockPath(tracker)
+	rel := relTo(cfg.Root, lock)
+
+	if _, err := os.Stat(tracker); err != nil {
+		// No tracker means reconcile has nothing to lock. Warning here would
+		// be a finding about a file that cannot yet exist.
+		return CheckResult{Status: StatusOK, Message: "no sprint-status.yaml yet — nothing to lock"}
+	}
+
+	switch gitIgnores(ctx, cfg.Root, lock) {
+	case ignoreYes:
+		return CheckResult{Status: StatusOK, Message: rel + " is ignored"}
+	case ignoreNotARepo:
+		// Nothing to ignore into, and nothing that can accidentally commit it.
+		return CheckResult{Status: StatusInfo, Message: "not a git repository"}
+	}
+
+	// Worse if it is already tracked: the artifact is in history, so
+	// ignoring it now changes nothing until it is also removed from the index.
+	if gitTracked(ctx, cfg.Root, lock) {
+		return CheckResult{
+			Status:  StatusWarn,
+			Message: rel + " is COMMITTED — a lock sidecar is in the project's history",
+			Remediation: "Add `" + rel + "` to .gitignore and untrack it. It is a runtime artifact of " +
+				"`ape sprint reconcile`, which never unlinks it, so it will keep reappearing.",
+			FixCommand: "git rm --cached " + rel,
+		}
+	}
+	return CheckResult{
+		Status:  StatusWarn,
+		Message: rel + " is not ignored by git",
+		Remediation: "`ape sprint reconcile` leaves this advisory-lock sidecar behind on every run and " +
+			"never unlinks it, so an untracked file sits beside the tracker waiting for a `git add -A`. " +
+			"Add `" + rel + "` (or `*" + sprint.LockSuffix + "`) to .gitignore.",
+		FixCommand: "echo '" + rel + "' >> .gitignore",
+	}
+}
+
+// ignoreState is the three-way answer gitIgnores can give: git's own
+// yes/no, plus "the question does not apply".
+type ignoreState int
+
+const (
+	ignoreNo ignoreState = iota
+	ignoreYes
+	ignoreNotARepo
+)
+
+// gitIgnores asks GIT whether a path is ignored, rather than reading
+// .gitignore and matching patterns by hand.
+//
+// The hand-rolled version is wrong in ways nobody notices until it matters:
+// the answer can come from a nested .gitignore, from .git/info/exclude, from
+// core.excludesFile, or from a negation later in the file. `git check-ignore`
+// is the only implementation that agrees with what git will actually do,
+// which is the thing being predicted.
+func gitIgnores(ctx context.Context, root, path string) ignoreState {
+	cmd := exec.CommandContext(ctx, "git", "check-ignore", "-q", "--", path)
+	cmd.Dir = root
+	err := cmd.Run()
+	if err == nil {
+		return ignoreYes
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		// 1 is git's "not ignored". Anything else — 128 for "not a
+		// repository", or git missing entirely — is not an answer, and
+		// reporting "not ignored" for it would be a finding about the
+		// environment dressed up as one about the project.
+		return ignoreNo
+	}
+	return ignoreNotARepo
+}
+
+// gitTracked reports whether git has the path in its index.
+func gitTracked(ctx context.Context, root, path string) bool {
+	cmd := exec.CommandContext(ctx, "git", "ls-files", "--error-unmatch", "--", path)
+	cmd.Dir = root
+	return cmd.Run() == nil
 }
 
 // projectDataConfig resolves the config for a check, or returns the

@@ -25,7 +25,7 @@ import (
 // than a confusing permissions message about a file the operator never
 // heard of.
 func lockFile(path string) (unlock func(), err error) {
-	lockPath := path + ".lock"
+	lockPath := LockPath(path)
 	f, openErr := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
 	if openErr != nil {
 		// Deliberately not propagated — see the doc comment: an unwritable

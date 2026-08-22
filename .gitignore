@@ -44,3 +44,12 @@ vendor/
 #  (e.g., output/), not in subdirectories
 # The leading / anchors the pattern to the root of the repo.
 /output/
+
+# `ape sprint reconcile` takes an advisory lock on a `<tracker>.lock` sidecar
+# and never unlinks it — releasing the lock and deleting the file are
+# different acts, and deleting one another process may be waiting on loses
+# the mutual exclusion. The file is a runtime artifact and belongs in no
+# history; this repo's testdata project acquires one whenever a test or a
+# manual run reconciles it. `ape doctor`'s sprint.lock_ignored row is the
+# check that tells a real project the same thing.
+*.lock

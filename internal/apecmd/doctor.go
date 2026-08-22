@@ -152,6 +152,7 @@ var allChecks = []doctorCheck{
 	{Name: "registry.drift", Run: checkRegistryDrift},
 	{Name: "story.frontmatter", Run: checkStoryFrontmatter},
 	{Name: "sprint.divergence", Run: checkSprintDivergence},
+	{Name: "sprint.lock_ignored", Run: checkSprintLockIgnored},
 	{Name: "memory.size", Required: true, Run: checkMemorySize},
 	{Name: "migration.pending", Run: checkMigrationPending},
 }
@@ -179,11 +180,12 @@ outside a project root; the operating-rules checks only hard-fail when a
 framework install that manages them has lost the fragment, import, or
 apex-orchestrator skill.
 
-Six checks report on PROJECT DATA rather than on the host: whether the
+Seven checks report on PROJECT DATA rather than on the host: whether the
 config resolves at all (nothing else can see the project's artifacts
 without it), registry drift, story frontmatter, tracker divergence,
-team-memory size, and any pending project-data migration. All six degrade
-to INFO outside a project root.
+whether the tracker's lock sidecar is gitignored, team-memory size, and
+any pending project-data migration. All seven degrade to INFO outside a
+project root.
 
 memory.size is one of only two Required checks in that group, deliberately:
 a non-required FAIL is downgraded to WARN, so nothing else could surface a
