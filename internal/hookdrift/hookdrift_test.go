@@ -14,7 +14,14 @@ import (
 // optional manifest) under <root>/_output/tasks/<skill>/<runID>/.
 func writeRun(t *testing.T, root, skill, runID, hookBody, manifest string) string {
 	t.Helper()
-	dir := filepath.Join(root, "_output", "tasks", skill, runID)
+	return writeRunUnder(t, root, filepath.Join("_output", "tasks"), skill, runID, hookBody, manifest)
+}
+
+// writeRunUnder is writeRun with the runlog root spelled out, so the tests
+// can put a run where each real producer puts one.
+func writeRunUnder(t *testing.T, root, runlogRoot, skill, runID, hookBody, manifest string) string {
+	t.Helper()
+	dir := filepath.Join(root, runlogRoot, skill, runID)
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	path := filepath.Join(dir, "hook-events.jsonl")
 	require.NoError(t, os.WriteFile(path, []byte(hookBody), 0o600))
@@ -22,6 +29,17 @@ func writeRun(t *testing.T, root, skill, runID, hookBody, manifest string) strin
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte(manifest), 0o600))
 	}
 	return dir
+}
+
+// touch sets a runlog's mtime, which is how Observe decides which run is
+// the most recent and therefore whose Claude Code version is judged.
+func touch(t *testing.T, dir string, at time.Time) {
+	t.Helper()
+	require.NoError(t, os.Chtimes(filepath.Join(dir, "hook-events.jsonl"), at, at))
+}
+
+func manifestFor(version string) string {
+	return "claude_version: " + version + " (Claude Code)\nstatus: completed\n"
 }
 
 func lines(ls ...string) string { return strings.Join(ls, "\n") + "\n" }
@@ -73,8 +91,10 @@ func TestObserve_DetectsDrift(t *testing.T) {
 	require.Zero(t, drifted[0].Present)
 }
 
-// Partial presence is NOT drift: one old runlog in the window alongside
-// current ones must not raise an alarm.
+// Partial presence WITHIN one harness version is not drift: a field the
+// harness omits on some turns and sends on others is still being sent.
+// Cross-version masking is a different problem, handled by scoping the
+// verdict — see TestObserve_JudgesOnlyTheNewestVersion.
 func TestObserve_PartialPresenceIsNotDrift(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -85,6 +105,87 @@ func TestObserve_PartialPresenceIsNotDrift(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, rep.OK())
 	require.Equal(t, 2, rep.Runs)
+	require.Equal(t, 2, rep.Scanned, "both runs are unstamped, so both are in the judged bucket")
+}
+
+// The masking this scoping exists for. A 30-day window that straddles a
+// Claude Code upgrade holds healthy pre-upgrade runs; without scoping,
+// their Present > 0 keeps the verdict green while every run on the harness
+// actually installed has lost the field.
+func TestObserve_JudgesOnlyTheNewestVersion(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	now := time.Now()
+	// Three healthy runs on the old harness...
+	for i, id := range []string{"old1", "old2", "old3"} {
+		d := writeRun(t, root, "skill-a", id, lines(healthyStop), manifestFor("2.1.232"))
+		touch(t, d, now.Add(-time.Duration(30+i)*time.Minute))
+	}
+	// ...and one on the harness in use now, which has dropped the field.
+	d := writeRun(t, root, "skill-a", "new1", lines(driftedStop), manifestFor("2.1.240"))
+	touch(t, d, now.Add(-time.Minute))
+
+	rep, err := Observe(root, now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.False(t, rep.OK(), "drift on the installed harness must not be masked by older runs")
+	require.Equal(t, "2.1.240", rep.Judged)
+	require.Equal(t, 4, rep.Runs)
+	require.Equal(t, 1, rep.Scanned)
+	require.Equal(t, 3, rep.Ignored)
+
+	drifted := rep.Drifted()
+	require.Len(t, drifted, 1)
+	require.Equal(t, FieldBackgroundTasks, drifted[0].Field)
+
+	// The runs it did not judge have to be named, or a one-run verdict
+	// reads as though it spoke for the whole window.
+	require.Contains(t, rep.Summary(), "Claude Code 2.1.240")
+	require.Contains(t, rep.Summary(), "3 run(s) from 1 other version(s) not judged")
+}
+
+// The mirror of the above: the newest harness is healthy, and drift that
+// existed on a version no longer in use is not raised as a live problem.
+func TestObserve_OldVersionDriftIsNotJudged(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	now := time.Now()
+	old := writeRun(t, root, "skill-a", "old1", lines(driftedStop), manifestFor("2.1.232"))
+	touch(t, old, now.Add(-30*time.Minute))
+	cur := writeRun(t, root, "skill-a", "new1", lines(healthyStop), manifestFor("2.1.240"))
+	touch(t, cur, now.Add(-time.Minute))
+
+	rep, err := Observe(root, now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.True(t, rep.OK())
+	require.Equal(t, "2.1.240", rep.Judged)
+	require.Equal(t, 1, rep.Scanned)
+	require.Equal(t, []string{"2.1.232", "2.1.240"}, rep.Versions,
+		"every version in the window is still reported, even unjudged")
+}
+
+// Every producer's runlog root must be swept. Reading only _output/tasks
+// made `ape pipeline` — the flagship command — invisible to this check for
+// its entire existence, so a project that only runs pipelines reported
+// "no interactive runs" for ever.
+func TestObserve_SweepsEveryRunlogRoot(t *testing.T) {
+	t.Parallel()
+	for _, root := range []string{
+		filepath.Join("_output", "pipelines"),
+		filepath.Join("_output", "tasks"),
+		filepath.Join("_output", "ape", "prompts"),
+		filepath.Join("_output", "ape", "chats"),
+	} {
+		t.Run(root, func(t *testing.T) {
+			t.Parallel()
+			proj := t.TempDir()
+			writeRunUnder(t, proj, root, "design", "run1", lines(driftedStop), "")
+
+			rep, err := Observe(proj, time.Now().Add(-time.Hour))
+			require.NoError(t, err)
+			require.True(t, rep.Observed(), "a runlog under %s must be swept", root)
+			require.False(t, rep.OK(), "drift under %s must be detected", root)
+		})
+	}
 }
 
 // Absence of evidence is not coverage: a project with no runs skips

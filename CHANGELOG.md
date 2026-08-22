@@ -289,6 +289,31 @@
     the release skill both say plainly that this is "not verified" rather than
     a pass.
 
+- **fix(hookdrift): the detector was reading one of four runlog roots, and a
+  Claude Code upgrade masked drift for a month** — two defects that both made
+  it quieter than it looked, found by pointing the new `make check-hooks` at a
+  real project.
+  - **It swept only `_output/tasks`.** ape writes runlogs to four roots:
+    `_output/pipelines` (`ape pipeline`), `_output/tasks` (`ape task`,
+    `ape script`), `_output/ape/prompts` and `_output/ape/chats`. The
+    flagship command was invisible to it, so a project that runs pipelines
+    and nothing else reported "no interactive runs in the last 30 days" for
+    ever and the check had never once fired — while its own doc comment
+    claimed the corpus was "every interactive run". It now walks `_output`
+    whole, which is also the shape that cannot regress when a fifth producer
+    is added.
+  - **The verdict is now scoped to one harness version.** A field was only
+    reported absent when it was missing from *every* payload in the window,
+    so a 30-day window straddling a Claude Code upgrade kept the verdict
+    green on the strength of pre-upgrade runs while every run on the harness
+    actually installed had lost the field. The verdict now comes from the
+    version that wrote the most recent run; older versions are counted and
+    named, never judged. Chosen over a presence-ratio threshold or a
+    newest-N window because it needs no invented constant, reuses the
+    `claude_version` the manifest already carries, and asks the question the
+    gate actually means — does the Claude Code I have installed *now* still
+    send this? Partial presence within a single version stays healthy.
+
 - **`make check-harness` is now the whole sweep** — `check-prices` (model ids
   in local transcripts) + `check-hooks` (hook payload fields in local runlogs)
   + `check-claude` (a live PTY session). Three gates, each reading what the

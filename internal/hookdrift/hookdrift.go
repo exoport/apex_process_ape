@@ -22,6 +22,48 @@
 // which every interactive run already writes.
 //
 // Present-but-empty is healthy. Absent is drift.
+//
+// # Which runlogs count, and whose verdict it is
+//
+// Two things about the corpus were wrong until they were measured against
+// a real project, and both made the detector quieter than it looked.
+//
+// The sweep used to read only <project>/_output/tasks. ape writes runlogs
+// to four roots — _output/pipelines (`ape pipeline`), _output/tasks
+// (`ape task`, `ape script`), _output/ape/prompts and _output/ape/chats —
+// so the detector could not see the flagship command. On a project that
+// runs pipelines and nothing else it reported "no interactive runs" for
+// ever and had never once fired. It now walks _output whole and takes
+// every hook-events.jsonl it finds, which is also the shape that cannot
+// regress the same way when a fifth producer is added.
+//
+// The verdict is scoped to ONE Claude Code version: the one that wrote the
+// most recent run. A field absent from every payload of that version is
+// drift; older versions in the window are counted and reported, never
+// judged. Without that scoping a 30-day window straddling an upgrade masks
+// fresh drift for a month — 25 healthy pre-upgrade runs keep Present > 0
+// while every post-upgrade run lacks the field.
+//
+// Alternatives considered, and why this one:
+//
+//   - a presence RATIO threshold ("flag below 50%") needs a constant
+//     nobody can justify, and would misfire on a field that is
+//     legitimately sparse on a healthy harness;
+//   - judging the newest N runs approximates recency but still mixes
+//     versions when the upgrade lands mid-window, and N is as arbitrary
+//     as the ratio;
+//   - shrinking the window is cruder still and raises the skip rate,
+//     pushing the gate toward "not verified" — the one outcome worth
+//     avoiding, since a gate that cannot speak reads as a gate that
+//     approved.
+//
+// Version scoping needs no tuned constant, reuses a value the manifest
+// already carries, and asks the question the gate actually means: does the
+// Claude Code I have installed right now still send this field?
+//
+// Runs whose manifest carries no version stamp form their own bucket, so
+// an older ape's runlogs are judged together rather than silently fused
+// with a stamped generation.
 package hookdrift
 
 import (
@@ -62,10 +104,20 @@ func (o Observation) OK() bool { return o.Seen == 0 || o.Present > 0 }
 
 // Report is the outcome of a sweep.
 type Report struct {
-	Runs         int           // runlogs read
+	Runs         int           // runlogs in the window, across every version
 	Window       time.Duration // how far back the sweep looked
-	Observations []Observation
-	Versions     []string // claude_version values seen, sorted
+	Observations []Observation // counted from the JUDGED version only
+	Versions     []string      // every claude_version seen in the window, sorted
+
+	// Judged is the claude_version the verdict is about: the version that
+	// wrote the most recent run. Empty means those runlogs carried no
+	// version stamp.
+	Judged string
+	// Scanned is how many runs the verdict was computed from, and Ignored
+	// how many were in the window but written by a different version. A
+	// non-zero Ignored is normal right after a Claude Code upgrade.
+	Scanned int
+	Ignored int
 }
 
 // Observed reports whether the sweep found anything to judge.
@@ -105,10 +157,17 @@ func (r *Report) Summary() string {
 		parts = append(parts, fmt.Sprintf("%s %d/%d", o.Field, o.Present, o.Seen))
 	}
 	v := ""
-	if len(r.Versions) > 0 {
-		v = " (Claude Code " + strings.Join(r.Versions, ", ") + ")"
+	if r.Judged != "" {
+		v = " (Claude Code " + r.Judged + ")"
 	}
-	return fmt.Sprintf("%d run(s): %s%s", r.Runs, strings.Join(parts, ", "), v)
+	// Name the runs the verdict did NOT come from. Silently dropping them
+	// would make a one-run verdict look like it spoke for the whole window.
+	ignored := ""
+	if r.Ignored > 0 {
+		ignored = fmt.Sprintf("; %d run(s) from %d other version(s) not judged",
+			r.Ignored, len(r.Versions)-1)
+	}
+	return fmt.Sprintf("%d run(s): %s%s%s", r.Scanned, strings.Join(parts, ", "), v, ignored)
 }
 
 // hookRow is one runlog hook-events.jsonl line. Payload stays raw so
@@ -119,27 +178,93 @@ type hookRow struct {
 	Payload map[string]json.RawMessage `json:"payload"`
 }
 
+// HookEventsFile is the per-run file every runlog producer writes.
+const HookEventsFile = "hook-events.jsonl"
+
+// outputDir is the project-relative tree every runlog producer writes
+// under — _output/pipelines, _output/tasks, _output/ape/prompts and
+// _output/ape/chats all live inside it. Sweeping the whole tree rather
+// than an enumerated list of roots is deliberate: an enumeration is what
+// silently excluded `ape pipeline` runs from this check for its entire
+// existence, and a fifth producer would have repeated the mistake.
+const outputDir = "_output"
+
+// runRef is one runlog found in the window, with the harness version that
+// produced it.
+type runRef struct {
+	path    string
+	mtime   time.Time
+	version string // "" when the run's manifest carried no stamp
+}
+
 // Observe sweeps a project's runlogs for hook payloads written since
 // `since`, and reports whether the fields the gates depend on are still
-// present.
+// present in the output of the Claude Code that wrote the most recent run.
 //
 // A project with no runlogs yields an unobserved report and no error:
 // absence of evidence is not coverage, so a fresh checkout (or CI) skips
 // rather than passes.
 func Observe(projectRoot string, since time.Time) (*Report, error) {
-	rep := &Report{Window: time.Since(since)}
-	root := filepath.Join(projectRoot, "_output", "tasks")
+	runs, err := discover(projectRoot, since)
+	if err != nil {
+		return nil, err
+	}
 
+	rep := &Report{Window: time.Since(since), Runs: len(runs)}
 	bg := Observation{Field: FieldBackgroundTasks, Event: "Stop"}
 	tr := Observation{Field: FieldToolResponse, Event: "PostToolUse"}
 	ag := Observation{Field: FieldAgentID, Event: "SubagentStop"}
-	versions := map[string]bool{}
+	rep.Observations = []Observation{bg, tr, ag}
+	if len(runs) == 0 {
+		return rep, nil
+	}
 
+	seen := map[string]bool{}
+	for _, r := range runs {
+		if r.version != "" {
+			seen[r.version] = true
+		}
+	}
+	for v := range seen {
+		rep.Versions = append(rep.Versions, v)
+	}
+	sort.Strings(rep.Versions)
+
+	// The verdict belongs to whichever Claude Code wrote the newest run —
+	// mtime rather than a semver comparison, so a downgrade is judged as
+	// what it is (the harness in use) instead of being ranked below the
+	// version it replaced.
+	newest := runs[0]
+	for _, r := range runs[1:] {
+		if r.mtime.After(newest.mtime) {
+			newest = r
+		}
+	}
+	rep.Judged = newest.version
+
+	for _, r := range runs {
+		if r.version != rep.Judged {
+			rep.Ignored++
+			continue
+		}
+		rep.Scanned++
+		scanRunlog(r.path, &bg, &tr, &ag)
+	}
+	rep.Observations = []Observation{bg, tr, ag}
+	return rep, nil
+}
+
+// discover finds every runlog under <projectRoot>/_output modified since
+// `since`. A missing tree is not an error — it is a project nobody has run
+// ape in.
+func discover(projectRoot string, since time.Time) ([]runRef, error) {
+	root := filepath.Join(projectRoot, outputDir)
+	var runs []runRef
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil //nolint:nilerr // an unreadable subtree is skipped, never fatal
 		}
-		if d.IsDir() || d.Name() != "hook-events.jsonl" {
+		if d.IsDir() || d.Name() != HookEventsFile {
 			return nil
 		}
 		// `latest/` is a symlink to a real run dir; WalkDir does not follow
@@ -153,23 +278,19 @@ func Observe(projectRoot string, since time.Time) (*Report, error) {
 		if info.ModTime().Before(since) {
 			return nil
 		}
-		rep.Runs++
-		if v := claudeVersionFor(path); v != "" {
-			versions[v] = true
-		}
-		scanRunlog(path, &bg, &tr, &ag)
+		runs = append(runs, runRef{
+			path:    path,
+			mtime:   info.ModTime(),
+			version: claudeVersionFor(path),
+		})
 		return nil
 	})
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("sweep %s: %w", root, err)
 	}
-
-	rep.Observations = []Observation{bg, tr, ag}
-	for v := range versions {
-		rep.Versions = append(rep.Versions, v)
-	}
-	sort.Strings(rep.Versions)
-	return rep, nil
+	// Path order, so a tie on mtime resolves the same way on every run.
+	sort.Slice(runs, func(i, j int) bool { return runs[i].path < runs[j].path })
+	return runs, nil
 }
 
 // scanRunlog folds one runlog's hook events into the observations.

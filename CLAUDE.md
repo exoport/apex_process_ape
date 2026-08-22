@@ -14,7 +14,7 @@ Guidance for Claude Code when working in this repository.
 | `internal/apecmd/`        | Cobra command definitions: pipeline, adr, pattern, trait, update, etc.                              |
 | `internal/pipeline/`      | Pipeline runner and pre-flight checks. Specs are **not** embedded — they load from `<projectRoot>/_apex/pipelines/*.yaml` (v0.0.6; see `docs/explanation/why-project-local-pipelines.md`). |
 | `internal/repl/`          | The PTY that drives `claude`: spawn + keystrokes + a vt10x-rendered pane. Owns the ready-signal vocabulary (`bypass permissions on`, `❯`), the pre-REPL modal table, `ScrubClaudeCodeEnv`, and `CLAUDE_CODE_EFFORT_LEVEL`. `TestLive_ClaudeCodeContract` (opt-in, `make check-claude`) checks all of it against the installed Claude Code. |
-| `internal/hookdrift/`     | Detects Claude Code dropping the hook-payload fields the step-completion gates read, from a project's own runlogs. Surfaced by `ape doctor` and gated by `make check-hooks`. |
+| `internal/hookdrift/`     | Detects Claude Code dropping the hook-payload fields the step-completion gates read. Sweeps every runlog under a project's `_output/`, and scopes the verdict to the harness version that wrote the newest run so an upgrade cannot mask fresh drift. Surfaced by `ape doctor`, gated by `make check-hooks`. |
 | `internal/contract/`      | The framework-owned *terminal* contract (`_apex/terminal-contracts.csv`) — did a run reach its summary step. Unrelated to the PTY contract above, despite the name. |
 | `internal/tui/`           | Bubble Tea two-panel TUI.                                                                           |
 | `internal/output/`        | Output-format helpers (human / json / yaml).                                                        |
