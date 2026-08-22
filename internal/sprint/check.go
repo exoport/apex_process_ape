@@ -80,8 +80,8 @@ func RunCheck(cfg *apexcfg.Resolved) (*CheckReport, error) {
 	// findings is non-nil from the start so an empty report marshals as
 	// `"findings": []` and never `null`. A caller that iterates the array
 	// meets a list on a clean project instead of a null it has to
-	// special-case — apex-defer-repair is explicitly told to take its work
-	// list from one of these payloads rather than globbing.
+	// special-case — the deferred-repair skill is explicitly told to take
+	// its work list from one of these payloads rather than globbing.
 	report := &CheckReport{Tracker: cfg.Paths.SprintStatus, Findings: []Finding{}}
 	tracker, loadErr := Load(cfg.Paths.SprintStatus)
 	if loadErr != nil {

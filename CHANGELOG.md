@@ -128,7 +128,7 @@
   - **Empty JSON arrays marshal as `[]`, never `null`.** Six payloads emitted
     `null` on a clean run — `findings` on `story verify`, `sprint check`,
     `deferred verify` and `registry verify`, and `changes` on
-    `sprint reconcile` and `registry sync`. `apex-defer-repair` is explicitly
+    `sprint reconcile` and `registry sync`. The deferred-repair skill is explicitly
     told to take its work list from `ape deferred verify --output-format json`
     rather than globbing, so a clean store handed it a `null` where it expects
     a list.
@@ -147,6 +147,25 @@
     calling it `size`. It is what `os.Stat` returns, what the 256 KiB Read cap
     is measured in, and what `ape memory check` already emits — a `size` in
     one and a `bytes` in the other would be worse than either.
+
+- **fix(deferred): follow the framework's `apex-defer-repair` →
+  `apex-deferred-repair` rename, without a lockstep release** — the skill
+  name was a hardcoded constant, so the rename would have broken
+  `ape deferred repair` until ape shipped too. It now resolves against what
+  is actually installed, preferring the current name and accepting the
+  pre-rename one, which removes the ordering constraint rather than
+  documenting it: a hard switch would break a new ape against an older
+  framework *and* an older ape against the renamed framework, so the two
+  repos would have had to ship in the same hour.
+  - **And it refuses when neither name resolves, `--dry-run` included.** A
+    real dispatch was already safe — `runTask` builds a single-step spec and
+    `pipeline.Run` calls `PreflightSkills`, so an unresolvable skill exits 2
+    without reaching claude. A dry run never reaches the runner, though, so
+    it would have printed a plan naming a skill that does not exist, said
+    "no session spawned", and read as clean, with the real run failing
+    later. The check also picks between the two spellings, names both in its
+    message, and fires before the TTY refusal so an operator is not told to
+    pass `--force` first and find out afterwards.
 
 - **feat(doctor): report a `sprint-status.yaml.lock` that git is not
   ignoring** — new `sprint.lock_ignored` row. `ape sprint reconcile` takes an

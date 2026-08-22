@@ -73,7 +73,7 @@ func (s *Store) Verify(opts VerifyOptions) (*VerifyReport, error) {
 		return nil, err
 	}
 	// Non-nil so a clean store marshals as `"findings": []`, not `null`.
-	// apex-defer-repair is explicitly told to take its work list from this
+	// The deferred-repair skill is explicitly told to take its work list from this
 	// payload rather than globbing the directory.
 	report := &VerifyReport{Findings: []Finding{}}
 	for _, w := range res.Warnings {

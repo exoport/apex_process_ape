@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/deferred"
+	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/stretchr/testify/require"
 )
 
@@ -148,6 +149,16 @@ func TestDeferredMigrate_RecoverDeletedFlagExists(t *testing.T) {
 
 // --- repair ---
 
+// installRepairSkill puts a repair skill in the project's own skills tree.
+// Every repair test past the nothing-to-repair short-circuit needs one,
+// because a name that resolves to neither skill is refused up front.
+func installRepairSkill(t *testing.T, root, name string) {
+	t.Helper()
+	dir := filepath.Join(root, framework.ProjectSkillsDir, name)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("# "+name+"\n"), 0o644))
+}
+
 func TestDeferredRepair_NothingToRepair(t *testing.T) {
 	root := newTestProject(t, realProjectConfig)
 	writeLegacyLedger(t, root, "## Deferred from: story review of 1-1 (2026-01-01)\n\n"+
@@ -162,6 +173,7 @@ func TestDeferredRepair_DryRunSpawnsNothing(t *testing.T) {
 	root := newTestProject(t, realProjectConfig)
 	writeLegacyLedger(t, root, legacyLedgerFixture)
 	runCmd(t, newDeferredMigrateCmd())
+	installRepairSkill(t, root, repairSkill)
 
 	out := runCmd(t, newDeferredRepairCmd(), "--dry-run")
 	require.Contains(t, out, "free-form record(s)")
@@ -177,6 +189,7 @@ func TestDeferredRepair_RefusesWithoutATTY(t *testing.T) {
 	root := newTestProject(t, realProjectConfig)
 	writeLegacyLedger(t, root, legacyLedgerFixture)
 	runCmd(t, newDeferredMigrateCmd())
+	installRepairSkill(t, root, repairSkill)
 
 	cmd := newDeferredRepairCmd()
 	cmd.SetOut(&bytes.Buffer{})
@@ -268,4 +281,69 @@ func TestMigrationPathsAreDisjointFromTheFrameworkInstall(t *testing.T) {
 			require.False(t, strings.HasPrefix(i, m), "%s overlaps the migration path %s", i, m)
 		}
 	}
+}
+
+// TestResolveRepairSkill_AcceptsBothNames is what stops the framework's
+// rename from being a lockstep release. A hard switch would break a new ape
+// against an older framework AND an older ape against the renamed one, so
+// the two repos would have to ship in the same hour.
+func TestResolveRepairSkill_AcceptsBothNames(t *testing.T) {
+	t.Run("current name", func(t *testing.T) {
+		root := t.TempDir()
+		installRepairSkill(t, root, repairSkill)
+		name, found := resolveRepairSkill(root)
+		require.True(t, found)
+		require.Equal(t, repairSkill, name)
+	})
+
+	t.Run("legacy name on an older framework", func(t *testing.T) {
+		root := t.TempDir()
+		installRepairSkill(t, root, repairSkillLegacy)
+		name, found := resolveRepairSkill(root)
+		require.True(t, found)
+		require.Equal(t, repairSkillLegacy, name)
+	})
+
+	t.Run("both installed prefers the current one", func(t *testing.T) {
+		root := t.TempDir()
+		installRepairSkill(t, root, repairSkillLegacy)
+		installRepairSkill(t, root, repairSkill)
+		name, found := resolveRepairSkill(root)
+		require.True(t, found)
+		require.Equal(t, repairSkill, name,
+			"a framework mid-rename may ship both; the current name wins")
+	})
+}
+
+// TestDeferredRepair_RefusesWhenNoSkillIsInstalled covers the gap the
+// runner's own preflight leaves.
+//
+// A real dispatch is already safe: runTask goes through pipeline.Run, which
+// calls PreflightSkills and exits 2 without reaching claude. But --dry-run
+// never reaches the runner, so without this check it would print a plan
+// naming a skill that does not exist, report "no session spawned", and read
+// as a clean dry run — with the real run failing later. That is the case
+// asserted here, and it is asserted through --dry-run for exactly that
+// reason.
+func TestDeferredRepair_RefusesWhenNoSkillIsInstalled(t *testing.T) {
+	// ResolveSkill falls back to ~/.claude/skills, so a developer machine
+	// with the real framework installed would resolve the name and this
+	// would not test what it claims. Point HOME somewhere empty.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+
+	root := newTestProject(t, realProjectConfig)
+	writeLegacyLedger(t, root, legacyLedgerFixture)
+	runCmd(t, newDeferredMigrateCmd())
+
+	cmd := newDeferredRepairCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetArgs([]string{"--dry-run"})
+	err := cmd.Execute()
+
+	require.Error(t, err, "--dry-run checks this too: finding out whether it would work is the point")
+	require.Contains(t, err.Error(), repairSkill)
+	require.Contains(t, err.Error(), repairSkillLegacy, "both names are named, so the operator can see which is expected")
+	require.Contains(t, err.Error(), "ape framework update")
 }

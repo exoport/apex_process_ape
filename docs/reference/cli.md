@@ -926,13 +926,20 @@ phase, never inside the verified migration. That separation is what keeps
 the migration assertable and revertible: a model's output can never
 invalidate a byte-identity check.
 
-Mechanism: this spawns apex-defer-repair on opus through
+Mechanism: this spawns apex-deferred-repair on opus through
 the same PTY task runner `ape task` uses. The prompt lives in the
 framework as a versioned, reviewable skill rather than a Go string
 literal, so ape gains no HTTP client, no credentials and no model
-constant.
+constant. apex-defer-repair is accepted as the pre-rename name, so
+an older framework install still works.
 
-Two guards this command adds:
+Three guards this command adds:
+
+  It REFUSES when neither skill is installed, --dry-run included. A real
+  dispatch is already caught by the runner's skill preflight, but a dry
+  run never reaches the runner — so without this it would print a plan
+  naming a skill that does not exist, say "no session spawned", and read
+  as fine.
 
   It REFUSES without a TTY unless --force. It spends real money, and it
   should not do that from a script that did not ask — the same refusal

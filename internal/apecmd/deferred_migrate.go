@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/deferred"
+	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/output"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -21,7 +22,45 @@ import (
 // The prompt lives there — versioned and reviewable — rather than as a Go
 // string literal, which is what keeps ape free of an HTTP client, API
 // credentials and a model constant.
-const repairSkill = "apex-defer-repair"
+//
+// repairSkillLegacy is what the framework called it before it was renamed
+// to match the `ape deferred` noun. Both are accepted, and that is not
+// politeness — it is what stops this from being a lockstep release. A hard
+// switch would mean a new ape against an older framework finds nothing, and
+// an older ape against the renamed framework finds nothing, so the two
+// repos would have to ship in the same hour. Resolving against what is
+// actually installed removes the constraint instead of documenting it.
+const (
+	repairSkill       = "apex-deferred-repair"
+	repairSkillLegacy = "apex-defer-repair"
+)
+
+// resolveRepairSkill picks whichever repair skill this project has, current
+// name first.
+//
+// A real dispatch is already safe without this: runTask builds a single-step
+// spec and pipeline.Run calls PreflightSkills, so an unresolvable skill exits
+// 2 with a clear message and never reaches claude. What this adds is
+// three things that check cannot give:
+//
+//   - It chooses BETWEEN the two names, which is the whole point of
+//     tolerating the rename.
+//   - It fires under --dry-run, where the runner never runs at all.
+//     Otherwise a dry run prints a plan naming a skill that does not exist
+//     and reports "no session spawned", which reads as fine, and the real
+//     run fails later. A dry run that cannot tell you the dispatch would
+//     fail is not doing its job.
+//   - It fires before the TTY refusal, so an operator learns the skill is
+//     missing instead of being told to pass --force first and finding out
+//     after that.
+func resolveRepairSkill(projectRoot string) (name string, found bool) {
+	for _, candidate := range []string{repairSkill, repairSkillLegacy} {
+		if _, _, ok := framework.ResolveSkill(candidate, projectRoot); ok {
+			return candidate, true
+		}
+	}
+	return repairSkill, false
+}
 
 // repairModel is the tier the judgment phase runs on. Passed through the
 // existing PTY task runner's --model, not an API call.
@@ -212,9 +251,16 @@ Mechanism: this spawns ` + repairSkill + ` on ` + repairModel + ` through
 the same PTY task runner ` + "`ape task`" + ` uses. The prompt lives in the
 framework as a versioned, reviewable skill rather than a Go string
 literal, so ape gains no HTTP client, no credentials and no model
-constant.
+constant. ` + repairSkillLegacy + ` is accepted as the pre-rename name, so
+an older framework install still works.
 
-Two guards this command adds:
+Three guards this command adds:
+
+  It REFUSES when neither skill is installed, --dry-run included. A real
+  dispatch is already caught by the runner's skill preflight, but a dry
+  run never reaches the runner — so without this it would print a plan
+  naming a skill that does not exist, say "no session spawned", and read
+  as fine.
 
   It REFUSES without a TTY unless --force. It spends real money, and it
   should not do that from a script that did not ask — the same refusal
@@ -242,8 +288,9 @@ Nothing is committed.`,
 				}
 			}
 
+			skill, skillFound := resolveRepairSkill(cfg.Root)
 			plan := repairPlan{
-				Skill:    repairSkill,
+				Skill:    skill,
 				Model:    repairModel,
 				Records:  len(before.Records),
 				FreeForm: freeForm,
@@ -261,6 +308,14 @@ Nothing is committed.`,
 			if freeForm == 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "nothing to repair")
 				return nil
+			}
+			// Checked before --dry-run returns: finding out whether this
+			// would work is most of what a dry run is for.
+			if !skillFound {
+				return fmt.Errorf(
+					"no repair skill installed: neither %s nor %s resolves under %s or ~/.claude/skills/ — "+
+						"run `ape framework update` to install it",
+					repairSkill, repairSkillLegacy, framework.ProjectSkillsDir)
 			}
 			if dryRun {
 				fmt.Fprintln(cmd.OutOrStdout(), "--dry-run: no session spawned")

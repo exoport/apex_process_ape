@@ -864,7 +864,7 @@ is the operator's decision — the plan's job is to make them separable, not to 
 
 **Mechanism: reuse what exists.** `ape` already runs a framework skill through the PTY task
 runner with a model override (`ape task <skill> --model opus`, `task.go:153`). `repair`
-spawns `apex-defer-repair` on opus through that same path. The prompt therefore lives in
+spawns the deferred-repair skill on opus through that same path. The prompt therefore lives in
 the framework as a versioned, reviewable skill rather than as a Go string literal, and
 `ape` gains no HTTP client, no credentials and no model constant.
 
@@ -1243,7 +1243,7 @@ them would move a rendering pipeline into a CLI that has no business owning one.
       one file per record, ingest never fails for content, one bad record loses one record.
 - [x] **D8 — `ape deferred migrate`** — fixed mapping, verified before write, idempotent
       from disk state, never deletes the source.
-- [x] **D9 — `ape deferred repair`** — dispatches `apex-defer-repair` on opus through the
+- [x] **D9 — `ape deferred repair`** — dispatches `apex-deferred-repair` on opus through the
       existing task runner; refuses without a TTY; record-count post-condition.
 - [x] **D10 — `ape framework update` integration** — `--dry-run`, `--no-migrate`,
       `--repair`; path-scoped clean gate; commits nothing, prints the paths and the
@@ -1944,7 +1944,7 @@ assumption holds. Five findings came out alongside it; all five are addressed.
 | # | Finding | Resolution |
 | - | ------- | ---------- |
 | 1 | `sprint check` correlates on `story_id` — 100% false positives | Same as R1. Found independently on both sides, which is the strongest evidence either review produced. |
-| 2 | `findings` marshals as `null`, not `[]`, on the verify payloads | Fixed, and wider than reported: six payloads, not four (`registry verify` also emitted `null`, and `changes` on `sprint reconcile` / `registry sync` had the same defect). `apex-defer-repair` reads one of these as a work list. |
+| 2 | `findings` marshals as `null`, not `[]`, on the verify payloads | Fixed, and wider than reported: six payloads, not four (`registry verify` also emitted `null`, and `changes` on `sprint reconcile` / `registry sync` had the same defect). The deferred-repair skill reads one of these as a work list. |
 | 3 | All four family `update` commands print one hardcoded `ape adr update` example | Fixed — the example is built from the family descriptor. |
 | 4 | `--cwd` missing on 5 of 16 new subcommands | **Decision 1 amended** rather than the flag added. The five are exactly the five that resolve nothing from the project, so `--cwd` would have no referent; giving it one would mean "project root" on eleven commands and "path base" on five. Each of the five now says so in its `Long`. |
 | 5 | The memory index size field is `bytes`; three surfaces call it `size` | **Keep `bytes`** — it is what `os.Stat` returns, what the 256 KiB Read cap is measured in, and what `ape memory check` already emits. ape's own two prose sites corrected here; the framework's nine are its to change. |
