@@ -409,7 +409,7 @@ func emitRegistryReport(w io.Writer, report *registry.Report, format output.Form
 		emitRegistryHuman(w, report)
 	}
 	if strict && !report.OK() {
-		os.Exit(1)
+		return gateErr(1, nil)
 	}
 	return nil
 }

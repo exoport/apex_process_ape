@@ -3,7 +3,6 @@ package apecmd
 import (
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -108,13 +107,11 @@ Exit codes:
 			cfg := resolveProjectConfig(cwdFlag)
 			ordinals, err := memory.ParseOrdinals(args[0])
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-				os.Exit(ExitUsage)
+				return usageErr(err)
 			}
 			bodies, err := memory.Bodies(cfg.Paths.TeamMemory, ordinals)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-				os.Exit(exitCodeMemoryOutOfRange)
+				return gateErr(exitCodeMemoryOutOfRange, err)
 			}
 			for _, b := range bodies {
 				fmt.Fprint(cmd.OutOrStdout(), b)
@@ -173,8 +170,7 @@ on it.`,
 			switch failAt {
 			case failAtNever, failAtSoft, failAtHard:
 			default:
-				fmt.Fprintf(os.Stderr, "Error: --fail-at must be never|soft|hard, got %q\n", failAt)
-				os.Exit(ExitUsage)
+				return usageErr(fmt.Errorf("--fail-at must be never|soft|hard, got %q", failAt))
 			}
 			cfg := resolveProjectConfig(cwdFlag)
 			check := memory.CheckSize(cfg.Paths.TeamMemory, soft, hard)
@@ -187,7 +183,7 @@ on it.`,
 				emitMemoryCheckHuman(cmd.OutOrStdout(), check)
 			}
 			if memoryCheckShouldFail(check.State, failAt) {
-				os.Exit(1)
+				return gateErr(1, nil)
 			}
 			return nil
 		},

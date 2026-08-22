@@ -39,6 +39,25 @@ func (e *exitError) Unwrap() error { return e.err }
 func usageErr(err error) error { return &exitError{code: ExitUsage, err: err} }
 func failErr(err error) error  { return &exitError{code: ExitRunFailed, err: err} }
 
+// gateErr carries a gate command's verdict out as an exit code.
+//
+// The PLAN-25 gates — `ape story verify --file`, `ape sprint verify`,
+// `ape memory show`, and anything with --strict — signal failure through a
+// process status rather than a message, because that is what their callers
+// branch on. Returning it as an *exitError rather than calling os.Exit in
+// RunE is what keeps them testable in-process: os.Exit would kill the test
+// binary on the first assertion. err may be nil when the command already
+// printed its own diagnostic.
+func gateErr(code int, err error) error {
+	if code == ExitOK {
+		return nil
+	}
+	if err == nil {
+		err = fmt.Errorf("exit status %d", code)
+	}
+	return &exitError{code: code, err: err}
+}
+
 // ExitCode maps the error Execute returns onto a process exit status for main():
 // 0 for nil, the code carried by an *exitError (e.g. `ape sandbox exec`
 // forwarding the guest's exit status), else 1. silent reports that the error
