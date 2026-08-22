@@ -9,6 +9,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/exoport/apex_process_ape/internal/runlog"
 )
 
 // Rollup is the on-disk shape of <project>/_output/ape/cost-rollup.json.
@@ -18,7 +20,7 @@ type Rollup struct {
 	UpdatedAt time.Time         `json:"updated_at"`
 	Pipelines map[string]Bucket `json:"pipelines,omitempty"`
 	// Tasks aggregates `ape task` runs, keyed by skill name
-	// (manifests under _output/tasks/<skill>/<run-id>/). PLAN-11.
+	// (manifests under _output/ape/tasks/<skill>/<run-id>/). PLAN-11.
 	Tasks map[string]Bucket `json:"tasks,omitempty"`
 	Chats Bucket            `json:"chats"`
 	// Prompts aggregates `ape prompt` sessions, keyed by prompt-id
@@ -42,7 +44,7 @@ type Bucket struct {
 
 // RollupPath returns <project>/_output/ape/cost-rollup.json.
 func RollupPath(projectRoot string) string {
-	return filepath.Join(projectRoot, "_output", "ape", "cost-rollup.json")
+	return runlog.CostRollupPath(projectRoot)
 }
 
 // LoadRollup reads RollupPath(projectRoot). Returns an empty rollup

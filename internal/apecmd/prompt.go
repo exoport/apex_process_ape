@@ -319,7 +319,7 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 
 	start := time.Now()
 	promptID := runlog.NewChatID(start, o.projectRoot, os.Getpid())
-	runDir := filepath.Join(o.projectRoot, "_output", "ape", "prompts", promptID)
+	runDir := runlog.PromptRunDir(o.projectRoot, promptID)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return promptResult{}, ExitRunFailed, fmt.Errorf("ape prompt: create record dir: %w", err)
 	}

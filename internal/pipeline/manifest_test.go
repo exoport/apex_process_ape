@@ -20,7 +20,7 @@ func TestManifestWriter_FullLifecycle(t *testing.T) {
 		t.Fatalf("write source: %v", err)
 	}
 
-	baseDir := filepath.Join(root, "_output", "pipelines")
+	baseDir := filepath.Join(root, "_output", "ape", "pipelines")
 	mw, err := newManifestWriter(baseDir, "design", root, source, "0.0.9-test", time.Unix(1715420730, 0))
 	if err != nil {
 		t.Fatalf("newManifestWriter: %v", err)
@@ -115,7 +115,7 @@ func TestManifestWriter_FailedStepCountsInTotals(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	_ = os.WriteFile(source, []byte("name: p"), 0o644)
-	mw, err := newManifestWriter(filepath.Join(root, "_output", "pipelines"), "p", root, source, "0.0.9-test", time.Now())
+	mw, err := newManifestWriter(filepath.Join(root, "_output", "ape", "pipelines"), "p", root, source, "0.0.9-test", time.Now())
 	if err != nil {
 		t.Fatalf("newManifestWriter: %v", err)
 	}

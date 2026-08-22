@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -14,7 +15,7 @@ import (
 // optional manifest) under <root>/_output/tasks/<skill>/<runID>/.
 func writeRun(t *testing.T, root, skill, runID, hookBody, manifest string) string {
 	t.Helper()
-	return writeRunUnder(t, root, filepath.Join("_output", "tasks"), skill, runID, hookBody, manifest)
+	return writeRunUnder(t, root, filepath.Join("_output", "ape", "tasks"), skill, runID, hookBody, manifest)
 }
 
 // writeRunUnder is writeRun with the runlog root spelled out, so the tests
@@ -167,25 +168,52 @@ func TestObserve_OldVersionDriftIsNotJudged(t *testing.T) {
 // made `ape pipeline` — the flagship command — invisible to this check for
 // its entire existence, so a project that only runs pipelines reported
 // "no interactive runs" for ever.
+//
+// The roots come from runlog.RunRoots rather than a list written out here:
+// a hand-written list is exactly what produced the bug, and one in a test
+// would go stale in the same silence. A fifth run kind is covered the day
+// it is added.
 func TestObserve_SweepsEveryRunlogRoot(t *testing.T) {
 	t.Parallel()
-	for _, root := range []string{
-		filepath.Join("_output", "pipelines"),
-		filepath.Join("_output", "tasks"),
-		filepath.Join("_output", "ape", "prompts"),
-		filepath.Join("_output", "ape", "chats"),
-	} {
-		t.Run(root, func(t *testing.T) {
+	roots := runlog.RunRoots("")
+	require.NotEmpty(t, roots)
+	for _, r := range roots {
+		t.Run(r.Kind, func(t *testing.T) {
 			t.Parallel()
 			proj := t.TempDir()
-			writeRunUnder(t, proj, root, "design", "run1", lines(driftedStop), "")
+			// r.Path is relative to "" — rebuild it under the temp project.
+			dir := filepath.Join(proj, r.Path, "run1")
+			if r.Grouped {
+				dir = filepath.Join(proj, r.Path, "design", "run1")
+			}
+			require.NoError(t, os.MkdirAll(dir, 0o755))
+			require.NoError(t, os.WriteFile(
+				filepath.Join(dir, "hook-events.jsonl"), []byte(lines(driftedStop)), 0o600,
+			))
 
 			rep, err := Observe(proj, time.Now().Add(-time.Hour))
 			require.NoError(t, err)
-			require.True(t, rep.Observed(), "a runlog under %s must be swept", root)
-			require.False(t, rep.OK(), "drift under %s must be detected", root)
+			require.True(t, rep.Observed(), "a %s runlog under %s must be swept", r.Kind, r.Path)
+			require.False(t, rep.OK(), "drift in a %s runlog must be detected", r.Kind)
 		})
 	}
+}
+
+// The framework owns _output/; ape owns only _output/ape/. A handoff or a
+// verify-orchestrator report that happened to contain a hook-events.jsonl
+// is not ape's run and must not be swept.
+func TestObserve_IgnoresTheFrameworksOutputTree(t *testing.T) {
+	t.Parallel()
+	proj := t.TempDir()
+	outside := filepath.Join(proj, "_output", "verify-orchestrator", "run1")
+	require.NoError(t, os.MkdirAll(outside, 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(outside, "hook-events.jsonl"), []byte(lines(driftedStop)), 0o600,
+	))
+
+	rep, err := Observe(proj, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.False(t, rep.Observed(), "only _output/ape is ape's to read")
 }
 
 // Absence of evidence is not coverage: a project with no runs skips

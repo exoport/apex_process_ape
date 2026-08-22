@@ -11,6 +11,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/reporting"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/spf13/cobra"
 )
 
@@ -103,11 +104,25 @@ func runMetrics(ctx context.Context, out io.Writer, f *reportFlags, runID string
 }
 
 // metricsFromRun builds a metrics payload from a completed run's manifest
-// (--run-id mode). The run dir is located under <project>/_output/*/*/<id>.
+// (--run-id mode).
+//
+// The roots come from runlog.RunRoots. The previous `_output/*/*/<id>`
+// glob matched both layouts only by coincidence of nesting depth —
+// `_output/pipelines/<name>/<id>` and `_output/ape/prompts/<id>` happen to
+// sit at the same depth — which would have broken silently the moment a
+// run kind was nested differently.
 func metricsFromRun(projectRoot, runID string) (reporting.MetricsPayload, string, error) {
-	matches, _ := filepath.Glob(filepath.Join(projectRoot, "_output", "*", "*", runID, "manifest.yaml"))
+	var matches []string
+	for _, r := range runlog.RunRoots(projectRoot) {
+		pattern := filepath.Join(r.Path, runID, "manifest.yaml")
+		if r.Grouped {
+			pattern = filepath.Join(r.Path, "*", runID, "manifest.yaml")
+		}
+		found, _ := filepath.Glob(pattern)
+		matches = append(matches, found...)
+	}
 	if len(matches) == 0 {
-		return reporting.MetricsPayload{}, "", fmt.Errorf("no manifest found for run %q under %s/_output", runID, projectRoot)
+		return reporting.MetricsPayload{}, "", fmt.Errorf("no manifest found for run %q under %s", runID, runlog.ApeRoot(projectRoot))
 	}
 	m, err := pipeline.LoadManifest(filepath.Dir(matches[0]))
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"gopkg.in/yaml.v3"
 )
 
@@ -56,7 +57,7 @@ type RepriceReport struct {
 // timestamp, so dated promotional windows resolve against the run's own
 // start date, which is the correct bucket for every turn in a single run.
 //
-// Artefacts covered: _output/{pipelines,tasks}/<name>/<run-id>/manifest.yaml
+// Artefacts covered: _output/ape/{pipelines,tasks}/<name>/<run-id>/manifest.yaml
 // and _output/ape/prompts/<id>/prompt.yaml. Chat session.yaml carries no
 // per-model breakdown and is skipped (nothing to reprice from).
 //
@@ -118,10 +119,28 @@ func Reprice(projectRoot string, write bool) (RepriceReport, error) {
 // twice the real delta. rollup_walk.go skips the `latest` name for the same
 // reason; resolving instead of name-matching also covers any other symlink.
 func repriceTargets(projectRoot string) ([]string, error) {
-	globs := []string{
-		filepath.Join(projectRoot, "_output", "pipelines", "*", "*", "manifest.yaml"),
-		filepath.Join(projectRoot, "_output", "tasks", "*", "*", "manifest.yaml"),
-		filepath.Join(projectRoot, "_output", "ape", "prompts", "*", "prompt.yaml"),
+	// Roots come from runlog.RunRoots so the move to _output/ape is defined
+	// in one place. Which record file each kind carries is decided here,
+	// and chats are skipped ON PURPOSE — session.yaml holds one cost_usd
+	// with no per-model token breakdown, so there is nothing to recompute a
+	// cost from. See Reprice's doc comment.
+	roots := runlog.RunRoots(projectRoot)
+	globs := make([]string, 0, len(roots))
+	for _, r := range roots {
+		var record string
+		switch r.Kind {
+		case runlog.KindPipeline, runlog.KindTask:
+			record = "manifest.yaml"
+		case runlog.KindPrompt:
+			record = "prompt.yaml"
+		default: // KindChat, and any kind added without a repriceable record
+			continue
+		}
+		if r.Grouped {
+			globs = append(globs, filepath.Join(r.Path, "*", "*", record))
+			continue
+		}
+		globs = append(globs, filepath.Join(r.Path, "*", record))
 	}
 	var out []string
 	seen := map[string]bool{}

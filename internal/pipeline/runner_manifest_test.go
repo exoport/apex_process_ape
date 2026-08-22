@@ -60,7 +60,7 @@ func TestRun_EmitsManifest(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	pipelineDir := filepath.Join(root, "_output", "pipelines", "smoke")
+	pipelineDir := filepath.Join(root, "_output", "ape", "pipelines", "smoke")
 	entries, err := os.ReadDir(pipelineDir)
 	if err != nil {
 		t.Fatalf("read pipeline dir: %v", err)
@@ -173,7 +173,7 @@ func TestRun_FailedStepCaptured(t *testing.T) {
 		t.Fatalf("expected non-nil error from failing step")
 	}
 
-	entries, _ := os.ReadDir(filepath.Join(root, "_output", "pipelines", "bad"))
+	entries, _ := os.ReadDir(filepath.Join(root, "_output", "ape", "pipelines", "bad"))
 	var runID string
 	for _, e := range entries {
 		if e.IsDir() && strings.HasPrefix(e.Name(), "20") {
@@ -184,7 +184,7 @@ func TestRun_FailedStepCaptured(t *testing.T) {
 	if runID == "" {
 		t.Fatalf("no run_id dir found")
 	}
-	data, _ := os.ReadFile(filepath.Join(root, "_output", "pipelines", "bad", runID, "manifest.yaml"))
+	data, _ := os.ReadFile(filepath.Join(root, "_output", "ape", "pipelines", "bad", runID, "manifest.yaml"))
 	var m Manifest
 	_ = yaml.Unmarshal(data, &m)
 	if m.Status != StatusFailed {

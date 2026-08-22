@@ -28,14 +28,13 @@
 // Two things about the corpus were wrong until they were measured against
 // a real project, and both made the detector quieter than it looked.
 //
-// The sweep used to read only <project>/_output/tasks. ape writes runlogs
-// to four roots — _output/pipelines (`ape pipeline`), _output/tasks
-// (`ape task`, `ape script`), _output/ape/prompts and _output/ape/chats —
-// so the detector could not see the flagship command. On a project that
-// runs pipelines and nothing else it reported "no interactive runs" for
-// ever and had never once fired. It now walks _output whole and takes
-// every hook-events.jsonl it finds, which is also the shape that cannot
-// regress the same way when a fifth producer is added.
+// The sweep used to read only <project>/_output/tasks, one of the four
+// roots ape writes runs into, so `ape pipeline` — the flagship command —
+// was invisible to it. A project that ran pipelines and nothing else
+// reported "no interactive runs" for ever and the check had never once
+// fired. It now walks runlog.ApeRoot and takes every hook-events.jsonl
+// beneath it, so a new run kind is covered the moment it exists rather
+// than when someone remembers to add it here.
 //
 // The verdict is scoped to ONE Claude Code version: the one that wrote the
 // most recent run. A field absent from every payload of that version is
@@ -76,6 +75,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/exoport/apex_process_ape/internal/runlog"
 )
 
 // DefaultWindow is how far back a sweep looks. Runs older than this say
@@ -181,13 +182,15 @@ type hookRow struct {
 // HookEventsFile is the per-run file every runlog producer writes.
 const HookEventsFile = "hook-events.jsonl"
 
-// outputDir is the project-relative tree every runlog producer writes
-// under — _output/pipelines, _output/tasks, _output/ape/prompts and
-// _output/ape/chats all live inside it. Sweeping the whole tree rather
-// than an enumerated list of roots is deliberate: an enumeration is what
-// silently excluded `ape pipeline` runs from this check for its entire
-// existence, and a fifth producer would have repeated the mistake.
-const outputDir = "_output"
+// The sweep walks runlog.ApeRoot — the one subtree ape owns — rather than
+// an enumerated list of run roots. An enumeration is what silently
+// excluded `ape pipeline` runs from this check for its entire existence,
+// and a fifth producer would have repeated the mistake.
+//
+// It walks ape's subtree and not the whole output folder because
+// `_output/` belongs to the framework: handoffs, briefs and
+// verify-orchestrator reports live there too, and sweeping them to find
+// ape's own runlogs would be reading someone else's tree.
 
 // runRef is one runlog found in the window, with the harness version that
 // produced it.
@@ -258,7 +261,7 @@ func Observe(projectRoot string, since time.Time) (*Report, error) {
 // `since`. A missing tree is not an error — it is a project nobody has run
 // ape in.
 func discover(projectRoot string, since time.Time) ([]runRef, error) {
-	root := filepath.Join(projectRoot, outputDir)
+	root := runlog.ApeRoot(projectRoot)
 	var runs []runRef
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

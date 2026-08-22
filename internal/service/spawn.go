@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/exoport/apex_process_ape/internal/runlog"
 )
 
 // ErrValidation: the request is missing a required field, names a path
@@ -325,7 +327,7 @@ func (s *Spawner) childEnv(jobID string) []string {
 // openJobLog creates <projectRoot>/_output/ape/service/ and opens the job's
 // append log for the child's combined stdout+stderr.
 func openJobLog(projectRoot, jobID string) (string, *os.File, error) {
-	dir := filepath.Join(projectRoot, "_output", "ape", "service")
+	dir := runlog.ServiceRoot(projectRoot)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", nil, fmt.Errorf("service: job log dir: %w", err)
 	}

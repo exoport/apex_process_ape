@@ -25,7 +25,7 @@ import (
 //
 // All writes go through atomic rename (write tmp, then os.Rename).
 type manifestWriter struct {
-	baseDir      string // e.g. <projectRoot>/_output/pipelines
+	baseDir      string // e.g. <projectRoot>/_output/ape/pipelines
 	pipelineName string
 	runID        string
 	runDir       string // baseDir/pipelineName/runID

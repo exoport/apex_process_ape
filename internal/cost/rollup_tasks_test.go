@@ -14,7 +14,7 @@ func TestRebuildRollupIncludesTasks(t *testing.T) {
 	root := t.TempDir()
 
 	writeManifest := func(base, name, runID, yaml string) {
-		dir := filepath.Join(root, "_output", base, name, runID)
+		dir := filepath.Join(root, "_output", "ape", base, name, runID)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}

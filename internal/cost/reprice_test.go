@@ -55,7 +55,7 @@ steps:
 // is pinned `-text` in .gitattributes.
 func writeManifest(t *testing.T, root, content string) string {
 	t.Helper()
-	dir := filepath.Join(root, "_output", "pipelines", "demo", "20260720-120000-abc123")
+	dir := filepath.Join(root, "_output", "ape", "pipelines", "demo", "20260720-120000-abc123")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func leadingSpace(s string) string {
 func TestRepriceDedupesLatestSymlink(t *testing.T) {
 	root := t.TempDir()
 	writeManifest(t, root, manifestFixture)
-	linkParent := filepath.Join(root, "_output", "pipelines", "demo")
+	linkParent := filepath.Join(root, "_output", "ape", "pipelines", "demo")
 	if err := os.Symlink("20260720-120000-abc123", filepath.Join(linkParent, "latest")); err != nil {
 		t.Skipf("symlinks unavailable on this platform: %v", err)
 	}

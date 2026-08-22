@@ -65,7 +65,7 @@ const (
 )
 
 // Manifest is the canonical on-disk record of one ape pipeline run.
-// It is written to <project_root>/_output/pipelines/<name>/<run_id>/manifest.yaml.
+// It is written to <project_root>/_output/ape/pipelines/<name>/<run_id>/manifest.yaml.
 // The eval reads this artifact (apex_process_framework_eval PLAN-9).
 //
 // YAML field names are snake_case (not camelCase) by design: the on-disk

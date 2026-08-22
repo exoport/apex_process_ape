@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"gopkg.in/yaml.v3"
 )
 
@@ -77,7 +78,7 @@ type RunOptions struct {
 	Observer Observer
 
 	// ManifestDir overrides the root location for per-run manifest
-	// artifacts. Defaults to <ProjectRoot>/_output/pipelines when empty.
+	// artifacts. Defaults to <ProjectRoot>/_output/ape/pipelines when empty.
 	// PLAN-3 / M4.
 	ManifestDir string
 
@@ -248,7 +249,7 @@ type Observer interface {
 // stages (per PLAN-7 § Scope — full-fail semantics).
 //
 // PLAN-3 / M4: each run produces an on-disk manifest under
-// opts.ManifestDir (default <ProjectRoot>/_output/pipelines). The
+// opts.ManifestDir (default <ProjectRoot>/_output/ape/pipelines). The
 // manifest writer is constructed after preflight and finalized on every
 // return path (success, step failure, context cancellation, build-argv
 // error). When opts.DisableManifest is set, the writer is skipped and
@@ -395,7 +396,7 @@ func startManifestWriter(spec *Spec, opts RunOptions) (*manifestWriter, error) {
 	}
 	baseDir := opts.ManifestDir
 	if baseDir == "" {
-		baseDir = filepath.Join(opts.ProjectRoot, "_output", "pipelines")
+		baseDir = runlog.PipelinesRoot(opts.ProjectRoot)
 	}
 	apeVersion := opts.ApeVersion
 	if apeVersion == "" {
@@ -695,7 +696,7 @@ func ResolveLatestRunDir(projectRoot, pipelineName, manifestDir string) string {
 // Returns "" when the symlink is absent (no run finalized yet).
 func latestRunDir(projectRoot, pipelineName, manifestDir string) string {
 	if manifestDir == "" {
-		manifestDir = filepath.Join(projectRoot, "_output", "pipelines")
+		manifestDir = runlog.PipelinesRoot(projectRoot)
 	}
 	link := filepath.Join(manifestDir, pipelineName, "latest")
 	target, err := os.Readlink(link)

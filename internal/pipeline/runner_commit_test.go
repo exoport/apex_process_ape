@@ -120,7 +120,7 @@ func seedFile(t *testing.T, root, rel string) {
 // loadLatestManifest reads <root>/_output/pipelines/<name>/latest/manifest.yaml.
 func loadLatestManifest(t *testing.T, root, name string) Manifest {
 	t.Helper()
-	latest := filepath.Join(root, "_output", "pipelines", name, "latest")
+	latest := filepath.Join(root, "_output", "ape", "pipelines", name, "latest")
 	target, err := os.Readlink(latest)
 	if err != nil {
 		t.Fatalf("readlink latest: %v", err)

@@ -108,7 +108,7 @@ func runChat(ctx context.Context, projectRoot, modelArg, effortArg string, ignor
 	defer runCancel()
 
 	chatID := time.Now().UTC().Format("20060102T150405Z")
-	runDir := filepath.Join(projectRoot, "_output", "ape", "chats", chatID)
+	runDir := runlog.ChatRunDir(projectRoot, chatID)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return fmt.Errorf("ape chat: create runlog dir: %w", err)
 	}

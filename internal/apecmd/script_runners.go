@@ -14,6 +14,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 )
 
@@ -92,7 +93,7 @@ func (r *scriptRunner) runTask(ctx context.Context, o apescript.TaskOpts) (apesc
 	}
 	spec := pipeline.NewSingleStepSpec(o.Skill, step, taskCommit)
 
-	manifestDir := filepath.Join(root, "_output", "tasks")
+	manifestDir := runlog.TasksRoot(root)
 	cfg := r.runCfg(manifestDir, eventing.KindTask)
 	cfg.prompt = o.Prompt
 	cfg.allowDirty = o.AllowDirty

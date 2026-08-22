@@ -15,6 +15,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/repl"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -71,7 +72,7 @@ Commit control is two-layered:
                   the end of the run. Off by default. A bare flag derives
                   the message "ape:task/<skill>".
 
-Run artifacts land under <project>/_output/tasks/<skill>/<run-id>/
+Run artifacts land under <project>/_output/ape/tasks/<skill>/<run-id>/
 (manifest.yaml, per-step ndjson, runlog streams).
 
 --handoff <file> is a shorthand for --prompt: it checks the file
@@ -165,7 +166,7 @@ preflight error · 3 REPL never became ready (last pane on stderr).`,
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json (json = result envelope on stdout, progress on stderr)")
 	cmd.Flags().BoolVar(&jsonAlias, "json", false, "Alias for --output-format json")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "Suppress the per-event progress stream")
-	cmd.Flags().StringVar(&manifestDirFlag, "manifest-dir", "", "Override the run-artifact base dir (default: <project>/_output/tasks)")
+	cmd.Flags().StringVar(&manifestDirFlag, "manifest-dir", "", "Override the run-artifact base dir (default: <project>/_output/ape/tasks)")
 	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json")
 	_ = cmd.Flags().MarkHidden("json")
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
@@ -323,7 +324,7 @@ func runTask(ctx context.Context, o taskOptions) error {
 
 	manifestDir := o.manifestDir
 	if manifestDir == "" {
-		manifestDir = filepath.Join(o.projectRoot, "_output", "tasks")
+		manifestDir = runlog.TasksRoot(o.projectRoot)
 	}
 
 	headBefore := gitHeadFull(ctx, o.projectRoot)

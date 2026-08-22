@@ -7,7 +7,7 @@
 //	transcripts/         symlinks into ~/.claude/projects/<hash>/<sid>.jsonl
 //
 // Pipeline runs use the existing PLAN-3 layout
-// (<project>/_output/pipelines/<name>/<run_id>/) — runlog does not
+// (<project>/_output/ape/pipelines/<name>/<run_id>/) — runlog does not
 // move the directory, it adds files alongside manifest.yaml.
 //
 // `ape chat` writes to a separate convention
@@ -295,16 +295,14 @@ func writeJSONLine(w io.Writer, v any) error {
 }
 
 // --- Run-id / chat-id helpers ---
-
-// PipelineRunDir returns <project>/_output/pipelines/<name>/<run_id>/.
-// PLAN-3's path, extended in place by PLAN-5.
-func PipelineRunDir(projectRoot, pipelineName, runID string) string {
-	return filepath.Join(projectRoot, "_output", "pipelines", pipelineName, runID)
-}
+//
+// The paths themselves live in layout.go, which is the single definition
+// of what ape writes where. ChatDir is kept as the name callers already
+// use.
 
 // ChatDir returns <project>/_output/ape/chats/<chat-id>/. PLAN-5 / C6.
 func ChatDir(projectRoot, chatID string) string {
-	return filepath.Join(projectRoot, "_output", "ape", "chats", chatID)
+	return ChatRunDir(projectRoot, chatID)
 }
 
 // NewChatID generates a chat-id of the shape YYYYMMDD-HHMMSS-<7-char hash>.

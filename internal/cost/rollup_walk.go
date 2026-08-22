@@ -6,11 +6,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"gopkg.in/yaml.v3"
 )
 
-// RebuildRollup walks <project>/_output/pipelines/<name>/<run-id>/manifest.yaml,
-// <project>/_output/tasks/<skill>/<run-id>/manifest.yaml (PLAN-11), and
+// RebuildRollup walks <project>/_output/ape/pipelines/<name>/<run-id>/manifest.yaml,
+// <project>/_output/ape/tasks/<skill>/<run-id>/manifest.yaml (PLAN-11), and
 // <project>/_output/ape/chats/<chat-id>/session.yaml, folds every row
 // into a fresh Rollup, and saves it. Used by `ape costs roll`. PLAN-5 / C7.
 //
@@ -27,10 +28,10 @@ func RebuildRollup(projectRoot string) (*Rollup, error) {
 	r.Chats.Runs = map[string]Totals{}
 	r.Prompts.Runs = map[string]Totals{}
 
-	if err := walkManifestTree(filepath.Join(projectRoot, "_output", "pipelines"), r.FoldPipelineRun); err != nil {
+	if err := walkManifestTree(runlog.PipelinesRoot(projectRoot), r.FoldPipelineRun); err != nil {
 		return nil, err
 	}
-	if err := walkManifestTree(filepath.Join(projectRoot, "_output", "tasks"), r.FoldTaskRun); err != nil {
+	if err := walkManifestTree(runlog.TasksRoot(projectRoot), r.FoldTaskRun); err != nil {
 		return nil, err
 	}
 	if err := walkChats(projectRoot, r); err != nil {
@@ -74,7 +75,7 @@ type modelUsageRecord struct {
 }
 
 // walkManifestTree walks a <root>/<name>/<run-id>/manifest.yaml tree
-// (the shared layout of _output/pipelines and _output/tasks) and folds
+// (the shared layout of _output/ape/pipelines and _output/ape/tasks) and folds
 // every readable manifest via fold(name, runID, day, totals).
 func walkManifestTree(root string, fold func(name, runID string, day time.Time, totals Totals, perModel map[string]Totals)) error {
 	entries, err := os.ReadDir(root)
@@ -157,7 +158,7 @@ type sessionForRollup struct {
 }
 
 func walkChats(projectRoot string, r *Rollup) error {
-	root := filepath.Join(projectRoot, "_output", "ape", "chats")
+	root := runlog.ChatsRoot(projectRoot)
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -211,7 +212,7 @@ func (p promptForRollup) totals() Totals {
 }
 
 func walkPrompts(projectRoot string, r *Rollup) error {
-	root := filepath.Join(projectRoot, "_output", "ape", "prompts")
+	root := runlog.PromptsRoot(projectRoot)
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -263,7 +264,7 @@ type PromptSession struct {
 // FindPromptSession reads _output/ape/prompts/<id>/prompt.yaml.
 // ok=false when the session is absent. PLAN-12.
 func FindPromptSession(projectRoot, promptID string) (PromptSession, bool) {
-	path := filepath.Join(projectRoot, "_output", "ape", "prompts", promptID, "prompt.yaml")
+	path := filepath.Join(runlog.PromptRunDir(projectRoot, promptID), "prompt.yaml")
 	p, ok := loadPromptForRollup(path)
 	if !ok {
 		return PromptSession{}, false
@@ -286,15 +287,18 @@ type RunManifest struct {
 	PerModel map[string]Totals `json:"per_model,omitempty"`
 }
 
-// FindRunManifest locates a run by run-id under _output/pipelines/ and
-// _output/tasks/ and returns its cost summary. ok=false when no manifest
+// FindRunManifest locates a run by run-id under _output/ape/pipelines/
+// and _output/ape/tasks/ and returns its cost summary. ok=false when no manifest
 // with that run-id exists. PLAN-10 D5 (restores `ape costs run`).
 func FindRunManifest(projectRoot, runID string) (RunManifest, bool) {
-	for _, tree := range []struct{ root, kind string }{
-		{filepath.Join(projectRoot, "_output", "pipelines"), "pipeline"},
-		{filepath.Join(projectRoot, "_output", "tasks"), "task"},
-	} {
-		entries, err := os.ReadDir(tree.root)
+	// Only the manifest-bearing kinds: chats and prompts keep their own
+	// records (session.yaml / prompt.yaml) and are served by
+	// FindChatSession / FindPromptRecord behind `ape costs chat|prompt`.
+	for _, tree := range runlog.RunRoots(projectRoot) {
+		if tree.Kind != runlog.KindPipeline && tree.Kind != runlog.KindTask {
+			continue
+		}
+		entries, err := os.ReadDir(tree.Path)
 		if err != nil {
 			continue
 		}
@@ -302,14 +306,14 @@ func FindRunManifest(projectRoot, runID string) (RunManifest, bool) {
 			if !ent.IsDir() {
 				continue
 			}
-			m, ok := loadManifestForRollup(filepath.Join(tree.root, ent.Name(), runID, "manifest.yaml"))
+			m, ok := loadManifestForRollup(filepath.Join(tree.Path, ent.Name(), runID, "manifest.yaml"))
 			if !ok {
 				continue
 			}
 			return RunManifest{
 				Name:  ent.Name(),
 				RunID: m.RunID,
-				Kind:  tree.kind,
+				Kind:  tree.Kind,
 				Totals: Totals{
 					CostUSD:             m.Totals.CostUSD,
 					InputTokens:         m.Totals.TokensInput,
@@ -336,7 +340,7 @@ type ChatSession struct {
 // FindChatSession reads _output/ape/chats/<chatID>/session.yaml.
 // ok=false when the session is absent. PLAN-10 D5.
 func FindChatSession(projectRoot, chatID string) (ChatSession, bool) {
-	path := filepath.Join(projectRoot, "_output", "ape", "chats", chatID, "session.yaml")
+	path := filepath.Join(runlog.ChatRunDir(projectRoot, chatID), "session.yaml")
 	s, ok := loadSessionForRollup(path)
 	if !ok {
 		return ChatSession{}, false
