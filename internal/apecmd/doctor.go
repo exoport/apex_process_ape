@@ -145,6 +145,15 @@ var allChecks = []doctorCheck{
 	{Name: "sandbox.image", Run: checkSandboxImage},
 	{Name: "sandbox.credential-acl", Run: checkSandboxCredentialACL},
 	{Name: "sandbox.ape-delivery", Run: checkSandboxApeDelivery},
+	// PLAN-25 D11 — project data. config.resolved and memory.size are
+	// Required; the rest report findings a person acts on, and a warn keeps
+	// doctor usable on a project that has some.
+	{Name: "config.resolved", Required: true, Run: checkConfigResolved},
+	{Name: "registry.drift", Run: checkRegistryDrift},
+	{Name: "story.frontmatter", Run: checkStoryFrontmatter},
+	{Name: "sprint.divergence", Run: checkSprintDivergence},
+	{Name: "memory.size", Required: true, Run: checkMemorySize},
+	{Name: "migration.pending", Run: checkMigrationPending},
 }
 
 func newDoctorCmd() *cobra.Command {
@@ -169,6 +178,17 @@ CLAUDE.md managed block). Project-scoped checks degrade to INFO when run
 outside a project root; the operating-rules checks only hard-fail when a
 framework install that manages them has lost the fragment, import, or
 apex-orchestrator skill.
+
+Six checks report on PROJECT DATA rather than on the host: whether the
+config resolves at all (nothing else can see the project's artifacts
+without it), registry drift, story frontmatter, tracker divergence,
+team-memory size, and any pending project-data migration. All six degrade
+to INFO outside a project root.
+
+memory.size is one of only two Required checks in that group, deliberately:
+a non-required FAIL is downgraded to WARN, so nothing else could surface a
+team-memory.md that has passed the Read cap and become unreadable by its
+own writer.
 
 Two checks report on the step-completion gates rather than on
 prerequisites, because both protect against a failure that is otherwise

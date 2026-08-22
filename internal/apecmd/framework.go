@@ -144,10 +144,13 @@ func newFrameworkUpdateCmd(repoFlag, cwdFlag *string) *cobra.Command {
 		noFetch      bool
 		force        bool
 		outputFormat string
+		dryRun       bool
+		noMigrate    bool
+		repair       bool
 	)
 	cmd := &cobra.Command{
 		Use:   "update",
-		Short: "Refresh framework skills and pipelines against the framework repo",
+		Short: "Refresh framework skills and pipelines, and run pending project-data migrations",
 		Long: `Refresh framework-managed assets in <project>:
 
   - .claude/skills/apex-*  re-copied from <repo>/.claude/skills
@@ -155,14 +158,39 @@ func newFrameworkUpdateCmd(repoFlag, cwdFlag *string) *cobra.Command {
   - _apex/framework.yaml   metadata refreshed (preserves project_name +
                            extensions recorded by 'ape framework setup')
 
+Then any pending PROJECT-DATA migration (PLAN-25 D10). Migrations run here
+rather than as a separate command a skill has to police, so no skill ever
+meets an un-migrated project and no skill needs a migration failure path.
+This is the right transaction boundary: explicitly invoked, at the moment
+framework expectations change, outside the build loop.
+
+THIS COMMAND COMMITS NOTHING — not the install, not the migration, not the
+repair. It never has, and that property is worth more than the
+convenience: the whole result sits in the working tree for one 'git diff',
+and you group it into however many commits you want. The run prints the
+paths and the 'git add' line.
+
 Does NOT touch _apex/config.yaml — that's the one-time bootstrap from
 'ape framework setup'. To re-bootstrap, pass --force to 'setup'.
+
+  --dry-run     show the framework drift AND the pending migrations,
+                writing nothing
+  --no-migrate  install framework files only; migrations stay pending, and
+                'ape doctor' reports them so the state is visible
+  --repair      also run the judgment phase over free-form deferred
+                records. OFF by default: it spawns a paid opus session, and
+                a file-copying verb should not start doing that silently.
 
 Refuses to run when:
   - _apex/framework.yaml is absent (run 'ape framework setup' first)
   - the framework repo is dirty, on a non-main branch, or its
     .claude/skills/apex-* subtree has uncommitted changes (pass
-    --force to bypass)`,
+    --force to bypass)
+
+A migration is skipped (never forced) when ITS OWN paths have uncommitted
+changes. The gate is path-scoped rather than whole-tree: those paths are
+disjoint from what the install writes, so the two are order-independent,
+and unrelated work-in-progress elsewhere does not block anything.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			repo, err := resolveFrameworkRepo(*repoFlag)
 			if err != nil {
@@ -173,6 +201,9 @@ Refuses to run when:
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
 				return err
+			}
+			if dryRun {
+				return emitFrameworkDryRun(cmd.Context(), cmd.OutOrStdout(), repo, projectRoot)
 			}
 			format := output.Format(outputFormat)
 			res, err := framework.Update(cmd.Context(), &framework.UpdateOptions{
@@ -190,13 +221,42 @@ Refuses to run when:
 				return handleUpdateError(err)
 			}
 			warnOperatingRulesSkew(res.Summary)
-			return printFrameworkUpdate(&frameworkUpdateOutput{Metadata: res.Metadata, Summary: res.Summary}, format)
+			if err := printFrameworkUpdate(
+				&frameworkUpdateOutput{Metadata: res.Metadata, Summary: res.Summary}, format); err != nil {
+				return err
+			}
+			if noMigrate {
+				fmt.Fprintln(cmd.OutOrStdout(),
+					"migration: skipped (--no-migrate) — `ape doctor` will report it as pending")
+				return nil
+			}
+			if err := runProjectMigrations(cmd.Context(), cmd.OutOrStdout(), projectRoot); err != nil {
+				return err
+			}
+			if repair {
+				return runFrameworkRepair(cmd, projectRoot)
+			}
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&noFetch, "no-fetch", false, "Skip 'git fetch && merge --ff-only' on the framework repo before reading its state")
 	cmd.Flags().BoolVar(&force, "force", false, "Bypass safety checks (dirty framework, non-main branch, modified project skills)")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show the framework diff and pending migrations, writing nothing")
+	cmd.Flags().BoolVar(&noMigrate, "no-migrate", false, "Install framework files only; leave migrations pending")
+	cmd.Flags().BoolVar(&repair, "repair", false, "Also run the opus judgment phase over free-form deferred records (spends money)")
 	return cmd
+}
+
+// runFrameworkRepair runs the judgment phase after a migration, reusing
+// the same command so its TTY refusal and record-count post-condition
+// apply here too.
+func runFrameworkRepair(cmd *cobra.Command, projectRoot string) error {
+	repairCmd := newDeferredRepairCmd()
+	repairCmd.SetOut(cmd.OutOrStdout())
+	repairCmd.SetErr(cmd.ErrOrStderr())
+	repairCmd.SetArgs([]string{"--cwd", projectRoot})
+	return repairCmd.Execute()
 }
 
 func newFrameworkStatusCmd(repoFlag, cwdFlag *string) *cobra.Command {
