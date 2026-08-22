@@ -32,10 +32,10 @@ func newPatternListCmd() *cobra.Command {
 		Use:     cmdUseList,
 		Short:   "List all governance patterns",
 		Example: "  ape pattern list --output-format json",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			patternsDir := findPatternsDir()
 			if patternsDir == "" {
-				fmt.Fprintln(os.Stderr, "no patterns directory found (looking for development/patterns/)")
+				fmt.Fprintln(os.Stderr, "no patterns directory found (no _apex/config.yaml governance folder, and no development/patterns/)")
 				return nil
 			}
 
@@ -56,13 +56,14 @@ func newPatternListCmd() *cobra.Command {
 				return fmt.Errorf("cannot parse patterns index: %w", err)
 			}
 
+			out := cmd.OutOrStdout()
 			format := output.Format(outputFormat)
 			switch format {
 			case output.FormatJSON, output.FormatYAML:
-				return output.Print(os.Stdout, format, index.Patterns)
+				return output.Print(out, format, index.Patterns)
 			default:
 				for _, p := range index.Patterns {
-					fmt.Printf("%-20s %s\n", p.ID, p.Title)
+					fmt.Fprintf(out, "%-20s %s\n", p.ID, p.Title)
 				}
 				return nil
 			}
@@ -100,16 +101,32 @@ func newPatternSyncCmd() *cobra.Command {
 	}
 }
 
-func findPatternsDir() string {
-	candidates := []string{
+// findPatternsDir resolves through the project config (PLAN-25 D1); see
+// findADRDir for why the hardcoded probe was wrong. The legacy candidates
+// remain as a fall-back outside a configured project.
+func findPatternsDir() string { return findPatternsDirIn("") }
+
+func findPatternsDirIn(cwdFlag string) string {
+	if res := tryResolveProjectConfig(cwdFlag); res != nil && res.Paths.Patterns != "" {
+		if _, err := os.Stat(res.Paths.Patterns); err == nil {
+			return res.Paths.Patterns
+		}
+	}
+	return firstExistingDir(
 		"development/patterns",
 		filepath.Join(os.Getenv("APE_PROCESS_REPO"), "development", "patterns"),
-	}
+	)
+}
+
+// firstExistingDir returns the first candidate that exists as a
+// directory, or "". Empty candidates are skipped, so an unset
+// $APE_PROCESS_REPO cannot resolve to the filesystem root.
+func firstExistingDir(candidates ...string) string {
 	for _, c := range candidates {
-		if c == "" {
+		if c == "" || c == string(filepath.Separator) {
 			continue
 		}
-		if _, err := os.Stat(c); err == nil {
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
 			return c
 		}
 	}

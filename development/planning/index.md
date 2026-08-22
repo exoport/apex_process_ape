@@ -2,6 +2,7 @@
 
 | ID      | Title                                                   | Status                | Created    |
 | ------- | ------------------------------------------------------- | --------------------- | ---------- |
+| PLAN-25 | Project-data commands — config resolution, registries, stories, memory, deferred work, Python retirement | draft | 2026-08-21 |
 | PLAN-24 | Local sandbox polish — port-forward, reporting, capacity, agent, reaper | implemented | 2026-08-05 |
 | PLAN-23 | Runtime `ape` delivery into sandbox workspaces           | done                  | 2026-07-26 |
 | PLAN-22 | Sandbox toolchain / devcontainer model + lifecycle      | partially-implemented | 2026-07-23 |
@@ -61,6 +62,16 @@
 > Decision record: `_output/2026-08-04-unified-roadmap-decided.html`.
 >
 > The rationale below is the original 2026-07-02 sequencing record.
+
+> **Added 2026-08-21 (PLAN-25).** The first non-sandbox wave since PLAN-19: the
+> deterministic project-data commands the APEX framework skills call instead of doing
+> mechanical work by hand. Origin is upstream — `apex_process_framework_eval/_output/
+> apex-implementation-plan.md` — whose Part B/D is `ape`'s share. It is **not** a sandbox
+> plan and has no dependency on any of PLAN-16/18/20–24. Two ordering constraints matter:
+> `ape config resolve` (D1) gates every other deliverable, because no `.go` file in this
+> tree currently reads `_apex/config.yaml`'s folder variables; and `ape` must be released
+> **before** the framework version bump that calls these commands, since C2 gives the
+> skills no fallback branch.
 
 ## Proposed-wave dependency order (2026-07-02)
 

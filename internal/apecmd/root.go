@@ -57,6 +57,7 @@ func init() {
 	rootCmd.AddCommand(
 		newVersionCmd(),
 		newBootstrapCmd(),
+		newConfigCmd(),
 		newTraitCmd(),
 		newPatternCmd(),
 		newADRCmd(),

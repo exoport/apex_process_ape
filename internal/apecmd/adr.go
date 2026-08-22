@@ -34,10 +34,10 @@ func newADRListCmd() *cobra.Command {
 		Use:     cmdUseList,
 		Short:   "List all ADRs",
 		Example: "  ape adr list --output-format json",
-		RunE: func(_ *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			adrDir := findADRDir()
 			if adrDir == "" {
-				fmt.Fprintln(os.Stderr, "no ADR directory found (looking for development/adrs/)")
+				fmt.Fprintln(os.Stderr, "no ADR directory found (no _apex/config.yaml governance folder, and no development/adrs/)")
 				return nil
 			}
 
@@ -58,13 +58,14 @@ func newADRListCmd() *cobra.Command {
 				return fmt.Errorf("cannot parse ADR index: %w", err)
 			}
 
+			out := cmd.OutOrStdout()
 			format := output.Format(outputFormat)
 			switch format {
 			case output.FormatJSON, output.FormatYAML:
-				return output.Print(os.Stdout, format, index.ADRs)
+				return output.Print(out, format, index.ADRs)
 			default:
 				for _, a := range index.ADRs {
-					fmt.Printf("%-15s %-10s %s\n", a.ID, a.Status, a.Title)
+					fmt.Fprintf(out, "%-15s %-10s %s\n", a.ID, a.Status, a.Title)
 				}
 				return nil
 			}
@@ -96,14 +97,11 @@ func newADRNewCmd() *cobra.Command {
 		Use:   "new <title>",
 		Short: "Scaffold a new ADR file",
 		Args:  cobra.MinimumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			title := strings.Join(args, " ")
-			adrDir := findADRDir()
-			if adrDir == "" {
-				adrDir = "development/adrs"
-				if err := os.MkdirAll(adrDir, 0o755); err != nil {
-					return fmt.Errorf("cannot create ADR directory: %w", err)
-				}
+			adrDir := adrDirForWrite("")
+			if err := os.MkdirAll(adrDir, 0o755); err != nil {
+				return fmt.Errorf("cannot create ADR directory: %w", err)
 			}
 
 			slug := strings.ToLower(strings.ReplaceAll(title, " ", "-"))
@@ -141,24 +139,44 @@ date: %s
 				return fmt.Errorf("cannot write ADR file: %w", err)
 			}
 
-			fmt.Printf("Created: %s\n", filePath)
+			fmt.Fprintf(cmd.OutOrStdout(), "Created: %s\n", filePath)
 			return nil
 		},
 	}
 }
 
-func findADRDir() string {
-	candidates := []string{
+// findADRDir resolves the project's ADR directory through the config
+// (PLAN-25 D1) rather than probing hardcoded paths. The old two-candidate
+// probe looked for "development/adrs" and $APE_PROCESS_REPO/development/adrs,
+// neither of which exists on a project that sets
+// `governance_folder: development/governance` — so `ape adr list` reported
+// "no ADR directory found" against 64 ADRs on disk.
+//
+// The legacy candidates stay as a fall-back for a tree with no _apex/
+// config at all, so nothing that worked before stops working.
+func findADRDir() string { return findADRDirIn("") }
+
+func findADRDirIn(cwdFlag string) string {
+	if res := tryResolveProjectConfig(cwdFlag); res != nil && res.Paths.ADRs != "" {
+		if _, err := os.Stat(res.Paths.ADRs); err == nil {
+			return res.Paths.ADRs
+		}
+	}
+	return firstExistingDir(
 		"development/adrs",
 		filepath.Join(os.Getenv("APE_PROCESS_REPO"), "development", "adrs"),
+	)
+}
+
+// adrDirForWrite is findADRDirIn plus the create-if-absent path `adr new`
+// needs: the resolved governance location, so `new` and `list` cannot
+// disagree about where an ADR lives.
+func adrDirForWrite(cwdFlag string) string {
+	if dir := findADRDirIn(cwdFlag); dir != "" {
+		return dir
 	}
-	for _, c := range candidates {
-		if c == "" {
-			continue
-		}
-		if _, err := os.Stat(c); err == nil {
-			return c
-		}
+	if res := tryResolveProjectConfig(cwdFlag); res != nil && res.Paths.ADRs != "" {
+		return res.Paths.ADRs
 	}
-	return ""
+	return "development/adrs"
 }

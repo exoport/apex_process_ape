@@ -228,10 +228,24 @@ func printBootstrapResult(result *trait.ResolveResult, format output.Format, see
 	}
 }
 
+// bootstrapGovernanceDirs decides where composed ADRs and patterns land.
+// Inside a configured project it is the resolved governance folder
+// (PLAN-25 D1), so `ape bootstrap` writes where `ape adr list` reads —
+// the two disagreed before, and worse: a record's catalog-relative
+// `../adrs/<file>` path joined onto outDir put the file OUTSIDE outDir
+// entirely (`.` → `../adrs/`), while the directories were created at
+// `<out>/governance/adrs`. Records are now placed by base name under the
+// resolved directory, so neither can happen.
+func bootstrapGovernanceDirs(outDir string) (govDir, adrDir, patDir string) {
+	if res := tryResolveProjectConfig(""); res != nil && res.Paths.ADRs != "" && res.Paths.Patterns != "" {
+		return res.Paths.Governance, res.Paths.ADRs, res.Paths.Patterns
+	}
+	govDir = filepath.Join(outDir, "governance")
+	return govDir, filepath.Join(govDir, "adrs"), filepath.Join(govDir, "patterns")
+}
+
 func writeArtifacts(result *trait.ResolveResult, outDir string) (string, error) {
-	govDir := filepath.Join(outDir, "governance")
-	adrDir := filepath.Join(govDir, "adrs")
-	patDir := filepath.Join(govDir, "patterns")
+	govDir, adrDir, patDir := bootstrapGovernanceDirs(outDir)
 
 	for _, d := range []string{adrDir, patDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -241,36 +255,32 @@ func writeArtifacts(result *trait.ResolveResult, outDir string) (string, error) 
 
 	catalogBase := trait.CatalogBaseDir()
 
-	for _, a := range result.ADRs {
-		src := filepath.Join(catalogBase, a.File)
-		dst := filepath.Join(outDir, a.File)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return "", err
-		}
+	copyRecord := func(destDir, id, file string) error {
+		src := filepath.Join(catalogBase, file)
+		dst := filepath.Join(destDir, filepath.Base(file))
 		data, err := os.ReadFile(src)
 		if err != nil {
-			data = fmt.Appendf(nil, "# %s\n\nSource: %s\n", a.ID, a.File)
+			data = fmt.Appendf(nil, "# %s\n\nSource: %s\n", id, file)
 		}
-		if err := os.WriteFile(dst, data, 0o644); err != nil { //nolint:gosec // governance artifacts are documentation, world-readable is intentional
+		//nolint:gosec // governance artifacts are documentation, world-readable is intentional
+		return os.WriteFile(dst, data, 0o644)
+	}
+
+	for _, a := range result.ADRs {
+		if err := copyRecord(adrDir, a.ID, a.File); err != nil {
 			return "", err
 		}
 	}
 
 	for _, p := range result.Patterns {
-		src := filepath.Join(catalogBase, p.File)
-		dst := filepath.Join(outDir, p.File)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return "", err
-		}
-		data, err := os.ReadFile(src)
-		if err != nil {
-			data = fmt.Appendf(nil, "# %s\n\nSource: %s\n", p.ID, p.File)
-		}
-		if err := os.WriteFile(dst, data, 0o644); err != nil { //nolint:gosec // governance artifacts are documentation, world-readable is intentional
+		if err := copyRecord(patDir, p.ID, p.File); err != nil {
 			return "", err
 		}
 	}
 
+	if err := os.MkdirAll(govDir, 0o755); err != nil {
+		return "", err
+	}
 	seedPath := filepath.Join(govDir, ".governance-seed.yaml")
 	seedContent := buildSeedContent(result)
 	if err := os.WriteFile(seedPath, []byte(seedContent), 0o644); err != nil { //nolint:gosec // seed file is configuration, world-readable is intentional

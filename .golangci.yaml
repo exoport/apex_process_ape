@@ -179,6 +179,14 @@ linters:
       - linters:
           - tagliatelle
         path: internal/sessions/registry\.go
+      # PLAN-25 project-data commands: the framework's own variable names
+      # (`governance_folder`, `implementation_folder`, `ext_adrs`, …) and the
+      # `findings[]` / `files_scanned` payload keys ARE the contract the 91
+      # skills read. snake_case is fixed by the framework, not ours to
+      # camelCase — same rule as the manifest and the NATS envelopes above.
+      - linters:
+          - tagliatelle
+        path: internal/apexcfg/apexcfg\.go
       # PLAN-13 NATS wire contract: the ape.evt/log/metrics payloads
       # (docs/reference/events.md), the ape.blob.uri-request offload
       # request/reply, and the NATS user-JWT claim names ("sub") are all
