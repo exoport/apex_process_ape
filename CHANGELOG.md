@@ -289,6 +289,36 @@
     the release skill both say plainly that this is "not verified" rather than
     a pass.
 
+- **BREAKING (on-disk): everything ape writes now lives under `_output/ape/`** —
+  `_output/` is the *framework's* output folder. Its value comes from the
+  `output_folder` config variable and the skills write handoffs, briefs and
+  verify-orchestrator reports there. ape had been scattering run artifacts
+  across it as siblings of that content — `_output/pipelines/`,
+  `_output/tasks/`, and inconsistently `_output/ape/prompts/` and
+  `_output/ape/chats/` — with two different nesting depths. ape now owns
+  exactly one subtree, `_output/ape/`, and writes nothing outside it.
+  - **`ape framework setup|update` relocates an existing project.** Whole run
+    directories at a time, so a run is never half at each path; a destination
+    that already exists is reported as a conflict and left alone rather than
+    overwritten or merged; `latest` symlinks are recreated pointing at the
+    same run; emptied legacy trees are pruned; and it is idempotent. Cross-
+    filesystem moves fall back to copy-then-remove. `--no-migrate` defers it,
+    `--dry-run` reports it without writing, and `ape doctor` flags a project
+    that still needs it (`runs.legacy_layout`).
+  - **The layout is now defined once**, in `internal/runlog/layout.go`, and
+    `runlog.RunRoots` is the only way to ask where the runs are. Eight
+    consumers used to re-derive it, and their coverage varied: `hookdrift`
+    read one root of four, `ape metrics --run-id` matched two layouts only by
+    coincidence of nesting depth, and only `cost.ScanProject` had the full
+    list. A fifth run kind is now one line in one file.
+  - Two things that look like the same bug are **not**, and stay as they were:
+    `ape costs reprice` skips chats because `session.yaml` carries no
+    per-model token breakdown to recompute from, and `cost.FindRunManifest`
+    covers only the manifest-bearing kinds because `ape costs chat|prompt`
+    serve the other two. Both are now expressed as explicit decisions against
+    the shared root list rather than as hand-written path globs that happened
+    to omit them.
+
 - **fix(hookdrift): the detector was reading one of four runlog roots, and a
   Claude Code upgrade masked drift for a month** — two defects that both made
   it quieter than it looked, found by pointing the new `make check-hooks` at a

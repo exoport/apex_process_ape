@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/deferred"
 	"github.com/exoport/apex_process_ape/internal/framework"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 )
 
 // Project-data migrations run as part of `ape framework update` rather
@@ -132,6 +134,12 @@ func emitFrameworkDryRun(ctx context.Context, w io.Writer, repo, projectRoot str
 			state = "PENDING"
 		}
 		fmt.Fprintf(w, "migration %s: %s — %s\n", st.Name, state, st.Detail)
+	}
+	if runlog.Pending(projectRoot) {
+		fmt.Fprintf(w, "run layout: PENDING — run artifacts still at _output/pipelines / _output/tasks; "+
+			"an update relocates them into %s/\n", filepath.Join(runlog.OutputDirName, runlog.ApeDirName))
+	} else {
+		fmt.Fprintln(w, "run layout: nothing pending — run artifacts are under _output/ape")
 	}
 	fmt.Fprintln(w, "\n--dry-run: nothing written, nothing committed.")
 	return nil

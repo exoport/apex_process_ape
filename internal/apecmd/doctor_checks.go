@@ -15,6 +15,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/hookdrift"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/exoport/apex_process_ape/internal/updatecache"
 )
@@ -603,6 +604,36 @@ func checkHookContractDrift(_ context.Context, env doctorEnv) CheckResult {
 			"agent is still outstanding can again be reported as a success having done nothing. " +
 			"Upgrade ape; if this persists on the latest ape, report it — the hook contract has moved.",
 		FixCommand: "ape update",
+	}
+}
+
+// checkRunLayoutLegacy reports run artifacts still sitting at the
+// pre-`_output/ape` paths.
+//
+// `_output/` is the framework's output_folder — it holds handoffs, briefs
+// and verify reports — and ape used to scatter run artifacts through it as
+// siblings of that content. ape now owns exactly one subtree,
+// `_output/ape/`. Until a project is moved across, everything reading the
+// new paths (cost rollups, `ape costs run`, the hook-contract check) sees
+// a project with no history.
+//
+// WARN rather than FAIL: nothing is broken or lost, the records are just
+// somewhere ape no longer looks, and one command relocates them.
+func checkRunLayoutLegacy(_ context.Context, env doctorEnv) CheckResult {
+	if !isProjectRoot(env.ProjectRoot) {
+		return CheckResult{Status: StatusInfo, Message: "not in a project"}
+	}
+	if !runlog.Pending(env.ProjectRoot) {
+		return CheckResult{Status: StatusOK, Message: "run artifacts are under _output/ape"}
+	}
+	return CheckResult{
+		Status:  StatusWarn,
+		Message: "run artifacts still at the legacy _output/pipelines and/or _output/tasks paths",
+		Remediation: "ape now keeps everything it writes under _output/ape/, so _output/ stays the " +
+			"framework's. Until these move, cost rollups and the hook-contract check read a project " +
+			"with no history. `ape framework update` relocates them: nothing is overwritten, and a run " +
+			"whose destination is already taken is reported rather than merged.",
+		FixCommand: "ape framework update",
 	}
 }
 

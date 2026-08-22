@@ -16,7 +16,7 @@ two orthogonal axes: **who drives** (a human vs ape, unattended) and
 | **Commits**           | none                              | two-layer (`--no-commit` / `--task-commit`) | none                          |
 | **Telemetry scan**    | no — runlog hooks/calls only      | yes                                 | yes                                   |
 | **`--output-format`** | no (interactive)                  | human/json                          | human/json/yaml                       |
-| **Artifacts**         | `_output/ape/chats/<id>/` (runlog) | `_output/tasks/<skill>/<run-id>/` (**manifest**) | `_output/ape/prompts/<id>/` (session record) |
+| **Artifacts**         | `_output/ape/chats/<id>/` (runlog) | `_output/ape/tasks/<skill>/<run-id>/` (**manifest**) | `_output/ape/prompts/<id>/` (session record) |
 | **Exit codes**        | 0/1/2                             | 0/1/2/3                             | 0/1/2/3/**4**                         |
 
 Both `ape task` and `ape prompt` end on the bridge Stop hook. Behind that,

@@ -1,15 +1,48 @@
-# How to read `_output/`
+# How to read `_output/ape/`
 
-Every `ape pipeline` or `ape chat` invocation drops artefacts under
-the project root. This document describes the layout and what each
-file is for.
+Every `ape pipeline`, `ape task`, `ape prompt` or `ape chat` invocation drops
+artefacts under the project root. This document describes the layout and what
+each file is for.
 
 PLAN-5 / C6.
+
+## What ape owns
+
+`_output/` is **the framework's** output folder — its value comes from
+`output_folder` in `_apex/config.yaml`, and the skills write handoffs, briefs
+and verify reports there.
+
+ape owns exactly one subtree of it, **`_output/ape/`**, and writes nothing
+outside it:
+
+```
+<project>/_output/                     ← framework-owned
+├── handoffs/                          ← framework
+├── verify-orchestrator/               ← framework
+└── ape/                               ← ape owns this, and only this
+    ├── pipelines/<pipeline>/<run-id>/
+    ├── tasks/<skill>/<run-id>/
+    ├── prompts/<prompt-id>/
+    ├── chats/<chat-id>/
+    ├── service/
+    └── cost-rollup.json
+```
+
+> **Moved in v0.0.53.** Pipeline and task runs used to live at
+> `_output/pipelines/` and `_output/tasks/`, as siblings of the framework's
+> own content. `ape framework setup|update` relocates them into
+> `_output/ape/` automatically — whole run directories at a time, never
+> overwriting, and reporting any run whose destination is already taken
+> rather than merging it. `ape doctor` reports a project that still needs it
+> (`runs.legacy_layout`), and `ape framework update --dry-run` shows what
+> would move. Until a project is relocated, cost rollups and the
+> hook-contract check read a project with no history — nothing is lost, it
+> is just somewhere ape no longer looks.
 
 ## Pipeline runs
 
 ```
-<project>/_output/pipelines/<pipeline-name>/<run-id>/
+<project>/_output/ape/pipelines/<pipeline-name>/<run-id>/
 ├── manifest.yaml        ← PLAN-3 per-step metrics, cost, commit shas
 ├── report.md            ← human-readable run report
 ├── hook-events.jsonl    ← one JSON per Claude Code hook (PLAN-5 / C4)

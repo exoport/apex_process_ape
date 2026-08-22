@@ -5,7 +5,7 @@ Every `ape pipeline <name>` invocation writes a structured on-disk record of the
 ## Layout
 
 ```
-<project_root>/_output/pipelines/<pipeline_name>/<run_id>/
+<project_root>/_output/ape/pipelines/<pipeline_name>/<run_id>/
   manifest.yaml             # canonical schema (this document)
   pipeline-report.md        # human-readable summary rendered from the manifest
   stages/
@@ -198,7 +198,7 @@ That preserves the pre-PLAN-4 shape: zero commits during the run, dirty working 
 ```bash
 git log --oneline --grep '^ape:design/'      # all commits from the latest `design` run (or any pipeline named `design`)
 git show <sha>                                # full diff of one step
-cat _output/pipelines/design/latest/pipeline-report.md
+cat _output/ape/pipelines/design/latest/pipeline-report.md
 ```
 
 Tip: ape's per-step commit messages are designed for `git log --grep '^ape:<pipeline>/'` to retrieve them. If a project also commits with `ape:` prefixes outside of pipeline runs, narrow the grep to `^ape:<pipeline>/<stage>/`.
@@ -226,9 +226,9 @@ There is no end-user flag to disable the manifest. The library-level `RunOptions
 ape never deletes old runs. Reclaim disk with:
 
 ```bash
-rm -rf _output/pipelines/<pipeline_name>/<old_run_id>
+rm -rf _output/ape/pipelines/<pipeline_name>/<old_run_id>
 # or wipe a whole pipeline's history:
-rm -rf _output/pipelines/<pipeline_name>
+rm -rf _output/ape/pipelines/<pipeline_name>
 ```
 
 Most projects gitignore `_output/`; the runs accumulate there until explicitly removed.

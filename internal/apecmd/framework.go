@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -216,6 +218,7 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 				// seed config.yaml. installCore skips bootstrapConfig
 				// when doBootstrap=false.
 				Bootstrapper: framework.NoopBootstrapper{},
+				NoMigrate:    noMigrate,
 			})
 			if err != nil {
 				return handleUpdateError(err)
@@ -478,6 +481,22 @@ func printFrameworkUpdate(out *frameworkUpdateOutput, format output.Format) erro
 			// already there and a line about it would be noise.
 			fmt.Printf("Ignore:    %s += %s (lock sidecar `ape sprint reconcile` leaves behind)\n",
 				framework.ProjectGitignore, framework.GitignoreLockPattern)
+		}
+		// Reported only when it acted. ape moved a user's own run history,
+		// so it says exactly how much and where to; on every later run there
+		// is nothing left to move and a line about it would be noise.
+		if n := out.Summary.RunsRelocated; n > 0 {
+			fmt.Printf("Runs:      relocated %d run(s) into %s/ (was _output/pipelines, _output/tasks)\n",
+				n, filepath.Join(runlog.OutputDirName, runlog.ApeDirName))
+		}
+		if c := out.Summary.RunsRelocationConflicts; len(c) > 0 {
+			// Never folded into the count above: these did NOT move, and a
+			// summary that implied they had would be the worst outcome here.
+			fmt.Printf("Runs:      %d run(s) left in place — a run of the same id already exists at the new path:\n", len(c))
+			for _, r := range c {
+				fmt.Printf("             %s\n", r)
+			}
+			fmt.Println("           Nothing was overwritten. Compare the two and remove whichever is stale.")
 		}
 		fmt.Printf("Metadata:  %s\n", framework.ProjectMetadata)
 		return nil

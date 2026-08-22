@@ -1241,7 +1241,7 @@ evidence is not coverage.
   ape doctor --only hooks.contract_drift --strict --cwd <project>
 
 That is what "make check-hooks" runs. Note the --cwd: hook drift is
-observed from the runlogs ape itself wrote (<project>/_output/tasks), so it
+observed from the runlogs ape itself wrote (<project>/_output/ape), so it
 can only be judged against a project ape has actually run pipelines in, not
 against the ape repo. An unknown name in --only is an error rather than a
 silent no-op — a typo that ran zero checks would exit 0 and read as a pass.
@@ -2074,7 +2074,7 @@ Flags:
 | `--from` | string | `—` | Skip stages before the named one and start execution there |
 | `--idle-timeout` | duration | `0s` | Per-step idle backstop: cancel a step only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 90m). Default 60m. |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json. Honoured in --web mode. |
-| `--manifest-dir` | string | `—` | Override the directory for run manifest artifacts (default: <project>/_output/pipelines) |
+| `--manifest-dir` | string | `—` | Override the directory for run manifest artifacts (default: <project>/_output/ape/pipelines) |
 | `--max-duration` | duration | `3h0m0s` | Hard wall-clock ceiling per step regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a sequential batch step is bounded per item, not per batch. 0 disables the cap. |
 | `--nats-creds` | string | `—` | NATS .creds file; its user identity is baked into every subject (env APE_NATS_CREDS). |
 | `--nats-url` | string | `—` | NATS server URL for progress events + transcript upload (env APE_NATS_URL). Empty disables both. |
@@ -3594,7 +3594,7 @@ Commit control is two-layered:
                   the end of the run. Off by default. A bare flag derives
                   the message "ape:task/<skill>".
 
-Run artifacts land under <project>/_output/tasks/<skill>/<run-id>/
+Run artifacts land under <project>/_output/ape/tasks/<skill>/<run-id>/
 (manifest.yaml, per-step ndjson, runlog streams).
 
 --handoff <file> is a shorthand for --prompt: it checks the file
@@ -3629,7 +3629,7 @@ Flags:
 | `--handoff` | string | `—` | Path to a handoff/context file; derives a "Read <path> and follow the Resume Protocol" --prompt value (mutually exclusive with --prompt) |
 | `--idle-timeout` | duration | `0s` | Idle backstop: cancel only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default matches pipeline (60m) |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
-| `--manifest-dir` | string | `—` | Override the run-artifact base dir (default: <project>/_output/tasks) |
+| `--manifest-dir` | string | `—` | Override the run-artifact base dir (default: <project>/_output/ape/tasks) |
 | `--max-duration` | duration | `3h0m0s` | Hard wall-clock ceiling regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item, not per batch. 0 disables the cap. |
 | `--model` | string | `—` | Claude model. A bare family (sonnet, opus, haiku) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly |
 | `--nats-creds` | string | `—` | NATS .creds file; its user identity is baked into every subject (env APE_NATS_CREDS). |

@@ -105,11 +105,11 @@ last screen on stderr rather than hanging.
 
 ## 5. Read the run artifacts
 
-Every run writes a manifest tree under `_output/pipelines/<name>/`. The
+Every run writes a manifest tree under `_output/ape/pipelines/<name>/`. The
 `latest` symlink points at the most recent run:
 
 ```console
-$ ls _output/pipelines/design/latest/
+$ ls _output/ape/pipelines/design/latest/
 manifest.yaml   pipeline-report.md   <per-step ndjson logs>   transcripts/
 ```
 
@@ -141,7 +141,7 @@ claude-opus-4-8   $...    ...      ...      ...      ...
 ```
 
 For a single run, pass its id (the `<run-id>` directory name under
-`_output/pipelines/design/`):
+`_output/ape/pipelines/design/`):
 
 ```console
 $ ape costs run 20260704-101530-a1b2c3

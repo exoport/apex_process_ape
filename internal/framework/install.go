@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"gopkg.in/yaml.v3"
 )
 
@@ -71,6 +72,10 @@ type UpdateOptions struct {
 	// Bootstrapper resolves config-bootstrap values when
 	// _apex/config.yaml is absent. Required.
 	Bootstrapper Bootstrapper
+	// NoMigrate leaves pending migrations alone — including the one-time
+	// relocation of run artifacts into _output/ape. Set by `ape framework
+	// update --no-migrate`; setup never sets it.
+	NoMigrate bool
 	// Now is injectable for deterministic tests; defaults to
 	// time.Now().UTC().
 	Now func() time.Time
@@ -105,6 +110,12 @@ type UpdateSummary struct {
 	// framework predates it — version-skew suppression, not a failure;
 	// ape then runs no contract check.
 	TerminalContractsInstalled bool `json:"terminalContractsInstalled" yaml:"terminalContractsInstalled"`
+
+	// RunsRelocated / RunsRelocationConflicts report the one-time move of
+	// run artifacts from the pre-`_output/ape` layout. Both are zero on a
+	// project that has never run ape, and on every install after the first.
+	RunsRelocated           int      `json:"runsRelocated"                     yaml:"runsRelocated"`
+	RunsRelocationConflicts []string `json:"runsRelocationConflicts,omitempty" yaml:"runsRelocationConflicts,omitempty"`
 
 	// GitignoreLockAdded reports that the project .gitignore gained the
 	// entry for `ape sprint reconcile`'s advisory-lock sidecar. False means
@@ -277,6 +288,17 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if err != nil {
 		return nil, err
 	}
+	// Relocate run artifacts left at the pre-`_output/ape` paths. Both setup
+	// and update run it, and it is idempotent — a project already on the new
+	// layout has no legacy tree to read. Runs whose destination is already
+	// occupied are reported, never overwritten.
+	var runsMoved runlog.MigrationResult
+	if !opts.NoMigrate {
+		runsMoved, err = runlog.Migrate(opts.ProjectRoot)
+		if err != nil {
+			return nil, fmt.Errorf("relocate run artifacts into %s: %w", runlog.ApeRoot(opts.ProjectRoot), err)
+		}
+	}
 	// For Update (doBootstrap=false), preserve the existing ConfigSource
 	// values rather than overwriting with zeros. This keeps the
 	// project_name + extensions recorded by the original Setup.
@@ -328,7 +350,10 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			ManagedBlockUpdated:     opRules.BlockUpdated,
 
 			TerminalContractsInstalled: contractsInstalled,
-			GitignoreLockAdded:         lockIgnored,
+
+			RunsRelocated:           len(runsMoved.Moved),
+			RunsRelocationConflicts: runsMoved.Conflicts,
+			GitignoreLockAdded:      lockIgnored,
 		},
 	}, nil
 }

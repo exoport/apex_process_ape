@@ -62,7 +62,7 @@ make check-harness HOOK_PROJECT=~/work/some-apex-project
 | Gate | Reads | Catches |
 | --- | --- | --- |
 | `check-prices` | `~/.claude/projects` transcripts | a model id or family alias the price table does not cover — tokens keep counting, cost silently goes to zero |
-| `check-hooks` | `$HOOK_PROJECT/_output/tasks` runlogs | a hook field ape's step-completion gates read being renamed or dropped — the gate stops firing and ape resumes reporting success on runs that did nothing |
+| `check-hooks` | `$HOOK_PROJECT/_output/ape/tasks` runlogs | a hook field ape's step-completion gates read being renamed or dropped — the gate stops firing and ape resumes reporting success on runs that did nothing |
 | `check-claude` | a live PTY session | everything below |
 
 > **`check-hooks` needs a real project.** Hook drift is observed from the `hook-events.jsonl` files ape itself wrote, so it can only be judged against a project you have actually run `ape` pipelines in. `HOOK_PROJECT` defaults to `.` — the ape repo, which has no runlogs and will always report a skip. Point it somewhere real or the gate is decorative.

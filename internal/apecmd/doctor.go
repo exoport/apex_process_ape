@@ -155,6 +155,7 @@ var allChecks = []doctorCheck{
 	{Name: "sprint.lock_ignored", Run: checkSprintLockIgnored},
 	{Name: "memory.size", Required: true, Run: checkMemorySize},
 	{Name: "migration.pending", Run: checkMigrationPending},
+	{Name: "runs.legacy_layout", Run: checkRunLayoutLegacy},
 }
 
 func newDoctorCmd() *cobra.Command {
@@ -213,7 +214,7 @@ evidence is not coverage.
   ape doctor --only hooks.contract_drift --strict --cwd <project>
 
 That is what "make check-hooks" runs. Note the --cwd: hook drift is
-observed from the runlogs ape itself wrote (<project>/_output/tasks), so it
+observed from the runlogs ape itself wrote (<project>/_output/ape), so it
 can only be judged against a project ape has actually run pipelines in, not
 against the ape repo. An unknown name in --only is an error rather than a
 silent no-op — a typo that ran zero checks would exit 0 and read as a pass.

@@ -201,7 +201,7 @@ Stream output. Record the probed version from the `probing Claude Code at …` l
 | `hook contract not verified` | `HOOK_PROJECT` has no runlogs in the last 30 days | "hook contract NOT verified — set `HOOK_PROJECT` to a project you have run `ape` pipelines in" |
 | `claude not on PATH` | the live PTY gate could not run at all | "PTY/model contract NOT verified (no local claude)" |
 
-Hook drift can only be observed from the `hook-events.jsonl` files ape wrote under `<project>/_output/tasks`, so `HOOK_PROJECT` pointing at this repo — the default — always skips. If the user has an APEX project they run pipelines in, ask for its path and re-run with it. If they do not, say the hook contract is unverified and ask whether to proceed anyway.
+Hook drift can only be observed from the `hook-events.jsonl` files ape wrote under `<project>/_output/ape/tasks`, so `HOOK_PROJECT` pointing at this repo — the default — always skips. If the user has an APEX project they run pipelines in, ask for its path and re-run with it. If they do not, say the hook contract is unverified and ask whether to proceed anyway.
 
 On success inform the user: "Harness contract verified against Claude Code {claude_version}" — naming any gate that skipped.
 

@@ -89,7 +89,7 @@ Progress streams to stderr; stdout carries only the result envelope:
     "num_turns": 26
   },
   "commits": ["SKILL:create-prd"],
-  "manifest_path": "_output/tasks/apex-create-prd/20260702-120000-abc1234/manifest.yaml",
+  "manifest_path": "_output/ape/tasks/apex-create-prd/20260702-120000-abc1234/manifest.yaml",
   "error": null
 }
 ```
@@ -105,7 +105,7 @@ their sum). The same split appears on each `model_usage` entry.
 ## Artifacts
 
 Each run writes `manifest.yaml`, per-step ndjson, and runlog streams
-under `_output/tasks/<skill>/<run-id>/` (a `latest` symlink tracks the
+under `_output/ape/tasks/<skill>/<run-id>/` (a `latest` symlink tracks the
 newest run). Task runs appear in `ape costs` under `task:<skill>` after
 `ape costs roll`.
 
