@@ -245,6 +245,58 @@
     a sentence to learn what the options were is not. Populated in the
     one-candidate case too, so a consumer reads one field either way.
 
+- **test: `make check-claude`, a local gate against the installed Claude
+  Code** — ape's real dependency is not a library it pins, it is the `claude`
+  binary on the host: ape types into a TUI over a PTY and reads the rendered
+  grid back. Every coupling to it is an undocumented detail of a program that
+  auto-updates on a schedule ape does not control, and when one moves nothing
+  errors — ape keeps running and silently stops doing the thing the coupling
+  bought. Two such detectors already existed (`ape costs coverage` for model
+  ids, `hookdrift` for hook payload fields), but both read artifacts a past
+  run left behind. Neither can see the terminal contract at all.
+  `TestLive_ClaudeCodeContract` spawns the local Claude Code through ape's own
+  `internal/repl` path and checks the ready-signal footer and `❯` glyph
+  *separately* (WaitForReady accepts either, so a rotted footer would hide
+  behind the fallback), that no unknown pre-REPL modal blocks the prompt, that
+  `CLAUDE_CODE_EFFORT_LEVEL` still moves the rendered effort, that every model
+  id in ape's family-alias table still names a model Claude Code knows, that a
+  spawned session still persists a transcript ape can parse (the v0.0.28–32
+  root cause), and that `claude --version` still parses. Gated behind
+  `APE_CLAUDE_LIVE=1`, so `make test` and GitHub CI never run it — a CI runner
+  has no `claude`, no auth and no network, and a gate that can only skip there
+  reads as a pass. `make check-harness` runs it with `make check-prices`.
+  - **The model check keys on the raw id being ABSENT from the pane.** An id
+    Claude Code no longer knows is not an error: it starts the REPL anyway and
+    echoes the id verbatim where a live one renders as its display name
+    (`claude-opus-5` → `Opus 5`). So a dead alias silently downgrades a run to
+    a fallback model, and the assertion that catches it also survives
+    Anthropic renaming the human-facing labels.
+
+- **feat(doctor): `ape doctor --only`, and `make check-hooks` on top of it** —
+  the hook-drift detector has existed since the gates it guards, but it was
+  reachable only by running all 33 doctor checks, so no release ever consulted
+  it. `--only` narrows the run to named checks, which makes a single gate
+  scriptable: `make check-hooks` is `ape doctor --only hooks.contract_drift
+  --strict --cwd $(HOOK_PROJECT)`. An unknown name in `--only` is a hard error
+  listing the valid ones, not a silent no-op — a typo that ran zero checks
+  would exit 0 and read as a pass, which is the exact failure mode a
+  single-gate flag exists to avoid. `--skip` keeps its lenient behaviour,
+  where a typo costs nothing.
+  - **`HOOK_PROJECT` must name a project ape has actually run.** Hook drift is
+    observed from the `hook-events.jsonl` files ape wrote under
+    `<project>/_output/tasks`, so it cannot be judged from the ape repo, which
+    has no runlogs. The default (`.`) therefore reports a skip; the docs and
+    the release skill both say plainly that this is "not verified" rather than
+    a pass.
+
+- **`make check-harness` is now the whole sweep** — `check-prices` (model ids
+  in local transcripts) + `check-hooks` (hook payload fields in local runlogs)
+  + `check-claude` (a live PTY session). Three gates, each reading what the
+  installed Claude Code is *actually* doing rather than what it did at release
+  time, and each reporting "not verified" rather than green when it finds no
+  evidence. The release skill runs it as one named phase so it cannot drift
+  out of sync with what "the harness contract holds" means.
+
 ## v0.0.52 (2026-08-15)
 
 - **feat(sandbox): finish the single-node workspace story (PLAN-24)** — seven

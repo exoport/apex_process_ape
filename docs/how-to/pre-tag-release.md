@@ -32,8 +32,10 @@ This expands to:
 1. `make test` — Linux race-detector test suite.
 2. `make lint` — `golangci-lint`.
 3. `make govulncheck` — vulnerability scan.
-4. `make xcompile-windows` — cross-compile + cross-vet for `GOOS=windows GOARCH=amd64`, plus a per-package test-binary cross-compile. Catches portability *compile* errors (broken `//go:build` tags, missing functions, unused imports per platform).
-5. `make snapshot` — `goreleaser` snapshot build. Catches release-config regressions before the real release machinery sees them.
+4. `make docs-check` — every doc reachable from `docs/README.md`, every link resolving.
+5. `make check-prices` — the built-in price table against the model ids the local Claude Code is emitting.
+6. `make xcompile-windows` — cross-compile + cross-vet for `GOOS=windows GOARCH=amd64`, plus a per-package test-binary cross-compile. Catches portability *compile* errors (broken `//go:build` tags, missing functions, unused imports per platform).
+7. `make snapshot` — `goreleaser` snapshot build. Catches release-config regressions before the real release machinery sees them.
 
 What `ci-local` catches:
 
@@ -44,9 +46,47 @@ What `ci-local` catches:
 
 What it **does not** catch:
 
-- Windows runtime behaviour — e.g. `exec.LookPath` needing `.exe`, `os.UserHomeDir` reading `%USERPROFILE%` not `$HOME`, path-separator handling. These only show up when the test binary actually runs on Windows.
+- Windows runtime behaviour — e.g. `exec.LookPath` needing `.exe`, `os.UserHomeDir` reading `%USERPROFILE%` not `$HOME`, path-separator handling. These only show up when the test binary actually runs on Windows. For those, use step 2.
+- The installed Claude Code having broken the contract ape drives it through. For that, use step 1b.
 
-For those, use step 2.
+## Step 1b — the Claude Code harness contract
+
+```bash
+make check-harness HOOK_PROJECT=~/work/some-apex-project
+```
+
+`ci-local` proves *ape* is internally consistent. It cannot prove ape still works, because ape's real dependency is not a library it pins — it is the `claude` binary on the machine, which auto-updates on a schedule ape does not control and makes no compatibility promise about its TUI, its flags, its hook payloads, or its transcript format.
+
+`check-harness` is the whole sweep — three gates that each read what the locally-installed Claude Code is *actually doing*:
+
+| Gate | Reads | Catches |
+| --- | --- | --- |
+| `check-prices` | `~/.claude/projects` transcripts | a model id or family alias the price table does not cover — tokens keep counting, cost silently goes to zero |
+| `check-hooks` | `$HOOK_PROJECT/_output/tasks` runlogs | a hook field ape's step-completion gates read being renamed or dropped — the gate stops firing and ape resumes reporting success on runs that did nothing |
+| `check-claude` | a live PTY session | everything below |
+
+> **`check-hooks` needs a real project.** Hook drift is observed from the `hook-events.jsonl` files ape itself wrote, so it can only be judged against a project you have actually run `ape` pipelines in. `HOOK_PROJECT` defaults to `.` — the ape repo, which has no runlogs and will always report a skip. Point it somewhere real or the gate is decorative.
+
+`make check-claude` on its own spawns the locally-installed Claude Code through ape's own PTY path and verifies the couplings that would otherwise fail *silently*:
+
+| Coupling | What breaks if it moves |
+| --- | --- |
+| `bypass permissions on` footer | `WaitForReady`'s primary ready signal. Falls back to the `❯` glyph, so nothing errors — until that goes too. |
+| `❯` prompt glyph | The fallback ready signal, and `emptyPromptRe`'s anchor. |
+| Pre-REPL modals | A *new* blocking modal `blockingModals` cannot dismiss makes every run idle until timeout. |
+| `--dangerously-skip-permissions`, `--model` | A rejected flag means no session starts at all. |
+| `CLAUDE_CODE_EFFORT_LEVEL` | Every run silently uses the harness default effort instead of the one the pipeline asked for. |
+| Family-alias model ids | An id that no longer exists does **not** error — Claude Code starts anyway on a fallback model. |
+| Transcript persistence | The v0.0.28–32 root cause: every cost, token, and model figure silently becomes zero. |
+| `claude --version` shape | The manifest's `claude_version` stamp and hookdrift's version attribution stop resolving. |
+
+None of this is part of `ci-local`, and none of it runs in GitHub CI: it needs `claude` on PATH, working auth, network, and local runlogs — none of which a CI runner has. Run it on a developer machine before tagging, and after any Claude Code upgrade.
+
+Takes ~40 s. Every check but one costs zero tokens — they read local artifacts, or launch the REPL and read the rendered pane. The exception submits a single short Haiku turn to prove a transcript is really written and that ape can still parse it; `APE_CLAUDE_LIVE_TOKENS=0` skips that one.
+
+> **A SKIP is not a pass.** Each gate reports "not verified" rather than green when it finds nothing to judge — no transcripts, no runlogs, no `claude` on PATH. Read the output rather than the exit code: absence of evidence is not coverage, and every one of these is designed so an empty run cannot masquerade as a clean one.
+
+> **Why this can't be a CI job.** Every check here is a statement about the harness *installed on this machine right now*. A CI runner has none of the inputs, so the honest result there is a skip — and a gate that always skips is worse than no gate, because it reads as a pass. The same reasoning is why `ape costs coverage` exits 0 with "coverage NOT verified" rather than green when it finds nothing.
 
 ## Step 2 — remote CI on the SHA you'll tag
 

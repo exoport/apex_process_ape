@@ -50,6 +50,10 @@ make govulncheck   # scan for known vulnerabilities (pinned via bingo)
 make xcompile-windows  # cross-compile + cross-vet for Windows; catches portability compile errors
 make ci-local      # full pre-push gate: test + lint + vuln + prices + xcompile-windows + snapshot
 make check-prices  # verify the price table covers the models the local Claude Code emits
+make check-claude  # LOCAL ONLY: spawn the installed Claude Code and verify ape's PTY/model contract
+make check-hooks   # LOCAL ONLY: verify Claude Code still sends the hook fields the completion gates read
+                   #   needs a project ape has run: make check-hooks HOOK_PROJECT=~/work/some-apex-project
+make check-harness # check-prices + check-hooks + check-claude — the whole "is the local Claude Code still compatible?" sweep
 make tools         # pre-install all bingo-pinned tools
 make tidy          # go mod tidy
 make clean         # remove build artifacts
@@ -67,7 +71,9 @@ make clean         # remove build artifacts
 
 Two-step verification flow — see `docs/how-to/pre-tag-release.md` for the full guide. The automated walkthrough lives in `.claude/skills/release/SKILL.md` (`/release vX.Y.Z`).
 
-1. **Local gate** — run `make ci-local`. Runs test + lint + vuln + price-table coverage + Windows cross-compile + goreleaser snapshot. ~30–60 s. Catches per-platform compile errors, release-config regressions, and a model price table that has gone stale against the locally-installed Claude Code.
+1. **Local gate** — run `make ci-local`. Runs test + lint + vuln + docs-check + price-table coverage + Windows cross-compile + goreleaser snapshot. ~30–60 s. Catches per-platform compile errors, release-config regressions, and a model price table that has gone stale against the locally-installed Claude Code.
+
+   **Then run `make check-harness HOOK_PROJECT=<a project ape has run>`** (~40 s, developer machine only). `ci-local` proves ape is internally consistent; it cannot prove ape still *works*, because ape's real dependency is the auto-updating `claude` binary on the host. The sweep is three gates that read what that binary is actually doing: `check-prices` (model ids in transcripts), `check-hooks` (the hook fields the step-completion gates read, from a project's runlogs), and `check-claude` (a live PTY session — the ready-signal footer and `❯` glyph, an unknown pre-REPL modal, the spawn flags, `CLAUDE_CODE_EFFORT_LEVEL`, the family-alias model ids still naming real models, and transcript persistence). Deliberately **not** in `ci-local` and never in GitHub CI: they need `claude` + auth + network + local runlogs, so a CI run could only skip them, and a gate that always skips reads as a pass. Read the output — each reports "not verified" rather than green when it has no evidence.
 2. **Remote gate** — push commits to `main`:
    ```bash
    git push origin main

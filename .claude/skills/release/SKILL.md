@@ -1,6 +1,6 @@
 ---
 name: release
-description: 'Full release workflow for ape: pre-flight checks (clean tree, CHANGELOG, no duplicate tag) → local CI gate (make ci-local) → push main → poll push CI → final tag → poll release workflow → cosign signature verification. Use when the user says "/release", "cut a release", "tag a release", or "ship vX.Y.Z".'
+description: 'Full release workflow for ape: pre-flight checks (clean tree, CHANGELOG, no duplicate tag) → local CI gate (make ci-local) → Claude Code harness contract (make check-harness) → push main → poll push CI → final tag → poll release workflow → cosign signature verification. Use when the user says "/release", "cut a release", "tag a release", or "ship vX.Y.Z".'
 argument-hint: "Optional: version to release (e.g. v0.0.22) and/or the word \"autonomous\" to skip all confirmation gates. Version is detected from CHANGELOG.md if omitted. Order doesn't matter (e.g. \"v0.0.22 autonomous\" or \"autonomous\")."
 ---
 
@@ -168,6 +168,42 @@ make ci-local
 This is a long-running command (30–60 s). Stream output. HALT if the exit code is non-zero. Message: "`make ci-local` failed. Fix the issues and re-run `/release`."
 
 On success inform the user: "Local CI gate passed."
+
+---
+
+### Phase 2b — Claude Code harness contract
+
+`ci-local` proves ape is internally consistent. It cannot prove ape still *works*: ape's real dependency is the auto-updating `claude` binary on this machine, and every coupling to it fails **silently** when it moves — a renamed hook field just stops a completion gate firing, a dead model id starts a fallback model instead of erroring, a changed TUI footer costs the PTY its ready signal. GitHub CI can never check any of it: no `claude`, no auth, no network, no runlogs. A release-time local run is the only opportunity.
+
+Run the whole sweep as one named gate:
+
+```bash
+make check-harness HOOK_PROJECT="${HOOK_PROJECT:-.}"
+```
+
+That is `check-prices` + `check-hooks` + `check-claude`. ~40 s total. Spends a fraction of a cent (one short Haiku turn); everything else reads local artifacts or the rendered pane for free.
+
+> `check-prices` already ran in Phase 1h as a fast pre-flight. Re-running it here is deliberate and cheap: Phase 2b is the single gate that defines "the harness contract holds", and it must not be able to drift out of sync with what that phrase covers.
+
+If `{autonomous}` is false: ask "Run `make check-harness`? It sweeps the price table, the hook contract, and spawns the local Claude Code for the PTY/model contract (~40 s, one Haiku turn)." — wait for confirmation.
+
+If `{autonomous}` is true: skip the ask and run it.
+
+Stream output. Record the probed version from the `probing Claude Code at …` log line as `{claude_version}`.
+
+**If it fails, HALT.** Report which gate failed and what it means — the failure messages name the affected coupling and its consequence. Do not treat it as flaky and do not proceed to tag: a failure here means the binary you are about to release is already broken against the Claude Code on users' machines, which is a reason to fix before shipping, not after.
+
+**Then read the output for SKIPs. A skip is never a pass** — every gate here reports "not verified" rather than green when it finds no evidence, precisely so an empty run cannot be mistaken for a clean one. Report each explicitly in the summary:
+
+| Skip | What it means | What to say |
+| --- | --- | --- |
+| `no Claude Code transcripts found` | no local model ids to price | "price coverage NOT verified" |
+| `hook contract not verified` | `HOOK_PROJECT` has no runlogs in the last 30 days | "hook contract NOT verified — set `HOOK_PROJECT` to a project you have run `ape` pipelines in" |
+| `claude not on PATH` | the live PTY gate could not run at all | "PTY/model contract NOT verified (no local claude)" |
+
+Hook drift can only be observed from the `hook-events.jsonl` files ape wrote under `<project>/_output/tasks`, so `HOOK_PROJECT` pointing at this repo — the default — always skips. If the user has an APEX project they run pipelines in, ask for its path and re-run with it. If they do not, say the hook contract is unverified and ask whether to proceed anyway.
+
+On success inform the user: "Harness contract verified against Claude Code {claude_version}" — naming any gate that skipped.
 
 ---
 

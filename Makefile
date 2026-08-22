@@ -176,3 +176,5 @@ ci-local: test lint govulncheck docs-check check-prices xcompile-windows snapsho
 	@echo "Local CI gates green. Safe to push + tag."
 	@echo "Catches: Linux test failures, lint, vuln, Windows compile-time portability bugs, release-config regressions."
 	@echo "Does NOT catch: Windows runtime behaviour (use a push-to-branch + GitHub Actions Windows runner for that)."
+	@echo "Does NOT catch: the installed Claude Code breaking a contract ape drives it through (PTY, models,"
+	@echo "                hook payloads) — run 'make check-harness HOOK_PROJECT=<a project ape has run>'."
