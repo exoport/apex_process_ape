@@ -26,7 +26,8 @@ func newFixture(t *testing.T, extensions string) *fixture {
 		"development_folder: development\nimplementation_folder: development/implementation\n" +
 		"governance_folder: development/governance\nfunctionality_folder: development/functionality\n"
 	require.NoError(t, os.WriteFile(
-		filepath.Join(root, apexcfg.DirName, apexcfg.BaseFile), []byte(body), 0o644))
+		filepath.Join(root, apexcfg.DirName, apexcfg.BaseFile), []byte(body), 0o644,
+	))
 	cfg, err := apexcfg.ResolveAt(root, nil)
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(cfg.Paths.Implementation, 0o755))
@@ -552,7 +553,8 @@ func TestVerifyFile_DoesNotAssertReferentialIntegrity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.md")
 	require.NoError(t, os.WriteFile(path, []byte(
 		"---\nstory_id: 1-1\nepic: 1\nstatus: done\noutput_document: x.md\n"+
-			"governance:\n  adrs: [ADR-9999]\n---\n\nx\n"), 0o644))
+			"governance:\n  adrs: [ADR-9999]\n---\n\nx\n",
+	), 0o644))
 
 	verdict := VerifyFile(path, ParseActiveExtensions("ext-adrs"))
 	require.Equal(t, FileOK, verdict.Code)

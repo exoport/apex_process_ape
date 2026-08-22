@@ -80,20 +80,24 @@ func TestClassifyStop(t *testing.T) {
 		{"empty list completes", tasks(), stopComplete, 0},
 		{"benign shell ignored", tasks(BackgroundTask{Type: taskShell, Status: "running"}), stopComplete, 0},
 		{"benign monitor+dream ignored", tasks(
-			BackgroundTask{Type: taskMonitor}, BackgroundTask{Type: taskDream}), stopComplete, 0},
+			BackgroundTask{Type: taskMonitor}, BackgroundTask{Type: taskDream},
+		), stopComplete, 0},
 		{"workflow ignored", tasks(BackgroundTask{Type: taskWorkflow}), stopComplete, 0},
 		{"running subagent defers", tasks(
-			BackgroundTask{Type: taskSubagent, Status: "running"}), stopDefer, 1},
+			BackgroundTask{Type: taskSubagent, Status: "running"},
+		), stopDefer, 1},
 		{"cloud session defers", tasks(BackgroundTask{Type: taskCloud}), stopDefer, 1},
 		{"teammate is fatal", tasks(BackgroundTask{Type: taskTeammate}), stopFatal, 1},
 		// A teammate outranks a resolvable sub-agent: waiting cannot fix it.
 		{"teammate outranks subagent", tasks(
-			BackgroundTask{Type: taskSubagent}, BackgroundTask{Type: taskTeammate}), stopFatal, 2},
+			BackgroundTask{Type: taskSubagent}, BackgroundTask{Type: taskTeammate},
+		), stopFatal, 2},
 		// An unmapped future task kind arrives under its raw internal name.
 		// Defer rather than ignore — ignoring silently re-opens the hole.
 		{"unknown type defers", tasks(BackgroundTask{Type: "some_future_kind"}), stopDefer, 1},
 		{"benign alongside blocking still defers", tasks(
-			BackgroundTask{Type: taskShell}, BackgroundTask{Type: taskSubagent}), stopDefer, 1},
+			BackgroundTask{Type: taskShell}, BackgroundTask{Type: taskSubagent},
+		), stopDefer, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -194,7 +198,8 @@ func TestDriver_CleanStopCompletes(t *testing.T) {
 func TestDriver_TeammateStopIsFatal(t *testing.T) {
 	t.Parallel()
 	payload := json.RawMessage(
-		`{"background_tasks":[{"id":"t9","type":"teammate","status":"running","description":"review story 1-0"}]}`)
+		`{"background_tasks":[{"id":"t9","type":"teammate","status":"running","description":"review story 1-0"}]}`,
+	)
 
 	d := newTestDriver(time.Hour) // a long idle window must not be reached
 	d.SetStepSkill("apex-story-batch-review")
@@ -219,7 +224,8 @@ func TestDriver_TeammateStopIsFatal(t *testing.T) {
 func TestDriver_TeammateSpawnIsFatal(t *testing.T) {
 	t.Parallel()
 	payload := json.RawMessage(
-		`{"tool_name":"Agent","tool_response":{"status":"teammate_spawned","teammate_id":"t42","name":"story-1-0"}}`)
+		`{"tool_name":"Agent","tool_response":{"status":"teammate_spawned","teammate_id":"t42","name":"story-1-0"}}`,
+	)
 
 	d := newTestDriver(time.Hour)
 	d.SetStepSkill("apex-story-batch-review")

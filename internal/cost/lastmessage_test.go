@@ -27,7 +27,8 @@ func assistant(text string) string {
 
 func TestLastAssistantText_LastTurnWins(t *testing.T) {
 	t.Parallel()
-	path := writeMsgTranscript(t,
+	path := writeMsgTranscript(
+		t,
 		assistant("first"),
 		`{"type":"user","message":{"content":[{"type":"text","text":"ignored"}]}}`,
 		assistant("run_status: partial"),
@@ -41,7 +42,8 @@ func TestLastAssistantText_LastTurnWins(t *testing.T) {
 // sub-agent turns, so they must never be mistaken for the final message.
 func TestLastAssistantText_SkipsSidechainAndMeta(t *testing.T) {
 	t.Parallel()
-	path := writeMsgTranscript(t,
+	path := writeMsgTranscript(
+		t,
 		assistant("the real closing message"),
 		`{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"sub-agent said this"}]}}`,
 		`{"type":"assistant","isMeta":true,"message":{"content":[{"type":"text","text":"meta noise"}]}}`,
@@ -55,7 +57,8 @@ func TestLastAssistantText_SkipsSidechainAndMeta(t *testing.T) {
 // lives in the last turn that actually said something.
 func TestLastAssistantText_SkipsTextlessTurns(t *testing.T) {
 	t.Parallel()
-	path := writeMsgTranscript(t,
+	path := writeMsgTranscript(
+		t,
 		assistant("run_status: complete"),
 		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash"}]}}`,
 	)
@@ -66,7 +69,8 @@ func TestLastAssistantText_SkipsTextlessTurns(t *testing.T) {
 
 func TestLastAssistantText_JoinsMultipleTextBlocks(t *testing.T) {
 	t.Parallel()
-	path := writeMsgTranscript(t,
+	path := writeMsgTranscript(
+		t,
 		`{"type":"assistant","message":{"content":[`+
 			`{"type":"thinking","thinking":"hidden"},`+
 			`{"type":"text","text":"summary above"},`+
@@ -81,7 +85,8 @@ func TestLastAssistantText_JoinsMultipleTextBlocks(t *testing.T) {
 // tolerance the cost scanner applies, for the same reason.
 func TestLastAssistantText_SkipsMalformedLines(t *testing.T) {
 	t.Parallel()
-	path := writeMsgTranscript(t,
+	path := writeMsgTranscript(
+		t,
 		`{not json at all`,
 		assistant("still readable"),
 		``,

@@ -203,7 +203,8 @@ func Reconcile(path string, opts ReconcileOptions) (*ReconcileResult, error) {
 		if restoreErr := writeFileAtomic(path, data); restoreErr != nil {
 			return nil, fmt.Errorf(
 				"%w; CRITICAL: restore also failed (%w) — recover %s from git",
-				err, restoreErr, path)
+				err, restoreErr, path,
+			)
 		}
 		return nil, fmt.Errorf("%w; the file was restored to its pre-edit content", err)
 	}
@@ -255,7 +256,8 @@ func verifyWriteLanded(path string, before *Tracker, changes []ReconcileChange) 
 		if got != row.Status {
 			return fmt.Errorf(
 				"round-trip verification failed: untouched row %q changed %q -> %q",
-				row.Key, row.Status, got)
+				row.Key, row.Status, got,
+			)
 		}
 	}
 	return nil
@@ -272,7 +274,8 @@ func verifyWriteLanded(path string, before *Tracker, changes []ReconcileChange) 
 // only the value moves.
 func lineRe(indent, key string) *regexp.Regexp {
 	return regexp.MustCompile(
-		`(?m)^(` + indent + `)` + regexp.QuoteMeta(key) + `:[ \t]*([^\r\n#]*?)([ \t]*)(#[^\r\n]*)?(\r?)$`)
+		`(?m)^(` + indent + `)` + regexp.QuoteMeta(key) + `:[ \t]*([^\r\n#]*?)([ \t]*)(#[^\r\n]*)?(\r?)$`,
+	)
 }
 
 // setLine replaces the value on a matching line, preserving indentation,

@@ -39,7 +39,8 @@ func TestEnsureLockIgnored_AppendsAndPreserves(t *testing.T) {
 	root := t.TempDir()
 	existing := "# my rules\n/dist/\n*.tmp\n"
 	require.NoError(t, os.WriteFile(
-		filepath.Join(root, framework.ProjectGitignore), []byte(existing), 0o644))
+		filepath.Join(root, framework.ProjectGitignore), []byte(existing), 0o644,
+	))
 
 	added, err := framework.EnsureLockIgnored(context.Background(), root)
 	require.NoError(t, err)
@@ -53,7 +54,8 @@ func TestEnsureLockIgnored_AppendsAndPreserves(t *testing.T) {
 func TestEnsureLockIgnored_AddsTheMissingNewlineFirst(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.WriteFile(
-		filepath.Join(root, framework.ProjectGitignore), []byte("*.tmp"), 0o644))
+		filepath.Join(root, framework.ProjectGitignore), []byte("*.tmp"), 0o644,
+	))
 
 	_, err := framework.EnsureLockIgnored(context.Background(), root)
 	require.NoError(t, err)
@@ -91,7 +93,8 @@ func TestEnsureLockIgnored_RespectsAProjectsOwnBroaderRule(t *testing.T) {
 	root := t.TempDir()
 	gitInitForTest(t, root)
 	require.NoError(t, os.WriteFile(
-		filepath.Join(root, framework.ProjectGitignore), []byte("*.lock\n"), 0o644))
+		filepath.Join(root, framework.ProjectGitignore), []byte("*.lock\n"), 0o644,
+	))
 
 	added, err := framework.EnsureLockIgnored(context.Background(), root)
 	require.NoError(t, err)

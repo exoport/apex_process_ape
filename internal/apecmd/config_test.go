@@ -41,7 +41,8 @@ func newTestProject(t *testing.T, cfg string) string {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, apexcfg.DirName), 0o755))
 	require.NoError(t, os.WriteFile(
-		filepath.Join(root, apexcfg.DirName, apexcfg.BaseFile), []byte(cfg), 0o644))
+		filepath.Join(root, apexcfg.DirName, apexcfg.BaseFile), []byte(cfg), 0o644,
+	))
 	t.Chdir(root)
 	return root
 }
@@ -138,7 +139,8 @@ func TestConfigResolve_LocalOverlayReported(t *testing.T) {
 	root := newTestProject(t, realProjectConfig)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(root, apexcfg.DirName, apexcfg.LocalFile),
-		[]byte("governance_repository_path: /srv/canon\n"), 0o644))
+		[]byte("governance_repository_path: /srv/canon\n"), 0o644,
+	))
 
 	var buf bytes.Buffer
 	cmd := newConfigResolveCmd()

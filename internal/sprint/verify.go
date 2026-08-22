@@ -124,7 +124,8 @@ func VerifyRow(ctx context.Context, path, key, expected string) VerifyResult {
 			res.Clamp = committed
 			res.Message = fmt.Sprintf(
 				"updated_at %q is earlier than the last committed value %q — re-write it as the committed value (or later) and re-run",
-				updated, committed)
+				updated, committed,
+			)
 			return res
 		}
 	}

@@ -26,7 +26,8 @@ func projectFor(t *testing.T, cfg string) string {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, apexcfg.DirName), 0o755))
 	require.NoError(t, os.WriteFile(
-		filepath.Join(root, apexcfg.DirName, apexcfg.BaseFile), []byte(cfg), 0o644))
+		filepath.Join(root, apexcfg.DirName, apexcfg.BaseFile), []byte(cfg), 0o644,
+	))
 	return root
 }
 
@@ -50,7 +51,8 @@ func TestCheckConfigResolved(t *testing.T) {
 		root := projectFor(t, realProjectConfig)
 		require.NoError(t, os.WriteFile(
 			filepath.Join(root, apexcfg.DirName, apexcfg.LocalFile),
-			[]byte("user_name: Diego\n"), 0o644))
+			[]byte("user_name: Diego\n"), 0o644,
+		))
 		res := checkConfigResolved(ctx, projectDataEnv(root))
 		require.Equal(t, StatusOK, res.Status)
 		require.Contains(t, res.Message, "user_name")
@@ -62,7 +64,8 @@ func TestCheckConfigResolved(t *testing.T) {
 		root := projectFor(t, realProjectConfig)
 		require.NoError(t, os.WriteFile(
 			filepath.Join(root, apexcfg.DirName, apexcfg.LocalFile),
-			[]byte("user_name: [unterminated\n"), 0o644))
+			[]byte("user_name: [unterminated\n"), 0o644,
+		))
 		res := checkConfigResolved(ctx, projectDataEnv(root))
 		require.Equal(t, StatusFail, res.Status)
 		require.Contains(t, res.Message, apexcfg.LocalFile)

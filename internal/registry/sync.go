@@ -283,7 +283,8 @@ func removeEntry(idx *Index, shape Shape, id string) {
 		for i := 0; i+1 < len(idx.entries.Content); i += 2 {
 			if idx.entries.Content[i].Value == id {
 				idx.entries.Content = append(
-					idx.entries.Content[:i], idx.entries.Content[i+2:]...)
+					idx.entries.Content[:i], idx.entries.Content[i+2:]...,
+				)
 				return
 			}
 		}

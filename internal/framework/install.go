@@ -438,7 +438,8 @@ func notAGitRepoError(dir string, gitErr error) *ValidationError {
 		return &ValidationError{Code: code, Detail: fmt.Sprintf(
 			"git refuses %s as a repository because it belongs to another user (\"dubious ownership\") — "+
 				"the repo is intact, this is a refusal. A sandbox workspace's framework mount is always "+
-				"in that state: read-only and host-owned. %s (git: %v)", dir, floor, gitErr)}
+				"in that state: read-only and host-owned. %s (git: %v)", dir, floor, gitErr,
+		)}
 	}
 
 	// No .git at all: a copy of the files, not a checkout, so there is no version to read.
@@ -447,7 +448,8 @@ func notAGitRepoError(dir string, gitErr error) *ValidationError {
 			"%s holds framework content but has no .git, so the framework version it pins cannot be "+
 				"read. In an `ape sandbox` workspace this mount is produced by `ape sandbox framework "+
 				"materialize <ref>`, which delivers a real checkout — a plain copy of the files is not "+
-				"enough. (git: %v)", dir, gitErr)}
+				"enough. (git: %v)", dir, gitErr,
+		)}
 	}
 
 	// A .git is present and git still would not use it. Report git's own words rather than
@@ -455,7 +457,8 @@ func notAGitRepoError(dir string, gitErr error) *ValidationError {
 	// rule out when this happens inside a workspace.
 	return &ValidationError{Code: code, Detail: fmt.Sprintf(
 		"%s has a .git, but git would not read it as a repository — so this is a refusal or a broken "+
-			"checkout, not a missing one. If it ran in a sandbox workspace: %s (git: %v)", dir, floor, gitErr)}
+			"checkout, not a missing one. If it ran in a sandbox workspace: %s (git: %v)", dir, floor, gitErr,
+	)}
 }
 
 // validateFrameworkRepo runs the framework-side preconditions: subtree

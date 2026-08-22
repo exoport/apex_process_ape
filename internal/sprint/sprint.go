@@ -264,16 +264,19 @@ func RemediationFor(rowKey string, candidates []string) string {
 				"stem of `%s` plus a separator and slug. Either the story is filed under an "+
 				"unrelated name, in which case rename the row to that file's stem, or the "+
 				"story does not exist and the row is stale",
-			rowKey)
+			rowKey,
+		)
 	case 1:
 		return fmt.Sprintf(
 			"rename the row `%s` to `%s` to match the story file, or rename `%s.md` to `%s.md`",
-			rowKey, candidates[0], candidates[0], rowKey)
+			rowKey, candidates[0], candidates[0], rowKey,
+		)
 	default:
 		return fmt.Sprintf(
 			"%d story files could be this row (%s) — rename the row to whichever it means, "+
 				"and give the others a row of their own",
-			len(candidates), strings.Join(candidates, ", "))
+			len(candidates), strings.Join(candidates, ", "),
+		)
 	}
 }
 

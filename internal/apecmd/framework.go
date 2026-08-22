@@ -222,7 +222,8 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 			}
 			warnOperatingRulesSkew(res.Summary)
 			if err := printFrameworkUpdate(
-				&frameworkUpdateOutput{Metadata: res.Metadata, Summary: res.Summary}, format); err != nil {
+				&frameworkUpdateOutput{Metadata: res.Metadata, Summary: res.Summary}, format,
+			); err != nil {
 				return err
 			}
 			if noMigrate {

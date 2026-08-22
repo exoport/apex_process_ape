@@ -289,7 +289,8 @@ func TestSelect_Filters(t *testing.T) {
 	s := newStore(t)
 	_, err := s.Ingest([]byte(
 		"- [Defer] Alpha [pkg/a/x.go:1] — defer: owner=alice\n"+
-			"- [Defer] Beta [pkg/b/y.go:2] — defer: owner=bob\n"),
+			"- [Defer] Beta [pkg/b/y.go:2] — defer: owner=bob\n",
+	),
 		IngestOptions{Story: "1-1", Date: "2026-08-22"})
 	require.NoError(t, err)
 	_, err = s.Ingest([]byte("- [Defer] Gamma [pkg/a/z.go:3] — defer: owner=alice\n"),
@@ -322,7 +323,8 @@ func TestVerify_CleanStore(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "internal", "apecmd"), 0o755))
 	require.NoError(t, os.WriteFile(
-		filepath.Join(root, "internal", "apecmd", "modelarg.go"), []byte("package apecmd\n"), 0o644))
+		filepath.Join(root, "internal", "apecmd", "modelarg.go"), []byte("package apecmd\n"), 0o644,
+	))
 
 	_, err := s.Ingest([]byte(realBullet), IngestOptions{Story: "54-1", Date: "2026-08-22"})
 	require.NoError(t, err)

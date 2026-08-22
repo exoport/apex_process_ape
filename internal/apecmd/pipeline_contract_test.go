@@ -74,11 +74,13 @@ func TestContracts_PresentTableChecks(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(projectRoot, "_apex"), 0o755))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(projectRoot, "_apex", "terminal-contracts.csv"),
-		[]byte("skill,pattern\napex-story-batch-review,^run_status:\n"), 0o600))
+		[]byte("skill,pattern\napex-story-batch-review,^run_status:\n"), 0o600,
+	))
 
 	transcript := filepath.Join(projectRoot, "session.jsonl")
 	require.NoError(t, os.WriteFile(transcript, []byte(
-		`{"type":"assistant","message":{"content":[{"type":"text","text":"I'll wait for it to finish."}]}}`+"\n"),
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"I'll wait for it to finish."}]}}`+"\n",
+	),
 		0o600))
 
 	core := newInteractiveCore(func() {}, nilRunLog)
@@ -103,11 +105,13 @@ func TestContracts_UnenrolledSkillSilent(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(projectRoot, "_apex"), 0o755))
 	require.NoError(t, os.WriteFile(
 		filepath.Join(projectRoot, "_apex", "terminal-contracts.csv"),
-		[]byte("skill,pattern\napex-story-batch-review,^run_status:\n"), 0o600))
+		[]byte("skill,pattern\napex-story-batch-review,^run_status:\n"), 0o600,
+	))
 
 	transcript := filepath.Join(projectRoot, "session.jsonl")
 	require.NoError(t, os.WriteFile(transcript, []byte(
-		`{"type":"assistant","message":{"content":[{"type":"text","text":"Batch Story Creation Complete"}]}}`+"\n"),
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"Batch Story Creation Complete"}]}}`+"\n",
+	),
 		0o600))
 
 	core := newInteractiveCore(func() {}, nilRunLog)

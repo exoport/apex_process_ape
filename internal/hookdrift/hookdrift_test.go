@@ -149,13 +149,16 @@ func TestObserve_RealFixtures(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	body, err := os.ReadFile(filepath.Join(
-		"..", "..", "testdata", "hookpayloads", "stop-clean-with-contract.jsonl"))
+		"..", "..", "testdata", "hookpayloads", "stop-clean-with-contract.jsonl",
+	))
 	require.NoError(t, err)
 	agent, err := os.ReadFile(filepath.Join(
-		"..", "..", "testdata", "hookpayloads", "agent-post-completed.jsonl"))
+		"..", "..", "testdata", "hookpayloads", "agent-post-completed.jsonl",
+	))
 	require.NoError(t, err)
 	subs, err := os.ReadFile(filepath.Join(
-		"..", "..", "testdata", "hookpayloads", "subagent-pairs.jsonl"))
+		"..", "..", "testdata", "hookpayloads", "subagent-pairs.jsonl",
+	))
 	require.NoError(t, err)
 
 	writeRun(t, root, "apex-story-batch-dev", "run1",

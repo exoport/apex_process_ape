@@ -130,7 +130,8 @@ Failure to read history is a warning, never fatal.`,
 				if dirty := dirtyPaths(cmd.Context(), cfg.Root, migrationPaths(cfg.Paths.Deferred, from)); len(dirty) > 0 {
 					return usageErr(fmt.Errorf(
 						"migration paths have uncommitted changes, so `git status` could not tell ape's work from yours: %s",
-						strings.Join(dirty, ", ")))
+						strings.Join(dirty, ", "),
+					))
 				}
 			}
 
@@ -315,7 +316,8 @@ Nothing is committed.`,
 				return fmt.Errorf(
 					"no repair skill installed: neither %s nor %s resolves under %s or ~/.claude/skills/ — "+
 						"run `ape framework update` to install it",
-					repairSkill, repairSkillLegacy, framework.ProjectSkillsDir)
+					repairSkill, repairSkillLegacy, framework.ProjectSkillsDir,
+				)
 			}
 			if dryRun {
 				fmt.Fprintln(cmd.OutOrStdout(), "--dry-run: no session spawned")
@@ -324,7 +326,8 @@ Nothing is committed.`,
 			if !force && !isInteractiveStdout() {
 				return usageErr(errors.New(
 					"refusing to spawn a paid " + repairModel +
-						" session without a TTY — pass --force if that is what you meant"))
+						" session without a TTY — pass --force if that is what you meant",
+				))
 			}
 
 			opts := repairTaskOptions(cfg.Root, plan)
@@ -391,7 +394,8 @@ func assertNoRecordsLost(w io.Writer, store *deferred.Store, before *deferred.Lo
 	}
 	return fmt.Errorf(
 		"the repair pass LOST %d record(s), which it is never allowed to do — restore them before committing: %s",
-		len(missing), strings.Join(missing, ", "))
+		len(missing), strings.Join(missing, ", "),
+	)
 }
 
 // isInteractiveStdout reports whether stdout is a terminal, mirroring the

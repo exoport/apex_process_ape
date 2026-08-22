@@ -234,7 +234,8 @@ func validatePriceRow(model string, baseInput, output float64) error {
 		return fmt.Errorf(
 			"model %q has a zero price (base_input=%v output=%v) — check for a misspelled key; "+
 				"a zero rate would silently report those tokens as free",
-			model, baseInput, output)
+			model, baseInput, output,
+		)
 	}
 	return nil
 }

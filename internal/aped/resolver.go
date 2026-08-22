@@ -387,7 +387,8 @@ func (r *Resolver) frameworkMount(ref string) (mount workspace.MountSpec, served
 		return workspace.MountSpec{}, false, fmt.Errorf(
 			"%w: framework ref %q is not materialized on this node (expected %s). "+
 				"Materialize it host-side: ape sandbox framework materialize %s",
-			workspace.ErrValidation, want, src, want)
+			workspace.ErrValidation, want, src, want,
+		)
 	}
 	return workspace.MountSpec{Source: src, Dest: sandbox.FrameworkDest, ReadOnly: true}, true, nil
 }

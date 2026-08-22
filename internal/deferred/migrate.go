@@ -20,7 +20,8 @@ import (
 //	## Deferred from: story review of 54-1 (2026-08-21)
 //	## Deferred from: apex-correct-course reconciliation of epic 12 (2026-07-02)
 var sectionRe = regexp.MustCompile(
-	`(?i)^##\s+Deferred from:\s*(.*?)(?:\s+of\s+(\S+))?\s*(?:\(([\d-]+)\))?\s*$`)
+	`(?i)^##\s+Deferred from:\s*(.*?)(?:\s+of\s+(\S+))?\s*(?:\(([\d-]+)\))?\s*$`,
+)
 
 // MigrateOptions controls one migration.
 type MigrateOptions struct {

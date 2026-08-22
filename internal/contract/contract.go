@@ -190,7 +190,8 @@ func (r Result) Diagnostic() string {
 		return fmt.Sprintf(
 			"%s ended without its terminal contract (no match for %s in the final message) — "+
 				"the run did not reach its summary step, so it did not necessarily do the work it reports",
-			r.Skill, r.Pattern)
+			r.Skill, r.Pattern,
+		)
 	case StatusNoTranscript:
 		return r.Skill + " declares a terminal contract but no closing message could be read" +
 			" — contract not verified"

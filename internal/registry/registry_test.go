@@ -34,7 +34,8 @@ governance_folder: development/governance
 functionality_folder: development/functionality
 `
 	require.NoError(t, os.WriteFile(
-		filepath.Join(root, apexcfg.DirName, apexcfg.BaseFile), []byte(cfgBody), 0o644))
+		filepath.Join(root, apexcfg.DirName, apexcfg.BaseFile), []byte(cfgBody), 0o644,
+	))
 	cfg, err := apexcfg.ResolveAt(root, nil)
 	require.NoError(t, err)
 	f := &fixture{t: t, root: root, cfg: cfg}
@@ -353,7 +354,8 @@ func TestVerify_MappingShapedFeaturesIndex(t *testing.T) {
 	f.record("features", "feat-1-2_logout.md", "FEAT-1-2")
 	f.mappingIndex(
 		[2]string{"FEAT-1-1", "feat-1-1_login.md"},
-		[2]string{"FEAT-1-2", "feat-1-2_missing.md"})
+		[2]string{"FEAT-1-2", "feat-1-2_missing.md"},
+	)
 
 	report := f.verify("features")
 	require.Empty(t, findingsOf(report, CheckOrphanRecord), "both ids are indexed")

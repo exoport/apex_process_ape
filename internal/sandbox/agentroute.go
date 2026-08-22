@@ -77,7 +77,8 @@ func AgentNatsRoute(guestURL, mgmtHost string, mgmtPort int) (SystemRoute, error
 	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
 		return SystemRoute{}, fmt.Errorf(
 			"sandbox: guest NATS URL %q uses a loopback literal — inside a guest that address is the GUEST's "+
-				"own loopback, so the agent would never reach this host. Use %s", guestURL, AgentNatsURL)
+				"own loopback, so the agent would never reach this host. Use %s", guestURL, AgentNatsURL,
+		)
 	}
 	if mgmtPort <= 0 {
 		return SystemRoute{}, fmt.Errorf("sandbox: agent NATS route needs the front's management port (got %d)", mgmtPort)

@@ -47,7 +47,8 @@ func seedADRCorpus(t *testing.T, root string, n int, skip ...int) string {
 		// 54 of them, none of which may count as a record.
 		require.NoError(t, os.WriteFile(
 			filepath.Join(dir, "changelog", fmt.Sprintf("adr-%04d_decision_changelog.yaml", i)),
-			[]byte("entries: []\n"), 0o644))
+			[]byte("entries: []\n"), 0o644,
+		))
 		if skipped[i] {
 			continue
 		}

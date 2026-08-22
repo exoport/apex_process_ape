@@ -165,7 +165,8 @@ func TestIntersectDomainsNarrowsNeverWidens(t *testing.T) {
 }
 
 func TestSortedDomainsNormalises(t *testing.T) {
-	assert.Equal(t,
+	assert.Equal(
+		t,
 		[]string{"api.anthropic.com", "github.com"},
 		SortedDomains([]string{"GitHub.com", " api.anthropic.com ", "github.com", ""}),
 	)

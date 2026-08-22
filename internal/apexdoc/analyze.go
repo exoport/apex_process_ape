@@ -158,7 +158,8 @@ var docTypeRules = []struct {
 // companionSuffixRe strips the suffixes that mark a companion document, so
 // `x-brief.md` and `x-brief-discovery-notes.md` share a group key.
 var companionSuffixRe = regexp.MustCompile(
-	`[-_](discovery[-_]notes|discovery|notes|appendix|addendum|supplement)$`)
+	`[-_](discovery[-_]notes|discovery|notes|appendix|addendum|supplement)$`,
+)
 
 // DocType classifies a document from its name.
 func DocType(name string) string {
