@@ -122,6 +122,24 @@ check-prices:  ## Verify the built-in price table covers the models the locally-
 	@# skip and exits 0: absence of evidence is not coverage.
 	go run ./cmd/ape costs coverage --strict
 
+.PHONY: check-claude
+check-claude:  ## Spawn the LOCAL Claude Code and verify it still honours the PTY/model contract ape drives it through.
+	@# ape does not call a Claude Code API — it types into a TUI over a PTY
+	@# and reads the rendered grid back. Every one of those couplings (the
+	@# `bypass permissions on` footer, the ❯ glyph, --dangerously-skip-permissions,
+	@# --model, CLAUDE_CODE_EFFORT_LEVEL, transcript persistence after the env
+	@# scrub) is an undocumented detail of a binary that auto-updates on a
+	@# schedule ape does not control. When one moves, nothing errors: ape keeps
+	@# running and silently stops doing the thing the coupling bought.
+	@#
+	@# Not hermetic — needs claude on PATH, auth, and network — so it is opt-in
+	@# and NEVER part of `make test` or GitHub CI. Run it before a release, and
+	@# after any Claude Code upgrade.
+	@#
+	@# Costs one short Haiku turn; APE_CLAUDE_LIVE_TOKENS=0 skips that subtest.
+	APE_CLAUDE_LIVE=1 go test ./internal/repl/ \
+	  -run TestLive_ClaudeCodeContract -v -count=1 -timeout 20m
+
 .PHONY: ci-local
 ci-local: test lint govulncheck docs-check check-prices xcompile-windows snapshot ## Run every gate CI + release would run (Linux + Windows cross-compile + snapshot).
 	@echo
