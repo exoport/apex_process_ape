@@ -179,15 +179,23 @@ written in the same operation. Exit 5 means "deterministically repairable":
 re-write the field as the reported clamp value or later, re-run, report the
 clamp, and never stop the run.
 
-> **Add `*.lock` to your project's `.gitignore`.** `reconcile` takes an
-> advisory lock on a `sprint-status.yaml.lock` sidecar and never unlinks it —
+> **The lock sidecar is gitignored for you.** `reconcile` takes an advisory
+> lock on a `sprint-status.yaml.lock` sidecar and never unlinks it —
 > releasing a lock and deleting the file are different acts, and deleting one
 > another process may be waiting on is how the mutual exclusion is lost. So
 > the file stays, the framework reconciles at six boundaries, and an
 > untracked artifact sits beside the tracker waiting to be swept up by a
-> `git add -A`. `ape doctor`'s `sprint.lock_ignored` row reports this, and
-> reports it more loudly once the file is already committed — ignoring a
-> tracked file changes nothing until it is untracked too.
+> `git add -A`.
+>
+> `ape framework setup` and `ape framework update` append
+> `sprint-status.yaml.lock` to the project `.gitignore` — the entry is that
+> narrow deliberately, since a blanket `*.lock` would also ignore
+> `Cargo.lock`, `flake.lock` and friends, which belong in history. They skip
+> the write when git already ignores the sidecar by any rule of your own.
+> `ape doctor`'s `sprint.lock_ignored` row reports the state for a project
+> that has not been updated yet, and reports it more loudly once the file is
+> already committed — ignoring a tracked file changes nothing until it is
+> untracked too.
 
 `reconcile` projects an epic's row from its story rows. It changes exactly
 two lines — the `epic-N:` value and the body `updated_at` — leaving every

@@ -45,11 +45,9 @@ vendor/
 # The leading / anchors the pattern to the root of the repo.
 /output/
 
-# `ape sprint reconcile` takes an advisory lock on a `<tracker>.lock` sidecar
-# and never unlinks it — releasing the lock and deleting the file are
-# different acts, and deleting one another process may be waiting on loses
-# the mutual exclusion. The file is a runtime artifact and belongs in no
-# history; this repo's testdata project acquires one whenever a test or a
-# manual run reconciles it. `ape doctor`'s sprint.lock_ignored row is the
-# check that tells a real project the same thing.
-*.lock
+# Advisory-lock sidecar left by `ape sprint reconcile`. It is a runtime
+# artifact — the lock is released, but the file is deliberately not unlinked
+# (deleting a lock another process may hold loses the mutual exclusion).
+# The same entry `ape framework setup` writes into a project, and narrower
+# than `*.lock` on purpose: Cargo.lock and friends belong in history.
+sprint-status.yaml.lock

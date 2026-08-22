@@ -164,9 +164,28 @@
   nothing. The check asks `git check-ignore` rather than matching patterns
   against `.gitignore` by hand — nested ignore files, `.git/info/exclude`,
   `core.excludesFile` and later negations all decide this, and only git
-  agrees with what git will do. `*.lock` added to ape's own `.gitignore`,
-  and `sprint.LockPath` is now one definition shared by the locker, the
-  check and the remediation text.
+  agrees with what git will do. `sprint.LockPath` is now one definition
+  shared by the locker, the check and the remediation text.
+  - **`ape framework setup` and `ape framework update` fix it, not just
+    report it.** A doctor row that tells every operator to add the same line
+    by hand scales badly, so setup writes the entry — a project is born
+    ignoring the artifact — and update is the verify-and-fix pass for
+    projects that predate this. That is a deliberate widening of what those
+    verbs write into a user's tree, defensible where the doctor row is not:
+    they are explicitly-invoked write commands that already install skills,
+    pipelines and a `CLAUDE.md` managed block, while `ape doctor` stays
+    diagnostic.
+  - **The entry is `sprint-status.yaml.lock`, never `*.lock`.** A blanket
+    `*.lock` is fine in ape's own repository and destructive in a user's:
+    `Cargo.lock`, `flake.lock`, `Gemfile.lock`, `poetry.lock` and
+    `composer.lock` all match it and all belong in history. A test asserts
+    each of those five stays un-ignored. Ape's own `.gitignore` was narrowed
+    to the same pattern.
+  - It **appends and never manages a region** — an ignore file's job is to be
+    hand-curated, and owning part of it to hold one line is the wrong trade —
+    and it **asks git before writing**, so a project that already ignores the
+    sidecar by its own rule, a nested `.gitignore`, `.git/info/exclude` or
+    `core.excludesFile` collects no redundant entry.
 
 - **feat(sprint): report a tracker row key the two epic-projection
   implementations count differently** — new `sprint.nonstandard_row_key`

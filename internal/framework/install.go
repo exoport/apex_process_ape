@@ -105,6 +105,11 @@ type UpdateSummary struct {
 	// framework predates it — version-skew suppression, not a failure;
 	// ape then runs no contract check.
 	TerminalContractsInstalled bool `json:"terminalContractsInstalled" yaml:"terminalContractsInstalled"`
+
+	// GitignoreLockAdded reports that the project .gitignore gained the
+	// entry for `ape sprint reconcile`'s advisory-lock sidecar. False means
+	// it was already ignored, which is the steady state after the first run.
+	GitignoreLockAdded bool `json:"gitignoreLockAdded" yaml:"gitignoreLockAdded"`
 }
 
 // ValidationError signals the framework repo is in a state that
@@ -265,6 +270,13 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if err != nil {
 		return nil, err
 	}
+	// Both setup AND update ensure it: update is the "verify and fix" pass
+	// for a project installed before this existed, and the call is idempotent
+	// so a project that already ignores the sidecar is untouched.
+	lockIgnored, err := EnsureLockIgnored(ctx, opts.ProjectRoot)
+	if err != nil {
+		return nil, err
+	}
 	// For Update (doBootstrap=false), preserve the existing ConfigSource
 	// values rather than overwriting with zeros. This keeps the
 	// project_name + extensions recorded by the original Setup.
@@ -316,6 +328,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			ManagedBlockUpdated:     opRules.BlockUpdated,
 
 			TerminalContractsInstalled: contractsInstalled,
+			GitignoreLockAdded:         lockIgnored,
 		},
 	}, nil
 }

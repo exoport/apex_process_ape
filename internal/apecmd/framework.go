@@ -471,6 +471,13 @@ func printFrameworkUpdate(out *frameworkUpdateOutput, format output.Format) erro
 		case out.Summary.OperatingRulesSkipped:
 			fmt.Println("Op-rules:  skipped (framework predates the operating-rules fragment)")
 		}
+		if out.Summary.GitignoreLockAdded {
+			// Reported only when it wrote. ape edited a file the operator
+			// owns, so it says so; on every subsequent run the entry is
+			// already there and a line about it would be noise.
+			fmt.Printf("Ignore:    %s += %s (lock sidecar `ape sprint reconcile` leaves behind)\n",
+				framework.ProjectGitignore, framework.GitignoreLockPattern)
+		}
 		fmt.Printf("Metadata:  %s\n", framework.ProjectMetadata)
 		return nil
 	}

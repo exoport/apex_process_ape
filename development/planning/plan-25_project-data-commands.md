@@ -1898,8 +1898,40 @@ Three decisions in the check:
 
 `sprint.LockPath` and `sprint.LockSuffix` are now one definition shared by the
 two build-tagged lockers, the check and the remediation text, so the path
-cannot drift from what the check looks for. `*.lock` is in ape's own
-`.gitignore`, so the accident cannot recur here either.
+cannot drift from what the check looks for.
+
+**And setup/update fix it, not just doctor.** A row that tells every operator
+to add the same line by hand is a design that scales badly, so
+`ape framework setup` and `ape framework update` append the entry themselves —
+setup so a project is born ignoring the artifact, update as the verify-and-fix
+pass for the projects that predate this. That is a deliberate widening of what
+those commands write into a user's tree, and it is defensible where the doctor
+row is not: setup and update are explicitly-invoked write verbs that already
+install skills, pipelines and a CLAUDE.md managed block, while `ape doctor` is
+diagnostic and must stay so.
+
+Three constraints on that write:
+
+- **The pattern is `sprint-status.yaml.lock`, never `*.lock`.** A blanket
+  `*.lock` is fine in ape's own repository and actively destructive in a
+  user's: `Cargo.lock`, `flake.lock`, `Gemfile.lock`, `poetry.lock` and
+  `composer.lock` all match it and all belong in history. Ignoring a
+  dependency lockfile surfaces weeks later as an unreproducible build, and it
+  would be ape's fault for writing a pattern broader than the problem. A test
+  asserts each of those five stays un-ignored. (Ape's own `.gitignore` was
+  narrowed to the same pattern for the same reason.)
+- **It appends; it never manages a region.** `CLAUDE.md` gets an
+  `apex:managed` block because ape owns that content. An ignore file's whole
+  job is to be hand-curated, and taking ownership of a region of it to hold
+  one line is the wrong trade. The cost is that deleting the line brings it
+  back on the next update; the alternative cost is ape reformatting a file it
+  does not own.
+- **It asks git before writing.** A project that already ignores the sidecar
+  — by `*.lock`, a nested `.gitignore`, `.git/info/exclude`, or
+  `core.excludesFile` — must not collect a redundant entry, and only
+  `git check-ignore` knows. Outside a repository there is no answer, and the
+  entry is written anyway: a directory that is not yet a repository is the one
+  most likely to become one and commit the sidecar on its first `git add -A`.
 
 ## What the framework's own defect report found (2026-08-22)
 

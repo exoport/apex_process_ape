@@ -33,7 +33,8 @@ What happens:
 6. Copies all `apex-*` skill directories into `<project>/.claude/skills/` (including `apex-orchestrator`).
 7. Copies all framework pipeline YAMLs into `<project>/_apex/pipelines/`.
 8. Refreshes the operating-rules fragment (`_apex/apex-operating-rules.md`) and the managed block in the repo-root `CLAUDE.md`. Skipped with a warning if the framework repo predates the fragment.
-9. Rewrites `<project>/_apex/framework.yaml` — preserving the `sources.config` block recorded by the original `setup` so `project_name` + `extensions` stay intact.
+9. Ensures `.gitignore` ignores `sprint-status.yaml.lock`, appending the entry only when git does not already ignore the sidecar. This is the verify-and-fix pass: a project set up before the entry existed gains it here, without having to know it was missing.
+10. Rewrites `<project>/_apex/framework.yaml` — preserving the `sources.config` block recorded by the original `setup` so `project_name` + `extensions` stay intact.
 
 ## What gets touched
 
@@ -45,6 +46,7 @@ What happens:
 | `CLAUDE.md` (repo root)           | Managed block refreshed in place; content outside the markers untouched |
 | `_apex/config.yaml`               | **NOT touched** (that's setup)     |
 | `_apex/config.local.example.yaml` | **NOT touched**                    |
+| `.gitignore` (repo root)          | One entry APPENDED if the lock sidecar is not already ignored; never rewritten, never reordered |
 | `_apex/framework.yaml`            | Rewritten (config block preserved) |
 
 Non-`apex-*` entries under `.claude/skills/` are never touched. In `CLAUDE.md`, only the bytes *between* the `<!-- apex:managed:begin -->` / `<!-- apex:managed:end -->` markers are ape-owned — everything else is preserved byte-for-byte. Do not hand-edit inside the markers; `update` refreshes that region wholesale, so in-marker edits are discarded.
@@ -56,6 +58,7 @@ Running `update` twice on a steady-state project is safe and cheap:
 - Skills: wiped + reinstalled. Net effect identical when the framework HEAD is unchanged.
 - Pipelines: overwritten. Net effect identical.
 - Operating rules: fragment overwritten; the `CLAUDE.md` managed block is rewritten only when its bytes actually change, so a steady-state `update` leaves `CLAUDE.md` byte-identical.
+- `.gitignore`: appended to only when the sidecar is not already ignored, so a steady-state `update` leaves it byte-identical. Unlike `CLAUDE.md` this is **not** a managed block — ape appends one line and never rewrites the file, because an ignore file's whole job is to be hand-curated and managing a region of it to own a single line is a bad trade. Delete the line and the next `update` puts it back; that is the cost of the simpler contract.
 - `framework.yaml`: rewritten with a fresh `installed_at` timestamp.
 
 The destructive operation that matters — wiping `apex-*` skills — is git-safe: if the project is a git repo and you have uncommitted edits to a tracked `apex-*` skill file, the command refuses without `--force`. Untracked `apex-*` paths are treated as leftovers and get clobbered.
