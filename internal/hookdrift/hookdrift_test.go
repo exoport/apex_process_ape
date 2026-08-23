@@ -208,7 +208,11 @@ func TestObserve_IgnoresTheFrameworksOutputTree(t *testing.T) {
 	// Every directory the framework says it writes under the output folder.
 	for _, dir := range []string{
 		"handoffs", "governance", "functionality", "planning",
-		"implementation", "framework-requests", "verify-orchestrator",
+		"implementation", "framework-requests", "retrospective",
+		"ux-mockups", "ux-wireframes",
+		// Build-repo-only, but the literal path is reachable when ape runs
+		// inside the framework repo itself.
+		"verify-orchestrator",
 	} {
 		t.Run(dir, func(t *testing.T) {
 			t.Parallel()

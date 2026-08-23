@@ -277,6 +277,15 @@ func copyFile(src, dst string) error {
 // pruneIfEmpty removes dir when nothing is left in it. Best-effort: a
 // directory that still holds something the migration declined to move
 // stays, which is the point.
+//
+// "Empty" here means NO ENTRIES AT ALL — files included. That is deliberate
+// and it is not the same test hasRunDir applies a few lines up, which counts
+// only subdirectories. The two look unifiable and are not: hasRunDir answers
+// "is there a run still to move?", where a loose file is not a run; this
+// answers "may I delete this directory?", where a loose file is somebody's
+// data. The framework writes loose files at the output-folder root —
+// defer-*, retro-epic-*, data-architecture-ripple-* and friends — so a
+// prune that ignored files would delete them. Do not make these agree.
 func pruneIfEmpty(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) > 0 {

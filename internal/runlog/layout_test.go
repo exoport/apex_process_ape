@@ -125,6 +125,59 @@ func TestLegacyRunRoots_RenamedOutputFolderMovesAllFour(t *testing.T) {
 
 // End-to-end for the renamed case: ungrouped trees relocate correctly,
 // which the grouped-only migration would have silently skipped.
+// Loose files at the output-folder root must survive, and must stop the
+// husk prune.
+//
+// This is the case that bites only on a RENAMED output_folder, which is
+// also the only case where ape prunes an output directory at all. A project
+// that renamed output_folder after running older ape has its legacy `_output`
+// holding both ape's run trees AND whatever loose files the skills left there
+// — defer-*, retro-epic-*, data-architecture-ripple-* and friends, which have
+// no directory of their own. Once the run trees move out, `_output` still
+// holds those files and must NOT be removed.
+//
+// pruneIfEmpty counts files for exactly this reason. hasRunDir, a few lines
+// away, counts only subdirectories because it answers a different question.
+// This test is what stops the two being "unified".
+func TestMigrate_LooseFilesAtOutputRootBlockThePrune(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeConfig(t, root, "build/out")
+
+	runDir := filepath.Join(root, "_output", "pipelines", "design", "r1")
+	require.NoError(t, os.MkdirAll(runDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(runDir, "manifest.yaml"), []byte("x\n"), 0o600))
+
+	loose := []string{
+		"defer-something.md", "defer-epic-04.md", "defer-code-review-12.md",
+		"retro-epic-04.md", "retro-improvement-brief-epic-04.md",
+		"data-architecture-ripple-07.md",
+	}
+	for _, name := range loose {
+		require.NoError(t, os.WriteFile(
+			filepath.Join(root, "_output", name), []byte("framework-owned\n"), 0o600,
+		))
+	}
+
+	res, err := Migrate(root)
+	require.NoError(t, err)
+	require.Equal(t, []string{"pipeline/design/r1"}, res.Moved)
+
+	// The run moved...
+	require.FileExists(t, filepath.Join(root, "build", "out", "ape", "pipelines", "design", "r1", "manifest.yaml"))
+	require.NoDirExists(t, filepath.Join(root, "_output", "pipelines"))
+
+	// ...and every loose file is still there, in a directory that survived
+	// precisely because they are in it.
+	require.DirExists(t, filepath.Join(root, "_output"),
+		"_output holds the framework's loose files and must not be pruned")
+	for _, name := range loose {
+		body, rerr := os.ReadFile(filepath.Join(root, "_output", name))
+		require.NoError(t, rerr, "%s must survive the migration", name)
+		require.Equal(t, "framework-owned\n", string(body))
+	}
+}
+
 func TestMigrate_RenamedOutputFolderMovesPromptsAndChats(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

@@ -147,7 +147,27 @@ var frameworkOutputDirs = []string{
 	"planning",
 	"implementation",
 	"framework-requests",
+	"retrospective", // apex-epic-retrospective
+	"ux-mockups",    // apex-create-mockups
+	"ux-wireframes", // apex-create-wireframes
+	// verify-orchestrator cannot occur in a user project — it is the
+	// framework build repo's own meta-skill writing a literal
+	// _output/verify-orchestrator/, and it never ships. Guarded anyway:
+	// the name costs nothing and the literal path is reachable when ape
+	// runs inside that repo.
 	"verify-orchestrator",
+}
+
+// frameworkOutputFiles are LOOSE FILES the skills write at the output-folder
+// root, with no directory of their own. They are the reason pruneIfEmpty
+// counts files rather than only subdirectories.
+var frameworkOutputFiles = []string{
+	"defer-something.md",
+	"defer-epic-04.md",
+	"defer-code-review-12.md",
+	"retro-epic-04.md",
+	"retro-improvement-brief-epic-04.md",
+	"data-architecture-ripple-07.md",
 }
 
 // The framework owns the output folder. Its directories sit beside ape's
@@ -163,6 +183,12 @@ func TestMigrate_LeavesFrameworkOutputAlone(t *testing.T) {
 		require.NoError(t, os.MkdirAll(filepath.Dir(f), 0o755))
 		require.NoError(t, os.WriteFile(f, []byte("framework-owned: "+dir+"\n"), 0o600))
 	}
+	// ...and the loose files the skills write with no directory of their own.
+	for _, name := range frameworkOutputFiles {
+		require.NoError(t, os.WriteFile(
+			filepath.Join(root, "_output", name), []byte("framework-owned: "+name+"\n"), 0o600,
+		))
+	}
 
 	_, err := Migrate(root)
 	require.NoError(t, err)
@@ -171,6 +197,11 @@ func TestMigrate_LeavesFrameworkOutputAlone(t *testing.T) {
 		body, err := os.ReadFile(filepath.Join(root, "_output", dir, "record.md"))
 		require.NoError(t, err, "%s must survive the migration", dir)
 		require.Equal(t, "framework-owned: "+dir+"\n", string(body))
+	}
+	for _, name := range frameworkOutputFiles {
+		body, err := os.ReadFile(filepath.Join(root, "_output", name))
+		require.NoError(t, err, "loose file %s must survive the migration", name)
+		require.Equal(t, "framework-owned: "+name+"\n", string(body))
 	}
 	// ape's own legacy tree still went where it belongs.
 	require.FileExists(t, filepath.Join(PipelineRunDir(root, "design", "run1"), "manifest.yaml"))

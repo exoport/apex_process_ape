@@ -24,7 +24,10 @@ default:
 ├── planning/                          ← framework
 ├── implementation/                    ← framework
 ├── framework-requests/                ← framework
-├── verify-orchestrator/               ← framework
+├── retrospective/                     ← framework
+├── ux-mockups/                        ← framework
+├── ux-wireframes/                     ← framework
+├── defer-*.md, retro-epic-*.md, …     ← framework (loose files, no dir)
 └── ape/                               ← ape owns this, and only this
     ├── pipelines/<pipeline>/<run-id>/
     ├── tasks/<skill>/<run-id>/
@@ -33,6 +36,20 @@ default:
     ├── service/
     └── cost-rollup.json
 ```
+
+### Two path shapes
+
+Run kinds nest in one of two ways, which is why the paths are not uniform:
+
+| Shape | Kinds | Path |
+| --- | --- | --- |
+| **Grouped** | pipelines, tasks | `<root>/<group>/<run-id>/` — grouped by pipeline name or skill name |
+| **Flat** | prompts, chats | `<root>/<id>/` — the id is unique on its own |
+
+A grouped kind has something worth grouping by: you run the `design` pipeline
+many times, and want its runs together. A prompt or chat has no such natural
+bucket. `service/` is neither — it holds `<job-id>.log` files, not run
+directories.
 
 > **A project that renames `output_folder`** gets its ape artifacts under
 > that folder too — `build/artifacts/ape/…` for `output_folder:
@@ -54,16 +71,21 @@ default:
 ## Pipeline runs
 
 ```
-<project>/_output/ape/pipelines/<pipeline-name>/<run-id>/
-├── manifest.yaml        ← PLAN-3 per-step metrics, cost, commit shas
-├── report.md            ← human-readable run report
-├── hook-events.jsonl    ← one JSON per Claude Code hook (PLAN-5 / C4)
-├── bridge-calls.jsonl   ← one JSON per MCP tool call seen by the bridge
-├── checkpoints.jsonl    ← stage events + skill `reply()` + commit-made
-└── transcripts/
-    ├── step-01-<skill>.jsonl  ← symlink into ~/.claude/projects/<hash>/<sid>.jsonl
-    ├── step-02-<skill>.jsonl  ← …
-    └── …
+<project>/_output/ape/pipelines/<pipeline-name>/
+├── latest -> <run-id>       ← symlink to the most recent run (see below)
+└── <run-id>/
+    ├── manifest.yaml        ← PLAN-3 per-step metrics, cost, commit shas
+    ├── report.md            ← human-readable run report
+    ├── hook-events.jsonl    ← one JSON per Claude Code hook (PLAN-5 / C4)
+    ├── bridge-calls.jsonl   ← one JSON per MCP tool call seen by the bridge
+    ├── checkpoints.jsonl    ← stage events + skill `reply()` + commit-made
+    ├── stages/
+    │   └── <NN>-<stage>/
+    │       └── step-<NN>-<skill>.ndjson  ← the per-step event stream
+    └── transcripts/
+        ├── step-01-<skill>.jsonl  ← symlink into ~/.claude/projects/<hash>/<sid>.jsonl
+        ├── step-02-<skill>.jsonl  ← …
+        └── …
 ```
 
 - `<run-id>` is `YYYYMMDD-HHMMSS-<7-char hash>` (PLAN-3 shape, unchanged).
@@ -73,6 +95,58 @@ default:
   session JSONL stays under `~/.claude/projects/` and ape's run-dir
   references it. Deleting the source breaks the symlink — that's the
   trade for not double-storing transcripts.
+- **`latest` sits one level above the run dir**, beside its siblings — not
+  inside one. It is the path to reach for interactively, and the one most
+  docs quote:
+
+  ```bash
+  cat _output/ape/pipelines/design/latest/report.md
+  ```
+
+  Tasks have one too (`tasks/<skill>/latest`). Prompts and chats do not:
+  their roots are flat, so there is no group to hang a pointer off.
+- **`stages/` is where per-step detail lives.** `manifest.yaml` is the
+  summary; `stages/<NN>-<stage>/step-<NN>-<skill>.ndjson` is the event
+  stream that produced it. When a step fails, this is the file to open.
+
+## Task runs
+
+`ape task <skill>` runs a single framework skill — the single-skill analogue
+of a pipeline run, grouped by skill name rather than pipeline name:
+
+```text
+<project>/_output/ape/tasks/<skill>/
+├── latest -> <run-id>
+└── <run-id>/
+    ├── manifest.yaml        ← same schema as a pipeline manifest, one step
+    ├── hook-events.jsonl
+    ├── bridge-calls.jsonl
+    ├── checkpoints.jsonl
+    └── transcripts/
+```
+
+No `stages/`: a task is one step, so there is no stage tree to build. Override
+the base directory with `--manifest-dir`.
+
+`ape script` writes here too — a script's spawned steps are tasks.
+
+## Prompt runs
+
+`ape prompt` drives an unattended session. Its root is flat — the prompt id is
+unique on its own, so there is nothing to group by:
+
+```text
+<project>/_output/ape/prompts/<prompt-id>/
+├── prompt.yaml          ← the session record: status, model, cost, tokens
+├── hook-events.jsonl
+├── bridge-calls.jsonl
+├── checkpoints.jsonl
+└── transcripts/
+```
+
+`prompt.yaml` carries the full per-model token breakdown, which is why
+`ape costs reprice` can recompute a prompt's cost after a price-table
+correction. Read one with `ape costs prompt <id>`.
 
 ## Chat sessions
 
@@ -93,6 +167,24 @@ hook observability over a separate TCP port. Artefacts:
   PTY migration, 2026-05-22; before that, a tmux spawn-and-attach
   under PLAN-6, 2026-05-20). claude's own transcript still lives at
   `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`.
+- **A chat therefore contributes no cost.** `ape costs chat <id>` and the
+  chat rows of the cost rollup both read `session.yaml`, so with nothing
+  writing it they find nothing. Use `ape costs` for the project total from
+  pipeline and task manifests, which are written.
+
+## Service job logs
+
+`ape service` runs a NATS job daemon. Unlike every other kind, this root holds
+plain files rather than run directories — one log per accepted job:
+
+```text
+<project>/_output/ape/service/
+└── <job-id>.log
+```
+
+The jobs themselves are pipelines or tasks, so their artefacts land under
+`pipelines/` or `tasks/` as usual. This directory is just the daemon's own
+stdout/stderr capture, and it is transient — nothing reads it back.
 
 ## Cross-project state
 
