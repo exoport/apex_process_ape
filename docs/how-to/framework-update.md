@@ -34,7 +34,8 @@ What happens:
 7. Copies all framework pipeline YAMLs into `<project>/_apex/pipelines/`.
 8. Refreshes the operating-rules fragment (`_apex/apex-operating-rules.md`) and the managed block in the repo-root `CLAUDE.md`. Skipped with a warning if the framework repo predates the fragment.
 9. Ensures `.gitignore` ignores `sprint-status.yaml.lock`, appending the entry only when git does not already ignore the sidecar. This is the verify-and-fix pass: a project set up before the entry existed gains it here, without having to know it was missing.
-10. Rewrites `<project>/_apex/framework.yaml` — preserving the `sources.config` block recorded by the original `setup` so `project_name` + `extensions` stay intact.
+10. Relocates any run artifacts still at the pre-`{output_folder}/ape` paths (`_output/pipelines/`, `_output/tasks/`, and on a project that renamed `output_folder`, `_output/ape/prompts/` and `_output/ape/chats/`). Skipped with `--no-migrate`; reported without writing by `--dry-run`. See [What the relocation does](#what-the-relocation-does).
+11. Rewrites `<project>/_apex/framework.yaml` — preserving the `sources.config` block recorded by the original `setup` so `project_name` + `extensions` stay intact.
 
 ## What gets touched
 
@@ -48,6 +49,8 @@ What happens:
 | `_apex/config.local.example.yaml` | **NOT touched**                    |
 | `.gitignore` (repo root)          | One entry APPENDED if the lock sidecar is not already ignored; never rewritten, never reordered |
 | `_apex/framework.yaml`            | Rewritten (config block preserved) |
+| `{output_folder}/ape/`            | Run artifacts MOVED here from the legacy paths, once. Never overwritten — see below |
+| `{output_folder}/` (elsewhere)    | **NOT touched** — the framework's handoffs, briefs and reports are not ape's |
 
 Non-`apex-*` entries under `.claude/skills/` are never touched. In `CLAUDE.md`, only the bytes *between* the `<!-- apex:managed:begin -->` / `<!-- apex:managed:end -->` markers are ape-owned — everything else is preserved byte-for-byte. Do not hand-edit inside the markers; `update` refreshes that region wholesale, so in-marker edits are discarded.
 
@@ -59,9 +62,44 @@ Running `update` twice on a steady-state project is safe and cheap:
 - Pipelines: overwritten. Net effect identical.
 - Operating rules: fragment overwritten; the `CLAUDE.md` managed block is rewritten only when its bytes actually change, so a steady-state `update` leaves `CLAUDE.md` byte-identical.
 - `.gitignore`: appended to only when the sidecar is not already ignored, so a steady-state `update` leaves it byte-identical. Unlike `CLAUDE.md` this is **not** a managed block — ape appends one line and never rewrites the file, because an ignore file's whole job is to be hand-curated and managing a region of it to own a single line is a bad trade. Delete the line and the next `update` puts it back; that is the cost of the simpler contract.
+- Run artifacts: relocated only if a legacy tree still holds runs. A project already on the current layout has nothing to read, so a steady-state `update` moves nothing and reports nothing.
 - `framework.yaml`: rewritten with a fresh `installed_at` timestamp.
 
 The destructive operation that matters — wiping `apex-*` skills — is git-safe: if the project is a git repo and you have uncommitted edits to a tracked `apex-*` skill file, the command refuses without `--force`. Untracked `apex-*` paths are treated as leftovers and get clobbered.
+
+## What the relocation does
+
+`update` is where a project moves onto ape's current output layout. ape owns
+`{output_folder}/ape/` and nothing outside it; run artifacts written by older
+versions sit at `_output/pipelines/` and `_output/tasks/`, beside the
+framework's own directories.
+
+This moves your run history — the manifests `ape costs` reads and the run ids
+your reports quote — so it is deliberately conservative:
+
+- **Whole run directories only.** A run is never half at the old path and half
+  at the new one.
+- **A destination that already exists is a conflict.** The source is left
+  untouched and named in the output; nothing is overwritten or merged. Two runs
+  sharing an id is not something to resolve by guessing. A conflict does not
+  stop the other runs from moving.
+- **`latest` symlinks are recreated** pointing at the same run.
+- **Emptied legacy directories are pruned** — but never your live output
+  folder, even when empty. That directory is the framework's.
+- **Idempotent.** Nothing left to move means nothing reported.
+
+Look before you leap:
+
+```bash
+ape framework update --dry-run     # reports what would move, writes nothing
+ape framework update --no-migrate  # installs framework files only, defers this
+```
+
+`ape doctor` reports a project that still needs it as `runs.legacy_layout`.
+Until it runs, cost rollups and the hook-contract check read a project with no
+history — nothing is lost, the records are just somewhere ape no longer looks.
+
+Full layout: [How to read the output folder](run-artefacts.md).
 
 ## Inspecting drift
 

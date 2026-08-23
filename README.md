@@ -66,6 +66,8 @@ ape pipeline design --no-tui
 
 Pre-flight checks run before any Claude invocation. If a pipeline requires upstream artifacts (e.g., `governance` needs `architecture.md`), `ape` fails fast with a message naming the missing file and the upstream pipeline that produces it.
 
+Every run writes a manifest, a report, and the hook/bridge/checkpoint streams under `{output_folder}/ape/` — the `output_folder` from `_apex/config.yaml`, `_output` by default. ape owns that one subtree and writes nothing outside it; the rest of the output folder is the framework's. See [How to read the output folder](docs/how-to/run-artefacts.md).
+
 ## Pipeline TUI
 
 While a pipeline runs, the TUI shows three regions:

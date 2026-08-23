@@ -139,6 +139,7 @@ var allChecks = []doctorCheck{
 	{Name: "cost.price_table_coverage", Run: checkPriceTableCoverage},
 	{Name: "hooks.contract_drift", Run: checkHookContractDrift},
 	{Name: "framework.terminal_contracts", Run: checkTerminalContracts},
+	{Name: "runs.legacy_layout", Run: checkRunLayoutLegacy},
 	{Name: "kvm.available", Run: checkKVMAvailable},
 	{Name: "containerd.running", Run: checkContainerdRunning},
 	{Name: "kata.runtime", Run: checkKataRuntime},
@@ -155,7 +156,6 @@ var allChecks = []doctorCheck{
 	{Name: "sprint.lock_ignored", Run: checkSprintLockIgnored},
 	{Name: "memory.size", Required: true, Run: checkMemorySize},
 	{Name: "migration.pending", Run: checkMigrationPending},
-	{Name: "runs.legacy_layout", Run: checkRunLayoutLegacy},
 }
 
 func newDoctorCmd() *cobra.Command {
@@ -205,6 +205,10 @@ silent:
                                 installed, and which skills it enrols. No
                                 table means no run is checked for a
                                 terminal contract.
+  runs.legacy_layout            whether run artifacts are still at the
+                                pre-{output_folder}/ape paths. Until they
+                                move, cost rollups and the hook check read
+                                a project with no history.
 
 Both SKIP or report INFO when there is nothing to judge — absence of
 evidence is not coverage.

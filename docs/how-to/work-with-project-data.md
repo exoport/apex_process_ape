@@ -313,11 +313,16 @@ refuses when two headings slugify to the same value rather than writing
 ape doctor
 ```
 
-Six rows report project data: `config.resolved`, `registry.drift`,
-`story.frontmatter`, `sprint.divergence`, `memory.size` and
-`migration.pending`. All degrade to INFO outside a project. `memory.size`
-and `config.resolved` are the only two that can fail the run — see
-[Run doctor in CI](run-doctor-in-ci.md).
+Seven rows report project data: `config.resolved`, `registry.drift`,
+`story.frontmatter`, `sprint.divergence`, `sprint.lock_ignored`,
+`memory.size` and `migration.pending`. All degrade to INFO outside a
+project. `memory.size` and `config.resolved` are the only two that can fail
+the run — see [Run doctor in CI](run-doctor-in-ci.md).
+
+An eighth project-scoped row, `runs.legacy_layout`, reports on ape's own
+artifacts rather than the project's records: run history still sitting at
+the pre-`{output_folder}/ape` paths. `ape framework update` relocates it —
+see [How to read the output folder](run-artefacts.md).
 
 ## Related
 

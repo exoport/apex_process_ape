@@ -1232,6 +1232,10 @@ silent:
                                 installed, and which skills it enrols. No
                                 table means no run is checked for a
                                 terminal contract.
+  runs.legacy_layout            whether run artifacts are still at the
+                                pre-{output_folder}/ape paths. Until they
+                                move, cost rollups and the hook check read
+                                a project with no history.
 
 Both SKIP or report INFO when there is nothing to judge — absence of
 evidence is not coverage.

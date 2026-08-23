@@ -33,8 +33,9 @@ What happens:
 6. Removes any pre-existing `<project>/.claude/skills/apex-*` (so leftover skills from a prior install disappear).
 7. Copies all `apex-*` skill directories into `<project>/.claude/skills/` (including the `apex-orchestrator` persona skill).
 8. Copies all framework pipeline YAMLs into `<project>/_apex/pipelines/`.
-9. Installs the always-on operating-rules fragment (`_apex/apex-operating-rules.md`) and ensures the repo-root `CLAUDE.md` imports it inside a managed block — see [Operating rules](#operating-rules-always-on-apex-discipline) below. Skipped with a warning if the framework repo predates the fragment.
-10. Writes `<project>/_apex/framework.yaml` recording what was installed.
+9. Relocates any run artifacts still at the pre-`{output_folder}/ape` paths. Usually a no-op on a fresh project — but `ape chat` and `ape prompt` work without a framework install, so a project can have run history before `setup` ever runs. Same rules as on update: nothing overwritten, collisions reported. See [How to refresh the framework](framework-update.md#what-the-relocation-does).
+10. Installs the always-on operating-rules fragment (`_apex/apex-operating-rules.md`) and ensures the repo-root `CLAUDE.md` imports it inside a managed block — see [Operating rules](#operating-rules-always-on-apex-discipline) below. Skipped with a warning if the framework repo predates the fragment.
+11. Writes `<project>/_apex/framework.yaml` recording what was installed.
 
 ## What gets installed
 
