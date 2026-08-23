@@ -136,10 +136,14 @@ func emitFrameworkDryRun(ctx context.Context, w io.Writer, repo, projectRoot str
 		fmt.Fprintf(w, "migration %s: %s — %s\n", st.Name, state, st.Detail)
 	}
 	if runlog.Pending(projectRoot) {
-		fmt.Fprintf(w, "run layout: PENDING — run artifacts still at _output/pipelines / _output/tasks; "+
-			"an update relocates them into %s/\n", filepath.Join(runlog.OutputDirName, runlog.ApeDirName))
+		root := runlog.ApeRoot(projectRoot)
+		if rel, rerr := filepath.Rel(projectRoot, root); rerr == nil {
+			root = rel
+		}
+		fmt.Fprintf(w, "run layout: PENDING — run artifacts still at the legacy _output paths; "+
+			"an update relocates them into %s/\n", root)
 	} else {
-		fmt.Fprintln(w, "run layout: nothing pending — run artifacts are under _output/ape")
+		fmt.Fprintln(w, "run layout: nothing pending — run artifacts are under the current output folder")
 	}
 	fmt.Fprintln(w, "\n--dry-run: nothing written, nothing committed.")
 	return nil

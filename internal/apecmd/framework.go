@@ -5,12 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/output"
-	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -487,7 +485,7 @@ func printFrameworkUpdate(out *frameworkUpdateOutput, format output.Format) erro
 		// is nothing left to move and a line about it would be noise.
 		if n := out.Summary.RunsRelocated; n > 0 {
 			fmt.Printf("Runs:      relocated %d run(s) into %s/ (was _output/pipelines, _output/tasks)\n",
-				n, filepath.Join(runlog.OutputDirName, runlog.ApeDirName))
+				n, out.Summary.RunsRoot)
 		}
 		if c := out.Summary.RunsRelocationConflicts; len(c) > 0 {
 			// Never folded into the count above: these did NOT move, and a

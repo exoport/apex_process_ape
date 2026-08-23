@@ -8,12 +8,13 @@ PLAN-5 / C6.
 
 ## What ape owns
 
-`_output/` is **the framework's** output folder — its value comes from
-`output_folder` in `_apex/config.yaml`, and the skills write handoffs, briefs
-and verify reports there.
+The output folder is **the framework's**. Its path comes from `output_folder`
+in `_apex/config.yaml` — `_output` by default, but a project may point it
+anywhere — and the skills write handoffs, briefs and verify reports there.
 
-ape owns exactly one subtree of it, **`_output/ape/`**, and writes nothing
-outside it:
+ape resolves that variable and owns exactly one subtree of it,
+**`{output_folder}/ape/`**, writing nothing outside it. Shown below at the
+default:
 
 ```
 <project>/_output/                     ← framework-owned
@@ -28,10 +29,16 @@ outside it:
     └── cost-rollup.json
 ```
 
+> **A project that renames `output_folder`** gets its ape artifacts under
+> that folder too — `build/artifacts/ape/…` for `output_folder:
+> build/artifacts`. When the config is absent or does not parse (a bare
+> directory, a syntax error), ape falls back to the framework's own default,
+> `_output`.
+
 > **Moved in v0.0.53.** Pipeline and task runs used to live at
 > `_output/pipelines/` and `_output/tasks/`, as siblings of the framework's
-> own content. `ape framework setup|update` relocates them into
-> `_output/ape/` automatically — whole run directories at a time, never
+> own content, and ape ignored `output_folder` entirely. `ape framework
+> setup|update` relocates them into `{output_folder}/ape/` automatically — whole run directories at a time, never
 > overwriting, and reporting any run whose destination is already taken
 > rather than merging it. `ape doctor` reports a project that still needs it
 > (`runs.legacy_layout`), and `ape framework update --dry-run` shows what
@@ -106,15 +113,30 @@ exit (best-effort — failure prints a warning, does not block exit).
 
 ## .gitignore policy
 
-On first run, ape checks whether `_output/` is in the project's
-`.gitignore`. If absent:
+**ape does not manage this.** Whether run artefacts are committed is the
+project's decision, and the output folder is the framework's directory
+rather than ape's, so ape neither adds an entry nor prompts for one.
 
-- **TTY:** ape prompts (`Append _output/ to .gitignore? [y/N]`).
-- **Non-TTY:** ape warns on stderr but does not modify the file.
+If you do not want run artefacts tracked, add your output folder to
+`.gitignore` yourself:
 
-Add `_output/` manually if you prefer not to be asked. The line is
-a directory match, so files under `_output/` of any subproject also
-gets ignored.
+```gitignore
+_output/          # or whatever output_folder names
+```
+
+A directory match covers `{output_folder}/ape/` along with the framework's
+own subdirectories. To keep the framework's artefacts tracked but not
+ape's, ignore the subtree instead:
+
+```gitignore
+_output/ape/
+```
+
+> The one `.gitignore` entry ape *does* manage is unrelated to this: `ape
+> framework setup|update` adds the tracker lock sidecar
+> (`sprint-status.yaml.lock`), because that file is a side effect of `ape
+> sprint reconcile` taking an advisory lock and is never meaningful to
+> commit.
 
 ## File schemas
 

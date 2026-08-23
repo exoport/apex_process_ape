@@ -624,12 +624,16 @@ func checkRunLayoutLegacy(_ context.Context, env doctorEnv) CheckResult {
 		return CheckResult{Status: StatusInfo, Message: "not in a project"}
 	}
 	if !runlog.Pending(env.ProjectRoot) {
-		return CheckResult{Status: StatusOK, Message: "run artifacts are under _output/ape"}
+		root := runlog.ApeRoot(env.ProjectRoot)
+		if rel, err := filepath.Rel(env.ProjectRoot, root); err == nil {
+			root = rel
+		}
+		return CheckResult{Status: StatusOK, Message: "run artifacts are under " + root}
 	}
 	return CheckResult{
 		Status:  StatusWarn,
 		Message: "run artifacts still at the legacy _output/pipelines and/or _output/tasks paths",
-		Remediation: "ape now keeps everything it writes under _output/ape/, so _output/ stays the " +
+		Remediation: "ape now keeps everything it writes under {output_folder}/ape/, so the output folder stays the " +
 			"framework's. Until these move, cost rollups and the hook-contract check read a project " +
 			"with no history. `ape framework update` relocates them: nothing is overwritten, and a run " +
 			"whose destination is already taken is reported rather than merged.",

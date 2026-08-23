@@ -24,23 +24,37 @@ type MigrationResult struct {
 // finds rather than enumerating the whole tree.
 func Pending(projectRoot string) bool {
 	for _, rel := range LegacyRunRoots(projectRoot) {
+		if !rel.Grouped {
+			if hasRunDir(rel.From) {
+				return true
+			}
+			continue
+		}
 		groups, err := os.ReadDir(rel.From)
 		if err != nil {
 			continue
 		}
 		for _, g := range groups {
-			if !g.IsDir() {
-				continue
+			if g.IsDir() && hasRunDir(filepath.Join(rel.From, g.Name())) {
+				return true
 			}
-			runs, err := os.ReadDir(filepath.Join(rel.From, g.Name()))
-			if err != nil {
-				continue
-			}
-			for _, r := range runs {
-				if r.IsDir() {
-					return true
-				}
-			}
+		}
+	}
+	return false
+}
+
+// hasRunDir reports whether dir holds at least one subdirectory — one run.
+// An empty legacy tree is not pending work: there is nothing in it to
+// move, and reporting it would nag forever on a project whose runs were
+// deleted by hand.
+func hasRunDir(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			return true
 		}
 	}
 	return false
@@ -75,10 +89,36 @@ func Migrate(projectRoot string) (MigrationResult, error) {
 			return res, err
 		}
 	}
+	pruneLegacyParents(projectRoot)
 	return res, nil
 }
 
+// pruneLegacyParents removes the emptied `_output/ape` and `_output`
+// husks a relocation can leave behind on a project that renamed
+// output_folder.
+//
+// It never touches the LIVE output folder, even when empty: that
+// directory is the framework's, and deleting it because ape happened to
+// find it empty would be ape reaching outside its own subtree — the exact
+// thing this whole change is about.
+func pruneLegacyParents(projectRoot string) {
+	legacy := filepath.Join(projectRoot, DefaultOutputDirName)
+	if filepath.Clean(legacy) == filepath.Clean(OutputRoot(projectRoot)) {
+		return // _output IS the output folder — not ours to remove
+	}
+	pruneIfEmpty(filepath.Join(legacy, ApeDirName))
+	pruneIfEmpty(legacy)
+}
+
 func migrateRoot(rel Relocation, res *MigrationResult) error {
+	// Ungrouped trees (prompts, chats) hold run dirs directly.
+	if !rel.Grouped {
+		if err := migrateGroup(rel, "", res); err != nil {
+			return err
+		}
+		pruneIfEmpty(rel.From)
+		return nil
+	}
 	groups, err := os.ReadDir(rel.From)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -101,11 +141,19 @@ func migrateRoot(rel Relocation, res *MigrationResult) error {
 	return nil
 }
 
+// migrateGroup moves the runs in one group. group is "" for an ungrouped
+// tree, where the runs sit directly under rel.From.
 func migrateGroup(rel Relocation, group string, res *MigrationResult) error {
-	srcGroup := filepath.Join(rel.From, group)
-	dstGroup := filepath.Join(rel.To, group)
+	srcGroup, dstGroup := rel.From, rel.To
+	if group != "" {
+		srcGroup = filepath.Join(rel.From, group)
+		dstGroup = filepath.Join(rel.To, group)
+	}
 	runs, err := os.ReadDir(srcGroup)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		return fmt.Errorf("read %s: %w", srcGroup, err)
 	}
 	for _, r := range runs {

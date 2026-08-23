@@ -289,14 +289,29 @@
     the release skill both say plainly that this is "not verified" rather than
     a pass.
 
-- **BREAKING (on-disk): everything ape writes now lives under `_output/ape/`** —
-  `_output/` is the *framework's* output folder. Its value comes from the
-  `output_folder` config variable and the skills write handoffs, briefs and
-  verify-orchestrator reports there. ape had been scattering run artifacts
-  across it as siblings of that content — `_output/pipelines/`,
-  `_output/tasks/`, and inconsistently `_output/ape/prompts/` and
-  `_output/ape/chats/` — with two different nesting depths. ape now owns
-  exactly one subtree, `_output/ape/`, and writes nothing outside it.
+- **BREAKING (on-disk): everything ape writes now lives under
+  `{output_folder}/ape/`** — the output folder is the *framework's*. Its path
+  comes from the `output_folder` config variable and the skills write
+  handoffs, briefs and verify-orchestrator reports there. ape had been
+  scattering run artifacts across it as siblings of that content —
+  `_output/pipelines/`, `_output/tasks/`, and inconsistently
+  `_output/ape/prompts/` and `_output/ape/chats/` — at two different nesting
+  depths, while ignoring `output_folder` entirely and hardcoding `_output`.
+  ape now resolves the variable and owns exactly one subtree of it,
+  `{output_folder}/ape/`, writing nothing outside it.
+  - **`output_folder` is now honoured.** A project with `output_folder:
+    build/artifacts` gets its ape artifacts at `build/artifacts/ape/`.
+    Resolution degrades rather than failing: run paths are needed where a
+    project config is not guaranteed (`ape chat` in a bare directory, a
+    `config.yaml` with a syntax error), so an absent or unparseable config
+    falls back to the framework's own default, `_output`.
+  - **The migration is asymmetric for a renamed output folder.** Because ape
+    hardcoded `_output` *before* this change, legacy artifacts sit under a
+    literal `_output` whatever the config says. A default project therefore
+    has two relocations (pipelines, tasks); a project that renamed
+    output_folder has four, because its prompts and chats were also written
+    to the literal `_output/ape/`. Emptied `_output/` husks are pruned — but
+    never the live output folder, which is the framework's.
   - **`ape framework setup|update` relocates an existing project.** Whole run
     directories at a time, so a run is never half at each path; a destination
     that already exists is reported as a conflict and left alone rather than

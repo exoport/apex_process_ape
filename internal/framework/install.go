@@ -114,7 +114,11 @@ type UpdateSummary struct {
 	// RunsRelocated / RunsRelocationConflicts report the one-time move of
 	// run artifacts from the pre-`_output/ape` layout. Both are zero on a
 	// project that has never run ape, and on every install after the first.
-	RunsRelocated           int      `json:"runsRelocated"                     yaml:"runsRelocated"`
+	RunsRelocated int `json:"runsRelocated" yaml:"runsRelocated"`
+	// RunsRoot is the resolved {output_folder}/ape the runs now live under,
+	// relative to the project. Reported because output_folder is the
+	// framework's to name, so it is not always "_output/ape".
+	RunsRoot                string   `json:"runsRoot,omitempty"                yaml:"runsRoot,omitempty"`
 	RunsRelocationConflicts []string `json:"runsRelocationConflicts,omitempty" yaml:"runsRelocationConflicts,omitempty"`
 
 	// GitignoreLockAdded reports that the project .gitignore gained the
@@ -352,6 +356,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			TerminalContractsInstalled: contractsInstalled,
 
 			RunsRelocated:           len(runsMoved.Moved),
+			RunsRoot:                relRoot(opts.ProjectRoot),
 			RunsRelocationConflicts: runsMoved.Conflicts,
 			GitignoreLockAdded:      lockIgnored,
 		},
@@ -839,4 +844,14 @@ func short(sha string) string {
 		return sha
 	}
 	return sha[:w]
+}
+
+// relRoot renders ape's run root relative to the project, for reporting.
+// Falls back to the absolute path if it is somehow outside the project.
+func relRoot(projectRoot string) string {
+	root := runlog.ApeRoot(projectRoot)
+	if rel, err := filepath.Rel(projectRoot, root); err == nil {
+		return rel
+	}
+	return root
 }
