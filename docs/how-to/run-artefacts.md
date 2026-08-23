@@ -16,9 +16,14 @@ ape resolves that variable and owns exactly one subtree of it,
 **`{output_folder}/ape/`**, writing nothing outside it. Shown below at the
 default:
 
-```
+```text
 <project>/_output/                     ← framework-owned
 ├── handoffs/                          ← framework
+├── governance/                        ← framework
+├── functionality/                     ← framework
+├── planning/                          ← framework
+├── implementation/                    ← framework
+├── framework-requests/                ← framework
 ├── verify-orchestrator/               ← framework
 └── ape/                               ← ape owns this, and only this
     ├── pipelines/<pipeline>/<run-id>/
@@ -117,16 +122,16 @@ exit (best-effort — failure prints a warning, does not block exit).
 project's decision, and the output folder is the framework's directory
 rather than ape's, so ape neither adds an entry nor prompts for one.
 
-If you do not want run artefacts tracked, add your output folder to
-`.gitignore` yourself:
+The framework's own preflight already prescribes ignoring the **whole**
+output folder, so on an APEX project this is normally already done for you:
 
 ```gitignore
 _output/          # or whatever output_folder names
 ```
 
 A directory match covers `{output_folder}/ape/` along with the framework's
-own subdirectories. To keep the framework's artefacts tracked but not
-ape's, ignore the subtree instead:
+own subdirectories. If you want the framework's artefacts tracked but not
+ape's run history, ignore just ape's subtree instead:
 
 ```gitignore
 _output/ape/

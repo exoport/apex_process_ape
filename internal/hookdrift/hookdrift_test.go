@@ -199,21 +199,32 @@ func TestObserve_SweepsEveryRunlogRoot(t *testing.T) {
 	}
 }
 
-// The framework owns _output/; ape owns only _output/ape/. A handoff or a
-// verify-orchestrator report that happened to contain a hook-events.jsonl
-// is not ape's run and must not be swept.
+// The framework owns the output folder; ape owns only its `ape/` subtree.
+// A hook-events.jsonl that turns up anywhere else under it is not ape's run
+// and must not be swept — checked against every directory the framework says
+// it writes, so a sweep that widened by accident is caught.
 func TestObserve_IgnoresTheFrameworksOutputTree(t *testing.T) {
 	t.Parallel()
-	proj := t.TempDir()
-	outside := filepath.Join(proj, "_output", "verify-orchestrator", "run1")
-	require.NoError(t, os.MkdirAll(outside, 0o755))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(outside, "hook-events.jsonl"), []byte(lines(driftedStop)), 0o600,
-	))
+	// Every directory the framework says it writes under the output folder.
+	for _, dir := range []string{
+		"handoffs", "governance", "functionality", "planning",
+		"implementation", "framework-requests", "verify-orchestrator",
+	} {
+		t.Run(dir, func(t *testing.T) {
+			t.Parallel()
+			proj := t.TempDir()
+			outside := filepath.Join(proj, "_output", dir, "run1")
+			require.NoError(t, os.MkdirAll(outside, 0o755))
+			require.NoError(t, os.WriteFile(
+				filepath.Join(outside, "hook-events.jsonl"), []byte(lines(driftedStop)), 0o600,
+			))
 
-	rep, err := Observe(proj, time.Now().Add(-time.Hour))
-	require.NoError(t, err)
-	require.False(t, rep.Observed(), "only _output/ape is ape's to read")
+			rep, err := Observe(proj, time.Now().Add(-time.Hour))
+			require.NoError(t, err)
+			require.False(t, rep.Observed(),
+				"only the ape/ subtree is ape's to read, not _output/%s", dir)
+		})
+	}
 }
 
 // Absence of evidence is not coverage: a project with no runs skips

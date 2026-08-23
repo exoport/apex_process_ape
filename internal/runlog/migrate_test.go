@@ -136,22 +136,44 @@ func TestMigrate_CarriesTheLatestSymlink(t *testing.T) {
 	require.FileExists(t, filepath.Join(filepath.Dir(newLink), target, "manifest.yaml"))
 }
 
-// The framework owns _output/. Its handoffs, briefs and reports sit beside
-// ape's trees and must be left exactly where they are.
+// frameworkOutputDirs is what the FRAMEWORK writes under the output folder,
+// per its own answer on the layout split. None of them is ape's, and ape
+// must leave every one untouched — the ownership rule this whole layout
+// change exists to establish.
+var frameworkOutputDirs = []string{
+	"handoffs",
+	"governance",
+	"functionality",
+	"planning",
+	"implementation",
+	"framework-requests",
+	"verify-orchestrator",
+}
+
+// The framework owns the output folder. Its directories sit beside ape's
+// trees and must be left exactly where they are — every one of them, not
+// just the one that was convenient to write a test for.
 func TestMigrate_LeavesFrameworkOutputAlone(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	legacyRun(t, root, "pipelines", "design", "run1", map[string]string{"manifest.yaml": "x\n"})
-	handoff := filepath.Join(root, "_output", "handoffs", "2026-notes.md")
-	require.NoError(t, os.MkdirAll(filepath.Dir(handoff), 0o755))
-	require.NoError(t, os.WriteFile(handoff, []byte("framework-owned\n"), 0o600))
+
+	for _, dir := range frameworkOutputDirs {
+		f := filepath.Join(root, "_output", dir, "record.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(f), 0o755))
+		require.NoError(t, os.WriteFile(f, []byte("framework-owned: "+dir+"\n"), 0o600))
+	}
 
 	_, err := Migrate(root)
 	require.NoError(t, err)
 
-	body, err := os.ReadFile(handoff)
-	require.NoError(t, err)
-	require.Equal(t, "framework-owned\n", string(body))
+	for _, dir := range frameworkOutputDirs {
+		body, err := os.ReadFile(filepath.Join(root, "_output", dir, "record.md"))
+		require.NoError(t, err, "%s must survive the migration", dir)
+		require.Equal(t, "framework-owned: "+dir+"\n", string(body))
+	}
+	// ape's own legacy tree still went where it belongs.
+	require.FileExists(t, filepath.Join(PipelineRunDir(root, "design", "run1"), "manifest.yaml"))
 }
 
 func TestPending(t *testing.T) {
