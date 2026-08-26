@@ -12,6 +12,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/bridge/ipc"
 	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
+	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 )
 
@@ -90,6 +91,49 @@ const (
 	progressNone       = "none"
 )
 
+// DefaultAPIErrorGrace is how long every progress signal must be quiet
+// before a terminal API error in the transcript is believed.
+//
+// The grace window is doing the real work here, not the error text. A
+// session that hits a 529 and recovers writes the error AND its next
+// entry at the same timestamp — measured across every such error in a
+// local transcript corpus, recovery latency was 0.0 s in every case, and
+// none of them was the transcript's last entry. Failing on sight of the
+// message would therefore have killed healthy sessions. Requiring silence
+// first is what separates "the API blipped and the session carried on"
+// from "the session is dead".
+//
+// Three minutes is ~180× the observed recovery latency and 20× faster
+// than waiting out DefaultIdleTimeout, which is what happens today. The
+// asymmetry justifies the margin: firing early kills a healthy multi-hour
+// stage, firing late merely costs minutes.
+//
+// Detection latency is this window plus up to one poll interval, and the
+// poll scales with the idle window — 30 s at the default hour. So expect
+// ~3.5 min in practice, not 3 min exactly. Still 17× better than the 60 min
+// it replaces, and not worth polling harder for.
+const DefaultAPIErrorGrace = 3 * time.Minute
+
+// timeForever is longer than any quiet window a real run can accumulate,
+// used to switch the API-error check off without a branch at the call site.
+const timeForever = time.Duration(1) << 62
+
+// TerminalAPIError reports that the session's own turn failed against the
+// API and nothing followed it. The upstream message is carried verbatim so
+// a caller can tell "upstream was degraded, this is retryable" from "the
+// skill is broken" — a distinction the idle timeout cannot express,
+// because it reports only that nothing happened.
+type TerminalAPIError struct {
+	Label   string        // "interactive step" / "session"
+	Message string        // the transcript's last assistant text, verbatim
+	Quiet   time.Duration // how long every signal had been silent
+}
+
+func (e *TerminalAPIError) Error() string {
+	return fmt.Sprintf("%s failed upstream and made no progress for %v: %s",
+		e.Label, e.Quiet.Round(time.Second), strings.TrimSpace(e.Message))
+}
+
 // IdleTimeoutError reports that WaitStepDone tripped the idle backstop:
 // no progress across any watched signal (hook / transcript / PTY) for a
 // full idle window. Diagnostic carries the per-source ages + child
@@ -138,6 +182,21 @@ type Driver struct {
 	// …"). Defaults to "session"; the pipeline runner sets
 	// "interactive step".
 	idleErrLabel string
+
+	// apiErrorGrace is the quiet window before a terminal API error in the
+	// transcript is acted on. Zero disables the check entirely.
+	apiErrorGrace time.Duration
+	// lastAssistantText reads a transcript's final assistant message. A
+	// seam so the check can be driven without a real transcript; production
+	// always uses cost.LastAssistantText.
+	lastAssistantText func(path string) (string, bool)
+
+	// Memo for terminalAPIError, keyed on the transcript signature so an
+	// unchanged file is read once rather than once per poll tick.
+	apiCheckedOK    bool
+	apiCheckedSize  int64
+	apiCheckedMTime time.Time
+	apiCheckedMsg   string
 
 	// childAliveProbe, when set, reports the child claude process's pid
 	// and liveness for the D4 termination diagnostic (PLAN-19 D4). nil →
@@ -195,13 +254,15 @@ func NewDriver(getRunLog func() *runlog.Writer, idleTimeout time.Duration) *Driv
 		idleTimeout = DefaultIdleTimeout
 	}
 	return &Driver{
-		getRunLog:    getRunLog,
-		idleTimeout:  idleTimeout,
-		maxDuration:  DefaultMaxDuration,
-		idleErrLabel: "session",
-		stepDoneCh:   make(chan struct{}, 64),
-		fatalCh:      make(chan error, 1),
-		subSessions:  map[string]*SubCapture{},
+		getRunLog:         getRunLog,
+		idleTimeout:       idleTimeout,
+		maxDuration:       DefaultMaxDuration,
+		apiErrorGrace:     DefaultAPIErrorGrace,
+		lastAssistantText: cost.LastAssistantText,
+		idleErrLabel:      "session",
+		stepDoneCh:        make(chan struct{}, 64),
+		fatalCh:           make(chan error, 1),
+		subSessions:       map[string]*SubCapture{},
 	}
 }
 
@@ -593,6 +654,18 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 				}
 			}
 			lastProgress := latest(lastHook, lastTranscript, lastPTY)
+
+			// A terminal API error is decidable long before the idle
+			// ceiling, but only once EVERY signal has gone quiet: a session
+			// that recovers from a 529 keeps writing, and hooks can still
+			// fire while the transcript sits. Keyed off lastProgress rather
+			// than lastTranscript for exactly that reason.
+			if quiet := now.Sub(lastProgress); quiet >= d.apiErrorGraceWindow() {
+				if msg, ok := d.terminalAPIError(tSize, tMtime); ok {
+					return &TerminalAPIError{Label: d.idleErrLabel, Message: msg, Quiet: quiet}
+				}
+			}
+
 			if idle := now.Sub(lastProgress); idle > d.idleTimeout {
 				src, diag := d.diagnose(now, stepStart, lastHook, lastTranscript, lastPTY)
 				return &IdleTimeoutError{
@@ -664,6 +737,59 @@ func (d *Driver) ptyOutputAt() (time.Time, bool) {
 // most recently (and how long ago), each watched source's age, and the
 // child claude process's liveness. It reports whether transcript / PTY
 // are even monitored so an operator can tell "silent" from "unwatched".
+// apiErrorGraceWindow is the configured grace, never longer than the idle
+// window itself — a caller who sets a 60 s idle timeout has said the whole
+// step is decidable in 60 s, and a 3 min grace inside that would never fire.
+// Returns a window larger than any real quiet period when the check is off.
+func (d *Driver) apiErrorGraceWindow() time.Duration {
+	if d.apiErrorGrace <= 0 || d.lastAssistantText == nil {
+		return timeForever
+	}
+	if d.apiErrorGrace > d.idleTimeout {
+		return d.idleTimeout
+	}
+	return d.apiErrorGrace
+}
+
+// terminalAPIError reports the transcript's final assistant message when it
+// is an upstream error.
+//
+// The transcript signature gates the read: LastAssistantText scans the whole
+// file, transcripts run to megabytes, and the poll loop would otherwise
+// re-read an unchanged file every tick for the length of a stall. Re-reading
+// only when the file has actually changed makes the cost proportional to
+// what happened rather than to how long the stall lasted.
+func (d *Driver) terminalAPIError(size int64, mtime time.Time) (string, bool) {
+	d.activityMu.Lock()
+	path := d.activeTranscript
+	d.activityMu.Unlock()
+	if path == "" || d.lastAssistantText == nil {
+		return "", false
+	}
+	if d.apiCheckedOK && d.apiCheckedSize == size && d.apiCheckedMTime.Equal(mtime) {
+		return d.apiCheckedMsg, d.apiCheckedMsg != ""
+	}
+	text, ok := d.lastAssistantText(path)
+	msg := ""
+	if ok && IsTerminalAPIError(text) {
+		msg = text
+	}
+	d.apiCheckedOK, d.apiCheckedSize, d.apiCheckedMTime, d.apiCheckedMsg = true, size, mtime, msg
+	return msg, msg != ""
+}
+
+// IsTerminalAPIError reports whether a transcript's final assistant text is
+// Claude Code's own upstream-failure message.
+//
+// Anchored on the PREFIX, deliberately. Matching "API Error" anywhere in the
+// text also matches an assistant discussing one — a transcript of this very
+// change contains several — and enumerating status codes (529, 522, …)
+// would need a new release each time upstream grows one. The prefix is what
+// Claude Code emits and nothing else produces it in first position.
+func IsTerminalAPIError(text string) bool {
+	return strings.HasPrefix(strings.TrimSpace(text), "API Error")
+}
+
 func (d *Driver) diagnose(now, stepStart, lastHook, lastTranscript, lastPTY time.Time) (source, diagnostic string) {
 	d.mu.Lock()
 	transcriptWatched := d.activeTranscript != ""

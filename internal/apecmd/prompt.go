@@ -51,6 +51,9 @@ const (
 	promptStatusFailed      = "failed"
 	promptStatusIdleTimeout = "idle_timeout"
 	promptStatusMaxDuration = "max_duration"
+	// promptStatusUpstreamAPI: the session's own turn failed against the
+	// API and nothing followed. Upstream and retryable, not a broken skill.
+	promptStatusUpstreamAPI = "upstream_api_error"
 	promptStatusClaudeDied  = "claude_died"
 )
 
@@ -468,11 +471,16 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 func promptStatus(waitErr error) (status string, code int) {
 	var ite *sessiondriver.IdleTimeoutError
 	var mde *sessiondriver.MaxDurationError
+	var tae *sessiondriver.TerminalAPIError
 	switch {
 	case waitErr == nil:
 		return promptStatusCompleted, ExitOK
 	case errors.Is(waitErr, errClaudeDied):
 		return promptStatusClaudeDied, ExitClaudeDied
+	// Ahead of the two backstops: an upstream failure is decidable, and
+	// reporting it as a stall would lose the one fact a caller needs.
+	case errors.As(waitErr, &tae):
+		return promptStatusUpstreamAPI, ExitUpstreamAPI
 	case errors.As(waitErr, &mde):
 		return promptStatusMaxDuration, ExitRunFailed
 	case errors.As(waitErr, &ite):

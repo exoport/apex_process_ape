@@ -22,7 +22,7 @@ import (
 )
 
 // `ape task` uses the shared exit-code table in exitcodes.go
-// (ExitOK / ExitRunFailed / ExitUsage / ExitREPLNotReady).
+// (ExitOK / ExitRunFailed / ExitUsage / ExitREPLNotReady / ExitUpstreamAPI).
 
 // taskCommitDerivedSentinel is the NoOptDefVal for a bare
 // `--task-commit` (no message). Contains a control byte so it cannot
@@ -314,6 +314,12 @@ func taskExitCode(runErr error) int {
 	var nre *repl.NotReadyError
 	if errors.As(runErr, &nre) {
 		return ExitREPLNotReady
+	}
+	// Upstream, not the skill. Reported separately so a caller can tell a
+	// degraded API from a run that genuinely failed.
+	var tae *sessiondriver.TerminalAPIError
+	if errors.As(runErr, &tae) {
+		return ExitUpstreamAPI
 	}
 	return ExitRunFailed
 }

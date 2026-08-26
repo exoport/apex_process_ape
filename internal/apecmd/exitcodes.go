@@ -17,10 +17,18 @@ package apecmd
 //	4  claude exited before the Stop hook fired (PLAN-12 `ape prompt`) —
 //	   the process died mid-session, so the run neither completed nor
 //	   idled out
+//	5  the session's own turn failed against the API and nothing followed
+//	   it — a 529/522/… carried verbatim in the envelope. Distinct from 1
+//	   because it is upstream and retryable: the skill did not misbehave,
+//	   and a caller that knows its budget can decide to re-run. Without it
+//	   the run would sit until the idle ceiling and then report 1, which
+//	   says only "nothing happened"
 const (
 	ExitOK           = 0
 	ExitRunFailed    = 1
 	ExitUsage        = 2
 	ExitREPLNotReady = 3
 	ExitClaudeDied   = 4
+	// ExitUpstreamAPI is sessiondriver.TerminalAPIError reaching a command.
+	ExitUpstreamAPI = 5
 )

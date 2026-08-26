@@ -289,6 +289,33 @@
     the release skill both say plainly that this is "not verified" rather than
     a pass.
 
+- **feat(sessiondriver): a dead session fails with its reason, not with
+  silence** — when the session's own turn fails against the API and nothing
+  follows it, ape waited out `--idle-timeout` (60 min by default) and then
+  reported "nothing happened". It now fails as soon as the failure is
+  decidable and carries the upstream message verbatim, under a new exit code
+  5: distinct from 1 because it is upstream and retryable — the skill did not
+  misbehave — which is a distinction a caller could not previously make.
+  - **The grace window does the work, not the error text.** Across every
+    `API Error` in a local transcript corpus, a session that hit one and
+    recovered wrote its next entry at the *same timestamp* — recovery latency
+    0.0 s in every case — and none of them was the transcript's last line.
+    Failing on sight of the message would have killed three healthy sessions
+    on one machine. So the check fires only after every progress signal
+    (hook, transcript, PTY) has been quiet for `DefaultAPIErrorGrace`
+    (3 min), keyed off overall progress rather than the transcript alone so a
+    session still emitting hooks is never touched.
+  - **Matched on the message PREFIX.** "API Error" anywhere in the text also
+    matches an assistant *discussing* an outage — the transcripts of this very
+    change contain several — and enumerating status codes would need a release
+    each time upstream grows one. Of 52 local `API Error` lines, 30 were
+    `tool_result` rows from tools failing inside healthy sessions; a substring
+    match would have treated those as fatal too.
+  - Reading is memoized on the transcript signature, so an unchanged
+    multi-megabyte file is scanned once per stall rather than once per poll.
+    Detection latency is the grace window plus one poll interval (30 s at the
+    default idle window), so ~3.5 min against the 60 min it replaces.
+
 - **feat(framework): install `_apex/ape-commands.yaml`** — the framework-owned
   manifest of the ape command surface an installed framework requires. From
   framework v0.11.0 the skills shell out to ape subcommands with no fallback

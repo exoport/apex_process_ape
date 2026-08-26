@@ -112,6 +112,7 @@ are readable with `ape costs prompt <prompt-id>`.
 | 2    | Usage or preflight error — no `_apex/config.yaml`, unresolved `--agent`, missing `--handoff` file, or both/neither of `<text>`/`--handoff`. |
 | 3    | The claude REPL never became ready in the PTY — the last pane snapshot is on stderr. |
 | 4    | claude exited before the Stop hook fired.                                |
+| 5    | The session's own turn failed against the API and nothing followed — a `529`/`522`/… carried verbatim in the envelope, with `status: upstream_api_error`. Upstream and retryable: the skill did not misbehave. Reported ~3.5 min in, rather than waiting out `--idle-timeout`. |
 
 ## `ape chat` vs `ape task` vs `ape prompt`
 
