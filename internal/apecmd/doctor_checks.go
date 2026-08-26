@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/contract"
@@ -565,6 +566,106 @@ func checkTerminalContracts(_ context.Context, env doctorEnv) CheckResult {
 		}
 	}
 	return CheckResult{Status: StatusOK, Message: msg}
+}
+
+// checkCommandSurface compares the command surface the installed framework
+// declares it requires against the one this binary actually provides.
+//
+// The gap it closes: from framework v0.11.0 the skills shell out to ape
+// subcommands with every fallback branch removed, so an ape that predates a
+// command makes a skill fail deep inside a multi-hour stage. `framework.metadata`
+// compares framework versions, not ape's, so nothing here noticed. An eval
+// capture came within a hand-check of measuring eight hours of broken runs
+// against exactly that mismatch.
+//
+// Resolution is a name diff against cobra's own tree rather than a version
+// floor, because a locally-built ape reports a Go pseudo-version that a floor
+// check skips as unstamped — it would pass on precisely the binary in question.
+//
+// Required, and FAIL when something is missing: a framework whose commands
+// this binary cannot provide is not degraded, it is broken, and the whole
+// point is that the failure otherwise surfaces hours later inside a stage.
+func checkCommandSurface(_ context.Context, env doctorEnv) CheckResult {
+	if env.ProjectRoot == "" || !isProjectRoot(env.ProjectRoot) {
+		return CheckResult{Status: StatusInfo, Message: "no project root resolved"}
+	}
+	manifest, err := framework.LoadApeCommands(env.ProjectRoot)
+	if err != nil {
+		return CheckResult{
+			Status:      StatusWarn,
+			Message:     err.Error(),
+			Remediation: "The command surface cannot be verified until the manifest parses. `ape framework update` reinstalls it.",
+			FixCommand:  "ape framework update",
+		}
+	}
+	if manifest == nil {
+		return CheckResult{
+			Status: StatusSkip,
+			Message: fmt.Sprintf("%s not installed — framework predates the command-surface contract",
+				framework.ProjectApeCommands),
+		}
+	}
+	if len(manifest.Required) == 0 {
+		return CheckResult{
+			Status:  StatusSkip,
+			Message: fmt.Sprintf("%s declares no required commands", framework.ProjectApeCommands),
+		}
+	}
+
+	missing := missingCommands(manifest.Required)
+	if len(missing) == 0 {
+		return CheckResult{
+			Status:  StatusOK,
+			Message: fmt.Sprintf("%d required command(s) provided", len(manifest.Required)),
+		}
+	}
+	// The whole difference, never the first miss: an operator on an old
+	// binary wants one line naming everything, not a bisect.
+	return CheckResult{
+		Status: StatusFail,
+		Message: fmt.Sprintf("%d of %d required command(s) missing: %s",
+			len(missing), len(manifest.Required), strings.Join(missing, ", ")),
+		Remediation: "The installed framework calls ape commands this binary does not provide, and " +
+			"its skills have no fallback branch — each will fail mid-run. Upgrade ape; if they are " +
+			"still missing on the latest, the framework requires an ape that does not exist yet.",
+		FixCommand: "ape update",
+	}
+}
+
+// commandTreeMu guards resolution against the shared root command.
+//
+// cobra.Command.Find is NOT read-only: it calls mergePersistentFlags, which
+// lazily initialises and writes flag state on every command it walks. Two
+// goroutines resolving against the same tree therefore race, which the race
+// detector catches the moment two tests do it in parallel. runDoctor runs
+// checks sequentially so production never hit it, but a helper that is only
+// safe because of its caller's scheduling is a trap for the next caller.
+var commandTreeMu sync.Mutex
+
+// missingCommands resolves each manifest entry against the root command
+// tree and returns those that do not fully resolve, in manifest order.
+//
+// A partial match counts as missing: `cobra.Find` returns the deepest
+// command it could reach plus the leftover arguments, so `ape story fields`
+// on a binary with `ape story` but no `fields` comes back as the parent with
+// "fields" unconsumed. Treating that as present is the failure mode this
+// check exists to prevent.
+func missingCommands(required []string) []string {
+	commandTreeMu.Lock()
+	defer commandTreeMu.Unlock()
+
+	var missing []string
+	for _, entry := range required {
+		path := framework.CommandPath(entry)
+		if len(path) == 0 {
+			continue
+		}
+		cmd, rest, err := rootCmd.Find(path)
+		if err != nil || cmd == nil || len(rest) > 0 {
+			missing = append(missing, entry)
+		}
+	}
+	return missing
 }
 
 // checkHookContractDrift reports whether the hook-payload fields ape's

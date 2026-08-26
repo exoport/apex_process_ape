@@ -289,6 +289,40 @@
     the release skill both say plainly that this is "not verified" rather than
     a pass.
 
+- **feat(doctor): `framework.command_surface` — does this binary provide what
+  the installed framework requires?** The second half of the manifest work.
+  From framework v0.11.0, 74 of 90 skills shell out to ape subcommands and
+  PLAN-57's DD3 deleted every fallback branch, so an ape predating a command
+  makes a skill fail deep inside a multi-hour stage. Nothing noticed:
+  `framework.metadata` compares versions of the *framework*, not of ape. An
+  eval capture came within a hand-check of measuring eight hours of broken
+  runs against exactly that mismatch.
+  - **A name diff, not a version floor.** A locally-built ape reports a Go
+    pseudo-version (`0.0.53-0.20260823120345-def342771795`) that a floor check
+    skips as unstamped — it would have passed on precisely the binary in
+    question. Resolving each entry against cobra's own tree tests the
+    capability rather than the label, and holds for local builds and forks.
+  - **Required, and FAIL on a miss**: a framework whose commands are absent is
+    broken rather than degraded. The message names the whole difference, never
+    the first miss — an operator on an old binary wants one line, not a bisect.
+  - **Reads `required_commands` only.** The manifest carries a second list,
+    `sanctioned`, which is strictly smaller because it exists to lint skills
+    and so omits the operator-facing and dispatch commands the binary
+    nonetheless owes. Reading it would under-declare the surface.
+  - A partial match counts as missing: `cobra.Find` returns the deepest
+    command it reached plus leftover args, so `ape story fields` on a binary
+    with `ape story` but no `fields` comes back as the parent. Treating that
+    as present is the failure the check exists to prevent.
+  - Compares command **names**, not flag sets — a binary can provide
+    `ape story fields` with an older flag set and pass. Stated in the check's
+    own `--help` so it is not mistaken for version compatibility. An absent
+    manifest reports a skip: the framework predates the contract.
+  - Resolution is mutex-guarded, because `cobra.Find` is **not** read-only:
+    it lazily merges persistent flags and writes to every command it walks.
+    `runDoctor` runs checks sequentially so production never raced, but a
+    helper safe only by its caller's scheduling is a trap for the next one —
+    the race detector found it the moment two tests resolved in parallel.
+
 - **feat(sessiondriver): a dead session fails with its reason, not with
   silence** — when the session's own turn fails against the API and nothing
   follows it, ape waited out `--idle-timeout` (60 min by default) and then

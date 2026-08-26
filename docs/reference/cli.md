@@ -1236,6 +1236,20 @@ silent:
                                 pre-{output_folder}/ape paths. Until they
                                 move, cost rollups and the hook check read
                                 a project with no history.
+  framework.command_surface     whether this binary provides every ape
+                                command the installed framework declares
+                                it requires (_apex/ape-commands.yaml). The
+                                skills have no fallback branch, so a
+                                missing one fails a skill mid-stage rather
+                                than degrading.
+
+                                It compares command NAMES ONLY. A binary
+                                can provide "ape story fields" with an
+                                older flag set and still pass, so this is
+                                a version-skew guard and not a statement
+                                of version compatibility. A framework that
+                                ships no manifest predates the contract
+                                and the check reports a skip.
 
 Both SKIP or report INFO when there is nothing to judge — absence of
 evidence is not coverage.

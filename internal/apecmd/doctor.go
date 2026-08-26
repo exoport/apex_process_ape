@@ -139,6 +139,7 @@ var allChecks = []doctorCheck{
 	{Name: "cost.price_table_coverage", Run: checkPriceTableCoverage},
 	{Name: "hooks.contract_drift", Run: checkHookContractDrift},
 	{Name: "framework.terminal_contracts", Run: checkTerminalContracts},
+	{Name: "framework.command_surface", Required: true, Run: checkCommandSurface},
 	{Name: "runs.legacy_layout", Run: checkRunLayoutLegacy},
 	{Name: "kvm.available", Run: checkKVMAvailable},
 	{Name: "containerd.running", Run: checkContainerdRunning},
@@ -209,6 +210,20 @@ silent:
                                 pre-{output_folder}/ape paths. Until they
                                 move, cost rollups and the hook check read
                                 a project with no history.
+  framework.command_surface     whether this binary provides every ape
+                                command the installed framework declares
+                                it requires (_apex/ape-commands.yaml). The
+                                skills have no fallback branch, so a
+                                missing one fails a skill mid-stage rather
+                                than degrading.
+
+                                It compares command NAMES ONLY. A binary
+                                can provide "ape story fields" with an
+                                older flag set and still pass, so this is
+                                a version-skew guard and not a statement
+                                of version compatibility. A framework that
+                                ships no manifest predates the contract
+                                and the check reports a skip.
 
 Both SKIP or report INFO when there is nothing to judge — absence of
 evidence is not coverage.
