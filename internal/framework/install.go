@@ -111,6 +111,12 @@ type UpdateSummary struct {
 	// ape then runs no contract check.
 	TerminalContractsInstalled bool `json:"terminalContractsInstalled" yaml:"terminalContractsInstalled"`
 
+	// ApeCommandsInstalled reports whether the framework carried the
+	// required-command-surface manifest (_apex/ape-commands.yaml). False
+	// means the framework predates it — version-skew suppression, not a
+	// failure. ape installs the file but does not read it yet.
+	ApeCommandsInstalled bool `json:"apeCommandsInstalled" yaml:"apeCommandsInstalled"`
+
 	// RunsRelocated / RunsRelocationConflicts report the one-time move of
 	// run artifacts from the pre-`_output/ape` layout. Both are zero on a
 	// project that has never run ape, and on every install after the first.
@@ -285,6 +291,10 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if err != nil {
 		return nil, err
 	}
+	apeCommandsInstalled, err := installApeCommands(opts.FrameworkRepo, opts.ProjectRoot)
+	if err != nil {
+		return nil, err
+	}
 	// Both setup AND update ensure it: update is the "verify and fix" pass
 	// for a project installed before this existed, and the call is idempotent
 	// so a project that already ignores the sidecar is untouched.
@@ -354,6 +364,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			ManagedBlockUpdated:     opRules.BlockUpdated,
 
 			TerminalContractsInstalled: contractsInstalled,
+			ApeCommandsInstalled:       apeCommandsInstalled,
 
 			RunsRelocated:           len(runsMoved.Moved),
 			RunsRoot:                relRoot(opts.ProjectRoot),
@@ -383,6 +394,30 @@ func installTerminalContracts(frameworkRepo, projectRoot string) (bool, error) {
 	dst := filepath.Join(projectRoot, ProjectTerminalContracts)
 	if err := CopyFile(src, dst); err != nil {
 		return false, fmt.Errorf("copy terminal-contracts table: %w", err)
+	}
+	return true, nil
+}
+
+// installApeCommands copies the framework's required-command-surface
+// manifest into the project. Absent in the framework repo = version skew,
+// not an error: a framework older than v0.11.0 ships no such file and the
+// project simply has none.
+//
+// ape does not read this file yet. It is installed ahead of the check that
+// will, so the framework can ship the manifest and have it reach projects
+// on their next `ape framework update` rather than waiting for a
+// coordinated ape release.
+func installApeCommands(frameworkRepo, projectRoot string) (bool, error) {
+	src := filepath.Join(frameworkRepo, SubtreeApeCommands)
+	if _, err := os.Stat(src); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat ape-commands manifest: %w", err)
+	}
+	dst := filepath.Join(projectRoot, ProjectApeCommands)
+	if err := CopyFile(src, dst); err != nil {
+		return false, fmt.Errorf("copy ape-commands manifest: %w", err)
 	}
 	return true, nil
 }

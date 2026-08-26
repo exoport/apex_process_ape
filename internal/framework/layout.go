@@ -29,6 +29,21 @@ const (
 	// SubtreeOperatingRules — a framework that predates it installs
 	// nothing and ape simply runs no contract check.
 	SubtreeTerminalContracts = "_apex/terminal-contracts.csv"
+	// SubtreeApeCommands is the framework-owned manifest of the ape command
+	// surface an installed framework requires. From v0.11.0 the skills shell
+	// out to ape subcommands with no fallback branch, so a binary missing one
+	// makes a skill fail deep inside a stage rather than degrade.
+	//
+	// Installed here so the contract lives in the project rather than only in
+	// the framework build repo. ape does not read it yet — the check that
+	// diffs `required_commands` against this binary's own command tree is
+	// separate work. Copying it first is deliberate: it means the framework
+	// can ship the manifest and have it reach projects on their next update,
+	// without waiting for the ape release that consumes it.
+	//
+	// Optional in the framework repo, on the same version-skew terms as
+	// SubtreeOperatingRules and SubtreeTerminalContracts.
+	SubtreeApeCommands = "_apex/ape-commands.yaml"
 )
 
 // Project-side paths, relative to the project root the user is
@@ -47,6 +62,9 @@ const (
 	// ProjectTerminalContracts is where the per-skill terminal-contract
 	// table lands in the project. Absent = no contract check runs.
 	ProjectTerminalContracts = "_apex/terminal-contracts.csv"
+	// ProjectApeCommands is where the required-command-surface manifest
+	// lands in the project. Absent = the framework predates the contract.
+	ProjectApeCommands = "_apex/ape-commands.yaml"
 )
 
 // SkillPrefix is the filename prefix that identifies framework-managed

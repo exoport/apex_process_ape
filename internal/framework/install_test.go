@@ -67,6 +67,20 @@ func fakeFramework(t *testing.T, root, tag string) {
 	}
 }
 
+// commitAll stages and commits everything in a fake framework repo, so a
+// test can add a file after fakeFramework and leave the tree clean (the
+// install refuses to run against a dirty framework repo).
+func commitAll(t *testing.T, root, msg string) {
+	t.Helper()
+	ctx := context.Background()
+	for _, args := range [][]string{{"add", "."}, {"commit", "-m", msg}} {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+}
+
 // fakeFrameworkOpRules builds a fake framework repo that ALSO ships the
 // PLAN-47 operating-rules fragment (_apex/apex-operating-rules.md) and the
 // apex-orchestrator skill, on top of fakeFramework's assets. The extras go
@@ -642,4 +656,90 @@ func TestFrameworkNotGitRepoDistinguishesAbsenceFromRefusal(t *testing.T) {
 		require.Contains(t, ve.Detail, "v0.0.49", "the version floor is the cheapest cause to rule out")
 		require.Contains(t, ve.Detail, "git:", "git's own words, not a guess about them")
 	})
+}
+
+// --- _apex/ape-commands.yaml (R1 ask 1) ---
+//
+// The manifest declares the ape command surface an installed framework
+// requires. ape installs it but does not read it yet: the check that diffs
+// `required_commands` against this binary's command tree is separate work,
+// deliberately sequenced after, so the framework can ship the manifest and
+// have it reach projects on their next update without a coordinated
+// release.
+
+const apeCommandsManifest = `# framework-owned
+required_commands:
+  - ape adr update
+  - ape deferred list
+  - ape story fields
+`
+
+// A framework that ships the manifest gets it copied into the project.
+func TestSetup_InstallsApeCommandsManifest(t *testing.T) {
+	t.Parallel()
+	fw, proj := t.TempDir(), t.TempDir()
+	fakeFramework(t, fw, "v0.11.0")
+	require.NoError(t, os.WriteFile(
+		filepath.Join(fw, framework.SubtreeApeCommands), []byte(apeCommandsManifest), 0o644,
+	))
+	// The install refuses a dirty framework repo, so land it in a commit.
+	commitAll(t, fw, "add ape-commands manifest")
+
+	res, err := framework.Setup(context.Background(), &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "test", Bootstrapper: framework.NoopBootstrapper{},
+	})
+	require.NoError(t, err)
+	require.True(t, res.Summary.ApeCommandsInstalled)
+
+	got, err := os.ReadFile(filepath.Join(proj, framework.ProjectApeCommands))
+	require.NoError(t, err)
+	require.Equal(t, apeCommandsManifest, string(got), "copied byte-for-byte")
+}
+
+// A framework that predates the manifest installs nothing and does not
+// fail — the same version-skew terms as the operating-rules fragment and
+// the terminal-contracts table.
+func TestSetup_ApeCommandsManifestAbsentIsNotAFailure(t *testing.T) {
+	t.Parallel()
+	fw, proj := t.TempDir(), t.TempDir()
+	fakeFramework(t, fw, "v0.10.2")
+
+	res, err := framework.Setup(context.Background(), &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "test", Bootstrapper: framework.NoopBootstrapper{},
+	})
+	require.NoError(t, err)
+	require.False(t, res.Summary.ApeCommandsInstalled)
+	require.NoFileExists(t, filepath.Join(proj, framework.ProjectApeCommands))
+}
+
+// The point of installing it ahead of the check: a project set up against
+// an older framework gains the manifest on the next `update`, with no ape
+// release in between.
+func TestUpdate_PicksUpApeCommandsManifestAddedLater(t *testing.T) {
+	t.Parallel()
+	fw, proj := t.TempDir(), t.TempDir()
+	fakeFramework(t, fw, "v0.10.2")
+
+	_, err := framework.Setup(context.Background(), &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "test", Bootstrapper: framework.NoopBootstrapper{},
+	})
+	require.NoError(t, err)
+	require.NoFileExists(t, filepath.Join(proj, framework.ProjectApeCommands))
+
+	// The framework ships it in a later version.
+	require.NoError(t, os.WriteFile(
+		filepath.Join(fw, framework.SubtreeApeCommands), []byte(apeCommandsManifest), 0o644,
+	))
+	commitAll(t, fw, "add ape-commands manifest")
+
+	res, err := framework.Update(context.Background(), &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "test", Bootstrapper: framework.NoopBootstrapper{},
+	})
+	require.NoError(t, err)
+	require.True(t, res.Summary.ApeCommandsInstalled)
+	require.FileExists(t, filepath.Join(proj, framework.ProjectApeCommands))
 }

@@ -289,6 +289,18 @@
     the release skill both say plainly that this is "not verified" rather than
     a pass.
 
+- **feat(framework): install `_apex/ape-commands.yaml`** — the framework-owned
+  manifest of the ape command surface an installed framework requires. From
+  framework v0.11.0 the skills shell out to ape subcommands with no fallback
+  branch, so a binary missing one makes a skill fail deep inside a stage.
+  ape installs the file but does not read it yet; the check that diffs
+  `required_commands` against this binary's command tree is separate work.
+  Copying it first is the point — the framework can ship the manifest and have
+  it reach projects on their next `ape framework update`, with no coordinated
+  ape release. Absent in the framework repo = version skew, not an error, on
+  the same terms as the operating-rules fragment and the terminal-contracts
+  table.
+
 - **BREAKING (on-disk): everything ape writes now lives under
   `{output_folder}/ape/`** — the output folder is the *framework's*. Its path
   comes from the `output_folder` config variable and the skills write
