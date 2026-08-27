@@ -18,7 +18,7 @@ func TestForwardOpenValidatesThePort(t *testing.T) {
 	r := startVMMRig(t)
 	for _, port := range []int{0, -1, 65536} {
 		msg := r.req(t, "forward.open", workspace.ForwardOpenReq{
-			V: workspace.WireVersion, ID: testWS, ForwardRequest: workspace.ForwardRequest{Port: port},
+			V: workspace.WireVersion, ID: testWS, Port: port,
 		})
 		if got := vmmErrCode(msg); got != workspace.CodeValidation {
 			t.Errorf("forward.open port %d → code %q, want %s", port, got, workspace.CodeValidation)
@@ -29,7 +29,7 @@ func TestForwardOpenValidatesThePort(t *testing.T) {
 func TestForwardOpenRequiresAnID(t *testing.T) {
 	r := startVMMRig(t)
 	msg := r.req(t, "forward.open", workspace.ForwardOpenReq{
-		V: workspace.WireVersion, ForwardRequest: workspace.ForwardRequest{Port: 8080},
+		V: workspace.WireVersion, Port: 8080,
 	})
 	if got := vmmErrCode(msg); got != workspace.CodeValidation {
 		t.Errorf("forward.open with no id → code %q, want %s", got, workspace.CodeValidation)
@@ -42,7 +42,7 @@ func TestForwardOpenRequiresAnID(t *testing.T) {
 func TestForwardOpenUnsupportedWithoutTheBridge(t *testing.T) {
 	r := startVMMRig(t)
 	msg := r.req(t, "forward.open", workspace.ForwardOpenReq{
-		V: workspace.WireVersion, ID: testWS, ForwardRequest: workspace.ForwardRequest{Port: 8080},
+		V: workspace.WireVersion, ID: testWS, Port: 8080,
 	})
 	if got := vmmErrCode(msg); got != workspace.CodeUnsupported {
 		t.Errorf("forward.open on a bridgeless node → code %q, want %s", got, workspace.CodeUnsupported)
@@ -55,7 +55,7 @@ func TestForwardOpenUnsupportedWithoutTheBridge(t *testing.T) {
 func TestForwardOpenValidatesBeforeReportingUnsupported(t *testing.T) {
 	r := startVMMRig(t)
 	msg := r.req(t, "forward.open", workspace.ForwardOpenReq{
-		V: workspace.WireVersion, ID: testWS, ForwardRequest: workspace.ForwardRequest{Port: 0},
+		V: workspace.WireVersion, ID: testWS, Port: 0,
 	})
 	if got := vmmErrCode(msg); got != workspace.CodeValidation {
 		t.Errorf("code = %q, want the port error rather than %s", got, workspace.CodeUnsupported)

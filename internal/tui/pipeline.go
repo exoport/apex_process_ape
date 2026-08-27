@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1130,7 +1131,12 @@ func (m pipelineModel) followActive() pipelineModel {
 			return m
 		}
 	}
-	for i := len(m.stages) - 1; i >= 0; i-- {
+	// slices.Backward ranged on the INDEX only. Taking the value too
+	// (`for i, v := range`) copies 144 bytes an iteration to read one
+	// field, which gocritic flags — and a hand-rolled countdown loop is
+	// what modernize flags. Index-only satisfies both and reads like the
+	// forward loop above.
+	for i := range slices.Backward(m.stages) {
 		if m.stages[i].state != statePending {
 			m.cursorIdx = i
 			return m
@@ -1235,8 +1241,8 @@ func (m pipelineModel) handleAwaitKey(msg tea.KeyMsg, key string) (pipelineModel
 // post-slash suffix is the chain-internal step index + skill name and
 // is irrelevant for stage routing. PLAN-7 / FA.
 func stageFromHookStep(step string) string {
-	if i := strings.IndexByte(step, '/'); i >= 0 {
-		return step[:i]
+	if before, _, ok := strings.Cut(step, "/"); ok {
+		return before
 	}
 	return step
 }

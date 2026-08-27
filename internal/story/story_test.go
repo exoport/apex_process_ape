@@ -281,7 +281,7 @@ features:
 		"55-1", "55-2",
 	}
 	for _, id := range missingFeatures {
-		epic := strings.Split(id, "-")[0]
+		epic, _, _ := strings.Cut(id, "-")
 		fm := fmt.Sprintf(base, id, epic, id)
 		fm = strings.Split(fm, "features:")[0] // drop the features block
 		f.story(id+"_story.md", fm)

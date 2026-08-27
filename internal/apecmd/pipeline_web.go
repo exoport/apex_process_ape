@@ -355,8 +355,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		_ = rl.Close()
 	}
 
-	var pfe *pipeline.PreflightError
-	if errors.As(runErr, &pfe) {
+	if pfe, ok := errors.AsType[*pipeline.PreflightError](runErr); ok {
 		fmt.Fprintf(os.Stderr, "%s\n", pfe.Error())
 		os.Exit(ExitUsage) //nolint:gocritic // explicit exit
 	}

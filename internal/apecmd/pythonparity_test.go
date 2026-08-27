@@ -609,7 +609,7 @@ func requireTreesIdentical(t *testing.T, a, b string) {
 	names := func(dir string) []string {
 		entries, err := os.ReadDir(dir)
 		require.NoError(t, err)
-		var out []string
+		out := make([]string, 0, len(entries))
 		for _, e := range entries {
 			out = append(out, e.Name())
 		}

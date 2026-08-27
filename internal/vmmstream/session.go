@@ -3,6 +3,7 @@ package vmmstream
 import (
 	"context"
 	"io"
+	"slices"
 	"sync"
 	"time"
 
@@ -81,8 +82,8 @@ func NewServerSession(nc *nats.Conn, prefix string, proc Process, credit int) (*
 
 	var cleanup []func()
 	fail := func(err error) (*ServerSession, error) {
-		for i := len(cleanup) - 1; i >= 0; i-- {
-			cleanup[i]()
+		for _, c := range slices.Backward(cleanup) {
+			c()
 		}
 		return nil, err
 	}

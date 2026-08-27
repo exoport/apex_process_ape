@@ -281,7 +281,7 @@ func TestVMMCreateAndLifecycle(t *testing.T) {
 
 	// exec
 	var er workspace.ExecReply
-	if err := json.Unmarshal(r.req(t, "exec", workspace.ExecReq{ID: testWS, ExecRequest: workspace.ExecRequest{Cmd: []string{"true"}}}).Data, &er); err != nil {
+	if err := json.Unmarshal(r.req(t, "exec", workspace.ExecReq{ID: testWS, Cmd: []string{"true"}}).Data, &er); err != nil {
 		t.Fatal(err)
 	}
 	if er.Code != 0 {

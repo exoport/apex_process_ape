@@ -342,14 +342,14 @@ func sandboxSymbolHint(err error, sandbox bool) string {
 	}
 	pkg := ""
 	rest := msg[impIdx+len(`import "`):]
-	if j := strings.Index(rest, `"`); j >= 0 {
-		pkg = rest[:j]
+	if before, _, ok := strings.Cut(rest, `"`); ok {
+		pkg = before
 	}
 	// yaegi's message is "<file>:<line>:<col>: import "pkg" error: …"; the
 	// text before `: import "` is the source location.
 	loc := msg
-	if i := strings.Index(msg, `: import "`); i >= 0 {
-		loc = msg[:i]
+	if before, _, ok := strings.Cut(msg, `: import "`); ok {
+		loc = before
 	}
 	return fmt.Sprintf("%s: package %q is not allowed in --sandbox mode "+
 		"(the restricted interpreter blocks os/exec, os.Exit, syscall, unsafe and other escape hatches — "+
@@ -375,7 +375,7 @@ func lookupScriptMain(i *interp.Interpreter) (func(context.Context) error, error
 	if err != nil {
 		return nil, errors.New("script must define `func Main(ctx context.Context) error` in package main")
 	}
-	fn, ok := v.Interface().(func(context.Context) error)
+	fn, ok := reflect.TypeAssert[func(context.Context) error](v)
 	if !ok {
 		return nil, fmt.Errorf("script Main has wrong signature %s; want func(context.Context) error", v.Type())
 	}

@@ -398,8 +398,7 @@ func parseExtensions(s string) ([]string, error) {
 // process exit codes. Mirrors handleUpdateError but also recognizes
 // AlreadyInstalledError.
 func handleSetupError(err error) error {
-	var aie *framework.AlreadyInstalledError
-	if errors.As(err, &aie) {
+	if aie, ok := errors.AsType[*framework.AlreadyInstalledError](err); ok {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", aie.Error())
 		os.Exit(exitCodeAlreadyInstalled)
 	}

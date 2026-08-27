@@ -311,14 +311,12 @@ func taskExitCode(runErr error) int {
 	if runErr == nil {
 		return ExitOK
 	}
-	var nre *repl.NotReadyError
-	if errors.As(runErr, &nre) {
+	if _, ok := errors.AsType[*repl.NotReadyError](runErr); ok {
 		return ExitREPLNotReady
 	}
 	// Upstream, not the skill. Reported separately so a caller can tell a
 	// degraded API from a run that genuinely failed.
-	var tae *sessiondriver.TerminalAPIError
-	if errors.As(runErr, &tae) {
+	if _, ok := errors.AsType[*sessiondriver.TerminalAPIError](runErr); ok {
 		return ExitUpstreamAPI
 	}
 	return ExitRunFailed

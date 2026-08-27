@@ -77,11 +77,11 @@ type jwtClaims struct {
 // `-----BEGIN NATS USER JWT-----` block of a .creds file. The block body
 // may be split across lines; they are concatenated.
 func extractUserJWT(creds string) (string, error) {
-	start := strings.Index(creds, credsJWTBegin)
-	if start < 0 {
+	_, after, ok := strings.Cut(creds, credsJWTBegin)
+	if !ok {
 		return "", errors.New("natsconn: no NATS USER JWT block in creds file")
 	}
-	rest := creds[start+len(credsJWTBegin):]
+	rest := after
 	// The end marker's dash count varies slightly across nats tooling; match
 	// on the stable core text to stay robust.
 	end := strings.Index(rest, "END NATS USER JWT")

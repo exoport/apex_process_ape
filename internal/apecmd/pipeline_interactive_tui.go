@@ -170,8 +170,7 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 		return fmt.Errorf("TUI: %w", err)
 	}
 	runErr := <-runErrCh
-	var pfe *pipeline.PreflightError
-	if errors.As(runErr, &pfe) {
+	if pfe, ok := errors.AsType[*pipeline.PreflightError](runErr); ok {
 		fmt.Fprintf(os.Stderr, "%s\n", pfe.Error())
 		runCancel()
 		os.Exit(ExitUsage) //nolint:gocritic // explicit runCancel above neutralizes defer-skip

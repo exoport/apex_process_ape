@@ -127,8 +127,7 @@ func TestWaitForReadyUnknownModalTimesOut(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected timeout error")
 	}
-	var nre *NotReadyError
-	if !errors.As(err, &nre) {
+	if _, ok := errors.AsType[*NotReadyError](err); !ok {
 		t.Fatalf("expected *NotReadyError, got %T: %v", err, err)
 	}
 	if !strings.Contains(err.Error(), "Pick a theme") {

@@ -69,15 +69,15 @@ func Split(data []byte) (fm, body []byte, err error) {
 
 // consumeDelimiterLine strips a leading `---` line and returns the rest.
 func consumeDelimiterLine(data []byte) (rest []byte, ok bool) {
-	lineEnd := bytes.IndexByte(data, '\n')
-	if lineEnd < 0 {
+	before, after, ok := bytes.Cut(data, []byte{'\n'})
+	if !ok {
 		// A document that is nothing but "---" has no closing delimiter.
 		return nil, false
 	}
-	if !isDelimiter(data[:lineEnd]) {
+	if !isDelimiter(before) {
 		return nil, false
 	}
-	return data[lineEnd+1:], true
+	return after, true
 }
 
 // isDelimiter reports whether a line is exactly `---`, ignoring a

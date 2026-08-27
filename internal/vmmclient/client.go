@@ -158,7 +158,7 @@ func (c *Client) AttachOpen(_ context.Context, id string, req workspace.AttachRe
 func (c *Client) ForwardOpen(_ context.Context, id string, port int) (workspace.ForwardOpenReply, error) {
 	var r workspace.ForwardOpenReply
 	err := c.call("forward.open", workspace.ForwardOpenReq{
-		V: workspace.WireVersion, ID: id, ForwardRequest: workspace.ForwardRequest{Port: port},
+		V: workspace.WireVersion, ID: id, Port: port,
 	}, &r)
 	return r, err
 }

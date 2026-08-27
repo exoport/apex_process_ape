@@ -154,7 +154,7 @@ func (m *bootstrapModel) View() string {
 			if m.selected[i] {
 				mark = "[x]"
 			}
-			b.WriteString(fmt.Sprintf("%s%s %-18s %s\n", cursor, mark, ext.ID, hintStyle.Render(ext.Description)))
+			fmt.Fprintf(&b, "%s%s %-18s %s\n", cursor, mark, ext.ID, hintStyle.Render(ext.Description))
 		}
 		b.WriteString("\n")
 		b.WriteString(hintStyle.Render("Space toggle, ↑↓ navigate, Enter to confirm, Esc to cancel."))

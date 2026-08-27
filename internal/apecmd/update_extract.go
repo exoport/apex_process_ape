@@ -38,7 +38,7 @@ func binaryName(goos string) string {
 	// concept from the unrelated "ape" literals elsewhere in the package (a
 	// path segment, a service-name default, the cobra command Use), so a
 	// shared constant would wrongly couple them.
-	return "ape" //nolint:goconst // program binary base name; distinct from other "ape" strings
+	return "ape"
 }
 
 // extractBinary pulls the named executable out of a release archive, choosing

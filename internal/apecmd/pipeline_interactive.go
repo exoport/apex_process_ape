@@ -807,8 +807,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	finalizeRun(ctx, core.publisher(), eventConn, eventIdentity, runDir, projectRoot, cfg, runErr)
 	core.publisher().Close()
 
-	var pfe *pipeline.PreflightError
-	if errors.As(runErr, &pfe) {
+	if pfe, ok := errors.AsType[*pipeline.PreflightError](runErr); ok {
 		fmt.Fprintf(os.Stderr, "%s\n", pfe.Error())
 		runCancel()
 		os.Exit(ExitUsage) //nolint:gocritic // explicit runCancel above; mirrors sibling runners

@@ -289,6 +289,43 @@
     the release skill both say plainly that this is "not verified" rather than
     a pass.
 
+- **chore: Go 1.27, refreshed dependencies, and the pinned toolchain** —
+  `go 1.26.6` → `go 1.27.0` (CI reads `go-version-file: go.mod`, so the bump
+  carries there and to the release workflow with no second edit). All direct
+  and indirect dependencies updated; `govulncheck` reports **0 vulnerabilities
+  and 0 allow-list exceptions**.
+  - Pinned tools: gofumpt `v0.10.0` → `v0.11.0`, golangci-lint `v2.6.0` →
+    `v2.13.1`, govulncheck `v1.3.0` → `v1.7.0`, goreleaser `v2.15.4` →
+    `v2.18.0` — the last held to the newest **stable** tag, since
+    `goreleaser@latest` resolves to a nightly and release machinery should not
+    be pinned to one.
+  - **Two linters had been silently re-enabled by renames.** golangci-lint
+    v2.13 versioned `exhaustruct` to `exhaustruct_v5`, so the existing
+    `disable` entry stopped matching and 50 findings appeared; `gomodguard` is
+    deprecated in favour of `gomodguard_v2`. Both spellings are now handled,
+    the same way `wsl`/`wsl_v5` already were. A disable entry that names only
+    the old spelling is a check turning itself back on at the next upgrade.
+  - **goconst's `min-len: 2` no longer earns its keep.** It flagged every
+    cobra verb, output format, wire field and YAML tag in the tree — 50+
+    findings, none an improvement, since `Use: "verify"` beside `Use: "update"`
+    reads better than two consts. Raised to 16, at which exactly one real
+    finding survives (a message repeated five times across three packages,
+    now `apexcfg.MsgImplementationFolderUnset`) — tuned to keep the linter
+    useful rather than to reach green.
+  - **gosec grew two checks that this program's threat model answers
+    differently.** G703 (path traversal by taint analysis) marks any path
+    reaching a file operation from config, flags or the environment; for a CLI
+    whose job is operating on directories the invoking user names, that is
+    every file operation and there is no privilege boundary to traverse — one
+    of the three sites it flagged already rejects `""` and the filesystem root
+    before stat'ing. Excluded as a category, with the reasoning in the config.
+    G122 (WalkDir symlink TOCTOU) and G115 (uint32→byte) are single sites and
+    carry their own justification at the call site.
+  - Go 1.27 idioms adopted where the linter proposed them: `errors.AsType`,
+    `strings.Cut`, `reflect.TypeAssert`, `slices.Backward`. One of those
+    auto-fixes regressed a hot TUI loop into copying 144 bytes an iteration —
+    ranging on the index alone satisfies both `modernize` and `gocritic`.
+
 - **build: `make check-framework`, the release gate for the other dependency
   axis** — `check-harness` asks whether the local *Claude Code* still honours
   what ape drives it through. Nothing asked whether ape still satisfies what

@@ -67,8 +67,7 @@ func ExitCode(err error) (code int, silent bool) {
 	if err == nil {
 		return ExitOK, false
 	}
-	var ee *exitError
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*exitError](err); ok {
 		return ee.code, true
 	}
 	return ExitRunFailed, false
@@ -84,8 +83,7 @@ func runReport(core func() error) error {
 	}
 	fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 	code := ExitRunFailed
-	var ee *exitError
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*exitError](err); ok {
 		code = ee.code
 	}
 	os.Exit(code)

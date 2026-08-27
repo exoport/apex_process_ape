@@ -200,8 +200,7 @@ func runChat(ctx context.Context, projectRoot, modelArg, effortArg string, ignor
 	if err := claude.Run(); err != nil {
 		// Non-zero exit from claude itself is treated as a clean exit
 		// — same behaviour the PLAN-6 tmux-era attach path provided.
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) {
+		if _, ok := errors.AsType[*exec.ExitError](err); !ok {
 			return fmt.Errorf("ape chat: claude: %w", err)
 		}
 	}

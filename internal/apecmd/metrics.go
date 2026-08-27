@@ -59,7 +59,7 @@ func runMetrics(ctx context.Context, out io.Writer, f *reportFlags, runID string
 	}
 	defer r.Close()
 
-	payload := reporting.MetricsPayload{}
+	var payload reporting.MetricsPayload
 	sessionID := ref.SessionID
 	if runID != "" {
 		project, _ := f.projectRoot()

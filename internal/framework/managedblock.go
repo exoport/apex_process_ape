@@ -123,8 +123,10 @@ func appendBlock(lines, blk []string) []string {
 // blockLines renders the begin marker, the body (split into lines), and
 // the end marker as a slice of logical lines.
 func blockLines(body string) []string {
-	out := []string{ManagedBlockBegin}
-	out = append(out, strings.Split(body, "\n")...)
+	lines := strings.Split(body, "\n")
+	out := make([]string, 0, len(lines)+2) // + the begin and end markers
+	out = append(out, ManagedBlockBegin)
+	out = append(out, lines...)
 	out = append(out, ManagedBlockEnd)
 	return out
 }
