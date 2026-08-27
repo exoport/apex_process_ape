@@ -8,6 +8,10 @@ linters:
     - embeddedstructfieldcheck
     - err113
     - exhaustruct
+    # golangci-lint v2.13 versioned this linter's name. Disabling only the
+    # old spelling silently re-enables it on upgrade — 50 findings appeared
+    # the moment the pin moved. Same reason `wsl_v5` sits beside `wsl`.
+    - exhaustruct_v5
     - forbidigo
     - funcorder
     - funlen
@@ -16,6 +20,11 @@ linters:
     - gocognit
     - godot
     - godox
+    # Deprecated in golangci-lint v2.12 in favour of gomodguard_v2,
+    # which `default: all` already enables. Disabling the old spelling
+    # silences the deprecation warning without losing the check — the
+    # same rename dance as exhaustruct/exhaustruct_v5 and wsl/wsl_v5.
+    - gomodguard
     - ireturn
     - lll
     - nlreturn
@@ -57,8 +66,38 @@ linters:
     exhaustive:
       default-signifies-exhaustive: true
     goconst:
-      min-len: 2
+      # min-len 2 flagged every cobra verb ("verify", "update"), output
+      # format ("human"), wire field ("session_id") and YAML tag ("!!map")
+      # in the tree — 50+ findings, none of them an improvement: a
+      # `Use: "verify"` beside a `Use: "update"` reads better than two
+      # consts. Raised until only genuinely long repeated strings remain,
+      # which is one real finding rather than none, so the linter still
+      # earns its place. Same judgement the mnd and tagliatelle exclusions
+      # already make about literals that ARE the contract.
+      min-len: 16
       min-occurrences: 3
+      # A test that spells "apex-create-prd" three times reads better than
+      # one that spells `wantSkill` three times — the literal IS the case
+      # under test. Same reasoning that already excludes dupl and gocyclo
+      # from _test.go below. golangci-lint v2.13 started reporting these.
+      ignore-tests: true
+    gosec:
+      excludes:
+        # G703 (path traversal via taint analysis), new in the gosec that
+        # ships with golangci-lint v2.13. It marks any path reaching a file
+        # operation from configuration, flags or the environment as tainted.
+        # For a CLI whose entire job is operating on directories the invoking
+        # user names — project roots, --cwd, output folders, a framework
+        # checkout — that is every file operation in the tree, and the user
+        # already holds those permissions: there is no privilege boundary
+        # here to traverse. It flagged three sites, one of which
+        # (firstExistingDir) explicitly rejects "" and the filesystem root
+        # before stat'ing, which is the check G703 is asking for.
+        #
+        # Excluded as a category rather than with three identical nolints,
+        # because the judgement is about the linter's model of this program
+        # and not about any one call site.
+        - G703
     gocritic:
       enabled-tags:
         - diagnostic

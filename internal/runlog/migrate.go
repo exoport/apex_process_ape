@@ -228,7 +228,19 @@ func moveDir(src, dst string) error {
 	return os.RemoveAll(src)
 }
 
+// copyTree is the cross-filesystem fallback for moveDir.
+//
+// gosec's G122 flags operating on a WalkDir-supplied path as symlink-TOCTOU
+// prone and points at os.Root. Not adopted here, for a reason rather than
+// convenience: the tree being walked is the user's own project directory,
+// reached by a command they just ran in it, so an attacker able to swap a
+// path mid-walk already has write access to everything this would protect.
+// The walk also does not FOLLOW symlinks — it recreates them verbatim in
+// the branch below — so the classic "descend through a swapped link" shape
+// does not arise. Worth revisiting with os.Root if this ever moves a tree
+// ape does not already own.
 func copyTree(src, dst string) error {
+	//nolint:gosec // G122: user's own project tree; symlinks recreated, never followed
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err

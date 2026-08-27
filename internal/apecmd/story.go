@@ -7,6 +7,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/output"
 	"github.com/exoport/apex_process_ape/internal/story"
 	"github.com/spf13/cobra"
@@ -56,7 +57,7 @@ warnings and the rest are still returned.`,
 			}
 			cfg := resolveProjectConfig(cwdFlag)
 			if cfg.Paths.Implementation == "" {
-				return usageErr(errors.New("implementation_folder is not configured"))
+				return usageErr(errors.New(apexcfg.MsgImplementationFolderUnset))
 			}
 			res, err := story.Project(cfg.Paths.Implementation, selected)
 			if err != nil {

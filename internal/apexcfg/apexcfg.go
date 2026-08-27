@@ -126,6 +126,16 @@ type Resolved struct {
 // start directory or any parent. Callers map it to exit 4.
 var ErrNotFound = errors.New("no _apex/config.yaml found in this directory or any parent")
 
+// MsgImplementationFolderUnset is the single wording for "the project did
+// not configure implementation_folder".
+//
+// It reaches a user from five call sites across three packages — story
+// verification, the migration status, two doctor rows and the story
+// command's preflight — and they have to agree, because a person who sees
+// it in one place and searches for it should find the others. Defined here
+// because this package owns the variable it names.
+const MsgImplementationFolderUnset = "implementation_folder is not configured"
+
 // MalformedError reports a config file that exists but does not parse.
 // This is deliberately fatal rather than a fall-back to base values: the
 // resolution is the first act of every skill, so one typo'd override

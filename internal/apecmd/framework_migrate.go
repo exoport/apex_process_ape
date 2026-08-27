@@ -44,7 +44,7 @@ func deferredMigrationStatus(cfg *apexcfg.Resolved) migrationStatus {
 	st := migrationStatus{Name: "deferred"}
 	legacy := cfg.Paths.DeferredLegacy
 	if legacy == "" {
-		st.Detail = "implementation_folder is not configured"
+		st.Detail = apexcfg.MsgImplementationFolderUnset
 		return st
 	}
 	info, err := os.Stat(legacy)

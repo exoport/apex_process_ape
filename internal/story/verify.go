@@ -79,7 +79,7 @@ func (r *Report) OK() bool { return len(r.Findings) == 0 }
 func VerifyCorpus(cfg *apexcfg.Resolved) (*Report, error) {
 	root := cfg.Paths.Implementation
 	if root == "" {
-		return nil, errors.New("implementation_folder is not configured")
+		return nil, errors.New(apexcfg.MsgImplementationFolderUnset)
 	}
 	heads, err := ScanHeads(root)
 	if err != nil {

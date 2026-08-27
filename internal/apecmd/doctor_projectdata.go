@@ -87,7 +87,7 @@ func checkStoryFrontmatter(_ context.Context, env doctorEnv) CheckResult {
 		return *res
 	}
 	if cfg.Paths.Implementation == "" {
-		return CheckResult{Status: StatusInfo, Message: "implementation_folder is not configured"}
+		return CheckResult{Status: StatusInfo, Message: apexcfg.MsgImplementationFolderUnset}
 	}
 	report, err := story.VerifyCorpus(cfg)
 	if err != nil {
@@ -237,7 +237,7 @@ func checkSprintLockIgnored(ctx context.Context, env doctorEnv) CheckResult {
 	}
 	tracker := cfg.Paths.SprintStatus
 	if tracker == "" {
-		return CheckResult{Status: StatusInfo, Message: "implementation_folder is not configured"}
+		return CheckResult{Status: StatusInfo, Message: apexcfg.MsgImplementationFolderUnset}
 	}
 	lock := sprint.LockPath(tracker)
 	rel := relTo(cfg.Root, lock)

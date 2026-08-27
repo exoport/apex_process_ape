@@ -314,6 +314,9 @@ func AllocateGuestIP(hostCIDR string, taken map[string]string, workspace string)
 func addInt(ip net.IP, n int) {
 	v := uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
 	v += uint32(n) //nolint:gosec // n is bounded by the subnet size (≤65534)
+	// Truncation is the point: these four bytes ARE the address. gosec's
+	// G115 reads every uint32→byte conversion as a potential overflow.
+	//nolint:gosec // deliberate octet extraction, not a narrowing bug
 	ip[0], ip[1], ip[2], ip[3] = byte(v>>24), byte(v>>16), byte(v>>8), byte(v)
 }
 
