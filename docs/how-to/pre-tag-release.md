@@ -86,6 +86,41 @@ Takes ~40 s. Every check but one costs zero tokens — they read local artifacts
 
 > **A SKIP is not a pass.** Each gate reports "not verified" rather than green when it finds nothing to judge — no transcripts, no runlogs, no `claude` on PATH. Read the output rather than the exit code: absence of evidence is not coverage, and every one of these is designed so an empty run cannot masquerade as a clean one.
 
+## Step 1c — the APEX framework contract
+
+Step 1b asks whether the local **Claude Code** still honours what ape drives it
+through. This asks the other question: does ape still satisfy what the local
+**APEX framework** requires? Two dependencies, two release schedules.
+
+```bash
+make check-framework APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
+```
+
+Framework v0.11.0 moved deterministic project-data work into ape subcommands
+and deleted every fallback branch — 74 of 90 skills shell out. An ape missing
+one does not degrade: it fails a skill deep inside a multi-hour stage. Four
+gates close that:
+
+| Gate | Asks |
+| --- | --- |
+| `TestCommandSurface_AgainstRealManifest` | does this binary provide every command the framework's shipped `_apex/ape-commands.yaml` requires? |
+| `TestContract_LiveConfigTemplate` | do the config variables ape resolves match the framework's **live** template, not a copied fixture? |
+| `TestParity_*` | do the commands that replaced the retired Python scripts still behave identically? |
+| `ape doctor --only framework.command_surface,framework.terminal_contracts` | the same surface as a project actually **received** it — what a skill meets at run time |
+
+Both framework layouts resolve: released (`_apex/` at the repo root) and build
+(nested under `framework/`).
+
+Reading the result:
+
+- **Variable unset** → "framework contract NOT verified", exit 0. A skip, not a pass.
+- **Path that is not a framework checkout** → hard error. Setting the variable
+  says you want the gate to run, so a path resolving to nothing is a typo —
+  every gate would otherwise have passed green.
+- **`TestParity_*` all skip** → expected against a modern framework. The
+  scripts they compare against are retired, which is what that gate was built
+  to guard.
+
 > **Why this can't be a CI job.** Every check here is a statement about the harness *installed on this machine right now*. A CI runner has none of the inputs, so the honest result there is a skip — and a gate that always skips is worse than no gate, because it reads as a pass. The same reasoning is why `ape costs coverage` exits 0 with "coverage NOT verified" rather than green when it finds nothing.
 
 ## Step 2 — remote CI on the SHA you'll tag

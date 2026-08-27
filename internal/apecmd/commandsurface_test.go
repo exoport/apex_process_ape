@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/framework"
@@ -174,21 +173,10 @@ func TestCommandSurface_NoPipelineDev(t *testing.T) {
 // this binary. Skipped when no framework checkout is available.
 func TestCommandSurface_AgainstRealManifest(t *testing.T) {
 	t.Parallel()
-	repo := strings.TrimSpace(os.Getenv("APEX_FRAMEWORK_REPO"))
-	if repo == "" {
-		t.Skip("set APEX_FRAMEWORK_REPO to check against the framework's real manifest")
-	}
-	var path string
-	for _, candidate := range []string{
-		filepath.Join(repo, framework.SubtreeApeCommands),
-		filepath.Join(repo, "framework", framework.SubtreeApeCommands), // build layout
-	} {
-		if _, err := os.Stat(candidate); err == nil {
-			path = candidate
-			break
-		}
-	}
-	if path == "" {
+	// Same resolver as the other framework-checkout gates, so build and
+	// released layouts behave identically across all of them.
+	path := filepath.Join(frameworkSubtreeRoot(t), framework.SubtreeApeCommands)
+	if _, err := os.Stat(path); err != nil {
 		t.Skip("framework checkout ships no ape-commands.yaml (predates the contract)")
 	}
 	body, err := os.ReadFile(path)

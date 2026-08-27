@@ -1,6 +1,6 @@
 ---
 name: release
-description: 'Full release workflow for ape: pre-flight checks (clean tree, CHANGELOG, no duplicate tag) → local CI gate (make ci-local) → Claude Code harness contract (make check-harness) → push main → poll push CI → final tag → poll release workflow → cosign signature verification. Use when the user says "/release", "cut a release", "tag a release", or "ship vX.Y.Z".'
+description: 'Full release workflow for ape: pre-flight checks (clean tree, CHANGELOG, no duplicate tag) → local CI gate (make ci-local) → Claude Code harness contract (make check-harness) → APEX framework contract (make check-framework) → push main → poll push CI → final tag → poll release workflow → cosign signature verification. Use when the user says "/release", "cut a release", "tag a release", or "ship vX.Y.Z".'
 argument-hint: "Optional: version to release (e.g. v0.0.22) and/or the word \"autonomous\" to skip all confirmation gates. Version is detected from CHANGELOG.md if omitted. Order doesn't matter (e.g. \"v0.0.22 autonomous\" or \"autonomous\")."
 ---
 
@@ -207,6 +207,50 @@ On success inform the user: "Harness contract verified against Claude Code {clau
 
 ---
 
+### Phase 2c — APEX framework contract
+
+Phase 2b asks whether the local **Claude Code** still honours what ape drives it
+through. This asks the other question: does ape still satisfy what the local
+**APEX framework** requires? Two dependencies, two schedules, and only one of
+them was gated before.
+
+It matters because framework v0.11.0 moved deterministic work into ape
+subcommands and deleted every fallback branch — 74 of 90 skills shell out. An
+ape missing one does not degrade; it fails a skill deep inside a multi-hour
+stage. An eval capture came within a hand-check of measuring eight hours of
+broken runs against exactly that mismatch.
+
+```bash
+make check-framework APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
+```
+
+Four gates:
+
+| Gate | Asks |
+| --- | --- |
+| `TestCommandSurface_AgainstRealManifest` | does this binary provide every command the framework's shipped `_apex/ape-commands.yaml` declares it requires? |
+| `TestContract_LiveConfigTemplate` | do the config variables ape resolves match the framework's **live** template, rather than a copied fixture? |
+| `TestParity_*` | do the commands that replaced the retired Python scripts still behave identically? |
+| `ape doctor --only framework.command_surface,framework.terminal_contracts` | the same command surface as a project actually **received** it, which is what a skill meets at run time |
+
+If `{autonomous}` is false: ask "Run `make check-framework`? Needs a checkout of apex_process_framework — give me the path, or skip." — wait for confirmation.
+
+If `{autonomous}` is true: run it if `APEX_FRAMEWORK_REPO` is already set in the environment; otherwise state that the framework contract is unverified and continue.
+
+**HALT if it fails.** A named command the framework requires and this binary lacks means the release ships an ape that breaks the installed framework — the failure this gate exists to prevent, and it surfaces hours into a stage otherwise.
+
+Reading the output:
+
+- **`APEX_FRAMEWORK_REPO` unset** → prints "framework contract NOT verified — this is a skip, not a pass" and exits 0. Report it as unverified; do not call it passed.
+- **A path that is not a framework checkout** → hard error, exit 1. Deliberate: setting the variable says you want the gate to run, so a path resolving to nothing is a typo, not a skip.
+- **`TestParity_*` all SKIP** → expected against a modern framework. The scripts they compare against have been retired, which is the outcome that gate was built to guard. Not a gap.
+- **`TestCommandSurface_AgainstRealManifest` SKIP** → the framework predates the manifest (pre-v0.11.0). Not a failure.
+- **`installed command surface NOT verified`** → `HOOK_PROJECT` has no `_apex/`. The checkout gates still ran; only the installed-project half did not.
+
+Both framework layouts resolve — released (`_apex/` at the repo root) and build (nested under `framework/`).
+
+---
+
 ### Phase 3 — Push main
 
 If `{autonomous}` is false: ask "Local gate passed. Push main?" — wait for confirmation.
@@ -376,7 +420,13 @@ Release complete:
   tag:           {version} (commit {head_sha})
   release URL:   https://github.com/{repo_slug}/releases/tag/{version}
   cosign:        verified / skipped (cosign not installed)
+  harness:       verified against Claude Code {claude_version} / NOT verified (reason)
+  framework:     verified against {APEX_FRAMEWORK_REPO} / NOT verified (no checkout)
 ```
+
+Name every gate that did **not** run, and why. A release summary that lists
+only what passed reads as though everything was checked, which is the failure
+mode every one of these gates was written to avoid.
 
 If cosign was skipped, also display the manual verification command ready to copy-paste:
 

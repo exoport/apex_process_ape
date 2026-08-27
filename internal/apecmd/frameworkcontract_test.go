@@ -197,11 +197,39 @@ func topLevelYAMLKeys(t *testing.T, data []byte) []string {
 //
 //	APEX_FRAMEWORK_REPO=/path/to/apex_process_framework go test ./internal/apecmd/ -run TestContract_LiveConfigTemplate
 func TestContract_LiveConfigTemplate(t *testing.T) {
-	repo := os.Getenv("APEX_FRAMEWORK_REPO")
+	root := frameworkSubtreeRoot(t)
+	requireSameConfigKeys(t, filepath.Join(root, filepath.FromSlash(framework.SubtreeConfig)))
+}
+
+// frameworkSubtreeRoot resolves APEX_FRAMEWORK_REPO to the directory the
+// `_apex/` and `.claude/` subtrees actually sit under, skipping when there
+// is no checkout to read.
+//
+// Two layouts are in circulation and a test that knows only one fails on
+// the other for a reason that has nothing to do with what it asserts. The
+// RELEASED layout puts them at the repo root — the shape a project consumes,
+// and the one framework.Subtree* constants target. The BUILD repo nests them
+// under `framework/`, and that is where the framework authors work, so it is
+// the checkout a developer is most likely to have on hand.
+//
+// Resolved in one place because the alternative is each gate rediscovering
+// it: `check-framework` pointed at a build checkout failed here on its first
+// run while the sibling gate beside it passed, purely because one had learned
+// about both layouts and the other had not.
+func frameworkSubtreeRoot(t *testing.T) string {
+	t.Helper()
+	repo := strings.TrimSpace(os.Getenv("APEX_FRAMEWORK_REPO"))
 	if repo == "" {
 		t.Skip("set APEX_FRAMEWORK_REPO to a framework checkout to compare against the live template")
 	}
-	requireSameConfigKeys(t, filepath.Join(repo, filepath.FromSlash(framework.SubtreeConfig)))
+	for _, root := range []string{repo, filepath.Join(repo, "framework")} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(framework.SubtreeConfig))); err == nil {
+			return root
+		}
+	}
+	t.Skipf("no %s under %s (released layout) or its framework/ subdirectory (build layout)",
+		framework.SubtreeConfig, repo)
+	return ""
 }
 
 // TestContract_MigrationPathsAreDisjointFromTheInstallWriteSet derives the

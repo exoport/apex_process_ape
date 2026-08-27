@@ -289,6 +289,31 @@
     the release skill both say plainly that this is "not verified" rather than
     a pass.
 
+- **build: `make check-framework`, the release gate for the other dependency
+  axis** — `check-harness` asks whether the local *Claude Code* still honours
+  what ape drives it through. Nothing asked whether ape still satisfies what
+  the local *APEX framework* requires, even though three families of tests
+  existed to answer it — `TestCommandSurface_AgainstRealManifest`,
+  `TestContract_LiveConfigTemplate` and the eight `TestParity_*` — all gated
+  on `APEX_FRAMEWORK_REPO` and therefore skipping silently in every run,
+  including the release. They now have a target, and the release skill a phase.
+  - It also runs `ape doctor --only framework.command_surface,framework.terminal_contracts`
+    against `HOOK_PROJECT`, which is the same surface as a project actually
+    *received* it rather than as a checkout declares it.
+  - **A path that is not a framework checkout is a hard error**, not a skip:
+    setting the variable says you want the gate to run, so a typo that resolves
+    to nothing would otherwise pass green on four gates at once. An unset
+    variable still skips, loudly.
+  - **Both framework layouts resolve.** Released puts `_apex/` at the repo
+    root; the build repo nests it under `framework/`. Resolution is now in one
+    helper — the first real run of this target failed against a build checkout
+    while the gate beside it passed, purely because one had learned about both
+    layouts and the other had not.
+  - `TestParity_*` skipping against a modern framework is the intended end
+    state, not a gap: the scripts they compare against are retired, which is
+    what the gate existed to guard. Documented so a skipped parity run is not
+    read as a hole.
+
 - **feat(doctor): `framework.command_surface` — does this binary provide what
   the installed framework requires?** The second half of the manifest work.
   From framework v0.11.0, 74 of 90 skills shell out to ape subcommands and

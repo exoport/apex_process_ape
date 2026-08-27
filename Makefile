@@ -164,6 +164,58 @@ check-hooks:  ## Verify Claude Code still sends the hook fields ape's completion
 	@# runlogs. That is a SKIP, not a pass: absence of evidence is not coverage.
 	go run ./cmd/ape doctor --only hooks.contract_drift --strict --cwd $(HOOK_PROJECT)
 
+# A checkout of apex_process_framework, for the contract gates below. Unset
+# means those gates cannot run — they report that rather than passing.
+APEX_FRAMEWORK_REPO ?=
+
+.PHONY: check-framework
+check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's contract (set APEX_FRAMEWORK_REPO).
+	@# The OTHER axis from check-harness. That one asks "is the local Claude
+	@# Code still compatible?"; this asks "is the local FRAMEWORK still
+	@# compatible?" — a different dependency that also moves on its own
+	@# schedule, and the one an eval capture nearly measured eight hours of
+	@# broken runs against.
+	@#
+	@# Three gates, all needing a sibling framework checkout:
+	@#   TestCommandSurface_AgainstRealManifest  every command the framework's
+	@#     shipped _apex/ape-commands.yaml requires resolves against this binary
+	@#   TestContract_LiveConfigTemplate         the config variables ape resolves
+	@#     match the framework's live template, not a copied fixture
+	@#   TestParity_*                            the ten retired Python scripts,
+	@#     run side by side with the commands that replace them. These SKIP once
+	@#     the framework has retired the scripts, which is the intended end state
+	@#     rather than a gap — the gate existed to guard the retirement.
+	@#
+	@# Both framework layouts resolve: released (_apex/ at the repo root) and
+	@# build (nested under framework/). The whole guard is ONE shell block
+	@# because a bare `exit 0` in a make recipe ends only that line's shell —
+	@# the first draft printed "NOT verified" and then ran the tests anyway.
+	@if [ -z "$(APEX_FRAMEWORK_REPO)" ]; then \
+		echo "framework contract NOT verified — this is a skip, not a pass."; \
+		echo "  set APEX_FRAMEWORK_REPO=/path/to/apex_process_framework to run it."; \
+	elif [ ! -f "$(APEX_FRAMEWORK_REPO)/_apex/config.yaml" ] \
+	  && [ ! -f "$(APEX_FRAMEWORK_REPO)/framework/_apex/config.yaml" ]; then \
+		echo "APEX_FRAMEWORK_REPO=$(APEX_FRAMEWORK_REPO) is not a framework checkout:"; \
+		echo "  no _apex/config.yaml there (released layout) or under framework/ (build layout)."; \
+		echo "  Setting the variable says you want this gate to RUN, so a path that resolves to"; \
+		echo "  nothing is a typo rather than a skip — every gate would have passed green."; \
+		exit 1; \
+	else \
+		echo "==> framework contract against $(APEX_FRAMEWORK_REPO)"; \
+		APEX_FRAMEWORK_REPO="$(APEX_FRAMEWORK_REPO)" go test ./internal/apecmd/ -count=1 -v \
+		  -run 'TestCommandSurface_AgainstRealManifest|TestContract_Live|TestParity'; \
+	fi
+	@# The gates above compare ape to a framework CHECKOUT. This compares it to
+	@# a framework INSTALL — the manifest as a project actually received it,
+	@# which is what a skill meets at run time.
+	@if [ -d "$(HOOK_PROJECT)/_apex" ]; then \
+		echo "==> installed command surface in $(HOOK_PROJECT)"; \
+		go run ./cmd/ape doctor --strict --cwd "$(HOOK_PROJECT)" \
+		  --only framework.command_surface,framework.terminal_contracts; \
+	else \
+		echo "installed command surface NOT verified — HOOK_PROJECT=$(HOOK_PROJECT) has no _apex/."; \
+	fi
+
 .PHONY: check-harness
 check-harness: check-prices check-hooks check-claude ## All local-only gates against the installed Claude Code (prices + hooks + PTY/model).
 	@echo
@@ -178,3 +230,5 @@ ci-local: test lint govulncheck docs-check check-prices xcompile-windows snapsho
 	@echo "Does NOT catch: Windows runtime behaviour (use a push-to-branch + GitHub Actions Windows runner for that)."
 	@echo "Does NOT catch: the installed Claude Code breaking a contract ape drives it through (PTY, models,"
 	@echo "                hook payloads) — run 'make check-harness HOOK_PROJECT=<a project ape has run>'."
+	@echo "Does NOT catch: ape no longer satisfying the APEX framework (command surface, config template,"
+	@echo "                Python parity) — run 'make check-framework APEX_FRAMEWORK_REPO=<checkout>'."
