@@ -414,6 +414,15 @@ func SendEnter(_ context.Context, name string) error {
 	return nil
 }
 
+// SendDown presses the Down arrow: the ANSI escape a terminal sends for
+// it (ESC [ B). Used to move the selection in claude's pre-REPL menus.
+//
+// An arrow rather than a digit deliberately — see the trust-folder modal's
+// accept function for why a typed selection keystroke is not safe here.
+func SendDown(ctx context.Context, name string) error {
+	return SendText(ctx, name, "\x1b[B")
+}
+
 // SendCommand types text, settles for PromptSettle, then presses
 // Enter. The canonical "send a slash command" helper.
 func SendCommand(ctx context.Context, name, text string) error {
@@ -434,6 +443,7 @@ func SendCommand(ctx context.Context, name, text string) error {
 var (
 	capturePaneFn = CapturePane
 	sendEnterFn   = SendEnter
+	sendDownFn    = SendDown
 )
 
 // modalSpec describes a blocking modal claude may render before the
@@ -458,24 +468,218 @@ type modalSpec struct {
 var blockingModals = []modalSpec{
 	{
 		name: "trust-folder",
-		match: func(s string) bool {
-			return strings.Contains(s, "trust this folder") ||
-				strings.Contains(s, "Is this a project you")
-		},
-		// Dismiss with a BARE Enter — option 1 ("Yes, I trust this
-		// folder") is preselected and the dialog shows "Enter to
-		// confirm", so Enter alone accepts it. Do NOT type a "1"
-		// selection keystroke: in the interactive runtime that "1"
-		// surfaces as a UserPromptSubmit the step-contract verifier
-		// could consume as the skill prompt (got "1" → spurious
-		// stage failure in any untrusted dir). Bare Enter carries no
-		// prompt text, eliminating that leak at the source. (The
-		// verifier also skips non-slash UPS events as defense in
-		// depth — see orchestrator.ContractVerifier.Consume.)
+		// Matched on WORDS, not on either exact sentence it has used.
+		// The prompt is claude's copy, not a contract: it has been
+		// "Do you trust the files in this folder?", then "Quick safety
+		// check: Is this a project you created or one you trust?", and
+		// the heading moved from the folder path to "Accessing
+		// workspace:". What survives every rewording is that the screen
+		// talks about TRUSTING a PLACE, so that is what this asks.
+		match: trustModalVisible,
+		// Walk the menu to the option that grants trust, THEN confirm.
+		//
+		// Never a bare Enter. Until claude 2.1.247 the accept option was
+		// preselected, so Enter alone worked; 2.1.248 reordered the menu
+		// to put "No, exit" first and made it the default. A blind Enter
+		// then presses the exit button — the session dies, the REPL never
+		// becomes ready, and every stage burns its idle window for zero
+		// turns. Reading the selection back before confirming is what
+		// makes the order claude's business rather than ours.
+		//
+		// Arrow keys, never a "1"/"2" selection keystroke: in the
+		// interactive runtime a typed digit surfaces as a
+		// UserPromptSubmit the step-contract verifier could consume as
+		// the skill prompt (got "1" → spurious stage failure in any
+		// untrusted dir). An arrow carries no prompt text, so the leak
+		// cannot happen at the source. (The verifier also skips
+		// non-slash UPS events as defense in depth — see
+		// orchestrator.ContractVerifier.Consume.)
 		accept: func(ctx context.Context, name string) error {
-			return sendEnterFn(ctx, name)
+			// A PAINTED dialog is not an dialog READY FOR INPUT. claude
+			// draws the menu before its key handler is live, and a
+			// keystroke sent into that gap is echoed as text instead of
+			// consumed — visible as a literal ^[[B above the dialog, and
+			// worse, left sitting in the input buffer to be submitted with
+			// the first real prompt. Waiting for the pane to stop changing
+			// is what separates the two states.
+			if err := awaitPaneSettled(ctx, name); err != nil {
+				return err
+			}
+			last := ""
+			for range maxMenuMoves {
+				snap, err := capturePaneFn(ctx, name)
+				if err != nil {
+					return err
+				}
+				// The dialog can go away underneath this loop — claude
+				// draws it, and a slow first paint means the caller may
+				// have matched on a frame that is already stale. Anything
+				// typed after that lands in the REPL as text, which is how
+				// a first draft of this walked eight ^[[B escapes into a
+				// live prompt. Re-checking each pass makes the loop a
+				// no-op the moment there is nothing left to dismiss.
+				if !trustModalVisible(snap) {
+					return nil
+				}
+				selected, ok := selectedMenuOption(snap)
+				if !ok {
+					return nil // no menu on screen; nothing to press
+				}
+				if grantsTrust(selected) {
+					return sendEnterFn(ctx, name)
+				}
+				last = selected
+				if err := sendDownFn(ctx, name); err != nil {
+					return err
+				}
+				if err := awaitMenuMove(ctx, name, selected); err != nil {
+					return err
+				}
+			}
+			snap, _ := capturePaneFn(ctx, name)
+			return fmt.Errorf(
+				"repl: could not reach a trust-granting option in %d moves (last selection %q) — "+
+					"the dialog's options have changed shape; pane:\n%s", maxMenuMoves, last, snap)
 		},
 	},
+}
+
+// menuMovePoll / menuMoveTimeout bound the wait for a selection to move
+// after an arrow key.
+//
+// Polling rather than sleeping a fixed interval, because the number that
+// matters is claude's repaint latency and it is not ours to predict. A
+// first draft slept 150ms and concluded the arrows were being ignored —
+// they were not, the pane simply had not redrawn yet, and the run then
+// typed escape sequences into a live REPL. Measured repaint on this
+// machine is comfortably under a second; the timeout is the point at
+// which "not moving" becomes the honest description.
+const (
+	menuMovePoll    = 100 * time.Millisecond
+	menuMoveTimeout = 2 * time.Second
+	// menuSettleQuiet is how long the pane must stop changing before the
+	// dialog is treated as ready for input, and menuSettleTimeout bounds
+	// that wait.
+	menuSettleQuiet   = 400 * time.Millisecond
+	menuSettleTimeout = 5 * time.Second
+)
+
+// maxMenuMoves bounds the walk through a selection menu. Generous
+// relative to any dialog claude has shipped, and finite so a menu whose
+// selection does not move can never spin.
+const maxMenuMoves = 6
+
+// selectedMenuOption returns the text of the highlighted line in a
+// selection dialog — the one the ❯ cursor sits on — and whether one was
+// found.
+//
+// The glyph doubles as the REPL's prompt, but there it is alone on its
+// line (see emptyPromptRe); a menu row always carries the option text
+// after it, so requiring text is what separates the two.
+func selectedMenuOption(snap string) (string, bool) {
+	for line := range strings.SplitSeq(snap, "\n") {
+		trimmed := strings.TrimSpace(line)
+		rest, found := strings.CutPrefix(trimmed, ReadyGlyph)
+		if !found {
+			continue
+		}
+		if rest = strings.TrimSpace(rest); rest != "" {
+			return rest, true
+		}
+	}
+	return "", false
+}
+
+// trustModalVisible reports whether the pane is showing the folder-trust
+// dialog.
+//
+// Matched on WORDS, not on either exact sentence claude has used. The
+// prompt is its copy, not a contract: it has been "Do you trust the files
+// in this folder?", then "Quick safety check: Is this a project you
+// created or one you trust?", and the heading moved from the folder path
+// to "Accessing workspace:". What survives every rewording is that the
+// screen talks about TRUSTING a PLACE, so that is what this asks.
+func trustModalVisible(s string) bool {
+	l := strings.ToLower(s)
+	if !strings.Contains(l, "trust") {
+		return false
+	}
+	for _, place := range []string{"folder", "workspace", "directory", "project"} {
+		if strings.Contains(l, place) {
+			return true
+		}
+	}
+	return false
+}
+
+// awaitPaneSettled waits until two consecutive captures agree, i.e. the
+// screen has stopped being redrawn. Best effort: on timeout it returns
+// nil and lets the caller proceed, because a pane that never settles is
+// still worth trying rather than failing outright.
+func awaitPaneSettled(ctx context.Context, name string) error {
+	deadline := time.Now().Add(menuSettleTimeout)
+	prev, _ := capturePaneFn(ctx, name)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(menuSettleQuiet):
+		}
+		snap, err := capturePaneFn(ctx, name)
+		if err == nil && snap == prev {
+			return nil
+		}
+		prev = snap
+		if time.Now().After(deadline) {
+			return nil
+		}
+	}
+}
+
+// awaitMenuMove waits for the highlighted option to stop being `from`,
+// or for menuMoveTimeout. Returning without a change is not an error here
+// — the caller compares selections across passes and reports the stall
+// with the pane, which is more useful than a bare timeout.
+func awaitMenuMove(ctx context.Context, name, from string) error {
+	deadline := time.Now().Add(menuMoveTimeout)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(menuMovePoll):
+		}
+		if snap, err := capturePaneFn(ctx, name); err == nil {
+			if sel, ok := selectedMenuOption(snap); ok && sel != from {
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return nil
+		}
+	}
+}
+
+// grantsTrust reports whether a menu option is the one that accepts the
+// folder.
+//
+// Word-based rather than an exact phrase, because the wording is not ours
+// and has already moved once. It asks two questions: does the option talk
+// about trusting, and is it phrased as an acceptance rather than a
+// refusal. The second half is what matters — a menu offering "Yes, I
+// trust this folder" against "No, exit" is easy, but one offering
+// "Don't trust this folder" would satisfy a naive substring match and
+// select exactly the wrong row.
+func grantsTrust(option string) bool {
+	l := strings.ToLower(option)
+	if !strings.Contains(l, "trust") {
+		return false
+	}
+	for _, decline := range []string{"no,", "no ", "don't", "do not", "never", "exit", "cancel", "quit"} {
+		if strings.Contains(l, decline) {
+			return false
+		}
+	}
+	return true
 }
 
 // dismissBlockingModals dismisses at most one known modal per call and

@@ -58,34 +58,28 @@ func installFakePane(t *testing.T, frames []string) *fakePane {
 		f.enters++
 		return nil
 	}
+	// Stubbed even though these frames never need it: the real SendDown
+	// would reach for a PTY session that does not exist here.
+	sendDownFn = func(_ context.Context, _ string) error { return nil }
 	t.Cleanup(func() {
 		capturePaneFn = CapturePane
 		sendEnterFn = SendEnter
+		sendDownFn = SendDown
 	})
 	return f
 }
 
-// TestWaitForReadyDismissesTrustModal drives the trust-then-ready
-// sequence: the pane shows the trust modal for two polls, then the
-// real footer. dismissBlockingModals must fire and WaitForReady must
-// return nil.
-func TestWaitForReadyDismissesTrustModal(t *testing.T) {
-	f := installFakePane(t, []string{trustModalPane, trustModalPane, readyFooterPane})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := WaitForReady(ctx, "fake"); err != nil {
-		t.Fatalf("WaitForReady: %v", err)
-	}
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	// Dismissal is a BARE Enter — no "1" selection keystroke that could
-	// leak as a UserPromptSubmit into the step-contract window.
-	if f.enters == 0 {
-		t.Fatalf("expected dismissal to press Enter")
-	}
-}
+// The trust-modal dismissal is covered by trustmodal_test.go's fakeMenu
+// instead of a frame list.
+//
+// A scripted sequence of panes cannot express the property that matters
+// here: the pane changes BECAUSE a key was pressed. The frame version
+// asserted only that some Enter was sent, which stayed green through the
+// claude 2.1.248 regression where that Enter landed on "No, exit".
+// fakeMenu models the cursor, so the tests can assert WHICH option was
+// confirmed — see TestTrustModal_ConfirmsAPreselectedAccept for this
+// case and TestTrustModal_WalksPastAPreselectedDecline for the one that
+// broke.
 
 // TestMenuGlyphIsNotReady is the regression guard for the exact bug:
 // a modal menu item containing the ❯ glyph must not satisfy replReady.

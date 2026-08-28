@@ -289,6 +289,37 @@
     the release skill both say plainly that this is "not verified" rather than
     a pass.
 
+- **fix(repl): claude 2.1.248 made "No, exit" the default on the folder-trust
+  dialog, and ape was pressing it** — the dialog's wording did not change, so
+  ape's matcher fired correctly; what moved was the SELECTION. Until 2.1.247
+  the accept option was preselected and a bare Enter took it. In 2.1.248
+  "No, exit" comes first and is highlighted, so that same Enter quit Claude:
+  the REPL never became ready, every stage burned its idle window, and runs
+  reported zero turns.
+  - **ape now reads the selection back before confirming.** It walks the menu
+    to the option that grants trust, wherever it sits, and presses Enter only
+    there. Position is Claude's business; encoding it here is what broke.
+  - **Matched on words, not sentences**, on both axes. The dialog has been
+    "Do you trust the files in this folder?", then "Quick safety check: Is
+    this a project you created or one you trust?", and the heading moved to
+    "Accessing workspace:" — so the match asks whether the screen talks about
+    *trusting* a *place*. The option test asks whether a row grants trust and
+    is not a refusal, because a naive `contains("trust")` selects "Don't
+    trust this folder".
+  - **A painted dialog is not a dialog ready for input.** Claude draws the
+    menu before its key handler is live; a keystroke sent into that gap is
+    echoed as literal text — visible as `^[[B` above the dialog — and left in
+    the input buffer to be submitted with the first real prompt. ape waits
+    for the pane to stop changing before touching it, then polls for the
+    selection to move rather than sleeping a guessed interval.
+  - Arrow keys, never a typed digit: a digit surfaces as a UserPromptSubmit
+    the step-contract verifier can consume as the skill prompt. That
+    reasoning predates this fix and still holds.
+  - **`make check-claude` caught this.** Against 2.1.248 the pre-fix binary
+    fails `ready_signals` in 120 s with the diagnostic written for exactly
+    this case — "a NEW pre-REPL modal is blocking that blockingModals does
+    not know how to dismiss". Verified by reverting the fix and re-running.
+
 - **chore: Go 1.27, refreshed dependencies, and the pinned toolchain** —
   `go 1.26.6` → `go 1.27.0` (CI reads `go-version-file: go.mod`, so the bump
   carries there and to the release workflow with no second edit). All direct
