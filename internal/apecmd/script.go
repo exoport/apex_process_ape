@@ -375,7 +375,15 @@ func lookupScriptMain(i *interp.Interpreter) (func(context.Context) error, error
 	if err != nil {
 		return nil, errors.New("script must define `func Main(ctx context.Context) error` in package main")
 	}
-	fn, ok := reflect.TypeAssert[func(context.Context) error](v)
+	// NOT reflect.TypeAssert[T](v), which golangci-lint's modernize
+	// proposes. The two are not equivalent here: TypeAssert matches on the
+	// reflect.Type directly, while Interface() boxes first and lets the
+	// interpreter hand back its own callable wrapper for the func. yaegi
+	// values are synthesised, so the boxing form is the one that yields a
+	// function ape can call and whose panics surface where callScriptMain
+	// can recover them.
+	//nolint:modernize // reflecttypeassert is NOT equivalent for a yaegi value — see above
+	fn, ok := v.Interface().(func(context.Context) error)
 	if !ok {
 		return nil, fmt.Errorf("script Main has wrong signature %s; want func(context.Context) error", v.Type())
 	}
