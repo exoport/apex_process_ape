@@ -163,7 +163,8 @@ func TestWaitStepDone_TerminalAPIErrorFailsFast(t *testing.T) {
 	// pollInterval floors at 1s and scales with the idle window, so the
 	// window has to be short enough to tick quickly while still being far
 	// enough away that the idle backstop cannot be what fires.
-	d := newTestDriver(4 * time.Second)
+	const idle = 20 * time.Second // far enough that only the grace can fire
+	d := newTestDriver(idle)
 	d.apiErrorGrace = 40 * time.Millisecond
 	d.activeTranscript = filepath.Join(t.TempDir(), "session.jsonl")
 	require.NoError(t, os.WriteFile(d.activeTranscript, []byte("{}\n"), 0o600))
@@ -181,7 +182,11 @@ func TestWaitStepDone_TerminalAPIErrorFailsFast(t *testing.T) {
 	var tae *TerminalAPIError
 	require.ErrorAs(t, err, &tae, "want TerminalAPIError, got %v", err)
 	require.Contains(t, tae.Message, "529 Overloaded", "upstream text carried verbatim")
-	require.Less(t, elapsed, 3*time.Second, "must not wait out the idle ceiling")
+	// The property is "decided long before the idle ceiling", not a
+	// particular latency — a loaded CI runner polls slower than a laptop,
+	// and pinning an absolute number would make this flaky rather than
+	// strict. The gap here is 20s of headroom against a ~1s poll.
+	require.Less(t, elapsed, idle/2, "must not wait out the idle ceiling")
 }
 
 // The case the local corpus says is the COMMON one: a session hits a 529

@@ -195,7 +195,9 @@ func TestMigrate_RenamedOutputFolderMovesPromptsAndChats(t *testing.T) {
 	res, err := Migrate(root)
 	require.NoError(t, err)
 	require.ElementsMatch(t,
-		[]string{"pipeline/design/r1", filepath.Join("prompt", "p1"), filepath.Join("chat", "c1")},
+		// Forward slashes on every platform: these are report labels, not
+		// paths — see the path.Join in migrate.go.
+		[]string{"pipeline/design/r1", "prompt/p1", "chat/c1"},
 		res.Moved)
 	require.Empty(t, res.Conflicts)
 

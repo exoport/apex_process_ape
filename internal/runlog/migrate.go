@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 )
 
@@ -160,7 +161,12 @@ func migrateGroup(rel Relocation, group string, res *MigrationResult) error {
 		name := r.Name()
 		src := filepath.Join(srcGroup, name)
 		dst := filepath.Join(dstGroup, name)
-		label := filepath.Join(rel.Kind, group, name)
+		// path.Join, not filepath.Join: this is a REPORT label, not a
+		// path to open. It is printed by `ape framework update`, carried
+		// in UpdateSummary and serialized to JSON, so it should read the
+		// same on every platform — `pipeline/design/run-1`, never
+		// `pipeline\design\run-1` on Windows.
+		label := path.Join(rel.Kind, group, name)
 
 		// `latest` is a symlink into a sibling run dir. Recreating it
 		// after the runs have moved is simpler and safer than trying to
