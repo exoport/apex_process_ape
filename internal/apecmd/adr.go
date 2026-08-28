@@ -173,7 +173,11 @@ func findADRDirIn(cwdFlag string) string {
 		}
 	}
 	return firstExistingDir(
-		"development/adrs",
+		// filepath.Join, not a "development/adrs" literal: this value is
+		// returned to callers that open it and print it, so it has to be
+		// the platform's own spelling. On Windows the literal resolved
+		// fine but came back forward-slashed, unlike every sibling path.
+		filepath.Join("development", "adrs"),
 		filepath.Join(os.Getenv("APE_PROCESS_REPO"), "development", "adrs"),
 	)
 }

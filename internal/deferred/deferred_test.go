@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -151,6 +152,13 @@ func TestIngest_SameBulletSameDayIsIdempotent(t *testing.T) {
 }
 
 func TestIngest_UnwritableStoreIsTheOnlyFailure(t *testing.T) {
+	// The premise is a directory the process cannot write to. Windows does
+	// not honour POSIX mode bits, so os.Chmod leaves it writable and the
+	// ingest succeeds — the condition under test cannot be created, which
+	// is different from the behaviour being wrong.
+	if runtime.GOOS == "windows" {
+		t.Skip("windows ignores POSIX mode bits; an unwritable dir cannot be staged this way")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}

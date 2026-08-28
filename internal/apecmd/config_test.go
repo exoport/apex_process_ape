@@ -130,7 +130,9 @@ func TestConfigResolve_HumanAndYAML(t *testing.T) {
 			cmd.SetOut(&buf)
 			cmd.SetArgs([]string{"--output-format", format})
 			require.NoError(t, cmd.Execute())
-			require.Contains(t, buf.String(), "development/governance")
+			// Native separator: apexcfg resolves through filepath.Join, so
+			// the rendered paths are the platform's — backslashed on Windows.
+			require.Contains(t, buf.String(), filepath.Join("development", "governance"))
 		})
 	}
 }

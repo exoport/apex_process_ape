@@ -177,11 +177,33 @@ func gitRelPath(ctx context.Context, dir, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	rel, err := filepath.Rel(strings.TrimSpace(top), abs)
+	rel, err := filepath.Rel(resolveForGit(strings.TrimSpace(top)), resolveForGit(abs))
 	if err != nil {
 		return "", err
 	}
 	return filepath.ToSlash(rel), nil
+}
+
+// resolveForGit normalises a path so filepath.Rel can be compared against
+// git's own idea of the repo root.
+//
+// `git rev-parse --show-toplevel` reports a fully resolved path; the path
+// ape holds may not be. On Windows a temp dir is handed out in 8.3 short
+// form (C:\Users\RUNNER~1\...) while git reports the long name, and on
+// macOS /var is a symlink to /private/var. Either mismatch makes
+// filepath.Rel return a "../../.." walk, the `git show HEAD:<rel>` that
+// follows fails, and the caller reads that as "nothing committed to
+// compare" — a silent skip rather than an error, which is how this went
+// unnoticed until the first Windows CI run.
+//
+// EvalSymlinks resolves both forms. A path that cannot be resolved is
+// returned unchanged: the comparison may still work, and failing here
+// would turn a best-effort check into a hard error.
+func resolveForGit(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return p
 }
 
 // ErrGitFailed reports a git invocation that did not succeed.
