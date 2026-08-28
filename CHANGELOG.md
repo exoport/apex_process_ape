@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## v0.0.54 (2026-08-28)
+
+- **fix(hookdrift): every run kind now stamps the Claude Code that produced
+  it** — the harness version was read only from the pipeline manifest, which
+  `ape prompt` and `ape chat` do not write, so their runs carried no version
+  at all. `hookdrift` scopes its verdict to one Claude Code version and picks
+  that version from the *newest* run in the window, so a single recent prompt
+  run set the judged version to the unstamped bucket and pushed every
+  properly-stamped pipeline run in the window into `Ignored` — the verdict was
+  then computed from the unstamped runs alone, where pre- and post-upgrade runs
+  fuse together. That fusion is exactly the masking version scoping exists to
+  prevent, and it was reachable on any project driven mainly by `ape prompt`.
+  The stamp now lives in `runlog.Writer`, which every producer opens (it is what
+  creates `hook-events.jsonl`), written to a new per-run `harness.yaml` — so a
+  run kind that does not exist yet cannot forget it, the same reasoning that
+  makes `RunRoots` the single list of run trees. `hookdrift` reads that file
+  first and keeps `manifest.yaml` as a fallback, because every runlog already on
+  disk predates the stamp and is the whole corpus for a project with history.
+  Verified end-to-end against Claude Code 2.1.251: `make check-hooks` on a
+  prompt-only project now reports `background_tasks 1/1, tool_response 1/1,
+  agent_id 1/1 (Claude Code 2.1.251)` where it previously named no version.
+- **fix(hookdrift): the unjudged-runs count no longer reports "0 other
+  version(s)"** — the summary derived the count from `len(Versions)-1`, but
+  `Versions` holds only *stamped* versions, so ignored unstamped runs were
+  counted as zero versions. Distinct ignored versions are now counted directly,
+  with the unstamped bucket counting as one. Reachable whenever a window
+  straddles an upgrade, which is when the line is read.
+- **chore(runlog): drop the dead `WriteSessionYAML`** — `session.yaml` was
+  never written; the function had no callers anywhere, tests included. The one
+  field that mattered is now covered for every run kind by `harness.yaml`.
+
 ## v0.0.53 (2026-08-28)
 
 - **feat: the project-data commands the framework skills call (PLAN-25)** —

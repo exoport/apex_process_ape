@@ -756,7 +756,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	onRunDir := func(dir string) {
 		runLogMu.Lock()
 		if rl == nil {
-			if w, openErr := runlog.New(dir); openErr == nil {
+			if w, openErr := runlog.New(dir, runlog.WithClaudeBin(cfg.claudeBin)); openErr == nil {
 				rl = w
 			}
 		}

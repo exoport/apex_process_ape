@@ -313,3 +313,90 @@ func TestObserve_RealFixtures(t *testing.T) {
 	require.True(t, rep.Observed())
 	require.True(t, rep.OK(), "real captured payloads must satisfy the contract: %s", rep.Summary())
 }
+
+// stampHarness writes the harness.yaml every runlog.Writer produces.
+func stampHarness(t *testing.T, dir, version string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, runlog.HarnessFile),
+		[]byte("claude_version: "+version+" (Claude Code)\n"), 0o600,
+	))
+}
+
+// `ape prompt` and `ape chat` write no manifest, so before the harness
+// stamp existed their runs were attributable to nothing at all. Every
+// other test in this file supplies only a manifest, which is what keeps
+// the legacy fallback covered.
+func TestObserve_ReadsTheHarnessStamp(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := writeRunUnder(t, root, filepath.Join("_output", "ape", "prompts"),
+		"", "20260828-213856-7c1a0b6", lines(healthyStop), "")
+	stampHarness(t, dir, "2.1.251")
+
+	rep, err := Observe(root, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, "2.1.251", rep.Judged, "a manifest-less run must still name its harness")
+	require.Equal(t, 1, rep.Scanned)
+	require.Contains(t, rep.Summary(), "Claude Code 2.1.251")
+}
+
+// Both files carry the key. The harness stamp is the one every producer
+// writes, so it is the one that decides.
+func TestObserve_HarnessStampWinsOverManifest(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dir := writeRun(t, root, "skill-a", "run1", lines(healthyStop), manifestFor("2.1.240"))
+	stampHarness(t, dir, "2.1.251")
+
+	rep, err := Observe(root, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, "2.1.251", rep.Judged)
+}
+
+// The regression this stamp exists for. The judged version is the newest
+// run's, so an unstamped prompt run set Judged to "" and pushed every
+// stamped pipeline run in the window into Ignored — the verdict was then
+// computed from the prompt runs alone, and inside that bucket pre- and
+// post-upgrade runs fused, which is the masking version scoping prevents.
+func TestObserve_PromptRunDoesNotHijackTheVerdict(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	now := time.Now()
+
+	pipe := writeRunUnder(t, root, filepath.Join("_output", "ape", "pipelines"),
+		"design", "run1", lines(healthyStop, agentPost), manifestFor("2.1.251"))
+	touch(t, pipe, now.Add(-30*time.Minute))
+
+	prompt := writeRunUnder(t, root, filepath.Join("_output", "ape", "prompts"),
+		"", "p1", lines(healthyStop), "")
+	stampHarness(t, prompt, "2.1.251")
+	touch(t, prompt, now.Add(-time.Minute))
+
+	rep, err := Observe(root, now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, "2.1.251", rep.Judged)
+	require.Equal(t, 2, rep.Scanned, "the pipeline run must be judged alongside the prompt run")
+	require.Equal(t, 0, rep.Ignored, "same harness, so nothing is excluded")
+	require.NotContains(t, rep.Summary(), "not judged")
+}
+
+// Versions holds only stamped versions, so counting "other versions" from
+// it reported 0 whenever the ignored runs were unstamped — the ordinary
+// case for runlogs written before the harness stamp existed.
+func TestObserve_CountsTheUnstampedBucketAsAVersion(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	now := time.Now()
+
+	legacy := writeRun(t, root, "skill-a", "old1", lines(healthyStop), "")
+	touch(t, legacy, now.Add(-30*time.Minute))
+	cur := writeRun(t, root, "skill-a", "new1", lines(healthyStop), manifestFor("2.1.251"))
+	touch(t, cur, now.Add(-time.Minute))
+
+	rep, err := Observe(root, now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 1, rep.Ignored)
+	require.Equal(t, 1, rep.IgnoredVersions)
+	require.Contains(t, rep.Summary(), "1 run(s) from 1 other version(s) not judged")
+}

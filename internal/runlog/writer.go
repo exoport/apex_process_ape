@@ -1,18 +1,20 @@
 // Package runlog writes the four PLAN-5 / C6 streams that surround
-// the pipeline manifest:
+// the pipeline manifest, plus the harness stamp:
 //
 //	hook-events.jsonl    one JSON per ape-notify forward
 //	bridge-calls.jsonl   one JSON per MCP tool call seen by the bridge
 //	checkpoints.jsonl    ape stage events + skill reply() calls
 //	transcripts/         symlinks into ~/.claude/projects/<hash>/<sid>.jsonl
+//	harness.yaml         the Claude Code version that produced the run
 //
 // Pipeline runs use the existing PLAN-3 layout
 // (<project>/_output/ape/pipelines/<name>/<run_id>/) — runlog does not
 // move the directory, it adds files alongside manifest.yaml.
 //
-// `ape chat` writes to a separate convention
-// (<project>/_output/ape/chats/<chat-id>/) with session.yaml in place
-// of the PLAN-3 manifest.
+// `ape prompt` and `ape chat` write to their own conventions
+// (<project>/_output/ape/{prompts,chats}/<id>/) and produce no PLAN-3
+// manifest, since neither is a pipeline. harness.yaml is what those runs
+// have in common with pipeline runs — see HarnessFile.
 package runlog
 
 import (
@@ -43,10 +45,10 @@ type Writer struct {
 	chk   *os.File
 }
 
-// New opens (or creates) the four streams under dir. Fails loud if
-// the dir already exists and contains a non-empty manifest — that is
-// the PLAN-5 / C6 run-id collision contract.
-func New(dir string) (*Writer, error) {
+// New opens (or creates) the four streams under dir and stamps
+// harness.yaml. Fails loud if the dir already exists and contains a
+// non-empty manifest — that is the PLAN-5 / C6 run-id collision contract.
+func New(dir string, opts ...Option) (*Writer, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("runlog: mkdir %s: %w", dir, err)
 	}
@@ -64,6 +66,11 @@ func New(dir string) (*Writer, error) {
 	if w.chk, err = openAppend(filepath.Join(dir, "checkpoints.jsonl")); err != nil {
 		return nil, err
 	}
+	cfg := writerConfig{claudeBin: DefaultClaudeBin}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	writeHarnessStamp(dir, cfg.claudeBin)
 	return w, nil
 }
 

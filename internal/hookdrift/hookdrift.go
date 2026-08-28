@@ -60,9 +60,17 @@
 // already carries, and asks the question the gate actually means: does the
 // Claude Code I have installed right now still send this field?
 //
-// Runs whose manifest carries no version stamp form their own bucket, so
-// an older ape's runlogs are judged together rather than silently fused
-// with a stamped generation.
+// Runs that carry no version stamp form their own bucket, so an older
+// ape's runlogs are judged together rather than silently fused with a
+// stamped generation.
+//
+// That bucket used to be much larger than it looked. The stamp was read
+// only from the pipeline manifest, which `ape prompt` and `ape chat` do
+// not write — so runs from today's ape landed in it alongside runs from
+// an ape three releases old, and since the judged version is the newest
+// run's, one recent prompt run dragged the whole verdict in there and
+// excluded every stamped pipeline run beside it. Both producers now stamp
+// runlog.HarnessFile, which every run kind writes; see claudeVersionFor.
 package hookdrift
 
 import (
@@ -119,6 +127,9 @@ type Report struct {
 	// non-zero Ignored is normal right after a Claude Code upgrade.
 	Scanned int
 	Ignored int
+	// IgnoredVersions is how many distinct versions those ignored runs came
+	// from, counting the unstamped bucket as one.
+	IgnoredVersions int
 }
 
 // Observed reports whether the sweep found anything to judge.
@@ -166,7 +177,7 @@ func (r *Report) Summary() string {
 	ignored := ""
 	if r.Ignored > 0 {
 		ignored = fmt.Sprintf("; %d run(s) from %d other version(s) not judged",
-			r.Ignored, len(r.Versions)-1)
+			r.Ignored, r.IgnoredVersions)
 	}
 	return fmt.Sprintf("%d run(s): %s%s%s", r.Scanned, strings.Join(parts, ", "), v, ignored)
 }
@@ -245,14 +256,22 @@ func Observe(projectRoot string, since time.Time) (*Report, error) {
 	}
 	rep.Judged = newest.version
 
+	ignoredVersions := map[string]bool{}
 	for _, r := range runs {
 		if r.version != rep.Judged {
 			rep.Ignored++
+			ignoredVersions[r.version] = true
 			continue
 		}
 		rep.Scanned++
 		scanRunlog(r.path, &bg, &tr, &ag)
 	}
+	// Counted here rather than derived from len(Versions)-1 in Summary:
+	// Versions holds only stamped versions, so unstamped runs are ignored
+	// without being counted, and the summary reported "N run(s) from 0
+	// other version(s)". Unstamped runs are the common case straddling an
+	// upgrade, which is exactly when the line is read.
+	rep.IgnoredVersions = len(ignoredVersions)
 	rep.Observations = []Observation{bg, tr, ag}
 	return rep, nil
 }
@@ -343,12 +362,35 @@ func toolName(row hookRow) string {
 	return s
 }
 
-// claudeVersionFor reads the claude_version recorded in the run's
-// manifest, so a drift report names the harness that produced it.
-// Best-effort: a missing or unparsable manifest simply contributes
-// nothing.
+// claudeVersionFor reads the claude_version recorded beside the run's
+// hook events, so a drift report names the harness that produced it.
+// Best-effort: a run that records no version simply contributes nothing.
+//
+// Two sources, in order. runlog.HarnessFile is written by every producer,
+// because they all open a runlog.Writer; manifest.yaml is written only by
+// the pipeline runner. Reading the harness stamp first is what makes
+// `ape prompt` and `ape chat` runs attributable at all.
+//
+// The manifest fallback is not vestigial: every runlog already on disk
+// predates the harness stamp, and those runs are the entire corpus for
+// any project with history. Dropping it would blank out the existing
+// evidence and push a healthy project to "not verified".
 func claudeVersionFor(hookPath string) string {
-	f, err := os.Open(filepath.Join(filepath.Dir(hookPath), "manifest.yaml"))
+	dir := filepath.Dir(hookPath)
+	for _, name := range []string{runlog.HarnessFile, "manifest.yaml"} {
+		if v := readClaudeVersion(filepath.Join(dir, name)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// readClaudeVersion pulls the `claude_version:` line out of one YAML file.
+// Line-scanned rather than parsed: the two files it reads share nothing
+// but this key, and a full unmarshal would couple the detector to the
+// pipeline manifest's schema.
+func readClaudeVersion(path string) string {
+	f, err := os.Open(path)
 	if err != nil {
 		return ""
 	}

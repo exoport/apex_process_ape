@@ -23,10 +23,11 @@ type PromptModelUsage struct {
 }
 
 // PromptMeta is the session record written to prompt.yaml when an
-// `ape prompt` run ends (PLAN-12). It is the prompt analogue of
-// SessionMeta (chats) — prompt sessions are not pipelines, so no PLAN-3
-// manifest equivalent — but carries a status and a per-model breakdown
-// so `ape costs` can attribute them.
+// `ape prompt` run ends (PLAN-12). Prompt sessions are not pipelines, so
+// there is no PLAN-3 manifest equivalent, but the record carries a status
+// and a per-model breakdown so `ape costs` can attribute them. The
+// harness version is not here: it is stamped for every run kind alike in
+// harness.yaml, written by the Writer itself.
 //
 //nolint:tagliatelle // snake_case matches the session-record on-disk contract
 type PromptMeta struct {
@@ -47,7 +48,7 @@ type PromptMeta struct {
 // WritePromptYAML emits prompt.yaml at <dir>/prompt.yaml.
 func WritePromptYAML(dir string, m PromptMeta) error {
 	// Normalize the timestamps to UTC RFC3339 for a stable, comparable
-	// on-disk shape (matches WriteSessionYAML).
+	// on-disk shape.
 	m.StartedAt = m.StartedAt.UTC().Truncate(time.Second)
 	m.EndedAt = m.EndedAt.UTC().Truncate(time.Second)
 	bs, err := yaml.Marshal(m)
