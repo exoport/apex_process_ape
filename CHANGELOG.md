@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## v0.0.55 (unreleased)
+
+- **test: retire the eight `TestParity_*` gates, porting the one case they
+  alone asserted** — they ran the ten retired framework Python scripts side by
+  side with the commands replacing them, which made them a *differential* gate:
+  their value was catching divergences nobody had transcribed wrongly on
+  purpose, and it was spent at migration. Framework v0.11.0 deleted the
+  scripts, so against any supported framework they could only skip — eight
+  SKIP lines in the output of `make check-framework`, a gate whose whole
+  discipline is "a skip is not a pass". A test that can never fail again is
+  not a gate, and skip noise taxes exactly the careful reading that gate asks
+  for. The behaviours themselves stay covered natively:
+  `TestStoryVerifyFile_ExitCodesTravelAsErrors`,
+  `TestSprintVerify_ExitCodesTravelAsErrors` (all five codes),
+  `internal/sprint`'s reconcile suite, `internal/apexdoc`, and
+  `TestProject_CRLFAndBOM` / `TestSplit_BOM` for the BOM asymmetry.
+  - **One case was NOT covered elsewhere, and is now.** The parity gate
+    recorded that ape is deliberately *stricter* than the Python on a
+    backwards write: an unquoted 14-digit `updated_at` is valid YAML for an
+    int, so `verify-sprint-status-row.py`'s `str` guard skipped the comparison
+    and reported OK on a real regression, while ape compares the rendered
+    value and returns exit 5. The native test only used quoted timestamps, so
+    that asymmetry was asserted nowhere that ever ran — nothing stopped the
+    render-then-compare being "simplified" back into the guard that had the
+    bug. Now `internal/sprint`'s
+    `TestVerifyRow_BackwardsWriteAgainstUnquotedCommittedValue`, verified to
+    fail (exit 0 instead of 5) when the type guard is reinstated.
+
 ## v0.0.54 (2026-08-28)
 
 - **fix(hookdrift): every run kind now stamps the Claude Code that produced

@@ -256,7 +256,7 @@ ape has a second dependency that moves on its own schedule — the APEX framewor
 make check-framework APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
 ```
 
-That checks the command surface the installed framework declares it requires, the config variables its live template defines, and the behaviour of the commands that replaced its retired Python scripts.
+That checks the command surface the installed framework declares it requires and the config variables its live template defines.
 
 Details for both: [How to verify a release before tagging](docs/how-to/pre-tag-release.md).
 

@@ -105,7 +105,6 @@ gates close that:
 | --- | --- |
 | `TestCommandSurface_AgainstRealManifest` | does this binary provide every command the framework's shipped `_apex/ape-commands.yaml` requires? |
 | `TestContract_LiveConfigTemplate` | do the config variables ape resolves match the framework's **live** template, not a copied fixture? |
-| `TestParity_*` | do the commands that replaced the retired Python scripts still behave identically? |
 | `ape doctor --only framework.command_surface,framework.terminal_contracts` | the same surface as a project actually **received** it — what a skill meets at run time |
 
 Both framework layouts resolve: released (`_apex/` at the repo root) and build
@@ -117,9 +116,6 @@ Reading the result:
 - **Path that is not a framework checkout** → hard error. Setting the variable
   says you want the gate to run, so a path resolving to nothing is a typo —
   every gate would otherwise have passed green.
-- **`TestParity_*` all skip** → expected against a modern framework. The
-  scripts they compare against are retired, which is what that gate was built
-  to guard.
 
 > **Why this can't be a CI job.** Every check here is a statement about the harness *installed on this machine right now*. A CI runner has none of the inputs, so the honest result there is a skip — and a gate that always skips is worse than no gate, because it reads as a pass. The same reasoning is why `ape costs coverage` exits 0 with "coverage NOT verified" rather than green when it finds nothing.
 

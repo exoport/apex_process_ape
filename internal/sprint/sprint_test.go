@@ -598,6 +598,56 @@ development_status:
 	require.Equal(t, VerifyOK, VerifyRow(ctx, path, "1-1", "done").Code)
 }
 
+// TestVerifyRow_BackwardsWriteAgainstUnquotedCommittedValue is the case the
+// Python this replaced waved through, and the reason VerifyRow compares the
+// RENDERED value rather than a type-guarded one.
+//
+// A 14-digit timestamp written without quotes is valid YAML for an int, so
+// `verify-sprint-status-row.py` — whose guard demanded a str — silently
+// skipped the comparison and reported OK on a genuine backwards write. Two
+// review skills branch on exit 5 by number, and its repair instruction is
+// "re-write updated_at as the value this reports", so a missed 5 does not
+// merely under-report: it lets a stale timestamp stand as committed truth.
+//
+// The asymmetry was found by the retired TestParity_SprintRowBackwardsWrite,
+// which ran the real script side by side with this command. That gate could
+// only ever fire against a pre-v0.11.0 framework, so the case lives here now
+// — without it, nothing stops the render-then-compare being "simplified"
+// back into the type guard that had the bug.
+func TestVerifyRow_BackwardsWriteAgainstUnquotedCommittedValue(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	git := func(args ...string) {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		require.NoError(t, cmd.Run(), "git %v", args)
+	}
+	git("init", "-q")
+
+	path := filepath.Join(dir, "sprint-status.yaml")
+	// Unquoted: YAML decodes this as an int, not a string.
+	committed := `updated_at: 20260301120000
+development_status:
+  1-1: done
+`
+	require.NoError(t, os.WriteFile(path, []byte(committed), 0o644))
+	git("add", ".")
+	git("commit", "-qm", "tracker")
+
+	backwards := strings.Replace(committed, "20260301120000", "20260201120000", 1)
+	require.NoError(t, os.WriteFile(path, []byte(backwards), 0o644))
+
+	res := VerifyRow(ctx, path, "1-1", "done")
+	require.Equal(t, VerifyBackwardsWrite, res.Code, res.Message)
+	require.Equal(t, "20260301120000", res.Committed,
+		"the committed value must render identically whether or not it was quoted")
+}
+
 // TestVerifyRow_CreatedEqualsUpdatedPassesTrivially documents why the
 // committed comparison exists at all: comparing updated_at against
 // created_at alone cannot catch a backwards write, because both are

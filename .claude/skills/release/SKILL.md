@@ -230,7 +230,6 @@ Four gates:
 | --- | --- |
 | `TestCommandSurface_AgainstRealManifest` | does this binary provide every command the framework's shipped `_apex/ape-commands.yaml` declares it requires? |
 | `TestContract_LiveConfigTemplate` | do the config variables ape resolves match the framework's **live** template, rather than a copied fixture? |
-| `TestParity_*` | do the commands that replaced the retired Python scripts still behave identically? |
 | `ape doctor --only framework.command_surface,framework.terminal_contracts` | the same command surface as a project actually **received** it, which is what a skill meets at run time |
 
 If `{autonomous}` is false: ask "Run `make check-framework`? Needs a checkout of apex_process_framework — give me the path, or skip." — wait for confirmation.
@@ -243,7 +242,6 @@ Reading the output:
 
 - **`APEX_FRAMEWORK_REPO` unset** → prints "framework contract NOT verified — this is a skip, not a pass" and exits 0. Report it as unverified; do not call it passed.
 - **A path that is not a framework checkout** → hard error, exit 1. Deliberate: setting the variable says you want the gate to run, so a path resolving to nothing is a typo, not a skip.
-- **`TestParity_*` all SKIP** → expected against a modern framework. The scripts they compare against have been retired, which is the outcome that gate was built to guard. Not a gap.
 - **`TestCommandSurface_AgainstRealManifest` SKIP** → the framework predates the manifest (pre-v0.11.0). Not a failure.
 - **`installed command surface NOT verified`** → `HOOK_PROJECT` has no `_apex/`. The checkout gates still ran; only the installed-project half did not.
 

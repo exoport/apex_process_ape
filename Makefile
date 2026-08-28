@@ -176,15 +176,21 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	@# schedule, and the one an eval capture nearly measured eight hours of
 	@# broken runs against.
 	@#
-	@# Three gates, all needing a sibling framework checkout:
+	@# Two gates, both needing a sibling framework checkout:
 	@#   TestCommandSurface_AgainstRealManifest  every command the framework's
 	@#     shipped _apex/ape-commands.yaml requires resolves against this binary
 	@#   TestContract_LiveConfigTemplate         the config variables ape resolves
 	@#     match the framework's live template, not a copied fixture
-	@#   TestParity_*                            the ten retired Python scripts,
-	@#     run side by side with the commands that replace them. These SKIP once
-	@#     the framework has retired the scripts, which is the intended end state
-	@#     rather than a gap — the gate existed to guard the retirement.
+	@#
+	@# The eight TestParity_* gates were removed in v0.0.55. They ran the ten
+	@# retired Python scripts side by side with the commands replacing them, so
+	@# they could only fire against a pre-v0.11.0 framework — against any
+	@# supported one they skipped, adding eight SKIP lines to the output of a
+	@# gate whose whole discipline is "a skip is not a pass". Their value was
+	@# the differential itself and it was spent at migration; the behaviours
+	@# are covered natively, and the one asymmetry they alone asserted (an
+	@# unquoted 14-digit updated_at, which the Python's str guard dropped) is
+	@# now internal/sprint's TestVerifyRow_BackwardsWriteAgainstUnquotedCommittedValue.
 	@#
 	@# Both framework layouts resolve: released (_apex/ at the repo root) and
 	@# build (nested under framework/). The whole guard is ONE shell block
@@ -203,7 +209,7 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	else \
 		echo "==> framework contract against $(APEX_FRAMEWORK_REPO)"; \
 		APEX_FRAMEWORK_REPO="$(APEX_FRAMEWORK_REPO)" go test ./internal/apecmd/ -count=1 -v \
-		  -run 'TestCommandSurface_AgainstRealManifest|TestContract_Live|TestParity'; \
+		  -run 'TestCommandSurface_AgainstRealManifest|TestContract_Live'; \
 	fi
 	@# The gates above compare ape to a framework CHECKOUT. This compares it to
 	@# a framework INSTALL — the manifest as a project actually received it,
@@ -230,5 +236,5 @@ ci-local: test lint govulncheck docs-check check-prices xcompile-windows snapsho
 	@echo "Does NOT catch: Windows runtime behaviour (use a push-to-branch + GitHub Actions Windows runner for that)."
 	@echo "Does NOT catch: the installed Claude Code breaking a contract ape drives it through (PTY, models,"
 	@echo "                hook payloads) — run 'make check-harness HOOK_PROJECT=<a project ape has run>'."
-	@echo "Does NOT catch: ape no longer satisfying the APEX framework (command surface, config template,"
-	@echo "                Python parity) — run 'make check-framework APEX_FRAMEWORK_REPO=<checkout>'."
+	@echo "Does NOT catch: ape no longer satisfying the APEX framework (command surface, config"
+	@echo "                template) — run 'make check-framework APEX_FRAMEWORK_REPO=<checkout>'."
