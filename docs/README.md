@@ -29,6 +29,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [How to write and run an `ape script`](how-to/write-ape-scripts.md)
 - [How to run a sandboxed Kata VM workspace](how-to/sandbox-workspaces.md)
 - [How to use a workspace as your dev container](how-to/devcontainer-workspaces.md)
+- [How to use the board (`ape aboard`)](how-to/use-the-board.md)
 - [How to run ape as a service (NATS job daemon)](how-to/run-ape-as-a-service.md)
 - [How to run aped (the VM-management daemon)](how-to/run-aped.md)
 - [How ape runs claude (PTY-only)](how-to/interactive-vs-programmatic.md)

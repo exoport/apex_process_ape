@@ -97,6 +97,10 @@ func init() {
 		newSandboxConnectCmd(),
 		newServiceCmd(),
 		newGenDocsCmd(),
+		// A whole command tree from a separate module, mounted rather than
+		// ported — see aboard.go for what the two hosts share and what
+		// distinguishes them.
+		newAboardCmd(),
 	)
 }
 

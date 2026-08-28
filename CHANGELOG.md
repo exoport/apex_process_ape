@@ -2,6 +2,51 @@
 
 ## v0.0.55 (unreleased)
 
+- **feat: `ape aboard` — the board, mounted** — `github.com/exoport/aboard`
+  v0.1.0 serves a browser UI for a project whose state a human and one or more
+  agent sessions read and write. It is a library by construction (no
+  package-level cobra state, no `init()` registration, no `os.Args` reads, no
+  `os.Exit` outside its own `Execute`), so ape *mounts* the whole tree with one
+  `AddCommand` rather than porting it. Both hosts resolve the same `.aboard/`
+  per project, derive the same port from it, and write the same state file: a
+  board started by `ape aboard serve` is the board a bare `aboard status`
+  reports, and either binary can drive it.
+  - **Exactly one string differs.** `app`/`host` in `/health` and
+    `.aboard/run/instance.json` become `ape-aboard`, so a message can name the
+    command the reader has. The capability manifest must NOT differ —
+    `aboard.AppName` describes the board, not the process serving it — and
+    `TestAboardCapabilitiesAreHostIndependent` asserts full-output equality
+    rather than just `capsHash`, since a change that altered a declared command
+    but left the hash stale would pass a hash check and still be the drift.
+    Verified live: `207b5d93` under both binaries, manifests byte-identical.
+  - **aboard's exit table survives ape's mapping.** It declares 0/1/2/3 (2 =
+    usage, 3 = `wait` timed out, both documented and scripted against), and
+    ape's `ExitCode` recognised none of them — it matches ape's own
+    `*exitError` and otherwise returns 1, so `ape aboard export` and a timed-out
+    `ape aboard wait` would both have exited 1. `ExitCode` now offers errors it
+    does not own to aboard's table first. Verified end to end: exit 2 on a usage
+    error, exit 3 on a `wait` that timed out against a live board.
+  - **The board does not inherit ape's update check.** Cobra runs the closest
+    `PersistentPreRun` walking up from the executed command and aboard's tree
+    defines none, so every board command would have run ape's — which can print
+    `update available: … run 'ape update'` onto stderr mid-board-output, and
+    fires as a goroutine, so whether it appeared at all depended on a race with
+    process exit. The mount shadows it with a no-op. The board is reachable from
+    the standalone binary too and its output must not differ by host.
+  - **Version reporting needs nothing from ape.** aboard resolves its own
+    version from `info.Deps` when it is not the main module, so `ape aboard
+    version` reports `0.1.0` rather than ape's tag. There is no field to pass
+    and none is wanted: a bug report carrying the host's version would name the
+    wrong project.
+  - New how-to: [use the board](docs/how-to/use-the-board.md). The generated
+    CLI reference grows by the mounted tree.
+  - Still open, and **in the aboard repo, not this one**: 55 message strings
+    plus 12 cobra `Example:` fields still say `aboard <cmd>` where the user has
+    `ape aboard <cmd>`. `Options.Argv0` already carries the right invocation and
+    is already plumbed to the instance record and `/health`; it is simply not
+    used for message text yet. The mount is what makes that fixable — 55 sites
+    cannot be verified against a host that does not exist.
+
 - **test: retire the eight `TestParity_*` gates, porting the one case they
   alone asserted** — they ran the ten retired framework Python scripts side by
   side with the commands replacing them, which made them a *differential* gate:

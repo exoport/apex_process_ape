@@ -1,0 +1,95 @@
+# How to use the board (`ape aboard`)
+
+`ape aboard` serves a browser UI for a project and keeps its state in a file
+both a human and one or more agent sessions read and write. Tabs are *data*,
+not code: an agent opens one for whatever it needs to show — a graph, a chart,
+a question form, an annotated screenshot, a bespoke widget — and reads back
+what the human changed.
+
+The board is [aboard](https://github.com/exoport/aboard), a separate public
+module. ape mounts its command tree rather than reimplementing it, so every
+`aboard` subcommand is available as `ape aboard <cmd>`. See
+[`ape aboard` in the CLI reference](../reference/cli.md) for the full surface.
+
+## Start a board
+
+```bash
+ape aboard init --example     # create .aboard/ with a demo board
+ape aboard serve              # run the server; prints the URL
+ape aboard status             # what is running here, and on which port
+```
+
+State lives under `.aboard/` at the project root, found by walking up from
+`--cwd`. Each project gets its own port derived from that root, so the URL is
+stable and two checkouts never collide.
+
+Add `.aboard/` to `.gitignore` — `ape aboard init --gitignore` does it for you.
+
+## One board per project, whichever binary you use
+
+`ape aboard` and the standalone `aboard` binary resolve the same `.aboard/`,
+derive the same port, and write the same state file. A board started by
+`ape aboard serve` is the board a bare `aboard status` reports, and either can
+drive it. You do not need both installed; if you have both, they cooperate.
+
+Exactly one thing differs. `/health` and `.aboard/run/instance.json` report
+`"app": "ape-aboard"` instead of `"aboard"`, so a message can name the command
+the reader actually has:
+
+```console
+$ ape aboard status
+aboard running at http://localhost:44186
+  ...
+  served  ape-aboard
+  caps    207b5d93
+```
+
+What must **not** differ is the capability manifest. `ape aboard capabilities`
+and `aboard capabilities` are byte-identical, `capsHash` included — it
+describes the board, not the process serving it, so an agent reading it cannot
+tell which host it reached.
+
+## Exit statuses
+
+The board has its own table, and ape preserves it:
+
+| code | meaning |
+| --- | --- |
+| 0 | fine |
+| 1 | it ran and failed |
+| 2 | a flag or argument it could not act on, decided before anything was contacted |
+| 3 | `ape aboard wait` returned because nobody came |
+
+Exit 3 is the one worth scripting against:
+
+```bash
+ape aboard wait --for poke --timeout 5m || [ $? -eq 3 ] && echo "nobody came"
+```
+
+## Two rules that matter
+
+1. **Do not edit `.aboard/aboard.json` by hand while a board is running.** Use
+   `ape aboard apply`, which is a compare-and-set on the document's `rev`. A
+   `409` means someone got there first — re-read and retry.
+2. **Do not take a healthy server away from another session.** `ape aboard
+   serve` refuses to start a second board for the same project and prints the
+   URL of the one already running. The refusal is anchored to the board, not
+   the port, so `--port` is not a way around it.
+
+## Version
+
+`ape aboard version` reports **aboard's** module version, not ape's — the
+board is a dependency, and a bug report carrying the host's tag would name the
+wrong project.
+
+```console
+$ ape aboard --version
+aboard version 0.1.0
+```
+
+## Platform note
+
+`ape aboard boards` scans `/proc` and is Linux-only by design. On other
+platforms it still exists and exits 2 with a line naming the platform,
+pointing at `ape aboard status` — a command that is present and honest beats
+one that is missing on two of three platforms.

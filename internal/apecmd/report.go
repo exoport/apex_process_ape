@@ -63,12 +63,19 @@ func gateErr(code int, err error) error {
 // forwarding the guest's exit status), else 1. silent reports that the error
 // already conveyed its outcome (an *exitError — the command streamed its own
 // output/stderr), so main can skip printing a redundant "Error:" line.
+//
+// The mounted aboard tree brings a second status table with it (usage 2,
+// `wait` timeout 3), which ape's *exitError cannot express. Errors ape does
+// not own are offered to it before falling through — see aboardExitCode.
 func ExitCode(err error) (code int, silent bool) {
 	if err == nil {
 		return ExitOK, false
 	}
 	if ee, ok := errors.AsType[*exitError](err); ok {
 		return ee.code, true
+	}
+	if c, s, handled := aboardExitCode(err); handled {
+		return c, s
 	}
 	return ExitRunFailed, false
 }
