@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.0.53 (2026-08-28)
 
 - **feat: the project-data commands the framework skills call (PLAN-25)** —
   33 new subcommands under nine new groups, five new packages, and ten of the

@@ -248,7 +248,17 @@ make check-harness HOOK_PROJECT=~/work/some-apex-project
 
 Three gates, each reading what the installed Claude Code is *actually* doing: `check-prices` (model ids in local transcripts), `check-hooks` (the hook fields ape's step-completion gates read, from a project's runlogs), and `check-claude` (a live PTY session — ready signals, spawn flags, effort level, model aliases, transcript persistence).
 
-None of them run in GitHub CI, which has no `claude`, no auth, no network and no runlogs. Each reports "not verified" rather than green when it finds no evidence — **read the output, not the exit code**. Details: [How to verify a release before tagging](docs/how-to/pre-tag-release.md).
+None of them run in GitHub CI, which has no `claude`, no auth, no network and no runlogs. Each reports "not verified" rather than green when it finds no evidence — **read the output, not the exit code**.
+
+ape has a second dependency that moves on its own schedule — the APEX framework itself, whose skills call ape subcommands with no fallback branch:
+
+```bash
+make check-framework APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
+```
+
+That checks the command surface the installed framework declares it requires, the config variables its live template defines, and the behaviour of the commands that replaced its retired Python scripts.
+
+Details for both: [How to verify a release before tagging](docs/how-to/pre-tag-release.md).
 
 Tooling is pinned via [bingo](https://github.com/bwplotka/bingo) — the `.bingo/` directory contains a per-tool `.mod` file, and `make lint` / `make fmt` / `make snapshot` build the pinned binary on first use. Bumping a version: `go install github.com/bwplotka/bingo@v0.10.0` (one-time), then `bingo get <module>@<version>`.
 
