@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/exoport/aboard/pkg/aboard"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"gopkg.in/yaml.v3"
 )
@@ -126,6 +127,19 @@ type UpdateSummary struct {
 	// SkillsRemovedPaths does: a count alone cannot be checked against the
 	// tree by anyone reading the output.
 	AboardRecipePaths []string `json:"aboardRecipePaths,omitempty" yaml:"aboardRecipePaths,omitempty"`
+
+	// The project's own board. AboardCreated is false on every run after the
+	// first, and on a project that already had one — `aboard.Init` refuses to
+	// overwrite a document, which is the correct refusal.
+	AboardCreated bool `json:"aboardCreated" yaml:"aboardCreated"`
+	// AboardGitignoreSeeded reports that .aboard/.gitignore was written. The
+	// directory is committed, its contents never are.
+	AboardGitignoreSeeded bool `json:"aboardGitignoreSeeded" yaml:"aboardGitignoreSeeded"`
+	// AboardParentRoot is set when a board root ABOVE this project already
+	// owns it, so none was created here. Not a failure: aboard refuses to nest
+	// one root inside another, because the inner board would be invisible from
+	// the outer one.
+	AboardParentRoot string `json:"aboardParentRoot,omitempty" yaml:"aboardParentRoot,omitempty"`
 
 	// RunsRelocated / RunsRelocationConflicts report the one-time move of
 	// run artifacts from the pre-`_output/ape` layout. Both are zero on a
@@ -309,6 +323,13 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if err != nil {
 		return nil, err
 	}
+	// Both setup AND update: update is the verify-and-fix pass for a project
+	// installed before the board existed, and both steps are no-ops once the
+	// board and its ignore file are there.
+	board, err := installAboard(opts.ProjectRoot)
+	if err != nil {
+		return nil, err
+	}
 	// Both setup AND update ensure it: update is the "verify and fix" pass
 	// for a project installed before this existed, and the call is idempotent
 	// so a project that already ignores the sidecar is untouched.
@@ -381,6 +402,9 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			ApeCommandsInstalled:       apeCommandsInstalled,
 			AboardRecipesInstalled:     len(aboardRecipes),
 			AboardRecipePaths:          aboardRecipes,
+			AboardCreated:              board.Created,
+			AboardGitignoreSeeded:      board.GitignoreSeeded,
+			AboardParentRoot:           board.ParentRoot,
 
 			RunsRelocated:           len(runsMoved.Moved),
 			RunsRoot:                relRoot(opts.ProjectRoot),
@@ -492,6 +516,74 @@ func installAboardRecipes(frameworkRepo, projectRoot string) ([]string, error) {
 	}
 	sort.Strings(installed)
 	return installed, nil
+}
+
+// aboardResult reports what installAboard did.
+type aboardResult struct {
+	Created         bool   // the board root was brought into existence by this run
+	GitignoreSeeded bool   // .aboard/.gitignore was written by this run
+	ParentRoot      string // a board above this project owns it; nothing was created
+}
+
+// installAboard gives the project a board, and keeps its contents out of git.
+//
+// Two steps, and the second is the interesting one. `aboard.Init` creates
+// `.aboard/` with an empty document; then `.aboard/.gitignore` is seeded so
+// the DIRECTORY is committed and nothing inside it ever is. Ignoring
+// `.aboard/` from the repo root instead — which is what aboard's own docs
+// suggest — would ignore that file too, so the board's home would be missing
+// on a fresh clone and the first person to open the project would have to
+// know to run `init`.
+//
+// Neither step is a refresh. `Init` REFUSES to overwrite an existing document
+// (destroying a board is the one mistake here with no undo), so a project
+// that already has one is left alone; and the ignore file is seeded only when
+// absent, like `_apex/config.yaml`, because a project that edited it meant to.
+//
+// A board root ABOVE this project belongs to that project. aboard refuses to
+// nest one root inside another — the inner board would be invisible to every
+// command run from the outer root — and asking `FindRoot` first means that
+// case is reported rather than raised as an error that would fail the whole
+// install.
+func installAboard(projectRoot string) (aboardResult, error) {
+	var res aboardResult
+	// Resolved the way aboard resolves, so the comparison below is not a
+	// false inequality wherever the path crosses a symlink.
+	dir := projectRoot
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
+	if found, err := aboard.FindRoot(dir); err == nil && found.String() != dir {
+		res.ParentRoot = found.String()
+		return res, nil
+	}
+
+	stateFile := aboard.Root(dir).StateFile("")
+	switch _, err := os.Stat(stateFile); {
+	case err == nil:
+		// A board is already here. Nothing to create.
+	case errors.Is(err, fs.ErrNotExist):
+		if _, initErr := aboard.Init(aboard.InitConfig{Dir: dir}, AboardInvocation); initErr != nil {
+			return res, fmt.Errorf("create board: %w", initErr)
+		}
+		res.Created = true
+	default:
+		return res, fmt.Errorf("stat board document: %w", err)
+	}
+
+	ignore := filepath.Join(projectRoot, ProjectAboardGitignore)
+	switch _, err := os.Stat(ignore); {
+	case err == nil:
+		// Already there — possibly edited. Not ape's to rewrite.
+	case errors.Is(err, fs.ErrNotExist):
+		if err := AtomicWriteFile(ignore, []byte(AboardGitignore), 0o644); err != nil {
+			return res, fmt.Errorf("write %s: %w", ProjectAboardGitignore, err)
+		}
+		res.GitignoreSeeded = true
+	default:
+		return res, fmt.Errorf("stat %s: %w", ProjectAboardGitignore, err)
+	}
+	return res, nil
 }
 
 // operatingRulesResult reports what installOperatingRules did. Managed

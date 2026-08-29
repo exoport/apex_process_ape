@@ -9,6 +9,7 @@ import (
 
 	"github.com/exoport/aboard/pkg/aboard"
 	aboardcli "github.com/exoport/aboard/pkg/aboard/cli"
+	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -34,6 +35,17 @@ func TestAboardOptionsIdentifyTheApeHost(t *testing.T) {
 	opts := aboardOptions()
 	require.Equal(t, aboard.HostApe, opts.Host)
 	require.Equal(t, "ape aboard", opts.Argv0)
+}
+
+// The framework installer creates a project's board itself, so it needs the
+// same invocation string for the board's error messages — and it cannot
+// import this package, because apecmd already imports it. Two copies, and
+// this is the assertion that keeps them one string: a drifted copy would tell
+// somebody to run a command that does not exist.
+func TestAboardInvocationMatchesTheMount(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, framework.AboardInvocation, aboardArgv0)
+	require.Equal(t, framework.AboardInvocation, aboardOptions().Argv0)
 }
 
 // runCapabilities executes `capabilities` on a tree built from opts and

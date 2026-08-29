@@ -458,6 +458,19 @@ func printFrameworkUpdate(out *frameworkUpdateOutput, format output.Format) erro
 			fmt.Printf("Recipes:   %d installed into %s (`ape aboard recipes list`)\n",
 				n, framework.ProjectAboardRecipesDir)
 		}
+		// Reported only when something happened, or when the board is not
+		// this project's to make. A run that found everything already in
+		// place says nothing, like every other line here.
+		switch {
+		case out.Summary.AboardParentRoot != "":
+			fmt.Printf("Board:     not created — %s already has one, and a board here would be invisible from it\n",
+				out.Summary.AboardParentRoot)
+		case out.Summary.AboardCreated:
+			fmt.Printf("Board:     %s/ created (`ape aboard serve`)\n", framework.ProjectAboardDir)
+		case out.Summary.AboardGitignoreSeeded:
+			fmt.Printf("Board:     %s added — the folder is committed, its contents are not\n",
+				framework.ProjectAboardGitignore)
+		}
 		if out.Summary.ConfigSeeded {
 			fmt.Printf(
 				"Config:    seeded — project_name=%q extensions=[%s]\n",

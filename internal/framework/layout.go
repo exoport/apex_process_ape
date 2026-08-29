@@ -86,7 +86,43 @@ const (
 	// for exactly this directory, so it is the same string on both sides and
 	// must stay that way.
 	ProjectAboardRecipesDir = "_apex/aboard/recipes"
+	// ProjectAboardDir is the board's own directory, created by setup/update
+	// so a project has a board without anyone running `ape aboard init`.
+	ProjectAboardDir = ".aboard"
+	// ProjectAboardGitignore keeps the board's contents out of git while
+	// leaving the DIRECTORY in it.
+	//
+	// The alternative — one `.aboard/` line in the repo-root .gitignore — is
+	// what aboard's own docs suggest, and it is not what this does. Ignoring
+	// the directory at the root would ignore this file too, so the folder
+	// would not exist on a fresh clone at all. Committing only the ignore
+	// file means the board's home is always there, and everything the board
+	// writes into it (the document, the run directory, uploads) still stays
+	// out of everyone else's diffs.
+	ProjectAboardGitignore = ".aboard/.gitignore"
 )
+
+// AboardGitignore is the file written into a project's board directory. It
+// ignores everything beside itself.
+//
+// Kept byte-identical to `_apex/.gitignore` in this repo, which is the same
+// pattern for the same reason: a directory that must exist in git while none
+// of its contents do.
+const AboardGitignore = `# Ignore everything
+*
+
+# Allow files and folders with a pattern starting with !
+!.gitignore
+`
+
+// AboardInvocation is the command name the board uses in its own messages
+// when ape is the host, so an error from `Init` names something the reader
+// can actually type.
+//
+// Duplicated from apecmd's aboardArgv0 because apecmd imports this package
+// and the dependency cannot run the other way. TestAboardInvocationMatchesTheMount
+// in apecmd asserts the two are the same string.
+const AboardInvocation = "ape aboard"
 
 // SkillPrefix is the filename prefix that identifies framework-managed
 // skills. Anything else under .claude/skills/ is left alone by
