@@ -230,8 +230,30 @@ ape aboard wait --by "agent-1" --timeout 15m
 
 The board's header then shows *notify agent-1* with a lit dot, and the human
 pressing it releases you (exit 0; exit 3 means nobody came). Say what you are
-waiting for when you start waiting. Full contract in
+waiting for when you start waiting — and say that the button is what releases
+you, because a human who does not know it is there will answer, sit back, and
+wait for you to notice. Full contract in
 [references/capabilities.md](references/capabilities.md#waiting-for-the-human).
+
+**Wait for the nudge, not for the first click.** The default predicate is `poke`
+— the button — and it is almost always the one you want. `--for change` looks
+more attentive and is a trap: every edit is a write, so a human working through a
+four-field form saves four times, and `change` fires on the FIRST one. You wake
+holding one answer and three defaults, mistake the defaults for a decision, and
+write something back under a person who is still reading. Do that twice and you
+are arguing with a draft.
+
+`poke` is the human saying *I am done, look now*, and it is the only signal that
+carries that meaning. Waiting on it is not the slower path: they decide when the
+answer is finished, which is the one judgement that cannot be made from this
+side. If you wake and find half a form, you have used the wrong predicate — go
+back to waiting rather than reacting.
+
+Narrow it only when you need one specific event rather than a conversation:
+`answer <id>` for a gate you cannot proceed past, `rendered <id>` to find out
+whether a browser ever drew a tab, `request` for a note that may already be
+waiting. `change` earns its place when another AGENT is driving the board, where
+every write is final and there is nobody to interrupt.
 
 ## What the board is FOR — and what it must never be
 

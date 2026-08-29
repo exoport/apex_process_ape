@@ -560,6 +560,12 @@ repaints the button.
   mounted that tab), `request [<tab>]` (the human has a note waiting for an
   agent). An unknown predicate is refused immediately rather than blocking on
   something that will never fire.
+- **`poke` is the default because it is the only predicate that means "I have
+  finished".** Every edit is a write, so `change` fires on the first save of an
+  interaction — a human filling in a form writes once per field — and an agent
+  waiting on it wakes mid-edit and reacts to answers that are not final. Use
+  `change` for a board another agent is driving, where every write is final;
+  use `poke` for a human.
 - `request` is the one form that can be satisfied before you ask, and it answers
   at once when it is: a note left an hour ago is a fact about the document rather
   than an event still to come, and blocking on it would be asking the human to
