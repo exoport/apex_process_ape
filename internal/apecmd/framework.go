@@ -450,6 +450,14 @@ func printFrameworkUpdate(out *frameworkUpdateOutput, format output.Format) erro
 		)
 		fmt.Printf("Skills:    %d installed (%d removed)\n", out.Summary.SkillsInstalled, out.Summary.SkillsRemoved)
 		fmt.Printf("Pipelines: %d installed\n", out.Summary.PipelinesInstalled)
+		// Reported only when the framework carried a library. Zero is the
+		// ordinary case for a framework that ships none, and every built-in
+		// recipe reaches the project inside the binary regardless — so a
+		// "0 installed" line would suggest a shortfall that does not exist.
+		if n := out.Summary.AboardRecipesInstalled; n > 0 {
+			fmt.Printf("Recipes:   %d installed into %s (`ape aboard recipes list`)\n",
+				n, framework.ProjectAboardRecipesDir)
+		}
 		if out.Summary.ConfigSeeded {
 			fmt.Printf(
 				"Config:    seeded — project_name=%q extensions=[%s]\n",

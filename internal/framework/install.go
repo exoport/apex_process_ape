@@ -117,6 +117,16 @@ type UpdateSummary struct {
 	// failure. ape installs the file but does not read it yet.
 	ApeCommandsInstalled bool `json:"apeCommandsInstalled" yaml:"apeCommandsInstalled"`
 
+	// AboardRecipesInstalled counts the `ape aboard` recipe files the
+	// framework's library carried into the project. Zero means the framework
+	// ships no library — version-skew suppression, not a failure, and every
+	// built-in recipe still reaches the project inside the binary.
+	AboardRecipesInstalled int `json:"aboardRecipesInstalled" yaml:"aboardRecipesInstalled"`
+	// AboardRecipePaths names them, project-relative, for the same reason
+	// SkillsRemovedPaths does: a count alone cannot be checked against the
+	// tree by anyone reading the output.
+	AboardRecipePaths []string `json:"aboardRecipePaths,omitempty" yaml:"aboardRecipePaths,omitempty"`
+
 	// RunsRelocated / RunsRelocationConflicts report the one-time move of
 	// run artifacts from the pre-`_output/ape` layout. Both are zero on a
 	// project that has never run ape, and on every install after the first.
@@ -295,6 +305,10 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if err != nil {
 		return nil, err
 	}
+	aboardRecipes, err := installAboardRecipes(opts.FrameworkRepo, opts.ProjectRoot)
+	if err != nil {
+		return nil, err
+	}
 	// Both setup AND update ensure it: update is the "verify and fix" pass
 	// for a project installed before this existed, and the call is idempotent
 	// so a project that already ignores the sidecar is untouched.
@@ -365,6 +379,8 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 
 			TerminalContractsInstalled: contractsInstalled,
 			ApeCommandsInstalled:       apeCommandsInstalled,
+			AboardRecipesInstalled:     len(aboardRecipes),
+			AboardRecipePaths:          aboardRecipes,
 
 			RunsRelocated:           len(runsMoved.Moved),
 			RunsRoot:                relRoot(opts.ProjectRoot),
@@ -420,6 +436,62 @@ func installApeCommands(frameworkRepo, projectRoot string) (bool, error) {
 		return false, fmt.Errorf("copy ape-commands manifest: %w", err)
 	}
 	return true, nil
+}
+
+// installAboardRecipes copies the framework's `ape aboard` recipe library
+// into the project. Absent in the framework repo = version skew, not an
+// error: a framework that ships no library installs none, and every
+// built-in recipe still reaches the project inside the ape binary.
+//
+// Only `.md` files, and no recursion — a recipe is one flat markdown file
+// with frontmatter, and the directory is a library rather than a tree.
+//
+// REFRESHED, NOT SYNCED: a file the framework no longer ships is left
+// alone, matching how pipelines and the manifests behave and differing
+// deliberately from skills, which are wiped by prefix. The reason is
+// whose directory this is — `_apex/aboard/recipes/` is also where a
+// WORKSPACE puts its own recipes (aboard documents it as "for every
+// project in a workspace"), so a sync would delete work ape never
+// installed. Framework-owned names are overwritten; everything else is
+// the project's.
+func installAboardRecipes(frameworkRepo, projectRoot string) ([]string, error) {
+	srcRoot := filepath.Join(frameworkRepo, SubtreeAboardRecipes)
+	entries, err := os.ReadDir(srcRoot)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read %s: %w", srcRoot, err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			names = append(names, e.Name())
+		}
+	}
+	if len(names) == 0 {
+		// An empty library must not leave an empty directory behind: aboard
+		// reports a recipe's SCOPE by the directory it came from, and an
+		// `_apex/aboard/recipes/` that exists but holds nothing reads as a
+		// library somebody emptied rather than one never installed.
+		return nil, nil
+	}
+	dstRoot := filepath.Join(projectRoot, ProjectAboardRecipesDir)
+	// CopyFile does not create parents, and nothing else in the project
+	// makes this path — `_apex/aboard/` is two levels ape has not needed
+	// before.
+	if err := os.MkdirAll(dstRoot, 0o755); err != nil {
+		return nil, fmt.Errorf("create %s: %w", ProjectAboardRecipesDir, err)
+	}
+	installed := make([]string, 0, len(names))
+	for _, name := range names {
+		if err := CopyFile(filepath.Join(srcRoot, name), filepath.Join(dstRoot, name)); err != nil {
+			return nil, fmt.Errorf("copy aboard recipe %s: %w", name, err)
+		}
+		installed = append(installed, filepath.Join(ProjectAboardRecipesDir, name))
+	}
+	sort.Strings(installed)
+	return installed, nil
 }
 
 // operatingRulesResult reports what installOperatingRules did. Managed

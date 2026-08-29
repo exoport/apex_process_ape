@@ -44,6 +44,22 @@ const (
 	// Optional in the framework repo, on the same version-skew terms as
 	// SubtreeOperatingRules and SubtreeTerminalContracts.
 	SubtreeApeCommands = "_apex/ape-commands.yaml"
+	// SubtreeAboardRecipes is the framework's curated `ape aboard` recipe
+	// library — markdown methods for one board move each, which the board
+	// discovers from the project.
+	//
+	// This is the HIGHEST-precedence of aboard's four recipe directories
+	// (`_apex/aboard/recipes` → `_aboard/recipes` → `.aboard/recipes` →
+	// built into the binary), which is exactly why only curated library
+	// recipes belong here. Copying a BUILT-IN into it would shadow the
+	// binary's own copy and freeze it at install time, so the recipe would
+	// silently stop tracking the renderer it describes — the same drift the
+	// capsHash beacon exists to catch, reintroduced by hand.
+	//
+	// Optional in the framework repo, on the same version-skew terms as the
+	// three above: a framework that ships none installs none, and every
+	// built-in still reaches the project inside the binary.
+	SubtreeAboardRecipes = "_apex/aboard/recipes"
 )
 
 // Project-side paths, relative to the project root the user is
@@ -65,6 +81,11 @@ const (
 	// ProjectApeCommands is where the required-command-surface manifest
 	// lands in the project. Absent = the framework predates the contract.
 	ProjectApeCommands = "_apex/ape-commands.yaml"
+	// ProjectAboardRecipesDir is where the framework's recipe library lands.
+	// The path is aboard's to define, not ape's — the board walks up looking
+	// for exactly this directory, so it is the same string on both sides and
+	// must stay that way.
+	ProjectAboardRecipesDir = "_apex/aboard/recipes"
 )
 
 // SkillPrefix is the filename prefix that identifies framework-managed
