@@ -42,7 +42,7 @@
     CLI reference grows by the mounted tree.
   - **The invocation strings are fixed too, in aboard v0.1.1** (released the
     same day, and this dependency is pinned to it). Under `ape aboard` the board
-    used to print `run \`aboard init\`` — a command this user does not have —
+    used to print "run `aboard init`" — a command this user does not have —
     beneath a cobra `Usage:` line that was always correct. `Options.Argv0` now
     reaches message text through an `aboard.Invocation`. The recorded count was
     low twice over: 55 + 12 became 71 sites, because the measuring grep only
