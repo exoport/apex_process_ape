@@ -36,7 +36,8 @@ What happens:
 9. Relocates any run artifacts still at the pre-`{output_folder}/ape` paths. Usually a no-op on a fresh project — but `ape chat` and `ape prompt` work without a framework install, so a project can have run history before `setup` ever runs. Same rules as on update: nothing overwritten, collisions reported. See [How to refresh the framework](framework-update.md#what-the-relocation-does).
 10. Installs the always-on operating-rules fragment (`_apex/apex-operating-rules.md`) and ensures the repo-root `CLAUDE.md` imports it inside a managed block — see [Operating rules](#operating-rules-always-on-apex-discipline) below. Skipped with a warning if the framework repo predates the fragment.
 11. Copies the framework's [`ape aboard` recipe library](use-the-board.md#recipes) into `<project>/_apex/aboard/recipes/`. Nothing is installed when the framework ships no library — the recipes built into ape reach the project regardless.
-12. Writes `<project>/_apex/framework.yaml` recording what was installed.
+12. Creates the project's [board](use-the-board.md#the-board-is-already-there) at `<project>/.aboard/` and seeds `.aboard/.gitignore`, which ignores everything beside itself — the directory is committed, its contents never are. An existing board is never overwritten.
+13. Writes `<project>/_apex/framework.yaml` recording what was installed.
 
 ## What gets installed
 
@@ -48,6 +49,8 @@ What happens:
 | `_apex/config.local.example.yaml` | `_apex/config.local.example.yaml`           | **Seeded if absent** |
 | `_apex/apex-operating-rules.md`   | `_apex/apex-operating-rules.md`             | Created (if shipped) |
 | `_apex/aboard/recipes/*.md`       | `_apex/aboard/recipes/*.md`                 | Created (if shipped) |
+| `.aboard/`                        | _(created by the board)_                    | Created if absent    |
+| `.aboard/.gitignore`              | _(generated)_                               | **Seeded if absent** |
 | `CLAUDE.md` (repo root)           | _(managed block written in place)_          | Created or updated   |
 | `_apex/framework.yaml`            | _(generated)_                               | Created              |
 

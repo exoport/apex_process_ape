@@ -97,6 +97,42 @@ ape aboard wait --for poke --timeout 5m || [ $? -eq 3 ] && echo "nobody came"
    URL of the one already running. The refusal is anchored to the board, not
    the port, so `--port` is not a way around it.
 
+## The board is already there
+
+`ape framework setup` and `ape framework update` create `.aboard/` for you, so
+in a project with the framework installed there is nothing to initialise — go
+straight to `ape aboard serve`. `ape aboard init` is for everything else: a
+project without the framework, or a second board (`--name`).
+
+They also write **`.aboard/.gitignore`**, which ignores everything beside
+itself:
+
+```gitignore
+# Ignore everything
+*
+
+# Allow files and folders with a pattern starting with !
+!.gitignore
+```
+
+So the **directory** is committed and none of its **contents** ever are — the
+document, `run/`, `uploads/` and any recipes you drop in stay out of every
+diff. That is deliberately not the same as putting `.aboard/` in the repo-root
+`.gitignore`: that would hide this file too, so the folder would be missing on
+a fresh clone and the next person would have to know to run `init`.
+
+Two things setup and update will not do:
+
+- **Overwrite an existing board.** `init` refuses to replace a document, which
+  is the correct refusal — it is the one mistake here with no undo. A project
+  that already has a board is left exactly as it is.
+- **Nest a board under one that already exists above the project.** aboard
+  refuses a root inside a root, because the inner board would be invisible to
+  every command run from the outer one. Setup reports the parent instead.
+
+The ignore file is seeded, not refreshed: edit it and your version survives
+future updates.
+
 ## Recipes
 
 A **recipe** is a short markdown method for one board move, written for an

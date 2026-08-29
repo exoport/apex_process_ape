@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## Unreleased
+
+- **feat: `ape framework setup|update` create the project's board.** A project
+  with the framework installed now has `.aboard/` already, so there is nothing
+  to initialise before `ape aboard serve` — `ape aboard init` is left for
+  projects without the framework and for second boards (`--name`).
+  - **`.aboard/.gitignore` is seeded beside it**, ignoring everything except
+    itself, so the DIRECTORY is committed and none of its CONTENTS ever are.
+    This is deliberately not the `.aboard/` line in the repo-root `.gitignore`
+    that aboard's own docs suggest: ignoring the directory would ignore that
+    file too, so the board's home would be missing on a fresh clone and the
+    next person would have to know to run `init`. Byte-identical to this repo's
+    own `_apex/.gitignore`, which solves the same problem the same way.
+  - **An existing board is never overwritten.** `aboard.Init` refuses to
+    replace a document — the one mistake here with no undo — and the installer
+    treats that refusal as "already done" rather than raising it.
+  - **A board root ABOVE the project is reported, not nested under.** aboard
+    refuses a root inside a root, because the inner board would be invisible to
+    every command run from the outer one. Asking `FindRoot` first means that
+    case never surfaces as an error that would fail the whole install.
+  - The ignore file is **seeded, not refreshed**, like `_apex/config.yaml`: a
+    project that edited it meant to.
+  - The invocation string the board uses in its own messages now exists in two
+    packages, because `apecmd` already imports `framework` and the dependency
+    cannot run the other way. `TestAboardInvocationMatchesTheMount` holds them
+    to one value — a drifted copy would tell somebody to run a command that
+    does not exist.
+
 ## v0.0.57 (2026-08-29)
 
 Recipes reach projects, and a `ui` write that was legal-but-dead now warns at the
