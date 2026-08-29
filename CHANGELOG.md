@@ -1,5 +1,63 @@
 # CHANGELOG
 
+## v0.0.56 (2026-08-29)
+
+The board, used in anger for the first time, and everything that fell out of
+doing it. v0.0.55 mounted `ape aboard`; this release is what a session driving
+that mount actually found — a shipped crash, a missing doctor probe, and a skill
+that told an agent to wait without saying what to wait for.
+
+- **feat: `ape doctor` gains `aboard.skill_reference`** — a WARN when a
+  `.claude/skills/aboard/` reference copied into the project was generated for a
+  different `capsHash` than this binary serves. The renderers are compiled into
+  ape and the skill is a COPY, so the two drift independently; an agent reading
+  a stale one can write state no renderer reads, and `apply` still prints
+  `applied` and exits 0, which is why nothing else catches it. A project that
+  never copied the skill reports SKIP — absence is not drift, and most projects
+  are that project.
+  - **Deliberately NOT a "does ape provide `ape aboard`" check.** The tree is
+    compiled in, so such a check could only assert that this binary contains a
+    package it demonstrably contains. Command presence is the other list's job:
+    put `aboard` in the framework's `required_commands` and the existing
+    `framework.command_surface` covers it, at the cost of hard-failing every ape
+    older than v0.0.55. Both were weighed; `ape aboard` stays out of
+    `_apex/ape-commands.yaml` for now, because the `sanctioned` list governs a
+    framework skill step shelling out and no framework skill does.
+  - The verdict is delegated to `aboard.Status` rather than re-parsed here. The
+    stamped-hash read and the manifest hash belong to the library, and a second
+    implementation in ape would be free to disagree with the board it serves.
+
+- **fix: `ape aboard status` no longer panics on a malformed skill reference**
+  (via aboard v0.1.2, pinned here). `stampedHash` sliced
+  `strings.Split(body, "\n")[:6]` on a file that might have fewer than six
+  lines, and indexed `strings.Fields(after)[0]` on a line reading `capsHash:`
+  with nothing after it. v0.0.55 shipped both: a two-line
+  `reference.generated.md` killed the command with
+  `panic: slice bounds out of range [:6] with capacity 3`. The file is somebody's
+  copy — truncated, hand-edited or half-written by an interrupted redirect are
+  ordinary states — and the commands it took down are `status` and `doctor`, the
+  two run precisely when something is already wrong. Found by adding the check
+  above, which widened the reach of a crash that was already released. `capsHash`
+  is unchanged at `207b5d93`, so no copied reference goes stale over it.
+
+- **feat(skill): the aboard skill, rewritten for `ape aboard`** — copied from the
+  aboard repository with all 179 CLI invocations across six files renamed to the
+  command an agent in this repo actually has. Three classes deliberately left
+  alone: `/aboard --<recipe>` (the slash command, not a CLI call), `.aboard/`
+  paths (identical under both hosts), and the `aboard-template` fence tag.
+
+- **docs(skill): wait for the nudge, not for the first click.** The session
+  driving all of the above used `--for change` and paid for it twice: every edit
+  is a write, so a human working through a four-field form saves once per field
+  and `change` fires on the FIRST one. The agent woke holding one answer and
+  three defaults, read the defaults as a decision, and wrote back under someone
+  still reading. The skill showed `wait` without saying which predicate to use,
+  so the more attentive-looking one won. It now says `poke` is the default
+  because it is the only signal meaning *I have finished*, that waking to half a
+  form means the wrong predicate rather than a reason to react, and that
+  `change` belongs to a board another AGENT is driving. Also: tell the human the
+  button is what releases you.
+
 ## v0.0.55 (2026-08-28)
 
 - **feat: `ape aboard` — the board, mounted** — `github.com/exoport/aboard`
