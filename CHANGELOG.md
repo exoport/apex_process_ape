@@ -1,5 +1,54 @@
 # CHANGELOG
 
+## v0.0.57 (2026-08-29)
+
+Recipes reach projects, and a `ui` write that was legal-but-dead now warns at the
+write instead of on someone's screen.
+
+- **feat: `ape framework setup|update` installs the framework's `ape aboard`
+  recipe library** into `<project>/_apex/aboard/recipes/`. A recipe is a short
+  markdown method for one board move, written for an agent to follow — prose
+  plus, usually, a tab skeleton. Built-in recipes already travel inside the ape
+  binary; this is how a framework ships the curated ones on top.
+  - **Refreshed, not synced.** Framework-named files are overwritten; every other
+    file in that directory is left alone. That differs from skills, which are
+    wiped by prefix, and the difference is whose directory it is: aboard
+    documents `_apex/aboard/recipes/` as the workspace-wide location, so a sync
+    would delete recipes ape never installed.
+  - **An empty library installs nothing and leaves no directory.** aboard reports
+    a recipe's SCOPE by the directory it came from, so an `_apex/aboard/recipes/`
+    that exists and holds nothing reads as a library somebody emptied rather than
+    one never installed.
+  - **A framework that ships no library is version skew, not a failure** — the
+    same terms as the operating-rules fragment, the terminal-contracts table and
+    the ape-commands manifest. Every built-in still reaches the project inside
+    the binary, so nothing is lost.
+  - Only top-level `.md`: a recipe is one flat file with frontmatter, and the
+    directory is a library rather than a tree.
+  - **Not a place to copy a BUILT-IN into.** `_apex/aboard/recipes/` is the
+    highest-precedence of aboard's four recipe directories, so a built-in copied
+    there shadows the binary's own copy and freezes it at install time — the
+    recipe then silently stops tracking the renderer it describes, which is the
+    drift the capsHash beacon exists to catch, reintroduced by hand. Documented
+    where somebody about to do it will read it.
+
+- **chore(deps): aboard v0.1.3** — `apply --check` now reads the VALUE of a
+  layout prop, not only its name. `gap` reaches the stylesheet as-is, so a size
+  token (`"lg"`) is not CSS: the substitution is invalid, the declaration becomes
+  guaranteed-invalid, and a flex row closes to zero — four stats rendered as one
+  run-together string while `apply` printed `applied` and exited 0. A bare number
+  is the same defect (`12` has no unit). `grid.columns` silently falls back to 2
+  and clamps at 6; `spacer.size` fails like `gap`. All three warn now. Found by
+  writing a tab in this repo, applying it clean, and looking at a screenshot.
+
+- **docs: recipes, as a concept rather than a catalogue.** A new section in
+  [use the board](docs/how-to/use-the-board.md#recipes): what a recipe is, the
+  four directories and their precedence, the frontmatter schema and the
+  `aboard-template` fence, and the three commands. It deliberately enumerates no
+  recipes — the set depends on what the binary carries and what a project's own
+  directories add, so `ape aboard recipes list` is the only answer that cannot be
+  wrong for somebody. The install rows are in the setup and update how-tos.
+
 ## v0.0.56 (2026-08-29)
 
 The board, used in anger for the first time, and everything that fell out of
