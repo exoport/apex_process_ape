@@ -32,10 +32,11 @@ What happens:
 5. Removes any existing `<project>/.claude/skills/apex-*` (so removed-from-framework skills disappear locally).
 6. Copies all `apex-*` skill directories into `<project>/.claude/skills/` (including `apex-orchestrator`).
 7. Copies all framework pipeline YAMLs into `<project>/_apex/pipelines/`.
-8. Refreshes the operating-rules fragment (`_apex/apex-operating-rules.md`) and the managed block in the repo-root `CLAUDE.md`. Skipped with a warning if the framework repo predates the fragment.
-9. Ensures `.gitignore` ignores `sprint-status.yaml.lock`, appending the entry only when git does not already ignore the sidecar. This is the verify-and-fix pass: a project set up before the entry existed gains it here, without having to know it was missing.
-10. Relocates any run artifacts still at the pre-`{output_folder}/ape` paths (`_output/pipelines/`, `_output/tasks/`, and on a project that renamed `output_folder`, `_output/ape/prompts/` and `_output/ape/chats/`). Skipped with `--no-migrate`; reported without writing by `--dry-run`. See [What the relocation does](#what-the-relocation-does).
-11. Rewrites `<project>/_apex/framework.yaml` — preserving the `sources.config` block recorded by the original `setup` so `project_name` + `extensions` stay intact.
+8. Refreshes the framework's [`ape aboard` recipe library](use-the-board.md#recipes) in `<project>/_apex/aboard/recipes/`.
+9. Refreshes the operating-rules fragment (`_apex/apex-operating-rules.md`) and the managed block in the repo-root `CLAUDE.md`. Skipped with a warning if the framework repo predates the fragment.
+10. Ensures `.gitignore` ignores `sprint-status.yaml.lock`, appending the entry only when git does not already ignore the sidecar. This is the verify-and-fix pass: a project set up before the entry existed gains it here, without having to know it was missing.
+11. Relocates any run artifacts still at the pre-`{output_folder}/ape` paths (`_output/pipelines/`, `_output/tasks/`, and on a project that renamed `output_folder`, `_output/ape/prompts/` and `_output/ape/chats/`). Skipped with `--no-migrate`; reported without writing by `--dry-run`. See [What the relocation does](#what-the-relocation-does).
+12. Rewrites `<project>/_apex/framework.yaml` — preserving the `sources.config` block recorded by the original `setup` so `project_name` + `extensions` stay intact.
 
 ## What gets touched
 
@@ -44,6 +45,7 @@ What happens:
 | `.claude/skills/apex-*/`          | Wiped + reinstalled                |
 | `_apex/pipelines/*.yaml`          | Overwritten                        |
 | `_apex/apex-operating-rules.md`   | Overwritten (if framework ships it) |
+| `_apex/aboard/recipes/*.md`       | The framework's own recipe files are overwritten; **anything else in that directory is left alone** — see below |
 | `CLAUDE.md` (repo root)           | Managed block refreshed in place; content outside the markers untouched |
 | `_apex/config.yaml`               | **NOT touched** (that's setup)     |
 | `_apex/config.local.example.yaml` | **NOT touched**                    |
@@ -51,6 +53,8 @@ What happens:
 | `_apex/framework.yaml`            | Rewritten (config block preserved) |
 | `{output_folder}/ape/`            | Run artifacts MOVED here from the legacy paths, once. Never overwritten — see below |
 | `{output_folder}/` (elsewhere)    | **NOT touched** — the framework's handoffs, briefs and reports are not ape's |
+
+Recipes are **refreshed, not synced**: a file the framework no longer ships stays where it is, and a recipe you wrote yourself is never removed. The reason is whose directory it is — `_apex/aboard/recipes/` is also where a workspace keeps its own recipes, so deleting what ape did not install would destroy work the framework never owned. Framework-named files are overwritten in place; if you edited one, your edit is replaced, so keep local changes under a different name.
 
 Non-`apex-*` entries under `.claude/skills/` are never touched. In `CLAUDE.md`, only the bytes *between* the `<!-- apex:managed:begin -->` / `<!-- apex:managed:end -->` markers are ape-owned — everything else is preserved byte-for-byte. Do not hand-edit inside the markers; `update` refreshes that region wholesale, so in-marker edits are discarded.
 
