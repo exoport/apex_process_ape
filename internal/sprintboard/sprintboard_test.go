@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -230,6 +231,12 @@ func TestRefreshRefusesADocumentWithNoRev(t *testing.T) {
 // failure. It reports and moves on.
 func TestRefreshSurvivesAnUnwritableBoard(t *testing.T) {
 	t.Parallel()
+	// Two ways to be unable to make a directory unwritable: be root, or be on
+	// Windows, where a directory's mode bits do not govern creating files in
+	// it. Either way the write succeeds and there is nothing to assert.
+	if runtime.GOOS == "windows" {
+		t.Skip("a directory's mode does not gate file creation on Windows")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores the mode bits this test relies on")
 	}
