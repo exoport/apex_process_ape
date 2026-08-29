@@ -40,12 +40,18 @@
     wrong project.
   - New how-to: [use the board](docs/how-to/use-the-board.md). The generated
     CLI reference grows by the mounted tree.
-  - Still open, and **in the aboard repo, not this one**: 55 message strings
-    plus 12 cobra `Example:` fields still say `aboard <cmd>` where the user has
-    `ape aboard <cmd>`. `Options.Argv0` already carries the right invocation and
-    is already plumbed to the instance record and `/health`; it is simply not
-    used for message text yet. The mount is what makes that fixable — 55 sites
-    cannot be verified against a host that does not exist.
+  - **The invocation strings are fixed too, in aboard v0.1.1** (released the
+    same day, and this dependency is pinned to it). Under `ape aboard` the board
+    used to print `run \`aboard init\`` — a command this user does not have —
+    beneath a cobra `Usage:` line that was always correct. `Options.Argv0` now
+    reaches message text through an `aboard.Invocation`. The recorded count was
+    low twice over: 55 + 12 became 71 sites, because the measuring grep only
+    matched double-quoted literals and never saw the backtick `Long:` help. 16
+    sites deliberately stay literal — the generated artifacts, the README written
+    into `.aboard/recipes/`, the declared table that feeds `capsHash`, and
+    `boards`' help, which names both spellings on purpose. Verified here:
+    `ape aboard status` in a directory with no board now says `ape aboard init`,
+    and `capsHash` is still `207b5d93` against the standalone binary.
 
 - **test: retire the eight `TestParity_*` gates, porting the one case they
   alone asserted** — they ran the ten retired framework Python scripts side by
