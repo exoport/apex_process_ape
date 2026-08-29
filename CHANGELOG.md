@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v0.0.55 (unreleased)
+## v0.0.55 (2026-08-28)
 
 - **feat: `ape aboard` — the board, mounted** — `github.com/exoport/aboard`
   v0.1.0 serves a browser UI for a project whose state a human and one or more
