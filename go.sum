@@ -155,8 +155,8 @@ github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f h1:Y/CXytFA4m6
 github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f/go.mod h1:vw97MGsxSvLiUE2X8qFplwetxpGLQrlU1Q9AUEIzCaM=
 github.com/erofs/go-erofs v0.3.0 h1:o/W5ABAA3sHYl97WL93dacKEfeDpJhdFf3c2snAti7I=
 github.com/erofs/go-erofs v0.3.0/go.mod h1:XkSeN9MHszGd4+3gcEjadJLYHCQpWzJ7/8yznzMuzJs=
-github.com/exoport/aboard v0.1.1 h1:YeTbPopbcQRJ8Rz0PsGaJHLoMxioSaTjr1LfTsgEkbw=
-github.com/exoport/aboard v0.1.1/go.mod h1:JXB7DRsO/2x1Ps/pvLaxCAQynMopdZHwk+U+0r/bhqQ=
+github.com/exoport/aboard v0.1.2 h1:dlDlOZxxoYqcDSTTcIHbt4WdYWR5ir10AgNPGS4JKRg=
+github.com/exoport/aboard v0.1.2/go.mod h1:JXB7DRsO/2x1Ps/pvLaxCAQynMopdZHwk+U+0r/bhqQ=
 github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=
 github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
 github.com/go-chi/chi/v5 v5.3.1 h1:3j4HZLGZQ3JpMCrPJF/Jl3mYJfWLKBfNJ6quurUGCf8=

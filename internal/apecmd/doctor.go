@@ -140,6 +140,7 @@ var allChecks = []doctorCheck{
 	{Name: "hooks.contract_drift", Run: checkHookContractDrift},
 	{Name: "framework.terminal_contracts", Run: checkTerminalContracts},
 	{Name: "framework.command_surface", Required: true, Run: checkCommandSurface},
+	{Name: "aboard.skill_reference", Run: checkAboardSkillReference},
 	{Name: "runs.legacy_layout", Run: checkRunLayoutLegacy},
 	{Name: "kvm.available", Run: checkKVMAvailable},
 	{Name: "containerd.running", Run: checkContainerdRunning},
@@ -224,6 +225,17 @@ silent:
                                 of version compatibility. A framework that
                                 ships no manifest predates the contract
                                 and the check reports a skip.
+  aboard.skill_reference        whether a .claude/skills/aboard reference
+                                copied into this project still describes
+                                the board this binary serves, by capsHash.
+                                The renderers are compiled in and the skill
+                                is a copy, so the two drift independently;
+                                an agent reading a stale one writes state no
+                                renderer reads and the write still reports
+                                success. Deliberately NOT a check that ape
+                                provides "ape aboard" — the tree is compiled
+                                in, so that could only assert a tautology.
+                                A project that never copied the skill skips.
 
 Both SKIP or report INFO when there is nothing to judge — absence of
 evidence is not coverage.

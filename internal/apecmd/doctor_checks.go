@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/exoport/aboard/pkg/aboard"
 	"github.com/exoport/apex_process_ape/internal/contract"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/framework"
@@ -629,6 +630,59 @@ func checkCommandSurface(_ context.Context, env doctorEnv) CheckResult {
 			"its skills have no fallback branch — each will fail mid-run. Upgrade ape; if they are " +
 			"still missing on the latest, the framework requires an ape that does not exist yet.",
 		FixCommand: "ape update",
+	}
+}
+
+// checkAboardSkillReference reports capsHash drift between the board this
+// binary mounts and a `.claude/skills/aboard/` reference copied into the
+// project.
+//
+// It is deliberately the ONLY thing doctor says about the board. "Does ape
+// provide `ape aboard`" would be tautological — the tree is compiled in, so
+// the check could only assert that this binary contains a package it
+// demonstrably contains. Drift is the opposite: the skill is a COPY, the
+// renderers travel inside the binary, and the two move independently. An agent
+// reading a stale reference writes state no renderer reads and the write still
+// says "applied", which is the failure that otherwise looks like success.
+//
+// `ape aboard status` already reports this, but only from inside a project
+// that has a board — which is exactly the project that has not been used yet
+// when the reference goes stale. Doctor sees it either way.
+//
+// The verdict comes from aboard.Status rather than a local re-read: the
+// stamped-hash parse and the manifest hash are the library's to define, and a
+// second implementation here would be free to disagree with the board that
+// serves it. Status probes a recorded board over localhost, but the Skill
+// fields are resolved before that and never depend on it.
+func checkAboardSkillReference(ctx context.Context, env doctorEnv) CheckResult {
+	if env.ProjectRoot == "" || !isProjectRoot(env.ProjectRoot) {
+		return CheckResult{Status: StatusInfo, Message: "no project root resolved"}
+	}
+	rep := aboard.Status(ctx, aboard.Root(env.ProjectRoot), "", aboard.WebFS())
+	switch rep.Skill {
+	case aboard.SkillAbsent:
+		// Not drift. A project that never copied the skill has nothing to
+		// be out of date, and most projects never copy it.
+		return CheckResult{
+			Status:  StatusSkip,
+			Message: "no .claude/skills/aboard reference copied into this project",
+		}
+	case aboard.SkillCurrent:
+		return CheckResult{
+			Status:  StatusOK,
+			Message: fmt.Sprintf("skill reference current (capsHash %s)", rep.CapsHash),
+		}
+	default:
+		return CheckResult{
+			Status: StatusWarn,
+			Message: fmt.Sprintf("skill reference stamped %s, this binary serves %s",
+				rep.SkillCapsHash, rep.CapsHash),
+			Remediation: "The copied skill describes a board this binary no longer serves. An agent " +
+				"reading it can set state no renderer reads, and the write still reports success. " +
+				"Regenerate both generated references against this binary.",
+			FixCommand: "ape aboard capabilities --format md > " +
+				".claude/skills/aboard/references/reference.generated.md",
+		}
 	}
 }
 
