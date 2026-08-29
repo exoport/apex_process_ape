@@ -94,6 +94,13 @@ ape aboard wait --for poke --timeout 5m || [ $? -eq 3 ] && echo "nobody came"
 1. **Do not edit `.aboard/aboard.json` by hand while a board is running.** Use
    `ape aboard apply`, which is a compare-and-set on the document's `rev`. A
    `409` means someone got there first — re-read and retry.
+Stopping a board is Ctrl-C, or a `TERM` to its pid — either shuts it down
+cleanly and removes `.aboard/run/instance.json`, which is how every other tool
+knows the board is gone. That needs **ape v0.0.59 or later**: before it, ape
+installed no signal handler, so an ape-hosted board was killed outright and
+left its record behind, and the VS Code extension went on believing a dead
+board was running.
+
 2. **Do not take a healthy server away from another session.** `ape aboard
    serve` refuses to start a second board for the same project and prints the
    URL of the one already running. The refusal is anchored to the board, not

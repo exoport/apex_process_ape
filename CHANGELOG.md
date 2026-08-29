@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## v0.0.59 (2026-08-29)
+
+- **fix: `ape` shuts down on a signal instead of dying where it stands.** Ctrl-C
+  and SIGTERM now cancel the command's context; before, no signal handler was
+  installed anywhere in `ape` and the process was simply terminated.
+  - **What it broke, and had been breaking since v0.0.55: `ape aboard serve`
+    never cleaned up.** aboard installs its own signal handler inside its
+    `cli.Execute`, and the whole point of the mount is that ape does not call
+    that — it adds aboard's command tree to its own. So the board ran under a
+    context nothing ever cancelled, its shutdown path never ran, and **every
+    stopped board left `.aboard/run/instance.json` behind.**
+  - A stale record is what makes tooling believe a dead board is alive. It cost
+    an afternoon of the VS Code extension showing no *Start the Board* button,
+    diagnosed at the time as a crashed server — because a graceful stop does
+    clean up, which is true of the standalone `aboard` binary and was never true
+    of an ape-hosted one. Found by stopping a board and noticing the record
+    survive; confirmed by an A/B against the standalone binary, which cleans up
+    on the same signal.
+  - **At the root, not on the board subtree.** Nothing about it is
+    aboard-specific: every long-running command here — `chat`, `pipeline`,
+    `sandbox exec` — was being killed outright rather than asked to stop.
+  - **A second signal still kills.** `signal.NotifyContext` keeps swallowing
+    signals until its stop function runs, so the handler releases itself the
+    moment the context is cancelled. Without that, a command that ignores its
+    context would have traded a process that dies too eagerly for one that
+    cannot be stopped at all.
+  - Verified live, which is the only place this is observable: `ape aboard
+    serve` stopped with SIGTERM and with SIGINT now leaves an empty run
+    directory, matching the standalone binary.
+
 ## v0.0.58 (2026-08-29)
 
 - **feat: `ape sprint reconcile` refreshes a `Sprint` tab on the project's

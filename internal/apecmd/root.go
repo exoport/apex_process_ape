@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/updatecache"
@@ -50,7 +52,35 @@ func Execute() error {
 	// Execute time when handling `--version`. A non-empty Version makes
 	// cobra register the `--version` flag automatically.
 	rootCmd.Version = Version
-	return rootCmd.Execute()
+
+	// A signal-cancelled context, so Ctrl-C and SIGTERM reach the command
+	// through cmd.Context() instead of killing the process where it stands.
+	//
+	// The bug that made this necessary: `ape aboard serve` never shut down
+	// gracefully. aboard installs its own handler inside its cli.Execute, and
+	// the whole point of the mount is that ape does NOT call that — it adds
+	// aboard's tree to this one. So the board ran under a context nothing ever
+	// cancelled, its shutdown path never ran, and every stopped board left
+	// `.aboard/run/instance.json` behind. A stale record is what makes tooling
+	// believe a dead board is alive; it cost an afternoon of the VS Code
+	// extension showing no "Start the Board" button, misdiagnosed as a crash
+	// when it was in fact every ape-hosted board that was ever stopped.
+	//
+	// At the root rather than on the board subtree because nothing about it is
+	// aboard-specific: every long-running command here — chat, pipeline,
+	// sandbox exec — was being killed outright rather than asked to stop.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// And the second signal still kills. signal.NotifyContext keeps swallowing
+	// signals until stop(), so without this a second impatient Ctrl-C on a
+	// command that ignores its context would do nothing at all — trading a
+	// process that dies too eagerly for one that cannot be stopped.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
+	return rootCmd.ExecuteContext(ctx)
 }
 
 func init() {
