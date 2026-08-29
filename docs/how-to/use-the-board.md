@@ -49,6 +49,27 @@ and `aboard capabilities` are byte-identical, `capsHash` included — it
 describes the board, not the process serving it, so an agent reading it cannot
 tell which host it reached.
 
+Messages name the command **you** typed. Under `ape aboard`, an error says
+``run `ape aboard init` `` and help examples read `ape aboard history ab133`,
+rather than naming a command you may not have. That needs aboard **v0.1.1 or
+later**; ape pins it, so nothing to do.
+
+## In VS Code
+
+The [aboard VS Code extension](https://github.com/exoport/aboard_vscode) puts
+the board's tabs in the sidebar and the board itself in a panel beside your
+code, and handles the writes only a human is allowed to make. It talks to a
+running board over HTTP and does not care which host started it.
+
+Its **Start a board** button picks the command from your project: a folder with
+an `_apex/` directory gets `ape aboard serve`, anything else gets `aboard
+serve` when the dedicated binary is installed. It probes `ape aboard --version`
+first, so an ape older than v0.0.55 — which has no `aboard` subcommand — is
+never offered. Needs extension **v0.1.2 or later** for both rules.
+
+It is not on any marketplace: download the `.vsix` from the extension's GitHub
+Release and `code --install-extension aboard-vscode-<version>.vsix --force`.
+
 ## Exit statuses
 
 The board has its own table, and ape preserves it:

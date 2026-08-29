@@ -81,9 +81,9 @@ same every time and two checkouts never collide.
 
 Start with:
 
-  aboard serve            run the server for this project
-  aboard status           what is running here, and on which port
-  aboard capabilities     what this board can do (no server needed)
+  ape aboard serve            run the server for this project
+  ape aboard status           what is running here, and on which port
+  ape aboard capabilities     what this board can do (no server needed)
 
 Subcommands:
 
@@ -153,7 +153,7 @@ unconditionally; --force writes it anyway and says so on stderr.
 Examples:
 
 ```
-  aboard apply --by agent-1 < next.json
+  ape aboard apply --by agent-1 < next.json
 ```
 
 Flags:
@@ -183,7 +183,7 @@ ape aboard boards [flags]
 
 Every running board on this machine, whichever project it belongs to.
 
-This is the cross-project half of `aboard status`. It needs no project of its
+This is the cross-project half of `ape aboard status`. It needs no project of its
 own — it works from a directory that has never held a board — because it asks
 the PROCESS TABLE rather than a registry: it walks /proc for an `aboard serve`
 or an `ape aboard serve`, resolves each one's project root, and then does exactly
@@ -201,13 +201,13 @@ result, because "no board found" after 3 processes and after 400 mean different
 things.
 
 /proc is Linux only. Everywhere else this command exits 2 and says so, and the
-per-project answer is `aboard status` inside each project.
+per-project answer is `ape aboard status` inside each project.
 
 Examples:
 
 ```
-  aboard boards
-  aboard boards --output-format json
+  ape aboard boards
+  ape aboard boards --output-format json
 ```
 
 Flags:
@@ -238,10 +238,10 @@ it describes, and this aggregates those with the declared command table and the
 route list. It needs no running server and no project: a fresh checkout, a copied
 binary, or another session holding the port all still answer.
 
-  aboard capabilities            the whole manifest, as JSON
-  aboard capabilities kanban     one type — cheap, for a mid-task lookup
-  aboard capabilities --format md    the markdown reference the skill commits
-  aboard capabilities --check    exit 1 if that committed reference is stale
+  ape aboard capabilities            the whole manifest, as JSON
+  ape aboard capabilities kanban     one type — cheap, for a mid-task lookup
+  ape aboard capabilities --format md    the markdown reference the skill commits
+  ape aboard capabilities --check    exit 1 if that committed reference is stale
 
 --check treats a MISSING reference as "nothing to check": a project that never
 copied the skill has nothing to be out of date.
@@ -281,8 +281,8 @@ retyping was the cost that made it expensive.
 Examples:
 
 ```
-  aboard export ab128
-  aboard export table-example --format csv
+  ape aboard export ab128
+  ape aboard export table-example --format csv
 ```
 
 Flags:
@@ -314,8 +314,8 @@ first, naming who replaced each one — and says plainly where the record ends,
 because rotation keeps one older generation and a listing that just stopped would
 read as "this tab has only ever been written twice".
 
-  aboard history ab133                          what it said, and when
-  aboard history ab133 --at 1 | aboard apply --by agent-1     put version 1 back
+  ape aboard history ab133                          what it said, and when
+  ape aboard history ab133 --at 1 | ape aboard apply --by agent-1     put version 1 back
 
 --at prints a WHOLE document with that one tab put back, not the tab on its own:
 a single-tab document is a document that deletes every other tab, and the server
@@ -338,8 +338,8 @@ board, whose history is its own. The restore line the listing prints carries
 Examples:
 
 ```
-  aboard history ab133
-  aboard history ab133 --at 1 | aboard apply --by agent-1
+  ape aboard history ab133
+  ape aboard history ab133 --at 1 | ape aboard apply --by agent-1
 ```
 
 Flags:
@@ -371,7 +371,7 @@ document, an uploads directory, a recipes directory and the run directory.
 This is the ONE command that does not walk up. Every other command finds the
 project root by climbing from --cwd, because a board belongs to a project rather
 than to whichever subdirectory you happened to be in — but there is nothing to
-find yet, and climbing would mean `aboard init` in a subdirectory quietly doing
+find yet, and climbing would mean `ape aboard init` in a subdirectory quietly doing
 nothing while reporting success. So it creates a root where you stand, and
 refuses when that would make a second one, naming the root it found.
 
@@ -390,9 +390,9 @@ over a conversation that was never theirs.
 Examples:
 
 ```
-  aboard init
-  aboard init --example --gitignore
-  aboard init --name review
+  ape aboard init
+  ape aboard init --example --gitignore
+  ape aboard init --name review
 ```
 
 Flags:
@@ -473,7 +473,7 @@ losing it from the terminal you are watching.
 Examples:
 
 ```
-  go test ./... 2>&1 | aboard log ab126
+  go test ./... 2>&1 | ape aboard log ab126
 ```
 
 Global flags:
@@ -492,7 +492,7 @@ ape aboard poke [flags]
 ```
 
 Do what the human's notify button does: release every session currently blocked
-on `aboard wait`, and tell them who released them and why.
+on `ape aboard wait`, and tell them who released them and why.
 
 Nothing here starts an agent. A session is released only if it had already
 decided to listen; a board with nobody waiting is simply not listening, and this
@@ -595,15 +595,15 @@ it is for, then the body. The frontmatter is stripped — it is metadata for the
 list, and YAML at the top of something meant to be read as prose is noise.
 
 --template prints ONLY the JSON tab skeleton the recipe carries, so it pipes
-straight into an edit and then into `aboard apply`. A recipe with no skeleton
+straight into an edit and then into `ape aboard apply`. A recipe with no skeleton
 exits 1 saying so, rather than printing an empty document that would be applied
 as an empty tab.
 
 Examples:
 
 ```
-  aboard recipes show apply-a-write
-  aboard recipes show my-recipe --template | jq .
+  ape aboard recipes show apply-a-write
+  ape aboard recipes show my-recipe --template | jq .
 ```
 
 Flags:
@@ -629,7 +629,7 @@ ape aboard rendered [tab] [flags]
 
 What a real browser actually put on screen for a tab, as it reported it.
 
-`aboard apply` printing "applied" is evidence a write was accepted, not that
+`ape aboard apply` printing "applied" is evidence a write was accepted, not that
 anything renders — an unknown `ui` component draws a marker and an unknown PROP
 draws nothing at all. After every mount the shell posts the control ids it drew,
 the ones somebody pressed, and any unknown-component markers, and this prints
@@ -648,8 +648,8 @@ it needs no server. With no argument it prints every tab that has a receipt.
 Examples:
 
 ```
-  aboard rendered ab133
-  aboard rendered
+  ape aboard rendered ab133
+  ape aboard rendered
 ```
 
 Flags:
@@ -681,10 +681,10 @@ tab and say "this is wrong, fix it" — so it needs a channel an agent can find
 without being told to look, because by definition it arrives while nobody is
 watching.
 
-Run this at the start of a turn, next to `aboard status` (which prints the
+Run this at the start of a turn, next to `ape aboard status` (which prints the
 count). Then say you did one:
 
-  aboard requests done ab199 --by agent-1 --note "redrew the arrow"
+  ape aboard requests done ab199 --by agent-1 --note "redrew the arrow"
 
 Only the human writes these. An agent write that creates, edits, reorders or
 deletes one has it restored by the server; adding a done stamp is the one change
@@ -692,7 +692,7 @@ an agent may make, and the stamp is never cleared — the human deleting the who
 note is how it goes away.
 
 Needs no running board: it falls back to the state file. Stamping one does need
-the board, for the same reason `aboard apply` does.
+the board, for the same reason `ape aboard apply` does.
 
 Subcommands:
 
@@ -701,8 +701,8 @@ Subcommands:
 Examples:
 
 ```
-  aboard requests
-  aboard requests --tab ab14 --all
+  ape aboard requests
+  ape aboard requests --tab ab14 --all
 ```
 
 Flags:
@@ -746,7 +746,7 @@ their own requests by deleting them.
 Examples:
 
 ```
-  aboard requests done ab199 --by agent-1 --note "redrew the arrow"
+  ape aboard requests done ab199 --by agent-1 --note "redrew the arrow"
 ```
 
 Flags:
@@ -787,9 +787,9 @@ digits, dot, underscore, tilde or hyphen. Anything else is a usage error.
 Examples:
 
 ```
-  aboard serve
-  aboard serve --dev
-  aboard serve --base-path /aboard
+  ape aboard serve
+  ape aboard serve --dev
+  ape aboard serve --base-path /aboard
 ```
 
 Flags:
@@ -853,9 +853,9 @@ its declared fields. An html widget's markup can name a file no spec knows
 about, and a scan over declared fields would call that file an orphan and offer
 to delete an image somebody is looking at.
 
-  aboard uploads                    list them, unreferenced ones marked *
-  aboard uploads --prune            show exactly what deleting them would remove
-  aboard uploads --prune --yes      delete them
+  ape aboard uploads                    list them, unreferenced ones marked *
+  ape aboard uploads --prune            show exactly what deleting them would remove
+  ape aboard uploads --prune --yes      delete them
 
 --prune on its own prints and REFUSES: deletion is irreversible and .aboard/ is
 gitignored, so there is no copy anywhere to go back to.
@@ -870,8 +870,8 @@ Reads the state files directly, so it needs no server.
 Examples:
 
 ```
-  aboard uploads
-  aboard uploads --prune --yes
+  ape aboard uploads
+  ape aboard uploads --prune --yes
 ```
 
 Flags:
@@ -957,7 +957,7 @@ Exit 0 means released. Exit 3 means the timeout ran out and nobody came.
 Examples:
 
 ```
-  aboard wait --for "answer ab128" --note "waiting on the gate"
+  ape aboard wait --for "answer ab128" --note "waiting on the gate"
 ```
 
 Flags:

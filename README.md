@@ -96,6 +96,32 @@ Keybindings:
 [20:09:18] design · apex-create-architecture · ✓ skill complete (3 turns)
 ```
 
+## A shared board
+
+`ape aboard` serves a browser UI for a project whose state a human and one or more agent
+sessions read and write. Tabs are *data*, not code: an agent opens one for whatever it
+needs to show — a graph, a chart, a question form, an annotated screenshot — and reads
+back what the human changed.
+
+```bash
+ape aboard init --example     # create .aboard/ with a demo board
+ape aboard serve              # run the server; prints the URL
+ape aboard status             # what is running here, and on which port
+```
+
+The board is [aboard](https://github.com/exoport/aboard), a separate public module whose
+command tree ape **mounts** rather than reimplements, so every `aboard` subcommand is
+available as `ape aboard <cmd>`. Both hosts resolve the same `.aboard/`, derive the same
+port from it, and write the same state file — a board started by `ape aboard serve` is
+the board a bare `aboard status` reports, and either binary can drive it. You do not need
+both installed.
+
+There is also a [VS Code extension](https://github.com/exoport/aboard_vscode) that puts
+the board's tabs in the sidebar and the board itself in a panel; its **Start a board**
+button runs `ape aboard serve` in a project that has an `_apex/` directory.
+
+Full guide: [How to use the board](docs/how-to/use-the-board.md).
+
 ## Isolated dev workspaces
 
 `ape sandbox` provisions a **hardware-isolated Kata microVM per project** — its own guest
@@ -171,6 +197,12 @@ See [Choosing between `ape chat`, `ape task`, and `ape prompt`](docs/explanation
 | `ape doc`        | Shard, assemble and survey Markdown documents (`shard`, `assemble`, `analyze`, `verify`).         |
 | `ape trait`      | Inspect APEX traits (`list`, `show`, `validate`, `conflicts`).                                    |
 | `ape bootstrap`  | Bootstrap governance artifacts from declared traits.                                              |
+
+**The board**
+
+| Command       | What it does                                                                                       |
+| ------------- | ---------------------------------------------------------------------------------------------------- |
+| `ape aboard`  | A shared visual board for a human and one or more agent sessions — `serve`, `status`, `apply`, … |
 
 **Sandbox workspaces**
 

@@ -35,11 +35,20 @@
     the standalone binary too and its output must not differ by host.
   - **Version reporting needs nothing from ape.** aboard resolves its own
     version from `info.Deps` when it is not the main module, so `ape aboard
-    version` reports `0.1.0` rather than ape's tag. There is no field to pass
+    version` reports `0.1.1` rather than ape's tag. There is no field to pass
     and none is wanted: a bug report carrying the host's version would name the
     wrong project.
-  - New how-to: [use the board](docs/how-to/use-the-board.md). The generated
-    CLI reference grows by the mounted tree.
+  - **The VS Code extension works against a board ape started**, and knows to
+    prefer this host: aboard-vscode **v0.1.2**'s *Start a board* button runs
+    `ape aboard serve` in a project that has an `_apex/` directory, and probes
+    `ape aboard --version` first so an ape older than this release — which has
+    no `aboard` subcommand at all — is never offered. Confirmed by driving the
+    extension's compiled discovery against a live `ape aboard serve` board:
+    `acceptHealth` accepts the real `app: "ape-aboard"` payload, and every
+    route it uses (`/health`, `/aboard.json`, `/capabilities`, `/events`,
+    `/waiters`, `POST /poke`, `POST /aboard.json`) answers.
+  - New how-to: [use the board](docs/how-to/use-the-board.md), plus a README
+    section. The generated CLI reference grows by the mounted tree.
   - **The invocation strings are fixed too, in aboard v0.1.1** (released the
     same day, and this dependency is pinned to it). Under `ape aboard` the board
     used to print "run `aboard init`" — a command this user does not have —
