@@ -51,3 +51,10 @@ vendor/
 # The same entry `ape framework setup` writes into a project, and narrower
 # than `*.lock` on purpose: Cargo.lock and friends belong in history.
 sprint-status.yaml.lock
+
+# The shared board's state (`ape aboard`). Gitignored on purpose: a board is a
+# LOCAL, persistent, non-authoritative channel — several developers on one repo
+# each get their own, and a committed one is a whole-file JSON conflict on every
+# merge over a conversation that was never theirs. Conclusions reached on a board
+# get promoted into committed artifacts; the board itself never is.
+.aboard/
