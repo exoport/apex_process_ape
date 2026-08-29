@@ -4357,6 +4357,29 @@ writer would otherwise silently drop a sibling's update.
 Exit 0 for every content outcome, including an unrecognised status.
 Non-zero only for a genuine I/O failure.
 
+If the project has a board (see 'ape aboard'), reconcile also refreshes a
+'Sprint' tab in it — story and epic counts, what is in flight, and what is
+blocked, all derived from the tracker. That is how a long or autonomous run
+can be watched without interrupting it: reconcile already runs at every
+boundary that moves a story, so it is the thing that OBSERVES tracker
+changes rather than the thing that causes them.
+
+Two write paths, chosen by whether a board answers. A board that is
+listening is POSTed to, which is the only way a page already showing the
+board is pushed the change, and which gets the write a real compare-and-set.
+When nothing is listening the file is written directly, so the tab is
+current before anyone starts a board. A server that IS there and refuses —
+a 409, a timeout — stops the refresh rather than writing around it.
+
+The refresh is STRICTLY BEST-EFFORT and cannot affect this command. A
+board that is absent, unreadable or unwritable changes neither the exit
+code nor a byte of stdout; anything it has to say goes to stderr. That is
+not politeness: reconcile sits on mutation paths where a non-zero exit is
+read as a content verdict, so a broken board would otherwise convert a
+defer into a patch and demote a story. --check skips it entirely, since a
+dry run that writes to a board is not a dry run. Nothing here creates a
+board: starting one, and initialising one, are yours to do.
+
 Examples:
 
 ```

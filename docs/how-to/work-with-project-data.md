@@ -114,6 +114,10 @@ no `--strict`: which side is right is judgment, and wiring it into a build
 loop would stop runs over something no tool can fix. It belongs in
 `ape doctor` and nowhere else.
 
+`reconcile` also refreshes a **`Sprint` tab on the project's board**, if the
+project has one — story and epic counts, what is in flight, what is blocked.
+See [Watching a run on the board](use-the-board.md#watching-a-run-on-the-board).
+
 The join is the **story key** — the story file's stem, which is what the
 tracker rows on. A story's frontmatter `story_id` is a *different* string
 (`1-1_greet-a-name` vs `"1.1"`); it travels in the finding for legibility

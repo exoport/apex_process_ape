@@ -1,6 +1,62 @@
 # CHANGELOG
 
-## Unreleased
+## v0.0.58 (2026-08-29)
+
+- **feat: `ape sprint reconcile` refreshes a `Sprint` tab on the project's
+  board.** During a long or autonomous APEX run there was no way to see where
+  the work was without interrupting it. Reconcile already runs at every
+  boundary that moves a story, which makes it the thing that OBSERVES tracker
+  changes rather than the thing that causes them — so the refresh lives there
+  and nothing in the framework has to know a tab exists.
+  - The tab is `ui`, found by **key** (`apex-sprint`) on every refresh — never
+    by name, which the human may change, and never by index. Story counts by
+    status, epic counts by **derived** status, what is in flight, and what is
+    blocked. `blocked` and `cancelled` get their own cells rather than folding
+    into a total: a sprint of nothing but blocked work must not read as healthy.
+  - **It cannot affect the command.** A board that is absent, stopped, hung,
+    mid-restart or serving a malformed document changes neither the exit code
+    nor a byte of stdout, and even a panic below it is contained. This is the
+    whole risk of the feature rather than a nicety: reconcile sits on mutation
+    paths inside `apex-review-story`, `apex-code-review` and
+    `apex-epic-batch-review` where a non-zero exit is read as a CONTENT
+    VERDICT — it converts a defer into a patch, raises `unfixed_patches` and
+    demotes the story. A broken board would otherwise corrupt review outcomes
+    on projects that happen to have one and not on projects that do not. The
+    test asserts stdout EQUALITY against a run with no board at all. An
+    unreadable document is reported on stderr and left exactly as it was.
+  - **Two write paths, chosen by whether a board answers.** A listening board is
+    POSTed to: that is the only way a page already showing the board is pushed
+    the change — the server emits SSE frames from its own write path and never
+    watches the file — and it gets the write a real compare-and-set. Verified
+    live against a client on `/events`, which received
+    `{"checked":["ab1"],"origin":"apply"}`, the frame that triggers a reload.
+    When nothing is listening the file is written directly, so the tab is
+    already current when somebody starts a board rather than filling in at the
+    next story boundary; that document is stamped the way the server stamps its
+    own (`rev` advanced, `updatedAt`, `version`, `lastEditedBy`) and written
+    through a temp file and a rename, so a reader sees the whole old document
+    or the whole new one and never a torn read.
+  - **The fallback is entered only when nothing is listening.** A server that is
+    there and refuses — a 409, a timeout, an HTTP error — stops the refresh
+    instead of writing around it, because a 409 is another writer's work and
+    going behind a live server is the one move here that can destroy it. Bounded by a 2s timeout. Written through
+    the server's compare-and-set, never straight to the state file, so a
+    concurrent change from the browser is refused rather than clobbered.
+    Skipped on `--check`, and it never creates a board.
+  - **The derivation is a library function** (`sprint.Summarize`), not part of
+    the board-writing path, so a second consumer — a TUI, a status line — reuses
+    the numbers rather than reimplementing arithmetic that could then disagree.
+  - **Two departures from the request, both because the board says so.** It
+    asks for `state.readOnly` and `state.heartbeat` on a `ui` tab; `ui` declares
+    neither (they belong to `kanban`, and `readOnly` to `table`), and
+    `aboard apply` reports both as "stored and ignored" on every write. A
+    freshness strip that renders nothing fails the requirement it exists for, so
+    the write time is rendered **in the tab** instead. `readOnly` is moot: the
+    tree carries no `field` and no `button`. Also, `reopened_by` lives in story
+    frontmatter and parked patches in the deferred store — neither is in
+    `sprint-status.yaml`, and reading the corpus on a command called many times
+    per run is exactly the cost this design avoids — so Attention reports
+    blocked work and says on the tab what it is not counting.
 
 - **feat: `ape framework setup|update` create the project's board.** A project
   with the framework installed now has `.aboard/` already, so there is nothing

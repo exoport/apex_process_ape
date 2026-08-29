@@ -23,7 +23,9 @@ State lives under `.aboard/` at the project root, found by walking up from
 `--cwd`. Each project gets its own port derived from that root, so the URL is
 stable and two checkouts never collide.
 
-Add `.aboard/` to `.gitignore` — `ape aboard init --gitignore` does it for you.
+Keep `.aboard/`'s contents out of git. In a framework project that is already
+done — see [The board is already there](#the-board-is-already-there). Elsewhere,
+`ape aboard init --gitignore` adds the one line to the repo-root `.gitignore`.
 
 ## One board per project, whichever binary you use
 
@@ -132,6 +134,43 @@ Two things setup and update will not do:
 
 The ignore file is seeded, not refreshed: edit it and your version survives
 future updates.
+
+## Watching a run on the board
+
+`ape sprint reconcile` refreshes a **`Sprint`** tab (key `apex-sprint`) whenever
+the project has a board. That is how a long or autonomous APEX run can be
+watched without interrupting it: reconcile already runs at every boundary that
+moves a story, so it is the thing that *observes* tracker changes rather than
+the thing that causes them, and nothing in the framework has to remember to
+update a dashboard.
+
+The tab shows story counts by status, epic counts by **derived** status, the
+stories in flight, and what is blocked — all read from `sprint-status.yaml`.
+**The tracker is authoritative and the tab is a view of it**: if the two ever
+disagree, the tab is wrong. A Freshness panel carries the time of the last
+refresh, so a run that has stopped moving stories is visible as a timestamp
+that stops advancing.
+
+Two things it deliberately does not do:
+
+- **It never creates a board.** No `.aboard/aboard.json`, no tab. Starting one,
+  and initialising one, are yours.
+- **It cannot affect `reconcile`.** A board that is absent, unreadable,
+  unwritable or refusing changes neither the command's exit code nor a byte of
+  its stdout; anything it has to say goes to stderr. That is not politeness —
+  reconcile sits on mutation paths where a non-zero exit is read as a content
+  verdict, so a broken board would otherwise convert a defer into a patch and
+  demote a story. `--check` skips the refresh entirely.
+
+Where the write goes depends on whether a board is answering. A running board
+is **posted to**, which is what pushes the change to a page already open and
+what gets the write a compare-and-set. With nothing listening the state file is
+written directly, so the tab is already current when you next run
+`ape aboard serve` rather than filling in at the next story boundary. A server
+that is there and *refuses* stops the refresh rather than writing around it.
+
+The tab is a projection and is rewritten on every refresh, so edits to it do
+not survive. Renaming it does: it is found by key.
 
 ## Recipes
 
