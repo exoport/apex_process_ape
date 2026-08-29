@@ -10,6 +10,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/output"
 	"github.com/exoport/apex_process_ape/internal/sprint"
+	"github.com/exoport/apex_process_ape/internal/sprintboard"
 	"github.com/spf13/cobra"
 )
 
@@ -199,7 +200,30 @@ concurrent per-epic sub-agents reconcile the same tracker and the last
 writer would otherwise silently drop a sibling's update.
 
 Exit 0 for every content outcome, including an unrecognised status.
-Non-zero only for a genuine I/O failure.`,
+Non-zero only for a genuine I/O failure.
+
+If the project has a board (see 'ape aboard'), reconcile also refreshes a
+'Sprint' tab in it — story and epic counts, what is in flight, and what is
+blocked, all derived from the tracker. That is how a long or autonomous run
+can be watched without interrupting it: reconcile already runs at every
+boundary that moves a story, so it is the thing that OBSERVES tracker
+changes rather than the thing that causes them.
+
+Two write paths, chosen by whether a board answers. A board that is
+listening is POSTed to, which is the only way a page already showing the
+board is pushed the change, and which gets the write a real compare-and-set.
+When nothing is listening the file is written directly, so the tab is
+current before anyone starts a board. A server that IS there and refuses —
+a 409, a timeout — stops the refresh rather than writing around it.
+
+The refresh is STRICTLY BEST-EFFORT and cannot affect this command. A
+board that is absent, unreadable or unwritable changes neither the exit
+code nor a byte of stdout; anything it has to say goes to stderr. That is
+not politeness: reconcile sits on mutation paths where a non-zero exit is
+read as a content verdict, so a broken board would otherwise convert a
+defer into a patch and demote a story. --check skips it entirely, since a
+dry run that writes to a board is not a dry run. Nothing here creates a
+board: starting one, and initialising one, are yours to do.`,
 		Args:    cobra.NoArgs,
 		Example: "  ape sprint reconcile --epic 12\n  ape sprint reconcile --all --check",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -238,9 +262,23 @@ Non-zero only for a genuine I/O failure.`,
 			}
 			format := output.Format(outputFormat)
 			if format != output.FormatHuman {
-				return output.Print(cmd.OutOrStdout(), format, res)
+				if err := output.Print(cmd.OutOrStdout(), format, res); err != nil {
+					return err
+				}
+			} else {
+				emitReconcileHuman(cmd.OutOrStdout(), res, check)
 			}
-			emitReconcileHuman(cmd.OutOrStdout(), res, check)
+			// AFTER stdout is written, and never able to change what went to
+			// it or what this returns. See sprintboard.Refresh: reconcile sits
+			// on review mutation paths where a non-zero exit is read as a
+			// content verdict, so a board that is down must not be able to
+			// reach that outcome.
+			//
+			// Skipped on --check: a dry run that mutates a board is not a dry
+			// run, whatever the board is showing.
+			if !check && cfg != nil {
+				refreshSprintBoard(cmd, cfg.Root, path)
+			}
 			return nil
 		},
 	}
@@ -286,4 +324,27 @@ func emitReconcileHuman(w io.Writer, res *sprint.ReconcileResult, check bool) {
 	if !res.Changed() {
 		fmt.Fprintln(w, "no epic row needed to move")
 	}
+}
+
+// refreshSprintBoard projects the reconciled tracker onto the project's board,
+// if one is running. Best-effort by construction: it cannot fail, and every
+// word it emits goes to stderr.
+//
+// The tracker is re-read rather than reusing what Reconcile parsed, and that
+// is the point: reconcile has just WRITTEN to it, so a projection built from
+// the pre-write rows would show the board a sprint that no longer exists. A
+// tracker is a few KB, and the read happens only where a board is already
+// running.
+func refreshSprintBoard(cmd *cobra.Command, projectRoot, trackerPath string) {
+	tracker, err := sprint.Load(trackerPath)
+	if err != nil || tracker.Missing {
+		// A project before its first sprint has no tracker, and a tracker
+		// that will not parse is reconcile's problem to report, not this
+		// one's — it has already run and said so.
+		return
+	}
+	sprintboard.Refresh(
+		cmd.Context(), projectRoot, sprint.Summarize(tracker.Rows),
+		time.Now(), cmd.ErrOrStderr(),
+	)
 }
