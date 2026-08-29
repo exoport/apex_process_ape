@@ -5,14 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -288,12 +285,14 @@ func TestRefreshWritesOnlyToTheWriterItIsGiven(t *testing.T) {
 // and never watches the file.
 func TestRefreshPostsToARunningBoard(t *testing.T) {
 	t.Parallel()
-	var posted atomic.Int32
-	var got []byte
+	// A buffered channel rather than a shared slice: the handler runs on the
+	// server's goroutine and the assertions on the test's, and "net/http
+	// probably orders that for me" is not something a test should rest on.
+	posted := make(chan []byte, 4)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
-			got, _ = io.ReadAll(r.Body)
-			posted.Add(1)
+			body, _ := io.ReadAll(r.Body)
+			posted <- body
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"ok":true,"rev":2,"updatedAt":"2026-08-29T00:00:00.000Z"}`))
 			return
@@ -309,8 +308,8 @@ func TestRefreshPostsToARunningBoard(t *testing.T) {
 	var errOut bytes.Buffer
 	Refresh(context.Background(), proj, sampleSummary(), time.Now(), &errOut)
 	require.Empty(t, errOut.String())
-	require.Equal(t, int32(1), posted.Load(), "a running board was not posted to")
-	require.Contains(t, string(got), TabKey, "the posted document has no sprint tab")
+	require.Len(t, posted, 1, "a running board was posted to %d times, want 1", len(posted))
+	require.Contains(t, string(<-posted), TabKey, "the posted document has no sprint tab")
 
 	// The file is the SERVER's to write. Going behind it would bypass the
 	// compare-and-set that posting exists to get.
@@ -348,14 +347,14 @@ func TestRefreshDoesNotWriteBehindAServerThatRefuses(t *testing.T) {
 // listening. Nothing answers, so the file write takes over.
 func TestRefreshFallsBackWhenTheRecordedBoardIsDead(t *testing.T) {
 	t.Parallel()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	addr, ok := ln.Addr().(*net.TCPAddr)
-	require.True(t, ok)
-	require.NoError(t, ln.Close()) // free it: nothing answers here now
-
 	proj := boardOnDisk(t, `{"version":1,"rev":1,"nextId":1,"tabs":[]}`)
-	recordInstance(t, proj, "http://127.0.0.1:"+strconv.Itoa(addr.Port))
+	// Port 1 rather than a port bound-then-freed. The obvious trick — take an
+	// ephemeral port, close it, and assume it stays free — is a race on a busy
+	// machine: something else takes it, the dial SUCCEEDS, and this asserts the
+	// opposite of what it means to. Port 1 is privileged, the test process
+	// cannot bind it and neither can anything else here, so the connection is
+	// refused every time.
+	recordInstance(t, proj, "http://127.0.0.1:1")
 
 	var errOut bytes.Buffer
 	Refresh(context.Background(), proj, sampleSummary(), time.Now(), &errOut)

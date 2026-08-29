@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,15 +19,34 @@ development_status:
   1-2: done
 `
 
+// projectNoChdir builds a project WITHOUT changing the process's working
+// directory, and every test here addresses it with --cwd.
+//
+// newTestProject chdirs, which is process-global: while a serial test holds a
+// changed cwd, any PARALLEL test in this package that resolves a relative path
+// sees it too. These tests do not need it — reconcile takes --cwd — so they do
+// not take the risk, and they do not widen the window for anybody else.
+func projectNoChdir(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, apexcfg.DirName), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(root, apexcfg.DirName, apexcfg.BaseFile), []byte(realProjectConfig), 0o644))
+	return root
+}
+
 // runReconcile executes the real command and returns stdout, stderr and the
 // error separately — the whole point here is that the three do not move
 // together.
-func runReconcile(t *testing.T, args ...string) (stdout, stderr string, err error) {
+func runReconcile(t *testing.T, root string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	var out, errBuf bytes.Buffer
 	cmd := newSprintReconcileCmd()
 	cmd.SetOut(&out)
 	cmd.SetErr(&errBuf)
+	if root != "" {
+		args = append(args, "--cwd", root)
+	}
 	cmd.SetArgs(args)
 	err = cmd.Execute()
 	return out.String(), errBuf.String(), err
@@ -53,11 +73,11 @@ func brokenBoard(t *testing.T, root string) {
 
 // The tab lands, from the command, with no server anywhere.
 func TestSprintReconcile_WritesTheTabWithNoServerRunning(t *testing.T) {
-	root := newTestProject(t, realProjectConfig)
+	root := projectNoChdir(t)
 	writeStory(t, root, "sprint-status.yaml", reconcileTracker)
 	giveItABoard(t, root)
 
-	_, stderr, err := runReconcile(t, "--epic", "1")
+	_, stderr, err := runReconcile(t, root, "--epic", "1")
 	require.NoError(t, err)
 	require.Empty(t, stderr)
 
@@ -83,16 +103,16 @@ func TestSprintReconcile_WritesTheTabWithNoServerRunning(t *testing.T) {
 // Asserted as EQUALITY against a run with no board at all, not as "looks
 // fine": the claim is that the two are indistinguishable.
 func TestSprintReconcile_ABrokenBoardChangesNeitherStdoutNorExitCode(t *testing.T) {
-	withoutRoot := newTestProject(t, realProjectConfig)
+	withoutRoot := projectNoChdir(t)
 	writeStory(t, withoutRoot, "sprint-status.yaml", reconcileTracker)
-	wantOut, _, wantErr := runReconcile(t, "--epic", "1")
+	wantOut, _, wantErr := runReconcile(t, withoutRoot, "--epic", "1")
 	require.NoError(t, wantErr)
 	require.NotEmpty(t, wantOut)
 
-	withRoot := newTestProject(t, realProjectConfig)
+	withRoot := projectNoChdir(t)
 	writeStory(t, withRoot, "sprint-status.yaml", reconcileTracker)
 	brokenBoard(t, withRoot)
-	gotOut, gotErrText, gotErr := runReconcile(t, "--epic", "1")
+	gotOut, gotErrText, gotErr := runReconcile(t, withRoot, "--epic", "1")
 
 	require.NoError(t, gotErr, "a broken board changed reconcile's exit code")
 	require.Equal(t, wantOut, gotOut, "a broken board changed reconcile's stdout")
@@ -102,11 +122,11 @@ func TestSprintReconcile_ABrokenBoardChangesNeitherStdoutNorExitCode(t *testing.
 // The same guarantee for the machine-readable path, which is the one the
 // skills actually use: stdout must stay parseable JSON with a dead board.
 func TestSprintReconcile_JSONStdoutIsUnaffectedByABrokenBoard(t *testing.T) {
-	root := newTestProject(t, realProjectConfig)
+	root := projectNoChdir(t)
 	writeStory(t, root, "sprint-status.yaml", reconcileTracker)
 	brokenBoard(t, root)
 
-	out, _, err := runReconcile(t, "--epic", "1", "--output-format", "json")
+	out, _, err := runReconcile(t, root, "--epic", "1", "--output-format", "json")
 	require.NoError(t, err)
 
 	var parsed map[string]any
@@ -117,10 +137,10 @@ func TestSprintReconcile_JSONStdoutIsUnaffectedByABrokenBoard(t *testing.T) {
 
 // A project that never ran a board pays nothing and hears nothing.
 func TestSprintReconcile_NoBoardIsCompletelySilent(t *testing.T) {
-	root := newTestProject(t, realProjectConfig)
+	root := projectNoChdir(t)
 	writeStory(t, root, "sprint-status.yaml", reconcileTracker)
 
-	_, stderr, err := runReconcile(t, "--epic", "1")
+	_, stderr, err := runReconcile(t, root, "--epic", "1")
 	require.NoError(t, err)
 	require.Empty(t, stderr)
 	require.NoDirExists(t, filepath.Join(root, ".aboard"),
@@ -130,11 +150,11 @@ func TestSprintReconcile_NoBoardIsCompletelySilent(t *testing.T) {
 // --check is a dry run. A dry run that mutates a board is not a dry run,
 // whatever the board happens to be showing.
 func TestSprintReconcile_CheckDoesNotTouchTheBoard(t *testing.T) {
-	root := newTestProject(t, realProjectConfig)
+	root := projectNoChdir(t)
 	writeStory(t, root, "sprint-status.yaml", reconcileTracker)
 	giveItABoard(t, root)
 
-	_, stderr, err := runReconcile(t, "--epic", "1", "--check")
+	_, stderr, err := runReconcile(t, root, "--epic", "1", "--check")
 	require.NoError(t, err)
 	require.Empty(t, stderr, "--check attempted a board write")
 
@@ -150,9 +170,10 @@ func TestSprintReconcile_FileFlagOutsideAProjectStillWorks(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sprint-status.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(reconcileTracker), 0o644))
-	t.Chdir(dir)
 
-	_, stderr, err := runReconcile(t, "--epic", "1", "--file", path)
+	// No --cwd and no chdir: --file names the tracker outright, which is how
+	// the framework's call sites reach one outside any project.
+	_, stderr, err := runReconcile(t, "", "--epic", "1", "--file", path)
 	require.NoError(t, err)
 	require.Empty(t, stderr)
 }
