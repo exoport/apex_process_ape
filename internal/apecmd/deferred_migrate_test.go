@@ -379,3 +379,94 @@ func TestDeferredMigrate_AlreadyDoneSaysHowToReMigrate(t *testing.T) {
 	require.Contains(t, out, "restore")
 	require.Contains(t, out, "remove")
 }
+
+// TestDeferredMigrate_RecoveryIsOnByDefault: the choice is not symmetric.
+// Recovery only writes tombstones into closed/, and skipping it forfeits
+// the history permanently because migrate short-circuits afterwards. The
+// automatic path (`ape framework update`) was the one taking the lossy
+// branch, so the default moved.
+func TestDeferredMigrate_RecoveryIsOnByDefault(t *testing.T) {
+	root := newTestProject(t, realProjectConfig)
+	writeLegacyLedger(t, root, legacyLedgerFixture)
+
+	out := runCmd(t, newDeferredMigrateCmd())
+	require.Contains(t, out, "recovered from git history",
+		"recovery must run without being asked, and report even at zero")
+	require.NotContains(t, out, "SKIPPED")
+}
+
+// TestDeferredMigrate_OptOutIsStatedAsOneWay: --no-recover-deleted is a
+// choice that cannot be revisited through this command.
+func TestDeferredMigrate_OptOutIsStatedAsOneWay(t *testing.T) {
+	root := newTestProject(t, realProjectConfig)
+	writeLegacyLedger(t, root, legacyLedgerFixture)
+
+	out := runCmd(t, newDeferredMigrateCmd(), "--no-recover-deleted")
+	require.Contains(t, out, "history recovery SKIPPED")
+	require.Contains(t, out, "one-way")
+}
+
+// TestDeferredMigrate_AlreadyDoneNamesTheIgnoredFlag: silently doing
+// nothing is indistinguishable from running and finding nothing, and only
+// one of those means the history is still recoverable.
+func TestDeferredMigrate_AlreadyDoneNamesTheIgnoredFlag(t *testing.T) {
+	root := newTestProject(t, realProjectConfig)
+	writeLegacyLedger(t, root, legacyLedgerFixture)
+	require.Contains(t, runCmd(t, newDeferredMigrateCmd()), "migration:")
+
+	out := runCmd(t, newDeferredMigrateCmd(), "--recover-deleted")
+	require.Contains(t, out, "already migrated")
+	require.Contains(t, out, "NOT run")
+	require.Contains(t, out, "ape deferred recover",
+		"the refusal must name the command that still works")
+
+	// And without the flag, no misleading note about it.
+	plain := runCmd(t, newDeferredMigrateCmd(), "--no-recover-deleted")
+	require.Contains(t, plain, "already migrated")
+	require.NotContains(t, plain, "NOT run")
+}
+
+// TestDeferredDiscard_WritesTheThirdStatus covers the command whose
+// absence caused a judgment phase to reach for `close` instead.
+func TestDeferredDiscard_WritesTheThirdStatus(t *testing.T) {
+	root := newTestProject(t, realProjectConfig)
+	writeLegacyLedger(t, root, legacyLedgerFixture)
+	require.Contains(t, runCmd(t, newDeferredMigrateCmd()), "migration:")
+
+	store := deferred.New(filepath.Join(root, "development", "deferred"))
+	loaded, err := store.Load(deferred.LoadOptions{})
+	require.NoError(t, err)
+	require.NotEmpty(t, loaded.Records)
+	id := loaded.Records[0].ID
+
+	out := runCmd(t, newDeferredDiscardCmd(), id,
+		"--reason", "superseded by the 91-2 rewrite",
+		"--evidence", "pkg/a.go:12 is gone at HEAD")
+	require.Contains(t, out, "discarded "+id)
+	require.Contains(t, out, "superseded by the 91-2 rewrite")
+
+	// Visible under the status the flag help now advertises.
+	listed := runCmd(t, newDeferredListCmd(), "--status", "discarded")
+	require.Contains(t, listed, id)
+}
+
+func TestDeferredDiscard_RefusesWithoutAReason(t *testing.T) {
+	root := newTestProject(t, realProjectConfig)
+	writeLegacyLedger(t, root, legacyLedgerFixture)
+	require.Contains(t, runCmd(t, newDeferredMigrateCmd()), "migration:")
+
+	cmd := newDeferredDiscardCmd()
+	cmd.SetArgs([]string{"DW-anything", "--cwd", root})
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	require.Error(t, cmd.Execute())
+}
+
+// TestDeferredList_AdvertisesAllThreeStatuses: the flag help said
+// open|closed|all while the store modelled three, and a caller reading the
+// short version concluded discard was unsupported.
+func TestDeferredList_AdvertisesAllThreeStatuses(t *testing.T) {
+	cmd := newDeferredListCmd()
+	require.Contains(t, cmd.Flags().Lookup("status").Usage, "discarded")
+	require.Contains(t, cmd.Long, "discarded")
+}

@@ -104,7 +104,14 @@ func runProjectMigrations(ctx context.Context, w io.Writer, projectRoot string) 
 	// No DryRun here: `--dry-run` is answered by emitFrameworkDryRun, which
 	// reports the framework drift alongside the pending migrations. This
 	// path only ever performs one.
-	res, err := store.Migrate(ctx, deferred.MigrateOptions{From: cfg.Paths.DeferredLegacy})
+	// RecoverDeleted is explicit here rather than inherited from the option's
+	// zero value. This is the path most projects actually migrate through —
+	// `ape framework update` runs it for them — and it was the one silently
+	// forfeiting the history, because recovery is unreachable afterwards.
+	res, err := store.Migrate(ctx, deferred.MigrateOptions{
+		From:           cfg.Paths.DeferredLegacy,
+		RecoverDeleted: true,
+	})
 	if err != nil {
 		return err
 	}

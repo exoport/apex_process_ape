@@ -36,6 +36,8 @@ per deferred item under that folder would feed every one of them.`,
 		newDeferredIngestCmd(),
 		newDeferredListCmd(),
 		newDeferredCloseCmd(),
+		newDeferredDiscardCmd(),
+		newDeferredRecoverCmd(),
 		newDeferredVerifyCmd(),
 		newDeferredMigrateCmd(),
 		newDeferredRepairCmd(),
@@ -155,6 +157,12 @@ func newDeferredListCmd() *cobra.Command {
 closed records stay on disk but leave the working set, which is what stops
 an LLM re-filing work it already did.
 
+Three statuses exist, not two. A record is open, closed (the work was done)
+or discarded (the work was never needed) — and those last two are different
+claims, so they are not interchangeable. --status closed matches BOTH, since
+both have left the working set; --status discarded narrows to just the
+discards.
+
 --detail picks how much the human rendering shows; --output-format picks
 the encoding. They are separate axes.`,
 		Args: cobra.NoArgs,
@@ -180,7 +188,8 @@ the encoding. They are separate axes.`,
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", helpCwd)
 	cmd.Flags().StringVar(&format, "output-format", "human", helpFormat)
 	cmd.Flags().StringVar(&detail, "detail", "brief", "Human rendering detail: brief|full")
-	cmd.Flags().StringVar(&filter.Status, "status", "open", "Which records: open|closed|all")
+	cmd.Flags().StringVar(&filter.Status, "status", "open",
+		"Which records: open|closed|discarded|all (closed includes discarded)")
 	cmd.Flags().StringVar(&filter.Owner, "owner", "", "Only records with this owner")
 	cmd.Flags().StringVar(&filter.Story, "story", "", "Only records filed from this story")
 	cmd.Flags().StringVar(&filter.Path, "path", "", "Only records anchored under this path prefix")

@@ -286,11 +286,40 @@ records found 5 already delivered.
 leave the working set but stay on disk, which is what stops an LLM
 re-filing work it already did.
 
+### Three statuses, and why `discard` is not `close`
+
+```bash
+ape deferred close   DW-… --by "54-2"
+ape deferred discard DW-… --reason "superseded by the 91-2 rewrite" \
+                          --evidence "pkg/a.go:12 is gone at HEAD"
+ape deferred list --status discarded
+```
+
+A record is `open`, `closed` (the work was done) or `discarded` (the work
+was never needed). Those last two are different claims and are not
+interchangeable:
+
+| | records | body |
+| --- | --- | --- |
+| `close` | `resolved_by`, `resolved_at` | gains a discharge marker |
+| `discard` | `discard_reason`, `discard_evidence` | untouched |
+
+Using `close` for a discard asserts work happened that did not, and it
+mutates the body — breaking the byte-identity the migration's whole
+verification design exists to protect. `verify` cannot tell the two apart
+afterwards, because it accepts `resolved_by` **or** `discard_reason`, so
+the mistake is silent. That is why the third status has its own writer.
+
+`--status closed` matches discarded records too, since both have left the
+working set; `--status discarded` narrows to just the discards.
+
 ### Migrating an existing ledger
 
 ```bash
-ape deferred migrate --dry-run           # parse and verify, write nothing
-ape deferred migrate --recover-deleted   # plus records mined from git history
+ape deferred migrate --dry-run              # parse and verify, write nothing
+ape deferred migrate                        # history recovery is ON by default
+ape deferred migrate --no-recover-deleted   # skip it — a one-way choice
+ape deferred recover                        # recover into an ALREADY-migrated store
 ```
 
 The migration verifies before it writes, **against the ledger**: every
@@ -316,6 +345,22 @@ The completion output reports how many bytes of cited text changed folders.
 A repo-wide gate scoped to `implementation_folder` — an anchor count, a
 citation ratchet — will drop the moment this lands, with nothing actually
 regressed. Re-baseline it rather than chasing it.
+
+**History recovery runs by default, and only on the first migration.** The
+ledger's only eviction mechanism was deletion, so its git history holds
+records that exist nowhere else; the migration mines them into `closed/` as
+tombstones. It defaults on because the choice is not symmetric — recovery
+only ever writes to `closed/` and cannot touch the working set, the cost is
+one `git show` per revision, and skipping it forfeits that history
+permanently. After the migration, `migrate` reports `already migrated` and
+returns before the recovery step, so the flag is inert; it now says so
+rather than exiting 0 in silence.
+
+Use **`ape deferred recover`** for a store that has already been migrated.
+It reads history *through* the stub now sitting at the ledger path, and
+de-duplicates against what is on disk rather than a fresh parse, so it is
+safe to re-run. It is the only route that does not cost you every `close`,
+`discard` and repair edit made since the migration.
 
 **Re-migrating after a parser fix.** Record ids are derived from the
 ledger, so a corrected parse yields different ids and the two sets cannot

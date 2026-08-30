@@ -1673,9 +1673,11 @@ per deferred item under that folder would feed every one of them.
 Subcommands:
 
 - `close` — Discharge a record, moving it to closed/
+- `discard` — Retire a record as never-needed, moving it to closed/
 - `ingest` — Store defer bullets as records (bullets on stdin)
 - `list` — List deferred records (open by default)
 - `migrate` — Convert the legacy deferred-work.md into record files
+- `recover` — Recover ledger records deleted before the migration, into closed/
 - `repair` — Complete or retire free-form records (judgment, on opus)
 - `verify` — Check the store: invariants, and candidates for a human
 
@@ -1711,6 +1713,52 @@ Flags:
 | `--by` | string | `—` | Story key or reason that discharged it (required) |
 | `--cwd` | string | `—` | Project root (default: current working dir) |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape deferred discard
+
+Retire a record as never-needed, moving it to closed/
+
+```
+ape deferred discard <id> [flags]
+```
+
+Mark a record discarded and move it to closed/. The record is NEVER
+deleted, exactly as with 'close'.
+
+DISCARD IS NOT CLOSE. They record incompatible claims:
+
+  close    the work was done       -> resolved_by, resolved_at
+  discard  the work was not needed -> discard_reason, discard_evidence
+
+Using 'close' for a discard asserts that work happened, and it also
+APPENDS A DISCHARGE MARKER TO THE BODY — which breaks the byte-identity
+the migration's whole verification design exists to protect. This command
+leaves the body untouched.
+
+Nothing here re-derives the judgment. Deciding a deferred item is moot
+requires re-verifying its premises against HEAD, so --reason is required
+and --evidence carries what was checked. 'ape deferred verify' flags
+CANDIDATES and never discards one.
+
+The result is visible as 'ape deferred list --status discarded', and under
+'--status closed' too, since both statuses have left the working set.
+
+Examples:
+
+```
+  ape deferred discard DW-20260822-a1b2c3 \
+    --reason "superseded by the 91-2 rewrite" \
+    --evidence "pkg/a.go:12 no longer exists at HEAD"
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--evidence` | string | `—` | What was checked to establish that |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--reason` | string | `—` | Why the work is not needed (required) |
 
 ## ape deferred ingest
 
@@ -1770,6 +1818,12 @@ Project the record set. Open records only unless --status says otherwise:
 closed records stay on disk but leave the working set, which is what stops
 an LLM re-filing work it already did.
 
+Three statuses exist, not two. A record is open, closed (the work was done)
+or discarded (the work was never needed) — and those last two are different
+claims, so they are not interchangeable. --status closed matches BOTH, since
+both have left the working set; --status discarded narrows to just the
+discards.
+
 --detail picks how much the human rendering shows; --output-format picks
 the encoding. They are separate axes.
 
@@ -1790,7 +1844,7 @@ Flags:
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--owner` | string | `—` | Only records with this owner |
 | `--path` | string | `—` | Only records anchored under this path prefix |
-| `--status` | string | `open` | Which records: open\|closed\|all |
+| `--status` | string | `open` | Which records: open\|closed\|discarded\|all (closed includes discarded) |
 | `--story` | string | `—` | Only records filed from this story |
 
 ## ape deferred migrate
@@ -1850,10 +1904,21 @@ merged. Restore the ledger from git and delete the store directory; this
 refuses to run into a store that still holds records rather than
 interleaving two migrations on disk.
 
---recover-deleted mines the ledger's git history for records removed from
-it and writes them straight to closed/. The ledger's own preamble
-documents 'git log -p' as the recovery route; this automates exactly that.
-Failure to read history is a warning, never fatal.
+HISTORY RECOVERY IS ON BY DEFAULT, AND IS FIRST-RUN-ONLY. The migration
+mines the ledger's git history for records removed from it and writes them
+straight to closed/ as tombstones. The ledger's own preamble documents
+'git log -p' as the recovery route; this automates exactly that. Failure to
+read history is a warning, never fatal.
+
+It defaults on because the choice is not symmetric. Recovery only ever
+writes to closed/, so it cannot put anything in the working set; the cost
+is one 'git show' per revision touching the ledger. But it runs only on the
+FIRST migration — afterwards this command reports 'already migrated' and
+returns before the recovery step — so skipping it forfeits that history
+permanently. One project lost 180 recoverable records that way.
+
+Pass --no-recover-deleted to skip it. Use 'ape deferred recover' to run it
+against a store that has already been migrated.
 
 Examples:
 
@@ -1869,8 +1934,58 @@ Flags:
 | `--cwd` | string | `—` | Project root (default: current working dir) |
 | `--dry-run` | bool | `false` | Parse and verify, writing nothing |
 | `--from` | string | `—` | Legacy ledger path (default: resolved from config) |
+| `--no-recover-deleted` | bool | `false` | Skip history recovery. This is a ONE-WAY choice: after the migration the history is unreachable |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--recover-deleted` | bool | `false` | Also recover records removed from the ledger, from git history, into closed/ |
+| `--recover-deleted` | bool | `true` | Recover records removed from the ledger, from git history, into closed/ (default true) |
+
+## ape deferred recover
+
+Recover ledger records deleted before the migration, into closed/
+
+```
+ape deferred recover [flags]
+```
+
+Mine the legacy ledger's git history for records that were removed from
+it, and write them to closed/ as tombstones.
+
+The ledger's only eviction mechanism was deletion — closing a record
+destroyed its own audit trail — which is the failure the record store
+exists to end. This is the repair for the history that predates it.
+
+WHY THIS IS A SEPARATE COMMAND. 'ape deferred migrate --recover-deleted'
+does the same work, but only on the FIRST migration: afterwards migrate
+reports 'already migrated' and returns before the recovery step, so the
+flag is silently inert. The route out of that ("restore the ledger, remove
+the store, re-migrate") costs every close, discard and repair edit made
+since the migration. This does not.
+
+SAFE TO RE-RUN. Recovery only ever writes to closed/, so it can never add
+anything to the open working set. It de-duplicates against what is on disk
+— open records AND existing tombstones — so a second run recovers nothing.
+
+The ledger path is normally a stub by now. That is fine: git history is
+read THROUGH the path, not out of the file at it, so every revision that
+held the real ledger is still reachable. A repo with no history for that
+path is a warning, never fatal.
+
+Nothing is committed.
+
+Examples:
+
+```
+  ape deferred recover --dry-run
+  ape deferred recover
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--dry-run` | bool | `false` | Report what would be recovered, writing nothing |
+| `--from` | string | `—` | Legacy ledger path (default: resolved from config) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
 ## ape deferred repair
 

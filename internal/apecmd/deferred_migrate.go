@@ -68,11 +68,12 @@ const repairModel = "opus"
 
 func newDeferredMigrateCmd() *cobra.Command {
 	var (
-		cwdFlag        string
-		fromFlag       string
-		recoverDeleted bool
-		dryRun         bool
-		format         string
+		cwdFlag          string
+		fromFlag         string
+		recoverDeleted   bool
+		noRecoverDeleted bool
+		dryRun           bool
+		format           string
 	)
 	cmd := &cobra.Command{
 		Use:   "migrate",
@@ -126,10 +127,21 @@ merged. Restore the ledger from git and delete the store directory; this
 refuses to run into a store that still holds records rather than
 interleaving two migrations on disk.
 
---recover-deleted mines the ledger's git history for records removed from
-it and writes them straight to closed/. The ledger's own preamble
-documents 'git log -p' as the recovery route; this automates exactly that.
-Failure to read history is a warning, never fatal.`,
+HISTORY RECOVERY IS ON BY DEFAULT, AND IS FIRST-RUN-ONLY. The migration
+mines the ledger's git history for records removed from it and writes them
+straight to closed/ as tombstones. The ledger's own preamble documents
+'git log -p' as the recovery route; this automates exactly that. Failure to
+read history is a warning, never fatal.
+
+It defaults on because the choice is not symmetric. Recovery only ever
+writes to closed/, so it cannot put anything in the working set; the cost
+is one 'git show' per revision touching the ledger. But it runs only on the
+FIRST migration — afterwards this command reports 'already migrated' and
+returns before the recovery step — so skipping it forfeits that history
+permanently. One project lost 180 recoverable records that way.
+
+Pass --no-recover-deleted to skip it. Use 'ape deferred recover' to run it
+against a store that has already been migrated.`,
 		Args: cobra.NoArgs,
 		Example: "  ape deferred migrate --dry-run\n" +
 			"  ape deferred migrate --recover-deleted",
@@ -163,7 +175,7 @@ Failure to read history is a warning, never fatal.`,
 
 			res, err := store.Migrate(cmd.Context(), deferred.MigrateOptions{
 				From:           from,
-				RecoverDeleted: recoverDeleted,
+				RecoverDeleted: recoverDeleted && !noRecoverDeleted,
 				DryRun:         dryRun,
 			})
 			if err != nil {
@@ -178,8 +190,19 @@ Failure to read history is a warning, never fatal.`,
 	}
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", helpCwd)
 	cmd.Flags().StringVar(&fromFlag, "from", "", "Legacy ledger path (default: resolved from config)")
-	cmd.Flags().BoolVar(&recoverDeleted, "recover-deleted", false,
-		"Also recover records removed from the ledger, from git history, into closed/")
+	// ON by default. Recovery only ever writes tombstones into closed/, so
+	// it cannot touch the working set; the cost is one `git show` per
+	// revision touching the ledger; and the cost of skipping it is
+	// PERMANENT, because Migrate short-circuits on AlreadyDone before it
+	// reaches the recovery branch. Opting in cost seconds and missing it
+	// cost one project 180 records, silently — so the default moved.
+	//
+	// `--recover-deleted` is still accepted, and must be: the framework's
+	// preflight guidance already tells operators to pass it.
+	cmd.Flags().BoolVar(&recoverDeleted, "recover-deleted", true,
+		"Recover records removed from the ledger, from git history, into closed/ (default true)")
+	cmd.Flags().BoolVar(&noRecoverDeleted, "no-recover-deleted", false,
+		"Skip history recovery. This is a ONE-WAY choice: after the migration the history is unreachable")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Parse and verify, writing nothing")
 	cmd.Flags().StringVar(&format, "output-format", "human", helpFormat)
 	return cmd
@@ -196,6 +219,15 @@ func migrationPaths(store, legacy string) []string {
 func emitMigrateHuman(w io.Writer, res *deferred.MigrateResult, root string) {
 	if res.AlreadyDone {
 		fmt.Fprintln(w, "already migrated — the store holds records and the legacy file is a stub")
+		if res.RecoverRequested {
+			// Naming the ignored flag is the whole point. Silently doing
+			// nothing is indistinguishable from running and finding
+			// nothing, and one of those means history is still on the table.
+			fmt.Fprintln(w,
+				"  NOTE: history recovery was requested but NOT run — migration recovers only on the first run.")
+			fmt.Fprintln(w,
+				"        run `ape deferred recover` to mine history into an already-migrated store.")
+		}
 		fmt.Fprintf(w, "  to re-migrate after a parser fix: restore %s from git and remove %s\n",
 			relTo(root, res.From), relTo(root, res.To))
 		return
@@ -205,9 +237,14 @@ func emitMigrateHuman(w io.Writer, res *deferred.MigrateResult, root string) {
 		verb = "migration (dry run):"
 	}
 	fmt.Fprintf(w, "%s %d record(s) -> %s\n", verb, res.RecordsIn, relTo(root, res.To))
-	if res.Recovered > 0 {
+	if res.RecoverRequested {
+		// Reported even at zero. A silent recovery step is how an operator
+		// ends up believing history was never there to recover.
 		fmt.Fprintf(w, "           %d recovered from git history -> %s\n",
 			res.Recovered, relTo(root, filepath.Join(res.To, deferred.ClosedDirName)))
+	} else {
+		fmt.Fprintln(w,
+			"           history recovery SKIPPED (--no-recover-deleted) — this is one-way; it cannot be run later by `migrate`")
 	}
 	if res.Closed > 0 {
 		fmt.Fprintf(w, "           %d arrived already resolved -> %s\n",

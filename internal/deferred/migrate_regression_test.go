@@ -241,3 +241,51 @@ func TestParseLegacy_BodiesSurviveAsALineMultiset(t *testing.T) {
 		require.Equalf(t, n, source[line], "record line not present in the source: %q", line)
 	}
 }
+
+// TestParseLegacy_SourceHeadingIsTheTrueEnclosingHeading is the field
+// harness's own assertion, and it is the cheap one that catches the whole
+// inherited-context class.
+//
+// It recomputes each record's enclosing `##` heading FROM THE SOURCE —
+// locate the body, walk backwards to the nearest heading — rather than
+// asking the parser what it thinks. That independence is the point: a
+// parser that reintroduces stale section context agrees with its own
+// bookkeeping and disagrees with this. Measured across the real corpus it
+// held for 118/118 records.
+func TestParseLegacy_SourceHeadingIsTheTrueEnclosingHeading(t *testing.T) {
+	for name, ledger := range map[string]string{
+		"field shapes":  realLedgerShapes,
+		"mapping table": legacyLedger,
+	} {
+		t.Run(name, func(t *testing.T) {
+			lines := strings.Split(ledger, "\n")
+			doc := ParseLegacyDocument([]byte(ledger))
+			require.NotEmpty(t, doc.Records)
+
+			for i := range doc.Records {
+				rec := &doc.Records[i]
+				first, _, _ := strings.Cut(strings.TrimRight(rec.Body, "\n"), "\n")
+
+				at := -1
+				for n, line := range lines {
+					if line == first {
+						at = n
+						break
+					}
+				}
+				require.GreaterOrEqualf(t, at, 0,
+					"record %s: its body's first line is not in the ledger: %q", rec.ID, first)
+
+				want := ""
+				for n := at; n >= 0; n-- {
+					if strings.HasPrefix(lines[n], "## ") {
+						want = lines[n]
+						break
+					}
+				}
+				require.Equalf(t, want, rec.SourceHeading,
+					"record %s sits under a different heading than it claims", rec.ID)
+			}
+		})
+	}
+}

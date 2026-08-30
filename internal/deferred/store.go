@@ -238,7 +238,12 @@ func (s *Store) Find(id string) (Record, error) {
 
 // Filter selects records for `list`.
 type Filter struct {
-	// Status is open|closed|all. Empty means open.
+	// Status is open|closed|discarded|all. Empty means open, and `closed`
+	// matches discarded records too — both have left the working set. The
+	// vocabulary is spelled out here because it used to say `open|closed|all`
+	// while the store modelled three statuses, and a caller reading the
+	// short version concluded discard was not supported and wrote the wrong
+	// one.
 	Status string
 	Owner  string
 	Story  string
@@ -367,4 +372,64 @@ func (s *Store) RebuildIndex() error {
 		return fmt.Errorf("encode index: %w", err)
 	}
 	return writeFileAtomic(filepath.Join(s.Dir, IndexFileName), []byte(buf.String()))
+}
+
+// Discard moves a record to closed/ as NOT NEEDED, rather than as done.
+//
+// This is not `Close` with different words. The two record incompatible
+// claims — closed says the work was performed, discarded says it never
+// needed to be — and the store has always modelled both (StatusDiscarded,
+// DiscardReason, DiscardEvidence, and Verify accepting either). What it
+// lacked was a writer, so the judgment phase reached for Close instead,
+// and that cost two things at once:
+//
+//   - 20 records asserted `resolved_by`/`resolved_at`, i.e. work done, for
+//     findings whose whole point was that no work was needed. Nothing in
+//     `verify` catches it: the schema check accepts `resolved_by` OR
+//     `discard_reason`, so a discard written as a close is indistinguishable
+//     from a real one.
+//   - Close appends the discharge marker to the BODY. Those bodies stopped
+//     being byte-identical to what the migration wrote — the one property
+//     the migration's entire verification design exists to protect.
+//
+// So: body untouched, no discharge marker, reason and evidence recorded,
+// and the same never-delete guarantee as Close.
+func (s *Store) Discard(id, reason, evidence, date string) (Record, error) {
+	if strings.TrimSpace(reason) == "" {
+		return Record{}, errors.New("a discard needs a reason — an unexplained one cannot be reviewed")
+	}
+	rec, err := s.Find(id)
+	if err != nil {
+		return Record{}, err
+	}
+	if rec.Status == StatusDiscarded {
+		return rec, nil // idempotent
+	}
+	if rec.Status == StatusClosed {
+		return Record{}, fmt.Errorf(
+			"%s is already closed as done; discarding it would overwrite that claim — reopen it first if the close was wrong", id)
+	}
+	rec.Status = StatusDiscarded
+	rec.DiscardReason = reason
+	rec.DiscardEvidence = evidence
+	rec.ResolvedAt = date
+
+	if err := os.MkdirAll(s.ClosedDir(), 0o755); err != nil {
+		return Record{}, fmt.Errorf("create %s: %w", s.ClosedDir(), err)
+	}
+	data, err := Render(rec)
+	if err != nil {
+		return Record{}, err
+	}
+	dest := filepath.Join(s.ClosedDir(), rec.FileName())
+	if err := writeFileAtomic(dest, data); err != nil {
+		return Record{}, err
+	}
+	if rec.Path != "" && rec.Path != dest {
+		if err := os.Remove(rec.Path); err != nil {
+			return Record{}, fmt.Errorf("remove %s after discarding: %w", rec.Path, err)
+		}
+	}
+	rec.Path = dest
+	return rec, nil
 }

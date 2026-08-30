@@ -64,9 +64,39 @@ type MigrateOptions struct {
 	From string
 	// RecoverDeleted mines git history for records removed from the ledger
 	// and writes them straight to closed/.
+	//
+	// The CLI defaults this ON; the zero value here stays off so no
+	// existing library caller changes behaviour by being recompiled. The
+	// two disagree deliberately — see the CLI's flag for why the default
+	// moved.
 	RecoverDeleted bool
 	// DryRun parses and verifies, writing nothing.
 	DryRun bool
+}
+
+// RecoverOptions controls a standalone recovery into an existing store.
+type RecoverOptions struct {
+	// From is the legacy ledger path. After a migration this is a stub,
+	// which is fine and is the whole point: history is read THROUGH the
+	// path, not out of the file sitting at it.
+	From string
+	// DryRun reports what would be recovered, writing nothing.
+	DryRun bool
+}
+
+// RecoverResult is what a standalone recovery did, or would do.
+type RecoverResult struct {
+	From string `json:"from" yaml:"from"`
+	To   string `json:"to"   yaml:"to"`
+	// Recovered is how many tombstones were written.
+	Recovered int `json:"recovered" yaml:"recovered"`
+	// Existing is how many records were already on disk, and so were the
+	// set the recovery de-duplicated against.
+	Existing int      `json:"existing"           yaml:"existing"`
+	Records  []Record `json:"records,omitempty"  yaml:"records,omitempty"`
+	Paths    []string `json:"paths,omitempty"    yaml:"paths,omitempty"`
+	Warnings []string `json:"warnings,omitempty" yaml:"warnings,omitempty"`
+	DryRun   bool     `json:"dry_run"            yaml:"dry_run"`
 }
 
 // MigrateResult is what the migration did, or would do.
@@ -82,6 +112,11 @@ type MigrateResult struct {
 	// Closed is how many parsed records arrived already discharged — a
 	// resolution banner in the ledger, not an open item.
 	Closed int `json:"closed" yaml:"closed"`
+	// RecoverRequested records that recovery was asked for, so the
+	// AlreadyDone path can say the request could not be honoured. A flag
+	// that is silently ignored is indistinguishable from one that ran and
+	// found nothing, and those are very different facts.
+	RecoverRequested bool `json:"recover_requested" yaml:"recover_requested"`
 	// Bytes is how much ledger text moved out of the legacy file. The
 	// framework's anchor and citation gates are scoped to a folder, so a
 	// migration that relocates this much cited text moves those counts
@@ -432,7 +467,10 @@ func sectionFrom(label string) sectionContext {
 //   - NO COMMIT. The files land in the working tree and the operator
 //     commits, as one commit or two, however they like.
 func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (*MigrateResult, error) {
-	res := &MigrateResult{From: opts.From, To: s.Dir, DryRun: opts.DryRun}
+	res := &MigrateResult{
+		From: opts.From, To: s.Dir, DryRun: opts.DryRun,
+		RecoverRequested: opts.RecoverDeleted,
+	}
 
 	if done, err := s.migrationDone(opts.From); err != nil {
 		return nil, err
@@ -891,4 +929,68 @@ func resolveForGit(p string) string {
 		return r
 	}
 	return p
+}
+
+// Recover mines the ledger's git history for records the store does not
+// hold, and writes them to closed/ as tombstones.
+//
+// This is Migrate's --recover-deleted, reachable AFTER a migration. It has
+// to exist separately because Migrate short-circuits on AlreadyDone before
+// it ever reaches its recovery branch, so on a migrated project that flag
+// is silently inert — and the route the AlreadyDone message names (restore
+// the ledger, delete the store, re-migrate) throws away every close,
+// discard and repair edit made since. For a project that has committed its
+// store, this is the only path that does not cost work.
+//
+// TWO DIFFERENCES FROM THE MIGRATION'S RECOVERY, both consequences of
+// running later:
+//
+//   - It de-duplicates against what is ON DISK (open records and existing
+//     tombstones), not against a fresh parse of the ledger. Those are the
+//     same set immediately after a migration and diverge afterwards, and
+//     the store is the one that stays true.
+//   - The path it reads is normally a STUB by now. That is fine and is the
+//     point: git history is read through the path, not out of the file
+//     sitting at it, so every revision that held the real ledger is still
+//     reachable.
+//
+// Recovery only ever writes to closed/. It cannot put anything into the
+// open working set, which is what makes it safe to run more than once —
+// a second run recovers nothing, because the first run's tombstones are
+// now part of the set it de-duplicates against.
+func (s *Store) Recover(ctx context.Context, opts RecoverOptions) (*RecoverResult, error) {
+	res := &RecoverResult{From: opts.From, To: s.ClosedDir(), DryRun: opts.DryRun}
+	if opts.From == "" {
+		return nil, errors.New("no ledger path to read history through")
+	}
+	if _, err := os.Stat(opts.From); err != nil {
+		return nil, fmt.Errorf("read %s: %w", opts.From, err)
+	}
+
+	loaded, err := s.Load(LoadOptions{IncludeClosed: true})
+	if err != nil {
+		return nil, err
+	}
+	res.Existing = len(loaded.Records)
+
+	recovered, warnings := s.recoverDeleted(ctx, opts.From, loaded.Records)
+	res.Warnings = append(res.Warnings, warnings...)
+	res.Recovered = len(recovered)
+	res.Records = recovered
+	if opts.DryRun {
+		return res, nil
+	}
+	for i := range recovered {
+		path, writeErr := s.writeClosed(recovered[i])
+		if writeErr != nil {
+			return nil, writeErr
+		}
+		res.Paths = append(res.Paths, path)
+	}
+	if len(recovered) > 0 {
+		if err := s.RebuildIndex(); err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
 }

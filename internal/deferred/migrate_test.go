@@ -793,3 +793,153 @@ func TestMigrate_HeadingsThatYAMLMustEscape(t *testing.T) {
 		})
 	}
 }
+
+// TestRecover_ReachesHistoryAfterAMigration is A2's fix.
+//
+// Migrate short-circuits on AlreadyDone before its recovery branch, so on
+// a migrated project --recover-deleted is silently inert: exit 0, no
+// warning, nothing recovered, and the evicted records unreachable through
+// any CLI path. One project lost 180 that way, because the automatic path
+// (`ape framework update`) ran the migration without recovery.
+func TestRecover_ReachesHistoryAfterAMigration(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	git := func(args ...string) {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		require.NoError(t, cmd.Run(), "git %v", args)
+	}
+	git("init", "-q")
+
+	legacy := filepath.Join(dir, "deferred-work.md")
+	require.NoError(t, os.WriteFile(legacy, []byte(
+		"## Deferred from: story review of 1-1 (2026-01-01)\n\n"+
+			"- [Defer] Survivor [a.go:1]\n"+
+			"- [Defer] Evicted long ago [b.go:2]\n"), 0o644))
+	git("add", ".")
+	git("commit", "-qm", "both")
+	require.NoError(t, os.WriteFile(legacy, []byte(
+		"## Deferred from: story review of 1-1 (2026-01-01)\n\n"+
+			"- [Defer] Survivor [a.go:1]\n"), 0o644))
+	git("add", ".")
+	git("commit", "-qm", "evict one")
+
+	s := New(filepath.Join(dir, "deferred"))
+
+	// Migrate WITHOUT recovery — the path `ape framework update` used to take.
+	res, err := s.Migrate(ctx, MigrateOptions{From: legacy})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.RecordsIn)
+	require.Zero(t, res.Recovered)
+	git("add", "-A")
+	git("commit", "-qm", "migrate")
+
+	// Migrate can no longer help: the flag is accepted and ignored.
+	blocked, err := s.Migrate(ctx, MigrateOptions{From: legacy, RecoverDeleted: true})
+	require.NoError(t, err)
+	require.True(t, blocked.AlreadyDone)
+	require.True(t, blocked.RecoverRequested, "the result has to carry that it was asked for")
+	require.Zero(t, blocked.Recovered)
+
+	// Recover does, reading history THROUGH the stub now at that path.
+	rec, err := s.Recover(ctx, RecoverOptions{From: legacy})
+	require.NoError(t, err)
+	require.Equal(t, 1, rec.Recovered)
+	require.Equal(t, 1, rec.Existing, "it de-duplicated against the store, not a fresh parse")
+
+	all, err := s.Load(LoadOptions{IncludeClosed: true})
+	require.NoError(t, err)
+	require.Len(t, all.Records, 2)
+	open, err := s.Load(LoadOptions{})
+	require.NoError(t, err)
+	require.Len(t, open.Records, 1, "recovery never touches the open working set")
+
+	// Safe to re-run: the tombstone is now part of what it de-duplicates against.
+	again, err := s.Recover(ctx, RecoverOptions{From: legacy})
+	require.NoError(t, err)
+	require.Zero(t, again.Recovered)
+	require.Equal(t, 2, again.Existing)
+}
+
+// TestDiscard_IsNotClose: the two record incompatible claims, and using
+// close for a discard cost 20 records their metadata AND their bodies.
+func TestDiscard_IsNotClose(t *testing.T) {
+	dir, legacy := writeLegacy(t, legacyLedger)
+	s := New(filepath.Join(dir, "deferred"))
+	_, err := s.Migrate(context.Background(), MigrateOptions{From: legacy})
+	require.NoError(t, err)
+
+	loaded, err := s.Load(LoadOptions{})
+	require.NoError(t, err)
+	require.NotEmpty(t, loaded.Records)
+	target := loaded.Records[0]
+	bodyBefore := target.Body
+
+	got, err := s.Discard(target.ID, "superseded by the 91-2 rewrite", "pkg/a.go:12 is gone at HEAD", "2026-08-30")
+	require.NoError(t, err)
+	require.Equal(t, StatusDiscarded, got.Status)
+	require.Equal(t, "superseded by the 91-2 rewrite", got.DiscardReason)
+	require.Equal(t, "pkg/a.go:12 is gone at HEAD", got.DiscardEvidence)
+	require.Empty(t, got.ResolvedBy, "a discard must never claim work was done")
+
+	// The body is untouched — the property close breaks.
+	require.Equal(t, bodyBefore, got.Body)
+	require.NotContains(t, got.Body, dischargeMarkerPrefix)
+	require.Contains(t, got.Path, ClosedDirName)
+
+	// It leaves the working set, is visible under both status filters, and
+	// verify stays clean.
+	open, err := s.Load(LoadOptions{})
+	require.NoError(t, err)
+	for i := range open.Records {
+		require.NotEqual(t, target.ID, open.Records[i].ID)
+	}
+	all, err := s.Load(LoadOptions{IncludeClosed: true})
+	require.NoError(t, err)
+	require.Len(t, Select(all.Records, Filter{Status: StatusDiscarded}), 1)
+	require.Len(t, Select(all.Records, Filter{Status: StatusClosed}), 1,
+		"`closed` matches discarded too — both have left the working set")
+
+	// verify raises no SCHEMA finding: a non-open record needs resolved_by
+	// or discard_reason, and the discard supplied the second. (The fixture's
+	// free-form candidate is unrelated and expected.)
+	report, err := s.Verify(VerifyOptions{})
+	require.NoError(t, err)
+	require.Zerof(t, report.Summary.ByCheck[CheckSchema],
+		"a discarded record must satisfy the schema check: %+v", report.Findings)
+
+	// Idempotent, and it refuses to overwrite a genuine close.
+	twice, err := s.Discard(target.ID, "same reason", "", "2026-08-30")
+	require.NoError(t, err)
+	require.Equal(t, StatusDiscarded, twice.Status)
+
+	_, err = s.Discard("DW-nope", "reason", "", "2026-08-30")
+	require.ErrorIs(t, err, ErrNotFound)
+
+	other := loaded.Records[1]
+	_, err = s.Close(other.ID, "54-2", "2026-08-30")
+	require.NoError(t, err)
+	_, err = s.Discard(other.ID, "changed my mind", "", "2026-08-30")
+	require.Error(t, err, "discarding a record already closed as done would overwrite that claim")
+	require.Contains(t, err.Error(), "already closed")
+}
+
+// TestDiscard_RequiresAReason: an unexplained discard cannot be reviewed.
+func TestDiscard_RequiresAReason(t *testing.T) {
+	dir, legacy := writeLegacy(t, legacyLedger)
+	s := New(filepath.Join(dir, "deferred"))
+	_, err := s.Migrate(context.Background(), MigrateOptions{From: legacy})
+	require.NoError(t, err)
+	loaded, err := s.Load(LoadOptions{})
+	require.NoError(t, err)
+
+	_, err = s.Discard(loaded.Records[0].ID, "   ", "", "2026-08-30")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "reason")
+}

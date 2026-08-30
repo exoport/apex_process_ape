@@ -1,5 +1,80 @@
 # CHANGELOG
 
+## v0.0.62 (2026-08-30)
+
+Two discoverability defects from the `axon_tenax_engine` second migration.
+Neither is a parser bug — the `v0.0.61` fixes held in the field, with all
+118 record files reproducing byte-identical on a fresh run. Both are a
+correct capability a caller could not find, and each cost real data.
+
+- **feat: history recovery is ON by default, and reachable afterwards via
+  `ape deferred recover`.** The legacy ledger's only eviction mechanism was
+  deletion, so its git history holds records that exist nowhere else. The
+  migration could mine them — behind an opt-in flag that the automatic path
+  never passed.
+  - **`ape framework update` was the lossy path.** It called `Migrate` with
+    no `RecoverDeleted`, and that is how most projects migrate, because
+    `framework update` runs the migration for them. The reporting project's
+    ledger history holds 226 removed bullets across 178 commits, of which
+    the flag recovers **180 records**.
+  - **The flag was not merely opt-in, it was single-use.** `Migrate` returns
+    `AlreadyDone` before reaching the recovery branch, so afterwards
+    `--recover-deleted` exits 0 having done nothing, with no warning —
+    indistinguishable from a run that found nothing. The one state means the
+    history is still recoverable and the other does not.
+  - **The default moved because the choice is not symmetric.** Recovery only
+    ever writes tombstones into `closed/`, so it cannot touch the open
+    working set; the cost is one `git show` per revision; the cost of
+    skipping it is permanent. Opting in cost seconds. Missing it cost 180
+    records, silently. `--no-recover-deleted` opts out and says the choice
+    is one-way; `--recover-deleted` is still accepted, because the
+    framework preflight already tells operators to pass it.
+  - **`ape deferred recover`** runs the same mining against an existing
+    store. It reads history THROUGH the stub now sitting at the ledger path
+    — the stub is just another revision of that path — and de-duplicates
+    against what is on disk rather than a fresh parse, so it is safe to
+    re-run. It is the only route that does not cost every `close`,
+    `discard` and repair edit made since the migration, which is what the
+    documented "restore the ledger, delete the store, re-migrate" route
+    throws away.
+  - Recovery now reports its outcome **even at zero**. A silent step is how
+    an operator concludes there was never any history to recover.
+
+- **feat: `ape deferred discard`, and `discarded` named wherever the status
+  vocabulary appears.** The store has modelled three statuses since the
+  beginning — `StatusDiscarded`, `discard_reason`, `discard_evidence`,
+  `verify` accepting either `resolved_by` or `discard_reason`,
+  `--status closed` matching both, and `--status discarded` already working.
+  The only thing a running model could read said `open|closed|all`.
+  - **A capability with no command reads as a capability that is not real.**
+    The discard was the one write in the whole store with nothing behind it,
+    so the judgment phase took the flag help at face value, chose
+    `ape deferred close` for its 20 discards, and stated the deviation
+    rather than hiding it.
+  - **It cost two things, and the second is the worse one.** Twenty records
+    now assert `resolved_by`/`resolved_at` — the work was done — for
+    findings whose whole point was that the work was never needed. And
+    `close` appends a discharge marker to the BODY, so those twenty bodies
+    stopped being byte-identical to what the migration wrote: the one
+    property the migration's entire verification design exists to protect,
+    broken by the workaround that looked most sanctioned.
+  - **Nothing catches it afterwards.** `verify`'s schema check accepts
+    `resolved_by` OR `discard_reason`, so a discard written as a close is
+    indistinguishable from a real close by any check ape has.
+  - `discard` records the two fields, moves the record to `closed/`, leaves
+    the body untouched, requires `--reason` (an unexplained discard cannot
+    be reviewed later), and refuses a record already closed as done rather
+    than overwriting that claim.
+
+- **test: `source_heading` is asserted against the true enclosing heading.**
+  The field harness's own check, and the cheap one that catches the whole
+  inherited-section-context class: locate each record's body back to its
+  ledger line, walk backwards to the nearest `##`, and require
+  `source_heading` to equal it. It recomputes from the SOURCE rather than
+  asking the parser what it thinks, so a parser that reintroduces stale
+  context agrees with its own bookkeeping and disagrees with this. Holds
+  118/118 on the real corpus.
+
 ## v0.0.61 (2026-08-30)
 
 **`ape deferred migrate` was wrong in six ways at once, and reported clean
