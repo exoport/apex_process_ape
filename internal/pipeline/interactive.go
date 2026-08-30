@@ -349,6 +349,8 @@ func stepTelemetryToResultEvent(t *StepTelemetry) *resultEvent {
 		ModelUsage:    t.ModelUsage,
 		Sessions:      t.Sessions,
 		TelemetryNote: t.Note,
+		Contract:      t.Contract,
+		ContextWindow: t.ContextWindow,
 	}
 	ev.Usage.InputTokens = t.TokensInput
 	ev.Usage.OutputTokens = t.TokensOutput

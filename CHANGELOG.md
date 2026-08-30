@@ -1,5 +1,160 @@
 # CHANGELOG
 
+## v0.0.60 (2026-08-29)
+
+Four independent items from two framework-side change requests
+(`ape-contract-telemetry-and-run-hygiene` and
+`ape-context-window-in-the-price-table`, both 2026-08-29). They touch
+nothing of each other and nothing of the completion gates, exit codes, or
+the PTY contract.
+
+- **feat: the price table carries a context window, so an occupancy ratio
+  has a single correctable denominator.** `prices.yaml` rows gain an
+  optional `context_window:`, and it reaches the manifest on every step.
+  The eval was maintaining a second copy of this table, and the first copy
+  had already gone stale once — a 200k sonnet entry outlived a 1M window and
+  inflated every affected step's occupancy fivefold.
+  - **A maintained value, never a measurement.** Claude Code reports the
+    real per-model window only on the stream-json result event; ape is
+    PTY-only by design and does not use that surface, so the reported window
+    cannot reach ape on any path ape drives. That is a consequence of the
+    PTY invariant, not a deferred feature, and nothing here is labelled as
+    reported.
+  - **Values from the Models API (`GET /v1/models` → `max_input_tokens`),
+    curated by hand and locked by a test.** Everything from Opus 4.6 and
+    Sonnet 4.6 onward is **1M** at standard pricing; 200000 is the pre-4.6
+    window. The first draft of these values put 200000 on the whole Opus
+    family — wrong by 5x, on the most-used models, in the direction that
+    inflates every ratio computed from them. What guards against a repeat is
+    `TestContextWindow_GenerationBoundary`, which asserts the split model by
+    model: hermetic, in `make test`, and it makes changing a window a
+    deliberate edit to a test rather than a quiet edit to data.
+    - A live gate against the Models API was built and then **removed**. It
+      needed an API key; this project's machines authenticate through Claude
+      Code, so it skipped everywhere it was meant to run — and a gate that
+      always skips reads as a pass, which is the failure mode `check-hooks`
+      and `check-prices` are written to avoid. Better no gate than a
+      decorative one.
+  - **Both manifest window fields honour the `[1m]` suffix.** The per-model
+    `model_usage[].context_window` is resolved from the RAW model spelling
+    the transcript recorded, before normalization folds a model and its
+    context variant into one pricing bucket. The fold is right for cost and
+    would be wrong for context; ape now keeps both. A bucket holding turns
+    of two different sizes — a step's sub-agents running a different variant
+    than the step was spawned with — records no window rather than the side
+    that is wrong by 5x. Found by the eval, which measured that Claude Code
+    keeps `[1m]` in the `modelUsage` key with the base name in
+    `canonicalModel`; ape's own transcripts carry it in the assistant
+    `model` field too, so it was ape discarding the distinction, not the
+    data lacking it.
+  - **The `[1m]` suffix wins, and had to.** A suffixed and unsuffixed model
+    are one model at one rate — `NormalizeModel` strips the suffix on
+    purpose so both attribute to a single pricing bucket — but they can be
+    different amounts of context. Window resolution reads the suffix
+    *before* normalizing. The gap has narrowed: `opus[1m]` was the motivating
+    case when the Opus base was 200K, and now that 1M is the base the two
+    agree. It still bites on the models that kept a 200K default with a 1M
+    opt-in — `claude-sonnet-4-5[1m]` against a 200K base — which is what the
+    test asserts on, because a test that cannot fail is worse than none.
+    Consequence worth knowing: `model_usage[].context_window` is keyed by
+    the attribution id and so always reports the base model, while the new
+    `steps[].context_window` is resolved from the effective `--model` and
+    honours the suffix. On an `opus[1m]` step the two differ by 5×, and the
+    step-level one is what an occupancy ratio needs.
+  - **Unknown stays unknown, with no family fallback.** A model with no
+    window gets no field — not a zero, not a default. The schema supports a
+    family window and the shipped table deliberately has none: a family
+    price that is off lands in the right order of magnitude and is flagged
+    as an estimate, whereas a family window that is off yields a
+    precise-looking ratio wrong by the ratio of the windows, and the guess
+    fails toward the *smaller* one — pre-loading the exact bug this retires.
+  - A window travels through `ape costs update --from` like a rate, so a
+    correction ships without a binary. A price-only override does not erase
+    a built-in window.
+  - `ape costs coverage` gains a CONTEXT column and names any observed model
+    with no known window. Deliberately **not** folded into the report's
+    `OK()`: `ape costs coverage --strict` is `make check-prices` and
+    `ape doctor --strict` is scripted in CI, so gating on a missing window
+    would have turned a reporting addition into a gate change. Verified:
+    `make check-prices` still exits 0.
+
+The three from the first request:
+
+- **feat: the terminal-contract verdict is recorded instead of discarded.**
+  Gate C already loaded the framework's per-skill pattern table and matched
+  every step's closing message against it — and then printed the verdict to
+  stderr and dropped it. The comment on the check said warn-only telemetry
+  would establish a base rate before the exit-code path landed; that was not
+  true of a number nothing recorded. Each step's manifest record now carries
+  `contract: present | missing | no-transcript`, and the run's
+  `checkpoints.jsonl` gets a matching `contract` row with the diagnostic.
+  - **Omitted for a skill the table does not enrol**, rather than written as
+    `not-enrolled`. The check short-circuits an absent table to the same
+    status, so recording it would mean a project whose framework ships no
+    table writes nothing while a project that enrolled one unrelated skill
+    writes `not-enrolled` for everything else it runs — the same step
+    carrying two different values for the same reason. Omitting gives the
+    field one invariant: present exactly when the skill was enrolled.
+  - **`missing` means the closing text did not match, NOT that the skill
+    failed to emit.** The check reads the MAIN session's last assistant
+    message, and that is a relay whenever anything below it did the work —
+    which for the batch skills this table enrols is the normal case, under
+    `--agent` and without it. Treating the two as one would blame a
+    framework-side quality problem for a relay artifact, which is the exact
+    decision warn-only exists to defer. The caveat is on the field, not just
+    in the release note.
+  - Additive under `schema_version: 2` — verified rather than assumed, so
+    nobody bumps the version defensively: the eval builds its step record
+    from explicit key lookups and drops what it does not name, and nothing
+    in ape decodes a manifest with `KnownFields(true)`. A version bump is
+    what would break the eval's `[1,2]` reader range; a new field is not.
+
+- **feat: `ape doctor` reports whether ape's run subtree is gitignored.**
+  New `output.ape_ignored` row. Everything ape writes lands under the
+  resolved `{output_folder}/ape/` and is rewritten on every run; untracked
+  it waits in `git status` for a `git add -A`, and tracked it dirties the
+  tree on every run and fails the next `ape pipeline`'s dirty-tree
+  pre-flight. The framework already requires the output folder to be
+  gitignored and nothing installed the rule, so a project could be years
+  into violating it with no line of output saying so.
+  - **Reports, never writes**, matching `sprint.lock_ignored` — `.gitignore`
+    is the operator's file. An earlier draft had `ape framework update`
+    append the line; it was dropped for two reasons that only showed up on
+    inspection. An ignore line does not untrack anything, so on the projects
+    most in need of the fix it would have written a line, changed nothing,
+    and reported success. And `.gitignore` is captured into the eval's
+    fixture overlays, whose `_output` stripper matches the literal line
+    only — so the write would have propagated into 20+ committed fixtures.
+  - Separates **COMMITTED** from merely unignored and offers
+    `git rm -r --cached` for the first, because that is the case where the
+    obvious advice cannot work on its own.
+  - Resolves `output_folder` rather than assuming `_output`, and reports
+    nothing when it points outside the repository.
+  - `dirtyTreeGate`'s error text hardcoded `_output/` and now names the
+    resolved path — on a renamed project it was pointing at a directory that
+    does not exist, at the one moment the operator needed the right one.
+
+- **feat: `SessionStart` and `PreCompact` are delivered into
+  `hook-events.jsonl`.** Two entries in the inline `--settings` hook map,
+  both async. Recorded and read by nothing: neither carries a field a
+  completion gate depends on, which is what lets both be async and what
+  leaves `internal/hookdrift` untouched — it watches gated FIELDS keyed to
+  the event carrying them, so an event with no gated field has no drift to
+  detect and adds no observation. That matters beyond tidiness:
+  `make check-hooks` runs `ape doctor --only hooks.contract_drift --strict`,
+  where a WARN is exit 1, so a fourth observation added by reflex would
+  break a Make gate rather than print a stray line.
+  - **`SessionStart` fires roughly once per STEP, not once per spawn.** Its
+    `source` is one of `startup` / `resume` / `clear` / `compact`, and the
+    runner sends `/clear` between steps within a stage. Read `source` before
+    counting these as sessions. Those rows also carry an empty `step`,
+    because `/clear` is sent before the next step's contract is registered.
+    `PreCompact` fires mid-step and attributes normally.
+  - The settings blob went from 876 to 1164 bytes, so the `<1 KB` canary
+    moves to 2 KB. It was never an argv limit — that is 128 KB on Linux —
+    but each registered event costs a hook subprocess per occurrence, and
+    the size is the cheap proxy for the cost that matters.
+
 ## v0.0.59 (2026-08-29)
 
 - **fix: `ape` shuts down on a signal instead of dying where it stands.** Ctrl-C

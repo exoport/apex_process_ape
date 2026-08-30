@@ -45,6 +45,12 @@ type ObservedModel struct {
 	Turns int `json:"turns" yaml:"turns"`
 	// Source is how this binary resolves its price.
 	Source PriceSource `json:"price_source" yaml:"price_source"`
+	// Window is the model's context window in tokens, 0 when this binary
+	// has none — UNKNOWN, never a default. WindowSource says how it was
+	// reached. Note the window is resolved from the ATTRIBUTION id, which
+	// has any `[1m]` suffix stripped, so this is always the base model's.
+	Window       int          `json:"context_window,omitempty" yaml:"context_window,omitempty"`
+	WindowSource WindowSource `json:"window_source"            yaml:"window_source"`
 	// BaseInput / Output are the resolved rate, zero when unpriced.
 	BaseInput float64 `json:"base_input" yaml:"base_input"`
 	Output    float64 `json:"output"     yaml:"output"`
@@ -116,12 +122,51 @@ func (r CoverageReport) Observed() bool { return r.TranscriptsScanned > 0 }
 // first (unpriced before estimated), each ordered by turn count.
 func (r CoverageReport) Gaps() []ObservedModel {
 	var out []ObservedModel
-	for _, m := range r.Models {
-		if !m.Source.Exact() {
-			out = append(out, m)
+	for i := range r.Models { // indexed: ObservedModel is past the copy threshold
+		if !r.Models[i].Source.Exact() {
+			out = append(out, r.Models[i])
 		}
 	}
 	return out
+}
+
+// WindowGaps returns the observed models this binary has no context window
+// for, worst first by turn count.
+//
+// Deliberately NOT folded into OK(). `ape costs coverage --strict` is the
+// release gate (`make check-prices`) and `ape doctor --strict` is scripted
+// in CI, so making a missing window fail either one would turn a reporting
+// addition into a gate change — and the request that asked for this window
+// table was explicit that nothing gates on it. The gap is reported in
+// Summary() at whatever status the price verdict already produced, so it is
+// visible without being load-bearing.
+//
+// Sentinel ids are excluded: `<synthetic>` is Claude Code's marker for a
+// locally generated turn, not a model, and has no window to be missing.
+func (r CoverageReport) WindowGaps() []ObservedModel {
+	var out []ObservedModel
+	for i := range r.Models { // indexed: ObservedModel is past the copy threshold
+		if IsSyntheticModel(r.Models[i].Model) || r.Models[i].WindowSource.Known() {
+			continue
+		}
+		out = append(out, r.Models[i])
+	}
+	return out
+}
+
+// WindowGapSummary renders the missing-window clause, or "" when every
+// observed model has one.
+func (r CoverageReport) WindowGapSummary() string {
+	gaps := r.WindowGaps()
+	if len(gaps) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(gaps))
+	for i := range gaps {
+		names = append(names, fmt.Sprintf("%s (%d turns)", gaps[i].Model, gaps[i].Turns))
+	}
+	return "no context window for " + strings.Join(names, ", ") +
+		" — an occupancy ratio over these steps has no denominator"
 }
 
 // Summary renders a one-line verdict for a human or a CI log.
@@ -129,13 +174,17 @@ func (r CoverageReport) Summary() string {
 	if !r.Observed() {
 		return "no Claude Code transcripts in the window — coverage not verified"
 	}
-	if r.OK() {
-		return fmt.Sprintf("all %d observed model(s) exactly priced (%d transcript(s), table updated %s)",
-			r.ExactModels, r.TranscriptsScanned, r.TableUpdated)
+	windows := ""
+	if s := r.WindowGapSummary(); s != "" {
+		windows = "; " + s
 	}
-	return fmt.Sprintf("%d model(s) unpriced, %d estimated, %d exact, %d alias drift(s) (%d transcript(s), table updated %s)",
+	if r.OK() {
+		return fmt.Sprintf("all %d observed model(s) exactly priced (%d transcript(s), table updated %s)%s",
+			r.ExactModels, r.TranscriptsScanned, r.TableUpdated, windows)
+	}
+	return fmt.Sprintf("%d model(s) unpriced, %d estimated, %d exact, %d alias drift(s) (%d transcript(s), table updated %s)%s",
 		r.UnpricedModels, r.EstimatedModels, r.ExactModels, len(r.AliasDrifts),
-		r.TranscriptsScanned, r.TableUpdated)
+		r.TranscriptsScanned, r.TableUpdated, windows)
 }
 
 // ObserveModels sweeps the local Claude Code transcript tree and reports
@@ -193,10 +242,13 @@ func ObserveModels(home string, since time.Time) (CoverageReport, error) {
 
 	for model, a := range seen {
 		price, src := LookupSourceAt(model, a.lastSeen)
+		window, wsrc := ContextWindow(model)
 		om := ObservedModel{
 			Model:         model,
 			Turns:         a.turns,
 			Source:        src,
+			Window:        window,
+			WindowSource:  wsrc,
 			BaseInput:     price.BaseInput,
 			Output:        price.Output,
 			LastSeen:      a.lastSeen,
@@ -236,7 +288,8 @@ func ObserveModels(home string, since time.Time) (CoverageReport, error) {
 	// not depend on iteration order; the zero-timestamp case falls back to
 	// the first version seen rather than reporting none.
 	var newest time.Time
-	for _, m := range rep.Models {
+	for i := range rep.Models { // indexed: ObservedModel is past the copy threshold
+		m := &rep.Models[i]
 		if m.ClaudeVersion == "" {
 			continue
 		}
@@ -265,9 +318,9 @@ func ObserveModels(home string, since time.Time) (CoverageReport, error) {
 // answer; a guess is not.
 func detectAliasDrift(observed []ObservedModel) []AliasDrift {
 	byFamily := map[string][]string{}
-	for _, m := range observed {
-		if fam := ModelFamily(m.Model); fam != "" {
-			byFamily[fam] = append(byFamily[fam], m.Model)
+	for i := range observed { // indexed: ObservedModel is past the copy threshold
+		if fam := ModelFamily(observed[i].Model); fam != "" {
+			byFamily[fam] = append(byFamily[fam], observed[i].Model)
 		}
 	}
 	drifts := make([]AliasDrift, 0, len(modelAliases))

@@ -35,6 +35,16 @@ type TurnRecord struct {
 	// contributed $0 because no rate was found — NOT because it was free.
 	// Never read CostUSD without it.
 	PriceSource PriceSource
+	// ContextWindow is the turn's context window in tokens, resolved from
+	// the RAW model spelling the transcript recorded — before Model above
+	// had its `[1m]` suffix normalized away. 0 means unknown.
+	//
+	// It lives on the turn rather than being re-derived from Model because
+	// Model is the pricing key and has deliberately lost the distinction:
+	// a base model and its 1M variant fold to one id at one rate, and no
+	// later reader can tell them apart. This is the only place that still
+	// can.
+	ContextWindow int
 }
 
 // ScanResult is the full outcome of scanning one session transcript:
@@ -46,6 +56,20 @@ type ScanResult struct {
 	Totals    Totals
 	ByModel   map[string]Totals
 	LastModel string
+
+	// ModelWindows is each ByModel bucket's context window in tokens,
+	// resolved from the RAW model spelling before normalization. Same keys
+	// as ByModel; 0 means unknown and is never a window of zero.
+	//
+	// It exists because normalization and window resolution want different
+	// halves of the same id. `claude-sonnet-4-5` and
+	// `claude-sonnet-4-5[1m]` are one model at one rate, so ByModel folds
+	// them into a single PRICING bucket on purpose — but they are 200K and
+	// 1M of context. Claude Code writes the suffix in the transcript's
+	// `model` field; resolving the window here, off the raw spelling,
+	// is what keeps that 5x distinction instead of discarding it with the
+	// suffix. See noteModelWindow for the both-spellings-in-one-bucket rule.
+	ModelWindows map[string]int
 
 	// PLAN-10 D1 additions (all additive — existing callers use the three
 	// fields above unchanged).
@@ -109,6 +133,40 @@ func mergeModelCounts(dst, src map[string]int) {
 	}
 }
 
+// noteModelWindow records a bucket's context window, collapsing to
+// UNKNOWN when one bucket holds turns of two different sizes.
+//
+// One normalized key can legitimately cover both a base model and its
+// context variant — a step's sub-agents need not run the spelling the step
+// was spawned with. No single number is then right for the bucket, and the
+// nearest wrong one is off by the ratio of the two windows, which is the
+// error this whole field exists to stop. So a disagreement resolves to 0,
+// which every consumer already renders as "could not look".
+//
+// Absent (`ok == false`) means not yet seen; 0 means seen and unknowable.
+// Once 0, always 0 — a later confident value cannot un-conflict a bucket.
+func noteModelWindow(dst map[string]int, model string, window int) {
+	if dst == nil {
+		return
+	}
+	if prev, seen := dst[model]; seen {
+		if prev != window {
+			dst[model] = 0
+		}
+		return
+	}
+	dst[model] = window
+}
+
+// MergeModelWindows folds src into dst under the same rule. Exported for
+// sessiondriver, which merges a step's sub-agent sessions into the step
+// aggregate and must apply the same collapse-on-disagreement.
+func MergeModelWindows(dst, src map[string]int) {
+	for model, w := range src {
+		noteModelWindow(dst, model, w)
+	}
+}
+
 // ScanSession reads a Claude Code session JSONL file once and returns
 // the aggregated cost / token totals plus a per-model breakdown.
 //
@@ -129,6 +187,7 @@ func ScanSession(path string) (ScanResult, error) {
 		// that folds this result cannot hit a nil-map write.
 		return ScanResult{
 			ByModel:         map[string]Totals{},
+			ModelWindows:    map[string]int{},
 			UnpricedModels:  map[string]int{},
 			EstimatedModels: map[string]int{},
 		}, err
@@ -158,20 +217,24 @@ func scanTurns(r io.Reader) ([]TurnRecord, error) {
 			continue
 		}
 		model := NormalizeModel(al.Message.Model)
+		// From the RAW spelling, before the suffix is gone: NormalizeModel
+		// strips `[1m]` so pricing folds, and the window must not.
+		rawWindow, _ := ContextWindow(al.Message.Model)
 		ts := parseTurnTime(al.Timestamp)
 		price, src := LookupSourceAt(model, ts)
 		tr := TurnRecord{
-			Timestamp:   ts,
-			Model:       model,
-			SessionID:   al.SessionID,
-			MessageID:   al.Message.ID,
-			RequestID:   al.RequestID,
-			StopReason:  al.Message.StopReason,
-			Sidechain:   al.IsSidechain,
-			Version:     al.Version,
-			Usage:       al.Message.Usage,
-			CostUSD:     TurnCost(al.Message.Usage, price),
-			PriceSource: src,
+			Timestamp:     ts,
+			Model:         model,
+			ContextWindow: rawWindow,
+			SessionID:     al.SessionID,
+			MessageID:     al.Message.ID,
+			RequestID:     al.RequestID,
+			StopReason:    al.Message.StopReason,
+			Sidechain:     al.IsSidechain,
+			Version:       al.Version,
+			Usage:         al.Message.Usage,
+			CostUSD:       TurnCost(al.Message.Usage, price),
+			PriceSource:   src,
 		}
 		if al.Message.ID == "" {
 			turns = append(turns, tr)
@@ -201,6 +264,7 @@ func scanTurns(r io.Reader) ([]TurnRecord, error) {
 func aggregateTurns(turns []TurnRecord) ScanResult {
 	res := ScanResult{
 		ByModel:         map[string]Totals{},
+		ModelWindows:    map[string]int{},
 		Turns:           turns,
 		UnpricedModels:  map[string]int{},
 		EstimatedModels: map[string]int{},
@@ -219,6 +283,7 @@ func aggregateTurns(turns []TurnRecord) ScanResult {
 			res.EstimatedModels[tr.Model]++
 		}
 		res.LastModel = tr.Model
+		noteModelWindow(res.ModelWindows, tr.Model, tr.ContextWindow)
 		res.Totals.Add(tr.Usage, price)
 		mt := res.ByModel[tr.Model]
 		mt.Add(tr.Usage, price)
@@ -261,6 +326,7 @@ func parseTurnTime(s string) time.Time {
 func ScanPaths(paths []string) ScanResult {
 	merged := ScanResult{
 		ByModel:         map[string]Totals{},
+		ModelWindows:    map[string]int{},
 		UnpricedModels:  map[string]int{},
 		EstimatedModels: map[string]int{},
 	}
@@ -271,6 +337,7 @@ func ScanPaths(paths []string) ScanResult {
 		}
 		merged.Totals = sumTotals(merged.Totals, res.Totals)
 		merged.ByModel = sumPerModel(merged.ByModel, res.ByModel)
+		MergeModelWindows(merged.ModelWindows, res.ModelWindows)
 		merged.Turns = append(merged.Turns, res.Turns...)
 		mergeModelCounts(merged.UnpricedModels, res.UnpricedModels)
 		mergeModelCounts(merged.EstimatedModels, res.EstimatedModels)

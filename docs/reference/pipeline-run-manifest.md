@@ -35,6 +35,8 @@ Since v2, additional fields have been added **without bumping the schema version
 - per-step `sessions[]` — per-claude-session usage: the step's main REPL session plus any sub-agent (Agent tool) sessions observed via `SubagentStart` / `SubagentStop`.
 - `claude_version` — the resolved `claude --version` at run start (best-effort).
 - per-step `telemetry_note` — a diagnosability breadcrumb explaining why a numeric field is zero or approximate. Two causes: the transcript was unavailable / had no complete assistant turn (everything zero), or a model had no price in the table (tokens and turns correct, `cost_usd` a lower bound). More than one cause is joined with `; `.
+- per-step `context_window` and per-`model_usage`-entry `context_window` (ape v0.0.60+) — the model's usable context in tokens, from ape's maintained table. **Omitted when unknown**, never defaulted. See [reading the `context_window` fields](#reading-the-context_window-fields) — there are two of them and they can legitimately disagree.
+- per-step `contract` (ape v0.0.60+) — the terminal-contract verdict: `present`, `missing`, or `no-transcript`. **Omitted** when the step's skill declares no contract in the framework's `_apex/terminal-contracts.csv`, so the field is present exactly when the skill was enrolled. See [reading the `contract` field](#reading-the-contract-field) before using it as a quality metric — it measures TEXT, not work.
 
 Forward-compatible: v2 readers should accept v1 manifests (the new fields are optional `omitempty`) and treat unrecognized additive fields as opaque.
 
@@ -113,6 +115,8 @@ stages:
         commit_message: "ape:design/prd/apex-create-prd"
         commit_status: committed
         commit_error: ""
+        contract: present            # omitted when the skill is not enrolled
+        context_window: 1000000      # the window of the model THIS STEP was spawned with
         model_usage:                 # this step's per-model breakdown (additive)
           claude-opus-4-8:
             cost_usd: 1.42
@@ -156,6 +160,64 @@ Cost and tokens can also disagree in the other direction. Pricing uses a table c
 
 - `ape costs run <run-id>` — reads that run's `manifest.yaml` and prints its totals plus per-model breakdown.
 - `ape costs chat <chat-id>` — reads a chat's `session.yaml`.
+
+### Reading the `context_window` fields
+
+`peak_tokens / context_window` is only as good as the divisor, so both the number and its absence are contracts.
+
+**This is a maintained table, not a measurement of a run.** Claude Code reports the real per-model window on the stream-json result event's `modelUsage[].contextWindow`. ape is [PTY-only by design](../explanation/why-pty-only.md) and does not use that surface, so the reported window cannot reach ape on any path ape drives — not as a deferred feature, but as a consequence of the PTY invariant. Do not label these fields as reported. What they give you is a single, correctable source for the divisor instead of a second hand-maintained copy per consumer.
+
+The values come from the Models API — `GET /v1/models/{id}` returns `max_input_tokens`, which *is* the context window (the object has no `context_window` field) — but they are curated by hand from it, the same standing as ape's rates. Everything from Opus 4.6 and Sonnet 4.6 onward is 1M at standard pricing; 200000 is the pre-4.6 window. Treat a window as correct-as-of-the-release, not as live truth: if a model shipped after your `ape` build, its window may be absent (reported as absent, never defaulted) or stale.
+
+**There are two fields, and both honour a `[1m]` suffix:**
+
+| field                                  | resolved from                                        |
+| -------------------------------------- | ---------------------------------------------------- |
+| `steps[].context_window`               | the step's effective `--model` string                |
+| `steps[].model_usage[].context_window` | the raw model spelling in the transcript, per bucket  |
+
+A suffixed and unsuffixed model are the same model at the same price, so ape folds them into one `model_usage` bucket keyed by the base id — correct for cost, and it would be wrong for context. Since v0.0.60 the bucket's window is read from the raw spelling *before* that fold, so a `claude-sonnet-4-5[1m]` step reports 1000000 in both fields rather than 200000 in one of them.
+
+**Which to divide by** is now a question about scope, not accuracy. `steps[].context_window` is the step's own window and the right denominator for a step-level ratio — a step whose sub-agents ran other models has several per-model entries and no one of them speaks for the step. Use a per-model entry when you want that model's share.
+
+One case records **no** per-model window: a single bucket holding turns of two different sizes, which happens when a step's sub-agents run a different context variant than the step was spawned with. No single number is right for it, and the nearest wrong one is off by 5×, so it is omitted like any other unknown.
+
+The gap has narrowed on current models without going away. `opus[1m]` was the motivating case back when the Opus base window was 200K; from Opus 4.6 / Sonnet 4.6 onward 1M is the base and the two agree. The models that kept a 200K default with a 1M opt-in are where it still matters.
+
+**Absent means unknown.** A model ape has no window for gets no field at all — not a zero. Render "could not look", never a plausible ratio. Defaulting to 200k is the specific failure these fields exist to retire: a stale 200k entry that outlived a 1M window inflated every affected step's occupancy fivefold, and the metric built on it had to be retracted. For the same reason there is **no family fallback**: a family price that is off lands in the right order of magnitude and is flagged as an estimate, while a family window that is off produces a precise-looking ratio wrong by the ratio of the two windows — and the guess would fail toward the smaller one.
+
+`ape doctor`'s `cost.price_table_coverage` row names any model it saw in recent transcripts that has no known window. A window can be corrected without a new ape binary, the same way a price can:
+
+```bash
+ape costs update --from corrected.yaml   # rows accept `context_window:` beside base_input / output
+```
+
+### Reading the `contract` field
+
+Some APEX skills end a run with a machine-readable return block — a story-batch skill's `run_status:`, an epic-batch review's `epics:`. The framework declares which skills promise one, and the pattern that recognises it, in `_apex/terminal-contracts.csv`. After each step ape matches the closing assistant message against that skill's pattern and records the verdict.
+
+| value           | meaning                                                            |
+| --------------- | ------------------------------------------------------------------ |
+| `present`       | the closing message matched the skill's pattern                     |
+| `missing`       | a closing message was read and it did not match                     |
+| `no-transcript` | the skill is enrolled but no closing message could be read at all   |
+| *(omitted)*     | the skill declares no terminal contract — there was nothing to check |
+
+`no-transcript` is deliberately distinct from `missing`: "looked and it was not there" and "could not look" are different facts, and only the first is evidence about the run.
+
+**This is telemetry about text, not about work.** The check reads the closing message of the step's **main** claude session, and that message is a *relay* whenever anything below it did the work — which, for the batch skills this table enrols, is usually:
+
+- under `--agent`, the runner types `/<agent> --autonomous -- <skill> …`, so the agent skill closes the session and the sub-skill's block appears only if the agent relayed it verbatim;
+- with no agent at all, a batch skill that fans out to Agent-tool sub-agents has the same shape — the subs' own transcripts are separate files (see `sessions[]`) and the main session's closing message summarises them.
+
+So `missing` means *the closing text did not match*, **not** *the skill failed to emit its contract*. Conflating the two would blame a framework-side quality problem for what may be a relay artifact. Any decision to make this fail a run has to separate them first; it is warn-only today for exactly that reason.
+
+Two limits on the denominator:
+
+- **Only completed steps have a record.** A step whose wait failed — idle timeout, detached agent, dead session — gets no `StepRecord` at all, so it carries no verdict either way. A rate computed from this field is a rate over completed steps.
+- **`no_clear: true` steps share the previous step's transcript.** If such a step added no assistant turn of its own, the message read is its predecessor's, which can record a `present` that belongs to the previous step.
+
+The same verdict is also written to the run's `checkpoints.jsonl` as a `contract` row carrying the skill, the status and the diagnostic text.
 
 ### Forward compatibility
 
@@ -207,7 +269,7 @@ Tip: ape's per-step commit messages are designed for `git log --grep '^ape:<pipe
 
 When commits are enabled, ape refuses to start if `git status --porcelain` is non-empty at runner-start. Bypass with `--commit-allow-dirty` (commits proceed; first committing step's diff includes the prior WIP) or with `--no-commit` (no commits at all; gate is moot).
 
-`_output/` should be in your `.gitignore` so the manifest tree itself never trips the gate.
+The resolved `{output_folder}/ape/` should be in your `.gitignore` so the manifest tree itself never trips the gate. `ape doctor --only output.ape_ignored` reports whether it is — including the worse case where the tree is already **committed**, which an ignore line alone does not fix (git keeps tracking what is in the index; it needs `git rm -r --cached` too). ape reports and never edits `.gitignore` itself.
 
 ## Reading a manifest from code
 

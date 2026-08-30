@@ -10,6 +10,40 @@
 # All rates are USD per 1M tokens. The 1.25x / 2.00x / 0.10x cache
 # multipliers live in formula.go and apply on top of base_input.
 #
+# `context_window:` is the model's usable context in TOKENS, and it is
+# OPTIONAL. WHERE THE VALUES COME FROM: the Models API — `GET /v1/models/{id}`
+# returns `max_input_tokens`, which is the context window (there is no
+# `context_window` field on that object). Curated by hand from that source,
+# the same standing as the rates above, and checked the same way: by a person
+# who looked. Everything from Opus 4.6 and Sonnet 4.6 onward is 1M at standard
+# pricing; 200000 is the pre-4.6 standard window.
+#
+# There is deliberately NO live gate against that endpoint. One was built and
+# removed: it needed an API key, this project's machines authenticate through
+# Claude Code, and a gate that skips on every machine it is meant to protect
+# is a skip with a Makefile target — worse than nothing, because the skip
+# reads as a pass. What guards the values instead is
+# TestContextWindow_GenerationBoundary, which asserts the 1M/200K split model
+# by model: it is hermetic, it runs in `make test`, and it makes changing a
+# window a deliberate edit to a test rather than a quiet edit to data.
+#
+# WHEN A MODEL SHIPS: add its window here and to that test, from the Models
+# API value. The first draft of this table put 200000 on the whole Opus
+# family — wrong by 5x, on the most-used models, in the direction that
+# inflates every occupancy ratio computed from it.
+#
+# It is a maintained value, never a measurement OF A RUN: Claude Code
+# reports the real per-model window only on the stream-json result event,
+# and ape is PTY-only by design, so that number cannot reach ape on any
+# path ape drives. Do not describe it as reported anywhere.
+#
+# An omitted window means UNKNOWN and must stay unknown. There is no
+# default: `ape doctor` reports a model observed with no window, and a
+# consumer dividing by it renders "could not look" rather than a plausible
+# ratio. Defaulting is the specific failure this table exists to avoid — a
+# stale 200k entry outliving a 1M window inflated every affected step's
+# occupancy fivefold and the metric built on it had to be retracted.
+#
 # WHEN A NEW MODEL SHIPS: add its exact id under `prices:` and repoint the
 # family alias under `aliases:`. Until you do, `families:` prices it as a
 # flagged estimate and every surface that reports cost says so — it is a
@@ -26,61 +60,76 @@ prices:
   claude-fable-5:
     base_input: 10.00
     output: 50.00
+    context_window: 1000000
   claude-mythos-5:
     base_input: 10.00
     output: 50.00
+    context_window: 1000000
   # Claude Opus 5 — same tier as Opus 4.5+.
   # NOTE: fast mode (speed: "fast") bills at 10.00 / 50.00. The transcript
   # usage block carries no speed marker, so fast-mode turns price low here.
   claude-opus-5:
     base_input: 5.00
     output: 25.00
+    context_window: 1000000
   # Claude Sonnet 5 — the STANDARD (post-intro) rate. The 2.00/10.00 intro
   # window through 2026-08-31 is applied date-aware via dated_prices; this
   # entry is the conservative fallback a dateless Lookup returns (PLAN-10 D3).
   claude-sonnet-5:
     base_input: 3.00
     output: 15.00
+    context_window: 1000000
   # Claude Opus 4.5+ — current pricing tier.
   claude-opus-4-8:
     base_input: 5.00
     output: 25.00
+    context_window: 1000000
   claude-opus-4-7:
     base_input: 5.00
     output: 25.00
+    context_window: 1000000
   claude-opus-4-6:
     base_input: 5.00
     output: 25.00
+    context_window: 1000000
   claude-opus-4-5:
     base_input: 5.00
     output: 25.00
+    context_window: 200000
   # Claude Opus 4 / 4.1 — legacy pricing (half the input rate and one third
   # the output rate arrived with Opus 4.5).
   claude-opus-4-1:
     base_input: 15.00
     output: 75.00
+    context_window: 200000
   claude-opus-4:
     base_input: 15.00
     output: 75.00
+    context_window: 200000
   # Claude Sonnet 4.5+.
   claude-sonnet-4-6:
     base_input: 3.00
     output: 15.00
+    context_window: 1000000
   claude-sonnet-4-5:
     base_input: 3.00
     output: 15.00
+    context_window: 200000
   claude-sonnet-4:
     base_input: 3.00
     output: 15.00
+    context_window: 200000
   # Claude Haiku 4.5.
   claude-haiku-4-5:
     base_input: 1.00
     output: 5.00
+    context_window: 200000
   # Claude Haiku 3.5 — retired on the first-party API but still reachable
   # via Bedrock / Vertex; keep for those captures.
   claude-haiku-3-5:
     base_input: 0.80
     output: 4.00
+    context_window: 200000
   # `<synthetic>` is Claude Code's sentinel for an assistant message it
   # generated locally rather than sampling from a model — an interrupt
   # notice, an injected error. Its usage block is all zeros, so this is a
@@ -121,6 +170,18 @@ aliases:
 # Matching (see familyTier.matches): the bare family word, or the
 # `claude-<family>-...` prefix. `fictional-model` matches nothing and stays
 # unpriced, which is the correct answer for an id we know nothing about.
+#
+# DELIBERATELY NO `context_window:` HERE. The schema supports it and the
+# shipped table leaves it empty, because a family estimate is sound for a
+# price and unsound for a window. A family price that is off lands in the
+# right order of magnitude and is flagged as an estimate everywhere it is
+# shown. A family window that is off produces a precise-looking RATIO that
+# is wrong by the ratio of the two windows — 5x between 200k and 1M — and
+# occupancy ratios get compared against thresholds. Worse, the guess fails
+# toward the smaller window, so a future `sonnet-6` shipping with a 1M
+# window would silently divide by 200k and report 5x the true occupancy:
+# the exact bug this whole field was added to retire. An unknown window
+# reported as unknown is the correct answer.
 families:
   - family: fable
     base_input: 10.00
@@ -137,3 +198,26 @@ families:
   - family: haiku
     base_input: 1.00
     output: 5.00
+
+# `--model` context suffixes → the window that suffix selects.
+#
+# A suffixed and unsuffixed model are the same model at the same rate —
+# NormalizeModel strips the suffix on purpose so both attribute to one
+# pricing bucket — but they can be different amounts of CONTEXT. The suffix
+# is the only carrier of that distinction, so ContextWindow reads it before
+# anything else and it wins over the base model's entry.
+#
+# The gap has narrowed and the mechanism still matters. `opus[1m]` used to be
+# the interesting case, back when the Opus base window was 200K; from Opus
+# 4.6 / Sonnet 4.6 onward 1M IS the base, so `opus` and `opus[1m]` now agree.
+# Where it still bites is the older models that kept a 200K default with a 1M
+# opt-in — `claude-sonnet-4-5[1m]` is 1M against a 200K base, a 5x difference
+# in the divisor. Do not delete this block because the flagship models
+# stopped needing it.
+#
+# A suffix that is not listed here resolves to NO window rather than falling
+# back to the base model's: `opus[7m]` means the caller asked for a size
+# this binary does not know, and answering 200K would be a wrong number
+# instead of a missing one.
+context_suffixes:
+  "[1m]": 1000000

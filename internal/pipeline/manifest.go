@@ -17,10 +17,18 @@ import (
 // Later additions stay ADDITIVE under v2 (new fields, no version bump):
 // v0.0.27–v0.0.35 added num_turns, model_usage, sessions[]; v0.0.37 added
 // the ephemeral cache-write split (tokens_cache_creation_5m/_1h alongside
-// the unchanged tokens_cache_creation sum). The eval reader
+// the unchanged tokens_cache_creation sum); v0.0.60 added the per-step
+// terminal-contract verdict (`contract`). The eval reader
 // (apex_process_framework_eval) hard-rejects any schema_version outside
 // [1,2] but tolerates unknown fields, so additive-under-v2 is the only
 // eval-safe path — see PLAN-10 D5.
+//
+// Verified for the v0.0.60 addition, so nobody bumps defensively: the eval
+// builds its StepRecord from explicit key lookups on a plain dict and
+// drops what it does not name, and nothing in ape decodes a manifest with
+// yaml.Decoder.KnownFields(true). A new field is invisible to both. A
+// version BUMP, by contrast, would fail the eval's [1,2] range outright —
+// it is the change to avoid, not the field.
 const ManifestSchemaVersion = 2
 
 // RunStatus enumerates terminal pipeline / stage / step states.
@@ -153,6 +161,22 @@ type ModelUsageRecord struct {
 	TokensCacheCreation5m int     `yaml:"tokens_cache_creation_5m"`
 	TokensCacheCreation1h int     `yaml:"tokens_cache_creation_1h"`
 	NumTurns              int     `yaml:"num_turns"`
+	// ContextWindow is this model's usable context in tokens, from ape's
+	// maintained table — NOT a value Claude Code reported. Omitted when the
+	// table has no window for the model, which means UNKNOWN and must not be
+	// read as a default.
+	//
+	// Resolved from the RAW model spelling the transcript recorded, before
+	// normalization folds a model and its context variant into one pricing
+	// bucket — so a `[1m]` step reports 1M here, not the base model's
+	// window. Keyed by the normalized (pricing) id all the same: the fold
+	// is correct for cost and wrong for context, and ape now keeps both.
+	//
+	// One bucket CAN hold turns of two different sizes — a step's
+	// sub-agents need not run the spelling the step was spawned with — and
+	// no single number is right for it then. That case records nothing
+	// (unknown) rather than picking the side that is wrong by 5x.
+	ContextWindow int `yaml:"context_window,omitempty"`
 }
 
 // SessionUsageRecord is one claude session's usage within a step: the
@@ -217,4 +241,66 @@ type StepRecord struct {
 	// numeric fields above are zero (transcript unavailable at scan
 	// time, zero assistant turns, …). Empty on healthy steps.
 	TelemetryNote string `yaml:"telemetry_note,omitempty"`
+	// Contract is the PLAN-25 Gate C verdict for this step:
+	// `present` | `missing` | `no-transcript`. Absent when the step's
+	// skill declares no terminal contract in the framework's
+	// `_apex/terminal-contracts.csv`, and absent on every manifest
+	// written before ape v0.0.60.
+	//
+	// HOW TO READ IT — this is telemetry about TEXT, not about work.
+	//
+	// The check matches the closing assistant message of the step's MAIN
+	// claude session against the framework's per-skill pattern. That
+	// message is a RELAY whenever anything below it did the work, and for
+	// the population this table enrols — batch skills — something below it
+	// usually did:
+	//
+	//   - under `--agent` the runner types
+	//     `/<agent> --autonomous -- <skill> …`, so the agent skill closes
+	//     the session and the sub-skill's block reaches the transcript
+	//     only if the agent relayed it verbatim;
+	//   - with no agent at all, a batch skill that fans out to Agent-tool
+	//     sub-agents has the same shape — the subs' own transcripts are
+	//     separate files (see Sessions above), and the main session's
+	//     closing message summarises them.
+	//
+	// So `missing` means "the closing text did not match", NOT "the skill
+	// failed to emit its contract". Treated as the latter it conflates a
+	// real framework-side quality problem with a relay artifact — which is
+	// precisely what the warn-only release exists to avoid deciding on.
+	// Any exit-code decision taken from this field has to separate the two
+	// first.
+	//
+	// Two further limits on the denominator:
+	//
+	//   - only COMPLETED steps have a record at all. A step whose
+	//     WaitStepDone failed (idle timeout, detached agent, dead session)
+	//     never reaches recordStep, so it carries no verdict either way;
+	//   - a `no_clear: true` step shares the previous step's transcript.
+	//     If it added no assistant turn of its own, the closing message
+	//     read is the PREVIOUS step's — which can record a `present` that
+	//     belongs to its predecessor.
+	Contract string `yaml:"contract,omitempty"`
+	// ContextWindow is the usable context, in tokens, of the model this
+	// step was SPAWNED with — the denominator for an occupancy ratio.
+	// Omitted when ape's table has no window for that model, which means
+	// UNKNOWN: render "could not look", never a default.
+	//
+	// It is a MAINTAINED value, not a measurement. Claude Code reports the
+	// real per-model window only on the stream-json result event's
+	// `modelUsage[].contextWindow`; ape is PTY-only by design and does not
+	// use that surface, so the reported window cannot reach ape on any path
+	// ape drives. Do not label this as reported.
+	//
+	// Resolved from the step's effective `--model`, so it honours a `[1m]`
+	// suffix. As of v0.0.60 the per-model entries do too — their window is
+	// read from the raw transcript spelling before normalization — so the
+	// two agree on an ordinary step and neither is a trap.
+	//
+	// This one is still the better divisor for a STEP-level ratio, for a
+	// reason that has nothing to do with suffixes: a step whose sub-agents
+	// ran other models has several per-model entries and no single one of
+	// them is the step's window. Prefer a per-model entry only when you are
+	// computing a ratio for that model's share.
+	ContextWindow int `yaml:"context_window,omitempty"`
 }

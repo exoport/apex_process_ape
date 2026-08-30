@@ -503,7 +503,7 @@ func checkPriceTableCoverage(_ context.Context, env doctorEnv) CheckResult {
 		}
 	}
 	gaps := rep.Gaps()
-	names := make([]string, 0, len(gaps)+len(rep.AliasDrifts)+len(badOverrides))
+	names := make([]string, 0, len(gaps)+len(rep.AliasDrifts)+len(badOverrides)+1)
 	names = append(names, badOverrides...)
 	for _, g := range gaps {
 		names = append(names, fmt.Sprintf("%s (%s, %d turns)", g.Model, g.Source, g.Turns))
@@ -511,6 +511,12 @@ func checkPriceTableCoverage(_ context.Context, env doctorEnv) CheckResult {
 	for _, d := range rep.AliasDrifts {
 		names = append(names, fmt.Sprintf("alias %s→%s superseded by %s",
 			d.Alias, d.Target, strings.Join(d.Newer, "/")))
+	}
+	// Carried on the warn path too. The OK path gets it via rep.Summary();
+	// without this the gap would be visible only while the price table was
+	// healthy, which is the wrong way round.
+	if s := rep.WindowGapSummary(); s != "" {
+		names = append(names, s)
 	}
 	return CheckResult{
 		Status:  StatusWarn,

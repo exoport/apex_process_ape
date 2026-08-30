@@ -181,6 +181,15 @@ type StepTelemetry struct {
 	// assistant turns). A zeroed step must be explainable, never
 	// silent.
 	Note string
+	// Contract is the Gate C verdict token for the step, computed by the
+	// apecmd layer against the framework's per-skill pattern table.
+	// Empty when the skill is not enrolled — see StepRecord.Contract for
+	// what the value does and does not mean.
+	Contract string
+	// ContextWindow is the window of the model this step was SPAWNED with,
+	// resolved from the effective `--model` string including any `[1m]`
+	// suffix. 0 means unknown. See StepRecord.ContextWindow.
+	ContextWindow int
 }
 
 // ModelUsage is one model's (or one session's) share of a step's
@@ -196,6 +205,7 @@ type ModelUsage struct {
 	TokensCacheCreation5m int
 	TokensCacheCreation1h int
 	NumTurns              int
+	ContextWindow         int
 }
 
 // SessionUsage is the usage of one claude session that contributed to
@@ -334,12 +344,24 @@ func dirtyTreeGate(ctx context.Context, spec *Spec, opts RunOptions) error {
 	if porcelain == "" {
 		return nil
 	}
+	// The hint names the RESOLVED path, not a literal `_output/`. On a
+	// project that renamed output_folder the hardcoded form pointed at a
+	// directory that does not exist, which is the least useful moment to
+	// be told to gitignore something — the operator is here because a
+	// previous run's artifacts dirtied the tree, and the fix is about the
+	// path that actually holds them. `ape doctor`'s output.ape_ignored row
+	// is the same finding, reported before it costs a run.
+	apeRoot := runlog.ApeRoot(opts.ProjectRoot)
+	if rel, relErr := filepath.Rel(opts.ProjectRoot, apeRoot); relErr == nil {
+		apeRoot = filepath.ToSlash(rel)
+	}
 	return fmt.Errorf(
 		"working tree has uncommitted changes; commit or stash before running `ape pipeline` "+
 			"(commits run by default). Bypass options: --no-commit (leave the entire run uncommitted) or "+
 			"--commit-allow-dirty (commit anyway; prior WIP merges into the first step's commit). "+
-			"Note: `_output/` should be in your .gitignore — ape's manifest tree lives there.\n\n"+
-			"git status --porcelain output:\n%s", porcelain,
+			"Note: `%s/` should be in your .gitignore — ape's manifest tree lives there "+
+			"(`ape doctor --only output.ape_ignored` checks it).\n\n"+
+			"git status --porcelain output:\n%s", apeRoot, porcelain,
 	)
 }
 
@@ -449,6 +471,23 @@ func closeStepLog(w io.WriteCloser) {
 
 // recordStep appends a StepRecord to the manifest writer, populating
 // metrics from the parsed terminal result event when present.
+//
+// `status` and `exitCode` are always StatusCompleted and 0 today, and that
+// is a statement about the CALLER, not about the parameters. runStage has
+// exactly one recordStep call and it sits after the success path: a step
+// whose WaitStepDone failed — idle timeout, detached agent, dead session —
+// breaks out of the loop before reaching it and gets no manifest record at
+// all. So a failed step is absent from the manifest rather than present
+// and marked failed.
+//
+// That is worth knowing when reading any per-step field as a rate: the
+// denominator is completed steps. It is also why the two parameters stay.
+// Removing them to satisfy the linter would harden today's single caller
+// into the signature and make recording a failed step a bigger change than
+// it should be; ev.Subtype below already flips status to failed, so the
+// parameter is load-bearing the moment a second caller exists.
+//
+//nolint:unparam // constant because the only caller is the success path — see above
 func recordStep(
 	mw *manifestWriter,
 	stageIdx, stepIdx int,
@@ -488,6 +527,8 @@ func recordStep(
 		rec.TokensCacheCreation1h = ev.Usage.CacheCreation1hInputTokens
 		rec.NumTurns = ev.NumTurns
 		rec.TelemetryNote = ev.TelemetryNote
+		rec.Contract = ev.Contract
+		rec.ContextWindow = ev.ContextWindow
 		rec.ModelUsage = modelUsageToRecords(ev.ModelUsage)
 		rec.Sessions = sessionUsageToRecords(ev.Sessions)
 		if status == StatusCompleted && ev.Subtype != "" && ev.Subtype != "success" {

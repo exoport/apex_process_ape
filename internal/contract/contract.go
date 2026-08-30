@@ -152,6 +152,40 @@ const (
 	StatusMissing
 )
 
+// Token is the durable form of a status — what a manifest or an event
+// stream records. Empty for StatusNotEnrolled, and that emptiness is the
+// design, not an oversight.
+//
+// Recording "not-enrolled" would make the field mean different things on
+// different projects. Check short-circuits an absent or empty table to
+// StatusNotEnrolled, and so a project whose framework ships no table would
+// record nothing while a project that enrolled one unrelated skill would
+// record "not-enrolled" for every other skill it runs. The same step would
+// carry two different values for the same reason. Omitting instead gives
+// the field one invariant worth having: it is present exactly when the
+// skill was enrolled, so a base rate is
+//
+//	present / (present + missing + no-transcript)
+//
+// over the rows that have one, with no denominator to reconstruct.
+//
+// Distinguishing "not enrolled" from "written by an ape that predates the
+// field" is the manifest's job, not this token's: every manifest stamps
+// ape_version.
+func (s Status) Token() string {
+	switch s {
+	case StatusPresent:
+		return "present"
+	case StatusMissing:
+		return "missing"
+	case StatusNoTranscript:
+		return "no-transcript"
+	case StatusNotEnrolled:
+		return ""
+	}
+	return ""
+}
+
 // Result reports one check.
 type Result struct {
 	Status  Status

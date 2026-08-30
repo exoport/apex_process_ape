@@ -84,6 +84,9 @@ type SessionUsage struct {
 	ParentSessionID string // empty for the main session
 	Totals          cost.Totals
 	ByModel         map[string]cost.Totals
+	// ModelWindows is each ByModel bucket's context window, resolved from
+	// the raw model spelling. Same keys as ByModel; 0 is unknown.
+	ModelWindows map[string]int
 }
 
 // MainScan is the absolute scan of the main transcript. The pipeline
@@ -100,11 +103,19 @@ type MainScan struct {
 // not be derived. Advance is non-nil only when the main transcript
 // scanned OK — callers that track a rolling baseline store it then.
 type Telemetry struct {
-	Totals   cost.Totals
-	ByModel  map[string]cost.Totals
-	Sessions []SessionUsage
-	Note     string
-	Advance  *MainScan
+	Totals  cost.Totals
+	ByModel map[string]cost.Totals
+	// ModelWindows is each ByModel bucket's context window in tokens,
+	// resolved from the raw spelling before normalization. Same keys as
+	// ByModel; 0 is unknown, never a window of zero.
+	//
+	// Carried rather than recomputed from the key: the key is the pricing
+	// id, which folds a model and its 1M context variant together on
+	// purpose, so re-deriving from it would report the base window for both.
+	ModelWindows map[string]int
+	Sessions     []SessionUsage
+	Note         string
+	Advance      *MainScan
 }
 
 // note returns a zeroed Telemetry carrying the diagnosability
@@ -161,13 +172,19 @@ func ScanStep(p ScanParams) *Telemetry {
 	mainDelta := subTotals(res.Totals, prev)
 	mainByModel := byModelDelta(res.ByModel, prevByModel)
 
+	// Windows are carried, not subtracted: a delta of two token counts is
+	// meaningful, a delta of two context windows is not. The current scan's
+	// answer is the step's answer.
+	mainWindows := windowsFor(res.ModelWindows, mainByModel)
 	tele := &Telemetry{
-		Totals:  mainDelta,
-		ByModel: mainByModel,
+		Totals:       mainDelta,
+		ByModel:      mainByModel,
+		ModelWindows: mainWindows,
 		Sessions: []SessionUsage{{
-			SessionID: p.ParentSessionID,
-			Totals:    mainDelta,
-			ByModel:   mainByModel,
+			SessionID:    p.ParentSessionID,
+			Totals:       mainDelta,
+			ByModel:      mainByModel,
+			ModelWindows: mainWindows,
 		}},
 		Advance: &MainScan{Totals: res.Totals, ByModel: res.ByModel, Path: p.Source},
 	}
@@ -224,6 +241,7 @@ func ScanStep(p ScanParams) *Telemetry {
 			parent = p.ParentSessionID
 		}
 		subByModel := byModelDelta(subRes.ByModel, nil)
+		subWindows := windowsFor(subRes.ModelWindows, subByModel)
 		// SessionID = agent_id: the sub's internal sessionId equals the
 		// parent's, so agent_id is the only distinct per-sub identifier.
 		tele.Sessions = append(tele.Sessions, SessionUsage{
@@ -231,6 +249,7 @@ func ScanStep(p ScanParams) *Telemetry {
 			ParentSessionID: parent,
 			Totals:          subRes.Totals,
 			ByModel:         subByModel,
+			ModelWindows:    subWindows,
 		})
 		tele.Totals = sumTotals(tele.Totals, subRes.Totals)
 		if tele.ByModel == nil {
@@ -239,6 +258,14 @@ func ScanStep(p ScanParams) *Telemetry {
 		for model, u := range subByModel {
 			tele.ByModel[model] = sumTotals(tele.ByModel[model], u)
 		}
+		// A sub-agent can run a different context variant of the same model
+		// than the step was spawned with. Both land in one bucket, and
+		// noteModelWindow collapses that to unknown rather than picking a
+		// side — the two answers differ by the ratio of the windows.
+		if tele.ModelWindows == nil {
+			tele.ModelWindows = map[string]int{}
+		}
+		cost.MergeModelWindows(tele.ModelWindows, subWindows)
 		snapshot(p.GetRunLog, cd.path)
 	}
 
@@ -255,6 +282,25 @@ func ScanStep(p ScanParams) *Telemetry {
 	// pricing gap went 13 days unnoticed precisely because nothing did.
 	appendNote(tele, pricing.PricingNote())
 	return tele
+}
+
+// windowsFor narrows a scan's window map to the buckets that survived the
+// delta, so a model whose usage all predates this step does not carry a
+// window into it. nil in / empty out means nil.
+func windowsFor(windows map[string]int, byModel map[string]cost.Totals) map[string]int {
+	if len(windows) == 0 || len(byModel) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(byModel))
+	for model := range byModel {
+		if w, ok := windows[model]; ok {
+			out[model] = w
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // appendNote joins a breadcrumb onto Telemetry.Note instead of replacing

@@ -27,4 +27,6 @@ type resultEvent struct {
 	ModelUsage    map[string]ModelUsage
 	Sessions      []SessionUsage
 	TelemetryNote string
+	Contract      string
+	ContextWindow int
 }

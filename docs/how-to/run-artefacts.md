@@ -78,7 +78,7 @@ directories.
     ├── report.md            ← human-readable run report
     ├── hook-events.jsonl    ← one JSON per Claude Code hook (PLAN-5 / C4)
     ├── bridge-calls.jsonl   ← one JSON per MCP tool call seen by the bridge
-    ├── checkpoints.jsonl    ← stage events + skill `reply()` + commit-made
+    ├── checkpoints.jsonl    ← stage events + skill `reply()` + commit-made + contract
     ├── stages/
     │   └── <NN>-<stage>/
     │       └── step-<NN>-<skill>.ndjson  ← the per-step event stream
@@ -248,7 +248,15 @@ _output/ape/
   two paired lines (deferred-entry + flush) with the same `id`.
 - `checkpoints.jsonl`: one JSON per line —
   `{"ts","kind","step","payload"}`. Kinds:
-  `stage-start | stage-end | commit-made | pipeline-end | reply | stopped | chat-start | chat-end`.
+  `stage-start | stage-end | commit-made | contract | pipeline-end | reply | stopped | chat-start | chat-end`.
+
+  A `contract` row (ape v0.0.60+) carries `{"skill","status","diagnostic"}`
+  — the terminal-contract verdict for the step named in `step`. The same
+  verdict is on the step's manifest record; the row is where the human-
+  readable diagnostic lives. It is written only for a skill the framework
+  enrolled in `_apex/terminal-contracts.csv`. See
+  [the manifest reference](../reference/pipeline-run-manifest.md#reading-the-contract-field)
+  for what the verdict does and does not mean.
 
 ## Reading further
 

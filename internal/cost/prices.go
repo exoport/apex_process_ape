@@ -107,6 +107,16 @@ var modelAliases map[string]string
 // prices.yaml. Consulted only after an exact match fails.
 var familyTiers []familyTier
 
+// contextWindows is the exact-match context-window table (tokens), loaded
+// from the `context_window:` field on each prices.yaml row. A model absent
+// here has NO KNOWN WINDOW — it is not zero-context, and it must never be
+// given a default. See ContextWindow.
+var contextWindows map[string]int
+
+// contextSuffixes maps a `--model` context suffix to the window it selects,
+// loaded from prices.yaml. Keys are lowercased and include the brackets.
+var contextSuffixes map[string]int
+
 // SonnetIntroEnd is the last instant Claude Sonnet 5 bills at its
 // promotional intro rate. Derived from the claude-sonnet-5 window in
 // prices.yaml — the YAML is the source of truth; this var is the named
@@ -126,10 +136,12 @@ type datedPrice struct {
 	Price ModelPrice
 }
 
-// familyTier is one family's fallback rate.
+// familyTier is one family's fallback rate, and its fallback context
+// window. Window is 0 when the family has no known window.
 type familyTier struct {
 	Family string
 	Price  ModelPrice
+	Window int
 }
 
 // matches reports whether a normalized model id belongs to this family:
@@ -167,6 +179,10 @@ type priceTableFile struct {
 	DatedPrices map[string][]datedPriceRow `yaml:"dated_prices"`
 	Aliases     map[string]string          `yaml:"aliases"`
 	Families    []familyRow                `yaml:"families"`
+	// ContextSuffixes maps a `--model` context suffix to the window it
+	// selects (`[1m]` → 1000000). Data rather than a parse of "1m" so a
+	// future `[500k]` is a table edit, not a code change.
+	ContextSuffixes map[string]int `yaml:"context_suffixes"`
 }
 
 //nolint:tagliatelle // snake_case matches the on-disk / wire contract
@@ -178,9 +194,10 @@ type datedPriceRow struct {
 
 //nolint:tagliatelle // snake_case matches the on-disk / wire contract
 type familyRow struct {
-	Family    string  `yaml:"family"`
-	BaseInput float64 `yaml:"base_input"`
-	Output    float64 `yaml:"output"`
+	Family        string  `yaml:"family"`
+	BaseInput     float64 `yaml:"base_input"`
+	Output        float64 `yaml:"output"`
+	ContextWindow int     `yaml:"context_window,omitempty"`
 }
 
 func init() {
@@ -245,8 +262,19 @@ func applyPriceTable(tbl priceTableFile) {
 	PriceTableUpdated = tbl.Updated
 
 	Prices = make(map[string]ModelPrice, len(tbl.Prices))
+	contextWindows = make(map[string]int, len(tbl.Prices))
 	for model, row := range tbl.Prices {
 		Prices[model] = ModelPrice{BaseInput: row.BaseInput, Output: row.Output}
+		if row.ContextWindow > 0 {
+			contextWindows[model] = row.ContextWindow
+		}
+	}
+
+	contextSuffixes = make(map[string]int, len(tbl.ContextSuffixes))
+	for suffix, window := range tbl.ContextSuffixes {
+		if window > 0 {
+			contextSuffixes[strings.ToLower(suffix)] = window
+		}
 	}
 
 	datedPrices = make(map[string][]datedPrice, len(tbl.DatedPrices))
@@ -272,6 +300,7 @@ func applyPriceTable(tbl priceTableFile) {
 		familyTiers = append(familyTiers, familyTier{
 			Family: f.Family,
 			Price:  ModelPrice{BaseInput: f.BaseInput, Output: f.Output},
+			Window: f.ContextWindow,
 		})
 	}
 }
@@ -404,4 +433,105 @@ func LookupSourceAt(model string, ts time.Time) (ModelPrice, PriceSource) {
 		}
 	}
 	return ModelPrice{}, PriceNone
+}
+
+// WindowSource records how a model's context window was resolved. Same
+// discipline as PriceSource, and for the same reason: a consumer dividing
+// by this number has to be able to tell an answer from the absence of one.
+type WindowSource string
+
+const (
+	// WindowSuffix: the model string carried an explicit context suffix
+	// (`opus[1m]`), which selects the window regardless of the base model's
+	// default. The most specific answer available.
+	WindowSuffix WindowSource = "suffix"
+	// WindowOverride: matched ~/.ape/prices.yaml (operator-supplied).
+	WindowOverride WindowSource = "override"
+	// WindowExact: matched the built-in table by exact model id.
+	WindowExact WindowSource = "exact"
+	// WindowFamily: no exact row — taken from the model's family tier.
+	// Approximate by construction.
+	WindowFamily WindowSource = "family"
+	// WindowNone: nothing matched. The window is UNKNOWN, and the returned
+	// zero is not a window of zero.
+	WindowNone WindowSource = "none"
+)
+
+// Known reports whether the source yielded a usable window at all.
+func (s WindowSource) Known() bool { return s != WindowNone && s != "" }
+
+// Exact reports whether the window came from a specific value for this
+// exact model (a suffix, an override, or the built-in table) rather than
+// from a family fallback.
+func (s WindowSource) Exact() bool {
+	return s == WindowSuffix || s == WindowOverride || s == WindowExact
+}
+
+// ContextWindow resolves a model's usable context window, in tokens, and
+// reports how it was reached.
+//
+// # This is a maintained table, never a reported measurement
+//
+// Claude Code reports the real per-model window in the stream-json result
+// event's `modelUsage[].contextWindow`. ape is PTY-only by design
+// (docs/explanation/why-pty-only.md) and does not use that surface, so the
+// reported window cannot reach ape on any path ape actually drives — not
+// as a deferred feature, but as a consequence of the PTY invariant. Nothing
+// here should ever be described as the reported window. What this gives a
+// consumer is a single, correctable source for the divisor, instead of a
+// second hand-maintained copy in whichever repo needs the ratio.
+//
+// # Resolution order
+//
+//	explicit suffix → override → exact table → family tier → none
+//
+// The SUFFIX WINS, and it has to. `opus` and `opus[1m]` are the same model
+// at the same price — NormalizeModel deliberately strips the suffix so both
+// attribute to one pricing bucket — but they are 200K and 1M of context,
+// a 5x difference in exactly the denominator a consumer is dividing by. The
+// suffix is the only carrier of that distinction, so window resolution
+// reads it before doing anything else.
+//
+// # Unknown stays unknown
+//
+// A model with no known window returns (0, WindowNone). Do NOT substitute a
+// plausible default. Defaulting to 200K is precisely the failure this exists
+// to prevent: a 200K entry that outlived a 1M window inflated every affected
+// step's occupancy fivefold, and the metric built on it had to be retracted.
+// A consumer that cannot get a window must render "could not look", not a
+// number that reads as measurement.
+func ContextWindow(model string) (int, WindowSource) {
+	base, suffix := splitContextSuffix(model)
+	if suffix != "" {
+		if w, ok := contextSuffixes[strings.ToLower(suffix)]; ok {
+			return w, WindowSuffix
+		}
+		// An unrecognized suffix is NOT ignored in favour of the base
+		// model's window. `opus[7m]` means the caller asked for something
+		// this binary does not know the size of, and answering with the
+		// 200K default would be a wrong number rather than a missing one.
+		return 0, WindowNone
+	}
+	normalized := NormalizeModel(base)
+	if ov, ok := loadOverridesOnce()[normalized]; ok && ov.Window > 0 {
+		return ov.Window, WindowOverride
+	}
+	if w, ok := contextWindows[normalized]; ok {
+		return w, WindowExact
+	}
+	for _, f := range familyTiers {
+		if f.matches(normalized) && f.Window > 0 {
+			return f.Window, WindowFamily
+		}
+	}
+	return 0, WindowNone
+}
+
+// IsSyntheticModel reports whether a model id is one of Claude Code's
+// sentinel markers rather than a real model (`<synthetic>` for a locally
+// generated assistant turn). Such ids have no context window and no price,
+// and reporting them as gaps would be noise about something that is not a
+// model at all.
+func IsSyntheticModel(model string) bool {
+	return strings.HasPrefix(NormalizeModel(model), "<")
 }

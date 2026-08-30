@@ -32,6 +32,7 @@ func overridesPath() string {
 //	    base_input: 3.00
 //	    output:    15.00
 //	    effective_from: 2026-09-01   # optional; override activates on/after this date
+//	    context_window: 1000000      # optional; corrects the model's context window
 //
 // effective_from is the optional dating hook (PLAN-10 D3): absent, the
 // override wins unconditionally (unchanged legacy behaviour); present, it
@@ -45,6 +46,13 @@ type priceRow struct {
 	BaseInput     float64 `yaml:"base_input"`
 	Output        float64 `yaml:"output"`
 	EffectiveFrom string  `yaml:"effective_from,omitempty"`
+	// ContextWindow is the model's usable context in tokens. Optional, and
+	// shared with the embedded table (priceTableFile.Prices is the same row
+	// type), which is what lets `ape costs update --from` correct a window
+	// the same way it corrects a rate — no new binary.
+	//
+	// Zero means UNKNOWN, never a default. See ContextWindow in prices.go.
+	ContextWindow int `yaml:"context_window,omitempty"`
 }
 
 // OverrideEntry is a parsed override: the price plus the optional date it
@@ -57,6 +65,11 @@ type priceRow struct {
 type OverrideEntry struct {
 	Price ModelPrice
 	From  time.Time
+	// Window is the model's context window in tokens, 0 when the override
+	// carries none. An override that omits it does NOT erase the built-in
+	// window — ContextWindow falls through to the embedded table — so a
+	// price-only correction stays a price-only correction.
+	Window int
 }
 
 var (
@@ -89,7 +102,14 @@ func LoadOverridesFrom(path string) (map[string]OverrideEntry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("cost.LoadOverridesFrom: model %q: %w", k, err)
 		}
-		out[k] = OverrideEntry{Price: ModelPrice{BaseInput: v.BaseInput, Output: v.Output}, From: from}
+		if v.ContextWindow < 0 {
+			return nil, fmt.Errorf("cost.LoadOverridesFrom: model %q: negative context_window", k)
+		}
+		out[k] = OverrideEntry{
+			Price:  ModelPrice{BaseInput: v.BaseInput, Output: v.Output},
+			From:   from,
+			Window: v.ContextWindow,
+		}
 	}
 	return out, nil
 }
@@ -116,7 +136,7 @@ func parseEffectiveFrom(s string) (time.Time, error) {
 func SaveOverrides(prices map[string]OverrideEntry) error {
 	shape := overridesShape{Prices: make(map[string]priceRow, len(prices))}
 	for k, v := range prices {
-		row := priceRow{BaseInput: v.Price.BaseInput, Output: v.Price.Output}
+		row := priceRow{BaseInput: v.Price.BaseInput, Output: v.Price.Output, ContextWindow: v.Window}
 		if !v.From.IsZero() {
 			row.EffectiveFrom = v.From.UTC().Format(time.RFC3339)
 		}
@@ -188,9 +208,15 @@ func loadOverridesOnce() map[string]OverrideEntry {
 		// A malformed effective_from disables that row's dating rather than
 		// the whole file — the price still applies (unconditionally).
 		from, _ := parseEffectiveFrom(v.EffectiveFrom)
+		// Same direction as a bad rate: drop the bad value, keep the good
+		// ones. A negative window clamps to 0 and falls through to the
+		// built-in table rather than poisoning the divisor of every
+		// occupancy ratio.
+		window := max(v.ContextWindow, 0)
 		loadedOverrides[k] = OverrideEntry{
-			Price: ModelPrice{BaseInput: v.BaseInput, Output: v.Output},
-			From:  from,
+			Price:  ModelPrice{BaseInput: v.BaseInput, Output: v.Output},
+			From:   from,
+			Window: window,
 		}
 	}
 	sort.Strings(rejected)

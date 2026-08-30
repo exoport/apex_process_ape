@@ -88,6 +88,11 @@ type interactiveCore struct {
 	stepMu      sync.Mutex
 	activeStep  string
 	activeSkill string // current step's skill, for the step-end event label
+	// activeModel is the step's EFFECTIVE --model string, suffix included
+	// (`claude-opus-5[1m]`). Kept verbatim rather than normalized: the
+	// `[1m]` suffix is the only carrier of the 1M-vs-200K context
+	// distinction, and NormalizeModel strips it because both bill alike.
+	activeModel string
 
 	// pub publishes PLAN-13 progress events. Set once via setPublisher when
 	// the run dir resolves (the run id is the <id> subject segment). Guarded
@@ -194,7 +199,9 @@ func (c *interactiveCore) setContracts(projectRoot string) {
 
 // checkTerminalContract reports whether the just-finished step reached
 // its declared summary step, by matching the closing assistant message of
-// its own transcript against the framework's per-skill pattern.
+// its own transcript against the framework's per-skill pattern. It
+// returns the verdict token for the manifest ("" when nothing is to be
+// recorded) and writes the same verdict to the run's checkpoint stream.
 //
 // Warn-only in this release. The failure mode it guards against is real,
 // but so is the failure mode it could introduce: the check depends on a
@@ -202,12 +209,21 @@ func (c *interactiveCore) setContracts(projectRoot string) {
 // an agent that paraphrases would turn a framework-side quality problem
 // into a hard ape-side run failure. One release of warning-only telemetry
 // establishes the base rate first; the exit-code path lands next.
-func (c *interactiveCore) checkTerminalContract() {
+//
+// Until this returned something, that sentence was not true: the verdict
+// was printed to stderr and dropped, so no run directory held the base
+// rate the exit-code decision was supposed to wait for. The persistence
+// is the whole of the change — the check itself is untouched, and so is
+// its warn-only standing. What the recorded value does and does not
+// license is on pipeline.StepRecord.Contract; read it before treating
+// `missing` as a skill that failed.
+func (c *interactiveCore) checkTerminalContract() string {
 	if c.contracts.Len() == 0 {
-		return
+		return ""
 	}
 	c.stepMu.Lock()
 	skill := c.activeSkill
+	step := c.activeStep
 	c.stepMu.Unlock()
 	c.transcriptMu.Lock()
 	source := c.activeTranscript
@@ -215,9 +231,26 @@ func (c *interactiveCore) checkTerminalContract() {
 
 	text, ok := cost.LastAssistantText(source)
 	res := c.contracts.Check(skill, text, ok)
-	if diag := res.Diagnostic(); diag != "" {
+	diag := res.Diagnostic()
+	if diag != "" {
 		fmt.Fprintf(os.Stderr, "⚠ contract: %s\n", diag)
 	}
+	token := res.Status.Token()
+	if token == "" {
+		return ""
+	}
+	// checkpoints.jsonl is the one stream in a run dir that is ape's own —
+	// hook-events and bridge-calls are records of what claude did. A run
+	// directory now answers "did this step emit its contract?" without
+	// re-reading a transcript that may since have been rotated away.
+	if w := c.getRunLog(); w != nil {
+		payload := map[string]any{"skill": skill, "status": token}
+		if diag != "" {
+			payload["diagnostic"] = diag
+		}
+		w.CheckpointKindStep("contract", step, payload, time.Now().UTC())
+	}
+	return token
 }
 
 // applyTimeouts threads the runConfig's idle-window + hard max-duration
@@ -422,6 +455,7 @@ func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 	// manifest's step numbering.
 	c.activeStep = pipeline.StepLabel(info.Stage, info.StepIdx+1, info.Skill)
 	c.activeSkill = info.Skill
+	c.activeModel = info.Model
 	c.stepMu.Unlock()
 	// Label the step on the Driver so a detached-agent failure names the
 	// skill that spawned it, not just the stage/step index the runner adds.
@@ -468,6 +502,7 @@ func (c *interactiveCore) OnStepEnd(_ pipeline.InteractiveStepInfo) {
 	c.verifier.EndStep()
 	c.stepMu.Lock()
 	c.activeStep = ""
+	c.activeModel = ""
 	c.stepMu.Unlock()
 }
 
@@ -560,7 +595,14 @@ func (c *interactiveCore) StepTelemetry(stage string, stepIdx int) (tele *pipeli
 	// has just paid the transcript flush grace — claude buffers its JSONL
 	// writes, so the closing assistant turn may not be on disk when the
 	// Stop fires.
-	c.checkTerminalContract()
+	contractStatus := c.checkTerminalContract()
+	// The step's own context window, resolved from the model it was spawned
+	// with. Read here rather than in telemetryFromScan because the suffix
+	// lives on activeModel and OnStepEnd clears it.
+	c.stepMu.Lock()
+	stepModel := c.activeModel
+	c.stepMu.Unlock()
+	stepWindow, _ := cost.ContextWindow(stepModel)
 	if st.Advance != nil {
 		// Advance the per-stage baseline for the next step's delta.
 		c.transcriptMu.Lock()
@@ -573,12 +615,15 @@ func (c *interactiveCore) StepTelemetry(stage string, stepIdx int) (tele *pipeli
 		// Preserve the runner's no-silent-zero stderr breadcrumb.
 		fmt.Fprintf(os.Stderr, "⚠ telemetry: %s\n", st.Note)
 	}
-	return telemetryFromScan(st)
+	return telemetryFromScan(st, contractStatus, stepWindow)
 }
 
 // telemetryFromScan adapts the neutral sessiondriver.Telemetry onto the
 // pipeline package's StepTelemetry shape (the manifest's contract).
-func telemetryFromScan(st *sessiondriver.Telemetry) *pipeline.StepTelemetry {
+// contractStatus rides along because sessiondriver is shared with
+// `ape prompt`, which has no contract table and no Gate C — keeping the
+// verdict out of Telemetry keeps that asymmetry visible.
+func telemetryFromScan(st *sessiondriver.Telemetry, contractStatus string, stepWindow int) *pipeline.StepTelemetry {
 	agg := totalsToModelUsage(st.Totals)
 	tele := &pipeline.StepTelemetry{
 		CostUSD:               agg.CostUSD,
@@ -589,15 +634,17 @@ func telemetryFromScan(st *sessiondriver.Telemetry) *pipeline.StepTelemetry {
 		TokensCacheCreation5m: agg.TokensCacheCreation5m,
 		TokensCacheCreation1h: agg.TokensCacheCreation1h,
 		NumTurns:              agg.NumTurns,
-		ModelUsage:            byModelToPipeline(st.ByModel),
+		ModelUsage:            byModelToPipeline(st.ByModel, st.ModelWindows),
 		Note:                  st.Note,
+		Contract:              contractStatus,
+		ContextWindow:         stepWindow,
 	}
 	for _, s := range st.Sessions {
 		tele.Sessions = append(tele.Sessions, pipeline.SessionUsage{
 			SessionID:       s.SessionID,
 			ParentSessionID: s.ParentSessionID,
 			Usage:           totalsToModelUsage(s.Totals),
-			ModelUsage:      byModelToPipeline(s.ByModel),
+			ModelUsage:      byModelToPipeline(s.ByModel, s.ModelWindows),
 		})
 	}
 	return tele
@@ -618,15 +665,34 @@ func totalsToModelUsage(t cost.Totals) pipeline.ModelUsage {
 	}
 }
 
-// byModelToPipeline converts a cost.Totals per-model map to the
-// pipeline ModelUsage shape. nil in → nil out.
-func byModelToPipeline(m map[string]cost.Totals) map[string]pipeline.ModelUsage {
+// byModelToPipeline converts a cost.Totals per-model map to the pipeline
+// ModelUsage shape, attaching each bucket's context window. nil in → nil
+// out.
+//
+// windows is keyed the same as m and is resolved at scan time from the RAW
+// model spelling, before NormalizeModel folds `claude-sonnet-4-5` and
+// `claude-sonnet-4-5[1m]` into one pricing bucket. That is why it is
+// threaded here rather than re-derived from the map key: the key has
+// deliberately lost the 5x distinction, so deriving from it would report
+// the base model's window for a variant step.
+//
+// A key absent from windows falls back to resolving from the key itself —
+// the honest answer for a caller that supplied no scan-time windows (an
+// older telemetry value, a test), and identical to the threaded value for
+// every unsuffixed model, which is all of them on current releases.
+func byModelToPipeline(m map[string]cost.Totals, windows map[string]int) map[string]pipeline.ModelUsage {
 	if len(m) == 0 {
 		return nil
 	}
 	out := make(map[string]pipeline.ModelUsage, len(m))
 	for model, t := range m {
-		out[model] = totalsToModelUsage(t)
+		u := totalsToModelUsage(t)
+		if w, ok := windows[model]; ok {
+			u.ContextWindow = w
+		} else {
+			u.ContextWindow, _ = cost.ContextWindow(model)
+		}
+		out[model] = u
 	}
 	return out
 }

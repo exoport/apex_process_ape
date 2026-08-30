@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -106,14 +107,19 @@ func printCoverageHuman(rep cost.CoverageReport) {
 	fmt.Printf("family aliases: %s\n\n", strings.Join(parts, "  "))
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "MODEL\tSEEN\tPRICING\tIN/1M\tOUT/1M\tLAST SEEN")
-	for _, m := range rep.Models {
+	fmt.Fprintln(tw, "MODEL\tSEEN\tPRICING\tIN/1M\tOUT/1M\tCONTEXT\tLAST SEEN")
+	for i := range rep.Models { // indexed: ObservedModel is past the copy threshold
+		m := &rep.Models[i]
 		last := ""
 		if !m.LastSeen.IsZero() {
 			last = m.LastSeen.Format("2006-01-02")
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%s\t$%.2f\t$%.2f\t%s\n",
-			m.Model, m.Turns, m.Source, m.BaseInput, m.Output, last)
+		window := "unknown"
+		if m.WindowSource.Known() {
+			window = strconv.Itoa(m.Window)
+		}
+		fmt.Fprintf(tw, "%s\t%d\t%s\t$%.2f\t$%.2f\t%s\t%s\n",
+			m.Model, m.Turns, m.Source, m.BaseInput, m.Output, window, last)
 	}
 	tw.Flush()
 
@@ -154,8 +160,9 @@ func printCoverageHuman(rep cost.CoverageReport) {
 	}
 	fmt.Println()
 	fmt.Println("to close the gap, add the exact rate(s) to internal/cost/prices.yaml:")
-	for _, m := range gaps {
-		fmt.Printf("  %s:\n    base_input: %.2f\n    output: %.2f\n", m.Model, m.BaseInput, m.Output)
+	for i := range gaps {
+		fmt.Printf("  %s:\n    base_input: %.2f\n    output: %.2f\n",
+			gaps[i].Model, gaps[i].BaseInput, gaps[i].Output)
 	}
 	fmt.Println("(the values shown are this binary's current estimate — confirm each against")
 	fmt.Println(" https://platform.claude.com/docs/en/about-claude/pricing before committing)")
