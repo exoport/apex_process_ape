@@ -20,7 +20,7 @@ func TestBuildSettings_NonWebReturnsEmptyObject(t *testing.T) {
 	}
 }
 
-func TestBuildSettings_WebInjectsAllSixHooks(t *testing.T) {
+func TestBuildSettings_WebInjectsAllHooks(t *testing.T) {
 	raw, err := BuildSettings(SettingsOptions{
 		APEBin:     "/usr/local/bin/ape",
 		BridgePort: 47291,
@@ -43,7 +43,18 @@ func TestBuildSettings_WebInjectsAllSixHooks(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	wantEvents := []string{"PreToolUse", "PostToolUse", "UserPromptSubmit", "SubagentStart", "SubagentStop", "Stop"}
+	wantEvents := []string{
+		"PreToolUse", "PostToolUse", "UserPromptSubmit",
+		"SubagentStart", "SubagentStop",
+		"SessionStart", "PreCompact",
+		"Stop",
+	}
+	// Exact set, not a subset: an event registered here spawns a hook
+	// subprocess on every occurrence, so one added by accident is a cost
+	// nobody chose to pay.
+	if len(got.Hooks) != len(wantEvents) {
+		t.Errorf("registered %d events, want %d: %v", len(got.Hooks), len(wantEvents), got.Hooks)
+	}
 	for _, ev := range wantEvents {
 		entries, ok := got.Hooks[ev]
 		if !ok {
@@ -96,10 +107,18 @@ func TestBuildSettings_WebErrorsOnInvalidPort(t *testing.T) {
 	}
 }
 
-// TestBuildSettings_BlobSizeUnderArgLimit locks PLAN-5 / C2's "<1 KB"
-// invariant on the settings JSON. If a future hook adds enough surface
-// to blow past 1 KB the runner needs revisiting (the argv path is
-// fine up to 128 KB on Linux, but the assertion is a useful canary).
+// TestBuildSettings_BlobSizeUnderArgLimit is a canary on the settings
+// JSON's size, not a limit the argv path imposes — that is fine to 128 KB
+// on Linux and 32 KB on Windows, and the blob is two orders of magnitude
+// below both.
+//
+// The ceiling was 1024 while the blob carried PLAN-5 / C4's six events
+// (876 bytes). The two session-boundary events took it to 1164, so the
+// canary moves to 2048 rather than being deleted: each registered event
+// costs ~145 bytes AND a hook subprocess per occurrence, and the size is
+// the cheap proxy for the cost that actually matters. Roughly six more
+// events would trip it again, which is the right moment to re-ask whether
+// every one of them is earning its spawn.
 func TestBuildSettings_BlobSizeUnderArgLimit(t *testing.T) {
 	raw, err := BuildSettings(SettingsOptions{
 		APEBin:     "/usr/local/bin/ape",
@@ -109,7 +128,7 @@ func TestBuildSettings_BlobSizeUnderArgLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSettings: %v", err)
 	}
-	if len(raw) > 1024 {
-		t.Errorf("settings blob is %d bytes, expected <1024", len(raw))
+	if len(raw) > 2048 {
+		t.Errorf("settings blob is %d bytes, expected <2048", len(raw))
 	}
 }

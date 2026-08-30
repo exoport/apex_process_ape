@@ -54,10 +54,11 @@ type hookCommand struct {
 }
 
 // BuildSettings produces the JSON blob handed to `claude --settings`.
-// Mode == ModeWeb (PLAN-5) or InjectHooks == true (PLAN-6) wires the
-// six events listed in PLAN-5 / C4 (five async, Stop sync). ModeEval
-// always returns `{}` regardless of InjectHooks (PLAN-6 invariant #1).
-// All other combinations return `{}`.
+// Mode == ModeWeb (PLAN-5) or InjectHooks == true (PLAN-6) wires eight
+// events — the six from PLAN-5 / C4 plus the two session-boundary events
+// below — with Stop the only synchronous one. ModeEval always returns
+// `{}` regardless of InjectHooks (PLAN-6 invariant #1), so nothing here
+// can reach the eval's spawn shape. All other combinations return `{}`.
 func BuildSettings(opts SettingsOptions) (json.RawMessage, error) {
 	if opts.Mode == ModeEval {
 		return json.RawMessage(`{}`), nil
@@ -105,6 +106,20 @@ func BuildSettings(opts SettingsOptions) (json.RawMessage, error) {
 		}},
 		"SubagentStop": {{
 			Hooks: []hookCommand{{Type: "command", Command: cmd("SubagentStop"), Async: true}},
+		}},
+		// Session-boundary observability. Recorded into
+		// hook-events.jsonl and read by nothing: neither event carries a
+		// field ape gates on, which is exactly why both can be async.
+		// A SYNCHRONOUS hook on a session boundary is how a run wedges.
+		//
+		// SessionStart fires on startup / resume / clear / compact, and
+		// the runner sends `/clear` between steps, so expect roughly one
+		// per step rather than one per spawned process.
+		"SessionStart": {{
+			Hooks: []hookCommand{{Type: "command", Command: cmd("SessionStart"), Async: true}},
+		}},
+		"PreCompact": {{
+			Hooks: []hookCommand{{Type: "command", Command: cmd("PreCompact"), Async: true}},
 		}},
 		// Stop is the only sync hook: ape needs the run-log flushed
 		// before the loop returns so the durable record is complete.

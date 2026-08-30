@@ -43,6 +43,18 @@ const (
 	HookSubagentStart    = "SubagentStart"
 	HookSubagentStop     = "SubagentStop"
 	HookStop             = "Stop"
+	// HookSessionStart and HookPreCompact are recorded, not read. ape
+	// gates on no field either one carries; they exist so a run directory
+	// can answer "did this session restart?" and "did Claude Code compact
+	// mid-run, and how often?" without re-deriving it from transcripts.
+	//
+	// SessionStart fires on more than a process spawn: its `source` is one
+	// of startup / resume / clear / compact, and the runner sends `/clear`
+	// between steps within a stage, so a stage's single claude process
+	// emits roughly one SessionStart per STEP, not one per spawn. Read the
+	// payload's `source` before counting these as sessions.
+	HookSessionStart = "SessionStart"
+	HookPreCompact   = "PreCompact"
 )
 
 // Message is the canonical IPC frame. Fields are populated per the

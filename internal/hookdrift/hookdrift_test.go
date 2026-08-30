@@ -72,6 +72,48 @@ func TestObserve_HealthyCorpus(t *testing.T) {
 	require.NotContains(t, rep.Summary(), "(Claude Code)")
 }
 
+// TestObserve_SessionBoundaryEventsAddNoObservation locks the reason this
+// package needed NO change when ape started registering SessionStart and
+// PreCompact (v0.0.60).
+//
+// The reflex on a new hook event is to widen the drift sweep to cover it.
+// That would be a category error here: an Observation exists for a FIELD
+// ape GATES on, keyed to the event carrying it. Neither of these two
+// carries such a field — they are recorded and read by nothing — so there
+// is no drift for this package to detect and nothing to add.
+//
+// It matters beyond tidiness. A fourth Observation would start at 0/0 and,
+// on a corpus where the field never appeared, could report drift for a
+// field no gate reads. `make check-hooks` runs
+// `ape doctor --only hooks.contract_drift --strict`, where a WARN is exit
+// 1 — so the wrong reflex here does not produce a spurious log line, it
+// breaks a Make gate.
+func TestObserve_SessionBoundaryEventsAddNoObservation(t *testing.T) {
+	t.Parallel()
+	const (
+		sessionStart = `{"event":"SessionStart","payload":{"session_id":"s1","source":"clear"}}`
+		preCompact   = `{"event":"PreCompact","payload":{"session_id":"s1","trigger":"auto"}}`
+	)
+	root := t.TempDir()
+	writeRun(t, root, "apex-story-batch-dev", "run1",
+		lines(sessionStart, agentPost, preCompact, subagentStop, preCompact, healthyStop),
+		manifestFor("2.1.232"))
+
+	rep, err := Observe(root, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.True(t, rep.OK(), "two ungated events cannot make a healthy corpus drift")
+	require.Len(t, rep.Observations, 3, "still exactly the three gated fields")
+	for _, o := range rep.Observations {
+		require.NotEqual(t, "SessionStart", o.Event)
+		require.NotEqual(t, "PreCompact", o.Event)
+	}
+	// The rows are skipped outright, not counted as absences against some
+	// other event's field.
+	require.Contains(t, rep.Summary(), "background_tasks 1/1")
+	require.Contains(t, rep.Summary(), "tool_response 1/1")
+	require.Contains(t, rep.Summary(), "agent_id 1/1")
+}
+
 // The failure this package exists for: the gate's field is gone, nothing
 // errored, and without this check nobody would notice.
 func TestObserve_DetectsDrift(t *testing.T) {

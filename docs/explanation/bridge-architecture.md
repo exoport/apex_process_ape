@@ -97,11 +97,30 @@ The pattern was validated by the PoC at
 
 ## Hooks shape the UI
 
-The inline `--settings` blob wires six hooks (`PreToolUse`,
+The inline `--settings` blob wires eight hooks (`PreToolUse`,
 `PostToolUse`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`,
-`Stop`). Five are `async: true` so the tool loop never waits; `Stop`
-is `async: false` because the parent uses it to flush the per-step
-run-log before the loop returns.
+`SessionStart`, `PreCompact`, `Stop`). Seven are `async: true` so the
+tool loop never waits; `Stop` is `async: false` because the parent uses
+it to flush the per-step run-log before the loop returns.
+
+`SessionStart` and `PreCompact` (ape v0.0.60) are recorded and read by
+nothing. Neither carries a field a [completion
+gate](step-completion-gates.md) depends on, which is what lets both be
+async and what keeps `internal/hookdrift` unchanged — it watches gated
+FIELDS, keyed to the event carrying them, so an event with no gated
+field has no drift to detect. They land in `hook-events.jsonl` so a run
+directory can answer "did Claude Code compact mid-run, and how often?"
+without re-deriving it from transcripts.
+
+One counting trap: `SessionStart` fires with `source` ∈ `startup` /
+`resume` / `clear` / `compact`, and the runner sends `/clear` between
+steps within a stage. A stage's single `claude` process therefore emits
+roughly one `SessionStart` per **step**, not one per spawn — read
+`source` before treating a count of them as a count of sessions. Those
+rows also carry an empty `step`, because `/clear` is sent before the
+next step's contract is registered (deliberately — see
+`interactive.go`). `PreCompact` fires mid-step and is attributed
+normally.
 
 Hooks are injected in every mode now: `--web` sets `Mode == ModeWeb`,
 and `--tui` / `--no-tui` opt in via `InjectHooks` (PLAN-6 / Phase E) so

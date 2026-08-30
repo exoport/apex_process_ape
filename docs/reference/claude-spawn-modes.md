@@ -34,7 +34,7 @@ Every claude spawn is an interactive REPL attached to a PTY. ape never passes -p
 
 ## Bridge role
 
-The MCP bridge (`internal/bridge/orchestrator/`) stays wired for **hook observability** (`UserPromptSubmit`, `Stop`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`) in every mode. Under `--web` it additionally carries prompt/reply traffic for the browser via `await_message` / `reply`.
+The MCP bridge (`internal/bridge/orchestrator/`) stays wired for **hook observability** (`UserPromptSubmit`, `Stop`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`, and since v0.0.60 `SessionStart` and `PreCompact`) in every mode. Under `--web` it additionally carries prompt/reply traffic for the browser via `await_message` / `reply`.
 
 ## Source of truth in code
 
