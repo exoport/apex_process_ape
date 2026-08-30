@@ -10,9 +10,9 @@
 //
 // The store lives under `{development_folder}/deferred/`, deliberately
 // OUTSIDE `{implementation_folder}`: ten skills glob
-// `{implementation_folder}/**/*.md` across 17 sites, and 227 record files
-// under that folder would feed every one of them. Siting it one level up
-// costs zero skill edits and cannot collide.
+// `{implementation_folder}/**/*.md` across 17 sites, and a record file per
+// entry under that folder would feed every one of them. Siting it one
+// level up costs zero skill edits and cannot collide.
 package deferred
 
 import (
@@ -54,6 +54,28 @@ type Record struct {
 	Source string `json:"source,omitempty" yaml:"source,omitempty"`
 	// SourceStory is the story whose review filed this.
 	SourceStory string `json:"source_story,omitempty" yaml:"source_story,omitempty"`
+	// SourceHeading is the legacy ledger heading this record sat under,
+	// verbatim.
+	//
+	// It carries what the structured fields cannot. `source`,
+	// `source_story` and `created` are extractions, and a heading holds
+	// more than they take:
+	//
+	//	## Deferred from: story review of 86-1_… (retroactively backfilled by Story 89.2, 2026-07-26)
+	//
+	// leaves "retroactively backfilled by Story 89.2" with nowhere to go —
+	// attribution on exactly the two-field headings the independent
+	// slug/date extraction exists to rescue. Without this the RECOGNISED
+	// heading was the one that lost text, while an unrecognised one
+	// survived as a Title: the better-understood heading lost more.
+	//
+	// It is also what makes the migration's losslessness guarantee true
+	// rather than merely plausible. Heading lines leave the body, so they
+	// are counted separately by the pre-write check; before this field
+	// existed that bucket was a parse-time artifact that never reached
+	// disk, and the check proved something about the parse rather than
+	// about the migration.
+	SourceHeading string `json:"source_heading,omitempty" yaml:"source_heading,omitempty"`
 	// Skill is the skill that filed it.
 	Skill string `json:"skill,omitempty" yaml:"skill,omitempty"`
 	// Cycle is the review cycle number, when the caller passed one.
@@ -81,7 +103,16 @@ type Record struct {
 
 	// FreeForm marks a record the deterministic parser could not complete:
 	// its body is the original text verbatim and its title is the first
-	// line. 26 of 109 real records are free-form, so this path always runs.
+	// line, and NO field on this struct was parsed from it. That second
+	// half is the contract — `free_form: true` means nothing here was
+	// interpreted, so `ape deferred repair` can treat the body as the only
+	// evidence rather than having to distrust half-filled fields.
+	//
+	// Any real ledger has records that land here, so the path always runs.
+	// What FRACTION land here is deliberately not quoted: the first field
+	// migration showed the rate is a property of the corpus and of the
+	// parser's own defects, so a number printed at an operator only invites
+	// them to trust a figure that was measured against different code.
 	FreeForm bool `json:"free_form,omitempty" yaml:"free_form,omitempty"`
 
 	// ResolvedBy and ResolvedAt are written by close.
@@ -227,7 +258,13 @@ func ParseBullet(text string) Record {
 		if rec.Title == "" {
 			rec.Title = "(untitled)"
 		}
-		applyTail(&rec, strings.Join(lines, "\n"))
+		// NO field parsing here, deliberately. This path used to run
+		// applyTail over the ENTIRE BODY, so any text containing the
+		// substring `outside-story=` — including prose describing something
+		// else — acquired a field, and the record came out simultaneously
+		// flagged unparseable and carrying parsed values. Anchors stay:
+		// a `[path:line]` bracket is extracted from the text, not inferred
+		// from it, so it cannot claim more than the body says.
 		rec.Anchors = findAnchors(text)
 		return rec
 	}
@@ -242,9 +279,84 @@ func ParseBullet(text string) Record {
 		rec.Title = "(untitled)"
 	}
 	// Fields can appear in the tail or on continuation lines.
-	applyTail(&rec, tail+"\n"+strings.Join(lines[1:], "\n"))
+	applyTail(&rec, tailBlob(tail, lines[1:]))
 	rec.Anchors = findAnchors(text)
 	return rec
+}
+
+// tailFieldRe recognises a line that continues the `— defer:` FIELD LIST
+// rather than starting prose under the bullet.
+//
+// The vocabulary is exactly the one the field regexes above read, and
+// NOTHING ELSE — in particular not a bare `;`. A semicolon looks like the
+// list's own separator but it is also ordinary punctuation, so accepting
+// it put the corruption straight back:
+//
+//	— defer: owner=alice
+//	  it broke; then we reverted it     -> owner="alice it broke"
+//
+// The separator was never load-bearing either. A wrapped value is joined
+// because the continuation opens the NEXT field, and a line that opens a
+// field names it — so the key alternatives already catch every wrap the
+// `;` did, including a three-line one where only the last line carries
+// `cross-cycle=`.
+var tailFieldRe = regexp.MustCompile(
+	`(?i)\b(?:outside-story|cross-cycle|non-blocking|owner|trigger|next-batch brief)\s*[:=]`)
+
+// tailBlob assembles the text the field regexes run over.
+//
+// Field values are bounded by `[^;\n]+`, so a newline terminates one. That
+// is right for a field on its own line and WRONG for a value the ledger
+// soft-wrapped: `outside-story=none of the 4 files are in the story's File
+// List` wraps mid-value, and the half before the wrap was stored as though
+// it were the whole answer — a truncated half-sentence presented as an
+// authoritative field.
+//
+// Unwrapping has to distinguish a wrapped value from a continued sentence,
+// and those two are only told apart by what the continuation line says:
+//
+//   - [Defer] First thing — defer: owner=alice
+//     continuation line for the first          <- prose; owner is "alice"
+//
+//   - [Defer] Wrapped — defer: outside-story=none of the 4 files are in
+//     the story's File List; cross-cycle=no    <- the field list, wrapped
+//
+// So a continuation line is joined onto the tail only when it carries
+// field syntax, and the run stops at a blank line. A prose continuation
+// never reaches the field regexes, which means this can shorten a value
+// that wrapped without any field marker but can never let one run on into
+// a sentence. Truncation is a wrong answer; absence is an honest one, and
+// `ape deferred repair` exists for the difference.
+//
+// The lookahead to the LAST field-bearing line in the run is what handles
+// a value wrapped across three lines, where only the final one carries the
+// `;` that opens the next field.
+func tailBlob(tail string, continuation []string) string {
+	if strings.TrimSpace(tail) == "" {
+		return "\n" + strings.Join(continuation, "\n")
+	}
+	run := 0
+	for run < len(continuation) && strings.TrimSpace(continuation[run]) != "" {
+		run++
+	}
+	join := 0
+	for i := range run {
+		if tailFieldRe.MatchString(continuation[i]) {
+			join = i + 1
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString(strings.TrimSpace(tail))
+	for i := range join {
+		b.WriteByte(' ')
+		b.WriteString(strings.TrimSpace(continuation[i]))
+	}
+	for i := join; i < len(continuation); i++ {
+		b.WriteByte('\n')
+		b.WriteString(continuation[i])
+	}
+	return b.String()
 }
 
 // trimTail removes a `— defer: …` tail from a title fragment.
@@ -270,6 +382,56 @@ func applyTail(rec *Record, blob string) {
 	set(ownerRe, &rec.Owner)
 	set(triggerRe, &rec.Trigger)
 	set(nextActionRe, &rec.NextAction)
+}
+
+// resolutionBannerRe matches a block that announces its own resolution.
+var resolutionBannerRe = regexp.MustCompile(`(?i)\bRESOLVED\b`)
+
+// resolvedByBanner is what a migrated resolution banner records as its
+// discharge. It names the EVIDENCE, not a person, because nothing verified
+// the claim — the ledger said the work was done and the migration is
+// repeating it, which is a different thing from `ape deferred close`
+// having checked the premise against HEAD.
+const resolvedByBanner = "resolution banner in the legacy ledger (migrated, not verified)"
+
+// applyResolutionBanner closes a record whose body is a blockquote
+// announcing that the work is already done.
+//
+// The migration used to stamp `status: open` on every record with no
+// inspection of the body at all, so a `✅ RESOLVED` banner had no path to
+// any other status and landed in the open working set as a live item.
+//
+// The test is deliberately narrow — the body must be BLOCKQUOTE-ONLY and
+// must say RESOLVED. A blockquote-only block is a section annotation
+// rather than a deferred item, which is what makes reading its own claim
+// about itself safe; the same word inside a bullet is that bullet
+// describing something else. Guessing wider than this would put the
+// migration back in the business of interpreting content.
+func applyResolutionBanner(rec *Record) {
+	if !isBlockquoteOnly(rec.Body) || !resolutionBannerRe.MatchString(rec.Body) {
+		return
+	}
+	rec.Status = StatusClosed
+	rec.ResolvedBy = resolvedByBanner
+	if dates := isoDateRe.FindAllString(rec.Body, -1); len(dates) > 0 {
+		rec.ResolvedAt = dates[0]
+	}
+}
+
+// isBlockquoteOnly reports whether every non-blank line is a blockquote.
+func isBlockquoteOnly(text string) bool {
+	quoted := false
+	for line := range strings.SplitSeq(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if !strings.HasPrefix(trimmed, ">") {
+			return false
+		}
+		quoted = true
+	}
+	return quoted
 }
 
 func findAnchors(text string) []string {

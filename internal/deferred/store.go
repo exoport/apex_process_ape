@@ -77,7 +77,11 @@ func (s *Store) loadDir(dir string, res *LoadResult) error {
 		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".md") {
 			continue
 		}
-		if strings.HasPrefix(e.Name(), ".") || strings.EqualFold(e.Name(), "README.md") {
+		// The two files in a store that are prose about the store rather
+		// than records in it.
+		if strings.HasPrefix(e.Name(), ".") ||
+			strings.EqualFold(e.Name(), "README.md") ||
+			strings.EqualFold(e.Name(), PreambleFileName) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())

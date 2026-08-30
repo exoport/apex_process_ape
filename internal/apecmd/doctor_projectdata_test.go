@@ -404,7 +404,7 @@ func TestRunProjectMigrations_RunsAndPrintsTheGitAddLine(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, runProjectMigrations(context.Background(), &buf, root))
 	out := buf.String()
-	require.Contains(t, out, "bodies byte-identical ... OK")
+	require.Contains(t, out, "every ledger line accounted for ... OK")
 	require.Contains(t, out, "nothing committed")
 	require.Contains(t, out, "git add")
 }

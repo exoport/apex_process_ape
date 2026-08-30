@@ -37,7 +37,7 @@ func TestDeferredMigrate_HumanOutputAndGitAddHint(t *testing.T) {
 
 	out := runCmd(t, newDeferredMigrateCmd())
 	require.Contains(t, out, "migration:")
-	require.Contains(t, out, "bodies byte-identical ... OK")
+	require.Contains(t, out, "every ledger line accounted for ... OK")
 	require.Contains(t, out, "-> stub")
 
 	// Nothing is committed, so the output has to carry what a commit
@@ -249,7 +249,7 @@ func TestEmitGitAddHint_CollapsesToDirectories(t *testing.T) {
 	require.Equal(t, 1, strings.Count(out, "git add"))
 	require.Contains(t, out, filepath.Join("development", "deferred"))
 	require.Contains(t, out, filepath.Join("development", "implementation"))
-	require.NotContains(t, out, "DW-1_a.md", "227 paths in a git add line is not usable")
+	require.NotContains(t, out, "DW-1_a.md", "a git add line listing every record file is not usable")
 }
 
 func TestRelTo(t *testing.T) {
@@ -346,4 +346,36 @@ func TestDeferredRepair_RefusesWhenNoSkillIsInstalled(t *testing.T) {
 	require.Contains(t, err.Error(), repairSkill)
 	require.Contains(t, err.Error(), repairSkillLegacy, "both names are named, so the operator can see which is expected")
 	require.Contains(t, err.Error(), "ape framework update")
+}
+
+// TestDeferredMigrate_ReportsTheRelocation covers the reporting gap the
+// first field migration hit: 456 KB of cited text left the folder a
+// repo-wide anchor gate was scoped to, that gate's count fell by 44, and
+// the drop read as a regression caused by the migration rather than as the
+// migration itself. Nothing was wrong; nothing said so either.
+func TestDeferredMigrate_ReportsTheRelocation(t *testing.T) {
+	root := newTestProject(t, realProjectConfig)
+	writeLegacyLedger(t, root, legacyLedgerFixture)
+
+	out := runCmd(t, newDeferredMigrateCmd())
+	require.Contains(t, out, "bytes of cited text moved out of")
+	require.Contains(t, out, "not a regression")
+	require.Contains(t, out, filepath.Join("development", "implementation"))
+}
+
+// TestDeferredMigrate_AlreadyDoneSaysHowToReMigrate: a wrong section date
+// is hashed into the record id, so that class of defect can only be fixed
+// by re-migrating. "already migrated" on its own is a dead end when
+// re-migrating is exactly what the operator is trying to do.
+func TestDeferredMigrate_AlreadyDoneSaysHowToReMigrate(t *testing.T) {
+	root := newTestProject(t, realProjectConfig)
+	writeLegacyLedger(t, root, legacyLedgerFixture)
+
+	require.Contains(t, runCmd(t, newDeferredMigrateCmd()), "migration:")
+
+	out := runCmd(t, newDeferredMigrateCmd())
+	require.Contains(t, out, "already migrated")
+	require.Contains(t, out, "to re-migrate")
+	require.Contains(t, out, "restore")
+	require.Contains(t, out, "remove")
 }

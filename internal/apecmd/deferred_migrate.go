@@ -81,24 +81,50 @@ func newDeferredMigrateCmd() *cobra.Command {
 
 Four properties, all asserted rather than assumed:
 
-  VERIFIED BEFORE WRITE   N records parsed must equal N files written and
-                          every body must survive byte-for-byte, or NOTHING
-                          is written. A lossy conversion that passed
-                          silently is the one failure here that git cannot
-                          undo.
+  VERIFIED BEFORE WRITE   every significant line of the ledger must come
+                          back out in something this writes — a record
+                          body, a record's source_heading, or the preamble
+                          file — N records parsed must equal N files
+                          written, and every body must survive a round
+                          trip, or NOTHING is written. The first of those
+                          three is checked against the LEDGER, not just
+                          against the parser's own output: a conversion
+                          that silently lost text while reporting success
+                          is the one failure here that git cannot undo.
+                          Line endings are the single normalisation — a
+                          CRLF ledger yields LF bodies.
   IDEMPOTENT              detected from disk state — does the store hold
                           records, is the legacy file already a stub. No
                           version marker is stored, so nothing can drift.
   NEVER DELETES THE SOURCE  the legacy file becomes a short signpost; its
-                          content stays in git.
+                          content stays in git, and its preamble is kept
+                          verbatim beside the records.
   NO COMMIT               the files land in the working tree. You commit
                           them, as one commit or two, however you like.
 
+Each record carries the ledger heading it sat under verbatim, in
+source_heading, alongside the source/source_story/created extracted from
+it. A heading holds more than three fields can take, and that remainder is
+often attribution.
+
 A record whose tail does not match the expected shape keeps its full text
-as the body and takes its title from the first line — 26 of 109 records in
-the reference ledger are free-form, so that path always runs. Nothing is
-dropped and nothing is guessed at; 'ape deferred verify' flags them, and
-'ape deferred repair' completes or retires them.
+as the body and takes its title from the first line, with NO fields parsed
+from it — 'free_form: true' means nothing in it was interpreted. Any real
+ledger has records that land there. What fraction is not quoted here on
+purpose: it is a property of your corpus, and a number measured against
+someone else's would only invite you to trust it. 'ape deferred verify'
+flags them and 'ape deferred repair' completes or retires them.
+
+The migration MOVES cited text out of the folder it was living in. A
+repo-wide gate scoped to that folder — anchor counts, citation ratchets —
+will drop the moment this lands, without anything regressing. The
+completion output says how much moved so that drop is explainable.
+
+Re-migrating after a parser fix: record ids are derived from the ledger,
+so a corrected parse yields different ids and the two sets cannot be
+merged. Restore the ledger from git and delete the store directory; this
+refuses to run into a store that still holds records rather than
+interleaving two migrations on disk.
 
 --recover-deleted mines the ledger's git history for records removed from
 it and writes them straight to closed/. The ledger's own preamble
@@ -170,6 +196,8 @@ func migrationPaths(store, legacy string) []string {
 func emitMigrateHuman(w io.Writer, res *deferred.MigrateResult, root string) {
 	if res.AlreadyDone {
 		fmt.Fprintln(w, "already migrated — the store holds records and the legacy file is a stub")
+		fmt.Fprintf(w, "  to re-migrate after a parser fix: restore %s from git and remove %s\n",
+			relTo(root, res.From), relTo(root, res.To))
 		return
 	}
 	verb := "migration:"
@@ -181,6 +209,10 @@ func emitMigrateHuman(w io.Writer, res *deferred.MigrateResult, root string) {
 		fmt.Fprintf(w, "           %d recovered from git history -> %s\n",
 			res.Recovered, relTo(root, filepath.Join(res.To, deferred.ClosedDirName)))
 	}
+	if res.Closed > 0 {
+		fmt.Fprintf(w, "           %d arrived already resolved -> %s\n",
+			res.Closed, relTo(root, filepath.Join(res.To, deferred.ClosedDirName)))
+	}
 	if res.FreeForm > 0 {
 		fmt.Fprintf(w, "           %d free-form record(s) kept verbatim, flagged for `ape deferred verify`\n",
 			res.FreeForm)
@@ -189,15 +221,39 @@ func emitMigrateHuman(w io.Writer, res *deferred.MigrateResult, root string) {
 		fmt.Fprintf(w, "  warning: %s\n", warning)
 	}
 	if res.DryRun {
-		fmt.Fprintln(w, "\nverify: parsed and round-tripped cleanly. Nothing written (--dry-run).")
+		fmt.Fprintln(w, "\nverify: every ledger line accounted for, records round-trip. Nothing written (--dry-run).")
+		emitMigrateRelocationNote(w, res, root)
 		return
 	}
-	fmt.Fprintf(w, "  verify:  %d in -> %d out, bodies byte-identical ... OK\n",
+	fmt.Fprintf(w, "  verify:  %d in -> %d out, every ledger line accounted for ... OK\n",
 		res.RecordsIn, res.RecordsOut)
+	if res.PreambleWritten {
+		fmt.Fprintf(w, "           ledger preamble kept at %s\n",
+			relTo(root, filepath.Join(res.To, deferred.PreambleFileName)))
+	}
 	if res.StubWritten {
 		fmt.Fprintf(w, "           %s -> stub\n", relTo(root, res.From))
 	}
+	emitMigrateRelocationNote(w, res, root)
 	emitGitAddHint(w, root, res.Paths)
+}
+
+// emitMigrateRelocationNote says that cited text has changed folders.
+//
+// Not a nicety and not a warning: a project whose gates count anchors or
+// citations under one folder watches that count fall the moment this runs,
+// with nothing actually regressed. The first field migration moved 456 KB
+// and took a ratchet from 1039 to 995, which read as a regression and cost
+// a revert to work out. Saying it here is cheaper than explaining it after.
+func emitMigrateRelocationNote(w io.Writer, res *deferred.MigrateResult, root string) {
+	if res.Bytes == 0 {
+		return
+	}
+	fmt.Fprintf(w,
+		"\nnote: %d bytes of cited text moved out of %s into %s.\n"+
+			"      A gate scoped to the old folder will count fewer anchors now. That is\n"+
+			"      the move, not a regression — re-baseline it rather than chasing it.\n",
+		res.Bytes, relTo(root, filepath.Dir(res.From)), relTo(root, res.To))
 }
 
 // emitGitAddHint prints what a commit message would have carried. This is
@@ -211,7 +267,7 @@ func emitGitAddHint(w io.Writer, root string, paths []string) {
 	var roots []string
 	for _, p := range paths {
 		// Collapse per-record files to their directory: a `git add` line
-		// with 227 paths in it is not usable.
+		// listing every record file in it is not usable.
 		dir := relTo(root, filepath.Dir(p))
 		if !seen[dir] {
 			seen[dir] = true

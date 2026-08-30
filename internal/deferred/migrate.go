@@ -15,12 +15,47 @@ import (
 	"github.com/exoport/apex_process_ape/internal/frontmatter"
 )
 
-// sectionRe matches the legacy ledger's provenance headings:
+// headingRe matches ANY level-2 heading.
+//
+// The ledger's structure is carried entirely by its `##` lines, so every
+// one of them is a record boundary. The parser used to know only the one
+// provenance form below and let every other `##` line fall through into
+// generic text accumulation, which is a single gap that produced three
+// separate field defects at once: the previous section's story and date
+// stayed live under a heading that had nothing to do with them, the
+// unrecognised heading itself became body text, and the ledger's own
+// preamble accumulated into a record because `## Still open` reset
+// nothing either.
+//
+// Being heading-aware rather than bullet-aware closes all three.
+var headingRe = regexp.MustCompile(`^##\s+\S`)
+
+// sectionRe matches the legacy ledger's provenance headings and captures
+// everything after the label:
 //
 //	## Deferred from: story review of 54-1 (2026-08-21)
 //	## Deferred from: apex-correct-course reconciliation of epic 12 (2026-07-02)
-var sectionRe = regexp.MustCompile(
-	`(?i)^##\s+Deferred from:\s*(.*?)(?:\s+of\s+(\S+))?\s*(?:\(([\d-]+)\))?\s*$`,
+//
+// It deliberately captures the WHOLE remainder rather than trying to
+// structure it in one pattern. The previous shape made slug and date
+// alternatives inside a single lazy expression, so a heading carrying a
+// prose parenthetical —
+//
+//	## Deferred from: story review of 86-1_… (retroactively backfilled by Story 89.2, 2026-07-26)
+//
+// — failed the date group, backtracked, and collapsed the entire remainder
+// into the label: the slug was lost too, with both values sitting in
+// plain sight on the line. sectionFrom extracts them independently.
+var sectionRe = regexp.MustCompile(`(?i)^##\s+Deferred from:\s*(.*)$`)
+
+// sectionSlugRe and isoDateRe are the two INDEPENDENT extractions.
+//
+// The slug's anchor is `of <token>`, whatever follows it, and the date is
+// the last ISO date anywhere in the heading — so neither can be defeated
+// by the other failing to match.
+var (
+	sectionSlugRe = regexp.MustCompile(`(?i)\bof\s+(\S+)`)
+	isoDateRe     = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
 )
 
 // MigrateOptions controls one migration.
@@ -44,45 +79,186 @@ type MigrateResult struct {
 	RecordsOut int `json:"records_out" yaml:"records_out"`
 	FreeForm   int `json:"free_form"   yaml:"free_form"`
 	Recovered  int `json:"recovered"   yaml:"recovered"`
+	// Closed is how many parsed records arrived already discharged — a
+	// resolution banner in the ledger, not an open item.
+	Closed int `json:"closed" yaml:"closed"`
+	// Bytes is how much ledger text moved out of the legacy file. The
+	// framework's anchor and citation gates are scoped to a folder, so a
+	// migration that relocates this much cited text moves those counts
+	// with it; reporting it is what stops that looking like a regression.
+	Bytes int `json:"bytes" yaml:"bytes"`
 	// Paths is every file written, for the caller's `git add` line.
 	Paths []string `json:"paths,omitempty" yaml:"paths,omitempty"`
 	// StubWritten records that the legacy file became a signpost.
-	StubWritten bool     `json:"stub_written"       yaml:"stub_written"`
-	DryRun      bool     `json:"dry_run"            yaml:"dry_run"`
-	AlreadyDone bool     `json:"already_done"       yaml:"already_done"`
-	Warnings    []string `json:"warnings,omitempty" yaml:"warnings,omitempty"`
+	StubWritten bool `json:"stub_written" yaml:"stub_written"`
+	// PreambleWritten records that the ledger's own header — document
+	// history, not a deferred item — was preserved beside the records.
+	PreambleWritten bool     `json:"preamble_written"   yaml:"preamble_written"`
+	DryRun          bool     `json:"dry_run"            yaml:"dry_run"`
+	AlreadyDone     bool     `json:"already_done"       yaml:"already_done"`
+	Warnings        []string `json:"warnings,omitempty" yaml:"warnings,omitempty"`
 }
 
 // ErrLosslessnessFailed reports that the verify-before-write assertion did
 // not hold. Nothing is written when this is returned.
 var ErrLosslessnessFailed = errors.New("losslessness assertion failed")
 
-// ParseLegacy splits the legacy ledger into records.
+// ErrStorePopulated reports a store that already holds records when a
+// migration was asked to run into it.
+//
+// Without this the migration writes its records alongside the existing
+// ones and only then fails the post-write count assertion — files on
+// disk, an error at the end, and an operator left to work out which half
+// is which. Refusing up front is the same verdict delivered before
+// anything is touched.
+var ErrStorePopulated = errors.New("store already holds records")
+
+// LegacyDocument is everything a parse of the ledger produced. Every line
+// of the source is accounted for by exactly one of its fields, which is
+// what lets verifyLossless check the whole document rather than the part
+// that happens to be convenient.
+type LegacyDocument struct {
+	// Records are the deferred items.
+	Records []Record
+	// Preamble is ledger prose that is not a record: the header above the
+	// first boundary. Verbatim ledger text and nothing else.
+	Preamble string
+	// OrphanHeadings are headings that titled no record, because another
+	// heading followed with nothing in between.
+	//
+	// They are kept rather than dropped. `## Still open` is noise and
+	// `## Deferred-at-decision: <a real title>` is not, and nothing here
+	// can tell them apart — so neither is deleted. They are stored beside
+	// the preamble, not inside it, so Preamble stays verbatim.
+	OrphanHeadings []string
+	// Headings is every `##` line consumed as a boundary that went on to
+	// produce a record — lifted out of the body and written verbatim to
+	// each of those records' `source_heading`.
+	//
+	// It exists to be COUNTED. Heading lines are the one class that leaves
+	// the body text, and an exemption that is merely ignored is a hole the
+	// losslessness check cannot see through: heading-shaped content could
+	// be deleted silently and the check would still pass.
+	//
+	// Counting it is only honest because `source_heading` puts it on disk.
+	// While it was a parse-time artifact that evaporated at write time,
+	// this bucket made the check prove something about the PARSE while
+	// reading as a claim about the MIGRATION — and the text a recognised
+	// provenance heading carries beyond `source`/`source_story`/`created`
+	// really was being dropped.
+	Headings []string
+}
+
+// ParseLegacy splits the legacy ledger into records, discarding everything
+// that is not one. Use ParseLegacyDocument where the rest matters — the
+// migration keeps it, because discarding it is what the store exists to
+// stop.
+func ParseLegacy(data []byte) []Record {
+	return ParseLegacyDocument(data).Records
+}
+
+// ParseLegacyDocument splits the legacy ledger into records plus the
+// preamble the records sit under.
 //
 // The mapping is fixed, because this is the only place losslessness can be
 // lost. A record whose tail does not match keeps its full text as the body
-// and takes its title from the first line — 26 of 109 real records are
-// free-form, so that path always runs. Nothing is dropped and nothing is
-// guessed at.
-func ParseLegacy(data []byte) []Record {
+// and takes its title from the first line; nothing is dropped and nothing
+// is guessed at.
+//
+// THREE STRUCTURAL RULES, each of which was a field defect:
+//
+//   - A `##` heading is a boundary, always. A recognised one sets
+//     provenance context; an unrecognised one CLEARS it. Letting the
+//     previous `## Deferred from:` context stay live under an unrelated
+//     heading made records assert a story they never sat under, and the
+//     inherited date is hashed into the id — so the damage survived any
+//     later frontmatter edit and could only be undone by re-running.
+//
+//   - A heading is never body text. An unrecognised one titles the FIRST
+//     record beneath it and is lifted out of every body, exactly as the
+//     provenance form already was. Leaving it in the body made the store
+//     hold titles with no body and bodies with no title, and which of the
+//     two you got depended on whether the next line was a bullet.
+//
+//   - Content above the first boundary is preamble, not a record. In the
+//     field this produced one 434-line, 37,822-byte "open item" that was
+//     pure document history. A ledger that opens with bullets and no
+//     heading still parses: the first top-level bullet is a boundary too,
+//     so a flat ledger does not collapse into preamble.
+//
+// A FENCED CODE BLOCK SUSPENDS ALL OF IT. Inside a ``` or ~~~ fence
+// opened at column 0, no line is a boundary — not a heading and not a
+// bullet. Without that, a Makefile pasted into the ledger has its
+// `## build everything` comment consumed as a section heading: the line is
+// deleted, and the fence is split across two records with the opener in
+// one and the closer in the other. Losslessness cannot catch it, because
+// the deleted line is heading-shaped and heading-shaped lines are the
+// exempt class — which is exactly why the exemption is now COUNTED
+// (LegacyDocument.Headings) instead of ignored. An unclosed fence runs to
+// the end of the document, as Markdown says it does.
+func ParseLegacyDocument(data []byte) *LegacyDocument {
+	doc := &LegacyDocument{}
 	var (
-		records []Record
-		section sectionContext
-		pending strings.Builder
+		section     sectionContext
+		pending     strings.Builder
+		preambleBuf strings.Builder
+		orphans     []string
+		heading     string
+		headingLine string
+		headingUsed bool
+		sawBoundary bool
+		inFence     bool
 	)
 	flush := func() {
 		text := pending.String()
 		pending.Reset()
 		if strings.TrimSpace(text) == "" {
+			// A heading with nothing under it is not a record. `heading` is
+			// deliberately NOT cleared here: it belongs to whatever content
+			// comes next, which has not been buffered yet.
+			return
+		}
+		if !sawBoundary {
+			preambleBuf.WriteString(text)
 			return
 		}
 		rec := ParseBullet(text)
 		rec.Source = section.source
 		rec.SourceStory = section.story
 		rec.Created = section.date
-		rec.Status = StatusOpen
+		// The heading goes down verbatim on every record it covers. That
+		// is what makes Headings an OUTPUT rather than a parse-time
+		// artifact, and it is the only place the parts of a heading that
+		// no structured field extracts survive at all.
+		rec.SourceHeading = headingLine
+		if heading != "" {
+			// An unrecognised heading titles the first record under it, and
+			// only that one — everything after takes its own first line.
+			rec.Title = heading
+			heading = ""
+		}
+		applyResolutionBanner(&rec)
 		rec.ID = NewID(section.date, rec.Title, rec.Body)
-		records = append(records, rec)
+		doc.Records = append(doc.Records, rec)
+		headingUsed = true
+	}
+	// closeHeading files the heading that is going out of scope. One that
+	// produced a record is accounted for by that record's frontmatter; one
+	// that produced nothing has nowhere to be, so its text is kept as
+	// preamble rather than dropped. `## Still open` is noise and `##
+	// Deferred-at-decision: <a real title>` is not, and nothing here can
+	// tell them apart — so neither is deleted.
+	closeHeading := func() {
+		if headingLine == "" {
+			return
+		}
+		if headingUsed {
+			doc.Headings = append(doc.Headings, headingLine)
+		} else {
+			orphans = append(orphans, headingLine)
+		}
+		headingLine = ""
+		headingUsed = false
 	}
 
 	scanner := bufio.NewScanner(bytes.NewReader(data))
@@ -94,15 +270,38 @@ func ParseLegacy(data []byte) []Record {
 	startedList := false
 	for scanner.Scan() {
 		line := scanner.Text()
-		if m := sectionRe.FindStringSubmatch(line); m != nil {
+		if fenceRe.MatchString(line) {
+			inFence = !inFence
+			pending.WriteString(line)
+			pending.WriteString("\n")
+			continue
+		}
+		if inFence {
+			// Verbatim, blank lines included: inside a fence a blank line
+			// is content, not separation.
+			pending.WriteString(line)
+			pending.WriteString("\n")
+			continue
+		}
+		if headingRe.MatchString(line) {
 			flush()
+			closeHeading()
+			sawBoundary = true
 			startedList = false
-			section = sectionFrom(m)
+			headingLine = line
+			if m := sectionRe.FindStringSubmatch(line); m != nil {
+				section = sectionFrom(m[1])
+				heading = ""
+			} else {
+				section = sectionContext{}
+				heading = headingTitle(line)
+			}
 			continue
 		}
 		switch {
 		case topLevelBulletRe.MatchString(line):
 			flush()
+			sawBoundary = true
 			startedList = true
 		case strings.TrimSpace(line) == "":
 			if pending.Len() > 0 {
@@ -119,18 +318,38 @@ func ParseLegacy(data []byte) []Record {
 		pending.WriteString("\n")
 	}
 	flush()
+	closeHeading()
 
 	// De-duplicate ids that collide because two records in the same
 	// section have identical text. Both are kept: the operator wrote two.
 	seen := map[string]int{}
-	for i := range records {
-		id := records[i].ID
+	for i := range doc.Records {
+		id := doc.Records[i].ID
 		if n := seen[id]; n > 0 {
-			records[i].ID = fmt.Sprintf("%s-%d", id, n+1)
+			doc.Records[i].ID = fmt.Sprintf("%s-%d", id, n+1)
 		}
 		seen[id]++
 	}
-	return records
+
+	doc.Preamble = preambleBuf.String()
+	doc.OrphanHeadings = orphans
+	return doc
+}
+
+// fenceRe matches a code-fence delimiter at column 0. An indented fence
+// is already inside a bullet's continuation, where nothing is a boundary
+// anyway.
+var fenceRe = regexp.MustCompile("^(?:```|~~~)")
+
+// orphanHeadingsNote tells a reader why headings are sitting at the end of
+// the preamble file.
+const orphanHeadingsNote = "<!-- Headings from the ledger that titled no record. A heading is lifted " +
+	"into frontmatter, and one with nothing under it has no frontmatter to be lifted into — kept " +
+	"here rather than dropped. -->"
+
+// headingTitle renders a heading line as a record title.
+func headingTitle(line string) string {
+	return strings.TrimSpace(strings.TrimLeft(line, "# \t"))
 }
 
 type sectionContext struct {
@@ -139,15 +358,44 @@ type sectionContext struct {
 	date   string
 }
 
-func sectionFrom(m []string) sectionContext {
-	label := strings.ToLower(strings.TrimSpace(m[1]))
-	ctx := sectionContext{story: strings.TrimSpace(m[2]), date: strings.TrimSpace(m[3])}
+// sectionFrom reads provenance out of a `## Deferred from:` heading's
+// remainder, extracting each field independently so one unparseable part
+// cannot take the others down with it.
+func sectionFrom(label string) sectionContext {
+	var ctx sectionContext
+	if m := sectionSlugRe.FindAllStringSubmatch(label, -1); len(m) > 0 {
+		// The last `of <token>` that looks like a story key — one starting
+		// with a digit — and the FIRST `of` otherwise.
+		//
+		// Neither half alone is enough. Taking the last unconditionally
+		// reads a slug out of ordinary prose ("of 91-2, deemed out of
+		// scope" -> "scope"), which is FW-1a's failure mode arriving
+		// through a different door: a confidently wrong value that reads as
+		// authoritative. Taking the first breaks a label that qualifies
+		// itself before naming the story. Story keys start with a digit and
+		// the prose words that follow `of` do not, so the digit test picks
+		// the real one whenever there is one, and the first-`of` fallback
+		// keeps a non-numeric key like `epic-12` working.
+		ctx.story = strings.Trim(strings.TrimSpace(m[0][1]), "(),;:.")
+		for _, match := range m {
+			token := strings.Trim(strings.TrimSpace(match[1]), "(),;:.")
+			if token != "" && token[0] >= '0' && token[0] <= '9' {
+				ctx.story = token
+			}
+		}
+	}
+	if dates := isoDateRe.FindAllString(label, -1); len(dates) > 0 {
+		// The last ISO date anywhere in the heading. A prose parenthetical
+		// can carry an earlier one; the filing date is the one at the end.
+		ctx.date = dates[len(dates)-1]
+	}
+	lower := strings.ToLower(label)
 	switch {
-	case strings.Contains(label, "correct-course"):
+	case strings.Contains(lower, "correct-course"):
 		ctx.source = SourceCorrectCourse
 		// A correct-course heading names an epic, not a story.
 		ctx.story = ""
-	case strings.Contains(label, "story review"), strings.Contains(label, "review"):
+	case strings.Contains(lower, "review"):
 		ctx.source = SourceStoryReview
 	default:
 		ctx.source = SourceUnknown
@@ -159,15 +407,28 @@ func sectionFrom(m []string) sectionContext {
 //
 // Required properties, all four asserted rather than assumed:
 //
-//   - VERIFIED BEFORE WRITE. N records in must equal N files out and every
-//     body must be byte-identical, or nothing is written at all. A lossy
+//   - VERIFIED BEFORE WRITE, AGAINST THE LEDGER. Every significant line of
+//     the source must come back out in something this writes — a record
+//     body, a record's `source_heading`, or the preamble file — N records
+//     in must equal N files out, and every body must survive a
+//     render/parse round trip, or nothing is written at all. A lossy
 //     conversion that passed silently is the one failure here that is not
 //     recoverable from git.
+//
+//     LINE ENDINGS ARE THE ONE NORMALISATION. Bodies are byte-identical
+//     modulo CRLF: the line scanner drops a trailing carriage return, so a
+//     CRLF ledger yields LF bodies. Both sides of the check strip it, so
+//     the assertion holds; "byte-for-byte" means "byte-for-byte after line
+//     endings are normalised", and on this repo's history that distinction
+//     has been worth stating rather than assuming.
+//
 //   - IDEMPOTENT, detected from disk state (does deferred/ exist, is the
 //     legacy file already a stub). No stored version marker, so there is
 //     nothing to drift.
+//
 //   - NEVER DELETES THE SOURCE. The legacy file becomes a short stub
 //     pointing at the directory; its content stays in git.
+//
 //   - NO COMMIT. The files land in the working tree and the operator
 //     commits, as one commit or two, however they like.
 func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (*MigrateResult, error) {
@@ -180,42 +441,32 @@ func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (*MigrateResul
 		return res, nil
 	}
 
+	if !opts.DryRun {
+		if err := s.refuseIfPopulated(); err != nil {
+			return nil, err
+		}
+	}
+
 	data, err := os.ReadFile(opts.From)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", opts.From, err)
 	}
 
-	records := ParseLegacy(data)
+	doc := ParseLegacyDocument(data)
+	records := doc.Records
 	res.RecordsIn = len(records)
+	res.Bytes = len(data)
 	for i := range records {
 		if records[i].FreeForm {
 			res.FreeForm++
 		}
+		if !records[i].IsOpen() {
+			res.Closed++
+		}
 	}
 
-	// Verify BEFORE writing: render each record, parse it back, and
-	// require the body to survive byte-for-byte.
-	//
-	// Record content cannot currently defeat this, and that is deliberate:
-	// Render always emits the frontmatter's own closing `---` before the
-	// body, so Split's first-closer-wins rule can never eat into it. The
-	// check stays as a guard on future changes to either function — the one
-	// failure in this migration that git could not undo is a lossy
-	// conversion that passed silently.
-	for i := range records {
-		rendered, renderErr := Render(records[i])
-		if renderErr != nil {
-			return nil, fmt.Errorf("%w: %w", ErrLosslessnessFailed, renderErr)
-		}
-		_, body, splitErr := frontmatter.Split(rendered)
-		if splitErr != nil {
-			return nil, fmt.Errorf("%w: record %s does not round-trip: %w",
-				ErrLosslessnessFailed, records[i].ID, splitErr)
-		}
-		if string(body) != records[i].Body {
-			return nil, fmt.Errorf("%w: record %s body changed on round trip",
-				ErrLosslessnessFailed, records[i].ID)
-		}
+	if err := verifyBeforeWrite(data, doc); err != nil {
+		return nil, err
 	}
 
 	if opts.RecoverDeleted {
@@ -239,7 +490,15 @@ func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (*MigrateResul
 	}
 
 	for i := range records {
-		path, writeErr := s.Write(records[i])
+		write := s.Write
+		if !records[i].IsOpen() {
+			// A record that arrived already discharged goes straight to
+			// closed/ — it is history, and putting it in the open working
+			// set is how the ledger accumulated resolved items in the
+			// first place.
+			write = s.writeClosed
+		}
+		path, writeErr := write(records[i])
 		if writeErr != nil {
 			return nil, writeErr
 		}
@@ -247,15 +506,24 @@ func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (*MigrateResul
 		res.RecordsOut++
 	}
 
+	if doc.Preamble != "" || len(doc.OrphanHeadings) > 0 {
+		path, writeErr := s.writePreamble(doc)
+		if writeErr != nil {
+			return nil, writeErr
+		}
+		res.Paths = append(res.Paths, path)
+		res.PreambleWritten = true
+	}
+
 	// The post-write count assertion. Belt to the pre-write braces: this
 	// is what catches a filename collision silently overwriting a record.
-	loaded, err := s.Load(LoadOptions{})
+	loaded, err := s.Load(LoadOptions{IncludeClosed: true})
 	if err != nil {
 		return nil, err
 	}
-	if len(loaded.Records) != res.RecordsIn {
-		return nil, fmt.Errorf("%w: %d records parsed but %d on disk after writing",
-			ErrLosslessnessFailed, res.RecordsIn, len(loaded.Records))
+	if want := res.RecordsIn + res.Recovered; len(loaded.Records) != want {
+		return nil, fmt.Errorf("%w: %d records parsed and %d recovered but %d on disk after writing",
+			ErrLosslessnessFailed, res.RecordsIn, res.Recovered, len(loaded.Records))
 	}
 
 	if err := s.writeStub(opts.From); err != nil {
@@ -271,6 +539,169 @@ func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (*MigrateResul
 		return nil, err
 	}
 	return res, nil
+}
+
+// refuseIfPopulated rejects a migration into a store that already holds
+// records, before anything is written.
+func (s *Store) refuseIfPopulated() error {
+	existing, err := s.Load(LoadOptions{IncludeClosed: true})
+	if err != nil {
+		return err
+	}
+	if len(existing.Records) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: %s holds %d record(s) from an earlier migration. To re-migrate, "+
+			"restore the ledger from git and remove the store directory first — "+
+			"record ids are derived from the ledger, so a corrected parse produces "+
+			"different ids and the two sets cannot be merged",
+		ErrStorePopulated, s.Dir, len(existing.Records))
+}
+
+// verifyBeforeWrite is the whole pre-write assertion, in two halves.
+//
+// FIRST, against the ledger: every significant source line has to come
+// back out. This is the half that was missing, and its absence is not
+// theoretical — a parser that inherited stale section context, turned
+// headings into records and swallowed the preamble produced a completely
+// wrong store, and the migration reported clean success on it, because
+// nothing here ever compared the output to the input. The field project
+// found the corruption by building this exact check by hand, afterwards.
+// It belongs in front of the write.
+//
+// SECOND, per record: render it, parse it back, require byte identity.
+// Record content cannot currently defeat this, and that is deliberate:
+// Render always emits the frontmatter's own closing `---` before the body,
+// so Split's first-closer-wins rule can never eat into it. It stays as a
+// guard on future changes to either function.
+func verifyBeforeWrite(data []byte, doc *LegacyDocument) error {
+	if err := verifyLossless(data, doc); err != nil {
+		return err
+	}
+	for i := range doc.Records {
+		rendered, err := Render(doc.Records[i])
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrLosslessnessFailed, err)
+		}
+		_, body, err := frontmatter.Split(rendered)
+		if err != nil {
+			return fmt.Errorf("%w: record %s does not round-trip: %w",
+				ErrLosslessnessFailed, doc.Records[i].ID, err)
+		}
+		if string(body) != doc.Records[i].Body {
+			return fmt.Errorf("%w: record %s body changed on round trip",
+				ErrLosslessnessFailed, doc.Records[i].ID)
+		}
+	}
+	return nil
+}
+
+// verifyLossless compares the ledger against everything the migration is
+// about to emit, as a multiset of lines.
+//
+// A multiset rather than a diff, and in BOTH directions: it catches a line
+// dropped, a line duplicated into two records, and a line the parser
+// invented, without caring which record any line landed in. Ordering and
+// record boundaries are the parser's job to get right; not losing text is
+// the property that has to hold even when it gets them wrong.
+//
+// THERE IS NO EXEMPT LINE CLASS. Heading lines leave the body — they
+// become provenance or a title — but they are counted here all the same,
+// from doc.Headings for the ones that produced a record and from
+// doc.OrphanHeadings for the ones that did not. An exemption that is
+// merely ignored is a hole the check cannot see through: it was possible
+// for a heading-shaped line to be deleted silently and still pass, which
+// is precisely what a `##` comment inside a pasted code fence did.
+//
+// EVERY BUCKET IS AN OUTPUT, which is what makes this a statement about
+// the migration rather than about the parse. Records become files,
+// Preamble and OrphanHeadings become PREAMBLE.md, and Headings is written
+// verbatim to `source_heading` on each record it provenances. A bucket
+// that were merely counted here and then discarded at write time would
+// make this check read as a guarantee it does not give.
+func verifyLossless(data []byte, doc *LegacyDocument) error {
+	source := significantLines(string(data))
+	emitted := map[string]int{}
+	add := func(text string) {
+		for line, n := range significantLines(text) {
+			emitted[line] += n
+		}
+	}
+	for i := range doc.Records {
+		add(doc.Records[i].Body)
+	}
+	add(doc.Preamble)
+	for _, heading := range doc.Headings {
+		add(heading)
+	}
+	for _, heading := range doc.OrphanHeadings {
+		add(heading)
+	}
+
+	for line, want := range source {
+		if got := emitted[line]; got != want {
+			return fmt.Errorf(
+				"%w: the ledger has %d copy/copies of a line and the migration emits %d: %q",
+				ErrLosslessnessFailed, want, got, line)
+		}
+	}
+	for line, got := range emitted {
+		if want := source[line]; got != want {
+			return fmt.Errorf(
+				"%w: the migration emits %d copy/copies of a line the ledger has %d of: %q",
+				ErrLosslessnessFailed, got, want, line)
+		}
+	}
+	return nil
+}
+
+// significantLines counts the lines that carry content.
+//
+// Blank lines are separation rather than content, and are reflowed around
+// record boundaries by design. A trailing carriage return is stripped so a
+// CRLF ledger compares against bodies the line scanner has already
+// normalised, rather than reporting every single line as lost — the one
+// respect in which a body is not literally byte-identical to its source.
+func significantLines(text string) map[string]int {
+	out := map[string]int{}
+	for line := range strings.SplitSeq(text, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		out[line]++
+	}
+	return out
+}
+
+// PreambleFileName holds the legacy ledger's own header — the banners and
+// reconciliation notes that sat above the first record.
+//
+// It is preserved rather than dropped because the preamble is document
+// history, and losing history on a migration is precisely the failure this
+// store was built to end. It is not a record: it has no id, no status and
+// nothing to discharge, and the loader skips it by name.
+const PreambleFileName = "PREAMBLE.md"
+
+// writePreamble stores the ledger prose that is not a record.
+func (s *Store) writePreamble(doc *LegacyDocument) (string, error) {
+	var b strings.Builder
+	b.WriteString("<!-- Preserved verbatim from the legacy deferred-work.md. " +
+		"Document history, not a deferred record: it has no id and nothing to discharge. -->\n\n")
+	b.WriteString(doc.Preamble)
+	if len(doc.OrphanHeadings) > 0 {
+		if doc.Preamble != "" && !strings.HasSuffix(doc.Preamble, "\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString("\n" + orphanHeadingsNote + "\n\n")
+		b.WriteString(strings.Join(doc.OrphanHeadings, "\n") + "\n")
+	}
+	path := filepath.Join(s.Dir, PreambleFileName)
+	if err := writeFileAtomic(path, []byte(b.String())); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // migrationDone detects the post-migration state from disk alone: the
@@ -316,18 +747,20 @@ This ledger has been migrated to one file per record:
 
     %s/
 
-Why: as a single file it reached 456,144 bytes, which is past the size a
-skill can read — and its only eviction mechanism was deletion, so closing
-a record destroyed its own audit trail.
+Why: as a single file it grew past the size a skill can read — and its only
+eviction mechanism was deletion, so closing a record destroyed its own
+audit trail.
 
     ape deferred list                 open records
     ape deferred list --status all    including closed ones
     ape deferred verify               invariants, plus candidates for a human
     ape deferred close <id> --by "…"  discharge one
 
-Closed records move to %s/closed/ and stay there. The full history of this
-file, including every record ever removed from it, is in git.
-`, stubMarker, rel, rel)
+Closed records move to %s/closed/ and stay there. This file's own preamble
+— the banners and reconciliation notes that were not deferred items — is
+preserved verbatim at %s/%s. The full history of this file, including every
+record ever removed from it, is in git.
+`, stubMarker, rel, rel, rel, PreambleFileName)
 	return writeFileAtomic(legacy, []byte(stub))
 }
 

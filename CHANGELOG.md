@@ -1,5 +1,160 @@
 # CHANGELOG
 
+## v0.0.61 (2026-08-30)
+
+**`ape deferred migrate` was wrong in six ways at once, and reported clean
+success on all of them.** The first real-project migration
+(`axon_tenax_engine`: 2,535 lines, 456,144 bytes, 124 records) produced a
+store that asserted stories records never sat under, promoted headings to
+records, filed the ledger's preamble as the largest open item, and stored
+truncated half-sentences as authoritative fields. The project reverted the
+framework update. Every finding was reproduced against the real parser
+before anything was changed, and the field project's own regression suite
+ships here as `internal/deferred/migrate_regression_test.go` — it failed
+seven of eight at v0.0.60.
+
+- **fix: `ParseLegacy` is heading-aware and fence-aware, not bullet-aware.**
+  One structural change closes three of the six findings, because they were
+  one bug. The parser consulted a single heading pattern and let every other
+  `##` line fall through into text accumulation, so it had no concept of a
+  heading it did not recognise.
+  - **An unrecognised heading now CLEARS section context instead of leaving
+    the previous one live.** Eleven records asserted a story they never sat
+    under, and the inherited date is hashed into the record id — so the
+    defect survived any frontmatter edit and could only be undone by
+    re-running. This is the one that forced a re-run rather than a repair.
+  - **A heading is never body text.** It titles the first record beneath it.
+    Previously it became a record on its own when the next line was a bullet
+    and merged with the content when the next line was prose, so the store
+    held titles with no body *and* bodies with no title. Deterministic, but
+    determined by the wrong thing.
+  - **Content above the first boundary is preamble, not a record.** In the
+    field corpus that was one 434-line, 37,822-byte "open item" that was
+    pure document history. A ledger that opens with bullets and no heading
+    still parses: the first top-level bullet is a boundary too.
+  - **A fenced code block suspends all of it.** A `## build everything`
+    comment inside a pasted Makefile was being consumed as a section
+    heading: the line deleted, the fence split across two records with the
+    opener in one and the closer in the other. Found by the framework in
+    review of the first fix, and it is the worst shape of regression —
+    heading-shaped lines were the losslessness check's exempt class, so
+    deleting one was invisible to it. Both halves are fixed: fences suspend
+    boundary detection (bullets included), and the exemption is now counted
+    rather than ignored.
+  - **A heading that titles no record keeps its text.** `## Still open` is
+    noise and `## Deferred-at-decision: <a real title>` is not, and nothing
+    here can tell them apart — so neither is deleted. They go to
+    `PREAMBLE.md` with a note saying why.
+
+- **fix: the section heading's slug and date are extracted independently.**
+  `sectionRe` made them alternatives inside one lazy expression, so a
+  heading carrying a prose parenthetical failed the date group, backtracked,
+  and collapsed the entire remainder into the label — losing the slug too,
+  with both values sitting in plain sight on the line.
+  - The slug anchor is the last `of <token>` **whose token starts with a
+    digit**, falling back to the first `of`. Taking the last
+    unconditionally reads a slug out of ordinary prose ("of 91-2, deemed out
+    of scope" -> `scope`), which is the same failure mode arriving through a
+    different door: a confidently wrong value that reads as authoritative.
+  - The date is the last ISO date anywhere in the heading.
+
+- **fix: a `— defer:` value is the whole value or it is absent.** The corpus
+  soft-wraps the tail, and `[^;\n]+` stopped at the wrap, so
+  `outside-story=none of the 4 files are in` was stored as though it were
+  the whole answer. Continuation lines are now joined onto the tail before
+  matching.
+  - **Only when the continuation carries field syntax.** A wrapped value and
+    a continued sentence are told apart only by what the continuation says,
+    and joining unconditionally corrupts the other direction —
+    `owner=alice` followed by prose became
+    `owner="alice continuation line for the first"`. The vocabulary is the
+    six field keys and nothing else; a bare `;` was tried and rejected,
+    because a semicolon is also ordinary punctuation and reintroduced the
+    corruption (`"it broke; then we reverted it"` -> `owner="alice it
+    broke"`). It was never load-bearing: a continuation that opens the next
+    field names it.
+  - This can shorten a value that wrapped with no field marker at all.
+    Absence is honest, truncation is not, and `ape deferred repair` exists
+    for the difference.
+
+- **fix: `free_form: true` now means nothing on the record was
+  interpreted.** `applyTail` ran over the entire body for free-form records,
+  so any text containing the substring `outside-story=` — including prose
+  describing something else — acquired a field, and records came out
+  simultaneously flagged unparseable and carrying parsed values. The repair
+  skill can now treat the body as the only evidence instead of distrusting
+  half-filled fields.
+
+- **fix: a record whose body announces its own resolution is not written
+  `status: open`.** The migration stamped `StatusOpen` unconditionally with
+  no inspection of the body, so a `✅ RESOLVED` banner had no path to any
+  other status and landed in the live working set. It now goes to `closed/`
+  with `resolved_by` naming the evidence — "resolution banner in the legacy
+  ledger (migrated, not verified)", because nothing checked the claim. The
+  test is narrow on purpose: blockquote-only *and* saying RESOLVED. A
+  blockquote-only block is a section annotation rather than a deferred item,
+  which is what makes reading its claim about itself safe.
+
+- **feat: the verify-before-write assertion is checked against the ledger.**
+  This is the finding underneath all six. `Migrate` advertised "every body
+  must survive byte-for-byte, or NOTHING is written", and the only check it
+  made was rendering each record and parsing it back — a serialiser round
+  trip that never compared the output to the input. A completely wrong parse
+  is perfectly self-consistent, which is why 124 corrupt records reported
+  success. The field project found the corruption by building a line-multiset
+  harness by hand, afterwards; that harness now runs in front of the write.
+  - **No exempt line class.** Every significant source line must come back
+    out in something the migration writes — a record body, a record's
+    `source_heading`, or `PREAMBLE.md`. An exemption that is merely ignored
+    is a hole the check cannot see through, which is exactly how the fenced
+    `##` comment above went undetected.
+  - **Every counted bucket is an output.** `Headings` was briefly counted at
+    parse time and discarded at write time, which made the check prove
+    something about the *parse* while reading as a claim about the
+    *migration*. Caught by the framework in review.
+  - Line endings are the single normalisation: the line scanner drops a
+    trailing carriage return, so a CRLF ledger yields LF bodies.
+    "Byte-for-byte" means byte-for-byte modulo line endings, and on this
+    repo's history that distinction is worth stating rather than assuming.
+
+- **feat: `source_heading` carries the ledger heading verbatim.**
+  `source`, `source_story` and `created` are extractions, and a heading
+  holds more than they take — "retroactively backfilled by Story 89.2" is
+  attribution, on exactly the two-field headings the independent slug/date
+  extraction exists to rescue. The asymmetry was the tell: an *unrecognised*
+  heading survived as a record Title, so the better-understood heading was
+  the one losing text.
+
+- **feat: the migration refuses a populated store, and says how to
+  proceed.** A wrong section date is hashed into the id, so that class of
+  defect can only be fixed by re-migrating — and re-running into a store
+  that still held the old records wrote the new ones alongside them and only
+  then failed the post-write count assertion, leaving two migrations
+  interleaved on disk. `already migrated` now names the two steps
+  (restore the ledger from git, remove the store directory) rather than
+  being a dead end for the operator trying to do exactly that.
+
+- **feat: the completion output reports the relocation.** The migration
+  moves cited text out of `implementation_folder`. The reporting project's
+  anchor ratchet went 1039 -> 995 purely because 456 KB of cited text left
+  the scanned directory, and that read as a regression the migration had
+  caused. It now says how many bytes moved and that a gate scoped to the old
+  folder should be re-baselined rather than chased. A reporting gap, not a
+  bug — and the one that cost the most to diagnose.
+
+- **docs: the hard-coded corpus statistics are gone.** `26 of 109 real
+  records are free-form` appeared in four places including the shipped CLI
+  reference, and `227 record files` in two more. The true rate was unknown
+  until these fixes landed, because several causes of it were the bugs
+  themselves. The property is stated instead: any real ledger has records
+  that land there, and what fraction is a property of your corpus.
+
+- **The preamble is preserved, not dropped.** "Not a record" had to mean
+  "kept somewhere that is not the record set", because losing history on a
+  migration is the exact failure this store exists to end. It goes to
+  `{store}/PREAMBLE.md`, which the loader skips by name alongside
+  `README.md`.
+
 ## v0.0.60 (2026-08-29)
 
 Four independent items from two framework-side change requests

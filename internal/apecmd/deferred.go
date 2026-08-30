@@ -29,8 +29,8 @@ returns ZERO records when handed one malformed entry, while this shape
 loses exactly the one bad file.
 
 The store sits OUTSIDE {implementation_folder} deliberately. Ten skills
-glob {implementation_folder}/**/*.md across 17 sites, and 227 record files
-under that folder would feed every one of them.`,
+glob {implementation_folder}/**/*.md across 17 sites, and one record file
+per deferred item under that folder would feed every one of them.`,
 	}
 	cmd.AddCommand(
 		newDeferredIngestCmd(),

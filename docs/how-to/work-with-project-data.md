@@ -254,6 +254,10 @@ outside `implementation_folder` deliberately: ten skills glob
 `{implementation_folder}/**/*.md` across 17 sites, and record files under
 that folder would feed every one of them.
 
+Two files there are prose about the store rather than records in it, and
+the loader skips both by name: `README.md`, and `PREAMBLE.md` where a
+migration parks the ledger text that is not a deferred item.
+
 `ingest` takes bullets from `--body-file` or stdin, never argv — 108 of 109
 real bodies contain backticks, which shell-expand inside an argument. It
 **never exits non-zero for a content reason**: an unrecognised bullet is
@@ -267,6 +271,12 @@ Only an unwritable store fails.
 - `confidence: candidate` — a heuristic, never auto-actionable. A dead
   anchor, a trigger naming a now-done story, a near-duplicate title, a
   free-form record.
+
+`free_form: true` means **nothing on that record was interpreted** — the
+body is the text verbatim, the title is its first line, and no field was
+parsed from it. That is the contract `repair` relies on: it can treat the
+body as the only evidence instead of having to distrust half-filled
+fields.
 
 Nothing here ever closes a record. Closing requires re-verifying the
 premises against HEAD, and on the reference ledger an unbiased sample of 20
@@ -283,11 +293,35 @@ ape deferred migrate --dry-run           # parse and verify, write nothing
 ape deferred migrate --recover-deleted   # plus records mined from git history
 ```
 
-The migration verifies before it writes — N records parsed must equal N
-files written, with every body byte-identical, or nothing lands. It is
-idempotent from disk state, never deletes the source (the ledger becomes a
-short signpost), and **commits nothing**: it prints the paths and the
-`git add` line, and you group the change into however many commits you want.
+The migration verifies before it writes, **against the ledger**: every
+significant source line must come back out in something the migration
+writes — a record body, a record's `source_heading`, or the `PREAMBLE.md`
+that holds ledger prose which is not a record — N records parsed must equal
+N files written, and every body must survive a round trip, or nothing
+lands. Line endings are the one normalisation: a CRLF ledger yields LF
+bodies.
+
+The against-the-ledger half matters more than it sounds. Checking only that
+records round-trip through the serialiser proves the parser is consistent
+with itself, which a badly wrong parse can be — the first field migration
+inherited stale section context, turned headings into records and swallowed
+the ledger's preamble, and reported clean success on 124 records.
+
+It is idempotent from disk state, never deletes the source (the ledger
+becomes a short signpost), and **commits nothing**: it prints the paths and
+the `git add` line, and you group the change into however many commits you
+want.
+
+The completion output reports how many bytes of cited text changed folders.
+A repo-wide gate scoped to `implementation_folder` — an anchor count, a
+citation ratchet — will drop the moment this lands, with nothing actually
+regressed. Re-baseline it rather than chasing it.
+
+**Re-migrating after a parser fix.** Record ids are derived from the
+ledger, so a corrected parse yields different ids and the two sets cannot
+be merged. Restore the ledger from git and delete the store directory; the
+migration refuses to run into a store that still holds records rather than
+interleaving two migrations on disk.
 
 `ape framework update` runs it for you; `--no-migrate` leaves it pending,
 and `ape doctor` reports that so the state is visible rather than silent.

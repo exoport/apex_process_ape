@@ -1667,8 +1667,8 @@ returns ZERO records when handed one malformed entry, while this shape
 loses exactly the one bad file.
 
 The store sits OUTSIDE {implementation_folder} deliberately. Ten skills
-glob {implementation_folder}/**/*.md across 17 sites, and 227 record files
-under that folder would feed every one of them.
+glob {implementation_folder}/**/*.md across 17 sites, and one record file
+per deferred item under that folder would feed every one of them.
 
 Subcommands:
 
@@ -1805,24 +1805,50 @@ Convert a single-file deferred-work.md into one file per record.
 
 Four properties, all asserted rather than assumed:
 
-  VERIFIED BEFORE WRITE   N records parsed must equal N files written and
-                          every body must survive byte-for-byte, or NOTHING
-                          is written. A lossy conversion that passed
-                          silently is the one failure here that git cannot
-                          undo.
+  VERIFIED BEFORE WRITE   every significant line of the ledger must come
+                          back out in something this writes — a record
+                          body, a record's source_heading, or the preamble
+                          file — N records parsed must equal N files
+                          written, and every body must survive a round
+                          trip, or NOTHING is written. The first of those
+                          three is checked against the LEDGER, not just
+                          against the parser's own output: a conversion
+                          that silently lost text while reporting success
+                          is the one failure here that git cannot undo.
+                          Line endings are the single normalisation — a
+                          CRLF ledger yields LF bodies.
   IDEMPOTENT              detected from disk state — does the store hold
                           records, is the legacy file already a stub. No
                           version marker is stored, so nothing can drift.
   NEVER DELETES THE SOURCE  the legacy file becomes a short signpost; its
-                          content stays in git.
+                          content stays in git, and its preamble is kept
+                          verbatim beside the records.
   NO COMMIT               the files land in the working tree. You commit
                           them, as one commit or two, however you like.
 
+Each record carries the ledger heading it sat under verbatim, in
+source_heading, alongside the source/source_story/created extracted from
+it. A heading holds more than three fields can take, and that remainder is
+often attribution.
+
 A record whose tail does not match the expected shape keeps its full text
-as the body and takes its title from the first line — 26 of 109 records in
-the reference ledger are free-form, so that path always runs. Nothing is
-dropped and nothing is guessed at; 'ape deferred verify' flags them, and
-'ape deferred repair' completes or retires them.
+as the body and takes its title from the first line, with NO fields parsed
+from it — 'free_form: true' means nothing in it was interpreted. Any real
+ledger has records that land there. What fraction is not quoted here on
+purpose: it is a property of your corpus, and a number measured against
+someone else's would only invite you to trust it. 'ape deferred verify'
+flags them and 'ape deferred repair' completes or retires them.
+
+The migration MOVES cited text out of the folder it was living in. A
+repo-wide gate scoped to that folder — anchor counts, citation ratchets —
+will drop the moment this lands, without anything regressing. The
+completion output says how much moved so that drop is explainable.
+
+Re-migrating after a parser fix: record ids are derived from the ledger,
+so a corrected parse yields different ids and the two sets cannot be
+merged. Restore the ledger from git and delete the store directory; this
+refuses to run into a store that still holds records rather than
+interleaving two migrations on disk.
 
 --recover-deleted mines the ledger's git history for records removed from
 it and writes them straight to closed/. The ledger's own preamble
@@ -2146,12 +2172,18 @@ outside a project root; the operating-rules checks only hard-fail when a
 framework install that manages them has lost the fragment, import, or
 apex-orchestrator skill.
 
-Seven checks report on PROJECT DATA rather than on the host: whether the
+Eight checks report on PROJECT DATA rather than on the host: whether the
 config resolves at all (nothing else can see the project's artifacts
 without it), registry drift, story frontmatter, tracker divergence,
-whether the tracker's lock sidecar is gitignored, team-memory size, and
-any pending project-data migration. All seven degrade to INFO outside a
-project root.
+whether the tracker's lock sidecar is gitignored, whether ape's own run
+subtree is gitignored, team-memory size, and any pending project-data
+migration. All eight degrade to INFO outside a project root.
+
+The two "is it gitignored" rows report and never write. .gitignore is the
+operator's file; a tool that edits it uninvited is worse than one that
+points. Both also distinguish COMMITTED from merely unignored, because an
+ignore line does not untrack anything — on a project that already
+committed the path, adding the line changes nothing at all.
 
 memory.size is one of only two Required checks in that group, deliberately:
 a non-required FAIL is downgraded to WARN, so nothing else could surface a
