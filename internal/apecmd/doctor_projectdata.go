@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/memory"
 	"github.com/exoport/apex_process_ape/internal/registry"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sprint"
 	"github.com/exoport/apex_process_ape/internal/story"
 )
@@ -274,6 +277,93 @@ func checkSprintLockIgnored(ctx context.Context, env doctorEnv) CheckResult {
 			"never unlinks it, so an untracked file sits beside the tracker waiting for a `git add -A`. " +
 			"Add `" + rel + "` (or `*" + sprint.LockSuffix + "`) to .gitignore.",
 		FixCommand: "echo '" + rel + "' >> .gitignore",
+	}
+}
+
+// checkOutputApeIgnored reports whether git is ignoring the resolved
+// `{output_folder}/ape/` — the one subtree ape writes into a project.
+//
+// Everything ape produces during a run lands there: manifests, runlogs,
+// transcript links, cost rollups. It is regenerated on every run and
+// belongs in nobody's history. Left unignored, the first commit-emitting
+// step's `git add -A` sweeps it into the operator's commit, and from then
+// on every run rewrites tracked files — which is also what makes the NEXT
+// `ape pipeline` fail its pre-flight dirty-tree gate, since the artifacts
+// of the last run are sitting uncommitted in the tree.
+//
+// The framework already requires this and states it plainly:
+// apex-orchestrator's preflight lists `output_folder` as one that "must be
+// gitignored", and apex-epic-retrospective depends on the fact when it
+// tells a batch to write its corpus artifact somewhere ELSE precisely
+// because `{output_folder}/` is not tracked. What the framework does not
+// do is install the rule — its own `_output/.gitignore` catchall is
+// repo-local housekeeping and is not part of the payload
+// `ape framework setup` copies into a project. So the requirement exists,
+// nothing enforces it, and a project can be years into violating it
+// without a single line of output saying so. That gap is what this row
+// closes.
+//
+// REPORTING ONLY, and never a write — the same standing as
+// checkSprintLockIgnored below, for the reason stated there: `.gitignore`
+// is the operator's file, and a tool that edits it uninvited is worse than
+// one that points. An earlier draft of this had `ape framework update`
+// append the line. It was dropped, and two things killed it. An ignore
+// line does not untrack anything, so on the projects most in need of the
+// fix it would have written a line and changed nothing while reading as
+// success. And `.gitignore` is captured into the eval's overlays, so a
+// write would have propagated a line into 20+ committed fixtures that the
+// eval's own `_output`-stripper does not match.
+//
+// Deliberately narrower than the framework's rule: this asks only about
+// ape's subtree, not the whole output folder, because `{output_folder}/`
+// holds the framework's handoffs, briefs and verify reports and whether
+// THOSE are tracked is the framework's call to make, not ape's.
+func checkOutputApeIgnored(ctx context.Context, env doctorEnv) CheckResult {
+	cfg, res := projectDataConfig(env)
+	if res != nil {
+		return *res
+	}
+	apeRoot := runlog.ApeRoot(cfg.Root)
+	rel, relErr := filepath.Rel(cfg.Root, apeRoot)
+	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		// output_folder points outside the repository. Nothing here can be
+		// covered by this project's .gitignore, and there is no finding.
+		return CheckResult{
+			Status:  StatusInfo,
+			Message: "output_folder resolves outside the project — nothing for .gitignore to cover",
+		}
+	}
+	rel = filepath.ToSlash(rel)
+
+	switch gitIgnores(ctx, cfg.Root, apeRoot) {
+	case ignoreYes:
+		return CheckResult{Status: StatusOK, Message: rel + " is ignored"}
+	case ignoreNotARepo:
+		return CheckResult{Status: StatusInfo, Message: "not a git repository"}
+	}
+
+	// Worse if it is already tracked. Adding the ignore line now would
+	// change nothing — git keeps honouring the index for paths it already
+	// follows — so the remediation has to say `git rm --cached` out loud or
+	// it is advice that cannot work.
+	if gitTracked(ctx, cfg.Root, apeRoot) {
+		return CheckResult{
+			Status:  StatusWarn,
+			Message: rel + " is COMMITTED — ape's run artifacts are in the project's history",
+			Remediation: "Every run rewrites these, so each one dirties the tree and the next " +
+				"`ape pipeline` fails its dirty-tree pre-flight. Ignoring the path is not enough on " +
+				"its own: git keeps tracking what is already in the index, so untrack it too.",
+			FixCommand: "git rm -r --cached " + rel + " && echo '" + rel + "/' >> .gitignore",
+		}
+	}
+	return CheckResult{
+		Status:  StatusWarn,
+		Message: rel + " is not ignored by git",
+		Remediation: "ape writes every manifest, runlog and transcript link under this path and " +
+			"rewrites them on each run. Untracked, they sit in `git status` waiting for a " +
+			"`git add -A` — including ape's own commit-emitting steps. The framework already " +
+			"requires the output folder to be gitignored; this is the part of it ape can see.",
+		FixCommand: "echo '" + rel + "/' >> .gitignore",
 	}
 }
 

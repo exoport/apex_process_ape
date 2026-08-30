@@ -156,6 +156,7 @@ var allChecks = []doctorCheck{
 	{Name: "story.frontmatter", Run: checkStoryFrontmatter},
 	{Name: "sprint.divergence", Run: checkSprintDivergence},
 	{Name: "sprint.lock_ignored", Run: checkSprintLockIgnored},
+	{Name: "output.ape_ignored", Run: checkOutputApeIgnored},
 	{Name: "memory.size", Required: true, Run: checkMemorySize},
 	{Name: "migration.pending", Run: checkMigrationPending},
 }
@@ -184,12 +185,18 @@ outside a project root; the operating-rules checks only hard-fail when a
 framework install that manages them has lost the fragment, import, or
 apex-orchestrator skill.
 
-Seven checks report on PROJECT DATA rather than on the host: whether the
+Eight checks report on PROJECT DATA rather than on the host: whether the
 config resolves at all (nothing else can see the project's artifacts
 without it), registry drift, story frontmatter, tracker divergence,
-whether the tracker's lock sidecar is gitignored, team-memory size, and
-any pending project-data migration. All seven degrade to INFO outside a
-project root.
+whether the tracker's lock sidecar is gitignored, whether ape's own run
+subtree is gitignored, team-memory size, and any pending project-data
+migration. All eight degrade to INFO outside a project root.
+
+The two "is it gitignored" rows report and never write. .gitignore is the
+operator's file; a tool that edits it uninvited is worse than one that
+points. Both also distinguish COMMITTED from merely unignored, because an
+ignore line does not untrack anything — on a project that already
+committed the path, adding the line changes nothing at all.
 
 memory.size is one of only two Required checks in that group, deliberately:
 a non-required FAIL is downgraded to WARN, so nothing else could surface a

@@ -119,15 +119,24 @@ ape doctor --output-format json | jq -e '.checks[] | select(.name == "ape.update
 | `story.frontmatter WARN`               | Stories are missing extension-gated keys, or carry a type mismatch      | `ape story verify` lists them. Frontmatter is authored, so these are fixed by hand.                    |
 | `sprint.divergence WARN`               | A tracker row and a story file disagree, or a row key is non-conforming | `ape sprint check` names both sides. Neither is assumed correct — a person decides, which is why this can never be more than a warn. A `sprint.nonstandard_row_key` finding is the one with a mechanical fix: the row is keyed `N-M` with no slug, so it names no story file *and* the two live epic-projection implementations count it differently. |
 | `sprint.lock_ignored WARN`             | `sprint-status.yaml.lock` is not gitignored, or is already committed    | `ape sprint reconcile` takes an advisory lock on that sidecar and never unlinks it, so it sits beside the tracker waiting for a `git add -A`. Add `*.lock` to `.gitignore`; if it is already committed, `git rm --cached` it too, because ignoring a tracked file changes nothing. |
+| `output.ape_ignored WARN`              | The resolved `{output_folder}/ape/` is not gitignored, or is already committed | ape rewrites every manifest, runlog and transcript link under that path on each run. Untracked, they wait in `git status` for a `git add -A`; tracked, every run dirties the tree and the next `ape pipeline` fails its dirty-tree pre-flight. Add the resolved path to `.gitignore`; if it is already committed, `git rm -r --cached` it too, because ignoring a tracked path changes nothing. Reports the **resolved** folder, so a project that renamed `output_folder` is judged on the path it actually writes to. |
 | `migration.pending WARN`               | A legacy `deferred-work.md` has not been converted to record files      | `ape framework update` runs it, or `ape deferred migrate --dry-run` to look first. Nothing is committed either way. |
 
 ## Project-data checks
 
-Seven checks report on the project's own records rather than on the host:
+Eight checks report on the project's own records rather than on the host:
 `config.resolved`, `registry.drift`, `story.frontmatter`,
-`sprint.divergence`, `sprint.lock_ignored`, `memory.size` and
-`migration.pending`. All seven degrade to INFO outside a project root —
-absence of a project is not a finding.
+`sprint.divergence`, `sprint.lock_ignored`, `output.ape_ignored`,
+`memory.size` and `migration.pending`. All eight degrade to INFO outside a
+project root — absence of a project is not a finding.
+
+`sprint.lock_ignored` and `output.ape_ignored` **report and never write**.
+`.gitignore` is the operator's file, and a tool that edits it uninvited is
+worse than one that points. Both also separate *committed* from merely
+*unignored*, because an ignore line does not untrack anything — on a
+project that already committed the path, adding the line changes nothing
+at all, which is the failure mode a write-it-for-you fix would have hidden
+behind a success message.
 
 Two are **required**, and both for a mechanical reason. `runDoctor`
 downgrades a non-required FAIL to WARN, so:
@@ -149,7 +158,7 @@ should still be able to run `ape doctor` in CI without a red build. Add
 To keep a CI gate to host prerequisites only:
 
 ```bash
-ape doctor --skip config.resolved,registry.drift,story.frontmatter,sprint.divergence,sprint.lock_ignored,memory.size,migration.pending
+ape doctor --skip config.resolved,registry.drift,story.frontmatter,sprint.divergence,sprint.lock_ignored,output.ape_ignored,memory.size,migration.pending
 ```
 
 ## Operating-rules checks (required, but self-gating)

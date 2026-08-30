@@ -132,6 +132,7 @@ func TestProjectDataChecks_DegradeOutsideAProject(t *testing.T) {
 		"story.frontmatter":   checkStoryFrontmatter,
 		"sprint.divergence":   checkSprintDivergence,
 		"sprint.lock_ignored": checkSprintLockIgnored,
+		"output.ape_ignored":  checkOutputApeIgnored,
 		"memory.size":         checkMemorySize,
 		"migration.pending":   checkMigrationPending,
 	}
@@ -153,7 +154,9 @@ func countProjectDataChecks(t *testing.T) int {
 	t.Helper()
 	n := 0
 	for _, c := range allChecks {
-		for _, prefix := range []string{"config.", "registry.", "story.", "sprint.", "memory.", "migration."} {
+		for _, prefix := range []string{
+			"config.", "registry.", "story.", "sprint.", "output.", "memory.", "migration.",
+		} {
 			if strings.HasPrefix(c.Name, prefix) {
 				n++
 				break
@@ -261,6 +264,72 @@ func TestCheckSprintLockIgnored(t *testing.T) {
 	res = checkSprintLockIgnored(ctx, projectDataEnv(root))
 	require.Equal(t, StatusOK, res.Status, res.Message)
 	require.Contains(t, res.Message, "is ignored")
+}
+
+// TestCheckOutputApeIgnored walks the four states in the order a real
+// project reaches them, on a project that RENAMED output_folder — which is
+// the case the row exists for. A hardcoded `_output/` answers the wrong
+// question here, and would report OK on a project whose artifacts are
+// being committed under `build-out/ape/`.
+func TestCheckOutputApeIgnored(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	ctx := context.Background()
+	root := projectFor(t, allExtensionsConfig+"output_folder: build-out\n")
+	apeRoot := filepath.Join(root, "build-out", "ape", "pipelines", "demo", "20260401-a")
+	require.NoError(t, os.MkdirAll(apeRoot, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(apeRoot, "manifest.yaml"),
+		[]byte("schema_version: 2\n"), 0o644))
+
+	// Not a repository: nothing to ignore into, and nothing that can
+	// accidentally commit it either.
+	res := checkOutputApeIgnored(ctx, projectDataEnv(root))
+	require.Equal(t, StatusInfo, res.Status, res.Message)
+	require.Contains(t, res.Message, "not a git repository")
+
+	gitInit(t, root)
+	res = checkOutputApeIgnored(ctx, projectDataEnv(root))
+	require.Equal(t, StatusWarn, res.Status)
+	require.Contains(t, res.Message, "build-out/ape",
+		"the finding names the RESOLVED path, not a hardcoded _output")
+	require.Contains(t, res.Message, "not ignored")
+
+	// Swept into a commit by a routine `git add -A` — the failure the row
+	// exists to catch, and a strictly worse state than merely unignored.
+	gitCommitAll(t, root, "everything")
+	res = checkOutputApeIgnored(ctx, projectDataEnv(root))
+	require.Equal(t, StatusWarn, res.Status)
+	require.Contains(t, res.Message, "COMMITTED")
+	require.Contains(t, res.FixCommand, "git rm -r --cached",
+		"an ignore line does not untrack anything, so the fix has to say so")
+
+	// Ignored by a rule on the PARENT folder — the shape the framework
+	// actually asks for ("output_folder must be gitignored"). Asking git
+	// rather than matching patterns by hand is what makes this OK instead
+	// of a redundant second finding.
+	untrack := exec.CommandContext(ctx, "git", "rm", "-r", "--cached", "-q", "--", "build-out")
+	untrack.Dir = root
+	require.NoError(t, untrack.Run())
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".gitignore"), []byte("build-out/\n"), 0o644))
+	res = checkOutputApeIgnored(ctx, projectDataEnv(root))
+	require.Equal(t, StatusOK, res.Status, res.Message)
+	require.Contains(t, res.Message, "is ignored")
+}
+
+// An output_folder pointing outside the repository has nothing this
+// project's .gitignore could cover, so there is no finding to report.
+// Writing one would be a statement about a tree ape does not own.
+func TestCheckOutputApeIgnored_OutsideTheRepositoryIsNotAFinding(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := projectFor(t, allExtensionsConfig+"output_folder: ../elsewhere\n")
+	gitInit(t, root)
+
+	res := checkOutputApeIgnored(context.Background(), projectDataEnv(root))
+	require.Equal(t, StatusInfo, res.Status, res.Message)
+	require.Contains(t, res.Message, "outside the project")
 }
 
 // TestGitIgnores_DistinguishesNotIgnoredFromNoAnswer: git says "not

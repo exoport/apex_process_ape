@@ -317,10 +317,10 @@ refuses when two headings slugify to the same value rather than writing
 ape doctor
 ```
 
-Seven rows report project data: `config.resolved`, `registry.drift`,
+Eight rows report project data: `config.resolved`, `registry.drift`,
 `story.frontmatter`, `sprint.divergence`, `sprint.lock_ignored`,
-`memory.size` and `migration.pending`. All degrade to INFO outside a
-project. `memory.size` and `config.resolved` are the only two that can fail
+`output.ape_ignored`, `memory.size` and `migration.pending`. All degrade to
+INFO outside a project. `memory.size` and `config.resolved` are the only two that can fail
 the run — see [Run doctor in CI](run-doctor-in-ci.md).
 
 An eighth project-scoped row, `runs.legacy_layout`, reports on ape's own
