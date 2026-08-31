@@ -47,6 +47,33 @@ func TestDeferredMigrate_HumanOutputAndGitAddHint(t *testing.T) {
 	require.Contains(t, out, filepath.Join("development", "deferred"))
 }
 
+// TestPreambleContents_ThreeStates: PREAMBLE.md has two independent
+// reasons to exist, so `preamble_written` alone cannot say what is in it.
+// Announcing "the ledger preamble" for an orphan-headings-only file names
+// something the ledger never had, and sends the operator looking for it.
+func TestPreambleContents_ThreeStates(t *testing.T) {
+	require.Equal(t, "ledger preamble",
+		preambleContents(&deferred.MigrateResult{PreambleBytes: 42}))
+	require.Equal(t, "2 heading(s) that titled no record",
+		preambleContents(&deferred.MigrateResult{OrphanHeadings: 2}))
+	require.Equal(t, "ledger preamble + 1 heading(s) that titled no record",
+		preambleContents(&deferred.MigrateResult{PreambleBytes: 42, OrphanHeadings: 1}))
+}
+
+// TestDeferredMigrate_DischargedIsNotResolved: the count includes records a
+// `[Superseded: …]` annotation DISCARDED, and those were never delivered.
+func TestDeferredMigrate_DischargedIsNotResolved(t *testing.T) {
+	root := newTestProject(t, realProjectConfig)
+	writeLegacyLedger(t, root, "## Deferred from: story review of 54-1 (2026-08-21)\n\n"+
+		"- [Defer] An entry overtaken by a better account\n"+
+		"- [Superseded: docs/atomix.md:50] recorded there instead\n"+
+		"- [Defer] An entry that is still open\n")
+
+	out := runCmd(t, newDeferredMigrateCmd())
+	require.Contains(t, out, "1 arrived already discharged")
+	require.NotContains(t, out, "already resolved")
+}
+
 func TestDeferredMigrate_JSONPayload(t *testing.T) {
 	root := newTestProject(t, realProjectConfig)
 	writeLegacyLedger(t, root, legacyLedgerFixture)

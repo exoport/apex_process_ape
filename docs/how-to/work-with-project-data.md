@@ -264,13 +264,29 @@ real bodies contain backticks, which shell-expand inside an argument. It
 stored verbatim as free-form with a warning, and empty input is a no-op.
 Only an unwritable store fails.
 
+A bullet whose own text already announces its discharge — an appended
+`RESOLVED` clause, a `[Closed: <sha>]` or `[Superseded: <artifact>]`
+companion line — is stored in `closed/` rather than the working set, with a
+warning saying so. The open set is a *directory*, not a status filter, so a
+`status: closed` file written beside the open records would sit in `list`
+forever. `migrate` reads the same markers, which is what makes the
+closure-marker check below a fact.
+
 `verify` (alias `lint`) tags each finding:
 
 - `confidence: certain` — a fact. Schema problems; `related[]` /
-  `supersedes[]` pointing at records that do not exist.
+  `supersedes[]` pointing at records that do not exist; an open record whose
+  own body carries a closure marker.
 - `confidence: candidate` — a heuristic, never auto-actionable. A dead
   anchor, a trigger naming a now-done story, a near-duplicate title, a
   free-form record.
+
+The closure-marker check is a fact rather than a heuristic because no write
+door can produce it: `migrate` and `ingest` both read the discharge markers
+before they write, so a record that says it is closed and is sitting in the
+working set got there by a later append or a hand edit. It is reported, never
+acted on — discharging a record is judgment, and `repair` is forbidden to
+close one.
 
 `free_form: true` means **nothing on that record was interpreted** — the
 body is the text verbatim, the title is its first line, and no field was

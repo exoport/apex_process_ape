@@ -943,3 +943,305 @@ func TestDiscard_RequiresAReason(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reason")
 }
+
+// TestParseLegacy_AbsorbsStatusAnnotation: a register whose closure
+// convention is POSITIONAL appends the marker as a sibling bullet at column
+// 0. Every top-level bullet used to be a boundary, so the marker became a
+// record — turning one discharged entry into two open records, the entry
+// with nothing in its body saying it was closed and the closure evidence
+// filed as a free-form record of its own.
+//
+// On the field ledger that produced this rule, 238 entries became 637
+// records, 252 of them pure annotations, and every one of the 637 landed
+// open — while 52 of the entries carried a companion marker saying they
+// were already done.
+func TestParseLegacy_AbsorbsStatusAnnotation(t *testing.T) {
+	const ledger = `## Deferred from: story review of 12-4 (2026-07-28)
+
+- [Defer] Production wiring is a fail-closed placeholder — defer: owner=platform
+- [Closed: 193c4ec] Story 17.8 built the real adapter and swapped it in.
+- [Defer] A second entry that is genuinely still open
+- [Open]
+- [Defer] An entry overtaken by a better account
+- [Superseded: docs/atomix.md:50] recorded there instead
+`
+	doc := ParseLegacyDocument([]byte(ledger))
+	require.Len(t, doc.Records, 3, "three entries, not six: an annotation is not a record")
+
+	require.Equal(t, StatusClosed, doc.Records[0].Status)
+	require.Contains(t, doc.Records[0].ResolvedBy, "[Closed: 193c4ec]")
+	require.Contains(t, doc.Records[0].Body, "[Closed: 193c4ec]",
+		"the annotation stays verbatim in the body it belonged to")
+	require.Equal(t, "platform", doc.Records[0].Owner,
+		"absorbing the companion line must not disturb the entry's own field parse")
+
+	require.Equal(t, StatusOpen, doc.Records[1].Status, "[Open] never moves a record")
+
+	require.Equal(t, StatusDiscarded, doc.Records[2].Status,
+		"superseded is discarded, not closed: the work was never done")
+	require.Equal(t, "docs/atomix.md:50", doc.Records[2].DiscardEvidence)
+
+	// The whole point of absorbing rather than dropping: no line is lost, so
+	// the pre-write assertion still holds over the new boundaries.
+	require.NoError(t, verifyLossless([]byte(ledger), doc))
+}
+
+// TestParseLegacy_AbsorbsAColumnZeroClosureMarker: the positional rule
+// covers BOTH discharge vocabularies, not just the bracketed tags.
+//
+// Recognising only `[Closed]`/`[Superseded]` left a column-0 `RESOLVED`
+// clause splitting exactly as before, and worse: the marker closed ITSELF
+// and moved to closed/, leaving the entry open with the evidence no longer
+// beside it — and invisible to `verify`, whose body no longer carries a
+// marker. Indentation was never the discriminator; a register that appends
+// its markers as siblings does it in whichever vocabulary it uses.
+func TestParseLegacy_AbsorbsAColumnZeroClosureMarker(t *testing.T) {
+	const ledger = `## Deferred from: story review of 12-4 (2026-07-28)
+
+- [Defer] A thing that was later done
+- **RESOLVED (2026-08-20) — closed by Story 3.17, re-verified against the diff.**
+- [Defer] A second entry, discharged in the bracketed form
+- [RESOLVED, 2026-08-28, story dev of 31-5_prove-it] closed there
+- [Defer] A third entry, still open
+`
+	doc := ParseLegacyDocument([]byte(ledger))
+	require.Len(t, doc.Records, 3, "three entries: a marker bullet is not a record")
+
+	require.Equal(t, StatusClosed, doc.Records[0].Status)
+	require.Equal(t, "A thing that was later done", doc.Records[0].Title,
+		"the ENTRY keeps the record, not the marker that discharged it")
+	require.Equal(t, "2026-08-20", doc.Records[0].ResolvedAt)
+	require.Contains(t, doc.Records[0].Body, "**RESOLVED (2026-08-20)",
+		"the marker stays verbatim in the body it belonged to")
+
+	require.Equal(t, StatusClosed, doc.Records[1].Status)
+	require.Equal(t, "2026-08-28", doc.Records[1].ResolvedAt)
+
+	require.Equal(t, StatusOpen, doc.Records[2].Status)
+
+	require.NoError(t, verifyLossless([]byte(ledger), doc))
+}
+
+// TestParseLegacy_OrphanAnnotationKeepsItsOwnRecord: an annotation with
+// nothing above it has nothing to annotate. It must not be absorbed into
+// the void — it stays a record, where its tag is still read.
+func TestParseLegacy_OrphanAnnotationKeepsItsOwnRecord(t *testing.T) {
+	const ledger = `## Deferred from: story review of 12-4 (2026-07-28)
+
+- [Closed: abc1234] An annotation that opens its section
+`
+	doc := ParseLegacyDocument([]byte(ledger))
+	require.Len(t, doc.Records, 1)
+	require.Equal(t, StatusClosed, doc.Records[0].Status)
+	require.NoError(t, verifyLossless([]byte(ledger), doc))
+}
+
+// TestParseLegacy_DeferTagIsNeverAbsorbed: the annotation vocabulary is
+// closed and disjoint from the tags that open a record. A `[Defer]` bullet
+// following another one is a second entry, always.
+func TestParseLegacy_DeferTagIsNeverAbsorbed(t *testing.T) {
+	const ledger = `## Deferred from: story review of 12-4 (2026-07-28)
+
+- [Defer] first
+- [Defer] second
+- [Patch] a patch item, not a status annotation
+- [Addendum, 2026-08-28] an addendum entry
+`
+	doc := ParseLegacyDocument([]byte(ledger))
+	require.Len(t, doc.Records, 4)
+	for i := range doc.Records {
+		require.True(t, doc.Records[i].IsOpen())
+	}
+}
+
+// TestMigrate_ClosesRecordsCarryingAClosureMarker: a record that announces
+// its own discharge must not land in the open working set. `ape deferred
+// repair` is forbidden to touch a record `verify` did not flag, so before
+// this ran the marked records were unreachable by the only sanctioned
+// discharge path — and the better a register's hygiene, the more of them
+// there are.
+func TestMigrate_ClosesRecordsCarryingAClosureMarker(t *testing.T) {
+	const ledger = `## Deferred from: story dev of 30-4 (2026-08-20)
+
+- [Defer] A thing that was later done
+  - **RESOLVED (2026-08-20) — closed by Story 3.17, re-verified against the diff.**
+- [Defer] A thing that is still open, cited 2026-08-01.
+  Closed, as with every other entry in this register, by an appended dated
+  ` + "`RESOLVED`" + ` clause, never by deletion.
+`
+	dir, legacy := writeLegacy(t, ledger)
+	s := New(filepath.Join(dir, "deferred"))
+	res, err := s.Migrate(context.Background(), MigrateOptions{From: legacy})
+	require.NoError(t, err)
+	require.Equal(t, 2, res.RecordsIn)
+	require.Equal(t, 1, res.Closed, "one closure marker, one boilerplate mention of the convention")
+
+	loaded, err := s.Load(LoadOptions{IncludeClosed: true})
+	require.NoError(t, err)
+	var closed, open int
+	for i := range loaded.Records {
+		if loaded.Records[i].IsOpen() {
+			open++
+			continue
+		}
+		closed++
+		require.Equal(t, "2026-08-20", loaded.Records[i].ResolvedAt,
+			"the date comes off the marker's own line, not from anywhere in the body")
+	}
+	require.Equal(t, 1, closed)
+	require.Equal(t, 1, open)
+
+	// And the heading's provenance is read, not filed as unknown.
+	require.Equal(t, SourceStoryDev, loaded.Records[0].Source)
+}
+
+// TestMigrate_StubOnlyPromisesAPreambleItWrote: the stub used to assert a
+// PREAMBLE.md unconditionally, so a ledger that opens on its first heading
+// got a signpost pointing at a file that does not exist. Two of the three
+// field ledgers are that shape.
+func TestMigrate_StubOnlyPromisesAPreambleItWrote(t *testing.T) {
+	t.Run("no preamble", func(t *testing.T) {
+		const ledger = `## Deferred from: story review of 1-9 (2026-07-26)
+
+- [Defer] the first line of this ledger is its first heading
+`
+		dir, legacy := writeLegacy(t, ledger)
+		s := New(filepath.Join(dir, "deferred"))
+		res, err := s.Migrate(context.Background(), MigrateOptions{From: legacy})
+		require.NoError(t, err)
+		require.False(t, res.PreambleWritten)
+
+		stub, err := os.ReadFile(legacy)
+		require.NoError(t, err)
+		require.NotContains(t, string(stub), PreambleFileName,
+			"a signpost must not point at a file the migration did not write")
+		require.NoFileExists(t, filepath.Join(s.Dir, PreambleFileName))
+	})
+
+	t.Run("with a preamble", func(t *testing.T) {
+		const ledger = `# Deferred work
+
+Banner text that is document history, not a deferred item.
+
+## Deferred from: story review of 1-9 (2026-07-26)
+
+- [Defer] a real entry
+`
+		dir, legacy := writeLegacy(t, ledger)
+		s := New(filepath.Join(dir, "deferred"))
+		res, err := s.Migrate(context.Background(), MigrateOptions{From: legacy})
+		require.NoError(t, err)
+		require.True(t, res.PreambleWritten)
+
+		stub, err := os.ReadFile(legacy)
+		require.NoError(t, err)
+		require.Contains(t, string(stub), PreambleFileName)
+		require.Contains(t, string(stub), "preserved verbatim at")
+		require.FileExists(t, filepath.Join(s.Dir, PreambleFileName))
+		require.Positive(t, res.PreambleBytes)
+		require.Zero(t, res.OrphanHeadings)
+	})
+
+	// The third state. A ledger with no prose above its first boundary but
+	// with a heading that titled no record still writes PREAMBLE.md — and
+	// calling what is in it "the ledger preamble" names something the ledger
+	// never had, on both the stub and the completion line.
+	t.Run("orphan headings only", func(t *testing.T) {
+		const ledger = `## Still open
+
+## Deferred from: story review of 1-9 (2026-07-26)
+
+- [Defer] a real entry
+`
+		dir, legacy := writeLegacy(t, ledger)
+		s := New(filepath.Join(dir, "deferred"))
+		res, err := s.Migrate(context.Background(), MigrateOptions{From: legacy})
+		require.NoError(t, err)
+		require.True(t, res.PreambleWritten)
+		require.Zero(t, res.PreambleBytes)
+		require.Equal(t, 1, res.OrphanHeadings)
+
+		stub, err := os.ReadFile(legacy)
+		require.NoError(t, err)
+		require.Contains(t, string(stub), PreambleFileName)
+		require.NotContains(t, string(stub), "preserved verbatim at",
+			"there was no preamble to preserve")
+		require.Contains(t, string(stub), "titled no record")
+	})
+}
+
+// TestMigrate_RecoveredRecordKeepsItsOwnDischarge: a historical copy is
+// parsed by the same code as the live one, so it can arrive ALREADY
+// discharged by a closure marker or a [Superseded:] annotation.
+//
+// Recovery must not overwrite that verdict. Stamping "recovered from git
+// history" over it trades WHY the record left the working set for merely
+// WHERE it was found — and on a superseded record it would assert a
+// delivery that never happened, which is the exact confusion `discarded`
+// exists to prevent.
+func TestMigrate_RecoveredRecordKeepsItsOwnDischarge(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	git := func(args ...string) {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@e",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@e")
+		require.NoError(t, cmd.Run(), "git %v", args)
+	}
+	git("init", "-q")
+
+	legacy := filepath.Join(dir, "deferred-work.md")
+	before := "## Deferred from: story review of 1-1 (2026-01-01)\n\n" +
+		"- [Defer] Survivor [a.go:1]\n" +
+		"- [Defer] Overtaken by a better account [b.go:2]\n" +
+		"- [Superseded: docs/elsewhere.md:12] recorded there instead\n" +
+		"- [Defer] Delivered then evicted [c.go:3]\n" +
+		"  - **RESOLVED (2026-01-02) — closed by Story 9.9.**\n"
+	require.NoError(t, os.WriteFile(legacy, []byte(before), 0o644))
+	git("add", ".")
+	git("commit", "-qm", "all three")
+
+	after := "## Deferred from: story review of 1-1 (2026-01-01)\n\n" +
+		"- [Defer] Survivor [a.go:1]\n"
+	require.NoError(t, os.WriteFile(legacy, []byte(after), 0o644))
+	git("add", ".")
+	git("commit", "-qm", "evict two")
+
+	s := New(filepath.Join(dir, "deferred"))
+	res, err := s.Migrate(ctx, MigrateOptions{From: legacy, RecoverDeleted: true})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.RecordsIn)
+	require.Equal(t, 2, res.Recovered)
+
+	all, err := s.Load(LoadOptions{IncludeClosed: true})
+	require.NoError(t, err)
+	byTitle := map[string]*Record{}
+	for i := range all.Records {
+		byTitle[all.Records[i].Title] = &all.Records[i]
+	}
+
+	superseded := byTitle["Overtaken by a better account"]
+	require.NotNil(t, superseded)
+	require.Equal(t, StatusDiscarded, superseded.Status,
+		"recovery must not promote a superseded record to delivered")
+	require.Contains(t, superseded.DiscardReason, "[Superseded: docs/elsewhere.md:12]")
+	require.Contains(t, superseded.DiscardReason, "recovered from git history")
+	require.Empty(t, superseded.ResolvedBy, "a discarded record asserts no delivery")
+
+	delivered := byTitle["Delivered then evicted"]
+	require.NotNil(t, delivered)
+	require.Equal(t, StatusClosed, delivered.Status)
+	require.Contains(t, delivered.ResolvedBy, "closure marker")
+	require.Contains(t, delivered.ResolvedBy, "recovered from git history")
+
+	// Neither is in the open set, and the survivor is untouched.
+	open, err := s.Load(LoadOptions{})
+	require.NoError(t, err)
+	require.Len(t, open.Records, 1)
+	require.Equal(t, "Survivor", open.Records[0].Title)
+}

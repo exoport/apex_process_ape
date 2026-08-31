@@ -1,5 +1,100 @@
 # CHANGELOG
 
+## v0.0.63 (2026-08-31)
+
+Three corrections from a third field migration, verified against three real
+ledgers at once — 85, 8 and 387 records. The third one is not the defect it
+was reported as: the reported symptom was a missing `verify` check, and
+underneath it was a migration that severed the link between an entry and
+the marker discharging it.
+
+- **fix: a record that says it is closed no longer lands in the open
+  working set.** Registers close entries by appending a marker rather than
+  deleting them — which is the practice this store's own rationale
+  recommends — and the migration read none of them, so the better a
+  register's hygiene, the more of its history arrived as live work. Two
+  shapes are now recognised, and `ape deferred verify` reports either one if
+  it appears later. Nothing is closed on a word: the marker must OPEN a list
+  item, because on one ledger `RESOLVED` appears in 32 of 85 records while
+  only 20 are closures — the other 12 are entries describing how they will
+  eventually be closed.
+  - **A positional marker cost the most, and looked like nothing.** Where
+    the marker is appended as a sibling bullet at column 0, every one of
+    them became a record of its own: one discharged entry turned into two
+    open records — the entry with nothing in its body saying it was closed,
+    and the closure evidence filed separately. On the largest ledger, 238
+    entries became 637 records, 252 of them pure annotations, and every one
+    of the 637 was open. It now reads 387 records, 56 of them discharged.
+    The rule covers BOTH vocabularies. Reading only the bracketed tags —
+    on the theory that indentation told the two families apart — left a
+    column-0 `RESOLVED` clause splitting exactly as before, and worse: the
+    marker discharged itself and moved to `closed/`, so the entry stayed
+    open with the evidence no longer even beside it, and invisible to
+    `verify`, whose body no longer carried a marker.
+  - **The markers on one entry are a chronology, and the last one wins.**
+    They are appended, never edited in place, and a run of them is absorbed
+    whole — including lines that narrate a neighbouring entry. Reading the
+    first `[Closed]` instead of the last tag closed four records whose own
+    final word is `[Open]`.
+  - **Nothing was lost, which is why nothing caught it.** The pre-write
+    check compares a multiset of lines, so document order — the only thing
+    linking a marker to its entry — was invisible to it. The guarantee was
+    true of the text and false of the relation the text depended on. The
+    marker is absorbed into the body it belonged to rather than
+    reinterpreted, so it still appears exactly once.
+  - `[Superseded: <artifact>]` discards rather than closes. The entry was
+    overtaken, not delivered, and recording it as closed asserts work that
+    never happened.
+  - **History recovery keeps a recovered record's own discharge.** A
+    historical copy is read by the same parser, so it can arrive already
+    closed or superseded; the recovery now appends its provenance to that
+    reason instead of overwriting it. Overwriting traded why a record left
+    the working set for merely where it was found, and on a superseded
+    record it asserted a delivery that never happened.
+  - **`ingest` reads the markers too, so the invariant holds at every write
+    door.** It is the one `verify` now reports as `certain`, and while
+    ingest skipped the readings ape could write a record and then flag it
+    itself. A bullet that arrives discharged goes to `closed/` rather than
+    the working set — the open set is a directory, not a status filter, so a
+    `status: closed` file written beside the open records would sit in
+    `list` forever — and says so as a warning rather than re-routing in
+    silence.
+  - `resolved_at` on a `[Closed]` annotation comes off the winning tag's own
+    line, the same rule the appended-clause form already followed. A record
+    cites several dates and only one of them is when it was discharged.
+    `[Superseded]` writes none: there is no discarded-at field, and a
+    `resolved_at` on a discarded record would assert a delivery.
+
+- **fix: the migration reads `story dev` headings.** Half the records on two
+  of the three ledgers were filed as `source: unknown` because only
+  `review` and `correct-course` were recognised. `story-dev` joins the
+  vocabulary — 102 of 206 provenance headings in the field say it. It is a
+  register convention operators maintain by hand, not one any skill emits,
+  and filing half a ledger under `unknown` described the parser rather than
+  the corpus.
+  - **Ingest and migration now agree.** They shared a comment claiming they
+    were comparable and two fallbacks that were not: a migrated
+    `story dev of 30-4` became `unknown` while a freshly-ingested
+    `apex-dev-story` became the literal string `apex-dev-story`. Both go
+    through one classifier, and an unrecognised filer is `unknown` on both —
+    `skill` already carries it verbatim.
+
+- **fix: the stub no longer promises a preamble that was never written.**
+  A ledger whose first line is its first heading has no preamble, so no
+  `PREAMBLE.md` is written — and the signpost left behind said it was
+  "preserved verbatim" there anyway. Two of the three field ledgers are that
+  shape. The sentence now describes what the migration actually wrote, and
+  is omitted when it wrote nothing.
+  - The completion line says the same three things. `PREAMBLE.md` has two
+    independent reasons to exist — prose above the first boundary, and
+    headings that titled no record — so `preamble_written` alone cannot say
+    what is in it, and calling an orphan-headings-only file "the ledger
+    preamble" names something the ledger never had. `preamble_bytes` and
+    `orphan_headings` join the payload as the two facts both surfaces read.
+  - The already-discharged count is reported as "discharged", not
+    "resolved": it includes the records a `[Superseded: …]` annotation
+    discarded, and those were never delivered.
+
 ## v0.0.62 (2026-08-30)
 
 Two discoverability defects from the `axon_tenax_engine` second migration.

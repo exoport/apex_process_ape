@@ -575,7 +575,177 @@ func TestSourceForSkill(t *testing.T) {
 	require.Equal(t, SourceStoryReview, sourceForSkill("apex-code-review"))
 	require.Equal(t, SourceCorrectCourse, sourceForSkill("apex-correct-course"))
 	require.Equal(t, SourceUnknown, sourceForSkill(""))
-	require.Equal(t, "apex-something", sourceForSkill("apex-something"))
+	// A dev skill is `story-dev` on BOTH paths now — the ingest half used to
+	// fall back to the raw skill name while the migration's half fell back
+	// to `unknown`, so the same conceptual source got two different values.
+	require.Equal(t, SourceStoryDev, sourceForSkill("apex-dev-story"))
+	require.Equal(t, SourceStoryDev, sourceForSkill("apex-story-batch-dev"))
+	// An unrecognised skill is `unknown`, not its own name: `skill` already
+	// carries the filer verbatim, and inventing an enum member from it would
+	// produce a source value no heading can ever match.
+	require.Equal(t, SourceUnknown, sourceForSkill("apex-something"))
+}
+
+func TestClassifySource_HeadingsAndSkills(t *testing.T) {
+	// The dev half is a whole word, so the development folder is not a
+	// provenance.
+	require.Equal(t, SourceStoryDev, classifySource("story dev of 30-4_amend-adr-0003"))
+	require.Equal(t, SourceUnknown, classifySource("the development folder"))
+	// Review wins a heading that says both.
+	require.Equal(t, SourceStoryReview, classifySource("story dev review of 12-1"))
+	require.Equal(t, SourceCorrectCourse, classifySource("apex-correct-course reconciliation of epic 12"))
+}
+
+func TestApplyClosureMarker_AnchoredNotWordSearch(t *testing.T) {
+	// The shape that closes: a list item OPENING with the marker.
+	closed := Record{Status: StatusOpen, Body: "- [Defer] a thing\n" +
+		"  - **RESOLVED (2026-08-20) — closed by Story 3.17, re-verified.**\n"}
+	applyClosureMarker(&closed)
+	require.Equal(t, StatusClosed, closed.Status)
+	require.Equal(t, "2026-08-20", closed.ResolvedAt)
+	require.Contains(t, closed.ResolvedBy, "migrated, not verified")
+
+	// The shape that must NOT close: the register describing its own
+	// convention. 12 of 32 `RESOLVED` mentions on the reference ledger are
+	// this, on records that are correctly open.
+	open := Record{Status: StatusOpen, Body: "- [Defer] a thing, cited 2026-08-01.\n" +
+		"  Closed, as with every other entry in this register, by an appended\n" +
+		"  dated `RESOLVED` clause, never by deletion.\n"}
+	applyClosureMarker(&open)
+	require.Equal(t, StatusOpen, open.Status)
+	require.Empty(t, open.ResolvedAt)
+
+	// Lowercase prose is not the tag.
+	prose := Record{Status: StatusOpen, Body: "- [Defer] the resolved role names differ\n"}
+	applyClosureMarker(&prose)
+	require.Equal(t, StatusOpen, prose.Status)
+}
+
+func TestApplyStatusAnnotation(t *testing.T) {
+	closed := Record{Status: StatusOpen, Body: "- [Defer] a thing\n- [Closed: 193c4ec] Story 17.8 built it\n"}
+	applyStatusAnnotation(&closed)
+	require.Equal(t, StatusClosed, closed.Status)
+	require.Contains(t, closed.ResolvedBy, "[Closed: 193c4ec]")
+
+	// Superseded is DISCARDED, not closed: the work was never done, it was
+	// overtaken. Recording it as closed asserts a delivery that never
+	// happened.
+	sup := Record{Status: StatusOpen, Body: "- [Defer] a thing\n- [Superseded: docs/atomix.md:50] overtaken\n"}
+	applyStatusAnnotation(&sup)
+	require.Equal(t, StatusDiscarded, sup.Status)
+	require.Equal(t, "docs/atomix.md:50", sup.DiscardEvidence)
+	require.NotEmpty(t, sup.DiscardReason)
+
+	// `[Open]` is the register asserting the entry still reproduces.
+	stays := Record{Status: StatusOpen, Body: "- [Defer] a thing\n- [Open]\n"}
+	applyStatusAnnotation(&stays)
+	require.Equal(t, StatusOpen, stays.Status)
+
+	// THE LAST TAG WINS. The convention is append-only, so a run of tags is
+	// a chronology — and a `[Closed]` in the middle of one is routinely a
+	// comment about a NEIGHBOURING entry, absorbed along with the rest. On
+	// the field ledger, taking the first discharging tag closed four records
+	// whose final word is `[Open]`.
+	reopened := Record{Status: StatusOpen, Body: "- [Defer] a thing\n" +
+		"- [Open] re-verified live: still reproduces\n" +
+		"- [Closed] the entry ABOVE, not this one\n" +
+		"- [Open] filed open at dev time for the same reason\n"}
+	applyStatusAnnotation(&reopened)
+	require.Equal(t, StatusOpen, reopened.Status,
+		"a trailing [Open] is the register's latest word")
+	require.Empty(t, reopened.ResolvedBy)
+
+	// And the reverse order still closes.
+	late := Record{Status: StatusOpen, Body: "- [Defer] a thing\n" +
+		"- [Open] not yet\n- [Closed: bdffb51] Story 23.2 landed it\n"}
+	applyStatusAnnotation(&late)
+	require.Equal(t, StatusClosed, late.Status)
+	require.Contains(t, late.ResolvedBy, "[Closed: bdffb51]")
+
+	// A record already discharged by an appended closure marker is not
+	// resurrected by a trailing [Open].
+	alreadyClosed := Record{
+		Status: StatusClosed, ResolvedBy: "story 3.17",
+		Body: "- [Defer] a thing\n- [Open] stale annotation\n",
+	}
+	applyStatusAnnotation(&alreadyClosed)
+	require.Equal(t, StatusClosed, alreadyClosed.Status)
+}
+
+// TestApplyStatusAnnotation_DateOffTheWinningLine: `resolved_at` comes off
+// the line the winning tag sits on, the same rule applyClosureMarker
+// follows. A record cites several dates and only one of them is when it was
+// discharged — and the tag itself stops at `]`, so the date can be inside it
+// or after it.
+func TestApplyStatusAnnotation_DateOffTheWinningLine(t *testing.T) {
+	inside := Record{Status: StatusOpen, Body: "- [Defer] filed 2026-01-01, code last moved 2026-02-02\n" +
+		"- [Closed, 2026-08-28] Story 23.2 landed it\n"}
+	applyStatusAnnotation(&inside)
+	require.Equal(t, "2026-08-28", inside.ResolvedAt)
+
+	after := Record{Status: StatusOpen, Body: "- [Defer] filed 2026-01-01\n" +
+		"- [Closed: bdffb51] landed on 2026-08-29\n"}
+	applyStatusAnnotation(&after)
+	require.Equal(t, "2026-08-29", after.ResolvedAt)
+
+	// THE WINNING line, not the first one. A [Closed] earlier in the
+	// chronology is routinely a comment about a neighbouring entry, and its
+	// date is not this record's.
+	last := Record{Status: StatusOpen, Body: "- [Defer] a thing\n" +
+		"- [Closed, 2026-03-03] the entry ABOVE, not this one\n" +
+		"- [Closed, 2026-09-09] this one, later\n"}
+	applyStatusAnnotation(&last)
+	require.Equal(t, "2026-09-09", last.ResolvedAt)
+
+	// No date on the line is no date at all, never a guess from elsewhere.
+	none := Record{Status: StatusOpen, Body: "- [Defer] filed 2026-01-01\n- [Closed: bdffb51] landed\n"}
+	applyStatusAnnotation(&none)
+	require.Equal(t, StatusClosed, none.Status)
+	require.Empty(t, none.ResolvedAt)
+
+	// `[Superseded]` writes no date: there is no discarded-at field, and
+	// resolved_at on a discarded record would assert a delivery.
+	sup := Record{Status: StatusOpen, Body: "- [Defer] a thing\n- [Superseded: docs/a.md:5] on 2026-08-28\n"}
+	applyStatusAnnotation(&sup)
+	require.Equal(t, StatusDiscarded, sup.Status)
+	require.Empty(t, sup.ResolvedAt)
+}
+
+// TestIngest_DischargedBulletGoesStraightToClosed: the invariant `verify`
+// reports as `certain` has to be true at EVERY write door, not just the
+// migration's. While ingest skipped the discharge readings, ape could write
+// a record and then flag it itself.
+//
+// The routing matters as much as the status: the open set is the DIRECTORY,
+// so a `status: closed` file written beside the open records would sit in
+// `ape deferred list` forever.
+func TestIngest_DischargedBulletGoesStraightToClosed(t *testing.T) {
+	s := New(t.TempDir())
+	res, err := s.Ingest([]byte(
+		"- [Defer] A thing a skill filed as already done\n"+
+			"  - **RESOLVED (2026-08-20) — closed by Story 3.17.**\n"+
+			"- [Defer] A thing that is genuinely open\n"),
+		IngestOptions{Skill: "apex-review-story", Story: "54-1", Date: "2026-08-20"})
+	require.NoError(t, err)
+	require.Equal(t, 2, res.Count)
+	require.Contains(t, strings.Join(res.Warnings, "\n"), "already discharged",
+		"a silent re-route is not a report")
+
+	open, err := s.Load(LoadOptions{})
+	require.NoError(t, err)
+	require.Len(t, open.Records, 1, "the discharged bullet must not be in the working set")
+	require.Equal(t, "A thing that is genuinely open", open.Records[0].Title)
+
+	all, err := s.Load(LoadOptions{IncludeClosed: true})
+	require.NoError(t, err)
+	require.Len(t, all.Records, 2, "and it must not be dropped either")
+
+	// And no `certain` finding on a store ape has only just written.
+	report, err := s.Verify(VerifyOptions{})
+	require.NoError(t, err)
+	for _, f := range report.Findings {
+		require.NotEqual(t, CheckClosureMark, f.Check, "%+v", f)
+	}
 }
 
 // TestStore_ScaleOfTheRealCorpus: 109 open records plus 118 tombstones is
@@ -598,4 +768,65 @@ func TestStore_ScaleOfTheRealCorpus(t *testing.T) {
 	report, err := s.Verify(VerifyOptions{})
 	require.NoError(t, err)
 	require.True(t, report.OK(), "%+v", report.Findings)
+}
+
+// TestVerify_FlagsClosureMarkerOnAnOpenRecord: the migration closes these,
+// so any that exist arrived afterwards — a skill appending to a body, or a
+// hand edit. It matters because `ape deferred repair` is forbidden to touch
+// a record `verify` did not flag, so an unreported one is unreachable by
+// the only sanctioned discharge path.
+func TestVerify_FlagsClosureMarkerOnAnOpenRecord(t *testing.T) {
+	s := New(t.TempDir())
+	marked := Record{
+		ID: "DW-20260820-aaa111", Title: "already done", Status: StatusOpen,
+		Body: "- [Defer] a thing\n  - **RESOLVED (2026-08-20) — closed by Story 3.17.**\n",
+	}
+	annotated := Record{
+		ID: "DW-20260820-bbb222", Title: "annotated done", Status: StatusOpen,
+		Body: "- [Defer] a thing\n- [Closed: 193c4ec] built and swapped in\n",
+	}
+	// The register describing its own convention, on a record that is
+	// correctly open. A body-wide word search flags this; the anchor must not.
+	boilerplate := Record{
+		ID: "DW-20260820-ccc333", Title: "still open", Status: StatusOpen,
+		Body: "- [Defer] a thing\n  Closed, as with every other entry in this register, by an\n" +
+			"  appended dated `RESOLVED` clause, never by deletion.\n",
+	}
+	// `[Open]` is a status annotation too, and is not a discharge.
+	stillOpen := Record{
+		ID: "DW-20260820-ddd444", Title: "explicitly open", Status: StatusOpen,
+		Body: "- [Defer] a thing\n- [Open]\n",
+	}
+	for _, rec := range []Record{marked, annotated, boilerplate, stillOpen} {
+		_, err := s.Write(rec)
+		require.NoError(t, err)
+	}
+
+	report, err := s.Verify(VerifyOptions{})
+	require.NoError(t, err)
+
+	flagged := map[string]bool{}
+	for _, f := range report.Findings {
+		if f.Check == CheckClosureMark {
+			require.Equal(t, ConfidenceCertain, f.Confidence)
+			flagged[f.ID] = true
+		}
+	}
+	require.True(t, flagged[marked.ID], "an appended closure marker must be reported")
+	require.True(t, flagged[annotated.ID], "a [Closed:] annotation must be reported")
+	require.False(t, flagged[boilerplate.ID], "the convention described is not a closure")
+	require.False(t, flagged[stillOpen.ID], "[Open] is not a discharge")
+
+	// A closed record is not re-reported: it is already discharged.
+	closed := marked
+	closed.ID = "DW-20260820-eee555"
+	closed.Status = StatusClosed
+	closed.ResolvedBy = "story 3.17"
+	_, err = s.Write(closed)
+	require.NoError(t, err)
+	report, err = s.Verify(VerifyOptions{})
+	require.NoError(t, err)
+	for _, f := range report.Findings {
+		require.NotEqual(t, closed.ID, f.ID, "a discharged record has nothing left to flag")
+	}
 }

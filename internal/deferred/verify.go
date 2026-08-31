@@ -20,6 +20,7 @@ const (
 	CheckDeadAnchor   = "deferred.dead_anchor"
 	CheckDuplicate    = "deferred.duplicate_candidate"
 	CheckTriggerFired = "deferred.trigger_may_have_fired"
+	CheckClosureMark  = "deferred.closure_marker_in_open_record"
 )
 
 // Confidence levels. `candidate` findings are heuristics: a person or a
@@ -99,6 +100,7 @@ func (s *Store) Verify(opts VerifyOptions) (*VerifyReport, error) {
 
 		report.Findings = append(report.Findings, checkSchema(rec)...)
 		report.Findings = append(report.Findings, checkRefs(rec, ids)...)
+		report.Findings = append(report.Findings, checkClosureMarker(rec)...)
 
 		// Heuristics — candidates only, never conclusions.
 		if rec.IsOpen() {
@@ -165,6 +167,70 @@ func checkSchema(rec *Record) []Finding {
 		})
 	}
 	return out
+}
+
+// checkClosureMarker flags an open record whose own body says it is closed.
+//
+// CERTAIN, not a candidate, and the reason is that it reads STRUCTURE
+// rather than prose: the same two anchored recognisers the write paths act
+// on, so the surfaces cannot disagree about what a closure marker is.
+//
+// NO WRITE DOOR CAN PRODUCE THIS STATE. Both Migrate and Ingest run the
+// three discharge readings before they write, and Close/Discard set the
+// status themselves — so every occurrence is drift introduced afterwards, by
+// a skill appending to a body or by a hand edit, and mechanically checkable.
+// That is what makes it a fact rather than a heuristic; while ingest skipped
+// the readings, this check could fire on a record ape had just written.
+//
+// It matters because of who reads this list: `ape deferred repair` is
+// forbidden to touch a record `verify` did not flag, so a record that
+// announces its own discharge and is not reported here is unreachable by
+// the only sanctioned discharge path. Nothing here closes it — verify never
+// writes — but naming it puts it back in front of the one thing that can.
+func checkClosureMarker(rec *Record) []Finding {
+	if !rec.IsOpen() {
+		return nil
+	}
+	// The message states the FACT and stops there. It used to name
+	// `ape deferred close`, which `ape deferred repair` — the main consumer
+	// of this list — is explicitly forbidden to run: discharging an open
+	// record as delivered is the operator's judgment, and a finding that
+	// instructs the one reader who must not act on it is worse than no
+	// finding at all.
+	switch {
+	case inBodyClosureRe.MatchString(rec.Body):
+		return []Finding{{
+			Check: CheckClosureMark, ID: rec.ID, Confidence: ConfidenceCertain,
+			Message: "open record carries an appended closure marker in its body — " +
+				"the record's own text says it was discharged; report it for the operator",
+		}}
+	case hasDischargingAnnotation(rec.Body):
+		return []Finding{{
+			Check: CheckClosureMark, ID: rec.ID, Confidence: ConfidenceCertain,
+			Message: "open record carries a [Closed]/[Superseded] status annotation — " +
+				"the record's own text says it was discharged; report it for the operator",
+		}}
+	}
+	return nil
+}
+
+// hasDischargingAnnotation reports whether a body's LAST status tag means
+// discharged.
+//
+// It must read the tags exactly as applyStatusAnnotation does, or the two
+// surfaces disagree: the annotations on one entry are an append-only
+// chronology, so a record whose final tag is `[Open]` is open however many
+// `[Closed]` lines precede it, and flagging it here would report a record
+// the migration correctly left alone. `[Open]` is a status annotation too,
+// so matching the tag family alone would flag every open record in a
+// register that annotates all of them.
+func hasDischargingAnnotation(body string) bool {
+	matches := statusAnnotationRe.FindAllStringSubmatch(body, -1)
+	if len(matches) == 0 {
+		return false
+	}
+	last := matches[len(matches)-1][1]
+	return last == "Closed" || last == "Superseded"
 }
 
 // checkRefs is the other hard invariant: a pointer that points nowhere.

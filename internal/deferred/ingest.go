@@ -121,6 +121,25 @@ func (s *Store) Ingest(data []byte, opts IngestOptions) (*IngestResult, error) {
 		rec.Cycle = opts.Cycle
 		rec.Created = opts.Date
 		rec.Source = sourceForSkill(opts.Skill)
+		// The same three discharge readings the migration applies, for the
+		// same reason and in the same order: a body that says it is closed
+		// must not land in the open working set, whichever door it came in
+		// through. Without this the invariant `verify` now checks was true of
+		// migrated records and merely documented for ingested ones — and a
+		// `certain` finding on a record ape itself had just written is a
+		// contradiction the operator has to unpick.
+		//
+		// Nothing here can fail, so the exit-code contract above is untouched.
+		//
+		// ONE RESIDUAL, named rather than fixed: SplitBullets has no
+		// absorbAnnotation, so a marker written at column 0 in an ingest
+		// payload still becomes its own record. An ingest payload is a skill's
+		// freshly-emitted defer bullets, not a register carrying an
+		// append-only closure convention, and no field payload has ever
+		// carried one.
+		applyResolutionBanner(&rec)
+		applyClosureMarker(&rec)
+		applyStatusAnnotation(&rec)
 		rec.ID = NewID(opts.Date, rec.Title, rec.Body)
 
 		// Two identical bullets in one payload would collide on a
@@ -134,7 +153,20 @@ func (s *Store) Ingest(data []byte, opts IngestOptions) (*IngestResult, error) {
 		if rec.FreeForm {
 			res.Warnings = append(res.Warnings, rec.ID+": stored verbatim as free-form (no [Defer] bullet shape) — flag for `ape deferred verify`")
 		}
-		path, err := s.Write(rec)
+		write := s.Write
+		if !rec.IsOpen() {
+			// Straight to closed/, because the OPEN SET IS THE DIRECTORY:
+			// Load reads open records by listing s.Dir, not by filtering on
+			// the status field, so a `status: closed` file written here would
+			// sit in `ape deferred list` forever. It is also worth saying out
+			// loud — a skill filing a defer that already announces its own
+			// discharge is a thing the operator should see, not a silent
+			// re-route.
+			write = s.writeClosed
+			res.Warnings = append(res.Warnings,
+				rec.ID+": the bullet's own text says it is already discharged — stored in closed/, not the working set")
+		}
+		path, err := write(rec)
 		if err != nil {
 			// An unwritable store IS a setup failure, and the only thing
 			// here allowed to fail the command.
@@ -148,17 +180,21 @@ func (s *Store) Ingest(data []byte, opts IngestOptions) (*IngestResult, error) {
 	return res, nil
 }
 
-// sourceForSkill maps the filing skill onto the legacy ledger's source
-// vocabulary, so migrated and freshly-ingested records are comparable.
+// sourceForSkill maps the filing skill onto the source vocabulary, so
+// migrated and freshly-ingested records really are comparable.
+//
+// It defers to classifySource, which is the whole fix: this function used
+// to fall back to the RAW SKILL NAME while the migration's half of the same
+// mapping fell back to `unknown`, so the two produced different values for
+// the same conceptual source and the claim in this comment was false. The
+// skill is not lost by the change — `skill` carries it verbatim on every
+// ingested record.
+//
+// It passes an EMPTY skill through rather than short-circuiting it, which
+// costs nothing (`classifySource("")` matches nothing and is `unknown`) and
+// buys the exactness `Source`'s own doc claims: `unknown` means a
+// classification ran and nothing matched, on every door, with no case where
+// the value was reached without one.
 func sourceForSkill(skill string) string {
-	switch {
-	case skill == "":
-		return SourceUnknown
-	case strings.Contains(skill, "correct-course"):
-		return SourceCorrectCourse
-	case strings.Contains(skill, "review"):
-		return SourceStoryReview
-	default:
-		return skill
-	}
+	return classifySource(skill)
 }

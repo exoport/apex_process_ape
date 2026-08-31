@@ -37,9 +37,54 @@ const (
 // Source values recorded from the legacy ledger's section headings.
 const (
 	SourceStoryReview   = "story-review"
+	SourceStoryDev      = "story-dev"
 	SourceCorrectCourse = "correct-course"
 	SourceUnknown       = "unknown"
 )
+
+// devWordRe matches the dev half of the vocabulary as a WHOLE WORD, which
+// is the entire reason it is a regexp rather than a Contains: `development`
+// contains `dev` and is not a provenance, and a heading naming the
+// development folder would otherwise be filed as a dev heading.
+//
+// `\b` sits on both sides of a hyphen, so this catches `story dev of 30-4`,
+// `apex-dev-story` and `apex-story-batch-dev` alike.
+var devWordRe = regexp.MustCompile(`(?i)\bdev\b`)
+
+// classifySource maps a provenance phrase onto the store's source
+// vocabulary. It is the ONE classifier, deliberately: the migration passes
+// a legacy heading's label and Ingest passes the filing skill's name, and
+// while those were two functions they disagreed on the fallback — a
+// migrated `story dev of 30-4` became `unknown` while a freshly-ingested
+// `apex-dev-story` became the literal string `apex-dev-story`. The comment
+// on the ingest half claimed the two were comparable. They were not.
+//
+// `story-dev` is here because it is the majority form in the field, not
+// because the framework emits it: across two field ledgers, 102 of 206
+// provenance headings say `story dev` and none of the framework's own
+// heading templates ever have. It is a register convention operators
+// maintain by hand, and filing half a ledger under `unknown` describes the
+// parser rather than the corpus.
+//
+// The fallback is `unknown` on BOTH paths. An unrecognised skill name is
+// not silently promoted into this vocabulary, because `skill` already
+// carries the exact filer verbatim and a source value invented from it
+// would be the only member of the enum that no heading can ever produce.
+func classifySource(text string) string {
+	lower := strings.ToLower(text)
+	switch {
+	case strings.Contains(lower, "correct-course"):
+		return SourceCorrectCourse
+	// Review wins a heading that says both. `story dev review of X` is a
+	// review; there is no form where the reverse reading is the right one.
+	case strings.Contains(lower, "review"):
+		return SourceStoryReview
+	case devWordRe.MatchString(lower):
+		return SourceStoryDev
+	default:
+		return SourceUnknown
+	}
+}
 
 // Record is one deferred item.
 //
@@ -48,9 +93,19 @@ const (
 // are free text in the corpus ("yes", "no", "n/a", prose), and
 // normalising them would be the kind of guess this store exists to avoid.
 type Record struct {
-	ID     string `json:"id"               yaml:"id"`
-	Title  string `json:"title"            yaml:"title"`
-	Status string `json:"status"           yaml:"status"`
+	ID     string `json:"id"     yaml:"id"`
+	Title  string `json:"title"  yaml:"title"`
+	Status string `json:"status" yaml:"status"`
+	// Source is the provenance classification, and ABSENT IS NOT `unknown`.
+	// Absent means nothing ever claimed the record — it sat under an
+	// ordinary `##` section, so no classification was attempted at all.
+	// `unknown` means a classification RAN and nothing in the vocabulary
+	// matched: a `## Deferred from:` heading the migration could not place,
+	// or a filing skill Ingest could not place. Collapsing the two would
+	// make an index row under a legend heading indistinguishable from a real
+	// defer under an unclassifiable provenance, and `source_heading` (or
+	// `skill`) carries the original verbatim either way, so nothing is lost
+	// by leaving it empty.
 	Source string `json:"source,omitempty" yaml:"source,omitempty"`
 	// SourceStory is the story whose review filed this.
 	SourceStory string `json:"source_story,omitempty" yaml:"source_story,omitempty"`
@@ -416,6 +471,176 @@ func applyResolutionBanner(rec *Record) {
 	if dates := isoDateRe.FindAllString(rec.Body, -1); len(dates) > 0 {
 		rec.ResolvedAt = dates[0]
 	}
+}
+
+// inBodyClosureRe matches a list item whose content OPENS with a closure
+// marker — the shape a register uses when it closes an entry by appending a
+// dated clause instead of deleting it, whether as an indented sub-bullet or
+// as a sibling at column 0 (which absorbAnnotation folds back into the
+// entry it discharges):
+//
+//   - **RESOLVED (2026-08-20) — closed by Story 3.17, re-verified …**
+//   - [RESOLVED, 2026-08-28, story dev of 31-5_prove-it-over-both-…]
+//   - **Disposition recorded (2026-08-20, Story 23.4) — dissolved by …**
+//
+// THE ANCHOR IS THE WHOLE POINT, and it is what a body-wide word search
+// gets wrong. On the reference ledger, `RESOLVED` appears in 32 of 85
+// records but only 20 of them are closures; the other 12 are the register's
+// own forward-looking boilerplate —
+//
+//	Closed, as with every other entry in this register, by an appended
+//	dated `RESOLVED` clause, never by deletion.
+//
+// — on records that are correctly open and merely describe how they will
+// eventually be closed. Requiring the marker to OPEN a list item separates
+// the two exactly: 20 hits, no false positives, on the corpus that produced
+// the convention.
+//
+// The token is case-sensitive because the convention is a literal tag. A
+// lowercase `resolved` is ordinary prose ("the resolved role names"), and
+// matching it would put back the failure this anchor exists to remove.
+var inBodyClosureRe = regexp.MustCompile(`(?m)^[ \t]*[-*][ \t]*(?:\*\*|__|\[)?(?:RESOLVED|Disposition recorded)\b`)
+
+// statusAnnotationRe matches a TOP-LEVEL bullet whose content is one of the
+// bracketed status tags a register appends as a companion line to the entry
+// above it:
+//
+//   - [Defer] <the entry>
+//   - [Closed: 193c4ec] Story 17.8 built the real adapter and swapped …
+//
+// The vocabulary is closed — `[Open]`, `[Closed]`, `[Closed: <sha>]`,
+// `[Superseded: <artifact>]` — and disjoint from the tags that open a
+// record of their own (`[Defer]`, `[Patch]`, `[Addendum, <date>]`), which
+// is what makes recognising it structural rather than interpretive.
+//
+// INDENTATION IS NOT THE DISCRIMINATOR against inBodyClosureRe, and
+// believing it was is what first left the positional rule applying to this
+// family alone: both are written at column 0 as a sibling of the entry they
+// discharge, so either one would otherwise become a RECORD of its own.
+// absorbAnnotation in the migration recognises both, and its comment holds
+// what missing that cost.
+var statusAnnotationRe = regexp.MustCompile(`(?m)^ ?[-*] \[(Open|Closed|Superseded)\b([^\]]*)\]`)
+
+// migratedNote labels a discharge the migration read off the ledger rather
+// than verified. It names the EVIDENCE, not a person, for the same reason
+// resolvedByBanner does: the ledger said so and the migration is repeating
+// it, which is a different thing from `ape deferred close` having checked
+// the premise against HEAD.
+func migratedNote(marker string) string {
+	return marker + " in the legacy ledger (migrated, not verified)"
+}
+
+// markerLine returns the rest of the body line a marker starts on.
+//
+// It is the span BOTH appliers read a discharge date out of, and it is one
+// function so they cannot drift: a record routinely cites several dates —
+// when it was filed, when the code it names last changed, what it is
+// waiting for — and only the one on the marker's own line is when the
+// record was discharged. Anything wider is a coin toss dressed as a field.
+func markerLine(body string, start int) string {
+	line := body[start:]
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	return line
+}
+
+// applyClosureMarker closes a record whose body carries an appended closure
+// marker.
+//
+// A record that announces its own discharge and still lands in the open
+// working set is not a cosmetic problem: `ape deferred repair` is forbidden
+// to touch a record `verify` did not flag, so before this ran the marked
+// records were unreachable by the only sanctioned discharge path — and the
+// better a register's hygiene, the more of them there are. Closing by an
+// appended clause instead of deleting the entry is exactly the practice the
+// store's own rationale recommends.
+func applyClosureMarker(rec *Record) {
+	if !rec.IsOpen() {
+		return
+	}
+	loc := inBodyClosureRe.FindStringIndex(rec.Body)
+	if loc == nil {
+		return
+	}
+	rec.Status = StatusClosed
+	rec.ResolvedBy = migratedNote("closure marker")
+	if d := isoDateRe.FindString(markerLine(rec.Body, loc[0])); d != "" {
+		rec.ResolvedAt = d
+	}
+}
+
+// applyStatusAnnotation sets a record's status from the companion status
+// tags absorbed into its body.
+//
+// THE LAST TAG WINS, because the convention is append-only: the legend
+// these registers carry says a marker is "appended, not an in-place edit",
+// so the tags on one entry are a chronology and the final one is its
+// current state. Taking the first discharging tag instead read the middle
+// of that chronology as its end, and on the field ledger it closed four
+// records whose last word is `[Open]` — including one that spells the
+// sequence out:
+//
+//   - [Defer] `nodeio.LLMRequest.MaxAttempts` … is STILL not honored
+//   - [Open]  Re-verified live: still unhonored by runChain's fallback
+//   - [Closed] The `story dev of 5-6…` entry ABOVE (…) — annotating a
+//     neighbour, not this entry
+//   - [Open]  Filed `[Open]` at dev time ONLY because …
+//
+// A run of annotations is absorbed whole, and some of them narrate a
+// neighbouring entry rather than this one. Reading the last tag is what
+// stops a comment about the entry above from discharging this one.
+//
+// `[Open]` is therefore a real verdict and not a no-op: it is the register
+// asserting the entry still reproduces, and as the final tag it leaves the
+// record open however many `[Closed]` lines precede it.
+//
+// `[Superseded: <artifact>]` discards rather than closes. The tag means the
+// entry's claim was overtaken by a more accurate account recorded
+// elsewhere — the work was never done and is no longer wanted, which is the
+// distinction `discarded` exists to carry. Recording it as `closed` would
+// assert delivery that never happened, the precise defect that cost the
+// last field project twenty records.
+func applyStatusAnnotation(rec *Record) {
+	// A record already discharged by a resolution banner or an appended
+	// closure marker is left alone. A trailing `[Open]` never REOPENS one:
+	// the two families do not co-occur on any field ledger, and of the two
+	// possible errors, resurrecting a closed record is the worse one.
+	if !rec.IsOpen() {
+		return
+	}
+	// The index form, because the DATE is read off the winning tag's own
+	// line and the submatch strings alone cannot say which line that was.
+	locs := statusAnnotationRe.FindAllStringSubmatchIndex(rec.Body, -1)
+	if len(locs) == 0 {
+		return
+	}
+	loc := locs[len(locs)-1]
+	kind := rec.Body[loc[2]:loc[3]]
+	rest := rec.Body[loc[4]:loc[5]]
+	tag := "[" + kind + rest + "]"
+	switch kind {
+	case "Closed":
+		rec.Status = StatusClosed
+		rec.ResolvedBy = migratedNote(tag)
+		// Same span as applyClosureMarker reads, and it has to be the whole
+		// line rather than the tag: the tag stops at `]`, so a
+		// `[Closed, 2026-08-28] …` date sits inside it while a
+		// `[Closed: <sha>] … on 2026-08-28` one sits after it.
+		//
+		// `[Superseded]` gets no such treatment: there is no discarded-at
+		// field for it to write, and adding one would put a second, unread
+		// spelling of "when did this leave the working set" on the record.
+		if d := isoDateRe.FindString(markerLine(rec.Body, loc[0])); d != "" {
+			rec.ResolvedAt = d
+		}
+	case "Superseded":
+		rec.Status = StatusDiscarded
+		rec.DiscardReason = migratedNote(tag)
+		rec.DiscardEvidence = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(rest), ":"))
+	}
+	// `[Open]` falls through deliberately: the record keeps the open status
+	// it already has.
 }
 
 // isBlockquoteOnly reports whether every non-blank line is a blockquote.

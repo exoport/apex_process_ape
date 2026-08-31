@@ -292,8 +292,9 @@ func newDeferredVerifyCmd() *cobra.Command {
 		Short:   "Check the store: invariants, and candidates for a human",
 		Long: `Two kinds of finding, and the tag on each is the important part:
 
-  confidence: certain    a fact. Schema problems, and related[]/supersedes[]
-                         pointing at records that do not exist.
+  confidence: certain    a fact. Schema problems, related[]/supersedes[]
+                         pointing at records that do not exist, and an open
+                         record whose own body carries a closure marker.
   confidence: candidate  a heuristic, NEVER auto-actionable. A dead anchor
                          (the record may be moot, or the code may just have
                          moved), a trigger naming a story that is now done

@@ -247,7 +247,11 @@ func emitMigrateHuman(w io.Writer, res *deferred.MigrateResult, root string) {
 			"           history recovery SKIPPED (--no-recover-deleted) — this is one-way; it cannot be run later by `migrate`")
 	}
 	if res.Closed > 0 {
-		fmt.Fprintf(w, "           %d arrived already resolved -> %s\n",
+		// "discharged", not "resolved": this count includes the records a
+		// `[Superseded: …]` annotation discarded, and those were never
+		// delivered. Calling them resolved is the assertion the third status
+		// exists to avoid making.
+		fmt.Fprintf(w, "           %d arrived already discharged -> %s\n",
 			res.Closed, relTo(root, filepath.Join(res.To, deferred.ClosedDirName)))
 	}
 	if res.FreeForm > 0 {
@@ -265,14 +269,35 @@ func emitMigrateHuman(w io.Writer, res *deferred.MigrateResult, root string) {
 	fmt.Fprintf(w, "  verify:  %d in -> %d out, every ledger line accounted for ... OK\n",
 		res.RecordsIn, res.RecordsOut)
 	if res.PreambleWritten {
-		fmt.Fprintf(w, "           ledger preamble kept at %s\n",
-			relTo(root, filepath.Join(res.To, deferred.PreambleFileName)))
+		// Three states, the same three the stub's own signpost sentence
+		// distinguishes: a ledger can have prose above its first boundary,
+		// headings that titled no record, or both. Two of the three field
+		// ledgers had no preamble at all, and announcing one anyway sends the
+		// operator looking for something the file does not contain.
+		fmt.Fprintf(w, "           %s kept at %s\n",
+			preambleContents(res), relTo(root, filepath.Join(res.To, deferred.PreambleFileName)))
 	}
 	if res.StubWritten {
 		fmt.Fprintf(w, "           %s -> stub\n", relTo(root, res.From))
 	}
 	emitMigrateRelocationNote(w, res, root)
 	emitGitAddHint(w, root, res.Paths)
+}
+
+// preambleContents names what the migration parked in PREAMBLE.md.
+//
+// Driven by the two counts on the result rather than by re-reading the
+// ledger, so this and the stub's own signpost sentence answer from the same
+// facts and cannot drift apart.
+func preambleContents(res *deferred.MigrateResult) string {
+	switch {
+	case res.PreambleBytes > 0 && res.OrphanHeadings > 0:
+		return fmt.Sprintf("ledger preamble + %d heading(s) that titled no record", res.OrphanHeadings)
+	case res.PreambleBytes > 0:
+		return "ledger preamble"
+	default:
+		return fmt.Sprintf("%d heading(s) that titled no record", res.OrphanHeadings)
+	}
 }
 
 // emitMigrateRelocationNote says that cited text has changed folders.

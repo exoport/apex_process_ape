@@ -109,8 +109,10 @@ type MigrateResult struct {
 	RecordsOut int `json:"records_out" yaml:"records_out"`
 	FreeForm   int `json:"free_form"   yaml:"free_form"`
 	Recovered  int `json:"recovered"   yaml:"recovered"`
-	// Closed is how many parsed records arrived already discharged — a
-	// resolution banner in the ledger, not an open item.
+	// Closed is how many parsed records arrived already discharged, by any
+	// of the three shapes a ledger uses to say so: a resolution banner, an
+	// appended closure marker, or a bracketed status annotation. Discarded
+	// records are counted here too — they are equally not open items.
 	Closed int `json:"closed" yaml:"closed"`
 	// RecoverRequested records that recovery was asked for, so the
 	// AlreadyDone path can say the request could not be honoured. A flag
@@ -128,10 +130,18 @@ type MigrateResult struct {
 	StubWritten bool `json:"stub_written" yaml:"stub_written"`
 	// PreambleWritten records that the ledger's own header — document
 	// history, not a deferred item — was preserved beside the records.
-	PreambleWritten bool     `json:"preamble_written"   yaml:"preamble_written"`
-	DryRun          bool     `json:"dry_run"            yaml:"dry_run"`
-	AlreadyDone     bool     `json:"already_done"       yaml:"already_done"`
-	Warnings        []string `json:"warnings,omitempty" yaml:"warnings,omitempty"`
+	PreambleWritten bool `json:"preamble_written" yaml:"preamble_written"`
+	// PreambleBytes and OrphanHeadings are WHY that file exists, and they
+	// are two independent reasons: prose above the first boundary, and
+	// headings that titled no record. Either alone writes it, so
+	// `preamble_written` on its own cannot tell an operator what is in it —
+	// and calling an orphan-headings-only file "the ledger preamble" names
+	// something the ledger never had.
+	PreambleBytes  int      `json:"preamble_bytes"     yaml:"preamble_bytes"`
+	OrphanHeadings int      `json:"orphan_headings"    yaml:"orphan_headings"`
+	DryRun         bool     `json:"dry_run"            yaml:"dry_run"`
+	AlreadyDone    bool     `json:"already_done"       yaml:"already_done"`
+	Warnings       []string `json:"warnings,omitempty" yaml:"warnings,omitempty"`
 }
 
 // ErrLosslessnessFailed reports that the verify-before-write assertion did
@@ -272,7 +282,12 @@ func ParseLegacyDocument(data []byte) *LegacyDocument {
 			rec.Title = heading
 			heading = ""
 		}
+		// Three independent ways a ledger says "already discharged", applied
+		// in order. Each no-ops on a record another has already closed, so
+		// the first to fire wins and none can reopen what another closed.
 		applyResolutionBanner(&rec)
+		applyClosureMarker(&rec)
+		applyStatusAnnotation(&rec)
 		rec.ID = NewID(section.date, rec.Title, rec.Body)
 		doc.Records = append(doc.Records, rec)
 		headingUsed = true
@@ -335,6 +350,10 @@ func ParseLegacyDocument(data []byte) *LegacyDocument {
 		}
 		switch {
 		case topLevelBulletRe.MatchString(line):
+			if absorbAnnotation(line, sawBoundary, pending.String()) {
+				// Not a boundary: this bullet annotates the record above it.
+				break
+			}
 			flush()
 			sawBoundary = true
 			startedList = true
@@ -369,6 +388,63 @@ func ParseLegacyDocument(data []byte) *LegacyDocument {
 	doc.Preamble = preambleBuf.String()
 	doc.OrphanHeadings = orphans
 	return doc
+}
+
+// absorbAnnotation reports whether a top-level bullet is a discharge
+// marker on the record above it rather than a record boundary.
+//
+// THE FOURTH STRUCTURAL RULE, and the most expensive one to have missed.
+// A register whose closure convention is POSITIONAL appends the marker as a
+// sibling bullet at column 0, and it does it in BOTH of the vocabularies a
+// ledger uses to say "discharged":
+//
+//   - [Defer] <the entry>
+//
+//   - [Closed: 193c4ec] Story 17.8 built the real adapter and swapped …
+//
+//   - [Defer] <the entry>
+//
+//   - **RESOLVED (2026-08-20) — closed by Story 3.17, re-verified …**
+//
+// Recognising only the bracketed family — on the theory that indentation
+// told the two apart — left the second one splitting exactly as before, and
+// worse than before: the marker now closes itself and moves to `closed/`,
+// so the entry is left open with the evidence no longer even beside it, and
+// invisible to `verify`, whose own body no longer carries a marker. Both
+// families are read here for that reason.
+//
+// Every top-level bullet was a boundary, so the marker became a RECORD.
+// On the ledger that produced this rule — 238 real entries, every one
+// carrying a companion marker — that turned one discharged item into two
+// open records: the entry, with nothing in its body saying it was closed,
+// and the closure evidence, filed as an open free-form record of its own.
+// 238 entries became 637 records, 252 of them pure annotations, and every
+// one of the 637 landed `status: open` — while 52 of the entries carried a
+// companion marker saying they were already done.
+//
+// No text was lost, and that is exactly why nothing caught it:
+// verifyLossless compares a MULTISET OF LINES, so document order — the only
+// thing linking a marker to the entry it discharges — is invisible to it.
+// The guarantee was true of the text and false of the relation the text
+// depended on.
+//
+// Absorbing rather than interpreting is what keeps this honest. The line
+// stays verbatim in the body it belonged to all along, so the losslessness
+// check still sees it exactly once; all that changes is which record it
+// lands in. Both vocabularies are closed and structural — a bracketed
+// `[Open]`/`[Closed]`/`[Superseded]` opening the bullet, or a `RESOLVED` /
+// `Disposition recorded` clause opening it — and both are disjoint from the
+// tags that legitimately open a record (`[Defer]`, `[Patch]`,
+// `[Addendum, <date>]`), so this cannot swallow an entry.
+//
+// It absorbs only into a record that is actually open above it: a marker
+// that opens a section has nothing to annotate and stays a record of its
+// own, where applyStatusAnnotation and applyClosureMarker can still read
+// it.
+func absorbAnnotation(line string, sawBoundary bool, pending string) bool {
+	return sawBoundary &&
+		strings.TrimSpace(pending) != "" &&
+		(statusAnnotationRe.MatchString(line) || inBodyClosureRe.MatchString(line))
 }
 
 // fenceRe matches a code-fence delimiter at column 0. An indented fence
@@ -424,16 +500,10 @@ func sectionFrom(label string) sectionContext {
 		// can carry an earlier one; the filing date is the one at the end.
 		ctx.date = dates[len(dates)-1]
 	}
-	lower := strings.ToLower(label)
-	switch {
-	case strings.Contains(lower, "correct-course"):
-		ctx.source = SourceCorrectCourse
+	ctx.source = classifySource(label)
+	if ctx.source == SourceCorrectCourse {
 		// A correct-course heading names an epic, not a story.
 		ctx.story = ""
-	case strings.Contains(lower, "review"):
-		ctx.source = SourceStoryReview
-	default:
-		ctx.source = SourceUnknown
 	}
 	return ctx
 }
@@ -494,6 +564,8 @@ func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (*MigrateResul
 	records := doc.Records
 	res.RecordsIn = len(records)
 	res.Bytes = len(data)
+	res.PreambleBytes = len(doc.Preamble)
+	res.OrphanHeadings = len(doc.OrphanHeadings)
 	for i := range records {
 		if records[i].FreeForm {
 			res.FreeForm++
@@ -564,7 +636,7 @@ func (s *Store) Migrate(ctx context.Context, opts MigrateOptions) (*MigrateResul
 			ErrLosslessnessFailed, res.RecordsIn, res.Recovered, len(loaded.Records))
 	}
 
-	if err := s.writeStub(opts.From); err != nil {
+	if err := s.writeStub(opts.From, doc); err != nil {
 		return nil, err
 	}
 	res.StubWritten = true
@@ -769,10 +841,39 @@ func (s *Store) migrationDone(legacy string) (bool, error) {
 // signpost. Its presence is the idempotency check.
 const stubMarker = "<!-- ape:deferred-migrated -->"
 
+// preambleSentence describes what PREAMBLE.md holds, or says nothing at
+// all when the migration did not write one.
+//
+// The sentence used to be unconditional, so a ledger that opens on its
+// first heading — no preamble to preserve, nothing written — still got a
+// stub pointing at a `PREAMBLE.md` that does not exist. Two of the three
+// field ledgers are that shape. A signpost's whole job is to be true about
+// where things went.
+func preambleSentence(rel string, doc *LegacyDocument) string {
+	hasPreamble := doc.Preamble != ""
+	hasOrphans := len(doc.OrphanHeadings) > 0
+	target := rel + "/" + PreambleFileName
+	switch {
+	case hasPreamble && hasOrphans:
+		return "\n\nThis file's own preamble — the banners and reconciliation notes that were\n" +
+			"not deferred items — is preserved verbatim at " + target + ", together with\n" +
+			"the headings that titled no record."
+	case hasPreamble:
+		return "\n\nThis file's own preamble — the banners and reconciliation notes that were\n" +
+			"not deferred items — is preserved verbatim at " + target + "."
+	case hasOrphans:
+		return "\n\nThe headings in this file that titled no record are preserved at\n" + target + "."
+	default:
+		// This ledger had no preamble and no orphan headings, so there is no
+		// PREAMBLE.md and nothing to point at.
+		return ""
+	}
+}
+
 // writeStub replaces the legacy ledger with a short signpost. The file is
 // never deleted: anything still reading the old path finds a pointer
 // rather than silence, and the content stays in git.
-func (s *Store) writeStub(legacy string) error {
+func (s *Store) writeStub(legacy string, doc *LegacyDocument) error {
 	rel := s.Dir
 	if r, err := filepath.Rel(filepath.Dir(legacy), s.Dir); err == nil {
 		rel = filepath.ToSlash(r)
@@ -794,11 +895,11 @@ audit trail.
     ape deferred verify               invariants, plus candidates for a human
     ape deferred close <id> --by "…"  discharge one
 
-Closed records move to %s/closed/ and stay there. This file's own preamble
-— the banners and reconciliation notes that were not deferred items — is
-preserved verbatim at %s/%s. The full history of this file, including every
-record ever removed from it, is in git.
-`, stubMarker, rel, rel, rel, PreambleFileName)
+Closed records move to %s/closed/ and stay there.%s
+
+The full history of this file, including every record ever removed from it,
+is in git.
+`, stubMarker, rel, rel, preambleSentence(rel, doc))
 	return writeFileAtomic(legacy, []byte(stub))
 }
 
@@ -872,8 +973,23 @@ func (s *Store) recoverDeleted(ctx context.Context, legacy string, live []Record
 				continue
 			}
 			seen[key] = true
-			rec.Status = StatusClosed
-			rec.ResolvedBy = "recovered from git history (" + rev[:min(len(rev), revShortLen)] + ")"
+			note := "recovered from git history (" + rev[:min(len(rev), revShortLen)] + ")"
+			// A historical copy can arrive ALREADY discharged, because the
+			// parse reads the same closure markers the live one does. Keep
+			// that verdict and append the recovery to its own reason rather
+			// than overwriting it: replacing it would trade WHY the record
+			// left the working set for merely WHERE it was found, and on a
+			// discarded record it would assert a delivery that never
+			// happened — the precise confusion `discarded` exists to prevent.
+			switch {
+			case rec.IsOpen():
+				rec.Status = StatusClosed
+				rec.ResolvedBy = note
+			case rec.ResolvedBy != "":
+				rec.ResolvedBy += "; " + note
+			case rec.DiscardReason != "":
+				rec.DiscardReason += "; " + note
+			}
 			recovered = append(recovered, *rec)
 		}
 	}
