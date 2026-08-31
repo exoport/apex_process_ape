@@ -70,7 +70,7 @@ make tidy          # go mod tidy
 make clean         # remove build artifacts
 ```
 
-`golangci-lint`, `gofumpt`, and `goreleaser` are pinned via [bingo](https://github.com/bwplotka/bingo) — see `.bingo/Variables.mk` and the per-tool `.bingo/<name>.mod` files. Each Make target depends on the version-stamped binary path (e.g., `$(GOLANGCI_LINT)` → `$(GOBIN)/golangci-lint-v2.6.0`); the binary is rebuilt automatically when the corresponding `.mod` changes. To upgrade a tool: `bingo get <module>@<version>` (or `@latest`), commit the regenerated `.bingo/` files. To bootstrap bingo itself: `go install github.com/bwplotka/bingo@v0.10.0`.
+`golangci-lint`, `gofumpt`, and `goreleaser` are pinned via [bingo](https://github.com/bwplotka/bingo) — see `.bingo/Variables.mk` and the per-tool `.bingo/<name>.mod` files. Each Make target depends on the version-stamped binary path (e.g., `$(GOLANGCI_LINT)` → `$(GOBIN)/golangci-lint-v2.13.2`); the binary is rebuilt automatically when the corresponding `.mod` changes. That stamping is the whole safety property, so never invoke the unversioned name — `bingo get` also maintains a bare `$(GOBIN)/golangci-lint` symlink, and anything resolving it gets whichever version was installed last rather than the pin. To upgrade a tool: `bingo get <module>@<version>` (or `@latest`), commit the regenerated `.bingo/` files. To bootstrap bingo itself: `go install github.com/bwplotka/bingo@v0.10.0`.
 
 ### Commits
 
