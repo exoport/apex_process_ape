@@ -1,8 +1,40 @@
+# The lint hook runs the bingo-PINNED golangci-lint, by going through the
+# Makefile rather than resolving the bare command name.
+#
+# It used to be `diegosz/pre-commit-golang`'s `golangci-lint-mod`, whose script
+# is `cmd=(golangci-lint run)` — an unversioned name off $PATH. Bingo builds
+# version-stamped binaries ($GOBIN/golangci-lint-v2.13.1) and never writes that
+# name, so what answered it was a leftover `golangci-lint -> golangci-lint-v2.6.0`
+# symlink from an older `bingo get`. When go.mod moved to 1.27.0, that stale
+# binary — built with go1.26 — began refusing to load the config at all, and
+# every commit failed on a linter that was not the one this repo pins:
+#
+#     can't load config: the Go language version (go1.26) used to build
+#     golangci-lint is lower than the targeted Go version (1.27.0)
+#
+# The failure was the visible half. The quiet half is worse and had been true
+# the whole time: a hook resolving the bare name lints with whatever version
+# happens to be first on a developer's $PATH, so it can pass locally and fail
+# in CI, or enforce rules this repo never pinned.
+#
+# `make lint` is the same line CI runs (.github/workflows/ci.yml) and resolves
+# $(GOLANGCI_LINT) from .bingo/Variables.mk, rebuilding it when the pin moves.
+# One source of truth for the version, which is where CLAUDE.md says tooling
+# pins live. The repo is a single module rooted here, so `run ./...` is the
+# same scope the -mod hook computed, and it costs ~2 s warm.
 repos:
-  - repo: https://github.com/diegosz/pre-commit-golang
-    rev: v1.0.0-rc.1.bingo
+  - repo: local
     hooks:
-      - id: golangci-lint-mod
+      - id: golangci-lint
+        name: golangci-lint (bingo-pinned, via make lint)
+        entry: make lint
+        language: system
+        # Same trigger as the hook this replaces: any Go source, or go.mod.
+        files: '(\.go$)|(\bgo\.mod$)'
+        exclude: '(^|/)vendor/'
+        # `make lint` lints the module, not a file list.
+        pass_filenames: false
+        require_serial: true
   - repo: https://github.com/diegosz/pre-commit-wip
     rev: v0.0.3
     hooks:

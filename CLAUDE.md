@@ -38,7 +38,7 @@ Guidance for Claude Code when working in this repository.
 | `.github/workflows/`      | `ci.yml` (build + test + lint + govulncheck on push to `main` / PR; the Windows job builds everything but runs `make test-portable`) and `release.yml` (goreleaser on final-semver tag `vX.Y.Z` only). |
 | `.goreleaser.yaml`        | Release build config.                                                                               |
 | `.golangci.yaml`          | Linter config.                                                                                      |
-| `.pre-commit-config.yaml` | Pre-commit hooks (golangci-lint-mod, config_secrets).                                               |
+| `.pre-commit-config.yaml` | Pre-commit hooks (golangci-lint via `make lint`, config_secrets). The lint hook is `repo: local` on purpose — a hook resolving the bare `golangci-lint` name lints with whatever is first on $PATH, not the pinned version. |
 
 ## Workflow
 
@@ -76,7 +76,7 @@ make clean         # remove build artifacts
 
 - Use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`).
 - **Do not** include Claude attribution or "Generated with Claude Code" in commit messages.
-- Pre-commit hooks (`golangci-lint-mod`, `config_secrets`) must pass before commits land.
+- Pre-commit hooks (`golangci-lint`, `config_secrets`) must pass before commits land. The lint hook shells out to `make lint`, so it, `make lint` and CI all run the one bingo-pinned binary.
 
 ### Releases
 
