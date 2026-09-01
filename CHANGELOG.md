@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.0.65 (2026-09-01)
 
 Verified against Claude Code 2.1.252: `check-prices` (5/5 observed models
 exactly priced) and `check-claude` (all six subtests) both pass. The third
