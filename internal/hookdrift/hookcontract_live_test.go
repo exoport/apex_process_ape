@@ -75,16 +75,98 @@ func TestLive_HookContract(t *testing.T) {
 	wantVersion := claudeVersion(t, claudeBin)
 	t.Logf("seeding a runlog with Claude Code at %s (%s)", claudeBin, wantVersion)
 
-	project := seedProject(t)
 	apeBin := buildApe(t)
 
-	// A short, bounded, read-only session that spawns exactly one subagent.
+	// The seed is RETRIED while its corpus is inadequate, and that is not the
+	// same as retrying a failing gate.
+	//
+	// Two of the three fields only exist if the session actually delegates:
+	// `tool_response` is counted on Agent-tool PostToolUse and `agent_id` on
+	// SubagentStop. Whether it delegates is the model's call, and a Haiku
+	// session at effort `low` will sometimes just read the one file itself —
+	// observed doing exactly that, 2 turns instead of 6, on a run that had
+	// passed three times before it. Producing the corpus is the means here,
+	// not the thing under test, so an attempt that fails to provoke the
+	// events is a wasted setup, not a verdict.
+	//
+	// Drift is never retried. A field SEEN but absent fails on the first
+	// attempt below, because retrying that would be re-rolling until the
+	// answer is convenient — the precise thing this package exists to stop.
+	var rep *Report
+	for attempt := 1; attempt <= seedAttempts; attempt++ {
+		project := seedProject(t)
+		runSeed(t, apeBin, project)
+
+		// Judge only what this run wrote: the window starts at the test, so
+		// no stray corpus can contribute, and Judged must be the local harness.
+		r, err := Observe(project, time.Now().Add(-1*time.Hour))
+		require.NoError(t, err)
+		require.True(t, r.Observed(), "the seeded session produced no hook events at all — "+
+			"ape wrote no runlog, so the contract is NOT verified")
+		require.Equal(t, 1, r.Scanned, "expected to judge exactly the one run just seeded")
+		require.Equal(t, wantVersion, r.Judged,
+			"the verdict must be about the Claude Code installed right now")
+		t.Logf("attempt %d/%d verdict: %s", attempt, seedAttempts, r.Summary())
+
+		rep = r
+		if seedIsAdequate(r) {
+			break
+		}
+		t.Logf("attempt %d did not delegate, so two fields have nothing to judge — reseeding", attempt)
+	}
+
+	// Two distinct failures, reported distinctly. Seen == 0 means the SEED
+	// failed to provoke the event, so this run cannot speak for the field —
+	// which Observation.OK() would otherwise wave through as a pass.
+	for _, o := range rep.Observations {
+		t.Run(o.Field, func(t *testing.T) {
+			require.NotZerof(t, o.Seen,
+				"no %s events after %d seeding attempt(s): the corpus cannot judge %q, so this "+
+					"is a broken seed, NOT a passing contract. The session declined to delegate "+
+					"every time, which past that many tries is a change in how Claude Code or the "+
+					"model handles sub-agents — fix the seed prompt before trusting any green here.",
+				o.Event, seedAttempts, o.Field)
+			require.NotZerof(t, o.Present,
+				"DRIFT: Claude Code %s emitted %d %s event(s), none carrying %q. The step-completion "+
+					"gate reading it has gone silent — ape will report success on runs that did nothing.",
+				rep.Judged, o.Seen, o.Event, o.Field)
+		})
+	}
+}
+
+// seedAttempts bounds the reseeding above. Three is enough for a step the
+// model takes most of the time, and each attempt costs one short Haiku
+// session — a gate that quietly spent ten of them would be its own problem.
+const seedAttempts = 3
+
+// seedIsAdequate reports whether a seeded run provoked every event the
+// gate needs, i.e. whether its verdict can speak for all three fields.
+func seedIsAdequate(r *Report) bool {
+	for _, o := range r.Observations {
+		if o.Seen == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// runSeed drives one unattended session in project.
+//
+// The prompt forbids doing the work directly, because that is the shortcut
+// a cheap model takes: told to delegate a one-file read, it reads the file
+// and answers, which is a perfectly good answer to the question asked and a
+// useless corpus for this gate. Naming the refusal explicitly is what makes
+// delegation the only way to comply.
+func runSeed(t *testing.T, apeBin, project string) {
+	t.Helper()
+	const seed = "Delegate this task; do not do it yourself. Call the Task tool exactly once to " +
+		"spawn one general-purpose subagent, and have THAT subagent read README.md in the current " +
+		"directory and report back the text of its first heading. You must not read README.md " +
+		"yourself — the delegation is the point of this exercise. When the subagent reports back, " +
+		"tell me the heading and stop. Do not create, modify or delete any files."
+
 	// Haiku keeps it to fractions of a cent; the timeouts are backstops for
 	// a session that hangs rather than expected durations.
-	const seed = "Use the Task tool to spawn exactly one general-purpose subagent, and have that " +
-		"subagent read README.md in the current directory and report back the text of its first " +
-		"heading. Then tell me that heading and stop. Do not create, modify or delete any files."
-
 	cmd := exec.Command(apeBin, "prompt", seed,
 		"--cwd", project,
 		"--model", "haiku",
@@ -97,35 +179,6 @@ func TestLive_HookContract(t *testing.T) {
 	t.Logf("ape prompt exited: %v\n%s", err, tail(string(out), 40))
 	require.NoError(t, err, "the seeding session must complete via the Stop hook; "+
 		"without a runlog there is nothing to judge")
-
-	// Judge only what this run wrote: the window starts at the test, so no
-	// stray corpus can contribute, and Judged must be the local harness.
-	rep, err := Observe(project, time.Now().Add(-1*time.Hour))
-	require.NoError(t, err)
-
-	require.True(t, rep.Observed(), "the seeded session produced no hook events at all — "+
-		"ape wrote no runlog, so the contract is NOT verified")
-	require.Equal(t, 1, rep.Scanned, "expected to judge exactly the one run just seeded")
-	require.Equal(t, wantVersion, rep.Judged,
-		"the verdict must be about the Claude Code installed right now")
-	t.Logf("verdict: %s", rep.Summary())
-
-	// Two distinct failures, reported distinctly. Seen == 0 means the SEED
-	// failed to provoke the event, so this run cannot speak for the field —
-	// which Observation.OK() would otherwise wave through as a pass.
-	for _, o := range rep.Observations {
-		t.Run(o.Field, func(t *testing.T) {
-			require.NotZerof(t, o.Seen,
-				"no %s events in the seeded run: the corpus cannot judge %q, so this is a "+
-					"broken seed, NOT a passing contract. If Claude Code changed how it reports "+
-					"subagents, fix the seed prompt before trusting any green here.",
-				o.Event, o.Field)
-			require.NotZerof(t, o.Present,
-				"DRIFT: Claude Code %s emitted %d %s event(s), none carrying %q. The step-completion "+
-					"gate reading it has gone silent — ape will report success on runs that did nothing.",
-				rep.Judged, o.Seen, o.Event, o.Field)
-		})
-	}
 }
 
 // seedProject copies the testdata project into a temp dir. `ape prompt`

@@ -6,6 +6,24 @@ Two checks had been reporting for weeks with nothing that could act on
 them, and the one documented remedy turned out to be destructive on the
 case that needed it most. Found by repairing two real projects by hand.
 
+- **fix(hookdrift): the seeded hook gate was a coin flip.** `make check-hooks`
+  writes its own corpus by running one unattended session that delegates to a
+  sub-agent — and whether it delegates is the model's call. A Haiku session at
+  effort `low`, told to spawn a sub-agent for a one-file read, will sometimes
+  just read the file: a perfectly good answer to the question asked, and a
+  useless corpus for this gate. Caught it failing a release gate at 2 turns
+  instead of 6, after passing three times, on an unchanged contract.
+
+  The gate was right to refuse — it reported "broken seed, NOT a passing
+  contract", which is the distinction it exists to draw. But a release gate
+  that fails at random gets re-run until it is green, and then it is not a
+  gate. Producing the corpus is the means, not the thing under test, so an
+  attempt that provokes no sub-agent is now a wasted setup and is reseeded,
+  up to three times. **Drift is never retried**: a field seen but absent
+  fails on the first attempt, because re-rolling that is exactly what this
+  package exists to stop. The seed prompt now also forbids doing the work
+  directly, which is what makes delegation the only way to comply.
+
 - **fix(cost): price Claude Fable 5.1, and move the `fable` alias onto it.**
   `claude-fable-5-1` turned up in local transcripts and the table had no row
   for it, so its turns priced through the family tier — an estimate, flagged
