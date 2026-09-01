@@ -147,15 +147,50 @@ func SkillsPorcelain(ctx context.Context, repoDir string) ([]PorcelainEntry, err
 
 // FetchAndFastForward runs `git fetch origin <branch>` then
 // `git merge --ff-only origin/<branch>`. Any non-fast-forward
-// situation returns an error naming the divergence.
+// situation returns an error naming the divergence. Tags are mirrored
+// separately — see MirrorTags for why that is not part of the fetch above.
 func FetchAndFastForward(ctx context.Context, repoDir, branch string) error {
 	if _, err := runGit(ctx, repoDir, "fetch", "origin", branch); err != nil {
 		return err
 	}
+	MirrorTags(ctx, repoDir)
 	if _, err := runGit(ctx, repoDir, "merge", "--ff-only", "origin/"+branch); err != nil {
 		return fmt.Errorf("framework branch %q diverged from origin (cannot fast-forward): %w", branch, err)
 	}
 	return nil
+}
+
+// MirrorTags brings origin's tags into the clone. Best-effort: failures
+// are swallowed, because a tag problem must never block an update.
+//
+// git auto-follows tags on a plain `git fetch`, but NOT when an explicit
+// refspec is given — and every fetch here names one (`fetch origin main`).
+// So an update pulled the release commit and left its tag behind. Nothing
+// errored: `describe --exact-match` then legitimately found no tag at HEAD,
+// ExactTag mapped that to the honest ("", nil), and the install recorded
+// `version_tag: ""` about a clone that really did lack the tag. Downstream,
+// `ape doctor` printed the hash instead of the version, and TagDrift
+// compared "" against a tag the user had since pulled by hand, so it read
+// as permanent drift — an indicator stuck on is as uninformative as one
+// that never fires.
+//
+// Two decisions here, both about not making a cosmetic bug expensive:
+//
+//   - SEPARATE from the branch fetch, and errors dropped. Folding --tags
+//     into that fetch looks like the smaller change, but it moves tag
+//     failures onto the update's critical path: when upstream moves a tag,
+//     `git fetch --tags` exits 1 with "would clobber existing tag", which
+//     FetchAndFastForward would return before ever reaching the ff-merge.
+//     One retagged release upstream would then break `ape framework update`
+//     outright. Wrong metadata is worth fixing; a broken update is not a
+//     price worth paying for it.
+//   - --force, so a moved tag is actually mirrored. ape only ever
+//     fast-forwards this clone, i.e. treats it as a mirror of origin, so
+//     upstream's tag is by definition the right answer. Without it a
+//     retagged release would leave version_tag stale — the same class of
+//     wrong value this exists to fix.
+func MirrorTags(ctx context.Context, repoDir string) {
+	_, _ = runGit(ctx, repoDir, "fetch", "--tags", "--force", "origin")
 }
 
 // ErrGitMissing signals the git binary is absent from PATH. Returned

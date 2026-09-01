@@ -47,6 +47,36 @@ gate could not answer, and that turned out to be the interesting part.
   replacement, because silently ignoring it would gate the default `.` while
   looking like it had targeted a project.
 
+- **fix(framework): `ape framework update` pulled release commits and left
+  their tags behind.** git auto-follows tags on a plain `git fetch`, but not
+  when the command line names a refspec — and both fetch sites named one
+  (`git fetch origin main`). So an update took the release commit without its
+  tag, `git describe --tags --exact-match HEAD` then correctly found no tag,
+  `ExactTag` mapped that to the honest `("", nil)`, and the install recorded
+  `version_tag: ""` about a clone that genuinely lacked the tag. Nothing
+  errored at any step, which is how it survived: there was no test that
+  fetched from a real remote, so no test could observe a tag failing to
+  arrive.
+
+  Reproduced on git 2.53.0, and both consequences are cosmetic — `git_hash`
+  stays authoritative. `ape doctor` printed `framework <hash> installed`
+  instead of the version (the `doctor_checks.go` hash fallback), and
+  `TagDrift` compared a recorded `""` against a tag the user had since pulled
+  by hand, so `ape framework check` reported drift permanently. An indicator
+  stuck on is as uninformative as one that never fires.
+
+  Tags are now mirrored by `MirrorTags`, deliberately **not** by adding
+  `--tags` to the branch fetch. That one-flag version passes the obvious test
+  and introduces a worse bug: when upstream moves a tag, `git fetch --tags`
+  exits 1 with "would clobber existing tag", and `FetchAndFastForward` would
+  return that before reaching the ff-merge — one retagged release upstream
+  would break `ape framework update` outright. The mirror is a separate
+  best-effort call, so tag trouble can never block an update, and uses
+  `--force` so a moved tag is actually mirrored rather than left stale. Both
+  properties are locked by tests that fail against the previous code.
+
+  Existing projects self-heal on their next `ape framework update`.
+
 - **feat: `make docs-cli-check` — the generated CLI reference cannot go stale
   unnoticed.** `docs/reference/cli.md` is generated from the cobra tree and
   says "do not edit by hand", but nothing could tell that the tree had moved

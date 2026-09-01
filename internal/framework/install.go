@@ -1009,6 +1009,10 @@ func Status(ctx context.Context, opts StatusOptions) (*StatusResult, error) {
 	if !opts.NoFetch {
 		// Best-effort fetch — don't ff-merge for a status read.
 		_, _ = runGit(ctx, opts.FrameworkRepo, "fetch", "origin", "main")
+		// ...and the tags that fetch does not follow, or this read would
+		// report the HEAD tag as absent for the same reason the install
+		// recorded it empty. See MirrorTags.
+		MirrorTags(ctx, opts.FrameworkRepo)
 	}
 	info, err := readFrameworkInfo(ctx, opts.FrameworkRepo)
 	if err != nil {

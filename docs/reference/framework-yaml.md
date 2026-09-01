@@ -63,6 +63,8 @@ sources:
 | `git_hash`    | string | Full 40-character SHA at framework HEAD when the install ran.                                                                            |
 | `git_branch`  | string | Branch name from `git rev-parse --abbrev-ref HEAD`. Almost always `main`; non-`main` values mean `--force` was used.                     |
 
+> **An empty `version_tag` written by ape ≤ v0.0.64 may not mean what the table says.** `ape framework update` fetched with an explicit refspec (`git fetch origin main`), which suppresses git's tag auto-following — so it pulled a release commit and left that release's tag behind, and `git describe` then correctly reported no tag at HEAD. The recorded value was honest about the clone, but the clone was missing a tag it should have had. Symptoms: `ape doctor` prints `framework <hash> installed` instead of the version, and `ape framework check` reports tag drift permanently. Both are cosmetic — `git_hash` is authoritative and unaffected. ape now mirrors tags on every update, so the next `ape framework update` records the real tag.
+
 ## `ape`
 
 | Field     | Type   | Description                                                                                                            |
