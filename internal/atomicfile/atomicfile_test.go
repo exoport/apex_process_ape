@@ -3,11 +3,31 @@ package atomicfile
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+// requirePOSIXPerms skips a test whose subject is a POSIX permission bit.
+//
+// Go on Windows does not implement chmod: it maps the whole mode to a
+// single read-only attribute, so a writable file always stats as 0666
+// whatever it was created with, and a directory chmod'd 0500 still accepts
+// new files. Asserting 0644, or that an unwritable directory fails a write,
+// is asserting a POSIX property on a platform that has no such thing.
+//
+// The behaviour under test is still real and still covered — on Linux and
+// macOS, where the mode is what protects a record in a shared checkout.
+// `make test-portable` runs this package on Windows, which is how the
+// assertions were caught; a compile-only gate could not see them.
+func requirePOSIXPerms(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("windows has no POSIX permission bits — chmod sets only the read-only attribute")
+	}
+}
 
 func TestWrite_CreatesAndOverwrites(t *testing.T) {
 	dir := t.TempDir()
@@ -42,6 +62,7 @@ func TestWrite_LeavesNoTempFileBehind(t *testing.T) {
 // every other user of a shared checkout, and the failure surfaces far from
 // here.
 func TestWrite_UsesTheDeclaredMode(t *testing.T) {
+	requirePOSIXPerms(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "doc.md")
 	require.NoError(t, Write(path, []byte("x")))
@@ -55,6 +76,7 @@ func TestWrite_UsesTheDeclaredMode(t *testing.T) {
 // makes easy to lose: the temp file is born 0600, so a rename without the
 // chmod would silently tighten permissions on an existing document.
 func TestWrite_PreservesModeOnOverwrite(t *testing.T) {
+	requirePOSIXPerms(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "doc.md")
 	require.NoError(t, os.WriteFile(path, []byte("old"), 0o644))
@@ -91,6 +113,7 @@ func TestWrite_CreatesMissingParents(t *testing.T) {
 // says so — which is the contract every caller here depends on to roll a
 // story or a record back.
 func TestWrite_OriginalSurvivesAFailedWrite(t *testing.T) {
+	requirePOSIXPerms(t)
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores directory permissions")
 	}
