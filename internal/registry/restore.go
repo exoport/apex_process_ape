@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 
@@ -77,7 +76,7 @@ func RestoreHeaders(cfg *apexcfg.Resolved, opts SyncOptions) (*RestoreResult, er
 		if dir == "" || !dirExists(dir) {
 			continue
 		}
-		if err := restoreFamily(dir, family, opts, result); err != nil {
+		if err := restoreFamily(cfg.Root, dir, family, opts, result); err != nil {
 			return nil, err
 		}
 	}
@@ -86,7 +85,7 @@ func RestoreHeaders(cfg *apexcfg.Resolved, opts SyncOptions) (*RestoreResult, er
 	return result, nil
 }
 
-func restoreFamily(dir string, family Family, opts SyncOptions, out *RestoreResult) error {
+func restoreFamily(root, dir string, family Family, opts SyncOptions, out *RestoreResult) error {
 	records, err := ListRecords(dir)
 	if err != nil {
 		return err
@@ -139,7 +138,7 @@ func restoreFamily(dir string, family Family, opts SyncOptions, out *RestoreResu
 			})
 			continue
 		}
-		fm, count, buildErr := frontmatterFromEntry(node, entry.ID, dir, rec.Name)
+		fm, count, buildErr := frontmatterFromEntry(node, entry.ID, root, dir, rec.Name)
 		if buildErr != nil {
 			return buildErr
 		}
@@ -174,7 +173,7 @@ func entryForFile(idx *Index, entries []Entry, family Family, name string) (Entr
 
 // frontmatterFromEntry renders an index entry as a record frontmatter
 // block, preserving key order and every value shape the entry carries.
-func frontmatterFromEntry(node *yaml.Node, id, dir, name string) (block []byte, fieldCount int, err error) {
+func frontmatterFromEntry(node *yaml.Node, id, root, dir, name string) (block []byte, fieldCount int, err error) {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil, 0, fmt.Errorf("index entry for %s is not a mapping", name)
 	}
@@ -202,7 +201,7 @@ func frontmatterFromEntry(node *yaml.Node, id, dir, name string) (block []byte, 
 	}
 	// `output_document` is the record's own self-reference; every
 	// well-formed record in these families carries it and no index does.
-	rel := filepath.ToSlash(filepath.Join(relOrDir(dir), name))
+	rel := filepath.ToSlash(filepath.Join(relOrDir(root, dir), name))
 	out.Content = append(out.Content, scalar("output_document"), scalar(rel))
 	fields++
 
@@ -221,17 +220,23 @@ func frontmatterFromEntry(node *yaml.Node, id, dir, name string) (block []byte, 
 }
 
 // relOrDir renders the family directory the way a record's
-// output_document states it: project-relative where that is recoverable,
-// and the plain directory otherwise.
-func relOrDir(dir string) string {
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return dir
-	}
-	parts := strings.Split(filepath.ToSlash(abs), "/")
-	for i, part := range slices.Backward(parts) {
-		if part == "development" {
-			return strings.Join(parts[i:], "/")
+// output_document states it: relative to the project root.
+//
+// Derived from the root rather than by looking for a path segment named
+// "development". That segment is not a constant — `development_folder` is
+// a config variable a project may rename — so the search returned the
+// ABSOLUTE directory for any project that had, writing a machine-specific
+// path into a committed record. It also matched a coincidental ancestor:
+// a project under `/home/u/development/proj` resolved to
+// `development/proj/...`, rooted at the wrong directory entirely.
+//
+// filepath.Rel answers exactly the question being asked, and the resolved
+// config has carried Root all along. The old fallback stays for the case
+// Rel genuinely cannot express (a different volume on Windows).
+func relOrDir(root, dir string) string {
+	if root != "" {
+		if rel, err := filepath.Rel(root, dir); err == nil && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
 		}
 	}
 	return filepath.ToSlash(dir)

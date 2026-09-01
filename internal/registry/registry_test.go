@@ -930,3 +930,55 @@ func TestRestoreHeaders_SkipsWhenNothingDescribesTheRecord(t *testing.T) {
 	require.Len(t, res.Skipped, 1)
 	require.Contains(t, res.Skipped[0].Reason, "no index entry names this file")
 }
+
+// TestRestoreHeaders_OutputDocumentIsRelativeToTheProjectRoot pins the one
+// value in a restored header that is derived rather than copied.
+//
+// Everything else comes verbatim off the index entry; `output_document` is
+// computed from the family directory, and it used to be computed by
+// searching the absolute path for a segment literally named "development".
+// That segment is not a constant — `development_folder` is a config
+// variable — so a project that renamed it got its ABSOLUTE directory
+// written into a committed record, and a project living under a
+// coincidental `/…/development/…` ancestor got a path rooted at the wrong
+// place. Every fixture in this file uses the default name, which is why
+// neither showed up.
+func TestRestoreHeaders_OutputDocumentIsRelativeToTheProjectRoot(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, apexcfg.DirName), 0o755))
+	// Every folder renamed away from "development".
+	require.NoError(t, os.WriteFile(
+		filepath.Join(root, apexcfg.DirName, apexcfg.BaseFile), []byte(`config_schema_version: "1"
+project_name: fx
+extensions: [ext-adrs]
+development_folder: workspace
+implementation_folder: workspace/implementation
+governance_folder: workspace/governance
+functionality_folder: workspace/functionality
+`), 0o644))
+	cfg, err := apexcfg.ResolveAt(root, nil)
+	require.NoError(t, err)
+
+	family, err := FamilyByName("adrs")
+	require.NoError(t, err)
+	dir := family.Dir(cfg.Paths)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "adr-0002_headerless.md"),
+		[]byte("# ADR-0002 — no header\n\nbody\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, IndexFileName),
+		[]byte("generated_at: '20260821120000'\nadrs:\n"+
+			"  - id: ADR-0002\n    title: No header\n    status: accepted\n"+
+			"    file: adr-0002_headerless.md\n"), 0o644))
+
+	res, err := RestoreHeaders(cfg, SyncOptions{Only: []string{"adrs"}})
+	require.NoError(t, err)
+	require.Len(t, res.Changes, 1)
+
+	body, err := os.ReadFile(filepath.Join(dir, "adr-0002_headerless.md"))
+	require.NoError(t, err)
+	text := string(body)
+	require.Contains(t, text, "output_document: workspace/governance/adrs/adr-0002_headerless.md",
+		"output_document must be relative to the project root, whatever the folders are called")
+	require.NotContains(t, text, root,
+		"an absolute, machine-specific path must never be written into a record")
+}

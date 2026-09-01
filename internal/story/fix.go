@@ -155,13 +155,17 @@ func fixFile(target, rel string, findings []Finding, ext apexcfg.Ext, check bool
 	// reporting success — so the write is provisional until this passes.
 	//
 	// VerifyFile cannot see the corpus, so it never reports the referential
-	// class; comparing its count against this file's own type findings is
-	// like-for-like only because --fix owns nothing else.
+	// class. The count must also be narrowed to the findings --fix OWNS, not
+	// every type_mismatch: that check fires on `features[i]` too, which this
+	// command deliberately refuses. Counting those made a file carrying both
+	// classes compare 1 surviving features finding against 1 repaired
+	// depends_on finding, trip `>=`, and roll back a correct repair — on
+	// exactly the documents most likely to have both.
 	was := len(findings)
 	now := VerifyFile(target, ext)
 	typeFindings := 0
 	for _, f := range now.Findings {
-		if f.Check == CheckTypeMismatch {
+		if f.Check == CheckTypeMismatch && dependsOnFieldRe.MatchString(f.Field) {
 			typeFindings++
 		}
 	}

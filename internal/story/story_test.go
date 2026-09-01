@@ -693,3 +693,37 @@ func TestFix_IgnoresValuesThatOnlyLookNumeric(t *testing.T) {
 	require.Empty(t, res.Changes, "nothing here is a bare number")
 	require.Equal(t, before, f.contents("mixed.md"))
 }
+
+// TestFix_RepairsDependsOnBesideAnUnfixableFeaturesItem pins the scope of
+// the rollback guard.
+//
+// The guard re-verifies a touched file and reverts a write that did not
+// reduce its findings — the right instinct for a lexical rewrite. But
+// `story.type_mismatch` covers `features[i]` as well as `depends_on[i]`,
+// and --fix owns only the second. Counting both made one surviving
+// features finding cancel out one repaired depends_on finding, trip the
+// `>=`, and revert a correct repair — leaving the fixable finding reported
+// as "remaining" with nothing to distinguish it from one --fix refuses on
+// purpose. The two classes are separate files in every other test here,
+// which is why nothing caught it; a story carrying both is the case the
+// command exists for.
+func TestFix_RepairsDependsOnBesideAnUnfixableFeaturesItem(t *testing.T) {
+	f := newFixture(t, "ext-features")
+	f.seedRecords()
+	before := "---\n" + fixBase +
+		"depends_on: [112.1]\n" +
+		"features: [FEAT-1-1]\n" +
+		"---\n\nbody\n"
+	f.write("both.md", before)
+
+	res, err := FixCorpus(f.cfg, false)
+	require.NoError(t, err)
+
+	require.Len(t, res.Changes, 1, "the derivable repair must survive the guard")
+	require.Contains(t, f.contents("both.md"), `depends_on: ["112.1"]`)
+
+	require.Len(t, res.Remaining, 1, "the refused class is still reported")
+	require.Equal(t, "features[0]", res.Remaining[0].Field)
+	require.Contains(t, f.contents("both.md"), "features: [FEAT-1-1]",
+		"the refused item stays byte-for-byte as authored")
+}

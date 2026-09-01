@@ -33,6 +33,15 @@ case that needed it most. Found by repairing two real projects by hand.
   index-bookkeeping keys and plus the `output_document` self-reference.
   Nothing is invented.
 
+  That self-reference is the one derived value, and it is taken relative to
+  the resolved project root. An earlier cut found it by searching the
+  absolute path for a segment literally named `development` — but
+  `development_folder` is a config variable, so a project that renamed it
+  got its own absolute, machine-specific directory written into a committed
+  record, and a project living under a coincidental `/…/development/…`
+  ancestor got a path rooted somewhere else entirely. Every fixture used
+  the default name, so nothing caught it.
+
   It refuses a record that HAS a frontmatter block, even one that fails to
   parse. Overwriting a header someone authored to satisfy a checker is a
   different and far worse operation than giving a headerless file the
@@ -57,11 +66,22 @@ case that needed it most. Found by repairing two real projects by hand.
   The repair is lexical so the rest of the file survives byte-for-byte —
   this corpus has hand-wrapped flow sequences a node round-trip would
   reflow. That is also how a fixer corrupts a file while reporting success,
-  so every touched file is re-verified and rolled back if its finding count
-  did not fall. One bug the fixture caught before release: a single regex
-  anchored on the delimiters has to consume an item's trailing comma, which
-  eats the next item's leading one — `[112.1, 112.2]` became
-  `["112.1", 112.2]`, which is worse than no fix because it looks repaired.
+  so every touched file is re-verified and rolled back if the count of the
+  findings `--fix` OWNS did not fall.
+
+  Two bugs caught before release, both in that guard's neighbourhood. A
+  single regex anchored on the delimiters has to consume an item's trailing
+  comma, which eats the next item's leading one — `[112.1, 112.2]` became
+  `["112.1", 112.2]`, worse than no fix because it looks repaired; the
+  fixture caught that one. And the rollback originally counted every
+  `story.type_mismatch`, a check that covers `features[i]` as well as
+  `depends_on[i]` — so on a story carrying both, one surviving features
+  finding cancelled one repaired depends_on finding, tripped the `>=`, and
+  reverted a correct repair, leaving it reported as "remaining" with
+  nothing to distinguish it from a class `--fix` refuses on purpose. Every
+  other test here puts the two classes in separate files, which is why it
+  took a review to find. The count is now scoped to the one class this
+  command owns.
 
 ## v0.0.65 (2026-09-01)
 
