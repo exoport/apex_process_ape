@@ -587,3 +587,109 @@ func TestLookupPath(t *testing.T) {
 	_, ok = lookupPath(raw, []string{"nope", "deeper"})
 	require.False(t, ok)
 }
+
+// fixContents reads a story back after a fix.
+func (f *fixture) contents(name string) string {
+	f.t.Helper()
+	body, err := os.ReadFile(filepath.Join(f.cfg.Paths.Implementation, name))
+	require.NoError(f.t, err)
+	return string(body)
+}
+
+const fixBase = "story_id: \"112.2\"\nepic: \"112\"\nstatus: done\n" +
+	"output_document: \"development/implementation/s.md\"\n"
+
+// TestFix_QuotesBothSequenceShapes covers the two ways a corpus writes
+// depends_on. The already-quoted item in the block case is the control: a
+// fixer that rewrites it has stopped being a repair and started being a
+// reformatter.
+func TestFix_QuotesBothSequenceShapes(t *testing.T) {
+	f := newFixture(t, "")
+	f.story("flow.md", fixBase+"depends_on: [112.1, 112.2]\n")
+	f.story("block.md", fixBase+"depends_on:\n  - 112.1\n  - \"112.3\"\n")
+
+	res, err := FixCorpus(f.cfg, false)
+	require.NoError(t, err)
+	require.Len(t, res.Changes, 2)
+
+	require.Contains(t, f.contents("flow.md"), `depends_on: ["112.1", "112.2"]`,
+		"every item must be quoted, not just the first")
+	block := f.contents("block.md")
+	require.Contains(t, block, `  - "112.1"`)
+	require.Contains(t, block, `  - "112.3"`, "an already-quoted item is left exactly as authored")
+
+	after, err := VerifyCorpus(f.cfg)
+	require.NoError(t, err)
+	require.Empty(t, after.Findings)
+}
+
+// TestFix_LeavesTheJudgmentClassesAlone is the scope gate. `features` needs a
+// contribution that lives in another document, and a missing key needs a
+// value that is a registry question — writing either would be fabrication,
+// so both must survive --fix untouched and be reported as remaining.
+func TestFix_LeavesTheJudgmentClassesAlone(t *testing.T) {
+	f := newFixture(t, "ext-features")
+	f.seedRecords()
+	before := "---\n" + fixBase + "features: [FEAT-1-1]\n---\n\nbody\n"
+	f.write("featstring.md", before)
+	f.story("nokey.md", "story_id: \"53.1\"\nepic: \"53\"\nstatus: done\n"+
+		"output_document: \"development/implementation/nokey.md\"\n")
+
+	res, err := FixCorpus(f.cfg, false)
+	require.NoError(t, err)
+	require.Empty(t, res.Changes)
+	require.NotEmpty(t, res.Remaining, "declined findings are reported, never dropped")
+
+	require.Equal(t, before, f.contents("featstring.md"),
+		"a features item must survive --fix byte-for-byte")
+	require.NotContains(t, f.contents("nokey.md"), "features:",
+		"--fix must not invent an empty features list")
+}
+
+// TestFix_CheckWritesNothing is the dry-run contract.
+func TestFix_CheckWritesNothing(t *testing.T) {
+	f := newFixture(t, "")
+	f.story("flow.md", fixBase+"depends_on: [112.1]\n")
+	before := f.contents("flow.md")
+
+	res, err := FixCorpus(f.cfg, true)
+	require.NoError(t, err)
+	require.Len(t, res.Changes, 1)
+	require.Equal(t, before, f.contents("flow.md"))
+}
+
+// TestFix_TouchesNothingOutsideTheDependsOnLine: the repair is lexical, so
+// the gate is that the rest of the document — body, key order, quoting
+// style, the hand-wrapped values a node round-trip would reflow — is
+// identical afterwards.
+func TestFix_TouchesNothingOutsideTheDependsOnLine(t *testing.T) {
+	f := newFixture(t, "")
+	before := "---\n" + fixBase +
+		"depends_on: [112.1]\n" +
+		"governance:\n  adrs:\n    [\n      ADR-0001,\n      ADR-0002,\n    ]\n" +
+		"---\n\n## Story\n\nprose that must not move.\n"
+	f.write("wrapped.md", before)
+
+	_, err := FixCorpus(f.cfg, false)
+	require.NoError(t, err)
+
+	after := f.contents("wrapped.md")
+	require.Equal(t,
+		strings.Replace(before, "depends_on: [112.1]", `depends_on: ["112.1"]`, 1),
+		after,
+		"exactly one line may differ")
+}
+
+// TestFix_IgnoresValuesThatOnlyLookNumeric guards the anchoring. A version
+// string, a suffixed key and an already-quoted item are not float-decoded
+// story keys, and rewriting them would corrupt real values.
+func TestFix_IgnoresValuesThatOnlyLookNumeric(t *testing.T) {
+	f := newFixture(t, "")
+	before := "---\n" + fixBase + `depends_on: ["112.1", v1.2, 112.1a]` + "\n---\n\nbody\n"
+	f.write("mixed.md", before)
+
+	res, err := FixCorpus(f.cfg, false)
+	require.NoError(t, err)
+	require.Empty(t, res.Changes, "nothing here is a bare number")
+	require.Equal(t, before, f.contents("mixed.md"))
+}

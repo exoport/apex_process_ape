@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -132,6 +133,8 @@ func newStoryVerifyCmd() *cobra.Command {
 		strict       bool
 		fileFlag     string
 		activeExts   string
+		fix          bool
+		fixCheck     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "verify",
@@ -167,13 +170,33 @@ TWO MODES, with deliberately different contracts:
                          or an optional key is present but malformed
                     Referential integrity is not asserted here — a single
                     file cannot see the corpus, exactly as the Python
-                    could not.`,
+                    could not.
+
+--fix REPAIRS ONE CLASS AND SAYS SO. A depends_on item that decoded as a
+number is re-quoted: same characters, one right answer, no second source
+needed. Nothing else is touched, and the findings --fix does not own are
+reported as remaining rather than dropped.
+
+The two classes it declines look mechanical and are not. A features item
+needs a contribution, whose only source is the prose table inside the
+feature record — and where that table has no row for the story, the
+disagreement IS the defect. A missing features:/capabilities: key needs a
+value, and [] claims the story contributes to nothing, which is a registry
+question. Both belong to apex-frontmatter-repair, which may read documents
+and judge. Every touched file is re-verified and rolled back if its
+finding count did not fall.`,
 		Args: cobra.NoArgs,
 		Example: "  ape story verify --output-format json\n" +
 			"  ape story verify --file development/implementation/1-1_thing.md --active-extensions ext-adrs",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if fileFlag != "" {
+				if fix {
+					return errors.New("--fix is a corpus repair; drop --file")
+				}
 				return runStoryVerifyFile(cmd, fileFlag, activeExts, outputFormat)
+			}
+			if fix {
+				return runStoryFix(cmd.OutOrStdout(), cwdFlag, outputFormat, fixCheck)
 			}
 			cfg := resolveProjectConfig(cwdFlag)
 			report, err := story.VerifyCorpus(cfg)
@@ -199,9 +222,70 @@ TWO MODES, with deliberately different contracts:
 	cmd.Flags().BoolVar(&strict, "strict", false,
 		helpStrict+" — NEVER set this from apex-review-story, apex-code-review or apex-epic-batch-review")
 	cmd.Flags().StringVar(&fileFlag, "file", "", "Verify one story file as a gate (exit 0/2/3)")
+	cmd.Flags().BoolVar(&fix, "fix", false,
+		"Repair the findings with a single derivable answer (depends_on quoting), and report the rest")
+	cmd.Flags().BoolVar(&fixCheck, "check", false, "With --fix: report the repairs without writing")
 	cmd.Flags().StringVar(&activeExts, "active-extensions", "",
 		"Comma-separated active extensions for --file mode (e.g. ext-adrs,ext-features)")
 	return cmd
+}
+
+func runStoryFix(w io.Writer, cwdFlag, outputFormat string, check bool) error {
+	cfg := resolveProjectConfig(cwdFlag)
+	res, err := story.FixCorpus(cfg, check)
+	if err != nil {
+		return err
+	}
+	format := output.Format(outputFormat)
+	if format != output.FormatHuman {
+		return output.Print(w, format, res)
+	}
+	if !res.Changed() && len(res.Remaining) == 0 {
+		fmt.Fprintln(w, "story frontmatter is clean — nothing to fix")
+		return nil
+	}
+	if res.Changed() {
+		verb := "repaired"
+		if check {
+			verb = "would repair"
+		}
+		fmt.Fprintf(w, "%s %d story header(s):\n", verb, len(res.Changes))
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		for _, c := range res.Changes {
+			fmt.Fprintf(tw, "  %s\t%s\t%s -> %s\n", c.Story, c.Field, c.Before, c.After)
+		}
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+	}
+	if len(res.Remaining) == 0 {
+		return nil
+	}
+	// Reported, never dropped: a fixer that prints only its successes reads
+	// as having finished.
+	byCheck := map[string]int{}
+	for _, f := range res.Remaining {
+		byCheck[f.Check]++
+	}
+	fmt.Fprintf(w, "\n%d finding(s) --fix does not own:\n", len(res.Remaining))
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	for _, name := range sortedKeys(byCheck) {
+		fmt.Fprintf(tw, "  %s\t%d\n", name, byCheck[name])
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Fprintln(w, "\nThese need a document read or a judgment call — run /apex-frontmatter-repair.")
+	return nil
+}
+
+func sortedKeys(m map[string]int) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func runStoryVerifyFile(cmd *cobra.Command, path, activeExts, outputFormat string) error {

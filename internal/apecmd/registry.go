@@ -75,8 +75,105 @@ func newRegistryCmd() *cobra.Command {
 features and capabilities. Each family also carries these verbs on its own
 noun (` + "`ape adr verify`" + `); this is the whole-project view.`,
 	}
-	cmd.AddCommand(newRegistryVerifyCmd(), newRegistrySyncCmd())
+	cmd.AddCommand(newRegistryVerifyCmd(), newRegistrySyncCmd(), newRegistryRestoreHeadersCmd())
 	return cmd
+}
+
+const restoreHeadersLong = `Give a headerless record back the frontmatter its index entry already
+states. This is ` + "`sync`" + ` run in the other direction, and it is the
+non-destructive answer to the one finding pair that had none.
+
+A record with no frontmatter block claims no id. So ` + "`verify`" + ` reports it
+twice — registry.record_unparseable for the record, registry.phantom_entry
+for the index entry nothing appears to claim — and ` + "`sync`" + ` reads that
+entry as dead and offers to delete it. That entry is the last copy of the
+record's id, title, type, status, version and dates: deleting it turns a
+missing header into an unrecoverable loss, on a file that was on disk the
+whole time. ` + "`sync`" + ` now withholds those removals; this is what clears
+them.
+
+Every value is copied verbatim from the entry — sequences like ` + "`tags`" + `
+included — minus the two keys that are index bookkeeping (` + "`file`" + `,
+` + "`slug`" + `), plus the ` + "`output_document`" + ` self-reference every record in
+these families carries. Nothing is invented.
+
+IT WILL NOT TOUCH A RECORD THAT HAS A FRONTMATTER BLOCK, even one that
+fails to parse. Overwriting a header someone authored to satisfy a checker
+is a different and far worse operation than giving a headerless file the
+header its index says it always had; that case is reported and left for a
+person.
+
+--check makes it a dry run.`
+
+func newRegistryRestoreHeadersCmd() *cobra.Command {
+	var (
+		cwdFlag      string
+		outputFormat string
+		check        bool
+		all          bool
+		families     []string
+	)
+	cmd := &cobra.Command{
+		Use:     "restore-headers",
+		Short:   "Rebuild a headerless record's frontmatter from its index entry",
+		Long:    restoreHeadersLong,
+		Args:    cobra.NoArgs,
+		Example: "  ape registry restore-headers --check",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			only := families
+			if all {
+				only = nil
+			}
+			return runRegistryRestoreHeaders(cmd.OutOrStdout(), cwdFlag, outputFormat, check, only)
+		},
+	}
+	cmd.Flags().StringVar(&cwdFlag, "cwd", "", helpCwd)
+	cmd.Flags().StringVar(&outputFormat, "output-format", "human", helpFormat)
+	cmd.Flags().BoolVar(&check, "check", false, "Report what would be written, without writing")
+	cmd.Flags().BoolVar(&all, "all", false, "Every family (the default when --family is not given)")
+	cmd.Flags().StringSliceVar(&families, "family", nil,
+		"Families to repair: "+strings.Join(registry.FamilyNames(), ","))
+	return cmd
+}
+
+func runRegistryRestoreHeaders(w io.Writer, cwdFlag, outputFormat string, check bool, only []string) error {
+	cfg := resolveProjectConfig(cwdFlag)
+	res, err := registry.RestoreHeaders(cfg, registry.SyncOptions{Only: only, Check: check})
+	if err != nil {
+		return err
+	}
+	format := output.Format(outputFormat)
+	if format != output.FormatHuman {
+		return output.Print(w, format, res)
+	}
+	if !res.Changed() && len(res.Skipped) == 0 {
+		fmt.Fprintln(w, "every record parses — nothing to restore")
+		return nil
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	if res.Changed() {
+		verb := "restored"
+		if check {
+			verb = "would restore"
+		}
+		fmt.Fprintf(w, "%s %d record header(s):\n", verb, len(res.Changes))
+		for _, c := range res.Changes {
+			fmt.Fprintf(tw, "  %s\t%s\t%s\t%d field(s)\n", c.Family, c.ID, c.File, c.Fields)
+		}
+	}
+	if len(res.Skipped) > 0 {
+		fmt.Fprintf(w, "\n%d record(s) left for a person:\n", len(res.Skipped))
+		for _, s := range res.Skipped {
+			fmt.Fprintf(tw, "  %s\t%s\t%s\n", s.Family, s.File, s.Reason)
+		}
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if res.Changed() && !check {
+		fmt.Fprintln(w, "\nRe-run `ape registry verify --all` to confirm, then `ape registry sync --all`.")
+	}
+	return nil
 }
 
 // verifyLong is the shared explanation of the four checks. Stated on
@@ -247,20 +344,42 @@ func runRegistrySync(w io.Writer, cwdFlag, outputFormat string, check bool, only
 	if format != output.FormatHuman {
 		return output.Print(w, format, res)
 	}
-	if !res.Changed() {
+	if !res.Changed() && !res.Withheld() {
 		fmt.Fprintln(w, "registries already in sync — nothing to do")
 		return nil
 	}
-	verb := "applied"
-	if check {
-		verb = "would apply"
+	if res.Changed() {
+		verb := "applied"
+		if check {
+			verb = "would apply"
+		}
+		fmt.Fprintf(w, "%s %d change(s):\n", verb, len(res.Changes))
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		for _, c := range res.Changes {
+			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", c.Action, c.Family, c.ID, c.Detail)
+		}
+		if err := tw.Flush(); err != nil {
+			return err
+		}
 	}
-	fmt.Fprintf(w, "%s %d change(s):\n", verb, len(res.Changes))
+	if !res.Withheld() {
+		return nil
+	}
+	// Loud, and after the changes: a withheld removal is the one outcome
+	// where doing less than asked is the correct answer, so it must not
+	// read as an incidental note under a list of successes.
+	fmt.Fprintf(w, "\nWITHHELD %d removal(s) — an index entry here may be the only copy of a\n"+
+		"record's metadata, and removing it is not reversible short of git:\n", len(res.Blocked))
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	for _, c := range res.Changes {
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", c.Action, c.Family, c.ID, c.Detail)
+	for _, b := range res.Blocked {
+		fmt.Fprintf(tw, "  keep\t%s\t%s\t%s\n", b.Family, b.ID, b.Reason)
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Fprintln(w, "\nRun `ape registry verify --all` for the record_unparseable finding, give that\n"+
+		"record its frontmatter back, then re-run sync.")
+	return nil
 }
 
 // familyExampleID is a representative record id per family, for help text.

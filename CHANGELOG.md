@@ -1,5 +1,68 @@
 # CHANGELOG
 
+## v0.0.66 (2026-09-01)
+
+Two checks had been reporting for weeks with nothing that could act on
+them, and the one documented remedy turned out to be destructive on the
+case that needed it most. Found by repairing two real projects by hand.
+
+- **fix(registry): `sync` offered to delete the metadata that would have
+  repaired the record.** A record with no frontmatter block claims no id,
+  so it is absent from the on-disk id set and its index entry reads exactly
+  like a phantom. `sync` proposed `remove` — and that entry was the last
+  copy of the record's id, title, type, status, version and dates, on a
+  file sitting on disk the whole time. The two findings always arrive
+  together (`registry.phantom_entry` beside `registry.record_unparseable`)
+  and the framework's own preflight names this command as the fix for the
+  first of them.
+
+  Reproduced from a field ADR whose header had been lost. Removals are now
+  withheld where a phantom cannot be proven, narrowest rule first: an entry
+  whose `file:` names an unreadable record is that record's entry; and
+  while any record in the family is unreadable, no entry in it is provable,
+  because the unreadable one may claim that id. Adds and file-repointing
+  still run — forward progress is not what loses data. Withheld removals
+  are reported under their own heading, not as a note beneath a list of
+  successes.
+
+- **feat(registry): `ape registry restore-headers` — `sync` in the other
+  direction.** Gives a headerless record the frontmatter its index entry
+  already states, which dissolves both findings and loses nothing. Values
+  are copied verbatim, sequences like `tags` included (`Entry.Fields` keeps
+  only scalars, so this reads the YAML node), minus the two
+  index-bookkeeping keys and plus the `output_document` self-reference.
+  Nothing is invented.
+
+  It refuses a record that HAS a frontmatter block, even one that fails to
+  parse. Overwriting a header someone authored to satisfy a checker is a
+  different and far worse operation than giving a headerless file the
+  header its index says it always had.
+
+- **feat(story): `ape story verify --fix`, scoped to one class on
+  purpose.** A `depends_on` item that decoded as a number is re-quoted:
+  same characters, one right answer, derivable from the finding with no
+  second source. Both the flow and block shapes, and an already-quoted item
+  is left as authored.
+
+  It refuses the two classes that look equally mechanical. A `features`
+  item needs a contribution, whose only source is the prose `## Stories`
+  table in the feature record — and where that table has no row for the
+  story, the disagreement between the documents IS the defect. A missing
+  `features:`/`capabilities:` key needs a value, and `[]` claims the story
+  contributes to nothing, which is a registry question. Both are reported
+  as remaining rather than dropped, and both route to
+  `apex-frontmatter-repair`: the same split as `ape deferred verify` and
+  `apex-deferred-repair`.
+
+  The repair is lexical so the rest of the file survives byte-for-byte —
+  this corpus has hand-wrapped flow sequences a node round-trip would
+  reflow. That is also how a fixer corrupts a file while reporting success,
+  so every touched file is re-verified and rolled back if its finding count
+  did not fall. One bug the fixture caught before release: a single regex
+  anchored on the delimiters has to consume an item's trailing comma, which
+  eats the next item's leading one — `[112.1, 112.2]` became
+  `["112.1", 112.2]`, which is worse than no fix because it looks repaired.
+
 ## v0.0.65 (2026-09-01)
 
 Verified against Claude Code 2.1.252: `check-prices` (5/5 observed models

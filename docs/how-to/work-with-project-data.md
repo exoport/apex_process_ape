@@ -67,6 +67,49 @@ what a record's own frontmatter already states and invents no titles or
 statuses. A renamed record keeps its authored index entry rather than being
 dropped and re-added with less.
 
+### A headerless record, and the removal `sync` will not make
+
+A record with no frontmatter block claims no id. `verify` therefore reports
+it twice — `registry.record_unparseable` for the record, and
+`registry.phantom_entry` for the index entry that now looks unclaimed — and
+those two findings always arrive together.
+
+That entry is the last copy of the record's id, title, type, status,
+version and dates. Removing it turns a missing header into an unrecoverable
+loss, on a file that was sitting on disk the whole time. So `sync`
+**withholds** the removal and says why:
+
+```text
+WITHHELD 1 removal(s) — an index entry here may be the only copy of a
+record's metadata, and removing it is not reversible short of git:
+  keep  adrs  ADR-0032  the record at adr-0032_….md is on disk but its
+                        frontmatter is unreadable, so it claims no id —
+                        this entry is its metadata, not a phantom
+```
+
+Two rules, narrowest first: an entry whose `file:` names an unreadable
+record is that record's entry; and while *any* record in the family is
+unreadable, no entry in it can be shown to be a phantom, because the
+unreadable one may claim that very id. Adds and file-repointing still run.
+
+The repair is `sync` in the other direction:
+
+```bash
+ape registry restore-headers --all --check    # what it would write
+ape registry restore-headers --all
+```
+
+It gives a headerless record the frontmatter its index entry already
+states — every value copied verbatim, sequences like `tags` included, minus
+the two index-bookkeeping keys (`file`, `slug`) and plus the
+`output_document` self-reference. Both findings then dissolve and `sync`
+has nothing left to withhold.
+
+It will **not** touch a record that has a frontmatter block, even one that
+fails to parse: overwriting a header someone authored to satisfy a checker
+is a different and far worse operation. That case is reported and left for
+a person.
+
 `ape <family> update --updates -` applies field deltas to entries that are
 already listed, and fails before writing anything if it is handed an id
 that is not — creating an entry is the job of the skill that authors the
@@ -78,6 +121,8 @@ document it points at.
 ape story fields --select story_id,epic,status,features
 ape story verify                                  # corpus report, exit 0
 ape story verify --file path/to/1-1_thing.md      # gate, exit 0/2/3
+ape story verify --fix --check                    # derivable repairs, dry
+ape story verify --fix                            # apply them
 ```
 
 `fields` reads at most 8 KiB per file, stops at the closing `---`, and
@@ -99,6 +144,36 @@ mode is a **report** — exit 0 even with findings, `--strict` to make it 1.
 > `apex-code-review` or `apex-epic-batch-review`. A non-zero exit on those
 > paths converts a defer into a patch, raises `unfixed_patches`, and demotes
 > the story.
+
+### `--fix`, and the two classes it refuses
+
+`--fix` repairs exactly one class: a `depends_on` item that YAML decoded as
+a number. `- 53.1` has one right answer — the same characters, quoted —
+derivable from the finding alone with no second source. It handles both the
+flow and block shapes and leaves an already-quoted item as authored.
+
+Two other classes look just as mechanical and are not:
+
+- **`features:` items must be `{id, contribution}` objects.** The
+  contribution is not in the finding. Its only source is the prose
+  `## Stories` table inside the feature record — and where that table has
+  no row for the story, the disagreement between the two documents *is* the
+  defect. Coercing a value here would fabricate a lifecycle edge.
+- **A missing `features:`/`capabilities:` key needs a value.** `[]` is a
+  claim that the story contributes to nothing, true only if no record lists
+  it. That is a registry question, not a frontmatter one.
+
+Both are reported as remaining rather than dropped, and both belong to
+`apex-frontmatter-repair`, the framework skill that may read documents and
+judge. This is the same split as `ape deferred verify` and
+`apex-deferred-repair`: deterministic work here, judgment in a versioned
+skill.
+
+The repair is lexical, so the rest of the file — key order, quoting style,
+the hand-wrapped flow sequences a node round-trip would reflow — is
+byte-identical afterwards. That is also how a fixer corrupts a file while
+reporting success, so every touched file is re-verified and rolled back if
+its finding count did not fall.
 
 ## Sprint tracker
 

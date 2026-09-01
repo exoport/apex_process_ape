@@ -3303,8 +3303,59 @@ noun (`ape adr verify`); this is the whole-project view.
 
 Subcommands:
 
+- `restore-headers` — Rebuild a headerless record's frontmatter from its index entry
 - `sync` — Reconcile every record index against records on disk
 - `verify` — Verify every record registry (or a named subset)
+
+## ape registry restore-headers
+
+Rebuild a headerless record's frontmatter from its index entry
+
+```
+ape registry restore-headers [flags]
+```
+
+Give a headerless record back the frontmatter its index entry already
+states. This is `sync` run in the other direction, and it is the
+non-destructive answer to the one finding pair that had none.
+
+A record with no frontmatter block claims no id. So `verify` reports it
+twice — registry.record_unparseable for the record, registry.phantom_entry
+for the index entry nothing appears to claim — and `sync` reads that
+entry as dead and offers to delete it. That entry is the last copy of the
+record's id, title, type, status, version and dates: deleting it turns a
+missing header into an unrecoverable loss, on a file that was on disk the
+whole time. `sync` now withholds those removals; this is what clears
+them.
+
+Every value is copied verbatim from the entry — sequences like `tags`
+included — minus the two keys that are index bookkeeping (`file`,
+`slug`), plus the `output_document` self-reference every record in
+these families carries. Nothing is invented.
+
+IT WILL NOT TOUCH A RECORD THAT HAS A FRONTMATTER BLOCK, even one that
+fails to parse. Overwriting a header someone authored to satisfy a checker
+is a different and far worse operation than giving a headerless file the
+header its index says it always had; that case is reported and left for a
+person.
+
+--check makes it a dry run.
+
+Examples:
+
+```
+  ape registry restore-headers --check
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--all` | bool | `false` | Every family (the default when --family is not given) |
+| `--check` | bool | `false` | Report what would be written, without writing |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--family` | stringSlice | `[]` | Families to repair: adrs,patterns,features,capabilities |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
 ## ape registry sync
 
@@ -4705,6 +4756,20 @@ TWO MODES, with deliberately different contracts:
                     file cannot see the corpus, exactly as the Python
                     could not.
 
+--fix REPAIRS ONE CLASS AND SAYS SO. A depends_on item that decoded as a
+number is re-quoted: same characters, one right answer, no second source
+needed. Nothing else is touched, and the findings --fix does not own are
+reported as remaining rather than dropped.
+
+The two classes it declines look mechanical and are not. A features item
+needs a contribution, whose only source is the prose table inside the
+feature record — and where that table has no row for the story, the
+disagreement IS the defect. A missing features:/capabilities: key needs a
+value, and [] claims the story contributes to nothing, which is a registry
+question. Both belong to apex-frontmatter-repair, which may read documents
+and judge. Every touched file is re-verified and rolled back if its
+finding count did not fall.
+
 Examples:
 
 ```
@@ -4717,8 +4782,10 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--active-extensions` | string | `—` | Comma-separated active extensions for --file mode (e.g. ext-adrs,ext-features) |
+| `--check` | bool | `false` | With --fix: report the repairs without writing |
 | `--cwd` | string | `—` | Project root (default: current working dir) |
 | `--file` | string | `—` | Verify one story file as a gate (exit 0/2/3) |
+| `--fix` | bool | `false` | Repair the findings with a single derivable answer (depends_on quoting), and report the rest |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) — NEVER set this from apex-review-story, apex-code-review or apex-epic-batch-review |
 

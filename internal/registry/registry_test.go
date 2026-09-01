@@ -755,3 +755,178 @@ func TestListRecords_MissingDirIsAnError(t *testing.T) {
 	_, err := ListRecords(filepath.Join(t.TempDir(), "nope"))
 	require.Error(t, err)
 }
+
+// TestSync_WithholdsRemovalOfAnUnreadableRecordsEntry is the data-loss gate.
+//
+// A record with no frontmatter claims no id, so it is absent from the
+// on-disk id set and its index entry looks exactly like a phantom. Removing
+// it deletes the only copy of the id, title, type, status and dates that
+// would repair the record — turning a missing-header defect into an
+// unrecoverable one, on a file that was sitting right there the whole time.
+// This fired in the field: an ADR whose header had been lost was reported as
+// `phantom_entry` + `record_unparseable`, and the remediation the framework's
+// own preflight recommends is this command.
+func TestSync_WithholdsRemovalOfAnUnreadableRecordsEntry(t *testing.T) {
+	f := newFixture(t)
+	f.record("adrs", "adr-0001_first.md", "ADR-0001")
+	f.raw("adrs", "adr-0002_headerless.md", "# ADR-0002 — no frontmatter block\n\ntext\n")
+	f.listIndex([2]string{"ADR-0001", "adr-0001_first.md"},
+		[2]string{"ADR-0002", "adr-0002_headerless.md"})
+
+	// Precondition: the pair of findings that appear together in the field.
+	report := f.verify("adrs")
+	require.Len(t, findingsOf(report, CheckPhantomEntry), 1)
+	require.Len(t, findingsOf(report, CheckRecordUnparsable), 1)
+
+	res, err := Sync(f.cfg, SyncOptions{Only: []string{"adrs"}, GeneratedAt: "20260901000000"})
+	require.NoError(t, err)
+
+	for _, c := range res.Changes {
+		require.NotEqual(t, "remove", c.Action, "sync must never remove an unreadable record's entry")
+	}
+	require.True(t, res.Withheld())
+	require.Len(t, res.Blocked, 1)
+	require.Equal(t, "ADR-0002", res.Blocked[0].ID)
+	require.Contains(t, res.Blocked[0].Reason, "adr-0002_headerless.md")
+
+	// The metadata that repairs the record must still be on disk.
+	body, err := os.ReadFile(filepath.Join(f.dir("adrs"), IndexFileName))
+	require.NoError(t, err)
+	require.Contains(t, string(body), "ADR-0002")
+	require.Contains(t, string(body), "Record ADR-0002")
+}
+
+// TestSync_WithholdsEveryRemovalWhileAnyRecordIsUnreadable is the wider half
+// of the rule. An entry whose file: does not name the unreadable record is
+// still not a provable phantom: the unreadable record may claim that very id,
+// and nothing can read it to find out.
+func TestSync_WithholdsEveryRemovalWhileAnyRecordIsUnreadable(t *testing.T) {
+	f := newFixture(t)
+	f.record("adrs", "adr-0001_first.md", "ADR-0001")
+	f.raw("adrs", "adr-0002_headerless.md", "# ADR-0002 — no frontmatter block\n\ntext\n")
+	f.listIndex([2]string{"ADR-0001", "adr-0001_first.md"},
+		[2]string{"ADR-0009", "adr-0009_ghost.md"})
+
+	res, err := Sync(f.cfg, SyncOptions{Only: []string{"adrs"}, GeneratedAt: "20260901000000"})
+	require.NoError(t, err)
+
+	for _, c := range res.Changes {
+		require.NotEqual(t, "remove", c.Action)
+	}
+	require.Len(t, res.Blocked, 1)
+	require.Equal(t, "ADR-0009", res.Blocked[0].ID)
+	require.Contains(t, res.Blocked[0].Reason, "record_unparseable")
+}
+
+// TestSync_StillDropsAProvablePhantom guards the other direction: the
+// withholding rule must not disarm the removal it was narrowing. With every
+// record readable, an entry no record claims is a phantom and goes.
+func TestSync_StillDropsAProvablePhantom(t *testing.T) {
+	f := newFixture(t)
+	f.record("adrs", "adr-0001_first.md", "ADR-0001")
+	f.listIndex([2]string{"ADR-0001", "adr-0001_first.md"},
+		[2]string{"ADR-0009", "adr-0009_ghost.md"})
+
+	res, err := Sync(f.cfg, SyncOptions{Only: []string{"adrs"}, GeneratedAt: "20260901000000"})
+	require.NoError(t, err)
+	require.False(t, res.Withheld())
+
+	actions := map[string]string{}
+	for _, c := range res.Changes {
+		actions[c.ID] = c.Action
+	}
+	require.Equal(t, "remove", actions["ADR-0009"])
+	require.Empty(t, f.verify("adrs").Findings)
+}
+
+// TestRestoreHeaders_RebuildsAHeaderlessRecord is the non-destructive answer
+// to the phantom_entry + record_unparseable pair. Everything written must
+// come off the index entry, sequence values included: Entry.Fields keeps
+// only scalars, so a `tags:` list is the case that catches a rebuild reading
+// the wrong side of the loader.
+func TestRestoreHeaders_RebuildsAHeaderlessRecord(t *testing.T) {
+	f := newFixture(t)
+	f.record("adrs", "adr-0001_first.md", "ADR-0001")
+	f.raw("adrs", "adr-0002_headerless.md", "# ADR-0002 — no header\n\nbody text\n")
+	f.raw("adrs", IndexFileName, "generated_at: '20260821120000'\nadrs:\n"+
+		"  - id: ADR-0001\n    title: Record ADR-0001\n    status: accepted\n    file: adr-0001_first.md\n"+
+		"  - id: ADR-0002\n    slug: headerless\n    file: adr-0002_headerless.md\n"+
+		"    title: The one with no header\n    type: process\n    status: accepted\n"+
+		"    tags:\n      - data-architecture\n")
+
+	res, err := RestoreHeaders(f.cfg, SyncOptions{Only: []string{"adrs"}})
+	require.NoError(t, err)
+	require.Len(t, res.Changes, 1)
+	require.Equal(t, "ADR-0002", res.Changes[0].ID)
+
+	body, err := os.ReadFile(filepath.Join(f.dir("adrs"), "adr-0002_headerless.md"))
+	require.NoError(t, err)
+	text := string(body)
+	require.True(t, strings.HasPrefix(text, "---\n"))
+	require.Contains(t, text, "id: ADR-0002")
+	require.Contains(t, text, "title: The one with no header")
+	require.Contains(t, text, "- data-architecture", "sequence values must survive the rebuild")
+	require.NotContains(t, text, "slug:", "slug is index bookkeeping, not record frontmatter")
+	require.NotContains(t, text, "file: adr-0002", "file is index bookkeeping, not record frontmatter")
+	require.Contains(t, text, "# ADR-0002 — no header", "the original body is kept, untouched")
+	require.Contains(t, text, "body text")
+
+	// Both findings dissolve, and sync then has nothing to withhold.
+	require.Empty(t, f.verify("adrs").Findings)
+	sync, err := Sync(f.cfg, SyncOptions{Only: []string{"adrs"}, GeneratedAt: "20260901000000"})
+	require.NoError(t, err)
+	require.False(t, sync.Withheld())
+	require.False(t, sync.Changed())
+}
+
+// TestRestoreHeaders_RefusesARecordThatHasAHeader is the blast radius. A
+// frontmatter block that fails to parse was authored by someone; overwriting
+// it from an index to satisfy a checker destroys their work. Only a record
+// with no block at all is this command's business.
+func TestRestoreHeaders_RefusesARecordThatHasAHeader(t *testing.T) {
+	f := newFixture(t)
+	broken := "---\nid: ADR-0002\ntitle: [unclosed\n---\n\nbody\n"
+	f.raw("adrs", "adr-0002_broken.md", broken)
+	f.listIndex([2]string{"ADR-0002", "adr-0002_broken.md"})
+
+	res, err := RestoreHeaders(f.cfg, SyncOptions{Only: []string{"adrs"}})
+	require.NoError(t, err)
+	require.Empty(t, res.Changes)
+	require.Len(t, res.Skipped, 1)
+	require.Contains(t, res.Skipped[0].Reason, "repair it by hand")
+
+	after, err := os.ReadFile(filepath.Join(f.dir("adrs"), "adr-0002_broken.md"))
+	require.NoError(t, err)
+	require.Equal(t, broken, string(after), "an authored header must survive byte-for-byte")
+}
+
+// TestRestoreHeaders_CheckWritesNothing is the dry-run contract.
+func TestRestoreHeaders_CheckWritesNothing(t *testing.T) {
+	f := newFixture(t)
+	before := "# ADR-0002 — no header\n"
+	f.raw("adrs", "adr-0002_headerless.md", before)
+	f.listIndex([2]string{"ADR-0002", "adr-0002_headerless.md"})
+
+	res, err := RestoreHeaders(f.cfg, SyncOptions{Only: []string{"adrs"}, Check: true})
+	require.NoError(t, err)
+	require.Len(t, res.Changes, 1)
+
+	after, err := os.ReadFile(filepath.Join(f.dir("adrs"), "adr-0002_headerless.md"))
+	require.NoError(t, err)
+	require.Equal(t, before, string(after))
+}
+
+// TestRestoreHeaders_SkipsWhenNothingDescribesTheRecord: with no index entry
+// naming the file there is no source for an id or a title, and inventing one
+// is what this whole command exists to avoid.
+func TestRestoreHeaders_SkipsWhenNothingDescribesTheRecord(t *testing.T) {
+	f := newFixture(t)
+	f.raw("adrs", "adr-0002_headerless.md", "# ADR-0002 — no header\n")
+	f.listIndex([2]string{"ADR-0001", "adr-0001_first.md"})
+
+	res, err := RestoreHeaders(f.cfg, SyncOptions{Only: []string{"adrs"}})
+	require.NoError(t, err)
+	require.Empty(t, res.Changes)
+	require.Len(t, res.Skipped, 1)
+	require.Contains(t, res.Skipped[0].Reason, "no index entry names this file")
+}
