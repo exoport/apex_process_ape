@@ -173,15 +173,15 @@ On success inform the user: "Local CI gate passed."
 
 ### Phase 2b — Claude Code harness contract
 
-`ci-local` proves ape is internally consistent. It cannot prove ape still *works*: ape's real dependency is the auto-updating `claude` binary on this machine, and every coupling to it fails **silently** when it moves — a renamed hook field just stops a completion gate firing, a dead model id starts a fallback model instead of erroring, a changed TUI footer costs the PTY its ready signal. GitHub CI can never check any of it: no `claude`, no auth, no network, no runlogs. A release-time local run is the only opportunity.
+`ci-local` proves ape is internally consistent. It cannot prove ape still *works*: ape's real dependency is the auto-updating `claude` binary on this machine, and every coupling to it fails **silently** when it moves — a renamed hook field just stops a completion gate firing, a dead model id starts a fallback model instead of erroring, a changed TUI footer costs the PTY its ready signal. GitHub CI can never check any of it: no `claude`, no auth, no network. A release-time local run is the only opportunity.
 
 Run the whole sweep as one named gate:
 
 ```bash
-make check-harness HOOK_PROJECT="${HOOK_PROJECT:-.}"
+make check-harness
 ```
 
-That is `check-prices` + `check-hooks` + `check-claude`. ~40 s total. Spends a fraction of a cent (one short Haiku turn); everything else reads local artifacts or the rendered pane for free.
+That is `check-prices` + `check-hooks` + `check-claude`. ~60 s total. Spends a few cents (two short sessions — the PTY gate's Haiku turn, and the seeded run `check-hooks` judges); everything else reads local artifacts or the rendered pane for free.
 
 > `check-prices` already ran in Phase 1h as a fast pre-flight. Re-running it here is deliberate and cheap: Phase 2b is the single gate that defines "the harness contract holds", and it must not be able to drift out of sync with what that phrase covers.
 
@@ -198,10 +198,9 @@ Stream output. Record the probed version from the `probing Claude Code at …` l
 | Skip | What it means | What to say |
 | --- | --- | --- |
 | `no Claude Code transcripts found` | no local model ids to price | "price coverage NOT verified" |
-| `hook contract not verified` | `HOOK_PROJECT` has no runlogs in the last 30 days | "hook contract NOT verified — set `HOOK_PROJECT` to a project you have run `ape` pipelines in" |
-| `claude not on PATH` | the live PTY gate could not run at all | "PTY/model contract NOT verified (no local claude)" |
+| `claude not on PATH` | the live gates could not run at all | "PTY/model and hook contracts NOT verified (no local claude)" |
 
-Hook drift can only be observed from the `hook-events.jsonl` files ape wrote under `<project>/_output/ape/tasks`, so `HOOK_PROJECT` pointing at this repo — the default — always skips. If the user has an APEX project they run pipelines in, ask for its path and re-run with it. If they do not, say the hook contract is unverified and ask whether to proceed anyway.
+`check-hooks` seeds its own corpus, so it does not skip for lack of a project. It has two distinct failure modes and they mean different things: a **broken seed** (`no <Event> events in the seeded run`) means the session did not provoke the event, so that field was not judged at all — fix the seed prompt, do not read it as a pass; **DRIFT** (`none carrying "<field>"`) means the field is genuinely gone and a completion gate has silently stopped firing.
 
 On success inform the user: "Harness contract verified against Claude Code {claude_version}" — naming any gate that skipped.
 
@@ -243,7 +242,7 @@ Reading the output:
 - **`APEX_FRAMEWORK_REPO` unset** → prints "framework contract NOT verified — this is a skip, not a pass" and exits 0. Report it as unverified; do not call it passed.
 - **A path that is not a framework checkout** → hard error, exit 1. Deliberate: setting the variable says you want the gate to run, so a path resolving to nothing is a typo, not a skip.
 - **`TestCommandSurface_AgainstRealManifest` SKIP** → the framework predates the manifest (pre-v0.11.0). Not a failure.
-- **`installed command surface NOT verified`** → `HOOK_PROJECT` has no `_apex/`. The checkout gates still ran; only the installed-project half did not.
+- **`installed command surface NOT verified`** → `APEX_PROJECT` has no `_apex/`. The checkout gates still ran; only the installed-project half did not. It defaults to this repo, which does have one, so this normally means it was pointed elsewhere.
 
 Both framework layouts resolve — released (`_apex/` at the repo root) and build (nested under `framework/`).
 

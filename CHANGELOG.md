@@ -1,5 +1,62 @@
 # CHANGELOG
 
+## Unreleased
+
+Verified against Claude Code 2.1.252: `check-prices` (5/5 observed models
+exactly priced) and `check-claude` (all six subtests) both pass. The third
+gate could not answer, and that turned out to be the interesting part.
+
+- **feat: `check-hooks` seeds its own corpus instead of hoping to find one.**
+  The gate read `hook-events.jsonl` files left behind by past interactive
+  runs, so it could only speak about a project someone had recently run
+  `ape` in. `HOOK_PROJECT` defaulted to this repo, which has no runlogs and
+  always skipped — and on the machine where it was finally checked, **no
+  project on the entire filesystem had a single `hook-events.jsonl`**. In its
+  whole existence the gate had never once fired, while contributing a
+  permanent SKIP line to `check-harness`. That is the defect that retired the
+  eight `TestParity_*` gates in v0.0.55: a skip is not a pass, and a gate
+  that can only skip reads as one.
+
+  It now writes the evidence it judges — `TestLive_HookContract` copies
+  `testdata/apexproject` to a temp dir, drives one unattended `ape prompt`
+  session, and reads the runlog that session wrote. Reproducible on any
+  machine with `claude` + auth, no pre-existing project, ~20 s and a few
+  cents. The corpus is deliberately a *real* session: synthesising a
+  `hook-events.jsonl` would test ape against ape's own idea of the payload,
+  which is the tautology `hookdrift` exists to escape.
+
+  The seed spawns a sub-agent on purpose. `tool_response` is only counted on
+  Agent-tool `PostToolUse` and `agent_id` only on `SubagentStop`, and
+  `Observation.OK()` passes a field seen zero times — so a seed that merely
+  answered a question would verify one field of three and still report green,
+  reintroducing the exact failure mode inside the fix. A field observed zero
+  times therefore fails as a **broken seed**, reported separately from a
+  drift verdict.
+
+  The observational read did not go away: it is `ape doctor --only
+  hooks.contract_drift --cwd <project>`, unchanged. Only the Makefile alias
+  for it is gone.
+
+- **refactor: `HOOK_PROJECT` → `APEX_PROJECT`.** Once `check-hooks` stopped
+  reading a project, the variable's only remaining consumer was
+  `check-framework`'s installed-command-surface half, and the name described
+  nothing it did. It now sits beside `APEX_FRAMEWORK_REPO` under a comment
+  stating the distinction the two names imply but never said: a framework
+  **checkout** versus a project with the framework **installed**. A stale
+  `HOOK_PROJECT=` on the command line is a hard `$(error)` naming the
+  replacement, because silently ignoring it would gate the default `.` while
+  looking like it had targeted a project.
+
+- **feat: `make docs-cli-check` — the generated CLI reference cannot go stale
+  unnoticed.** `docs/reference/cli.md` is generated from the cobra tree and
+  says "do not edit by hand", but nothing could tell that the tree had moved
+  underneath it: `docs-check` is a link checker, and no CI job regenerated
+  it. Editing a command's `Long` text desynced the committed reference
+  silently — which happened in this very changeset, to `ape doctor`. The new
+  target regenerates to a temp file and diffs, printing the offending hunk
+  and the one-line fix. Hermetic — no `claude`, no auth, no network — so
+  unlike the `check-*` gates it runs in **GitHub CI** as well as `ci-local`.
+
 ## v0.0.64 (2026-08-31)
 
 Three corrections to v0.0.63's closure-marker reading, found by the

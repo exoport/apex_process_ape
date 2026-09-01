@@ -61,7 +61,7 @@ ape doctor --output-format json | jq -r '.checks[].name'
 ape doctor --only hooks.contract_drift --strict --cwd "$PROJECT"
 ```
 
-That is exactly what `make check-hooks` runs. The two flags compose — `--only` selects, then `--skip` removes from the selection.
+That is the observational read of hook drift, against a project you have really run. (`make check-hooks` answers the same question the other way round — it seeds its own runlog with one unattended session, so it never depends on finding such a project.) The two flags compose — `--only` selects, then `--skip` removes from the selection.
 
 The asymmetry between them is deliberate: an unknown name in `--skip` is ignored (the check simply runs, which costs nothing), but an unknown name in `--only` is a **hard error** listing the valid names. A typo there would otherwise select nothing, run zero checks, and exit 0 — a gate reporting success while checking nothing, which is the one outcome a single-check flag must never produce.
 
@@ -104,7 +104,7 @@ ape doctor --output-format json | jq -e '.checks[] | select(.name == "ape.update
 | `operating_rules.fragment FAIL`        | A project that manages operating rules lost `_apex/apex-operating-rules.md` or the `CLAUDE.md` managed import | Run `ape framework update`. (Legacy / older-framework installs report WARN, not FAIL — see below.)   |
 | `permissions.home_claude WARN`         | Container runs as a user without write access to `~/.claude`            | Mount or create the dir owned by the runner UID.                                                      |
 | `cost.price_table_coverage SKIP`       | No Claude Code transcripts on the runner — the price table cannot be checked against real usage | Expected in CI, and SKIP never fails `--strict`. This check is meaningful on a developer machine; the release gate runs it as `make check-prices`. |
-| `hooks.contract_drift SKIP`            | No runlogs under `_output/` from the last 30 days — the hook contract cannot be checked | Expected in CI, and SKIP never fails `--strict`. Only a project ape has actually run in can answer this; the release gate runs it as `make check-hooks HOOK_PROJECT=…`. |
+| `hooks.contract_drift SKIP`            | No runlogs under `_output/` from the last 30 days — the hook contract cannot be checked | Expected in CI, and SKIP never fails `--strict`. Only a project ape has actually run in can answer this read; the release gate sidesteps that by seeding its own runlog — `make check-hooks`. |
 | `hooks.contract_drift WARN`            | The Claude Code that wrote your most recent run has stopped sending a hook field ape's step-completion gates read | The gates are now silently inactive — a run whose agent yields while a spawned agent is outstanding can again be reported as a success having done nothing. `ape update`; if it persists on the latest ape, report it. |
 | `framework.command_surface FAIL`       | The installed framework requires ape commands this binary does not provide | **Required — fails the run.** From framework v0.11.0 the skills shell out to ape with no fallback branch, so each missing command fails a skill mid-stage. The message lists every one. `ape update`; if they are still missing on the latest, the framework requires an ape that does not exist yet. |
 | `framework.command_surface SKIP`       | The framework ships no `_apex/ape-commands.yaml` | It predates the contract (pre-v0.11.0). Not a failure. |

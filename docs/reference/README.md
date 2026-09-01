@@ -6,7 +6,7 @@ For ape, reference is the surface area: every command, every flag, every config 
 
 ## Available reference
 
-- [cli.md](cli.md) — every command, flag, and default (generated from the command tree; run `make docs-cli` to regenerate).
+- [cli.md](cli.md) — every command, flag, and default (generated from the command tree; run `make docs-cli` to regenerate, and `make docs-cli-check` — which GitHub CI also runs — to verify it is in sync).
 - [bridge-ipc.md](bridge-ipc.md) — MCP bridge IPC wire schema.
 - [bridge-security.md](bridge-security.md) — bridge bind + threat model.
 - [claude-code-env-vars.md](claude-code-env-vars.md) — Claude Code's `CLAUDECODE` / `CLAUDE_CODE_*` environment variables, nested-session protection, and ape's env scrub.

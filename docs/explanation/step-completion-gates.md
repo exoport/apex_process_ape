@@ -67,7 +67,9 @@ Patterns are matched multi-line against the closing assistant message of the ste
 
 **Gate D — detecting the gates going silent.** If Claude Code renames `background_tasks`, nothing errors. Gate A just stops firing and `ape` quietly returns to reporting success on runs that did nothing. A gate that can stop firing unnoticed is worse than no gate, because it converts an absent protection into a believed-present one.
 
-`ape doctor` sweeps the project's own `hook-events.jsonl` and reports whether the fields the gates depend on are still present in recent payloads. Present-but-empty is healthy; absent is drift. This mirrors [`ape costs coverage`](../reference/cli.md), which catches a model id changing under the price table for exactly the same reason — the change lands on the harness's schedule, under an already-released `ape` binary, where no release-time check can see it.
+`ape doctor` sweeps the project's own `hook-events.jsonl` and reports whether the fields the gates depend on are still present in recent payloads. Present-but-empty is healthy; absent is drift. This mirrors [`ape costs coverage`](../reference/cli.md), which catches a model id changing under the price table for exactly the same reason — the change lands on the harness's schedule, under an already-released `ape` binary, where no release-time check can see it *coming*.
+
+Drift that has **already** landed is a different question, and `make check-hooks` answers it at release time. That gate used to read whatever runlogs a past interactive run happened to leave behind, which made it dependent on finding a project someone had recently run — and on the machine where it was finally checked, no such project existed, so it had never once fired. It now seeds its own corpus: one short unattended `ape prompt` session in a throwaway project, judged immediately. The session deliberately spawns a sub-agent, because `tool_response` is only counted on Agent-tool `PostToolUse` and `agent_id` only on `SubagentStop` — a seed that merely answered a question would check one field of three and still report green.
 
 ## Why teammates fail fast and background sub-agents do not
 

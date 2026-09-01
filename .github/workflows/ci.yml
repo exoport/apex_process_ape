@@ -74,6 +74,13 @@ jobs:
       - name: Run golangci-lint
         run: make lint
 
+      # docs/reference/cli.md is generated from the cobra command tree, so a
+      # help-text edit in internal/apecmd/ desyncs it silently. Hermetic —
+      # just regenerates and diffs — so unlike the check-* harness gates it
+      # can run here rather than only on a developer machine.
+      - name: Check generated CLI reference is in sync
+        run: make docs-cli-check
+
   vuln:
     name: Vulnerability scan
     runs-on: ubuntu-latest

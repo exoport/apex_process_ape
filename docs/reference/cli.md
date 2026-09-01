@@ -2364,11 +2364,14 @@ evidence is not coverage.
 
   ape doctor --only hooks.contract_drift --strict --cwd <project>
 
-That is what "make check-hooks" runs. Note the --cwd: hook drift is
-observed from the runlogs ape itself wrote (<project>/_output/ape), so it
-can only be judged against a project ape has actually run pipelines in, not
-against the ape repo. An unknown name in --only is an error rather than a
-silent no-op — a typo that ran zero checks would exit 0 and read as a pass.
+Note the --cwd: hook drift is observed from the runlogs ape itself wrote
+(<project>/_output/ape), so it can only be judged against a project ape has
+actually run pipelines in, not against the ape repo. This is the
+observational read — point it at a real project. The release gate takes the
+other route: "make check-hooks" seeds its own runlog with one unattended
+session, so it always has a corpus to judge. An unknown name in --only is
+an error rather than a silent no-op — a typo that ran zero checks would
+exit 0 and read as a pass.
 
 Exit codes:
   0  every required check passed (warnings allowed unless --strict)

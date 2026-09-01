@@ -275,12 +275,18 @@ CI runs build + test + lint + govulncheck on every push to `main` and every pull
 `make ci-local` proves ape is internally consistent. It cannot prove ape still *works*, because ape's real dependency is not a library it pins — it is the `claude` binary on your machine, which auto-updates on a schedule this repo does not control and makes no compatibility promise about its TUI, its flags, its hook payloads, or its transcript format. When one of those moves, nothing errors: ape keeps running and silently stops doing the thing the coupling bought.
 
 ```bash
-make check-harness HOOK_PROJECT=~/work/some-apex-project
+make check-harness
 ```
 
-Three gates, each reading what the installed Claude Code is *actually* doing: `check-prices` (model ids in local transcripts), `check-hooks` (the hook fields ape's step-completion gates read, from a project's runlogs), and `check-claude` (a live PTY session — ready signals, spawn flags, effort level, model aliases, transcript persistence).
+Three gates, each reading what the installed Claude Code is *actually* doing: `check-prices` (model ids in local transcripts), `check-hooks` (the hook fields ape's step-completion gates read, judged against a runlog the gate seeds itself with one short unattended session), and `check-claude` (a live PTY session — ready signals, spawn flags, effort level, model aliases, transcript persistence).
 
-None of them run in GitHub CI, which has no `claude`, no auth, no network and no runlogs. Each reports "not verified" rather than green when it finds no evidence — **read the output, not the exit code**.
+None of them run in GitHub CI, which has no `claude`, no auth and no network. `check-prices` reports "not verified" rather than green when it finds no evidence, so **read the output, not just the exit code**.
+
+To read hook drift on a project you have actually run pipelines in, rather than on a seeded one:
+
+```bash
+ape doctor --only hooks.contract_drift --strict --cwd ~/work/some-apex-project
+```
 
 ape has a second dependency that moves on its own schedule — the APEX framework itself, whose skills call ape subcommands with no fallback branch:
 

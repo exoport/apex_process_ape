@@ -15,7 +15,7 @@ Guidance for Claude Code when working in this repository.
 | `internal/apecmd/aboard.go` | The `ape aboard` **mount** — a whole command tree from the separate public `github.com/exoport/aboard` module, added rather than ported. Owns the three things hosting requires: the `Host`/`Argv0` identity, aboard's exit table surviving ape's `ExitCode`, and the `PersistentPreRun` shadow that keeps ape's update notice out of board output. Both hosts drive the same `.aboard/` and must produce an identical `capsHash`. |
 | `internal/pipeline/`      | Pipeline runner and pre-flight checks. Specs are **not** embedded — they load from `<projectRoot>/_apex/pipelines/*.yaml` (v0.0.6; see `docs/explanation/why-project-local-pipelines.md`). |
 | `internal/repl/`          | The PTY that drives `claude`: spawn + keystrokes + a vt10x-rendered pane. Owns the ready-signal vocabulary (`bypass permissions on`, `❯`), the pre-REPL modal table, `ScrubClaudeCodeEnv`, and `CLAUDE_CODE_EFFORT_LEVEL`. `TestLive_ClaudeCodeContract` (opt-in, `make check-claude`) checks all of it against the installed Claude Code. |
-| `internal/hookdrift/`     | Detects Claude Code dropping the hook-payload fields the step-completion gates read. Sweeps every runlog under a project's `_output/`, and scopes the verdict to the harness version that wrote the newest run so an upgrade cannot mask fresh drift. Surfaced by `ape doctor`, gated by `make check-hooks`. |
+| `internal/hookdrift/`     | Detects Claude Code dropping the hook-payload fields the step-completion gates read. Sweeps every runlog under a project's `_output/`, and scopes the verdict to the harness version that wrote the newest run so an upgrade cannot mask fresh drift. Two ways in: `ape doctor --only hooks.contract_drift --cwd <project>` reads a real project's runlogs (observational, and skips when there are none), while `make check-hooks` seeds its own corpus with one `ape prompt` session so it always returns a verdict. |
 | `internal/contract/`      | The framework-owned *terminal* contract (`_apex/terminal-contracts.csv`) — did a run reach its summary step. Unrelated to the PTY contract above, despite the name. |
 | `internal/tui/`           | Bubble Tea two-panel TUI.                                                                           |
 | `internal/output/`        | Output-format helpers (human / json / yaml).                                                        |
@@ -35,7 +35,7 @@ Guidance for Claude Code when working in this repository.
 | `deploy/`                 | `aped` deploy assets (systemd units, tmpfiles, policy, auditd rules) + `tier2-setup.sh`, the idempotent Tier-2 host-stack provisioner (see `docs/how-to/run-aped.md`). |
 | `testdata/`               | Test fixtures consumed by `_test.go` files.                                                         |
 | `docs/`                   | User-facing docs (Diátaxis-structured — see `docs/README.md`).                                      |
-| `.github/workflows/`      | `ci.yml` (build + test + lint + govulncheck on push to `main` / PR; the Windows job builds everything but runs `make test-portable`) and `release.yml` (goreleaser on final-semver tag `vX.Y.Z` only). |
+| `.github/workflows/`      | `ci.yml` (build + test + lint + generated-CLI-reference sync + govulncheck on push to `main` / PR; the Windows job builds everything but runs `make test-portable`) and `release.yml` (goreleaser on final-semver tag `vX.Y.Z` only). |
 | `.goreleaser.yaml`        | Release build config.                                                                               |
 | `.golangci.yaml`          | Linter config.                                                                                      |
 | `.pre-commit-config.yaml` | Pre-commit hooks (golangci-lint via `make lint`, config_secrets). The lint hook is `repo: local` on purpose — a hook resolving the bare `golangci-lint` name lints with whatever is first on $PATH, not the pinned version. |
@@ -57,11 +57,14 @@ make pre-commit    # run all pre-commit hooks
 make snapshot      # goreleaser snapshot (no upload, no sign) — for verifying release builds
 make govulncheck   # scan for known vulnerabilities (pinned via bingo)
 make xcompile-windows  # cross-compile + cross-vet for Windows; catches portability compile errors
-make ci-local      # full pre-push gate: test + lint + vuln + prices + xcompile-windows + snapshot
+make docs-cli      # regenerate docs/reference/cli.md from the cobra command tree
+make docs-cli-check # verify that generated reference is still in sync (also runs in GitHub CI)
+make ci-local      # full pre-push gate: test + lint + vuln + docs + prices + xcompile-windows + snapshot
 make check-prices  # verify the price table covers the models the local Claude Code emits
 make check-claude  # LOCAL ONLY: spawn the installed Claude Code and verify ape's PTY/model contract
-make check-hooks   # LOCAL ONLY: verify Claude Code still sends the hook fields the completion gates read
-                   #   needs a project ape has run: make check-hooks HOOK_PROJECT=~/work/some-apex-project
+make check-hooks   # LOCAL ONLY: verify Claude Code still sends the hook fields the completion gates read.
+                   #   Seeds its own corpus (one `ape prompt` session in a temp copy of
+                   #   testdata/apexproject), so it needs no pre-existing project.
 make check-harness # check-prices + check-hooks + check-claude — the whole "is the local Claude Code still compatible?" sweep
 make check-framework # LOCAL ONLY: does ape still satisfy the APEX framework? (set APEX_FRAMEWORK_REPO)
                    #   command surface, live config template — the other dependency axis
@@ -82,9 +85,9 @@ make clean         # remove build artifacts
 
 Two-step verification flow — see `docs/how-to/pre-tag-release.md` for the full guide. The automated walkthrough lives in `.claude/skills/release/SKILL.md` (`/release vX.Y.Z`).
 
-1. **Local gate** — run `make ci-local`. Runs test + lint + vuln + docs-check + price-table coverage + Windows cross-compile + goreleaser snapshot. ~30–60 s. Catches per-platform compile errors, release-config regressions, and a model price table that has gone stale against the locally-installed Claude Code.
+1. **Local gate** — run `make ci-local`. Runs test + lint + vuln + docs-check + generated-CLI-reference sync + price-table coverage + Windows cross-compile + goreleaser snapshot. ~30–60 s. Catches per-platform compile errors, release-config regressions, and a model price table that has gone stale against the locally-installed Claude Code.
 
-   **Then run `make check-harness HOOK_PROJECT=<a project ape has run>`** (~40 s, developer machine only). `ci-local` proves ape is internally consistent; it cannot prove ape still *works*, because ape's real dependency is the auto-updating `claude` binary on the host. The sweep is three gates that read what that binary is actually doing: `check-prices` (model ids in transcripts), `check-hooks` (the hook fields the step-completion gates read, from a project's runlogs), and `check-claude` (a live PTY session — the ready-signal footer and `❯` glyph, an unknown pre-REPL modal, the spawn flags, `CLAUDE_CODE_EFFORT_LEVEL`, the family-alias model ids still naming real models, and transcript persistence). Deliberately **not** in `ci-local` and never in GitHub CI: they need `claude` + auth + network + local runlogs, so a CI run could only skip them, and a gate that always skips reads as a pass. Read the output — each reports "not verified" rather than green when it has no evidence.
+   **Then run `make check-harness`** (~60 s, developer machine only). `ci-local` proves ape is internally consistent; it cannot prove ape still *works*, because ape's real dependency is the auto-updating `claude` binary on the host. The sweep is three gates that read what that binary is actually doing: `check-prices` (model ids in transcripts), `check-hooks` (the hook fields the step-completion gates read, judged against a runlog it seeds itself with one unattended `ape prompt` session — so the verdict never depends on finding a project someone happened to run), and `check-claude` (a live PTY session — the ready-signal footer and `❯` glyph, an unknown pre-REPL modal, the spawn flags, `CLAUDE_CODE_EFFORT_LEVEL`, the family-alias model ids still naming real models, and transcript persistence). Deliberately **not** in `ci-local` and never in GitHub CI: they need `claude` + auth + network + local transcripts, so a CI run could only skip them, and a gate that always skips reads as a pass. Read the output — `check-prices` reports "not verified" rather than green when it has no evidence, and `check-hooks` fails a seed that produced no events rather than passing it as "nothing to judge".
 
    **And `make check-framework APEX_FRAMEWORK_REPO=<checkout>`** — the other dependency axis. `check-harness` asks whether the local *Claude Code* still honours what ape drives it through; this asks whether ape still satisfies what the local *APEX framework* requires: the command surface its shipped `_apex/ape-commands.yaml` declares, and the config variables its live template defines. Framework v0.11.0 deleted every fallback branch, so a missing command fails a skill mid-stage rather than degrading.
 2. **Remote gate** — push commits to `main`:

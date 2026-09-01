@@ -33,9 +33,10 @@ This expands to:
 2. `make lint` — `golangci-lint`.
 3. `make govulncheck` — vulnerability scan.
 4. `make docs-check` — every doc reachable from `docs/README.md`, every link resolving.
-5. `make check-prices` — the built-in price table against the model ids the local Claude Code is emitting.
-6. `make xcompile-windows` — cross-compile + cross-vet for `GOOS=windows GOARCH=amd64`, plus a per-package test-binary cross-compile. Catches portability *compile* errors (broken `//go:build` tags, missing functions, unused imports per platform).
-7. `make snapshot` — `goreleaser` snapshot build. Catches release-config regressions before the real release machinery sees them.
+5. `make docs-cli-check` — `docs/reference/cli.md` still matching the cobra command tree it is generated from. A help-text edit in `internal/apecmd/` desyncs it silently otherwise. Also runs in GitHub CI, since it needs nothing but the command tree.
+6. `make check-prices` — the built-in price table against the model ids the local Claude Code is emitting.
+7. `make xcompile-windows` — cross-compile + cross-vet for `GOOS=windows GOARCH=amd64`, plus a per-package test-binary cross-compile. Catches portability *compile* errors (broken `//go:build` tags, missing functions, unused imports per platform).
+8. `make snapshot` — `goreleaser` snapshot build. Catches release-config regressions before the real release machinery sees them.
 
 What `ci-local` catches:
 
@@ -52,7 +53,7 @@ What it **does not** catch:
 ## Step 1b — the Claude Code harness contract
 
 ```bash
-make check-harness HOOK_PROJECT=~/work/some-apex-project
+make check-harness
 ```
 
 `ci-local` proves *ape* is internally consistent. It cannot prove ape still works, because ape's real dependency is not a library it pins — it is the `claude` binary on the machine, which auto-updates on a schedule ape does not control and makes no compatibility promise about its TUI, its flags, its hook payloads, or its transcript format.
@@ -62,10 +63,14 @@ make check-harness HOOK_PROJECT=~/work/some-apex-project
 | Gate | Reads | Catches |
 | --- | --- | --- |
 | `check-prices` | `~/.claude/projects` transcripts | a model id or family alias the price table does not cover — tokens keep counting, cost silently goes to zero |
-| `check-hooks` | `$HOOK_PROJECT/_output/ape/tasks` runlogs | a hook field ape's step-completion gates read being renamed or dropped — the gate stops firing and ape resumes reporting success on runs that did nothing |
+| `check-hooks` | a runlog it seeds itself | a hook field ape's step-completion gates read being renamed or dropped — the gate stops firing and ape resumes reporting success on runs that did nothing |
 | `check-claude` | a live PTY session | everything below |
 
-> **`check-hooks` needs a real project.** Hook drift is observed from the `hook-events.jsonl` files ape itself wrote, so it can only be judged against a project you have actually run `ape` pipelines in. `HOOK_PROJECT` defaults to `.` — the ape repo, which has no runlogs and will always report a skip. Point it somewhere real or the gate is decorative.
+> **`check-hooks` brings its own evidence.** Hook drift can only be observed from the `hook-events.jsonl` files ape itself wrote, so this gate writes one: it copies `testdata/apexproject` to a temp dir and drives a single short unattended `ape prompt` session (one Haiku turn, a few cents). It needs no pre-existing project and always returns a verdict.
+>
+> The seed deliberately spawns a subagent, because `tool_response` is only counted on Agent-tool `PostToolUse` and `agent_id` only on `SubagentStop`. A seed that merely answered a question would check one field of three and still go green — so a field observed **zero** times fails as a broken seed, separately from an actual drift verdict.
+>
+> To judge a project you have really run pipelines in, use the observational read instead: `ape doctor --only hooks.contract_drift --strict --cwd <project>`.
 
 `make check-claude` on its own spawns the locally-installed Claude Code through ape's own PTY path and verifies the couplings that would otherwise fail *silently*:
 
@@ -80,11 +85,11 @@ make check-harness HOOK_PROJECT=~/work/some-apex-project
 | Transcript persistence | The v0.0.28–32 root cause: every cost, token, and model figure silently becomes zero. |
 | `claude --version` shape | The manifest's `claude_version` stamp and hookdrift's version attribution stop resolving. |
 
-None of this is part of `ci-local`, and none of it runs in GitHub CI: it needs `claude` on PATH, working auth, network, and local runlogs — none of which a CI runner has. Run it on a developer machine before tagging, and after any Claude Code upgrade.
+None of this is part of `ci-local`, and none of it runs in GitHub CI: it needs `claude` on PATH, working auth, and network — none of which a CI runner has. Run it on a developer machine before tagging, and after any Claude Code upgrade.
 
 Takes ~40 s. Every check but one costs zero tokens — they read local artifacts, or launch the REPL and read the rendered pane. The exception submits a single short Haiku turn to prove a transcript is really written and that ape can still parse it; `APE_CLAUDE_LIVE_TOKENS=0` skips that one.
 
-> **A SKIP is not a pass.** Each gate reports "not verified" rather than green when it finds nothing to judge — no transcripts, no runlogs, no `claude` on PATH. Read the output rather than the exit code: absence of evidence is not coverage, and every one of these is designed so an empty run cannot masquerade as a clean one.
+> **A SKIP is not a pass.** Each gate reports "not verified" rather than green when it finds nothing to judge — no transcripts, no `claude` on PATH. Read the output rather than the exit code: absence of evidence is not coverage, and every one of these is designed so an empty run cannot masquerade as a clean one. `check-hooks` takes that one step further: rather than skipping when it has no corpus, it makes one, and it fails outright if the corpus it made turns out to be empty.
 
 ## Step 1c — the APEX framework contract
 
@@ -159,5 +164,5 @@ The bugs that escaped to v0.0.18 were *both* OS-conditional (PATHEXT extension o
 
 - [How to run `ape doctor` in CI](run-doctor-in-ci.md) — strict JSON invocation, exit codes, GitHub Actions snippet.
 - `.github/workflows/ci.yml` and `.github/workflows/release.yml` — the actual filter definitions live here.
-- `Makefile` — `ci-local`, `xcompile-windows` targets.
+- `Makefile` — `ci-local`, `xcompile-windows`, `docs-cli-check` targets.
 - `.claude/skills/release/SKILL.md` — automated `/release` walkthrough that drives this flow.
