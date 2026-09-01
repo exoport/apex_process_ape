@@ -14,13 +14,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Resolved with Find, not Commands: cobra's Commands() sorts the child slice
-// IN PLACE, so calling it on the shared rootCmd from a parallel test races
-// every other test that walks the same tree (the command-surface checks all
-// use Find, which only reads).
+// Resolved against a PRIVATE tree, because nothing cobra offers for walking
+// one is read-only. `Commands()` sorts the child slice in place, and `Find`
+// — the replacement adopted to avoid that — is no better: `findNext` writes
+// `commandCalledAs` on every command it touches. This comment used to say
+// Find "only reads", and that false premise is why this test took no lock
+// while missingCommands took commandTreeMu for the same walk; the two raced
+// whenever they overlapped, which is what made Test(ubuntu-latest) fail
+// intermittently on main under a different test name each run.
+//
+// newRootCmd builds the tree from the same rootShell + rootSubcommands the
+// process-wide one is built from, so this still asserts on ape's real
+// surface — it just cannot collide with another test doing the same.
 func TestAboardIsMountedOnTheRoot(t *testing.T) {
 	t.Parallel()
-	found, _, err := rootCmd.Find([]string{"aboard"})
+	found, _, err := newRootCmd().Find([]string{"aboard"})
 	require.NoError(t, err)
 	require.NotNil(t, found)
 	require.Equal(t, "aboard", found.Name(), "`ape aboard` must be registered on ape's root")
