@@ -96,7 +96,7 @@ func TestContextWindow_SuffixWins(t *testing.T) {
 // same fivefold inflation, on the newest and most-used models.
 func TestContextWindow_GenerationBoundary(t *testing.T) {
 	for _, m := range []string{
-		"claude-fable-5", "claude-mythos-5", "claude-opus-5",
+		"claude-fable-5-1", "claude-fable-5", "claude-mythos-5", "claude-opus-5",
 		"claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
 		"claude-sonnet-5", "claude-sonnet-4-6",
 	} {

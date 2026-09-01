@@ -51,12 +51,19 @@
 # fails the release gate while any locally-observed model is inexact.
 
 version: 1
-updated: "2026-07-28"
+updated: "2026-09-01"
 
 # Exact per-model rates, keyed by the `model` field on each assistant-line
 # `usage` block in the session JSONL (after NormalizeModel).
 prices:
   # Claude 5 family — top tier.
+  # Fable 5.1 supersedes Fable 5; the docs list Fable 5 under "Legacy models
+  # (still available)", so both keep exact rows — a transcript written by the
+  # older one must still price exactly.
+  claude-fable-5-1:
+    base_input: 10.00
+    output: 50.00
+    context_window: 1000000
   claude-fable-5:
     base_input: 10.00
     output: 50.00
@@ -158,7 +165,7 @@ aliases:
   opus: claude-opus-5
   sonnet: claude-sonnet-5
   haiku: claude-haiku-4-5
-  fable: claude-fable-5
+  fable: claude-fable-5-1
   mythos: claude-mythos-5
 
 # Family tiers — the estimate of last resort. Consulted only when no exact

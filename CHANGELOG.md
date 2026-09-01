@@ -6,6 +6,23 @@ Two checks had been reporting for weeks with nothing that could act on
 them, and the one documented remedy turned out to be destructive on the
 case that needed it most. Found by repairing two real projects by hand.
 
+- **fix(cost): price Claude Fable 5.1, and move the `fable` alias onto it.**
+  `claude-fable-5-1` turned up in local transcripts and the table had no row
+  for it, so its turns priced through the family tier — an estimate, flagged
+  everywhere but still not a rate. Worse, `fable` still resolved to
+  `claude-fable-5`: a bare `fable` in a pipeline spec or `--model` selected
+  the superseded model, silently. Both confirmed against the model docs
+  rather than accepted from the tool's own estimate: `claude-fable-5-1` is
+  $10.00/$50.00 per MTok with a 1M window, and Fable 5 is now listed under
+  "Legacy models (still available)" — so it keeps its exact row, because a
+  transcript an older Claude Code wrote must still price exactly. The window
+  is locked in `TestContextWindow_GenerationBoundary` alongside the rest of
+  the 1M generation.
+
+  `make check-prices` caught this as a release-gate failure, which is what
+  it is for — the same shape as the `opus[1m]` gap that priced real usage at
+  zero for thirteen days.
+
 - **fix(registry): `sync` offered to delete the metadata that would have
   repaired the record.** A record with no frontmatter block claims no id,
   so it is absent from the on-disk id set and its index entry reads exactly
