@@ -83,6 +83,21 @@ case that needed it most. Found by repairing two real projects by hand.
   took a review to find. The count is now scoped to the one class this
   command owns.
 
+- **internal(atomicfile): both writers rewrite documents a person authored,
+  so neither uses `os.WriteFile`.** It truncates before it writes, which
+  means an interrupted call destroys the original and leaves nothing in its
+  place — on exactly the files whose loss is least recoverable. The new
+  package writes a temp file beside the target and renames over it, so a
+  reader sees the whole old file or the whole new one.
+
+  The rename alone does not make that survive a crash: it can reach the
+  disk ahead of the data it points at, leaving a file that is present,
+  correctly named and empty. The temp file is therefore synced before the
+  rename and the directory after it, and the package documents which of the
+  two guarantees each step buys. Directory sync is best-effort — some
+  platforms refuse to open a directory for it, and failing a write that is
+  already correct on disk would trade a durability nicety for an outage.
+
 ## v0.0.65 (2026-09-01)
 
 Verified against Claude Code 2.1.252: `check-prices` (5/5 observed models
