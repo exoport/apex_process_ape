@@ -21,6 +21,20 @@ const (
 	CheckDuplicate    = "deferred.duplicate_candidate"
 	CheckTriggerFired = "deferred.trigger_may_have_fired"
 	CheckClosureMark  = "deferred.closure_marker_in_open_record"
+	// CheckSupersededMark is the OPPOSITE verdict to CheckClosureMark, and it
+	// is a separate check name rather than a nuance inside that one because
+	// the two demand opposite remediations: a closure marker means the work
+	// was done and only an operator may `close` it, while a supersession
+	// means it was overtaken and never done, which is a `discard`.
+	//
+	// While one code covered both, a consumer had to re-open the record body
+	// and re-derive the distinction from prose — and the framework's repair
+	// skill, the only consumer, got it backwards on its first attempt and
+	// routed superseded records at `close`. That stamps a delivery that never
+	// happened, which is the exact defect `discarded` exists to prevent.
+	// Verify reads structure everywhere else; handing back prose to be
+	// re-parsed was the one place it did not.
+	CheckSupersededMark = "deferred.superseded_marker_in_open_record"
 )
 
 // Confidence levels. `candidate` findings are heuristics: a person or a
@@ -100,7 +114,7 @@ func (s *Store) Verify(opts VerifyOptions) (*VerifyReport, error) {
 
 		report.Findings = append(report.Findings, checkSchema(rec)...)
 		report.Findings = append(report.Findings, checkRefs(rec, ids)...)
-		report.Findings = append(report.Findings, checkClosureMarker(rec)...)
+		report.Findings = append(report.Findings, checkDischargeMarker(rec)...)
 
 		// Heuristics — candidates only, never conclusions.
 		if rec.IsOpen() {
@@ -169,7 +183,7 @@ func checkSchema(rec *Record) []Finding {
 	return out
 }
 
-// checkClosureMarker flags an open record whose own body says it is closed.
+// checkDischargeMarker flags an open record whose own body says it is closed.
 //
 // CERTAIN, not a candidate, and the reason is that it reads STRUCTURE
 // rather than prose: the same two anchored recognisers the write paths act
@@ -187,35 +201,48 @@ func checkSchema(rec *Record) []Finding {
 // announces its own discharge and is not reported here is unreachable by
 // the only sanctioned discharge path. Nothing here closes it — verify never
 // writes — but naming it puts it back in front of the one thing that can.
-func checkClosureMarker(rec *Record) []Finding {
+func checkDischargeMarker(rec *Record) []Finding {
 	if !rec.IsOpen() {
 		return nil
 	}
-	// The message states the FACT and stops there. It used to name
+	// An in-body closure marker is read FIRST, matching the order the write
+	// paths apply their three discharge readings — so a record carrying both
+	// is classified the same way here as it would be stored.
+	//
+	// The DONE messages state the fact and stop there. They must not name
 	// `ape deferred close`, which `ape deferred repair` — the main consumer
 	// of this list — is explicitly forbidden to run: discharging an open
 	// record as delivered is the operator's judgment, and a finding that
 	// instructs the one reader who must not act on it is worse than no
-	// finding at all.
-	switch {
-	case inBodyClosureRe.MatchString(rec.Body):
+	// finding at all. The SUPERSEDED message may name the verdict, because
+	// `discard` is exactly what that skill was dispatched to reach.
+	if inBodyClosureRe.MatchString(rec.Body) {
 		return []Finding{{
 			Check: CheckClosureMark, ID: rec.ID, Confidence: ConfidenceCertain,
 			Message: "open record carries an appended closure marker in its body — " +
-				"the record's own text says it was discharged; report it for the operator",
+				"the record's own text says the work was DONE; report it for the operator",
 		}}
-	case hasDischargingAnnotation(rec.Body):
+	}
+	switch lastDischargingAnnotation(rec.Body) {
+	case annotationClosed:
 		return []Finding{{
 			Check: CheckClosureMark, ID: rec.ID, Confidence: ConfidenceCertain,
-			Message: "open record carries a [Closed]/[Superseded] status annotation — " +
-				"the record's own text says it was discharged; report it for the operator",
+			Message: "open record's last status annotation is [Closed] — " +
+				"the record's own text says the work was DONE; report it for the operator",
+		}}
+	case annotationSuperseded:
+		return []Finding{{
+			Check: CheckSupersededMark, ID: rec.ID, Confidence: ConfidenceCertain,
+			Message: "open record's last status annotation is [Superseded] — the record's own " +
+				"text says the work was OVERTAKEN and never done, so it is a discard, not a close",
 		}}
 	}
 	return nil
 }
 
-// hasDischargingAnnotation reports whether a body's LAST status tag means
-// discharged.
+// lastDischargingAnnotation returns a body's LAST status tag when that tag
+// discharges the record, and "" otherwise — so the caller can tell WHICH
+// discharge it is rather than only that there was one.
 //
 // It must read the tags exactly as applyStatusAnnotation does, or the two
 // surfaces disagree: the annotations on one entry are an append-only
@@ -224,13 +251,16 @@ func checkClosureMarker(rec *Record) []Finding {
 // the migration correctly left alone. `[Open]` is a status annotation too,
 // so matching the tag family alone would flag every open record in a
 // register that annotates all of them.
-func hasDischargingAnnotation(body string) bool {
+func lastDischargingAnnotation(body string) string {
 	matches := statusAnnotationRe.FindAllStringSubmatch(body, -1)
 	if len(matches) == 0 {
-		return false
+		return ""
 	}
-	last := matches[len(matches)-1][1]
-	return last == "Closed" || last == "Superseded"
+	switch last := matches[len(matches)-1][1]; last {
+	case annotationClosed, annotationSuperseded:
+		return last
+	}
+	return ""
 }
 
 // checkRefs is the other hard invariant: a pointer that points nowhere.

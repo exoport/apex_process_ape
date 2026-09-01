@@ -276,7 +276,16 @@ closure-marker check below a fact.
 
 - `confidence: certain` — a fact. Schema problems; `related[]` /
   `supersedes[]` pointing at records that do not exist; an open record whose
-  own body carries a closure marker.
+  own body says it was discharged.
+
+An open record that says it was discharged is **two** checks, not one,
+because the two mean opposite things and need opposite remediations —
+branch on the check name rather than re-reading the body:
+
+| Check                                       | The record's text says           | Remediation             |
+| ------------------------------------------- | -------------------------------- | ----------------------- |
+| `deferred.closure_marker_in_open_record`    | the work was **done**            | an operator `close`s it |
+| `deferred.superseded_marker_in_open_record` | it was **overtaken**, never done | `ape deferred discard`  |
 - `confidence: candidate` — a heuristic, never auto-actionable. A dead
   anchor, a trigger naming a now-done story, a near-duplicate title, a
   free-form record.

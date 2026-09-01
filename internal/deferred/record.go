@@ -34,6 +34,16 @@ const (
 	StatusDiscarded = "discarded"
 )
 
+// Status-annotation tags. These are the capture values of
+// statusAnnotationRe, named so the migration and `verify` cannot drift apart
+// on a string literal — they have to agree about which tag discharges a
+// record and which of the two OPPOSITE discharges it is.
+const (
+	annotationOpen       = "Open"
+	annotationClosed     = "Closed"
+	annotationSuperseded = "Superseded"
+)
+
 // Source values recorded from the legacy ledger's section headings.
 const (
 	SourceStoryReview   = "story-review"
@@ -481,7 +491,24 @@ func applyResolutionBanner(rec *Record) {
 //
 //   - **RESOLVED (2026-08-20) — closed by Story 3.17, re-verified …**
 //   - [RESOLVED, 2026-08-28, story dev of 31-5_prove-it-over-both-…]
-//   - **Disposition recorded (2026-08-20, Story 23.4) — dissolved by …**
+//
+// `RESOLVED` IS THE ONLY TOKEN, and `Disposition recorded` was removed from
+// it. That phrase asserts that a decision was written down, not that the
+// work was discharged — and across the three field ledgers (730 records) it
+// occurs exactly once, where it says:
+//
+//	**Disposition recorded (2026-08-20, …) — dissolved by construction once
+//	the operator's already-decided tag move happens; NOT YET CLOSED, because
+//	the move has not happened.**
+//
+// So its whole field record as a discharge marker is one occurrence meaning
+// the opposite. Matching it closed a record that denies being closed, and no
+// anchor can fix that because the negation is in the prose after the token —
+// which this design does not read. Dropping the token removes the failure
+// without reading anything: the one record carrying it is still discharged,
+// by the later `RESOLVED` clause that overrules the note. Not closing a
+// record is recoverable — it stays in the working set; wrongly closing one
+// asserts a delivery that never happened.
 //
 // THE ANCHOR IS THE WHOLE POINT, and it is what a body-wide word search
 // gets wrong. On the reference ledger, `RESOLVED` appears in 32 of 85
@@ -499,7 +526,7 @@ func applyResolutionBanner(rec *Record) {
 // The token is case-sensitive because the convention is a literal tag. A
 // lowercase `resolved` is ordinary prose ("the resolved role names"), and
 // matching it would put back the failure this anchor exists to remove.
-var inBodyClosureRe = regexp.MustCompile(`(?m)^[ \t]*[-*][ \t]*(?:\*\*|__|\[)?(?:RESOLVED|Disposition recorded)\b`)
+var inBodyClosureRe = regexp.MustCompile(`(?m)^[ \t]*[-*][ \t]*(?:\*\*|__|\[)?RESOLVED\b`)
 
 // statusAnnotationRe matches a TOP-LEVEL bullet whose content is one of the
 // bracketed status tags a register appends as a companion line to the entry
@@ -559,10 +586,31 @@ func applyClosureMarker(rec *Record) {
 	if !rec.IsOpen() {
 		return
 	}
-	loc := inBodyClosureRe.FindStringIndex(rec.Body)
-	if loc == nil {
+	locs := inBodyClosureRe.FindAllStringIndex(rec.Body, -1)
+	if len(locs) == 0 {
 		return
 	}
+	// THE LAST MARKER WINS, for the same reason applyStatusAnnotation reads
+	// the last annotation: they are appended, never edited in place, so a
+	// run of them is a chronology and the final one is the current state.
+	// Reading the first instead dated a discharge from a marker the register
+	// had already overruled — on the reference ledger, a record carrying
+	//
+	//	- **Disposition recorded (2026-08-20, …) — … not yet closed, because
+	//	  the move has not happened …**
+	//	- **RESOLVED (2026-08-26, Story 29.3) — re-derived against the tree in
+	//	  this pass, not trusted from … the disposition sub-bullet's own
+	//	  now-stale restatement.**
+	//
+	// was stamped `resolved_at: 2026-08-20`, the date of the note that says
+	// it is NOT closed, six days before the discharge that actually happened.
+	//
+	// That record only had two markers because `Disposition recorded` was a
+	// closure token then; it no longer is, for the reason given on
+	// inBodyClosureRe. Both fixes were needed and neither subsumes the other:
+	// dropping the token stops a denial being read as a discharge, and
+	// last-wins stops an earlier genuine marker outdating a later one.
+	loc := locs[len(locs)-1]
 	rec.Status = StatusClosed
 	rec.ResolvedBy = migratedNote("closure marker")
 	if d := isoDateRe.FindString(markerLine(rec.Body, loc[0])); d != "" {
@@ -620,7 +668,7 @@ func applyStatusAnnotation(rec *Record) {
 	rest := rec.Body[loc[4]:loc[5]]
 	tag := "[" + kind + rest + "]"
 	switch kind {
-	case "Closed":
+	case annotationClosed:
 		rec.Status = StatusClosed
 		rec.ResolvedBy = migratedNote(tag)
 		// Same span as applyClosureMarker reads, and it has to be the whole
@@ -634,13 +682,25 @@ func applyStatusAnnotation(rec *Record) {
 		if d := isoDateRe.FindString(markerLine(rec.Body, loc[0])); d != "" {
 			rec.ResolvedAt = d
 		}
-	case "Superseded":
+	case annotationSuperseded:
 		rec.Status = StatusDiscarded
 		rec.DiscardReason = migratedNote(tag)
 		rec.DiscardEvidence = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(rest), ":"))
+	case annotationOpen:
+		// Deliberately nothing: the register's latest word is that the entry
+		// still reproduces, which is the status the record already has.
+		//
+		// It is a written-out case rather than a silent default so that all
+		// three members of the vocabulary are visible at the point of
+		// decision. That is documentation and NOT a compile-time guarantee:
+		// Go does not check a string switch for exhaustiveness, and the
+		// vocabulary's real source is statusAnnotationRe's alternation — a
+		// string literal the compiler cannot connect to this switch at all.
+		// Adding a tag there without a verdict here still builds and still
+		// does nothing. The two are kept in step by hand; typing the
+		// constants would only catch a new CONSTANT, never a new alternative
+		// in the regex, which is the half that actually gets edited.
 	}
-	// `[Open]` falls through deliberately: the record keeps the open status
-	// it already has.
 }
 
 // isBlockquoteOnly reports whether every non-blank line is a blockquote.

@@ -294,12 +294,22 @@ func newDeferredVerifyCmd() *cobra.Command {
 
   confidence: certain    a fact. Schema problems, related[]/supersedes[]
                          pointing at records that do not exist, and an open
-                         record whose own body carries a closure marker.
+                         record whose own body says it was discharged.
   confidence: candidate  a heuristic, NEVER auto-actionable. A dead anchor
                          (the record may be moot, or the code may just have
                          moved), a trigger naming a story that is now done
                          (the closing condition MAY have fired), a
                          near-duplicate title, a free-form record.
+
+An open record that says it was discharged is TWO checks, not one, because
+the two mean opposite things and need opposite remediations:
+
+  deferred.closure_marker_in_open_record     the work was DONE
+  deferred.superseded_marker_in_open_record  the work was OVERTAKEN, never
+                                             done — a discard, not a close
+
+Branch on the check name. Re-deriving it from the message is what a consumer
+got backwards, closing records whose whole point was that nobody did them.
 
 Nothing here ever closes a record. Closing requires re-verifying the
 premises against HEAD, which is judgment — and on the reference ledger an

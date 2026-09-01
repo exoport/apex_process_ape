@@ -1,5 +1,62 @@
 # CHANGELOG
 
+## v0.0.64 (2026-08-31)
+
+Three corrections to v0.0.63's closure-marker reading, found by the
+framework's own review of the skill that consumes it: two wrong readings of
+real data, and the shape that made getting them wrong easy. Plus the flaky
+CI job, which turned out to be an earlier fix that was correct and
+incomplete.
+
+- **fix: the LAST closure marker dates the discharge, not the first.**
+  Markers are appended and never edited, so a run of them is a chronology —
+  `applyStatusAnnotation` already read the last one and this did not. On the
+  reference ledger a record carried a disposition note saying it was **not
+  yet closed**, overruled six days later by a `RESOLVED` clause that calls
+  that note "now-stale"; the record was stamped with the earlier date, the
+  one that denies the discharge.
+
+- **fix: `Disposition recorded` is no longer read as a discharge.** The
+  phrase asserts that a decision was written down, not that the work was
+  done. Across the three field ledgers — 730 records — it occurs exactly
+  once, and there it says the entry is **not yet closed**; matching it closed
+  a record that denies being closed. No anchor could fix that, because the
+  negation is in the prose after the token and this design does not read
+  prose. `RESOLVED` is now the only in-body token. Nothing is lost: the one
+  record carrying the phrase is still discharged, by the later `RESOLVED`
+  clause that overrules the note.
+
+- **feat: a supersession is its own check, because it is the opposite
+  verdict.** `deferred.closure_marker_in_open_record` covered both "the work
+  was done" and `[Superseded: <artifact>]`, which means the work was
+  overtaken and never done. One code, two opposite remediations — `close` and
+  `discard` — so the only consumer had to re-open the record body and
+  re-derive the difference from prose, and got it backwards: it routed
+  superseded records at `close`, which asserts a delivery that never happened
+  and appends a discharge line to a body the migration wrote byte-for-byte.
+  That is the defect `discarded` exists to prevent, so the distinction is now
+  machine-readable as `deferred.superseded_marker_in_open_record`. `verify`
+  reads structure everywhere else; this was the one place it handed prose
+  back to be re-parsed.
+
+- **fix(test): the intermittently-red `Test (ubuntu-latest)` job.** A mutex
+  guards `missingCommands` because `cobra.Find` is not read-only — but
+  `aboard_test.go` walked the same shared root without taking it, on the
+  strength of a comment asserting that "Find only reads". A lock only works
+  if every accessor takes it, so the two raced whenever they overlapped, and
+  the failure named a different aboard test each run. The earlier mutex fix
+  was correct and incomplete; it did not cover the accessor that believed it
+  did not need covering.
+
+  Tests now build a private tree with `newRootCmd()` instead of resolving
+  against the process-wide one, which is independent by construction rather
+  than by scheduling luck. `rootShell()` + `rootSubcommands()` are the one
+  definition both trees come from, so a test still asserts on ape's real
+  surface — verified identical command-and-flag tree before and after. The
+  package failed roughly two runs in three under `-race`; it now passes 8 of
+  8. The false comment is gone: leaving it is how the next reader re-derives
+  the same wrong mitigation.
+
 ## v0.0.63 (2026-08-31)
 
 Three corrections from a third field migration, verified against three real

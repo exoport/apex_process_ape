@@ -830,3 +830,92 @@ func TestVerify_FlagsClosureMarkerOnAnOpenRecord(t *testing.T) {
 		require.NotEqual(t, closed.ID, f.ID, "a discharged record has nothing left to flag")
 	}
 }
+
+// TestApplyClosureMarker_LastMarkerWins: markers are appended, never edited,
+// so a run of them is a chronology and the last one is the discharge that
+// actually happened.
+//
+// This is the reference ledger's own shape: a disposition note saying the
+// entry is NOT yet closed, overruled six days later by a RESOLVED clause
+// that calls the earlier note "now-stale". Reading the first marker dated
+// the discharge from the note that denies it.
+func TestApplyClosureMarker_LastMarkerWins(t *testing.T) {
+	rec := Record{Status: StatusOpen, Body: "- [Defer] a thing re-opened once\n" +
+		"  - **RESOLVED (2026-08-20) — closed by Story 23.4.**\n" +
+		"  - **RESOLVED (2026-08-26, Story 29.3) — re-derived against the tree in this pass, not\n" +
+		"    trusted from the earlier clause's own now-stale restatement.**\n"}
+	applyClosureMarker(&rec)
+	require.Equal(t, StatusClosed, rec.Status)
+	require.Equal(t, "2026-08-26", rec.ResolvedAt,
+		"the discharge date comes from the LAST marker, not the one it superseded")
+}
+
+// TestApplyClosureMarker_DispositionIsNotADischarge: `Disposition recorded`
+// asserts that a decision was written down, not that the work was done.
+//
+// Across the three field ledgers — 730 records — the phrase occurs exactly
+// once, and there it says the entry is NOT yet closed. Its whole record as a
+// discharge token is one occurrence meaning the opposite, and no anchor can
+// rescue it because the negation lives in the prose after the token, which
+// this design does not read. Not closing a record is recoverable; wrongly
+// closing one asserts a delivery that never happened.
+func TestApplyClosureMarker_DispositionIsNotADischarge(t *testing.T) {
+	rec := Record{Status: StatusOpen, Body: "- [Defer] the v0.1.0 tag already exists\n" +
+		"  - **Disposition recorded (2026-08-20, Story 23.4) — dissolved by construction once the\n" +
+		"    operator's tag move happens; not yet closed, because the move has not happened.**\n"}
+	applyClosureMarker(&rec)
+	require.Equal(t, StatusOpen, rec.Status, "a note that denies discharge must not discharge")
+	require.Empty(t, rec.ResolvedAt)
+
+	// The real record carried a later RESOLVED clause too, and that is what
+	// discharges it — the disposition line is simply inert.
+	rec.Body += "  - **RESOLVED (2026-08-26, Story 29.3) — re-derived against the tree.**\n"
+	applyClosureMarker(&rec)
+	require.Equal(t, StatusClosed, rec.Status)
+	require.Equal(t, "2026-08-26", rec.ResolvedAt)
+}
+
+// TestVerify_SupersededGetsItsOwnCheck: one finding code for two opposite
+// remediations made the consumer re-derive the distinction from prose, and
+// the framework's repair skill got it backwards — routing superseded records
+// at `close`, which asserts a delivery that never happened.
+func TestVerify_SupersededGetsItsOwnCheck(t *testing.T) {
+	s := New(t.TempDir())
+	done := Record{
+		ID: "DW-20260820-aaa111", Title: "done", Status: StatusOpen,
+		Body: "- [Defer] a thing\n- [Closed: 193c4ec] built and swapped in\n",
+	}
+	overtaken := Record{
+		ID: "DW-20260820-bbb222", Title: "overtaken", Status: StatusOpen,
+		Body: "- [Defer] a thing\n- [Superseded: docs/atomix.md:50] recorded there instead\n",
+	}
+	inBody := Record{
+		ID: "DW-20260820-ccc333", Title: "marked done in body", Status: StatusOpen,
+		Body: "- [Defer] a thing\n  - **RESOLVED (2026-08-20) — closed by Story 3.17.**\n",
+	}
+	for _, rec := range []Record{done, overtaken, inBody} {
+		_, err := s.Write(rec)
+		require.NoError(t, err)
+	}
+
+	report, err := s.Verify(VerifyOptions{})
+	require.NoError(t, err)
+	byID := map[string]Finding{}
+	for _, f := range report.Findings {
+		if f.Check == CheckClosureMark || f.Check == CheckSupersededMark {
+			byID[f.ID] = f
+		}
+	}
+
+	require.Equal(t, CheckClosureMark, byID[done.ID].Check, "[Closed] means the work was done")
+	require.Equal(t, CheckClosureMark, byID[inBody.ID].Check, "an in-body marker means the work was done")
+	require.Equal(t, CheckSupersededMark, byID[overtaken.ID].Check,
+		"[Superseded] is the OPPOSITE verdict and must be separable without reading prose")
+
+	require.Contains(t, byID[overtaken.ID].Message, "discard, not a close")
+	require.NotContains(t, byID[done.ID].Message, "discard",
+		"the done family must not be pointed at discard")
+	for _, f := range byID {
+		require.Equal(t, ConfidenceCertain, f.Confidence)
+	}
+}

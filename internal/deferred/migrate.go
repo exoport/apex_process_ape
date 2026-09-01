@@ -432,10 +432,18 @@ func ParseLegacyDocument(data []byte) *LegacyDocument {
 // stays verbatim in the body it belonged to all along, so the losslessness
 // check still sees it exactly once; all that changes is which record it
 // lands in. Both vocabularies are closed and structural — a bracketed
-// `[Open]`/`[Closed]`/`[Superseded]` opening the bullet, or a `RESOLVED` /
-// `Disposition recorded` clause opening it — and both are disjoint from the
-// tags that legitimately open a record (`[Defer]`, `[Patch]`,
-// `[Addendum, <date>]`), so this cannot swallow an entry.
+// `[Open]`/`[Closed]`/`[Superseded]` opening the bullet, or a `RESOLVED`
+// clause opening it — and both are disjoint from the tags that legitimately
+// open a record (`[Defer]`, `[Patch]`, `[Addendum, <date>]`), so this cannot
+// swallow an entry.
+//
+// `Disposition recorded` was in the second vocabulary and is not any more;
+// see inBodyClosureRe for why. A column-0 disposition bullet is therefore a
+// record of its own again rather than being absorbed — which is right, since
+// it no longer discharges anything, and the entry above keeps the open
+// status the note says it still has. The one such line in the field is an
+// indented sub-bullet, so it is ordinary continuation text and no boundary
+// question arises at all.
 //
 // It absorbs only into a record that is actually open above it: a marker
 // that opens a section has nothing to annotate and stays a record of its
