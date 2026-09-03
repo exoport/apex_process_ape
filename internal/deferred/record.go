@@ -366,7 +366,8 @@ func ParseBullet(text string) Record {
 // `;` did, including a three-line one where only the last line carries
 // `cross-cycle=`.
 var tailFieldRe = regexp.MustCompile(
-	`(?i)\b(?:outside-story|cross-cycle|non-blocking|owner|trigger|next-batch brief)\s*[:=]`)
+	`(?i)\b(?:outside-story|cross-cycle|non-blocking|owner|trigger|next-batch brief)\s*[:=]`,
+)
 
 // tailBlob assembles the text the field regexes run over.
 //

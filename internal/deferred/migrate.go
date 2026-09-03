@@ -674,7 +674,8 @@ func (s *Store) refuseIfPopulated() error {
 			"restore the ledger from git and remove the store directory first — "+
 			"record ids are derived from the ledger, so a corrected parse produces "+
 			"different ids and the two sets cannot be merged",
-		ErrStorePopulated, s.Dir, len(existing.Records))
+		ErrStorePopulated, s.Dir, len(existing.Records),
+	)
 }
 
 // verifyBeforeWrite is the whole pre-write assertion, in two halves.
@@ -761,14 +762,16 @@ func verifyLossless(data []byte, doc *LegacyDocument) error {
 		if got := emitted[line]; got != want {
 			return fmt.Errorf(
 				"%w: the ledger has %d copy/copies of a line and the migration emits %d: %q",
-				ErrLosslessnessFailed, want, got, line)
+				ErrLosslessnessFailed, want, got, line,
+			)
 		}
 	}
 	for line, got := range emitted {
 		if want := source[line]; got != want {
 			return fmt.Errorf(
 				"%w: the migration emits %d copy/copies of a line the ledger has %d of: %q",
-				ErrLosslessnessFailed, got, want, line)
+				ErrLosslessnessFailed, got, want, line,
+			)
 		}
 	}
 	return nil

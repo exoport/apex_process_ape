@@ -724,7 +724,8 @@ func TestIngest_DischargedBulletGoesStraightToClosed(t *testing.T) {
 	res, err := s.Ingest([]byte(
 		"- [Defer] A thing a skill filed as already done\n"+
 			"  - **RESOLVED (2026-08-20) — closed by Story 3.17.**\n"+
-			"- [Defer] A thing that is genuinely open\n"),
+			"- [Defer] A thing that is genuinely open\n",
+	),
 		IngestOptions{Skill: "apex-review-story", Story: "54-1", Date: "2026-08-20"})
 	require.NoError(t, err)
 	require.Equal(t, 2, res.Count)

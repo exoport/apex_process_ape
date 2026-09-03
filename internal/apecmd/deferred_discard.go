@@ -60,7 +60,8 @@ The result is visible as 'ape deferred list --status discarded', and under
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if reason == "" {
 				return usageErr(errors.New(
-					"--reason is required: a discard with no stated reason cannot be reviewed later"))
+					"--reason is required: a discard with no stated reason cannot be reviewed later",
+				))
 			}
 			store, _, date := storeFor(cwdFlag)
 			rec, err := store.Discard(args[0], reason, evidence, date)
@@ -148,7 +149,8 @@ Nothing is committed.`,
 				if dirty := dirtyPaths(cmd.Context(), cfg.Root, []string{cfg.Paths.Deferred}); len(dirty) > 0 {
 					return usageErr(fmt.Errorf(
 						"the store has uncommitted changes, so `git status` could not tell ape's work from yours: %v",
-						dirty))
+						dirty,
+					))
 				}
 			}
 

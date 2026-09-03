@@ -167,7 +167,8 @@ func TestContextWindow_OverrideRoundTrip(t *testing.T) {
 			"  claude-sonnet-4-5:\n"+
 			"    base_input: 3.00\n"+
 			"    output: 15.00\n"+
-			"    context_window: 1000000\n"), 0o600))
+			"    context_window: 1000000\n",
+	), 0o600))
 
 	loaded, err := LoadOverridesFrom(assetPath)
 	require.NoError(t, err)
@@ -224,7 +225,8 @@ func TestScanSession_WindowComesFromTheRawSpelling(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	require.NoError(t, os.WriteFile(path, []byte(
 		assistantLine("claude-sonnet-4-5[1m]")+"\n"+
-			assistantLine("claude-sonnet-4-5[1m]")+"\n"), 0o600))
+			assistantLine("claude-sonnet-4-5[1m]")+"\n",
+	), 0o600))
 
 	res, err := ScanSession(path)
 	require.NoError(t, err)
@@ -246,7 +248,8 @@ func TestScanSession_MixedVariantsCollapseToUnknown(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	require.NoError(t, os.WriteFile(path, []byte(
 		assistantLine("claude-sonnet-4-5")+"\n"+
-			assistantLine("claude-sonnet-4-5[1m]")+"\n"), 0o600))
+			assistantLine("claude-sonnet-4-5[1m]")+"\n",
+	), 0o600))
 
 	res, err := ScanSession(path)
 	require.NoError(t, err)
@@ -260,7 +263,8 @@ func TestScanSession_MixedVariantsCollapseToUnknown(t *testing.T) {
 func TestScanSession_UnsuffixedWindowIsTheModelsOwn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	require.NoError(t, os.WriteFile(path, []byte(
-		assistantLine("claude-opus-5")+"\n"), 0o600))
+		assistantLine("claude-opus-5")+"\n",
+	), 0o600))
 
 	res, err := ScanSession(path)
 	require.NoError(t, err)

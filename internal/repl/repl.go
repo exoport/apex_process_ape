@@ -539,7 +539,8 @@ var blockingModals = []modalSpec{
 			snap, _ := capturePaneFn(ctx, name)
 			return fmt.Errorf(
 				"repl: could not reach a trust-granting option in %d moves (last selection %q) — "+
-					"the dialog's options have changed shape; pane:\n%s", maxMenuMoves, last, snap)
+					"the dialog's options have changed shape; pane:\n%s", maxMenuMoves, last, snap,
+			)
 		},
 	},
 }

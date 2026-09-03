@@ -407,7 +407,8 @@ func (s *Store) Discard(id, reason, evidence, date string) (Record, error) {
 	}
 	if rec.Status == StatusClosed {
 		return Record{}, fmt.Errorf(
-			"%s is already closed as done; discarding it would overwrite that claim — reopen it first if the close was wrong", id)
+			"%s is already closed as done; discarding it would overwrite that claim — reopen it first if the close was wrong", id,
+		)
 	}
 	rec.Status = StatusDiscarded
 	rec.DiscardReason = reason

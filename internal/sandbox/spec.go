@@ -94,7 +94,8 @@ func BuildSpec(opts SpecOptions) (*specs.Spec, error) {
 	}
 
 	env := make([]string, 0, 3+len(opts.Comp.Env)+len(opts.Env)) // 3 fixed entries below
-	env = append(env,
+	env = append(
+		env,
 		"HOME="+opts.Comp.GuestHome,
 		// ApeBinDest leads, because aped delivers `ape` there at runtime (PLAN-23) and this
 		// builder sets PATH outright rather than extending the image's. The containerd path

@@ -376,7 +376,8 @@ func recordInstance(t *testing.T, proj, url string) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(
-		filepath.Join(proj, ".aboard", "run", "instance.json"), rec, 0o644))
+		filepath.Join(proj, ".aboard", "run", "instance.json"), rec, 0o644,
+	))
 }
 
 // asMap and tabAt assert their way into the document, so a shape change fails
@@ -403,7 +404,8 @@ func boardOnDisk(t *testing.T, document string) string {
 	proj := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(proj, ".aboard", "run"), 0o755))
 	require.NoError(t, os.WriteFile(
-		filepath.Join(proj, ".aboard", "aboard.json"), []byte(document), 0o644))
+		filepath.Join(proj, ".aboard", "aboard.json"), []byte(document), 0o644,
+	))
 	return proj
 }
 

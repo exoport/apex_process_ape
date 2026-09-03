@@ -167,7 +167,8 @@ func runSeed(t *testing.T, apeBin, project string) {
 
 	// Haiku keeps it to fractions of a cent; the timeouts are backstops for
 	// a session that hangs rather than expected durations.
-	cmd := exec.Command(apeBin, "prompt", seed,
+	cmd := exec.Command(
+		apeBin, "prompt", seed,
 		"--cwd", project,
 		"--model", "haiku",
 		"--effort", "low",

@@ -955,7 +955,8 @@ development_folder: workspace
 implementation_folder: workspace/implementation
 governance_folder: workspace/governance
 functionality_folder: workspace/functionality
-`), 0o644))
+`), 0o644,
+	))
 	cfg, err := apexcfg.ResolveAt(root, nil)
 	require.NoError(t, err)
 

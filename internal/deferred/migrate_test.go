@@ -821,12 +821,14 @@ func TestRecover_ReachesHistoryAfterAMigration(t *testing.T) {
 	require.NoError(t, os.WriteFile(legacy, []byte(
 		"## Deferred from: story review of 1-1 (2026-01-01)\n\n"+
 			"- [Defer] Survivor [a.go:1]\n"+
-			"- [Defer] Evicted long ago [b.go:2]\n"), 0o644))
+			"- [Defer] Evicted long ago [b.go:2]\n",
+	), 0o644))
 	git("add", ".")
 	git("commit", "-qm", "both")
 	require.NoError(t, os.WriteFile(legacy, []byte(
 		"## Deferred from: story review of 1-1 (2026-01-01)\n\n"+
-			"- [Defer] Survivor [a.go:1]\n"), 0o644))
+			"- [Defer] Survivor [a.go:1]\n",
+	), 0o644))
 	git("add", ".")
 	git("commit", "-qm", "evict one")
 

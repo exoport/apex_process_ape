@@ -31,7 +31,8 @@ func projectNoChdir(t *testing.T) string {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, apexcfg.DirName), 0o755))
 	require.NoError(t, os.WriteFile(
-		filepath.Join(root, apexcfg.DirName, apexcfg.BaseFile), []byte(realProjectConfig), 0o644))
+		filepath.Join(root, apexcfg.DirName, apexcfg.BaseFile), []byte(realProjectConfig), 0o644,
+	))
 	return root
 }
 
