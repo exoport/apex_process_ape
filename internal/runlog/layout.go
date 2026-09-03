@@ -132,6 +132,16 @@ func CostRollupPath(projectRoot string) string {
 	return filepath.Join(ApeRoot(projectRoot), "cost-rollup.json")
 }
 
+// TimestampStatePath holds the last stamp ape issued for this project —
+// the persisted floor behind the monotonic clock in internal/stamp.
+//
+// Not a run artifact and not a cache: deleting it does not lose history,
+// but it does drop the floor, which is why the issuer re-seeds from the
+// tracker rather than restarting at the wall clock.
+func TimestampStatePath(projectRoot string) string {
+	return filepath.Join(ApeRoot(projectRoot), "timestamp.state")
+}
+
 // PipelineRunDir is where one pipeline run's artifacts live.
 func PipelineRunDir(projectRoot, pipelineName, runID string) string {
 	return filepath.Join(PipelinesRoot(projectRoot), pipelineName, runID)

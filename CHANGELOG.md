@@ -1,5 +1,143 @@
 # CHANGELOG
 
+## v0.0.67 (unreleased — draft)
+
+> Draft entry for the PLAN-63/PLAN-64 bundle. The version is provisional
+> until the tag is cut; the framework's blocked acceptance blocks fill
+> `<X.Y.Z>` from the released tag, not from this heading.
+
+### What the framework greps
+
+The exact surfaces the framework's blocked acceptance blocks assert
+against, quoted so they can be matched without reading the source:
+
+| Command | Outcome |
+| ------- | ------- |
+| `ape story verify --file <story with a derived section removed>` | non-zero (**4**); the message names the section, e.g. `the derived section set requires ### Debug Log References and the body does not carry it (an empty section is accepted; a missing header is not)` |
+| `ape story verify --file <story declaring adrs_applicable 0 against a non-zero tag match>` | non-zero (**4**); `adrs_applicable is 0 but the recomputed adrs_considered is N — the digest pass certified that none of N candidate ADRs applies, which is the one judgement it cannot make silently`. Never the words "applicability mismatch" |
+| `ape story verify --file <story citing a governance.adrs id absent at HEAD>` | non-zero (**4**); `ADR-9999 does not resolve to an ADR at HEAD` |
+| `ape story verify --file <story citing a proposed ADR>` | **exit 0**, reported under `flagged`: `ADR-0001 resolves to an ADR whose status is "proposed", not accepted — reported, not gated` |
+| a non-committer dispatch | HEAD unchanged, no path staged that was not staged before, stash unchanged; the verdict rides `ape task --output-format json` as `commit_contract` |
+
+The new `story verify` check-class names, in full:
+`story.section_missing`, `story.file_list_marker`,
+`story.placeholder_residue`, `story.compliance_table_header`,
+`story.gcc_line_form`, `story.adrs_considered`, `story.adr_unresolved`,
+and the report-only `story.adr_not_accepted`.
+
+The dispatch-assertion check names: `dispatch.head_moved`,
+`dispatch.index_staged`, `dispatch.stash_changed`, `dispatch.no_commit`,
+`dispatch.message_format`.
+
+New exit codes: **`ape story verify --file` 4** (body problem, beside the
+unchanged 0/2/3) and **`ape task` 6** (declared commit ownership
+violated).
+
+---
+
+The APEX framework is about to delete ~89 KB of git-prohibition prose from
+85 skills, a timestamp-clamp paragraph from ~53 more, and the structural
+rules four skills each restate in their own words. It can do that only
+once the binary asserts what the prose asserted. This release is that
+assertion — the `ape` half of the framework's PLAN-63 and PLAN-64, shipped
+as one tag because two framework half-phases are gated on it and splitting
+it would put prose in front of the check that enforces it.
+
+- **feat(task): assert the project's declared commit ownership on every
+  dispatch.** `_apex/commit-owners.csv` (`skill,commit_kind,message_regex`)
+  says which skills commit and in what format. A skill **absent** from it
+  must leave HEAD, the index and the stash reflog unchanged across the
+  dispatch — and all three are checked, because HEAD alone is not the
+  assertion: `git add` and `git stash` both leave HEAD exactly where it
+  was, and a stash silently destroys the caller's working tree. A skill
+  **present** must produce at least one commit, with every commit in
+  `pre..HEAD` matching one of its declared formats — a per-commit
+  predicate, not "HEAD advanced by one", because a batch dispatch makes a
+  dev and a review commit per story.
+
+  New exit code **6**, distinct from 1 because the skill's own work may
+  have succeeded: the run finished and the repository is not in the state
+  the project declared it would be, which is a different thing to fix. An
+  absent CSV means no skill commits. Rows naming a skill `ape` never
+  dispatches — the conducting session's `apex-orchestrator` rows — are
+  read and never reached. `--task-commit` is `ape`'s own commit and is not
+  judged against a skill's declaration. A malformed CSV fails preflight
+  rather than degrading to "no skill commits", since that inversion is
+  precisely what would let a suppressed commit through.
+
+- **feat(stamp): `ape` owns timestamp monotonicity.** Every skill resolves
+  a `timestamp` and copies it into a field recording when something was
+  last written. Two of those were seen moving backwards in a real project
+  — `sprint-status.yaml`'s `updated_at` by ~2h44m, an ADR index's
+  `generated_at` by ~57min, written by different agents. The framework's
+  answer was a paragraph carried verbatim in ~53 skills telling each
+  writer to clamp, which works exactly as well as an instruction is
+  followed.
+
+  The contract is unchanged and its implementation moves into the binary:
+  local wall-clock, `YYYYMMDDHHMMSS`, and every issue returns
+  `max(now, last_issued)`. The floor persists under
+  `{output_folder}/ape/timestamp.state`, and when that file is absent — a
+  fresh clone, a cleaned `_output` — it seeds from the newest `updated_at`
+  already in `sprint-status.yaml`, so a clean checkout cannot silently
+  reset it. `ape config resolve`, `ape sprint reconcile` and the run
+  manifest's new `timestamp` field all issue through it. `ape sprint
+  verify`'s exit-5 backwards-write check stays the detector of last
+  resort rather than the only detector.
+
+- **feat(story): `ape story verify --file` takes the whole story shape.**
+  Seven new gating classes over the body, plus one that reports without
+  gating:
+
+  | Class | What it catches |
+  | ----- | --------------- |
+  | `story.section_missing` | a section the derived set requires is absent |
+  | `story.file_list_marker` | a File List entry with no marker, an unknown one, or the em-dash-prose form standing in for one |
+  | `story.placeholder_residue` | `_(populated during dev)_` surviving at `status: review` |
+  | `story.compliance_table_header` | a compliance table header that is not the declared shape |
+  | `story.gcc_line_form` | a GCC line that is not `- [ ] **[ID]** {instruction} -- {scope}` |
+  | `story.adrs_considered` | `adrs_applicable` not binding against the recomputed tag-match count |
+  | `story.adr_unresolved` | a `governance.adrs` id resolving to no ADR at HEAD |
+  | `story.adr_not_accepted` | a cited ADR that is not `accepted` — **exit 0**, flagged |
+
+  The derived section set is a function of **resolved config alone**: no
+  writer stamps a story type today, so there is nothing else to read, and
+  the check is built so a later `story_type:` key narrows the set without
+  changing the exit contract. `## Feature Scope` is a member on
+  `ext_features` alone and always expected — the `_No features apply to
+  this story._` line is "no matches", never a missing section.
+
+  New exit code **4** for a body problem, beside the unchanged 0 / 2 / 3;
+  3 still wins when a file has both, because the keys are the more
+  fundamental failure. Corpus mode is untouched and still never opens a
+  body — that cap is what keeps a 465-story sweep at 67 KB rather than
+  23.5 MB.
+
+  Two details worth stating because they differ from the ask as filed.
+  The File List vocabulary is **all five** markers the template declares,
+  not three: `(planned)` and `(deferred)` are `apex-lift-project`'s, and
+  rejecting them would report a finding on every lifted story. And
+  `### Debug Log References` carrying `_No issues encountered._` is a
+  terminal convention rather than residue, so it is never a finding.
+
+  The two governance classes need the ADR corpus, which `--file` mode
+  finds by walking up from the story's own path. Against a story outside
+  any project they **skip and say so** — the mode is required to keep
+  working there, and a governance class that says nothing when it could
+  not run reads as one that passed.
+
+- **feat(config): `model_profile` and `evidence_folder` join the overlay
+  allow-list.** `OverlayKeys()` iterated seventeen keys and silently
+  skipped the rest, so `ape config resolve` could not emit a variable the
+  framework added and `config.local.yaml` could not override one. Both new
+  keys are emitted **raw, with no default and no derived path**: the
+  framework owns `strong` for `model_profile` and owns the
+  `evidence_folder` fallback chain, and re-deriving either here would put
+  a second source of truth behind a key whose whole point is that the
+  framework resolves it. They are marked optional, so the config-template
+  drift guard no longer requires the framework's own template to declare
+  them.
+
 ## v0.0.66 (2026-09-01)
 
 Two checks had been reporting for weeks with nothing that could act on

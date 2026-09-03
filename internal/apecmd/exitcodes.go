@@ -23,6 +23,14 @@ package apecmd
 //	   and a caller that knows its budget can decide to re-run. Without it
 //	   the run would sit until the idle ceiling and then report 1, which
 //	   says only "nothing happened"
+//	6  the dispatch violated the project's declared commit ownership
+//	   (`_apex/commit-owners.csv`) — a non-committer moved HEAD, staged
+//	   content or touched the stash, or a declared committer produced no
+//	   commit or one whose subject matches none of its declared formats.
+//	   Distinct from 1 because the skill's own work may have SUCCEEDED:
+//	   the run completed and the repository is not in the state the
+//	   framework declared it would be, which is a different thing to
+//	   report and a different thing to fix
 const (
 	ExitOK           = 0
 	ExitRunFailed    = 1
@@ -31,4 +39,7 @@ const (
 	ExitClaudeDied   = 4
 	// ExitUpstreamAPI is sessiondriver.TerminalAPIError reaching a command.
 	ExitUpstreamAPI = 5
+	// ExitCommitContract is a failed per-dispatch commit-ownership
+	// assertion (PLAN-26 D2).
+	ExitCommitContract = 6
 )

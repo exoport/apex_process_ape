@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -48,9 +49,16 @@ const (
 	TimestampLayout = "20060102150405"
 )
 
-// Config is the seventeen variables the framework's On Activation block
-// resolves, in the order that block lists them. Field names mirror the
-// YAML keys exactly so a reader can diff this against any SKILL.md.
+// Config is the framework's On Activation variables, in the order that
+// block lists them. Field names mirror the YAML keys exactly so a reader
+// can diff this against any SKILL.md.
+//
+// Seventeen of them are the canonical set the block has always resolved.
+// The last two — model_profile and evidence_folder — are declared
+// OPTIONAL variables (PLAN-64 7.1, PLAN-63 § `ape` requests item 1): each
+// ships with a documented default that every framework consumer applies
+// when the resolver omits it. That is why neither is defaulted here. See
+// OverlayKeys.
 type Config struct {
 	ConfigSchemaVersion      string   `json:"config_schema_version"      yaml:"config_schema_version"`
 	ProjectName              string   `json:"project_name"               yaml:"project_name"`
@@ -69,6 +77,23 @@ type Config struct {
 	GovernanceFolder         string   `json:"governance_folder"          yaml:"governance_folder"`
 	GovernanceStaleness      string   `json:"governance_staleness"       yaml:"governance_staleness"`
 	FunctionalityFolder      string   `json:"functionality_folder"       yaml:"functionality_folder"`
+
+	// ModelProfile and EvidenceFolder are the framework's two declared
+	// OPTIONAL variables. Both are emitted exactly as the project wrote
+	// them and are EMPTY when the project never declared one — `ape` does
+	// not supply a default for either.
+	//
+	// That is deliberate, not an omission. `model_profile` defaults to
+	// `strong` and acts as a ceiling (it can force `full`, never force
+	// `lean`), and `evidence_folder` resolves through a three-step
+	// fallback (the key when present, else an existing `evidence/` under
+	// {governance_folder}, else `evidence/`). Both defaults belong to the
+	// framework, which applies them when this resolver omits the key;
+	// re-deriving either here would put a second source of truth behind a
+	// key whose whole purpose is that the framework resolves it. Note the
+	// consequence: no Paths entry is derived for evidence_folder.
+	ModelProfile   string `json:"model_profile,omitempty"   yaml:"model_profile,omitempty"`
+	EvidenceFolder string `json:"evidence_folder,omitempty" yaml:"evidence_folder,omitempty"`
 }
 
 // Ext carries the four booleans the framework derives from `extensions`.
@@ -276,8 +301,16 @@ func applyLocal(cfg *Config, path string) (overlaid []string, applied bool, err 
 	return overlaid, true, nil
 }
 
-// OverlayKeys is the ordered list of keys config.local.yaml may replace
-// — the same seventeen the framework's On Activation block resolves.
+// OverlayKeys is the ordered list of keys config.local.yaml may replace:
+// the seventeen canonical variables the framework's On Activation block
+// resolves, plus its two declared optional ones.
+//
+// The loop in applyLocal looks up ONLY these keys and silently skips
+// anything else, so a key absent from this list cannot be overridden in
+// config.local.yaml and cannot be emitted by `ape config resolve` — which
+// is why adding a framework variable means adding it here, not only to
+// Config. (The `unknown overlay key` error decodeInto returns is
+// unreachable from this path by construction; it guards a direct call.)
 func OverlayKeys() []string {
 	return []string{
 		"config_schema_version",
@@ -297,7 +330,31 @@ func OverlayKeys() []string {
 		"governance_folder",
 		"governance_staleness",
 		"functionality_folder",
+		"model_profile",
+		"evidence_folder",
 	}
+}
+
+// OptionalKeys are the OverlayKeys a config template need not declare.
+//
+// The framework's canonical seventeen are mandatory: every one of them
+// names a folder or a name a skill reads, and a template missing one
+// resolves it as empty, which sends a writer to the wrong directory. The
+// framework's *declared optional* variables are different by design —
+// each ships with a documented default its consumers apply when the
+// resolver omits the key — so a template that never mentions one is
+// correct, not drifted.
+//
+// The contract test reads this: a template key `ape` does not resolve is
+// still a failure in both directions, but an optional key absent from a
+// template is not.
+func OptionalKeys() []string {
+	return []string{"model_profile", "evidence_folder"}
+}
+
+// IsOptionalKey reports whether key is one of OptionalKeys.
+func IsOptionalKey(key string) bool {
+	return slices.Contains(OptionalKeys(), key)
 }
 
 // decodeInto writes one overlay key into cfg. The switch is exhaustive
@@ -323,6 +380,8 @@ func decodeInto(cfg *Config, key string, node yaml.Node) error {
 		"governance_folder":          &cfg.GovernanceFolder,
 		"governance_staleness":       &cfg.GovernanceStaleness,
 		"functionality_folder":       &cfg.FunctionalityFolder,
+		"model_profile":              &cfg.ModelProfile,
+		"evidence_folder":            &cfg.EvidenceFolder,
 	}
 	target, ok := targets[key]
 	if !ok {

@@ -4674,7 +4674,7 @@ Aliases: `stories`
 Subcommands:
 
 - `fields` — Project named frontmatter keys across every story
-- `verify` — Verify story frontmatter (corpus report, or a single-file gate)
+- `verify` — Verify story frontmatter and shape (corpus report, or a single-file gate)
 
 ## ape story fields
 
@@ -4717,7 +4717,7 @@ Flags:
 
 ## ape story verify
 
-Verify story frontmatter (corpus report, or a single-file gate)
+Verify story frontmatter and shape (corpus report, or a single-file gate)
 
 ```
 ape story verify [flags]
@@ -4738,13 +4738,53 @@ contribution field has no normative source, so coercing it would fabricate
 a lifecycle edge — a test asserts this command reports nothing for any
 value of it.
 
+--file mode adds the STORY-SHAPE classes over the body:
+
+  story.section_missing           a section the derived set requires is
+                                  absent. The set is a function of the
+                                  resolved config alone (## Feature Scope
+                                  on ext_features, the two governance
+                                  headers on ext_adrs / ext_patterns); an
+                                  empty section is accepted, a missing
+                                  header is not
+  story.file_list_marker          a File List entry with no status marker,
+                                  an unknown one, or the forbidden
+                                  em-dash-prose form in place of one
+  story.placeholder_residue       a template placeholder surviving at
+                                  status: review. Debug Log References'
+                                  "_No issues encountered._" is a terminal
+                                  convention, never residue
+  story.compliance_table_header   a compliance table whose header row is
+                                  not the declared shape
+  story.gcc_line_form             a Governance Compliance Criteria line
+                                  that is not
+                                  "- [ ] **[ID]** {instruction} -- {scope}"
+  story.adrs_considered           adrs_applicable does not bind against
+                                  the recomputed tag-match candidate count
+  story.adr_unresolved            a governance.adrs id that resolves to no
+                                  ADR at HEAD
+
+And one class that is REPORTED WITHOUT GATING:
+
+  story.adr_not_accepted          a cited ADR that resolves but is not
+                                  accepted. Exit 0 — a story may
+                                  legitimately cite a proposed ADR
+
+The two governance classes need the project's ADR corpus, which is found
+by walking up from the story's own path. Against a story outside any
+project they SKIP and say so; they never silently pass.
+
 TWO MODES, with deliberately different contracts:
 
-  corpus (default)  a REPORT. Exit 0 even with findings; --strict makes it
-                    1. --strict must never be set from inside
-                    apex-review-story, apex-code-review or
+  corpus (default)  a REPORT, over frontmatter only. Exit 0 even with
+                    findings; --strict makes it 1. --strict must never be
+                    set from inside apex-review-story, apex-code-review or
                     apex-epic-batch-review: a non-zero exit on those paths
                     converts a defer into a patch and demotes the story.
+                    The shape classes are deliberately NOT run here: the
+                    corpus scan reads at most 8 KiB per file and never
+                    opens a body, which is what keeps a 465-story sweep at
+                    67 KB instead of 23.5 MB.
 
   --file <path>     a GATE, replacing verify-story-frontmatter.py with its
                     exit codes intact:
@@ -4752,9 +4792,14 @@ TWO MODES, with deliberately different contracts:
                       2  parse failure (bad YAML, or no --- delimiters)
                       3  a required or extension-conditional key is absent,
                          or an optional key is present but malformed
-                    Referential integrity is not asserted here — a single
-                    file cannot see the corpus, exactly as the Python
-                    could not.
+                      4  the keys are fine and the BODY is not — one of the
+                         story-shape classes above
+                    3 wins over 4 when a file has both; the keys are the
+                    more fundamental failure. Referential integrity across
+                    the four families is not asserted here — a single file
+                    cannot see the corpus, exactly as the Python could
+                    not — though the ADR family alone is, by the walk
+                    described above.
 
 --fix REPAIRS ONE CLASS AND SAYS SO. A depends_on item that decoded as a
 number is re-quoted: same characters, one right answer, no second source
@@ -4820,8 +4865,20 @@ Protocol inside it." (the same continuation prompt the /handoff skill
 suggests). It still requires --prompt-flag to actually reach the
 skill, and is mutually exclusive with --prompt.
 
+Every dispatch is asserted against the project's declared commit
+ownership, _apex/commit-owners.csv. A skill ABSENT from that file must
+leave HEAD, the index and the stash reflog unchanged — "git add" and
+"git stash" both leave HEAD alone, so HEAD by itself is not the check. A
+skill PRESENT in it must produce at least one commit, every one of them
+matching a message format the file declares for it. An absent CSV means
+no skill commits, and rows naming a skill ape never dispatches (the
+conducting session's own) are simply never reached. --task-commit is
+ape's own commit and is not judged against a skill's declaration.
+
 Exit codes: 0 success · 1 run failed or idle timeout · 2 usage or
-preflight error · 3 REPL never became ready (last pane on stderr).
+preflight error · 3 REPL never became ready (last pane on stderr) ·
+5 upstream API failure · 6 the dispatch violated its declared commit
+ownership (the run itself may have succeeded).
 
 Examples:
 

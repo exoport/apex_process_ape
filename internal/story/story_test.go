@@ -478,8 +478,111 @@ func TestVerifyCorpus_FindingOrderIsStable(t *testing.T) {
 
 // --- VerifyFile (D5, the retirement replacement) ---
 
+// conformingBody is a story body carrying every section the derived set
+// requires with no extensions active. The frontmatter cases below pair
+// with it so they test what they are named for — the KEY classes — and
+// do not incidentally trip the body classes that arrived with PLAN-26.
+const conformingBody = `
+# Story 1.1: A thing
+
+## Story
+
+As a user, I want a thing.
+
+## Acceptance Criteria
+
+1. It works.
+
+## Tasks / Subtasks
+
+- [ ] Task 1 (AC: 1)
+
+## Dev Notes
+
+Notes.
+
+## Dev Agent Record
+
+### Agent Model Used
+
+_(populated during dev)_
+
+### File List
+
+_(populated during dev)_
+
+### Completion Notes List
+
+_(populated during dev)_
+
+### Debug Log References
+
+_No issues encountered._
+
+## Change Log
+
+| Date | Change |
+| ---- | ------ |
+`
+
+// governanceBody adds the sections ext_adrs makes members of the set.
+const governanceBody = `
+# Story 1.1: A thing
+
+## Story
+
+As a user, I want a thing.
+
+## Acceptance Criteria
+
+1. It works.
+
+### Governance Compliance Criteria
+
+- [ ] **[ADR-0001]** Verify the thing is wired -- ` + "`internal/**`" + `
+
+## Tasks / Subtasks
+
+- [ ] Task 1 (AC: 1)
+
+## Dev Notes
+
+Notes.
+
+## Governance
+
+### ADR Compliance Table
+
+| ADR | Why it applies | Key constraints |
+| --- | -------------- | --------------- |
+
+## Dev Agent Record
+
+### Agent Model Used
+
+_(populated during dev)_
+
+### File List
+
+_(populated during dev)_
+
+### Completion Notes List
+
+_(populated during dev)_
+
+### Debug Log References
+
+_No issues encountered._
+
+## Change Log
+
+| Date | Change |
+| ---- | ------ |
+`
+
 // TestVerifyFile_ExitCodesMatchThePython is the retirement gate: 0 valid,
-// 2 parse failure, 3 key problem — verify-story-frontmatter.py's table.
+// 2 parse failure, 3 key problem — verify-story-frontmatter.py's table,
+// unchanged and unrenumbered by the body classes added beside it.
 func TestVerifyFile_ExitCodesMatchThePython(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, body string) string {
@@ -496,7 +599,7 @@ func TestVerifyFile_ExitCodesMatchThePython(t *testing.T) {
 	}{
 		{
 			name: "valid, no extensions",
-			body: "---\nstory_id: 1-1\nepic: 1\nstatus: done\noutput_document: x.md\n---\n\nx\n",
+			body: "---\nstory_id: 1-1\nepic: 1\nstatus: done\noutput_document: x.md\n---\n" + conformingBody,
 			want: FileOK,
 		},
 		{
@@ -532,7 +635,7 @@ func TestVerifyFile_ExitCodesMatchThePython(t *testing.T) {
 		},
 		{
 			name: "extension satisfied",
-			body: "---\nstory_id: 1-1\nepic: 1\nstatus: done\noutput_document: x.md\ngovernance:\n  adrs: [ADR-1]\n---\n\nx\n",
+			body: "---\nstory_id: 1-1\nepic: 1\nstatus: done\noutput_document: x.md\ngovernance:\n  adrs: [ADR-1]\n---\n" + governanceBody,
 			exts: "ext-adrs",
 			want: FileOK,
 		},
@@ -553,7 +656,7 @@ func TestVerifyFile_DoesNotAssertReferentialIntegrity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "s.md")
 	require.NoError(t, os.WriteFile(path, []byte(
 		"---\nstory_id: 1-1\nepic: 1\nstatus: done\noutput_document: x.md\n"+
-			"governance:\n  adrs: [ADR-9999]\n---\n\nx\n",
+			"governance:\n  adrs: [ADR-9999]\n---\n"+governanceBody,
 	), 0o644))
 
 	verdict := VerifyFile(path, ParseActiveExtensions("ext-adrs"))

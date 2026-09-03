@@ -10,6 +10,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/stamp"
 	"github.com/spf13/cobra"
 )
 
@@ -171,12 +172,34 @@ func resolveProjectConfig(cwdFlag string) *apexcfg.Resolved {
 		}
 		start = wd
 	}
-	res, err := apexcfg.Resolve(start, nil)
+	res, err := resolveMonotonic(start)
 	if err != nil {
 		_ = handleConfigError(err)
 		os.Exit(exitCodeConfigNotFound)
 	}
 	return res
+}
+
+// resolveMonotonic resolves the project config with ape's monotonic clock
+// rather than a bare wall-clock read.
+//
+// This is the single wiring point for the timestamp guarantee. Every
+// project-data command routes through resolveProjectConfig or
+// tryResolveProjectConfig, so the `timestamp` that `ape config resolve`
+// emits — the value skills copy into `updated_at`, `generated_at`,
+// `frozen_at` and their own report headers — is issued by
+// internal/stamp and can never move backwards. See that package for why
+// the guarantee lives in the binary rather than in ~53 copies of a
+// paragraph.
+//
+// The root is found first because the clock is per-project: the floor is
+// persisted under that project's output folder.
+func resolveMonotonic(start string) (*apexcfg.Resolved, error) {
+	root, err := apexcfg.Find(start)
+	if err != nil {
+		return nil, err
+	}
+	return apexcfg.ResolveAt(root, stamp.New(root, nil).Clock())
 }
 
 // tryResolveProjectConfig is resolveProjectConfig for callers that must
@@ -191,7 +214,7 @@ func tryResolveProjectConfig(cwdFlag string) *apexcfg.Resolved {
 		}
 		start = wd
 	}
-	res, err := apexcfg.Resolve(start, nil)
+	res, err := resolveMonotonic(start)
 	if err != nil {
 		return nil
 	}

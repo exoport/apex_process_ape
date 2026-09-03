@@ -62,6 +62,62 @@ framework's granular commits and produces exactly one whole-task
 commit. The dirty-tree gate applies only when `--task-commit` is given
 (bypass with `--commit-allow-dirty`).
 
+## The commit-ownership assertion
+
+Every dispatch is checked against the project's own declaration,
+`_apex/commit-owners.csv`:
+
+```csv
+skill,commit_kind,message_regex
+apex-story-batch-dev,dev,^dev: story \d+\.\d+ [a-z0-9 ]+$
+apex-story-batch-dev,review,^review: story \d+\.\d+ [a-z0-9 ]+$
+```
+
+Two rows for one skill is the schema's shape, not a duplicate. Each regex
+carries its own anchors **in the file** and is compiled verbatim — `ape`
+adds none — and is matched against a commit's **subject line only**.
+
+| Skill | Assertion across the dispatch |
+| ----- | ----------------------------- |
+| **absent** from the CSV | HEAD unchanged, no path staged that was not staged before, and the stash unchanged |
+| **present** in the CSV | at least one commit, and every commit in `pre..HEAD` matching one of that skill's rows |
+
+HEAD alone is not the check, and that is the point: `git add` and
+`git stash` both leave HEAD exactly where it was, and a stash silently
+destroys the caller's working tree. The committer side is a **per-commit
+predicate over the range**, not "HEAD advanced by one" — a batch dispatch
+makes a dev and a review commit per story, and all of them must match.
+
+Three things it deliberately does not do:
+
+- **An absent CSV means no skill commits.** Every dispatch takes the
+  non-committer assertion. That is a normal state, not an error. A CSV
+  that exists but does not parse fails preflight instead — degrading a
+  broken declaration to an empty one would turn every committer's
+  assertion into the non-committer's, which is exactly the inversion that
+  lets a suppressed commit through.
+- **Rows naming a skill `ape` never dispatches are tolerated.** The
+  conducting session's own rows carry `apex-orchestrator`, a persona that
+  is adopted rather than dispatched, so the assertion never reaches them.
+- **A path the caller staged before the run is the caller's.** Only paths
+  the dispatch added are reported.
+
+`--task-commit` is `ape`'s own commit, in `ape`'s own derived format, made
+after the skill is done — it is not judged against a skill's declaration,
+and the assertion is skipped when that flag is set.
+
+A violation exits **6** and prints each finding on stderr:
+
+```text
+Error: dispatch.stash_changed: the stash changed across the dispatch
+  (no stash, depth 0 → a1b2c3d4, depth 1) — a stash silently destroys the
+  caller's working tree, which is why the operating rules forbid it outright
+```
+
+In a directory that is not a git repository the assertion cannot run. It
+reports that as **skipped**, never as a pass: "we could not look" and "we
+looked and it was clean" are different answers.
+
 ## Machine-readable result
 
 ```bash
@@ -90,12 +146,23 @@ Progress streams to stderr; stdout carries only the result envelope:
   },
   "commits": ["SKILL:create-prd"],
   "manifest_path": "_output/ape/tasks/apex-create-prd/20260702-120000-abc1234/manifest.yaml",
+  "commit_contract": {
+    "skill": "apex-create-prd",
+    "declared": false
+  },
   "error": null
 }
 ```
 
 `commits` lists every commit made during the run (framework commits
-included), oldest first. Cost and usage come from the session
+included), oldest first.
+
+`commit_contract` is the per-dispatch commit-ownership verdict described
+above. It is always present, including when the assertion passed and when
+it had to be skipped — a consumer must be able to tell "asserted and
+clean" from "could not assert", and a field that appears only on failure
+cannot. `declared` says which of the two assertions ran; `violations` and
+`skipped` / `skip_reason` appear only when they apply. Cost and usage come from the session
 transcript scan — the same telemetry pipeline steps record.
 `cache_creation_input_tokens` is the total ephemeral cache-write count;
 `cache_creation_5m_input_tokens` and `cache_creation_1h_input_tokens`
@@ -118,3 +185,4 @@ newest run). Task runs appear in `ape costs` under `task:<skill>` after
 | 2    | Usage or preflight error (unknown skill/agent, bad flags).               |
 | 3    | REPL never became ready — trust-dialog dismissal failed or an unknown modal blocked; the last pane snapshot is on stderr. |
 | 5    | The session's own turn failed against the API and nothing followed — a `529`/`522`/… carried verbatim. Upstream and retryable: the skill did not misbehave, so a caller that knows its budget can decide to re-run. Reported ~3.5 min in, rather than waiting out `--idle-timeout`. |
+| 6    | The dispatch violated the project's declared commit ownership. Distinct from 1 because the skill's own work may have **succeeded**: the run finished and the repository is not in the state `_apex/commit-owners.csv` declared it would be. Only reported when nothing worse happened — a skill that crashed *and* left a stash is reported as the crash. |

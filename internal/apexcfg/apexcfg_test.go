@@ -68,10 +68,16 @@ func TestResolve_BaseOnly(t *testing.T) {
 	require.Equal(t, "20260821233045", res.Timestamp)
 }
 
-// TestResolve_AllSeventeenKeys is the completeness lock: every variable
+// TestResolve_EveryOverlayKey is the completeness lock: every variable
 // the framework's On Activation block lists must survive the round trip
 // with its configured value, not a zero one.
-func TestResolve_AllSeventeenKeys(t *testing.T) {
+//
+// The seventeen canonical variables are asserted non-empty. The two
+// declared optional ones are asserted PRESENT IN THE PAYLOAD but empty,
+// because baseConfig does not declare them and `ape` supplies no default
+// for either — the framework applies those. An empty value here is the
+// contract, not a gap: see Config's ModelProfile/EvidenceFolder comment.
+func TestResolve_EveryOverlayKey(t *testing.T) {
 	root := t.TempDir()
 	writeProject(t, root, baseConfig, "")
 
@@ -96,19 +102,69 @@ func TestResolve_AllSeventeenKeys(t *testing.T) {
 		"governance_folder":          res.GovernanceFolder,
 		"governance_staleness":       res.GovernanceStaleness,
 		"functionality_folder":       res.FunctionalityFolder,
+		"model_profile":              res.ModelProfile,
+		"evidence_folder":            res.EvidenceFolder,
 	}
-	require.Len(t, got, 17, "the framework resolves exactly seventeen variables")
+	require.Len(t, got, 19,
+		"seventeen canonical framework variables plus its two declared optional ones")
 	for _, key := range OverlayKeys() {
 		_, ok := got[key]
 		require.True(t, ok, "overlay key %q has no field in the resolved payload", key)
 	}
 	// Non-list values are all non-empty in the template except the
-	// deliberately-blank governance_repository_path.
+	// deliberately-blank governance_repository_path — and the two optional
+	// keys, which baseConfig does not declare and `ape` must not default.
 	for key, v := range got {
-		if s, isStr := v.(string); isStr && key != "governance_repository_path" {
-			require.NotEmpty(t, s, "key %q resolved empty", key)
+		s, isStr := v.(string)
+		if !isStr || key == "governance_repository_path" {
+			continue
 		}
+		if IsOptionalKey(key) {
+			require.Empty(t, s,
+				"optional key %q must resolve empty when the project does not declare it — "+
+					"the framework owns its default, and defaulting it here would make "+
+					"`ape config resolve` assert a value nobody chose", key)
+			continue
+		}
+		require.NotEmpty(t, s, "key %q resolved empty", key)
 	}
+}
+
+// TestResolve_OptionalKeysCarryDeclaredValues is the other half: when a
+// project DOES declare them, both survive the round trip verbatim. The
+// values are passed through as written — no path is derived for
+// evidence_folder, and model_profile is not validated against an enum,
+// because both vocabularies are the framework's.
+func TestResolve_OptionalKeysCarryDeclaredValues(t *testing.T) {
+	root := t.TempDir()
+	writeProject(t, root, baseConfig+
+		"model_profile: standard\n"+
+		"evidence_folder: development/governance/evidence\n", "")
+
+	res, err := Resolve(root, fixedClock)
+	require.NoError(t, err)
+
+	require.Equal(t, "standard", res.ModelProfile)
+	require.Equal(t, "development/governance/evidence", res.EvidenceFolder)
+}
+
+// TestApplyLocal_OptionalKeysOverridable is the point of the request: a
+// project can override either key in config.local.yaml. Before they
+// joined OverlayKeys the overlay loop skipped them silently, so a local
+// value was read by nothing.
+func TestApplyLocal_OptionalKeysOverridable(t *testing.T) {
+	root := t.TempDir()
+	writeProject(t, root,
+		baseConfig+"model_profile: strong\nevidence_folder: evidence\n",
+		"model_profile: standard\nevidence_folder: development/governance/evidence\n")
+
+	res, err := Resolve(root, fixedClock)
+	require.NoError(t, err)
+
+	require.Equal(t, "standard", res.ModelProfile)
+	require.Equal(t, "development/governance/evidence", res.EvidenceFolder)
+	require.Contains(t, res.OverlaidKeys, "model_profile")
+	require.Contains(t, res.OverlaidKeys, "evidence_folder")
 }
 
 // TestApplyLocal_KeyWise is the overlay's core contract: a key present

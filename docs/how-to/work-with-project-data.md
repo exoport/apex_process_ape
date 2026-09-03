@@ -18,8 +18,9 @@ ape config resolve
 ```
 
 This walks up for `_apex/config.yaml`, overlays `_apex/config.local.yaml`
-key-wise, and prints the seventeen folder/name variables, the four derived
-`ext_*` flags, and the absolute paths those folders denote.
+key-wise, and prints the seventeen folder/name variables, the framework's
+two declared **optional** variables, the four derived `ext_*` flags, the
+absolute paths those folders denote, and the run's `date` and `timestamp`.
 
 Run it first when anything below reports "no records". Before it existed,
 `ape adr list` printed `no ADR directory found (looking for
@@ -39,6 +40,45 @@ A malformed `config.local.yaml` is a hard failure on purpose. This
 resolution is the first act of every skill, so a silent fall-back to base
 values would let one typo'd override run a whole pipeline against folders
 nobody chose.
+
+### The two optional variables
+
+`model_profile` and `evidence_folder` are the framework's **declared
+optional** variables. Both can be set in `config.yaml` and overridden in
+`config.local.yaml`, and both are emitted **exactly as written**.
+
+`ape` supplies **no default for either, and derives no path from
+`evidence_folder`.** That is the contract, not a gap: each key ships with a
+documented default its framework consumers apply when the resolver omits it
+(`strong` for `model_profile`, and a three-step fallback for
+`evidence_folder`). Defaulting them here would make `ape config resolve`
+assert a value nobody chose, behind a key whose whole point is that the
+framework resolves it.
+
+A config template that never mentions them is correct rather than drifted,
+which is why they are exempt from the template-drift check that otherwise
+requires every resolved variable to be declared.
+
+### `timestamp` never moves backwards
+
+The `timestamp` this command emits — local wall-clock `YYYYMMDDHHMMSS`, the
+value skills copy into `updated_at`, `generated_at`, `frozen_at` and their
+own report headers — is issued monotonically. Every issue returns
+`max(now, last_issued)`, so a machine whose clock is behind cannot write a
+field backwards.
+
+The floor persists in `{output_folder}/ape/timestamp.state`. When that file
+is absent — a fresh clone, a cleaned `_output` — it seeds from the newest
+`updated_at` already in `sprint-status.yaml`, so a clean checkout cannot
+silently reset it. `date` derives from the same clamped instant, so a
+record can never carry a date of one day and a timestamp of the next.
+
+A skewed clock is **clamped, never fatal**: keeping the floor is a
+deterministic repair that needs no judgement, and failing instead would
+trade a corrupt field for a dead run. `ape sprint verify`'s exit-5
+backwards-write check remains the detector of last resort. If the output
+folder is unwritable the floor is simply not persisted — the command still
+resolves.
 
 ## Registries: ADRs, patterns, features, capabilities
 
@@ -120,7 +160,7 @@ document it points at.
 ```bash
 ape story fields --select story_id,epic,status,features
 ape story verify                                  # corpus report, exit 0
-ape story verify --file path/to/1-1_thing.md      # gate, exit 0/2/3
+ape story verify --file path/to/1-1_thing.md      # gate, exit 0/2/3/4
 ape story verify --fix --check                    # derivable repairs, dry
 ape story verify --fix                            # apply them
 ```
@@ -138,12 +178,74 @@ and only the trailer distinguishes them.
 `verify` has two modes with deliberately different contracts. The corpus
 mode is a **report** — exit 0 even with findings, `--strict` to make it 1.
 `--file` is a **gate**, with the exit codes its callers already branch on:
-0 valid, 2 parse failure, 3 a required or extension-conditional key absent.
+0 valid, 2 parse failure, 3 a required or extension-conditional key absent,
+4 the keys are fine and the **body** is not.
 
 > `--strict` must never be set from inside `apex-review-story`,
 > `apex-code-review` or `apex-epic-batch-review`. A non-zero exit on those
 > paths converts a defer into a patch, raises `unfixed_patches`, and demotes
 > the story.
+
+### The story-shape classes (`--file` only)
+
+Corpus mode checks frontmatter. `--file` also checks the **body**, which is
+what lets the framework delete the structural prose four skills each
+restate in their own words.
+
+| Check | What it catches |
+| ----- | --------------- |
+| `story.section_missing` | a section the derived set requires is absent |
+| `story.file_list_marker` | a File List entry with no marker, an unknown one, or the em-dash-prose form standing in for one |
+| `story.placeholder_residue` | `_(populated during dev)_` surviving at `status: review` |
+| `story.compliance_table_header` | a compliance table header that is not the declared shape |
+| `story.gcc_line_form` | a GCC line that is not `- [ ] **[ID]** {instruction} -- {scope}` |
+| `story.adrs_considered` | `adrs_applicable` not binding against the recomputed tag-match count |
+| `story.adr_unresolved` | a `governance.adrs` id resolving to no ADR at HEAD |
+| `story.adr_not_accepted` | a cited ADR that is not `accepted` — **exit 0**, reported under `flagged` |
+
+**The derived section set is a function of the resolved config alone.** No
+writer stamps a story type into frontmatter, so there is nothing else to
+read: `## Story`, `## Acceptance Criteria`, `## Tasks / Subtasks`,
+`## Dev Notes`, `## Dev Agent Record` with its four subsections and
+`## Change Log` are always members; `### Governance Compliance Criteria`
+and `## Governance` join on `ext_adrs` **or** `ext_patterns`, the two
+compliance tables on their own flags, and `## Feature Scope` on
+`ext_features` alone. `## UX Specification` is **not** a member — the
+template calls it a frontend-story section, which is exactly the
+type-dependent judgement no key records.
+
+An empty section is accepted; a missing header is not. `## Feature Scope`
+carrying `_No features apply to this story._` is "no matches", never a
+missing section.
+
+Two details that differ from the prose they replace:
+
+- **The File List marker vocabulary is all five the template declares** —
+  `(created)`, `(modified)`, `(deleted)`, `(planned)`, `(deferred)`. The
+  last two are `apex-lift-project`'s, and rejecting them would report a
+  finding on every lifted story. Backticks around the path are canonical
+  but not required by this check: a bare path is still read as an entry,
+  so the commonest defect — no marker at all — cannot slip past.
+- **`### Debug Log References` carrying `_No issues encountered._` is a
+  terminal convention, not residue.** Its writer emits it as a complete
+  answer, so it is never a finding.
+
+`story.adrs_considered` recomputes the tag-match candidate count from the
+body and binds the story's declared `governance_pass.adrs_applicable`
+against it as a **bound, never an equality**: the findings are
+`adrs_applicable > adrs_considered` and `adrs_applicable == 0` against a
+non-zero candidate set. Applicability itself is the producing agent's
+judgement, so a recomputed-applicability mismatch is deliberately not a
+finding — a deterministic CLI reproducing a judgement would fire on every
+legitimate keep-or-drop. The candidate set counts only ADRs that could
+produce a compliance criterion at all (`status: accepted`,
+`type != pattern`).
+
+The two ADR classes need the project's corpus, which `--file` finds by
+walking up from the story's own path. Against a story outside any project
+they **skip and say so** under `skipped_checks`; the mode keeps working
+there, and a governance class that says nothing when it could not run
+would read as one that passed.
 
 ### `--fix`, and the two classes it refuses
 

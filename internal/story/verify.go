@@ -388,9 +388,25 @@ type FileVerdict struct {
 	Path     string    `json:"path"     yaml:"path"`
 	Code     int       `json:"code"     yaml:"code"`
 	Findings []Finding `json:"findings" yaml:"findings"`
+	// Flagged carries findings that are REPORTED WITHOUT GATING — today,
+	// a cited ADR whose status is not `accepted`. They are kept out of
+	// Findings so the code stays 0, and emitted separately so they are
+	// not lost: a note nobody can see is a note that does not exist.
+	Flagged []Finding `json:"flagged,omitempty" yaml:"flagged,omitempty"`
+	// SkippedChecks names classes that could not run and why. A skipped
+	// class is never a pass — a caller must be able to tell "asserted and
+	// clean" from "could not assert".
+	SkippedChecks []SkippedCheck `json:"skipped_checks,omitempty" yaml:"skipped_checks,omitempty"`
 }
 
-// File verdict codes, matching the Python's documented table.
+// SkippedCheck is one class that did not run.
+type SkippedCheck struct {
+	Check  string `json:"check"  yaml:"check"`
+	Reason string `json:"reason" yaml:"reason"`
+}
+
+// File verdict codes. 0 / 2 / 3 are the Python's documented table,
+// unchanged and unrenumbered — two review skills branch on them.
 const (
 	FileOK = 0
 	// FileParseFailure — YAML malformed or the --- delimiters are missing.
@@ -398,6 +414,19 @@ const (
 	// FileKeyProblem — a required key absent, an extension-conditional key
 	// absent, or an optional key present with a malformed value.
 	FileKeyProblem = 3
+	// FileShapeProblem — the frontmatter is fine and the BODY is not: a
+	// derived section missing, a File List entry with no marker, template
+	// placeholder residue at status: review, a compliance-table header
+	// that is not the declared shape, a malformed GCC line, or a
+	// governance count that does not bind.
+	//
+	// A NEW code rather than an overload of 3. Three is documented as a
+	// key problem and the calling prose routes on that meaning; a story
+	// whose keys are all present and whose body is missing a section is a
+	// different defect with a different repair, and collapsing the two
+	// would make the code stop identifying anything. When a file has both,
+	// 3 wins — the keys are the more fundamental failure.
+	FileShapeProblem = 4
 )
 
 // VerifyFile checks one story file against the active extensions. ext is
@@ -431,19 +460,102 @@ func VerifyFile(path string, ext apexcfg.Ext) FileVerdict {
 	}
 	verdict := FileVerdict{Path: rel, Code: FileOK}
 	for _, f := range checkStory(h, ext, nil) {
-		// Referential integrity needs the corpus, so the per-file gate
-		// cannot assert it — exactly as the Python could not. Only the
-		// key-shape classes decide this verdict.
+		// Referential integrity across the four families needs the corpus,
+		// so the per-file gate cannot assert it — exactly as the Python
+		// could not. (The ADR family alone IS asserted below, by walking
+		// up to the project; that is 13.3b's ask and it degrades to a
+		// skip when no project is found.) Only the key-shape classes
+		// decide the FileKeyProblem verdict.
 		if f.Check == CheckUnresolvedRef {
 			continue
 		}
 		verdict.Findings = append(verdict.Findings, f)
 	}
 	if len(verdict.Findings) > 0 {
+		// 3 wins over 4 when a file has both: the keys are the more
+		// fundamental failure, and the calling prose routes on 3.
 		verdict.Code = FileKeyProblem
+		sortFindings(verdict.Findings)
+		return verdict
+	}
+
+	shape := verifyShape(path, rel, ext)
+	verdict.Findings = append(verdict.Findings, shape.Findings...)
+	verdict.Flagged = shape.Flagged
+	verdict.SkippedChecks = shape.SkippedChecks
+	if len(verdict.Findings) > 0 {
+		verdict.Code = FileShapeProblem
 	}
 	sortFindings(verdict.Findings)
+	sortFindings(verdict.Flagged)
 	return verdict
+}
+
+// verifyShape runs the body classes over one story.
+//
+// Split out so the frontmatter gate above stays readable, and so the
+// order is explicit: the body is only read once the keys are known good,
+// which keeps a story with malformed frontmatter from producing a second
+// wave of confusing structural findings about a document that has a
+// more basic problem.
+func verifyShape(path, rel string, ext apexcfg.Ext) FileVerdict {
+	out := FileVerdict{Path: rel}
+	body := ReadBody(path)
+	if body.Err != nil {
+		// The head parsed a moment ago, so this is an I/O race or a file
+		// that shrank underneath us. Reported as a skip rather than
+		// invented findings.
+		out.SkippedChecks = append(out.SkippedChecks, SkippedCheck{
+			Check:  "story.shape",
+			Reason: body.Err.Error(),
+		})
+		return out
+	}
+	id := ""
+	if v, ok := body.Raw[IDKey]; ok && v != nil {
+		id = fmt.Sprintf("%v", v)
+	}
+
+	out.Findings = append(out.Findings, CheckSections(body, ext, id)...)
+	out.Findings = append(out.Findings, CheckFileList(body, id)...)
+	out.Findings = append(out.Findings, CheckPlaceholders(body, id)...)
+	out.Findings = append(out.Findings, CheckComplianceTables(body, ext, id)...)
+	out.Findings = append(out.Findings, CheckGCCLines(body, id)...)
+
+	if !ext.ADRs {
+		return out
+	}
+	corpus := ResolveGovernanceCorpus(path)
+	if !corpus.Resolved {
+		// The mode is required to keep working against a story outside
+		// any project, so this is a skip and not a failure — and it is
+		// REPORTED, because a governance class that says nothing when it
+		// could not run reads as a governance class that passed.
+		out.SkippedChecks = append(
+			out.SkippedChecks,
+			SkippedCheck{
+				Check:  CheckADRsConsidered,
+				Reason: "no project ADR corpus resolved from the story's path",
+			},
+			SkippedCheck{
+				Check:  CheckADRUnresolved,
+				Reason: "no project ADR corpus resolved from the story's path",
+			},
+		)
+		return out
+	}
+	out.Findings = append(out.Findings, CheckGovernanceCounts(body, corpus.ADRs, id)...)
+	for _, f := range CheckADRRefs(body, corpus.ADRs, id) {
+		if f.Check == CheckADRNotAccepted {
+			// Reported, never gated: a story may legitimately cite a
+			// proposed ADR, and stopping the run over it would turn a
+			// note into a halt.
+			out.Flagged = append(out.Flagged, f)
+			continue
+		}
+		out.Findings = append(out.Findings, f)
+	}
+	return out
 }
 
 // ParseActiveExtensions reads the comma-separated form the Python's

@@ -249,6 +249,16 @@ board: starting one, and initialising one, are yours to do.`,
 				}
 			}
 			if timestamp == "" {
+				// No config resolved, so there is no project root to hold
+				// a monotonic floor and nowhere to persist one — writing
+				// a state file next to a bare `--file` tracker would put
+				// ape's state outside any output folder. The wall clock
+				// is what this path has always used.
+				//
+				// The tracker is still protected: Reconcile clamps
+				// updated_at itself and never moves it backwards. Where a
+				// config DOES resolve, cfg.Timestamp above is issued by
+				// internal/stamp and is monotonic across processes.
 				timestamp = time.Now().Format(apexcfg.TimestampLayout)
 			}
 			if path == "" {

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/apexcfg"
+	"github.com/exoport/apex_process_ape/internal/commitowners"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/repl"
@@ -22,7 +24,8 @@ import (
 )
 
 // `ape task` uses the shared exit-code table in exitcodes.go
-// (ExitOK / ExitRunFailed / ExitUsage / ExitREPLNotReady / ExitUpstreamAPI).
+// (ExitOK / ExitRunFailed / ExitUsage / ExitREPLNotReady / ExitUpstreamAPI
+// / ExitCommitContract).
 
 // taskCommitDerivedSentinel is the NoOptDefVal for a bare
 // `--task-commit` (no message). Contains a control byte so it cannot
@@ -81,8 +84,20 @@ Protocol inside it." (the same continuation prompt the /handoff skill
 suggests). It still requires --prompt-flag to actually reach the
 skill, and is mutually exclusive with --prompt.
 
+Every dispatch is asserted against the project's declared commit
+ownership, _apex/commit-owners.csv. A skill ABSENT from that file must
+leave HEAD, the index and the stash reflog unchanged — "git add" and
+"git stash" both leave HEAD alone, so HEAD by itself is not the check. A
+skill PRESENT in it must produce at least one commit, every one of them
+matching a message format the file declares for it. An absent CSV means
+no skill commits, and rows naming a skill ape never dispatches (the
+conducting session's own) are simply never reached. --task-commit is
+ape's own commit and is not judged against a skill's declaration.
+
 Exit codes: 0 success · 1 run failed or idle timeout · 2 usage or
-preflight error · 3 REPL never became ready (last pane on stderr).`,
+preflight error · 3 REPL never became ready (last pane on stderr) ·
+5 upstream API failure · 6 the dispatch violated its declared commit
+ownership (the run itself may have succeeded).`,
 		Example: `  ape task apex-shard-doc --args "--doc prd"
   ape task apex-create-prd --agent apex-agent-pm --model "opus[1m]" --prompt "a greeter CLI" --prompt-flag --prompt
   ape task apex-create-prd --agent apex-agent-pm --handoff _output/handoffs/2026-07-05-x.md --prompt-flag --prompt
@@ -303,7 +318,12 @@ type taskEnvelope struct {
 	Commits         []string                  `json:"commits"`
 	ManifestPath    string                    `json:"manifest_path,omitempty"`
 	TelemetryNote   string                    `json:"telemetry_note,omitempty"`
-	Error           *string                   `json:"error"`
+	// CommitContract is the per-dispatch commit-ownership verdict. Always
+	// emitted, including when it passed and when it had to be skipped:
+	// a consumer must be able to tell "asserted and clean" from "could
+	// not assert", and a field that appears only on failure cannot.
+	CommitContract *commitowners.Result `json:"commit_contract,omitempty"`
+	Error          *string              `json:"error"`
 }
 
 // taskExitCode maps a run error onto the PLAN-11 exit-code table.
@@ -331,7 +351,19 @@ func runTask(ctx context.Context, o taskOptions) error {
 		manifestDir = runlog.TasksRoot(o.projectRoot)
 	}
 
-	headBefore := gitHeadFull(ctx, o.projectRoot)
+	// The commit-ownership declaration is loaded BEFORE the dispatch, so a
+	// malformed CSV is a preflight failure rather than a verdict delivered
+	// after an hour of model time. A missing file is not an error — it
+	// means no skill commits, and every dispatch takes the non-committer
+	// assertion.
+	owners, ownersErr := commitowners.Load(filepath.Join(o.projectRoot, apexcfg.DirName))
+	if ownersErr != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", ownersErr)
+		os.Exit(ExitUsage)
+	}
+
+	stateBefore := commitowners.Capture(ctx, o.projectRoot)
+	headBefore := stateBefore.Head
 
 	cfg := runConfig{
 		prompt:                o.prompt,
@@ -358,15 +390,39 @@ func runTask(ctx context.Context, o taskOptions) error {
 	runErr := runWithInteractive(ctx, spec, o.projectRoot, cfg)
 	duration := time.Since(start)
 
+	subjects := gitCommitSubjectsSince(ctx, o.projectRoot, headBefore)
+
+	// The two per-dispatch assertions. They run whether or not the skill
+	// itself succeeded: a run that failed halfway can still have left a
+	// commit, a staged index or a stash behind, and that is precisely the
+	// state the caller needs told about.
+	//
+	// `--task-commit` is ape's own commit, in ape's own derived format,
+	// made after the skill is done. Judging it against the skill's
+	// declaration would fail every task that used the flag, so the
+	// assertion is skipped when ape is the one committing.
+	var contract commitowners.Result
+	if o.taskCommit == nil {
+		contract = owners.Assert(o.skill, stateBefore,
+			commitowners.Capture(ctx, o.projectRoot), subjects)
+	}
+
 	exitCode := taskExitCode(runErr)
+	if exitCode == ExitOK && !contract.OK() {
+		// Only promoted to the verdict when nothing worse happened: a
+		// skill that crashed AND left a stash is reported as the crash,
+		// because that is the thing to fix first.
+		exitCode = ExitCommitContract
+	}
 	env := taskEnvelope{
 		Skill:           o.skill,
 		Agent:           o.agent,
 		Model:           o.model,
-		Success:         runErr == nil,
+		Success:         runErr == nil && contract.OK(),
 		ExitCode:        exitCode,
 		DurationSeconds: duration.Seconds(),
-		Commits:         gitCommitSubjectsSince(ctx, o.projectRoot, headBefore),
+		Commits:         subjects,
+		CommitContract:  &contract,
 	}
 	if runErr != nil {
 		msg := runErr.Error()
@@ -384,10 +440,18 @@ func runTask(ctx context.Context, o taskOptions) error {
 		printTaskSummary(env, runErr)
 	}
 	if exitCode != ExitOK {
-		// exitCode != 0 implies runErr != nil (see taskExitCode). A
-		// NotReadyError's text carries the last pane snapshot, so an
+		// A NotReadyError's text carries the last pane snapshot, so an
 		// unknown blocking modal is diagnosable straight from stderr.
-		fmt.Fprintf(os.Stderr, "Error: %s\n", runErr.Error())
+		//
+		// runErr may be nil here: ExitCommitContract is reached by a run
+		// that SUCCEEDED and then failed its declaration, and the
+		// violations are the whole diagnosis in that case.
+		if runErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", runErr.Error())
+		}
+		for _, v := range contract.Violations {
+			fmt.Fprintf(os.Stderr, "Error: %s: %s\n", v.Check, v.Message)
+		}
 		os.Exit(exitCode)
 	}
 	return nil
@@ -482,6 +546,32 @@ func printTaskSummary(env taskEnvelope, runErr error) {
 			fmt.Fprintf(os.Stdout, "   %s\n", c)
 		}
 	}
+	printCommitContract(env.CommitContract)
+}
+
+// printCommitContract reports the per-dispatch assertion. A skipped
+// assertion is announced rather than passed over in silence — "we could
+// not look" and "we looked and it was clean" are different answers, and
+// a check that says nothing when it could not run reads as a pass.
+func printCommitContract(res *commitowners.Result) {
+	switch {
+	case res == nil:
+		return
+	case res.Skipped:
+		fmt.Fprintf(os.Stdout, "⚠️  commit contract not asserted: %s\n", res.SkipReason)
+	case !res.OK():
+		fmt.Fprintf(os.Stdout, "❌ commit contract violated (%s):\n", contractRole(*res))
+		for _, v := range res.Violations {
+			fmt.Fprintf(os.Stdout, "   %s: %s\n", v.Check, v.Message)
+		}
+	}
+}
+
+func contractRole(res commitowners.Result) string {
+	if res.Declared {
+		return "declared committer"
+	}
+	return "non-committer"
 }
 
 // gitHeadFull returns the full HEAD SHA of projectRoot, or "" when
@@ -500,12 +590,23 @@ func gitHeadFull(ctx context.Context, projectRoot string) string {
 // gitCommitSubjectsSince returns the subjects of commits made after
 // `before` (oldest first) — the run's complete commit trail, framework
 // commits included, not just ape's boundary commit. Best-effort.
+//
+// An empty `before` means the repository had no commits when the run
+// started, so every commit reachable from HEAD was made BY the run. That
+// case has to list them rather than return nothing: the commit-ownership
+// assertion reads this list, and reporting an empty trail there would
+// accuse a declared committer of suppressing the very commit it just
+// made. A repo that still has no commits has no HEAD, the log fails, and
+// the empty result is then correct.
 func gitCommitSubjectsSince(ctx context.Context, projectRoot, before string) []string {
+	revRange := before + "..HEAD"
 	if before == "" {
-		return []string{}
+		revRange = "HEAD"
 	}
 	var stdout bytes.Buffer
-	cmd := exec.CommandContext(ctx, "git", "log", "--reverse", "--format=%s", before+"..HEAD") //nolint:gosec // `before` is a SHA captured from rev-parse at run start, not user input
+	// revRange is built from a SHA captured by rev-parse at run start, or
+	// the literal "HEAD" — never from user input.
+	cmd := exec.CommandContext(ctx, "git", "log", "--reverse", "--format=%s", revRange)
 	cmd.Dir = projectRoot
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {

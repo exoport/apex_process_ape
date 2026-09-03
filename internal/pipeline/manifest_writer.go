@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/stamp"
 	"gopkg.in/yaml.v3"
 )
 
@@ -72,7 +73,14 @@ func newManifestWriter(
 			ProjectRoot: projectRoot,
 			RunID:       runID,
 			StartedAt:   startedAt.UTC(),
-			Status:      StatusRunning,
+			// The framework's `timestamp` for this dispatch, issued
+			// monotonically. Recorded here rather than derived from
+			// StartedAt by a consumer, because the whole point is that it
+			// is NOT a formatting of the wall clock: a run on a machine
+			// whose clock is behind gets the project's floor, and that is
+			// the value the record fields must carry.
+			Timestamp: stamp.New(projectRoot, nil).Issue(),
+			Status:    StatusRunning,
 		},
 	}
 	if err := w.persist(); err != nil {

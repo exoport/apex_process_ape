@@ -25,21 +25,78 @@ func writeStory(t *testing.T, root, name, body string) string {
 	return path
 }
 
+// storyFrontmatter is a story that passes every class with ext_adrs and
+// ext_patterns active — which since PLAN-26 means it must carry the
+// derived section set in its BODY too, not only its keys.
+//
+// governance.adrs is empty on purpose: an id here would have to resolve
+// against the project's real ADR corpus (story.adr_unresolved), and
+// these cases are about the frontmatter gate rather than the governance
+// one. The tests that exercise citation resolution seed a corpus.
 const storyFrontmatter = `---
 story_id: 1-1
 epic: 1
 status: done
 output_document: development/implementation/1-1_thing.md
 governance:
-  adrs:
-    - ADR-0001
-  patterns:
-    - PAT-0001
+  adrs: []
+  patterns: []
 ---
+
+# Story 1.1: A thing
 
 ## Story
 
-body
+As a user, I want a thing.
+
+## Acceptance Criteria
+
+1. It works.
+
+### Governance Compliance Criteria
+
+## Tasks / Subtasks
+
+- [ ] Task 1 (AC: 1)
+
+## Dev Notes
+
+Notes.
+
+## Governance
+
+### ADR Compliance Table
+
+| ADR | Why it applies | Key constraints |
+| --- | -------------- | --------------- |
+
+### Pattern Compliance Table
+
+| Pattern | Why it applies | Key constraints |
+| ------- | -------------- | --------------- |
+
+## Dev Agent Record
+
+### Agent Model Used
+
+_(populated during dev)_
+
+### File List
+
+_(populated during dev)_
+
+### Completion Notes List
+
+_(populated during dev)_
+
+### Debug Log References
+
+_No issues encountered._
+
+## Change Log
+
+| Date | Change |
+| ---- | ------ |
 `
 
 // --- story fields ---

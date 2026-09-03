@@ -90,16 +90,25 @@ type Manifest struct {
 	// auto-updates silently and its trust-dialog / transcript behavior
 	// shifts across versions — telemetry and repro must be
 	// attributable to the exact version that ran.
-	ClaudeVersion string         `yaml:"claude_version,omitempty"`
-	Pipeline      Ref            `yaml:"pipeline"`
-	ProjectRoot   string         `yaml:"project_root"`
-	RunID         string         `yaml:"run_id"`
-	StartedAt     time.Time      `yaml:"started_at"`
-	EndedAt       time.Time      `yaml:"ended_at,omitempty"`
-	DurationSecs  float64        `yaml:"duration_seconds"`
-	Status        RunStatus      `yaml:"status"`
-	Totals        ManifestTotals `yaml:"totals"`
-	Stages        []StageRecord  `yaml:"stages"`
+	ClaudeVersion string    `yaml:"claude_version,omitempty"`
+	Pipeline      Ref       `yaml:"pipeline"`
+	ProjectRoot   string    `yaml:"project_root"`
+	RunID         string    `yaml:"run_id"`
+	StartedAt     time.Time `yaml:"started_at"`
+	// Timestamp is the framework's `timestamp` variable for this run —
+	// local wall-clock `YYYYMMDDHHMMSS`, issued by internal/stamp and
+	// therefore monotonic across processes.
+	//
+	// It is not a redundant StartedAt. StartedAt is an RFC-3339 instant
+	// for telemetry and may move backwards on a skewed clock; this is the
+	// value the framework's record fields are written from, and it never
+	// does. Empty when the run had no project to issue against.
+	Timestamp    string         `yaml:"timestamp,omitempty"`
+	EndedAt      time.Time      `yaml:"ended_at,omitempty"`
+	DurationSecs float64        `yaml:"duration_seconds"`
+	Status       RunStatus      `yaml:"status"`
+	Totals       ManifestTotals `yaml:"totals"`
+	Stages       []StageRecord  `yaml:"stages"`
 
 	// TranscriptBlobs maps each uploaded transcript's file base name to its
 	// content-addressed reference (PLAN-13 D3). Empty/absent when transcript

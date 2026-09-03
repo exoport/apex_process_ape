@@ -50,6 +50,7 @@ pipeline:
 project_root: /home/foo/myproject
 run_id: 20260511-094530-a0d06c8
 started_at: 2026-05-11T09:45:30Z
+timestamp: "20260511094530"   # the framework's `timestamp` for this run (additive)
 ended_at: 2026-05-11T10:38:12Z
 duration_seconds: 3162.4
 status: completed             # running | completed | failed | cancelled
@@ -219,9 +220,22 @@ Two limits on the denominator:
 
 The same verdict is also written to the run's `checkpoints.jsonl` as a `contract` row carrying the skill, the status and the diagnostic text.
 
+### `timestamp` is not a second `started_at`
+
+`started_at` is an RFC-3339 UTC instant for telemetry, read straight from
+the wall clock. `timestamp` is the framework's own variable — local
+wall-clock `YYYYMMDDHHMMSS` — and it is **issued monotonically**: every
+issue returns the later of the wall clock and the project's persisted
+floor, so a machine whose clock is behind cannot stamp a record backwards.
+The two can therefore disagree, and when they do the disagreement is the
+point. Empty when the run had no project to issue against.
+
+See [work with project data](../how-to/work-with-project-data.md) for the
+floor's persistence and its fresh-clone seed.
+
 ### Forward compatibility
 
-Future ape releases may add fields. Consumers should treat unknown fields as opaque and reject only manifests whose `schema_version` is higher than the version they recognize.
+Future ape releases may add fields. Consumers should treat unknown fields as opaque and reject only manifests whose `schema_version` is higher than the version they recognize. `timestamp` was added this way — additive under `schema_version: 2`, absent from older manifests.
 
 ## Commits during a run
 

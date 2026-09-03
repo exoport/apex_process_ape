@@ -166,14 +166,43 @@ func requireSameConfigKeys(t *testing.T, templatePath string) {
 	require.NoError(t, err)
 
 	inTemplate := topLevelYAMLKeys(t, data)
-	resolved := append([]string(nil), apexcfg.OverlayKeys()...)
-	sort.Strings(inTemplate)
-	sort.Strings(resolved)
-	require.Equal(t, inTemplate, resolved,
-		"%s and apexcfg.OverlayKeys have drifted: every variable in the framework's config "+
-			"template must be one ape resolves, and vice versa — an unresolved folder variable "+
-			"reads as empty, and an empty folder variable sends a writer to the wrong directory",
-		templatePath)
+	resolves := map[string]bool{}
+	for _, key := range apexcfg.OverlayKeys() {
+		resolves[key] = true
+	}
+
+	// Direction 1, unchanged in force: a template variable ape does not
+	// resolve reads as empty, and an empty folder variable sends a writer
+	// to the wrong directory.
+	for _, key := range inTemplate {
+		require.True(t, resolves[key],
+			"%s declares %q but apexcfg.OverlayKeys does not resolve it — an unresolved "+
+				"folder variable reads as empty, and an empty folder variable sends a "+
+				"writer to the wrong directory", templatePath, key)
+	}
+
+	// Direction 2, relaxed for the framework's DECLARED OPTIONAL variables
+	// only. Each of those ships with a documented default its consumers
+	// apply when the resolver omits the key, so a template that never
+	// mentions one is correct rather than drifted — which is exactly the
+	// state `model_profile` and `evidence_folder` are in until the
+	// framework adds them to its own template. Every other key ape
+	// resolves must still be declared, or the two lists have drifted.
+	declared := map[string]bool{}
+	for _, key := range inTemplate {
+		declared[key] = true
+	}
+	var missing []string
+	for _, key := range apexcfg.OverlayKeys() {
+		if declared[key] || apexcfg.IsOptionalKey(key) {
+			continue
+		}
+		missing = append(missing, key)
+	}
+	sort.Strings(missing)
+	require.Empty(t, missing,
+		"apexcfg.OverlayKeys resolves these mandatory variables that %s does not declare: %v",
+		templatePath, missing)
 }
 
 func topLevelYAMLKeys(t *testing.T, data []byte) []string {

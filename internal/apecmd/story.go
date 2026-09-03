@@ -138,7 +138,7 @@ func newStoryVerifyCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "verify",
-		Short: "Verify story frontmatter (corpus report, or a single-file gate)",
+		Short: "Verify story frontmatter and shape (corpus report, or a single-file gate)",
 		Long: `Three check classes over story frontmatter, and no others:
 
   1. presence  the four required keys, plus the extension-gated ones
@@ -154,13 +154,53 @@ contribution field has no normative source, so coercing it would fabricate
 a lifecycle edge — a test asserts this command reports nothing for any
 value of it.
 
+--file mode adds the STORY-SHAPE classes over the body:
+
+  story.section_missing           a section the derived set requires is
+                                  absent. The set is a function of the
+                                  resolved config alone (## Feature Scope
+                                  on ext_features, the two governance
+                                  headers on ext_adrs / ext_patterns); an
+                                  empty section is accepted, a missing
+                                  header is not
+  story.file_list_marker          a File List entry with no status marker,
+                                  an unknown one, or the forbidden
+                                  em-dash-prose form in place of one
+  story.placeholder_residue       a template placeholder surviving at
+                                  status: review. Debug Log References'
+                                  "_No issues encountered._" is a terminal
+                                  convention, never residue
+  story.compliance_table_header   a compliance table whose header row is
+                                  not the declared shape
+  story.gcc_line_form             a Governance Compliance Criteria line
+                                  that is not
+                                  "- [ ] **[ID]** {instruction} -- {scope}"
+  story.adrs_considered           adrs_applicable does not bind against
+                                  the recomputed tag-match candidate count
+  story.adr_unresolved            a governance.adrs id that resolves to no
+                                  ADR at HEAD
+
+And one class that is REPORTED WITHOUT GATING:
+
+  story.adr_not_accepted          a cited ADR that resolves but is not
+                                  accepted. Exit 0 — a story may
+                                  legitimately cite a proposed ADR
+
+The two governance classes need the project's ADR corpus, which is found
+by walking up from the story's own path. Against a story outside any
+project they SKIP and say so; they never silently pass.
+
 TWO MODES, with deliberately different contracts:
 
-  corpus (default)  a REPORT. Exit 0 even with findings; --strict makes it
-                    1. --strict must never be set from inside
-                    apex-review-story, apex-code-review or
+  corpus (default)  a REPORT, over frontmatter only. Exit 0 even with
+                    findings; --strict makes it 1. --strict must never be
+                    set from inside apex-review-story, apex-code-review or
                     apex-epic-batch-review: a non-zero exit on those paths
                     converts a defer into a patch and demotes the story.
+                    The shape classes are deliberately NOT run here: the
+                    corpus scan reads at most 8 KiB per file and never
+                    opens a body, which is what keeps a 465-story sweep at
+                    67 KB instead of 23.5 MB.
 
   --file <path>     a GATE, replacing verify-story-frontmatter.py with its
                     exit codes intact:
@@ -168,9 +208,14 @@ TWO MODES, with deliberately different contracts:
                       2  parse failure (bad YAML, or no --- delimiters)
                       3  a required or extension-conditional key is absent,
                          or an optional key is present but malformed
-                    Referential integrity is not asserted here — a single
-                    file cannot see the corpus, exactly as the Python
-                    could not.
+                      4  the keys are fine and the BODY is not — one of the
+                         story-shape classes above
+                    3 wins over 4 when a file has both; the keys are the
+                    more fundamental failure. Referential integrity across
+                    the four families is not asserted here — a single file
+                    cannot see the corpus, exactly as the Python could
+                    not — though the ADR family alone is, by the walk
+                    described above.
 
 --fix REPAIRS ONE CLASS AND SAYS SO. A depends_on item that decoded as a
 number is re-quoted: same characters, one right answer, no second source
@@ -297,13 +342,24 @@ func runStoryVerifyFile(cmd *cobra.Command, path, activeExts, outputFormat strin
 		if err := output.Print(cmd.OutOrStdout(), format, verdict); err != nil {
 			return err
 		}
+		return gateErr(verdict.Code, nil)
 	case verdict.Code == story.FileOK:
-		fmt.Fprintf(cmd.OutOrStdout(), "OK: %s frontmatter is valid\n", path)
+		fmt.Fprintf(cmd.OutOrStdout(), "OK: %s is valid\n", path)
 	default:
 		fmt.Fprintf(cmd.ErrOrStderr(), "FAIL: %s\n", path)
 		for _, f := range verdict.Findings {
 			fmt.Fprintf(cmd.ErrOrStderr(), "  %s %s: %s\n", f.Check, f.Field, f.Message)
 		}
+	}
+	// Flagged findings and skipped classes are emitted whatever the
+	// verdict, and on stdout: they do not change the exit code, and a
+	// note routed to a stream nobody reads on success is a note that
+	// does not exist.
+	for _, f := range verdict.Flagged {
+		fmt.Fprintf(cmd.OutOrStdout(), "  flagged %s %s: %s\n", f.Check, f.Field, f.Message)
+	}
+	for _, s := range verdict.SkippedChecks {
+		fmt.Fprintf(cmd.OutOrStdout(), "  skipped %s: %s\n", s.Check, s.Reason)
 	}
 	return gateErr(verdict.Code, nil)
 }

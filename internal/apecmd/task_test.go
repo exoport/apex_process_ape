@@ -150,7 +150,32 @@ func TestGitCommitSubjectsSince(t *testing.T) {
 	subjects := gitCommitSubjectsSince(ctx, dir, before)
 	require.Equal(t, []string{"SKILL:create-prd", "ape:task/apex-shard-doc"}, subjects)
 
-	// Empty `before` (no repo at run start) degrades to empty, not error.
+	// Empty `before` means the repository had NO COMMITS when the run
+	// started, so every commit reachable from HEAD was made by the run.
+	//
+	// This used to return an empty list. That was wrong in a way only the
+	// commit-ownership assertion exposed: it reads this list, so a
+	// declared committer working in a fresh repo was accused of
+	// suppressing the very commit it had just made.
+	require.Equal(t,
+		[]string{"base", "SKILL:create-prd", "ape:task/apex-shard-doc"},
+		gitCommitSubjectsSince(ctx, dir, ""),
+		"with no HEAD at run start, the whole history is the run's work")
+}
+
+// TestGitCommitSubjectsSince_NoHeadAtAll is the other half: a repository
+// that still has no commits has no HEAD, the log fails, and an empty
+// result is then the correct answer rather than a wrong one.
+func TestGitCommitSubjectsSince_NoHeadAtAll(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	dir := t.TempDir()
+	ctx := context.Background()
+	cmd := exec.CommandContext(ctx, "git", "init")
+	cmd.Dir = dir
+	require.NoError(t, cmd.Run())
+
 	require.Empty(t, gitCommitSubjectsSince(ctx, dir, ""))
 }
 
