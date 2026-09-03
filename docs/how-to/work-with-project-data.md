@@ -218,6 +218,18 @@ An empty section is accepted; a missing header is not. `## Feature Scope`
 carrying `_No features apply to this story._` is "no matches", never a
 missing section.
 
+**Fenced code blocks are skipped by every one of these classes.** A fenced
+block is an example of a shape, not an instance of it — and the story
+template puts its own canonical File List entry inside a ```` ```markdown ````
+fence, which is copied verbatim into every minted story. Read as an entry,
+that example reports its literal `(marker)` as an unknown marker. The same
+trap applies to every other class: a fenced `## Story` in Dev Notes must not
+satisfy the derived section set, and a fenced GCC line must not be checked
+for its separator. Tag matching for `story.adrs_considered` is the one thing
+that still reads the fences, because a tag mentioned in an example is still
+the story talking about that subject, and step 1 of the digest algorithm is
+instructed to be inclusive.
+
 Two details that differ from the prose they replace:
 
 - **The File List marker vocabulary is all five the template declares** —

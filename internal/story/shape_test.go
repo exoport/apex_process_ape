@@ -338,3 +338,120 @@ func TestCheckFileList_PlaceholderIsNotAnEntry(t *testing.T) {
 	path := writeStory(t, dir, "1-1.md", head("ready-for-dev")+conformingBody)
 	require.Equal(t, FileOK, VerifyFile(path, apexcfg.Ext{}).Code)
 }
+
+// --- fenced code blocks are examples, not content ----------------------
+
+// templateFileListFence is the story template's own "Canonical entry
+// shape" block, verbatim. It is written into every minted story and
+// `apex-dev-story` often leaves it in place, so reading it as an entry
+// reported `(marker)` as an unknown marker on 51 of 60 fixture stories,
+// 140 of one real project's 483 and 2 of another's 296.
+const templateFileListFence = "\n" +
+	"**Status-marker vocabulary** — every populated entry MUST carry exactly one marker.\n" +
+	"\n" +
+	"| Marker       | Meaning                     |\n" +
+	"| ------------ | --------------------------- |\n" +
+	"| `(created)`  | Newly created in this story |\n" +
+	"\n" +
+	"Canonical entry shape:\n" +
+	"\n" +
+	"```markdown\n" +
+	"- `path/to/file.ext` (marker) — short note\n" +
+	"```\n" +
+	"\n" +
+	"- `internal/x/thing.go` (created) — the real entry\n"
+
+func TestStripFences_TemplateFileListExampleIsNotAnEntry(t *testing.T) {
+	dir := t.TempDir()
+	body := strings.Replace(conformingBody,
+		"### File List\n\n_(populated during dev)_\n",
+		"### File List\n"+templateFileListFence, 1)
+	path := writeStory(t, dir, "1-1.md", head("done")+body)
+
+	verdict := VerifyFile(path, apexcfg.Ext{})
+	require.Equal(t, FileOK, verdict.Code,
+		"the template's own example must not be reported against the story: %+v",
+		verdict.Findings)
+}
+
+// TestStripFences_EveryStructuralClass — a fenced example of ANY body
+// shape can appear in Dev Notes, so the strip is not File-List-specific.
+func TestStripFences_EveryStructuralClass(t *testing.T) {
+	dir := t.TempDir()
+	fenced := "\n```markdown\n" +
+		"## Story\n" +
+		"### Governance Compliance Criteria\n" +
+		"- [ ] **[PATCAN-0001]** a bad id — with an em-dash separator\n" +
+		"| ADR | Title | Notes |\n" +
+		"- bare/path/with/no/marker.go\n" +
+		Placeholder + "\n" +
+		"```\n"
+	// status: review with the real placeholders filled in, so the only
+	// candidate for a placeholder finding is the FENCED one.
+	body := conformingBody
+	for _, section := range []string{
+		"### Agent Model Used\n\n_(populated during dev)_\n",
+		"### File List\n\n_(populated during dev)_\n",
+		"### Completion Notes List\n\n_(populated during dev)_\n",
+	} {
+		body = strings.Replace(body, section,
+			strings.Replace(section, Placeholder, "filled in", 1), 1)
+	}
+	body = strings.Replace(body, "Notes.\n", "Notes.\n"+fenced, 1)
+	path := writeStory(t, dir, "1-1.md", head("review")+body)
+
+	verdict := VerifyFile(path, apexcfg.Ext{})
+	require.Equal(t, FileOK, verdict.Code,
+		"no structural class may fire on a fenced example: %+v", verdict.Findings)
+}
+
+// TestStripFences_ARealDefectOutsideAFenceStillFires is the other half:
+// the strip must not become a way to hide findings.
+func TestStripFences_ARealDefectOutsideAFenceStillFires(t *testing.T) {
+	dir := t.TempDir()
+	body := strings.Replace(conformingBody,
+		"### File List\n\n_(populated during dev)_\n",
+		"### File List\n"+templateFileListFence+"- bad/entry.go\n", 1)
+	path := writeStory(t, dir, "1-1.md", head("done")+body)
+
+	verdict := VerifyFile(path, apexcfg.Ext{})
+	require.Equal(t, FileShapeProblem, verdict.Code)
+	require.Len(t, verdict.Findings, 1, "only the unfenced entry: %+v", verdict.Findings)
+	require.Equal(t, "bad/entry.go", verdict.Findings[0].Field)
+}
+
+// TestStripFences_AFencedHeadingDoesNotSatisfyTheSectionSet — a fenced
+// `## Change Log` is an example of one, not the story's own.
+func TestStripFences_AFencedHeadingDoesNotSatisfyTheSectionSet(t *testing.T) {
+	dir := t.TempDir()
+	body := strings.Replace(conformingBody,
+		"## Change Log\n\n| Date | Change |\n| ---- | ------ |\n",
+		"```markdown\n## Change Log\n```\n", 1)
+	path := writeStory(t, dir, "1-1.md", head("done")+body)
+
+	verdict := VerifyFile(path, apexcfg.Ext{})
+	require.Equal(t, FileShapeProblem, verdict.Code)
+	require.Equal(t, CheckSectionMissing, verdict.Findings[0].Check)
+	require.Equal(t, SecChangeLog, verdict.Findings[0].Field)
+}
+
+func TestStripFences_Mechanics(t *testing.T) {
+	for name, tc := range map[string]struct{ in, want string }{
+		"tilde fence":                  {"a\n~~~\nhidden\n~~~\nb", "a\nb"},
+		"info string":                  {"a\n```go\nhidden\n```\nb", "a\nb"},
+		"indented up to three":         {"a\n   ```\nhidden\n   ```\nb", "a\nb"},
+		"indented four is not a fence": {"a\n    ```\nb", "a\n    ```\nb"},
+		"longer inner run stays open": {
+			"a\n````\n```\nstill hidden\n````\nb", "a\nb",
+		},
+		"tilde does not close a backtick fence": {
+			"a\n```\nhidden\n~~~\nalso hidden\n```\nb", "a\nb",
+		},
+		"unclosed fence runs to the end": {"a\n```\nhidden", "a"},
+		"inline code is not a fence":     {"a `x` b", "a `x` b"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, tc.want, stripFences(tc.in))
+		})
+	}
+}

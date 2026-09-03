@@ -113,6 +113,17 @@ it would put prose in front of the check that enforces it.
   body — that cap is what keeps a 465-story sweep at 67 KB rather than
   23.5 MB.
 
+  **Every body class skips fenced code blocks.** A fence holds an example
+  of a shape, not an instance of it — and the story template puts its own
+  canonical File List entry inside a ```` ```markdown ```` fence that is
+  copied verbatim into every minted story. Read as an entry, it reports
+  the literal word `marker` as an unknown marker. The framework's pre-tag
+  sweep caught this: 51 of 60 failing fixture stories, and 140 of one real
+  project's 483 stories plus 2 of another's 296, failed on nothing but the
+  template quoting itself. Tag matching is the one thing that still reads
+  inside fences, because a tag named in an example is still the story
+  talking about that subject.
+
   Two details worth stating because they differ from the ask as filed.
   The File List vocabulary is **all five** markers the template declares,
   not three: `(planned)` and `(deferred)` are `apex-lift-project`'s, and

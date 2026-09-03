@@ -150,8 +150,13 @@ func DerivedSections(ext apexcfg.Ext, storyType string) []string {
 type Body struct {
 	Path string
 	Raw  map[string]any
+	// Text is the body verbatim, fences and all.
 	Text string
-	Err  error
+	// Prose is Text with every fenced code block removed. Every
+	// STRUCTURAL class reads this rather than Text — see stripFences for
+	// why a fenced example is not a story's own content.
+	Prose string
+	Err   error
 }
 
 // ReadBody reads a whole story file.
@@ -177,7 +182,100 @@ func ReadBody(path string) Body {
 	}
 	b.Raw = raw
 	b.Text = string(rest)
+	b.Prose = stripFences(b.Text)
 	return b
+}
+
+// stripFences removes fenced code blocks from a body.
+//
+// # Why every structural class needs this
+//
+// A fenced block is an EXAMPLE of a shape, not an instance of it. The
+// story template's `### File List` carries its canonical entry shape
+// inside a ```markdown fence:
+//
+//   - `path/to/file.ext` (marker) — short note
+//
+// That line is written verbatim into every minted story, and
+// `apex-dev-story` often leaves it in place. Read as an entry it reports
+// `(marker)` as an unknown marker — which is how this turned into 51 of
+// 60 failing fixture stories, 140 of one real project's 483 and 2 of
+// another's 296. The validator would have been reporting the template
+// against itself.
+//
+// The same trap exists for every other body class: a fenced `## Story`
+// in Dev Notes must not satisfy the derived section set, a fenced GCC
+// line must not be checked for its separator, a fenced compliance table
+// must not be read as the story's own, and a fenced placeholder is not
+// residue. So the strip happens once, here, and every structural class
+// reads Prose.
+//
+// Tag matching deliberately still reads Text: the digest algorithm's
+// step 1 is instructed to be inclusive ("extra entries cost little,
+// missed entries are expensive"), and a tag mentioned inside an example
+// is still the story talking about that subject.
+//
+// Fence rules follow CommonMark closely enough for real documents: an
+// opening fence is three or more backticks or tildes, indented at most
+// three spaces, optionally followed by an info string; the block ends at
+// a fence of the SAME character that is at least as long and carries no
+// info string, or at end of document. Matching the character and length
+// is what lets a ```` ``` ```` example sit inside a ```“ ```` ```“ block.
+func stripFences(text string) string {
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	var (
+		inFence bool
+		char    byte
+		width   int
+	)
+	for _, line := range lines {
+		marker, markerChar, markerWidth, info := fenceMarker(line)
+		switch {
+		case !inFence && marker:
+			inFence, char, width = true, markerChar, markerWidth
+			// The opening fence line goes too — it is not story prose.
+		case inFence && marker && markerChar == char && markerWidth >= width && info == "":
+			inFence = false
+		case inFence:
+			// Inside the block: dropped.
+		default:
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// fenceMarker reports whether line opens or closes a fence, with the
+// fence character, its run length, and any info string.
+func fenceMarker(line string) (isFence bool, char byte, width int, info string) {
+	trimmed := strings.TrimLeft(line, " ")
+	if len(line)-len(trimmed) > 3 {
+		// More than three spaces of indent is an indented code block, not
+		// a fence.
+		return false, 0, 0, ""
+	}
+	if len(trimmed) < 3 {
+		return false, 0, 0, ""
+	}
+	c := trimmed[0]
+	if c != '`' && c != '~' {
+		return false, 0, 0, ""
+	}
+	n := 0
+	for n < len(trimmed) && trimmed[n] == c {
+		n++
+	}
+	if n < 3 {
+		return false, 0, 0, ""
+	}
+	rest := strings.TrimSpace(trimmed[n:])
+	if c == '`' && strings.Contains(rest, "`") {
+		// A backtick fence's info string may not contain a backtick;
+		// that shape is inline code, not a fence.
+		return false, 0, 0, ""
+	}
+	return true, c, n, rest
 }
 
 // Status returns the story's declared status, lowercased.
@@ -221,7 +319,7 @@ func headings(text string) []string {
 // CheckSections reports each derived section the body does not carry.
 func CheckSections(b Body, ext apexcfg.Ext, id string) []Finding {
 	present := map[string]bool{}
-	for _, h := range headings(b.Text) {
+	for _, h := range headings(b.Prose) {
 		present[h] = true
 	}
 	var findings []Finding
@@ -302,7 +400,7 @@ var emDashProseRe = regexp.MustCompile(`^[—–-]+[ \t]*(created|modified|delet
 // CheckFileList reports File List entries whose marker is missing or
 // written in the forbidden em-dash-prose form.
 func CheckFileList(b Body, id string) []Finding {
-	body := section(b.Text, SecFileList)
+	body := section(b.Prose, SecFileList)
 	if strings.TrimSpace(body) == "" {
 		return nil
 	}
@@ -375,7 +473,7 @@ func CheckPlaceholders(b Body, id string) []Finding {
 	}
 	var findings []Finding
 	for _, heading := range []string{SecAgentModel, SecFileList, SecCompletionNote} {
-		if !strings.Contains(section(b.Text, heading), Placeholder) {
+		if !strings.Contains(section(b.Prose, heading), Placeholder) {
 			continue
 		}
 		findings = append(findings, Finding{
@@ -414,7 +512,7 @@ func CheckComplianceTables(b Body, ext apexcfg.Ext, id string) []Finding {
 		if !tbl.on {
 			continue
 		}
-		body := section(b.Text, tbl.heading)
+		body := section(b.Prose, tbl.heading)
 		if strings.TrimSpace(body) == "" {
 			// A missing section is CheckSections' finding, not this one —
 			// reporting both would name one defect twice.
@@ -480,7 +578,7 @@ var naPrefixRe = regexp.MustCompile(`^N/A:[ \t]*\S`)
 // CheckGCCLines reports Governance Compliance Criteria lines that do not
 // match the declared form.
 func CheckGCCLines(b Body, id string) []Finding {
-	body := section(b.Text, SecGCC)
+	body := section(b.Prose, SecGCC)
 	if strings.TrimSpace(body) == "" {
 		return nil
 	}
