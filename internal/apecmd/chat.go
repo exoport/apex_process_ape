@@ -191,6 +191,14 @@ func runChat(
 	// reason as repl.NewSession: an inherited CLAUDECODE/CLAUDE_CODE_*
 	// environment makes the child claude suppress session-transcript
 	// persistence.
+	//
+	// This path deliberately does NOT strip TMUX / TMUX_PANE, and that
+	// asymmetry with repl.NewSessionWithEnv is intentional. The exec
+	// above hands claude the user's REAL terminal, so inside tmux this
+	// child genuinely is in the inherited pane and recording that address
+	// is correct and useful. The PTY path strips them because there the
+	// address describes ape's terminal rather than the child's. Do not
+	// unify the two — see repl.scrubTmuxEnv.
 	claude.Env = repl.ScrubClaudeCodeEnv(os.Environ())
 	// Interactive chat keeps claude's NATIVE effort when --effort is unset —
 	// unlike the autonomous pipeline/task/prompt paths, which default to

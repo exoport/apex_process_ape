@@ -36,6 +36,39 @@ Every claude spawn is an interactive REPL attached to a PTY. ape never passes -p
 
 The MCP bridge (`internal/bridge/orchestrator/`) stays wired for **hook observability** (`UserPromptSubmit`, `Stop`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`, and since v0.0.60 `SessionStart` and `PreCompact`) in every mode. Under `--web` it additionally carries prompt/reply traffic for the browser via `await_message` / `reply`.
 
+## tmux terminal identity is stripped on the PTY path (and only there)
+
+`TMUX` and `TMUX_PANE` describe **which terminal** a process is attached
+to. For a child on ape's in-process PTY that description is false: the
+child's terminal is the PTY ape holds, while the inherited pane address
+belongs to ape itself.
+
+Claude Code reads both and records the pane in its session registry
+(`~/.claude/sessions/<pid>.json`) as `"tmux": "session:@window.%pane"`,
+without checking that the pane is its own controlling terminal. Driving
+that recorded address then fails in two directions at once: the control
+message lands as literal text in whatever the operator has in that pane,
+and the claude on the PTY sees nothing.
+
+ape itself was never affected — the runner writes to its own PTY master
+and never reads the field — which is why this went unnoticed. The damage
+lands on external consumers of the registry.
+
+So the PTY spawn path strips both. The correct outcome is that the
+child's record carries **no `tmux` key at all**: the only way into that
+REPL is ape's PTY master, which no external process can reach, so a tool
+reading the registry should conclude there is no keyboard to drive.
+
+**`ape chat` deliberately does not strip them.** It direct-execs claude
+onto the user's real terminal, so inside tmux that child genuinely *is*
+in the inherited pane and recording the address is correct and useful.
+The asymmetry is intentional and is why the filter is a separate,
+unexported function in `internal/repl` rather than two more lines in the
+shared `ScrubClaudeCodeEnv` — a caller outside that package cannot reach
+it, so it cannot be applied to the chat path by accident. A test asserts
+the shared scrubber still passes tmux through, so folding the two
+together fails loudly.
+
 ## The output style is pinned on every spawn
 
 Every session `ape` starts is a real Claude Code session in the project

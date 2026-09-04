@@ -137,6 +137,45 @@ it would put prose in front of the check that enforces it.
   working there, and a governance class that says nothing when it could
   not run reads as one that passed.
 
+- **fix(repl): stop leaking ape's tmux pane address into PTY children.**
+  `TMUX` and `TMUX_PANE` say which terminal a process is attached to, and
+  for a child on ape's in-process PTY the inherited pair describes **ape's**
+  terminal rather than the child's. Claude Code reads them and records the
+  pane in its session registry as `"tmux": "session:@window.%pane"` without
+  checking the pane is its own controlling terminal. Driving that address
+  then fails both ways at once: the control message lands as literal text
+  in whatever the operator has in that pane, and the claude on the PTY sees
+  nothing.
+
+  ape itself was never affected — the runner writes to its own PTY master
+  and never reads the field — which is exactly why this went unnoticed. The
+  damage lands on external consumers of the registry, and it would have
+  landed dozens of times during an unattended multi-step run inside tmux.
+
+  Reproduced and fixed under a real tmux server rather than a simulated
+  one, which turned out to matter: a fake `TMUX` value does not reproduce
+  it at all, presumably because Claude Code queries a live server. Inside a
+  genuine session the pre-fix binary recorded `ape-tmuxleak-test:@1.%1`,
+  a pane running `sleep`; the fixed binary records **no `tmux` key at all**.
+  That absence is the correct answer rather than a missing one — the only
+  way into that REPL is ape's PTY master, which no external process can
+  reach, so a tool reading the registry should conclude there is no
+  keyboard to drive.
+
+  **`ape chat` deliberately keeps them.** It direct-execs claude onto the
+  user's real terminal, where the inherited pane address is correct and
+  useful. That asymmetry is why the filter is a separate unexported
+  function rather than two more lines in the shared `ScrubClaudeCodeEnv`:
+  a caller outside `internal/repl` cannot reach it, so it cannot be applied
+  to the chat path by accident, and a test asserts the shared scrubber
+  still passes tmux through so folding the two together fails loudly.
+
+  `TMUX` is stripped alongside `TMUX_PANE` on purpose. A child that still
+  sees `TMUX` believes it is inside tmux, and with `teammateMode` set to
+  `auto` or `tmux` it would open agent-team panes in the operator's visible
+  window while its own output went to ape's PTY. Inert today, closed for
+  free.
+
 - **feat(spawn): pin the output style on every spawned session.** Every
   session `ape` starts inherits whatever output style the machine has
   configured, and an output style claims precedence over other

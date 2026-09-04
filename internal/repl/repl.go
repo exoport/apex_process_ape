@@ -140,6 +140,72 @@ func ScrubClaudeCodeEnv(env []string) []string {
 	return out
 }
 
+// scrubTmuxEnv removes the tmux terminal-identity variables from a
+// spawned child's environment.
+//
+// # Why this is separate from ScrubClaudeCodeEnv, and must stay separate
+//
+// `TMUX` and `TMUX_PANE` describe WHICH TERMINAL a process is attached
+// to. For a child on ape's in-process PTY that description is false: the
+// child's actual terminal is the PTY ape holds, while the inherited pane
+// address belongs to ape itself.
+//
+// Claude Code reads both and records the pane in its session registry
+// (`~/.claude/sessions/<pid>.json`) as `"tmux": "session:@window.%pane"`,
+// without ever checking that the pane is its own controlling terminal.
+// Reproduced: a PTY-spawned child recorded a pane that was running
+// `sleep`. Driving that recorded address then fails in two directions at
+// once — the control message lands as literal text in whatever the
+// operator has in that pane, and the claude on the PTY sees nothing.
+//
+// ape itself is unaffected, which is why this went unnoticed: the runner
+// writes to its own PTY master and never reads the `tmux` field. The
+// damage lands on external consumers of the registry.
+//
+// **This must NOT move into ScrubClaudeCodeEnv.** `ape chat`
+// (internal/apecmd/chat.go) direct-execs claude onto the user's REAL
+// terminal, where the inherited pane address is correct and useful.
+// Scrubbing there would delete working behaviour. That asymmetry is the
+// entire reason this is a second function rather than two more lines in
+// the first one, and it is why this one is unexported: a caller outside
+// this package cannot reach it, so it cannot be applied to the chat path
+// by accident. Being unexported costs nothing in testability, since the
+// env tests live in this package.
+//
+// Stripping `TMUX` as well as `TMUX_PANE` is deliberate rather than
+// belt-and-braces. A child that still sees `TMUX` believes it is inside
+// tmux, and with `teammateMode` set to `auto` or `tmux` it would open
+// agent-team panes in the operator's visible window while its own output
+// goes to ape's PTY. That is inert today — the default is `in-process`,
+// ape sets nothing, and CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS is already
+// removed by the CLAUDE_CODE_ prefix rule — but stripping both closes it
+// for free.
+//
+// The correct outcome is that the child's registry record carries NO
+// `tmux` key at all. That is an accurate answer rather than a missing
+// one: the only way into that REPL is ape's PTY master, which no
+// external process can reach, so a tool reading the registry should
+// conclude there is no keyboard to drive.
+//
+// On Windows the PTY backend is ConPTY and neither variable is normally
+// set, so this is a no-op there rather than anything conditional on
+// GOOS.
+func scrubTmuxEnv(env []string) []string {
+	const (
+		envTmux     = "TMUX"
+		envTmuxPane = "TMUX_PANE"
+	)
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		k, _, _ := strings.Cut(e, "=")
+		if k == envTmux || k == envTmuxPane {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 // EnvClaudeEffortLevel is the environment variable the spawned claude reads
 // to set its reasoning-effort level (low|medium|high|xhigh|max). ape sets it
 // from the resolved --effort flag / pipeline `effort:` field (default
@@ -215,7 +281,12 @@ func NewSessionWithEnv(_ context.Context, name, dir string, argv, extraEnv []str
 	// transcript persists, keep → zero). extraEnv (e.g. the resolved
 	// CLAUDE_CODE_EFFORT_LEVEL) is appended after the scrub so it survives
 	// and is authoritative.
-	cmd.Env = append(ScrubClaudeCodeEnv(os.Environ()), extraEnv...)
+	//
+	// scrubTmuxEnv is applied HERE and only here: this child's terminal is
+	// the PTY above, so an inherited tmux pane address describes someone
+	// else's terminal. `ape chat` deliberately does not do this — see
+	// scrubTmuxEnv for why the two paths must not be tidied into one.
+	cmd.Env = append(scrubTmuxEnv(ScrubClaudeCodeEnv(os.Environ())), extraEnv...)
 
 	if err := cmd.Start(); err != nil {
 		_ = ptm.Close()

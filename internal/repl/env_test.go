@@ -146,3 +146,136 @@ func TestNewSessionWithEnvInjectsEffort(t *testing.T) {
 		t.Fatalf("effort entry = %q, want %s=xhigh (inherited value must be scrubbed)", got[0], EnvClaudeEffortLevel)
 	}
 }
+
+// --- tmux terminal-identity scrub (PTY spawn path only) ----------------
+
+// TestScrubTmuxEnv_RemovesTerminalIdentity is the fix for the leak: a
+// child on ape's PTY inherited a pane address belonging to ape, Claude
+// Code recorded it in its session registry without checking it was its
+// own controlling terminal, and driving that address put literal text in
+// the operator's pane while the PTY child saw nothing.
+func TestScrubTmuxEnv_RemovesTerminalIdentity(t *testing.T) {
+	got := scrubTmuxEnv([]string{
+		"PATH=/usr/bin",
+		"TMUX=/tmp/tmux-1000/default,2345,0",
+		"HOME=/home/x",
+		"TMUX_PANE=%0",
+		"ANTHROPIC_API_KEY=sk-test",
+	})
+	want := []string{"PATH=/usr/bin", "HOME=/home/x", "ANTHROPIC_API_KEY=sk-test"}
+	if len(got) != len(want) {
+		t.Fatalf("scrubTmuxEnv = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("entry %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestScrubTmuxEnv_LeavesEverythingElseAlone — including keys that merely
+// start with the same letters. The filter matches whole names, so a
+// variable like TMUXP_SESSION or TMUX_TMPDIR belonging to someone else's
+// tooling is not collateral.
+func TestScrubTmuxEnv_LeavesEverythingElseAlone(t *testing.T) {
+	in := []string{
+		"TMUXP_SESSION=work",
+		"TMUX_TMPDIR=/tmp",
+		"TERM=tmux-256color",
+		"NOTTMUX=1",
+	}
+	got := scrubTmuxEnv(in)
+	if len(got) != len(in) {
+		t.Fatalf("scrubTmuxEnv dropped entries: %v, want %v", got, in)
+	}
+	for i := range in {
+		if got[i] != in[i] {
+			t.Errorf("entry %d = %q, want %q", i, got[i], in[i])
+		}
+	}
+}
+
+// TestScrubTmuxEnv_NoTmuxIsAByteIdenticalPassThrough is the Windows /
+// ConPTY case: neither variable is normally set there, so the filter must
+// be a plain no-op rather than anything conditional on GOOS.
+func TestScrubTmuxEnv_NoTmuxIsAByteIdenticalPassThrough(t *testing.T) {
+	in := []string{"PATH=C:\\Windows", "USERPROFILE=C:\\Users\\x", "TERM=xterm"}
+	got := scrubTmuxEnv(in)
+	if len(got) != len(in) {
+		t.Fatalf("scrubTmuxEnv = %v, want %v", got, in)
+	}
+	for i := range in {
+		if got[i] != in[i] {
+			t.Errorf("entry %d = %q, want %q", i, got[i], in[i])
+		}
+	}
+}
+
+// TestScrubClaudeCodeEnv_KeepsTmux locks the asymmetry the fix depends
+// on. `ape chat` calls the SHARED scrubber and direct-execs claude onto
+// the user's real terminal, where the inherited pane address is correct.
+// If someone later folds the tmux strip into ScrubClaudeCodeEnv to
+// "tidy" the two paths, this fails and says why.
+func TestScrubClaudeCodeEnv_KeepsTmux(t *testing.T) {
+	got := ScrubClaudeCodeEnv([]string{
+		"TMUX=/tmp/tmux-1000/default,2345,0",
+		"TMUX_PANE=%0",
+		"CLAUDECODE=1",
+	})
+	var sawTmux, sawPane bool
+	for _, e := range got {
+		switch {
+		case strings.HasPrefix(e, "TMUX="):
+			sawTmux = true
+		case strings.HasPrefix(e, "TMUX_PANE="):
+			sawPane = true
+		}
+	}
+	if !sawTmux || !sawPane {
+		t.Errorf("ScrubClaudeCodeEnv must NOT strip tmux vars — `ape chat` "+
+			"hands claude the user's real terminal, where the inherited pane "+
+			"address is correct. got %v", got)
+	}
+}
+
+// TestNewSessionScrubsTmuxEnv is the end-to-end counterpart: with TMUX
+// and TMUX_PANE set on the test process (simulating ape launched from
+// inside tmux, which is how the leak was found), a real spawned session's
+// command env must carry neither. Asserted on the actual spawn rather
+// than on scrubTmuxEnv alone, because the defect was never in the filter
+// — it was that no filter was wired into this path at all.
+func TestNewSessionScrubsTmuxEnv(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("POSIX PTY test; skipping on Windows")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not installed")
+	}
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,2345,0")
+	t.Setenv("TMUX_PANE", "%0")
+	t.Setenv("ANTHROPIC_API_KEY", "keep-me")
+
+	name := "ape-repl-test-tmuxscrub"
+	_ = KillSession(t.Context(), name)
+	if err := NewSession(t.Context(), name, "/tmp",
+		[]string{"bash", "--noprofile", "--norc", "-c", "sleep 2"}); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	t.Cleanup(func() { _ = KillSession(t.Context(), name) })
+
+	s, ok := lookup(name)
+	if !ok {
+		t.Fatalf("session not registered")
+	}
+	for _, e := range s.cmd.Env {
+		k, _, _ := strings.Cut(e, "=")
+		if k == "TMUX" || k == "TMUX_PANE" {
+			t.Fatalf("child env contains %q — the child would record ape's pane "+
+				"as its own terminal, and driving that address puts literal text "+
+				"in the operator's pane while this child sees nothing", e)
+		}
+	}
+	if !strings.Contains(strings.Join(s.cmd.Env, "\n"), "ANTHROPIC_API_KEY=keep-me") {
+		t.Fatalf("child env lost ANTHROPIC_API_KEY (auth must pass through)")
+	}
+}
