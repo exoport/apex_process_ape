@@ -137,6 +137,45 @@ it would put prose in front of the check that enforces it.
   working there, and a governance class that says nothing when it could
   not run reads as one that passed.
 
+- **feat(spawn): pin the output style on every spawned session.** Every
+  session `ape` starts inherits whatever output style the machine has
+  configured, and an output style claims precedence over other
+  communication and formatting guidance — which is exactly what the
+  framework depends on at the end of a run: the fenced return contracts a
+  batch orchestrator parses, the guided menus and HALT prompts, the
+  completion summaries the eval asserts on. A developer who set `Concise`
+  for their own conversations would silently change what every skill run
+  emits, on their machine only, in a way no test elsewhere would
+  reproduce.
+
+  `ape` now writes `"outputStyle": "Default"` into the `--settings` blob
+  it already builds, on every spawn path. The key must be written
+  explicitly: precedence is enterprise-managed → `--settings` →
+  project-local → shared-project → user, and an omitted key falls through
+  to the highest file that defines one, so leaving it out neutralises
+  nothing. `--ignore-project-settings` was never the answer — it passes
+  `--setting-sources user`, which drops the project files and keeps the
+  user one. `--output-style inherit` opts out; `--output-style
+  <name>` pins a specific one. Available on `task`, `pipeline`, `prompt`
+  and `chat`.
+
+  Two paths that used to return an empty blob now carry the pin, which is
+  the point: a pin written inside the hooks block would have been missing
+  from exactly the plain interactive spawn most runs use. **`--eval` stays
+  byte-empty** on purpose — PLAN-6 invariant #1 locks spawn-shape
+  equivalence with an external consumer, and nothing needing the pin
+  reaches that path.
+
+  Verified against Claude Code 2.1.259 rather than taken from the docs,
+  which only ever describe *omitting* the key. An unknown style name is
+  silently ignored rather than rejected, so "it did not error" was not
+  accepted as evidence: the check was a custom style with a unique marker,
+  confirming the key is honoured from `--settings`, that an explicit
+  `Default` overrides the same style set in a settings file, and — through
+  a real `ape prompt` run against a project configured with that style —
+  that the marker is absent by default and present under
+  `--output-style inherit`.
+
 - **feat(config): `model_profile` and `evidence_folder` join the overlay
   allow-list.** `OverlayKeys()` iterated seventeen keys and silently
   skipped the rest, so `ape config resolve` could not emit a variable the

@@ -36,6 +36,55 @@ Every claude spawn is an interactive REPL attached to a PTY. ape never passes -p
 
 The MCP bridge (`internal/bridge/orchestrator/`) stays wired for **hook observability** (`UserPromptSubmit`, `Stop`, `PreToolUse`, `PostToolUse`, `SubagentStart`, `SubagentStop`, and since v0.0.60 `SessionStart` and `PreCompact`) in every mode. Under `--web` it additionally carries prompt/reply traffic for the browser via `await_message` / `reply`.
 
+## The output style is pinned on every spawn
+
+Every session `ape` starts is a real Claude Code session in the project
+root, so without intervention it inherits whatever **output style** the
+machine has configured. That is not cosmetic. An output style claims
+precedence over other communication and formatting guidance, and that is
+exactly what the APEX framework leans on at the end of a run: the fenced
+return contracts a batch orchestrator parses to reconstruct status and
+paths, the guided menus and HALT prompts, and the completion summaries
+the eval asserts on. A developer who set `Concise` for their own
+conversations would quietly change what every skill run emits — on their
+machine only, in a way no test on another machine would reproduce.
+
+So `ape` writes `"outputStyle": "Default"` into the `--settings` blob it
+already builds, on every spawn path. A skill run is machine-consumed
+output rather than a conversation, so the pin is the default rather than
+an opt-in.
+
+**The key has to be written explicitly.** Claude Code's precedence is
+enterprise-managed → `--settings` → project-local → shared-project →
+user, and an *omitted* key falls through to the highest file that defines
+one. Leaving it out neutralises nothing.
+
+```bash
+ape task <skill> --output-style inherit     # keep the machine's style
+ape task <skill> --output-style Explanatory # pin a specific one
+```
+
+The flag is on `ape task`, `ape pipeline`, `ape prompt` and `ape chat`.
+
+Two limits worth knowing:
+
+- **Enterprise-managed settings still outrank `--settings`.** On a
+  managed fleet the pin can be overridden, and `ape` cannot close that.
+- **`--ignore-project-settings` was never the answer.** It passes
+  `--setting-sources user`, which drops the project and local files and
+  *keeps* the user one — so a user-level style still reaches the session.
+- **`--eval` is deliberately exempt.** `ModeEval` returns a byte-empty
+  settings blob under PLAN-6 invariant #1, which locks spawn-shape
+  equivalence with an external consumer. Nothing that needs the pin
+  reaches that path.
+
+This was verified against Claude Code 2.1.259 rather than taken from the
+docs, which only ever describe omitting the key: a custom style named in
+`--settings` takes effect, an explicit `Default` there overrides the same
+style set in a project settings file, and an unknown style name is
+silently ignored rather than rejected — so "it did not error" is not
+evidence that a value was honoured.
+
 ## Source of truth in code
 
 | What                                              | Where                                                      |
@@ -44,6 +93,7 @@ The MCP bridge (`internal/bridge/orchestrator/`) stays wired for **hook observab
 | Per-stage PTY + `claude` spawn (interactive path) | `internal/apecmd/pipeline_interactive.go`                  |
 | PTY driver (NewSession / SendCommand / …)         | `internal/repl/`                                           |
 | `ape chat` direct exec with stdio inheritance     | `internal/apecmd/chat.go`                                  |
+| `--settings` blob, incl. the output-style pin     | `internal/bridge/config/settings.go`                       |
 
 ## Related
 

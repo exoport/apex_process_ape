@@ -6,17 +6,81 @@ import (
 	"testing"
 )
 
-func TestBuildSettings_NonWebReturnsEmptyObject(t *testing.T) {
-	for _, mode := range []Mode{ModeEval, ModeTUI} {
-		t.Run(mode.String(), func(t *testing.T) {
-			raw, err := BuildSettings(SettingsOptions{Mode: mode})
+// TestBuildSettings_EvalStaysByteEmpty is PLAN-6 invariant #1, and it is
+// the one deliberate hole in the output-style pin: `--eval` locks
+// byte-equivalence with an external consumer that compares the spawn
+// shape exactly, so a key added here would break a cross-repo contract.
+// Safe because nothing reaches the eval path that needs the pin — the
+// framework's own harness does not pass `--eval`.
+func TestBuildSettings_EvalStaysByteEmpty(t *testing.T) {
+	raw, err := BuildSettings(SettingsOptions{Mode: ModeEval})
+	if err != nil {
+		t.Fatalf("BuildSettings(eval): %v", err)
+	}
+	if string(raw) != "{}" {
+		t.Errorf("eval settings = %s, want {} — PLAN-6 invariant #1", string(raw))
+	}
+}
+
+// TestBuildSettings_OutputStyleIsPinnedOnEverySpawnPath is the whole
+// point of the pin: a machine's configured output style claims
+// precedence over other formatting guidance, and the framework's fenced
+// return contracts, guided menus and completion summaries are what that
+// precedence would rewrite.
+//
+// The no-hooks path is covered explicitly because it used to return `{}`
+// — a pin written inside the hooks block would have been silently
+// missing in exactly the place a plain interactive spawn lands.
+func TestBuildSettings_OutputStyleIsPinnedOnEverySpawnPath(t *testing.T) {
+	cases := map[string]SettingsOptions{
+		"tui, no hooks":   {Mode: ModeTUI},
+		"tui, with hooks": {Mode: ModeTUI, InjectHooks: true, APEBin: "/x", BridgePort: 1234},
+		"web":             {Mode: ModeWeb, APEBin: "/x", BridgePort: 1234},
+		"web, hooks off":  {Mode: ModeWeb, InjectHooks: false, APEBin: "/x", BridgePort: 1234},
+	}
+	for name, opts := range cases {
+		t.Run(name, func(t *testing.T) {
+			raw, err := BuildSettings(opts)
 			if err != nil {
-				t.Fatalf("BuildSettings(%s): %v", mode, err)
+				t.Fatalf("BuildSettings: %v", err)
 			}
-			if string(raw) != "{}" {
-				t.Errorf("non-web settings = %s, want {}", string(raw))
+			var got map[string]any
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if got["outputStyle"] != DefaultOutputStyle {
+				t.Errorf("outputStyle = %v, want %q — an unpinned spawn "+
+					"inherits the machine's style", got["outputStyle"], DefaultOutputStyle)
 			}
 		})
+	}
+}
+
+// TestBuildSettings_OutputStyleOptOut — the operator who wants a style
+// deliberately gets one, and "inherit" means no key at all rather than a
+// key naming a style called "inherit".
+func TestBuildSettings_OutputStyleOptOut(t *testing.T) {
+	raw, err := BuildSettings(SettingsOptions{Mode: ModeTUI, OutputStyle: InheritOutputStyle})
+	if err != nil {
+		t.Fatalf("BuildSettings: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, present := got["outputStyle"]; present {
+		t.Errorf("settings = %s, want no outputStyle key at all", string(raw))
+	}
+
+	raw, err = BuildSettings(SettingsOptions{Mode: ModeTUI, OutputStyle: "Explanatory"})
+	if err != nil {
+		t.Fatalf("BuildSettings: %v", err)
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["outputStyle"] != "Explanatory" {
+		t.Errorf("outputStyle = %v, want Explanatory", got["outputStyle"])
 	}
 }
 

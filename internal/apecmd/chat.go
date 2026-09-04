@@ -43,6 +43,7 @@ func newChatCmd() *cobra.Command {
 		effortFlag            string
 		cwdFlag               string
 		ignoreProjectSettings bool
+		outputStyleFlag       string
 	)
 	cmd := &cobra.Command{
 		Use:   "chat",
@@ -81,7 +82,8 @@ error (no _apex/config.yaml, bad cwd).`,
 				fmt.Fprintf(os.Stderr, "Error: ape chat requires a project root with _apex/config.yaml; not found at %s\n", cfgPath)
 				os.Exit(ExitUsage)
 			}
-			if err := runChat(cmd.Context(), projectRoot, resolveModelArg(modelFlag), effortFlag, ignoreProjectSettings); err != nil {
+			if err := runChat(cmd.Context(), projectRoot, resolveModelArg(modelFlag), effortFlag,
+				ignoreProjectSettings, outputStyleFlag); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 				os.Exit(ExitRunFailed)
 			}
@@ -92,13 +94,17 @@ error (no _apex/config.yaml, bad cwd).`,
 	cmd.Flags().StringVar(&effortFlag, "effort", "", "Reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Defaults to claude's native effort when unset.")
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root (default: current working directory).")
 	cmd.Flags().BoolVar(&ignoreProjectSettings, "ignore-project-settings", false, "Tell claude to skip project + local .claude/settings*.json.")
+	addOutputStyleFlag(cmd, &outputStyleFlag)
 	return cmd
 }
 
 // runChat wires the bridge runtime, then exec's claude as a foreground
 // child with stdio inherited so the user can drive the REPL directly.
 // Returns when claude exits.
-func runChat(ctx context.Context, projectRoot, modelArg, effortArg string, ignoreProjectSettings bool) error {
+func runChat(
+	ctx context.Context, projectRoot, modelArg, effortArg string,
+	ignoreProjectSettings bool, outputStyle string,
+) error {
 	apeBin, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("ape chat: locate self: %w", err)
@@ -160,7 +166,7 @@ func runChat(ctx context.Context, projectRoot, modelArg, effortArg string, ignor
 	go func() { rtErrCh <- rt.Serve(runCtx) }()
 	defer func() { <-rtErrCh }()
 
-	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, ignoreProjectSettings)
+	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, ignoreProjectSettings, outputStyle)
 	if err != nil {
 		return err
 	}

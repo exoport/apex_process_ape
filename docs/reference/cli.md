@@ -1381,6 +1381,7 @@ Flags:
 | `--effort` | string | `—` | Reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Defaults to claude's native effort when unset. |
 | `--ignore-project-settings` | bool | `false` | Tell claude to skip project + local .claude/settings*.json. |
 | `--model` | string | `—` | Initial claude model. A bare family (sonnet, opus, haiku) resolves to its current generation; sonnet-5 / opus[1m] pin explicitly. Empty falls back to claude's default. |
+| `--output-style` | string | `—` | Output style pinned on the spawned session (default "Default"). Pass "inherit" to keep whatever style the machine is configured with. |
 
 ## ape config
 
@@ -3209,6 +3210,7 @@ Flags:
 | `--no-tui` | bool | `false` | No UI surface: plain stdout progress lines. Exec is still the interactive per-stage claude REPL in an in-process PTY. |
 | `--open` | bool | `false` | With --web (or default): xdg-open the broker URL on start. |
 | `--output-format` | string | `human` | Output format for list mode (no positional arg): human\|json\|yaml |
+| `--output-style` | string | `—` | Output style pinned on the spawned session (default "Default"). Pass "inherit" to keep whatever style the machine is configured with. |
 | `--prompt` | string | `—` | Optional prompt forwarded to skills that accept it (currently: epics) |
 | `--quiet` | bool | `false` | With --no-tui: suppress per-event stream; print only stage/step start/end markers |
 | `--transcript-store` | string | `nats-object` | Transcript blob backend: nats-object\|uri-offload (env APE_TRANSCRIPT_STORE). |
@@ -3285,6 +3287,7 @@ Flags:
 | `--max-duration` | duration | `3h0m0s` | Hard wall-clock ceiling regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a batch of sub-agents is bounded per item, not overall. 0 disables the cap. |
 | `--model` | string | `—` | Claude model. A bare family (sonnet, opus, haiku) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml (json/yaml = result envelope on stdout, progress on stderr) |
+| `--output-style` | string | `—` | Output style pinned on the spawned session (default "Default"). Pass "inherit" to keep whatever style the machine is configured with. |
 | `--quiet` | bool | `false` | Suppress the progress stream on stderr |
 | `--ultracode` | bool | `false` | Prepend the ultracode keyword (session runs workflows by default) |
 | `--workflow` | bool | `false` | Append a directive to run the task through a Claude Code workflow |
@@ -4910,6 +4913,7 @@ Flags:
 | `--nats-url` | string | `—` | NATS server URL for progress events + transcript upload (env APE_NATS_URL). Empty disables both. |
 | `--no-commit` | bool | `false` | Skill layer: tell the skill/framework not to commit (adds skill-level --no-commit on the agent path) |
 | `--output-format` | string | `human` | Output format: human\|json (json = result envelope on stdout, progress on stderr) |
+| `--output-style` | string | `—` | Output style pinned on the spawned session (default "Default"). Pass "inherit" to keep whatever style the machine is configured with. |
 | `--prompt` | string | `—` | Run prompt forwarded via --prompt-flag (same semantics as pipeline --prompt) |
 | `--prompt-flag` | string | `—` | Skill flag name the --prompt value is forwarded through (spec prompt_flag equivalent) |
 | `--quiet` | bool | `false` | Suppress the per-event progress stream |

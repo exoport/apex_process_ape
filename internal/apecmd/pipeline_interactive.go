@@ -721,7 +721,10 @@ func (c *interactiveCore) WaitStepDone(ctx context.Context, _ string, _ int) err
 // else (hooks-via-InjectHooks path).
 //
 //nolint:unparam // mode is a genuine settings-shape selector; ModeWeb is a supported value even though every current caller passes ModeTUI
-func buildInteractivePrepend(apeBin string, ipcPort int, mode config.Mode, ignoreProjectSettings bool) ([]string, error) {
+func buildInteractivePrepend(
+	apeBin string, ipcPort int, mode config.Mode,
+	ignoreProjectSettings bool, outputStyle string,
+) ([]string, error) {
 	mcpCfg, err := config.BuildMCPConfig(config.MCPOptions{APEBin: apeBin, IPCPort: ipcPort})
 	if err != nil {
 		return nil, err
@@ -731,6 +734,7 @@ func buildInteractivePrepend(apeBin string, ipcPort int, mode config.Mode, ignor
 		BridgePort:  ipcPort,
 		Mode:        mode,
 		InjectHooks: mode != config.ModeWeb, // ModeWeb auto-injects; other modes need the explicit flag
+		OutputStyle: outputStyle,
 	})
 	if err != nil {
 		return nil, err
@@ -814,7 +818,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		runLogMu.Unlock()
 	}()
 
-	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, cfg.ignoreProjectSettings)
+	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, cfg.ignoreProjectSettings, cfg.outputStyle)
 	if err != nil {
 		return err
 	}

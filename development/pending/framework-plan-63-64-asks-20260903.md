@@ -63,6 +63,26 @@ uv run apex-eval run --skill apex-dev-story --fixture gf-hello-world
 
 The framework records the floor at `framework/_apex/apex-operating-rules.md:17`, never as a `version:` key in `_apex/ape-commands.yaml` (its header forbids one: a locally built `ape` reports an unstamped pseudo-version). The framework-side halves that wait on this release: PLAN-64 5b (the 85 `## Commit Policy` deletions), 6b, 9.12b, 13.3b.
 
+## Late addition (2026-09-04) — pin the output style on every spawned session
+
+Not part of the two plans; found while auditing why a Claude Code output style leaks into skill runs. Filed here because it belongs in the same release, before the framework reaches other machines and other users.
+
+**The hazard.** `ape task`, `ape pipeline`, `ape chat` and `ape prompt` each launch a real Claude Code session in the project root. Nothing in `ape`, the framework or the eval harness sets, clears or overrides `outputStyle`, so whatever the machine has configured is inherited by every skill run. A style such as `Concise` explicitly claims precedence over other communication and formatting guidance, which is precisely what APEX depends on at the end of a run: the fenced return contracts a batch orchestrator parses to reconstruct status and paths, the guided menus and HALT prompts, and the completion summaries the eval asserts on. `--ignore-project-settings` does not close it: it passes `--setting-sources user`, which drops the project and local files and keeps the user one.
+
+**The lever, and why it is the only one.** The CLI has no output-style flag. `--safe-mode` would disable output styles but also skills, hooks and MCP, which `ape` requires. That leaves `--settings`, which `ape` already builds.
+
+**Precedence, confirmed against the docs.** Managed settings, then `--settings`, then project local, then shared project, then user. So a key in `ape`'s blob overrides all three files. An omitted key falls through to the highest file that defines it, so the key must be written explicitly; omitting it neutralizes nothing. Enterprise-managed settings still outrank `ape`, which is a residual limit worth a line in the docs rather than a problem to solve.
+
+**The ask.** Pin the default output style in the settings blob on every spawn path, with an opt-out flag for anyone who deliberately wants a style. A skill run is machine-consumed rather than a conversation, so the default should not be negotiable.
+
+Three details, from reading `internal/bridge/config/settings.go`:
+
+1. **`BuildSettings` short-circuits twice** — `ModeEval` returns `{}` under the PLAN-6 byte-equivalence invariant, and any non-web mode without `InjectHooks` also returns `{}`. A pin added inside the hooks block would be silently absent in exactly those paths. Whether the eval-equivalence invariant can carry one extra key is your call; the framework's eval harness does not pass `--eval`, so its captures come through the ordinary interactive path either way.
+2. **Verify the literal empirically rather than trusting it.** The built-in styles are capitalised (`Concise`, `Explanatory`, `Learning`, `Proactive`), and `Default` is the documented name of the standard style, but the docs never show it written explicitly into settings — they say to omit the key. Setting it explicitly is what this ask needs, so confirm the CLI accepts `"outputStyle": "Default"` without an unknown-style error before relying on it, and say what you found.
+3. **A regression test** asserting the key is present in the blob on every spawn mode, including the two early-return paths.
+
+**Consequence for the release.** This means a rebuild, and the framework side re-runs its 135-story sweep against the new binary. Both are cheap and the bundle is not tagged yet, which is why it is filed now rather than as a follow-up.
+
 ## Handshake
 
 Cross-session peer on the framework side: `apex-process-framework-b6` (session names change on restart; `ListAgents` before sending). Send the version and the check-class names when the tag is cut.

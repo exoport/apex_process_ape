@@ -52,6 +52,7 @@ func newTaskCmd() *cobra.Command {
 		quietFlag          bool
 		manifestDirFlag    string
 		ignoreProjSettings bool
+		outputStyleFlag    string
 		natsURLFlag        string
 		natsCredsFlag      string
 		eventsPrefixFlag   string
@@ -156,6 +157,7 @@ ownership (the run itself may have succeeded).`,
 				projectRoot:           projectRoot,
 				manifestDir:           manifestDirFlag,
 				ignoreProjectSettings: ignoreProjSettings,
+				outputStyle:           outputStyleFlag,
 				natsURL:               natsURLFlag,
 				natsCreds:             natsCredsFlag,
 				eventsPrefix:          eventsPrefixFlag,
@@ -184,6 +186,7 @@ ownership (the run itself may have succeeded).`,
 	cmd.Flags().StringVar(&manifestDirFlag, "manifest-dir", "", "Override the run-artifact base dir (default: <project>/_output/ape/tasks)")
 	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json")
 	_ = cmd.Flags().MarkHidden("json")
+	addOutputStyleFlag(cmd, &outputStyleFlag)
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
 	addNatsFlags(cmd, &natsURLFlag, &natsCredsFlag, &eventsPrefixFlag, &uploadTranscripts, &transcriptStore)
 	return cmd
@@ -208,6 +211,7 @@ type taskOptions struct {
 	projectRoot           string
 	manifestDir           string
 	ignoreProjectSettings bool
+	outputStyle           string
 	natsURL               string
 	natsCreds             string
 	eventsPrefix          string
@@ -370,6 +374,7 @@ func runTask(ctx context.Context, o taskOptions) error {
 		manifestDir:           manifestDir,
 		allowDirty:            o.allowDirty,
 		ignoreProjectSettings: o.ignoreProjectSettings,
+		outputStyle:           o.outputStyle,
 		quiet:                 o.quiet,
 		suppressSummary:       o.jsonMode,
 		idleTimeout:           o.idleTimeout,

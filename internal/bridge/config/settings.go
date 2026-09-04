@@ -32,6 +32,68 @@ type SettingsOptions struct {
 	// InjectHooks opts into the hooks block independently of Mode.
 	// PLAN-6 / Phase E: TUI + interactive modes set this to true.
 	InjectHooks bool
+	// OutputStyle pins Claude Code's output style for the spawned
+	// session. Empty means DefaultOutputStyle; InheritOutputStyle omits
+	// the key entirely and lets the machine's own configuration win.
+	OutputStyle string
+}
+
+// Output-style pinning.
+//
+// # Why ape writes this key at all
+//
+// Every session ape spawns is a real Claude Code session in the project
+// root, and it inherits whatever output style the machine has
+// configured. An output style is not cosmetic: it claims precedence over
+// other communication and formatting guidance, which is exactly what the
+// APEX framework depends on at the end of a run — the fenced return
+// contracts a batch orchestrator parses to reconstruct status and paths,
+// the guided menus and HALT prompts, and the completion summaries the
+// eval asserts on. A developer who set `Concise` for their own
+// conversations would silently change what every skill run emits, on
+// their machine only, in a way no test on another machine would catch.
+//
+// A skill run is machine-consumed output, not a conversation, so the pin
+// is the default rather than an opt-in.
+//
+// # Why the key must be written explicitly
+//
+// Claude Code's settings precedence is: enterprise-managed, then
+// `--settings`, then project-local, then shared-project, then user. An
+// OMITTED key falls through to the highest file that defines one, so
+// leaving it out neutralises nothing — the key has to be present to
+// override. Enterprise-managed settings still outrank `--settings`,
+// which is a documented residual limit rather than something ape can
+// close.
+//
+// Verified against Claude Code 2.1.259 rather than assumed, because the
+// docs only ever describe OMITTING the key: a custom style named in
+// `--settings` takes effect, the same style set in a project settings
+// file is overridden by an explicit `Default` in `--settings`, and an
+// unknown style name is silently ignored rather than rejected — which is
+// why "it did not error" was not accepted as evidence that the value was
+// honoured.
+const (
+	// DefaultOutputStyle is Claude Code's own standard style, and the
+	// value ape pins. Capitalised exactly as the built-in names are.
+	DefaultOutputStyle = "Default"
+	// InheritOutputStyle is the opt-out: no key is written and the
+	// machine's configured style applies. For an operator who wants a
+	// style deliberately.
+	InheritOutputStyle = "inherit"
+)
+
+// resolveOutputStyle maps the option onto the value written, and reports
+// whether to write the key at all.
+func resolveOutputStyle(style string) (value string, write bool) {
+	switch style {
+	case InheritOutputStyle:
+		return "", false
+	case "":
+		return DefaultOutputStyle, true
+	default:
+		return style, true
+	}
 }
 
 // hookSpec is the Claude Code hooks shape, one entry per event in
@@ -60,11 +122,30 @@ type hookCommand struct {
 // `{}` regardless of InjectHooks (PLAN-6 invariant #1), so nothing here
 // can reach the eval's spawn shape. All other combinations return `{}`.
 func BuildSettings(opts SettingsOptions) (json.RawMessage, error) {
+	// ModeEval stays byte-empty, and that is a deliberate exception to
+	// the output-style pin rather than an oversight.
+	//
+	// PLAN-6 invariant #1 locks `--eval` byte-equivalence with an
+	// external consumer that compares the spawn shape exactly; adding a
+	// key here would break a cross-repo contract to close a hazard that
+	// does not reach this path. The framework's own eval harness does
+	// not pass `--eval` — its captures come through the interactive path
+	// below, which IS pinned — so nothing the framework consumes is left
+	// unprotected by this exception.
 	if opts.Mode == ModeEval {
 		return json.RawMessage(`{}`), nil
 	}
+
+	root := map[string]any{}
+	if style, write := resolveOutputStyle(opts.OutputStyle); write {
+		root["outputStyle"] = style
+	}
+
+	// The no-hooks path still gets the pin. It used to return `{}`, which
+	// is precisely where a pin written inside the hooks block would have
+	// been silently missing.
 	if opts.Mode != ModeWeb && !opts.InjectHooks {
-		return json.RawMessage(`{}`), nil
+		return json.Marshal(root)
 	}
 	if opts.APEBin == "" {
 		return nil, errors.New("config.BuildSettings: APEBin is empty (required when hooks are injected)")
@@ -128,6 +209,6 @@ func BuildSettings(opts SettingsOptions) (json.RawMessage, error) {
 		}},
 	}
 
-	root := map[string]any{"hooks": hooks}
+	root["hooks"] = hooks
 	return json.Marshal(root)
 }

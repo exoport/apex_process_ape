@@ -126,7 +126,7 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 		runLogMu.Unlock()
 	}()
 
-	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, cfg.ignoreProjectSettings)
+	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, cfg.ignoreProjectSettings, cfg.outputStyle)
 	if err != nil {
 		return err
 	}

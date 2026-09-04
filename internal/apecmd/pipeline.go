@@ -38,6 +38,7 @@ func newPipelineCmd() *cobra.Command {
 		webFlag            bool
 		openFlag           bool
 		ignoreProjSettings bool
+		outputStyleFlag    string
 		interactiveFlag    bool
 		programmaticFlag   bool
 		natsURLFlag        string
@@ -137,6 +138,7 @@ func newPipelineCmd() *cobra.Command {
 				noCommit:              noCommitFlag,
 				allowDirty:            allowDirtyFlag,
 				ignoreProjectSettings: ignoreProjSettings,
+				outputStyle:           outputStyleFlag,
 				openOnStart:           openFlag,
 				natsURL:               natsURLFlag,
 				natsCreds:             natsCredsFlag,
@@ -177,6 +179,7 @@ func newPipelineCmd() *cobra.Command {
 	_ = cmd.Flags().MarkHidden("programmatic")
 	_ = cmd.Flags().MarkHidden("eval")
 	cmd.Flags().BoolVar(&openFlag, "open", false, "With --web (or default): xdg-open the broker URL on start.")
+	addOutputStyleFlag(cmd, &outputStyleFlag)
 	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json. Honoured in --web mode.")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "With --no-tui: suppress per-event stream; print only stage/step start/end markers")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format for list mode (no positional arg): human|json|yaml")
@@ -283,7 +286,11 @@ type runConfig struct {
 	noCommit              bool
 	allowDirty            bool
 	ignoreProjectSettings bool
-	openOnStart           bool
+	// outputStyle pins the spawned session's Claude Code output style.
+	// Empty pins config.DefaultOutputStyle; config.InheritOutputStyle
+	// leaves the machine's own style alone.
+	outputStyle string
+	openOnStart bool
 
 	// progressWriter redirects the plain observer's progress stream.
 	// nil keeps the default (os.Stdout). `ape task --output-format

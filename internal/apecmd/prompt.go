@@ -71,6 +71,7 @@ type promptOptions struct {
 	projectRoot           string
 	quiet                 bool
 	ignoreProjectSettings bool
+	outputStyle           string
 	format                output.Format
 }
 
@@ -87,6 +88,7 @@ func newPromptCmd() *cobra.Command {
 		cwdFlag            string
 		quietFlag          bool
 		ignoreProjSettings bool
+		outputStyleFlag    string
 		outputFormat       string
 	)
 	cmd := &cobra.Command{
@@ -176,6 +178,7 @@ failed · 2 usage or preflight error (no _apex/config.yaml, unresolved
 				projectRoot:           projectRoot,
 				quiet:                 quietFlag,
 				ignoreProjectSettings: ignoreProjSettings,
+				outputStyle:           outputStyleFlag,
 				format:                format,
 			})
 		},
@@ -190,6 +193,7 @@ failed · 2 usage or preflight error (no _apex/config.yaml, unresolved
 	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Hard wall-clock ceiling regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a batch of sub-agents is bounded per item, not overall. 0 disables the cap.")
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "Suppress the progress stream on stderr")
+	addOutputStyleFlag(cmd, &outputStyleFlag)
 	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml (json/yaml = result envelope on stdout, progress on stderr)")
 	return cmd
@@ -365,7 +369,7 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 		runLogMu.Unlock()
 	}()
 
-	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, o.ignoreProjectSettings)
+	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, o.ignoreProjectSettings, o.outputStyle)
 	if err != nil {
 		return promptResult{}, ExitRunFailed, err
 	}

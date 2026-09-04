@@ -205,9 +205,10 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		return err
 	}
 	settings, err := config.BuildSettings(config.SettingsOptions{
-		APEBin:     apeBin,
-		BridgePort: hub.IPCPort(),
-		Mode:       config.ModeWeb,
+		APEBin:      apeBin,
+		BridgePort:  hub.IPCPort(),
+		Mode:        config.ModeWeb,
+		OutputStyle: cfg.outputStyle,
 	})
 	if err != nil {
 		return err
