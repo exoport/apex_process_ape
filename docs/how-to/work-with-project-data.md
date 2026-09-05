@@ -203,6 +203,24 @@ restate in their own words.
 | `story.adr_unresolved` | a `governance.adrs` id resolving to no ADR at HEAD |
 | `story.adr_not_accepted` | a cited ADR that is not `accepted` — **exit 0**, reported under `flagged` |
 
+One further class is **advisory and opt-in**, reported only behind
+`--include-advisory`:
+
+| Check | What it catches |
+| ----- | --------------- |
+| `story.requirement_ids_missing` | the story declares no `requirement_ids`, the field the release record's coverage table reads |
+
+It is off by default because it fires on every story until a backfill
+completes — hundreds on a real corpus — and `ape doctor` reds sit on the
+orchestrator's never-worked-around list. A gate that cannot be cleared
+for the duration of a migration either gets suspended in practice, which
+teaches operators that doctor reds are sometimes ignorable, or forces an
+escalation nobody can act on. So it stays invisible to the gate and fully
+visible to every consumer whose job is to work it:
+`apex-frontmatter-repair` asks for it, a migration entry asks for it, and
+so can you. It has no `--fix`: the ids live in the story's prose where
+two sections can disagree, and choosing between them is a judgement.
+
 **The derived section set is a function of the resolved config alone.** No
 writer stamps a story type into frontmatter, so there is nothing else to
 read: `## Story`, `## Acceptance Criteria`, `## Tasks / Subtasks`,

@@ -71,6 +71,9 @@ var dependsOnFieldRe = regexp.MustCompile(`^depends_on\[\d+\]$`)
 // a write that does not strictly reduce that file's findings is rolled
 // back and reported.
 func FixCorpus(cfg *apexcfg.Resolved, check bool) (*FixResult, error) {
+	// Advisory classes are excluded: --fix owns none of them, and listing
+	// them under "findings --fix does not own" would bury the ones a
+	// person can act on under a backfill's worth of noise.
 	report, err := VerifyCorpus(cfg)
 	if err != nil {
 		return nil, err

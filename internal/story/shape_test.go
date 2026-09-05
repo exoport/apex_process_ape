@@ -456,26 +456,37 @@ func TestStripFences_Mechanics(t *testing.T) {
 	}
 }
 
-// --- story.requirement_ids_missing (report-only) ------------------------
+// --- story.requirement_ids_missing (advisory, opt-in) ------------------
 
-// TestRequirementIDs_ReportedNeverGating is the whole contract of the
-// class. Every story minted before the key existed lacks it, so gating
-// would fail entire corpora over a field that is being backfilled.
-func TestRequirementIDs_ReportedNeverGating(t *testing.T) {
+// TestRequirementIDs_SilentByDefault is the property the framework
+// maintainer overruled me to get, and the reason is a fact about their
+// corpus: `ape doctor` reds sit on the orchestrator's
+// never-worked-around list, so a class firing on all 296 or 483 stories
+// of a project mid-backfill would jam a gate nobody is allowed to route
+// around. Either the rule gets suspended in practice — teaching
+// operators that doctor reds are sometimes ignorable, permanently — or
+// every session escalates a red it cannot clear.
+func TestRequirementIDs_SilentByDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := writeStory(t, dir, "1-1.md", head("done")+conformingBody)
 
 	verdict := VerifyFile(path, apexcfg.Ext{})
-	require.Equal(t, FileOK, verdict.Code, "report-only must never decide an exit code")
+	require.Equal(t, FileOK, verdict.Code)
+	require.Empty(t, verdict.Flagged, "the advisory class must not appear unasked")
+}
 
-	var flagged bool
-	for _, f := range verdict.Flagged {
-		if f.Check == CheckRequirementIDsMissing {
-			flagged = true
-			require.Equal(t, "requirement_ids", f.Field)
-		}
-	}
-	require.True(t, flagged, "and it must still be reported: %+v", verdict.Flagged)
+// TestRequirementIDs_ReportedWhenAsked — fully visible to every consumer
+// whose job is to work the list. A work list nobody can see would not be
+// a work list; a work list that jams a gate is worse.
+func TestRequirementIDs_ReportedWhenAsked(t *testing.T) {
+	dir := t.TempDir()
+	path := writeStory(t, dir, "1-1.md", head("done")+conformingBody)
+
+	verdict := VerifyFileWith(path, apexcfg.Ext{}, VerifyOptions{IncludeAdvisory: true})
+	require.Equal(t, FileOK, verdict.Code, "asking for it must not make it gate")
+	require.Len(t, verdict.Flagged, 1)
+	require.Equal(t, CheckRequirementIDsMissing, verdict.Flagged[0].Check)
+	require.Equal(t, "requirement_ids", verdict.Flagged[0].Field)
 }
 
 // TestRequirementIDs_PresentIsSilent, including the shapes a corpus
@@ -490,7 +501,8 @@ func TestRequirementIDs_PresentIsSilent(t *testing.T) {
 			path := writeStory(t, dir, "s.md",
 				"---\nstory_id: 1-1\nepic: 1\nstatus: done\noutput_document: x.md\n"+
 					fm+"---\n"+conformingBody)
-			require.Empty(t, VerifyFile(path, apexcfg.Ext{}).Flagged)
+			require.Empty(t,
+				VerifyFileWith(path, apexcfg.Ext{}, VerifyOptions{IncludeAdvisory: true}).Flagged)
 		})
 	}
 }
@@ -504,7 +516,7 @@ func TestRequirementIDs_EmptyListCountsAsMissing(t *testing.T) {
 		"---\nstory_id: 1-1\nepic: 1\nstatus: done\noutput_document: x.md\n"+
 			"requirement_ids: []\n---\n"+conformingBody)
 
-	verdict := VerifyFile(path, apexcfg.Ext{})
+	verdict := VerifyFileWith(path, apexcfg.Ext{}, VerifyOptions{IncludeAdvisory: true})
 	require.Equal(t, FileOK, verdict.Code)
 	require.Len(t, verdict.Flagged, 1)
 	require.Equal(t, CheckRequirementIDsMissing, verdict.Flagged[0].Check)
@@ -512,8 +524,8 @@ func TestRequirementIDs_EmptyListCountsAsMissing(t *testing.T) {
 
 // TestRequirementIDs_HasNoFix — the value lives in the story's prose,
 // where two sections can disagree, and picking between them is the
-// judgement apex-frontmatter-repair exists to make. A --fix that guessed
-// would be the re-derivation that skill's contract forbids.
+// judgement apex-frontmatter-repair exists to make. --fix must not
+// invent one, and must not list a class it does not own either.
 func TestRequirementIDs_HasNoFix(t *testing.T) {
 	f := newFixture(t, "")
 	f.story("1-1_thing.md", "story_id: 1-1\nepic: 1\nstatus: done\noutput_document: x.md\n")
@@ -521,12 +533,36 @@ func TestRequirementIDs_HasNoFix(t *testing.T) {
 	res, err := FixCorpus(f.cfg, false)
 	require.NoError(t, err)
 	require.Empty(t, res.Changes, "--fix must not invent requirement ids")
-
-	var reported bool
 	for _, r := range res.Remaining {
-		if r.Check == CheckRequirementIDsMissing {
-			reported = true
-		}
+		require.False(t, IsAdvisory(r.Check),
+			"--fix owns no advisory class, so listing one would bury the actionable ones")
 	}
-	require.True(t, reported, "but it is reported as remaining — that is the work list")
+}
+
+// TestRequirementIDs_MigrationOrdering is the interaction the framework
+// flagged: v0.16.0's own migration entry is what clears this class, so
+// the runner that reports the work list and the migration that empties
+// it meet in the first release shipping both. Asserted here rather than
+// discovered in the gating eval.
+func TestRequirementIDs_MigrationOrdering(t *testing.T) {
+	f := newFixture(t, "")
+	f.story("1-1_thing.md", "story_id: 1-1\nepic: 1\nstatus: done\noutput_document: x.md\n")
+
+	// Before the backfill: silent by default, work list when asked.
+	quiet, err := VerifyCorpus(f.cfg)
+	require.NoError(t, err)
+	require.Empty(t, quiet.Findings, "a mid-migration project must not red a gate")
+
+	work, err := VerifyCorpusWith(f.cfg, VerifyOptions{IncludeAdvisory: true})
+	require.NoError(t, err)
+	require.Len(t, work.Findings, 1)
+	require.Equal(t, CheckRequirementIDsMissing, work.Findings[0].Check)
+
+	// After the backfill writes the field, the work list is empty.
+	f.story("1-1_thing.md",
+		"story_id: 1-1\nepic: 1\nstatus: done\nrequirement_ids: [FR-1]\n"+
+			"output_document: x.md\n")
+	done, err := VerifyCorpusWith(f.cfg, VerifyOptions{IncludeAdvisory: true})
+	require.NoError(t, err)
+	require.Empty(t, done.Findings, "the migration clears its own work list")
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -89,8 +90,52 @@ type ReportSummary struct {
 // OK reports whether the corpus is clean.
 func (r *Report) OK() bool { return len(r.Findings) == 0 }
 
-// VerifyCorpus checks every story under the implementation folder.
+// AdvisoryChecks are the classes that are reported only when a caller
+// asks for them, and are otherwise absent from every surface.
+//
+// # Why a class would ever be opt-in
+//
+// `story.requirement_ids_missing` fires on every story that has not been
+// backfilled — 296 stories on one real project, 483 on another — and it
+// stays that way for the whole migration. That is fine for the skill
+// whose job is to work the list, and not fine for `ape doctor`, whose
+// reds sit on the orchestrator's never-worked-around list: a conducting
+// session is forbidden from routing around them. A permanently-red gate
+// leaves exactly two outcomes, and both are worse than the finding:
+// either the rule is suspended in practice, which teaches operators that
+// doctor reds are sometimes ignorable, or every session escalates a red
+// nobody can clear.
+//
+// So the class is invisible to the gate whose job is to be trustworthy,
+// and fully visible to every consumer whose job is to work it —
+// `apex-frontmatter-repair` asks, a migration entry asks,
+// `ape story verify --include-advisory` asks. A work list nobody can see
+// would not be a work list; a work list that jams a gate is worse.
+func AdvisoryChecks() []string {
+	return []string{CheckRequirementIDsMissing}
+}
+
+// IsAdvisory reports whether a check is opt-in.
+func IsAdvisory(check string) bool {
+	return slices.Contains(AdvisoryChecks(), check)
+}
+
+// VerifyOptions controls which classes a corpus verify reports.
+type VerifyOptions struct {
+	// IncludeAdvisory adds the AdvisoryChecks classes to the report.
+	// Off by default: see AdvisoryChecks for why the default matters.
+	IncludeAdvisory bool
+}
+
+// VerifyCorpus checks every story under the implementation folder,
+// excluding the advisory classes.
 func VerifyCorpus(cfg *apexcfg.Resolved) (*Report, error) {
+	return VerifyCorpusWith(cfg, VerifyOptions{})
+}
+
+// VerifyCorpusWith is VerifyCorpus with the class selection made
+// explicit.
+func VerifyCorpusWith(cfg *apexcfg.Resolved, opts VerifyOptions) (*Report, error) {
 	root := cfg.Paths.Implementation
 	if root == "" {
 		return nil, errors.New(apexcfg.MsgImplementationFolderUnset)
@@ -127,7 +172,12 @@ func VerifyCorpus(cfg *apexcfg.Resolved) (*Report, error) {
 			continue
 		}
 		report.Summary.StoriesChecked++
-		report.Findings = append(report.Findings, checkStory(h, cfg.Ext, known)...)
+		for _, f := range checkStory(h, cfg.Ext, known) {
+			if IsAdvisory(f.Check) && !opts.IncludeAdvisory {
+				continue
+			}
+			report.Findings = append(report.Findings, f)
+		}
 	}
 	sortFindings(report.Findings)
 	report.Summary.Findings = len(report.Findings)
@@ -484,6 +534,13 @@ const (
 // has the list, and the check stays reproducible against a file outside
 // any project.
 func VerifyFile(path string, ext apexcfg.Ext) FileVerdict {
+	return VerifyFileWith(path, ext, VerifyOptions{})
+}
+
+// VerifyFileWith is VerifyFile with the class selection made explicit.
+// The advisory classes never affect the code either way; the option only
+// controls whether they are reported at all.
+func VerifyFileWith(path string, ext apexcfg.Ext, opts VerifyOptions) FileVerdict {
 	rel := path
 	h := readHead(path, rel)
 	if h.Err != nil {
@@ -518,9 +575,11 @@ func VerifyFile(path string, ext apexcfg.Ext) FileVerdict {
 		if f.Check == CheckUnresolvedRef {
 			continue
 		}
-		if f.Check == CheckRequirementIDsMissing {
-			// Report-only: surfaced, never gating. See the constant.
-			verdict.Flagged = append(verdict.Flagged, f)
+		if IsAdvisory(f.Check) {
+			// Opt-in and never gating. See AdvisoryChecks.
+			if opts.IncludeAdvisory {
+				verdict.Flagged = append(verdict.Flagged, f)
+			}
 			continue
 		}
 		verdict.Findings = append(verdict.Findings, f)

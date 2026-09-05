@@ -4834,6 +4834,7 @@ Flags:
 | `--cwd` | string | `—` | Project root (default: current working dir) |
 | `--file` | string | `—` | Verify one story file as a gate (exit 0/2/3) |
 | `--fix` | bool | `false` | Repair the findings with a single derivable answer (depends_on quoting), and report the rest |
+| `--include-advisory` | bool | `false` | Also report the advisory classes (story.requirement_ids_missing). Off by default: they fire on every story until a backfill completes, and `ape doctor` reds may not be worked around. |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) — NEVER set this from apex-review-story, apex-code-review or apex-epic-batch-review |
 

@@ -206,17 +206,24 @@ it would put prose in front of the check that enforces it.
 
   `story.requirement_ids_missing` fires on a story that declares no
   `requirement_ids` — the field the release record's coverage table reads.
-  **Report-only, with no `--fix`, and it never decides an exit code.** The
+  **Advisory: off by default behind `--include-advisory`, with no `--fix`,
+  and it never decides an exit code.** The
   value lives in the story's prose, where two sections can disagree, and
   choosing between them is the judgement `apex-frontmatter-repair` exists
   to make; a `--fix` that guessed would be exactly the re-derivation that
   skill's contract forbids. The class exists so that skill can branch on a
   check name like its other classes instead of globbing the corpus. It
-  fires on every story until the field is backfilled, which is the point
-  rather than a defect — but it is why gating on it would fail whole
-  corpora over a field mid-migration, and why `--file` reports it under
-  `flagged` instead. A present-but-empty list counts as missing: it
-  asserts nothing the coverage table can use.
+  fires on every story until the field is backfilled — hundreds on a real
+  corpus — which is why it is opt-in rather than merely non-gating.
+  `ape doctor` reds sit on the orchestrator's never-worked-around list, so
+  a class that cannot be cleared for the duration of a migration would
+  either get that rule suspended in practice, teaching operators that
+  doctor reds are sometimes ignorable, or force an escalation nobody can
+  act on. Invisible to the gate whose job is to be trustworthy; fully
+  visible to every consumer whose job is to work it —
+  `apex-frontmatter-repair` asks, a migration entry asks. A present-but-
+  empty list counts as missing: it asserts nothing the coverage table can
+  use.
 
   `ape deferred discard` had two fields asserting things that were not
   true. Its refusal on an already-closed record ended "reopen it first",

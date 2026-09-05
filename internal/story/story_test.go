@@ -88,19 +88,16 @@ func (f *fixture) seedRecords() {
 
 const allExts = "ext-adrs, ext-patterns, ext-capabilities, ext-features"
 
-// gating returns the findings that decide a verdict, dropping the
-// report-only advisory classes.
+// gating returns the findings that decide a verdict.
 //
-// story.requirement_ids_missing fires on any story without the key,
-// which is every story in every corpus until the field is backfilled —
-// that breadth is the point, since the class exists to be
-// apex-frontmatter-repair's work list. A test about which GATING classes
-// fire has to filter it out, or it is really asserting the state of a
-// backfill it does not care about.
+// Advisory classes are excluded from a default corpus verify, so this is
+// a no-op today. It stays as the explicit statement of what these tests
+// assert on, and so that a class added to AdvisoryChecks later cannot
+// quietly change what a count here means.
 func gating(findings []Finding) []Finding {
 	var out []Finding
 	for _, f := range findings {
-		if f.Check == CheckRequirementIDsMissing {
+		if IsAdvisory(f.Check) {
 			continue
 		}
 		out = append(out, f)
@@ -317,11 +314,8 @@ features:
 	require.NoError(t, err)
 	found := gating(report.Findings)
 	require.Len(t, found, 14, "exactly the 14 known failures: %+v", found)
-	// ByCheck counts the whole report, advisory classes included: every
-	// one of these 15 fixture stories also lacks requirement_ids.
-	require.Equal(t, 14, report.Summary.ByCheck[CheckExtKeyMissing])
-	require.Equal(t, 15, report.Summary.ByCheck[CheckRequirementIDsMissing],
-		"the advisory class fires on every story, which is what makes it a work list")
+	require.Equal(t, map[string]int{CheckExtKeyMissing: 14}, report.Summary.ByCheck,
+		"the advisory class is absent by default, so it cannot pad this count")
 
 	var featureGaps, capabilityGaps int
 	for _, finding := range report.Findings {

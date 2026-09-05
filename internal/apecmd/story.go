@@ -135,6 +135,7 @@ func newStoryVerifyCmd() *cobra.Command {
 		activeExts   string
 		fix          bool
 		fixCheck     bool
+		advisory     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "verify",
@@ -238,13 +239,14 @@ finding count did not fall.`,
 				if fix {
 					return errors.New("--fix is a corpus repair; drop --file")
 				}
-				return runStoryVerifyFile(cmd, fileFlag, activeExts, outputFormat)
+				return runStoryVerifyFile(cmd, fileFlag, activeExts, outputFormat, advisory)
 			}
 			if fix {
 				return runStoryFix(cmd.OutOrStdout(), cwdFlag, outputFormat, fixCheck)
 			}
 			cfg := resolveProjectConfig(cwdFlag)
-			report, err := story.VerifyCorpus(cfg)
+			report, err := story.VerifyCorpusWith(cfg,
+				story.VerifyOptions{IncludeAdvisory: advisory})
 			if err != nil {
 				return err
 			}
@@ -272,6 +274,10 @@ finding count did not fall.`,
 	cmd.Flags().BoolVar(&fixCheck, "check", false, "With --fix: report the repairs without writing")
 	cmd.Flags().StringVar(&activeExts, "active-extensions", "",
 		"Comma-separated active extensions for --file mode (e.g. ext-adrs,ext-features)")
+	cmd.Flags().BoolVar(&advisory, "include-advisory", false,
+		"Also report the advisory classes ("+strings.Join(story.AdvisoryChecks(), ", ")+
+			"). Off by default: they fire on every story until a backfill "+
+			"completes, and `ape doctor` reds may not be worked around.")
 	return cmd
 }
 
@@ -333,9 +339,9 @@ func sortedKeys(m map[string]int) []string {
 	return out
 }
 
-func runStoryVerifyFile(cmd *cobra.Command, path, activeExts, outputFormat string) error {
+func runStoryVerifyFile(cmd *cobra.Command, path, activeExts, outputFormat string, advisory bool) error {
 	ext := story.ParseActiveExtensions(activeExts)
-	verdict := story.VerifyFile(path, ext)
+	verdict := story.VerifyFileWith(path, ext, story.VerifyOptions{IncludeAdvisory: advisory})
 	format := output.Format(outputFormat)
 	switch {
 	case format != output.FormatHuman:
