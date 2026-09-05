@@ -394,6 +394,31 @@ it would put prose in front of the check that enforces it.
   `ape` names rather than which terminal the child is attached to. If it
   cannot be made, the run says so and proceeds unpinned.
 
+- **fix(framework): install `_apex/commit-owners.csv`, without which this
+  release's headline assertion never fires.** The framework ships the
+  commit-ownership roster and its own `_apex/README.md` lists it in the
+  installed folder structure beside `terminal-contracts.csv`. ape's
+  installer had an explicit list of framework-owned `_apex/` files and the
+  roster was not on it.
+
+  `ape task` reads the roster **from the project**, and an absent file
+  correctly means "this project has not adopted the declaration" — a
+  `skipped` verdict with a reason, never a conviction. Those two facts
+  compose into the worst possible outcome: on every project installed the
+  normal way the file was absent, every dispatch's assertion skipped, and
+  the skip looked exactly like the deliberate behaviour it is. The
+  assertion that lets the framework delete 85 `## Commit Policy` sections
+  would have been inert everywhere, reporting normally.
+
+  Installed on the same version-skew terms as every other optional
+  framework file: a framework that predates the roster installs none. The
+  update line now reports **both** directions — an absent roster is not a
+  quiet default when it disarms the check the release exists for.
+
+  Found by verifying the last unverified row of the greps table above,
+  which needed a real dispatch, which needed a project with a roster —
+  and there was no way to get one.
+
 - **fix(story): a governance class that did not run says so.**
   `ape story verify --file` gates the two ADR classes on `ext-adrs`, which
   in `--file` mode comes from `--active-extensions` alone. When the

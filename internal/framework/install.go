@@ -111,6 +111,10 @@ type UpdateSummary struct {
 	// framework predates it — version-skew suppression, not a failure;
 	// ape then runs no contract check.
 	TerminalContractsInstalled bool `json:"terminalContractsInstalled" yaml:"terminalContractsInstalled"`
+	// CommitOwnersInstalled reports whether the framework carried a
+	// commit-ownership roster to install. False on a framework that
+	// predates it — the dispatch assertion then skips, with a reason.
+	CommitOwnersInstalled bool `json:"commitOwnersInstalled" yaml:"commitOwnersInstalled"`
 
 	// ApeCommandsInstalled reports whether the framework carried the
 	// required-command-surface manifest (_apex/ape-commands.yaml). False
@@ -311,6 +315,10 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if err != nil {
 		return nil, err
 	}
+	commitOwnersInstalled, err := installCommitOwners(opts.FrameworkRepo, opts.ProjectRoot)
+	if err != nil {
+		return nil, err
+	}
 	contractsInstalled, err := installTerminalContracts(opts.FrameworkRepo, opts.ProjectRoot)
 	if err != nil {
 		return nil, err
@@ -406,6 +414,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			ManagedBlockUpdated:     opRules.BlockUpdated,
 
 			TerminalContractsInstalled: contractsInstalled,
+			CommitOwnersInstalled:      commitOwnersInstalled,
 			ApeCommandsInstalled:       apeCommandsInstalled,
 			AboardRecipesInstalled:     len(aboardRecipes),
 			AboardRecipePaths:          aboardRecipes,
@@ -441,6 +450,28 @@ func installTerminalContracts(frameworkRepo, projectRoot string) (bool, error) {
 	dst := filepath.Join(projectRoot, ProjectTerminalContracts)
 	if err := CopyFile(src, dst); err != nil {
 		return false, fmt.Errorf("copy terminal-contracts table: %w", err)
+	}
+	return true, nil
+}
+
+// installCommitOwners copies the framework's commit-ownership roster into
+// the project — the file `ape task` reads per dispatch to decide whether a
+// skill is allowed to commit, and in what shape.
+//
+// Same version-skew suppression as installTerminalContracts: a framework
+// that predates the roster installs none, and the runner then reports every
+// dispatch's assertion as skipped rather than convicting on no evidence.
+func installCommitOwners(frameworkRepo, projectRoot string) (bool, error) {
+	src := filepath.Join(frameworkRepo, SubtreeCommitOwners)
+	if _, err := os.Stat(src); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat commit-owners roster: %w", err)
+	}
+	dst := filepath.Join(projectRoot, ProjectCommitOwners)
+	if err := CopyFile(src, dst); err != nil {
+		return false, fmt.Errorf("copy commit-owners roster: %w", err)
 	}
 	return true, nil
 }

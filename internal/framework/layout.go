@@ -44,6 +44,22 @@ const (
 	// Optional in the framework repo, on the same version-skew terms as
 	// SubtreeOperatingRules and SubtreeTerminalContracts.
 	SubtreeApeCommands = "_apex/ape-commands.yaml"
+	// SubtreeCommitOwners is the framework-owned roster of which skills
+	// commit and in what subject shape — the file `ape task`'s per-dispatch
+	// commit-ownership assertion reads (PLAN-26 D2).
+	//
+	// It MUST be installed, and that is not obvious from ape's side: the
+	// assertion reads it from the PROJECT, and an absent file means "this
+	// project has not adopted the declaration", which the runner correctly
+	// reports as `skipped`. So a framework that ships the roster while ape
+	// declines to copy it produces a release where the assertion never
+	// fires anywhere and says so in a way that reads like normal
+	// operation — the deletion of 85 `## Commit Policy` sections would
+	// land on a check that is permanently inert.
+	//
+	// Optional in the framework repo, on the same version-skew terms as
+	// the three above.
+	SubtreeCommitOwners = "_apex/commit-owners.csv"
 	// SubtreeAboardRecipes is the framework's curated `ape aboard` recipe
 	// library — markdown methods for one board move each, which the board
 	// discovers from the project.
@@ -81,6 +97,10 @@ const (
 	// ProjectApeCommands is where the required-command-surface manifest
 	// lands in the project. Absent = the framework predates the contract.
 	ProjectApeCommands = "_apex/ape-commands.yaml"
+	// ProjectCommitOwners is where the commit-ownership roster lands.
+	// Absent = the project has not adopted the declaration, and every
+	// dispatch's assertion is skipped with a reason.
+	ProjectCommitOwners = "_apex/commit-owners.csv"
 	// ProjectAboardRecipesDir is where the framework's recipe library lands.
 	// The path is aboard's to define, not ape's — the board walks up looking
 	// for exactly this directory, so it is the same string on both sides and

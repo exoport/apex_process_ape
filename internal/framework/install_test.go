@@ -743,3 +743,85 @@ func TestUpdate_PicksUpApeCommandsManifestAddedLater(t *testing.T) {
 	require.True(t, res.Summary.ApeCommandsInstalled)
 	require.FileExists(t, filepath.Join(proj, framework.ProjectApeCommands))
 }
+
+// commitOwnersRoster is the framework's own roster shape.
+const commitOwnersRoster = `skill,commit_kind,message_regex
+apex-story-batch-dev,dev,^dev: story \d+\.\d+ [a-z0-9 ]+$
+apex-orchestrator,release,^release: .+$
+`
+
+// TestSetup_InstallsCommitOwnersRoster is the delivery half of PLAN-26's
+// dispatch assertion, and it was missing.
+//
+// `ape task` reads `_apex/commit-owners.csv` FROM THE PROJECT, and an
+// absent file correctly means "this project has not adopted the
+// declaration" — reported as a skip, never a conviction. So an installer
+// that does not copy the roster produces a release in which the assertion
+// never fires on any project and says so in a way that reads like normal
+// operation. The framework's own `_apex/README.md` lists the file in the
+// installed folder structure beside terminal-contracts.csv.
+func TestSetup_InstallsCommitOwnersRoster(t *testing.T) {
+	t.Parallel()
+	fw, proj := t.TempDir(), t.TempDir()
+	fakeFramework(t, fw, "v0.16.0")
+	require.NoError(t, os.WriteFile(
+		filepath.Join(fw, framework.SubtreeCommitOwners), []byte(commitOwnersRoster), 0o644,
+	))
+	commitAll(t, fw, "ship the commit-owners roster")
+
+	res, err := framework.Setup(context.Background(), &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "test", Bootstrapper: framework.NoopBootstrapper{},
+	})
+	require.NoError(t, err)
+	require.True(t, res.Summary.CommitOwnersInstalled)
+
+	got, err := os.ReadFile(filepath.Join(proj, framework.ProjectCommitOwners))
+	require.NoError(t, err)
+	require.Equal(t, commitOwnersRoster, string(got), "copied byte-for-byte")
+}
+
+// A framework that predates the roster installs nothing and does not
+// fail — the same version-skew terms as every other optional file here.
+func TestSetup_CommitOwnersRosterAbsentIsNotAFailure(t *testing.T) {
+	t.Parallel()
+	fw, proj := t.TempDir(), t.TempDir()
+	fakeFramework(t, fw, "v0.15.0")
+
+	res, err := framework.Setup(context.Background(), &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "test", Bootstrapper: framework.NoopBootstrapper{},
+	})
+	require.NoError(t, err)
+	require.False(t, res.Summary.CommitOwnersInstalled)
+	require.NoFileExists(t, filepath.Join(proj, framework.ProjectCommitOwners))
+}
+
+// A project set up against an older framework gains the roster on the
+// next `update`, with no ape release in between — which is the path every
+// existing project takes to the v0.0.67 assertion actually firing.
+func TestUpdate_PicksUpCommitOwnersRosterAddedLater(t *testing.T) {
+	t.Parallel()
+	fw, proj := t.TempDir(), t.TempDir()
+	fakeFramework(t, fw, "v0.15.0")
+
+	_, err := framework.Setup(context.Background(), &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "test", Bootstrapper: framework.NoopBootstrapper{},
+	})
+	require.NoError(t, err)
+	require.NoFileExists(t, filepath.Join(proj, framework.ProjectCommitOwners))
+
+	require.NoError(t, os.WriteFile(
+		filepath.Join(fw, framework.SubtreeCommitOwners), []byte(commitOwnersRoster), 0o644,
+	))
+	commitAll(t, fw, "ship the commit-owners roster")
+
+	res, err := framework.Update(context.Background(), &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "test", Bootstrapper: framework.NoopBootstrapper{},
+	})
+	require.NoError(t, err)
+	require.True(t, res.Summary.CommitOwnersInstalled)
+	require.FileExists(t, filepath.Join(proj, framework.ProjectCommitOwners))
+}

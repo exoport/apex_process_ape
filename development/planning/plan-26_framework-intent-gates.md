@@ -137,6 +137,27 @@ the three story fixtures for `adrs_applicable`, the absent ADR id and the propos
 **authored on the framework/eval side** as part of 6b, 9.12b and 13.3b, once this tag exists.
 This repo writes its own `testdata/` fixtures and does not touch the eval repo.
 
+### D2 delivery: the roster has to REACH the project
+
+Found late, by trying to verify the one row of the release notes that needed a real dispatch — which
+needed a project carrying `_apex/commit-owners.csv`, and there was no way to get one.
+
+`ape framework setup|update` copies an explicit list of framework-owned `_apex/` files
+(`apex-operating-rules.md`, `terminal-contracts.csv`, `ape-commands.yaml`, `aboard/recipes/`,
+`pipelines/`). **`commit-owners.csv` was not on that list**, although the framework ships it and its
+own `_apex/README.md` documents it in the installed folder structure beside `terminal-contracts.csv`,
+"read by the runner".
+
+The two halves compose into the worst available outcome. `ape task` reads the roster **from the
+project**, and D2's own correction says an absent file means "this project has not adopted the
+declaration" — `skipped`, with a reason, never a conviction. So on every project installed the normal
+way the roster was absent, every dispatch skipped, and the skip was indistinguishable from the
+deliberate behaviour it is. Floor 1 — the assertion PLAN-64 5b's 85 `## Commit Policy` deletions land
+on — would have been **inert everywhere while reporting normally**.
+
+Installed now on the same version-skew terms as the rest, and the update line reports BOTH directions:
+an absent roster is not a quiet default when it disarms the check the release exists for.
+
 ## The story-shape classes
 
 `ape story verify --file` gains the classes below. **`--file` mode only**: the corpus scan

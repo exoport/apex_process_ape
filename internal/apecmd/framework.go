@@ -537,6 +537,18 @@ func printFrameworkUpdate(out *frameworkUpdateOutput, format output.Format) erro
 		case out.Summary.OperatingRulesSkipped:
 			fmt.Println("Op-rules:  skipped (framework predates the operating-rules fragment)")
 		}
+		// Reported in BOTH directions, unlike the lines around it. An
+		// absent roster is not a quiet default: it makes every dispatch's
+		// commit-ownership assertion skip, and a release whose headline
+		// check never fires should say so on the run that would have
+		// installed it.
+		if out.Summary.CommitOwnersInstalled {
+			fmt.Printf("Commits:   %s installed — per-dispatch commit ownership is asserted\n",
+				framework.ProjectCommitOwners)
+		} else {
+			fmt.Printf("Commits:   no %s in the framework — every dispatch's commit-ownership assertion will SKIP\n",
+				framework.SubtreeCommitOwners)
+		}
 		if out.Summary.GitignoreLockAdded {
 			// Reported only when it wrote. ape edited a file the operator
 			// owns, so it says so; on every subsequent run the entry is
