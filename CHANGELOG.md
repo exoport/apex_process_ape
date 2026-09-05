@@ -11,7 +11,9 @@
 The exact surfaces the framework's blocked acceptance blocks assert
 against, quoted so they can be matched without reading the source. **Every
 string below was run against the built binary**, not transcribed from the
-source.
+source — including the dispatch row, verified with two live `ape task`
+runs against a project carrying the roster: one that asserted and held,
+one that asserted nothing and said so.
 
 > **The three governance rows need `--active-extensions ext-adrs`.** The
 > classes are gated on the extension, and `--file` mode takes it from that
@@ -30,7 +32,7 @@ source.
 | `ape story verify --file <story declaring adrs_applicable 0 against a non-zero tag match> --active-extensions ext-adrs` | non-zero (**4**); `adrs_applicable is 0 but the recomputed adrs_considered is 1 — the digest pass certified that none of 1 candidate ADRs applies, which is the one judgement it cannot make silently`. Never the words "applicability mismatch" |
 | `ape story verify --file <story citing a governance.adrs id absent at HEAD> --active-extensions ext-adrs` | non-zero (**4**); `ADR-9999 does not resolve to an ADR at HEAD` |
 | `ape story verify --file <otherwise-clean story citing a proposed ADR> --active-extensions ext-adrs` | **exit 0**, reported under `flagged`: `ADR-0004 resolves to an ADR whose status is "proposed", not accepted — reported, not gated`. The story must be otherwise clean — any other body finding makes the exit 4 for its own reasons |
-| a non-committer dispatch | HEAD unchanged, no path staged that was not staged before, stash unchanged; the verdict rides `ape task --output-format json` as `commit_contract` |
+| a non-committer dispatch — `ape task <skill absent from the roster> --output-format json` | exit **0**; `"commit_contract": {"skill":"<skill>","declared":false}` — the assertion RAN and held: HEAD unchanged, no path staged that was not staged before, stash unchanged. **Assert that shape, not the exit code**: a dispatch that asserted nothing is also exit 0, and carries `"skipped":true` with a `skip_reason` instead. The project must have `_apex/commit-owners.csv` installed or every dispatch skips |
 
 The new `story verify` check-class names, in full:
 `story.section_missing`, `story.file_list_marker`,
