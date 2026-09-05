@@ -99,6 +99,31 @@ error (no _apex/config.yaml, bad cwd).`,
 	return cmd
 }
 
+// chatSpawnEnv composes the environment `ape chat` hands claude, in the
+// order the three parts have to be applied.
+//
+// Extracted so it can be asserted. It had no test at all and neither did
+// the command around it, which is how the `ape` pin reached this path
+// verified only by the fact that it compiled.
+//
+//  1. ScrubClaudeCodeEnv drops the parent session's nesting markers, or
+//     the child suppresses transcript persistence. TMUX/TMUX_PANE are
+//     deliberately NOT stripped here — the child really is in the
+//     inherited pane on this path.
+//  2. selfpath.Pin puts THIS binary at the front of PATH as `ape`, so a
+//     skill shelling out inside the session gets the binary hosting it.
+//  3. The effort level goes LAST, after the scrub that would otherwise
+//     have removed it, so the caller's value is authoritative and
+//     propagates to sub-agents. Empty means claude's native effort, which
+//     is the interactive default — unlike the autonomous paths.
+func chatSpawnEnv(base []string, effortArg string) (env []string, unpin func(), notice string) {
+	env, unpin, notice = selfpath.Pin(repl.ScrubClaudeCodeEnv(base))
+	if effortArg != "" {
+		env = append(env, repl.EnvClaudeEffortLevel+"="+effortArg)
+	}
+	return env, unpin, notice
+}
+
 // runChat wires the bridge runtime, then exec's claude as a foreground
 // child with stdio inherited so the user can drive the REPL directly.
 // Returns when claude exits.
@@ -208,20 +233,12 @@ func runChat(
 	// `ape` exactly as one inside a dispatch does, and without the pin it
 	// gets whatever the machine has installed rather than the binary
 	// hosting the session. See internal/selfpath.
-	env, unpin, pathNotice := selfpath.Pin(repl.ScrubClaudeCodeEnv(os.Environ()))
+	env, unpin, pathNotice := chatSpawnEnv(os.Environ(), effortArg)
 	defer unpin()
 	if pathNotice != "" {
 		fmt.Fprintf(os.Stderr, "ape chat: %s\n", pathNotice)
 	}
 	claude.Env = env
-	// Interactive chat keeps claude's NATIVE effort when --effort is unset —
-	// unlike the autonomous pipeline/task/prompt paths, which default to
-	// repl.DefaultEffort. Only inject CLAUDE_CODE_EFFORT_LEVEL (after the
-	// scrub, so it's authoritative and propagates to sub-agents) when the user
-	// asked for a specific level.
-	if effortArg != "" {
-		claude.Env = append(claude.Env, repl.EnvClaudeEffortLevel+"="+effortArg)
-	}
 	claude.Stdin = os.Stdin
 	claude.Stdout = os.Stdout
 	claude.Stderr = os.Stderr
