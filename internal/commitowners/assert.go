@@ -133,6 +133,20 @@ type Result struct {
 // assertion is not OK-by-default: callers branch on Skipped separately.
 func (r Result) OK() bool { return len(r.Violations) == 0 }
 
+// Skipped builds the verdict for a dispatch whose assertion was never
+// ATTEMPTED, as distinct from one that ran and found nothing.
+//
+// It exists because the zero Result is the wrong thing to emit there.
+// `{"skill":"","declared":false}` marshals with no violations and OK()
+// true, so a consumer reads "the non-committer assertion ran and was
+// clean" — a pass nobody earned, on a dispatch where nothing was checked.
+// The envelope field's own contract is that a consumer must be able to
+// tell "asserted and clean" from "could not assert"; a zero value defeats
+// exactly that.
+func Skipped(skill, reason string) Result {
+	return Result{Skill: skill, Skipped: true, SkipReason: reason}
+}
+
 // Assert compares the state before and after a dispatch of skill against
 // the table's declaration.
 //

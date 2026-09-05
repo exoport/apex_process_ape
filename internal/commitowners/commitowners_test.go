@@ -2,6 +2,7 @@ package commitowners
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -459,4 +460,33 @@ func TestAssert_DeclaredNonCommitterStillEnforced(t *testing.T) {
 	require.False(t, res.OK(), "a declared non-committer that commits is still a violation")
 	require.False(t, res.Skipped)
 	require.Equal(t, CheckHeadMoved, res.Violations[0].Check)
+}
+
+// TestSkipped_IsNotAZeroResult is the distinction the envelope's own
+// contract rests on: a consumer must be able to tell "asserted and clean"
+// from "could not assert".
+//
+// The zero Result defeats that. It marshals as
+// `{"skill":"","declared":false}` — no violations, OK() true, Skipped
+// false — which reads as a clean non-committer assertion. `ape task
+// --task-commit` used to emit exactly that, on the one path where nothing
+// is asserted at all.
+func TestSkipped_IsNotAZeroResult(t *testing.T) {
+	var zero Result
+	require.True(t, zero.OK(), "the zero value reads as a pass, which is the hazard")
+	require.False(t, zero.Skipped)
+
+	got := Skipped("apex-shard-doc", "--task-commit: ape makes the commit")
+	require.True(t, got.Skipped)
+	require.Equal(t, "apex-shard-doc", got.Skill, "a skip still names the dispatch it is about")
+	require.Contains(t, got.SkipReason, "--task-commit")
+
+	blob, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.Contains(t, string(blob), `"skipped":true`)
+	require.Contains(t, string(blob), `"skip_reason"`)
+
+	// A skip carries no violations, so it must not fail the run — the
+	// caller branches on Skipped, never on OK() alone.
+	require.True(t, got.OK())
 }

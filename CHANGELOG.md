@@ -394,6 +394,26 @@ it would put prose in front of the check that enforces it.
   `ape` names rather than which terminal the child is attached to. If it
   cannot be made, the run says so and proceeds unpinned.
 
+- **fix(task): `--task-commit` reported a commit-contract pass it never
+  ran.** On that path ape makes the dispatch's own commit, so the skill's
+  declaration cannot be asserted against the range — deliberately. But the
+  verdict was left as the **zero** `Result`, which marshals as
+  `{"skill":"","declared":false}`: no violations, `OK()` true, `skipped`
+  absent. A consumer reads that as "the non-committer assertion ran and was
+  clean". Nothing was asserted at all.
+
+  That directly contradicts the envelope field's own documented contract —
+  "a consumer must be able to tell 'asserted and clean' from 'could not
+  assert', and a field that appears only on failure cannot". It now emits
+  an explicit skip naming the skill and the reason, through a new
+  `commitowners.Skipped` so the shape lives in one place.
+
+  Found while writing the first tests for `commit_contract` at all: the
+  key the framework's acceptance block greps for existed in one struct tag
+  and one CHANGELOG line, with nothing tying them together. It now has
+  three — the key by name, a clean verdict still being emitted, and a skip
+  not marshalling like a pass.
+
 - **fix(framework): install `_apex/commit-owners.csv`, without which this
   release's headline assertion never fires.** The framework ships the
   commit-ownership roster and its own `_apex/README.md` lists it in the

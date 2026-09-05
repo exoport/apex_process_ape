@@ -418,6 +418,15 @@ func runTask(ctx context.Context, o taskOptions) error {
 	if o.taskCommit == nil {
 		contract = owners.Assert(o.skill, stateBefore,
 			commitowners.Capture(ctx, o.projectRoot), subjects)
+	} else {
+		// Explicitly skipped, never left as the zero Result. The zero
+		// value marshals as `{"skill":"","declared":false}` with no
+		// violations, which a consumer reads as "the non-committer
+		// assertion ran and was clean" — a pass nobody earned on a
+		// dispatch where nothing was asserted at all.
+		contract = commitowners.Skipped(o.skill,
+			"--task-commit: ape makes this dispatch's commit itself, "+
+				"so the skill's declaration cannot be asserted against the range")
 	}
 
 	exitCode := taskExitCode(runErr)
