@@ -1,10 +1,15 @@
 package repl
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/exoport/apex_process_ape/internal/selfpath"
+	"github.com/stretchr/testify/require"
 )
 
 // goosWindows names the GOOS these POSIX-PTY tests skip on.
@@ -278,4 +283,53 @@ func TestNewSessionScrubsTmuxEnv(t *testing.T) {
 	if !strings.Contains(strings.Join(s.cmd.Env, "\n"), "ANTHROPIC_API_KEY=keep-me") {
 		t.Fatalf("child env lost ANTHROPIC_API_KEY (auth must pass through)")
 	}
+}
+
+// TestSpawnEnv_PinsThisBinaryAsApe covers the composition at the spawn
+// site: the scrubbers run, and then `ape` is pinned to this binary.
+//
+// The defect it guards, observed live rather than reasoned about: ape
+// 0.0.67 spawned a session and `ape version` inside it reported 0.0.56,
+// because 69 framework skill files run `ape …` lines that resolve through
+// the operator's PATH. The framework declares a version FLOOR, and a
+// skill running a pre-floor binary inside a dispatch by the post-floor
+// one makes the floor unenforceable from the inside.
+//
+// Asserted on the composition rather than on a live session, because a
+// live one costs a real Claude Code run; the end-to-end observation is
+// recorded in the commit message and was re-made by hand after the fix.
+func TestSpawnEnv_PinsThisBinaryAsApe(t *testing.T) {
+	base := scrubTmuxEnv(ScrubClaudeCodeEnv([]string{
+		"PATH=/stale/bin:/usr/bin",
+		"TMUX=/tmp/tmux-1000/default,123,0",
+		"CLAUDECODE=1",
+		"HOME=/h",
+	}))
+	env, unpin, notice := selfpath.Pin(base)
+	defer unpin()
+	require.Empty(t, notice)
+
+	var pathValue string
+	for _, kv := range env {
+		if after, ok := strings.CutPrefix(kv, "PATH="); ok {
+			pathValue = after
+		}
+	}
+	require.NotEmpty(t, pathValue)
+
+	first, rest, _ := strings.Cut(pathValue, string(os.PathListSeparator))
+	require.Equal(t, "/stale/bin:/usr/bin", rest, "the operator's PATH is preserved behind the pin")
+
+	pinned := filepath.Join(first, selfpath.Name)
+	require.FileExists(t, pinned, "`ape` resolves to the pin before /stale/bin")
+
+	// The scrubbers still did their jobs — the pin composes with them
+	// rather than replacing the env.
+	joined := strings.Join(env, "\n")
+	require.NotContains(t, joined, "TMUX=")
+	require.NotContains(t, joined, "CLAUDECODE=")
+	require.Contains(t, joined, "HOME=/h")
+
+	unpin()
+	require.NoFileExists(t, pinned, "the shadow is removed when the session is reaped")
 }

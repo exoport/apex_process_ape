@@ -145,6 +145,36 @@ above for an ape-spawned claude (e.g. `CLAUDE_CODE_MAX_OUTPUT_TOKENS`), the
 scrub removes it along with the nesting markers — configure the equivalent
 via claude settings files or ape flags instead.
 
+### `PATH`: `ape` inside a session is *this* ape
+
+One variable is added rather than removed. Every spawned session gets a
+one-entry directory at the front of `PATH` in which `ape` is the binary
+that spawned it, and it is removed when the session is reaped.
+
+Without it, the ~69 framework skill files that run `ape …` lines resolve
+`ape` through the operator's `PATH` — which is whatever the machine has
+installed, and need not be the binary running the dispatch. Observed on a
+development machine with both `~/go/bin/ape` and `/usr/local/bin/ape`
+present: `ape` 0.0.67 spawned a session and `ape version` *inside* that
+session reported **0.0.56**.
+
+That matters because the framework declares an `ape` **version floor**. A
+skill running a pre-floor binary inside a dispatch by the post-floor one
+makes the floor unenforceable from the inside, and it does so silently —
+a stale binary that is merely old still has the commands, still emits
+valid output, and simply answers about a world where the newer checks do
+not exist. A *missing* command would have errored and been caught.
+
+The pin applies to the PTY path and to `ape chat` alike; unlike the tmux
+scrub, there is no asymmetry, because this is about which binary `ape`
+names rather than which terminal the child is attached to. If the pin
+cannot be made, the run says so and proceeds unpinned — proceeding
+unpinned *silently* is the failure it exists to prevent.
+
+The framework's own eval harness reached the same remedy independently
+(`apex_eval/runner.py:_pin_ape_on_path`), after observing v0.0.52 answering
+for a much newer binary on the same machine.
+
 ## Related
 
 - [claude-spawn-modes.md](claude-spawn-modes.md) — how and when ape spawns

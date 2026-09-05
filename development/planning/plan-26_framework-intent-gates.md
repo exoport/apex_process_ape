@@ -340,7 +340,25 @@ watches. The corrected mapping is the convention `grep -q`, `jq -e` and `test` a
 means a framework check must exit 1 for "no" — `test -f x && grep -q y x`, never a bare
 `grep -q y x`, which exits 2 when the file is absent.
 
-**`ape` inside a check is the running binary.** Checks and commands run with a one-entry shadow
+**`ape` inside anything `ape` starts is the running binary** — the migration runner's checks *and*
+every spawned session. `internal/selfpath` owns the one-entry PATH shadow both use.
+
+The second half was found by taking the first seriously one layer up, and it is the larger of the
+two: ~69 framework skill files run `ape …` lines inside a dispatched session, and those resolved
+through the operator's PATH. Verified live — `ape 0.0.67` spawned a session and `ape version`
+inside it reported **0.0.56**. This release exists to raise the framework's version floor, so a
+skill running a pre-floor binary inside a dispatch by the post-floor one makes the floor
+unenforceable from the inside, silently, because a merely-old binary still has the commands and
+still answers coherently. The framework's own eval harness had reached the same remedy
+independently eight weeks earlier (`apex_eval/runner.py:_pin_ape_on_path`, observing v0.0.52 on
+the same machine), which neither side knew until the two findings were compared.
+
+Covers the PTY path and `ape chat` alike. Unlike the tmux scrub the two are NOT asymmetric here:
+that one is about which terminal the child is attached to, this one about which binary `ape`
+names. The shadow is removed when the session is reaped, and a pin that cannot be made is reported
+rather than silently skipped.
+
+ Checks and commands run with a one-entry shadow
 directory at the front of `PATH`, in which `ape` is a link to `os.Executable()`. Found by running
 the framework's *authored* entry — `framework/_apex/migrations/v0.16.0_seq-01_retro-rows-per-epic.md`
 — against a real machine rather than a fixture of it. Its check is

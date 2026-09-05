@@ -1,7 +1,9 @@
-package migration
+package selfpath
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -38,24 +40,23 @@ func TestSelfShadow_TheDecoyOnPathLoses(t *testing.T) {
 		t.Skip("the framework's migration lines are POSIX shell")
 	}
 	decoyDir := filepath.Join(t.TempDir(), "stale-bin")
-	writeScript(t, decoyDir, SelfName, `echo STALE`)
+	writeScript(t, decoyDir, Name, `echo STALE`)
 
 	current := writeScript(t, filepath.Join(t.TempDir(), "current"), "the-real-one", `echo CURRENT`)
-	shadowDir, cleanup, err := selfShadow(current)
+	shadowDir, cleanup, err := shadow(current)
 	require.NoError(t, err)
 	defer cleanup()
 
 	env := prependPath(append(os.Environ(), "PATH="+decoyDir), shadowDir)
 	out := filepath.Join(t.TempDir(), "seen")
-	code, err := ShellRunner{Env: env}.Run(t.Context(), t.TempDir(),
-		SelfName+" > "+out)
+	code, err := runLine(t, env, Name+" > "+out)
 	require.NoError(t, err)
 	require.Equal(t, 0, code)
 
 	seen, err := os.ReadFile(out)
 	require.NoError(t, err)
 	require.Equal(t, "CURRENT", strings.TrimSpace(string(seen)),
-		"a check naming %q must be answered by the binary running the migration", SelfName)
+		"a check naming %q must be answered by the binary running the migration", Name)
 }
 
 // TestSelfShadow_WithoutItTheDecoyWins is the other half: the same setup
@@ -66,11 +67,11 @@ func TestSelfShadow_WithoutItTheDecoyWins(t *testing.T) {
 		t.Skip("the framework's migration lines are POSIX shell")
 	}
 	decoyDir := filepath.Join(t.TempDir(), "stale-bin")
-	writeScript(t, decoyDir, SelfName, `echo STALE`)
+	writeScript(t, decoyDir, Name, `echo STALE`)
 
 	out := filepath.Join(t.TempDir(), "seen")
 	env := prependPath(os.Environ(), decoyDir)
-	code, err := ShellRunner{Env: env}.Run(t.Context(), t.TempDir(), SelfName+" > "+out)
+	code, err := runLine(t, env, Name+" > "+out)
 	require.NoError(t, err)
 	require.Equal(t, 0, code)
 
@@ -83,14 +84,14 @@ func TestSelfShadow_WithoutItTheDecoyWins(t *testing.T) {
 // so nothing else on PATH changes resolution order.
 func TestSelfShadow_ShadowsOnlyItsOwnName(t *testing.T) {
 	current := writeScript(t, filepath.Join(t.TempDir(), "current"), "the-real-one", `echo CURRENT`)
-	dir, cleanup, err := selfShadow(current)
+	dir, cleanup, err := shadow(current)
 	require.NoError(t, err)
 	defer cleanup()
 
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
-	require.Equal(t, SelfName+exeSuffix(), entries[0].Name())
+	require.Equal(t, Name+exeSuffix(), entries[0].Name())
 
 	cleanup()
 	require.NoDirExists(t, dir)
@@ -112,18 +113,18 @@ func TestPrependPath(t *testing.T) {
 	require.Contains(t, got, "PATH=/shadow")
 }
 
-// TestNewShellRunner_ShadowsThisBinary: the exported constructor arranges
-// the shadow and reports no notice when it succeeds. A notice is not a
+// TestPin_ShadowsThisBinary: the exported entry point arranges the
+// shadow and reports no notice when it succeeds. A notice is not a
 // failure — it is the fallback being visible, which is the point, since
 // running with the wrong `ape` SILENTLY is the defect.
-func TestNewShellRunner_ShadowsThisBinary(t *testing.T) {
-	runner, cleanup, notice := NewShellRunner()
+func TestPin_ShadowsThisBinary(t *testing.T) {
+	env, cleanup, notice := Pin(os.Environ())
 	defer cleanup()
 	require.Empty(t, notice)
-	require.NotEmpty(t, runner.Env)
+	require.NotEmpty(t, env)
 
 	var pathValue string
-	for _, kv := range runner.Env {
+	for _, kv := range env {
 		if after, ok := strings.CutPrefix(kv, "PATH="); ok {
 			pathValue = after
 			break
@@ -131,12 +132,22 @@ func TestNewShellRunner_ShadowsThisBinary(t *testing.T) {
 	}
 	require.NotEmpty(t, pathValue)
 	first, _, _ := strings.Cut(pathValue, string(os.PathListSeparator))
-	require.FileExists(t, filepath.Join(first, SelfName+exeSuffix()))
+	require.FileExists(t, filepath.Join(first, Name+exeSuffix()))
 }
 
-func exeSuffix() string {
-	if runtime.GOOS == "windows" {
-		return ".exe"
+// runLine executes one shell line with env and returns its exit code.
+// A local helper rather than a dependency on any runner, so this package
+// tests its own contract.
+func runLine(t *testing.T, env []string, line string) (int, error) {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "sh", "-c", line)
+	cmd.Dir = t.TempDir()
+	cmd.Env = env
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+			return exitErr.ExitCode(), nil
+		}
+		return -1, err
 	}
-	return ""
+	return 0, nil
 }

@@ -351,6 +351,36 @@ it would put prose in front of the check that enforces it.
   report the others. The key set is pinned against the framework's own
   record template, confirmed final for framework v0.16.0.
 
+- **fix(repl,chat): `ape` inside a spawned session is the binary that
+  spawned it.** Every session ape starts now gets a one-entry directory at
+  the front of `PATH` in which `ape` is this binary, removed when the
+  session is reaped.
+
+  About 69 framework skill files run `ape …` lines, and those resolved
+  through the operator's `PATH` — whatever the machine has installed,
+  which need not be the binary running the dispatch. Observed live on a
+  machine carrying both `~/go/bin/ape` and `/usr/local/bin/ape`: **ape
+  0.0.67 spawned a session and `ape version` inside it reported 0.0.56.**
+
+  This release exists to raise the framework's `ape` **version floor**, so
+  a skill running a pre-floor binary inside a dispatch by the post-floor
+  one makes that floor unenforceable from the inside. And it fails
+  silently: a merely-old binary still has the commands, still emits valid
+  output, and answers about a world where the newer checks do not exist. A
+  *missing* command would have errored and been caught — the third time in
+  this release that a coherent wrong answer beat a loud failure.
+
+  Found by extending the migration-runner fix below one layer up, after
+  the framework session confirmed the stale binary was the machine's
+  default rather than an artifact of one probe. The framework's own eval
+  harness had reached the same remedy independently eight weeks earlier
+  (`_pin_ape_on_path`, observing v0.0.52), which neither side knew.
+
+  The pin covers the PTY path and `ape chat` alike — unlike the tmux
+  scrub, there is no asymmetry here, because this is about which binary
+  `ape` names rather than which terminal the child is attached to. If it
+  cannot be made, the run says so and proceeds unpinned.
+
 - **feat(sprint): a `sprint.epic_without_retro` check class.** One finding
   per epic carrying no `epic-N-retrospective` row, in a command that
   already always exits 0. It exists because the obvious substitute cannot

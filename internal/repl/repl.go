@@ -48,6 +48,7 @@ import (
 	"time"
 
 	"github.com/aymanbagabas/go-pty"
+	"github.com/exoport/apex_process_ape/internal/selfpath"
 	"github.com/hinshun/vt10x"
 )
 
@@ -95,6 +96,16 @@ type session struct {
 	// touching the vt10x reader path (PLAN-19 D1 optional PTY signal).
 	outMu      sync.Mutex
 	lastOutput time.Time
+
+	// unpin removes the PATH shadow that makes `ape` inside this session
+	// mean the binary that spawned it. Called from reap, once the child
+	// has exited: the link is resolved at exec time and by every `ape`
+	// the session runs afterwards, so removing it earlier would unpin a
+	// live session.
+	unpin func()
+	// pathNotice is non-empty when the pin could not be made. Surfaced by
+	// PathNotice so a caller can report it.
+	pathNotice string
 
 	done chan struct{}
 }
@@ -286,19 +297,39 @@ func NewSessionWithEnv(_ context.Context, name, dir string, argv, extraEnv []str
 	// the PTY above, so an inherited tmux pane address describes someone
 	// else's terminal. `ape chat` deliberately does not do this — see
 	// scrubTmuxEnv for why the two paths must not be tidied into one.
-	cmd.Env = append(scrubTmuxEnv(ScrubClaudeCodeEnv(os.Environ())), extraEnv...)
+	//
+	// selfpath.Pin puts THIS binary at the front of the child's PATH as
+	// `ape`. 69 framework skill files run `ape …` lines inside the session
+	// this spawns, and without the pin those resolve to whatever `ape` the
+	// machine has installed. Observed live on the development machine: ape
+	// 0.0.67 spawned a session and `ape version` inside it reported
+	// 0.0.56. The framework declares a version FLOOR, so a skill running a
+	// pre-floor binary inside a dispatch by the post-floor one makes the
+	// floor unenforceable from the inside — silently, because the stale
+	// binary answers coherently rather than erroring.
+	env, unpin, notice := selfpath.Pin(scrubTmuxEnv(ScrubClaudeCodeEnv(os.Environ())))
+	// extraEnv last, so a caller's explicit value (the resolved
+	// CLAUDE_CODE_EFFORT_LEVEL) stays authoritative over the scrub.
+	cmd.Env = append(append([]string{}, env...), extraEnv...)
 
 	if err := cmd.Start(); err != nil {
+		unpin()
 		_ = ptm.Close()
 		return fmt.Errorf("repl: start %q: %w", argv[0], err)
 	}
 
 	s := &session{
-		name: name,
-		ptm:  ptm,
-		cmd:  cmd,
-		term: vt10x.New(vt10x.WithSize(paneCols, paneRows)),
-		done: make(chan struct{}),
+		name:  name,
+		ptm:   ptm,
+		cmd:   cmd,
+		term:  vt10x.New(vt10x.WithSize(paneCols, paneRows)),
+		done:  make(chan struct{}),
+		unpin: unpin,
+	}
+	if notice != "" {
+		// Never fatal, and never silent: proceeding unpinned is survivable,
+		// proceeding unpinned without saying so is the defect itself.
+		s.pathNotice = notice
 	}
 	regMu.Lock()
 	registry[name] = s
@@ -334,7 +365,21 @@ func (s *session) pump() {
 // reports false once the REPL has exited on its own.
 func (s *session) reap() {
 	_ = s.cmd.Wait()
+	if s.unpin != nil {
+		s.unpin()
+	}
 	close(s.done)
+}
+
+// PathNotice reports why a session's `ape` pin could not be made, or the
+// empty string when it was. A caller that shows it makes an unpinned
+// session visible; nothing here fails on one.
+func PathNotice(name string) string {
+	s, ok := lookup(name)
+	if !ok {
+		return ""
+	}
+	return s.pathNotice
 }
 
 // snapshot returns the VT grid as plain text — each row trimmed of

@@ -16,6 +16,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/exoport/apex_process_ape/internal/runlog"
+	"github.com/exoport/apex_process_ape/internal/selfpath"
 )
 
 // newChatCmd registers `ape chat`. A thin wrapper around `claude`
@@ -199,7 +200,20 @@ func runChat(
 	// is correct and useful. The PTY path strips them because there the
 	// address describes ape's terminal rather than the child's. Do not
 	// unify the two — see repl.scrubTmuxEnv.
-	claude.Env = repl.ScrubClaudeCodeEnv(os.Environ())
+	//
+	// The `ape` pin, on the other hand, IS shared with the PTY path, and
+	// for a reason the tmux asymmetry does not touch: that one is about
+	// which terminal the child is attached to, this one is about which
+	// binary `ape` means. A skill run inside `ape chat` shells out to
+	// `ape` exactly as one inside a dispatch does, and without the pin it
+	// gets whatever the machine has installed rather than the binary
+	// hosting the session. See internal/selfpath.
+	env, unpin, pathNotice := selfpath.Pin(repl.ScrubClaudeCodeEnv(os.Environ()))
+	defer unpin()
+	if pathNotice != "" {
+		fmt.Fprintf(os.Stderr, "ape chat: %s\n", pathNotice)
+	}
+	claude.Env = env
 	// Interactive chat keeps claude's NATIVE effort when --effort is unset —
 	// unlike the autonomous pipeline/task/prompt paths, which default to
 	// repl.DefaultEffort. Only inject CLAUDE_CODE_EFFORT_LEVEL (after the
