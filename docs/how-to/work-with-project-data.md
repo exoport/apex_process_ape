@@ -19,7 +19,7 @@ ape config resolve
 
 This walks up for `_apex/config.yaml`, overlays `_apex/config.local.yaml`
 key-wise, and prints the seventeen folder/name variables, the framework's
-two declared **optional** variables, the four derived `ext_*` flags, the
+declared **optional** variable, the four derived `ext_*` flags, the
 absolute paths those folders denote, and the run's `date` and `timestamp`.
 
 Run it first when anything below reports "no records". Before it existed,
@@ -41,22 +41,22 @@ resolution is the first act of every skill, so a silent fall-back to base
 values would let one typo'd override run a whole pipeline against folders
 nobody chose.
 
-### The two optional variables
+### The optional variable
 
-`model_profile` and `evidence_folder` are the framework's **declared
-optional** variables. Both can be set in `config.yaml` and overridden in
-`config.local.yaml`, and both are emitted **exactly as written**.
+`evidence_folder` is the framework's **declared optional** variable. It can
+be set in `config.yaml` and overridden in `config.local.yaml`, and it is
+emitted **exactly as written**.
 
-`ape` supplies **no default for either, and derives no path from
-`evidence_folder`.** That is the contract, not a gap: each key ships with a
-documented default its framework consumers apply when the resolver omits it
-(`strong` for `model_profile`, and a three-step fallback for
-`evidence_folder`). Defaulting them here would make `ape config resolve`
-assert a value nobody chose, behind a key whose whole point is that the
-framework resolves it.
+`ape` supplies **no default for it and derives no path from it.** That is
+the contract, not a gap: the key ships with a documented fallback its
+framework consumers apply when the resolver omits it (the key when
+present, else an existing `evidence/` under `{governance_folder}`, else
+`evidence/`). Defaulting it here would make `ape config resolve` assert a
+value nobody chose, behind a key whose whole point is that the framework
+resolves it.
 
-A config template that never mentions them is correct rather than drifted,
-which is why they are exempt from the template-drift check that otherwise
+A config template that never mentions it is correct rather than drifted,
+which is why it is exempt from the template-drift check that otherwise
 requires every resolved variable to be declared.
 
 ### `timestamp` never moves backwards

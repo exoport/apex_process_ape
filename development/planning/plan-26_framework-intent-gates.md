@@ -108,18 +108,23 @@ Two tolerances the assertion must carry:
 - **`ape task --task-commit` is `ape`'s own commit** and keeps its own derived format
   (`ape:task/<skill>`). It is not a skill commit and is not judged against the CSV.
 
-## D3 — the two overlay keys
+## D3 — the overlay key
 
-`model_profile` and `evidence_folder` join `Config`, `OverlayKeys()` and `decodeInto`, so
-`config.local.yaml` can override either.
+`evidence_folder` joins `Config`, `OverlayKeys()` and `decodeInto`, so `config.local.yaml` can
+override it.
 
 **Emit the raw key only. Fabricate no default, derive no path.** PLAN-64 7.1's wording is "the
 key ships with a documented default that every consumer applies when the resolver omits it" —
-the framework owns `strong` for `model_profile` and owns the `evidence_folder` fallback chain
-(the `config.yaml` key when present, else an existing `evidence/` under `{governance_folder}`,
-else `evidence/`). Reimplementing either here would put a second source of truth behind a key
-whose whole point is that the framework resolves it. When `evidence_folder` is set it passes
-through as written; no `Paths.Evidence` is derived.
+the framework owns the `evidence_folder` fallback chain (the `config.yaml` key when present,
+else an existing `evidence/` under `{governance_folder}`, else `evidence/`). Reimplementing it
+here would put a second source of truth behind a key whose whole point is that the framework
+resolves it. When it is set it passes through as written; no `Paths.Evidence` is derived.
+
+**`model_profile` was asked for, implemented, and then withdrawn** (maintainer decision,
+2026-09-05) before release. The framework removed the lean scaffold profile the key was a
+ceiling over — the recapture measured lean against full and it did not earn its complexity, with
+`compactions_observed: 0` on every run killing the context-headroom argument it rested on — so
+the key had nothing left to bound. Removed from the resolver, the overlay list and its tests.
 
 The exhaustiveness test over `OverlayKeys()` ↔ `decodeInto` already exists and must keep
 passing — it is what stops a key being added to one list and forgotten in the other.

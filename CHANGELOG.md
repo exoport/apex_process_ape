@@ -240,17 +240,26 @@ it would put prose in front of the check that enforces it.
   that the marker is absent by default and present under
   `--output-style inherit`.
 
-- **feat(config): `model_profile` and `evidence_folder` join the overlay
-  allow-list.** `OverlayKeys()` iterated seventeen keys and silently
-  skipped the rest, so `ape config resolve` could not emit a variable the
-  framework added and `config.local.yaml` could not override one. Both new
-  keys are emitted **raw, with no default and no derived path**: the
-  framework owns `strong` for `model_profile` and owns the
-  `evidence_folder` fallback chain, and re-deriving either here would put
-  a second source of truth behind a key whose whole point is that the
-  framework resolves it. They are marked optional, so the config-template
-  drift guard no longer requires the framework's own template to declare
-  them.
+- **feat(config): `evidence_folder` joins the overlay allow-list.**
+  `OverlayKeys()` iterated seventeen keys and silently skipped the rest,
+  so `ape config resolve` could not emit a variable the framework added
+  and `config.local.yaml` could not override one. The key is emitted
+  **raw, with no default and no derived path**: the framework owns its
+  fallback chain, and re-deriving it here would put a second source of
+  truth behind a key whose whole point is that the framework resolves it.
+  It is marked optional, so the config-template drift guard no longer
+  requires the framework's own template to declare it.
+
+  A second key, `model_profile`, was asked for, implemented, and then
+  **withdrawn before release** at the framework maintainer's decision. The
+  framework removed the lean scaffold profile the key was a ceiling over,
+  so it had nothing left to bound. Recorded here rather than silently
+  dropped, because it shipped in this branch's history: the recapture
+  measured lean against full across three pairs and it did not earn its
+  complexity — one stage cheaper, one more expensive in both lean runs,
+  run-to-run variance on the third about three times the claimed effect —
+  and the context-headroom argument died on `compactions_observed: 0` at
+  12–27% peak occupancy of a 1M window.
 
 ## v0.0.66 (2026-09-01)
 

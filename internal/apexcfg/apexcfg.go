@@ -54,11 +54,10 @@ const (
 // can diff this against any SKILL.md.
 //
 // Seventeen of them are the canonical set the block has always resolved.
-// The last two — model_profile and evidence_folder — are declared
-// OPTIONAL variables (PLAN-64 7.1, PLAN-63 § `ape` requests item 1): each
-// ships with a documented default that every framework consumer applies
-// when the resolver omits it. That is why neither is defaulted here. See
-// OverlayKeys.
+// The last — evidence_folder — is a declared OPTIONAL variable (PLAN-63
+// § `ape` requests item 1): it ships with a documented default that every
+// framework consumer applies when the resolver omits it. That is why it
+// is not defaulted here. See OverlayKeys.
 type Config struct {
 	ConfigSchemaVersion      string   `json:"config_schema_version"      yaml:"config_schema_version"`
 	ProjectName              string   `json:"project_name"               yaml:"project_name"`
@@ -78,21 +77,22 @@ type Config struct {
 	GovernanceStaleness      string   `json:"governance_staleness"       yaml:"governance_staleness"`
 	FunctionalityFolder      string   `json:"functionality_folder"       yaml:"functionality_folder"`
 
-	// ModelProfile and EvidenceFolder are the framework's two declared
-	// OPTIONAL variables. Both are emitted exactly as the project wrote
-	// them and are EMPTY when the project never declared one — `ape` does
-	// not supply a default for either.
+	// EvidenceFolder is the framework's declared OPTIONAL variable. It is
+	// emitted exactly as the project wrote it and is EMPTY when the
+	// project never declared one — `ape` supplies no default.
 	//
-	// That is deliberate, not an omission. `model_profile` defaults to
-	// `strong` and acts as a ceiling (it can force `full`, never force
-	// `lean`), and `evidence_folder` resolves through a three-step
-	// fallback (the key when present, else an existing `evidence/` under
-	// {governance_folder}, else `evidence/`). Both defaults belong to the
-	// framework, which applies them when this resolver omits the key;
-	// re-deriving either here would put a second source of truth behind a
-	// key whose whole purpose is that the framework resolves it. Note the
-	// consequence: no Paths entry is derived for evidence_folder.
-	ModelProfile   string `json:"model_profile,omitempty"   yaml:"model_profile,omitempty"`
+	// That is deliberate, not an omission. `evidence_folder` resolves
+	// through a three-step fallback (the key when present, else an
+	// existing `evidence/` under {governance_folder}, else `evidence/`).
+	// That default belongs to the framework, which applies it when this
+	// resolver omits the key; re-deriving it here would put a second
+	// source of truth behind a key whose whole purpose is that the
+	// framework resolves it. Note the consequence: no Paths entry is
+	// derived for it.
+	//
+	// A sibling key `model_profile` shipped here briefly and was removed
+	// before release: the framework withdrew the lean scaffold profile it
+	// was a ceiling over, so the key had nothing left to bound.
 	EvidenceFolder string `json:"evidence_folder,omitempty" yaml:"evidence_folder,omitempty"`
 }
 
@@ -330,7 +330,6 @@ func OverlayKeys() []string {
 		"governance_folder",
 		"governance_staleness",
 		"functionality_folder",
-		"model_profile",
 		"evidence_folder",
 	}
 }
@@ -349,7 +348,7 @@ func OverlayKeys() []string {
 // still a failure in both directions, but an optional key absent from a
 // template is not.
 func OptionalKeys() []string {
-	return []string{"model_profile", "evidence_folder"}
+	return []string{"evidence_folder"}
 }
 
 // IsOptionalKey reports whether key is one of OptionalKeys.
@@ -380,7 +379,6 @@ func decodeInto(cfg *Config, key string, node yaml.Node) error {
 		"governance_folder":          &cfg.GovernanceFolder,
 		"governance_staleness":       &cfg.GovernanceStaleness,
 		"functionality_folder":       &cfg.FunctionalityFolder,
-		"model_profile":              &cfg.ModelProfile,
 		"evidence_folder":            &cfg.EvidenceFolder,
 	}
 	target, ok := targets[key]
