@@ -700,7 +700,8 @@ func storyFile(t *testing.T, write func(name, body string), key, dottedID, statu
 
 func TestRunCheck_Clean(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  1-1_greet-a-name: done\n")
+	write("sprint-status.yaml",
+		"development_status:\n  1-1_greet-a-name: done\n  epic-1-retrospective: optional\n")
 	storyFile(t, write, "1-1_greet-a-name", "1.1", "done")
 
 	report, err := RunCheck(cfg)
@@ -712,19 +713,37 @@ func TestRunCheck_Clean(t *testing.T) {
 
 func TestRunCheck_RowWithoutStory(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  1-1_greet-a-name: done\n  9-9_ghost: backlog\n")
+	write("sprint-status.yaml",
+		"development_status:\n  1-1_greet-a-name: done\n  9-9_ghost: backlog\n  epic-1-retrospective: optional\n")
 	storyFile(t, write, "1-1_greet-a-name", "1.1", "done")
 
 	report, err := RunCheck(cfg)
 	require.NoError(t, err)
-	require.Len(t, report.Findings, 1)
-	require.Equal(t, CheckRowWithoutStory, report.Findings[0].Check)
-	require.Equal(t, "9-9_ghost", report.Findings[0].Key)
+	// The ghost row also puts epic 9 in the epic set with no retrospective,
+	// which is a true statement about this tracker and a second finding.
+	// Filtered rather than fixtured away: adding a retro row for a phantom
+	// epic would be inventing the very thing the ghost row is wrong about.
+	rows := findingsOf(report, CheckRowWithoutStory)
+	require.Len(t, rows, 1)
+	require.Equal(t, "9-9_ghost", rows[0].Key)
+}
+
+// findingsOf narrows a report to one check class, for a test about that
+// class rather than about the whole report.
+func findingsOf(report *CheckReport, check string) []Finding {
+	var out []Finding
+	for i := range report.Findings {
+		if report.Findings[i].Check == check {
+			out = append(out, report.Findings[i])
+		}
+	}
+	return out
 }
 
 func TestRunCheck_StoryWithoutRow(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  1-1_greet-a-name: done\n")
+	write("sprint-status.yaml",
+		"development_status:\n  1-1_greet-a-name: done\n  epic-1-retrospective: optional\n")
 	storyFile(t, write, "1-1_greet-a-name", "1.1", "done")
 	storyFile(t, write, "1-2_present-the-form", "1.2", "backlog")
 
@@ -739,7 +758,8 @@ func TestRunCheck_StoryWithoutRow(t *testing.T) {
 
 func TestRunCheck_StatusDivergenceNamesBothSides(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  1-1_greet-a-name: done\n")
+	write("sprint-status.yaml",
+		"development_status:\n  1-1_greet-a-name: done\n  epic-1-retrospective: optional\n")
 	storyFile(t, write, "1-1_greet-a-name", "1.1", "in-progress")
 
 	report, err := RunCheck(cfg)
@@ -756,7 +776,8 @@ func TestRunCheck_StatusDivergenceNamesBothSides(t *testing.T) {
 // a divergence on every drafted story.
 func TestRunCheck_DraftedIsNotADivergence(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  1-1_greet-a-name: drafted\n")
+	write("sprint-status.yaml",
+		"development_status:\n  1-1_greet-a-name: drafted\n  epic-1-retrospective: optional\n")
 	storyFile(t, write, "1-1_greet-a-name", "1.1", "ready-for-dev")
 
 	report, err := RunCheck(cfg)
@@ -794,7 +815,8 @@ func TestStoryKeyFromPath(t *testing.T) {
 // send a reader off to create `2-1.md` when the row is what is wrong.
 func TestRunCheck_BareRowKeyIsItsOwnFinding(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  epic-2: backlog\n  2-1: done\n")
+	write("sprint-status.yaml",
+		"development_status:\n  epic-2: backlog\n  2-1: done\n  epic-2-retrospective: optional\n")
 
 	report, err := RunCheck(cfg)
 	require.NoError(t, err)
@@ -821,7 +843,8 @@ func TestRunCheck_BareRowKeyIsItsOwnFinding(t *testing.T) {
 // must not also be reported as having no tracker row when it plainly has one.
 func TestRunCheck_BareRowKeyNamesItsActualStory(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  epic-7: backlog\n  7-3: done\n")
+	write("sprint-status.yaml",
+		"development_status:\n  epic-7: backlog\n  7-3: done\n  epic-7-retrospective: optional\n")
 	storyFile(t, write, "7-3_payment-retry", "7.3", "done")
 
 	report, err := RunCheck(cfg)
@@ -857,7 +880,8 @@ func TestRunCheck_BareRowKeyNamesItsActualStory(t *testing.T) {
 // the same answer twice.
 func TestRunCheck_BareRowKeyWithNoCandidateReportsTheSearch(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  epic-7: backlog\n  7-3: done\n")
+	write("sprint-status.yaml",
+		"development_status:\n  epic-7: backlog\n  7-3: done\n  epic-7-retrospective: optional\n")
 	storyFile(t, write, "8-1_unrelated", "8.1", "done")
 
 	report, err := RunCheck(cfg)
@@ -881,7 +905,8 @@ func TestRunCheck_BareRowKeyWithNoCandidateReportsTheSearch(t *testing.T) {
 // nothing is suppressed — each file really does lack a row of its own name.
 func TestRunCheck_BareRowKeyWithTwoCandidatesPicksNeither(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  epic-7: backlog\n  7-3: done\n")
+	write("sprint-status.yaml",
+		"development_status:\n  epic-7: backlog\n  7-3: done\n  epic-7-retrospective: optional\n")
 	storyFile(t, write, "7-3_payment-retry", "7.3", "done")
 	storyFile(t, write, "7-3_payment-refund", "7.3", "done")
 
@@ -947,7 +972,8 @@ func TestBareRowKeyRemediation_IsForTheCallerThatCannotLook(t *testing.T) {
 // genuinely different problem from a malformed key.
 func TestRunCheck_CanonicalKeyWithNoFileIsStillRowWithoutStory(t *testing.T) {
 	cfg, write := newCheckFixture(t)
-	write("sprint-status.yaml", "development_status:\n  2-1_refuse-a-long-name: done\n")
+	write("sprint-status.yaml",
+		"development_status:\n  2-1_refuse-a-long-name: done\n  epic-2-retrospective: optional\n")
 
 	report, err := RunCheck(cfg)
 	require.NoError(t, err)
@@ -991,4 +1017,94 @@ func TestRunCheck_MissingTrackerIsClean(t *testing.T) {
 	report, err := RunCheck(cfg)
 	require.NoError(t, err)
 	require.True(t, report.OK())
+}
+
+// --- sprint.epic_without_retro ---
+
+// TestRunCheck_EpicWithoutRetro is the class a framework migration's check
+// needs. A count comparison cannot answer it: two retros on one epic and
+// none on another satisfies `retrospective_rows >= epic_rows` while the
+// thing being checked is false — and a migration that records a false
+// "applied" in its ledger never looks again.
+func TestRunCheck_EpicWithoutRetro(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml", `development_status:
+  epic-1: done
+  1-1_greet-a-name: done
+  epic-1-retrospective: done
+  epic-2: done
+  2-1_refuse-a-long-name: done
+`)
+	storyFile(t, write, "1-1_greet-a-name", "1.1", "done")
+	storyFile(t, write, "2-1_refuse-a-long-name", "2.1", "done")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	found := findingsOf(report, CheckEpicWithoutRetro)
+	require.Len(t, found, 1, "epic 1 has one, epic 2 has none")
+	require.Equal(t, "epic-2", found[0].Key)
+	require.Contains(t, found[0].Message, "epic-2-retrospective")
+}
+
+// TestRunCheck_EpicWithoutRetro_CountsCannotAnswerIt is the exact shape the
+// count comparison passes and this class does not.
+func TestRunCheck_EpicWithoutRetro_CountsCannotAnswerIt(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml", `development_status:
+  epic-1: done
+  1-1_greet-a-name: done
+  epic-1-retrospective: done
+  epic-1-retrospective-followup: done
+  epic-2: done
+  2-1_refuse-a-long-name: done
+`)
+	storyFile(t, write, "1-1_greet-a-name", "1.1", "done")
+	storyFile(t, write, "2-1_refuse-a-long-name", "2.1", "done")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, report.Summary.RetroRows, report.Summary.EpicRows,
+		"the count comparison a migration would otherwise have used passes here")
+	require.Len(t, findingsOf(report, CheckEpicWithoutRetro), 1,
+		"and epic 2 still has no retrospective row")
+}
+
+// TestRunCheck_EpicWithoutRetro_StoryRowsAloneDefineTheEpic: an epic
+// mid-mint, with story rows but no `epic-N` header, is still asked.
+func TestRunCheck_EpicWithoutRetro_StoryRowsAloneDefineTheEpic(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml", "development_status:\n  3-1_a: done\n")
+	storyFile(t, write, "3-1_a", "3.1", "done")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	require.Len(t, findingsOf(report, CheckEpicWithoutRetro), 1)
+}
+
+// TestRunCheck_EpicWithoutRetro_UnattributableRetroCreditsNobody: a retro
+// row whose key names no epic is not silently credited to whichever epic
+// happens to be missing one.
+func TestRunCheck_EpicWithoutRetro_UnattributableRetroCreditsNobody(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml", `development_status:
+  epic-4: done
+  4-1_a: done
+  project-retrospective: done
+`)
+	storyFile(t, write, "4-1_a", "4.1", "done")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	require.Equal(t, 1, report.Summary.RetroRows, "it is still classified as a retro row")
+	require.Len(t, findingsOf(report, CheckEpicWithoutRetro), 1,
+		"but it names no epic, so it discharges none")
+}
+
+func TestRetroRowEpic(t *testing.T) {
+	require.Equal(t, 3, retroRowEpic("epic-3-retrospective"))
+	require.Equal(t, 12, retroRowEpic("epic-12-retrospective"))
+	require.Equal(t, 3, retroRowEpic("epic-3_retrospective"))
+	require.Equal(t, 0, retroRowEpic("project-retrospective"))
+	require.Equal(t, 0, retroRowEpic("epic-3-retrospective-followup"))
+	require.Equal(t, 0, retroRowEpic("epic-3"))
 }

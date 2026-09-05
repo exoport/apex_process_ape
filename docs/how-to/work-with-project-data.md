@@ -330,6 +330,36 @@ tracker rows on. A story's frontmatter `story_id` is a *different* string
 (`1-1_greet-a-name` vs `"1.1"`); it travels in the finding for legibility
 and is never correlated on.
 
+### `sprint.epic_without_retro`, and why a count could not do it
+
+One finding per epic carrying no `epic-N-retrospective` row. The epic set
+is every epic with an `epic-N` row **or** a story row belonging to N, so an
+epic mid-mint is still asked. Like every class here it reports and never
+resolves — whether a missing retrospective should be minted, waived, or is
+simply not due yet is the ceremony's call.
+
+It exists because the obvious substitute cannot answer the question. A
+framework upgrade migration needs a `check:` for "does this project have a
+retrospective row per epic", and the only datum before this was
+`retrospective_rows >= epic_rows` — which two retros on one epic and none
+on another satisfies. A migration whose check can report *applied* while
+the thing it checks is false is worse than one with no check at all: the
+runner writes the id to its ledger and never looks again, so a false
+"applied" is permanent.
+
+The migration-side check, which `ape sprint check`'s always-exit-0
+contract makes safe:
+
+```bash
+ape sprint check --output-format json \
+  | jq -e '[.findings[] | select(.check=="sprint.epic_without_retro")] | length == 0'
+```
+
+A retrospective row whose key names no epic — `project-retrospective` — is
+still classified as a retrospective row and discharges no epic. Crediting
+it to whichever epic happens to be missing one would be inventing an
+attribution the key does not carry.
+
 ### `sprint.nonstandard_row_key`, and why it exists
 
 A story row keyed `7-3`, with no separator and slug, is reported on its own

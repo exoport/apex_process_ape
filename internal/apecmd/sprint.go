@@ -78,7 +78,18 @@ func emitSprintCheckHuman(w io.Writer, report *sprint.CheckReport) {
 		fmt.Fprintln(w, "no divergence")
 		return
 	}
-	fmt.Fprintf(w, "\n%d divergence(s) — neither side is assumed correct:\n", len(report.Findings))
+	// "neither side is assumed correct" is a claim about a TWO-SIDED
+	// finding, and not every class here has two sides:
+	// sprint.epic_without_retro names one missing row and nothing to weigh
+	// it against. Saying it anyway would put a reader looking for a second
+	// side that does not exist, so the line is only claimed when the
+	// findings actually carry one.
+	if anyTwoSided(report.Findings) {
+		fmt.Fprintf(w, "\n%d finding(s) — where two sides are named, neither is assumed correct:\n",
+			len(report.Findings))
+	} else {
+		fmt.Fprintf(w, "\n%d finding(s):\n", len(report.Findings))
+	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "  CHECK\tKEY\tTRACKER\tSTORY")
 	for i := range report.Findings {
@@ -86,6 +97,15 @@ func emitSprintCheckHuman(w io.Writer, report *sprint.CheckReport) {
 		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", f.Check, f.Key, dashIfEmpty(f.Tracker), dashIfEmpty(f.Story))
 	}
 	_ = tw.Flush()
+}
+
+func anyTwoSided(findings []sprint.Finding) bool {
+	for i := range findings {
+		if findings[i].Tracker != "" && findings[i].Story != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func dashIfEmpty(s string) string {

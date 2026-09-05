@@ -29,6 +29,16 @@ The dispatch-assertion check names: `dispatch.head_moved`,
 `dispatch.index_staged`, `dispatch.stash_changed`, `dispatch.no_commit`,
 `dispatch.message_format`.
 
+One new `ape sprint check` class, for the framework's own v0.16.0
+migration entry: **`sprint.epic_without_retro`**. Its `check:` line, which
+`ape sprint check`'s always-exit-0 contract makes safe to gate a migration
+on:
+
+```bash
+ape sprint check --output-format json \
+  | jq -e '[.findings[] | select(.check=="sprint.epic_without_retro")] | length == 0'
+```
+
 New exit codes: **`ape story verify --file` 4** (body problem, beside the
 unchanged 0/2/3) and **`ape task` 6** (declared commit ownership
 violated).
@@ -340,6 +350,28 @@ it would put prose in front of the check that enforces it.
   **Exit 0 always**: a projection that halted on one bad record could not
   report the others. The key set is pinned against the framework's own
   record template, confirmed final for framework v0.16.0.
+
+- **feat(sprint): a `sprint.epic_without_retro` check class.** One finding
+  per epic carrying no `epic-N-retrospective` row, in a command that
+  already always exits 0. It exists because the obvious substitute cannot
+  answer the question: a framework upgrade migration needs a `check:` for
+  "is there a retrospective row per epic", and the only datum before this
+  was `retrospective_rows >= epic_rows` — which two retros on one epic and
+  none on another satisfies. A migration whose check can report *applied*
+  while the thing it checks is false is worse than one with no check at
+  all, because the runner writes the id to its ledger and never looks
+  again: a false "applied" is permanent.
+
+  The epic set is every epic with an `epic-N` row **or** a story row
+  belonging to N, so an epic mid-mint is still asked. A retrospective row
+  whose key names no epic — `project-retrospective` — discharges none;
+  crediting it to whichever epic is missing one would invent an
+  attribution the key does not carry.
+
+  The summary line changed with it. `N divergence(s) — neither side is
+  assumed correct` is a claim about a two-sided finding, and this class
+  names one missing row with nothing to weigh it against, so the claim is
+  now made only when the findings actually carry two sides.
 
 - **feat(framework): run the framework's upgrade-migration list.** A
   framework release changes what project data must look like. Until now

@@ -68,6 +68,12 @@ var (
 	canonicalStoryRowRe = regexp.MustCompile(`^\d+-\d+[-_].+$`)
 	// retroRowRe matches a retrospective row.
 	retroRowRe = regexp.MustCompile(`(?i)retrospective`)
+	// retroEpicRe reads the epic number out of a retrospective row key,
+	// `epic-3-retrospective`. Neither epicRowRe nor storyRowRe matches one
+	// — the first is anchored at the end and the second needs a leading
+	// digit — so a retro row's Epic is 0, which the projection relies on
+	// and `sprint.epic_without_retro` needs a way past.
+	retroEpicRe = regexp.MustCompile(`(?i)^epic-(\d+)[-_]retrospective$`)
 )
 
 // Row is one tracker entry.

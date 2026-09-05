@@ -20,6 +20,17 @@ const (
 	// two possible fixes — rename the row, or rename the file — are a
 	// judgment about which name is the right one.
 	CheckNonStandardRowKey = "sprint.nonstandard_row_key"
+	// CheckEpicWithoutRetro is an epic with no retrospective row.
+	//
+	// It exists because counting rows cannot answer the question. A
+	// framework migration's check asked "is there a retrospective row per
+	// epic" and the only datum available was
+	// `retrospective_rows >= epic_rows`, which two retros on one epic and
+	// none on another satisfies. A migration whose check can report
+	// applied while the thing it checks is false is worse than one with no
+	// check at all: the runner writes the id to the ledger and never looks
+	// again, so a false "applied" is permanent.
+	CheckEpicWithoutRetro = "sprint.epic_without_retro"
 )
 
 // Finding is one divergence. It names both sides and picks neither.
@@ -225,9 +236,75 @@ func RunCheck(cfg *apexcfg.Resolved) (*CheckReport, error) {
 		})
 	}
 
+	report.Findings = append(report.Findings, epicsWithoutRetro(tracker.Rows)...)
+
 	sortCheckFindings(report.Findings)
 	report.tally()
 	return report, nil
+}
+
+// epicsWithoutRetro reports every epic carrying no retrospective row.
+//
+// The subject is the EPIC SET, not a row count. An epic is in it when the
+// tracker has an `epic-N` row or any story row belonging to N, so an epic
+// mid-mint with rows but no header is still asked the question.
+//
+// Like every other class here it reports and never resolves: whether a
+// missing retrospective should be minted, waived, or is simply not due yet
+// is the retrospective ceremony's call and not a checker's.
+func epicsWithoutRetro(rows []Row) []Finding {
+	epics := map[int]bool{}
+	withRetro := map[int]bool{}
+	for i := range rows {
+		r := &rows[i]
+		switch r.Kind {
+		case KindEpic, KindStory:
+			if r.Epic > 0 {
+				epics[r.Epic] = true
+			}
+		case KindRetrospective:
+			if n := retroRowEpic(r.Key); n > 0 {
+				withRetro[n] = true
+			}
+		}
+	}
+	numbers := make([]int, 0, len(epics))
+	for n := range epics {
+		if !withRetro[n] {
+			numbers = append(numbers, n)
+		}
+	}
+	sort.Ints(numbers)
+
+	out := make([]Finding, 0, len(numbers))
+	for _, n := range numbers {
+		out = append(out, Finding{
+			Check: CheckEpicWithoutRetro,
+			Key:   "epic-" + strconv.Itoa(n),
+			Message: "epic " + strconv.Itoa(n) + " has no retrospective row — expected " +
+				"`epic-" + strconv.Itoa(n) + "-retrospective`",
+		})
+	}
+	return out
+}
+
+// retroRowEpic reads the epic number out of a retrospective row key.
+//
+// Separate from rowEpic because the two patterns it tries do not match a
+// retro key at all: `^epic-(\d+)$` is anchored at the end, and the story
+// pattern needs a leading digit. A retro row therefore carries Epic 0
+// today, which is harmless for the projection (it never reads them) and
+// is exactly what this check needs.
+//
+// Zero when the key names no epic, and that is reported as "this epic has
+// no retro" rather than silently crediting an unattributable row to
+// whichever epic is missing one.
+func retroRowEpic(key string) int {
+	m := retroEpicRe.FindStringSubmatch(key)
+	if m == nil {
+		return 0
+	}
+	return atoi(m[1])
 }
 
 // bareRowCandidates lists the story keys on disk that a bare row key could be

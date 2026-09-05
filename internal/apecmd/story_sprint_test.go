@@ -273,7 +273,11 @@ func TestGateErr(t *testing.T) {
 func TestSprintCheck_AlwaysExitsZeroAndNamesBothSides(t *testing.T) {
 	root := newTestProject(t, realProjectConfig)
 	// The row key is the story file's STEM; story_id is the dotted form.
-	writeStory(t, root, "sprint-status.yaml", "development_status:\n  1-1_thing: done\n")
+	// The retrospective row is part of the healthy shape apex-sprint-sync
+	// mints, so the fixture carries one and the status divergence stays
+	// the only finding under test.
+	writeStory(t, root, "sprint-status.yaml",
+		"development_status:\n  1-1_thing: done\n  epic-1-retrospective: optional\n")
 	writeStory(t, root, "1-1_thing.md", "---\nstory_id: \"1.1\"\nstatus: in-progress\n---\n\nx\n")
 
 	out := runCmd(t, newSprintCheckCmd(), "--output-format", "json")
@@ -284,7 +288,20 @@ func TestSprintCheck_AlwaysExitsZeroAndNamesBothSides(t *testing.T) {
 	require.Equal(t, "in-progress", report.Findings[0].Story)
 
 	human := runCmd(t, newSprintCheckCmd())
-	require.Contains(t, human, "neither side is assumed correct")
+	require.Contains(t, human, "neither is assumed correct")
+}
+
+// TestSprintCheck_OneSidedFindingDoesNotClaimTwoSides:
+// sprint.epic_without_retro names one missing row and nothing to weigh it
+// against, so the summary must not send a reader looking for a second side.
+func TestSprintCheck_OneSidedFindingDoesNotClaimTwoSides(t *testing.T) {
+	root := newTestProject(t, realProjectConfig)
+	writeStory(t, root, "sprint-status.yaml", "development_status:\n  1-1_thing: done\n")
+	writeStory(t, root, "1-1_thing.md", "---\nstory_id: \"1.1\"\nstatus: done\n---\n\nx\n")
+
+	human := runCmd(t, newSprintCheckCmd())
+	require.Contains(t, human, "sprint.epic_without_retro")
+	require.NotContains(t, human, "neither is assumed correct")
 }
 
 func TestSprintCheck_NoStrictFlagExists(t *testing.T) {
@@ -295,7 +312,8 @@ func TestSprintCheck_NoStrictFlagExists(t *testing.T) {
 
 func TestSprintCheck_Clean(t *testing.T) {
 	root := newTestProject(t, realProjectConfig)
-	writeStory(t, root, "sprint-status.yaml", "development_status:\n  1-1_thing: drafted\n")
+	writeStory(t, root, "sprint-status.yaml",
+		"development_status:\n  1-1_thing: drafted\n  epic-1-retrospective: optional\n")
 	writeStory(t, root, "1-1_thing.md", "---\nstory_id: \"1.1\"\nstatus: ready-for-dev\n---\n\nx\n")
 
 	out := runCmd(t, newSprintCheckCmd())
