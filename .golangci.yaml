@@ -238,6 +238,12 @@ linters:
       - linters:
           - tagliatelle
         path: internal/sprint/(check|verify|reconcile)\.go
+      # The release record's frontmatter keys (`release_id`, `frozen_at`,
+      # `slice_change_log`, …) are the framework's own file format, read
+      # here and never authored — camelCasing them would decode nothing.
+      - linters:
+          - tagliatelle
+        path: internal/release/release\.go
       - linters:
           - tagliatelle
         path: internal/deferred/(record|store|ingest|verify|migrate)\.go

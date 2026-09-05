@@ -300,6 +300,47 @@ it would put prose in front of the check that enforces it.
   basis to call the file missing. `ape config resolve` gains a
   `project_context` path beside `team_memory`.
 
+- **feat(release): `ape release status`, projecting the release record.**
+  A slice is an operator-declared set of epics living in
+  `sprint-status.yaml`'s `release_slices:` / `active_slice:` keys; a
+  record is one file per release under `{planning_folder}/releases/`,
+  whose frontmatter asserts that release's status. `ape` reads both and
+  writes neither.
+
+  **A slice is released when its record says so, and by no other route.**
+  A `release_slices:` entry deliberately carries no status of its own —
+  that is what stops a shipped release being counted as unshipped by a
+  writer that only ever wrote `declared`. An absent `releases/` folder, an
+  absent record and an **unreadable** record all mean *not released*, so
+  the slice's epics stay in scope; the unreadable one is reported as
+  `unreadable` with its parse error rather than handed a status it never
+  asserted.
+
+  **Frontmatter only.** The record's body carries nine assembled tables,
+  including the gate table with its per-row `PASS` / `RED` / `NOT-RUN` /
+  `PENDING` results. Those belong to `apex-release-record`; re-deriving
+  them from a Markdown table would put a second source of truth behind
+  the release's own verdict, and there is nothing to gain — the verdict is
+  already in the frontmatter, where `status:` asserts it, `blocking:` says
+  why it is not `prepared` and `acceptance:` says why a run that reached
+  no verdict reached one. What is reported about gates is the
+  declaration: how many, how many required.
+
+  `active_slice` resolves `declared`, `undeclared`, or `dangling` — the
+  last being an id `release_slices:` does not carry. All three yield a
+  scope, and `dangling` is kept separate because it is a repair rather
+  than a default. With **no tracker** the epic sets come back `null`
+  rather than `[]`: epics are enumerated from tracker rows, and "nothing
+  to enumerate from" is not "no epics". `tagger_from_object` is carried
+  apart from `tag_authorization` and labelled *provenance, not
+  authorization*, everywhere it prints — it is reconstructed from a git
+  tag object on a `--backfill-legacy` record, and reading it as
+  authorization would let a record assert something no human said.
+
+  **Exit 0 always**: a projection that halted on one bad record could not
+  report the others. The key set is pinned against the framework's own
+  record template, confirmed final for framework v0.16.0.
+
 - **feat(config): `evidence_folder` joins the overlay allow-list.**
   `OverlayKeys()` iterated seventeen keys and silently skipped the rest,
   so `ape config resolve` could not emit a variable the framework added

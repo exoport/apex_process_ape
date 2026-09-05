@@ -49,6 +49,7 @@ Subcommands:
 - `planning` — Show the planning pipeline diagram
 - `prompt` — Drive an unattended Claude session from a prompt or a handoff file
 - `registry` — Verify or reconcile every record registry at once
+- `release` — Project the framework's release record
 - `rollback` — Rollback ape to the previous version
 - `sandbox` — Provision and operate hardware-isolated Kata VM workspaces (via aped)
 - `script` — Run a Go orchestration script through the yaegi interpreter
@@ -3518,6 +3519,83 @@ Flags:
 | `--family` | stringSlice | `[]` | Families to verify: adrs,patterns,features,capabilities |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) |
+
+## ape release
+
+Project the framework's release record
+
+```
+ape release
+```
+
+A release slice is an operator-declared set of epics, living in
+sprint-status.yaml's release_slices: and active_slice: keys. A release
+record is one file per release under {planning_folder}/releases/, whose
+frontmatter asserts that release's status.
+
+  status  project the records and the slices they decide
+
+Subcommands:
+
+- `status` — Report the declared slices and the state each record asserts
+
+## ape release status
+
+Report the declared slices and the state each record asserts
+
+```
+ape release status [flags]
+```
+
+Read sprint-status.yaml's release_slices: and active_slice: keys and,
+for each slice, the frontmatter of {planning_folder}/releases/release-<id>.md.
+
+Two things this reads and never computes.
+
+THE STATUS IS THE RECORD'S. A release's status is asserted in exactly one
+place — the record's own 'status:' field — so a slice is released when its
+record says so and by no other route. A release_slices: entry deliberately
+carries no status of its own, which is what stops a shipped release being
+counted as unshipped by a writer that only ever wrote 'declared'. An
+absent releases/ folder, an absent record and an UNREADABLE one all mean
+"not released"; the unreadable one is reported as unreadable rather than
+given a status it never asserted.
+
+ONLY THE FRONTMATTER. The record's body carries nine assembled tables,
+including the gate table with its per-row PASS / RED / NOT-RUN / PENDING
+results. Those belong to apex-release-record, and re-deriving them from a
+Markdown table here would put a second source of truth behind the
+release's own verdict. What is reported about gates is the declaration —
+how many, how many required — never a result. The verdict is in the
+frontmatter already: 'status:' asserts it, 'blocking:' says why it is not
+'prepared', 'acceptance:' says why a run that reached no verdict reached
+one.
+
+The active scope resolves the way the framework's own prose does:
+active_slice names a declared slice, or — absent, empty, or naming a slice
+release_slices: does not carry — the scope is every epic not inside a
+released slice. Epics are enumerated from tracker rows, so with NO tracker
+the epic sets come back null rather than empty: "no tracker to enumerate
+from" and "no epics" are different answers, and only one of them is true.
+
+EXIT 0 ALWAYS. The record's 'status:' is the verdict, not the exit code —
+a projection that halted on one bad record could not report the others.
+
+Examples:
+
+```
+  ape release status
+  ape release status --output-format json
+  ape release status --slice v1.2.0
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--slice` | string | `—` | Report one slice by id instead of every declared slice |
 
 ## ape rollback
 

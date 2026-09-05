@@ -478,6 +478,60 @@ only two *required* project-data checks, and a third required failure
 would red the gate on exactly the projects that need to keep working while
 they compact.
 
+## Release records
+
+```bash
+ape release status                        # every declared slice and what its record says
+ape release status --slice v1.2.0         # one slice
+ape release status --output-format json   # the projection, for a consumer
+```
+
+A **slice** is an operator-declared set of epics, living in
+`sprint-status.yaml`'s `release_slices:` and `active_slice:` keys. A
+**record** is one file per release under `{planning_folder}/releases/`,
+whose frontmatter asserts that release's status. `apex-sprint-sync
+--declare-slice` writes the tracker keys and `apex-release-record` writes
+the record; `ape` reads both and writes neither.
+
+Two rules the projection is built on.
+
+**The status is the record's.** A release's status is asserted in exactly
+one place — the record's own `status:` field. A `release_slices:` entry
+deliberately carries no status of its own, which is what stops a shipped
+release being counted as unshipped by a writer that only ever wrote
+`declared`. An absent `releases/` folder, an absent record and an
+**unreadable** record all mean *not released*, and the slice's epics stay
+in scope; the unreadable one is reported as `unreadable` with its parse
+error, never handed a status it never asserted.
+
+**Only the frontmatter.** The record's body carries nine assembled
+tables, including the gate table with its per-row `PASS` / `RED` /
+`NOT-RUN` / `PENDING` results. Those belong to `apex-release-record`, and
+re-deriving them from a Markdown table here would put a second source of
+truth behind the release's own verdict. What is reported about gates is
+the declaration — how many, how many required. The verdict is already in
+the frontmatter: `status:` asserts it, `blocking:` says why it is not
+`prepared`, `acceptance:` says why a run that reached no verdict reached
+one.
+
+`active_slice` resolves three ways, and the value is reported so a
+consumer can branch on it:
+
+| `active_resolution` | means |
+| ------------------- | ----- |
+| `declared` | `active_slice` names a slice `release_slices:` carries |
+| `undeclared` | no `active_slice`; scope is every epic not inside a released slice |
+| `dangling` | `active_slice` names a slice that is not there — same fallback scope, but a repair rather than a default |
+
+Epics are enumerated from tracker rows. With **no tracker**, the epic sets
+come back `null` rather than `[]` — "nothing to enumerate from" and "no
+epics" are different answers, and the framework's own resolution finds
+epics in the epic shards.
+
+**It exits 0 always.** The record's `status:` is the verdict, not the exit
+code: a projection that halted on one bad record could not report the
+others.
+
 ## Deferred work
 
 ```bash

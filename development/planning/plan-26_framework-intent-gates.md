@@ -264,6 +264,42 @@ Four decisions:
 `ape config resolve` gains a `project_context` path alongside `team_memory`, since the command
 needs the location and every project-data command routes through `apexcfg`.
 
+### `ape release status`
+
+PLAN-63 filed this as "deferred by M4 until the record exists to be projected". It exists now:
+`apex-release-record`, its four steps and its **record template** are committed on the framework's
+`intent-releaser` branch, and the framework session confirmed on 2026-09-05 that the template's
+frontmatter key set is **final for v0.16.0** — none of PLAN-64's four still-blocked half-phases
+touches record frontmatter. So the reader is pinned to it rather than written tolerantly.
+
+- **A slice is released when its record says so, and by no other route.** The status is asserted
+  in exactly one place, the record's `status:` field; a `release_slices:` entry carries no
+  `status:` of its own precisely so a shipped release cannot be counted as unshipped by a writer
+  that only ever wrote `declared`. An absent `releases/` folder, an absent record and an
+  **unreadable** record all mean *not released* — the framework's own rule at
+  `apex-story-batch-create/steps/step-01-discover.md:84` — so the slice's epics stay in scope.
+  The unreadable one is reported as unreadable, never given a status.
+- **Frontmatter only, confirmed by the framework as the right cut.** The nine body tables belong
+  to `apex-release-record`, and a Markdown-table parser here would be a second source of truth
+  behind the release's own verdict. It would also add no verdict information: `status:`,
+  `blocking:` and `acceptance:` are already the three fields that carry it. Gates are reported as
+  a **declaration** — count, required count, tier — never a result.
+- **No tracker means null, not empty.** Epics are enumerated from tracker rows and there is no
+  other source here; the framework's resolution discovers them from the epic shards and falls
+  back to "every discovered epic", which is byte-for-byte the old `--epics all` behaviour and
+  exists so a pipeline can never mint nothing by accident. Reporting `[]` would say "no epics",
+  the one answer that is actively wrong.
+- **`tagger_from_object` is provenance, never authorization.** It appears only on a
+  `--backfill-legacy` record, naming whoever the git tag object credits. It is carried in its own
+  field, labelled at every point it prints, and a test asserts it never populates
+  `tag_authorization` — otherwise a reconstructed record could assert something no human said.
+- **Exit 0 always.** A projection that halted on one bad record could not report the others.
+
+The framework does **not** adopt the call in v0.16.0, by its own decision: a skill reading
+`ape release status` would acquire a version floor on v0.0.67, and four half-phases are already
+blocked on exactly that floor. The prose resolution also works with no `ape` at all and never
+HALTs. So this ships as the field the caller will read, and the skill adopts it in v0.17.0.
+
 `--scaffold` on `ape task` is explicitly **not requested** (O-3): `--args` already forwards
 skill flags verbatim and both paths append `--autonomous`, so
 `ape task <skill> --args "--scaffold lean"` is the operator's opt-in already.
