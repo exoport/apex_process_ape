@@ -61,7 +61,12 @@ func loadMigrationPlan(ctx context.Context, projectRoot string, runner migration
 // collapsing the second into a non-zero exit would make the first look
 // like it had not happened.
 func runUpgradeMigrations(ctx context.Context, w io.Writer, projectRoot string) error {
-	plan, err := loadMigrationPlan(ctx, projectRoot, migration.ShellRunner{}, true)
+	runner, cleanup, notice := migration.NewShellRunner()
+	defer cleanup()
+	if notice != "" {
+		fmt.Fprintf(w, "migrations: %s\n", notice)
+	}
+	plan, err := loadMigrationPlan(ctx, projectRoot, runner, true)
 	if err != nil {
 		return err
 	}
@@ -80,7 +85,7 @@ func runUpgradeMigrations(ctx context.Context, w io.Writer, projectRoot string) 
 		return nil
 	}
 
-	res := migration.Apply(ctx, w, projectRoot, plan, migration.ShellRunner{}, stamp.New(projectRoot, nil).Issue)
+	res := migration.Apply(ctx, w, projectRoot, plan, runner, stamp.New(projectRoot, nil).Issue)
 
 	rows := make([]framework.AppliedMigration, 0, len(res.Applied))
 	for _, a := range res.Applied {

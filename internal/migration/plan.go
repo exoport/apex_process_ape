@@ -2,10 +2,7 @@ package migration
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -114,43 +111,6 @@ type Runner interface {
 // deliberately NOT bounded here, because a derivable entry may dispatch a
 // whole Claude session.
 const CheckTimeout = 2 * time.Minute
-
-// ShellRunner runs a line through the platform shell.
-//
-// A shell is required rather than an argv split: the framework's own
-// entries pipe into `jq` and quote embedded JSON, and splitting those on
-// whitespace would silently run something else.
-type ShellRunner struct{}
-
-func (ShellRunner) Run(ctx context.Context, dir, line string) (int, error) {
-	name, flag := "sh", "-c"
-	if runtime.GOOS == "windows" {
-		name, flag = "cmd", "/c"
-	}
-	cmd := exec.CommandContext(ctx, name, flag, line)
-	cmd.Dir = dir
-	err := cmd.Run()
-	if err == nil {
-		return 0, nil
-	}
-	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
-		// The command ran and said no. That is a verdict, not a failure
-		// to obtain one.
-		return exitErr.ExitCode(), nil
-	}
-	return -1, err
-}
-
-// refusingRunner is what `--plan --no-check` uses: every check reports
-// not-run rather than a verdict nobody obtained.
-type refusingRunner struct{}
-
-func (refusingRunner) Run(context.Context, string, string) (int, error) {
-	return -1, errors.New("checks disabled")
-}
-
-// NoCheckRunner returns a Runner that executes nothing.
-func NoCheckRunner() Runner { return refusingRunner{} }
 
 // BuildPlan resolves every entry's state.
 //

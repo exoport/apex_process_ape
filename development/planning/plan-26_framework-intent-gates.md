@@ -340,6 +340,18 @@ watches. The corrected mapping is the convention `grep -q`, `jq -e` and `test` a
 means a framework check must exit 1 for "no" — `test -f x && grep -q y x`, never a bare
 `grep -q y x`, which exits 2 when the file is absent.
 
+**`ape` inside a check is the running binary.** Checks and commands run with a one-entry shadow
+directory at the front of `PATH`, in which `ape` is a link to `os.Executable()`. Found by running
+the framework's *authored* entry — `framework/_apex/migrations/v0.16.0_seq-01_retro-rows-per-epic.md`
+— against a real machine rather than a fixture of it. Its check is
+`ape sprint check --output-format json | jq -e …`; an `ape` v0.0.56 was on `PATH`; that binary has
+`sprint check --output-format json`, emits valid JSON, and reports `findings: []` because
+`sprint.epic_without_retro` did not exist yet. `jq` returned `true`, the check reported satisfied,
+and the entry would have been recorded **applied on a project that was never migrated** — permanent,
+since the ledger is never revisited. A check naming `ape` can only coherently mean the `ape`
+deciding whether to apply the migration. When the shadow cannot be built the runner says so rather
+than proceeding silently, because proceeding silently is the failure.
+
 **Binding properties, and where each one actually lives.** Idempotent — the ledger, not the
 command. Resumable — ledger rows are persisted in success order, so a failure leaves the completed
 prefix recorded. Runs between dispatches — the caller's placement in `ape framework update`,

@@ -167,6 +167,25 @@ pending and ape would apply it. Write checks that exit 1 for "no" —
 Checks are bounded at two minutes. A `command:` is not, because a derivable
 entry may dispatch a whole session.
 
+### `ape` inside a check means *this* `ape`
+
+Checks and commands run with a PATH in which `ape` resolves to the binary
+running the migration, not to whatever `ape` the machine has installed.
+
+This is not a convenience. The framework's first migration entry checks
+with `ape sprint check --output-format json | jq -e …`, and on a machine
+with an older `ape` on PATH that older binary answers: it has
+`sprint check --output-format json`, it emits perfectly valid JSON, and
+its `findings` is `[]` because the check class did not exist yet. `jq`
+says `true`, the check reports satisfied, the entry is recorded as
+applied, and the ledger makes that permanent — on a project that was never
+migrated.
+
+The shadow directory holds one entry, so nothing else on PATH changes
+resolution order. If it cannot be built, the run says so in a line
+beginning `migrations:` rather than proceeding silently — running against
+the wrong `ape` without saying so is the failure this prevents.
+
 ### Ordering, and what stops a run
 
 Entries are ordered **semantically**: `version` as semver, then `seq` as an

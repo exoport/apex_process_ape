@@ -226,7 +226,14 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 			// before any install: it must be readable against a project in
 			// any state, including one whose framework repo has moved on.
 			if plan {
-				p, pErr := loadMigrationPlan(cmd.Context(), projectRoot, migration.ShellRunner{}, !noCheck)
+				// The same self-shadow the run uses, so `--plan` and the run
+				// cannot be answered by two different `ape` binaries.
+				runner, cleanup, notice := migration.NewShellRunner()
+				defer cleanup()
+				if notice != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "migrations: %s\n", notice)
+				}
+				p, pErr := loadMigrationPlan(cmd.Context(), projectRoot, runner, !noCheck)
 				if pErr != nil {
 					return pErr
 				}

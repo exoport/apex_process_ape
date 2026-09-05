@@ -413,6 +413,20 @@ it would put prose in front of the check that enforces it.
   through the one door nobody watches, and only a test that ran a real
   `sh -c` found it.
 
+  **`ape` inside a check means the binary running the migration**, not
+  whatever `ape` the machine has installed. Checks and commands run with a
+  one-entry shadow directory at the front of PATH. This was found by
+  running the framework's own first entry on a real machine rather than a
+  fixture of it: its check is `ape sprint check --output-format json | jq
+  -e …`, an `ape` v0.0.56 was sitting in `~/go/bin`, and that binary *has*
+  `sprint check --output-format json`, emits perfectly valid JSON, and
+  reports `findings: []` because the check class did not exist yet. `jq`
+  said `true`, the check reported satisfied, and the entry would have been
+  recorded applied on a project that was never migrated — permanently,
+  because the ledger is never revisited. The same defect shape as the 127
+  one above and as everything else this release turned up: the check ran,
+  it reported success, and it was measuring a stand-in.
+
   Ordering is **semantic** — semver on `version`, integer on `seq`,
   honouring `after:` — and never the filename's, under which `v0.9.0`
   sorts after `v0.10.0`. An `after:` cycle leaves the order undefined and
