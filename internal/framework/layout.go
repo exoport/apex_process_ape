@@ -60,6 +60,18 @@ const (
 	// Optional in the framework repo, on the same version-skew terms as
 	// the three above.
 	SubtreeCommitOwners = "_apex/commit-owners.csv"
+	// SubtreeMigrations is the framework's per-version upgrade list, read
+	// by `ape framework update`'s migration runner (PLAN-26 M14).
+	//
+	// Installed for the same reason the roster above is: the runner reads
+	// the list from `{apex_folder}/migrations/` in the PROJECT, and an
+	// absent folder is reported as "this framework ships no migration
+	// list". On a framework that ships one, that report is not merely
+	// unhelpful — it is false, and it is the shape the operator would act
+	// on.
+	//
+	// Optional in the framework repo, on the same version-skew terms.
+	SubtreeMigrations = "_apex/migrations"
 	// SubtreeAboardRecipes is the framework's curated `ape aboard` recipe
 	// library — markdown methods for one board move each, which the board
 	// discovers from the project.
@@ -101,6 +113,9 @@ const (
 	// Absent = the project has not adopted the declaration, and every
 	// dispatch's assertion is skipped with a reason.
 	ProjectCommitOwners = "_apex/commit-owners.csv"
+	// ProjectMigrationsDir is where the upgrade list lands. Absent = this
+	// framework ships none, and the runner has nothing pending.
+	ProjectMigrationsDir = "_apex/migrations"
 	// ProjectAboardRecipesDir is where the framework's recipe library lands.
 	// The path is aboard's to define, not ape's — the board walks up looking
 	// for exactly this directory, so it is the same string on both sides and

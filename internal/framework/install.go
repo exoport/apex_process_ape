@@ -115,6 +115,13 @@ type UpdateSummary struct {
 	// commit-ownership roster to install. False on a framework that
 	// predates it — the dispatch assertion then skips, with a reason.
 	CommitOwnersInstalled bool `json:"commitOwnersInstalled" yaml:"commitOwnersInstalled"`
+	// MigrationsInstalled counts the framework's upgrade-list entries
+	// copied into the project. Zero means the framework ships none — the
+	// runner then reports nothing pending, which is then TRUE.
+	MigrationsInstalled int `json:"migrationsInstalled" yaml:"migrationsInstalled"`
+	// MigrationPaths names them, for the same reason SkillsRemovedPaths
+	// does: a count alone cannot be checked against the tree.
+	MigrationPaths []string `json:"migrationPaths,omitempty" yaml:"migrationPaths,omitempty"`
 
 	// ApeCommandsInstalled reports whether the framework carried the
 	// required-command-surface manifest (_apex/ape-commands.yaml). False
@@ -319,6 +326,10 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if err != nil {
 		return nil, err
 	}
+	migrationsInstalled, err := installMigrations(opts.FrameworkRepo, opts.ProjectRoot)
+	if err != nil {
+		return nil, err
+	}
 	contractsInstalled, err := installTerminalContracts(opts.FrameworkRepo, opts.ProjectRoot)
 	if err != nil {
 		return nil, err
@@ -415,6 +426,8 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 
 			TerminalContractsInstalled: contractsInstalled,
 			CommitOwnersInstalled:      commitOwnersInstalled,
+			MigrationsInstalled:        len(migrationsInstalled),
+			MigrationPaths:             migrationsInstalled,
 			ApeCommandsInstalled:       apeCommandsInstalled,
 			AboardRecipesInstalled:     len(aboardRecipes),
 			AboardRecipePaths:          aboardRecipes,
@@ -474,6 +487,54 @@ func installCommitOwners(frameworkRepo, projectRoot string) (bool, error) {
 		return false, fmt.Errorf("copy commit-owners roster: %w", err)
 	}
 	return true, nil
+}
+
+// installMigrations copies the framework's per-version upgrade list into
+// the project — the folder `ape framework update`'s runner reads.
+//
+// Refreshed rather than synced, like the aboard recipe library: an entry
+// the framework no longer ships stays put. That is deliberate. The
+// applied-id ledger in framework.yaml records entries BY ID, so deleting a
+// file whose id is already recorded would leave a ledger row naming a
+// migration nobody can read — and a pruned entry (the framework prunes
+// them per major release) is exactly the case where that happens.
+//
+// Returns the file names installed. An absent folder is a no-op, on the
+// same version-skew terms as the roster.
+func installMigrations(frameworkRepo, projectRoot string) ([]string, error) {
+	srcRoot := filepath.Join(frameworkRepo, SubtreeMigrations)
+	entries, err := os.ReadDir(srcRoot)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read %s: %w", srcRoot, err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			names = append(names, e.Name())
+		}
+	}
+	if len(names) == 0 {
+		// No empty directory left behind: `--plan` distinguishes "no
+		// folder" from "a folder declaring nothing", and an empty one
+		// would report the second when the truth is the first.
+		return nil, nil
+	}
+	dstRoot := filepath.Join(projectRoot, ProjectMigrationsDir)
+	if err := os.MkdirAll(dstRoot, 0o755); err != nil {
+		return nil, fmt.Errorf("create %s: %w", ProjectMigrationsDir, err)
+	}
+	installed := make([]string, 0, len(names))
+	for _, name := range names {
+		if err := CopyFile(filepath.Join(srcRoot, name), filepath.Join(dstRoot, name)); err != nil {
+			return nil, fmt.Errorf("copy migration %s: %w", name, err)
+		}
+		installed = append(installed, name)
+	}
+	sort.Strings(installed)
+	return installed, nil
 }
 
 // installApeCommands copies the framework's required-command-surface

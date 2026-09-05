@@ -277,6 +277,26 @@ they **skip and say so** under `skipped_checks`; the mode keeps working
 there, and a governance class that says nothing when it could not run
 would read as one that passed.
 
+**They are also gated on `ext-adrs`, and `--file` takes that from
+`--active-extensions` alone** — it does not infer it from the project's
+config, even though it walks the project up for the corpus. Omit the flag
+and both classes skip, reported the same way:
+
+```console
+$ ape story verify --file development/implementation/1-1_thing.md
+OK: … is valid
+  skipped story.adrs_considered: ext-adrs is not active for this run (--file mode takes it from --active-extensions)
+  skipped story.adr_unresolved:  ext-adrs is not active for this run (--file mode takes it from --active-extensions)
+```
+
+That skip line is not decoration. On an otherwise-clean story citing a
+`proposed` ADR the command exits **0 with the flag and 0 without it**, and
+only the run with the flag produces the flagged finding — so a check
+asserting "exit 0, flagged" passes either way and measures nothing in one
+of them. The skip is what tells the two runs apart. Pass
+`--active-extensions ext-adrs` whenever you mean to exercise these
+classes.
+
 ### `--fix`, and the two classes it refuses
 
 `--fix` repairs exactly one class: a `depends_on` item that YAML decoded as

@@ -825,3 +825,104 @@ func TestUpdate_PicksUpCommitOwnersRosterAddedLater(t *testing.T) {
 	require.True(t, res.Summary.CommitOwnersInstalled)
 	require.FileExists(t, filepath.Join(proj, framework.ProjectCommitOwners))
 }
+
+const migrationEntry = `---
+id: v0.16.0_seq-01
+version: 0.16.0
+seq: 1
+kind: derivable
+blocking: false
+check: "true"
+command: "true"
+---
+
+body
+`
+
+// TestSetup_InstallsMigrationList is the same defect as the commit-owners
+// roster, one item over, and it was still open after that fix.
+//
+// The runner reads the upgrade list from `{apex_folder}/migrations/` in
+// the PROJECT, and an absent folder is reported as "this framework ships
+// no migration list". On a framework that ships one, that report is not
+// merely unhelpful — it is FALSE, and it is the sentence an operator
+// would act on. The whole runner was unreachable.
+func TestSetup_InstallsMigrationList(t *testing.T) {
+	t.Parallel()
+	fw, proj := t.TempDir(), t.TempDir()
+	fakeFramework(t, fw, "v0.16.0")
+	require.NoError(t, os.MkdirAll(filepath.Join(fw, framework.SubtreeMigrations), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(fw, framework.SubtreeMigrations, "v0.16.0_seq-01_x.md"),
+		[]byte(migrationEntry), 0o644,
+	))
+	commitAll(t, fw, "ship the migration list")
+
+	res, err := framework.Setup(context.Background(), &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "test", Bootstrapper: framework.NoopBootstrapper{},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Summary.MigrationsInstalled)
+	require.Equal(t, []string{"v0.16.0_seq-01_x.md"}, res.Summary.MigrationPaths)
+
+	got, err := os.ReadFile(
+		filepath.Join(proj, framework.ProjectMigrationsDir, "v0.16.0_seq-01_x.md"))
+	require.NoError(t, err)
+	require.Equal(t, migrationEntry, string(got), "copied byte-for-byte")
+}
+
+// An absent list installs nothing AND LEAVES NO EMPTY DIRECTORY: `--plan`
+// distinguishes "no folder" from "a folder declaring nothing", and an
+// empty one would report the second when the truth is the first.
+func TestSetup_MigrationListAbsentLeavesNoDirectory(t *testing.T) {
+	t.Parallel()
+	fw, proj := t.TempDir(), t.TempDir()
+	fakeFramework(t, fw, "v0.15.0")
+
+	res, err := framework.Setup(context.Background(), &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "test", Bootstrapper: framework.NoopBootstrapper{},
+	})
+	require.NoError(t, err)
+	require.Zero(t, res.Summary.MigrationsInstalled)
+	require.NoDirExists(t, filepath.Join(proj, framework.ProjectMigrationsDir))
+}
+
+// Refreshed, not synced: an entry the framework pruned stays put, because
+// the applied-id ledger records entries BY ID and a removed file would
+// leave a ledger row naming a migration nobody can read.
+func TestUpdate_MigrationListIsRefreshedNotSynced(t *testing.T) {
+	t.Parallel()
+	fw, proj := t.TempDir(), t.TempDir()
+	fakeFramework(t, fw, "v0.16.0")
+	require.NoError(t, os.MkdirAll(filepath.Join(fw, framework.SubtreeMigrations), 0o755))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(fw, framework.SubtreeMigrations, "v0.16.0_seq-01_x.md"),
+		[]byte(migrationEntry), 0o644,
+	))
+	commitAll(t, fw, "ship it")
+
+	_, err := framework.Setup(context.Background(), &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "test", Bootstrapper: framework.NoopBootstrapper{},
+	})
+	require.NoError(t, err)
+
+	// The framework prunes it in a later version.
+	require.NoError(t, os.Remove(filepath.Join(fw, framework.SubtreeMigrations, "v0.16.0_seq-01_x.md")))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(fw, framework.SubtreeMigrations, "v0.18.0_seq-01_y.md"),
+		[]byte(migrationEntry), 0o644,
+	))
+	commitAll(t, fw, "prune the old entry, ship a new one")
+
+	_, err = framework.Update(context.Background(), &framework.UpdateOptions{
+		FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+		ApeVersion: "test", Bootstrapper: framework.NoopBootstrapper{},
+	})
+	require.NoError(t, err)
+	require.FileExists(t, filepath.Join(proj, framework.ProjectMigrationsDir, "v0.16.0_seq-01_x.md"),
+		"a pruned entry stays: its id may already be in the ledger")
+	require.FileExists(t, filepath.Join(proj, framework.ProjectMigrationsDir, "v0.18.0_seq-01_y.md"))
+}

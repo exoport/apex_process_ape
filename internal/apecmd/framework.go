@@ -549,6 +549,10 @@ func printFrameworkUpdate(out *frameworkUpdateOutput, format output.Format) erro
 			fmt.Printf("Commits:   no %s in the framework — every dispatch's commit-ownership assertion will SKIP\n",
 				framework.SubtreeCommitOwners)
 		}
+		if n := out.Summary.MigrationsInstalled; n > 0 {
+			fmt.Printf("Migrations: %d upgrade entr%s installed into %s/\n",
+				n, pluralY(n), framework.ProjectMigrationsDir)
+		}
 		if out.Summary.GitignoreLockAdded {
 			// Reported only when it wrote. ape edited a file the operator
 			// owns, so it says so; on every subsequent run the entry is

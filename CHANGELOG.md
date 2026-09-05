@@ -416,6 +416,29 @@ it would put prose in front of the check that enforces it.
   three — the key by name, a clean verdict still being emitted, and a skip
   not marshalling like a pass.
 
+- **fix(framework): install `_apex/migrations/` too — the same gap, one
+  item over.** The upgrade runner reads the list from
+  `{apex_folder}/migrations/` in the **project**, and nothing put it
+  there. So on every project `ape framework update --plan` reported
+  *"this framework ships no migration list"* — which on a framework that
+  ships one is not unhelpful, it is **false**, and it is the sentence an
+  operator would act on. The whole runner was unreachable.
+
+  Found while updating the docs: `framework-update.md`'s "What gets
+  touched" table is a contract about what the command writes, and writing
+  the roster row into it meant checking what else the table was missing.
+  The lesson from the roster fix — *when a feature reads a file from the
+  project, check that something puts it there* — had been written down
+  and not applied to the very next feature in the same release.
+
+  Refreshed rather than synced, like the aboard recipe library: an entry
+  the framework prunes stays put, because the applied-id ledger records
+  entries **by id** and a removed file would leave a ledger row naming a
+  migration nobody can read. No empty directory is left behind when the
+  framework ships none — `--plan` distinguishes "no folder" from "a folder
+  declaring nothing", and an empty one would report the second when the
+  truth is the first.
+
 - **fix(framework): install `_apex/commit-owners.csv`, without which this
   release's headline assertion never fires.** The framework ships the
   commit-ownership roster and its own `_apex/README.md` lists it in the

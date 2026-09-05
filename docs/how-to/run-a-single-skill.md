@@ -65,7 +65,12 @@ commit. The dirty-tree gate applies only when `--task-commit` is given
 ## The commit-ownership assertion
 
 Every dispatch is checked against the project's own declaration,
-`_apex/commit-owners.csv`:
+`_apex/commit-owners.csv` — **the framework ships it, and
+[`ape framework update`](framework-update.md) installs it.** A project
+that has not updated against a framework carrying the roster has no file,
+and every dispatch's assertion is then skipped; the update run reports
+which of the two happened rather than leaving an absent roster to look
+like a deliberate choice.
 
 ```csv
 skill,commit_kind,message_regex
@@ -130,6 +135,23 @@ Every verdict, including a skip, is also written to the run's
 `manifest.yaml` as `commit_contract`. The JSON envelope is ephemeral; a
 consumer that parses it, sees failure and discards stdout would otherwise
 leave nothing on disk saying why.
+
+**Assert the verdict's shape, never the exit status.** A dispatch that
+asserted and held, and one that asserted nothing, are BOTH exit 0 — the
+skip is not a failure and must not fail a run. The two are told apart by
+the payload:
+
+```json
+"commit_contract": {"skill":"apex-help","declared":false}
+"commit_contract": {"skill":"apex-help","declared":false,"skipped":true,
+                    "skip_reason":"--task-commit: ape makes this dispatch's commit itself, …"}
+```
+
+The first is a **held** assertion. The second asserted nothing. A missing
+`skipped` key is the held verdict rather than an absent one — `omitempty`
+drops a false bool by design — so a check written against `$?` cannot
+tell them apart, and neither can one that only looks for the key's
+presence.
 
 > **Reading a failing run:** `totals.commits_made` counts **ape's own**
 > boundary commits (`--task-commit`, per-step commits), never the ones the

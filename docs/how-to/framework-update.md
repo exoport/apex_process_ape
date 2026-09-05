@@ -35,9 +35,10 @@ What happens:
 8. Refreshes the framework's [`ape aboard` recipe library](use-the-board.md#recipes) in `<project>/_apex/aboard/recipes/`.
 9. Ensures the project has a [board](use-the-board.md#the-board-is-already-there): creates `<project>/.aboard/` and seeds `.aboard/.gitignore` if either is missing. An existing board is never overwritten.
 10. Refreshes the operating-rules fragment (`_apex/apex-operating-rules.md`) and the managed block in the repo-root `CLAUDE.md`. Skipped with a warning if the framework repo predates the fragment.
-11. Ensures `.gitignore` ignores `sprint-status.yaml.lock`, appending the entry only when git does not already ignore the sidecar. This is the verify-and-fix pass: a project set up before the entry existed gains it here, without having to know it was missing.
-12. Relocates any run artifacts still at the pre-`{output_folder}/ape` paths (`_output/pipelines/`, `_output/tasks/`, and on a project that renamed `output_folder`, `_output/ape/prompts/` and `_output/ape/chats/`). Skipped with `--no-migrate`; reported without writing by `--dry-run`. See [What the relocation does](#what-the-relocation-does).
-13. Rewrites `<project>/_apex/framework.yaml` — preserving the `sources.config` block recorded by the original `setup` so `project_name` + `extensions` stay intact.
+11. Copies the framework-owned tables the runner reads: `_apex/terminal-contracts.csv`, `_apex/ape-commands.yaml`, `_apex/commit-owners.csv`, and the upgrade list `_apex/migrations/*.md`. Each is optional in the framework repo — one that predates a file installs none of it, and the runner then reports that state rather than assuming it. **`commit-owners.csv` is reported in both directions**, because an absent roster silently disarms the per-dispatch commit-ownership assertion described in [Run a single skill](run-a-single-skill.md).
+12. Ensures `.gitignore` ignores `sprint-status.yaml.lock`, appending the entry only when git does not already ignore the sidecar. This is the verify-and-fix pass: a project set up before the entry existed gains it here, without having to know it was missing.
+13. Relocates any run artifacts still at the pre-`{output_folder}/ape` paths (`_output/pipelines/`, `_output/tasks/`, and on a project that renamed `output_folder`, `_output/ape/prompts/` and `_output/ape/chats/`). Skipped with `--no-migrate`; reported without writing by `--dry-run`. See [What the relocation does](#what-the-relocation-does).
+14. Rewrites `<project>/_apex/framework.yaml` — preserving the `sources.config` block recorded by the original `setup` so `project_name` + `extensions` stay intact.
 
 ## What gets touched
 
@@ -46,6 +47,10 @@ What happens:
 | `.claude/skills/apex-*/`          | Wiped + reinstalled                |
 | `_apex/pipelines/*.yaml`          | Overwritten                        |
 | `_apex/apex-operating-rules.md`   | Overwritten (if framework ships it) |
+| `_apex/terminal-contracts.csv`    | Overwritten (if framework ships it) |
+| `_apex/ape-commands.yaml`         | Overwritten (if framework ships it) |
+| `_apex/commit-owners.csv`         | Overwritten (if framework ships it). **Absent = every dispatch's commit-ownership assertion skips** — the run says so either way |
+| `_apex/migrations/*.md`           | Refreshed, **not synced**: an entry the framework pruned stays put, because the applied-id ledger records entries by id. No empty directory is left when the framework ships none |
 | `_apex/aboard/recipes/*.md`       | The framework's own recipe files are overwritten; **anything else in that directory is left alone** — see below |
 | `.aboard/`                        | Created if missing; an existing board is **never** overwritten |
 | `.aboard/.gitignore`              | Seeded if missing; an edited one is **NOT** rewritten |
