@@ -224,12 +224,31 @@ func TestGovernanceClasses_SkipOutsideAProject(t *testing.T) {
 }
 
 // TestGovernanceClasses_SkipWhenExtADRsIsOff — the classes are gated on
-// the extension, like every other governance-shaped check.
+// the extension, like every other governance-shaped check, AND the
+// non-run is reported.
+//
+// The reporting half is not decoration. This branch is reached two ways
+// that look identical from outside: a project that genuinely does not use
+// ADRs, and a caller that forgot `--active-extensions`. Measured on an
+// otherwise-clean story citing a `proposed` ADR, `--file` exits 0 with
+// the flag and 0 without it, and only the first run produces the flagged
+// finding — so an acceptance block asserting "exit 0, flagged" passes on
+// the second while measuring nothing. The skip is what tells the two
+// apart.
 func TestGovernanceClasses_SkipWhenExtADRsIsOff(t *testing.T) {
 	cfg := govProject(t)
 	path := writeStory(t, cfg.Paths.Implementation, "1-1.md",
 		"---\nstory_id: 1-1\nepic: 1\nstatus: done\noutput_document: x.md\n"+
 			"governance:\n  adrs: [ADR-9999]\n---\n"+conformingBody)
 
-	require.Equal(t, FileOK, VerifyFile(path, apexcfg.Ext{}).Code)
+	verdict := VerifyFile(path, apexcfg.Ext{})
+	require.Equal(t, FileOK, verdict.Code)
+	require.Len(t, verdict.SkippedChecks, 2)
+	names := []string{verdict.SkippedChecks[0].Check, verdict.SkippedChecks[1].Check}
+	require.Contains(t, names, CheckADRsConsidered)
+	require.Contains(t, names, CheckADRUnresolved)
+	for _, s := range verdict.SkippedChecks {
+		require.Contains(t, s.Reason, "ext-adrs is not active",
+			"a class that did not run must say why, or it reads as one that passed")
+	}
 }

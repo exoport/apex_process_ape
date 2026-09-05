@@ -9,14 +9,27 @@
 ### What the framework greps
 
 The exact surfaces the framework's blocked acceptance blocks assert
-against, quoted so they can be matched without reading the source:
+against, quoted so they can be matched without reading the source. **Every
+string below was run against the built binary**, not transcribed from the
+source.
+
+> **The three governance rows need `--active-extensions ext-adrs`.** The
+> classes are gated on the extension, and `--file` mode takes it from that
+> flag alone — it does not infer it from the project's config. An
+> acceptance block that omits it does not merely lose the check: on an
+> otherwise-clean story citing a `proposed` ADR the exit code is **0 either
+> way**, so a block asserting "exit 0, flagged" passes while measuring
+> nothing. The run now reports `skipped story.adrs_considered` /
+> `skipped story.adr_unresolved` with the reason when the extension is off,
+> which is how the two are told apart. The framework's own skills already
+> pass the flag; it is the acceptance blocks that need it added.
 
 | Command | Outcome |
 | ------- | ------- |
-| `ape story verify --file <story with a derived section removed>` | non-zero (**4**); the message names the section, e.g. `the derived section set requires ### Debug Log References and the body does not carry it (an empty section is accepted; a missing header is not)` |
-| `ape story verify --file <story declaring adrs_applicable 0 against a non-zero tag match>` | non-zero (**4**); `adrs_applicable is 0 but the recomputed adrs_considered is N — the digest pass certified that none of N candidate ADRs applies, which is the one judgement it cannot make silently`. Never the words "applicability mismatch" |
-| `ape story verify --file <story citing a governance.adrs id absent at HEAD>` | non-zero (**4**); `ADR-9999 does not resolve to an ADR at HEAD` |
-| `ape story verify --file <story citing a proposed ADR>` | **exit 0**, reported under `flagged`: `ADR-0001 resolves to an ADR whose status is "proposed", not accepted — reported, not gated` |
+| `ape story verify --file <story with a derived section removed>` | non-zero (**4**); the message names the section: `the derived section set requires ### Debug Log References and the body does not carry it (an empty section is accepted; a missing header is not)` |
+| `ape story verify --file <story declaring adrs_applicable 0 against a non-zero tag match> --active-extensions ext-adrs` | non-zero (**4**); `adrs_applicable is 0 but the recomputed adrs_considered is 1 — the digest pass certified that none of 1 candidate ADRs applies, which is the one judgement it cannot make silently`. Never the words "applicability mismatch" |
+| `ape story verify --file <story citing a governance.adrs id absent at HEAD> --active-extensions ext-adrs` | non-zero (**4**); `ADR-9999 does not resolve to an ADR at HEAD` |
+| `ape story verify --file <otherwise-clean story citing a proposed ADR> --active-extensions ext-adrs` | **exit 0**, reported under `flagged`: `ADR-0004 resolves to an ADR whose status is "proposed", not accepted — reported, not gated`. The story must be otherwise clean — any other body finding makes the exit 4 for its own reasons |
 | a non-committer dispatch | HEAD unchanged, no path staged that was not staged before, stash unchanged; the verdict rides `ape task --output-format json` as `commit_contract` |
 
 The new `story verify` check-class names, in full:
@@ -380,6 +393,27 @@ it would put prose in front of the check that enforces it.
   scrub, there is no asymmetry here, because this is about which binary
   `ape` names rather than which terminal the child is attached to. If it
   cannot be made, the run says so and proceeds unpinned.
+
+- **fix(story): a governance class that did not run says so.**
+  `ape story verify --file` gates the two ADR classes on `ext-adrs`, which
+  in `--file` mode comes from `--active-extensions` alone. When the
+  extension is off the classes were skipped **silently** — unlike the
+  adjacent unresolvable-corpus branch, which has always reported its skip
+  on the stated grounds that "a governance class that says nothing when it
+  could not run reads as one that passed".
+
+  That branch is reached two ways which look identical from outside: a
+  project that genuinely does not use ADRs, and a caller that forgot the
+  flag. Measured on an otherwise-clean story citing a `proposed` ADR,
+  `--file` exits **0 with the flag and 0 without it**, and only the first
+  run produces the flagged finding — so an acceptance block asserting
+  "exit 0, flagged" passes while measuring nothing at all. Found while
+  verifying every string in the greps table above against the built
+  binary rather than transcribing it from the source.
+
+  The run now reports `skipped story.adrs_considered` and
+  `skipped story.adr_unresolved` with the reason. Report-only and
+  additive: no exit code and no existing message changes.
 
 - **feat(sprint): a `sprint.epic_without_retro` check class.** One finding
   per epic carrying no `epic-N-retrospective` row, in a command that
