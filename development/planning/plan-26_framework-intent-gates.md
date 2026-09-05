@@ -123,8 +123,9 @@ resolves it. When it is set it passes through as written; no `Paths.Evidence` is
 **`model_profile` was asked for, implemented, and then withdrawn** (maintainer decision,
 2026-09-05) before release. The framework removed the lean scaffold profile the key was a
 ceiling over — the recapture measured lean against full and it did not earn its complexity, with
-`compactions_observed: 0` on every run killing the context-headroom argument it rested on — so
-the key had nothing left to bound. Removed from the resolver, the overlay list and its tests.
+`compactions_observed: 0` on every run killing the context-headroom argument it rested on. Peak
+occupancy across 57 measured steps was 4.4%–37.1% of a 1M window, and the 37.1% worst case was a
+**full** step, so the pressure was absent even at maximum. The key had nothing left to bound. Removed from the resolver, the overlay list and its tests.
 
 The exhaustiveness test over `OverlayKeys()` ↔ `decodeInto` already exists and must keep
 passing — it is what stops a key being added to one list and forgotten in the other.

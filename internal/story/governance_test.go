@@ -188,9 +188,17 @@ func TestADRRefs_ProposedADRIsFlaggedNotGated(t *testing.T) {
 	verdict := VerifyFile(path, apexcfg.Ext{ADRs: true})
 	require.Equal(t, FileOK, verdict.Code,
 		"a story may legitimately cite a proposed ADR — gating would turn a note into a halt")
-	require.Len(t, verdict.Flagged, 1)
-	require.Equal(t, CheckADRNotAccepted, verdict.Flagged[0].Check)
-	require.Contains(t, verdict.Flagged[0].Message, "proposed")
+	// Filtered rather than counted: Flagged also carries the report-only
+	// story.requirement_ids_missing, which fires on any story without the
+	// key and has nothing to do with ADR status.
+	var notAccepted []Finding
+	for _, f := range verdict.Flagged {
+		if f.Check == CheckADRNotAccepted {
+			notAccepted = append(notAccepted, f)
+		}
+	}
+	require.Len(t, notAccepted, 1)
+	require.Contains(t, notAccepted[0].Message, "proposed")
 }
 
 // TestGovernanceClasses_SkipOutsideAProject is the property the `--file`

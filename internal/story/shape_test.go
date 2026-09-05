@@ -455,3 +455,78 @@ func TestStripFences_Mechanics(t *testing.T) {
 		})
 	}
 }
+
+// --- story.requirement_ids_missing (report-only) ------------------------
+
+// TestRequirementIDs_ReportedNeverGating is the whole contract of the
+// class. Every story minted before the key existed lacks it, so gating
+// would fail entire corpora over a field that is being backfilled.
+func TestRequirementIDs_ReportedNeverGating(t *testing.T) {
+	dir := t.TempDir()
+	path := writeStory(t, dir, "1-1.md", head("done")+conformingBody)
+
+	verdict := VerifyFile(path, apexcfg.Ext{})
+	require.Equal(t, FileOK, verdict.Code, "report-only must never decide an exit code")
+
+	var flagged bool
+	for _, f := range verdict.Flagged {
+		if f.Check == CheckRequirementIDsMissing {
+			flagged = true
+			require.Equal(t, "requirement_ids", f.Field)
+		}
+	}
+	require.True(t, flagged, "and it must still be reported: %+v", verdict.Flagged)
+}
+
+// TestRequirementIDs_PresentIsSilent, including the shapes a corpus
+// actually writes.
+func TestRequirementIDs_PresentIsSilent(t *testing.T) {
+	dir := t.TempDir()
+	for name, fm := range map[string]string{
+		"block sequence": "requirement_ids:\n  - FR-AUTH-1\n  - NFR-SEC-7\n",
+		"flow sequence":  "requirement_ids: [FR-AUTH-1]\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := writeStory(t, dir, "s.md",
+				"---\nstory_id: 1-1\nepic: 1\nstatus: done\noutput_document: x.md\n"+
+					fm+"---\n"+conformingBody)
+			require.Empty(t, VerifyFile(path, apexcfg.Ext{}).Flagged)
+		})
+	}
+}
+
+// TestRequirementIDs_EmptyListCountsAsMissing — a story declaring an
+// empty list asserts nothing the coverage table can use, so it reads the
+// same as absent rather than as "covers nothing".
+func TestRequirementIDs_EmptyListCountsAsMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := writeStory(t, dir, "1-1.md",
+		"---\nstory_id: 1-1\nepic: 1\nstatus: done\noutput_document: x.md\n"+
+			"requirement_ids: []\n---\n"+conformingBody)
+
+	verdict := VerifyFile(path, apexcfg.Ext{})
+	require.Equal(t, FileOK, verdict.Code)
+	require.Len(t, verdict.Flagged, 1)
+	require.Equal(t, CheckRequirementIDsMissing, verdict.Flagged[0].Check)
+}
+
+// TestRequirementIDs_HasNoFix — the value lives in the story's prose,
+// where two sections can disagree, and picking between them is the
+// judgement apex-frontmatter-repair exists to make. A --fix that guessed
+// would be the re-derivation that skill's contract forbids.
+func TestRequirementIDs_HasNoFix(t *testing.T) {
+	f := newFixture(t, "")
+	f.story("1-1_thing.md", "story_id: 1-1\nepic: 1\nstatus: done\noutput_document: x.md\n")
+
+	res, err := FixCorpus(f.cfg, false)
+	require.NoError(t, err)
+	require.Empty(t, res.Changes, "--fix must not invent requirement ids")
+
+	var reported bool
+	for _, r := range res.Remaining {
+		if r.Check == CheckRequirementIDsMissing {
+			reported = true
+		}
+	}
+	require.True(t, reported, "but it is reported as remaining — that is the work list")
+}

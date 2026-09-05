@@ -201,6 +201,34 @@ it would put prose in front of the check that enforces it.
   window while its own output went to ape's PTY. Inert today, closed for
   free.
 
+- **feat(story): a report-only `story.requirement_ids_missing` class, and
+  `ape deferred discard` stops asserting two untrue things.**
+
+  `story.requirement_ids_missing` fires on a story that declares no
+  `requirement_ids` — the field the release record's coverage table reads.
+  **Report-only, with no `--fix`, and it never decides an exit code.** The
+  value lives in the story's prose, where two sections can disagree, and
+  choosing between them is the judgement `apex-frontmatter-repair` exists
+  to make; a `--fix` that guessed would be exactly the re-derivation that
+  skill's contract forbids. The class exists so that skill can branch on a
+  check name like its other classes instead of globbing the corpus. It
+  fires on every story until the field is backfilled, which is the point
+  rather than a defect — but it is why gating on it would fail whole
+  corpora over a field mid-migration, and why `--file` reports it under
+  `flagged` instead. A present-but-empty list counts as missing: it
+  asserts nothing the coverage table can use.
+
+  `ape deferred discard` had two fields asserting things that were not
+  true. Its refusal on an already-closed record ended "reopen it first",
+  naming an `ape deferred reopen` that does not exist — the fix is to stop
+  naming it, not to build a command because an error string mentioned one.
+  And a discard stamped `resolved_at`, claiming work was resolved that
+  nobody resolved; it now stamps a new `discarded_at`. **Records written
+  before this are not rewritten**: guessing which historical `resolved_at`
+  values were really discards is the kind of invention this store refuses
+  everywhere else, so old records keep the wrong field and only new
+  discards are honest.
+
 - **feat(spawn): pin the output style on every spawned session.** Every
   session `ape` starts inherits whatever output style the machine has
   configured, and an output style claims precedence over other
@@ -258,8 +286,11 @@ it would put prose in front of the check that enforces it.
   measured lean against full across three pairs and it did not earn its
   complexity — one stage cheaper, one more expensive in both lean runs,
   run-to-run variance on the third about three times the claimed effect —
-  and the context-headroom argument died on `compactions_observed: 0` at
-  12–27% peak occupancy of a 1M window.
+  and the context-headroom argument died on `compactions_observed: 0`.
+  Peak occupancy across 57 measured steps ran 4.4%–37.1% of a 1M window,
+  and the worst case anywhere — 37.1%, with zero compactions — was a
+  **full** step, so the pressure lean exists to relieve was absent even at
+  maximum pressure.
 
 ## v0.0.66 (2026-09-01)
 

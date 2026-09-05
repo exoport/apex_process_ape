@@ -920,3 +920,45 @@ func TestVerify_SupersededGetsItsOwnCheck(t *testing.T) {
 		require.Equal(t, ConfidenceCertain, f.Confidence)
 	}
 }
+
+// TestDiscard_StampsDiscardedAtNotResolvedAt — a discarded record was
+// not resolved, and `resolved_at` on one asserts something untrue. A
+// reader counting resolved work would have counted discards, with
+// nothing in the record to contradict them.
+func TestDiscard_StampsDiscardedAtNotResolvedAt(t *testing.T) {
+	s := newStore(t)
+	res, err := s.Ingest([]byte(realBullet), IngestOptions{
+		Story: "54-1", Skill: "apex-review-story", Cycle: 2, Date: "2026-08-22",
+	})
+	require.NoError(t, err)
+	id := res.Records[0].ID
+
+	rec, err := s.Discard(id, "superseded by ADR-0007", "", "2026-09-05")
+	require.NoError(t, err)
+
+	require.Equal(t, "2026-09-05", rec.DiscardedAt)
+	require.Empty(t, rec.ResolvedAt, "a discard must not claim the work was resolved")
+	require.Empty(t, rec.ResolvedBy)
+	require.Equal(t, StatusDiscarded, rec.Status)
+}
+
+// TestDiscard_ClosedRefusalNamesNoPhantomOperation — the refusal used to
+// end "reopen it first", sending the reader after an `ape deferred
+// reopen` that does not exist.
+func TestDiscard_ClosedRefusalNamesNoPhantomOperation(t *testing.T) {
+	s := newStore(t)
+	res, err := s.Ingest([]byte(realBullet), IngestOptions{
+		Story: "54-1", Skill: "apex-review-story", Cycle: 2, Date: "2026-08-22",
+	})
+	require.NoError(t, err)
+	id := res.Records[0].ID
+
+	_, err = s.Close(id, "someone", "2026-09-04")
+	require.NoError(t, err)
+
+	_, err = s.Discard(id, "changed our minds", "", "2026-09-05")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already closed as done")
+	require.NotContains(t, err.Error(), "reopen",
+		"an error must not name an operation ape does not provide")
+}

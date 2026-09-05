@@ -387,7 +387,8 @@ var FileListMarkers = []string{"created", "modified", "deleted", "planned", "def
 // this class's finding (the class is the marker vocabulary); being
 // unable to see the entry would be.
 var fileListEntryRe = regexp.MustCompile(
-	"^[-*][ \t]+(?:`([^`]+)`|([^\\s`]+))[ \t]*(.*)$")
+	"^[-*][ \t]+(?:`([^`]+)`|([^\\s`]+))[ \t]*(.*)$",
+)
 
 // markerRe matches the canonical marker position: parens immediately
 // after the backticked path.

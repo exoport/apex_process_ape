@@ -2,6 +2,8 @@
 story_id: "1.1"
 epic: "1"
 status: done
+requirement_ids:
+  - FR-1-1
 review_count: 2
 output_document: "development/implementation/1-1_greet-a-name-from-the-domain.md"
 governance:

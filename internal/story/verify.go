@@ -22,6 +22,20 @@ const (
 	CheckTypeMismatch         = "story.type_mismatch"
 	CheckUnresolvedRef        = "story.unresolved_ref"
 	CheckUnparsable           = "story.unparseable"
+	// CheckRequirementIDsMissing — the story declares no requirement_ids.
+	//
+	// REPORT-ONLY, and there is no --fix for it. The value cannot be
+	// derived from frontmatter: the ids live in the story's own prose,
+	// where two sections can disagree, and picking between them is the
+	// judgement `apex-frontmatter-repair` exists to make. This class is
+	// how that skill gets a work list — it branches on a check name like
+	// its other classes instead of globbing the corpus and guessing,
+	// which is the re-derivation its contract forbids.
+	//
+	// Every story minted before the key existed lacks it, so gating on
+	// this would fail entire corpora over a field that is being
+	// backfilled. It never decides an exit code.
+	CheckRequirementIDsMissing = "story.requirement_ids_missing"
 )
 
 // RequiredKeys are the four keys every story carries, matching
@@ -178,9 +192,44 @@ func checkStory(h Head, ext apexcfg.Ext, known map[string]map[string]bool) []Fin
 		}
 	}
 
+	// Class 1d: requirement_ids, report-only. Absent and present-but-empty
+	// are the same answer — a story that claims no requirement covers
+	// none, and the release record's coverage table reads `unknown` for
+	// it either way.
+	if !hasRequirementIDs(h.Raw) {
+		findings = append(findings, Finding{
+			Check: CheckRequirementIDsMissing, Story: id, Path: h.Path,
+			Field:   "requirement_ids",
+			Message: "story declares no requirement_ids — the release record's coverage table reads it as unknown (report-only; the ids live in the story's prose and backfilling them is a judgement)",
+		})
+	}
+
 	findings = append(findings, checkTypes(h, id)...)
 	findings = append(findings, checkRefs(h, id, ext, known)...)
 	return findings
+}
+
+// hasRequirementIDs reports whether the story declares at least one
+// requirement id. A present-but-empty list is treated as absent: it
+// asserts nothing the coverage table can use.
+func hasRequirementIDs(raw map[string]any) bool {
+	v, ok := raw["requirement_ids"]
+	if !ok || v == nil {
+		return false
+	}
+	switch typed := v.(type) {
+	case []any:
+		for _, item := range typed {
+			if item != nil && strings.TrimSpace(fmt.Sprintf("%v", item)) != "" {
+				return true
+			}
+		}
+		return false
+	case string:
+		return strings.TrimSpace(typed) != ""
+	default:
+		return true
+	}
 }
 
 // checkTypes is class 2, as plain Go type switches.
@@ -469,6 +518,11 @@ func VerifyFile(path string, ext apexcfg.Ext) FileVerdict {
 		if f.Check == CheckUnresolvedRef {
 			continue
 		}
+		if f.Check == CheckRequirementIDsMissing {
+			// Report-only: surfaced, never gating. See the constant.
+			verdict.Flagged = append(verdict.Flagged, f)
+			continue
+		}
 		verdict.Findings = append(verdict.Findings, f)
 	}
 	if len(verdict.Findings) > 0 {
@@ -481,7 +535,9 @@ func VerifyFile(path string, ext apexcfg.Ext) FileVerdict {
 
 	shape := verifyShape(path, rel, ext)
 	verdict.Findings = append(verdict.Findings, shape.Findings...)
-	verdict.Flagged = shape.Flagged
+	// Appended, not assigned: the frontmatter pass above may already have
+	// flagged a report-only class, and overwriting here dropped it.
+	verdict.Flagged = append(verdict.Flagged, shape.Flagged...)
 	verdict.SkippedChecks = shape.SkippedChecks
 	if len(verdict.Findings) > 0 {
 		verdict.Code = FileShapeProblem

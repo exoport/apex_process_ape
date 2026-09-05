@@ -37,6 +37,8 @@ const storyFrontmatter = `---
 story_id: 1-1
 epic: 1
 status: done
+requirement_ids:
+  - FR-1-1
 output_document: development/implementation/1-1_thing.md
 governance:
   adrs: []

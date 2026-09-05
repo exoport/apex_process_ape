@@ -64,6 +64,8 @@ func (f *fixture) record(dir, name, id string) {
 const validStory = `story_id: 1-1
 epic: 1
 status: done
+requirement_ids:
+  - FR-1
 output_document: development/implementation/1-1_thing.md
 governance:
   adrs:
@@ -85,6 +87,26 @@ func (f *fixture) seedRecords() {
 }
 
 const allExts = "ext-adrs, ext-patterns, ext-capabilities, ext-features"
+
+// gating returns the findings that decide a verdict, dropping the
+// report-only advisory classes.
+//
+// story.requirement_ids_missing fires on any story without the key,
+// which is every story in every corpus until the field is backfilled —
+// that breadth is the point, since the class exists to be
+// apex-frontmatter-repair's work list. A test about which GATING classes
+// fire has to filter it out, or it is really asserting the state of a
+// backfill it does not care about.
+func gating(findings []Finding) []Finding {
+	var out []Finding
+	for _, f := range findings {
+		if f.Check == CheckRequirementIDsMissing {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
 
 // --- Fields (D4) ---
 
@@ -293,8 +315,13 @@ features:
 
 	report, err := VerifyCorpus(f.cfg)
 	require.NoError(t, err)
-	require.Len(t, report.Findings, 14, "exactly the 14 known failures: %+v", report.Findings)
-	require.Equal(t, map[string]int{CheckExtKeyMissing: 14}, report.Summary.ByCheck)
+	found := gating(report.Findings)
+	require.Len(t, found, 14, "exactly the 14 known failures: %+v", found)
+	// ByCheck counts the whole report, advisory classes included: every
+	// one of these 15 fixture stories also lacks requirement_ids.
+	require.Equal(t, 14, report.Summary.ByCheck[CheckExtKeyMissing])
+	require.Equal(t, 15, report.Summary.ByCheck[CheckRequirementIDsMissing],
+		"the advisory class fires on every story, which is what makes it a work list")
 
 	var featureGaps, capabilityGaps int
 	for _, finding := range report.Findings {
@@ -383,7 +410,7 @@ governance:
 
 	report, err := VerifyCorpus(f.cfg)
 	require.NoError(t, err)
-	require.Empty(t, report.Findings,
+	require.Empty(t, gating(report.Findings),
 		"with only ext-adrs active, missing features/capabilities/patterns are not findings")
 }
 
@@ -393,8 +420,9 @@ func TestVerifyCorpus_RequiredKeys(t *testing.T) {
 
 	report, err := VerifyCorpus(f.cfg)
 	require.NoError(t, err)
-	require.Len(t, report.Findings, 3, "epic, status and output_document are absent")
-	for _, finding := range report.Findings {
+	found := gating(report.Findings)
+	require.Len(t, found, 3, "epic, status and output_document are absent")
+	for _, finding := range found {
 		require.Equal(t, CheckRequiredKeyMissing, finding.Check)
 	}
 }
@@ -454,13 +482,14 @@ func TestVerifyCorpus_OptionalKeyFormat(t *testing.T) {
 	f.story("1-1_good.md", good)
 	report, err := VerifyCorpus(f.cfg)
 	require.NoError(t, err)
-	require.Empty(t, report.Findings)
+	require.Empty(t, gating(report.Findings))
 
 	f.story("1-1_good.md", strings.Replace(good, "a1b2c3d", "not-a-sha", 1))
 	report, err = VerifyCorpus(f.cfg)
 	require.NoError(t, err)
-	require.Len(t, report.Findings, 1)
-	require.Equal(t, CheckOptionalKeyMalformed, report.Findings[0].Check)
+	bad := gating(report.Findings)
+	require.Len(t, bad, 1)
+	require.Equal(t, CheckOptionalKeyMalformed, bad[0].Check)
 }
 
 func TestVerifyCorpus_FindingOrderIsStable(t *testing.T) {
@@ -699,7 +728,13 @@ func (f *fixture) contents(name string) string {
 	return string(body)
 }
 
+// fixBase carries requirement_ids so these tests stay about --fix. The
+// report-only story.requirement_ids_missing class fires on any story
+// without the key and lands in Remaining, which is its delivery route to
+// apex-frontmatter-repair — correct behaviour, and pure noise in a test
+// asserting which findings --fix owns.
 const fixBase = "story_id: \"112.2\"\nepic: \"112\"\nstatus: done\n" +
+	"requirement_ids: [FR-1]\n" +
 	"output_document: \"development/implementation/s.md\"\n"
 
 // TestFix_QuotesBothSequenceShapes covers the two ways a corpus writes
@@ -825,8 +860,20 @@ func TestFix_RepairsDependsOnBesideAnUnfixableFeaturesItem(t *testing.T) {
 	require.Len(t, res.Changes, 1, "the derivable repair must survive the guard")
 	require.Contains(t, f.contents("both.md"), `depends_on: ["112.1"]`)
 
-	require.Len(t, res.Remaining, 1, "the refused class is still reported")
-	require.Equal(t, "features[0]", res.Remaining[0].Field)
+	// The refused class is still reported. Asserted by identity rather
+	// than by a count of the whole list: report-only classes such as
+	// story.requirement_ids_missing also land in Remaining — that IS
+	// their delivery route to apex-frontmatter-repair — so a bare length
+	// check here would break every time one is added, without saying
+	// anything about the guard this test exists to pin.
+	var refused []Finding
+	for _, r := range res.Remaining {
+		if r.Check == CheckTypeMismatch {
+			refused = append(refused, r)
+		}
+	}
+	require.Len(t, refused, 1, "the refused class is still reported")
+	require.Equal(t, "features[0]", refused[0].Field)
 	require.Contains(t, f.contents("both.md"), "features: [FEAT-1-1]",
 		"the refused item stays byte-for-byte as authored")
 }

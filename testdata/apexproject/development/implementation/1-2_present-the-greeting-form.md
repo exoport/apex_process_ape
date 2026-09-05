@@ -2,6 +2,8 @@
 story_id: "1.2"
 epic: "1"
 status: done
+requirement_ids:
+  - FR-1-2
 review_count: 1
 output_document: "development/implementation/1-2_present-the-greeting-form.md"
 governance:

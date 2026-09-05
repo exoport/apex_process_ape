@@ -406,14 +406,22 @@ func (s *Store) Discard(id, reason, evidence, date string) (Record, error) {
 		return rec, nil // idempotent
 	}
 	if rec.Status == StatusClosed {
+		// Names no remedy, deliberately. This used to end "reopen it
+		// first if the close was wrong", which sent the reader after an
+		// `ape deferred reopen` that does not exist. An error that names
+		// an operation nobody can run is worse than one that stops at
+		// the fact: the fix was to stop naming it, not to build the
+		// command because an error string mentioned one.
 		return Record{}, fmt.Errorf(
-			"%s is already closed as done; discarding it would overwrite that claim — reopen it first if the close was wrong", id,
+			"%s is already closed as done; discarding it would overwrite that claim", id,
 		)
 	}
 	rec.Status = StatusDiscarded
 	rec.DiscardReason = reason
 	rec.DiscardEvidence = evidence
-	rec.ResolvedAt = date
+	// discarded_at, NOT resolved_at: nothing about this record was
+	// resolved, and a field asserting otherwise is worse than no field.
+	rec.DiscardedAt = date
 
 	if err := os.MkdirAll(s.ClosedDir(), 0o755); err != nil {
 		return Record{}, fmt.Errorf("create %s: %w", s.ClosedDir(), err)

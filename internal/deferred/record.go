@@ -180,9 +180,22 @@ type Record struct {
 	// them to trust a figure that was measured against different code.
 	FreeForm bool `json:"free_form,omitempty" yaml:"free_form,omitempty"`
 
-	// ResolvedBy and ResolvedAt are written by close.
+	// ResolvedBy and ResolvedAt are written by close, and mean the work
+	// was DONE. A discard must not borrow them: see DiscardedAt.
 	ResolvedBy string `json:"resolved_by,omitempty" yaml:"resolved_by,omitempty"`
 	ResolvedAt string `json:"resolved_at,omitempty" yaml:"resolved_at,omitempty"`
+	// DiscardedAt is when a record was discarded — dropped without the
+	// work being done.
+	//
+	// Discard used to stamp ResolvedAt, which asserted that a record
+	// nobody resolved had been resolved. A field that is false is worse
+	// than a field that is absent: a reader counting resolved work would
+	// have counted discards, and nothing in the record contradicted it.
+	// Records written before this change still carry the wrong field;
+	// they are not rewritten, because guessing which historical
+	// `resolved_at` values were really discards is exactly the kind of
+	// invention this store refuses elsewhere.
+	DiscardedAt string `json:"discarded_at,omitempty" yaml:"discarded_at,omitempty"`
 	// DiscardReason and DiscardEvidence are written by the judgment phase.
 	DiscardReason   string `json:"discard_reason,omitempty"   yaml:"discard_reason,omitempty"`
 	DiscardEvidence string `json:"discard_evidence,omitempty" yaml:"discard_evidence,omitempty"`
