@@ -782,7 +782,7 @@ func checkHookContractDrift(_ context.Context, env doctorEnv) CheckResult {
 // somewhere ape no longer looks, and one command relocates them.
 func checkRunLayoutLegacy(_ context.Context, env doctorEnv) CheckResult {
 	if !isProjectRoot(env.ProjectRoot) {
-		return CheckResult{Status: StatusInfo, Message: "not in a project"}
+		return CheckResult{Status: StatusInfo, Message: msgNotInAProject}
 	}
 	if !runlog.Pending(env.ProjectRoot) {
 		root := runlog.ApeRoot(env.ProjectRoot)

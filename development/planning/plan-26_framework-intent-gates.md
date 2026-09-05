@@ -300,6 +300,65 @@ The framework does **not** adopt the call in v0.16.0, by its own decision: a ski
 blocked on exactly that floor. The prose resolution also works with no `ape` at all and never
 HALTs. So this ships as the field the caller will read, and the skill adopts it in v0.17.0.
 
+### The migration-list runner
+
+Division of labour with the framework's PLAN-66: `ape` owns parsing `_apex/migrations/*.md`,
+semantic ordering, applying `derivable` entries, reporting `judged` ones, the applied-id ledger,
+`--plan` and the doctor row. The framework owns the migration files, `apex-upgrade-project`, its
+terminal contract, its help row and the orchestrator's routing event.
+
+**The four rulings, applied.** All four were proposed here and confirmed by the framework
+maintainer; they are not re-opened.
+
+1. **Applied ids live in `_apex/framework.yaml` as an ORDERED list** of `{id, version,
+   applied_at}`. The ledger — not the check — decides applied-ness, which is what makes a second
+   run a no-op and a failed run resumable independently of what any command does. `applied_at` is
+   issued through `internal/stamp`, so it is monotonic like every other field `ape` writes.
+   **`framework.yaml` is regenerated wholesale by every update**, so the ledger is carried forward
+   explicitly at the same site that already carries the config source — on *every* path including
+   bootstrap, since a setup re-run over an existing project would otherwise drop it.
+2. **`--plan` prints and does nothing**, is readable against a project in any state, and
+   distinguishes pending / applied / cannot-tell. It reports a fourth state, `half-applied` — the
+   ledger says it ran and the check says the post-condition does not hold — because PLAN-66 asks
+   the doctor row for it and the ordered ledger exists to make exactly that visible.
+3. **`kind:` gates whether the runner may ACT.** `judged` is listed and never executed under any
+   flag, including when the entry also carries a `command:`; an unrecognised or absent `kind:` is
+   treated as judged, because "ape does not understand this" is a reason not to run it.
+4. **`check:` reports and never gates.** A check that cannot run leaves the entry
+   unapplied-and-unverifiable; the runner does not act on it, which is the ruling's own reason —
+   collapsing cannot-tell into pending builds a runner that re-applies things. An entry with **no**
+   check declared is pending rather than cannot-tell: the absence of a check must not stop the
+   runner either, and the ledger plus idempotency cover the re-run risk there.
+
+**The exit-code mapping, and how it was found.** Checks map `0` → applied, `1` → not applied,
+`≥2` → the check itself failed and the entry is cannot-tell. That was **not** the first design,
+which read every non-zero code as "not applied". A test running a real `sh -c` — rather than the
+fake every other test uses — showed that a shell reports a missing binary as exit **127**, so the
+framework's own `… | jq -e '…'` check on a machine without `jq` would have come back non-zero,
+made the entry pending, and been applied. The re-application arrives through the one door nobody
+watches. The corrected mapping is the convention `grep -q`, `jq -e` and `test` already use, and it
+means a framework check must exit 1 for "no" — `test -f x && grep -q y x`, never a bare
+`grep -q y x`, which exits 2 when the file is absent.
+
+**Binding properties, and where each one actually lives.** Idempotent — the ledger, not the
+command. Resumable — ledger rows are persisted in success order, so a failure leaves the completed
+prefix recorded. Runs between dispatches — the caller's placement in `ape framework update`,
+outside the build loop. Row-preserving — the framework's, since `apex-sprint-sync` already halts
+rather than regenerate a tracker whose release keys it cannot re-emit; `ape` adds a test that a
+second run is a no-op instead of relying on the command.
+
+**A failure stops the sequence**, because `after:` means a later entry may depend on an earlier
+one. The remaining entries are reported as not attempted, and the command still exits **0**: the
+framework install succeeded, and collapsing a migration failure into a non-zero exit would make
+the install look like it had not happened.
+
+**Doctor row `migrations.pending`**, warn and never fail — a project that owes a migration is
+behind, not broken, and a red here would sit on the orchestrator's never-worked-around list. It
+runs no checks, answering from the ledger alone, so it stays cheap and predictable in `--strict`
+CI. The name is the framework's request and is one character from the existing `migration.pending`;
+both are kept, with a comment at the registration site and a note in the how-to saying which is
+which, because the two have different subjects, remedies and owners.
+
 `--scaffold` on `ape task` is explicitly **not requested** (O-3): `--args` already forwards
 skill flags verbatim and both paths append `--autonomous`, so
 `ape task <skill> --args "--scaffold lean"` is the operator's opt-in already.

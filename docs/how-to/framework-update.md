@@ -108,6 +108,91 @@ history — nothing is lost, the records are just somewhere ape no longer looks.
 
 Full layout: [How to read the output folder](run-artefacts.md).
 
+## The framework's upgrade migrations
+
+A framework release changes what project data must look like. The framework
+ships that change as a list of entries under `_apex/migrations/`, one file per
+migration, and `ape framework update` runs it after the install.
+
+```bash
+ape framework update --plan            # print the plan, do nothing else
+ape framework update --plan --no-check # …and run no entry's check: command
+ape framework update                   # install, then apply the derivable ones
+ape framework update --no-migrate      # install only; the list stays pending
+```
+
+`--plan` is readable against a project in any state and it is the whole
+command: no install, no fetch, no migration.
+
+### What ape may run, and what it may not
+
+`kind:` is the authority model, not a hint.
+
+| `kind:` | what happens |
+| ------- | ------------ |
+| `derivable` | ape executes the entry's `command:` unattended |
+| `judged` | listed with the skill from `skill:` to dispatch, and **never executed, under any flag** — an entry that also carries a `command:` still does not run it |
+| anything else, or unset | treated as `judged`; ape not understanding an entry means ape does not run it |
+
+### The four states
+
+The **ledger** in `_apex/framework.yaml` decides applied-ness — an ordered list
+of `{id, version, applied_at}`, a list rather than a set because "which
+migrations ran, in what order" is what you ask when one half-applies. It is
+also what makes a second run a no-op and a failed run resumable, independent of
+whatever any command does.
+
+| state | means |
+| ----- | ----- |
+| `applied` | the ledger records it — or it does not, and the entry's check says the shape is already there. `source:` says which; ape never backfills the ledger for work it did not do |
+| `half-applied` | the ledger says it ran and the check says the post-condition does not hold |
+| `pending` | not in the ledger, and either the check answered "no" or no check is declared |
+| `cannot-tell` | not in the ledger, and the check **could not run**. Unapplied *and* unverifiable, so it is never run — treating it as pending is how a runner re-applies things |
+
+### Writing a `check:`
+
+A check **reports and never gates**, and its exit code is read the way `grep -q`,
+`jq -e` and `test` already work:
+
+- **`0`** — applied.
+- **`1`** — not applied. This is the only non-zero code read as an answer.
+- **`2` and above** — the check itself failed, so the entry is `cannot-tell`.
+
+That split matters more than it looks. A shell reports a missing binary as exit
+**127**, so a check piping into a `jq` that is not installed comes back
+non-zero; reading every non-zero code as "not applied" would make the entry
+pending and ape would apply it. Write checks that exit 1 for "no" —
+`test -f x && grep -q y x`, not `grep -q y x`, which exits 2 when `x` is absent.
+
+Checks are bounded at two minutes. A `command:` is not, because a derivable
+entry may dispatch a whole session.
+
+### Ordering, and what stops a run
+
+Entries are ordered **semantically**: `version` as semver, then `seq` as an
+integer, then `after:`. Never by filename — `v0.9.0` sorts *after* `v0.10.0`
+lexically, which is the bug the rule exists to prevent. The filename is for
+uniqueness and humans, and one that disagrees with its frontmatter is reported.
+
+An `after:` **cycle** leaves the order undefined, so none of the entries in it
+runs; an invented order is how a migration runs before what it depends on. An
+`after:` naming an entry that is not in the list is a finding, not a cycle.
+
+A failed entry **stops the sequence** — later entries may depend on it — and
+the rest are reported as not attempted. The command still exits 0: the
+framework install succeeded, and collapsing a migration failure into a non-zero
+exit would make the install look like it had not happened. Re-running picks up
+where it stopped.
+
+`ape doctor` reports the state as `migrations.pending`, as a warning rather
+than a failure: a project that owes a migration is behind, not broken. That row
+runs no checks — it answers from the ledger alone, so it stays cheap and
+predictable in `--strict` CI.
+
+> `migrations.pending` and `migration.pending` are **different rows**. The
+> singular one is ape's own project-data conversion, detected from disk state;
+> the plural one is the framework's authored upgrade list, tracked in a ledger.
+
 ## Inspecting drift
 
 ```bash

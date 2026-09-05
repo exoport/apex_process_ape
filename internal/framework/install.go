@@ -357,8 +357,14 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 		Extensions:  bootstrap.Extensions,
 	}
 	cfgLocalSource := ConfigLocalExampleSource{Seeded: configLocalSeeded}
-	if !doBootstrap {
-		if prior, prErr := ReadMetadata(opts.ProjectRoot); prErr == nil {
+	// The applied-migration ledger is carried forward on EVERY path,
+	// bootstrap included: this file is regenerated wholesale, and a setup
+	// re-run over an existing project that dropped the ledger would make
+	// every applied migration look pending again.
+	var priorMigrations []AppliedMigration
+	if prior, prErr := ReadMetadata(opts.ProjectRoot); prErr == nil {
+		priorMigrations = prior.Migrations
+		if !doBootstrap {
 			cfgSource = prior.Sources.Config
 			cfgLocalSource = prior.Sources.ConfigLocalExample
 		}
@@ -380,6 +386,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			ConfigLocalExample: cfgLocalSource,
 			OperatingRules:     OperatingRulesSource{Managed: opRules.Managed},
 		},
+		Migrations: priorMigrations,
 	}
 	if err := WriteMetadata(opts.ProjectRoot, &meta); err != nil {
 		return nil, err

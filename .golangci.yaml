@@ -244,6 +244,13 @@ linters:
       - linters:
           - tagliatelle
         path: internal/release/release\.go
+      # Same for the migration entries' frontmatter (`applied_at`,
+      # `superseded_by`, `check_detail`): the framework authors the files
+      # and the plan payload keeps their spelling so one vocabulary spans
+      # the file, the ledger and the report.
+      - linters:
+          - tagliatelle
+        path: internal/migration/(migration|plan|apply)\.go
       - linters:
           - tagliatelle
         path: internal/deferred/(record|store|ingest|verify|migrate)\.go

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/framework"
+	"github.com/exoport/apex_process_ape/internal/migration"
 	"github.com/exoport/apex_process_ape/internal/output"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -147,6 +148,8 @@ func newFrameworkUpdateCmd(repoFlag, cwdFlag *string) *cobra.Command {
 		dryRun       bool
 		noMigrate    bool
 		repair       bool
+		plan         bool
+		noCheck      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "update",
@@ -158,11 +161,22 @@ func newFrameworkUpdateCmd(repoFlag, cwdFlag *string) *cobra.Command {
   - _apex/framework.yaml   metadata refreshed (preserves project_name +
                            extensions recorded by 'ape framework setup')
 
-Then any pending PROJECT-DATA migration (PLAN-25 D10). Migrations run here
-rather than as a separate command a skill has to police, so no skill ever
-meets an un-migrated project and no skill needs a migration failure path.
-This is the right transaction boundary: explicitly invoked, at the moment
-framework expectations change, outside the build loop.
+Then any pending PROJECT-DATA migration (PLAN-25 D10), and then the
+framework's own per-version UPGRADE list from _apex/migrations/*.md.
+Migrations run here rather than as a separate command a skill has to
+police, so no skill ever meets an un-migrated project and no skill needs a
+migration failure path. This is the right transaction boundary: explicitly
+invoked, at the moment framework expectations change, outside the build
+loop.
+
+The upgrade list is ordered semantically — semver on 'version', integer on
+'seq', honouring 'after:' — and never by filename, under which v0.9.0
+sorts after v0.10.0. Applied ids are recorded in _apex/framework.yaml as
+an ordered list, which is what makes a second run a no-op and a failed run
+resumable. Only 'kind: derivable' entries are executed; 'kind: judged' is
+listed with the skill to dispatch and is NEVER run, under any flag. An
+entry's 'check:' reports and never gates: one that cannot run leaves the
+entry unapplied-and-unverifiable, which is reported and blocks nothing.
 
 THIS COMMAND COMMITS NOTHING — not the install, not the migration, not the
 repair. It never has, and that property is worth more than the
@@ -173,6 +187,12 @@ paths and the 'git add' line.
 Does NOT touch _apex/config.yaml — that's the one-time bootstrap from
 'ape framework setup'. To re-bootstrap, pass --force to 'setup'.
 
+  --plan        print the upgrade-migration plan and do NOTHING ELSE — no
+                install, no fetch, no migration. Readable against a project
+                in any state, and it distinguishes pending / applied /
+                half-applied / cannot-tell rather than collapsing them,
+                because a runner that reads cannot-tell as pending
+                re-applies things
   --dry-run     show the framework drift AND the pending migrations,
                 writing nothing
   --no-migrate  install framework files only; migrations stay pending, and
@@ -201,6 +221,17 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
 				return err
+			}
+			// --plan runs before the repo resolution's consequences and
+			// before any install: it must be readable against a project in
+			// any state, including one whose framework repo has moved on.
+			if plan {
+				p, pErr := loadMigrationPlan(cmd.Context(), projectRoot, migration.ShellRunner{}, !noCheck)
+				if pErr != nil {
+					return pErr
+				}
+				emitMigrationPlan(cmd.OutOrStdout(), p)
+				return nil
 			}
 			if dryRun {
 				return emitFrameworkDryRun(cmd.Context(), cmd.OutOrStdout(), repo, projectRoot)
@@ -235,6 +266,9 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 			if err := runProjectMigrations(cmd.Context(), cmd.OutOrStdout(), projectRoot); err != nil {
 				return err
 			}
+			if err := runUpgradeMigrations(cmd.Context(), cmd.OutOrStdout(), projectRoot); err != nil {
+				return err
+			}
 			if repair {
 				return runFrameworkRepair(cmd, projectRoot)
 			}
@@ -246,6 +280,9 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show the framework diff and pending migrations, writing nothing")
 	cmd.Flags().BoolVar(&noMigrate, "no-migrate", false, "Install framework files only; leave migrations pending")
+	cmd.Flags().BoolVar(&plan, "plan", false, "Print the upgrade-migration plan and do nothing else")
+	cmd.Flags().BoolVar(&noCheck, "no-check", false,
+		"With --plan: do not run any migration's check: command; every row falls back to the ledger alone")
 	cmd.Flags().BoolVar(&repair, "repair", false, "Also run the opus judgment phase over free-form deferred records (spends money)")
 	return cmd
 }

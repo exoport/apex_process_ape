@@ -21,6 +21,11 @@ import (
 // root — absence of a project is not a failure — and each reports what it
 // found rather than what it fixed.
 
+// msgNotInAProject is the one wording for a check whose subject is a
+// project and which was not run inside one. Shared so four rows cannot
+// drift into four different phrasings of the same non-finding.
+const msgNotInAProject = "not in a project"
+
 // checkConfigResolved is Required: nothing else in this family can see the
 // project's artifacts without it, and a malformed config.local.yaml is the
 // failure most likely to send every other check looking at the wrong tree.
@@ -190,7 +195,7 @@ func checkMemorySize(_ context.Context, env doctorEnv) CheckResult {
 // than a silent one.
 func checkMigrationPending(_ context.Context, env doctorEnv) CheckResult {
 	if !isProjectRoot(env.ProjectRoot) {
-		return CheckResult{Status: StatusInfo, Message: "not in a project"}
+		return CheckResult{Status: StatusInfo, Message: msgNotInAProject}
 	}
 	pending := pendingMigrations(env.ProjectRoot)
 	if len(pending) == 0 {
@@ -415,7 +420,7 @@ func gitTracked(ctx context.Context, root, path string) bool {
 // answer is INFO — absence of evidence is not a finding.
 func projectDataConfig(env doctorEnv) (*apexcfg.Resolved, *CheckResult) {
 	if !isProjectRoot(env.ProjectRoot) {
-		return nil, &CheckResult{Status: StatusInfo, Message: "not in a project"}
+		return nil, &CheckResult{Status: StatusInfo, Message: msgNotInAProject}
 	}
 	cfg, err := apexcfg.ResolveAt(env.ProjectRoot, nil)
 	if err != nil {

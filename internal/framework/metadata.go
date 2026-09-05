@@ -28,6 +28,28 @@ type Metadata struct {
 	Framework           RepoInfo  `json:"framework"           yaml:"framework"`
 	Ape                 ApeInfo   `json:"ape"                 yaml:"ape"`
 	Sources             Sources   `json:"sources"             yaml:"sources"`
+	// Migrations is the applied-id ledger for `_apex/migrations/`: an
+	// ORDERED list of {id, version, applied_at}, because "which
+	// migrations ran, in what order" is what an operator asks when one
+	// half-applies.
+	//
+	// This file is REGENERATED on every update, so the ledger has to be
+	// carried forward explicitly like the config source below it. Losing
+	// it would not merely lose history — it would make every applied
+	// migration look pending, which is precisely the re-application the
+	// ledger exists to prevent.
+	Migrations []AppliedMigration `json:"migrations,omitempty" yaml:"migrations,omitempty"`
+}
+
+// AppliedMigration is one ledger row. Kept structurally identical to
+// internal/migration.Applied, and defined here rather than imported so
+// the on-disk schema of framework.yaml lives in one file.
+//
+//nolint:tagliatelle // framework.yaml uses snake_case for human readability
+type AppliedMigration struct {
+	ID        string `json:"id"        yaml:"id"`
+	Version   string `json:"version"   yaml:"version"`
+	AppliedAt string `json:"appliedAt" yaml:"applied_at"`
 }
 
 // RepoInfo records the framework repo state at install time.
@@ -122,6 +144,40 @@ func WriteMetadata(projectRoot string, m *Metadata) error {
 	}
 	full := append([]byte(metadataHeader), body...)
 	return AtomicWriteFile(MetadataPath(projectRoot), full, 0o644)
+}
+
+// AppendMigrations records applied migrations in framework.yaml,
+// preserving every row already there and skipping any id it already
+// holds.
+//
+// Append rather than rewrite: the ledger is the record of what ran and in
+// what order, so an entry the framework later supersedes or prunes from
+// its list keeps its row. A project that upgraded through it did, in
+// fact, run it, and a re-added id must not appear twice.
+//
+// The read-modify-write is deliberate. framework.yaml is regenerated
+// wholesale by every update, so a writer that marshalled only the ledger
+// would drop the rest of the file.
+func AppendMigrations(projectRoot string, rows []AppliedMigration) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	m, err := ReadMetadata(projectRoot)
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(m.Migrations))
+	for _, a := range m.Migrations {
+		seen[a.ID] = true
+	}
+	for _, a := range rows {
+		if a.ID == "" || seen[a.ID] {
+			continue
+		}
+		seen[a.ID] = true
+		m.Migrations = append(m.Migrations, a)
+	}
+	return WriteMetadata(projectRoot, m)
 }
 
 // NotInstalledError signals that <projectRoot>/_apex/framework.yaml is

@@ -341,6 +341,63 @@ it would put prose in front of the check that enforces it.
   report the others. The key set is pinned against the framework's own
   record template, confirmed final for framework v0.16.0.
 
+- **feat(framework): run the framework's upgrade-migration list.** A
+  framework release changes what project data must look like. Until now
+  the only upgrade path was prose in a CHANGELOG bullet and whatever the
+  operator remembered to run, and a project that skipped a version had no
+  way to find out. The framework now ships `_apex/migrations/*.md`, one
+  entry per migration, and `ape framework update` runs it.
+
+  **`kind:` is an authority model, not a hint.** `derivable` runs
+  unattended. `judged` is listed with the skill to dispatch and is **never
+  executed, under any flag** — an entry that also carries a `command:`
+  still does not run it, and an unrecognised `kind:` is treated as judged,
+  because ape not understanding an entry is a reason not to run it.
+
+  **The ledger decides applied-ness.** Applied ids live in
+  `_apex/framework.yaml` as an ordered list of `{id, version, applied_at}`
+  — a list rather than a set, because "which migrations ran, in what
+  order" is what an operator asks when one half-applies. It is what makes
+  a second run a no-op and a failed run resumable, independent of what any
+  command does. `framework.yaml` is regenerated wholesale by every update,
+  so the ledger is carried forward explicitly on every path: losing it
+  would make every applied migration look pending, which is the exact
+  re-application it exists to prevent.
+
+  **`--plan` prints and does nothing** — no install, no fetch, no
+  migration — and is readable against a project in any state. It
+  distinguishes `pending` / `applied` / `half-applied` / `cannot-tell`
+  rather than collapsing them: an entry whose check *could not run* is
+  unapplied **and unverifiable**, and reading that as pending is how a
+  runner re-applies things.
+
+  **A check's exit code is read the way `grep -q` and `jq -e` already
+  work: 0 applied, 1 not applied, 2-and-above the check itself failed.**
+  This was not the first design, and a real shell is what corrected it. A
+  shell reports a missing binary as exit **127**, so the framework's own
+  `… | jq -e '…'` check on a machine without `jq` comes back non-zero —
+  and the original mapping read every non-zero code as "not applied",
+  made the entry pending, and would have applied it. The failure arrives
+  through the one door nobody watches, and only a test that ran a real
+  `sh -c` found it.
+
+  Ordering is **semantic** — semver on `version`, integer on `seq`,
+  honouring `after:` — and never the filename's, under which `v0.9.0`
+  sorts after `v0.10.0`. An `after:` cycle leaves the order undefined and
+  none of the entries in it runs; an invented order is how a migration
+  runs before what it depends on. A failed entry stops the sequence, since
+  a later one may depend on it, and the rest are reported as not
+  attempted. The command still exits 0 — the install succeeded, and a
+  migration failure is not an install failure.
+
+  `ape doctor` reports `migrations.pending`, warning rather than failing:
+  a project that owes a migration is behind, not broken. That row runs no
+  checks and answers from the ledger alone, so it stays cheap in
+  `--strict` CI. It is a **separate row** from the existing
+  `migration.pending`, whose near-identical name is deliberate but
+  confusable: that one is ape's own project-data conversion detected from
+  disk state, this one the framework's authored list.
+
 - **feat(config): `evidence_folder` joins the overlay allow-list.**
   `OverlayKeys()` iterated seventeen keys and silently skipped the rest,
   so `ape config resolve` could not emit a variable the framework added

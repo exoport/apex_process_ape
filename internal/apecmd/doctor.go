@@ -159,6 +159,12 @@ var allChecks = []doctorCheck{
 	{Name: "output.ape_ignored", Run: checkOutputApeIgnored},
 	{Name: "memory.size", Required: true, Run: checkMemorySize},
 	{Name: "migration.pending", Run: checkMigrationPending},
+	// PLAN-26 M14. Deliberately a SEPARATE row from `migration.pending`
+	// above, and the near-identical names are the framework's request, not
+	// a slip: that one is ape's own project-data conversion detected from
+	// disk state, this one is the framework's authored upgrade list with a
+	// ledger. Different subject, different remediation, different owner.
+	{Name: "migrations.pending", Run: checkUpgradeMigrations},
 }
 
 func newDoctorCmd() *cobra.Command {
