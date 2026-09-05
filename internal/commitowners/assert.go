@@ -148,6 +148,32 @@ func (t *Table) Assert(skill string, before, after State, subjects []string) Res
 		return res
 	}
 
+	// No declaration on disk means there is nothing to assert against.
+	//
+	// "An absent file means no skill commits" is the declared semantics,
+	// and taken literally it would put every dispatch on the
+	// non-committer assertion. That is wrong in a way that only shows up
+	// on a real project: it converts "this project has not adopted the
+	// declaration" into "this project asserts that nothing may commit",
+	// which is a claim nobody made — and every framework skill that
+	// legitimately commits then fails on every project that has not
+	// adopted the CSV, which today is all of them.
+	//
+	// Found by the framework's own eval: a successful
+	// `apex-story-batch-dev` dispatch made six correctly-formatted
+	// commits and `ape task` exited 6, discarding an 89-minute capture.
+	//
+	// The authority for either assertion is the declaration. Without one
+	// this is a SKIP — reported, never a silent pass — for the same
+	// reason an unreadable git state is: a check that cannot tell must
+	// say so rather than inventing a verdict in either direction.
+	if !t.Present {
+		res.Skipped = true
+		res.SkipReason = "no " + FileName + " in the project: nothing declares which skills commit, " +
+			"so neither assertion has a basis"
+		return res
+	}
+
 	if !res.Declared {
 		t.assertNonCommitter(&res, before, after)
 		return res
@@ -197,6 +223,17 @@ func (t *Table) assertNonCommitter(res *Result, before, after State) {
 // assertCommitter is the predicate that catches a suppressed commit: at
 // least one commit, and EVERY commit matching one of the skill's rows.
 func (t *Table) assertCommitter(res *Result, skill string, before, after State, subjects []string) {
+	// HEAD moved but the subject list came back empty: the two reads
+	// disagree, and the subject list is the one that failed. `git log`
+	// erroring — a cancelled context after a long run, a transient lock —
+	// must not be reported as a suppressed commit, which is the most
+	// serious verdict this package issues. Skip and say why.
+	if before.Head != after.Head && len(subjects) == 0 {
+		res.Skipped = true
+		res.SkipReason = "HEAD advanced but the commit subjects could not be read, " +
+			"so the declared message formats cannot be checked"
+		return
+	}
 	if before.Head == after.Head || len(subjects) == 0 {
 		rows := t.Rows(skill)
 		formats := make([]string, 0, len(rows))

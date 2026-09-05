@@ -379,3 +379,84 @@ func TestAssert_CommitterInARepoWithNoPriorCommits(t *testing.T) {
 		[]string{"dev: story 1.1 add the greeter"})
 	require.True(t, res.OK(), "violations: %+v", res.Violations)
 }
+
+// TestAssert_AbsentDeclarationDoesNotConvictACommitter is the eval
+// blocker found in the gf-hello-world recapture: a successful
+// apex-story-batch-dev dispatch made six correctly-formatted commits, in
+// a project with no commit-owners.csv, and `ape task` exited 6.
+//
+// "Absent file = no skill commits" was the specified semantics, and read
+// literally it enforces the NON-committer assertion on every dispatch —
+// which turns "this project has not adopted the declaration" into "this
+// project asserts that nothing may commit", a claim nobody made. Every
+// framework skill that legitimately commits then fails on every project
+// that has not adopted the CSV yet, which today is all of them.
+func TestAssert_AbsentDeclarationDoesNotConvictACommitter(t *testing.T) {
+	repo := gitInit(t)
+	table, err := Load(t.TempDir()) // no commit-owners.csv
+	require.NoError(t, err)
+	require.False(t, table.Present)
+
+	before := Capture(context.Background(), repo)
+	for _, subject := range []string{
+		"dev: story 1.2 serve the greeting form at",
+		"review: story 1.2 serve the greeting form at",
+	} {
+		writeFile(t, repo, "f"+subject[:9]+".txt", subject+"\n")
+		runGit(t, repo, "add", ".")
+		runGit(t, repo, "commit", "-qm", subject)
+	}
+	after := Capture(context.Background(), repo)
+
+	res := table.Assert("apex-story-batch-dev", before, after,
+		subjectsSince(t, repo, before.Head))
+	require.True(t, res.OK(),
+		"an absent declaration is no basis to convict a committer: %+v", res.Violations)
+	require.True(t, res.Skipped, "and it must say it could not judge, not pass silently")
+}
+
+// TestAssert_HeadMovedButSubjectsUnreadableIsASkip covers the other
+// candidate raised against this package: if `git log` fails while
+// `rev-parse` succeeded, the two reads disagree. Reporting "suppressed
+// commit" — the most serious verdict here — on the strength of the read
+// that FAILED would be exactly backwards.
+func TestAssert_HeadMovedButSubjectsUnreadableIsASkip(t *testing.T) {
+	repo := gitInit(t)
+	table, err := Load(writeCSV(t, declaration))
+	require.NoError(t, err)
+
+	before := Capture(context.Background(), repo)
+	writeFile(t, repo, "a.txt", "x\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-qm", "dev: story 1.1 add the greeter")
+	after := Capture(context.Background(), repo)
+
+	// nil subjects simulates the log read failing, not an absent commit.
+	res := table.Assert("apex-story-batch-dev", before, after, nil)
+	require.True(t, res.Skipped, "a failed read is not evidence of a suppressed commit")
+	require.True(t, res.OK(), "violations: %+v", res.Violations)
+	require.Contains(t, res.SkipReason, "could not be read")
+}
+
+// TestAssert_DeclaredNonCommitterStillEnforced — the fix must not
+// disarm the assertion where a declaration DOES exist and does not list
+// the skill. That is a real statement about the skill, unlike an absent
+// file.
+func TestAssert_DeclaredNonCommitterStillEnforced(t *testing.T) {
+	repo := gitInit(t)
+	table, err := Load(writeCSV(t, declaration))
+	require.NoError(t, err)
+	require.True(t, table.Present)
+
+	before := Capture(context.Background(), repo)
+	writeFile(t, repo, "sneaky.txt", "x\n")
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-qm", "chore: sneak one in")
+	after := Capture(context.Background(), repo)
+
+	res := table.Assert("apex-dev-story", before, after,
+		subjectsSince(t, repo, before.Head))
+	require.False(t, res.OK(), "a declared non-committer that commits is still a violation")
+	require.False(t, res.Skipped)
+	require.Equal(t, CheckHeadMoved, res.Violations[0].Check)
+}

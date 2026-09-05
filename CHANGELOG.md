@@ -57,13 +57,38 @@ it would put prose in front of the check that enforces it.
 
   New exit code **6**, distinct from 1 because the skill's own work may
   have succeeded: the run finished and the repository is not in the state
-  the project declared it would be, which is a different thing to fix. An
-  absent CSV means no skill commits. Rows naming a skill `ape` never
-  dispatches — the conducting session's `apex-orchestrator` rows — are
-  read and never reached. `--task-commit` is `ape`'s own commit and is not
-  judged against a skill's declaration. A malformed CSV fails preflight
-  rather than degrading to "no skill commits", since that inversion is
-  precisely what would let a suppressed commit through.
+  the project declared it would be, which is a different thing to fix.
+  Rows naming a skill `ape` never dispatches — the conducting session's
+  `apex-orchestrator` rows — are read and never reached. `--task-commit`
+  is `ape`'s own commit and is not judged against a skill's declaration.
+  A malformed CSV fails preflight rather than degrading to an empty one,
+  since that inversion is precisely what would let a suppressed commit
+  through.
+
+  **A project with no `commit-owners.csv` is not asserted at all.** The
+  ask specified "absent file = no skill commits", and that reading —
+  which shipped first — puts every dispatch on the non-committer
+  assertion, converting "this project has not adopted the declaration"
+  into "this project asserts that nothing may commit". The framework's
+  own eval found it: a successful `apex-story-batch-dev` dispatch made
+  six correctly-formatted commits, `ape task` exited 6, and an 89-minute
+  capture was discarded. Every framework skill that legitimately commits
+  would have failed on every project that has not adopted the CSV, which
+  today is all of them. With no declaration there is no basis for either
+  assertion, so the verdict is now `skipped` with a reason. Where a CSV
+  *does* exist and omits a skill, that is a real statement about the
+  skill and the non-committer assertion still binds.
+
+  Two further hardenings from the same investigation. HEAD advancing
+  while the commit subjects come back empty is now a **skip**, not a
+  suppressed-commit verdict — the two reads disagree and the one that
+  failed must not decide the most serious verdict this check issues. And
+  the verdict is now written to the run manifest as `commit_contract`,
+  because the JSON envelope is ephemeral: a consumer that parses it, sees
+  failure and discards stdout leaves nothing on disk saying why, which is
+  exactly the position the eval was in. `totals.commits_made` also gained
+  a doc note that it counts ape's own boundary commits and never the
+  skill's, after reading as a smoking gun during that diagnosis.
 
 - **feat(stamp): `ape` owns timestamp monotonicity.** Every skill resolves
   a `timestamp` and copies it into a field recording when something was

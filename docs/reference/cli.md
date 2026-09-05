@@ -4868,15 +4868,22 @@ Protocol inside it." (the same continuation prompt the /handoff skill
 suggests). It still requires --prompt-flag to actually reach the
 skill, and is mutually exclusive with --prompt.
 
-Every dispatch is asserted against the project's declared commit
-ownership, _apex/commit-owners.csv. A skill ABSENT from that file must
-leave HEAD, the index and the stash reflog unchanged — "git add" and
-"git stash" both leave HEAD alone, so HEAD by itself is not the check. A
-skill PRESENT in it must produce at least one commit, every one of them
-matching a message format the file declares for it. An absent CSV means
-no skill commits, and rows naming a skill ape never dispatches (the
-conducting session's own) are simply never reached. --task-commit is
-ape's own commit and is not judged against a skill's declaration.
+Where the project declares commit ownership in _apex/commit-owners.csv,
+every dispatch is asserted against it. A skill ABSENT from that file
+must leave HEAD, the index and the stash reflog unchanged — "git add"
+and "git stash" both leave HEAD alone, so HEAD by itself is not the
+check. A skill PRESENT in it must produce at least one commit, every one
+matching a message format the file declares for it.
+
+A project with NO commit-owners.csv is not asserted at all: with nothing
+declaring which skills commit, neither assertion has a basis, and the
+verdict is reported as skipped rather than guessed in either direction.
+Rows naming a skill ape never dispatches (the conducting session's own)
+are simply never reached. --task-commit is ape's own commit and is not
+judged against a skill's declaration.
+
+The verdict is written to the run manifest as commit_contract, so a
+failure stays diagnosable after the fact.
 
 Exit codes: 0 success · 1 run failed or idle timeout · 2 usage or
 preflight error · 3 REPL never became ready (last pane on stderr) ·

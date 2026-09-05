@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
+	"github.com/exoport/apex_process_ape/internal/atomicfile"
 	"github.com/exoport/apex_process_ape/internal/commitowners"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
@@ -85,15 +86,22 @@ Protocol inside it." (the same continuation prompt the /handoff skill
 suggests). It still requires --prompt-flag to actually reach the
 skill, and is mutually exclusive with --prompt.
 
-Every dispatch is asserted against the project's declared commit
-ownership, _apex/commit-owners.csv. A skill ABSENT from that file must
-leave HEAD, the index and the stash reflog unchanged — "git add" and
-"git stash" both leave HEAD alone, so HEAD by itself is not the check. A
-skill PRESENT in it must produce at least one commit, every one of them
-matching a message format the file declares for it. An absent CSV means
-no skill commits, and rows naming a skill ape never dispatches (the
-conducting session's own) are simply never reached. --task-commit is
-ape's own commit and is not judged against a skill's declaration.
+Where the project declares commit ownership in _apex/commit-owners.csv,
+every dispatch is asserted against it. A skill ABSENT from that file
+must leave HEAD, the index and the stash reflog unchanged — "git add"
+and "git stash" both leave HEAD alone, so HEAD by itself is not the
+check. A skill PRESENT in it must produce at least one commit, every one
+matching a message format the file declares for it.
+
+A project with NO commit-owners.csv is not asserted at all: with nothing
+declaring which skills commit, neither assertion has a basis, and the
+verdict is reported as skipped rather than guessed in either direction.
+Rows naming a skill ape never dispatches (the conducting session's own)
+are simply never reached. --task-commit is ape's own commit and is not
+judged against a skill's declaration.
+
+The verdict is written to the run manifest as commit_contract, so a
+failure stays diagnosable after the fact.
 
 Exit codes: 0 success · 1 run failed or idle timeout · 2 usage or
 preflight error · 3 REPL never became ready (last pane on stderr) ·
@@ -434,6 +442,7 @@ func runTask(ctx context.Context, o taskOptions) error {
 		env.Error = &msg
 	}
 	fillEnvelopeFromManifest(&env, o.projectRoot, o.skill, manifestDir)
+	recordCommitContract(o.projectRoot, o.skill, manifestDir, contract)
 
 	if o.jsonMode {
 		enc := json.NewEncoder(os.Stdout)
@@ -512,6 +521,56 @@ func fillEnvelopeFromManifest(env *taskEnvelope, projectRoot, skill, manifestDir
 			}
 		}
 	}
+}
+
+// recordCommitContract writes the dispatch's commit-ownership verdict
+// into the run manifest.
+//
+// The JSON envelope already carries it, but the envelope is ephemeral: a
+// consumer that parses it, sees failure and discards stdout leaves
+// nothing on disk saying why the dispatch was judged to have failed.
+// That is how an 89-minute capture was thrown away with the cause
+// unrecoverable from the artifacts. The manifest is the durable record.
+//
+// Best-effort, and deliberately so: this runs after the work is done and
+// after the verdict has already been reported on stdout and via the exit
+// code. Failing the command because a diagnostic could not be persisted
+// would trade the run for the note about the run.
+func recordCommitContract(projectRoot, skill, manifestDir string, contract commitowners.Result) {
+	if contract.Skill == "" {
+		return // no assertion ran (e.g. --task-commit); nothing to record
+	}
+	runDir := pipeline.ResolveLatestRunDir(projectRoot, skill, manifestDir)
+	if runDir == "" {
+		return
+	}
+	manifestPath := filepath.Join(runDir, "manifest.yaml")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return
+	}
+	var m pipeline.Manifest
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return
+	}
+	rec := &pipeline.CommitContractRecord{
+		Skill:      contract.Skill,
+		Declared:   contract.Declared,
+		Asserted:   !contract.Skipped,
+		SkipReason: contract.SkipReason,
+		OK:         contract.OK(),
+		Subjects:   contract.Subjects,
+	}
+	for _, v := range contract.Violations {
+		rec.Violations = append(rec.Violations, v.Check+": "+v.Message)
+	}
+	m.CommitContract = rec
+
+	out, err := yaml.Marshal(&m)
+	if err != nil {
+		return
+	}
+	_ = atomicfile.Write(manifestPath, out)
 }
 
 // modelUsageRecordsToEnvelope converts manifest model_usage records to

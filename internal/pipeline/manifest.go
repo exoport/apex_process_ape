@@ -118,6 +118,43 @@ type Manifest struct {
 	// UploadStatus records the outcome of the transcript upload:
 	// "ok" | "partial" | "failed" (empty when upload was not attempted).
 	UploadStatus string `yaml:"upload_status,omitempty"`
+
+	// CommitContract is the per-dispatch commit-ownership verdict, for
+	// the run kinds that assert one (`ape task`).
+	//
+	// It lives here as well as on the JSON envelope because the envelope
+	// is ephemeral: a consumer that parses it, sees failure and discards
+	// stdout leaves nothing on disk saying WHY the dispatch was judged to
+	// have failed. That is not hypothetical — it is how an 89-minute
+	// capture was discarded with the cause unrecoverable from the
+	// artifacts. The manifest is the durable record, so the verdict
+	// belongs in it.
+	//
+	// Additive under schema_version 2; absent on runs that assert no
+	// contract.
+	CommitContract *CommitContractRecord `yaml:"commit_contract,omitempty"`
+}
+
+// CommitContractRecord is the manifest's copy of the commit-ownership
+// verdict. A local shape rather than internal/commitowners' own, so the
+// on-disk schema does not move whenever that package's Go types do —
+// the manifest is an external contract read by the eval.
+type CommitContractRecord struct {
+	Skill string `yaml:"skill"`
+	// Declared reports whether the project's declaration lists this
+	// skill, i.e. which of the two assertions ran.
+	Declared bool `yaml:"declared"`
+	// Asserted is false when neither assertion could run. A skipped
+	// check is never a pass, so a reader must be able to tell them apart.
+	Asserted bool `yaml:"asserted"`
+	// SkipReason says why, when Asserted is false.
+	SkipReason string `yaml:"skip_reason,omitempty"`
+	// OK is the verdict when Asserted.
+	OK bool `yaml:"ok"`
+	// Violations are the failed assertions, `<check>: <message>` each.
+	Violations []string `yaml:"violations,omitempty"`
+	// Subjects are the commit subjects observed across the dispatch.
+	Subjects []string `yaml:"subjects,omitempty"`
 }
 
 // TranscriptBlob is one uploaded transcript's content-addressed reference.
@@ -150,7 +187,16 @@ type ManifestTotals struct {
 	NumTurns              int `yaml:"num_turns"`
 	StepsRun              int `yaml:"steps_run"`
 	StepsFailed           int `yaml:"steps_failed"`
-	CommitsMade           int `yaml:"commits_made"`
+	// CommitsMade counts APE'S OWN boundary commits — per-step commits
+	// and `ape task --task-commit`. It does NOT count commits the
+	// dispatched skill made itself.
+	//
+	// So `commits_made: 0` on a run whose skill committed six times is
+	// correct and expected, not a smoking gun. Spelled out because it has
+	// already cost one person a detour while diagnosing a dispatch that
+	// exited non-zero: the skill's own commits are in `git log`, and the
+	// verdict on them is `commit_contract` below.
+	CommitsMade int `yaml:"commits_made"`
 	// ModelUsage is the run-level per-model breakdown, summed across
 	// steps. Additive field (schema stays v2 — v2 readers ignore it).
 	ModelUsage map[string]ModelUsageRecord `yaml:"model_usage,omitempty"`

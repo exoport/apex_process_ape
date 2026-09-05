@@ -81,6 +81,7 @@ adds none — and is matched against a commit's **subject line only**.
 | ----- | ----------------------------- |
 | **absent** from the CSV | HEAD unchanged, no path staged that was not staged before, and the stash unchanged |
 | **present** in the CSV | at least one commit, and every commit in `pre..HEAD` matching one of that skill's rows |
+| **no CSV in the project** | nothing is asserted; the verdict is `skipped` with a reason |
 
 HEAD alone is not the check, and that is the point: `git add` and
 `git stash` both leave HEAD exactly where it was, and a stash silently
@@ -90,12 +91,17 @@ makes a dev and a review commit per story, and all of them must match.
 
 Three things it deliberately does not do:
 
-- **An absent CSV means no skill commits.** Every dispatch takes the
-  non-committer assertion. That is a normal state, not an error. A CSV
-  that exists but does not parse fails preflight instead — degrading a
-  broken declaration to an empty one would turn every committer's
-  assertion into the non-committer's, which is exactly the inversion that
-  lets a suppressed commit through.
+- **A project with no CSV is not asserted at all.** With nothing
+  declaring which skills commit, neither assertion has a basis, so the
+  verdict is `skipped` with a reason rather than a guess. Enforcing the
+  non-committer branch there would convert "this project has not adopted
+  the declaration" into "this project asserts nothing may commit" — a
+  claim nobody made — and would fail every framework skill that
+  legitimately commits, on every project that has not adopted the CSV
+  yet. A CSV that exists but does not parse fails preflight instead:
+  degrading a broken declaration to an empty one would turn every
+  committer's assertion into the non-committer's, which is exactly the
+  inversion that lets a suppressed commit through.
 - **Rows naming a skill `ape` never dispatches are tolerated.** The
   conducting session's own rows carry `apex-orchestrator`, a persona that
   is adopted rather than dispatched, so the assertion never reaches them.
@@ -116,7 +122,20 @@ Error: dispatch.stash_changed: the stash changed across the dispatch
 
 In a directory that is not a git repository the assertion cannot run. It
 reports that as **skipped**, never as a pass: "we could not look" and "we
-looked and it was clean" are different answers.
+looked and it was clean" are different answers. The same applies when
+HEAD advanced but the commit subjects could not be read — a failed read
+is not evidence of a suppressed commit.
+
+Every verdict, including a skip, is also written to the run's
+`manifest.yaml` as `commit_contract`. The JSON envelope is ephemeral; a
+consumer that parses it, sees failure and discards stdout would otherwise
+leave nothing on disk saying why.
+
+> **Reading a failing run:** `totals.commits_made` counts **ape's own**
+> boundary commits (`--task-commit`, per-step commits), never the ones the
+> dispatched skill made itself. A `commits_made: 0` on a run whose skill
+> committed six times is correct and expected — check `commit_contract`
+> and `git log`, not that field.
 
 ## Machine-readable result
 
