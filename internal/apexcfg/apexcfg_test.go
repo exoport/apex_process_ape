@@ -308,6 +308,7 @@ func TestDerivePaths_FullLayout(t *testing.T) {
 	require.Equal(t, j("development", "functionality", "features"), res.Paths.Features)
 	require.Equal(t, j("development", "functionality", "capabilities"), res.Paths.Capabilities)
 	require.Equal(t, j("development", "team-memory.md"), res.Paths.TeamMemory)
+	require.Equal(t, j("development", "project-context.md"), res.Paths.ProjectContext)
 	require.Equal(t, j("development", "implementation", "sprint-status.yaml"), res.Paths.SprintStatus)
 	require.Equal(t, j("development", "implementation", "deferred-work.md"), res.Paths.DeferredLegacy)
 
@@ -330,6 +331,7 @@ func TestDerivePaths_UnconfiguredFolderYieldsEmpty(t *testing.T) {
 	require.Empty(t, res.Paths.Governance)
 	require.Empty(t, res.Paths.ADRs)
 	require.Empty(t, res.Paths.TeamMemory)
+	require.Empty(t, res.Paths.ProjectContext)
 	require.Equal(t, filepath.Join(root, DirName), res.Paths.Apex, "apex_folder falls back to the fixed dir name")
 }
 

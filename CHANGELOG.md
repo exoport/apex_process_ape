@@ -275,6 +275,31 @@ it would put prose in front of the check that enforces it.
   that the marker is absent by default and present under
   `--output-style inherit`.
 
+- **feat(context): `ape context check`, the same two budgets over
+  `project-context.md`.** `project-context.md` is the standards document
+  every skill loads whole, it grows by append, and it is bounded by the
+  same 256 KiB Read cap `team-memory.md` is — past which its own writer
+  can no longer read it. The request was explicitly for *one caller of the
+  budget constants rather than two restatements of the numbers*, so the
+  command calls the same `memory.CheckSize` with the same soft 40960 B /
+  hard 204800 B, and the `--fail-at` policy and the leading size line are
+  extracted into one place both commands share. Same four states, same
+  flags, same JSON shape.
+
+  **Exit 0 by default, whatever the band**, for the reason `ape memory
+  check` keeps that contract: "non-zero means HALT" would abort
+  `apex-generate-project-context` at exactly the moment compaction is due.
+  `--fail-at soft|hard` is the CI opt-in.
+
+  Two things it deliberately does not do. It measures **only**
+  `{development_folder}/project-context.md`, the path the generator
+  writes — reader skills glob for a fallback copy, but a size gate has to
+  name the file it measured, so `absent` prints the path it stat'd rather
+  than searching. And with no `development_folder` configured it exits 2
+  instead of reporting `absent`: there is no path to stat, so there is no
+  basis to call the file missing. `ape config resolve` gains a
+  `project_context` path beside `team_memory`.
+
 - **feat(config): `evidence_folder` joins the overlay allow-list.**
   `OverlayKeys()` iterated seventeen keys and silently skipped the rest,
   so `ape config resolve` could not emit a variable the framework added

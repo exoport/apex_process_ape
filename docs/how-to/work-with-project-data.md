@@ -447,6 +447,37 @@ moment compaction is most needed. `--fail-at soft|hard` opts CI into a
 non-zero exit, and `ape doctor` fails on `over-hard` so a real breach stays
 non-ignorable either way.
 
+## Project context
+
+```bash
+ape context check         # size against the same two budgets
+```
+
+`project-context.md` is the standards document every skill loads whole, it
+grows by append, and it hits the same 256 KiB Read cap `team-memory.md`
+does — past which its own writer can no longer read it. So the bands are
+literally the same numbers, from the same constants: soft 40960 B, hard
+204800 B, the same four states, the same `--soft` / `--hard` /
+`--fail-at` / `--output-format` flags, and the same **exit 0 whatever the
+state** contract, for the same reason — a failing exit would abort
+`apex-generate-project-context` at the moment compaction is due.
+
+Two differences worth knowing:
+
+- It measures **only** `{development_folder}/project-context.md`. Reader
+  skills carry a `**/project-context.md` fallback for a lifted project
+  that put the file elsewhere; a size gate has to be able to say which
+  file it measured, so `absent` here prints the path it stat'd rather than
+  going looking for another candidate.
+- With no `development_folder` configured it exits **2** rather than
+  reporting `absent`. There is no path to stat, so there is no basis to
+  say the file is missing.
+
+There is no `ape doctor` row for it, deliberately: `memory.size` is one of
+only two *required* project-data checks, and a third required failure
+would red the gate on exactly the projects that need to keep working while
+they compact.
+
 ## Deferred work
 
 ```bash

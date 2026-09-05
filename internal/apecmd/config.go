@@ -143,6 +143,7 @@ func emitResolvedHuman(w io.Writer, res *apexcfg.Resolved) error {
 		{"features", res.Paths.Features},
 		{"capabilities", res.Paths.Capabilities},
 		{"team_memory", res.Paths.TeamMemory},
+		{"project_context", res.Paths.ProjectContext},
 		{"sprint_status", res.Paths.SprintStatus},
 		{"deferred", res.Paths.Deferred},
 	} {

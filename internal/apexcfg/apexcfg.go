@@ -125,6 +125,7 @@ type Paths struct {
 	Features       string `json:"features"        yaml:"features"`
 	Capabilities   string `json:"capabilities"    yaml:"capabilities"`
 	TeamMemory     string `json:"team_memory"     yaml:"team_memory"`
+	ProjectContext string `json:"project_context" yaml:"project_context"`
 	SprintStatus   string `json:"sprint_status"   yaml:"sprint_status"`
 	Deferred       string `json:"deferred"        yaml:"deferred"`
 	DeferredLegacy string `json:"deferred_legacy" yaml:"deferred_legacy"`
@@ -442,6 +443,11 @@ func derivePaths(root string, cfg *Config) Paths {
 	}
 	if p.Development != "" {
 		p.TeamMemory = filepath.Join(p.Development, "team-memory.md")
+		// The canonical location, and the only one derived. Reader skills
+		// carry a `**/project-context.md` fallback for a lifted project
+		// that put it elsewhere; the generator writes here, and a size
+		// gate has to be able to say which file it measured.
+		p.ProjectContext = filepath.Join(p.Development, "project-context.md")
 		// The deferred store sits under development_folder, NOT under
 		// implementation_folder: ten skills glob
 		// `{implementation_folder}/**/*.md` across 17 sites, and 227

@@ -33,6 +33,7 @@ Subcommands:
 - `capability` — Inspect and maintain the capability registry
 - `chat` — Bridged claude REPL with hooks captured to a runlog
 - `config` — Resolve the project's APEX configuration
+- `context` — Inspect the project-context document
 - `costs` — Show this project's Claude cost rollup
 - `deferred` — The deferred-work record store
 - `doc` — Shard, assemble and survey Markdown documents
@@ -1437,6 +1438,85 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root to resolve from (default: current working dir) |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape context
+
+Inspect the project-context document
+
+```
+ape context
+```
+
+project-context.md is the standards document every skill loads whole —
+architecture, ADR and pattern passes, both story batches, the reviewers.
+It grows by append, and it is bounded by the same 256 KiB Read cap
+team-memory.md is, so the same two budgets apply to it.
+
+  check  size against the soft budget and hard ceiling, from a stat alone
+
+Subcommands:
+
+- `check` — Report project-context size against the soft budget and hard ceiling
+
+## ape context check
+
+Report project-context size against the soft budget and hard ceiling
+
+```
+ape context check [flags]
+```
+
+Classify {development_folder}/project-context.md against two budgets,
+from an os.Stat alone — the file is never read, which is what lets the
+generator take the measurement BEFORE the full read it would otherwise
+die on.
+
+  state: absent      no project-context.md yet (the governance pipeline
+                     writes it; before that, not a problem)
+  state: ok          under the soft budget
+  state: over-soft   compaction is due
+  state: over-hard   approaching Claude Code's 256 KiB Read cap — the file
+                     is about to become unreadable by its own writer
+
+The budgets are the pair 'ape memory check' already enforces on
+team-memory.md, from one set of constants rather than two restatements of
+the numbers: soft 40960 B, hard 204800 B.
+
+Only the canonical path is measured. Reader skills carry a
+'**/project-context.md' fallback for a lifted project that put the file
+somewhere else; a size gate has to name the file it measured, so an
+'absent' verdict here prints the path it looked at rather than searching
+for another candidate.
+
+EXIT 0 BY DEFAULT, whatever the state — the same contract 'ape memory
+check' keeps, and for the same reason: the framework's prose convention
+is "on non-zero exit: HALT", so a failing exit would abort the generator
+at exactly the moment compaction is due.
+
+--fail-at opts into a non-zero exit for CI, which wants one:
+  never  (default) always exit 0
+  soft   exit 1 at over-soft or worse
+  hard   exit 1 at over-hard
+
+The token count in the output is bytes/4, an estimate, and nothing gates
+on it.
+
+Examples:
+
+```
+  ape context check
+  ape context check --output-format json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--fail-at` | string | `never` | Exit 1 at this state or worse: never\|soft\|hard |
+| `--hard` | int64 | `0` | Hard ceiling in bytes (default 204800) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--soft` | int64 | `0` | Soft budget in bytes (default 40960) |
 
 ## ape costs
 

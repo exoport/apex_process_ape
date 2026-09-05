@@ -12,13 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// failAt values for `ape memory check`.
-const (
-	failAtNever = "never"
-	failAtSoft  = "soft"
-	failAtHard  = "hard"
-)
-
 func newMemoryCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "memory",
@@ -167,10 +160,8 @@ on it.`,
 		Args:    cobra.NoArgs,
 		Example: "  ape memory check\n  ape memory check --fail-at hard",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			switch failAt {
-			case failAtNever, failAtSoft, failAtHard:
-			default:
-				return usageErr(fmt.Errorf("--fail-at must be never|soft|hard, got %q", failAt))
+			if err := validateFailAt(failAt); err != nil {
+				return err
 			}
 			cfg := resolveProjectConfig(cwdFlag)
 			check := memory.CheckSize(cfg.Paths.TeamMemory, soft, hard)
@@ -182,7 +173,7 @@ on it.`,
 			} else {
 				emitMemoryCheckHuman(cmd.OutOrStdout(), check)
 			}
-			if memoryCheckShouldFail(check.State, failAt) {
+			if sizeCheckShouldFail(check.State, failAt) {
 				return gateErr(1, nil)
 			}
 			return nil
@@ -198,25 +189,8 @@ on it.`,
 	return cmd
 }
 
-// memoryCheckShouldFail applies the --fail-at policy.
-func memoryCheckShouldFail(state memory.State, failAt string) bool {
-	switch failAt {
-	case failAtSoft:
-		return state == memory.StateOverSoft || state == memory.StateOverHard
-	case failAtHard:
-		return state == memory.StateOverHard
-	default:
-		return false
-	}
-}
-
 func emitMemoryCheckHuman(w io.Writer, c memory.Check) {
-	if !c.Exists {
-		fmt.Fprintf(w, "memory: absent (%s)\n", c.Path)
-		return
-	}
-	fmt.Fprintf(w, "memory: %s / %s — %s (~%s tokens, estimated)\n",
-		humanBytes(c.Bytes), humanBytes(c.SoftBudget), c.State, thousands(c.EstimatedTokens))
+	emitSizeCheckLine(w, "memory", c)
 	switch c.State {
 	case memory.StateOverSoft:
 		fmt.Fprintln(w, "compaction is due — schedule apex-distillator at the next epic close")

@@ -66,6 +66,7 @@ func rootSubcommands() []*cobra.Command {
 		newCapabilityCmd(),
 		newRegistryCmd(),
 		newMemoryCmd(),
+		newContextCmd(),
 		newStoryCmd(),
 		newSprintCmd(),
 		newDeferredCmd(),

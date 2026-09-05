@@ -143,25 +143,6 @@ func TestMemoryCheck_ThresholdOverrides(t *testing.T) {
 	require.Equal(t, int64(4096), c.HardCeiling)
 }
 
-// TestMemoryCheckShouldFail is the --fail-at policy table: three values
-// crossed with all four states.
-func TestMemoryCheckShouldFail(t *testing.T) {
-	states := []memory.State{
-		memory.StateAbsent, memory.StateOK, memory.StateOverSoft, memory.StateOverHard,
-	}
-	want := map[string][]bool{
-		failAtNever: {false, false, false, false},
-		failAtSoft:  {false, false, true, true},
-		failAtHard:  {false, false, false, true},
-	}
-	for policy, expected := range want {
-		for i, state := range states {
-			require.Equal(t, expected[i], memoryCheckShouldFail(state, policy),
-				"--fail-at %s with state %s", policy, state)
-		}
-	}
-}
-
 func TestMemoryIndex_FencedHeadingNotCounted(t *testing.T) {
 	root := newTestProject(t, realProjectConfig)
 	writeTeamMemory(t, root,

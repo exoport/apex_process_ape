@@ -212,13 +212,57 @@ project resolves — a story outside any project, which is a property the mode i
 keep — the two governance classes **skip**, and every other class still gates. A skipped class
 is reported as skipped, never as a pass.
 
-## Out of scope
+## The five non-dependency requests — moved back in
 
-The five non-dependency requests in the intake (`ape context check`, `ape release status`, the
-M14 migration runner, `story.requirement_ids_missing`, and the two `ape deferred discard`
-observations) are **not** in this release. None blocks a framework phase, and bundling them
-would put a much larger surface behind a tag two framework half-phases are waiting on. They
-stay in `development/pending/` as their own queue entries.
+The intake's five non-dependency requests were originally deferred here: none blocks a framework
+phase, and bundling them would put a much larger surface behind a tag two framework half-phases
+are waiting on. **The maintainer moved all five back into this release on 2026-09-05**, before
+the tag existed, so the deferral no longer describes what ships. Recorded rather than silently
+rewritten, because the reasoning for deferring them was right at the time and the reason it was
+overridden is that the tag had not been cut yet.
+
+| Request | Status |
+| ------- | ------ |
+| `story.requirement_ids_missing` | in — advisory, opt-in behind `--include-advisory`, no `--fix` |
+| the two `ape deferred discard` observations | in — the refusal stops naming a command `ape` does not provide, and a discard stamps `discarded_at` |
+| `ape context check` | in — see below |
+| `ape release status` | in |
+| the M14 migration-list runner | in |
+
+### `ape context check`
+
+**One caller of the two constants, not two restatements of the numbers.** That is the request as
+filed, and it is the whole design: `internal/memory`'s `DefaultSoftBudget` (40960) and
+`DefaultHardCeiling` (204800) already band `team-memory.md`, and `project-context.md` is bounded
+by the same 256 KiB Read cap for the same reason — its own writer reads it whole. So the command
+calls `memory.CheckSize`, and the `--fail-at` policy, the leading size line and the flag set are
+extracted into one place both commands use rather than copied.
+
+Four decisions:
+
+- **Exit 0 by default, whatever the band**, exactly as `ape memory check` does. The framework's
+  prose convention is "on non-zero exit: HALT", so a failing exit would abort
+  `apex-generate-project-context` at the moment compaction is due — the gate would break the
+  ceremony it exists to trigger. `--fail-at soft|hard` is the CI opt-in.
+- **The canonical path only.** Reader skills carry a `**/project-context.md` fallback; the
+  generator writes `{development_folder}/project-context.md`, and a size gate has to be able to
+  say which file it measured. `absent` therefore prints the path it stat'd, so a project that
+  put the file elsewhere can see that from the output alone rather than reading `absent` as
+  "there is no such file anywhere".
+- **No `development_folder` is not `absent`.** With no configured folder there is no path to
+  stat, so the check has no basis to report the file missing; it exits 2, the preflight code
+  `ape story` already uses for an unconfigured folder. A check with no basis to judge must not
+  invent a verdict.
+- **No `ape doctor` row**, and this is a deliberate omission rather than an oversight.
+  `memory.size` is one of only two Required project-data checks, and the framework's
+  `apex-orchestrator/resources/preflight.md` documents that pair by name and forbids proceeding
+  past a doctor red. Adding a third Required failure would change a documented framework
+  statement from this side of the repo boundary, on a project whose `project-context.md` is
+  already over the hard ceiling — i.e. on exactly the projects that need to keep working while
+  they compact. Offered to the framework session as a follow-up they can request.
+
+`ape config resolve` gains a `project_context` path alongside `team_memory`, since the command
+needs the location and every project-data command routes through `apexcfg`.
 
 `--scaffold` on `ape task` is explicitly **not requested** (O-3): `--args` already forwards
 skill flags verbatim and both paths append `--autonomous`, so
