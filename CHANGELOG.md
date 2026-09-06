@@ -1,10 +1,9 @@
 # CHANGELOG
 
-## v0.0.67 (unreleased — draft)
+## v0.0.67 (2026-09-06)
 
-> Draft entry for the PLAN-63/PLAN-64 bundle. The version is provisional
-> until the tag is cut; the framework's blocked acceptance blocks fill
-> `<X.Y.Z>` from the released tag, not from this heading.
+> The PLAN-63/PLAN-64 bundle. The framework's blocked acceptance blocks
+> fill `<X.Y.Z>` from this released tag, `v0.0.67`.
 
 ### What the framework greps
 
