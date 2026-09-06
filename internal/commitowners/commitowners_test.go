@@ -157,7 +157,7 @@ func TestAssert_NonCommitterCleanDispatch(t *testing.T) {
 	writeFile(t, repo, "worked.txt", "the skill's output\n") // untracked, uncommitted
 	after := Capture(context.Background(), repo)
 
-	res := table.Assert("apex-dev-story", before, after, nil)
+	res := table.Assert("apex-dev-story", before, after, nil, AssertOptions{})
 	require.True(t, res.OK(), "violations: %+v", res.Violations)
 	require.False(t, res.Declared)
 	require.False(t, res.Skipped)
@@ -175,7 +175,7 @@ func TestAssert_NonCommitterMovedHead(t *testing.T) {
 	after := Capture(context.Background(), repo)
 
 	res := table.Assert("apex-dev-story", before, after,
-		subjectsSince(t, repo, before.Head))
+		subjectsSince(t, repo, before.Head), AssertOptions{})
 	require.False(t, res.OK())
 	require.Equal(t, CheckHeadMoved, res.Violations[0].Check)
 }
@@ -193,7 +193,7 @@ func TestAssert_NonCommitterStagedTheIndex(t *testing.T) {
 	after := Capture(context.Background(), repo)
 
 	require.Equal(t, before.Head, after.Head, "the premise: HEAD did not move")
-	res := table.Assert("apex-dev-story", before, after, nil)
+	res := table.Assert("apex-dev-story", before, after, nil, AssertOptions{})
 	require.False(t, res.OK())
 	require.Equal(t, CheckIndexStaged, res.Violations[0].Check)
 }
@@ -212,7 +212,7 @@ func TestAssert_NonCommitterStashed(t *testing.T) {
 	after := Capture(context.Background(), repo)
 
 	require.Equal(t, before.Head, after.Head, "the premise: HEAD did not move")
-	res := table.Assert("apex-dev-story", before, after, nil)
+	res := table.Assert("apex-dev-story", before, after, nil, AssertOptions{})
 	require.False(t, res.OK())
 	require.Equal(t, CheckStashChanged, res.Violations[0].Check)
 }
@@ -239,7 +239,7 @@ func TestAssert_CommitterBatchMakesManyCommits(t *testing.T) {
 	after := Capture(context.Background(), repo)
 
 	res := table.Assert("apex-story-batch-dev", before, after,
-		subjectsSince(t, repo, before.Head))
+		subjectsSince(t, repo, before.Head), AssertOptions{})
 	require.True(t, res.OK(), "violations: %+v", res.Violations)
 	require.True(t, res.Declared)
 	require.Len(t, res.Subjects, 4)
@@ -256,7 +256,7 @@ func TestAssert_CommitterSuppressedItsCommit(t *testing.T) {
 	writeFile(t, repo, "done.txt", "the work, uncommitted\n")
 	after := Capture(context.Background(), repo)
 
-	res := table.Assert("apex-story-batch-dev", before, after, nil)
+	res := table.Assert("apex-story-batch-dev", before, after, nil, AssertOptions{})
 	require.False(t, res.OK())
 	require.Equal(t, CheckNoCommit, res.Violations[0].Check)
 	require.Contains(t, res.Violations[0].Message, "suppressed commit")
@@ -277,7 +277,7 @@ func TestAssert_CommitterWrongMessageFormat(t *testing.T) {
 	after := Capture(context.Background(), repo)
 
 	res := table.Assert("apex-story-batch-dev", before, after,
-		subjectsSince(t, repo, before.Head))
+		subjectsSince(t, repo, before.Head), AssertOptions{})
 	require.False(t, res.OK())
 	require.Len(t, res.Violations, 1, "only the offending commit is a violation")
 	require.Equal(t, CheckMessageFormat, res.Violations[0].Check)
@@ -294,7 +294,7 @@ func TestAssert_SkippedOutsideARepo(t *testing.T) {
 	before := Capture(context.Background(), dir)
 	after := Capture(context.Background(), dir)
 
-	res := table.Assert("apex-dev-story", before, after, nil)
+	res := table.Assert("apex-dev-story", before, after, nil, AssertOptions{})
 	require.True(t, res.Skipped)
 	require.NotEmpty(t, res.SkipReason)
 	require.True(t, res.OK(), "a skip reports no violations, but callers branch on Skipped")
@@ -316,7 +316,7 @@ func TestAssert_PreStagedIndexIsTheCallersNotTheSkills(t *testing.T) {
 	require.NotEmpty(t, before.Staged, "the premise: the index is already dirty")
 	after := Capture(context.Background(), repo)
 
-	res := table.Assert("apex-dev-story", before, after, nil)
+	res := table.Assert("apex-dev-story", before, after, nil, AssertOptions{})
 	require.True(t, res.OK(), "violations: %+v", res.Violations)
 }
 
@@ -336,7 +336,7 @@ func TestAssert_StagingOnTopOfADirtyIndexIsStillCaught(t *testing.T) {
 	runGit(t, repo, "add", "skill.txt")
 	after := Capture(context.Background(), repo)
 
-	res := table.Assert("apex-dev-story", before, after, nil)
+	res := table.Assert("apex-dev-story", before, after, nil, AssertOptions{})
 	require.False(t, res.OK())
 	require.Equal(t, CheckIndexStaged, res.Violations[0].Check)
 	require.Contains(t, res.Violations[0].Message, "skill.txt")
@@ -377,7 +377,7 @@ func TestAssert_CommitterInARepoWithNoPriorCommits(t *testing.T) {
 	// The subject list the caller passes: with no prior HEAD, every commit
 	// reachable from HEAD was made by the run.
 	res := table.Assert("apex-story-batch-dev", before, after,
-		[]string{"dev: story 1.1 add the greeter"})
+		[]string{"dev: story 1.1 add the greeter"}, AssertOptions{})
 	require.True(t, res.OK(), "violations: %+v", res.Violations)
 }
 
@@ -410,7 +410,7 @@ func TestAssert_AbsentDeclarationDoesNotConvictACommitter(t *testing.T) {
 	after := Capture(context.Background(), repo)
 
 	res := table.Assert("apex-story-batch-dev", before, after,
-		subjectsSince(t, repo, before.Head))
+		subjectsSince(t, repo, before.Head), AssertOptions{})
 	require.True(t, res.OK(),
 		"an absent declaration is no basis to convict a committer: %+v", res.Violations)
 	require.True(t, res.Skipped, "and it must say it could not judge, not pass silently")
@@ -433,7 +433,7 @@ func TestAssert_HeadMovedButSubjectsUnreadableIsASkip(t *testing.T) {
 	after := Capture(context.Background(), repo)
 
 	// nil subjects simulates the log read failing, not an absent commit.
-	res := table.Assert("apex-story-batch-dev", before, after, nil)
+	res := table.Assert("apex-story-batch-dev", before, after, nil, AssertOptions{})
 	require.True(t, res.Skipped, "a failed read is not evidence of a suppressed commit")
 	require.True(t, res.OK(), "violations: %+v", res.Violations)
 	require.Contains(t, res.SkipReason, "could not be read")
@@ -456,7 +456,7 @@ func TestAssert_DeclaredNonCommitterStillEnforced(t *testing.T) {
 	after := Capture(context.Background(), repo)
 
 	res := table.Assert("apex-dev-story", before, after,
-		subjectsSince(t, repo, before.Head))
+		subjectsSince(t, repo, before.Head), AssertOptions{})
 	require.False(t, res.OK(), "a declared non-committer that commits is still a violation")
 	require.False(t, res.Skipped)
 	require.Equal(t, CheckHeadMoved, res.Violations[0].Check)
@@ -489,4 +489,91 @@ func TestSkipped_IsNotAZeroResult(t *testing.T) {
 	// A skip carries no violations, so it must not fail the run — the
 	// caller branches on Skipped, never on OK() alone.
 	require.True(t, got.OK())
+}
+
+// --- `--no-commit` against a DECLARED committer ---
+//
+// This pair is the whole fix, and it must be read as a pair. The first
+// test alone would be satisfied by deleting the check; the second is what
+// proves the check still exists. The framework session asked for both by
+// name, for exactly that reason.
+
+// TestCommitter_UnderNoCommit_ProducingNoneIsSkipped: the dispatch told
+// the skill not to commit and it did not. That is the contract honoured.
+//
+// `commit-owners.csv` is `skill,commit_kind,message_regex` — no
+// conditionality column. It declares the SHAPE of a commit, not its
+// inevitability, and reading it as "this skill always commits" made
+// `--no-commit` unusable for all six declared committers.
+func TestCommitter_UnderNoCommit_ProducingNoneIsSkipped(t *testing.T) {
+	tbl, err := Load(writeCSV(t, "skill,commit_kind,message_regex\napex-sprint-planning,plan,^plan: .+$\n"))
+	require.NoError(t, err)
+	before := State{Known: true, Head: "aaaa111"}
+	after := State{Known: true, Head: "aaaa111"}
+
+	res := tbl.Assert("apex-sprint-planning", before, after, nil,
+		AssertOptions{NoCommit: true})
+
+	require.True(t, res.Skipped, "obedience is not suppression")
+	require.Contains(t, res.SkipReason, "--no-commit")
+	require.Contains(t, res.SkipReason, "honoured")
+	require.Empty(t, res.Violations)
+	require.True(t, res.Declared, "it is still a declared committer; the assertion just did not apply")
+}
+
+// TestCommitter_WithoutNoCommit_ProducingNoneStillViolates is the
+// negative control. Same skill, same git state, flag absent — the
+// suppressed-commit verdict must survive, or the fix above has disarmed
+// the check it was built to make.
+func TestCommitter_WithoutNoCommit_ProducingNoneStillViolates(t *testing.T) {
+	tbl, err := Load(writeCSV(t, "skill,commit_kind,message_regex\napex-sprint-planning,plan,^plan: .+$\n"))
+	require.NoError(t, err)
+	before := State{Known: true, Head: "aaaa111"}
+	after := State{Known: true, Head: "aaaa111"}
+
+	res := tbl.Assert("apex-sprint-planning", before, after, nil, AssertOptions{})
+
+	require.False(t, res.Skipped)
+	require.Len(t, res.Violations, 1)
+	require.Equal(t, CheckNoCommit, res.Violations[0].Check)
+	require.Contains(t, res.Violations[0].Message, "suppressed commit")
+}
+
+// TestCommitter_UnderNoCommit_StillChecksMessageShape: the flag excuses
+// the ABSENCE of a commit, not a malformed one. A skill that commits
+// anyway is still held to the shape its roster row declares.
+func TestCommitter_UnderNoCommit_StillChecksMessageShape(t *testing.T) {
+	tbl, err := Load(writeCSV(t, "skill,commit_kind,message_regex\napex-sprint-planning,plan,^plan: .+$\n"))
+	require.NoError(t, err)
+	before := State{Known: true, Head: "aaaa111"}
+	after := State{Known: true, Head: "bbbb222"}
+
+	ok := tbl.Assert("apex-sprint-planning", before, after,
+		[]string{"plan: the next slice"}, AssertOptions{NoCommit: true})
+	require.Empty(t, ok.Violations)
+	require.False(t, ok.Skipped)
+
+	bad := tbl.Assert("apex-sprint-planning", before, after,
+		[]string{"wip: whatever"}, AssertOptions{NoCommit: true})
+	require.Len(t, bad.Violations, 1)
+	require.Equal(t, CheckMessageFormat, bad.Violations[0].Check)
+}
+
+// TestNonCommitter_UnderNoCommit_IsUnchanged: the flag says "do not
+// commit" and a non-committer was never allowed to anyway, so its
+// three-part assertion is untouched. Guards against widening the fix
+// past declared committers.
+func TestNonCommitter_UnderNoCommit_IsUnchanged(t *testing.T) {
+	tbl, err := Load(writeCSV(t, "skill,commit_kind,message_regex\napex-sprint-planning,plan,^plan: .+$\n"))
+	require.NoError(t, err)
+	before := State{Known: true, Head: "aaaa111"}
+	after := State{Known: true, Head: "bbbb222"}
+
+	res := tbl.Assert("apex-shard-doc", before, after,
+		[]string{"anything"}, AssertOptions{NoCommit: true})
+
+	require.False(t, res.Declared)
+	require.False(t, res.Skipped)
+	require.Len(t, res.Violations, 1)
+	require.Equal(t, CheckHeadMoved, res.Violations[0].Check)
 }

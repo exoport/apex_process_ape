@@ -87,6 +87,7 @@ adds none — and is matched against a commit's **subject line only**.
 | **absent** from the CSV | HEAD unchanged, no path staged that was not staged before, and the stash unchanged |
 | **present** in the CSV | at least one commit, and every commit in `pre..HEAD` matching one of that skill's rows |
 | **no CSV in the project** | nothing is asserted; the verdict is `skipped` with a reason |
+| **present, dispatched with `--no-commit`** | producing no commit is `skipped` with a reason — the dispatch told it not to. A commit it makes anyway is still held to its declared shape |
 
 HEAD alone is not the check, and that is the point: `git add` and
 `git stash` both leave HEAD exactly where it was, and a stash silently
@@ -116,6 +117,22 @@ Three things it deliberately does not do:
 `--task-commit` is `ape`'s own commit, in `ape`'s own derived format, made
 after the skill is done — it is not judged against a skill's declaration,
 and the assertion is skipped when that flag is set.
+
+**`--no-commit` does the same to the other half.** The roster is
+`skill,commit_kind,message_regex` — it has no conditionality column, and
+it declares the **shape** of a commit rather than its inevitability:
+*when this skill commits, the subject looks like this*. Reading it as
+"this skill always commits" would convict a declared committer for
+obeying `--no-commit`, which several framework skills mandate in their own
+text (`apex-sprint-planning`: "When `{no_commit}` is `true`: make NO
+commits and NO `git add`/`git stash`"). So under that flag, producing no
+commit is a **skip with a reason** rather than a violation — a suppressed
+commit means *the skill was permitted to commit and produced none*, never
+*the operator said not to and it complied*.
+
+The flag excuses the absence of a commit, not a malformed one: a skill
+that commits anyway under `--no-commit` is still checked against its
+declared shape.
 
 A violation exits **6** and prints each finding on stderr:
 

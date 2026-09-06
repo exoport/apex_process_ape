@@ -133,6 +133,29 @@ type Result struct {
 // assertion is not OK-by-default: callers branch on Skipped separately.
 func (r Result) OK() bool { return len(r.Violations) == 0 }
 
+// AssertOptions carries the facts about the DISPATCH that decide which
+// assertion applies — as distinct from the git State, which is what an
+// assertion is applied to.
+type AssertOptions struct {
+	// NoCommit reports that the dispatch carried `--no-commit`, which
+	// instructs the skill not to commit.
+	//
+	// It changes what a declared committer producing nothing MEANS.
+	// `commit-owners.csv` is `skill,commit_kind,message_regex` — it has no
+	// conditionality column, and it declares the SHAPE of a commit, not
+	// its inevitability: "when this skill commits, the subject looks like
+	// this". Reading it as "this skill always commits" is a claim the
+	// framework never made and has no column in which to make.
+	//
+	// The framework mandates the behaviour directly —
+	// `apex-sprint-planning/SKILL.md:73`: "When {no_commit} is true: make
+	// NO commits and NO git add/git stash." Convicting that is convicting
+	// a skill for obedience. "Suppressed commit" must mean the skill was
+	// PERMITTED to commit and produced none, never that the operator said
+	// not to and it complied.
+	NoCommit bool
+}
+
 // Skipped builds the verdict for a dispatch whose assertion was never
 // ATTEMPTED, as distinct from one that ran and found nothing.
 //
@@ -154,7 +177,7 @@ func Skipped(skill, reason string) Result {
 // first, which the caller reads with `git log before..HEAD`. It is
 // passed in rather than read here because the caller already collects it
 // for the run envelope.
-func (t *Table) Assert(skill string, before, after State, subjects []string) Result {
+func (t *Table) Assert(skill string, before, after State, subjects []string, opts AssertOptions) Result {
 	res := Result{Skill: skill, Declared: t.Owns(skill), Subjects: subjects}
 	if !before.Known || !after.Known {
 		res.Skipped = true
@@ -192,7 +215,7 @@ func (t *Table) Assert(skill string, before, after State, subjects []string) Res
 		t.assertNonCommitter(&res, before, after)
 		return res
 	}
-	t.assertCommitter(&res, skill, before, after, subjects)
+	t.assertCommitter(&res, skill, before, after, subjects, opts)
 	return res
 }
 
@@ -236,7 +259,9 @@ func (t *Table) assertNonCommitter(res *Result, before, after State) {
 
 // assertCommitter is the predicate that catches a suppressed commit: at
 // least one commit, and EVERY commit matching one of the skill's rows.
-func (t *Table) assertCommitter(res *Result, skill string, before, after State, subjects []string) {
+func (t *Table) assertCommitter(res *Result, skill string, before, after State, subjects []string,
+	opts AssertOptions,
+) {
 	// HEAD moved but the subject list came back empty: the two reads
 	// disagree, and the subject list is the one that failed. `git log`
 	// erroring — a cancelled context after a long run, a transient lock —
@@ -249,6 +274,17 @@ func (t *Table) assertCommitter(res *Result, skill string, before, after State, 
 		return
 	}
 	if before.Head == after.Head || len(subjects) == 0 {
+		if opts.NoCommit {
+			// The dispatch told it not to commit and it did not. That is
+			// the contract honoured, not a commit suppressed — see
+			// AssertOptions.NoCommit. Reported as a skip rather than a
+			// silent pass, so "the assertion did not apply" stays
+			// distinguishable from "the assertion applied and held".
+			res.Skipped = true
+			res.SkipReason = "--no-commit: the dispatch instructed the skill not to commit, " +
+				"so a declared committer producing none is the contract being honoured, not suppressed"
+			return
+		}
 		rows := t.Rows(skill)
 		formats := make([]string, 0, len(rows))
 		for _, row := range rows {
@@ -264,6 +300,17 @@ func (t *Table) assertCommitter(res *Result, skill string, before, after State, 
 		})
 		return
 	}
+	// Reached under `--no-commit` too, when the skill committed anyway.
+	// The shape check still applies there and costs nothing: the roster
+	// declares what a commit from this skill looks like, whatever
+	// prompted it.
+	//
+	// NOT asserted here: that committing at all under `--no-commit` is
+	// itself a breach. It is one — the framework's own wording is "make
+	// NO commits" — but it is a new check class the framework would have
+	// to know about, and inventing one mid-release to fire on a path
+	// nothing has exercised is how this defect got here. Filed rather
+	// than guessed at.
 	for _, subject := range subjects {
 		if _, ok := t.MatchSubject(skill, subject); ok {
 			continue

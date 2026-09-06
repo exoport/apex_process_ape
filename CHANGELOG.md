@@ -396,6 +396,40 @@ it would put prose in front of the check that enforces it.
   `ape` names rather than which terminal the child is attached to. If it
   cannot be made, the run says so and proceeds unpinned.
 
+- **fix(task): `--no-commit` convicted a declared committer for obeying
+  it.** A skill in `commit-owners.csv` dispatched with `--no-commit` made
+  no commit — as several framework skills mandate in their own text
+  (`apex-sprint-planning`: "When `{no_commit}` is `true`: make NO commits
+  and NO `git add`/`git stash`") — and the contract reported
+  `dispatch.no_commit`, exit **6**.
+
+  The defect is sharper than a missing exemption. The roster is
+  `skill,commit_kind,message_regex`: it has **no conditionality column**,
+  and it declares the *shape* of a commit rather than its inevitability —
+  "when this skill commits, the subject looks like this". Reading it as
+  "this skill always commits" is a claim the framework never made and has
+  no column in which to make. As shipped, `--no-commit` was unusable for
+  all six declared committers.
+
+  Under the flag, a declared committer producing no commit is now a
+  **skip with a reason**: a suppressed commit means *the skill was
+  permitted to commit and produced none*, never *the operator said not to
+  and it complied*. The flag excuses the absence of a commit, not a
+  malformed one — a skill that commits anyway is still held to its
+  declared shape.
+
+  **Why it surfaced only now, and it is this release's pattern once
+  more:** the roster was never installed into a project until this
+  release, so every dispatch before it took the *non-committer* branch.
+  The committer branch had never executed against any fixture, ever — and
+  its first live run misfired on the one path that deliberately suppresses
+  commits. Correct code, unreachable, wrong the first time it was reached.
+
+  Both directions are tested, live and in unit tests, because a fix that
+  only made the first case pass would have disarmed the check entirely: a
+  committer under `--no-commit` producing none **skips**; the same
+  dispatch without the flag still **exits 6**.
+
 - **fix(task): `--task-commit` reported a commit-contract pass it never
   ran.** On that path ape makes the dispatch's own commit, so the skill's
   declaration cannot be asserted against the range — deliberately. But the

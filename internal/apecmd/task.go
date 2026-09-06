@@ -417,7 +417,8 @@ func runTask(ctx context.Context, o taskOptions) error {
 	var contract commitowners.Result
 	if o.taskCommit == nil {
 		contract = owners.Assert(o.skill, stateBefore,
-			commitowners.Capture(ctx, o.projectRoot), subjects)
+			commitowners.Capture(ctx, o.projectRoot), subjects,
+			commitowners.AssertOptions{NoCommit: o.skillNoCommit})
 	} else {
 		// Explicitly skipped, never left as the zero Result. The zero
 		// value marshals as `{"skill":"","declared":false}` with no
