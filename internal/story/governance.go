@@ -311,6 +311,51 @@ type GovernanceCorpus struct {
 	Root string
 }
 
+// ResolveProjectExt reads the active extensions from the project a story
+// sits in, walking up from the story's own path.
+//
+// `--file` mode ALREADY does this walk — ResolveGovernanceCorpus below is
+// the same three lines — and then ignored the project's own `extensions`,
+// requiring the caller to restate them via `--active-extensions`.
+//
+// Deriving them is not a convenience. It removes a RESTATEMENT: the
+// project's `_apex/config.yaml` already says which extensions are on, and
+// asking every caller to retype it is the two-shapes-for-one-fact family,
+// with one shape reachable only by remembering.
+//
+// Measured, against the framework at v0.16.0-in-progress. Fourteen skills
+// reference `ape story verify`; three pass `--active-extensions`; eight
+// use corpus mode, which always took its extensions from the resolved
+// project and was never affected. **Three call `--file` with no flag** —
+// `apex-orchestrator`, `apex-review-story` and `apex-story-governance` —
+// so on every invocation the two ADR classes silently did not run and the
+// caller read `is valid`. `apex-review-story`'s is the structural
+// pre-review gate four other steps cite as their verdict source.
+//
+// At corpus scale the same omission hid more: the framework's own sweep
+// passed no flag, so 982 of 982 stories skipped both classes across seven
+// sweeps and were reported clean — 925 of them in fixtures that DO enable
+// `ext-adrs`, i.e. 94% of the corpus under-checked and quoted.
+//
+// ok is false when no project resolves — a story outside any project,
+// which `--file` is required to keep working for. The caller then has
+// nothing to derive from and the governance classes skip, as before.
+func ResolveProjectExt(storyPath string) (ext apexcfg.Ext, ok bool) {
+	abs, err := filepath.Abs(storyPath)
+	if err != nil {
+		return apexcfg.Ext{}, false
+	}
+	root, err := apexcfg.Find(filepath.Dir(abs))
+	if err != nil {
+		return apexcfg.Ext{}, false
+	}
+	cfg, err := apexcfg.ResolveAt(root, nil)
+	if err != nil {
+		return apexcfg.Ext{}, false
+	}
+	return cfg.Ext, true
+}
+
 // ResolveGovernanceCorpus walks up from the story's own path to find a
 // project, then loads its ADRs.
 //

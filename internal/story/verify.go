@@ -642,14 +642,21 @@ func verifyShape(path, rel string, ext apexcfg.Ext) FileVerdict {
 		// below reports: a governance class that says nothing when it did
 		// not run reads as one that passed.
 		//
-		// This branch is reached two ways that look identical from the
-		// outside — a project that genuinely does not use ADRs, and a
-		// caller that forgot `--active-extensions`. The second is a live
-		// hazard: on an otherwise-clean story citing a `proposed` ADR,
-		// `--file` exits 0 with the flag and 0 without it, and only the
-		// first run produces the flagged finding. An acceptance block
-		// asserting "exit 0, flagged" would pass on the second while
-		// measuring nothing at all.
+		// Reached when the project genuinely does not enable ADRs, or
+		// when a caller passed `--active-extensions` without it, or when
+		// the story sits outside any project so there is nothing to
+		// derive from.
+		//
+		// A caller who simply OMITS the flag no longer lands here on an
+		// ADR project: the extensions come from the project `--file`
+		// already resolves. That omission used to be a live hazard — on
+		// an otherwise-clean story citing a `proposed` ADR, `--file`
+		// exited 0 with the flag and 0 without, and only the first run
+		// produced the flagged finding, so an acceptance block asserting
+		// "exit 0, flagged" passed on the second while measuring nothing.
+		// The framework's own sweep hit it at scale: 982 of 982 stories
+		// skipping both classes, 94% of them on projects that enable
+		// ADRs.
 		out.SkippedChecks = append(
 			out.SkippedChecks,
 			SkippedCheck{Check: CheckADRsConsidered, Reason: msgADRsInactive},
@@ -694,7 +701,7 @@ func verifyShape(path, rel string, ext apexcfg.Ext) FileVerdict {
 // because ext-adrs is not active", shared by both skip entries so a
 // consumer matches one string.
 const msgADRsInactive = "ext-adrs is not active for this run " +
-	"(--file mode takes it from --active-extensions)"
+	"(from --active-extensions when given, otherwise from the project's own extensions)"
 
 // ParseActiveExtensions reads the comma-separated form the Python's
 // --active-extensions flag takes ("ext-adrs,ext-features"), including the

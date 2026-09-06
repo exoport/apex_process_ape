@@ -87,7 +87,7 @@ adds none — and is matched against a commit's **subject line only**.
 | **absent** from the CSV | HEAD unchanged, no path staged that was not staged before, and the stash unchanged |
 | **present** in the CSV | at least one commit, and every commit in `pre..HEAD` matching one of that skill's rows |
 | **no CSV in the project** | nothing is asserted; the verdict is `skipped` with a reason |
-| **present, dispatched with `--no-commit`** | producing no commit is `skipped` with a reason — the dispatch told it not to. A commit it makes anyway is still held to its declared shape |
+| **present, dispatched with `--no-commit`** | producing no commit is `skipped` with a reason — the dispatch told it not to. Committing **anyway** is `dispatch.committed_under_no_commit`, reported instead of the message format even when the subject matches |
 
 HEAD alone is not the check, and that is the point: `git add` and
 `git stash` both leave HEAD exactly where it was, and a stash silently
@@ -130,9 +130,12 @@ commit is a **skip with a reason** rather than a violation — a suppressed
 commit means *the skill was permitted to commit and produced none*, never
 *the operator said not to and it complied*.
 
-The flag excuses the absence of a commit, not a malformed one: a skill
-that commits anyway under `--no-commit` is still checked against its
-declared shape.
+The flag excuses the absence of a commit and **forbids its presence**. A
+skill that commits anyway reports `dispatch.committed_under_no_commit` —
+reported *instead of* `dispatch.message_format`, including when the
+subject matches its declared shape perfectly. When the commit should not
+exist, its wording is not the defect, and naming the format would send you
+to fix a commit whose fix is deletion.
 
 A violation exits **6** and prints each finding on stderr:
 

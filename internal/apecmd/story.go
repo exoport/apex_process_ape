@@ -340,7 +340,17 @@ func sortedKeys(m map[string]int) []string {
 }
 
 func runStoryVerifyFile(cmd *cobra.Command, path, activeExts, outputFormat string, advisory bool) error {
+	// An explicit --active-extensions always wins. When it is absent, the
+	// extensions come from the project this story sits in — the same
+	// project `--file` already walks up to for the ADR corpus. Before
+	// this, an omitted flag meant "no extensions", which silently
+	// disabled the two governance classes on a project that enables them.
 	ext := story.ParseActiveExtensions(activeExts)
+	if strings.TrimSpace(activeExts) == "" {
+		if derived, ok := story.ResolveProjectExt(path); ok {
+			ext = derived
+		}
+	}
 	verdict := story.VerifyFileWith(path, ext, story.VerifyOptions{IncludeAdvisory: advisory})
 	format := output.Format(outputFormat)
 	switch {

@@ -42,7 +42,7 @@ and the report-only `story.adr_not_accepted`.
 
 The dispatch-assertion check names: `dispatch.head_moved`,
 `dispatch.index_staged`, `dispatch.stash_changed`, `dispatch.no_commit`,
-`dispatch.message_format`.
+`dispatch.message_format`, and `dispatch.committed_under_no_commit`.
 
 One new `ape sprint check` class, for the framework's own v0.16.0
 migration entry: **`sprint.epic_without_retro`**. Its `check:` line, which
@@ -412,6 +412,51 @@ it would put prose in front of the check that enforces it.
   shape that let a v0.15.0 manifest be reported as a green v0.16.0 gate
   for a whole release. Neither suffix appears when nothing was skipped,
   so an ordinary run reads as it always did.
+
+- **feat(framework,story,task): three gaps this release exposed, closed
+  before the tag.** All three were queued for "the next release" until the
+  framework maintainer pointed out there is no released v0.0.67 to defer
+  *from* — nothing is pushed or tagged, so the version number was a
+  fiction. They land here.
+
+  **An installer-coverage gate, derived from the tree.** It walks a
+  framework's `_apex/` and asserts every file arrives in the project,
+  with a small default-DENY list naming what ape deliberately does not
+  install and why. That direction is the point: a list of what to install
+  cannot catch a missing entry, because absence looks like completeness —
+  which is how `commit-owners.csv` and `_apex/migrations/` both shipped
+  unreachable. Re-breaking each install in turn makes the gate fail
+  naming exactly that file, so it is verified against the two defects it
+  exists for rather than only against a green run.
+
+  **`dispatch.committed_under_no_commit`.** The counterpart to the skip
+  above: `--no-commit` excuses the *absence* of a commit from a declared
+  committer and forbids its *presence*. Reported instead of
+  `dispatch.message_format`, including when the subject matches
+  perfectly — when the commit should not exist, its wording is not the
+  defect, and naming the format would send the operator to fix a commit
+  whose fix is deletion. **Proven by live dispatch rather than shipped
+  with a caveat**, both branches: a declared committer that commits under
+  the flag exits 6 with the new class; the same skill making the same
+  commit without the flag exits 0 clean.
+
+  **`ape story verify --file` derives extensions from the project it
+  already resolved.** The mode walks up to find the ADR corpus and then
+  discarded that project's own `extensions`, requiring the caller to
+  retype them via `--active-extensions`. An explicit flag still wins;
+  omitting it now means "ask the project" rather than "no extensions".
+
+  This one was worse than a convenience. Of fourteen framework skills
+  referencing `ape story verify`, three pass the flag and eight use
+  corpus mode (which always read the project). **Three call `--file` with
+  no flag** — `apex-orchestrator`, `apex-review-story` and
+  `apex-story-governance` — so the two ADR classes silently did not run
+  on every invocation and the caller read `is valid`;
+  `apex-review-story`'s is the structural pre-review gate four other
+  steps cite as their verdict source. At corpus scale the framework's own
+  sweep passed no flag, so **982 of 982 stories skipped both classes
+  across seven sweeps** and were reported clean, 94% of them on projects
+  that enable ADRs.
 
 - **fix(task): `--no-commit` convicted a declared committer for obeying
   it.** A skill in `commit-owners.csv` dispatched with `--no-commit` made

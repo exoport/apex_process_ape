@@ -539,24 +539,43 @@ func TestCommitter_WithoutNoCommit_ProducingNoneStillViolates(t *testing.T) {
 	require.Contains(t, res.Violations[0].Message, "suppressed commit")
 }
 
-// TestCommitter_UnderNoCommit_StillChecksMessageShape: the flag excuses
-// the ABSENCE of a commit, not a malformed one. A skill that commits
-// anyway is still held to the shape its roster row declares.
-func TestCommitter_UnderNoCommit_StillChecksMessageShape(t *testing.T) {
+// TestCommitter_UnderNoCommit_CommittingAtAllIsTheBreach is the
+// counterpart to the skip: `--no-commit` excuses the ABSENCE of a commit
+// and forbids its presence.
+//
+// Reported INSTEAD of dispatch.message_format, including when the subject
+// matches perfectly — when the commit should not exist its wording is not
+// the defect, and naming the format would send the operator to fix a
+// commit whose fix is deletion.
+func TestCommitter_UnderNoCommit_CommittingAtAllIsTheBreach(t *testing.T) {
 	tbl, err := Load(writeCSV(t, "skill,commit_kind,message_regex\napex-sprint-planning,plan,^plan: .+$\n"))
 	require.NoError(t, err)
 	before := State{Known: true, Head: "aaaa111"}
 	after := State{Known: true, Head: "bbbb222"}
 
-	ok := tbl.Assert("apex-sprint-planning", before, after,
+	// A PERFECTLY formatted commit is still a breach under the flag.
+	matching := tbl.Assert("apex-sprint-planning", before, after,
 		[]string{"plan: the next slice"}, AssertOptions{NoCommit: true})
-	require.Empty(t, ok.Violations)
-	require.False(t, ok.Skipped)
+	require.Len(t, matching.Violations, 1)
+	require.Equal(t, CheckCommittedUnderNoCommit, matching.Violations[0].Check)
+	require.Contains(t, matching.Violations[0].Message, "should not exist")
 
-	bad := tbl.Assert("apex-sprint-planning", before, after,
+	// A malformed one reports the SAME class, not the format — one finding
+	// naming the real fix, never two sending two directions.
+	malformed := tbl.Assert("apex-sprint-planning", before, after,
 		[]string{"wip: whatever"}, AssertOptions{NoCommit: true})
-	require.Len(t, bad.Violations, 1)
-	require.Equal(t, CheckMessageFormat, bad.Violations[0].Check)
+	require.Len(t, malformed.Violations, 1)
+	require.Equal(t, CheckCommittedUnderNoCommit, malformed.Violations[0].Check)
+
+	// NEGATIVE CONTROL: without the flag the same commits are fine, and a
+	// malformed one is a format finding exactly as it always was. Without
+	// this half, the class above could be fired unconditionally and pass.
+	require.Empty(t, tbl.Assert("apex-sprint-planning", before, after,
+		[]string{"plan: the next slice"}, AssertOptions{}).Violations)
+	fmtOnly := tbl.Assert("apex-sprint-planning", before, after,
+		[]string{"wip: whatever"}, AssertOptions{})
+	require.Len(t, fmtOnly.Violations, 1)
+	require.Equal(t, CheckMessageFormat, fmtOnly.Violations[0].Check)
 }
 
 // TestNonCommitter_UnderNoCommit_IsUnchanged: the flag says "do not

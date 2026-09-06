@@ -109,6 +109,20 @@ const (
 	// CheckMessageFormat — a declared committer's commit does not match
 	// any of its declared message formats.
 	CheckMessageFormat = "dispatch.message_format"
+	// CheckCommittedUnderNoCommit — the dispatch carried `--no-commit`
+	// and the skill committed anyway.
+	//
+	// The counterpart to the skip: `--no-commit` excuses the ABSENCE of a
+	// commit from a declared committer, and forbids its presence. The
+	// framework states it directly — "When {no_commit} is true: make NO
+	// commits and NO git add/git stash. Leave the entire working tree
+	// dirty; an outer driver owns the commit."
+	//
+	// Reported INSTEAD of dispatch.message_format, not alongside it. When
+	// the commit should not exist, its subject is not the defect, and
+	// naming the format would send the operator to fix the wording of a
+	// commit whose fix is deletion.
+	CheckCommittedUnderNoCommit = "dispatch.committed_under_no_commit"
 )
 
 // Result is the verdict of one dispatch's assertions.
@@ -300,17 +314,20 @@ func (t *Table) assertCommitter(res *Result, skill string, before, after State, 
 		})
 		return
 	}
-	// Reached under `--no-commit` too, when the skill committed anyway.
-	// The shape check still applies there and costs nothing: the roster
-	// declares what a commit from this skill looks like, whatever
-	// prompted it.
-	//
-	// NOT asserted here: that committing at all under `--no-commit` is
-	// itself a breach. It is one — the framework's own wording is "make
-	// NO commits" — but it is a new check class the framework would have
-	// to know about, and inventing one mid-release to fire on a path
-	// nothing has exercised is how this defect got here. Filed rather
-	// than guessed at.
+	if opts.NoCommit {
+		// Committing at all is the defect here, so it is reported alone.
+		res.Violations = append(res.Violations, Violation{
+			Check: CheckCommittedUnderNoCommit, Skill: skill,
+			Message: fmt.Sprintf(
+				"the dispatch carried --no-commit and the skill made %d commit(s) anyway (%s) — "+
+					"--no-commit means make NO commits and leave the working tree dirty for the "+
+					"caller, so this is a commit that should not exist rather than one with the "+
+					"wrong subject",
+				len(subjects), strings.Join(subjects, "; "),
+			),
+		})
+		return
+	}
 	for _, subject := range subjects {
 		if _, ok := t.MatchSubject(skill, subject); ok {
 			continue
