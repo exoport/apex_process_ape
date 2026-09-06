@@ -465,6 +465,18 @@ it would put prose in front of the check that enforces it.
   pins the set to one. That is what you want for testing a class in
   isolation and not what you want for reproducing what a skill sees.
 
+  **Measured before shipping, flagless, over a 982-story fixture corpus —
+  the same way a real caller runs it.** Without derivation: 982 stories,
+  **982 carrying a silent skip**, none failing. With it: 982 stories,
+  **57 carrying a skip**, none failing. So it closes 925 silent skips and
+  newly fails nothing on that corpus. The 57 are the two fixtures that
+  genuinely do not enable ADRs, where the skip is the honest answer.
+
+  That is evidence about one corpus, not a guarantee about yours. A
+  project whose stories lack a section its extensions require will now see
+  that reported where it was not before — which is the change working, and
+  the reason this is written up as a change rather than a fix.
+
   This one was worse than a convenience. Of fourteen framework skills
   referencing `ape story verify`, three pass the flag and eight use
   corpus mode (which always read the project). **Three call `--file` with
