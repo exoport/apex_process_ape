@@ -608,8 +608,14 @@ func modelUsageRecordsToEnvelope(mu map[string]pipeline.ModelUsageRecord) map[st
 // printTaskSummary emits the human-mode post-run lines.
 func printTaskSummary(env taskEnvelope, runErr error) {
 	if runErr == nil {
-		fmt.Fprintf(os.Stdout, "✅ task %s done in %.1fs — $%.2f, %d turn(s)\n",
-			env.Skill, env.DurationSeconds, env.CostUSD, env.Usage.NumTurns)
+		// The contract's state rides this line, not only the ⚠️ below it.
+		// "✅ task X done" is what gets quoted, pasted and carried forward
+		// as evidence, and on its own it says the dispatch was fine when
+		// the commit-ownership assertion may never have run. A skip is
+		// only reported if the summary cannot be quoted without it.
+		fmt.Fprintf(os.Stdout, "✅ task %s done in %.1fs — $%.2f, %d turn(s)%s\n",
+			env.Skill, env.DurationSeconds, env.CostUSD, env.Usage.NumTurns,
+			contractSkipSuffix(env.CommitContract))
 	}
 	if env.ManifestPath != "" {
 		fmt.Fprintf(os.Stdout, "📊 manifest: %s\n", env.ManifestPath)
@@ -621,6 +627,16 @@ func printTaskSummary(env taskEnvelope, runErr error) {
 		}
 	}
 	printCommitContract(env.CommitContract)
+}
+
+// contractSkipSuffix marks a summary line whose commit-ownership
+// assertion was never made. Empty when the assertion ran, so a normal
+// dispatch reads exactly as it did.
+func contractSkipSuffix(res *commitowners.Result) string {
+	if res == nil || !res.Skipped {
+		return ""
+	}
+	return " — commit contract NOT asserted"
 }
 
 // printCommitContract reports the per-dispatch assertion. A skipped

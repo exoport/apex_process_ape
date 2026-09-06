@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/commitowners"
+	"github.com/exoport/apex_process_ape/internal/story"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,4 +60,36 @@ func TestTaskEnvelope_SkippedContractIsDistinguishable(t *testing.T) {
 		"a dispatch that asserted nothing must not marshal like one that asserted and passed")
 	require.Contains(t, string(skipBlob), `"skipped":true`)
 	require.NotContains(t, string(cleanBlob), `"skipped"`)
+}
+
+// TestSummaryLinesCannotBeQuotedWithoutTheirSkips is the rule the
+// framework session and I arrived at after three gates whose skip read as
+// a pass: **a skip is only reported if the summary cannot be quoted
+// without it.**
+//
+// None of those three failed to print the skip. Each printed it honestly,
+// on its own line. What defeated us was the summary ABOVE it — because
+// the summary is what gets quoted into a message, pasted into a report,
+// and carried forward as evidence. A total that counts skips as
+// not-failures converts an absent guarantee into a believed-present one
+// at the moment someone decides to trust it.
+func TestSummaryLinesCannotBeQuotedWithoutTheirSkips(t *testing.T) {
+	t.Run("task: contract asserted", func(t *testing.T) {
+		res := commitowners.Result{Skill: "apex-help", Declared: true}
+		require.Empty(t, contractSkipSuffix(&res),
+			"a dispatch whose assertion ran reads exactly as it always did")
+	})
+	t.Run("task: contract skipped", func(t *testing.T) {
+		res := commitowners.Skipped("apex-help", "--no-commit: …")
+		require.Contains(t, contractSkipSuffix(&res), "NOT asserted")
+	})
+	t.Run("task: no contract at all", func(t *testing.T) {
+		require.Empty(t, contractSkipSuffix(nil))
+	})
+	t.Run("story verify: classes skipped", func(t *testing.T) {
+		require.Empty(t, skipSuffix(nil))
+		require.Contains(t,
+			skipSuffix([]story.SkippedCheck{{Check: "story.adr_unresolved", Reason: "x"}}),
+			"SKIPPED")
+	})
 }

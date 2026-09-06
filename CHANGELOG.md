@@ -396,6 +396,23 @@ it would put prose in front of the check that enforces it.
   `ape` names rather than which terminal the child is attached to. If it
   cannot be made, the run says so and proceeds unpinned.
 
+- **fix(story,task): a summary line now carries its own skips.** Three
+  gates this release had a skip read as a pass, and the sharpening that
+  came out of it is the rule this implements: **none of the three failed
+  to report the skip.** Each printed it honestly, on its own line. What
+  defeated us every time was the *summary above it*, because the summary
+  is what gets quoted into a message, pasted into a report and carried
+  forward as evidence.
+
+  So `ape story verify --file` now prints `OK: <path> is valid — 2
+  check(s) SKIPPED, listed below` when governance classes did not run,
+  and `ape task` prints `✅ task X done … — commit contract NOT asserted`
+  when the dispatch's assertion was never made. Both were previously a
+  clean summary with the skip on the line beneath, which is exactly the
+  shape that let a v0.15.0 manifest be reported as a green v0.16.0 gate
+  for a whole release. Neither suffix appears when nothing was skipped,
+  so an ordinary run reads as it always did.
+
 - **fix(task): `--no-commit` convicted a declared committer for obeying
   it.** A skill in `commit-owners.csv` dispatched with `--no-commit` made
   no commit — as several framework skills mandate in their own text

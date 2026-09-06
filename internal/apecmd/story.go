@@ -350,9 +350,15 @@ func runStoryVerifyFile(cmd *cobra.Command, path, activeExts, outputFormat strin
 		}
 		return gateErr(verdict.Code, nil)
 	case verdict.Code == story.FileOK:
-		fmt.Fprintf(cmd.OutOrStdout(), "OK: %s is valid\n", path)
+		// The skip count rides the SUMMARY LINE, not only the detail
+		// lines below it. "OK: … is valid" is the line a reader quotes,
+		// pastes into a report and carries forward as evidence — and on
+		// its own it says a story passed when two governance classes may
+		// never have run. A skip is only reported if the summary cannot
+		// be quoted without it.
+		fmt.Fprintf(cmd.OutOrStdout(), "OK: %s is valid%s\n", path, skipSuffix(verdict.SkippedChecks))
 	default:
-		fmt.Fprintf(cmd.ErrOrStderr(), "FAIL: %s\n", path)
+		fmt.Fprintf(cmd.ErrOrStderr(), "FAIL: %s%s\n", path, skipSuffix(verdict.SkippedChecks))
 		for _, f := range verdict.Findings {
 			fmt.Fprintf(cmd.ErrOrStderr(), "  %s %s: %s\n", f.Check, f.Field, f.Message)
 		}
@@ -368,6 +374,16 @@ func runStoryVerifyFile(cmd *cobra.Command, path, activeExts, outputFormat strin
 		fmt.Fprintf(cmd.OutOrStdout(), "  skipped %s: %s\n", s.Check, s.Reason)
 	}
 	return gateErr(verdict.Code, nil)
+}
+
+// skipSuffix renders the count of classes that did not run, for the
+// summary line. Empty when none did — a story where every class ran
+// should not carry a parenthetical saying so.
+func skipSuffix(skipped []story.SkippedCheck) string {
+	if len(skipped) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" — %d check(s) SKIPPED, listed below", len(skipped))
 }
 
 func emitStoryReportHuman(w io.Writer, report *story.Report) {
