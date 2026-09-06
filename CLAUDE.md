@@ -72,7 +72,11 @@ make check-hooks   # LOCAL ONLY: verify Claude Code still sends the hook fields 
                    #   Seeds its own corpus (one `ape prompt` session in a temp copy of
                    #   testdata/apexproject), so it needs no pre-existing project.
 make check-harness # check-prices + check-hooks + check-claude — the whole "is the local Claude Code still compatible?" sweep
-make check-framework # LOCAL ONLY: does ape still satisfy the APEX framework? (set APEX_FRAMEWORK_REPO)
+make check-framework # LOCAL ONLY: does ape still satisfy the APEX framework?
+                   #   Set BOTH: APEX_FRAMEWORK_REPO=<checkout> and APEX_PROJECT=<an
+                   #   install of that framework version>. Without the second, half the
+                   #   gate reports NOT verified — the default is this repo, which is
+                   #   not a framework install.
                    #   command surface, live config template — the other dependency axis
 make tools         # pre-install all bingo-pinned tools
 make tidy          # go mod tidy
@@ -95,7 +99,7 @@ Two-step verification flow — see `docs/how-to/pre-tag-release.md` for the full
 
    **Then run `make check-harness`** (~60 s, developer machine only). `ci-local` proves ape is internally consistent; it cannot prove ape still *works*, because ape's real dependency is the auto-updating `claude` binary on the host. The sweep is three gates that read what that binary is actually doing: `check-prices` (model ids in transcripts), `check-hooks` (the hook fields the step-completion gates read, judged against a runlog it seeds itself with one unattended `ape prompt` session — so the verdict never depends on finding a project someone happened to run), and `check-claude` (a live PTY session — the ready-signal footer and `❯` glyph, an unknown pre-REPL modal, the spawn flags, `CLAUDE_CODE_EFFORT_LEVEL`, the family-alias model ids still naming real models, and transcript persistence). Deliberately **not** in `ci-local` and never in GitHub CI: they need `claude` + auth + network + local transcripts, so a CI run could only skip them, and a gate that always skips reads as a pass. Read the output — `check-prices` reports "not verified" rather than green when it has no evidence, and `check-hooks` fails a seed that produced no events rather than passing it as "nothing to judge".
 
-   **And `make check-framework APEX_FRAMEWORK_REPO=<checkout>`** — the other dependency axis. `check-harness` asks whether the local *Claude Code* still honours what ape drives it through; this asks whether ape still satisfies what the local *APEX framework* requires: the command surface its shipped `_apex/ape-commands.yaml` declares, and the config variables its live template defines. Framework v0.11.0 deleted every fallback branch, so a missing command fails a skill mid-stage rather than degrading.
+   **And `make check-framework APEX_FRAMEWORK_REPO=<checkout> APEX_PROJECT=<install>`** — the other dependency axis. **Both variables**: the first checks ape against the framework checkout, the second against a framework *install*, which is the manifest as a skill meets it at run time. Omit the second and that half reports NOT verified; point it at a project last updated against an OLDER framework and it verifies the older contract while reporting green, because the manifest is versioned. `check-harness` asks whether the local *Claude Code* still honours what ape drives it through; this asks whether ape still satisfies what the local *APEX framework* requires: the command surface its shipped `_apex/ape-commands.yaml` declares, and the config variables its live template defines. Framework v0.11.0 deleted every fallback branch, so a missing command fails a skill mid-stage rather than degrading.
 2. **Remote gate** — push commits to `main`:
    ```bash
    git push origin main

@@ -220,7 +220,9 @@ stage. An eval capture came within a hand-check of measuring eight hours of
 broken runs against exactly that mismatch.
 
 ```bash
-make check-framework APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
+make check-framework \
+  APEX_FRAMEWORK_REPO=/path/to/apex_process_framework \
+  APEX_PROJECT=/path/to/a/project/using/that/framework
 ```
 
 Four gates:
@@ -231,7 +233,7 @@ Four gates:
 | `TestContract_LiveConfigTemplate` | do the config variables ape resolves match the framework's **live** template, rather than a copied fixture? |
 | `ape doctor --only framework.command_surface,framework.terminal_contracts` | the same command surface as a project actually **received** it, which is what a skill meets at run time |
 
-If `{autonomous}` is false: ask "Run `make check-framework`? Needs a checkout of apex_process_framework — give me the path, or skip." — wait for confirmation.
+If `{autonomous}` is false: ask "Run `make check-framework`? Needs TWO paths — a checkout of apex_process_framework, and a project that has run `ape framework update` against the version being released for. Give me both, or skip." — wait for confirmation. **With only the checkout, the installed-surface half reports NOT verified**, and a project on an older framework verifies the older contract while reporting green.
 
 If `{autonomous}` is true: run it if `APEX_FRAMEWORK_REPO` is already set in the environment; otherwise state that the framework contract is unverified and continue.
 

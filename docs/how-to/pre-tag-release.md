@@ -98,8 +98,22 @@ through. This asks the other question: does ape still satisfy what the local
 **APEX framework** requires? Two dependencies, two release schedules.
 
 ```bash
-make check-framework APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
+make check-framework \
+  APEX_FRAMEWORK_REPO=/path/to/apex_process_framework \
+  APEX_PROJECT=/path/to/a/project/using/that/framework
 ```
+
+**Both variables, or half the gate skips.** `APEX_FRAMEWORK_REPO` checks
+ape against the framework *checkout*. `APEX_PROJECT` checks it against a
+framework *install* — the manifest as a skill actually meets it at run
+time — and without it that half reports **NOT verified** rather than
+passing. The default is this repo, which is not a framework install.
+
+The install is **versioned**: a project last updated against an older
+framework verifies the *older* contract, and reports green while doing it.
+Point it at a project that has run `ape framework update` against the
+framework version you are releasing for. (v0.15.0 declares 82 required
+commands; v0.16.0 declares 84.)
 
 Framework v0.11.0 moved deterministic project-data work into ape subcommands
 and deleted every fallback branch — 74 of 90 skills shell out. An ape missing

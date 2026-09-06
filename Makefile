@@ -219,10 +219,19 @@ check-hooks:  ## Seed a throwaway project with one real Claude session, then jud
 #   APEX_FRAMEWORK_REPO  a CHECKOUT of apex_process_framework — the framework's
 #                        own source. Unset means the checkout gates cannot run;
 #                        they report that rather than passing.
-#   APEX_PROJECT         a project with the framework INSTALLED, i.e. one with
-#                        an _apex/. Used for the installed-command-surface half,
-#                        which is the manifest as a skill actually meets it at
-#                        run time. Defaults to this repo, which has an _apex/.
+#   APEX_PROJECT         a project with the framework INSTALLED — one carrying
+#                        _apex/ape-commands.yaml. Used for the installed-command-
+#                        surface half, which is the manifest as a skill actually
+#                        meets it at run time.
+#
+#                        The default is this repo, and THIS REPO IS NOT SUCH A
+#                        PROJECT: its _apex/ holds a README and nothing else. So
+#                        the default skips, loudly, and the half is verified only
+#                        when you point it somewhere real. It is also VERSIONED —
+#                        a project installed from an older framework verifies the
+#                        older contract, which is a stale gate wearing a green
+#                        result. v0.15.0 declares 82 required commands, v0.16.0
+#                        declares 84.
 #
 # APEX_PROJECT was called HOOK_PROJECT until check-hooks stopped reading a
 # project at all (it now seeds its own runlog). The name then described
@@ -284,12 +293,25 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	@# The gates above compare ape to a framework CHECKOUT. This compares it to
 	@# a framework INSTALL — the manifest as a project actually received it,
 	@# which is what a skill meets at run time.
-	@if [ -d "$(APEX_PROJECT)/_apex" ]; then \
+	@# Guarded on the FILE the check reads, not on the directory. `-d _apex`
+	@# is true of this repo — it holds a README and nothing else — so the
+	@# guard passed, the doctor ran, both checks reported "not installed",
+	@# and the gate printed "0 fail" while verifying nothing. That is the
+	@# skip-looks-like-a-pass shape this whole target exists to refuse, and
+	@# it fooled the author of these lines for a whole release.
+	@if [ -f "$(APEX_PROJECT)/_apex/ape-commands.yaml" ]; then \
 		echo "==> installed command surface in $(APEX_PROJECT)"; \
 		go run ./cmd/ape doctor --strict --cwd "$(APEX_PROJECT)" \
 		  --only framework.command_surface,framework.terminal_contracts; \
 	else \
-		echo "installed command surface NOT verified — APEX_PROJECT=$(APEX_PROJECT) has no _apex/."; \
+		echo "installed command surface NOT verified — this is a skip, not a pass."; \
+		echo "  APEX_PROJECT=$(APEX_PROJECT) has no _apex/ape-commands.yaml, so there is no"; \
+		echo "  installed manifest to check this binary against."; \
+		echo "  Point it at a project that has run \`ape framework update\` against the"; \
+		echo "  framework version you are releasing for:"; \
+		echo "    make check-framework APEX_FRAMEWORK_REPO=<checkout> APEX_PROJECT=<project>"; \
+		echo "  A project installed from an OLDER framework verifies the OLDER contract —"; \
+		echo "  the manifest is versioned, so a stale install is a stale gate."; \
 	fi
 
 .PHONY: check-harness
