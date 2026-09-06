@@ -450,6 +450,21 @@ it would put prose in front of the check that enforces it.
   retype them via `--active-extensions`. An explicit flag still wins;
   omitting it now means "ask the project" rather than "no extensions".
 
+  **This is stricter than it sounds, and it can newly fail a story that
+  passed.** The extensions do not only gate the two ADR classes — they
+  decide the **derived section set**. A flagless run on a project enabling
+  `ext-patterns` now requires `### Pattern Compliance Table`; one enabling
+  `ext-features` requires `## Feature Scope`. A story that reported
+  `is valid` flagless yesterday can report `story.section_missing` today,
+  and the three skills above enforce it. That is the correct set — those
+  skills were under-checking the shape as well as the governance — but it
+  is a behaviour change and not only an unlocking.
+
+  Note the inversion it creates: `--active-extensions ext-adrs` now checks
+  **less** than no flag at all on a four-extension project, because it
+  pins the set to one. That is what you want for testing a class in
+  isolation and not what you want for reproducing what a skill sees.
+
   This one was worse than a convenience. Of fourteen framework skills
   referencing `ape story verify`, three pass the flag and eight use
   corpus mode (which always read the project). **Three call `--file` with
