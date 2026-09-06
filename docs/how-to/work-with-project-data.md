@@ -277,25 +277,40 @@ they **skip and say so** under `skipped_checks`; the mode keeps working
 there, and a governance class that says nothing when it could not run
 would read as one that passed.
 
-**They are also gated on `ext-adrs`, and `--file` takes that from
-`--active-extensions` alone** — it does not infer it from the project's
-config, even though it walks the project up for the corpus. Omit the flag
-and both classes skip, reported the same way:
+**They are gated on `ext-adrs`, which `--file` takes from
+`--active-extensions` when given and otherwise from the project's own
+`extensions`** — the same project it already walked up to for the corpus.
+An explicit flag always wins, and is what you want when testing one class
+in isolation regardless of a fixture's config.
+
+When they cannot run, both skip and **the summary line says so**, so a
+passing verdict cannot be quoted without it:
 
 ```console
-$ ape story verify --file development/implementation/1-1_thing.md
-OK: … is valid
-  skipped story.adrs_considered: ext-adrs is not active for this run (--file mode takes it from --active-extensions)
-  skipped story.adr_unresolved:  ext-adrs is not active for this run (--file mode takes it from --active-extensions)
+$ ape story verify --file /tmp/loose-story.md
+OK: /tmp/loose-story.md is valid — 2 check(s) SKIPPED, listed below
+  skipped story.adrs_considered: ext-adrs is not active for this run (from --active-extensions when given, otherwise from the project's own extensions)
+  skipped story.adr_unresolved: ext-adrs is not active for this run (from --active-extensions when given, otherwise from the project's own extensions)
 ```
 
-That skip line is not decoration. On an otherwise-clean story citing a
-`proposed` ADR the command exits **0 with the flag and 0 without it**, and
-only the run with the flag produces the flagged finding — so a check
-asserting "exit 0, flagged" passes either way and measures nothing in one
-of them. The skip is what tells the two runs apart. Pass
-`--active-extensions ext-adrs` whenever you mean to exercise these
-classes.
+There are exactly two reasons and they are deliberately different strings,
+so a corpus sweep can partition its skips without opening fixtures:
+
+| reason | means |
+| ------ | ----- |
+| `ext-adrs is not active for this run` | the extension is off — the project does not enable it, or no project resolved and no flag was given |
+| `no project ADR corpus resolved from the story's path` | the extension **is** on, and walking up from the story found no ADR corpus |
+
+The second only appears once the extension is active, so it is the one
+worth investigating: on a project that enables ADRs it means the corpus is
+missing, not that the check was switched off.
+
+Deriving from the project is not a convenience — it removes a
+restatement. Three framework skills called `--file` with no flag
+(`apex-orchestrator`, `apex-review-story`, `apex-story-governance`), so
+both classes silently did not run on every invocation and the caller read
+`is valid`. At corpus scale a flagless sweep skipped them on **982 of 982
+stories**, 94% of which were on projects that enable ADRs.
 
 ### `--fix`, and the two classes it refuses
 

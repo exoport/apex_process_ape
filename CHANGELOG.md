@@ -15,16 +15,20 @@ source — including the dispatch row, verified with two live `ape task`
 runs against a project carrying the roster: one that asserted and held,
 one that asserted nothing and said so.
 
-> **The three governance rows need `--active-extensions ext-adrs`.** The
-> classes are gated on the extension, and `--file` mode takes it from that
-> flag alone — it does not infer it from the project's config. An
-> acceptance block that omits it does not merely lose the check: on an
-> otherwise-clean story citing a `proposed` ADR the exit code is **0 either
-> way**, so a block asserting "exit 0, flagged" passes while measuring
-> nothing. The run now reports `skipped story.adrs_considered` /
-> `skipped story.adr_unresolved` with the reason when the extension is off,
-> which is how the two are told apart. The framework's own skills already
-> pass the flag; it is the acceptance blocks that need it added.
+> **Pass `--active-extensions ext-adrs` on the three governance rows.**
+> The classes are gated on the extension. `--file` takes it from that flag
+> when given, and **otherwise from the project's own `extensions`** — so a
+> block run inside a project that enables ADRs now exercises them either
+> way. Pass it anyway: an acceptance block should assert a class in
+> isolation rather than inherit whatever its fixture happens to declare.
+>
+> This used to be a trap rather than a preference. The flag was the only
+> source, so on an otherwise-clean story citing a `proposed` ADR the exit
+> code was **0 either way** and a block asserting "exit 0, flagged" passed
+> while measuring nothing. Two changes closed it: the classes now derive
+> from the project when no flag is given, and a run that skips them says
+> so **on the summary line** (`… is valid — 2 check(s) SKIPPED`) rather
+> than only on the lines beneath it.
 
 | Command | Outcome |
 | ------- | ------- |
