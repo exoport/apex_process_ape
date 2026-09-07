@@ -3,6 +3,7 @@ package commitowners
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -226,13 +227,21 @@ func TestAssert_CommitterBatchMakesManyCommits(t *testing.T) {
 	require.NoError(t, err)
 
 	before := Capture(context.Background(), repo)
-	for _, subject := range []string{
+	// Numbered rather than derived from the subject. The subject's first
+	// nine bytes are "dev: stor" for BOTH story rows and "review: s" for
+	// both others, so the derived name collided in pairs — masked on POSIX,
+	// where the differing content still made a diff to commit. On Windows
+	// the colon additionally makes `fdev: stor.txt` an NTFS alternate data
+	// stream on a base file `fdev`, which git does not track, so the
+	// re-write produced no diff at all and the third commit had nothing
+	// staged.
+	for i, subject := range []string{
 		"dev: story 1.1 add the greeter",
 		"review: story 1.1 add the greeter",
 		"dev: story 1.2 add the parser",
 		"review: story 1.2 add the parser",
 	} {
-		writeFile(t, repo, "f"+subject[:9]+".txt", subject+"\n")
+		writeFile(t, repo, fmt.Sprintf("f%d.txt", i), subject+"\n")
 		runGit(t, repo, "add", ".")
 		runGit(t, repo, "commit", "-qm", subject)
 	}
@@ -399,11 +408,14 @@ func TestAssert_AbsentDeclarationDoesNotConvictACommitter(t *testing.T) {
 	require.False(t, table.Present)
 
 	before := Capture(context.Background(), repo)
-	for _, subject := range []string{
+	// Numbered, for the reason given in the batch test above. These two
+	// subjects happen not to collide, so this site passed on Windows by
+	// luck rather than by design — the colon still makes an NTFS stream.
+	for i, subject := range []string{
 		"dev: story 1.2 serve the greeting form at",
 		"review: story 1.2 serve the greeting form at",
 	} {
-		writeFile(t, repo, "f"+subject[:9]+".txt", subject+"\n")
+		writeFile(t, repo, fmt.Sprintf("f%d.txt", i), subject+"\n")
 		runGit(t, repo, "add", ".")
 		runGit(t, repo, "commit", "-qm", subject)
 	}
