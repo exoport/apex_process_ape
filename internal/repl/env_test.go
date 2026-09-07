@@ -320,7 +320,7 @@ func TestSpawnEnv_PinsThisBinaryAsApe(t *testing.T) {
 	first, rest, _ := strings.Cut(pathValue, string(os.PathListSeparator))
 	require.Equal(t, "/stale/bin:/usr/bin", rest, "the operator's PATH is preserved behind the pin")
 
-	pinned := filepath.Join(first, selfpath.Name)
+	pinned := filepath.Join(first, selfpath.FileName())
 	require.FileExists(t, pinned, "`ape` resolves to the pin before /stale/bin")
 
 	// The scrubbers still did their jobs — the pin composes with them

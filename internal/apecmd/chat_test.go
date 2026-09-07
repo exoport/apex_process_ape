@@ -58,7 +58,7 @@ func TestChatSpawnEnv_PinsThisBinaryAsApe(t *testing.T) {
 	first, rest, _ := strings.Cut(pathValue, string(os.PathListSeparator))
 	require.Equal(t, "/stale/bin:/usr/bin", rest, "the operator's PATH survives behind the pin")
 
-	pinned := filepath.Join(first, selfpath.Name)
+	pinned := filepath.Join(first, selfpath.FileName())
 	require.FileExists(t, pinned)
 
 	unpin()

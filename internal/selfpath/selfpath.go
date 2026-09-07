@@ -52,6 +52,19 @@ import (
 // "the binary running this".
 const Name = "ape"
 
+// FileName is Name as it appears ON DISK inside the shadow directory —
+// `ape` everywhere, `ape.exe` on Windows, because that is the only form
+// Windows will execute by that name.
+//
+// Exported because the distinction is invisible from outside and was got
+// wrong the first time: `internal/apecmd` and `internal/repl` each
+// asserted the pin by building filepath.Join(dir, Name), which is correct
+// on POSIX and names a file that does not exist on Windows. Both passed
+// locally and failed on the Windows runner, while this package's own
+// tests passed — they had the suffix because they could see exeSuffix.
+// One exported answer, so a consumer cannot spell it a second way.
+func FileName() string { return Name + exeSuffix() }
+
 // Pin returns env with a shadow directory prepended to PATH, in which
 // Name resolves to the running executable.
 //
@@ -91,7 +104,7 @@ func shadow(target string) (dir string, cleanup func(), err error) {
 	}
 	cleanup = func() { _ = os.RemoveAll(dir) }
 
-	link := filepath.Join(dir, Name+exeSuffix())
+	link := filepath.Join(dir, FileName())
 	if symErr := os.Symlink(target, link); symErr != nil {
 		if linkErr := os.Link(target, link); linkErr != nil {
 			cleanup()

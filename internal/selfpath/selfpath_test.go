@@ -132,7 +132,7 @@ func TestPin_ShadowsThisBinary(t *testing.T) {
 	}
 	require.NotEmpty(t, pathValue)
 	first, _, _ := strings.Cut(pathValue, string(os.PathListSeparator))
-	require.FileExists(t, filepath.Join(first, Name+exeSuffix()))
+	require.FileExists(t, filepath.Join(first, FileName()))
 }
 
 // runLine executes one shell line with env and returns its exit code.
