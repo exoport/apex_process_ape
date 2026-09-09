@@ -374,7 +374,7 @@ func checkPipelinesProject(_ context.Context, env doctorEnv) CheckResult {
 	// Validate each spec's `model:` values while we are here. A typo in a
 	// checked-in spec otherwise stays invisible until a run reaches that step
 	// and claude rejects it — which can be many minutes in.
-	var modelIssues, specIssues []string
+	var modelIssues, specIssues, styleNotes []string
 	for _, name := range names {
 		spec, err := pipeline.LoadSpec(name, env.ProjectRoot)
 		if err != nil {
@@ -398,6 +398,18 @@ func checkPipelinesProject(_ context.Context, env doctorEnv) CheckResult {
 			specIssues = append(specIssues, fmt.Sprintf(
 				"%s → %s: unknown key %q (line %d)", name, k.Location, k.Key, k.Line))
 		}
+		// The pipeline YAML is the only surface where a checked-in style
+		// name is looked at by anything: the per-skill CSV has its own
+		// doctor check, and the flag is echoed at spawn. Nothing else
+		// reads these, and Claude Code ignores a name it cannot resolve
+		// in silence — so an unnoticed edit here enrols nothing and
+		// passes every gate in ape and the framework both.
+		for _, decl := range spec.OutputStyleDeclarations() {
+			if _, builtin := config.BuiltinOutputStyleSpelling(decl.Style); !builtin {
+				styleNotes = append(styleNotes, fmt.Sprintf(
+					"%s → %s: output-style %q names no built-in", name, decl.Location, decl.Style))
+			}
+		}
 	}
 	if len(specIssues) > 0 {
 		return CheckResult{
@@ -416,6 +428,20 @@ func checkPipelinesProject(_ context.Context, env doctorEnv) CheckResult {
 			Remediation: "Those `model:` values are not ones ape recognizes — likely typos. Accepted forms: a bare " +
 				"family (sonnet, opus, haiku) for its current generation, or an explicit id " +
 				"(sonnet-5, claude-sonnet-5, opus[1m]). A model newer than this ape build is passed through unchanged.",
+		}
+	}
+	if len(styleNotes) > 0 {
+		// Info, not Warn: a custom style installed on the machine is a
+		// legitimate declaration and ape cannot see it from here. The
+		// line exists so a typo is READABLE, not so it is convicted.
+		return CheckResult{
+			Status: StatusInfo,
+			Message: fmt.Sprintf("%d pipelines at %s; %s",
+				len(names), dir, strings.Join(styleNotes, "; ")),
+			Remediation: fmt.Sprintf(
+				"Built-in styles are %s. A name outside that set applies only if the machine has a custom "+
+					"style by it; otherwise Claude Code ignores it silently and the stage runs %s.",
+				strings.Join(config.BuiltinOutputStyles(), ", "), config.DefaultOutputStyle),
 		}
 	}
 	return CheckResult{
@@ -636,15 +662,38 @@ func checkOutputStyles(_ context.Context, env doctorEnv) CheckResult {
 		}
 	}
 	pairs := make([]string, 0, tbl.Len())
+	var unknown []string
 	for _, e := range tbl.Entries() {
-		pairs = append(pairs, e[0]+"→"+e[1])
+		skill, style := e[0], e[1]
+		canonical, builtin := config.BuiltinOutputStyleSpelling(style)
+		pairs = append(pairs, skill+"→"+canonical)
+		if !builtin {
+			unknown = append(unknown, fmt.Sprintf("%s→%s", skill, style))
+		}
 	}
 	msg := fmt.Sprintf("%d skill(s) enrolled: %s", tbl.Len(), strings.Join(pairs, ", "))
 	if len(tbl.Warnings) > 0 {
 		return CheckResult{
 			Status:      StatusWarn,
 			Message:     msg + " — " + strings.Join(tbl.Warnings, "; "),
-			Remediation: "A style name Claude Code cannot resolve is ignored silently, so those skills run the pinned default.",
+			Remediation: "Rows that do not parse are skipped, so those skills run the pinned default.",
+		}
+	}
+	// Reported, not judged. ape folds a built-in's case when it writes
+	// the settings key, so a spelling difference is no longer a finding —
+	// but a name matching no built-in is either a custom style the
+	// machine has installed or a typo that will enrol nothing, and ape
+	// cannot tell those apart. A human reading this line can.
+	if len(unknown) > 0 {
+		return CheckResult{
+			Status: StatusInfo,
+			Message: msg + fmt.Sprintf(" — not built-in style(s): %s",
+				strings.Join(unknown, ", ")),
+			Remediation: fmt.Sprintf(
+				"Those name no built-in (%s). If the machine has a custom style by that name it applies; "+
+					"if it is a typo, Claude Code ignores it silently and the skill runs %s. "+
+					"ape cannot enumerate installed custom styles, so it reports rather than guesses.",
+				strings.Join(config.BuiltinOutputStyles(), ", "), config.DefaultOutputStyle),
 		}
 	}
 	return CheckResult{Status: StatusOK, Message: msg}

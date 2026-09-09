@@ -457,6 +457,36 @@ func (s *Spec) EffectiveOutputStyle(stageName string) (string, error) {
 	return firstNonEmpty(stage.OutputStyle, s.OutputStyle), nil
 }
 
+// StyleDeclaration is one `output-style:` a spec declares, with the
+// scope that declared it.
+type StyleDeclaration struct {
+	// Location is `pipeline` or `stage "<name>"`.
+	Location string
+	Style    string
+}
+
+// OutputStyleDeclarations lists every `output-style:` in the spec.
+//
+// For `ape doctor`, which is the only place a checked-in style name gets
+// looked at by anything. A name that resolves to no installed style is
+// ignored by Claude Code in silence, and unlike the per-skill CSV these
+// declarations sit in hand-edited YAML that nothing else inspects.
+func (s *Spec) OutputStyleDeclarations() []StyleDeclaration {
+	var out []StyleDeclaration
+	if s.OutputStyle != "" {
+		out = append(out, StyleDeclaration{Location: "pipeline", Style: s.OutputStyle})
+	}
+	for _, stage := range s.Stages() {
+		if stage.OutputStyle != "" {
+			out = append(out, StyleDeclaration{
+				Location: fmt.Sprintf("stage %q", stage.Name),
+				Style:    stage.OutputStyle,
+			})
+		}
+	}
+	return out
+}
+
 // StageModelConflictStep is one step whose declared model is not the
 // model its stage actually launched with.
 type StageModelConflictStep struct {

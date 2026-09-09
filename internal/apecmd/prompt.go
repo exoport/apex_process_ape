@@ -130,6 +130,7 @@ failed · 2 usage or preflight error (no _apex/config.yaml, unresolved
 · 4 claude exited before the Stop hook.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			warnUnknownOutputStyleFlag(cmd, outputStyleFlag)
 			format := output.Format(outputFormat)
 			if format != output.FormatHuman && format != output.FormatJSON && format != output.FormatYAML {
 				fmt.Fprintf(os.Stderr, "Error: --output-format must be human, json, or yaml, got %q\n", outputFormat)

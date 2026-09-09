@@ -196,3 +196,83 @@ func TestBuildSettings_BlobSizeUnderArgLimit(t *testing.T) {
 		t.Errorf("settings blob is %d bytes, expected <2048", len(raw))
 	}
 }
+
+// Claude Code is case-sensitive and ignores a name it cannot resolve
+// SILENTLY, so a miscased built-in enrols nothing and reports nothing.
+// ape is the last place that spelling can be corrected: every
+// declaration site — flag, CSV, pipeline YAML — terminates here.
+func TestBuildSettings_FoldsBuiltinStyleCase(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"concise", "Concise"},
+		{"CONCISE", "Concise"},
+		{"Concise", "Concise"},
+		{"  concise  ", "Concise"},
+		{"explanatory", "Explanatory"},
+		{"learning", "Learning"},
+		{"proactive", "Proactive"},
+		{"default", DefaultOutputStyle},
+		{"Default", DefaultOutputStyle},
+	} {
+		raw, err := BuildSettings(SettingsOptions{Mode: ModeTUI, OutputStyle: tc.in})
+		if err != nil {
+			t.Fatalf("BuildSettings(%q): %v", tc.in, err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got["outputStyle"] != tc.want {
+			t.Errorf("outputStyle for %q = %v, want %q", tc.in, got["outputStyle"], tc.want)
+		}
+	}
+}
+
+// A name matching no built-in is written EXACTLY as declared. ape cannot
+// enumerate the custom styles a machine has installed, so guessing at
+// one would silently retarget a style its owner defined.
+func TestBuildSettings_UnknownStyleIsPassedThroughVerbatim(t *testing.T) {
+	for _, name := range []string{"ApexTerse", "apex-terse", "Concsie"} {
+		raw, err := BuildSettings(SettingsOptions{Mode: ModeTUI, OutputStyle: name})
+		if err != nil {
+			t.Fatalf("BuildSettings(%q): %v", name, err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got["outputStyle"] != name {
+			t.Errorf("outputStyle for %q = %v, want it unchanged", name, got["outputStyle"])
+		}
+	}
+}
+
+// The opt-out is folded too, so `--output-style INHERIT` cannot silently
+// become a style name Claude Code would try to resolve.
+func TestBuildSettings_InheritIsCaseInsensitive(t *testing.T) {
+	for _, name := range []string{"inherit", "Inherit", "INHERIT", " inherit "} {
+		raw, err := BuildSettings(SettingsOptions{Mode: ModeTUI, OutputStyle: name})
+		if err != nil {
+			t.Fatalf("BuildSettings(%q): %v", name, err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		if _, present := got["outputStyle"]; present {
+			t.Errorf("outputStyle present for %q, want the key omitted", name)
+		}
+	}
+}
+
+func TestBuiltinOutputStyles_ListsTheCanonicalSpellings(t *testing.T) {
+	got := BuiltinOutputStyles()
+	want := []string{"Concise", "Default", "Explanatory", "Learning", "Proactive"}
+	if len(got) != len(want) {
+		t.Fatalf("BuiltinOutputStyles() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("BuiltinOutputStyles()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}

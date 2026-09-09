@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- **feat(spawn): output-style names are matched case-insensitively.**
+  Claude Code is case-sensitive and ignores a name it cannot resolve
+  *silently*, so `concise` enrolled nothing and reported nothing. Every
+  declaration site — the flag, the CSV, a pipeline's `output-style:` —
+  terminates at ape, so ape folds a built-in's spelling before writing
+  the key. A name matching no built-in is written exactly as declared, so
+  custom styles still work.
+
+  The cost is deliberate: output styles are an **open** namespace, and a
+  machine may ship its own `.claude/output-styles/concise.md` that
+  folding now shadows. Resolving custom styles first would mean
+  enumerating user, project, policy and plugin style directories plus the
+  `forceForPlugin` override — a second implementation of Claude Code's
+  precedence. `cost.CanonicalModelArg` folds model spellings without this
+  cost only because model ids are a **closed** vendor namespace.
+
+  **`make check-output-styles`** is the price of that table, in the same
+  shape as `check-prices` for `prices.yaml`: it reads the installed
+  Claude Code's own built-in list and fails if ape's differs. `Concise`
+  and `Proactive` only appeared in 2.1.237, and a stale table fails by
+  halves — lowercase keeps working for the styles ape knows and silently
+  stops for a newer one, after the working cases have taught users that
+  case does not matter. Finding zero built-ins fails rather than skips: a
+  probe that cannot look is not a pass. Added to `make check-harness`.
+
+- **feat(doctor): an output-style name that resolves to nothing is
+  reported on all three surfaces.** Folding removes the casing failure;
+  what remains is a typo, or a custom style this machine does not have,
+  and ape cannot tell those apart — so each surface states the
+  consequence rather than convicting the value. `framework.output_styles`
+  covers the CSV, `pipelines.project` now covers pipeline `output-style:`
+  declarations (previously reported nowhere at all, while the framework
+  ships five of them), and the `--output-style` flag is echoed at spawn,
+  which is the one surface with a human watching.
+
 - **feat(spawn): the project declares which output style each skill and
   each stage runs under.** `Default` stays what ape pins when nothing says
   otherwise; it was never a claim that one style suits every skill. The

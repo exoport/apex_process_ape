@@ -71,6 +71,7 @@ func newPipelineCmd() *cobra.Command {
 			return pipeline.AvailablePipelines(projectRoot), cobra.ShellCompDirectiveNoFileComp
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			warnUnknownOutputStyleFlag(cmd, outputStyleFlag)
 			projectRoot := cwdFlag
 			if projectRoot == "" {
 				wd, err := os.Getwd()

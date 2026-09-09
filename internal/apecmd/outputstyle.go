@@ -2,6 +2,8 @@ package apecmd
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/bridge/config"
 	"github.com/exoport/apex_process_ape/internal/outputstyles"
@@ -40,6 +42,44 @@ func addOutputStyleFlag(cmd *cobra.Command, target *string) {
 func outputStyleFlagSet(cmd *cobra.Command) bool {
 	f := cmd.Flags().Lookup("output-style")
 	return f != nil && f.Changed
+}
+
+// warnUnknownOutputStyleFlag echoes a typed --output-style value that
+// names no built-in.
+//
+// The third of the three surfaces a style can be declared on, and the
+// only one with a human watching at the moment it is used — the other
+// two are checked-in files that `ape doctor` reports on. ape folds a
+// built-in's case before writing the key, so a casing slip is no longer
+// a failure; what remains is a name that resolves to nothing, and Claude
+// Code ignores those in silence. ape cannot tell a typo from a custom
+// style the machine has installed, so this states what will happen
+// rather than convicting the value.
+func warnUnknownOutputStyleFlag(cmd *cobra.Command, style string) {
+	if !outputStyleFlagSet(cmd) {
+		return
+	}
+	if note := unknownOutputStyleNote(style); note != "" {
+		fmt.Fprintln(os.Stderr, "⚠ "+note)
+	}
+}
+
+// unknownOutputStyleNote returns what to say about a style name, or ""
+// when there is nothing to say. Split out from the printing so the
+// wording is testable without capturing stderr.
+func unknownOutputStyleNote(style string) string {
+	trimmed := strings.TrimSpace(style)
+	if trimmed == "" || strings.EqualFold(trimmed, config.InheritOutputStyle) {
+		return ""
+	}
+	if _, builtin := config.BuiltinOutputStyleSpelling(trimmed); builtin {
+		return ""
+	}
+	return fmt.Sprintf(
+		"--output-style %q names no built-in style (%s). It is passed through unchanged: it applies only if "+
+			"this machine has a custom style by that name, and otherwise Claude Code ignores it silently and the "+
+			"session runs %s.",
+		style, strings.Join(config.BuiltinOutputStyles(), ", "), config.DefaultOutputStyle)
 }
 
 // resolveSkillOutputStyle picks the style for a single-skill dispatch

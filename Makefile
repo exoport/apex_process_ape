@@ -170,6 +170,24 @@ check-claude:  ## Spawn the LOCAL Claude Code and verify it still honours the PT
 	APE_CLAUDE_LIVE=1 go test ./internal/repl/ \
 	  -run TestLive_ClaudeCodeContract -v -count=1 -timeout 20m
 
+.PHONY: check-output-styles
+check-output-styles:  ## Verify ape's built-in output-style table matches the locally-installed Claude Code.
+	@# ape folds a built-in style's case before writing `outputStyle`, so the
+	@# table in internal/bridge/config is a claim about a vendor surface that
+	@# moves on its own schedule — `Concise` and `Proactive` only appeared in
+	@# 2.1.237. A stale table does not fail loudly, it fails by HALVES:
+	@# lowercase keeps working for the styles ape knows and silently stops for
+	@# a newer one, after the working cases have taught users that case does
+	@# not matter.
+	@#
+	@# Same standing as check-prices: hand-curated data about something ape
+	@# does not control, gated against the installed binary rather than
+	@# trusted. Reads the local install, so it is LOCAL ONLY and never in CI.
+	@# Finding zero built-ins FAILS rather than skipping — a probe that cannot
+	@# look is not a pass.
+	APE_CLAUDE_LIVE=1 go test ./internal/bridge/config/ \
+	  -run TestLive_OutputStyleBuiltins -v -count=1
+
 .PHONY: check-hooks
 check-hooks:  ## Seed a throwaway project with one real Claude session, then judge the hook contract.
 	@# ape's step-completion gates read fields off Claude Code's hook payloads:
@@ -322,7 +340,7 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	fi
 
 .PHONY: check-harness
-check-harness: check-prices check-hooks check-claude ## All local-only gates against the installed Claude Code (prices + hooks + PTY/model).
+check-harness: check-prices check-output-styles check-hooks check-claude ## All local-only gates against the installed Claude Code (prices + output styles + hooks + PTY/model).
 	@echo
 	@echo "Harness sweep complete against Claude Code $$(claude --version 2>/dev/null || echo 'unknown')."
 	@echo "Read the output above: any gate that reported a SKIP was NOT verified — it found no evidence to judge."

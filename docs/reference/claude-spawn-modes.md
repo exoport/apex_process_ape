@@ -133,15 +133,51 @@ silently, for its neighbours. Pipelines therefore declare their own
 style at a granularity a spawn can actually deliver. There is no
 step-level `output-style:` for the same reason.
 
-**`ape doctor --only framework.output_styles`** prints what each enrolled
-skill resolves to. It exists because a missing table, an unenrolled
-skill, and a style name Claude Code could not resolve all produce the
-same unremarkable outcome — a session in the default style — and nothing
-during a run distinguishes them. A style name that does not resolve is
-ignored *silently* by Claude Code, so a miscased built-in (`concise` for
-`Concise`) is a row that reads as enrolled and does nothing; the check
-reports those rather than correcting them, because a project may
-legitimately ship a custom style whose name differs only in case.
+### Style names are matched case-insensitively
+
+Claude Code is case-**sensitive** here and ignores a name it cannot
+resolve *silently*, so `concise` would enrol nothing and report nothing.
+Every declaration site terminates at ape, so ape folds a built-in's
+spelling before writing the key: `concise`, `CONCISE` and `Concise` are
+one declaration. `inherit` is folded the same way.
+
+A name matching no built-in is written **exactly as declared**, so a
+custom style still works.
+
+The cost is deliberate and worth stating: output styles are an *open*
+namespace, so a machine may have its own `.claude/output-styles/concise.md`,
+and folding shadows it with the built-in. Resolving custom styles first
+would mean enumerating user, project, policy and plugin style directories
+plus the `forceForPlugin` override — a second implementation of Claude
+Code's precedence, which ape refuses to keep. (Contrast `--model`, where
+`cost.CanonicalModelArg` folds spellings with no such cost: model ids are
+a *closed* vendor namespace.)
+
+Because the table names a vendor surface that moves — `Concise` and
+`Proactive` only appeared in 2.1.237 — **`make check-output-styles`**
+gates it against the installed Claude Code, in the same shape as
+`make check-prices` for the price table. A stale table fails by halves:
+lowercase keeps working for the styles ape knows and silently stops for a
+newer one.
+
+### Where an unresolvable name is reported
+
+Folding removes the casing failure. What remains is a name that resolves
+to nothing — a typo, or a custom style this machine does not have — and
+ape cannot tell those apart, so each surface reports rather than judges:
+
+| Surface | Reported by |
+| ------- | ----------- |
+| `_apex/output-styles.csv` | `ape doctor --only framework.output_styles` |
+| pipeline `output-style:`  | `ape doctor --only pipelines.project` |
+| `--output-style`          | a line on stderr at spawn |
+
+The two checked-in surfaces are reported on demand because nothing else
+ever reads them; the flag is echoed at spawn because that is the one
+surface with a human watching. `ape doctor --only framework.output_styles`
+also prints what each enrolled skill resolves to, since a missing table,
+an unenrolled skill and an unresolvable name otherwise produce the same
+unremarkable outcome: a session in the default style.
 
 Two limits worth knowing:
 

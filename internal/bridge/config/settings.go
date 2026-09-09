@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -85,16 +86,43 @@ const (
 )
 
 // builtinOutputStyles maps a lower-cased style name onto the spelling
-// Claude Code resolves it by. The built-ins are capitalised; a name that
-// does not resolve is ignored silently, so a wrong case is a row that
-// looks correct and does nothing.
+// Claude Code resolves it by. Claude Code is case-SENSITIVE here and
+// ignores a name it cannot resolve silently, so `concise` enrols nothing
+// and reports nothing — verified against 2.1.266, where `"Concise"`
+// yields the style and `"concise"` / `"CONCISE"` yield no attachment at
+// all.
 //
-// "default" appears twice on purpose. Claude Code's own style table is
-// keyed by the literal `default` for the standard style, while the value
-// ape pins is `Default`, and for THIS name the two are observationally
-// identical: an unresolvable name yields no style section, which is
-// exactly what the standard style yields. Both spellings therefore
-// reach the same session and neither deserves a warning.
+// ape therefore folds case before writing the key. Every declaration
+// site — the flag, `_apex/output-styles.csv`, a pipeline's
+// `output-style:` — terminates at ape, so ape is the last place a
+// spelling can be corrected and the only one that knows what Claude Code
+// will accept.
+//
+// # The cost, which is deliberate
+//
+// Output styles are an OPEN namespace: a project, plugin or user may
+// ship `.claude/output-styles/concise.md`, a legitimate style whose name
+// is literally `concise`. Folding case shadows it with the built-in.
+// That is accepted rather than unnoticed — the alternative, resolving
+// custom styles first, means enumerating user, project, policy and
+// plugin style directories plus the forceForPlugin override, which is a
+// re-implementation of Claude Code's own precedence and a second source
+// of truth ape refuses to keep. A name that matches no built-in is
+// passed through untouched, so a custom style with any other name is
+// unaffected.
+//
+// Contrast `cost.CanonicalModelArg`, which folds model spellings without
+// this cost: model ids are a CLOSED vendor namespace where no user can
+// define a colliding name.
+//
+// # Drift
+//
+// This table tracks a vendor surface that moves — `Concise` and
+// `Proactive` only appeared in 2.1.237 — and a stale table does not fail
+// loudly, it fails by halves: lowercase keeps working for the styles ape
+// knows and silently stops for a newer one, after users have learned
+// that case does not matter. `make check-output-styles` is what keeps it
+// honest, in the same shape as `make check-prices` for `prices.yaml`.
 var builtinOutputStyles = map[string]string{
 	"default":     DefaultOutputStyle,
 	"concise":     "Concise",
@@ -103,21 +131,27 @@ var builtinOutputStyles = map[string]string{
 	"proactive":   "Proactive",
 }
 
+// BuiltinOutputStyles lists the canonical spellings ape knows, sorted.
+// Consumed by the drift gate and by `ape doctor`.
+func BuiltinOutputStyles() []string {
+	out := make([]string, 0, len(builtinOutputStyles))
+	for _, canonical := range builtinOutputStyles {
+		out = append(out, canonical)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // BuiltinOutputStyleSpelling reports the canonical spelling of a
 // built-in output style, and whether the name names a built-in at all.
 // A custom style — project, plugin or user-defined — is not a built-in
-// and comes back (style, false): ape cannot enumerate what a machine has
-// installed, so an unrecognised name is reported as unknown rather than
-// as wrong.
+// and comes back (style, false) UNCHANGED: ape cannot enumerate what a
+// machine has installed, so an unrecognised name is passed through as
+// written rather than guessed at.
 func BuiltinOutputStyleSpelling(style string) (canonical string, builtin bool) {
 	canonical, builtin = builtinOutputStyles[strings.ToLower(strings.TrimSpace(style))]
 	if !builtin {
 		return style, false
-	}
-	// Both `default` and `Default` are accepted spellings of the
-	// standard style; report the input as canonical so neither warns.
-	if strings.EqualFold(style, DefaultOutputStyle) {
-		return style, true
 	}
 	return canonical, true
 }
@@ -125,13 +159,18 @@ func BuiltinOutputStyleSpelling(style string) (canonical string, builtin bool) {
 // resolveOutputStyle maps the option onto the value written, and reports
 // whether to write the key at all.
 func resolveOutputStyle(style string) (value string, write bool) {
-	switch style {
-	case InheritOutputStyle:
+	trimmed := strings.TrimSpace(style)
+	switch {
+	case strings.EqualFold(trimmed, InheritOutputStyle):
 		return "", false
-	case "":
+	case trimmed == "":
 		return DefaultOutputStyle, true
 	default:
-		return style, true
+		// Fold case against the built-ins; anything else is written
+		// exactly as declared. See builtinOutputStyles for why the fold
+		// happens here and what it costs.
+		canonical, _ := BuiltinOutputStyleSpelling(trimmed)
+		return canonical, true
 	}
 }
 

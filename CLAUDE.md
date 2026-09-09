@@ -68,11 +68,16 @@ make docs-cli      # regenerate docs/reference/cli.md from the cobra command tre
 make docs-cli-check # verify that generated reference is still in sync (also runs in GitHub CI)
 make ci-local      # full pre-push gate: test + lint + vuln + docs + prices + xcompile-windows + snapshot
 make check-prices  # verify the price table covers the models the local Claude Code emits
+make check-output-styles # verify ape's built-in output-style table matches the local Claude Code
+                   #   (ape folds a built-in's case before writing `outputStyle`, so a stale
+                   #   table fails by halves: lowercase keeps working for the styles ape knows
+                   #   and silently stops for a newer one)
 make check-claude  # LOCAL ONLY: spawn the installed Claude Code and verify ape's PTY/model contract
 make check-hooks   # LOCAL ONLY: verify Claude Code still sends the hook fields the completion gates read.
                    #   Seeds its own corpus (one `ape prompt` session in a temp copy of
                    #   testdata/apexproject), so it needs no pre-existing project.
-make check-harness # check-prices + check-hooks + check-claude — the whole "is the local Claude Code still compatible?" sweep
+make check-harness # check-prices + check-output-styles + check-hooks + check-claude — the whole
+                   #   "is the local Claude Code still compatible?" sweep
 make check-framework # LOCAL ONLY: does ape still satisfy the APEX framework?
                    #   Set BOTH: APEX_FRAMEWORK_REPO=<checkout> and APEX_PROJECT=<an
                    #   install of that framework version>. Without the second, half the

@@ -68,13 +68,28 @@ func TestResolveSkillOutputStyle_UnreadableTableWarnsAndFallsBack(t *testing.T) 
 	require.Contains(t, warnings[0], outputstyles.TableFile)
 }
 
-func TestResolveSkillOutputStyle_RowWarningsReachTheOperator(t *testing.T) {
+func TestResolveSkillOutputStyle_MiscasedRowResolvesRatherThanWarning(t *testing.T) {
 	root := writeStyleTable(t, "apex-x,concise\n")
 	var warnings []string
 	got := resolveSkillOutputStyle(root, "apex-x", "", false, func(m string) { warnings = append(warnings, m) })
-	require.Equal(t, "concise", got, "the declared value still reaches claude verbatim")
+	require.Equal(t, "concise", got, "the resolver carries the row as written")
+	require.Empty(t, warnings, "case is folded when the key is written, so it is not a finding here")
+
+	// And it reaches claude as the spelling claude resolves.
+	settings, err := config.BuildSettings(config.SettingsOptions{Mode: config.ModeTUI, OutputStyle: got})
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(settings, &decoded))
+	require.Equal(t, "Concise", decoded["outputStyle"])
+}
+
+// A row that cannot be USED is still reported — that class did not move.
+func TestResolveSkillOutputStyle_UnusableRowStillWarns(t *testing.T) {
+	root := writeStyleTable(t, "apex-x,Concise\nbroken-row\n")
+	var warnings []string
+	resolveSkillOutputStyle(root, "apex-x", "", false, func(m string) { warnings = append(warnings, m) })
 	require.Len(t, warnings, 1)
-	require.Contains(t, warnings[0], "Concise")
+	require.Contains(t, warnings[0], "want 2 columns")
 }
 
 func TestOutputStyleFlagSet(t *testing.T) {
@@ -297,4 +312,50 @@ stages:
 	require.Equal(t, config.DefaultOutputStyle, styleOf(t, run))
 	require.Nil(t, perStage)
 	require.Contains(t, strings.Join(run, " "), "--strict-mcp-config")
+}
+
+// The third surface. Casing is no longer a failure — ape folds it — so
+// what is left to say is that a name resolves to nothing ape knows, and
+// the note has to say that without convicting a legitimate custom style.
+func TestUnknownOutputStyleNote(t *testing.T) {
+	for _, builtin := range []string{"Concise", "concise", "CONCISE", "Default", "default", "Proactive"} {
+		require.Empty(t, unknownOutputStyleNote(builtin), "a built-in in any case is silent: %q", builtin)
+	}
+	require.Empty(t, unknownOutputStyleNote(config.InheritOutputStyle), "the opt-out is not a style name")
+	require.Empty(t, unknownOutputStyleNote("INHERIT"))
+	require.Empty(t, unknownOutputStyleNote(""), "no flag typed, nothing to say")
+
+	note := unknownOutputStyleNote("Concsie")
+	require.Contains(t, note, `"Concsie"`)
+	require.Contains(t, note, "Concise", "the note lists the built-ins so a typo is visible next to them")
+	require.Contains(t, note, config.DefaultOutputStyle, "and says what will actually run")
+
+	// A deliberate custom style gets the same note, by design: ape cannot
+	// tell it from a typo, so it states the consequence instead of
+	// judging the value.
+	require.NotEmpty(t, unknownOutputStyleNote("ApexTerse"))
+}
+
+// The whole point of folding: a miscased built-in must reach claude as
+// the spelling claude resolves, through the real settings path.
+func TestBuildSpecPrepends_FoldsMiscasedStyleFromEverySource(t *testing.T) {
+	spec := loadSpecFromYAML(t, `
+name: demo
+stages:
+  a:
+    output-style: concise
+    chain:
+      - skill: one
+`)
+	// From the spec's stage declaration.
+	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, config.ModeTUI, spec, runConfig{})
+	require.NoError(t, err)
+	require.Equal(t, "Concise", styleOf(t, perStage["a"]), "stage declaration folded")
+	require.Equal(t, config.DefaultOutputStyle, styleOf(t, run))
+
+	// From outside the spec: the flag, or ape task's per-skill table.
+	cfg := runConfig{outputStyle: "concise", outputStyleSet: true}
+	run, _, err = buildSpecPrepends("/usr/bin/ape", 4242, config.ModeTUI, spec, cfg)
+	require.NoError(t, err)
+	require.Equal(t, "Concise", styleOf(t, run), "externally-supplied style folded")
 }

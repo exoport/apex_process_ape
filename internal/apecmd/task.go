@@ -147,6 +147,7 @@ ownership (the run itself may have succeeded).`,
 				}
 				taskCommit = &pipeline.CommitDirective{Mode: pipeline.CommitModeExplicit, Message: msg}
 			}
+			warnUnknownOutputStyleFlag(cmd, outputStyleFlag)
 			opts := taskOptions{
 				skill:                 args[0],
 				agent:                 agentFlag,

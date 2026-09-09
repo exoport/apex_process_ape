@@ -69,6 +69,7 @@ separately (e.g. wrap ape chat in tmux or screen).
 Exit codes: 0 success · 1 claude/bridge failure · 2 usage or preflight
 error (no _apex/config.yaml, bad cwd).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			warnUnknownOutputStyleFlag(cmd, outputStyleFlag)
 			projectRoot := cwdFlag
 			if projectRoot == "" {
 				wd, err := os.Getwd()

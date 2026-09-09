@@ -63,20 +63,19 @@ apex-empty,
 	require.Len(t, tbl.Warnings, 3)
 }
 
-// The row most likely to be wrong is the one that looks right. Claude
-// Code ignores a style name it cannot resolve, so a miscased built-in
-// leaves the skill on the default while the CSV reads as if it were
-// enrolled. ape reports it and does NOT silently retarget the row.
-func TestLoad_MiscasedBuiltinWarnsAndIsKeptVerbatim(t *testing.T) {
+// Case is no longer judged here: ape folds a built-in's spelling when
+// it writes the settings key, so `concise` and `Concise` are the same
+// declaration by the time claude sees one. The parser's job is to carry
+// the row verbatim and say nothing about it.
+func TestLoad_MiscasedBuiltinIsCarriedWithoutComplaint(t *testing.T) {
 	root := writeTable(t, "apex-x,concise\n")
 	tbl, err := Load(root)
 	require.NoError(t, err)
 
 	style, ok := tbl.Style("apex-x")
 	require.True(t, ok)
-	require.Equal(t, "concise", style, "the row must reach claude exactly as written")
-	require.Len(t, tbl.Warnings, 1)
-	require.Contains(t, tbl.Warnings[0], `"Concise"`)
+	require.Equal(t, "concise", style, "the row reaches the settings builder as written")
+	require.Empty(t, tbl.Warnings)
 }
 
 // A project may ship its own style; ape cannot enumerate what a machine
@@ -90,9 +89,7 @@ func TestLoad_CustomStyleNameIsNotAWarning(t *testing.T) {
 	require.Empty(t, tbl.Warnings)
 }
 
-// `default` is Claude Code's own key for the standard style and
-// `Default` is what ape pins; both reach the same session, so neither
-// may be reported as a miscased built-in.
+// Neither spelling of the standard style is remarkable to the parser.
 func TestLoad_BothDefaultSpellingsAreClean(t *testing.T) {
 	root := writeTable(t, "apex-a,Default\napex-b,default\n")
 	tbl, err := Load(root)

@@ -37,8 +37,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/exoport/apex_process_ape/internal/bridge/config"
 )
 
 // TableFile is the project-relative path of the framework-owned table.
@@ -51,10 +49,11 @@ const TableFile = "_apex/output-styles.csv"
 // config.DefaultOutputStyle, which is exactly today's behaviour.
 type Table struct {
 	styles map[string]string
-	// Warnings records rows that could not be used, and rows whose
-	// style name ape has reason to believe will not resolve. Surfaced
-	// at load and by `ape doctor`, never fatal: a malformed framework
-	// file must not fail a user's run.
+	// Warnings records rows that could not be USED — wrong column
+	// count, empty fields. Surfaced at load and by `ape doctor`, never
+	// fatal: a malformed framework file must not fail a user's run.
+	// Whether a style NAME will resolve is not judged here; see the
+	// note in parse.
 	Warnings []string
 }
 
@@ -154,21 +153,14 @@ func parse(r io.Reader) (*Table, error) {
 			t.warnf("row %d: empty skill or style — ignored", i+1)
 			continue
 		}
-		// A style name Claude Code cannot resolve is IGNORED by Claude
-		// Code, silently — verified against 2.1.259 and recorded in
-		// internal/bridge/config. So the row that is most likely to be
-		// wrong is the one that looks right: a built-in spelled in the
-		// wrong case resolves to nothing and the skill quietly runs the
-		// default. ape reports it and keeps the value verbatim rather
-		// than correcting it, because a project may legitimately ship a
-		// custom style whose name differs from a built-in only by case,
-		// and silently retargeting a row to a different style is a worse
-		// failure than the one being reported.
-		if canonical, builtin := config.BuiltinOutputStyleSpelling(style); builtin && canonical != style {
-			t.warnf("skill %q: style %q is not the built-in spelling %q — "+
-				"Claude Code ignores a style name it cannot resolve, so this row would leave the skill on %s",
-				skill, style, canonical, config.DefaultOutputStyle)
-		}
+		// The row is kept exactly as written. Case is not judged here:
+		// ape folds a built-in's spelling when it writes the settings
+		// key (see config.BuiltinOutputStyleSpelling), so `concise` and
+		// `Concise` are the same declaration by the time they reach
+		// claude. What this parser cannot judge at all is whether a name
+		// that matches no built-in is a typo or a custom style the
+		// machine has installed — `ape doctor` reports those, because
+		// only a human can tell the two apart.
 		t.styles[skill] = style
 	}
 	return t, nil
