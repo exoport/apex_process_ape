@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.0.68 (2026-09-09)
 
 - **feat(spawn): output-style names are matched case-insensitively.**
   Claude Code is case-sensitive and ignores a name it cannot resolve
