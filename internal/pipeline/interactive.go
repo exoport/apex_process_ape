@@ -87,6 +87,22 @@ const interactiveReadyTimeout = 30 * time.Second
 // ~200ms; doubling to 500ms keeps the prompt from racing the redraw.
 const interactiveClearSettle = 500 * time.Millisecond
 
+// PrependForStage picks the flags a stage's claude process is spawned
+// with: the caller's per-stage override when it named this stage, the
+// run-level slice otherwise.
+//
+// The lookup happens once per stage because the stage spawn is the only
+// place these flags can take effect — `--settings` is fixed at launch
+// and the whole chain shares the process. That is the same constraint
+// that makes a step-level `output-style:` impossible, and the same one
+// StageModelConflicts reports for `model:`.
+func PrependForStage(opts RunOptions, stageName string) []string {
+	if staged, ok := opts.StagePrependFlags[stageName]; ok {
+		return staged
+	}
+	return opts.PrependFlags
+}
+
 // runStageInteractive spawns one claude inside a PTY for the stage,
 // sends each step's prompt as a real REPL slash command via PTY
 // Write, waits for the bridge's Stop hook between steps, emits
@@ -119,7 +135,7 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		return StatusFailed, fmt.Errorf("stage %q: plan commits: %w", stage.Name, planErr)
 	}
 
-	argv, argvErr := buildInteractiveArgv(opts.ClaudeBin, firstModel, opts.PrependFlags)
+	argv, argvErr := buildInteractiveArgv(opts.ClaudeBin, firstModel, PrependForStage(opts, stage.Name))
 	if argvErr != nil {
 		return StatusFailed, argvErr
 	}
@@ -181,17 +197,33 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		if effAgent == "" {
 			effAgent = step.Agent
 		}
+		// What the step DECLARES versus what it will actually run on.
+		// The stage's claude process was spawned once, above, with
+		// firstModel; nothing switches models mid-session (there is no
+		// `/model` send anywhere in ape). Recording effModel here as
+		// though it had been applied is what made the divergence
+		// invisible in the manifest, the TUI and the event stream at
+		// once. Report the truth, and keep the declared value beside it
+		// so the mismatch is diagnosable from the artifact rather than
+		// only from the spec. Spec.StageModelConflicts reports the same
+		// divergence before the run starts.
+		declaredModel := effModel
+		runModel := firstModel
+		if declaredModel == runModel {
+			declaredModel = ""
+		}
 
 		eventLog, eventsRel := openStepLog(mw, stageIdx, i+1, stage.Name, step.Skill)
 
 		stepInfo := InteractiveStepInfo{
-			Stage:       stage.Name,
-			StepIdx:     i,
-			Skill:       step.Skill,
-			Agent:       effAgent,
-			Model:       effModel,
-			NoClear:     step.NoClear,
-			SessionName: sessionName,
+			Stage:         stage.Name,
+			StepIdx:       i,
+			Skill:         step.Skill,
+			Agent:         effAgent,
+			Model:         runModel,
+			ModelDeclared: declaredModel,
+			NoClear:       step.NoClear,
+			SessionName:   sessionName,
 		}
 
 		// Between steps within a stage: send `/clear` so the next
@@ -229,16 +261,22 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		beforeSnap, _ := repl.CapturePane(ctx, sessionName)
 
 		prompt := assembleInteractivePromptLine(effAgent, step, opts.Prompt)
-		writeInteractiveStepEvent(eventLog, "step-start", map[string]any{
+		stepStartFields := map[string]any{
 			"stage":    stage.Name,
 			"step":     i + 1,
 			"skill":    step.Skill,
 			"agent":    effAgent,
-			"model":    effModel,
+			"model":    runModel,
 			"effort":   stageEffort,
 			"prompt":   prompt,
 			"no_clear": step.NoClear,
-		})
+		}
+		if declaredModel != "" {
+			// Present only on a divergence, so its presence is itself
+			// the signal and an unaffected run's events are unchanged.
+			stepStartFields["model_declared"] = declaredModel
+		}
+		writeInteractiveStepEvent(eventLog, "step-start", stepStartFields)
 		if err := repl.SendCommand(ctx, sessionName, prompt); err != nil {
 			stageErr = fmt.Errorf("stage %q step %d: send prompt: %w", stage.Name, i, err)
 			stageStatus = StatusFailed
@@ -305,7 +343,8 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 				ev = stepTelemetryToResultEvent(tele)
 			}
 		}
-		recordStep(mw, stageIdx, i+1, step, opts.Prompt, stepStart, time.Now(), StatusCompleted, exitCode, eventsRel, ev)
+		recordStep(mw, stageIdx, i+1, step, models{Run: runModel, Declared: declaredModel},
+			opts.Prompt, stepStart, time.Now(), StatusCompleted, exitCode, eventsRel, ev)
 
 		// Commit boundary: same semantics as runStages (PLAN-6 / C2).
 		// Runs only after the step's run-state is recorded so the

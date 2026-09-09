@@ -139,6 +139,7 @@ var allChecks = []doctorCheck{
 	{Name: "cost.price_table_coverage", Run: checkPriceTableCoverage},
 	{Name: "hooks.contract_drift", Run: checkHookContractDrift},
 	{Name: "framework.terminal_contracts", Run: checkTerminalContracts},
+	{Name: "framework.output_styles", Run: checkOutputStyles},
 	{Name: "framework.command_surface", Required: true, Run: checkCommandSurface},
 	{Name: "aboard.skill_reference", Run: checkAboardSkillReference},
 	{Name: "runs.legacy_layout", Run: checkRunLayoutLegacy},
@@ -220,6 +221,11 @@ silent:
                                 installed, and which skills it enrols. No
                                 table means no run is checked for a
                                 terminal contract.
+  framework.output_styles       which skills _apex/output-styles.csv
+                                enrols, and the style each resolves to.
+                                A missing table, an unenrolled skill and
+                                a style name Claude Code cannot resolve
+                                all look identical from inside a run.
   runs.legacy_layout            whether run artifacts are still at the
                                 pre-{output_folder}/ape paths. Until they
                                 move, cost rollups and the hook check read

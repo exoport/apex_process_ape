@@ -115,6 +115,12 @@ type UpdateSummary struct {
 	// commit-ownership roster to install. False on a framework that
 	// predates it — the dispatch assertion then skips, with a reason.
 	CommitOwnersInstalled bool `json:"commitOwnersInstalled" yaml:"commitOwnersInstalled"`
+	// OutputStylesInstalled reports whether the framework carried a
+	// per-skill output-style table. False on a framework that predates
+	// it — every skill then runs the pinned default. Reported rather
+	// than inferred because "no styles applied" and "the table never
+	// arrived" look identical from inside a run.
+	OutputStylesInstalled bool `json:"outputStylesInstalled" yaml:"outputStylesInstalled"`
 	// MigrationsInstalled counts the framework's upgrade-list entries
 	// copied into the project. Zero means the framework ships none — the
 	// runner then reports nothing pending, which is then TRUE.
@@ -338,6 +344,10 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if err != nil {
 		return nil, err
 	}
+	outputStylesInstalled, err := installOutputStyles(opts.FrameworkRepo, opts.ProjectRoot)
+	if err != nil {
+		return nil, err
+	}
 	aboardRecipes, err := installAboardRecipes(opts.FrameworkRepo, opts.ProjectRoot)
 	if err != nil {
 		return nil, err
@@ -426,6 +436,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 
 			TerminalContractsInstalled: contractsInstalled,
 			CommitOwnersInstalled:      commitOwnersInstalled,
+			OutputStylesInstalled:      outputStylesInstalled,
 			MigrationsInstalled:        len(migrationsInstalled),
 			MigrationPaths:             migrationsInstalled,
 			ApeCommandsInstalled:       apeCommandsInstalled,
@@ -463,6 +474,29 @@ func installTerminalContracts(frameworkRepo, projectRoot string) (bool, error) {
 	dst := filepath.Join(projectRoot, ProjectTerminalContracts)
 	if err := CopyFile(src, dst); err != nil {
 		return false, fmt.Errorf("copy terminal-contracts table: %w", err)
+	}
+	return true, nil
+}
+
+// installOutputStyles copies the framework's per-skill output-style
+// table into the project. Reports whether the framework repo carried one.
+//
+// Without this step the whole feature is inert in the one direction that
+// looks fine: the framework ships the table, `ape task` reads a path that
+// does not exist, finds nothing, and every skill silently runs the
+// default. Same version-skew suppression as installTerminalContracts, so
+// the two repos can still ship in either order.
+func installOutputStyles(frameworkRepo, projectRoot string) (bool, error) {
+	src := filepath.Join(frameworkRepo, SubtreeOutputStyles)
+	if _, err := os.Stat(src); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat output-styles table: %w", err)
+	}
+	dst := filepath.Join(projectRoot, ProjectOutputStyles)
+	if err := CopyFile(src, dst); err != nil {
+		return false, fmt.Errorf("copy output-styles table: %w", err)
 	}
 	return true, nil
 }

@@ -1,5 +1,89 @@
 # CHANGELOG
 
+## Unreleased
+
+- **feat(spawn): the project declares which output style each skill and
+  each stage runs under.** `Default` stays what ape pins when nothing says
+  otherwise; it was never a claim that one style suits every skill. The
+  framework measured that it does not — the same terse style that makes
+  some skills materially faster makes a batch orchestrator materially
+  slower — so the declaration is framework-owned data and ape supplies the
+  mechanism, exactly as with `_apex/terminal-contracts.csv`.
+
+  Two surfaces, because a spawn can only honour a style at the
+  granularity at which it launches a process:
+
+  - `ape task` reads `_apex/output-styles.csv` (`skill,style`, `#`
+    comments, optional header) and pins the row for the dispatched skill.
+  - `ape pipeline` reads `output-style:` on the pipeline and on a stage.
+
+  Precedence is `--output-style` flag > stage > pipeline > CSV >
+  `Default`. The flag had to be distinguished from its own zero value to
+  make that hold: `--output-style Default` and no flag at all are the same
+  string, so cobra's `Changed` is what keeps a checked-in file from
+  outranking the operator.
+
+  **The CSV is deliberately not consulted for pipeline steps.** It is keyed
+  by skill, a stage is a chain of skills sharing ONE process, and
+  `--settings` is fixed at launch — so a stage whose steps mapped to
+  different styles could only honour one of them, silently, for its
+  neighbours. There is no step-level `output-style:` for the same reason.
+
+  An absent table enrols nothing and an undeclared pipeline pins
+  `Default`, so a project that adopts neither is byte-identical at spawn
+  to before this existed.
+
+- **feat(framework): `ape framework setup|update` installs
+  `_apex/output-styles.csv`.** Three integration points have to line up —
+  the framework ships the table, ape installs it, ape reads it — and each
+  fails open alone. Without the install step the framework's declaration
+  would be correct on its side, every file would parse, and every skill
+  would quietly run `Default`. `setup`/`update` now reports the table in
+  **both** directions, like the commit-owners roster: a missing one is not
+  a quiet default.
+
+- **feat(doctor): `framework.output_styles`.** Reports how many skills are
+  enrolled and what each resolves to. A missing table, an unenrolled
+  skill, and a style name Claude Code could not resolve all produce the
+  same unremarkable outcome — a session in the default style — and nothing
+  during a run tells them apart. Claude Code ignores an unresolvable style
+  name *silently*, so a miscased built-in (`concise` for `Concise`) is a
+  row that reads as enrolled and does nothing; ape reports it and keeps
+  the value verbatim rather than retargeting a row that a project may have
+  meant for a custom style of its own.
+
+- **fix(pipeline): a step's `model:` was reported as applied when it never
+  was.** A stage is one `claude` process, launched with the model its
+  FIRST step resolves to; the rest of the chain is typed into that same
+  session and ape sends no `/model` — the switch `InteractiveStepInfo.Model`
+  was documented as expecting was never implemented. So steps 2..n ran on
+  step 1's model whatever they declared.
+
+  That much is a limitation. The defect is that every artifact agreed with
+  the spec instead of with the session: the manifest, the TUI and the
+  `step-start` event all recorded the declared value. Independently
+  confirmed against real transcripts by the framework's eval session,
+  which found six such steps in one governance run — two analysis steps
+  given `opus` that ran `sonnet`, and four given `sonnet` that ran `opus`.
+
+  Now: `model` records what actually ran, the new `model_declared` appears
+  beside it only on a divergence, and `ape pipeline` plus
+  `ape doctor --only pipelines.project` name the stage, its launch model
+  and every step that declares another *before* the run. Reported rather
+  than rejected — the fix belongs to whoever owns the pipeline file (split
+  the stage at its model boundaries), and failing the spec would break
+  pipelines whose only fault is a mis-stated artifact.
+
+- **fix(pipeline): unknown spec keys are named instead of dropped in
+  silence.** Specs decode with plain `yaml.Unmarshal` and no
+  `KnownFields`, so a mistyped key parses fine and does nothing — the same
+  fail-open shape as an unresolvable style name, and precisely how a
+  mistyped `output-style:` would behave. Pipeline, stage and step keys are
+  now checked, with the line number. Still a warning, not an error: a
+  newer framework may legitimately ship a key an older ape has not
+  learned, and hard-failing would make every framework addition a breaking
+  change for anyone who upgraded in the other order.
+
 ## v0.0.67 (2026-09-06)
 
 > The PLAN-63/PLAN-64 bundle. The framework's blocked acceptance blocks

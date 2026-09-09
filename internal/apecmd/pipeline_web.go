@@ -198,28 +198,12 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	_ = sessions.Register(regPath, regRow)
 	defer func() { _ = sessions.Deregister(regPath, regRow.PID) }()
 
-	// Inline configs — once for the whole run. Every step's claude
-	// invocation gets these prepended via opts.PrependFlags.
-	mcpCfg, err := config.BuildMCPConfig(config.MCPOptions{APEBin: apeBin, IPCPort: hub.IPCPort()})
+	// Inline configs — once for the whole run, plus a per-stage override
+	// wherever the spec declares a different output style. Every step's
+	// claude invocation gets these prepended via opts.PrependFlags.
+	prepend, stagePrepend, err := buildSpecPrepends(apeBin, hub.IPCPort(), config.ModeWeb, spec, cfg)
 	if err != nil {
 		return err
-	}
-	settings, err := config.BuildSettings(config.SettingsOptions{
-		APEBin:      apeBin,
-		BridgePort:  hub.IPCPort(),
-		Mode:        config.ModeWeb,
-		OutputStyle: cfg.outputStyle,
-	})
-	if err != nil {
-		return err
-	}
-	prepend := []string{
-		"--strict-mcp-config",
-		"--mcp-config", string(mcpCfg),
-		"--settings", string(settings),
-	}
-	if cfg.ignoreProjectSettings {
-		prepend = append(prepend, "--setting-sources", "user")
 	}
 
 	// runlog binds after the runner picks the run id. We open it
@@ -278,19 +262,20 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	// the plain observer needs no step-tracking wrapper.
 	observer := pipeline.Observer(newPlainObserver(os.Stdout, projectRoot, true))
 	runOptions := pipeline.RunOptions{
-		ProjectRoot:  projectRoot,
-		Prompt:       cfg.prompt,
-		Observer:     observer,
-		ApeVersion:   Version,
-		ManifestDir:  cfg.manifestDir,
-		FromStage:    cfg.fromStage,
-		NoCommit:     cfg.noCommit,
-		AllowDirty:   cfg.allowDirty,
-		Effort:       cfg.effort,
-		PrependFlags: prepend,
-		OnStageStart: onStageStart,
-		OnStageEnd:   onStageEnd,
-		OnRunDir:     onRunDir,
+		ProjectRoot:       projectRoot,
+		Prompt:            cfg.prompt,
+		Observer:          observer,
+		ApeVersion:        Version,
+		ManifestDir:       cfg.manifestDir,
+		FromStage:         cfg.fromStage,
+		NoCommit:          cfg.noCommit,
+		AllowDirty:        cfg.allowDirty,
+		Effort:            cfg.effort,
+		PrependFlags:      prepend,
+		StagePrependFlags: stagePrepend,
+		OnStageStart:      onStageStart,
+		OnStageEnd:        onStageEnd,
+		OnRunDir:          onRunDir,
 		// RunLog is attached lazily via the closure inside OnStageStart;
 		// we cannot pass *runlog.Writer here because it doesn't exist
 		// until the runner has resolved the run dir.

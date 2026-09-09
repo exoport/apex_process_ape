@@ -166,6 +166,7 @@ ownership (the run itself may have succeeded).`,
 				manifestDir:           manifestDirFlag,
 				ignoreProjectSettings: ignoreProjSettings,
 				outputStyle:           outputStyleFlag,
+				outputStyleSet:        outputStyleFlagSet(cmd),
 				natsURL:               natsURLFlag,
 				natsCreds:             natsCredsFlag,
 				eventsPrefix:          eventsPrefixFlag,
@@ -220,11 +221,14 @@ type taskOptions struct {
 	manifestDir           string
 	ignoreProjectSettings bool
 	outputStyle           string
-	natsURL               string
-	natsCreds             string
-	eventsPrefix          string
-	uploadTranscripts     bool
-	transcriptStore       string
+	// outputStyleSet records that --output-style was typed, which is what
+	// lets an explicit flag outrank the project's own declaration.
+	outputStyleSet    bool
+	natsURL           string
+	natsCreds         string
+	eventsPrefix      string
+	uploadTranscripts bool
+	transcriptStore   string
 }
 
 // resolveHandoffPrompt derives the --prompt value from --handoff: a
@@ -377,22 +381,32 @@ func runTask(ctx context.Context, o taskOptions) error {
 	stateBefore := commitowners.Capture(ctx, o.projectRoot)
 	headBefore := stateBefore.Head
 
+	// The framework declares, per skill, which style a dispatch runs
+	// under; the flag overrides it. Resolved here rather than inside the
+	// settings builder because this is where the skill is known, and the
+	// skill is the table's key.
+	outputStyle := resolveSkillOutputStyle(o.projectRoot, o.skill, o.outputStyle, o.outputStyleSet,
+		func(msg string) { fmt.Fprintf(os.Stderr, "⚠ %s\n", msg) })
+
 	cfg := runConfig{
 		prompt:                o.prompt,
 		manifestDir:           manifestDir,
 		allowDirty:            o.allowDirty,
 		ignoreProjectSettings: o.ignoreProjectSettings,
-		outputStyle:           o.outputStyle,
-		quiet:                 o.quiet,
-		suppressSummary:       o.jsonMode,
-		idleTimeout:           o.idleTimeout,
-		maxDuration:           o.maxDuration,
-		natsURL:               o.natsURL,
-		natsCreds:             o.natsCreds,
-		eventsPrefix:          o.eventsPrefix,
-		uploadTranscripts:     o.uploadTranscripts,
-		transcriptStore:       o.transcriptStore,
-		kind:                  eventing.KindTask,
+		outputStyle:           outputStyle,
+		// Already resolved above, so nothing downstream may re-rank it
+		// against a spec's declaration.
+		outputStyleSet:    true,
+		quiet:             o.quiet,
+		suppressSummary:   o.jsonMode,
+		idleTimeout:       o.idleTimeout,
+		maxDuration:       o.maxDuration,
+		natsURL:           o.natsURL,
+		natsCreds:         o.natsCreds,
+		eventsPrefix:      o.eventsPrefix,
+		uploadTranscripts: o.uploadTranscripts,
+		transcriptStore:   o.transcriptStore,
+		kind:              eventing.KindTask,
 	}
 	if o.jsonMode {
 		// stdout carries only the envelope; progress goes to stderr.

@@ -43,11 +43,23 @@ type Spec struct {
 	// (no pipeline-level opinion); non-nil values propagate to stages
 	// that don't override. Phase A does not yet wire this into the
 	// runner — the stage-boundary default lights up in Phase D.
-	Commit    *CommitDirective  `yaml:"commit,omitempty"`
-	Requires  Requires          `yaml:"requires,omitempty"`
-	StagesRaw yaml.Node         `yaml:"stages"` //nolint:tagliatelle // on-disk YAML files use "stages"; field name includes "Raw" suffix to signal internal use
-	stages    []Stage           `yaml:"-"`
-	stageMap  map[string]*Stage `yaml:"-"`
+	Commit *CommitDirective `yaml:"commit,omitempty"`
+	// OutputStyle pins Claude Code's output style for every session this
+	// pipeline spawns. Stage-level `output-style:` overrides it; the
+	// `--output-style` flag overrides both. Empty means "no pipeline-level
+	// opinion", and the run takes config.DefaultOutputStyle.
+	//
+	// Deliberately NOT available at step level. The style is a launch-time
+	// setting and a stage's chain shares one spawned process, so a
+	// step-level key could not be honoured for steps 2..n — the defect
+	// StageModelConflicts reports for `model:`. Stage is the finest
+	// granularity a process spawn can deliver.
+	OutputStyle string            `yaml:"output-style,omitempty"` //nolint:tagliatelle // on-disk spec YAML uses kebab-case "output-style"
+	Requires    Requires          `yaml:"requires,omitempty"`
+	StagesRaw   yaml.Node         `yaml:"stages"` //nolint:tagliatelle // on-disk YAML files use "stages"; field name includes "Raw" suffix to signal internal use
+	stages      []Stage           `yaml:"-"`
+	stageMap    map[string]*Stage `yaml:"-"`
+	unknownKeys []UnknownKey      `yaml:"-"`
 }
 
 // Requires lists pre-flight conditions for a pipeline.
@@ -78,7 +90,11 @@ type Stage struct {
 	// stage boundary by default; step-level Commit is the escape
 	// hatch for mid-chain commits (see Effective).
 	Commit *CommitDirective
-	Chain  []Step
+	// OutputStyle overrides the pipeline-level output style for this
+	// stage's spawned session. Empty inherits. See Spec.OutputStyle for
+	// why there is no step-level equivalent.
+	OutputStyle string
+	Chain       []Step
 }
 
 // Step is one invocation inside a stage's chain.
@@ -223,6 +239,7 @@ func LoadSpec(name, projectRoot string) (*Spec, error) {
 	for i := range spec.stages {
 		spec.stageMap[spec.stages[i].Name] = &spec.stages[i]
 	}
+	spec.unknownKeys = scanUnknownKeys(data)
 	return &spec, nil
 }
 
@@ -272,11 +289,12 @@ func decodeStages(node *yaml.Node) ([]Stage, error) {
 		}
 		stage := Stage{Name: key.Value}
 		var body struct {
-			Model  string           `yaml:"model,omitempty"`
-			Effort string           `yaml:"effort,omitempty"`
-			Agent  string           `yaml:"agent,omitempty"`
-			Commit *CommitDirective `yaml:"commit,omitempty"`
-			Chain  []Step           `yaml:"chain"`
+			Model       string           `yaml:"model,omitempty"`
+			Effort      string           `yaml:"effort,omitempty"`
+			Agent       string           `yaml:"agent,omitempty"`
+			Commit      *CommitDirective `yaml:"commit,omitempty"`
+			OutputStyle string           `yaml:"output-style,omitempty"` //nolint:tagliatelle // on-disk spec YAML uses kebab-case "output-style"
+			Chain       []Step           `yaml:"chain"`
 		}
 		if err := val.Decode(&body); err != nil {
 			return nil, fmt.Errorf("stage %q: %w", stage.Name, err)
@@ -293,6 +311,7 @@ func decodeStages(node *yaml.Node) ([]Stage, error) {
 		stage.Effort = body.Effort
 		stage.Agent = body.Agent
 		stage.Commit = body.Commit
+		stage.OutputStyle = body.OutputStyle
 		stage.Chain = body.Chain
 		stages = append(stages, stage)
 	}
@@ -413,6 +432,226 @@ func (s *Spec) ModelWarnings() []ModelWarning {
 			step := stage.Chain[i]
 			check(fmt.Sprintf("stage %q step %d (%s)", stage.Name, i, step.Skill), step.Model)
 		}
+	}
+	return out
+}
+
+// EffectiveOutputStyle resolves the output style for a stage's spawned
+// session: stage `output-style:` ?? pipeline `output-style:` ?? "".
+//
+// Empty means the caller applies its own default (config.DefaultOutputStyle
+// via BuildSettings), which is what every pipeline did before this key
+// existed.
+//
+// Stage granularity is the contract, not a simplification. `--settings`
+// is fixed when the stage's claude process is launched and the whole
+// chain shares that process, so this is the finest granularity that can
+// be honoured. There is deliberately no step-level key: see
+// StageModelConflicts for what happens to a per-step launch setting that
+// the runner cannot apply.
+func (s *Spec) EffectiveOutputStyle(stageName string) (string, error) {
+	stage, ok := s.stageMap[stageName]
+	if !ok || stage == nil {
+		return "", fmt.Errorf("unknown stage %q", stageName)
+	}
+	return firstNonEmpty(stage.OutputStyle, s.OutputStyle), nil
+}
+
+// StageModelConflictStep is one step whose declared model is not the
+// model its stage actually launched with.
+type StageModelConflictStep struct {
+	// Index is the zero-based position in the stage's chain.
+	Index int
+	Skill string
+	// Declared is the model the cascade resolves for this step — the
+	// value the manifest, the TUI and the step-start event report.
+	Declared string
+}
+
+// StageModelConflict is one stage whose chain declares more than one
+// model.
+type StageModelConflict struct {
+	Stage string
+	// Launch is the model the stage's session is actually spawned with:
+	// the first step's resolved model. Every step in the chain runs on
+	// it. Empty means the spawn passed no --model at all, so claude's
+	// own default applies.
+	Launch string
+	// Steps lists the steps whose declared model differs from Launch.
+	Steps []StageModelConflictStep
+}
+
+// StageModelConflicts reports stages whose chain declares a model that
+// the run cannot honour.
+//
+// The mechanism: a stage spawns ONE claude process, with `--model` fixed
+// at launch from the first step's resolved model, and the chain's
+// remaining steps are typed into that same session as prompts. Switching
+// models mid-session would need a `/model` command; ape sends none, and
+// InteractiveStepInfo.Model still carries the comment describing the
+// switch that was never implemented. So steps 2..n run on step 1's
+// model no matter what they declare.
+//
+// That much would merely be a limitation. What made it a defect is that
+// the declared value was reported as though it had been applied — to the
+// manifest, the TUI and the step-start event — so a spec asking for opus
+// on an analysis step and getting sonnet looked, in every artifact, like
+// it got opus. The runner now records the launch model as what ran and
+// the declared one alongside it, and this reports the divergence before
+// the run rather than leaving it to be reconstructed afterwards.
+//
+// Reported, never fatal. Rejecting the spec would fail pipelines that
+// run correctly today apart from a mis-stated artifact, and the fix
+// belongs to whoever owns the pipeline file: split the stage at its
+// model boundaries.
+func (s *Spec) StageModelConflicts() []StageModelConflict {
+	var out []StageModelConflict
+	for _, stage := range s.Stages() {
+		if len(stage.Chain) < 2 {
+			continue
+		}
+		launch, _, _, _, err := s.Effective(stage.Name, 0)
+		if err != nil {
+			continue
+		}
+		// Mirror runStageInteractive's own fallback: a model the
+		// canonicalizer does not recognize still reaches --model.
+		launch = firstNonEmpty(launch, stage.Chain[0].Model)
+		conflict := StageModelConflict{Stage: stage.Name, Launch: launch}
+		for i := 1; i < len(stage.Chain); i++ {
+			declared, _, _, _, effErr := s.Effective(stage.Name, i)
+			if effErr != nil {
+				continue
+			}
+			declared = firstNonEmpty(declared, stage.Chain[i].Model)
+			if declared == "" || declared == launch {
+				continue
+			}
+			conflict.Steps = append(conflict.Steps, StageModelConflictStep{
+				Index:    i,
+				Skill:    stage.Chain[i].Skill,
+				Declared: declared,
+			})
+		}
+		if len(conflict.Steps) > 0 {
+			out = append(out, conflict)
+		}
+	}
+	return out
+}
+
+// UnknownKey is one spec key ape does not recognize.
+type UnknownKey struct {
+	// Location identifies the containing scope, e.g. `pipeline`,
+	// `stage "review"`, `stage "review" step 2`.
+	Location string
+	Key      string
+	Line     int
+}
+
+// UnknownKeyWarnings reports keys the spec declares that this ape does
+// not read.
+//
+// Specs are decoded with plain yaml.Unmarshal — no KnownFields — so an
+// unrecognized key is silently dropped. That fails open in the worst
+// direction: a framework can ship a declaration, a project can install
+// it, every file parses, and the setting does nothing. It is the same
+// shape as an output-style name Claude Code cannot resolve, and it is
+// how a mistyped `output-style:` or `no-clear:` would behave.
+//
+// Reporting rather than rejecting is deliberate, and for the opposite
+// reason to StageModelConflicts: a NEWER framework may legitimately ship
+// a key that an OLDER ape has not learned yet, and hard-failing there
+// would make every framework addition a breaking change for anyone who
+// had not upgraded ape first.
+func (s *Spec) UnknownKeyWarnings() []UnknownKey {
+	return s.unknownKeys
+}
+
+var (
+	specTopLevelKeys = map[string]struct{}{
+		"name": {}, "model": {}, "effort": {}, "agent": {}, "commit": {},
+		"output-style": {}, "requires": {}, "stages": {},
+	}
+	specStageKeys = map[string]struct{}{
+		"model": {}, "effort": {}, "agent": {}, "commit": {},
+		"output-style": {}, "chain": {},
+	}
+	specStepKeys = map[string]struct{}{
+		"skill": {}, "agent": {}, "model": {}, "effort": {}, "args": {},
+		"prompt_flag": {}, "commit": {}, "no-clear": {},
+	}
+)
+
+// scanUnknownKeys walks the raw document and reports every mapping key
+// outside the known sets. Best-effort: the document has already been
+// unmarshalled successfully by the caller, so a parse failure here means
+// only that no warnings can be produced.
+func scanUnknownKeys(data []byte) []UnknownKey {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil
+	}
+	root := &doc
+	if root.Kind == yaml.DocumentNode {
+		if len(root.Content) == 0 {
+			return nil
+		}
+		root = root.Content[0]
+	}
+	if root.Kind != yaml.MappingNode {
+		return nil
+	}
+	var out []UnknownKey
+	out = append(out, unknownIn(root, specTopLevelKeys, "pipeline")...)
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value != "stages" {
+			continue
+		}
+		stages := root.Content[i+1]
+		if stages.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j+1 < len(stages.Content); j += 2 {
+			name := stages.Content[j].Value
+			body := stages.Content[j+1]
+			if body.Kind != yaml.MappingNode {
+				continue
+			}
+			loc := fmt.Sprintf("stage %q", name)
+			out = append(out, unknownIn(body, specStageKeys, loc)...)
+			for k := 0; k+1 < len(body.Content); k += 2 {
+				if body.Content[k].Value != "chain" {
+					continue
+				}
+				chain := body.Content[k+1]
+				if chain.Kind != yaml.SequenceNode {
+					continue
+				}
+				for idx, stepNode := range chain.Content {
+					if stepNode.Kind != yaml.MappingNode {
+						continue
+					}
+					out = append(out, unknownIn(stepNode, specStepKeys,
+						fmt.Sprintf("%s step %d", loc, idx))...)
+				}
+			}
+		}
+	}
+	return out
+}
+
+func unknownIn(mapping *yaml.Node, known map[string]struct{}, location string) []UnknownKey {
+	var out []UnknownKey
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		key := mapping.Content[i]
+		if key.Kind != yaml.ScalarNode {
+			continue
+		}
+		if _, ok := known[key.Value]; ok {
+			continue
+		}
+		out = append(out, UnknownKey{Location: location, Key: key.Value, Line: key.Line})
 	}
 	return out
 }

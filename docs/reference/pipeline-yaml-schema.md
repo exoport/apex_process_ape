@@ -74,6 +74,41 @@ step.<field>  →  stage.<field>  →  pipeline.<field>  →  default
 - `model` / `agent`: default is empty string (claude picks its own default model; skill runs without an agent prefix).
 - `commit`: default is **skip** (no commit fires).
 
+### `model` resolves per step but applies per stage
+
+A stage is **one** `claude` process. It is launched with the model its
+**first** step resolves to, the rest of the chain is typed into that same
+session, and ape sends no `/model` — so a later step declaring a
+different model runs on the first step's regardless.
+
+That limit used to be invisible: the declared value was written to the
+manifest, the TUI and the `step-start` event as though it had been
+applied. It is now reported instead.
+
+- Before the run, `ape pipeline` prints a warning naming the stage, the
+  model it launches on, and each step that declares another.
+- `ape doctor --only pipelines.project` reports the same thing on demand.
+- In the manifest, `model` is what the step **ran on**; `model_declared`
+  appears beside it only when the spec asked for something else.
+
+To actually get two models, split the stage at its model boundary — the
+stage is the unit of process, so it is also the unit of model.
+
+### `output-style`
+
+Pipeline- and stage-level only, for the same reason: `--settings` is
+fixed at launch. See
+[claude-spawn-modes.md](claude-spawn-modes.md#the-project-can-declare-a-style-per-skill-and-per-stage)
+for the full precedence, including the per-skill table `ape task` reads.
+
+### Unknown keys
+
+A key ape does not read is **ignored**, not rejected — a newer framework
+may ship one an older ape has not learned. Since a silently-dropped key
+is indistinguishable from a typo, `ape pipeline` and
+`ape doctor --only pipelines.project` both name any key outside the
+schema above, with its line number.
+
 ### Commit boundary
 
 The boundary depends on which level set the value:

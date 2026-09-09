@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/exoport/aboard/pkg/aboard"
+	"github.com/exoport/apex_process_ape/internal/bridge/config"
 	"github.com/exoport/apex_process_ape/internal/contract"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/hookdrift"
+	"github.com/exoport/apex_process_ape/internal/outputstyles"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sandbox"
@@ -372,7 +374,7 @@ func checkPipelinesProject(_ context.Context, env doctorEnv) CheckResult {
 	// Validate each spec's `model:` values while we are here. A typo in a
 	// checked-in spec otherwise stays invisible until a run reaches that step
 	// and claude rejects it — which can be many minutes in.
-	var modelIssues []string
+	var modelIssues, specIssues []string
 	for _, name := range names {
 		spec, err := pipeline.LoadSpec(name, env.ProjectRoot)
 		if err != nil {
@@ -380,6 +382,31 @@ func checkPipelinesProject(_ context.Context, env doctorEnv) CheckResult {
 		}
 		for _, w := range spec.ModelWarnings() {
 			modelIssues = append(modelIssues, fmt.Sprintf("%s → %s: %q", name, w.Location, w.Model))
+		}
+		// A stage that declares two models is not a typo — every value in
+		// it is real — but the run can only honour the first, so it
+		// belongs in the same on-demand report as a model ape cannot
+		// resolve. Both are "the spec says something the run will not do".
+		for _, c := range spec.StageModelConflicts() {
+			for _, s := range c.Steps {
+				specIssues = append(specIssues, fmt.Sprintf(
+					"%s → stage %q step %d (%s) declares %q but the stage runs on %q",
+					name, c.Stage, s.Index, s.Skill, s.Declared, c.Launch))
+			}
+		}
+		for _, k := range spec.UnknownKeyWarnings() {
+			specIssues = append(specIssues, fmt.Sprintf(
+				"%s → %s: unknown key %q (line %d)", name, k.Location, k.Key, k.Line))
+		}
+	}
+	if len(specIssues) > 0 {
+		return CheckResult{
+			Status: StatusWarn,
+			Message: fmt.Sprintf("%d pipelines at %s; %s",
+				len(names), dir, strings.Join(append(modelIssues, specIssues...), "; ")),
+			Remediation: "A stage is one claude session launched with its first step's model, so a later " +
+				"step's `model:` cannot be applied — split the stage at its model boundaries. An unknown " +
+				"key is silently ignored: check the spelling, or upgrade ape if the framework is newer.",
 		}
 	}
 	if len(modelIssues) > 0 {
@@ -570,6 +597,54 @@ func checkTerminalContracts(_ context.Context, env doctorEnv) CheckResult {
 			Status:      StatusWarn,
 			Message:     msg + " — " + strings.Join(tbl.Warnings, "; "),
 			Remediation: "Rows that do not parse are skipped, so those skills are unchecked.",
+		}
+	}
+	return CheckResult{Status: StatusOK, Message: msg}
+}
+
+// checkOutputStyles reports which skills the project's framework enrols
+// in a non-default output style, and what each one resolves to.
+//
+// Silent during runs, discoverable on demand — the same shape as
+// checkTerminalContracts, and for the same reason. Nothing about a run
+// tells you whether the style you believe is active actually is: a
+// missing table, an unenrolled skill and a style name Claude Code could
+// not resolve all produce the identical, unremarkable outcome of a
+// session in the default style. This is the only place that distinguishes
+// them.
+func checkOutputStyles(_ context.Context, env doctorEnv) CheckResult {
+	if env.ProjectRoot == "" || !isProjectRoot(env.ProjectRoot) {
+		return CheckResult{Status: StatusInfo, Message: "no project root resolved"}
+	}
+	tbl, err := outputstyles.Load(env.ProjectRoot)
+	if err != nil {
+		return CheckResult{
+			Status:      StatusWarn,
+			Message:     fmt.Sprintf("%s unreadable: %v", outputstyles.TableFile, err),
+			Remediation: "Every skill runs the pinned default until the table parses. Re-run `ape framework update` to restore it.",
+			FixCommand:  "ape framework update",
+		}
+	}
+	if tbl.Len() == 0 {
+		return CheckResult{
+			Status: StatusInfo,
+			Message: fmt.Sprintf("%s not installed — every skill runs the %s output style",
+				outputstyles.TableFile, config.DefaultOutputStyle),
+			Remediation: "The framework declares which skills run under which output style. " +
+				"`ape framework update` installs the table, if your framework version ships one.",
+			FixCommand: "ape framework update",
+		}
+	}
+	pairs := make([]string, 0, tbl.Len())
+	for _, e := range tbl.Entries() {
+		pairs = append(pairs, e[0]+"→"+e[1])
+	}
+	msg := fmt.Sprintf("%d skill(s) enrolled: %s", tbl.Len(), strings.Join(pairs, ", "))
+	if len(tbl.Warnings) > 0 {
+		return CheckResult{
+			Status:      StatusWarn,
+			Message:     msg + " — " + strings.Join(tbl.Warnings, "; "),
+			Remediation: "A style name Claude Code cannot resolve is ignored silently, so those skills run the pinned default.",
 		}
 	}
 	return CheckResult{Status: StatusOK, Message: msg}

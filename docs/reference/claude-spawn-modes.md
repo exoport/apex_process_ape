@@ -99,6 +99,50 @@ ape task <skill> --output-style Explanatory # pin a specific one
 
 The flag is on `ape task`, `ape pipeline`, `ape prompt` and `ape chat`.
 
+### The project can declare a style per skill and per stage
+
+`Default` is what ape pins when nothing says otherwise, not a claim that
+it is the right style everywhere. Which style suits a given skill is a
+framework judgement made from framework measurements, so the declaration
+lives in framework-owned files and ape only reads them:
+
+| Surface        | Declaration                                       |
+| -------------- | ------------------------------------------------- |
+| `ape task`     | `_apex/output-styles.csv` — `skill,style` rows     |
+| `ape pipeline` | `output-style:` on the pipeline, or on a stage     |
+
+Precedence, highest first:
+
+```text
+--output-style flag        (operator override)
+  > stage   output-style:  (pipeline YAML)
+  > pipeline output-style: (pipeline YAML)
+  > _apex/output-styles.csv (ape task only)
+  > "Default"
+```
+
+An absent table enrols nothing and an undeclared pipeline pins `Default`,
+so a project that adopts neither behaves exactly as it did before either
+existed.
+
+**Why the CSV is not consulted for pipeline steps.** It is keyed by
+skill, and a pipeline stage is a chain of skills sharing ONE spawned
+process. `--settings` is fixed when that process launches, so a stage
+whose steps mapped to different styles could only honour one of them —
+silently, for its neighbours. Pipelines therefore declare their own
+style at a granularity a spawn can actually deliver. There is no
+step-level `output-style:` for the same reason.
+
+**`ape doctor --only framework.output_styles`** prints what each enrolled
+skill resolves to. It exists because a missing table, an unenrolled
+skill, and a style name Claude Code could not resolve all produce the
+same unremarkable outcome — a session in the default style — and nothing
+during a run distinguishes them. A style name that does not resolve is
+ignored *silently* by Claude Code, so a miscased built-in (`concise` for
+`Concise`) is a row that reads as enrolled and does nothing; the check
+reports those rather than correcting them, because a project may
+legitimately ship a custom style whose name differs only in case.
+
 Two limits worth knowing:
 
 - **Enterprise-managed settings still outrank `--settings`.** On a
@@ -127,6 +171,8 @@ evidence that a value was honoured.
 | PTY driver (NewSession / SendCommand / …)         | `internal/repl/`                                           |
 | `ape chat` direct exec with stdio inheritance     | `internal/apecmd/chat.go`                                  |
 | `--settings` blob, incl. the output-style pin     | `internal/bridge/config/settings.go`                       |
+| Per-skill output-style table (`ape task`)         | `internal/outputstyles/`                                   |
+| Per-stage `--settings` resolution                 | `buildSpecPrepends` in `internal/apecmd/pipeline_interactive.go` |
 
 ## Related
 

@@ -44,6 +44,15 @@ const (
 	// Optional in the framework repo, on the same version-skew terms as
 	// SubtreeOperatingRules and SubtreeTerminalContracts.
 	SubtreeApeCommands = "_apex/ape-commands.yaml"
+	// SubtreeOutputStyles is the framework-owned table of per-skill output
+	// styles: which Claude Code output style each skill's session runs
+	// under. The framework measures the effect per skill and owns the
+	// judgement; ape reads a name and pins it.
+	//
+	// Optional in the framework repo, on the same version-skew terms as
+	// SubtreeTerminalContracts — a framework that predates it installs
+	// nothing and every skill takes the pinned default.
+	SubtreeOutputStyles = "_apex/output-styles.csv"
 	// SubtreeCommitOwners is the framework-owned roster of which skills
 	// commit and in what subject shape — the file `ape task`'s per-dispatch
 	// commit-ownership assertion reads (PLAN-26 D2).
@@ -109,6 +118,10 @@ const (
 	// ProjectApeCommands is where the required-command-surface manifest
 	// lands in the project. Absent = the framework predates the contract.
 	ProjectApeCommands = "_apex/ape-commands.yaml"
+	// ProjectOutputStyles is where the per-skill output-style table lands.
+	// Absent = no skill is enrolled and every dispatch takes the pinned
+	// default, which is what every dispatch did before the table existed.
+	ProjectOutputStyles = "_apex/output-styles.csv"
 	// ProjectCommitOwners is where the commit-ownership roster lands.
 	// Absent = the project has not adopted the declaration, and every
 	// dispatch's assertion is skipped with a reason.

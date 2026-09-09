@@ -35,6 +35,7 @@ Since v2, additional fields have been added **without bumping the schema version
 - per-step `sessions[]` — per-claude-session usage: the step's main REPL session plus any sub-agent (Agent tool) sessions observed via `SubagentStart` / `SubagentStop`.
 - `claude_version` — the resolved `claude --version` at run start (best-effort).
 - per-step `telemetry_note` — a diagnosability breadcrumb explaining why a numeric field is zero or approximate. Two causes: the transcript was unavailable / had no complete assistant turn (everything zero), or a model had no price in the table (tokens and turns correct, `cost_usd` a lower bound). More than one cause is joined with `; `.
+- per-step `model_declared` (ape v0.0.68+) — present **only** when the spec's resolved `model:` for that step is not the one the step ran on. A stage is one `claude` process launched with its first step's model and ape sends no `/model`, so a later step's `model:` cannot take effect. `model` now records what ran; `model_declared` records what was asked for. Absent on every step where the two agree, so its presence is itself the signal. Older manifests carry the *declared* value in `model` with no way to tell whether it was applied — see [pipeline-yaml-schema.md](pipeline-yaml-schema.md#model-resolves-per-step-but-applies-per-stage).
 - per-step `context_window` and per-`model_usage`-entry `context_window` (ape v0.0.60+) — the model's usable context in tokens, from ape's maintained table. **Omitted when unknown**, never defaulted. See [reading the `context_window` fields](#reading-the-context_window-fields) — there are two of them and they can legitimately disagree.
 - per-step `contract` (ape v0.0.60+) — the terminal-contract verdict: `present`, `missing`, or `no-transcript`. **Omitted** when the step's skill declares no contract in the framework's `_apex/terminal-contracts.csv`, so the field is present exactly when the skill was enrolled. See [reading the `contract` field](#reading-the-contract-field) before using it as a quality metric — it measures TEXT, not work.
 
@@ -96,7 +97,8 @@ stages:
         agent: apex-agent-pm     # omitted when the step has no agent
         args: ""
         prompt: ""
-        model: ""
+        model: ""                # what the step RAN on: its stage's launch model
+        model_declared: ""       # only when the spec asked for a different one (see below)
         effort: ""               # step-level `effort:`; omitted when unset (resolved default is xhigh)
         started_at: 2026-05-11T09:45:30Z
         ended_at: 2026-05-11T09:58:11Z

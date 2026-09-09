@@ -139,6 +139,7 @@ func newPipelineCmd() *cobra.Command {
 				allowDirty:            allowDirtyFlag,
 				ignoreProjectSettings: ignoreProjSettings,
 				outputStyle:           outputStyleFlag,
+				outputStyleSet:        outputStyleFlagSet(cmd),
 				openOnStart:           openFlag,
 				natsURL:               natsURLFlag,
 				natsCreds:             natsCredsFlag,
@@ -290,7 +291,12 @@ type runConfig struct {
 	// Empty pins config.DefaultOutputStyle; config.InheritOutputStyle
 	// leaves the machine's own style alone.
 	outputStyle string
-	openOnStart bool
+	// outputStyleSet records that the operator typed --output-style, so
+	// an explicit flag outranks the spec's `output-style:` declarations
+	// (see buildSpecPrepends). Empty-string is not a usable sentinel:
+	// `--output-style Default` and an absent flag look identical.
+	outputStyleSet bool
+	openOnStart    bool
 
 	// progressWriter redirects the plain observer's progress stream.
 	// nil keeps the default (os.Stdout). `ape task --output-format
@@ -472,5 +478,49 @@ func warnSpecModels(spec *pipeline.Spec) {
 				"  Accepted: a bare family (sonnet, opus, haiku) for its current generation,\n"+
 				"  or an explicit id (sonnet-5, claude-sonnet-5, opus[1m]).\n",
 			w.Location, w.Model)
+	}
+	warnStageModelConflicts(spec)
+	warnUnknownSpecKeys(spec)
+}
+
+// warnStageModelConflicts reports steps whose declared model the run
+// cannot apply, before anything spawns.
+//
+// A stage is one claude process, launched with the first step's model,
+// and no `/model` is ever sent — so a later step declaring a different
+// model runs on the first step's instead. Silent until now, and worse
+// than silent: the manifest, the TUI and the step-start event all
+// reported the declared value, so the artifact agreed with the spec
+// while the session disagreed with both.
+func warnStageModelConflicts(spec *pipeline.Spec) {
+	for _, c := range spec.StageModelConflicts() {
+		launch := c.Launch
+		if launch == "" {
+			launch = "claude's default (no --model passed)"
+		}
+		fmt.Fprintf(os.Stderr,
+			"⚠ stage %q launches on %s and cannot switch models mid-chain; these steps run on it anyway:\n",
+			c.Stage, launch)
+		for _, s := range c.Steps {
+			fmt.Fprintf(os.Stderr, "    step %d (%s) declares %q\n", s.Index, s.Skill, s.Declared)
+		}
+		fmt.Fprintf(os.Stderr,
+			"  Split the stage at its model boundaries to honour them. The run records what actually ran.\n")
+	}
+}
+
+// warnUnknownSpecKeys reports spec keys this ape does not read.
+//
+// Specs decode with plain yaml.Unmarshal, so an unknown key is dropped
+// in silence: the file parses, the run starts, and the declaration does
+// nothing. A framework can ship a key an older ape has not learned yet,
+// which is why this warns instead of failing — but it says so, because
+// the alternative is a setting everybody believes is live.
+func warnUnknownSpecKeys(spec *pipeline.Spec) {
+	for _, k := range spec.UnknownKeyWarnings() {
+		fmt.Fprintf(os.Stderr,
+			"⚠ %s: key %q (line %d) is not one this ape reads — it has no effect.\n"+
+				"  Either it is a typo, or this binary predates the framework that ships it.\n",
+			k.Location, k.Key, k.Line)
 	}
 }

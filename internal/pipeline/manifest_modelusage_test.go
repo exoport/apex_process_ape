@@ -41,7 +41,7 @@ func TestManifestModelUsageRoundTrip(t *testing.T) {
 		},
 	}
 	ev := stepTelemetryToResultEvent(tele)
-	recordStep(mw, stageIdx, 1, Step{Skill: "apex-x"}, "", time.Now(), time.Now(), StatusCompleted, 0, "", ev)
+	recordStep(mw, stageIdx, 1, Step{Skill: "apex-x"}, models{}, "", time.Now(), time.Now(), StatusCompleted, 0, "", ev)
 	if _, err := mw.Finalize(StatusCompleted, time.Now()); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestManifestTelemetryNoteRoundTrip(t *testing.T) {
 	}
 	stageIdx := mw.BeginStage("task-y", time.Now())
 	ev := stepTelemetryToResultEvent(&StepTelemetry{Note: "transcript unavailable at scan time"})
-	recordStep(mw, stageIdx, 1, Step{Skill: "apex-y"}, "", time.Now(), time.Now(), StatusCompleted, 0, "", ev)
+	recordStep(mw, stageIdx, 1, Step{Skill: "apex-y"}, models{}, "", time.Now(), time.Now(), StatusCompleted, 0, "", ev)
 	if _, err := mw.Finalize(StatusCompleted, time.Now()); err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestManifestContractRoundTrip(t *testing.T) {
 			}
 			stageIdx := mw.BeginStage("task-c", time.Now())
 			ev := stepTelemetryToResultEvent(&StepTelemetry{Contract: tc.contract})
-			recordStep(mw, stageIdx, 1, Step{Skill: "apex-c"}, "", time.Now(), time.Now(),
+			recordStep(mw, stageIdx, 1, Step{Skill: "apex-c"}, models{}, "", time.Now(), time.Now(),
 				StatusCompleted, 0, "", ev)
 			if _, err := mw.Finalize(StatusCompleted, time.Now()); err != nil {
 				t.Fatalf("Finalize: %v", err)
@@ -232,7 +232,7 @@ func TestManifestContextWindowRoundTrip(t *testing.T) {
 			"claude-fable-5": {NumTurns: 1}, // no known window
 		},
 	})
-	recordStep(mw, stageIdx, 1, Step{Skill: "apex-w"}, "", time.Now(), time.Now(),
+	recordStep(mw, stageIdx, 1, Step{Skill: "apex-w"}, models{}, "", time.Now(), time.Now(),
 		StatusCompleted, 0, "", ev)
 	if _, err := mw.Finalize(StatusCompleted, time.Now()); err != nil {
 		t.Fatalf("Finalize: %v", err)

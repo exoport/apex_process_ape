@@ -53,6 +53,17 @@ type RunOptions struct {
 	// PLAN-5 / C1 + C3 (pipeline web mode).
 	PrependFlags []string
 
+	// StagePrependFlags overrides PrependFlags for the named stage.
+	// Stages absent from the map take PrependFlags unchanged, and a nil
+	// map leaves every stage on it — so a caller that varies nothing
+	// produces byte-identical argv to before this field existed.
+	//
+	// This exists because `--settings` carries the output-style pin and
+	// the framework declares that per stage. Passing whole flag slices
+	// rather than a style keeps the runner ignorant of settings JSON,
+	// the same way PrependFlags keeps it ignorant of the MCP config.
+	StagePrependFlags map[string][]string
+
 	// OnStageStart / OnStageEnd are extra hooks alongside the
 	// Observer interface. Web mode wires them to broker.Publish so
 	// the SSE schema's stage-start / stage-end events fire. The
@@ -226,10 +237,21 @@ type InteractiveStepInfo struct {
 	StepIdx int
 	Skill   string
 	Agent   string
-	// Model is the model the step expects after a `/model` command;
-	// empty means no model switch is expected at this step boundary.
-	Model   string
-	NoClear bool
+	// Model is the model the step's session is actually running on: the
+	// model its STAGE was launched with, which is the first step's.
+	//
+	// This field used to be documented as "the model the step expects
+	// after a `/model` command". No `/model` command was ever sent — ape
+	// has no such send — so for steps 2..n of a chain the field named a
+	// model that was not running, and the TUI and manifest repeated it.
+	// It now names what runs.
+	Model string
+	// ModelDeclared is the spec's cascaded model for this step when it
+	// differs from Model, and empty otherwise. Non-empty means the spec
+	// asked for a model the stage's already-running session cannot
+	// switch to.
+	ModelDeclared string
+	NoClear       bool
 	// SessionName is the repl PTY session driving this stage (empty for
 	// non-interactive callers). PLAN-19 D4: lets the interactive core
 	// install a child-liveness probe so a step-termination diagnostic can
@@ -469,6 +491,18 @@ func closeStepLog(w io.WriteCloser) {
 	_ = w.Close()
 }
 
+// models carries the two model values a step has: the one its session
+// actually runs on, and the one the spec declared when those differ.
+// See Spec.StageModelConflicts for why they can differ at all.
+type models struct {
+	// Run is the model the step's claude session was launched with.
+	// Empty means no --model was passed and claude's default applied.
+	Run string
+	// Declared is the spec's cascaded value, recorded ONLY when it
+	// differs from Run. Empty is the ordinary case.
+	Declared string
+}
+
 // recordStep appends a StepRecord to the manifest writer, populating
 // metrics from the parsed terminal result event when present.
 //
@@ -492,6 +526,7 @@ func recordStep(
 	mw *manifestWriter,
 	stageIdx, stepIdx int,
 	step Step,
+	m models,
 	prompt string,
 	startedAt, endedAt time.Time,
 	status RunStatus,
@@ -503,19 +538,20 @@ func recordStep(
 		return
 	}
 	rec := StepRecord{
-		Index:        stepIdx,
-		Skill:        step.Skill,
-		Agent:        step.Agent,
-		Args:         step.Args,
-		Prompt:       prompt,
-		Model:        step.Model,
-		Effort:       step.Effort,
-		StartedAt:    startedAt.UTC(),
-		EndedAt:      endedAt.UTC(),
-		DurationSecs: endedAt.Sub(startedAt).Seconds(),
-		Status:       status,
-		ExitCode:     exitCode,
-		EventsPath:   eventsPath,
+		Index:         stepIdx,
+		Skill:         step.Skill,
+		Agent:         step.Agent,
+		Args:          step.Args,
+		Prompt:        prompt,
+		Model:         m.Run,
+		ModelDeclared: m.Declared,
+		Effort:        step.Effort,
+		StartedAt:     startedAt.UTC(),
+		EndedAt:       endedAt.UTC(),
+		DurationSecs:  endedAt.Sub(startedAt).Seconds(),
+		Status:        status,
+		ExitCode:      exitCode,
+		EventsPath:    eventsPath,
 	}
 	if ev != nil {
 		rec.CostUSD = ev.TotalCostUSD

@@ -261,12 +261,17 @@ type StageRecord struct {
 // zero if the terminal `result` event was missing or unparseable; status
 // reflects the exit / parse outcome regardless.
 type StepRecord struct {
-	Index                 int          `yaml:"index"`
-	Skill                 string       `yaml:"skill"`
-	Agent                 string       `yaml:"agent,omitempty"`
-	Args                  string       `yaml:"args,omitempty"`
-	Prompt                string       `yaml:"prompt,omitempty"`
+	Index  int    `yaml:"index"`
+	Skill  string `yaml:"skill"`
+	Agent  string `yaml:"agent,omitempty"`
+	Args   string `yaml:"args,omitempty"`
+	Prompt string `yaml:"prompt,omitempty"`
+	// Model is what the step's session actually ran on — its stage's
+	// launch model. ModelDeclared appears only when the spec asked for
+	// a different one, which a running session cannot switch to; see
+	// Spec.StageModelConflicts.
 	Model                 string       `yaml:"model,omitempty"`
+	ModelDeclared         string       `yaml:"model_declared,omitempty"`
 	Effort                string       `yaml:"effort,omitempty"`
 	StartedAt             time.Time    `yaml:"started_at"`
 	EndedAt               time.Time    `yaml:"ended_at,omitempty"`

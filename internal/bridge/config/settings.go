@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 )
 
 // SettingsOptions configures the inline --settings JSON.
@@ -82,6 +83,44 @@ const (
 	// style deliberately.
 	InheritOutputStyle = "inherit"
 )
+
+// builtinOutputStyles maps a lower-cased style name onto the spelling
+// Claude Code resolves it by. The built-ins are capitalised; a name that
+// does not resolve is ignored silently, so a wrong case is a row that
+// looks correct and does nothing.
+//
+// "default" appears twice on purpose. Claude Code's own style table is
+// keyed by the literal `default` for the standard style, while the value
+// ape pins is `Default`, and for THIS name the two are observationally
+// identical: an unresolvable name yields no style section, which is
+// exactly what the standard style yields. Both spellings therefore
+// reach the same session and neither deserves a warning.
+var builtinOutputStyles = map[string]string{
+	"default":     DefaultOutputStyle,
+	"concise":     "Concise",
+	"explanatory": "Explanatory",
+	"learning":    "Learning",
+	"proactive":   "Proactive",
+}
+
+// BuiltinOutputStyleSpelling reports the canonical spelling of a
+// built-in output style, and whether the name names a built-in at all.
+// A custom style — project, plugin or user-defined — is not a built-in
+// and comes back (style, false): ape cannot enumerate what a machine has
+// installed, so an unrecognised name is reported as unknown rather than
+// as wrong.
+func BuiltinOutputStyleSpelling(style string) (canonical string, builtin bool) {
+	canonical, builtin = builtinOutputStyles[strings.ToLower(strings.TrimSpace(style))]
+	if !builtin {
+		return style, false
+	}
+	// Both `default` and `Default` are accepted spellings of the
+	// standard style; report the input as canonical so neither warns.
+	if strings.EqualFold(style, DefaultOutputStyle) {
+		return style, true
+	}
+	return canonical, true
+}
 
 // resolveOutputStyle maps the option onto the value written, and reports
 // whether to write the key at all.

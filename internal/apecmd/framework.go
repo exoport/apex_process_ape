@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/exoport/apex_process_ape/internal/bridge/config"
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/migration"
 	"github.com/exoport/apex_process_ape/internal/output"
@@ -548,6 +549,18 @@ func printFrameworkUpdate(out *frameworkUpdateOutput, format output.Format) erro
 		} else {
 			fmt.Printf("Commits:   no %s in the framework — every dispatch's commit-ownership assertion will SKIP\n",
 				framework.SubtreeCommitOwners)
+		}
+		// Both directions, for the same reason as the roster above: a
+		// missing table is not a quiet default. The framework declares
+		// which skills run under which output style, and if the file
+		// never arrived every one of them runs the pinned default while
+		// the framework's own declaration looks correct on its side.
+		if out.Summary.OutputStylesInstalled {
+			fmt.Printf("Styles:    %s installed — per-skill output styles apply to `ape task`\n",
+				framework.ProjectOutputStyles)
+		} else {
+			fmt.Printf("Styles:    no %s in the framework — every skill runs the %s output style\n",
+				framework.SubtreeOutputStyles, config.DefaultOutputStyle)
 		}
 		if n := out.Summary.MigrationsInstalled; n > 0 {
 			fmt.Printf("Migrations: %d upgrade entr%s installed into %s/\n",

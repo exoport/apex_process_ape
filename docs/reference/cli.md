@@ -2409,6 +2409,11 @@ silent:
                                 installed, and which skills it enrols. No
                                 table means no run is checked for a
                                 terminal contract.
+  framework.output_styles       which skills _apex/output-styles.csv
+                                enrols, and the style each resolves to.
+                                A missing table, an unenrolled skill and
+                                a style name Claude Code cannot resolve
+                                all look identical from inside a run.
   runs.legacy_layout            whether run artifacts are still at the
                                 pre-{output_folder}/ape paths. Until they
                                 move, cost rollups and the hook check read

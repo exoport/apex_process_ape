@@ -719,8 +719,6 @@ func (c *interactiveCore) WaitStepDone(ctx context.Context, _ string, _ int) err
 // or Hub's IPC port. Mode picks the settings shape: ModeWeb for
 // web mode (legacy hooks-via-Mode path), ModeTUI for everywhere
 // else (hooks-via-InjectHooks path).
-//
-//nolint:unparam // mode is a genuine settings-shape selector; ModeWeb is a supported value even though every current caller passes ModeTUI
 func buildInteractivePrepend(
 	apeBin string, ipcPort int, mode config.Mode,
 	ignoreProjectSettings bool, outputStyle string,
@@ -748,6 +746,63 @@ func buildInteractivePrepend(
 		prepend = append(prepend, "--setting-sources", "user")
 	}
 	return prepend, nil
+}
+
+// buildSpecPrepends resolves the prepend flags for a whole run: the
+// run-level slice, plus a per-stage override for every stage whose
+// output style differs from it.
+//
+// Precedence, and the reason this cannot live in BuildSettings:
+//
+//	--output-style flag  >  stage output-style:  >  pipeline output-style:  >  Default
+//
+// The flag is an operator override, so when it is set every stage gets
+// it and the per-stage map stays nil — a run that declares nothing
+// produces exactly the argv it produced before this existed.
+//
+// Precomputing per stage rather than resolving at spawn time keeps the
+// error handling here, where a bad settings blob fails the run before
+// any model time is spent, instead of inside the runner's stage loop.
+func buildSpecPrepends(
+	apeBin string, ipcPort int, mode config.Mode,
+	spec *pipeline.Spec, cfg runConfig,
+) (runFlags []string, perStage map[string][]string, err error) {
+	runStyle := cfg.outputStyle
+	if !cfg.outputStyleSet && spec.OutputStyle != "" {
+		runStyle = spec.OutputStyle
+	}
+	runFlags, err = buildInteractivePrepend(apeBin, ipcPort, mode, cfg.ignoreProjectSettings, runStyle)
+	if err != nil {
+		return nil, nil, err
+	}
+	if cfg.outputStyleSet {
+		return runFlags, nil, nil
+	}
+	for _, stage := range spec.Stages() {
+		declared, styleErr := spec.EffectiveOutputStyle(stage.Name)
+		// An undeclared stage INHERITS the run-level flags; it must not
+		// get an override. Comparing the spec's cascade against runStyle
+		// alone is not enough, because runStyle can come from outside the
+		// spec — the `--output-style` flag, or `ape task`'s per-skill
+		// table. On those paths every stage is undeclared, so treating
+		// "undeclared" as a difference built an override pinning Default
+		// onto every stage and silently discarded the very style the
+		// caller had just resolved. That is what shipped in the first cut
+		// and what a real `ape task --output-style Concise` proved.
+		if styleErr != nil || declared == "" || declared == runStyle {
+			continue
+		}
+		style := declared
+		stageFlags, stageErr := buildInteractivePrepend(apeBin, ipcPort, mode, cfg.ignoreProjectSettings, style)
+		if stageErr != nil {
+			return nil, nil, stageErr
+		}
+		if perStage == nil {
+			perStage = map[string][]string{}
+		}
+		perStage[stage.Name] = stageFlags
+	}
+	return runFlags, perStage, nil
 }
 
 // runWithInteractive runs a pipeline in PLAN-6 interactive exec mode
@@ -818,7 +873,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		runLogMu.Unlock()
 	}()
 
-	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, cfg.ignoreProjectSettings, cfg.outputStyle)
+	prepend, stagePrepend, err := buildSpecPrepends(apeBin, rt.IPCPort(), config.ModeTUI, spec, cfg)
 	if err != nil {
 		return err
 	}
@@ -846,18 +901,19 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	}
 	obs := newPlainObserver(progressW, projectRoot, cfg.quiet)
 	runErr := pipeline.Run(runCtx, spec, pipeline.RunOptions{
-		ProjectRoot:  projectRoot,
-		Prompt:       cfg.prompt,
-		Observer:     obs,
-		ClaudeBin:    cfg.claudeBin,
-		Effort:       cfg.effort,
-		ApeVersion:   Version,
-		ManifestDir:  cfg.manifestDir,
-		FromStage:    cfg.fromStage,
-		NoCommit:     cfg.noCommit,
-		AllowDirty:   cfg.allowDirty,
-		PrependFlags: prepend,
-		OnStageStart: core.ResetStageTelemetry,
+		ProjectRoot:       projectRoot,
+		Prompt:            cfg.prompt,
+		Observer:          obs,
+		ClaudeBin:         cfg.claudeBin,
+		Effort:            cfg.effort,
+		ApeVersion:        Version,
+		ManifestDir:       cfg.manifestDir,
+		FromStage:         cfg.fromStage,
+		NoCommit:          cfg.noCommit,
+		AllowDirty:        cfg.allowDirty,
+		PrependFlags:      prepend,
+		StagePrependFlags: stagePrepend,
+		OnStageStart:      core.ResetStageTelemetry,
 		OnStageEnd: func(stage string, dur time.Duration, err error) {
 			core.publisher().StageEnd(stage, dur.Seconds(), err != nil)
 		},

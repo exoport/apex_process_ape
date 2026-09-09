@@ -293,6 +293,13 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	@# The gates above compare ape to a framework CHECKOUT. This compares it to
 	@# a framework INSTALL — the manifest as a project actually received it,
 	@# which is what a skill meets at run time.
+	@#
+	@# framework.output_styles rides here for the same reason as the contract
+	@# table: both are framework-owned files whose ABSENCE is silent, and the
+	@# install is the only place to see whether one arrived. Under --strict it
+	@# reports Info (not Warn) when the table is absent, so a project on a
+	@# framework that predates it stays green — version skew, not a failure —
+	@# while a table that is present and unusable fails the gate.
 	@# Guarded on the FILE the check reads, not on the directory. `-d _apex`
 	@# is true of this repo — it holds a README and nothing else — so the
 	@# guard passed, the doctor ran, both checks reported "not installed",
@@ -302,7 +309,7 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	@if [ -f "$(APEX_PROJECT)/_apex/ape-commands.yaml" ]; then \
 		echo "==> installed command surface in $(APEX_PROJECT)"; \
 		go run ./cmd/ape doctor --strict --cwd "$(APEX_PROJECT)" \
-		  --only framework.command_surface,framework.terminal_contracts; \
+		  --only framework.command_surface,framework.terminal_contracts,framework.output_styles; \
 	else \
 		echo "installed command surface NOT verified — this is a skip, not a pass."; \
 		echo "  APEX_PROJECT=$(APEX_PROJECT) has no _apex/ape-commands.yaml, so there is no"; \
