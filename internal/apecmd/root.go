@@ -54,8 +54,19 @@ inspection. Every claude invocation runs in an in-process PTY — there is no
 }
 
 // rootSubcommands constructs one fresh instance of every top-level command.
+//
+// The unknown-verb guard is installed HERE rather than in each
+// constructor, because both tree-building sites (this function's two
+// callers) must get it and a new group must not be able to arrive
+// without it. See groupguard.go for what the guard is and why cobra's
+// default needed one.
 func rootSubcommands() []*cobra.Command {
-	return []*cobra.Command{
+	// Held by identity rather than matched by name later: aboard is the
+	// one subtree the guard must not descend into, and a string match is
+	// what silently stops matching when a command is renamed.
+	aboardCmd := newAboardCmd()
+
+	subs := []*cobra.Command{
 		newVersionCmd(),
 		newBootstrapCmd(),
 		newConfigCmd(),
@@ -103,8 +114,23 @@ func rootSubcommands() []*cobra.Command {
 		// A whole command tree from a separate module, mounted rather than
 		// ported — see aboard.go for what the two hosts share and what
 		// distinguishes them.
-		newAboardCmd(),
+		aboardCmd,
 	}
+
+	// The unknown-verb guard, installed over the tree rather than in each
+	// constructor. aboard gets it on the mounted NODE only: the subtree's
+	// argument contracts belong to aboard, the standalone binary serves
+	// the same tree, and a host that answered differently would be a host
+	// an agent could tell apart.
+	for _, cmd := range subs {
+		if cmd == aboardCmd {
+			guardGroup(cmd)
+			continue
+		}
+		guardGroupsDeep(cmd)
+	}
+
+	return subs
 }
 
 // newRootCmd builds a COMPLETE and PRIVATE copy of ape's command tree.
