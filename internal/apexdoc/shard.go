@@ -19,6 +19,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/exoport/apex_process_ape/internal/mdscan"
 )
 
 // IndexFileName is the listing `shard` always writes.
@@ -43,17 +45,27 @@ var (
 	spaceRe     = regexp.MustCompile(`[\s_]+`)
 	multiDashRe = regexp.MustCompile(`-+`)
 
-	// mdLinkRe matches `[text](url)` and `![alt](url)`, tolerating one
-	// level of nested brackets in the label.
-	mdLinkRe = regexp.MustCompile(`(!?\[(?:[^\[\]]|\[[^\]]*\])*\])\(([^)]+)\)`)
-	// mdRefRe matches a reference definition at the start of a line.
-	mdRefRe = regexp.MustCompile(`(?m)^(\s*\[[^\]]+\]:\s+)(\S+)(.*)`)
-	// htmlSrcRe matches src="url", src='url' and bare src=url.
-	htmlSrcRe = regexp.MustCompile(`(?i)(src=)(["']?)([^"'>\s]+)(["']?)`)
-	// uriSchemeRe matches any URI scheme prefix.
-	uriSchemeRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+\-.]*:`)
-	// sectionEntryRe parses `- [Title](file.md)` out of the index.
-	sectionEntryRe = regexp.MustCompile(`(?m)^\s*-\s+\[.*?\]\(([^)]+)\)`)
+	// The link forms now live in internal/mdscan, so a second reader of
+	// these documents — the spec graph — resolves the same set this
+	// package does. Aliased rather than rewritten at each call site so
+	// every use below, and the golden tests over them, are textually
+	// unchanged.
+	//
+	// The WHOLE set moved, not just the one the graph asked for. Its
+	// `shard_of` edges need sectionEntryRe alone, and exporting only that
+	// (or only mdLinkRe) would have left it blind to reference-style
+	// links and HTML src= — links this package already handles. A reader
+	// that sees fewer links than the sharding tool whose regexes it
+	// borrowed is worse than one that wrote its own, because its gaps
+	// look like the document's.
+	//
+	// Slugify's three stay here: it is already exported, has a golden
+	// test, and moving it would break every caller for no gain.
+	mdLinkRe       = mdscan.MDLinkRe
+	mdRefRe        = mdscan.MDRefRe
+	htmlSrcRe      = mdscan.HTMLSrcRe
+	uriSchemeRe    = mdscan.URISchemeRe
+	sectionEntryRe = mdscan.SectionEntryRe
 )
 
 // Slugify converts heading text to a filename component, reproducing
