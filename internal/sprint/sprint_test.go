@@ -815,8 +815,14 @@ func TestStoryKeyFromPath(t *testing.T) {
 // send a reader off to create `2-1.md` when the row is what is wrong.
 func TestRunCheck_BareRowKeyIsItsOwnFinding(t *testing.T) {
 	cfg, write := newCheckFixture(t)
+	// epic-2 reads `done` and not `backlog` so this fixture carries exactly
+	// ONE defect. ape counts a bare row toward its epic, so `2-1: done`
+	// projects `done`, and an epic row asserting `backlog` would be a real
+	// and separate epic_projection_divergence — see
+	// TestRunCheck_BareRowCountsTowardTheProjection, which is where that
+	// interaction belongs. Here it would only blunt the count below.
 	write("sprint-status.yaml",
-		"development_status:\n  epic-2: backlog\n  2-1: done\n  epic-2-retrospective: optional\n")
+		"development_status:\n  epic-2: done\n  2-1: done\n  epic-2-retrospective: optional\n")
 
 	report, err := RunCheck(cfg)
 	require.NoError(t, err)
@@ -843,8 +849,11 @@ func TestRunCheck_BareRowKeyIsItsOwnFinding(t *testing.T) {
 // must not also be reported as having no tracker row when it plainly has one.
 func TestRunCheck_BareRowKeyNamesItsActualStory(t *testing.T) {
 	cfg, write := newCheckFixture(t)
+	// epic-7 reads `done` for the same reason as the fixture above: the
+	// bare row projects `done`, so `backlog` here would add a second,
+	// unrelated finding and weaken the one-problem-one-finding claim.
 	write("sprint-status.yaml",
-		"development_status:\n  epic-7: backlog\n  7-3: done\n  epic-7-retrospective: optional\n")
+		"development_status:\n  epic-7: done\n  7-3: done\n  epic-7-retrospective: optional\n")
 	storyFile(t, write, "7-3_payment-retry", "7.3", "done")
 
 	report, err := RunCheck(cfg)
@@ -1107,4 +1116,193 @@ func TestRetroRowEpic(t *testing.T) {
 	require.Equal(t, 0, retroRowEpic("project-retrospective"))
 	require.Equal(t, 0, retroRowEpic("epic-3-retrospective-followup"))
 	require.Equal(t, 0, retroRowEpic("epic-3"))
+}
+
+// --- sprint.epic_projection_divergence -------------------------------
+//
+// The class is a comparison, not a projection: it calls the same Project
+// that `ape sprint reconcile` writes from. So these tests are about WHEN
+// it speaks and what it says, not about the projection rule — that is
+// already covered by the Project and reconcile tests, and duplicating it
+// here would create a second place to update when the rule moves.
+
+// TestEpicProjection_ReportsADivergentEpicRow is the base case: the row
+// says one thing, the story rows project another.
+func TestEpicProjection_ReportsADivergentEpicRow(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml",
+		"development_status:\n  epic-1: in-progress\n"+
+			"  1-1_a: done\n  1-2_b: done\n  epic-1-retrospective: optional\n")
+	storyFile(t, write, "1-1_a", "1.1", "done")
+	storyFile(t, write, "1-2_b", "1.2", "done")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+
+	found := findingsWithCheck(report.Findings, CheckEpicProjectionDivergence)
+	require.Len(t, found, 1)
+	require.Equal(t, "epic-1", found[0].Key)
+	require.Equal(t, "in-progress", found[0].Tracker, "the asserted value")
+	require.Equal(t, "done", found[0].Projected, "the computed value")
+
+	// The remediation is a command and a skill, never a hand edit — the
+	// tracker's own header says epic rows are derived, and a finding that
+	// suggested otherwise would contradict the file it is printed about.
+	require.Contains(t, found[0].Message, "ape sprint reconcile")
+	require.Contains(t, found[0].Message, "apex-sprint-sync")
+	require.Contains(t, found[0].Message, "Never hand-edit an epic row.")
+}
+
+// TestEpicProjection_AgreementIsSilent — the class must not fire on a
+// healthy project, which is the property every check here lives or dies
+// by. A checker that cries wolf is one an operator learns to ignore.
+func TestEpicProjection_AgreementIsSilent(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml",
+		"development_status:\n  epic-1: done\n  1-1_a: done\n  epic-1-retrospective: optional\n")
+	storyFile(t, write, "1-1_a", "1.1", "done")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	require.Empty(t, findingsWithCheck(report.Findings, CheckEpicProjectionDivergence))
+}
+
+// TestEpicProjection_ContextedIsALegacySpellingOfInProgress covers the one
+// value that needed a mapping, and the reason it got its own normaliser.
+func TestEpicProjection_ContextedIsALegacySpellingOfInProgress(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml",
+		"development_status:\n  epic-1: contexted\n"+
+			"  1-1_a: done\n  1-2_b: backlog\n  epic-1-retrospective: optional\n")
+	storyFile(t, write, "1-1_a", "1.1", "done")
+	storyFile(t, write, "1-2_b", "1.2", "backlog")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	require.Empty(t, findingsWithCheck(report.Findings, CheckEpicProjectionDivergence),
+		"`contexted` is the legacy epic spelling of in-progress, which is what "+
+			"one done and one backlog story project — reporting it would fire on "+
+			"every tracker written before the rename")
+}
+
+// TestEpicProjection_ContextedDoesNotMoveStatusDivergence is the other
+// half of that decision, and the one worth a test of its own.
+//
+// The mapping lives in NormalizeEpicStatus and NOT in NormalizeStatus,
+// which sprint.status_divergence reads on every story row of every
+// project. Folding it in would have been one line and would have changed
+// a shipped class's output as a side effect of adding a different one. A
+// story row written `contexted` must still diverge from an `in-progress`
+// story file.
+func TestEpicProjection_ContextedDoesNotMoveStatusDivergence(t *testing.T) {
+	require.Equal(t, StatusInProgress, NormalizeEpicStatus("contexted"))
+	require.Equal(t, "contexted", NormalizeStatus("contexted"),
+		"the story vocabulary is untouched; only the epic row maps this value")
+
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml",
+		"development_status:\n  epic-1: in-progress\n  1-1_a: contexted\n"+
+			"  epic-1-retrospective: optional\n")
+	storyFile(t, write, "1-1_a", "1.1", "in-progress")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	require.Len(t, findingsWithCheck(report.Findings, CheckStatusDivergence), 1,
+		"a story row reading `contexted` still diverges from an in-progress story file")
+}
+
+// TestEpicProjection_NoProjectionMeansNoFinding covers both silences.
+//
+// An epic with no story rows and an epic whose every row is cancelled
+// have NO projection — Project returns "" for each — so there is nothing
+// for the asserted value to disagree with. Reporting them would fire on
+// every epic mid-mint and on every descoped epic, which are decisions
+// rather than drift.
+func TestEpicProjection_NoProjectionMeansNoFinding(t *testing.T) {
+	t.Run("no story rows", func(t *testing.T) {
+		cfg, write := newCheckFixture(t)
+		write("sprint-status.yaml",
+			"development_status:\n  epic-9: done\n  epic-9-retrospective: optional\n")
+
+		report, err := RunCheck(cfg)
+		require.NoError(t, err)
+		require.Empty(t, findingsWithCheck(report.Findings, CheckEpicProjectionDivergence))
+	})
+
+	t.Run("every story row cancelled", func(t *testing.T) {
+		cfg, write := newCheckFixture(t)
+		write("sprint-status.yaml",
+			"development_status:\n  epic-9: backlog\n  9-1_a: cancelled\n"+
+				"  epic-9-retrospective: optional\n")
+		storyFile(t, write, "9-1_a", "9.1", "cancelled")
+
+		report, err := RunCheck(cfg)
+		require.NoError(t, err)
+		require.Empty(t, findingsWithCheck(report.Findings, CheckEpicProjectionDivergence),
+			"all-cancelled is a scope decision, and the projection declines to close on it")
+	})
+}
+
+// TestEpicProjection_NoEpicRowAssertsNothing: story rows but no `epic-N`
+// header. Nothing was asserted, so nothing can diverge — and inventing a
+// divergence against a value nobody wrote would send a reader to correct
+// a row that does not exist. The absent header is a different finding
+// with a different fix.
+func TestEpicProjection_NoEpicRowAssertsNothing(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml",
+		"development_status:\n  1-1_a: done\n  epic-1-retrospective: optional\n")
+	storyFile(t, write, "1-1_a", "1.1", "done")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	require.Empty(t, findingsWithCheck(report.Findings, CheckEpicProjectionDivergence))
+}
+
+// TestRunCheck_BareRowCountsTowardTheProjection is the interaction two
+// other fixtures in this file were carrying silently until this class
+// existed, which is why it now has a test of its own.
+//
+// ape counts a bare `N-M` row toward its epic and the
+// reconcile-epic-status.py it replaces does not. So a tracker with a bare
+// row can carry TWO genuine findings: the misnamed row, and an epic row
+// that is stale by ape's counting. They are not one problem wearing two
+// hats — renaming the row leaves the projection exactly where it was, so
+// the epic row is still wrong afterwards.
+func TestRunCheck_BareRowCountsTowardTheProjection(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml",
+		"development_status:\n  epic-7: backlog\n  7-3: done\n  epic-7-retrospective: optional\n")
+	storyFile(t, write, "7-3_payment-retry", "7.3", "done")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+
+	require.Len(t, findingsWithCheck(report.Findings, CheckNonStandardRowKey), 1)
+	drift := findingsWithCheck(report.Findings, CheckEpicProjectionDivergence)
+	require.Len(t, drift, 1,
+		"the bare row is counted, so the epic projects done against an asserted backlog")
+	require.Equal(t, "backlog", drift[0].Tracker)
+	require.Equal(t, "done", drift[0].Projected)
+}
+
+// TestEpicProjection_UnrecognisedStatusIsNamedNotSwallowed — an
+// unrecognised story status can only ever hold an epic open, so it may be
+// the whole cause of a divergence. A reader who cannot see it would read
+// the projection as wrong instead of the row.
+func TestEpicProjection_UnrecognisedStatusIsNamedNotSwallowed(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml",
+		"development_status:\n  epic-1: done\n  1-1_a: marinating\n"+
+			"  epic-1-retrospective: optional\n")
+	storyFile(t, write, "1-1_a", "1.1", "marinating")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+
+	found := findingsWithCheck(report.Findings, CheckEpicProjectionDivergence)
+	require.Len(t, found, 1)
+	require.Equal(t, "in-progress", found[0].Projected)
+	require.Contains(t, found[0].Message, "marinating",
+		"the status that held the epic open is named in the finding")
 }

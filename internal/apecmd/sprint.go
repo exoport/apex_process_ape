@@ -91,12 +91,37 @@ func emitSprintCheckHuman(w io.Writer, report *sprint.CheckReport) {
 		fmt.Fprintf(w, "\n%d finding(s):\n", len(report.Findings))
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "  CHECK\tKEY\tTRACKER\tSTORY")
+	fmt.Fprintln(tw, "  CHECK\tKEY\tTRACKER\tSTORY\tPROJECTED")
 	for i := range report.Findings {
 		f := &report.Findings[i]
-		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", f.Check, f.Key, dashIfEmpty(f.Tracker), dashIfEmpty(f.Story))
+		fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\n",
+			f.Check, f.Key, dashIfEmpty(f.Tracker), dashIfEmpty(f.Story), dashIfEmpty(f.Projected))
 	}
 	_ = tw.Flush()
+
+	// The remediation, once, for the one class whose row cannot carry it.
+	//
+	// Every other class here names two sides and picks neither, so the
+	// table IS the finding. An epic-projection divergence is the opposite:
+	// the projection is authoritative and the row is derived, so there is
+	// exactly one correct fix and it is mechanical — and a reader seeing
+	// only `TRACKER in-progress  PROJECTED done` is told what is wrong and
+	// not what to do about it. Printed once rather than per row because it
+	// is the same sentence every time, and printed at all because human
+	// output is what an operator reads; a remediation that exists only in
+	// the JSON reaches nobody who needed it.
+	if anyCheck(report.Findings, sprint.CheckEpicProjectionDivergence) {
+		fmt.Fprintf(w, "\n%s\n", sprint.EpicProjectionRemediation)
+	}
+}
+
+func anyCheck(findings []sprint.Finding, check string) bool {
+	for i := range findings {
+		if findings[i].Check == check {
+			return true
+		}
+	}
+	return false
 }
 
 func anyTwoSided(findings []sprint.Finding) bool {

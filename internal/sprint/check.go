@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/story"
@@ -31,7 +32,30 @@ const (
 	// check at all: the runner writes the id to the ledger and never looks
 	// again, so a false "applied" is permanent.
 	CheckEpicWithoutRetro = "sprint.epic_without_retro"
+	// CheckEpicProjectionDivergence is an `epic-N` row whose asserted
+	// status disagrees with the projection of that epic's story rows.
+	//
+	// Report-only, like every class here, and for a sharper reason than
+	// the others: an epic row is DERIVED. The framework's operating rules
+	// say "never set, close, or reopen an epic row by hand", so unlike a
+	// status divergence — where which side is right is genuine judgment —
+	// this one has exactly one correct resolution, and it is mechanical.
+	// Which is also why there is no --fix here: `ape sprint reconcile`
+	// already owns the write, and a second writer of the same rows is how
+	// two tools start disagreeing about a value neither of them decides.
+	CheckEpicProjectionDivergence = "sprint.epic_projection_divergence"
 )
+
+// EpicProjectionRemediation is the fix for an epic-projection
+// divergence, stated once so the finding, the framework's doctor routing
+// prose and any future caller cannot drift apart.
+//
+// It names a command and a skill and NOT a hand edit, deliberately: the
+// tracker's own header says "DERIVED — never edit an epic row by hand",
+// and a remediation that suggested otherwise would contradict the file it
+// is printed about.
+const EpicProjectionRemediation = "epic rows are derived, not asserted: re-derive with " +
+	"`ape sprint reconcile` (the apex-sprint-sync skill runs it). Never hand-edit an epic row."
 
 // Finding is one divergence. It names both sides and picks neither.
 type Finding struct {
@@ -55,7 +79,15 @@ type Finding struct {
 	// learn what the options were. One candidate populates this too, so a
 	// consumer reads one field regardless of which branch it landed in.
 	Candidates []string `json:"candidates,omitempty" yaml:"candidates,omitempty"`
-	Message    string   `json:"message"              yaml:"message"`
+	// Projected is the value an epic-projection divergence COMPUTED, to
+	// sit beside Tracker's asserted one. A separate field rather than
+	// reusing Story, which means "the story file's own value" everywhere
+	// else — a consumer reading a projection out of it would be reading a
+	// field that names the wrong source.
+	//
+	// omitempty, so no other class's payload gains a key.
+	Projected string `json:"projected,omitempty" yaml:"projected,omitempty"`
+	Message   string `json:"message"             yaml:"message"`
 }
 
 // CheckReport is the payload of `ape sprint check`.
@@ -237,10 +269,81 @@ func RunCheck(cfg *apexcfg.Resolved) (*CheckReport, error) {
 	}
 
 	report.Findings = append(report.Findings, epicsWithoutRetro(tracker.Rows)...)
+	report.Findings = append(report.Findings, epicProjectionDivergences(tracker.Rows)...)
 
 	sortCheckFindings(report.Findings)
 	report.tally()
 	return report, nil
+}
+
+// epicProjectionDivergences reports every `epic-N` row whose asserted
+// status disagrees with the projection of that epic's story rows.
+//
+// It calls the SAME Project that `ape sprint reconcile` writes from,
+// rather than reimplementing the rule. That is the whole design: the
+// report and the write cannot disagree about which epics are drifting,
+// because a key one side counts and the other does not is exactly how
+// they drift apart. It also means this class inherits Project's decisions
+// for free — cancelled rows dropped from the active set, `blocked`
+// holding an epic open, and a bare `N-M` row counted toward its epic
+// (which reconcile discloses in BareRowKeys and the script it replaced
+// did not count at all).
+//
+// Two silences, both deliberate:
+//
+//   - An epic with no story rows, or none that are active, has NO
+//     projection — Project returns "" — so there is nothing to disagree
+//     with. Reporting those would fire on every epic mid-mint and on
+//     every all-cancelled epic, which is a scope decision rather than
+//     drift.
+//   - An epic with story rows but no `epic-N` row asserts nothing, so
+//     nothing can diverge. The absent header is a different finding with
+//     a different fix, and inventing a divergence against a value nobody
+//     wrote would send a reader to correct a row that does not exist.
+func epicProjectionDivergences(rows []Row) []Finding {
+	asserted := map[int]string{}
+	for _, r := range rows {
+		if r.Kind == KindEpic && r.Epic > 0 {
+			asserted[r.Epic] = r.Status
+		}
+	}
+
+	var findings []Finding
+	for _, epic := range EpicNumbers(rows) {
+		current, declared := asserted[epic]
+		if !declared {
+			continue // nothing asserted, so nothing to diverge from
+		}
+		target, unrecognised := Project(rows, epic)
+		if target == "" {
+			continue // no rows, or no active rows: no projection exists
+		}
+		if strings.EqualFold(NormalizeEpicStatus(current), target) {
+			continue
+		}
+
+		msg := fmt.Sprintf(
+			"epic row asserts %q but its story rows project %q — %s",
+			current, target, EpicProjectionRemediation,
+		)
+		if len(unrecognised) > 0 {
+			// Named rather than swallowed, for the same reason reconcile
+			// names them: an unrecognised status can only ever hold an epic
+			// open, so it may be the whole cause of the divergence, and a
+			// reader who cannot see it would read the projection as wrong.
+			msg += " Unrecognised story status(es) held this epic open: " +
+				strings.Join(unrecognised, ", ") + "."
+		}
+
+		findings = append(findings, Finding{
+			Check:     CheckEpicProjectionDivergence,
+			Key:       "epic-" + strconv.Itoa(epic),
+			Tracker:   current,
+			Projected: target,
+			Message:   msg,
+		})
+	}
+	return findings
 }
 
 // epicsWithoutRetro reports every epic carrying no retrospective row.

@@ -50,6 +50,12 @@ const (
 	// ready-for-dev. Normalised on comparison, never rewritten.
 	StatusDrafted     = "drafted"
 	StatusReadyForDev = "ready-for-dev"
+	// StatusContexted is a legacy EPIC-row spelling of in-progress. It
+	// exists only in the framework's apex-sprint-status vocabulary and in
+	// old trackers; nothing in ape ever writes it. Read by
+	// NormalizeEpicStatus and by nothing else, which is the point — see
+	// there for why it is not in NormalizeStatus.
+	StatusContexted = "contexted"
 )
 
 var (
@@ -337,6 +343,31 @@ func NormalizeStatus(s string) string {
 		return StatusReadyForDev
 	}
 	return strings.TrimSpace(s)
+}
+
+// NormalizeEpicStatus maps the tracker's EPIC-row vocabulary onto the
+// projection's.
+//
+// Deliberately separate from NormalizeStatus, which maps the tracker's
+// story vocabulary onto a story file's, and which is read by
+// sprint.status_divergence on every story row of every project. The two
+// vocabularies are not the same and only one legacy value needs mapping
+// here: `contexted`, which the framework's own apex-sprint-status
+// documents as a legacy spelling of `in-progress` for an epic row, and
+// which appears nowhere in ape.
+//
+// Folding it into NormalizeStatus would have been one line and would
+// have moved sprint.status_divergence's output — a story row written
+// `contexted` would stop diverging from an `in-progress` story file. That
+// is a behaviour change to a shipped class, arriving as a side effect of
+// adding a different one, which is exactly what the new class was
+// required not to do.
+func NormalizeEpicStatus(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if strings.EqualFold(trimmed, StatusContexted) {
+		return StatusInProgress
+	}
+	return trimmed
 }
 
 // Project computes an epic's status from its story rows.
