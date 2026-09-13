@@ -87,7 +87,11 @@ message. Read them before you decide what to do; an outstanding request beats
 whatever you were going to pick up. See [Answering their requests](#answering-their-requests).
 
 `ape aboard status` reports: running (use it), a stale record, or nothing (start it
-with `ape aboard serve`). It answers for THIS project only; `ape aboard boards` is the
+with `ape aboard serve --detach`). **From an agent session, always start it detached**:
+`ape aboard serve … &` — `nohup` or not — stays in your shell's process group, dies when
+the session restarts, and leaves a stale record that fails every `apply` after it.
+`--detach` puts it in a session of its own, logs to `.aboard/run/serve.log`, and
+returns once the board answers. It answers for THIS project only; `ape aboard boards` is the
 machine-wide version — every running board, whichever project it belongs to, read
 out of the process table. Use it when you have lost track of which board a URL
 belongs to, or before assuming a colleague's session is not already up. It is

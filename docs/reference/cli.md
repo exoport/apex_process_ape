@@ -786,10 +786,17 @@ shell, so every fetch, the SSE stream and an html tab's iframe all build from it
 Because it is injected, it is also validated: one or more /segments of letters,
 digits, dot, underscore, tilde or hyphen. Anything else is a usage error.
 
+--detach starts the same server in a session of its own, with its output in
+.aboard/run/serve.log, and returns once it answers — so a board started from an
+agent session outlives that session restarting, where one started with
+`nohup … &` dies with it. It still refuses a second board for this project, and
+says so with the log of the process that refused. Stop it by the pid it prints.
+
 Examples:
 
 ```
   ape aboard serve
+  ape aboard serve --detach
   ape aboard serve --dev
   ape aboard serve --base-path /aboard
 ```
@@ -799,6 +806,7 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--base-path` | string | `—` | serve under a URL prefix, e.g. /aboard (default: the server root) |
+| `--detach` | bool | `false` | start the server in a session of its own, log to .aboard/run/serve.log, and return once it answers |
 | `--dev` | bool | `false` | serve the web tree from disk instead of the embedded copy |
 | `--dev-dir` | string | `—` | with --dev, the web tree to serve (default: pkg/aboard/web under the root) |
 | `--port` | int | `0` | port to listen on (0 derives one from the project root; env PORT) |

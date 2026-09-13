@@ -242,7 +242,10 @@ Gotcha: in `requirementDiagram`, quote any `text:` containing punctuation.
     { "id":"notes", "type":"textarea", "label":"…", "value":"" } ] }
 ```
 
-Five field types. The form has a generated `id`; **field ids stay semantic** —
+Five field types, named by **`type`** — never `kind`. A field whose `type` is
+anything else draws "Unsupported field type" instead of an input, and `ape aboard apply`
+warns about it, and about any key on a field that the form never reads. The form
+has a generated `id`; **field ids stay semantic** —
 you choose them and read answers back by them, so keep them stable when you only
 reword. A default value may mean "not answered yet".
 
@@ -273,9 +276,17 @@ The human can answer, and Reset answers.
   warns when a write names a colour the board does not have, and prints the ones
   it does.
 - `strokes[].points` is one `"x,y x,y"` string. Keep the compact form.
-- Images the human pastes or drops land in `.aboard/uploads/` and are served from
-  `/uploads/<file>`; images you ship with the binary live in its embedded
-  `assets/`.
+- **Put an image you supply in `.aboard/uploads/`** and reference it as
+  `uploads/<file>` — PNG, JPEG, GIF or WebP; SVG is refused. That is also where the
+  human's pasted and dropped images land. **Not `assets/`**: that directory is
+  compiled into the binary, so a file you write there answers 404 and the image
+  shows "Image failed to load".
+- **To retake a screen, keep the marks**: save the new capture under a NEW file
+  name and change only that image's `src`. The regions, strokes and their notes live
+  on the image object, so nothing else has to move, and they stay aligned when the
+  retake has the same framing and aspect ratio. Rebuilding the image instead
+  discards whatever the human drew. Reusing the old file name does not reload the
+  picture in a page that already has it open.
 
 The human can: draw with **region**, **ellipse** or **pen**; **move** a mark;
 **resize** a rect or ellipse by its handles; hide/show marks per image; note each
