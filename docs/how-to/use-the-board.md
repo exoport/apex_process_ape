@@ -101,7 +101,7 @@ Release and `code --install-extension aboard-vscode-<version>.vsix --force`.
 
 A host that shows the board inside a view of its own drives it through the
 shell URL and a message channel. The contract is aboard's —
-[HTTP API: `GET /`](https://github.com/exoport/aboard/blob/v0.2.0/docs/reference/http-api.md#get---get-aboardhtml)
+[HTTP API: `GET /`](https://github.com/exoport/aboard/blob/v0.2.1/docs/reference/http-api.md#get---get-aboardhtml)
 — and ape serves it unchanged:
 
 | in the URL | what it does |
@@ -114,6 +114,11 @@ shell URL and a message channel. The contract is aboard's —
 `top`), the parameters and the messages each way — so a host can tell a board
 that speaks a channel from an older one before loading it. `?embed=top` and
 `?theme=` need **ape v0.0.69 or later** (aboard v0.2.0).
+
+Send `?theme=` for the first paint and a `theme` message for every change after
+it. From **ape v0.0.70** (aboard v0.2.1) the variant a message last set survives
+an edit to `.aboard/theme.json`; on v0.0.69 that edit put the board back on the
+load-time `?theme=`, or the viewer's stored choice.
 
 ## Exit statuses
 
@@ -329,7 +334,7 @@ wrong project.
 
 ```console
 $ ape aboard --version
-aboard version 0.2.0
+aboard version 0.2.1
 ```
 
 ## Platform note

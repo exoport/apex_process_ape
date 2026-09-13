@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## v0.0.70 (2026-09-13)
+
+- **fix(aboard): `ape aboard` serves aboard v0.2.1.** One browser-side fix
+  in the embedded shell: a host's `theme` message is now remembered, so an
+  edit to `.aboard/theme.json` keeps the variant the host last sent instead
+  of reverting to the load-time `?theme=` or the viewer's stored choice. On
+  v0.0.69 a board loaded with `?theme=dark` and then told `light` went dark
+  again at the next project theme change. Found by Moonwatcher while
+  building its `?embed=top` load. Nothing in aboard's Go API, command tree
+  or described surface changed — `capsHash` stays `8beefdfe` — so the mount
+  and this repo's skill copy are unchanged; both were checked against the
+  new module rather than assumed.
+
 ## v0.0.69 (2026-09-13)
 
 - **fix(repl): on Claude Code 2.1.270 no spawn could get past the
