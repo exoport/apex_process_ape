@@ -130,42 +130,104 @@ var (
 // example is still the story talking about that subject. So this is a
 // function a caller chooses, never something applied on the way in.
 //
-// Fence rules follow CommonMark closely enough for real documents: an
-// opening fence is three or more backticks or tildes, indented at most
-// three spaces, optionally followed by an info string; the block ends at
-// a fence of the SAME character that is at least as long and carries no
-// info string, or at end of document. Matching the character and length
-// is what lets a ```` ``` ```` example sit inside a ```` ```` ```` block.
+// The fence rules: an opening fence is three or more backticks or tildes,
+// indented at most three spaces, optionally followed by an info string;
+// the block ends at a fence of the SAME character that is at least as long
+// and carries no info string, or at end of document. Matching the
+// character and length is what lets a ```` ``` ```` example sit inside a
+// ```` ```` ```` block.
+//
+// A fence inside a block quote is a fence, as CommonMark has it: `> ```bash`
+// opens one. It is found by stripping the quote markers first, and the
+// block remembers the depth it opened at — its closing fence must sit at
+// that same depth, and it also ends when its block quote does, because a
+// fence cannot outlive its container. That second rule is the one that
+// matters: without it, an unclosed quoted fence would run to the end of
+// the document and strip every real section after it.
+//
+// NOT handled: a fence nested in a list item and indented four or more
+// spaces. CommonMark measures that indent from the item's content column;
+// this measures it from the margin, so such a block stays in the prose.
 func StripFences(text string) string {
 	lines := strings.Split(text, "\n")
 	out := make([]string, 0, len(lines))
 	var (
 		inFence bool
+		depth   int // the block-quote depth the open fence sits at
 		char    byte
 		width   int
 	)
 	for _, line := range lines {
-		marker, markerChar, markerWidth, info := fenceMarker(line)
-		switch {
-		case !inFence && marker:
-			inFence, char, width = true, markerChar, markerWidth
-			// The opening fence line goes too — it is not story prose.
-		case inFence && marker && markerChar == char && markerWidth >= width && info == "":
+		if inFence {
+			inner, stillQuoted := stripQuoteMarkers(line, depth)
+			if stillQuoted {
+				// Inside the block, or its closing line: dropped either way.
+				marker, markerChar, markerWidth, info := fenceMarker(inner)
+				if marker && markerChar == char && markerWidth >= width && info == "" {
+					inFence = false
+				}
+				continue
+			}
+			// The block quote holding the fence ended, so the fence did too,
+			// and this line is read afresh.
 			inFence = false
-		case inFence:
-			// Inside the block: dropped.
-		default:
-			out = append(out, line)
 		}
+		lineDepth, inner := quoteDepth(line)
+		if marker, markerChar, markerWidth, _ := fenceMarker(inner); marker {
+			// The opening fence line goes too — it is not story prose.
+			inFence, depth, char, width = true, lineDepth, markerChar, markerWidth
+			continue
+		}
+		out = append(out, line)
 	}
 	return strings.Join(out, "\n")
+}
+
+// maxBlockIndent is how far a block-quote marker or a fence may be
+// indented: four spaces is an indented code block.
+const maxBlockIndent = 3
+
+// quoteMarker strips one block-quote marker — up to three spaces, `>`, and
+// one optional space — reporting whether there was one.
+func quoteMarker(line string) (string, bool) {
+	trimmed := strings.TrimLeft(line, " ")
+	if len(line)-len(trimmed) > maxBlockIndent || !strings.HasPrefix(trimmed, ">") {
+		return line, false
+	}
+	return strings.TrimPrefix(trimmed[1:], " "), true
+}
+
+// quoteDepth strips every leading block-quote marker and reports how many
+// there were.
+func quoteDepth(line string) (depth int, inner string) {
+	inner = line
+	for {
+		rest, ok := quoteMarker(inner)
+		if !ok {
+			return depth, inner
+		}
+		depth, inner = depth+1, rest
+	}
+}
+
+// stripQuoteMarkers strips exactly depth markers, reporting false when the
+// line has fewer — the block quote at that depth has ended.
+func stripQuoteMarkers(line string, depth int) (string, bool) {
+	for range depth {
+		inner, ok := quoteMarker(line)
+		if !ok {
+			return line, false
+		}
+		line = inner
+	}
+	return line, true
 }
 
 // fenceMarker reports whether line opens or closes a fence, with the
 // fence character, its run length, and any info string.
 func fenceMarker(line string) (isFence bool, char byte, width int, info string) {
 	trimmed := strings.TrimLeft(line, " ")
-	if len(line)-len(trimmed) > 3 {
+	if len(line)-len(trimmed) > maxBlockIndent {
 		// More than three spaces of indent is an indented code block, not
 		// a fence.
 		return false, 0, 0, ""

@@ -126,3 +126,71 @@ func TestSection_NormalisesHeadingWhitespace(t *testing.T) {
 	const doc = "## Tasks  /  Subtasks\ninside\n## Dev Notes\nout\n"
 	require.Contains(t, Section(doc, "## Tasks / Subtasks"), "inside")
 }
+
+// --- fences inside block quotes ---------------------------------------
+
+// A fence in a block quote is a fence. Before this was handled, the
+// quoted example below survived into Prose, and `ape story verify --file`
+// reported the placeholder inside it as residue — exit 4 on a story whose
+// only "residue" was an example. The unquoted control is what shows the
+// quote was the only difference.
+func TestStripFences_BlockQuotedFence(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct{ in, want string }{
+		"unquoted control": {"a\n```md\nhidden\n```\nb", "a\nb"},
+		"quoted":           {"a\n> ```md\n> hidden\n> ```\nb", "a\nb"},
+		"no space after >": {"a\n>```md\n>hidden\n>```\nb", "a\nb"},
+		"quote indented three spaces": {
+			"a\n   > ```\n   > hidden\n   > ```\nb", "a\nb",
+		},
+		"quote indented four is not a quote": {
+			"a\n    > ```\nb", "a\n    > ```\nb",
+		},
+		"a bare > inside the block keeps it open": {
+			"a\n> ```\n> one\n>\n> two\n> ```\nb", "a\nb",
+		},
+		"quoted prose around the fence stays": {
+			"> Example:\n> ```md\n> hidden\n> ```\n> After.", "> Example:\n> After.",
+		},
+		// Depth is state, both ways. A deeper fence line inside a shallower
+		// fence is content: stripping every marker off it would read `> > ```
+		// as a close and leave "hidden" in the prose.
+		"a deeper fence line inside a shallower fence is content": {
+			"a\n> ```\n> > ```\n> hidden\n> ```\nb", "a\nb",
+		},
+		// And a shallower line ends a deeper fence, because the inner quote
+		// holding it has ended; the line itself is prose again.
+		"a shallower line ends a deeper fence": {
+			"a\n> > ```\n> > hidden\n> text\nb", "a\n> text\nb",
+		},
+		"an unquoted fence's quoted lines are content": {
+			"a\n```\n> ```\nhidden\n```\nb", "a\nb",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, StripFences(tc.in))
+		})
+	}
+}
+
+// The rule that keeps the fix from being worse than the defect. A quoted
+// fence nobody closed ends where its block quote ends; if it ran to the
+// end of the document instead, every real section after it — a real
+// `- [ ] [Patch]`, a real File List — would vanish from Prose, and a
+// false positive would have been traded for false negatives.
+func TestStripFences_AnUnclosedQuotedFenceEndsWithItsQuote(t *testing.T) {
+	t.Parallel()
+	in := "## Dev Notes\n\n> ```md\n> an example nobody closed\n\n### Review Findings\n\n- [ ] [Patch] real"
+	require.Equal(t, "## Dev Notes\n\n\n### Review Findings\n\n- [ ] [Patch] real", StripFences(in))
+}
+
+// The documented residual, pinned so the doc comment cannot go stale
+// silently: a fence under a list item indented four or more spaces is an
+// indented line here, not a fence, whatever CommonMark says.
+func TestStripFences_ListItemFenceIndentedFourIsNotHandled(t *testing.T) {
+	t.Parallel()
+	in := "- step:\n\n    ```bash\n    make build\n    ```"
+	require.Equal(t, in, StripFences(in),
+		"if this now strips, list-item fences are handled — update StripFences' NOT-handled note")
+}

@@ -435,6 +435,25 @@ func TestStripFences_AFencedHeadingDoesNotSatisfyTheSectionSet(t *testing.T) {
 	require.Equal(t, SecChangeLog, verdict.Findings[0].Field)
 }
 
+// TestStripFences_ABlockQuotedExampleIsNotResidue is the consequence the
+// block-quote rule exists for, measured before it was fixed: this story
+// exited 4 with `story.placeholder_residue` on Completion Notes, while the
+// same fence unquoted passed. Placeholder residue is a substring test, so
+// it is the one class that saw inside a quoted fence — the line-anchored
+// ones (`- [ ] [Patch]`, File List entries, headings) never matched a line
+// starting with `>`, quoted example or not.
+func TestStripFences_ABlockQuotedExampleIsNotResidue(t *testing.T) {
+	filled := strings.Replace(conformingBody, "### Agent Model Used\n\n"+Placeholder, "### Agent Model Used\n\ntest", 1)
+	filled = strings.Replace(filled, "### File List\n\n"+Placeholder, "### File List\n\n- `a/b.go` (modified)", 1)
+	filled = strings.Replace(filled, "### Completion Notes List\n\n"+Placeholder,
+		"### Completion Notes List\n\nDone. The template's shape, for the next reader:\n\n"+
+			"> ```markdown\n> "+Placeholder+"\n> ```\n", 1)
+	require.Contains(t, filled, "> "+Placeholder, "the fixture edit must have landed")
+
+	verdict := VerifyFile(writeStory(t, t.TempDir(), "1-1.md", head("review")+filled), apexcfg.Ext{})
+	require.Equal(t, FileOK, verdict.Code, "findings: %+v", verdict.Findings)
+}
+
 func TestStripFences_Mechanics(t *testing.T) {
 	for name, tc := range map[string]struct{ in, want string }{
 		"tilde fence":                  {"a\n~~~\nhidden\n~~~\nb", "a\nb"},
