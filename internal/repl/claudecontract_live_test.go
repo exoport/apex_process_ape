@@ -109,6 +109,11 @@ func liveReadySignals(t *testing.T, claudeBin string) {
 		"the ❯ prompt glyph (ReadyGlyph) is replReady's fallback signal and the anchor for emptyPromptRe")
 	require.True(t, replReady(pane),
 		"replReady rejected a pane WaitForReady accepted — the two have diverged")
+	// The fallback, on its own. Asserting only that the glyph is SOMEWHERE
+	// on the pane let a fallback that could never match a real claude pass
+	// here for months: the real prompt line is ❯ + U+00A0.
+	require.True(t, emptyPromptRe.MatchString(pane),
+		"emptyPromptRe does not match the real prompt line — readiness is resting on the footer alone.\nPane:\n%s", pane)
 }
 
 // liveEmulatorsAgree is resilience remedy R4a on a real session: the bytes
@@ -139,23 +144,28 @@ func liveEmulatorsAgree(t *testing.T, claudeBin string) {
 		30*time.Second, 200*time.Millisecond, "the trust dialog never appeared; pane:\n%s", paneOf(ctx, name))
 	require.NoError(t, awaitPaneSettled(ctx, name))
 
-	compare := func(stage string) {
+	// Both emulators render the SAME recorded bytes, so the comparison
+	// cannot be skewed by claude writing between two reads.
+	compare := func(stage string, wholePane bool) {
 		t.Helper()
 		raw := RecentOutput(name)
 		require.Less(t, len(raw), ptyTailBytes,
 			"%s: the recorder wrapped, so replaying its tail would start mid-stream", stage)
-		oracle := newVT10xOracle()
+		prod, oracle := newScreen(), newVT10xOracle()
+		defer prod.close()
+		prod.write(raw)
 		oracle.write(raw)
-		prodPane, oraclePane := paneOf(ctx, name), oracle.text()
-		if paneReadsOf(prodPane) != paneReadsOf(oraclePane) {
+		prodPane, oraclePane := prod.text(), oracle.text()
+		agree := paneReadsOf(prodPane) == paneReadsOf(oraclePane) && (!wholePane || prodPane == oraclePane)
+		if !agree {
 			dump := filepath.Join(t.TempDir(), stage+".bin")
 			_ = os.WriteFile(dump, raw, 0o644)
-			t.Fatalf("%s: x/vt and vt10x+filter disagree on what ape would read from this claude's screen.\n"+
+			t.Fatalf("%s: x/vt and vt10x+filter disagree on this claude's screen.\n"+
 				"x/vt reads %+v\nvt10x reads %+v\nraw bytes: %s\n--- x/vt pane:\n%s\n--- vt10x pane:\n%s",
 				stage, paneReadsOf(prodPane), paneReadsOf(oraclePane), dump, prodPane, oraclePane)
 		}
 	}
-	compare("dialog")
+	compare("dialog", false)
 
 	before, _ := selectedMenuOption(paneOf(ctx, name))
 	require.NoError(t, SendDown(ctx, name))
@@ -163,7 +173,17 @@ func liveEmulatorsAgree(t *testing.T, claudeBin string) {
 	require.NoError(t, err)
 	require.True(t, moved, "the selection did not move off %q after Down; pane:\n%s", before, paneOf(ctx, name))
 	require.NoError(t, awaitPaneSettled(ctx, name))
-	compare("after-down")
+	compare("after-down", false)
+
+	// Past the dialog, into the REPL — where claude sets its title, and where
+	// x/vt once printed that title over the logo row. The WHOLE pane must
+	// match here: a REPL frame draws the same text in any faithful emulator,
+	// and a row that differs is a sequence one of them misreads, whether or
+	// not it happens to touch a read ape makes today.
+	require.NoError(t, WaitForReady(ctx, name))
+	time.Sleep(2 * time.Second) // the footer paints a beat after the first ready frame
+	require.NoError(t, awaitPaneSettled(ctx, name))
+	compare("repl", true)
 }
 
 // liveEffortEnv proves CLAUDE_CODE_EFFORT_LEVEL still selects the reasoning

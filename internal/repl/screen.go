@@ -24,10 +24,13 @@ import (
 // screen_sequences_test.go for what that was measured against. vt10x lives
 // on in test code as a second opinion on the same bytes — see vt10xOracle.
 type screen struct {
-	// mu guards term. vt.Emulator is not safe for concurrent use, and
-	// SafeEmulator does not lock String, which is the read ape makes.
+	// mu guards term and strings. vt.Emulator is not safe for concurrent
+	// use, and SafeEmulator does not lock String, which is the read ape
+	// makes.
 	mu   sync.Mutex
 	term *vt.Emulator
+	// strings removes string controls before the emulator sees them.
+	strings stringControlFilter
 	// replies is the emulator's answer pipe, closed with the session.
 	replies io.Closer
 }
@@ -58,7 +61,9 @@ func newScreen() *screen {
 func (s *screen) write(p []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, _ = s.term.Write(p)
+	if out := s.strings.filter(p); len(out) > 0 {
+		_, _ = s.term.Write(out)
+	}
 }
 
 // text returns the grid as plain text — each row trimmed of trailing
@@ -84,5 +89,94 @@ func (s *screen) text() string {
 func (s *screen) close() {
 	if s.replies != nil {
 		_ = s.replies.Close()
+	}
+}
+
+// stringControlFilter removes the string controls — OSC, DCS, SOS, PM, APC:
+// ESC ] … ESC P … ESC X … ESC ^ … ESC _ …, each ended by BEL or ESC \ —
+// from the byte stream before the emulator parses it.
+//
+// ape renders a screen as text, and a string control never puts text on a
+// screen: it sets a window title, carries a hyperlink target, writes the
+// clipboard, draws an image. Dropping them changes nothing ape reads. A
+// hyperlink's visible text sits OUTSIDE its OSC 8 controls and still renders.
+//
+// Keeping them is what did change something. x/vt's parser (charmbracelet/
+// x/ansi) ends a string at byte 0x9C — the 8-bit form of ST — even when that
+// byte is the middle of a UTF-8 character in the payload. claude sets its
+// title to "✳ Claude Code", and ✳ is E2 9C B3: the parser ended the title at
+// the 9C and PRINTED " Claude Code" onto the grid where the cursor stood. The
+// whole spinner set claude cycles through its title while it works — ✳ ✶ ✻
+// ✽ ✢ — is E2 9C xx, so every title update could write text over whatever row
+// the cursor was on. It showed first as a garbled logo row, found by
+// comparing x/vt's pane of a real session with the vt10x oracle's.
+//
+// UTF-8-safe by construction: inside a string no byte but BEL, ESC, CAN or
+// SUB is looked at, so no continuation byte can end one. Stateful across
+// writes, because a 4 KiB read can split a title anywhere.
+type stringControlFilter struct {
+	state stringFilterState
+}
+
+type stringFilterState int
+
+const (
+	sfGround    stringFilterState = iota
+	sfEscape                      // an ESC was seen and held
+	sfString                      // inside a string control: everything dropped
+	sfStringEsc                   // an ESC inside a string: ST, or a new sequence
+)
+
+const (
+	bel = 0x07
+	can = 0x18
+	sub = 0x1a
+	esc = 0x1b
+)
+
+func (f *stringControlFilter) filter(p []byte) []byte {
+	out := make([]byte, 0, len(p)+1)
+	for _, b := range p {
+		out = f.step(out, b)
+	}
+	return out
+}
+
+func (f *stringControlFilter) step(out []byte, b byte) []byte {
+	switch f.state {
+	case sfEscape:
+		switch b {
+		case ']', 'P', 'X', '^', '_':
+			f.state = sfString // the held ESC and the introducer are both dropped
+			return out
+		case esc:
+			return append(out, esc) // the earlier ESC stands alone; hold this one
+		default:
+			f.state = sfGround
+			return append(out, esc, b)
+		}
+	case sfString:
+		switch b {
+		case bel, can, sub:
+			f.state = sfGround
+		case esc:
+			f.state = sfStringEsc
+		}
+		return out
+	case sfStringEsc:
+		if b == '\\' {
+			f.state = sfGround // ST: the string is over
+			return out
+		}
+		// An ESC that is not ST aborts the string and begins a sequence of
+		// its own, exactly as a terminal reads it.
+		f.state = sfEscape
+		return f.step(out, b)
+	default:
+		if b == esc {
+			f.state = sfEscape
+			return out
+		}
+		return append(out, b)
 	}
 }

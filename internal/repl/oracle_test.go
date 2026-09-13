@@ -117,7 +117,6 @@ func (s *vt10xOracle) text() string {
 }
 
 const (
-	esc = 0x1b
 	// csiFinalMin and csiFinalMax bound the byte that ends a CSI sequence.
 	csiFinalMin = 0x40
 	csiFinalMax = 0x7e

@@ -848,10 +848,19 @@ func dismissBlockingModals(ctx context.Context, name, snap string) (bool, error)
 	return false, nil
 }
 
+// readyFooter is the bypass-permissions footer, replReady's primary signal.
+const readyFooter = "bypass permissions on"
+
 // emptyPromptRe matches a prompt line with nothing typed: the ❯ glyph
 // alone on its line (snapshot() strips trailing spaces). A modal menu
 // item renders as `❯ 1. …` and can never match.
-var emptyPromptRe = regexp.MustCompile(`(?m)^\s*` + ReadyGlyph + `\s*$`)
+//
+// The padding includes U+00A0. claude's real prompt line is `❯` followed by
+// a NO-BREAK SPACE, which RE2's `\s` does not match and the trailing-space
+// trim does not remove — so until this was measured, the fallback never
+// matched a real claude at all, and readiness rested on the footer alone
+// while every test (a bash PS1 of plain `❯ `) said the fallback worked.
+var emptyPromptRe = regexp.MustCompile(`(?m)^[\s\x{00a0}]*` + ReadyGlyph + `[\s\x{00a0}]*$`)
 
 // replReady reports whether the pane shows the live REPL input
 // affordance rather than a menu item that merely contains the glyph.
@@ -860,7 +869,7 @@ var emptyPromptRe = regexp.MustCompile(`(?m)^\s*` + ReadyGlyph + `\s*$`)
 // whenever the real REPL is up. Fallback: an empty prompt line, which
 // also keeps the bash-based tests (PS1='❯ ') honest.
 func replReady(snap string) bool {
-	if strings.Contains(snap, "bypass permissions on") {
+	if strings.Contains(snap, readyFooter) {
 		return true
 	}
 	return emptyPromptRe.MatchString(snap)

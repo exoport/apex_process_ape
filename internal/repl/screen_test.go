@@ -2,6 +2,7 @@ package repl
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/vt"
 	"github.com/hinshun/vt10x"
 	"github.com/stretchr/testify/require"
 )
@@ -331,4 +333,108 @@ func TestDescribeMenuWalk(t *testing.T) {
 	require.Contains(t, got, "pane B")
 	require.True(t, strings.HasSuffix(got, "pane at failure:\npane C"))
 	require.Equal(t, 1, strings.Count(got, "pane A"), "an unchanged pane is named, not repeated")
+}
+
+// claudeBannerFrame is claude's startup logo row as its bytes arrive: the
+// window title first, then the logo and the version placed by column. The
+// escape sequences are claude 2.1.270's, observed from a live session; the
+// visible text is its public banner, and no user, host or path is in it.
+const claudeBannerFrame = "\x1b]0;✳ Claude Code\x07\x1b[?2026h\x1b[38;5;174m ▐\x1b[48;5;16m▛███▛█\x1b[12G\x1b[39m\x1b[49m" +
+	"\x1b[1mClaude\x1b[19GCode\x1b[24G\x1b[22m\x1b[38;5;246mv2.1.270\x1b[39m\r\r\n"
+
+const claudeBannerRow = " ▐▛███▛█   Claude Code v2.1.270"
+
+// A string control — here claude's window title — draws nothing, however
+// the read boundaries fall. x/vt's parser ended the title at the 0x9C inside
+// ✳ (E2 9C B3) and printed " Claude Code" over the logo.
+func TestScreen_StringControlsDrawNothing(t *testing.T) {
+	t.Parallel()
+	for name, newEmu := range emulators() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			for cut := 0; cut <= len(claudeBannerFrame); cut++ {
+				s := newEmu()
+				s.write([]byte(claudeBannerFrame[:cut]))
+				s.write([]byte(claudeBannerFrame[cut:]))
+				require.Equal(t, claudeBannerRow, paneRow(s.text(), 0), "cut at byte %d", cut)
+			}
+		})
+	}
+}
+
+// Every spinner glyph claude cycles through its title is E2 9C xx, so the
+// title changes while the model works, with the cursor wherever the last
+// repaint left it. Nothing on that row may change.
+func TestScreen_ASpinnerTitleLeavesTheCursorRowAlone(t *testing.T) {
+	t.Parallel()
+	for name, newEmu := range emulators() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			s := newEmu()
+			s.write([]byte("\x1b[4;1H  ⏵⏵ bypass permissions on\x1b[4;3H"))
+			for _, glyph := range []string{"✳", "✶", "✻", "✽", "✢", "·"} {
+				s.write([]byte("\x1b]0;" + glyph + " Refactoring the ledger\x07"))
+			}
+			require.Equal(t, "  ⏵⏵ bypass permissions on", paneRow(s.text(), 3))
+		})
+	}
+}
+
+func TestScreen_StringControlForms(t *testing.T) {
+	t.Parallel()
+	for name, newEmu := range emulators() {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct{ in, want string }{
+				{"a\x1b]2;✶ ST-terminated\x1b\\b", "ab"},
+				{"a\x1bP1$r0m\x1b\\b", "ab"},                                                    // DCS reply shape
+				{"a\x1b_Gf=100;✳data\x1b\\b", "ab"},                                             // APC (kitty graphics)
+				{"see \x1b]8;;https://example.com\x07the guide\x1b]8;;\x07.", "see the guide."}, // a hyperlink's text stays
+			} {
+				s := newEmu()
+				s.write([]byte(tc.in))
+				require.Equal(t, tc.want, s.text(), "%q", tc.in)
+			}
+		})
+	}
+}
+
+// An ESC inside a string that is not ST ends the string and begins a real
+// sequence, as xterm reads it. Production only: the vt10x oracle reads this
+// shape differently — it is a second opinion, not ground truth, and no claude
+// has been seen to send it.
+func TestScreen_AnESCEndsAStringAndStartsASequence(t *testing.T) {
+	t.Parallel()
+	in := "a\x1b]0;aborted\x1b[1mB"
+	for cut := range len(in) + 1 {
+		s := newScreen()
+		s.write([]byte(in[:cut]))
+		s.write([]byte(in[cut:]))
+		require.Equal(t, "aB", s.text(), "cut at byte %d", cut)
+		s.close()
+	}
+}
+
+// The control: bare x/vt still prints the title over the logo. If this
+// starts failing after an x/vt or x/ansi bump, the parser no longer ends a
+// string at a UTF-8 continuation byte — re-read stringControlFilter's
+// reasons before deleting anything.
+func TestScreen_BareXVTPrintsTheTitle(t *testing.T) {
+	t.Parallel()
+	term := vt.NewEmulator(paneCols, paneRows)
+	go func() { _, _ = io.Copy(io.Discard, term) }()
+	_, _ = term.WriteString(claudeBannerFrame)
+	top, _, _ := strings.Cut(term.String(), "\n")
+	require.NotEqual(t, claudeBannerRow, strings.TrimRight(top, " "),
+		"bare x/vt now renders claude's title correctly — the premise of stringControlFilter has changed")
+	require.Contains(t, top, "Claude Cod", "the title's text on the grid, which is the defect")
+}
+
+// claude's real prompt line is ❯ + U+00A0. The fallback ready signal must
+// read it as an empty prompt, and still not read a menu row as one.
+func TestEmptyPromptRe_AcceptsTheNoBreakSpace(t *testing.T) {
+	t.Parallel()
+	require.True(t, emptyPromptRe.MatchString("────\n❯ \n────"), "claude 2.1.270's real prompt line")
+	require.True(t, replReady("────\n❯ \n────"), "and readiness holds on the fallback alone")
+	require.False(t, emptyPromptRe.MatchString("❯ No, exit"), "a menu row is not an empty prompt")
 }
