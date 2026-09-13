@@ -248,8 +248,8 @@ func liveTranscriptPersists(t *testing.T, claudeBin string) {
 
 	require.NoError(t, SendCommand(ctx, name, "Reply with the single word OK and nothing else."))
 
-	// Claude Code writes the session file as the turn completes, not at
-	// launch, so poll rather than sleeping a fixed interval.
+	// Poll rather than sleeping a fixed interval: the file appears before the
+	// turn is recorded in it (see waitForTranscript).
 	path := waitForTranscript(ctx, t, home, token)
 	if path == "" {
 		diagnosis := "transcript persistence is BROKEN: nothing was written anywhere under the Claude home " +
@@ -280,7 +280,23 @@ func liveTranscriptPersists(t *testing.T, claudeBin string) {
 }
 
 // waitForTranscript polls for the session transcript written for dir, and
-// returns its path (or "" if ctx expires first).
+// returns its path once the turn is recorded in it — or "" if no transcript
+// appears before ctx expires.
+//
+// A transcript on disk is not a finished turn. Claude Code 2.1.270 creates the
+// session file as the prompt is submitted, holding the user record alone, and
+// appends the assistant record — the one carrying the model id and usage — a
+// second or so later (measured: file at +250ms, assistant record at +1.25s).
+// Returning on the first file raced that append, and a read that landed in the
+// gap failed the gate with "the record's model field has moved" while nothing
+// had moved at all — which is how it failed the v0.0.70 release gate after
+// passing twice the same day on the same code.
+//
+// So a file is returned only once ape can read a model and tokens out of it,
+// or once turnRecordTimeout has passed since it appeared. The bound is what
+// keeps a REAL move diagnosable: the caller's assertions then run against a
+// transcript that had ample time to be completed, and say which field is gone,
+// rather than the gate hanging until ctx expires.
 //
 // It globs dir's own project slug rather than calling cost.FindSessionJSONL,
 // which returns the newest transcript across the WHOLE home. That is the
@@ -304,18 +320,38 @@ func liveTranscriptPersists(t *testing.T, claudeBin string) {
 func waitForTranscript(ctx context.Context, t *testing.T, home, token string) string {
 	t.Helper()
 	glob := filepath.Join(home, ".claude", "projects", "*"+token+"*", "*.jsonl")
+	var path string
+	var seen time.Time
 	for {
 		if matches, _ := filepath.Glob(glob); len(matches) > 0 {
 			sort.Strings(matches)
-			return matches[0]
+			if path == "" {
+				seen = time.Now()
+			}
+			path = matches[0]
+			totals, model, err := cost.ScanSessionJSONL(path)
+			if err == nil && model != "" && totals.InputTokens+totals.OutputTokens > 0 {
+				return path
+			}
+			if time.Since(seen) > turnRecordTimeout {
+				return path
+			}
 		}
 		select {
 		case <-ctx.Done():
-			return ""
-		case <-time.After(2 * time.Second):
+			return path
+		case <-time.After(transcriptPoll):
 		}
 	}
 }
+
+// transcriptPoll and turnRecordTimeout bound waitForTranscript. The timeout is
+// generous against the ~1s a one-word Haiku turn takes to be recorded, and far
+// short of the subtest's own 4-minute ctx.
+const (
+	transcriptPoll    = 500 * time.Millisecond
+	turnRecordTimeout = 60 * time.Second
+)
 
 // uniqueWorkdir creates a working directory whose name is a token that
 // survives Claude Code's cwd → project-directory encoding intact, and

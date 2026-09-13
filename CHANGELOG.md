@@ -2,6 +2,20 @@
 
 ## v0.0.70 (2026-09-13)
 
+- **fix(check-claude): `transcript_persists` no longer races the turn it
+  checks.** Claude Code 2.1.270 creates a session's transcript as the prompt
+  is submitted, with the user record alone, and appends the assistant record
+  — the one carrying the model id and usage — about a second later. The gate
+  read the first file it found, so a read landing in that gap failed with
+  "the record's model field has moved" while nothing had moved; it failed
+  this release's gate after passing twice the same day on the same code. It
+  now waits until ape can read a model and tokens out of the transcript,
+  bounded at 60 s after the file appears so a real move still fails fast and
+  says which field is gone. Test-only: ape itself scans a step's transcript
+  when its Stop hook fires, after a 500 ms flush grace
+  (`sessiondriver.DefaultFlushGrace`) — keyed on the turn ending, not on the
+  file existing, which is the assumption only the test made.
+
 - **fix(aboard): `ape aboard` serves aboard v0.2.1.** One browser-side fix
   in the embedded shell: a host's `theme` message is now remembered, so an
   edit to `.aboard/theme.json` keeps the variant the host last sent instead
