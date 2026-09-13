@@ -101,7 +101,9 @@ Let it run to completion. A few things worth knowing:
 
 If a step stalls waiting for a first run's folder-trust prompt, ape
 dismisses it automatically; a genuinely stuck REPL times out with the
-last screen on stderr rather than hanging.
+last screen on stderr rather than hanging. Claude Code 2.1.270 and later
+need **ape v0.0.69 or later** for that: an older ape fails at the prompt
+with "could not reach a trust-granting option", still on "No, exit".
 
 ## 5. Read the run artifacts
 

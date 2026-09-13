@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.0.69 (2026-09-13)
 
 - **fix(repl): on Claude Code 2.1.270 no spawn could get past the
   folder-trust dialog.** 2.1.270 uses the kitty keyboard protocol and sends
