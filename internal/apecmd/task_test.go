@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -80,6 +81,18 @@ func TestTaskExitCode(t *testing.T) {
 		&repl.NotReadyError{Name: "s", Pane: "modal", Err: context.DeadlineExceeded},
 	)
 	require.Equal(t, ExitREPLNotReady, taskExitCode(wrapped))
+
+	// A trust walk that could not finish, as the pipeline's interactive stage
+	// now returns it: typed by WaitForReady, its bytes saved beside the run,
+	// wrapped with the stage name. It was a bare error, so this was exit 1.
+	dir := t.TempDir()
+	walk := fmt.Errorf("stage %q: claude REPL not ready in PTY: %w", "dev",
+		repl.WithSavedOutput(&repl.NotReadyError{
+			Name: "s", Pane: "❯ No, exit", Output: []byte("\x1b[?u"),
+			Err: errors.New("repl: dismiss trust-folder modal: repl: could not reach a trust-granting option in 6 moves"),
+		}, filepath.Join(dir, "pty-tail-dev.bin")))
+	require.Equal(t, ExitREPLNotReady, taskExitCode(walk))
+	require.FileExists(t, filepath.Join(dir, "pty-tail-dev.bin"))
 }
 
 // TestTaskEnvelopeShape locks the JSON field names the eval consumes.

@@ -61,6 +61,7 @@ func TestLive_ClaudeCodeContract(t *testing.T) {
 
 	t.Run("version_shape", func(t *testing.T) { liveVersionShape(t, claudeBin) })
 	t.Run("ready_signals", func(t *testing.T) { liveReadySignals(t, claudeBin) })
+	t.Run("emulators_agree", func(t *testing.T) { liveEmulatorsAgree(t, claudeBin) })
 	t.Run("effort_env", func(t *testing.T) { liveEffortEnv(t, claudeBin) })
 	t.Run("model_aliases", func(t *testing.T) { liveModelAliases(t, claudeBin) })
 	t.Run("transcript_persists", func(t *testing.T) { liveTranscriptPersists(t, claudeBin) })
@@ -108,6 +109,61 @@ func liveReadySignals(t *testing.T, claudeBin string) {
 		"the ❯ prompt glyph (ReadyGlyph) is replReady's fallback signal and the anchor for emptyPromptRe")
 	require.True(t, replReady(pane),
 		"replReady rejected a pane WaitForReady accepted — the two have diverged")
+}
+
+// liveEmulatorsAgree is resilience remedy R4a on a real session: the bytes
+// the installed claude actually sends, rendered by production's x/vt and by
+// the vt10x oracle, must agree on everything ape reads off the screen — the
+// highlighted menu row, whether the trust dialog is showing, whether the
+// REPL is ready — on the trust dialog as it first paints and again after a
+// Down press moves the selection.
+//
+// A claude update that sends a sequence one emulator misreads — as 2.1.269's
+// kitty query was misread by vt10x — fails HERE, with both panes and the raw
+// bytes saved, instead of in a stalled run diagnosed from a misleading pane.
+// The comparison is on ape's reads rather than the whole grid on purpose: the
+// two may differ in ways that change no decision, and a gate that failed on
+// those would teach its reader to ignore it.
+func liveEmulatorsAgree(t *testing.T, claudeBin string) {
+	t.Helper()
+	name := sessionName(t, "emulators")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	require.NoError(t, NewSessionWithEnv(ctx, name, t.TempDir(),
+		[]string{claudeBin, "--dangerously-skip-permissions"}, EffortEnv("")))
+	t.Cleanup(func() { _ = KillSession(context.Background(), name) })
+
+	// A fresh temp directory is untrusted, so the trust dialog is the first
+	// screen. Wait for it, and for the pane to stop changing, before reading.
+	require.Eventually(t, func() bool { return trustModalVisible(paneOf(ctx, name)) },
+		30*time.Second, 200*time.Millisecond, "the trust dialog never appeared; pane:\n%s", paneOf(ctx, name))
+	require.NoError(t, awaitPaneSettled(ctx, name))
+
+	compare := func(stage string) {
+		t.Helper()
+		raw := RecentOutput(name)
+		require.Less(t, len(raw), ptyTailBytes,
+			"%s: the recorder wrapped, so replaying its tail would start mid-stream", stage)
+		oracle := newVT10xOracle()
+		oracle.write(raw)
+		prodPane, oraclePane := paneOf(ctx, name), oracle.text()
+		if paneReadsOf(prodPane) != paneReadsOf(oraclePane) {
+			dump := filepath.Join(t.TempDir(), stage+".bin")
+			_ = os.WriteFile(dump, raw, 0o644)
+			t.Fatalf("%s: x/vt and vt10x+filter disagree on what ape would read from this claude's screen.\n"+
+				"x/vt reads %+v\nvt10x reads %+v\nraw bytes: %s\n--- x/vt pane:\n%s\n--- vt10x pane:\n%s",
+				stage, paneReadsOf(prodPane), paneReadsOf(oraclePane), dump, prodPane, oraclePane)
+		}
+	}
+	compare("dialog")
+
+	before, _ := selectedMenuOption(paneOf(ctx, name))
+	require.NoError(t, SendDown(ctx, name))
+	moved, err := awaitMenuMove(ctx, name, before)
+	require.NoError(t, err)
+	require.True(t, moved, "the selection did not move off %q after Down; pane:\n%s", before, paneOf(ctx, name))
+	require.NoError(t, awaitPaneSettled(ctx, name))
+	compare("after-down")
 }
 
 // liveEffortEnv proves CLAUDE_CODE_EFFORT_LEVEL still selects the reasoning

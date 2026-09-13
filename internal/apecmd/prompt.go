@@ -413,8 +413,9 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	cancelReady()
 	if readyErr != nil {
 		// The claude REPL never became ready (exit 3). The NotReadyError
-		// carries the last pane snapshot for diagnosis.
-		return promptResult{}, ExitREPLNotReady, readyErr
+		// carries the last pane snapshot for diagnosis, and its raw PTY bytes
+		// are saved beside the record.
+		return promptResult{}, ExitREPLNotReady, repl.WithSavedOutput(readyErr, runlog.PTYTailPath(runDir, ""))
 	}
 
 	// If claude exits before the Stop hook, cancel the wait immediately

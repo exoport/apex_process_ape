@@ -2,6 +2,7 @@ package runlog
 
 import (
 	"path/filepath"
+	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
 )
@@ -155,6 +156,24 @@ func TaskRunDir(projectRoot, skill, runID string) string {
 // PromptRunDir is where one `ape prompt` run's artifacts live.
 func PromptRunDir(projectRoot, promptID string) string {
 	return filepath.Join(PromptsRoot(projectRoot), promptID)
+}
+
+// PTYTailPath is where a run saves the raw PTY bytes of a claude session
+// that never became ready (repl.NotReadyError.Output). A pipeline spawns
+// one session per stage, so the stage names the file; a run with a single
+// session passes "".
+func PTYTailPath(runDir, stage string) string {
+	if stage == "" {
+		return filepath.Join(runDir, "pty-tail.bin")
+	}
+	safe := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			return r
+		}
+		return '_'
+	}, stage)
+	return filepath.Join(runDir, "pty-tail-"+safe+".bin")
 }
 
 // ChatRunDir is where one `ape chat` session's artifacts live.

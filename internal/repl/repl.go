@@ -89,6 +89,8 @@ type session struct {
 	// into a 200×50 rendered grid. The pump is its only writer; text is
 	// safe to call from any goroutine.
 	screen *screen
+	// tail is the flight recorder: the raw bytes the grid was drawn from.
+	tail tailBuffer
 
 	// outMu guards lastOutput, the timestamp of the most recent non-empty
 	// PTY read. The pump goroutine writes it; LastOutputAt reads it. A
@@ -349,6 +351,7 @@ func (s *session) pump() {
 	for {
 		n, err := s.ptm.Read(buf)
 		if n > 0 {
+			s.tail.write(buf[:n])
 			s.screen.write(buf[:n])
 			s.outMu.Lock()
 			s.lastOutput = time.Now()
@@ -863,18 +866,23 @@ func replReady(snap string) bool {
 	return emptyPromptRe.MatchString(snap)
 }
 
-// NotReadyError is returned by WaitForReady when the REPL did not
-// become ready before ctx expired. Pane carries the last captured
-// snapshot so an unrecognized blocking modal is diagnosable from the
-// error text instead of a silent stall (no-silent-caps principle).
+// NotReadyError is returned by WaitForReady when the REPL did not become
+// ready: ctx expired, or a blocking modal could not be dismissed. Pane
+// carries the last captured snapshot so an unrecognized blocking modal is
+// diagnosable from the error text instead of a silent stall
+// (no-silent-caps principle), and Output the raw bytes behind it.
 type NotReadyError struct {
 	Name string
 	Pane string
 	Err  error
+	// Output is the session's last raw PTY bytes (see tailBuffer). Not in
+	// Error(): it is binary, and the caller saves it beside the run's
+	// record with SaveOutput.
+	Output []byte
 }
 
 func (e *NotReadyError) Error() string {
-	return fmt.Sprintf("repl %q not ready before timeout: %v; last pane:\n%s", e.Name, e.Err, e.Pane)
+	return fmt.Sprintf("repl %q not ready: %v; last pane:\n%s", e.Name, e.Err, e.Pane)
 }
 
 func (e *NotReadyError) Unwrap() error { return e.Err }
@@ -895,7 +903,16 @@ func WaitForReady(ctx context.Context, name string) error {
 			handled, derr := dismissBlockingModals(ctx, name, snap)
 			switch {
 			case derr != nil:
-				return derr
+				// A modal ape could not dismiss is the REPL not becoming
+				// ready, the same as a timeout, and is typed the same way.
+				// It was returned bare, so `ape task` mapped a failed trust
+				// walk to exit 1 (the run failed) instead of 3 (the REPL
+				// never came up), and it carried no pane and no bytes.
+				pane := lastSnap
+				if now, perr := capturePaneFn(ctx, name); perr == nil {
+					pane = now
+				}
+				return &NotReadyError{Name: name, Pane: pane, Err: derr, Output: recentOutputFn(name)}
 			case handled:
 				// Modal dismissed — poll again before testing readiness.
 			case replReady(snap):
@@ -904,7 +921,7 @@ func WaitForReady(ctx context.Context, name string) error {
 		}
 		select {
 		case <-ctx.Done():
-			return &NotReadyError{Name: name, Pane: lastSnap, Err: ctx.Err()}
+			return &NotReadyError{Name: name, Pane: lastSnap, Err: ctx.Err(), Output: recentOutputFn(name)}
 		case <-ticker.C:
 		}
 	}

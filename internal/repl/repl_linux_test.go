@@ -3,10 +3,17 @@
 package repl
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestKillSession_ReapsGrandchildren is the FE regression guard: a
@@ -70,4 +77,24 @@ func TestKillSession_ReapsGrandchildren(t *testing.T) {
 		_ = exec.Command("pkill", "-9", "-f", marker).Run()
 		t.Fatalf("grandchild still alive after KillSession; pgrep -f %s:\n%s", marker, post)
 	}
+}
+
+// The recorder through the real thing: a child on a real PTY that never
+// shows a ready REPL. The NotReadyError must carry exactly what the child
+// wrote — escape sequences and all, the part a pane cannot show.
+func TestWaitForReady_RecordsTheRawBytesOfARealSession(t *testing.T) {
+	name := fmt.Sprintf("ape-test-recorder-%d", os.Getpid())
+	t.Cleanup(func() { _ = KillSession(context.Background(), name) })
+	script := `printf '\033[?u\033[c\033[2Jbooting, never ready'; sleep 30`
+	require.NoError(t, NewSession(t.Context(), name, "/tmp", []string{"bash", "--noprofile", "--norc", "-c", script}))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	err := WaitForReady(ctx, name)
+
+	nr, ok := errors.AsType[*NotReadyError](err)
+	require.True(t, ok, "%T: %v", err, err)
+	require.Contains(t, nr.Pane, "booting, never ready")
+	require.True(t, bytes.Contains(nr.Output, []byte("\x1b[?u\x1b[c\x1b[2Jbooting, never ready")),
+		"the raw bytes, escapes included: %q", nr.Output)
 }
