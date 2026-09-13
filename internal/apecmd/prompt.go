@@ -388,6 +388,10 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	}
 	progressf("ape prompt: bridged claude (id %s)\n  record: %s\n", promptID, runDir)
 
+	if err := ensureClaude(runCtx, "claude"); err != nil {
+		return promptResult{}, ExitREPLNotReady, err
+	}
+
 	sessionName := fmt.Sprintf("ape-prompt-%d", os.Getpid())
 	_ = repl.KillSession(runCtx, sessionName)
 	// Inject the resolved reasoning effort (default xhigh) so it reaches the

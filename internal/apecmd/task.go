@@ -14,6 +14,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/atomicfile"
+	"github.com/exoport/apex_process_ape/internal/claudeprobe"
 	"github.com/exoport/apex_process_ape/internal/commitowners"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
@@ -349,6 +350,11 @@ func taskExitCode(runErr error) int {
 		return ExitOK
 	}
 	if _, ok := errors.AsType[*repl.NotReadyError](runErr); ok {
+		return ExitREPLNotReady
+	}
+	// The startup probe found a claude that would not come up either — the
+	// same failure, found before the dispatch rather than during it.
+	if claudeprobe.IsBroken(runErr) {
 		return ExitREPLNotReady
 	}
 	// Upstream, not the skill. Reported separately so a caller can tell a

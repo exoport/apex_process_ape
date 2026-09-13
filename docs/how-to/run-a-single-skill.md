@@ -244,6 +244,6 @@ newest run). Task runs appear in `ape costs` under `task:<skill>` after
 | 0    | Success.                                                                 |
 | 1    | Skill ran but failed, Stop-wait error, or a backstop fired — the progress-aware idle window (`--idle-timeout`, default 60m) or the hard ceiling (`--max-duration`, default 3h). |
 | 2    | Usage or preflight error (unknown skill/agent, bad flags).               |
-| 3    | REPL never became ready — trust-dialog dismissal failed or an unknown modal blocked; the last pane snapshot is on stderr. |
+| 3    | REPL never became ready — trust-dialog dismissal failed, an unknown modal blocked, or the claude startup check found a claude ape cannot drive. The last pane snapshot is on stderr, and the raw terminal bytes are saved beside the run (`pty-tail-<stage>.bin`) or in the user cache for the startup check — see [run artefacts](run-artefacts.md). |
 | 5    | The session's own turn failed against the API and nothing followed — a `529`/`522`/… carried verbatim. Upstream and retryable: the skill did not misbehave, so a caller that knows its budget can decide to re-run. Reported ~3.5 min in, rather than waiting out `--idle-timeout`. |
 | 6    | The dispatch violated the project's declared commit ownership. Distinct from 1 because the skill's own work may have **succeeded**: the run finished and the repository is not in the state `_apex/commit-owners.csv` declared it would be. Only reported when nothing worse happened — a skill that crashed *and* left a stash is reported as the crash. |

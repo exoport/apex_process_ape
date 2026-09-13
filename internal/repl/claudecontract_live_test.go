@@ -62,6 +62,7 @@ func TestLive_ClaudeCodeContract(t *testing.T) {
 	t.Run("version_shape", func(t *testing.T) { liveVersionShape(t, claudeBin) })
 	t.Run("ready_signals", func(t *testing.T) { liveReadySignals(t, claudeBin) })
 	t.Run("emulators_agree", func(t *testing.T) { liveEmulatorsAgree(t, claudeBin) })
+	t.Run("startup_probe", func(t *testing.T) { liveStartupProbe(t, claudeBin) })
 	t.Run("effort_env", func(t *testing.T) { liveEffortEnv(t, claudeBin) })
 	t.Run("model_aliases", func(t *testing.T) { liveModelAliases(t, claudeBin) })
 	t.Run("transcript_persists", func(t *testing.T) { liveTranscriptPersists(t, claudeBin) })
@@ -184,6 +185,18 @@ func liveEmulatorsAgree(t *testing.T, claudeBin string) {
 	time.Sleep(2 * time.Second) // the footer paints a beat after the first ready frame
 	require.NoError(t, awaitPaneSettled(ctx, name))
 	compare("repl", true)
+}
+
+// liveStartupProbe runs the probe every first run on a new claude version
+// runs (internal/claudeprobe) against the installed claude. It must say
+// verified here, or every user of this claude is stopped at the start of
+// their run — so a probe that misjudges a working claude fails the release
+// gate rather than the user.
+func liveStartupProbe(t *testing.T, claudeBin string) {
+	t.Helper()
+	res := ProbeClaude(context.Background(), claudeBin)
+	require.Equal(t, ProbeVerified, res.Verdict,
+		"the startup probe does not verify the installed claude: %s\npane:\n%s", res.Detail, res.Pane)
 }
 
 // liveEffortEnv proves CLAUDE_CODE_EFFORT_LEVEL still selects the reasoning

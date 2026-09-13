@@ -98,3 +98,28 @@ func TestWaitForReady_RecordsTheRawBytesOfARealSession(t *testing.T) {
 	require.True(t, bytes.Contains(nr.Output, []byte("\x1b[?u\x1b[c\x1b[2Jbooting, never ready")),
 		"the raw bytes, escapes included: %q", nr.Output)
 }
+
+// ProbeClaude through a real PTY, with shell stand-ins for claude: the
+// verdict must follow what the screen actually shows. The trust-walk case
+// is covered by TestJudgeNotReady and, against the real claude, by the live
+// startup_probe subtest.
+func TestProbeClaude_OnARealPTY(t *testing.T) {
+	dir := t.TempDir()
+	stub := func(name, body string) string {
+		p := dir + "/" + name
+		require.NoError(t, os.WriteFile(p, []byte("#!/bin/sh\n"+body), 0o755))
+		return p
+	}
+	t.Run("a REPL with both ready signals is verified", func(t *testing.T) {
+		bin := stub("ready.sh", `printf '\n❯ \n\n  ⏵⏵ bypass permissions on (shift+tab to cycle)\n'; sleep 30`)
+		res := ProbeClaude(t.Context(), bin)
+		require.Equal(t, ProbeVerified, res.Verdict, "%s\n%s", res.Detail, res.Pane)
+	})
+	t.Run("a REPL without the footer is broken, not waved through on the ❯ fallback", func(t *testing.T) {
+		bin := stub("nofooter.sh", `printf '\n❯ \n'; sleep 30`)
+		res := ProbeClaude(t.Context(), bin)
+		require.Equal(t, ProbeBroken, res.Verdict)
+		require.Contains(t, res.Detail, "bypass permissions on")
+		require.NotEmpty(t, res.Output, "the raw bytes come with a broken verdict")
+	})
+}

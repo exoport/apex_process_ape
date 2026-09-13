@@ -79,6 +79,7 @@ directories.
     ├── hook-events.jsonl    ← one JSON per Claude Code hook (PLAN-5 / C4)
     ├── bridge-calls.jsonl   ← one JSON per MCP tool call seen by the bridge
     ├── checkpoints.jsonl    ← stage events + skill `reply()` + commit-made + contract
+    ├── pty-tail-<stage>.bin ← ONLY when a stage's claude never became ready: its last raw PTY bytes
     ├── stages/
     │   └── <NN>-<stage>/
     │       └── step-<NN>-<skill>.ndjson  ← the per-step event stream
@@ -108,6 +109,13 @@ directories.
 - **`stages/` is where per-step detail lives.** `manifest.yaml` is the
   summary; `stages/<NN>-<stage>/step-<NN>-<skill>.ndjson` is the event
   stream that produced it. When a step fails, this is the file to open.
+- **`pty-tail-<stage>.bin` exists only when claude never became ready** — a
+  pre-REPL screen ape could not get past, or a timeout. It holds the last
+  64 KiB of raw terminal output the session produced, escape sequences
+  included: the bytes the pane in the error was drawn from. The pane can be
+  wrong where the bytes cannot — the claude 2.1.269 trust-dialog failure was
+  a pane that showed a dialog "rendered twice" that claude never drew. Keep
+  the file with the bug report; `cat -v` shows the sequences.
 
 ## Task runs
 
@@ -122,6 +130,7 @@ of a pipeline run, grouped by skill name rather than pipeline name:
     ├── hook-events.jsonl
     ├── bridge-calls.jsonl
     ├── checkpoints.jsonl
+    ├── pty-tail-<stage>.bin ← only when claude never became ready (see Pipeline runs)
     └── transcripts/
 ```
 
@@ -141,6 +150,7 @@ unique on its own, so there is nothing to group by:
 ├── hook-events.jsonl
 ├── bridge-calls.jsonl
 ├── checkpoints.jsonl
+├── pty-tail.bin         ← only when claude never became ready (see Pipeline runs)
 └── transcripts/
 ```
 
@@ -196,6 +206,29 @@ stdout/stderr capture, and it is transient — nothing reads it back.
 
 Run `ape sessions` to list, `ape sessions prune` to drop dead PIDs,
 `ape sessions open <pfx>` to xdg-open the URL of a live session.
+
+In the user cache directory (`~/.cache/ape/` on Linux,
+`~/Library/Caches/ape/` on macOS, `%LocalAppData%\ape\` on Windows):
+
+```text
+ape/
+├── version-check.json          ← the background update check
+├── claude-contract.json        ← claude versions this ape has verified it can drive
+└── claude-probe-<version>.bin  ← ONLY when a claude failed that check: its raw PTY bytes
+```
+
+**The claude startup check.** The first `ape task`, `ape pipeline` or
+`ape prompt` on a Claude Code version this ape has not seen spawns it once in
+a fresh, untrusted scratch directory — through the trust dialog to a ready
+REPL, spending no tokens, a few seconds — and records the pair in
+`claude-contract.json`. A claude that fails stops the run with the reason, the
+screen and the saved bytes (exit 3 from `ape task` and `ape prompt`), because
+every run on it would meet the same screen. One the check cannot judge —
+claude draws nothing before the deadline, as when offline or logged out — is
+reported as a warning and the run continues; nothing is recorded, so it is
+checked again next time. A new ape re-checks too.
+`APE_CLAUDE_PROBE=off` skips the check and says so on every run. Deleting
+`claude-contract.json` forces a re-check.
 
 ## Cost rollup
 
