@@ -106,6 +106,7 @@ back what the human changed.
 ```bash
 ape aboard init --example     # create .aboard/ with a demo board
 ape aboard serve              # run the server; prints the URL
+ape aboard serve --detach     # from an agent session: survives the session restarting
 ape aboard status             # what is running here, and on which port
 ```
 

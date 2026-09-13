@@ -1,5 +1,50 @@
 # CHANGELOG
 
+## Unreleased
+
+- **feat(aboard): `ape aboard` serves aboard v0.2.0.** `capsHash` moves from
+  `207b5d93` to **`8beefdfe`** — the same hash the standalone `aboard` v0.2.0
+  reports, as it must be. Nothing in ape's mount changed: the new surface
+  arrives through the mounted tree. What a user gets
+  ([aboard's CHANGELOG](https://github.com/exoport/aboard/blob/v0.2.0/CHANGELOG.md)
+  has the whole of it):
+
+  - **`ape aboard serve --detach`** starts the board in a session of its own,
+    logs to `.aboard/run/serve.log`, and returns once that process answers
+    `/health`. A board an agent started with `serve … &` stayed in the agent
+    shell's process group, died when the session restarted, and left a stale
+    record that failed every `apply` after it. It still refuses a second board,
+    and `status` names `--detach` when it finds a stale record.
+  - **`?embed=top`** — a host that runs the board top level rather than framing
+    it now exchanges the same messages on the board's own window — and
+    **`?theme=dark|light`**, painted from the first frame and stored nowhere.
+    `GET /capabilities` declares both under a new `embed` section.
+  - **The write-time checks look inside `form.fields[]` and `markup.images[]`**:
+    a field keyed `kind` instead of `type` applied clean and drew "Unsupported
+    field type" in every field. Still warnings; `apply --strict` refuses.
+  - The skill, the markup spec and the built-in image recipe now put an agent's
+    images in **`.aboard/uploads/`**, not `assets/` — which is compiled into the
+    binary, so a file written there answered 404.
+  - `mwembed:` is admitted in an `html` tab's `frame-ancestors`, temporarily, for
+    Moonwatcher's wrapper page.
+
+  `--detach` is the one v0.2.0 feature that puts a requirement on the **host**:
+  it starts the board by re-running `os.Executable()` with the command path
+  minus the root's name, so under ape the child is `ape aboard serve …`, and it
+  only works while ape's binary reaches the tree at the path it was mounted at.
+  aboard can test that mechanism only against its own binary, so
+  `TestAboardServeDetachReRunsApe` runs it against this one — the test binary
+  re-entered through `Execute`, as `cmd/ape` does — and asserts the child comes
+  up as the ape host, leads its own session, refuses a second start, and
+  removes its record on `TERM` (the last being ape's signal context, not
+  aboard's).
+
+  This repo's `.claude/skills/aboard/` copy is re-derived from aboard v0.2.0's
+  skill by the same `aboard <verb>` → `ape aboard <verb>` rewrite as before —
+  checked first to reproduce the v0.1.3 copy byte for byte, so no ape-only edit
+  was lost — and its generated reference is regenerated from this binary, so
+  `ape doctor`'s `aboard.skill_reference` reads current.
+
 ## v0.0.68 (2026-09-09)
 
 - **feat(spawn): output-style names are matched case-insensitively.**

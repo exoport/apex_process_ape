@@ -23,6 +23,31 @@ State lives under `.aboard/` at the project root, found by walking up from
 `--cwd`. Each project gets its own port derived from that root, so the URL is
 stable and two checkouts never collide.
 
+### From an agent session, start it detached
+
+```bash
+ape aboard serve --detach     # own session, log in .aboard/run/serve.log; returns once it answers
+```
+
+`ape aboard serve … &` — with `nohup` or without — stays in the starting
+shell's process group, so a board an agent started dies when that session
+restarts and leaves `.aboard/run/instance.json` behind, and every `apply` after
+that fails until somebody notices. `--detach` runs `ape aboard serve` again in a
+session of its own (a detached process on Windows), writes its output to
+`.aboard/run/serve.log`, and returns once that very process answers `/health`.
+It still refuses a second board for the project, and `ape aboard status` names
+`--detach` when it finds a stale record. Needs **ape v0.0.69 or later** (aboard
+v0.2.0).
+
+### Stopping a board
+
+Ctrl-C, or a `TERM` to its pid — `ape aboard status` prints it, and so does
+`--detach`. Either shuts the board down cleanly and removes
+`.aboard/run/instance.json`, which is how every other tool knows the board is
+gone. That needs **ape v0.0.59 or later**: before it, ape installed no signal
+handler, so an ape-hosted board was killed outright and left its record behind,
+and the VS Code extension went on believing a dead board was running.
+
 Keep `.aboard/`'s contents out of git. In a framework project that is already
 done — see [The board is already there](#the-board-is-already-there). Elsewhere,
 `ape aboard init --gitignore` adds the one line to the repo-root `.gitignore`.
@@ -43,7 +68,7 @@ $ ape aboard status
 aboard running at http://localhost:44186
   ...
   served  ape-aboard
-  caps    207b5d93
+  caps    8beefdfe
 ```
 
 What must **not** differ is the capability manifest. `ape aboard capabilities`
@@ -72,6 +97,24 @@ never offered. Needs extension **v0.1.2 or later** for both rules.
 It is not on any marketplace: download the `.vsix` from the extension's GitHub
 Release and `code --install-extension aboard-vscode-<version>.vsix --force`.
 
+## In another tool
+
+A host that shows the board inside a view of its own drives it through the
+shell URL and a message channel. The contract is aboard's —
+[HTTP API: `GET /`](https://github.com/exoport/aboard/blob/v0.2.0/docs/reference/http-api.md#get---get-aboardhtml)
+— and ape serves it unchanged:
+
+| in the URL | what it does |
+| --- | --- |
+| `?chrome=full\|notabs\|none` | how much of the board's own head to draw; `notabs` is for a host that lists tabs itself |
+| `?embed=top` | the host runs the page top level and exchanges messages on the board's own window instead of from a parent frame |
+| `?theme=dark\|light` | the variant to paint from the first frame; stored nowhere, and gives way when the human presses the theme switch |
+
+`GET /capabilities` declares all of this under `embed` — the channels (`frame`,
+`top`), the parameters and the messages each way — so a host can tell a board
+that speaks a channel from an older one before loading it. `?embed=top` and
+`?theme=` need **ape v0.0.69 or later** (aboard v0.2.0).
+
 ## Exit statuses
 
 The board has its own table, and ape preserves it:
@@ -94,17 +137,24 @@ ape aboard wait --for poke --timeout 5m || [ $? -eq 3 ] && echo "nobody came"
 1. **Do not edit `.aboard/aboard.json` by hand while a board is running.** Use
    `ape aboard apply`, which is a compare-and-set on the document's `rev`. A
    `409` means someone got there first — re-read and retry.
-Stopping a board is Ctrl-C, or a `TERM` to its pid — either shuts it down
-cleanly and removes `.aboard/run/instance.json`, which is how every other tool
-knows the board is gone. That needs **ape v0.0.59 or later**: before it, ape
-installed no signal handler, so an ape-hosted board was killed outright and
-left its record behind, and the VS Code extension went on believing a dead
-board was running.
 
 2. **Do not take a healthy server away from another session.** `ape aboard
    serve` refuses to start a second board for the same project and prints the
    URL of the one already running. The refusal is anchored to the board, not
    the port, so `--port` is not a way around it.
+
+`apply` also checks what a write means, not only whether it applies: an unknown
+prop, a colour name the board does not have, a form field keyed `kind` where it
+needs `type`, a key inside a `form.fields[]` or `markup.images[]` item that
+nothing reads. These are warnings on stderr and the write still lands with exit
+0 — read them. `ape aboard apply --strict` refuses the write instead (exit 1,
+nothing written). The checks inside those two arrays need **ape v0.0.69 or
+later** (aboard v0.2.0); before it, a form written with `kind` applied clean and
+drew "Unsupported field type" in every field.
+
+An image an agent supplies goes in **`.aboard/uploads/`**, referenced as
+`uploads/<file>` — never `assets/`, which is compiled into the binary, so a file
+written there answers 404.
 
 ## The board is already there
 
@@ -279,7 +329,7 @@ wrong project.
 
 ```console
 $ ape aboard --version
-aboard version 0.1.0
+aboard version 0.2.0
 ```
 
 ## Platform note
