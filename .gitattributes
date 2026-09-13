@@ -5,3 +5,8 @@
 # Treat them as binary so git never touches their contents.
 internal/apecmd/testdata/update/** -text
 internal/apecmd/trusted_root.json -text
+
+# Captured PTY streams (claude's raw terminal output, CR and LF as it wrote
+# them) replayed through vt10x byte for byte. A conversion would move where
+# every line lands in the emulator.
+internal/repl/testdata/*.bin -text

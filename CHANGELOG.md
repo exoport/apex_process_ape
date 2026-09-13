@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **fix(repl): on Claude Code 2.1.270 no spawn could get past the
+  folder-trust dialog.** 2.1.270 uses the kitty keyboard protocol and sends
+  `CSI > 5 u`, `CSI < u` and `CSI ? u` around every keypress. vt10x, the
+  emulator ape renders claude's pane with, recognises only `?` as a private
+  marker and ignores it on `u`, so all three ran as *restore cursor* — to
+  the origin — and every repaint after a key landed on the top rows of the
+  pane. The Down arrow did move the selection to "Yes, I trust this folder"
+  in claude, but the menu ape reads never changed, so the trust walk gave
+  up after six moves with "No, exit" still selected. Every `ape task`,
+  `pipeline` and `prompt` launched in a folder claude had not yet trusted
+  died there. `make check-hooks` caught it, because its seed session runs in
+  a fresh temp copy.
+
+  The PTY stream now passes through a filter before vt10x that drops the
+  private sequences it misreads: every `<`/`=`/`>`-prefixed CSI (vt10x
+  implements none, so each ran as its unprefixed command with default
+  arguments) and the `?`-prefixed cursor save/restore. Every other byte
+  passes unchanged and in order, including the `?` mode sets vt10x does
+  understand, and a sequence split across two reads is held until it ends.
+  The test replays claude 2.1.270's own bytes for the dialog and one Down,
+  captured from a PTY, with a control that shows the unfiltered emulator
+  still reproduces the stuck selection, plus every split of that stream.
+
 - **feat(aboard): `ape aboard` serves aboard v0.2.0.** `capsHash` moves from
   `207b5d93` to **`8beefdfe`** — the same hash the standalone `aboard` v0.2.0
   reports, as it must be. Nothing in ape's mount changed: the new surface

@@ -344,13 +344,16 @@ func NewSessionWithEnv(_ context.Context, name, dir string, argv, extraEnv []str
 // pump drains PTY output into the VT emulator until the PTY closes
 // (child exited, or KillSession closed the master). vt10x.Write
 // acquires the terminal's internal lock, so concurrent CapturePane
-// reads are safe.
+// reads are safe. Output passes through privateCSIFilter first: vt10x
+// executes some private sequences as cursor moves, which misplaces
+// every repaint that follows them.
 func (s *session) pump() {
 	buf := make([]byte, pumpReadBufSize)
+	var filter privateCSIFilter
 	for {
 		n, err := s.ptm.Read(buf)
 		if n > 0 {
-			_, _ = s.term.Write(buf[:n])
+			_, _ = s.term.Write(filter.apply(buf[:n]))
 			s.outMu.Lock()
 			s.lastOutput = time.Now()
 			s.outMu.Unlock()
