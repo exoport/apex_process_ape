@@ -483,7 +483,7 @@ func checkApeUpdateAvailable(_ context.Context, _ doctorEnv) CheckResult {
 	if entry == nil {
 		return CheckResult{
 			Status:  StatusInfo,
-			Message: "no cached update check — background probe will refresh on next ape invocation",
+			Message: "no cached update check — the background probe refreshes it on the next ape invocation from a terminal",
 		}
 	}
 	if isNewerVersion(Version, entry.LatestVersion) {

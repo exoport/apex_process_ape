@@ -10,6 +10,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/updatecache"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 const (
@@ -39,11 +40,7 @@ Also: framework setup/update, doctor, sessions, planning, trait/pattern/adr
 inspection. Every claude invocation runs in an in-process PTY — there is no
 "claude -p" programmatic path.`,
 		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
-			// Skip the background update check for hidden / utility commands
-			// (mcp-bridge, notify) — they run inside the spawned claude on
-			// hot paths where a network check is noise, not user-facing.
-			// PLAN-9 F3.
-			if cmd.Hidden {
+			if !shouldCheckForUpdates(cmd, term.IsTerminal(int(os.Stderr.Fd()))) {
 				return
 			}
 			go checkForUpdatesBackground()
@@ -202,6 +199,25 @@ func Execute() error {
 // capture the zero value.
 func init() {
 	rootCmd.AddCommand(rootSubcommands()...)
+}
+
+// shouldCheckForUpdates reports whether cmd runs the background update check.
+//
+// Hidden / utility commands (mcp-bridge, notify) skip it — they run inside
+// the spawned claude on hot paths where a network check is noise, not
+// user-facing. PLAN-9 F3.
+//
+// So does any process whose stderr is not a terminal. The notice is written
+// to stderr from a goroutine, and a tool that captures a command's output
+// merges stderr into what it reads — Claude Code's Bash tool does — so a
+// skill parsing `ape config resolve --output-format json` got the line before
+// or after its payload, or not at all, depending on the goroutine's race with
+// process exit. Skipping by --output-format would not have been enough: skills
+// read human-format output too. A person at a terminal still sees the notice;
+// a pipe, a redirect, CI and every tool call neither see it nor pay for the
+// network request.
+func shouldCheckForUpdates(cmd *cobra.Command, stderrIsTerminal bool) bool {
+	return !cmd.Hidden && stderrIsTerminal
 }
 
 func checkForUpdatesBackground() {

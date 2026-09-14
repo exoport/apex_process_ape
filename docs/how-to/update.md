@@ -45,3 +45,5 @@ sudo -E ape update
 ## The update-available notice
 
 Most ape commands run a quick background check for newer releases and print `update available: vX → run 'ape update'` to stderr when one exists. The check is cached so it only fires once per cache window. The notice is informational — it does not affect the running command's exit code.
+
+The check only runs when stderr is a terminal. Piped or redirected output, CI logs, and commands run by a tool (Claude Code's Bash tool merges stderr into the output a skill parses) get neither the notice nor the network request. `ape doctor` reports the cached result under `ape.update_available` either way; the cache itself is refreshed only by a command run from a terminal.
