@@ -1,10 +1,27 @@
 package apecmd
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+// newRootCmd promises a private tree, which tests rely on to build trees in
+// parallel. A constructor that writes shared state — newSandboxCmd binding its
+// connection flags to package variables did — breaks that silently, and only
+// the race detector sees it, so this only proves anything under -race (which
+// `make test` and CI use). Several builders, not two, so a write the detector
+// happens to miss once is unlikely to be missed every time.
+func TestNewRootCmd_TreesBuildConcurrently(t *testing.T) {
+	t.Parallel()
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() { newRootCmd() })
+	}
+	wg.Wait()
+}
 
 // The update notice reached skill-parsed payloads: Claude Code's Bash tool
 // merges stderr into the result, so a JSON answer could arrive with
@@ -12,10 +29,8 @@ import (
 // resolved from a private tree — `config resolve` is the call the framework
 // eval's payload check failed on, and `notify` is a hidden hot-path command.
 func TestShouldCheckForUpdates(t *testing.T) {
-	// Not parallel: building a tree is not race-free despite newRootCmd's
-	// comment — newSandboxCmd binds --node and its siblings to package
-	// variables, and TestAboardIsMountedOnTheRoot already builds one in
-	// parallel, so a second parallel builder fails -race.
+	t.Parallel()
+
 	root := newRootCmd()
 	resolve, _, err := root.Find([]string{"config", "resolve"})
 	require.NoError(t, err)

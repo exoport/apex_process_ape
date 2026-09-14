@@ -23,10 +23,13 @@ import (
 // thin aped client (PLAN-18): every verb speaks the ape.vmm.<node>.> contract
 // over NATS. The daemonless runner path (PLAN-16) was retired — aped owns
 // composition, egress, and the workspace registry server-side.
-var (
-	sandboxNode      string
-	sandboxNatsURL   string
-	sandboxNatsCreds string
+//
+// Named once because they are declared in one place and read in another; see
+// sandboxFlag for why the value is not bound to a variable.
+const (
+	sandboxFlagNode      = "node"
+	sandboxFlagNatsURL   = "nats-url"
+	sandboxFlagNatsCreds = "nats-creds" //nolint:gosec // G101 false positive: a flag name, not a credential
 )
 
 // errNoAped is returned when no aped endpoint is configured.
@@ -76,9 +79,9 @@ credential aped mints at startup) and --node. Requires a running aped on a
 Linux host with KVM + containerd + Kata.`,
 	}
 	pf := cmd.PersistentFlags()
-	pf.StringVar(&sandboxNode, "node", "", "aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname)")
-	pf.StringVar(&sandboxNatsURL, "nats-url", "", "aped management NATS URL (env APE_NATS_URL)")
-	pf.StringVar(&sandboxNatsCreds, "nats-creds", "", "operator .creds for aped (env APE_NATS_CREDS)")
+	pf.String(sandboxFlagNode, "", "aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname)")
+	pf.String(sandboxFlagNatsURL, "", "aped management NATS URL (env APE_NATS_URL)")
+	pf.String(sandboxFlagNatsCreds, "", "operator .creds for aped (env APE_NATS_CREDS)")
 
 	cmd.AddCommand(
 		newSandboxUpCmd(),
@@ -110,7 +113,7 @@ Linux host with KVM + containerd + Kata.`,
 // the session subjects on it directly) and a closer that drains the connection.
 // It returns errNoAped when no endpoint is configured.
 func dialVMM(cmd *cobra.Command) (*vmmclient.Client, *nats.Conn, func(), error) {
-	node := sandboxNode
+	node := sandboxFlag(cmd, sandboxFlagNode)
 	if node == "" {
 		node = os.Getenv("APE_APED_NODE")
 	}
@@ -130,7 +133,7 @@ func dialVMM(cmd *cobra.Command) (*vmmclient.Client, *nats.Conn, func(), error) 
 		fmt.Fprintln(cmd.ErrOrStderr(), "re-published the host credential (it had been replaced since the last publish)")
 	}
 
-	cfg := natsconn.Resolve(sandboxNatsURL, sandboxNatsCreds)
+	cfg := natsconn.Resolve(sandboxFlag(cmd, sandboxFlagNatsURL), sandboxFlag(cmd, sandboxFlagNatsCreds))
 	if !cfg.Enabled() {
 		return nil, nil, nil, errNoAped
 	}
@@ -139,6 +142,23 @@ func dialVMM(cmd *cobra.Command) (*vmmclient.Client, *nats.Conn, func(), error) 
 		return nil, nil, nil, err
 	}
 	return vmmclient.New(nc, natsconn.SubjectToken(node), 0), nc, func() { _ = nc.Drain() }, nil
+}
+
+// sandboxFlag reads one of the group's connection flags from the command being
+// run, which inherits them from `ape sandbox`. Empty when the flag is unset, and
+// when cmd is not under the group at all.
+//
+// Read from the command's own flag set rather than bound to package variables,
+// because a package variable is shared by every tree ever built: each
+// newSandboxCmd call re-bound it, so two trees built at once wrote the same
+// memory and failed -race, and a value parsed into one tree showed up in the
+// other. newRootCmd promises a private tree; this is what keeps that true.
+func sandboxFlag(cmd *cobra.Command, name string) string {
+	f := cmd.Flag(name)
+	if f == nil {
+		return ""
+	}
+	return f.Value.String()
 }
 
 // vmmBackend builds the ape.vmm NATS client for the configured node, or returns

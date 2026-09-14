@@ -143,6 +143,9 @@ func rootSubcommands() []*cobra.Command {
 //
 // A private tree is independent BY CONSTRUCTION rather than by scheduling
 // luck, and it costs nothing: these constructors only build cobra values.
+// That holds only while no constructor binds a flag to a package variable —
+// newSandboxCmd's connection flags once did, and two trees built at once
+// failed -race. TestNewRootCmd_TreesBuildConcurrently is the check.
 // It asserts on the same thing the shared tree would, because both come
 // from rootShell + rootSubcommands.
 func newRootCmd() *cobra.Command {
