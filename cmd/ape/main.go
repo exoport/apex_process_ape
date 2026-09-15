@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/exoport/apex_process_ape/internal/apecmd"
@@ -16,11 +15,10 @@ func main() {
 	// no message). ExitCode also lets a command forward a specific status
 	// (e.g. `ape sandbox exec` returning the guest's exit code) with defers
 	// still running; silent errors already reported their own outcome.
-	if err := apecmd.Execute(); err != nil {
-		code, silent := apecmd.ExitCode(err)
-		if !silent {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		}
+	//
+	// Report prints any error its command did not print itself. A
+	// successful run exits 0 through the same call.
+	if code := apecmd.Report(apecmd.Execute(), os.Stderr); code != 0 {
 		os.Exit(code)
 	}
 }

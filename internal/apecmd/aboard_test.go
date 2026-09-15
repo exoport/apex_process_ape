@@ -116,7 +116,15 @@ func TestAboardExitStatusesSurviveApesMapping(t *testing.T) {
 		t.Parallel()
 		code, silent := ExitCode(gateErr(7, errors.New("boom")))
 		require.Equal(t, 7, code)
-		require.True(t, silent, "ape's own errors already reported themselves")
+		// This once asserted silent, on the premise that "ape's own errors
+		// already reported themselves". They did not: an exitError nobody
+		// printed exited with its code and an empty stderr. Only a command
+		// that printed its diagnostic is silent now.
+		require.False(t, silent, "an error with a message nobody printed must reach stderr")
+
+		code, silent = ExitCode(gateErr(7, nil))
+		require.Equal(t, 7, code)
+		require.True(t, silent, "a nil gate error means the command printed its own diagnostic")
 	})
 
 	t.Run("an error neither owns is unchanged", func(t *testing.T) {

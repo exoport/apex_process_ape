@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/exoport/apex_process_ape/internal/eventing"
@@ -29,23 +30,41 @@ import (
 type exitError struct {
 	code int
 	err  error
+	// reported is true when the command has already told the user what
+	// went wrong — printed the error, streamed a guest's output, or written
+	// a report whose findings ARE the diagnostic. main prints every other
+	// exitError's message.
+	//
+	// It used to be implied for every exitError, so an error nobody printed
+	// exited with its code and nothing on stderr: `ape memory show 999`,
+	// `ape release status --slice nope` and `ape story fields` outside a
+	// project all exited 2 silently, as did about twenty other usage paths.
+	// Defaulting to unreported fixes the class at the one place every one of
+	// them passes through; a command that prints its own message says so.
+	reported bool
 }
 
 func (e *exitError) Error() string { return e.err.Error() }
 func (e *exitError) Unwrap() error { return e.err }
 
 // usageErr → exit 2 (usage/config/unresolvable); failErr → exit 1 (an
-// established connection then failed to publish/upload).
+// established connection then failed to publish/upload). Neither prints:
+// main does, or runReport for the reporting commands.
 func usageErr(err error) error { return &exitError{code: ExitUsage, err: err} }
 func failErr(err error) error  { return &exitError{code: ExitRunFailed, err: err} }
 
+// reportedErr is an exitError whose command has already printed what went
+// wrong, so main adds nothing.
+func reportedErr(code int, err error) error {
+	return &exitError{code: code, err: err, reported: true}
+}
+
 // usageErrExit couples a message with a specific exit code, printing the
-// message itself: ExitCode reports an *exitError as already-reported, so
-// a command that only returned one would exit non-zero with no
-// diagnostic.
+// message itself and marking the error reported so main does not print it
+// a second time.
 func usageErrExit(code int, err error) error {
 	fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-	return &exitError{code: code, err: err}
+	return reportedErr(code, err)
 }
 
 // gateErr carries a gate command's verdict out as an exit code.
@@ -55,23 +74,38 @@ func usageErrExit(code int, err error) error {
 // process status rather than a message, because that is what their callers
 // branch on. Returning it as an *exitError rather than calling os.Exit in
 // RunE is what keeps them testable in-process: os.Exit would kill the test
-// binary on the first assertion. err may be nil when the command already
-// printed its own diagnostic.
+// binary on the first assertion. A nil err means the command already
+// printed its own diagnostic; a non-nil one has not been printed, and main
+// prints it.
 func gateErr(code int, err error) error {
 	if code == ExitOK {
 		return nil
 	}
 	if err == nil {
-		err = fmt.Errorf("exit status %d", code)
+		return reportedErr(code, fmt.Errorf("exit status %d", code))
 	}
 	return &exitError{code: code, err: err}
 }
 
+// Report is main's last step: it prints err unless its command already did,
+// and returns the process exit status. main is one line around it so the
+// print-or-not decision — the one that left about twenty usage errors
+// exiting 2 with an empty stderr — can be tested in-process.
+func Report(err error, stderr io.Writer) int {
+	code, silent := ExitCode(err)
+	if err != nil && !silent {
+		fmt.Fprintf(stderr, "Error: %s\n", err)
+	}
+	return code
+}
+
 // ExitCode maps the error Execute returns onto a process exit status for main():
 // 0 for nil, the code carried by an *exitError (e.g. `ape sandbox exec`
-// forwarding the guest's exit status), else 1. silent reports that the error
-// already conveyed its outcome (an *exitError — the command streamed its own
-// output/stderr), so main can skip printing a redundant "Error:" line.
+// forwarding the guest's exit status), else 1. silent reports that the
+// command already conveyed its outcome — an *exitError marked reported — so
+// main can skip printing a redundant "Error:" line. An unreported one is
+// printed like any other error: carrying an exit code is not the same as
+// having said why.
 //
 // The mounted aboard tree brings a second status table with it (usage 2,
 // `wait` timeout 3), which ape's *exitError cannot express. Errors ape does
@@ -81,7 +115,7 @@ func ExitCode(err error) (code int, silent bool) {
 		return ExitOK, false
 	}
 	if ee, ok := errors.AsType[*exitError](err); ok {
-		return ee.code, true
+		return ee.code, ee.reported
 	}
 	if c, s, handled := aboardExitCode(err); handled {
 		return c, s

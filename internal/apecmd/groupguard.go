@@ -119,13 +119,14 @@ func guardGroup(cmd *cobra.Command) {
 					"run `ape doctor --only framework.command_surface` to see whether the "+
 					"installed framework expects commands this binary is missing",
 				args[0], c.CommandPath())
-			// Printed here, not left to a caller. Both silencers above are
-			// on, and ExitCode reports an *exitError as already-reported —
-			// so a guard that only returned one would exit 2 with no
-			// diagnostic at all, which is a worse answer than the help text
-			// it replaced. Measured that way once; hence this line.
+			// Printed here with the command's own stderr, and returned as
+			// reported so main does not print it a second time. Both
+			// silencers above are on, so before main printed unreported
+			// errors a guard that only returned one exited 2 with no
+			// diagnostic at all — a worse answer than the help text it
+			// replaced. Measured that way once.
 			fmt.Fprintf(c.ErrOrStderr(), "Error: %s\n", err)
-			return usageErr(err)
+			return reportedErr(ExitUsage, err)
 		}
 		if prev != nil {
 			return prev(c, args)

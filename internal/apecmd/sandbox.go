@@ -622,7 +622,7 @@ func exitCodeError(code int) error {
 	if code == 0 {
 		return nil
 	}
-	return &exitError{code: code, err: fmt.Errorf("workspace command exited with code %d", code)}
+	return reportedErr(code, fmt.Errorf("workspace command exited with code %d", code))
 }
 
 func newSandboxFreezeCmd() *cobra.Command {
