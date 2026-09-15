@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -132,6 +133,61 @@ func liveReadySignals(t *testing.T, claudeBin string) {
 // those would teach its reader to ignore it.
 func liveEmulatorsAgree(t *testing.T, claudeBin string) {
 	t.Helper()
+	for _, mode := range claudeTerminalModes {
+		t.Run(mode.name, func(t *testing.T) {
+			// Claude names its terminal from these, in precedence order,
+			// before and besides TERM_PROGRAM. Removed rather than blanked
+			// so the name comes from TERM_PROGRAM alone, whatever terminal
+			// this gate itself runs in. t.Setenv restores each afterwards.
+			for _, k := range claudeTerminalIdentityEnv {
+				t.Setenv(k, "")
+				require.NoError(t, os.Unsetenv(k))
+			}
+			t.Setenv("TERM", "xterm-256color")
+			t.Setenv("TERM_PROGRAM", mode.termProgram)
+			liveEmulatorsAgreeIn(t, claudeBin, mode.pushesKittyFlags)
+		})
+	}
+}
+
+// claudeTerminalModes are the two byte streams claude writes, and which one
+// it writes is chosen by the terminal its environment names — read from
+// claude's own code (2.1.270, 2.1.272), and asserted below from the bytes each
+// run recorded. A terminal claude believes is iTerm, kitty, WezTerm,
+// ghostty, tmux, Windows Terminal or Warp gets kitty keyboard flags pushed at
+// startup and around keypresses (`CSI >5u`, `CSI >4;2m`, `CSI <u`); any other
+// gets only the query (`CSI ?u`). ape passes TERM_PROGRAM through, so which
+// stream production renders depends on where the operator started ape —
+// and this gate used to see only the one its own terminal produced.
+//
+// tmux is the push trigger because it is what tmux exports: ape scrubs TMUX
+// and TMUX_PANE but not TERM_PROGRAM, so an ape started inside tmux is this
+// stream.
+var claudeTerminalModes = []struct {
+	name             string
+	termProgram      string
+	pushesKittyFlags bool
+}{
+	{name: "kitty_push", termProgram: "tmux", pushesKittyFlags: true},
+	{name: "query_only", termProgram: "vscode", pushesKittyFlags: false},
+}
+
+// claudeTerminalIdentityEnv is what claude reads to name its terminal other
+// than TERM and TERM_PROGRAM: the IDE markers it checks first, the
+// per-terminal markers it checks after, and the two that override
+// synchronized output.
+var claudeTerminalIdentityEnv = []string{
+	"CURSOR_TRACE_ID", "VSCODE_GIT_ASKPASS_MAIN", "__CFBundleIdentifier", "VisualStudioVersion",
+	"TERMINAL_EMULATOR", "TMUX", "TMUX_PANE", "KITTY_WINDOW_ID", "WT_SESSION", "VTE_VERSION",
+	"CLAUDE_CODE_FORCE_SYNC_OUTPUT",
+}
+
+// kittyPush is the kitty keyboard protocol's push of flags 5, the sequence
+// that tells the two streams apart.
+const kittyPush = "\x1b[>5u"
+
+func liveEmulatorsAgreeIn(t *testing.T, claudeBin string, wantKittyPush bool) {
+	t.Helper()
 	name := sessionName(t, "emulators")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -167,6 +223,15 @@ func liveEmulatorsAgree(t *testing.T, claudeBin string) {
 		}
 	}
 	compare("dialog", false)
+
+	// The run is only evidence for the stream it was meant to exercise. If
+	// claude stops choosing its keyboard protocol from TERM_PROGRAM, both
+	// modes would quietly test the same bytes and read as green.
+	pushed := bytes.Contains(RecentOutput(name), []byte(kittyPush))
+	require.Equal(t, wantKittyPush, pushed,
+		"claude's startup %s kitty flags (%q) — it no longer picks its keyboard protocol the way "+
+			"claudeTerminalModes says, so this subtest is not exercising the stream it is named for",
+		map[bool]string{true: "pushed", false: "did not push"}[pushed], kittyPush)
 
 	before, _ := selectedMenuOption(paneOf(ctx, name))
 	require.NoError(t, SendDown(ctx, name))
