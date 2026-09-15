@@ -126,6 +126,68 @@ func TestGovernanceCounts_NoDeclarationIsNotAFinding(t *testing.T) {
 	require.Equal(t, FileOK, VerifyFile(path, apexcfg.Ext{ADRs: true}).Code)
 }
 
+// writeADRTagsRaw writes an accepted architectural ADR whose `tags` line is
+// given verbatim, for the shapes writeADR's flow list cannot express.
+func writeADRTagsRaw(t *testing.T, dir, id, tagsLine string) {
+	t.Helper()
+	body := "---\nid: " + id + "\ntitle: \"" + id + "\"\nstatus: accepted\ntype: architectural\n" +
+		tagsLine + "\n---\n\n# " + id + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "adr-"+id+".md"), []byte(body), 0o644))
+}
+
+// TestGovernanceCounts_ScalarTagIsCounted is the recount through the shipped
+// gate. `tags: wiring` used to fail the ADR's typed decode, dropping the
+// record from the corpus: considered 0, so a pass declaring 0 applicable
+// raised nothing against a story about wiring. It is a candidate now, and
+// the self-certifying skip fires exactly as it does for `tags: [wiring]`.
+func TestGovernanceCounts_ScalarTagIsCounted(t *testing.T) {
+	for name, tagsLine := range map[string]string{
+		"flow list (control)": "tags: [wiring]",
+		"block list":          "tags:\n  - wiring",
+		"scalar":              "tags: wiring",
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := govProject(t)
+			writeADRTagsRaw(t, cfg.Paths.ADRs, "ADR-0001", tagsLine)
+
+			path := storyWithGovernance(t, cfg,
+				"governance_pass:\n  adrs_considered: 1\n  adrs_applicable: 0\n",
+				"\nThe story is about wiring the thing.\n")
+
+			verdict := VerifyFile(path, apexcfg.Ext{ADRs: true})
+			require.Contains(t, checkNames(verdict.Findings), CheckADRsConsidered,
+				"the ADR must be a candidate; findings: %+v", verdict.Findings)
+		})
+	}
+}
+
+// TestLoadADRs_TagShapes pins what each `tags` spelling decodes to, and that
+// the shapes which are not a tag list still drop the record as before.
+func TestLoadADRs_TagShapes(t *testing.T) {
+	dir := t.TempDir()
+	writeADRTagsRaw(t, dir, "ADR-0001", "tags: [a, b]")
+	writeADRTagsRaw(t, dir, "ADR-0002", "tags: governance")
+	writeADRTagsRaw(t, dir, "ADR-0003", "tags: a, b")
+	writeADRTagsRaw(t, dir, "ADR-0004", "tags:")
+	writeADRTagsRaw(t, dir, "ADR-0005", "tags: ~")
+	writeADRTagsRaw(t, dir, "ADR-0006", "tags: {a: b}")
+	writeADRTagsRaw(t, dir, "ADR-0007", "tags: [[a]]")
+
+	adrs, ok := LoadADRs(dir)
+	require.True(t, ok)
+	got := map[string][]string{}
+	for _, a := range adrs {
+		got[a.ID] = a.Tags
+	}
+	require.Equal(t, map[string][]string{
+		"ADR-0001": {"a", "b"},
+		"ADR-0002": {"governance"},
+		"ADR-0003": {"a, b"}, // one tag: a scalar is never split
+		"ADR-0004": nil,
+		"ADR-0005": nil,
+	}, got, "a mapping and a nested list are not tag lists and still drop the record")
+}
+
 // TestTagMatch_CandidateSetExcludesIneligibleADRs documents the decision
 // PLAN-26 records: the candidate set is the tag match over ADRs that can
 // produce a GCC line at all. Counting a proposed or pattern-typed record

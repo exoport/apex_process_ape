@@ -115,10 +115,10 @@ func readADR(path string) (ADR, bool) {
 		return ADR{}, false
 	}
 	var head struct {
-		ID     string   `yaml:"id"`
-		Status string   `yaml:"status"`
-		Type   string   `yaml:"type"`
-		Tags   []string `yaml:"tags"`
+		ID     string  `yaml:"id"`
+		Status string  `yaml:"status"`
+		Type   string  `yaml:"type"`
+		Tags   tagList `yaml:"tags"`
 	}
 	if err := yaml.Unmarshal(fm, &head); err != nil {
 		return ADR{}, false
@@ -133,6 +133,44 @@ func readADR(path string) (ADR, bool) {
 		Tags:   head.Tags,
 		Path:   filepath.Base(path),
 	}, true
+}
+
+// tagList is an ADR's `tags`: a list, or a one-item list when the record
+// writes a single scalar.
+//
+// `tags: governance` used to fail the typed decode above, and the whole
+// record was dropped with it — never a tag-match candidate, never counted
+// in the adrs_considered recount, and nothing reported — while
+// `ape registry verify` reads the same record without complaint. It is
+// counted now. Every record in the real corpora measured (137 of them)
+// writes a flow list, so their counts do not move; the scalar is what a
+// hand-written record produces.
+//
+// A scalar is ONE tag: `tags: a, b` is the tag "a, b". Splitting on commas
+// would be guessing at a form YAML already spells as `[a, b]`. A mapping, or
+// a list holding one, still fails the decode, as before.
+type tagList []string
+
+// UnmarshalYAML implements yaml.Unmarshaler.
+func (t *tagList) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if node.Tag == "!!null" || node.Value == "" {
+			*t = nil
+			return nil
+		}
+		*t = tagList{node.Value}
+		return nil
+	case yaml.SequenceNode:
+		var list []string
+		if err := node.Decode(&list); err != nil {
+			return err
+		}
+		*t = list
+		return nil
+	default:
+		return fmt.Errorf("tags at line %d: want a list or a single tag", node.Line)
+	}
 }
 
 // TagMatch returns the ADRs whose tags appear in the story body — the

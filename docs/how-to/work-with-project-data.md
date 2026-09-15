@@ -246,7 +246,10 @@ satisfy the derived section set, and a fenced GCC line must not be checked
 for its separator. Tag matching for `story.adrs_considered` is the one thing
 that still reads the fences, because a tag mentioned in an example is still
 the story talking about that subject, and step 1 of the digest algorithm is
-instructed to be inclusive.
+instructed to be inclusive. An ADR's `tags` count in any YAML spelling — a
+flow list, a block list, or a single scalar (`tags: wiring` is one tag; a
+scalar is never split on commas). A scalar used to drop the whole record
+from the recount without a word.
 
 Two details that differ from the prose they replace:
 
