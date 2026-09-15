@@ -39,6 +39,15 @@ func (e *exitError) Unwrap() error { return e.err }
 func usageErr(err error) error { return &exitError{code: ExitUsage, err: err} }
 func failErr(err error) error  { return &exitError{code: ExitRunFailed, err: err} }
 
+// usageErrExit couples a message with a specific exit code, printing the
+// message itself: ExitCode reports an *exitError as already-reported, so
+// a command that only returned one would exit non-zero with no
+// diagnostic.
+func usageErrExit(code int, err error) error {
+	fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+	return &exitError{code: code, err: err}
+}
+
 // gateErr carries a gate command's verdict out as an exit code.
 //
 // The PLAN-25 gates — `ape story verify --file`, `ape sprint verify`,

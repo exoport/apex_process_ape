@@ -245,7 +245,9 @@ concurrent per-epic sub-agents reconcile the same tracker and the last
 writer would otherwise silently drop a sibling's update.
 
 Exit 0 for every content outcome, including an unrecognised status.
-Non-zero only for a genuine I/O failure.
+Exit 2 for a usage error: neither --epic nor --all, both at once, an
+epic number below 1, or no tracker resolved and no --file. Exit 1 only
+for a genuine I/O failure.
 
 If the project has a board (see 'ape aboard'), reconcile also refreshes a
 'Sprint' tab in it — story and epic counts, what is in flight, and what is
@@ -272,6 +274,9 @@ board: starting one, and initialising one, are yours to do.`,
 		Args:    cobra.NoArgs,
 		Example: "  ape sprint reconcile --epic 12\n  ape sprint reconcile --all --check",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := reconcileScope(epic, all, cmd.Flags().Changed("epic")); err != nil {
+				return usageErrExit(ExitUsage, err)
+			}
 			// The timestamp is resolved whether or not --file was passed.
 			// Refreshing the body updated_at on mutation is part of what
 			// reconcile IS, so it must not depend on how the tracker was
@@ -307,7 +312,10 @@ board: starting one, and initialising one, are yours to do.`,
 				timestamp = time.Now().Format(apexcfg.TimestampLayout)
 			}
 			if path == "" {
-				return usageErr(errors.New("no sprint-status.yaml resolved; pass --file"))
+				// usageErrExit, not usageErr: an *exitError is reported by
+				// ExitCode as already printed, so the bare form exited 2 with
+				// no message at all.
+				return usageErrExit(ExitUsage, errors.New("no sprint-status.yaml resolved; pass --file"))
 			}
 			res, err := sprint.Reconcile(path, sprint.ReconcileOptions{
 				Epic: epic, All: all, Timestamp: timestamp, Check: check,
@@ -344,6 +352,28 @@ board: starting one, and initialising one, are yours to do.`,
 	cmd.Flags().BoolVar(&all, "all", false, "Reconcile every epic with rows")
 	cmd.Flags().BoolVar(&check, "check", false, "Report the projection without writing")
 	return cmd
+}
+
+// reconcileScope is reconcile's usage check, made before anything is
+// resolved or read.
+//
+// It used to live only inside sprint.Reconcile, whose plain error exits 1
+// — the code a caller reads as a failed run, not a malformed call. And two
+// shapes passed it that say nothing coherent: `--epic 1 --all` ran --all
+// and dropped --epic without a word, and `--epic 0` reads as "no --epic"
+// because 0 is the flag's unset value.
+func reconcileScope(epic int, all, epicSet bool) error {
+	switch {
+	case all && epicSet:
+		return errors.New("--epic and --all are exclusive: pass one")
+	case all:
+		return nil
+	case !epicSet:
+		return errors.New("reconcile needs --epic <N> or --all")
+	case epic < 1:
+		return fmt.Errorf("--epic must be an epic number of 1 or more, got %d", epic)
+	}
+	return nil
 }
 
 // emitReconcileHuman prints one line per epic, matching the single-line

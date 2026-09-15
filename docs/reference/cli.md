@@ -4760,7 +4760,9 @@ concurrent per-epic sub-agents reconcile the same tracker and the last
 writer would otherwise silently drop a sibling's update.
 
 Exit 0 for every content outcome, including an unrecognised status.
-Non-zero only for a genuine I/O failure.
+Exit 2 for a usage error: neither --epic nor --all, both at once, an
+epic number below 1, or no tracker resolved and no --file. Exit 1 only
+for a genuine I/O failure.
 
 If the project has a board (see 'ape aboard'), reconcile also refreshes a
 'Sprint' tab in it — story and epic counts, what is in flight, and what is
