@@ -6,7 +6,7 @@
 internal/apecmd/testdata/update/** -text
 internal/apecmd/trusted_root.json -text
 
-# Captured PTY streams (claude's raw terminal output, CR and LF as it wrote
-# them) replayed through vt10x byte for byte. A conversion would move where
-# every line lands in the emulator.
-internal/repl/testdata/*.bin -text
+# Raw PTY output captured from a live Claude Code session. The bytes ARE the
+# fixture — "\r\r\n" and relative cursor moves included — and the defect they
+# pin was in how those exact bytes render, so a converted copy tests nothing.
+internal/repl/testdata/** -text

@@ -15,9 +15,10 @@
 // natively under Git Bash on Windows 11 without WSL or a tmux binary
 // on PATH.
 //
-// PTY output is parsed through a github.com/hinshun/vt10x VT100/xterm
-// emulator. CapturePane returns the rendered grid as plain text — no
-// ANSI escape sequences, no cursor-positioning noise — matching tmux's
+// PTY output is parsed through a github.com/charmbracelet/x/vt terminal
+// emulator (see screen, including why it replaced hinshun/vt10x).
+// CapturePane returns the rendered grid as plain text — no ANSI escape
+// sequences, no cursor-positioning noise — matching tmux's
 // `capture-pane -p` semantics rather than dumping raw bytes.
 //
 // Known limitations:
@@ -26,7 +27,7 @@
 //     process. There is no equivalent of the old `tmux attach -t …`
 //     for an in-flight run. Pipeline runs that want live introspection
 //     should tail the per-step ndjson event log instead.
-//   - Visible-grid scrollback only. vt10x's grid is sized to claude's
+//   - Visible-grid scrollback only. The grid is sized to claude's
 //     perceived terminal (200×50), matching the ioctl winsize claude
 //     reads. Lines that scroll off the top via `\n` at the bottom are
 //     gone — tmux's history buffer (default 2000 lines) isn't
@@ -49,7 +50,6 @@ import (
 
 	"github.com/aymanbagabas/go-pty"
 	"github.com/exoport/apex_process_ape/internal/selfpath"
-	"github.com/hinshun/vt10x"
 )
 
 // PromptSettle is the wait between typing a command and pressing
@@ -85,15 +85,15 @@ type session struct {
 	ptm  pty.Pty
 	cmd  *pty.Cmd
 
-	// term is the VT100/xterm emulator that turns the PTY byte stream
-	// into a 200×50 rendered grid. It owns its own mutex; Write and
-	// String are both safe to call from independent goroutines.
-	term vt10x.Terminal
+	// screen is the VT100/xterm emulator that turns the PTY byte stream
+	// into a 200×50 rendered grid. The pump is its only writer; text is
+	// safe to call from any goroutine.
+	screen *screen
 
 	// outMu guards lastOutput, the timestamp of the most recent non-empty
 	// PTY read. The pump goroutine writes it; LastOutputAt reads it. A
 	// lock-guarded timestamp keeps the accessor race-free without
-	// touching the vt10x reader path (PLAN-19 D1 optional PTY signal).
+	// touching the emulator's reader path (PLAN-19 D1 optional PTY signal).
 	outMu      sync.Mutex
 	lastOutput time.Time
 
@@ -319,12 +319,12 @@ func NewSessionWithEnv(_ context.Context, name, dir string, argv, extraEnv []str
 	}
 
 	s := &session{
-		name:  name,
-		ptm:   ptm,
-		cmd:   cmd,
-		term:  vt10x.New(vt10x.WithSize(paneCols, paneRows)),
-		done:  make(chan struct{}),
-		unpin: unpin,
+		name:   name,
+		ptm:    ptm,
+		cmd:    cmd,
+		screen: newScreen(),
+		done:   make(chan struct{}),
+		unpin:  unpin,
 	}
 	if notice != "" {
 		// Never fatal, and never silent: proceeding unpinned is survivable,
@@ -342,18 +342,14 @@ func NewSessionWithEnv(_ context.Context, name, dir string, argv, extraEnv []str
 }
 
 // pump drains PTY output into the VT emulator until the PTY closes
-// (child exited, or KillSession closed the master). vt10x.Write
-// acquires the terminal's internal lock, so concurrent CapturePane
-// reads are safe. Output passes through privateCSIFilter first: vt10x
-// executes some private sequences as cursor moves, which misplaces
-// every repaint that follows them.
+// (child exited, or KillSession closed the master). screen.write takes
+// the screen's lock, so concurrent CapturePane reads are safe.
 func (s *session) pump() {
 	buf := make([]byte, pumpReadBufSize)
-	var filter privateCSIFilter
 	for {
 		n, err := s.ptm.Read(buf)
 		if n > 0 {
-			_, _ = s.term.Write(filter.apply(buf[:n]))
+			s.screen.write(buf[:n])
 			s.outMu.Lock()
 			s.lastOutput = time.Now()
 			s.outMu.Unlock()
@@ -368,6 +364,7 @@ func (s *session) pump() {
 // reports false once the REPL has exited on its own.
 func (s *session) reap() {
 	_ = s.cmd.Wait()
+	s.screen.close()
 	if s.unpin != nil {
 		s.unpin()
 	}
@@ -386,20 +383,9 @@ func PathNotice(name string) string {
 }
 
 // snapshot returns the VT grid as plain text — each row trimmed of
-// trailing padding spaces, fully-empty trailing rows removed. vt10x's
-// String() acquires its own lock, so no extra synchronization is
-// needed here.
+// trailing padding spaces, fully-empty trailing rows removed.
 func (s *session) snapshot() string {
-	raw := s.term.String()
-	lines := strings.Split(raw, "\n")
-	for i, line := range lines {
-		lines[i] = strings.TrimRight(line, " \t")
-	}
-	end := len(lines)
-	for end > 0 && lines[end-1] == "" {
-		end--
-	}
-	return strings.Join(lines[:end], "\n")
+	return s.screen.text()
 }
 
 func lookup(name string) (*session, bool) {
@@ -624,7 +610,7 @@ var blockingModals = []modalSpec{
 			if err := awaitPaneSettled(ctx, name); err != nil {
 				return err
 			}
-			last := ""
+			var walk []menuMove
 			for range maxMenuMoves {
 				snap, err := capturePaneFn(ctx, name)
 				if err != nil {
@@ -647,21 +633,62 @@ var blockingModals = []modalSpec{
 				if grantsTrust(selected) {
 					return sendEnterFn(ctx, name)
 				}
-				last = selected
 				if err := sendDownFn(ctx, name); err != nil {
 					return err
 				}
-				if err := awaitMenuMove(ctx, name, selected); err != nil {
+				moved, err := awaitMenuMove(ctx, name, selected)
+				if err != nil {
 					return err
 				}
+				walk = append(walk, menuMove{selected: selected, moved: moved, pane: snap})
 			}
 			snap, _ := capturePaneFn(ctx, name)
 			return fmt.Errorf(
 				"repl: could not reach a trust-granting option in %d moves (last selection %q) — "+
-					"the dialog's options have changed shape; pane:\n%s", maxMenuMoves, last, snap,
+					"either the dialog's options have changed shape, or the pane is not tracking the dialog\n%s",
+				maxMenuMoves, walk[len(walk)-1].selected, describeMenuWalk(walk, snap),
 			)
 		},
 	},
+}
+
+// menuMove is one pass of the trust walk: what the pane read as selected,
+// whether the read changed after Down was pressed, and the pane it was
+// read from.
+type menuMove struct {
+	selected string
+	moved    bool
+	pane     string
+}
+
+// describeMenuWalk renders every pass of a failed walk, not just the pane
+// at failure.
+//
+// One pane cannot tell the failures apart, and they need opposite fixes.
+// Identical panes with a read that never moves: the keys are not reaching
+// the dialog. Panes that change while the read does not: the keys work and
+// the read is looking at the wrong rows — which is what claude 2.1.269
+// looked like when the grid had desynchronised (see dropPrivateCSI), and a
+// failure-time dump of that grid sent two diagnoses after a dialog
+// "rendered twice" that claude never rendered.
+func describeMenuWalk(walk []menuMove, final string) string {
+	var b strings.Builder
+	prev := ""
+	for i, m := range walk {
+		change := "the read did not change within " + menuMoveTimeout.String()
+		if m.moved {
+			change = "the read changed"
+		}
+		fmt.Fprintf(&b, "move %d: read %q, pressed Down, %s; pane before the press:\n", i+1, m.selected, change)
+		if i > 0 && m.pane == prev {
+			fmt.Fprintf(&b, "  (identical to move %d's)\n", i)
+		} else {
+			b.WriteString(m.pane + "\n")
+		}
+		prev = m.pane
+	}
+	b.WriteString("pane at failure:\n" + final)
+	return b.String()
 }
 
 // menuMovePoll / menuMoveTimeout bound the wait for a selection to move
@@ -757,24 +784,24 @@ func awaitPaneSettled(ctx context.Context, name string) error {
 }
 
 // awaitMenuMove waits for the highlighted option to stop being `from`,
-// or for menuMoveTimeout. Returning without a change is not an error here
-// — the caller compares selections across passes and reports the stall
-// with the pane, which is more useful than a bare timeout.
-func awaitMenuMove(ctx context.Context, name, from string) error {
+// or for menuMoveTimeout, and reports which. Returning without a change is
+// not an error here — the caller records it per pass and reports the stall
+// with every pane, which is more useful than a bare timeout.
+func awaitMenuMove(ctx context.Context, name, from string) (bool, error) {
 	deadline := time.Now().Add(menuMoveTimeout)
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return false, ctx.Err()
 		case <-time.After(menuMovePoll):
 		}
 		if snap, err := capturePaneFn(ctx, name); err == nil {
 			if sel, ok := selectedMenuOption(snap); ok && sel != from {
-				return nil
+				return true, nil
 			}
 		}
 		if time.Now().After(deadline) {
-			return nil
+			return false, nil
 		}
 	}
 }
