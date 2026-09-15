@@ -117,8 +117,13 @@ error (no _apex/config.yaml, bad cwd).`,
 //     have removed it, so the caller's value is authoritative and
 //     propagates to sub-agents. Empty means claude's native effort, which
 //     is the interactive default — unlike the autonomous paths.
+//  4. The background-shell pressure reap is turned off, as on every other
+//     spawn path (repl.EnvDisableBGShellReap): Claude Code otherwise kills a
+//     running background shell when Bun reports memory pressure, and the
+//     scrub in 1 is what stops an operator setting this themselves.
 func chatSpawnEnv(base []string, effortArg string) (env []string, unpin func(), notice string) {
 	env, unpin, notice = selfpath.Pin(repl.ScrubClaudeCodeEnv(base))
+	env = append(env, repl.DisableBGShellReapEnv()...)
 	if effortArg != "" {
 		env = append(env, repl.EnvClaudeEffortLevel+"="+effortArg)
 	}

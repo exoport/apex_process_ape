@@ -247,6 +247,49 @@ func EffortEnv(effort string) []string {
 	return []string{EnvClaudeEffortLevel + "=" + effort}
 }
 
+// EnvDisableBGShellReap turns off Claude Code's background-shell "pressure
+// reap", and ape sets it on every claude it spawns (DisableBGShellReapEnv).
+//
+// What it disables, read in the 2.1.270, 2.1.272 and 2.1.273 binaries and
+// identical in all three: every background shell task registers a
+// `memoryPressure` handler UNLESS this variable is set, and the handler kills
+// the still-running task — status "killed", reason "memory_pressure",
+// telemetry event `task_local_shell_pressure_reap`. The event is Bun's, off a
+// PSI trigger.
+//
+// Why ape turns it off rather than leaving it to the operator: an ape run is
+// unattended, and a background command killed mid-step is not an error any
+// ape gate can see — the step simply never finishes. It was measured firing on
+// this machine's development host with the PSI averages reading 0.00 and about
+// 18 GB available, killing two background watchers of a session that was not
+// short of memory, and it is the suspected (NOT proven) cause of a 2h20m stall
+// in a framework eval run, where a background sub-agent's Bash call was
+// announced and never completed with no shell process behind it.
+//
+// The trade: under real memory pressure a spawned session's background shells
+// keep running where Claude Code would have killed them. The kernel's OOM
+// killer is still the backstop, and the shells are the work the operator asked
+// for.
+//
+// It has to be ape that sets it. ScrubClaudeCodeEnv strips the whole
+// CLAUDE_CODE_ family, so a value an operator exports cannot reach the child
+// — measured live, the other way round: a CLAUDE_CODE_* entry passed as
+// extraEnv (CLAUDE_CODE_FORCE_SYNC_OUTPUT=1) survives the scrub and changes
+// what claude writes, which is the path this uses.
+//
+// There is deliberately no way to ask for the reap back: Claude Code reads
+// the variable for truthiness, so even "0" disables it. A caller that needs
+// the handler (a test) passes its own entry through extraEnv, which is
+// appended after this one and wins.
+const EnvDisableBGShellReap = "CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP"
+
+// DisableBGShellReapEnv returns the entry ape adds to every spawned claude's
+// environment. Exported because `ape chat` spawns claude directly rather than
+// through a PTY session (chatSpawnEnv).
+func DisableBGShellReapEnv() []string {
+	return []string{EnvDisableBGShellReap + "=1"}
+}
+
 // NewSession spawns argv attached to a PTY, registers it under name,
 // and starts background readers that accumulate pane output for
 // CapturePane / WaitForReady. argv[0] is the program; argv[1:] its
@@ -310,9 +353,11 @@ func NewSessionWithEnv(_ context.Context, name, dir string, argv, extraEnv []str
 	// floor unenforceable from the inside — silently, because the stale
 	// binary answers coherently rather than erroring.
 	env, unpin, notice := selfpath.Pin(scrubTmuxEnv(ScrubClaudeCodeEnv(os.Environ())))
-	// extraEnv last, so a caller's explicit value (the resolved
-	// CLAUDE_CODE_EFFORT_LEVEL) stays authoritative over the scrub.
-	cmd.Env = append(append([]string{}, env...), extraEnv...)
+	// Then ape's own spawn defaults (EnvDisableBGShellReap), and extraEnv
+	// last, so a caller's explicit value (the resolved
+	// CLAUDE_CODE_EFFORT_LEVEL, or a test asking for the reap back) stays
+	// authoritative over both the scrub and the defaults.
+	cmd.Env = append(append(append([]string{}, env...), DisableBGShellReapEnv()...), extraEnv...)
 
 	if err := cmd.Start(); err != nil {
 		unpin()

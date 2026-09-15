@@ -145,9 +145,34 @@ above for an ape-spawned claude (e.g. `CLAUDE_CODE_MAX_OUTPUT_TOKENS`), the
 scrub removes it along with the nesting markers — configure the equivalent
 via claude settings files or ape flags instead.
 
+### Background-shell pressure reap (`CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP`)
+
+The second variable ape injects, on **every** spawn path, always set to `1`.
+
+Claude Code registers a `memoryPressure` handler for each background shell
+task unless this variable is set. When the handler fires it kills the still
+running task — status `killed`, reason `memory_pressure`. The event comes
+from Bun, off a kernel PSI trigger, and it has been observed firing on a
+development host while the PSI averages read `0.00` with ~18 GB available,
+killing two background watchers of a session that was not short of memory.
+
+ape turns it off because an ape run is unattended: a background command
+killed mid-step is not an error any ape gate can see — the step simply never
+finishes. (It is the suspected, unproven cause of a 2h20m stall in a
+framework eval run, where a background sub-agent's command was announced and
+never completed, with no shell process behind it.)
+
+The trade: under real memory pressure a spawned session's background shells
+keep running where Claude Code would have killed them. The kernel's OOM
+killer remains the backstop.
+
+There is no flag to ask for the reap back, and setting the variable yourself
+does nothing — the scrub above removes it with the rest of the family, and
+Claude Code reads it for truthiness, so even `0` disables the reap.
+
 ### `PATH`: `ape` inside a session is *this* ape
 
-One variable is added rather than removed. Every spawned session gets a
+A third variable is added rather than removed. Every spawned session gets a
 one-entry directory at the front of `PATH` in which `ape` is the binary
 that spawned it, and it is removed when the session is reaped.
 

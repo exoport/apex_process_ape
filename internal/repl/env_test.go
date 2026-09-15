@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -87,11 +88,24 @@ func TestNewSessionScrubsNestedClaudeEnv(t *testing.T) {
 	if s.cmd.Env == nil {
 		t.Fatalf("cmd.Env is nil — child inherits the full parent env, nesting markers included")
 	}
+	// Nothing INHERITED from the family survives. ape's own injections do,
+	// and they are listed by name rather than waved through by prefix: a
+	// leaked marker and a deliberate entry look identical to a prefix test,
+	// and the leak is the one that silently zeroes telemetry.
+	apeInjected := map[string]bool{EnvDisableBGShellReap: true}
+	var injected []string
 	for _, e := range s.cmd.Env {
 		k, _, _ := strings.Cut(e, "=")
+		if apeInjected[k] {
+			injected = append(injected, e)
+			continue
+		}
 		if k == "CLAUDECODE" || k == "CLAUDE_EFFORT" || strings.HasPrefix(k, "CLAUDE_CODE_") {
 			t.Fatalf("child env contains %q — nested-session markers leaked", e)
 		}
+	}
+	if want := []string{EnvDisableBGShellReap + "=1"}; !slices.Equal(injected, want) {
+		t.Fatalf("ape's own CLAUDE_CODE_ entries = %v, want %v", injected, want)
 	}
 	if !strings.Contains(strings.Join(s.cmd.Env, "\n"), "ANTHROPIC_API_KEY=keep-me") {
 		t.Fatalf("child env lost ANTHROPIC_API_KEY (auth must pass through)")
@@ -332,4 +346,69 @@ func TestSpawnEnv_PinsThisBinaryAsApe(t *testing.T) {
 
 	unpin()
 	require.NoFileExists(t, pinned, "the shadow is removed when the session is reaped")
+}
+
+// TestNewSessionWithEnv_DisablesTheBackgroundShellReap proves the injection
+// through the spawn path: an inherited value is scrubbed with the rest of the
+// CLAUDE_CODE_ family and ape's own entry is the only one the child gets, so
+// Claude Code does not register the handler that kills a running background
+// shell on a memory-pressure event (EnvDisableBGShellReap).
+func TestNewSessionWithEnv_DisablesTheBackgroundShellReap(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("POSIX PTY test; skipping on Windows")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not installed")
+	}
+	t.Setenv(EnvDisableBGShellReap, "") // an operator's value cannot reach the child
+
+	name := "ape-repl-test-bgreap"
+	_ = KillSession(t.Context(), name)
+	require.NoError(t, NewSessionWithEnv(
+		t.Context(), name, "/tmp",
+		[]string{"bash", "--noprofile", "--norc", "-c", "sleep 2"},
+		EffortEnv(""),
+	))
+	t.Cleanup(func() { _ = KillSession(t.Context(), name) })
+
+	s, ok := lookup(name)
+	require.True(t, ok, "session not registered")
+	require.Equal(t, []string{EnvDisableBGShellReap + "=1"}, entriesFor(s.cmd.Env, EnvDisableBGShellReap))
+}
+
+// A caller may still ask for the reap back — the live gate would, to observe
+// it — because extraEnv is appended after ape's defaults.
+func TestNewSessionWithEnv_ExtraEnvOutranksTheSpawnDefault(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("POSIX PTY test; skipping on Windows")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not installed")
+	}
+
+	name := "ape-repl-test-bgreap-override"
+	_ = KillSession(t.Context(), name)
+	require.NoError(t, NewSessionWithEnv(
+		t.Context(), name, "/tmp",
+		[]string{"bash", "--noprofile", "--norc", "-c", "sleep 2"},
+		[]string{EnvDisableBGShellReap + "="},
+	))
+	t.Cleanup(func() { _ = KillSession(t.Context(), name) })
+
+	s, ok := lookup(name)
+	require.True(t, ok, "session not registered")
+	got := entriesFor(s.cmd.Env, EnvDisableBGShellReap)
+	require.Len(t, got, 2, "both entries are present; os/exec keeps the LAST of a duplicate key")
+	require.Equal(t, EnvDisableBGShellReap+"=", got[len(got)-1])
+}
+
+// entriesFor returns every entry in env keyed on key, in order.
+func entriesFor(env []string, key string) []string {
+	var out []string
+	for _, e := range env {
+		if k, _, _ := strings.Cut(e, "="); k == key {
+			out = append(out, e)
+		}
+	}
+	return out
 }

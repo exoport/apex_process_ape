@@ -89,3 +89,26 @@ func TestChatSpawnEnv_NoEffortKeepsClaudesNative(t *testing.T) {
 	defer unpin()
 	require.NotContains(t, strings.Join(env, "\n"), repl.EnvClaudeEffortLevel+"=")
 }
+
+// TestChatSpawnEnv_DisablesTheBackgroundShellReap — `ape chat` spawns claude
+// directly rather than through a PTY session, so it has to add ape's spawn
+// defaults itself. Claude Code kills a running background shell when Bun
+// reports memory pressure unless this is set, and the scrub above is what
+// stops an operator setting it for the child.
+func TestChatSpawnEnv_DisablesTheBackgroundShellReap(t *testing.T) {
+	env, unpin, notice := chatSpawnEnv([]string{
+		"HOME=/h",
+		repl.EnvDisableBGShellReap + "=inherited-and-scrubbed",
+	}, "")
+	defer unpin()
+	require.Empty(t, notice)
+
+	var got []string
+	for _, kv := range env {
+		if k, _, _ := strings.Cut(kv, "="); k == repl.EnvDisableBGShellReap {
+			got = append(got, kv)
+		}
+	}
+	require.Equal(t, []string{repl.EnvDisableBGShellReap + "=1"}, got,
+		"exactly one entry, ape's own: the inherited value is scrubbed with the rest of the family")
+}
