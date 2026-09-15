@@ -71,6 +71,26 @@ import (
 // get the better message — that is a per-group judgement, not a blanket
 // one.
 //
+// # The residual: --help bypasses it
+//
+// Cobra processes the help flag BEFORE it validates arguments, so
+// `ape sprint zzunknown --help` still exits 0 with the group's help. The
+// honest statement of what this guard gives is therefore "an unknown verb
+// is exit 2 UNLESS --help is passed".
+//
+// Left open by decision rather than oversight. Nothing downstream reaches
+// it: no sanctioned framework call passes --help, and `ape doctor`'s
+// framework.command_surface resolves through rootCmd.Find rather than by
+// invoking anything. Closing it would mean overriding cobra's built-in
+// help handling on every guarded group — more surface than the residual
+// warrants.
+//
+// It is worth knowing about for one reason: `<verb> --help` is a
+// TEMPTING existence probe and it lies. Probing a set of declared verbs
+// that way once reported every one present against an implementation
+// missing three of them — minutes after this guard was written, by the
+// person who wrote it. Probe by invoking.
+//
 // # What is deliberately not guarded
 //
 // Cobra's own `completion` command, which cobra adds to the root itself
