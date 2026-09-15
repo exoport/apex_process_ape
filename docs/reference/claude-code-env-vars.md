@@ -170,6 +170,12 @@ There is no flag to ask for the reap back, and setting the variable yourself
 does nothing — the scrub above removes it with the rest of the family, and
 Claude Code reads it for truthiness, so even `0` disables the reap.
 
+Because a variable ape exports is worthless the moment Claude Code stops
+reading it, `make check-claude` carries a `bg_shell_reap_switch` subtest: it
+reads the installed binary and fails if the variable has vanished, if the
+memory-pressure handler it guards has vanished, or if the two no longer sit
+together.
+
 ### `PATH`: `ape` inside a session is *this* ape
 
 A third variable is added rather than removed. Every spawned session gets a

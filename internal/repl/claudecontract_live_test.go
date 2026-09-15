@@ -64,6 +64,7 @@ func TestLive_ClaudeCodeContract(t *testing.T) {
 	t.Run("ready_signals", func(t *testing.T) { liveReadySignals(t, claudeBin) })
 	t.Run("emulators_agree", func(t *testing.T) { liveEmulatorsAgree(t, claudeBin) })
 	t.Run("startup_probe", func(t *testing.T) { liveStartupProbe(t, claudeBin) })
+	t.Run("bg_shell_reap_switch", func(t *testing.T) { liveBGShellReapSwitch(t, claudeBin) })
 	t.Run("effort_env", func(t *testing.T) { liveEffortEnv(t, claudeBin) })
 	t.Run("model_aliases", func(t *testing.T) { liveModelAliases(t, claudeBin) })
 	t.Run("transcript_persists", func(t *testing.T) { liveTranscriptPersists(t, claudeBin) })
@@ -262,6 +263,61 @@ func liveStartupProbe(t *testing.T, claudeBin string) {
 	res := ProbeClaude(context.Background(), claudeBin)
 	require.Equal(t, ProbeVerified, res.Verdict,
 		"the startup probe does not verify the installed claude: %s\npane:\n%s", res.Detail, res.Pane)
+}
+
+// liveBGShellReapSwitch checks the coupling behind ape's spawn default: the
+// installed Claude Code still reads EnvDisableBGShellReap, and still reads it
+// as the switch on the background-shell pressure reap.
+//
+// ape sets that variable on every spawn so a background shell is not killed
+// mid-step when Bun reports memory pressure (see EnvDisableBGShellReap). If
+// Claude Code renames the variable, or keeps the name but stops gating the
+// handler on it, nothing errors: ape keeps exporting a string nobody reads and
+// the protection is silently gone — the "believed-present protection" trap
+// this whole file exists to close.
+//
+// It reads the binary rather than driving it, because the reap only fires
+// under real kernel memory pressure, which a test cannot stage. What can be
+// checked is that the two still sit together: the variable, and the
+// `process.on("memoryPressure", …)` registration it guards. The scan is
+// streaming — the bundle is ~220 MB — and case-sensitive.
+func liveBGShellReapSwitch(t *testing.T, claudeBin string) {
+	t.Helper()
+	path, err := filepath.EvalSymlinks(claudeBin)
+	require.NoError(t, err)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+
+	const anchor = `process.on("memoryPressure"`
+	// Generous: the gate reads `if(!Te()&&!a.<VAR>){…process.on(…)}`, a few
+	// hundred bytes in the bundles seen so far. Wide enough to survive
+	// reminification, narrow enough that the string table's own copy of the
+	// name (far from any code) cannot satisfy it.
+	const window = 4096
+
+	anchors, named, together := scanBinaryCoupling(t, path, []byte(anchor), []byte(EnvDisableBGShellReap), window)
+
+	require.Empty(t, reapSwitchProblem(anchors, named, together),
+		"ape sets %s on every spawn so a background shell is not killed mid-step, and this says that no longer holds.\n"+
+			"  binary:   %s (%d MiB)\n"+
+			"  variable: %d occurrence(s) of %s\n"+
+			"  handler:  %d registration(s) of %s\n"+
+			"  within %d bytes of each other: %v",
+		EnvDisableBGShellReap, path, info.Size()>>20, named, EnvDisableBGShellReap, anchors, anchor, window, together)
+}
+
+// scanBinaryCoupling counts occurrences of anchor and needle in the file at
+// path, and reports whether any pair of them falls within window bytes.
+func scanBinaryCoupling(t *testing.T, path string, anchor, needle []byte, window int) (anchors, needles int, together bool) {
+	t.Helper()
+	f, err := os.Open(path)
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	const chunk = 8 << 20 // the bundle is ~220 MB; read it in pieces
+	anchors, needles, together, err = scanCoupling(f, anchor, needle, window, chunk)
+	require.NoError(t, err)
+	return anchors, needles, together
 }
 
 // liveEffortEnv proves CLAUDE_CODE_EFFORT_LEVEL still selects the reasoning
