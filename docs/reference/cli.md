@@ -4702,6 +4702,11 @@ ape sprint check [flags]
 Set-compare sprint-status.yaml's story rows against story files on disk,
 and compare each row's status against that story's own frontmatter.
 
+A story file is one that declares story_id, or one a tracker story row
+names. The second is a brownfield story with no frontmatter: its status is
+its body's Status: line. A named file stating no status anywhere is
+reported as row_without_story, saying so rather than claiming no file.
+
 epic-* and *-retrospective rows are classified out: they have no story
 file to diverge from. The tracker's 'drafted' is normalised to a story
 file's 'ready-for-dev' for comparison only — neither file is touched — or

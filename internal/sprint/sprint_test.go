@@ -1306,3 +1306,60 @@ func TestEpicProjection_UnrecognisedStatusIsNamedNotSwallowed(t *testing.T) {
 	require.Contains(t, found[0].Message, "marinating",
 		"the status that held the epic open is named in the finding")
 }
+
+// --- brownfield stories: a tracker-claimed file with no frontmatter ------
+
+// TestRunCheck_BrownfieldStoryIsOnDisk — a story with no frontmatter whose
+// file name a tracker row claims is a story, and its body `Status:` line is
+// its status. RunCheck used to see only frontmatter `story_id`, so it
+// reported "tracker row has no <key>.md" with the file right there.
+func TestRunCheck_BrownfieldStoryIsOnDisk(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml",
+		"development_status:\n  1-1_legacy: in-progress\n  1-2_drifted: done\n  epic-1-retrospective: optional\n")
+	write("1-1_legacy.md", "# Legacy import\n\nStatus: in-progress\n\nLifted from the old tracker.\n")
+	write("1-2_drifted.md", "# Drifted\n\n**Status:** review\n")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	require.Empty(t, findingsOf(report, CheckRowWithoutStory), "both files are on disk: %+v", report.Findings)
+	require.Equal(t, 2, report.Summary.StoriesOnDisk)
+
+	div := findingsOf(report, CheckStatusDivergence)
+	require.Len(t, div, 1, "only the drifted story disagrees with its row")
+	require.Equal(t, "1-2_drifted", div[0].Key)
+	require.Equal(t, "done", div[0].Tracker)
+	require.Equal(t, "review", div[0].Story, "the body line is the story's side of the comparison")
+}
+
+// A claimed file that states no status anywhere is still counted with the
+// missing rows, as the framework's cross-check does — but the message says
+// what is actually wrong, not that the file does not exist.
+func TestRunCheck_BrownfieldStoryWithNoStatusSaysSo(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml", "development_status:\n  1-1_bare: backlog\n  epic-1-retrospective: optional\n")
+	write("1-1_bare.md", "# Bare\n\nNo status line at all.\n\n```md\nStatus: done\n```\n")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	rows := findingsOf(report, CheckRowWithoutStory)
+	require.Len(t, rows, 1)
+	require.Equal(t, "1-1_bare", rows[0].Key)
+	require.Contains(t, rows[0].Message, "is on disk but states no status",
+		"a fenced `Status:` example is not the story's own status")
+	require.Equal(t, "1-1_bare.md", rows[0].Path)
+}
+
+// The second branch is bounded by the tracker. A markdown file nobody's row
+// names — a README, a retrospective — is still not a story, so it produces
+// no story_without_row.
+func TestRunCheck_UnclaimedFileWithoutFrontmatterIsNotAStory(t *testing.T) {
+	cfg, write := newCheckFixture(t)
+	write("sprint-status.yaml", "development_status:\n  epic-1-retrospective: optional\n")
+	write("README.md", "# Notes\n\nStatus: draft\n")
+
+	report, err := RunCheck(cfg)
+	require.NoError(t, err)
+	require.Empty(t, findingsOf(report, CheckStoryWithoutRow), "%+v", report.Findings)
+	require.Zero(t, report.Summary.StoriesOnDisk)
+}

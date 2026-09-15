@@ -1,12 +1,14 @@
 package sprint
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
+	"github.com/exoport/apex_process_ape/internal/frontmatter"
 	"github.com/exoport/apex_process_ape/internal/story"
 )
 
@@ -145,28 +147,11 @@ func RunCheck(cfg *apexcfg.Resolved) (*CheckReport, error) {
 		return report, nil
 	}
 
-	stories := map[string]string{} // story key -> status from its own file
-	ids := map[string]string{}     // story key -> its frontmatter story_id
-	paths := map[string]string{}
-	if cfg.Paths.Implementation != "" {
-		heads, err := story.ScanHeads(cfg.Paths.Implementation)
-		if err != nil {
-			return nil, err
-		}
-		for _, h := range heads {
-			if !h.IsStory() {
-				continue
-			}
-			key := StoryKeyFromPath(h.Path)
-			status := ""
-			if v, ok := h.Raw["status"]; ok && v != nil {
-				status = fmt.Sprintf("%v", v)
-			}
-			stories[key] = status
-			ids[key] = h.StoryID()
-			paths[key] = h.Path
-		}
+	disk, err := scanStoryFiles(cfg.Paths.Implementation, tracker.Rows)
+	if err != nil {
+		return nil, err
 	}
+	stories, ids, paths, statusless := disk.status, disk.ids, disk.paths, disk.statusless
 	report.Summary.StoriesOnDisk = len(stories)
 
 	// claimed holds story keys already accounted for by a nonstandard_row_key
@@ -224,6 +209,17 @@ func RunCheck(cfg *apexcfg.Resolved) (*CheckReport, error) {
 			continue
 		}
 		fileStatus, onDisk := stories[row.Key]
+		if path, present := statusless[row.Key]; present {
+			report.Findings = append(report.Findings, Finding{
+				Check:   CheckRowWithoutStory,
+				Key:     row.Key,
+				Path:    path,
+				Tracker: row.Status,
+				Message: row.Key + ".md is on disk but states no status — " +
+					"neither a frontmatter status nor a body Status: line",
+			})
+			continue
+		}
 		if !onDisk {
 			report.Findings = append(report.Findings, Finding{
 				Check:   CheckRowWithoutStory,
@@ -274,6 +270,71 @@ func RunCheck(cfg *apexcfg.Resolved) (*CheckReport, error) {
 	sortCheckFindings(report.Findings)
 	report.tally()
 	return report, nil
+}
+
+// storyFiles is what the implementation folder says about each story key.
+type storyFiles struct {
+	status map[string]string // story key -> status from its own file
+	ids    map[string]string // story key -> its frontmatter story_id
+	paths  map[string]string
+	// statusless holds tracker-claimed files that state no status anywhere —
+	// no frontmatter `status`, no body `Status:` line. Still reported with
+	// the missing rows, as the framework counts them, but not as a file
+	// that is not there.
+	statusless map[string]string
+}
+
+// scanStoryFiles reads the story files under the implementation folder.
+//
+// A story is a file that declares story_id, OR one whose name a tracker
+// story row claims. The second is the brownfield story (what
+// apex-lift-project leaves behind): no frontmatter at all, its status on a
+// body line. Seeing only the first branch reported such a story as
+// "tracker row has no <key>.md" with the file right there. The claim is
+// bounded by the tracker, so an unclaimed frontmatter-less file — a README —
+// is still not a story.
+func scanStoryFiles(implDir string, rows []Row) (storyFiles, error) {
+	out := storyFiles{
+		status: map[string]string{}, ids: map[string]string{},
+		paths: map[string]string{}, statusless: map[string]string{},
+	}
+	if implDir == "" {
+		return out, nil
+	}
+	heads, err := story.ScanHeads(implDir)
+	if err != nil {
+		return out, err
+	}
+	rowKeys := map[string]bool{}
+	for _, row := range rows {
+		if row.Kind == KindStory {
+			rowKeys[row.Key] = true
+		}
+	}
+	for _, h := range heads {
+		key := StoryKeyFromPath(h.Path)
+		noFrontmatter := errors.Is(h.Err, frontmatter.ErrNoFrontmatter)
+		if !h.IsStory() && (!rowKeys[key] || (h.Err != nil && !noFrontmatter)) {
+			continue
+		}
+		status := ""
+		if v, ok := h.Raw["status"]; ok && v != nil {
+			status = fmt.Sprintf("%v", v)
+		}
+		if noFrontmatter {
+			if st, readErr := story.ReadBodyStatus(h.Abs); readErr == nil {
+				status = st
+			}
+		}
+		if status == "" && !h.IsStory() {
+			out.statusless[key] = h.Path
+			continue
+		}
+		out.status[key] = status
+		out.ids[key] = h.StoryID()
+		out.paths[key] = h.Path
+	}
+	return out, nil
 }
 
 // epicProjectionDivergences reports every `epic-N` row whose asserted
