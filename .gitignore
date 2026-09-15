@@ -58,3 +58,14 @@ sprint-status.yaml.lock
 # merge over a conversation that was never theirs. Conclusions reached on a board
 # get promoted into committed artifacts; the board itself never is.
 .aboard/
+
+# Run artifacts ape writes INTO a test fixture when a command is pointed at
+# one. `resolveMonotonic` issues a timestamp for every project-data command,
+# and its persisted floor lands under the fixture's own output folder — so
+# merely running `ape sprint check --cwd testdata/apexproject` leaves a file
+# behind. One was committed once; this is why it cannot happen twice.
+#
+# Scoped to testdata rather than a bare `_output/`: a project's output folder
+# is framework-owned and named by config, and a blanket rule here would be a
+# claim about other people's repositories.
+testdata/*/_output/
