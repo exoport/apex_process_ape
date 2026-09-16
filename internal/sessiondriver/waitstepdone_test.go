@@ -2,6 +2,7 @@ package sessiondriver
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -240,4 +241,98 @@ func TestPollInterval_ShortWindowScaling(t *testing.T) {
 	require.Equal(t, 15*time.Second, d.pollInterval(0))
 	// Past the long-run threshold the 15s quarter still wins over 60s.
 	require.Equal(t, 15*time.Second, d.pollInterval(2*time.Hour))
+}
+
+// touchEvery bumps path's mtime without writing a byte, every interval until
+// stop closes. Models what Claude Code does to a HUNG session's transcript
+// roughly once an hour.
+func touchEvery(t *testing.T, path string, interval time.Duration, stop <-chan struct{}) {
+	t.Helper()
+	go func() {
+		tick := time.NewTicker(interval)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case now := <-tick.C:
+				_ = os.Chtimes(path, now, now)
+			}
+		}
+	}()
+}
+
+// TestWaitStepDone_TouchWithoutGrowthIsNotProgress is the 2h20m stall, in
+// miniature. Claude Code touches a hung session's transcript about once an
+// hour without writing to it; while that counted as progress, the idle clock
+// restarted at every touch and `--idle-timeout 3600s` could never fire. A
+// framework eval run sat dead for 2h20m that way, its last hook event and
+// last output two hours old.
+//
+// Touches here are faster than the window, exactly as an hourly touch is
+// faster than the hour-long default.
+func TestWaitStepDone_TouchWithoutGrowthIsNotProgress(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "sess.jsonl")
+	require.NoError(t, os.WriteFile(src, []byte(turnLine(10, 10)+"\n"), 0o600))
+	before, err := os.Stat(src)
+	require.NoError(t, err)
+
+	d := newTestDriver(1500 * time.Millisecond)
+	d.SetActiveTranscript(src)
+	d.Begin()
+
+	stop := make(chan struct{})
+	touchEvery(t, src, 300*time.Millisecond, stop)
+	defer close(stop)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	waitErr := d.WaitStepDone(ctx)
+
+	require.NoError(t, ctx.Err(), "the wait outlived the test deadline — a bare touch is still holding the session open")
+	var idle *IdleTimeoutError
+	require.ErrorAs(t, waitErr, &idle)
+	require.Contains(t, idle.Diagnostic, "without growing",
+		"the diagnostic must name the touches; that sentence is what makes this stall recognisable")
+
+	after, err := os.Stat(src)
+	require.NoError(t, err)
+	require.Equal(t, before.Size(), after.Size(), "fixture: the file must not have grown")
+	require.True(t, after.ModTime().After(before.ModTime()), "fixture: the touches must have moved mtime")
+}
+
+// The other half: a session rotation — claude opening a new transcript in the
+// same directory after /clear — changes the DIRECTORY mtime, and that is real
+// progress. A fix that only watched file size would kill a rotating session.
+func TestWaitStepDone_SessionRotationKeepsAlive(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "sess.jsonl")
+	require.NoError(t, os.WriteFile(src, []byte(turnLine(10, 10)+"\n"), 0o600))
+
+	d := newTestDriver(1500 * time.Millisecond)
+	d.SetActiveTranscript(src)
+	d.Begin()
+
+	stop := make(chan struct{})
+	go func() {
+		tick := time.NewTicker(300 * time.Millisecond)
+		defer tick.Stop()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			case <-tick.C:
+				// A new file in the directory moves the dir's mtime.
+				_ = os.WriteFile(filepath.Join(dir, fmt.Sprintf("rotated-%d.jsonl", i)), []byte("{}\n"), 0o600)
+			}
+		}
+	}()
+	defer close(stop)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+	defer cancel()
+	err := d.WaitStepDone(ctx)
+	require.ErrorIs(t, err, context.DeadlineExceeded,
+		"a rotating session is progressing and must not be declared idle: %v", err)
 }

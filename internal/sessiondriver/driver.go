@@ -604,6 +604,11 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 	// under activityMu since FeedHook writes it on the bridge goroutine).
 	lastTranscript := stepStart
 	lastPTY := stepStart
+	// Bare mtime bumps: counted for the diagnostic, never progress.
+	var (
+		touches   int
+		lastTouch time.Time
+	)
 	tSize, tMtime, tDir, _ := d.transcriptSig()
 	ptySeen, _ := d.ptyOutputAt()
 
@@ -621,13 +626,27 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case now := <-ticker.C:
-			// Transcript growth (size, file mtime, or dir mtime for a
-			// /clear-driven session rotation) counts as activity.
+			// Transcript GROWTH counts as activity: more bytes, or a dir
+			// mtime change for a /clear-driven session rotation.
+			//
+			// A bare mtime bump does NOT, and that is the whole point.
+			// Claude Code touches a hung session's transcript about once an
+			// hour without writing a byte, so treating the touch as progress
+			// reset the idle clock forever: a framework eval run sat dead for
+			// 2h20m under `--idle-timeout 3600s`, having produced its last
+			// hook event and its last output two hours earlier. Any window at
+			// or above the touch period had the same hole. The touch is still
+			// recorded, because "touched N times, never grew" is the sentence
+			// that makes the diagnosis immediate.
 			if s, m, dir, ok := d.transcriptSig(); ok {
-				if s != tSize || m.After(tMtime) || dir.After(tDir) {
+				switch {
+				case s != tSize || dir.After(tDir):
 					lastTranscript = now
-					tSize, tMtime, tDir = s, m, dir
+				case m.After(tMtime):
+					touches++
+					lastTouch = now
 				}
+				tSize, tMtime, tDir = s, m, dir
 			}
 			// PTY output bytes (optional signal).
 			if at, ok := d.ptyOutputAt(); ok && at.After(ptySeen) {
@@ -645,7 +664,7 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 			// sub-agent boundary (== step start when the step spawns none),
 			// so a sequential batch is bounded per item, not per batch.
 			if capElapsed := now.Sub(capAnchor); d.maxDuration > 0 && capElapsed > d.maxDuration {
-				_, diag := d.diagnose(now, stepStart, lastHook, lastTranscript, lastPTY)
+				_, diag := d.diagnose(now, stepStart, lastHook, lastTranscript, lastPTY, touches, lastTouch)
 				return &MaxDurationError{
 					Label:      d.idleErrLabel,
 					Elapsed:    capElapsed,
@@ -667,7 +686,7 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 			}
 
 			if idle := now.Sub(lastProgress); idle > d.idleTimeout {
-				src, diag := d.diagnose(now, stepStart, lastHook, lastTranscript, lastPTY)
+				src, diag := d.diagnose(now, stepStart, lastHook, lastTranscript, lastPTY, touches, lastTouch)
 				return &IdleTimeoutError{
 					Label:      d.idleErrLabel,
 					Idle:       idle,
@@ -790,7 +809,7 @@ func IsTerminalAPIError(text string) bool {
 	return strings.HasPrefix(strings.TrimSpace(text), "API Error")
 }
 
-func (d *Driver) diagnose(now, stepStart, lastHook, lastTranscript, lastPTY time.Time) (source, diagnostic string) {
+func (d *Driver) diagnose(now, stepStart, lastHook, lastTranscript, lastPTY time.Time, touches int, lastTouch time.Time) (source, diagnostic string) {
 	d.mu.Lock()
 	transcriptWatched := d.activeTranscript != ""
 	d.mu.Unlock()
@@ -818,6 +837,13 @@ func (d *Driver) diagnose(now, stepStart, lastHook, lastTranscript, lastPTY time
 		sourceAge(now, stepStart, lastHook, true),
 		sourceAge(now, stepStart, lastTranscript, transcriptWatched),
 		sourceAge(now, stepStart, lastPTY, ptyWatched))
+	// The touch count separates "nothing happened" from "something kept
+	// touching the file without writing to it" — the shape of a hung
+	// session, and invisible in every other field here.
+	if touches > 0 {
+		fmt.Fprintf(&b, "; transcript touched %d time(s) without growing, last %v ago",
+			touches, now.Sub(lastTouch).Round(time.Second))
+	}
 	if d.childAliveProbe != nil {
 		pid, alive := d.childAliveProbe()
 		state := "alive"

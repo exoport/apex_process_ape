@@ -20,10 +20,17 @@ progressing.
 Now the idle window is anchored on **real progress**, not just hooks:
 
 - a bridge hook event (as before);
-- the active claude **transcript growing** (its size or mtime, plus the
-  transcript directory's mtime so a `/clear` session rotation counts as
-  activity);
+- the active claude **transcript growing** — its size, plus the transcript
+  directory's mtime so a `/clear` session rotation counts as activity;
 - on the `ape prompt` path, **PTY output bytes**.
+
+A transcript whose **mtime moves while its size does not** is deliberately not
+progress. Claude Code touches a hung session's transcript roughly once an hour
+without writing anything, and while that counted, every touch restarted the
+idle clock: a run under `--idle-timeout 3600s` sat dead for 2h20m, its last
+hook event and last output two hours old. Any window at or above the touch
+period had the same hole. The touches are still counted, and named in the
+termination diagnostic.
 
 Any of these resets the window. **Active steps are no longer cancelled at
 60m** — a step that keeps writing its transcript or streaming to the PTY runs
@@ -97,6 +104,7 @@ tell a real stall from a mis-tuned window at a glance. For example:
 ```
 interactive step idle for 60m1s without progress (window 60m0s): no progress
 across any signal (hook none for 60m1s; transcript none for 60m1s; pty n/a);
+transcript touched 2 time(s) without growing, last 13m20s ago;
 child pid 12345 alive → stopping
 ```
 
@@ -107,6 +115,9 @@ child pid 12345 alive → stopping
   `--max-duration`, or set it to `0` to disable.
 - `child … alive` vs `exited` tells you whether `claude` was still running when
   ape gave up.
+- `transcript touched N time(s) without growing` → the session was hung rather
+  than quiet: something kept touching the transcript without writing to it.
+  Only shown when it happened.
 
 The poll cadence is 30s for the first hour of a step, then 60s thereafter, so
 early stalls are caught quickly while long runs poll cheaply.
