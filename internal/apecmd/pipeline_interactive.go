@@ -475,6 +475,45 @@ func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 			return pid, repl.HasSession(context.Background(), name)
 		})
 	}
+	// And deliberately NO SetPTYProbe here, though `ape prompt` installs
+	// one and this is where it would go. A PTY anchor is a keep-alive, and
+	// on this path — the one `ape task` and every pipeline stage run on —
+	// three measurements say it would cost more than it buys:
+	//
+	//  1. It anchors almost nothing that is not already anchored. A
+	//     sub-agent call emits hooks throughout: three real batch stages
+	//     measured 973 / 1713 / 1614 events with worst gaps of 95 / 363 /
+	//     221 s against a 3600 s window. The only window PTY uniquely
+	//     covers is ONE foreground tool call going silent, and claude
+	//     bounds that at its 120 s Bash default (raised only by
+	//     BASH_DEFAULT_TIMEOUT_MS / BASH_MAX_TIMEOUT_MS, or by
+	//     backgrounding, which returns immediately and fires PostToolUse).
+	//  2. During a silent tool call claude repaints about once a second
+	//     (spinner + elapsed timer), measured at a PTY age of 0-100 ms
+	//     while the transcript did not grow by a byte. So PTY output means
+	//     "the TUI is animating", NOT "work is happening" — and a claude
+	//     waiting on a child that no longer exists animates the same way.
+	//     The 2h20m stall this repo fixed in 554db86 was exactly that: a
+	//     sub-agent Bash call with no shell process behind it and no hook
+	//     after the first 15 s. Whether its pane was still animating is
+	//     unknown and now unknowable (headless run, no PTY recording), and
+	//     an unknown is a reason not to add a keep-alive.
+	//  3. "Only while a tool call is open" does not rescue it. That gate
+	//     was true for the whole of that stall — the call never closed —
+	//     and the hook stream cannot support the bookkeeping anyway: the
+	//     outer Agent PostToolUse arrives BEFORE the sub-agent's inner
+	//     calls, a PreToolUse can have no PostToolUse at all (these hooks
+	//     are async, so drops are expected), and a SubagentStop can carry
+	//     an id that had no SubagentStart. A measured turn ended +1 open.
+	//     Anything built on this stream must be a RECENCY check on the
+	//     newest event, never a balance of opens against closes.
+	//
+	// The termination diagnostic says so out loud: an unwatched source
+	// renders as "n/a", so an idle cancellation here prints "pty n/a" —
+	// which is how to tell "ape stopped watching" from "claude stopped
+	// working". If this ever does get wired, the case to beat is a wedged
+	// session that keeps repainting, and --max-duration (3h, and it resets
+	// at every sub-agent boundary) is not a substitute for that.
 	// Sub-agent captures are per-step: a fresh step must not re-count
 	// the previous step's sub-sessions. stepStartedAt anchors the
 	// robustness sweep's mtime window to this step.

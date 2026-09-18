@@ -21,10 +21,19 @@ two orthogonal axes: **who drives** (a human vs ape, unattended) and
 
 Both `ape task` and `ape prompt` end on the bridge Stop hook. Behind that,
 a **progress-aware backstop** (PLAN-19) cancels a step only after a full idle
-window (`--idle-timeout`, default 60m) with no progress across *any* signal —
-bridge hooks, the transcript growing, or PTY output — not just the old
-hook-only 60m timer. A step that is actively working is never cancelled for
-being slow; a hard `--max-duration` ceiling (default 3h) is the absolute stop.
+window (`--idle-timeout`, default 60m) with no progress across *any* watched
+signal — bridge hooks, the transcript growing, and on the `ape prompt` path
+PTY output — not just the old hook-only 60m timer. A step that is actively
+working is never cancelled for being slow; a hard `--max-duration` ceiling
+(default 3h) is the absolute stop.
+
+`ape task` and every pipeline stage watch hooks and transcript growth but
+**not** PTY output, deliberately: a sub-agent call emits hooks throughout, so
+PTY would anchor almost nothing new, while "the TUI is animating" is not
+evidence that work is happening — a claude waiting on a child that no longer
+exists animates exactly like one doing the work. An idle cancellation prints
+`pty n/a` for that reason, which is how to tell *ape stopped watching* from
+*claude stopped working*.
 See [How to tune long-running steps](../how-to/tune-long-running-steps.md).
 
 ## Lineage

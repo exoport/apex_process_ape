@@ -36,6 +36,31 @@ Any of these resets the window. **Active steps are no longer cancelled at
 60m** — a step that keeps writing its transcript or streaming to the PTY runs
 as long as it keeps making progress, up to the hard ceiling below.
 
+### Which signal is actually carrying your run
+
+Worth knowing before you tune anything, because two of these were measured
+and neither is obvious:
+
+- **A sub-agent call is anchored by hooks the whole way through.** Sub-agents
+  fire `PreToolUse`/`PostToolUse` from inside themselves, each carrying an
+  `agent_id`. Three real batch stages measured 973, 1713 and 1614 hook events
+  with worst gaps of 95 s, 363 s and 221 s — against a 3600 s window. So the
+  framework's batch skills, which dispatch one sub-agent per story, are nowhere
+  near the window no matter how long an individual story takes.
+- **A single foreground tool call is bounded by claude, not by ape.** claude's
+  Bash tool has a **120-second default timeout**: a `sleep 240` is killed at
+  two minutes with "the command timed out". So the classic worry — one silent
+  command outliving the idle window — cannot happen at default settings. It
+  becomes possible only if you raise `BASH_DEFAULT_TIMEOUT_MS` /
+  `BASH_MAX_TIMEOUT_MS`. Backgrounding does not create the problem either: a
+  backgrounded command returns at once and fires `PostToolUse`.
+
+**`ape task` and pipeline stages do not watch PTY output** — only `ape prompt`
+does. That is deliberate: PTY bytes mean "the TUI is animating", which a claude
+waiting on a child that no longer exists does exactly as well as one doing the
+work. An idle cancellation on those paths prints `pty n/a` in its diagnostic,
+which is how to tell *ape stopped watching* from *claude stopped working*.
+
 ## Raise the idle window for pathologically silent tools
 
 The idle window (`--idle-timeout`, default `60m`) only trips on genuine silence
