@@ -584,8 +584,8 @@ func TestUpdate_AppliesDeltasAndRefreshesGeneratedAt(t *testing.T) {
 
 	family, err := FamilyByName("adrs")
 	require.NoError(t, err)
-	res, err := Update(f.cfg, family, map[string]map[string]string{
-		"ADR-0001": {"status": "superseded", "updated_at": "20260822010203"},
+	res, err := Update(f.cfg, family, map[string]map[string]UpdateValue{
+		"ADR-0001": {"status": {Scalar: "superseded"}, "updated_at": {Scalar: "20260822010203"}},
 	}, "20260822010203")
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Entries)
@@ -611,9 +611,9 @@ func TestUpdate_UnknownIDFailsBeforeAnyWrite(t *testing.T) {
 
 	family, err := FamilyByName("adrs")
 	require.NoError(t, err)
-	_, err = Update(f.cfg, family, map[string]map[string]string{
-		"ADR-0001": {"status": "superseded"},
-		"ADR-9999": {"status": "superseded"},
+	_, err = Update(f.cfg, family, map[string]map[string]UpdateValue{
+		"ADR-0001": {"status": {Scalar: "superseded"}},
+		"ADR-9999": {"status": {Scalar: "superseded"}},
 	}, "20260822010203")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "ADR-9999")
@@ -629,7 +629,7 @@ func TestUpdate_MissingIndexIsAnError(t *testing.T) {
 	f := newFixture(t)
 	family, err := FamilyByName("adrs")
 	require.NoError(t, err)
-	_, err = Update(f.cfg, family, map[string]map[string]string{"ADR-1": {"status": "x"}}, "")
+	_, err = Update(f.cfg, family, map[string]map[string]UpdateValue{"ADR-1": {"status": {Scalar: "x"}}}, "")
 	require.Error(t, err)
 }
 
@@ -640,8 +640,8 @@ func TestUpdate_MappingShaped(t *testing.T) {
 
 	family, err := FamilyByName("features")
 	require.NoError(t, err)
-	_, err = Update(f.cfg, family, map[string]map[string]string{
-		"FEAT-1-1": {"status": "delivered"},
+	_, err = Update(f.cfg, family, map[string]map[string]UpdateValue{
+		"FEAT-1-1": {"status": {Scalar: "delivered"}},
 	}, "20260822010203")
 	require.NoError(t, err)
 
@@ -668,8 +668,8 @@ adrs:
 
 	family, err := FamilyByName("adrs")
 	require.NoError(t, err)
-	_, err = Update(f.cfg, family, map[string]map[string]string{
-		"ADR-0001": {"status": "superseded"},
+	_, err = Update(f.cfg, family, map[string]map[string]UpdateValue{
+		"ADR-0001": {"status": {Scalar: "superseded"}},
 	}, "20260822010203")
 	require.NoError(t, err)
 
@@ -704,9 +704,9 @@ func TestScalarQuoting(t *testing.T) {
 func TestParseUpdates(t *testing.T) {
 	got, err := ParseUpdates([]byte(`{"ADR-0001": {"status": "accepted", "v": 4}}`))
 	require.NoError(t, err)
-	require.Equal(t, map[string]map[string]string{
-		"ADR-0001": {"status": "accepted", "v": "4"},
-	}, got, "values are coerced to strings — an index field is text")
+	require.Equal(t, map[string]map[string]UpdateValue{
+		"ADR-0001": {"status": {Scalar: "accepted"}, "v": {Scalar: "4"}},
+	}, got, "scalars are coerced to text — an index field is text")
 
 	_, err = ParseUpdates([]byte(`["not", "an", "object"]`))
 	require.Error(t, err)

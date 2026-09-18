@@ -155,6 +155,27 @@ already listed, and fails before writing anything if it is handed an id
 that is not — creating an entry is the job of the skill that authors the
 document it points at.
 
+**A value is a scalar or a list of scalars, and the difference is kept.**
+
+```bash
+echo '{"FEAT-1-1": {"status": "delivered", "depends_on": ["FEAT-1-2", "FEAT-1-3"]}}' \
+  | ape feature update --updates -
+```
+
+A scalar is written as text — a status of `no` stays `"no"`, an id of
+`0001` keeps its zeros — because YAML 1.1 would otherwise turn them into a
+bool and an int. A list is written as a YAML sequence, which is what the
+dependency fields hold. A nested object, or a list containing one, is
+refused by name rather than written in a form nothing can read back.
+
+> **Repairing a dependency list an older ape flattened.** Up to v0.0.71 a
+> list value was rendered with Go's own formatting and stored as the quoted
+> string `'[FEAT-1-2 FEAT-1-3]'`, which is neither YAML nor JSON. Re-run the
+> update with the list — the value node is replaced outright, so the field
+> becomes a real sequence again. Do not hand-edit `index.yaml`, and note
+> that `ape registry sync` will not help: it adds and removes entries, and
+> never rewrites a field.
+
 ## Stories
 
 ```bash

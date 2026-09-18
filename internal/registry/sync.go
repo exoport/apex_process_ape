@@ -395,7 +395,7 @@ type UpdateResult struct {
 // verbatim: only entries already listed may be updated, an unknown id
 // fails BEFORE anything is written, and the rendered result is
 // round-trip parsed before it replaces the file.
-func Update(cfg *apexcfg.Resolved, family Family, updates map[string]map[string]string, generatedAt string) (*UpdateResult, error) {
+func Update(cfg *apexcfg.Resolved, family Family, updates map[string]map[string]UpdateValue, generatedAt string) (*UpdateResult, error) {
 	dir := family.Dir(cfg.Paths)
 	if dir == "" {
 		return nil, fmt.Errorf("the folder %s records live under is not configured", family.Name)
@@ -422,25 +422,85 @@ func Update(cfg *apexcfg.Resolved, family Family, updates map[string]map[string]
 	}, nil
 }
 
-// ParseUpdates decodes the `{"<id>": {"<field>": "<value>"}}` JSON shape
-// the framework's update skills pipe in. Values are coerced to strings
-// because an index field is text: a status of `no` or an id of `0001`
-// must not become a bool or an int on the way through.
-func ParseUpdates(data []byte) (map[string]map[string]string, error) {
+// ParseUpdates decodes the `{"<id>": {"<field>": <value>}}` JSON shape
+// the framework's update skills pipe in.
+//
+// A SCALAR value is carried as text, because an index field is text: a
+// status of `no` or an id of `0001` must not become a bool or an int on
+// the way through.
+//
+// A LIST value is carried as a list. It used to go through the same
+// `fmt.Sprintf("%v", …)` as everything else, which renders a []any as
+// `[FEAT-1-2 FEAT-1-3]` — Go's own formatting, not YAML and not JSON, so
+// the value landed in index.yaml as a quoted STRING that nothing
+// downstream can round-trip. A framework capture hit it on
+// `depends_on`/`depended_on_by` and left seven dependency lists corrupted
+// in one file; the skill that read the index back refused to commit, which
+// is the only reason it surfaced at all rather than propagating.
+//
+// Re-running the update with the same list repairs a field corrupted by
+// the old behaviour: ApplyDeltas replaces the value node outright, so the
+// quoted string becomes a real sequence. There is no hand-edit step.
+func ParseUpdates(data []byte) (map[string]map[string]UpdateValue, error) {
 	var raw map[string]map[string]any
 	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("updates must be a JSON object of {id: {field: value}}: %w", err)
 	}
-	out := make(map[string]map[string]string, len(raw))
+	out := make(map[string]map[string]UpdateValue, len(raw))
 	for id, deltas := range raw {
 		if strings.TrimSpace(id) == "" {
 			return nil, errors.New("updates contain an empty entry id")
 		}
-		fields := make(map[string]string, len(deltas))
+		fields := make(map[string]UpdateValue, len(deltas))
 		for key, value := range deltas {
-			fields[key] = fmt.Sprintf("%v", value)
+			uv, err := newUpdateValue(value)
+			if err != nil {
+				return nil, fmt.Errorf("%s.%s: %w", id, key, err)
+			}
+			fields[key] = uv
 		}
 		out[id] = fields
 	}
 	return out, nil
+}
+
+// UpdateValue is one field delta: either a scalar rendered as text, or a
+// list of scalars rendered as a YAML sequence.
+type UpdateValue struct {
+	// Scalar is the text form; meaningful only when IsList is false.
+	Scalar string
+	// Items are the list's elements, each already in text form.
+	Items []string
+	// IsList distinguishes an empty list from an empty scalar — `[]` and
+	// `""` are different values, and a length check cannot tell them apart.
+	IsList bool
+}
+
+// newUpdateValue classifies one decoded JSON value.
+//
+// Rejects what it cannot represent rather than flattening it: a nested
+// object, or a list containing one, has no faithful text form, and
+// `fmt.Sprintf("%v", …)` on those produces `map[a:1]` — a value that reads
+// back as a string and silently replaces structure with a Go debug
+// rendering. That is the same failure this function exists to end, so it
+// is an error here, raised before anything is written.
+func newUpdateValue(value any) (UpdateValue, error) {
+	switch v := value.(type) {
+	case []any:
+		items := make([]string, 0, len(v))
+		for i, item := range v {
+			switch item.(type) {
+			case []any, map[string]any, map[any]any:
+				return UpdateValue{}, fmt.Errorf(
+					"list item %d is %T; an index field holds scalars or a list of scalars", i, item)
+			}
+			items = append(items, fmt.Sprintf("%v", item))
+		}
+		return UpdateValue{Items: items, IsList: true}, nil
+	case map[string]any, map[any]any:
+		return UpdateValue{}, fmt.Errorf(
+			"value is %T; an index field holds scalars or a list of scalars", value)
+	default:
+		return UpdateValue{Scalar: fmt.Sprintf("%v", value)}, nil
+	}
 }

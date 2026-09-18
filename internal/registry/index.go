@@ -180,7 +180,7 @@ func entryFromMapping(node *yaml.Node, idFromKey string) (Entry, error) {
 // updated, and an unknown id is an error raised BEFORE anything is
 // written. Creating an index entry is the job of the skill that authors
 // the document it points at.
-func (idx *Index) ApplyDeltas(updates map[string]map[string]string, generatedAt string) (fields int, err error) {
+func (idx *Index) ApplyDeltas(updates map[string]map[string]UpdateValue, generatedAt string) (fields int, err error) {
 	if idx.Missing || idx.root == nil {
 		return 0, fmt.Errorf("%s does not exist", idx.Path)
 	}
@@ -206,7 +206,7 @@ func (idx *Index) ApplyDeltas(updates map[string]map[string]string, generatedAt 
 			return 0, fmt.Errorf("entry %q has no node in %s", id, idx.Path)
 		}
 		for _, key := range sortedKeys(deltas) {
-			setMappingValue(target, key, scalar(deltas[key]))
+			setMappingValue(target, key, updateNode(deltas[key]))
 			fields++
 		}
 	}
@@ -242,6 +242,23 @@ func scalar(value string) *yaml.Node {
 	n := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value}
 	if needsQuoting(value) {
 		n.Style = yaml.SingleQuotedStyle
+	}
+	return n
+}
+
+// updateNode renders one field delta as the YAML node to store.
+//
+// A list becomes a real sequence node in FLOW style ([a, b]), matching how
+// the framework's own generators write `depends_on` — the index stays
+// diffable line-per-entry, and a reader cannot tell an ape-written list
+// from a generator-written one.
+func updateNode(v UpdateValue) *yaml.Node {
+	if !v.IsList {
+		return scalar(v.Scalar)
+	}
+	n := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Style: yaml.FlowStyle}
+	for _, item := range v.Items {
+		n.Content = append(n.Content, scalar(item))
 	}
 	return n
 }
@@ -327,7 +344,7 @@ func writeFileAtomic(path string, data []byte) error {
 	return nil
 }
 
-func sortedKeys(m map[string]string) []string {
+func sortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)

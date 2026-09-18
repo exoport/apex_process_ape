@@ -1097,10 +1097,23 @@ ape adr update [flags]
 
 Apply per-entry field deltas to index.yaml and refresh generated_at.
 
---updates takes {"<id>": {"<field>": "<value>"}} as a file path or '-' for
+--updates takes {"<id>": {"<field>": <value>}} as a file path or '-' for
 stdin. Only entries ALREADY listed may be updated: an unknown id is an
 error raised before anything is written, because creating an index entry
 is the job of the skill that authors the document it points at.
+
+A value is either a SCALAR or a LIST OF SCALARS. A scalar is written as
+text, so a status of "no" stays a string and an id of "0001" keeps its
+zeros instead of becoming a bool or an int. A list is written as a YAML
+sequence — depends_on: [FEAT-1-1, FEAT-1-2] — which is what the
+dependency fields hold. Anything else (a nested object, or a list
+containing one) is refused, naming the entry and field, rather than
+written in a form that cannot be read back.
+
+Re-running an update is how a field is repaired: the value is replaced
+outright, so a dependency list that an older ape stored as the quoted
+string '[FEAT-1-2 FEAT-1-3]' becomes a real sequence again without
+hand-editing index.yaml.
 
 The rendered index is round-trip parsed before it replaces the file, and
 the write is atomic — a crash mid-write cannot truncate an index. Key
@@ -1281,10 +1294,23 @@ ape capability update [flags]
 
 Apply per-entry field deltas to index.yaml and refresh generated_at.
 
---updates takes {"<id>": {"<field>": "<value>"}} as a file path or '-' for
+--updates takes {"<id>": {"<field>": <value>}} as a file path or '-' for
 stdin. Only entries ALREADY listed may be updated: an unknown id is an
 error raised before anything is written, because creating an index entry
 is the job of the skill that authors the document it points at.
+
+A value is either a SCALAR or a LIST OF SCALARS. A scalar is written as
+text, so a status of "no" stays a string and an id of "0001" keeps its
+zeros instead of becoming a bool or an int. A list is written as a YAML
+sequence — depends_on: [FEAT-1-1, FEAT-1-2] — which is what the
+dependency fields hold. Anything else (a nested object, or a list
+containing one) is refused, naming the entry and field, rather than
+written in a form that cannot be read back.
+
+Re-running an update is how a field is repaired: the value is replaced
+outright, so a dependency list that an older ape stored as the quoted
+string '[FEAT-1-2 FEAT-1-3]' becomes a real sequence again without
+hand-editing index.yaml.
 
 The rendered index is round-trip parsed before it replaces the file, and
 the write is atomic — a crash mid-write cannot truncate an index. Key
@@ -2609,10 +2635,23 @@ ape feature update [flags]
 
 Apply per-entry field deltas to index.yaml and refresh generated_at.
 
---updates takes {"<id>": {"<field>": "<value>"}} as a file path or '-' for
+--updates takes {"<id>": {"<field>": <value>}} as a file path or '-' for
 stdin. Only entries ALREADY listed may be updated: an unknown id is an
 error raised before anything is written, because creating an index entry
 is the job of the skill that authors the document it points at.
+
+A value is either a SCALAR or a LIST OF SCALARS. A scalar is written as
+text, so a status of "no" stays a string and an id of "0001" keeps its
+zeros instead of becoming a bool or an int. A list is written as a YAML
+sequence — depends_on: [FEAT-1-1, FEAT-1-2] — which is what the
+dependency fields hold. Anything else (a nested object, or a list
+containing one) is refused, naming the entry and field, rather than
+written in a form that cannot be read back.
+
+Re-running an update is how a field is repaired: the value is replaced
+outright, so a dependency list that an older ape stored as the quoted
+string '[FEAT-1-2 FEAT-1-3]' becomes a real sequence again without
+hand-editing index.yaml.
 
 The rendered index is round-trip parsed before it replaces the file, and
 the write is atomic — a crash mid-write cannot truncate an index. Key
@@ -3183,10 +3222,23 @@ ape pattern update [flags]
 
 Apply per-entry field deltas to index.yaml and refresh generated_at.
 
---updates takes {"<id>": {"<field>": "<value>"}} as a file path or '-' for
+--updates takes {"<id>": {"<field>": <value>}} as a file path or '-' for
 stdin. Only entries ALREADY listed may be updated: an unknown id is an
 error raised before anything is written, because creating an index entry
 is the job of the skill that authors the document it points at.
+
+A value is either a SCALAR or a LIST OF SCALARS. A scalar is written as
+text, so a status of "no" stays a string and an id of "0001" keeps its
+zeros instead of becoming a bool or an int. A list is written as a YAML
+sequence — depends_on: [FEAT-1-1, FEAT-1-2] — which is what the
+dependency fields hold. Anything else (a nested object, or a list
+containing one) is refused, naming the entry and field, rather than
+written in a form that cannot be read back.
+
+Re-running an update is how a field is repaired: the value is replaced
+outright, so a dependency list that an older ape stored as the quoted
+string '[FEAT-1-2 FEAT-1-3]' becomes a real sequence again without
+hand-editing index.yaml.
 
 The rendered index is round-trip parsed before it replaces the file, and
 the write is atomic — a crash mid-write cannot truncate an index. Key
