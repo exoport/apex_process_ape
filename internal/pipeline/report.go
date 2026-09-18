@@ -33,6 +33,33 @@ func renderReport(m *Manifest) string {
 	if m.Pipeline.Digest != "" {
 		fmt.Fprintf(&b, "- digest: `%s`\n", m.Pipeline.Digest)
 	}
+	// Before Totals, deliberately: on a terminated run the totals are
+	// mostly zeros, and a reader who meets them first concludes the run
+	// did nothing rather than that it was stopped.
+	if t := m.Termination; t != nil {
+		b.WriteString("\n## Why this run ended\n\n")
+		fmt.Fprintf(&b, "- reason: **%s**\n", t.Kind)
+		fmt.Fprintf(&b, "- %s\n", t.Message)
+		switch t.Kind {
+		case TerminationIdle:
+			fmt.Fprintf(&b, "- idle %s against a %s window; last progress from `%s`\n",
+				formatDuration(t.IdleSecs), formatDuration(t.WindowSecs), orNone(t.LastSource))
+		case TerminationMaxDuration:
+			fmt.Fprintf(&b, "- ran %s against a %s ceiling — the ceiling fires whether or not the step was progressing\n",
+				formatDuration(t.ElapsedSecs), formatDuration(t.MaxSecs))
+		case TerminationAPIError:
+			fmt.Fprintf(&b, "- every signal had been quiet for %s; this is claude's own upstream failure, not the step's\n",
+				formatDuration(t.QuietSecs))
+		}
+		if t.Diagnostic != "" {
+			fmt.Fprintf(&b, "- diagnostic: `%s`\n", t.Diagnostic)
+			b.WriteString("\n> `pty n/a` in that diagnostic means ape was not watching PTY output on this path " +
+				"(only `ape prompt` does), not that claude stopped drawing. Totals below count only COMPLETED " +
+				"steps, so a run stopped mid-step reports zeros while its work is still in git and in " +
+				"`commit_contract`.\n")
+		}
+	}
+
 	b.WriteString("\n## Totals\n\n")
 	b.WriteString("| Metric | Value |\n| --- | --- |\n")
 	fmt.Fprintf(&b, "| cost | $%.4f |\n", m.Totals.CostUSD)
@@ -160,4 +187,13 @@ func formatInt(n int) string {
 		b.WriteRune(c)
 	}
 	return b.String()
+}
+
+// orNone renders an empty progress-source name as the driver's own word
+// for it, so the report never shows a dangling empty backtick pair.
+func orNone(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
 }

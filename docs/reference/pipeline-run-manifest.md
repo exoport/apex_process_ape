@@ -151,6 +151,44 @@ stages:
 - `failed` — at least one step exited non-zero or its terminal `result` event reported a non-success subtype.
 - `cancelled` — the run's context was cancelled (e.g. user pressed `q` then `y` in the TUI).
 
+### `termination` — why a run ended
+
+Present only when a run ended for a reason other than finishing; absent on a
+completed run, where `status` already says everything. Additive under
+`schema_version: 2`.
+
+```yaml
+termination:
+  kind: idle_timeout          # idle_timeout | max_duration | api_error | cancelled | error
+  message: "interactive step idle for 1h0m0s without progress (window 1h0m0s): …"
+  diagnostic: "last progress hook 1h0m0s ago (hook 1h0m0s ago; transcript none for 3h44m; pty n/a); child pid 4242 alive"
+  last_source: hook           # idle only: hook | transcript | pty | none
+  idle_seconds: 3600.0        # idle only
+  window_seconds: 3600.0      # idle only
+  elapsed_seconds: 14400.0    # max_duration only
+  max_seconds: 10800.0        # max_duration only
+  quiet_seconds: 90.0         # api_error only
+```
+
+**Read it together with the zeros.** `totals` counts *completed* steps, and a
+step cancelled mid-flight records none — so a terminated run shows
+`steps: []`, `cost_usd: 0` and `num_turns: 0` while its work is real, committed
+and visible in `git log` and in `commit_contract`. Before this field existed,
+such a run was indistinguishable on disk from one that did nothing: a framework
+eval capture ended after 3h44m with exactly those zeros, the backstop having
+fired correctly 60 minutes after the parent's last hook, and the reason existed
+only in stderr.
+
+Two things in `diagnostic` are worth knowing how to read:
+
+- **`pty n/a`** means ape was not *watching* PTY output on this path — `ape task`
+  and pipeline stages deliberately do not, only `ape prompt` does — **not** that
+  claude stopped drawing. It is the difference between *ape stopped watching*
+  and *claude stopped working*.
+- **`transcript touched N time(s) without growing`** is the signature of a hung
+  session: Claude Code touches a wedged session's transcript about hourly
+  without writing a byte.
+
 ### Metric provenance
 
 Since v0.0.36 every run drives an interactive `claude` REPL inside a PTY (see [why-pty-only.md](../explanation/why-pty-only.md)), so there is no per-step terminal `result` event to read. Per-step `cost_usd`, `tokens_*`, `num_turns`, `model_usage`, and `sessions[]` are derived by scanning the session transcript (`internal/cost/`). Transcript scanning is the single cost source, and it attributes usage per model and per claude session (including sub-agent sessions spawned via the Agent tool). If the transcript is unavailable at scan time, the numeric fields are zero, `telemetry_note` explains why, and the step still appears with the correct duration and status.

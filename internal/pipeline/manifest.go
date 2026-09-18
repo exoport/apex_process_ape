@@ -133,6 +133,66 @@ type Manifest struct {
 	// Additive under schema_version 2; absent on runs that assert no
 	// contract.
 	CommitContract *CommitContractRecord `yaml:"commit_contract,omitempty"`
+
+	// Termination says WHY a run ended, when it ended for a reason other
+	// than finishing. Absent on a completed run, where `status` already
+	// says everything.
+	//
+	// It is here for the same reason CommitContract is: the message goes
+	// to stderr, and stderr is nobody's durable record. A framework eval
+	// capture ended after 3h44m with `status: failed`, `steps: []` and
+	// totals of zero — the backstop had fired correctly and the manifest
+	// could not say so, so the artifact was indistinguishable from a
+	// step that did nothing at all. Every field below was already in
+	// hand at that moment and simply was not written down.
+	//
+	// Additive under schema_version 2.
+	Termination *TerminationRecord `yaml:"termination,omitempty"`
+}
+
+// TerminationKind names the backstop that ended a run. Stable strings:
+// the manifest is read by the eval harness, so these are an external
+// contract, not an internal enum.
+const (
+	// TerminationIdle — no progress across any WATCHED signal for a full
+	// `--idle-timeout` window. Which signals were watched is in the
+	// diagnostic, and it matters: `pty n/a` there means ape was not
+	// watching PTY output on this path, not that claude fell silent.
+	TerminationIdle = "idle_timeout"
+	// TerminationMaxDuration — the hard `--max-duration` ceiling, which
+	// fires whether or not the step was progressing.
+	TerminationMaxDuration = "max_duration"
+	// TerminationAPIError — claude's own upstream-failure text, which is
+	// a failure of the harness rather than of the step.
+	TerminationAPIError = "api_error"
+	// TerminationCancelled — the context was cancelled (operator ^C, or
+	// a parent deadline).
+	TerminationCancelled = "cancelled"
+	// TerminationError — any other run error.
+	TerminationError = "error"
+)
+
+// TerminationRecord is the durable "why" behind a non-completed run.
+type TerminationRecord struct {
+	Kind string `yaml:"kind"`
+	// Message is the error text as the operator saw it on stderr.
+	Message string `yaml:"message"`
+	// Diagnostic is the driver's per-source progress breakdown — hook,
+	// transcript and PTY ages, bare transcript touches, child liveness.
+	// The single most useful line for telling "ape stopped watching"
+	// from "claude stopped working"; empty for kinds that carry none.
+	Diagnostic string `yaml:"diagnostic,omitempty"`
+	// LastSource is the progress signal that advanced most recently
+	// ("hook" / "transcript" / "pty" / "none") for an idle termination.
+	LastSource string `yaml:"last_source,omitempty"`
+	// IdleSecs / WindowSecs describe an idle termination; ElapsedSecs /
+	// MaxSecs a ceiling one; QuietSecs how long every signal had been
+	// silent when an API error was judged terminal.
+	IdleSecs    float64 `yaml:"idle_seconds,omitempty"`
+	WindowSecs  float64 `yaml:"window_seconds,omitempty"`
+	ElapsedSecs float64 `yaml:"elapsed_seconds,omitempty"`
+	MaxSecs     float64 `yaml:"max_seconds,omitempty"`
+	QuietSecs   float64 `yaml:"quiet_seconds,omitempty"`
 }
 
 // CommitContractRecord is the manifest's copy of the commit-ownership

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/runlog"
+	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 	"gopkg.in/yaml.v3"
 )
 
@@ -466,7 +467,60 @@ func finalizeManifest(mw *manifestWriter, runErr error, _ Observer) {
 	case runErr != nil:
 		status = StatusFailed
 	}
+	mw.RecordTermination(newTerminationRecord(runErr))
 	_, _ = mw.Finalize(status, time.Now())
+}
+
+// newTerminationRecord projects a run error into the manifest's durable
+// "why". nil for a clean run: a completed run's `status` says everything,
+// and an empty record would only invite a reader to look for meaning in
+// it.
+//
+// Typed errors first, in the order that keeps the most specific verdict:
+// an idle or ceiling termination is also "an error", and collapsing it
+// into TerminationError would throw away the numbers that say whether the
+// window was wrong or the step really was dead.
+func newTerminationRecord(runErr error) *TerminationRecord {
+	if runErr == nil {
+		return nil
+	}
+	var (
+		ite *sessiondriver.IdleTimeoutError
+		mde *sessiondriver.MaxDurationError
+		tae *sessiondriver.TerminalAPIError
+	)
+	switch {
+	case errors.As(runErr, &ite):
+		return &TerminationRecord{
+			Kind:       TerminationIdle,
+			Message:    ite.Error(),
+			Diagnostic: ite.Diagnostic,
+			LastSource: ite.LastSource,
+			IdleSecs:   ite.Idle.Seconds(),
+			WindowSecs: ite.Window.Seconds(),
+		}
+	case errors.As(runErr, &mde):
+		return &TerminationRecord{
+			Kind:        TerminationMaxDuration,
+			Message:     mde.Error(),
+			Diagnostic:  mde.Diagnostic,
+			ElapsedSecs: mde.Elapsed.Seconds(),
+			MaxSecs:     mde.Max.Seconds(),
+		}
+	case errors.As(runErr, &tae):
+		return &TerminationRecord{
+			Kind:      TerminationAPIError,
+			Message:   tae.Error(),
+			QuietSecs: tae.Quiet.Seconds(),
+		}
+	// Checked AFTER the typed errors: a cancelled context is how an idle
+	// termination reaches some callers, and reporting that as a plain
+	// cancellation would lose the reason it was cancelled.
+	case errors.Is(runErr, context.Canceled), errors.Is(runErr, context.DeadlineExceeded):
+		return &TerminationRecord{Kind: TerminationCancelled, Message: runErr.Error()}
+	default:
+		return &TerminationRecord{Kind: TerminationError, Message: runErr.Error()}
+	}
 }
 
 // openStepLog wraps manifestWriter.OpenStepLog with the nil-mw fallback

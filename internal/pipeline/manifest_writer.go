@@ -202,6 +202,16 @@ func (w *manifestWriter) EndStage(stageIdx int, status RunStatus, at time.Time) 
 	return w.persist()
 }
 
+// RecordTermination stores why the run ended, for Finalize to persist.
+// A nil record clears nothing and writes nothing: a clean run carries no
+// termination, and Finalize is the only writer of this field.
+func (w *manifestWriter) RecordTermination(rec *TerminationRecord) {
+	if rec == nil {
+		return
+	}
+	w.manifest.Termination = rec
+}
+
 // Finalize writes the terminal manifest + renders the human report.
 // Closes any open per-step log files. The returned report path is the
 // absolute path to pipeline-report.md.
