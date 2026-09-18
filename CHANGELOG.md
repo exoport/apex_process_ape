@@ -199,6 +199,13 @@ failing, which is why a framework that needs them names this version.
   variables.** Package-level flag state is shared across invocations and
   makes a second call in one process inherit the first one's flags.
 
+- **chore(deps): containerd `v2.3.5`, closing GO-2026-6444.** A goroutine
+  leak in containerd's CRI `ExecSync` (CVE-2026-53495), published the day
+  before this release and reachable from `ape sandbox`'s client code. The
+  advisory names no symbols, so the whole module counts as affected — the
+  bump is the fix rather than an allow-list entry, and the gate's
+  allow-list stays empty.
+
 - **docs:** `sprint.epic_projection_divergence` and `reconcile`'s scope
   contract are written up in
   [Work with project data](docs/how-to/work-with-project-data.md) — both
