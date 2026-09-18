@@ -359,9 +359,22 @@ no `--strict`: which side is right is judgment, and wiring it into a build
 loop would stop runs over something no tool can fix. It belongs in
 `ape doctor` and nowhere else.
 
+The one class that does name a correct value is
+[`sprint.epic_projection_divergence`](#sprintepic_projection_divergence-the-one-class-that-names-the-right-value)
+— an epic row is derived rather than asserted, so there is nothing to
+judge. It still only reports.
+
 `reconcile` also refreshes a **`Sprint` tab on the project's board**, if the
 project has one — story and epic counts, what is in flight, what is blocked.
 See [Watching a run on the board](use-the-board.md#watching-a-run-on-the-board).
+
+**`reconcile` needs a scope, and says so with exit 2.** Exactly one of
+`--epic N` (with `N >= 1`) or `--all`: neither, both, or an epic below 1 is
+a *usage* error — exit 2, the reason on stderr, the tracker untouched —
+rather than the exit 1 a failed reconcile uses, so a caller can tell a
+malformed call from a reconcile that tried and failed. Passing `--epic 1
+--all` together used to exit 0, having run `--all` and dropped `--epic`
+without a word.
 
 The join is the **story key** — the story file's stem, which is what the
 tracker rows on. A story's frontmatter `story_id` is a *different* string
@@ -397,6 +410,68 @@ A retrospective row whose key names no epic — `project-retrospective` — is
 still classified as a retrospective row and discharges no epic. Crediting
 it to whichever epic happens to be missing one would be inventing an
 attribution the key does not carry.
+
+### `sprint.epic_projection_divergence`, the one class that names the right value
+
+One finding per `epic-N` row whose asserted status disagrees with the
+projection of that epic's own story rows:
+
+```console
+$ ape sprint check
+4 story row(s), 4 on disk (2 epic, 2 retrospective, 0 other row(s) classified out)
+
+1 finding(s):
+  CHECK                              KEY     TRACKER  STORY  PROJECTED
+  sprint.epic_projection_divergence  epic-2  done     -      in-progress
+
+epic rows are derived, not asserted: re-derive with `ape sprint reconcile` (the apex-sprint-sync skill runs it). Never hand-edit an epic row.
+```
+
+The `PROJECTED` column and that closing line — printed once per report, not
+per finding — exist because the four columns every other class uses name two
+sides and let the reader choose. For this class that is wrong: an operator
+shown `TRACKER in-progress STORY -` was told neither what the value should
+be nor what to do about it. `STORY` stays empty because an epic row has no
+story file behind it; the projection is in `projected` in JSON and YAML, a
+field of its own rather than a reuse of `story`, which everywhere else means
+"the story file's own value".
+
+**It reports and never writes, for a sharper reason than the other
+classes.** Elsewhere which side of a divergence is right is genuine
+judgment, and ape refuses to pick. Here the framework's operating rules say
+never to set, close or reopen an epic row by hand, and the tracker's own
+header repeats it — so exactly one resolution is correct and it is
+mechanical. That is also why there is no `--fix`: `ape sprint reconcile`
+already owns that write, and a second writer of the same rows is how two
+tools start disagreeing about a value neither of them decides.
+
+It is a **comparison, not a second projection**: it calls the same
+`sprint.Project` that `reconcile` writes from, so the report and the write
+cannot disagree about which epics are drifting. It inherits that
+projection's decisions for free — `cancelled` rows dropped from the active
+set, `blocked` holding an epic open, a bare `N-M` row counted toward its
+epic — and an unrecognised story status is **named** in the message rather
+than swallowed, since it can only ever hold an epic open and a reader who
+could not see it would read the projection itself as wrong.
+
+Two silences are deliberate. An epic with no story rows, or none still
+active, has no projection for anything to disagree with — reporting those
+would fire on every epic mid-mint and every descoped one. And an epic with
+story rows but no `epic-N` header asserts nothing, so there is no divergence
+to invent; a finding there would send a reader off to correct a row nobody
+wrote.
+
+> `contexted` is read as `in-progress` when projecting an epic, and **only**
+> there. The story-row normaliser `sprint.status_divergence` uses is
+> untouched: folding the mapping in would have been one line, and would have
+> silently changed a shipped class — a story row written `contexted` would
+> have stopped diverging from an `in-progress` story file.
+
+The remediation string is one exported constant (`EpicProjectionRemediation`),
+so the finding, the human line and the framework's own doctor routing prose
+cannot drift apart. Both sides of that routing are prose, and a
+one-character difference would ship an orchestrator naming a command ape
+never prints.
 
 ### `sprint.nonstandard_row_key`, and why it exists
 

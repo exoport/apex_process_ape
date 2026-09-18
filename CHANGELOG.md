@@ -1,5 +1,212 @@
 # CHANGELOG
 
+## v0.0.71 (2026-09-17)
+
+Two runs that reported success while doing nothing are the spine of this
+release: a spawn that could not start on a Claude Code version nobody had
+checked, and a hung session ape counted as making progress for 2h20m.
+Neither errored, which is the shape of defect this release is mostly about.
+
+It also raises the floor the APEX framework's preflight relies on. Three
+behaviours below are what a framework release can now require rather than
+work around — `ape sprint check`'s `sprint.epic_projection_divergence`
+class and its remediation string, `ape story verify` counting an ADR whose
+`tags:` is a single value, and `ape sprint reconcile` refusing a scopeless
+call with exit 2. Under an older ape each of those goes *quiet* instead of
+failing, which is why a framework that needs them names this version.
+
+- **feat: a new Claude Code version is checked once, before a run meets
+  it.** `ape task`, `pipeline` and `prompt` now run a startup probe before
+  their first spawn: a zero-token `claude` spawn in an untrusted scratch
+  directory, driven through the trust dialog to a REPL showing both ready
+  signals. The verdict is cached per (claude version, ape version) in the
+  user cache dir, so it costs nothing after the first run on a version.
+
+  It exists because nothing in ape reacted to a `claude` auto-update:
+  2.1.269 broke every spawn two days after v0.0.68 shipped green, and each
+  affected command failed on its own, late, with a pane nobody had a
+  baseline for. A *broken* verdict now stops the run and prints the pane
+  plus the raw bytes; *undetermined* (claude drew nothing at all) warns and
+  continues without caching, because refusing to run on no evidence would
+  make a slow machine look like a broken one. `APE_CLAUDE_PROBE=off` skips
+  the check, loudly. `make check-claude` gained a `startup_probe` subtest,
+  which is what keeps the probe itself from misjudging a working claude.
+
+- **feat(repl): `charmbracelet/x/vt` renders the pane; vt10x stays on as a
+  second opinion.** Every read ape takes of claude's screen comes from the
+  new emulator. vt10x — the previous one — misread claude 2.1.269's
+  kitty-keyboard query (`CSI ? u` ran as *restore cursor*), which
+  desynchronised the whole grid and was the real cause of the trust-dialog
+  failure v0.0.69 had patched with a byte filter in front of the emulator.
+  That filter is now **deleted** rather than layered in front of x/vt: it
+  was measured to be a no-op on both captured streams, and it swallowed a
+  character on `ESC ESC [>5u b`.
+
+  vt10x survives in test code as `vt10xOracle`: every captured byte fixture
+  is replayed through both emulators, at every split point of the stream,
+  and they must agree. A one-emulator test suite is what let the original
+  misreading look like correct behaviour for as long as it did. Plain `CSI u`
+  is unimplemented in x/vt — pinned by a test with a tripwire rather than
+  shimmed, since claude uses `ESC 7`/`ESC 8`.
+
+- **feat(repl): the raw PTY bytes are recorded, and a failed trust walk
+  exits 3.** A trust walk that gives up used to be indistinguishable from
+  an ordinary failure; it now has its own exit code, and the bytes that
+  produced the pane are kept, so the next emulator defect is diagnosable
+  from the recording instead of a screenshot of the symptom.
+
+- **fix(repl): string controls never draw, and the fallback ready signal
+  matches a real claude.** Two defects in the pane ape reads, both
+  invisible to every offline test and both found by comparing against a
+  live claude.
+
+  x/ansi's parser ends a string control at the 8-bit ST byte `0x9C` even
+  when that byte falls inside a UTF-8 character, and claude's window title
+  is "✳ Claude Code" — so " Claude Code" was printed onto the logo row.
+  Not cosmetic in general: every spinner glyph claude cycles through its
+  title while it works encodes as `E2 9C xx`, so any title update could
+  write text over the row the cursor was on. The screen now strips string
+  controls — OSC, DCS, SOS, PM, APC — before the emulator sees them; ape
+  renders text, and a string control never puts text on a screen, while a
+  hyperlink's visible text sits outside its OSC 8 and still renders. The
+  vt10x oracle stays unfiltered, so it remains an independent opinion.
+
+  The second one is why the fallback ready signal had never actually
+  matched: claude's prompt line is `❯` followed by U+00A0, which RE2's `\s`
+  does not match and a trailing-space trim does not remove. Readiness had
+  been resting on the bypass-permissions footer **alone** on every real
+  pane, while the tests — a bash `PS1` of a plain `❯ ` — said the fallback
+  worked. The startup probe found it, by declaring a working claude broken.
+  `emulators_agree` now compares the *whole* ready-REPL pane between
+  emulators rather than only the rows ape reads today, and `ready_signals`
+  asserts the prompt pattern against a real pane instead of merely finding
+  the glyph somewhere on it.
+
+- **feat(spawn): Claude Code's background-shell pressure reap is turned
+  off on every spawn.** ape sets
+  `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1` for every PTY session and
+  for `ape chat`. Claude Code otherwise registers a `memoryPressure`
+  handler per background shell task and **kills the running task**, which
+  an attended user sees and an unattended pipeline step cannot. There is no
+  opt-out by design: the env scrub strips the whole `CLAUDE_CODE_` family,
+  and claude reads the variable for truthiness, so even `0` would disable
+  the reap.
+
+  Not proven, and stated as such: that this was the cause of the 2h20m
+  stall the idle-timeout fix below addresses. The kill was never observed
+  live; the handler was read in 2.1.270, 2.1.272 and 2.1.273's binaries.
+
+- **test(check-claude): the pressure-reap switch is still claude's
+  switch.** ape now exports a variable that a vendor could rename at any
+  time, so `make check-claude` reads the installed binary and fails if the
+  variable is gone, if the `process.on("memoryPressure", …)` registration
+  it guards is gone, or if the two are no longer within 4 KiB of each other
+  — three classes with three different remedies. The scanner streams the
+  ~220 MB bundle in chunks with an overlap, and is unit-tested, so
+  `make test` covers it with no claude present.
+
+  (Measured on 2.1.274, after this branch was frozen: claude narrowed the
+  reap to *critical* memory only, and still gates the handler's
+  registration on this variable. The switch keeps working; the gate is what
+  will say so next time.)
+
+- **fix(sessiondriver): a transcript touch is not progress.** Claude Code
+  touches a hung session's transcript roughly hourly **without writing
+  anything**. ape read any mtime change as progress, so `--idle-timeout`
+  could never fire on the one condition it exists for: a run sat dead for
+  2h20m with the timeout set to an hour. Progress is now transcript
+  *growth* — bytes, or the directory's mtime for a `/clear` rotation — and
+  a bare touch is counted and named in the diagnostic ("touched N time(s)
+  without growing").
+
+  The worse fix is guarded against with its own test: a rotating session,
+  whose directory mtime moves while the file size stands still, must stay
+  alive. `internal/sessiondriver/driver.go` was byte-identical across every
+  ape build to date, so this was never version-specific. The trade is that
+  a long, genuinely silent tool call — no hook, no output, no growth — is
+  now cancelled at the window; no shipped pipeline or skill sets
+  `--idle-timeout`, so it reaches only a caller who passes the flag.
+
+- **feat(sprint): an epic row that disagrees with its own projection is
+  reported.** `sprint.epic_projection_divergence` in `ape sprint check`:
+  one finding per `epic-N` row whose asserted status disagrees with the
+  projection of that epic's story rows. It is a **comparison, not a second
+  projection** — it calls the same `sprint.Project` that
+  `ape sprint reconcile` writes from, so the report and the write cannot
+  disagree about which epics are drifting.
+
+  It is the one class in that command that names a correct value, because
+  an epic row is *derived*: the operating rules and the tracker's own header
+  both say never to edit one by hand, so there is no judgment to refuse.
+  Human output gained a `PROJECTED` column and a once-per-report
+  remediation line, since the four columns every other class uses name two
+  sides and let the reader choose — an operator shown `TRACKER in-progress
+  STORY -` was told neither the right value nor what to do. Still
+  report-only, and no `--fix`: `reconcile` owns that write, and a second
+  writer of the same rows is how two tools start disagreeing.
+
+  Two silences are deliberate and tested: an epic with no active story rows
+  has no projection to disagree with, and an epic with no `epic-N` header
+  asserts nothing to diverge from. `contexted` is read as `in-progress`
+  when projecting an epic and **only** there — folding it into the shared
+  story-row normaliser would have been one line and would have silently
+  changed a shipped class.
+
+- **fix(story): an ADR written with a scalar `tags:` is counted, not
+  dropped.** `tags: wiring` is one tag. A scalar is never split on commas,
+  and the whole record used to be dropped. The real corpora all write flow
+  lists, so no counts move on them.
+
+- **fix(sprint): a malformed `reconcile` call exits 2 and says why.**
+  Exactly one of `--epic N` (N ≥ 1) or `--all`. Neither, both, or an epic
+  below 1 is now a usage error — exit 2, the reason on stderr, the tracker
+  untouched — instead of the exit 1 a *failed* reconcile uses, so a caller
+  can tell a malformed call from a reconcile that tried. Three shapes the
+  old check never reached, all measured on the pre-fix binary: `--epic 1
+  --all` exited 0 having run `--all` and dropped `--epic` without a word;
+  `--epic 0` and `--epic -2` read as "no --epic" and complained about a
+  flag that *was* passed; and outside a project the command exited 2 with
+  nothing on stderr at all.
+
+- **fix(cli): a command group no longer answers an unknown verb with exit
+  0.** `ape <group> zzunknown` reported success. The fix keeps the two
+  cobra behaviours that made the obvious version of it a no-op, and a
+  related silence is fixed with it: an exit code is not a message, so a
+  command that returns a bare usage error now prints before returning
+  rather than exiting non-zero with an empty stderr. One documented
+  residual remains, stated in the CLI reference rather than left for
+  someone to discover: `ape <group> zzunknown --help` still exits 0.
+
+- **fix(sprint): a brownfield story file is on disk, not missing.**
+  A story the tracker knows about and the corpus walk found was reported as
+  absent.
+
+- **fix(update): the update notice only runs when stderr is a terminal.**
+  It was writing into captured output, where nobody reads it and something
+  else has to parse around it.
+
+- **refactor(mdscan): one markdown layer for story, apexdoc and the spec
+  graph.** Fence stripping, heading normalisation, the File List grammar,
+  the GCC line form and the markdown link set were private copies in two
+  packages, with a third reader of the same documents on the way — and two
+  parsers that disagree about what a heading is produce two answers about
+  one file with no way to tell which is wrong. The extraction is
+  behaviour-preserving by construction (the originals keep one-line
+  aliases, so every call site and test is textually unchanged), and it
+  brought one real fix with it: a fence inside a block quote is a fence.
+
+- **refactor(sandbox): connection flags live on the command, not in package
+  variables.** Package-level flag state is shared across invocations and
+  makes a second call in one process inherit the first one's flags.
+
+- **docs:** `sprint.epic_projection_divergence` and `reconcile`'s scope
+  contract are written up in
+  [Work with project data](docs/how-to/work-with-project-data.md) — both
+  were behaviours the framework's preflight depends on that existed only in
+  the generated CLI reference. The env-var reference covers the
+  pressure-reap switch, the long-running-steps guide covers what now counts
+  as progress, and the release guide covers the two new gates.
+
 ## v0.0.70 (2026-09-13)
 
 - **fix(check-claude): `transcript_persists` no longer races the turn it
