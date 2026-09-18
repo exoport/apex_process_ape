@@ -1,5 +1,106 @@
 # CHANGELOG
 
+## v0.0.72 (2026-09-18)
+
+Three findings from one day of framework eval captures, and none of them
+was a crash: a command that corrupted the file it was asked to edit, a
+backstop that fired correctly and left no record of having fired, and a
+promise in a flag's own help text that two of three commands did not keep.
+
+- **fix(registry): a list field is written as a list, not as Go's
+  rendering of one.** `ape <family> update` flattened every list value
+  into a string. A JSON list arrives as `[]any`, the parser ran the same
+  `fmt.Sprintf("%v", …)` over it as over every scalar, and Go renders that
+  as `[FEAT-1-2 FEAT-1-3]` — space-separated, neither YAML nor JSON. It
+  landed in `index.yaml` as a quoted **string** nothing downstream can
+  round-trip:
+
+  ```yaml
+  depended_on_by: '[FEAT-1-2 FEAT-1-3 FEAT-1-4 FEAT-1-5 FEAT-3-2]'
+  ```
+
+  Found on `depends_on` / `depended_on_by`: seven dependency lists
+  corrupted in one feature index, beside correct lists written by other
+  paths on the same records. The skill reading the index back detected the
+  invalid registry and refused to commit, halting a 58-minute stage — which
+  is the only reason it surfaced rather than propagating into epic and
+  story generation.
+
+  The stringification was deliberate and **stays for scalars**: YAML 1.1
+  turns `no` into `false` and `0001` into `1`, and an index field is text.
+  What was missing is that a sequence is not a scalar. Values now carry
+  their kind, and a list is written as a real YAML sequence. A nested
+  object, or a list containing one, is now refused by entry and field name
+  rather than written as `map[a:1]` — the same failure in a different
+  costume.
+
+  **There is an in-band repair**, contrary to how this first read: re-run
+  the update with the list, and the value node is replaced outright. No
+  hand-editing of `index.yaml`, which the framework forbids, and no new
+  command. `ape registry sync` genuinely cannot do it — it adds and removes
+  entries and never rewrites a field. Verified with the real CLI against
+  the preserved capture: that exact quoted string became a sequence again.
+
+- **feat(manifest): a run records WHY it ended, not just that it failed.**
+  A capture ran 3h44m and finished with `status: failed`, `steps: []` and
+  totals of zero. The idle backstop had fired exactly as designed — 60
+  minutes after the parent's last hook, while the parent was genuinely
+  working until it gave up — and nothing on disk said so. Four stories had
+  been dev'd, reviewed and committed before the wedge; the artifact was
+  indistinguishable from a step that did nothing at all.
+
+  `manifest.yaml` gains `termination` (additive under `schema_version: 2`,
+  absent on a completed run): which backstop fired, the message, the
+  driver's per-source diagnostic, and the numbers behind the verdict —
+  idle/window, elapsed/max, or quiet. `pipeline-report.md` gains a "Why
+  this run ended" section, placed **before** Totals on purpose, since a
+  reader who meets `cost $0.0000 / steps run 0` first concludes the run did
+  nothing.
+
+  The classifier checks the typed errors **before** `context.Canceled`,
+  because cancelling the run is *how* the backstop stops it; the naive
+  order would report every idle timeout as a plain cancellation and throw
+  away the reason. `totals` still reports zeros on a terminated run, which
+  stays correct — they count *completed* steps — and the report now says
+  why they are zeros.
+
+- **docs(idle-timeout): PTY output is not an anchor on `task` or
+  `pipeline`.** The flag's help on both advertised progress across "hooks,
+  transcript growth, or PTY output", but `SetPTYProbe` has one non-test
+  caller (`ape prompt`), and `ape task` runs on the pipeline runner's
+  driver — so a third of that promise was false on every path the APEX
+  framework uses. An eval harness had cited that help text as its
+  justification for a 60-minute window.
+
+  The fix is the promise, not the missing probe, and three measurements
+  decided it. Sub-agent calls are already hook-anchored: three real batch
+  stages measured 973 / 1713 / 1614 hook events with worst gaps of 95 s /
+  363 s / 221 s against a 3600 s window. The only window PTY uniquely
+  covers is one **foreground** tool call going silent, and claude bounds
+  that at its 120-second Bash default. And PTY output means "the TUI is
+  animating", not "work is happening" — measured at 0–100 ms age throughout
+  a silent `sleep` while the transcript did not grow by a byte, and a
+  claude waiting on a child that no longer exists animates identically.
+
+  The reasoning is recorded where someone would otherwise add the probe,
+  and `docs/how-to/tune-long-running-steps.md` gained a "which signal is
+  actually carrying your run" section. `pty n/a` in a termination
+  diagnostic means ape was not watching PTY output on that path — not that
+  claude stopped drawing.
+
+- **`make check-claude` gains `pty_repaints_during_tool`.** It guards the
+  one path where PTY *is* load-bearing: during a silent tool call
+  `ape prompt` has no other live signal. It asserts both halves — PTY
+  staying fresh is only meaningful while the transcript is proven static —
+  so if transcript growth ever starts anchoring that window, the gate says
+  to re-measure the reasoning above rather than trust it. Its running
+  markers were read off a live pane: there is no "esc to interrupt" string
+  in this claude, and the empty-prompt pattern matches *while* a turn
+  works, so neither is a busy/idle discriminator.
+
+Verified against Claude Code **2.1.277** (prices, output styles, hook
+contract, and every `check-claude` subtest, no skips).
+
 ## v0.0.71 (2026-09-17)
 
 Two runs that reported success while doing nothing are the spine of this
