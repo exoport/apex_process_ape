@@ -31,6 +31,14 @@ package apecmd
 //	   the run completed and the repository is not in the state the
 //	   framework declared it would be, which is a different thing to
 //	   report and a different thing to fix
+//
+// Codes above 6 are command-local and are NOT declared here, because no
+// two commands mean the same thing by them. `ape framework` uses 3..7 for
+// its own install failures (framework.go), and 8, 9 and 10 are reserved
+// for `ape change`'s three outcomes — escalated, refused, halted
+// (PLAN-68 B.3), which land later and declare them in their own file.
+// This note is that reservation: a command taking one of those numbers
+// for an unrelated meaning makes the range unreadable, and 7 is gone.
 const (
 	ExitOK           = 0
 	ExitRunFailed    = 1

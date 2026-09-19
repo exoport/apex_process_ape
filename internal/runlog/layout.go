@@ -113,6 +113,24 @@ func TasksRoot(projectRoot string) string {
 	return filepath.Join(ApeRoot(projectRoot), "tasks")
 }
 
+// ChangesRoot holds one directory per `ape change` run.
+//
+// Deliberately NOT a run root: a change directory holds the request
+// ape typed, the skill's terminal contract, the change record and any
+// residue — not a manifest. The dispatch it makes is an ordinary task
+// run under TasksRoot, keyed by the skill, and that is what RunRoots
+// sees. Listing this tree as a fifth root would offer every manifest
+// sweeper a directory with no manifest in it.
+func ChangesRoot(projectRoot string) string {
+	return filepath.Join(ApeRoot(projectRoot), "changes")
+}
+
+// ChangeDir is where one `ape change` run's own artifacts live. The
+// change id is ape's, and is not the run id of the dispatch beneath it.
+func ChangeDir(projectRoot, changeID string) string {
+	return filepath.Join(ChangesRoot(projectRoot), changeID)
+}
+
 // PromptsRoot holds one directory per `ape prompt` run.
 func PromptsRoot(projectRoot string) string {
 	return filepath.Join(ApeRoot(projectRoot), "prompts")

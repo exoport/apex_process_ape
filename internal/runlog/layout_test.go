@@ -77,6 +77,25 @@ func TestRunRoots_AllUnderTheResolvedApeRoot(t *testing.T) {
 	}, kinds)
 }
 
+// A change directory resolves under the project's own output folder like
+// every other ape path, and stays OUT of RunRoots: it holds no manifest,
+// and the dispatch it makes is an ordinary task run that RunRoots already
+// covers. A sweeper handed this tree would find nothing to read.
+func TestChangesRoot_UnderApeRootAndNotARunRoot(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	writeConfig(t, root, "out")
+
+	require.Equal(t, filepath.Join(root, "out", "ape", "changes"), ChangesRoot(root))
+	require.Equal(t, filepath.Join(root, "out", "ape", "changes", "20260919-a"),
+		ChangeDir(root, "20260919-a"))
+
+	for _, r := range RunRoots(root) {
+		require.NotEqual(t, ChangesRoot(root), r.Path,
+			"changes/ holds no manifest, so it is not a run root")
+	}
+}
+
 // On a default project the old and new homes for prompts and chats are the
 // same path, so only pipelines and tasks have anywhere to go.
 func TestLegacyRunRoots_DefaultProjectHasTwoRelocations(t *testing.T) {
