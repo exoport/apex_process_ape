@@ -103,6 +103,7 @@ func rootSubcommands() []*cobra.Command {
 		newRollbackCmd(),
 		newPipelineCmd(),
 		newTaskCmd(),
+		newChangeCmd(),
 		newPromptCmd(),
 		newScriptCmd(),
 		newPlanningCmd(),

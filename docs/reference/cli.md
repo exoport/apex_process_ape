@@ -31,6 +31,7 @@ Subcommands:
 - `adr` — Manage Architecture Decision Records
 - `bootstrap` — Bootstrap governance artifacts from traits
 - `capability` — Inspect and maintain the capability registry
+- `change` — Run one maintenance change: dispatch the lane, then commit its goals
 - `chat` — Bridged claude REPL with hooks captured to a runlog
 - `config` — Resolve the project's APEX configuration
 - `context` — Inspect the project-context document
@@ -1380,6 +1381,70 @@ Flags:
 | `--cwd` | string | `—` | Project root (default: current working dir) |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) |
+
+## ape change
+
+Run one maintenance change: dispatch the lane, then commit its goals
+
+```
+ape change [request] [flags]
+```
+
+Carry one maintenance request through the lean lane.
+
+ape dispatches the apex-maintenance skill with its hands off git, reads
+the terminal contract the skill writes, and then composes and makes
+every commit itself. The skill never runs git; ape holds the pen.
+
+The request is text that gets TYPED INTO A REPL as keystrokes, so it
+comes from a file or stdin rather than argv:
+
+  --request-file <path>   read the request from a file
+  --request-file -        read it from stdin
+  <request>               positional, for a human at a shell
+
+A newline, a control character or a trailing backslash is refused
+before anything spawns: the first submits the line early, the last
+never submits at all.
+
+--fixes <deferred-record-id> names the record this change discharges. It
+may be given alone, in which case there is no request and no Request:
+trailer, or together with one.
+
+Artifacts land under {output_folder}/ape/changes/<change-id>/: the
+request verbatim, the skill's contract, the change record, and — where
+a run left edits in the tree — the residue it could not commit.
+
+Exit codes: 0 every goal landed · 1 the run failed, or its contract was
+missing or invalid · 2 usage or preflight · 3 REPL never became ready ·
+4 claude died · 5 upstream API · 6 the commit was refused (ownership,
+reconciliation or validation) · 8 escalated, with the route's commands
+on stdout · 9 refused by the lane · 10 halted part way, with earlier
+goals committed and the rest saved as residue.
+
+Examples:
+
+```
+  ape change "the CLI reference is out of date"
+  ape change --request-file /tmp/request.txt --output-format json
+  printf '%s' "$req" | ape change --request-file -
+  ape change --fixes 20260919-a3f1c2 --review
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--contract-out` | string | `—` | Where the skill writes its terminal contract (default: contract.yaml in the change directory; must sit inside it) |
+| `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--dry-run` | bool | `false` | Print the messages ape would compose and commit nothing, leaving the tree as the run left it |
+| `--effort` | string | `—` | Reasoning effort (low\|medium\|high\|xhigh\|max) |
+| `--fixes` | string | `—` | Deferred record id this change discharges (may be given alone) |
+| `--model` | string | `—` | Claude model for the dispatch |
+| `--output-format` | string | `human` | Output format: human\|json |
+| `--quiet` | bool | `false` | Suppress the per-event progress stream (the default when stdout is not a terminal) |
+| `--request-file` | string | `—` | File holding the request; "-" reads stdin |
+| `--review` | bool | `false` | Ask the lane to review its own change before reporting |
 
 ## ape chat
 
