@@ -1,5 +1,110 @@
 # CHANGELOG
 
+<!-- The version below is the ONE place this release's number appears; it is
+     provisional until the tag is decided. -->
+
+## v0.0.73 (unreleased)
+
+The maintenance lane's carrier. The APEX framework's PLAN-68 adds a lean lane
+for a fix too small to be a story, and `ape` is the half of it that touches
+git: it dispatches the skill with its hands off the repository, reads the
+terminal contract that skill writes, checks that contract against what
+actually changed, and composes every commit itself.
+
+- **feat(change): `ape change`, and ape holds the pen.** One maintenance
+  request in, commits out. The request is text that gets TYPED INTO A REPL,
+  so it arrives through `--request-file <path>` or `--request-file -` rather
+  than argv — a shell argument runs command substitution on backticks and
+  reads a leading dash as a flag — and a newline, a control character or a
+  trailing backslash is refused before anything spawns: the first submits the
+  line early, the last never submits at all.
+
+  The pre-flight refuses the four states ape could not hold the pen from: a
+  dirty tree, a detached HEAD, an unignored `{output_folder}/ape`, and no
+  `evidence_folder`. After the dispatch, the contract is checked against
+  itself — a goal that landed after a halt, counts that disagree with the
+  goals they count — and then against the repository. That reconciliation is
+  deliberately ASYMMETRIC: a changed path no goal claims refuses the run,
+  because that is unreviewed work riding into someone else's commit, while a
+  path a goal claimed that did not change is recorded and reported. The
+  commit would still be exactly the real changes, and refusing there would
+  throw away a finished hour over a list that was too long.
+
+  Per landed goal, in order: an `evidence:` commit, the goal's own commit
+  over its own paths, then the deferred records the run earned. `Fixes:` only
+  when every goal landed — a partial run writes `Refs:`, so a record is never
+  read as discharged by a run that did not finish. Every commit stages and
+  commits the same literal pathspec, so nothing the operator staged rides
+  along, and hooks are never skipped. Whatever is left in the tree is saved
+  under the change record: `residue.patch` written with plumbing, because
+  porcelain `git diff` output fails `git apply` under `color.ui=always` or
+  `diff.noprefix`, self-tested with `git apply --check -R`, plus a byte copy
+  of every untracked file.
+
+- **feat(governance): `ape governance match`.** Which stories' File Lists
+  claim a set of paths, and what that means for the lane: an in-flight owner
+  vetoes, a finished or not-yet-started one earns a `Carries:` row. Three
+  rules in it are the ones a re-implementation drops, so each is tested on
+  its own — ownership is a whole path token, so `store.go` never matches
+  `sqlstore.go`; a `(planned)` or `(deferred)` entry claims nothing; and a
+  story whose file and tracker disagree is treated as owned, because a story
+  mid-transition is exactly the one a patch must not quietly overwrite. The
+  owner arm only: there is no `adrs` or `patterns` field, not even empty,
+  because an empty list would read as "nothing applies" where the truth is
+  that this `ape` does not answer that question.
+
+- **feat(change): `--queue` and `--drain`.** A request written down now and
+  run later, because the lane refuses a dirty tree and a request usually
+  arrives mid-change. The queued record's body's FIRST LINE is the request,
+  verbatim — not a dedicated field, which an older `ape deferred close` would
+  drop, where bodies survive every version. The drain stops at the first run
+  that leaves edits in the tree, which is the ORDINARY way it ends: every
+  later run would refuse at pre-flight anyway, so it names the residue and
+  the records it never reached.
+
+- **fix(doctor): ask git about the ape folder with a trailing slash.** git
+  answers about a bare path by what it can see, and a directory it cannot see
+  is not a directory to it. So under `_output/ape/` — the line this check's
+  own fix command tells the project to add — the answer was "not ignored"
+  until something created the folder: a project that took the advice was told
+  to take it again on every run. Under a contents rule (`_output/ape/*`) it
+  answered "not ignored" even once the folder existed, for ever. Found by the
+  framework's eval while building against `ape change`, whose pre-flight
+  refuses to run when that path is unignored — there the same bug would have
+  refused a project whose ignore file was exactly right.
+
+- **feat(change): the escalation route prints, and nothing is sequenced.** On
+  exit 8 the verb prints the exact next commands for the route the contract
+  named, from the framework's own `_apex/change-routes.yaml`, which
+  `ape framework setup|update` now installs. A route change is therefore not
+  an `ape` release. The story key in a printed command is RESOLVED against
+  the tracker and the story files and never pasted from the contract: a
+  contract can name a story, but a string like `12-3; rm -rf ~` can never
+  become one.
+
+- **feat(task, pipeline): `--prompt-file`, and two supporting verbs.**
+  `ape task` and `ape pipeline` take a prompt from a file or stdin, sharing
+  `ape change`'s reader and validation, so a printed escalation command
+  carries the operator's own words without argv touching them.
+  `ape config pin evidence_folder [--check]` writes the framework's own
+  fallback into the project config — the path that project's skills were
+  already resolving, so no install moves — and its exit codes are a
+  migration's verdict: 0 set, 1 unset, and a missing or malformed config
+  keeps its 4 or 2, because a runner reads anything else as "the check
+  failed". `ape deferred list --id` exposes the by-id read the store always
+  had internally.
+
+- **docs(explanation): running `ape` from inside a session `ape` started.**
+  Why nesting works — the environment scrub, the bridge port baked into the
+  hook command rather than inherited, each run reading only the transcript
+  its own hooks named, and the transitive PATH pin — and why the constraint
+  is the OUTER run's lifecycle rather than the nesting. Two halves are
+  measured rather than reasoned: a background-shell poll appears in the
+  hook stream as a `Read` of the shell's output file, NOT as `BashOutput`,
+  so anything reading those events must key on the path shape; and a nested
+  `ape version` returns the spawning binary on a machine whose installed
+  `ape` is three dozen versions older.
+
 ## v0.0.72 (2026-09-18)
 
 Three findings from one day of framework eval captures, and none of them
