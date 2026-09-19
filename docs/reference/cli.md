@@ -1411,6 +1411,15 @@ never submits at all.
 may be given alone, in which case there is no request and no Request:
 trailer, or together with one.
 
+--queue writes the request down instead of running it, as a maintenance
+record ape commits itself — the lane refuses a dirty tree, and a
+request usually arrives while someone is mid-change. --drain then runs
+every queued record as its own change, skipping any a commit already
+discharged with a Fixes: trailer, and stopping at the first run that
+leaves edits in the tree, because every later run would refuse at
+preflight anyway. A record the drain escalated, had refused, or halted
+part way is marked so a second drain does not retry it.
+
 Artifacts land under {output_folder}/ape/changes/<change-id>/: the
 request verbatim, the skill's contract, the change record, and — where
 a run left edits in the tree — the residue it could not commit.
@@ -1437,11 +1446,13 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--contract-out` | string | `—` | Where the skill writes its terminal contract (default: contract.yaml in the change directory; must sit inside it) |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--drain` | bool | `false` | Run every queued maintenance record as its own change, stopping at the first that leaves the tree dirty |
 | `--dry-run` | bool | `false` | Print the messages ape would compose and commit nothing, leaving the tree as the run left it |
 | `--effort` | string | `—` | Reasoning effort (low\|medium\|high\|xhigh\|max) |
 | `--fixes` | string | `—` | Deferred record id this change discharges (may be given alone) |
 | `--model` | string | `—` | Claude model for the dispatch |
 | `--output-format` | string | `human` | Output format: human\|json |
+| `--queue` | bool | `false` | Write the request down as a maintenance record and commit it, running nothing |
 | `--quiet` | bool | `false` | Suppress the per-event progress stream (the default when stdout is not a terminal) |
 | `--request-file` | string | `—` | File holding the request; "-" reads stdin |
 | `--review` | bool | `false` | Ask the lane to review its own change before reporting |

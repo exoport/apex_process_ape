@@ -71,6 +71,8 @@ func newChangeCmd() *cobra.Command {
 		modelFlag    string
 		effortFlag   string
 		dryRunFlag   bool
+		queueFlag    bool
+		drainFlag    bool
 		contractOut  string
 		outputFormat string
 		quietFlag    bool
@@ -100,6 +102,15 @@ never submits at all.
 may be given alone, in which case there is no request and no Request:
 trailer, or together with one.
 
+--queue writes the request down instead of running it, as a maintenance
+record ape commits itself — the lane refuses a dirty tree, and a
+request usually arrives while someone is mid-change. --drain then runs
+every queued record as its own change, skipping any a commit already
+discharged with a Fixes: trailer, and stopping at the first run that
+leaves edits in the tree, because every later run would refuse at
+preflight anyway. A record the drain escalated, had refused, or halted
+part way is marked so a second drain does not retry it.
+
 Artifacts land under {output_folder}/ape/changes/<change-id>/: the
 request verbatim, the skill's contract, the change record, and — where
 a run left edits in the tree — the residue it could not commit.
@@ -124,9 +135,19 @@ goals committed and the rest saved as residue.`,
 			if len(args) == 1 {
 				positional = args[0]
 			}
-			request, err := resolveChangeRequest(positional, requestFile, cmd.InOrStdin(), fixesFlag)
-			if err != nil {
-				return usageErr(err)
+			if queueFlag && drainFlag {
+				return usageErr(errors.New("--queue writes a request down and --drain runs the " +
+					"ones already written: pass one"))
+			}
+			// --drain takes no request of its own: each record's first
+			// line is the request for its own run.
+			request := ""
+			if !drainFlag {
+				var err error
+				request, err = resolveChangeRequest(positional, requestFile, cmd.InOrStdin(), fixesFlag)
+				if err != nil {
+					return usageErr(err)
+				}
 			}
 			o := changeOptions{
 				request:     request,
@@ -135,6 +156,8 @@ goals committed and the rest saved as residue.`,
 				model:       resolveModelArg(modelFlag),
 				effort:      effortFlag,
 				dryRun:      dryRunFlag,
+				queue:       queueFlag,
+				drain:       drainFlag,
 				contractOut: contractOut,
 				jsonMode:    jsonMode,
 				// Quiet by default off a terminal: the conductor runs this
@@ -152,6 +175,10 @@ goals committed and the rest saved as residue.`,
 	cmd.Flags().StringVar(&modelFlag, "model", "", "Claude model for the dispatch")
 	cmd.Flags().StringVar(&effortFlag, "effort", "", "Reasoning effort (low|medium|high|xhigh|max)")
 	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Print the messages ape would compose and commit nothing, leaving the tree as the run left it")
+	cmd.Flags().BoolVar(&queueFlag, "queue", false,
+		"Write the request down as a maintenance record and commit it, running nothing")
+	cmd.Flags().BoolVar(&drainFlag, "drain", false,
+		"Run every queued maintenance record as its own change, stopping at the first that leaves the tree dirty")
 	cmd.Flags().StringVar(&contractOut, "contract-out", "",
 		"Where the skill writes its terminal contract (default: contract.yaml in the change directory; must sit inside it)")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json")
@@ -168,6 +195,8 @@ type changeOptions struct {
 	model       string
 	effort      string
 	dryRun      bool
+	queue       bool
+	drain       bool
 	contractOut string
 	jsonMode    bool
 	quiet       bool
@@ -337,6 +366,8 @@ type changeRun struct {
 	args string
 	// residue is what the run left in the tree, once it has been saved.
 	residue *change.Residue
+	// env is the run's final envelope, kept for --drain.
+	env changeEnvelope
 }
 
 // changeRecord is `change.yaml`: what ape was asked, what it did, and
@@ -511,16 +542,29 @@ type changeEnvelope struct {
 }
 
 func runChange(ctx context.Context, o changeOptions) error {
+	switch {
+	case o.queue:
+		return runQueue(ctx, o)
+	case o.drain:
+		return runDrain(ctx, o)
+	}
+	_, err := changeOnce(ctx, o)
+	return err
+}
+
+// changeOnce is one dispatch and its settlement, returning the run so a
+// caller can read what happened. `--drain` is that caller.
+func changeOnce(ctx context.Context, o changeOptions) (*changeRun, error) {
 	r, err := changeStart(ctx, o)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
 	res, derr := dispatchTask(ctx, r.taskOptions(o))
 	if derr != nil {
-		return usageErr(derr)
+		return r, usageErr(derr)
 	}
-	return r.settle(ctx, o, res)
+	settled := r.settle(ctx, o, res)
+	return r, settled
 }
 
 // settle is everything after the dispatch returns: read the tree, read
@@ -543,7 +587,7 @@ func (r *changeRun) settle(ctx context.Context, o changeOptions, res taskRun) er
 	// contract. Everything downstream reconciles against this.
 	changed, changedErr := change.Changed(ctx, r.cfg.Root)
 	if changedErr != nil {
-		return reportChange(o, env, failErr(changedErr))
+		return r.report(o, env, failErr(changedErr))
 	}
 	env.Residue = changed
 
@@ -564,7 +608,7 @@ func (r *changeRun) settle(ctx context.Context, o changeOptions, res taskRun) er
 		// and a lost one.
 		r.saveResidue(ctx, o, &env)
 		r.writeRecord(env, nil)
-		return reportChange(o, env, reportedErr(env.ExitCode, errors.New("the dispatch failed")))
+		return r.report(o, env, reportedErr(env.ExitCode, errors.New("the dispatch failed")))
 	}
 
 	contract, contractErr := change.ReadContract(r.contractPath)
@@ -578,7 +622,7 @@ func (r *changeRun) settle(ctx context.Context, o changeOptions, res taskRun) er
 		env.Error = &msg
 		r.saveResidue(ctx, o, &env)
 		r.writeRecord(env, nil)
-		return reportChange(o, env, reportedErr(ExitRunFailed, contractErr))
+		return r.report(o, env, reportedErr(ExitRunFailed, contractErr))
 	}
 
 	env.Outcome = contract.Status
@@ -591,7 +635,7 @@ func (r *changeRun) settle(ctx context.Context, o changeOptions, res taskRun) er
 
 	layout, layoutErr := change.LayoutFrom(r.cfg)
 	if layoutErr != nil {
-		return reportChange(o, env, usageErr(layoutErr))
+		return r.report(o, env, usageErr(layoutErr))
 	}
 
 	// Validation and reconciliation both refuse the whole run before the
@@ -635,7 +679,7 @@ func (r *changeRun) settle(ctx context.Context, o changeOptions, res taskRun) er
 		env.Error = &msg
 		r.saveResidue(ctx, o, &env)
 		r.writeRecord(env, contract)
-		return reportChange(o, env, reportedErr(ExitRunFailed, composeErr))
+		return r.report(o, env, reportedErr(ExitRunFailed, composeErr))
 	}
 
 	r.saveResidue(ctx, o, &env)
@@ -658,9 +702,9 @@ func (r *changeRun) settle(ctx context.Context, o changeOptions, res taskRun) er
 	}
 	r.writeRecord(env, contract)
 	if env.ExitCode == ExitOK {
-		return reportChange(o, env, nil)
+		return r.report(o, env, nil)
 	}
-	return reportChange(o, env, reportedErr(env.ExitCode, errors.New(contract.Status)))
+	return r.report(o, env, reportedErr(env.ExitCode, errors.New(contract.Status)))
 }
 
 // refuse is exit 6: the run happened, and ape will not turn it into
@@ -672,7 +716,7 @@ func (r *changeRun) refuse(ctx context.Context, o changeOptions, env changeEnvel
 	env.Error = &msg
 	r.saveResidue(ctx, o, &env)
 	r.writeRecord(env, nil)
-	return reportChange(o, env, reportedErr(ExitCommitContract, err))
+	return r.report(o, env, reportedErr(ExitCommitContract, err))
 }
 
 // saveResidue writes whatever is left in the tree under the change
@@ -729,6 +773,16 @@ func changeExitCode(status string) int {
 
 // reportChange writes the envelope or the human summary, then returns
 // the error that carries the exit code.
+//
+// It is a method so the run KEEPS its envelope: `--drain` needs the
+// outcome of each run it made to decide whether to mark the record and
+// whether to stop, and re-deriving that from an exit code alone would
+// lose the route and the blocking condition.
+func (r *changeRun) report(o changeOptions, env changeEnvelope, exitErr error) error {
+	r.env = env
+	return reportChange(o, env, exitErr)
+}
+
 func reportChange(o changeOptions, env changeEnvelope, exitErr error) error {
 	if o.jsonMode {
 		enc := json.NewEncoder(os.Stdout)

@@ -296,6 +296,32 @@ type commitSpec struct {
 	kind    string
 }
 
+// CommitFiles makes one only-semantics commit over paths, for a caller
+// outside the goal loop — `--queue` and `--drain`, which commit the
+// deferred records they write so the tree is clean for the next
+// preflight.
+//
+// Same rules as every commit ape composes: a literal pathspec on both
+// the add and the commit, a verbatim message, and hooks left alone.
+func CommitFiles(ctx context.Context, root, messageDir, name, message string, paths []string) (Commit, error) {
+	return Layout{}.commit(ctx, root, commitSpec{
+		subject: firstMessageLine(message),
+		message: message,
+		paths:   paths,
+		kind:    name,
+	}, ComposeOptions{MessageDir: messageDir})
+}
+
+// firstMessageLine is the subject of a composed message.
+func firstMessageLine(msg string) string {
+	line, _, _ := strings.Cut(msg, "\n")
+	return line
+}
+
+// IsNothingStaged reports the sentinel: the commit was not made because
+// nothing under its paths differed from HEAD.
+func IsNothingStaged(err error) bool { return errors.Is(err, errNothingStaged) }
+
 // commit stages the paths and commits exactly them.
 func (l Layout) commit(ctx context.Context, root string, spec commitSpec, o ComposeOptions) (Commit, error) {
 	out := Commit{
@@ -322,6 +348,9 @@ func (l Layout) commit(ctx context.Context, root string, spec commitSpec, o Comp
 	}
 	msgPath := filepath.Join(o.MessageDir,
 		fmt.Sprintf("commit-%d-%s.msg", spec.goal, spec.kind))
+	if err := os.MkdirAll(o.MessageDir, 0o755); err != nil {
+		return Commit{}, fmt.Errorf("create the message directory: %w", err)
+	}
 	if err := os.WriteFile(msgPath, []byte(spec.message), 0o600); err != nil {
 		return Commit{}, fmt.Errorf("write the commit message: %w", err)
 	}
