@@ -4,7 +4,7 @@ A conducting session — one `ape prompt` or `ape task` spawned — sometimes ne
 
 This works, and it is designed for rather than tolerated. What constrains it is not the nesting at all — it is the **outer** run's lifecycle.
 
-> Everything below is read from the implementation. At the time of writing no nested dispatch had been measured end to end, and the idle-window half in particular is a prediction. The four mechanisms are each checkable in isolation, so a contradicting measurement identifies which one to fix.
+> Most of this is read from the implementation. Two parts have been measured live against claude 2.1.278 and are marked **measured**; the rest, in particular "an inner run's hook events stay in the inner run's file", has not been — two live bridges at once is still untested. The four mechanisms are each checkable in isolation, so a contradicting measurement identifies which one to fix.
 
 ## The four mechanisms that make it work
 
@@ -32,9 +32,11 @@ The driver learns its transcript path from the `transcript_path` field of its ow
 
 The two sessions are unrelated top-level sessions — not parent and sub-agent — so the outer run's `sessions[]` never contains the inner's. `ape costs` counts both runs, once each, which is correct: two runs, two token bills.
 
-### 4. The PATH pin is transitive
+### 4. The PATH pin is transitive — **measured**
 
 `selfpath.Pin` resolves `os.Executable()` through symlinks and prepends a directory whose only entry is `ape` pointing at the real binary. The inner `ape` is launched through that shadow, so its own `os.Executable()` is the same file, and its own pin points there too. At any depth, `ape` inside the session is the binary that started it.
+
+Measured: a session spawned by a locally-built `ape 0.0.73-0.20260919230835-cd654022793a` ran `ape version` and got that string back, on a machine whose installed `ape` is `0.0.56`. This is the pin doing the job it exists for — `ape` 0.0.67 once spawned a session that reported 0.0.56.
 
 ## What actually constrains nesting
 
@@ -48,7 +50,15 @@ Even without that, the outer run would time out. The idle anchor resets on a hoo
 
 Start the inner run in a background shell and poll it.
 
-The reason polling works is worth stating, because it reads like a workaround and is not one: **every `BashOutput` poll is a tool call**. It fires `PreToolUse` and `PostToolUse` on the outer bridge and grows the outer transcript. The act of checking whether the inner run has finished is the act that proves the outer run is still working. Replace the polling with something tidier — a single long sleep, a blocking wait — and the outer run goes silent and is killed, with no error that names the cause.
+The reason polling works is worth stating, because it reads like a workaround and is not one: **every poll is a tool call**. It fires `PreToolUse` and `PostToolUse` on the outer bridge and grows the outer transcript. The act of checking whether the inner run has finished is the act that proves the outer run is still working. Replace the polling with something tidier — a single long sleep, a blocking wait — and the outer run goes silent and is killed, with no error that names the cause.
+
+**Measured, and the shape is not what the name suggests.** One unattended `ape prompt` session on claude 2.1.278 launched a background shell and polled it until it finished. Its run directory's `hook-events.jsonl` holds all 28 tool events: the launch as `Bash` with `tool_input.run_in_background: true`, and thirteen polls 1.4–3.2 s apart. But the polls' `tool_name` is **`Read`**, not `BashOutput` — that version implements "check the background shell" as a read of the shell's output file:
+
+```json
+{"file_path": "<claude-tmp>/<session-uuid>/tasks/bz14rrwvv.output"}
+```
+
+Anything that reasons about polling from the hook stream has to key on the PATH SHAPE — a file ending `.output` whose parent directory is `tasks/` — rather than on the tool name. Two consequences for a reader of these events: a check for `BashOutput` finds nothing while the session polls busily, and a check that counts `Read` calls as file access sees thirteen reads the session never asked for. Treat the name as version-dependent; one version has been measured.
 
 ape also sets `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP` on every spawn, because Claude Code otherwise kills a running background shell on a memory-pressure event. An unattended run cannot see that happen. With the variable set, the shell holding the inner run survives.
 
