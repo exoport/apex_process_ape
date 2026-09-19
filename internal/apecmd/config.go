@@ -30,7 +30,7 @@ func newConfigCmd() *cobra.Command {
 		Use:   "config",
 		Short: "Resolve the project's APEX configuration",
 	}
-	cmd.AddCommand(newConfigResolveCmd())
+	cmd.AddCommand(newConfigResolveCmd(), newConfigPinCmd())
 	return cmd
 }
 

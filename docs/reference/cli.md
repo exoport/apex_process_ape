@@ -1494,7 +1494,46 @@ ape config
 
 Subcommands:
 
+- `pin` — Write a framework-resolved fallback into _apex/config.yaml
 - `resolve` — Resolve _apex/config.yaml + the config.local.yaml overlay
+
+## ape config pin
+
+Write a framework-resolved fallback into _apex/config.yaml
+
+```
+ape config pin <key> [flags]
+```
+
+Resolve a key the framework has been falling back for, and append it to
+the project's own config so every reader sees the same value.
+
+Only evidence_folder today. The value written is the path the project's
+skills were already resolving — an existing {governance_folder}/evidence
+where the project keeps its evidence there, else the literal evidence —
+so no install silently moves. It is a no-op when the base config or the
+config.local.yaml overlay already sets the key.
+
+--check writes nothing and answers in its exit code: 0 when the key is
+set, 1 when it is not. Those two, and only those two, are answers about
+the KEY. A missing config still exits 4 and a malformed one still exits
+2, because a migration runner reads anything but 0 or 1 as "the check
+failed" — and a config ape cannot read is not a config it should be
+repairing.
+
+Examples:
+
+```
+  ape config pin evidence_folder
+  ape config pin evidence_folder --check
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | Answer in the exit code and write nothing: 0 set, 1 unset |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
 
 ## ape config resolve
 
@@ -2008,11 +2047,19 @@ discards.
 --detail picks how much the human rendering shows; --output-format picks
 the encoding. They are separate axes.
 
+--id <id> reads ONE record by id, open or closed, ignoring every filter.
+It is the by-id read the store has had internally and no command
+exposed, and it is what a caller naming a record — ape change --fixes
+<id> — needs to check that the id it was handed is real. An unknown id
+exits 2 rather than printing an empty list, because "no such record"
+and "no records match" are different answers.
+
 Examples:
 
 ```
   ape deferred list --owner platform
   ape deferred list --status all --output-format json
+  ape deferred list --id DW-20260919-a1b2c3 --output-format json
 ```
 
 Flags:
@@ -2022,6 +2069,7 @@ Flags:
 | `--cwd` | string | `—` | Project root (default: current working dir) |
 | `--detail` | string | `brief` | Human rendering detail: brief\|full |
 | `--group` | string | `—` | Only records in this group |
+| `--id` | string | `—` | Read one record by id, open or closed, ignoring every other filter |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--owner` | string | `—` | Only records with this owner |
 | `--path` | string | `—` | Only records anchored under this path prefix |
@@ -3442,6 +3490,7 @@ Flags:
 | `--output-format` | string | `human` | Output format for list mode (no positional arg): human\|json\|yaml |
 | `--output-style` | string | `—` | Output style pinned on the spawned session (default "Default"). Pass "inherit" to keep whatever style the machine is configured with. |
 | `--prompt` | string | `—` | Optional prompt forwarded to skills that accept it (currently: epics) |
+| `--prompt-file` | string | `—` | File holding the --prompt text; "-" reads stdin. Mutually exclusive with --prompt |
 | `--quiet` | bool | `false` | With --no-tui: suppress per-event stream; print only stage/step start/end markers |
 | `--transcript-store` | string | `nats-object` | Transcript blob backend: nats-object\|uri-offload (env APE_TRANSCRIPT_STORE). |
 | `--tui` | bool | `false` | Bubble Tea TUI (the default; explicit form for scripts). |
@@ -5177,6 +5226,13 @@ Commit control is two-layered:
 Run artifacts land under <project>/_output/ape/tasks/<skill>/<run-id>/
 (manifest.yaml, per-step ndjson, runlog streams).
 
+--prompt-file <path> reads the prompt from a file, and "-" reads it
+from stdin. It is how a printed escalation command carries the
+operator's own words: argv runs command substitution on backticks and
+reads a leading dash as a flag, so text that a person wrote never goes
+through it. The text is held to the same shape a REPL can be typed:
+one line, no control characters, no trailing backslash.
+
 --handoff <file> is a shorthand for --prompt: it checks the file
 exists and derives the prompt "Read <abs-path> and follow the Resume
 Protocol inside it." (the same continuation prompt the /handoff skill
@@ -5237,6 +5293,7 @@ Flags:
 | `--output-format` | string | `human` | Output format: human\|json (json = result envelope on stdout, progress on stderr) |
 | `--output-style` | string | `—` | Output style pinned on the spawned session (default "Default"). Pass "inherit" to keep whatever style the machine is configured with. |
 | `--prompt` | string | `—` | Run prompt forwarded via --prompt-flag (same semantics as pipeline --prompt) |
+| `--prompt-file` | string | `—` | File holding the --prompt text; "-" reads stdin. Mutually exclusive with --prompt and --handoff |
 | `--prompt-flag` | string | `—` | Skill flag name the --prompt value is forwarded through (spec prompt_flag equivalent) |
 | `--quiet` | bool | `false` | Suppress the per-event progress stream |
 | `--task-commit` | string | `—` | Task layer: commit the complete task at the end; bare flag derives "ape:task/<skill>" |

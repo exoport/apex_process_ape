@@ -62,7 +62,9 @@ func readTextInput(path string, stdin io.Reader) ([]byte, error) {
 }
 
 // validateTypedLine strips exactly one trailing newline and refuses text
-// that cannot be typed into the REPL as a single line.
+// that cannot be typed into the REPL as a single line. `what` names the
+// text in every message: a request on `ape change`, a prompt on
+// `ape task` and `ape pipeline`.
 //
 // One trailing newline, because a file written by an editor has one and
 // nobody means it as part of the request. A CRLF pair counts as that one
@@ -75,9 +77,7 @@ func readTextInput(path string, stdin io.Reader) ([]byte, error) {
 // it would edit the operator's words. The request is recorded
 // byte-verbatim and lands in a commit trailer, so "nearly what they
 // wrote" is not good enough.
-func validateTypedLine(raw []byte) (string, error) {
-	// One subject, named in every message: this text is always a request.
-	const what = "the request"
+func validateTypedLine(raw []byte, what string) (string, error) {
 	text := string(raw)
 	text = strings.TrimSuffix(text, "\n")
 	text = strings.TrimSuffix(text, "\r")

@@ -22,6 +22,7 @@ import (
 func newPipelineCmd() *cobra.Command {
 	var (
 		promptFlag         string
+		promptFileFlag     string
 		noTUI              bool
 		quietFlag          bool
 		cwdFlag            string
@@ -130,6 +131,15 @@ func newPipelineCmd() *cobra.Command {
 				// silently no-op.
 				return errors.New("--quiet is only meaningful with --no-tui (the TUI panels aren't affected by the flag)")
 			}
+			if promptFileFlag != "" {
+				prompt, promptErr := resolvePromptFile(promptFileFlag,
+					cmd.Flags().Changed("prompt"), false, cmd.InOrStdin())
+				if promptErr != nil {
+					fmt.Fprintf(os.Stderr, "Error: %s\n", promptErr)
+					os.Exit(ExitUsage)
+				}
+				promptFlag = prompt
+			}
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
 			runOpts := runConfig{
@@ -167,6 +177,8 @@ func newPipelineCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Optional prompt forwarded to skills that accept it (currently: epics)")
+	cmd.Flags().StringVar(&promptFileFlag, "prompt-file", "",
+		`File holding the --prompt text; "-" reads stdin. Mutually exclusive with --prompt`)
 	cmd.Flags().BoolVar(&webFlag, "web", false, "Bridged web UI. Explicit form for scripts.")
 	cmd.Flags().BoolVar(&tuiFlag, "tui", false, "Bubble Tea TUI (the default; explicit form for scripts).")
 	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "No UI surface: plain stdout progress lines. Exec is still the interactive per-stage claude REPL in an in-process PTY.")

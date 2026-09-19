@@ -260,3 +260,30 @@ func TestDeferredStore_LivesOutsideImplementation(t *testing.T) {
 	_, err = os.Stat(filepath.Join(root, "development", "deferred"))
 	require.NoError(t, err, "the store is a sibling of implementation/, not a child")
 }
+
+// `--fixes <id>` needs to know an id is real before it dispatches, and
+// the store has always had the by-id read that no command exposed.
+// "no such record" and "no records match" are different answers, so an
+// unknown id exits 2 rather than printing an empty list.
+func TestDeferredList_ByID(t *testing.T) {
+	root := projectFor(t, allExtensionsConfig)
+	store, _, _ := storeFor(root)
+	res, err := store.IngestStructured([]deferred.Structured{
+		{Title: "the finding", Owner: "maintenance", Trigger: "when x", Body: "body"},
+	}, deferred.IngestOptions{Date: "2026-09-19"})
+	require.NoError(t, err)
+	id := res.Records[0].ID
+
+	var out bytes.Buffer
+	cmd := newDeferredListCmd()
+	cmd.SetArgs([]string{"--id", id, "--cwd", root, "--output-format", "json"})
+	cmd.SetOut(&out)
+	require.NoError(t, cmd.Execute())
+	require.Contains(t, out.String(), id)
+	require.Contains(t, out.String(), "the finding")
+
+	unknown := newDeferredListCmd()
+	unknown.SetArgs([]string{"--id", "DW-20260101-nope", "--cwd", root})
+	unknown.SetOut(&bytes.Buffer{})
+	require.Equal(t, ExitUsage, exitCodeOf(t, unknown.Execute()))
+}

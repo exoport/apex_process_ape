@@ -190,13 +190,13 @@ func resolveChangeRequest(positional, requestFile string, stdin io.Reader, fixes
 		// --fixes alone. The record is the request; no Request: trailer.
 		return "", nil
 	case hasPositional:
-		return validateTypedLine([]byte(positional))
+		return validateTypedLine([]byte(positional), "the request")
 	default:
 		data, err := readTextInput(requestFile, stdin)
 		if err != nil {
 			return "", err
 		}
-		return validateTypedLine(data)
+		return validateTypedLine(data, "the request")
 	}
 }
 
@@ -476,6 +476,11 @@ type changeEnvelope struct {
 	// Residue is every path left in the working tree, saved under the
 	// change directory. Empty when the tree is clean.
 	Residue []string `json:"residue"`
+	// Unmatched is every path a goal claimed that did not change. Not a
+	// refusal — the commits are still exactly the real changes — but a
+	// goal claiming a file it never edited usually means an edit that
+	// silently failed.
+	Unmatched []string `json:"unmatched,omitempty"`
 	// The two paths a caller would otherwise have to construct, both
 	// project-relative.
 	ChangeDir    string  `json:"change_dir"`
@@ -576,8 +581,16 @@ func (r *changeRun) settle(ctx context.Context, o changeOptions, res taskRun) er
 		return r.refuse(ctx, o, env, err)
 	}
 	reconciled := layout.Reconcile(changed, contract.Goals)
-	if err := reconciled.RefusalError(contract.Goals); err != nil {
+	if err := reconciled.RefusalError(contract); err != nil {
 		return r.refuse(ctx, o, env, err)
+	}
+	// An over-long claim list is not a refusal, but it is worth seeing:
+	// a goal claiming a path it never edited is usually a goal whose
+	// edit silently failed.
+	env.Unmatched = reconciled.UnmatchedPaths()
+	for n, paths := range reconciled.Unmatched {
+		fmt.Fprintf(os.Stderr, "⚠ goal %d claims %d %s that did not change: %s\n",
+			n, len(paths), plural(len(paths), "path", "paths"), strings.Join(paths, ", "))
 	}
 
 	commits, composeErr := layout.Compose(ctx, r.cfg.Root, contract, reconciled, change.ComposeOptions{

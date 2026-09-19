@@ -148,6 +148,7 @@ func newDeferredListCmd() *cobra.Command {
 		cwdFlag string
 		format  string
 		detail  string
+		idFlag  string
 		filter  deferred.Filter
 	)
 	cmd := &cobra.Command{
@@ -164,12 +165,31 @@ both have left the working set; --status discarded narrows to just the
 discards.
 
 --detail picks how much the human rendering shows; --output-format picks
-the encoding. They are separate axes.`,
+the encoding. They are separate axes.
+
+--id <id> reads ONE record by id, open or closed, ignoring every filter.
+It is the by-id read the store has had internally and no command
+exposed, and it is what a caller naming a record — ape change --fixes
+<id> — needs to check that the id it was handed is real. An unknown id
+exits 2 rather than printing an empty list, because "no such record"
+and "no records match" are different answers.`,
 		Args: cobra.NoArgs,
 		Example: "  ape deferred list --owner platform\n" +
-			"  ape deferred list --status all --output-format json",
+			"  ape deferred list --status all --output-format json\n" +
+			"  ape deferred list --id DW-20260919-a1b2c3 --output-format json",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			store, _, _ := storeFor(cwdFlag)
+			if idFlag != "" {
+				rec, err := store.Find(idFlag)
+				if err != nil {
+					return usageErr(err)
+				}
+				if f := output.Format(format); f != output.FormatHuman {
+					return output.Print(cmd.OutOrStdout(), f, []deferred.Record{rec})
+				}
+				emitDeferredList(cmd.OutOrStdout(), []deferred.Record{rec}, "full")
+				return nil
+			}
 			res, err := store.Load(deferred.LoadOptions{IncludeClosed: includeClosed(filter.Status)})
 			if err != nil {
 				return err
@@ -194,6 +214,7 @@ the encoding. They are separate axes.`,
 	cmd.Flags().StringVar(&filter.Story, "story", "", "Only records filed from this story")
 	cmd.Flags().StringVar(&filter.Path, "path", "", "Only records anchored under this path prefix")
 	cmd.Flags().StringVar(&filter.Group, "group", "", "Only records in this group")
+	cmd.Flags().StringVar(&idFlag, "id", "", "Read one record by id, open or closed, ignoring every other filter")
 	return cmd
 }
 

@@ -25,9 +25,28 @@ type Reconciliation struct {
 	// Unclaimed is every changed path no goal accounts for. Non-empty
 	// means the run is refused.
 	Unclaimed []string
-	// Missing is every path a goal claims that git does not report as
-	// changed. Recorded, not refused — see Reconcile.
-	Missing []string
+	// Unmatched holds, per goal, the paths it claims that git does not
+	// report as changed. Recorded, not refused — see Reconcile.
+	//
+	// Kept per goal rather than flat because it is a diagnostic about a
+	// goal: a goal claiming a path it never edited is usually a goal
+	// whose edit silently failed, and this report is the only place that
+	// shows.
+	Unmatched map[int][]string
+}
+
+// UnmatchedPaths flattens Unmatched, in goal order.
+func (r *Reconciliation) UnmatchedPaths() []string {
+	goals := make([]int, 0, len(r.Unmatched))
+	for n := range r.Unmatched {
+		goals = append(goals, n)
+	}
+	sort.Ints(goals)
+	var out []string
+	for _, n := range goals {
+		out = append(out, r.Unmatched[n]...)
+	}
+	return out
 }
 
 // Reconcile matches the changed set against the goals' claims.
@@ -50,6 +69,7 @@ func (l Layout) Reconcile(changed []string, goals []Goal) *Reconciliation {
 	r := &Reconciliation{
 		ClaimedBy:     map[string]int{},
 		EvidenceFiles: map[int][]string{},
+		Unmatched:     map[int][]string{},
 	}
 	type claim struct {
 		path string
@@ -98,11 +118,13 @@ func (l Layout) Reconcile(changed []string, goals []Goal) *Reconciliation {
 			}
 		}
 		if !found {
-			r.Missing = append(r.Missing, c.path)
+			r.Unmatched[c.goal] = append(r.Unmatched[c.goal], c.path)
 		}
 	}
 	sort.Strings(r.Unclaimed)
-	sort.Strings(r.Missing)
+	for g := range r.Unmatched {
+		sort.Strings(r.Unmatched[g])
+	}
 	for g := range r.EvidenceFiles {
 		sort.Strings(r.EvidenceFiles[g])
 	}
@@ -121,9 +143,21 @@ func isEvidence(goals []Goal, n int, p string) bool {
 // RefusalError renders the unclaimed set as the refusal it is, with both
 // sides listed: what changed and what was claimed. One side alone is not
 // diagnosable — the operator needs to see which of the two is wrong.
-func (r *Reconciliation) RefusalError(goals []Goal) error {
+//
+// On an escalated or refused contract it names the contradiction
+// instead, because those two outcomes are the skill asserting it edited
+// NOTHING. An operator reading exit 6 there would otherwise take it for
+// an ownership failure, when what happened is that the contract is false
+// about the tree.
+func (r *Reconciliation) RefusalError(c *Contract) error {
 	if len(r.Unclaimed) == 0 {
 		return nil
+	}
+	goals := c.Goals
+	if c.Status == StatusEscalated || c.Status == StatusRefused {
+		return fmt.Errorf("%w: the contract reports %s, which edits nothing, and %d %s changed "+
+			"that no goal claims:\n  %s", ErrRefused, c.Status, len(r.Unclaimed),
+			plural(len(r.Unclaimed), "path", "paths"), strings.Join(r.Unclaimed, "\n  "))
 	}
 	var claimed []string
 	for i := range goals {

@@ -41,6 +41,7 @@ func newTaskCmd() *cobra.Command {
 		effortFlag         string
 		argsFlag           string
 		promptFlag         string
+		promptFileFlag     string
 		promptFlagName     string
 		handoffFlag        string
 		noCommitFlag       bool
@@ -80,6 +81,13 @@ Commit control is two-layered:
 
 Run artifacts land under <project>/_output/ape/tasks/<skill>/<run-id>/
 (manifest.yaml, per-step ndjson, runlog streams).
+
+--prompt-file <path> reads the prompt from a file, and "-" reads it
+from stdin. It is how a printed escalation command carries the
+operator's own words: argv runs command substitution on backticks and
+reads a leading dash as a flag, so text that a person wrote never goes
+through it. The text is held to the same shape a REPL can be typed:
+one line, no control characters, no trailing backslash.
 
 --handoff <file> is a shorthand for --prompt: it checks the file
 exists and derives the prompt "Read <abs-path> and follow the Resume
@@ -136,6 +144,15 @@ ownership (the run itself may have succeeded).`,
 				}
 				promptFlag = prompt
 			}
+			if promptFileFlag != "" {
+				prompt, err := resolvePromptFile(promptFileFlag,
+					cmd.Flags().Changed("prompt"), handoffFlag != "", cmd.InOrStdin())
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+					os.Exit(ExitUsage)
+				}
+				promptFlag = prompt
+			}
 			var taskCommit *pipeline.CommitDirective
 			if cmd.Flags().Changed("task-commit") {
 				msg := taskCommitFlag
@@ -183,6 +200,8 @@ ownership (the run itself may have succeeded).`,
 	cmd.Flags().StringVar(&effortFlag, "effort", "", "Reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Default xhigh when unset.")
 	cmd.Flags().StringVar(&argsFlag, "args", "", "Verbatim skill args appended to the invocation (whitespace-separated)")
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Run prompt forwarded via --prompt-flag (same semantics as pipeline --prompt)")
+	cmd.Flags().StringVar(&promptFileFlag, "prompt-file", "",
+		`File holding the --prompt text; "-" reads stdin. Mutually exclusive with --prompt and --handoff`)
 	cmd.Flags().StringVar(&promptFlagName, "prompt-flag", "", "Skill flag name the --prompt value is forwarded through (spec prompt_flag equivalent)")
 	cmd.Flags().StringVar(&handoffFlag, "handoff", "", "Path to a handoff/context file; derives a \"Read <path> and follow the Resume Protocol\" --prompt value (mutually exclusive with --prompt)")
 	cmd.Flags().BoolVar(&noCommitFlag, "no-commit", false, "Skill layer: tell the skill/framework not to commit (adds skill-level --no-commit on the agent path)")

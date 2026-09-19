@@ -17,11 +17,11 @@ func TestReconcile_ClaimsEveryChangedPath(t *testing.T) {
 	}, goals)
 
 	require.Empty(t, r.Unclaimed)
-	require.Empty(t, r.Missing)
+	require.Empty(t, r.Unmatched)
 	require.Equal(t, 1, r.ClaimedBy["docs/reference/cli.md"])
 	require.Equal(t, []string{"development/governance/evidence/20260919-a/gate.txt"},
 		r.EvidenceFiles[1], "the evidence commit carries what landed under the evidence path")
-	require.NoError(t, r.RefusalError(goals))
+	require.NoError(t, r.RefusalError(&Contract{Status: StatusLanded, Goals: goals}))
 }
 
 // The failure the step exists to catch: an edit nobody declared, which
@@ -38,7 +38,7 @@ func TestReconcile_AnUndeclaredEditRefusesTheRun(t *testing.T) {
 	}, goals)
 
 	require.Equal(t, []string{"src/quietly-edited.go"}, r.Unclaimed)
-	err := r.RefusalError(goals)
+	err := r.RefusalError(&Contract{Status: StatusLanded, Goals: goals})
 	require.ErrorIs(t, err, ErrRefused)
 	require.ErrorContains(t, err, "src/quietly-edited.go")
 	require.ErrorContains(t, err, "the contract claims:", "both sides are listed, or it is not diagnosable")
@@ -75,8 +75,9 @@ func TestReconcile_AClaimedPathThatDidNotChangeIsRecorded(t *testing.T) {
 	require.Equal(t, []string{
 		"development/governance/evidence/20260919-a",
 		"docs/reference/never-touched.md",
-	}, r.Missing)
-	require.NoError(t, r.RefusalError(goals), "an over-long claim list is not a refusal")
+	}, r.Unmatched[1], "recorded per goal: it is a diagnostic about that goal")
+	require.NoError(t, r.RefusalError(&Contract{Status: StatusLanded, Goals: goals}),
+		"an over-long claim list is not a refusal")
 }
 
 // A halted goal's files are claimed — so they never refuse the run —

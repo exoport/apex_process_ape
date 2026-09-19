@@ -151,19 +151,19 @@ func TestValidateTypedLine_RefusesWhatCannotBeTyped(t *testing.T) {
 		{"whitespace only", "   \n", "is empty"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := validateTypedLine([]byte(tc.in))
+			_, err := validateTypedLine([]byte(tc.in), "the request")
 			require.ErrorContains(t, err, tc.want)
 		})
 	}
 
 	t.Run("a CRLF file is not a malformed request", func(t *testing.T) {
-		got, err := validateTypedLine([]byte("written on windows\r\n"))
+		got, err := validateTypedLine([]byte("written on windows\r\n"), "the request")
 		require.NoError(t, err)
 		require.Equal(t, "written on windows", got)
 	})
 
 	t.Run("an @path at the end survives", func(t *testing.T) {
-		got, err := validateTypedLine([]byte("read @docs/reference/cli.md\n"))
+		got, err := validateTypedLine([]byte("read @docs/reference/cli.md\n"), "the request")
 		require.NoError(t, err)
 		require.Equal(t, "read @docs/reference/cli.md", got)
 	})
@@ -377,4 +377,55 @@ func changeLogSubjects(t *testing.T, root string) []string {
 	out, err := cmd.Output()
 	require.NoError(t, err)
 	return strings.Split(strings.TrimSpace(string(out)), "\n")
+}
+
+// --prompt-file is how a printed escalation command carries the
+// operator's own words to the next command: argv cannot, and the
+// destination is the same REPL, typed into as keystrokes.
+func TestResolvePromptFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "prompt.txt")
+	require.NoError(t, os.WriteFile(path, []byte("fix the reference\n"), 0o644))
+
+	got, err := resolvePromptFile(path, false, false, strings.NewReader(""))
+	require.NoError(t, err)
+	require.Equal(t, "fix the reference", got)
+
+	got, err = resolvePromptFile("-", false, false, strings.NewReader("from stdin\n"))
+	require.NoError(t, err)
+	require.Equal(t, "from stdin", got)
+
+	_, err = resolvePromptFile(path, true, false, strings.NewReader(""))
+	require.ErrorContains(t, err, "mutually exclusive")
+
+	_, err = resolvePromptFile(path, false, true, strings.NewReader(""))
+	require.ErrorContains(t, err, "--handoff")
+
+	// The same shape check a request takes, for the same reason.
+	multiline := filepath.Join(dir, "two-lines.txt")
+	require.NoError(t, os.WriteFile(multiline, []byte("one\ntwo\n"), 0o644))
+	_, err = resolvePromptFile(multiline, false, false, strings.NewReader(""))
+	require.ErrorContains(t, err, "line break")
+
+	// Nothing asked for, nothing read.
+	got, err = resolvePromptFile("", false, false, strings.NewReader("ignored"))
+	require.NoError(t, err)
+	require.Empty(t, got)
+}
+
+// `escalated` and `refused` are the skill asserting it edited nothing.
+// With edits in the tree the contract is false, and the refusal says
+// which contradiction it found — an operator must not read exit 6 there
+// as an ownership failure.
+func TestChangeSettle_AnEscalatedContractWithEditsNamesTheContradiction(t *testing.T) {
+	escalated := strings.Replace(strings.Replace(
+		strings.Replace(landedContract, "maintenance_status: landed", "maintenance_status: escalated", 1),
+		"    status: landed", "    status: not-started", 1),
+		"goals_landed: 1", "goals_landed: 0", 1)
+	r, o := settleFixtureEdits(t, escalated, true)
+
+	err := r.settle(context.Background(), o, taskRun{})
+	require.Equal(t, ExitCommitContract, exitCodeOf(t, err))
+	require.ErrorContains(t, err, "the contract reports escalated, which edits nothing")
+	require.Equal(t, []string{"the reference", "base"}, changeLogSubjects(t, r.cfg.Root))
 }
