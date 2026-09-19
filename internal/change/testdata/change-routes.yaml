@@ -1,0 +1,111 @@
+# What `ape change` prints when a maintenance request is not lane work.
+#
+# The verb exits 8 with the route the skill's contract named, and prints the exact next commands for
+# that route. It sequences NONE of them: every escalated route is conducted by the session that ran
+# the verb, and the reason is measured — the lean-story chain costs the same four dispatches and five
+# sessions rung 3 already gives, it cannot name its own epic from a raw request, its standalone
+# review parks a patch on any path a `done` sibling owns (79 %, 71 % and 55 % of recent stories'
+# paths on three real projects), and it skips the injection passes dev presupposes.
+#
+# This file is FRAMEWORK-OWNED, for two reasons that pull in the same direction: commands carried in
+# a model-written contract would be shell the next model runs with nothing guarding its flags, and
+# commands hard-coded in `ape` would put framework vocabulary in the binary — a route change would
+# then need an `ape` release.
+#
+# PLACEHOLDERS — a closed set. Anything else invalidates the table, and the verb prints the route's
+# name alone rather than a command it cannot fill:
+#   {request_file}  `ape`'s own copy of the request, absolute and shell-quoted. Never the caller's
+#                   path: the caller's copy may be a temp file that is already gone.
+#   {story_key}     resolved against the tracker and the story files, never pasted from the request —
+#                   it lands in a shell line. USABLE ONLY WHERE THE STORY ALREADY EXISTS, which is
+#                   `rung-2` alone: in a chain whose first command CREATES the story there is
+#                   nothing to resolve it against at print time, ever, and one unfillable command
+#                   invalidates the whole list — the route would degrade to its name and print no
+#                   commands at all. Where the conductor supplies the value, write the angle form
+#                   (`<story-key>`, `<N>`, `<id>`) exactly as `--epic <N>` does.
+#
+# THE REQUEST NEVER TRAVELS IN argv. Every command that carries the operator's words passes them with
+# `--prompt-file <path> --prompt-flag --instruction`, which hands the skill `--instruction "<text>"`
+# with the text read from a file: a shell argument would run command substitution on backticks and
+# read a leading dash as a flag. Two things make that shape work and both ship with this table — the
+# `--prompt-file` form on `ape task`, and the persona rule that PREPENDS `--autonomous` instead of
+# appending it, without which the flag is swallowed by the trailing free text.
+#
+# A route whose entry is missing, or a file that is absent or unreadable, degrades the same way: the
+# name alone, and the run still exits 8. Nothing here can fail a run.
+#
+# NO ROUTE PASSES `--review-tier`. A route table must not lower a review tier the epic's author
+# declared; that is the conductor's judgment, per request.
+
+routes:
+  rung-2:
+    summary: An in-flight story owns the path. Amend it; do not fix around it.
+    commands:
+      - ape task apex-story-amend --agent apex-agent-sm --args "--story {story_key}" --prompt-file {request_file} --prompt-flag --instruction
+    notes:
+      - "The story's own review re-verifies the change; no dev cycle follows an amendment."
+      - "A story whose epic sits in a `released` slice refuses the amendment. That work is a lane
+        fix carrying a `Carries:` trailer, or a lean story."
+
+  lean-story:
+    summary: >-
+      Product code with no witness unattended, a schema migration, or a wire-format change: the lane
+      refuses it and no document changes. One story, seeded and built.
+    commands:
+      - ape task apex-create-epics-and-stories --agent apex-agent-pm --args "--additive --epic <N>" --prompt-file {request_file} --prompt-flag --instruction
+      - ape task apex-create-story --agent apex-agent-sm --args "<story-key>"
+      - ape task apex-dev-story --agent apex-agent-dev --args "<story-key>"
+      - ape task apex-review-story --agent apex-agent-dev --args "<story-key>"
+    notes:
+      - "`--epic <N>` and `<story-key>` are yours to fill. The seed never infers the epic, and the
+        epic decides which release the story belongs to; the story key does not exist until the
+        seed has run, so nothing could resolve it when this was printed — take it from the seed's
+        own report, which names the key it minted."
+      - "After a release, the epic is the maintenance epic for that release line (`Maintenance —
+        <release line>`) — create it first, through `apex-correct-course`, when this is the line's
+        first lean story. Seeding into an epic that already shipped reopens it."
+      - "Run the injection passes this project uses before dev. They are dev's stated precondition
+        and nothing in this chain runs them."
+      - "A review outside a batch parks a patch on any path a `done` sibling owns, rather than
+        applying it. Expect that outcome and route the parked patch, rather than reading it as a
+        failed review."
+
+  lean-feature:
+    summary: One requirement is added, so the PRD changes first — then the lean story delivers it.
+    commands:
+      - ape task apex-edit-prd --agent apex-agent-pm --prompt-file {request_file} --prompt-flag --instruction
+      - ape task apex-create-epics-and-stories --agent apex-agent-pm --args "--additive --epic <N> --requirement-ids <id>" --prompt-file {request_file} --prompt-flag --instruction
+      - ape task apex-create-story --agent apex-agent-sm --args "<story-key>"
+      - ape task apex-dev-story --agent apex-agent-dev --args "<story-key>"
+      - ape task apex-review-story --agent apex-agent-dev --args "<story-key>"
+    notes:
+      - "The PRD edit is add-only. It refuses an amendment, a second requirement, and a new
+        requirement area — each of those is a re-plan (`apex-correct-course`)."
+      - "Pass the id the PRD edit minted as `--requirement-ids`, and expect the seed to cite it in
+        the stub's own text: a story's `requirement_ids:` derive from that text, and an id that
+        lives only on the epic's line never reaches the release record's coverage table."
+      - "The lean-story notes above apply to this chain too."
+
+  ux:
+    summary: A wireframe or UX specification would be falsified. Guided only.
+    commands:
+      - ape task apex-create-wireframes --agent apex-agent-ux-designer
+    notes:
+      - "On a project that already has wireframes the skill detects them and routes into its
+        continue path, where standalone validation and the per-file fix steps live — there is no
+        flag for it. Unattended this route is descoped: report the request and stop."
+      - "An artifact no skill can reach is rung 5 — a verbatim operator instruction, recorded in
+        the release record's direct-fix table with the path and the instruction."
+
+  governance:
+    summary: An ADR or a pattern is contacted and the contact cannot be cleared.
+    commands:
+      - ape task apex-adr-picking --agent apex-agent-architect
+      - ape task apex-adr-update --agent apex-agent-architect
+      - ape task apex-pattern-update --agent apex-agent-architect
+    notes:
+      - "Run the one that matches the contact. A decision that must change is an ADR update; an
+        implementation rule that must change is a pattern update; a decision that does not yet
+        exist is picked first."
+      - "Governance always prints and is never sequenced: changing a decision is not a step in a
+        fix."

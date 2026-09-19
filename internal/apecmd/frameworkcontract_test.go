@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
+	"github.com/exoport/apex_process_ape/internal/change"
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/registry"
 	"github.com/exoport/apex_process_ape/internal/sandbox"
@@ -500,4 +501,104 @@ func fakeFrameworkForContract(t *testing.T, root string) {
 	mk(framework.SubtreeSkills+"/apex-foo/SKILL.md", "# apex-foo\n")
 	gitInit(t, root)
 	gitCommitAll(t, root, "framework baseline")
+}
+
+// TestContract_LiveChangeRoutes reads the framework's OWN escalation
+// table through ape's parser.
+//
+// The table is framework-owned so that a route change is not an ape
+// release — which means ape can only find out that a route stopped
+// working by reading the live file. The three properties that matter:
+//
+//   - every placeholder is one ape fills. An invented one makes the
+//     table invalid, and at run time the verb prints the route's name
+//     alone — a silent loss of the commands that are the route's whole
+//     content;
+//   - `{story_key}` appears only where the story already exists. The
+//     first cut of this table used it in the chains that CREATE the
+//     story, so both of them printed nothing at all;
+//   - every route yields its commands once ape's fill is applied.
+func TestContract_LiveChangeRoutes(t *testing.T) {
+	root := frameworkSubtreeRoot(t)
+	path := filepath.Join(root, filepath.FromSlash(framework.SubtreeChangeRoutes))
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("no %s in this framework checkout — a framework that predates the lane",
+			framework.SubtreeChangeRoutes)
+	}
+	table := change.LoadRouteTable(path)
+	require.NotEmpty(t, table.Routes, "the live table parses through ape's own parser")
+
+	fill := change.RouteFill{
+		RequestFile: "'/p/_output/ape/changes/x/request.txt'",
+		StoryKey:    "12-3_a-real-story",
+		ChangeID:    "20260919-120000-abc1234",
+		RecordID:    "DW-20260919-a1b2c3",
+	}
+	for name, route := range table.Routes {
+		t.Run(name, func(t *testing.T) {
+			for _, cmd := range route.Commands {
+				if strings.Contains(cmd, "{story_key}") {
+					require.Equal(t, "rung-2", name,
+						"only a route whose story already exists can carry a resolved key")
+				}
+			}
+			printed := table.Lookup(name, fill)
+			require.Empty(t, printed.Note,
+				"ape fills every placeholder this route uses, or prints no commands at run time")
+			require.Len(t, printed.Commands, len(route.Commands))
+			for _, cmd := range printed.Commands {
+				require.NotContains(t, cmd, "{", "no placeholder survives into a printed command")
+			}
+		})
+	}
+}
+
+// TestContract_LiveMaintenanceContract reads the contract template out of
+// the framework's own apex-maintenance skill and holds it to what ape's
+// parser needs.
+//
+// The block is a versioned interface: ape composes every commit in the
+// lane from it. A framework edit that renames a key would otherwise
+// surface as a run that dispatched for an hour and then reported "the
+// skill wrote no contract" — the failure this gate converts into a test
+// failure at the moment the rename lands.
+func TestContract_LiveMaintenanceContract(t *testing.T) {
+	root := frameworkSubtreeRoot(t)
+	// Both layouts again, and the skills subtree spells itself
+	// differently in each: `.claude/` in the released shape a project
+	// consumes, `_claude/` in the build repo the framework's authors
+	// work in — the dot is added on release.
+	var body string
+	for _, dir := range []string{".claude", "_claude"} {
+		data, err := os.ReadFile(filepath.Join(root, dir, "skills", "apex-maintenance", "SKILL.md"))
+		if err == nil {
+			body = string(data)
+			break
+		}
+	}
+	if body == "" {
+		t.Skip("no apex-maintenance skill in this framework checkout — one that predates the lane")
+	}
+
+	// The keys ape reads by name. A missing one is a contract ape cannot
+	// act on, whatever else the block carries.
+	for _, key := range []string{
+		"contract_version:", "maintenance_status:", "goals_total:", "goals_landed:",
+		"route:", "blocking_condition:", "goals:",
+		"status:", "paths:", "subject:", "gates:", "evidence:", "triage:", "governance:",
+		"deferred:", "findings_patched:", "findings_deferred:",
+		"title:", "anchors:", "owner:", "trigger:", "body:",
+	} {
+		require.Contains(t, body, key, "the contract template still carries %s", key)
+	}
+
+	// The two closed vocabularies ape branches on.
+	for _, outcome := range []string{
+		change.StatusLanded, change.StatusRefused, change.StatusEscalated, change.StatusHalted,
+	} {
+		require.Contains(t, body, outcome, "maintenance_status still offers %q", outcome)
+	}
+	for _, goalStatus := range []string{change.GoalLanded, change.GoalHalted, change.GoalNotStarted} {
+		require.Contains(t, body, goalStatus, "a goal's status still offers %q", goalStatus)
+	}
 }

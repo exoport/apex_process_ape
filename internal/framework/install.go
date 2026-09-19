@@ -121,6 +121,12 @@ type UpdateSummary struct {
 	// than inferred because "no styles applied" and "the table never
 	// arrived" look identical from inside a run.
 	OutputStylesInstalled bool `json:"outputStylesInstalled" yaml:"outputStylesInstalled"`
+	// ChangeRoutesInstalled reports whether the framework carried the
+	// escalation-route table `ape change` prints from. False on a
+	// framework that predates it — the verb then names the route and
+	// prints no commands, which is the same degradation as an unknown
+	// route.
+	ChangeRoutesInstalled bool `json:"changeRoutesInstalled" yaml:"changeRoutesInstalled"`
 	// MigrationsInstalled counts the framework's upgrade-list entries
 	// copied into the project. Zero means the framework ships none — the
 	// runner then reports nothing pending, which is then TRUE.
@@ -348,6 +354,10 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if err != nil {
 		return nil, err
 	}
+	changeRoutesInstalled, err := installChangeRoutes(opts.FrameworkRepo, opts.ProjectRoot)
+	if err != nil {
+		return nil, err
+	}
 	aboardRecipes, err := installAboardRecipes(opts.FrameworkRepo, opts.ProjectRoot)
 	if err != nil {
 		return nil, err
@@ -437,6 +447,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			TerminalContractsInstalled: contractsInstalled,
 			CommitOwnersInstalled:      commitOwnersInstalled,
 			OutputStylesInstalled:      outputStylesInstalled,
+			ChangeRoutesInstalled:      changeRoutesInstalled,
 			MigrationsInstalled:        len(migrationsInstalled),
 			MigrationPaths:             migrationsInstalled,
 			ApeCommandsInstalled:       apeCommandsInstalled,
@@ -497,6 +508,28 @@ func installOutputStyles(frameworkRepo, projectRoot string) (bool, error) {
 	dst := filepath.Join(projectRoot, ProjectOutputStyles)
 	if err := CopyFile(src, dst); err != nil {
 		return false, fmt.Errorf("copy output-styles table: %w", err)
+	}
+	return true, nil
+}
+
+// installChangeRoutes copies the framework's escalation-route table into
+// the project — what `ape change` prints on exit 8.
+//
+// Same version-skew suppression as the tables above, and the degradation
+// is already designed for: a project without the table gets the route's
+// name and no commands, exactly as it would for a route the table does
+// not carry.
+func installChangeRoutes(frameworkRepo, projectRoot string) (bool, error) {
+	src := filepath.Join(frameworkRepo, SubtreeChangeRoutes)
+	if _, err := os.Stat(src); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat change-routes table: %w", err)
+	}
+	dst := filepath.Join(projectRoot, ProjectChangeRoutes)
+	if err := CopyFile(src, dst); err != nil {
+		return false, fmt.Errorf("copy change-routes table: %w", err)
 	}
 	return true, nil
 }

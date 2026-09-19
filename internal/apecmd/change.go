@@ -292,8 +292,20 @@ func changeStart(ctx context.Context, o changeOptions) (*changeRun, error) {
 	if err := os.Remove(contractPath); err != nil && !os.IsNotExist(err) {
 		return nil, usageErr(fmt.Errorf("clear the contract path: %w", err))
 	}
-	if o.request != "" {
-		if err := os.WriteFile(filepath.Join(dir, changeRequestFile), []byte(o.request), 0o600); err != nil {
+	// ape's own copy of the request. On a --fixes-only run there is no
+	// request, and the record's first line stands in for one where it
+	// passes the same validation — that line is what the operator wrote
+	// when they queued it. Where it does not, no file is written and an
+	// escalation prints its route's name rather than a command with an
+	// empty path in it.
+	text := o.request
+	if text == "" && fixesRec.Body != "" {
+		if line, lineErr := validateTypedLine([]byte(firstLine(fixesRec.Body)), "the record's first line"); lineErr == nil {
+			text = line
+		}
+	}
+	if text != "" {
+		if err := os.WriteFile(filepath.Join(dir, changeRequestFile), []byte(text), 0o600); err != nil {
 			return nil, usageErr(fmt.Errorf("write the request: %w", err))
 		}
 	}
@@ -346,13 +358,17 @@ type changeRecord struct {
 	Fixes   string `yaml:"fixes,omitempty"`
 	// Dispatch is the invocation ape made, so the run is reproducible
 	// from the record alone.
-	Dispatch     changeDispatch   `yaml:"dispatch"`
-	Outcome      string           `yaml:"outcome"`
-	ExitCode     int              `yaml:"exit_code"`
-	ContractPath string           `yaml:"contract_path"`
-	Commits      []composedCommit `yaml:"commits"`
-	Goals        []change.Goal    `yaml:"goals,omitempty"`
-	Residue      *change.Residue  `yaml:"residue,omitempty"`
+	Dispatch changeDispatch `yaml:"dispatch"`
+	Outcome  string         `yaml:"outcome"`
+	// RouteMismatch records a route named on an outcome with no use for
+	// one. Kept here as well as in the envelope because the envelope is
+	// ephemeral and this is the durable half.
+	RouteMismatch string           `yaml:"route_mismatch,omitempty"`
+	ExitCode      int              `yaml:"exit_code"`
+	ContractPath  string           `yaml:"contract_path"`
+	Commits       []composedCommit `yaml:"commits"`
+	Goals         []change.Goal    `yaml:"goals,omitempty"`
+	Residue       *change.Residue  `yaml:"residue,omitempty"`
 }
 
 // changeDispatch records what was run.
@@ -384,11 +400,12 @@ func (r *changeRun) writeRecord(env changeEnvelope, contract *change.Contract) {
 			Args:         r.args,
 			ManifestPath: env.ManifestPath,
 		},
-		Outcome:      env.Outcome,
-		ExitCode:     env.ExitCode,
-		ContractPath: relTo(r.cfg.Root, r.contractPath),
-		Commits:      env.Commits,
-		Residue:      r.residue,
+		Outcome:       env.Outcome,
+		RouteMismatch: env.RouteMismatch,
+		ExitCode:      env.ExitCode,
+		ContractPath:  relTo(r.cfg.Root, r.contractPath),
+		Commits:       env.Commits,
+		Residue:       r.residue,
 	}
 	if contract != nil {
 		rec.Goals = contract.Goals
@@ -470,9 +487,13 @@ type changeEnvelope struct {
 	Commits  []composedCommit `json:"commits"`
 	// Route is where escalated work goes; NextCommands is what to run,
 	// from the framework's own table.
-	Route             string   `json:"route,omitempty"`
-	NextCommands      []string `json:"next_commands,omitempty"`
-	BlockingCondition string   `json:"blocking_condition,omitempty"`
+	Route        string   `json:"route,omitempty"`
+	NextCommands []string `json:"next_commands,omitempty"`
+	// RouteMismatch records a route named on an outcome that has no use
+	// for one. Recorded rather than acted on: the exit code comes from
+	// maintenance_status alone.
+	RouteMismatch     string `json:"route_mismatch,omitempty"`
+	BlockingCondition string `json:"blocking_condition,omitempty"`
 	// Residue is every path left in the working tree, saved under the
 	// change directory. Empty when the tree is clean.
 	Residue []string `json:"residue"`
@@ -619,6 +640,22 @@ func (r *changeRun) settle(ctx context.Context, o changeOptions, res taskRun) er
 
 	r.saveResidue(ctx, o, &env)
 	env.ExitCode = changeExitCode(contract.Status)
+
+	// The exit code comes from maintenance_status alone: a route never
+	// changes it. A route named on any other outcome is ignored, and the
+	// mismatch is recorded rather than acted on.
+	switch {
+	case contract.Status == change.StatusEscalated:
+		printed := r.routesFor(contract)
+		env.NextCommands = printed.Commands
+		if !o.jsonMode {
+			printRoute(os.Stdout, printed)
+		}
+	case env.Route != "":
+		env.RouteMismatch = fmt.Sprintf("the contract names route %q on a %s outcome, where a "+
+			"route means nothing; it was not acted on", env.Route, contract.Status)
+		fmt.Fprintf(os.Stderr, "⚠ %s\n", env.RouteMismatch)
+	}
 	r.writeRecord(env, contract)
 	if env.ExitCode == ExitOK {
 		return reportChange(o, env, nil)
@@ -732,6 +769,13 @@ func printChangeSummary(w io.Writer, env changeEnvelope) {
 	if env.Error != nil {
 		fmt.Fprintf(w, "  error: %s\n", *env.Error)
 	}
+}
+
+// firstLine is the record's own first line — what --queue wrote there
+// verbatim, before any later marker was appended.
+func firstLine(body string) string {
+	line, _, _ := strings.Cut(body, "\n")
+	return line
 }
 
 // plural picks the noun form. Local to the command's own output.

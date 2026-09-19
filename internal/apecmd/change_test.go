@@ -228,6 +228,13 @@ func settleFixture(t *testing.T, contract string) (*changeRun, changeOptions) {
 func settleFixtureEdits(t *testing.T, contract string, edits bool) (*changeRun, changeOptions) {
 	t.Helper()
 	root := changeProject(t, "_output/ape/")
+	// The framework's escalation table, committed as `ape framework
+	// setup` would have left it: an uncommitted one would dirty the tree
+	// the preflight then refuses.
+	routes, err := os.ReadFile(filepath.Join("..", "change", "testdata", "change-routes.yaml"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "change-routes.yaml"), routes, 0o644))
+
 	// The file the change will edit exists and is TRACKED, so a refusal
 	// has a real patch to save rather than only untracked copies.
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "docs", "reference"), 0o755))
@@ -236,8 +243,8 @@ func settleFixtureEdits(t *testing.T, contract string, edits bool) (*changeRun, 
 	gitCommitAll(t, root, "the reference")
 
 	o := changeOptions{request: "the reference is out of date", cwdFlag: root}
-	r, err := changeStart(context.Background(), o)
-	require.NoError(t, err)
+	r, startErr := changeStart(context.Background(), o)
+	require.NoError(t, startErr)
 
 	if !edits {
 		if contract != "" {
@@ -428,4 +435,63 @@ func TestChangeSettle_AnEscalatedContractWithEditsNamesTheContradiction(t *testi
 	require.Equal(t, ExitCommitContract, exitCodeOf(t, err))
 	require.ErrorContains(t, err, "the contract reports escalated, which edits nothing")
 	require.Equal(t, []string{"the reference", "base"}, changeLogSubjects(t, r.cfg.Root))
+}
+
+// The escalation print, end to end: exit 8, the route's commands filled
+// from the framework's table, and ape running none of them.
+func TestChangeSettle_EscalatedPrintsTheRoutesCommands(t *testing.T) {
+	escalated := strings.Replace(strings.Replace(strings.Replace(landedContract,
+		"maintenance_status: landed", "maintenance_status: escalated", 1),
+		"    status: landed", "    status: not-started", 1),
+		"goals_landed: 1", "goals_landed: 0", 1)
+	escalated = strings.Replace(escalated, "route: 'none'", "route: 'lean-story'", 1)
+
+	r, o := settleFixtureEdits(t, escalated, false)
+
+	o.jsonMode = true
+	err := r.settle(context.Background(), o, taskRun{})
+	require.Equal(t, exitChangeEscalated, exitCodeOf(t, err))
+
+	rec, readErr := os.ReadFile(filepath.Join(r.dir, "change.yaml"))
+	require.NoError(t, readErr)
+	require.Contains(t, string(rec), "outcome: escalated")
+
+	// The request reached the printed command as a FILE — ape's own copy,
+	// absolute and quoted — because argv cannot carry an operator's words.
+	printed := r.routesFor(&change.Contract{Status: change.StatusEscalated, Route: "lean-story"})
+	require.Len(t, printed.Commands, 4)
+	require.Contains(t, printed.Commands[0], "--prompt-file '"+filepath.Join(r.dir, "request.txt")+"'")
+	require.Contains(t, printed.Commands[0], "--epic <N>", "the epic stays the conductor's to fill")
+
+	// And nothing was run: the tree is where the skill left it.
+	require.Equal(t, []string{"the reference", "base"}, changeLogSubjects(t, r.cfg.Root))
+}
+
+// A route named on an outcome that has no use for one is recorded, not
+// acted on: the exit code comes from maintenance_status alone.
+func TestChangeSettle_ARouteOnANonEscalatedOutcomeIsRecordedOnly(t *testing.T) {
+	contract := strings.Replace(landedContract, "route: 'none'", "route: 'lean-story'", 1)
+	r, o := settleFixture(t, contract)
+
+	require.NoError(t, r.settle(context.Background(), o, taskRun{}), "the route changes no exit code")
+
+	rec, err := os.ReadFile(filepath.Join(r.dir, "change.yaml"))
+	require.NoError(t, err)
+	require.Contains(t, string(rec), "route_mismatch:")
+}
+
+// The story key that reaches a printed shell command is the one ape read
+// from the project's own records — never the string the contract
+// offered. A contract can name a story; it can never be one.
+func TestResolveStoryKey_ComesFromTheProjectNotTheContract(t *testing.T) {
+	root := projectFor(t, allExtensionsConfig)
+	cfg := resolveProjectConfig(root)
+	require.NoError(t, os.MkdirAll(filepath.Dir(cfg.Paths.SprintStatus), 0o755))
+	require.NoError(t, os.WriteFile(cfg.Paths.SprintStatus, []byte(
+		"development_status:\n  12-3_do-the-thing: done\n  12-4_another: drafted\n"), 0o644))
+
+	require.Equal(t, "12-3_do-the-thing", resolveStoryKey(cfg, "12-3_do-the-thing"))
+	require.Equal(t, "12-3_do-the-thing", resolveStoryKey(cfg, "12-3"), "a bare key with one match")
+	require.Empty(t, resolveStoryKey(cfg, "12-3; rm -rf ~"), "a shell line is not a story")
+	require.Empty(t, resolveStoryKey(cfg, "99-1_never-existed"))
 }

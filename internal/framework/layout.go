@@ -53,6 +53,19 @@ const (
 	// SubtreeTerminalContracts — a framework that predates it installs
 	// nothing and every skill takes the pinned default.
 	SubtreeOutputStyles = "_apex/output-styles.csv"
+	// SubtreeChangeRoutes is the framework-owned table of what
+	// `ape change` prints when the lane escalates: per route, the ordered
+	// commands and the notes.
+	//
+	// Framework-owned for two reasons that pull the same way. Commands
+	// carried in the skill's own contract would be model-written shell the
+	// next model runs with nothing guarding its flags; commands hardcoded
+	// in ape would put framework vocabulary in the binary, so a route
+	// change would need an ape release.
+	//
+	// Same version-skew suppression as the tables above: absent, the verb
+	// still exits 8 and prints the route's name alone.
+	SubtreeChangeRoutes = "_apex/change-routes.yaml"
 	// SubtreeCommitOwners is the framework-owned roster of which skills
 	// commit and in what subject shape — the file `ape task`'s per-dispatch
 	// commit-ownership assertion reads (PLAN-26 D2).
@@ -122,6 +135,9 @@ const (
 	// Absent = no skill is enrolled and every dispatch takes the pinned
 	// default, which is what every dispatch did before the table existed.
 	ProjectOutputStyles = "_apex/output-styles.csv"
+	// ProjectChangeRoutes is where the escalation-route table lands.
+	// Absent = `ape change` prints the route's name and no commands.
+	ProjectChangeRoutes = "_apex/change-routes.yaml"
 	// ProjectCommitOwners is where the commit-ownership roster lands.
 	// Absent = the project has not adopted the declaration, and every
 	// dispatch's assertion is skipped with a reason.
