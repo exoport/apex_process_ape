@@ -42,6 +42,7 @@ Subcommands:
 - `event` — Publish a session progress event over NATS
 - `feature` — Inspect and maintain the feature registry
 - `framework` — Install and inspect APEX framework assets in a project
+- `governance` — Answer governance questions about a set of paths
 - `log` — Publish a structured log record over NATS
 - `memory` — Read the team-memory file without loading it whole
 - `metrics` — Scan and publish this session's usage metrics over NATS
@@ -3046,6 +3047,79 @@ Global flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
 | `--repo` | string | `—` | Path to a checked-out apex_process_framework repo (default: $APEX_FRAMEWORK_REPO) |
+
+## ape governance
+
+Answer governance questions about a set of paths
+
+```
+ape governance
+```
+
+Subcommands:
+
+- `match` — Which stories own these paths, and what that means for a maintenance change
+
+## ape governance match
+
+Which stories own these paths, and what that means for a maintenance change
+
+```
+ape governance match [flags]
+```
+
+Answer, for each path, which stories' File Lists claim it and what
+follows for the lean maintenance lane.
+
+A story owns a path when its "### File List" names it as a whole path
+token. A (planned) or (deferred) entry claims nothing — it records an
+intention, not a change — and a mention under "## Tasks" is advisory
+and is never read here at all.
+
+The owner's status decides:
+
+  in-progress, review              veto — the path is owned
+  the two statuses disagree        veto — fail-closed
+  no status on either side         veto — ownership not established
+  blocked                          Carries: <story-key> <path>
+  backlog, ready-for-dev           Carries: <story-key> <path>
+  done, cancelled                  Carries: <story-key> <path>
+  no owner                         nothing
+
+The status is read from the story file and its tracker row together,
+after normalisation — the tracker writes "drafted" where a file reads
+"ready-for-dev" — and where one side is missing the other is used.
+More than five finished owners collapse to one "shared <path> (<N>
+owners)" row, because a commit message is read by a person.
+
+Paths come from --path (repeatable), --paths-file, or stdin. Never a
+comma-separated list: a path may contain a comma, and a prescan lists
+many.
+
+This answers the OWNER question only. There is no adrs or patterns
+field, not even an empty one: an empty list would read as "nothing
+applies", where the truth is that this ape does not answer that.
+
+Always exits 0 when it could answer. The verdict is the veto field, not
+the exit code — a skill reading a non-zero exit as a content verdict is
+the failure mode the framework's own rules warn about.
+
+Examples:
+
+```
+  ape governance match --path internal/repl/pty.go --path docs/reference/cli.md
+  ape governance match --paths-file changed.txt --output-format json
+  git diff --name-only | ape governance match --paths-file -
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--path` | stringArray | `[]` | A path to match (repeatable) |
+| `--paths-file` | string | `—` | File holding one path per line; "-" reads stdin |
 
 ## ape log
 

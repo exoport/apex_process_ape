@@ -78,6 +78,10 @@ type ComposeOptions struct {
 	// its record ids are stamped with.
 	Store *deferred.Store
 	Date  string
+	// Carries holds, per goal, the ownership rows its commit records —
+	// derived by ape over the paths that actually changed, never copied
+	// from the skill's claim.
+	Carries map[int][]string
 	// DryRun composes every message and makes no commit.
 	DryRun bool
 }
@@ -178,7 +182,7 @@ func (l Layout) commitGoal(
 		// make and nothing is lost by saying so quietly here.
 		return Commit{}, errNothingStaged
 	}
-	msg := composeGoalMessage(g, hasEvidence, o)
+	msg := composeGoalMessage(g, n, hasEvidence, o)
 	return l.commit(ctx, root, commitSpec{
 		subject: g.Subject,
 		message: msg,
@@ -190,7 +194,7 @@ func (l Layout) commitGoal(
 
 // composeGoalMessage is the goal's subject and its trailers, in the
 // order the framework's readers expect them.
-func composeGoalMessage(g *Goal, hasEvidence bool, o ComposeOptions) string {
+func composeGoalMessage(g *Goal, n int, hasEvidence bool, o ComposeOptions) string {
 	var b strings.Builder
 	b.WriteString(g.Subject)
 	b.WriteString("\n\n")
@@ -216,6 +220,12 @@ func composeGoalMessage(g *Goal, hasEvidence bool, o ComposeOptions) string {
 		// the line" are different claims, and a reader counting evidence
 		// has to be able to tell them apart.
 		b.WriteString("Evidence: none\n")
+	}
+	// One row per owner whose story this change makes less than the whole
+	// truth about the path. Derived by ape over what actually changed, so
+	// a row the skill did not write still appears.
+	for _, row := range o.Carries[n] {
+		b.WriteString("Carries: " + row + "\n")
 	}
 	return b.String()
 }

@@ -104,6 +104,7 @@ func rootSubcommands() []*cobra.Command {
 		newPipelineCmd(),
 		newTaskCmd(),
 		newChangeCmd(),
+		newGovernanceCmd(),
 		newPromptCmd(),
 		newScriptCmd(),
 		newPlanningCmd(),

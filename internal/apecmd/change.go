@@ -17,6 +17,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/change"
 	"github.com/exoport/apex_process_ape/internal/deferred"
+	"github.com/exoport/apex_process_ape/internal/governance"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/stamp"
 	"github.com/spf13/cobra"
@@ -658,6 +659,15 @@ func (r *changeRun) settle(ctx context.Context, o changeOptions, res taskRun) er
 			n, len(paths), plural(len(paths), "path", "paths"), strings.Join(paths, ", "))
 	}
 
+	// The ownership pass, over the paths that ACTUALLY changed rather
+	// than the ones the skill claimed. An in-flight owner it missed stops
+	// the commit here, and the Carries: rows are derived rather than
+	// copied.
+	carries, ownErr := r.ownership(contract, reconciled)
+	if ownErr != nil {
+		return r.refuse(ctx, o, env, ownErr)
+	}
+
 	commits, composeErr := layout.Compose(ctx, r.cfg.Root, contract, reconciled, change.ComposeOptions{
 		ChangeID:   r.id,
 		Request:    o.request,
@@ -666,6 +676,7 @@ func (r *changeRun) settle(ctx context.Context, o changeOptions, res taskRun) er
 		MessageDir: r.dir,
 		Store:      deferred.New(r.cfg.Paths.Deferred),
 		Date:       r.cfg.Date,
+		Carries:    carries,
 		DryRun:     o.dryRun,
 	})
 	env.Commits = envelopeCommits(commits)
@@ -705,6 +716,73 @@ func (r *changeRun) settle(ctx context.Context, o changeOptions, res taskRun) er
 		return r.report(o, env, nil)
 	}
 	return r.report(o, env, reportedErr(env.ExitCode, errors.New(contract.Status)))
+}
+
+// ownership re-derives who owns the changed paths, and what the commits
+// must record about them.
+//
+// Over the ACTUAL changed set, not the contract's claim: the skill
+// declares its ownership check in the contract, and this is the half
+// that cannot be talked out of. An in-flight owner it missed refuses
+// the run; a finished or not-yet-started owner earns a `Carries:` row on
+// the goal that touched its path.
+//
+// Evidence paths are excluded. They are ape's own artifact under the
+// evidence folder, and no story's File List claims them.
+func (r *changeRun) ownership(
+	contract *change.Contract, reconciled *change.Reconciliation,
+) (map[int][]string, error) {
+	carries := map[int][]string{}
+	var vetoed []string
+	for i := range contract.Goals {
+		g := &contract.Goals[i]
+		if g.Status == change.GoalNotStarted || len(g.Paths) == 0 {
+			continue
+		}
+		paths := make([]string, 0, len(g.Paths))
+		for _, p := range g.Paths {
+			if _, claimed := reconciled.ClaimedBy[p]; !claimed && !changedUnder(reconciled, p) {
+				continue // claimed but never changed: nothing to own
+			}
+			paths = append(paths, p)
+		}
+		report, matchErr := governance.Match(r.cfg, paths)
+		if matchErr != nil {
+			// A project with no implementation folder has no stories, so
+			// nothing can own a path. Reported rather than treated as a
+			// veto, which would refuse every change on such a project.
+			fmt.Fprintf(os.Stderr, "⚠ ownership could not be read: %s\n", matchErr)
+			continue
+		}
+		for j := range report.Paths {
+			for k := range report.Paths[j].Owners {
+				if report.Paths[j].Owners[k].Effect == governance.EffectVeto {
+					vetoed = append(vetoed, fmt.Sprintf("%s — %s (%s)",
+						report.Paths[j].Path, report.Paths[j].Owners[k].Key,
+						report.Paths[j].Owners[k].Reason))
+				}
+			}
+		}
+		if len(report.Carries) > 0 {
+			carries[i+1] = report.Carries
+		}
+	}
+	if len(vetoed) > 0 {
+		return nil, fmt.Errorf("%w: an in-flight story owns what this change touched:\n  %s",
+			change.ErrRefused, strings.Join(vetoed, "\n  "))
+	}
+	return carries, nil
+}
+
+// changedUnder reports whether anything beneath a claimed directory
+// actually changed.
+func changedUnder(reconciled *change.Reconciliation, claim string) bool {
+	for p := range reconciled.ClaimedBy {
+		if strings.HasPrefix(p, claim+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // refuse is exit 6: the run happened, and ape will not turn it into

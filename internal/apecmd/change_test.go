@@ -225,9 +225,14 @@ func settleFixture(t *testing.T, contract string) (*changeRun, changeOptions) {
 // framework's contract says so in as many words — so a fixture that
 // left edits behind for those would be testing a contract the skill
 // cannot write.
-func settleFixtureEdits(t *testing.T, contract string, edits bool) (*changeRun, changeOptions) {
+func settleFixtureEdits(
+	t *testing.T, contract string, edits bool, prep ...func(t *testing.T, root string),
+) (*changeRun, changeOptions) {
 	t.Helper()
 	root := changeProject(t, "_output/ape/")
+	for _, p := range prep {
+		p(t, root)
+	}
 	// The framework's escalation table, committed as `ape framework
 	// setup` would have left it: an uncommitted one would dirty the tree
 	// the preflight then refuses.
@@ -494,4 +499,49 @@ func TestResolveStoryKey_ComesFromTheProjectNotTheContract(t *testing.T) {
 	require.Equal(t, "12-3_do-the-thing", resolveStoryKey(cfg, "12-3"), "a bare key with one match")
 	require.Empty(t, resolveStoryKey(cfg, "12-3; rm -rf ~"), "a shell line is not a story")
 	require.Empty(t, resolveStoryKey(cfg, "99-1_never-existed"))
+}
+
+// ownedBy writes a story whose File List claims the path this change
+// edits, with the statuses given on both sides.
+func ownedBy(key, fmStatus, trackerStatus string) func(t *testing.T, root string) {
+	return func(t *testing.T, root string) {
+		t.Helper()
+		impl := filepath.Join(root, "development", "implementation")
+		require.NoError(t, os.MkdirAll(impl, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(impl, key+".md"), []byte(
+			"---\nstory_id: \"x\"\nstatus: "+fmStatus+"\n---\n\n"+
+				"### File List\n\n- `docs/reference/cli.md` (modified)\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(impl, "sprint-status.yaml"), []byte(
+			"development_status:\n  "+key+": "+trackerStatus+"\n"), 0o644))
+	}
+}
+
+// The ownership pass is over what ACTUALLY changed, not what the
+// contract claimed. An in-flight story owning the path stops the commit
+// even though the contract says nothing about it.
+func TestChangeSettle_AnInFlightOwnerRefusesTheRun(t *testing.T) {
+	r, o := settleFixtureEdits(t, landedContract, true,
+		ownedBy("12-1_in-flight", "in-progress", "in-progress"))
+
+	err := r.settle(context.Background(), o, taskRun{})
+	require.Equal(t, ExitCommitContract, exitCodeOf(t, err))
+	require.ErrorContains(t, err, "an in-flight story owns what this change touched")
+	require.ErrorContains(t, err, "12-1_in-flight")
+	require.Equal(t, []string{"the reference", "base"}, changeLogSubjects(t, r.cfg.Root),
+		"nothing is committed when ownership refuses")
+}
+
+// A finished owner does not stop the change: it earns a Carries: row,
+// derived by ape, so whoever reads that story next knows its file is no
+// longer the whole truth about the path.
+func TestChangeSettle_AFinishedOwnerEarnsADerivedCarriesRow(t *testing.T) {
+	r, o := settleFixtureEdits(t, landedContract, true,
+		ownedBy("12-2_finished", "done", "done"))
+
+	require.NoError(t, r.settle(context.Background(), o, taskRun{}))
+
+	body := commitBodyOf(t, r.cfg.Root, "HEAD")
+	require.Contains(t, body, "Carries: 12-2_finished docs/reference/cli.md")
+	require.NotContains(t, landedContract, "Carries",
+		"the contract never mentioned it — ape derived the row from the tree")
 }
