@@ -299,3 +299,29 @@ func TestPromptCommandTimeoutFlags(t *testing.T) {
 	require.NotNil(t, md)
 	require.Equal(t, sessiondriver.DefaultMaxDuration.String(), md.DefValue)
 }
+
+// A malformed commit-owners.csv is a preflight failure, and dispatchTask
+// REPORTS it rather than calling os.Exit. That is the whole reason the
+// split exists: `ape change` dispatches through this and then composes
+// its own commits, so a preflight that exited would take the caller's
+// run down with it and lose the residue it had yet to save.
+//
+// The malformed CSV is the one preflight reachable without spawning
+// claude, which is what makes it testable here at all.
+func TestDispatchTask_MalformedOwnersIsReturnedNotExited(t *testing.T) {
+	root := t.TempDir()
+	apexDir := filepath.Join(root, "_apex")
+	require.NoError(t, os.MkdirAll(apexDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(apexDir, "commit-owners.csv"),
+		[]byte("not,the,declared,header\n"), 0o644))
+
+	res, err := dispatchTask(context.Background(), taskOptions{
+		skill:       "apex-maintenance",
+		projectRoot: root,
+	})
+
+	var preflight *taskPreflightError
+	require.ErrorAs(t, err, &preflight, "a preflight failure is returned, not exited")
+	require.Contains(t, err.Error(), "malformed")
+	require.Equal(t, taskRun{}, res, "nothing dispatched, so there is no outcome to report")
+}

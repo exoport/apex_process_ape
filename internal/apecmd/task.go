@@ -365,7 +365,48 @@ func taskExitCode(runErr error) int {
 	return ExitRunFailed
 }
 
-func runTask(ctx context.Context, o taskOptions) error {
+// taskRun is one dispatch's outcome: everything the command reports, and
+// everything a caller that holds the pen itself needs before it decides
+// what to commit.
+type taskRun struct {
+	// Envelope is the `--output-format json` result, already filled from
+	// the run manifest and carrying the mapped exit code.
+	Envelope taskEnvelope
+	// Contract is the per-dispatch commit-ownership verdict, already
+	// folded into Envelope.ExitCode.
+	Contract commitowners.Result
+	// RunErr is the dispatch's own failure. Kept beside the envelope
+	// because the human summary prints the error itself and the envelope
+	// carries only its text.
+	RunErr error
+	// ManifestDir is the resolved run-artifact base dir, so a caller can
+	// find the run without re-deriving the default.
+	ManifestDir string
+	// HeadBefore is where HEAD pointed before the dispatch — the left
+	// edge of the commit range the assertion judged.
+	HeadBefore string
+}
+
+// taskPreflightError is a failure found BEFORE any claude process
+// spawns. It is the one error dispatchTask returns, and it is ExitUsage.
+type taskPreflightError struct{ err error }
+
+func (e *taskPreflightError) Error() string { return e.err.Error() }
+func (e *taskPreflightError) Unwrap() error { return e.err }
+
+// dispatchTask runs one task and RETURNS. It exits for nothing and
+// writes nothing to stdout.
+//
+// That is the whole point of the split: `ape change` dispatches through
+// this, then runs its own reconciliation and composes the commits
+// itself, and a preflight calling os.Exit would take the caller's run
+// down mid-flight with no chance to save the residue. (`ape script`'s
+// task runner has that defect today and is tracked separately.)
+//
+// The error return is preflight only. A dispatch that spawned and then
+// failed reports through the returned taskRun, whose envelope carries
+// the exit code.
+func dispatchTask(ctx context.Context, o taskOptions) (taskRun, error) {
 	step := buildTaskStep(o)
 	spec := pipeline.NewSingleStepSpec(o.skill, step, o.taskCommit)
 
@@ -381,8 +422,7 @@ func runTask(ctx context.Context, o taskOptions) error {
 	// assertion.
 	owners, ownersErr := commitowners.Load(filepath.Join(o.projectRoot, apexcfg.DirName))
 	if ownersErr != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", ownersErr)
-		os.Exit(ExitUsage)
+		return taskRun{}, &taskPreflightError{err: ownersErr}
 	}
 
 	stateBefore := commitowners.Capture(ctx, o.projectRoot)
@@ -475,29 +515,49 @@ func runTask(ctx context.Context, o taskOptions) error {
 	fillEnvelopeFromManifest(&env, o.projectRoot, o.skill, manifestDir)
 	recordCommitContract(o.projectRoot, o.skill, manifestDir, contract)
 
+	return taskRun{
+		Envelope:    env,
+		Contract:    contract,
+		RunErr:      runErr,
+		ManifestDir: manifestDir,
+		HeadBefore:  headBefore,
+	}, nil
+}
+
+// runTask is `ape task`: dispatch, report, exit. The exiting half of the
+// split — every decision it makes is dispatchTask's, and everything here
+// is output.
+func runTask(ctx context.Context, o taskOptions) error {
+	res, err := dispatchTask(ctx, o)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		os.Exit(ExitUsage)
+	}
+	env := res.Envelope
+
 	if o.jsonMode {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		if err := enc.Encode(env); err != nil {
-			return err
+		if encErr := enc.Encode(env); encErr != nil {
+			return encErr
 		}
 	} else {
-		printTaskSummary(env, runErr)
+		printTaskSummary(env, res.RunErr)
 	}
-	if exitCode != ExitOK {
+	if env.ExitCode != ExitOK {
 		// A NotReadyError's text carries the last pane snapshot, so an
 		// unknown blocking modal is diagnosable straight from stderr.
 		//
-		// runErr may be nil here: ExitCommitContract is reached by a run
+		// RunErr may be nil here: ExitCommitContract is reached by a run
 		// that SUCCEEDED and then failed its declaration, and the
 		// violations are the whole diagnosis in that case.
-		if runErr != nil {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", runErr.Error())
+		if res.RunErr != nil {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", res.RunErr.Error())
 		}
-		for _, v := range contract.Violations {
+		for _, v := range res.Contract.Violations {
 			fmt.Fprintf(os.Stderr, "Error: %s: %s\n", v.Check, v.Message)
 		}
-		os.Exit(exitCode)
+		os.Exit(env.ExitCode)
 	}
 	return nil
 }
