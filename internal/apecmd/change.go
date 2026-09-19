@@ -21,6 +21,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/stamp"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
 )
 
 // Exit codes `ape change` adds to the shared table. Command-local, as
@@ -296,14 +297,17 @@ func changeStart(ctx context.Context, o changeOptions) (*changeRun, error) {
 			return nil, usageErr(fmt.Errorf("write the request: %w", err))
 		}
 	}
-	return &changeRun{
+	run := &changeRun{
 		cfg:          cfg,
 		id:           id,
 		dir:          dir,
 		contractPath: contractPath,
 		startedAt:    at,
 		fixesRecord:  fixesRec,
-	}, nil
+		opts:         o,
+	}
+	run.args = run.skillArgs(o)
+	return run, nil
 }
 
 // changeRun is one change's resolved context: where it writes, what it
@@ -315,6 +319,87 @@ type changeRun struct {
 	contractPath string
 	startedAt    time.Time
 	fixesRecord  deferred.Record
+	// opts is the invocation this run came from, and args the skill
+	// flags composed from it.
+	opts changeOptions
+	args string
+	// residue is what the run left in the tree, once it has been saved.
+	residue *change.Residue
+}
+
+// changeRecord is `change.yaml`: what ape was asked, what it did, and
+// where every piece of it went.
+//
+// The envelope on stdout is ephemeral — a consumer that parses it, sees
+// a refusal and drops stdout leaves nothing on disk saying why. This is
+// the durable half, and it is written on every exit that got as far as
+// dispatching.
+//
+//nolint:tagliatelle // snake_case is the manifest contract
+type changeRecord struct {
+	SchemaVersion int    `yaml:"schema_version"`
+	ID            string `yaml:"id"`
+	StartedAt     string `yaml:"started_at"`
+	// Request is the operator's words, byte-verbatim. Empty under
+	// --fixes alone.
+	Request string `yaml:"request"`
+	Fixes   string `yaml:"fixes,omitempty"`
+	// Dispatch is the invocation ape made, so the run is reproducible
+	// from the record alone.
+	Dispatch     changeDispatch   `yaml:"dispatch"`
+	Outcome      string           `yaml:"outcome"`
+	ExitCode     int              `yaml:"exit_code"`
+	ContractPath string           `yaml:"contract_path"`
+	Commits      []composedCommit `yaml:"commits"`
+	Goals        []change.Goal    `yaml:"goals,omitempty"`
+	Residue      *change.Residue  `yaml:"residue,omitempty"`
+}
+
+// changeDispatch records what was run.
+//
+//nolint:tagliatelle // snake_case is the manifest contract
+type changeDispatch struct {
+	Skill        string `yaml:"skill"`
+	Agent        string `yaml:"agent"`
+	Model        string `yaml:"model,omitempty"`
+	Effort       string `yaml:"effort,omitempty"`
+	Args         string `yaml:"args"`
+	ManifestPath string `yaml:"manifest_path,omitempty"`
+}
+
+// writeRecord saves change.yaml. Best-effort, for the same reason the
+// residue is: it runs after the verdict is already decided and reported.
+func (r *changeRun) writeRecord(env changeEnvelope, contract *change.Contract) {
+	rec := changeRecord{
+		SchemaVersion: 1,
+		ID:            r.id,
+		StartedAt:     r.startedAt.Format(time.RFC3339),
+		Request:       r.opts.request,
+		Fixes:         r.opts.fixes,
+		Dispatch: changeDispatch{
+			Skill:        changeSkill,
+			Agent:        changeAgent,
+			Model:        r.opts.model,
+			Effort:       r.opts.effort,
+			Args:         r.args,
+			ManifestPath: env.ManifestPath,
+		},
+		Outcome:      env.Outcome,
+		ExitCode:     env.ExitCode,
+		ContractPath: relTo(r.cfg.Root, r.contractPath),
+		Commits:      env.Commits,
+		Residue:      r.residue,
+	}
+	if contract != nil {
+		rec.Goals = contract.Goals
+	}
+	out, err := yaml.Marshal(&rec)
+	if err != nil {
+		return
+	}
+	if err := os.WriteFile(filepath.Join(r.dir, "change.yaml"), out, 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ the change record could not be written: %s\n", err)
+	}
 }
 
 // skillArgs assembles the flags that follow the skill name on the
@@ -345,7 +430,7 @@ func (r *changeRun) taskOptions(o changeOptions) taskOptions {
 		agent:          changeAgent,
 		model:          o.model,
 		effort:         o.effort,
-		args:           r.skillArgs(o),
+		args:           r.args,
 		prompt:         o.request,
 		promptFlagName: changePromptFlag,
 		// The skill layer's own flag. ape holds the pen for this
@@ -360,11 +445,13 @@ func (r *changeRun) taskOptions(o changeOptions) taskOptions {
 
 // composedCommit is one commit ape made, in the order it made them.
 type composedCommit struct {
-	SHA     string `json:"sha"`
-	Subject string `json:"subject"`
-	// Goal is the 1-based goal this commit belongs to, or 0 for a commit
-	// that is not a goal's own (the evidence and deferred commits).
-	Goal int `json:"goal"`
+	SHA     string `json:"sha"     yaml:"sha"`
+	Subject string `json:"subject" yaml:"subject"`
+	// Kind is evidence, goal or deferred — which of the three commits
+	// per goal this is.
+	Kind string `json:"kind" yaml:"kind"`
+	// Goal is the 1-based goal this commit belongs to.
+	Goal int `json:"goal" yaml:"goal"`
 }
 
 // changeEnvelope is `--output-format json`. snake_case is the wire
@@ -407,7 +494,17 @@ func runChange(ctx context.Context, o changeOptions) error {
 	if derr != nil {
 		return usageErr(derr)
 	}
+	return r.settle(ctx, o, res)
+}
 
+// settle is everything after the dispatch returns: read the tree, read
+// the contract, refuse or compose, save what is left, report.
+//
+// Split from runChange so it can be driven without spawning claude —
+// the exit codes and the envelope are an interface other tools build
+// against, and a path only reachable through an hour-long model run is
+// a path that gets tested once.
+func (r *changeRun) settle(ctx context.Context, o changeOptions, res taskRun) error {
 	env := changeEnvelope{
 		ChangeID:     r.id,
 		ChangeDir:    relTo(r.cfg.Root, r.dir),
@@ -436,6 +533,11 @@ func runChange(ctx context.Context, o changeOptions) error {
 		for _, v := range res.Contract.Violations {
 			fmt.Fprintf(os.Stderr, "Error: %s: %s\n", v.Check, v.Message)
 		}
+		// A dispatch that died mid-edit still leaves the operator's work
+		// in the tree. Saving it is the difference between a failed run
+		// and a lost one.
+		r.saveResidue(ctx, o, &env)
+		r.writeRecord(env, nil)
 		return reportChange(o, env, reportedErr(env.ExitCode, errors.New("the dispatch failed")))
 	}
 
@@ -448,6 +550,8 @@ func runChange(ctx context.Context, o changeOptions) error {
 		env.ExitCode = ExitRunFailed
 		msg := contractErr.Error()
 		env.Error = &msg
+		r.saveResidue(ctx, o, &env)
+		r.writeRecord(env, nil)
 		return reportChange(o, env, reportedErr(ExitRunFailed, contractErr))
 	}
 
@@ -458,11 +562,99 @@ func runChange(ctx context.Context, o changeOptions) error {
 	if !change.None(contract.BlockingCondition) {
 		env.BlockingCondition = strings.TrimSpace(contract.BlockingCondition)
 	}
+
+	layout, layoutErr := change.LayoutFrom(r.cfg)
+	if layoutErr != nil {
+		return reportChange(o, env, usageErr(layoutErr))
+	}
+
+	// Validation and reconciliation both refuse the whole run before the
+	// first commit. A contract whose third goal is malformed must not
+	// leave the first two committed: that is a state the operator has to
+	// untangle by hand, and it is avoidable by checking everything first.
+	if err := layout.ValidateGoals(contract.Goals); err != nil {
+		return r.refuse(ctx, o, env, err)
+	}
+	reconciled := layout.Reconcile(changed, contract.Goals)
+	if err := reconciled.RefusalError(contract.Goals); err != nil {
+		return r.refuse(ctx, o, env, err)
+	}
+
+	commits, composeErr := layout.Compose(ctx, r.cfg.Root, contract, reconciled, change.ComposeOptions{
+		ChangeID:   r.id,
+		Request:    o.request,
+		FixesID:    o.fixes,
+		AllLanded:  contract.Status == change.StatusLanded,
+		MessageDir: r.dir,
+		Store:      deferred.New(r.cfg.Paths.Deferred),
+		Date:       r.cfg.Date,
+		DryRun:     o.dryRun,
+	})
+	env.Commits = envelopeCommits(commits)
+	if composeErr != nil {
+		// The commit itself was refused — a project hook, since ape never
+		// passes --no-verify. The goals before this one stay committed and
+		// the rest is residue. Nothing about the contract was wrong, so
+		// this is exit 1 rather than a refusal.
+		env.ExitCode = ExitRunFailed
+		msg := composeErr.Error()
+		env.Error = &msg
+		r.saveResidue(ctx, o, &env)
+		r.writeRecord(env, contract)
+		return reportChange(o, env, reportedErr(ExitRunFailed, composeErr))
+	}
+
+	r.saveResidue(ctx, o, &env)
 	env.ExitCode = changeExitCode(contract.Status)
+	r.writeRecord(env, contract)
 	if env.ExitCode == ExitOK {
 		return reportChange(o, env, nil)
 	}
 	return reportChange(o, env, reportedErr(env.ExitCode, errors.New(contract.Status)))
+}
+
+// refuse is exit 6: the run happened, and ape will not turn it into
+// commits. The tree is left exactly as it was and saved as residue, so
+// the operator can see the work and decide.
+func (r *changeRun) refuse(ctx context.Context, o changeOptions, env changeEnvelope, err error) error {
+	env.ExitCode = ExitCommitContract
+	msg := err.Error()
+	env.Error = &msg
+	r.saveResidue(ctx, o, &env)
+	r.writeRecord(env, nil)
+	return reportChange(o, env, reportedErr(ExitCommitContract, err))
+}
+
+// saveResidue writes whatever is left in the tree under the change
+// directory.
+//
+// Best-effort and never fatal: this runs after the work is done and
+// after the verdict is decided, so failing the run because a diagnostic
+// could not be saved would trade the run for the note about the run.
+//
+// Skipped under --dry-run, where a dirty tree is the point rather than a
+// leftover: writing a patch there would suggest ape had cleaned up after
+// a run that deliberately changed nothing.
+func (r *changeRun) saveResidue(ctx context.Context, o changeOptions, env *changeEnvelope) {
+	if o.dryRun {
+		return
+	}
+	res, err := change.Save(ctx, r.cfg.Root, r.dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ the residue could not be saved: %s\n", err)
+		return
+	}
+	env.Residue = res.Paths
+	r.residue = res
+}
+
+// envelopeCommits projects the composed commits onto the wire shape.
+func envelopeCommits(commits []change.Commit) []composedCommit {
+	out := make([]composedCommit, 0, len(commits))
+	for _, c := range commits {
+		out = append(out, composedCommit{SHA: c.SHA, Subject: c.Subject, Goal: c.Goal, Kind: c.Kind})
+	}
+	return out
 }
 
 // changeExitCode maps the contract's outcome onto the process status.

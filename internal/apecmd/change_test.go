@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/change"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -197,4 +199,182 @@ func TestComputeChangeID_DistinctWithinOneSecond(t *testing.T) {
 
 	require.True(t, strings.HasPrefix(first, "20260919-120000-"))
 	require.NotEqual(t, first, second)
+}
+
+// exitCodeOf reads the code a command's error carries.
+func exitCodeOf(t *testing.T, err error) int {
+	t.Helper()
+	if err == nil {
+		return ExitOK
+	}
+	var ee *exitError
+	require.ErrorAs(t, err, &ee, "a change's verdict travels as an exit code")
+	return ee.code
+}
+
+// settleFixture is a project mid-run: the dispatch has returned, the
+// skill has edited a file and written its gate output, and the contract
+// is on disk. Everything after that is ape's.
+func settleFixture(t *testing.T, contract string) (*changeRun, changeOptions) {
+	t.Helper()
+	return settleFixtureEdits(t, contract, true)
+}
+
+// settleFixtureEdits builds the same fixture with or without the
+// skill's edits. A run that escalated or refused edited NOTHING — the
+// framework's contract says so in as many words — so a fixture that
+// left edits behind for those would be testing a contract the skill
+// cannot write.
+func settleFixtureEdits(t *testing.T, contract string, edits bool) (*changeRun, changeOptions) {
+	t.Helper()
+	root := changeProject(t, "_output/ape/")
+	// The file the change will edit exists and is TRACKED, so a refusal
+	// has a real patch to save rather than only untracked copies.
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "docs", "reference"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "docs", "reference", "cli.md"),
+		[]byte("old\n"), 0o644))
+	gitCommitAll(t, root, "the reference")
+
+	o := changeOptions{request: "the reference is out of date", cwdFlag: root}
+	r, err := changeStart(context.Background(), o)
+	require.NoError(t, err)
+
+	if !edits {
+		if contract != "" {
+			require.NoError(t, os.WriteFile(r.contractPath, []byte(contract), 0o644))
+		}
+		return r, o
+	}
+
+	// What the skill did, in the order it would have done it.
+	require.NoError(t, os.WriteFile(filepath.Join(root, "docs", "reference", "cli.md"),
+		[]byte("regenerated\n"), 0o644))
+	evidenceDir := filepath.Join(root, "development", "governance", "evidence", "20260919-a")
+	require.NoError(t, os.MkdirAll(evidenceDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(evidenceDir, "gate.txt"), []byte("PASS\n"), 0o644))
+
+	if contract != "" {
+		require.NoError(t, os.WriteFile(r.contractPath, []byte(contract), 0o644))
+	}
+	return r, o
+}
+
+const landedContract = `contract_version: '1'
+maintenance_status: landed
+goals_total: 1
+goals_landed: 1
+route: 'none'
+blocking_condition: 'none'
+goals:
+  - goal: 'the reference is stale'
+    status: landed
+    paths:
+      - 'docs/reference/cli.md'
+    subject: 'docs(cli): regenerate the reference'
+    gates: 'make docs-cli-check'
+    evidence: 'development/governance/evidence/20260919-a'
+    triage: 'none'
+    governance: 'none'
+    deferred: []
+    findings_patched: 0
+    findings_deferred: 0
+`
+
+// The whole path, end to end: contract in, two commits out, clean tree,
+// exit 0.
+func TestChangeSettle_ALandedRunCommitsAndLeavesNothing(t *testing.T) {
+	r, o := settleFixture(t, landedContract)
+
+	err := r.settle(context.Background(), o, taskRun{})
+	require.NoError(t, err)
+
+	subjects := changeLogSubjects(t, r.cfg.Root)
+	require.Equal(t, []string{
+		"docs(cli): regenerate the reference",
+		"evidence: change " + r.id + " goal 1",
+		"the reference",
+		"base",
+	}, subjects)
+
+	left, lerr := change.Changed(context.Background(), r.cfg.Root)
+	require.NoError(t, lerr)
+	require.Empty(t, left, "a landed run leaves the tree clean")
+
+	// The durable half: change.yaml survives the envelope.
+	rec, rerr := os.ReadFile(filepath.Join(r.dir, "change.yaml"))
+	require.NoError(t, rerr)
+	require.Contains(t, string(rec), "outcome: landed")
+	require.Contains(t, string(rec), "request: the reference is out of date")
+}
+
+// An edit no goal claims refuses the whole run: nothing is committed,
+// the tree is untouched, and the work is saved as residue.
+func TestChangeSettle_AnUnclaimedEditRefusesAndSavesTheWork(t *testing.T) {
+	r, o := settleFixture(t, landedContract)
+	require.NoError(t, os.WriteFile(filepath.Join(r.cfg.Root, "sneaky.txt"), []byte("x\n"), 0o644))
+
+	err := r.settle(context.Background(), o, taskRun{})
+	require.Equal(t, ExitCommitContract, exitCodeOf(t, err))
+	require.Equal(t, []string{"the reference", "base"}, changeLogSubjects(t, r.cfg.Root),
+		"nothing was committed")
+
+	saved, rerr := os.ReadFile(filepath.Join(r.dir, "untracked", "sneaky.txt"))
+	require.NoError(t, rerr)
+	require.Equal(t, "x\n", string(saved), "the work is saved before anyone is asked to clear the tree")
+	require.FileExists(t, filepath.Join(r.dir, "residue.patch"))
+}
+
+// The three outcome codes, and the two that win over them.
+func TestChangeSettle_OutcomeExitCodes(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		contract string
+		edits    bool
+		want     int
+	}{
+		{"escalated", strings.Replace(strings.Replace(landedContract,
+			"maintenance_status: landed", "maintenance_status: escalated", 1),
+			"    status: landed", "    status: not-started", 1), false, exitChangeEscalated},
+		{"refused", strings.Replace(strings.Replace(landedContract,
+			"maintenance_status: landed", "maintenance_status: refused", 1),
+			"    status: landed", "    status: not-started", 1), false, exitChangeRefused},
+		{"halted", strings.Replace(strings.Replace(landedContract,
+			"maintenance_status: landed", "maintenance_status: halted", 1),
+			"    status: landed", "    status: halted", 1), true, exitChangeHalted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// goals_landed follows the goal's own status.
+			contract := strings.Replace(tc.contract, "goals_landed: 1", "goals_landed: 0", 1)
+			r, o := settleFixtureEdits(t, contract, tc.edits)
+
+			err := r.settle(context.Background(), o, taskRun{})
+			require.Equal(t, tc.want, exitCodeOf(t, err))
+		})
+	}
+
+	t.Run("a missing contract is exit 1, not an outcome", func(t *testing.T) {
+		r, o := settleFixture(t, "")
+		err := r.settle(context.Background(), o, taskRun{})
+		require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
+		require.Equal(t, []string{"the reference", "base"}, changeLogSubjects(t, r.cfg.Root),
+			"ape never infers landed from a tree it cannot account for")
+	})
+
+	t.Run("the dispatch's own failure wins over any outcome", func(t *testing.T) {
+		r, o := settleFixture(t, landedContract)
+		err := r.settle(context.Background(), o, taskRun{
+			Envelope: taskEnvelope{ExitCode: ExitREPLNotReady},
+		})
+		require.Equal(t, ExitREPLNotReady, exitCodeOf(t, err))
+		require.Equal(t, []string{"the reference", "base"}, changeLogSubjects(t, r.cfg.Root))
+	})
+}
+
+func changeLogSubjects(t *testing.T, root string) []string {
+	t.Helper()
+	cmd := exec.CommandContext(context.Background(), "git", "log", "--format=%s")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	require.NoError(t, err)
+	return strings.Split(strings.TrimSpace(string(out)), "\n")
 }

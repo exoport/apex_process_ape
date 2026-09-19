@@ -116,68 +116,122 @@ func (s *Store) Ingest(data []byte, opts IngestOptions) (*IngestResult, error) {
 	seen := map[string]int{}
 	for _, chunk := range chunks {
 		rec := ParseBullet(chunk)
-		rec.SourceStory = opts.Story
-		rec.Skill = opts.Skill
-		rec.Cycle = opts.Cycle
-		rec.Created = opts.Date
-		rec.Source = sourceForSkill(opts.Skill)
-		// The same three discharge readings the migration applies, for the
-		// same reason and in the same order: a body that says it is closed
-		// must not land in the open working set, whichever door it came in
-		// through. Without this the invariant `verify` now checks was true of
-		// migrated records and merely documented for ingested ones — and a
-		// `certain` finding on a record ape itself had just written is a
-		// contradiction the operator has to unpick.
-		//
-		// Nothing here can fail, so the exit-code contract above is untouched.
-		//
-		// ONE RESIDUAL, named rather than fixed: SplitBullets has no
-		// absorbAnnotation, so a marker written at column 0 in an ingest
-		// payload still becomes its own record. An ingest payload is a skill's
-		// freshly-emitted defer bullets, not a register carrying an
-		// append-only closure convention, and no field payload has ever
-		// carried one.
-		applyResolutionBanner(&rec)
-		applyClosureMarker(&rec)
-		applyStatusAnnotation(&rec)
-		rec.ID = NewID(opts.Date, rec.Title, rec.Body)
-
-		// Two identical bullets in one payload would collide on a
-		// content-addressed id. Suffix the later ones rather than silently
-		// overwriting: the operator wrote two, so two are stored.
-		if n := seen[rec.ID]; n > 0 {
-			rec.ID = fmt.Sprintf("%s-%d", rec.ID, n+1)
-		}
-		seen[rec.ID]++
-
-		if rec.FreeForm {
-			res.Warnings = append(res.Warnings, rec.ID+": stored verbatim as free-form (no [Defer] bullet shape) — flag for `ape deferred verify`")
-		}
-		write := s.Write
-		if !rec.IsOpen() {
-			// Straight to closed/, because the OPEN SET IS THE DIRECTORY:
-			// Load reads open records by listing s.Dir, not by filtering on
-			// the status field, so a `status: closed` file written here would
-			// sit in `ape deferred list` forever. It is also worth saying out
-			// loud — a skill filing a defer that already announces its own
-			// discharge is a thing the operator should see, not a silent
-			// re-route.
-			write = s.writeClosed
-			res.Warnings = append(res.Warnings,
-				rec.ID+": the bullet's own text says it is already discharged — stored in closed/, not the working set")
-		}
-		path, err := write(rec)
-		if err != nil {
-			// An unwritable store IS a setup failure, and the only thing
-			// here allowed to fail the command.
+		if err := s.finishAndWrite(rec, opts, seen, res); err != nil {
 			return nil, err
 		}
-		rec.Path = path
-		res.Records = append(res.Records, rec)
-		res.Stored = append(res.Stored, path)
 	}
 	res.Count = len(res.Records)
 	return res, nil
+}
+
+// Structured is a record's fields as a caller already holds them, with
+// no bullet to parse.
+//
+// It is the SECOND front end onto the store, and it exists because
+// `ape change` is handed these fields by a skill's terminal contract
+// rather than as prose. Rendering them back into a `[Defer]` bullet so
+// the parser could take them apart again would put a regex between a
+// structured field and the record it already is — which is the failure
+// the contract's structured fields were introduced to avoid.
+type Structured struct {
+	Title   string
+	Anchors []string
+	Owner   string
+	Trigger string
+	// Body is the finding, and may span lines.
+	Body string
+}
+
+// IngestStructured writes one record per item.
+//
+// It shares finishAndWrite with Ingest, and that sharing is the point:
+// the provenance stamps, the three discharge readings and the id
+// suffixing all apply here too. A door that skipped any of them would
+// produce records `ape deferred verify` asserts no door can produce.
+func (s *Store) IngestStructured(items []Structured, opts IngestOptions) (*IngestResult, error) {
+	res := &IngestResult{}
+	seen := map[string]int{}
+	for _, it := range items {
+		rec := Record{
+			Status:  StatusOpen,
+			Title:   strings.TrimSpace(it.Title),
+			Anchors: it.Anchors,
+			Owner:   it.Owner,
+			Trigger: it.Trigger,
+			Body:    it.Body,
+		}
+		if err := s.finishAndWrite(rec, opts, seen, res); err != nil {
+			return nil, err
+		}
+	}
+	res.Count = len(res.Records)
+	return res, nil
+}
+
+// finishAndWrite is the one write path both front ends share: stamp the
+// provenance, read the body for its own discharge, derive the id, and
+// write the record to the open set or straight to closed/.
+func (s *Store) finishAndWrite(rec Record, opts IngestOptions, seen map[string]int, res *IngestResult) error {
+	rec.SourceStory = opts.Story
+	rec.Skill = opts.Skill
+	rec.Cycle = opts.Cycle
+	rec.Created = opts.Date
+	rec.Source = sourceForSkill(opts.Skill)
+	// The same three discharge readings the migration applies, for the
+	// same reason and in the same order: a body that says it is closed
+	// must not land in the open working set, whichever door it came in
+	// through. Without this the invariant `verify` now checks was true of
+	// migrated records and merely documented for ingested ones — and a
+	// `certain` finding on a record ape itself had just written is a
+	// contradiction the operator has to unpick.
+	//
+	// Nothing here can fail, so the exit-code contract above is untouched.
+	//
+	// ONE RESIDUAL, named rather than fixed: SplitBullets has no
+	// absorbAnnotation, so a marker written at column 0 in an ingest
+	// payload still becomes its own record. An ingest payload is a skill's
+	// freshly-emitted defer bullets, not a register carrying an
+	// append-only closure convention, and no field payload has ever
+	// carried one.
+	applyResolutionBanner(&rec)
+	applyClosureMarker(&rec)
+	applyStatusAnnotation(&rec)
+	rec.ID = NewID(opts.Date, rec.Title, rec.Body)
+
+	// Two identical bullets in one payload would collide on a
+	// content-addressed id. Suffix the later ones rather than silently
+	// overwriting: the operator wrote two, so two are stored.
+	if n := seen[rec.ID]; n > 0 {
+		rec.ID = fmt.Sprintf("%s-%d", rec.ID, n+1)
+	}
+	seen[rec.ID]++
+
+	if rec.FreeForm {
+		res.Warnings = append(res.Warnings, rec.ID+": stored verbatim as free-form (no [Defer] bullet shape) — flag for `ape deferred verify`")
+	}
+	write := s.Write
+	if !rec.IsOpen() {
+		// Straight to closed/, because the OPEN SET IS THE DIRECTORY:
+		// Load reads open records by listing s.Dir, not by filtering on
+		// the status field, so a `status: closed` file written here would
+		// sit in `ape deferred list` forever. It is also worth saying out
+		// loud — a skill filing a defer that already announces its own
+		// discharge is a thing the operator should see, not a silent
+		// re-route.
+		write = s.writeClosed
+		res.Warnings = append(res.Warnings,
+			rec.ID+": the bullet's own text says it is already discharged — stored in closed/, not the working set")
+	}
+	path, err := write(rec)
+	if err != nil {
+		// An unwritable store IS a setup failure, and the only thing
+		// here allowed to fail the command.
+		return err
+	}
+	rec.Path = path
+	res.Records = append(res.Records, rec)
+	res.Stored = append(res.Stored, path)
+	return nil
 }
 
 // sourceForSkill maps the filing skill onto the source vocabulary, so

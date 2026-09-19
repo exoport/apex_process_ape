@@ -962,3 +962,80 @@ func TestDiscard_ClosedRefusalNamesNoPhantomOperation(t *testing.T) {
 	require.NotContains(t, err.Error(), "reopen",
 		"an error must not name an operation ape does not provide")
 }
+
+// --- IngestStructured ---
+
+// The second front end writes the same records the bullet parser does,
+// through the same finish-and-write step. What it must NOT do is skip
+// any of that step: a door that wrote records without the provenance
+// stamps, the discharge readings or the id suffixing would produce a
+// state `ape deferred verify` asserts no door can produce.
+func TestIngestStructured_SharesTheOneWritePath(t *testing.T) {
+	s := newStore(t)
+	res, err := s.IngestStructured([]Structured{
+		{
+			Title:   "the parser has no glob arm",
+			Anchors: []string{"internal/change/validate.go:12"},
+			Owner:   "maintenance",
+			Trigger: "when a corpus shows a prescan that was wrong",
+			Body:    "A body that\nspans lines.\n",
+		},
+		{Title: "a second finding", Owner: "maintenance", Trigger: "never", Body: "short"},
+	}, IngestOptions{Skill: "apex-maintenance", Date: "2026-09-19"})
+	require.NoError(t, err)
+	require.Equal(t, 2, res.Count)
+
+	rec := res.Records[0]
+	require.Equal(t, "the parser has no glob arm", rec.Title)
+	require.Equal(t, []string{"internal/change/validate.go:12"}, rec.Anchors)
+	require.Equal(t, "maintenance", rec.Owner)
+	require.Equal(t, "when a corpus shows a prescan that was wrong", rec.Trigger)
+	require.Equal(t, "A body that\nspans lines.\n", rec.Body, "a finding may span lines")
+
+	// The provenance stamps the shared step applies.
+	require.Equal(t, "apex-maintenance", rec.Skill)
+	require.Equal(t, "2026-09-19", rec.Created)
+	require.NotEmpty(t, rec.Source, "a classification ran")
+	require.True(t, rec.IsOpen())
+	require.False(t, rec.FreeForm, "nothing was parsed, so nothing failed to parse")
+
+	reread, err := ReadRecord(rec.Path)
+	require.NoError(t, err)
+	require.Equal(t, rec.Title, reread.Title)
+	require.Equal(t, rec.Body, reread.Body)
+}
+
+// Ids are content-addressed, so two identical findings from one goal
+// would collide and the second would overwrite the first. The skill
+// wrote two, so two are stored.
+func TestIngestStructured_IdenticalFindingsDoNotOverwrite(t *testing.T) {
+	s := newStore(t)
+	same := Structured{Title: "the same finding", Owner: "maintenance", Trigger: "x", Body: "same"}
+	res, err := s.IngestStructured([]Structured{same, same}, IngestOptions{Date: "2026-09-19"})
+	require.NoError(t, err)
+	require.Equal(t, 2, res.Count)
+	require.NotEqual(t, res.Records[0].ID, res.Records[1].ID)
+	require.Len(t, res.Stored, 2)
+
+	loaded, err := s.Load(LoadOptions{})
+	require.NoError(t, err)
+	require.Len(t, loaded.Records, 2, "both are in the working set")
+}
+
+// A finding whose body announces its own discharge must not land in the
+// open working set, whichever door it came in through.
+func TestIngestStructured_ABodyThatSaysItIsClosedGoesToClosed(t *testing.T) {
+	s := newStore(t)
+	res, err := s.IngestStructured([]Structured{{
+		Title: "already done",
+		Body:  "> **RESOLVED** 2026-09-19 — fixed in the same run.\n",
+	}}, IngestOptions{Date: "2026-09-19"})
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Count)
+	require.False(t, res.Records[0].IsOpen())
+	require.NotEmpty(t, res.Warnings, "a re-route the operator should see, not a silent one")
+
+	loaded, err := s.Load(LoadOptions{})
+	require.NoError(t, err)
+	require.Empty(t, loaded.Records, "it never enters the working set")
+}
