@@ -340,7 +340,22 @@ func checkOutputApeIgnored(ctx context.Context, env doctorEnv) CheckResult {
 	}
 	rel = filepath.ToSlash(rel)
 
-	switch gitIgnores(ctx, cfg.Root, apeRoot) {
+	// Asked WITH A TRAILING SLASH, which is the query and not the path.
+	//
+	// git answers about the bare path by what it can see, and a directory
+	// it cannot see is not a directory to it. So under `_output/ape/` —
+	// the line this check's own FixCommand tells the project to add — the
+	// bare path answers "not ignored" until the directory exists, and the
+	// project that took the advice keeps being told to take it again. A
+	// contents rule (`_output/ape/*`, `_output/ape/**`) is worse: git
+	// ignores what the folder holds and not the folder, so the bare path
+	// answers "not ignored" even once it is there, for ever.
+	//
+	// The slash-suffixed query answers correctly in both, present or
+	// absent. A tracked file under the folder still answers "not ignored"
+	// whatever the rule, which is a correct refusal — the COMMITTED arm
+	// below is the one that then reports it.
+	switch gitIgnores(ctx, cfg.Root, rel+"/") {
 	case ignoreYes:
 		return CheckResult{Status: StatusOK, Message: rel + " is ignored"}
 	case ignoreNotARepo:

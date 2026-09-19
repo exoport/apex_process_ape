@@ -444,3 +444,67 @@ func TestEmitFrameworkDryRun_ReportsPendingMigrations(t *testing.T) {
 	require.Contains(t, out, "migration deferred: PENDING")
 	require.Contains(t, out, "nothing written, nothing committed")
 }
+
+// The ignore rule a project writes is the one this check's own
+// FixCommand hands it — `_output/ape/`, a directory-only pattern — and
+// git answers about the BARE path by what it can see. So the check used
+// to keep warning on a fresh project that had taken its advice, until
+// some run happened to create the folder; and on a contents rule
+// (`_output/ape/*`) it warned for ever, because git ignores what the
+// folder holds and not the folder itself.
+//
+// Measured on git 2.53. The slash-suffixed query answers correctly for
+// every rule shape, whether or not the directory exists.
+func TestCheckOutputApeIgnored_EveryRuleShapeAbsentAndPresent(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	for _, rule := range []string{
+		"_output/ape/", "/_output/ape/", "_output/ape", "_output/",
+		"_output/ape/*", "_output/ape/**",
+	} {
+		t.Run(rule, func(t *testing.T) {
+			root := projectFor(t, allExtensionsConfig)
+			gitInit(t, root)
+			require.NoError(t, os.WriteFile(filepath.Join(root, ".gitignore"),
+				[]byte(rule+"\n"), 0o644))
+			gitCommitAll(t, root, "base")
+
+			// The project's first ape run has not happened yet.
+			require.NoDirExists(t, filepath.Join(root, "_output", "ape"))
+			res := checkOutputApeIgnored(context.Background(), projectDataEnv(root))
+			require.Equal(t, StatusOK, res.Status,
+				"rule %q covers the folder, so the check must not ask for it again: %s", rule, res.Message)
+
+			// And once a run has created it.
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "_output", "ape", "tasks"), 0o755))
+			require.NoError(t, os.WriteFile(
+				filepath.Join(root, "_output", "ape", "tasks", "manifest.yaml"), []byte("x\n"), 0o644))
+			res = checkOutputApeIgnored(context.Background(), projectDataEnv(root))
+			require.Equal(t, StatusOK, res.Status, "rule %q, folder present: %s", rule, res.Message)
+		})
+	}
+}
+
+// Taking the check's own advice has to satisfy it. This runs the
+// FixCommand the check emits and asserts the next run is clean — the
+// loop that was broken, stated as a test rather than as a comment.
+func TestCheckOutputApeIgnored_ItsOwnFixCommandSatisfiesIt(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	root := projectFor(t, allExtensionsConfig)
+	gitInit(t, root)
+	gitCommitAll(t, root, "base")
+
+	res := checkOutputApeIgnored(context.Background(), projectDataEnv(root))
+	require.Equal(t, StatusWarn, res.Status, "nothing ignores it yet")
+	require.Equal(t, "echo '_output/ape/' >> .gitignore", res.FixCommand)
+
+	cmd := exec.CommandContext(context.Background(), "sh", "-c", res.FixCommand)
+	cmd.Dir = root
+	require.NoError(t, cmd.Run())
+
+	res = checkOutputApeIgnored(context.Background(), projectDataEnv(root))
+	require.Equal(t, StatusOK, res.Status, "the advice was taken, so the finding is gone: %s", res.Message)
+}
