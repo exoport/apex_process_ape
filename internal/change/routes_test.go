@@ -166,3 +166,53 @@ func TestShellQuote(t *testing.T) {
 	require.NotContains(t, ShellQuote("/p/$(whoami)/r.txt"), "\"")
 	require.True(t, strings.HasPrefix(ShellQuote("/p/$(whoami)/r.txt"), "'"))
 }
+
+// InspectRoutes is the rule `ape doctor` and `make check-framework`
+// share, so the two cannot disagree about the same file.
+func TestInspectRoutes_ReportsWhatARouteWouldPrint(t *testing.T) {
+	t.Run("the framework's own table is healthy", func(t *testing.T) {
+		health := InspectRoutes(filepath.Join("testdata", "change-routes.yaml"))
+		require.Equal(t, []string{"governance", "lean-feature", "lean-story", "rung-2", "ux"}, health.Routes)
+		require.Empty(t, health.Problems)
+	})
+
+	t.Run("no table at all", func(t *testing.T) {
+		health := InspectRoutes(filepath.Join(t.TempDir(), "absent.yaml"))
+		require.Empty(t, health.Routes)
+		require.Empty(t, health.Problems, "an absent table has no routes to have problems")
+	})
+
+	// The defect the framework shipped once: a chain that creates the
+	// story its later steps name can never resolve the key, so the whole
+	// route degrades to its own name.
+	t.Run("a resolved key outside rung-2", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "routes.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(
+			"routes:\n  lean-story:\n    summary: x\n    commands:\n"+
+				"      - ape task apex-create-story --args \"{story_key}\"\n"), 0o644))
+
+		health := InspectRoutes(path)
+		require.Equal(t, []string{"lean-story"}, health.Routes)
+		require.Len(t, health.Problems, 1)
+		require.Contains(t, health.Problems[0].Detail, "{story_key} outside rung-2")
+	})
+
+	t.Run("a placeholder ape does not fill", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "routes.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(
+			"routes:\n  ux:\n    summary: x\n    commands:\n      - ape task x --args \"{epic_number}\"\n"), 0o644))
+
+		health := InspectRoutes(path)
+		require.Len(t, health.Problems, 1)
+		require.Contains(t, health.Problems[0].Detail, "{epic_number}")
+	})
+
+	t.Run("a route with no commands at all", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "routes.yaml")
+		require.NoError(t, os.WriteFile(path, []byte("routes:\n  ux:\n    summary: x\n"), 0o644))
+
+		health := InspectRoutes(path)
+		require.Len(t, health.Problems, 1)
+		require.Contains(t, health.Problems[0].Detail, "can only print its own name")
+	})
+}

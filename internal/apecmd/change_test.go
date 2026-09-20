@@ -545,3 +545,49 @@ func TestChangeSettle_AFinishedOwnerEarnsADerivedCarriesRow(t *testing.T) {
 	require.NotContains(t, landedContract, "Carries",
 		"the contract never mentioned it — ape derived the row from the tree")
 }
+
+// The row exists because an absent table is SILENT: `ape change`
+// escalates correctly, names the route and prints no commands — the
+// same output as a route the table lacks, and the same output as an ape
+// too old to read the file. Three causes, one output, nothing naming
+// the missing piece.
+func TestCheckChangeRoutes(t *testing.T) {
+	routes, err := os.ReadFile(filepath.Join("..", "change", "testdata", "change-routes.yaml"))
+	require.NoError(t, err)
+
+	t.Run("installed and healthy", func(t *testing.T) {
+		root := projectFor(t, allExtensionsConfig)
+		require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "change-routes.yaml"), routes, 0o644))
+
+		res := checkChangeRoutes(context.Background(), projectDataEnv(root))
+		require.Equal(t, StatusOK, res.Status, res.Message)
+		require.Contains(t, res.Message, "5 route(s)")
+		require.Contains(t, res.Message, "rung-2")
+	})
+
+	t.Run("not installed is version skew, not a failure", func(t *testing.T) {
+		root := projectFor(t, allExtensionsConfig)
+
+		res := checkChangeRoutes(context.Background(), projectDataEnv(root))
+		require.Equal(t, StatusInfo, res.Status)
+		require.Contains(t, res.Message, "not installed")
+		require.Equal(t, "ape framework update", res.FixCommand)
+	})
+
+	t.Run("a route that cannot print its commands warns", func(t *testing.T) {
+		root := projectFor(t, allExtensionsConfig)
+		require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "change-routes.yaml"), []byte(
+			"routes:\n  lean-story:\n    summary: x\n    commands:\n"+
+				"      - ape task apex-create-story --args \"{story_key}\"\n"), 0o644))
+
+		res := checkChangeRoutes(context.Background(), projectDataEnv(root))
+		require.Equal(t, StatusWarn, res.Status)
+		require.Contains(t, res.Message, "lean-story")
+		require.Contains(t, res.Message, "{story_key}")
+	})
+
+	t.Run("outside a project", func(t *testing.T) {
+		res := checkChangeRoutes(context.Background(), projectDataEnv(t.TempDir()))
+		require.Equal(t, StatusInfo, res.Status)
+	})
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -38,6 +39,10 @@ const (
 	phChangeID    = "{change_id}"
 	phRecordID    = "{record_id}"
 )
+
+// routeRung2 is the one route whose story already exists, and so the
+// only one where a resolved `{story_key}` can appear.
+const routeRung2 = "rung-2"
 
 // placeholderRe finds every `{…}` in a command line. `<…>` markers such
 // as `--epic <N>` are deliberately NOT placeholders: they are literal,
@@ -203,4 +208,79 @@ func fillCommand(cmd string, fill RouteFill) (string, error) {
 // output_folder, which ape does not get to choose.
 func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// RouteProblem is one reason a route would print nothing useful.
+type RouteProblem struct {
+	Route  string `json:"route"  yaml:"route"`
+	Detail string `json:"detail" yaml:"detail"`
+}
+
+// RoutesHealth is what a reader can know about the table without
+// running a change: which routes it carries, and which of them could
+// never print their commands.
+type RoutesHealth struct {
+	// Routes are the names the table carries, sorted.
+	Routes []string
+	// Problems are routes that parse but would print nothing at run
+	// time. Findings about the TABLE, not about a project.
+	Problems []RouteProblem
+}
+
+// InspectRoutes reads a table and reports what it would do.
+//
+// It exists so `ape doctor` and `make check-framework` apply the SAME
+// rule to the same file. A route whose commands cannot be filled prints
+// its name and nothing else — correct behaviour, and indistinguishable
+// at a glance from a route that simply carries no commands, which is how
+// the framework's first cut of this table shipped two routes that could
+// never print.
+func InspectRoutes(path string) RoutesHealth {
+	table := LoadRouteTable(path)
+	out := RoutesHealth{}
+	for name := range table.Routes {
+		out.Routes = append(out.Routes, name)
+	}
+	sort.Strings(out.Routes)
+
+	// Every placeholder satisfied: what is still unfillable after this
+	// is unfillable on every run, not just on one that lacks a request.
+	fill := RouteFill{
+		RequestFile: "'/p/request.txt'",
+		StoryKey:    "0-0_a-story",
+		ChangeID:    "00000000-000000-0000000",
+		RecordID:    "DW-00000000-000000",
+	}
+	for _, name := range out.Routes {
+		route := table.Routes[name]
+		unresolvable := false
+		for _, cmd := range route.Commands {
+			// `{story_key}` resolves against the tracker, so it is usable
+			// only where the story ALREADY exists — rung 2 and nowhere
+			// else. A chain that creates the story it then names can never
+			// resolve the key at print time.
+			if strings.Contains(cmd, phStoryKey) && name != routeRung2 {
+				out.Problems = append(out.Problems, RouteProblem{
+					Route: name,
+					Detail: "uses {story_key} outside " + routeRung2 + ", where the story does not " +
+						"exist yet — this route can only print its own name",
+				})
+				unresolvable = true
+				break
+			}
+		}
+		if unresolvable {
+			continue
+		}
+		switch printed := table.Lookup(name, fill); {
+		case printed.Note != "":
+			out.Problems = append(out.Problems, RouteProblem{Route: name, Detail: printed.Note})
+		case len(printed.Commands) == 0:
+			out.Problems = append(out.Problems, RouteProblem{
+				Route:  name,
+				Detail: "carries no commands, so it can only print its own name",
+			})
+		}
+	}
+	return out
 }

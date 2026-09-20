@@ -140,6 +140,7 @@ var allChecks = []doctorCheck{
 	{Name: "hooks.contract_drift", Run: checkHookContractDrift},
 	{Name: "framework.terminal_contracts", Run: checkTerminalContracts},
 	{Name: "framework.output_styles", Run: checkOutputStyles},
+	{Name: "framework.change_routes", Run: checkChangeRoutes},
 	{Name: "framework.command_surface", Required: true, Run: checkCommandSurface},
 	{Name: "aboard.skill_reference", Run: checkAboardSkillReference},
 	{Name: "runs.legacy_layout", Run: checkRunLayoutLegacy},
@@ -222,6 +223,12 @@ silent:
                                 installed, and which skills it enrols. No
                                 table means no run is checked for a
                                 terminal contract.
+  framework.change_routes       whether _apex/change-routes.yaml is
+                                installed and every route in it can print
+                                its commands. Absent = ape change names
+                                an escalation's route and prints nothing
+                                for it, which is also what an older ape
+                                does — one output, three causes.
   framework.output_styles       which skills _apex/output-styles.csv
                                 enrols, and the style each resolves to.
                                 A missing table, an unenrolled skill and

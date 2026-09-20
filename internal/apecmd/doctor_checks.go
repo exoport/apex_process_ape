@@ -13,6 +13,7 @@ import (
 
 	"github.com/exoport/aboard/pkg/aboard"
 	"github.com/exoport/apex_process_ape/internal/bridge/config"
+	"github.com/exoport/apex_process_ape/internal/change"
 	"github.com/exoport/apex_process_ape/internal/contract"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/framework"
@@ -638,6 +639,63 @@ func checkTerminalContracts(_ context.Context, env doctorEnv) CheckResult {
 // not resolve all produce the identical, unremarkable outcome of a
 // session in the default style. This is the only place that distinguishes
 // them.
+// checkChangeRoutes reports whether the framework's escalation-route
+// table arrived, and whether every route in it can print its commands.
+//
+// The row exists for the same reason as its two siblings above: this is
+// a framework-owned file whose ABSENCE IS SILENT. `ape change` on a
+// project without the table escalates correctly, names the route, and
+// prints no commands — which is exactly what it does for a route the
+// table does not carry, and exactly what an older ape does for a table
+// it never learned to read. Three different situations, one output, and
+// nothing naming the missing piece.
+//
+// It also reads the table's health, because a route that parses is not
+// the same as a route that can print. The framework's first cut of this
+// file used `{story_key}` in the two chains that CREATE the story, so
+// neither could resolve it and both degraded to their name — a defect
+// that ships looking like a design.
+func checkChangeRoutes(_ context.Context, env doctorEnv) CheckResult {
+	if env.ProjectRoot == "" || !isProjectRoot(env.ProjectRoot) {
+		return CheckResult{Status: StatusInfo, Message: "no project root resolved"}
+	}
+	path := filepath.Join(env.ProjectRoot, framework.ProjectChangeRoutes)
+	if _, err := os.Stat(path); err != nil {
+		// Version skew, not a failure: a framework that predates the lane
+		// ships no table, and `ape change` then prints route names alone.
+		return CheckResult{
+			Status: StatusInfo,
+			Message: framework.ProjectChangeRoutes + " not installed — `ape change` will name an " +
+				"escalation's route and print no commands for it",
+			Remediation: "The framework owns this table. `ape framework update` installs it, if " +
+				"your framework version ships one.",
+			FixCommand: "ape framework update",
+		}
+	}
+	health := change.InspectRoutes(path)
+	if len(health.Routes) == 0 {
+		return CheckResult{
+			Status:      StatusWarn,
+			Message:     framework.ProjectChangeRoutes + " carries no routes ape can read",
+			Remediation: "Every escalation will print its route's name and no commands. Re-run `ape framework update` to restore the table.",
+			FixCommand:  "ape framework update",
+		}
+	}
+	msg := fmt.Sprintf("%d route(s): %s", len(health.Routes), strings.Join(health.Routes, ", "))
+	if len(health.Problems) > 0 {
+		var lines []string
+		for _, p := range health.Problems {
+			lines = append(lines, p.Route+" — "+p.Detail)
+		}
+		return CheckResult{
+			Status:      StatusWarn,
+			Message:     msg + "; " + strings.Join(lines, "; "),
+			Remediation: "These routes parse but cannot print their commands, so an escalation into one of them tells the conductor only where the work goes, not how to start it. The table is the framework's to fix.",
+		}
+	}
+	return CheckResult{Status: StatusOK, Message: msg}
+}
+
 func checkOutputStyles(_ context.Context, env doctorEnv) CheckResult {
 	if env.ProjectRoot == "" || !isProjectRoot(env.ProjectRoot) {
 		return CheckResult{Status: StatusInfo, Message: "no project root resolved"}
