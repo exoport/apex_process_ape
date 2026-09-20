@@ -82,6 +82,17 @@ actually changed, and composes every commit itself.
   contract can name a story, but a string like `12-3; rm -rf ~` can never
   become one.
 
+- **feat(doctor): `framework.change_routes`.** The escalation table is the
+  third framework-owned file whose absence is silent, and the first two
+  already had rows. Without it `ape change` escalates correctly, names the
+  route and prints no commands — the same output as a route the table lacks,
+  and the same output as an older `ape` that never learned to read the file.
+  The row also reads the table's health, because a route that parses is not a
+  route that can print: a placeholder `ape` does not fill, a route with no
+  commands, or `{story_key}` outside `rung-2`, where the story does not exist
+  yet. Found by the framework's eval, whose harness was not injecting the
+  table at all.
+
 - **feat(task, pipeline): `--prompt-file`, and two supporting verbs.**
   `ape task` and `ape pipeline` take a prompt from a file or stdin, sharing
   `ape change`'s reader and validation, so a printed escalation command
