@@ -86,6 +86,18 @@ actually changed, and composes every commit itself.
   also named why the class recurs: `required_commands` checks command NAMES,
   never flags, so nothing on either side guards a flag surface.
 
+- **fix(framework): `agent-manifest.csv` and `apex-help.csv` are installed.**
+  The framework ships both and ape installed neither, on every project, from
+  the day each shipped. Nine skill files read them between them — including
+  `apex-agent-pm`, `apex-agent-ux-designer` and `apex-agent-modeler` — and
+  nothing said so, because a missing table is not a failure: the skills that
+  read one find nothing and carry on, which is indistinguishable from a
+  framework that never shipped it. The roster stays explicit, because an
+  installer must not copy a file it has never heard of into someone's
+  project; the STALENESS is derived instead, and `make check-framework` now
+  fails on any top-level `_apex/` file ape neither installs nor declines by
+  name.
+
 - **fix(cli): every leaf says what it does with positional arguments.**
   Fifteen of 129 leaf commands declared no argument contract, so cobra let a
   stray one through and the command ignored it — `ape chat zzbogus`,
