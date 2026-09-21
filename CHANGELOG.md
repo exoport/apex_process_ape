@@ -62,6 +62,22 @@ actually changed, and composes every commit itself.
   later run would refuse at pre-flight anyway, so it names the residue and
   the records it never reached.
 
+- **fix(story): an absent implementation folder is an empty answer, not a
+  failure.** `ape story fields`, `ape story verify` and `ape sprint check`
+  failed when `implementation_folder` did not exist and answered "no stories"
+  when it existed and was empty — the same world, two answers, and the absent
+  case is the one a young project is in. Twelve framework skills call
+  `ape story fields`, several at design time before anything is planned, and
+  the framework has no fallback branches: a skill may not work around a
+  failing sanctioned command. The rule already existed one package over —
+  `sprint.Load` treats an absent tracker as "nothing to compare" and says so —
+  and the scan now does the same, carrying `implementation_folder_missing`
+  into each trailer so "nowhere to look" stays distinct from "looked and
+  found nothing". An unreadable directory is still an error. What it gives
+  up, a loud failure on a MISTYPED folder variable, moves to `ape doctor`'s
+  new `config.folders` row: INFO and never a finding, because a young project
+  legitimately has not reached those folders.
+
 - **fix(doctor): ask git about the ape folder with a trailing slash.** git
   answers about a bare path by what it can see, and a directory it cannot see
   is not a directory to it. So under `_output/ape/` — the line this check's
