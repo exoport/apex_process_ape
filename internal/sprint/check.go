@@ -301,10 +301,11 @@ func scanStoryFiles(implDir string, rows []Row) (storyFiles, error) {
 	if implDir == "" {
 		return out, nil
 	}
-	heads, err := story.ScanHeads(implDir)
+	scan, err := story.ScanHeads(implDir)
 	if err != nil {
 		return out, err
 	}
+	heads := scan.Heads
 	rowKeys := map[string]bool{}
 	for _, row := range rows {
 		if row.Kind == KindStory {

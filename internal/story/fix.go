@@ -81,12 +81,12 @@ func FixCorpus(cfg *apexcfg.Resolved, check bool) (*FixResult, error) {
 	// A Finding's Path is relative to the scan root — a display name, not
 	// something to open. Resolve it through the same scan the report came
 	// from rather than rebuilding the path by hand.
-	heads, err := ScanHeads(cfg.Paths.Implementation)
+	scan, err := ScanHeads(cfg.Paths.Implementation)
 	if err != nil {
 		return nil, err
 	}
-	abs := make(map[string]string, len(heads))
-	for _, h := range heads {
+	abs := make(map[string]string, len(scan.Heads))
+	for _, h := range scan.Heads {
 		abs[h.Path] = h.Abs
 	}
 

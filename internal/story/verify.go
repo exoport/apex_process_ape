@@ -85,6 +85,10 @@ type ReportSummary struct {
 	StoriesChecked int            `json:"stories_checked"    yaml:"stories_checked"`
 	Findings       int            `json:"findings"           yaml:"findings"`
 	ByCheck        map[string]int `json:"by_check,omitempty" yaml:"by_check,omitempty"`
+	// RootMissing reports that implementation_folder does not exist, so
+	// a clean verdict over zero files means "nowhere to look" rather
+	// than "looked and found nothing wrong".
+	RootMissing bool `json:"implementation_folder_missing,omitempty" yaml:"implementation_folder_missing,omitempty"`
 }
 
 // OK reports whether the corpus is clean.
@@ -140,7 +144,7 @@ func VerifyCorpusWith(cfg *apexcfg.Resolved, opts VerifyOptions) (*Report, error
 	if root == "" {
 		return nil, errors.New(apexcfg.MsgImplementationFolderUnset)
 	}
-	heads, err := ScanHeads(root)
+	scan, err := ScanHeads(root)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +154,8 @@ func VerifyCorpusWith(cfg *apexcfg.Resolved, opts VerifyOptions) (*Report, error
 	}
 	// Non-nil so a clean corpus marshals as `"findings": []`, not `null`.
 	report := &Report{Findings: []Finding{}}
-	for _, h := range heads {
+	report.Summary.RootMissing = scan.RootMissing
+	for _, h := range scan.Heads {
 		report.Summary.FilesScanned++
 		if h.Err != nil {
 			// Not every .md under implementation_folder is a story —

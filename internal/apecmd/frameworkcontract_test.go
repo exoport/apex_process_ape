@@ -97,7 +97,7 @@ func TestContract_RealProjectIsClean(t *testing.T) {
 func TestContract_TrackerRowsKeyOnTheStoryKeyNotTheStoryID(t *testing.T) {
 	cfg := fixtureProject(t)
 
-	heads, err := story.ScanHeads(cfg.Paths.Implementation)
+	scan, err := story.ScanHeads(cfg.Paths.Implementation)
 	require.NoError(t, err)
 	tracker, err := sprint.Load(cfg.Paths.SprintStatus)
 	require.NoError(t, err)
@@ -108,7 +108,7 @@ func TestContract_TrackerRowsKeyOnTheStoryKeyNotTheStoryID(t *testing.T) {
 	}
 
 	checked := 0
-	for _, h := range heads {
+	for _, h := range scan.Heads {
 		if !h.IsStory() {
 			continue
 		}

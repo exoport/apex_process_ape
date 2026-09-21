@@ -153,6 +153,7 @@ var allChecks = []doctorCheck{
 	// Required; the rest report findings a person acts on, and a warn keeps
 	// doctor usable on a project that has some.
 	{Name: "config.resolved", Required: true, Run: checkConfigResolved},
+	{Name: "config.folders", Run: checkConfigFolders},
 	{Name: "registry.drift", Run: checkRegistryDrift},
 	{Name: "story.frontmatter", Run: checkStoryFrontmatter},
 	{Name: "sprint.divergence", Run: checkSprintDivergence},

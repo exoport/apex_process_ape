@@ -63,6 +63,11 @@ type FieldsTrailer struct {
 	// BytesRead is what the cap bought, and the number the mechanism test
 	// asserts against files_scanned × 8 KiB.
 	BytesRead int `json:"bytes_read" yaml:"bytes_read"`
+	// RootMissing reports that implementation_folder does not exist, so
+	// the zeros above mean "nowhere to look" rather than "looked and
+	// found nothing". Omitted when the folder is there, so the ordinary
+	// answer is unchanged.
+	RootMissing bool `json:"implementation_folder_missing,omitempty" yaml:"implementation_folder_missing,omitempty"`
 }
 
 // ParseSelect splits and validates the --select list.
@@ -121,10 +126,38 @@ func (h Head) StoryID() string {
 	return ""
 }
 
+// Scan is what a walk found, plus what it could not look at.
+//
+// RootMissing is the distinction this type exists for: a project that
+// has not planned yet has no implementation folder, and that is the SAME
+// WORLD as one whose folder is there and empty — no stories. Returning
+// an error for one and an empty projection for the other gave two
+// answers to one question, and stranded every design-time caller on a
+// young project, since a framework skill may not work around a failing
+// command.
+//
+// Reported rather than swallowed, which is the other half: a caller has
+// to be able to tell "no stories" from "nothing to look in", because the
+// second can also mean a mistyped implementation_folder. The rule is
+// sprint.Load's, one package over — an absent tracker is "nothing to
+// compare", and the Tracker says so.
+type Scan struct {
+	Heads       []Head
+	RootMissing bool
+}
+
 // ScanHeads walks root for `.md` files and reads each one's frontmatter,
 // capped. Non-story files are returned too — the caller decides — because
 // "how many files did you look at" is part of the trailer.
-func ScanHeads(root string) ([]Head, error) {
+//
+// An absent ROOT is not an error (see Scan). Anything else — an
+// unreadable directory, an IO failure mid-walk — still is: those say the
+// answer cannot be trusted, where an absent root says the answer is
+// empty.
+func ScanHeads(root string) (Scan, error) {
+	if _, statErr := os.Stat(root); statErr != nil && errors.Is(statErr, fs.ErrNotExist) {
+		return Scan{RootMissing: true}, nil
+	}
 	var heads []Head
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -150,10 +183,10 @@ func ScanHeads(root string) ([]Head, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("walk %s: %w", root, err)
+		return Scan{}, fmt.Errorf("walk %s: %w", root, err)
 	}
 	sort.Slice(heads, func(i, j int) bool { return heads[i].Path < heads[j].Path })
-	return heads, nil
+	return Scan{Heads: heads}, nil
 }
 
 // chunkSize is how much readHead pulls per syscall while hunting for the
@@ -249,14 +282,16 @@ func opensWithDelimiter(data []byte) bool {
 
 // Project builds the FieldsResult for the selected keys.
 func Project(root string, selected []string) (*FieldsResult, error) {
-	heads, err := ScanHeads(root)
+	scan, err := ScanHeads(root)
 	if err != nil {
 		return nil, err
 	}
+	heads := scan.Heads
 	res := &FieldsResult{
 		Trailer: FieldsTrailer{
 			Fields:          selected,
 			PerFieldPresent: make(map[string]int, len(selected)),
+			RootMissing:     scan.RootMissing,
 		},
 	}
 	// Seed every requested field at zero, so a field present in no story

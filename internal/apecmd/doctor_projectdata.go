@@ -445,3 +445,62 @@ func projectDataConfig(env doctorEnv) (*apexcfg.Resolved, *CheckResult) {
 	}
 	return cfg, nil
 }
+
+// checkConfigFolders reports which of the project's configured folders
+// are not on disk.
+//
+// It is the other half of a deliberate trade. `ape story fields`,
+// `ape story verify` and `ape sprint check` used to FAIL when
+// implementation_folder did not exist, while answering "no stories" when
+// it existed and was empty — two answers to one world, and a hard
+// failure for every design-time caller on a project that has not planned
+// yet. They now answer the same way in both cases and record the
+// absence.
+//
+// What that gives up is the loud failure on a MISTYPED folder variable,
+// which used to surface as every data command breaking. This row is
+// where that moved: a folder a project names and does not have is
+// listed, once, by the command whose job is diagnosis.
+//
+// INFO rather than WARN, always. A young project legitimately has no
+// implementation folder — the framework creates it when planning starts
+// — and a row that warns on every fresh project is a row people learn to
+// skip. Being listed here is not a finding; it is the fact a reader
+// needs when a projection comes back empty.
+func checkConfigFolders(_ context.Context, env doctorEnv) CheckResult {
+	cfg, res := projectDataConfig(env)
+	if res != nil {
+		return *res
+	}
+	// The folder variables a reader consults when a command answers
+	// "nothing". Deliberately not every path: `output_folder` is created
+	// on demand and the deferred store's legacy path is expected absent.
+	folders := []struct{ name, path string }{
+		{"development_folder", cfg.Paths.Development},
+		{"implementation_folder", cfg.Paths.Implementation},
+		{"planning_folder", cfg.Paths.Planning},
+		{"governance_folder", cfg.Paths.Governance},
+		{"functionality_folder", cfg.Paths.Functionality},
+		{"docs_folder", cfg.Paths.Docs},
+	}
+	var missing []string
+	for _, f := range folders {
+		if f.path == "" {
+			continue // unset is a different question, and config.resolved owns it
+		}
+		if st, err := os.Stat(f.path); err != nil || !st.IsDir() {
+			missing = append(missing, f.name+" ("+relTo(cfg.Root, f.path)+")")
+		}
+	}
+	if len(missing) == 0 {
+		return CheckResult{Status: StatusOK, Message: "every configured folder is on disk"}
+	}
+	return CheckResult{
+		Status:  StatusInfo,
+		Message: "not on disk yet: " + strings.Join(missing, ", "),
+		Remediation: "Normal on a project that has not reached that stage — the framework creates " +
+			"each folder when it first writes there, and commands that read one report an empty " +
+			"result rather than failing. Worth a second look only if a folder you EXPECT to hold " +
+			"work is listed: that is what a mistyped folder variable looks like.",
+	}
+}

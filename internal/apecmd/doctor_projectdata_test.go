@@ -11,6 +11,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/sprint"
+	"github.com/exoport/apex_process_ape/internal/story"
 	"github.com/stretchr/testify/require"
 )
 
@@ -128,6 +129,7 @@ func TestProjectDataChecks_DegradeOutsideAProject(t *testing.T) {
 	env := projectDataEnv(t.TempDir())
 	checks := map[string]func(context.Context, doctorEnv) CheckResult{
 		"config.resolved":     checkConfigResolved,
+		"config.folders":      checkConfigFolders,
 		"registry.drift":      checkRegistryDrift,
 		"story.frontmatter":   checkStoryFrontmatter,
 		"sprint.divergence":   checkSprintDivergence,
@@ -507,4 +509,53 @@ func TestCheckOutputApeIgnored_ItsOwnFixCommandSatisfiesIt(t *testing.T) {
 
 	res = checkOutputApeIgnored(context.Background(), projectDataEnv(root))
 	require.Equal(t, StatusOK, res.Status, "the advice was taken, so the finding is gone: %s", res.Message)
+}
+
+// The row exists because the data commands stopped failing on an absent
+// folder: this is where a mistyped folder variable shows up instead. It
+// is INFO and never a finding — a young project legitimately has not
+// reached most of these, and a row that warns on every fresh project is
+// one people learn to skip.
+func TestCheckConfigFolders(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a young project lists what it has not reached", func(t *testing.T) {
+		root := projectFor(t, allExtensionsConfig)
+
+		res := checkConfigFolders(ctx, projectDataEnv(root))
+		require.Equal(t, StatusInfo, res.Status, "absence is not a finding")
+		require.Contains(t, res.Message, "implementation_folder")
+		require.Contains(t, res.Remediation, "mistyped folder variable",
+			"the row says what it is FOR, since the listing alone is not a verdict")
+	})
+
+	t.Run("every folder on disk", func(t *testing.T) {
+		root := projectFor(t, allExtensionsConfig)
+		for _, dir := range []string{
+			"development", "development/implementation", "development/planning",
+			"development/governance", "development/functionality", "docs",
+		} {
+			require.NoError(t, os.MkdirAll(filepath.Join(root, dir), 0o755))
+		}
+		res := checkConfigFolders(ctx, projectDataEnv(root))
+		require.Equal(t, StatusOK, res.Status, res.Message)
+	})
+
+	t.Run("outside a project", func(t *testing.T) {
+		res := checkConfigFolders(ctx, projectDataEnv(t.TempDir()))
+		require.Equal(t, StatusInfo, res.Status)
+	})
+}
+
+// The trade this row pays for: a projection over an absent folder is an
+// empty answer rather than an error, and it says which.
+func TestStoryFields_AbsentImplementationFolderAnswersEmpty(t *testing.T) {
+	root := projectFor(t, allExtensionsConfig)
+	require.NoDirExists(t, filepath.Join(root, "development", "implementation"))
+
+	res, err := story.Project(resolveProjectConfig(root).Paths.Implementation,
+		[]string{"story_id", "status"})
+	require.NoError(t, err)
+	require.True(t, res.Trailer.RootMissing)
+	require.Equal(t, 0, res.Trailer.StoriesMatched)
 }
