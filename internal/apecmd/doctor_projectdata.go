@@ -483,13 +483,38 @@ func checkConfigFolders(_ context.Context, env doctorEnv) CheckResult {
 		{"functionality_folder", cfg.Paths.Functionality},
 		{"docs_folder", cfg.Paths.Docs},
 	}
-	var missing []string
+	var missing, notADir []string
 	for _, f := range folders {
 		if f.path == "" {
 			continue // unset is a different question, and config.resolved owns it
 		}
-		if st, err := os.Stat(f.path); err != nil || !st.IsDir() {
+		st, err := os.Stat(f.path)
+		switch {
+		case err != nil:
 			missing = append(missing, f.name+" ("+relTo(cfg.Root, f.path)+")")
+		case !st.IsDir():
+			// A path that EXISTS and is not a directory can never hold
+			// what the variable names. That is not a project which has
+			// not got there yet; it is a variable pointing at the wrong
+			// thing, and it is the one case here ape can prove.
+			notADir = append(notADir, f.name+" ("+relTo(cfg.Root, f.path)+")")
+		}
+	}
+
+	// WARN only for the provable case, so --strict gates on it. An absent
+	// folder cannot be told from a young project — see below — and a row
+	// that guessed would be a row people learn to skip.
+	if len(notADir) > 0 {
+		msg := "not a directory: " + strings.Join(notADir, ", ")
+		if len(missing) > 0 {
+			msg += "; not on disk yet: " + strings.Join(missing, ", ")
+		}
+		return CheckResult{
+			Status:  StatusWarn,
+			Message: msg,
+			Remediation: "A folder variable naming a file cannot ever work: every command that " +
+				"reads it will report nothing, for ever. Point it at a directory, or remove the " +
+				"override and let the framework's default stand.",
 		}
 	}
 	if len(missing) == 0 {
@@ -501,6 +526,8 @@ func checkConfigFolders(_ context.Context, env doctorEnv) CheckResult {
 		Remediation: "Normal on a project that has not reached that stage — the framework creates " +
 			"each folder when it first writes there, and commands that read one report an empty " +
 			"result rather than failing. Worth a second look only if a folder you EXPECT to hold " +
-			"work is listed: that is what a mistyped folder variable looks like.",
+			"work is listed: that is what a mistyped folder variable looks like. ape cannot tell " +
+			"the two apart — a young project and a typo produce the same empty directory listing " +
+			"— which is why this is reported and not enforced.",
 	}
 }

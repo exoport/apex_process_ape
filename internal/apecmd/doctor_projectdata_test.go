@@ -541,6 +541,24 @@ func TestCheckConfigFolders(t *testing.T) {
 		require.Equal(t, StatusOK, res.Status, res.Message)
 	})
 
+	// The one case ape can PROVE is wrong, and so the only one that
+	// warns: a path that exists and is not a directory can never hold
+	// what the variable names, on any project, ever. --strict gates on
+	// WARN, so this is also the only shape of misconfiguration here that
+	// can fail a pipeline's pre-flight.
+	t.Run("a folder variable naming a file warns", func(t *testing.T) {
+		root := projectFor(t, allExtensionsConfig)
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "development"), 0o755))
+		require.NoError(t, os.WriteFile(
+			filepath.Join(root, "development", "implementation"), []byte("not a folder\n"), 0o644))
+
+		res := checkConfigFolders(ctx, projectDataEnv(root))
+		require.Equal(t, StatusWarn, res.Status)
+		require.Contains(t, res.Message, "not a directory")
+		require.Contains(t, res.Message, "implementation_folder")
+		require.Contains(t, res.Remediation, "cannot ever work")
+	})
+
 	t.Run("outside a project", func(t *testing.T) {
 		res := checkConfigFolders(ctx, projectDataEnv(t.TempDir()))
 		require.Equal(t, StatusInfo, res.Status)
