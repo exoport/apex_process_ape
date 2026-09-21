@@ -58,7 +58,10 @@ func newSessionsPruneCmd() *cobra.Command {
 	var outputFormat string
 
 	cmd := &cobra.Command{
-		Use:     "prune",
+		Use: "prune",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:    cobra.NoArgs,
 		Short:   "Drop registry rows whose PID is no longer running",
 		Example: "  ape sessions prune\n  ape sessions prune --output-format json",
 		RunE: func(_ *cobra.Command, _ []string) error {

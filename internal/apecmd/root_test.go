@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
@@ -180,4 +181,45 @@ func TestArgGuard_LeavesAnAlreadyCodedErrorAlone(t *testing.T) {
 	code, reported := ExitCode(err)
 	require.Equal(t, ExitUsage, code)
 	require.True(t, reported, "the group guard prints its own message and says so")
+}
+
+// Every leaf command declares what it does with positional arguments.
+//
+// This is the ABSENT-rule class, and it is harder to see than a wrong
+// rule because there is nothing to read. `ape version zzbogus` printed
+// the version and exited 0 for exactly this reason: the command never
+// said it took no arguments, so cobra let one through and the RunE
+// ignored it. A caller that typo'd a verb got a plausible answer to a
+// question it never asked.
+//
+// The rule is derived from the command's OWN help line rather than from
+// a list maintained here: a Use string advertising a positional
+// (`task <skill>`, `verify [file]`) is a command whose arguments are its
+// contract, and this says nothing about it. One that advertises none has
+// to say so, so that adding a command cannot quietly re-open the hole.
+//
+// The aboard subtree is skipped: its argument contracts belong to the
+// separate module ape hosts, and a host that answered differently would
+// be a host an agent could tell apart.
+func TestEveryLeafDeclaresItsArgumentContract(t *testing.T) {
+	var walk func(cmd *cobra.Command, underAboard bool)
+	var undeclared []string
+
+	walk = func(cmd *cobra.Command, underAboard bool) {
+		if underAboard {
+			return
+		}
+		advertisesPositional := strings.ContainsAny(cmd.Use, "<[")
+		if !cmd.HasSubCommands() && !advertisesPositional && cmd.Args == nil {
+			undeclared = append(undeclared, cmd.CommandPath()+"  (Use: "+cmd.Use+")")
+		}
+		for _, sub := range cmd.Commands() {
+			walk(sub, sub.Name() == "aboard")
+		}
+	}
+	walk(newRootCmd(), false)
+
+	require.Empty(t, undeclared, "these commands advertise no positional argument and do not "+
+		"declare cobra.NoArgs, so a stray argument is silently ignored and they answer 0 to an "+
+		"invocation nobody meant:\n  %s", strings.Join(undeclared, "\n  "))
 }

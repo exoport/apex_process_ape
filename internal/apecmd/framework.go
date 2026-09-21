@@ -71,7 +71,10 @@ func newFrameworkSetupCmd(repoFlag, cwdFlag *string) *cobra.Command {
 		noBootstrap    bool
 	)
 	cmd := &cobra.Command{
-		Use:   "setup",
+		Use: "setup",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:  cobra.NoArgs,
 		Short: "Initial install of framework skills + pipelines into the project",
 		Long: `Initial install of framework-managed assets into <project>:
 
@@ -153,7 +156,10 @@ func newFrameworkUpdateCmd(repoFlag, cwdFlag *string) *cobra.Command {
 		noCheck      bool
 	)
 	cmd := &cobra.Command{
-		Use:   "update",
+		Use: "update",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:  cobra.NoArgs,
 		Short: "Refresh framework skills and pipelines, and run pending project-data migrations",
 		Long: `Refresh framework-managed assets in <project>:
 
@@ -312,7 +318,10 @@ func newFrameworkStatusCmd(repoFlag, cwdFlag *string) *cobra.Command {
 		outputFormat string
 	)
 	cmd := &cobra.Command{
-		Use:   "status",
+		Use: "status",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:  cobra.NoArgs,
 		Short: "Inspect the installed framework version + drift report",
 		Long: `Read <project>/_apex/framework.yaml and report what was installed.
 

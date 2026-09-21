@@ -33,7 +33,10 @@ func newUpdateCmd() *cobra.Command {
 	var outputFormat string
 
 	cmd := &cobra.Command{
-		Use:   "update",
+		Use: "update",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:  cobra.NoArgs,
 		Short: "Update ape to the latest version",
 		Long: "Download and install the latest ape release from GitHub.\n\n" +
 			"Downloads are verified before they are applied: the release's signed\n" +

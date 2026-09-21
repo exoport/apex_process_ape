@@ -47,7 +47,10 @@ func newChatCmd() *cobra.Command {
 		outputStyleFlag       string
 	)
 	cmd := &cobra.Command{
-		Use:   "chat",
+		Use: "chat",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:  cobra.NoArgs,
 		Short: "Bridged claude REPL with hooks captured to a runlog",
 		Long: `Spawn claude as a child of ape with the ape bridge attached.
 Bridge hooks (PreToolUse, PostToolUse, UserPromptSubmit, Stop, and

@@ -154,7 +154,10 @@ func newCostsChatCmd() *cobra.Command {
 func newCostsUpdateCmd() *cobra.Command {
 	var fromPath string
 	cmd := &cobra.Command{
-		Use:   "update",
+		Use: "update",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:  cobra.NoArgs,
 		Short: "Persist model price overrides from a YAML file to ~/.ape/prices.yaml",
 		Long: `Reads a YAML file in the shape:
 
@@ -199,7 +202,10 @@ PLAN-5 / C7.`,
 
 func newCostsRollCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "roll",
+		Use: "roll",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:  cobra.NoArgs,
 		Short: "Rebuild <project>/_output/ape/cost-rollup.json from on-disk run / chat artefacts",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cwd, err := os.Getwd()

@@ -23,7 +23,10 @@ import (
 func newNotifyCmd() *cobra.Command {
 	var event string
 	cmd := &cobra.Command{
-		Use:    "notify",
+		Use: "notify",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:   cobra.NoArgs,
 		Short:  "(internal) Forward a Claude Code hook envelope to the bridge.",
 		Hidden: true,
 		RunE: func(_ *cobra.Command, _ []string) error {

@@ -9,7 +9,10 @@ import (
 
 func newRollbackCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "rollback",
+		Use: "rollback",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:  cobra.NoArgs,
 		Short: "Rollback ape to the previous version",
 		Long:  "Restore the backup binary created during the last update.",
 		RunE: func(_ *cobra.Command, _ []string) error {

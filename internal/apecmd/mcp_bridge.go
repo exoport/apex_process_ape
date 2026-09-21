@@ -15,7 +15,10 @@ import (
 // true flag keeps it off the top-level help table.
 func newMCPBridgeCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:    "mcp-bridge",
+		Use: "mcp-bridge",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:   cobra.NoArgs,
 		Short:  "(internal) Run the MCP bridge over stdio. Spawned by claude.",
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {

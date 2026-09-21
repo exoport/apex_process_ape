@@ -33,7 +33,10 @@ func newBootstrapCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "bootstrap",
+		Use: "bootstrap",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:    cobra.NoArgs,
 		Short:   "Bootstrap governance artifacts from traits",
 		Long:    "Bootstrap a project's governance artifacts by composing traits from the catalog.",
 		Example: "  ape bootstrap --traits go-service,http-api\n  ape bootstrap --no-picker --traits go-service --dry-run",

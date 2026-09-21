@@ -57,8 +57,11 @@ func newADRListCmd() *cobra.Command {
 	var outputFormat string
 
 	cmd := &cobra.Command{
-		Use:     cmdUseList,
-		Short:   "List all ADRs",
+		Use:   cmdUseList,
+		Short: "List all ADRs",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:    cobra.NoArgs,
 		Example: "  ape adr list --output-format json",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			adrDir := findADRDir()

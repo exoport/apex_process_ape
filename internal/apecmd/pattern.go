@@ -38,8 +38,11 @@ func newPatternListCmd() *cobra.Command {
 	var outputFormat string
 
 	cmd := &cobra.Command{
-		Use:     cmdUseList,
-		Short:   "List all governance patterns",
+		Use:   cmdUseList,
+		Short: "List all governance patterns",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args:    cobra.NoArgs,
 		Example: "  ape pattern list --output-format json",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			patternsDir := findPatternsDir()

@@ -33,6 +33,9 @@ func newTraitListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   cmdUseList,
 		Short: "List all available traits",
+		// Takes none: without this, a stray argument is silently ignored
+		// and the command answers 0 to an invocation nobody meant.
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			catalog, err := trait.LoadCatalog()
 			if err != nil {
