@@ -11,14 +11,14 @@ The file should be checked into the project's git so all collaborators agree on 
 # overwritten on the next run. Track in git so all collaborators agree
 # on which framework version is installed.
 config_schema_version: "1"
-installed_at: 2026-05-10T13:00:00Z
+installed_at: 2026-09-21T10:14:52Z
 framework:
-  repo_origin: https://github.com/diegosz/apex_process_framework.git
-  version_tag: v0.0.71
-  git_hash: c1e9e1082c60bdadcdedf6334d45c952c2ec0702
+  repo_origin: https://github.com/exoar/apex_process_framework.git
+  version_tag: v0.21.0
+  git_hash: 4d91ae0c7f25b83619ec4a7d0f2b6598c31ad74e
   git_branch: main
 ape:
-  version: 0.0.6
+  version: 0.0.73
 sources:
   skills:
     count: 86
@@ -43,6 +43,29 @@ sources:
   operating_rules:
     managed: true
 ```
+
+### Example: installed during framework development
+
+Two fields above show only one of the two values they take. An install made from an
+untagged framework checkout, by a locally-built ape, records this instead — both arms are
+normal, and neither is a failure:
+
+```yaml
+installed_at: 2026-09-21T11:03:27Z
+framework:
+  repo_origin: https://github.com/diegosz/apex_process_framework.git
+  version_tag: ""
+  git_hash: 8a4f2c7b90e1d653aa47f0b2c19d8e35b7061f4a
+  git_branch: main
+ape:
+  version: dev
+```
+
+`version_tag` is empty because HEAD carries no exact tag, which is ordinary between
+releases — `git_hash` stays authoritative either way. `ape.version` is `dev` because a
+binary built with `go build` has no release ldflags. Note also the origin: this reads the
+*build* repo, while a project installed the ordinary way reads the *ship* repo as in the
+first example.
 
 ## Top-level fields
 
@@ -69,7 +92,7 @@ sources:
 
 | Field     | Type   | Description                                                                                                            |
 | --------- | ------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `version` | string | Version of the ape binary that performed the install. Distinct from `framework.version_tag` — different release lines. |
+| `version` | string | Version of the ape binary that performed the install. Distinct from `framework.version_tag` — different release lines. `dev` when the install was performed by a binary built without release ldflags (a plain `go build`), which is the normal value during ape development. |
 
 ## `sources`
 

@@ -1,9 +1,6 @@
 # CHANGELOG
 
-<!-- The version below is the ONE place this release's number appears; it is
-     provisional until the tag is decided. -->
-
-## v0.0.73 (unreleased)
+## v0.0.73 (2026-09-21)
 
 The maintenance lane's carrier. The APEX framework's PLAN-68 adds a lean lane
 for a fix too small to be a story, and `ape` is the half of it that touches
@@ -190,6 +187,21 @@ actually changed, and composes every commit itself.
   so anything reading those events must key on the path shape; and a nested
   `ape version` returns the spawning binary on a machine whose installed
   `ape` is three dozen versions older.
+
+- **docs(reference): `framework.yaml`'s example showed one arm of a
+  two-arm field.** `version_tag` is empty whenever the framework HEAD
+  carries no exact tag — ordinary between releases, and documented as such
+  in the field table — but the only example showed the populated form, so
+  the example taught a conditional field as a mandatory one. The same held
+  for `ape.version`, which is `dev` for any binary built without release
+  ldflags. Both now appear in a second example, alongside the build repo's
+  origin rather than the ship repo's, because those three values co-occur:
+  they are what an install made during framework development looks like.
+  The first example was replaced whole rather than renumbered — its tag and
+  its `installed_at` agreed with each other, and moving one without the
+  other would have produced a pair that never existed, which is the defect
+  this entry is about. Found by the framework session reading ape's own
+  reference doc against three real installs.
 
 ## v0.0.72 (2026-09-18)
 
