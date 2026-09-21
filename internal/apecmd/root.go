@@ -24,7 +24,7 @@ const (
 // the process-wide rootCmd is built from — two trees that could drift apart
 // would make a test asserting on one prove nothing about the other.
 func rootShell() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "ape",
 		Short: "APE — APEX Process Engine CLI",
 		Long: `ape runs APEX framework work against your project through an
@@ -48,6 +48,24 @@ inspection. Every claude invocation runs in an in-process PTY — there is no
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	// A mistyped flag is a USAGE error, not a verdict. Cobra reports one
+	// as an ordinary error, which ExitCode then maps to 1 — the same
+	// status every gate in this binary uses to mean "I looked and found
+	// something". `ape doc verify --doc epics` exited 1 without reading
+	// any document, and its caller, whose own help text calls it "a GATE
+	// … the caller relies on the non-zero exit to stop", concluded the
+	// document had duplicates. Fail-closed, so nothing corrupt was
+	// written; but the verdict was a phantom and the message explaining
+	// it went to stderr, where a caller reading stdout never saw it.
+	//
+	// Set on the root and inherited: cobra walks up to the nearest
+	// FlagErrorFunc, so every command in the tree — including ones added
+	// later — answers 2 for a flag it does not have, which is what
+	// exitcodes.go has always said 2 means.
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return usageErr(err)
+	})
+	return cmd
 }
 
 // rootSubcommands constructs one fresh instance of every top-level command.

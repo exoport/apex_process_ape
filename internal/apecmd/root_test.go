@@ -1,6 +1,10 @@
 package apecmd
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -45,4 +49,65 @@ func TestShouldCheckForUpdates(t *testing.T) {
 		"stderr that is not a terminal is a pipe, a redirect or a tool reading the output — no check")
 	require.False(t, shouldCheckForUpdates(notify, true),
 		"a hidden command never checks, even at a terminal")
+}
+
+// A mistyped flag is a USAGE error, not a verdict.
+//
+// Every gate in this binary uses exit 1 to mean "I looked and found
+// something", and cobra reported a flag it did not recognise as an
+// ordinary error, which the exit table then mapped to the same 1. So
+// `ape doc verify --doc epics` exited 1 having read no document, and a
+// caller whose help text calls it "a GATE … the caller relies on the
+// non-zero exit to stop" concluded the document had duplicates. The
+// explanation went to stderr, where a caller reading stdout never saw
+// it.
+func TestFlagErrors_ExitUsageNotTheVerdictCode(t *testing.T) {
+	for _, args := range [][]string{
+		{"doc", "verify", "--doc", "epics"},
+		{"doc", "verify", "--file", "development/planning/epics.md"},
+		{"sprint", "verify", "--nonsense"},
+		{"story", "fields", "--nonsense"},
+		{"--nonsense"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			root := newRootCmd()
+			root.SetArgs(args)
+			root.SetOut(&bytes.Buffer{})
+			root.SetErr(&bytes.Buffer{})
+
+			code, _ := ExitCode(root.Execute())
+			require.Equal(t, ExitUsage, code,
+				"a flag ape does not have is exit 2, never the code a gate uses for a finding")
+		})
+	}
+}
+
+// And the other half of the same statement: a real verdict must NOT
+// move. A gate that started answering 2 for a finding would be the same
+// collision in reverse.
+func TestFlagErrors_ContentVerdictsAreUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	dup := filepath.Join(dir, "dup.md")
+	require.NoError(t, os.WriteFile(dup, []byte("# t\n\n## a\n\n## a\n"), 0o644))
+	clean := filepath.Join(dir, "clean.md")
+	require.NoError(t, os.WriteFile(clean, []byte("# t\n\n## a\n\n## b\n"), 0o644))
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want int
+	}{
+		{"duplicates are still 1", []string{"doc", "verify", dup, "--level", "2"}, ExitRunFailed},
+		{"a clean document is still 0", []string{"doc", "verify", clean, "--level", "2"}, ExitOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newRootCmd()
+			root.SetArgs(tc.args)
+			root.SetOut(&bytes.Buffer{})
+			root.SetErr(&bytes.Buffer{})
+
+			code, _ := ExitCode(root.Execute())
+			require.Equal(t, tc.want, code)
+		})
+	}
 }
