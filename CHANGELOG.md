@@ -86,6 +86,17 @@ actually changed, and composes every commit itself.
   also named why the class recurs: `required_commands` checks command NAMES,
   never flags, so nothing on either side guards a flag surface.
 
+- **fix(cli): every leaf says what it does with positional arguments.**
+  Fifteen of 129 leaf commands declared no argument contract, so cobra let a
+  stray one through and the command ignored it — `ape chat zzbogus`,
+  `ape framework setup zzbogus`, `ape trait list zzbogus` all answered 0 to an
+  invocation nobody meant. Every one of them advertises no positional in its
+  own help line, so the answer was never in doubt; the rule was absent, which
+  is the harder class to see because there is nothing to read. A test now
+  derives the rule from each command's own `Use` string — one advertising
+  `<skill>` or `[file]` has arguments as its contract and is left alone — so a
+  new command cannot quietly re-open the hole and nobody maintains a list.
+
 - **fix(doctor): `config.folders` warns for the one case it can prove.** A
   configured folder that is absent is INFO — ape cannot tell a young project
   from a typo — but a path that EXISTS and is not a directory can never hold
