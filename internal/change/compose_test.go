@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -193,6 +194,15 @@ func TestCompose_DryRunCommitsNothing(t *testing.T) {
 // legitimate, so ape never skips it. When one refuses, the goals before
 // it stay committed and the rest is left for the residue.
 func TestCompose_AHookRefusalStopsAtThatGoal(t *testing.T) {
+	// The refusing hook is POSIX shell made runnable by its mode bit, and
+	// windows honours neither: os.WriteFile's 0o755 sets only the
+	// read-only attribute, so git may never run the hook and the commit
+	// succeeds. That makes the CONDITION unstageable there, which is not
+	// the same as the behaviour being wrong — ape passes `--no-verify`
+	// nowhere, on any platform.
+	if runtime.GOOS == "windows" {
+		t.Skip("windows ignores the executable bit that makes git run a POSIX-shell hook")
+	}
 	root, goals, l := composeFixture(t)
 	hook := filepath.Join(root, ".git", "hooks", "pre-commit")
 	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\nexit 1\n"), 0o755))
