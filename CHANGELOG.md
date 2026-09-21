@@ -65,18 +65,16 @@ actually changed, and composes every commit itself.
 - **fix(cli): a usage error is exit 2, not a verdict.** Every gate in this
   binary uses exit 1 to mean "I looked and found something", and cobra
   reported both an unrecognised FLAG and a rejected ARGUMENT as ordinary
-  errors, which the exit table mapped to the same 1. Every gate
-  in this binary uses exit 1 to mean "I looked and found something", and
-  cobra reported an unrecognised flag as an ordinary error, which the exit
-  table mapped to the same 1. So `ape doc verify --doc epics` exited 1 having
-  read no document, and a caller whose own help text calls it "a GATE … the
-  caller relies on the non-zero exit to stop" concluded the document had
-  duplicates. Fail-closed, so nothing corrupt was written — but the verdict
-  was a phantom, and the message explaining it went to stderr where a caller
-  reading stdout never saw it. `ape doctor zzbogus` was the same shape one
-  step later, and `ape version zzbogus` was worse — it printed the version and
-  exited 0, a plausible answer to a question the caller never asked, and the
-  only silent survivor of a 23-group sweep. Flag errors now answer through one
+  errors, which the exit table mapped to the same 1. So `ape doc verify
+  --doc epics` exited 1 having read no document, and a caller whose own
+  help text calls it "a GATE … the caller relies on the non-zero exit to
+  stop" concluded the document had duplicates. Fail-closed, so nothing
+  corrupt was written — but the verdict was a phantom, and the message
+  explaining it went to stderr where a caller reading stdout never saw
+  it. `ape doctor zzbogus` was the same shape one step later, and `ape
+  version zzbogus` was worse — it printed the version and exited 0, a
+  plausible answer to a question the caller never asked, and the only
+  silent survivor of a 23-group sweep. Flag errors now answer through one
   hook on the root, argument validation is wrapped across the tree so each
   command keeps its own contract, and `ape version` declares that it takes
   none. All 23 groups answer 2. Content verdicts do not move, and a test says
