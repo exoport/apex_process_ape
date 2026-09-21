@@ -90,9 +90,16 @@ actually changed, and composes every commit itself.
   The framework ships both and ape installed neither, on every project, from
   the day each shipped. Nine skill files read them between them — including
   `apex-agent-pm`, `apex-agent-ux-designer` and `apex-agent-modeler` — and
-  nothing said so, because a missing table is not a failure: the skills that
-  read one find nothing and carry on, which is indistinguishable from a
-  framework that never shipped it. The roster stays explicit, because an
+  nothing said so, because a missing table is not a failure that anything
+  reports. What those skills DID on a project that never received the tables
+  is unspecified: the framework confirms that not one of the readers declares
+  an absent-file branch, so the behaviour varied run to run — one session
+  proceeding without the roster, the next announcing it could not continue,
+  both consistent with the prose. `apex-help` and `apex-party-mode` are where
+  the table is not decoration: a catalog-less help skill and a roster-less
+  party mode have nothing to work from. The fix arrives through
+  `ape framework update`, which is what a project runs for this release
+  anyway. The roster stays explicit, because an
   installer must not copy a file it has never heard of into someone's
   project; the STALENESS is derived instead, and `make check-framework` now
   fails on any top-level `_apex/` file ape neither installs nor declines by
