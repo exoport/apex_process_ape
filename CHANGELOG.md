@@ -62,7 +62,10 @@ actually changed, and composes every commit itself.
   later run would refuse at pre-flight anyway, so it names the residue and
   the records it never reached.
 
-- **fix(cli): a flag ape does not have is exit 2, not a verdict.** Every gate
+- **fix(cli): a usage error is exit 2, not a verdict.** Every gate in this
+  binary uses exit 1 to mean "I looked and found something", and cobra
+  reported both an unrecognised FLAG and a rejected ARGUMENT as ordinary
+  errors, which the exit table mapped to the same 1. Every gate
   in this binary uses exit 1 to mean "I looked and found something", and
   cobra reported an unrecognised flag as an ordinary error, which the exit
   table mapped to the same 1. So `ape doc verify --doc epics` exited 1 having
@@ -70,11 +73,18 @@ actually changed, and composes every commit itself.
   caller relies on the non-zero exit to stop" concluded the document had
   duplicates. Fail-closed, so nothing corrupt was written — but the verdict
   was a phantom, and the message explaining it went to stderr where a caller
-  reading stdout never saw it. One hook on the root, inherited tree-wide, and
-  2 is what `exitcodes.go` has always said usage means. Content verdicts do
-  not move. Found by the framework eval, which also named why the class
-  recurs: `required_commands` checks command NAMES, never flags, so nothing
-  on either side guards a flag surface.
+  reading stdout never saw it. `ape doctor zzbogus` was the same shape one
+  step later, and `ape version zzbogus` was worse — it printed the version and
+  exited 0, a plausible answer to a question the caller never asked, and the
+  only silent survivor of a 23-group sweep. Flag errors now answer through one
+  hook on the root, argument validation is wrapped across the tree so each
+  command keeps its own contract, and `ape version` declares that it takes
+  none. All 23 groups answer 2. Content verdicts do not move, and a test says
+  so in both directions. No error's TEXT is read anywhere in this: the one
+  shape that would need that — cobra's own command lookup — is left alone at
+  a measured 2 occurrences in 3580 calls. Found by the framework eval, which
+  also named why the class recurs: `required_commands` checks command NAMES,
+  never flags, so nothing on either side guards a flag surface.
 
 - **fix(doctor): `config.folders` warns for the one case it can prove.** A
   configured folder that is absent is INFO — ape cannot tell a young project
