@@ -3,6 +3,7 @@ package story
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -49,6 +50,14 @@ func TestProject_AbsentRootProjectsEmptyAndSaysSo(t *testing.T) {
 // An unreadable root is NOT the tolerated case: it says the answer
 // cannot be trusted, where an absent root says the answer is empty.
 func TestScanHeads_AnUnreadableRootIsStillAnError(t *testing.T) {
+	// windows does not honour POSIX mode bits, so os.Chmod leaves the
+	// directory readable and ScanHeads succeeds — the condition under
+	// test cannot be created there, which is different from the
+	// behaviour being wrong. Same reason internal/deferred skips its
+	// unwritable-directory case.
+	if runtime.GOOS == "windows" {
+		t.Skip("windows ignores POSIX mode bits; an unreadable directory cannot be staged this way")
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root reads every directory, so there is no unreadable case to make")
 	}
