@@ -53,6 +53,14 @@ const (
 	// SubtreeTerminalContracts — a framework that predates it installs
 	// nothing and every skill takes the pinned default.
 	SubtreeOutputStyles = "_apex/output-styles.csv"
+	// SubtreeAgentManifest is the framework's roster of its agent
+	// personas, read by apex-help, apex-party-mode, apex-retrospective,
+	// apex-advanced-elicitation and the distillator's format reference.
+	SubtreeAgentManifest = "_apex/agent-manifest.csv"
+	// SubtreeApexHelp is the framework's own help table, read by
+	// apex-agent-pm, apex-agent-ux-designer, apex-agent-modeler and the
+	// mockup and screen-story completion steps.
+	SubtreeApexHelp = "_apex/apex-help.csv"
 	// SubtreeChangeRoutes is the framework-owned table of what
 	// `ape change` prints when the lane escalates: per route, the ordered
 	// commands and the notes.
@@ -135,6 +143,12 @@ const (
 	// Absent = no skill is enrolled and every dispatch takes the pinned
 	// default, which is what every dispatch did before the table existed.
 	ProjectOutputStyles = "_apex/output-styles.csv"
+	// ProjectAgentManifest and ProjectApexHelp are where the framework's
+	// two persona-facing tables land. Absent = every skill that reads one
+	// finds nothing, silently: neither is a gate, so a run proceeds
+	// without the roster it meant to consult.
+	ProjectAgentManifest = "_apex/agent-manifest.csv"
+	ProjectApexHelp      = "_apex/apex-help.csv"
 	// ProjectChangeRoutes is where the escalation-route table lands.
 	// Absent = `ape change` prints the route's name and no commands.
 	ProjectChangeRoutes = "_apex/change-routes.yaml"

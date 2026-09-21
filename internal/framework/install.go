@@ -121,6 +121,10 @@ type UpdateSummary struct {
 	// than inferred because "no styles applied" and "the table never
 	// arrived" look identical from inside a run.
 	OutputStylesInstalled bool `json:"outputStylesInstalled" yaml:"outputStylesInstalled"`
+	// AgentManifestInstalled and ApexHelpInstalled report whether the
+	// framework carried its two persona-facing tables.
+	AgentManifestInstalled bool `json:"agentManifestInstalled" yaml:"agentManifestInstalled"`
+	ApexHelpInstalled      bool `json:"apexHelpInstalled"      yaml:"apexHelpInstalled"`
 	// ChangeRoutesInstalled reports whether the framework carried the
 	// escalation-route table `ape change` prints from. False on a
 	// framework that predates it — the verb then names the route and
@@ -354,7 +358,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if err != nil {
 		return nil, err
 	}
-	changeRoutesInstalled, err := installChangeRoutes(opts.FrameworkRepo, opts.ProjectRoot)
+	lateTables, err := installLateTables(opts.FrameworkRepo, opts.ProjectRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -447,7 +451,9 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			TerminalContractsInstalled: contractsInstalled,
 			CommitOwnersInstalled:      commitOwnersInstalled,
 			OutputStylesInstalled:      outputStylesInstalled,
-			ChangeRoutesInstalled:      changeRoutesInstalled,
+			ChangeRoutesInstalled:      lateTables.ChangeRoutes,
+			AgentManifestInstalled:     lateTables.AgentManifest,
+			ApexHelpInstalled:          lateTables.ApexHelp,
 			MigrationsInstalled:        len(migrationsInstalled),
 			MigrationPaths:             migrationsInstalled,
 			ApeCommandsInstalled:       apeCommandsInstalled,
@@ -508,6 +514,94 @@ func installOutputStyles(frameworkRepo, projectRoot string) (bool, error) {
 	dst := filepath.Join(projectRoot, ProjectOutputStyles)
 	if err := CopyFile(src, dst); err != nil {
 		return false, fmt.Errorf("copy output-styles table: %w", err)
+	}
+	return true, nil
+}
+
+// SimpleTable is a framework-owned file copied verbatim into a project.
+//
+// Declared as DATA rather than as another function, for a reason the
+// framework eval found on its own side the same day: ape's install
+// roster is hand-kept, which is the right shape for a tool that writes
+// into someone's project — an installer must not copy a file it has
+// never heard of because the file turned up in a directory listing. But
+// a hand-kept roster cannot notice that it has gone stale, and this one
+// had. The framework shipped `agent-manifest.csv` and `apex-help.csv`,
+// read between them by nine skill files including three agent personas,
+// and ape installed neither, on every project, from the day each
+// shipped. Nothing said so: a missing table is not a failure, the
+// skills that read it simply find nothing.
+//
+// So the roster stays explicit AND becomes readable. The installer
+// iterates this; `make check-framework` compares it against what the
+// framework actually ships and fails on anything neither listed here
+// nor declined by name.
+type SimpleTable struct {
+	Subtree string
+	Project string
+	// What names it in an error, in the installer's own words.
+	What string
+}
+
+// SimpleTables are the framework-owned files copied verbatim. The ones
+// needing more than a copy — the config bootstrap, the migrations and
+// pipelines directories, the aboard recipe library, the operating-rules
+// fragment with its managed CLAUDE.md block — keep their own functions
+// and are accounted for separately by the gate.
+func SimpleTables() []SimpleTable {
+	return []SimpleTable{
+		{SubtreeTerminalContracts, ProjectTerminalContracts, "terminal-contracts table"},
+		{SubtreeApeCommands, ProjectApeCommands, "ape-commands manifest"},
+		{SubtreeOutputStyles, ProjectOutputStyles, "output-styles table"},
+		{SubtreeCommitOwners, ProjectCommitOwners, "commit-owners roster"},
+		{SubtreeChangeRoutes, ProjectChangeRoutes, "change-routes table"},
+		{SubtreeAgentManifest, ProjectAgentManifest, "agent manifest"},
+		{SubtreeApexHelp, ProjectApexHelp, "help table"},
+	}
+}
+
+// lateTableResult reports which of the copied-verbatim tables the
+// framework carried.
+type lateTableResult struct {
+	ChangeRoutes  bool
+	AgentManifest bool
+	ApexHelp      bool
+}
+
+// installLateTables copies the framework-owned files that need nothing
+// but a copy. Lifted out of installCore, which is already at the edge of
+// what one function should be deciding — each table added there costs a
+// branch, and the count is what this keeps flat.
+func installLateTables(frameworkRepo, projectRoot string) (lateTableResult, error) {
+	var out lateTableResult
+	var err error
+	if out.ChangeRoutes, err = installChangeRoutes(frameworkRepo, projectRoot); err != nil {
+		return out, err
+	}
+	if out.AgentManifest, err = installTable(frameworkRepo, projectRoot,
+		SimpleTable{SubtreeAgentManifest, ProjectAgentManifest, "agent manifest"}); err != nil {
+		return out, err
+	}
+	if out.ApexHelp, err = installTable(frameworkRepo, projectRoot,
+		SimpleTable{SubtreeApexHelp, ProjectApexHelp, "help table"}); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+// installTable copies one SimpleTable, with the version-skew
+// suppression every table here shares: a framework that predates the
+// file installs nothing, and that is not an error.
+func installTable(frameworkRepo, projectRoot string, tbl SimpleTable) (bool, error) {
+	src := filepath.Join(frameworkRepo, tbl.Subtree)
+	if _, err := os.Stat(src); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat %s: %w", tbl.What, err)
+	}
+	if err := CopyFile(src, filepath.Join(projectRoot, tbl.Project)); err != nil {
+		return false, fmt.Errorf("copy %s: %w", tbl.What, err)
 	}
 	return true, nil
 }

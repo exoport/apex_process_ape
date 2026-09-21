@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -520,12 +521,12 @@ func fakeFrameworkForContract(t *testing.T, root string) {
 //   - every route yields its commands once ape's fill is applied.
 func TestContract_LiveChangeRoutes(t *testing.T) {
 	root := frameworkSubtreeRoot(t)
-	path := filepath.Join(root, filepath.FromSlash(framework.SubtreeChangeRoutes))
-	if _, err := os.Stat(path); err != nil {
+	routesPath := filepath.Join(root, filepath.FromSlash(framework.SubtreeChangeRoutes))
+	if _, err := os.Stat(routesPath); err != nil {
 		t.Skipf("no %s in this framework checkout — a framework that predates the lane",
 			framework.SubtreeChangeRoutes)
 	}
-	table := change.LoadRouteTable(path)
+	table := change.LoadRouteTable(routesPath)
 	require.NotEmpty(t, table.Routes, "the live table parses through ape's own parser")
 
 	fill := change.RouteFill{
@@ -600,5 +601,70 @@ func TestContract_LiveMaintenanceContract(t *testing.T) {
 	}
 	for _, goalStatus := range []string{change.GoalLanded, change.GoalHalted, change.GoalNotStarted} {
 		require.Contains(t, body, goalStatus, "a goal's status still offers %q", goalStatus)
+	}
+}
+
+// TestContract_LiveApexTreeIsFullyAccountedFor fails when the framework
+// ships a top-level `_apex/` file ape neither installs nor declines by
+// name.
+//
+// ape's install roster is hand-kept, which is the right shape for a tool
+// that WRITES INTO SOMEONE'S PROJECT: an installer must not copy a file
+// it has never heard of because the file turned up in a directory
+// listing. What a hand-kept roster cannot do is notice that it has gone
+// stale, and this one had — the framework shipped `agent-manifest.csv`
+// and `apex-help.csv`, read between them by nine skill files including
+// three agent personas, and ape installed neither on any project from
+// the day each shipped. Nothing said so, because a missing table is not
+// a failure: the skills that read it find nothing and carry on.
+//
+// The installed set is read from framework.SimpleTables() and the
+// framework package's own path constants — the same values the
+// installer iterates — so this cannot pass while the installer ignores a
+// file. An earlier draft compared the directory against a map typed out
+// here, which passed while the installer did nothing at all: a test that
+// restates a claim rather than checking it.
+func TestContract_LiveApexTreeIsFullyAccountedFor(t *testing.T) {
+	root := frameworkSubtreeRoot(t)
+	entries, err := os.ReadDir(filepath.Join(root, "_apex"))
+	require.NoError(t, err)
+
+	// Copied verbatim — straight from the installer's own list.
+	installed := map[string]bool{}
+	for _, tbl := range framework.SimpleTables() {
+		installed[path.Base(tbl.Subtree)] = true
+	}
+	// Handled by their own install paths, named through the same
+	// constants the installer uses rather than as literals here.
+	for _, subtree := range []string{
+		framework.SubtreeOperatingRules, // + the managed CLAUDE.md block
+		framework.SubtreeConfig,         // seeded through the bootstrap
+		framework.SubtreeConfigLocalExample,
+		framework.SubtreeMigrations,
+		framework.SubtreePipelines,
+	} {
+		installed[path.Base(subtree)] = true
+	}
+	// The aboard recipe library lives one level down; the directory that
+	// holds it is what appears at this level.
+	installed[path.Base(path.Dir(framework.SubtreeAboardRecipes))] = true
+
+	// Declined, each with the reason. A file here is a decision.
+	declined := map[string]string{
+		"README.md": "documents the framework's own _apex tree for someone reading the framework " +
+			"repo; a project's _apex holds the project's tables, not that prose",
+		".gitignore": "the framework's housekeeping for its own repository. Installing it would " +
+			"change what git tracks inside the project, which is the project's call",
+	}
+
+	for _, e := range entries {
+		name := e.Name()
+		if installed[name] || declined[name] != "" {
+			continue
+		}
+		t.Errorf("the framework ships _apex/%s and ape neither installs nor declines it.\n"+
+			"A project set up by `ape framework setup` will not have it and nothing will say so — "+
+			"a table nobody installed is indistinguishable from a framework that never shipped one.\n"+
+			"Add it to framework.SimpleTables(), or decline it by name here with the reason.", name)
 	}
 }
