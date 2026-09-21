@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -145,6 +146,47 @@ func guardGroup(cmd *cobra.Command) {
 	// the help text lands on stdout again — the thing being fixed.
 	cmd.SilenceUsage = true
 	cmd.SilenceErrors = true
+}
+
+// guardArgs makes a command's ARGUMENT validation answer with ape's
+// usage code rather than the code a gate uses for a finding.
+//
+// The same collision the flag path had: cobra reports a rejected
+// argument as an ordinary error, which the exit table maps to 1, and
+// every gate in this binary uses 1 to mean "I looked and found
+// something". `ape doctor zzbogus` exited 1 — cobra.NoArgs refusing an
+// argument it cannot mean — which reads as a doctor run that found a
+// problem.
+//
+// Distinct from guardGroup above, which replaces a GROUP's Args
+// entirely. This wraps whatever validator a command already has,
+// including cobra's own NoArgs and ExactArgs, so a command keeps its
+// contract and only the exit code moves. Nothing here matches an error
+// message: the validator's verdict is ape-side, and its text is not
+// read.
+func guardArgs(cmd *cobra.Command) {
+	prev := cmd.Args
+	if prev == nil {
+		return // no declared contract: positional args are this command's own
+	}
+	cmd.Args = func(c *cobra.Command, args []string) error {
+		err := prev(c, args)
+		if err == nil {
+			return nil
+		}
+		if _, ok := errors.AsType[*exitError](err); ok {
+			return err // already carries a code — guardGroup's, typically
+		}
+		return usageErr(err)
+	}
+}
+
+// guardArgsDeep applies guardArgs across a tree.
+func guardArgsDeep(cmds ...*cobra.Command) {
+	for _, cmd := range cmds {
+		guardArgs(cmd)
+		guardArgsDeep(cmd.Commands()...)
+	}
 }
 
 // guardGroupsDeep installs the guard on every group in each tree.

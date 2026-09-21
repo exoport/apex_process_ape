@@ -37,6 +37,11 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Long:  "Print the version, build date, and git commit of the ape binary.",
+		// It takes none, and without this it ACCEPTED one: `ape version
+		// zzbogus` printed the version and exited 0, so a caller that
+		// typo'd a verb got a plausible answer to a question it did not
+		// ask. The only silent survivor of a 23-group sweep.
+		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			res := versionResult{
 				Version:   Version,

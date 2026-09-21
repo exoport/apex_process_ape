@@ -143,6 +143,12 @@ func rootSubcommands() []*cobra.Command {
 			continue
 		}
 		guardGroupsDeep(cmd)
+		// And the same for a LEAF's own argument contract: a command
+		// that refuses an argument is answering about usage, not about
+		// the thing it inspects. aboard is excluded for the reason
+		// above — its argument contracts, and its exit table, are its
+		// own.
+		guardArgsDeep(cmd)
 	}
 
 	return subs

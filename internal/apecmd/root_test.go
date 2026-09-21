@@ -111,3 +111,73 @@ func TestFlagErrors_ContentVerdictsAreUnchanged(t *testing.T) {
 		})
 	}
 }
+
+// The same collision as the flag path, one step later: cobra reports a
+// REJECTED ARGUMENT as an ordinary error, which the exit table mapped to
+// 1 — the code every gate here uses for a finding. `ape doctor zzbogus`
+// exited 1 refusing an argument it cannot mean, which reads as a doctor
+// run that found a problem.
+//
+// Nothing in this path reads an error's text. The validator's verdict is
+// ape-side; only the code it travels under moves.
+func TestArgErrors_ExitUsageNotTheVerdictCode(t *testing.T) {
+	for _, args := range [][]string{
+		{"doctor", "zzbogus"},
+		{"metrics", "zzbogus"},
+		{"planning", "zzbogus"},
+		{"version", "zzbogus"},
+		{"task"}, // a required positional, absent
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			root := newRootCmd()
+			root.SetArgs(args)
+			root.SetOut(&bytes.Buffer{})
+			root.SetErr(&bytes.Buffer{})
+
+			code, _ := ExitCode(root.Execute())
+			require.Equal(t, ExitUsage, code,
+				"an argument a command cannot mean is exit 2, never a verdict")
+		})
+	}
+}
+
+// `ape version zzbogus` printed the version and exited 0 — a caller that
+// typo'd a verb got a plausible answer to a question it never asked. It
+// was the only silent survivor of a 23-group sweep, and read-only, which
+// is why it survived: nothing it did was wrong except agreeing.
+// Exit codes only, deliberately: `ape version` writes to os.Stdout
+// rather than to the command's writer, so a buffer set here captures
+// nothing. The first draft asserted the bogus call printed no version
+// string against that empty buffer — an assertion that passes whatever
+// the command does, which is the shape of test this repo keeps finding
+// in other people's code.
+func TestVersion_RefusesAnArgumentItCannotMean(t *testing.T) {
+	root := newRootCmd()
+	root.SetArgs([]string{"version", "zzbogus"})
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	code, _ := ExitCode(root.Execute())
+	require.Equal(t, ExitUsage, code)
+
+	// And the command itself still answers.
+	clean := newRootCmd()
+	clean.SetArgs([]string{"version"})
+	clean.SetOut(&bytes.Buffer{})
+	clean.SetErr(&bytes.Buffer{})
+	code, _ = ExitCode(clean.Execute())
+	require.Equal(t, ExitOK, code)
+}
+
+// A group's own guard already carries a code; wrapping must not restate
+// it, or the two would disagree about who decided.
+func TestArgGuard_LeavesAnAlreadyCodedErrorAlone(t *testing.T) {
+	root := newRootCmd()
+	root.SetArgs([]string{"sprint", "zzbogus"})
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+
+	err := root.Execute()
+	code, reported := ExitCode(err)
+	require.Equal(t, ExitUsage, code)
+	require.True(t, reported, "the group guard prints its own message and says so")
+}
