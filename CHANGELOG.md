@@ -62,6 +62,26 @@ actually changed, and composes every commit itself.
   later run would refuse at pre-flight anyway, so it names the residue and
   the records it never reached.
 
+- **fix(cli): a flag ape does not have is exit 2, not a verdict.** Every gate
+  in this binary uses exit 1 to mean "I looked and found something", and
+  cobra reported an unrecognised flag as an ordinary error, which the exit
+  table mapped to the same 1. So `ape doc verify --doc epics` exited 1 having
+  read no document, and a caller whose own help text calls it "a GATE … the
+  caller relies on the non-zero exit to stop" concluded the document had
+  duplicates. Fail-closed, so nothing corrupt was written — but the verdict
+  was a phantom, and the message explaining it went to stderr where a caller
+  reading stdout never saw it. One hook on the root, inherited tree-wide, and
+  2 is what `exitcodes.go` has always said usage means. Content verdicts do
+  not move. Found by the framework eval, which also named why the class
+  recurs: `required_commands` checks command NAMES, never flags, so nothing
+  on either side guards a flag surface.
+
+- **fix(doctor): `config.folders` warns for the one case it can prove.** A
+  configured folder that is absent is INFO — ape cannot tell a young project
+  from a typo — but a path that EXISTS and is not a directory can never hold
+  what the variable names, on any project, ever. That is a WARN, and `--strict`
+  gates on it.
+
 - **fix(story): an absent implementation folder is an empty answer, not a
   failure.** `ape story fields`, `ape story verify` and `ape sprint check`
   failed when `implementation_folder` did not exist and answered "no stories"
