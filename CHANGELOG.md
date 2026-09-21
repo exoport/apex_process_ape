@@ -88,16 +88,17 @@ actually changed, and composes every commit itself.
 
 - **fix(framework): `agent-manifest.csv` and `apex-help.csv` are installed.**
   The framework ships both and ape installed neither, on every project, from
-  the day each shipped. Nine skill files read them between them — including
-  `apex-agent-pm`, `apex-agent-ux-designer` and `apex-agent-modeler` — and
-  nothing said so, because a missing table is not a failure that anything
+  the day each shipped. Four skills read them between them — `apex-help`,
+  `apex-party-mode`, `apex-retrospective` and `apex-advanced-elicitation` —
+  and nothing said so, because a missing table is not a failure that anything
   reports. What those skills DID on a project that never received the tables
   is unspecified: the framework confirms that not one of the readers declares
   an absent-file branch, so the behaviour varied run to run — one session
   proceeding without the roster, the next announcing it could not continue,
-  both consistent with the prose. `apex-help` and `apex-party-mode` are where
-  the table is not decoration: a catalog-less help skill and a roster-less
-  party mode have nothing to work from. The fix arrives through
+  both consistent with the prose. `apex-party-mode` is the one that cannot
+  work without the roster — its work IS the roster — and the other three can
+  answer partially and say so. The framework has since given each of them an
+  explicit absent-file branch. The fix arrives through
   `ape framework update`, which is what a project runs for this release
   anyway. The roster stays explicit, because an
   installer must not copy a file it has never heard of into someone's
