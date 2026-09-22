@@ -76,24 +76,30 @@ func TestContract_LiveAboardRecipeForkMatchesUpstream(t *testing.T) {
 			if got == upstreamBody {
 				return
 			}
-			// Markdown table formatters pad cells and stretch separator
-			// runs. That is cosmetic, and failing on it would make the
-			// gate cry wolf — but it is reported, because a fork that is
-			// only equal after normalization is a fork someone has
-			// reformatted, and the next edit through that formatter is
-			// where real drift hides.
-			if normalizeMarkdownTables(got) == normalizeMarkdownTables(upstreamBody) {
-				t.Logf("matches upstream only after normalizing markdown table padding — "+
-					"the `transform:` claims byte-identity modulo the prefix, and a formatter has run over %s",
-					e.Name())
-				return
+			// EXACT comparison, deliberately. This tolerated markdown
+			// table repadding for one revision, because the ported file
+			// had been run through prettier and a byte-exact gate would
+			// have failed on semantically correct content. That tolerance
+			// is gone, and the reason it is gone is the point: a fork only
+			// equal after normalizing is one someone has run a formatter
+			// over, and the next edit through that formatter is where real
+			// drift hides. The framework now exempts the forked files in
+			// `.prettierignore`, so byte-identity holds at the SOURCE and
+			// this check does not have to be lenient to stay useful.
+			//
+			// Reported as the first differing lines rather than two whole
+			// files: require.Equal on multi-kilobyte markdown prints both
+			// in full, and a failure nobody can read is a gate nobody acts
+			// on.
+			diff, allTableRows := firstDifference(upstreamBody, got)
+			hint := ""
+			if allTableRows {
+				hint = "\n  EVERY differing line is a markdown table row, which is what a formatter" +
+					"\n  does to a forked file — check the framework's .prettierignore before" +
+					"\n  re-porting, or the next port will repad it again."
 			}
-			// Reported as the first differing lines, not as two whole
-			// files. require.Equal on multi-kilobyte markdown prints both
-			// in full, and a failure nobody can read is a gate nobody
-			// acts on.
-			t.Fatalf("fork has diverged from aboard %s beyond the documented `ape ` prefix:\n%s",
-				pinned, firstDifference(upstreamBody, got))
+			t.Fatalf("fork has diverged from aboard %s beyond the documented `ape ` prefix:\n%s%s",
+				pinned, diff, hint)
 		})
 	}
 	// A SKIP, not a failure. The stamps arrived with the framework release
@@ -112,12 +118,15 @@ func TestContract_LiveAboardRecipeForkMatchesUpstream(t *testing.T) {
 }
 
 // firstDifference renders the first few diverging lines with their line
-// numbers, plus how many lines differ in total.
-func firstDifference(want, got string) string {
+// numbers, plus how many lines differ in total. The second return says
+// whether EVERY differing line is a markdown table row — the signature of
+// a formatter having run over a forked file, which is a different problem
+// from real content drift and has a different fix.
+func firstDifference(want, got string) (string, bool) {
 	w := strings.Split(want, "\n")
 	g := strings.Split(got, "\n")
 	var b strings.Builder
-	shown, differing := 0, 0
+	shown, differing, tableRows := 0, 0, 0
 	for i := 0; i < len(w) || i < len(g); i++ {
 		var lw, lg string
 		if i < len(w) {
@@ -130,13 +139,16 @@ func firstDifference(want, got string) string {
 			continue
 		}
 		differing++
+		if mdTableRowRe.MatchString(lw) && mdTableRowRe.MatchString(lg) {
+			tableRows++
+		}
 		if shown < 3 {
 			fmt.Fprintf(&b, "  line %d\n    upstream: %s\n    fork:     %s\n", i+1, truncLine(lw), truncLine(lg))
 			shown++
 		}
 	}
 	fmt.Fprintf(&b, "  (%d line(s) differ in total)", differing)
-	return b.String()
+	return b.String(), differing > 0 && tableRows == differing
 }
 
 func truncLine(s string) string {
@@ -190,27 +202,6 @@ func reverseApePrefix(s string) string {
 }
 
 var mdTableRowRe = regexp.MustCompile(`(?m)^\s*\|.*\|\s*$`)
-
-// normalizeMarkdownTables collapses cell padding and separator dash runs so
-// a reformatted table compares equal to a compact one.
-func normalizeMarkdownTables(s string) string {
-	lines := strings.Split(s, "\n")
-	for i, l := range lines {
-		if !mdTableRowRe.MatchString(l) {
-			continue
-		}
-		cells := strings.Split(strings.TrimSpace(l), "|")
-		for j, c := range cells {
-			c = strings.TrimSpace(c)
-			if c != "" && strings.Trim(c, "-:") == "" {
-				c = "---" // any separator run reads as one
-			}
-			cells[j] = c
-		}
-		lines[i] = strings.Join(cells, "|")
-	}
-	return strings.Join(lines, "\n")
-}
 
 // pinnedAboardVersion is the aboard version THIS build depends on, read
 // from go.mod rather than written down — a literal here would be the same
