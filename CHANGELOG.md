@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v0.0.74 (unreleased)
+## v0.0.74 (2026-09-22)
 
 - **feat(aboard): the board is upgraded to aboard v0.3.0, and it can take its
   own picture.** `ape aboard shot <tab>` screenshots a running board's tab with
