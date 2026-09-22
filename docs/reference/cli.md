@@ -1620,7 +1620,7 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--check` | bool | `false` | Answer in the exit code and write nothing: 0 set, 1 unset |
+| `--check` | bool | `false` | Answer in the exit code and write nothing: 0 set, 1 unset (still 4 with no config, 2 if malformed) |
 | `--cwd` | string | `—` | Project root (default: current working dir) |
 
 ## ape config resolve
@@ -5362,7 +5362,7 @@ Flags:
 | `--active-extensions` | string | `—` | Comma-separated active extensions for --file mode (e.g. ext-adrs,ext-features) |
 | `--check` | bool | `false` | With --fix: report the repairs without writing |
 | `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--file` | string | `—` | Verify one story file as a gate (exit 0/2/3) |
+| `--file` | string | `—` | Verify one story file as a gate (exit 0/2/3/4) |
 | `--fix` | bool | `false` | Repair the findings with a single derivable answer (depends_on quoting), and report the rest |
 | `--include-advisory` | bool | `false` | Also report the advisory classes (story.requirement_ids_missing). Off by default: they fire on every story until a backfill completes, and `ape doctor` reds may not be worked around. |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |

@@ -96,7 +96,8 @@ repairing.`,
 		},
 	}
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", helpCwd)
-	cmd.Flags().BoolVar(&checkFlag, "check", false, "Answer in the exit code and write nothing: 0 set, 1 unset")
+	cmd.Flags().BoolVar(&checkFlag, "check", false,
+		"Answer in the exit code and write nothing: 0 set, 1 unset (still 4 with no config, 2 if malformed)")
 	return cmd
 }
 

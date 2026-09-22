@@ -41,6 +41,24 @@
   because a stale reference degrades an agent's writes without stopping the
   project working.
 
+- **fix(story): `--file`'s flag summary contradicted its own help.** `ape story
+  verify --help` states the gate's exit table twice — a numbered block under
+  the `--file` description documenting 0/2/3/4, and a parenthesised summary on
+  the flag line that said `exit 0/2/3`. Same command, same output, two answers,
+  and the omitted 4 is the whole of the body-shape gate, so a caller reading
+  the shorter text saw a real verdict as an anomaly. Found by the framework
+  eval, whose captured `story-batch-dev` run took a genuine exit 4 (an
+  `adrs_considered` governance failure, corrected in-run) and first recorded it
+  as an undocumented code. A test now asserts the two texts name the same set
+  rather than checking either against a literal, because a literal would put
+  the list in three places when two already drifted.
+
+  `ape config pin --check` had a weaker version of the same shape — the summary
+  gave `0 set, 1 unset` while the help explains a missing config still exits 4
+  and a malformed one 2. Not a contradiction, since those are deliberately not
+  answers about the key, but a migration runner reading only the flag line
+  would treat them as unexpected. It now names all four.
+
 - **fix(doctor): the aboard skill-reference remediation promised two files and
   fixed one.** It told the reader to "regenerate both generated references" and
   handed over a command for `reference.generated.md` only, leaving

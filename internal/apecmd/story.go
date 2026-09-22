@@ -268,7 +268,10 @@ finding count did not fall.`,
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", helpFormat)
 	cmd.Flags().BoolVar(&strict, "strict", false,
 		helpStrict+" — NEVER set this from apex-review-story, apex-code-review or apex-epic-batch-review")
-	cmd.Flags().StringVar(&fileFlag, "file", "", "Verify one story file as a gate (exit 0/2/3)")
+	// Every code the block above documents, including 4. A summary that
+	// stops at 3 tells a caller in the same --help output that a real
+	// verdict is unexpected — and 4 is the whole of the body-shape gate.
+	cmd.Flags().StringVar(&fileFlag, "file", "", "Verify one story file as a gate (exit 0/2/3/4)")
 	cmd.Flags().BoolVar(&fix, "fix", false,
 		"Repair the findings with a single derivable answer (depends_on quoting), and report the rest")
 	cmd.Flags().BoolVar(&fixCheck, "check", false, "With --fix: report the repairs without writing")
