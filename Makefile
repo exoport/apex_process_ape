@@ -278,6 +278,13 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	@#     shipped _apex/ape-commands.yaml requires resolves against this binary
 	@#   TestContract_LiveConfigTemplate         the config variables ape resolves
 	@#     match the framework's live template, not a copied fixture
+	@#   TestContract_LiveAboardRecipeForkMatchesUpstream  the framework's FORK of
+	@#     aboard's recipe library still matches upstream at the aboard version
+	@#     this binary pins. It lives here because this is the only repo holding
+	@#     both trees — the module cache has upstream, APEX_FRAMEWORK_REPO has the
+	@#     fork — and it fires on a dependency bump rather than months later. The
+	@#     fork sat frozen at v0.2.1 through a v0.3.0 release with nothing on
+	@#     either side reporting it.
 	@#
 	@# The eight TestParity_* gates were removed in v0.0.55. They ran the ten
 	@# retired Python scripts side by side with the commands replacing them, so
