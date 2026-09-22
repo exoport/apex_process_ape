@@ -41,6 +41,24 @@ type ModelPrice struct {
 	BaseInput float64
 	// Output is the output price per 1M tokens, USD.
 	Output float64
+	// CacheReadMul is the multiple of BaseInput a cache read bills at.
+	// Zero means the standard DefaultCacheReadMul — every construction
+	// site leaves it zero unless the model publishes a different rate, and
+	// CacheReadMultiplier() resolves that, so a zero here is never a 0%
+	// cache-read price.
+	CacheReadMul float64
+}
+
+// CacheReadMultiplier is the multiple of BaseInput this model's cache
+// reads bill at, resolving an unset value to the standard rate.
+//
+// A method rather than a populated field so the "no price" sentinel
+// (ModelPrice{}) cannot be mistaken for "cache reads are free".
+func (p ModelPrice) CacheReadMultiplier() float64 {
+	if p.CacheReadMul > 0 {
+		return p.CacheReadMul
+	}
+	return DefaultCacheReadMul
 }
 
 // PriceSource records how a model's price was resolved. It exists because
@@ -81,8 +99,10 @@ func (s PriceSource) Estimated() bool { return s == PriceFamily }
 // Prices is the exact-match table keyed by the `model` field on each
 // assistant-line `usage` block in the session JSONL, loaded from the
 // embedded prices.yaml at init. Per-million-tokens, USD. The 1.25x / 2.00x
-// / 0.10x cache multipliers live in formula.go and apply on top of the
-// BaseInput rate here.
+// cache-CREATION multipliers live in formula.go and apply on top of the
+// BaseInput rate here; the cache-READ multiple is per model (0.10 by
+// default, 0.05 on Opus 5.5, 0.025 on Fable 5.1 / Mythos 5.1) and rides on
+// ModelPrice.CacheReadMul.
 //
 // There is no API that returns Anthropic's prices, so this table is
 // hand-curated and will go stale when a model ships. That is expected and
@@ -117,11 +137,13 @@ var contextWindows map[string]int
 // loaded from prices.yaml. Keys are lowercased and include the brackets.
 var contextSuffixes map[string]int
 
-// SonnetIntroEnd is the last instant Claude Sonnet 5 bills at its
-// promotional intro rate. Derived from the claude-sonnet-5 window in
-// prices.yaml — the YAML is the source of truth; this var is the named
-// handle callers and tests use.
-var SonnetIntroEnd time.Time
+// There is deliberately no SonnetIntroEnd here any more. It named the end
+// of Claude Sonnet 5's promotional window, on the assumption that the rate
+// would rise to 3.00/15.00 on 2026-09-01. That increase was cancelled and
+// the intro rate became the standard one, so the instant it named stopped
+// existing. The dated_prices MECHANISM is untouched and still applies to
+// any real future window — what was wrong was encoding an announced future
+// price as though it had happened.
 
 // PriceTableUpdated is the `updated:` stamp from prices.yaml, surfaced by
 // `ape costs coverage` and `ape doctor` so an operator can see how old the
@@ -264,7 +286,7 @@ func applyPriceTable(tbl priceTableFile) {
 	Prices = make(map[string]ModelPrice, len(tbl.Prices))
 	contextWindows = make(map[string]int, len(tbl.Prices))
 	for model, row := range tbl.Prices {
-		Prices[model] = ModelPrice{BaseInput: row.BaseInput, Output: row.Output}
+		Prices[model] = ModelPrice{BaseInput: row.BaseInput, Output: row.Output, CacheReadMul: row.CacheReadMul}
 		if row.ContextWindow > 0 {
 			contextWindows[model] = row.ContextWindow
 		}
@@ -288,10 +310,6 @@ func applyPriceTable(tbl priceTableFile) {
 		}
 		datedPrices[model] = windows
 	}
-	if w := datedPrices["claude-sonnet-5"]; len(w) > 0 {
-		SonnetIntroEnd = w[0].Until
-	}
-
 	modelAliases = make(map[string]string, len(tbl.Aliases))
 	maps.Copy(modelAliases, tbl.Aliases)
 

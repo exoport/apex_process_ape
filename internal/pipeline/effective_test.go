@@ -147,7 +147,7 @@ stages:
     chain:
       - skill: foo
 `,
-			wantModel:  "claude-opus-5[1m]",
+			wantModel:  testModelOpus1MResolved,
 			wantEffort: "medium",
 			wantAgent:  "apex-agent-pm",
 		},

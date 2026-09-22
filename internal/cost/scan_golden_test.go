@@ -106,15 +106,21 @@ func TestScanSessionUnpricedModel(t *testing.T) {
 
 // TestLookupNormalization pins the P0b alias / suffix contract.
 func TestLookupNormalization(t *testing.T) {
+	// Only the alias forms belong here: they must land on the alias
+	// target's row. An explicit id like claude-opus-4-8 has its OWN rate
+	// and is checked separately below.
 	cases := []string{
-		"claude-opus-4-8",
-		"claude-opus-4-8[1m]",
 		"opus",
 		"opus[1m]",
 	}
-	want, ok := Lookup("claude-opus-4-8")
+	// The expected price is the alias target's own row, NOT another Opus
+	// model's. This compared against claude-opus-4-8 on the assumption that
+	// the whole Opus tier shares one rate — true until Opus 5.5 shipped at
+	// 4.00/20.00 against Opus 5's 5.00/25.00. A tier is not a price.
+	opusTarget := ResolveFamilyAlias("opus")
+	want, ok := Lookup(opusTarget)
 	if !ok {
-		t.Fatalf("claude-opus-4-8 missing from Prices")
+		t.Fatalf("opus alias target %q missing from Prices", opusTarget)
 	}
 	for _, c := range cases {
 		p, ok := Lookup(c)
@@ -126,6 +132,20 @@ func TestLookupNormalization(t *testing.T) {
 			t.Errorf("Lookup(%q) = %+v, want %+v", c, p, want)
 		}
 	}
+	// An explicit id keeps its own rate, and the [1m] suffix does not move
+	// it onto another model's. Checked against its own row rather than the
+	// alias target's, which is the distinction that broke when Opus 5.5
+	// arrived cheaper than the rest of the Opus tier.
+	own, ok := Lookup("claude-opus-4-8")
+	if !ok {
+		t.Fatalf("claude-opus-4-8 missing from Prices")
+	}
+	for _, c := range []string{"claude-opus-4-8", "claude-opus-4-8[1m]"} {
+		if p, found := Lookup(c); !found || p != own {
+			t.Errorf("Lookup(%q) = %+v (found %v), want its own row %+v", c, p, found, own)
+		}
+	}
+
 	if got := NormalizeModel(" claude-sonnet-5[1m] "); got != "claude-sonnet-5" {
 		t.Fatalf("NormalizeModel = %q", got)
 	}

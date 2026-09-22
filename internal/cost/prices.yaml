@@ -7,8 +7,15 @@
 # release required.
 #
 # Source: https://platform.claude.com/docs/en/about-claude/pricing
-# All rates are USD per 1M tokens. The 1.25x / 2.00x / 0.10x cache
+# All rates are USD per 1M tokens. The 1.25x / 2.00x cache-CREATION
 # multipliers live in formula.go and apply on top of base_input.
+#
+# `cache_read_mul:` is the multiple of base_input a cache READ bills at,
+# and it is OPTIONAL — omitted means the standard 0.10. It is per model
+# because it is not one number: Claude Opus 5.5 reads at 0.05x and Claude
+# Fable 5.1 / Mythos 5.1 at 0.025x. A single global 0.10 priced those two
+# families' cache reads 2x and 4x high, and cache reads are usually the
+# LARGEST token category in an agentic run.
 #
 # `context_window:` is the model's usable context in TOKENS, and it is
 # OPTIONAL. WHERE THE VALUES COME FROM: the Models API — `GET /v1/models/{id}`
@@ -64,6 +71,7 @@ prices:
     base_input: 10.00
     output: 50.00
     context_window: 1000000
+    cache_read_mul: 0.025
   claude-fable-5:
     base_input: 10.00
     output: 50.00
@@ -72,6 +80,19 @@ prices:
     base_input: 10.00
     output: 50.00
     context_window: 1000000
+  # Claude Opus 5.5 — CHEAPER than Opus 5, which is the unusual direction:
+  # 4.00/20.00 against Opus 5's 5.00/25.00. A family estimate would have
+  # priced it at the Opus tier and overstated every turn by 25%.
+  # NOTE: fast mode (speed: "fast") bills at 8.00 / 40.00 — its own rate,
+  # not Opus 5's 10.00/50.00. The transcript usage block carries no speed
+  # marker, so fast-mode turns price low here, as they do for Opus 5.
+  # NOTE: cache reads bill at 0.05x base input ($0.20/MTok), not the 0.10x
+  # most models use — hence cache_read_mul below.
+  claude-opus-5-5:
+    base_input: 4.00
+    output: 20.00
+    context_window: 1000000
+    cache_read_mul: 0.05
   # Claude Opus 5 — same tier as Opus 4.5+.
   # NOTE: fast mode (speed: "fast") bills at 10.00 / 50.00. The transcript
   # usage block carries no speed marker, so fast-mode turns price low here.
@@ -79,12 +100,17 @@ prices:
     base_input: 5.00
     output: 25.00
     context_window: 1000000
-  # Claude Sonnet 5 — the STANDARD (post-intro) rate. The 2.00/10.00 intro
-  # window through 2026-08-31 is applied date-aware via dated_prices; this
-  # entry is the conservative fallback a dateless Lookup returns (PLAN-10 D3).
+  # Claude Sonnet 5 — 2.00/10.00, and this is now the STANDARD rate.
+  # It was announced as an intro rate through 2026-08-31, and this table
+  # encoded the scheduled 3.00/15.00 increase as fact. That increase WAS
+  # CANCELLED: the pricing page states the intro rate "is now the standard
+  # price" and the 2026-09-01 increase "will not occur". Between 2026-09-01
+  # and this correction ape priced every Sonnet 5 turn 50% high. There is
+  # no date at which this model bills differently, so it carries no
+  # dated_prices window — a scheduled price is not a price.
   claude-sonnet-5:
-    base_input: 3.00
-    output: 15.00
+    base_input: 2.00
+    output: 10.00
     context_window: 1000000
   # Claude Opus 4.5+ — current pricing tier.
   claude-opus-4-8:
@@ -150,11 +176,7 @@ prices:
 # turn carries a timestamp; the first entry whose `until` is at/after the
 # turn wins. A dateless lookup never matches a window, so it stays on the
 # conservative standard rate (PLAN-10 D3).
-dated_prices:
-  claude-sonnet-5:
-    - until: 2026-08-31T23:59:59Z
-      base_input: 2.00
-      output: 10.00
+dated_prices: {}
 
 # Claude's short spawn-time aliases → the full model id the CLI currently
 # resolves them to. The transcript records the resolved id, so this hop only
@@ -162,7 +184,7 @@ dated_prices:
 # `opus[1m]` spawn argument). An alias that goes stale now degrades to its
 # family tier rather than to zero.
 aliases:
-  opus: claude-opus-5
+  opus: claude-opus-5-5
   sonnet: claude-sonnet-5
   haiku: claude-haiku-4-5
   fable: claude-fable-5-1

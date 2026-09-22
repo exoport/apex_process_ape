@@ -53,6 +53,17 @@ type priceRow struct {
 	//
 	// Zero means UNKNOWN, never a default. See ContextWindow in prices.go.
 	ContextWindow int `yaml:"context_window,omitempty"`
+	// CacheReadMul is the multiple of base_input a cache READ bills at.
+	// Optional; zero means the standard 0.10 (DefaultCacheReadMul).
+	//
+	// It is per-model because it is not one number: Claude Opus 5.5 reads
+	// at 0.05x and Claude Fable 5.1 / Mythos 5.1 at 0.025x, while everything
+	// else is 0.10x. A single global constant priced Opus 5.5 cache reads
+	// 2x high and Fable 5.1's 4x high — and cache reads are usually the
+	// largest token category in an agentic run, so that is not a rounding
+	// error. Living on the shared row means `ape costs update --from` can
+	// correct it without a rebuild, exactly as it corrects a rate.
+	CacheReadMul float64 `yaml:"cache_read_mul,omitempty"`
 }
 
 // OverrideEntry is a parsed override: the price plus the optional date it
@@ -106,7 +117,7 @@ func LoadOverridesFrom(path string) (map[string]OverrideEntry, error) {
 			return nil, fmt.Errorf("cost.LoadOverridesFrom: model %q: negative context_window", k)
 		}
 		out[k] = OverrideEntry{
-			Price:  ModelPrice{BaseInput: v.BaseInput, Output: v.Output},
+			Price:  ModelPrice{BaseInput: v.BaseInput, Output: v.Output, CacheReadMul: v.CacheReadMul},
 			From:   from,
 			Window: v.ContextWindow,
 		}
@@ -214,7 +225,7 @@ func loadOverridesOnce() map[string]OverrideEntry {
 		// occupancy ratio.
 		window := max(v.ContextWindow, 0)
 		loadedOverrides[k] = OverrideEntry{
-			Price:  ModelPrice{BaseInput: v.BaseInput, Output: v.Output},
+			Price:  ModelPrice{BaseInput: v.BaseInput, Output: v.Output, CacheReadMul: v.CacheReadMul},
 			From:   from,
 			Window: window,
 		}

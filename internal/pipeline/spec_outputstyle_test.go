@@ -3,6 +3,7 @@ package pipeline
 import (
 	"testing"
 
+	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/stretchr/testify/require"
 )
 
@@ -85,11 +86,11 @@ stages:
 	conflicts := spec.StageModelConflicts()
 	require.Len(t, conflicts, 1, "only the stage with divergent models conflicts")
 	require.Equal(t, "governance", conflicts[0].Stage)
-	require.Equal(t, "claude-sonnet-5", conflicts[0].Launch)
+	require.Equal(t, cost.ResolveFamilyAlias("sonnet"), conflicts[0].Launch)
 	require.Len(t, conflicts[0].Steps, 1)
 	require.Equal(t, 1, conflicts[0].Steps[0].Index)
 	require.Equal(t, "apex-adr-survey", conflicts[0].Steps[0].Skill)
-	require.Equal(t, "claude-opus-5", conflicts[0].Steps[0].Declared)
+	require.Equal(t, cost.ResolveFamilyAlias("opus"), conflicts[0].Steps[0].Declared)
 }
 
 // The other direction of the same defect, and the one that is easiest to
@@ -112,7 +113,7 @@ stages:
 	conflicts := spec.StageModelConflicts()
 	require.Len(t, conflicts, 1)
 	require.Empty(t, conflicts[0].Launch, "no --model was passed at launch")
-	require.Equal(t, "claude-opus-5", conflicts[0].Steps[0].Declared)
+	require.Equal(t, cost.ResolveFamilyAlias("opus"), conflicts[0].Steps[0].Declared)
 }
 
 // A single-step stage can never conflict: the launch model IS the step's.

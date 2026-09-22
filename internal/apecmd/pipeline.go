@@ -488,9 +488,9 @@ func warnSpecModels(spec *pipeline.Spec) {
 	for _, w := range spec.ModelWarnings() {
 		fmt.Fprintf(os.Stderr,
 			"⚠ %s: model %q is not one ape recognizes — passing it to claude unchanged.\n"+
-				"  Accepted: a bare family (sonnet, opus, haiku) for its current generation,\n"+
+				"  Accepted: a bare family (%s) for its current generation,\n"+
 				"  or an explicit id (sonnet-5, claude-sonnet-5, opus[1m]).\n",
-			w.Location, w.Model)
+			w.Location, w.Model, modelFamilyWords())
 	}
 	warnStageModelConflicts(spec)
 	warnUnknownSpecKeys(spec)

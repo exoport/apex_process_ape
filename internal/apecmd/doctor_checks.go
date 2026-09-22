@@ -427,7 +427,7 @@ func checkPipelinesProject(_ context.Context, env doctorEnv) CheckResult {
 			Status:  StatusWarn,
 			Message: fmt.Sprintf("%d pipelines at %s; unrecognized model(s): %s", len(names), dir, strings.Join(modelIssues, "; ")),
 			Remediation: "Those `model:` values are not ones ape recognizes — likely typos. Accepted forms: a bare " +
-				"family (sonnet, opus, haiku) for its current generation, or an explicit id " +
+				"family (" + modelFamilyWords() + ") for its current generation, or an explicit id " +
 				"(sonnet-5, claude-sonnet-5, opus[1m]). A model newer than this ape build is passed through unchanged.",
 		}
 	}

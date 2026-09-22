@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/exoport/apex_process_ape/internal/cost"
 )
 
 const (
@@ -15,11 +17,17 @@ const (
 	testPromptFlag = "--prompt"
 	// testModelOpus1M is the bare-family spawn form a spec/flag carries.
 	testModelOpus1M = "opus[1m]"
-	// testModelOpus1MResolved is what Effective canonicalizes it to: a bare
-	// family word resolves to that family's current generation, keeping the
-	// context-window suffix.
-	testModelOpus1MResolved = "claude-opus-5[1m]"
 )
+
+// testModelOpus1MResolved is what Effective canonicalizes testModelOpus1M
+// to: the family's CURRENT generation, keeping the context-window suffix.
+//
+// Derived rather than written down. It was the literal "claude-opus-5[1m]"
+// and broke the moment `opus` moved to Claude Opus 5.5 — a generation
+// turnover none of these tests is about. What they assert is that a bare
+// family word resolves and the suffix survives, and that holds whichever
+// generation is current.
+var testModelOpus1MResolved = cost.ResolveFamilyAlias("opus") + "[1m]"
 
 // stubSpecSkills writes empty SKILL.md files under
 // <root>/.claude/skills/<name>/ for every skill and agent referenced by

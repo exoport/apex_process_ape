@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/exoport/apex_process_ape/internal/cost"
 )
 
 // writeSpec drops a spec named "demo" under <root>/_apex/pipelines/.
@@ -52,11 +54,20 @@ stages:
 		t.Fatalf("LoadSpec: %v", err)
 	}
 
+	// The family-word rows are DERIVED: what this test asserts is that a
+	// bare family resolves, that case and punctuation fold, and that a
+	// context suffix survives — not which generation is current. Pinning
+	// the id made a generation turnover fail a spelling test.
+	// Only the BARE-FAMILY rows derive. `Claude_Opus_5` and `sonnet-5` name
+	// a generation explicitly, so they fold to that id and must not follow
+	// the alias — which is the distinction this test exists to draw.
+	opus := cost.ResolveFamilyAlias("opus")
+	sonnet := cost.ResolveFamilyAlias("sonnet")
 	want := []string{
-		"claude-opus-5",     // pipeline-level default, punctuation + case folded
-		"claude-sonnet-5",   // `claude-sonnet` → the family's current generation
+		"claude-opus-5",     // EXPLICIT id, punctuation + case folded
+		sonnet,              // `claude-sonnet` → the family's current generation
 		"claude-sonnet-4-6", // dotted generation folded onto the canonical id
-		"claude-opus-5[1m]", // bare family resolved, context suffix preserved
+		opus + "[1m]",       // bare family resolved, context suffix preserved
 		"claude-sonnet-5",   // explicit generation stays as written
 	}
 	for i, w := range want {

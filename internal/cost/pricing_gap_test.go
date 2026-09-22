@@ -22,9 +22,6 @@ func TestEmbeddedPriceTableLoads(t *testing.T) {
 	if len(familyTiers) == 0 {
 		t.Error("familyTiers is empty — the family fallback is the only thing standing between a new model id and a $0 total")
 	}
-	if SonnetIntroEnd.IsZero() {
-		t.Error("SonnetIntroEnd not derived from the claude-sonnet-5 dated window")
-	}
 }
 
 // TestPriceTableSelfConsistency locks the invariants a stale hand-edit
@@ -75,13 +72,31 @@ func TestPriceTableSelfConsistency(t *testing.T) {
 // incident: `opus[1m]` began resolving to claude-opus-5, the table had no
 // such row, and every cost silently reported $0.00 for 13 days.
 func TestOpusFiveIsExactlyPriced(t *testing.T) {
-	for _, id := range []string{"claude-opus-5", "claude-opus-5[1m]", "opus", "opus[1m]"} {
+	// The explicit id and its suffixed form keep Opus 5's own rate. This is
+	// the incident's actual subject.
+	for _, id := range []string{"claude-opus-5", "claude-opus-5[1m]"} {
 		p, src := LookupSourceAt(id, time.Time{})
 		if !src.Exact() {
 			t.Errorf("%q resolved via %s, want an exact rate", id, src)
 		}
 		if p.BaseInput != 5.00 || p.Output != 25.00 {
 			t.Errorf("%q priced %+v, want {5,25}", id, p)
+		}
+	}
+
+	// The bare family word is checked for EXACTNESS, not for a particular
+	// rate. The incident was a family word resolving to an id with no row —
+	// silently $0.00 for 13 days — and that failure is independent of what
+	// the current generation charges. Pinning {5,25} here re-broke the test
+	// the moment `opus` moved to Opus 5.5 at 4.00/20.00, which is the
+	// generation turnover this lock has to survive rather than fail on.
+	for _, id := range []string{"opus", "opus[1m]"} {
+		p, src := LookupSourceAt(id, time.Time{})
+		if !src.Exact() {
+			t.Errorf("%q resolved via %s, want an exact rate", id, src)
+		}
+		if p.BaseInput <= 0 || p.Output <= 0 {
+			t.Errorf("%q priced %+v — a family word must never reach a zero rate", id, p)
 		}
 	}
 }
@@ -132,7 +147,6 @@ func TestNormalizeModelResilience(t *testing.T) {
 		"claude_opus_5":             "claude-opus-5",
 		"claude-sonnet-4.6":         "claude-sonnet-4-6",
 		"claude-haiku-4-5-20251001": "claude-haiku-4-5", // dated snapshot
-		"opus":                      "claude-opus-5",    // alias
 		"  sonnet  ":                "claude-sonnet-5",
 		"<synthetic>":               "<synthetic>",
 	}
@@ -141,6 +155,21 @@ func TestNormalizeModelResilience(t *testing.T) {
 			t.Errorf("NormalizeModel(%q) = %q, want %q", in, got, want)
 		}
 	}
+	// A bare family word resolves to whatever the alias table currently
+	// points at — asserted against the table rather than a literal id,
+	// because the literal rots the moment a generation ships. `opus` was
+	// pinned to claude-opus-5 here while the alias had moved to
+	// claude-opus-5-5, which is the drift this form removes.
+	for family := range modelAliases {
+		target := ResolveFamilyAlias(family)
+		if got := NormalizeModel(family); got != target {
+			t.Errorf("NormalizeModel(%q) = %q, want the alias target %q", family, got, target)
+		}
+		if _, priced := Prices[target]; !priced {
+			t.Errorf("alias %q resolves to %q, which has no price row", family, target)
+		}
+	}
+
 	// An unrecognized dated id keeps its full form so coverage reports what
 	// Claude Code actually emitted rather than a truncation of it.
 	if got := NormalizeModel("claude-unknown-9-20260101"); got != "claude-unknown-9-20260101" {
@@ -161,16 +190,15 @@ func TestCanonicalModelArg(t *testing.T) {
 		{"Sonnet", "claude-sonnet-5", true},
 		{"SONNET", "claude-sonnet-5", true},
 		{"claude-sonnet", "claude-sonnet-5", true},
-		{"opus", "claude-opus-5", true},
-		{"claude-opus", "claude-opus-5", true},
 		{"haiku", "claude-haiku-4-5", true},
 		// An explicit generation is honoured as written.
 		{"sonnet-5", "claude-sonnet-5", true},
 		{"claude-sonnet-5", "claude-sonnet-5", true},
 		{"claude-sonnet-4.6", "claude-sonnet-4-6", true},
 		{"claude_sonnet_4_6", "claude-sonnet-4-6", true},
-		// The context-window suffix rides along with the resolution.
-		{"opus[1m]", "claude-opus-5[1m]", true},
+		// The context-window suffix rides along with the resolution. The
+		// bare-family form is asserted below against the alias table, not
+		// here, so a new generation does not falsify a literal.
 		{"Claude-Opus-5[1m]", "claude-opus-5[1m]", true},
 		{"", "", true},
 		{"   ", "", true},
@@ -182,6 +210,24 @@ func TestCanonicalModelArg(t *testing.T) {
 		if got != c.want || recognized != c.recognized {
 			t.Errorf("CanonicalModelArg(%q) = (%q, %v), want (%q, %v)",
 				c.in, got, recognized, c.want, c.recognized)
+		}
+	}
+
+	// Bare family words, and the same word wearing a context suffix, both
+	// resolve through the alias table — derived, for the reason above.
+	for family := range modelAliases {
+		target := ResolveFamilyAlias(family)
+		if got, ok := CanonicalModelArg(family); got != target || !ok {
+			t.Errorf("CanonicalModelArg(%q) = (%q, %v), want (%q, true)", family, got, ok, target)
+		}
+		if got, ok := CanonicalModelArg(family + "[1m]"); got != target+"[1m]" || !ok {
+			t.Errorf("CanonicalModelArg(%q[1m]) = (%q, %v), want (%q[1m], true)",
+				family, got, ok, target)
+		}
+		// The family word wearing a `claude-` prefix resolves the same way.
+		if got, ok := CanonicalModelArg("claude-" + family); got != target || !ok {
+			t.Errorf("CanonicalModelArg(\"claude-%s\") = (%q, %v), want (%q, true)",
+				family, got, ok, target)
 		}
 	}
 }

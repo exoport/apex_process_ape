@@ -27,7 +27,13 @@ const perMillion = 1_000_000.0
 const (
 	CacheCreationEphemeral5mMul = 1.25
 	CacheCreationEphemeral1hMul = 2.00
-	CacheReadMul                = 0.10
+	// DefaultCacheReadMul is the cache-read multiple for every model that
+	// does not publish its own. It is NOT universal: Claude Opus 5.5 reads
+	// at 0.05x and Claude Fable 5.1 / Mythos 5.1 at 0.025x, carried per
+	// model on ModelPrice.CacheReadMul. This was a single global constant
+	// applied to everything, which priced Opus 5.5 cache reads 2x high and
+	// Fable 5.1's 4x.
+	DefaultCacheReadMul = 0.10
 )
 
 // TurnCost returns USD for one assistant turn given its usage block
@@ -36,8 +42,11 @@ const (
 //	turn_cost = BaseInput × input_tokens
 //	          + BaseInput × 1.25 × cache_creation.ephemeral_5m_input_tokens
 //	          + BaseInput × 2.00 × cache_creation.ephemeral_1h_input_tokens
-//	          + BaseInput × 0.10 × cache_read_input_tokens
+//	          + BaseInput × cacheReadMul × cache_read_input_tokens
 //	          + Output    × output_tokens
+//
+// cacheReadMul is the MODEL's, not a constant: 0.10 for most, 0.05 on
+// Claude Opus 5.5, 0.025 on Claude Fable 5.1 / Mythos 5.1.
 //
 // All terms divided by 1M so the per-million-token price table can be
 // used directly. Unknown models (zero ModelPrice) yield $0.00 with no
@@ -46,7 +55,7 @@ func TurnCost(u UsageBlock, p ModelPrice) float64 {
 	return p.BaseInput*float64(u.InputTokens)/perMillion +
 		p.BaseInput*CacheCreationEphemeral5mMul*float64(u.CacheCreation.Ephemeral5m)/perMillion +
 		p.BaseInput*CacheCreationEphemeral1hMul*float64(u.CacheCreation.Ephemeral1h)/perMillion +
-		p.BaseInput*CacheReadMul*float64(u.CacheRead)/perMillion +
+		p.BaseInput*p.CacheReadMultiplier()*float64(u.CacheRead)/perMillion +
 		p.Output*float64(u.OutputTokens)/perMillion
 }
 

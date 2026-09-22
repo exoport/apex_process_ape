@@ -41,6 +41,58 @@
   because a stale reference degrades an agent's writes without stopping the
   project working.
 
+- **fix(cost): three wrong numbers in the price table, found by reading the
+  authority instead of the gate.** `make check-prices` went red on
+  `claude-opus-5-5` appearing in local transcripts. Fixing that surfaced two
+  larger errors the gate could never have reported, because it asks whether
+  every observed model has a ROW, not whether the row is RIGHT.
+
+  - **`claude-opus-5-5` was unpriced**, so it fell to a family estimate.
+    Its real rate is **4.00/20.00** — *cheaper* than Opus 5's 5.00/25.00,
+    which is the unusual direction — so the Opus-tier estimate overstated
+    every turn by 25%. The `opus` alias also still pointed at
+    `claude-opus-5`, meaning a bare `opus` in a spec or `--model` selected
+    the superseded model.
+  - **Claude Sonnet 5 was priced 50% high since 2026-09-01.** The table
+    carried 3.00/15.00 as the standard rate with a dated window dropping to
+    2.00/10.00 until 2026-08-31 — it had encoded an *announced* price
+    increase as fact. That increase was cancelled and the intro rate became
+    the standard one, so there was never a 3.00/15.00 period at all. Now a
+    flat 2.00/10.00 with no window, because a scheduled price is not a
+    price. The `dated_prices` mechanism is untouched for any real future
+    window; what went is `SonnetIntroEnd`, which named an instant that
+    stopped existing.
+  - **Cache reads billed at one global 0.10x multiple.** The published
+    rates are 0.10x for most models, **0.05x on Opus 5.5** and **0.025x on
+    Fable 5.1 / Mythos 5.1** — so cache reads priced 2x high on one and 4x
+    high on the other, on what is usually the largest token category in an
+    agentic run. `cache_read_mul:` is now an optional per-row field (absent
+    = 0.10) carried on `ModelPrice`, and it rides the same row type as the
+    rates, so `ape costs update --from` can correct it without a rebuild.
+
+  Five tests had the old assumptions baked in as literals — three pinning
+  `opus` to `claude-opus-5`, two assuming the whole Opus tier shares one
+  rate. They now derive from the alias table, so the next generation cannot
+  falsify them. The 2026-07-14 regression lock was split rather than
+  edited: the explicit id still pins 5.00/25.00, while the bare family word
+  is checked for exactness and a non-zero rate, which is what that incident
+  was actually about and survives a generation turnover instead of failing
+  on one.
+
+- **fix(model): ape's help named three model families and accepted five.**
+  Which bare words `--model` takes is data — `internal/cost/prices.yaml`'s
+  `aliases:` — and it has carried `fable` and `mythos` alongside `opus`,
+  `sonnet` and `haiku` for some time. Six sentences describing that set in
+  prose had not moved: the `--model` descriptions on `task`, `prompt` and
+  `chat`, the unrecognized-model warning, the same warning for a pipeline
+  spec, and `ape doctor`'s remediation for an unrecognized `model:`. All six
+  said "(sonnet, opus, haiku)". So ape told a caller that a word it would
+  honour was not a family — and the framework's own orchestrator reference
+  correctly documents five, meaning a persona following it would write a
+  model ape's help denied. All six now derive the list from the alias table,
+  which is the only fix that survives the next alias: a seventh sentence
+  written by hand is the defect, not the wording of any one of them.
+
 - **fix(story): `--file`'s flag summary contradicted its own help.** `ape story
   verify --help` states the gate's exit table twice — a numbered block under
   the `--file` description documenting 0/2/3/4, and a parenthesised summary on
