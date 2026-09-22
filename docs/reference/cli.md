@@ -104,6 +104,7 @@ Subcommands:
 - `rendered` — Print what the browser reported it drew
 - `requests` — List the human's notes to an agent
 - `serve` — Run the board server for this project
+- `shot` — Screenshot tabs of the running board with a headless browser
 - `status` — Report this project's running board, if any, and the caps beacon
 - `uploads` — List the files under .aboard/uploads/ and the tabs that mention them
 - `version` — Print the build identity of this binary
@@ -639,6 +640,12 @@ draws nothing at all. After every mount the shell posts the control ids it drew,
 the ones somebody pressed, and any unknown-component markers, and this prints
 them.
 
+It also says what did NOT FIT, at the width that browser had: a `ui`
+component or an `html` widget whose content is larger than its box — cut off
+(overflow hidden), spilling past its edge (an unbroken URL), or scrolling inside
+the tab (a wide code block or table). Only those two renderers measure; the
+others draw the board's own layouts, which truncate on purpose.
+
 This is NOT a DOM sweep. Every id here is already declared in
 views/<type>.spec.json; nothing is scraped and nothing is matched against prose.
 
@@ -813,6 +820,75 @@ Flags:
 | `--dev-dir` | string | `—` | with --dev, the web tree to serve (default: pkg/aboard/web under the root) |
 | `--port` | int | `0` | port to listen on (0 derives one from the project root; env PORT) |
 | `--state` | string | `—` | state file to serve (default: .aboard/aboard.json under the root) |
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | directory to resolve the project root from (default: the working directory) |
+| `--name` | string | `—` | board name, for a second isolated board in the same project (env ABOARD_NAME) |
+
+## ape aboard shot
+
+Screenshot tabs of the running board with a headless browser
+
+```
+ape aboard shot <tab>... [flags]
+```
+
+Take a picture of a tab as the human sees it, and print where it went. Then
+READ the picture: `ape aboard apply` exits 0 for a tree that draws an empty box, and
+the write warnings cannot see a layout that is legal and still unreadable.
+
+A tab is named by id, key or type. The board must be running — the picture is of
+the page the binary serving it draws — and a chromium-family browser must be
+installed: chromium, google-chrome or Edge, found on $PATH or in its usual place,
+or named with --browser (or ABOARD_BROWSER).
+
+Pictures go to .aboard/run/shots/<tab>.png, and the previous one is removed
+first, so a file there is this run's or nothing.
+
+Under each picture it lists what did NOT FIT in that window, as the page itself
+measured it: a ui component or an html widget whose content is larger than its
+box, cut off, spilling past its edge, or scrolling inside the tab. That catches
+what a picture hides — the text below a clipped edge, the column a table
+scrolls away — and it is measured at --width, so try a narrower one too.
+
+What it knows so you do not have to:
+
+  a ui tab's panels     --node <panel label> opens that panel; without it the
+                        picture shows the FIRST one, and the output says so
+  an html tab           is shot on its own route, because a headless browser
+                        does not reliably paint the frame inside the board
+  a snap browser        renders into its own directory and the file is moved,
+                        because a snap cannot write to a project under a hidden
+                        directory such as ~/.cache, or outside $HOME
+  mount receipts        none are posted: `ape aboard rendered` and
+                        `ape aboard wait --for "rendered <id>"` go on meaning a person
+                        had the tab open
+
+It never writes to the board.
+
+Examples:
+
+```
+  ape aboard shot ab24
+  ape aboard shot ab24 --node Summary
+  ape aboard shot kanban dag --theme light --width 1000
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--browser` | string | `—` | the chromium-family browser to drive, a path or a name on $PATH (env ABOARD_BROWSER; default: the first one found) |
+| `--height` | int | `900` | window height in pixels |
+| `--help-panel` | bool | `false` | open the board's help panel over the tab |
+| `--node` | string | `—` | a node's id or a ui panel's label to open first; refused if the tab has none |
+| `--output-format` | string | `human` | human, json or yaml |
+| `--theme` | string | `—` | dark or light (default: the board's own default) |
+| `--timeout` | duration | `1m30s` | how long each picture may take |
+| `--width` | int | `1400` | window width in pixels |
 
 Global flags:
 

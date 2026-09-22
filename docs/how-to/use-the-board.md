@@ -101,7 +101,7 @@ Release and `code --install-extension aboard-vscode-<version>.vsix --force`.
 
 A host that shows the board inside a view of its own drives it through the
 shell URL and a message channel. The contract is aboard's —
-[HTTP API: `GET /`](https://github.com/exoport/aboard/blob/v0.2.1/docs/reference/http-api.md#get---get-aboardhtml)
+[HTTP API: `GET /`](https://github.com/exoport/aboard/blob/v0.3.0/docs/reference/http-api.md#get---get-aboardhtml)
 — and ape serves it unchanged:
 
 | in the URL | what it does |

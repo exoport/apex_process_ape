@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## v0.0.74 (unreleased)
+
+- **feat(aboard): the board is upgraded to aboard v0.3.0, and it can take its
+  own picture.** `ape aboard shot <tab>` screenshots a running board's tab with
+  a headless chromium-family browser and writes it to
+  `.aboard/run/shots/<tab>.png`. What earns it more than convenience is the
+  report printed under each picture: every ui component or html widget whose
+  content is larger than its box — cut off, spilling past its edge, or
+  scrolling inside the tab — as the page itself measured it, at the width the
+  shot was taken. That is the gap the existing gates cannot see. `ape aboard
+  apply` exits 0 for a tree that draws an empty box, because a write warning
+  judges the document and not the rendering, so a layout could be legal and
+  unreadable at the same time and nothing would say so.
+
+  The mount needed no change: aboard is a library by construction, so a new
+  command arrives through the single `AddCommand` and inherits ape's `Argv0`
+  — the new command's own help text says `ape aboard apply`, not `aboard
+  apply`. `shot` also declares no new exit status, reusing 0/1/2, so ape's
+  exit-table bridge still covers the tree completely.
+
+- **The board's `capsHash` moves from `8beefdfe` to `4a958b30`**, because the
+  capability manifest gained the new surface. Verified host-identical: the
+  board ape mounts reports exactly the hash aboard v0.3.0 documents for
+  itself, so an agent reading the manifest still cannot tell which binary is
+  serving. The consequence for a project: a `.claude/skills/aboard` reference
+  copied under the old board now describes one this binary no longer serves,
+  and `ape doctor --only aboard.skill_reference` says so with the command to
+  refresh it. A warn rather than a fail, because a stale reference degrades an
+  agent's writes without stopping the project working.
+
 ## v0.0.73 (2026-09-21)
 
 The maintenance lane's carrier. The APEX framework's PLAN-68 adds a lean lane
