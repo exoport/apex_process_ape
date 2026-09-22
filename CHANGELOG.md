@@ -24,11 +24,28 @@
   capability manifest gained the new surface. Verified host-identical: the
   board ape mounts reports exactly the hash aboard v0.3.0 documents for
   itself, so an agent reading the manifest still cannot tell which binary is
-  serving. The consequence for a project: a `.claude/skills/aboard` reference
-  copied under the old board now describes one this binary no longer serves,
-  and `ape doctor --only aboard.skill_reference` says so with the command to
-  refresh it. A warn rather than a fail, because a stale reference degrades an
-  agent's writes without stopping the project working.
+  serving.
+
+  **`ape framework update` does NOT refresh the copied reference, and does not
+  need to.** Two different skills are easy to confuse here. The framework's own
+  `apex-aboard` carries no cached capability reference at all — it runs `ape
+  aboard capabilities` live on every run, which the framework's manifest calls
+  the load-bearing command for exactly this reason — so it is immune to a
+  capsHash move by construction. The thing that goes stale is
+  `.claude/skills/aboard/`, which is **aboard's own** skill, copied into a
+  project by whoever wanted it; the framework ships nothing at that path, so an
+  install or update never touches it. `ape doctor --only
+  aboard.skill_reference` reports the drift and now prints both regeneration
+  commands rather than one — the reference AND the recipe index, which is what
+  aboard's own `make caps` writes into that skill. A warn rather than a fail,
+  because a stale reference degrades an agent's writes without stopping the
+  project working.
+
+- **fix(doctor): the aboard skill-reference remediation promised two files and
+  fixed one.** It told the reader to "regenerate both generated references" and
+  handed over a command for `reference.generated.md` only, leaving
+  `references/recipes.md` stamped for a board that no longer serves it — a
+  half-repair that reports success.
 
 ## v0.0.73 (2026-09-21)
 

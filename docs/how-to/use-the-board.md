@@ -161,6 +161,39 @@ An image an agent supplies goes in **`.aboard/uploads/`**, referenced as
 `uploads/<file>` — never `assets/`, which is compiled into the binary, so a file
 written there answers 404.
 
+## Look at what it drew
+
+Those checks judge the document, not the rendering. `apply` exits 0 for a tree
+that draws an empty box, and no write warning can see a tab that is legal and
+still unreadable. `ape aboard shot` closes that gap by photographing the running
+board and measuring the result:
+
+```bash
+ape aboard shot kanban                     # .aboard/run/shots/kanban.png
+ape aboard shot ab24 --node Summary        # one node of a tab
+ape aboard shot kanban dag --width 1000    # several tabs, narrower window
+```
+
+Name a tab by id, key or type. The board must be running — the picture is of the
+page the binary serving it draws — and a chromium-family browser must be
+installed: chromium, google-chrome or Edge, found on `$PATH` or in its usual
+place, or named with `--browser` (env `ABOARD_BROWSER`). Pictures land in
+`.aboard/run/shots/<tab>.png`, and the previous one is deleted first, so a file
+there is this run's or nothing.
+
+**Read the report under the picture, not just the picture.** It lists what did
+not fit, as the page itself measured it: any ui component or html widget whose
+content is larger than its box — cut off, spilling past its edge, or scrolling
+inside the tab. That is what a screenshot hides. The text below a clipped edge
+and the column a table scrolls away are both invisible in the image and named in
+the report.
+
+The measurement is taken at `--width`, so it answers for that window and no
+other. A tab that fits at the default can still clip on a narrower screen; run
+it again at the width you care about.
+
+Needs **ape v0.0.74 or later** (aboard v0.3.0).
+
 ## The board is already there
 
 `ape framework setup` and `ape framework update` create `.aboard/` for you, so

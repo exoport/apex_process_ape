@@ -867,9 +867,16 @@ func checkAboardSkillReference(ctx context.Context, env doctorEnv) CheckResult {
 				rep.SkillCapsHash, rep.CapsHash),
 			Remediation: "The copied skill describes a board this binary no longer serves. An agent " +
 				"reading it can set state no renderer reads, and the write still reports success. " +
-				"Regenerate both generated references against this binary.",
+				"Regenerate both generated references against this binary. Note `ape framework " +
+				"update` does NOT do this: the framework ships no skill at that path — it is a " +
+				"copy of aboard's own, and the framework's `apex-aboard` reads the live surface " +
+				"instead of caching one, so it is unaffected.",
+			// Both files aboard's own `make caps` writes into the skill, because the
+			// remediation says "both" and one command would leave the recipe index
+			// stamped for a board that no longer serves it.
 			FixCommand: "ape aboard capabilities --format md > " +
-				".claude/skills/aboard/references/reference.generated.md",
+				".claude/skills/aboard/references/reference.generated.md && " +
+				"ape aboard recipes index > .claude/skills/aboard/references/recipes.md",
 		}
 	}
 }
