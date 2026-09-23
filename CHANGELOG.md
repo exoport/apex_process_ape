@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## v0.1.0 (2026-09-23)
+
+The first minor release. It is v0.0.74 plus one help-text fix: no command,
+flag, exit code or file format changes, and `ape update` from any 0.0.x
+release picks it up normally (version comparison is semver, so 0.1.0 sorts
+after 0.0.74).
+
+- **What the number marks.** This is the ape that was evaluated end to end
+  with APEX framework **v0.23.0**, and the eval passed with no ape findings.
+  The framework's floor (`ape >= 0.0.74`) is satisfied. Compatibility with
+  Claude Code was checked against **2.1.281** (`make check-harness`, all four
+  gates, no skips).
+- **It also ends the shared number space.** The framework numbered its
+  releases `0.0.x` up to v0.0.79 before moving to `0.2x.x`, while ape was
+  still in `0.0.7x`. So a version like `v0.0.76` could mean either project,
+  and only the context told you which. From v0.1.0 on, ape's numbers can't be
+  mistaken for the framework's. Versions already written in docs and records
+  are left as they are.
+- **Still pre-1.0.** The status in the README is unchanged: commands and flags
+  may still change between minor releases until `v1.0.0`.
+
+- **docs(pipeline): `--prompt` help named a `prompt_flag` no pipeline
+  declares.** `ape pipeline --help`, the `--prompt` flag description and two
+  docs said `apex-create-epics-and-stories` in the `epics` pipeline opts in.
+  No shipped framework pipeline declares `prompt_flag`: none of the ten in
+  v0.23.0, and `git log -S` shows none ever did. All four now say so, and
+  `pass-args-to-skills.md` presents its `epics` example as a step you would add
+  the field to yourself. The README quickstart had the same claim in example
+  form: `ape pipeline epics --prompt "…"`, described as generating epics from
+  a one-line brief. On a shipped pipeline that prompt goes nowhere, and the
+  epics pipeline builds from the design and governance output anyway. The
+  example is now plain `ape pipeline epics`. Reported by the framework session's sweep of its
+  `ape-execution.md` against a binary built from the v0.0.74 tag.
+
 ## v0.0.74 (2026-09-22)
 
 - **feat(aboard): the board is upgraded to aboard v0.3.0, and it can take its

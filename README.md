@@ -26,7 +26,7 @@ The other recommended install path is to pin a specific release in your project 
 ```bash
 # In your project repo:
 bingo get -l github.com/exoport/apex_process_ape/cmd/ape@latest 
-# or a specific release tag, e.g. v0.0.38
+# or a specific release tag, e.g. v0.1.0
 ```
 
 ## Quickstart
@@ -57,8 +57,8 @@ ape pipeline design
 # Run governance scaffolding: pattern + adr + capability/feature activation.
 ape pipeline governance
 
-# Generate epics + stories from a one-line product brief.
-ape pipeline epics --prompt "minimal greeter app, single screen, no auth"
+# Decompose the architecture + governance into epics and stories.
+ape pipeline epics
 
 # Disable the TUI for scripted runs (auto-detected on non-TTY).
 ape pipeline design --no-tui
