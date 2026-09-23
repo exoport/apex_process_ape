@@ -50,7 +50,7 @@ Resulting prompt: `/apex-agent-pm --autonomous -- apex-create-epics-and-stories 
 
 The value passes through Go's argv directly — embedded quotes, em-dashes, and shell metacharacters survive without escaping.
 
-If the step has no `prompt_flag`, the CLI `--prompt` value is silently ignored for that step. In the canonical pipeline set, only `apex-create-epics-and-stories` opts in.
+If the step has no `prompt_flag`, the CLI `--prompt` value is silently ignored for that step. No canonical framework pipeline declares `prompt_flag`, so `--prompt` does nothing on an unmodified install — the `epics` example above is a step you would add it to yourself.
 
 ## What you can't do
 

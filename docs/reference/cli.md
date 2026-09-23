@@ -3623,9 +3623,10 @@ Rendering surface: --tui (default) shows the Bubble Tea panels, --web
 serves the bridged web UI, --no-tui prints plain stdout progress lines.
 
 The --prompt flag is forwarded only to skills whose pipeline definition
-declares prompt_flag (currently apex-create-epics-and-stories in the
-"epics" pipeline). The prompt value passes through as REPL keystrokes
-directly, so embedded quotes/specials survive without shell quoting.
+declares prompt_flag; no canonical framework pipeline declares it, so
+the flag only reaches a step in a pipeline you have added it to. The
+prompt value passes through as REPL keystrokes directly, so embedded
+quotes/specials survive without shell quoting.
 
 Examples:
 
@@ -3656,7 +3657,7 @@ Flags:
 | `--open` | bool | `false` | With --web (or default): xdg-open the broker URL on start. |
 | `--output-format` | string | `human` | Output format for list mode (no positional arg): human\|json\|yaml |
 | `--output-style` | string | `—` | Output style pinned on the spawned session (default "Default"). Pass "inherit" to keep whatever style the machine is configured with. |
-| `--prompt` | string | `—` | Optional prompt forwarded to skills that accept it (currently: epics) |
+| `--prompt` | string | `—` | Optional prompt forwarded to steps whose pipeline declares prompt_flag (no canonical pipeline does) |
 | `--prompt-file` | string | `—` | File holding the --prompt text; "-" reads stdin. Mutually exclusive with --prompt |
 | `--quiet` | bool | `false` | With --no-tui: suppress per-event stream; print only stage/step start/end markers |
 | `--transcript-store` | string | `nats-object` | Transcript blob backend: nats-object\|uri-offload (env APE_TRANSCRIPT_STORE). |

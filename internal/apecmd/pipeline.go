@@ -176,7 +176,7 @@ func newPipelineCmd() *cobra.Command {
 			}
 		},
 	}
-	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Optional prompt forwarded to skills that accept it (currently: epics)")
+	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Optional prompt forwarded to steps whose pipeline declares prompt_flag (no canonical pipeline does)")
 	cmd.Flags().StringVar(&promptFileFlag, "prompt-file", "",
 		`File holding the --prompt text; "-" reads stdin. Mutually exclusive with --prompt`)
 	cmd.Flags().BoolVar(&webFlag, "web", false, "Bridged web UI. Explicit form for scripts.")
@@ -247,9 +247,10 @@ Rendering surface: --tui (default) shows the Bubble Tea panels, --web
 serves the bridged web UI, --no-tui prints plain stdout progress lines.
 
 The --prompt flag is forwarded only to skills whose pipeline definition
-declares prompt_flag (currently apex-create-epics-and-stories in the
-"epics" pipeline). The prompt value passes through as REPL keystrokes
-directly, so embedded quotes/specials survive without shell quoting.`
+declares prompt_flag; no canonical framework pipeline declares it, so
+the flag only reaches a step in a pipeline you have added it to. The
+prompt value passes through as REPL keystrokes directly, so embedded
+quotes/specials survive without shell quoting.`
 }
 
 // removedExecFlagMessage is the actionable error shown when a caller
