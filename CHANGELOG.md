@@ -37,6 +37,12 @@
   backfill restores every entry to the values the framework's skills had
   written.
 
+- **fix(framework): update no longer reports every skill as removed.** Install
+  clears every `apex-*` skill before copying the framework's back, and it
+  counted that clear, so a routine update printed "96 installed (96
+  removed)". It now counts only the skills the copy didn't put back, which
+  are the ones gone upstream.
+
 ## v0.1.0 (2026-09-23)
 
 The first minor release. It is v0.0.74 plus one help-text fix: no command,

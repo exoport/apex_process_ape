@@ -309,8 +309,9 @@ func TestUpdate_RemovesStaleApexSkills(t *testing.T) {
 		ApeVersion: "0.0.6", Bootstrapper: framework.NoopBootstrapper{}, Now: fixedNow,
 	})
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, res.Summary.SkillsRemoved, 1)
-	require.Contains(t, res.Summary.SkillsRemovedPaths, filepath.Join(".claude", "skills", "apex-removed"))
+	require.Equal(t, 1, res.Summary.SkillsRemoved,
+		"only the skill that is gone upstream — not every apex-* the wipe cleared and the copy put back")
+	require.Equal(t, []string{filepath.Join(".claude", "skills", "apex-removed")}, res.Summary.SkillsRemovedPaths)
 
 	_, err = os.Stat(stale)
 	require.True(t, os.IsNotExist(err), "stale apex-* skill must be removed")
@@ -925,4 +926,27 @@ func TestUpdate_MigrationListIsRefreshedNotSynced(t *testing.T) {
 	require.FileExists(t, filepath.Join(proj, framework.ProjectMigrationsDir, "v0.16.0_seq-01_x.md"),
 		"a pruned entry stays: its id may already be in the ledger")
 	require.FileExists(t, filepath.Join(proj, framework.ProjectMigrationsDir, "v0.18.0_seq-01_y.md"))
+}
+
+// TestUpdate_ReinstalledSkillsAreNotReportedRemoved: the update wipes every
+// apex-* skill and copies the framework's back. It used to report the wipe,
+// so an update that removed nothing printed "2 installed (2 removed)".
+func TestUpdate_ReinstalledSkillsAreNotReportedRemoved(t *testing.T) {
+	t.Parallel()
+	fw, proj := t.TempDir(), t.TempDir()
+	fakeFramework(t, fw, "v0.10.2")
+	opts := func() *framework.UpdateOptions {
+		return &framework.UpdateOptions{
+			FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+			ApeVersion: "test", Bootstrapper: framework.NoopBootstrapper{},
+		}
+	}
+	_, err := framework.Setup(context.Background(), opts())
+	require.NoError(t, err)
+
+	res, err := framework.Update(context.Background(), opts())
+	require.NoError(t, err)
+	require.Equal(t, 2, res.Summary.SkillsInstalled)
+	require.Zero(t, res.Summary.SkillsRemoved)
+	require.Empty(t, res.Summary.SkillsRemovedPaths)
 }

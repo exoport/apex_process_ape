@@ -318,11 +318,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create %s: %w", skillsDir, err)
 	}
-	removed, err := wipeStaleSkills(skillsDir)
-	if err != nil {
-		return nil, err
-	}
-	installedSkills, err := copySkills(opts.FrameworkRepo, skillsDir)
+	installedSkills, removed, err := replaceSkills(opts.FrameworkRepo, skillsDir)
 	if err != nil {
 		return nil, err
 	}
@@ -1084,7 +1080,8 @@ func validateFrameworkLayout(repoPath string) error {
 
 // wipeStaleSkills removes every apex-* entry under skillsDir,
 // returning the relative paths (under the project root) of what was
-// removed. Used so that skills deleted upstream disappear locally too.
+// wiped. Used so that skills deleted upstream disappear locally too; the
+// caller narrows the list to those with notReinstalled.
 func wipeStaleSkills(skillsDir string) ([]string, error) {
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
@@ -1106,6 +1103,39 @@ func wipeStaleSkills(skillsDir string) ([]string, error) {
 	}
 	sort.Strings(removed)
 	return removed, nil
+}
+
+// replaceSkills clears every apex-* skill and copies the framework's back,
+// returning what was installed and what was REMOVED — only the skills the
+// copy did not put back, i.e. the ones gone upstream. Counting the clear
+// itself reported "96 installed (96 removed)" on every update.
+func replaceSkills(frameworkRepo, skillsDir string) (installed, removed []string, err error) {
+	wiped, err := wipeStaleSkills(skillsDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	installed, err = copySkills(frameworkRepo, skillsDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	return installed, notReinstalled(wiped, installed), nil
+}
+
+// notReinstalled returns the wiped paths the install did not put back —
+// the skills that no longer exist upstream. Both lists are sorted
+// project-relative paths.
+func notReinstalled(wiped, installed []string) []string {
+	back := make(map[string]bool, len(installed))
+	for _, p := range installed {
+		back[p] = true
+	}
+	gone := make([]string, 0, len(wiped))
+	for _, p := range wiped {
+		if !back[p] {
+			gone = append(gone, p)
+		}
+	}
+	return gone
 }
 
 // copySkills copies every apex-* directory under
