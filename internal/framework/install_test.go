@@ -950,3 +950,42 @@ func TestUpdate_ReinstalledSkillsAreNotReportedRemoved(t *testing.T) {
 	require.Zero(t, res.Summary.SkillsRemoved)
 	require.Empty(t, res.Summary.SkillsRemovedPaths)
 }
+
+// TestUpdate_NoOpKeepsInstalledAt: a no-op update must leave the tree
+// clean, and a fresh installed_at was the one line it still rewrote. When
+// anything about the install changes — here the framework commit — it
+// moves.
+func TestUpdate_NoOpKeepsInstalledAt(t *testing.T) {
+	t.Parallel()
+	fw, proj := t.TempDir(), t.TempDir()
+	fakeFramework(t, fw, "v0.10.2")
+	clock := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	opts := func() *framework.UpdateOptions {
+		return &framework.UpdateOptions{
+			FrameworkRepo: fw, ProjectRoot: proj, NoFetch: true,
+			ApeVersion: "test", Bootstrapper: framework.NoopBootstrapper{},
+			Now: func() time.Time { return clock },
+		}
+	}
+	_, err := framework.Setup(context.Background(), opts())
+	require.NoError(t, err)
+	metaPath := framework.MetadataPath(proj)
+	before, err := os.ReadFile(metaPath)
+	require.NoError(t, err)
+
+	clock = clock.Add(time.Hour)
+	_, err = framework.Update(context.Background(), opts())
+	require.NoError(t, err)
+	after, err := os.ReadFile(metaPath)
+	require.NoError(t, err)
+	require.Equal(t, string(before), string(after), "a no-op update leaves framework.yaml byte-identical")
+
+	// A new framework commit is a change, and installed_at records it.
+	require.NoError(t, os.WriteFile(filepath.Join(fw, "NOTE.md"), []byte("x"), 0o644))
+	commitAll(t, fw, "a new framework commit")
+	_, err = framework.Update(context.Background(), opts())
+	require.NoError(t, err)
+	meta, err := framework.ReadMetadata(proj)
+	require.NoError(t, err)
+	require.True(t, meta.InstalledAt.Equal(clock), "installed_at moves when the install does: %v", meta.InstalledAt)
+}

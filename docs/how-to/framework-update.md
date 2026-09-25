@@ -75,7 +75,7 @@ Running `update` twice on a steady-state project is safe and cheap:
 - Operating rules: fragment overwritten; the `CLAUDE.md` managed block is rewritten only when its bytes actually change, so a steady-state `update` leaves `CLAUDE.md` byte-identical.
 - `.gitignore`: appended to only when the sidecar is not already ignored, so a steady-state `update` leaves it byte-identical. Unlike `CLAUDE.md` this is **not** a managed block — ape appends one line and never rewrites the file, because an ignore file's whole job is to be hand-curated and managing a region of it to own a single line is a bad trade. Delete the line and the next `update` puts it back; that is the cost of the simpler contract.
 - Run artifacts: relocated only if a legacy tree still holds runs. A project already on the current layout has nothing to read, so a steady-state `update` moves nothing and reports nothing.
-- `framework.yaml`: rewritten with a fresh `installed_at` timestamp.
+- `framework.yaml`: rewritten, but byte-identical when nothing about the install changed. `installed_at` moves only when the framework commit, the ape version, the installed files or the ledger did (since v0.1.1). So a steady-state `update` leaves the whole tree clean.
 
 The destructive operation that matters — wiping `apex-*` skills — is git-safe: if the project is a git repo and you have uncommitted edits to a tracked `apex-*` skill file, the command refuses without `--force`. Untracked `apex-*` paths are treated as leftovers and get clobbered.
 

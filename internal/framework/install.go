@@ -1,6 +1,7 @@
 package framework
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -401,7 +402,8 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	// re-run over an existing project that dropped the ledger would make
 	// every applied migration look pending again.
 	var priorMigrations []AppliedMigration
-	if prior, prErr := ReadMetadata(opts.ProjectRoot); prErr == nil {
+	prior, prErr := ReadMetadata(opts.ProjectRoot)
+	if prErr == nil {
 		priorMigrations = prior.Migrations
 		if !doBootstrap {
 			cfgSource = prior.Sources.Config
@@ -427,7 +429,10 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 		},
 		Migrations: priorMigrations,
 	}
-	if err := WriteMetadata(opts.ProjectRoot, &meta); err != nil {
+	if prErr != nil {
+		prior = nil
+	}
+	if err := writeInstallMetadata(opts.ProjectRoot, prior, &meta); err != nil {
 		return nil, err
 	}
 	return &UpdateResult{
@@ -1103,6 +1108,29 @@ func wipeStaleSkills(skillsDir string) ([]string, error) {
 	}
 	sort.Strings(removed)
 	return removed, nil
+}
+
+// writeInstallMetadata writes meta, keeping prior's installed_at when
+// nothing else about the install changed: a no-op update must leave the
+// tree clean, and a fresh installed_at was the one line it still
+// rewrote. prior is nil when there was no readable record.
+func writeInstallMetadata(projectRoot string, prior, meta *Metadata) error {
+	if prior != nil && sameInstall(prior, meta) {
+		meta.InstalledAt = prior.InstalledAt
+	}
+	return WriteMetadata(projectRoot, meta)
+}
+
+// sameInstall reports whether two metadata records describe the same
+// install — every field but installed_at. Compared as rendered YAML, the
+// form on disk, so a nil and an empty list read the same way they are
+// written.
+func sameInstall(prior, next *Metadata) bool {
+	a, b := *prior, *next
+	a.InstalledAt, b.InstalledAt = time.Time{}, time.Time{}
+	ay, errA := yaml.Marshal(&a)
+	by, errB := yaml.Marshal(&b)
+	return errA == nil && errB == nil && bytes.Equal(ay, by)
 }
 
 // replaceSkills clears every apex-* skill and copies the framework's back,

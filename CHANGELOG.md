@@ -81,6 +81,13 @@
   removed)". It now counts only the skills the copy didn't put back, which
   are the ones gone upstream.
 
+- **fix(framework): a no-op update keeps `installed_at`.** `framework.yaml`
+  was rewritten with a fresh `installed_at` on every update, which was the
+  last line a no-op update still changed. `installed_at` now moves only when
+  something else in the record does (the framework commit, the ape version,
+  the installed files or the migration ledger), so a steady-state `ape
+  framework update` leaves the tree clean.
+
 ## v0.1.0 (2026-09-23)
 
 The first minor release. It is v0.0.74 plus one help-text fix: no command,

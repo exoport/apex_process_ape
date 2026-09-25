@@ -72,7 +72,7 @@ first example.
 | Field                   | Type      | Description                                                                                |
 | ----------------------- | --------- | ------------------------------------------------------------------------------------------ |
 | `config_schema_version` | string    | Identifies this file's schema. Currently `"1"`. Bumped only on non-additive shape changes. |
-| `installed_at`          | timestamp | RFC 3339 / ISO 8601 timestamp at which `ape framework update` produced this file.          |
+| `installed_at`          | timestamp | RFC 3339 / ISO 8601 timestamp of the last `ape framework setup`/`update` that changed the install. A no-op update keeps it (since v0.1.1).          |
 | `framework`             | object    | Framework repo state at install time. See [`framework`](#framework).                       |
 | `ape`                   | object    | The ape binary that performed the install. See [`ape`](#ape).                              |
 | `sources`               | object    | Tally of what was installed. See [`sources`](#sources).                                    |
@@ -138,7 +138,7 @@ Tools that read `framework.yaml` should rely on:
 
 1. The file's existence as the signal that `ape framework update` has been run at least once.
 2. `framework.git_hash` as the canonical identifier — tags are convenient but version_tag may be empty.
-3. `installed_at` as a coarse "freshness" timestamp; not authoritative because it advances on every run.
+3. `installed_at` as the time the install last changed. It does not advance on a no-op update (since v0.1.1; before that it advanced on every run).
 4. `sources.*.paths` as the audit trail of what was installed. A path missing on disk is a local deletion (drift signal); a path on disk but not in the list is a local addition (also drift, e.g., a custom pipeline).
 
 ## Related
