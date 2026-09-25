@@ -64,7 +64,7 @@ The result is visible as 'ape deferred list --status discarded', and under
 				))
 			}
 			store, _, date := storeFor(cwdFlag)
-			rec, err := store.Discard(args[0], reason, evidence, date)
+			rec, err := store.Discard(args[0], reason, evidence, date())
 			if err != nil {
 				return err
 			}

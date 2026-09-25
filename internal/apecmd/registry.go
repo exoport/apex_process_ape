@@ -366,6 +366,12 @@ func runRegistrySync(w io.Writer, cwdFlag, outputFormat string, check bool, only
 		}
 		return err
 	}
+	for _, f := range res.Families {
+		if f.Written {
+			cfg.StampUsed() // generated_at carries it
+			break
+		}
+	}
 	if err := emitRegistrySync(w, outputFormat, check, res); err != nil {
 		return err
 	}
@@ -514,6 +520,12 @@ func runRegistryBackfill(w io.Writer, cwdFlag, outputFormat string, check bool, 
 		}
 		return err
 	}
+	for _, f := range res.Families {
+		if f.Written {
+			cfg.StampUsed() // generated_at carries it
+			break
+		}
+	}
 	pending := func() error {
 		if check && res.Pending() {
 			return reportedErr(ExitRunFailed, fmt.Errorf("%d index entr(ies) have fields to fill", len(res.Fills)))
@@ -639,6 +651,9 @@ Exit codes:
 			res, err := registry.Update(cfg, family, updates, stamp)
 			if err != nil {
 				return err
+			}
+			if generatedAt == "" {
+				cfg.StampUsed()
 			}
 			format := output.Format(outputFormat)
 			if format != output.FormatHuman {

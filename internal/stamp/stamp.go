@@ -116,18 +116,32 @@ func New(projectRoot string, now func() time.Time) *Issuer {
 // while `timestamp` is clamped forward would let a project's records carry
 // a date of one day and a timestamp of the next.
 func (i *Issuer) Now() time.Time {
+	t := i.Peek()
+	i.Commit(t)
+	return t
+}
+
+// Peek returns what Now would issue — the later of the wall clock and the
+// persisted floor — without recording it. Pair it with Commit once the
+// value is actually used: the floor only has to cover stamps that were
+// written somewhere, and recording every one that was merely resolved
+// rewrote the floor file on every no-op command, dirtying the tree.
+func (i *Issuer) Peek() time.Time {
 	now := i.now()
-	floor, ok := i.floor()
-	if !ok {
-		i.persist(now)
-		return now
-	}
-	if now.Before(floor) {
-		// The clamp. The floor is already persisted, so nothing to write.
+	if floor, ok := i.floor(); ok && now.Before(floor) {
+		// The clamp.
 		return floor
 	}
-	i.persist(now)
 	return now
+}
+
+// Commit records t as the floor when it is later than the one persisted.
+// A t at or below the floor is already covered, so nothing is written.
+func (i *Issuer) Commit(t time.Time) {
+	if floor, ok := i.floor(); ok && !t.After(floor) {
+		return
+	}
+	i.persist(t)
 }
 
 // Issue returns the formatted stamp for the issued instant.

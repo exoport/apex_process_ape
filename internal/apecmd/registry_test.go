@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/registry"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
@@ -424,4 +425,51 @@ func TestRegistrySyncCheck_ExitCodes(t *testing.T) {
 	require.NoError(t, run(t, "--all", "--cwd", root))
 	require.NoError(t, run(t, "--all", "--check", "--cwd", root), "in sync is exit 0")
 	require.Equal(t, ExitUsage, exitCodeOf(t, run(t, "--family", "nope", "--check", "--cwd", root)))
+}
+
+// TestTimestampFloor_WrittenOnlyWhenUsed: the monotonic floor records the
+// stamps something wrote down. A no-op backfill or sync, and a --check,
+// resolve a stamp and discard it, so they must leave the floor file alone:
+// rewriting it on every run dirtied the tree, and a migration check runs
+// on every `ape framework update`.
+func TestTimestampFloor_WrittenOnlyWhenUsed(t *testing.T) {
+	root := projectFor(t, allExtensionsConfig)
+	seedADRCorpus(t, root, 2, 2) // ADR-0002 is an orphan
+	state := runlog.TimestampStatePath(root)
+	run := func(cmd *cobra.Command, args ...string) {
+		t.Helper()
+		cmd.SetArgs(append(args, "--cwd", root))
+		cmd.SetOut(&bytes.Buffer{})
+		_ = cmd.Execute()
+	}
+
+	run(newRegistryBackfillCmd(), "--all")
+	run(newRegistrySyncCmd(), "--all", "--check")
+	require.NoFileExists(t, state, "a no-op and a --check record nothing")
+
+	run(newRegistrySyncCmd(), "--all")
+	require.FileExists(t, state, "a sync that wrote generated_at records the stamp it wrote")
+}
+
+// TestConfigResolve_IsMonotonic: `ape config resolve` is how skills get the
+// timestamp they write into updated_at, and it read the bare wall clock —
+// the one command the floor was documented to cover, and the one it
+// didn't. A floor in the future must come back as the timestamp, and
+// emitting it records it.
+func TestConfigResolve_IsMonotonic(t *testing.T) {
+	root := projectFor(t, allExtensionsConfig)
+	state := runlog.TimestampStatePath(root)
+	require.NoError(t, os.MkdirAll(filepath.Dir(state), 0o755))
+	require.NoError(t, os.WriteFile(state, []byte("29990101000000\n"), 0o644))
+
+	var buf bytes.Buffer
+	cmd := newConfigCmd()
+	cmd.SetArgs([]string{"resolve", "--cwd", root, "--output-format", "json"})
+	cmd.SetOut(&buf)
+	require.NoError(t, cmd.Execute())
+	var res struct {
+		Timestamp string `json:"timestamp"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &res))
+	require.Equal(t, "29990101000000", res.Timestamp, "clamped to the floor, not the wall clock")
 }

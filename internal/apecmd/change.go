@@ -668,6 +668,9 @@ func (r *changeRun) settle(ctx context.Context, o changeOptions, res taskRun) er
 		return r.refuse(ctx, o, env, ownErr)
 	}
 
+	if !o.dryRun {
+		r.cfg.StampUsed() // the composed commits carry its date
+	}
 	commits, composeErr := layout.Compose(ctx, r.cfg.Root, contract, reconciled, change.ComposeOptions{
 		ChangeID:   r.id,
 		Request:    o.request,

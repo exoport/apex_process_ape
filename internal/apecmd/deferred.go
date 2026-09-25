@@ -48,10 +48,14 @@ per deferred item under that folder would feed every one of them.`,
 // storeFor resolves the project's deferred store, plus the two pieces of
 // resolved config its operations need: the project root (for anchor
 // resolution) and today's local date (for record ids and discharge
-// stamps).
-func storeFor(cwdFlag string) (store *deferred.Store, projectRoot, date string) {
+// stamps). The date is a func so only a writer that takes it records the
+// stamp; list and verify leave the floor file alone.
+func storeFor(cwdFlag string) (store *deferred.Store, projectRoot string, date func() string) {
 	cfg := resolveProjectConfig(cwdFlag)
-	return deferred.New(cfg.Paths.Deferred), cfg.Root, cfg.Date
+	return deferred.New(cfg.Paths.Deferred), cfg.Root, func() string {
+		cfg.StampUsed()
+		return cfg.Date
+	}
 }
 
 func newDeferredIngestCmd() *cobra.Command {
@@ -97,7 +101,7 @@ Nothing about the CONTENT of a defer can make this command exit non-zero.`,
 				return usageErr(err)
 			}
 			res, err := store.Ingest(data, deferred.IngestOptions{
-				Story: storyKey, Skill: skill, Cycle: cycle, Date: date,
+				Story: storyKey, Skill: skill, Cycle: cycle, Date: date(),
 			})
 			if err != nil {
 				return err
@@ -284,7 +288,7 @@ automatically. 'ape deferred verify' flags CANDIDATES and never closes one.`,
 				return usageErr(errors.New("--by is required: record what discharged this"))
 			}
 			store, _, date := storeFor(cwdFlag)
-			rec, err := store.Close(args[0], by, date)
+			rec, err := store.Close(args[0], by, date())
 			if err != nil {
 				return err
 			}

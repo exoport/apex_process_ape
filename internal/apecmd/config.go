@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"text/tabwriter"
+	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/output"
@@ -74,10 +75,15 @@ Exit codes:
 				}
 				start = wd
 			}
-			res, err := apexcfg.Resolve(start, nil)
+			// Monotonic, like every other project-data command. This one
+			// read the bare wall clock, so the timestamp skills copy into
+			// updated_at was the one value the floor never covered.
+			res, err := resolveMonotonic(start)
 			if err != nil {
 				return handleConfigError(err)
 			}
+			// Emitting the stamp is using it: the caller writes it down.
+			res.StampUsed()
 			format := output.Format(outputFormat)
 			if format == output.FormatHuman {
 				return emitResolvedHuman(cmd.OutOrStdout(), res)
@@ -195,12 +201,27 @@ func resolveProjectConfig(cwdFlag string) *apexcfg.Resolved {
 //
 // The root is found first because the clock is per-project: the floor is
 // persisted under that project's output folder.
+//
+// The stamp is PEEKED here and recorded only when a command uses it (see
+// apexcfg.Resolved.StampUsed). Recording it on every resolution rewrote
+// the floor file on every read-only and no-op command, dirtying the tree
+// for a value nothing wrote down.
 func resolveMonotonic(start string) (*apexcfg.Resolved, error) {
 	root, err := apexcfg.Find(start)
 	if err != nil {
 		return nil, err
 	}
-	return apexcfg.ResolveAt(root, stamp.New(root, nil).Clock())
+	iss := stamp.New(root, nil)
+	var issued time.Time
+	res, err := apexcfg.ResolveAt(root, func() time.Time {
+		issued = iss.Peek()
+		return issued
+	})
+	if err != nil {
+		return nil, err
+	}
+	res.OnStampUsed(func() { iss.Commit(issued) })
+	return res, nil
 }
 
 // tryResolveProjectConfig is resolveProjectConfig for callers that must

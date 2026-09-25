@@ -146,6 +146,26 @@ type Resolved struct {
 	Paths        Paths  `json:"paths"                   yaml:"paths"`
 	Date         string `json:"date"                    yaml:"date"`
 	Timestamp    string `json:"timestamp"               yaml:"timestamp"`
+
+	// stampUsed persists Date/Timestamp as the project's monotonic floor.
+	// Set by whoever supplied a floor-backed clock; nil otherwise.
+	stampUsed func()
+}
+
+// OnStampUsed registers what StampUsed does. The clock that produced
+// Date and Timestamp is the one that knows how to record them.
+func (r *Resolved) OnStampUsed(f func()) { r.stampUsed = f }
+
+// StampUsed records that Date or Timestamp was written somewhere or handed
+// to a caller who will write it — which is the only case the monotonic
+// floor has to cover. A stamp that was resolved and thrown away constrains
+// nothing, and persisting it anyway rewrote the floor file on every
+// read-only and no-op command. Safe to call more than once, and a no-op
+// when no floor-backed clock was used.
+func (r *Resolved) StampUsed() {
+	if r != nil && r.stampUsed != nil {
+		r.stampUsed()
+	}
 }
 
 // ErrNotFound is returned when no `_apex/config.yaml` exists in the

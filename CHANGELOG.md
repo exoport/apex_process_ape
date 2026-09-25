@@ -53,6 +53,21 @@
   an unreadable index), `4` no config. Withheld removals alone exit 0. A
   caller that ran `sync --check` and treated any non-zero exit as failure now
   sees 1 whenever there is work to do.
+- **fix(stamp): the timestamp floor is written only when a stamp is used.**
+  Every project-data command used to persist `_output/ape/timestamp.state` as
+  it resolved the config, even when it wrote nothing. So a no-op `backfill`, a
+  `--check` and a no-op `framework update` (whose migration checks are ape
+  commands) all dirtied the tree. The floor now records a stamp only when a
+  command writes it into a document or hands it to a caller: `config
+  resolve`, a sync or backfill that wrote, `update`, `sprint reconcile`, and
+  the deferred and change writers. A stamp nothing wrote down constrains
+  nothing, so the guarantee is unchanged.
+- **fix(config): `ape config resolve` now emits the monotonic timestamp.** It
+  read the bare wall clock, while every other project-data command went
+  through the floor. It was the one command the floor was documented to
+  cover, and the one skills use to get the `timestamp` they write into
+  `updated_at`. A floor ahead of the wall clock now comes back as the
+  timestamp.
 - **fix(framework): `update --plan` previews the migrations the update
   brings.** It read only the project's installed `_apex/migrations/`, so an
   entry arriving with the update, like the framework's v0.24.0 backfill, was

@@ -194,3 +194,31 @@ func writeTracker(t *testing.T, root, body string) {
 	path := filepath.Join(root, "development", "implementation", "sprint-status.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
 }
+
+// TestPeek_RecordsNothingUntilCommitted: a stamp that is resolved and not
+// used constrains nothing, so Peek must not write. Writing on every
+// resolution dirtied the tree on every no-op command.
+func TestPeek_RecordsNothingUntilCommitted(t *testing.T) {
+	root := newProject(t)
+	state := runlog.TimestampStatePath(root)
+	clock := at(t, "20260925120000")
+	iss := New(root, func() time.Time { return clock })
+
+	got := iss.Peek()
+	require.Equal(t, clock, got)
+	require.NoFileExists(t, state, "Peek writes nothing")
+
+	iss.Commit(got)
+	require.Equal(t, "20260925120000", readStampFile(state))
+
+	// The clamp still applies to a peek, and committing a value at or below
+	// the floor writes nothing.
+	clock = at(t, "20260925090000")
+	require.Equal(t, at(t, "20260925120000"), iss.Peek())
+	info, err := os.Stat(state)
+	require.NoError(t, err)
+	iss.Commit(iss.Peek())
+	after, err := os.Stat(state)
+	require.NoError(t, err)
+	require.Equal(t, info.ModTime(), after.ModTime(), "a stamp the floor already covers is not rewritten")
+}

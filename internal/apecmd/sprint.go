@@ -299,6 +299,8 @@ board: starting one, and initialising one, are yours to do.`,
 			path := fileFlag
 			if cfg != nil {
 				timestamp = cfg.Timestamp
+				// Reconcile stamps updated_at with it on every run.
+				cfg.StampUsed()
 				if path == "" {
 					path = cfg.Paths.SprintStatus
 				}

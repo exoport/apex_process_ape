@@ -76,6 +76,7 @@ func runQueue(ctx context.Context, o changeOptions) error {
 		Trigger: queueTrigger,
 		Body:    o.request + "\n",
 	}}, deferred.IngestOptions{Skill: changeSkill, Date: cfg.Date})
+	cfg.StampUsed()
 	if err != nil {
 		return failErr(fmt.Errorf("write the queued record: %w", err))
 	}
@@ -260,6 +261,7 @@ func markDrained(
 		body += "\n"
 	}
 	rec.Body = body + drainedMarker + cfg.Date + " " + mark + "\n"
+	cfg.StampUsed()
 	path, err := store.Write(rec)
 	if err != nil {
 		return fmt.Errorf("write the drain mark: %w", err)
