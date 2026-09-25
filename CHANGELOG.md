@@ -1,6 +1,23 @@
 # CHANGELOG
 
-## Unreleased
+## v0.1.1 (2026-09-25)
+
+The registry release. `ape <family> sync` now writes index entries that pass
+the framework's index schemas; the new `ape registry backfill` completes
+entries already written; and `verify` reports an incomplete entry. It is the
+ape floor for APEX framework **v0.24.0**, whose migration `v0.24.0_seq-01`
+runs `ape registry backfill --all` on `ape framework update`.
+
+- **Evaluated end to end** with framework build 95edab67. sprint-plan-e2e
+  scored judge 5.0, validation 8/8, and `ape registry verify --all` on its
+  output reported no findings. The upgrade probes passed: a no-op update leaves
+  the tree clean, and `--plan` previews the incoming migration. Checked
+  against Claude Code **2.1.282** (`make check-harness`).
+- **Two behaviour changes to know about.** `sync --check` now exits 1 when
+  changes are pending, where it used to exit 0. And `verify` has a fifth check,
+  so `ape doctor`'s `registry.drift` row can WARN on a project that previously
+  read clean. That only happens if an index entry lacks a field its schema
+  requires, and `ape registry backfill --all` repairs it.
 
 - **fix(registry): `sync` now writes index entries that pass the family's
   index schema.** When sync added a record to an index, the new entry had only
