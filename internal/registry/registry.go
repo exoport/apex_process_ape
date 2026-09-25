@@ -2,12 +2,18 @@
 // — ADRs, patterns, features and capabilities — each of which is a
 // directory of Markdown records plus an `index.yaml` that lists them.
 //
-// The scope is deliberately four checks and no more (PLAN-25 D2): set
-// equality between directory and index in both directions, every index
-// `file:` resolving on disk, duplicate ids, and whether a record parses
-// as frontmatter at all. No schema validation, no field drift, no tag
-// comparison, no `updated_at` comparison — those are judgment, and a
-// verifier that wanders into them stops being trustworthy.
+// The scope is deliberately five checks and no more: set equality between
+// directory and index in both directions, every index `file:` resolving
+// on disk, duplicate ids, whether a record parses as frontmatter at all
+// (PLAN-25 D2), and whether an index entry has every field its family's
+// index schema requires. The fifth is presence only, read off the same
+// field tables sync and backfill copy by: no type or value validation, no
+// field drift, no tag comparison, no `updated_at` comparison — those are
+// judgment, and a verifier that wanders into them stops being trustworthy.
+//
+// The fifth was added once sync could write complete entries: an entry
+// short of its schema passed verify as "no findings", which was how
+// v0.1.0's five-field ADR entries went unnoticed.
 //
 // What it replaces did none of this: `runMarkdownDirValidate` read the
 // directory, printed "OK: <file>" for every `.md`, and returned nil
@@ -30,6 +36,10 @@ const (
 	CheckFileUnresolved   = "registry.file_unresolved"
 	CheckDuplicateID      = "registry.duplicate_id"
 	CheckRecordUnparsable = "registry.record_unparseable"
+	// CheckEntryIncomplete is an index entry without a field its family's
+	// index schema requires. `file:` is excluded — its absence is already
+	// registry.file_unresolved, and one defect gets one finding.
+	CheckEntryIncomplete = "registry.entry_incomplete"
 	// CheckIndexMissing is the degenerate case of the set-equality check,
 	// not a fifth check: one side of the comparison is absent entirely.
 	// Reporting it once beats emitting an orphan per record, which would

@@ -97,7 +97,7 @@ type VerifyOptions struct {
 	IgnoreExt bool
 }
 
-// Verify runs the four checks over the selected families.
+// Verify runs the five checks over the selected families.
 func Verify(cfg *apexcfg.Resolved, opts VerifyOptions) (*Report, error) {
 	families, err := selectFamilies(opts.Only)
 	if err != nil {
@@ -244,6 +244,7 @@ func verifyFamily(cfg *apexcfg.Resolved, family Family, ignoreExt bool) (FamilyR
 	findings = append(findings, checkDuplicates(family, parsable, entries)...)
 	findings = append(findings, checkSetEquality(family, parsable, entries)...)
 	findings = append(findings, checkFilesResolve(family, dir, entries)...)
+	findings = append(findings, checkEntriesComplete(idx, family, entries)...)
 
 	return result, findings
 }
@@ -355,6 +356,32 @@ func checkFilesResolve(family Family, dir string, entries []Entry) []Finding {
 				Message: "index file: does not resolve against " + dir,
 			})
 		}
+	}
+	return findings
+}
+
+// checkEntriesComplete is check 5: every entry carries each field its
+// family's index schema requires. Presence only — a value of the wrong
+// shape is judgment, and not this verifier's.
+func checkEntriesComplete(idx *Index, family Family, entries []Entry) []Finding {
+	var findings []Finding
+	for _, e := range entries {
+		node := idx.entryNode(e)
+		if node == nil {
+			continue
+		}
+		absent := absentRequired(node, family.entryFields)
+		if len(absent) == 0 {
+			continue
+		}
+		findings = append(findings, Finding{
+			Check:  CheckEntryIncomplete,
+			Family: family.Name,
+			ID:     e.ID,
+			File:   IndexFileName,
+			Message: "index entry lacks required field(s): " + strings.Join(absent, ", ") +
+				" — `ape registry backfill --all` fills those its record states",
+		})
 	}
 	return findings
 }

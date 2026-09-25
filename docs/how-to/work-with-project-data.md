@@ -86,7 +86,7 @@ Each family carries the same five verbs, and answers to its plural
 (`ape adrs verify` is `ape adr verify`):
 
 ```bash
-ape adr verify                  # four checks, exit 0 with findings
+ape adr verify                  # five checks, exit 0 with findings
 ape adr sync --check            # what reconciling would change; exit 1 if anything would
 ape adr sync                    # reconcile the index against disk
 ape adr backfill --check        # exit 1 if existing entries lack fields their record has
@@ -94,12 +94,21 @@ ape adr backfill                # fill them
 ape registry verify --all       # every family at once
 ```
 
-`verify` does **exactly four checks and no others**: set equality between
-the directory and `index.yaml` in both directions, every index `file:`
-resolving against the index's own directory, duplicate ids on both sides,
-and whether a record parses as frontmatter at all. No schema validation, no
-field drift, no tag comparison, no `updated_at` comparison — those are
-judgment, and a verifier that wanders into them stops being trustworthy.
+`verify` does **exactly five checks and no others**:
+
+- set equality between the directory and `index.yaml`, in both directions;
+- every index `file:` resolving against the index's own directory;
+- duplicate ids on both sides;
+- whether a record parses as frontmatter at all;
+- `registry.entry_incomplete`: whether every entry has each field its
+  family's index schema requires. `file:` is excepted, since its absence is
+  already `registry.file_unresolved`.
+
+The fifth check is about **presence only**. There's no type or value
+validation, no field drift, no tag comparison and no `updated_at`
+comparison. Those are judgment calls, and a verifier that wanders into
+them stops being trustworthy. Before v0.1.1 there were four checks, and an
+entry short of its schema passed as "no findings".
 
 An `index.yaml` that is absent while records exist is one finding
 (`registry.index_missing`), not one per record.
@@ -128,7 +137,7 @@ accepts. Up to v0.1.0, an added entry fails its schema.
 ### Completing existing entries: `backfill`
 
 `sync` never touches an entry that is already listed. `backfill` fills
-those: every required field **absent** from an existing entry is copied in
+those, and so is the repair for `registry.entry_incomplete`: every required field **absent** from an existing entry is copied in
 from its record, by the same rules `sync` uses for a new entry.
 
 ```bash

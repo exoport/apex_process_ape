@@ -122,8 +122,9 @@ adrs:
 // never pass on a project whose records are themselves incomplete.
 func TestBackfill_ReportsWhatTheRecordCannotSupply(t *testing.T) {
 	f := newFixture(t)
-	f.record("adrs", "adr-0001_first.md", "ADR-0001") // id, title, status only
-	f.listIndex([2]string{"ADR-0001", "adr-0001_first.md"})
+	f.raw("adrs", "adr-0001_first.md", "---\nid: ADR-0001\ntitle: First\nstatus: accepted\n---\n")
+	f.raw("adrs", IndexFileName, "generated_at: '20260101000000'\nadrs:\n"+
+		"  - id: ADR-0001\n    file: adr-0001_first.md\n    status: accepted\n    title: First\n")
 
 	res, err := Backfill(f.cfg, SyncOptions{Only: []string{"adrs"}})
 	require.NoError(t, err)
@@ -139,8 +140,9 @@ func TestBackfill_ReportsWhatTheRecordCannotSupply(t *testing.T) {
 
 func TestBackfill_CheckWritesNothing(t *testing.T) {
 	f := newFixture(t)
-	f.record("adrs", "adr-0001_first.md", "ADR-0001")
-	f.listIndex([2]string{"ADR-0001", "adr-0001_first.md"})
+	f.raw("adrs", "adr-0001_first.md", fullADR)
+	f.raw("adrs", IndexFileName, "generated_at: '20260101000000'\nadrs:\n"+
+		"  - id: ADR-0001\n    file: adr-0001_first.md\n    status: accepted\n    title: First\n")
 	before := f.readIndex("adrs")
 
 	res, err := Backfill(f.cfg, SyncOptions{Only: []string{"adrs"}, Check: true, GeneratedAt: "20260925000000"})
@@ -187,4 +189,52 @@ func TestBackfill_NoIndexIsNotAnAdd(t *testing.T) {
 	require.True(t, res.Families[0].Skipped)
 	_, statErr := os.Stat(filepath.Join(f.dir("adrs"), IndexFileName))
 	require.True(t, os.IsNotExist(statErr))
+}
+
+// TestVerify_EntryIncomplete is check 5, and the reason it exists: a
+// five-field ADR entry — what v0.1.0's sync wrote — passed verify as
+// "no findings". One finding per entry, naming the absent fields; file:
+// is check 2's, so an entry with none is not reported twice.
+func TestVerify_EntryIncomplete(t *testing.T) {
+	f := newFixture(t)
+	f.raw("adrs", "adr-0001_first.md", fullADR)
+	f.raw("adrs", IndexFileName, `generated_at: '20260101000000'
+adrs:
+  - id: ADR-0001
+    title: First
+    status: accepted
+    type: technology
+`)
+	got := findingsOf(f.verify("adrs"), CheckEntryIncomplete)
+	require.Len(t, got, 1)
+	require.Equal(t, "ADR-0001", got[0].ID)
+	require.Contains(t, got[0].Message, "slug, tags, version, created_at, updated_at")
+	require.NotContains(t, got[0].Message, "file", "an absent file: is registry.file_unresolved's")
+	require.Len(t, findingsOf(f.verify("adrs"), CheckFileUnresolved), 1)
+
+	// backfill is its repair: every field comes from the record.
+	_, err := Backfill(f.cfg, SyncOptions{Only: []string{"adrs"}})
+	require.NoError(t, err)
+	require.Empty(t, findingsOf(f.verify("adrs"), CheckEntryIncomplete))
+}
+
+// TestVerify_EntryIncompleteFollowsEachFamilysSchema: the required set is
+// per family, so a complete capability entry — no file:, no title — is
+// clean, and the same entry missing components is not.
+func TestVerify_EntryIncompleteFollowsEachFamilysSchema(t *testing.T) {
+	f := newFixture(t)
+	f.record("capabilities", "cap-1_a.md", "CAP-1")
+	f.record("capabilities", "cap-2_b.md", "CAP-2")
+	f.capabilityIndex("CAP-1", "CAP-2")
+	require.Empty(t, f.verify("capabilities").Findings)
+
+	f.raw("capabilities", IndexFileName, "generated_at: '20260101000000'\ncapabilities:\n"+
+		"  - id: CAP-1\n    slug: a\n    name: A\n    status: accepted\n"+
+		"    created_at: '20260101000000'\n    updated_at: '20260101000000'\n"+
+		"  - id: CAP-2\n    slug: b\n    name: B\n    status: accepted\n    components: []\n"+
+		"    created_at: '20260101000000'\n    updated_at: '20260101000000'\n")
+	got := findingsOf(f.verify("capabilities"), CheckEntryIncomplete)
+	require.Len(t, got, 1)
+	require.Equal(t, "CAP-1", got[0].ID)
+	require.Contains(t, got[0].Message, "components")
 }

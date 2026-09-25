@@ -60,7 +60,7 @@ func checkConfigResolved(_ context.Context, env doctorEnv) CheckResult {
 	}
 }
 
-// checkRegistryDrift reports the four registry checks. Not Required: drift
+// checkRegistryDrift reports the five registry checks. Not Required: drift
 // is a finding for a person, and a warn keeps `ape doctor` usable on a
 // project that has some.
 func checkRegistryDrift(_ context.Context, env doctorEnv) CheckResult {
@@ -81,10 +81,11 @@ func checkRegistryDrift(_ context.Context, env doctorEnv) CheckResult {
 		}
 	}
 	return CheckResult{
-		Status:      StatusWarn,
-		Message:     fmt.Sprintf("%d finding(s): %v", report.Summary.Findings, report.Summary.ByCheck),
-		Remediation: "`ape registry verify --all` lists them; `ape registry sync --all` repairs the ones a tool can.",
-		FixCommand:  "ape registry verify --all",
+		Status:  StatusWarn,
+		Message: fmt.Sprintf("%d finding(s): %v", report.Summary.Findings, report.Summary.ByCheck),
+		Remediation: "`ape registry verify --all` lists them; `ape registry sync --all` repairs set and file drift, " +
+			"`ape registry backfill --all` incomplete entries.",
+		FixCommand: "ape registry verify --all",
 	}
 }
 

@@ -11,6 +11,7 @@ adrs:
     version: v1
     created_at: "20260817003935"
     updated_at: "20260817004537"
+    title: Use Markdown ADRs
   - id: ADR-0002
     slug: serve-over-http
     file: adr-0002_serve-over-http.md
@@ -20,3 +21,4 @@ adrs:
     version: v1
     created_at: "20260817003935"
     updated_at: "20260817004537"
+    title: Serve over HTTP

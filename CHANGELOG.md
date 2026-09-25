@@ -37,6 +37,16 @@
   backfill restores every entry to the values the framework's skills had
   written.
 
+- **feat(registry): `verify` gains a fifth check, `registry.entry_incomplete`.**
+  One finding per index entry that lacks a field its family's schema
+  requires, naming the fields. It is driven by the same tables sync and
+  backfill copy by, and it checks presence only. `file:` is excluded because
+  its absence is already `registry.file_unresolved`. `ape doctor`'s
+  `registry.drift` row counts it, and `verify` still exits 0 with findings
+  unless you pass `--strict`. Measured on the eight real projects on the
+  development machine that have records (up to 154 of them), it fires zero
+  times. It exists because a five-field ADR entry passed `ape adr verify` as
+  "no findings". Its repair is `ape registry backfill --all`.
 - **fix(registry): `sync --check` exits 1 when changes are pending.** It
   exited 0 either way. It now shares `backfill --check`'s contract: `0` in
   sync, `1` changes pending, `2` the check itself failed (an unknown family,

@@ -1279,7 +1279,7 @@ Verify the adrs registry against its index
 ape adr verify [flags]
 ```
 
-Exactly four checks, and no others:
+Exactly five checks, and no others:
 
   1. registry.orphan_record / registry.phantom_entry
      set equality between the record directory and index.yaml, both
@@ -1290,10 +1290,14 @@ Exactly four checks, and no others:
      duplicate ids, in the index and on disk
   4. registry.record_unparseable
      the record parses as frontmatter at all
+  5. registry.entry_incomplete
+     every index entry carries each field its family's index schema
+     requires (file: excepted: its absence is check 2).
+     `ape registry backfill --all` fills the ones its record states
 
-No schema validation, no field drift, no tag comparison, no updated_at
-comparison — those are judgment, and a verifier that wanders into them
-stops being trustworthy.
+Check 5 is presence only. No type or value validation, no field drift, no
+tag comparison, no updated_at comparison — those are judgment, and a
+verifier that wanders into them stops being trustworthy.
 
 An index.yaml that is absent while records exist is reported once, as
 registry.index_missing: the degenerate case of check 1, not a fifth check.
@@ -1531,7 +1535,7 @@ Verify the capabilities registry against its index
 ape capability verify [flags]
 ```
 
-Exactly four checks, and no others:
+Exactly five checks, and no others:
 
   1. registry.orphan_record / registry.phantom_entry
      set equality between the record directory and index.yaml, both
@@ -1542,10 +1546,14 @@ Exactly four checks, and no others:
      duplicate ids, in the index and on disk
   4. registry.record_unparseable
      the record parses as frontmatter at all
+  5. registry.entry_incomplete
+     every index entry carries each field its family's index schema
+     requires (file: excepted: its absence is check 2).
+     `ape registry backfill --all` fills the ones its record states
 
-No schema validation, no field drift, no tag comparison, no updated_at
-comparison — those are judgment, and a verifier that wanders into them
-stops being trustworthy.
+Check 5 is presence only. No type or value validation, no field drift, no
+tag comparison, no updated_at comparison — those are judgment, and a
+verifier that wanders into them stops being trustworthy.
 
 An index.yaml that is absent while records exist is reported once, as
 registry.index_missing: the degenerate case of check 1, not a fifth check.
@@ -3056,7 +3064,7 @@ Verify the features registry against its index
 ape feature verify [flags]
 ```
 
-Exactly four checks, and no others:
+Exactly five checks, and no others:
 
   1. registry.orphan_record / registry.phantom_entry
      set equality between the record directory and index.yaml, both
@@ -3067,10 +3075,14 @@ Exactly four checks, and no others:
      duplicate ids, in the index and on disk
   4. registry.record_unparseable
      the record parses as frontmatter at all
+  5. registry.entry_incomplete
+     every index entry carries each field its family's index schema
+     requires (file: excepted: its absence is check 2).
+     `ape registry backfill --all` fills the ones its record states
 
-No schema validation, no field drift, no tag comparison, no updated_at
-comparison — those are judgment, and a verifier that wanders into them
-stops being trustworthy.
+Check 5 is presence only. No type or value validation, no field drift, no
+tag comparison, no updated_at comparison — those are judgment, and a
+verifier that wanders into them stops being trustworthy.
 
 An index.yaml that is absent while records exist is reported once, as
 registry.index_missing: the degenerate case of check 1, not a fifth check.
@@ -3774,7 +3786,7 @@ Verify the patterns registry against its index
 ape pattern verify [flags]
 ```
 
-Exactly four checks, and no others:
+Exactly five checks, and no others:
 
   1. registry.orphan_record / registry.phantom_entry
      set equality between the record directory and index.yaml, both
@@ -3785,10 +3797,14 @@ Exactly four checks, and no others:
      duplicate ids, in the index and on disk
   4. registry.record_unparseable
      the record parses as frontmatter at all
+  5. registry.entry_incomplete
+     every index entry carries each field its family's index schema
+     requires (file: excepted: its absence is check 2).
+     `ape registry backfill --all` fills the ones its record states
 
-No schema validation, no field drift, no tag comparison, no updated_at
-comparison — those are judgment, and a verifier that wanders into them
-stops being trustworthy.
+Check 5 is presence only. No type or value validation, no field drift, no
+tag comparison, no updated_at comparison — those are judgment, and a
+verifier that wanders into them stops being trustworthy.
 
 An index.yaml that is absent while records exist is reported once, as
 registry.index_missing: the degenerate case of check 1, not a fifth check.
@@ -4126,7 +4142,7 @@ Verify every record registry (or a named subset)
 ape registry verify [flags]
 ```
 
-Exactly four checks, and no others:
+Exactly five checks, and no others:
 
   1. registry.orphan_record / registry.phantom_entry
      set equality between the record directory and index.yaml, both
@@ -4137,10 +4153,14 @@ Exactly four checks, and no others:
      duplicate ids, in the index and on disk
   4. registry.record_unparseable
      the record parses as frontmatter at all
+  5. registry.entry_incomplete
+     every index entry carries each field its family's index schema
+     requires (file: excepted: its absence is check 2).
+     `ape registry backfill --all` fills the ones its record states
 
-No schema validation, no field drift, no tag comparison, no updated_at
-comparison — those are judgment, and a verifier that wanders into them
-stops being trustworthy.
+Check 5 is presence only. No type or value validation, no field drift, no
+tag comparison, no updated_at comparison — those are judgment, and a
+verifier that wanders into them stops being trustworthy.
 
 An index.yaml that is absent while records exist is reported once, as
 registry.index_missing: the degenerate case of check 1, not a fifth check.

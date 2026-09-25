@@ -178,10 +178,10 @@ func runRegistryRestoreHeaders(w io.Writer, cwdFlag, outputFormat string, check 
 	return nil
 }
 
-// verifyLong is the shared explanation of the four checks. Stated on
+// verifyLong is the shared explanation of the five checks. Stated on
 // every verify command because the scope IS the contract: a reader has to
 // be able to tell what this will never report.
-const verifyLong = `Exactly four checks, and no others:
+const verifyLong = `Exactly five checks, and no others:
 
   1. registry.orphan_record / registry.phantom_entry
      set equality between the record directory and index.yaml, both
@@ -192,10 +192,14 @@ const verifyLong = `Exactly four checks, and no others:
      duplicate ids, in the index and on disk
   4. registry.record_unparseable
      the record parses as frontmatter at all
+  5. registry.entry_incomplete
+     every index entry carries each field its family's index schema
+     requires (file: excepted: its absence is check 2).
+     ` + "`ape registry backfill --all`" + ` fills the ones its record states
 
-No schema validation, no field drift, no tag comparison, no updated_at
-comparison — those are judgment, and a verifier that wanders into them
-stops being trustworthy.
+Check 5 is presence only. No type or value validation, no field drift, no
+tag comparison, no updated_at comparison — those are judgment, and a
+verifier that wanders into them stops being trustworthy.
 
 An index.yaml that is absent while records exist is reported once, as
 registry.index_missing: the degenerate case of check 1, not a fifth check.

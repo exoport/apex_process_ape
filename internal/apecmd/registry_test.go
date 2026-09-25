@@ -41,7 +41,8 @@ func seedADRCorpus(t *testing.T, root string, n int, skip ...int) string {
 	for i := 1; i <= n; i++ {
 		id := fmt.Sprintf("ADR-%04d", i)
 		name := fmt.Sprintf("adr-%04d_decision.md", i)
-		body := fmt.Sprintf("---\nid: %s\ntitle: Decision %s\nstatus: accepted\n---\n\n## Context\n\nx\n", id, id)
+		body := fmt.Sprintf("---\nid: %s\ntitle: Decision %s\nstatus: accepted\ntype: process\ntags: [x]\n"+
+			"version: v1\ncreated_at: \"20260101000000\"\nupdated_at: \"20260101000000\"\n---\n\n## Context\n\nx\n", id, id)
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644))
 		// Every record gets a changelog sidecar, as the real corpus does:
 		// 54 of them, none of which may count as a record.
@@ -52,7 +53,9 @@ func seedADRCorpus(t *testing.T, root string, n int, skip ...int) string {
 		if skipped[i] {
 			continue
 		}
-		fmt.Fprintf(&index, "  - id: %s\n    title: Decision %s\n    status: accepted\n    file: %s\n", id, id, name)
+		fmt.Fprintf(&index, "  - id: %s\n    slug: decision\n    file: %s\n    status: accepted\n    type: process\n"+
+			"    tags: [x]\n    version: v1\n    created_at: '20260101000000'\n    updated_at: '20260101000000'\n"+
+			"    title: Decision %s\n", id, name, id)
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "index.yaml"), []byte(index.String()), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# ADRs\n"), 0o644))
@@ -379,13 +382,18 @@ func TestRegistryBackfillCheck_ExitCodes(t *testing.T) {
 	}
 
 	root := projectFor(t, allExtensionsConfig)
-	seedADRCorpus(t, root, 2) // every entry lacks slug, which the file name supplies
+	dir := seedADRCorpus(t, root, 2)
+	// Entries without slug, which the record's file name supplies.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "index.yaml"), []byte(
+		"generated_at: '20260101000000'\nadrs:\n"+
+			"  - id: ADR-0001\n    file: adr-0001_decision.md\n    title: Decision ADR-0001\n"+
+			"  - id: ADR-0002\n    file: adr-0002_decision.md\n    title: Decision ADR-0002\n"), 0o644))
 
 	require.Equal(t, ExitRunFailed, exitCodeOf(t, run(t, "--all", "--check", "--cwd", root)),
 		"fills pending is exit 1")
 	require.NoError(t, run(t, "--all", "--cwd", root), "the command itself exits 0")
 	require.NoError(t, run(t, "--all", "--check", "--cwd", root),
-		"applied is exit 0 — though the records' missing type, tags, … are still reported as gaps")
+		"applied is exit 0")
 
 	require.Equal(t, ExitUsage, exitCodeOf(t, run(t, "--family", "nope", "--check", "--cwd", root)),
 		"an unknown family is not 'pending'")

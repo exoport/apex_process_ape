@@ -52,10 +52,17 @@ func (f *fixture) dir(familyName string) string {
 	return family.Dir(f.cfg.Paths)
 }
 
+// recordFrontmatter is a superset of what any family's index schema
+// requires, so an entry sync builds from it is complete for every family —
+// and a test that wants an incomplete one writes it by hand.
+const recordFrontmatter = "type: technology\ntags: [x]\nversion: v1\ncategory: general\n" +
+	"capability: CAP-1\ncomponents: [x]\ncreated_at: \"20260101000000\"\nupdated_at: \"20260101000000\"\n"
+
 // record writes a record file with the given id.
 func (f *fixture) record(familyName, name, id string) {
 	f.t.Helper()
-	body := fmt.Sprintf("---\nid: %s\ntitle: Record %s\nstatus: accepted\n---\n\n## Context\n\nx\n", id, id)
+	body := fmt.Sprintf("---\nid: %s\ntitle: Record %s\nname: Record %s\nstatus: accepted\n%s---\n\n## Context\n\nx\n",
+		id, id, id, recordFrontmatter)
 	require.NoError(f.t, os.WriteFile(filepath.Join(f.dir(familyName), name), []byte(body), 0o644))
 }
 
@@ -73,7 +80,9 @@ func (f *fixture) listIndex(pairs ...[2]string) {
 	var b strings.Builder
 	b.WriteString("generated_at: '20260821120000'\nadrs:\n")
 	for _, p := range pairs {
-		fmt.Fprintf(&b, "  - id: %s\n    title: Record %s\n    status: accepted\n    file: %s\n", p[0], p[0], p[1])
+		fmt.Fprintf(&b, "  - id: %s\n    slug: %s\n    file: %s\n    status: accepted\n    type: technology\n"+
+			"    tags: [x]\n    version: v1\n    created_at: '20260101000000'\n    updated_at: '20260101000000'\n"+
+			"    title: Record %s\n", p[0], slugFromName(p[1]), p[1], p[0])
 	}
 	f.raw("adrs", IndexFileName, b.String())
 }
@@ -84,7 +93,9 @@ func (f *fixture) mappingIndex(pairs ...[2]string) {
 	var b strings.Builder
 	b.WriteString("generated_at: '20260821120000'\nfeatures:\n")
 	for _, p := range pairs {
-		fmt.Fprintf(&b, "  %s:\n    title: Record %s\n    status: planned\n    file: %s\n", p[0], p[0], p[1])
+		fmt.Fprintf(&b, "  %s:\n    name: Record %s\n    slug: %s\n    file: %s\n    capability: CAP-1\n"+
+			"    status: planned\n    created_at: '20260101000000'\n    updated_at: '20260101000000'\n",
+			p[0], p[0], slugFromName(p[1]), p[1])
 	}
 	f.raw("features", IndexFileName, b.String())
 }
@@ -117,7 +128,8 @@ func (f *fixture) capabilityIndex(ids ...string) {
 	b.WriteString("generated_at: '20260821120000'\ncapabilities:\n")
 	for _, id := range ids {
 		fmt.Fprintf(&b, "  - id: %s\n    slug: cap-%s\n    name: Capability %s\n"+
-			"    status: accepted\n    components: []\n", id, strings.ToLower(id), id)
+			"    status: accepted\n    components: []\n    created_at: '20260101000000'\n"+
+			"    updated_at: '20260101000000'\n", id, strings.ToLower(id), id)
 	}
 	f.raw("capabilities", IndexFileName, b.String())
 }
@@ -182,7 +194,9 @@ func TestSync_RepairsAnEmptyFileField(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join(f.dir("adrs"), IndexFileName))
 	require.NoError(t, err)
 	require.Contains(t, string(body), "file: adr-0001_first.md")
-	require.Empty(t, f.verify("adrs").Findings)
+	// The entry is deliberately thin, so entry_incomplete stays; the file
+	// finding is the one this repair owns.
+	require.Empty(t, findingsOf(f.verify("adrs"), CheckFileUnresolved))
 }
 
 // TestVerify_CleanCorpusHasNoFindings is the false-positive gate, and the
@@ -871,8 +885,11 @@ func TestRestoreHeaders_RebuildsAHeaderlessRecord(t *testing.T) {
 	require.Contains(t, text, "# ADR-0002 — no header", "the original body is kept, untouched")
 	require.Contains(t, text, "body text")
 
-	// Both findings dissolve, and sync then has nothing to withhold.
-	require.Empty(t, f.verify("adrs").Findings)
+	// Both findings dissolve, and sync then has nothing to withhold. The
+	// entries are deliberately thin, so entry_incomplete is all that stays.
+	for _, finding := range f.verify("adrs").Findings {
+		require.Equal(t, CheckEntryIncomplete, finding.Check, "%+v", finding)
+	}
 	sync, err := Sync(f.cfg, SyncOptions{Only: []string{"adrs"}, GeneratedAt: "20260901000000"})
 	require.NoError(t, err)
 	require.False(t, sync.Withheld())
