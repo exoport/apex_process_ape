@@ -45,8 +45,12 @@ archives:
     files:
       - README.md
       - LICENSE
+      # A single-file src takes dst as its full path: `dst: deploy` wrote the
+      # policy as a FILE named deploy, which broke extracting deploy/... .
+      # deploy/**/* below matches subdirectories only, so this entry is the
+      # policy's only route in. scripts/check-archives.py gates both.
       - src: deploy/policy.yaml
-        dst: deploy
+        dst: deploy/policy.yaml
       - src: deploy/**/*
         dst: deploy
 

@@ -68,8 +68,10 @@ snapshot: $(GORELEASER) ## Build release snapshot artifacts via goreleaser (no u
 	# --skip=sign avoids the cosign OIDC device flow in local runs.
 	# Real releases sign via release.yml, which runs on a GitHub Actions
 	# runner whose ambient OIDC token is automatically exchanged with
-	# Fulcio. Locally we just want to verify the archive layout.
+	# Fulcio. Locally we just want to verify the archive layout, which
+	# check-archives.py then actually does.
 	$(GORELEASER) release --snapshot --clean --skip=publish --skip=sign
+	python3 scripts/check-archives.py
 
 .PHONY: govulncheck
 govulncheck: $(GOVULNCHECK) ## Scan for known vulnerabilities (pinned via bingo); allow-lists documented unfixable advisories.

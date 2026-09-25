@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Unreleased
+
+- **fix(release): the release archives extract, and ship
+  `deploy/policy.yaml`.** Since 2026-07-10 (the first aped release), every
+  archive has carried a FILE named `deploy` next to the `deploy/...` entries.
+  A goreleaser `files:` entry with a single-file `src` takes `dst` as the full
+  path, so `src: deploy/policy.yaml, dst: deploy` wrote the policy under the
+  name `deploy`. A plain `tar x` failed on every `deploy/...` entry after `ape`
+  and `aped` were already out, and the `deploy/policy.yaml` that the aped
+  install in `docs/how-to/run-aped.md` copies to `/etc/aped/policy.yaml` didn't
+  exist in any archive. `ape update` was unaffected, because it extracts only
+  the binary. `make snapshot`, and so `make ci-local`, now runs
+  `scripts/check-archives.py`, which fails an archive that cannot extract or
+  lacks what the docs install from it. Before this, `make snapshot` built the
+  archives "to verify the archive layout" and nothing looked at them.
+
 ## v0.1.1 (2026-09-25)
 
 The registry release. `ape <family> sync` now writes index entries that pass
