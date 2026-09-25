@@ -205,7 +205,7 @@ func TestSyncCmd_LegacySpellingIsHiddenAndDelegates(t *testing.T) {
 
 	root := newTestProject(t, allExtensionsConfig)
 	seedADRCorpus(t, root, 2, 2)
-	out := runCmd(t, newSyncCmd(), "adrs", "--check")
+	out := runCmdAllowError(t, newSyncCmd(), "adrs", "--check") // exit 1: a change is pending
 	require.Contains(t, out, "deprecated")
 	require.Contains(t, out, "would apply")
 	require.Contains(t, out, "ADR-0002")
@@ -241,8 +241,12 @@ func TestFamilySync_CheckWritesNothing(t *testing.T) {
 
 	family, err := registry.FamilyByName("adrs")
 	require.NoError(t, err)
-	out := runCmd(t, newFamilySyncCmd(family), "--check")
-	require.Contains(t, out, "would apply")
+	var buf bytes.Buffer
+	cmd := newFamilySyncCmd(family)
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--check"})
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, cmd.Execute()), "a pending change is exit 1")
+	require.Contains(t, buf.String(), "would apply")
 
 	after, err := os.ReadFile(indexPath)
 	require.NoError(t, err)
@@ -390,4 +394,26 @@ func TestRegistryBackfillCheck_ExitCodes(t *testing.T) {
 	require.NoError(t, os.WriteFile(index, []byte("adrs: [\n"), 0o644))
 	require.Equal(t, ExitUsage, exitCodeOf(t, run(t, "--all", "--check", "--cwd", root)),
 		"an unreadable index is the check failing, not fills pending")
+}
+
+// `sync --check` answers with the same contract as `backfill --check`, so a
+// caller reads both exit codes the same way: 0 nothing to change, 1
+// changes pending, 2 the check itself failed. It used to exit 0 with a
+// change pending, which made the exit code useless as a check.
+func TestRegistrySyncCheck_ExitCodes(t *testing.T) {
+	run := func(t *testing.T, args ...string) error {
+		t.Helper()
+		cmd := newRegistrySyncCmd()
+		cmd.SetArgs(args)
+		cmd.SetOut(&bytes.Buffer{})
+		return cmd.Execute()
+	}
+	root := projectFor(t, allExtensionsConfig)
+	seedADRCorpus(t, root, 3, 3) // ADR-0003 is an orphan
+
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, run(t, "--all", "--check", "--cwd", root)),
+		"a pending change is exit 1")
+	require.NoError(t, run(t, "--all", "--cwd", root))
+	require.NoError(t, run(t, "--all", "--check", "--cwd", root), "in sync is exit 0")
+	require.Equal(t, ExitUsage, exitCodeOf(t, run(t, "--family", "nope", "--check", "--cwd", root)))
 }

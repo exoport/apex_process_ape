@@ -268,6 +268,8 @@ func newRegistryVerifyCmd() *cobra.Command {
 	return cmd
 }
 
+const helpSyncCheck = "Report the diff without writing; exit 0 nothing to change, 1 changes pending (2 or 4 if the check itself failed)"
+
 const syncLong = `Reconcile index.yaml against the records on disk: records with no entry
 are added, entries whose id no record claims are removed, and an entry
 whose file: no longer resolves is repointed at the record claiming its id.
@@ -283,8 +285,12 @@ field with no value is left out and listed in the change's missing. An
 entry that is already listed is never completed here; that is
 ` + "`backfill`" + `.
 
---check makes it a dry run: the same diff, nothing written. generated_at
-moves only when something else did.`
+--check makes it a dry run: the same diff, nothing written, and the answer
+in the exit code: 0 when there is nothing to change, 1 when changes are
+pending, 2 when the check itself failed (an unknown family, or an index
+that cannot be read), 4 with no project config. Withheld removals alone
+exit 0: sync cannot make them. generated_at moves only when something
+else did.`
 
 func newFamilySyncCmd(family registry.Family) *cobra.Command {
 	var (
@@ -304,7 +310,7 @@ func newFamilySyncCmd(family registry.Family) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", helpCwd)
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", helpFormat)
-	cmd.Flags().BoolVar(&check, "check", false, "Report the diff without writing")
+	cmd.Flags().BoolVar(&check, "check", false, helpSyncCheck)
 	return cmd
 }
 
@@ -331,13 +337,18 @@ func newRegistrySyncCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", helpCwd)
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", helpFormat)
-	cmd.Flags().BoolVar(&check, "check", false, "Report the diff without writing")
+	cmd.Flags().BoolVar(&check, "check", false, helpSyncCheck)
 	cmd.Flags().BoolVar(&all, "all", false, "Reconcile every family (the default when --family is not given)")
 	cmd.Flags().StringSliceVar(&families, "family", nil,
 		"Families to reconcile: "+strings.Join(registry.FamilyNames(), ","))
 	return cmd
 }
 
+// runRegistrySync answers --check in its exit code with the same contract
+// as backfill: 0 nothing to change, 1 changes pending, and a failure of the
+// check itself is 2 — never 1, which a caller would read as "pending".
+// Withheld removals alone are not pending: sync cannot make them, so a
+// re-run would find the same ones.
 func runRegistrySync(w io.Writer, cwdFlag, outputFormat string, check bool, only []string) error {
 	cfg := resolveProjectConfig(cwdFlag)
 	res, err := registry.Sync(cfg, registry.SyncOptions{
@@ -346,8 +357,21 @@ func runRegistrySync(w io.Writer, cwdFlag, outputFormat string, check bool, only
 		GeneratedAt: cfg.Timestamp,
 	})
 	if err != nil {
+		if check {
+			return usageErr(err)
+		}
 		return err
 	}
+	if err := emitRegistrySync(w, outputFormat, check, res); err != nil {
+		return err
+	}
+	if check && res.Changed() {
+		return reportedErr(ExitRunFailed, fmt.Errorf("%d registry change(s) pending", len(res.Changes)))
+	}
+	return nil
+}
+
+func emitRegistrySync(w io.Writer, outputFormat string, check bool, res *registry.SyncResult) error {
 	format := output.Format(outputFormat)
 	if format != output.FormatHuman {
 		return output.Print(w, format, res)

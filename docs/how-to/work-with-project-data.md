@@ -87,7 +87,7 @@ Each family carries the same five verbs, and answers to its plural
 
 ```bash
 ape adr verify                  # four checks, exit 0 with findings
-ape adr sync --check            # what reconciling would change
+ape adr sync --check            # what reconciling would change; exit 1 if anything would
 ape adr sync                    # reconcile the index against disk
 ape adr backfill --check        # exit 1 if existing entries lack fields their record has
 ape adr backfill                # fill them
@@ -103,6 +103,12 @@ judgment, and a verifier that wanders into them stops being trustworthy.
 
 An `index.yaml` that is absent while records exist is one finding
 (`registry.index_missing`), not one per record.
+
+`sync --check` and `backfill --check` share one exit-code contract: `0`
+nothing to do, `1` changes pending, `2` the check itself failed, `4` no
+project config. Up to v0.1.0, `sync --check` exited `0` even with changes
+pending, so only its output could tell you. Withheld removals alone exit
+`0`, because sync can't make them.
 
 `sync` is the repair for what `verify` reports, and nothing more: it copies
 what a record's own frontmatter already states and invents no titles or

@@ -1199,8 +1199,12 @@ field with no value is left out and listed in the change's missing. An
 entry that is already listed is never completed here; that is
 `backfill`.
 
---check makes it a dry run: the same diff, nothing written. generated_at
-moves only when something else did.
+--check makes it a dry run: the same diff, nothing written, and the answer
+in the exit code: 0 when there is nothing to change, 1 when changes are
+pending, 2 when the check itself failed (an unknown family, or an index
+that cannot be read), 4 with no project config. Withheld removals alone
+exit 0: sync cannot make them. generated_at moves only when something
+else did.
 
 Examples:
 
@@ -1212,7 +1216,7 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--check` | bool | `false` | Report the diff without writing |
+| `--check` | bool | `false` | Report the diff without writing; exit 0 nothing to change, 1 changes pending (2 or 4 if the check itself failed) |
 | `--cwd` | string | `—` | Project root (default: current working dir) |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
@@ -1447,8 +1451,12 @@ field with no value is left out and listed in the change's missing. An
 entry that is already listed is never completed here; that is
 `backfill`.
 
---check makes it a dry run: the same diff, nothing written. generated_at
-moves only when something else did.
+--check makes it a dry run: the same diff, nothing written, and the answer
+in the exit code: 0 when there is nothing to change, 1 when changes are
+pending, 2 when the check itself failed (an unknown family, or an index
+that cannot be read), 4 with no project config. Withheld removals alone
+exit 0: sync cannot make them. generated_at moves only when something
+else did.
 
 Examples:
 
@@ -1460,7 +1468,7 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--check` | bool | `false` | Report the diff without writing |
+| `--check` | bool | `false` | Report the diff without writing; exit 0 nothing to change, 1 changes pending (2 or 4 if the check itself failed) |
 | `--cwd` | string | `—` | Project root (default: current working dir) |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
@@ -2968,8 +2976,12 @@ field with no value is left out and listed in the change's missing. An
 entry that is already listed is never completed here; that is
 `backfill`.
 
---check makes it a dry run: the same diff, nothing written. generated_at
-moves only when something else did.
+--check makes it a dry run: the same diff, nothing written, and the answer
+in the exit code: 0 when there is nothing to change, 1 when changes are
+pending, 2 when the check itself failed (an unknown family, or an index
+that cannot be read), 4 with no project config. Withheld removals alone
+exit 0: sync cannot make them. generated_at moves only when something
+else did.
 
 Examples:
 
@@ -2981,7 +2993,7 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--check` | bool | `false` | Report the diff without writing |
+| `--check` | bool | `false` | Report the diff without writing; exit 0 nothing to change, 1 changes pending (2 or 4 if the check itself failed) |
 | `--cwd` | string | `—` | Project root (default: current working dir) |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
@@ -3682,8 +3694,12 @@ field with no value is left out and listed in the change's missing. An
 entry that is already listed is never completed here; that is
 `backfill`.
 
---check makes it a dry run: the same diff, nothing written. generated_at
-moves only when something else did.
+--check makes it a dry run: the same diff, nothing written, and the answer
+in the exit code: 0 when there is nothing to change, 1 when changes are
+pending, 2 when the check itself failed (an unknown family, or an index
+that cannot be read), 4 with no project config. Withheld removals alone
+exit 0: sync cannot make them. generated_at moves only when something
+else did.
 
 Examples:
 
@@ -3695,7 +3711,7 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--check` | bool | `false` | Report the diff without writing |
+| `--check` | bool | `false` | Report the diff without writing; exit 0 nothing to change, 1 changes pending (2 or 4 if the check itself failed) |
 | `--cwd` | string | `—` | Project root (default: current working dir) |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
@@ -4085,15 +4101,19 @@ field with no value is left out and listed in the change's missing. An
 entry that is already listed is never completed here; that is
 `backfill`.
 
---check makes it a dry run: the same diff, nothing written. generated_at
-moves only when something else did.
+--check makes it a dry run: the same diff, nothing written, and the answer
+in the exit code: 0 when there is nothing to change, 1 when changes are
+pending, 2 when the check itself failed (an unknown family, or an index
+that cannot be read), 4 with no project config. Withheld removals alone
+exit 0: sync cannot make them. generated_at moves only when something
+else did.
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--all` | bool | `false` | Reconcile every family (the default when --family is not given) |
-| `--check` | bool | `false` | Report the diff without writing |
+| `--check` | bool | `false` | Report the diff without writing; exit 0 nothing to change, 1 changes pending (2 or 4 if the check itself failed) |
 | `--cwd` | string | `—` | Project root (default: current working dir) |
 | `--family` | stringSlice | `[]` | Families to reconcile: adrs,patterns,features,capabilities |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |

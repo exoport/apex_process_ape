@@ -37,6 +37,12 @@
   backfill restores every entry to the values the framework's skills had
   written.
 
+- **fix(registry): `sync --check` exits 1 when changes are pending.** It
+  exited 0 either way. It now shares `backfill --check`'s contract: `0` in
+  sync, `1` changes pending, `2` the check itself failed (an unknown family,
+  an unreadable index), `4` no config. Withheld removals alone exit 0. A
+  caller that ran `sync --check` and treated any non-zero exit as failure now
+  sees 1 whenever there is work to do.
 - **fix(framework): `update --plan` previews the migrations the update
   brings.** It read only the project's installed `_apex/migrations/`, so an
   entry arriving with the update, like the framework's v0.24.0 backfill, was
