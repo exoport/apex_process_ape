@@ -70,8 +70,11 @@ type Family struct {
 	// extension on, which is a false positive that never clears and which
 	// `ape doctor` reports as registry drift forever.
 	HasFileField bool
-	dir          func(apexcfg.Paths) string
-	ext          func(apexcfg.Ext) bool
+	// entryFields is the family's index-entry schema, in write order —
+	// what sync copies from a record into a new entry. See entryfields.go.
+	entryFields []entryField
+	dir         func(apexcfg.Paths) string
+	ext         func(apexcfg.Ext) bool
 }
 
 // Dir returns the family's record directory, or "" when the folder it
@@ -86,26 +89,30 @@ func (f Family) Enabled(e apexcfg.Ext) bool { return f.ext(e) }
 var Families = []Family{
 	{
 		Name: "adrs", Singular: "adr", Shape: ShapeList, HasFileField: true,
-		dir: func(p apexcfg.Paths) string { return p.ADRs },
-		ext: func(e apexcfg.Ext) bool { return e.ADRs },
+		entryFields: adrEntryFields,
+		dir:         func(p apexcfg.Paths) string { return p.ADRs },
+		ext:         func(e apexcfg.Ext) bool { return e.ADRs },
 	},
 	{
 		Name: "patterns", Singular: "pattern", Shape: ShapeList, HasFileField: true,
-		dir: func(p apexcfg.Paths) string { return p.Patterns },
-		ext: func(e apexcfg.Ext) bool { return e.Patterns },
+		entryFields: patternEntryFields,
+		dir:         func(p apexcfg.Paths) string { return p.Patterns },
+		ext:         func(e apexcfg.Ext) bool { return e.Patterns },
 	},
 	{
 		// features is the mapping-shaped outlier.
 		Name: "features", Singular: "feature", Shape: ShapeMapping, HasFileField: true,
-		dir: func(p apexcfg.Paths) string { return p.Features },
-		ext: func(e apexcfg.Ext) bool { return e.Features },
+		entryFields: featureEntryFields,
+		dir:         func(p apexcfg.Paths) string { return p.Features },
+		ext:         func(e apexcfg.Ext) bool { return e.Features },
 	},
 	{
 		// capabilities is the no-file-field outlier: its schema defines no
 		// `file` property, so the record is located by id + slug.
 		Name: "capabilities", Singular: "capability", Shape: ShapeList, HasFileField: false,
-		dir: func(p apexcfg.Paths) string { return p.Capabilities },
-		ext: func(e apexcfg.Ext) bool { return e.Capabilities },
+		entryFields: capabilityEntryFields,
+		dir:         func(p apexcfg.Paths) string { return p.Capabilities },
+		ext:         func(e apexcfg.Ext) bool { return e.Capabilities },
 	},
 }
 

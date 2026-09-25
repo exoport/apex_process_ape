@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
-	"github.com/exoport/apex_process_ape/internal/frontmatter"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,6 +18,10 @@ type SyncChange struct {
 	ID     string `json:"id"               yaml:"id"`
 	File   string `json:"file,omitempty"   yaml:"file,omitempty"`
 	Detail string `json:"detail,omitempty" yaml:"detail,omitempty"`
+	// Missing lists, on an add, the fields the family's index schema
+	// requires that the record has no value for. Sync copies and never
+	// invents, so these are left out of the entry and named here instead.
+	Missing []string `json:"missing,omitempty" yaml:"missing,omitempty"`
 }
 
 // SyncBlocked is a removal `sync` declined to make because it could not
@@ -75,7 +78,10 @@ type SyncOptions struct {
 //
 // It is the repair for D2's findings and nothing more — it does not
 // invent titles, statuses or any other field beyond what a new record's
-// own frontmatter states.
+// own frontmatter states. A new entry carries every field of the family's
+// index schema the record has a value for (its frontmatter, or its file
+// name for `slug`); a required field with no source is reported in the
+// change's Missing, not filled in.
 //
 // REMOVALS ARE WITHHELD WHERE A PHANTOM CANNOT BE PROVEN. "No record on
 // disk claims this id" is read off records whose frontmatter parsed, so a
@@ -216,15 +222,21 @@ func syncFamily(cfg *apexcfg.Resolved, family Family, opts SyncOptions) (SyncFam
 		if _, present := indexed[rec.ID]; present {
 			continue
 		}
-		fields, err := readRecordFields(rec.Path)
+		values, err := readEntryValues(rec.Path, rec.Name, family.entryFields)
 		if err != nil {
 			return res, nil, nil, err
 		}
-		addEntry(idx, family, rec, fields)
-		changes = append(changes, SyncChange{
+		addEntry(idx, family, rec, values)
+		change := SyncChange{
 			Action: "add", Family: family.Name, ID: rec.ID, File: rec.Name,
 			Detail: "record on disk was absent from the index",
-		})
+		}
+		if len(values.Missing) > 0 {
+			change.Missing = values.Missing
+			change.Detail += "; the record states no " + strings.Join(values.Missing, ", ") +
+				" — the entry is incomplete against the index schema until the record does"
+		}
+		changes = append(changes, change)
 	}
 
 	if len(changes) == 0 {
@@ -303,53 +315,17 @@ func newEntriesNode(shape Shape) *yaml.Node {
 	return &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 }
 
-// indexedFields are the record frontmatter fields an index entry carries.
-// Deliberately short: `sync` copies what the record already states and
-// invents nothing. Anything else an index holds is authored by the skill
-// that owns the document.
-var indexedFields = []string{"title", "status", "type", "epic", "capability"}
-
-// readRecordFields reads the frontmatter fields a new index entry needs.
-func readRecordFields(path string) (map[string]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", path, err)
-	}
-	defer func() { _ = f.Close() }()
-	buf := make([]byte, recordCap)
-	n, readErr := f.Read(buf)
-	if n == 0 && readErr != nil {
-		return nil, fmt.Errorf("read %s: %w", path, readErr)
-	}
-	fm, _, err := frontmatter.Split(buf[:n])
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	var raw map[string]any
-	if err := yaml.Unmarshal(fm, &raw); err != nil {
-		return nil, fmt.Errorf("%s: frontmatter is not valid YAML: %w", path, err)
-	}
-	out := map[string]string{}
-	for _, key := range indexedFields {
-		if v, ok := raw[key]; ok && v != nil {
-			out[key] = fmt.Sprintf("%v", v)
-		}
-	}
-	return out, nil
-}
-
-func addEntry(idx *Index, family Family, rec Record, fields map[string]string) {
+// addEntry appends a new entry built from what the record states, in the
+// family's schema key order.
+func addEntry(idx *Index, family Family, rec Record, values entryValues) {
 	body := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	if family.Shape == ShapeList {
 		setMappingValue(body, "id", scalar(rec.ID))
 	}
-	for _, key := range indexedFields {
-		if v, ok := fields[key]; ok {
-			setMappingValue(body, key, scalar(v))
+	for _, field := range family.entryFields {
+		if node, ok := values.Nodes[field.Key]; ok {
+			setMappingValue(body, field.Key, node)
 		}
-	}
-	if family.HasFileField {
-		setMappingValue(body, "file", scalar(rec.Name))
 	}
 
 	if family.Shape == ShapeMapping {

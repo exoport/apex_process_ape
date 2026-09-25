@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## Unreleased
+
+- **fix(registry): `sync` now writes index entries that pass the family's
+  index schema.** When sync added a record to an index, the new entry had only
+  `id`, `title`, `status`, `type`, `epic`, `capability` and `file`. None of the
+  four framework index schemas accepts that: an ADR entry lacked `slug`,
+  `tags`, `version`, `created_at` and `updated_at`, and the other three
+  families lacked similar sets. The framework's frontmatter repair sends every
+  `registry.orphan_record` to `ape registry sync --all`, so its standard repair
+  was writing entries the schema rejects. `verify` checks no schemas, so it
+  reported them clean. Each family now has a field table taken from its schema,
+  in the key order the framework's skills write. Sync copies every field the
+  record states, including optional ones like `pattern_ids`, `bootstrap`,
+  `depends_on`, `related_epics`, `supersedes` and `superseded_by`. Lists stay
+  YAML sequences, timestamps stay quoted strings, and `slug` comes from the
+  file name when the frontmatter has none (ADR and feature records never carry
+  one). Sync still doesn't invent values. A required field the record has no
+  value for, or has in the wrong shape, is left out of the entry and listed in
+  the change's new `missing` field. Checked against a framework eval tree: all
+  four indexes, deleted and rebuilt from their 24 records alone, pass the
+  framework's JSON schemas. Entries already in an index are unchanged, and
+  that includes incomplete ones an earlier sync wrote.
+
 ## v0.1.0 (2026-09-23)
 
 The first minor release. It is v0.0.74 plus one help-text fix: no command,
