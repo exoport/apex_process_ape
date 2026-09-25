@@ -129,6 +129,17 @@ ape framework update --no-migrate      # install only; the list stays pending
 `--plan` is readable against a project in any state and it is the whole
 command: no install, no fetch, no migration.
 
+It shows the list the project will hold **after** the update: what's installed
+now, overlaid by the repo's `_apex/migrations/` by file name, which is exactly
+what the install's copy does. It also runs each entry's `check:` against the
+project as it is now. A `SOURCE` column marks each row `installed`,
+`incoming (new)` or `incoming (replaces installed)`, so a migration arriving
+with this update can be read before it runs. The repo is read as it stands,
+unfetched. The update itself fetches first unless you pass `--no-fetch`, so
+use `--no-fetch` on both if you want the preview and the run to match
+exactly. Before v0.1.1, `--plan` showed only the installed list, so an
+incoming entry was invisible until it had run.
+
 ### What ape may run, and what it may not
 
 `kind:` is the authority model, not a hint.

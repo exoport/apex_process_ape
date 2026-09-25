@@ -37,6 +37,13 @@
   backfill restores every entry to the values the framework's skills had
   written.
 
+- **fix(framework): `update --plan` previews the migrations the update
+  brings.** It read only the project's installed `_apex/migrations/`, so an
+  entry arriving with the update, like the framework's v0.24.0 backfill, was
+  invisible until it had run. The plan is now the list as install will leave
+  it: installed entries overlaid by the repo's, by file name. A `SOURCE`
+  column marks each row `installed`, `incoming (new)` or
+  `incoming (replaces installed)`.
 - **fix(framework): update no longer reports every skill as removed.** Install
   clears every `apex-*` skill before copying the framework's back, and it
   counted that clear, so a routine update printed "96 installed (96

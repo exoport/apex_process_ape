@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
@@ -24,6 +27,28 @@ import (
 // that stopped on one bad entry could not report the others.
 func loadMigrationPlan(ctx context.Context, projectRoot string, runner migration.Runner, runChecks bool,
 ) (*migration.Plan, error) {
+	return loadMigrationPlanWith(ctx, projectRoot, "", runner, runChecks)
+}
+
+// loadIncomingMigrationPlan is `--plan`'s view: the list the project will
+// hold AFTER `ape framework update` installs from repo, judged against the
+// project as it is now. Without it `--plan` showed only what was already
+// installed, so a migration arriving with the update — the one an operator
+// most wants to see first — was invisible until it had run.
+func loadIncomingMigrationPlan(ctx context.Context, projectRoot, repo string, runner migration.Runner,
+	runChecks bool,
+) (*migration.Plan, error) {
+	return loadMigrationPlanWith(ctx, projectRoot, repo, runner, runChecks)
+}
+
+// loadMigrationPlanWith builds the plan over the project's installed list,
+// overlaid with repo's when repo is set. The overlay is what install does:
+// it copies every file from the repo over the same name and deletes
+// nothing, so an incoming file replaces its installed namesake and every
+// other installed file stays.
+func loadMigrationPlanWith(ctx context.Context, projectRoot, repo string, runner migration.Runner,
+	runChecks bool,
+) (*migration.Plan, error) {
 	cfg, err := apexcfg.ResolveAt(projectRoot, nil)
 	if err != nil {
 		// No resolvable config means no `{apex_folder}` to look in. Not a
@@ -34,6 +59,13 @@ func loadMigrationPlan(ctx context.Context, projectRoot string, runner migration
 	entries, err := migration.Load(dir)
 	if err != nil {
 		return nil, err
+	}
+	if repo != "" {
+		incoming, iErr := migration.Load(filepath.Join(repo, framework.SubtreeMigrations))
+		if iErr != nil {
+			return nil, iErr
+		}
+		entries = overlayMigrations(entries, incoming)
 	}
 	if entries == nil {
 		// An absent folder is a normal state on a framework that ships no
@@ -49,6 +81,25 @@ func loadMigrationPlan(ctx context.Context, projectRoot string, runner migration
 		}
 	}
 	return migration.BuildPlan(ctx, dir, projectRoot, entries, ledger, runner, runChecks), nil
+}
+
+// overlayMigrations is install's copy applied to the parsed lists: an
+// incoming entry replaces the installed one with the same file name.
+func overlayMigrations(installed, incoming []migration.Entry) []migration.Entry {
+	if len(incoming) == 0 {
+		return installed
+	}
+	replaced := make(map[string]bool, len(incoming))
+	for i := range incoming {
+		replaced[filepath.Base(incoming[i].Path)] = true
+	}
+	out := make([]migration.Entry, 0, len(installed)+len(incoming))
+	for i := range installed {
+		if !replaced[filepath.Base(installed[i].Path)] {
+			out = append(out, installed[i])
+		}
+	}
+	return append(out, incoming...)
 }
 
 // runUpgradeMigrations applies the derivable pending entries and records
@@ -124,8 +175,10 @@ func emitApplyResult(w io.Writer, res *migration.ApplyResult) {
 	}
 }
 
-// emitMigrationPlan is `--plan`: it prints and does nothing.
-func emitMigrationPlan(w io.Writer, plan *migration.Plan) {
+// emitMigrationPlan is `--plan`: it prints and does nothing. repo, when
+// set, is where incoming entries were read from, and adds a SOURCE column
+// saying which rows the update brings.
+func emitMigrationPlan(w io.Writer, plan *migration.Plan, repo string) {
 	if !plan.Present {
 		fmt.Fprintln(w, "migrations: no _apex/migrations/ folder — this framework ships no migration list")
 		return
@@ -135,18 +188,43 @@ func emitMigrationPlan(w io.Writer, plan *migration.Plan) {
 		return
 	}
 
+	if repo != "" {
+		fmt.Fprintf(w, "migrations: the list this project will hold after `ape framework update` from %s\n"+
+			"            (read as the repo stands now; the update itself fetches first unless --no-fetch)\n\n", repo)
+	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tKIND\tSTATE\tCHECK\tBLOCKING\tACTION")
+	header := "ID\tKIND\tSTATE\tCHECK\tBLOCKING\tACTION"
+	if repo != "" {
+		header = "ID\tSOURCE\tKIND\tSTATE\tCHECK\tBLOCKING\tACTION"
+	}
+	fmt.Fprintln(tw, header)
 	for i := range plan.Rows {
 		r := &plan.Rows[i]
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%t\t%s\n",
-			r.Label(), migrationKind(r), r.State, r.Check, r.Blocking, migrationAction(r))
+		source := ""
+		if repo != "" {
+			source = migrationSource(r, repo, plan.Dir) + "\t"
+		}
+		fmt.Fprintf(tw, "%s\t%s%s\t%s\t%s\t%t\t%s\n",
+			r.Label(), source, migrationKind(r), r.State, r.Check, r.Blocking, migrationAction(r))
 	}
 	if err := tw.Flush(); err != nil {
 		return
 	}
 	fmt.Fprintf(w, "\n%s\n", migrationCountLine(plan.Counts()))
 	emitMigrationFindings(w, plan)
+}
+
+// migrationSource says where a --plan row comes from: already installed,
+// or brought by the update — as a new file or over an installed one.
+func migrationSource(r *migration.Row, repo, installedDir string) string {
+	rel, err := filepath.Rel(repo, r.Path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "installed"
+	}
+	if _, statErr := os.Stat(filepath.Join(installedDir, filepath.Base(r.Path))); statErr == nil {
+		return "incoming (replaces installed)"
+	}
+	return "incoming (new)"
 }
 
 func emitMigrationFindings(w io.Writer, plan *migration.Plan) {

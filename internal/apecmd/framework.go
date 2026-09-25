@@ -195,11 +195,14 @@ Does NOT touch _apex/config.yaml — that's the one-time bootstrap from
 'ape framework setup'. To re-bootstrap, pass --force to 'setup'.
 
   --plan        print the upgrade-migration plan and do NOTHING ELSE — no
-                install, no fetch, no migration. Readable against a project
-                in any state, and it distinguishes pending / applied /
-                half-applied / cannot-tell rather than collapsing them,
-                because a runner that reads cannot-tell as pending
-                re-applies things
+                install, no fetch, no migration. The plan is the list the
+                project will hold AFTER this update: the installed entries
+                overlaid by the repo's, with a SOURCE column marking the
+                ones the update brings, so a migration can be read before
+                it runs. The repo is read as it stands, unfetched. It
+                distinguishes pending / applied / half-applied /
+                cannot-tell rather than collapsing them, because a runner
+                that reads cannot-tell as pending re-applies things
   --dry-run     show the framework drift AND the pending migrations,
                 writing nothing
   --no-migrate  install framework files only; migrations stay pending, and
@@ -240,11 +243,11 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 				if notice != "" {
 					fmt.Fprintf(cmd.OutOrStdout(), "migrations: %s\n", notice)
 				}
-				p, pErr := loadMigrationPlan(cmd.Context(), projectRoot, runner, !noCheck)
+				p, pErr := loadIncomingMigrationPlan(cmd.Context(), projectRoot, repo, runner, !noCheck)
 				if pErr != nil {
 					return pErr
 				}
-				emitMigrationPlan(cmd.OutOrStdout(), p)
+				emitMigrationPlan(cmd.OutOrStdout(), p, repo)
 				return nil
 			}
 			if dryRun {
@@ -294,7 +297,8 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show the framework diff and pending migrations, writing nothing")
 	cmd.Flags().BoolVar(&noMigrate, "no-migrate", false, "Install framework files only; leave migrations pending")
-	cmd.Flags().BoolVar(&plan, "plan", false, "Print the upgrade-migration plan and do nothing else")
+	cmd.Flags().BoolVar(&plan, "plan", false,
+		"Print the upgrade-migration plan, incoming entries included, and do nothing else")
 	cmd.Flags().BoolVar(&noCheck, "no-check", false,
 		"With --plan: do not run any migration's check: command; every row falls back to the ledger alone")
 	cmd.Flags().BoolVar(&repair, "repair", false, "Also run the opus judgment phase over free-form deferred records (spends money)")

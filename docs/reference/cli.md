@@ -3239,11 +3239,14 @@ Does NOT touch _apex/config.yaml — that's the one-time bootstrap from
 'ape framework setup'. To re-bootstrap, pass --force to 'setup'.
 
   --plan        print the upgrade-migration plan and do NOTHING ELSE — no
-                install, no fetch, no migration. Readable against a project
-                in any state, and it distinguishes pending / applied /
-                half-applied / cannot-tell rather than collapsing them,
-                because a runner that reads cannot-tell as pending
-                re-applies things
+                install, no fetch, no migration. The plan is the list the
+                project will hold AFTER this update: the installed entries
+                overlaid by the repo's, with a SOURCE column marking the
+                ones the update brings, so a migration can be read before
+                it runs. The repo is read as it stands, unfetched. It
+                distinguishes pending / applied / half-applied /
+                cannot-tell rather than collapsing them, because a runner
+                that reads cannot-tell as pending re-applies things
   --dry-run     show the framework drift AND the pending migrations,
                 writing nothing
   --no-migrate  install framework files only; migrations stay pending, and
@@ -3273,7 +3276,7 @@ Flags:
 | `--no-fetch` | bool | `false` | Skip 'git fetch && merge --ff-only' on the framework repo before reading its state |
 | `--no-migrate` | bool | `false` | Install framework files only; leave migrations pending |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--plan` | bool | `false` | Print the upgrade-migration plan and do nothing else |
+| `--plan` | bool | `false` | Print the upgrade-migration plan, incoming entries included, and do nothing else |
 | `--repair` | bool | `false` | Also run the opus judgment phase over free-form deferred records (spends money) |
 
 Global flags:

@@ -64,7 +64,7 @@ func TestMigrationPlan_AbsentFolderIsNormal(t *testing.T) {
 	require.False(t, p.Present)
 
 	var b strings.Builder
-	emitMigrationPlan(&b, p)
+	emitMigrationPlan(&b, p, "")
 	require.Contains(t, b.String(), "ships no migration list")
 }
 
@@ -79,7 +79,7 @@ func TestMigrationPlan_DerivableAndJudged(t *testing.T) {
 	require.Len(t, p.Rows, 2)
 
 	var b strings.Builder
-	emitMigrationPlan(&b, p)
+	emitMigrationPlan(&b, p, "")
 	out := b.String()
 	require.Contains(t, out, "run: true", "the derivable entry names the command ape would run")
 	require.Contains(t, out, "dispatch apex-upgrade-project",
@@ -291,4 +291,56 @@ body
 
 	checkUpgradeMigrations(t.Context(), doctorEnv{ProjectRoot: root})
 	require.NoFileExists(t, filepath.Join(root, "check-ran"))
+}
+
+// TestMigrationPlan_PreviewsIncomingEntries: `--plan` exists so a migration
+// can be seen before it runs, and it read only the project's installed
+// list — so the entries an update BRINGS, the ones most worth previewing,
+// were invisible until they had run. It now shows the list as install will
+// leave it: installed entries, overlaid by the repo's by file name.
+func TestMigrationPlan_PreviewsIncomingEntries(t *testing.T) {
+	root := newTestProject(t, realProjectConfig)
+	seedMigration(t, root, "v0.16.0_seq-01_slice-keys.md", derivableEntry)
+	seedFrameworkMetadata(t, root, []framework.AppliedMigration{
+		{ID: "v0.16.0_seq-01", Version: "0.16.0", AppliedAt: "20260905120000"},
+	})
+
+	repo := t.TempDir()
+	incomingDir := filepath.Join(repo, framework.SubtreeMigrations)
+	require.NoError(t, os.MkdirAll(incomingDir, 0o755))
+	// The repo still ships the installed entry, plus one new one.
+	require.NoError(t, os.WriteFile(filepath.Join(incomingDir, "v0.16.0_seq-01_slice-keys.md"),
+		[]byte(derivableEntry), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(incomingDir, "v0.17.0_seq-02_requirement-ids.md"),
+		[]byte(judgedEntry), 0o644))
+
+	installedOnly, err := loadMigrationPlan(t.Context(), root, migration.NoCheckRunner(), false)
+	require.NoError(t, err)
+	require.Len(t, installedOnly.Rows, 1, "the run's own view is still the installed list")
+
+	p, err := loadIncomingMigrationPlan(t.Context(), root, repo, migration.NoCheckRunner(), false)
+	require.NoError(t, err)
+	require.Len(t, p.Rows, 2, "one entry per file name: the incoming copy replaces the installed one")
+
+	var b strings.Builder
+	emitMigrationPlan(&b, p, repo)
+	out := b.String()
+	require.Contains(t, out, "SOURCE")
+	require.Contains(t, out, "incoming (new)", "the entry the update brings is visible before it runs")
+	require.Contains(t, out, "incoming (replaces installed)")
+	require.Contains(t, out, "dispatch apex-upgrade-project")
+	require.Contains(t, out, "1 pending")
+}
+
+// An installed entry the repo no longer ships stays: install copies and
+// never deletes, so the preview must not drop it either.
+func TestOverlayMigrations_KeepsInstalledEntriesTheRepoDropped(t *testing.T) {
+	installed := []migration.Entry{{Path: "/p/_apex/migrations/a.md", ID: "a"}, {Path: "/p/_apex/migrations/b.md", ID: "b-old"}}
+	incoming := []migration.Entry{{Path: "/r/_apex/migrations/b.md", ID: "b-new"}, {Path: "/r/_apex/migrations/c.md", ID: "c"}}
+	merged := overlayMigrations(installed, incoming)
+	ids := make([]string, 0, len(merged))
+	for _, e := range merged {
+		ids = append(ids, e.ID)
+	}
+	require.ElementsMatch(t, []string{"a", "b-new", "c"}, ids)
 }
