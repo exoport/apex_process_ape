@@ -156,14 +156,14 @@ func verifyFamily(cfg *apexcfg.Resolved, family Family, ignoreExt bool) (FamilyR
 		return result, nil
 	case dir == "":
 		result.Skipped = true
-		result.Reason = "the folder this family lives under is not configured"
+		result.Reason = reasonDirUnconfigured
 		return result, nil
 	}
 	result.Dir = dir
 
 	if !dirExists(dir) {
 		result.Skipped = true
-		result.Reason = "directory does not exist"
+		result.Reason = reasonDirMissing
 		return result, nil
 	}
 

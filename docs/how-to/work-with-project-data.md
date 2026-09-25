@@ -82,13 +82,15 @@ resolves.
 
 ## Registries: ADRs, patterns, features, capabilities
 
-Each family carries the same four verbs, and answers to its plural
+Each family carries the same five verbs, and answers to its plural
 (`ape adrs verify` is `ape adr verify`):
 
 ```bash
 ape adr verify                  # four checks, exit 0 with findings
 ape adr sync --check            # what reconciling would change
 ape adr sync                    # reconcile the index against disk
+ape adr backfill --check        # exit 1 if existing entries lack fields their record has
+ape adr backfill                # fill them
 ape registry verify --all       # every family at once
 ```
 
@@ -106,6 +108,52 @@ An `index.yaml` that is absent while records exist is one finding
 what a record's own frontmatter already states and invents no titles or
 statuses. A renamed record keeps its authored index entry rather than being
 dropped and re-added with less.
+
+An entry `sync` adds carries every field the family's index schema names
+that the record has a value for, in the key order the framework's skills
+write. The value comes from the frontmatter, or from the file name for
+`slug`, since ADR and feature records carry none. Lists stay YAML
+sequences and timestamps stay quoted strings. A required field the record
+has no value for is left out and named in the change's `missing` list
+rather than invented. Before v0.1.1, `sync` wrote only `id`, `title`,
+`status`, `type`, `epic`, `capability` and `file`, which no family's schema
+accepts. Up to v0.1.0, an added entry fails its schema.
+
+### Completing existing entries: `backfill`
+
+`sync` never touches an entry that is already listed. `backfill` fills
+those: every required field **absent** from an existing entry is copied in
+from its record, by the same rules `sync` uses for a new entry.
+
+```bash
+ape registry backfill --all --check   # 0 nothing to fill · 1 fills pending
+ape registry backfill --all           # fill them
+ape adr backfill                      # one family
+```
+
+It is deliberately narrow, because it runs unattended as a framework
+migration on `ape framework update`:
+
+- **no adds, no removes, no repoints.** The set of entries and every `file:`
+  stay as they were, since those are `sync`'s repairs;
+- **a present value is never changed**, even an empty one;
+- **`file:` is never filled.** An entry with no file is a
+  `registry.file_unresolved` finding, and `sync` repairs it.
+
+A required field the record has no value for stays absent and is reported as
+a **gap**. So is an entry whose record is absent or unreadable. Gaps
+are not pending work. Nothing on disk can close them, so they never make
+`--check` exit 1: a check that can never pass would re-run its migration on
+every update.
+
+`--check` exit codes are the migration contract:
+
+| exit | meaning |
+| ---- | ------- |
+| `0`  | nothing to fill (gaps may still be reported) |
+| `1`  | fills pending, and running `backfill` would write them |
+| `2`  | the check itself failed: an unknown `--family`, or an index or record that cannot be read |
+| `4`  | no project config |
 
 ### A headerless record, and the removal `sync` will not make
 

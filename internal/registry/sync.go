@@ -128,11 +128,11 @@ func syncFamily(cfg *apexcfg.Resolved, family Family, opts SyncOptions) (SyncFam
 		res.Skipped, res.Reason = true, "ext_"+family.Name+" is false"
 		return res, nil, nil, nil
 	case dir == "":
-		res.Skipped, res.Reason = true, "the folder this family lives under is not configured"
+		res.Skipped, res.Reason = true, reasonDirUnconfigured
 		return res, nil, nil, nil
 	}
 	if !dirExists(dir) {
-		res.Skipped, res.Reason = true, "directory does not exist"
+		res.Skipped, res.Reason = true, reasonDirMissing
 		return res, nil, nil, nil
 	}
 

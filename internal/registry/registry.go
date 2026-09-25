@@ -215,3 +215,10 @@ func sortFindings(findings []Finding) {
 		return a.File < b.File
 	})
 }
+
+// Skip reasons shared by verify, sync and backfill, so the three report a
+// skipped family in the same words.
+const (
+	reasonDirUnconfigured = "the folder this family lives under is not configured"
+	reasonDirMissing      = "directory does not exist"
+)

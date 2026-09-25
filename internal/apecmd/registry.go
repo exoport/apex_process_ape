@@ -33,6 +33,7 @@ func registryVerbs(family registry.Family) []*cobra.Command {
 	return []*cobra.Command{
 		newFamilyVerifyCmd(family),
 		newFamilySyncCmd(family),
+		newFamilyBackfillCmd(family),
 		newFamilyUpdateCmd(family),
 	}
 }
@@ -75,7 +76,8 @@ func newRegistryCmd() *cobra.Command {
 features and capabilities. Each family also carries these verbs on its own
 noun (` + "`ape adr verify`" + `); this is the whole-project view.`,
 	}
-	cmd.AddCommand(newRegistryVerifyCmd(), newRegistrySyncCmd(), newRegistryRestoreHeadersCmd())
+	cmd.AddCommand(newRegistryVerifyCmd(), newRegistrySyncCmd(), newRegistryBackfillCmd(),
+		newRegistryRestoreHeadersCmd())
 	return cmd
 }
 
@@ -275,6 +277,12 @@ it copies what a record's own frontmatter states and invents no titles,
 statuses or any other field. A renamed record keeps its authored entry
 rather than being dropped and re-added.
 
+An added entry carries every field of the family's index schema the record
+has a value for: its frontmatter, or its file name for slug. A required
+field with no value is left out and listed in the change's missing. An
+entry that is already listed is never completed here; that is
+` + "`backfill`" + `.
+
 --check makes it a dry run: the same diff, nothing written. generated_at
 moves only when something else did.`
 
@@ -380,6 +388,147 @@ func runRegistrySync(w io.Writer, cwdFlag, outputFormat string, check bool, only
 	fmt.Fprintln(w, "\nRun `ape registry verify --all` for the record_unparseable finding, give that\n"+
 		"record its frontmatter back, then re-run sync.")
 	return nil
+}
+
+const backfillLong = `Complete the index entries that already exist. A field the family's index
+schema requires that is ABSENT from an entry is copied in from that
+entry's record: its frontmatter, or its file name for slug. It is the same
+rule sync uses when it adds an entry.
+
+It does nothing else. No entry is added, removed or repointed, a value
+that is present is never changed (even an empty one), and file: is never
+filled, because an entry with no file is sync's repair. That narrowness is
+the point: this runs unattended as a framework migration on
+` + "`ape framework update`" + `, where a structural index change is not wanted.
+
+A required field the record has no value for stays absent and is reported
+as a gap. An entry whose record is absent or unreadable is also a gap.
+Gaps are not pending work: nothing on disk can close them, so re-running
+finds the same ones.
+
+--check writes nothing and answers in its exit code: 0 when there is
+nothing to fill, 1 when fills are pending. Those two are the only answers
+about the index. Anything else means the check itself failed: 2 for an
+unknown family or an index or record that cannot be read, 4 with no
+project config.`
+
+func newFamilyBackfillCmd(family registry.Family) *cobra.Command {
+	var (
+		cwdFlag      string
+		outputFormat string
+		check        bool
+	)
+	cmd := &cobra.Command{
+		Use:     "backfill",
+		Short:   "Fill absent required fields of existing " + family.Name + " index entries from their records",
+		Long:    backfillLong,
+		Args:    cobra.NoArgs,
+		Example: "  ape " + family.Singular + " backfill --check",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runRegistryBackfill(cmd.OutOrStdout(), cwdFlag, outputFormat, check, []string{family.Name})
+		},
+	}
+	cmd.Flags().StringVar(&cwdFlag, "cwd", "", helpCwd)
+	cmd.Flags().StringVar(&outputFormat, "output-format", "human", helpFormat)
+	cmd.Flags().BoolVar(&check, "check", false, helpBackfillCheck)
+	return cmd
+}
+
+const helpBackfillCheck = "Write nothing; exit 0 when nothing is fillable, 1 when fills are pending (2 or 4 if the check itself failed)"
+
+func newRegistryBackfillCmd() *cobra.Command {
+	var (
+		cwdFlag      string
+		outputFormat string
+		check        bool
+		all          bool
+		families     []string
+	)
+	cmd := &cobra.Command{
+		Use:     "backfill",
+		Short:   "Fill absent required fields of existing index entries from their records",
+		Long:    backfillLong,
+		Args:    cobra.NoArgs,
+		Example: "  ape registry backfill --all --check\n  ape registry backfill --all",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			only := families
+			if all {
+				only = nil
+			}
+			return runRegistryBackfill(cmd.OutOrStdout(), cwdFlag, outputFormat, check, only)
+		},
+	}
+	cmd.Flags().StringVar(&cwdFlag, "cwd", "", helpCwd)
+	cmd.Flags().StringVar(&outputFormat, "output-format", "human", helpFormat)
+	cmd.Flags().BoolVar(&check, "check", false, helpBackfillCheck)
+	cmd.Flags().BoolVar(&all, "all", false, "Every family (the default when --family is not given)")
+	cmd.Flags().StringSliceVar(&families, "family", nil,
+		"Families to backfill: "+strings.Join(registry.FamilyNames(), ","))
+	return cmd
+}
+
+// runRegistryBackfill is a migration's check and command. Its exit codes
+// matter in a specific way: the migration runner reads 0 as applied, 1 as
+// not applied, and anything else as "the check failed". So under --check a
+// failure must never exit 1, or an unreadable index would read as "fills
+// pending" and the runner would try to write into it.
+func runRegistryBackfill(w io.Writer, cwdFlag, outputFormat string, check bool, only []string) error {
+	// Exits 4 for an absent config and 2 for a malformed one.
+	cfg := resolveProjectConfig(cwdFlag)
+	res, err := registry.Backfill(cfg, registry.SyncOptions{
+		Only:        only,
+		Check:       check,
+		GeneratedAt: cfg.Timestamp,
+	})
+	if err != nil {
+		if check {
+			return usageErr(err)
+		}
+		return err
+	}
+	pending := func() error {
+		if check && res.Pending() {
+			return reportedErr(ExitRunFailed, fmt.Errorf("%d index entr(ies) have fields to fill", len(res.Fills)))
+		}
+		return nil
+	}
+	format := output.Format(outputFormat)
+	if format != output.FormatHuman {
+		if err := output.Print(w, format, res); err != nil {
+			return err
+		}
+		return pending()
+	}
+	if !res.Pending() && len(res.Gaps) == 0 {
+		fmt.Fprintln(w, "every index entry has its required fields — nothing to fill")
+		return nil
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	if res.Pending() {
+		verb := "filled"
+		if check {
+			verb = "would fill"
+		}
+		fmt.Fprintf(w, "%s %d entr(ies):\n", verb, len(res.Fills))
+		for _, f := range res.Fills {
+			fmt.Fprintf(tw, "  %s\t%s\t%s\n", f.Family, f.ID, strings.Join(f.Fields, ", "))
+		}
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintln(w, "nothing to fill")
+	}
+	if len(res.Gaps) > 0 {
+		fmt.Fprintf(w, "\n%d entr(ies) still incomplete — the record has no value to copy:\n", len(res.Gaps))
+		for _, g := range res.Gaps {
+			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\n", g.Family, g.ID, strings.Join(g.Fields, ", "), g.Reason)
+		}
+		if err := tw.Flush(); err != nil {
+			return err
+		}
+	}
+	return pending()
 }
 
 // familyExampleID is a representative record id per family, for help text.

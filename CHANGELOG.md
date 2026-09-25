@@ -21,7 +21,21 @@
   the change's new `missing` field. Checked against a framework eval tree: all
   four indexes, deleted and rebuilt from their 24 records alone, pass the
   framework's JSON schemas. Entries already in an index are unchanged, and
-  that includes incomplete ones an earlier sync wrote.
+  that includes incomplete ones an earlier sync wrote. `backfill` below
+  completes those.
+- **feat(registry): `ape registry backfill` and `ape <family> backfill`.**
+  These fill every required field that is *absent* from an existing index
+  entry, copying it from the entry's record by the same rules `sync` uses. It
+  makes no adds, removes or repoints, never changes a present value, and never
+  fills `file:`, so it is safe to run unattended as a framework migration on
+  `ape framework update`. A required field the record has no value for is
+  reported as a gap and never counts as pending. `--check` is the migration
+  check: exit `0` when there is nothing to fill, `1` when fills are pending,
+  `2` when the check itself failed (unknown family, or an unreadable index or
+  record) and `4` when there is no project config. Checked against the same
+  eval tree: with every required field stripped from all 24 entries, one
+  backfill restores every entry to the values the framework's skills had
+  written.
 
 ## v0.1.0 (2026-09-23)
 

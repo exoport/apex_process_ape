@@ -360,3 +360,34 @@ func TestPluralY(t *testing.T) {
 	require.Equal(t, "ies", pluralY(0))
 	require.Equal(t, "ies", pluralY(2))
 }
+
+// `ape registry backfill --check` is a framework migration's check:, and
+// the runner reads 0 as applied, 1 as not applied and ANYTHING ELSE as
+// "the check itself failed". So 1 may mean only "fills pending" — never an
+// unreadable index, and never a gap nothing on disk can close.
+func TestRegistryBackfillCheck_ExitCodes(t *testing.T) {
+	run := func(t *testing.T, args ...string) error {
+		t.Helper()
+		cmd := newRegistryBackfillCmd()
+		cmd.SetArgs(args)
+		cmd.SetOut(&bytes.Buffer{})
+		return cmd.Execute()
+	}
+
+	root := projectFor(t, allExtensionsConfig)
+	seedADRCorpus(t, root, 2) // every entry lacks slug, which the file name supplies
+
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, run(t, "--all", "--check", "--cwd", root)),
+		"fills pending is exit 1")
+	require.NoError(t, run(t, "--all", "--cwd", root), "the command itself exits 0")
+	require.NoError(t, run(t, "--all", "--check", "--cwd", root),
+		"applied is exit 0 — though the records' missing type, tags, … are still reported as gaps")
+
+	require.Equal(t, ExitUsage, exitCodeOf(t, run(t, "--family", "nope", "--check", "--cwd", root)),
+		"an unknown family is not 'pending'")
+
+	index := filepath.Join(root, "development", "governance", "adrs", "index.yaml")
+	require.NoError(t, os.WriteFile(index, []byte("adrs: [\n"), 0o644))
+	require.Equal(t, ExitUsage, exitCodeOf(t, run(t, "--all", "--check", "--cwd", root)),
+		"an unreadable index is the check failing, not fills pending")
+}

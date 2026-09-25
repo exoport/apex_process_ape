@@ -1097,11 +1097,56 @@ Aliases: `adrs`
 
 Subcommands:
 
+- `backfill` — Fill absent required fields of existing adrs index entries from their records
 - `list` — List all ADRs
 - `new` — Scaffold a new ADR file
 - `sync` — Reconcile the adrs index against records on disk
 - `update` — Apply field deltas to existing adrs index entries
 - `verify` — Verify the adrs registry against its index
+
+## ape adr backfill
+
+Fill absent required fields of existing adrs index entries from their records
+
+```
+ape adr backfill [flags]
+```
+
+Complete the index entries that already exist. A field the family's index
+schema requires that is ABSENT from an entry is copied in from that
+entry's record: its frontmatter, or its file name for slug. It is the same
+rule sync uses when it adds an entry.
+
+It does nothing else. No entry is added, removed or repointed, a value
+that is present is never changed (even an empty one), and file: is never
+filled, because an entry with no file is sync's repair. That narrowness is
+the point: this runs unattended as a framework migration on
+`ape framework update`, where a structural index change is not wanted.
+
+A required field the record has no value for stays absent and is reported
+as a gap. An entry whose record is absent or unreadable is also a gap.
+Gaps are not pending work: nothing on disk can close them, so re-running
+finds the same ones.
+
+--check writes nothing and answers in its exit code: 0 when there is
+nothing to fill, 1 when fills are pending. Those two are the only answers
+about the index. Anything else means the check itself failed: 2 for an
+unknown family or an index or record that cannot be read, 4 with no
+project config.
+
+Examples:
+
+```
+  ape adr backfill --check
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | Write nothing; exit 0 when nothing is fillable, 1 when fills are pending (2 or 4 if the check itself failed) |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
 ## ape adr list
 
@@ -1147,6 +1192,12 @@ This is the repair for the findings `verify` reports, and nothing more —
 it copies what a record's own frontmatter states and invents no titles,
 statuses or any other field. A renamed record keeps its authored entry
 rather than being dropped and re-added.
+
+An added entry carries every field of the family's index schema the record
+has a value for: its frontmatter, or its file name for slug. A required
+field with no value is left out and listed in the change's missing. An
+entry that is already listed is never completed here; that is
+`backfill`.
 
 --check makes it a dry run: the same diff, nothing written. generated_at
 moves only when something else did.
@@ -1302,10 +1353,55 @@ Aliases: `capabilities`
 
 Subcommands:
 
+- `backfill` — Fill absent required fields of existing capabilities index entries from their records
 - `list` — List capabilities from the registry index
 - `sync` — Reconcile the capabilities index against records on disk
 - `update` — Apply field deltas to existing capabilities index entries
 - `verify` — Verify the capabilities registry against its index
+
+## ape capability backfill
+
+Fill absent required fields of existing capabilities index entries from their records
+
+```
+ape capability backfill [flags]
+```
+
+Complete the index entries that already exist. A field the family's index
+schema requires that is ABSENT from an entry is copied in from that
+entry's record: its frontmatter, or its file name for slug. It is the same
+rule sync uses when it adds an entry.
+
+It does nothing else. No entry is added, removed or repointed, a value
+that is present is never changed (even an empty one), and file: is never
+filled, because an entry with no file is sync's repair. That narrowness is
+the point: this runs unattended as a framework migration on
+`ape framework update`, where a structural index change is not wanted.
+
+A required field the record has no value for stays absent and is reported
+as a gap. An entry whose record is absent or unreadable is also a gap.
+Gaps are not pending work: nothing on disk can close them, so re-running
+finds the same ones.
+
+--check writes nothing and answers in its exit code: 0 when there is
+nothing to fill, 1 when fills are pending. Those two are the only answers
+about the index. Anything else means the check itself failed: 2 for an
+unknown family or an index or record that cannot be read, 4 with no
+project config.
+
+Examples:
+
+```
+  ape capability backfill --check
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | Write nothing; exit 0 when nothing is fillable, 1 when fills are pending (2 or 4 if the check itself failed) |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
 ## ape capability list
 
@@ -1344,6 +1440,12 @@ This is the repair for the findings `verify` reports, and nothing more —
 it copies what a record's own frontmatter states and invents no titles,
 statuses or any other field. A renamed record keeps its authored entry
 rather than being dropped and re-added.
+
+An added entry carries every field of the family's index schema the record
+has a value for: its frontmatter, or its file name for slug. A required
+field with no value is left out and listed in the change's missing. An
+entry that is already listed is never completed here; that is
+`backfill`.
 
 --check makes it a dry run: the same diff, nothing written. generated_at
 moves only when something else did.
@@ -2772,10 +2874,55 @@ Aliases: `features`
 
 Subcommands:
 
+- `backfill` — Fill absent required fields of existing features index entries from their records
 - `list` — List features from the registry index
 - `sync` — Reconcile the features index against records on disk
 - `update` — Apply field deltas to existing features index entries
 - `verify` — Verify the features registry against its index
+
+## ape feature backfill
+
+Fill absent required fields of existing features index entries from their records
+
+```
+ape feature backfill [flags]
+```
+
+Complete the index entries that already exist. A field the family's index
+schema requires that is ABSENT from an entry is copied in from that
+entry's record: its frontmatter, or its file name for slug. It is the same
+rule sync uses when it adds an entry.
+
+It does nothing else. No entry is added, removed or repointed, a value
+that is present is never changed (even an empty one), and file: is never
+filled, because an entry with no file is sync's repair. That narrowness is
+the point: this runs unattended as a framework migration on
+`ape framework update`, where a structural index change is not wanted.
+
+A required field the record has no value for stays absent and is reported
+as a gap. An entry whose record is absent or unreadable is also a gap.
+Gaps are not pending work: nothing on disk can close them, so re-running
+finds the same ones.
+
+--check writes nothing and answers in its exit code: 0 when there is
+nothing to fill, 1 when fills are pending. Those two are the only answers
+about the index. Anything else means the check itself failed: 2 for an
+unknown family or an index or record that cannot be read, 4 with no
+project config.
+
+Examples:
+
+```
+  ape feature backfill --check
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | Write nothing; exit 0 when nothing is fillable, 1 when fills are pending (2 or 4 if the check itself failed) |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
 ## ape feature list
 
@@ -2814,6 +2961,12 @@ This is the repair for the findings `verify` reports, and nothing more —
 it copies what a record's own frontmatter states and invents no titles,
 statuses or any other field. A renamed record keeps its authored entry
 rather than being dropped and re-added.
+
+An added entry carries every field of the family's index schema the record
+has a value for: its frontmatter, or its file name for slug. A required
+field with no value is left out and listed in the change's missing. An
+entry that is already listed is never completed here; that is
+`backfill`.
 
 --check makes it a dry run: the same diff, nothing written. generated_at
 moves only when something else did.
@@ -3433,10 +3586,55 @@ Aliases: `patterns`
 
 Subcommands:
 
+- `backfill` — Fill absent required fields of existing patterns index entries from their records
 - `list` — List all governance patterns
 - `sync` — Reconcile the patterns index against records on disk
 - `update` — Apply field deltas to existing patterns index entries
 - `verify` — Verify the patterns registry against its index
+
+## ape pattern backfill
+
+Fill absent required fields of existing patterns index entries from their records
+
+```
+ape pattern backfill [flags]
+```
+
+Complete the index entries that already exist. A field the family's index
+schema requires that is ABSENT from an entry is copied in from that
+entry's record: its frontmatter, or its file name for slug. It is the same
+rule sync uses when it adds an entry.
+
+It does nothing else. No entry is added, removed or repointed, a value
+that is present is never changed (even an empty one), and file: is never
+filled, because an entry with no file is sync's repair. That narrowness is
+the point: this runs unattended as a framework migration on
+`ape framework update`, where a structural index change is not wanted.
+
+A required field the record has no value for stays absent and is reported
+as a gap. An entry whose record is absent or unreadable is also a gap.
+Gaps are not pending work: nothing on disk can close them, so re-running
+finds the same ones.
+
+--check writes nothing and answers in its exit code: 0 when there is
+nothing to fill, 1 when fills are pending. Those two are the only answers
+about the index. Anything else means the check itself failed: 2 for an
+unknown family or an index or record that cannot be read, 4 with no
+project config.
+
+Examples:
+
+```
+  ape pattern backfill --check
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | Write nothing; exit 0 when nothing is fillable, 1 when fills are pending (2 or 4 if the check itself failed) |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
 ## ape pattern list
 
@@ -3474,6 +3672,12 @@ This is the repair for the findings `verify` reports, and nothing more —
 it copies what a record's own frontmatter states and invents no titles,
 statuses or any other field. A renamed record keeps its authored entry
 rather than being dropped and re-added.
+
+An added entry carries every field of the family's index schema the record
+has a value for: its frontmatter, or its file name for slug. A required
+field with no value is left out and listed in the change's missing. An
+entry that is already listed is never completed here; that is
+`backfill`.
 
 --check makes it a dry run: the same diff, nothing written. generated_at
 moves only when something else did.
@@ -3753,9 +3957,57 @@ noun (`ape adr verify`); this is the whole-project view.
 
 Subcommands:
 
+- `backfill` — Fill absent required fields of existing index entries from their records
 - `restore-headers` — Rebuild a headerless record's frontmatter from its index entry
 - `sync` — Reconcile every record index against records on disk
 - `verify` — Verify every record registry (or a named subset)
+
+## ape registry backfill
+
+Fill absent required fields of existing index entries from their records
+
+```
+ape registry backfill [flags]
+```
+
+Complete the index entries that already exist. A field the family's index
+schema requires that is ABSENT from an entry is copied in from that
+entry's record: its frontmatter, or its file name for slug. It is the same
+rule sync uses when it adds an entry.
+
+It does nothing else. No entry is added, removed or repointed, a value
+that is present is never changed (even an empty one), and file: is never
+filled, because an entry with no file is sync's repair. That narrowness is
+the point: this runs unattended as a framework migration on
+`ape framework update`, where a structural index change is not wanted.
+
+A required field the record has no value for stays absent and is reported
+as a gap. An entry whose record is absent or unreadable is also a gap.
+Gaps are not pending work: nothing on disk can close them, so re-running
+finds the same ones.
+
+--check writes nothing and answers in its exit code: 0 when there is
+nothing to fill, 1 when fills are pending. Those two are the only answers
+about the index. Anything else means the check itself failed: 2 for an
+unknown family or an index or record that cannot be read, 4 with no
+project config.
+
+Examples:
+
+```
+  ape registry backfill --all --check
+  ape registry backfill --all
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--all` | bool | `false` | Every family (the default when --family is not given) |
+| `--check` | bool | `false` | Write nothing; exit 0 when nothing is fillable, 1 when fills are pending (2 or 4 if the check itself failed) |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--family` | stringSlice | `[]` | Families to backfill: adrs,patterns,features,capabilities |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
 ## ape registry restore-headers
 
@@ -3823,6 +4075,12 @@ This is the repair for the findings `verify` reports, and nothing more —
 it copies what a record's own frontmatter states and invents no titles,
 statuses or any other field. A renamed record keeps its authored entry
 rather than being dropped and re-added.
+
+An added entry carries every field of the family's index schema the record
+has a value for: its frontmatter, or its file name for slug. A required
+field with no value is left out and listed in the change's missing. An
+entry that is already listed is never completed here; that is
+`backfill`.
 
 --check makes it a dry run: the same diff, nothing written. generated_at
 moves only when something else did.
