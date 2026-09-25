@@ -181,7 +181,8 @@ func TestCheckRegistryDrift(t *testing.T) {
 	seedADRCorpus(t, root, 4, 3)
 	res = checkRegistryDrift(ctx, projectDataEnv(root))
 	require.Equal(t, StatusWarn, res.Status, "drift is a warn, not a fail")
-	require.Contains(t, res.Message, "orphan_record")
+	require.Equal(t, "1 finding(s): registry.orphan_record: 1", res.Message,
+		"a tally reads like the other rows, not as Go's map[...] formatting")
 	require.Contains(t, res.FixCommand, "ape registry verify")
 }
 
@@ -576,4 +577,9 @@ func TestStoryFields_AbsentImplementationFolderAnswersEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, res.Trailer.RootMissing)
 	require.Equal(t, 0, res.Trailer.StoriesMatched)
+}
+
+func TestCountsLine(t *testing.T) {
+	require.Equal(t, "a.one: 2, b.two: 1", countsLine(map[string]int{"b.two": 1, "a.one": 2}))
+	require.Empty(t, countsLine(nil))
 }

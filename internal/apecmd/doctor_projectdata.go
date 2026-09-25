@@ -52,7 +52,7 @@ func checkConfigResolved(_ context.Context, env doctorEnv) CheckResult {
 	}
 	overlay := "no local overlay"
 	if cfg.LocalOverlayApplied {
-		overlay = fmt.Sprintf("local overlay replaced %v", cfg.OverlaidKeys)
+		overlay = "local overlay replaced " + strings.Join(cfg.OverlaidKeys, ", ")
 	}
 	return CheckResult{
 		Status:  StatusOK,
@@ -82,7 +82,7 @@ func checkRegistryDrift(_ context.Context, env doctorEnv) CheckResult {
 	}
 	return CheckResult{
 		Status:  StatusWarn,
-		Message: fmt.Sprintf("%d finding(s): %v", report.Summary.Findings, report.Summary.ByCheck),
+		Message: fmt.Sprintf("%d finding(s): %s", report.Summary.Findings, countsLine(report.Summary.ByCheck)),
 		Remediation: "`ape registry verify --all` lists them; `ape registry sync --all` repairs set and file drift, " +
 			"`ape registry backfill --all` incomplete entries.",
 		FixCommand: "ape registry verify --all",
@@ -140,7 +140,7 @@ func checkSprintDivergence(_ context.Context, env doctorEnv) CheckResult {
 	}
 	return CheckResult{
 		Status:      StatusWarn,
-		Message:     fmt.Sprintf("%d divergence(s): %v", report.Summary.Findings, report.Summary.ByCheck),
+		Message:     fmt.Sprintf("%d divergence(s): %s", report.Summary.Findings, countsLine(report.Summary.ByCheck)),
 		Remediation: "`ape sprint check` names both sides of each one. Neither is assumed correct — a person decides.",
 		FixCommand:  "ape sprint check",
 	}
@@ -213,7 +213,7 @@ func checkMigrationPending(_ context.Context, env doctorEnv) CheckResult {
 	}
 	return CheckResult{
 		Status:      StatusWarn,
-		Message:     fmt.Sprintf("pending: %v", names),
+		Message:     "pending: " + strings.Join(names, ", "),
 		Remediation: "`ape framework update` runs them, or `ape deferred migrate --dry-run` to look first. Nothing is committed either way.",
 		FixCommand:  "ape deferred migrate --dry-run",
 	}
@@ -531,4 +531,15 @@ func checkConfigFolders(_ context.Context, env doctorEnv) CheckResult {
 			"the two apart — a young project and a typo produce the same empty directory listing " +
 			"— which is why this is reported and not enforced.",
 	}
+}
+
+// countsLine renders a per-check tally the way the other rows read —
+// `registry.entry_incomplete: 1, registry.orphan_record: 2`, sorted by
+// check — rather than as Go's `map[registry.entry_incomplete:1]`.
+func countsLine(counts map[string]int) string {
+	parts := make([]string, 0, len(counts))
+	for _, check := range sortedKeys(counts) {
+		parts = append(parts, fmt.Sprintf("%s: %d", check, counts[check]))
+	}
+	return strings.Join(parts, ", ")
 }

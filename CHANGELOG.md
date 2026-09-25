@@ -87,6 +87,12 @@
   something else in the record does (the framework commit, the ape version,
   the installed files or the migration ledger), so a steady-state `ape
   framework update` leaves the tree clean.
+- **fix(doctor): finding tallies read as text, not as Go values.**
+  `registry.drift` and `sprint.divergence` printed their per-check counts as
+  `map[registry.entry_incomplete:1]`. They now print
+  `registry.entry_incomplete: 1`, comma-separated and sorted. The
+  config-overlay and pending-migration rows printed Go's `[a b]` slice form,
+  and now print a comma-separated list.
 
 ## v0.1.0 (2026-09-23)
 
