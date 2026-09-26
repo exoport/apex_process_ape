@@ -136,7 +136,7 @@ func TestPromptRecord_UnpinnedTableRecordsTheObservedRow(t *testing.T) {
 	runDir := t.TempDir()
 	table := &effort.Defaults{
 		Version:  1,
-		Defaults: map[string]string{"opus": "medium", "sonnet": "xhigh"},
+		Defaults: map[string]string{"opus": "medium", "sonnet": "high"},
 		Fallback: "high",
 	}
 	tele := &sessiondriver.Telemetry{Sessions: []sessiondriver.SessionUsage{

@@ -5,7 +5,7 @@
 // # Why a table, and why it rides in --settings
 //
 // One claude process runs more than one model: an Opus session at medium
-// spawns Sonnet sub-agents that the framework wants at xhigh. The only
+// spawns Sonnet sub-agents that the framework wants at high. The only
 // effort knob ape used to turn, CLAUDE_CODE_EFFORT_LEVEL, is process-wide
 // and outranks every per-model setting, so it cannot express that. Claude
 // Code's settings can: `modelSettings.<model>.effortLevel` is looked up

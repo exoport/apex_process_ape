@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.2.0 (2026-09-26)
 
 - **feat(effort): per-model effort defaults from the framework.** ape used
   to give every spawned session `xhigh`, process-wide through
@@ -11,7 +11,7 @@
   installs it, and ape writes it into each spawn's `--settings` as Claude
   Code's `modelSettings.<model>.effortLevel` plus a top-level `effortLevel`
   for the fallback. Claude applies it per request, so an Opus session at
-  `medium` spawns Sonnet sub-agents at `xhigh`, in one process. That was
+  `medium` spawns Sonnet sub-agents at `high`, in one process. That was
   measured live on claude 2.1.283 by reading the per-request `effort` the
   transcripts record, with values the machine's own user settings could not
   produce: a naive probe passed with no ape settings at all, because the

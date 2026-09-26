@@ -62,7 +62,7 @@ func runEffortSpec(t *testing.T, specBody string, table *effort.Defaults) (m Man
 
 var fwTable = &effort.Defaults{
 	Version:  1,
-	Defaults: map[string]string{"opus": "medium", "sonnet": "xhigh", "haiku": "medium"},
+	Defaults: map[string]string{"opus": "medium", "sonnet": "high", "haiku": "medium"},
 	Fallback: "high",
 }
 
@@ -77,7 +77,7 @@ func TestRun_TableGovernsWithNoProcessWideEffort(t *testing.T) {
 	require.False(t, set, "no CLAUDE_CODE_EFFORT_LEVEL when the table governs")
 
 	step := m.Stages[0].Steps[0]
-	require.Equal(t, "xhigh", step.Effort, "the sonnet row, resolved")
+	require.Equal(t, "high", step.Effort, "the sonnet row, resolved")
 	require.Equal(t, effort.SourceTable, step.EffortSource)
 }
 

@@ -80,12 +80,12 @@ Valid values: `low`, `medium`, `high`, `xhigh`, `max`. An unknown value fails th
 version: 1
 defaults:
   opus: medium
-  sonnet: xhigh
+  sonnet: high
   haiku: medium
 fallback: high   # the model is unknown, or its family is not listed
 ```
 
-ape writes it into the `--settings` it passes each spawn, as Claude Code's `modelSettings.<model>.effortLevel` plus a top-level `effortLevel` for the fallback. Claude applies it per request, by the model making the request. So an Opus session at `medium` spawns Sonnet sub-agents that run at `xhigh`, in one process. A spawn with no `--model` gets the row of whatever model claude picks. `max` is not allowed in the table, because the per-model setting cannot hold it. `ape config effort` shows the resolved table and the exact keys written. Measured on Claude Code 2.1.283 by reading the per-request `effort` each transcript records, for the main session and each sub-agent.
+ape writes it into the `--settings` it passes each spawn, as Claude Code's `modelSettings.<model>.effortLevel` plus a top-level `effortLevel` for the fallback. Claude applies it per request, by the model making the request. So an Opus session at `medium` spawns Sonnet sub-agents that run at `high`, in one process. A spawn with no `--model` gets the row of whatever model claude picks. `max` is not allowed in the table, because the per-model setting cannot hold it. `ape config effort` shows the resolved table and the exact keys written. Measured on Claude Code 2.1.283 by reading the per-request `effort` each transcript records, for the main session and each sub-agent.
 
 **A stage has one effort.** It is applied when the stage's `claude` process launches, as `--model` is, so a multi-step stage runs its whole chain at the first step's effort. A later step declaring another is reported before the run (`⚠ stage … cannot change effort mid-chain`) and by `ape doctor`. The manifest records what ran as `effort`, the declaration beside it as `effort_declared`, and where the effort came from as `effort_source` (`step`, `stage`, `pipeline`, `flag`, `table` or `legacy-default`). To honour two efforts, split the stage:
 

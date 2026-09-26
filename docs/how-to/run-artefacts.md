@@ -109,6 +109,10 @@ directories.
 - **`stages/` is where per-step detail lives.** `manifest.yaml` is the
   summary; `stages/<NN>-<stage>/step-<NN>-<skill>.ndjson` is the event
   stream that produced it. When a step fails, this is the file to open.
+  Its `step-start` event carries `effort_source` and, when ape knows it at
+  launch, `effort`. With no `--model` under the effort table, claude has not
+  picked its model yet, so `step-start` has no `effort`. `step-end` then adds
+  `model_observed` and that model's `effort`, from the step's own telemetry.
 - **`pty-tail-<stage>.bin` exists only when claude never became ready** — a
   pre-REPL screen ape could not get past, or a timeout. It holds the last
   64 KiB of raw terminal output the session produced, escape sequences
@@ -156,7 +160,11 @@ unique on its own, so there is nothing to group by:
 
 `prompt.yaml` carries the full per-model token breakdown, which is why
 `ape costs reprice` can recompute a prompt's cost after a price-table
-correction. Read one with `ape costs prompt <id>`.
+correction. Read one with `ape costs prompt <id>`. Its `effort` and
+`effort_source` say what the session ran at and which rule set it. With no
+`--model` under the effort table, `effort` is the row of the model the main
+session actually ran on, not the table's fallback. `ape eval conduct` writes
+the same record to `prompt.yaml` and `manifest.json`.
 
 ## Chat sessions
 

@@ -282,7 +282,7 @@ func TestBuiltinOutputStyles_ListsTheCanonicalSpellings(t *testing.T) {
 func TestBuildSettings_MergesTheEffortFragment(t *testing.T) {
 	raw, err := BuildSettings(SettingsOptions{Mode: ModeTUI, Effort: map[string]any{
 		"effortLevel":   "high",
-		"modelSettings": map[string]any{"sonnet": map[string]any{"effortLevel": "xhigh"}},
+		"modelSettings": map[string]any{"sonnet": map[string]any{"effortLevel": "high"}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +295,7 @@ func TestBuildSettings_MergesTheEffortFragment(t *testing.T) {
 		t.Fatalf("effortLevel = %v", got["effortLevel"])
 	}
 	ms, _ := got["modelSettings"].(map[string]any)
-	if s, _ := ms["sonnet"].(map[string]any); s["effortLevel"] != "xhigh" {
+	if s, _ := ms["sonnet"].(map[string]any); s["effortLevel"] != "high" {
 		t.Fatalf("modelSettings = %v", got["modelSettings"])
 	}
 	if got["outputStyle"] == nil {

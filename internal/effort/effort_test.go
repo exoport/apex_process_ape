@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// frameworkTable is the file the framework ships, verbatim.
+// frameworkTable carries the values the framework ships (its comments trimmed).
 const frameworkTable = `version: 1
 defaults:        # model family word -> effort
   opus: medium
-  sonnet: xhigh
+  sonnet: high
   haiku: medium
 fallback: high   # the model is unknown, or its family is not listed
 `
@@ -29,7 +29,7 @@ func TestLoad_TheFrameworksTable(t *testing.T) {
 	d, err := Load(writeTable(t, frameworkTable))
 	require.NoError(t, err)
 	require.Equal(t, 1, d.Version)
-	require.Equal(t, map[string]string{"opus": "medium", "sonnet": "xhigh", "haiku": "medium"}, d.Defaults)
+	require.Equal(t, map[string]string{"opus": "medium", "sonnet": "high", "haiku": "medium"}, d.Defaults)
 	require.Equal(t, "high", d.Fallback)
 }
 
@@ -72,8 +72,8 @@ func TestFor(t *testing.T) {
 	require.NoError(t, err)
 
 	level, fromFamily := d.For("claude-sonnet-5")
-	require.Equal(t, "xhigh", level)
-	require.True(t, fromFamily)
+	require.Equal(t, "high", level)
+	require.True(t, fromFamily, "the sonnet row, not the fallback it happens to equal")
 
 	level, fromFamily = d.For("claude-opus-5-5[1m]")
 	require.Equal(t, "medium", level)
@@ -124,7 +124,7 @@ func TestDecide(t *testing.T) {
 	p = Decide("", "", d, "claude-sonnet-5")
 	require.Empty(t, p.EnvEntries(), "the table governs: no process-wide override")
 	require.Equal(t, SourceTable, p.Source)
-	require.Equal(t, "xhigh", p.Resolved)
+	require.Equal(t, "high", p.Resolved)
 	require.True(t, p.FromFamily)
 
 	p = Decide("", "", nil, "claude-sonnet-5")
