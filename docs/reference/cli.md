@@ -1643,7 +1643,7 @@ Flags:
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
 | `--drain` | bool | `false` | Run every queued maintenance record as its own change, stopping at the first that leaves the tree dirty |
 | `--dry-run` | bool | `false` | Print the messages ape would compose and commit nothing, leaving the tree as the run left it |
-| `--effort` | string | `—` | Reasoning effort (low\|medium\|high\|xhigh\|max) |
+| `--effort` | string | `—` | Explicit reasoning effort (low\|medium\|high\|xhigh\|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). |
 | `--fixes` | string | `—` | Deferred record id this change discharges (may be given alone) |
 | `--model` | string | `—` | Claude model for the dispatch |
 | `--output-format` | string | `human` | Output format: human\|json |
@@ -1700,8 +1700,53 @@ ape config
 
 Subcommands:
 
+- `effort` — Show the per-model effort defaults a spawn in this project gets
 - `pin` — Write a framework-resolved fallback into _apex/config.yaml
 - `resolve` — Resolve _apex/config.yaml + the config.local.yaml overlay
+
+## ape config effort
+
+Show the per-model effort defaults a spawn in this project gets
+
+```
+ape config effort [flags]
+```
+
+Read _apex/effort-defaults.yaml and report what ape gives a spawned claude
+session when no step, stage, pipeline or --effort value is declared.
+
+With the file, every spawn carries the table in its --settings: each model,
+sub-agents included, runs at its family's row, and any other model at the
+fallback. An explicit effort still wins, process-wide. Without the file,
+every spawn gets xhigh process-wide, which is what ape did before
+the table existed.
+
+settings_keys are the exact modelSettings keys written: the family word,
+which follows the family's current alias, plus every id of that family
+this ape knows. A model id newer than this binary that is not its family's
+alias target gets the fallback.
+
+--model resolves one model the way a spawn would.
+
+Exit codes:
+  0  resolved (with or without a table)
+  2  the table exists and is invalid, or --model is empty after trimming
+  4  no _apex/config.yaml in --cwd or any parent
+
+Examples:
+
+```
+  ape config effort --output-format json
+  ape config effort --model sonnet
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root (default: current working dir) |
+| `--model` | string | `—` | Resolve this model's effort as a spawn would (e.g. sonnet, claude-opus-5-5) |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
 ## ape config pin
 
@@ -3882,7 +3927,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--commit-allow-dirty` | bool | `false` | Bypass the dirty-tree pre-run gate. The first committing step's diff will include any pre-existing uncommitted changes. |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
-| `--effort` | string | `—` | Reasoning effort (low\|medium\|high\|xhigh\|max) applied when a step/stage/pipeline doesn't set an effort field in the YAML. Propagates to sub-agents. Default xhigh when unset everywhere. |
+| `--effort` | string | `—` | Explicit reasoning effort (low\|medium\|high\|xhigh\|max) applied when a step/stage/pipeline does not set one in the YAML. Process-wide, sub-agents included. Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). |
 | `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
 | `--from` | string | `—` | Skip stages before the named one and start execution there |
 | `--idle-timeout` | duration | `0s` | Per-step idle backstop: cancel a step only after this long with no progress across hook events or transcript growth (e.g. 90m). Default 60m. PTY output is NOT an anchor here — see `ape prompt`. |
@@ -3966,7 +4011,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--agent` | string | `—` | Framework agent fronting the session: /<agent> --autonomous -- <prompt> |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
-| `--effort` | string | `—` | Reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Default xhigh when unset. |
+| `--effort` | string | `—` | Explicit reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). |
 | `--handoff` | string | `—` | Handoff document to seed the session with (mutually exclusive with the positional prompt) |
 | `--idle-timeout` | duration | `0s` | Idle backstop: end the session only after this long with no progress across hooks, transcript growth, or PTY output (e.g. 15m); default matches the pipeline (60m) |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
@@ -5748,7 +5793,7 @@ Flags:
 | `--args` | string | `—` | Verbatim skill args appended to the invocation (whitespace-separated) |
 | `--commit-allow-dirty` | bool | `false` | Bypass the dirty-tree gate (relevant only with --task-commit) |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
-| `--effort` | string | `—` | Reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Default xhigh when unset. |
+| `--effort` | string | `—` | Explicit reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). |
 | `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
 | `--handoff` | string | `—` | Path to a handoff/context file; derives a "Read <path> and follow the Resume Protocol" --prompt value (mutually exclusive with --prompt) |
 | `--idle-timeout` | duration | `0s` | Idle backstop: cancel only after this long with no progress across hook events or transcript growth (e.g. 15m); default matches pipeline (60m). PTY output is NOT an anchor here — see `ape prompt` |

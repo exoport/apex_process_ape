@@ -126,6 +126,9 @@ type UpdateSummary struct {
 	// framework carried its two persona-facing tables.
 	AgentManifestInstalled bool `json:"agentManifestInstalled" yaml:"agentManifestInstalled"`
 	ApexHelpInstalled      bool `json:"apexHelpInstalled"      yaml:"apexHelpInstalled"`
+	// EffortDefaultsInstalled reports whether the framework carried the
+	// per-model effort table.
+	EffortDefaultsInstalled bool `json:"effortDefaultsInstalled" yaml:"effortDefaultsInstalled"`
 	// ChangeRoutesInstalled reports whether the framework carried the
 	// escalation-route table `ape change` prints from. False on a
 	// framework that predates it — the verb then names the route and
@@ -455,6 +458,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			ChangeRoutesInstalled:      lateTables.ChangeRoutes,
 			AgentManifestInstalled:     lateTables.AgentManifest,
 			ApexHelpInstalled:          lateTables.ApexHelp,
+			EffortDefaultsInstalled:    lateTables.EffortDefaults,
 			MigrationsInstalled:        len(migrationsInstalled),
 			MigrationPaths:             migrationsInstalled,
 			ApeCommandsInstalled:       apeCommandsInstalled,
@@ -558,15 +562,17 @@ func SimpleTables() []SimpleTable {
 		{SubtreeChangeRoutes, ProjectChangeRoutes, "change-routes table"},
 		{SubtreeAgentManifest, ProjectAgentManifest, "agent manifest"},
 		{SubtreeApexHelp, ProjectApexHelp, "help table"},
+		{SubtreeEffortDefaults, ProjectEffortDefaults, "effort-defaults table"},
 	}
 }
 
 // lateTableResult reports which of the copied-verbatim tables the
 // framework carried.
 type lateTableResult struct {
-	ChangeRoutes  bool
-	AgentManifest bool
-	ApexHelp      bool
+	ChangeRoutes   bool
+	AgentManifest  bool
+	ApexHelp       bool
+	EffortDefaults bool
 }
 
 // installLateTables copies the framework-owned files that need nothing
@@ -585,6 +591,10 @@ func installLateTables(frameworkRepo, projectRoot string) (lateTableResult, erro
 	}
 	if out.ApexHelp, err = installTable(frameworkRepo, projectRoot,
 		SimpleTable{SubtreeApexHelp, ProjectApexHelp, "help table"}); err != nil {
+		return out, err
+	}
+	if out.EffortDefaults, err = installTable(frameworkRepo, projectRoot,
+		SimpleTable{SubtreeEffortDefaults, ProjectEffortDefaults, "effort-defaults table"}); err != nil {
 		return out, err
 	}
 	return out, nil

@@ -15,6 +15,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/exoport/apex_process_ape/internal/contract"
 	"github.com/exoport/apex_process_ape/internal/cost"
+	"github.com/exoport/apex_process_ape/internal/effort"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/repl"
@@ -760,8 +761,12 @@ func (c *interactiveCore) WaitStepDone(ctx context.Context, _ string, _ int) err
 // else (hooks-via-InjectHooks path).
 func buildInteractivePrepend(
 	apeBin string, ipcPort int, mode config.Mode,
-	ignoreProjectSettings bool, outputStyle string,
+	ignoreProjectSettings bool, outputStyle string, table *effort.Defaults,
 ) ([]string, error) {
+	var effortSettings map[string]any
+	if table != nil {
+		effortSettings = table.Settings()
+	}
 	mcpCfg, err := config.BuildMCPConfig(config.MCPOptions{APEBin: apeBin, IPCPort: ipcPort})
 	if err != nil {
 		return nil, err
@@ -772,6 +777,7 @@ func buildInteractivePrepend(
 		Mode:        mode,
 		InjectHooks: mode != config.ModeWeb, // ModeWeb auto-injects; other modes need the explicit flag
 		OutputStyle: outputStyle,
+		Effort:      effortSettings,
 	})
 	if err != nil {
 		return nil, err
@@ -810,7 +816,7 @@ func buildSpecPrepends(
 	if !cfg.outputStyleSet && spec.OutputStyle != "" {
 		runStyle = spec.OutputStyle
 	}
-	runFlags, err = buildInteractivePrepend(apeBin, ipcPort, mode, cfg.ignoreProjectSettings, runStyle)
+	runFlags, err = buildInteractivePrepend(apeBin, ipcPort, mode, cfg.ignoreProjectSettings, runStyle, cfg.effortTable)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -832,7 +838,7 @@ func buildSpecPrepends(
 			continue
 		}
 		style := declared
-		stageFlags, stageErr := buildInteractivePrepend(apeBin, ipcPort, mode, cfg.ignoreProjectSettings, style)
+		stageFlags, stageErr := buildInteractivePrepend(apeBin, ipcPort, mode, cfg.ignoreProjectSettings, style, cfg.effortTable)
 		if stageErr != nil {
 			return nil, nil, stageErr
 		}
@@ -851,6 +857,9 @@ func buildSpecPrepends(
 // (interactive) variant; the `--tui` variant routes through
 // runWithInteractiveTUI in pipeline_interactive_tui.go.
 func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot string, cfg runConfig) error {
+	if err := prepareEffort(spec, projectRoot, &cfg); err != nil {
+		return err
+	}
 	apeBin, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("ape pipeline --interactive: locate self: %w", err)
@@ -950,6 +959,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		Observer:          obs,
 		ClaudeBin:         cfg.claudeBin,
 		Effort:            cfg.effort,
+		EffortTable:       cfg.effortTable,
 		ApeVersion:        Version,
 		ManifestDir:       cfg.manifestDir,
 		FromStage:         cfg.fromStage,

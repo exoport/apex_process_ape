@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/effort"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/output"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
@@ -203,7 +204,7 @@ func newPipelineCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&allowDirtyFlag, "commit-allow-dirty", false, "Bypass the dirty-tree pre-run gate. The first committing step's diff will include any pre-existing uncommitted changes.")
 	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Per-step idle backstop: cancel a step only after this long with no progress across hook events or transcript growth (e.g. 90m). Default 60m. PTY output is NOT an anchor here — see `ape prompt`.")
 	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Hard wall-clock ceiling per step regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a sequential batch step is bounded per item, not per batch. 0 disables the cap.")
-	cmd.Flags().StringVar(&effortFlag, "effort", "", "Reasoning effort (low|medium|high|xhigh|max) applied when a step/stage/pipeline doesn't set an effort field in the YAML. Propagates to sub-agents. Default xhigh when unset everywhere.")
+	cmd.Flags().StringVar(&effortFlag, "effort", "", "Explicit reasoning effort (low|medium|high|xhigh|max) applied when a step/stage/pipeline does not set one in the YAML. Process-wide, sub-agents included. Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort).")
 	cmd.PersistentFlags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
 	addNatsFlags(cmd, &natsURLFlag, &natsCredsFlag, &eventsPrefixFlag, &uploadTranscripts, &transcriptStore)
 	return cmd
@@ -334,9 +335,12 @@ type runConfig struct {
 	maxDuration time.Duration
 	// effort is the run-level reasoning effort (--effort). Threaded onto
 	// RunOptions.Effort; sits below the pipeline files' `effort:` and above
-	// repl.DefaultEffort in the resolution chain. Empty means "no run-level
+	// the framework effort table in the resolution chain. Empty means "no run-level
 	// override".
 	effort string
+	// effortTable is the project's `_apex/effort-defaults.yaml`, loaded by
+	// prepareEffort before anything spawns; nil when the project has none.
+	effortTable *effort.Defaults
 
 	// NATS progress-eventing + transcript-blob upload (PLAN-13). All
 	// strictly opt-in and resolved flags → env (natsconn.Resolve); with no
@@ -494,7 +498,28 @@ func warnSpecModels(spec *pipeline.Spec) {
 			w.Location, w.Model, modelFamilyWords())
 	}
 	warnStageModelConflicts(spec)
+	warnStageEffortConflicts(spec)
 	warnUnknownSpecKeys(spec)
+}
+
+// warnStageEffortConflicts is warnStageModelConflicts for `effort:`: a
+// stage's effort is fixed at launch from its first step, so a later step
+// declaring another runs at the launch effort anyway.
+func warnStageEffortConflicts(spec *pipeline.Spec) {
+	for _, c := range spec.StageEffortConflicts() {
+		launch := c.Launch
+		if launch == "" {
+			launch = "no explicit effort (the framework table, --effort, or the default governs)"
+		}
+		fmt.Fprintf(os.Stderr,
+			"⚠ stage %q launches at %s and cannot change effort mid-chain; these steps run at it anyway:\n",
+			c.Stage, launch)
+		for _, s := range c.Steps {
+			fmt.Fprintf(os.Stderr, "    step %d (%s) declares effort %q\n", s.Index, s.Skill, s.Declared)
+		}
+		fmt.Fprintf(os.Stderr,
+			"  Split the stage at its effort boundaries to honour them. The run records what actually ran.\n")
+	}
 }
 
 // warnStageModelConflicts reports steps whose declared model the run

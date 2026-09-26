@@ -26,6 +26,9 @@ import (
 // invocation matrix. Other cells: the `none + interactive` case
 // routes to runWithInteractive; web variants route to runWithWeb.
 func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot string, cfg runConfig) error {
+	if err := prepareEffort(spec, projectRoot, &cfg); err != nil {
+		return err
+	}
 	apeBin, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("ape pipeline (tui + interactive): locate self: %w", err)
@@ -153,6 +156,7 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 			NoCommit:               cfg.noCommit,
 			AllowDirty:             cfg.allowDirty,
 			Effort:                 cfg.effort,
+			EffortTable:            cfg.effortTable,
 			PrependFlags:           prepend,
 			StagePrependFlags:      stagePrepend,
 			OnStageStart:           core.ResetStageTelemetry,

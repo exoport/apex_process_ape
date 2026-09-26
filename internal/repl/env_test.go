@@ -112,11 +112,12 @@ func TestNewSessionScrubsNestedClaudeEnv(t *testing.T) {
 	}
 }
 
-// TestEffortEnv covers the default substitution (empty → DefaultEffort) and
-// explicit pass-through, and that the entry is keyed on EnvClaudeEffortLevel.
+// TestEffortEnv: empty adds nothing — there is no hidden default here any
+// more (see effort.Decide) — and an explicit level passes through, keyed on
+// EnvClaudeEffortLevel.
 func TestEffortEnv(t *testing.T) {
-	if got := EffortEnv(""); len(got) != 1 || got[0] != EnvClaudeEffortLevel+"="+DefaultEffort {
-		t.Fatalf("EffortEnv(%q) = %v, want [%s=%s]", "", got, EnvClaudeEffortLevel, DefaultEffort)
+	if got := EffortEnv(""); got != nil {
+		t.Fatalf("EffortEnv(%q) = %v, want nothing", "", got)
 	}
 	if got := EffortEnv("low"); len(got) != 1 || got[0] != EnvClaudeEffortLevel+"=low" {
 		t.Fatalf("EffortEnv(%q) = %v, want [%s=low]", "low", got, EnvClaudeEffortLevel)
@@ -367,7 +368,7 @@ func TestNewSessionWithEnv_DisablesTheBackgroundShellReap(t *testing.T) {
 	require.NoError(t, NewSessionWithEnv(
 		t.Context(), name, "/tmp",
 		[]string{"bash", "--noprofile", "--norc", "-c", "sleep 2"},
-		EffortEnv(""),
+		EffortEnv("xhigh"),
 	))
 	t.Cleanup(func() { _ = KillSession(t.Context(), name) })
 

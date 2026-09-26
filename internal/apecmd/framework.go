@@ -575,6 +575,13 @@ func printFrameworkUpdate(out *frameworkUpdateOutput, format output.Format) erro
 			fmt.Printf("Styles:    no %s in the framework — every skill runs the %s output style\n",
 				framework.SubtreeOutputStyles, config.DefaultOutputStyle)
 		}
+		if out.Summary.EffortDefaultsInstalled {
+			fmt.Printf("Effort:    %s installed — per-model effort defaults (`ape config effort`)\n",
+				framework.ProjectEffortDefaults)
+		} else {
+			fmt.Printf("Effort:    no %s in the framework — every spawn keeps the legacy xhigh default\n",
+				framework.SubtreeEffortDefaults)
+		}
 		if n := out.Summary.MigrationsInstalled; n > 0 {
 			fmt.Printf("Migrations: %d upgrade entr%s installed into %s/\n",
 				n, pluralY(n), framework.ProjectMigrationsDir)

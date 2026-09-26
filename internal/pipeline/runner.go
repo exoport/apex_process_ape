@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/effort"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 	"gopkg.in/yaml.v3"
@@ -42,10 +43,16 @@ type RunOptions struct {
 
 	// Effort is the run-level reasoning effort (--effort) applied when the
 	// pipeline files don't set one at the step/stage/pipeline level. It sits
-	// below the spec's `effort:` and above repl.DefaultEffort in the
-	// resolution chain (see runStageInteractive). Empty means "no run-level
-	// override"; the runner then falls back to repl.DefaultEffort.
+	// below the spec's `effort:` and above the framework table in the
+	// resolution chain (see effort.Decide). Empty means "no run-level
+	// override".
 	Effort string
+
+	// EffortTable is the project's `_apex/effort-defaults.yaml`, nil when it
+	// has none. With no explicit effort it governs every stage per model,
+	// through the stage's --settings; with none of either, the legacy
+	// process-wide default applies.
+	EffortTable *effort.Defaults
 
 	// PrependFlags is inserted into every claude invocation after
 	// argv[0] and before --dangerously-skip-permissions. Used by
@@ -555,6 +562,11 @@ type models struct {
 	// Declared is the spec's cascaded value, recorded ONLY when it
 	// differs from Run. Empty is the ordinary case.
 	Declared string
+	// Effort is the stage's launch plan: what the session runs at and why.
+	Effort effort.Plan
+	// EffortDeclared is this step's explicit effort when it differs from
+	// the launch — see Spec.StageEffortConflicts. Empty is the ordinary case.
+	EffortDeclared string
 }
 
 // recordStep appends a StepRecord to the manifest writer, populating
@@ -591,21 +603,32 @@ func recordStep(
 	if mw == nil {
 		return
 	}
+	plan := m.Effort
+	if plan.Source == effort.SourceTable && m.Run == "" && plan.Table != nil {
+		// No --model: claude chose the model, and applied that model's row.
+		// The step's own telemetry names it, so record the row it got
+		// rather than the fallback ape had to assume at launch.
+		if main := mainSessionModel(ev); main != "" {
+			plan.Resolved, plan.FromFamily = plan.Table.For(main)
+		}
+	}
 	rec := StepRecord{
-		Index:         stepIdx,
-		Skill:         step.Skill,
-		Agent:         step.Agent,
-		Args:          step.Args,
-		Prompt:        prompt,
-		Model:         m.Run,
-		ModelDeclared: m.Declared,
-		Effort:        step.Effort,
-		StartedAt:     startedAt.UTC(),
-		EndedAt:       endedAt.UTC(),
-		DurationSecs:  endedAt.Sub(startedAt).Seconds(),
-		Status:        status,
-		ExitCode:      exitCode,
-		EventsPath:    eventsPath,
+		Index:          stepIdx,
+		Skill:          step.Skill,
+		Agent:          step.Agent,
+		Args:           step.Args,
+		Prompt:         prompt,
+		Model:          m.Run,
+		ModelDeclared:  m.Declared,
+		Effort:         plan.Resolved,
+		EffortDeclared: m.EffortDeclared,
+		EffortSource:   plan.Source,
+		StartedAt:      startedAt.UTC(),
+		EndedAt:        endedAt.UTC(),
+		DurationSecs:   endedAt.Sub(startedAt).Seconds(),
+		Status:         status,
+		ExitCode:       exitCode,
+		EventsPath:     eventsPath,
 	}
 	if ev != nil {
 		rec.CostUSD = ev.TotalCostUSD
@@ -838,4 +861,26 @@ func latestRunDir(projectRoot, pipelineName, manifestDir string) string {
 		target = filepath.Join(filepath.Dir(link), target)
 	}
 	return target
+}
+
+// mainSessionModel returns the model the step's main session ran on — the
+// one with the most turns among its own (non-sub-agent) usage — or "" when
+// the telemetry does not say.
+func mainSessionModel(ev *resultEvent) string {
+	if ev == nil {
+		return ""
+	}
+	for _, s := range ev.Sessions {
+		if s.ParentSessionID != "" {
+			continue
+		}
+		best, turns := "", -1
+		for model, u := range s.ModelUsage {
+			if u.NumTurns > turns || (u.NumTurns == turns && model < best) {
+				best, turns = model, u.NumTurns
+			}
+		}
+		return best
+	}
+	return ""
 }

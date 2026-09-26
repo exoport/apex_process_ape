@@ -63,8 +63,8 @@ func splitContextSuffix(s string) (base, suffix string) {
 //	sonnet · Sonnet · claude-sonnet          → "claude-sonnet-5"
 //	sonnet-5 · claude-sonnet-5               → "claude-sonnet-5"
 //	claude-sonnet-4.6 · claude_sonnet_4_6    → "claude-sonnet-4-6"
-//	opus · Opus · claude-opus                → "claude-opus-5"
-//	opus[1m] · Opus[1m]                      → "claude-opus-5[1m]" (suffix kept)
+//	opus · Opus · claude-opus                → the `aliases:` target, e.g. "claude-opus-5-5"
+//	opus[1m] · Opus[1m]                      → that target with "[1m]" kept
 //
 // A bare family word RESOLVES to the current generation of that family from
 // the `aliases:` block of prices.yaml, rather than being passed through for

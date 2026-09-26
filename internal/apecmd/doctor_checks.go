@@ -395,6 +395,20 @@ func checkPipelinesProject(_ context.Context, env doctorEnv) CheckResult {
 					name, c.Stage, s.Index, s.Skill, s.Declared, c.Launch))
 			}
 		}
+		for _, c := range spec.StageEffortConflicts() {
+			launch := c.Launch
+			if launch == "" {
+				launch = "no explicit effort"
+			}
+			for _, s := range c.Steps {
+				specIssues = append(specIssues, fmt.Sprintf(
+					"%s → stage %q step %d (%s) declares effort %q but the stage runs at %s",
+					name, c.Stage, s.Index, s.Skill, s.Declared, launch))
+			}
+		}
+		for _, e := range spec.EffortErrors() {
+			specIssues = append(specIssues, name+" → "+e)
+		}
 		for _, k := range spec.UnknownKeyWarnings() {
 			specIssues = append(specIssues, fmt.Sprintf(
 				"%s → %s: unknown key %q (line %d)", name, k.Location, k.Key, k.Line))

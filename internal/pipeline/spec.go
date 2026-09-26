@@ -34,7 +34,8 @@ type Spec struct {
 	// (low|medium|high|xhigh|max) exported to the spawned claude via the
 	// CLAUDE_CODE_EFFORT_LEVEL env var. Same precedence rules as Model; when
 	// empty at every level the runner falls back to the --effort flag, then
-	// the built-in default (repl.DefaultEffort).
+	// the framework's per-model table, then ape's legacy default (see
+	// internal/effort).
 	Effort string `yaml:"effort,omitempty"`
 	// Agent is the pipeline-level default agent. Same precedence rules
 	// as Model.

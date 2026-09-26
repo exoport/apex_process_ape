@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- **feat(effort): per-model effort defaults from the framework.** ape used
+  to give every spawned session `xhigh`, process-wide through
+  `CLAUDE_CODE_EFFORT_LEVEL`. That variable outranks every per-model
+  setting, so an Opus session and the Sonnet sub-agents it spawns could only
+  ever run at one level. The framework now ships `_apex/effort-defaults.yaml`
+  (model family → effort, plus a fallback), `ape framework setup|update`
+  installs it, and ape writes it into each spawn's `--settings` as Claude
+  Code's `modelSettings.<model>.effortLevel` plus a top-level `effortLevel`
+  for the fallback. Claude applies it per request, so an Opus session at
+  `medium` spawns Sonnet sub-agents at `xhigh`, in one process. That was
+  measured live on claude 2.1.283 by reading the per-request `effort` the
+  transcripts record, with values the machine's own user settings could not
+  produce: a naive probe passed with no ape settings at all, because the
+  user settings already said the same thing.
+  - **Precedence.** A step, stage or pipeline `effort:` or `--effort` is an
+    explicit override and stays process-wide. Otherwise the table applies,
+    and without a table the legacy `xhigh` applies, so a new ape on an old
+    install behaves as before.
+  - **Keys.** A family word works as a key but matches only the model it
+    currently aliases, so ape writes the word plus every known id of the
+    family.
+  - **Validation.** `max` is refused in the table, because the per-model
+    setting cannot hold it. Every `effort:` value and `--effort` is now
+    validated before anything spawns; nothing validated them before.
+  - **`ape config effort`** shows the resolved table and the exact keys
+    written, and `--model` resolves one model.
+  - **Manifest.** A step's `effort` now records what the step ran at, with
+    `effort_source` (step, stage, pipeline, flag, table or legacy-default)
+    and `effort_declared` when a later step asked for something else. It
+    used to record only the step's own field.
+  - **Conflicts.** A later step's `effort:` is reported before the run and by
+    `ape doctor`, like a model conflict. `ape chat` keeps claude's native
+    effort, as before.
 - **fix(release): the release archives extract, and ship
   `deploy/policy.yaml`.** Since 2026-07-10 (the first aped release), every
   archive has carried a FILE named `deploy` next to the `deploy/...` entries.

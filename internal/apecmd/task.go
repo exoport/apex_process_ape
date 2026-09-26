@@ -197,7 +197,7 @@ ownership (the run itself may have succeeded).`,
 	}
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "Framework agent (slash-command) fronting the skill: /<agent> --autonomous -- <skill> ...")
 	cmd.Flags().StringVar(&modelFlag, "model", "", modelFlagUsage("Claude model."))
-	cmd.Flags().StringVar(&effortFlag, "effort", "", "Reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Default xhigh when unset.")
+	cmd.Flags().StringVar(&effortFlag, "effort", "", "Explicit reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort).")
 	cmd.Flags().StringVar(&argsFlag, "args", "", "Verbatim skill args appended to the invocation (whitespace-separated)")
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Run prompt forwarded via --prompt-flag (same semantics as pipeline --prompt)")
 	cmd.Flags().StringVar(&promptFileFlag, "prompt-file", "",

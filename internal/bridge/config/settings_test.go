@@ -276,3 +276,29 @@ func TestBuiltinOutputStyles_ListsTheCanonicalSpellings(t *testing.T) {
 		}
 	}
 }
+
+// The effort fragment lands at the top level of --settings, where claude
+// reads `effortLevel` and `modelSettings`, beside the output-style pin.
+func TestBuildSettings_MergesTheEffortFragment(t *testing.T) {
+	raw, err := BuildSettings(SettingsOptions{Mode: ModeTUI, Effort: map[string]any{
+		"effortLevel":   "high",
+		"modelSettings": map[string]any{"sonnet": map[string]any{"effortLevel": "xhigh"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["effortLevel"] != "high" {
+		t.Fatalf("effortLevel = %v", got["effortLevel"])
+	}
+	ms, _ := got["modelSettings"].(map[string]any)
+	if s, _ := ms["sonnet"].(map[string]any); s["effortLevel"] != "xhigh" {
+		t.Fatalf("modelSettings = %v", got["modelSettings"])
+	}
+	if got["outputStyle"] == nil {
+		t.Fatal("the output-style pin must survive the merge")
+	}
+}

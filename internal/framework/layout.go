@@ -61,6 +61,11 @@ const (
 	// apex-agent-pm, apex-agent-ux-designer, apex-agent-modeler and the
 	// mockup and screen-story completion steps.
 	SubtreeApexHelp = "_apex/apex-help.csv"
+	// SubtreeEffortDefaults is the framework's per-model reasoning-effort
+	// table (internal/effort): model family → effort, plus a fallback.
+	// Absent on a framework that predates it, and then every spawn keeps
+	// ape's legacy default, so an older install behaves as it always did.
+	SubtreeEffortDefaults = "_apex/effort-defaults.yaml"
 	// SubtreeChangeRoutes is the framework-owned table of what
 	// `ape change` prints when the lane escalates: per route, the ordered
 	// commands and the notes.
@@ -149,6 +154,9 @@ const (
 	// without the roster it meant to consult.
 	ProjectAgentManifest = "_apex/agent-manifest.csv"
 	ProjectApexHelp      = "_apex/apex-help.csv"
+	// ProjectEffortDefaults is where the effort table lands, and where
+	// internal/effort reads it from.
+	ProjectEffortDefaults = "_apex/effort-defaults.yaml"
 	// ProjectChangeRoutes is where the escalation-route table lands.
 	// Absent = `ape change` prints the route's name and no commands.
 	ProjectChangeRoutes = "_apex/change-routes.yaml"

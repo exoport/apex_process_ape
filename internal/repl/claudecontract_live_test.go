@@ -194,7 +194,7 @@ func liveEmulatorsAgreeIn(t *testing.T, claudeBin string, wantKittyPush bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	require.NoError(t, NewSessionWithEnv(ctx, name, t.TempDir(),
-		[]string{claudeBin, "--dangerously-skip-permissions"}, EffortEnv("")))
+		[]string{claudeBin, "--dangerously-skip-permissions"}, EffortEnv("xhigh")))
 	t.Cleanup(func() { _ = KillSession(context.Background(), name) })
 
 	// A fresh temp directory is untrusted, so the trust dialog is the first

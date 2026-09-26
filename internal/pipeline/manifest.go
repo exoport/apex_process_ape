@@ -330,9 +330,24 @@ type StepRecord struct {
 	// launch model. ModelDeclared appears only when the spec asked for
 	// a different one, which a running session cannot switch to; see
 	// Spec.StageModelConflicts.
-	Model                 string       `yaml:"model,omitempty"`
-	ModelDeclared         string       `yaml:"model_declared,omitempty"`
+	Model         string `yaml:"model,omitempty"`
+	ModelDeclared string `yaml:"model_declared,omitempty"`
+	// Effort is what the step's launch model actually ran at, resolved —
+	// it used to be the step's own `effort:` field, so a step inheriting
+	// from its stage, the pipeline, --effort or the default recorded
+	// nothing, and a later step's declaration was recorded as though it
+	// had applied. EffortSource says which rule produced it (step, stage,
+	// pipeline, flag, table, legacy-default); an eval report reads it to
+	// tell a run that got the framework table from one that did not.
+	// EffortDeclared appears only when the step asked for something else.
+	//
+	// Under `table` with no --model, Effort is the table's fallback: ape
+	// cannot know which model claude defaults to. Claude applies the
+	// matching row itself, and each transcript line records the effort
+	// actually sent.
 	Effort                string       `yaml:"effort,omitempty"`
+	EffortDeclared        string       `yaml:"effort_declared,omitempty"`
+	EffortSource          string       `yaml:"effort_source,omitempty"`
 	StartedAt             time.Time    `yaml:"started_at"`
 	EndedAt               time.Time    `yaml:"ended_at,omitempty"`
 	DurationSecs          float64      `yaml:"duration_seconds"`

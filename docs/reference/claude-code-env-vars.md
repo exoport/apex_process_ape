@@ -76,7 +76,7 @@ processes.
 | --- | --- |
 | `CLAUDE_CODE_SUBAGENT_MODEL` | Overrides the model identifier used exclusively by worker/sub-agents or background processing loops, allowing heavier tasks to route to Sonnet/Opus and smaller tasks to Haiku. |
 | `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` | When enabled, actively scrubs sensitive tokens and credentials from the environment before spawning child shell processes/sub-commands, so executed tools don't leak tokens into logs. |
-| `CLAUDE_CODE_EFFORT_LEVEL` | Controls the reasoning/thinking budget sent to the API (`low`, `medium`, `high`, `xhigh`, `max`). Set globally, any sub-session or command follows the same constraint. **ape sets this itself** from the resolved `--effort` flag / pipeline `effort:` field (default `xhigh`) — see below. |
+| `CLAUDE_CODE_EFFORT_LEVEL` | Controls the reasoning/thinking budget sent to the API (`low`, `medium`, `high`, `xhigh`, `max`). Set globally, any sub-session or command follows the same constraint. **ape sets this itself**, but only for an explicit `--effort` / pipeline `effort:` value, or `xhigh` on a project with no effort table. Otherwise the table rides in `--settings`, per model. See below. |
 
 ### Context and token limits
 
@@ -123,22 +123,24 @@ The same scrub applies to the inherited-stdio spawn in `ape chat`.
 
 ### Reasoning effort (`CLAUDE_CODE_EFFORT_LEVEL`)
 
-When ape sets a reasoning effort, it **re-injects** `CLAUDE_CODE_EFFORT_LEVEL`
-into the spawned claude's environment right after the scrub, so its value is
-authoritative (the inherited one is stripped first) and **propagates to any
-sub-agents** the session spawns — a batch skill's per-item sub-agents inherit
-the same effort. All four run commands accept an `--effort` flag:
+The inherited `CLAUDE_CODE_EFFORT_LEVEL` is always stripped first. What ape
+puts back depends on where the effort comes from (see
+[Pipeline spec § Reasoning effort](pipeline-spec.md#reasoning-effort)):
 
-- **`ape pipeline` / `ape task` / `ape prompt`** always set it, resolving to
-  `step.effort ?? stage.effort ?? pipeline.effort ?? --effort ?? "xhigh"`
-  (pipelines; see [Pipeline spec § Reasoning effort](pipeline-spec.md#reasoning-effort))
-  or `--effort ?? "xhigh"` (task/prompt) — so these autonomous paths always run
-  at an explicit effort, defaulting to `xhigh`.
-- **`ape chat`** is interactive: it injects the var **only when `--effort` is
-  given**, otherwise leaving claude's native effort untouched.
-
-Setting the effort via this env var — rather than claude's `--effort` CLI
-flag — is what gives the sub-agent propagation.
+- **An explicit effort** (`step.effort ?? stage.effort ?? pipeline.effort ?? --effort`
+  on `ape pipeline` / `ape task` / `ape change`, or `--effort` on `ape prompt`)
+  is re-injected as this variable. It is **process-wide**: it reaches every
+  sub-agent the session spawns and outranks any per-model setting.
+- **No explicit effort, with `_apex/effort-defaults.yaml`**: ape sets **no**
+  variable. The table rides in the spawn's `--settings` as
+  `modelSettings.<model>.effortLevel` plus a top-level `effortLevel`, so each
+  model, sub-agents included, runs at its family's row. The variable would
+  flatten them all to one level, which is exactly what the table exists to avoid.
+- **Neither**: `xhigh`, process-wide, which is what ape did before the table
+  existed.
+- **`ape chat`** is interactive: it injects the variable **only when
+  `--effort` is given**, and takes no table, leaving claude's native effort
+  untouched.
 
 Consequence: if you *want* to set one of the `CLAUDE_CODE_*` variables
 above for an ape-spawned claude (e.g. `CLAUDE_CODE_MAX_OUTPUT_TOKENS`), the

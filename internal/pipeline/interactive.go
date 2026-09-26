@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/effort"
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 )
@@ -116,20 +117,27 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 	}
 
 	firstStep := stage.Chain[0]
-	firstModel, firstEffort, _, _, err := spec.Effective(stage.Name, 0)
+	// Only the model is read here: the effort is re-resolved with its
+	// source by EffectiveEffort below.
+	firstModel, _, _, _, err := spec.Effective(stage.Name, 0) //nolint:dogsled // see above
 	if err != nil {
 		return StatusFailed, fmt.Errorf("stage %q: resolve effective values: %w", stage.Name, err)
 	}
 	if firstModel == "" {
 		firstModel = firstStep.Model
 	}
-	// Reasoning effort is a per-stage LAUNCH setting, exported to the
-	// spawned claude via CLAUDE_CODE_EFFORT_LEVEL (it propagates to any
-	// sub-agents the session spawns) — the same launch-time shape as
-	// --model. Resolve it from the first step's cascade, then the run-level
-	// --effort (opts.Effort), then repl.DefaultEffort so a run always has an
-	// explicit effort.
-	stageEffort := firstNonEmpty(firstEffort, opts.Effort, repl.DefaultEffort)
+	// Reasoning effort is a per-stage LAUNCH setting, like --model. An
+	// explicit one — the first step's cascade, then --effort — is exported
+	// as CLAUDE_CODE_EFFORT_LEVEL, process-wide, sub-agents included. With
+	// none, the framework table governs per model through --settings, so a
+	// Sonnet sub-agent of an Opus session runs at Sonnet's row; with no
+	// table either, the legacy default applies process-wide. effort.Decide
+	// is the one place that rule lives.
+	explicitEffort, effortSource, effErr := spec.EffectiveEffort(stage.Name, 0, opts.Effort)
+	if effErr != nil {
+		return StatusFailed, fmt.Errorf("stage %q: resolve effort: %w", stage.Name, effErr)
+	}
+	effortPlan := effort.Decide(explicitEffort, effortSource, opts.EffortTable, firstModel)
 
 	plan, planErr := spec.PlanStageCommits(stage.Name)
 	if planErr != nil {
@@ -141,7 +149,7 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		return StatusFailed, argvErr
 	}
 
-	stageEnv := repl.EffortEnv(stageEffort)
+	stageEnv := effortPlan.EnvEntries()
 
 	sessionName := fmt.Sprintf("ape-%s-%d", sanitizeSessionName(stage.Name), os.Getpid())
 	// Ensure no stale session by that name; ignore not-found error.
@@ -266,14 +274,16 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 
 		prompt := assembleInteractivePromptLine(effAgent, step, opts.Prompt)
 		stepStartFields := map[string]any{
-			"stage":    stage.Name,
-			"step":     i + 1,
-			"skill":    step.Skill,
-			"agent":    effAgent,
-			"model":    runModel,
-			"effort":   stageEffort,
-			"prompt":   prompt,
-			"no_clear": step.NoClear,
+			"stage":  stage.Name,
+			"step":   i + 1,
+			"skill":  step.Skill,
+			"agent":  effAgent,
+			"model":  runModel,
+			"effort": effortPlan.Resolved,
+			// table | legacy-default | step | stage | pipeline | flag
+			"effort_source": effortPlan.Source,
+			"prompt":        prompt,
+			"no_clear":      step.NoClear,
 		}
 		if declaredModel != "" {
 			// Present only on a divergence, so its presence is itself
@@ -347,7 +357,14 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 				ev = stepTelemetryToResultEvent(tele)
 			}
 		}
-		recordStep(mw, stageIdx, i+1, step, models{Run: runModel, Declared: declaredModel},
+		// A later step's own effort never reaches the running session; say
+		// so beside what ran, as for the model. See StageEffortConflicts.
+		effortDeclared := ""
+		if declared, _, _ := spec.EffectiveEffort(stage.Name, i, opts.Effort); declared != "" && declared != effortPlan.Resolved {
+			effortDeclared = declared
+		}
+		recordStep(mw, stageIdx, i+1, step,
+			models{Run: runModel, Declared: declaredModel, Effort: effortPlan, EffortDeclared: effortDeclared},
 			opts.Prompt, stepStart, time.Now(), StatusCompleted, exitCode, eventsRel, ev)
 
 		// Commit boundary: same semantics as runStages (PLAN-6 / C2).

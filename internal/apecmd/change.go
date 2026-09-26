@@ -174,7 +174,7 @@ goals committed and the rest saved as residue.`,
 	cmd.Flags().StringVar(&fixesFlag, "fixes", "", "Deferred record id this change discharges (may be given alone)")
 	cmd.Flags().BoolVar(&reviewFlag, "review", false, "Ask the lane to review its own change before reporting")
 	cmd.Flags().StringVar(&modelFlag, "model", "", "Claude model for the dispatch")
-	cmd.Flags().StringVar(&effortFlag, "effort", "", "Reasoning effort (low|medium|high|xhigh|max)")
+	cmd.Flags().StringVar(&effortFlag, "effort", "", "Explicit reasoning effort (low|medium|high|xhigh|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort).")
 	cmd.Flags().BoolVar(&dryRunFlag, "dry-run", false, "Print the messages ape would compose and commit nothing, leaving the tree as the run left it")
 	cmd.Flags().BoolVar(&queueFlag, "queue", false,
 		"Write the request down as a maintenance record and commit it, running nothing")

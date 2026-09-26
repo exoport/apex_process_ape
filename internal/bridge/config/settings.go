@@ -38,6 +38,11 @@ type SettingsOptions struct {
 	// session. Empty means DefaultOutputStyle; InheritOutputStyle omits
 	// the key entirely and lets the machine's own configuration win.
 	OutputStyle string
+	// Effort is the per-model effort fragment — top-level `effortLevel`
+	// and `modelSettings` — from effort.Defaults.Settings. nil writes
+	// neither key, and the session takes whatever effort its environment
+	// and the machine's own settings give it.
+	Effort map[string]any
 }
 
 // Output-style pinning.
@@ -201,15 +206,13 @@ type hookCommand struct {
 // can reach the eval's spawn shape. All other combinations return `{}`.
 func BuildSettings(opts SettingsOptions) (json.RawMessage, error) {
 	// ModeEval stays byte-empty, and that is a deliberate exception to
-	// the output-style pin rather than an oversight.
+	// the output-style pin and the effort table rather than an oversight.
 	//
 	// PLAN-6 invariant #1 locks `--eval` byte-equivalence with an
-	// external consumer that compares the spawn shape exactly; adding a
-	// key here would break a cross-repo contract to close a hazard that
-	// does not reach this path. The framework's own eval harness does
-	// not pass `--eval` — its captures come through the interactive path
-	// below, which IS pinned — so nothing the framework consumes is left
-	// unprotected by this exception.
+	// external consumer that compares the spawn shape exactly. No command
+	// reaches this branch any more: `--eval` was removed in v0.0.36 and
+	// survives only as a hidden no-op flag, so every spawn — the
+	// framework's eval harness included — takes the path below.
 	if opts.Mode == ModeEval {
 		return json.RawMessage(`{}`), nil
 	}
@@ -217,6 +220,9 @@ func BuildSettings(opts SettingsOptions) (json.RawMessage, error) {
 	root := map[string]any{}
 	if style, write := resolveOutputStyle(opts.OutputStyle); write {
 		root["outputStyle"] = style
+	}
+	for key, value := range opts.Effort {
+		root[key] = value
 	}
 
 	// The no-hooks path still gets the pin. It used to return `{}`, which

@@ -221,28 +221,22 @@ func scrubTmuxEnv(env []string) []string {
 
 // EnvClaudeEffortLevel is the environment variable the spawned claude reads
 // to set its reasoning-effort level (low|medium|high|xhigh|max). ape sets it
-// from the resolved --effort flag / pipeline `effort:` field (default
-// DefaultEffort). Setting it via the env — rather than claude's --effort CLI
-// flag — makes it propagate to sub-agents the session spawns (e.g. a batch
-// skill's per-item sub-agents) and take precedence over any inherited value.
+// only for an EXPLICIT effort — a pipeline `effort:` field or --effort — or
+// for the legacy default on a project with no effort table; see
+// internal/effort. It is process-wide: it reaches sub-agents the session
+// spawns and outranks every per-model setting, which is right for an
+// explicit override and wrong for the framework's per-model table.
 // ScrubClaudeCodeEnv strips the inherited one first (via the CLAUDE_CODE_
 // prefix) so the value re-injected here is authoritative — no duplicate key.
 const EnvClaudeEffortLevel = "CLAUDE_CODE_EFFORT_LEVEL"
 
-// DefaultEffort is the reasoning effort ape applies to a spawned claude when
-// nothing else sets one — no --effort flag, and (for pipelines) no
-// step/stage/pipeline `effort:` field. Exported so every spawn path shares a
-// single default: the pipeline/task runner, `ape prompt`, and `ape chat`.
-const DefaultEffort = "xhigh"
-
-// EffortEnv returns the CLAUDE_CODE_EFFORT_LEVEL entry for the resolved
-// effort, substituting DefaultEffort when effort is empty. Append it to a
-// spawned claude's scrubbed environment (NewSessionWithEnv, or ape chat's
-// direct exec) so effort propagates to sub-agents and overrides any inherited
-// level. Always returns exactly one entry (the default guarantees non-empty).
+// EffortEnv returns the CLAUDE_CODE_EFFORT_LEVEL entry for an effort, or
+// nothing for "". It no longer substitutes a default: whether a spawn gets
+// a process-wide level at all is effort.Decide's call, and a hidden default
+// here is how the xhigh-for-everything behaviour would come back.
 func EffortEnv(effort string) []string {
 	if effort == "" {
-		effort = DefaultEffort
+		return nil
 	}
 	return []string{EnvClaudeEffortLevel + "=" + effort}
 }

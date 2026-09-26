@@ -28,6 +28,9 @@ import (
 //
 //nolint:maintidx // single-spawn web orchestration: hub setup, runlog wiring, runner integration, and shutdown all need to share state; splitting harms readability more than it helps.
 func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cfg runConfig) error {
+	if err := prepareEffort(spec, projectRoot, &cfg); err != nil {
+		return err
+	}
 	apeBin, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("ape pipeline --web: locate self: %w", err)
@@ -271,6 +274,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		NoCommit:          cfg.noCommit,
 		AllowDirty:        cfg.allowDirty,
 		Effort:            cfg.effort,
+		EffortTable:       cfg.effortTable,
 		PrependFlags:      prepend,
 		StagePrependFlags: stagePrepend,
 		OnStageStart:      onStageStart,
