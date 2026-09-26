@@ -1,3 +1,9 @@
+//go:build !windows
+
+// Whole file is //go:build !windows, like runner_commit_test.go: every
+// TestRun_* here drives the bash PTY claude shim. The spec-only effort
+// helpers are tested portably in spec_effort_test.go.
+
 package pipeline
 
 import (
@@ -113,34 +119,6 @@ func TestRun_LaterStepEffortIsRecordedAsDeclared(t *testing.T) {
 	require.Equal(t, "medium", steps[1].Effort, "step 2 ran at the launch effort")
 	require.Equal(t, "low", steps[1].EffortDeclared)
 	require.Empty(t, steps[0].EffortDeclared)
-}
-
-func TestSpec_EffortHelpers(t *testing.T) {
-	root := t.TempDir()
-	dir := filepath.Join(root, "_apex", "pipelines")
-	require.NoError(t, os.MkdirAll(dir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "fx.yaml"), []byte("name: fx\neffort: high\nstages:\n"+
-		"  a:\n    chain:\n      - skill: s0\n      - skill: s1\n        effort: low\n"+
-		"  b:\n    effort: xtreme\n    chain:\n      - skill: s2\n"), 0o644))
-	spec, err := LoadSpec("fx", root)
-	require.NoError(t, err)
-
-	level, source, err := spec.EffectiveEffort("a", 0, "medium")
-	require.NoError(t, err)
-	require.Equal(t, []string{"high", effort.SourcePipeline}, []string{level, source}, "the spec outranks --effort")
-	level, source, _ = spec.EffectiveEffort("a", 1, "")
-	require.Equal(t, []string{"low", effort.SourceStep}, []string{level, source})
-
-	conflicts := spec.StageEffortConflicts()
-	require.Len(t, conflicts, 1)
-	require.Equal(t, "a", conflicts[0].Stage)
-	require.Equal(t, "high", conflicts[0].Launch)
-	require.Equal(t, "low", conflicts[0].Steps[0].Declared)
-
-	errs := spec.EffortErrors()
-	require.Len(t, errs, 1)
-	require.Contains(t, errs[0], `stage "b"`)
-	require.Contains(t, errs[0], "xtreme")
 }
 
 // Every stage's session carries APE_SESSION=<kind>/<run-id>, so an ape a
