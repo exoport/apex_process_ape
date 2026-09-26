@@ -1,6 +1,7 @@
 package runlog
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"time"
@@ -13,13 +14,14 @@ import (
 // package's modelUsageRecord so the rollup walker reads them directly.
 //
 //nolint:tagliatelle // snake_case matches the manifest/rollup on-disk contract
+//nolint:tagliatelle // snake_case is the record's contract, in YAML and JSON alike
 type PromptModelUsage struct {
-	CostUSD             float64 `yaml:"cost_usd"`
-	TokensInput         int     `yaml:"tokens_input"`
-	TokensOutput        int     `yaml:"tokens_output"`
-	TokensCacheRead     int     `yaml:"tokens_cache_read"`
-	TokensCacheCreation int     `yaml:"tokens_cache_creation"`
-	NumTurns            int     `yaml:"num_turns"`
+	CostUSD             float64 `json:"cost_usd"              yaml:"cost_usd"`
+	TokensInput         int     `json:"tokens_input"          yaml:"tokens_input"`
+	TokensOutput        int     `json:"tokens_output"         yaml:"tokens_output"`
+	TokensCacheRead     int     `json:"tokens_cache_read"     yaml:"tokens_cache_read"`
+	TokensCacheCreation int     `json:"tokens_cache_creation" yaml:"tokens_cache_creation"`
+	NumTurns            int     `json:"num_turns"             yaml:"num_turns"`
 }
 
 // PromptMeta is the session record written to prompt.yaml when an
@@ -30,19 +32,42 @@ type PromptModelUsage struct {
 // harness.yaml, written by the Writer itself.
 //
 //nolint:tagliatelle // snake_case matches the session-record on-disk contract
+//nolint:tagliatelle // snake_case is the record's contract, in YAML and JSON alike
 type PromptMeta struct {
-	PromptID  string                      `yaml:"prompt_id"`
-	StartedAt time.Time                   `yaml:"started_at"`
-	EndedAt   time.Time                   `yaml:"ended_at"`
-	Status    string                      `yaml:"status"`
-	Agent     string                      `yaml:"agent,omitempty"`
-	Model     string                      `yaml:"model,omitempty"`
-	SessionID string                      `yaml:"session_id,omitempty"`
-	CostUSD   float64                     `yaml:"cost_usd"`
-	TokensIn  int                         `yaml:"tokens_input"`
-	TokensOut int                         `yaml:"tokens_output"`
-	NumTurns  int                         `yaml:"num_turns"`
-	PerModel  map[string]PromptModelUsage `yaml:"per_model,omitempty"`
+	PromptID  string    `json:"prompt_id"            yaml:"prompt_id"`
+	StartedAt time.Time `json:"started_at"           yaml:"started_at"`
+	EndedAt   time.Time `json:"ended_at"             yaml:"ended_at"`
+	Status    string    `json:"status"               yaml:"status"`
+	Agent     string    `json:"agent,omitempty"      yaml:"agent,omitempty"`
+	Model     string    `json:"model,omitempty"      yaml:"model,omitempty"`
+	SessionID string    `json:"session_id,omitempty" yaml:"session_id,omitempty"`
+	// Host names a non-default host of the session: `eval-conduct` for
+	// `ape eval conduct`. Empty for `ape prompt`.
+	Host string `json:"host,omitempty" yaml:"host,omitempty"`
+	// Effort and EffortSource are the session's launch effort and where it
+	// came from (internal/effort: flag, table or legacy-default).
+	Effort       string `json:"effort,omitempty"        yaml:"effort,omitempty"`
+	EffortSource string `json:"effort_source,omitempty" yaml:"effort_source,omitempty"`
+	// TranscriptPath is the session's own transcript, as its hooks named it.
+	TranscriptPath string                      `json:"transcript_path,omitempty" yaml:"transcript_path,omitempty"`
+	CostUSD        float64                     `json:"cost_usd"                  yaml:"cost_usd"`
+	TokensIn       int                         `json:"tokens_input"              yaml:"tokens_input"`
+	TokensOut      int                         `json:"tokens_output"             yaml:"tokens_output"`
+	NumTurns       int                         `json:"num_turns"                 yaml:"num_turns"`
+	PerModel       map[string]PromptModelUsage `json:"per_model,omitempty"       yaml:"per_model,omitempty"`
+}
+
+// WriteConductManifest emits manifest.json at <dir>/manifest.json — the
+// same record as prompt.yaml, for `ape eval conduct`'s harness, which
+// reads JSON.
+func WriteConductManifest(dir string, m PromptMeta) error {
+	m.StartedAt = m.StartedAt.UTC().Truncate(time.Second)
+	m.EndedAt = m.EndedAt.UTC().Truncate(time.Second)
+	bs, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "manifest.json"), append(bs, '\n'), 0o644) //nolint:gosec // user-visible runlog metadata
 }
 
 // WritePromptYAML emits prompt.yaml at <dir>/prompt.yaml.

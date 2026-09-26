@@ -109,7 +109,7 @@ func TestPromptRecordAndRollup(t *testing.T) {
 		},
 	}
 	perModel := perModelTotals(tele)
-	writePromptRecord(runDir, promptID, promptOptions{model: "opus[1m]"}, "sess-xyz", "completed", time.Now(), tele, perModel)
+	writePromptRecord(runDir, promptID, promptOptions{model: "opus[1m]"}, promptRecordExtras{sessionID: "sess-xyz"}, "completed", time.Now(), tele, perModel)
 
 	require.FileExists(t, filepath.Join(runDir, "prompt.yaml"))
 

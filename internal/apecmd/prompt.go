@@ -74,6 +74,10 @@ type promptOptions struct {
 	ignoreProjectSettings bool
 	outputStyle           string
 	format                output.Format
+	// conduct hosts the orchestrator for the eval (`ape eval conduct`): no
+	// orchestrator refusal, NO APE_SESSION marker, and the driver's conduct
+	// completion rule. Never set by `ape prompt`.
+	conduct bool
 }
 
 func newPromptCmd() *cobra.Command {
@@ -251,6 +255,8 @@ type promptResult struct {
 	PerModel        map[string]cost.Totals `json:"per_model,omitempty" yaml:"per_model,omitempty"`
 	TranscriptPaths []string               `json:"transcript_paths"    yaml:"transcript_paths"`
 	SessionID       string                 `json:"session_id"          yaml:"session_id"`
+	// Host is `eval-conduct` for `ape eval conduct`, absent for `ape prompt`.
+	Host string `json:"host,omitempty" yaml:"host,omitempty"`
 
 	// Unexported carry-fields for the CLI summary printer; never serialized.
 	telemetry *sessiondriver.Telemetry
@@ -265,6 +271,10 @@ type promptResult struct {
 // printing.
 func runPrompt(ctx context.Context, o promptOptions) error {
 	res, exitCode, outcomeErr := runPromptCore(ctx, o)
+	if o.conduct {
+		exitCode = conductExitCode(res.Status, exitCode)
+		res.Host = conductHost
+	}
 
 	if exitCode == ExitUsage || exitCode == ExitREPLNotReady {
 		// Preflight / never-ready: no result envelope, just the error + exit.
@@ -310,8 +320,10 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 
 	// Preflight (exit 2): agent must resolve; handoff/prompt derivation
 	// must succeed. Detected before any claude process spawns.
-	if err := refuseOrchestrator(o.agent); err != nil {
-		return promptResult{}, ExitUsage, err
+	if !o.conduct {
+		if err := refuseOrchestrator(o.agent); err != nil {
+			return promptResult{}, ExitUsage, err
+		}
 	}
 	if o.agent != "" {
 		if _, _, found := framework.ResolveSkill(o.agent, o.projectRoot); !found {
@@ -354,6 +366,7 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 
 	driver := sessiondriver.NewDriver(getRunLog, o.idleTimeout)
 	driver.SetMaxDuration(o.maxDuration)
+	driver.SetConductMode(o.conduct)
 
 	rt := orchestrator.NewBridgeRuntime(orchestrator.BridgeRuntimeOptions{
 		OnHook:  driver.FeedHook,
@@ -405,8 +418,7 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 
 	sessionName := fmt.Sprintf("ape-prompt-%d", os.Getpid())
 	_ = repl.KillSession(runCtx, sessionName)
-	spawnEnv := append(effortPlan.EnvEntries(), repl.SessionMarkerEnv("prompt", promptID)...)
-	if err := repl.NewSessionWithEnv(runCtx, sessionName, o.projectRoot, argv, spawnEnv); err != nil {
+	if err := repl.NewSessionWithEnv(runCtx, sessionName, o.projectRoot, argv, promptSpawnEnv(effortPlan, o.conduct, promptID)); err != nil {
 		return promptResult{}, ExitRunFailed, fmt.Errorf("ape prompt: spawn claude: %w", err)
 	}
 	defer func() { _ = repl.KillSession(context.Background(), sessionName) }() //nolint:contextcheck // cleanup-on-exit
@@ -465,7 +477,9 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	// Persist the session record + fold the rollup. Best-effort: a
 	// record write failure must not change the run's exit code.
 	perModel := perModelTotals(tele)
-	writePromptRecord(runDir, promptID, o, driver.SessionID(), status, start, tele, perModel)
+	writePromptRecord(runDir, promptID, o, promptRecordExtras{
+		sessionID: driver.SessionID(), transcript: driver.TranscriptPath(), effort: effortPlan,
+	}, status, start, tele, perModel)
 	if _, rerr := cost.RebuildRollup(o.projectRoot); rerr != nil {
 		progressf("ape prompt: rebuild cost rollup: %v\n", rerr)
 	}
@@ -522,19 +536,42 @@ func perModelTotals(tele *sessiondriver.Telemetry) map[string]cost.Totals {
 }
 
 // writePromptRecord persists prompt.yaml. Best-effort.
-func writePromptRecord(runDir, promptID string, o promptOptions, sessionID, status string, start time.Time, tele *sessiondriver.Telemetry, perModel map[string]cost.Totals) {
+// promptSpawnEnv is the extra environment for a prompt-path session: the
+// effort plan's entries, and the APE_SESSION marker — except on the
+// conductor, the one session ape spawns WITHOUT it. The conductor
+// dispatches `ape change` / `ape task`, each of which marks its own
+// session, and the orchestrator HALTs on activation if it sees a marker.
+func promptSpawnEnv(plan effort.Plan, conduct bool, promptID string) []string {
+	env := plan.EnvEntries()
+	if !conduct {
+		env = append(env, repl.SessionMarkerEnv("prompt", promptID)...)
+	}
+	return env
+}
+
+// promptRecordExtras carries what the record needs beyond the options.
+type promptRecordExtras struct {
+	sessionID  string
+	transcript string
+	effort     effort.Plan
+}
+
+func writePromptRecord(runDir, promptID string, o promptOptions, x promptRecordExtras, status string, start time.Time, tele *sessiondriver.Telemetry, perModel map[string]cost.Totals) {
 	meta := runlog.PromptMeta{
-		PromptID:  promptID,
-		StartedAt: start,
-		EndedAt:   time.Now(),
-		Status:    status,
-		Agent:     o.agent,
-		Model:     o.model,
-		SessionID: sessionID,
-		CostUSD:   tele.Totals.CostUSD,
-		TokensIn:  tele.Totals.InputTokens,
-		TokensOut: tele.Totals.OutputTokens,
-		NumTurns:  tele.Totals.NumTurns,
+		PromptID:       promptID,
+		StartedAt:      start,
+		EndedAt:        time.Now(),
+		Status:         status,
+		Agent:          o.agent,
+		Model:          o.model,
+		SessionID:      x.sessionID,
+		Effort:         x.effort.Resolved,
+		EffortSource:   x.effort.Source,
+		TranscriptPath: x.transcript,
+		CostUSD:        tele.Totals.CostUSD,
+		TokensIn:       tele.Totals.InputTokens,
+		TokensOut:      tele.Totals.OutputTokens,
+		NumTurns:       tele.Totals.NumTurns,
 	}
 	if len(perModel) > 0 {
 		meta.PerModel = map[string]runlog.PromptModelUsage{}
@@ -548,6 +585,10 @@ func writePromptRecord(runDir, promptID string, o promptOptions, sessionID, stat
 				NumTurns:            t.NumTurns,
 			}
 		}
+	}
+	if o.conduct {
+		meta.Host = conductHost
+		_ = runlog.WriteConductManifest(runDir, meta)
 	}
 	_ = runlog.WritePromptYAML(runDir, meta)
 }

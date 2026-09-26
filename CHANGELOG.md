@@ -46,6 +46,22 @@
   `docs/explanation/nested-ape-runs.md`. Measured live: inside an
   `ape prompt` session, `ape task` refused and named the run, and
   `ape config effort` still ran.
+- **feat(eval): `ape eval conduct`, the eval's orchestrator host.** A
+  hidden, eval-only verb that keeps the framework eval's orchestrator-persona
+  stages alive under the nesting refusal. It is refused unless
+  `APE_EVAL_HOST=1` (exit 22) and refused inside an ape session (exit 23).
+  It types `/apex-orchestrator --autonomous -- <request>`, with the request
+  from `--request-file <path|->`, into a PTY session that carries **no**
+  `APE_SESSION`, so the `ape change` the conductor dispatches runs and marks
+  its own session. It ends at the first `Stop` with no background task
+  outstanding. A `Stop` while the conductor awaits its background dispatch
+  is a yield: the idle timer is suspended, and `--max-duration` is a flat
+  hard ceiling. The idle timeout exits 20 and max-duration exits 21. The
+  record in `{output_folder}/ape/prompts/<run-id>/` adds `manifest.json`
+  (host `eval-conduct`, the conductor's own session, transcript, cost,
+  effort source and status). Measured live: the conductor saw an empty
+  `APE_SESSION`, yielded on a running shell, was resumed by the task
+  notification, and ended with exit 0 after its inner `ape task` completed.
 
 - **fix(release): the release archives extract, and ship
   `deploy/policy.yaml`.** Since 2026-07-10 (the first aped release), every

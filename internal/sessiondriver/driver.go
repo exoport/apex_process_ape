@@ -226,6 +226,13 @@ type Driver struct {
 	// stepSkill labels the running step in a DetachedAgentError. Empty on
 	// the `ape prompt` path, which has no skill.
 	stepSkill string
+	// conduct is the eval conductor's completion rule (SetConductMode):
+	// ANY outstanding background task, a shell included, defers a Stop.
+	conduct bool
+	// bgOutstanding records that the most recent Stop reported background
+	// work, which in conduct mode suspends the idle backstop until a later
+	// Stop reports none.
+	bgOutstanding bool
 
 	activityMu   sync.Mutex
 	lastActivity time.Time
@@ -282,6 +289,44 @@ func (d *Driver) DeferredStops() (n int, tasks []BackgroundTask) {
 	d.stopMu.Lock()
 	defer d.stopMu.Unlock()
 	return d.deferredStops, d.deferredTasks
+}
+
+// SetConductMode switches the driver to the eval conductor's completion
+// rule (`ape eval conduct`). The ordinary rule treats a backgrounded shell
+// as benign: a skill may leave one running across a turn. A conductor
+// backgrounds the `ape change` it dispatches and ENDS ITS TURN to await the
+// shell's completion notice, which Claude Code answers by resuming it. So
+// here:
+//
+//   - a Stop reporting any background task defers, and is a yield, not an
+//     end: the run survives Stop → resume cycles;
+//   - the idle backstop is suspended while the latest Stop reported one,
+//     because the conductor is legitimately silent while it waits;
+//   - the max-duration ceiling is flat from the start rather than reset at
+//     each sub-agent boundary, so it stays the hard bound it is here;
+//   - the first Stop reporting none ends the run.
+//
+// A teammate is still fatal: nothing can ever resolve one.
+func (d *Driver) SetConductMode(on bool) {
+	d.stopMu.Lock()
+	d.conduct = on
+	d.stopMu.Unlock()
+}
+
+// backgroundSuspendsIdle reports whether conduct mode is waiting on
+// background work, which suspends the idle backstop.
+func (d *Driver) backgroundSuspendsIdle() bool {
+	d.stopMu.Lock()
+	defer d.stopMu.Unlock()
+	return d.conduct && d.bgOutstanding
+}
+
+// TranscriptPath returns the session's own transcript as its hooks named
+// it, or "" before the first UserPromptSubmit.
+func (d *Driver) TranscriptPath() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.activeTranscript
 }
 
 // SetFlushGrace overrides the Stop→scan flush window. Test seam.
@@ -349,7 +394,15 @@ func (d *Driver) RecordActivity() {
 // batch, so a sequential batch skill runs as long as each item completes
 // within max-duration. Both driver paths call it: the prompt path from
 // Driver.FeedHook, the pipeline/task path from interactiveCore.FeedHook.
-func (d *Driver) RecordItemBoundary() { d.resetMaxDurationAnchor(time.Now()) }
+func (d *Driver) RecordItemBoundary() {
+	d.stopMu.Lock()
+	conduct := d.conduct
+	d.stopMu.Unlock()
+	if conduct {
+		return // the conductor's ceiling is flat; see SetConductMode
+	}
+	d.resetMaxDurationAnchor(time.Now())
+}
 
 // resetMaxDurationAnchor sets the ceiling reset point under activityMu.
 func (d *Driver) resetMaxDurationAnchor(t time.Time) {
@@ -434,6 +487,18 @@ func (d *Driver) NoteHook(event string, payload json.RawMessage) {
 // cannot leave the gate stuck.
 func (d *Driver) noteStop(env hookEnvelope) {
 	verdict, blocking := classifyStop(env.BackgroundTasks)
+	d.stopMu.Lock()
+	conduct := d.conduct
+	if conduct {
+		outstanding := env.BackgroundTasks != nil && len(*env.BackgroundTasks) > 0
+		d.bgOutstanding = outstanding
+		if outstanding && verdict == stopComplete {
+			// Benign under the ordinary rule — a shell, a monitor — but a
+			// conductor awaiting it is yielding, not done.
+			verdict, blocking = stopDefer, *env.BackgroundTasks
+		}
+	}
+	d.stopMu.Unlock()
 	switch verdict {
 	case stopFatal:
 		d.SignalStepFatal(&DetachedAgentError{
@@ -685,7 +750,7 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 				}
 			}
 
-			if idle := now.Sub(lastProgress); idle > d.idleTimeout {
+			if idle := now.Sub(lastProgress); idle > d.idleTimeout && !d.backgroundSuspendsIdle() {
 				src, diag := d.diagnose(now, stepStart, lastHook, lastTranscript, lastPTY, touches, lastTouch)
 				return &IdleTimeoutError{
 					Label:      d.idleErrLabel,

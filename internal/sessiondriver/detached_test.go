@@ -285,3 +285,67 @@ func TestDriver_DrainClearsFatal(t *testing.T) {
 	d.FeedHook(orchestrator.HookEvent{Event: ipc.HookStop})
 	require.NoError(t, d.WaitStepDone(t.Context()))
 }
+
+var shellStop = json.RawMessage(`{"hook_event_name":"Stop","background_tasks":[` +
+	`{"id":"bz14rrwvv","type":"shell","status":"running","description":"ape change --fixes DW-1"}]}`)
+
+// Under the ORDINARY rule a backgrounded shell is benign: the Stop ends the
+// step. That is what a conductor awaiting its `ape change` must not get.
+func TestDriver_ShellStopCompletesOrdinarily(t *testing.T) {
+	t.Parallel()
+	d := newTestDriver(time.Minute)
+	d.FeedHook(orchestrator.HookEvent{Event: ipc.HookStop, Payload: shellStop})
+	require.NoError(t, d.WaitStepDone(t.Context()))
+}
+
+// TestDriver_ConductShellStopIsAYield: in conduct mode the same Stop is a
+// yield. The run survives it, the idle backstop is suspended while the
+// shell runs (so a 50ms window does NOT fire), and the resumed turn's
+// clean Stop ends the run.
+func TestDriver_ConductShellStopIsAYield(t *testing.T) {
+	t.Parallel()
+	d := newTestDriver(50 * time.Millisecond)
+	d.SetConductMode(true)
+	d.FeedHook(orchestrator.HookEvent{Event: ipc.HookStop, Payload: shellStop})
+
+	done := make(chan error, 1)
+	go func() { done <- d.WaitStepDone(t.Context()) }()
+	select {
+	case err := <-done:
+		t.Fatalf("a conductor awaiting a background shell must not end, nor idle out: %v", err)
+	case <-time.After(1500 * time.Millisecond):
+	}
+	n, blocking := d.DeferredStops()
+	require.Equal(t, 1, n)
+	require.Equal(t, "shell", blocking[0].Type)
+
+	// The shell finished; Claude Code resumed the conductor, whose turn ends
+	// with nothing outstanding.
+	d.FeedHook(orchestrator.HookEvent{
+		Event:   ipc.HookStop,
+		Payload: json.RawMessage(`{"hook_event_name":"Stop","background_tasks":[]}`),
+	})
+	require.NoError(t, <-done)
+}
+
+// Once nothing is outstanding the idle backstop is live again.
+func TestDriver_ConductIdleResumesAfterACleanYield(t *testing.T) {
+	t.Parallel()
+	d := newTestDriver(50 * time.Millisecond)
+	d.SetConductMode(true)
+	d.FeedHook(orchestrator.HookEvent{Event: ipc.HookStop, Payload: shellStop})
+	require.True(t, d.backgroundSuspendsIdle())
+	d.noteStop(parseHookEnvelope(json.RawMessage(`{"background_tasks":[]}`)))
+	require.False(t, d.backgroundSuspendsIdle())
+}
+
+// A teammate stays fatal in conduct mode: nothing can resolve it.
+func TestDriver_ConductTeammateStillFatal(t *testing.T) {
+	t.Parallel()
+	d := newTestDriver(time.Minute)
+	d.SetConductMode(true)
+	d.FeedHook(orchestrator.HookEvent{Event: ipc.HookStop, Payload: json.RawMessage(
+		`{"background_tasks":[{"id":"t1","type":"teammate","status":"running"}]}`)})
+	var det *DetachedAgentError
+	require.ErrorAs(t, d.WaitStepDone(t.Context()), &det)
+}

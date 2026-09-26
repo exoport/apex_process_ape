@@ -85,6 +85,7 @@ func rootSubcommands() []*cobra.Command {
 		newVersionCmd(),
 		newBootstrapCmd(),
 		newConfigCmd(),
+		newEvalCmd(),
 		newTraitCmd(),
 		newPatternCmd(),
 		newADRCmd(),
