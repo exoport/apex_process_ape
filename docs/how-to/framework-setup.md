@@ -32,7 +32,7 @@ What happens:
 5. Opens an interactive Bubble Tea prompt for the project name and which extensions to enable. (Skip the TUI with `--project-name` + `--extensions`, or skip seeding entirely with `--no-bootstrap`.)
 6. Removes any pre-existing `<project>/.claude/skills/apex-*` (so leftover skills from a prior install disappear).
 7. Copies all `apex-*` skill directories into `<project>/.claude/skills/` (including the `apex-orchestrator` persona skill).
-8. Copies all framework pipeline YAMLs into `<project>/_apex/pipelines/`.
+8. Copies all framework pipeline YAMLs into `<project>/_apex/pipelines/`, and the framework-owned tables the runner reads. These include `_apex/effort-defaults.yaml`, the per-model reasoning-effort table every spawned session gets (`ape config effort` shows it; without it, every session runs at `xhigh`, as before v0.2.0).
 9. Relocates any run artifacts still at the pre-`{output_folder}/ape` paths. Usually a no-op on a fresh project — but `ape chat` and `ape prompt` work without a framework install, so a project can have run history before `setup` ever runs. Same rules as on update: nothing overwritten, collisions reported. See [How to refresh the framework](framework-update.md#what-the-relocation-does).
 10. Installs the always-on operating-rules fragment (`_apex/apex-operating-rules.md`) and ensures the repo-root `CLAUDE.md` imports it inside a managed block — see [Operating rules](#operating-rules-always-on-apex-discipline) below. Skipped with a warning if the framework repo predates the fragment.
 11. Copies the framework's [`ape aboard` recipe library](use-the-board.md#recipes) into `<project>/_apex/aboard/recipes/`. Nothing is installed when the framework ships no library — the recipes built into ape reach the project regardless.
@@ -48,6 +48,7 @@ What happens:
 | `_apex/config.yaml`               | `_apex/config.yaml` (template)              | **Seeded if absent** |
 | `_apex/config.local.example.yaml` | `_apex/config.local.example.yaml`           | **Seeded if absent** |
 | `_apex/apex-operating-rules.md`   | `_apex/apex-operating-rules.md`             | Created (if shipped) |
+| `_apex/effort-defaults.yaml`      | `_apex/effort-defaults.yaml`                | Created (if shipped) |
 | `_apex/aboard/recipes/*.md`       | `_apex/aboard/recipes/*.md`                 | Created (if shipped) |
 | `.aboard/`                        | _(created by the board)_                    | Created if absent    |
 | `.aboard/.gitignore`              | _(generated)_                               | **Seeded if absent** |
