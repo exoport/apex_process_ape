@@ -3,6 +3,7 @@ package repl
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/cost"
+	"github.com/exoport/apex_process_ape/internal/effort"
 	"github.com/stretchr/testify/require"
 )
 
@@ -66,6 +68,7 @@ func TestLive_ClaudeCodeContract(t *testing.T) {
 	t.Run("startup_probe", func(t *testing.T) { liveStartupProbe(t, claudeBin) })
 	t.Run("bg_shell_reap_switch", func(t *testing.T) { liveBGShellReapSwitch(t, claudeBin) })
 	t.Run("effort_env", func(t *testing.T) { liveEffortEnv(t, claudeBin) })
+	t.Run("model_settings_effort", func(t *testing.T) { liveModelSettingsEffort(t, claudeBin) })
 	t.Run("model_aliases", func(t *testing.T) { liveModelAliases(t, claudeBin) })
 	t.Run("transcript_persists", func(t *testing.T) { liveTranscriptPersists(t, claudeBin) })
 	t.Run("pty_repaints_during_tool", func(t *testing.T) { livePTYRepaintsDuringTool(t, claudeBin) })
@@ -361,6 +364,185 @@ func liveEffortEnv(t *testing.T, claudeBin string) {
 	}
 }
 
+// probeEffortTable is the per-model table the model_settings_effort check
+// writes — through ape's own effort.Defaults.Settings, so the keys under test
+// are the keys ape ships, not a hand-written blob.
+//
+// The levels are chosen to be ones a developer's own settings are unlikely
+// to produce for these models. That is not decoration: a user settings file
+// that already pins `opus: medium` makes a naive probe pass with no ape
+// settings at all, which is exactly how the first measurement of this nearly
+// went wrong.
+var probeEffortTable = &effort.Defaults{
+	Version:  1,
+	Defaults: map[string]string{"opus": "low", "sonnet": "medium"},
+	Fallback: "high",
+}
+
+// levelWord matches an effort level as a whole word, so `high` does not
+// match inside `xhigh`.
+func levelWord(level string) *regexp.Regexp {
+	return regexp.MustCompile(`\b` + regexp.QuoteMeta(level) + `\b`)
+}
+
+// liveModelSettingsEffort proves the per-model effort table still works.
+//
+// v0.2.0's effort defaults rest entirely on Claude Code reading
+// `modelSettings.<model>.effortLevel` (plus a top-level `effortLevel` as the
+// fallback) from the --settings ape passes, per request, by the model making
+// it. If a Claude Code release renamed or dropped that setting, every session
+// would quietly fall back to the user's own settings: no error anywhere, and
+// every other gate here still green.
+//
+// Two halves:
+//
+//   - FREE: the footer's effort indicator for a model with a row, and for
+//     one without (the fallback). No turn is submitted.
+//   - ONE TURN (skipped under APE_CLAUDE_LIVE_TOKENS=0): an Opus parent
+//     spawns a Sonnet sub-agent, and each transcript's recorded `effort`
+//     must be its OWN family's row. This is the half the footer cannot see
+//     and the reason the table exists — CLAUDE_CODE_EFFORT_LEVEL is
+//     process-wide and could only ever give both one level.
+func liveModelSettingsEffort(t *testing.T, claudeBin string) {
+	t.Helper()
+	blob, err := json.Marshal(probeEffortTable.Settings())
+	require.NoError(t, err)
+	settings := string(blob)
+
+	for _, tc := range []struct{ family, want string }{
+		{"sonnet", "medium"}, // its row
+		{"opus", "low"},      // its row, over any user-level opus pin
+	} {
+		model := cost.ResolveFamilyAlias(tc.family)
+		pane := launch(t, claudeBin, "msettings-"+tc.family, []string{"--settings", settings, "--model", model}, "")
+		line := lineContaining(pane, "/effort")
+		require.NotEmpty(t, line, "no effort indicator in the pane for %s — this check needs rethinking.\nPane:\n%s", model, pane)
+		require.Regexp(t, levelWord(tc.want), line,
+			"--settings carries modelSettings.%s.effortLevel=%s but %s's effort indicator reads %q. Claude Code "+
+				"no longer applies ape's per-model effort table: every session now runs at the user's own "+
+				"effort instead of the framework's _apex/effort-defaults.yaml", tc.family, tc.want, model, line)
+	}
+
+	if os.Getenv("APE_CLAUDE_LIVE_TOKENS") == "0" {
+		t.Skip("APE_CLAUDE_LIVE_TOKENS=0 — the per-model sub-agent half submits a turn")
+	}
+	liveModelSettingsSubagent(t, claudeBin, settings)
+}
+
+// liveModelSettingsSubagent is the one-turn half: an Opus parent and the
+// Sonnet sub-agent it spawns, in ONE process, each at its own row — read
+// from the `effort` Claude Code records on every assistant transcript line.
+func liveModelSettingsSubagent(t *testing.T, claudeBin, settings string) {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	dir, token := uniqueWorkdir(t)
+	name := sessionName(t, "msettings-subagent")
+	t.Cleanup(func() { removeScratchTranscripts(t, home, token) })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	argv := []string{
+		claudeBin, "--dangerously-skip-permissions", "--settings", settings,
+		"--model", cost.ResolveFamilyAlias("opus"),
+	}
+	require.NoError(t, NewSessionWithEnv(ctx, name, dir, argv, nil))
+	t.Cleanup(func() { _ = KillSession(context.Background(), name) })
+	require.NoError(t, WaitForReady(ctx, name))
+	require.NoError(t, SendCommand(ctx, name, `Use the Agent tool exactly once, with model "sonnet" and `+
+		`subagent_type "general-purpose", asking it to reply with the single word PONG. Then reply with the single word DONE.`))
+
+	main, sub := waitForSubagentEfforts(ctx, home, token)
+	want := probeEffortTable.Defaults
+	require.NotEmpty(t, main, "no effort recorded for the Opus parent's turns.\nlast pane:\n%s", paneOf(ctx, name))
+	require.NotEmpty(t, sub, "the Sonnet sub-agent recorded no effort — did it run?\nlast pane:\n%s", paneOf(ctx, name))
+	require.Equal(t, []string{want["opus"]}, main,
+		"the Opus parent ran at %v, not its row %q", main, want["opus"])
+	require.Equal(t, []string{want["sonnet"]}, sub,
+		"the Sonnet sub-agent of an Opus session ran at %v, not ITS row %q. Claude Code applied one effort "+
+			"to the whole process, so the per-model table no longer reaches sub-agents", sub, want["sonnet"])
+	t.Logf("opus parent at %v, sonnet sub-agent at %v — per model, one process", main, sub)
+}
+
+// waitForSubagentEfforts polls the scratch session's transcripts until the
+// sub-agent's assistant lines are recorded and the parent has finished its
+// turn, then returns the distinct efforts each recorded.
+func waitForSubagentEfforts(ctx context.Context, home, token string) (main, sub []string) {
+	for {
+		main, sub = nil, nil
+		dirs, _ := filepath.Glob(filepath.Join(home, ".claude", "projects", "*"+token+"*"))
+		for _, d := range dirs {
+			files, _ := filepath.Glob(filepath.Join(d, "*.jsonl"))
+			subs, _ := filepath.Glob(filepath.Join(d, "*", "subagents", "*.jsonl"))
+			for _, f := range files {
+				main = append(main, recordedEfforts(f)...)
+			}
+			for _, f := range subs {
+				sub = append(sub, recordedEfforts(f)...)
+			}
+		}
+		main, sub = distinct(main), distinct(sub)
+		// Done once the sub-agent has recorded and the parent has a line
+		// AFTER spawning it (its closing DONE turn).
+		if len(sub) > 0 && len(main) > 0 && parentFinished(dirs) {
+			return main, sub
+		}
+		select {
+		case <-ctx.Done():
+			return main, sub
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+// recordedEfforts returns the `effort` of every assistant line in a transcript.
+func recordedEfforts(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		var rec struct {
+			Effort  string `json:"effort"`
+			Message struct {
+				Role string `json:"role"`
+			} `json:"message"`
+		}
+		if json.Unmarshal([]byte(line), &rec) == nil && rec.Message.Role == "assistant" && rec.Effort != "" {
+			out = append(out, rec.Effort)
+		}
+	}
+	return out
+}
+
+// parentFinished reports whether a main transcript's last assistant text
+// says DONE — the parent's closing turn, after the sub-agent returned.
+func parentFinished(dirs []string) bool {
+	for _, d := range dirs {
+		files, _ := filepath.Glob(filepath.Join(d, "*.jsonl"))
+		for _, f := range files {
+			if text, ok := cost.LastAssistantText(f); ok && strings.Contains(text, "DONE") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func distinct(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range in {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // lineContaining returns the first line of pane containing sub, trimmed, or
 // "" when no line does.
 func lineContaining(pane, sub string) string {
@@ -628,14 +810,14 @@ func anyTranscriptSince(home string, ts time.Time) bool {
 // launch spawns claude the way the interactive runner does, waits for the
 // REPL, and returns the rendered pane. Failures carry the pane so a broken
 // contract is diagnosable from the test output alone.
-func launch(t *testing.T, claudeBin, label string, extraArgs []string, effort string) string {
+func launch(t *testing.T, claudeBin, label string, extraArgs []string, effortLevel string) string {
 	t.Helper()
 	name := sessionName(t, label)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	argv := append([]string{claudeBin, "--dangerously-skip-permissions"}, extraArgs...)
-	require.NoError(t, NewSessionWithEnv(ctx, name, t.TempDir(), argv, EffortEnv(effort)),
+	require.NoError(t, NewSessionWithEnv(ctx, name, t.TempDir(), argv, EffortEnv(effortLevel)),
 		"could not spawn claude with argv %v", argv)
 	t.Cleanup(func() { _ = KillSession(context.Background(), name) })
 

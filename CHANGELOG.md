@@ -46,6 +46,15 @@
   `docs/explanation/nested-ape-runs.md`. Measured live: inside an
   `ape prompt` session, `ape task` refused and named the run, and
   `ape config effort` still ran.
+- **test(harness): `make check-claude` gates the per-model effort table.**
+  The new `model_settings_effort` step runs against the installed Claude
+  Code. With no tokens spent, it checks the footer's effort for Sonnet and
+  Opus under ape's own `--settings`. In one Opus turn it then checks that the
+  Opus parent and the Sonnet sub-agent it spawns each run at their own
+  family's row, as recorded in the transcripts. Without it, a Claude Code
+  release that stopped reading `modelSettings` would silently put every
+  session back on the user's own effort, while every other check stayed
+  green. It was verified to fail on an empty table.
 - **feat(eval): `ape eval conduct`, the eval's orchestrator host.** A
   hidden, eval-only verb that keeps the framework eval's orchestrator-persona
   stages alive under the nesting refusal. It is refused unless

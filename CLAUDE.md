@@ -76,7 +76,9 @@ make check-output-styles # verify ape's built-in output-style table matches the 
                    #   and silently stops for a newer one)
 make check-claude  # LOCAL ONLY: spawn the installed Claude Code and verify ape's PTY/model contract
                    #   (incl. bg_shell_reap_switch: the background-shell pressure-reap variable
-                   #   ape sets on every spawn is still the switch claude reads)
+                   #   ape sets on every spawn is still the switch claude reads; and
+                   #   model_settings_effort: claude still applies ape's per-model effort
+                   #   table, sub-agents included — one Opus+Sonnet turn, a few cents)
 make check-hooks   # LOCAL ONLY: verify Claude Code still sends the hook fields the completion gates read.
                    #   Seeds its own corpus (one `ape prompt` session in a temp copy of
                    #   testdata/apexproject), so it needs no pre-existing project.

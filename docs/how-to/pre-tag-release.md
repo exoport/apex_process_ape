@@ -83,7 +83,8 @@ make check-harness
 | `❯` prompt glyph | The fallback ready signal, and `emptyPromptRe`'s anchor. |
 | Pre-REPL modals | A *new* blocking modal `blockingModals` cannot dismiss makes every run idle until timeout. |
 | `--dangerously-skip-permissions`, `--model` | A rejected flag means no session starts at all. |
-| `CLAUDE_CODE_EFFORT_LEVEL` | Every run silently uses the harness default effort instead of the one the pipeline asked for. |
+| `CLAUDE_CODE_EFFORT_LEVEL` | An explicit `effort:` / `--effort` override silently stops applying, and so does the legacy `xhigh` on a project with no effort table. |
+| Per-model effort table (`model_settings_effort`) | v0.2.0's effort defaults ride in `--settings` as `modelSettings.<model>.effortLevel` plus a top-level `effortLevel` fallback, built by ape's own `effort.Defaults.Settings`. If Claude Code stops reading them, every session silently runs at the user's own effort instead of the framework's `_apex/effort-defaults.yaml`. The free half reads the footer's effort indicator for Sonnet and Opus. The one-turn half (skipped under `APE_CLAUDE_LIVE_TOKENS=0`) has an Opus parent spawn a Sonnet sub-agent, and requires each transcript's recorded `effort` to be its own family's row, the per-model property `CLAUDE_CODE_EFFORT_LEVEL` could never give. The levels are ones a user's own settings are unlikely to pin. Verified to fail with an empty table, where the footer showed the user's `xhigh`. |
 | Family-alias model ids | An id that no longer exists does **not** error — Claude Code starts anyway on a fallback model. |
 | Transcript persistence | The v0.0.28–32 root cause: every cost, token, and model figure silently becomes zero. |
 | `claude --version` shape | The manifest's `claude_version` stamp and hookdrift's version attribution stop resolving. |
