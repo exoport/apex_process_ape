@@ -132,3 +132,34 @@ func TestDecide(t *testing.T) {
 	require.Equal(t, SourceLegacy, p.Source)
 	require.Nil(t, p.Table)
 }
+
+// With no --model the launch-time Resolved is only the fallback. A record
+// written after the session ran must say the row of the model it ran on.
+func TestPlan_Observed(t *testing.T) {
+	d, err := Load(writeTable(t, frameworkTable))
+	require.NoError(t, err)
+
+	p := Decide("", "", d, "")
+	require.True(t, p.Unattributed(""))
+	require.Equal(t, d.Fallback, p.Resolved, "at launch ape can only assume the fallback")
+
+	got := p.Observed("", "claude-opus-5-5")
+	require.Equal(t, d.Defaults["opus"], got.Resolved, "the row of the model that ran")
+	require.True(t, got.FromFamily)
+	require.Equal(t, SourceTable, got.Source)
+
+	require.Equal(t, p, p.Observed("", ""), "no observed model: unchanged")
+
+	pinned := Decide("", "", d, "claude-sonnet-5")
+	require.False(t, pinned.Unattributed("claude-sonnet-5"))
+	require.Equal(t, pinned, pinned.Observed("claude-sonnet-5", "claude-opus-5-5"),
+		"a pinned model is already attributed; telemetry does not overrule it")
+
+	explicit := Decide("low", SourceFlag, d, "")
+	require.False(t, explicit.Unattributed(""))
+	require.Equal(t, "low", explicit.Observed("", "claude-opus-5-5").Resolved, "an override is process-wide")
+
+	legacy := Decide("", "", nil, "")
+	require.False(t, legacy.Unattributed(""))
+	require.Equal(t, LegacyDefault, legacy.Observed("", "claude-opus-5-5").Resolved)
+}

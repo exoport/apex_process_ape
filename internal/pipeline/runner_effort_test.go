@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -149,4 +150,60 @@ func TestRun_StampsTheSessionMarker(t *testing.T) {
 	data, err := os.ReadFile(dump)
 	require.NoError(t, err)
 	require.Contains(t, string(data), "APE_SESSION=pipeline/"+m.RunID+"\n")
+}
+
+// With no --model, ape can only assume the table's fallback at launch.
+// Neither record may present that as what ran: step-start says nothing,
+// and step-end and the manifest carry the row of the model the step's own
+// telemetry names. Found by the framework eval: an unpinned opus session
+// ran every turn at medium while both records said high.
+func TestRun_UnpinnedModelRecordsTheObservedRow(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "_apex", "pipelines")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "fx.yaml"),
+		[]byte("name: fx\nstages:\n  only:\n    chain:\n      - skill: apex-fake\n"), 0o644))
+	spec, err := LoadSpec("fx", root)
+	require.NoError(t, err)
+	stubSpecSkills(t, root, spec)
+
+	tele := &StepTelemetry{
+		NumTurns: 5,
+		Sessions: []SessionUsage{
+			{SessionID: "main", ModelUsage: map[string]ModelUsage{"claude-opus-5-5": {NumTurns: 5}}},
+			{SessionID: "sub", ParentSessionID: "main", ModelUsage: map[string]ModelUsage{"claude-sonnet-5": {NumTurns: 9}}},
+		},
+	}
+	shim, _ := envDumpShim(t)
+	require.NoError(t, Run(context.Background(), spec, RunOptions{
+		ProjectRoot:     root,
+		ClaudeBin:       shim,
+		NoCommit:        true,
+		WaitStepDone:    fastStepDone,
+		EffortTable:     fwTable,
+		StepTelemetryFn: func(string, int) *StepTelemetry { return tele },
+	}))
+
+	m := loadLatestManifest(t, root, "fx")
+	step := m.Stages[0].Steps[0]
+	require.Empty(t, step.Model, "unpinned")
+	require.Equal(t, "medium", step.Effort, "the opus row, from the main session — not the sub-agent's sonnet")
+	require.Equal(t, effort.SourceTable, step.EffortSource)
+
+	runDir, err := filepath.EvalSymlinks(filepath.Join(root, "_output", "ape", "pipelines", "fx", "latest"))
+	require.NoError(t, err)
+	data, err := os.ReadFile(filepath.Join(runDir, step.EventsPath))
+	require.NoError(t, err)
+	events := map[string]map[string]any{}
+	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+		var ev map[string]any
+		require.NoError(t, json.Unmarshal([]byte(line), &ev))
+		kind, _ := ev["type"].(string)
+		events[kind] = ev
+	}
+	require.Contains(t, events, "step-start")
+	require.NotContains(t, events["step-start"], "effort", "the fallback must not pose as what ran")
+	require.Equal(t, effort.SourceTable, events["step-start"]["effort_source"])
+	require.Equal(t, "claude-opus-5-5", events["step-end"]["model_observed"])
+	require.Equal(t, "medium", events["step-end"]["effort"])
 }

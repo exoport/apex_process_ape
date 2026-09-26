@@ -231,9 +231,9 @@ type Plan struct {
 	// Source is one of the Source* constants.
 	Source string `json:"source" yaml:"source"`
 	// Resolved is the effort the launch model runs at. Under the table
-	// with no --model it is the fallback's value: ape cannot know which
-	// model claude defaults to, so FromFamily is false and the record
-	// says so rather than guessing.
+	// with no --model it is the fallback's value: ape cannot know at
+	// launch which model claude defaults to, so FromFamily is false. A
+	// record written after the session ran goes through Observed instead.
 	Resolved string `json:"resolved" yaml:"resolved"`
 	// FromFamily is true when Resolved came from the model's family row.
 	FromFamily bool `json:"from_family,omitempty" yaml:"from_family,omitempty"`
@@ -253,6 +253,25 @@ func Decide(explicit, source string, table *Defaults, model string) Plan {
 	default:
 		return Plan{Env: LegacyDefault, Source: SourceLegacy, Resolved: LegacyDefault}
 	}
+}
+
+// Unattributed reports whether Resolved is only the table's fallback
+// standing in for a model ape did not pick: the table governs and there
+// was no --model. Claude applies the row of whatever model it defaults to,
+// so a record written before the session ran must not claim Resolved.
+func (p Plan) Unattributed(launchModel string) bool {
+	return p.Source == SourceTable && p.Table != nil && launchModel == ""
+}
+
+// Observed re-resolves an unattributed plan against the model the session's
+// own telemetry says it ran on, so a record written after the session says
+// what ran rather than the fallback. Any other plan, or an empty ran, is
+// returned unchanged.
+func (p Plan) Observed(launchModel, ran string) Plan {
+	if p.Unattributed(launchModel) && ran != "" {
+		p.Resolved, p.FromFamily = p.Table.For(ran)
+	}
+	return p
 }
 
 // EnvEntries returns the environment entry the plan needs, if any.

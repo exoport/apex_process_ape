@@ -341,9 +341,10 @@ type StepRecord struct {
 	// tell a run that got the framework table from one that did not.
 	// EffortDeclared appears only when the step asked for something else.
 	//
-	// Under `table` with no --model, Effort is the table's fallback: ape
-	// cannot know which model claude defaults to. Claude applies the
-	// matching row itself, and each transcript line records the effort
+	// Under `table` with no --model, Effort is the row of the model the
+	// step's main session ran on, from its own telemetry (effort.Plan.Observed);
+	// the fallback only when the telemetry names no model. Sub-agents run at
+	// their own family's row, and each transcript line records the effort
 	// actually sent.
 	Effort                string       `yaml:"effort,omitempty"`
 	EffortDeclared        string       `yaml:"effort_declared,omitempty"`

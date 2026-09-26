@@ -31,7 +31,15 @@
   - **Manifest.** A step's `effort` now records what the step ran at, with
     `effort_source` (step, stage, pipeline, flag, table or legacy-default)
     and `effort_declared` when a later step asked for something else. It
-    used to record only the step's own field.
+    used to record only the step's own field. With no `--model`, the
+    records name the row of the model the session ran on, taken from its
+    own telemetry, never the fallback ape can only assume at launch: the
+    manifest, the `prompt.yaml`/`manifest.json` of `ape prompt` and
+    `ape eval conduct`, and the interactive step log, whose `step-start`
+    now omits `effort` and whose `step-end` adds `model_observed` and
+    `effort`. The framework eval caught the conductor and the dispatched
+    lane recording `high` for sessions whose every turn ran opus at
+    `medium`.
   - **Conflicts.** A later step's `effort:` is reported before the run and by
     `ape doctor`, like a model conflict. `ape chat` keeps claude's native
     effort, as before.

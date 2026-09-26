@@ -44,8 +44,10 @@ type PromptMeta struct {
 	// Host names a non-default host of the session: `eval-conduct` for
 	// `ape eval conduct`. Empty for `ape prompt`.
 	Host string `json:"host,omitempty" yaml:"host,omitempty"`
-	// Effort and EffortSource are the session's launch effort and where it
-	// came from (internal/effort: flag, table or legacy-default).
+	// Effort and EffortSource are the session's effort and where it came
+	// from (internal/effort: flag, table or legacy-default). Under the
+	// table with no --model, Effort is the row of the model the main
+	// session ran on, not the fallback assumed at launch.
 	Effort       string `json:"effort,omitempty"        yaml:"effort,omitempty"`
 	EffortSource string `json:"effort_source,omitempty" yaml:"effort_source,omitempty"`
 	// TranscriptPath is the session's own transcript, as its hooks named it.

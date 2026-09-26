@@ -12,9 +12,12 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/cost"
+	"github.com/exoport/apex_process_ape/internal/effort"
 	"github.com/exoport/apex_process_ape/internal/repl"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestAssemblePromptLine(t *testing.T) {
@@ -123,6 +126,32 @@ func TestPromptRecordAndRollup(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, r.Prompts.Runs, promptID)
 	require.InDelta(t, 1.25, r.Prompts.Totals.CostUSD, 1e-9)
+}
+
+// The conductor never pins a model, so its record went through the
+// launch-time fallback: the framework eval saw `effort: high` on a session
+// whose every turn ran opus at medium. The record now names the row of the
+// model the main session ran on; a sub-agent's model does not count.
+func TestPromptRecord_UnpinnedTableRecordsTheObservedRow(t *testing.T) {
+	runDir := t.TempDir()
+	table := &effort.Defaults{
+		Version:  1,
+		Defaults: map[string]string{"opus": "medium", "sonnet": "xhigh"},
+		Fallback: "high",
+	}
+	tele := &sessiondriver.Telemetry{Sessions: []sessiondriver.SessionUsage{
+		{SessionID: "main", ByModel: map[string]cost.Totals{"claude-opus-5-5": {NumTurns: 24}}},
+		{SessionID: "sub", ParentSessionID: "main", ByModel: map[string]cost.Totals{"claude-sonnet-5": {NumTurns: 40}}},
+	}}
+	writePromptRecord(runDir, "p1", promptOptions{}, promptRecordExtras{effort: effort.Decide("", "", table, "")},
+		"completed", time.Now(), tele, nil)
+
+	data, err := os.ReadFile(filepath.Join(runDir, "prompt.yaml"))
+	require.NoError(t, err)
+	var meta runlog.PromptMeta
+	require.NoError(t, yaml.Unmarshal(data, &meta))
+	require.Equal(t, "medium", meta.Effort)
+	require.Equal(t, effort.SourceTable, meta.EffortSource)
 }
 
 // --- bash-PTY stand-in (mirrors internal/repl's pattern) ---

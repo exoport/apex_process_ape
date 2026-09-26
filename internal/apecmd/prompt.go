@@ -558,14 +558,16 @@ type promptRecordExtras struct {
 
 func writePromptRecord(runDir, promptID string, o promptOptions, x promptRecordExtras, status string, start time.Time, tele *sessiondriver.Telemetry, perModel map[string]cost.Totals) {
 	meta := runlog.PromptMeta{
-		PromptID:       promptID,
-		StartedAt:      start,
-		EndedAt:        time.Now(),
-		Status:         status,
-		Agent:          o.agent,
-		Model:          o.model,
-		SessionID:      x.sessionID,
-		Effort:         x.effort.Resolved,
+		PromptID:  promptID,
+		StartedAt: start,
+		EndedAt:   time.Now(),
+		Status:    status,
+		Agent:     o.agent,
+		Model:     o.model,
+		SessionID: x.sessionID,
+		// No --model: the fallback ape assumed at launch is not what ran.
+		// Record the row of the model the session actually ran on.
+		Effort:         x.effort.Observed(o.model, mainModel(tele)).Resolved,
 		EffortSource:   x.effort.Source,
 		TranscriptPath: x.transcript,
 		CostUSD:        tele.Totals.CostUSD,
@@ -646,6 +648,27 @@ func refuseOrchestrator(agent string) error {
 		return errors.New(orchestratorRefusal)
 	}
 	return nil
+}
+
+// mainModel returns the model the main (non-sub-agent) session ran most
+// turns on, or "" when the telemetry does not say.
+func mainModel(tele *sessiondriver.Telemetry) string {
+	if tele == nil {
+		return ""
+	}
+	for _, s := range tele.Sessions {
+		if s.ParentSessionID != "" {
+			continue
+		}
+		best, turns := "", -1
+		for model, t := range s.ByModel {
+			if t.NumTurns > turns || (t.NumTurns == turns && model < best) {
+				best, turns = model, t.NumTurns
+			}
+		}
+		return best
+	}
+	return ""
 }
 
 // promptEffortPlan applies the pipeline stage's rule (effort.Decide) to a

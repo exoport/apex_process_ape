@@ -609,15 +609,10 @@ func recordStep(
 	if mw == nil {
 		return
 	}
-	plan := m.Effort
-	if plan.Source == effort.SourceTable && m.Run == "" && plan.Table != nil {
-		// No --model: claude chose the model, and applied that model's row.
-		// The step's own telemetry names it, so record the row it got
-		// rather than the fallback ape had to assume at launch.
-		if main := mainSessionModel(ev); main != "" {
-			plan.Resolved, plan.FromFamily = plan.Table.For(main)
-		}
-	}
+	// No --model: claude chose the model, and applied that model's row.
+	// The step's own telemetry names it, so record the row it got rather
+	// than the fallback ape had to assume at launch.
+	plan := m.Effort.Observed(m.Run, mainSessionModel(ev))
 	rec := StepRecord{
 		Index:          stepIdx,
 		Skill:          step.Skill,

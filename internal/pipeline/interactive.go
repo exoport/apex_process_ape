@@ -274,16 +274,21 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 
 		prompt := assembleInteractivePromptLine(effAgent, step, opts.Prompt)
 		stepStartFields := map[string]any{
-			"stage":  stage.Name,
-			"step":   i + 1,
-			"skill":  step.Skill,
-			"agent":  effAgent,
-			"model":  runModel,
-			"effort": effortPlan.Resolved,
+			"stage": stage.Name,
+			"step":  i + 1,
+			"skill": step.Skill,
+			"agent": effAgent,
+			"model": runModel,
 			// table | legacy-default | step | stage | pipeline | flag
 			"effort_source": effortPlan.Source,
 			"prompt":        prompt,
 			"no_clear":      step.NoClear,
+		}
+		// With no --model under the table, claude has not picked its model
+		// yet, and Resolved would be the fallback posing as what ran. The
+		// step-end event carries the observed model's row instead.
+		if !effortPlan.Unattributed(runModel) {
+			stepStartFields["effort"] = effortPlan.Resolved
 		}
 		if declaredModel != "" {
 			// Present only on a divergence, so its presence is itself
@@ -338,15 +343,10 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 			fmt.Fprintf(os.Stderr, "[pty/%s/step%d]\n%s\n[/pty]\n", sessionName, i, stepOut)
 		}
 
-		writeInteractiveStepEvent(eventLog, "step-end", map[string]any{
-			"stage":         stage.Name,
-			"step":          i + 1,
-			"skill":         step.Skill,
-			"duration_secs": time.Since(stepStart).Seconds(),
-		})
-		closeStepLog(eventLog)
+		// Measured before the telemetry scan, which pays a transcript flush
+		// grace that is not the step's.
+		stepDuration := time.Since(stepStart)
 
-		exitCode := 0
 		// In interactive mode the pane snapshot never carries the
 		// stream-json `result` event (claude REPL emits no stream-json
 		// on stdout). Pull telemetry from the session transcript via
@@ -357,6 +357,25 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 				ev = stepTelemetryToResultEvent(tele)
 			}
 		}
+
+		stepEndFields := map[string]any{
+			"stage":         stage.Name,
+			"step":          i + 1,
+			"skill":         step.Skill,
+			"duration_secs": stepDuration.Seconds(),
+		}
+		if effortPlan.Unattributed(runModel) {
+			// What step-start could not say: the model claude chose and the
+			// row it ran at. Absent when the telemetry names no model.
+			if ran := mainSessionModel(ev); ran != "" {
+				stepEndFields["model_observed"] = ran
+				stepEndFields["effort"] = effortPlan.Observed(runModel, ran).Resolved
+			}
+		}
+		writeInteractiveStepEvent(eventLog, "step-end", stepEndFields)
+		closeStepLog(eventLog)
+
+		exitCode := 0
 		// A later step's own effort never reaches the running session; say
 		// so beside what ran, as for the model. See StageEffortConflicts.
 		effortDeclared := ""
