@@ -184,3 +184,12 @@ func emitEffortHuman(w io.Writer, rep *effortReport) error {
 	}
 	return nil
 }
+
+// sessionKindOf is the APE_SESSION kind for a run: its own override, else
+// its eventing kind.
+func sessionKindOf(cfg runConfig) string {
+	if cfg.sessionKind != "" {
+		return cfg.sessionKind
+	}
+	return string(cfg.kind)
+}

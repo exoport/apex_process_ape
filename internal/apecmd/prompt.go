@@ -131,6 +131,9 @@ failed · 2 usage or preflight error (no _apex/config.yaml, unresolved
 · 4 claude exited before the Stop hook.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := refuseNested("ape prompt"); err != nil {
+				return err
+			}
 			warnUnknownOutputStyleFlag(cmd, outputStyleFlag)
 			format := output.Format(outputFormat)
 			if format != output.FormatHuman && format != output.FormatJSON && format != output.FormatYAML {
@@ -307,6 +310,9 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 
 	// Preflight (exit 2): agent must resolve; handoff/prompt derivation
 	// must succeed. Detected before any claude process spawns.
+	if err := refuseOrchestrator(o.agent); err != nil {
+		return promptResult{}, ExitUsage, err
+	}
 	if o.agent != "" {
 		if _, _, found := framework.ResolveSkill(o.agent, o.projectRoot); !found {
 			return promptResult{}, ExitUsage, fmt.Errorf("--agent %q did not resolve under .claude/skills (project or user)", o.agent)
@@ -399,7 +405,8 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 
 	sessionName := fmt.Sprintf("ape-prompt-%d", os.Getpid())
 	_ = repl.KillSession(runCtx, sessionName)
-	if err := repl.NewSessionWithEnv(runCtx, sessionName, o.projectRoot, argv, effortPlan.EnvEntries()); err != nil {
+	spawnEnv := append(effortPlan.EnvEntries(), repl.SessionMarkerEnv("prompt", promptID)...)
+	if err := repl.NewSessionWithEnv(runCtx, sessionName, o.projectRoot, argv, spawnEnv); err != nil {
 		return promptResult{}, ExitRunFailed, fmt.Errorf("ape prompt: spawn claude: %w", err)
 	}
 	defer func() { _ = repl.KillSession(context.Background(), sessionName) }() //nolint:contextcheck // cleanup-on-exit
@@ -586,6 +593,20 @@ func printPromptSummary(res promptResult, tele *sessiondriver.Telemetry, runDir,
 	}
 }
 
+// orchestratorAgent conducts `ape task`, `ape pipeline` and `ape change`
+// runs, so an ape-spawned session running it would be ape inside ape —
+// exactly what refuseNested forbids, one level up. Its autonomous mode runs
+// in a plain Claude Code session instead, with one level of ape under it.
+const orchestratorAgent = "apex-orchestrator"
+
+// refuseOrchestrator is the preflight check for orchestratorAgent.
+func refuseOrchestrator(agent string) error {
+	if agent == orchestratorAgent {
+		return errors.New(orchestratorRefusal)
+	}
+	return nil
+}
+
 // promptEffortPlan applies the pipeline stage's rule (effort.Decide) to a
 // prompt: --effort is an explicit, process-wide override; without it the
 // framework table governs per model; without a table, the legacy default.
@@ -603,3 +624,7 @@ func promptEffortPlan(o promptOptions) (effort.Plan, error) {
 	}
 	return effort.Decide(o.effort, source, table, o.model), nil
 }
+
+const orchestratorRefusal = "ape prompt --agent apex-orchestrator is refused: the orchestrator starts ape runs, " +
+	"and ape never runs inside an ape-spawned session. Run it in a plain Claude Code session instead: " +
+	"type `/apex-orchestrator --autonomous -- <request>` there"

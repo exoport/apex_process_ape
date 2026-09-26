@@ -960,6 +960,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		ClaudeBin:         cfg.claudeBin,
 		Effort:            cfg.effort,
 		EffortTable:       cfg.effortTable,
+		SessionKind:       sessionKindOf(cfg),
 		ApeVersion:        Version,
 		ManifestDir:       cfg.manifestDir,
 		FromStage:         cfg.fromStage,

@@ -72,6 +72,9 @@ separately (e.g. wrap ape chat in tmux or screen).
 Exit codes: 0 success · 1 claude/bridge failure · 2 usage or preflight
 error (no _apex/config.yaml, bad cwd).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := refuseNested("ape chat"); err != nil {
+				return err
+			}
 			warnUnknownOutputStyleFlag(cmd, outputStyleFlag)
 			projectRoot := cwdFlag
 			if projectRoot == "" {
@@ -125,9 +128,12 @@ error (no _apex/config.yaml, bad cwd).`,
 //     spawn path (repl.EnvDisableBGShellReap): Claude Code otherwise kills a
 //     running background shell when Bun reports memory pressure, and the
 //     scrub in 1 is what stops an operator setting this themselves.
-func chatSpawnEnv(base []string, effortArg string) (env []string, unpin func(), notice string) {
+//  5. APE_SESSION marks the session as ape's (repl.EnvApeSession), so an
+//     `ape task` a skill shells out to inside it refuses rather than nesting.
+func chatSpawnEnv(base []string, effortArg, chatID string) (env []string, unpin func(), notice string) {
 	env, unpin, notice = selfpath.Pin(repl.ScrubClaudeCodeEnv(base))
 	env = append(env, repl.DisableBGShellReapEnv()...)
+	env = append(env, repl.SessionMarkerEnv("chat", chatID)...)
 	if effortArg != "" {
 		env = append(env, repl.EnvClaudeEffortLevel+"="+effortArg)
 	}
@@ -245,7 +251,7 @@ func runChat(
 	// `ape` exactly as one inside a dispatch does, and without the pin it
 	// gets whatever the machine has installed rather than the binary
 	// hosting the session. See internal/selfpath.
-	env, unpin, pathNotice := chatSpawnEnv(os.Environ(), effortArg)
+	env, unpin, pathNotice := chatSpawnEnv(os.Environ(), effortArg, chatID)
 	defer unpin()
 	if pathNotice != "" {
 		fmt.Fprintf(os.Stderr, "ape chat: %s\n", pathNotice)

@@ -149,7 +149,7 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		return StatusFailed, argvErr
 	}
 
-	stageEnv := effortPlan.EnvEntries()
+	stageEnv := append(effortPlan.EnvEntries(), repl.SessionMarkerEnv(sessionKind(opts), runIDOf(mw, spec))...)
 
 	sessionName := fmt.Sprintf("ape-%s-%d", sanitizeSessionName(stage.Name), os.Getpid())
 	// Ensure no stale session by that name; ignore not-found error.
@@ -541,4 +541,21 @@ func waitStepDone(ctx context.Context, opts RunOptions, stage string, stepIdx in
 	case <-time.After(opts.InteractiveStepGrace):
 		return nil
 	}
+}
+
+// sessionKind is the owning command for the APE_SESSION marker.
+func sessionKind(opts RunOptions) string {
+	if opts.SessionKind == "" {
+		return "pipeline"
+	}
+	return opts.SessionKind
+}
+
+// runIDOf names the run for the APE_SESSION marker: the manifest's run id,
+// or the pipeline's name when the run keeps no manifest.
+func runIDOf(mw *manifestWriter, spec *Spec) string {
+	if mw != nil && mw.runID != "" {
+		return mw.runID
+	}
+	return spec.Name
 }

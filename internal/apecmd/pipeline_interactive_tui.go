@@ -157,6 +157,7 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 			AllowDirty:             cfg.allowDirty,
 			Effort:                 cfg.effort,
 			EffortTable:            cfg.effortTable,
+			SessionKind:            sessionKindOf(cfg),
 			PrependFlags:           prepend,
 			StagePrependFlags:      stagePrepend,
 			OnStageStart:           core.ResetStageTelemetry,

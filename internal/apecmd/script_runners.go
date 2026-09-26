@@ -77,6 +77,7 @@ func (r *scriptRunner) runCfg(manifestDir string, kind eventing.Kind) runConfig 
 	cfg.suppressSummary = true // the script, not the runner, owns output
 	cfg.progressWriter = os.Stderr
 	cfg.kind = kind
+	cfg.sessionKind = string(eventing.KindScript)
 	cfg.claudeBin = r.claudeBin
 	return cfg
 }

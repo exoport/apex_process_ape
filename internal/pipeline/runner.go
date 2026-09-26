@@ -54,6 +54,12 @@ type RunOptions struct {
 	// process-wide default applies.
 	EffortTable *effort.Defaults
 
+	// SessionKind is the command that owns this run — pipeline, task,
+	// change or script — stamped into every stage's session as
+	// APE_SESSION=<kind>/<run-id> (repl.EnvApeSession). Empty means
+	// "pipeline".
+	SessionKind string
+
 	// PrependFlags is inserted into every claude invocation after
 	// argv[0] and before --dangerously-skip-permissions. Used by
 	// web mode to attach --strict-mcp-config + --mcp-config + --settings

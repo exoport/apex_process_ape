@@ -97,6 +97,9 @@ Exit codes: 0 success · 1 the script returned an error, panicked, or a
 launched run failed · 2 usage or read error (no file, bad flags).`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := refuseNested("ape script"); err != nil {
+				return err
+			}
 			format := output.Format(outputFormat)
 			if format != output.FormatHuman && format != output.FormatJSON && format != output.FormatYAML {
 				fmt.Fprintf(os.Stderr, "Error: --output-format must be human, json, or yaml, got %q\n", outputFormat)

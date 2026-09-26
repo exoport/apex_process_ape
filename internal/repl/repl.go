@@ -230,6 +230,22 @@ func scrubTmuxEnv(env []string) []string {
 // prefix) so the value re-injected here is authoritative — no duplicate key.
 const EnvClaudeEffortLevel = "CLAUDE_CODE_EFFORT_LEVEL"
 
+// EnvApeSession marks a claude session ape spawned: `<kind>/<run-id>`, kind
+// one of pipeline, task, change, script, prompt, chat. Claude passes its
+// environment to every tool subprocess, so a skill that shells out to
+// `ape task` inside the session carries it, and the session-starting
+// commands refuse to run under it: ape never runs inside an ape session.
+// The framework's orchestrator HALTs on activation when it is set.
+//
+// Deliberately NOT set by the migration shell runner or the service
+// daemon — neither spawns a claude session.
+const EnvApeSession = "APE_SESSION"
+
+// SessionMarkerEnv returns the EnvApeSession entry for a spawned session.
+func SessionMarkerEnv(kind, runID string) []string {
+	return []string{EnvApeSession + "=" + kind + "/" + runID}
+}
+
 // EffortEnv returns the CLAUDE_CODE_EFFORT_LEVEL entry for an effort, or
 // nothing for "". It no longer substitutes a default: whether a spawn gets
 // a process-wide level at all is effort.Decide's call, and a hidden default

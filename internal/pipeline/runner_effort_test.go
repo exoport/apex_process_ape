@@ -141,3 +141,12 @@ func TestSpec_EffortHelpers(t *testing.T) {
 	require.Contains(t, errs[0], `stage "b"`)
 	require.Contains(t, errs[0], "xtreme")
 }
+
+// Every stage's session carries APE_SESSION=<kind>/<run-id>, so an ape a
+// skill shells out to inside it knows it is nested and refuses.
+func TestRun_StampsTheSessionMarker(t *testing.T) {
+	m, dump := runEffortSpec(t, "name: fx\nstages:\n  only:\n    chain:\n      - skill: apex-fake\n", nil)
+	data, err := os.ReadFile(dump)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "APE_SESSION=pipeline/"+m.RunID+"\n")
+}

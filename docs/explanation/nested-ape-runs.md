@@ -1,83 +1,34 @@
-# Running `ape` from inside a session `ape` started
+# Why `ape` never runs inside a session `ape` started
 
-A conducting session — one `ape prompt` or `ape task` spawned — sometimes needs to run `ape` itself. An orchestrator persona dispatching `ape task`, a maintenance conductor running `ape change`: the outer run drives a `claude`, and that `claude` shells out to a binary that drives another one. Hooks inside hooks.
+From v0.2.0, a session-starting command (`ape pipeline`, `ape task`, `ape change`, `ape prompt`, `ape chat` and `ape script`) refuses with exit 2 when it finds itself inside a `claude` session that ape spawned. `ape prompt --agent apex-orchestrator` is refused outright. Project-data commands (`ape story`, `ape sprint`, `ape config`, `ape registry` and the rest) are unaffected: skills run them inside sessions all the time, and they start nothing.
 
-This works, and it is designed for rather than tolerated. What constrains it is not the nesting at all — it is the **outer** run's lifecycle.
+Up to v0.1.x this nesting was supported by design. The orchestrator persona ran as an `ape prompt` session and dispatched `ape task`, `ape pipeline` and `ape change` from inside it. This page records why that path was closed, and what replaced it.
 
-> Most of this is read from the implementation. Two parts have been measured live against claude 2.1.278 and are marked **measured**; the rest, in particular "an inner run's hook events stay in the inner run's file", has not been — two live bridges at once is still untested. The four mechanisms are each checkable in isolation, so a contradicting measurement identifies which one to fix.
+## How ape knows
 
-## The four mechanisms that make it work
-
-### 1. The child gets its own session, because ape takes the parent's markers away
-
-`repl.ScrubClaudeCodeEnv` strips `CLAUDECODE`, `CLAUDE_EFFORT` and the whole `CLAUDE_CODE_*` family from the environment of every `claude` ape spawns.
-
-That family is not decoration. It carries the parent's session id **and the marker that suppresses transcript persistence** — a `claude` launched with it inherited writes no transcript of its own. Since the transcript is what ape scans for telemetry, an unscrubbed nested session would run, work, and report nothing.
-
-The scrub exists because ape is *usually* run from inside a Claude Code session already: a person typing `ape pipeline` into their own session is the same shape as a conducting session dispatching one. Authentication (`ANTHROPIC_*`) passes through untouched.
-
-### 2. Hooks cannot cross runs, because the port is not inherited
-
-Each run writes its own `--settings` file, and the hook command in it is literal:
+Every `claude` session ape spawns carries `APE_SESSION=<kind>/<run-id>`, where `<kind>` is `pipeline`, `task`, `change`, `script`, `prompt` or `chat`, and `<run-id>` is that run's id. Claude Code hands its environment to every tool subprocess, so an `ape task` a skill types into the session's Bash tool sees the marker, refuses, and names the owning run:
 
 ```
-env APE_BRIDGE_PORT=<port> <ape-bin> notify --event <event>
+Error: ape task refused: this process is inside the ape session prompt/20260926-120638-929faf6 (APE_SESSION is set), and ape never runs inside an ape-spawned session. Start it from a plain shell or a plain Claude Code session
 ```
 
-The port is baked into the command string, and `env(1)` sets it at hook time, so it wins over anything in the environment. An inner run's hooks reach the inner bridge; they have no way to reach the outer one. This is structural, not a coincidence of port allocation.
+That was measured live: an `ape prompt` session's Bash tool printed its own marker, `ape task` exited 2 with the message above, and `ape config effort` ran normally in the same shell.
 
-### 3. Telemetry cannot cross runs, because a run only reads the transcript its own hooks named
+The marker is not set by the framework-migration shell runner or by the service daemon, because neither spawns a `claude` session. There is no variable that disables the refusal. A switch a session can flip is a switch a session will flip.
 
-The driver learns its transcript path from the `transcript_path` field of its own bridge's `UserPromptSubmit` payload. A run can only read the transcript its own `claude` reported.
+The framework's orchestrator skill checks the same variable and HALTs on activation when it is set.
 
-The two sessions are unrelated top-level sessions — not parent and sub-agent — so the outer run's `sessions[]` never contains the inner's. `ape costs` counts both runs, once each, which is correct: two runs, two token bills.
+## Why nesting was closed
 
-### 4. The PATH pin is transitive — **measured**
+Nothing about nesting was broken at the mechanism level. The child got its own transcript, because ape scrubs the parent's `CLAUDE_CODE_*` markers. Hooks could not cross runs, because each run's hook command bakes in its own bridge port. The PATH pin was transitive. What made it fragile was the **outer** run, which could not see the inner one:
 
-`selfpath.Pin` resolves `os.Executable()` through symlinks and prepends a directory whose only entry is `ape` pointing at the real binary. The inner `ape` is launched through that shadow, so its own `os.Executable()` is the same file, and its own pin points there too. At any depth, `ape` inside the session is the binary that started it.
+- **A foreground call cannot work.** Claude Code's Bash tool times out after about two minutes by default, and ten at most. A dispatch routinely runs longer, and while it blocks, the outer run's idle anchor sees no hook events, no transcript growth and no PTY bytes, so it eventually stops itself.
+- **A background shell only worked because of polling.** Every poll was a tool call, and so the outer run's proof of life. Replace the polling with one long sleep and the outer run was killed, with no error naming the cause. On claude 2.1.278 a poll is a `Read` of `…/tasks/<id>.output`, not `BashOutput`, so anything keyed on the tool name misses it.
+- **Yielding the turn tore the outer run down.** ape derives completion from the `Stop` hook. A conductor that started an inner run in the background and ended its turn finished its own run, and orphaned the inner one.
+- **Two runs raced on one working tree.** The outer run's own dispatches were the likeliest source of the uncommitted work the inner run's pre-flight then refused.
 
-Measured: a session spawned by a locally-built `ape 0.0.73-0.20260919230835-cd654022793a` ran `ape version` and got that string back, on a machine whose installed `ape` is `0.0.56`. This is the pin doing the job it exists for — `ape` 0.0.67 once spawned a session that reported 0.0.56.
+Each of these needed a conductor that behaved exactly right, with the failure silent when it did not. One level of ape removes all four.
 
-## What actually constrains nesting
+## What replaces it
 
-### A foreground call cannot work
-
-Claude Code's Bash tool has its own timeout — roughly two minutes by default, ten at the most. A lane run or a dispatch is routinely longer, so the shell dies with the inner run still going.
-
-Even without that, the outer run would time out. The idle anchor resets on a hook event from *this run's* bridge, on *this run's* transcript growing, and on PTY bytes where a probe is installed. A blocked foreground call produces none of them, so the outer run sees silence for the inner run's whole duration and eventually stops itself.
-
-### A background shell, polled, is the shape that works
-
-Start the inner run in a background shell and poll it.
-
-The reason polling works is worth stating, because it reads like a workaround and is not one: **every poll is a tool call**. It fires `PreToolUse` and `PostToolUse` on the outer bridge and grows the outer transcript. The act of checking whether the inner run has finished is the act that proves the outer run is still working. Replace the polling with something tidier — a single long sleep, a blocking wait — and the outer run goes silent and is killed, with no error that names the cause.
-
-**Measured, and the shape is not what the name suggests.** One unattended `ape prompt` session on claude 2.1.278 launched a background shell and polled it until it finished. Its run directory's `hook-events.jsonl` holds all 28 tool events: the launch as `Bash` with `tool_input.run_in_background: true`, and thirteen polls 1.4–3.2 s apart. But the polls' `tool_name` is **`Read`**, not `BashOutput` — that version implements "check the background shell" as a read of the shell's output file:
-
-```json
-{"file_path": "<claude-tmp>/<session-uuid>/tasks/bz14rrwvv.output"}
-```
-
-Anything that reasons about polling from the hook stream has to key on the PATH SHAPE — a file ending `.output` whose parent directory is `tasks/` — rather than on the tool name. Two consequences for a reader of these events: a check for `BashOutput` finds nothing while the session polls busily, and a check that counts `Read` calls as file access sees thirteen reads the session never asked for. Treat the name as version-dependent; one version has been measured.
-
-ape also sets `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP` on every spawn, because Claude Code otherwise kills a running background shell on a memory-pressure event. An unattended run cannot see that happen. With the variable set, the shell holding the inner run survives.
-
-### Never yield the turn with an inner run outstanding
-
-ape derives completion from the turn's `Stop` hook. A conductor that starts an inner run in the background and then ends its turn tears down **its own** run — the outer one — while the inner keeps going, orphaned. This is the same rule that applies to an outstanding sub-agent, for the same reason. See [Why a `Stop` hook is not proof a step finished](step-completion-gates.md).
-
-### One `ape` at a time per project
-
-Two concurrent runs race on the working tree, and the second one's pre-flight reads the first one's edits as dirt. Outside nesting this is tidiness; with nesting it is load-bearing, because the outer run's own dispatches are the likeliest source of uncommitted work.
-
-## Where the run artifacts land
-
-Separate by construction — the outer and inner runs write to different roots under `{output_folder}/ape/`:
-
-| Run | Directory |
-| --- | --- |
-| outer `ape prompt` | `prompts/<id>/` |
-| inner `ape change` | `changes/<id>/`, and its dispatch under `tasks/<skill>/<run-id>/` |
-| inner `ape task` | `tasks/<skill>/<run-id>/` |
-
-Nothing needs to deduplicate them: each run's manifest describes its own session.
+The orchestrator's autonomous mode runs in a **plain** Claude Code session: type `/apex-orchestrator --autonomous -- <request>` into `claude` directly. The orchestrator then runs `ape task`, `ape pipeline` and `ape change`, and each of those is the only ape in its process tree. Each marks its own session, writes its own manifest under `{output_folder}/ape/`, and is governed by its own lifecycle, while the plain session around it has no ape lifecycle to trip over.

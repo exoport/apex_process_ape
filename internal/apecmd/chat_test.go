@@ -24,7 +24,7 @@ func TestChatSpawnEnv_ScrubsNestingMarkersAndKeepsTmux(t *testing.T) {
 		"TMUX_PANE=%7",
 		"HOME=/h",
 		"PATH=/usr/bin",
-	}, "")
+	}, "", "fx")
 	defer unpin()
 	require.Empty(t, notice)
 
@@ -45,7 +45,7 @@ func TestChatSpawnEnv_ScrubsNestingMarkersAndKeepsTmux(t *testing.T) {
 // TestChatSpawnEnv_PinsThisBinaryAsApe: a skill run inside `ape chat`
 // shells out to `ape` exactly as one inside a dispatch does.
 func TestChatSpawnEnv_PinsThisBinaryAsApe(t *testing.T) {
-	env, unpin, notice := chatSpawnEnv([]string{"PATH=/stale/bin:/usr/bin"}, "")
+	env, unpin, notice := chatSpawnEnv([]string{"PATH=/stale/bin:/usr/bin"}, "", "fx")
 	defer unpin()
 	require.Empty(t, notice)
 
@@ -69,7 +69,7 @@ func TestChatSpawnEnv_PinsThisBinaryAsApe(t *testing.T) {
 // point. Injected before the scrub, the value it sets is the value the
 // scrub then removes.
 func TestChatSpawnEnv_EffortIsInjectedAfterTheScrub(t *testing.T) {
-	env, unpin, _ := chatSpawnEnv([]string{"CLAUDE_CODE_EFFORT_LEVEL=low"}, "xhigh")
+	env, unpin, _ := chatSpawnEnv([]string{"CLAUDE_CODE_EFFORT_LEVEL=low"}, "xhigh", "fx")
 	defer unpin()
 
 	var seen []string
@@ -85,7 +85,7 @@ func TestChatSpawnEnv_EffortIsInjectedAfterTheScrub(t *testing.T) {
 // TestChatSpawnEnv_NoEffortKeepsClaudesNative is the interactive
 // default, and the one thing chat does differently from task/pipeline.
 func TestChatSpawnEnv_NoEffortKeepsClaudesNative(t *testing.T) {
-	env, unpin, _ := chatSpawnEnv([]string{"HOME=/h"}, "")
+	env, unpin, _ := chatSpawnEnv([]string{"HOME=/h"}, "", "fx")
 	defer unpin()
 	require.NotContains(t, strings.Join(env, "\n"), repl.EnvClaudeEffortLevel+"=")
 }
@@ -99,7 +99,7 @@ func TestChatSpawnEnv_DisablesTheBackgroundShellReap(t *testing.T) {
 	env, unpin, notice := chatSpawnEnv([]string{
 		"HOME=/h",
 		repl.EnvDisableBGShellReap + "=inherited-and-scrubbed",
-	}, "")
+	}, "", "fx")
 	defer unpin()
 	require.Empty(t, notice)
 

@@ -35,6 +35,18 @@
   - **Conflicts.** A later step's `effort:` is reported before the run and by
     `ape doctor`, like a model conflict. `ape chat` keeps claude's native
     effort, as before.
+- **feat(session): ape never runs inside a session ape started.** Every
+  spawned `claude` session carries `APE_SESSION=<kind>/<run-id>`.
+  `ape pipeline`, `task`, `change` (except `--queue`), `prompt`, `chat` and
+  `script` refuse with exit 2 under it, naming the owning run. Project-data
+  commands are unaffected. `ape prompt --agent apex-orchestrator` is refused
+  outright: the orchestrator's autonomous mode now runs in a plain Claude
+  Code session (`/apex-orchestrator --autonomous -- <request>`). This
+  reverses the nesting v0.1.x supported, for the reasons in
+  `docs/explanation/nested-ape-runs.md`. Measured live: inside an
+  `ape prompt` session, `ape task` refused and named the run, and
+  `ape config effort` still ran.
+
 - **fix(release): the release archives extract, and ship
   `deploy/policy.yaml`.** Since 2026-07-10 (the first aped release), every
   archive has carried a FILE named `deploy` next to the `deploy/...` entries.

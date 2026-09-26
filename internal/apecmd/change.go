@@ -136,6 +136,13 @@ goals committed and the rest saved as residue.`,
 			if len(args) == 1 {
 				positional = args[0]
 			}
+			// --queue writes a request down and starts nothing, so a skill
+			// may still queue work from inside a session.
+			if !queueFlag {
+				if err := refuseNested("ape change"); err != nil {
+					return err
+				}
+			}
 			if queueFlag && drainFlag {
 				return usageErr(errors.New("--queue writes a request down and --drain runs the " +
 					"ones already written: pass one"))
@@ -486,6 +493,7 @@ func (r *changeRun) taskOptions(o changeOptions) taskOptions {
 		// dispatch, and the non-committer assertion is what checks that
 		// the skill kept its hands off git.
 		skillNoCommit: true,
+		sessionKind:   "change",
 		projectRoot:   r.cfg.Root,
 		quiet:         o.quiet,
 		jsonMode:      o.jsonMode,

@@ -73,6 +73,9 @@ func newPipelineCmd() *cobra.Command {
 			return pipeline.AvailablePipelines(projectRoot), cobra.ShellCompDirectiveNoFileComp
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := refuseNested("ape pipeline"); err != nil {
+				return err
+			}
 			warnUnknownOutputStyleFlag(cmd, outputStyleFlag)
 			projectRoot := cwdFlag
 			if projectRoot == "" {
@@ -354,6 +357,11 @@ type runConfig struct {
 	// kind is the <kind> subject segment for events (pipeline/task/…).
 	// Empty defaults to pipeline in newEventPublisher.
 	kind eventing.Kind
+	// sessionKind names the owning command in the APE_SESSION marker
+	// stamped on every spawned session. Empty means kind, which is right
+	// for pipeline and task; change and script dispatch through the task
+	// runner and set their own.
+	sessionKind string
 
 	// claudeBin overrides the claude executable the interactive runner
 	// spawns. Empty defaults to "claude" (pipeline.RunOptions default). A

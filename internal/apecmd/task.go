@@ -123,6 +123,9 @@ ownership (the run itself may have succeeded).`,
   ape task apex-create-prd --agent apex-agent-pm --output-format json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := refuseNested("ape task"); err != nil {
+				return err
+			}
 			jsonMode := jsonAlias || outputFormat == "json"
 			if !jsonMode && outputFormat != "human" {
 				fmt.Fprintf(os.Stderr, "Error: --output-format must be human or json, got %q\n", outputFormat)
@@ -224,14 +227,17 @@ ownership (the run itself may have succeeded).`,
 
 // taskOptions bundles the resolved `ape task` invocation parameters.
 type taskOptions struct {
-	skill                 string
-	agent                 string
-	model                 string
-	effort                string
-	args                  string
-	prompt                string
-	promptFlagName        string
-	skillNoCommit         bool
+	skill          string
+	agent          string
+	model          string
+	effort         string
+	args           string
+	prompt         string
+	promptFlagName string
+	skillNoCommit  bool
+	// sessionKind overrides the APE_SESSION kind for a caller that
+	// dispatches through the task runner: `ape change`.
+	sessionKind           string
 	taskCommit            *pipeline.CommitDirective
 	allowDirty            bool
 	idleTimeout           time.Duration
@@ -473,6 +479,7 @@ func dispatchTask(ctx context.Context, o taskOptions) (taskRun, error) {
 		uploadTranscripts: o.uploadTranscripts,
 		transcriptStore:   o.transcriptStore,
 		kind:              eventing.KindTask,
+		sessionKind:       o.sessionKind,
 	}
 	if o.jsonMode {
 		// stdout carries only the envelope; progress goes to stderr.
