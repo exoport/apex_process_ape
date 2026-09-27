@@ -279,7 +279,7 @@ CI runs build + test + lint + govulncheck on every push to `main` and every pull
 make check-harness
 ```
 
-Four gates, each reading what the installed Claude Code is *actually* doing: `check-prices` (model ids in local transcripts), `check-output-styles` (the built-in output-style names ape folds declarations onto), `check-hooks` (the hook fields ape's step-completion gates read, judged against a runlog the gate seeds itself with one short unattended session), and `check-claude` (a live PTY session — ready signals, spawn flags, effort level, model aliases, transcript persistence).
+Six gates, each reading what the installed Claude Code is *actually* doing: `check-prices` (model ids in local transcripts), `check-output-styles` (the built-in output-style names ape folds declarations onto), `check-hooks` (the hook fields ape's step-completion gates read, judged against a runlog the gate seeds itself with one short unattended session), `check-claude` (a live PTY session — ready signals, spawn flags, effort level, model aliases, foreground sub-agents staying foreground, transcript persistence), `check-claude-surface` (the tool list, the binary's `CLAUDE_*` variables and unread CHANGELOG entries, diffed against a reviewed baseline), and `check-task-subagents` (one `ape task` run of a skill that fans out to two foreground sub-agents, as the framework's batch skills do).
 
 None of them run in GitHub CI, which has no `claude`, no auth and no network. `check-prices` reports "not verified" rather than green when it finds no evidence, so **read the output, not just the exit code**.
 
