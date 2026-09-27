@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.2.1 (2026-09-27)
 
 - **The orchestrator has no unattended mode.** The framework decided that
   `apex-orchestrator` always runs with its operator present, in a Claude
