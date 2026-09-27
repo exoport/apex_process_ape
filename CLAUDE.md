@@ -89,7 +89,11 @@ make check-claude-surface # LOCAL ONLY: diff the installed claude's tool list an
                    #   reviewed baseline, and list unread CHANGELOG entries about agents, background
                    #   work, hooks, tools and settings; fails until reviewed
 make update-claude-surface # record that review (rewrites internal/claudesurface/testdata/claude-surface.json)
-make check-harness # check-prices + check-output-styles + check-hooks + check-claude + check-claude-surface — the whole
+make check-task-subagents # LOCAL ONLY: `ape task` on a stand-in skill that fans out to two foreground
+                   #   sub-agents, as the framework's batch skills do — results inline, concurrent,
+                   #   APE_SESSION/fork gate/ape pin seen inside, manifest and hooks account for both
+make check-harness # check-prices + check-output-styles + check-hooks + check-claude + check-claude-surface
+                   #   + check-task-subagents — the whole
                    #   "is the local Claude Code still compatible?" sweep
 make check-framework # LOCAL ONLY: does ape still satisfy the APEX framework?
                    #   Set BOTH: APEX_FRAMEWORK_REPO=<checkout> and APEX_PROJECT=<an

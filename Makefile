@@ -368,8 +368,21 @@ update-claude-surface:  ## Record a review: rewrite the Claude Code surface base
 	APE_CLAUDE_LIVE=1 APE_CLAUDE_SURFACE_UPDATE=1 go test ./internal/claudesurface/ \
 	  -run TestLive_ClaudeSurface -v -count=1 -timeout 5m
 
+.PHONY: check-task-subagents
+check-task-subagents:  ## Run a framework-shaped skill that fans out to sub-agents through `ape task`, end to end.
+	@# A stand-in skill dispatches two foreground sub-agents in one message,
+	@# as the framework's batch skills do. Asserts the run completes, both
+	@# results come back inline and are acted on, the two run concurrently,
+	@# each sub-agent sees this run's APE_SESSION, the fork gate off and this
+	@# ape, and the manifest and hook log account for both.
+	@#
+	@# LOCAL ONLY: needs claude, auth and network. One short Sonnet session
+	@# with two Haiku sub-agents, under a minute.
+	APE_CLAUDE_LIVE=1 go test ./internal/e2e/ \
+	  -run TestLive_TaskSubagents -v -count=1 -timeout 25m
+
 .PHONY: check-harness
-check-harness: check-prices check-output-styles check-hooks check-claude check-claude-surface ## All local-only gates against the installed Claude Code (prices + output styles + hooks + PTY/model + surface).
+check-harness: check-prices check-output-styles check-hooks check-claude check-claude-surface check-task-subagents ## All local-only gates against the installed Claude Code (prices + output styles + hooks + PTY/model + surface + sub-agents).
 	@echo
 	@echo "Harness sweep complete against Claude Code $$(claude --version 2>/dev/null || echo 'unknown')."
 	@echo "Read the output above: any gate that reported a SKIP was NOT verified — it found no evidence to judge."

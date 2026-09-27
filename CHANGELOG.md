@@ -49,6 +49,15 @@
   removal (2.1.277) and interactive sessions running every agent in the
   background (2.1.232). Verified to fail on a 2.1.276 baseline that still
   listed `TaskOutput`, naming the 2.1.277 entry. Part of `check-harness`.
+- **test(harness): `make check-task-subagents`, a framework-shaped skill
+  end to end.** `ape task` runs a stand-in skill that dispatches two
+  foreground sub-agents in one message, as the framework's batch skills do.
+  The gate checks that the run completes, that both results come back
+  inline and are acted on, and that the two run concurrently. It also checks
+  that each sub-agent sees this run's `APE_SESSION`, the fork gate off and
+  this `ape`, and that the manifest and hook log account for both. Verified
+  to fail when the project's settings turn Claude Code's forced-async
+  default back on. Part of `check-harness`.
 
 ## v0.2.0 (2026-09-26)
 
