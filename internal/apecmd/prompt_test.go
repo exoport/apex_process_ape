@@ -128,9 +128,9 @@ func TestPromptRecordAndRollup(t *testing.T) {
 	require.InDelta(t, 1.25, r.Prompts.Totals.CostUSD, 1e-9)
 }
 
-// The conductor never pins a model, so its record went through the
-// launch-time fallback: the framework eval saw `effort: high` on a session
-// whose every turn ran opus at medium. The record now names the row of the
+// A session with no --model had its record go through the launch-time
+// fallback: the framework eval saw `effort: high` on a session whose every
+// turn ran opus at medium. The record now names the row of the
 // model the main session ran on; a sub-agent's model does not count.
 func TestPromptRecord_UnpinnedTableRecordsTheObservedRow(t *testing.T) {
 	runDir := t.TempDir()

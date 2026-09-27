@@ -74,10 +74,6 @@ type promptOptions struct {
 	ignoreProjectSettings bool
 	outputStyle           string
 	format                output.Format
-	// conduct hosts the orchestrator for the eval (`ape eval conduct`): no
-	// orchestrator refusal, NO APE_SESSION marker, and the driver's conduct
-	// completion rule. Never set by `ape prompt`.
-	conduct bool
 }
 
 func newPromptCmd() *cobra.Command {
@@ -255,8 +251,6 @@ type promptResult struct {
 	PerModel        map[string]cost.Totals `json:"per_model,omitempty" yaml:"per_model,omitempty"`
 	TranscriptPaths []string               `json:"transcript_paths"    yaml:"transcript_paths"`
 	SessionID       string                 `json:"session_id"          yaml:"session_id"`
-	// Host is `eval-conduct` for `ape eval conduct`, absent for `ape prompt`.
-	Host string `json:"host,omitempty" yaml:"host,omitempty"`
 
 	// Unexported carry-fields for the CLI summary printer; never serialized.
 	telemetry *sessiondriver.Telemetry
@@ -271,10 +265,6 @@ type promptResult struct {
 // printing.
 func runPrompt(ctx context.Context, o promptOptions) error {
 	res, exitCode, outcomeErr := runPromptCore(ctx, o)
-	if o.conduct {
-		exitCode = conductExitCode(res.Status, exitCode)
-		res.Host = conductHost
-	}
 
 	if exitCode == ExitUsage || exitCode == ExitREPLNotReady {
 		// Preflight / never-ready: no result envelope, just the error + exit.
@@ -320,10 +310,8 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 
 	// Preflight (exit 2): agent must resolve; handoff/prompt derivation
 	// must succeed. Detected before any claude process spawns.
-	if !o.conduct {
-		if err := refuseOrchestrator(o.agent); err != nil {
-			return promptResult{}, ExitUsage, err
-		}
+	if err := refuseOrchestrator(o.agent); err != nil {
+		return promptResult{}, ExitUsage, err
 	}
 	if o.agent != "" {
 		if _, _, found := framework.ResolveSkill(o.agent, o.projectRoot); !found {
@@ -366,7 +354,6 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 
 	driver := sessiondriver.NewDriver(getRunLog, o.idleTimeout)
 	driver.SetMaxDuration(o.maxDuration)
-	driver.SetConductMode(o.conduct)
 
 	rt := orchestrator.NewBridgeRuntime(orchestrator.BridgeRuntimeOptions{
 		OnHook:  driver.FeedHook,
@@ -418,7 +405,7 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 
 	sessionName := fmt.Sprintf("ape-prompt-%d", os.Getpid())
 	_ = repl.KillSession(runCtx, sessionName)
-	if err := repl.NewSessionWithEnv(runCtx, sessionName, o.projectRoot, argv, promptSpawnEnv(effortPlan, o.conduct, promptID)); err != nil {
+	if err := repl.NewSessionWithEnv(runCtx, sessionName, o.projectRoot, argv, promptSpawnEnv(effortPlan, promptID)); err != nil {
 		return promptResult{}, ExitRunFailed, fmt.Errorf("ape prompt: spawn claude: %w", err)
 	}
 	defer func() { _ = repl.KillSession(context.Background(), sessionName) }() //nolint:contextcheck // cleanup-on-exit
@@ -535,18 +522,11 @@ func perModelTotals(tele *sessiondriver.Telemetry) map[string]cost.Totals {
 	return out
 }
 
-// writePromptRecord persists prompt.yaml. Best-effort.
 // promptSpawnEnv is the extra environment for a prompt-path session: the
-// effort plan's entries, and the APE_SESSION marker — except on the
-// conductor, the one session ape spawns WITHOUT it. The conductor
-// dispatches `ape change` / `ape task`, each of which marks its own
-// session, and the orchestrator HALTs on activation if it sees a marker.
-func promptSpawnEnv(plan effort.Plan, conduct bool, promptID string) []string {
-	env := plan.EnvEntries()
-	if !conduct {
-		env = append(env, repl.SessionMarkerEnv("prompt", promptID)...)
-	}
-	return env
+// effort plan's entries, and the APE_SESSION marker every session ape
+// spawns carries.
+func promptSpawnEnv(plan effort.Plan, promptID string) []string {
+	return append(plan.EnvEntries(), repl.SessionMarkerEnv("prompt", promptID)...)
 }
 
 // promptRecordExtras carries what the record needs beyond the options.
@@ -556,6 +536,7 @@ type promptRecordExtras struct {
 	effort     effort.Plan
 }
 
+// writePromptRecord persists prompt.yaml. Best-effort.
 func writePromptRecord(runDir, promptID string, o promptOptions, x promptRecordExtras, status string, start time.Time, tele *sessiondriver.Telemetry, perModel map[string]cost.Totals) {
 	meta := runlog.PromptMeta{
 		PromptID:  promptID,
@@ -587,10 +568,6 @@ func writePromptRecord(runDir, promptID string, o promptOptions, x promptRecordE
 				NumTurns:            t.NumTurns,
 			}
 		}
-	}
-	if o.conduct {
-		meta.Host = conductHost
-		_ = runlog.WriteConductManifest(runDir, meta)
 	}
 	_ = runlog.WritePromptYAML(runDir, meta)
 }
@@ -691,4 +668,4 @@ func promptEffortPlan(o promptOptions) (effort.Plan, error) {
 
 const orchestratorRefusal = "ape prompt --agent apex-orchestrator is refused: the orchestrator starts ape runs, " +
 	"and ape never runs inside an ape-spawned session. Run it in a plain Claude Code session instead: " +
-	"type `/apex-orchestrator --autonomous -- <request>` there"
+	"start `claude` from a plain shell and run `/apex-orchestrator <request>` there"

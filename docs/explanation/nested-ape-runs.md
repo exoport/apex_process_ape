@@ -31,14 +31,6 @@ Each of these needed a conductor that behaved exactly right, with the failure si
 
 ## What replaces it
 
-The orchestrator's autonomous mode runs in a **plain** Claude Code session: type `/apex-orchestrator --autonomous -- <request>` into `claude` directly. The orchestrator then runs `ape task`, `ape pipeline` and `ape change`, and each of those is the only ape in its process tree. Each marks its own session, writes its own manifest under `{output_folder}/ape/`, and is governed by its own lifecycle, while the plain session around it has no ape lifecycle to trip over.
+The orchestrator runs in a **plain** Claude Code session, with the operator present: start `claude` from a plain shell and run `/apex-orchestrator <request>`. It has no unattended mode of its own. The orchestrator then runs `ape task`, `ape pipeline` and `ape change`, and each of those is the only ape in its process tree. Each marks its own session, writes its own manifest under `{output_folder}/ape/`, and is governed by its own lifecycle, while the plain session around it has no ape lifecycle to trip over. The skills those commands dispatch still run unattended, because ape appends `--autonomous` to every dispatch.
 
-## The one exception: the eval's conductor host
-
-The framework eval measures the orchestrator persona itself: whether it routes a defect to the maintenance lane, and whether it halts on an ambiguous scope. That needs ape to host the orchestrator, and `ape prompt --agent apex-orchestrator` is refused. So there is one hidden, eval-only verb, `ape eval conduct`, shaped so it cannot become a second front door:
-
-- it is refused unless `APE_EVAL_HOST=1`, and refused inside an ape session (exit 22 and 23), so it can never nest;
-- it types `/apex-orchestrator --autonomous -- <request>` into a PTY session exactly as an operator would type it into a plain one, and that session is the only one ape spawns **without** `APE_SESSION`. The `ape change` or `ape task` the conductor dispatches is therefore the only ape inside it, and marks its own session. The orchestrator's HALT-on-marker check sees an empty variable, as it would in the plain session it stands in for;
-- it ends at the first `Stop` with **no background task outstanding**. The conductor backgrounds its dispatch and ends its turn to await it, and Claude Code resumes it with a `<task-notification>` turn when the task finishes. A `Stop` reporting background work is therefore a yield: the host keeps waiting, with the idle timer suspended, while `--max-duration` stays a hard ceiling from the start. This is the opposite of the step gate, which treats a background shell as benign.
-
-Measured live on claude 2.1.283 with a stand-in orchestrator skill. The conductor printed an empty `APE_SESSION`, started `ape task` in the background and ended its turn (`Stop`, `background_tasks: [shell running]`, a yield). It was resumed by the task notification, and its next `Stop` carried `background_tasks: []`, which ended the run with exit 0. The inner task ran to completion.
+v0.2.0 also shipped a hidden, eval-only host for the orchestrator, `ape eval conduct`. v0.2.1 removed it: the orchestrator no longer has an unattended mode for it to drive, and the eval retired the stages that used it.

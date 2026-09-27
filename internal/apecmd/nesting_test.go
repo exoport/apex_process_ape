@@ -76,7 +76,8 @@ func TestPrompt_RefusesTheOrchestratorAgent(t *testing.T) {
 	})
 	require.Equal(t, ExitUsage, code)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "/apex-orchestrator --autonomous -- <request>")
+	require.Contains(t, err.Error(), "/apex-orchestrator <request>")
+	require.NotContains(t, err.Error(), "--autonomous", "the orchestrator has no unattended mode")
 }
 
 func TestChatSpawnEnv_StampsTheSessionMarker(t *testing.T) {

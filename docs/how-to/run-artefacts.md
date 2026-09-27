@@ -163,8 +163,7 @@ unique on its own, so there is nothing to group by:
 correction. Read one with `ape costs prompt <id>`. Its `effort` and
 `effort_source` say what the session ran at and which rule set it. With no
 `--model` under the effort table, `effort` is the row of the model the main
-session actually ran on, not the table's fallback. `ape eval conduct` writes
-the same record to `prompt.yaml` and `manifest.json`.
+session actually ran on, not the table's fallback.
 
 ## Chat sessions
 

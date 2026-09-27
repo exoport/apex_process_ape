@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## Unreleased
+
+- **The orchestrator has no unattended mode.** The framework decided that
+  `apex-orchestrator` always runs with its operator present, in a Claude
+  Code session a person started, and conducts ape from outside. The skills
+  it dispatches still run unattended, because `ape task` and
+  `ape pipeline` append `--autonomous` to every dispatch, and
+  `ape prompt --agent <agent>` still delivers `/<agent> --autonomous -- …`
+  for every other persona.
+  - **`ape prompt --agent apex-orchestrator`** is still refused (exit 2).
+    Its message now says to start `claude` from a plain shell and run
+    `/apex-orchestrator <request>`, without `--autonomous`.
+  - **`ape eval conduct` is removed**, together with its driver mode
+    (a background shell as a yield, the idle timer suspended, a flat
+    max-duration) and the conductor record's `host:` and `manifest.json`.
+    It was a hidden, eval-only host that typed
+    `/apex-orchestrator --autonomous -- <request>`, and the eval has retired
+    the persona stages that used it. The `APE_SESSION` marker and every
+    nesting refusal are unchanged.
+
 ## v0.2.0 (2026-09-26)
 
 - **feat(effort): per-model effort defaults from the framework.** ape used

@@ -1,7 +1,6 @@
 package runlog
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"time"
@@ -41,9 +40,6 @@ type PromptMeta struct {
 	Agent     string    `json:"agent,omitempty"      yaml:"agent,omitempty"`
 	Model     string    `json:"model,omitempty"      yaml:"model,omitempty"`
 	SessionID string    `json:"session_id,omitempty" yaml:"session_id,omitempty"`
-	// Host names a non-default host of the session: `eval-conduct` for
-	// `ape eval conduct`. Empty for `ape prompt`.
-	Host string `json:"host,omitempty" yaml:"host,omitempty"`
 	// Effort and EffortSource are the session's effort and where it came
 	// from (internal/effort: flag, table or legacy-default). Under the
 	// table with no --model, Effort is the row of the model the main
@@ -57,19 +53,6 @@ type PromptMeta struct {
 	TokensOut      int                         `json:"tokens_output"             yaml:"tokens_output"`
 	NumTurns       int                         `json:"num_turns"                 yaml:"num_turns"`
 	PerModel       map[string]PromptModelUsage `json:"per_model,omitempty"       yaml:"per_model,omitempty"`
-}
-
-// WriteConductManifest emits manifest.json at <dir>/manifest.json — the
-// same record as prompt.yaml, for `ape eval conduct`'s harness, which
-// reads JSON.
-func WriteConductManifest(dir string, m PromptMeta) error {
-	m.StartedAt = m.StartedAt.UTC().Truncate(time.Second)
-	m.EndedAt = m.EndedAt.UTC().Truncate(time.Second)
-	bs, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, "manifest.json"), append(bs, '\n'), 0o644) //nolint:gosec // user-visible runlog metadata
 }
 
 // WritePromptYAML emits prompt.yaml at <dir>/prompt.yaml.
