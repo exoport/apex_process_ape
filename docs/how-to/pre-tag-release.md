@@ -58,7 +58,7 @@ make check-harness
 
 `ci-local` proves *ape* is internally consistent. It cannot prove ape still works, because ape's real dependency is not a library it pins — it is the `claude` binary on the machine, which auto-updates on a schedule ape does not control and makes no compatibility promise about its TUI, its flags, its hook payloads, or its transcript format.
 
-`check-harness` is the whole sweep — four gates that each read what the locally-installed Claude Code is *actually doing*:
+`check-harness` is the whole sweep — five gates that each read what the locally-installed Claude Code is *actually doing*:
 
 | Gate | Reads | Catches |
 | --- | --- | --- |
@@ -66,6 +66,7 @@ make check-harness
 | `check-output-styles` | the installed binary's own built-in style table | a built-in output style ape's table does not know. ape folds a built-in's case before writing `outputStyle`, so a stale table fails by *halves*: lowercase keeps working for the styles ape knows and silently stops for a newer one, after the working cases have taught people that case does not matter. Finding zero built-ins fails rather than skips — a probe that cannot look is not a pass |
 | `check-hooks` | a runlog it seeds itself | a hook field ape's step-completion gates read being renamed or dropped — the gate stops firing and ape resumes reporting success on runs that did nothing |
 | `check-claude` | a live PTY session | everything below |
+| `check-claude-surface` | the init event of one `claude -p` spawn, the installed binary, and Claude Code's public CHANGELOG | a change nobody knew to assert. It diffs the tool list and the binary's `CLAUDE_*` names against `internal/claudesurface/testdata/claude-surface.json`, and lists every CHANGELOG entry about agents, background work, hooks, tools or settings in the versions newer than the baseline's `reviewed_through`. It fails on any tool-list change, on a variable ape sets vanishing, and on unread entries, until someone reviews them and runs `make update-claude-surface`, a committed diff. Other env-var changes are listed, not failed: the scan picks up some adjacent-data noise. It would have flagged `TaskOutput`'s removal (2.1.277) and the forced-async Agent default (2.1.232): both were in the CHANGELOG, and nothing read it. Expect about 7 to 33 flagged entries per release |
 
 > **`check-output-styles` reads the binary, not a transcript.** The built-in style names are not observable from a session's output — an unresolvable name produces no error and no attachment — so the gate matches Claude Code's own style table inside the installed executable. If the probe pattern stops matching, that is a failure and not a skip: a gate verifying nothing must not print green.
 

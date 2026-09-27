@@ -36,6 +36,19 @@
   unavailable in ape's sessions. `make check-claude` gains
   `foreground_agent_sync`, one Sonnet turn with a Haiku sub-agent, verified
   to fail with the gate forced back on.
+- **test(harness): `make check-claude-surface`, for the change nobody knew
+  to assert.** A committed baseline
+  (`internal/claudesurface/testdata/claude-surface.json`) records the
+  installed Claude Code's tool list (from a `claude -p` init event), the
+  `CLAUDE_*` names in its binary, and the newest version whose public
+  CHANGELOG entries have been read. The gate fails on any tool-list change,
+  on a variable ape sets vanishing from the binary, and on unread CHANGELOG
+  entries about agents, background work, hooks, tools or settings, until
+  someone reviews them and runs `make update-claude-surface`. Both of this
+  release's Claude Code surprises were in the CHANGELOG: `TaskOutput`'s
+  removal (2.1.277) and interactive sessions running every agent in the
+  background (2.1.232). Verified to fail on a 2.1.276 baseline that still
+  listed `TaskOutput`, naming the 2.1.277 entry. Part of `check-harness`.
 
 ## v0.2.0 (2026-09-26)
 

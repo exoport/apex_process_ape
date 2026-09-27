@@ -348,8 +348,28 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 		echo "  the manifest is versioned, so a stale install is a stale gate."; \
 	fi
 
+.PHONY: check-claude-surface
+check-claude-surface:  ## Diff the installed Claude Code's tools, env vars and CHANGELOG against the reviewed baseline.
+	@# ape's other live gates assert couplings ape knows it has. This one is
+	@# for the change nobody knew to assert: a tool removed (TaskOutput,
+	@# 2.1.277), a variable ape sets no longer read, or a CHANGELOG entry about
+	@# agents, background work, hooks or settings that nobody has read. It
+	@# fails until someone reviews what moved and runs update-claude-surface,
+	@# which rewrites internal/claudesurface/testdata/claude-surface.json —
+	@# a committed diff, so the review is recorded.
+	@#
+	@# LOCAL ONLY: needs claude, auth and network (the public CHANGELOG).
+	@# One `claude -p` spawn, killed at its init event.
+	APE_CLAUDE_LIVE=1 go test ./internal/claudesurface/ \
+	  -run TestLive_ClaudeSurface -v -count=1 -timeout 5m
+
+.PHONY: update-claude-surface
+update-claude-surface:  ## Record a review: rewrite the Claude Code surface baseline from the installed claude.
+	APE_CLAUDE_LIVE=1 APE_CLAUDE_SURFACE_UPDATE=1 go test ./internal/claudesurface/ \
+	  -run TestLive_ClaudeSurface -v -count=1 -timeout 5m
+
 .PHONY: check-harness
-check-harness: check-prices check-output-styles check-hooks check-claude ## All local-only gates against the installed Claude Code (prices + output styles + hooks + PTY/model).
+check-harness: check-prices check-output-styles check-hooks check-claude check-claude-surface ## All local-only gates against the installed Claude Code (prices + output styles + hooks + PTY/model + surface).
 	@echo
 	@echo "Harness sweep complete against Claude Code $$(claude --version 2>/dev/null || echo 'unknown')."
 	@echo "Read the output above: any gate that reported a SKIP was NOT verified — it found no evidence to judge."

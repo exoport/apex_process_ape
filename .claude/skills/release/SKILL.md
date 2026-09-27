@@ -181,7 +181,7 @@ Run the whole sweep as one named gate:
 make check-harness
 ```
 
-That is `check-prices` + `check-hooks` + `check-claude`. ~60 s total. Spends a few cents (two short sessions — the PTY gate's Haiku turn, and the seeded run `check-hooks` judges); everything else reads local artifacts or the rendered pane for free.
+That is `check-prices` + `check-output-styles` + `check-hooks` + `check-claude` + `check-claude-surface`. ~2–3 min total. Spends a few cents (two short sessions — the PTY gate's Haiku turn, and the seeded run `check-hooks` judges); everything else reads local artifacts or the rendered pane for free.
 
 > `check-prices` already ran in Phase 1h as a fast pre-flight. Re-running it here is deliberate and cheap: Phase 2b is the single gate that defines "the harness contract holds", and it must not be able to drift out of sync with what that phrase covers.
 
@@ -198,6 +198,7 @@ Stream output. Record the probed version from the `probing Claude Code at …` l
 | Skip | What it means | What to say |
 | --- | --- | --- |
 | `no Claude Code transcripts found` | no local model ids to price | "price coverage NOT verified" |
+| `check-claude-surface` fails with unread CHANGELOG entries | Claude Code shipped releases nobody reviewed | Not a skip, and not flaky. Read the listed entries, follow up anything that changes a contract ape or the skills rely on, then `make update-claude-surface` and commit the baseline. Ask the user before recording the review |
 | `claude not on PATH` | the live gates could not run at all | "PTY/model and hook contracts NOT verified (no local claude)" |
 
 `check-hooks` seeds its own corpus, so it does not skip for lack of a project. It has two distinct failure modes and they mean different things: a **broken seed** (`no <Event> events in the seeded run`) means the session did not provoke the event, so that field was not judged at all — fix the seed prompt, do not read it as a pass; **DRIFT** (`none carrying "<field>"`) means the field is genuinely gone and a completion gate has silently stopped firing.
