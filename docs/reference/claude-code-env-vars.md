@@ -178,9 +178,42 @@ reads the installed binary and fails if the variable has vanished, if the
 memory-pressure handler it guards has vanished, or if the two no longer sit
 together.
 
+### Foreground sub-agents stay foreground (`CLAUDE_CODE_FORK_SUBAGENT`)
+
+The third variable ape injects, set to `0` on every unattended spawn: `ape
+pipeline`, `ape task`, `ape change`, `ape script` and `ape prompt`. Not on
+`ape chat`, where a person drives the session and gets Claude Code's own
+default.
+
+In an interactive session, which every ape spawn is, Claude Code's
+fork-subagent gate is on by default, and while it is on the Agent tool
+launches **every** call async, including one that passes
+`run_in_background: false`. The caller gets "Async agent launched" instead of
+the sub-agent's result, and has to wait for a completion notice. Only
+coordinator mode, this variable set to false, or a non-interactive (`-p`)
+session turns the gate off. That was read in the 2.1.280 and 2.1.283 binaries
+and measured under `ape prompt` on 2.1.283: `run_in_background: false`
+returned `async_launched` without the variable and `completed`, with the
+result inline, with it.
+
+ape turns the gate off because the framework's skills dispatch foreground
+sub-agents and read their results, which is the Agent tool's documented
+contract. Under the forced-async default a framework eval run lost about 93
+minutes to a poll loop that held every completion notice back.
+
+What it does not change: a call that asks for the background, or that
+**omits** `run_in_background`, still launches async. Claude Code's `fork`
+sub-agent type is unavailable in ape's sessions.
+
+As with the reap switch, exporting the variable yourself does nothing under
+ape, because the scrub removes it. `make check-claude`'s
+`foreground_agent_sync` subtest spends one Sonnet turn with a Haiku sub-agent
+to assert that a `run_in_background: false` call comes back `completed` in a
+session ape spawned.
+
 ### `PATH`: `ape` inside a session is *this* ape
 
-A third variable is added rather than removed. Every spawned session gets a
+One more variable is added rather than removed. Every spawned session gets a
 one-entry directory at the front of `PATH` in which `ape` is the binary
 that spawned it, and it is removed when the session is reaped.
 

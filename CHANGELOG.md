@@ -19,6 +19,23 @@
     `/apex-orchestrator --autonomous -- <request>`, and the eval has retired
     the persona stages that used it. The `APE_SESSION` marker and every
     nesting refusal are unchanged.
+- **fix(repl): a foreground sub-agent runs in the foreground.** In an
+  interactive session, which every ape spawn is, Claude Code's
+  fork-subagent gate is on by default, and while it is on the Agent tool
+  launches every call async, including one that passes
+  `run_in_background: false`. A skill got "Async agent launched" instead of
+  its sub-agent's result, and had to wait for a completion notice; a
+  framework eval run lost about 93 minutes to a poll loop that held those
+  notices back. ape now sets `CLAUDE_CODE_FORK_SUBAGENT=0` on every
+  unattended spawn (`pipeline`, `task`, `change`, `script`, `prompt`; not
+  `chat`, where a person drives). Read in the 2.1.280 and 2.1.283 binaries,
+  and measured under `ape prompt` on 2.1.283: `run_in_background: false`
+  came back `async_launched` without it and `completed`, with the result
+  inline, with it. A call that asks for the background, or omits the
+  parameter, still launches async; Claude Code's `fork` sub-agent type is
+  unavailable in ape's sessions. `make check-claude` gains
+  `foreground_agent_sync`, one Sonnet turn with a Haiku sub-agent, verified
+  to fail with the gate forced back on.
 
 ## v0.2.0 (2026-09-26)
 

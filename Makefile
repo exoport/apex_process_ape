@@ -168,7 +168,7 @@ check-claude:  ## Spawn the LOCAL Claude Code and verify it still honours the PT
 	@# and NEVER part of `make test` or GitHub CI. Run it before a release, and
 	@# after any Claude Code upgrade.
 	@#
-	@# Costs one short Haiku turn; APE_CLAUDE_LIVE_TOKENS=0 skips that subtest.
+	@# Costs a few short turns (Haiku, Opus+Sonnet, Sonnet+Haiku); APE_CLAUDE_LIVE_TOKENS=0 skips them.
 	APE_CLAUDE_LIVE=1 go test ./internal/repl/ \
 	  -run TestLive_ClaudeCodeContract -v -count=1 -timeout 20m
 

@@ -300,6 +300,42 @@ func DisableBGShellReapEnv() []string {
 	return []string{EnvDisableBGShellReap + "=1"}
 }
 
+// EnvForkSubagent is Claude Code's fork-subagent gate, which ape sets to
+// "0" on every unattended spawn so an Agent call that asks for the
+// foreground gets it.
+//
+// What it controls, read in the 2.1.280 and 2.1.283 binaries: the Agent
+// tool launches a call async when `forceAsync` holds, WHATEVER the call's
+// run_in_background says, and `forceAsync` is the fork gate being anything
+// but "disabled". The gate is "disabled" in coordinator mode, when this
+// variable is false, or in a non-interactive (`-p`) session, and "default"
+// — on — otherwise. ape's sessions are interactive REPLs, so every Agent
+// call in them launched async: a skill passing run_in_background:false got
+// "Async agent launched" and had to wait for the completion notice.
+// Measured under `ape prompt` on 2.1.283: run_in_background:false returned
+// status async_launched without this, and completed with the result inline
+// with it.
+//
+// Why ape sets it: the framework's skills dispatch foreground sub-agents
+// and read their result, which is the tool's documented contract. Under the
+// forced-async default a skill had to poll for completion, and a framework
+// eval run lost about 93 minutes to a poll loop that held every completion
+// notice back until it returned. The trade: Claude Code's "fork" sub-agent
+// type is unavailable in ape's sessions. A call that asks for the
+// background still gets it.
+//
+// Not on `ape chat`: a person drives that session, and gets Claude Code's
+// own default. As with EnvDisableBGShellReap, the CLAUDE_CODE_ scrub is
+// what stops an operator's own value reaching the child, and extraEnv can
+// override it.
+const EnvForkSubagent = "CLAUDE_CODE_FORK_SUBAGENT"
+
+// SpawnDefaultEnv is what ape adds to every PTY spawn's environment, before
+// the caller's extraEnv: the background-shell reap switch and the fork gate.
+func SpawnDefaultEnv() []string {
+	return append(DisableBGShellReapEnv(), EnvForkSubagent+"=0")
+}
+
 // NewSession spawns argv attached to a PTY, registers it under name,
 // and starts background readers that accumulate pane output for
 // CapturePane / WaitForReady. argv[0] is the program; argv[1:] its
@@ -363,11 +399,11 @@ func NewSessionWithEnv(_ context.Context, name, dir string, argv, extraEnv []str
 	// floor unenforceable from the inside — silently, because the stale
 	// binary answers coherently rather than erroring.
 	env, unpin, notice := selfpath.Pin(scrubTmuxEnv(ScrubClaudeCodeEnv(os.Environ())))
-	// Then ape's own spawn defaults (EnvDisableBGShellReap), and extraEnv
+	// Then ape's own spawn defaults (SpawnDefaultEnv), and extraEnv
 	// last, so a caller's explicit value (the resolved
 	// CLAUDE_CODE_EFFORT_LEVEL, or a test asking for the reap back) stays
 	// authoritative over both the scrub and the defaults.
-	cmd.Env = append(append(append([]string{}, env...), DisableBGShellReapEnv()...), extraEnv...)
+	cmd.Env = append(append(append([]string{}, env...), SpawnDefaultEnv()...), extraEnv...)
 
 	if err := cmd.Start(); err != nil {
 		unpin()

@@ -69,6 +69,7 @@ func TestLive_ClaudeCodeContract(t *testing.T) {
 	t.Run("bg_shell_reap_switch", func(t *testing.T) { liveBGShellReapSwitch(t, claudeBin) })
 	t.Run("effort_env", func(t *testing.T) { liveEffortEnv(t, claudeBin) })
 	t.Run("model_settings_effort", func(t *testing.T) { liveModelSettingsEffort(t, claudeBin) })
+	t.Run("foreground_agent_sync", func(t *testing.T) { liveForegroundAgentSync(t, claudeBin) })
 	t.Run("model_aliases", func(t *testing.T) { liveModelAliases(t, claudeBin) })
 	t.Run("transcript_persists", func(t *testing.T) { liveTranscriptPersists(t, claudeBin) })
 	t.Run("pty_repaints_during_tool", func(t *testing.T) { livePTYRepaintsDuringTool(t, claudeBin) })
@@ -462,6 +463,121 @@ func liveModelSettingsSubagent(t *testing.T, claudeBin, settings string) {
 		"the Sonnet sub-agent of an Opus session ran at %v, not ITS row %q. Claude Code applied one effort "+
 			"to the whole process, so the per-model table no longer reaches sub-agents", sub, want["sonnet"])
 	t.Logf("opus parent at %v, sonnet sub-agent at %v — per model, one process", main, sub)
+}
+
+// liveForegroundAgentSync checks that an Agent call asking for the
+// foreground, in a session ape spawns, runs synchronously and returns its
+// result inline (EnvForkSubagent). One Sonnet turn and a Haiku sub-agent.
+//
+// Claude Code forces every Agent call async in an interactive session while
+// its fork-subagent gate is on, whatever run_in_background says; ape turns
+// the gate off on every spawn. If this fails, Claude Code changed the gate or
+// its variable, and every skill that reads a foreground sub-agent's result
+// under ape is back to polling for completion notices. Note what it does NOT
+// cover: a call that omits run_in_background still launches async with the
+// gate off, so the probe first requires the parent to have passed false.
+func liveForegroundAgentSync(t *testing.T, claudeBin string) {
+	t.Helper()
+	if os.Getenv("APE_CLAUDE_LIVE_TOKENS") == "0" {
+		t.Skip("APE_CLAUDE_LIVE_TOKENS=0 — the foreground-agent check submits a turn")
+	}
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	dir, token := uniqueWorkdir(t)
+	name := sessionName(t, "fg-agent")
+	t.Cleanup(func() { removeScratchTranscripts(t, home, token) })
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	argv := []string{claudeBin, "--dangerously-skip-permissions", "--model", cost.ResolveFamilyAlias("sonnet")}
+	require.NoError(t, NewSessionWithEnv(ctx, name, dir, argv, nil))
+	t.Cleanup(func() { _ = KillSession(context.Background(), name) })
+	require.NoError(t, WaitForReady(ctx, name))
+	require.NoError(t, SendCommand(ctx, name, `Call the Agent tool exactly once. Its input MUST include `+
+		`run_in_background set to the boolean false (explicitly, not omitted), subagent_type "general-purpose", `+
+		`model "haiku", description "probe", and prompt "Reply with the single word PONG." Then reply with the single word DONE.`))
+
+	var calls []agentCall
+	for {
+		dirs, _ := filepath.Glob(filepath.Join(home, ".claude", "projects", "*"+token+"*"))
+		calls = agentCalls(dirs)
+		if (len(calls) > 0 && calls[0].status != "") && parentFinished(dirs) || ctx.Err() != nil {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+	require.NotEmpty(t, calls, "the parent made no Agent call.\nlast pane:\n%s", paneOf(ctx, name))
+	c := calls[0]
+	require.NotNil(t, c.runInBackground, "probe invalid: the parent omitted run_in_background, which launches "+
+		"async regardless of the fork gate. Rephrase the probe; this says nothing about Claude Code")
+	require.False(t, *c.runInBackground, "probe invalid: the parent asked for the background")
+	require.Equal(t, "completed", c.status,
+		"an Agent call with run_in_background:false came back %q in a session ape spawned with %s=0. Claude Code "+
+			"forces foreground agents async again: its fork-subagent gate, or the variable that turns it off, "+
+			"has changed, and skills reading a foreground sub-agent's result will get a launch notice instead",
+		c.status, EnvForkSubagent)
+	t.Logf("run_in_background:false → %s, result inline", c.status)
+}
+
+// agentCall is one Agent tool call in a main transcript and its outcome.
+type agentCall struct {
+	runInBackground *bool
+	status          string
+}
+
+// agentCalls returns the Agent calls the main transcripts under dirs record,
+// in order, each with the `status` of its tool result once one exists.
+func agentCalls(dirs []string) []agentCall {
+	var out []agentCall
+	index := map[string]int{}
+	for _, d := range dirs {
+		files, _ := filepath.Glob(filepath.Join(d, "*.jsonl"))
+		for _, f := range files {
+			data, err := os.ReadFile(f)
+			if err != nil {
+				continue
+			}
+			for line := range strings.SplitSeq(string(data), "\n") {
+				//nolint:tagliatelle // Claude Code's transcript field names, not ours
+				var rec struct {
+					Message struct {
+						Content []struct {
+							Type      string `json:"type"`
+							ID        string `json:"id"`
+							Name      string `json:"name"`
+							ToolUseID string `json:"tool_use_id"`
+							Input     struct {
+								RunInBackground *bool `json:"run_in_background"`
+							} `json:"input"`
+						} `json:"content"`
+					} `json:"message"`
+					ToolUseResult json.RawMessage `json:"toolUseResult"`
+				}
+				if json.Unmarshal([]byte(line), &rec) != nil {
+					continue
+				}
+				for _, b := range rec.Message.Content {
+					switch {
+					case b.Type == "tool_use" && b.Name == "Agent":
+						index[b.ID] = len(out)
+						out = append(out, agentCall{runInBackground: b.Input.RunInBackground})
+					case b.Type == "tool_result":
+						i, ok := index[b.ToolUseID]
+						if !ok {
+							continue
+						}
+						var res struct {
+							Status string `json:"status"`
+						}
+						if json.Unmarshal(rec.ToolUseResult, &res) == nil {
+							out[i].status = res.Status
+						}
+					}
+				}
+			}
+		}
+	}
+	return out
 }
 
 // waitForSubagentEfforts polls the scratch session's transcripts until the
