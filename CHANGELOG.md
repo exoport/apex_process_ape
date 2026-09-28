@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.3.0 (2026-09-28)
 
 - **`sonnet` now starts Claude Sonnet 5.5.** Claude Code 2.1.284 resolves
   its own `sonnet` to `claude-sonnet-5-5`. ape translates a bare family word
