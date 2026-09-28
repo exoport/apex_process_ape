@@ -28,6 +28,12 @@
 //   - changelog: the entries matching Relevant, in every version newer than
 //     the baseline's ReviewedThrough up to the installed one. Any fails
 //     until someone reads them and records the review.
+//   - models: the claude-<family>-<generation> ids in the binary, diffed
+//     against the baseline. An added id fails until reviewed: it is a model
+//     Claude Code can now select, and ape's price table, family aliases and
+//     effort keys all have to learn it. Sonnet 5.5 shipped with no
+//     CHANGELOG entry and no tool change, and ape kept pinning `sonnet` to
+//     Sonnet 5 until a person asked.
 //
 // Recording a review is `make update-claude-surface`, which rewrites the
 // baseline from the installed claude. The baseline is committed, so a
@@ -59,6 +65,7 @@ type Baseline struct {
 	ReviewedThrough string   `json:"reviewed_through"`
 	Tools           []string `json:"tools"`
 	EnvVars         []string `json:"env_vars"`
+	Models          []string `json:"models"`
 }
 
 // Load reads a baseline file.
@@ -78,6 +85,7 @@ func Load(path string) (*Baseline, error) {
 func (b *Baseline) Save(path string) error {
 	b.Tools = sortedUnique(b.Tools)
 	b.EnvVars = sortedUnique(b.EnvVars)
+	b.Models = sortedUnique(b.Models)
 	data, err := json.MarshalIndent(b, "", "  ")
 	if err != nil {
 		return err
@@ -122,6 +130,30 @@ func EnvVars(r io.Reader) ([]string, error) {
 }
 
 func envVars(r io.Reader, chunk int) ([]string, error) {
+	return scanBinary(r, envName, chunk, func(s string) string { return s })
+}
+
+// modelID is a model id as Claude Code's binary spells it: a family ape
+// knows, then numeric generation segments. A dated snapshot
+// (claude-haiku-4-5-20251001) is recorded as its base id, which is how it
+// bills and how the price table keys it. Like envName, a few matches carry a
+// stray digit from adjacent data (claude-haiku-3-55); the list is reviewed,
+// so that noise is recorded once and stays quiet.
+var modelID = regexp.MustCompile(`\bclaude-(?:fable|mythos|opus|sonnet|haiku)-[0-9]+(?:-[0-9]+)*\b`)
+
+var dateSuffix = regexp.MustCompile(`-\d{8}$`)
+
+// ModelIDs returns every distinct claude model id in r (the claude binary),
+// dated snapshots folded onto their base id, sorted.
+func ModelIDs(r io.Reader) ([]string, error) {
+	return modelIDs(r, 1<<20)
+}
+
+func modelIDs(r io.Reader, chunk int) ([]string, error) {
+	return scanBinary(r, modelID, chunk, func(s string) string { return dateSuffix.ReplaceAllString(s, "") })
+}
+
+func scanBinary(r io.Reader, re *regexp.Regexp, chunk int, norm func(string) string) ([]string, error) {
 	const overlap = 256
 	found := map[string]bool{}
 	var carry []byte
@@ -134,9 +166,9 @@ func envVars(r io.Reader, chunk int) ([]string, error) {
 		}
 		data := append(append([]byte(nil), carry...), buf[:n]...)
 		cut := len(data) - overlap
-		for _, loc := range envName.FindAllIndex(data, -1) {
+		for _, loc := range re.FindAllIndex(data, -1) {
 			if final || loc[0] < cut {
-				found[string(data[loc[0]:loc[1]])] = true
+				found[norm(string(data[loc[0]:loc[1]]))] = true
 			}
 		}
 		if final {
@@ -157,6 +189,23 @@ func envVars(r io.Reader, chunk int) ([]string, error) {
 // without MCP tools (they depend on the machine's configuration, not on the
 // Claude Code release), and the version that event reports.
 func ToolsFromStreamJSON(r io.Reader) (tools []string, version string, err error) {
+	ev, err := InitFromStreamJSON(r)
+	return ev.Tools, ev.Version, err
+}
+
+// Init is what ape reads from the first `system`/`init` event of a
+// `claude -p --output-format stream-json --verbose` stream.
+type Init struct {
+	Tools   []string // sorted, MCP tools dropped
+	Version string   // claude_code_version
+	// Model is the id the session resolved --model to: `sonnet` comes back
+	// as claude-sonnet-5-5. A word Claude Code has no alias for comes back
+	// unchanged (`mythos` on an account without access), as does an unknown id.
+	Model string
+}
+
+// InitFromStreamJSON reads the first `system`/`init` event of r.
+func InitFromStreamJSON(r io.Reader) (Init, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
 	for sc.Scan() {
@@ -165,21 +214,23 @@ func ToolsFromStreamJSON(r io.Reader) (tools []string, version string, err error
 			Subtype string   `json:"subtype"`
 			Version string   `json:"claude_code_version"` //nolint:tagliatelle // Claude Code's field name
 			Tools   []string `json:"tools"`
+			Model   string   `json:"model"`
 		}
 		if json.Unmarshal(sc.Bytes(), &ev) != nil || ev.Type != "system" || ev.Subtype != "init" {
 			continue
 		}
+		var tools []string
 		for _, t := range ev.Tools {
 			if !strings.HasPrefix(t, "mcp__") {
 				tools = append(tools, t)
 			}
 		}
-		return sortedUnique(tools), ev.Version, nil
+		return Init{Tools: sortedUnique(tools), Version: ev.Version, Model: ev.Model}, nil
 	}
 	if err := sc.Err(); err != nil {
-		return nil, "", err
+		return Init{}, err
 	}
-	return nil, "", errors.New("no system/init event in the stream")
+	return Init{}, errors.New("no system/init event in the stream")
 }
 
 // Section is one `## <version>` block of Claude Code's CHANGELOG.

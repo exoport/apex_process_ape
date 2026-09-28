@@ -349,11 +349,12 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	fi
 
 .PHONY: check-claude-surface
-check-claude-surface:  ## Diff the installed Claude Code's tools, env vars and CHANGELOG against the reviewed baseline.
+check-claude-surface:  ## Diff the installed Claude Code's tools, env vars, model ids and CHANGELOG against the reviewed baseline.
 	@# ape's other live gates assert couplings ape knows it has. This one is
 	@# for the change nobody knew to assert: a tool removed (TaskOutput,
-	@# 2.1.277), a variable ape sets no longer read, or a CHANGELOG entry about
-	@# agents, background work, hooks or settings that nobody has read. It
+	@# 2.1.277), a variable ape sets no longer read, a model id new to the
+	@# binary (Sonnet 5.5, 2.1.284, with no CHANGELOG entry), or a CHANGELOG
+	@# entry about agents, background work, hooks or settings nobody has read. It
 	@# fails until someone reviews what moved and runs update-claude-surface,
 	@# which rewrites internal/claudesurface/testdata/claude-surface.json —
 	@# a committed diff, so the review is recorded.

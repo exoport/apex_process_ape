@@ -36,6 +36,29 @@ func TestEnvVars_WindowBoundaries(t *testing.T) {
 	}
 }
 
+func TestModelIDs_DatesFoldAndWindowBoundaries(t *testing.T) {
+	t.Parallel()
+	body := strings.Repeat("x", 300) + `"claude-sonnet-5-5",` + strings.Repeat("y", 290) +
+		`id:"claude-haiku-4-5-20251001"` + strings.Repeat("\x00", 10) + "claude-opus-5 claude-haiku-4-5 " +
+		"claude-3-5-sonnet claude-sonnetx-5 myclaude-opus-9 claude-opus-"
+	want := []string{"claude-haiku-4-5", "claude-opus-5", "claude-sonnet-5-5"}
+	for _, chunk := range []int{7, 64, 300, 1 << 20} {
+		got, err := modelIDs(bytes.NewReader([]byte(body)), chunk)
+		require.NoError(t, err)
+		require.Equal(t, want, got, "chunk %d", chunk)
+	}
+}
+
+func TestInitFromStreamJSON_Model(t *testing.T) {
+	t.Parallel()
+	ev, err := InitFromStreamJSON(strings.NewReader(
+		`{"type":"system","subtype":"init","claude_code_version":"2.1.284","model":"claude-sonnet-5-5","tools":["Read"]}` + "\n"))
+	require.NoError(t, err)
+	require.Equal(t, "claude-sonnet-5-5", ev.Model)
+	require.Equal(t, "2.1.284", ev.Version)
+	require.Equal(t, []string{"Read"}, ev.Tools)
+}
+
 func TestToolsFromStreamJSON(t *testing.T) {
 	t.Parallel()
 	stream := `{"type":"system","subtype":"hook_started"}
@@ -101,9 +124,10 @@ func TestCompareAndCanonical(t *testing.T) {
 func TestBaselineRoundTrip(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "b.json")
-	require.NoError(t, (&Baseline{ReviewedThrough: "2.1.283", Tools: []string{"Read", "Bash", "Read"}, EnvVars: []string{"B", "A"}}).Save(path))
+	require.NoError(t, (&Baseline{ReviewedThrough: "2.1.283", Tools: []string{"Read", "Bash", "Read"}, EnvVars: []string{"B", "A"}, Models: []string{"claude-opus-5-5", "claude-haiku-4-5"}}).Save(path))
 	b, err := Load(path)
 	require.NoError(t, err)
 	require.Equal(t, []string{"Bash", "Read"}, b.Tools)
 	require.Equal(t, []string{"A", "B"}, b.EnvVars)
+	require.Equal(t, []string{"claude-haiku-4-5", "claude-opus-5-5"}, b.Models)
 }

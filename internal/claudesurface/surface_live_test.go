@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/stretchr/testify/require"
 )
@@ -60,20 +61,33 @@ func TestLive_ClaudeSurface(t *testing.T) {
 	env, err := EnvVars(f)
 	_ = f.Close()
 	require.NoError(t, err)
+	f, err = os.Open(realBin)
+	require.NoError(t, err)
+	models, err := ModelIDs(f)
+	_ = f.Close()
+	require.NoError(t, err)
+	require.NotEmpty(t, models, "no claude-<family>-<n> ids in %s — the model scan needs rethinking", realBin)
 	unreviewed := RelevantSince(ParseChangelog(fetchChangelog(t)), base.ReviewedThrough, installed)
 
 	toolsAdded, toolsRemoved := Diff(base.Tools, tools)
 	envAdded, envRemoved := Diff(base.EnvVars, env)
+	modelsAdded, modelsRemoved := Diff(base.Models, models)
 	for _, e := range unreviewed {
 		t.Logf("changelog %s: %s", e.Version, e.Text)
 	}
 	t.Logf("tools: +%v -%v", toolsAdded, toolsRemoved)
 	t.Logf("env vars: %d added, %d removed: +%v -%v", len(envAdded), len(envRemoved), head(envAdded), head(envRemoved))
+	t.Logf("models: +%v -%v", head(modelsAdded), modelsRemoved)
+	for _, m := range modelsAdded {
+		if _, exact := cost.Lookup(m); !exact {
+			t.Logf("model %s: no exact row in internal/cost/prices.yaml", m)
+		}
+	}
 
 	if update {
-		require.NoError(t, (&Baseline{ReviewedThrough: installed, Tools: tools, EnvVars: env}).Save(baselinePath))
-		t.Logf("baseline rewritten from %s: %d tools, %d env vars, %d changelog entries acknowledged",
-			installed, len(tools), len(env), len(unreviewed))
+		require.NoError(t, (&Baseline{ReviewedThrough: installed, Tools: tools, EnvVars: env, Models: models}).Save(baselinePath))
+		t.Logf("baseline rewritten from %s: %d tools, %d env vars, %d models, %d changelog entries acknowledged",
+			installed, len(tools), len(env), len(models), len(unreviewed))
 		return
 	}
 
@@ -89,6 +103,10 @@ func TestLive_ClaudeSurface(t *testing.T) {
 		"Claude Code %s's tool list moved since the baseline (%s): added %v, removed %v. A removed tool breaks every "+
 			"skill naming it (TaskOutput, 2.1.277). Check the framework's skills, then `make update-claude-surface`",
 		installed, base.ReviewedThrough, toolsAdded, toolsRemoved)
+	require.Empty(t, modelsAdded, "Claude Code %s knows model ids the baseline (%s) does not: %v. A new model can be "+
+		"what a bare family word now starts (Sonnet 5.5, 2.1.284). For each real one: an exact row and context window "+
+		"in internal/cost/prices.yaml, its family alias repointed if it is the new generation (check-claude's "+
+		"model_aliases says), then `make update-claude-surface`", installed, base.ReviewedThrough, modelsAdded)
 	require.Empty(t, unreviewed, "%d CHANGELOG entries between %s and %s touch what ape and the skills drive "+
 		"Claude Code through (listed above). Read them; follow up anything that changes a contract; then "+
 		"`make update-claude-surface` to record the review", len(unreviewed), base.ReviewedThrough, installed)

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/claudesurface"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/effort"
 	"github.com/stretchr/testify/require"
@@ -32,7 +33,8 @@ import (
 //   - the `bypass permissions on` footer WaitForReady keys "the REPL is
 //     accepting input" off, and the ❯ glyph behind it;
 //   - CLAUDE_CODE_EFFORT_LEVEL, and the effort vocabulary it accepts;
-//   - the model ids in ape's family-alias table still naming real models;
+//   - the model ids in ape's family-alias table still naming real models,
+//     and naming the SAME model Claude Code's own family word starts;
 //   - a spawned claude persisting a session transcript at all, which every
 //     transcript-derived telemetry value depends on;
 //   - `--version` printing something the manifest stamp can parse.
@@ -687,6 +689,15 @@ func lineContaining(pane, sub string) string {
 // rather than on an expected display name means this survives Anthropic
 // renaming the human-facing labels, and only fails on the thing that
 // actually matters — the id going dead.
+//
+// Then the same family word goes to Claude Code itself, and ape's target
+// must be the model it resolves to. A live id is not a CURRENT one: when
+// Claude Code moved `sonnet` to Sonnet 5.5, ape's `sonnet` kept starting
+// Sonnet 5, which still exists, so the first half stayed green. Nothing
+// else could notice either — ape's runs never produced a Sonnet 5.5
+// transcript for check-prices or drift detection to find, because ape was
+// the one pinning the old model. The resolved model must also have an exact
+// price, or every turn on it is an estimate.
 func liveModelAliases(t *testing.T, claudeBin string) {
 	t.Helper()
 	aliases := cost.FamilyAliases()
@@ -707,8 +718,47 @@ func liveModelAliases(t *testing.T, claudeBin string) {
 					"for a model it does not recognise. ape's `%s` alias points at a dead id: a pipeline saying "+
 					"`model: %s` now spawns a fallback model. Fix the aliases: block in internal/cost/prices.yaml",
 				model, family, family)
+
+			resolved := claudeResolves(t, claudeBin, family)
+			if resolved == family {
+				// Claude Code echoes a word it has no alias for, exactly as
+				// it echoes an unknown id: here, a family the account cannot
+				// use (Mythos is Project Glasswing only). There is nothing to
+				// compare against, and saying so beats a pass.
+				t.Logf("Claude Code does not resolve `%s` on this machine (no alias, or no access): ape's target %s "+
+					"NOT compared", family, model)
+				return
+			}
+			require.Equal(t, model, cost.NormalizeModel(resolved),
+				"Claude Code's `%s` starts %s, but ape's `%s` alias pins %s: every spec, --model and prompt saying "+
+					"`%s` runs a different model than Claude Code would. Add %s to internal/cost/prices.yaml "+
+					"(rate, context_window) and repoint `aliases: %s:`",
+				family, resolved, family, model, family, cost.NormalizeModel(resolved), family)
+			_, exact := cost.Lookup(resolved)
+			require.True(t, exact, "Claude Code's `%s` starts %s, which has no exact price row", family, resolved)
 		})
 	}
+}
+
+// claudeResolves returns the model Claude Code's init event reports for
+// `--model word`, killing the session as soon as that event arrives. The
+// init event comes before the first request, so this spends no tokens.
+func claudeResolves(t *testing.T, claudeBin, word string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, claudeBin, "-p", "Reply OK", "--model", word,
+		"--output-format", "stream-json", "--verbose", "--strict-mcp-config")
+	cmd.Dir = t.TempDir()
+	cmd.Env = append(ScrubClaudeCodeEnv(os.Environ()), SpawnDefaultEnv()...)
+	stdout, err := cmd.StdoutPipe()
+	require.NoError(t, err)
+	require.NoError(t, cmd.Start())
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	ev, err := claudesurface.InitFromStreamJSON(stdout)
+	require.NoError(t, err, "no init event from `claude -p --model %s`", word)
+	require.NotEmpty(t, ev.Model, "the init event carries no model — this check needs rethinking")
+	return ev.Model
 }
 
 // liveTranscriptPersists is the regression gate for the v0.0.28–32 saga.

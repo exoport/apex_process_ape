@@ -1,5 +1,43 @@
 # CHANGELOG
 
+## Unreleased
+
+- **`sonnet` now starts Claude Sonnet 5.5.** Claude Code 2.1.284 resolves
+  its own `sonnet` to `claude-sonnet-5-5`. ape translates a bare family word
+  into a model id itself, and its table still said `claude-sonnet-5`, so
+  every spec, `--model` and `ape prompt` saying `sonnet` was starting the
+  previous Sonnet. The alias is repointed, and Sonnet 5.5 has an exact row:
+  $2 / $10 per MTok, cache reads at the standard 0.10x, 1M context. Before
+  this, a turn on it (a sub-agent's `model: sonnet`, which Claude Code
+  resolves) priced from the family estimate, $3 / $15, 50% high. Its row
+  also gives it an effort key of its own: `ape config effort` now lists
+  `claude-sonnet-5-5` under `sonnet` (`high` in the framework's table), where
+  it used to get `high` only because the fallback was `high` too.
+- **`mythos` now starts Claude Mythos 5.1** (Project Glasswing only): $10 /
+  $50, cache reads at 0.025x like Fable 5.1, 1M context. Mythos 5 keeps its
+  row.
+- **New harness checks for a model nobody told ape about.** Nothing noticed
+  Sonnet 5.5: it had no CHANGELOG entry and changed no tool; `check-claude`
+  only asked whether ape's alias named a model that exists, and Sonnet 5
+  still does; and `check-prices` and alias-drift detection need a transcript
+  from the newer model, which ape's runs could never produce while ape was
+  the one pinning the older one.
+  - `make check-claude` (`model_aliases`) now runs each family word through
+    `claude -p --model <word>` and fails when ape's alias names a different
+    model than Claude Code starts, or when that model has no exact price.
+    The session is stopped at its first event, before any request. A word
+    Claude Code does not resolve on the machine (`mythos` without access)
+    is logged as not compared. Verified to fail with `sonnet` pinned to
+    Sonnet 5.
+  - `make check-claude-surface` records the `claude-<family>-<n>` model ids
+    in the Claude Code binary in its reviewed baseline, and fails on a new
+    one until it is priced and `make update-claude-surface` records the
+    review. Verified to fail with `claude-sonnet-5-5` removed from the
+    baseline.
+  - Unit tests: every alias target must have a context window and an effort
+    key of its own, and the tests that had `claude-sonnet-5` written in as
+    the current Sonnet now read the alias table.
+
 ## v0.2.1 (2026-09-27)
 
 - **The orchestrator has no unattended mode.** The framework decided that
