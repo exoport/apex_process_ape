@@ -33,6 +33,10 @@ func TestPriceTableSelfConsistency(t *testing.T) {
 		if _, ok := Prices[full]; !ok {
 			t.Errorf("alias %q → %q, which has no row in the price table", alias, full)
 		}
+		if w, _ := ContextWindow(full); w == 0 {
+			t.Errorf("alias %q → %q, which has no context_window — every occupancy ratio for the model "+
+				"a bare `%s` starts would read as unknown", alias, full, alias)
+		}
 		if _, isAlso := Prices[alias]; isAlso {
 			t.Errorf("alias %q is also an exact model id — resolution order becomes ambiguous", alias)
 		}
@@ -147,7 +151,6 @@ func TestNormalizeModelResilience(t *testing.T) {
 		"claude_opus_5":             "claude-opus-5",
 		"claude-sonnet-4.6":         "claude-sonnet-4-6",
 		"claude-haiku-4-5-20251001": "claude-haiku-4-5", // dated snapshot
-		"  sonnet  ":                "claude-sonnet-5",
 		"<synthetic>":               "<synthetic>",
 	}
 	for in, want := range cases {
@@ -165,6 +168,9 @@ func TestNormalizeModelResilience(t *testing.T) {
 		if got := NormalizeModel(family); got != target {
 			t.Errorf("NormalizeModel(%q) = %q, want the alias target %q", family, got, target)
 		}
+		if got := NormalizeModel("  " + family + "  "); got != target {
+			t.Errorf("NormalizeModel(%q) = %q, want the alias target %q", "  "+family+"  ", got, target)
+		}
 		if _, priced := Prices[target]; !priced {
 			t.Errorf("alias %q resolves to %q, which has no price row", family, target)
 		}
@@ -180,17 +186,21 @@ func TestNormalizeModelResilience(t *testing.T) {
 // TestCanonicalModelArg covers the `--model` / spec `model:` spellings a
 // human writes by hand.
 func TestCanonicalModelArg(t *testing.T) {
+	// Bare family words are asserted against the alias table, not a literal:
+	// `sonnet` was pinned to claude-sonnet-5 here while Claude Code had moved
+	// on to claude-sonnet-5-5, the same rot `opus` went through before it.
+	sonnet, haiku := ResolveFamilyAlias("sonnet"), ResolveFamilyAlias("haiku")
 	cases := []struct {
 		in         string
 		want       string
 		recognized bool
 	}{
 		// A bare family word resolves to the CURRENT generation of that family.
-		{"sonnet", "claude-sonnet-5", true},
-		{"Sonnet", "claude-sonnet-5", true},
-		{"SONNET", "claude-sonnet-5", true},
-		{"claude-sonnet", "claude-sonnet-5", true},
-		{"haiku", "claude-haiku-4-5", true},
+		{"sonnet", sonnet, true},
+		{"Sonnet", sonnet, true},
+		{"SONNET", sonnet, true},
+		{"claude-sonnet", sonnet, true},
+		{"haiku", haiku, true},
 		// An explicit generation is honoured as written.
 		{"sonnet-5", "claude-sonnet-5", true},
 		{"claude-sonnet-5", "claude-sonnet-5", true},

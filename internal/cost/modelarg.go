@@ -60,7 +60,7 @@ func splitContextSuffix(s string) (base, suffix string) {
 //
 // Accepted spellings, all resolving to a concrete model id:
 //
-//	sonnet · Sonnet · claude-sonnet          → "claude-sonnet-5"
+//	sonnet · Sonnet · claude-sonnet          → the `aliases:` target, e.g. "claude-sonnet-5-5"
 //	sonnet-5 · claude-sonnet-5               → "claude-sonnet-5"
 //	claude-sonnet-4.6 · claude_sonnet_4_6    → "claude-sonnet-4-6"
 //	opus · Opus · claude-opus                → the `aliases:` target, e.g. "claude-opus-5-5"
@@ -74,12 +74,14 @@ func splitContextSuffix(s string) (base, suffix string) {
 //
 // The cost of pinning is that a stale alias table silently selects an older
 // generation — pass-through could not do that, because Claude Code always
-// knows its own current model. That risk is covered rather than accepted:
-// ObserveModels reports an alias as DRIFTED when the local Claude Code is
-// emitting a different generation of the same family than the table points
-// at, `ape doctor` surfaces it, and `make check-prices` fails the release
-// gate on it. Keep the alias block current and the pin is exact; let it rot
-// and the tooling says so out loud.
+// knows its own current model. ObserveModels reports an alias as DRIFTED
+// when local transcripts show a newer generation, and `make check-prices`
+// fails on it — but only once a newer model has run, which ape's own runs
+// never do while the pin is stale. Claude Code moved `sonnet` to Sonnet 5.5
+// and that check stayed silent. What catches it is `make check-claude`'s
+// model_aliases, which asks Claude Code what each family word resolves to,
+// and `make check-claude-surface`, which fails on a model id new to the
+// binary. Keep the alias block current and the pin is exact.
 //
 // recognized=false means ape could not attribute the string to a known
 // family. The canonical form is still returned and callers should still
@@ -121,7 +123,7 @@ func CanonicalModelArg(raw string) (canonical string, recognized bool) {
 }
 
 // ResolveFamilyAlias returns the concrete model id a bare family word maps
-// to ("opus" → "claude-opus-5"), or "" when the word is not a known alias.
+// to ("opus" → "claude-opus-5-5"), or "" when the word is not a known alias.
 func ResolveFamilyAlias(family string) string { return modelAliases[family] }
 
 // FamilyAliases returns the alias → concrete-id map, for reporting.

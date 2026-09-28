@@ -109,6 +109,16 @@ func TestSettings_WritesTheFamilyWordAndEveryKnownID(t *testing.T) {
 		require.Equal(t, map[string]any{"effortLevel": want}, models[id], id)
 	}
 	require.Contains(t, models, "claude-opus-5", "an older id of a listed family is covered")
+	// The model a bare family word starts must get its own row, not just the
+	// word key or the fallback: an id written out in full (a sub-agent's
+	// `model:`, a pinned spec) is matched only by its own key. Sonnet 5.5
+	// once got `high` only because the fallback happened to be `high` too.
+	for family, target := range cost.FamilyAliases() {
+		if want, listed := d.Defaults[family]; listed {
+			require.Equal(t, map[string]any{"effortLevel": want}, models[target],
+				"%s → %s has no effort row of its own", family, target)
+		}
+	}
 }
 
 func TestDecide(t *testing.T) {

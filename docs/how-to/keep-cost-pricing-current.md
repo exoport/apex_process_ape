@@ -131,11 +131,11 @@ all work:
 
 | You write | Resolves to |
 |---|---|
-| `sonnet`, `Sonnet`, `claude-sonnet` | `claude-sonnet-5` — the family's current generation |
-| `opus`, `Opus`, `claude-opus` | `claude-opus-5` |
+| `sonnet`, `Sonnet`, `claude-sonnet` | `claude-sonnet-5-5` — the family's current generation |
+| `opus`, `Opus`, `claude-opus` | `claude-opus-5-5` |
 | `sonnet-5`, `claude-sonnet-5` | `claude-sonnet-5` — as written |
 | `claude-sonnet-4.6`, `claude_sonnet_4_6` | `claude-sonnet-4-6` |
-| `opus[1m]`, `Opus[1m]` | `claude-opus-5[1m]` — the suffix rides along |
+| `opus[1m]`, `Opus[1m]` | `claude-opus-5-5[1m]` — the suffix rides along |
 
 Write the bare family when you want "whatever the current one is"; write an
 explicit generation to pin it. Either way `ape` substitutes a concrete id
@@ -179,6 +179,23 @@ parsing the numeric segments of `claude-<family>-<major>[-<minor>]`, so
 gets backwards. An id that does not parse that way (a legacy
 `claude-3-5-sonnet`, a future scheme) yields no comparison and therefore no
 claim; silence on something we cannot order is the correct answer.
+
+That check has a blind spot, and it is the case that matters most: it needs a
+transcript from the newer model, and ape's own runs cannot produce one,
+because ape is the one pinning the older model. Claude Code moved `sonnet` to
+Sonnet 5.5 in 2.1.284, and ape kept starting Sonnet 5 with every gate green.
+Two live gates close it by asking Claude Code directly instead of waiting for
+evidence:
+
+- `make check-claude` (`model_aliases`) runs each family word through
+  `claude -p --model <word>`, reads the model the session resolved, and fails
+  when ape's alias names a different one or when that model has no exact
+  price. The session is stopped at its first event, before any request. A
+  word Claude Code does not resolve on this machine (`mythos` without Project
+  Glasswing access) is reported as not compared, not passed.
+- `make check-claude-surface` keeps the model ids in the Claude Code binary in
+  its reviewed baseline, and fails on a new one until someone adds its price
+  and runs `make update-claude-surface`. That can fire before any alias moves.
 
 ## Why this can't be solved at release time alone
 

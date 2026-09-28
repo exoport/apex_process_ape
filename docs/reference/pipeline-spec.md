@@ -127,7 +127,7 @@ canonicalization, and so does `--model` on `ape pipeline` / `ape task` /
 | `sonnet` · `haiku` · `fable` | that family's current generation | Same. `mythos` exists for Project Glasswing only. |
 | `claude-sonnet-5` · `sonnet-5` | `claude-sonnet-5` | Pins the generation. Use when you need reproducibility. |
 | `claude-sonnet-4.6` · `claude_sonnet_4_6` | `claude-sonnet-4-6` | Separators and case are folded. |
-| `opus[1m]` | `claude-opus-5[1m]` | Suffix preserved. **Redundant on current models** — the 1M window is their default — and meaningless on `haiku`, which caps at 200K. |
+| `opus[1m]` | `claude-opus-5-5[1m]` | Suffix preserved. **Redundant on current models** — the 1M window is their default — and meaningless on `haiku`, which caps at 200K. |
 | anything else | unchanged, with a warning | A model newer than your `ape` build still runs. A typo is surfaced before the spawn. |
 
 Prefer the bare family word. Which generation each resolves to lives in the

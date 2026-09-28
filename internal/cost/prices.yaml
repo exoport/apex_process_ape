@@ -58,7 +58,7 @@
 # fails the release gate while any locally-observed model is inexact.
 
 version: 1
-updated: "2026-09-01"
+updated: "2026-09-28"
 
 # Exact per-model rates, keyed by the `model` field on each assistant-line
 # `usage` block in the session JSONL (after NormalizeModel).
@@ -76,6 +76,14 @@ prices:
     base_input: 10.00
     output: 50.00
     context_window: 1000000
+  # Claude Mythos 5.1 — Project Glasswing only. The same model, rate and
+  # 0.025x cache read as Fable 5.1; it succeeds Mythos 5, which keeps its
+  # row (still served, cache reads at the standard 0.10x).
+  claude-mythos-5-1:
+    base_input: 10.00
+    output: 50.00
+    context_window: 1000000
+    cache_read_mul: 0.025
   claude-mythos-5:
     base_input: 10.00
     output: 50.00
@@ -108,6 +116,14 @@ prices:
   # and this correction ape priced every Sonnet 5 turn 50% high. There is
   # no date at which this model bills differently, so it carries no
   # dated_prices window — a scheduled price is not a price.
+  # Claude Sonnet 5.5 — succeeds Sonnet 5 at the same 2.00/10.00, with
+  # cache reads at the standard 0.10x ($0.20). Claude Code's `sonnet`
+  # resolves to it from 2.1.284; nothing noticed until a person asked,
+  # because ape pinned `sonnet` to Sonnet 5 and so never ran the new one.
+  claude-sonnet-5-5:
+    base_input: 2.00
+    output: 10.00
+    context_window: 1000000
   claude-sonnet-5:
     base_input: 2.00
     output: 10.00
@@ -185,10 +201,10 @@ dated_prices: {}
 # family tier rather than to zero.
 aliases:
   opus: claude-opus-5-5
-  sonnet: claude-sonnet-5
+  sonnet: claude-sonnet-5-5
   haiku: claude-haiku-4-5
   fable: claude-fable-5-1
-  mythos: claude-mythos-5
+  mythos: claude-mythos-5-1
 
 # Family tiers — the estimate of last resort. Consulted only when no exact
 # row, override, or dated window matches, so that a model id that appears

@@ -166,7 +166,7 @@ stages:
     chain:
       - skill: foo
 `,
-			wantModel:  "claude-sonnet-5[1m]",
+			wantModel:  testModelSonnet1MResolved,
 			wantEffort: "high",
 			wantAgent:  "apex-agent-ux-designer",
 		},

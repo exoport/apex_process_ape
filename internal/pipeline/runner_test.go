@@ -29,6 +29,9 @@ const (
 // generation is current.
 var testModelOpus1MResolved = cost.ResolveFamilyAlias("opus") + "[1m]"
 
+// testModelSonnet1MResolved is `sonnet[1m]` after the same resolution.
+var testModelSonnet1MResolved = cost.ResolveFamilyAlias("sonnet") + "[1m]"
+
 // stubSpecSkills writes empty SKILL.md files under
 // <root>/.claude/skills/<name>/ for every skill and agent referenced by
 // the spec's stage chains. Required because PreflightSkills (called at
