@@ -382,8 +382,21 @@ check-task-subagents:  ## Run a framework-shaped skill that fans out to sub-agen
 	APE_CLAUDE_LIVE=1 go test ./internal/e2e/ \
 	  -run TestLive_TaskSubagents -v -count=1 -timeout 25m
 
+.PHONY: check-agents-md
+check-agents-md:  ## Verify the installed Claude Code loads this repo's AGENTS.md (the repo has no CLAUDE.md on purpose).
+	@# This repository's instructions live only in AGENTS.md, which Claude
+	@# Code loads natively only while no CLAUDE.md exists here or above. The
+	@# gate asks, from the repo root with every tool disabled, for a rule only
+	@# AGENTS.md contains, and asks the same in an empty dir as the negative
+	@# control. Verified to fail with a stray CLAUDE.md in the root. The free
+	@# half (no CLAUDE.md in the root) runs in `make test`.
+	@#
+	@# LOCAL ONLY: needs claude, auth and network. Two one-line Haiku turns.
+	APE_CLAUDE_LIVE=1 go test ./internal/e2e/ \
+	  -run TestLive_AgentsMD -v -count=1 -timeout 10m
+
 .PHONY: check-harness
-check-harness: check-prices check-output-styles check-hooks check-claude check-claude-surface check-task-subagents ## All local-only gates against the installed Claude Code (prices + output styles + hooks + PTY/model + surface + sub-agents).
+check-harness: check-prices check-output-styles check-hooks check-claude check-claude-surface check-task-subagents check-agents-md ## All local-only gates against the installed Claude Code (prices + output styles + hooks + PTY/model + surface + sub-agents + AGENTS.md).
 	@echo
 	@echo "Harness sweep complete against Claude Code $$(claude --version 2>/dev/null || echo 'unknown')."
 	@echo "Read the output above: any gate that reported a SKIP was NOT verified — it found no evidence to judge."

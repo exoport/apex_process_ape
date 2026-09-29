@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Unreleased
+
+- **The repository's instructions live in `AGENTS.md`, and there is no
+  `CLAUDE.md`.** Part of the release/eval workflow the framework, ape and eval
+  adopted together. Claude Code 2.1.277+ loads a root `AGENTS.md` natively,
+  but only while no `CLAUDE.md` exists here or above; with both it reads
+  `CLAUDE.md` alone. `/init` and `ape framework setup` each create one
+  silently, and `AGENTS.md` names both. Projects ape installs the framework
+  into keep their `CLAUDE.md`, and nothing about ape's managed block changes.
+  - `make check-agents-md`, now part of `make check-harness`: from the repo
+    root, with every tool disabled, the installed Claude Code must quote a
+    rule only `AGENTS.md` contains, and an empty directory must not. Verified
+    to fail with a stray `CLAUDE.md` in the root. Its first draft passed that
+    control anyway, because the model echoed the question's own words; the
+    marker is now a phrase the question does not contain.
+  - The free half, no `CLAUDE.md` in the root, runs in `make test`.
+
 ## v0.3.0 (2026-09-28)
 
 - **`sonnet` now starts Claude Sonnet 5.5.** Claude Code 2.1.284 resolves

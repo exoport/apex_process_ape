@@ -1,6 +1,30 @@
-# CLAUDE.md
+# AGENTS.md
 
-Guidance for Claude Code when working in this repository.
+Guidance for coding agents working in this repository.
+
+## This file, and why there is no CLAUDE.md
+
+This repository's instructions live here and only here. Claude Code (2.1.277+)
+loads a root `AGENTS.md` natively, but **only when no `CLAUDE.md` exists** in the
+working directory or any parent: when both exist it reads `CLAUDE.md` alone,
+and this file silently stops applying.
+
+**Never create a `CLAUDE.md` in this repository.** Two ordinary actions create
+one without asking:
+
+- `ape framework setup` silently writes a repo-root `CLAUDE.md` carrying the
+  framework's managed block when none exists — correct in a framework
+  PROJECT, wrong here. This repository is not one.
+- Claude Code's `/init` writes a `CLAUDE.md`.
+
+Either one, run by habit, turns these instructions off with no error.
+`make check-agents-md` (part of `make check-harness`) asks the installed Claude
+Code a question only this file answers, from the repo root with every tool
+disabled, and fails if it cannot.
+
+The PROJECTS ape installs the framework into are different: they keep
+`CLAUDE.md`, and ape's managed block, install and `ape doctor` checks are about
+theirs, not this file.
 
 ## Project overview
 
@@ -94,8 +118,10 @@ make update-claude-surface # record that review (rewrites internal/claudesurface
 make check-task-subagents # LOCAL ONLY: `ape task` on a stand-in skill that fans out to two foreground
                    #   sub-agents, as the framework's batch skills do — results inline, concurrent,
                    #   APE_SESSION/fork gate/ape pin seen inside, manifest and hooks account for both
+make check-agents-md # LOCAL ONLY: the installed claude still loads this repo's AGENTS.md (asked from
+                   #   the repo root with every tool off; an empty dir is the negative control)
 make check-harness # check-prices + check-output-styles + check-hooks + check-claude + check-claude-surface
-                   #   + check-task-subagents — the whole
+                   #   + check-task-subagents + check-agents-md — the whole
                    #   "is the local Claude Code still compatible?" sweep
 make check-framework # LOCAL ONLY: does ape still satisfy the APEX framework?
                    #   Set BOTH: APEX_FRAMEWORK_REPO=<checkout> and APEX_PROJECT=<an
@@ -122,7 +148,7 @@ Two-step verification flow — see `docs/how-to/pre-tag-release.md` for the full
 
 1. **Local gate** — run `make ci-local`. Runs test + lint + vuln + docs-check + generated-CLI-reference sync + price-table coverage + Windows cross-compile + goreleaser snapshot. ~30–60 s. Catches per-platform compile errors, release-config regressions, and a model price table that has gone stale against the locally-installed Claude Code.
 
-   **Then run `make check-harness`** (~3–4 min, developer machine only). `ci-local` proves ape is internally consistent; it cannot prove ape still *works*, because ape's real dependency is the auto-updating `claude` binary on the host. The sweep is six gates that read what that binary is actually doing: `check-prices` (model ids in transcripts), `check-output-styles` (the built-in style names ape folds declarations onto), `check-hooks` (the hook fields the step-completion gates read, judged against a runlog it seeds itself with one unattended `ape prompt` session — so the verdict never depends on finding a project someone happened to run), `check-claude` (a live PTY session — the ready-signal footer and `❯` glyph, an unknown pre-REPL modal, the spawn flags, `CLAUDE_CODE_EFFORT_LEVEL`, the family-alias model ids still naming real models and the same ones Claude Code's own family words start, a foreground sub-agent staying foreground, and transcript persistence), `check-claude-surface` (the tool list, the binary's `CLAUDE_*` names and model ids, and unread CHANGELOG entries against a reviewed baseline — it fails until someone reads them and runs `make update-claude-surface`), and `check-task-subagents` (one `ape task` run of a framework-shaped skill that fans out to two foreground sub-agents). Deliberately **not** in `ci-local` and never in GitHub CI: they need `claude` + auth + network + local transcripts, so a CI run could only skip them, and a gate that always skips reads as a pass. Read the output — `check-prices` reports "not verified" rather than green when it has no evidence, and `check-hooks` fails a seed that produced no events rather than passing it as "nothing to judge".
+   **Then run `make check-harness`** (~3–4 min, developer machine only). `ci-local` proves ape is internally consistent; it cannot prove ape still *works*, because ape's real dependency is the auto-updating `claude` binary on the host. The sweep is seven gates that read what that binary is actually doing: `check-prices` (model ids in transcripts), `check-output-styles` (the built-in style names ape folds declarations onto), `check-hooks` (the hook fields the step-completion gates read, judged against a runlog it seeds itself with one unattended `ape prompt` session — so the verdict never depends on finding a project someone happened to run), `check-claude` (a live PTY session — the ready-signal footer and `❯` glyph, an unknown pre-REPL modal, the spawn flags, `CLAUDE_CODE_EFFORT_LEVEL`, the family-alias model ids still naming real models and the same ones Claude Code's own family words start, a foreground sub-agent staying foreground, and transcript persistence), `check-claude-surface` (the tool list, the binary's `CLAUDE_*` names and model ids, and unread CHANGELOG entries against a reviewed baseline — it fails until someone reads them and runs `make update-claude-surface`), `check-task-subagents` (one `ape task` run of a framework-shaped skill that fans out to two foreground sub-agents), and `check-agents-md` (this repo's own instructions still load, since it has no CLAUDE.md). Deliberately **not** in `ci-local` and never in GitHub CI: they need `claude` + auth + network + local transcripts, so a CI run could only skip them, and a gate that always skips reads as a pass. Read the output — `check-prices` reports "not verified" rather than green when it has no evidence, and `check-hooks` fails a seed that produced no events rather than passing it as "nothing to judge".
 
    **And `make check-framework APEX_FRAMEWORK_REPO=<checkout> APEX_PROJECT=<install>`** — the other dependency axis. **Both variables**: the first checks ape against the framework checkout, the second against a framework *install*, which is the manifest as a skill meets it at run time. Omit the second and that half reports NOT verified; point it at a project last updated against an OLDER framework and it verifies the older contract while reporting green, because the manifest is versioned. `check-harness` asks whether the local *Claude Code* still honours what ape drives it through; this asks whether ape still satisfies what the local *APEX framework* requires: the command surface its shipped `_apex/ape-commands.yaml` declares, and the config variables its live template defines. Framework v0.11.0 deleted every fallback branch, so a missing command fails a skill mid-stage rather than degrading.
 2. **Remote gate** — push commits to `main`:

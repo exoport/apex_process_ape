@@ -19,7 +19,7 @@
 #
 # `make lint` is the same line CI runs (.github/workflows/ci.yml) and resolves
 # $(GOLANGCI_LINT) from .bingo/Variables.mk, rebuilding it when the pin moves.
-# One source of truth for the version, which is where CLAUDE.md says tooling
+# One source of truth for the version, which is where AGENTS.md says tooling
 # pins live. The repo is a single module rooted here, so `run ./...` is the
 # same scope the -mod hook computed, and it costs ~2 s warm.
 repos:

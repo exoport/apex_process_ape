@@ -1,7 +1,7 @@
 # ape-sandbox image → public `exoport/ape-sandbox` repo
 
 The official `ape-sandbox` OCI image (PLAN-16 D6) is **not built from this
-repo** — this repo is intentionally a CLI only (see `CLAUDE.md`). It is
+repo** — this repo is intentionally a CLI only (see `AGENTS.md`). It is
 **public and framework-free**, built + published from the separate public
 **`exoport/ape-sandbox`** repo to the public **`ghcr.io/exoport/ape-sandbox`**
 package (builds anonymously — no secret).
