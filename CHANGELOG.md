@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.3.1 (2026-09-29)
 
 - **The repository's instructions live in `AGENTS.md`, and there is no
   `CLAUDE.md`.** Part of the release/eval workflow the framework, ape and eval
