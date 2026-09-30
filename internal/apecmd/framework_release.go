@@ -182,7 +182,7 @@ func checkApeMinimum(ctx context.Context, w io.Writer, src, tag, projectRoot str
 			"still below %s's minimum after updating ape — the newest ape release does not meet it yet; nothing was written", label))
 	}
 	if !interactive() {
-		fmt.Fprintf(os.Stderr, "run: %s\n", route.command("<newest>"))
+		fmt.Fprintf(os.Stderr, "run: %s\n", route.command("latest"))
 		return usageErrExit(exitCodeApeBelowMinimum, errors.New("not updating ape without a terminal to ask; nothing was written"))
 	}
 	if !askYesNo(fmt.Sprintf("Update ape first (%s)?", route.name), true) {
