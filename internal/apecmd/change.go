@@ -78,6 +78,7 @@ func newChangeCmd() *cobra.Command {
 		outputFormat string
 		quietFlag    bool
 		cwdFlag      string
+		detachFlag   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "change [request]",
@@ -147,6 +148,13 @@ goals committed and the rest saved as residue.`,
 				return usageErr(errors.New("--queue writes a request down and --drain runs the " +
 					"ones already written: pass one"))
 			}
+			if detachFlag && !queueFlag {
+				root, err := resolveProjectRoot(cwdFlag)
+				if err != nil {
+					return usageErr(err)
+				}
+				return startDetached(cmd, root)
+			}
 			// --drain takes no request of its own: each record's first
 			// line is the request for its own run.
 			request := ""
@@ -192,6 +200,7 @@ goals committed and the rest saved as residue.`,
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "Suppress the per-event progress stream (the default when stdout is not a terminal)")
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
+	addDetachFlag(cmd, &detachFlag)
 	return cmd
 }
 

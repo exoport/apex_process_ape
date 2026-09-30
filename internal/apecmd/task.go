@@ -52,6 +52,7 @@ func newTaskCmd() *cobra.Command {
 		outputFormat       string
 		jsonAlias          bool
 		cwdFlag            string
+		detachFlag         bool
 		quietFlag          bool
 		manifestDirFlag    string
 		ignoreProjSettings bool
@@ -139,6 +140,9 @@ ownership (the run itself may have succeeded).`,
 				}
 				projectRoot = wd
 			}
+			if detachFlag {
+				return startDetached(cmd, projectRoot)
+			}
 			if handoffFlag != "" {
 				prompt, err := resolveHandoffPrompt(handoffFlag, cmd.Flags().Changed("prompt"))
 				if err != nil {
@@ -221,6 +225,7 @@ ownership (the run itself may have succeeded).`,
 	_ = cmd.Flags().MarkHidden("json")
 	addOutputStyleFlag(cmd, &outputStyleFlag)
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
+	addDetachFlag(cmd, &detachFlag)
 	addNatsFlags(cmd, &natsURLFlag, &natsCredsFlag, &eventsPrefixFlag, &uploadTranscripts, &transcriptStore)
 	return cmd
 }

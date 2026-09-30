@@ -58,6 +58,24 @@
     after the dispatch now runs on a context that survives cancellation.
   - The same bug made `ape task` report "commit contract not asserted:
     the project is not a git repository" for a stopped run in a git repo.
+- **`--detach` and `ape run wait|status`** (class C: the orchestrator calls
+  them). Claude Code 2.1.285 stops a Bash tool's background command at its
+  time limit, killing `setsid` and `nohup` descendants too, so the
+  orchestrator lost long dispatches. The framework worked around it with an
+  orphaning shell trick and asked for a supported form. See
+  `docs/how-to/detach-a-run.md`.
+  - `ape pipeline|task|change --detach` starts a supervisor in its own
+    session and returns at once with an id. The supervisor is orphaned, so
+    nothing that stops the starting shell reaches it.
+  - The supervisor runs the command with its output going to a log, and
+    records the exit code in `{output_folder}/ape/detached/<id>.json`.
+  - `ape run wait <id>` exits with the run's own code. With `--timeout`, it
+    exits 75 while the run is still going, so a caller can re-arm under a
+    tool limit.
+  - A supervisor that is gone without recording an exit is reported, exit
+    1, rather than waited on forever.
+  - Verified: the supervisor survives SIGKILL of the starting shell's
+    whole session, and the test fails without `setsid`.
 - **Stopping a run stops what the skill started** (class B). Claude's Bash
   tool runs each command outside Claude's process group. A skill's
   `go test` or build therefore kept running, and kept writing into the

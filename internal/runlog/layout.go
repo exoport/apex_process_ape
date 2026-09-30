@@ -141,6 +141,15 @@ func ChatsRoot(projectRoot string) string {
 	return filepath.Join(ApeRoot(projectRoot), "chats")
 }
 
+// DetachedRoot holds one handle (and one log) per `--detach` run: the
+// supervisor's record of the command, its pid and, once it ends, its exit
+// code. A handle is not a run — the run it supervises writes its own
+// manifest under TasksRoot / PipelinesRoot / ChangesRoot — so this is
+// deliberately not one of RunRoots.
+func DetachedRoot(projectRoot string) string {
+	return filepath.Join(ApeRoot(projectRoot), "detached")
+}
+
 // ServiceRoot is `ape service`'s state directory.
 func ServiceRoot(projectRoot string) string {
 	return filepath.Join(ApeRoot(projectRoot), "service")

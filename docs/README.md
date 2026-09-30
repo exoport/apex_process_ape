@@ -25,6 +25,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [How to refresh the APEX framework in a project](how-to/framework-update.md)
 - [How to pass arguments to skills](how-to/pass-args-to-skills.md)
 - [How to run a single skill with `ape task`](how-to/run-a-single-skill.md)
+- [How to run ape in the background, beyond a tool's time limit](how-to/detach-a-run.md) — `--detach`, `ape run wait` and its exit 75
 - [How to run an unattended session with `ape prompt`](how-to/run-a-prompt-session.md)
 - [How to write and run an `ape script`](how-to/write-ape-scripts.md)
 - [How to run a sandboxed Kata VM workspace](how-to/sandbox-workspaces.md)

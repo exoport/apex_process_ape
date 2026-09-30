@@ -27,6 +27,7 @@ func newPipelineCmd() *cobra.Command {
 		noTUI              bool
 		quietFlag          bool
 		cwdFlag            string
+		detachFlag         bool
 		outputFormat       string
 		manifestDirFlag    string
 		fromStageFlag      string
@@ -93,6 +94,9 @@ func newPipelineCmd() *cobra.Command {
 					Names:        pipeline.AvailablePipelines(projectRoot),
 				}
 				return printPipelineList(res, output.Format(outputFormat))
+			}
+			if detachFlag {
+				return startDetached(cmd, projectRoot)
 			}
 			name := args[0]
 			spec, err := pipeline.LoadSpec(name, projectRoot)
@@ -209,6 +213,7 @@ func newPipelineCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&maxDurationFlag, "max-duration", sessiondriver.DefaultMaxDuration, "Hard wall-clock ceiling per step regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a sequential batch step is bounded per item, not per batch. 0 disables the cap.")
 	cmd.Flags().StringVar(&effortFlag, "effort", "", "Explicit reasoning effort (low|medium|high|xhigh|max) applied when a step/stage/pipeline does not set one in the YAML. Process-wide, sub-agents included. Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort).")
 	cmd.PersistentFlags().StringVar(&cwdFlag, "cwd", "", "Project root directory (default: current working dir)")
+	addDetachFlag(cmd, &detachFlag)
 	addNatsFlags(cmd, &natsURLFlag, &natsCredsFlag, &eventsPrefixFlag, &uploadTranscripts, &transcriptStore)
 	return cmd
 }

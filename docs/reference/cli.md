@@ -53,6 +53,7 @@ Subcommands:
 - `registry` — Verify or reconcile every record registry at once
 - `release` — Project the framework's release record
 - `rollback` — Rollback ape to the previous version
+- `run` — Wait for, or inspect, a run started with --detach
 - `sandbox` — Provision and operate hardware-isolated Kata VM workspaces (via aped)
 - `script` — Run a Go orchestration script through the yaegi interpreter
 - `service` — Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply
@@ -1641,6 +1642,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--contract-out` | string | `—` | Where the skill writes its terminal contract (default: contract.yaml in the change directory; must sit inside it) |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--detach` | bool | `false` | Start the run in the background, detached from this shell, print its id, and return at once; `ape run wait <id>` waits for it |
 | `--drain` | bool | `false` | Run every queued maintenance record as its own change, stopping at the first that leaves the tree dirty |
 | `--dry-run` | bool | `false` | Print the messages ape would compose and commit nothing, leaving the tree as the run left it |
 | `--effort` | string | `—` | Explicit reasoning effort (low\|medium\|high\|xhigh\|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). |
@@ -3977,6 +3979,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--commit-allow-dirty` | bool | `false` | Bypass the dirty-tree pre-run gate. The first committing step's diff will include any pre-existing uncommitted changes. |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--detach` | bool | `false` | Start the run in the background, detached from this shell, print its id, and return at once; `ape run wait <id>` waits for it |
 | `--effort` | string | `—` | Explicit reasoning effort (low\|medium\|high\|xhigh\|max) applied when a step/stage/pipeline does not set one in the YAML. Process-wide, sub-agents included. Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). |
 | `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
 | `--from` | string | `—` | Skip stages before the named one and start execution there |
@@ -4368,6 +4371,67 @@ ape rollback
 ```
 
 Restore the backup binary created during the last update.
+
+## ape run
+
+Wait for, or inspect, a run started with --detach
+
+```
+ape run
+```
+
+A run started with --detach (ape pipeline|task|change --detach) returns an id at
+once and continues in the background, orphaned from the shell that started
+it, so a tool's time limit on that shell does not reach it.
+
+  ape run wait <id>     wait for it; exit with the run's own exit code
+  ape run status <id>   show its handle: command, pids, log, and the exit
+                        code once it has ended
+
+Subcommands:
+
+- `status` — Show a detached run's handle
+- `wait` — Wait for a detached run and exit with its exit code
+
+## ape run status
+
+Show a detached run's handle
+
+```
+ape run status <id> [flags]
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root directory (default: current working dir) |
+
+## ape run wait
+
+Wait for a detached run and exit with its exit code
+
+```
+ape run wait <id> [flags]
+```
+
+Wait for a run started with --detach, print where its log is and how it
+ended, and exit with the run's own exit code.
+
+--timeout bounds the wait. When it expires with the run still going, the
+command exits 75 and the run is untouched: wait again. That is how a caller
+under a tool time limit waits for a run longer than the limit — each wait
+stays inside it.
+
+A run whose supervisor is gone without recording an exit (killed, or the
+machine rebooted) is reported as such, exit 1, rather than waited on forever.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--timeout` | duration | `0s` | Stop waiting after this long (e.g. 25m) and exit 75 if the run is still going; 0 waits until it ends |
 
 ## ape sandbox
 
@@ -5843,6 +5907,7 @@ Flags:
 | `--args` | string | `—` | Verbatim skill args appended to the invocation (whitespace-separated) |
 | `--commit-allow-dirty` | bool | `false` | Bypass the dirty-tree gate (relevant only with --task-commit) |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--detach` | bool | `false` | Start the run in the background, detached from this shell, print its id, and return at once; `ape run wait <id>` waits for it |
 | `--effort` | string | `—` | Explicit reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). |
 | `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
 | `--handoff` | string | `—` | Path to a handoff/context file; derives a "Read <path> and follow the Resume Protocol" --prompt value (mutually exclusive with --prompt) |
