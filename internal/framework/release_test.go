@@ -232,3 +232,20 @@ func TestStatus_ACandidateAheadOfTheNewestRelease(t *testing.T) {
 	require.True(t, framework.InstalledIsAhead("v1.1.0-rc.1", "v1.0.0"))
 	require.False(t, framework.InstalledIsAhead("v1.1.0-rc.1", "v1.1.0"), "the final release is ahead of its own rc")
 }
+
+// A release installs its own bytes. With core.autocrlf=true — Git for
+// Windows' default — `git archive` converted LF to CRLF, so the same
+// release installed different bytes depending on who ran it. Caught by the
+// Windows CI job; asserted here on every platform.
+func TestRelease_ExportsTheReleasesOwnBytes(t *testing.T) {
+	fw := releaseRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(fw, ".claude", "skills", "apex-foo", "SKILL.md"),
+		[]byte("line one\nline two\n"), 0o644))
+	commitAll(t, fw, "lf content")
+	gitIn(t, fw, "tag", "v1.0.0")
+	gitIn(t, fw, "config", "core.autocrlf", "true")
+
+	_, proj, err := setupRelease(t, fw, framework.ReleaseSelector{})
+	require.NoError(t, err)
+	require.Equal(t, "line one\nline two\n", installedFoo(t, proj))
+}

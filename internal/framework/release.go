@@ -145,7 +145,13 @@ func ExportTag(ctx context.Context, repo, tag string) (dir string, cleanup func(
 		return "", nil, err
 	}
 	cleanup = func() { _ = os.RemoveAll(dir) }
-	cmd := exec.CommandContext(ctx, GitCmd, "-c", "safe.directory="+repo, "archive", "--format=tar", "refs/tags/"+tag) //nolint:gosec // git, with a tag ape resolved itself
+	// core.autocrlf=false: export the release's own bytes. On a Windows
+	// clone (autocrlf=true, the Git for Windows default) `git archive`
+	// otherwise converts line endings, so a project got different bytes
+	// depending on who ran the install. Found by the Windows CI job. Only
+	// the framework's own .gitattributes can still ask for CRLF.
+	cmd := exec.CommandContext(ctx, GitCmd, "-c", "safe.directory="+repo, "-c", "core.autocrlf=false", //nolint:gosec // git, with a tag ape resolved itself
+		"archive", "--format=tar", "refs/tags/"+tag)
 	cmd.Dir = repo
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
