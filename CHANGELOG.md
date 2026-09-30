@@ -77,8 +77,14 @@
   - `ape run wait <id>` exits with the run's own code. With `--timeout`, it
     exits 75 while the run is still going, so a caller can re-arm under a
     tool limit.
-  - A supervisor that is gone without recording an exit is reported, exit
-    1, rather than waited on forever.
+  - A supervisor that is gone without recording an exit exits **76**, a
+    code of its own, so it's never mistaken for a run that exited 1.
+  - The run's stdout has its own file (`<id>.out`, the handle's `stdout`),
+    apart from stderr (`<id>.log`). A detached `ape change --output-format
+    json` therefore leaves one clean envelope for the orchestrator to route
+    on. Asked for by the framework.
+  - `ape run stop <id>` stops the run as Ctrl-C would, then waits for its
+    exit to be recorded.
   - Verified: the supervisor survives SIGKILL of the starting shell's
     whole session, and the test fails without `setsid`.
 - **Stopping a run stops what the skill started** (class B). Claude's Bash

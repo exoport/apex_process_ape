@@ -22,3 +22,9 @@ func pidAlive(pid int) bool {
 func forwardTerm(p *os.Process) {
 	_ = p.Signal(syscall.SIGTERM)
 }
+
+// stopDetached asks the supervisor to stop; it forwards SIGTERM to the
+// run and records the exit.
+func stopDetached(h *detachedHandle) {
+	_ = syscall.Kill(h.SupervisorPID, syscall.SIGTERM)
+}

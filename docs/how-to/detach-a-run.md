@@ -8,7 +8,12 @@ $ ape task apex-dev-story --detach --prompt "…"
 detached: 20260930-031500-ab12cd
 wait:     ape run wait 20260930-031500-ab12cd --cwd /path/to/project
 log:      /path/to/project/_output/ape/detached/20260930-031500-ab12cd.log
+stdout:   /path/to/project/_output/ape/detached/20260930-031500-ab12cd.out
 ```
+
+The run's **stdout** goes to its own file (`.out`) and its **stderr** to the log
+(`.log`). So a detached `ape change --output-format json` leaves its JSON envelope
+in the `.out` file as one clean document, for whatever routes on it.
 
 Then wait for it:
 
@@ -52,13 +57,17 @@ mistake an outcome for "not yet".
   code. `state` is `running`, `ended, exit N`, or `gone without recording an
   exit`.
 - **A supervisor that is gone without recording an exit** means it was
-  killed, or the machine restarted. `run wait` reports that and exits 1
-  rather than waiting forever. The run's own manifest, under
+  killed, or the machine restarted. `run wait` reports that and exits
+  **76** rather than waiting forever. That's a code of its own, so it's
+  never mistaken for a run that exited 1. The run's own manifest, under
   `_output/ape/tasks/…` and the other run folders, says how far it got.
-- **Stopping a detached run:** send the supervisor (`supervisor_pid` in the
-  handle) a SIGTERM. It passes the signal on, the run shuts down the way a
-  Ctrl-C would, saving `ape change`'s residue and stopping what the skill
-  started, and the exit code is recorded.
+- **`ape run stop <id>`** stops a detached run the way Ctrl-C would. `ape
+  change` saves its residue, and the commands the skill started are
+  stopped. It then waits, up to `--timeout` (30 s by default), for the exit
+  to be recorded.
+  - It exits 0 once the run has ended, whatever the run's own code;
+    `ape run wait` reports that code.
+  - It exits 75 if the run hasn't ended in time.
 
 The handles live under `{output_folder}/ape/detached/`. They are records of
 the supervisor, not runs: each run still writes its own manifest where it

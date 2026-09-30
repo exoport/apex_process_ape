@@ -4385,12 +4385,17 @@ once and continues in the background, orphaned from the shell that started
 it, so a tool's time limit on that shell does not reach it.
 
   ape run wait <id>     wait for it; exit with the run's own exit code
-  ape run status <id>   show its handle: command, pids, log, and the exit
-                        code once it has ended
+                        (75: --timeout expired, wait again; 76: its
+                        supervisor is gone without recording an exit)
+  ape run status <id>   show its handle: command, pids, stdout and log
+                        files, and the exit code once it has ended
+  ape run stop <id>     stop it as Ctrl-C would, and wait for its exit
+                        to be recorded
 
 Subcommands:
 
 - `status` — Show a detached run's handle
+- `stop` — Stop a detached run as Ctrl-C would, and wait for its exit to be recorded
 - `wait` — Wait for a detached run and exit with its exit code
 
 ## ape run status
@@ -4406,6 +4411,30 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
+
+## ape run stop
+
+Stop a detached run as Ctrl-C would, and wait for its exit to be recorded
+
+```
+ape run stop <id> [flags]
+```
+
+Stop a run started with --detach. The supervisor passes the stop on to the
+run, which shuts down the way it does on Ctrl-C: ape change saves its
+residue, and the commands the skill started are stopped. Then this waits
+(up to --timeout) for the exit to be recorded and reports it.
+
+Exits 0 once the run has ended, whatever its own exit code (ape run wait
+reports that); 75 if it has not ended within --timeout; 0 at once if it had
+already ended.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--timeout` | duration | `30s` | How long to wait for the run to end after asking it to stop |
 
 ## ape run wait
 
@@ -4424,7 +4453,11 @@ under a tool time limit waits for a run longer than the limit — each wait
 stays inside it.
 
 A run whose supervisor is gone without recording an exit (killed, or the
-machine rebooted) is reported as such, exit 1, rather than waited on forever.
+machine rebooted) is reported as such, exit 76, rather than waited on
+forever — its own code, so it is never mistaken for a run that exited 1.
+
+The run's stdout is in its own file (the handle's "stdout"), apart from
+stderr (its "log"), so a --output-format json envelope reads clean.
 
 Flags:
 

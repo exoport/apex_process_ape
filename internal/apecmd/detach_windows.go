@@ -33,3 +33,15 @@ func pidAlive(pid int) bool {
 func forwardTerm(p *os.Process) {
 	_ = p.Kill()
 }
+
+// stopDetached stops the run itself: Windows has no SIGTERM to forward, and
+// killing the supervisor would lose the exit. The supervisor sees the run
+// end and records it.
+func stopDetached(h *detachedHandle) {
+	if h.ChildPID == 0 {
+		return
+	}
+	if p, err := os.FindProcess(h.ChildPID); err == nil {
+		_ = p.Kill()
+	}
+}

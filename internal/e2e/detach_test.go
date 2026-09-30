@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -72,7 +73,7 @@ func TestDetach_SurvivesTheStartingShellsTree(t *testing.T) {
 	require.NoError(t, writeFile(filepath.Join(project, ".claude", "skills", "apex-foo", "SKILL.md"), "# foo\n"))
 	marker := filepath.Join(t.TempDir(), "returned")
 
-	shell := exec.Command("sh", "-c", ape+" task apex-foo --detach --cwd "+project+" > "+marker+".out && touch "+marker+"; exec sleep 300")
+	shell := exec.Command("sh", "-c", ape+" task apex-foo --detach --output-format json --cwd "+project+" > "+marker+".out && touch "+marker+"; exec sleep 300")
 	shell.Env = append(os.Environ(), "PATH="+fake+":"+os.Getenv("PATH"), "APE_CLAUDE_PROBE=off")
 	shell.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	require.NoError(t, shell.Start())
@@ -98,14 +99,44 @@ func TestDetach_SurvivesTheStartingShellsTree(t *testing.T) {
 	require.Equal(t, 75, exitStatus(werr), "%s", wout)
 	require.Contains(t, string(wout), "still running; wait again")
 
-	// Stopping the supervisor stops the run, and the exit is recorded.
-	require.NoError(t, syscall.Kill(sup, syscall.SIGTERM))
+	// `ape run stop` stops the run as Ctrl-C would, and the exit is recorded.
+	stop := exec.Command(ape, "run", "stop", id, "--cwd", project)
+	sout, serr := stop.CombinedOutput()
+	require.NoError(t, serr, "%s", sout)
+	require.Contains(t, string(sout), "stopped; it ended with exit")
 	final := exec.Command(ape, "run", "wait", id, "--cwd", project, "--timeout", "30s")
 	fout, ferr := final.CombinedOutput()
 	code := exitStatus(ferr)
-	require.NotEqual(t, 75, code, "the run never ended: %s", fout)
-	require.NotEqual(t, 0, code, "a stopped run is not a success: %s", fout)
+	require.NotContains(t, []int{0, 75, 76}, code, "a stopped run ended with its own non-zero code: %s", fout)
 	require.Contains(t, string(fout), "ended with exit")
+
+	// stdout has a file of its own, so the JSON envelope reads clean; the
+	// diagnostics are in the log.
+	dir := filepath.Join(project, "_output", "ape", "detached")
+	envelope, err := os.ReadFile(filepath.Join(dir, id+".out"))
+	require.NoError(t, err)
+	var env map[string]any
+	require.NoError(t, json.Unmarshal(envelope, &env), "stdout is not one clean JSON document:\n%s", envelope)
+	logData, err := os.ReadFile(filepath.Join(dir, id+".log"))
+	require.NoError(t, err)
+	require.NotContains(t, string(logData), `"exit_code"`, "the envelope leaked into the log")
+}
+
+// A supervisor gone without recording an exit is exit 76 — never a
+// plausible exit code of the run's own.
+func TestDetach_ALostSupervisorIs76(t *testing.T) {
+	ape := buildApe(t)
+	project := t.TempDir()
+	dead := exec.Command("true")
+	require.NoError(t, dead.Run())
+	dir := filepath.Join(project, "_output", "ape", "detached")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, writeFile(filepath.Join(dir, "lost.json"),
+		`{"id":"lost","argv":[],"dir":"`+project+`","log":"x","stdout":"y","supervisor_pid":`+
+			strconv.Itoa(dead.ProcessState.Pid())+`,"started_at":"2026-01-01T00:00:00Z"}`))
+	out, err := exec.Command(ape, "run", "wait", "lost", "--cwd", project, "--timeout", "10s").CombinedOutput()
+	require.Equal(t, 76, exitStatus(err), "%s", out)
+	require.Contains(t, string(out), "gone without recording an exit")
 }
 
 func supervisorPID(t *testing.T, project, id string) int {

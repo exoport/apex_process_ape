@@ -39,6 +39,11 @@ const (
 	// with, so a caller's loop can tell "not yet" from any outcome.
 	exitCodeStillRunning = 75
 
+	// exitCodeRunLost: the supervisor is gone without recording an exit
+	// (killed, or the machine restarted). Its own code, so a caller never
+	// has to tell it from a run that really exited 1.
+	exitCodeRunLost = 76
+
 	// envDetachedID marks the process a supervisor started, for the log
 	// and for anything that wants to know it runs detached.
 	envDetachedID = "APE_DETACHED_ID"
@@ -52,7 +57,8 @@ type detachedHandle struct {
 	ID            string     `json:"id"`
 	Argv          []string   `json:"argv"`
 	Dir           string     `json:"dir"`
-	Log           string     `json:"log"`
+	Log           string     `json:"log"`    // the run's stderr
+	Stdout        string     `json:"stdout"` // the run's stdout, alone: a --output-format json envelope, clean
 	SupervisorPID int        `json:"supervisor_pid"`
 	ChildPID      int        `json:"child_pid,omitempty"`
 	StartedAt     time.Time  `json:"started_at"`
@@ -130,6 +136,7 @@ func startDetached(cmd *cobra.Command, projectRoot string) error {
 		Argv:      withoutDetach(os.Args[1:]),
 		Dir:       wd,
 		Log:       filepath.Join(dir, id+".log"),
+		Stdout:    filepath.Join(dir, id+".out"),
 		StartedAt: time.Now().UTC(),
 	}
 	path := handlePath(root, id)
@@ -152,6 +159,7 @@ func startDetached(cmd *cobra.Command, projectRoot string) error {
 	fmt.Fprintf(out, "detached: %s\n", id)
 	fmt.Fprintf(out, "wait:     ape run wait %s --cwd %s\n", id, root)
 	fmt.Fprintf(out, "log:      %s\n", h.Log)
+	fmt.Fprintf(out, "stdout:   %s\n", h.Stdout)
 	return nil
 }
 
@@ -170,12 +178,16 @@ once and continues in the background, orphaned from the shell that started
 it, so a tool's time limit on that shell does not reach it.
 
   ape run wait <id>     wait for it; exit with the run's own exit code
-  ape run status <id>   show its handle: command, pids, log, and the exit
-                        code once it has ended`,
+                        (75: --timeout expired, wait again; 76: its
+                        supervisor is gone without recording an exit)
+  ape run status <id>   show its handle: command, pids, stdout and log
+                        files, and the exit code once it has ended
+  ape run stop <id>     stop it as Ctrl-C would, and wait for its exit
+                        to be recorded`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
-	cmd.AddCommand(newRunWaitCmd(), newRunStatusCmd(), newRunSuperviseCmd())
+	cmd.AddCommand(newRunWaitCmd(), newRunStatusCmd(), newRunStopCmd(), newRunSuperviseCmd())
 	return cmd
 }
 
@@ -196,7 +208,11 @@ under a tool time limit waits for a run longer than the limit — each wait
 stays inside it.
 
 A run whose supervisor is gone without recording an exit (killed, or the
-machine rebooted) is reported as such, exit 1, rather than waited on forever.`,
+machine rebooted) is reported as such, exit 76, rather than waited on
+forever — its own code, so it is never mistaken for a run that exited 1.
+
+The run's stdout is in its own file (the handle's "stdout"), apart from
+stderr (its "log"), so a --output-format json envelope reads clean.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := resolveProjectRoot(cwd)
@@ -225,6 +241,7 @@ func waitDetached(ctx context.Context, cmd *cobra.Command, path string, timeout 
 		if h.ExitCode != nil {
 			fmt.Fprintf(out, "run %s ended with exit %d (%s)\n", h.ID, *h.ExitCode, strings.Join(h.Argv, " "))
 			fmt.Fprintf(out, "log: %s\n", h.Log)
+			fmt.Fprintf(out, "stdout: %s\n", h.Stdout)
 			if *h.ExitCode == 0 {
 				return nil
 			}
@@ -236,7 +253,7 @@ func waitDetached(ctx context.Context, cmd *cobra.Command, path string, timeout 
 			if h2, err := readHandle(path); err == nil && h2.ExitCode != nil {
 				continue
 			}
-			return usageErrExit(ExitRunFailed, fmt.Errorf(
+			return usageErrExit(exitCodeRunLost, fmt.Errorf(
 				"run %s: its supervisor (pid %d) is gone without recording an exit — it was killed, or the machine restarted; see %s",
 				h.ID, h.SupervisorPID, h.Log))
 		}
@@ -286,6 +303,59 @@ func newRunStatusCmd() *cobra.Command {
 	return cmd
 }
 
+func newRunStopCmd() *cobra.Command {
+	var (
+		cwd     string
+		timeout time.Duration
+	)
+	cmd := &cobra.Command{
+		Use:   "stop <id>",
+		Short: "Stop a detached run as Ctrl-C would, and wait for its exit to be recorded",
+		Long: `Stop a run started with --detach. The supervisor passes the stop on to the
+run, which shuts down the way it does on Ctrl-C: ape change saves its
+residue, and the commands the skill started are stopped. Then this waits
+(up to --timeout) for the exit to be recorded and reports it.
+
+Exits 0 once the run has ended, whatever its own exit code (ape run wait
+reports that); 75 if it has not ended within --timeout; 0 at once if it had
+already ended.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root, err := resolveProjectRoot(cwd)
+			if err != nil {
+				return usageErr(err)
+			}
+			path := handlePath(root, args[0])
+			h, err := readHandle(path)
+			if err != nil {
+				return usageErrExit(ExitUsage, fmt.Errorf("no detached run at %s: %w", path, err))
+			}
+			out := cmd.OutOrStdout()
+			if h.ExitCode != nil {
+				fmt.Fprintf(out, "run %s had already ended with exit %d\n", h.ID, *h.ExitCode)
+				return nil
+			}
+			if h.SupervisorPID == 0 || !pidAlive(h.SupervisorPID) {
+				return usageErrExit(exitCodeRunLost, fmt.Errorf("run %s: its supervisor is gone without recording an exit", h.ID))
+			}
+			stopDetached(h)
+			deadline := time.Now().Add(timeout)
+			for time.Now().Before(deadline) {
+				if h2, err := readHandle(path); err == nil && h2.ExitCode != nil {
+					fmt.Fprintf(out, "run %s stopped; it ended with exit %d\n", h2.ID, *h2.ExitCode)
+					return nil
+				}
+				time.Sleep(200 * time.Millisecond)
+			}
+			fmt.Fprintf(out, "run %s was asked to stop and has not ended yet; ape run wait %s\n", h.ID, h.ID)
+			return reportedErr(exitCodeStillRunning, errors.New("still running"))
+		},
+	}
+	cmd.Flags().StringVar(&cwd, "cwd", "", "Project root directory (default: current working dir)")
+	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "How long to wait for the run to end after asking it to stop")
+	return cmd
+}
+
 // newRunSuperviseCmd is the supervisor a --detach run starts. Hidden: it
 // is ape's own plumbing, not a command anyone types.
 func newRunSuperviseCmd() *cobra.Command {
@@ -315,13 +385,22 @@ func supervise(ctx context.Context, path string) error {
 		return usageErr(err)
 	}
 	defer func() { _ = logf.Close() }()
+	stdout := logf
+	if h.Stdout != "" {
+		outf, err := os.OpenFile(h.Stdout, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return usageErr(err)
+		}
+		defer func() { _ = outf.Close() }()
+		stdout = outf
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return usageErr(err)
 	}
 	child := exec.Command(exe, h.Argv...) //nolint:noctx // this binary, with the arguments --detach recorded; a signal is forwarded below, not a context kill
 	child.Dir = h.Dir
-	child.Stdout, child.Stderr = logf, logf
+	child.Stdout, child.Stderr = stdout, logf
 	child.Env = append(os.Environ(), envDetachedID+"="+h.ID)
 	if err := child.Start(); err != nil {
 		return recordExit(path, h, ExitRunFailed, err.Error())
