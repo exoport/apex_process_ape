@@ -163,3 +163,30 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+// A handle's supervisor pid can be reused by an unrelated process once the
+// supervisor is gone. ape must never signal it: `run stop` refuses (76) and
+// the stranger lives on, and `run wait` reports the run lost (76) instead of
+// waiting on the stranger as if it were the run.
+func TestDetach_NeverSignalsAProcessThatIsNotTheRuns(t *testing.T) {
+	ape := buildApe(t)
+	project := t.TempDir()
+	stranger := exec.Command("sleep", "60")
+	require.NoError(t, stranger.Start())
+	t.Cleanup(func() { _ = stranger.Process.Kill(); _, _ = stranger.Process.Wait() })
+
+	dir := filepath.Join(project, "_output", "ape", "detached")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, writeFile(filepath.Join(dir, "reused.json"),
+		`{"id":"reused","argv":[],"dir":"`+project+`","log":"x","stdout":"y","supervisor_pid":`+
+			strconv.Itoa(stranger.Process.Pid)+`,"started_at":"2026-01-01T00:00:00Z"}`))
+
+	out, err := exec.Command(ape, "run", "stop", "reused", "--cwd", project).CombinedOutput()
+	require.Equal(t, 76, exitStatus(err), "%s", out)
+	require.Contains(t, string(out), "nothing was signalled")
+	time.Sleep(300 * time.Millisecond)
+	require.NoError(t, syscall.Kill(stranger.Process.Pid, 0), "ape signalled a process that was not the run's")
+
+	out, err = exec.Command(ape, "run", "wait", "reused", "--cwd", project, "--timeout", "5s").CombinedOutput()
+	require.Equal(t, 76, exitStatus(err), "a stranger's pid is a lost run, not a running one: %s", out)
+}

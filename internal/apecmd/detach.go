@@ -247,7 +247,7 @@ func waitDetached(ctx context.Context, cmd *cobra.Command, path string, timeout 
 			}
 			return reportedErr(*h.ExitCode, fmt.Errorf("the detached run exited %d", *h.ExitCode))
 		}
-		if h.SupervisorPID != 0 && !pidAlive(h.SupervisorPID) {
+		if h.SupervisorPID != 0 && !supervisorIsOurs(ctx, h) {
 			// Re-read once: the supervisor may have recorded the exit
 			// between the two reads and then ended.
 			if h2, err := readHandle(path); err == nil && h2.ExitCode != nil {
@@ -288,7 +288,7 @@ func newRunStatusCmd() *cobra.Command {
 			switch {
 			case h.ExitCode != nil:
 				state = fmt.Sprintf("ended, exit %d", *h.ExitCode)
-			case h.SupervisorPID != 0 && !pidAlive(h.SupervisorPID):
+			case h.SupervisorPID != 0 && !supervisorIsOurs(cmd.Context(), h):
 				state = "gone without recording an exit"
 			}
 			enc := json.NewEncoder(cmd.OutOrStdout())
@@ -335,10 +335,11 @@ already ended.`,
 				fmt.Fprintf(out, "run %s had already ended with exit %d\n", h.ID, *h.ExitCode)
 				return nil
 			}
-			if h.SupervisorPID == 0 || !pidAlive(h.SupervisorPID) {
-				return usageErrExit(exitCodeRunLost, fmt.Errorf("run %s: its supervisor is gone without recording an exit", h.ID))
+			// Identity, not just liveness: a pid is reused once its process is
+			// gone, and stop must never signal a process that is not this run's.
+			if err := stopDetached(cmd.Context(), h); err != nil {
+				return usageErrExit(exitCodeRunLost, err)
 			}
-			stopDetached(h)
 			deadline := time.Now().Add(timeout)
 			for time.Now().Before(deadline) {
 				if h2, err := readHandle(path); err == nil && h2.ExitCode != nil {

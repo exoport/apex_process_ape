@@ -85,6 +85,14 @@
     on. Asked for by the framework.
   - `ape run stop <id>` stops the run as Ctrl-C would, then waits for its
     exit to be recorded.
+  - It only ever signals the run's own process. A pid is reused once its
+    process is gone, so before signalling, ape checks the process is still
+    this run's: on Unix by its `ape run supervise --handle …/<id>.json`
+    command line, and on Windows by being an `ape` process created after
+    the handle. Anything else is refused with 76, and nothing is signalled.
+    `run wait` and `run status` make the same check, so a reused pid reads
+    as lost rather than running. The test points a handle at an unrelated
+    live process, and fails without the check.
   - Verified: the supervisor survives SIGKILL of the starting shell's
     whole session, and the test fails without `setsid`.
 - **Stopping a run stops what the skill started** (class B). Claude's Bash

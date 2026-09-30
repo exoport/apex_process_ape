@@ -68,6 +68,16 @@ mistake an outcome for "not yet".
   - It exits 0 once the run has ended, whatever the run's own code;
     `ape run wait` reports that code.
   - It exits 75 if the run hasn't ended in time.
+  - **It only ever signals the run's own process.** A pid is reused once its
+    process is gone, so the handle's pid alone proves nothing. Before
+    signalling, ape checks the process is still this run's:
+    - Linux and macOS: its command line must be
+      `ape run supervise --handle …/detached/<id>.json`.
+    - Windows: it must be an `ape` process created after the handle was
+      written.
+    - Anything else is refused: nothing is signalled, and it exits 76. `ape
+      run wait` makes the same check, so a reused pid reads as a lost run,
+      not a running one.
 
 The handles live under `{output_folder}/ape/detached/`. They are records of
 the supervisor, not runs: each run still writes its own manifest where it
