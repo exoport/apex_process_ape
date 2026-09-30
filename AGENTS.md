@@ -144,7 +144,18 @@ make clean         # remove build artifacts
 
 ### Releases
 
-Two-step verification flow — see `docs/how-to/pre-tag-release.md` for the full guide. The automated walkthrough lives in `.claude/skills/release/SKILL.md` (`/release vX.Y.Z`).
+**Evaluate before releasing.** The framework, ape and the eval share one release workflow (agreed 2026-09-29): nothing that can change framework behaviour or eval results reaches the teams who consume these releases until the eval has measured it. ape's part:
+
+- **Every change has a class**, and a release is gated by the highest class it contains:
+  - **B, session-driving**: model aliases, effort, spawn flags, the PTY and hook contract, idle/timeouts, nesting. Needs an rc and an eval gate; a new eval baseline when the model or effort changes.
+  - **C, a surface skills or the eval use**: anything in the framework's `_apex/ape-commands.yaml`, `ape framework setup/update` and the migration runner, and the files the eval reads (`manifest.json`, `prompt.yaml`, step ndjson, `hook-events.jsonl`, cost fields). Needs an rc, the eval's conformance check, and the stages that call it.
+  - **D, independent**: new verbs no skill calls, TUI, docs, `ape aboard`, `ape sandbox`/`aped`, release tooling, tests. ape's own gates plus the eval's free tier; released directly, any time.
+  - Pricing alone changes recorded costs, not behaviour: `ape costs reprice` re-prices an existing corpus, so it needs no new capture.
+- **B and C ship through a release candidate.** `/release vX.Y.Z-rc.N` publishes a signed GitHub **prerelease**, which `ape update`, the install docs and `releases/latest/download` all skip. The eval pins it by tag AND commit. A finding is fixed with new commits and a new rc; tags never move.
+- **Release = promotion.** `/release vX.Y.Z` tags the last rc's EXACT commit final, with no new commit, after the user confirms the eval passed. The binary is rebuilt (its version and date are stamped at build time), so the release's identity is the COMMIT; the eval then smoke-tests the released binary. The dated `## vX.Y.Z` CHANGELOG section is written before the first rc, so promotion adds nothing.
+- **ape tags its final before any framework release that raises the framework's ape floor.**
+
+Two-step verification flow — see `docs/how-to/pre-tag-release.md` for the full guide. The automated walkthrough lives in `.claude/skills/release/SKILL.md` (`/release vX.Y.Z-rc.N`, `/release vX.Y.Z`).
 
 1. **Local gate** — run `make ci-local`. Runs test + lint + vuln + docs-check + generated-CLI-reference sync + price-table coverage + Windows cross-compile + goreleaser snapshot. ~30–60 s. Catches per-platform compile errors, release-config regressions, and a model price table that has gone stale against the locally-installed Claude Code.
 
@@ -156,21 +167,21 @@ Two-step verification flow — see `docs/how-to/pre-tag-release.md` for the full
    git push origin main
    ```
    The CI workflow re-runs the full Linux + Windows matrix against the pushed SHA. Wait for it to finish green before tagging.
-3. **Final tag** — once main's CI is green:
+3. **Tag** — once main's CI is green: an rc (`vX.Y.Z-rc.N`), a promotion (`vX.Y.Z` on the last rc's commit), or a direct class-D release (`vX.Y.Z`):
    ```bash
-   git tag -a v0.0.X -m "v0.0.X — what changed"
-   git push origin v0.0.X
+   git tag -a v0.4.0-rc.1 -m "v0.4.0-rc.1 — release candidate: what changed"
+   git push origin v0.4.0-rc.1
    ```
-   `release.yml` builds linux/darwin/windows × amd64/arm64, signs the checksums file via keyless cosign (Sigstore Fulcio), and uploads everything to GitHub Releases. No manual release steps.
+   `release.yml` builds linux/darwin/windows × amd64/arm64, signs the checksums file via keyless cosign (Sigstore Fulcio), and uploads everything to GitHub Releases, as a prerelease for an rc. No manual release steps.
 
-> The earlier flow used a `vX.Y.Z-rcN` pre-release tag as the remote gate. It was dropped after the v0.0.21 incident — rc and final annotated tags landing on the same commit confused goreleaser's `git describe`-based tag resolution and misrouted the build to the rc prerelease. The push-to-`main` CI run replaces that gate; the final tag is the only annotated tag on the commit, so goreleaser cannot pick the wrong one.
+> **Two tags on one commit is the v0.0.21 incident**, and promotion does it on purpose. goreleaser resolves its tag with `git describe`, so with an rc and a final on the same commit it picked the rc and built the final as the rc. That is why the rc cycle was once dropped. release.yml now sets `GORELEASER_CURRENT_TAG` to the pushed tag, and for a final sets `GORELEASER_PREVIOUS_TAG` to the previous FINAL, so its changelog covers every rc and not only the last one. Both were reproduced and fixed with goreleaser v2.18.0 on a dual-tagged scratch commit. The release skill still checks the published tag, the prerelease flag, `releases/latest` and the binary's own version, because the real run is the only proof.
 
 Tag filter shape:
 
 | Workflow      | Triggered by                                                          |
 | ------------- | --------------------------------------------------------------------- |
 | `ci.yml`      | push to `main`, pull request                                          |
-| `release.yml` | push of a final-semver tag `vX.Y.Z` only (no suffix)                  |
+| `release.yml` | push of `vX.Y.Z` (final) or `vX.Y.Z-rc.N` (prerelease); any other shape fails the "Validate tag" step before a build |
 
 Verifying a release locally (releases ship `ape_checksums.txt.bundle`, a
 Sigstore bundle — cert + signature + SCT + Rekor proof — verifiable offline;

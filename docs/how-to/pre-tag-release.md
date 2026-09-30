@@ -6,18 +6,36 @@ A safe release sequence that catches Windows-runtime and release-config bugs *be
 
 The naive release flow (`git tag v0.0.X && git push origin v0.0.X`) triggers the public Release workflow immediately. If the tagged SHA has a Windows-only test bug, you ship a broken release — exactly what happened between v0.0.18 and v0.0.19. This guide describes the two-step gate that prevents it.
 
-> **History — why this guide no longer uses an rc tag.** Earlier
-> versions of this flow used a `vX.Y.Z-rcN` pre-release tag to drive
-> the remote CI gate. That was dropped after the v0.0.21 incident:
-> when the rc and final annotated tags landed on the same commit,
-> goreleaser's `git describe`-based tag resolution misrouted the
-> build artifacts to the rc prerelease and no `v0.0.21` GitHub
-> Release was ever created. The same misrouting silently affected
-> v0.0.20. The fix is to skip the rc cycle entirely — push to `main`,
-> wait for the regular CI run to pass on the SHA you'll tag, then
-> push the final tag against the same SHA. The final tag is the only
-> annotated tag on that commit, so goreleaser cannot pick the wrong
-> one.
+## Release candidates, promotion, and the v0.0.21 incident
+
+Changes that can move framework behaviour or eval results (class B and C, see
+`AGENTS.md` → "Releases") are released through a **release candidate**, which
+the eval measures before anything reaches the teams who install ape:
+
+1. Date the `## vX.Y.Z` CHANGELOG section and commit it, then run this whole
+   guide on that commit and tag `vX.Y.Z-rc.1` (`/release vX.Y.Z-rc.1`). The
+   release workflow publishes it as a signed GitHub **prerelease**:
+   `ape update`, the install docs and `releases/latest/download` all skip it.
+2. The eval pins the rc by tag and commit. A finding is fixed with new commits
+   and a new `-rc.N`; tags never move.
+3. When the eval passes and the user agrees, **promote**: tag `vX.Y.Z` on the
+   last rc's exact commit (`/release vX.Y.Z`), with no new commit and no
+   re-run of these gates, which already ran on that commit.
+
+Class-D changes (docs, TUI, `ape aboard`, `ape sandbox`, release tooling, new
+verbs no skill calls) may still release directly, with no rc.
+
+> **History.** Promotion puts two annotated tags on one commit, which is exactly
+> the v0.0.21 incident: goreleaser resolves its tag with `git describe`, picked
+> the rc, and built the final as the rc. No `v0.0.21` Release was ever created,
+> and v0.0.20 was silently affected too. The rc cycle was dropped because of it.
+> It is back because `release.yml` now tells goreleaser which tag it is
+> building (`GORELEASER_CURRENT_TAG`) and, for a final, which final came before
+> it (`GORELEASER_PREVIOUS_TAG`), so the changelog covers every rc of the cycle.
+> Both were reproduced and fixed with goreleaser v2.18.0 on a dual-tagged
+> scratch commit. The release skill still checks the published tag, the
+> prerelease flag, `releases/latest` and the binary's own version, because
+> only the real run is proof.
 
 ## Step 1 — local verification
 
@@ -177,9 +195,9 @@ If the push-to-`main` CI fails, **don't** tag. Push more commits to `main` until
 | Workflow      | Trigger condition                                                  |
 | ------------- | ------------------------------------------------------------------ |
 | `ci.yml`      | push to `main`, pull request                                       |
-| `release.yml` | push of a `vX.Y.Z` final-semver tag (no suffix)                    |
+| `release.yml` | push of `vX.Y.Z` (final) or `vX.Y.Z-rc.N` (published as a prerelease) |
 
-`release.yml`'s `push.tags` glob `v[0-9]+.[0-9]+.[0-9]+` is not end-anchored, so it would still match a stray tag like `v1.2.3-rc1`. A job-level `if: !contains(github.ref_name, '-')` guard keeps the workflow safe even if a pre-release tag slips past the glob.
+`release.yml`'s `push.tags` globs are not end-anchored, so they also match shapes like `v1.2.3-beta` or `v1.2.3-rc.1x`. Its first step, "Validate tag", accepts exactly the two shapes above and fails anything else before a build.
 
 ## When to skip step 2
 

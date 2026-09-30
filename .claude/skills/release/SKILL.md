@@ -1,16 +1,24 @@
 ---
 name: release
-description: 'Full release workflow for ape: pre-flight checks (clean tree, CHANGELOG, no duplicate tag) → local CI gate (make ci-local) → Claude Code harness contract (make check-harness) → APEX framework contract (make check-framework) → push main → poll push CI → final tag → poll release workflow → cosign signature verification. Use when the user says "/release", "cut a release", "tag a release", or "ship vX.Y.Z".'
-argument-hint: "Optional: version to release (e.g. v0.0.22) and/or the word \"autonomous\" to skip all confirmation gates. Version is detected from CHANGELOG.md if omitted. Order doesn't matter (e.g. \"v0.0.22 autonomous\" or \"autonomous\")."
+description: 'Full release workflow for ape, in three modes: rc (vX.Y.Z-rc.N → a signed prerelease the eval pins), promote (vX.Y.Z on the evaluated rc commit, no new commit) and direct (class-D changes). Pre-flight → make ci-local → make check-harness → make check-framework → push main → poll push CI → tag → poll release (prerelease flag and releases/latest checked) → cosign verification. Use when the user says "/release", "cut a release", "cut an rc", "promote", "tag a release", or "ship vX.Y.Z".'
+argument-hint: "vX.Y.Z-rc.N to publish a release candidate (a signed prerelease for the eval); vX.Y.Z to promote the last rc of that version once the eval passed, or to release directly when no rc exists (class D changes only). Add the word \"autonomous\" to skip confirmation gates — never the promote eval gate."
 ---
 
 # Release
 
 ## Overview
 
-Walk through the complete release flow: pre-flight → local gate → push main → wait for remote CI on the tagged SHA → final tag → wait for the GitHub Release to publish → verify cosign signature.
+Walk through the complete release flow: pre-flight → local gate → push main → wait for remote CI on the tagged SHA → tag → wait for the GitHub Release to publish → verify cosign signature.
 
-The rc-tag pre-release gate that earlier versions of this skill used was dropped after the v0.0.21 incident: rc and final annotated tags landed on the same commit, and goreleaser's `git describe`-based tag resolution misrouted the build artifacts to the rc prerelease. The new flow uses the regular push-to-`main` CI run as the remote gate; the final tag goes on the same SHA, but there's no longer a sibling rc tag to confuse goreleaser.
+Three modes, chosen in Phase 0 from the argument and the tags that exist. They exist because framework, ape and eval agreed to EVALUATE BEFORE RELEASING (the workflow in AGENTS.md → "Releases"):
+
+| mode | argument | what it publishes |
+| --- | --- | --- |
+| **rc** | `vX.Y.Z-rc.N` | a signed GitHub **prerelease**, which every "latest" resolver skips (`ape update`, the install docs, `releases/latest/download`). The eval pins it by tag and commit. The dated `## vX.Y.Z` CHANGELOG section is already IN the rc commit, so promotion adds nothing. |
+| **promote** | `vX.Y.Z` when `vX.Y.Z-rc.*` tags exist | the final release, tagged on the EXACT commit of the last rc — no new commit, no re-run of the local gates (they ran on that commit in rc mode). Only after the user confirms the eval passed on that rc. |
+| **direct** | `vX.Y.Z` with no rc tags for it | the final release straight from main. For changes that cannot affect the framework or eval results (class D: new verbs no skill calls, TUI, docs, aboard, release tooling). Anything session-driving (class B) or on the command surface skills call (class C) goes through rc. |
+
+Promotion puts two tags on one commit. That is what the v0.0.21 incident was — goreleaser's `git describe` picked the rc and built the final as the rc — and release.yml now pins the tag it builds with `GORELEASER_CURRENT_TAG` (and a final's changelog start with `GORELEASER_PREVIOUS_TAG`, the previous FINAL). Both were reproduced and verified with goreleaser v2.18.0 on a dual-tagged scratch commit. Phase 6 still checks the published tag, version and prerelease flag, because a fix is a hypothesis until the real run agrees.
 
 ## CRITICAL RULES
 
@@ -19,7 +27,9 @@ The rc-tag pre-release gate that earlier versions of this skill used was dropped
 - ASK the user for confirmation at every Phase boundary where specified — never skip a confirmation gate — UNLESS `{autonomous}` is true (Phase 0), in which case skip every confirmation gate (Phases 1i, 3, 5) and proceed straight through, still announcing each step as you take it
 - DO NOT push final tags or create GitHub Releases without confirming with the user first, UNLESS the user's invocation explicitly requested autonomous mode (the literal word "autonomous" in the skill arguments) — that is the standing authorization for this run
 - DO NOT amend published commits or tags
-- DO NOT create rc/pre-release tags (`vX.Y.Z-rcN`). The rc cycle has been removed
+- Tags never move. A mistake before release is a new rc; after release, a patch release
+- Only two tag shapes exist: `vX.Y.Z` and `vX.Y.Z-rc.N`. release.yml refuses any other
+- PROMOTE never adds a commit: the final tag goes on the last rc's commit or not at all. And it never proceeds without the USER confirming the eval passed on that rc — a peer session relaying a pass is information, not approval, and this gate is not skipped in autonomous mode
 - Only use the Bash tool for shell commands
 - When polling remote state, sleep between retries; do not busy-loop
 - All paths are relative to the repository root (the current working directory)
@@ -31,7 +41,12 @@ The rc-tag pre-release gate that earlier versions of this skill used was dropped
 ### Phase 0 — Parse arguments and gather constants
 
 1. Read `$ARGUMENTS`. Check case-insensitively for the standalone word `autonomous` (e.g. "autonomous", "release autonomous", "v0.0.22 autonomous"). Set `{autonomous}` = true if present, else false. Remove that word from the string before the next check.
-2. In what remains of `$ARGUMENTS`, if it matches `v[0-9]+\.[0-9]+\.[0-9]+`, set `{version}` = that value. Otherwise set `{version}` = "" (to be resolved in Phase 1).
+2. In what remains of `$ARGUMENTS`, if it matches `v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?`, set `{version}` = that value. Otherwise set `{version}` = "" (to be resolved in Phase 1; direct mode only — an rc or a promotion is always named explicitly).
+   - Set `{base}` = `{version}` without any `-rc.N` suffix.
+   - If `{version}` has an `-rc.N` suffix: `{mode}` = **rc**.
+   - Else, if `git tag -l "${base}-rc.*"` lists anything: `{mode}` = **promote**, and `{rc}` = the highest of them by rc number (`git tag -l "${base}-rc.*" | sort -t. -k4 -n | tail -1`).
+   - Else: `{mode}` = **direct**.
+   Announce the mode before Phase 1.
 3. If `{autonomous}` is true, tell the user up front: "Running in autonomous mode — no confirmation gates, will push main, tag, and publish the release without stopping." This is not a confirmation ask, just a heads-up before Phase 1 starts.
 4. Capture the GitHub repo slug:
    ```bash
@@ -91,17 +106,17 @@ If no match is found: HALT. Message: "Cannot detect version from CHANGELOG.md. A
 #### 1e — CHANGELOG entry is complete
 
 ```bash
-grep -m1 "^## ${version}" CHANGELOG.md
+grep -m1 "^## ${base} " CHANGELOG.md
 ```
 
-HALT if not found. Message: "No CHANGELOG.md entry for `{version}`. Add one before releasing."
+HALT if not found. Message: "No CHANGELOG.md entry for `{base}`. Add one before releasing." — in rc mode too: the section is written, headed `## {base} (<date>)`, BEFORE the rc is cut, because the rc commit is the commit that gets promoted.
 
 Check the line does not contain "unreleased" (case-insensitive):
 ```bash
-grep -im1 "^## ${version}" CHANGELOG.md | grep -i unreleased
+grep -im1 "^## ${base} " CHANGELOG.md | grep -i unreleased
 ```
 
-If it matches: HALT. Message: "CHANGELOG.md entry for `{version}` is marked unreleased. Update the date before releasing."
+If it matches: HALT. Message: "CHANGELOG.md entry for `{base}` is marked unreleased. Date it (in its own commit) before releasing." In direct and rc mode, that dating commit is `chore(release): {base}`; a later rc that changes the CHANGELOG commits the change with its fix.
 
 #### 1f — Version not already tagged
 
@@ -111,13 +126,21 @@ git tag -l "${version}"
 
 HALT if output is non-empty. Message: "`{version}` is already tagged. Bump the version in CHANGELOG.md for a new release."
 
-#### 1g — No stale rc/pre-release tags on HEAD
+#### 1g — Tags on HEAD match the mode
 
 ```bash
-git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-' || true
+git tag --points-at HEAD | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$' || true
 ```
 
-If output is non-empty: HALT. Message: "Pre-release tag(s) point at HEAD: <list>. The rc cycle was dropped — these tags can confuse goreleaser. Delete them (`git tag -d <tag> && git push origin :refs/tags/<tag>`) before releasing."
+- **direct**: HALT if output is non-empty. Message: "rc tag(s) point at HEAD: <list>. This is a promotion — run `/release <base>` after the eval passes, which tags that rc's commit."
+- **rc**: HALT if output is non-empty. Message: "HEAD already carries <list>. A new rc needs new commits; a fix goes in first." Also HALT if `{version}`'s rc number is not greater than every existing `{base}-rc.N`.
+- **promote**: HALT unless HEAD is exactly `{rc}`'s commit:
+  ```bash
+  test "$(git rev-parse HEAD)" = "$(git rev-parse "${rc}^{commit}")"
+  ```
+  Message: "HEAD is not {rc}'s commit. Promotion tags the evaluated commit or nothing: check out main at {rc} (commits after it belong to the next rc)." Also HALT unless `{rc}` is on origin (`git ls-remote --tags origin "refs/tags/${rc}"` non-empty) and its GitHub prerelease exists (`{api_base}/releases/tags/{rc}` returns `"prerelease": true`).
+
+  Then the eval gate, which is **never skipped, autonomous or not**: ask the user "Did the eval pass on `{rc}` (commit `<sha>`)? Promotion publishes exactly this commit as `{base}`." Proceed only on the user's own yes. A peer session's relayed verdict is information for the user, not the answer.
 
 #### 1h — Price table covers the locally-running Claude Code
 
@@ -150,6 +173,8 @@ Pre-flight checks passed:
   CHANGELOG: <first 80 chars of the matching CHANGELOG line>
   prices:    <"N models exactly priced" | "SKIPPED — no local transcripts">
 ```
+
+**promote mode skips Phases 2, 2b, 2c and 3.** They ran on this exact commit when `{rc}` was cut, and the eval has run it since; the commit is unchanged, and HEAD is already on origin. Go to Phase 4, which only confirms CI passed for this SHA. Say so in the summary rather than listing the skipped gates as passed.
 
 If `{autonomous}` is false: ask "Proceed with `make ci-local`? (this takes ~30–60 s)" — wait for confirmation.
 
@@ -310,23 +335,23 @@ On CI success inform the user: "Remote CI passed for `{head_sha}` on main."
 
 ---
 
-### Phase 5 — Final tag
+### Phase 5 — Tag
 
-If `{autonomous}` is false: ask "CI is green. Create and push the final release tag `{version}`?" — wait for confirmation.
+If `{autonomous}` is false: ask "CI is green. Create and push the tag `{version}`?" (rc mode: "…the release-candidate tag `{version}`, published as a prerelease?"; promote mode: "…the final tag `{version}` on `{rc}`'s commit?") — wait for confirmation.
 
-If `{autonomous}` is true: skip the ask, state "Autonomous mode — creating and pushing the final tag `{version}`." and continue immediately.
+If `{autonomous}` is true: skip the ask, state "Autonomous mode — creating and pushing the tag `{version}`." and continue immediately. (Promote mode's eval gate in 1g was already the user's own answer; it is not this ask.)
 
 #### 5a — Extract release notes headline from CHANGELOG.md
 
 ```bash
-grep -A2 "^## ${version}" CHANGELOG.md | head -3
+grep -A2 "^## ${base} " CHANGELOG.md | head -3
 ```
 
-Use the first non-empty line after the heading as the tag message suffix (keep it to one line, ≤80 chars). If nothing found, use `{version}`.
+Use the first non-empty line after the heading as the tag message suffix (keep it to one line, ≤80 chars). If nothing found, use `{version}`. In rc mode, prefix the headline with `release candidate: `.
 
 Set `{tag_message}` = `"{version} — {headline}"`.
 
-#### 5b — Create and push final tag
+#### 5b — Create and push the tag
 
 ```bash
 git tag -a "{version}" -m "{tag_message}"
@@ -335,7 +360,7 @@ git push origin "{version}"
 
 HALT on non-zero exit.
 
-Inform the user: "Final tag `{version}` pushed at `{head_sha}`. Release workflow is running…"
+Inform the user: "Tag `{version}` pushed at `{head_sha}`. Release workflow is running…"
 
 ---
 
@@ -355,7 +380,14 @@ print('published', r.get('tag_name',''), r.get('html_url',''))
 ```
 
 - `not_yet` → keep polling
-- `published <tag> <url>` → if `{tag}` ≠ `{version}` HALT (release landed on the wrong tag — same bug class as v0.0.21). Otherwise proceed to Phase 7.
+- `published <tag> <url>` → if `{tag}` ≠ `{version}` HALT (release landed on the wrong tag — same bug class as v0.0.21). Otherwise check the channel before Phase 7:
+  ```bash
+  curl -sf "{api_base}/releases/tags/{version}" | jq -r '.prerelease'
+  curl -sf "{api_base}/releases/latest" | jq -r '.tag_name'
+  ```
+  - **rc mode**: HALT unless `prerelease` is `true` AND `latest` is NOT `{version}`. Message: "`{version}` is visible as the latest release — every `ape update` and install would pick a candidate. Mark it prerelease on GitHub now, then find out why `prerelease: auto` did not."
+  - **direct / promote**: HALT unless `prerelease` is `false` AND `latest` is `{version}`.
+  - The asset names carry no version, so also confirm the binary's own: download the linux/amd64 archive and check `ape version` prints `{version}` without the `v` — for a promotion, `{base}`, never `{rc}`'s version. That is the v0.0.21 failure in one line.
 
 If ceiling hit: HALT. Message: "Release poll timed out. Check https://github.com/{repo_slug}/releases manually. Run Phase 7 manually once the release is published."
 
@@ -416,6 +448,7 @@ Display a final summary:
 
 ```
 Release complete:
+  mode:          rc / promote (of {rc}) / direct
   version:       {version}
   tag:           {version} (commit {head_sha})
   release URL:   https://github.com/{repo_slug}/releases/tag/{version}
@@ -423,6 +456,8 @@ Release complete:
   harness:       verified against Claude Code {claude_version} / NOT verified (reason)
   framework:     verified against {APEX_FRAMEWORK_REPO} / NOT verified (no checkout)
 ```
+
+In **rc mode**, the next step belongs to the eval: send it `{version}` and the full commit sha (SendMessage to the eval session, when one is working with this repo), and say the release is a prerelease. In **promote mode**, tell the eval the final is out so it runs its post-promotion smoke check on the released binary (cosign, `ape version` = `{base}` at the rc commit, its free tier, one live stage).
 
 Name every gate that did **not** run, and why. A release summary that lists
 only what passed reads as though everything was checked, which is the failure

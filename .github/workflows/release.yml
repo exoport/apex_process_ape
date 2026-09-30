@@ -3,13 +3,15 @@ name: Release
 on:
   push:
     tags:
-      # Only final-semver tags trigger the public release. Pre-release
-      # tags are no longer used (the release skill drove this; the rc
-      # cycle was dropped because rc and final tags landing on the same
-      # SHA confused goreleaser's git-describe tag resolution). The
-      # job-level guard below keeps the workflow safe even if a stray
-      # pre-release tag slips past the glob.
+      # A final release (vX.Y.Z) or a release candidate (vX.Y.Z-rc.N). An rc
+      # is published as a GitHub PRERELEASE (`prerelease: auto` in
+      # .goreleaser.yaml), which every "latest" resolver skips: `ape update`,
+      # the install docs, releases/latest/download. The eval pins an rc by tag
+      # and commit; promotion tags the evaluated rc's commit final. The glob
+      # is not end-anchored, so the "Validate tag" step below is what enforces
+      # the exact shape.
       - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
 
 permissions:
   contents: write
@@ -19,15 +21,37 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    # Belt-and-suspenders: the push.tags glob isn't end-anchored so a
-    # tag like v0.0.20-rc1 still matches `v[0-9]+.[0-9]+.[0-9]+`.
-    # Skip the job for any tag containing a dash.
-    if: "!contains(github.ref_name, '-')"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      # Only two shapes publish. Anything else the glob let through (a
+      # `v1.2.3-beta`, a `v1.2.3-rc.1x`) fails here, before a build.
+      #
+      # The two GORELEASER_* variables are what make "promote = tag the rc
+      # commit final" safe. Without CURRENT, goreleaser picks one of the two
+      # tags on that commit by itself and built the final as the rc (the
+      # v0.0.21 incident; reproduced with goreleaser v2.18.0 on a dual-tagged
+      # scratch commit). Without PREVIOUS, a final's changelog starts at the
+      # rc before its own commit and lists only the last rc's changes; for a
+      # final, the previous tag is the previous FINAL. An rc keeps the default
+      # (its previous tag, rc or final).
+      - name: Validate tag
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            prev="$(git describe --tags --abbrev=0 --exclude '*-*' "${tag}^" 2>/dev/null || true)"
+            echo "GORELEASER_PREVIOUS_TAG=${prev}" >> "$GITHUB_ENV"
+            echo "final release ${tag}, changelog from ${prev:-the first commit}"
+          elif [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
+            echo "release candidate ${tag}: published as a prerelease"
+          else
+            echo "::error::tag ${tag} is neither vX.Y.Z nor vX.Y.Z-rc.N — nothing is published"
+            exit 1
+          fi
+          echo "GORELEASER_CURRENT_TAG=${tag}" >> "$GITHUB_ENV"
 
       - name: Set up Go
         uses: actions/setup-go@v6
