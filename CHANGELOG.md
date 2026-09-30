@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.4.0 (2026-09-30)
 
 - **`ape framework setup` and `update` install RELEASES** (class C; the
   first cycle through the release-candidate process). Until now they
