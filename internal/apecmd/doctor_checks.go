@@ -1212,3 +1212,65 @@ func splitFrameworkAndCustomSkills(names []string) (fwk, custom int) {
 	}
 	return fwk, custom
 }
+
+// checkFrameworkApeVersion compares this ape with the installed framework's
+// min_ape_version. `ape framework update` checks the release it is about to
+// install; this catches the other direction — the ape changed under an
+// installed framework (a downgrade, a different binary on PATH).
+func checkFrameworkApeVersion(_ context.Context, env doctorEnv) CheckResult {
+	if env.ProjectRoot == "" || !isProjectRoot(env.ProjectRoot) {
+		return CheckResult{Status: StatusInfo, Message: "no project root resolved"}
+	}
+	manifest, err := framework.LoadApeCommands(env.ProjectRoot)
+	if err != nil {
+		return CheckResult{
+			Status: StatusWarn, Message: err.Error(),
+			Remediation: "The minimum cannot be read until the manifest parses. `ape framework update` reinstalls it.",
+			FixCommand:  "ape framework update",
+		}
+	}
+	minimum := ""
+	if manifest != nil {
+		minimum = manifest.MinApeVersion
+	}
+	switch framework.CompareApeVersion(Version, minimum) {
+	case framework.ApeVersionNoMinimum:
+		return CheckResult{Status: StatusInfo, Message: "the installed framework declares no min_ape_version"}
+	case framework.ApeVersionUnknown:
+		return CheckResult{
+			Status:  StatusWarn,
+			Message: fmt.Sprintf("ape %s cannot be compared with min_ape_version %s (a dev build or a pseudo-version)", Version, minimum),
+		}
+	case framework.ApeVersionBelow:
+		route := apeUpdateRoute(env.ProjectRoot)
+		return CheckResult{
+			Status:      StatusFail,
+			Message:     fmt.Sprintf("ape %s is older than the installed framework's min_ape_version %s", Version, minimum),
+			Remediation: "Skills will call ape commands and behaviour this ape does not have. Update ape (" + route.name + ").",
+			FixCommand:  route.command("v" + strings.TrimPrefix(minimum, "v")),
+		}
+	case framework.ApeVersionOK:
+	}
+	return CheckResult{Status: StatusOK, Message: fmt.Sprintf("ape %s meets min_ape_version %s", Version, minimum)}
+}
+
+// checkFrameworkTagMoved reports an installed release tag that now names a
+// different commit in the framework clone ($APEX_FRAMEWORK_REPO).
+func checkFrameworkTagMoved(ctx context.Context, env doctorEnv) CheckResult {
+	if env.ProjectRoot == "" || !isProjectRoot(env.ProjectRoot) {
+		return CheckResult{Status: StatusInfo, Message: "no project root resolved"}
+	}
+	meta, err := framework.ReadMetadata(env.ProjectRoot)
+	if err != nil {
+		return CheckResult{Status: StatusInfo, Message: "no framework installed"}
+	}
+	repo := os.Getenv("APEX_FRAMEWORK_REPO")
+	if repo == "" {
+		return CheckResult{Status: StatusInfo, Message: "$APEX_FRAMEWORK_REPO unset — no clone to compare the installed tag against"}
+	}
+	if moved, now := framework.TagMoved(ctx, repo, meta.Framework); moved {
+		return CheckResult{Status: StatusWarn, Message: framework.TagMovedMessage(meta.Framework, now)}
+	}
+	return CheckResult{Status: StatusOK, Message: fmt.Sprintf("%s still names the installed commit",
+		defaultStr(meta.Framework.VersionTag, "(untagged install)"))}
+}

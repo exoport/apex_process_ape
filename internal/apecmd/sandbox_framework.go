@@ -57,7 +57,7 @@ node's framework root.
 
 aped never fetches the framework itself: if a requested ref is not materialized,
 'ape sandbox up' fails with the command to run. Inside the workspace, consume it
-with 'ape framework setup --no-fetch --repo /opt/apex-framework'.`,
+with 'ape framework setup --from-worktree --no-commit --no-fetch --repo /opt/apex-framework'.`,
 	}
 	cmd.AddCommand(newSandboxFrameworkMaterializeCmd(), newSandboxFrameworkLsCmd())
 	return cmd

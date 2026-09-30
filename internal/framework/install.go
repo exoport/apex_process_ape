@@ -74,6 +74,12 @@ type UpdateOptions struct {
 	// Bootstrapper resolves config-bootstrap values when
 	// _apex/config.yaml is absent. Required.
 	Bootstrapper Bootstrapper
+	// Release, when set, installs a release TAG exported from
+	// FrameworkRepo instead of FrameworkRepo's working tree (ape v0.4.0):
+	// the clone is then only read for objects, and the main-only / clean /
+	// fast-forward guards, which protect a working-tree install, do not
+	// apply. nil keeps the working-tree install (`--from-worktree`).
+	Release *ReleaseSelector
 	// NoMigrate leaves pending migrations alone — including the one-time
 	// relocation of run artifacts into _output/ape. Set by `ape framework
 	// update --no-migrate`; setup never sets it.
@@ -87,6 +93,9 @@ type UpdateOptions struct {
 type UpdateResult struct {
 	Metadata Metadata
 	Summary  UpdateSummary
+	// FetchWarning is set when a release install could not fetch tags and
+	// resolved against the tags already in the clone.
+	FetchWarning string
 }
 
 // UpdateSummary is a tally of what changed in the project tree.
@@ -294,13 +303,13 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 	if opts.FrameworkRepo == "" {
 		return nil, &ValidationError{Code: "framework_repo_unset", Detail: "framework repo path is empty (set --repo or $APEX_FRAMEWORK_REPO)"}
 	}
-	if err := validateFrameworkRepo(ctx, opts); err != nil {
-		return nil, err
-	}
-	info, err := readFrameworkInfo(ctx, opts.FrameworkRepo)
+	src, err := resolveInstallSource(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
+	defer src.cleanup()
+	info, source, fetchWarning := src.info, src.source, src.fetchWarning
+	opts = src.opts
 	if err := os.MkdirAll(filepath.Join(opts.ProjectRoot, "_apex"), 0o755); err != nil {
 		return nil, fmt.Errorf("create _apex/: %w", err)
 	}
@@ -418,6 +427,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 		InstalledAt:         now(),
 		Framework: RepoInfo{
 			RepoOrigin: info.origin,
+			Source:     source,
 			VersionTag: info.tag,
 			GitHash:    info.headSHA,
 			GitBranch:  info.branch,
@@ -439,7 +449,8 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 		return nil, err
 	}
 	return &UpdateResult{
-		Metadata: meta,
+		Metadata:     meta,
+		FetchWarning: fetchWarning,
 		Summary: UpdateSummary{
 			SkillsInstalled:         len(installedSkills),
 			SkillsRemoved:           len(removed),
@@ -1018,6 +1029,101 @@ func readFrameworkInfo(ctx context.Context, repo string) (repoInfo, error) {
 	return info, nil
 }
 
+// codeLayoutInvalid is the ValidationError code for a framework tree
+// missing the released layout.
+const codeLayoutInvalid = "framework_layout_invalid"
+
+// releaseSource is a release exported for installing.
+type releaseSource struct {
+	release Release
+	dir     string
+	info    repoInfo
+	cleanup func()
+}
+
+// installSource is where an install copies from, and what it records.
+type installSource struct {
+	opts         *UpdateOptions // FrameworkRepo is the directory to copy from
+	info         repoInfo
+	source       string
+	fetchWarning string
+	cleanup      func()
+}
+
+// resolveInstallSource validates and reads a working-tree source, or
+// resolves and exports a release. For a release, everything the install
+// copies comes from the export, so it takes FrameworkRepo's place in a
+// copy of the options; the caller's are untouched.
+func resolveInstallSource(ctx context.Context, opts *UpdateOptions) (*installSource, error) {
+	if opts.Release == nil {
+		if err := validateFrameworkRepo(ctx, opts); err != nil {
+			return nil, err
+		}
+		info, err := readFrameworkInfo(ctx, opts.FrameworkRepo)
+		if err != nil {
+			return nil, err
+		}
+		return &installSource{opts: opts, info: info, source: SourceWorktree, cleanup: func() {}}, nil
+	}
+	src, err := prepareRelease(ctx, opts.FrameworkRepo, *opts.Release)
+	if err != nil {
+		return nil, err
+	}
+	exported := *opts
+	exported.FrameworkRepo = src.dir
+	return &installSource{
+		opts: &exported, info: src.info, source: SourceTag,
+		fetchWarning: src.release.FetchWarning, cleanup: src.cleanup,
+	}, nil
+}
+
+// ExportRelease resolves and exports a release for READING — `--plan`,
+// `--dry-run`, and the min_ape_version check — exactly as an install would
+// resolve it. The caller must run cleanup.
+func ExportRelease(ctx context.Context, repo string, sel ReleaseSelector) (dir string, rel Release, cleanup func(), err error) {
+	src, err := prepareRelease(ctx, repo, sel)
+	if err != nil {
+		return "", Release{}, nil, err
+	}
+	return src.dir, src.release, src.cleanup, nil
+}
+
+// prepareRelease resolves and exports a release tag from repo. The
+// caller must run cleanup.
+func prepareRelease(ctx context.Context, repo string, sel ReleaseSelector) (*releaseSource, error) {
+	if gitErr := GitRepoError(ctx, repo); gitErr != nil {
+		return nil, notAGitRepoError(repo, gitErr)
+	}
+	rel, err := ResolveRelease(ctx, repo, sel)
+	if err != nil {
+		return nil, err
+	}
+	dir, cleanup, err := ExportTag(ctx, repo, rel.Tag)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateFrameworkLayout(dir); err != nil {
+		// Looked at BEFORE the export is removed, and reported in the
+		// tag's own terms: the export's temporary path means nothing to
+		// the reader.
+		_, buildErr := os.Stat(filepath.Join(dir, "framework", "_apex"))
+		cleanup()
+		if buildErr == nil {
+			return nil, &ValidationError{Code: codeLayoutInvalid, Detail: fmt.Sprintf(
+				"tag %s in %s uses the BUILD layout (framework/_apex): releases install from the ship repo's "+
+					"released layout. Point --repo at the ship repo", rel.Tag, repo)}
+		}
+		return nil, &ValidationError{Code: codeLayoutInvalid, Detail: fmt.Sprintf(
+			"tag %s in %s is not a framework release: it has no %s and %s at its root",
+			rel.Tag, repo, SubtreeSkills, SubtreePipelines)}
+	}
+	info := repoInfo{tag: rel.Tag, headSHA: rel.Commit}
+	if origin, err := RemoteOrigin(ctx, repo); err == nil {
+		info.origin = origin
+	}
+	return &releaseSource{release: rel, dir: dir, info: info, cleanup: cleanup}, nil
+}
+
 // checkProjectSkills runs the project-side skill-deletion safety
 // check: when the project is a git repo, refuse without --force if
 // any tracked apex-* skill has uncommitted edits. Untracked apex-*
@@ -1087,7 +1193,7 @@ func validateFrameworkLayout(repoPath string) error {
 		full := filepath.Join(repoPath, sub)
 		info, err := os.Stat(full)
 		if err != nil || !info.IsDir() {
-			return &ValidationError{Code: "framework_layout_invalid", Detail: "missing or non-directory: " + full}
+			return &ValidationError{Code: codeLayoutInvalid, Detail: "missing or non-directory: " + full}
 		}
 	}
 	return nil
@@ -1291,7 +1397,11 @@ func overrideConfigFields(doc *yaml.Node, bv BootstrapValues) error {
 type StatusOptions struct {
 	ProjectRoot   string
 	FrameworkRepo string // optional; when set, drift fields are populated
-	NoFetch       bool   // skip fetch when reading framework HEAD
+	NoFetch       bool   // skip fetch when reading the framework repo
+	// FromWorktree compares against the repo's working-tree HEAD, as
+	// before ape v0.4.0. Otherwise the comparison is against the newest
+	// release tag, which is what `update` would install.
+	FromWorktree bool
 }
 
 // StatusResult is the payload `ape framework status` returns.
@@ -1301,18 +1411,25 @@ type StatusResult struct {
 	Drift     *Drift    `json:"drift,omitempty"   yaml:"drift,omitempty"`
 }
 
-// Drift summarizes how the project's installed framework state
-// compares to the framework repo's current HEAD. Only populated when
-// FrameworkRepo was provided.
+// Drift summarizes how the project's installed framework compares to
+// what the framework repo offers now. Only populated when FrameworkRepo
+// was provided.
 type Drift struct {
-	HashDrift bool     `json:"hashDrift"       yaml:"hashDrift"`
-	TagDrift  bool     `json:"tagDrift"        yaml:"tagDrift"`
-	Notes     []string `json:"notes,omitempty" yaml:"notes,omitempty"`
+	HashDrift bool `json:"hashDrift" yaml:"hashDrift"`
+	TagDrift  bool `json:"tagDrift"  yaml:"tagDrift"`
+	// TagMoved: the installed version_tag now names a different commit
+	// than the one installed. Tags are meant never to move, so this is
+	// reported loudly and never followed.
+	TagMoved bool `json:"tagMoved" yaml:"tagMoved"`
+	// Ahead: the installed release is newer than the newest final release
+	// — a candidate installed by name. A default `update` keeps it rather
+	// than going backwards.
+	Ahead bool     `json:"ahead,omitempty" yaml:"ahead,omitempty"`
+	Notes []string `json:"notes,omitempty" yaml:"notes,omitempty"`
 }
 
-// Status reads a project's framework.yaml, optionally compares it
-// against the framework repo's current HEAD, and returns a structured
-// drift report.
+// Status reads a project's framework.yaml, optionally compares it with
+// the framework repo, and returns a structured drift report.
 func Status(ctx context.Context, opts StatusOptions) (*StatusResult, error) {
 	if opts.ProjectRoot == "" {
 		return nil, errors.New("StatusOptions.ProjectRoot is required")
@@ -1328,11 +1445,47 @@ func Status(ctx context.Context, opts StatusOptions) (*StatusResult, error) {
 	if err := EnsureGitAvailable(); err != nil {
 		return nil, err
 	}
-	if err := validateFrameworkLayout(opts.FrameworkRepo); err != nil {
-		return nil, err
-	}
 	if gitErr := GitRepoError(ctx, opts.FrameworkRepo); gitErr != nil {
 		return nil, notAGitRepoError(opts.FrameworkRepo, gitErr)
+	}
+	if opts.FromWorktree {
+		return worktreeStatus(ctx, opts, meta, res)
+	}
+	rel, err := ResolveRelease(ctx, opts.FrameworkRepo, ReleaseSelector{Fetch: !opts.NoFetch})
+	if err != nil {
+		return nil, err
+	}
+	current := &RepoInfo{Source: SourceTag, VersionTag: rel.Tag, GitHash: rel.Commit}
+	if origin, err := RemoteOrigin(ctx, opts.FrameworkRepo); err == nil {
+		current.RepoOrigin = origin
+	}
+	res.Current = current
+	drift := &Drift{TagDrift: meta.Framework.VersionTag != rel.Tag}
+	if rel.FetchWarning != "" {
+		drift.Notes = append(drift.Notes, rel.FetchWarning)
+	}
+	if InstalledIsAhead(meta.Framework.VersionTag, rel.Tag) {
+		drift.TagDrift, drift.Ahead = false, true
+		drift.Notes = append(drift.Notes, fmt.Sprintf("installed %s is newer than the newest release %s (a candidate, "+
+			"installed by name); \"ape framework update\" keeps it — pass --version to change it", meta.Framework.VersionTag, rel.Tag))
+	}
+	if drift.TagDrift {
+		drift.Notes = append(drift.Notes, fmt.Sprintf("installed %s, newest release %s — run \"ape framework update\"",
+			defaultTag(meta.Framework.VersionTag), rel.Tag))
+	}
+	if moved, now := TagMoved(ctx, opts.FrameworkRepo, meta.Framework); moved {
+		drift.TagMoved = true
+		drift.Notes = append(drift.Notes, TagMovedMessage(meta.Framework, now))
+	}
+	res.Drift = drift
+	return res, nil
+}
+
+// worktreeStatus is the pre-v0.4.0 comparison against the working tree's
+// HEAD, kept for --from-worktree installs.
+func worktreeStatus(ctx context.Context, opts StatusOptions, meta *Metadata, res *StatusResult) (*StatusResult, error) {
+	if err := validateFrameworkLayout(opts.FrameworkRepo); err != nil {
+		return nil, err
 	}
 	if !opts.NoFetch {
 		// Best-effort fetch — don't ff-merge for a status read.
@@ -1348,6 +1501,7 @@ func Status(ctx context.Context, opts StatusOptions) (*StatusResult, error) {
 	}
 	current := &RepoInfo{
 		RepoOrigin: info.origin,
+		Source:     SourceWorktree,
 		VersionTag: info.tag,
 		GitHash:    info.headSHA,
 		GitBranch:  info.branch,
@@ -1363,10 +1517,39 @@ func Status(ctx context.Context, opts StatusOptions) (*StatusResult, error) {
 	}
 	if drift.TagDrift {
 		drift.Notes = append(drift.Notes,
-			fmt.Sprintf("installed version_tag %q differs from framework HEAD tag %q — run \"ape framework update\"", meta.Framework.VersionTag, current.VersionTag))
+			fmt.Sprintf("installed version_tag %q differs from framework HEAD tag %q — run \"ape framework update --from-worktree\"", meta.Framework.VersionTag, current.VersionTag))
 	}
 	res.Drift = drift
 	return res, nil
+}
+
+// TagMoved reports whether the installed version_tag now names a different
+// commit in repo than the one recorded at install, and that commit. An
+// install with no tag, or a tag the repo does not have, is not "moved":
+// there is nothing to compare.
+func TagMoved(ctx context.Context, repo string, installed RepoInfo) (moved bool, now string) {
+	if installed.VersionTag == "" || installed.GitHash == "" {
+		return false, ""
+	}
+	now, err := TagCommit(ctx, repo, installed.VersionTag)
+	if err != nil || now == "" || now == installed.GitHash {
+		return false, ""
+	}
+	return true, now
+}
+
+// TagMovedMessage is the warning for a moved tag. Its prefix is stable:
+// callers and the eval's fixtures match on "framework tag moved:".
+func TagMovedMessage(installed RepoInfo, now string) string {
+	return fmt.Sprintf("framework tag moved: %s was installed at %s, and now names %s. Release tags are meant never "+
+		"to move — find out which history is right before updating over it", installed.VersionTag, installed.GitHash, now)
+}
+
+func defaultTag(tag string) string {
+	if tag == "" {
+		return "(untagged)"
+	}
+	return tag
 }
 
 func short(sha string) string {

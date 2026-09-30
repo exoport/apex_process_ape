@@ -142,6 +142,8 @@ var allChecks = []doctorCheck{
 	{Name: "framework.output_styles", Run: checkOutputStyles},
 	{Name: "framework.change_routes", Run: checkChangeRoutes},
 	{Name: "framework.command_surface", Required: true, Run: checkCommandSurface},
+	{Name: "framework.ape_version", Required: true, Run: checkFrameworkApeVersion},
+	{Name: "framework.tag_moved", Run: checkFrameworkTagMoved},
 	{Name: "aboard.skill_reference", Run: checkAboardSkillReference},
 	{Name: "runs.legacy_layout", Run: checkRunLayoutLegacy},
 	{Name: "kvm.available", Run: checkKVMAvailable},
@@ -238,6 +240,17 @@ silent:
                                 pre-{output_folder}/ape paths. Until they
                                 move, cost rollups and the hook check read
                                 a project with no history.
+  framework.ape_version         whether this ape meets the installed
+                                framework's min_ape_version
+                                (_apex/ape-commands.yaml, framework
+                                v0.27.0+). FAIL below it; WARN for a dev
+                                build or pseudo-version, which cannot be
+                                compared; INFO when none is declared. An
+                                rc of exactly the minimum meets it.
+  framework.tag_moved           whether the installed release tag now
+                                names a different commit in
+                                $APEX_FRAMEWORK_REPO than the one
+                                installed. Tags are meant never to move.
   framework.command_surface     whether this binary provides every ape
                                 command the installed framework declares
                                 it requires (_apex/ape-commands.yaml). The

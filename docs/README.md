@@ -59,6 +59,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [Why `ape` never runs inside a session `ape` started](explanation/nested-ape-runs.md) — the `APE_SESSION` marker, the nesting refusal, and why the outer run's lifecycle closed that path
 - [Bridge architecture](explanation/bridge-architecture.md) — the MCP bridge, SSE broker, and orchestrator behind `--web`
 - [Why project-local pipelines](explanation/why-project-local-pipelines.md) — design rationale for moving from embedded to on-disk specs in v0.0.6
+- [`ape framework update` installs releases](explanation/framework-updates-from-releases.md) — why setup and update install a release tag rather than the clone's `main` (v0.4.0), how `min_ape_version` is checked, and the commits that record an install
 - [Why setup and update are separate](explanation/why-setup-and-update-are-separate.md) — the v0.0.7 split of `framework update` into two commands
 - [Why streaming events](explanation/why-streaming-events.md) — design rationale for live event streaming in the v0.0.7 pipeline TUI
 

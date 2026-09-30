@@ -45,6 +45,11 @@ type ApeCommands struct {
 	// as written: a space-separated path, conventionally including the
 	// leading `ape`.
 	Required []string
+	// MinApeVersion is the oldest ape the framework release works with
+	// (`min_ape_version:`, framework v0.27.0+), as written. Empty when the
+	// manifest declares none — every framework before the field existed —
+	// which means "no minimum", reported as such rather than assumed.
+	MinApeVersion string
 }
 
 // apeCommandsFile is the on-disk shape. Only required_commands is decoded;
@@ -54,6 +59,7 @@ type ApeCommands struct {
 //nolint:tagliatelle // snake_case is the framework's on-disk contract, not ape's to rename
 type apeCommandsFile struct {
 	RequiredCommands []string `yaml:"required_commands"`
+	MinApeVersion    string   `yaml:"min_ape_version"`
 }
 
 // LoadApeCommands reads `_apex/ape-commands.yaml` from a project.
@@ -70,11 +76,17 @@ func LoadApeCommands(projectRoot string) (*ApeCommands, error) {
 		}
 		return nil, fmt.Errorf("read %s: %w", ProjectApeCommands, err)
 	}
+	return ParseApeCommands(data)
+}
+
+// ParseApeCommands decodes a manifest's bytes — from a project, or from a
+// release tag before anything is installed (`git show <tag>:…`).
+func ParseApeCommands(data []byte) (*ApeCommands, error) {
 	var f apeCommandsFile
 	if err := yaml.Unmarshal(data, &f); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", ProjectApeCommands, err)
 	}
-	out := &ApeCommands{}
+	out := &ApeCommands{MinApeVersion: strings.TrimSpace(f.MinApeVersion)}
 	for _, entry := range f.RequiredCommands {
 		if e := strings.TrimSpace(entry); e != "" {
 			out.Required = append(out.Required, e)

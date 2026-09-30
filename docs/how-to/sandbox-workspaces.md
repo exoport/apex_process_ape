@@ -274,7 +274,7 @@ and framework-free** — built from the separate public **`exoport/ape-sandbox`*
 repo and published to the public `ghcr.io/exoport` package. The **private** APEX
 framework is **not** baked; `aped` mounts a pinned host-side framework checkout
 read-only at `/opt/apex-framework` at runtime (PLAN-20), and a workspace installs
-it with `ape framework setup --no-fetch`.
+it with `ape framework setup --from-worktree --no-commit --no-fetch` (the mount IS the chosen ref, so it installs the mount as it stands; ape v0.4.0 made that explicit).
 
 ### `ape` inside a workspace
 

@@ -2822,6 +2822,17 @@ silent:
                                 pre-{output_folder}/ape paths. Until they
                                 move, cost rollups and the hook check read
                                 a project with no history.
+  framework.ape_version         whether this ape meets the installed
+                                framework's min_ape_version
+                                (_apex/ape-commands.yaml, framework
+                                v0.27.0+). FAIL below it; WARN for a dev
+                                build or pseudo-version, which cannot be
+                                compared; INFO when none is declared. An
+                                rc of exactly the minimum meets it.
+  framework.tag_moved           whether the installed release tag now
+                                names a different commit in
+                                $APEX_FRAMEWORK_REPO than the one
+                                installed. Tags are meant never to move.
   framework.command_surface     whether this binary provides every ape
                                 command the installed framework declares
                                 it requires (_apex/ape-commands.yaml). The
@@ -3164,20 +3175,25 @@ Manage the apex_process_framework assets installed at the project root.
   ape framework setup      One-time install: skills + pipelines + bootstrap
                            _apex/config.yaml. Refuses if already installed
                            (pass --force to re-bootstrap).
-  ape framework update     Refresh skills + pipelines against the framework
-                           repo's current HEAD. Refuses if not yet set up
-                           (run setup first).
+  ape framework update     Install the framework's newest release (or
+                           --version) and commit it. Refuses if not yet
+                           set up (run setup first).
   ape framework status     Inspect the installed framework version, with
                            optional drift report against the framework repo.
 
 The framework repo path is resolved from --repo or $APEX_FRAMEWORK_REPO.
+Since ape v0.4.0 setup and update install a RELEASE — the highest vX.Y.Z tag,
+or the one --version names (the only way to a vX.Y.Z-rc.N candidate) —
+exported from that clone, whose checkout ape never reads or moves;
+--from-worktree installs the working tree instead. See
+docs/explanation/framework-updates-from-releases.md.
 The project root is resolved from --cwd or the current working directory.
 
 Subcommands:
 
-- `setup` — Initial install of framework skills + pipelines into the project
+- `setup` — Initial install of a framework release into the project, committed
 - `status` — Inspect the installed framework version + drift report
-- `update` — Refresh framework skills and pipelines, and run pending project-data migrations
+- `update` — Install the framework's newest release, run pending migrations, and commit the result
 
 Flags:
 
@@ -3188,13 +3204,15 @@ Flags:
 
 ## ape framework setup
 
-Initial install of framework skills + pipelines into the project
+Initial install of a framework release into the project, committed
 
 ```
 ape framework setup [flags]
 ```
 
-Initial install of framework-managed assets into <project>:
+Initial install of framework-managed assets into <project>, from the
+framework's newest release tag (--version picks one; --from-worktree
+installs the repo's working tree instead):
 
   - .claude/skills/apex-*  copied from <repo>/.claude/skills
   - _apex/pipelines/*.yaml copied from <repo>/_apex/pipelines
@@ -3204,12 +3222,20 @@ Initial install of framework-managed assets into <project>:
                            entirely)
   - _apex/framework.yaml   metadata recording what was installed.
 
+The install is committed as 'chore(framework): install APEX framework
+vX.Y.Z' with Framework-Version / Framework-Commit / Generator trailers.
+--no-commit leaves it in the working tree instead.
+
 Refuses to run when:
   - _apex/framework.yaml already exists (pass --force to re-bootstrap;
     this resets project_name and extensions)
-  - the framework repo is dirty, on a non-main branch, or its
-    .claude/skills/apex-* subtree has uncommitted changes (pass
-    --force to bypass)
+  - committing, and the project is not a git repo, is on a detached HEAD,
+    or has modified or staged tracked files (exit 4)
+  - this ape is older than the release's min_ape_version (exit 11; on a
+    terminal it offers to update ape first and re-runs itself)
+  - --from-worktree, and the framework repo is dirty, on a non-main
+    branch, or its .claude/skills/apex-* subtree has uncommitted changes
+    (pass --force to bypass)
 
 Headless contexts: when stdout is not a TTY (or --output-format is not
 human) and the project lacks _apex/config.yaml, you must supply
@@ -3225,10 +3251,13 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--extensions` | string | `—` | Bootstrap value for extensions, comma-separated (e.g. ext-adrs,ext-features). Empty string = none. |
 | `--force` | bool | `false` | Bypass safety checks (already installed, dirty framework, non-main branch, modified project skills) |
+| `--from-worktree` | bool | `false` | Install the framework repo's working tree instead of a release tag (the pre-v0.4.0 behaviour: main-only, clean, fast-forward) |
 | `--no-bootstrap` | bool | `false` | Skip _apex/config.yaml seeding entirely |
+| `--no-commit` | bool | `false` | Leave the result in the working tree instead of committing it |
 | `--no-fetch` | bool | `false` | Skip 'git fetch && merge --ff-only' on the framework repo before reading its state |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--project-name` | string | `—` | Bootstrap value for project_name (skips the TUI prompt) |
+| `--version` | string | `—` | Install exactly this release tag, vX.Y.Z or vX.Y.Z-rc.N (default: the highest final vX.Y.Z; a candidate is only ever installed by name) |
 
 Global flags:
 
@@ -3247,15 +3276,18 @@ ape framework status [flags]
 
 Read <project>/_apex/framework.yaml and report what was installed.
 
-When --repo or $APEX_FRAMEWORK_REPO is set, also reads the framework
-repo's current HEAD (with a best-effort 'git fetch' unless --no-fetch
-is passed) and emits drift fields comparing the installed git_hash /
-version_tag against current.
+When --repo or $APEX_FRAMEWORK_REPO is set, also compares the install with
+what that repo offers now (after a best-effort tag fetch, unless
+--no-fetch): the NEWEST RELEASE tag, which is what 'update' would install,
+and whether the installed tag still names the installed commit (a moved
+tag is reported, never followed). --from-worktree compares against the
+repo's working-tree HEAD instead, as before ape v0.4.0.
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--from-worktree` | bool | `false` | Compare against the repo's working-tree HEAD instead of its newest release |
 | `--no-fetch` | bool | `false` | Skip the best-effort 'git fetch' against the framework repo |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
@@ -3268,13 +3300,14 @@ Global flags:
 
 ## ape framework update
 
-Refresh framework skills and pipelines, and run pending project-data migrations
+Install the framework's newest release, run pending migrations, and commit the result
 
 ```
 ape framework update [flags]
 ```
 
-Refresh framework-managed assets in <project>:
+Install the framework's newest release tag (or the one --version names;
+--from-worktree installs the repo's working tree instead) into <project>:
 
   - .claude/skills/apex-*  re-copied from <repo>/.claude/skills
   - _apex/pipelines/*.yaml re-copied from <repo>/_apex/pipelines
@@ -3298,11 +3331,18 @@ listed with the skill to dispatch and is NEVER run, under any flag. An
 entry's 'check:' reports and never gates: one that cannot run leaves the
 entry unapplied-and-unverifiable, which is reported and blocks nothing.
 
-THIS COMMAND COMMITS NOTHING — not the install, not the migration, not the
-repair. It never has, and that property is worth more than the
-convenience: the whole result sits in the working tree for one 'git diff',
-and you group it into however many commits you want. The run prints the
-paths and the 'git add' line.
+The install and the migrations it ran are committed together as
+'chore(framework): update APEX framework to vX.Y.Z', with Framework-Version,
+Framework-Commit, Framework-Migrations and Generator trailers; an update
+that changed nothing commits nothing. When this ape is older than the
+release's min_ape_version, a terminal is offered an ape update first (bingo
+when the project pins ape, else 'ape update'), committed as
+'chore(ape): update ape to vA.B.C' when bingo changed, and the command
+re-runs on the new ape; without a terminal it exits 11.
+
+Until ape v0.4.0 this command committed nothing. --no-commit keeps that:
+the whole result sits in the working tree for one 'git diff'. --repair's
+output is never committed.
 
 Does NOT touch _apex/config.yaml — that's the one-time bootstrap from
 'ape framework setup'. To re-bootstrap, pass --force to 'setup'.
@@ -3326,9 +3366,16 @@ Does NOT touch _apex/config.yaml — that's the one-time bootstrap from
 
 Refuses to run when:
   - _apex/framework.yaml is absent (run 'ape framework setup' first)
-  - the framework repo is dirty, on a non-main branch, or its
-    .claude/skills/apex-* subtree has uncommitted changes (pass
-    --force to bypass)
+  - committing, and the project is not a git repo, is on a detached HEAD,
+    or has modified or staged tracked files (exit 4)
+  - this ape is older than the release's min_ape_version (exit 11)
+  - --from-worktree, and the framework repo is dirty, on a non-main
+    branch, or its .claude/skills/apex-* subtree has uncommitted changes
+    (pass --force to bypass)
+
+Exit codes: 2 usage; 3 the framework source (no release, missing tag,
+build layout); 4 the project tree; 7 not installed; 11 ape below
+min_ape_version; 12 a commit failed (the changes are left staged).
 
 A migration is skipped (never forced) when ITS OWN paths have uncommitted
 changes. The gate is path-scoped rather than whole-tree: those paths are
@@ -3341,12 +3388,15 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--dry-run` | bool | `false` | Show the framework diff and pending migrations, writing nothing |
 | `--force` | bool | `false` | Bypass safety checks (dirty framework, non-main branch, modified project skills) |
+| `--from-worktree` | bool | `false` | Install the framework repo's working tree instead of a release tag (the pre-v0.4.0 behaviour: main-only, clean, fast-forward) |
 | `--no-check` | bool | `false` | With --plan: do not run any migration's check: command; every row falls back to the ledger alone |
+| `--no-commit` | bool | `false` | Leave the result in the working tree instead of committing it |
 | `--no-fetch` | bool | `false` | Skip 'git fetch && merge --ff-only' on the framework repo before reading its state |
 | `--no-migrate` | bool | `false` | Install framework files only; leave migrations pending |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--plan` | bool | `false` | Print the upgrade-migration plan, incoming entries included, and do nothing else |
 | `--repair` | bool | `false` | Also run the opus judgment phase over free-form deferred records (spends money) |
+| `--version` | string | `—` | Install exactly this release tag, vX.Y.Z or vX.Y.Z-rc.N (default: the highest final vX.Y.Z; a candidate is only ever installed by name) |
 
 Global flags:
 
@@ -4835,7 +4885,7 @@ node's framework root.
 
 aped never fetches the framework itself: if a requested ref is not materialized,
 'ape sandbox up' fails with the command to run. Inside the workspace, consume it
-with 'ape framework setup --no-fetch --repo /opt/apex-framework'.
+with 'ape framework setup --from-worktree --no-commit --no-fetch --repo /opt/apex-framework'.
 
 Subcommands:
 

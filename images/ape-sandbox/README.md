@@ -8,7 +8,7 @@ package (builds anonymously — no secret).
 
 The private APEX framework is **not** baked; `aped` mounts a pinned host-side
 framework checkout **read-only** at `/opt/apex-framework` at runtime, and a
-workspace installs it with `ape framework setup --no-fetch` (PLAN-20).
+workspace installs it with `ape framework setup --from-worktree --no-commit --no-fetch` (PLAN-20).
 
 Neither is **`ape`** (PLAN-23): `aped` mounts the binary installed beside it
 read-only at `/opt/ape/bin`, first on `PATH`, so a workspace runs the version

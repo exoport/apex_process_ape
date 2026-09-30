@@ -112,6 +112,14 @@ func overlayMigrations(installed, incoming []migration.Entry) []migration.Entry 
 // collapsing the second into a non-zero exit would make the first look
 // like it had not happened.
 func runUpgradeMigrations(ctx context.Context, w io.Writer, projectRoot string) error {
+	_, err := runUpgradeMigrationsApplied(ctx, w, projectRoot)
+	return err
+}
+
+// runUpgradeMigrationsApplied is runUpgradeMigrations, also returning the
+// ids it applied — what the install commit's Framework-Migrations trailer
+// names.
+func runUpgradeMigrationsApplied(ctx context.Context, w io.Writer, projectRoot string) ([]string, error) {
 	runner, cleanup, notice := migration.NewShellRunner()
 	defer cleanup()
 	if notice != "" {
@@ -119,38 +127,40 @@ func runUpgradeMigrations(ctx context.Context, w io.Writer, projectRoot string) 
 	}
 	plan, err := loadMigrationPlan(ctx, projectRoot, runner, true)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !plan.Present {
-		return nil
+		return nil, nil
 	}
 	if len(plan.Rows) == 0 {
 		fmt.Fprintln(w, "migrations: none declared")
-		return nil
+		return nil, nil
 	}
 	emitMigrationFindings(w, plan)
 
 	counts := plan.Counts()
 	if counts.Runnable == 0 && counts.JudgedToRun == 0 {
 		fmt.Fprintf(w, "migrations: nothing to run (%s)\n", migrationCountLine(counts))
-		return nil
+		return nil, nil
 	}
 
 	res := migration.Apply(ctx, w, projectRoot, plan, runner, stamp.New(projectRoot, nil).Issue)
 
 	rows := make([]framework.AppliedMigration, 0, len(res.Applied))
+	ids := make([]string, 0, len(res.Applied))
 	for _, a := range res.Applied {
 		rows = append(rows, framework.AppliedMigration{ID: a.ID, Version: a.Version, AppliedAt: a.AppliedAt})
+		ids = append(ids, a.ID)
 	}
 	if err := framework.AppendMigrations(projectRoot, rows); err != nil {
 		// The migrations RAN. Failing to record them is serious — the next
 		// run would re-run them — so it is reported loudly and returned,
 		// unlike a migration's own failure.
-		return fmt.Errorf("recording applied migrations in framework.yaml: %w", err)
+		return ids, fmt.Errorf("recording applied migrations in framework.yaml: %w", err)
 	}
 
 	emitApplyResult(w, res)
-	return nil
+	return ids, nil
 }
 
 func emitApplyResult(w io.Writer, res *migration.ApplyResult) {

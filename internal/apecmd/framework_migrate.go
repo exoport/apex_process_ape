@@ -125,10 +125,12 @@ func runProjectMigrations(ctx context.Context, w io.Writer, projectRoot string) 
 // A framework side that cannot be read (no metadata, no repo configured)
 // is reported and stepped over rather than fatal: the migration half is
 // often the reason someone ran --dry-run, and it is knowable either way.
-func emitFrameworkDryRun(ctx context.Context, w io.Writer, repo, projectRoot string) error {
+func emitFrameworkDryRun(ctx context.Context, w io.Writer, repo, projectRoot string, fromWorktree, noFetch bool) error {
 	res, err := framework.Status(ctx, framework.StatusOptions{
 		ProjectRoot:   projectRoot,
 		FrameworkRepo: repo,
+		FromWorktree:  fromWorktree,
+		NoFetch:       noFetch,
 	})
 	if err != nil {
 		fmt.Fprintf(w, "framework: cannot compare — %v\n", err)
@@ -165,7 +167,7 @@ func emitFrameworkDrift(w io.Writer, res *framework.StatusResult) {
 		fmt.Fprintf(w, "current:   %s (%s)\n",
 			defaultStr(res.Current.VersionTag, "(no tag)"), short(res.Current.GitHash))
 	}
-	if res.Drift != nil && (res.Drift.HashDrift || res.Drift.TagDrift) {
+	if res.Drift != nil && (res.Drift.HashDrift || res.Drift.TagDrift || res.Drift.TagMoved) {
 		fmt.Fprintln(w, "framework: would update —")
 		for _, n := range res.Drift.Notes {
 			fmt.Fprintln(w, "  - "+n)

@@ -49,6 +49,12 @@ for building scratch installs. Its record says `source: worktree`.
 `--plan` and `--dry-run` resolve the tag the same way, and read the tag's
 tree rather than the clone's working tree.
 
+**A default update never goes backwards.** When the installed release is
+newer than the newest final one, it is a candidate someone installed by
+name. `update` without `--version` then keeps it, prints why, commits
+nothing and exits 0. `--version vX.Y.Z` goes back when you mean it, and
+`status` reports the install as ahead rather than as drift.
+
 ## What is recorded
 
 `_apex/framework.yaml` → `framework:` gains one field and changes the
@@ -103,9 +109,9 @@ min_ape_version: 0.4.0
 | stdin and stderr are a terminal | Asks `ape 0.3.1 is older than v0.27.0 needs (0.4.0). Update ape first? [Y/n]`. Yes: update, then continue (below). No: exit 11, nothing written. |
 | not a terminal (CI, scripts, a skill) | Never asks, never updates. Prints the exact command to run and exits 11, nothing written. |
 
-When ape meets the minimum but a newer final ape exists, a terminal is
-offered the update (`[y/N]`, never blocking). A non-terminal gets one line
-saying a newer ape exists.
+When ape meets the minimum and the update check has cached a newer final
+ape, one line says so. It never prompts and never blocks: a courtesy must
+not make an install depend on GitHub being reachable.
 
 ### How ape updates itself here
 

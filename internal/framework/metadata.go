@@ -57,10 +57,20 @@ type AppliedMigration struct {
 //nolint:tagliatelle // framework.yaml uses snake_case for human readability
 type RepoInfo struct {
 	RepoOrigin string `json:"repoOrigin" yaml:"repo_origin"`
-	VersionTag string `json:"versionTag" yaml:"version_tag"` // empty when HEAD has no exact tag
-	GitHash    string `json:"gitHash"    yaml:"git_hash"`
-	GitBranch  string `json:"gitBranch"  yaml:"git_branch"`
+	// Source is how the framework was installed: SourceTag (a release,
+	// exported from its tag) or SourceWorktree (the clone's working tree).
+	// Empty for an install made before ape v0.4.0, which was a worktree.
+	Source     string `json:"source,omitempty" yaml:"source,omitempty"`
+	VersionTag string `json:"versionTag"       yaml:"version_tag"` // empty when HEAD has no exact tag
+	GitHash    string `json:"gitHash"          yaml:"git_hash"`
+	GitBranch  string `json:"gitBranch"        yaml:"git_branch"`
 }
+
+// Framework install sources recorded in RepoInfo.Source.
+const (
+	SourceTag      = "tag"
+	SourceWorktree = "worktree"
+)
 
 // ApeInfo records which ape binary performed the install.
 type ApeInfo struct {

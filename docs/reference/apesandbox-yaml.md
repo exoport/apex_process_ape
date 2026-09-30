@@ -173,7 +173,7 @@ aped never fetches: if a ref is not materialized on the node, `up` fails with th
 exact command to run. Inside the workspace, consume it read-only:
 
 ```bash
-ape framework setup --no-fetch --repo /opt/apex-framework
+ape framework setup --from-worktree --no-commit --no-fetch --repo /opt/apex-framework
 ```
 
 ## Changing a descriptor after `up`

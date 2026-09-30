@@ -316,44 +316,6 @@ func within(child, parent string) bool {
 	return rel == "." || !strings.HasPrefix(rel, "..")
 }
 
-// TestContract_FrameworkUpdateWritesNoCommits is the lock on the no-commit
-// rule. `ape framework update` has never written a commit into the user's
-// project, and the whole review story for a migration — one `git diff`, the
-// operator groups it however they like — depends on that staying true. This
-// fails against any implementation that starts committing, which is the only
-// way to state a property whose evidence is an ABSENCE.
-func TestContract_FrameworkUpdateWritesNoCommits(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	fwRepo := t.TempDir()
-	fakeFrameworkForContract(t, fwRepo)
-
-	root := newTestProject(t, realProjectConfig)
-	gitInit(t, root)
-	writeLegacyLedger(t, root, legacyLedgerFixture)
-	gitCommitAll(t, root, "project baseline")
-
-	before := gitLog(t, root)
-
-	repo, cwd := fwRepo, root
-	setup := newFrameworkSetupCmd(&repo, &cwd)
-	_ = runCmdAllowError(t, setup, "--no-fetch", "--no-bootstrap")
-	update := newFrameworkUpdateCmd(&repo, &cwd)
-	out := runCmdAllowError(t, update, "--no-fetch")
-
-	require.Equal(t, before, gitLog(t, root),
-		"ape framework update wrote a commit into the project.\n"+
-			"It never has, and the migration's reviewability depends on it not starting.\n"+
-			"update output:\n%s", out)
-
-	// And the migration really did run, or the assertion above is vacuous.
-	require.False(t, pendingMigrations(root)[0].Pending,
-		"the migration must have run for the no-commit assertion to mean anything")
-	require.FileExists(t, filepath.Join(root, framework.ProjectMetadata),
-		"the install must have run too")
-}
-
 // --- the sandbox delivery path -------------------------------------------
 //
 // A workspace gets the framework as a read-only mount rather than a baked
@@ -364,7 +326,7 @@ func TestContract_FrameworkUpdateWritesNoCommits(t *testing.T) {
 // TestContract_SandboxFrameworkHandoff pins the guest-side bootstrap line the
 // docs and `ape sandbox framework --help` both tell an operator to type:
 //
-//	ape framework setup --no-fetch --repo /opt/apex-framework
+//	ape framework setup --from-worktree --no-commit --no-fetch --repo /opt/apex-framework
 //
 // Renaming either flag, or moving the mount, breaks a documented workflow
 // silently — the docs are prose and prose does not fail a build.
@@ -373,6 +335,10 @@ func TestContract_SandboxFrameworkHandoff(t *testing.T) {
 	setup := newFrameworkSetupCmd(&repo, &cwd)
 	require.NotNil(t, setup.Flags().Lookup("no-fetch"),
 		"the guest has no credentials and no network to the framework remote")
+	require.NotNil(t, setup.Flags().Lookup("from-worktree"),
+		"the mount IS the ref the workspace chose; a release install would pick a tag instead")
+	require.NotNil(t, setup.Flags().Lookup("no-commit"),
+		"the guest bootstrap keeps its pre-v0.4.0 behaviour: the result is left in the tree")
 
 	parent := newFrameworkCmd()
 	require.NotNil(t, parent.PersistentFlags().Lookup("repo"),

@@ -1,5 +1,47 @@
 # CHANGELOG
 
+## Unreleased
+
+- **`ape framework setup` and `update` install RELEASES** (class C; the
+  first cycle through the release-candidate process). Until now they
+  installed whatever the framework clone's `main` was after a
+  fast-forward, so anything pushed to the ship repo reached every team,
+  tagged or not. See `docs/explanation/framework-updates-from-releases.md`.
+  - **Which release:** the highest tag shaped exactly `vX.Y.Z`, by semver,
+    exported with `git archive`. The clone is only read for objects: never
+    checked out, never merged, and it may be dirty or on any branch. A
+    candidate is installed only by name (`--version vX.Y.Z-rc.N`), and
+    `--version vX.Y.Z` pins a release. `--from-worktree` keeps the old
+    behaviour, and the sandbox bootstrap line now uses it, since the mount
+    IS the ref the workspace chose.
+  - **The record:** `framework.yaml` gains `source: tag|worktree`.
+    `version_tag` and `git_hash` record the tag and the commit it named. A
+    tag that later names another commit is reported by `update`, `status`
+    and the new doctor check `framework.tag_moved`, and never followed.
+    `status` compares against the newest release, not HEAD.
+  - **`min_ape_version`** (framework v0.27.0+, in `_apex/ape-commands.yaml`)
+    is read from the tag before anything is written. An rc of exactly the
+    minimum meets it; a dev or pseudo-version is unknown and warned about.
+    - Below it at a terminal: an offer to update ape (bingo when the project
+      pins ape, else `ape update`), then a re-run on the new binary.
+    - Below it without a terminal: exit 11, nothing written.
+    - The new required doctor check `framework.ape_version` covers an
+      installed project.
+  - **Commits, reversing a documented rule.** `update` used to commit
+    nothing. It now commits `chore(framework): update APEX framework to
+    vX.Y.Z` (setup: `install APEX framework vX.Y.Z`), install plus
+    migrations, with `Framework-Version`, `Framework-Commit`,
+    `Framework-Migrations` and `Generator: ape framework update` trailers.
+    It also commits a `.bingo/`-only `chore(ape)` commit when bingo updated
+    ape.
+    - Refused before anything is written when tracked files are modified
+      (exit 4, listing them).
+    - The user's untracked files are never committed.
+    - A failed hook leaves everything staged and exits 12.
+    - `--no-commit` restores the old behaviour exactly.
+  - Doctor never runs fix commands, so its `ape framework update`
+    suggestions stay as they were.
+
 ## v0.3.1 (2026-09-29)
 
 - **The repository's instructions live in `AGENTS.md`, and there is no

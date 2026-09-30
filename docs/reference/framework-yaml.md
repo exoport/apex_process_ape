@@ -14,9 +14,10 @@ config_schema_version: "1"
 installed_at: 2026-09-21T10:14:52Z
 framework:
   repo_origin: https://github.com/exoar/apex_process_framework.git
+  source: tag
   version_tag: v0.21.0
   git_hash: 4d91ae0c7f25b83619ec4a7d0f2b6598c31ad74e
-  git_branch: main
+  git_branch: ""
 ape:
   version: 0.0.73
 sources:
@@ -82,9 +83,10 @@ first example.
 | Field         | Type   | Description                                                                                                                              |
 | ------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `repo_origin` | string | URL from `git remote get-url origin`. Empty when no `origin` remote is configured.                                                       |
-| `version_tag` | string | Output of `git describe --tags --exact-match HEAD`. Empty when HEAD is not on a tagged commit (legitimate during framework development). |
-| `git_hash`    | string | Full 40-character SHA at framework HEAD when the install ran.                                                                            |
-| `git_branch`  | string | Branch name from `git rev-parse --abbrev-ref HEAD`. Almost always `main`; non-`main` values mean `--force` was used.                     |
+| `source`      | string | `tag`: a release, exported from its tag (the default since ape v0.4.0). `worktree`: the clone's working tree (`--from-worktree`). Absent in a file written before v0.4.0, which was always a worktree install. |
+| `version_tag` | string | `source: tag`: the release tag installed. `source: worktree`: the output of `git describe --tags --exact-match HEAD`, empty when HEAD is not on a tagged commit (legitimate during framework development). |
+| `git_hash`    | string | Full 40-character commit SHA installed: for `source: tag`, the commit the tag named at install time. If that tag later names another commit, `update`, `status` and `ape doctor` (`framework.tag_moved`) report it. |
+| `git_branch`  | string | `source: worktree`: the branch from `git rev-parse --abbrev-ref HEAD`, almost always `main`; non-`main` values mean `--force` was used. Empty for `source: tag`. |
 
 > **An empty `version_tag` written by ape ≤ v0.0.64 may not mean what the table says.** `ape framework update` fetched with an explicit refspec (`git fetch origin main`), which suppresses git's tag auto-following — so it pulled a release commit and left that release's tag behind, and `git describe` then correctly reported no tag at HEAD. The recorded value was honest about the clone, but the clone was missing a tag it should have had. Symptoms: `ape doctor` prints `framework <hash> installed` instead of the version, and `ape framework check` reports tag drift permanently. Both are cosmetic — `git_hash` is authoritative and unaffected. ape now mirrors tags on every update, so the next `ape framework update` records the real tag.
 

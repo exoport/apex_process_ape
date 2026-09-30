@@ -13,7 +13,8 @@ For subsequent framework version bumps, use [`ape framework update`](framework-u
   export APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
   ```
 
-- The framework repo must be on `main` and have a clean working tree (no uncommitted changes). To bypass either check, pass `--force`.
+- Since ape v0.4.0, `setup` installs the framework's newest **release** tag (or the one `--version` names), exported from that clone. ape never reads or moves the clone's checkout, so the clone may be dirty or on any branch. `--from-worktree` installs the working tree instead, and then the clone must be on `main` and clean (`--force` bypasses that). See [Which release is installed](framework-update.md#which-release-is-installed).
+- The install is committed (`chore(framework): install APEX framework vX.Y.Z`), so the project must be a git repository on a branch with no modified or staged tracked files. Pass `--no-commit` to leave it uncommitted. See [Commits](framework-update.md#commits).
 - The project's `_apex/framework.yaml` must **not** already exist — if it does, `setup` refuses to run. Use `update` instead, or pass `--force` to re-bootstrap (which resets `project_name` and `extensions`).
 
 ## Quickstart
@@ -26,9 +27,9 @@ ape framework setup
 What happens:
 
 1. Validates that `_apex/framework.yaml` is **absent** (the not-yet-installed signal). If present, the command exits with `Error: framework already installed at <path> — run "ape framework update" to refresh, or "ape framework setup --force" to re-bootstrap …`.
-2. Validates `$APEX_FRAMEWORK_REPO` (repo layout, git state, branch, working tree).
-3. Fetches `origin/main` and fast-forwards (skip with `--no-fetch`).
-4. Records the framework's HEAD SHA + tag for the metadata file.
+2. When committing, checks the project tree is clean (exit 4 otherwise).
+3. Fetches tags (skip with `--no-fetch`), picks the release and exports its files, and checks this ape against its `min_ape_version` (exit 11 below it without a terminal). See [ape's minimum version](framework-update.md#apes-minimum-version).
+4. Records the release's tag and commit for the metadata file.
 5. Opens an interactive Bubble Tea prompt for the project name and which extensions to enable. (Skip the TUI with `--project-name` + `--extensions`, or skip seeding entirely with `--no-bootstrap`.)
 6. Removes any pre-existing `<project>/.claude/skills/apex-*` (so leftover skills from a prior install disappear).
 7. Copies all `apex-*` skill directories into `<project>/.claude/skills/` (including the `apex-orchestrator` persona skill).
@@ -154,11 +155,11 @@ You already ran `setup` on this project. Either:
 
 Pass `--repo /path/to/apex_process_framework` or export `APEX_FRAMEWORK_REPO`.
 
-### `framework repo has uncommitted changes`
+### `framework repo has uncommitted changes` (`--from-worktree` only)
 
 The framework repo must be clean. Either commit/stash the framework-side changes, or pass `--force` to install from a dirty tree (recorded in `framework.yaml` so the divergence is auditable).
 
-### `framework repo is on branch X (expected main)`
+### `framework repo is on branch X (expected main)` (`--from-worktree` only)
 
 The command refuses to install from a non-`main` branch unless `--force` is passed. This is to prevent accidentally pinning a project to an experimental branch's HEAD.
 

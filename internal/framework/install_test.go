@@ -495,7 +495,7 @@ func TestStatus_DetectsDriftAfterFrameworkAdvance(t *testing.T) {
 	mustRun("commit", "-m", "advance")
 	mustRun("tag", "v0.0.72")
 
-	res, err := framework.Status(ctx, framework.StatusOptions{ProjectRoot: proj, FrameworkRepo: fw, NoFetch: true})
+	res, err := framework.Status(ctx, framework.StatusOptions{ProjectRoot: proj, FrameworkRepo: fw, NoFetch: true, FromWorktree: true})
 	require.NoError(t, err)
 	require.NotNil(t, res.Current)
 	require.NotNil(t, res.Drift)

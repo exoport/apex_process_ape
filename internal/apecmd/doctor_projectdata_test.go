@@ -418,19 +418,19 @@ func TestRunProjectMigrations_NoConfigIsNotAFailure(t *testing.T) {
 	require.Contains(t, buf.String(), "skipped")
 }
 
-// TestFrameworkUpdate_HasTheThreeFlagsAndNoCommitFlag pins the surface,
-// including the flag that deliberately does NOT exist.
+// TestFrameworkUpdate_Flags pins the surface. Until v0.4.0 it also pinned
+// the ABSENCE of --no-commit, because update committed nothing; v0.4.0
+// reversed that deliberately (it commits the release it installs), and
+// --no-commit is how the old behaviour is kept.
 func TestFrameworkUpdate_Flags(t *testing.T) {
 	repo, cwd := "", ""
 	cmd := newFrameworkUpdateCmd(&repo, &cwd)
-	for _, name := range []string{"dry-run", "no-migrate", "repair"} {
+	for _, name := range []string{"dry-run", "no-migrate", "repair", "no-commit", "version", "from-worktree"} {
 		require.NotNil(t, cmd.Flags().Lookup(name), "--%s must exist", name)
 	}
 	require.Nil(t, cmd.Flags().Lookup("no-repair"),
 		"repair is opt-IN: a file-copying verb must not start spending money by default")
-	require.Nil(t, cmd.Flags().Lookup("no-commit"),
-		"this command commits nothing, so there is nothing to suppress")
-	require.Contains(t, cmd.Long, "COMMITS NOTHING")
+	require.Contains(t, cmd.Long, "--no-commit")
 }
 
 func TestEmitFrameworkDryRun_ReportsPendingMigrations(t *testing.T) {
@@ -441,7 +441,7 @@ func TestEmitFrameworkDryRun_ReportsPendingMigrations(t *testing.T) {
 	// No framework repo configured: the framework half is reported as
 	// uncomparable and stepped over, because the migration half is often
 	// the reason someone ran --dry-run at all.
-	require.NoError(t, emitFrameworkDryRun(context.Background(), &buf, "", root))
+	require.NoError(t, emitFrameworkDryRun(context.Background(), &buf, "", root, false, true))
 	out := buf.String()
 	require.Contains(t, out, "framework: cannot compare")
 	require.Contains(t, out, "migration deferred: PENDING")

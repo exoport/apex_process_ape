@@ -1,8 +1,8 @@
 # How to refresh the framework in a project
 
-`ape framework update` is the refresh command. It re-copies skills + pipelines from a checked-out `apex_process_framework` repo into your project, and refreshes the `framework:` block of `_apex/framework.yaml`. It does **not** touch `_apex/config.yaml` — that's the one-time bootstrap from [`ape framework setup`](framework-setup.md).
+`ape framework update` installs the framework's newest **release** into your project and commits it. It exports the release tag's files from your clone of the framework's ship repo, re-copies skills, pipelines and the framework's tables, runs pending migrations, and refreshes `_apex/framework.yaml`. It does **not** touch `_apex/config.yaml` — that's the one-time bootstrap from [`ape framework setup`](framework-setup.md).
 
-Use `update` whenever you bump the framework repo to a new version and want your project to pick up the changes.
+Run it whenever the framework publishes a release. Since ape v0.4.0 it installs tagged releases only, never whatever happens to be on the framework's `main`. The design is in [Framework updates install releases](../explanation/framework-updates-from-releases.md).
 
 ## Prerequisites
 
@@ -14,7 +14,8 @@ Use `update` whenever you bump the framework repo to a new version and want your
   export APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
   ```
 
-- The framework repo must be on `main` and have a clean working tree. To bypass either check, pass `--force`.
+- ape uses that clone only to read git objects: it fetches tags, exports the chosen tag's files, and never checks anything out. The clone may be dirty or on any branch. (`--from-worktree` installs the clone's working tree instead, and then the clone must be on `main` and clean; `--force` bypasses that.)
+- To commit, which is the default, the project must be a git repository on a branch with no modified or staged tracked files. Untracked files are fine and are never committed. Pass `--no-commit` to leave the result in the working tree instead.
 
 ## Quickstart
 
@@ -26,19 +27,61 @@ ape framework update
 What happens:
 
 1. Validates that `_apex/framework.yaml` is **present** (the project is set up). If absent, exits with `Error: framework metadata not found at <path> — run "ape framework setup" to install`.
-2. Validates `$APEX_FRAMEWORK_REPO` (repo layout, git state, branch, working tree).
-3. Fetches `origin/main` and fast-forwards (skip with `--no-fetch`).
-4. Records the framework's HEAD SHA + tag for the metadata file.
-5. Removes any existing `<project>/.claude/skills/apex-*` (so removed-from-framework skills disappear locally).
-6. Copies all `apex-*` skill directories into `<project>/.claude/skills/` (including `apex-orchestrator`).
-7. Copies all framework pipeline YAMLs into `<project>/_apex/pipelines/`.
-8. Refreshes the framework's [`ape aboard` recipe library](use-the-board.md#recipes) in `<project>/_apex/aboard/recipes/`.
-9. Ensures the project has a [board](use-the-board.md#the-board-is-already-there): creates `<project>/.aboard/` and seeds `.aboard/.gitignore` if either is missing. An existing board is never overwritten.
-10. Refreshes the operating-rules fragment (`_apex/apex-operating-rules.md`) and the managed block in the repo-root `CLAUDE.md`. Skipped with a warning if the framework repo predates the fragment.
-11. Copies the framework-owned tables the runner reads: `_apex/terminal-contracts.csv`, `_apex/ape-commands.yaml`, `_apex/commit-owners.csv`, `_apex/effort-defaults.yaml` (the per-model reasoning-effort table; see `ape config effort`), and the upgrade list `_apex/migrations/*.md`. Each is optional in the framework repo — one that predates a file installs none of it, and the runner then reports that state rather than assuming it. **`commit-owners.csv` is reported in both directions**, because an absent roster silently disarms the per-dispatch commit-ownership assertion described in [Run a single skill](run-a-single-skill.md).
-12. Ensures `.gitignore` ignores `sprint-status.yaml.lock`, appending the entry only when git does not already ignore the sidecar. This is the verify-and-fix pass: a project set up before the entry existed gains it here, without having to know it was missing.
-13. Relocates any run artifacts still at the pre-`{output_folder}/ape` paths (`_output/pipelines/`, `_output/tasks/`, and on a project that renamed `output_folder`, `_output/ape/prompts/` and `_output/ape/chats/`). Skipped with `--no-migrate`; reported without writing by `--dry-run`. See [What the relocation does](#what-the-relocation-does).
-14. Rewrites `<project>/_apex/framework.yaml` — preserving the `sources.config` block recorded by the original `setup` so `project_name` + `extensions` stay intact.
+2. When committing, checks the project tree is clean (exit 4, listing the paths, if not). Nothing has been written yet.
+3. Fetches tags (`git fetch --tags --force origin`; skipped with `--no-fetch`; a failed fetch warns and uses the tags already there), then picks the release (see [Which release is installed](#which-release-is-installed)) and exports its files.
+4. Checks this ape against the release's `min_ape_version` (see [ape's minimum version](#apes-minimum-version)). Below it, nothing is written.
+5. Records the release's tag and commit for the metadata file, and warns loudly if the tag installed last time now names a different commit.
+6. Removes any existing `<project>/.claude/skills/apex-*` (so removed-from-framework skills disappear locally).
+7. Copies all `apex-*` skill directories into `<project>/.claude/skills/` (including `apex-orchestrator`).
+8. Copies all framework pipeline YAMLs into `<project>/_apex/pipelines/`.
+9. Refreshes the framework's [`ape aboard` recipe library](use-the-board.md#recipes) in `<project>/_apex/aboard/recipes/`.
+10. Ensures the project has a [board](use-the-board.md#the-board-is-already-there): creates `<project>/.aboard/` and seeds `.aboard/.gitignore` if either is missing. An existing board is never overwritten.
+11. Refreshes the operating-rules fragment (`_apex/apex-operating-rules.md`) and the managed block in the repo-root `CLAUDE.md`. Skipped with a warning if the framework repo predates the fragment.
+12. Copies the framework-owned tables the runner reads: `_apex/terminal-contracts.csv`, `_apex/ape-commands.yaml`, `_apex/commit-owners.csv`, `_apex/effort-defaults.yaml` (the per-model reasoning-effort table; see `ape config effort`), and the upgrade list `_apex/migrations/*.md`. Each is optional in the framework repo — one that predates a file installs none of it, and the runner then reports that state rather than assuming it. **`commit-owners.csv` is reported in both directions**, because an absent roster silently disarms the per-dispatch commit-ownership assertion described in [Run a single skill](run-a-single-skill.md).
+13. Ensures `.gitignore` ignores `sprint-status.yaml.lock`, appending the entry only when git does not already ignore the sidecar. This is the verify-and-fix pass: a project set up before the entry existed gains it here, without having to know it was missing.
+14. Relocates any run artifacts still at the pre-`{output_folder}/ape` paths (`_output/pipelines/`, `_output/tasks/`, and on a project that renamed `output_folder`, `_output/ape/prompts/` and `_output/ape/chats/`). Skipped with `--no-migrate`; reported without writing by `--dry-run`. See [What the relocation does](#what-the-relocation-does).
+15. Rewrites `<project>/_apex/framework.yaml` — preserving the `sources.config` block recorded by the original `setup` so `project_name` + `extensions` stay intact.
+16. Runs the pending migrations (see below), then commits everything the install and the migrations changed as `chore(framework): update APEX framework to vX.Y.Z` — see [Commits](#commits).
+
+## Which release is installed
+
+- **By default, the highest tag shaped exactly `vX.Y.Z`**, compared as semver, so `v0.10.0` beats `v0.9.0`. A release candidate (`-rc.N`) or any other suffix is never picked, and a commit on the framework's `main` that no release tag names is never installed.
+- **`--version vX.Y.Z`** installs exactly that release, and **`--version vX.Y.Z-rc.N`** installs a candidate. That is the only way to install one.
+- **`--from-worktree`** installs the clone's working tree as it stands, which was the behaviour before ape v0.4.0. It's for framework developers and scratch installs.
+- **A default update never goes backwards.** If you installed a candidate that is newer than the newest final release, `update` keeps it and says so. `--version vX.Y.Z` goes back when you mean it.
+
+The release must use the framework's released layout (`_apex/` and `.claude/` at the root of the tag). A tag from the framework's build repo nests them under `framework/` and is refused (exit 3): point `--repo` at the ship repo.
+
+## ape's minimum version
+
+A framework release can declare the oldest ape it works with, as `min_ape_version:` in its `_apex/ape-commands.yaml`. `update` reads it from the release **before writing anything**:
+
+- **Meets it** (an rc of exactly that version counts, so `0.4.0-rc.2` meets `0.4.0`): the install goes ahead. If the update check knows a newer ape, one line says so.
+- **Below it, at a terminal:** you are asked whether to update ape first. The update goes through bingo when the project pins ape (`.bingo/ape.mod`), and otherwise through `ape update`. Then the same command re-runs on the new ape.
+- **Below it, without a terminal:** nothing is written. ape prints the command to run (`run: …`) and exits 11.
+- **A `dev` build or Go pseudo-version** cannot be compared: a warning, and the install goes ahead. A release that declares no minimum has none.
+
+The two update routes trust different things. `ape update` installs the cosign-verified release binary. bingo compiles the tagged source through the Go module proxy, which is checksummed but is not the signed binary. A bingo-built ape reports its version correctly, and its git commit as `unknown`.
+
+## Commits
+
+Until ape v0.4.0, `update` committed nothing. Now each install is a release with an identity, and the commits record it:
+
+- **`chore(ape): update ape to vA.B.C`**, only when ape was updated through bingo, touching only `.bingo/`.
+- **`chore(framework): update APEX framework to vX.Y.Z`**, holding the install and the migrations it ran, with these trailers:
+
+  ```
+  Framework-Version: vX.Y.Z
+  Framework-Commit: <the release's full commit sha>
+  Framework-Migrations: <ids, when any were applied>
+  Generator: ape framework update
+  ```
+
+Details:
+- An update that changed nothing commits nothing.
+- Your hooks run. If one fails, everything stays staged and the command exits 12.
+- If ape was updated and committed and the install then fails, the ape commit stays: it is valid on its own.
+- `--no-commit` restores the old behaviour exactly: the whole result stays in the working tree for one `git diff`, and only modified `apex-*` skills block the run.
 
 ## What gets touched
 
@@ -234,7 +277,7 @@ predictable in `--strict` CI.
 ape framework status
 ```
 
-Compares the installed framework version (from `_apex/framework.yaml`) against the framework repo's current HEAD. When the SHAs or tags differ, drift fields are populated and the output suggests running `update`.
+Compares the installed release (from `_apex/framework.yaml`) with the newest release in the framework clone, which is what `update` would install. It also reports, loudly, when the installed tag now names a different commit than the one installed: release tags are meant never to move, so ape reports this and never follows it. `--from-worktree` compares against the clone's working-tree HEAD instead, as before ape v0.4.0.
 
 ## Output formats
 
@@ -255,11 +298,11 @@ You haven't run `setup` on this project yet. Update is refresh-only; use [`ape f
 
 Pass `--repo /path/to/apex_process_framework` or export `APEX_FRAMEWORK_REPO`.
 
-### `framework repo has uncommitted changes (pass --force to bypass)`
+### `framework repo has uncommitted changes (pass --force to bypass)` (`--from-worktree` only)
 
 The framework repo must be clean. Either commit/stash the framework-side changes, or pass `--force` to clobber-install from a dirty tree (recorded in `framework.yaml` so the divergence is auditable).
 
-### `framework repo is on branch X (expected main)`
+### `framework repo is on branch X (expected main)` (`--from-worktree` only)
 
 The command refuses to install from a non-`main` branch unless `--force` is passed. This is to prevent accidentally pinning a project to an experimental branch's HEAD.
 
@@ -281,7 +324,7 @@ suppression, not a failure). Upgrade the framework repo to a version that ships
 `_apex/apex-operating-rules.md`, then re-run `ape framework update`. Until then
 `ape doctor` reports the operating-rules checks as a WARN nudge, not a failure.
 
-### `framework branch "main" diverged from origin`
+### `framework branch "main" diverged from origin` (`--from-worktree` only)
 
 `git merge --ff-only` failed because the framework repo's local main has commits not on the remote. Either rebase manually or pass `--no-fetch` to skip the pull.
 
@@ -294,10 +337,10 @@ meets an un-migrated project and no skill needs a migration failure path.
 This is the right transaction boundary: explicitly invoked, at the moment
 framework expectations change, outside the build loop.
 
-**This command commits nothing** — not the framework files, not the
-migration, not the repair. It never has. The whole result sits in the
-working tree for one `git diff`, and the run prints the paths plus the
-`git add` line so you can group it into however many commits you want.
+The migrations `update` runs are committed together with the install (see
+[Commits](#commits)). `--repair`'s output is never committed. With
+`--no-commit`, nothing is: the whole result sits in the working tree for
+one `git diff`.
 
 ```bash
 ape framework update --dry-run     # framework drift AND pending migrations; writes nothing
