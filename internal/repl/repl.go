@@ -492,7 +492,7 @@ func lookup(name string) (*session, bool) {
 // KillSession terminates the child and tears down the PTY. Not-found
 // is treated as success so callers can use it as a pre-check (`_ =
 // KillSession(...)` before `NewSession`).
-func KillSession(_ context.Context, name string) error {
+func KillSession(ctx context.Context, name string) error {
 	regMu.Lock()
 	s, ok := registry[name]
 	if ok {
@@ -510,7 +510,7 @@ func KillSession(_ context.Context, name string) error {
 		// platforms — on Unix, SIGTERM to the group has already
 		// fired and SIGKILL is scheduled; on Windows, this is the
 		// only termination signal.
-		terminateGroup(s.cmd.Process.Pid)
+		terminateGroup(ctx, s.cmd.Process.Pid)
 		_ = s.cmd.Process.Kill()
 	}
 	_ = s.ptm.Close()

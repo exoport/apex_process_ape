@@ -584,6 +584,12 @@ func changeOnce(ctx context.Context, o changeOptions) (*changeRun, error) {
 // against, and a path only reachable through an hour-long model run is
 // a path that gets tested once.
 func (r *changeRun) settle(ctx context.Context, o changeOptions, res taskRun) error {
+	// Everything here runs AFTER the dispatch, and a dispatch stopped by
+	// SIGINT or SIGTERM is exactly when it matters: the run's context is
+	// cancelled by then, and exec.CommandContext refuses to start a git
+	// command on it. The first `git status` failed, settle returned, and
+	// the residue was never saved — however long the grace period.
+	ctx = context.WithoutCancel(ctx)
 	env := changeEnvelope{
 		ChangeID:     r.id,
 		ChangeDir:    relTo(r.cfg.Root, r.dir),

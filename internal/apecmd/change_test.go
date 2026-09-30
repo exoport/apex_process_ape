@@ -2,6 +2,7 @@ package apecmd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -590,4 +591,22 @@ func TestCheckChangeRoutes(t *testing.T) {
 		res := checkChangeRoutes(context.Background(), projectDataEnv(t.TempDir()))
 		require.Equal(t, StatusInfo, res.Status)
 	})
+}
+
+// A dispatch stopped by a signal is exactly when the residue matters most,
+// and the run's context is already cancelled by then. settle must still
+// read the tree and save the patch: every git call after the dispatch runs
+// on a context that survives cancellation.
+func TestSettle_SavesTheResidueAfterASignal(t *testing.T) {
+	r, o := settleFixture(t, landedContract)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // SIGTERM arrived: the root context is gone before settle runs
+	err := r.settle(ctx, o, taskRun{
+		Envelope: taskEnvelope{ExitCode: ExitRunFailed},
+		RunErr:   errors.New("wait done: terminated signal received"),
+	})
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
+	require.NotNil(t, r.residue, "the residue was not saved")
+	require.NotEmpty(t, r.residue.PatchPath)
+	require.FileExists(t, r.residue.PatchPath)
 }

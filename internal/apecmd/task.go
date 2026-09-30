@@ -503,8 +503,12 @@ func dispatchTask(ctx context.Context, o taskOptions) (taskRun, error) {
 	// assertion is skipped when ape is the one committing.
 	var contract commitowners.Result
 	if o.taskCommit == nil {
+		// The run's context is cancelled when a signal stopped it, and a
+		// git read on it fails at once — reported as "not a git
+		// repository". After the dispatch is exactly when this state
+		// matters, so the read survives cancellation.
 		contract = owners.Assert(o.skill, stateBefore,
-			commitowners.Capture(ctx, o.projectRoot), subjects,
+			commitowners.Capture(context.WithoutCancel(ctx), o.projectRoot), subjects,
 			commitowners.AssertOptions{NoCommit: o.skillNoCommit})
 	} else {
 		// Explicitly skipped, never left as the zero Result. The zero

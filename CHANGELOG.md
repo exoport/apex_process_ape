@@ -41,6 +41,32 @@
     - `--no-commit` restores the old behaviour exactly.
   - Doctor never runs fix commands, so its `ape framework update`
     suggestions stay as they were.
+  - A release installs its own bytes. With `core.autocrlf=true`, Git for
+    Windows' default, `git archive` converted LF to CRLF, so the same
+    release installed different bytes depending on who ran it. Caught by
+    the Windows CI job, and now asserted on every platform.
+- **A stopped run saves its residue, and reads the tree correctly** (class
+  B). Measured by sending `ape task` a SIGTERM, with and without Claude
+  Code 2.1.285's SIGKILL 3 s later, which its new background-command limit
+  does to a long dispatch:
+  - ape itself stops in about 0.1 s, so 3 s is plenty for the manifest,
+    which records `status: cancelled` with a termination record.
+  - **`ape change` never saved `residue.patch` after a signal**, however
+    long the grace period. Its settle step ran `git status` on the run's
+    already-cancelled context, which `exec.CommandContext` refuses to
+    start. The step failed, and the save was never reached. Everything
+    after the dispatch now runs on a context that survives cancellation.
+  - The same bug made `ape task` report "commit contract not asserted:
+    the project is not a git repository" for a stopped run in a git repo.
+- **Stopping a run stops what the skill started** (class B). Claude's Bash
+  tool runs each command outside Claude's process group. A skill's
+  `go test` or build therefore kept running, and kept writing into the
+  project, after ape stopped the run: a `sleep 90` survived SIGTERM and
+  SIGKILL of the group.
+  - ape now snapshots Claude's descendants before signalling and stops each
+    of them.
+  - Its SIGKILL escalation is now synchronous. It used to fire from a
+    goroutine 500 ms later, and ape had usually exited by then.
 
 ## v0.3.1 (2026-09-29)
 
