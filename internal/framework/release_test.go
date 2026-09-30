@@ -111,6 +111,8 @@ func TestRelease_IgnoresTheClonesCheckout(t *testing.T) {
 	b, err := os.ReadFile(skill)
 	require.NoError(t, err)
 	require.Equal(t, "# uncommitted work", string(b), "the clone's working tree is untouched")
+	require.Equal(t, "M .claude/skills/apex-foo/SKILL.md", gitIn(t, fw, "status", "--porcelain"),
+		"the clone's index is untouched: the export used a throwaway one")
 }
 
 // A build-repo tag nests the payload under framework/, and a release
@@ -234,7 +236,7 @@ func TestStatus_ACandidateAheadOfTheNewestRelease(t *testing.T) {
 }
 
 // A release installs its own bytes. With core.autocrlf=true — Git for
-// Windows' default — `git archive` converted LF to CRLF, so the same
+// Windows' default — the export converted LF to CRLF, so the same
 // release installed different bytes depending on who ran it. Caught by the
 // Windows CI job; asserted here on every platform.
 func TestRelease_ExportsTheReleasesOwnBytes(t *testing.T) {

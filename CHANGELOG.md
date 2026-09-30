@@ -8,7 +8,7 @@
   fast-forward, so anything pushed to the ship repo reached every team,
   tagged or not. See `docs/explanation/framework-updates-from-releases.md`.
   - **Which release:** the highest tag shaped exactly `vX.Y.Z`, by semver,
-    exported with `git archive`. The clone is only read for objects: never
+    exported through a throwaway index. The clone is only read for objects: never
     checked out, never merged, and it may be dirty or on any branch. A
     candidate is installed only by name (`--version vX.Y.Z-rc.N`), and
     `--version vX.Y.Z` pins a release. `--from-worktree` keeps the old
@@ -42,9 +42,14 @@
   - Doctor never runs fix commands, so its `ape framework update`
     suggestions stay as they were.
   - A release installs its own bytes. With `core.autocrlf=true`, Git for
-    Windows' default, `git archive` converted LF to CRLF, so the same
-    release installed different bytes depending on who ran it. Caught by
-    the Windows CI job, and now asserted on every platform.
+    Windows' default, the export converted LF to CRLF, so the same release
+    installed different bytes depending on who ran it. Caught by the Windows
+    CI job, and now asserted on every platform.
+  - The export no longer streams `git archive` into a tar reader. On
+    Windows the reader stopped early, `git archive` blocked on a full pipe,
+    and the install hung until the test timeout. Git now writes the tag's
+    files itself, through a throwaway index, so there is no pipe to block
+    on and any error is git's own, reported at once.
 - **A stopped run saves its residue, and reads the tree correctly** (class
   B). Measured by sending `ape task` a SIGTERM, with and without Claude
   Code 2.1.285's SIGKILL 3 s later, which its new background-command limit

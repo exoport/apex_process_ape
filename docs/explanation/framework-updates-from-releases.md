@@ -32,8 +32,11 @@ clone can be dirty, on any branch, or be the checkout you are developing in.
    - **`--version vX.Y.Z`** or **`--version vX.Y.Z-rc.N`** picks exactly
      that tag, and is the only way to install a candidate. Any other shape
      is a usage error (exit 2).
-3. **Export the tag's files:** `git archive <tag>` into a temporary
-   directory. That tree must use the RELEASED layout (`_apex/` and
+3. **Export the tag's files:** git writes the tag's tree into a temporary
+   directory through a throwaway index (`read-tree`, then
+   `checkout-index`). `core.autocrlf=false` makes the files the release's
+   own bytes, and the clone's index and working tree are left alone. That
+   tree must use the RELEASED layout (`_apex/` and
    `.claude/` at its root). A build-repo tag, which nests them under
    `framework/`, is refused (exit 3, `framework_layout_invalid`), with a
    hint to point `--repo` at the ship repo.

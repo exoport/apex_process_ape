@@ -4,18 +4,15 @@ package framework
 // v0.4.0; docs/explanation/framework-updates-from-releases.md).
 //
 // The clone named by --repo is used as a store of git objects: tags are
-// fetched into it, the chosen tag's tree is exported with `git archive`, and
+// fetched into it, the chosen tag's tree is exported through a throwaway index, and
 // nothing in the clone's checkout, branch or working tree is read or moved.
 // That is what lets "teams only see evaluated versions" hold by construction:
 // a commit pushed to the ship repo's main reaches nobody until it is tagged.
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -136,98 +133,48 @@ func ReadAtTag(ctx context.Context, repo, tag, path string) (data []byte, found 
 	return out, true, nil
 }
 
-// ExportTag writes the tree a tag names into a new temporary directory, via
-// `git archive`, and returns it with its cleanup. The clone itself is only
-// read.
+// ExportTag writes the tree a tag names into a new temporary directory and
+// returns it with its cleanup. The clone itself is only read: git writes
+// the files through a throwaway index (read-tree, then checkout-index), so
+// neither the clone's index nor its working tree is touched.
+//
+// It used to stream `git archive` into a tar reader. On Windows the reader
+// stopped early, `git archive` then blocked on a full pipe, and the Wait
+// that followed never returned — nine minutes, until the test timeout.
+// Letting git write the files removes both the pipe and the parser: an
+// error is git's own, reported at once.
+//
+// core.autocrlf=false: the release's own bytes. With Git for Windows'
+// default (autocrlf=true) the same release otherwise installed different
+// bytes depending on who ran it. Only the framework's own .gitattributes
+// can still ask for CRLF.
 func ExportTag(ctx context.Context, repo, tag string) (dir string, cleanup func(), err error) {
-	dir, err = os.MkdirTemp("", "ape-framework-"+tag+"-")
+	base, err := os.MkdirTemp("", "ape-framework-")
 	if err != nil {
 		return "", nil, err
 	}
-	cleanup = func() { _ = os.RemoveAll(dir) }
-	// core.autocrlf=false: export the release's own bytes. On a Windows
-	// clone (autocrlf=true, the Git for Windows default) `git archive`
-	// otherwise converts line endings, so a project got different bytes
-	// depending on who ran the install. Found by the Windows CI job. Only
-	// the framework's own .gitattributes can still ask for CRLF.
-	cmd := exec.CommandContext(ctx, GitCmd, "-c", "safe.directory="+repo, "-c", "core.autocrlf=false", //nolint:gosec // git, with a tag ape resolved itself
-		"archive", "--format=tar", "refs/tags/"+tag)
-	cmd.Dir = repo
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
+	cleanup = func() { _ = os.RemoveAll(base) }
+	dir = filepath.Join(base, "tree")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		cleanup()
 		return "", nil, err
 	}
-	if err := cmd.Start(); err != nil {
-		cleanup()
-		return "", nil, err
-	}
-	extractErr := extractTar(stdout, dir)
-	waitErr := cmd.Wait()
-	if waitErr != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("git archive %s: %w (stderr: %s)", tag, waitErr, strings.TrimSpace(stderr.String()))
-	}
-	if extractErr != nil {
-		cleanup()
-		return "", nil, fmt.Errorf("unpack %s: %w", tag, extractErr)
+	env := append(os.Environ(), "GIT_INDEX_FILE="+filepath.Join(base, "index"))
+	for _, args := range [][]string{
+		{"read-tree", "refs/tags/" + tag},
+		{"checkout-index", "--all", "--force"},
+	} {
+		full := append([]string{
+			"-c", "safe.directory=" + repo, "-c", "core.autocrlf=false", "--work-tree=" + dir,
+		}, args...)
+		cmd := exec.CommandContext(ctx, GitCmd, full...)
+		cmd.Dir, cmd.Env = repo, env
+		if out, err := cmd.CombinedOutput(); err != nil {
+			cleanup()
+			return "", nil, fmt.Errorf("export %s: git %s: %w (%s)", tag, args[0], err, strings.TrimSpace(string(out)))
+		}
 	}
 	return dir, cleanup, nil
-}
-
-// extractTar unpacks a `git archive` stream into dest. Only regular files,
-// directories and symlinks occur in one; anything else is skipped. A path
-// that would land outside dest is refused rather than trusted.
-func extractTar(r io.Reader, dest string) error {
-	tr := tar.NewReader(r)
-	root := filepath.Clean(dest) + string(os.PathSeparator)
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dest, filepath.FromSlash(hdr.Name))
-		if !strings.HasPrefix(target+string(os.PathSeparator), root) {
-			return fmt.Errorf("archive entry %q escapes the export directory", hdr.Name)
-		}
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			mode := os.FileMode(0o644)
-			if hdr.Mode&0o111 != 0 {
-				mode = 0o755
-			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(f, tr); err != nil { //nolint:gosec // a framework release is bounded; not an untrusted upload
-				_ = f.Close()
-				return err
-			}
-			if err := f.Close(); err != nil {
-				return err
-			}
-		case tar.TypeSymlink:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			if err := os.Symlink(hdr.Linkname, target); err != nil {
-				return err
-			}
-		}
-	}
 }
 
 // ApeVersionVerdict is how a running ape compares with a release's
