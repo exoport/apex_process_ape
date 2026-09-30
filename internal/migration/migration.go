@@ -208,8 +208,16 @@ func (e *Entry) validate() {
 	}
 	if e.Version == "" {
 		e.findingf("no version — ordering falls back to seq alone")
-	} else if !semver.IsValid("v" + strings.TrimPrefix(e.Version, "v")) {
+	} else if v := "v" + strings.TrimPrefix(e.Version, "v"); !semver.IsValid(v) {
 		e.findingf("version %q is not semver — it orders after every valid version", e.Version)
+	} else if semver.Prerelease(v) != "" {
+		// A migration belongs to the release that ships it, never to a
+		// candidate: the ledger records ids, not versions, so an entry
+		// written for an rc and applied by the eval under that rc would
+		// be listed against a version no team ever installs, and it sorts
+		// BEFORE the final version it belongs to.
+		e.findingf("version %q is a prerelease — a migration's version is the FINAL release that ships it (%s)",
+			e.Version, strings.TrimPrefix(strings.TrimSuffix(v, semver.Prerelease(v)), "v"))
 	}
 	switch e.Kind {
 	case KindDerivable:

@@ -176,6 +176,18 @@ body
 	require.True(t, entries[0].Unrunnable, "derivable with no command runs nothing")
 }
 
+func TestValidate_PrereleaseVersionIsAFinding(t *testing.T) {
+	e := Entry{ID: "a", Version: "v0.27.0-rc.2", Seq: 1, Kind: KindJudged, Skill: "s", Path: "a_seq-1_x.md"}
+	e.validate()
+	require.Contains(t, joinAll(e.Findings), "is a prerelease")
+	require.Contains(t, joinAll(e.Findings), "(0.27.0)", "the finding names the final version to use")
+	require.False(t, e.Unrunnable, "a finding reports; it does not stop the entry from running")
+
+	final := Entry{ID: "b", Version: "0.27.0", Seq: 1, Kind: KindJudged, Skill: "s", Path: "b_seq-1_x.md"}
+	final.validate()
+	require.NotContains(t, joinAll(final.Findings), "prerelease")
+}
+
 func TestValidate_UnknownKindIsTreatedAsJudged(t *testing.T) {
 	e := Entry{ID: "a", Version: "0.16.0", Seq: 1, Kind: "automatic", Path: "a_seq-1_x.md"}
 	e.validate()

@@ -16,6 +16,32 @@
     control anyway, because the model echoed the question's own words; the
     marker is now a phrase the question does not contain.
   - The free half, no `CLAUDE.md` in the root, runs in `make test`.
+- **ape releases through release candidates.** Framework, ape and eval now
+  evaluate before releasing, so the teams consuming these releases only see
+  what the eval measured. `AGENTS.md` → "Releases" has the classes: B
+  (session-driving) and C (surfaces skills or the eval use) go through an
+  rc, while D (independent) may still release directly.
+  - `release.yml` accepts `vX.Y.Z-rc.N` and publishes it as a signed GitHub
+    prerelease, which `ape update`, the install docs and
+    `releases/latest/download` all skip. A "Validate tag" step refuses any
+    other shape before a build.
+  - Promotion tags the evaluated rc's exact commit final. Two tags on one
+    commit is the v0.0.21 incident: goreleaser picked the rc and built the
+    final as it. Reproduced with goreleaser v2.18.0 on a dual-tagged scratch
+    commit, and fixed by setting `GORELEASER_CURRENT_TAG`. The same
+    reproduction showed a final's changelog starting at its own rc and listing
+    only the last rc's changes, so a final also gets `GORELEASER_PREVIOUS_TAG`,
+    the previous FINAL release.
+  - `/release` has three modes: `vX.Y.Z-rc.N` (rc), `vX.Y.Z` with rc tags
+    (promote: the last rc's commit or nothing, only after the user confirms
+    the eval passed, a gate autonomous mode does not skip), and `vX.Y.Z`
+    without them (direct, class D). After publishing, it checks the
+    prerelease flag, `releases/latest` and the binary's own `ape version`.
+- **A migration whose `version:` is a prerelease is reported.** A migration
+  belongs to the final release that ships it. The ledger keys on ids, so an
+  rc version would be recorded against a version no team installs, and it
+  sorts before the final release it belongs to. The finding names the final
+  version to use.
 
 ## v0.3.0 (2026-09-28)
 
