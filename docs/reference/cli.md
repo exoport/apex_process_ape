@@ -4389,13 +4389,13 @@ it, so a tool's time limit on that shell does not reach it.
                         supervisor is gone without recording an exit)
   ape run status <id>   show its handle: command, pids, stdout and log
                         files, and the exit code once it has ended
-  ape run stop <id>     stop it as Ctrl-C would, and wait for its exit
-                        to be recorded
+  ape run stop <id>     stop it (gracefully on Linux/macOS, hard on
+                        Windows) and wait for its exit to be recorded
 
 Subcommands:
 
 - `status` — Show a detached run's handle
-- `stop` — Stop a detached run as Ctrl-C would, and wait for its exit to be recorded
+- `stop` — Stop a detached run and wait for its exit to be recorded
 - `wait` — Wait for a detached run and exit with its exit code
 
 ## ape run status
@@ -4414,20 +4414,31 @@ Flags:
 
 ## ape run stop
 
-Stop a detached run as Ctrl-C would, and wait for its exit to be recorded
+Stop a detached run and wait for its exit to be recorded
 
 ```
 ape run stop <id> [flags]
 ```
 
-Stop a run started with --detach. The supervisor passes the stop on to the
-run, which shuts down the way it does on Ctrl-C: ape change saves its
-residue, and the commands the skill started are stopped. Then this waits
-(up to --timeout) for the exit to be recorded and reports it.
+Stop a run started with --detach, then wait (up to --timeout) for its exit to
+be recorded and report it. The supervisor ends itself once the run it
+supervises ends: it records the exit, then exits with that code.
+
+On Linux and macOS the stop is graceful: the supervisor forwards SIGTERM, and
+the run shuts down as on Ctrl-C — ape change saves its residue, and the
+commands the skill started are stopped. On Windows it is a HARD stop: there
+is no SIGTERM to forward, so the run's own process is terminated; no residue
+is saved and the skill's commands are not stopped.
+
+Only this run's own process is ever signalled. A pid is reused once its
+process is gone, so ape first checks the process is still this run's (Unix:
+its "ape run supervise --handle …/<id>.json" command line; Windows: an ape
+process created after the handle). Anything else is refused, exit 76, and
+nothing is signalled.
 
 Exits 0 once the run has ended, whatever its own exit code (ape run wait
-reports that); 75 if it has not ended within --timeout; 0 at once if it had
-already ended.
+reports that); 75 if it has not ended within --timeout; 76 if its supervisor
+is gone or the pid is no longer the run's; 0 at once if it had already ended.
 
 Flags:
 

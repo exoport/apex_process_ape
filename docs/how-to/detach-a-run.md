@@ -61,10 +61,19 @@ mistake an outcome for "not yet".
   **76** rather than waiting forever. That's a code of its own, so it's
   never mistaken for a run that exited 1. The run's own manifest, under
   `_output/ape/tasks/…` and the other run folders, says how far it got.
-- **`ape run stop <id>`** stops a detached run the way Ctrl-C would. `ape
-  change` saves its residue, and the commands the skill started are
-  stopped. It then waits, up to `--timeout` (30 s by default), for the exit
-  to be recorded.
+- **`ape run stop <id>`** stops a detached run, then waits up to
+  `--timeout` (30 s by default) for the exit to be recorded. The
+  supervisor always ends itself right after the run it supervises ends: it
+  waits on the run, writes the exit code into the handle, and exits with
+  that code.
+  - **Linux and macOS:** a graceful stop, as Ctrl-C would. The supervisor
+    forwards SIGTERM to the run, so `ape change` saves its residue and the
+    commands the skill started are stopped.
+  - **Windows:** a hard stop. There is no SIGTERM to forward, and killing
+    the supervisor would end it before it records the exit and orphan the
+    run, so ape ends the run's own process with `TerminateProcess`. The
+    supervisor then records the exit and ends. Nothing gets a chance to
+    clean up: no residue is saved, and the skill's commands keep running.
   - It exits 0 once the run has ended, whatever the run's own code;
     `ape run wait` reports that code.
   - It exits 75 if the run hasn't ended in time.

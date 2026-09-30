@@ -83,8 +83,11 @@
     apart from stderr (`<id>.log`). A detached `ape change --output-format
     json` therefore leaves one clean envelope for the orchestrator to route
     on. Asked for by the framework.
-  - `ape run stop <id>` stops the run as Ctrl-C would, then waits for its
-    exit to be recorded.
+  - `ape run stop <id>` stops the run, then waits for its exit to be
+    recorded. On Linux and macOS it's graceful, as Ctrl-C would be. On
+    Windows it's a hard stop (`TerminateProcess` on the run's own process,
+    since killing the supervisor would lose the exit): no residue is saved,
+    and the skill's commands are not stopped.
   - It only ever signals the run's own process. A pid is reused once its
     process is gone, so before signalling, ape checks the process is still
     this run's: on Unix by its `ape run supervise --handle …/<id>.json`

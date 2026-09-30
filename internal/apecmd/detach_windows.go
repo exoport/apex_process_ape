@@ -32,8 +32,8 @@ func procIdentity(pid int) (alive bool, image string, created time.Time) {
 	if err := windows.GetExitCodeProcess(h, &code); err != nil || code != 259 { // STILL_ACTIVE
 		return false, "", time.Time{}
 	}
-	buf := make([]uint16, windows.MAX_PATH)
-	size := uint32(len(buf))
+	var buf [windows.MAX_PATH]uint16
+	size := uint32(windows.MAX_PATH)
 	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &size); err == nil {
 		image = filepath.Base(windows.UTF16ToString(buf[:size]))
 	}
@@ -42,11 +42,6 @@ func procIdentity(pid int) (alive bool, image string, created time.Time) {
 		created = time.Unix(0, c.Nanoseconds())
 	}
 	return true, image, created
-}
-
-func pidAlive(pid int) bool {
-	alive, _, _ := procIdentity(pid)
-	return alive
 }
 
 // isOurs: alive, an ape executable, and created no earlier than the handle
@@ -65,10 +60,13 @@ func isOurs(pid int, h *detachedHandle) bool {
 
 func supervisorIsOurs(_ context.Context, h *detachedHandle) bool { return isOurs(h.SupervisorPID, h) }
 
-// stopDetached stops the run itself: Windows has no SIGTERM to forward, and
-// killing the supervisor would lose the exit. The supervisor sees the run
-// end and records it. The run's pid is checked to still be this run's ape
-// process immediately before; anything else is refused.
+// stopDetached ends the run's own process: Windows has no SIGTERM to
+// forward, and killing the supervisor would end it before it recorded the
+// exit (and orphan the run). The supervisor's wait then returns, it records
+// the exit, and it ends. This is a HARD stop (TerminateProcess), not a
+// Ctrl-C: ape change saves no residue and the skill's commands are not
+// stopped — documented as such. The run's pid is checked to still be this
+// run's ape process immediately before; anything else is refused.
 func stopDetached(_ context.Context, h *detachedHandle) error {
 	if !isOurs(h.ChildPID, h) {
 		return fmt.Errorf("pid %d is not run %s's process (it is gone, and the pid may belong to another "+
