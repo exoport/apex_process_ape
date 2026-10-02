@@ -183,7 +183,7 @@ func checkMemorySize(_ context.Context, env doctorEnv) CheckResult {
 	case memory.StateOverHard:
 		return CheckResult{
 			Status: StatusFail,
-			Message: fmt.Sprintf("%s is past the %s hard ceiling — the file is unreadable by its own writer",
+			Message: fmt.Sprintf("%s is past the %s hard ceiling — compaction is overdue: one Read shows only part of it, and at 256 KiB a Read fails outright",
 				humanBytes(c.Bytes), humanBytes(c.HardCeiling)),
 			Remediation: "Compact it now, and treat the miss as a bug report: the soft gate should have caught this several retrospectives ago.",
 			FixCommand:  "ape memory check",

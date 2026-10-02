@@ -60,11 +60,12 @@ const (
 	// not the limit that binds first: the ~25,000-token per-Read cap
 	// (about 72 KB of markdown) truncates the view long before it.
 	ReadCap = 256 << 10
-	// bytesPerTokenEstimate is the crude bytes-per-token ratio used only
-	// for the human-readable "~N tokens" hint. Never gated on. APEX
-	// markdown measures nearer 2.9, so the hint reads low by about a
-	// quarter.
-	bytesPerTokenEstimate = 4
+	// bytesPerTokenTenths is the bytes-per-token ratio behind the
+	// "~N tokens" hint, in tenths: 2.9, measured on APEX markdown (Claude
+	// Code counted 62,488 tokens for a 181,187-byte file). It used to be
+	// 4, which read low by about a quarter. Still only a hint: never gated
+	// on.
+	bytesPerTokenTenths = 29
 )
 
 // State is the verdict of a size check.
@@ -122,8 +123,8 @@ type Check struct {
 	SoftBudget  int64  `json:"soft_budget"  yaml:"soft_budget"`
 	HardCeiling int64  `json:"hard_ceiling" yaml:"hard_ceiling"`
 	State       State  `json:"state"        yaml:"state"`
-	// EstimatedTokens is bytes/4 and is labelled an estimate everywhere it
-	// is shown. Nothing gates on it.
+	// EstimatedTokens is bytes/2.9 and is labelled an estimate everywhere
+	// it is shown. Nothing gates on it.
 	EstimatedTokens int64 `json:"estimated_tokens" yaml:"estimated_tokens"`
 }
 
@@ -154,7 +155,7 @@ func CheckSize(path string, soft, hard int64) Check {
 	}
 	c.Exists = true
 	c.Bytes = info.Size()
-	c.EstimatedTokens = c.Bytes / bytesPerTokenEstimate
+	c.EstimatedTokens = c.Bytes * 10 / bytesPerTokenTenths
 	switch {
 	case c.Bytes > hard:
 		c.State = StateOverHard

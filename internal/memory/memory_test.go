@@ -264,7 +264,7 @@ func TestCheckSize_States(t *testing.T) {
 			require.Equal(t, tc.state, c.State)
 			require.True(t, c.Exists)
 			require.Equal(t, int64(tc.size), c.Bytes)
-			require.Equal(t, int64(tc.size/4), c.EstimatedTokens)
+			require.Equal(t, int64(tc.size)*10/29, c.EstimatedTokens)
 		})
 	}
 }

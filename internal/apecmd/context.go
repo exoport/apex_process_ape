@@ -73,8 +73,8 @@ at exactly the moment compaction is due.
   soft   exit 1 at over-soft or worse
   hard   exit 1 at over-hard
 
-The token count in the output is bytes/4, an estimate, and nothing gates
-on it.`,
+The token count in the output is bytes/2.9 (the ratio measured on APEX
+markdown), an estimate, and nothing gates on it.`,
 		Args:    cobra.NoArgs,
 		Example: "  ape context check\n  ape context check --output-format json",
 		RunE: func(cmd *cobra.Command, _ []string) error {

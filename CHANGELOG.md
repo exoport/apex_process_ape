@@ -28,6 +28,17 @@
     700-character line, and an 801-character one as a placeholder, where
     ape can see it. No turn, no tokens.
 
+- **`ape memory check` / `ape context check` estimate tokens at 2.9
+  bytes each, and `memory.size`'s FAIL no longer says "unreadable"**
+  (class C: output text). The `estimated_tokens` hint used bytes/4,
+  which read about a quarter low on APEX markdown; it is now bytes/2.9,
+  the ratio Claude Code's own count gave (62,488 tokens for a
+  181,187-byte file). Still a hint, never gated on. `ape doc analyze`
+  keeps its own bytes/4: its split prediction depends on it. The
+  `memory.size` FAIL message said a file past the hard ceiling was
+  "unreadable by its own writer"; it now says compaction is overdue, one
+  Read shows only part of the file, and at 256 KiB a Read fails outright.
+
 - **`story.adrs_considered` names its candidates** (class C: the shape of
   `ape story verify`'s output changes). Both messages now end with the
   candidate ADRs and the tag each matched on, e.g. `(candidates:
