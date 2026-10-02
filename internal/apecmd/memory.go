@@ -16,10 +16,11 @@ func newMemoryCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "memory",
 		Short: "Read the team-memory file without loading it whole",
-		Long: `team-memory.md outgrew whole-file reading: at 431,950 bytes on the
-reference project a Read fails outright ("exceeds maximum allowed size
-(256KB)") — including for the retrospective that is instructed to re-read
-it before editing it.
+		Long: `team-memory.md outgrew whole-file reading. Past ~25,000 tokens (about
+72 KB of markdown) a Read returns only part of the file, with a paging
+banner; at 431,950 bytes on the reference project it fails outright
+("exceeds maximum allowed size (256KB)") — including for the
+retrospective that is instructed to re-read it before editing it.
 
   index  what is in there: ordinal, section, date, size, title
   show   the verbatim body of named entries
@@ -138,8 +139,9 @@ every retrospective.
   state: absent      no team-memory.md yet (a fresh project, not a problem)
   state: ok          under the soft budget
   state: over-soft   compaction is due; schedule it at the next epic close
-  state: over-hard   approaching Claude Code's 256 KiB Read cap — the file
-                     is about to become unreadable by its own writer
+  state: over-hard   compaction is overdue: far past what one Read shows
+                     (~25k tokens, about 72 KB) and nearing Claude Code's
+                     256 KiB byte cap, where a Read fails outright
 
 EXIT 0 BY DEFAULT, whatever the state. The verdict is the 'state' field,
 not the exit code, and that is deliberate: the framework's prose

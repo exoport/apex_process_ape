@@ -214,8 +214,8 @@ committed the path, adding the line changes nothing at all.
 
 memory.size is one of only two Required checks in that group, deliberately:
 a non-required FAIL is downgraded to WARN, so nothing else could surface a
-team-memory.md that has passed the Read cap and become unreadable by its
-own writer.
+team-memory.md past its hard ceiling: far past what one Read shows, and
+nearing the 256 KiB byte cap at which a Read fails outright.
 
 Two checks report on the step-completion gates rather than on
 prerequisites, because both protect against a failure that is otherwise

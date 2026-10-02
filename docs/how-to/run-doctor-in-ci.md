@@ -113,7 +113,7 @@ ape doctor --output-format json | jq -e '.checks[] | select(.name == "ape.update
 | `runs.legacy_layout WARN`              | Run artifacts still at the pre-`{output_folder}/ape` paths | ape's cost rollups and hook-contract check read a project with no history until they move. Nothing is lost — `ape framework update` relocates them, reporting rather than overwriting any collision. |
 | `config.resolved FAIL`                 | `_apex/config.yaml` or `_apex/config.local.yaml` exists but does not parse | Fix the YAML the message names. This one is **required**: every other project-data check resolves its paths through it, so a broken config would otherwise make five checks report clean against the wrong tree. |
 | `config.resolved INFO`                 | The checkout is not an APEX project                                     | Expected outside a project. INFO never fails.                                                          |
-| `memory.size FAIL`                     | `team-memory.md` is past the 200 KiB hard ceiling                       | **Required, and intended to fail.** The file is approaching Claude Code's 256 KiB Read cap, past which the retrospective that writes it can no longer read it. Compact it; the soft gate should have caught this several runs earlier. |
+| `memory.size FAIL`                     | `team-memory.md` is past the 200 KiB hard ceiling                       | **Required, and intended to fail.** The file is far past what one Read shows (~25,000 tokens, about 72 KB of markdown) and nearing Claude Code's 256 KiB byte cap, at which a Read fails outright. Compact it; the soft gate should have caught this several runs earlier. |
 | `memory.size WARN`                     | Over the 40 KiB soft budget                                             | Compaction is due at the next epic close. Nothing is broken yet.                                        |
 | `registry.drift WARN`                  | A record is on disk but absent from `index.yaml`, or vice versa, or an entry lacks a field its schema requires (`registry.entry_incomplete`) | `ape registry verify --all` lists them. `ape registry sync --all` repairs set and file drift, and `ape registry backfill --all` repairs incomplete entries. |
 | `story.frontmatter WARN`               | Stories are missing extension-gated keys, or carry a type mismatch      | `ape story verify` lists them. Frontmatter is authored, so these are fixed by hand.                    |
@@ -142,7 +142,7 @@ Two are **required**, and both for a mechanical reason. `runDoctor`
 downgrades a non-required FAIL to WARN, so:
 
 - `memory.size` has to be required or nothing could surface a
-  `team-memory.md` that has passed the Read cap. `ape memory check`
+  `team-memory.md` that has passed its hard ceiling. `ape memory check`
   deliberately exits 0 in that state — a failing exit there would abort the
   retrospective at exactly the moment compaction is due — so this row is
   where the breach becomes non-ignorable.

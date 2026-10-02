@@ -677,7 +677,7 @@ enough to run on every retrospective:
 | `absent` | no `team-memory.md` yet — a fresh project, not a problem |
 | `ok` | under the soft budget |
 | `over-soft` | compaction is due at the next epic close |
-| `over-hard` | approaching the 256 KiB Read cap; the soft gate was missed |
+| `over-hard` | compaction is overdue: far past what one Read shows (~25k tokens, about 72 KB) and nearing the 256 KiB byte cap, where a Read fails outright; the soft gate was missed |
 
 **It exits 0 whatever the state.** The verdict is the `state` field, not
 the exit code — a failing exit would abort the retrospective at exactly the
@@ -692,9 +692,14 @@ ape context check         # size against the same two budgets
 ```
 
 `project-context.md` is the standards document every skill loads whole, it
-grows by append, and it hits the same 256 KiB Read cap `team-memory.md`
-does — past which its own writer can no longer read it. So the bands are
-literally the same numbers, from the same constants: soft 40960 B, hard
+grows by append, and it meets the same two Read limits `team-memory.md`
+does. The one that binds first is Claude Code's ~25,000-token cap on a
+single Read, about 72 KB of markdown: past it a Read returns only part of
+the file, with a paging banner. The 256 KiB byte cap only makes a Read fail
+outright, much later. For a file skills load whole, the soft budget
+(~14k tokens) is therefore the one that keeps it inside a single Read.
+
+The bands are literally the same numbers, from the same constants: soft 40960 B, hard
 204800 B, the same four states, the same `--soft` / `--hard` /
 `--fail-at` / `--output-format` flags, and the same **exit 0 whatever the
 state** contract, for the same reason — a failing exit would abort

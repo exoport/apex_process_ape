@@ -1841,8 +1841,11 @@ ape context
 
 project-context.md is the standards document every skill loads whole —
 architecture, ADR and pattern passes, both story batches, the reviewers.
-It grows by append, and it is bounded by the same 256 KiB Read cap
-team-memory.md is, so the same two budgets apply to it.
+It grows by append, and it meets the same two Read limits team-memory.md
+does: past ~25,000 tokens (about 72 KB of markdown) a Read returns only
+part of it, and at Claude Code's 256 KiB byte cap a Read fails outright.
+The same two budgets apply. For a file skills load whole, the soft
+budget (~14k tokens) is the one that keeps it inside a single Read.
 
   check  size against the soft budget and hard ceiling, from a stat alone
 
@@ -1866,9 +1869,11 @@ die on.
   state: absent      no project-context.md yet (the governance pipeline
                      writes it; before that, not a problem)
   state: ok          under the soft budget
-  state: over-soft   compaction is due
-  state: over-hard   approaching Claude Code's 256 KiB Read cap — the file
-                     is about to become unreadable by its own writer
+  state: over-soft   compaction is due; past ~72 KB a whole-file Read is
+                     already partial
+  state: over-hard   compaction is overdue: far past what one Read shows
+                     and nearing Claude Code's 256 KiB byte cap, where a
+                     Read fails outright
 
 The budgets are the pair 'ape memory check' already enforces on
 team-memory.md, from one set of constants rather than two restatements of
@@ -2795,8 +2800,8 @@ committed the path, adding the line changes nothing at all.
 
 memory.size is one of only two Required checks in that group, deliberately:
 a non-required FAIL is downgraded to WARN, so nothing else could surface a
-team-memory.md that has passed the Read cap and become unreadable by its
-own writer.
+team-memory.md past its hard ceiling: far past what one Read shows, and
+nearing the 256 KiB byte cap at which a Read fails outright.
 
 Two checks report on the step-completion gates rather than on
 prerequisites, because both protect against a failure that is otherwise
@@ -3526,10 +3531,11 @@ Read the team-memory file without loading it whole
 ape memory
 ```
 
-team-memory.md outgrew whole-file reading: at 431,950 bytes on the
-reference project a Read fails outright ("exceeds maximum allowed size
-(256KB)") — including for the retrospective that is instructed to re-read
-it before editing it.
+team-memory.md outgrew whole-file reading. Past ~25,000 tokens (about
+72 KB of markdown) a Read returns only part of the file, with a paging
+banner; at 431,950 bytes on the reference project it fails outright
+("exceeds maximum allowed size (256KB)") — including for the
+retrospective that is instructed to re-read it before editing it.
 
   index  what is in there: ordinal, section, date, size, title
   show   the verbatim body of named entries
@@ -3556,8 +3562,9 @@ every retrospective.
   state: absent      no team-memory.md yet (a fresh project, not a problem)
   state: ok          under the soft budget
   state: over-soft   compaction is due; schedule it at the next epic close
-  state: over-hard   approaching Claude Code's 256 KiB Read cap — the file
-                     is about to become unreadable by its own writer
+  state: over-hard   compaction is overdue: far past what one Read shows
+                     (~25k tokens, about 72 KB) and nearing Claude Code's
+                     256 KiB byte cap, where a Read fails outright
 
 EXIT 0 BY DEFAULT, whatever the state. The verdict is the 'state' field,
 not the exit code, and that is deliberate: the framework's prose

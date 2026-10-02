@@ -150,8 +150,9 @@ func checkSprintDivergence(_ context.Context, env doctorEnv) CheckResult {
 //
 // runDoctor silently downgrades a non-required FAIL to WARN, so a
 // non-required check could never surface the hard ceiling — the state where
-// team-memory.md has passed the Read cap and become unreadable by its own
-// writer. `ape memory check` deliberately exits 0 in that state (a failing
+// team-memory.md is far past what one Read shows (~25k tokens, about 72 KB)
+// and nearing the 256 KiB byte cap at which a Read fails outright.
+// `ape memory check` deliberately exits 0 in that state (a failing
 // exit there would abort the retrospective at exactly the moment
 // compaction is due); this is where the breach becomes non-ignorable
 // instead.

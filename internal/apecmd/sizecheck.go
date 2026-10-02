@@ -9,10 +9,11 @@ import (
 
 // Two commands stat a whole-file artifact and band it against the same two
 // budgets: `ape memory check` over `team-memory.md` and `ape context check`
-// over `project-context.md`. Both files are read whole by the skills that
-// write them, so both are bounded by the same 256 KiB Read cap, and the
-// framework asked for one caller of the constants rather than two
-// restatements of the numbers. The `--fail-at` policy, the leading size
+// over `project-context.md`. Skills read and append to both, so both meet
+// the same two Read limits: the ~25,000-token cap on one Read (about 72 KB
+// of markdown), past which a Read is partial, and the 256 KiB byte cap,
+// past which it fails outright. The framework asked for one caller of the
+// constants rather than two restatements of the numbers. The `--fail-at` policy, the leading size
 // line and the flag wiring live here so the two commands cannot drift; the
 // remediation prose does not, because it names a different skill in each.
 

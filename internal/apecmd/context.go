@@ -16,8 +16,11 @@ func newContextCmd() *cobra.Command {
 		Short: "Inspect the project-context document",
 		Long: `project-context.md is the standards document every skill loads whole —
 architecture, ADR and pattern passes, both story batches, the reviewers.
-It grows by append, and it is bounded by the same 256 KiB Read cap
-team-memory.md is, so the same two budgets apply to it.
+It grows by append, and it meets the same two Read limits team-memory.md
+does: past ~25,000 tokens (about 72 KB of markdown) a Read returns only
+part of it, and at Claude Code's 256 KiB byte cap a Read fails outright.
+The same two budgets apply. For a file skills load whole, the soft
+budget (~14k tokens) is the one that keeps it inside a single Read.
 
   check  size against the soft budget and hard ceiling, from a stat alone`,
 	}
@@ -44,9 +47,11 @@ die on.
   state: absent      no project-context.md yet (the governance pipeline
                      writes it; before that, not a problem)
   state: ok          under the soft budget
-  state: over-soft   compaction is due
-  state: over-hard   approaching Claude Code's 256 KiB Read cap — the file
-                     is about to become unreadable by its own writer
+  state: over-soft   compaction is due; past ~72 KB a whole-file Read is
+                     already partial
+  state: over-hard   compaction is overdue: far past what one Read shows
+                     and nearing Claude Code's 256 KiB byte cap, where a
+                     Read fails outright
 
 The budgets are the pair 'ape memory check' already enforces on
 team-memory.md, from one set of constants rather than two restatements of
