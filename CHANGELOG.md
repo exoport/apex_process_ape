@@ -17,6 +17,13 @@
     user settings; only an enterprise-managed setting can still override.
   Recorded as `file_read_max_output_tokens` in the manifest and in
   `prompt.yaml`. The `ape chat` spawn carries it too.
+- **`output.ape_ignored` points at the output folder.** A project whose
+  output folder is gitignored, as the framework requires, already passes
+  the check. The WARN on eval fixtures means `_output/` itself is not
+  ignored there. The row's message and fix command now name the output
+  folder (`echo '_output/' >> .gitignore`) instead of ape's subtree.
+  ape still never edits `.gitignore`.
+
 - **A typed line stays short, and ape confirms claude submitted it**
   (class B: how ape drives the session). Measured through ape's own PTY
   write on Claude Code 2.1.285 and 2.1.287: a typed burst past 800

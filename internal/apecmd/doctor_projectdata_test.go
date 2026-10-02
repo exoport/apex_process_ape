@@ -502,7 +502,8 @@ func TestCheckOutputApeIgnored_ItsOwnFixCommandSatisfiesIt(t *testing.T) {
 
 	res := checkOutputApeIgnored(context.Background(), projectDataEnv(root))
 	require.Equal(t, StatusWarn, res.Status, "nothing ignores it yet")
-	require.Equal(t, "echo '_output/ape/' >> .gitignore", res.FixCommand)
+	require.Equal(t, "echo '_output/' >> .gitignore", res.FixCommand,
+		"the remedy is the framework's own rule: the whole output folder")
 
 	cmd := exec.CommandContext(context.Background(), "sh", "-c", res.FixCommand)
 	cmd.Dir = root

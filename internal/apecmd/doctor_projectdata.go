@@ -341,6 +341,14 @@ func checkOutputApeIgnored(ctx context.Context, env doctorEnv) CheckResult {
 		}
 	}
 	rel = filepath.ToSlash(rel)
+	// The remedy names the OUTPUT FOLDER, not ape's subtree: the framework
+	// requires the whole output folder gitignored, and a project that does
+	// so never sees this row warn. Ignoring only ape's part would leave the
+	// framework's own handoffs and briefs beside it unignored.
+	outRel := rel
+	if o, err := filepath.Rel(cfg.Root, runlog.OutputRoot(cfg.Root)); err == nil {
+		outRel = filepath.ToSlash(o)
+	}
 
 	// Asked WITH A TRAILING SLASH, which is the query and not the path.
 	//
@@ -375,17 +383,17 @@ func checkOutputApeIgnored(ctx context.Context, env doctorEnv) CheckResult {
 			Remediation: "Every run rewrites these, so each one dirties the tree and the next " +
 				"`ape pipeline` fails its dirty-tree pre-flight. Ignoring the path is not enough on " +
 				"its own: git keeps tracking what is already in the index, so untrack it too.",
-			FixCommand: "git rm -r --cached " + rel + " && echo '" + rel + "/' >> .gitignore",
+			FixCommand: "git rm -r --cached " + rel + " && echo '" + outRel + "/' >> .gitignore",
 		}
 	}
 	return CheckResult{
 		Status:  StatusWarn,
-		Message: rel + " is not ignored by git",
-		Remediation: "ape writes every manifest, runlog and transcript link under this path and " +
-			"rewrites them on each run. Untracked, they sit in `git status` waiting for a " +
-			"`git add -A` — including ape's own commit-emitting steps. The framework already " +
-			"requires the output folder to be gitignored; this is the part of it ape can see.",
-		FixCommand: "echo '" + rel + "/' >> .gitignore",
+		Message: rel + " is not ignored by git: the output folder " + outRel + "/ is not gitignored",
+		Remediation: "The framework requires the output folder to be gitignored, and on a project " +
+			"that does this row is OK. ape writes every manifest, runlog and transcript link " +
+			"under " + rel + " and rewrites them on each run. Untracked, they sit in `git status` " +
+			"waiting for a `git add -A`, including ape's own commit-emitting steps.",
+		FixCommand: "echo '" + outRel + "/' >> .gitignore",
 	}
 }
 
