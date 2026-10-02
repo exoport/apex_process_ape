@@ -1,6 +1,7 @@
 package story
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,8 +82,83 @@ func TestGovernanceCounts_SelfCertifyingSkip(t *testing.T) {
 		require.Contains(t, f.Message, "adrs_considered")
 		require.NotContains(t, f.Message, "applicability mismatch",
 			"the message must never call this an applicability mismatch")
+		require.Contains(t, f.Message, "(candidates: ADR-0001 [wiring])")
+		require.Equal(t, []Candidate{{ID: "ADR-0001", Tag: "wiring"}}, f.Candidates)
 	}
 	require.True(t, found, "findings: %+v", verdict.Findings)
+}
+
+// TestGovernanceCounts_MessageNamesTheCandidates is why the candidates are
+// in the message at all: without them the agent fixing the story rebuilt
+// the set itself, with scratch copies and a home-made matcher. Each
+// candidate carries the FIRST of its declared tags that matched, in
+// declaration order, and only ADRs that could produce a criterion appear.
+func TestGovernanceCounts_MessageNamesTheCandidates(t *testing.T) {
+	cfg := govProject(t)
+	writeADR(t, cfg.Paths.ADRs, "ADR-0001", "golang", "wiring", "thing")
+	writeADR(t, cfg.Paths.ADRs, "ADR-0002", "Thing")
+	writeADR(t, cfg.Paths.ADRs, "ADR-0003", "unrelated")
+	writeADRAs(t, cfg.Paths.ADRs, "ADR-0004", "accepted", "pattern", "wiring")
+	writeADRAs(t, cfg.Paths.ADRs, "ADR-0005", "superseded", "architectural", "wiring")
+
+	path := storyWithGovernance(t, cfg,
+		"governance_pass:\n  adrs_applicable: 0\n",
+		"\nThe story is about wiring the thing.\n")
+
+	verdict := VerifyFile(path, apexcfg.Ext{ADRs: true})
+	require.Equal(t, FileShapeProblem, verdict.Code)
+	f := onlyFinding(t, verdict.Findings, CheckADRsConsidered)
+	require.Contains(t, f.Message, "(candidates: ADR-0001 [wiring], ADR-0002 [Thing])")
+	require.Equal(t, []Candidate{
+		{ID: "ADR-0001", Tag: "wiring"},
+		{ID: "ADR-0002", Tag: "Thing"},
+	}, f.Candidates)
+}
+
+// TestGovernanceCounts_NoCandidatesSaysNone covers the other message: more
+// judged applicable than were ever candidates, with an empty set. It says
+// "none" rather than leaving the reader to infer it from the count.
+func TestGovernanceCounts_NoCandidatesSaysNone(t *testing.T) {
+	cfg := govProject(t)
+	writeADR(t, cfg.Paths.ADRs, "ADR-0001", "unrelated")
+
+	path := storyWithGovernance(t, cfg,
+		"governance_pass:\n  adrs_applicable: 2\n",
+		"\nThe story is about wiring the thing.\n")
+
+	verdict := VerifyFile(path, apexcfg.Ext{ADRs: true})
+	f := onlyFinding(t, verdict.Findings, CheckADRsConsidered)
+	require.Contains(t, f.Message, "more ADRs were judged applicable than were ever candidates")
+	require.Contains(t, f.Message, "(candidates: none)")
+	require.Empty(t, f.Candidates)
+}
+
+// TestFinding_CandidatesOmittedWhenEmpty — every other check's finding
+// keeps its existing shape on the wire.
+func TestFinding_CandidatesOmittedWhenEmpty(t *testing.T) {
+	plain, err := json.Marshal(Finding{Check: "story.x", Path: "p", Message: "m"})
+	require.NoError(t, err)
+	require.NotContains(t, string(plain), "candidates")
+
+	withCands, err := json.Marshal(Finding{
+		Check: CheckADRsConsidered, Path: "p", Message: "m",
+		Candidates: []Candidate{{ID: "ADR-0001", Tag: "wiring"}},
+	})
+	require.NoError(t, err)
+	require.Contains(t, string(withCands), `"candidates":[{"id":"ADR-0001","tag":"wiring"}]`)
+}
+
+// onlyFinding returns the single finding with the given check id.
+func onlyFinding(t *testing.T, findings []Finding, check string) Finding {
+	t.Helper()
+	var got []Finding
+	for _, f := range findings {
+		if f.Check == check {
+			got = append(got, f)
+		}
+	}
+	require.Len(t, got, 1, "findings: %+v", findings)
+	return got[0]
 }
 
 func TestGovernanceCounts_ApplicableExceedsConsidered(t *testing.T) {

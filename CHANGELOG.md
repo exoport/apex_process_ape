@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **`story.adrs_considered` names its candidates** (class C: the shape of
+  `ape story verify`'s output changes). Both messages now end with the
+  candidate ADRs and the tag each matched on, e.g. `(candidates:
+  ADR-0003 [go], ADR-0004 [package])`, or `(candidates: none)`. The same
+  list is on the finding as an omitempty `candidates: [{id, tag}]` field.
+  Same check id, same exit code. Eval transcripts showed agents rebuilding
+  the set themselves, with scratch story copies and a home-made tag matcher
+  written into the project.
+
 - **chore(deps): containerd `v2.3.6`, closing GO-2026-6597.** An image-pull
   denial of service through a crafted OCI index graph (CVE-2026-53493),
   published 2026-10-01 and reported as reachable from `ape sandbox`'s

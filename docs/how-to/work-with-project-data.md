@@ -358,6 +358,17 @@ legitimate keep-or-drop. The candidate set counts only ADRs that could
 produce a compliance criterion at all (`status: accepted`,
 `type != pattern`).
 
+Both findings name the candidates, each with the first of its declared tags
+the body matched, so the set never has to be reconstructed by hand:
+
+```text
+story.adrs_considered: adrs_applicable is 0 but the recomputed adrs_considered is 2 — … (candidates: ADR-0003 [go], ADR-0004 [package])
+```
+
+With `--output-format json` or `yaml`, the same list is on the finding as
+`candidates: [{id, tag}]`. No other check sets it, and it is omitted when
+empty.
+
 The two ADR classes need the project's corpus, which `--file` finds by
 walking up from the story's own path. Against a story outside any project
 they **skip and say so** under `skipped_checks`; the mode keeps working

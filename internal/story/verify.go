@@ -71,6 +71,9 @@ type Finding struct {
 	Path    string `json:"path"            yaml:"path"`
 	Field   string `json:"field,omitempty" yaml:"field,omitempty"`
 	Message string `json:"message"         yaml:"message"`
+	// Candidates is set only by story.adrs_considered: the recomputed
+	// candidate set the message lists, as data.
+	Candidates []Candidate `json:"candidates,omitempty" yaml:"candidates,omitempty"`
 }
 
 // Report is the payload of a corpus verify.

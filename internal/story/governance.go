@@ -190,24 +190,65 @@ func TagMatch(adrs []ADR, body string) []ADR {
 		if !adr.EligibleForGCC() {
 			continue
 		}
-		if matchesAnyTag(adr.Tags, lower) {
+		if _, ok := firstMatchingTag(adr.Tags, lower); ok {
 			out = append(out, adr)
 		}
 	}
 	return out
 }
 
-func matchesAnyTag(tags []string, lowerBody string) bool {
+// Candidate is one member of the recomputed candidate set, with the tag
+// that put it there.
+type Candidate struct {
+	ID  string `json:"id"  yaml:"id"`
+	Tag string `json:"tag" yaml:"tag"`
+}
+
+// TagMatchCandidates is TagMatch with the reason attached: each candidate
+// ADR's id, and the first of its declared tags, in declaration order, that
+// the body matched. Same set, same order as TagMatch.
+//
+// It exists for the finding's message. A count alone left the producing
+// agent to rebuild the candidate set itself, and eval transcripts show it
+// doing exactly that: scratch copies of the story and a home-made tag
+// matcher written into the project, to find out which ADRs ape meant.
+func TagMatchCandidates(adrs []ADR, body string) []Candidate {
+	lower := strings.ToLower(body)
+	var out []Candidate
+	for _, adr := range adrs {
+		if !adr.EligibleForGCC() {
+			continue
+		}
+		if tag, ok := firstMatchingTag(adr.Tags, lower); ok {
+			out = append(out, Candidate{ID: adr.ID, Tag: tag})
+		}
+	}
+	return out
+}
+
+// firstMatchingTag returns the first tag, trimmed and as declared, that
+// lowerBody contains on word boundaries.
+func firstMatchingTag(tags []string, lowerBody string) (string, bool) {
 	for _, tag := range tags {
-		tag = strings.ToLower(strings.TrimSpace(tag))
+		tag = strings.TrimSpace(tag)
 		if tag == "" {
 			continue
 		}
-		if tagPattern(tag).MatchString(lowerBody) {
-			return true
+		if tagPattern(strings.ToLower(tag)).MatchString(lowerBody) {
+			return tag, true
 		}
 	}
-	return false
+	return "", false
+}
+
+// formatCandidates renders a candidate set for a finding's message:
+// "ADR-0003 [go], ADR-0004 [package]".
+func formatCandidates(cands []Candidate) string {
+	parts := make([]string, len(cands))
+	for i, c := range cands {
+		parts[i] = c.ID + " [" + c.Tag + "]"
+	}
+	return strings.Join(parts, ", ")
 }
 
 // tagPattern builds a word-boundary matcher for one tag. Compiled per
@@ -276,7 +317,17 @@ func CheckGovernanceCounts(b Body, adrs []ADR, id string) []Finding {
 	if !pass.Declared {
 		return nil
 	}
-	considered := len(TagMatch(adrs, b.Text))
+	cands := TagMatchCandidates(adrs, b.Text)
+	considered := len(cands)
+
+	// Both messages name the candidates and the tag each matched on, so
+	// the agent fixing the story does not have to reconstruct the set.
+	// With none, "(candidates: none)" says so rather than leaving it to
+	// be inferred from the count.
+	listed := "none"
+	if considered > 0 {
+		listed = formatCandidates(cands)
+	}
 
 	switch {
 	case pass.Applicable > considered:
@@ -284,9 +335,11 @@ func CheckGovernanceCounts(b Body, adrs []ADR, id string) []Finding {
 			Check: CheckADRsConsidered, Story: id, Path: b.Path, Field: "governance_pass",
 			Message: fmt.Sprintf(
 				"adrs_applicable is %d but the recomputed adrs_considered is %d — "+
-					"more ADRs were judged applicable than were ever candidates",
-				pass.Applicable, considered,
+					"more ADRs were judged applicable than were ever candidates "+
+					"(candidates: %s)",
+				pass.Applicable, considered, listed,
 			),
+			Candidates: cands,
 		}}
 	case pass.Applicable == 0 && considered > 0:
 		return []Finding{{
@@ -294,9 +347,11 @@ func CheckGovernanceCounts(b Body, adrs []ADR, id string) []Finding {
 			Message: fmt.Sprintf(
 				"adrs_applicable is 0 but the recomputed adrs_considered is %d — "+
 					"the digest pass certified that none of %d candidate ADRs applies, "+
-					"which is the one judgement it cannot make silently",
-				considered, considered,
+					"which is the one judgement it cannot make silently "+
+					"(candidates: %s)",
+				considered, considered, listed,
 			),
+			Candidates: cands,
 		}}
 	}
 	return nil
