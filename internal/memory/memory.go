@@ -33,10 +33,20 @@ import (
 // Default size budgets, in bytes.
 //
 // The soft budget says compaction is due; the retrospective gates
-// spawning apex-distillator on it. The hard ceiling is the one that
-// matters: it sits below Claude Code's 256 KiB Read cap, past which the
-// file becomes unreadable by its own writer. 40 KiB is roughly 10k
-// tokens.
+// spawning apex-distillator on it. The hard ceiling says compaction is
+// overdue.
+//
+// Neither is a Read limit, and the 256 KiB byte cap is not the one that
+// binds first. Claude Code also caps one Read at ~25,000 tokens, which is
+// about 72 KB of markdown at the ~2.9 bytes/token measured on APEX files
+// (Claude Code's own count: 62,488 tokens for a 181,187-byte file). Past
+// that a Read returns a PARTIAL view with a paging banner; the byte cap
+// only makes a whole-file Read fail outright, much later. So the 40 KiB
+// soft budget is ~14k tokens, and the 200 KiB hard ceiling is already well
+// past what one Read shows. That is acceptable because team memory is read
+// bounded, through `ape memory show` (an index, then named entries), never
+// whole: these numbers are about keeping compaction on schedule, not about
+// what fits in a Read.
 //
 // Defaults live here rather than in `_apex/config.yaml` so this
 // deliverable does not wait on a framework template change; the flags
@@ -45,11 +55,15 @@ import (
 const (
 	DefaultSoftBudget  = 40 << 10
 	DefaultHardCeiling = 200 << 10
-	// ReadCap is Claude Code's whole-file Read limit, for context in
-	// messages. Not a threshold — the hard ceiling is what gets enforced.
+	// ReadCap is Claude Code's Read byte cap, past which a whole-file Read
+	// fails outright; kept for context in messages. Not a threshold, and
+	// not the limit that binds first: the ~25,000-token per-Read cap
+	// (about 72 KB of markdown) truncates the view long before it.
 	ReadCap = 256 << 10
-	// bytesPerTokenEstimate is the crude chars-per-token ratio used only
-	// for the human-readable "~N tokens" hint. Never gated on.
+	// bytesPerTokenEstimate is the crude bytes-per-token ratio used only
+	// for the human-readable "~N tokens" hint. Never gated on. APEX
+	// markdown measures nearer 2.9, so the hint reads low by about a
+	// quarter.
 	bytesPerTokenEstimate = 4
 )
 
@@ -62,9 +76,10 @@ const (
 	StateOK     State = "ok"
 	// StateOverSoft — compaction is due at the next epic close.
 	StateOverSoft State = "over-soft"
-	// StateOverHard — the file is approaching the Read cap. The soft gate
-	// should have caught this several runs earlier, so this is a bug
-	// report, not a routine compaction.
+	// StateOverHard — compaction is overdue: the file is far past what one
+	// Read shows and nearing the byte cap at which a Read fails outright.
+	// The soft gate should have caught this several runs earlier, so this
+	// is a bug report, not a routine compaction.
 	StateOverHard State = "over-hard"
 )
 
