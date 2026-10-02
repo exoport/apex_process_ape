@@ -11,6 +11,23 @@
   the set themselves, with scratch story copies and a home-made tag matcher
   written into the project.
 
+- **`ape doctor`: `python3.binary`, `png.converter` and `skills.shadowed`**,
+  all WARN-level. A plain run's exit code is unchanged, but each is one
+  more WARN that `--strict` turns into exit 1.
+  - `python3.binary` looks for the literal name `python3`, which
+    apex-create-wireframes and apex-create-mockups call on every OS.
+  - `png.converter` passes on either converter: the cairosvg module, tried
+    first with a 5 s bound, or `rsvg-convert`.
+  - `skills.shadowed` lists every apex-* skill installed both in
+    `~/.claude/skills` and in the project. Claude Code loads the PERSONAL
+    copy, `${CLAUDE_SKILL_DIR}` included: measured on 2.1.285 and 2.1.287,
+    typed and with `-p`. ape deletes nothing, and the remediation names the
+    operator's step. `ResolveSkill`'s project-first order is unchanged; its
+    comment no longer claims to mirror Claude Code.
+  - `node.binary`'s remediation now says what Node is for:
+    apex-create-event-storming needs Node 18+, npm network access and
+    Playwright's Chromium, and `npx prettier` elsewhere is cosmetic.
+
 - **chore(deps): containerd `v2.3.6`, closing GO-2026-6597.** An image-pull
   denial of service through a crafted OCI index graph (CVE-2026-53493),
   published 2026-10-01 and reported as reachable from `ape sandbox`'s

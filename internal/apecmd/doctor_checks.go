@@ -62,16 +62,20 @@ func checkGitBinary(_ context.Context, _ doctorEnv) CheckResult {
 	return CheckResult{Status: StatusOK, Message: path}
 }
 
-// checkNodeBinary is WARN-on-missing — node is only required by skills
-// that render Excalidraw / run JS tooling. Without it, those skills
+// checkNodeBinary is WARN-on-missing — node is only required by
+// apex-create-event-storming, which renders Excalidraw. Other skills use
+// it only for `npx prettier`, which is cosmetic. Without it, those skills
 // log a skip-reason and the rest of the pipeline keeps running.
 func checkNodeBinary(_ context.Context, _ doctorEnv) CheckResult {
 	path, err := exec.LookPath("node")
 	if err != nil {
 		return CheckResult{
-			Status:      StatusWarn,
-			Message:     "not found on PATH",
-			Remediation: "Skills that render Excalidraw (apex-create-event-storming, apex-create-wireframes, apex-create-mockups) require Node 18+. Install via your package manager or volta.sh.",
+			Status:  StatusWarn,
+			Message: "not found on PATH",
+			Remediation: "apex-create-event-storming renders its Excalidraw diagrams with Node 18+, " +
+				"which also needs network access for npm and Playwright's Chromium (see playwright.cache). " +
+				"Other skills use Node only for `npx prettier` formatting, which is cosmetic. " +
+				"Install via your package manager or volta.sh.",
 		}
 	}
 	return CheckResult{Status: StatusOK, Message: path}
@@ -87,6 +91,55 @@ func checkNpxBinary(_ context.Context, _ doctorEnv) CheckResult {
 		}
 	}
 	return CheckResult{Status: StatusOK, Message: path}
+}
+
+// pythonSkills are the framework skills that run python3: their
+// resources/*.py validators, auto-fix, export and run-report scripts.
+const pythonSkills = "apex-create-wireframes and apex-create-mockups"
+
+// checkPython3Binary is WARN-on-missing. It looks for the literal name
+// `python3` on every OS, Windows included, because that is the name the
+// skills invoke: a `python` or `py` launcher would not satisfy them.
+func checkPython3Binary(_ context.Context, _ doctorEnv) CheckResult {
+	path, err := exec.LookPath("python3")
+	if err != nil {
+		return CheckResult{
+			Status:  StatusWarn,
+			Message: "not found on PATH",
+			Remediation: pythonSkills + " run python3 for their validators, auto-fix, export and run-report scripts. " +
+				"Install Python 3 so that the name `python3` resolves on PATH: the skills call that name on every OS.",
+		}
+	}
+	return CheckResult{Status: StatusOK, Message: path}
+}
+
+// pngImportTimeout bounds the `import cairosvg` probe. A healthy import
+// takes well under a second; the bound exists so a wedged interpreter
+// cannot stall `ape doctor`. A var so a test can shorten it.
+var pngImportTimeout = 5 * time.Second
+
+// checkPNGConverter is WARN-on-missing. The skills that export SVG to PNG
+// accept either converter, so either one passes: the cairosvg Python
+// module, tried first, or librsvg's rsvg-convert. Checking rsvg-convert
+// alone would warn forever on a machine that has only cairosvg.
+func checkPNGConverter(ctx context.Context, _ doctorEnv) CheckResult {
+	if py, err := exec.LookPath("python3"); err == nil {
+		probeCtx, cancel := context.WithTimeout(ctx, pngImportTimeout)
+		defer cancel()
+		if exec.CommandContext(probeCtx, py, "-c", "import cairosvg").Run() == nil {
+			return CheckResult{Status: StatusOK, Message: "cairosvg (python3 module)"}
+		}
+	}
+	if path, err := exec.LookPath("rsvg-convert"); err == nil {
+		return CheckResult{Status: StatusOK, Message: "rsvg-convert at " + path}
+	}
+	return CheckResult{
+		Status:  StatusWarn,
+		Message: "neither cairosvg (python3 -c 'import cairosvg') nor rsvg-convert is available",
+		Remediation: pythonSkills + " export SVG to PNG, and apex-inject-screen-stories embeds those PNGs. " +
+			"Install either converter: the cairosvg module (`pip install cairosvg`, or your distribution's " +
+			"python3-cairosvg package), or librsvg's rsvg-convert (`apt install librsvg2-bin`, `brew install librsvg`).",
+	}
 }
 
 // checkPlaywrightHostSupported flags Linux hosts whose Ubuntu major
@@ -356,6 +409,60 @@ func checkSkillsUser(_ context.Context, env doctorEnv) CheckResult {
 	return CheckResult{
 		Status:  StatusOK,
 		Message: fmt.Sprintf("%d skills at %s", len(names), dir),
+	}
+}
+
+// checkSkillsShadowed warns when an apex-* skill is installed both in the
+// user's ~/.claude/skills and in the project's .claude/skills.
+//
+// Claude Code loads the PERSONAL copy. Measured on 2.1.285 and 2.1.287,
+// typing /<name> in the REPL and passing it to -p alike, with a different
+// body in each copy: the personal body loaded, and ${CLAUDE_SKILL_DIR}
+// named the personal directory; with the personal copy removed, the
+// project's loaded. A stale personal apex-* copy therefore silently
+// replaces the framework version this project installed, resources
+// included.
+//
+// Report only, with no FixCommand: the personal copy may hold the
+// operator's own edits, and deleting it is their call.
+func checkSkillsShadowed(_ context.Context, env doctorEnv) CheckResult {
+	if !isProjectRoot(env.ProjectRoot) {
+		return CheckResult{Status: StatusInfo, Message: "not in a project — skill shadowing check skipped"}
+	}
+	if env.Home == "" {
+		return CheckResult{Status: StatusInfo, Message: "$HOME unresolved; user skills location unknown"}
+	}
+	userDir := filepath.Join(env.Home, ".claude", "skills")
+	projDir := framework.ProjectSkillsPath(env.ProjectRoot)
+	userNames, err := framework.ListInstalledSkills(userDir)
+	if err != nil {
+		return CheckResult{Status: StatusWarn, Message: fmt.Sprintf("list user skills: %v", err)}
+	}
+	projNames, err := framework.ListInstalledSkills(projDir)
+	if err != nil {
+		return CheckResult{Status: StatusWarn, Message: fmt.Sprintf("list project skills: %v", err)}
+	}
+	inProject := make(map[string]bool, len(projNames))
+	for _, n := range projNames {
+		inProject[n] = true
+	}
+	var both []string
+	for _, n := range userNames { // sorted by ListInstalledSkills
+		if framework.IsFrameworkSkill(n) && inProject[n] {
+			both = append(both, n)
+		}
+	}
+	if len(both) == 0 {
+		return CheckResult{Status: StatusOK, Message: "no apex-* skill installed in both " + userDir + " and " + projDir}
+	}
+	return CheckResult{
+		Status: StatusWarn,
+		Message: fmt.Sprintf("%d apex-* skill(s) in both %s and %s, and Claude Code loads the personal copy: %s",
+			len(both), userDir, projDir, strings.Join(both, ", ")),
+		Remediation: "Claude Code resolves a skill name personal-first, so each copy under " + userDir +
+			" replaces the framework version this project installed, ${CLAUDE_SKILL_DIR} included. " +
+			"Remove or rename each listed directory under " + userDir + " (move it aside first if it holds edits " +
+			"you want to keep), then rerun `ape doctor --only skills.shadowed`. ape never deletes it for you.",
 	}
 }
 

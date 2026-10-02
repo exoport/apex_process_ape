@@ -44,7 +44,7 @@ The `tee` keeps the JSON for later artifact upload while still letting the exit 
 In CI you usually know which workflows the job will exercise. Skip checks irrelevant to that job:
 
 ```bash
-ape doctor --strict --output-format json --skip node.binary,npx.binary,playwright.host_supported
+ape doctor --strict --output-format json --skip node.binary,npx.binary,python3.binary,png.converter,playwright.host_supported
 ```
 
 The canonical names are stable across minor releases. Inspect the current set with:

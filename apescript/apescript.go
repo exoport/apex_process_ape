@@ -137,8 +137,12 @@ func ScanTranscript(path string) (ScanResult, error) {
 }
 
 // Skills returns the framework skills resolved for cwd — project-scoped skills
-// under <cwd>/.claude/skills first, then the user-scoped ~/.claude/skills that
-// are not shadowed by a project skill of the same name. Sorted by name.
+// under <cwd>/.claude/skills first, then the user-scoped ~/.claude/skills whose
+// names the project does not also install. Sorted by name.
+//
+// A name installed in both places is listed once, as the project copy. That
+// is not the copy Claude Code runs: it loads the personal one (measured; see
+// framework.ResolveSkill), and `ape doctor`'s skills.shadowed row reports it.
 func Skills(cwd string) ([]SkillInfo, error) {
 	seen := map[string]bool{}
 	var out []SkillInfo
@@ -166,7 +170,7 @@ func Skills(cwd string) ([]SkillInfo, error) {
 		}
 		for _, n := range names {
 			if seen[n] {
-				continue // project skill shadows the user one
+				continue // listed once, as the project copy; see the doc comment
 			}
 			path, scope, found := framework.ResolveSkill(n, "")
 			if !found {

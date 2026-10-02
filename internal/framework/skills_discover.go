@@ -8,8 +8,7 @@ import (
 )
 
 // SkillScope tags whether a skill was resolved under the project's
-// .claude/skills tree or the user-scoped ~/.claude/skills tree. Matches
-// the lookup order claude itself uses (project wins over user).
+// .claude/skills tree or the user-scoped ~/.claude/skills tree.
 type SkillScope string
 
 const (
@@ -22,11 +21,21 @@ const (
 )
 
 // ResolveSkill reports whether a skill name resolves to an on-disk
-// SKILL.md, mirroring claude's lookup order: project-scoped
-// `<projectRoot>/.claude/skills/<name>/SKILL.md` first, then
-// user-scoped `~/.claude/skills/<name>/SKILL.md`. An empty projectRoot
-// disables the project-scope check. ResolveSkill returns the absolute
-// path, the scope it was found in, and a found flag.
+// SKILL.md: project-scoped `<projectRoot>/.claude/skills/<name>/SKILL.md`
+// first, then user-scoped `~/.claude/skills/<name>/SKILL.md`. An empty
+// projectRoot disables the project-scope check. ResolveSkill returns the
+// absolute path, the scope it was found in, and a found flag.
+//
+// The order is NOT Claude Code's. Claude Code loads the personal copy
+// when a name is installed in both places: measured on 2.1.285 and
+// 2.1.287, typing /<name> in the REPL and passing it to -p alike loaded
+// the ~/.claude/skills body, with ${CLAUDE_SKILL_DIR} pointing there too.
+// That is also its documented precedence: enterprise over personal,
+// personal over project. Existence checks (pipeline preflight,
+// `ape prompt --agent`) get the same answer from either order; the path
+// and scope returned for a name installed twice are where ape looked
+// first, not the copy that runs. `ape doctor`'s skills.shadowed row
+// reports every apex-* name installed in both places.
 func ResolveSkill(name, projectRoot string) (path string, scope SkillScope, found bool) {
 	if name == "" {
 		return "", ScopeNone, false
