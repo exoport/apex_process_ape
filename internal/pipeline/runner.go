@@ -339,6 +339,7 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 	}
 	if mw != nil {
 		mw.manifest.ClaudeVersion = claudeVersion(ctx, opts.ClaudeBin)
+		mw.manifest.FileReadMaxOutputTokens = repl.FileReadMaxOutputTokens
 		_ = mw.persist()
 		if opts.OnRunDir != nil {
 			opts.OnRunDir(mw.runDir)

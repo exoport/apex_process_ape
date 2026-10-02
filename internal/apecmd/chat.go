@@ -128,11 +128,15 @@ error (no _apex/config.yaml, bad cwd).`,
 //     spawn path (repl.EnvDisableBGShellReap): Claude Code otherwise kills a
 //     running background shell when Bun reports memory pressure, and the
 //     scrub in 1 is what stops an operator setting this themselves.
-//  5. APE_SESSION marks the session as ape's (repl.EnvApeSession), so an
+//  5. The Read cap is pinned (repl.EnvFileReadMaxOutputTokens), as on
+//     every other spawn path, so a Claude Code default change cannot move
+//     how much of a file one Read shows.
+//  6. APE_SESSION marks the session as ape's (repl.EnvApeSession), so an
 //     `ape task` a skill shells out to inside it refuses rather than nesting.
 func chatSpawnEnv(base []string, effortArg, chatID string) (env []string, unpin func(), notice string) {
 	env, unpin, notice = selfpath.Pin(repl.ScrubClaudeCodeEnv(base))
 	env = append(env, repl.DisableBGShellReapEnv()...)
+	env = append(env, repl.FileReadCapEnv()...)
 	env = append(env, repl.SessionMarkerEnv("chat", chatID)...)
 	if effortArg != "" {
 		env = append(env, repl.EnvClaudeEffortLevel+"="+effortArg)

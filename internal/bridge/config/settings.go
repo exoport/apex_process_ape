@@ -43,6 +43,14 @@ type SettingsOptions struct {
 	// neither key, and the session takes whatever effort its environment
 	// and the machine's own settings give it.
 	Effort map[string]any
+	// Env is written as the settings `env` block. It is how a variable
+	// ape pins holds against the machine's own settings: an `env` in a
+	// project, local or user settings file overrides the spawned
+	// process's environment (measured on 2.1.287: a project settings env
+	// of 12345 beat an exported 30000), while `--settings` outranks all
+	// three. Only enterprise-managed settings sit above it. nil writes no
+	// key.
+	Env map[string]string
 }
 
 // Output-style pinning.
@@ -223,6 +231,9 @@ func BuildSettings(opts SettingsOptions) (json.RawMessage, error) {
 	}
 	for key, value := range opts.Effort {
 		root[key] = value
+	}
+	if len(opts.Env) > 0 {
+		root["env"] = opts.Env
 	}
 
 	// The no-hooks path still gets the pin. It used to return `{}`, which

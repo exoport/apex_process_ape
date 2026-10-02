@@ -26,7 +26,7 @@ const changelogURL = "https://raw.githubusercontent.com/anthropics/claude-code/m
 
 // watchedEnv are the variables ape SETS on a spawn. One vanishing from the
 // binary means ape's setting silently stopped applying.
-var watchedEnv = []string{repl.EnvClaudeEffortLevel, repl.EnvDisableBGShellReap, repl.EnvForkSubagent}
+var watchedEnv = []string{repl.EnvClaudeEffortLevel, repl.EnvDisableBGShellReap, repl.EnvForkSubagent, repl.EnvFileReadMaxOutputTokens}
 
 // TestLive_ClaudeSurface diffs the installed Claude Code's tool list and
 // environment variables against the reviewed baseline, and lists the

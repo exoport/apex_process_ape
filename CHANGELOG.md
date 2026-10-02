@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **The per-Read token cap is pinned at 30000 on every spawn** (class B).
+  `CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS=30000` goes on every claude ape
+  starts (pipeline, task, prompt, change, chat), so a Claude Code default
+  change (25,000 on 2.1.285) cannot silently move how much of a file one
+  Read shows. It is set in two places, because measured on 2.1.287 one
+  is not enough:
+  - in the spawn environment, after the `CLAUDE_CODE_*` scrub, like the
+    other variables ape sets. An operator's exported value never reaches
+    the child (an exported 777 was not seen);
+  - in ape's `--settings` `env`. A project's `.claude/settings.json` `env`
+    beat the environment alone (the session saw 12345), and with the pin
+    in `--settings` it saw 30000. `--settings` outranks project, local and
+    user settings; only an enterprise-managed setting can still override.
+  Recorded as `file_read_max_output_tokens` in the manifest and in
+  `prompt.yaml`. The `ape chat` spawn carries it too.
 - **A typed line stays short, and ape confirms claude submitted it**
   (class B: how ape drives the session). Measured through ape's own PTY
   write on Claude Code 2.1.285 and 2.1.287: a typed burst past 800

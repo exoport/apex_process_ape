@@ -90,11 +90,16 @@ type Manifest struct {
 	// auto-updates silently and its trust-dialog / transcript behavior
 	// shifts across versions — telemetry and repro must be
 	// attributable to the exact version that ran.
-	ClaudeVersion string    `yaml:"claude_version,omitempty"`
-	Pipeline      Ref       `yaml:"pipeline"`
-	ProjectRoot   string    `yaml:"project_root"`
-	RunID         string    `yaml:"run_id"`
-	StartedAt     time.Time `yaml:"started_at"`
+	ClaudeVersion string `yaml:"claude_version,omitempty"`
+	// FileReadMaxOutputTokens is the per-Read token cap ape pinned on the
+	// session (repl.EnvFileReadMaxOutputTokens), recorded like effort so a
+	// run's evidence says what one Read could show. Absent on manifests
+	// written before the pin.
+	FileReadMaxOutputTokens int       `yaml:"file_read_max_output_tokens,omitempty"`
+	Pipeline                Ref       `yaml:"pipeline"`
+	ProjectRoot             string    `yaml:"project_root"`
+	RunID                   string    `yaml:"run_id"`
+	StartedAt               time.Time `yaml:"started_at"`
 	// Timestamp is the framework's `timestamp` variable for this run —
 	// local wall-clock `YYYYMMDDHHMMSS`, issued by internal/stamp and
 	// therefore monotonic across processes.

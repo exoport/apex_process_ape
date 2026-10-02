@@ -44,6 +44,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -332,10 +333,39 @@ func DisableBGShellReapEnv() []string {
 // override it.
 const EnvForkSubagent = "CLAUDE_CODE_FORK_SUBAGENT"
 
+// EnvFileReadMaxOutputTokens is Claude Code's cap on how many tokens one
+// Read returns before it pages, and FileReadMaxOutputTokens the value ape
+// pins on every claude it spawns.
+//
+// Why pin it: the framework sizes its documents against what one Read
+// shows, and the cap is a Claude Code default ape does not control. On
+// 2.1.285 it is 25,000 tokens; a release that moved it would change how
+// much of every large file a skill sees, silently. The eval measured the
+// variable honoured on 2.1.285, in the session and in every sub-agent.
+// 30,000 is the operator's choice.
+//
+// As with the other CLAUDE_CODE_ entries ape sets, the scrub stops an
+// operator's exported value reaching the child; extraEnv can still
+// override it. A project's or user's settings `env` is a different route:
+// see the CHANGELOG for which of the two wins.
+const (
+	EnvFileReadMaxOutputTokens = "CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS"
+	FileReadMaxOutputTokens    = 30000
+)
+
+// FileReadCapEnv is the Read-cap pin as an environment entry. Exported
+// because `ape chat` spawns claude directly rather than through a PTY
+// session (chatSpawnEnv).
+func FileReadCapEnv() []string {
+	return []string{EnvFileReadMaxOutputTokens + "=" + strconv.Itoa(FileReadMaxOutputTokens)}
+}
+
 // SpawnDefaultEnv is what ape adds to every PTY spawn's environment, before
-// the caller's extraEnv: the background-shell reap switch and the fork gate.
+// the caller's extraEnv: the background-shell reap switch, the fork gate
+// and the Read cap.
 func SpawnDefaultEnv() []string {
-	return append(DisableBGShellReapEnv(), EnvForkSubagent+"=0")
+	env := append(DisableBGShellReapEnv(), EnvForkSubagent+"=0")
+	return append(env, FileReadCapEnv()...)
 }
 
 // NewSession spawns argv attached to a PTY, registers it under name,

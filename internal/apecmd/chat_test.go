@@ -34,6 +34,8 @@ func TestChatSpawnEnv_ScrubsNestingMarkersAndKeepsTmux(t *testing.T) {
 	require.NotContains(t, joined, "CLAUDE_CODE_EFFORT_LEVEL=",
 		"the inherited effort is scrubbed; only an explicit one is re-injected")
 	require.Contains(t, joined, "HOME=/h")
+	require.Contains(t, joined, repl.EnvFileReadMaxOutputTokens+"=30000",
+		"chat pins the Read cap like every other spawn path")
 
 	// The asymmetry with the PTY path, asserted rather than only
 	// commented: chat hands claude the user's REAL terminal, so the

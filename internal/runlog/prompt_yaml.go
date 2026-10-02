@@ -46,6 +46,9 @@ type PromptMeta struct {
 	// session ran on, not the fallback assumed at launch.
 	Effort       string `json:"effort,omitempty"        yaml:"effort,omitempty"`
 	EffortSource string `json:"effort_source,omitempty" yaml:"effort_source,omitempty"`
+	// FileReadMaxOutputTokens is the per-Read token cap ape pinned on the
+	// session.
+	FileReadMaxOutputTokens int `json:"file_read_max_output_tokens,omitempty" yaml:"file_read_max_output_tokens,omitempty"`
 	// TranscriptPath is the session's own transcript, as its hooks named it.
 	TranscriptPath string                      `json:"transcript_path,omitempty" yaml:"transcript_path,omitempty"`
 	CostUSD        float64                     `json:"cost_usd"                  yaml:"cost_usd"`

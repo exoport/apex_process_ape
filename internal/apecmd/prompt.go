@@ -599,14 +599,16 @@ func writePromptRecord(runDir, promptID string, o promptOptions, x promptRecordE
 		SessionID: x.sessionID,
 		// No --model: the fallback ape assumed at launch is not what ran.
 		// Record the row of the model the session actually ran on.
-		Effort:         x.effort.Observed(o.model, mainModel(tele)).Resolved,
-		EffortSource:   x.effort.Source,
-		TranscriptPath: x.transcript,
-		ArgsFile:       x.argsFile,
-		CostUSD:        tele.Totals.CostUSD,
-		TokensIn:       tele.Totals.InputTokens,
-		TokensOut:      tele.Totals.OutputTokens,
-		NumTurns:       tele.Totals.NumTurns,
+		Effort:       x.effort.Observed(o.model, mainModel(tele)).Resolved,
+		EffortSource: x.effort.Source,
+		// The value every PTY spawn carries (repl.SpawnDefaultEnv).
+		FileReadMaxOutputTokens: repl.FileReadMaxOutputTokens,
+		TranscriptPath:          x.transcript,
+		ArgsFile:                x.argsFile,
+		CostUSD:                 tele.Totals.CostUSD,
+		TokensIn:                tele.Totals.InputTokens,
+		TokensOut:               tele.Totals.OutputTokens,
+		NumTurns:                tele.Totals.NumTurns,
 	}
 	if len(perModel) > 0 {
 		meta.PerModel = map[string]runlog.PromptModelUsage{}

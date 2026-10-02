@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -778,6 +779,10 @@ func buildInteractivePrepend(
 		InjectHooks: mode != config.ModeWeb, // ModeWeb auto-injects; other modes need the explicit flag
 		OutputStyle: outputStyle,
 		Effort:      effortSettings,
+		// The Read cap goes in --settings as well as the environment: a
+		// settings-file `env` would otherwise override the exported value
+		// and the recorded 30000 would be false.
+		Env: map[string]string{repl.EnvFileReadMaxOutputTokens: strconv.Itoa(repl.FileReadMaxOutputTokens)},
 	})
 	if err != nil {
 		return nil, err

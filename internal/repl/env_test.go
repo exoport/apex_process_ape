@@ -92,7 +92,7 @@ func TestNewSessionScrubsNestedClaudeEnv(t *testing.T) {
 	// and they are listed by name rather than waved through by prefix: a
 	// leaked marker and a deliberate entry look identical to a prefix test,
 	// and the leak is the one that silently zeroes telemetry.
-	apeInjected := map[string]bool{EnvDisableBGShellReap: true, EnvForkSubagent: true}
+	apeInjected := map[string]bool{EnvDisableBGShellReap: true, EnvForkSubagent: true, EnvFileReadMaxOutputTokens: true}
 	var injected []string
 	for _, e := range s.cmd.Env {
 		k, _, _ := strings.Cut(e, "=")
@@ -104,7 +104,7 @@ func TestNewSessionScrubsNestedClaudeEnv(t *testing.T) {
 			t.Fatalf("child env contains %q — nested-session markers leaked", e)
 		}
 	}
-	if want := []string{EnvDisableBGShellReap + "=1", EnvForkSubagent + "=0"}; !slices.Equal(injected, want) {
+	if want := []string{EnvDisableBGShellReap + "=1", EnvForkSubagent + "=0", EnvFileReadMaxOutputTokens + "=30000"}; !slices.Equal(injected, want) {
 		t.Fatalf("ape's own CLAUDE_CODE_ entries = %v, want %v", injected, want)
 	}
 	if !strings.Contains(strings.Join(s.cmd.Env, "\n"), "ANTHROPIC_API_KEY=keep-me") {
@@ -361,8 +361,9 @@ func TestNewSessionWithEnv_DisablesTheBackgroundShellReap(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not installed")
 	}
-	t.Setenv(EnvDisableBGShellReap, "") // an operator's value cannot reach the child
-	t.Setenv(EnvForkSubagent, "1")      // nor can one that would force agents async
+	t.Setenv(EnvDisableBGShellReap, "")         // an operator's value cannot reach the child
+	t.Setenv(EnvForkSubagent, "1")              // nor can one that would force agents async
+	t.Setenv(EnvFileReadMaxOutputTokens, "999") // nor one that would move the Read cap
 
 	name := "ape-repl-test-bgreap"
 	_ = KillSession(t.Context(), name)
@@ -378,6 +379,8 @@ func TestNewSessionWithEnv_DisablesTheBackgroundShellReap(t *testing.T) {
 	require.Equal(t, []string{EnvDisableBGShellReap + "=1"}, entriesFor(s.cmd.Env, EnvDisableBGShellReap))
 	require.Equal(t, []string{EnvForkSubagent + "=0"}, entriesFor(s.cmd.Env, EnvForkSubagent),
 		"foreground Agent calls stay synchronous: the fork gate is off")
+	require.Equal(t, []string{EnvFileReadMaxOutputTokens + "=30000"}, entriesFor(s.cmd.Env, EnvFileReadMaxOutputTokens),
+		"the Read cap is ape's pin, not the operator's exported value")
 }
 
 // A caller may still ask for the reap back — the live gate would, to observe

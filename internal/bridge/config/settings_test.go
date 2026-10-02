@@ -302,3 +302,29 @@ func TestBuildSettings_MergesTheEffortFragment(t *testing.T) {
 		t.Fatal("the output-style pin must survive the merge")
 	}
 }
+
+// TestBuildSettings_EnvBlock — a pinned variable rides in --settings `env`,
+// which outranks project, local and user settings files; nil writes no key.
+func TestBuildSettings_EnvBlock(t *testing.T) {
+	raw, err := BuildSettings(SettingsOptions{Mode: ModeTUI, Env: map[string]string{"CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS": "30000"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Env map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Env["CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS"] != "30000" {
+		t.Fatalf("env block = %v, want the Read cap pinned at 30000", got.Env)
+	}
+
+	raw, err = BuildSettings(SettingsOptions{Mode: ModeTUI})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"env"`) {
+		t.Fatalf("nil Env must write no key: %s", raw)
+	}
+}
