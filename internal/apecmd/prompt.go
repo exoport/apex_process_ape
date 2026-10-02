@@ -118,6 +118,17 @@ Prompt assembly:
   --workflow       appends an explicit "run this via a workflow"
                    directive. Independent of --ultracode; both compose.
 
+With --agent the line is a slash command, and Claude Code turns a typed
+burst past 800 characters into a "[Pasted text #N]" placeholder that
+never runs as one. So past 700 characters the prompt is written,
+verbatim, to prompt.md in the record directory, and the typed line
+names that file (prompt.yaml records it as args_file). A plain prompt is
+typed as is.
+
+After typing, ape presses Enter once claude has drawn the line, then
+confirms the submit through the UserPromptSubmit hook, pressing Enter up
+to twice more; a line still not submitted fails the session (exit 1).
+
 Records land under <project>/_output/ape/prompts/<prompt-id>/ (runlog
 streams + copied transcript + prompt.yaml session record) and fold into
 the project cost rollup's Prompts bucket.
@@ -125,8 +136,8 @@ the project cost rollup's Prompts bucket.
 ape prompt must run from a project root (a directory with
 _apex/config.yaml). It makes no commits of its own.
 
-Exit codes: 0 session completed (Stop hook) · 1 idle-timeout or session
-failed · 2 usage or preflight error (no _apex/config.yaml, unresolved
+Exit codes: 0 session completed (Stop hook) · 1 idle-timeout, session
+failed, or the typed line never submitted · 2 usage or preflight error (no _apex/config.yaml, unresolved
 --agent, missing --handoff file) · 3 the claude REPL never became ready
 · 4 claude exited before the Stop hook.`,
 		Args: cobra.MaximumNArgs(1),
@@ -239,6 +250,41 @@ func assemblePromptLine(agent, delivered string) string {
 	return delivered
 }
 
+// deliverAndWait types the prompt line and waits for the session's Stop.
+// Deliver confirms the submit through the UserPromptSubmit hook. A line
+// claude never submitted, or a claude that died meanwhile, comes back as
+// waitErr: the run's outcome, recorded like any other. Only a failure to
+// write to the PTY at all comes back as deliverErr, which stops the run
+// before any record.
+func deliverAndWait(ctx context.Context, sessionName, line string, driver *sessiondriver.Driver) (waitErr, deliverErr error) {
+	if err := repl.Deliver(ctx, sessionName, line, driver.PromptSubmits); err != nil {
+		var nse *repl.NotSubmittedError
+		if !errors.As(err, &nse) && !errors.Is(err, context.Canceled) {
+			return nil, fmt.Errorf("ape prompt: deliver prompt: %w", err)
+		}
+		return err, nil
+	}
+	return driver.WaitStepDone(ctx), nil
+}
+
+// spillPromptLine keeps an --agent line typeable. With --agent the line is
+// a slash command, and Claude Code turns a typed burst past 800 characters
+// into a "[Pasted text #N]" placeholder that never runs as one. Past
+// repl.TypedLineBudget the delivered text goes to the record directory,
+// verbatim, and the returned line names it; argsFile is then that file's
+// run-relative name. A plain prompt is a plain message either way, so it
+// is returned as is.
+func spillPromptLine(agent, delivered, line, runDir string) (typed, argsFile string, err error) {
+	if agent == "" || repl.FitsTypedLine(line) {
+		return line, "", nil
+	}
+	path := runlog.PromptArgsPath(runDir)
+	if err := os.WriteFile(path, []byte(delivered+"\n"), 0o600); err != nil {
+		return "", "", fmt.Errorf("ape prompt: write prompt file: %w", err)
+	}
+	return assemblePromptLine(agent, repl.ArgsPointer(path)), runlog.PromptArgsFile, nil
+}
+
 // promptResult is the `--output-format json|yaml` envelope printed on
 // stdout. snake_case is the wire contract.
 //
@@ -337,6 +383,11 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	runDir := runlog.PromptRunDir(o.projectRoot, promptID)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return promptResult{}, ExitRunFailed, fmt.Errorf("ape prompt: create record dir: %w", err)
+	}
+
+	promptLine, argsFile, err := spillPromptLine(o.agent, delivered, promptLine, runDir)
+	if err != nil {
+		return promptResult{}, ExitRunFailed, err
 	}
 
 	var (
@@ -446,11 +497,10 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	}
 
 	progressf("ape prompt: delivering prompt…\n")
-	if err := repl.SendCommand(runCtx, sessionName, promptLine); err != nil {
-		return promptResult{}, ExitRunFailed, fmt.Errorf("ape prompt: deliver prompt: %w", err)
+	waitErr, deliverErr := deliverAndWait(sessionCtx, sessionName, promptLine, driver)
+	if deliverErr != nil {
+		return promptResult{}, ExitRunFailed, deliverErr
 	}
-
-	waitErr := driver.WaitStepDone(sessionCtx)
 	if errors.Is(waitErr, context.Canceled) {
 		if cause := context.Cause(sessionCtx); cause != nil && !errors.Is(cause, context.Canceled) {
 			waitErr = cause
@@ -465,7 +515,7 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	// record write failure must not change the run's exit code.
 	perModel := perModelTotals(tele)
 	writePromptRecord(runDir, promptID, o, promptRecordExtras{
-		sessionID: driver.SessionID(), transcript: driver.TranscriptPath(), effort: effortPlan,
+		sessionID: driver.SessionID(), transcript: driver.TranscriptPath(), effort: effortPlan, argsFile: argsFile,
 	}, status, start, tele, perModel)
 	if _, rerr := cost.RebuildRollup(o.projectRoot); rerr != nil {
 		progressf("ape prompt: rebuild cost rollup: %v\n", rerr)
@@ -534,6 +584,7 @@ type promptRecordExtras struct {
 	sessionID  string
 	transcript string
 	effort     effort.Plan
+	argsFile   string
 }
 
 // writePromptRecord persists prompt.yaml. Best-effort.
@@ -551,6 +602,7 @@ func writePromptRecord(runDir, promptID string, o promptOptions, x promptRecordE
 		Effort:         x.effort.Observed(o.model, mainModel(tele)).Resolved,
 		EffortSource:   x.effort.Source,
 		TranscriptPath: x.transcript,
+		ArgsFile:       x.argsFile,
 		CostUSD:        tele.Totals.CostUSD,
 		TokensIn:       tele.Totals.InputTokens,
 		TokensOut:      tele.Totals.OutputTokens,

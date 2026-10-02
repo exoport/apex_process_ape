@@ -4053,6 +4053,17 @@ Prompt assembly:
   --workflow       appends an explicit "run this via a workflow"
                    directive. Independent of --ultracode; both compose.
 
+With --agent the line is a slash command, and Claude Code turns a typed
+burst past 800 characters into a "[Pasted text #N]" placeholder that
+never runs as one. So past 700 characters the prompt is written,
+verbatim, to prompt.md in the record directory, and the typed line
+names that file (prompt.yaml records it as args_file). A plain prompt is
+typed as is.
+
+After typing, ape presses Enter once claude has drawn the line, then
+confirms the submit through the UserPromptSubmit hook, pressing Enter up
+to twice more; a line still not submitted fails the session (exit 1).
+
 Records land under <project>/_output/ape/prompts/<prompt-id>/ (runlog
 streams + copied transcript + prompt.yaml session record) and fold into
 the project cost rollup's Prompts bucket.
@@ -4060,8 +4071,8 @@ the project cost rollup's Prompts bucket.
 ape prompt must run from a project root (a directory with
 _apex/config.yaml). It makes no commits of its own.
 
-Exit codes: 0 session completed (Stop hook) · 1 idle-timeout or session
-failed · 2 usage or preflight error (no _apex/config.yaml, unresolved
+Exit codes: 0 session completed (Stop hook) · 1 idle-timeout, session
+failed, or the typed line never submitted · 2 usage or preflight error (no _apex/config.yaml, unresolved
 --agent, missing --handoff file) · 3 the claude REPL never became ready
 · 4 claude exited before the Stop hook.
 
@@ -5918,6 +5929,19 @@ Protocol inside it." (the same continuation prompt the /handoff skill
 suggests). It still requires --prompt-flag to actually reach the
 skill, and is mutually exclusive with --prompt.
 
+A line longer than 700 characters is not typed. Claude Code turns a
+typed burst past 800 characters into a "[Pasted text #N]" placeholder
+that never runs as a skill, so ape writes the step's --args and prompt
+text, verbatim and with its newlines, to
+stages/NN-<stage>/step-NN-<skill>.args.md in the run directory, and
+types a line that names that file instead. The step-start event records
+it as args_file. Shorter lines are typed exactly as before.
+
+After typing, ape presses Enter once claude has drawn the line, then
+confirms the submit through the UserPromptSubmit hook, pressing Enter up
+to twice more. A line that is still not submitted ends the run with
+termination prompt_not_submitted instead of idling to the timeout.
+
 Where the project declares commit ownership in _apex/commit-owners.csv,
 every dispatch is asserted against it. A skill ABSENT from that file
 must leave HEAD, the index and the stash reflog unchanged — "git add"
@@ -5935,7 +5959,8 @@ judged against a skill's declaration.
 The verdict is written to the run manifest as commit_contract, so a
 failure stays diagnosable after the fact.
 
-Exit codes: 0 success · 1 run failed or idle timeout · 2 usage or
+Exit codes: 0 success · 1 run failed, idle timeout, or the typed line
+never submitted · 2 usage or
 preflight error · 3 REPL never became ready (last pane on stderr) ·
 5 upstream API failure · 6 the dispatch violated its declared commit
 ownership (the run itself may have succeeded).

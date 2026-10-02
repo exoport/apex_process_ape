@@ -185,6 +185,16 @@ func PromptRunDir(projectRoot, promptID string) string {
 	return filepath.Join(PromptsRoot(projectRoot), promptID)
 }
 
+// PromptArgsPath is where `ape prompt --agent` writes the delivered text
+// when it is too long to type (repl.TypedLineBudget), inside the prompt's
+// own run directory.
+func PromptArgsPath(runDir string) string {
+	return filepath.Join(runDir, PromptArgsFile)
+}
+
+// PromptArgsFile is PromptArgsPath's base name, as prompt.yaml records it.
+const PromptArgsFile = "prompt.md"
+
 // PTYTailPath is where a run saves the raw PTY bytes of a claude session
 // that never became ready (repl.NotReadyError.Output). A pipeline spawns
 // one session per stage, so the stage names the file; a run with a single

@@ -100,3 +100,35 @@ func TestDriver_RunlogFanout(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(calls), "Read")
 }
+
+// TestDriver_PromptSubmits is repl.Deliver's probe: every UserPromptSubmit
+// moves the tally, and the latest submitted text is kept. Begin does not
+// reset it, so a stale submit can never look new.
+func TestDriver_PromptSubmits(t *testing.T) {
+	d := NewDriver(func() *runlog.Writer { return nil }, time.Minute)
+	n, last := d.PromptSubmits()
+	require.Zero(t, n)
+	require.Empty(t, last)
+
+	d.FeedHook(orchestrator.HookEvent{Event: ipc.HookUserPromptSubmit, Payload: mustJSON(t, map[string]string{"prompt": "/clear"})})
+	d.FeedHook(orchestrator.HookEvent{Event: ipc.HookUserPromptSubmit, Payload: mustJSON(t, map[string]string{"prompt": "/apex-sprint-sync --autonomous --no-commit"})})
+	d.FeedHook(orchestrator.HookEvent{Event: ipc.HookStop})
+	d.Begin()
+
+	n, last = d.PromptSubmits()
+	require.Equal(t, uint64(2), n)
+	require.Equal(t, "/apex-sprint-sync --autonomous --no-commit", last)
+}
+
+// TestDriver_PromptSubmitsThroughNoteHook — the task/pipeline runner never
+// calls Driver.FeedHook: interactiveCore.FeedHook calls NoteHook. A tally
+// kept only in FeedHook left every `ape task` line looking unsubmitted,
+// and Deliver failed runs claude had in fact started (found live, not by
+// the FeedHook-only test above).
+func TestDriver_PromptSubmitsThroughNoteHook(t *testing.T) {
+	d := NewDriver(func() *runlog.Writer { return nil }, time.Minute)
+	d.NoteHook(ipc.HookUserPromptSubmit, mustJSON(t, map[string]string{"prompt": "/apex-x --autonomous"}))
+	n, last := d.PromptSubmits()
+	require.Equal(t, uint64(1), n)
+	require.Equal(t, "/apex-x --autonomous", last)
+}

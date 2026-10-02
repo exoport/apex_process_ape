@@ -75,6 +75,52 @@ func TestLive_ClaudeCodeContract(t *testing.T) {
 	t.Run("model_aliases", func(t *testing.T) { liveModelAliases(t, claudeBin) })
 	t.Run("transcript_persists", func(t *testing.T) { liveTranscriptPersists(t, claudeBin) })
 	t.Run("pty_repaints_during_tool", func(t *testing.T) { livePTYRepaintsDuringTool(t, claudeBin) })
+	t.Run("typed_line_renders", func(t *testing.T) { liveTypedLineRenders(t, claudeBin) })
+}
+
+// liveTypedLineRenders checks what Deliver's Enter waits for: that a line
+// ape types shows up in this pane at all, as text within TypedLineBudget
+// and as a "[Pasted text #N]" placeholder past 800 characters. If Claude
+// Code stops drawing either, typeLine falls back to pressing Enter after
+// typedRenderTimeout, so every typed line would cost ten seconds and the
+// load protection would be gone; this says so. Enter is never pressed:
+// no turn, no tokens.
+func liveTypedLineRenders(t *testing.T, claudeBin string) {
+	t.Helper()
+	cases := []struct {
+		label string
+		chars int
+		want  string
+	}{
+		{"at-budget", TypedLineBudget, "the text itself"},
+		{"collapsed", 801, "a [Pasted text #N] placeholder"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			name := sessionName(t, "typed")
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			argv := []string{claudeBin, "--dangerously-skip-permissions"}
+			require.NoError(t, NewSessionWithEnv(ctx, name, t.TempDir(), argv, EffortEnv("low")))
+			t.Cleanup(func() { _ = KillSession(context.Background(), name) })
+			require.NoError(t, WaitForReady(ctx, name))
+			time.Sleep(2 * time.Second) // the footer paints a beat after the first ready frame
+
+			line := "/apex-probe"
+			for i := 0; len(line) < tc.chars; i++ {
+				line += " alpha bravo charlie delta"[0 : 1+i%26]
+			}
+			line = line[:tc.chars]
+
+			start := time.Now()
+			shown, err := typeLine(ctx, name, line)
+			require.NoError(t, err)
+			require.True(t, shown,
+				"Claude Code did not draw a typed %d-character line as %s within %s, so ape cannot tell when "+
+					"it is safe to press Enter. Pane:\n%s", tc.chars, tc.want, typedRenderTimeout, paneOf(ctx, name))
+			t.Logf("%d chars drawn as %s after %s", tc.chars, tc.want, time.Since(start).Round(time.Millisecond))
+		})
+	}
 }
 
 // claudeVersionRe is the shape `claude --version` prints, e.g.

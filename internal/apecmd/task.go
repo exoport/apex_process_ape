@@ -96,6 +96,19 @@ Protocol inside it." (the same continuation prompt the /handoff skill
 suggests). It still requires --prompt-flag to actually reach the
 skill, and is mutually exclusive with --prompt.
 
+A line longer than 700 characters is not typed. Claude Code turns a
+typed burst past 800 characters into a "[Pasted text #N]" placeholder
+that never runs as a skill, so ape writes the step's --args and prompt
+text, verbatim and with its newlines, to
+stages/NN-<stage>/step-NN-<skill>.args.md in the run directory, and
+types a line that names that file instead. The step-start event records
+it as args_file. Shorter lines are typed exactly as before.
+
+After typing, ape presses Enter once claude has drawn the line, then
+confirms the submit through the UserPromptSubmit hook, pressing Enter up
+to twice more. A line that is still not submitted ends the run with
+termination prompt_not_submitted instead of idling to the timeout.
+
 Where the project declares commit ownership in _apex/commit-owners.csv,
 every dispatch is asserted against it. A skill ABSENT from that file
 must leave HEAD, the index and the stash reflog unchanged — "git add"
@@ -113,7 +126,8 @@ judged against a skill's declaration.
 The verdict is written to the run manifest as commit_contract, so a
 failure stays diagnosable after the fact.
 
-Exit codes: 0 success · 1 run failed or idle timeout · 2 usage or
+Exit codes: 0 success · 1 run failed, idle timeout, or the typed line
+never submitted · 2 usage or
 preflight error · 3 REPL never became ready (last pane on stderr) ·
 5 upstream API failure · 6 the dispatch violated its declared commit
 ownership (the run itself may have succeeded).`,

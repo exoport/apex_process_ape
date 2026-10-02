@@ -162,16 +162,22 @@ completed run, where `status` already says everything. Additive under
 
 ```yaml
 termination:
-  kind: idle_timeout          # idle_timeout | max_duration | api_error | cancelled | error
+  kind: idle_timeout          # idle_timeout | max_duration | api_error | prompt_not_submitted | cancelled | error
   message: "interactive step idle for 1h0m0s without progress (window 1h0m0s): …"
   diagnostic: "last progress hook 1h0m0s ago (hook 1h0m0s ago; transcript none for 3h44m; pty n/a); child pid 4242 alive"
   last_source: hook           # idle only: hook | transcript | pty | none
   idle_seconds: 3600.0        # idle only
   window_seconds: 3600.0      # idle only
-  elapsed_seconds: 14400.0    # max_duration only
+  elapsed_seconds: 14400.0    # max_duration; prompt_not_submitted: how long ape pressed Enter
   max_seconds: 10800.0        # max_duration only
   quiet_seconds: 90.0         # api_error only
 ```
+
+`prompt_not_submitted` means ape typed a step's line and claude never
+submitted it: no `UserPromptSubmit` hook followed, through the Enter press and
+the two retries ape makes about 20 s apart. The `message` says whether the line
+was ever drawn in the input box and quotes the input row. Before this kind
+existed, such a step sat with its line in the input box until `idle_timeout`.
 
 **Read it together with the zeros.** `totals` counts *completed* steps, and a
 step cancelled mid-flight records none — so a terminated run shows

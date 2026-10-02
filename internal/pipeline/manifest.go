@@ -165,6 +165,11 @@ const (
 	// TerminationAPIError — claude's own upstream-failure text, which is
 	// a failure of the harness rather than of the step.
 	TerminationAPIError = "api_error"
+	// TerminationNotSubmitted — ape typed a step's line and claude never
+	// submitted it: no UserPromptSubmit hook through every Enter
+	// repl.Deliver pressed. Before this kind existed the line sat in the
+	// input box and the run ended as an idle timeout.
+	TerminationNotSubmitted = "prompt_not_submitted"
 	// TerminationCancelled — the context was cancelled (operator ^C, or
 	// a parent deadline).
 	TerminationCancelled = "cancelled"

@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+- **A typed line stays short, and ape confirms claude submitted it**
+  (class B: how ape drives the session). Measured through ape's own PTY
+  write on Claude Code 2.1.285 and 2.1.287: a typed burst past 800
+  characters becomes a `[Pasted text #N]` placeholder and is submitted as
+  a plain message, so the skill never runs (799 expanded, 801 did not).
+  Under load, the eval saw lines from 750 characters never submitted at
+  all: ape pressed Enter a fixed 300 ms after typing, a starved claude
+  read the text and the `\r` in one chunk, and a CR inside a paste is a
+  newline. The step then idled to its timeout.
+  - Past 700 characters, a step's `--args` and prompt text go to
+    `stages/NN-<stage>/step-NN-<skill>.args.md` in the run directory,
+    verbatim, newlines kept, and the typed line names that file. The
+    persona prefix, the skill and ape's own `--no-commit` stay inline, and
+    the step-start event records `args_file`. `ape prompt --agent` does
+    the same with `prompt.md` in its record directory (`args_file` in
+    `prompt.yaml`). Shorter lines are typed exactly as before.
+  - Enter now waits until claude has drawn the line, or its placeholder,
+    in the pane, never earlier than the old 300 ms. Then ape confirms the
+    submit through the `UserPromptSubmit` hook and presses Enter up to
+    twice more, 20 s apart. A line still not submitted ends the run with
+    the new termination kind `prompt_not_submitted` (exit 1, as the idle
+    timeout it replaces).
+  - `make check-claude` gains `typed_line_renders`: claude still draws a
+    700-character line, and an 801-character one as a placeholder, where
+    ape can see it. No turn, no tokens.
+
 - **`story.adrs_considered` names its candidates** (class C: the shape of
   `ape story verify`'s output changes). Both messages now end with the
   candidate ADRs and the tag each matched on, e.g. `(candidates:

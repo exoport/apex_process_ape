@@ -53,6 +53,10 @@ type PromptMeta struct {
 	TokensOut      int                         `json:"tokens_output"             yaml:"tokens_output"`
 	NumTurns       int                         `json:"num_turns"                 yaml:"num_turns"`
 	PerModel       map[string]PromptModelUsage `json:"per_model,omitempty"       yaml:"per_model,omitempty"`
+	// ArgsFile is set when the delivered text was too long to type and
+	// went to a file in the run directory instead (PromptArgsFile); the
+	// typed line named that file.
+	ArgsFile string `json:"args_file,omitempty" yaml:"args_file,omitempty"`
 }
 
 // WritePromptYAML emits prompt.yaml at <dir>/prompt.yaml.

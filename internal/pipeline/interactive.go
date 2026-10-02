@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/exoport/apex_process_ape/internal/effort"
 	"github.com/exoport/apex_process_ape/internal/repl"
@@ -272,7 +275,20 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		// this step's output into the manifest record.
 		beforeSnap, _ := repl.CapturePane(ctx, sessionName)
 
-		prompt := assembleInteractivePromptLine(effAgent, step, opts.Prompt)
+		var argsAbs, argsRel string
+		if mw != nil {
+			argsAbs, argsRel = mw.StepArgsPath(stageIdx, i+1, stage.Name, step.Skill)
+		}
+		prompt, spilled, lineErr := stepLine(effAgent, step, opts.Prompt, argsAbs)
+		if lineErr != nil {
+			stageErr = fmt.Errorf("stage %q step %d: %w", stage.Name, i, lineErr)
+			stageStatus = StatusFailed
+			if opts.OnInteractiveStepEnd != nil {
+				opts.OnInteractiveStepEnd(stepInfo)
+			}
+			closeStepLog(eventLog)
+			break
+		}
 		stepStartFields := map[string]any{
 			"stage": stage.Name,
 			"step":  i + 1,
@@ -283,6 +299,11 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 			"effort_source": effortPlan.Source,
 			"prompt":        prompt,
 			"no_clear":      step.NoClear,
+		}
+		if spilled {
+			// Present only when the arguments went to a file, so an
+			// unaffected step's event is unchanged.
+			stepStartFields["args_file"] = argsRel
 		}
 		// With no --model under the table, claude has not picked its model
 		// yet, and Resolved would be the fallback posing as what ran. The
@@ -296,7 +317,14 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 			stepStartFields["model_declared"] = declaredModel
 		}
 		writeInteractiveStepEvent(eventLog, "step-start", stepStartFields)
-		if err := repl.SendCommand(ctx, sessionName, prompt); err != nil {
+		// sessionCtx, so a claude that dies mid-delivery ends the wait at
+		// once and is reported as such, not as an unsubmitted line.
+		if err := repl.Deliver(sessionCtx, sessionName, prompt, opts.PromptSubmits); err != nil {
+			if errors.Is(err, context.Canceled) {
+				if cause := context.Cause(sessionCtx); cause != nil {
+					err = cause
+				}
+			}
 			stageErr = fmt.Errorf("stage %q step %d: send prompt: %w", stage.Name, i, err)
 			stageStatus = StatusFailed
 			if opts.OnInteractiveStepEnd != nil {
@@ -544,6 +572,60 @@ func assembleInteractivePromptLine(effAgent string, step Step, prompt string) st
 		promptParts = append(promptParts, step.PromptFlag, prompt)
 	}
 	return strings.Join(promptParts, " ")
+}
+
+// stepLine returns the line to type for a step. Within
+// repl.TypedLineBudget it is assembleInteractivePromptLine's line,
+// unchanged. Past it, the step's arguments are written to argsPath
+// verbatim, newlines kept, and the line ends with repl.ArgsPointer
+// instead: Claude Code turns a longer burst into a "[Pasted text #N]"
+// placeholder that never runs as a command.
+//
+// What moves is the step's own text: its Args and its prompt flag and
+// value. The persona prefix and the skill name stay, and so does a
+// leading `--no-commit`, which `ape task` puts in front of Args on the
+// agent path: it is ape's flag, not the caller's text. An empty argsPath
+// (no run directory) types the long line as before.
+func stepLine(effAgent string, step Step, prompt, argsPath string) (line string, spilled bool, err error) {
+	line = assembleInteractivePromptLine(effAgent, step, prompt)
+	if repl.FitsTypedLine(line) || argsPath == "" {
+		return line, false, nil
+	}
+	keep, rest := splitLeadingNoCommit(step.Args)
+	parts := make([]string, 0, 2)
+	if rest != "" {
+		parts = append(parts, rest)
+	}
+	if step.PromptFlag != "" && prompt != "" {
+		parts = append(parts, step.PromptFlag+" "+prompt)
+	}
+	if len(parts) == 0 {
+		return line, false, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(argsPath), 0o755); err != nil {
+		return "", false, fmt.Errorf("create step args dir: %w", err)
+	}
+	if err := os.WriteFile(argsPath, []byte(strings.Join(parts, " ")+"\n"), 0o600); err != nil {
+		return "", false, fmt.Errorf("write step args: %w", err)
+	}
+	short := Step{Skill: step.Skill, Args: keep}
+	return assembleInteractivePromptLine(effAgent, short, "") + " " + repl.ArgsPointer(argsPath), true, nil
+}
+
+// splitLeadingNoCommit separates a leading `--no-commit` token from the
+// rest of args. The rest keeps its own whitespace, newlines included.
+func splitLeadingNoCommit(args string) (keep, rest string) {
+	const flag = "--no-commit"
+	trimmed := strings.TrimLeftFunc(args, unicode.IsSpace)
+	if after, ok := strings.CutPrefix(trimmed, flag); ok && (after == "" || startsWithSpace(after)) {
+		return flag, strings.TrimSpace(after)
+	}
+	return "", strings.TrimSpace(args)
+}
+
+func startsWithSpace(s string) bool {
+	r, _ := utf8.DecodeRuneInString(s)
+	return unicode.IsSpace(r)
 }
 
 // waitStepDone blocks until the current step has finished responding,

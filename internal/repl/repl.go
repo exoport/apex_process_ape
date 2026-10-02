@@ -52,10 +52,12 @@ import (
 	"github.com/exoport/apex_process_ape/internal/selfpath"
 )
 
-// PromptSettle is the wait between typing a command and pressing
+// PromptSettle is the least wait between typing a command and pressing
 // Enter. Long prompts otherwise submit before the REPL has finished
 // loading them — confirmed by the community /pmux pattern and
-// anthropics/claude-code#40168. 300ms is the well-known safe value.
+// anthropics/claude-code#40168. 300ms is the well-known safe value. It is
+// a floor, not the whole wait: Enter also waits for the text to be drawn
+// (see typeLine).
 const PromptSettle = 300 * time.Millisecond
 
 // ReadyPollInterval is how often we capture pane output while waiting
@@ -622,18 +624,11 @@ func SendDown(ctx context.Context, name string) error {
 	return SendText(ctx, name, "\x1b[B")
 }
 
-// SendCommand types text, settles for PromptSettle, then presses
-// Enter. The canonical "send a slash command" helper.
+// SendCommand types text, waits until claude has drawn it (and at least
+// PromptSettle), then presses Enter. The canonical "send a slash command"
+// helper; Deliver adds the confirmation that it was submitted.
 func SendCommand(ctx context.Context, name, text string) error {
-	if err := SendText(ctx, name, text); err != nil {
-		return err
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(PromptSettle):
-	}
-	return SendEnter(ctx, name)
+	return Deliver(ctx, name, text, nil)
 }
 
 // Test seams for WaitForReady's poll/dismiss loop so it can be driven

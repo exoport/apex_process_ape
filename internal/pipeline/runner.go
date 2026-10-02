@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/effort"
+	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 	"gopkg.in/yaml.v3"
@@ -141,6 +142,12 @@ type RunOptions struct {
 	// window controlled by InteractiveStepGrace; meaningful only for
 	// smoke tests that don't wire the bridge.
 	WaitStepDone func(ctx context.Context, stage string, stepIdx int) error
+
+	// PromptSubmits is the UserPromptSubmit tally repl.Deliver confirms a
+	// typed step line against, pressing Enter again when none arrives. The
+	// apecmd wiring passes the session driver's. Nil skips the
+	// confirmation, as smoke tests without a bridge need.
+	PromptSubmits repl.SubmitProbe
 
 	// InteractiveStepGrace is the duration the runner waits between
 	// steps in interactive mode when WaitStepDone is nil. Default is
@@ -501,6 +508,7 @@ func newTerminationRecord(runErr error) *TerminationRecord {
 		ite *sessiondriver.IdleTimeoutError
 		mde *sessiondriver.MaxDurationError
 		tae *sessiondriver.TerminalAPIError
+		nse *repl.NotSubmittedError
 	)
 	switch {
 	case errors.As(runErr, &ite):
@@ -525,6 +533,12 @@ func newTerminationRecord(runErr error) *TerminationRecord {
 			Kind:      TerminationAPIError,
 			Message:   tae.Error(),
 			QuietSecs: tae.Quiet.Seconds(),
+		}
+	case errors.As(runErr, &nse):
+		return &TerminationRecord{
+			Kind:        TerminationNotSubmitted,
+			Message:     nse.Error(),
+			ElapsedSecs: nse.Waited.Seconds(),
 		}
 	// Checked AFTER the typed errors: a cancelled context is how an idle
 	// termination reaches some callers, and reporting that as a plain

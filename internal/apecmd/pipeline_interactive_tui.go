@@ -163,6 +163,7 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 			OnStageStart:           core.ResetStageTelemetry,
 			OnRunDir:               onRunDir,
 			WaitStepDone:           core.WaitStepDone,
+			PromptSubmits:          core.driver.PromptSubmits,
 			OnInteractiveStepStart: core.OnStepStart,
 			OnInteractiveStepEnd:   core.OnStepEnd,
 			StepTelemetryFn:        core.StepTelemetry,

@@ -977,6 +977,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		},
 		OnRunDir:               onRunDir,
 		WaitStepDone:           core.WaitStepDone,
+		PromptSubmits:          core.driver.PromptSubmits,
 		OnInteractiveStepStart: core.OnStepStart,
 		OnInteractiveStepEnd:   core.OnStepEnd,
 		StepTelemetryFn:        core.StepTelemetry,

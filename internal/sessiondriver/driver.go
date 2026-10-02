@@ -48,6 +48,9 @@ type hookEnvelope struct {
 	LastAssistantMessage string            `json:"last_assistant_message"`
 	ToolName             string            `json:"tool_name"`
 	ToolResponse         json.RawMessage   `json:"tool_response"`
+	// Prompt is UserPromptSubmit's submitted text: the line as typed, e.g.
+	// "/apex-sprint-sync --autonomous --no-commit".
+	Prompt string `json:"prompt"`
 }
 
 // DefaultIdleTimeout is the maximum quiet window WaitStepDone tolerates
@@ -237,6 +240,11 @@ type Driver struct {
 	// WaitStepDone; guarded by activityMu alongside lastActivity.
 	maxDurationAnchor time.Time
 
+	// submitMu guards the UserPromptSubmit tally PromptSubmits reports.
+	submitMu   sync.Mutex
+	submits    uint64
+	lastPrompt string
+
 	mu               sync.Mutex
 	activeTranscript string
 	activeSessionID  string
@@ -282,6 +290,17 @@ func (d *Driver) DeferredStops() (n int, tasks []BackgroundTask) {
 	d.stopMu.Lock()
 	defer d.stopMu.Unlock()
 	return d.deferredStops, d.deferredTasks
+}
+
+// PromptSubmits reports how many UserPromptSubmit hooks the driver has
+// seen and the submitted text of the latest. It is repl.Deliver's probe:
+// a typed line counts as submitted only once the tally moves past the
+// value taken before typing. Never reset, so Begin cannot make a stale
+// submit look new.
+func (d *Driver) PromptSubmits() (count uint64, last string) {
+	d.submitMu.Lock()
+	defer d.submitMu.Unlock()
+	return d.submits, d.lastPrompt
 }
 
 // TranscriptPath returns the session's own transcript as its hooks named
@@ -427,6 +446,15 @@ func (d *Driver) DrainStepDone() {
 // context, at the spawn that caused it.
 func (d *Driver) NoteHook(event string, payload json.RawMessage) {
 	switch event {
+	case ipc.HookUserPromptSubmit:
+		// The tally lives here, not in FeedHook, because this is the one
+		// entry both paths share: the task/pipeline runner reaches the
+		// driver through interactiveCore.FeedHook, which calls NoteHook and
+		// never Driver.FeedHook.
+		d.submitMu.Lock()
+		d.submits++
+		d.lastPrompt = parseHookEnvelope(payload).Prompt
+		d.submitMu.Unlock()
 	case ipc.HookPostToolUse:
 		if err := classifyAgentSpawn(parseHookEnvelope(payload)); err != nil {
 			err.Skill = d.skill()

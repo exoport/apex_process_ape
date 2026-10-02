@@ -109,11 +109,7 @@ func (w *manifestWriter) BeginStage(name string, at time.Time) int {
 // forward slashes regardless of host OS so the manifest stays portable
 // between Linux/macOS producers and Windows consumers (web view, etc.).
 func (w *manifestWriter) OpenStepLog(stageIdx, stepIdx int, stageName, skill string) (io.WriteCloser, string, error) {
-	rel := filepath.Join(
-		"stages",
-		fmt.Sprintf("%02d-%s", stageIdx, sanitizeFsName(stageName)),
-		fmt.Sprintf("step-%02d-%s.ndjson", stepIdx, sanitizeFsName(skill)),
-	)
+	rel := stepFileStem(stageIdx, stepIdx, stageName, skill) + ".ndjson"
 	full := filepath.Join(w.runDir, rel)
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return nil, "", fmt.Errorf("create step dir: %w", err)
@@ -124,6 +120,25 @@ func (w *manifestWriter) OpenStepLog(stageIdx, stepIdx int, stageName, skill str
 	}
 	w.stepLogs = append(w.stepLogs, f)
 	return f, filepath.ToSlash(rel), nil
+}
+
+// StepArgsPath is where a step's arguments go when they are too long to
+// type (repl.TypedLineBudget): beside the step's own event log, sharing
+// its stem, so the two cannot drift apart. Returns the absolute path and
+// the run-relative one, forward-slashed like events_path.
+func (w *manifestWriter) StepArgsPath(stageIdx, stepIdx int, stageName, skill string) (abs, rel string) {
+	rel = stepFileStem(stageIdx, stepIdx, stageName, skill) + ".args.md"
+	return filepath.Join(w.runDir, rel), filepath.ToSlash(rel)
+}
+
+// stepFileStem is the run-relative path, without extension, that a step's
+// files share: stages/NN-<stage>/step-NN-<skill>.
+func stepFileStem(stageIdx, stepIdx int, stageName, skill string) string {
+	return filepath.Join(
+		"stages",
+		fmt.Sprintf("%02d-%s", stageIdx, sanitizeFsName(stageName)),
+		fmt.Sprintf("step-%02d-%s", stepIdx, sanitizeFsName(skill)),
+	)
 }
 
 // RecordStep appends a fully populated StepRecord to the given stage,
