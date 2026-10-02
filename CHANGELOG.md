@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased
+
+- **chore(deps): containerd `v2.3.6`, closing GO-2026-6597.** An image-pull
+  denial of service through a crafted OCI index graph (CVE-2026-53493),
+  published 2026-10-01 and reported as reachable from `ape sandbox`'s
+  client code. As with GO-2026-6444, the advisory names no symbols, so the
+  whole module counts as affected: the bump is the fix, and the gate's
+  allow-list stays empty.
+
 ## v0.4.0 (2026-09-30)
 
 - **`ape framework setup` and `update` install RELEASES** (class C; the
