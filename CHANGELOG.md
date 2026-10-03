@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **`ape doc analyze` estimates tokens at bytes/2.9** (class C: the
+  distillator routes on it). It used bytes/4, which reads about a quarter
+  low on APEX markdown; `ape memory check` and `ape context check` moved
+  to 2.9 in v0.5.0, the ratio Claude Code's own count gave (62,488 tokens
+  for a 181,187-byte file). The thresholds stay where they were, in
+  tokens: routing is `single` up to 15,000 estimated tokens and a split is
+  `likely` past 5,000 estimated distillate tokens. Measured in bytes, both
+  now trip earlier: fan-out from about 43.5 KB of sources (was 60 KB),
+  split likely from about 43.5 KB of sources (was 60 KB). Same fields,
+  same flags.
 - **A skill installed in both places resolves to the personal copy**,
   the one Claude Code runs (measured on 2.1.285 and 2.1.287). The
   `apescript.Skills` API listed it as the project copy, with the project

@@ -214,8 +214,9 @@ Routing is 'single' when the corpus is BOTH at or under the file limit and
 at or under the token limit; otherwise 'fan-out'. The split prediction
 estimates a distillate at a third of its sources.
 
-Every token number here is bytes/4 — an estimate, labelled as one, and
-nothing gates on it. The three thresholds are flags so the boundaries are
+Every token number here is bytes/2.9 — the ratio Claude Code's own count
+gives on APEX markdown, and the one ape memory check uses. It is still an
+estimate, labelled as one. The three thresholds are flags so the boundaries are
 testable without building a 15k-token fixture; the defaults are the ones
 the framework has always used.
 

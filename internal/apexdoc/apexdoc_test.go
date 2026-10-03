@@ -357,12 +357,12 @@ func TestAnalyze_FilesFoldersAndGlobs(t *testing.T) {
 
 func TestAnalyze_SizesAndTokens(t *testing.T) {
 	dir := t.TempDir()
-	write(t, dir, "a.md", strings.Repeat("x", 400))
+	write(t, dir, "a.md", strings.Repeat("x", 290))
 
 	res, err := Analyze([]string{dir}, AnalyzeOptions{})
 	require.NoError(t, err)
-	require.Equal(t, int64(400), res.Summary.TotalSizeBytes)
-	require.Equal(t, int64(100), res.Summary.TotalEstimatedTokens, "bytes/4, an estimate")
+	require.Equal(t, int64(290), res.Summary.TotalSizeBytes)
+	require.Equal(t, int64(100), res.Summary.TotalEstimatedTokens, "bytes/2.9, an estimate")
 	require.Equal(t, int64(100), res.Files[0].EstimatedTokens)
 }
 

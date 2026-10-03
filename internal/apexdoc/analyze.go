@@ -20,9 +20,13 @@ const (
 	// distillateRatio is the assumed compression: a distillate is roughly a
 	// third of its sources.
 	distillateRatio = 3
-	// bytesPerTokenEstimate is the crude chars-per-token ratio. Every
-	// number derived from it is labelled an estimate; nothing gates on it.
-	bytesPerTokenEstimate = 4
+	// bytesPerTokenTenths is the bytes-per-token ratio, in tenths: 2.9,
+	// measured on APEX markdown (Claude Code counted 62,488 tokens for a
+	// 181,187-byte file), the same ratio `ape memory check` uses. It used
+	// to be 4, which read low by about a quarter, so routing and the split
+	// prediction ran on a corpus they thought smaller than it was. Every
+	// number derived from it is labelled an estimate.
+	bytesPerTokenTenths = 29
 )
 
 // sourceExtensions are the file types a source document can be.
@@ -202,7 +206,7 @@ func Analyze(inputs []string, opts AnalyzeOptions) (*AnalyzeResult, error) {
 			Path:            filepath.ToSlash(path),
 			FileName:        filepath.Base(path),
 			SizeBytes:       info.Size(),
-			EstimatedTokens: info.Size() / bytesPerTokenEstimate,
+			EstimatedTokens: info.Size() * 10 / bytesPerTokenTenths,
 			DocType:         DocType(filepath.Base(path)),
 		}
 		res.Files = append(res.Files, fi)
