@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.6.0 (2026-10-03)
 
 - **`--max-duration` also bounds the wait for claude's REPL** (class B:
   session driving). The wait was a fixed 30 s whatever the ceiling, so
