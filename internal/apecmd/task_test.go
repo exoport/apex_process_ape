@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/exoport/apex_process_ape/internal/sessiondriver"
@@ -93,6 +94,15 @@ func TestTaskExitCode(t *testing.T) {
 		}, filepath.Join(dir, "pty-tail-dev.bin")))
 	require.Equal(t, ExitREPLNotReady, taskExitCode(walk))
 	require.FileExists(t, filepath.Join(dir, "pty-tail-dev.bin"))
+
+	// A --max-duration shorter than the readiness window cut the wait: the
+	// manifest records max_duration, and the exit code is still "the REPL
+	// never became ready", which is what happened.
+	cut := fmt.Errorf("stage %q: claude REPL not ready in PTY: %w", "dev", &sessiondriver.MaxDurationError{
+		Label: "interactive step", Max: 10 * time.Second,
+		Cause: &repl.NotReadyError{Name: "s", Err: context.DeadlineExceeded},
+	})
+	require.Equal(t, ExitREPLNotReady, taskExitCode(cut))
 }
 
 // TestTaskEnvelopeShape locks the JSON field names the eval consumes.

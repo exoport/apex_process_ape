@@ -286,6 +286,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		// until the runner has resolved the run dir.
 		RunLog:                 &lazyRunLog{getter: getRunLog},
 		WaitStepDone:           core.WaitStepDone,
+		MaxDuration:            cfg.maxDuration,
 		StepTelemetryFn:        core.StepTelemetry,
 		OnInteractiveStepStart: core.OnStepStart,
 		OnInteractiveStepEnd:   core.OnStepEnd,

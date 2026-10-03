@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
+	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 )
 
@@ -99,6 +100,25 @@ func TestNewTerminationRecord_IdleBeatsCancelled(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled, "precondition: this error IS a cancelled context")
 	require.Equal(t, TerminationIdle, newTerminationRecord(err).Kind,
 		"a cancelled context that carries an idle timeout must report the idle timeout")
+}
+
+// A --max-duration shorter than the REPL readiness window ends that wait
+// (sessiondriver.WaitReady), and the manifest says the ceiling did it, not
+// a REPL that failed to start.
+func TestNewTerminationRecord_ReadinessCutByTheCeiling(t *testing.T) {
+	t.Parallel()
+
+	notReady := &repl.NotReadyError{Name: "s", Pane: "", Err: context.DeadlineExceeded}
+	cut := &sessiondriver.MaxDurationError{
+		Label: "interactive step", Elapsed: 10 * time.Second, Max: 10 * time.Second,
+		Diagnostic: "the claude REPL never became ready", Cause: notReady,
+	}
+	err := fmt.Errorf("stage %q: claude REPL not ready in PTY: %w", "dev", cut)
+
+	rec := newTerminationRecord(err)
+	require.Equal(t, TerminationMaxDuration, rec.Kind)
+	require.InDelta(t, 10.0, rec.MaxSecs, 0.001)
+	require.ErrorAs(t, err, &notReady, "the pane snapshot stays reachable for the saved PTY bytes")
 }
 
 func TestNewTerminationRecord_CleanRunCarriesNothing(t *testing.T) {

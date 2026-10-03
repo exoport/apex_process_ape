@@ -162,12 +162,18 @@ type MaxDurationError struct {
 	Elapsed    time.Duration // wall-clock since the last item boundary (== step start when none)
 	Max        time.Duration // the configured ceiling
 	Diagnostic string        // last progress source + child liveness
+	// Cause is the error the ceiling cut short, when there was one: the
+	// REPL readiness wait's NotReadyError (see WaitReady), whose pane
+	// snapshot and raw PTY bytes stay reachable through errors.As.
+	Cause error
 }
 
 func (e *MaxDurationError) Error() string {
 	return fmt.Sprintf("%s exceeded max-duration %v (ran %v): %s → stopping",
 		e.Label, e.Max.Round(time.Second), e.Elapsed.Round(time.Second), e.Diagnostic)
 }
+
+func (e *MaxDurationError) Unwrap() error { return e.Cause }
 
 // Driver drives a single standalone Claude session end-to-end: it fans
 // hook / call / reply events out to the runlog, binds the session's

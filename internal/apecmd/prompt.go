@@ -472,9 +472,9 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 
 	driver.Begin()
 
-	readyCtx, cancelReady := context.WithTimeout(runCtx, promptReadyTimeout)
-	readyErr := repl.WaitForReady(readyCtx, sessionName)
-	cancelReady()
+	readyErr := sessiondriver.WaitReady(runCtx, promptReadyTimeout, o.maxDuration, "session", func(readyCtx context.Context) error {
+		return repl.WaitForReady(readyCtx, sessionName)
+	})
 	if readyErr != nil {
 		// The claude REPL never became ready (exit 3). The NotReadyError
 		// carries the last pane snapshot for diagnosis, and its raw PTY bytes

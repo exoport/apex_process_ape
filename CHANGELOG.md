@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`--max-duration` also bounds the wait for claude's REPL** (class B:
+  session driving). The wait was a fixed 30 s whatever the ceiling, so
+  `ape task --max-duration 5s` against a claude that never came up ran
+  30 s. A ceiling shorter than that window now ends the wait at the
+  ceiling, and the manifest records `termination.kind: max_duration`. The
+  exit code is still 3, because the REPL did not become ready. Applies to
+  `ape task`, `ape pipeline` and `ape prompt`. With no ceiling, or a longer
+  one, nothing changes.
 - **`ape doc analyze` estimates tokens at bytes/2.9** (class C: the
   distillator routes on it). It used bytes/4, which reads about a quarter
   low on APEX markdown; `ape memory check` and `ape context check` moved

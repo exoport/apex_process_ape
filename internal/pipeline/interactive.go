@@ -16,6 +16,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/effort"
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/exoport/apex_process_ape/internal/runlog"
+	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 )
 
 // runStagesInteractive drives a pipeline in PLAN-6 interactive exec
@@ -163,15 +164,14 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 	// Cleanup must run even after ctx is cancelled — Background is intentional.
 	defer func() { _ = repl.KillSession(context.Background(), sessionName) }() //nolint:contextcheck // cleanup-on-exit; ctx is already done here
 
-	readyCtx, cancelReady := context.WithTimeout(ctx, interactiveReadyTimeout)
-	if err := repl.WaitForReady(readyCtx, sessionName); err != nil {
-		cancelReady()
+	if err := sessiondriver.WaitReady(ctx, interactiveReadyTimeout, opts.MaxDuration, "interactive step", func(readyCtx context.Context) error {
+		return repl.WaitForReady(readyCtx, sessionName)
+	}); err != nil {
 		if mw != nil {
 			err = repl.WithSavedOutput(err, runlog.PTYTailPath(mw.runDir, stage.Name))
 		}
 		return StatusFailed, fmt.Errorf("stage %q: claude REPL not ready in PTY: %w", stage.Name, err)
 	}
-	cancelReady()
 
 	// If the claude process exits before the Stop hook fires, cancel
 	// sessionCtx so waitStepDone returns immediately instead of idling

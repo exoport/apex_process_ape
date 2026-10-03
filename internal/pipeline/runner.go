@@ -143,6 +143,11 @@ type RunOptions struct {
 	// smoke tests that don't wire the bridge.
 	WaitStepDone func(ctx context.Context, stage string, stepIdx int) error
 
+	// MaxDuration is the hard wall-clock ceiling the WaitStepDone driver
+	// enforces (0 = none). The runner reads it for one thing: a ceiling
+	// shorter than the REPL readiness window bounds that wait too.
+	MaxDuration time.Duration
+
 	// PromptSubmits is the UserPromptSubmit tally repl.Deliver confirms a
 	// typed step line against, pressing Enter again when none arrives. The
 	// apecmd wiring passes the session driver's. Nil skips the

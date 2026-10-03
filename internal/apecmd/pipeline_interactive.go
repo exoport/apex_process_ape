@@ -982,6 +982,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		},
 		OnRunDir:               onRunDir,
 		WaitStepDone:           core.WaitStepDone,
+		MaxDuration:            cfg.maxDuration,
 		PromptSubmits:          core.driver.PromptSubmits,
 		OnInteractiveStepStart: core.OnStepStart,
 		OnInteractiveStepEnd:   core.OnStepEnd,
