@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.5.0 (2026-10-02)
 
 - **The per-Read token cap is pinned at 30000 on every spawn** (class B).
   `CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS=30000` goes on every claude ape
