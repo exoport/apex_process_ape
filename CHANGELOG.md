@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Unreleased
+
+- **A skill installed in both places resolves to the personal copy**,
+  the one Claude Code runs (measured on 2.1.285 and 2.1.287). The
+  `apescript.Skills` API listed it as the project copy, with the project
+  path; it now lists it once, `Scope: "user"`, with the
+  `~/.claude/skills` path. `framework.ResolveSkill` looks personal-first;
+  its other callers (pipeline preflight, `ape prompt --agent`,
+  `ape deferred repair`) only ask whether a name resolves, so their
+  answers do not change. `ape doctor`'s `skills.shadowed` row is
+  unchanged.
+
 ## v0.5.0 (2026-10-02)
 
 - **The per-Read token cap is pinned at 30000 on every spawn** (class B).

@@ -92,7 +92,7 @@ type RunResult struct {
 | -------- | ------- |
 | `ReadManifest(path string) (Manifest, error)` | parsed run manifest; `path` may be the run dir or the `manifest.yaml` file |
 | `ScanTranscript(path string) (ScanResult, error)` | cost/token totals + per-model breakdown of one `.jsonl` transcript (PLAN-10) |
-| `Skills(cwd string) ([]SkillInfo, error)` | resolved skills — project-scoped first, then non-shadowed user-scoped |
+| `Skills(cwd string) ([]SkillInfo, error)` | installed skills, project- and user-scoped, sorted by name; a name installed in both is listed once, as the user-scoped copy Claude Code runs |
 
 `Manifest`, `ScanResult`, `Totals`, and `Digest` are type aliases for
 ape's internal `pipeline` / `cost` / `blobstore` shapes, so a script sees

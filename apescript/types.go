@@ -123,7 +123,8 @@ type PromptOpts struct {
 type SkillInfo struct {
 	// Name is the skill directory name (e.g. "apex-create-prd").
 	Name string
-	// Scope is "project" or "user" — which tree the skill resolved from.
+	// Scope is "project" or "user" — which tree the skill resolved from;
+	// "user" for a name installed in both, the copy Claude Code runs.
 	Scope string
 	// Path is the absolute path to the skill's SKILL.md.
 	Path string

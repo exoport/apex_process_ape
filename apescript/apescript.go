@@ -136,48 +136,41 @@ func ScanTranscript(path string) (ScanResult, error) {
 	return cost.ScanSession(path)
 }
 
-// Skills returns the framework skills resolved for cwd — project-scoped skills
-// under <cwd>/.claude/skills first, then the user-scoped ~/.claude/skills whose
-// names the project does not also install. Sorted by name.
+// Skills returns the skills installed for cwd — every name under
+// <cwd>/.claude/skills or the user-scoped ~/.claude/skills — sorted by name.
 //
-// A name installed in both places is listed once, as the project copy. That
-// is not the copy Claude Code runs: it loads the personal one (measured; see
-// framework.ResolveSkill), and `ape doctor`'s skills.shadowed row reports it.
+// A name installed in both places is listed once, as the copy Claude Code
+// runs: the personal one (measured; see framework.ResolveSkill). `ape
+// doctor`'s skills.shadowed row reports those names.
 func Skills(cwd string) ([]SkillInfo, error) {
-	seen := map[string]bool{}
-	var out []SkillInfo
-
+	var names []string
 	if cwd != "" {
-		projDir := framework.ProjectSkillsPath(cwd)
-		names, err := framework.ListInstalledSkills(projDir)
+		proj, err := framework.ListInstalledSkills(framework.ProjectSkillsPath(cwd))
 		if err != nil {
 			return nil, err
 		}
-		for _, n := range names {
-			path, scope, found := framework.ResolveSkill(n, cwd)
-			if !found {
-				continue
-			}
-			seen[n] = true
-			out = append(out, SkillInfo{Name: n, Scope: string(scope), Path: path, Framework: framework.IsFrameworkSkill(n)})
+		names = append(names, proj...)
+	}
+	if userDir := framework.UserSkillsPath(); userDir != "" {
+		user, err := framework.ListInstalledSkills(userDir)
+		if err != nil {
+			return nil, err
 		}
+		names = append(names, user...)
 	}
 
-	if userDir := framework.UserSkillsPath(); userDir != "" {
-		names, err := framework.ListInstalledSkills(userDir)
-		if err != nil {
-			return nil, err
+	seen := map[string]bool{}
+	var out []SkillInfo
+	for _, n := range names {
+		if seen[n] {
+			continue
 		}
-		for _, n := range names {
-			if seen[n] {
-				continue // listed once, as the project copy; see the doc comment
-			}
-			path, scope, found := framework.ResolveSkill(n, "")
-			if !found {
-				continue
-			}
-			out = append(out, SkillInfo{Name: n, Scope: string(scope), Path: path, Framework: framework.IsFrameworkSkill(n)})
+		seen[n] = true
+		path, scope, found := framework.ResolveSkill(n, cwd)
+		if !found {
+			continue
 		}
+		out = append(out, SkillInfo{Name: n, Scope: string(scope), Path: path, Framework: framework.IsFrameworkSkill(n)})
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

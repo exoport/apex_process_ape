@@ -21,35 +21,34 @@ const (
 )
 
 // ResolveSkill reports whether a skill name resolves to an on-disk
-// SKILL.md: project-scoped `<projectRoot>/.claude/skills/<name>/SKILL.md`
-// first, then user-scoped `~/.claude/skills/<name>/SKILL.md`. An empty
-// projectRoot disables the project-scope check. ResolveSkill returns the
-// absolute path, the scope it was found in, and a found flag.
+// SKILL.md, in Claude Code's own order: user-scoped
+// `~/.claude/skills/<name>/SKILL.md` first, then project-scoped
+// `<projectRoot>/.claude/skills/<name>/SKILL.md`. An empty projectRoot
+// disables the project-scope check. ResolveSkill returns the absolute
+// path, the scope it was found in, and a found flag.
 //
-// The order is NOT Claude Code's. Claude Code loads the personal copy
-// when a name is installed in both places: measured on 2.1.285 and
-// 2.1.287, typing /<name> in the REPL and passing it to -p alike loaded
-// the ~/.claude/skills body, with ${CLAUDE_SKILL_DIR} pointing there too.
-// That is also its documented precedence: enterprise over personal,
-// personal over project. Existence checks (pipeline preflight,
-// `ape prompt --agent`) get the same answer from either order; the path
-// and scope returned for a name installed twice are where ape looked
-// first, not the copy that runs. `ape doctor`'s skills.shadowed row
-// reports every apex-* name installed in both places.
+// Personal first is what Claude Code runs when a name is installed in
+// both places: measured on 2.1.285 and 2.1.287, typing /<name> in the
+// REPL and passing it to -p alike loaded the ~/.claude/skills body, with
+// ${CLAUDE_SKILL_DIR} pointing there too. That is also its documented
+// precedence: enterprise over personal, personal over project. So the
+// path and scope returned for a name installed twice are the copy that
+// runs. `ape doctor`'s skills.shadowed row reports every apex-* name
+// installed in both places.
 func ResolveSkill(name, projectRoot string) (path string, scope SkillScope, found bool) {
 	if name == "" {
 		return "", ScopeNone, false
-	}
-	if projectRoot != "" {
-		projPath := filepath.Join(projectRoot, ProjectSkillsDir, name, "SKILL.md")
-		if _, err := os.Stat(projPath); err == nil {
-			return projPath, ScopeProject, true
-		}
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		userPath := filepath.Join(home, ".claude", "skills", name, "SKILL.md")
 		if _, err := os.Stat(userPath); err == nil {
 			return userPath, ScopeUser, true
+		}
+	}
+	if projectRoot != "" {
+		projPath := filepath.Join(projectRoot, ProjectSkillsDir, name, "SKILL.md")
+		if _, err := os.Stat(projPath); err == nil {
+			return projPath, ScopeProject, true
 		}
 	}
 	return "", ScopeNone, false

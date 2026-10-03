@@ -134,6 +134,10 @@ func TestScanTranscript(t *testing.T) {
 
 // TestSkills lists a project-scoped skill and tags it framework/custom.
 func TestSkills(t *testing.T) {
+	// An empty HOME, or a developer machine's own ~/.claude/skills would
+	// decide the scope asserted below.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
 	cwd := t.TempDir()
 	for _, name := range []string{"apex-create-prd", "my-custom"} {
 		d := filepath.Join(cwd, ".claude", "skills", name)
@@ -151,6 +155,35 @@ func TestSkills(t *testing.T) {
 	require.True(t, byName["apex-create-prd"].Framework)
 	require.False(t, byName["my-custom"].Framework)
 	require.Equal(t, "project", byName["apex-create-prd"].Scope)
+}
+
+// TestSkills_InstalledTwiceListsThePersonalCopy: Claude Code runs the
+// personal copy of a name installed in both places, so that is the one
+// listed — once, with its path.
+func TestSkills_InstalledTwiceListsThePersonalCopy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cwd := t.TempDir()
+	install := func(root, name string) string {
+		d := filepath.Join(root, ".claude", "skills", name)
+		require.NoError(t, os.MkdirAll(d, 0o755))
+		p := filepath.Join(d, "SKILL.md")
+		require.NoError(t, os.WriteFile(p, []byte("# "+name), 0o644))
+		return p
+	}
+	install(cwd, "apex-create-prd")
+	personal := install(home, "apex-create-prd")
+	projOnly := install(cwd, "apex-dev-story")
+	userOnly := install(home, "my-custom")
+
+	skills, err := apescript.Skills(cwd)
+	require.NoError(t, err)
+	require.Equal(t, []apescript.SkillInfo{
+		{Name: "apex-create-prd", Scope: "user", Path: personal, Framework: true},
+		{Name: "apex-dev-story", Scope: "project", Path: projOnly, Framework: true},
+		{Name: "my-custom", Scope: "user", Path: userOnly, Framework: false},
+	}, skills)
 }
 
 // TestPutBlob_Dispatch proves the PutBlob facade streams through the hook.
