@@ -861,6 +861,17 @@ func buildSpecPrepends(
 // alongside PLAN-3's manifest path. This is the `--no-tui`
 // (interactive) variant; the `--tui` variant routes through
 // runWithInteractiveTUI in pipeline_interactive_tui.go.
+// exitOnPreflight is the `ape pipeline` command's handling of a
+// *pipeline.PreflightError from runWithInteractive: print it and exit
+// ExitUsage. Any other error is returned unchanged.
+func exitOnPreflight(err error) error {
+	if pfe, ok := errors.AsType[*pipeline.PreflightError](err); ok {
+		fmt.Fprintf(os.Stderr, "%s\n", pfe.Error())
+		os.Exit(ExitUsage)
+	}
+	return err
+}
+
 func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot string, cfg runConfig) error {
 	if err := prepareEffort(spec, projectRoot, &cfg); err != nil {
 		return err
@@ -995,11 +1006,10 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	finalizeRun(ctx, core.publisher(), eventConn, eventIdentity, runDir, projectRoot, cfg, runErr)
 	core.publisher().Close()
 
-	if pfe, ok := errors.AsType[*pipeline.PreflightError](runErr); ok {
-		fmt.Fprintf(os.Stderr, "%s\n", pfe.Error())
-		runCancel()
-		os.Exit(ExitUsage) //nolint:gocritic // explicit runCancel above; mirrors sibling runners
-	}
+	// A preflight failure is RETURNED, not exited on: `ape task`'s
+	// dispatchTask, `ape change` and `ape script` all run through here and
+	// must get control back. The `ape pipeline` command exits on it
+	// (exitOnPreflight).
 	if runErr == nil && !cfg.suppressSummary {
 		printEndOfRunSummary(spec.Name, projectRoot, cfg)
 	}

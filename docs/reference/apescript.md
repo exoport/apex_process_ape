@@ -31,7 +31,7 @@ record).
 | Function | CLI equivalent | Notes |
 | -------- | -------------- | ----- |
 | `RunPipeline(ctx, PipelineOpts) (RunResult, error)` | `ape pipeline` | multi-stage |
-| `RunTask(ctx, TaskOpts) (RunResult, error)` | `ape task` (PLAN-11) | single skill |
+| `RunTask(ctx, TaskOpts) (RunResult, error)` | `ape task` (PLAN-11) | single skill; asserted against `commit-owners.csv` and run under the skill's declared output style, as `ape task` is. A violation is an error naming each check, with the result still filled in |
 | `RunPrompt(ctx, PromptOpts) (RunResult, error)` | `ape prompt` (PLAN-12) | unattended session |
 
 ```go

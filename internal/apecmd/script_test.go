@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/apescript"
+	"github.com/exoport/apex_process_ape/internal/commitowners"
 	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/stretchr/testify/require"
 )
 
@@ -206,6 +208,89 @@ func TestScriptRunner_RunTaskAgainstBashStandin(t *testing.T) {
 	require.FileExists(t, res.ManifestPath)
 	require.NotEmpty(t, res.Status)
 	require.NotNil(t, res.CommitSHAs)
+}
+
+// scriptTaskProject is a git repo with one installed framework skill and a
+// header-only commit-owners.csv, so every skill is a declared
+// non-committer. The shim stands in for claude: it runs pre, then
+// presents a ❯ prompt.
+func scriptTaskProject(t *testing.T, pre string) (root, shim string) {
+	t.Helper()
+	if runtime.GOOS == goosWindows {
+		t.Skip("POSIX PTY test; skipping on Windows")
+	}
+	for _, bin := range []string{"bash", "git"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skip(bin + " not installed")
+		}
+	}
+	root = t.TempDir()
+	git := func(args ...string) {
+		cmd := exec.CommandContext(context.Background(), "git", args...)
+		cmd.Dir = root
+		cmd.Env = append(cmd.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+	}
+	git("init")
+	git("commit", "--allow-empty", "-m", "base")
+
+	skillDir := filepath.Join(root, ".claude", "skills", "apex-shard-doc")
+	require.NoError(t, os.MkdirAll(skillDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("# shard"), 0o644))
+	apexDir := filepath.Join(root, "_apex")
+	require.NoError(t, os.MkdirAll(apexDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(apexDir, "commit-owners.csv"),
+		[]byte("skill,commit_kind,message_regex\n"), 0o644))
+
+	// pre runs only when the shim was started in root. ape also runs
+	// claude elsewhere — `claude --version` from the test's own working
+	// directory, inside this repository — and a git write there lands in
+	// the real checkout.
+	resolved, err := filepath.EvalSymlinks(root)
+	require.NoError(t, err)
+	shim = filepath.Join(t.TempDir(), "claude-shim.sh")
+	body := "#!/bin/sh\nif [ \"$(pwd -P)\" = '" + resolved + "' ]; then\n" + pre + "\nfi\n" +
+		"PS1='❯ '\nexport PS1\nexec bash --noprofile --norc\n"
+	require.NoError(t, os.WriteFile(shim, []byte(body), 0o755))
+	return root, shim
+}
+
+// A script-driven task is asserted like `ape task`: a non-committer that
+// commits is reported to the script, beside the run's own failure, with
+// the result still filled in.
+func TestScriptRunner_RunTaskAssertsCommitOwnership(t *testing.T) {
+	root, shim := scriptTaskProject(t,
+		"git -c user.name=t -c user.email=t@t commit -q --allow-empty -m sneaky")
+
+	runner := &scriptRunner{projectRoot: root, quiet: true, claudeBin: shim}
+	res, runErr := runner.runTask(context.Background(),
+		apescript.TaskOpts{Skill: "apex-shard-doc", IdleTimeout: 3 * time.Second})
+
+	require.Error(t, runErr)
+	require.Contains(t, runErr.Error(), commitowners.CheckHeadMoved,
+		"the assertion `ape task` makes reaches the script")
+	require.Contains(t, runErr.Error(), `stage "apex-shard-doc"`, "the run's own failure is kept beside it")
+	require.Len(t, res.CommitSHAs, 1, "the result is still filled in")
+	require.FileExists(t, res.ManifestPath)
+}
+
+// A preflight failure comes back to the script as an error. It used to
+// os.Exit the whole process, which is why this test could not exist.
+func TestScriptRunner_RunTaskPreflightIsReturnedNotExited(t *testing.T) {
+	root, shim := scriptTaskProject(t, "")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+
+	runner := &scriptRunner{projectRoot: root, quiet: true, claudeBin: shim}
+	res, err := runner.runTask(context.Background(),
+		apescript.TaskOpts{Skill: "apex-not-installed", IdleTimeout: 3 * time.Second})
+
+	var pfe *pipeline.PreflightError
+	require.ErrorAs(t, err, &pfe)
+	require.Equal(t, apescript.RunResult{}, res)
 }
 
 func TestSandboxSymbolHint(t *testing.T) {

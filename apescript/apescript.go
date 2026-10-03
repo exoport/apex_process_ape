@@ -96,6 +96,12 @@ func RunPipeline(ctx context.Context, o PipelineOpts) (RunResult, error) {
 
 // RunTask runs a single framework skill through the same PTY-backed runner the
 // `ape task` command uses (PLAN-11 semantics) and returns the run's result.
+//
+// The dispatch is asserted against the project's commit-owners.csv and runs
+// under the skill's declared output style, exactly as `ape task`. A
+// violated declaration is returned as an error naming each check, with the
+// result still filled in; a preflight failure (an uninstalled skill, a
+// malformed declaration) is returned as an error with an empty result.
 func RunTask(ctx context.Context, o TaskOpts) (RunResult, error) {
 	e, ok := current()
 	if !ok || e.cfg.RunTask == nil {

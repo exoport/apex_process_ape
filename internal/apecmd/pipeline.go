@@ -180,7 +180,7 @@ func newPipelineCmd() *cobra.Command {
 			case mode.IsTUI() && useTUI:
 				return runWithInteractiveTUI(ctx, spec, projectRoot, runOpts)
 			default:
-				return runWithInteractive(ctx, spec, projectRoot, runOpts)
+				return exitOnPreflight(runWithInteractive(ctx, spec, projectRoot, runOpts))
 			}
 		},
 	}

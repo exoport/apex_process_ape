@@ -444,13 +444,42 @@ func (e *taskPreflightError) Unwrap() error { return e.err }
 // That is the whole point of the split: `ape change` dispatches through
 // this, then runs its own reconciliation and composes the commits
 // itself, and a preflight calling os.Exit would take the caller's run
-// down mid-flight with no chance to save the residue. (`ape script`'s
-// task runner has that defect today and is tracked separately.)
+// down mid-flight with no chance to save the residue. `ape script`'s
+// task runner dispatches through dispatchTaskWith for the same reason.
 //
 // The error return is preflight only. A dispatch that spawned and then
 // failed reports through the returned taskRun, whose envelope carries
 // the exit code.
 func dispatchTask(ctx context.Context, o taskOptions) (taskRun, error) {
+	cfg := runConfig{
+		prompt:                o.prompt,
+		allowDirty:            o.allowDirty,
+		ignoreProjectSettings: o.ignoreProjectSettings,
+		quiet:                 o.quiet,
+		suppressSummary:       o.jsonMode,
+		idleTimeout:           o.idleTimeout,
+		maxDuration:           o.maxDuration,
+		natsURL:               o.natsURL,
+		natsCreds:             o.natsCreds,
+		eventsPrefix:          o.eventsPrefix,
+		uploadTranscripts:     o.uploadTranscripts,
+		transcriptStore:       o.transcriptStore,
+		kind:                  eventing.KindTask,
+		sessionKind:           o.sessionKind,
+	}
+	if o.jsonMode {
+		// stdout carries only the envelope; progress goes to stderr.
+		cfg.progressWriter = os.Stderr
+	}
+	return dispatchTaskWith(ctx, o, cfg)
+}
+
+// dispatchTaskWith is dispatchTask over a caller-built runConfig: the
+// task's own decisions — the commit-ownership declaration and both
+// assertions, the per-skill output style, the manifest dir — are made
+// here and override cfg's, so no caller can dispatch a task without
+// them. `ape script` brings its own eventing and session kind in cfg.
+func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRun, error) {
 	step := buildTaskStep(o)
 	spec := pipeline.NewSingleStepSpec(o.skill, step, o.taskCommit)
 
@@ -476,38 +505,20 @@ func dispatchTask(ctx context.Context, o taskOptions) (taskRun, error) {
 	// under; the flag overrides it. Resolved here rather than inside the
 	// settings builder because this is where the skill is known, and the
 	// skill is the table's key.
-	outputStyle := resolveSkillOutputStyle(o.projectRoot, o.skill, o.outputStyle, o.outputStyleSet,
+	cfg.outputStyle = resolveSkillOutputStyle(o.projectRoot, o.skill, o.outputStyle, o.outputStyleSet,
 		func(msg string) { fmt.Fprintf(os.Stderr, "⚠ %s\n", msg) })
-
-	cfg := runConfig{
-		prompt:                o.prompt,
-		manifestDir:           manifestDir,
-		allowDirty:            o.allowDirty,
-		ignoreProjectSettings: o.ignoreProjectSettings,
-		outputStyle:           outputStyle,
-		// Already resolved above, so nothing downstream may re-rank it
-		// against a spec's declaration.
-		outputStyleSet:    true,
-		quiet:             o.quiet,
-		suppressSummary:   o.jsonMode,
-		idleTimeout:       o.idleTimeout,
-		maxDuration:       o.maxDuration,
-		natsURL:           o.natsURL,
-		natsCreds:         o.natsCreds,
-		eventsPrefix:      o.eventsPrefix,
-		uploadTranscripts: o.uploadTranscripts,
-		transcriptStore:   o.transcriptStore,
-		kind:              eventing.KindTask,
-		sessionKind:       o.sessionKind,
-	}
-	if o.jsonMode {
-		// stdout carries only the envelope; progress goes to stderr.
-		cfg.progressWriter = os.Stderr
-	}
+	// Already resolved above, so nothing downstream may re-rank it
+	// against a spec's declaration.
+	cfg.outputStyleSet = true
+	cfg.manifestDir = manifestDir
 
 	start := time.Now()
 	runErr := runWithInteractive(ctx, spec, o.projectRoot, cfg)
 	duration := time.Since(start)
+	if pfe, ok := errors.AsType[*pipeline.PreflightError](runErr); ok {
+		// Nothing spawned, so there is no run to report or assert.
+		return taskRun{}, &taskPreflightError{err: pfe}
+	}
 
 	subjects := gitCommitSubjectsSince(ctx, o.projectRoot, headBefore)
 

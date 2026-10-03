@@ -20,6 +20,16 @@
   when no other non-committer check fired. A repo with no HEAD reflog
   gives no evidence, so the check stays silent there, and a reflog that
   git shrank is not a finding.
+- **`ape script` tasks are asserted like `ape task`.** `apescript.RunTask`
+  skipped the commit-ownership assertion and the per-skill output style,
+  and a preflight failure inside it `os.Exit`ed the whole script. It now
+  dispatches through the same core as `ape task` and `ape change`. A
+  violated declaration comes back to the script as an error naming each
+  check, joined with the run's own error when there is one, with the
+  result still filled in. The runner no longer exits on a pipeline
+  preflight failure for any caller, so `apescript.RunPipeline` and
+  `ape change` get that error back too. `ape task` and `ape pipeline`
+  still exit 2 on it; `ape task` now prefixes the message with `Error:`.
 - **`ape doc analyze` estimates tokens at bytes/2.9** (class C: the
   distillator routes on it). It used bytes/4, which reads about a quarter
   low on APEX markdown; `ape memory check` and `ape context check` moved

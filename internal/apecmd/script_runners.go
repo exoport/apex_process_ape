@@ -3,6 +3,8 @@ package apecmd
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/apescript"
+	"github.com/exoport/apex_process_ape/internal/commitowners"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
@@ -82,18 +85,22 @@ func (r *scriptRunner) runCfg(manifestDir string, kind eventing.Kind) runConfig 
 	return cfg
 }
 
+// runTask dispatches through dispatchTaskWith, the core `ape task` and
+// `ape change` share, so a script-driven task gets the same
+// commit-ownership assertions and per-skill output style as one typed at
+// the terminal, and a preflight failure comes back as an error rather
+// than ending the script's process.
+//
+// A commit-ownership violation is returned as an error carrying every
+// finding, joined with the run's own error when there is one, and with
+// the result still filled in: the dispatch ran, and the script decides
+// what to do about a skill that broke its declaration.
 func (r *scriptRunner) runTask(ctx context.Context, o apescript.TaskOpts) (apescript.RunResult, error) {
 	root := r.resolveRoot(o.Cwd)
-	step := buildTaskStep(taskOptions{
-		skill: o.Skill, agent: o.Agent, model: o.Model, args: o.Args,
-		prompt: o.Prompt, promptFlagName: o.PromptFlag, skillNoCommit: o.NoCommit,
-	})
 	var taskCommit *pipeline.CommitDirective
 	if strings.TrimSpace(o.TaskCommit) != "" {
 		taskCommit = &pipeline.CommitDirective{Mode: pipeline.CommitModeExplicit, Message: o.TaskCommit}
 	}
-	spec := pipeline.NewSingleStepSpec(o.Skill, step, taskCommit)
-
 	manifestDir := runlog.TasksRoot(root)
 	cfg := r.runCfg(manifestDir, eventing.KindTask)
 	cfg.prompt = o.Prompt
@@ -101,14 +108,36 @@ func (r *scriptRunner) runTask(ctx context.Context, o apescript.TaskOpts) (apesc
 	cfg.idleTimeout = o.IdleTimeout
 	cfg.maxDuration = resolveMaxDuration(o.MaxDuration)
 
-	headBefore := gitHeadFull(ctx, root)
-	start := time.Now()
-	runErr := runWithInteractive(ctx, spec, root, cfg)
-	dur := time.Since(start)
+	run, err := dispatchTaskWith(ctx, taskOptions{
+		skill: o.Skill, agent: o.Agent, model: o.Model, args: o.Args,
+		prompt: o.Prompt, promptFlagName: o.PromptFlag, skillNoCommit: o.NoCommit,
+		taskCommit:  taskCommit,
+		projectRoot: root,
+		manifestDir: manifestDir,
+	}, cfg)
+	if err != nil {
+		return apescript.RunResult{}, err
+	}
 
 	runDir := pipeline.ResolveLatestRunDir(root, o.Skill, manifestDir)
-	res := r.manifestToResult(ctx, root, runDir, headBefore, dur)
-	return res, runErr
+	res := r.manifestToResult(ctx, root, runDir, run.HeadBefore,
+		time.Duration(run.Envelope.DurationSeconds*float64(time.Second)))
+	if !run.Contract.OK() {
+		// Beside the run's own failure, not instead of it: a skill that
+		// crashed and left a commit behind has two things to report.
+		return res, errors.Join(run.RunErr, commitContractError(run.Contract))
+	}
+	return res, run.RunErr
+}
+
+// commitContractError is a commit-ownership violation as an error: every
+// finding, in the `check: message` form `ape task` prints on stderr.
+func commitContractError(c commitowners.Result) error {
+	lines := make([]string, 0, len(c.Violations))
+	for _, v := range c.Violations {
+		lines = append(lines, v.Check+": "+v.Message)
+	}
+	return fmt.Errorf("%s broke its commit-ownership declaration: %s", c.Skill, strings.Join(lines, "; "))
 }
 
 func (r *scriptRunner) runPipeline(ctx context.Context, o apescript.PipelineOpts) (apescript.RunResult, error) {
