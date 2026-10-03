@@ -33,6 +33,20 @@ type State struct {
 	StashRef string
 	// StashDepth is the number of entries in the stash reflog.
 	StashDepth int
+	// HeadReflogDepth is the number of entries in HEAD's reflog, or -1
+	// when there is none to read: a repo with no commits, or one whose
+	// reflog is off (core.logAllRefUpdates=false, where git creates no
+	// new reflog).
+	//
+	// HEAD, the index and the stash can all end a dispatch where they
+	// started while the skill wrote to git in between: `git stash push`
+	// then `pop` from a clean index, or `git commit` then `git reset
+	// HEAD~1` (measured on git 2.53.0). Each of those writes HEAD's reflog
+	// ("reset: moving to HEAD", "commit: …"), and the reflog only grows.
+	HeadReflogDepth int
+	// HeadReflogRecent is the newest HEAD reflog subjects (%gs), newest
+	// first, at most headReflogRecentMax: the evidence a violation quotes.
+	HeadReflogRecent []string
 	// Known reports whether the reads succeeded.
 	Known bool
 }
@@ -53,7 +67,25 @@ func Capture(ctx context.Context, dir string) State {
 	st.Staged = staged(ctx, dir)
 	st.StashRef, _ = git(ctx, dir, "rev-parse", "--quiet", "--verify", "refs/stash")
 	st.StashDepth = stashDepth(ctx, dir)
+	st.HeadReflogDepth, st.HeadReflogRecent = headReflog(ctx, dir)
 	return st
+}
+
+// headReflogRecentMax bounds HeadReflogRecent, and so how many entries a
+// violation message quotes.
+const headReflogRecentMax = 10
+
+func headReflog(ctx context.Context, dir string) (depth int, recent []string) {
+	out, err := git(ctx, dir, "reflog", "show", "--format=%gs", "HEAD")
+	if err != nil || out == "" {
+		return -1, nil
+	}
+	lines := strings.Split(out, "\n")
+	recent = lines
+	if len(recent) > headReflogRecentMax {
+		recent = recent[:headReflogRecentMax]
+	}
+	return len(lines), recent
 }
 
 // emptyTree is git's well-known empty-tree object. Diffing the index
@@ -109,6 +141,13 @@ const (
 	// CheckMessageFormat — a declared committer's commit does not match
 	// any of its declared message formats.
 	CheckMessageFormat = "dispatch.message_format"
+	// CheckHeadRewritten — a non-committer wrote to git and put HEAD
+	// back: HEAD's reflog grew across the dispatch while HEAD, the index
+	// and the stash ended where they started. A commit then a reset, or a
+	// stash push then pop. Reported only when no other non-committer check
+	// fired, since a moved HEAD or a changed stash already accounts for
+	// the reflog entries.
+	CheckHeadRewritten = "dispatch.head_rewritten"
 	// CheckCommittedUnderNoCommit — the dispatch carried `--no-commit`
 	// and the skill committed anyway.
 	//
@@ -233,7 +272,7 @@ func (t *Table) Assert(skill string, before, after State, subjects []string, opt
 	return res
 }
 
-// assertNonCommitter is the three-part assertion. All three are checked
+// assertNonCommitter is the four-part assertion. All three are checked
 // and reported together rather than short-circuiting: a skill that both
 // staged content and stashed has two defects, and reporting one would
 // send the operator round the loop twice.
@@ -269,6 +308,32 @@ func (t *Table) assertNonCommitter(res *Result, before, after State) {
 			),
 		})
 	}
+	if len(res.Violations) > 0 || before.HeadReflogDepth < 0 || after.HeadReflogDepth <= before.HeadReflogDepth {
+		return
+	}
+	// The reflog can also SHRINK — `git gc` expiring old entries — which
+	// is not the skill writing, so only growth is a finding.
+	grew := after.HeadReflogDepth - before.HeadReflogDepth
+	quoted := after.HeadReflogRecent
+	if len(quoted) > grew {
+		quoted = quoted[:grew]
+	}
+	res.Violations = append(res.Violations, Violation{
+		Check: CheckHeadRewritten, Skill: res.Skill,
+		Message: fmt.Sprintf(
+			"HEAD ended where it started, but its reflog gained %d entr%s across the dispatch "+
+				"(newest first: %s) — this skill is absent from %s, and a commit then a reset, "+
+				"or a stash push then pop, is a git write even when HEAD is put back",
+			grew, plural(grew, "y", "ies"), strings.Join(quoted, "; "), FileName,
+		),
+	})
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 // assertCommitter is the predicate that catches a suppressed commit: at

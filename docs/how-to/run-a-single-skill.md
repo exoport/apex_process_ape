@@ -84,7 +84,7 @@ adds none — and is matched against a commit's **subject line only**.
 
 | Skill | Assertion across the dispatch |
 | ----- | ----------------------------- |
-| **absent** from the CSV | HEAD unchanged, no path staged that was not staged before, and the stash unchanged |
+| **absent** from the CSV | HEAD unchanged, no path staged that was not staged before, the stash unchanged, and HEAD's reflog no longer than it was |
 | **present** in the CSV | at least one commit, and every commit in `pre..HEAD` matching one of that skill's rows |
 | **no CSV in the project** | nothing is asserted; the verdict is `skipped` with a reason |
 | **present, dispatched with `--no-commit`** | producing no commit is `skipped` with a reason — the dispatch told it not to. Committing **anyway** is `dispatch.committed_under_no_commit`, reported instead of the message format even when the subject matches |
@@ -94,6 +94,16 @@ HEAD alone is not the check, and that is the point: `git add` and
 destroys the caller's working tree. The committer side is a **per-commit
 predicate over the range**, not "HEAD advanced by one" — a batch dispatch
 makes a dev and a review commit per story, and all of them must match.
+
+Even those three facts can end a dispatch where they started after a git
+write: `git stash push` then `pop`, or `git commit` then
+`git reset HEAD~1`. Both add entries to HEAD's reflog, so a non-committer
+whose HEAD reflog grew reports `dispatch.head_rewritten`, quoting the new
+entries. It is reported only when no other non-committer check fired,
+since a moved HEAD or a changed stash already explains them. A repo with
+no HEAD reflog (`core.logAllRefUpdates=false`) gives this check no
+evidence, so it stays silent while the other three still run. A reflog
+that shrank, because git expired old entries, is not a finding.
 
 Three things it deliberately does not do:
 

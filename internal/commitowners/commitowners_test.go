@@ -218,6 +218,138 @@ func TestAssert_NonCommitterStashed(t *testing.T) {
 	require.Equal(t, CheckStashChanged, res.Violations[0].Check)
 }
 
+// The two sequences that leave HEAD, the index and the stash exactly
+// where they were (measured on git 2.53.0). Both write HEAD's reflog,
+// and that is what catches them.
+func TestAssert_NonCommitterWroteAndPutHeadBack(t *testing.T) {
+	cases := map[string]func(repo string){
+		"stash push then pop": func(repo string) {
+			writeFile(t, repo, "seed.txt", "the caller's uncommitted work\n")
+			runGit(t, repo, "stash", "push", "-q")
+			runGit(t, repo, "stash", "pop", "-q")
+		},
+		"commit then reset": func(repo string) {
+			writeFile(t, repo, "new.txt", "skill output\n")
+			runGit(t, repo, "add", "new.txt")
+			runGit(t, repo, "commit", "-qm", "sneaky")
+			runGit(t, repo, "reset", "-q", "HEAD~1")
+		},
+	}
+	for name, dispatch := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := gitInit(t)
+			table, err := Load(writeCSV(t, declaration))
+			require.NoError(t, err)
+
+			before := Capture(context.Background(), repo)
+			dispatch(repo)
+			after := Capture(context.Background(), repo)
+
+			require.Equal(t, before.Head, after.Head, "the premise: HEAD did not move")
+			require.Equal(t, before.Staged, after.Staged, "the premise: nothing left staged")
+			require.Equal(t, before.StashRef, after.StashRef, "the premise: the stash is unchanged")
+			require.Equal(t, before.StashDepth, after.StashDepth)
+
+			res := table.Assert("apex-dev-story", before, after, nil, AssertOptions{})
+			require.False(t, res.OK())
+			require.Len(t, res.Violations, 1)
+			require.Equal(t, CheckHeadRewritten, res.Violations[0].Check)
+		})
+	}
+}
+
+// Restoring a file is not a git write to HEAD: `git checkout -- <path>`
+// (apex-generate-project-context restores project-context.md this way)
+// and `git restore` leave HEAD's reflog alone, so a non-owner using them
+// stays clean.
+func TestAssert_PathCheckoutIsNotAHeadRewrite(t *testing.T) {
+	repo := gitInit(t)
+	table, err := Load(writeCSV(t, declaration))
+	require.NoError(t, err)
+
+	before := Capture(context.Background(), repo)
+	writeFile(t, repo, "seed.txt", "a draft the skill discards\n")
+	runGit(t, repo, "checkout", "--", "seed.txt")
+	writeFile(t, repo, "seed.txt", "another draft\n")
+	runGit(t, repo, "restore", "seed.txt")
+	after := Capture(context.Background(), repo)
+
+	require.Equal(t, before.HeadReflogDepth, after.HeadReflogDepth)
+	require.True(t, table.Assert("apex-dev-story", before, after, nil, AssertOptions{}).OK())
+}
+
+// The quoted evidence is the dispatch's own entries, not older history.
+func TestAssert_HeadRewrittenQuotesOnlyTheDispatchEntries(t *testing.T) {
+	repo := gitInit(t)
+	table, err := Load(writeCSV(t, declaration))
+	require.NoError(t, err)
+
+	before := Capture(context.Background(), repo)
+	writeFile(t, repo, "new.txt", "x\n")
+	runGit(t, repo, "add", "new.txt")
+	runGit(t, repo, "commit", "-qm", "sneaky")
+	runGit(t, repo, "reset", "-q", "HEAD~1")
+	after := Capture(context.Background(), repo)
+
+	msg := table.Assert("apex-dev-story", before, after, nil, AssertOptions{}).Violations[0].Message
+	require.Contains(t, msg, "gained 2 entries")
+	require.Contains(t, msg, "commit: sneaky")
+	require.NotContains(t, msg, "commit (initial): seed", "the seed commit predates the dispatch")
+}
+
+// A stash left behind is reported as the stash, alone: the reflog entry
+// it wrote is the same defect, not a second one.
+func TestAssert_StashChangedIsNotAlsoReportedAsAHeadRewrite(t *testing.T) {
+	repo := gitInit(t)
+	table, err := Load(writeCSV(t, declaration))
+	require.NoError(t, err)
+
+	writeFile(t, repo, "seed.txt", "the caller's uncommitted work\n")
+	before := Capture(context.Background(), repo)
+	runGit(t, repo, "stash", "push", "-q")
+	after := Capture(context.Background(), repo)
+
+	res := table.Assert("apex-dev-story", before, after, nil, AssertOptions{})
+	require.Len(t, res.Violations, 1)
+	require.Equal(t, CheckStashChanged, res.Violations[0].Check)
+}
+
+// No reflog means no evidence either way, and that check stays silent
+// rather than inventing a verdict. The other three still run.
+func TestAssert_NoHeadReflogSkipsOnlyThatCheck(t *testing.T) {
+	repo := gitInit(t)
+	table, err := Load(writeCSV(t, declaration))
+	require.NoError(t, err)
+	runGit(t, repo, "config", "core.logAllRefUpdates", "false")
+	require.NoError(t, os.RemoveAll(filepath.Join(repo, ".git", "logs")))
+
+	before := Capture(context.Background(), repo)
+	require.Equal(t, -1, before.HeadReflogDepth)
+	writeFile(t, repo, "new.txt", "x\n")
+	runGit(t, repo, "add", "new.txt")
+	runGit(t, repo, "commit", "-qm", "sneaky")
+	runGit(t, repo, "reset", "-q", "HEAD~1")
+	after := Capture(context.Background(), repo)
+	require.Equal(t, -1, after.HeadReflogDepth, "git creates no new reflog when it is off")
+
+	require.True(t, table.Assert("apex-dev-story", before, after, nil, AssertOptions{}).OK())
+}
+
+// A reflog that shrank was expired by git, not written by the skill.
+func TestAssert_ShrunkReflogIsNotAFinding(t *testing.T) {
+	repo := gitInit(t)
+	table, err := Load(writeCSV(t, declaration))
+	require.NoError(t, err)
+	runGit(t, repo, "commit", "-q", "--allow-empty", "-m", "two")
+
+	before := Capture(context.Background(), repo)
+	runGit(t, repo, "reflog", "expire", "--expire=now", "--all")
+	after := Capture(context.Background(), repo)
+	require.Less(t, after.HeadReflogDepth, before.HeadReflogDepth)
+
+	require.True(t, table.Assert("apex-dev-story", before, after, nil, AssertOptions{}).OK())
+}
+
 // TestAssert_CommitterBatchMakesManyCommits is the predicate that is NOT
 // "HEAD advanced by one": a batch dispatch makes a dev and a review
 // commit per story, and all of them must match.

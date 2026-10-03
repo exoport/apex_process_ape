@@ -10,6 +10,16 @@
   exit code is still 3, because the REPL did not become ready. Applies to
   `ape task`, `ape pipeline` and `ape prompt`. With no ceiling, or a longer
   one, nothing changes.
+- **A non-committer that writes to git and puts HEAD back is caught**
+  (class C: a dispatch that passed can now exit 6). HEAD, the index and
+  the stash can all end a dispatch where they started after
+  `git stash push` then `pop`, or `git commit` then `git reset HEAD~1`
+  (measured on git 2.53.0). Both add entries to HEAD's reflog, so a
+  non-committer whose HEAD reflog grew now reports
+  `dispatch.head_rewritten`, quoting the new entries. It is reported only
+  when no other non-committer check fired. A repo with no HEAD reflog
+  gives no evidence, so the check stays silent there, and a reflog that
+  git shrank is not a finding.
 - **`ape doc analyze` estimates tokens at bytes/2.9** (class C: the
   distillator routes on it). It used bytes/4, which reads about a quarter
   low on APEX markdown; `ape memory check` and `ape context check` moved
