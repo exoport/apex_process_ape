@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.6.2 (2026-10-04)
 
 - **A claude that never came up is recorded as `repl_not_ready`, not
   `cancelled`** (class C: a manifest value the eval reads). The 30 s
