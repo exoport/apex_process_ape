@@ -74,6 +74,17 @@ func TestMemoryShow_MultipleInOrder(t *testing.T) {
 		"entries come back in the order asked for")
 }
 
+// Separate arguments and a mix of the two forms ask for the same entries,
+// in the same order, as one comma list. `show 3 1` exited 2 before v0.6.1.
+func TestMemoryShow_SpaceSeparatedOrdinals(t *testing.T) {
+	root := newTestProject(t, realProjectConfig)
+	writeTeamMemory(t, root, memoryFixture)
+
+	want := runCmd(t, newMemoryShowCmd(), "3,1,2")
+	require.Equal(t, want, runCmd(t, newMemoryShowCmd(), "3", "1", "2"))
+	require.Equal(t, want, runCmd(t, newMemoryShowCmd(), "3,1", "2"))
+}
+
 // TestMemoryCheck_ExitZeroByDefault is Decision 2's core contract: the
 // verdict is the state field, never the exit code, because the
 // framework's "non-zero means HALT" convention would otherwise abort the

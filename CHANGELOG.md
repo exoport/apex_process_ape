@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Unreleased
+
+- **`ape memory show` accepts space-separated ordinals** (class C: a
+  call that exited 2 now succeeds). `ape memory show 3 7 12` and the
+  mixed `ape memory show 3,7 12` now mean the same as
+  `ape memory show 3,7,12`: same entries, in the order asked for, with
+  the same exit codes. Only one comma list was accepted before, and the
+  eval's epic-retrospective probe on v0.6.0 saw a sub-agent write
+  `show 1 2 3 4` and get exit 2. The help and usage lines show both
+  forms. No new command or flag.
+
 ## v0.6.0 (2026-10-03)
 
 - **`--max-duration` also bounds the wait for claude's REPL** (class B:

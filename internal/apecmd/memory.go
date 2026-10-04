@@ -87,19 +87,26 @@ func emitMemoryIndexHuman(w io.Writer, idx *memory.Index) error {
 func newMemoryShowCmd() *cobra.Command {
 	var cwdFlag string
 	cmd := &cobra.Command{
-		Use:   "show <n>[,<n>,...]",
+		Use:   "show <n>[,<n>...] | <n> [<n>...]",
 		Short: "Print the verbatim body of the named entries",
 		Long: `Print entries by ordinal, in the order asked for, byte-for-byte as they
 appear in the file.
 
+Ordinals may be one comma list (3,7,12), separate arguments (3 7 12), or a
+mix (3,7 12): all three ask for the same entries in the same order.
+
 Exit codes:
   0  printed
-  2  an ordinal the file does not have`,
-		Args:    cobra.ExactArgs(1),
-		Example: "  ape memory show 3,7,12",
+  2  an ordinal the file does not have, or one that is not a number`,
+		// One comma list was the only accepted form, and a model told
+		// "ape memory show <n>" for several entries writes `show 1 2 3`,
+		// which exited 2 (seen in the eval's epic-retrospective probe on
+		// v0.6.0). Separate arguments now join the list.
+		Args:    cobra.MinimumNArgs(1),
+		Example: "  ape memory show 3,7,12\n  ape memory show 3 7 12",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := resolveProjectConfig(cwdFlag)
-			ordinals, err := memory.ParseOrdinals(args[0])
+			ordinals, err := memory.ParseOrdinals(strings.Join(args, ","))
 			if err != nil {
 				return usageErr(err)
 			}

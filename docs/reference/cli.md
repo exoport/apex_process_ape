@@ -3640,20 +3640,24 @@ Flags:
 Print the verbatim body of the named entries
 
 ```
-ape memory show <n>[,<n>,...] [flags]
+ape memory show <n>[,<n>...] | <n> [<n>...] [flags]
 ```
 
 Print entries by ordinal, in the order asked for, byte-for-byte as they
 appear in the file.
 
+Ordinals may be one comma list (3,7,12), separate arguments (3 7 12), or a
+mix (3,7 12): all three ask for the same entries in the same order.
+
 Exit codes:
   0  printed
-  2  an ordinal the file does not have
+  2  an ordinal the file does not have, or one that is not a number
 
 Examples:
 
 ```
   ape memory show 3,7,12
+  ape memory show 3 7 12
 ```
 
 Flags:
