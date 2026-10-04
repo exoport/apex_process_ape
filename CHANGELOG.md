@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.6.1 (2026-10-03)
 
 - **`ape memory show` accepts space-separated ordinals** (class C: a
   call that exited 2 now succeeds). `ape memory show 3 7 12` and the
