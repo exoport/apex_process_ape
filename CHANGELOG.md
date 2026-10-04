@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Unreleased
+
+- **A claude that never came up is recorded as `repl_not_ready`, not
+  `cancelled`** (class C: a manifest value the eval reads). The 30 s
+  readiness window expiring wraps a deadline error, and the manifest's
+  termination classifier read every deadline as a cancellation, so an
+  unknown modal or a stuck trust dialog looked like an operator's ^C.
+  `termination.kind: repl_not_ready` now says what happened, with the last
+  pane in `message`, and the manifest `status` is `failed` (it was
+  `cancelled` too, for the same reason). The exit code is still 3. A
+  `--max-duration` shorter than the window records `max_duration`, and a
+  run cancelled while claude is starting, as `ape run stop` does, still
+  records `cancelled` in both fields.
+
 ## v0.6.1 (2026-10-03)
 
 - **`ape memory show` accepts space-separated ordinals** (class C: a

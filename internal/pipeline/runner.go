@@ -488,6 +488,12 @@ func finalizeManifest(mw *manifestWriter, runErr error, _ Observer) {
 	}
 	status := StatusCompleted
 	switch {
+	// A REPL that never came up failed; its readiness window expiring
+	// wraps a deadline, which the next case would read as a cancellation.
+	// A run cancelled while claude was still starting stays cancelled,
+	// which is what a deliberate `ape run stop` must leave.
+	case notReady(runErr):
+		status = StatusFailed
 	case errors.Is(runErr, context.Canceled), errors.Is(runErr, context.DeadlineExceeded):
 		status = StatusCancelled
 	case runErr != nil:
@@ -495,6 +501,13 @@ func finalizeManifest(mw *manifestWriter, runErr error, _ Observer) {
 	}
 	mw.RecordTermination(newTerminationRecord(runErr))
 	_, _ = mw.Finalize(status, time.Now())
+}
+
+// notReady reports a run that ended because the claude REPL never came up,
+// as opposed to one the operator cancelled while it was coming up.
+func notReady(runErr error) bool {
+	_, ok := errors.AsType[*repl.NotReadyError](runErr)
+	return ok && !errors.Is(runErr, context.Canceled)
 }
 
 // newTerminationRecord projects a run error into the manifest's durable
@@ -546,6 +559,11 @@ func newTerminationRecord(runErr error) *TerminationRecord {
 			Message:     nse.Error(),
 			ElapsedSecs: nse.Waited.Seconds(),
 		}
+	// A readiness wait that ran out its own window wraps a deadline, which
+	// the cancelled case below would claim. A run the operator cancelled
+	// while claude was still coming up stays cancelled.
+	case notReady(runErr):
+		return &TerminationRecord{Kind: TerminationREPLNotReady, Message: runErr.Error()}
 	// Checked AFTER the typed errors: a cancelled context is how an idle
 	// termination reaches some callers, and reporting that as a plain
 	// cancellation would lose the reason it was cancelled.

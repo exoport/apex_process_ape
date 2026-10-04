@@ -121,6 +121,23 @@ func TestNewTerminationRecord_ReadinessCutByTheCeiling(t *testing.T) {
 	require.ErrorAs(t, err, &notReady, "the pane snapshot stays reachable for the saved PTY bytes")
 }
 
+// A REPL that never came up is its own kind. The readiness window
+// expiring wraps context.DeadlineExceeded, so it used to be recorded as
+// cancelled; an operator who cancels while claude is coming up still is.
+func TestNewTerminationRecord_REPLNotReady(t *testing.T) {
+	t.Parallel()
+
+	timedOut := fmt.Errorf("stage %q: claude REPL not ready in PTY: %w", "dev",
+		&repl.NotReadyError{Name: "s", Pane: "❯ Yes, I trust this folder", Err: context.DeadlineExceeded})
+	rec := newTerminationRecord(timedOut)
+	require.Equal(t, TerminationREPLNotReady, rec.Kind)
+	require.Contains(t, rec.Message, "trust this folder", "the last pane is the diagnosis")
+
+	stopped := fmt.Errorf("stage %q: claude REPL not ready in PTY: %w", "dev",
+		&repl.NotReadyError{Name: "s", Err: context.Canceled})
+	require.Equal(t, TerminationCancelled, newTerminationRecord(stopped).Kind)
+}
+
 func TestNewTerminationRecord_CleanRunCarriesNothing(t *testing.T) {
 	t.Parallel()
 	require.Nil(t, newTerminationRecord(nil),
@@ -173,4 +190,43 @@ func TestRenderReport_NoTerminationSectionOnACleanRun(t *testing.T) {
 
 	got := renderReport(&Manifest{SchemaVersion: 2, Status: StatusCompleted})
 	require.NotContains(t, got, "Why this run ended")
+}
+
+// The manifest's top-level status follows the same split: a REPL that
+// never came up is a failed run, not a cancelled one, while a run
+// cancelled during startup — what `ape run stop` does — stays cancelled.
+func TestFinalizeManifest_REPLNotReadyIsFailedNotCancelled(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		err  error
+		want RunStatus
+		kind string
+	}{
+		"window expired": {
+			err:  &repl.NotReadyError{Name: "s", Err: context.DeadlineExceeded},
+			want: StatusFailed, kind: TerminationREPLNotReady,
+		},
+		"cancelled during startup": {
+			err:  &repl.NotReadyError{Name: "s", Err: context.Canceled},
+			want: StatusCancelled, kind: TerminationCancelled,
+		},
+		"plain cancellation": {
+			err:  context.Canceled,
+			want: StatusCancelled, kind: TerminationCancelled,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			mw, err := newManifestWriter(t.TempDir(), "task-r", "/tmp/p", "/nonexistent.yaml", "test", time.Now())
+			require.NoError(t, err)
+			finalizeManifest(mw, fmt.Errorf("stage %q: %w", "dev", tc.err), nil)
+
+			m, err := LoadManifest(mw.runDir)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, m.Status)
+			require.NotNil(t, m.Termination)
+			require.Equal(t, tc.kind, m.Termination.Kind)
+		})
+	}
 }

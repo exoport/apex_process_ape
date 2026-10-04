@@ -175,6 +175,12 @@ const (
 	// repl.Deliver pressed. Before this kind existed the line sat in the
 	// input box and the run ended as an idle timeout.
 	TerminationNotSubmitted = "prompt_not_submitted"
+	// TerminationREPLNotReady — the claude REPL never came up inside the
+	// PTY within the readiness window: an unknown blocking modal, a trust
+	// walk that could not finish, or a claude that drew nothing. The
+	// message carries the last pane. The window expiring is a deadline,
+	// so before this kind existed such a run was recorded as cancelled.
+	TerminationREPLNotReady = "repl_not_ready"
 	// TerminationCancelled — the context was cancelled (operator ^C, or
 	// a parent deadline).
 	TerminationCancelled = "cancelled"

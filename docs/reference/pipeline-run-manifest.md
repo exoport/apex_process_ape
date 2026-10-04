@@ -163,7 +163,7 @@ completed run, where `status` already says everything. Additive under
 
 ```yaml
 termination:
-  kind: idle_timeout          # idle_timeout | max_duration | api_error | prompt_not_submitted | cancelled | error
+  kind: idle_timeout          # idle_timeout | max_duration | api_error | prompt_not_submitted | repl_not_ready | cancelled | error
   message: "interactive step idle for 1h0m0s without progress (window 1h0m0s): …"
   diagnostic: "last progress hook 1h0m0s ago (hook 1h0m0s ago; transcript none for 3h44m; pty n/a); child pid 4242 alive"
   last_source: hook           # idle only: hook | transcript | pty | none
@@ -179,6 +179,15 @@ submitted it: no `UserPromptSubmit` hook followed, through the Enter press and
 the two retries ape makes about 20 s apart. The `message` says whether the line
 was ever drawn in the input box and quotes the input row. Before this kind
 existed, such a step sat with its line in the input box until `idle_timeout`.
+
+`repl_not_ready` means claude never came up inside the PTY within the
+30-second readiness window: an unknown blocking modal, a trust dialog ape could
+not get past, or a claude that drew nothing. The `message` carries the last
+pane, and the raw PTY bytes are saved beside the run. The command exits 3.
+The run's `status` is `failed`. Before this kind existed, the expired window
+was recorded as `cancelled` in both fields. A
+`--max-duration` shorter than the window records `max_duration` instead, and a
+run you cancel while claude is still starting stays `cancelled`.
 
 **Read it together with the zeros.** `totals` counts *completed* steps, and a
 step cancelled mid-flight records none — so a terminated run shows
