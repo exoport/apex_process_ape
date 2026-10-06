@@ -7,13 +7,13 @@ For subsequent framework version bumps, use [`ape framework update`](framework-u
 ## Prerequisites
 
 - ape `v0.0.7` or later — `ape version` to confirm.
-- A local clone of `apex_process_framework`. Either pass `--repo PATH` on every invocation, or set `$APEX_FRAMEWORK_REPO` once:
+- A clone of `apex_process_framework`. Pass `--repo PATH`, set `$APEX_FRAMEWORK_REPO` once, or set neither and ape clones its own under the user cache directory (from `$APEX_FRAMEWORK_URL`, else the framework's GitHub repo; this machine needs git access to it):
 
   ```bash
   export APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
   ```
 
-- Since ape v0.4.0, `setup` installs the framework's newest **release** tag (or the one `--version` names), exported from that clone. ape never reads or moves the clone's checkout, so the clone may be dirty or on any branch. `--from-worktree` installs the working tree instead, and then the clone must be on `main` and clean (`--force` bypasses that). See [Which release is installed](framework-update.md#which-release-is-installed).
+- Since ape v0.4.0, `setup` installs the framework's newest **release** tag (or the one `--version` names), exported from that clone. Since v0.7.0 ape also checks that release out in the clone, so the clone is where to read the release's docs. A clone of yours only moves forward, and local changes in one that would move are refused unless `--force-clone`. See [The framework and governance clones are caches](../explanation/framework-and-governance-clones.md). `--from-worktree` installs the working tree instead and never moves it, and then the clone must be on `main` and clean (`--force` bypasses that). See [Which release is installed](framework-update.md#which-release-is-installed).
 - The install is committed (`chore(framework): install APEX framework vX.Y.Z`), so the project must be a git repository on a branch with no modified or staged tracked files. Pass `--no-commit` to leave it uncommitted. See [Commits](framework-update.md#commits).
 - The project's `_apex/framework.yaml` must **not** already exist — if it does, `setup` refuses to run. Use `update` instead, or pass `--force` to re-bootstrap (which resets `project_name` and `extensions`).
 

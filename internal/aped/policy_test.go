@@ -205,3 +205,14 @@ func TestPolicyTreatsTheDeliveredApeAsASystemMount(t *testing.T) {
 	require.ErrorIs(t, err, workspace.ErrPolicyDenied)
 	assert.Contains(t, err.Error(), "must be read-only")
 }
+
+func TestPolicyGovernanceMountMustBeReadOnly(t *testing.T) {
+	p := &Policy{Images: []string{"img"}, MountRoots: []string{t.TempDir()}}
+	gov := workspace.MountSpec{Source: "/srv/apex-governance/v0.1.2", Dest: sandbox.GovernanceDest, ReadOnly: true}
+	require.NoError(t, p.CheckCreate(ResolvedCreate{Image: "img", Mounts: []workspace.MountSpec{gov}}, 0))
+
+	gov.ReadOnly = false
+	err := p.CheckCreate(ResolvedCreate{Image: "img", Mounts: []workspace.MountSpec{gov}}, 0)
+	require.ErrorIs(t, err, workspace.ErrPolicyDenied)
+	assert.Contains(t, err.Error(), "must be read-only")
+}

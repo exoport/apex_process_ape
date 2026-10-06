@@ -8,13 +8,14 @@ Run it whenever the framework publishes a release. Since ape v0.4.0 it installs 
 
 - ape `v0.0.7` or later — `ape version` to confirm.
 - The project must have been set up first via `ape framework setup`. Update refuses to run if `_apex/framework.yaml` is absent.
-- A local clone of `apex_process_framework`. Either pass `--repo PATH` on every invocation, or set `$APEX_FRAMEWORK_REPO` once:
+- A clone of `apex_process_framework`. Pass `--repo PATH`, set `$APEX_FRAMEWORK_REPO` once, or set neither and ape keeps its own clone under the user cache directory (`~/.cache/ape/framework/…` on Linux), cloned from `$APEX_FRAMEWORK_URL` or the framework's GitHub repo the first time it is needed:
 
   ```bash
   export APEX_FRAMEWORK_REPO=/path/to/apex_process_framework
   ```
 
-- ape uses that clone only to read git objects: it fetches tags, exports the chosen tag's files, and never checks anything out. The clone may be dirty or on any branch. (`--from-worktree` installs the clone's working tree instead, and then the clone must be on `main` and clean; `--force` bypasses that.)
+- ape keeps the clone at the newest release (since v0.7.0): it fetches tags and brings the clone to the newest final `vX.Y.Z`, so what you read there is the release your projects run. A clone of yours only moves forward: a stale branch is fast-forwarded, and one ahead of the release (say, commits not tagged yet) is left where it is and reported. Local changes in a clone that would move are refused unless you pass `--force-clone`. ape's own clone is detached at the release and always overwritten. `--no-fetch` skips the fetch and uses the tags the clone has. (`--from-worktree` installs the clone's working tree instead and never moves it; the clone must be on `main` and clean, and `--force` bypasses that.)
+- The project's governance repo, if it has one, is kept at its newest release the same way: `governance_repository_path` in `_apex/config.local.yaml`, else `$APEX_GOVERNANCE_REPO`, else ape's own clone of `governance_repository_url`. See [The framework and governance clones are caches](../explanation/framework-and-governance-clones.md).
 - To commit, which is the default, the project must be a git repository on a branch with no modified or staged tracked files. Untracked files are fine and are never committed. Pass `--no-commit` to leave the result in the working tree instead.
 
 ## Quickstart

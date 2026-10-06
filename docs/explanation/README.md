@@ -11,6 +11,7 @@ Explanation docs answer "why" — design rationale, conceptual background, the s
 - [bridge-architecture.md](bridge-architecture.md) — design narrative for the MCP bridge, SSE broker, and orchestrator behind `--web`.
 - [why-project-local-pipelines.md](why-project-local-pipelines.md) — moving from embedded to on-disk specs in v0.0.6.
 - [why-setup-and-update-are-separate.md](why-setup-and-update-are-separate.md) — the v0.0.7 split of `framework update` into two commands.
+- [framework-and-governance-clones.md](framework-and-governance-clones.md) — why `framework setup/update` keep the framework and governance clones at their newest release (v0.7.0), and where ape keeps its own clones.
 - [why-streaming-events.md](why-streaming-events.md) — design rationale for live event streaming in the pipeline TUI.
 
 ## Planned explanation

@@ -251,9 +251,10 @@ silent:
                                 compared; INFO when none is declared. An
                                 rc of exactly the minimum meets it.
   framework.tag_moved           whether the installed release tag now
-                                names a different commit in
-                                $APEX_FRAMEWORK_REPO than the one
-                                installed. Tags are meant never to move.
+                                names a different commit in the
+                                framework clone ($APEX_FRAMEWORK_REPO,
+                                else ape's own) than the one installed.
+                                Tags are meant never to move.
   framework.command_surface     whether this binary provides every ape
                                 command the installed framework declares
                                 it requires (_apex/ape-commands.yaml). The

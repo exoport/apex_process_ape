@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -103,9 +104,10 @@ func TestResolve_EveryOverlayKey(t *testing.T) {
 		"governance_staleness":       res.GovernanceStaleness,
 		"functionality_folder":       res.FunctionalityFolder,
 		"evidence_folder":            res.EvidenceFolder,
+		"governance_repository_url":  res.GovernanceRepositoryURL,
 	}
-	require.Len(t, got, 18,
-		"seventeen canonical framework variables plus its one declared optional one")
+	require.Len(t, got, 19,
+		"seventeen canonical framework variables plus its two declared optional ones")
 	for _, key := range OverlayKeys() {
 		_, ok := got[key]
 		require.True(t, ok, "overlay key %q has no field in the resolved payload", key)
@@ -375,4 +377,61 @@ func TestMalformedError_Unwrap(t *testing.T) {
 	me := &MalformedError{Path: "/x/_apex/config.yaml", Err: sentinel}
 	require.ErrorIs(t, me, sentinel)
 	require.Contains(t, me.Error(), "/x/_apex/config.yaml")
+}
+
+// The emitted governance_repository_path is the EFFECTIVE one, with a
+// source saying where it came from: what a skill asking `ape config
+// resolve` must see when the project set no path.
+func TestResolve_GovernanceFallbacks(t *testing.T) {
+	cache := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache) // os.UserCacheDir on Linux
+	t.Setenv("LocalAppData", cache)   // and on Windows
+	t.Setenv("APEX_GOVERNANCE_REPO", "")
+	if runtime.GOOS == "darwin" {
+		t.Skip("os.UserCacheDir ignores the environment on macOS")
+	}
+	const url = "https://github.com/exoar/apex_process_governance.git"
+	root := t.TempDir()
+	writeProject(t, root, baseConfig+"governance_repository_url: "+url+"\n", "")
+
+	res, err := Resolve(root, fixedClock)
+	require.NoError(t, err)
+	require.Empty(t, res.GovernanceRepositoryPath, "ape's clone does not exist yet: no path to a directory that is not there")
+	require.Equal(t, "cache_missing", res.GovernanceRepositorySource,
+		"distinct from no governance repo, so a skill can say to run `ape framework update`")
+	c, err := res.GovernanceClone()
+	require.NoError(t, err)
+	require.True(t, c.Owned(), "but the clone to sync is still ape's cache")
+
+	clone := filepath.Join(cache, "ape", "governance", "github.com", "exoar", "apex_process_governance")
+	require.NoError(t, os.MkdirAll(filepath.Join(clone, ".git"), 0o755))
+	res, err = Resolve(root, fixedClock)
+	require.NoError(t, err)
+	require.Equal(t, clone, res.GovernanceRepositoryPath)
+	require.Equal(t, "cache", res.GovernanceRepositorySource)
+
+	t.Setenv("APEX_GOVERNANCE_REPO", "/srv/gov")
+	res, err = Resolve(root, fixedClock)
+	require.NoError(t, err)
+	require.Equal(t, "/srv/gov", res.GovernanceRepositoryPath)
+	require.Equal(t, "env", res.GovernanceRepositorySource)
+
+	writeProject(t, root, baseConfig, "governance_repository_path: /mine\n")
+	res, err = Resolve(root, fixedClock)
+	require.NoError(t, err)
+	require.Equal(t, "/mine", res.GovernanceRepositoryPath)
+	require.Equal(t, "config", res.GovernanceRepositorySource)
+}
+
+// A URL that cannot key a cache is not fatal to resolution — every
+// command resolves this config — but the command that clones sees it.
+func TestResolve_BadGovernanceURLIsNotFatal(t *testing.T) {
+	t.Setenv("APEX_GOVERNANCE_REPO", "")
+	root := t.TempDir()
+	writeProject(t, root, baseConfig+"governance_repository_url: not-a-url\n", "")
+	res, err := Resolve(root, fixedClock)
+	require.NoError(t, err)
+	require.Empty(t, res.GovernanceRepositorySource)
+	_, err = res.GovernanceClone()
+	require.Error(t, err)
 }

@@ -94,7 +94,11 @@ func readableSource(ctx context.Context, repo string, sel *framework.ReleaseSele
 // resolved tag, pinned, with no second fetch — so the install cannot land
 // on a different tag than the one that was checked. A nil selection (a
 // worktree install) is checked against the working tree.
-func prepareInstall(ctx context.Context, repo, projectRoot string, sel *framework.ReleaseSelector, commit bool) (
+//
+// newest says the release was chosen as the newest, not named by
+// --version: the clone sync has already pinned sel to a tag by then, so
+// sel alone no longer says so.
+func prepareInstall(ctx context.Context, repo, projectRoot string, sel *framework.ReleaseSelector, commit, newest bool) (
 	*framework.ReleaseSelector, func(), error,
 ) {
 	src, tag, cleanup, err := readableSource(ctx, repo, sel)
@@ -104,7 +108,7 @@ func prepareInstall(ctx context.Context, repo, projectRoot string, sel *framewor
 	// A default update never goes backwards: a candidate installed by
 	// name, newer than the newest final release, stays until --version
 	// says otherwise.
-	if sel != nil && sel.Version == "" {
+	if sel != nil && newest {
 		if meta, mErr := framework.ReadMetadata(projectRoot); mErr == nil &&
 			framework.InstalledIsAhead(meta.Framework.VersionTag, tag) {
 			cleanup()

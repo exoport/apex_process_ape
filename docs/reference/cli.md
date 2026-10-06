@@ -2838,9 +2838,10 @@ silent:
                                 compared; INFO when none is declared. An
                                 rc of exactly the minimum meets it.
   framework.tag_moved           whether the installed release tag now
-                                names a different commit in
-                                $APEX_FRAMEWORK_REPO than the one
-                                installed. Tags are meant never to move.
+                                names a different commit in the
+                                framework clone ($APEX_FRAMEWORK_REPO,
+                                else ape's own) than the one installed.
+                                Tags are meant never to move.
   framework.command_surface     whether this binary provides every ape
                                 command the installed framework declares
                                 it requires (_apex/ape-commands.yaml). The
@@ -3189,12 +3190,15 @@ Manage the apex_process_framework assets installed at the project root.
   ape framework status     Inspect the installed framework version, with
                            optional drift report against the framework repo.
 
-The framework repo path is resolved from --repo or $APEX_FRAMEWORK_REPO.
-Since ape v0.4.0 setup and update install a RELEASE — the highest vX.Y.Z tag,
-or the one --version names (the only way to a vX.Y.Z-rc.N candidate) —
-exported from that clone, whose checkout ape never reads or moves;
---from-worktree installs the working tree instead. See
-docs/explanation/framework-updates-from-releases.md.
+The framework repo is --repo, else $APEX_FRAMEWORK_REPO, else ape's own
+clone under the user cache directory (cloned from $APEX_FRAMEWORK_URL, else
+the framework's GitHub repo). Since ape v0.4.0 setup and update install a
+RELEASE — the highest vX.Y.Z tag, or the one --version names (the only way
+to a vX.Y.Z-rc.N candidate) — exported from that clone; since v0.7.0 they
+also check that release out in the clone, and keep the project's governance
+repo at its newest release the same way. --from-worktree installs the
+working tree instead. See docs/explanation/framework-updates-from-releases.md
+and docs/explanation/framework-and-governance-clones.md.
 The project root is resolved from --cwd or the current working directory.
 
 Subcommands:
@@ -3244,6 +3248,11 @@ Refuses to run when:
   - --from-worktree, and the framework repo is dirty, on a non-main
     branch, or its .claude/skills/apex-* subtree has uncommitted changes
     (pass --force to bypass)
+  - your framework or governance clone is behind the release and has
+    local changes (exit 3; pass --force-clone to overwrite them). A clone
+    of yours only ever moves forward: one whose branch is ahead of the
+    release, or diverged from it, is left where it is and reported. ape's
+    own clones under the user cache are always overwritten
 
 Headless contexts: when stdout is not a TTY (or --output-format is not
 human) and the project lacks _apex/config.yaml, you must supply
@@ -3259,10 +3268,11 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--extensions` | string | `—` | Bootstrap value for extensions, comma-separated (e.g. ext-adrs,ext-features). Empty string = none. |
 | `--force` | bool | `false` | Bypass safety checks (already installed, dirty framework, non-main branch, modified project skills) |
+| `--force-clone` | bool | `false` | Overwrite local changes in YOUR framework or governance clone when moving it to the release (ape's own clones are always overwritten; a clone ahead of the release is never moved) |
 | `--from-worktree` | bool | `false` | Install the framework repo's working tree instead of a release tag (the pre-v0.4.0 behaviour: main-only, clean, fast-forward) |
 | `--no-bootstrap` | bool | `false` | Skip _apex/config.yaml seeding entirely |
 | `--no-commit` | bool | `false` | Leave the result in the working tree instead of committing it |
-| `--no-fetch` | bool | `false` | Skip 'git fetch && merge --ff-only' on the framework repo before reading its state |
+| `--no-fetch` | bool | `false` | Skip fetching the framework and governance repos; use the releases they already hold |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--project-name` | string | `—` | Bootstrap value for project_name (skips the TUI prompt) |
 | `--version` | string | `—` | Install exactly this release tag, vX.Y.Z or vX.Y.Z-rc.N (default: the highest final vX.Y.Z; a candidate is only ever installed by name) |
@@ -3284,12 +3294,16 @@ ape framework status [flags]
 
 Read <project>/_apex/framework.yaml and report what was installed.
 
-When --repo or $APEX_FRAMEWORK_REPO is set, also compares the install with
-what that repo offers now (after a best-effort tag fetch, unless
+When there is a framework clone — --repo, $APEX_FRAMEWORK_REPO, or ape's
+own once cloned — also compares the install with what that repo offers now (after a best-effort tag fetch, unless
 --no-fetch): the NEWEST RELEASE tag, which is what 'update' would install,
 and whether the installed tag still names the installed commit (a moved
 tag is reported, never followed). --from-worktree compares against the
 repo's working-tree HEAD instead, as before ape v0.4.0.
+
+Then it says where the framework and governance clones are, and where
+each path came from (flag, env, config, or ape's cache), so you know where
+to read their docs.
 
 Flags:
 
@@ -3380,6 +3394,11 @@ Refuses to run when:
   - --from-worktree, and the framework repo is dirty, on a non-main
     branch, or its .claude/skills/apex-* subtree has uncommitted changes
     (pass --force to bypass)
+  - your framework or governance clone is behind the release and has
+    local changes (exit 3; pass --force-clone to overwrite them). A clone
+    of yours only ever moves forward: one whose branch is ahead of the
+    release, or diverged from it, is left where it is and reported. ape's
+    own clones under the user cache are always overwritten
 
 Exit codes: 2 usage; 3 the framework source (no release, missing tag,
 build layout); 4 the project tree; 7 not installed; 11 ape below
@@ -3396,10 +3415,11 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--dry-run` | bool | `false` | Show the framework diff and pending migrations, writing nothing |
 | `--force` | bool | `false` | Bypass safety checks (dirty framework, non-main branch, modified project skills) |
+| `--force-clone` | bool | `false` | Overwrite local changes in YOUR framework or governance clone when moving it to the release (ape's own clones are always overwritten; a clone ahead of the release is never moved) |
 | `--from-worktree` | bool | `false` | Install the framework repo's working tree instead of a release tag (the pre-v0.4.0 behaviour: main-only, clean, fast-forward) |
 | `--no-check` | bool | `false` | With --plan: do not run any migration's check: command; every row falls back to the ledger alone |
 | `--no-commit` | bool | `false` | Leave the result in the working tree instead of committing it |
-| `--no-fetch` | bool | `false` | Skip 'git fetch && merge --ff-only' on the framework repo before reading its state |
+| `--no-fetch` | bool | `false` | Skip fetching the framework and governance repos; use the releases they already hold |
 | `--no-migrate` | bool | `false` | Install framework files only; leave migrations pending |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--plan` | bool | `false` | Print the upgrade-migration plan, incoming entries included, and do nothing else |
@@ -4549,6 +4569,7 @@ Subcommands:
 - `forward` — Forward a local port to a port inside a workspace
 - `framework` — Manage the APEX framework refs a sandbox node can mount
 - `freeze` — Freeze a workspace (cgroup-freeze; guest RAM stays resident)
+- `governance` — Manage the governance repo refs a sandbox node can mount
 - `inspect` — Show a workspace's live state
 - `ls` — List provisioned workspaces
 - `setup` — Materialize the project's declared toolchain inside a workspace
@@ -5044,7 +5065,7 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--root` | string | `—` | Framework root to list (default: $APE_FRAMEWORK_ROOT or /srv/apex-framework) |
+| `--root` | string | `—` | Root to list (default: $APE_FRAMEWORK_ROOT or /srv/apex-framework) |
 
 Global flags:
 
@@ -5075,8 +5096,8 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--force` | bool | `false` | Replace an already-materialized ref |
-| `--repo` | string | `—` | Local apex_process_framework checkout (default: $APEX_FRAMEWORK_REPO) |
-| `--root` | string | `—` | Framework root the node mounts from (default: $APE_FRAMEWORK_ROOT or /srv/apex-framework) |
+| `--repo` | string | `—` | Local apex_process_framework checkout (default: $APEX_FRAMEWORK_REPO, else ape's own clone) |
+| `--root` | string | `—` | Root the node mounts framework refs from (default: $APE_FRAMEWORK_ROOT or /srv/apex-framework) |
 
 Global flags:
 
@@ -5097,6 +5118,96 @@ ape sandbox freeze <name>
 Freeze cgroup-freezes the workspace's guest processes: the guest stops
 consuming CPU but its RAM stays fully resident, so unfreeze resumes instantly.
 This is a freeze, not a VM suspend (see 'ape sandbox suspend').
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox governance
+
+Manage the governance repo refs a sandbox node can mount
+
+```
+ape sandbox governance
+```
+
+Manage the materialized governance repo refs on this host — the same
+delivery as 'ape sandbox framework', for the canonical governance repo the
+reconciliation skills read.
+
+A workspace gets it as a READ-ONLY mount at /opt/apex-governance, with
+$APEX_GOVERNANCE_REPO pointing there (set by aped, only when it mounts one).
+
+  ape sandbox governance materialize v0.1.2
+  ape sandbox governance ls
+  ape sandbox up dev --governance-ref v0.1.2
+
+aped never fetches it: if a requested ref is not materialized, 'ape sandbox
+up' fails with the command to run.
+
+Subcommands:
+
+- `ls` — List the governance refs materialized on this host
+- `materialize` — Materialize a governance ref into the node's governance root
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox governance ls
+
+List the governance refs materialized on this host
+
+```
+ape sandbox governance ls [flags]
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--root` | string | `—` | Root to list (default: $APE_GOVERNANCE_ROOT or /srv/apex-governance) |
+
+Global flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--nats-creds` | string | `—` | operator .creds for aped (env APE_NATS_CREDS) |
+| `--nats-url` | string | `—` | aped management NATS URL (env APE_NATS_URL) |
+| `--node` | string | `—` | aped node targeted by ape.vmm.<node>.> (env APE_APED_NODE; default: hostname) |
+
+## ape sandbox governance materialize
+
+Materialize a governance ref into the node's governance root
+
+```
+ape sandbox governance materialize <ref> [flags]
+```
+
+Materialize one governance ref (tag, branch, or commit) as a self-contained,
+mountable checkout under the governance root.
+
+The ref must ALREADY be present in the local governance repo — this command does
+not fetch, so a stale checkout fails loudly instead of silently materializing an
+older commit. Fetch first with your own credentials:
+  git -C <repo> fetch --tags
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--force` | bool | `false` | Replace an already-materialized ref |
+| `--repo` | string | `—` | Local governance checkout (default: $APEX_GOVERNANCE_REPO, else the project's governance_repository_path or ape's own clone) |
+| `--root` | string | `—` | Root the node mounts governance refs from (default: $APE_GOVERNANCE_ROOT or /srv/apex-governance) |
 
 Global flags:
 
@@ -5325,6 +5436,7 @@ Flags:
 | `--cwd` | string | `—` | Project root to mount for host-fs (default: current working directory) |
 | `--egress-domain` | stringArray | `[]` | Request an egress domain (repeatable; still gated by the node's policy) |
 | `--framework-ref` | string | `—` | APEX framework ref to mount read-only (must be materialized on the node) |
+| `--governance-ref` | string | `—` | Governance repo ref to mount read-only at /opt/apex-governance (must be materialized on the node) |
 | `--idle-stop` | string | `—` | Stop this workspace after it has been idle this long (e.g. 4h), or "off" to exempt it (default: the node's; overrides .apesandbox.yaml lifecycle.idle_stop) |
 | `--image` | string | `—` | Image ref override (default: aped's pinned image) |
 | `--mount` | string | `—` | Mount mode: host-fs \| volume \| ephemeral (default: host-fs) |

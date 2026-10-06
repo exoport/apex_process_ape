@@ -54,6 +54,10 @@ type FrontConfig struct {
 	FrameworkRoot string
 	// FrameworkRef is the default framework ref mounted when a request names none.
 	FrameworkRef string
+	// GovernanceRoot/GovernanceRef are the same for the governance repo, mounted
+	// read-only at /opt/apex-governance. Empty root → no governance mount.
+	GovernanceRoot string
+	GovernanceRef  string
 	// CacheRoot is the host directory holding durable tool caches (PLAN-22 D4).
 	// Empty → cache requests are ignored and toolchain state stays in the rootfs.
 	CacheRoot string
@@ -160,16 +164,18 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 	// The vmm service dispatches to the executor over the priv socket; Create is
 	// resolved here (de-privileged) before it crosses the boundary.
 	resolver := NewResolver(ResolverConfig{
-		StateDir:      cfg.StateDir,
-		HostHome:      cfg.HostHome,
-		NatsURL:       cfg.GuestNatsURL,
-		CredsExpiry:   cfg.CredsExpiry,
-		Telemetry:     srv.Telemetry(),
-		Egress:        egressPlannerOrNil(egress),
-		FrameworkRoot: cfg.FrameworkRoot,
-		FrameworkRef:  cfg.FrameworkRef,
-		CacheRoot:     cfg.CacheRoot,
-		ApeBin:        apeBin,
+		StateDir:       cfg.StateDir,
+		HostHome:       cfg.HostHome,
+		NatsURL:        cfg.GuestNatsURL,
+		CredsExpiry:    cfg.CredsExpiry,
+		Telemetry:      srv.Telemetry(),
+		Egress:         egressPlannerOrNil(egress),
+		FrameworkRoot:  cfg.FrameworkRoot,
+		FrameworkRef:   cfg.FrameworkRef,
+		GovernanceRoot: cfg.GovernanceRoot,
+		GovernanceRef:  cfg.GovernanceRef,
+		CacheRoot:      cfg.CacheRoot,
+		ApeBin:         apeBin,
 		// Re-verified per create, not just at startup: the file can be replaced under a
 		// running daemon, which is exactly what a redeploy does. A create landing in that
 		// window would otherwise deliver a binary nothing has checked.
@@ -196,6 +202,10 @@ func RunFront(ctx context.Context, cfg FrontConfig) error {
 	if cfg.FrameworkRoot != "" {
 		fmt.Fprintf(stderr, "  framework: %s (default ref %q) mounted read-only at %s\n",
 			cfg.FrameworkRoot, cfg.FrameworkRef, sandbox.FrameworkDest)
+	}
+	if cfg.GovernanceRoot != "" {
+		fmt.Fprintf(stderr, "  governance: %s (default ref %q) mounted read-only at %s\n",
+			cfg.GovernanceRoot, cfg.GovernanceRef, sandbox.GovernanceDest)
 	}
 	// The front holds the NATS conn, so it forwards the executor's audit records
 	// on ape.audit.<node>.> (the network-less executor returns them in-band —

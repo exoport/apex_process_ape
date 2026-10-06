@@ -26,8 +26,13 @@ type Metadata struct {
 	ConfigSchemaVersion string    `json:"configSchemaVersion" yaml:"config_schema_version"`
 	InstalledAt         time.Time `json:"installedAt"         yaml:"installed_at"`
 	Framework           RepoInfo  `json:"framework"           yaml:"framework"`
-	Ape                 ApeInfo   `json:"ape"                 yaml:"ape"`
-	Sources             Sources   `json:"sources"             yaml:"sources"`
+	// Governance is the governance clone this install synced (ape
+	// v0.7.0), absent when the project has none or it was not synced. A
+	// record, not a pin: skills read the clone, which any project's update
+	// on the machine moves.
+	Governance *GovernanceInfo `json:"governance,omitempty" yaml:"governance,omitempty"`
+	Ape        ApeInfo         `json:"ape"                  yaml:"ape"`
+	Sources    Sources         `json:"sources"              yaml:"sources"`
 	// Migrations is the applied-id ledger for `_apex/migrations/`: an
 	// ORDERED list of {id, version, applied_at}, because "which
 	// migrations ran, in what order" is what an operator asks when one
@@ -64,6 +69,15 @@ type RepoInfo struct {
 	VersionTag string `json:"versionTag"       yaml:"version_tag"` // empty when HEAD has no exact tag
 	GitHash    string `json:"gitHash"          yaml:"git_hash"`
 	GitBranch  string `json:"gitBranch"        yaml:"git_branch"`
+}
+
+// GovernanceInfo records the governance clone an install synced.
+//
+//nolint:tagliatelle // framework.yaml uses snake_case for human readability
+type GovernanceInfo struct {
+	RepoOrigin string `json:"repoOrigin"           yaml:"repo_origin"`
+	VersionTag string `json:"versionTag,omitempty" yaml:"version_tag,omitempty"` // empty when the clone has no release
+	GitHash    string `json:"gitHash,omitempty"    yaml:"git_hash,omitempty"`
 }
 
 // Framework install sources recorded in RepoInfo.Source.

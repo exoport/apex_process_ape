@@ -1,5 +1,46 @@
 # CHANGELOG
 
+## Unreleased
+
+- **The framework and governance clones are kept at their newest release**
+  (class C: `ape framework setup/update`, `ape config resolve` and
+  `_apex/framework.yaml` change). `setup` and `update` now fetch each clone
+  and bring it to its newest final `vX.Y.Z`, under a lock, so what a person
+  reads in the clone is the release their projects run, and the governance
+  skills, which read their clone live, read a release. The release is
+  resolved first and the checkouts move last, after every check, so a
+  refused install, or an update that keeps a newer rc, moves nothing.
+  ape's own clones are detached at the release. **A clone of yours only
+  moves forward:** fast-forwarded on its branch, or detached when it
+  already was; one ahead of the release or diverged from it (the ship
+  repo's promotion commits) is left in place and reported. Local changes in
+  a clone that would move refuse with exit 3 (`framework_clone_dirty` /
+  `governance_clone_dirty`) unless the new `--force-clone`; `--force` keeps
+  its old meaning. `--no-fetch` covers both clones. The framework is still
+  installed from the tag's export, and `--from-worktree`, `--plan` and
+  `--dry-run` move nothing. A governance path that is a directory but not a
+  git clone is read as-is, never cloned over.
+- **ape keeps its own clones when no path is set.** With no `--repo` and no
+  `$APEX_FRAMEWORK_REPO`, the framework is cloned into
+  `<user cache>/ape/framework/<host>/<path>` from `$APEX_FRAMEWORK_URL`, else
+  `https://github.com/exoar/apex_process_framework.git`. Governance resolves
+  `governance_repository_path`, then the new `$APEX_GOVERNANCE_REPO`, then
+  ape's clone of the new optional `governance_repository_url` config key.
+  ape's own clones are overwritten freely; nobody edits them.
+- **`ape config resolve` emits the effective `governance_repository_path`**,
+  and a new `governance_repository_source` (`config` / `env` / `cache` /
+  `cache_missing` / empty) says where it came from. The reconciliation skills see the
+  fallbacks once the framework moves them to `config resolve`.
+- **`_apex/framework.yaml` records the governance release synced**, in a new
+  `governance:` block. `ape framework status` prints where each clone is and
+  where its path came from.
+- **A read-only clone is pinned:** never fetched or moved, and the framework
+  release checked out there is the one installed. That is the sandbox case.
+- **`ape sandbox governance materialize|ls`, `aped front
+  --governance-root/--governance-ref` and `ape sandbox up --governance-ref`**
+  deliver the governance repo into a workspace read-only at
+  `/opt/apex-governance`, with `APEX_GOVERNANCE_REPO` set only when mounted.
+
 ## v0.6.2 (2026-10-04)
 
 - **A claude that never came up is recorded as `repl_not_ready`, not

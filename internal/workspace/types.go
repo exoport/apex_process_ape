@@ -51,6 +51,9 @@ type CreateRequest struct {
 	// under its own framework root and errors if absent — it never fetches, and the
 	// request can never point the mount somewhere else.
 	FrameworkRef string `json:"framework_ref,omitempty"`
+	// GovernanceRef is FrameworkRef for the governance repo, mounted read-only
+	// at /opt/apex-governance (ape v0.7.0).
+	GovernanceRef string `json:"governance_ref,omitempty"`
 	// IdleStop is this workspace's idle-stop preference (PLAN-24 D7): a Go
 	// duration, or "off" to exempt it from the node's idle reaper. Empty takes the
 	// node's default.

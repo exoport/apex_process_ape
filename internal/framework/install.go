@@ -80,6 +80,9 @@ type UpdateOptions struct {
 	// fast-forward guards, which protect a working-tree install, do not
 	// apply. nil keeps the working-tree install (`--from-worktree`).
 	Release *ReleaseSelector
+	// Governance is the governance clone synced before this install,
+	// recorded in framework.yaml; nil records none.
+	Governance *GovernanceInfo
 	// NoMigrate leaves pending migrations alone — including the one-time
 	// relocation of run artifacts into _output/ape. Set by `ape framework
 	// update --no-migrate`; setup never sets it.
@@ -409,19 +412,7 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 		Extensions:  bootstrap.Extensions,
 	}
 	cfgLocalSource := ConfigLocalExampleSource{Seeded: configLocalSeeded}
-	// The applied-migration ledger is carried forward on EVERY path,
-	// bootstrap included: this file is regenerated wholesale, and a setup
-	// re-run over an existing project that dropped the ledger would make
-	// every applied migration look pending again.
-	var priorMigrations []AppliedMigration
-	prior, prErr := ReadMetadata(opts.ProjectRoot)
-	if prErr == nil {
-		priorMigrations = prior.Migrations
-		if !doBootstrap {
-			cfgSource = prior.Sources.Config
-			cfgLocalSource = prior.Sources.ConfigLocalExample
-		}
-	}
+	prior, priorMigrations := carryForward(opts.ProjectRoot, doBootstrap, &cfgSource, &cfgLocalSource)
 	meta := Metadata{
 		ConfigSchemaVersion: MetadataSchemaVersion,
 		InstalledAt:         now(),
@@ -432,7 +423,8 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			GitHash:    info.headSHA,
 			GitBranch:  info.branch,
 		},
-		Ape: ApeInfo{Version: opts.ApeVersion},
+		Governance: opts.Governance,
+		Ape:        ApeInfo{Version: opts.ApeVersion},
 		Sources: Sources{
 			Skills:             SkillsSource{Count: len(installedSkills), Paths: installedSkills},
 			Pipelines:          PipelinesSource{Count: len(installedPipelines), Paths: installedPipelines},
@@ -441,9 +433,6 @@ func installCore(ctx context.Context, opts *UpdateOptions, doBootstrap bool) (*U
 			OperatingRules:     OperatingRulesSource{Managed: opRules.Managed},
 		},
 		Migrations: priorMigrations,
-	}
-	if prErr != nil {
-		prior = nil
 	}
 	if err := writeInstallMetadata(opts.ProjectRoot, prior, &meta); err != nil {
 		return nil, err
@@ -1230,6 +1219,26 @@ func wipeStaleSkills(skillsDir string) ([]string, error) {
 // nothing else about the install changed: a no-op update must leave the
 // tree clean, and a fresh installed_at was the one line it still
 // rewrote. prior is nil when there was no readable record.
+// carryForward reads the previous record and returns it (nil when there is
+// none) with the applied-migration ledger. The ledger is carried forward on
+// EVERY path, bootstrap included: this file is regenerated wholesale, and a
+// setup re-run over an existing project that dropped the ledger would make
+// every applied migration look pending again. An update (no bootstrap) also
+// keeps the recorded config sources.
+func carryForward(projectRoot string, doBootstrap bool, cfg *ConfigSource, cfgLocal *ConfigLocalExampleSource) (
+	*Metadata, []AppliedMigration,
+) {
+	prior, err := ReadMetadata(projectRoot)
+	if err != nil {
+		return nil, nil
+	}
+	if !doBootstrap {
+		*cfg = prior.Sources.Config
+		*cfgLocal = prior.Sources.ConfigLocalExample
+	}
+	return prior, prior.Migrations
+}
+
 func writeInstallMetadata(projectRoot string, prior, meta *Metadata) error {
 	if prior != nil && sameInstall(prior, meta) {
 		meta.InstalledAt = prior.InstalledAt

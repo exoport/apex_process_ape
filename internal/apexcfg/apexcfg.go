@@ -19,6 +19,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/repocache"
 	"gopkg.in/yaml.v3"
 )
 
@@ -94,6 +95,13 @@ type Config struct {
 	// before release: the framework withdrew the lean scaffold profile it
 	// was a ceiling over, so the key had nothing left to bound.
 	EvidenceFolder string `json:"evidence_folder,omitempty" yaml:"evidence_folder,omitempty"`
+
+	// GovernanceRepositoryURL is the declared OPTIONAL variable naming
+	// where the governance repo is cloned from when no path is set (ape
+	// v0.7.0; docs/explanation/framework-and-governance-clones.md). A
+	// project-wide value, so it belongs in the committed config.yaml,
+	// while governance_repository_path stays per-machine.
+	GovernanceRepositoryURL string `json:"governance_repository_url,omitempty" yaml:"governance_repository_url,omitempty"`
 }
 
 // Ext carries the four booleans the framework derives from `extensions`.
@@ -146,6 +154,21 @@ type Resolved struct {
 	Paths        Paths  `json:"paths"                   yaml:"paths"`
 	Date         string `json:"date"                    yaml:"date"`
 	Timestamp    string `json:"timestamp"               yaml:"timestamp"`
+
+	// GovernanceRepositorySource says where the emitted, EFFECTIVE
+	// governance_repository_path came from: "config" (the project set
+	// it), "env" ($APEX_GOVERNANCE_REPO), "cache" (ape's own clone of
+	// governance_repository_url), or "" (none). A skill reading the path
+	// from here sees the fallbacks; one reading config.yaml does not.
+	// "cache_missing": the URL is set and ape's clone does not exist yet
+	// (path empty; run `ape framework update`).
+	GovernanceRepositorySource string `json:"governance_repository_source" yaml:"governance_repository_source"`
+
+	// governanceConfigured is governance_repository_path as the config
+	// files wrote it, before the fallbacks; governanceErr is a URL that
+	// could not key a cache.
+	governanceConfigured string
+	governanceErr        error
 
 	// stampUsed persists Date/Timestamp as the project's monotonic floor.
 	// Set by whoever supplied a floor-backed clock; nil otherwise.
@@ -263,12 +286,48 @@ func ResolveAt(root string, now Clock) (*Resolved, error) {
 		res.LocalOverlayApplied = true
 		res.OverlaidKeys = overlaid
 	}
+	res.resolveGovernance()
 	res.Ext = deriveExt(res.Extensions)
 	res.Paths = derivePaths(abs, &res.Config)
 	stamp := now()
 	res.Date = stamp.Format(DateLayout)
 	res.Timestamp = stamp.Format(TimestampLayout)
 	return res, nil
+}
+
+// resolveGovernance replaces governance_repository_path with the effective
+// one. A cache clone counts only once it exists: a path to a directory that
+// is not there would send a skill to read nothing.
+//
+// A URL that cannot key a cache is kept as an error for the commands that
+// clone (and doctor), not raised here: every command resolves this config,
+// and one bad optional value must not stop all of them.
+func (r *Resolved) resolveGovernance() {
+	r.governanceConfigured = r.GovernanceRepositoryPath
+	c, err := repocache.ResolveGovernance(r.GovernanceRepositoryPath, r.GovernanceRepositoryURL)
+	if err != nil {
+		r.governanceErr = err
+		return
+	}
+	if c.Owned() && !repocache.Exists(c.Path) {
+		// The URL is set but `ape framework update` has not cloned it
+		// yet: distinct from "no governance repo", so a skill can say
+		// what to run.
+		r.GovernanceRepositoryPath = ""
+		r.GovernanceRepositorySource = SourceCacheMissing
+		return
+	}
+	r.GovernanceRepositoryPath = c.Path
+	r.GovernanceRepositorySource = string(c.Source)
+}
+
+// GovernanceClone resolves the governance clone from the configured values
+// — the one the framework update syncs, which may not exist yet.
+func (r *Resolved) GovernanceClone() (repocache.Clone, error) {
+	if r.governanceErr != nil {
+		return repocache.Clone{}, r.governanceErr
+	}
+	return repocache.ResolveGovernance(r.governanceConfigured, r.GovernanceRepositoryURL)
 }
 
 func readBase(path string) (*Config, error) {
@@ -352,8 +411,16 @@ func OverlayKeys() []string {
 		"governance_staleness",
 		"functionality_folder",
 		"evidence_folder",
+		keyGovernanceRepositoryURL,
 	}
 }
+
+// SourceCacheMissing is governance_repository_source when the URL is set
+// and ape's clone of it does not exist yet.
+const SourceCacheMissing = "cache_missing"
+
+// keyGovernanceRepositoryURL is named once: it appears in every key list.
+const keyGovernanceRepositoryURL = "governance_repository_url"
 
 // OptionalKeys are the OverlayKeys a config template need not declare.
 //
@@ -369,7 +436,7 @@ func OverlayKeys() []string {
 // still a failure in both directions, but an optional key absent from a
 // template is not.
 func OptionalKeys() []string {
-	return []string{"evidence_folder"}
+	return []string{"evidence_folder", keyGovernanceRepositoryURL}
 }
 
 // IsOptionalKey reports whether key is one of OptionalKeys.
@@ -401,6 +468,7 @@ func decodeInto(cfg *Config, key string, node yaml.Node) error {
 		"governance_staleness":       &cfg.GovernanceStaleness,
 		"functionality_folder":       &cfg.FunctionalityFolder,
 		"evidence_folder":            &cfg.EvidenceFolder,
+		keyGovernanceRepositoryURL:   &cfg.GovernanceRepositoryURL,
 	}
 	target, ok := targets[key]
 	if !ok {

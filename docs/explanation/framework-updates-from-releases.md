@@ -18,9 +18,11 @@ for it by name.
 ## Choosing what to install
 
 The framework clone (`--repo`, or `$APEX_FRAMEWORK_REPO`) keeps its meaning,
-but ape uses it only as a **store of git objects**. ape never checks anything
-out in it, never merges, and never looks at its working tree or branch. The
-clone can be dirty, on any branch, or be the checkout you are developing in.
+and the install uses it only as a **store of git objects**: it never reads the
+working tree or branch. (Until v0.7.0 ape also never checked anything out in
+it. Since v0.7.0 it brings the clone forward to the release, so the clone is
+where a person reads the release. See
+[The framework and governance clones are caches](framework-and-governance-clones.md).)
 
 1. **Fetch tags:** `git fetch --tags --force origin`, unless `--no-fetch`.
    If the fetch fails (offline, or no `origin`), ape warns, names the newest

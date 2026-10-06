@@ -3,11 +3,12 @@ package framework
 // Installing a framework RELEASE rather than a clone's working tree (ape
 // v0.4.0; docs/explanation/framework-updates-from-releases.md).
 //
-// The clone named by --repo is used as a store of git objects: tags are
-// fetched into it, the chosen tag's tree is exported through a throwaway index, and
-// nothing in the clone's checkout, branch or working tree is read or moved.
-// That is what lets "teams only see evaluated versions" hold by construction:
-// a commit pushed to the ship repo's main reaches nobody until it is tagged.
+// The install reads the clone as a store of git objects: the chosen tag's
+// tree is exported through a throwaway index, and the clone's checkout is
+// never read. That is what lets "teams only see evaluated versions" hold by
+// construction: a commit pushed to the ship repo's main reaches nobody until
+// it is tagged. Keeping the checkout itself at the release is
+// internal/repocache's job (ape v0.7.0).
 
 import (
 	"bytes"
@@ -19,12 +20,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/exoport/apex_process_ape/internal/repocache"
 	"golang.org/x/mod/semver"
-)
-
-var (
-	finalTag     = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
-	candidateTag = regexp.MustCompile(`^v\d+\.\d+\.\d+-rc\.\d+$`)
 )
 
 // ReleaseSelector asks for a release instead of the clone's working tree.
@@ -49,7 +46,7 @@ type Release struct {
 
 // ValidReleaseRef reports whether v is a tag shape --version accepts.
 func ValidReleaseRef(v string) bool {
-	return finalTag.MatchString(v) || candidateTag.MatchString(v)
+	return repocache.IsReleaseTag(v)
 }
 
 // ResolveRelease picks the tag to install from repo.
@@ -97,17 +94,7 @@ func fetchHint(fetched bool) string {
 // NewestRelease returns the highest final vX.Y.Z tag in repo by semver, or
 // "" when there is none. Candidates and any other suffix never count.
 func NewestRelease(ctx context.Context, repo string) (string, error) {
-	out, err := runGit(ctx, repo, "tag", "--list", "v*")
-	if err != nil {
-		return "", err
-	}
-	best := ""
-	for t := range strings.FieldsSeq(out) {
-		if finalTag.MatchString(t) && (best == "" || semver.Compare(t, best) > 0) {
-			best = t
-		}
-	}
-	return best, nil
+	return repocache.NewestRelease(ctx, repo)
 }
 
 // TagCommit returns the commit a tag names in repo.

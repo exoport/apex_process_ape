@@ -65,6 +65,8 @@ var profileEnvAllowed = map[string]bool{
 	"no_proxy":    true,
 	// Where the read-only framework is mounted.
 	"APEX_FRAMEWORK_REPO": true,
+	// Where the read-only governance repo is mounted, when there is one.
+	"APEX_GOVERNANCE_REPO": true,
 }
 
 // ProfileEnvLines renders the shell-sourceable subset of a workspace's environment.

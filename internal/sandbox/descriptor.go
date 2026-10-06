@@ -39,6 +39,9 @@ const (
 	WorkspaceRoot = "/workspace"
 	// FrameworkDest is where the pinned APEX framework is mounted read-only.
 	FrameworkDest = "/opt/apex-framework"
+	// GovernanceDest is where the pinned governance repo is mounted read-only
+	// (ape v0.7.0), with APEX_GOVERNANCE_REPO pointing at it.
+	GovernanceDest = "/opt/apex-governance"
 	// ApeBinRoot is the guest subtree aped owns for the `ape` it delivers (PLAN-23).
 	// Reserved as a whole subtree so it can grow (completions, docs) without minting
 	// another reserved destination.
@@ -59,7 +62,7 @@ const (
 // /workspace because a repo's path lives under it, /opt/ape because the delivered
 // binary sits in a bin/ below it — so a user mount can neither replace one nor slip
 // underneath it.
-var reservedDests = []string{WorkspaceRoot, FrameworkDest, ApeBinRoot, DefaultGuestHome}
+var reservedDests = []string{WorkspaceRoot, FrameworkDest, GovernanceDest, ApeBinRoot, DefaultGuestHome}
 
 // Descriptor is the parsed `.apesandbox.yaml`.
 //

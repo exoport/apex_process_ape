@@ -261,9 +261,9 @@ func (p *Policy) checkMounts(mounts []workspace.MountSpec) error {
 		}
 		seen[m.Dest] = true
 
-		if m.Dest == sandbox.FrameworkDest {
+		if m.Dest == sandbox.FrameworkDest || m.Dest == sandbox.GovernanceDest {
 			if !m.ReadOnly {
-				return fmt.Errorf("%w: the framework mount %q must be read-only", workspace.ErrPolicyDenied, m.Dest)
+				return fmt.Errorf("%w: the framework or governance mount %q must be read-only", workspace.ErrPolicyDenied, m.Dest)
 			}
 			continue
 		}

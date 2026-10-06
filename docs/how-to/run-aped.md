@@ -632,6 +632,24 @@ is always read-only and always present when the node serves a framework — a pr
 cannot redirect, remove, or make it writable. See
 [.apesandbox.yaml](../reference/apesandbox-yaml.md).
 
+The governance repo (the canon `apex-adr-reconciliation` and
+`apex-pattern-reconciliation` read) is delivered the same way, at
+`/opt/apex-governance`, with `APEX_GOVERNANCE_REPO` set in the workspace only when
+it is mounted:
+
+```bash
+ape sandbox governance materialize v0.1.2
+ape sandbox up dev --framework-ref v0.3.1 --governance-ref v0.1.2
+```
+
+```
+aped front … --governance-root /srv/apex-governance --governance-ref v0.1.2
+```
+
+Inside a workspace both mounts are read-only, so `ape framework update` treats them
+as pinned: it neither fetches nor moves them, and installs the release checked out
+there. See [The framework and governance clones are caches](../explanation/framework-and-governance-clones.md).
+
 ## See also
 
 - [.apesandbox.yaml](../reference/apesandbox-yaml.md) — the per-project descriptor

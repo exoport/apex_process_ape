@@ -44,12 +44,15 @@ func newFrameworkCmd() *cobra.Command {
   ape framework status     Inspect the installed framework version, with
                            optional drift report against the framework repo.
 
-The framework repo path is resolved from --repo or $APEX_FRAMEWORK_REPO.
-Since ape v0.4.0 setup and update install a RELEASE — the highest vX.Y.Z tag,
-or the one --version names (the only way to a vX.Y.Z-rc.N candidate) —
-exported from that clone, whose checkout ape never reads or moves;
---from-worktree installs the working tree instead. See
-docs/explanation/framework-updates-from-releases.md.
+The framework repo is --repo, else $APEX_FRAMEWORK_REPO, else ape's own
+clone under the user cache directory (cloned from $APEX_FRAMEWORK_URL, else
+the framework's GitHub repo). Since ape v0.4.0 setup and update install a
+RELEASE — the highest vX.Y.Z tag, or the one --version names (the only way
+to a vX.Y.Z-rc.N candidate) — exported from that clone; since v0.7.0 they
+also check that release out in the clone, and keep the project's governance
+repo at its newest release the same way. --from-worktree installs the
+working tree instead. See docs/explanation/framework-updates-from-releases.md
+and docs/explanation/framework-and-governance-clones.md.
 The project root is resolved from --cwd or the current working directory.`,
 	}
 	cmd.PersistentFlags().StringVar(&repoFlag, "repo", "", "Path to a checked-out apex_process_framework repo (default: $APEX_FRAMEWORK_REPO)")
@@ -70,6 +73,7 @@ func newFrameworkSetupCmd(repoFlag, cwdFlag *string) *cobra.Command {
 	var (
 		noFetch        bool
 		force          bool
+		forceClone     bool
 		outputFormat   string
 		projectName    string
 		extensionsFlag string
@@ -108,6 +112,11 @@ Refuses to run when:
   - --from-worktree, and the framework repo is dirty, on a non-main
     branch, or its .claude/skills/apex-* subtree has uncommitted changes
     (pass --force to bypass)
+  - your framework or governance clone is behind the release and has
+    local changes (exit 3; pass --force-clone to overwrite them). A clone
+    of yours only ever moves forward: one whose branch is ahead of the
+    release, or diverged from it, is left where it is and reported. ape's
+    own clones under the user cache are always overwritten
 
 Headless contexts: when stdout is not a TTY (or --output-format is not
 human) and the project lacks _apex/config.yaml, you must supply
@@ -117,11 +126,12 @@ human) and the project lacks _apex/config.yaml, you must supply
 For subsequent refreshes against a framework version bump, use
 'ape framework update'.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			repo, err := resolveFrameworkRepo(*repoFlag)
+			clone, err := resolveFrameworkClone(*repoFlag)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
 				return err
 			}
+			repo := clone.Path
 			projectRoot, err := resolveProjectRoot(*cwdFlag)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
@@ -138,7 +148,11 @@ For subsequent refreshes against a framework version bump, use
 					return err
 				}
 			}
-			sel, done, err := prepareInstall(cmd.Context(), repo, projectRoot, sel, !rf.noCommit)
+			fwTarget, sel, err := prepareFramework(cmd.Context(), clone, sel)
+			if err != nil {
+				return handleSetupError(err)
+			}
+			sel, done, err := prepareInstall(cmd.Context(), repo, projectRoot, sel, !rf.noCommit, rf.version == "")
 			if err != nil {
 				return handleSetupError(err)
 			}
@@ -151,6 +165,13 @@ For subsequent refreshes against a framework version bump, use
 				}
 				return err
 			}
+			// The clones move last, after every check that could refuse the
+			// install. Governance syncs only when the project already has a
+			// config to name it; a new project's is seeded by this setup.
+			gov, err := syncClones(cmd.Context(), cloneNoteWriter(cmd, format), clone, fwTarget, projectRoot, noFetch, forceClone)
+			if err != nil {
+				return err
+			}
 			res, err := framework.Setup(cmd.Context(), &framework.UpdateOptions{
 				FrameworkRepo: repo,
 				ProjectRoot:   projectRoot,
@@ -159,6 +180,7 @@ For subsequent refreshes against a framework version bump, use
 				ApeVersion:    Version,
 				Bootstrapper:  bootstrap,
 				Release:       sel,
+				Governance:    gov,
 			})
 			if err != nil {
 				return handleSetupError(err)
@@ -174,8 +196,9 @@ For subsequent refreshes against a framework version bump, use
 				"chore(framework): install APEX framework "+installLabel(res.Metadata), res.Metadata, nil)
 		},
 	}
-	cmd.Flags().BoolVar(&noFetch, "no-fetch", false, "Skip 'git fetch && merge --ff-only' on the framework repo before reading its state")
+	cmd.Flags().BoolVar(&noFetch, "no-fetch", false, "Skip fetching the framework and governance repos; use the releases they already hold")
 	cmd.Flags().BoolVar(&force, "force", false, "Bypass safety checks (already installed, dirty framework, non-main branch, modified project skills)")
+	cmd.Flags().BoolVar(&forceClone, "force-clone", false, forceCloneHelp)
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
 	cmd.Flags().StringVar(&projectName, "project-name", "", "Bootstrap value for project_name (skips the TUI prompt)")
 	cmd.Flags().StringVar(&extensionsFlag, "extensions", "", "Bootstrap value for extensions, comma-separated (e.g. ext-adrs,ext-features). Empty string = none.")
@@ -188,6 +211,7 @@ func newFrameworkUpdateCmd(repoFlag, cwdFlag *string) *cobra.Command {
 	var (
 		noFetch      bool
 		force        bool
+		forceClone   bool
 		outputFormat string
 		dryRun       bool
 		noMigrate    bool
@@ -268,6 +292,11 @@ Refuses to run when:
   - --from-worktree, and the framework repo is dirty, on a non-main
     branch, or its .claude/skills/apex-* subtree has uncommitted changes
     (pass --force to bypass)
+  - your framework or governance clone is behind the release and has
+    local changes (exit 3; pass --force-clone to overwrite them). A clone
+    of yours only ever moves forward: one whose branch is ahead of the
+    release, or diverged from it, is left where it is and reported. ape's
+    own clones under the user cache are always overwritten
 
 Exit codes: 2 usage; 3 the framework source (no release, missing tag,
 build layout); 4 the project tree; 7 not installed; 11 ape below
@@ -278,11 +307,12 @@ changes. The gate is path-scoped rather than whole-tree: those paths are
 disjoint from what the install writes, so the two are order-independent,
 and unrelated work-in-progress elsewhere does not block anything.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			repo, err := resolveFrameworkRepo(*repoFlag)
+			clone, err := resolveFrameworkClone(*repoFlag)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
 				return err
 			}
+			repo := clone.Path
 			projectRoot, err := resolveProjectRoot(*cwdFlag)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
@@ -295,25 +325,15 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 			// --plan runs before the repo resolution's consequences and
 			// before any install: it must be readable against a project in
 			// any state, including one whose framework repo has moved on.
+			if plan || dryRun {
+				// Both write nothing, the clones included: ape's own is
+				// not cloned for them.
+				if err := requireCloned(clone); err != nil {
+					return usageErrExit(exitCodeFrameworkValidation, err)
+				}
+			}
 			if plan {
-				src, _, cleanup, err := readableSource(cmd.Context(), repo, sel)
-				if err != nil {
-					return handleUpdateError(err)
-				}
-				defer cleanup()
-				// The same self-shadow the run uses, so `--plan` and the run
-				// cannot be answered by two different `ape` binaries.
-				runner, cleanup, notice := migration.NewShellRunner()
-				defer cleanup()
-				if notice != "" {
-					fmt.Fprintf(cmd.OutOrStdout(), "migrations: %s\n", notice)
-				}
-				p, pErr := loadIncomingMigrationPlan(cmd.Context(), projectRoot, src, runner, !noCheck)
-				if pErr != nil {
-					return pErr
-				}
-				emitMigrationPlan(cmd.OutOrStdout(), p, repo)
-				return nil
+				return runFrameworkUpdatePlan(cmd, repo, projectRoot, sel, noCheck)
 			}
 			if dryRun {
 				return emitFrameworkDryRun(cmd.Context(), cmd.OutOrStdout(), repo, projectRoot, rf.fromWorktree, noFetch)
@@ -330,7 +350,11 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 					fmt.Fprintf(os.Stderr, "WARNING: %s\n", framework.TagMovedMessage(meta.Framework, now))
 				}
 			}
-			sel, done, err := prepareInstall(cmd.Context(), repo, projectRoot, sel, !rf.noCommit)
+			fwTarget, sel, err := prepareFramework(cmd.Context(), clone, sel)
+			if err != nil {
+				return handleUpdateError(err)
+			}
+			sel, done, err := prepareInstall(cmd.Context(), repo, projectRoot, sel, !rf.noCommit, rf.version == "")
 			if errors.Is(err, errKeepInstalled) {
 				return nil
 			}
@@ -338,6 +362,13 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 				return handleUpdateError(err)
 			}
 			defer done()
+			// The clones move last, after every check that could refuse
+			// the install; an update that keeps an installed rc returned
+			// above, moving neither.
+			gov, err := syncClones(cmd.Context(), cloneNoteWriter(cmd, format), clone, fwTarget, projectRoot, noFetch, forceClone)
+			if err != nil {
+				return err
+			}
 			res, err := framework.Update(cmd.Context(), &framework.UpdateOptions{
 				FrameworkRepo: repo,
 				ProjectRoot:   projectRoot,
@@ -350,6 +381,7 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 				Bootstrapper: framework.NoopBootstrapper{},
 				NoMigrate:    noMigrate,
 				Release:      sel,
+				Governance:   gov,
 			})
 			if err != nil {
 				return handleUpdateError(err)
@@ -360,28 +392,8 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 			); err != nil {
 				return err
 			}
-			var applied []string
-			if noMigrate {
-				fmt.Fprintln(cmd.OutOrStdout(),
-					"migration: skipped (--no-migrate) — `ape doctor` will report it as pending")
-			} else {
-				if err := runProjectMigrations(cmd.Context(), cmd.OutOrStdout(), projectRoot); err != nil {
-					return err
-				}
-				if applied, err = runUpgradeMigrationsApplied(cmd.Context(), cmd.OutOrStdout(), projectRoot); err != nil {
-					return err
-				}
-			}
-			if !rf.noCommit {
-				// Re-read: the migration ledger was appended after Update returned.
-				meta := res.Metadata
-				if m, mErr := framework.ReadMetadata(projectRoot); mErr == nil {
-					meta = *m
-				}
-				if err := commitInstall(cmd.Context(), cmd.OutOrStdout(), projectRoot, untracked,
-					"chore(framework): update APEX framework to "+installLabel(meta), meta, applied); err != nil {
-					return err
-				}
+			if err := migrateAndCommitUpdate(cmd, projectRoot, res.Metadata, untracked, noMigrate, !rf.noCommit); err != nil {
+				return err
 			}
 			if repair {
 				return runFrameworkRepair(cmd, projectRoot)
@@ -389,8 +401,9 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&noFetch, "no-fetch", false, "Skip 'git fetch && merge --ff-only' on the framework repo before reading its state")
+	cmd.Flags().BoolVar(&noFetch, "no-fetch", false, "Skip fetching the framework and governance repos; use the releases they already hold")
 	cmd.Flags().BoolVar(&force, "force", false, "Bypass safety checks (dirty framework, non-main branch, modified project skills)")
+	cmd.Flags().BoolVar(&forceClone, "force-clone", false, forceCloneHelp)
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show the framework diff and pending migrations, writing nothing")
 	cmd.Flags().BoolVar(&noMigrate, "no-migrate", false, "Install framework files only; leave migrations pending")
@@ -401,6 +414,60 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 	cmd.Flags().BoolVar(&repair, "repair", false, "Also run the opus judgment phase over free-form deferred records (spends money)")
 	addReleaseFlags(cmd, &rf)
 	return cmd
+}
+
+// migrateAndCommitUpdate is the half of `update` after the install: the
+// project-data and upgrade migrations (unless --no-migrate), then the one
+// commit recording the install and the migrations it ran.
+func migrateAndCommitUpdate(cmd *cobra.Command, projectRoot string, installed framework.Metadata,
+	untracked map[string]bool, noMigrate, commit bool,
+) error {
+	var applied []string
+	if noMigrate {
+		fmt.Fprintln(cmd.OutOrStdout(),
+			"migration: skipped (--no-migrate) — `ape doctor` will report it as pending")
+	} else {
+		if err := runProjectMigrations(cmd.Context(), cmd.OutOrStdout(), projectRoot); err != nil {
+			return err
+		}
+		var err error
+		if applied, err = runUpgradeMigrationsApplied(cmd.Context(), cmd.OutOrStdout(), projectRoot); err != nil {
+			return err
+		}
+	}
+	if !commit {
+		return nil
+	}
+	// Re-read: the migration ledger was appended after Update returned.
+	meta := installed
+	if m, err := framework.ReadMetadata(projectRoot); err == nil {
+		meta = *m
+	}
+	return commitInstall(cmd.Context(), cmd.OutOrStdout(), projectRoot, untracked,
+		"chore(framework): update APEX framework to "+installLabel(meta), meta, applied)
+}
+
+// runFrameworkUpdatePlan is `update --plan`: the upgrade-migration plan the
+// project will hold after this update, and nothing else.
+func runFrameworkUpdatePlan(cmd *cobra.Command, repo, projectRoot string, sel *framework.ReleaseSelector, noCheck bool) error {
+	src, _, cleanup, err := readableSource(cmd.Context(), repo, sel)
+	if err != nil {
+		return handleUpdateError(err)
+	}
+	defer cleanup()
+	// The same self-shadow the run uses, so `--plan` and the run
+	// cannot be answered by two different `ape` binaries.
+	runner, cleanupRunner, notice := migration.NewShellRunner()
+	defer cleanupRunner()
+	if notice != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "migrations: %s\n", notice)
+	}
+	p, err := loadIncomingMigrationPlan(cmd.Context(), projectRoot, src, runner, !noCheck)
+	if err != nil {
+		return err
+	}
+	emitMigrationPlan(cmd.OutOrStdout(), p, repo)
+	return nil
 }
 
 // runFrameworkRepair runs the judgment phase after a migration, reusing
@@ -428,22 +495,25 @@ func newFrameworkStatusCmd(repoFlag, cwdFlag *string) *cobra.Command {
 		Short: "Inspect the installed framework version + drift report",
 		Long: `Read <project>/_apex/framework.yaml and report what was installed.
 
-When --repo or $APEX_FRAMEWORK_REPO is set, also compares the install with
-what that repo offers now (after a best-effort tag fetch, unless
+When there is a framework clone — --repo, $APEX_FRAMEWORK_REPO, or ape's
+own once cloned — also compares the install with what that repo offers now (after a best-effort tag fetch, unless
 --no-fetch): the NEWEST RELEASE tag, which is what 'update' would install,
 and whether the installed tag still names the installed commit (a moved
 tag is reported, never followed). --from-worktree compares against the
-repo's working-tree HEAD instead, as before ape v0.4.0.`,
+repo's working-tree HEAD instead, as before ape v0.4.0.
+
+Then it says where the framework and governance clones are, and where
+each path came from (flag, env, config, or ape's cache), so you know where
+to read their docs.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			projectRoot, err := resolveProjectRoot(*cwdFlag)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err.Error())
 				return err
 			}
-			repo := *repoFlag
-			if repo == "" {
-				repo = os.Getenv("APEX_FRAMEWORK_REPO")
-			}
+			// The drift report needs a clone: ape's own counts once it
+			// exists, and status never clones it.
+			repo, _ := resolveFrameworkRepo(*repoFlag)
 			res, err := framework.Status(cmd.Context(), framework.StatusOptions{
 				ProjectRoot:   projectRoot,
 				FrameworkRepo: repo,
@@ -461,7 +531,14 @@ repo's working-tree HEAD instead, as before ape v0.4.0.`,
 					}
 				}
 			}
-			return printFrameworkStatus(res, output.Format(outputFormat))
+			format := output.Format(outputFormat)
+			if err := printFrameworkStatus(res, format); err != nil {
+				return err
+			}
+			if format == output.FormatHuman {
+				printCloneLocations(cmd.OutOrStdout(), *repoFlag, projectRoot)
+			}
+			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&noFetch, "no-fetch", false, "Skip the best-effort 'git fetch' against the framework repo")
@@ -480,16 +557,6 @@ func warnOperatingRulesSkew(s framework.UpdateSummary) {
 				"Upgrade the framework to a version that ships it to enable the always-on APEX rules.\n",
 			framework.SubtreeOperatingRules, framework.ProjectClaudeMd)
 	}
-}
-
-func resolveFrameworkRepo(flagValue string) (string, error) {
-	if flagValue != "" {
-		return flagValue, nil
-	}
-	if env := os.Getenv("APEX_FRAMEWORK_REPO"); env != "" {
-		return env, nil
-	}
-	return "", errors.New("framework repo path not set: pass --repo or set APEX_FRAMEWORK_REPO")
 }
 
 func resolveProjectRoot(flagValue string) (string, error) {

@@ -30,6 +30,8 @@ func newFrontCmd() *cobra.Command {
 		egressHigh  int
 		fwRoot      string
 		fwRef       string
+		govRoot     string
+		govRef      string
 		cacheRoot   string
 		credentials string
 		credSyncInt time.Duration
@@ -78,6 +80,8 @@ in the workspace's egress audit trail with a distinguishing reason.`,
 				EgressPortHigh:    egressHigh,
 				FrameworkRoot:     fwRoot,
 				FrameworkRef:      fwRef,
+				GovernanceRoot:    govRoot,
+				GovernanceRef:     govRef,
 				CacheRoot:         cacheRoot,
 				Credentials:       credentials,
 				CredSyncInterval:  credSyncInt,
@@ -105,6 +109,8 @@ in the workspace's egress audit trail with a distinguishing reason.`,
 	f.IntVar(&egressHigh, "egress-port-high", 0, "Highest proxy listen port")
 	f.StringVar(&fwRoot, "framework-root", "", "Host dir holding materialized APEX framework refs, one subdir per ref ('' → no framework mount)")
 	f.StringVar(&fwRef, "framework-ref", "", "Default framework ref to mount read-only at /opt/apex-framework")
+	f.StringVar(&govRoot, "governance-root", "", "Host dir holding materialized governance repo refs, one subdir per ref ('' → no governance mount)")
+	f.StringVar(&govRef, "governance-ref", "", "Default governance ref to mount read-only at /opt/apex-governance")
 	f.StringVar(&cacheRoot, "cache-root", "", "Host dir holding durable tool caches (asdf/go/cargo/...); '' → no cache mounts")
 	f.StringVar(&credentials, "credentials", "", "Credential mode composed into workspaces: oauth | api-key | none (default none). oauth copies <host-home>/.claude/.credentials.json into each workspace and keeps them converged")
 	f.DurationVar(&credSyncInt, "cred-sync-interval", 0, "How often to converge the shared credential across host + workspaces (default 3s)")

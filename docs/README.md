@@ -61,6 +61,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [Bridge architecture](explanation/bridge-architecture.md) — the MCP bridge, SSE broker, and orchestrator behind `--web`
 - [Why project-local pipelines](explanation/why-project-local-pipelines.md) — design rationale for moving from embedded to on-disk specs in v0.0.6
 - [`ape framework update` installs releases](explanation/framework-updates-from-releases.md) — why setup and update install a release tag rather than the clone's `main` (v0.4.0), how `min_ape_version` is checked, and the commits that record an install
+- [The framework and governance clones are caches](explanation/framework-and-governance-clones.md) — why setup and update check the newest release out in both clones (v0.7.0), where each clone lives when nothing names one, and how a skill finds the governance clone
 - [Why setup and update are separate](explanation/why-setup-and-update-are-separate.md) — the v0.0.7 split of `framework update` into two commands
 - [Why streaming events](explanation/why-streaming-events.md) — design rationale for live event streaming in the v0.0.7 pipeline TUI
 

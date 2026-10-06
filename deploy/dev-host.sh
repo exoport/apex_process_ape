@@ -32,6 +32,8 @@
 #   PROJECT_ROOT  host dir holding your repos            (default /home/$SUDO_USER/_dev)
 #   FW_ROOT       framework materialize root             (default /srv/apex-framework)
 #   FW_REF        default framework ref for workspaces   (default: none)
+#   GOV_ROOT      governance materialize root            (default /srv/apex-governance)
+#   GOV_REF       default governance ref for workspaces  (default: none)
 #   CACHE_ROOT    durable toolchain cache root           (default /srv/ape-caches)
 #   CRED_ROOT     host-credential publish root           (default /srv/ape-credentials)
 #   CREDENTIALS   workspace credential mode              (default oauth; none to disable)
@@ -52,6 +54,9 @@ FW_ROOT="${FW_ROOT:-/srv/apex-framework}"
 # The framework ref workspaces get by default. It must be materialized on this host
 # (ape sandbox framework materialize <ref>) before a workspace can use it.
 FW_REF="${FW_REF:-}"
+# The same pair for the governance repo (ape sandbox governance materialize <ref>).
+GOV_ROOT="${GOV_ROOT:-/srv/apex-governance}"
+GOV_REF="${GOV_REF:-}"
 CACHE_ROOT="${CACHE_ROOT:-/srv/ape-caches}"
 # Where the operator publishes host credentials for workspaces to use. Outside /home
 # on purpose: the front runs with ProtectHome=yes and its own service user, so it
@@ -182,6 +187,12 @@ install_exec_dropins() {
   # flag as its value.
   if [ -n "$FW_REF" ] && aped_supports front --framework-ref; then
     front_line="$front_line --framework-ref $FW_REF"
+  fi
+  aped_supports front --governance-root \
+    && front_line="$front_line --governance-root $GOV_ROOT" \
+    || skipped="$skipped --governance-root"
+  if [ -n "$GOV_REF" ] && aped_supports front --governance-ref; then
+    front_line="$front_line --governance-ref $GOV_REF"
   fi
   aped_supports front --cache-root \
     && front_line="$front_line --cache-root $CACHE_ROOT" \
@@ -349,6 +360,9 @@ EOF
   install -d -m 0755 "$FW_ROOT"
   if [ -n "$OP_USER" ]; then chown "$OP_USER:$(id -gn "$OP_USER")" "$FW_ROOT"; fi
   ok "$FW_ROOT (owner ${OP_USER:-root})"
+  install -d -m 0755 "$GOV_ROOT"
+  if [ -n "$OP_USER" ]; then chown "$OP_USER:$(id -gn "$OP_USER")" "$GOV_ROOT"; fi
+  ok "$GOV_ROOT (owner ${OP_USER:-root})"
   # The credential root: the operator publishes their Claude credential here with
   # `ape sandbox credentials publish`, and the front reads it as --host-home. Owned by
   # the operator (they manage what is exposed), group `ape` so the front can traverse.
@@ -413,7 +427,7 @@ BindReadOnlyPaths=$PROJECT_ROOT"
   [ -f "$POLICY" ] || die "$POLICY missing — run deploy/tier2-setup.sh first"
   cp -a "$POLICY" "$POLICY.bak"
   local r
-  for r in "$MOUNT_ROOT" "$FW_ROOT" "$CACHE_ROOT" ${PROJECT_ROOT:+"$PROJECT_ROOT"}; do
+  for r in "$MOUNT_ROOT" "$FW_ROOT" "$GOV_ROOT" "$CACHE_ROOT" ${PROJECT_ROOT:+"$PROJECT_ROOT"}; do
     yaml_add_list_item "$POLICY" mount_roots "$r"
   done
   ok "backup at $POLICY.bak"
@@ -467,7 +481,7 @@ do_redeploy() {
   install -D -m 0644 "$SCRIPT_DIR/policy.yaml" "$POLICY"
   yaml_add_list_item "$POLICY" images "$PROBE_IMAGE"
   local r
-  for r in "$MOUNT_ROOT" "$FW_ROOT" "$CACHE_ROOT" ${PROJECT_ROOT:+"$PROJECT_ROOT"}; do
+  for r in "$MOUNT_ROOT" "$FW_ROOT" "$GOV_ROOT" "$CACHE_ROOT" ${PROJECT_ROOT:+"$PROJECT_ROOT"}; do
     yaml_add_list_item "$POLICY" mount_roots "$r"
   done
   if [ "$ENABLE_EGRESS" = "1" ]; then
@@ -523,4 +537,5 @@ echo "    export APE_NATS_URL=nats://127.0.0.1:4223 APE_NATS_CREDS=~/.config/ape
 echo "    ape sandbox ls --node \"\$(hostname)\""
 echo "    ip -br addr show $BRIDGE; sudo nft list table inet ape_egress"
 echo "    ape sandbox framework materialize <ref> --root $FW_ROOT   # then: ape sandbox up dev --framework-ref <ref>"
+echo "    ape sandbox governance materialize <ref> --root $GOV_ROOT # then: ape sandbox up dev --governance-ref <ref>"
 echo "    ape sandbox credentials publish                            # then workspaces get your Claude session"

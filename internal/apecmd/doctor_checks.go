@@ -1362,7 +1362,7 @@ func checkFrameworkApeVersion(_ context.Context, env doctorEnv) CheckResult {
 }
 
 // checkFrameworkTagMoved reports an installed release tag that now names a
-// different commit in the framework clone ($APEX_FRAMEWORK_REPO).
+// different commit in the framework clone ($APEX_FRAMEWORK_REPO, else ape's own).
 func checkFrameworkTagMoved(ctx context.Context, env doctorEnv) CheckResult {
 	if env.ProjectRoot == "" || !isProjectRoot(env.ProjectRoot) {
 		return CheckResult{Status: StatusInfo, Message: "no project root resolved"}
@@ -1371,9 +1371,10 @@ func checkFrameworkTagMoved(ctx context.Context, env doctorEnv) CheckResult {
 	if err != nil {
 		return CheckResult{Status: StatusInfo, Message: "no framework installed"}
 	}
-	repo := os.Getenv("APEX_FRAMEWORK_REPO")
-	if repo == "" {
-		return CheckResult{Status: StatusInfo, Message: "$APEX_FRAMEWORK_REPO unset — no clone to compare the installed tag against"}
+	repo, rerr := resolveFrameworkRepo("")
+	if rerr != nil {
+		return CheckResult{Status: StatusInfo, Message: "no framework clone to compare the installed tag against " +
+			"($APEX_FRAMEWORK_REPO unset, and ape's own not cloned yet)"}
 	}
 	if moved, now := framework.TagMoved(ctx, repo, meta.Framework); moved {
 		return CheckResult{Status: StatusWarn, Message: framework.TagMovedMessage(meta.Framework, now)}

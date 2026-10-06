@@ -9,7 +9,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/repocache"
 	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/spf13/cobra"
 )
@@ -39,6 +41,46 @@ import (
 // --framework-root.
 const DefaultFrameworkRoot = "/srv/apex-framework"
 
+// DefaultGovernanceRoot is the same for the governance repo (ape v0.7.0):
+// aped mounts <root>/<ref> read-only at /opt/apex-governance.
+const DefaultGovernanceRoot = "/srv/apex-governance"
+
+// mountedRepo is one repo a node materializes refs of: the framework, or
+// the governance repo. Both are delivered the same way.
+type mountedRepo struct {
+	kind        string // "framework" | "governance"
+	defaultRoot string
+	rootEnv     string
+	dest        string
+	// resolveRepo finds the local clone refs are materialized from.
+	resolveRepo func(flagValue string) (string, error)
+	repoHelp    string
+}
+
+var (
+	frameworkMountedRepo = mountedRepo{
+		kind: "framework", defaultRoot: DefaultFrameworkRoot, rootEnv: "APE_FRAMEWORK_ROOT",
+		dest: sandbox.FrameworkDest, resolveRepo: resolveFrameworkCheckout,
+		repoHelp: "Local apex_process_framework checkout (default: $APEX_FRAMEWORK_REPO, else ape's own clone)",
+	}
+	governanceMountedRepo = mountedRepo{
+		kind: "governance", defaultRoot: DefaultGovernanceRoot, rootEnv: "APE_GOVERNANCE_ROOT",
+		dest: sandbox.GovernanceDest, resolveRepo: resolveGovernanceCheckout,
+		repoHelp: "Local governance checkout (default: $APEX_GOVERNANCE_REPO, else the project's governance_repository_path or ape's own clone)",
+	}
+)
+
+// root resolves the repo's materialization root: flag, env, then the default.
+func (m mountedRepo) root(flagValue string) string {
+	if v := strings.TrimSpace(flagValue); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv(m.rootEnv)); v != "" {
+		return v
+	}
+	return m.defaultRoot
+}
+
 func newSandboxFrameworkCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "framework",
@@ -59,11 +101,33 @@ aped never fetches the framework itself: if a requested ref is not materialized,
 'ape sandbox up' fails with the command to run. Inside the workspace, consume it
 with 'ape framework setup --from-worktree --no-commit --no-fetch --repo /opt/apex-framework'.`,
 	}
-	cmd.AddCommand(newSandboxFrameworkMaterializeCmd(), newSandboxFrameworkLsCmd())
+	cmd.AddCommand(newSandboxMaterializeCmd(frameworkMountedRepo), newSandboxMaterializedLsCmd(frameworkMountedRepo))
 	return cmd
 }
 
-func newSandboxFrameworkMaterializeCmd() *cobra.Command {
+func newSandboxGovernanceCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "governance",
+		Short: "Manage the governance repo refs a sandbox node can mount",
+		Long: `Manage the materialized governance repo refs on this host — the same
+delivery as 'ape sandbox framework', for the canonical governance repo the
+reconciliation skills read.
+
+A workspace gets it as a READ-ONLY mount at /opt/apex-governance, with
+$APEX_GOVERNANCE_REPO pointing there (set by aped, only when it mounts one).
+
+  ape sandbox governance materialize v0.1.2
+  ape sandbox governance ls
+  ape sandbox up dev --governance-ref v0.1.2
+
+aped never fetches it: if a requested ref is not materialized, 'ape sandbox
+up' fails with the command to run.`,
+	}
+	cmd.AddCommand(newSandboxMaterializeCmd(governanceMountedRepo), newSandboxMaterializedLsCmd(governanceMountedRepo))
+	return cmd
+}
+
+func newSandboxMaterializeCmd(m mountedRepo) *cobra.Command {
 	var (
 		repoPath string
 		rootPath string
@@ -71,11 +135,11 @@ func newSandboxFrameworkMaterializeCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "materialize <ref>",
-		Short: "Materialize a framework ref into the node's framework root",
-		Long: `Materialize one framework ref (tag, branch, or commit) as a self-contained,
-mountable checkout under the framework root.
+		Short: "Materialize a " + m.kind + " ref into the node's " + m.kind + " root",
+		Long: `Materialize one ` + m.kind + ` ref (tag, branch, or commit) as a self-contained,
+mountable checkout under the ` + m.kind + ` root.
 
-The ref must ALREADY be present in the local framework repo — this command does
+The ref must ALREADY be present in the local ` + m.kind + ` repo — this command does
 not fetch, so a stale checkout fails loudly instead of silently materializing an
 older commit. Fetch first with your own credentials:
   git -C <repo> fetch --tags`,
@@ -83,18 +147,18 @@ older commit. Fetch first with your own credentials:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ref := strings.TrimSpace(args[0])
 			if err := sandbox.ValidateMountName(ref); err != nil {
-				return fmt.Errorf("framework ref %q is not usable as a directory name: %w", ref, err)
+				return fmt.Errorf("%s ref %q is not usable as a directory name: %w", m.kind, ref, err)
 			}
-			repo, err := resolveFrameworkCheckout(repoPath)
+			repo, err := m.resolveRepo(repoPath)
 			if err != nil {
 				return err
 			}
-			root := frameworkRoot(rootPath)
+			root := m.root(rootPath)
 
 			dest := filepath.Join(root, ref)
 			if _, err := os.Stat(dest); err == nil {
 				if !force {
-					fmt.Fprintf(cmd.OutOrStdout(), "framework ref %s already materialized at %s (--force to replace)\n", ref, dest)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s ref %s already materialized at %s (--force to replace)\n", m.kind, ref, dest)
 					return nil
 				}
 				if err := os.RemoveAll(dest); err != nil {
@@ -105,38 +169,38 @@ older commit. Fetch first with your own credentials:
 			ctx := cmd.Context()
 			// Verify the ref BEFORE writing anything, so a typo or a stale checkout
 			// never leaves a half-materialized directory behind.
-			if err := verifyRef(ctx, repo, ref); err != nil {
+			if err := verifyRef(ctx, m.kind, repo, ref); err != nil {
 				return err
 			}
 			if err := os.MkdirAll(root, 0o755); err != nil {
-				return fmt.Errorf("create framework root %s: %w", root, err)
+				return fmt.Errorf("create %s root %s: %w", m.kind, root, err)
 			}
-			if err := materializeRef(ctx, repo, ref, dest); err != nil {
+			if err := materializeRef(ctx, m.kind, repo, ref, dest); err != nil {
 				_ = os.RemoveAll(dest)
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "materialized %s → %s (branch main)\n", ref, dest)
-			fmt.Fprintf(cmd.OutOrStdout(), "use it: ape sandbox up <name> --framework-ref %s\n", ref)
+			fmt.Fprintf(cmd.OutOrStdout(), "use it: ape sandbox up <name> --%s-ref %s\n", m.kind, ref)
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&repoPath, "repo", "", "Local apex_process_framework checkout (default: $APEX_FRAMEWORK_REPO)")
-	cmd.Flags().StringVar(&rootPath, "root", "", "Framework root the node mounts from (default: $APE_FRAMEWORK_ROOT or "+DefaultFrameworkRoot+")")
+	cmd.Flags().StringVar(&repoPath, "repo", "", m.repoHelp)
+	cmd.Flags().StringVar(&rootPath, "root", "", "Root the node mounts "+m.kind+" refs from (default: $"+m.rootEnv+" or "+m.defaultRoot+")")
 	cmd.Flags().BoolVar(&force, "force", false, "Replace an already-materialized ref")
 	return cmd
 }
 
-func newSandboxFrameworkLsCmd() *cobra.Command {
+func newSandboxMaterializedLsCmd(m mountedRepo) *cobra.Command {
 	var (
 		rootPath     string
 		outputFormat string
 	)
 	cmd := &cobra.Command{
 		Use:   "ls",
-		Short: "List the framework refs materialized on this host",
+		Short: "List the " + m.kind + " refs materialized on this host",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			root := frameworkRoot(rootPath)
+			root := m.root(rootPath)
 			refs, err := materializedRefs(root)
 			if err != nil {
 				return err
@@ -146,8 +210,8 @@ func newSandboxFrameworkLsCmd() *cobra.Command {
 				return output.Print(cmd.OutOrStdout(), format, map[string]any{"root": root, "refs": refs})
 			}
 			if len(refs) == 0 {
-				fmt.Fprintf(cmd.OutOrStdout(), "no framework refs materialized under %s\n", root)
-				fmt.Fprintln(cmd.OutOrStdout(), "materialize one: ape sandbox framework materialize <ref>")
+				fmt.Fprintf(cmd.OutOrStdout(), "no %s refs materialized under %s\n", m.kind, root)
+				fmt.Fprintf(cmd.OutOrStdout(), "materialize one: ape sandbox %s materialize <ref>\n", m.kind)
 				return nil
 			}
 			for _, r := range refs {
@@ -156,31 +220,42 @@ func newSandboxFrameworkLsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&rootPath, "root", "", "Framework root to list (default: $APE_FRAMEWORK_ROOT or "+DefaultFrameworkRoot+")")
+	cmd.Flags().StringVar(&rootPath, "root", "", "Root to list (default: $"+m.rootEnv+" or "+m.defaultRoot+")")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
 	return cmd
 }
 
-// frameworkRoot resolves the framework root: flag, env, then the default.
-func frameworkRoot(flagValue string) string {
-	if v := strings.TrimSpace(flagValue); v != "" {
-		return v
-	}
-	if v := strings.TrimSpace(os.Getenv("APE_FRAMEWORK_ROOT")); v != "" {
-		return v
-	}
-	return DefaultFrameworkRoot
-}
-
 // resolveFrameworkCheckout resolves the local framework checkout the same way
-// `ape framework` does (flag, then $APEX_FRAMEWORK_REPO) and additionally confirms
-// it really is a git checkout — materializing from a non-repo would otherwise fail
-// with a raw git error.
+// `ape framework` does (flag, $APEX_FRAMEWORK_REPO, then ape's own clone once it
+// exists) and confirms it really is a git checkout — materializing from a non-repo
+// would otherwise fail with a raw git error.
 func resolveFrameworkCheckout(flagValue string) (string, error) {
 	repo, err := resolveFrameworkRepo(flagValue)
 	if err != nil {
 		return "", err
 	}
+	return gitCheckoutAbs(repo)
+}
+
+// resolveGovernanceCheckout resolves the local governance checkout: the flag,
+// then the effective governance_repository_path of the project in the working
+// directory (config, $APEX_GOVERNANCE_REPO, ape's own clone), then
+// $APEX_GOVERNANCE_REPO alone when there is no project here.
+func resolveGovernanceCheckout(flagValue string) (string, error) {
+	if v := strings.TrimSpace(flagValue); v != "" {
+		return gitCheckoutAbs(v)
+	}
+	if cfg, err := apexcfg.Resolve(".", nil); err == nil && cfg.GovernanceRepositoryPath != "" {
+		return gitCheckoutAbs(cfg.GovernanceRepositoryPath)
+	}
+	if v := strings.TrimSpace(os.Getenv(repocache.EnvGovernanceRepo)); v != "" {
+		return gitCheckoutAbs(v)
+	}
+	return "", fmt.Errorf("no governance repo: pass --repo, set $%s, or run this inside a project whose "+
+		"governance repo `ape framework update` has synced", repocache.EnvGovernanceRepo)
+}
+
+func gitCheckoutAbs(repo string) (string, error) {
 	abs, err := filepath.Abs(strings.TrimSpace(repo))
 	if err != nil {
 		return "", fmt.Errorf("resolve --repo %q: %w", repo, err)
@@ -193,33 +268,33 @@ func resolveFrameworkCheckout(flagValue string) (string, error) {
 
 // verifyRef confirms the ref resolves in the local repo, with actionable guidance
 // when it does not.
-func verifyRef(ctx context.Context, repo, ref string) error {
+func verifyRef(ctx context.Context, kind, repo, ref string) error {
 	out, err := runGitCapture(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
 	if err != nil || strings.TrimSpace(out) == "" {
-		return fmt.Errorf("framework ref %q not found in %s; fetch it first: git -C %s fetch --tags", ref, repo, repo)
+		return fmt.Errorf("%s ref %q not found in %s; fetch it first: git -C %s fetch --tags", kind, ref, repo, repo)
 	}
 	return nil
 }
 
 // materializeRef clones the ref into dest as a self-contained repo on a local
 // `main` branch.
-func materializeRef(ctx context.Context, repo, ref, dest string) error {
+func materializeRef(ctx context.Context, kind, repo, ref, dest string) error {
 	// --no-hardlinks keeps dest independent of the source repo's object store, so
 	// pruning or rewriting the source later cannot corrupt a mounted workspace.
 	if _, err := runGitCapture(ctx, "", "clone", "--quiet", "--no-hardlinks", "--branch", ref, repo, dest); err != nil {
 		// A commit SHA cannot be used with --branch; clone then check it out.
 		if _, cerr := runGitCapture(ctx, "", "clone", "--quiet", "--no-hardlinks", repo, dest); cerr != nil {
-			return fmt.Errorf("clone framework ref %s: %w", ref, err)
+			return fmt.Errorf("clone %s ref %s: %w", kind, ref, err)
 		}
 		if _, cerr := runGitCapture(ctx, dest, "checkout", "--quiet", ref); cerr != nil {
-			return fmt.Errorf("check out framework ref %s: %w", ref, cerr)
+			return fmt.Errorf("check out %s ref %s: %w", kind, ref, cerr)
 		}
 	}
 	// `ape framework setup` requires the framework repo to be on branch main
 	// (install.go's framework_not_main check); a tag clone lands detached, so pin a
 	// local main at that exact commit.
 	if _, err := runGitCapture(ctx, dest, "checkout", "--quiet", "-B", "main"); err != nil {
-		return fmt.Errorf("pin framework ref %s to a local main branch: %w", ref, err)
+		return fmt.Errorf("pin %s ref %s to a local main branch: %w", kind, ref, err)
 	}
 	return nil
 }
@@ -231,7 +306,7 @@ func materializedRefs(root string) ([]string, error) {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("read framework root %s: %w", root, err)
+		return nil, fmt.Errorf("read %s: %w", root, err)
 	}
 	var refs []string
 	for _, e := range entries {

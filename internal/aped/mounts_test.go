@@ -405,3 +405,41 @@ func TestResolveWritesTheLoginShellEnv(t *testing.T) {
 	lines := sandbox.ProfileEnvLines(append(sandbox.ProxyEnv(spec.HTTPSProxy), "GOPATH=/cache/go"))
 	assert.Contains(t, strings.Join(lines, "\n"), "export HTTPS_PROXY='http://169.254.42.1:3200'")
 }
+
+// The governance repo is served exactly like the framework (ape v0.7.0), and
+// APEX_GOVERNANCE_REPO is set only when it is mounted — nothing else in the
+// workspace sets it, and a variable naming an empty directory would send the
+// reconciliation skills to read nothing.
+func TestResolveMountsGovernanceSystemMount(t *testing.T) {
+	r, _ := mountResolver(t, "v0.3.1")
+	govRoot := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(govRoot, "v0.1.2"), 0o755))
+	r.governanceRoot, r.governanceRef = govRoot, "v0.1.2"
+
+	spec, err := r.Resolve(context.Background(), workspace.CreateRequest{Name: "dev", MountSource: t.TempDir()})
+	require.NoError(t, err)
+	gov, ok := mountByDest(spec.Mounts, sandbox.GovernanceDest)
+	require.True(t, ok)
+	assert.Equal(t, filepath.Join(govRoot, "v0.1.2"), gov.Source)
+	assert.True(t, gov.ReadOnly)
+	assert.Contains(t, spec.Env, "APEX_GOVERNANCE_REPO="+sandbox.GovernanceDest)
+
+	_, err = r.Resolve(context.Background(), workspace.CreateRequest{
+		Name: "dev", MountSource: t.TempDir(), GovernanceRef: "v9.9.9",
+	})
+	require.ErrorIs(t, err, workspace.ErrValidation)
+	assert.Contains(t, err.Error(), "ape sandbox governance materialize v9.9.9")
+}
+
+func TestResolveMountsNoGovernanceRootMeansNoMountAndNoEnv(t *testing.T) {
+	r, _ := mountResolver(t, "v0.3.1")
+	spec, err := r.Resolve(context.Background(), workspace.CreateRequest{
+		Name: "dev", MountSource: t.TempDir(), GovernanceRef: "v0.1.2",
+	})
+	require.NoError(t, err, "a node serving no governance ignores the request, as it does for the framework")
+	_, ok := mountByDest(spec.Mounts, sandbox.GovernanceDest)
+	assert.False(t, ok)
+	for _, e := range spec.Env {
+		assert.NotContains(t, e, "APEX_GOVERNANCE_REPO=")
+	}
+}

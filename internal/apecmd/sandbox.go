@@ -101,6 +101,7 @@ Linux host with KVM + containerd + Kata.`,
 		newSandboxSuspendCmd(),
 		newSandboxDownCmd(),
 		newSandboxFrameworkCmd(),
+		newSandboxGovernanceCmd(),
 		newSandboxCredentialsCmd(),
 		newSandboxEgressCmd(),
 		newSandboxProxyDaemonCmd(),
@@ -194,18 +195,19 @@ func streamAttach(cmd *cobra.Command, nc *nats.Conn, prefix string, tty bool) (i
 
 func newSandboxUpCmd() *cobra.Command {
 	var (
-		profileName  string
-		cwdFlag      string
-		image        string
-		runtime      string
-		mount        string
-		mountFlags   []string
-		configPath   string
-		noConfig     bool
-		frameworkRef string
-		egressDomain []string
-		caches       []string
-		idleStop     string
+		profileName   string
+		cwdFlag       string
+		image         string
+		runtime       string
+		mount         string
+		mountFlags    []string
+		configPath    string
+		noConfig      bool
+		frameworkRef  string
+		governanceRef string
+		egressDomain  []string
+		caches        []string
+		idleStop      string
 	)
 	cmd := &cobra.Command{
 		Use:   "up <name>",
@@ -232,12 +234,13 @@ but never widen it.`,
 			}
 
 			req := workspace.CreateRequest{
-				Name:         args[0],
-				Image:        image,
-				Runtime:      runtime,
-				Mount:        mount,
-				Profile:      profileName,
-				FrameworkRef: frameworkRef,
+				Name:          args[0],
+				Image:         image,
+				Runtime:       runtime,
+				Mount:         mount,
+				Profile:       profileName,
+				FrameworkRef:  frameworkRef,
+				GovernanceRef: governanceRef,
 			}
 			if req.Mount == "" || req.Mount == "host-fs" {
 				req.MountSource = root
@@ -280,6 +283,7 @@ but never widen it.`,
 	cmd.Flags().StringVar(&configPath, "sandbox-config", "", "Path to a non-default .apesandbox.yaml")
 	cmd.Flags().BoolVar(&noConfig, "no-sandbox-config", false, "Ignore any .apesandbox.yaml in the project")
 	cmd.Flags().StringVar(&frameworkRef, "framework-ref", "", "APEX framework ref to mount read-only (must be materialized on the node)")
+	cmd.Flags().StringVar(&governanceRef, "governance-ref", "", "Governance repo ref to mount read-only at /opt/apex-governance (must be materialized on the node)")
 	cmd.Flags().StringArrayVar(&egressDomain, "egress-domain", nil, "Request an egress domain (repeatable; still gated by the node's policy)")
 	cmd.Flags().StringSliceVar(&caches, "cache", nil, "Durable tool caches to mount: "+strings.Join(sandbox.ToolCacheNames(), "|")+" (adds to the descriptor's toolchain.caches)")
 	cmd.Flags().StringVar(&idleStop, "idle-stop", "",

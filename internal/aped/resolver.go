@@ -43,6 +43,10 @@ type Resolver struct {
 	// serves no framework and the mount is simply absent.
 	frameworkRoot string
 	frameworkRef  string
+	// governanceRoot/governanceRef are the same for the governance repo (ape
+	// v0.7.0), mounted read-only at /opt/apex-governance.
+	governanceRoot string
+	governanceRef  string
 	// cacheRoot is the host directory holding the durable tool caches (PLAN-22 D4).
 	// Empty → this node offers no caching and a cache request is ignored.
 	cacheRoot string
@@ -93,6 +97,10 @@ type ResolverConfig struct {
 	FrameworkRoot string
 	// FrameworkRef is the default ref to mount when a request names none.
 	FrameworkRef string
+	// GovernanceRoot/GovernanceRef are the same for the governance repo. Empty
+	// root disables the governance mount.
+	GovernanceRoot string
+	GovernanceRef  string
 	// CacheRoot is the host directory holding durable tool caches, one subdir per
 	// cache (PLAN-22 D4). Empty disables cache mounts.
 	CacheRoot string
@@ -119,21 +127,23 @@ func NewResolver(cfg ResolverConfig) *Resolver {
 		network = sandbox.NetworkNone
 	}
 	return &Resolver{
-		stateDir:      cfg.StateDir,
-		hostHome:      cfg.HostHome,
-		natsURL:       cfg.NatsURL,
-		credsExpiry:   cfg.CredsExpiry,
-		telemetry:     cfg.Telemetry,
-		network:       network,
-		egress:        cfg.Egress,
-		frameworkRoot: cfg.FrameworkRoot,
-		frameworkRef:  cfg.FrameworkRef,
-		cacheRoot:     cfg.CacheRoot,
-		apeBin:        cfg.ApeBin,
-		apeBinRecheck: cfg.ApeBinRecheck,
-		credentials:   cfg.Credentials,
-		loadProfile:   cfg.LoadProfile,
-		compose:       sandbox.Compose,
+		stateDir:       cfg.StateDir,
+		hostHome:       cfg.HostHome,
+		natsURL:        cfg.NatsURL,
+		credsExpiry:    cfg.CredsExpiry,
+		telemetry:      cfg.Telemetry,
+		network:        network,
+		egress:         cfg.Egress,
+		frameworkRoot:  cfg.FrameworkRoot,
+		frameworkRef:   cfg.FrameworkRef,
+		governanceRoot: cfg.GovernanceRoot,
+		governanceRef:  cfg.GovernanceRef,
+		cacheRoot:      cfg.CacheRoot,
+		apeBin:         cfg.ApeBin,
+		apeBinRecheck:  cfg.ApeBinRecheck,
+		credentials:    cfg.Credentials,
+		loadProfile:    cfg.LoadProfile,
+		compose:        sandbox.Compose,
 	}
 }
 
@@ -238,6 +248,17 @@ func (r *Resolver) resolveMounts(spec *sandbox.WorkspaceSpec, req workspace.Crea
 	}
 	if served {
 		spec.Mounts = append(spec.Mounts, fw)
+	}
+	// 1a. The governance repo, the same way. APEX_GOVERNANCE_REPO is set here
+	// rather than in the image because nothing else sets it, and only when the
+	// mount exists, so a workspace never points at an empty directory.
+	gov, served, err := r.governanceMount(req.GovernanceRef)
+	if err != nil {
+		return err
+	}
+	if served {
+		spec.Mounts = append(spec.Mounts, gov)
+		spec.Env = append(spec.Env, "APEX_GOVERNANCE_REPO="+sandbox.GovernanceDest)
 	}
 
 	// 1b. The `ape` binary: read-only, from THIS daemon's installation, never the request
@@ -368,29 +389,41 @@ func (r *Resolver) resolveCaches(spec *sandbox.WorkspaceSpec, requested []string
 // path. A missing ref is a clear, actionable error — aped never fetches (it holds
 // no credentials, and a workspace must be buildable offline).
 func (r *Resolver) frameworkMount(ref string) (mount workspace.MountSpec, served bool, err error) {
-	if strings.TrimSpace(r.frameworkRoot) == "" {
-		return workspace.MountSpec{}, false, nil // this node does not serve the framework
+	return refMount("framework", r.frameworkRoot, r.frameworkRef, ref, sandbox.FrameworkDest)
+}
+
+// governanceMount is frameworkMount for the governance repo.
+func (r *Resolver) governanceMount(ref string) (mount workspace.MountSpec, served bool, err error) {
+	return refMount("governance", r.governanceRoot, r.governanceRef, ref, sandbox.GovernanceDest)
+}
+
+// refMount resolves a read-only mount of <root>/<ref> at dest: the requested
+// ref, else the node's default; none when the node serves no root or names no
+// ref.
+func refMount(kind, root, defaultRef, ref, dest string) (mount workspace.MountSpec, served bool, err error) {
+	if strings.TrimSpace(root) == "" {
+		return workspace.MountSpec{}, false, nil // this node does not serve it
 	}
 	want := strings.TrimSpace(ref)
 	if want == "" {
-		want = r.frameworkRef
+		want = defaultRef
 	}
 	if want == "" {
 		return workspace.MountSpec{}, false, nil
 	}
 	if err := sandbox.ValidateMountName(want); err != nil {
-		return workspace.MountSpec{}, false, fmt.Errorf("%w: framework ref: %w", workspace.ErrValidation, err)
+		return workspace.MountSpec{}, false, fmt.Errorf("%w: %s ref: %w", workspace.ErrValidation, kind, err)
 	}
-	src := filepath.Join(r.frameworkRoot, want)
+	src := filepath.Join(root, want)
 	st, serr := os.Stat(src)
 	if serr != nil || !st.IsDir() {
 		return workspace.MountSpec{}, false, fmt.Errorf(
-			"%w: framework ref %q is not materialized on this node (expected %s). "+
-				"Materialize it host-side: ape sandbox framework materialize %s",
-			workspace.ErrValidation, want, src, want,
+			"%w: %s ref %q is not materialized on this node (expected %s). "+
+				"Materialize it host-side: ape sandbox %s materialize %s",
+			workspace.ErrValidation, kind, want, src, kind, want,
 		)
 	}
-	return workspace.MountSpec{Source: src, Dest: sandbox.FrameworkDest, ReadOnly: true}, true, nil
+	return workspace.MountSpec{Source: src, Dest: dest, ReadOnly: true}, true, nil
 }
 
 // resolveEgress folds the workspace's granted egress into the spec (PLAN-21 D1).
