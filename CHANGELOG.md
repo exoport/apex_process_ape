@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.7.0 (2026-10-06)
 
 - **The framework and governance clones are kept at their newest release**
   (class C: `ape framework setup/update`, `ape config resolve` and
