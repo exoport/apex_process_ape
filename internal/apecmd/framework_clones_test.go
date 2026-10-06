@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/framework"
@@ -32,7 +33,9 @@ func governanceIndex(t *testing.T, clone string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(clone, "governance", "patterns", "index.yaml"))
 	require.NoError(t, err)
-	return string(b)
+	// A checkout follows the machine's core.autocrlf (true on the Windows
+	// CI runners), unlike the install's export, which pins it off.
+	return strings.ReplaceAll(string(b), "\r\n", "\n")
 }
 
 // The update moves both clones to their newest release before installing,
