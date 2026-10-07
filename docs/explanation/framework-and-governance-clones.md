@@ -81,7 +81,10 @@ check access.
 **First, before any check that could refuse the install**, the framework
 release is resolved:
 
-1. **Clone** ape's own copy when it does not exist yet.
+1. **Clone** ape's own copy when it does not exist yet. This happens even
+   under `--no-fetch`: a first clone is the only way to have a release to
+   install at all, and `--no-fetch` means "use the releases the clone already
+   holds", which an absent clone holds none of.
 2. **Fetch:** `git fetch --tags --force origin` under the clone's lock (an
    exclusive lock on `<git dir>/ape-sync.lock`, so two projects updating at
    once cannot interleave), unless `--no-fetch`. A failed fetch warns and
@@ -198,6 +201,14 @@ governance:
   version_tag: v0.1.2
   git_hash: 9a0e…
 ```
+
+`repo_origin` (here and under `framework:`) is the URL the clone is
+**configured** with (`git config remote.origin.url`), never the machine's
+`url.<base>.insteadOf` rewrite of it, which `git remote get-url` returns.
+The record is committed: a rewrite would put a private ssh host alias in the
+project's history, and two machines with different rules would flip it on
+every update. Projects installed with an earlier ape may see `repo_origin`
+change once, back to the configured URL.
 
 It records which canon this project's update synced. It is not a pin:
 skills read the clone, which moves when any project on the machine updates.

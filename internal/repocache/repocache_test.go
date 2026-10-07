@@ -352,3 +352,17 @@ func TestSync_ConcurrentRunsShareOneClone(t *testing.T) {
 func TestState_NoCloneIsEmpty(t *testing.T) {
 	require.Empty(t, State(context.Background(), Clone{Kind: KindGovernance}))
 }
+
+// The recorded origin is the URL the clone is configured with, never the
+// machine's insteadOf rewrite of it: it lands in committed history, where a
+// private ssh alias must not, and where two machines' rules would flip it.
+func TestPrepare_OriginIsTheConfiguredURLNotTheRewrite(t *testing.T) {
+	c := userClone(t, origin(t))
+	git(t, c.Path, "remote", "set-url", "origin", "https://example.invalid/o/r.git")
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "url.git@private.alias:.insteadOf")
+	t.Setenv("GIT_CONFIG_VALUE_0", "https://example.invalid/")
+	tg, err := Prepare(context.Background(), c, SyncOptions{NoFetch: true})
+	require.NoError(t, err)
+	require.Equal(t, "https://example.invalid/o/r.git", tg.Origin)
+}

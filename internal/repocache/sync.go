@@ -151,7 +151,9 @@ func Prepare(ctx context.Context, c Clone, opts SyncOptions) (Target, error) {
 		return t, err
 	}
 	t.Cloned = cloned
-	t.Origin, _ = runGit(ctx, c.Path, "remote", "get-url", "origin")
+	// The configured URL, not get-url's: that applies the machine's
+	// insteadOf rules, and Origin is recorded in committed history.
+	t.Origin, _ = runGit(ctx, c.Path, "config", "--get", "remote.origin.url")
 
 	if !Writable(c.Path) {
 		return preparePinned(ctx, c, opts, t)

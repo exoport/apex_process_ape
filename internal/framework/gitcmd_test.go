@@ -248,3 +248,18 @@ func TestSkillsPorcelain_DistinguishesUntrackedFromModified(t *testing.T) {
 	require.GreaterOrEqual(t, untracked, 1, "expected at least one untracked apex-* path")
 	require.GreaterOrEqual(t, modified, 1, "expected at least one modified apex-* path")
 }
+
+// framework.yaml's repo_origin is committed: it must be the configured URL,
+// never the machine's insteadOf rewrite (a private ssh alias that would leak
+// into history and flip between machines).
+func TestRemoteOrigin_IsTheConfiguredURLNotTheRewrite(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	gitIn(t, dir, "config", "remote.origin.url", "https://example.invalid/o/r.git")
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "url.git@private.alias:.insteadOf")
+	t.Setenv("GIT_CONFIG_VALUE_0", "https://example.invalid/")
+	got, err := framework.RemoteOrigin(context.Background(), dir)
+	require.NoError(t, err)
+	require.Equal(t, "https://example.invalid/o/r.git", got)
+}

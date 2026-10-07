@@ -36,6 +36,12 @@
   `Governance-Commit:` trailers. An update where only governance moved is
   committed as `chore(framework): sync governance vX.Y.Z`. `ape framework status` prints where each clone is and
   where its path came from.
+- **`repo_origin` in `_apex/framework.yaml` is the configured URL**, not the
+  machine's `insteadOf` rewrite of it (`git remote get-url` applied the
+  rewrite, so a private ssh alias such as `git@github.diegos_exo:…` landed
+  in committed history, and machines with different rules flipped it).
+  Applies to `framework:` and `governance:`; a project installed by an
+  earlier ape may see `repo_origin` change once.
 - **A read-only clone is pinned:** never fetched or moved, and the framework
   release checked out there is the one installed. That is the sandbox case.
 - **`ape sandbox governance materialize|ls`, `aped front

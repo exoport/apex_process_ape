@@ -84,10 +84,16 @@ func ExactTag(ctx context.Context, repoDir string) (string, error) {
 	return tag, nil
 }
 
-// RemoteOrigin returns the URL for the "origin" remote, or an error
-// if no such remote is configured.
+// RemoteOrigin returns the URL configured for the "origin" remote, or an
+// error if no such remote is configured.
+//
+// The CONFIGURED value, not `git remote get-url`'s: get-url applies the
+// machine's url.<base>.insteadOf rules, so it returned a private ssh host
+// alias (git@github.diegos_exo:…) that then landed in the committed
+// framework.yaml, and two machines with different rules flipped it — and
+// committed the flip — on every update.
 func RemoteOrigin(ctx context.Context, repoDir string) (string, error) {
-	return runGit(ctx, repoDir, "remote", "get-url", "origin")
+	return runGit(ctx, repoDir, "config", "--get", "remote.origin.url")
 }
 
 // IsClean reports whether the working tree has no modifications.
