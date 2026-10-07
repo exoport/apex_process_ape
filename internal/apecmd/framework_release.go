@@ -411,6 +411,9 @@ func commitInstall(ctx context.Context, w io.Writer, projectRoot string, before 
 	if len(migrations) > 0 {
 		msg += "\nFramework-Migrations: " + strings.Join(migrations, ", ")
 	}
+	if g := meta.Governance; g != nil && g.GitHash != "" {
+		msg += "\nGovernance-Version: " + g.VersionTag + "\nGovernance-Commit: " + g.GitHash
+	}
 	msg += "\n" + generatorTrailer + "\n"
 	if err := commitPaths(ctx, projectRoot, paths, msg); err != nil {
 		return err

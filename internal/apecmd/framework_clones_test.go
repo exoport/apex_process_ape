@@ -51,7 +51,8 @@ func TestFrameworkUpdate_SyncsBothClonesToTheirRelease(t *testing.T) {
 	gitRun(t, fw, "reset", "-q", "--hard", "v1.2.0")
 
 	gov := filepath.Join(t.TempDir(), "gov")
-	gitRun(t, "", "clone", "-q", governanceOrigin(t), gov)
+	govOrigin := governanceOrigin(t)
+	gitRun(t, "", "clone", "-q", govOrigin, gov)
 	gitRun(t, gov, "reset", "-q", "--hard", "v0.1.0")
 	root := committedProject(t)
 	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "config.local.yaml"),
@@ -71,11 +72,26 @@ func TestFrameworkUpdate_SyncsBothClonesToTheirRelease(t *testing.T) {
 	require.NotNil(t, meta.Governance)
 	require.Equal(t, "v0.2.0", meta.Governance.VersionTag)
 	require.Equal(t, gitRun(t, gov, "rev-parse", "HEAD"), meta.Governance.GitHash)
+	msg := gitRun(t, root, "log", "-1", "--format=%B")
+	require.Contains(t, msg, "Governance-Version: v0.2.0")
+	require.Contains(t, msg, "Governance-Commit: "+meta.Governance.GitHash)
 
 	// Already there: a second run moves nothing.
 	out, err = runFramework(t, "update", fw, root, "--no-fetch")
 	require.NoError(t, err, out)
 	require.Contains(t, out, "governance repo: "+gov+" (from config) at v0.2.0 (already there)")
+
+	// A governance release alone: the commit says so, and which canon.
+	gitRun(t, govOrigin, "tag", "v0.3.0", "main")
+	out, err = runFramework(t, "update", fw, root, "--no-fetch")
+	require.NoError(t, err, out)
+	require.Contains(t, out, "governance repo: "+gov+" (from config) at v0.2.0", "--no-fetch covers governance too")
+	out, err = runFramework(t, "update", fw, root)
+	require.NoError(t, err, out)
+	msg = gitRun(t, root, "log", "-1", "--format=%B")
+	require.Contains(t, msg, "chore(framework): sync governance v0.3.0")
+	require.Contains(t, msg, "Framework-Version: v1.3.0")
+	require.Contains(t, msg, "Governance-Version: v0.3.0")
 }
 
 // A dirty user clone stops the update before anything is written, and
@@ -194,7 +210,7 @@ func TestFrameworkUpdate_KeptCandidateMovesNoClone(t *testing.T) {
 
 	out, err := runFramework(t, "update", fw, root, "--no-fetch")
 	require.NoError(t, err, out)
-	require.NotContains(t, out, "framework repo:")
+	require.Contains(t, out, "framework repo: "+fw+" (from flag) (not moved: installed rc kept)")
 	require.Equal(t, at, gitRun(t, fw, "rev-parse", "HEAD"))
 }
 

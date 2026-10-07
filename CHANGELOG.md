@@ -32,7 +32,9 @@
   `cache_missing` / empty) says where it came from. The reconciliation skills see the
   fallbacks once the framework moves them to `config resolve`.
 - **`_apex/framework.yaml` records the governance release synced**, in a new
-  `governance:` block. `ape framework status` prints where each clone is and
+  `governance:` block, and the install commit gains `Governance-Version:` /
+  `Governance-Commit:` trailers. An update where only governance moved is
+  committed as `chore(framework): sync governance vX.Y.Z`. `ape framework status` prints where each clone is and
   where its path came from.
 - **A read-only clone is pinned:** never fetched or moved, and the framework
   release checked out there is the one installed. That is the sandbox case.

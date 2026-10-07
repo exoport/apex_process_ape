@@ -202,6 +202,15 @@ governance:
 It records which canon this project's update synced. It is not a pin:
 skills read the clone, which moves when any project on the machine updates.
 
+The install commit carries it too, as `Governance-Version:` and
+`Governance-Commit:` trailers after the framework's. An update where only
+the governance clone moved (same framework release, no migration) is titled
+for what it did, `chore(framework): sync governance v0.1.3`, rather than as a
+framework update that would read as a no-op.
+
+An update that keeps a newer installed candidate moves neither clone and
+says so: `framework repo: <path> (not moved: installed rc kept)`.
+
 ## Reporting where things are
 
 `ape framework status` prints each clone's path, where it came from

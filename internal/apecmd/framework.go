@@ -11,6 +11,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/migration"
 	"github.com/exoport/apex_process_ape/internal/output"
+	"github.com/exoport/apex_process_ape/internal/repocache"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -356,6 +357,10 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 			}
 			sel, done, err := prepareInstall(cmd.Context(), repo, projectRoot, sel, !rf.noCommit, rf.version == "")
 			if errors.Is(err, errKeepInstalled) {
+				if fwTarget.Tag != "" {
+					fmt.Fprintf(cloneNoteWriter(cmd, format), "framework repo: %s (not moved: installed rc kept)\n",
+						repocache.Describe(clone))
+				}
 				return nil
 			}
 			if err != nil {
@@ -369,6 +374,7 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 			if err != nil {
 				return err
 			}
+			prior, _ := framework.ReadMetadata(projectRoot)
 			res, err := framework.Update(cmd.Context(), &framework.UpdateOptions{
 				FrameworkRepo: repo,
 				ProjectRoot:   projectRoot,
@@ -392,7 +398,7 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 			); err != nil {
 				return err
 			}
-			if err := migrateAndCommitUpdate(cmd, projectRoot, res.Metadata, untracked, noMigrate, !rf.noCommit); err != nil {
+			if err := migrateAndCommitUpdate(cmd, projectRoot, prior, res.Metadata, untracked, noMigrate, !rf.noCommit); err != nil {
 				return err
 			}
 			if repair {
@@ -419,7 +425,7 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 // migrateAndCommitUpdate is the half of `update` after the install: the
 // project-data and upgrade migrations (unless --no-migrate), then the one
 // commit recording the install and the migrations it ran.
-func migrateAndCommitUpdate(cmd *cobra.Command, projectRoot string, installed framework.Metadata,
+func migrateAndCommitUpdate(cmd *cobra.Command, projectRoot string, prior *framework.Metadata, installed framework.Metadata,
 	untracked map[string]bool, noMigrate, commit bool,
 ) error {
 	var applied []string
@@ -444,7 +450,31 @@ func migrateAndCommitUpdate(cmd *cobra.Command, projectRoot string, installed fr
 		meta = *m
 	}
 	return commitInstall(cmd.Context(), cmd.OutOrStdout(), projectRoot, untracked,
-		"chore(framework): update APEX framework to "+installLabel(meta), meta, applied)
+		updateSubject(prior, &meta, applied), meta, applied)
+}
+
+// updateSubject names an update commit. One where only the governance
+// clone moved — same framework release, no migration — says so: titled as a
+// framework update it reads as a no-op re-update, and its trailers would not
+// say which canon it synced.
+func updateSubject(prior, meta *framework.Metadata, applied []string) string {
+	if prior != nil && len(applied) == 0 && meta.Governance != nil &&
+		prior.Framework.VersionTag == meta.Framework.VersionTag && prior.Framework.GitHash == meta.Framework.GitHash &&
+		(prior.Governance == nil || *prior.Governance != *meta.Governance) {
+		return "chore(framework): sync governance " + governanceLabel(meta.Governance)
+	}
+	return "chore(framework): update APEX framework to " + installLabel(*meta)
+}
+
+// governanceLabel names a governance sync: its release, else its commit.
+func governanceLabel(g *framework.GovernanceInfo) string {
+	if g.VersionTag != "" {
+		return g.VersionTag
+	}
+	if len(g.GitHash) >= installLabelSHA {
+		return g.GitHash[:installLabelSHA]
+	}
+	return g.GitHash
 }
 
 // runFrameworkUpdatePlan is `update --plan`: the upgrade-migration plan the

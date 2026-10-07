@@ -177,7 +177,11 @@ Generator: ape framework update
 
 - `ape framework setup` writes `chore(framework): install APEX framework v0.27.0`
   with the same trailers.
-- `Framework-Migrations:` is present only when a migration was applied. A
+- `Framework-Migrations:` is present only when a migration was applied.
+- `Governance-Version:` / `Governance-Commit:` (ape v0.7.0) are present when
+  the project's governance clone was synced. An update where only it moved
+  is titled `chore(framework): sync governance vX.Y.Z`; see
+  [The framework and governance clones are caches](framework-and-governance-clones.md). A
   judged migration never runs, so it never appears.
 - `--repair` runs after commit 2, and what it changes is left uncommitted.
 - If the install changed nothing (already at that release, files
