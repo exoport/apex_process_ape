@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/mod/semver"
 	"gopkg.in/yaml.v3"
 )
 
@@ -262,6 +263,25 @@ func init() {
 	applyPriceTable(tbl)
 }
 
+// minClaude maps a model id to the oldest Claude Code version known to
+// recognize it. Loaded from the embedded table's `min_claude:`.
+var minClaude map[string]string
+
+// MinClaude returns the oldest Claude Code version known to recognize model
+// ("2.1.294"), or "" when the table records none. The model is normalized
+// first, so a family word answers for the id it resolves to.
+//
+// It exists because ape, not Claude Code, turns a family word into an id: a
+// release pins `haiku` to claude-haiku-5-5, and a Claude Code that predates
+// that model runs it anyway, as an unrecognized model with a guessed context
+// window and no cost basis. Claude Code 2.1.292 does exactly that with Haiku
+// 5.5, which changes when a step compacts. Only the embedded table carries
+// the floor: it describes this binary's aliases, which an override file
+// cannot change.
+func MinClaude(model string) string {
+	return minClaude[NormalizeModel(model)]
+}
+
 // parsePriceTable decodes and validates a price-table document.
 func parsePriceTable(bs []byte) (priceTableFile, error) {
 	var tbl priceTableFile
@@ -274,6 +294,9 @@ func parsePriceTable(bs []byte) (priceTableFile, error) {
 	for model, row := range tbl.Prices {
 		if err := row.validate(model); err != nil {
 			return tbl, err
+		}
+		if row.MinClaude != "" && !semver.IsValid("v"+row.MinClaude) {
+			return tbl, fmt.Errorf("model %q: min_claude %q is not a version like 2.1.294", model, row.MinClaude)
 		}
 	}
 	for _, f := range tbl.Families {
@@ -314,10 +337,14 @@ func applyPriceTable(tbl priceTableFile) {
 
 	Prices = make(map[string]ModelPrice, len(tbl.Prices))
 	contextWindows = make(map[string]int, len(tbl.Prices))
+	minClaude = make(map[string]string, len(tbl.Prices))
 	for model, row := range tbl.Prices {
 		Prices[model] = row.price()
 		if row.ContextWindow > 0 {
 			contextWindows[model] = row.ContextWindow
+		}
+		if row.MinClaude != "" {
+			minClaude[model] = row.MinClaude
 		}
 	}
 

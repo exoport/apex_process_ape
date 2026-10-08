@@ -394,6 +394,26 @@ func (s *Spec) Effective(stageName string, stepIdx int) (model, effort, agent st
 	return model, effort, agent, commit, nil
 }
 
+// Models returns every distinct effective `--model` value the spec's steps
+// spawn with, canonicalized as Effective resolves them, sorted. A step with
+// no model (claude's default) contributes nothing.
+func (s *Spec) Models() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, stage := range s.Stages() {
+		for i := range stage.Chain {
+			model, _, _, _, err := s.Effective(stage.Name, i)
+			if err != nil || model == "" || seen[model] {
+				continue
+			}
+			seen[model] = true
+			out = append(out, model)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // ModelWarning is one spec location whose `model:` value ape could not
 // attribute to a known Claude model family.
 type ModelWarning struct {

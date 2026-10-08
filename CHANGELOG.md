@@ -11,6 +11,17 @@
   sub-agent's `model: haiku`, which Claude Code resolves) was priced at the
   family estimate, $1 / $5, which is 10x high. Its row also gives it an
   effort key: `ape config effort` lists `claude-haiku-5-5` under `haiku`.
+- **`haiku` needs Claude Code 2.1.294 or newer, and ape now says so when
+  the installed claude is older.** ape turns family words into model ids
+  itself, so a release can start a model that the local Claude Code
+  predates. Claude Code 2.1.292 runs `claude-haiku-5-5` anyway, as an
+  unrecognized model with a 200k context window and no cost basis, and the
+  wrong window changes when a step compacts. A price row can now record
+  `min_claude:`, the oldest Claude Code measured to know that id, and
+  `ape task`, `ape pipeline` and `ape prompt` print a warning before the
+  first spawn for each model the installed claude is too old for. It is a
+  warning, not a refusal. Only Haiku 5.5 has a floor recorded (2.1.294); a
+  model with none warns about nothing. The eval reported this against rc.1.
 - **Prices can depend on prompt length.** Haiku 5.5 bills $0.10 / $0.50 per
   MTok for a prompt of up to 100,000 tokens and $0.50 / $2.50 above that,
   with the standard cache multiples on whichever rate applies. A price row

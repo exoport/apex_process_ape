@@ -22,6 +22,12 @@
 # prompt length; one flat row at its short-prompt rate would price every
 # turn past 100,000 tokens 5x low.
 #
+# `min_claude:` is OPTIONAL: the oldest Claude Code version known to
+# recognize the id. ape resolves family words itself, so a release can
+# start a model the installed Claude Code predates; `ape task`, `pipeline`
+# and `prompt` warn when it does. Record only a MEASURED version — absent
+# means no known floor, and a guessed one warns about a claude that works.
+#
 # `context_window:` is the model's usable context in TOKENS, and it is
 # OPTIONAL. WHERE THE VALUES COME FROM: the Models API — `GET /v1/models/{id}`
 # returns `max_input_tokens`, which is the context window (there is no
@@ -182,6 +188,9 @@ prices:
     base_input: 0.10
     output: 0.50
     context_window: 1000000
+    # 2.1.292 runs it as an unrecognized model (200k window, no cost basis);
+    # 2.1.294 is the first version measured to know it.
+    min_claude: "2.1.294"
     long_prompt:
       over: 100000
       base_input: 0.50

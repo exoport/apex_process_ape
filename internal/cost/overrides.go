@@ -68,6 +68,10 @@ type priceRow struct {
 	// Optional; absent means one rate at every prompt length. Claude Haiku
 	// 5.5 is the first model priced this way.
 	LongPrompt *longPromptRow `yaml:"long_prompt,omitempty"`
+	// MinClaude is the oldest Claude Code version known to recognize this
+	// id, e.g. "2.1.294". Optional; absent means no known floor. Read only
+	// from the embedded table (see MinClaude in prices.go).
+	MinClaude string `yaml:"min_claude,omitempty"`
 }
 
 type longPromptRow struct {

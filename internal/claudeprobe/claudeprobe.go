@@ -171,6 +171,16 @@ func withDefaults(o Options) Options {
 	return o
 }
 
+// InstalledVersion returns the installed claude's version ("2.1.294"), or
+// "" when claudeBin is not a runnable Claude Code.
+func InstalledVersion(ctx context.Context, claudeBin string) string {
+	m := versionRe.FindStringSubmatch(claudeVersionOutput(ctx, claudeBin))
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
 func claudeVersionOutput(ctx context.Context, claudeBin string) string {
 	vctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

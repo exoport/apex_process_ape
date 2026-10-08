@@ -882,7 +882,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	}
 	// Before any stage spawns: a claude this ape cannot drive fails here, in
 	// seconds, rather than as a stalled first stage.
-	if err := ensureClaude(ctx, cfg.claudeBin); err != nil {
+	if err := ensureClaude(ctx, cfg.claudeBin, spec.Models()...); err != nil {
 		return err
 	}
 

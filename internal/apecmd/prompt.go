@@ -450,7 +450,7 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	}
 	progressf("ape prompt: bridged claude (id %s)\n  record: %s\n", promptID, runDir)
 
-	if err := ensureClaude(runCtx, "claude"); err != nil {
+	if err := ensureClaude(runCtx, "claude", o.model); err != nil {
 		return promptResult{}, ExitREPLNotReady, err
 	}
 

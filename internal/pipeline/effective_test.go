@@ -438,3 +438,34 @@ func mustLoadInline(t *testing.T, src string) *Spec {
 	}
 	return &spec
 }
+
+// Models is what `ape pipeline` checks against the installed claude before
+// the first spawn, so it must list every step's effective model — inherited
+// ones included — once each, and skip steps that leave the model to claude.
+func TestSpec_Models_ListsEveryEffectiveModelOnce(t *testing.T) {
+	spec := mustLoadInline(t, `
+name: design
+model: "sonnet"
+stages:
+  s1:
+    chain:
+      - skill: a
+      - skill: b
+        model: haiku
+  s2:
+    model: "opus[1m]"
+    chain:
+      - skill: c
+      - skill: d
+        model: Haiku
+`)
+	got := spec.Models()
+	want := []string{"claude-haiku-5-5", "claude-opus-5-5[1m]", "claude-sonnet-5-5"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("Models() = %v, want %v", got, want)
+	}
+
+	if got := mustLoadInline(t, "name: x\nstages:\n  s1:\n    chain:\n      - skill: a\n").Models(); len(got) != 0 {
+		t.Errorf("a spec with no model anywhere listed %v", got)
+	}
+}

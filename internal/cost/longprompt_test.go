@@ -188,3 +188,21 @@ func TestOverrideTierAndCacheReadSurviveSaveRoundTrip(t *testing.T) {
 		t.Errorf("persisted override = %+v, want %+v", p, want)
 	}
 }
+
+// min_claude records the oldest Claude Code measured to know a model. It is
+// what lets ape warn when its own alias starts a model the installed claude
+// predates.
+func TestMinClaude(t *testing.T) {
+	t.Parallel()
+
+	if got := MinClaude("haiku"); got != "2.1.294" {
+		t.Errorf("MinClaude(haiku) = %q, want 2.1.294 (resolved through the alias)", got)
+	}
+	if got := MinClaude("claude-opus-5-5"); got != "" {
+		t.Errorf("MinClaude(opus 5.5) = %q, want none recorded", got)
+	}
+	bad := "prices:\n  claude-x-5:\n    base_input: 1\n    output: 5\n    min_claude: latest\n"
+	if _, err := parsePriceTable([]byte(bad)); err == nil {
+		t.Error("a min_claude that is not a version was accepted")
+	}
+}
