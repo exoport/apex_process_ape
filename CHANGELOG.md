@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v0.8.0 (unreleased)
+## v0.8.0 (2026-10-08)
 
 - **`haiku` now starts Claude Haiku 5.5** (class B: a model alias). Claude
   Code 2.1.294 resolves its own `haiku` to `claude-haiku-5-5`, and ape's
