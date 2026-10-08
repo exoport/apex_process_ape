@@ -26,6 +26,11 @@ type RepricedFile struct {
 	// Unpriced lists model ids that still have no rate — repricing cannot
 	// fix those, and the file's total remains a lower bound.
 	Unpriced []string `json:"unpriced,omitempty" yaml:"unpriced,omitempty"`
+	// LowerBound lists models priced by prompt length whose stored cost was
+	// outside what their token totals can cost, and was replaced by the
+	// least they can cost: the per-turn prompt lengths that would make it
+	// exact are not on disk.
+	LowerBound []string `json:"lower_bound,omitempty" yaml:"lower_bound,omitempty"`
 	// Written is true when --write actually rewrote the file.
 	Written bool `json:"written" yaml:"written"`
 }
@@ -44,6 +49,7 @@ type RepriceReport struct {
 	OldTotal      float64        `json:"old_total_usd"            yaml:"old_total_usd"`
 	NewTotal      float64        `json:"new_total_usd"            yaml:"new_total_usd"`
 	StillUnpriced []string       `json:"still_unpriced,omitempty" yaml:"still_unpriced,omitempty"`
+	LowerBound    []string       `json:"lower_bound,omitempty"    yaml:"lower_bound,omitempty"`
 }
 
 // Reprice recomputes stored cost figures from the token counts already on
@@ -68,6 +74,7 @@ type RepriceReport struct {
 func Reprice(projectRoot string, write bool) (RepriceReport, error) {
 	var rep RepriceReport
 	unpriced := map[string]bool{}
+	lowerBound := map[string]bool{}
 
 	paths, err := repriceTargets(projectRoot)
 	if err != nil {
@@ -90,6 +97,9 @@ func Reprice(projectRoot string, write bool) (RepriceReport, error) {
 		for _, m := range f.Unpriced {
 			unpriced[m] = true
 		}
+		for _, m := range f.LowerBound {
+			lowerBound[m] = true
+		}
 		if f.Changed() {
 			rep.Changed++
 		}
@@ -104,6 +114,10 @@ func Reprice(projectRoot string, write bool) (RepriceReport, error) {
 		rep.StillUnpriced = append(rep.StillUnpriced, m)
 	}
 	sort.Strings(rep.StillUnpriced)
+	for m := range lowerBound {
+		rep.LowerBound = append(rep.LowerBound, m)
+	}
+	sort.Strings(rep.LowerBound)
 	sort.Slice(rep.Files, func(i, j int) bool { return rep.Files[i].Path < rep.Files[j].Path })
 	return rep, nil
 }
@@ -253,6 +267,13 @@ func repriceNode(node *yaml.Node, day time.Time, res *RepricedFile) bool {
 				continue
 			}
 			cost := TurnCost(usageFromNode(rec), price)
+			if price.LongPrompt.Over > 0 {
+				var exact bool
+				cost, exact = repriceTiered(rec, price)
+				if !exact {
+					res.LowerBound = appendUnique(res.LowerBound, NormalizeModel(model))
+				}
+			}
 			if setNodeFloat(rec, "cost_usd", cost) {
 				changed = true
 			}
@@ -285,6 +306,34 @@ func repriceNode(node *yaml.Node, day time.Time, res *RepricedFile) bool {
 		}
 	}
 	return changed
+}
+
+// repriceTiered reprices one per-model record of a model whose rate depends
+// on prompt length. The record holds token totals summed over many turns, so
+// the per-turn prompt lengths that select the rate are gone: passing the
+// totals to TurnCost would read them as one enormous prompt and bill the
+// whole record at the long-prompt rate.
+//
+// What the totals do fix is a range. Every turn at the short-prompt rate is
+// the least the record can cost, every turn at the long one the most. A
+// stored cost inside that range is consistent with the per-turn pricing it
+// was recorded with, and is kept (exact = true). One outside it was priced
+// at a rate this model never bills — the family estimate, before the model
+// had a row — and is replaced by the least it can cost (exact = false), so
+// the record stays a lower bound rather than a guess.
+func repriceTiered(rec *yaml.Node, price ModelPrice) (cost float64, exact bool) {
+	u := usageFromNode(rec)
+	short := price
+	short.LongPrompt = PromptTier{}
+	long := short
+	long.BaseInput, long.Output = price.LongPrompt.BaseInput, price.LongPrompt.Output
+	lo, hi := TurnCost(u, short), TurnCost(u, long)
+
+	stored := nodeFloat(rec)
+	if (stored > lo || floatNear(stored, lo)) && (stored < hi || floatNear(stored, hi)) {
+		return stored, true
+	}
+	return lo, false
 }
 
 // usageFromNode reads a stored per-model record's token counts back into a

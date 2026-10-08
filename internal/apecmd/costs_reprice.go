@@ -43,6 +43,11 @@ Artefacts covered:
 Chat session.yaml has no per-model breakdown, so there is nothing to
 reprice from — those are skipped.
 
+A model priced by prompt length (Claude Haiku 5.5) cannot be repriced
+exactly: the stored totals do not say how long each turn's prompt was. A
+stored cost those totals could produce is kept; any other is replaced by
+the least they can cost, and the model is reported as a lower bound.
+
 Dry run by default: it prints what would change and touches nothing. Pass
 --write to apply, then run ` + "`ape costs roll`" + ` to refresh the rollup cache.
 Only cost_usd scalars are rewritten; key order, comments, and every other
@@ -97,6 +102,13 @@ func printRepriceHuman(rep cost.RepriceReport, write bool) {
 		fmt.Printf("⚠ still unpriced: %v\n", rep.StillUnpriced)
 		fmt.Println("  those runs keep their stored cost and remain a lower bound.")
 		fmt.Println("  add the exact rate(s) first — `ape costs coverage` shows the gap.")
+	}
+	if len(rep.LowerBound) > 0 {
+		fmt.Println()
+		fmt.Printf("⚠ lower bound: %v\n", rep.LowerBound)
+		fmt.Println("  priced by prompt length, and the per-turn prompt lengths are not on disk;")
+		fmt.Println("  a stored cost no per-turn pricing could produce was replaced by the least")
+		fmt.Println("  the run's tokens can cost.")
 	}
 	fmt.Println()
 	if !write {

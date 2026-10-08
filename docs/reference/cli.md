@@ -2053,6 +2053,11 @@ Artefacts covered:
 Chat session.yaml has no per-model breakdown, so there is nothing to
 reprice from — those are skipped.
 
+A model priced by prompt length (Claude Haiku 5.5) cannot be repriced
+exactly: the stored totals do not say how long each turn's prompt was. A
+stored cost those totals could produce is kept; any other is replaced by
+the least they can cost, and the model is reported as a lower bound.
+
 Dry run by default: it prints what would change and touches nothing. Pass
 --write to apply, then run `ape costs roll` to refresh the rollup cache.
 Only cost_usd scalars are rewritten; key order, comments, and every other

@@ -124,7 +124,7 @@ func TestStep_UnmarshalRecordsCommitSet(t *testing.T) {
 //
 // wantModel values are the CANONICALIZED form: whichever level wins the
 // cascade, Effective then resolves a bare family word to that family's
-// current generation ("haiku" → "claude-haiku-4-5") and preserves any
+// current generation ("haiku" → "claude-haiku-5-5") and preserves any
 // context-window suffix. Precedence and canonicalization are orthogonal —
 // these cases pin the first while showing the second.
 func TestSpec_Effective_ModelEffortAgentPrecedence(t *testing.T) {
@@ -188,7 +188,7 @@ stages:
         effort: low
         agent: apex-agent-dev
 `,
-			wantModel:  "claude-haiku-4-5",
+			wantModel:  "claude-haiku-5-5",
 			wantEffort: "low",
 			wantAgent:  "apex-agent-dev",
 		},

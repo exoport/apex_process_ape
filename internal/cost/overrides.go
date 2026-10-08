@@ -64,6 +64,44 @@ type priceRow struct {
 	// error. Living on the shared row means `ape costs update --from` can
 	// correct it without a rebuild, exactly as it corrects a rate.
 	CacheReadMul float64 `yaml:"cache_read_mul,omitempty"`
+	// LongPrompt is the rate for a prompt longer than `over` tokens.
+	// Optional; absent means one rate at every prompt length. Claude Haiku
+	// 5.5 is the first model priced this way.
+	LongPrompt *longPromptRow `yaml:"long_prompt,omitempty"`
+}
+
+type longPromptRow struct {
+	Over      int     `yaml:"over"`
+	BaseInput float64 `yaml:"base_input"`
+	Output    float64 `yaml:"output"`
+}
+
+// price builds the ModelPrice a row describes.
+func (r priceRow) price() ModelPrice {
+	p := ModelPrice{BaseInput: r.BaseInput, Output: r.Output, CacheReadMul: r.CacheReadMul}
+	if r.LongPrompt != nil {
+		p.LongPrompt = PromptTier{Over: r.LongPrompt.Over, BaseInput: r.LongPrompt.BaseInput, Output: r.LongPrompt.Output}
+	}
+	return p
+}
+
+// validate rejects a row that cannot be a real rate, its long-prompt tier
+// included: a tier with a misspelled key would bill every turn past the
+// threshold at $0, the same silent zero validatePriceRow exists to stop.
+func (r priceRow) validate(model string) error {
+	if err := validatePriceRow(model, r.BaseInput, r.Output); err != nil {
+		return err
+	}
+	if r.LongPrompt == nil {
+		return nil
+	}
+	if r.LongPrompt.Over <= 0 {
+		return fmt.Errorf("model %q: long_prompt.over must be a positive token count", model)
+	}
+	if err := validatePriceRow(model, r.LongPrompt.BaseInput, r.LongPrompt.Output); err != nil {
+		return fmt.Errorf("long_prompt: %w", err)
+	}
+	return nil
 }
 
 // OverrideEntry is a parsed override: the price plus the optional date it
@@ -106,7 +144,7 @@ func LoadOverridesFrom(path string) (map[string]OverrideEntry, error) {
 	}
 	out := make(map[string]OverrideEntry, len(raw.Prices))
 	for k, v := range raw.Prices {
-		if err := validatePriceRow(k, v.BaseInput, v.Output); err != nil {
+		if err := v.validate(k); err != nil {
 			return nil, fmt.Errorf("cost.LoadOverridesFrom: %w", err)
 		}
 		from, err := parseEffectiveFrom(v.EffectiveFrom)
@@ -117,7 +155,7 @@ func LoadOverridesFrom(path string) (map[string]OverrideEntry, error) {
 			return nil, fmt.Errorf("cost.LoadOverridesFrom: model %q: negative context_window", k)
 		}
 		out[k] = OverrideEntry{
-			Price:  ModelPrice{BaseInput: v.BaseInput, Output: v.Output, CacheReadMul: v.CacheReadMul},
+			Price:  v.price(),
 			From:   from,
 			Window: v.ContextWindow,
 		}
@@ -147,7 +185,15 @@ func parseEffectiveFrom(s string) (time.Time, error) {
 func SaveOverrides(prices map[string]OverrideEntry) error {
 	shape := overridesShape{Prices: make(map[string]priceRow, len(prices))}
 	for k, v := range prices {
-		row := priceRow{BaseInput: v.Price.BaseInput, Output: v.Price.Output, ContextWindow: v.Window}
+		row := priceRow{
+			BaseInput:     v.Price.BaseInput,
+			Output:        v.Price.Output,
+			ContextWindow: v.Window,
+			CacheReadMul:  v.Price.CacheReadMul,
+		}
+		if lp := v.Price.LongPrompt; lp.Over > 0 {
+			row.LongPrompt = &longPromptRow{Over: lp.Over, BaseInput: lp.BaseInput, Output: lp.Output}
+		}
 		if !v.From.IsZero() {
 			row.EffectiveFrom = v.From.UTC().Format(time.RFC3339)
 		}
@@ -212,7 +258,7 @@ func loadOverridesOnce() map[string]OverrideEntry {
 		// There is no error channel on this lazy load, so the rejection is
 		// recorded for `ape costs coverage` / `ape doctor` to report rather
 		// than lost.
-		if err := validatePriceRow(k, v.BaseInput, v.Output); err != nil {
+		if err := v.validate(k); err != nil {
 			rejected = append(rejected, err.Error())
 			continue
 		}
@@ -225,7 +271,7 @@ func loadOverridesOnce() map[string]OverrideEntry {
 		// occupancy ratio.
 		window := max(v.ContextWindow, 0)
 		loadedOverrides[k] = OverrideEntry{
-			Price:  ModelPrice{BaseInput: v.BaseInput, Output: v.Output, CacheReadMul: v.CacheReadMul},
+			Price:  v.price(),
 			From:   from,
 			Window: window,
 		}

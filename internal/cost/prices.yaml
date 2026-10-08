@@ -17,6 +17,11 @@
 # families' cache reads 2x and 4x high, and cache reads are usually the
 # LARGEST token category in an agentic run.
 #
+# `long_prompt:` is OPTIONAL too: a second input/output rate for a turn
+# whose prompt is longer than `over` tokens. Claude Haiku 5.5 is billed by
+# prompt length; one flat row at its short-prompt rate would price every
+# turn past 100,000 tokens 5x low.
+#
 # `context_window:` is the model's usable context in TOKENS, and it is
 # OPTIONAL. WHERE THE VALUES COME FROM: the Models API — `GET /v1/models/{id}`
 # returns `max_input_tokens`, which is the context window (there is no
@@ -58,7 +63,7 @@
 # fails the release gate while any locally-observed model is inexact.
 
 version: 1
-updated: "2026-09-28"
+updated: "2026-10-08"
 
 # Exact per-model rates, keyed by the `model` field on each assistant-line
 # `usage` block in the session JSONL (after NormalizeModel).
@@ -168,6 +173,19 @@ prices:
     base_input: 3.00
     output: 15.00
     context_window: 200000
+  # Claude Haiku 5.5 — priced by prompt length, the first model that is:
+  # $0.10 / $0.50 for a prompt of up to 100,000 tokens, $0.50 / $2.50 above
+  # it, standard cache multiples on whichever rate applies. The prompt is the
+  # turn's input + cache reads + cache writes (UsageBlock.PromptTokens).
+  # Context from the Models API's max_input_tokens.
+  claude-haiku-5-5:
+    base_input: 0.10
+    output: 0.50
+    context_window: 1000000
+    long_prompt:
+      over: 100000
+      base_input: 0.50
+      output: 2.50
   # Claude Haiku 4.5.
   claude-haiku-4-5:
     base_input: 1.00
@@ -202,7 +220,7 @@ dated_prices: {}
 aliases:
   opus: claude-opus-5-5
   sonnet: claude-sonnet-5-5
-  haiku: claude-haiku-4-5
+  haiku: claude-haiku-5-5
   fable: claude-fable-5-1
   mythos: claude-mythos-5-1
 

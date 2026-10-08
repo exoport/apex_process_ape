@@ -47,6 +47,35 @@ type ModelPrice struct {
 	// CacheReadMultiplier() resolves that, so a zero here is never a 0%
 	// cache-read price.
 	CacheReadMul float64
+	// LongPrompt is the rate a turn bills at once its prompt is longer than
+	// LongPrompt.Over tokens. The zero value means the model has one rate at
+	// every prompt length, which is every model before Claude Haiku 5.5.
+	LongPrompt PromptTier
+}
+
+// PromptTier is a second rate selected by prompt length. Claude Haiku 5.5
+// bills $0.10 / $0.50 per MTok for a prompt of up to 100,000 tokens and
+// $0.50 / $2.50 above that, cache multiples unchanged. A single row at the
+// lower rate would price every turn past the threshold 5x low — and a Claude
+// Code session's prompt grows past it as the conversation does.
+type PromptTier struct {
+	// Over is the prompt length, in tokens, above which this tier applies.
+	// Zero means no tier.
+	Over      int
+	BaseInput float64
+	Output    float64
+}
+
+// ForPrompt returns the rate a turn with a promptTokens-long prompt bills
+// at: p itself, or p with the long-prompt input and output rates. The cache
+// multiples stay the model's, applied to whichever base rate was selected.
+func (p ModelPrice) ForPrompt(promptTokens int) ModelPrice {
+	if p.LongPrompt.Over <= 0 || promptTokens <= p.LongPrompt.Over {
+		return p
+	}
+	p.BaseInput = p.LongPrompt.BaseInput
+	p.Output = p.LongPrompt.Output
+	return p
 }
 
 // CacheReadMultiplier is the multiple of BaseInput this model's cache
@@ -243,7 +272,7 @@ func parsePriceTable(bs []byte) (priceTableFile, error) {
 		return tbl, errors.New("no `prices:` map")
 	}
 	for model, row := range tbl.Prices {
-		if err := validatePriceRow(model, row.BaseInput, row.Output); err != nil {
+		if err := row.validate(model); err != nil {
 			return tbl, err
 		}
 	}
@@ -286,7 +315,7 @@ func applyPriceTable(tbl priceTableFile) {
 	Prices = make(map[string]ModelPrice, len(tbl.Prices))
 	contextWindows = make(map[string]int, len(tbl.Prices))
 	for model, row := range tbl.Prices {
-		Prices[model] = ModelPrice{BaseInput: row.BaseInput, Output: row.Output, CacheReadMul: row.CacheReadMul}
+		Prices[model] = row.price()
 		if row.ContextWindow > 0 {
 			contextWindows[model] = row.ContextWindow
 		}

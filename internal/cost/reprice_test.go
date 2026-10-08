@@ -232,3 +232,70 @@ func TestRepriceDedupesLatestSymlink(t *testing.T) {
 		t.Errorf("NewTotal = %v, want 5.00 (doubled means the symlink was folded in twice)", rep.NewTotal)
 	}
 }
+
+// haikuManifest is a run whose only model is priced by prompt length. Its
+// per-model record holds 1,000,000 input tokens summed over many turns, so it
+// can cost between $0.10 (every turn under 100,000 tokens) and $0.50 (every
+// turn over).
+func haikuManifest(stored string) string {
+	return `run_id: 20261008-120000-abc123
+started_at: 2026-10-08T12:00:00Z
+totals:
+    cost_usd: ` + stored + `
+    model_usage:
+        claude-haiku-5-5:
+            cost_usd: ` + stored + `
+            tokens_input: 1000000
+            tokens_output: 0
+            num_turns: 40
+`
+}
+
+// Repricing reads per-model TOTALS. Handing them to TurnCost reads them as
+// one 1M-token prompt and bills the record at the long-prompt rate — 5x the
+// $0.10 a run of short turns really cost. A stored cost the totals can
+// produce was priced per turn at capture time, and is kept.
+func TestRepriceKeepsATieredCostTheTotalsCanProduce(t *testing.T) {
+	for _, stored := range []string{"0.1", "0.3", "0.5"} {
+		root := t.TempDir()
+		writeManifest(t, root, haikuManifest(stored))
+
+		rep, err := Reprice(root, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rep.Changed != 0 {
+			t.Errorf("stored $%s is within [$0.10, $0.50] but reprice moved it: %+v", stored, rep.Files)
+		}
+		if len(rep.LowerBound) != 0 {
+			t.Errorf("stored $%s reported as a lower bound: %v", stored, rep.LowerBound)
+		}
+	}
+}
+
+// A stored cost outside the range was priced at a rate this model never
+// bills — here the $1 / $5 Haiku family estimate, before Haiku 5.5 had a
+// row. It is replaced by the least the totals can cost, and said to be a
+// lower bound.
+func TestRepriceReplacesAnImpossibleTieredCostWithALowerBound(t *testing.T) {
+	root := t.TempDir()
+	path := writeManifest(t, root, haikuManifest("1"))
+
+	rep, err := Reprice(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.LowerBound) != 1 || rep.LowerBound[0] != "claude-haiku-5-5" {
+		t.Errorf("LowerBound = %v, want [claude-haiku-5-5]", rep.LowerBound)
+	}
+	if !floatNear(rep.NewTotal, 0.10) {
+		t.Errorf("new total = %v, want 0.10", rep.NewTotal)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "cost_usd: 1\n") {
+		t.Errorf("the impossible cost survived --write:\n%s", got)
+	}
+}

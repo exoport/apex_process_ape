@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## v0.8.0 (unreleased)
+
+- **`haiku` now starts Claude Haiku 5.5** (class B: a model alias). Claude
+  Code 2.1.294 resolves its own `haiku` to `claude-haiku-5-5`, and ape's
+  table still said `claude-haiku-4-5`, so every spec, `--model` and
+  `ape prompt` saying `haiku` started the previous Haiku. `make check-claude`
+  (`model_aliases`) caught it. The alias is repointed, and Haiku 5.5 has an
+  exact row with a 1M context window. Before this, a Haiku 5.5 turn (a
+  sub-agent's `model: haiku`, which Claude Code resolves) was priced at the
+  family estimate, $1 / $5, which is 10x high. Its row also gives it an
+  effort key: `ape config effort` lists `claude-haiku-5-5` under `haiku`.
+- **Prices can depend on prompt length.** Haiku 5.5 bills $0.10 / $0.50 per
+  MTok for a prompt of up to 100,000 tokens and $0.50 / $2.50 above that,
+  with the standard cache multiples on whichever rate applies. A price row
+  can now carry an optional `long_prompt: {over, base_input, output}` tier,
+  and a turn uses it when its prompt (input + cache reads + cache writes) is
+  over `over`. Cached tokens count because a cached prefix is still part of
+  the prompt: counting `input_tokens` alone would keep nearly every Claude
+  Code turn on the cheaper rate. `ape costs update --from` accepts the tier,
+  and `ape costs reprice` re-prices existing runs with it.
+- **`ape costs update --from` no longer drops `cache_read_mul`.** The
+  override file is loaded and saved again, and the save left the field out,
+  so a persisted override billed cache reads at the standard 0.10x
+  multiple instead of its own.
+
 ## v0.7.0 (2026-10-06)
 
 - **The framework and governance clones are kept at their newest release**

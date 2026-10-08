@@ -16,6 +16,15 @@ type CacheCreation struct {
 	Ephemeral1h int `json:"ephemeral_1h_input_tokens"`
 }
 
+// PromptTokens is the length of the prompt this turn sent: fresh input plus
+// the cached prefix, whether read from the cache or written to it. A cached
+// prefix is still part of the prompt, so it counts toward a prompt-length
+// price threshold — counting only input_tokens would keep almost every
+// Claude Code turn under it, since nearly all of a session's prompt is cache.
+func (u UsageBlock) PromptTokens() int {
+	return u.InputTokens + u.CacheRead + u.CacheCreation.Ephemeral5m + u.CacheCreation.Ephemeral1h
+}
+
 // Per-million scaling factor — Anthropic publishes prices per 1M tokens,
 // so the formula divides token counts by perMillion before multiplying.
 const perMillion = 1_000_000.0
@@ -48,10 +57,15 @@ const (
 // cacheReadMul is the MODEL's, not a constant: 0.10 for most, 0.05 on
 // Claude Opus 5.5, 0.025 on Claude Fable 5.1 / Mythos 5.1.
 //
+// BaseInput and Output are the rate for this turn's prompt length (see
+// PromptTokens and ModelPrice.ForPrompt): Claude Haiku 5.5 bills a prompt
+// over 100,000 tokens at 5x its short-prompt rate.
+//
 // All terms divided by 1M so the per-million-token price table can be
 // used directly. Unknown models (zero ModelPrice) yield $0.00 with no
 // error — Tracker decides whether to stamp a `cost_note`.
 func TurnCost(u UsageBlock, p ModelPrice) float64 {
+	p = p.ForPrompt(u.PromptTokens())
 	return p.BaseInput*float64(u.InputTokens)/perMillion +
 		p.BaseInput*CacheCreationEphemeral5mMul*float64(u.CacheCreation.Ephemeral5m)/perMillion +
 		p.BaseInput*CacheCreationEphemeral1hMul*float64(u.CacheCreation.Ephemeral1h)/perMillion +
