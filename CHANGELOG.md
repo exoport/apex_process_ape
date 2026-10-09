@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## v0.8.2 (unreleased)
+
+- **The docs link check skips code the way `ape doc shard` does** (class D:
+  release tooling). `scripts/check-docs-links.py` only skipped fenced
+  blocks, and badly: any fence line toggled, so a ```` ``` ```` example inside a
+  four-backtick block flipped it the wrong way. It read inline code as
+  links, too, and reported the v0.8.1 CHANGELOG's code-span example as a
+  dead link. It now follows `internal/mdscan`'s rules: a fence closes on
+  the same character, at least as long, with no info string, and ends with
+  its block quote; inline code spans are masked; a link whose label is code
+  still counts. `make docs-check` runs its new tests first.
+
 ## v0.8.1 (2026-10-08)
 
 - **`ape doc shard` and `ape doc assemble` leave code alone** (class C:

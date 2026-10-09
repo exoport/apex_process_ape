@@ -142,6 +142,7 @@ apescript-symbols:  ## Regenerate the yaegi symbol table for the public apescrip
 
 .PHONY: docs-check
 docs-check:  ## Verify docs/ links resolve and every doc is reachable from docs/README.md.
+	python3 scripts/test_check_docs_links.py -q
 	python3 scripts/check-docs-links.py docs
 
 .PHONY: check-prices
