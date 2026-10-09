@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v0.8.1 (unreleased)
+## v0.8.1 (2026-10-08)
 
 - **`ape doc shard` and `ape doc assemble` leave code alone** (class C:
   `apex-shard-doc` calls them). A shard sits one directory below its source,
