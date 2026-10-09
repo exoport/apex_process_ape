@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## v0.8.1 (unreleased)
+
+- **chore(deps): Go 1.27.2, `golang.org/x/net` v0.60.0, `golang.org/x/crypto`
+  v0.57.0, closing 13 advisories published 2026-10-08** (GO-2026-6599,
+  -6600, -6603, -6604, -6605, -6607, -6608, -6609, -6610, -6611, -6612,
+  -6613, -6617). They are in `html/template`, `net/http` and its HTTP/2,
+  `crypto/tls`, `net/textproto` and `os` (`Root.MkdirAll` on Windows), each
+  reachable from ape's own calls. `go.mod` gains `toolchain go1.27.2`, which
+  CI and the release build read through `go-version-file`, so released
+  binaries are built with the fixed standard library.
+- **golangci-lint v2.14.0** (was v2.13.2), because Go 1.27.2 writes export
+  data v5 and v2.13.2 reads at most v4, failing every package at typecheck.
+  Its two new findings are fixed: `%#q` for a backquoted id, and
+  `strings.CutLast` in the pane-diff helper. Neither changes behaviour.
+
 ## v0.8.0 (2026-10-08)
 
 - **`haiku` now starts Claude Haiku 5.5** (class B: a model alias). Claude

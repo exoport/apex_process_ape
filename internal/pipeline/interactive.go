@@ -519,13 +519,12 @@ func diffPaneSnapshot(before, after string) string {
 	// is the last meaningful line, not the empty bottom of the
 	// terminal grid.
 	bTrim := strings.TrimRight(before, "\n \t")
-	idx := strings.LastIndex(after, bTrim)
-	if idx < 0 {
+	_, tail, found := strings.CutLast(after, bTrim)
+	if !found {
 		// Snapshot moved (scrollback overflow) — return the whole
 		// after-snap. Coarse but never wrong.
 		return after
 	}
-	tail := after[idx+len(bTrim):]
 	return strings.TrimLeft(tail, "\n")
 }
 

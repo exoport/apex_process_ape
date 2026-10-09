@@ -280,7 +280,7 @@ func RemediationFor(rowKey string, candidates []string) string {
 		)
 	case 1:
 		return fmt.Sprintf(
-			"rename the row `%s` to `%s` to match the story file, or rename `%s.md` to `%s.md`",
+			"rename the row %#q to %#q to match the story file, or rename `%s.md` to `%s.md`",
 			rowKey, candidates[0], candidates[0], rowKey,
 		)
 	default:
