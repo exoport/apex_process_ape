@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v0.8.2 (unreleased)
+## v0.8.2 (2026-10-09)
 
 - **The docs link check skips code the way `ape doc shard` does** (class D:
   release tooling). `scripts/check-docs-links.py` only skipped fenced
