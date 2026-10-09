@@ -2,6 +2,17 @@
 
 ## v0.8.2 (2026-10-09)
 
+- **A detached run keeps its supervisor's pid** (class C: framework skills
+  call `ape run wait` and `ape run stop`). Two processes write a detached
+  run's record: `--detach` records the supervisor's pid, and the supervisor
+  records the child's pid and the exit. The supervisor read the record as it
+  started, which can be before `--detach` had written the pid, and then
+  saved that stale copy back, erasing `supervisor_pid`. Without it,
+  `ape run stop` cannot find the process, and the check for a lost
+  supervisor (exit 76) cannot run. It needs a busy machine to hit; GitHub
+  CI hit it as `TestDetach_SurvivesTheStartingShellsTree` timing out. Every
+  write now re-reads the record and changes only its own fields, and the
+  supervisor always records its own pid.
 - **The docs link check skips code the way `ape doc shard` does** (class D:
   release tooling). `scripts/check-docs-links.py` only skipped fenced
   blocks, and badly: any fence line toggled, so a ```` ``` ```` example inside a

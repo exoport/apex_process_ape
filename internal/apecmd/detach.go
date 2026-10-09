@@ -83,6 +83,45 @@ func readHandle(path string) (*detachedHandle, error) {
 	return &h, nil
 }
 
+// updateHandle applies change to the handle as it is on disk now, and writes
+// it back.
+//
+// Two processes write a handle: the --detach process records the
+// supervisor's pid, and the supervisor records the child's pid and the exit.
+// Each must change only its own fields on a fresh read. Writing back a copy
+// read earlier undoes the other's write: the supervisor reads the handle as
+// it starts, which can be before --detach has recorded its pid, and then
+// saved that copy back with the child's pid, erasing supervisor_pid. With
+// no supervisor_pid, `ape run stop` and the lost-supervisor check (exit 76)
+// cannot find the process. CI caught it under load.
+func updateHandle(path string, change func(*detachedHandle)) error {
+	h, err := readHandle(path)
+	if err != nil {
+		return err
+	}
+	change(h)
+	return writeHandle(path, h)
+}
+
+// recordSupervisorPID is the --detach process's one write after the start:
+// the supervisor's pid, unless the supervisor has already recorded it.
+func recordSupervisorPID(path string, pid int) error {
+	return updateHandle(path, func(cur *detachedHandle) {
+		if cur.SupervisorPID == 0 {
+			cur.SupervisorPID = pid
+		}
+	})
+}
+
+// recordChildPID is the supervisor's write once the child has started. It
+// records its own pid too, so supervisor_pid is set whichever process wrote
+// last.
+func recordChildPID(path string, supervisorPID, childPID int) error {
+	return updateHandle(path, func(cur *detachedHandle) {
+		cur.SupervisorPID, cur.ChildPID = supervisorPID, childPID
+	})
+}
+
 func writeHandle(path string, h *detachedHandle) error {
 	data, err := json.MarshalIndent(h, "", "  ")
 	if err != nil {
@@ -150,7 +189,7 @@ func startDetached(cmd *cobra.Command, projectRoot string) error {
 		return usageErr(fmt.Errorf("start the supervisor: %w", err))
 	}
 	h.SupervisorPID = sup.Process.Pid
-	if err := writeHandle(path, h); err != nil {
+	if err := recordSupervisorPID(path, h.SupervisorPID); err != nil {
 		return usageErr(err)
 	}
 	_ = sup.Process.Release()
@@ -418,7 +457,7 @@ func supervise(ctx context.Context, path string) error {
 		return recordExit(path, h, ExitRunFailed, err.Error())
 	}
 	h.ChildPID = child.Process.Pid
-	_ = writeHandle(path, h)
+	_ = recordChildPID(path, os.Getpid(), h.ChildPID)
 
 	done := make(chan error, 1)
 	go func() { done <- child.Wait() }()
@@ -445,10 +484,18 @@ func supervise(ctx context.Context, path string) error {
 	return recordExit(path, h, code, msg)
 }
 
+// recordExit records how the run ended. Only the supervisor calls it, so the
+// handle's supervisor_pid is its own.
 func recordExit(path string, h *detachedHandle, code int, msg string) error {
 	now := time.Now().UTC()
 	h.EndedAt, h.ExitCode, h.Error = &now, &code, msg
-	if err := writeHandle(path, h); err != nil {
+	if err := updateHandle(path, func(cur *detachedHandle) {
+		cur.SupervisorPID = os.Getpid()
+		if h.ChildPID != 0 {
+			cur.ChildPID = h.ChildPID
+		}
+		cur.EndedAt, cur.ExitCode, cur.Error = h.EndedAt, h.ExitCode, h.Error
+	}); err != nil {
 		return usageErr(err)
 	}
 	if code != 0 {
