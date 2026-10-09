@@ -424,8 +424,16 @@ func prependParent(url string) string {
 
 // rewriteForward prepends ../ to relative links, because a shard sits one
 // directory deeper than the document it came from. skip leaves links to
-// generated sibling files alone.
+// generated sibling files alone. Code is left exactly as written: a link
+// inside a code span or fenced block is an example, not a reference (see
+// mdscan.MapOutsideCode).
 func rewriteForward(content string, skip map[string]bool) string {
+	return mdscan.MapOutsideCode(content, func(prose string) string {
+		return rewriteForwardProse(prose, skip)
+	})
+}
+
+func rewriteForwardProse(content string, skip map[string]bool) string {
 	content = mdLinkRe.ReplaceAllStringFunc(content, func(m string) string {
 		label, url, ok := splitMDLink(m)
 		if !ok {
@@ -471,8 +479,14 @@ func rewriteForward(content string, skip map[string]bool) string {
 
 // rewriteBackward strips ../ from links whose target actually exists in
 // parent. The existence test is what lets a `../` link that predated the
-// shard survive unchanged.
+// shard survive unchanged. Like rewriteForward, it never touches code.
 func rewriteBackward(content, parent string) string {
+	return mdscan.MapOutsideCode(content, func(prose string) string {
+		return rewriteBackwardProse(prose, parent)
+	})
+}
+
+func rewriteBackwardProse(content, parent string) string {
 	strip := func(path string) string {
 		if !strings.HasPrefix(path, "../") {
 			return path

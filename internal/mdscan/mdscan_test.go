@@ -1,6 +1,7 @@
 package mdscan
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -193,4 +194,43 @@ func TestStripFences_ListItemFenceIndentedFourIsNotHandled(t *testing.T) {
 	in := "- step:\n\n    ```bash\n    make build\n    ```"
 	require.Equal(t, in, StripFences(in),
 		"if this now strips, list-item fences are handled — update StripFences' NOT-handled note")
+}
+
+func TestMapOutsideCode(t *testing.T) {
+	t.Parallel()
+
+	upper := strings.ToUpper
+	for _, tc := range []struct{ name, in, want string }{
+		{"inline span", "a `b` c", "A `b` C"},
+		{"double-tick span holding a backtick", "a ``b ` c`` d", "A ``b ` c`` D"},
+		{"unclosed backtick is literal", "a ` b", "A ` B"},
+		{"span does not cross a blank line", "a `b\n\nc` d", "A `B\n\nC` D"},
+		{"fenced block", "a\n```go\nx := 1\n```\nb", "A\n```go\nx := 1\n```\nB"},
+		{"tilde fence", "a\n~~~\nx\n~~~\nb", "A\n~~~\nx\n~~~\nB"},
+		{"unclosed fence runs to the end", "a\n```\nx\ny", "A\n```\nx\ny"},
+		{"quoted fence", "> ```\n> x\n> ```\nb", "> ```\n> x\n> ```\nB"},
+		{"no code", "plain", "PLAIN"},
+	} {
+		if got := MapOutsideCode(tc.in, upper); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// f sees one placeholder where the code was, so a pattern spanning the code
+// (a link whose label is code) still matches as a whole.
+func TestMapOutsideCodeKeepsTheSurroundingShape(t *testing.T) {
+	t.Parallel()
+
+	var seen string
+	got := MapOutsideCode("[`x`](y.md)", func(s string) string {
+		seen = s
+		return strings.Replace(s, "(y.md)", "(../y.md)", 1)
+	})
+	if got != "[`x`](../y.md)" {
+		t.Errorf("got %q", got)
+	}
+	if strings.Contains(seen, "`") {
+		t.Errorf("f saw the code itself: %q", seen)
+	}
 }

@@ -34,6 +34,7 @@ package mdscan
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -150,18 +151,33 @@ var (
 // this measures it from the margin, so such a block stays in the prose.
 func StripFences(text string) string {
 	lines := strings.Split(text, "\n")
+	fenced := fencedLines(lines)
 	out := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if !fenced[i] {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// fencedLines reports, line by line, whether each line belongs to a fenced
+// code block, its opening and closing fence lines included. The rules are
+// the ones StripFences documents.
+func fencedLines(lines []string) []bool {
+	fenced := make([]bool, len(lines))
 	var (
 		inFence bool
 		depth   int // the block-quote depth the open fence sits at
 		char    byte
 		width   int
 	)
-	for _, line := range lines {
+	for i, line := range lines {
 		if inFence {
 			inner, stillQuoted := stripQuoteMarkers(line, depth)
 			if stillQuoted {
-				// Inside the block, or its closing line: dropped either way.
+				// Inside the block, or its closing line: fenced either way.
+				fenced[i] = true
 				marker, markerChar, markerWidth, info := fenceMarker(inner)
 				if marker && markerChar == char && markerWidth >= width && info == "" {
 					inFence = false
@@ -174,13 +190,130 @@ func StripFences(text string) string {
 		}
 		lineDepth, inner := quoteDepth(line)
 		if marker, markerChar, markerWidth, _ := fenceMarker(inner); marker {
-			// The opening fence line goes too — it is not story prose.
+			// The opening fence line is part of the block.
+			fenced[i] = true
 			inFence, depth, char, width = true, lineDepth, markerChar, markerWidth
+		}
+	}
+	return fenced
+}
+
+// Placeholder delimiters for MapOutsideCode: private-use code points, which
+// no link pattern matches and real documents do not carry.
+const (
+	codeOpen  = "\uE000"
+	codeClose = "\uE001"
+)
+
+// MapOutsideCode applies f to text with every fenced code block and inline
+// code span hidden, then puts the code back byte for byte.
+//
+// Code is an example, not a reference: `<img src=x onerror=alert(1)>` in a
+// test case, or a ```markdown block showing a link's shape. A rewrite that
+// reads it as a real link edits the example — `ape doc shard` turned that
+// XSS payload into `src=../x` in an epics file, so the shard and its source
+// disagreed about the test.
+//
+// The code is MASKED rather than split out, because links contain code:
+// [`main.go`](main.go) is one link, and splitting at the code span would
+// hand f a `[` and a `](main.go)` that are no longer a link. Each block or
+// span becomes one placeholder, so f still sees the link around it.
+//
+// Fences follow StripFences' rules. An inline code span is a run of N
+// backticks closed by the next run of exactly N, within the same paragraph
+// (a blank line ends the search); an unclosed run is literal backticks.
+// NOT handled, as in StripFences: indented (four-space) code blocks, which
+// list continuations make ambiguous. Text that already contains the
+// placeholder characters is passed to f unmasked.
+func MapOutsideCode(text string, f func(string) string) string {
+	if strings.Contains(text, codeOpen) || strings.Contains(text, codeClose) {
+		return f(text)
+	}
+	var codes []string
+	mask := func(code string) string {
+		codes = append(codes, code)
+		return codeOpen + strconv.Itoa(len(codes)-1) + codeClose
+	}
+
+	lines := strings.Split(text, "\n")
+	fenced := fencedLines(lines)
+	var b strings.Builder
+	for i := 0; i < len(lines); {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		j := i
+		for j < len(lines) && fenced[j] == fenced[i] {
+			j++
+		}
+		run := strings.Join(lines[i:j], "\n")
+		if fenced[i] {
+			b.WriteString(mask(run))
+		} else {
+			b.WriteString(maskCodeSpans(run, mask))
+		}
+		i = j
+	}
+
+	out := f(b.String())
+	for k, code := range codes {
+		out = strings.Replace(out, codeOpen+strconv.Itoa(k)+codeClose, code, 1)
+	}
+	return out
+}
+
+// maskCodeSpans replaces each inline code span in prose with mask(span).
+func maskCodeSpans(prose string, mask func(string) string) string {
+	var b strings.Builder
+	i := 0
+	for i < len(prose) {
+		if prose[i] != '`' {
+			b.WriteByte(prose[i])
+			i++
 			continue
 		}
-		out = append(out, line)
+		n := backtickRun(prose, i)
+		end := closingRun(prose, i+n, n)
+		if end < 0 {
+			// No closer: the backticks are literal.
+			b.WriteString(prose[i : i+n])
+			i += n
+			continue
+		}
+		b.WriteString(mask(prose[i : end+n]))
+		i = end + n
 	}
-	return strings.Join(out, "\n")
+	return b.String()
+}
+
+// backtickRun is the length of the backtick run starting at i.
+func backtickRun(s string, i int) int {
+	n := 0
+	for i+n < len(s) && s[i+n] == '`' {
+		n++
+	}
+	return n
+}
+
+// closingRun finds the next run of exactly n backticks at or after from,
+// before a blank line ends the paragraph. -1 when there is none.
+func closingRun(s string, from, n int) int {
+	limit := len(s)
+	if k := strings.Index(s[from:], "\n\n"); k >= 0 {
+		limit = from + k
+	}
+	for i := from; i < limit; {
+		if s[i] != '`' {
+			i++
+			continue
+		}
+		m := backtickRun(s, i)
+		if m == n && i+m <= limit {
+			return i
+		}
+		i += m
+	}
+	return -1
 }
 
 // maxBlockIndent is how far a block-quote marker or a fence may be

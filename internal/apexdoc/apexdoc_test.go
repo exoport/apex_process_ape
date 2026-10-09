@@ -475,3 +475,74 @@ func TestAnalyze_EmptyInput(t *testing.T) {
 	require.Zero(t, res.Summary.TotalFiles)
 	require.Equal(t, RoutingSingle, res.Routing.Recommendation, "nothing is small enough for one pass")
 }
+
+// docWithCode carries links that are EXAMPLES: inside inline code, inside a
+// fenced block, and inside a quoted fence. A shard sits one directory deeper
+// than its source, so real links gain ../ — but rewriting an example changes
+// what it says. The eval found it in an epics file: the XSS test payload
+// `"><img src=x onerror=alert(1)>` became `src=../x` in the shard, and the
+// shard and its source disagreed about the test.
+const docWithCode = "# Epics\n\n" +
+	"## Story 1.4\n\n" +
+	"Payload: `\"><img src=x onerror=alert(1)>` must be escaped.\n" +
+	"Double-tick code: ``a [l](x.md) b``.\n" +
+	"See [`main.go`](main.go) and [the guide](guide.md) and <img src=y.png>.\n\n" +
+	"```markdown\n[example](example.md)\n<img src=pic.png>\n```\n\n" +
+	"> ```\n> [quoted](quoted.md)\n> ```\n\n" +
+	"## Story 1.5\n\n" +
+	"An unclosed ` backtick, then [after](after.md).\n\n" +
+	"A pre-existing parent link in code: `../notes.md`.\n"
+
+func TestShard_LeavesCodeAlone(t *testing.T) {
+	dir := t.TempDir()
+	src := write(t, dir, "epics.md", docWithCode)
+	shardDir := filepath.Join(dir, "epics")
+	_, err := Shard(src, shardDir, ShardOptions{})
+	require.NoError(t, err)
+
+	got, err := os.ReadFile(filepath.Join(shardDir, "story-14.md"))
+	require.NoError(t, err)
+	s := string(got)
+	for _, kept := range []string{
+		"`\"><img src=x onerror=alert(1)>`",
+		"``a [l](x.md) b``",
+		"[example](example.md)\n<img src=pic.png>",
+		"> [quoted](quoted.md)",
+	} {
+		require.Contains(t, s, kept, "code must be copied exactly")
+	}
+	for _, rewritten := range []string{
+		"[`main.go`](../main.go)", // a link whose label is code is still a link
+		"[the guide](../guide.md)",
+		"<img src=../y.png>",
+	} {
+		require.Contains(t, s, rewritten, "a link outside code still gains ../")
+	}
+
+	got, err = os.ReadFile(filepath.Join(shardDir, "story-15.md"))
+	require.NoError(t, err)
+	require.Contains(t, string(got), "[after](../after.md)", "an unclosed backtick is literal, not a span")
+	require.Contains(t, string(got), "`../notes.md`")
+}
+
+// The reverse rewrite strips ../ from a link whose target exists beside the
+// document. Inside code that would edit the example too, so the round trip
+// is byte-identical only if both directions skip code — notes.md exists
+// here precisely so a code span naming `../notes.md` would be stripped.
+func TestRoundTrip_CodeIsByteIdentical(t *testing.T) {
+	dir := t.TempDir()
+	src := write(t, dir, "epics.md", docWithCode)
+	for _, f := range []string{"notes.md", "main.go", "guide.md", "y.png", "after.md", "x"} {
+		write(t, dir, f, "x")
+	}
+	shardDir := filepath.Join(dir, "epics")
+	_, err := Shard(src, shardDir, ShardOptions{})
+	require.NoError(t, err)
+
+	out := filepath.Join(dir, "reassembled.md")
+	_, err = Assemble(shardDir, out)
+	require.NoError(t, err)
+	got, err := os.ReadFile(out)
+	require.NoError(t, err)
+	require.Equal(t, docWithCode, string(got))
+}

@@ -2,6 +2,18 @@
 
 ## v0.8.1 (unreleased)
 
+- **`ape doc shard` and `ape doc assemble` leave code alone** (class C:
+  `apex-shard-doc` calls them). A shard sits one directory below its source,
+  so its relative links gain `../`, and `assemble` strips it again. Both
+  also rewrote links inside inline code and fenced blocks, which are
+  examples rather than links. The eval found it in an epics file: the XSS
+  test payload `"><img src=x onerror=alert(1)>` became `src=../x` in the
+  split file, and the two copies of the test disagreed. Assembling could
+  also strip a `../` that code named on purpose. Code spans and fenced
+  blocks (backtick or tilde, block quotes included) are now copied byte for
+  byte. A link whose label is itself code (a `` `main.go` `` label) is still
+  rewritten. Not handled: four-space indented code blocks, which list
+  continuations make ambiguous. Present since at least v0.7.0.
 - **chore(deps): Go 1.27.2, `golang.org/x/net` v0.60.0, `golang.org/x/crypto`
   v0.57.0, closing 13 advisories published 2026-10-08** (GO-2026-6599,
   -6600, -6603, -6604, -6605, -6607, -6608, -6609, -6610, -6611, -6612,
