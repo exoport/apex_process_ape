@@ -397,7 +397,11 @@ check-agents-md:  ## Verify the installed Claude Code loads this repo's AGENTS.m
 	  -run TestLive_AgentsMD -v -count=1 -timeout 10m
 
 .PHONY: check-harness
-check-harness: check-prices check-output-styles check-hooks check-claude check-claude-surface check-task-subagents check-agents-md ## All local-only gates against the installed Claude Code (prices + output styles + hooks + PTY/model + surface + sub-agents + AGENTS.md).
+check-harness: check-prices check-output-styles check-hooks check-claude check-task-subagents check-agents-md check-claude-surface ## All local-only gates against the installed Claude Code (prices + output styles + hooks + PTY/model + sub-agents + AGENTS.md + surface).
+	@# check-claude-surface runs LAST: on every Claude Code bump it stops on
+	@# unread CHANGELOG entries, which is a review to do, not a breakage, and
+	@# make stops at the first failing prerequisite. Last, it never hides the
+	@# verdict of a gate that judges whether ape still works.
 	@echo
 	@echo "Harness sweep complete against Claude Code $$(claude --version 2>/dev/null || echo 'unknown')."
 	@echo "Read the output above: any gate that reported a SKIP was NOT verified — it found no evidence to judge."

@@ -206,7 +206,7 @@ Run the whole sweep as one named gate:
 make check-harness
 ```
 
-That is `check-prices` + `check-output-styles` + `check-hooks` + `check-claude` + `check-claude-surface` + `check-task-subagents` + `check-agents-md`. ~3–4 min total. Spends a few cents (two short sessions — the PTY gate's Haiku turn, and the seeded run `check-hooks` judges); everything else reads local artifacts or the rendered pane for free.
+That is `check-prices` + `check-output-styles` + `check-hooks` + `check-claude` + `check-task-subagents` + `check-agents-md` + `check-claude-surface` (last, so its unread-CHANGELOG stop never hides another gate). ~3–4 min total. Spends a few cents (two short sessions — the PTY gate's Haiku turn, and the seeded run `check-hooks` judges); everything else reads local artifacts or the rendered pane for free.
 
 > `check-prices` already ran in Phase 1h as a fast pre-flight. Re-running it here is deliberate and cheap: Phase 2b is the single gate that defines "the harness contract holds", and it must not be able to drift out of sync with what that phrase covers.
 

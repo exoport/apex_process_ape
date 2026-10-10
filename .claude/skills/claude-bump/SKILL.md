@@ -47,7 +47,7 @@ This skill ends at a green push. It never tags. If the new version BREAKS someth
 
 Run it in the background (3–5 min), logging to `{scratchpad}/harness-{installed}.log`, and wait for the completion notification.
 
-Read the log, not just the exit code: `grep -nE -- '--- (PASS|FAIL)|not verified|FAIL' {log}`. The sweep is seven gates; triage each failure:
+Read the log, not just the exit code: `grep -nE -- '--- (PASS|FAIL)|not verified|FAIL|REVIEW NEEDED' {log}`. The sweep is seven gates, `check-claude-surface` last. On a Claude Code bump the sweep normally exits non-zero on `REVIEW NEEDED` (unread CHANGELOG entries) after every other gate has run. That is a review to do, not a failure: report it as "N CHANGELOG entries to review", never as "failed". Triage each real failure:
 
 | gate | failure | action |
 | --- | --- | --- |
@@ -55,9 +55,9 @@ Read the log, not just the exit code: `grep -nE -- '--- (PASS|FAIL)|not verified
 | `check-output-styles` | built-in style table differs | HALT. Update ape's table; a separate commit before the baseline |
 | `check-hooks` | a hook-payload field the completion gates read is gone | HALT. Class B: fix + rc via `/release` |
 | `check-claude` | any `TestLive_ClaudeCodeContract` subtest | HALT. Class B. `model_aliases` failing means a family word now starts a different model (the Sonnet 5.5 case) |
-| `check-claude-surface` | tool list changed, a variable ape SETS vanished, a new model id, or unread CHANGELOG entries | Unread entries only → Phase 2. Anything else → HALT and report the diff |
 | `check-task-subagents` | `subagents_concurrent` or a timeout | Re-run `make check-task-subagents` ONCE. It has flaked on a slow (~30 s) Haiku first response; compare the two sub-agents' start times before calling it serialization. A second failure → HALT |
 | `check-agents-md` | the model can't answer from AGENTS.md | HALT. Check first that no `CLAUDE.md` was created in the repo or a parent |
+| `check-claude-surface` | tool list changed, a variable ape SETS vanished, a new model id, or unread CHANGELOG entries | `REVIEW NEEDED` (unread entries only) → not a failure; Phase 2. Anything else → HALT and report the diff |
 
 The surface check's `env vars: N added, M removed` line is a scrape of the binary's strings, and names often carry a trailing garbage byte (`..._MSF`, `...ATTRIBUTIONK`). That churn is noise unless a name ape sets is among the removed. The test already fails on that case.
 
@@ -102,4 +102,4 @@ Done when `total_count` > 0 and every run is `completed`. Expect `Test (ubuntu-l
 
 ### Phase 6 — Report
 
-Give a short summary: `{reviewed}` → `{installed}`, each harness gate's result (including any flake re-run), the CHANGELOG entries reviewed and their verdicts, the commit sha(s), ci-local, and the CI outcome.
+Give a short summary: `{reviewed}` → `{installed}`, each harness gate's result (including any flake re-run; unread entries are "to review", not a gate failure), the CHANGELOG entries reviewed and their verdicts, the commit sha(s), ci-local, and the CI outcome.

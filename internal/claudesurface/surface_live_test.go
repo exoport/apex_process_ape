@@ -107,9 +107,16 @@ func TestLive_ClaudeSurface(t *testing.T) {
 		"what a bare family word now starts (Sonnet 5.5, 2.1.284). For each real one: an exact row and context window "+
 		"in internal/cost/prices.yaml, its family alias repointed if it is the new generation (check-claude's "+
 		"model_aliases says), then `make update-claude-surface`", installed, base.ReviewedThrough, modelsAdded)
-	require.Empty(t, unreviewed, "%d CHANGELOG entries between %s and %s touch what ape and the skills drive "+
-		"Claude Code through (listed above). Read them; follow up anything that changes a contract; then "+
-		"`make update-claude-surface` to record the review", len(unreviewed), base.ReviewedThrough, installed)
+	// Unread entries are the expected outcome of every Claude Code bump, and
+	// nothing is known to be broken: say so, so the exit reads as a to-do and
+	// not as a breakage. It still fails, because an unrecorded review is the
+	// gap this gate exists for.
+	if len(unreviewed) > 0 {
+		t.Fatalf("REVIEW NEEDED (nothing above is broken): %d CHANGELOG entries between %s and %s touch what ape "+
+			"and the skills drive Claude Code through (listed above). Read them; follow up anything that changes "+
+			"a contract; then `make update-claude-surface` to record the review",
+			len(unreviewed), base.ReviewedThrough, installed)
+	}
 }
 
 // liveTools reads the tool list from the init event of a `-p` session
