@@ -64,10 +64,15 @@ cache that does not exist yet and never create one.
 
 - **Framework:** `$APEX_FRAMEWORK_URL`, else the built-in
   `https://github.com/exoar/apex_process_framework.git`.
-- **Governance:** `governance_repository_url` in `_apex/config.yaml` (new,
-  optional; a project-wide value, so it is committed, while the local path
-  stays per-machine). No URL and no path means the project has no governance
-  repo, and nothing is done, exactly as before.
+- **Governance:** `governance_repository_url` in `_apex/config.yaml`
+  (optional; a project-wide value, so it is committed, while the local path
+  stays per-machine). ape has no built-in default: the value comes from the
+  framework's config template, which `setup` copies into a new project.
+  From framework v0.29.3 that template carries
+  `https://github.com/exoar/apex_process_governance.git`; earlier templates
+  carry `""`, and `setup` never rewrites an existing `config.yaml`, so older
+  projects opt in by hand. No URL and no path means the project has no
+  governance repo, and nothing is done.
 
 Both repositories are private. ape runs plain `git`, so cloning uses
 whatever credentials the machine has for that URL: a credential helper or
@@ -179,10 +184,11 @@ governance_repository_url: https://github.com/exoar/apex_process_governance.git
 `cache_missing` means the URL is set but ape's clone does not exist yet; the
 path is then empty, and the fix is `ape framework update`.
 
-The reconciliation skills read `_apex/config.yaml` directly today, so they
-do not see the env or cache fallback until the framework moves them to
-`ape config resolve`. That is a framework change, released after this ape,
-with its ape floor raised.
+The ADR and pattern reconciliation skills read the effective path and
+`governance_repository_source` from `ape config resolve` since framework
+v0.29.0 (ape floor 0.7.0), so they see the env and cache fallbacks and
+report `cache_missing` themselves. A skill that read `_apex/config.yaml`
+directly would see only the configured path, and miss both fallbacks.
 
 ## What is recorded
 
