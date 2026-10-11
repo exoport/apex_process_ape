@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## v0.8.3 (2026-10-11)
+
+- **The governance clones doc matches the framework** (class D: docs).
+  `docs/explanation/framework-and-governance-clones.md` said the
+  reconciliation skills read `_apex/config.yaml` directly and would miss
+  the env and cache fallbacks. They have read `ape config resolve` since
+  framework v0.29.0. It also now says where a new project's
+  `governance_repository_url` comes from: ape has no default, `setup`
+  copies the framework's template, and from framework v0.29.3 that
+  template names `https://github.com/exoar/apex_process_governance.git`.
+- **`make check-harness` runs the Claude Code surface review last**
+  (class D: release tooling). Unread Claude Code CHANGELOG entries stopped
+  the sweep before `check-task-subagents` and `check-agents-md` ran, and
+  read as a failure. The review now runs after every other gate, and the
+  unread-only case reports REVIEW NEEDED. The reviewed baseline now covers
+  Claude Code through 2.1.296.
+
 ## v0.8.2 (2026-10-09)
 
 - **A detached run keeps its supervisor's pid** (class C: framework skills
