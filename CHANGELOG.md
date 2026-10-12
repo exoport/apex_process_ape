@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Unreleased
+
+- **`ape doctor`'s `migrations.pending` row judges by the update's rule**
+  (class D: doctor). The row read the ledger alone, so an entry the
+  project already had without a ledger row (upgraded by hand, or born
+  after the change) warned "pending" forever: `ape framework update` and
+  its `--plan` ran the entry's `check:`, judged it applied, ran nothing and
+  recorded nothing, so the remedy the row named could never clear it. Seen
+  on a real project with two such entries. The row now runs the checks
+  through the same self-pinned runner, reports those entries as "applied
+  (N by check, not in the ledger)", and names half-applied and
+  cannot-tell entries instead of folding them into pending.
+
 ## v0.8.3 (2026-10-11)
 
 - **The governance clones doc matches the framework** (class D: docs).

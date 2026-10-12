@@ -308,16 +308,21 @@ func firstFinding(r *migration.Row) string {
 // half-applied, which IS a defect, and it still warns rather than fails
 // because the remedy is a dispatch and not a repair of ape's own state.
 //
-// The checks are NOT run here. They shell out, doctor rows are expected
-// to be cheap and to run unattended in `--strict` CI, and a check that
-// cannot run would turn every doctor invocation into a CANNOT-TELL
-// report. The ledger alone answers "what does this project still owe",
-// which is the question this row asks.
+// The checks ARE run, through the same self-pinned shell runner as
+// `ape framework update` and its `--plan`. The row once read the ledger
+// alone, and on a project that already had an entry's shape without a
+// ledger row — upgraded by hand, or born after the change — it reported
+// "pending" forever: the update judged the entry applied by its check,
+// ran nothing, and (rightly) recorded nothing, so the remedy the row
+// named could never clear it. A row and its remedy must judge by one
+// rule. A check that cannot run is reported as such, never as pending.
 func checkUpgradeMigrations(ctx context.Context, env doctorEnv) CheckResult {
 	if !isProjectRoot(env.ProjectRoot) {
 		return CheckResult{Status: StatusInfo, Message: msgNotInAProject}
 	}
-	plan, err := loadMigrationPlan(ctx, env.ProjectRoot, migration.NoCheckRunner(), false)
+	runner, cleanup, _ := migration.NewShellRunner()
+	defer cleanup()
+	plan, err := loadMigrationPlan(ctx, env.ProjectRoot, runner, true)
 	if err != nil {
 		return CheckResult{Status: StatusWarn, Message: err.Error()}
 	}
@@ -337,29 +342,49 @@ func checkUpgradeMigrations(ctx context.Context, env doctorEnv) CheckResult {
 			FixCommand:  "ape framework update --plan",
 		}
 	}
-	if c.Pending == 0 && c.HalfApplied == 0 {
+	applied := fmt.Sprintf("%d applied", c.Applied)
+	if byCheck := appliedByCheck(plan); byCheck > 0 {
+		applied += fmt.Sprintf(" (%d by check, not in the ledger)", byCheck)
+	}
+	if c.Pending == 0 && c.HalfApplied == 0 && c.CannotTell == 0 {
 		return CheckResult{
 			Status:  StatusOK,
-			Message: fmt.Sprintf("%d applied, nothing pending", c.Applied),
+			Message: applied + ", nothing pending",
 		}
 	}
-	msg := fmt.Sprintf("%d pending (%d ape can run, %d need a skill dispatch)",
-		c.Pending, c.Runnable, c.JudgedToRun)
-	if c.BlockingOpen > 0 {
-		msg += fmt.Sprintf(", %d marked blocking", c.BlockingOpen)
+	var parts []string
+	if c.Pending > 0 {
+		p := fmt.Sprintf("%d pending (%d ape can run, %d need a skill dispatch)",
+			c.Pending, c.Runnable, c.JudgedToRun)
+		if c.BlockingOpen > 0 {
+			p += fmt.Sprintf(", %d marked blocking", c.BlockingOpen)
+		}
+		parts = append(parts, p)
 	}
 	if c.HalfApplied > 0 {
-		// Only reachable when a check ran, which this row does not do — it
-		// is carried so a caller that built the plan WITH checks and passed
-		// it here still reports the state rather than hiding it.
-		msg += fmt.Sprintf(", %d HALF-APPLIED", c.HalfApplied)
+		parts = append(parts, fmt.Sprintf("%d HALF-APPLIED", c.HalfApplied))
 	}
+	if c.CannotTell > 0 {
+		parts = append(parts, fmt.Sprintf("%d cannot tell (check could not run)", c.CannotTell))
+	}
+	msg := strings.Join(parts, ", ")
 	return CheckResult{
 		Status:      StatusWarn,
 		Message:     msg,
 		Remediation: "`ape framework update` runs the derivable ones and lists the judged ones with the skill to dispatch.",
 		FixCommand:  "ape framework update --plan",
 	}
+}
+
+// appliedByCheck counts the rows applied on their check's word alone.
+func appliedByCheck(plan *migration.Plan) int {
+	n := 0
+	for i := range plan.Rows {
+		if plan.Rows[i].State == migration.StateApplied && plan.Rows[i].Source == migration.SourceCheck {
+			n++
+		}
+	}
+	return n
 }
 
 func migrationCountLine(c migration.Counts) string {

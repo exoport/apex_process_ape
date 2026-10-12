@@ -265,8 +265,10 @@ where it stopped.
 
 `ape doctor` reports the state as `migrations.pending`, as a warning rather
 than a failure: a project that owes a migration is behind, not broken. That row
-runs no checks — it answers from the ledger alone, so it stays cheap and
-predictable in `--strict` CI.
+runs each entry's `check:` by the same rule as the update and `--plan`, so an
+entry the project already has without a ledger row reads as applied ("by check,
+not in the ledger") rather than pending, and a check that cannot run is
+reported as *cannot tell* rather than pending.
 
 > `migrations.pending` and `migration.pending` are **different rows**. The
 > singular one is ape's own project-data conversion, detected from disk state;

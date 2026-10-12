@@ -265,32 +265,77 @@ func TestDoctorUpgradeMigrations_States(t *testing.T) {
 	})
 	t.Run("all applied", func(t *testing.T) {
 		root := newTestProject(t, realProjectConfig)
-		seedMigration(t, root, "v0.16.0_seq-01_slice-keys.md", derivableEntry)
+		// derivableEntry's check answers "not applied", which with a ledger
+		// row is HALF-APPLIED now that the row runs checks.
+		seedMigration(t, root, "v0.16.0_seq-01_slice-keys.md",
+			strings.Replace(derivableEntry, `check: "exit 1"`, `check: "true"`, 1))
 		seedFrameworkMetadata(t, root, []framework.AppliedMigration{{ID: "v0.16.0_seq-01"}})
 		res := checkUpgradeMigrations(t.Context(), doctorEnv{ProjectRoot: root})
 		require.Equal(t, StatusOK, res.Status)
 	})
 }
 
-// TestDoctorUpgradeMigrations_RunsNoChecks: doctor rows run unattended in
-// --strict CI, and a row that shelled out per entry would be neither
-// cheap nor predictable.
-func TestDoctorUpgradeMigrations_RunsNoChecks(t *testing.T) {
-	root := newTestProject(t, realProjectConfig)
-	seedMigration(t, root, "v0.16.0_seq-01_slice-keys.md", `---
+// TestDoctorUpgradeMigrations_JudgesByCheckLikeTheUpdate: the row once
+// read the ledger alone, so an entry whose shape the project already had —
+// no ledger row, check satisfied — stayed "pending" forever: the update
+// judged it applied by its check, ran nothing and recorded nothing, so the
+// remedy the row named could never clear it. Seen on a real project with
+// two such entries. The row now runs the checks, by the update's rule.
+func TestDoctorUpgradeMigrations_JudgesByCheckLikeTheUpdate(t *testing.T) {
+	entry := func(check string) string {
+		return `---
 id: v0.16.0_seq-01
 version: 0.16.0
 seq: 1
 kind: derivable
-check: "touch check-ran"
+check: "` + check + `"
 command: "true"
 ---
 body
-`)
-	seedFrameworkMetadata(t, root, nil)
+`
+	}
+	t.Run("satisfied check without a ledger row is applied", func(t *testing.T) {
+		root := newTestProject(t, realProjectConfig)
+		seedMigration(t, root, "v0.16.0_seq-01_slice-keys.md", entry("touch check-ran"))
+		seedFrameworkMetadata(t, root, nil)
 
-	checkUpgradeMigrations(t.Context(), doctorEnv{ProjectRoot: root})
-	require.NoFileExists(t, filepath.Join(root, "check-ran"))
+		res := checkUpgradeMigrations(t.Context(), doctorEnv{ProjectRoot: root})
+		require.FileExists(t, filepath.Join(root, "check-ran"), "the check ran")
+		require.Equal(t, StatusOK, res.Status, res.Message)
+		require.Contains(t, res.Message, "1 by check, not in the ledger")
+
+		plan, err := loadMigrationPlan(t.Context(), root, migration.NoCheckRunner(), false)
+		require.NoError(t, err)
+		require.Equal(t, 1, plan.Counts().Pending, "the ledger alone would still call it pending")
+	})
+	t.Run("unsatisfied check without a ledger row is pending", func(t *testing.T) {
+		root := newTestProject(t, realProjectConfig)
+		seedMigration(t, root, "v0.16.0_seq-01_slice-keys.md", entry("exit 1"))
+		seedFrameworkMetadata(t, root, nil)
+
+		res := checkUpgradeMigrations(t.Context(), doctorEnv{ProjectRoot: root})
+		require.Equal(t, StatusWarn, res.Status)
+		require.Contains(t, res.Message, "1 pending")
+	})
+	t.Run("a check that cannot run is reported, not pending", func(t *testing.T) {
+		root := newTestProject(t, realProjectConfig)
+		seedMigration(t, root, "v0.16.0_seq-01_slice-keys.md", entry("exit 7"))
+		seedFrameworkMetadata(t, root, nil)
+
+		res := checkUpgradeMigrations(t.Context(), doctorEnv{ProjectRoot: root})
+		require.Equal(t, StatusWarn, res.Status)
+		require.Contains(t, res.Message, "1 cannot tell")
+		require.NotContains(t, res.Message, "pending")
+	})
+	t.Run("recorded with a failing check is half-applied", func(t *testing.T) {
+		root := newTestProject(t, realProjectConfig)
+		seedMigration(t, root, "v0.16.0_seq-01_slice-keys.md", entry("exit 1"))
+		seedFrameworkMetadata(t, root, []framework.AppliedMigration{{ID: "v0.16.0_seq-01"}})
+
+		res := checkUpgradeMigrations(t.Context(), doctorEnv{ProjectRoot: root})
+		require.Equal(t, StatusWarn, res.Status)
+		require.Contains(t, res.Message, "1 HALF-APPLIED")
+	})
 }
 
 // TestMigrationPlan_PreviewsIncomingEntries: `--plan` exists so a migration
