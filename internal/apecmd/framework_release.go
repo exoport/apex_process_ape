@@ -204,8 +204,8 @@ func offerNewerApe(w io.Writer) {
 	if entry == nil || !isNewerVersion(Version, entry.LatestVersion) {
 		return
 	}
-	fmt.Fprintf(w, "ape: %s is available (this is %s, which meets the release's minimum); `ape update` installs it\n",
-		entry.LatestVersion, Version)
+	fmt.Fprintf(w, "ape: %s is available (this is %s, which meets the release's minimum); `%s` installs it\n",
+		entry.LatestVersion, Version, apeUpdateCommand(entry.LatestVersion))
 }
 
 // apeRoute is how ape gets updated in this project.

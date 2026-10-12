@@ -22,6 +22,16 @@ ape update --output-format json
 ape update --output-format yaml
 ```
 
+## A project that pins ape with bingo
+
+If ape was installed by [bingo](install.md#option-2--pin-via-bingo-recommended-for-project-repos), the binary is `<GOBIN>/ape-vX.Y.Z` and `ape update` **refuses**. It would write the new release into that file, so the name would lie about the version, the project's `.bingo/ape.mod` would still name the old one, and every project pinned to that version through the same `GOBIN` would silently run the new binary. Move the pin instead, in the project that owns it, and commit `.bingo/`:
+
+```bash
+bingo get -l github.com/exoport/apex_process_ape/cmd/ape@vX.Y.Z
+```
+
+Keep `-l` if `<GOBIN>/ape` is bingo's symlink to the pin: without it bingo builds `ape-vX.Y.Z` but leaves the bare `ape` name on the old version. The refusal, the update-available notice, `ape doctor`'s `ape.update_available` row and `ape framework update`'s "newer ape available" line all print the exact command, `-l` included when it applies.
+
 ## Roll back to the previous version
 
 If an update introduces a regression, restore the prior binary:
@@ -44,6 +54,6 @@ sudo -E ape update
 
 ## The update-available notice
 
-Most ape commands run a quick background check for newer releases and print `update available: vX → run 'ape update'` to stderr when one exists. The check is cached so it only fires once per cache window. The notice is informational — it does not affect the running command's exit code.
+Most ape commands run a quick background check for newer releases and print `update available: vX → run 'ape update'` to stderr when one exists (the bingo command instead, when the binary is a bingo pin). The check is cached so it only fires once per cache window. The notice is informational — it does not affect the running command's exit code.
 
 The check only runs when stderr is a terminal. Piped or redirected output, CI logs, and commands run by a tool (Claude Code's Bash tool merges stderr into the output a skill parses) get neither the notice nor the network request. `ape doctor` reports the cached result under `ape.update_available` either way; the cache itself is refreshed only by a command run from a terminal.

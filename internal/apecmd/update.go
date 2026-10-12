@@ -83,6 +83,9 @@ func runUpdate(ctx context.Context, current string, format output.Format) error 
 		}, format)
 	}
 
+	if err := refuseBingoSelfUpdate(latest); err != nil {
+		return err
+	}
 	if err := applyUpdate(ctx, rel, token); err != nil {
 		return fmt.Errorf("update failed: %w", err)
 	}

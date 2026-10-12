@@ -260,7 +260,7 @@ func checkForUpdatesBackground() {
 	entry := updatecache.Load()
 	if entry != nil {
 		if isNewerVersion(Version, entry.LatestVersion) {
-			fmt.Fprintf(os.Stderr, "update available: %s → run 'ape update'\n", entry.LatestVersion)
+			fmt.Fprintf(os.Stderr, "update available: %s → run '%s'\n", entry.LatestVersion, apeUpdateCommand(entry.LatestVersion))
 		}
 		return
 	}
@@ -276,6 +276,6 @@ func checkForUpdatesBackground() {
 	updatecache.Save(latest)
 
 	if isNewerVersion(Version, latest) {
-		fmt.Fprintf(os.Stderr, "update available: %s → run 'ape update'\n", latest)
+		fmt.Fprintf(os.Stderr, "update available: %s → run '%s'\n", latest, apeUpdateCommand(latest))
 	}
 }

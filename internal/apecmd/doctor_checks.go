@@ -612,8 +612,8 @@ func checkApeUpdateAvailable(_ context.Context, _ doctorEnv) CheckResult {
 		return CheckResult{
 			Status:      StatusWarn,
 			Message:     fmt.Sprintf("update available: %s → %s", Version, entry.LatestVersion),
-			Remediation: "Run `ape update` to install the latest release.",
-			FixCommand:  "ape update",
+			Remediation: apeUpdateRemediation(entry.LatestVersion),
+			FixCommand:  apeUpdateCommand(entry.LatestVersion),
 		}
 	}
 	return CheckResult{
@@ -938,7 +938,7 @@ func checkCommandSurface(_ context.Context, env doctorEnv) CheckResult {
 		Remediation: "The installed framework calls ape commands this binary does not provide, and " +
 			"its skills have no fallback branch — each will fail mid-run. Upgrade ape; if they are " +
 			"still missing on the latest, the framework requires an ape that does not exist yet.",
-		FixCommand: "ape update",
+		FixCommand: apeUpdateCommand(""),
 	}
 }
 
@@ -1074,7 +1074,7 @@ func checkHookContractDrift(_ context.Context, env doctorEnv) CheckResult {
 			"Those gates are now silently inactive: a run whose agent yields while a spawned " +
 			"agent is still outstanding can again be reported as a success having done nothing. " +
 			"Upgrade ape; if this persists on the latest ape, report it — the hook contract has moved.",
-		FixCommand: "ape update",
+		FixCommand: apeUpdateCommand(""),
 	}
 }
 

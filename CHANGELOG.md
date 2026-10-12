@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Unreleased
+
+- **`ape update` refuses on a bingo-pinned ape, and every update hint names
+  the bingo command** (class D: update tooling). On Linux the running
+  binary resolves through `~/go/bin/ape → ape-v0.8.3`, so a self-update
+  wrote the new release into `ape-v0.8.3`: a file whose name lies about its
+  version, a `.bingo/ape.mod` still naming the old one, and every project
+  pinned to that version through the same GOBIN silently running the new
+  binary. Yet the update notice, `ape doctor`'s `ape.update_available` row
+  and `ape framework update`'s "newer ape available" line all said `ape
+  update`. A binary named `ape-vX.Y.Z` is now recognised as a bingo pin:
+  `ape update` stops before touching it and prints `bingo get [-l]
+  github.com/exoport/apex_process_ape/cmd/ape@vX.Y.Z`, and the hints print
+  that line too. `-l` is included when the bare `ape` is bingo's symlink to
+  the pin, because without it bingo leaves the bare name on the old
+  version. `ape framework update`'s below-minimum route is unchanged: it
+  already used bingo when the project has `.bingo/ape.mod`.
+
 ## v0.8.4 (2026-10-12)
 
 - **`ape doctor`'s `migrations.pending` row judges by the update's rule**
