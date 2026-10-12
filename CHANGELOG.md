@@ -40,6 +40,17 @@
   `ape update`. The command then re-runs on the new ape. A terminal is
   asked, defaulting to No. Without a terminal and without the flag nothing
   changes, so an unattended run never picks up an ape nobody measured.
+  `--update-ape` is not handed to the pin, because a pin older than 0.9.0
+  refused the unknown flag (rc.2). The launcher compares the PIN, not
+  itself, with the newest release, moves it, and re-runs on the pin
+  without the flag. With the pin already newest, it hands the command
+  over unchanged (rc.3). The pin commit's trailer is
+  `Generator: ape framework update`.
+- **A successful re-run on the updated ape ends the command** (class C).
+  `ape framework update` re-runs itself on the new ape after updating it,
+  but when the re-run succeeded the original process carried on and
+  installed a second time. Seen live as two identical framework commits.
+  The below-minimum path had the same flaw (rc.3).
 - **`ape update` updates the machine's launcher, aware of the pin**
   (class C). It never hands over to the pin and never touches `.bingo/`
   unasked. Inside a project whose pin is behind the newest release it

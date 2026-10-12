@@ -44,13 +44,31 @@ for a in "$@"; do last="$a"; done
 tag="${last##*@}"
 mkdir -p .bingo
 printf 'module _\n\ngo 1.27.0\n\nrequire github.com/exoport/apex_process_ape %s // cmd/ape\n' "$tag" > .bingo/ape.mod
-printf '#!/bin/sh\nexit 0\n' > "$GOBIN/ape-$tag"
+printf '#!/bin/sh\necho "$@" >> "$0.args"\nexit 0\n' > "$GOBIN/ape-$tag"
 chmod +x "$GOBIN/ape-$tag"
 `
 	require.NoError(t, os.WriteFile(filepath.Join(bin, "bingo"), []byte(script), 0o755))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("GOBIN", gobin)
 	return calls
+}
+
+// installPinnedApe puts a fake ape-<tag> in GOBIN that records its args.
+func installPinnedApe(t *testing.T, tag string) string {
+	t.Helper()
+	bin := filepath.Join(os.Getenv("GOBIN"), "ape-"+tag)
+	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\necho \"$@\" >> \"$0.args\"\nexit 0\n"), 0o755))
+	return bin
+}
+
+// rerunArgs is what a fake pinned ape was re-run with, "" if it never ran.
+func rerunArgs(t *testing.T, tag string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(os.Getenv("GOBIN"), "ape-"+tag+".args"))
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func seedApePin(t *testing.T, root, version string) {
@@ -124,6 +142,7 @@ func TestFrameworkUpdate_NewerApeIsOptIn(t *testing.T) {
 	fw := releasedFramework(t, "v1.0.0")
 	installed := func(t *testing.T) string {
 		t.Helper()
+		_ = os.Remove(calls) // shared by the subtests; each judges its own runs
 		root := committedProject(t)
 		out, err := runFramework(t, "setup", fw, root, "--no-fetch", "--no-bootstrap")
 		require.NoError(t, err, out)
@@ -146,14 +165,57 @@ func TestFrameworkUpdate_NewerApeIsOptIn(t *testing.T) {
 		root := installed(t)
 		before := gitRun(t, root, "rev-parse", "HEAD")
 
-		// The re-run is the fake ape-v0.99.0, which exits 0 having done
-		// nothing; the pin's commit is what this asserts.
+		// The re-run is the fake ape-v0.99.0, which records its args and
+		// exits 0; the pin's commit and that re-run are what this asserts.
 		_, err := runFramework(t, "update", fw, root, "--no-fetch", "--update-ape")
-		require.NoError(t, err)
+		require.ErrorIs(t, err, errRerunDone, "the re-run IS the command: this process must not install again")
+		require.Equal(t, ExitOK, exitCodeOf(t, err))
 		require.Equal(t, "v0.99.0", pinOf(t, root))
 		require.Equal(t, "chore(ape): update ape to v0.99.0", gitRun(t, root, "log", "-1", "--format=%s"))
+		require.Contains(t, gitRun(t, root, "log", "-1", "--format=%b"), "Generator: ape framework update",
+			"the framework's release record keys on this trailer")
 		require.Equal(t, before, gitRun(t, root, "rev-parse", "HEAD~1"),
 			"one commit, the pin's: the framework install is the re-run's, never mixed into it")
 		require.Equal(t, ".bingo/ape.mod", gitRun(t, root, "show", "--name-only", "--format=", "HEAD"))
+		args := rerunArgs(t, "v0.99.0")
+		require.NotEmpty(t, args, "the command re-ran on the new pin")
+		require.NotContains(t, args, "--update-ape", "a pinned ape older than 0.9.0 refuses the unknown flag")
 	})
+	t.Run("a launcher newer than the pin still moves the pin", func(t *testing.T) {
+		// rc.2 compared the RUNNING binary: a launcher already at the newest
+		// release said "nothing to update" while the pin sat behind.
+		withApeVersion(t, "0.99.0")
+		root := installed(t)
+
+		_, err := runFramework(t, "update", fw, root, "--no-fetch", "--update-ape")
+		require.ErrorIs(t, err, errRerunDone, "the re-run IS the command: this process must not install again")
+		require.Equal(t, ExitOK, exitCodeOf(t, err))
+		require.Equal(t, "v0.99.0", pinOf(t, root))
+		require.Equal(t, "chore(ape): update ape to v0.99.0", gitRun(t, root, "log", "-1", "--format=%s"))
+	})
+	t.Run("a pin already newest is handed the command, without the flag", func(t *testing.T) {
+		withApeVersion(t, "0.8.0")
+		root := installed(t)
+		seedApePin(t, root, "v0.99.0")
+		gitCommitAll(t, root, "pin ape newest")
+		installPinnedApe(t, "v0.99.0")
+		head := gitRun(t, root, "rev-parse", "HEAD")
+
+		_, err := runFramework(t, "update", fw, root, "--no-fetch", "--update-ape")
+		require.ErrorIs(t, err, errRerunDone, "the re-run IS the command: this process must not install again")
+		require.Equal(t, ExitOK, exitCodeOf(t, err))
+		require.Equal(t, head, gitRun(t, root, "rev-parse", "HEAD"), "nothing to move, nothing committed")
+		args := rerunArgs(t, "v0.99.0")
+		require.NotEmpty(t, args, "the launcher handed the framework update to the pin")
+		require.NotContains(t, args, "--update-ape")
+	})
+}
+
+func TestUpdateApeFlagHelpers(t *testing.T) {
+	require.True(t, hasUpdateApe([]string{"framework", "update", "--update-ape"}))
+	require.True(t, hasUpdateApe([]string{"framework", "update", "--update-ape=true"}))
+	require.False(t, hasUpdateApe([]string{"framework", "update", "--update-ape=false"}))
+	require.False(t, hasUpdateApe([]string{"framework", "update", "--", "--update-ape"}))
+	require.Equal(t, []string{"framework", "update", "--no-fetch", "--", "--update-ape"},
+		withoutUpdateApe([]string{"framework", "update", "--update-ape", "--no-fetch", "--", "--update-ape"}))
 }

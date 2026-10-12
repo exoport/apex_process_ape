@@ -115,6 +115,19 @@ func TestDecidePin(t *testing.T) {
 		require.True(t, d.run)
 		require.Empty(t, d.exec)
 	})
+	t.Run("framework update --update-ape runs on the launcher", func(t *testing.T) {
+		// It moves the pin first; handing it to a pin older than 0.9.0
+		// failed with "unknown flag: --update-ape".
+		_, sub := pinProject(t, "v0.8.3")
+		in := pinInput(sub, "0.9.0", verbFrameworkUpdate)
+		in.updateApe = true
+		d := decidePin(in)
+		require.True(t, d.run)
+		require.Empty(t, d.exec)
+
+		in.updateApe = false
+		require.Equal(t, "/gobin/ape-v0.8.3", decidePin(in).exec, "without the flag it is handed over as usual")
+	})
 	t.Run("escape hatch", func(t *testing.T) {
 		_, sub := pinProject(t, "v0.8.4")
 		in := pinInput(sub, "0.7.0", "ape story list")

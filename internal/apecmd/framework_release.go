@@ -210,6 +210,18 @@ func offerNewerApe(ctx context.Context, w io.Writer, projectRoot string, commit,
 	if os.Getenv(envFrameworkReexec) == "1" {
 		return nil // the re-run after an update: the offer was already answered
 	}
+	// In a bingo project the question is whether the PIN is behind, not
+	// this binary: with --update-ape the launcher runs this, not the pin
+	// (a pin older than 0.9.0 does not know the flag), so its own version
+	// says nothing about what the project runs.
+	route := apeUpdateRoute(projectRoot)
+	current, have := Version, "this is "+Version
+	var pin *apePin
+	if route.bingo {
+		if p, err := findApePin(projectRoot); err == nil && p != nil {
+			pin, current, have = p, p.version, "this project pins "+p.version
+		}
+	}
 	latest := ""
 	if entry := updatecache.Load(); entry != nil {
 		latest = trimV(entry.LatestVersion)
@@ -222,28 +234,44 @@ func offerNewerApe(ctx context.Context, w io.Writer, projectRoot string, commit,
 		}
 		latest = trimV(v)
 	}
-	if latest == "" || !isNewerVersion(Version, latest) {
+	if latest == "" || !isNewerVersion(current, latest) {
 		if updateApe {
-			fmt.Fprintf(w, "ape: %s is the newest release; nothing to update\n", Version)
+			fmt.Fprintf(w, "ape: %s is the newest release (%s); nothing to update\n", trimV(current), have)
+			return handToPin(ctx, w, pin)
 		}
 		return nil
 	}
-	route := apeUpdateRoute(projectRoot)
 	if !updateApe {
 		if !interactive() {
-			fmt.Fprintf(w, "ape: %s is available (this is %s, which meets the release's minimum); "+
-				"`ape framework update --update-ape` or `%s` installs it\n", latest, Version, route.command("v"+latest))
+			fmt.Fprintf(w, "ape: %s is available (%s, which meets the release's minimum); "+
+				"`ape framework update --update-ape` or `%s` installs it\n", latest, have, route.command("v"+latest))
 			return nil
 		}
 		what := "update ape too (" + route.name + ")?"
 		if route.bingo {
 			what = "update the project's pin too?"
 		}
-		if !askYesNo(fmt.Sprintf("newer ape v%s available (this is %s) — %s", latest, Version, what), false) {
+		if !askYesNo(fmt.Sprintf("newer ape v%s available (%s) — %s", latest, have, what), false) {
 			return nil
 		}
 	}
 	return updateApeAndRerun(ctx, w, route, projectRoot, commit)
+}
+
+// handToPin re-runs the command on the project's pinned ape when this
+// process is not it — the launcher, which ran `--update-ape` only to move
+// the pin. A pin that is not installed leaves the command here, as the
+// startup check's recovery path would.
+func handToPin(ctx context.Context, w io.Writer, pin *apePin) error {
+	if pin == nil || sameApeVersion(Version, pin.version) {
+		return nil
+	}
+	bin, ok := locatePinnedApe(ctx, pin.version)
+	if !ok {
+		fmt.Fprintf(w, "ape: the pinned ape-%s is not installed; continuing on ape %s\n", pin.version, Version)
+		return nil
+	}
+	return rerun(ctx, bin)
 }
 
 // apeRoute is how ape gets updated in this project.
@@ -368,8 +396,11 @@ func bingoBinary(ctx context.Context, tool, version string) (string, error) {
 
 // rerun starts bin with this process's arguments and exits with its
 // status: the re-run's outcome IS the command's outcome.
+//
+// --update-ape is dropped: it has been acted on, and a pinned ape older
+// than 0.9.0 would refuse the unknown flag.
 func rerun(ctx context.Context, bin string) error {
-	cmd := exec.CommandContext(ctx, bin, os.Args[1:]...) //nolint:gosec // the ape binary this command just installed, with this command's own arguments
+	cmd := exec.CommandContext(ctx, bin, withoutUpdateApe(os.Args[1:])...) //nolint:gosec // the ape binary this command just installed, with this command's own arguments
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	cmd.Env = append(os.Environ(), envFrameworkReexec+"=1")
 	err := cmd.Run()
@@ -379,7 +410,42 @@ func rerun(ctx context.Context, bin string) error {
 	if err != nil {
 		return usageErrExit(exitCodeApeBelowMinimum, fmt.Errorf("re-running with the updated ape (%s): %w", bin, err))
 	}
-	return nil
+	// Success ends the command too: returning nil let the caller carry on
+	// and install a second time in this process, after the re-run already
+	// had — two identical framework commits, seen live.
+	return reportedErr(ExitOK, errRerunDone)
+}
+
+// errRerunDone ends a command whose re-run on the updated ape succeeded.
+// It exits 0 and prints nothing: the re-run already said everything.
+var errRerunDone = errors.New("the command re-ran on the updated ape")
+
+// withoutUpdateApe drops --update-ape (and --update-ape=<v>) up to a "--".
+func withoutUpdateApe(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i, a := range args {
+		if a == "--" {
+			return append(out, args[i:]...)
+		}
+		if a == "--update-ape" || strings.HasPrefix(a, "--update-ape=") {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// hasUpdateApe reports a --update-ape that asks for the update.
+func hasUpdateApe(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if a == "--update-ape" || (strings.HasPrefix(a, "--update-ape=") && a != "--update-ape=false") {
+			return true
+		}
+	}
+	return false
 }
 
 func interactive() bool {

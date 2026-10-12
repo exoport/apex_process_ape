@@ -136,6 +136,7 @@ type pinCheckInput struct {
 	env       func(string) string
 	verb      string // the cobra command path, "ape framework update"
 	help      bool   // -h/--help was asked for
+	updateApe bool   // `framework update --update-ape`
 	locate    func(version string) (string, bool)
 	floorFrom func(root string) (string, error)
 }
@@ -185,6 +186,12 @@ func decidePin(in pinCheckInput) pinDecision {
 	if in.verb == "ape update" {
 		return pinDecision{run: true}
 	}
+	// `framework update --update-ape` likewise runs on the launcher: it
+	// moves the pin, then re-runs on the pinned ape without the flag — a
+	// pin older than 0.9.0 does not know it.
+	if in.verb == verbFrameworkUpdate && in.updateApe {
+		return pinDecision{run: true}
+	}
 	if sameApeVersion(in.running, pin.version) {
 		return pinDecision{run: true}
 	}
@@ -213,7 +220,7 @@ func (in pinCheckInput) cannot(err error, remedy string) pinDecision {
 // locatePinnedApe finds `ape-<version>` where bingo puts it: GOBIN, else
 // the first GOPATH entry's bin, else ~/go/bin. `go env` is asked only when
 // none of those has it, so the common case spawns nothing.
-func locatePinnedApe(version string) (string, bool) {
+func locatePinnedApe(ctx context.Context, version string) (string, bool) {
 	name := "ape-" + version
 	if runtime.GOOS == goosWindows {
 		name += ".exe"
@@ -234,7 +241,7 @@ func locatePinnedApe(version string) (string, bool) {
 	if _, err := exec.LookPath("go"); err != nil {
 		return "", false
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "go", "env", "GOBIN", "GOPATH").Output()
 	if err != nil {
@@ -299,7 +306,9 @@ func honourApePin(root *cobra.Command, args []string, stderr io.Writer) error {
 	}
 	d := decidePin(pinCheckInput{
 		cwd: cwd, running: Version, self: self, env: os.Getenv, verb: verb, help: help,
-		locate: locatePinnedApe, floorFrom: installedFloor,
+		updateApe: verb == verbFrameworkUpdate && hasUpdateApe(args),
+		locate:    func(v string) (string, bool) { return locatePinnedApe(context.Background(), v) },
+		floorFrom: installedFloor,
 	})
 	switch {
 	case d.refuse != nil:
