@@ -21,6 +21,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 
 - [How to install ape](how-to/install.md)
 - [How to update ape](how-to/update.md)
+- [How to pin ape in a project](how-to/pin-ape-in-a-project.md) — a bare `ape` honours `.bingo/ape.mod`
 - [How to set up the APEX framework in a project (first install)](how-to/framework-setup.md)
 - [How to refresh the APEX framework in a project](how-to/framework-update.md)
 - [How to pass arguments to skills](how-to/pass-args-to-skills.md)

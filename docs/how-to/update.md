@@ -32,6 +32,8 @@ bingo get -l github.com/exoport/apex_process_ape/cmd/ape@vX.Y.Z
 
 Keep `-l` if `<GOBIN>/ape` is bingo's symlink to the pin: without it bingo builds `ape-vX.Y.Z` but leaves the bare `ape` name on the old version. The refusal, the update-available notice, `ape doctor`'s `ape.update_available` row and `ape framework update`'s "newer ape available" line all print the exact command, `-l` included when it applies.
 
+From v0.9.0, `ape update` run inside a pinned project updates the binary on PATH, not the pin, and says so. See [How to pin ape in a project](pin-ape-in-a-project.md).
+
 ## Roll back to the previous version
 
 If an update introduces a regression, restore the prior binary:

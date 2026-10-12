@@ -29,6 +29,8 @@ bingo get -l github.com/exoport/apex_process_ape/cmd/ape@latest
 
 This adds a per-tool `.mod` file under `.bingo/` and a `Makefile`-friendly variable for invoking the pinned binary, the same pattern this repo itself uses for its own dev tooling (see `.bingo/Variables.mk`). Commit the generated `.bingo/` files so the pin travels with the repo.
 
+From v0.9.0 a bare `ape` run anywhere in that repo hands the command to the pinned version, so a Claude session opened in the project runs the pin too. See [How to pin ape in a project](pin-ape-in-a-project.md).
+
 ## Option 3 — `go install`
 
 If you have a Go toolchain (1.26 or later):

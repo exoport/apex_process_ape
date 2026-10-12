@@ -1,0 +1,60 @@
+# How to pin ape in a project
+
+A project that pins ape with [bingo](https://github.com/bwplotka/bingo) runs that version, whichever `ape` is first on PATH. From v0.9.0, a bare `ape` honours the project's pin the way `go` honours a module's `toolchain` line.
+
+## Pin a version
+
+In the project's repo root:
+
+```bash
+bingo get -l github.com/exoport/apex_process_ape/cmd/ape@v0.9.0
+git add .bingo && git commit -m "chore: pin ape v0.9.0"
+```
+
+bingo builds `<GOBIN>/ape-v0.9.0` and records the version in `.bingo/ape.mod`. `-l` also points the bare `<GOBIN>/ape` at it. To move the pin later, run the same command with the new version and commit `.bingo/` again. Don't use `ape update` for this: it refuses on a pinned binary because it would overwrite the versioned file.
+
+## What a bare `ape` does in a pinned project
+
+Every invocation looks for `.bingo/ape.mod`, starting in the working directory and walking up to the repo root (the first directory with `.git`):
+
+| Situation | What happens |
+| --- | --- |
+| No `.bingo/ape.mod` | The `ape` on PATH runs the command, as before. The cost is one file lookup. |
+| The pin is this ape's version | It runs the command. |
+| The pin is another version, and `ape-vX.Y.Z` is installed | It hands the command to that binary: same arguments, same stdin and stdout, and the pinned binary's exit status. On Unix it is an `exec`, so the caller sees one ordinary command. |
+| The pin is not installed | It stops with exit 13 and `bingo get ape`. It never quietly runs its own version instead. |
+| The pin is below the installed framework's `min_ape_version` | It stops with exit 13 and the `bingo get -l …@v<floor>` that moves the pin forward. A pre-floor binary under a post-floor framework is what the floor exists to prevent. |
+
+The pinned binary is looked for where bingo puts it: `$GOBIN`, then the first `$GOPATH` entry's `bin`, then `~/go/bin`. `go env` is asked only when none of those has it.
+
+**Recovery commands still run when the pin can't.** `ape framework update`, `ape doctor`, `ape version`, `ape update`, bare `ape` and any `--help` run on the current binary, with a note on stderr. That is how a project finds out what is wrong and moves its pin. When the pin is usable they hand over like every other command, except `ape update`.
+
+**`ape update` never hands over.** It updates the binary that runs it, and in a pinned project it says on stderr that the pin did not move and prints the bingo command that moves it.
+
+## Check which ape ran
+
+```bash
+ape version
+```
+
+After a hand-over it adds `pinned by:  .bingo/ape.mod (started as ape 0.7.0)`. `--output-format json` carries the same as `pinnedFrom`.
+
+## Run a different ape on purpose
+
+```bash
+APE_TOOLCHAIN=local ape …
+```
+
+This skips the pin for that command, for example to try a newer ape in a pinned project before moving the pin.
+
+## Environment
+
+| Variable | Set by | Meaning |
+| --- | --- | --- |
+| `APE_TOOLCHAIN=local` | you | skip the pin for this command |
+| `APE_PINNED` | ape, on a hand-over | the pin it honoured. A binary that finds its own project's pin here runs without checking again, so no build can hand over to itself forever. A session that moves to a project with a different pin is still checked. |
+| `APE_PINNED_FROM` | ape, on a hand-over | the version that handed over, reported by `ape version` |
+
+Sessions ape spawns already run the pinned binary first on PATH (see `internal/selfpath`), so every `ape` inside them either is the pin or carries the marker. The check is what covers a Claude session you open yourself.
+
+> A `.bingo/ape.mod` outside any repo applies too: one in `~/_dev/.bingo/` governs an `ape` run from a directory under `~/_dev` that is not inside a repo.

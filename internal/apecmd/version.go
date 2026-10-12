@@ -28,6 +28,9 @@ type versionResult struct {
 	Version   string `json:"version"   yaml:"version"`
 	BuildDate string `json:"buildDate" yaml:"buildDate"`
 	GitCommit string `json:"gitCommit" yaml:"gitCommit"`
+	// PinnedFrom is the ape that handed this command over because the
+	// project's .bingo/ape.mod pins this one; empty when run directly.
+	PinnedFrom string `json:"pinnedFrom,omitempty" yaml:"pinnedFrom,omitempty"`
 }
 
 func newVersionCmd() *cobra.Command {
@@ -47,6 +50,9 @@ func newVersionCmd() *cobra.Command {
 				Version:   Version,
 				BuildDate: BuildDate,
 				GitCommit: GitCommit,
+			}
+			if os.Getenv(envPinned) != "" && sameApeVersion(Version, os.Getenv(envPinned)) {
+				res.PinnedFrom = os.Getenv(envPinnedFrom)
 			}
 			return printVersionResult(res, output.Format(outputFormat))
 		},
@@ -71,6 +77,9 @@ func printVersionResult(res versionResult, format output.Format) error {
 		fmt.Printf("ape %s\n", res.Version)
 		fmt.Printf("  build date: %s\n", res.BuildDate)
 		fmt.Printf("  git commit: %s\n", res.GitCommit)
+		if res.PinnedFrom != "" {
+			fmt.Printf("  pinned by:  .bingo/ape.mod (started as ape %s)\n", res.PinnedFrom)
+		}
 		return nil
 	}
 }

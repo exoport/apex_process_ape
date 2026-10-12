@@ -219,6 +219,11 @@ func Execute() error {
 		stop()
 	}()
 
+	// Before anything prints: a swap hands the whole command to the
+	// project's pinned ape, update notice included.
+	if err := honourApePin(rootCmd, os.Args[1:], os.Stderr); err != nil {
+		return err
+	}
 	return rootCmd.ExecuteContext(ctx)
 }
 
