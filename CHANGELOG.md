@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## v0.9.0 (2026-10-12)
+
+- **A bare `ape` honours the project's bingo pin** (class B: which binary
+  every skill call runs). The framework's skills call a bare `ape`, so the
+  shell picked whatever was first on PATH. Sessions ape spawns were covered
+  by `internal/selfpath`, a session the user opened directly was not.
+  Observed live: a project whose `.bingo/ape.mod` pinned 0.0.66 ran 0.7.0,
+  another project's `-l` link, and nothing said so. Every invocation now
+  looks for `.bingo/ape.mod` from the working directory up to the repo root.
+  If the pin is another version it hands the command to `ape-vX.Y.Z`
+  (exec on Unix, spawn and wait on Windows; same argv, stdio and exit
+  status), looked for in `$GOBIN`, then `$GOPATH/bin`, then `~/go/bin`. If
+  the pin is not installed, or below the installed framework's
+  `min_ape_version`, it exits 13 with the `bingo get` that fixes it. It
+  never quietly runs its own version. `ape framework update`, `ape doctor`,
+  `ape version`, `ape update`, bare `ape` and `--help` still run in that
+  case, with a note, so a project can recover. `ape update` never hands
+  over: a pin older than 0.8.5 would overwrite its own versioned file.
+  `APE_TOOLCHAIN=local` skips the pin. The hand-over sets `APE_PINNED` (the
+  loop guard) and `APE_PINNED_FROM`, which `ape version` reports as
+  "pinned by" (`pinnedFrom` in JSON). Projects without `.bingo/ape.mod` are
+  unchanged. Requested by the framework session; see
+  `docs/how-to/pin-ape-in-a-project.md`.
+
 ## v0.8.5 (2026-10-12)
 
 - **`ape update` refuses on a bingo-pinned ape, and every update hint names
