@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.8.5 (2026-10-12)
 
 - **`ape update` refuses on a bingo-pinned ape, and every update hint names
   the bingo command** (class D: update tooling). On Linux the running
