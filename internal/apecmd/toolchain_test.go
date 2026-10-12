@@ -163,6 +163,31 @@ func TestDecidePin(t *testing.T) {
 		d := decidePin(pinInput(sub, "0.7.0", "ape story list"))
 		require.ErrorContains(t, d.refuse, "requires no "+apeModuleRoot)
 	})
+	t.Run("outside any repo, a pin above is not honoured", func(t *testing.T) {
+		// ~/_dev/.bingo/ape.mod installs a launcher; ~/_dev/exoar below it
+		// is not a repo, and must not be swapped to that pin.
+		top := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(top, ".bingo"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(top, ".bingo", "ape.mod"),
+			[]byte("module _\nrequire github.com/exoport/apex_process_ape v0.7.0 // cmd/ape\n"), 0o644))
+		below := filepath.Join(top, "exoar")
+		require.NoError(t, os.MkdirAll(below, 0o755))
+
+		for _, dir := range []string{below, top} {
+			d := decidePin(pinInput(dir, "0.9.0", "ape story list"))
+			require.True(t, d.run, dir)
+			require.Empty(t, d.exec, dir)
+		}
+	})
+	t.Run("a worktree's .git file marks the repo root", func(t *testing.T) {
+		root := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: /elsewhere\n"), 0o644))
+		require.NoError(t, os.MkdirAll(filepath.Join(root, ".bingo"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, ".bingo", "ape.mod"),
+			[]byte("module _\nrequire github.com/exoport/apex_process_ape v0.8.4 // cmd/ape\n"), 0o644))
+		d := decidePin(pinInput(root, "0.7.0", "ape story list"))
+		require.Equal(t, "/gobin/ape-v0.8.4", d.exec)
+	})
 	t.Run("the walk stops at the repo root", func(t *testing.T) {
 		outer, _ := pinProject(t, "v0.8.4")
 		inner := filepath.Join(outer, "nested")

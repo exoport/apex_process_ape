@@ -54,11 +54,19 @@ type apePin struct {
 	version string // vX.Y.Z, as bingo pinned it
 }
 
-// findApePin walks up from dir to the first `.bingo/ape.mod`, stopping at
-// the repo root (the first directory holding .git). An absent pin is
-// (nil, nil); a pin that cannot be read is an error, because guessing past
-// it is the silent fallback this check exists to remove.
+// findApePin finds the pin governing dir: the first `.bingo/ape.mod` from
+// dir up to the repo root (the nearest directory holding .git — a
+// directory, or a worktree's file). Outside any repo there is no pin: a
+// `.bingo/ape.mod` above it — `~/_dev/.bingo`, which installs a launcher —
+// pins a tool for that directory, not for every directory below it.
+// An absent pin is (nil, nil); a pin that cannot be read is an error,
+// because guessing past it is the silent fallback this check exists to
+// remove.
 func findApePin(dir string) (*apePin, error) {
+	root, ok := repoRoot(dir)
+	if !ok {
+		return nil, nil //nolint:nilnil // not in a repo: nothing is pinned
+	}
 	for {
 		mod := filepath.Join(dir, ".bingo", "ape.mod")
 		data, err := os.ReadFile(mod)
@@ -72,12 +80,22 @@ func findApePin(dir string) (*apePin, error) {
 		case !errors.Is(err, os.ErrNotExist):
 			return nil, fmt.Errorf("read %s: %w", mod, err)
 		}
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		if dir == root {
 			return nil, nil //nolint:nilnil // no pin is the common case, not an error
+		}
+		dir = filepath.Dir(dir)
+	}
+}
+
+// repoRoot is the nearest directory at or above dir holding .git.
+func repoRoot(dir string) (string, bool) {
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir, true
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return nil, nil //nolint:nilnil // reached / without a pin
+			return "", false
 		}
 		dir = parent
 	}
@@ -173,7 +191,7 @@ func decidePin(in pinCheckInput) pinDecision {
 	bin, ok := in.locate(pin.version)
 	if !ok {
 		return in.cannot(fmt.Errorf("this project pins ape %s (.bingo/ape.mod), and ape-%s is not installed",
-			pin.version, pin.version), "install it: bingo get ape   (in "+pin.root+")")
+			pin.version, pin.version), "install it: bingo get ape   (in "+pin.root+"), or move the pin: ape update --pin")
 	}
 	if bin == in.self {
 		return pinDecision{run: true}

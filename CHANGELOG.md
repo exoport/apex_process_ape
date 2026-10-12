@@ -9,6 +9,9 @@
   Observed live: a project whose `.bingo/ape.mod` pinned 0.0.66 ran 0.7.0,
   another project's `-l` link, and nothing said so. Every invocation now
   looks for `.bingo/ape.mod` from the working directory up to the repo root.
+  Only a git repo is pinned: outside any repo nothing is honoured, so a
+  launcher-installing `~/_dev/.bingo/ape.mod` does not switch an `ape` run
+  in `~/_dev/exoar` (rc.2; rc.1 climbed to `/`).
   If the pin is another version it hands the command to `ape-vX.Y.Z`
   (exec on Unix, spawn and wait on Windows; same argv, stdio and exit
   status), looked for in `$GOBIN`, then `$GOPATH/bin`, then `~/go/bin`. If
@@ -23,6 +26,11 @@
   "pinned by" (`pinnedFrom` in JSON). Projects without `.bingo/ape.mod` are
   unchanged. Requested by the framework session; see
   `docs/how-to/pin-ape-in-a-project.md`.
+  **Upgrading:** a project whose pin is below the installed framework's
+  `min_ape_version` exits 13 on every ordinary command until the pin moves
+  (seen on two projects: 0.0.66 and 0.0.62 against a 0.7.0 floor). Run
+  `ape framework update --update-ape` or `ape update --pin` there; both
+  still run in that state.
 - **`ape framework update --update-ape`: a newer ape above the floor is
   opt-in** (class C: `ape framework update`). Below `min_ape_version`
   nothing changes. Above it, or with no minimum declared, v0.8.5 only

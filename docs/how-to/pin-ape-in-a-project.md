@@ -17,14 +17,14 @@ bingo builds `<GOBIN>/ape-v0.9.0` and records the version in `.bingo/ape.mod`. `
 
 ## What a bare `ape` does in a pinned project
 
-Every invocation looks for `.bingo/ape.mod`, starting in the working directory and walking up to the repo root (the first directory with `.git`):
+Every invocation looks for `.bingo/ape.mod`, starting in the working directory and walking up to the repo root (the nearest directory with `.git`). **Only a repo is pinned:** outside any git repo nothing is honoured, even a `.bingo/ape.mod` in a directory above.
 
 | Situation | What happens |
 | --- | --- |
 | No `.bingo/ape.mod` | The `ape` on PATH runs the command, as before. The cost is one file lookup. |
 | The pin is this ape's version | It runs the command. |
 | The pin is another version, and `ape-vX.Y.Z` is installed | It hands the command to that binary: same arguments, same stdin and stdout, and the pinned binary's exit status. On Unix it is an `exec`, so the caller sees one ordinary command. |
-| The pin is not installed | It stops with exit 13 and `bingo get ape`. It never quietly runs its own version instead. |
+| The pin is not installed | It stops with exit 13, naming `bingo get ape` (install the pinned version) and `ape update --pin` (move the pin). It never quietly runs its own version instead. |
 | The pin is below the installed framework's `min_ape_version` | It stops with exit 13 and the `bingo get -l …@v<floor>` that moves the pin forward. A pre-floor binary under a post-floor framework is what the floor exists to prevent. |
 
 The pinned binary is looked for where bingo puts it: `$GOBIN`, then the first `$GOPATH` entry's `bin`, then `~/go/bin`. `go env` is asked only when none of those has it.
@@ -61,4 +61,13 @@ This skips the pin for that command, for example to try a newer ape in a pinned 
 
 Sessions ape spawns already run the pinned binary first on PATH (see `internal/selfpath`), so every `ape` inside them either is the pin or carries the marker. The check is what covers a Claude session you open yourself.
 
-> A `.bingo/ape.mod` outside any repo applies too: one in `~/_dev/.bingo/` governs an `ape` run from a directory under `~/_dev` that is not inside a repo.
+> A `.bingo/ape.mod` that is not inside a repo pins nothing. For example, `~/_dev/.bingo/ape.mod` installs your launcher with `bingo get -l`, but an `ape` run in `~/_dev/exoar` (not a repo) is not switched to it.
+
+## A pin below the framework's minimum
+
+A project whose pin is older than the installed framework's `min_ape_version` exits 13 on every ordinary command until the pin moves. Move it with either of these; both still run in that state:
+
+```bash
+ape framework update --update-ape   # moves the pin, commits it as chore(ape), then updates the framework
+ape update --pin                    # moves the pin and commits it as chore(ape)
+```
