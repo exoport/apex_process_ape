@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -30,7 +31,10 @@ type updateResult struct {
 }
 
 func newUpdateCmd() *cobra.Command {
-	var outputFormat string
+	var (
+		outputFormat string
+		pin          bool
+	)
 
 	cmd := &cobra.Command{
 		Use: "update",
@@ -44,22 +48,37 @@ func newUpdateCmd() *cobra.Command {
 			"(pinning this repository's release workflow identity and the Fulcio\n" +
 			"issuer), then the downloaded archive is checked against that trusted\n" +
 			"manifest. Verification is fully offline against an embedded Sigstore\n" +
-			"trusted root — no cosign binary is required.",
+			"trusted root — no cosign binary is required.\n\n" +
+			"It updates the binary that runs it — the ape on PATH — and never a\n" +
+			"project's bingo pin (.bingo/ape.mod): that is a tracked, team-wide\n" +
+			"change. Inside a pinned project whose pin is behind, it says how to\n" +
+			"move the pin; --pin also moves it, committed on its own as\n" +
+			"'chore(ape): update ape to vA.B.C'. A launcher that is itself a bingo\n" +
+			"pin is not self-updated: --pin moves the project's pin instead.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runUpdate(cmd.Context(), Version, output.Format(outputFormat))
+			return runUpdate(cmd.Context(), Version, output.Format(outputFormat), pin)
 		},
 	}
 
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
+	cmd.Flags().BoolVar(&pin, "pin", false,
+		"Also move this project's bingo pin (.bingo/ape.mod) to the latest release and commit it as chore(ape)")
 	return cmd
 }
 
 // runUpdate resolves the latest release, and if newer than the running
 // binary, downloads + verifies + applies it. GITHUB_TOKEN is optional (raises
 // the API rate limit when set).
-func runUpdate(ctx context.Context, current string, format output.Format) error {
+func runUpdate(ctx context.Context, current string, format output.Format, movePinToo bool) error {
 	if err := refuseDeliveredSelfUpdate(); err != nil {
 		return err
+	}
+	var projectPin *apePin
+	if cwd, err := os.Getwd(); err == nil {
+		projectPin, _ = findApePin(cwd)
+	}
+	if movePinToo && projectPin == nil {
+		return usageErr(errors.New("--pin: no .bingo/ape.mod between here and the repo root, so there is no pin to move"))
 	}
 	token := os.Getenv("GITHUB_TOKEN")
 
@@ -72,31 +91,61 @@ func runUpdate(ctx context.Context, current string, format output.Format) error 
 		return fmt.Errorf("cannot detect latest version: %w", err)
 	}
 	latest := trimV(rel.TagName)
+	launcher, launcherIsPin := runningBingoPin()
 
-	if !isNewerVersion(current, latest) {
-		updatecache.Save(latest)
-		return printUpdateResult(updateResult{
-			CurrentVersion: current,
-			LatestVersion:  latest,
-			Updated:        false,
-			Message:        "already up to date",
-		}, format)
+	res := updateResult{CurrentVersion: current, LatestVersion: latest, Message: "already up to date"}
+	switch {
+	case !isNewerVersion(current, latest):
+	case launcherIsPin && movePinToo:
+		// The launcher is bingo's own: the pin move below is its update.
+		res.Message = "this ape is a bingo pin; moving the project's pin instead"
+	case launcherIsPin:
+		hint := ""
+		if projectPin != nil {
+			hint = "\n  or, in this project: ape update --pin"
+		}
+		return usageErr(fmt.Errorf("%w%s", refuseBingoSelfUpdate(latest), hint))
+	default:
+		if err := applyUpdate(ctx, rel, token); err != nil {
+			return fmt.Errorf("update failed: %w", err)
+		}
+		res.Updated, res.Message = true, "updated to "+latest
 	}
-
-	if err := refuseBingoSelfUpdate(latest); err != nil {
+	updatecache.Save(latest)
+	if err := printUpdateResult(res, format); err != nil {
 		return err
 	}
-	if err := applyUpdate(ctx, rel, token); err != nil {
-		return fmt.Errorf("update failed: %w", err)
+	if projectPin == nil || !isNewerVersion(projectPin.version, latest) {
+		if movePinToo && projectPin != nil {
+			fmt.Fprintf(os.Stderr, "ape: this project's pin is already %s\n", projectPin.version)
+		}
+		return nil
 	}
+	tag := "v" + latest
+	if !movePinToo {
+		fmt.Fprintf(os.Stderr, "ape: this project pins ape %s — to move it: bingo get %s@%s "+
+			"(or `ape update --pin`, or `ape framework update --update-ape`), then commit .bingo/\n",
+			projectPin.version, apeModulePath, tag)
+		return nil
+	}
+	return movePinAndCommit(ctx, projectPin.root, tag, launcherIsPin && launcher.linked)
+}
 
-	updatecache.Save(latest)
-	return printUpdateResult(updateResult{
-		CurrentVersion: current,
-		LatestVersion:  latest,
-		Updated:        true,
-		Message:        "updated to " + latest,
-	}, format)
+// movePinAndCommit is `ape update --pin`: the project's pin moves to tag in
+// a commit of its own, and nothing else is staged.
+func movePinAndCommit(ctx context.Context, root, tag string, link bool) error {
+	if _, err := exec.LookPath("bingo"); err != nil {
+		return usageErr(fmt.Errorf("--pin: bingo is not on PATH; run in %s: bingo get %s@%s, then commit .bingo/",
+			root, apeModulePath, tag))
+	}
+	if err := movePin(ctx, os.Stderr, root, tag, link); err != nil {
+		return failErr(err)
+	}
+	if err := commitPaths(ctx, root, []string{".bingo"}, pinCommitMessage(tag, "Generator: ape update --pin")); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "ape: moved this project's pin to %s and committed it (chore(ape))\n", tag)
+	return nil
 }
 
 // applyUpdate downloads the platform archive, the signed checksums manifest,

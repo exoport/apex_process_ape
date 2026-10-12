@@ -162,12 +162,10 @@ func decidePin(in pinCheckInput) pinDecision {
 
 	// `ape update` acts on the binary that runs it. Handing it to a pin
 	// older than 0.8.5 would overwrite the pin's own versioned file.
+	// It is the machine's launcher that `ape update` updates; it says what
+	// to do about a pin that is behind once it knows the newest version.
 	if in.verb == "ape update" {
-		if sameApeVersion(in.running, pin.version) {
-			return pinDecision{run: true}
-		}
-		return pinDecision{run: true, note: fmt.Sprintf("ape: this project pins ape %s (.bingo/ape.mod); "+
-			"`ape update` updates %s, not the pin. To move the pin: %s", pin.version, in.self, remedy("latest"))}
+		return pinDecision{run: true}
 	}
 	if sameApeVersion(in.running, pin.version) {
 		return pinDecision{run: true}

@@ -153,7 +153,7 @@ For subsequent refreshes against a framework version bump, use
 			if err != nil {
 				return handleSetupError(err)
 			}
-			sel, done, err := prepareInstall(cmd.Context(), repo, projectRoot, sel, !rf.noCommit, rf.version == "")
+			sel, done, err := prepareInstall(cmd.Context(), repo, projectRoot, sel, !rf.noCommit, rf.version == "", false)
 			if err != nil {
 				return handleSetupError(err)
 			}
@@ -219,6 +219,7 @@ func newFrameworkUpdateCmd(repoFlag, cwdFlag *string) *cobra.Command {
 		repair       bool
 		plan         bool
 		noCheck      bool
+		updateApe    bool
 		rf           releaseFlags
 	)
 	cmd := &cobra.Command{
@@ -260,6 +261,12 @@ release's min_ape_version, a terminal is offered an ape update first (bingo
 when the project pins ape, else 'ape update'), committed as
 'chore(ape): update ape to vA.B.C' when bingo changed, and the command
 re-runs on the new ape; without a terminal it exits 11.
+
+When this ape already meets the minimum and a newer one exists, nothing
+changes unless asked: --update-ape moves ape the same way (the pin in its
+own chore(ape) commit), and a terminal is asked, defaulting to No. Without
+either, only a line says so — an unattended run never picks up an ape
+nobody measured.
 
 Until ape v0.4.0 this command committed nothing. --no-commit keeps that:
 the whole result sits in the working tree for one 'git diff'. --repair's
@@ -355,7 +362,7 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 			if err != nil {
 				return handleUpdateError(err)
 			}
-			sel, done, err := prepareInstall(cmd.Context(), repo, projectRoot, sel, !rf.noCommit, rf.version == "")
+			sel, done, err := prepareInstall(cmd.Context(), repo, projectRoot, sel, !rf.noCommit, rf.version == "", updateApe)
 			if errors.Is(err, errKeepInstalled) {
 				if fwTarget.Tag != "" {
 					fmt.Fprintf(cloneNoteWriter(cmd, format), "framework repo: %s (not moved: installed rc kept)\n",
@@ -413,6 +420,9 @@ and unrelated work-in-progress elsewhere does not block anything.`,
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show the framework diff and pending migrations, writing nothing")
 	cmd.Flags().BoolVar(&noMigrate, "no-migrate", false, "Install framework files only; leave migrations pending")
+	cmd.Flags().BoolVar(&updateApe, "update-ape", false,
+		"Also move ape to its newest release first, when this one already meets the minimum: the project's bingo pin "+
+			"(committed on its own as chore(ape)) or `ape update`. A terminal is asked instead, defaulting to No")
 	cmd.Flags().BoolVar(&plan, "plan", false,
 		"Print the upgrade-migration plan, incoming entries included, and do nothing else")
 	cmd.Flags().BoolVar(&noCheck, "no-check", false,

@@ -11,6 +11,8 @@ bingo get -l github.com/exoport/apex_process_ape/cmd/ape@v0.9.0
 git add .bingo && git commit -m "chore: pin ape v0.9.0"
 ```
 
+Later, `ape update --pin` or `ape framework update --update-ape` moves the pin to the newest release and commits it for you.
+
 bingo builds `<GOBIN>/ape-v0.9.0` and records the version in `.bingo/ape.mod`. `-l` also points the bare `<GOBIN>/ape` at it. To move the pin later, run the same command with the new version and commit `.bingo/` again. Don't use `ape update` for this: it refuses on a pinned binary because it would overwrite the versioned file.
 
 ## What a bare `ape` does in a pinned project
@@ -29,7 +31,9 @@ The pinned binary is looked for where bingo puts it: `$GOBIN`, then the first `$
 
 **Recovery commands still run when the pin can't.** `ape framework update`, `ape doctor`, `ape version`, `ape update`, bare `ape` and any `--help` run on the current binary, with a note on stderr. That is how a project finds out what is wrong and moves its pin. When the pin is usable they hand over like every other command, except `ape update`.
 
-**`ape update` never hands over.** It updates the binary that runs it, and in a pinned project it says on stderr that the pin did not move and prints the bingo command that moves it.
+**`ape update` never hands over.** It updates the machine's launcher, the `ape` on PATH, whatever `.bingo/ape.mod` says. It never touches `.bingo/` unless asked, because moving the pin is a tracked, team-wide change. When the project's pin is behind the newest release, it prints the bingo command that moves it. `ape update --pin` also moves the pin, committed on its own as `chore(ape): update ape to vA.B.C`. If the launcher is itself a bingo pin (`~/go/bin/ape → ape-vX.Y.Z`), it is not self-updated: plain `ape update` refuses and names `--pin`, and `--pin` moves the project's pin (with `-l` when the launcher is bingo's link, so the bare `ape` follows).
+
+**`ape framework update --update-ape`** moves the pin to the newest release before installing, also in its own `chore(ape)` commit. At a terminal it asks first, defaulting to No. See [the framework update guide](framework-update.md#apes-minimum-version).
 
 ## Check which ape ran
 

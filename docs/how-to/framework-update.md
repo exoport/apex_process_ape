@@ -57,7 +57,10 @@ The release must use the framework's released layout (`_apex/` and `.claude/` at
 
 A framework release can declare the oldest ape it works with, as `min_ape_version:` in its `_apex/ape-commands.yaml`. `update` reads it from the release **before writing anything**:
 
-- **Meets it** (an rc of exactly that version counts, so `0.4.0-rc.2` meets `0.4.0`): the install goes ahead. If the update check knows a newer ape, one line says so.
+- **Meets it** (an rc of exactly that version counts, so `0.4.0-rc.2` meets `0.4.0`), or the release declares no minimum: the install goes ahead. A newer ape is **opt-in, never automatic**:
+  - `--update-ape` moves ape to the newest release first, through the same route as below: the project's bingo pin in a `chore(ape): update ape to vA.B.C` commit of its own, or `ape update`. The command then re-runs on the new ape.
+  - At a terminal, without the flag, you are asked `newer ape vX available … update the project's pin too? [y/N]`. The default is No.
+  - Without a terminal and without the flag, only one line says a newer ape exists. An unattended run never picks up an ape nobody measured.
 - **Below it, at a terminal:** you are asked whether to update ape first. The update goes through bingo when the project pins ape (`.bingo/ape.mod`), and otherwise through `ape update`. Then the same command re-runs on the new ape.
 - **Below it, without a terminal:** nothing is written. ape prints the command to run (`run: …`) and exits 11.
 - **A `dev` build or Go pseudo-version** cannot be compared: a warning, and the install goes ahead. A release that declares no minimum has none.

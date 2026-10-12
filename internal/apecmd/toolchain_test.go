@@ -109,13 +109,11 @@ func TestDecidePin(t *testing.T) {
 		d := decidePin(pinInput(sub, "0.7.0", "ape doctor"))
 		require.Equal(t, "/gobin/ape-v0.8.4", d.exec)
 	})
-	t.Run("ape update never swaps, and says the pin did not move", func(t *testing.T) {
+	t.Run("ape update never swaps: it updates the launcher", func(t *testing.T) {
 		_, sub := pinProject(t, "v0.8.4")
 		d := decidePin(pinInput(sub, "0.7.0", "ape update"))
 		require.True(t, d.run)
 		require.Empty(t, d.exec)
-		require.Contains(t, d.note, "not the pin")
-		require.Contains(t, d.note, "bingo get -l "+apeModulePath+"@latest")
 	})
 	t.Run("escape hatch", func(t *testing.T) {
 		_, sub := pinProject(t, "v0.8.4")

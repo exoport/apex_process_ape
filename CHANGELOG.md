@@ -23,6 +23,22 @@
   "pinned by" (`pinnedFrom` in JSON). Projects without `.bingo/ape.mod` are
   unchanged. Requested by the framework session; see
   `docs/how-to/pin-ape-in-a-project.md`.
+- **`ape framework update --update-ape`: a newer ape above the floor is
+  opt-in** (class C: `ape framework update`). Below `min_ape_version`
+  nothing changes. Above it, or with no minimum declared, v0.8.5 only
+  printed a line. Now `--update-ape` moves ape to the newest release first:
+  the project's bingo pin in a `chore(ape): update ape to vA.B.C` commit of
+  its own (with `-l` when the launcher is bingo's link to the pin), else
+  `ape update`. The command then re-runs on the new ape. A terminal is
+  asked, defaulting to No. Without a terminal and without the flag nothing
+  changes, so an unattended run never picks up an ape nobody measured.
+- **`ape update` updates the machine's launcher, aware of the pin**
+  (class C). It never hands over to the pin and never touches `.bingo/`
+  unasked. Inside a project whose pin is behind the newest release it
+  prints the bingo command that moves it. `--pin` also moves the pin,
+  committed on its own as `chore(ape)`. A launcher that is itself a bingo
+  pin is still refused (v0.8.5), now naming `ape update --pin`, and with
+  `--pin` the project's pin moves in its place.
 
 ## v0.8.5 (2026-10-12)
 

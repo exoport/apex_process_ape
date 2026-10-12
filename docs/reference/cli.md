@@ -3367,6 +3367,12 @@ when the project pins ape, else 'ape update'), committed as
 'chore(ape): update ape to vA.B.C' when bingo changed, and the command
 re-runs on the new ape; without a terminal it exits 11.
 
+When this ape already meets the minimum and a newer one exists, nothing
+changes unless asked: --update-ape moves ape the same way (the pin in its
+own chore(ape) commit), and a terminal is asked, defaulting to No. Without
+either, only a line says so — an unattended run never picks up an ape
+nobody measured.
+
 Until ape v0.4.0 this command committed nothing. --no-commit keeps that:
 the whole result sits in the working tree for one 'git diff'. --repair's
 output is never committed.
@@ -3429,6 +3435,7 @@ Flags:
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--plan` | bool | `false` | Print the upgrade-migration plan, incoming entries included, and do nothing else |
 | `--repair` | bool | `false` | Also run the opus judgment phase over free-form deferred records (spends money) |
+| `--update-ape` | bool | `false` | Also move ape to its newest release first, when this one already meets the minimum: the project's bingo pin (committed on its own as chore(ape)) or `ape update`. A terminal is asked instead, defaulting to No |
 | `--version` | string | `—` | Install exactly this release tag, vX.Y.Z or vX.Y.Z-rc.N (default: the highest final vX.Y.Z; a candidate is only ever installed by name) |
 
 Global flags:
@@ -6279,11 +6286,19 @@ issuer), then the downloaded archive is checked against that trusted
 manifest. Verification is fully offline against an embedded Sigstore
 trusted root — no cosign binary is required.
 
+It updates the binary that runs it — the ape on PATH — and never a
+project's bingo pin (.bingo/ape.mod): that is a tracked, team-wide
+change. Inside a pinned project whose pin is behind, it says how to
+move the pin; --pin also moves it, committed on its own as
+'chore(ape): update ape to vA.B.C'. A launcher that is itself a bingo
+pin is not self-updated: --pin moves the project's pin instead.
+
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
+| `--pin` | bool | `false` | Also move this project's bingo pin (.bingo/ape.mod) to the latest release and commit it as chore(ape) |
 
 ## ape version
 

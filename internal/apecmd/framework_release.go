@@ -98,7 +98,10 @@ func readableSource(ctx context.Context, repo string, sel *framework.ReleaseSele
 // newest says the release was chosen as the newest, not named by
 // --version: the clone sync has already pinned sel to a tag by then, so
 // sel alone no longer says so.
-func prepareInstall(ctx context.Context, repo, projectRoot string, sel *framework.ReleaseSelector, commit, newest bool) (
+//
+// updateApe is `--update-ape`: above the minimum too, move ape to the
+// newest release before installing.
+func prepareInstall(ctx context.Context, repo, projectRoot string, sel *framework.ReleaseSelector, commit, newest, updateApe bool) (
 	*framework.ReleaseSelector, func(), error,
 ) {
 	src, tag, cleanup, err := readableSource(ctx, repo, sel)
@@ -117,7 +120,7 @@ func prepareInstall(ctx context.Context, repo, projectRoot string, sel *framewor
 			return nil, nil, errKeepInstalled
 		}
 	}
-	if err := checkApeMinimum(ctx, os.Stdout, src, tag, projectRoot, commit); err != nil {
+	if err := checkApeMinimum(ctx, os.Stdout, src, tag, projectRoot, commit, updateApe); err != nil {
 		cleanup()
 		return nil, nil, err
 	}
@@ -152,7 +155,7 @@ func installLabel(meta framework.Metadata) string {
 // and, when it falls short, updates ape and re-runs the command on the new
 // binary. It returns nil when the install may proceed in this process.
 // A re-run's own outcome is final, so it exits with the child's status.
-func checkApeMinimum(ctx context.Context, w io.Writer, src, tag, projectRoot string, commit bool) error {
+func checkApeMinimum(ctx context.Context, w io.Writer, src, tag, projectRoot string, commit, updateApe bool) error {
 	manifest, err := framework.LoadApeCommands(src)
 	if err != nil {
 		return usageErrExit(exitCodeFrameworkValidation, err)
@@ -168,14 +171,13 @@ func checkApeMinimum(ctx context.Context, w io.Writer, src, tag, projectRoot str
 	switch framework.CompareApeVersion(Version, minimum) {
 	case framework.ApeVersionNoMinimum:
 		fmt.Fprintf(w, "ape: %s declares no min_ape_version\n", label)
-		return nil
+		return offerNewerApe(ctx, w, projectRoot, commit, updateApe)
 	case framework.ApeVersionUnknown:
 		fmt.Fprintf(os.Stderr, "warning: ape %s cannot be compared with %s's min_ape_version %s (a dev build or a pseudo-version) — continuing\n",
 			Version, label, minimum)
 		return nil
 	case framework.ApeVersionOK:
-		offerNewerApe(w)
-		return nil
+		return offerNewerApe(ctx, w, projectRoot, commit, updateApe)
 	case framework.ApeVersionBelow:
 	}
 
@@ -195,17 +197,53 @@ func checkApeMinimum(ctx context.Context, w io.Writer, src, tag, projectRoot str
 	return updateApeAndRerun(ctx, w, route, projectRoot, commit)
 }
 
-// offerNewerApe mentions, and never forces, a newer final ape when this
-// one already meets the minimum. It reads the version the background
-// update check last cached rather than asking the network: an install must
-// not depend on GitHub being reachable for a courtesy line.
-func offerNewerApe(w io.Writer) {
-	entry := updatecache.Load()
-	if entry == nil || !isNewerVersion(Version, entry.LatestVersion) {
-		return
+// offerNewerApe handles a newer final ape when this one already meets the
+// minimum. It is opt-in and never automatic: `--update-ape` moves ape (the
+// project's bingo pin when it has one) before installing, and a terminal is
+// asked, defaulting to No. Without either, it only prints a line, so an
+// unattended run never picks up an ape nobody measured.
+//
+// Without --update-ape it reads the version the background check last
+// cached rather than asking the network: an install must not depend on
+// GitHub being reachable for an offer.
+func offerNewerApe(ctx context.Context, w io.Writer, projectRoot string, commit, updateApe bool) error {
+	if os.Getenv(envFrameworkReexec) == "1" {
+		return nil // the re-run after an update: the offer was already answered
 	}
-	fmt.Fprintf(w, "ape: %s is available (this is %s, which meets the release's minimum); `%s` installs it\n",
-		entry.LatestVersion, Version, apeUpdateCommand(entry.LatestVersion))
+	latest := ""
+	if entry := updatecache.Load(); entry != nil {
+		latest = trimV(entry.LatestVersion)
+	}
+	if updateApe {
+		v, err := fetchLatestVersion(ctx, os.Getenv("GITHUB_TOKEN"))
+		if err != nil {
+			return usageErrExit(exitCodeApeBelowMinimum, fmt.Errorf(
+				"--update-ape: cannot find the newest ape release: %w; nothing was written", err))
+		}
+		latest = trimV(v)
+	}
+	if latest == "" || !isNewerVersion(Version, latest) {
+		if updateApe {
+			fmt.Fprintf(w, "ape: %s is the newest release; nothing to update\n", Version)
+		}
+		return nil
+	}
+	route := apeUpdateRoute(projectRoot)
+	if !updateApe {
+		if !interactive() {
+			fmt.Fprintf(w, "ape: %s is available (this is %s, which meets the release's minimum); "+
+				"`ape framework update --update-ape` or `%s` installs it\n", latest, Version, route.command("v"+latest))
+			return nil
+		}
+		what := "update ape too (" + route.name + ")?"
+		if route.bingo {
+			what = "update the project's pin too?"
+		}
+		if !askYesNo(fmt.Sprintf("newer ape v%s available (this is %s) — %s", latest, Version, what), false) {
+			return nil
+		}
+	}
+	return updateApeAndRerun(ctx, w, route, projectRoot, commit)
 }
 
 // apeRoute is how ape gets updated in this project.
@@ -239,7 +277,7 @@ func updateApeAndRerun(ctx context.Context, w io.Writer, route apeRoute, project
 		}
 		newBin = bin
 	} else {
-		if err := runUpdate(ctx, Version, "human"); err != nil {
+		if err := runUpdate(ctx, Version, "human", false); err != nil {
 			return usageErrExit(exitCodeApeBelowMinimum, err)
 		}
 		bin, err := os.Executable()
@@ -264,23 +302,44 @@ func updateApeViaBingo(ctx context.Context, w io.Writer, route apeRoute, project
 		fmt.Fprintf(os.Stderr, "run: %s\n", route.command(tag))
 		return "", usageErrExit(exitCodeApeBelowMinimum, errors.New("this project pins ape with bingo, and bingo is not on PATH"))
 	}
-	get := exec.CommandContext(ctx, "bingo", "get", apeModulePath+"@"+tag) //nolint:gosec // the tag is GitHub's newest release, reshaped as vX.Y.Z
-	get.Dir, get.Stdout, get.Stderr = projectRoot, w, os.Stderr
-	if err := get.Run(); err != nil {
-		return "", usageErrExit(exitCodeApeBelowMinimum, fmt.Errorf("bingo get %s@%s: %w", apeModulePath, tag, err))
+	// Keep the bare `ape` with the pin when it is bingo's -l link to it.
+	launcher, isPin := runningBingoPin()
+	if err := movePin(ctx, w, projectRoot, tag, isPin && launcher.linked); err != nil {
+		return "", usageErrExit(exitCodeApeBelowMinimum, err)
 	}
 	bin, err := bingoBinary(ctx, "ape", tag)
 	if err != nil {
 		return "", usageErrExit(exitCodeApeBelowMinimum, err)
 	}
 	if commit {
-		if err := commitPaths(ctx, projectRoot, []string{".bingo"},
-			"chore(ape): update ape to "+tag+"\n\n"+generatorTrailer+"\n"); err != nil {
+		if err := commitPaths(ctx, projectRoot, []string{".bingo"}, pinCommitMessage(tag, generatorTrailer)); err != nil {
 			return "", err
 		}
 		fmt.Fprintf(w, "ape: updated to %s and committed (chore(ape)); it stays committed whatever the install does next\n", tag)
 	}
 	return bin, nil
+}
+
+// movePin runs `bingo get [-l] <ape>@tag` in root. link keeps the bare
+// `ape` on the new pin, for a launcher that is bingo's -l link.
+func movePin(ctx context.Context, w io.Writer, root, tag string, link bool) error {
+	args := []string{"get"}
+	if link {
+		args = append(args, "-l")
+	}
+	args = append(args, apeModulePath+"@"+tag)
+	get := exec.CommandContext(ctx, "bingo", args...) //nolint:gosec // the tag is GitHub's newest release, reshaped as vX.Y.Z
+	get.Dir, get.Stdout, get.Stderr = root, w, os.Stderr
+	if err := get.Run(); err != nil {
+		return fmt.Errorf("bingo %s: %w", strings.Join(args, " "), err)
+	}
+	return nil
+}
+
+// pinCommitMessage is the commit that moves a project's ape pin: its own
+// commit, so it is never mixed into a framework install.
+func pinCommitMessage(tag, trailer string) string {
+	return "chore(ape): update ape to " + tag + "\n\n" + trailer + "\n"
 }
 
 // bingoBinary is where bingo put a pinned tool: $GOBIN, else $GOPATH/bin,
