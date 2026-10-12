@@ -2,6 +2,7 @@ package repl
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -91,6 +92,7 @@ func livePTYRepaintsDuringTool(t *testing.T, claudeBin string) {
 		worstPTY  time.Duration
 		samples   int
 		grewWhile bool
+		grownAt   int
 	)
 	for deadline := time.Now().Add(sleepFor - 5*time.Second); time.Now().Before(deadline); {
 		time.Sleep(2 * time.Second)
@@ -104,8 +106,9 @@ func livePTYRepaintsDuringTool(t *testing.T, claudeBin string) {
 		if age := time.Since(at); age > worstPTY {
 			worstPTY = age
 		}
-		if statSize(path) != sizeAtStart {
+		if !grewWhile && progressAppended(path, sizeAtStart) {
 			grewWhile = true
+			grownAt = samples
 		}
 	}
 
@@ -120,6 +123,11 @@ func livePTYRepaintsDuringTool(t *testing.T, claudeBin string) {
 	// The half that makes the above meaningful. If the transcript DID grow
 	// throughout, PTY is no longer load-bearing and the whole argument in
 	// pipeline_interactive.go's OnStepStart comment needs re-measuring.
+	if grewWhile {
+		// What claude wrote mid-tool is the whole question, and the
+		// transcript lives in a temp HOME that is gone after the test.
+		t.Logf("transcript grew at sample %d; appended after the tool row appeared:\n%s", grownAt, appendedSince(path, sizeAtStart))
+	}
 	require.False(t, grewWhile,
 		"the transcript GREW during a silent tool call (%d samples). That is not a failure of claude — it "+
 			"means transcript growth now anchors this window on its own, so PTY is no longer the only "+
@@ -162,4 +170,62 @@ func statSize(path string) int64 {
 		return -1
 	}
 	return fi.Size()
+}
+
+// appendedSince is what was written to path past offset, one JSONL record
+// per line, each cut to a readable length.
+func appendedSince(path string, offset int64) string {
+	data, err := os.ReadFile(path)
+	if err != nil || int64(len(data)) <= offset {
+		return "(nothing readable)"
+	}
+	var b strings.Builder
+	for line := range strings.SplitSeq(strings.TrimSpace(string(data[offset:])), "\n") {
+		if len(line) > 600 {
+			line = line[:600] + "…"
+		}
+		b.WriteString(line + "\n")
+	}
+	return b.String()
+}
+
+// metadataRecords are transcript records that say nothing about progress.
+// Claude Code writes the session's generated title ("ai-title") on its own
+// schedule, and on 2.1.296 it landed mid-tool in about one run in five —
+// twice failing this check before the appended bytes were looked at. One
+// title write is not an anchor: the window it could feed ends with it.
+var metadataRecords = map[string]bool{"ai-title": true}
+
+// progressAppended reports whether anything but metadata was written to
+// path past offset.
+func progressAppended(path string, offset int64) bool {
+	data, err := os.ReadFile(path)
+	if err != nil || int64(len(data)) <= offset {
+		return false
+	}
+	for line := range strings.SplitSeq(strings.TrimSpace(string(data[offset:])), "\n") {
+		var rec struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal([]byte(line), &rec) != nil || !metadataRecords[rec.Type] {
+			return true
+		}
+	}
+	return false
+}
+
+// TestProgressAppended: the title Claude Code writes mid-tool is not
+// progress; any other record is.
+func TestProgressAppended(t *testing.T) {
+	path := t.TempDir() + "/t.jsonl"
+	base := `{"type":"assistant","message":{}}` + "\n"
+	require.NoError(t, os.WriteFile(path, []byte(base), 0o644))
+	off := int64(len(base))
+	require.False(t, progressAppended(path, off), "nothing appended")
+
+	require.NoError(t, os.WriteFile(path, []byte(base+`{"type":"ai-title","aiTitle":"x"}`+"\n"), 0o644))
+	require.False(t, progressAppended(path, off), "a generated title is metadata")
+
+	require.NoError(t, os.WriteFile(path, []byte(base+`{"type":"ai-title","aiTitle":"x"}`+"\n"+`{"type":"user","message":{}}`+"\n"), 0o644))
+	require.True(t, progressAppended(path, off), "a real record after the title is progress")
 }
