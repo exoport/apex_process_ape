@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## Unreleased
+## v0.8.4 (2026-10-12)
 
 - **`ape doctor`'s `migrations.pending` row judges by the update's rule**
   (class D: doctor). The row read the ledger alone, so an entry the
