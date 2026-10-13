@@ -1,5 +1,60 @@
 # CHANGELOG
 
+## v0.10.0 (2026-10-13)
+
+- **Pipelines skip the stages and steps whose extensions are not
+  configured** (class C: the pipeline spec, and run-manifest fields the eval
+  reads). Some framework skills hard-gate on an extension
+  and exit `extension_not_enabled`. ape recorded such a step as a success,
+  so the run paid for an empty session: five of them on a no-patterns
+  project's `governance`. Stages and steps may now declare
+  `requires-extensions: [ext-…]` (all-of). ape reads the effective
+  `extensions` (`config.yaml` plus `config.local.yaml`) once at run start.
+  A stage whose gate is unmet is skipped whole: no spawn, no commit. So is
+  a stage whose every step is gated off. A gated step inside a running
+  stage is never typed and gets no `/clear`. The stage launches on the
+  model and effort of its first step that RUNS, and its stage commit fires
+  after its last step that runs. Work an earlier `commit: false` stage left
+  in the tree carries to the next boundary that fires.
+  A skipped stage or step never vanishes. The manifest records it as
+  `status: skipped`, `skip_reason: extension`, `missing_extensions: [...]`,
+  and a stage skipped whole keeps one skipped record per step. The run
+  records `extensions: {enabled, ignored}`, plus `totals.steps_skipped` and
+  `totals.stages_skipped`, which are omitted when zero. `steps_run`
+  excludes skipped steps. `schema_version` stays 2. The report, the TUI,
+  the web UI and `--no-tui` all show skips. Before the UI starts, the run
+  prints the extension set and what it will skip.
+  `--from <skipped stage>` starts at the next stage that is not skipped,
+  and says so. `--ignore-extensions` runs everything, as before.
+  A gated pipeline in a project whose config cannot be read is refused
+  rather than run with no extensions. `ape task` has no gates. Requested
+  by the framework session for framework v0.31.0, which declares the gates
+  and raises its floor to ape ≥ 0.10.0. An older ape warns about the keys
+  and runs every stage.
+- **`requires.conditional-files`** (class C). A path listed there is
+  required only when at least one of its `extensions-any` is enabled. It
+  covers folders that only an extension's skills create (`epics` requiring
+  `development/functionality` on a project with neither capabilities nor
+  features). Every entry is checked under `--ignore-extensions`. It is a
+  separate key, not a mapping inside `requires.files`, because an older ape
+  decodes `files` as strings and would refuse the whole pipeline. A
+  missing-files refusal still lists every missing path in one error.
+- **An unknown extension id fails the pipeline load** (class C), in a
+  gate, in `extensions-any`, or in a conditional entry missing `path` or
+  `extensions-any`. A typo would otherwise skip a stage on every project,
+  silently. The new keys are known keys, so they are no longer reported as
+  ignored.
+- **`ape doctor --only pipelines.project` fails on a pipeline that does
+  not load** (class D). It used to skip it and report the rest as
+  installed. Found on ape 0.7.0: a mapping inside `requires.files` made
+  `ape pipeline epics` refuse the file, and doctor said "10 pipelines".
+- **`ape framework setup` pre-selects the standard extensions** (class D):
+  `ext-adrs`, `ext-capabilities`, `ext-features`. Pressing Enter on the
+  checklist used to give none. The headless `--extensions` is unchanged.
+- Docs and help describe governance as ADR, pattern, capability and
+  feature governance as configured
+  (`docs/reference/pipeline-spec.md#extension-gates`).
+
 ## v0.9.0 (2026-10-12)
 
 - **A bare `ape` honours the project's bingo pin** (class B: which binary
