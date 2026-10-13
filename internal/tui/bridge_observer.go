@@ -39,6 +39,16 @@ func (o *BridgeObserver) OnStageEnd(stage string, dur time.Duration, err error) 
 	o.program.Send(stageEndMsg{stage: stage, dur: dur, err: err})
 }
 
+// OnStageSkipped / OnStepSkipped make the observer a pipeline.SkipObserver,
+// so a stage skipped for its extensions leaves the pending state.
+func (o *BridgeObserver) OnStageSkipped(stage string, skip pipeline.Skip) {
+	o.program.Send(stageSkippedMsg{stage: stage, skip: skip})
+}
+
+func (o *BridgeObserver) OnStepSkipped(stage string, idx int, _ pipeline.Step, _ pipeline.Skip) {
+	o.program.Send(stepSkippedMsg{stage: stage, idx: idx})
+}
+
 // OnStepStart forwards step starts to the model as stepStartMsg —
 // runner-side step boundaries don't depend on the stdout stream, so
 // the same forwarding the programmatic observer does is valid here.

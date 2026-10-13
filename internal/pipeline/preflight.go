@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/framework"
@@ -49,10 +50,20 @@ func (e *PreflightError) Error() string {
 
 // Preflight verifies the pipeline's prerequisites against the working
 // directory. Returns nil if all required files are present, otherwise
-// a *PreflightError listing the missing paths.
-func Preflight(spec *Spec, projectRoot string) error {
+// a *PreflightError listing every missing path at once.
+//
+// A `requires.conditional-files` entry is checked only when ext enables
+// at least one of its extensions; a nil ext, or --ignore-extensions,
+// checks them all.
+func Preflight(spec *Spec, projectRoot string, ext *Extensions) error {
+	paths := slices.Clone(spec.Requires.Files)
+	for _, cf := range spec.Requires.ConditionalFiles {
+		if ext.anyEnabled(cf.ExtensionsAny) {
+			paths = append(paths, cf.Path)
+		}
+	}
 	var missing []string
-	for _, rel := range spec.Requires.Files {
+	for _, rel := range paths {
 		p := filepath.Join(projectRoot, rel)
 		if _, err := os.Stat(p); err != nil {
 			if os.IsNotExist(err) {
@@ -102,7 +113,8 @@ func PreflightSkills(spec *Spec, projectRoot string) error {
 		))
 	}
 
-	for _, stage := range spec.Stages() {
+	for si := range spec.Stages() {
+		stage := &spec.Stages()[si]
 		for i := range stage.Chain {
 			step := &stage.Chain[i] // pointer: avoid copying the 128-byte Step per iteration
 			where := fmt.Sprintf("stage %s, step %d", stage.Name, i+1)

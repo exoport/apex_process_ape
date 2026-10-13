@@ -13,6 +13,9 @@ agent: apex-agent-pm # pipeline-level default (PLAN-6 / C2)
 commit: true # pipeline-level commit policy (PLAN-6 / C2)
 requires: # optional pre-flight check
   files: ["product-brief-*.md"]
+  conditional-files: # checked only when an extension listed is enabled (ape ≥ 0.10.0)
+    - path: development/functionality
+      extensions-any: [ext-capabilities, ext-features]
 stages: { ... } # required
 ```
 
@@ -37,6 +40,7 @@ stages:
     model: sonnet # stage-level override (PLAN-6 / C2)
     agent: apex-agent-pm # stage-level override (PLAN-6 / C2)
     commit: "feat: PRD" # stage-level override (PLAN-6 / C2)
+    requires-extensions: [ext-adrs] # skip the stage unless every id is enabled (ape ≥ 0.10.0)
     chain:
       - skill: apex-create-prd
         # ...
@@ -55,7 +59,12 @@ chain:
     prompt_flag: "--prompt" # forwards user-supplied --prompt
     commit: true # step-level commit (PLAN-4 / C1)
     no-clear: true # opt out of /clear before this step (PLAN-6 / C4)
+    requires-extensions: [ext-features] # skip the step unless every id is enabled (ape ≥ 0.10.0)
 ```
+
+### `requires-extensions`
+
+Stage- and step-level. A list of extension ids, all of which must be enabled in the project's effective config for the stage or step to run; otherwise it is recorded as skipped. See [pipeline-spec.md § Extension gates](pipeline-spec.md#extension-gates) for the full rules, including commits, `--from` and `--ignore-extensions`.
 
 ### `no-clear`
 

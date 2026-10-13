@@ -135,6 +135,21 @@ type RunOptions struct {
 	// any stage executes. CLI: --from <stage>.
 	FromStage string
 
+	// IgnoreExtensions runs every stage and step regardless of its
+	// `requires-extensions:` gate, and checks every conditional file —
+	// what every ape before v0.10.0 did. CLI: --ignore-extensions.
+	IgnoreExtensions bool
+
+	// Extensions is the run's extension set when the caller resolved it
+	// already (the CLI does, to report the plan before the UI starts).
+	// Nil makes Run resolve it from ProjectRoot's effective config.
+	Extensions *Extensions
+
+	// OnStageSkipped fires, in stage order, for a stage that does not run
+	// because its extension gate is unmet. Neither OnStageStart nor
+	// OnStageEnd fires for it. Web mode wires it to the stage card.
+	OnStageSkipped func(stage string, skip Skip)
+
 	// WaitStepDone is called between steps in interactive mode to
 	// block until the model has finished responding to the step's
 	// prompt. The apecmd wiring layer implements this by subscribing
@@ -301,6 +316,14 @@ type Observer interface {
 	OnStepEnd(stage string, idx int, step Step, dur time.Duration, output string, err error)
 }
 
+// SkipObserver is the optional half of Observer for extension skips. An
+// Observer that does not implement it simply never hears about them; the
+// manifest records them regardless.
+type SkipObserver interface {
+	OnStageSkipped(stage string, skip Skip)
+	OnStepSkipped(stage string, idx int, step Step, skip Skip)
+}
+
 // Run executes a pipeline against opts.ProjectRoot. Each stage runs
 // sequentially; within a stage, each step in the chain runs sequentially.
 // Any non-zero claude exit fails the whole pipeline and aborts further
@@ -327,7 +350,12 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 			return err
 		}
 	}
-	if err := Preflight(spec, opts.ProjectRoot); err != nil {
+	ext, err := extensionsForRun(spec, opts)
+	if err != nil {
+		return err
+	}
+	opts.Extensions = ext
+	if err := Preflight(spec, opts.ProjectRoot, ext); err != nil {
 		return err
 	}
 	if err := PreflightSkills(spec, opts.ProjectRoot); err != nil {
@@ -345,6 +373,13 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 	if mw != nil {
 		mw.manifest.ClaudeVersion = claudeVersion(ctx, opts.ClaudeBin)
 		mw.manifest.FileReadMaxOutputTokens = repl.FileReadMaxOutputTokens
+		if ext != nil {
+			enabled := ext.Enabled
+			if enabled == nil {
+				enabled = []string{}
+			}
+			mw.manifest.Extensions = &ExtensionsRecord{Enabled: enabled, Ignored: ext.Ignored}
+		}
 		_ = mw.persist()
 		if opts.OnRunDir != nil {
 			opts.OnRunDir(mw.runDir)
@@ -417,15 +452,16 @@ func dirtyTreeGate(ctx context.Context, spec *Spec, opts RunOptions) error {
 // validateFromStage returns an error when name does not match any stage
 // in spec, listing the available names to guide the caller.
 func validateFromStage(spec *Spec, name string) error {
-	for _, s := range spec.Stages() {
+	for si := range spec.Stages() {
+		s := &spec.Stages()[si]
 		if s.Name == name {
 			return nil
 		}
 	}
 	stages := spec.Stages()
 	names := make([]string, len(stages))
-	for i, s := range stages {
-		names[i] = s.Name
+	for i := range stages {
+		names[i] = stages[i].Name
 	}
 	return fmt.Errorf("--from: stage %q not found in pipeline %q (available: %s)",
 		name, spec.Name, strings.Join(names, ", "))

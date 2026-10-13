@@ -828,7 +828,9 @@ func buildSpecPrepends(
 	if cfg.outputStyleSet {
 		return runFlags, nil, nil
 	}
-	for _, stage := range spec.Stages() {
+	stages := spec.Stages()
+	for si := range stages {
+		stage := &stages[si]
 		declared, styleErr := spec.EffectiveOutputStyle(stage.Name)
 		// An undeclared stage INHERITS the run-level flags; it must not
 		// get an override. Comparing the spec's cascade against runStyle
@@ -980,6 +982,8 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		ApeVersion:        Version,
 		ManifestDir:       cfg.manifestDir,
 		FromStage:         cfg.fromStage,
+		IgnoreExtensions:  cfg.ignoreExtensions,
+		Extensions:        cfg.extensions,
 		NoCommit:          cfg.noCommit,
 		AllowDirty:        cfg.allowDirty,
 		PrependFlags:      prepend,

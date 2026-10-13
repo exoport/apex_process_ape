@@ -44,14 +44,24 @@ import (
 // set `NoClear` to opt out — used for skills that need to see the
 // previous step's context (rare).
 func runStagesInteractive(ctx context.Context, spec *Spec, opts RunOptions, mw *manifestWriter) error {
+	skips := spec.PlanSkips(opts.Extensions)
 	skipping := opts.FromStage != ""
-	for _, stage := range spec.Stages() {
+	for si := range spec.Stages() {
+		stage := &spec.Stages()[si]
 		if skipping {
 			if stage.Name == opts.FromStage {
 				skipping = false
 			} else {
 				continue
 			}
+		}
+		stageSkips := skips[stage.Name]
+		if stageSkips.Stage != nil {
+			// Never spawned, so no commit fires: work an earlier
+			// `commit: false` stage left in the tree carries to the next
+			// boundary that does.
+			recordSkippedStage(spec, stage, stageSkips, opts, mw)
+			continue
 		}
 		stageStart := time.Now()
 		var stageIdx int
@@ -64,7 +74,7 @@ func runStagesInteractive(ctx context.Context, spec *Spec, opts RunOptions, mw *
 		}
 		runLog(opts.RunLog, "stage-start", stage.Name, nil)
 
-		stageStatus, stageErr := runStageInteractive(ctx, spec, stage, opts, mw, stageIdx)
+		stageStatus, stageErr := runStageInteractive(ctx, spec, *stage, stageSkips, opts, mw, stageIdx)
 
 		if mw != nil {
 			_ = mw.EndStage(stageIdx, stageStatus, time.Now())
@@ -80,6 +90,38 @@ func runStagesInteractive(ctx context.Context, spec *Spec, opts RunOptions, mw *
 		runLog(opts.RunLog, "stage-end", stage.Name, nil)
 	}
 	return nil
+}
+
+// recordSkippedStage records and announces a stage skipped whole.
+func recordSkippedStage(spec *Spec, stage *Stage, skips StageSkips, opts RunOptions, mw *manifestWriter) {
+	skip := *skips.Stage
+	if mw != nil {
+		now := time.Now()
+		steps := make([]StepRecord, len(stage.Chain))
+		for i := range stage.Chain {
+			steps[i] = skippedStepRecord(&stage.Chain[i], effectiveAgent(spec, stage.Name, i), skips.Steps[i], now)
+		}
+		_ = mw.RecordSkippedStage(stage.Name, now, &skip, steps)
+	}
+	if so, ok := opts.Observer.(SkipObserver); ok {
+		so.OnStageSkipped(stage.Name, skip)
+	}
+	if opts.OnStageSkipped != nil {
+		opts.OnStageSkipped(stage.Name, skip)
+	}
+	runLog(opts.RunLog, "stage-skipped", stage.Name, map[string]any{
+		"reason": skip.Reason, "missing_extensions": skip.Missing,
+	})
+}
+
+// effectiveAgent is the agent a step would be typed with, for a record of
+// a step that never was.
+func effectiveAgent(spec *Spec, stage string, i int) string {
+	_, _, agent, _, err := spec.Effective(stage, i) //nolint:dogsled // only the agent is wanted
+	if err != nil {
+		return ""
+	}
+	return agent
 }
 
 // interactiveReadyTimeout bounds the wait for claude's REPL to come
@@ -115,15 +157,23 @@ func PrependForStage(opts RunOptions, stageName string) []string {
 // per-step manifest records, and tears the session down at the end.
 //
 //nolint:funlen,maintidx,gocyclo // single-spawn stage orchestration intentionally lives in one function; the keystroke / wait / capture interaction is clearer in one place than fragmented across helpers.
-func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunOptions, mw *manifestWriter, stageIdx int) (RunStatus, error) {
+func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, skips StageSkips, opts RunOptions, mw *manifestWriter, stageIdx int) (RunStatus, error) {
 	if len(stage.Chain) == 0 {
 		return StatusCompleted, nil
 	}
+	// The stage launches with the first step that RUNS: a skipped first
+	// step must not choose the model or effort the rest of the chain runs
+	// on. The caller never passes a stage with no step to run.
+	first := skips.firstRun()
+	if first < 0 {
+		return StatusCompleted, nil
+	}
+	last := skips.lastRun()
 
-	firstStep := stage.Chain[0]
+	firstStep := stage.Chain[first]
 	// Only the model is read here: the effort is re-resolved with its
 	// source by EffectiveEffort below.
-	firstModel, _, _, _, err := spec.Effective(stage.Name, 0) //nolint:dogsled // see above
+	firstModel, _, _, _, err := spec.Effective(stage.Name, first) //nolint:dogsled // see above
 	if err != nil {
 		return StatusFailed, fmt.Errorf("stage %q: resolve effective values: %w", stage.Name, err)
 	}
@@ -137,13 +187,13 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 	// Sonnet sub-agent of an Opus session runs at Sonnet's row; with no
 	// table either, the legacy default applies process-wide. effort.Decide
 	// is the one place that rule lives.
-	explicitEffort, effortSource, effErr := spec.EffectiveEffort(stage.Name, 0, opts.Effort)
+	explicitEffort, effortSource, effErr := spec.EffectiveEffort(stage.Name, first, opts.Effort)
 	if effErr != nil {
 		return StatusFailed, fmt.Errorf("stage %q: resolve effort: %w", stage.Name, effErr)
 	}
 	effortPlan := effort.Decide(explicitEffort, effortSource, opts.EffortTable, firstModel)
 
-	plan, planErr := spec.PlanStageCommits(stage.Name)
+	plan, planErr := spec.planStageCommits(stage.Name, skips.Steps)
 	if planErr != nil {
 		return StatusFailed, fmt.Errorf("stage %q: plan commits: %w", stage.Name, planErr)
 	}
@@ -197,6 +247,20 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 	var stageErr error
 	for i := range stage.Chain {
 		step := stage.Chain[i] // indexed to avoid a per-iteration copy of the 128-byte Step in the range clause
+		if skip := skips.Steps[i]; skip != nil {
+			// Never typed, and no /clear for it: the next step that runs
+			// clears the context the last one that ran left behind.
+			if mw != nil {
+				_ = mw.RecordSkippedStep(stageIdx, skippedStepRecord(&stage.Chain[i], effectiveAgent(spec, stage.Name, i), skip, time.Now()))
+			}
+			if so, ok := opts.Observer.(SkipObserver); ok {
+				so.OnStepSkipped(stage.Name, i, step, *skip)
+			}
+			runLog(opts.RunLog, "step-skipped", StepLabel(stage.Name, i+1, step.Skill), map[string]any{
+				"reason": skip.Reason, "missing_extensions": skip.Missing,
+			})
+			continue
+		}
 		stepStart := time.Now()
 		notify(opts.Observer, func(o Observer) { o.OnStepStart(stage.Name, i, step) })
 
@@ -249,7 +313,7 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		// spurious agent-prefix violation. The first step gets a
 		// clean session by construction. NoClear opts out for skills
 		// that need the previous step's context.
-		if i > 0 && !step.NoClear {
+		if i > first && !step.NoClear {
 			if err := repl.SendCommand(ctx, sessionName, "/clear"); err != nil {
 				stageErr = fmt.Errorf("stage %q step %d: send /clear: %w", stage.Name, i, err)
 				stageStatus = StatusFailed
@@ -418,7 +482,7 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, opts RunO
 		// Runs only after the step's run-state is recorded so the
 		// manifest reflects both the run outcome and the commit
 		// outcome atomically. Commit failures abort the stage.
-		isLastStep := i == len(stage.Chain)-1
+		isLastStep := i == last
 		commitSHA, commitMsg, committed, commitErr := performStepCommit(ctx, opts, mw, plan, stageIdx, i+1, isLastStep, nil)
 		if commitErr == nil {
 			runLog(opts.RunLog, "commit-made", StepLabel(stage.Name, i+1, step.Skill), nil)

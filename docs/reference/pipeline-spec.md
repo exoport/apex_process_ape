@@ -23,6 +23,52 @@ requires:
 
 `files` despite the name accepts both files and directories — the check is a `stat`, not a "is regular file" test. Used by the `governance` pipeline to ensure the architecture has already been sharded before governance work begins.
 
+`conditional-files` (ape ≥ 0.10.0) lists paths that are required only when at least one of their extensions is enabled — the folders that only an extension's skills create:
+
+```yaml
+requires:
+  files:
+    - development/planning/architecture
+  conditional-files:
+    - path: development/functionality
+      extensions-any: [ext-capabilities, ext-features]
+    - path: development/governance
+      extensions-any: [ext-adrs, ext-patterns]
+```
+
+Each entry needs both `path` and `extensions-any`, and every id must be one of `ext-adrs`, `ext-patterns`, `ext-capabilities`, `ext-features`; anything else fails the load. Under `--ignore-extensions` every entry is checked. A missing-files refusal lists every missing path, plain and conditional, in one error. It is a separate key rather than a mapping inside `files` so that an older ape, which decodes `files` as strings, ignores it instead of refusing the pipeline.
+
+## Extension gates
+
+A stage or a step may declare the extensions it needs (ape ≥ 0.10.0):
+
+```yaml
+stages:
+  pattern-governance:
+    requires-extensions: [ext-patterns] # all-of
+    chain:
+      - skill: apex-pattern-reconciliation
+  functionality-refresh:
+    chain:
+      - skill: apex-feature-refresh
+        requires-extensions: [ext-features]
+      - skill: apex-capability-refresh
+        requires-extensions: [ext-capabilities]
+```
+
+ape reads the project's effective `extensions` (`_apex/config.yaml` plus the `config.local.yaml` overlay) once, at run start, and records it in the manifest as `extensions: {enabled, ignored}`.
+
+- **A stage whose gate is unmet is skipped whole**: no `claude` is spawned and no commit fires. So is a stage whose every step is skipped by its own gate.
+- **A step whose gate is unmet is skipped inside its running stage**: it is never typed and gets no `/clear`. The stage launches with the model and effort of its first step that *runs*, and its stage commit fires after its last step that runs.
+- **Nothing vanishes.** A skipped stage or step is in the manifest with `status: skipped`, `skip_reason: extension` and `missing_extensions`; a stage skipped whole still lists one skipped record per step. The report, the TUI, the web UI and `--no-tui` output all show it. `totals.steps_skipped` / `totals.stages_skipped` count them; `steps_run` does not.
+- **Commits carry.** Work an earlier `commit: false` stage left in the tree is committed by the next commit boundary that fires, as it always was — a skipped stage is simply not one.
+- **`--from <stage>`** naming a skipped stage starts at the next stage that is not, and says so before the run.
+- **`--ignore-extensions`** applies no gate and checks every conditional file, as every ape before 0.10.0 did.
+- A gated pipeline in a project whose config cannot be read is refused rather than run with no extensions; `--ignore-extensions` runs it anyway.
+- `ape task` has no gates: a skill dispatched on its own keeps its own extension check.
+
+An id outside the four known ones fails the load, in `ape pipeline` and as a FAIL row in `ape doctor --only pipelines.project`.
+
 ## Stages
 
 Each stage runs a `chain` of skill invocations against the project. ape dispatches each step to the local `claude` CLI and waits for completion before moving to the next step.
@@ -45,6 +91,7 @@ stages:
 | Field   | Type           | Required | Description                                                                       |
 | ------- | -------------- | -------- | --------------------------------------------------------------------------------- |
 | `chain` | array of steps | yes      | One or more skill invocations, run in declaration order. Empty chain is rejected. |
+| `requires-extensions` | array of ids | no | All-of extension gate for the whole stage. See [Extension gates](#extension-gates). |
 
 ### Step object fields
 
@@ -57,6 +104,7 @@ stages:
 | `args`        | string         | no       | Extra literal CLI flags appended to the skill invocation, whitespace-separated. Example: `"--doc prd"`. Use this for fixed flags only.                                                                  |
 | `prompt_flag` | string         | no       | When set together with the runner's `--prompt` flag, ape appends `<prompt_flag> <prompt-value>` to the skill argv. No canonical framework pipeline declares it. |
 | `commit`      | bool or string | no       | Per-step commit boundary control (PLAN-4). See [Commits](#commits) below.                                                                                                                               |
+| `requires-extensions` | array of ids | no | All-of extension gate for this step. See [Extension gates](#extension-gates). |
 
 ## Reasoning effort
 

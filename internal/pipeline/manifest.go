@@ -39,6 +39,11 @@ const (
 	StatusCompleted RunStatus = "completed"
 	StatusFailed    RunStatus = "failed"
 	StatusCancelled RunStatus = "cancelled"
+	// StatusSkipped — a stage or step whose `requires-extensions:` gate
+	// the project's config did not meet. Never spawned or typed, so it
+	// carries no metrics; skip_reason and missing_extensions say why.
+	// Stage and step only, never a run status.
+	StatusSkipped RunStatus = "skipped"
 )
 
 // CommitStatus enumerates per-step commit outcomes recorded in the
@@ -113,7 +118,12 @@ type Manifest struct {
 	DurationSecs float64        `yaml:"duration_seconds"`
 	Status       RunStatus      `yaml:"status"`
 	Totals       ManifestTotals `yaml:"totals"`
-	Stages       []StageRecord  `yaml:"stages"`
+	// Extensions is the extension set the run was gated on, resolved once
+	// at run start from the effective config. Absent when the project had
+	// no readable config and the spec declared no gates. Additive under
+	// schema_version 2.
+	Extensions *ExtensionsRecord `yaml:"extensions,omitempty"`
+	Stages     []StageRecord     `yaml:"stages"`
 
 	// TranscriptBlobs maps each uploaded transcript's file base name to its
 	// content-addressed reference (PLAN-13 D3). Empty/absent when transcript
@@ -233,6 +243,15 @@ type CommitContractRecord struct {
 	Subjects []string `yaml:"subjects,omitempty"`
 }
 
+// ExtensionsRecord is the manifest's copy of the run's extension set.
+type ExtensionsRecord struct {
+	// Enabled is the effective `extensions` list. Recorded under
+	// --ignore-extensions too, when the config could be read.
+	Enabled []string `yaml:"enabled"`
+	// Ignored is --ignore-extensions: no gate was applied.
+	Ignored bool `yaml:"ignored"`
+}
+
 // TranscriptBlob is one uploaded transcript's content-addressed reference.
 type TranscriptBlob struct {
 	SessionID string `yaml:"session_id,omitempty"`
@@ -263,6 +282,11 @@ type ManifestTotals struct {
 	NumTurns              int `yaml:"num_turns"`
 	StepsRun              int `yaml:"steps_run"`
 	StepsFailed           int `yaml:"steps_failed"`
+	// StepsSkipped / StagesSkipped count records with status skipped.
+	// Skipped steps are not in StepsRun. Omitted when zero, so a run that
+	// skipped nothing writes the same totals as before they existed.
+	StepsSkipped  int `yaml:"steps_skipped,omitempty"`
+	StagesSkipped int `yaml:"stages_skipped,omitempty"`
 	// CommitsMade counts APE'S OWN boundary commits — per-step commits
 	// and `ape task --task-commit`. It does NOT count commits the
 	// dispatched skill made itself.
@@ -324,13 +348,17 @@ type SessionUsageRecord struct {
 
 // StageRecord captures one stage's lifecycle.
 type StageRecord struct {
-	Index        int          `yaml:"index"`
-	Name         string       `yaml:"name"`
-	StartedAt    time.Time    `yaml:"started_at"`
-	EndedAt      time.Time    `yaml:"ended_at,omitempty"`
-	DurationSecs float64      `yaml:"duration_seconds"`
-	Status       RunStatus    `yaml:"status"`
-	Steps        []StepRecord `yaml:"steps"`
+	Index        int       `yaml:"index"`
+	Name         string    `yaml:"name"`
+	StartedAt    time.Time `yaml:"started_at"`
+	EndedAt      time.Time `yaml:"ended_at,omitempty"`
+	DurationSecs float64   `yaml:"duration_seconds"`
+	Status       RunStatus `yaml:"status"`
+	// SkipReason and MissingExtensions are set when Status is skipped.
+	// A stage skipped whole still lists one skipped record per chain step.
+	SkipReason        string       `yaml:"skip_reason,omitempty"`
+	MissingExtensions []string     `yaml:"missing_extensions,omitempty"`
+	Steps             []StepRecord `yaml:"steps"`
 }
 
 // StepRecord captures one step's metrics. Numeric fields default to
@@ -369,6 +397,8 @@ type StepRecord struct {
 	EndedAt               time.Time    `yaml:"ended_at,omitempty"`
 	DurationSecs          float64      `yaml:"duration_seconds"`
 	Status                RunStatus    `yaml:"status"`
+	SkipReason            string       `yaml:"skip_reason,omitempty"`
+	MissingExtensions     []string     `yaml:"missing_extensions,omitempty"`
 	ExitCode              int          `yaml:"exit_code"`
 	CostUSD               float64      `yaml:"cost_usd"`
 	TokensInput           int          `yaml:"tokens_input"`

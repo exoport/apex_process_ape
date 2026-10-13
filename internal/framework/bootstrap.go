@@ -61,11 +61,17 @@ func newBootstrapModel(defaultProjectName string, extensions []Extension) *boots
 	ti.Focus()
 	ti.CharLimit = 64
 	ti.Width = 40
+	// Pre-select the standard set, so Enter on the checklist gives the
+	// configuration the framework documents rather than none at all.
+	selected := make([]bool, len(extensions))
+	for i, e := range extensions {
+		selected[i] = e.Standard
+	}
 	return &bootstrapModel{
 		phase:      phaseProjectName,
 		input:      ti,
 		extensions: extensions,
-		selected:   make([]bool, len(extensions)),
+		selected:   selected,
 	}
 }
 

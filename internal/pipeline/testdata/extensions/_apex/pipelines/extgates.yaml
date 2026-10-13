@@ -1,0 +1,56 @@
+# Extension-gate fixture (ape v0.10.0). The tests run it against a project
+# whose effective config enables [ext-adrs, ext-capabilities]: no patterns,
+# no features. Each stage pins one behaviour; the comment says which.
+name: extgates
+requires:
+  files:
+    - always.md
+  conditional-files:
+    - path: development/functionality
+      extensions-any: [ext-capabilities, ext-features]
+    - path: development/patterns-only
+      extensions-any: [ext-patterns]
+stages:
+  # commit: false — its work stays in the tree for the next boundary.
+  prep:
+    commit: false
+    chain:
+      - skill: prep-step
+  # Stage gate unmet: skipped whole, no spawn, no commit.
+  patterns-only:
+    requires-extensions: [ext-patterns]
+    commit: "specs: patterns"
+    chain:
+      - skill: pattern-survey
+      - skill: pattern-apply
+  # Stage gate met: runs, and its commit carries prep's work.
+  adrs:
+    requires-extensions: [ext-adrs]
+    commit: "specs: adrs"
+    chain:
+      - skill: adr-step
+  # First step skipped: the stage launches on the second step's model.
+  refresh:
+    commit: "specs: refresh"
+    chain:
+      - skill: feature-refresh
+        model: opus
+        requires-extensions: [ext-features]
+      - skill: capability-refresh
+        model: haiku
+        requires-extensions: [ext-capabilities]
+  # Last step skipped: the stage commit fires on the last step that runs.
+  tail-skip:
+    commit: "specs: tail"
+    chain:
+      - skill: tail-run
+      - skill: tail-feature
+        requires-extensions: [ext-features]
+  # Every step skipped by its own gate: treated as a skipped stage.
+  all-gated:
+    commit: "specs: never"
+    chain:
+      - skill: gated-pattern
+        requires-extensions: [ext-patterns]
+      - skill: gated-feature
+        requires-extensions: [ext-features, ext-patterns]

@@ -103,6 +103,58 @@ func (w *manifestWriter) BeginStage(name string, at time.Time) int {
 	return idx
 }
 
+// RecordSkippedStage appends a stage that did not run, with one skipped
+// record per chain step, so it shows in the manifest and the report at
+// its position instead of vanishing.
+func (w *manifestWriter) RecordSkippedStage(name string, at time.Time, skip *Skip, steps []StepRecord) error {
+	idx := len(w.manifest.Stages) + 1
+	rec := StageRecord{
+		Index:             idx,
+		Name:              name,
+		StartedAt:         at.UTC(),
+		EndedAt:           at.UTC(),
+		Status:            StatusSkipped,
+		SkipReason:        skip.Reason,
+		MissingExtensions: skip.Missing,
+	}
+	for i := range steps {
+		steps[i].Index = i + 1
+		w.manifest.Totals.StepsSkipped++
+	}
+	rec.Steps = steps
+	w.manifest.Stages = append(w.manifest.Stages, rec)
+	w.manifest.Totals.StagesSkipped++
+	return w.persist()
+}
+
+// RecordSkippedStep appends a skipped record to a running stage. It keeps
+// the stage's step records aligned with its chain, which RecordStepCommit
+// relies on.
+func (w *manifestWriter) RecordSkippedStep(stageIdx int, rec StepRecord) error {
+	if stageIdx < 1 || stageIdx > len(w.manifest.Stages) {
+		return fmt.Errorf("invalid stage index %d", stageIdx)
+	}
+	stage := &w.manifest.Stages[stageIdx-1]
+	rec.Index = len(stage.Steps) + 1
+	stage.Steps = append(stage.Steps, rec)
+	w.manifest.Totals.StepsSkipped++
+	return w.persist()
+}
+
+// skippedStepRecord is the record of a step that was never typed.
+func skippedStepRecord(step *Step, agent string, skip *Skip, at time.Time) StepRecord {
+	return StepRecord{
+		Skill:             step.Skill,
+		Agent:             agent,
+		Args:              step.Args,
+		StartedAt:         at.UTC(),
+		EndedAt:           at.UTC(),
+		Status:            StatusSkipped,
+		SkipReason:        skip.Reason,
+		MissingExtensions: skip.Missing,
+	}
+}
+
 // OpenStepLog creates the per-step NDJSON file and returns a WriteCloser
 // the runner tees claude's line stream into. The returned events_path
 // (relative to runDir) is recorded on the StepRecord. The path uses

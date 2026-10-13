@@ -50,7 +50,7 @@ func TestPreflight_AllPresent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := pipeline.Preflight(spec, dir); err != nil {
+	if err := pipeline.Preflight(spec, dir, nil); err != nil {
 		t.Fatalf("expected pass, got: %v", err)
 	}
 }
@@ -62,7 +62,7 @@ func TestPreflight_MissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = pipeline.Preflight(spec, dir)
+	err = pipeline.Preflight(spec, dir, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -85,7 +85,7 @@ func TestPreflight_NoRequires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := pipeline.Preflight(spec, dir); err != nil {
+	if err := pipeline.Preflight(spec, dir, nil); err != nil {
 		t.Errorf("design has no requires.files; expected pass, got: %v", err)
 	}
 }

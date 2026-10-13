@@ -43,7 +43,8 @@ var testModelSonnet1MResolved = cost.ResolveFamilyAlias("sonnet") + "[1m]"
 func stubSpecSkills(t *testing.T, root string, spec *Spec) {
 	t.Helper()
 	seen := make(map[string]bool)
-	for _, stage := range spec.Stages() {
+	for si := range spec.Stages() {
+		stage := &spec.Stages()[si]
 		for i := range stage.Chain {
 			step := &stage.Chain[i]
 			for _, name := range []string{step.Skill, step.Agent} {

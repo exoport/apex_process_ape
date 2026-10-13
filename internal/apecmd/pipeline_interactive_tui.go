@@ -153,6 +153,8 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 			ApeVersion:             Version,
 			ManifestDir:            cfg.manifestDir,
 			FromStage:              cfg.fromStage,
+			IgnoreExtensions:       cfg.ignoreExtensions,
+			Extensions:             cfg.extensions,
 			NoCommit:               cfg.noCommit,
 			AllowDirty:             cfg.allowDirty,
 			Effort:                 cfg.effort,

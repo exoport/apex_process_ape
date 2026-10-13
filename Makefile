@@ -288,6 +288,9 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	@#     fork — and it fires on a dependency bump rather than months later. The
 	@#     fork sat frozen at v0.2.1 through a v0.3.0 release with nothing on
 	@#     either side reporting it.
+	@#   TestContract_LivePipelinesLoad  every pipeline the framework ships loads
+	@#     with this binary — extension gates valid, no key this ape ignores. A
+	@#     mapping inside requires.files once made an older ape refuse `epics`.
 	@#
 	@# The eight TestParity_* gates were removed in v0.0.55. They ran the ten
 	@# retired Python scripts side by side with the commands replacing them, so

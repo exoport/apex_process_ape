@@ -66,6 +66,25 @@ type Spec struct {
 // Requires lists pre-flight conditions for a pipeline.
 type Requires struct {
 	Files []string `yaml:"files,omitempty"`
+	// ConditionalFiles are paths checked only when at least one of their
+	// extensions is enabled. A separate key rather than a mapping form
+	// inside Files on purpose: an older ape decodes Files as strings and
+	// would refuse the whole spec on a mapping entry, while it ignores a
+	// key it does not know.
+	ConditionalFiles []ConditionalFile `yaml:"conditional-files,omitempty"` //nolint:tagliatelle // on-disk spec YAML uses kebab-case
+}
+
+// ConditionalFile is one `requires.conditional-files` entry:
+//
+//   - path: development/functionality
+//     extensions-any: [ext-capabilities, ext-features]
+//
+// The path is required only when at least one listed extension is
+// enabled, because only the skills of those extensions create it. Under
+// --ignore-extensions every entry is checked.
+type ConditionalFile struct {
+	Path          string   `yaml:"path"`
+	ExtensionsAny []string `yaml:"extensions-any"` //nolint:tagliatelle // on-disk spec YAML uses kebab-case
 }
 
 // Stage is one logical step inside a pipeline. A stage executes a chain
@@ -95,7 +114,11 @@ type Stage struct {
 	// stage's spawned session. Empty inherits. See Spec.OutputStyle for
 	// why there is no step-level equivalent.
 	OutputStyle string
-	Chain       []Step
+	// RequiresExtensions gates the whole stage: it runs only when every
+	// listed extension is enabled in the project's effective config, and
+	// is recorded as skipped otherwise. All-of. See Spec.PlanSkips.
+	RequiresExtensions []string
+	Chain              []Step
 }
 
 // Step is one invocation inside a stage's chain.
@@ -139,6 +162,10 @@ type Step struct {
 	// multi-step chains that need to share context within a stage
 	// (e.g., apex-create-prd's elicit/respond loop). Step-level only.
 	NoClear bool `yaml:"no-clear,omitempty"` //nolint:tagliatelle // on-disk spec YAML uses kebab-case "no-clear"
+	// RequiresExtensions gates this one step inside its running stage:
+	// all-of, like the stage key. A skipped step is never typed and gets
+	// no `/clear`.
+	RequiresExtensions []string `yaml:"requires-extensions,omitempty"` //nolint:tagliatelle // on-disk spec YAML uses kebab-case
 }
 
 // stepYAML mirrors Step for YAML decoding so Step.UnmarshalYAML can
@@ -153,6 +180,8 @@ type stepYAML struct {
 	PromptFlag string           `yaml:"prompt_flag,omitempty"` //nolint:tagliatelle // matches Step.PromptFlag
 	Commit     *CommitDirective `yaml:"commit,omitempty"`
 	NoClear    bool             `yaml:"no-clear,omitempty"` //nolint:tagliatelle // matches Step.NoClear
+	// RequiresExtensions matches Step.RequiresExtensions.
+	RequiresExtensions []string `yaml:"requires-extensions,omitempty"` //nolint:tagliatelle // matches Step.RequiresExtensions
 }
 
 // UnmarshalYAML decodes a Step and records whether the optional
@@ -172,6 +201,7 @@ func (s *Step) UnmarshalYAML(node *yaml.Node) error {
 	s.Args = raw.Args
 	s.PromptFlag = raw.PromptFlag
 	s.NoClear = raw.NoClear
+	s.RequiresExtensions = raw.RequiresExtensions
 	if raw.Commit != nil {
 		s.Commit = *raw.Commit
 		s.CommitSet = true
@@ -241,6 +271,9 @@ func LoadSpec(name, projectRoot string) (*Spec, error) {
 		spec.stageMap[spec.stages[i].Name] = &spec.stages[i]
 	}
 	spec.unknownKeys = scanUnknownKeys(data)
+	if err := spec.validateExtensionIDs(); err != nil {
+		return nil, fmt.Errorf("pipeline %q: %w", name, err)
+	}
 	return &spec, nil
 }
 
@@ -294,7 +327,8 @@ func decodeStages(node *yaml.Node) ([]Stage, error) {
 			Effort      string           `yaml:"effort,omitempty"`
 			Agent       string           `yaml:"agent,omitempty"`
 			Commit      *CommitDirective `yaml:"commit,omitempty"`
-			OutputStyle string           `yaml:"output-style,omitempty"` //nolint:tagliatelle // on-disk spec YAML uses kebab-case "output-style"
+			OutputStyle string           `yaml:"output-style,omitempty"`        //nolint:tagliatelle // on-disk spec YAML uses kebab-case "output-style"
+			Requires    []string         `yaml:"requires-extensions,omitempty"` //nolint:tagliatelle // on-disk spec YAML uses kebab-case
 			Chain       []Step           `yaml:"chain"`
 		}
 		if err := val.Decode(&body); err != nil {
@@ -313,6 +347,7 @@ func decodeStages(node *yaml.Node) ([]Stage, error) {
 		stage.Agent = body.Agent
 		stage.Commit = body.Commit
 		stage.OutputStyle = body.OutputStyle
+		stage.RequiresExtensions = body.Requires
 		stage.Chain = body.Chain
 		stages = append(stages, stage)
 	}
@@ -400,7 +435,8 @@ func (s *Spec) Effective(stageName string, stepIdx int) (model, effort, agent st
 func (s *Spec) Models() []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, stage := range s.Stages() {
+	for si := range s.Stages() {
+		stage := &s.Stages()[si]
 		for i := range stage.Chain {
 			model, _, _, _, err := s.Effective(stage.Name, i)
 			if err != nil || model == "" || seen[model] {
@@ -447,7 +483,8 @@ func (s *Spec) ModelWarnings() []ModelWarning {
 		}
 	}
 	check("pipeline", s.Model)
-	for _, stage := range s.Stages() {
+	for si := range s.Stages() {
+		stage := &s.Stages()[si]
 		check(fmt.Sprintf("stage %q", stage.Name), stage.Model)
 		for i := range stage.Chain {
 			step := stage.Chain[i]
@@ -497,7 +534,8 @@ func (s *Spec) OutputStyleDeclarations() []StyleDeclaration {
 	if s.OutputStyle != "" {
 		out = append(out, StyleDeclaration{Location: "pipeline", Style: s.OutputStyle})
 	}
-	for _, stage := range s.Stages() {
+	for si := range s.Stages() {
+		stage := &s.Stages()[si]
 		if stage.OutputStyle != "" {
 			out = append(out, StyleDeclaration{
 				Location: fmt.Sprintf("stage %q", stage.Name),
@@ -557,7 +595,8 @@ type StageModelConflict struct {
 // model boundaries.
 func (s *Spec) StageModelConflicts() []StageModelConflict {
 	var out []StageModelConflict
-	for _, stage := range s.Stages() {
+	for si := range s.Stages() {
+		stage := &s.Stages()[si]
 		if len(stage.Chain) < 2 {
 			continue
 		}
@@ -626,11 +665,11 @@ var (
 	}
 	specStageKeys = map[string]struct{}{
 		"model": {}, "effort": {}, "agent": {}, "commit": {},
-		"output-style": {}, "chain": {},
+		"output-style": {}, "requires-extensions": {}, "chain": {},
 	}
 	specStepKeys = map[string]struct{}{
 		"skill": {}, "agent": {}, "model": {}, "effort": {}, "args": {},
-		"prompt_flag": {}, "commit": {}, "no-clear": {},
+		"prompt_flag": {}, "commit": {}, "no-clear": {}, "requires-extensions": {},
 	}
 )
 
@@ -762,12 +801,23 @@ type StageCommitPlan struct {
 // commit plan the runner should execute against it. Errors only on
 // unknown stageName.
 func (s *Spec) PlanStageCommits(stageName string) (StageCommitPlan, error) {
+	return s.planStageCommits(stageName, nil)
+}
+
+// planStageCommits is PlanStageCommits over the steps that run: a step
+// with a non-nil entry in skipped contributes nothing, so its step-level
+// `commit:` neither fires nor suppresses the stage commit. A stage with
+// some skipped steps commits as it otherwise would.
+func (s *Spec) planStageCommits(stageName string, skipped []*Skip) (StageCommitPlan, error) {
 	stage, ok := s.stageMap[stageName]
 	if !ok || stage == nil {
 		return StageCommitPlan{}, fmt.Errorf("unknown stage %q", stageName)
 	}
 	plan := StageCommitPlan{StepDirectives: map[int]CommitDirective{}}
 	for i := range stage.Chain {
+		if i < len(skipped) && skipped[i] != nil {
+			continue
+		}
 		step := stage.Chain[i]
 		if step.CommitSet && step.Commit.Mode == CommitModeSkip {
 			plan.Suppressed = true
@@ -818,7 +868,8 @@ func StepLabel(stage string, stepIdx int, skill string) string {
 // commit. Used by the dirty-tree gate to decide whether to enforce
 // the pre-run clean-tree contract.
 func (s *Spec) PipelineWantsCommits() bool {
-	for _, stage := range s.Stages() {
+	for si := range s.Stages() {
+		stage := &s.Stages()[si]
 		plan, err := s.PlanStageCommits(stage.Name)
 		if err != nil {
 			continue

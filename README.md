@@ -54,7 +54,7 @@ Then run pipelines:
 # Run the design pipeline: prd → ux-design → architecture (with shards).
 ape pipeline design
 
-# Run governance scaffolding: pattern + adr + capability/feature activation.
+# Run ADR, pattern, capability and feature governance, as configured.
 ape pipeline governance
 
 # Decompose the architecture + governance into epics and stories.
@@ -65,6 +65,8 @@ ape pipeline design --no-tui
 ```
 
 Pre-flight checks run before any Claude invocation. If a pipeline requires upstream artifacts (e.g., `governance` needs `architecture.md`), `ape` fails fast with a message naming the missing file and the upstream pipeline that produces it.
+
+Stages and steps that need an extension your project has not enabled (`extensions:` in `_apex/config.yaml`) are skipped and recorded as skipped, so a project without, say, `ext-patterns` pays for no pattern sessions. `--ignore-extensions` runs everything. See [Extension gates](docs/reference/pipeline-spec.md#extension-gates).
 
 Every run writes a manifest, a report, and the hook/bridge/checkpoint streams under `{output_folder}/ape/` — the `output_folder` from `_apex/config.yaml`, `_output` by default. ape owns that one subtree and writes nothing outside it; the rest of the output folder is the framework's. See [How to read the output folder](docs/how-to/run-artefacts.md).
 

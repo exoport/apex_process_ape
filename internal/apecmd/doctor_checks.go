@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/exoport/aboard/pkg/aboard"
+	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/bridge/config"
 	"github.com/exoport/apex_process_ape/internal/change"
 	"github.com/exoport/apex_process_ape/internal/contract"
@@ -482,11 +483,17 @@ func checkPipelinesProject(_ context.Context, env doctorEnv) CheckResult {
 	// Validate each spec's `model:` values while we are here. A typo in a
 	// checked-in spec otherwise stays invisible until a run reaches that step
 	// and claude rejects it — which can be many minutes in.
-	var modelIssues, specIssues, styleNotes []string
+	var loadIssues, modelIssues, specIssues, styleNotes []string
 	for _, name := range names {
 		spec, err := pipeline.LoadSpec(name, env.ProjectRoot)
 		if err != nil {
-			continue // spec-load failures are the loader's story, not this check's
+			// A spec that does not load is a pipeline `ape pipeline` will
+			// refuse — an unknown extension id in a gate, a malformed
+			// conditional file, a YAML error. Counting it as installed and
+			// reporting only the specs that did load said "fine" about a
+			// pipeline that cannot run.
+			loadIssues = append(loadIssues, strings.ReplaceAll(err.Error(), "\n", " "))
+			continue
 		}
 		for _, w := range spec.ModelWarnings() {
 			modelIssues = append(modelIssues, fmt.Sprintf("%s → %s: %q", name, w.Location, w.Model))
@@ -531,6 +538,16 @@ func checkPipelinesProject(_ context.Context, env doctorEnv) CheckResult {
 				styleNotes = append(styleNotes, fmt.Sprintf(
 					"%s → %s: output-style %q names no built-in", name, decl.Location, decl.Style))
 			}
+		}
+	}
+	if len(loadIssues) > 0 {
+		return CheckResult{
+			Status: StatusFail,
+			Message: fmt.Sprintf("%d of %d pipelines at %s do not load: %s",
+				len(loadIssues), len(names), dir, strings.Join(loadIssues, "; ")),
+			Remediation: "`ape pipeline <name>` refuses these files. An extension gate must name one of " +
+				strings.Join(apexcfg.KnownExtensions(), ", ") + "; otherwise fix the YAML, or reinstall the " +
+				"framework's copy with `ape framework update`. A framework newer than this ape may need `ape update`.",
 		}
 	}
 	if len(specIssues) > 0 {

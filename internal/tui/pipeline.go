@@ -138,6 +138,10 @@ const (
 	stateRunning
 	stateDone
 	stateFailed
+	// stateSkipped — the stage or step's extension gate was unmet, so it
+	// never ran. Terminal from the start, like a pending row that will
+	// never move.
+	stateSkipped
 )
 
 // EventSource selects which input the pipeline model ingests for its
@@ -186,6 +190,8 @@ type stageRow struct {
 	endedAt   time.Time
 	steps     []stepRow
 	err       error
+	// skipNote says why a skipped stage did not run.
+	skipNote string
 	// events is the per-stage feed of human-readable rendered events
 	// (one entry per displayable claude stream-json line, across all
 	// of this stage's chained steps in order).
@@ -324,6 +330,14 @@ type stepStartMsg struct {
 	idx   int
 	step  pipeline.Step
 }
+type stageSkippedMsg struct {
+	stage string
+	skip  pipeline.Skip
+}
+type stepSkippedMsg struct {
+	stage string
+	idx   int
+}
 type stepLineMsg struct {
 	stage string
 	idx   int
@@ -409,7 +423,9 @@ func WithAwaitReplySender(fn awaitReplySender) PipelineModelOption {
 func NewPipelineModel(spec *pipeline.Spec, cancel context.CancelFunc, projectRoot string, opts ...PipelineModelOption) pipelineModel { //nolint:revive // returning unexported type is intentional; callers receive tea.Model via assignment
 	rows := make([]stageRow, len(spec.Stages()))
 	idx := make(map[string]int, len(rows))
-	for i, st := range spec.Stages() {
+	specStages := spec.Stages()
+	for i := range specStages {
+		st := &specStages[i]
 		steps := make([]stepRow, len(st.Chain))
 		for j := range st.Chain {
 			steps[j] = stepRow{skill: st.Chain[j].Skill, agent: st.Chain[j].Agent}
@@ -602,6 +618,18 @@ func (m pipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.stages[i].state = stateDone
 			}
+		}
+	case stageSkippedMsg:
+		if i, ok := m.stageIdx[msg.stage]; ok {
+			m.stages[i].state = stateSkipped
+			m.stages[i].skipNote = msg.skip.Reason + ": needs " + strings.Join(msg.skip.Missing, ", ")
+			for j := range m.stages[i].steps {
+				m.stages[i].steps[j].state = stateSkipped
+			}
+		}
+	case stepSkippedMsg:
+		if i, ok := m.stageIdx[msg.stage]; ok && msg.idx < len(m.stages[i].steps) {
+			m.stages[i].steps[msg.idx].state = stateSkipped
 		}
 	case stepStartMsg:
 		if i, ok := m.stageIdx[msg.stage]; ok && msg.idx < len(m.stages[i].steps) {
@@ -1091,6 +1119,8 @@ func (m pipelineModel) renderStatusStrip() string {
 		parts = append(parts, "✓ pass")
 	case stateFailed:
 		parts = append(parts, "✗ fail")
+	case stateSkipped:
+		parts = append(parts, "⤼ skipped ("+st.skipNote+")")
 	case stateRunning, statePending:
 		// no verdict yet
 	}
@@ -1402,8 +1432,8 @@ func (m pipelineModel) summarizeRunState() (running, completed string) {
 			running = fmt.Sprintf("%s in progress (%s)", st.name, elapsedFor(st.state, st.startedAt, st.endedAt, m.tick))
 		case stateDone, stateFailed:
 			doneCount++
-		case statePending:
-			// not yet started — irrelevant to the modal
+		case statePending, stateSkipped:
+			// not started, or never will — irrelevant to the modal
 		}
 	}
 	if doneCount > 0 {
@@ -1422,6 +1452,8 @@ func glyphForState(s stageState) (string, lipgloss.Style) {
 		return "✗", stageFailedStyle
 	case statePending:
 		return "⏳", stagePendingStyle
+	case stateSkipped:
+		return "⤼", stagePendingStyle
 	}
 	return "⏳", stagePendingStyle
 }
@@ -1438,7 +1470,7 @@ func elapsedFor(state stageState, started, ended, now time.Time) string {
 			return ""
 		}
 		return formatDur(ended.Sub(started))
-	case statePending:
+	case statePending, stateSkipped:
 		return ""
 	}
 	return ""
@@ -1527,7 +1559,7 @@ func (m pipelineModel) tallyStages() (ok, failed, total int) {
 			ok++
 		case stateFailed:
 			failed++
-		case stateRunning, statePending:
+		case stateRunning, statePending, stateSkipped:
 			// not counted toward either tally
 		}
 	}
@@ -1595,6 +1627,15 @@ func (o *PipelineTUIObserver) OnStageStart(stage string) {
 
 func (o *PipelineTUIObserver) OnStageEnd(stage string, dur time.Duration, err error) {
 	o.program.Send(stageEndMsg{stage: stage, dur: dur, err: err})
+}
+
+// OnStageSkipped / OnStepSkipped make the observer a pipeline.SkipObserver.
+func (o *PipelineTUIObserver) OnStageSkipped(stage string, skip pipeline.Skip) {
+	o.program.Send(stageSkippedMsg{stage: stage, skip: skip})
+}
+
+func (o *PipelineTUIObserver) OnStepSkipped(stage string, idx int, _ pipeline.Step, _ pipeline.Skip) {
+	o.program.Send(stepSkippedMsg{stage: stage, idx: idx})
 }
 
 func (o *PipelineTUIObserver) OnStepStart(stage string, idx int, step pipeline.Step) {

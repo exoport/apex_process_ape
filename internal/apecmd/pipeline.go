@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/effort"
@@ -20,6 +21,7 @@ import (
 	"golang.org/x/term"
 )
 
+//nolint:maintidx // one command's flag wiring and dispatch; the run logic lives in the runners
 func newPipelineCmd() *cobra.Command {
 	var (
 		promptFlag         string
@@ -31,6 +33,7 @@ func newPipelineCmd() *cobra.Command {
 		outputFormat       string
 		manifestDirFlag    string
 		fromStageFlag      string
+		ignoreExtensions   bool
 		noCommitFlag       bool
 		allowDirtyFlag     bool
 		idleTimeoutFlag    time.Duration
@@ -148,9 +151,18 @@ func newPipelineCmd() *cobra.Command {
 				}
 				promptFlag = prompt
 			}
+			// After the mode line and before any UI: the operator reads what
+			// the run will skip while the terminal is still theirs.
+			exts, err := resolveRunExtensions(os.Stderr, spec, projectRoot, fromStageFlag, ignoreExtensions, quietFlag)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+				return err
+			}
 			ctx, cancel := context.WithCancel(cmd.Context())
 			defer cancel()
 			runOpts := runConfig{
+				ignoreExtensions:      ignoreExtensions,
+				extensions:            exts,
 				prompt:                promptFlag,
 				manifestDir:           manifestDirFlag,
 				fromStage:             fromStageFlag,
@@ -206,7 +218,8 @@ func newPipelineCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "With --no-tui: suppress per-event stream; print only stage/step start/end markers")
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format for list mode (no positional arg): human|json|yaml")
 	cmd.Flags().StringVar(&manifestDirFlag, "manifest-dir", "", "Override the directory for run manifest artifacts (default: <project>/_output/ape/pipelines)")
-	cmd.Flags().StringVar(&fromStageFlag, "from", "", "Skip stages before the named one and start execution there")
+	cmd.Flags().StringVar(&fromStageFlag, "from", "", "Skip stages before the named one and start execution there (a stage skipped for its extensions starts the run at the next one that is not)")
+	cmd.Flags().BoolVar(&ignoreExtensions, "ignore-extensions", false, "Run every stage and step regardless of its `requires-extensions:` gate, and check every conditional preflight file")
 	cmd.Flags().BoolVar(&noCommitFlag, "no-commit", false, "Do not commit anything during the run; leave the working tree dirty. Overrides any `commit:` field in the pipeline YAML.")
 	cmd.Flags().BoolVar(&allowDirtyFlag, "commit-allow-dirty", false, "Bypass the dirty-tree pre-run gate. The first committing step's diff will include any pre-existing uncommitted changes.")
 	cmd.Flags().DurationVar(&idleTimeoutFlag, "idle-timeout", 0, "Per-step idle backstop: cancel a step only after this long with no progress across hook events or transcript growth (e.g. 90m). Default 60m. PTY output is NOT an anchor here — see `ape prompt`.")
@@ -251,6 +264,13 @@ keystrokes following PAT-25 passthrough conventions —
 Skills without an agent skip the passthrough hop:
 
     /<skill> --autonomous --no-commit <args>
+
+Stages and steps may declare the extensions they need
+(requires-extensions). ape reads the project's effective extensions
+once at run start and skips — and records as skipped — every stage or
+step whose extensions are not configured, so governance runs ADR,
+pattern, capability and feature governance as configured.
+--ignore-extensions runs everything.
 
 Rendering surface: --tui (default) shows the Bubble Tea panels, --web
 serves the bridged web UI, --no-tui prints plain stdout progress lines.
@@ -304,9 +324,13 @@ func printPipelineList(res pipelineListResult, format output.Format) error {
 // runners (runWithInteractive / runWithInteractiveTUI / runWithWeb) and
 // to `ape task`. Grouped to keep call-sites stable as new flags land.
 type runConfig struct {
-	prompt                string
-	manifestDir           string
-	fromStage             string
+	prompt      string
+	manifestDir string
+	fromStage   string
+	// ignoreExtensions is --ignore-extensions; extensions is the set the
+	// command resolved before the UI started (nil: the runner resolves).
+	ignoreExtensions      bool
+	extensions            *pipeline.Extensions
 	noCommit              bool
 	allowDirty            bool
 	ignoreProjectSettings bool
@@ -431,6 +455,19 @@ func (p *plainObserver) OnStageEnd(stage string, dur time.Duration, err error) {
 		return
 	}
 	fmt.Fprintf(p.w, "[%s] stage done: %s (%s)\n", elapsed(p.t0), stage, fmtDuration(dur))
+}
+
+// OnStageSkipped and OnStepSkipped make plainObserver a
+// pipeline.SkipObserver: a skipped stage gets a line where its start
+// would have been, so a log never goes quiet about one.
+func (p *plainObserver) OnStageSkipped(stage string, skip pipeline.Skip) {
+	fmt.Fprintf(p.w, "[%s] stage skipped: %s (%s: needs %s)\n",
+		elapsed(p.t0), stage, skip.Reason, strings.Join(skip.Missing, ", "))
+}
+
+func (p *plainObserver) OnStepSkipped(_ string, idx int, step pipeline.Step, skip pipeline.Skip) {
+	fmt.Fprintf(p.w, "[%s]   step %d skipped: %s (%s: needs %s)\n",
+		elapsed(p.t0), idx+1, step.Skill, skip.Reason, strings.Join(skip.Missing, ", "))
 }
 
 func (p *plainObserver) OnStepStart(stage string, idx int, step pipeline.Step) {

@@ -44,7 +44,8 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 	// the running one. SSE stage-start/end will replace these by id.
 	stages := spec.Stages()
 	stageSeeds := make([]web.StageSeed, 0, len(stages))
-	for _, st := range stages {
+	for si := range stages {
+		st := &stages[si]
 		stageSeeds = append(stageSeeds, web.StageSeed{Slug: slugify(st.Name), Name: st.Name})
 	}
 	pageHTML := web.RenderPage(tpl, web.PageData{
@@ -226,7 +227,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		switch statusClass {
 		case "running":
 			event = "stage-start"
-		case "done", "failed", "stopped":
+		case "done", "failed", "stopped", "skipped":
 			event = "stage-end"
 		}
 		rememberStage(slug, broker.Event{Name: event, Data: frag})
@@ -238,6 +239,9 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		// step's telemetry delta equals its own absolute usage. Same
 		// hook the no-UI / TUI variants wire.
 		core.ResetStageTelemetry(stage)
+	}
+	onStageSkipped := func(stage string, skip pipeline.Skip) {
+		publishStageCard(stage, "skipped", "⤼", "skipped: "+skip.Reason+" (needs "+strings.Join(skip.Missing, ", ")+")")
 	}
 	onRunDir := func(dir string) {
 		runLogMu.Lock()
@@ -271,6 +275,8 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		ApeVersion:        Version,
 		ManifestDir:       cfg.manifestDir,
 		FromStage:         cfg.fromStage,
+		IgnoreExtensions:  cfg.ignoreExtensions,
+		Extensions:        cfg.extensions,
 		NoCommit:          cfg.noCommit,
 		AllowDirty:        cfg.allowDirty,
 		Effort:            cfg.effort,
@@ -280,6 +286,7 @@ func runWithWeb(ctx context.Context, spec *pipeline.Spec, projectRoot string, cf
 		StagePrependFlags: stagePrepend,
 		OnStageStart:      onStageStart,
 		OnStageEnd:        onStageEnd,
+		OnStageSkipped:    onStageSkipped,
 		OnRunDir:          onRunDir,
 		// RunLog is attached lazily via the closure inside OnStageStart;
 		// we cannot pass *runlog.Writer here because it doesn't exist

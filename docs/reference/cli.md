@@ -3999,6 +3999,13 @@ Skills without an agent skip the passthrough hop:
 
     /<skill> --autonomous --no-commit <args>
 
+Stages and steps may declare the extensions they need
+(requires-extensions). ape reads the project's effective extensions
+once at run start and skips — and records as skipped — every stage or
+step whose extensions are not configured, so governance runs ADR,
+pattern, capability and feature governance as configured.
+--ignore-extensions runs everything.
+
 Rendering surface: --tui (default) shows the Bubble Tea panels, --web
 serves the bridged web UI, --no-tui prints plain stdout progress lines.
 
@@ -4026,8 +4033,9 @@ Flags:
 | `--detach` | bool | `false` | Start the run in the background, detached from this shell, print its id, and return at once; `ape run wait <id>` waits for it |
 | `--effort` | string | `—` | Explicit reasoning effort (low\|medium\|high\|xhigh\|max) applied when a step/stage/pipeline does not set one in the YAML. Process-wide, sub-agents included. Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). |
 | `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
-| `--from` | string | `—` | Skip stages before the named one and start execution there |
+| `--from` | string | `—` | Skip stages before the named one and start execution there (a stage skipped for its extensions starts the run at the next one that is not) |
 | `--idle-timeout` | duration | `0s` | Per-step idle backstop: cancel a step only after this long with no progress across hook events or transcript growth (e.g. 90m). Default 60m. PTY output is NOT an anchor here — see `ape prompt`. |
+| `--ignore-extensions` | bool | `false` | Run every stage and step regardless of its `requires-extensions:` gate, and check every conditional preflight file |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json. Honoured in --web mode. |
 | `--manifest-dir` | string | `—` | Override the directory for run manifest artifacts (default: <project>/_output/ape/pipelines) |
 | `--max-duration` | duration | `3h0m0s` | Hard wall-clock ceiling per step regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a sequential batch step is bounded per item, not per batch. 0 disables the cap. |

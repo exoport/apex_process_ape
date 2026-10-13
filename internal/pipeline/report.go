@@ -33,6 +33,17 @@ func renderReport(m *Manifest) string {
 	if m.Pipeline.Digest != "" {
 		fmt.Fprintf(&b, "- digest: `%s`\n", m.Pipeline.Digest)
 	}
+	if e := m.Extensions; e != nil {
+		enabled := "none"
+		if len(e.Enabled) > 0 {
+			enabled = "`" + strings.Join(e.Enabled, "`, `") + "`"
+		}
+		if e.Ignored {
+			fmt.Fprintf(&b, "- extensions: %s — gates ignored (--ignore-extensions)\n", enabled)
+		} else {
+			fmt.Fprintf(&b, "- extensions: %s\n", enabled)
+		}
+	}
 	// Before Totals, deliberately: on a terminated run the totals are
 	// mostly zeros, and a reader who meets them first concludes the run
 	// did nothing rather than that it was stopped.
@@ -76,6 +87,9 @@ func renderReport(m *Manifest) string {
 	}
 	fmt.Fprintf(&b, "| steps run | %d |\n", m.Totals.StepsRun)
 	fmt.Fprintf(&b, "| steps failed | %d |\n", m.Totals.StepsFailed)
+	if m.Totals.StepsSkipped > 0 {
+		fmt.Fprintf(&b, "| steps skipped | %d |\n", m.Totals.StepsSkipped)
+	}
 	if anyCommitRecorded(m) {
 		fmt.Fprintf(&b, "| commits made | %d |\n", m.Totals.CommitsMade)
 	}
@@ -85,7 +99,11 @@ func renderReport(m *Manifest) string {
 		stage := &m.Stages[si]
 		fmt.Fprintf(&b, "\n## Stage %02d — %s\n\n", stage.Index, stage.Name)
 		fmt.Fprintf(&b, "- duration: %s\n", formatDuration(stage.DurationSecs))
-		fmt.Fprintf(&b, "- status: **%s**\n\n", stage.Status)
+		fmt.Fprintf(&b, "- status: **%s**\n", stage.Status)
+		if stage.Status == StatusSkipped {
+			fmt.Fprintf(&b, "- skipped: %s\n", skipText(stage.SkipReason, stage.MissingExtensions))
+		}
+		b.WriteString("\n")
 		if len(stage.Steps) == 0 {
 			b.WriteString("_(no steps recorded)_\n")
 			continue
@@ -103,13 +121,17 @@ func renderReport(m *Manifest) string {
 			if agent == "" {
 				agent = "—"
 			}
+			status := string(step.Status)
+			if step.Status == StatusSkipped {
+				status = "skipped (" + skipText(step.SkipReason, step.MissingExtensions) + ")"
+			}
 			if showCommit {
 				fmt.Fprintf(
 					&b, "| %d | `%s` | `%s` | %s | $%.4f | %s / %s | %s | %s |\n",
 					step.Index, step.Skill, agent,
 					formatDuration(step.DurationSecs), step.CostUSD,
 					formatInt(step.TokensInput), formatInt(step.TokensOutput),
-					step.Status, formatCommitCell(step.CommitStatus, step.CommitSHA),
+					status, formatCommitCell(step.CommitStatus, step.CommitSHA),
 				)
 			} else {
 				fmt.Fprintf(
@@ -117,7 +139,7 @@ func renderReport(m *Manifest) string {
 					step.Index, step.Skill, agent,
 					formatDuration(step.DurationSecs), step.CostUSD,
 					formatInt(step.TokensInput), formatInt(step.TokensOutput),
-					step.Status,
+					status,
 				)
 			}
 		}
@@ -129,6 +151,14 @@ func renderReport(m *Manifest) string {
 		}
 	}
 	return b.String()
+}
+
+// skipText renders a skip as "extension: needs ext-a, ext-b".
+func skipText(reason string, missing []string) string {
+	if len(missing) == 0 {
+		return reason
+	}
+	return reason + ": needs " + strings.Join(missing, ", ")
 }
 
 // anyCommitRecorded reports whether at least one step has a non-empty

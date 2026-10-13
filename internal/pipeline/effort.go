@@ -45,7 +45,8 @@ func (s *Spec) EffortErrors() []string {
 		}
 	}
 	check("pipeline", s.Effort)
-	for _, stage := range s.Stages() {
+	for si := range s.Stages() {
+		stage := &s.Stages()[si]
 		check(fmt.Sprintf("stage %q", stage.Name), stage.Effort)
 		for i := range stage.Chain {
 			check(fmt.Sprintf("stage %q step %d (%s)", stage.Name, i, stage.Chain[i].Skill), stage.Chain[i].Effort)
@@ -73,7 +74,8 @@ type StageEffortConflict struct {
 // the pipeline file, by splitting the stage at its effort boundaries.
 func (s *Spec) StageEffortConflicts() []StageEffortConflict {
 	var out []StageEffortConflict
-	for _, stage := range s.Stages() {
+	for si := range s.Stages() {
+		stage := &s.Stages()[si]
 		if len(stage.Chain) < 2 {
 			continue
 		}

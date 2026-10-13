@@ -41,6 +41,17 @@ const (
 	ExtFeatures     = "ext-features"
 )
 
+// KnownExtensions returns the four extension ids, in the framework's
+// declaration order. A fresh slice each call, so a caller may keep it.
+func KnownExtensions() []string {
+	return []string{ExtADRs, ExtPatterns, ExtCapabilities, ExtFeatures}
+}
+
+// IsKnownExtension reports whether id is one of KnownExtensions.
+func IsKnownExtension(id string) bool {
+	return slices.Contains(KnownExtensions(), id)
+}
+
 // Date and timestamp layouts. The framework is explicit that both are
 // system LOCAL wall-clock, never UTC unless the host itself is: skills
 // write these into `updated_at` fields that must not appear to move
