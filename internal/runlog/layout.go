@@ -1,10 +1,12 @@
 package runlog
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
+	"gopkg.in/yaml.v3"
 )
 
 // The on-disk layout of everything ape writes into a project, in one
@@ -98,9 +100,65 @@ func OutputRoot(projectRoot string) string {
 	return filepath.Join(projectRoot, DefaultOutputDirName)
 }
 
-// ApeRoot is the subtree ape owns: {output_folder}/ape.
+// ApeRoot is the subtree ape owns: {output_folder}/ape — or, in an APEX
+// v1 project, {development_folder}/.apex/runs.
+//
+// Why v1 differs (trial decision D16): models treat the output folder as
+// scratch and delete it, and with it every manifest, transcript and log
+// the run's cost and audit trail depend on. A v1 project already has a
+// folder only ape writes, development/.apex/ (the edit hook denies it to
+// models), so the run records live there. The directory ignores itself
+// (a `.gitignore` of `*` inside it), so runs never dirty the tree and no
+// tracked file has to change for an already-initialised project.
 func ApeRoot(projectRoot string) string {
+	if apexDir, ok := v1ApexDir(projectRoot); ok {
+		root := filepath.Join(apexDir, V1RunsDirName)
+		ensureSelfIgnored(root)
+		return root
+	}
 	return filepath.Join(OutputRoot(projectRoot), ApeDirName)
+}
+
+// V1RunsDirName is the run-records directory inside a v1 project's
+// development/.apex/.
+const V1RunsDirName = "runs"
+
+// v1ApexDir returns {development_folder}/.apex when projectRoot is an APEX
+// v1 project — that directory exists — reading development_folder from
+// _apex/config.yaml (default "development"). Read here, not through
+// internal/apexv1, which depends on this package.
+func v1ApexDir(projectRoot string) (string, bool) {
+	dev := "development"
+	if data, err := os.ReadFile(filepath.Join(projectRoot, apexcfg.DirName, "config.yaml")); err == nil {
+		var cfg struct {
+			DevelopmentFolder string `yaml:"development_folder"` //nolint:tagliatelle // the framework's config key
+		}
+		if yaml.Unmarshal(data, &cfg) == nil {
+			if d := strings.Trim(filepath.ToSlash(cfg.DevelopmentFolder), "/"); d != "" {
+				dev = d
+			}
+		}
+	}
+	apexDir := filepath.Join(projectRoot, filepath.FromSlash(dev), ".apex")
+	if st, err := os.Stat(apexDir); err == nil && st.IsDir() {
+		return apexDir, true
+	}
+	return "", false
+}
+
+// ensureSelfIgnored creates root with a `.gitignore` of `*`, so git
+// ignores everything in it, the .gitignore included. Best-effort: a
+// failure here surfaces as the writer's own error when it creates its run
+// directory.
+func ensureSelfIgnored(root string) {
+	marker := filepath.Join(root, ".gitignore")
+	if _, err := os.Stat(marker); err == nil {
+		return
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(marker, []byte("# ape run records (manifests, transcripts, logs); never tracked\n*\n"), 0o600)
 }
 
 // PipelinesRoot holds one directory per pipeline, each holding run dirs.

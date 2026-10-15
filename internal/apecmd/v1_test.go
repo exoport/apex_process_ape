@@ -13,6 +13,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -278,11 +279,11 @@ func TestStopGateRecorder(t *testing.T) {
 	require.True(t, ok)
 	require.False(t, blocked)
 
-	runDir := filepath.Join(root, "_output", "ape", "tasks", "apex-apply", "20261015-120000-abcd")
+	runDir := filepath.Join(runlog.TasksRoot(root), "apex-apply", "20261015-120000-abcd")
 	require.NoError(t, os.MkdirAll(runDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(runDir, "manifest.yaml"), []byte("schema_version: 2\nrun_id: 20261015-120000-abcd\n"), 0o644))
 	require.NoError(t, os.Symlink(filepath.Base(runDir), filepath.Join(filepath.Dir(runDir), "latest")))
-	recordStopGate(root, "apex-apply", filepath.Join(root, "_output", "ape", "tasks"), r)
+	recordStopGate(root, "apex-apply", runlog.TasksRoot(root), r)
 	data, err := os.ReadFile(filepath.Join(runDir, "manifest.yaml"))
 	require.NoError(t, err)
 	var m pipeline.Manifest

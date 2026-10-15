@@ -121,8 +121,14 @@ func TestTask_ProjectStopHookBlockKeepsTheRunAlive(t *testing.T) {
 	require.NoError(t, err, "the project hook never blocked — the fixture tests nothing")
 	require.Equal(t, "turn 1 blocked\n", string(turns))
 
-	data, err := os.ReadFile(filepath.Join(project, "_output", "ape", "tasks", "apex-apply", "latest", "manifest.yaml"))
+	// D16: in a v1 project the run records live in development/.apex/runs,
+	// which ignores itself, and nothing is written to _output/.
+	data, err := os.ReadFile(filepath.Join(project, "development", ".apex", "runs", "tasks", "apex-apply", "latest", "manifest.yaml"))
 	require.NoError(t, err)
+	require.NoDirExists(t, filepath.Join(project, "_output"))
+	status, err := exec.Command("git", "-C", project, "status", "--porcelain", "--untracked-files=all").Output()
+	require.NoError(t, err)
+	require.NotContains(t, string(status), ".apex/runs", "run records are never tracked")
 	var m pipeline.Manifest
 	require.NoError(t, yaml.Unmarshal(data, &m))
 	require.NotNil(t, m.StopGate, "manifest:\n%s", data)

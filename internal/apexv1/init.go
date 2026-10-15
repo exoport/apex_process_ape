@@ -129,7 +129,7 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 		{p.RoadmapMD(), "# Roadmap\n"},
 		{p.AgentsMD(), agentsSkeleton},
 		{p.ClaudeMD(), "@AGENTS.md\n"},
-		{filepath.Join(p.ApexDir(), ".gitignore"), "logs/\nstop-gate/\n"},
+		{filepath.Join(p.ApexDir(), ".gitignore"), "logs/\nstop-gate/\nruns/\n"},
 	}
 	for _, s := range steps {
 		if err := write(s.path, s.content); err != nil {

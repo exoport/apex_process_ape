@@ -4756,7 +4756,8 @@ After typing, ape presses Enter once claude has drawn the line, then
 confirms the submit through the UserPromptSubmit hook, pressing Enter up
 to twice more; a line still not submitted fails the session (exit 1).
 
-Records land under <project>/_output/ape/prompts/<prompt-id>/ (runlog
+Records land under <project>/_output/ape/prompts/<prompt-id>/ (in an
+APEX v1 project, development/.apex/runs/prompts/<prompt-id>/) (runlog
 streams + copied transcript + prompt.yaml session record) and fold into
 the project cost rollup's Prompts bucket.
 
@@ -6736,7 +6737,9 @@ Commit control is two-layered:
                   the message "ape:task/<skill>".
 
 Run artifacts land under <project>/_output/ape/tasks/<skill>/<run-id>/
-(manifest.yaml, per-step ndjson, runlog streams).
+(manifest.yaml, per-step ndjson, runlog streams) — in an APEX v1 project
+(development/.apex/ exists) under development/.apex/runs/tasks/ instead,
+a directory git ignores, where a model clearing _output/ cannot reach.
 
 --prompt-file <path> reads the prompt from a file, and "-" reads it
 from stdin. It is how a printed escalation command carries the
@@ -6811,7 +6814,7 @@ Flags:
 | `--handoff` | string | `—` | Path to a handoff/context file; derives a "Read <path> and follow the Resume Protocol" --prompt value (mutually exclusive with --prompt) |
 | `--idle-timeout` | duration | `0s` | Idle backstop: cancel only after this long with no progress across hook events or transcript growth (e.g. 15m); default matches pipeline (60m). PTY output is NOT an anchor here — see `ape prompt` |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
-| `--manifest-dir` | string | `—` | Override the run-artifact base dir (default: <project>/_output/ape/tasks) |
+| `--manifest-dir` | string | `—` | Override the run-artifact base dir (default: <project>/_output/ape/tasks; development/.apex/runs/tasks in an APEX v1 project) |
 | `--max-duration` | duration | `3h0m0s` | Hard wall-clock ceiling regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item, not per batch. 0 disables the cap. |
 | `--model` | string | `—` | Claude model. A bare family (fable, haiku, mythos, opus, sonnet) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly |
 | `--nats-creds` | string | `—` | NATS .creds file; its user identity is baked into every subject (env APE_NATS_CREDS). |
