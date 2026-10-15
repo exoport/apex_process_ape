@@ -2,6 +2,7 @@ package apecmd
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -20,16 +21,24 @@ import (
 // ape's own Stop hook tells the driver a turn ended. In a v1 project the
 // project's `ape hook stop` may have blocked that same Stop — Claude Code
 // then continues the turn with the hook's reason — and a driver that
-// trusted the first Stop would tear the session down mid-work. So, when
-// exactly one change is in progress, the driver waits for the hook's
-// verdict and only a non-block completes the step.
+// trusted the first Stop would tear the session down mid-work. So in a
+// project whose settings register the hook, the driver waits for the
+// hook's verdict on every Stop and only a non-block completes the step.
+// The hook blocks only while exactly one change is in progress and red; on
+// every other Stop it allows at once. Every Stop is matched to its own
+// verdict, in order.
 type stopGateRecorder struct {
 	root string
+	// appear is how long a Stop waits for its hook run to show up.
+	appear time.Duration
+
+	// gateMu serialises Stops: each is decided in arrival order, so the
+	// k-th Stop takes the k-th verdict in the hook's log.
+	gateMu sync.Mutex
 
 	mu sync.Mutex
-	// consumed is the StartedAt of the last verdict used, so a record
-	// left by an earlier Stop is never read as this one's.
-	consumed string
+	// consumed holds the StartedAt of every verdict already used.
+	consumed map[string]bool
 	events   []pipeline.StopGateEvent
 }
 
@@ -42,7 +51,7 @@ const stopGateAppear = 10 * time.Second
 const stopGateWait = 35 * time.Minute
 
 func newStopGateRecorder(root string) *stopGateRecorder {
-	return &stopGateRecorder{root: root}
+	return &stopGateRecorder{root: root, appear: stopGateAppear, consumed: map[string]bool{}}
 }
 
 // bounded adapts gate to sessiondriver.StopGate: each wait ends with the
@@ -57,18 +66,20 @@ func (r *stopGateRecorder) bounded(runCtx context.Context) sessiondriver.StopGat
 
 // gate decides one Stop.
 func (r *stopGateRecorder) gate(ctx context.Context, sessionID string, stopAt time.Time) (blocked, ok bool) {
-	if !apexv1.StopGateApplies(r.root) {
+	r.gateMu.Lock()
+	defer r.gateMu.Unlock()
+	if !apexv1.StopGateConfigured(r.root) {
 		return false, false
 	}
 	r.mu.Lock()
-	consumed := r.consumed
+	consumed := maps.Clone(r.consumed)
 	r.mu.Unlock()
-	rec, err := apexv1.WaitStopVerdict(ctx, r.root, sessionID, stopAt, consumed, stopGateAppear)
+	rec, err := apexv1.WaitStopVerdict(ctx, r.root, sessionID, stopAt, consumed, r.appear)
 	if err != nil {
 		return false, false
 	}
 	r.mu.Lock()
-	r.consumed = rec.StartedAt
+	r.consumed[rec.StartedAt] = true
 	r.events = append(r.events, pipeline.StopGateEvent{
 		At: time.Now().UTC(), Verdict: rec.Verdict, Change: rec.Change, Reason: rec.Reason,
 	})

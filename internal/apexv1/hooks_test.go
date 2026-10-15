@@ -190,61 +190,70 @@ func TestStopHook(t *testing.T) {
 	})
 }
 
-func TestStopGateApplies(t *testing.T) {
+func TestStopGateConfigured(t *testing.T) {
 	p := startedWave(t)
-	require.False(t, StopGateApplies(p.Root), "no settings.json registers the hook")
+	require.False(t, StopGateConfigured(p.Root), "no settings.json registers the hook")
 	_, err := MergeHooks(p.SettingsJSON())
 	require.NoError(t, err)
-	require.True(t, StopGateApplies(p.Root))
-	_, err = p.Block(ctx(), "add-wave", "q")
-	require.NoError(t, err)
-	require.False(t, StopGateApplies(p.Root))
+	require.True(t, StopGateConfigured(p.Root))
+	require.False(t, StopGateConfigured(t.TempDir()))
 }
 
 func TestWaitStopVerdict(t *testing.T) {
 	p := startedWave(t)
 	stopAt := time.Now()
+	none := map[string]bool{}
 
 	t.Run("no record appears", func(t *testing.T) {
-		_, err := WaitStopVerdict(ctx(), p.Root, "nobody", stopAt, "", 300*time.Millisecond)
+		_, err := WaitStopVerdict(ctx(), p.Root, "nobody", stopAt, none, 300*time.Millisecond)
 		require.ErrorIs(t, err, ErrNoStopVerdict)
 	})
 
-	d := StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
-	require.True(t, d.Block)
-	t.Run("the verdict for this stop", func(t *testing.T) {
-		rec, err := WaitStopVerdict(ctx(), p.Root, "sess-1", stopAt, "", time.Second)
+	first := StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
+	require.True(t, first.Block)
+	write(t, p, "wave.sh", "#!/bin/sh\necho wave\n")
+	second := StopHook(ctx(), stopPayload(p.Root, "Stop", true), RunOptions{})
+	require.False(t, second.Block)
+
+	t.Run("verdicts are taken in order, each once", func(t *testing.T) {
+		rec, err := WaitStopVerdict(ctx(), p.Root, "sess-1", stopAt, none, time.Second)
 		require.NoError(t, err)
-		require.Equal(t, StopBlock, rec.Verdict)
+		require.Equal(t, StopBlock, rec.Verdict, "the first Stop gets the first verdict, though a later one exists")
 		require.Equal(t, "add-wave", rec.Change)
-	})
-	t.Run("an already consumed record is not reused", func(t *testing.T) {
-		_, err := WaitStopVerdict(ctx(), p.Root, "sess-1", stopAt, d.Record.StartedAt, 300*time.Millisecond)
+		rec2, err := WaitStopVerdict(ctx(), p.Root, "sess-1", stopAt, map[string]bool{rec.StartedAt: true}, time.Second)
+		require.NoError(t, err)
+		require.Equal(t, StopAllow, rec2.Verdict)
+		_, err = WaitStopVerdict(ctx(), p.Root, "sess-1", stopAt,
+			map[string]bool{rec.StartedAt: true, rec2.StartedAt: true}, 300*time.Millisecond)
 		require.ErrorIs(t, err, ErrNoStopVerdict)
 	})
-	t.Run("a record from long before this stop is not this stop's", func(t *testing.T) {
-		_, err := WaitStopVerdict(ctx(), p.Root, "sess-1", stopAt.Add(time.Minute), "", 300*time.Millisecond)
+	t.Run("a run from long before this stop is not this stop's", func(t *testing.T) {
+		_, err := WaitStopVerdict(ctx(), p.Root, "sess-1", stopAt.Add(time.Minute), none, 300*time.Millisecond)
 		require.ErrorIs(t, err, ErrNoStopVerdict)
 	})
-	t.Run("a pending record is waited for past the appear window", func(t *testing.T) {
-		path := p.stopRecordPath("sess-2", "")
+	t.Run("a pending run is waited for past the appear window", func(t *testing.T) {
+		path := p.stopLogPath("sess-2")
 		started := time.Now().UTC().Format(time.RFC3339Nano)
-		p.saveStopRecord(path, StopRecord{SessionID: "sess-2", StartedAt: started, Verdict: StopPending})
+		p.appendStopLog(path, StopRecord{SessionID: "sess-2", StartedAt: started, Verdict: StopPending})
 		go func() {
 			time.Sleep(600 * time.Millisecond)
-			p.saveStopRecord(path, StopRecord{SessionID: "sess-2", StartedAt: started, Verdict: StopAllow})
+			p.appendStopLog(path, StopRecord{SessionID: "sess-2", StartedAt: started, Verdict: StopAllow})
 		}()
-		rec, err := WaitStopVerdict(ctx(), p.Root, "sess-2", time.Now(), "", 200*time.Millisecond)
+		rec, err := WaitStopVerdict(ctx(), p.Root, "sess-2", time.Now(), none, 200*time.Millisecond)
 		require.NoError(t, err)
 		require.Equal(t, StopAllow, rec.Verdict)
 	})
 	t.Run("context cancellation ends the wait", func(t *testing.T) {
-		path := p.stopRecordPath("sess-3", "")
-		p.saveStopRecord(path, StopRecord{SessionID: "sess-3", StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Verdict: StopPending})
+		path := p.stopLogPath("sess-3")
+		p.appendStopLog(path, StopRecord{SessionID: "sess-3", StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Verdict: StopPending})
 		c, cancel := context.WithTimeout(ctx(), 300*time.Millisecond)
 		defer cancel()
-		_, err := WaitStopVerdict(c, p.Root, "sess-3", time.Now(), "", time.Second)
+		_, err := WaitStopVerdict(c, p.Root, "sess-3", time.Now(), none, time.Second)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+	t.Run("sub-agent stops do not enter the main log", func(t *testing.T) {
+		StopHook(ctx(), stopPayload(p.Root, "SubagentStop", false), RunOptions{})
+		require.Len(t, p.readStopLog(p.stopLogPath("sess-1")), 2)
 	})
 }
 

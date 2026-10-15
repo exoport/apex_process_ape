@@ -289,12 +289,20 @@ func TestStopGateRecorder(t *testing.T) {
 	require.Equal(t, "add-wave", m.StopGate.Events[0].Change)
 }
 
-func TestStopGateRecorder_DoesNotApplyWithoutAnInProgressChange(t *testing.T) {
+// No hook registered: the gate has no verdict to wait for and answers at
+// once. Registered but the hook never ran for this Stop: no verdict after
+// the appear window, and the Stop completes as before.
+func TestStopGateRecorder_WithoutAVerdict(t *testing.T) {
 	root := v1Repo(t)
 	r := newStopGateRecorder(root)
-	start := time.Now()
+	r.appear = 300 * time.Millisecond
 	_, ok := r.gate(t.Context(), "s1", time.Now())
-	require.False(t, ok)
-	require.Less(t, time.Since(start), time.Second, "no wait when no gate applies")
+	require.False(t, ok, "settings register the hook but it never ran")
 	require.Nil(t, r.record())
+
+	require.NoError(t, os.Remove(filepath.Join(root, ".claude", "settings.json")))
+	start := time.Now()
+	_, ok = r.gate(t.Context(), "s1", time.Now())
+	require.False(t, ok)
+	require.Less(t, time.Since(start), 200*time.Millisecond, "no wait when no hook is registered")
 }

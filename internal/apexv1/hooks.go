@@ -191,6 +191,54 @@ func (p *Project) stopRecordPath(sessionID, agentID string) string {
 	return filepath.Join(p.StopGateDir(), key+".json")
 }
 
+// stopLogPath is the main session's append-only verdict log.
+func (p *Project) stopLogPath(sessionID string) string {
+	return strings.TrimSuffix(p.stopRecordPath(sessionID, ""), ".json") + ".jsonl"
+}
+
+// appendStopLog appends one record as a JSON line. A line is far below
+// PIPE_BUF-sized writes, so concurrent appends do not interleave.
+func (p *Project) appendStopLog(path string, r StopRecord) {
+	data, err := json.Marshal(r)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(append(data, '\n'))
+	_ = f.Close()
+}
+
+// readStopLog folds the log into one record per hook run (keyed by
+// StartedAt), in the order the runs started; a later line for the same
+// run replaces its pending line.
+func (p *Project) readStopLog(path string) []StopRecord {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []StopRecord
+	index := map[string]int{}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		var r StopRecord
+		if line == "" || json.Unmarshal([]byte(line), &r) != nil || r.StartedAt == "" {
+			continue
+		}
+		if i, ok := index[r.StartedAt]; ok {
+			out[i] = r
+			continue
+		}
+		index[r.StartedAt] = len(out)
+		out = append(out, r)
+	}
+	return out
+}
+
 var keyRe = regexp.MustCompile(`[^A-Za-z0-9._-]`)
 
 func sanitizeKey(s string) string { return keyRe.ReplaceAllString(s, "_") }
@@ -247,9 +295,21 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 		rec.ConsecutiveBlocks = 0
 	}
 	p.saveStopRecord(path, rec)
+	// The main session's verdicts are also appended to a log, one line
+	// when the hook starts and one when it decides: `ape task` matches its
+	// k-th Stop to the k-th verdict, which a single overwritten record
+	// cannot support when a blocked session stops again quickly.
+	logPath := ""
+	if agent == "" {
+		logPath = p.stopLogPath(payload.SessionID)
+		p.appendStopLog(logPath, rec)
+	}
 	finish := func(d StopDecision) StopDecision {
 		d.Record.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		p.saveStopRecord(path, d.Record)
+		if logPath != "" {
+			p.appendStopLog(logPath, d.Record)
+		}
 		return d
 	}
 
@@ -315,25 +375,18 @@ func stopReason(id string, red []CheckResult, n int) string {
 
 // --- the ape task side of the stop gate --------------------------------------
 
-// StopGateApplies reports whether a project's stop hook will gate a main
-// Stop right now: a v1 project whose settings register `ape hook stop`
-// and that has exactly one change in progress. Cheap — runs no check.
-func StopGateApplies(root string) bool {
+// StopGateConfigured reports whether a project's stop hook runs on a
+// main Stop: a v1 project whose settings register `ape hook stop`. Every
+// such Stop then has a verdict in the session's log — an allow, quickly,
+// when no single change is in progress — so `ape task` consumes one
+// verdict per Stop and the k-th Stop always meets the k-th verdict.
+func StopGateConfigured(root string) bool {
 	p, err := Open(FindRoot(root))
 	if err != nil || !p.IsV1() {
 		return false
 	}
 	data, err := os.ReadFile(p.SettingsJSON())
-	if err != nil || !strings.Contains(string(data), HookCmdStop) {
-		return false
-	}
-	n := 0
-	for _, c := range p.Changes() {
-		if c.State != nil && c.State.Status == StatusInProgress {
-			n++
-		}
-	}
-	return n == 1
+	return err == nil && strings.Contains(string(data), HookCmdStop)
 }
 
 // ErrNoStopVerdict means no stop-gate record for the Stop appeared in time:
@@ -341,29 +394,36 @@ func StopGateApplies(root string) bool {
 var ErrNoStopVerdict = errors.New("no stop-gate verdict")
 
 // WaitStopVerdict waits for the stop hook's verdict on the main Stop that
-// arrived at stopAt, for session sessionID. A record started more than
-// slack before stopAt, or the one already consumed (StartedAt == consumed),
-// belongs to an earlier Stop. It returns
-// ErrNoStopVerdict when no record for this Stop appears within appear,
-// and otherwise waits for the verdict as long as ctx allows.
-func WaitStopVerdict(ctx context.Context, root, sessionID string, stopAt time.Time, consumed string, appear time.Duration) (StopRecord, error) {
+// arrived at stopAt, for session sessionID: the first hook run in the
+// session's verdict log that is not in consumed and did not start more
+// than a few seconds before stopAt. Callers pass every StartedAt they have
+// already used, and decide their Stops one at a time, in order, so the
+// k-th Stop gets the k-th verdict. It returns ErrNoStopVerdict when no
+// run for this Stop appears within appear, and otherwise waits for that
+// run's verdict as long as ctx allows.
+func WaitStopVerdict(ctx context.Context, root, sessionID string, stopAt time.Time, consumed map[string]bool, appear time.Duration) (StopRecord, error) {
 	p, err := Open(FindRoot(root))
 	if err != nil {
 		return StopRecord{}, err
 	}
-	path := p.stopRecordPath(sessionID, "")
+	path := p.stopLogPath(sessionID)
 	const slack = 5 * time.Second
 	deadline := time.Now().Add(appear)
-	tick := time.NewTicker(200 * time.Millisecond)
+	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
 	for {
-		rec := p.loadStopRecord(path)
-		started, err := time.Parse(time.RFC3339Nano, rec.StartedAt)
-		if err == nil && rec.StartedAt != consumed && !started.Before(stopAt.Add(-slack)) {
-			if rec.Verdict == StopAllow || rec.Verdict == StopBlock {
-				return rec, nil
+		runs := p.readStopLog(path)
+		for i := range runs {
+			rec := &runs[i]
+			started, err := time.Parse(time.RFC3339Nano, rec.StartedAt)
+			if err != nil || consumed[rec.StartedAt] || started.Before(stopAt.Add(-slack)) {
+				continue
 			}
-			deadline = time.Time{} // the hook is running: wait for it
+			if rec.Verdict == StopAllow || rec.Verdict == StopBlock {
+				return *rec, nil
+			}
+			deadline = time.Time{} // this Stop's hook is running: wait for it
+			break
 		}
 		if !deadline.IsZero() && time.Now().After(deadline) {
 			return StopRecord{}, ErrNoStopVerdict
