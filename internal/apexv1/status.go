@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -79,28 +80,13 @@ func (p *Project) Status() *StatusReport {
 	r.Spend.TotalUSD = round2(r.Spend.TotalUSD)
 	r.Spend.Note = "sum of finished ape task/pipeline run manifests; a run still in progress is not counted yet"
 
-	rm := p.roadmap()
-	recs, _ := p.LoadMilestoneRecords()
-	if rm != nil {
-		for _, m := range rm.Milestones {
+	if rm := p.roadmap(); rm != nil {
+		for i := range rm.Milestones {
+			m := &rm.Milestones[i]
 			r.Milestones = append(r.Milestones, MilestoneLine{ID: m.ID, Title: m.Title, Status: m.Status})
 		}
 		if m := rm.Current(); m != nil {
-			ms := &MilestoneStatus{ID: m.ID, Title: m.Title, Status: m.Status, StatusText: m.StatusText, Gate: m.Gate, Budget: m.Budget}
-			if rec := recs[m.ID]; rec != nil {
-				ms.GateLast = rec.Last
-			}
-			since := time.Time{}
-			if t, err := time.Parse(time.RFC3339, m.ApprovedAt); err == nil {
-				since = t
-			}
-			for _, run := range runs {
-				if !run.StartedAt.Before(since) {
-					ms.SpentUSD += run.CostUSD
-				}
-			}
-			ms.SpentUSD = round2(ms.SpentUSD)
-			r.Milestone = ms
+			r.Milestone = p.milestoneStatus(m, runs)
 		}
 	}
 
@@ -139,6 +125,26 @@ func (p *Project) Status() *StatusReport {
 	return r
 }
 
+// milestoneStatus is the current milestone with its last gate run and
+// the spend of runs started since its approval.
+func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost) *MilestoneStatus {
+	ms := &MilestoneStatus{ID: m.ID, Title: m.Title, Status: m.Status, StatusText: m.StatusText, Gate: m.Gate, Budget: m.Budget}
+	if recs, err := p.LoadMilestoneRecords(); err == nil && recs[m.ID] != nil {
+		ms.GateLast = recs[m.ID].Last
+	}
+	since := time.Time{}
+	if t, err := time.Parse(time.RFC3339, m.ApprovedAt); err == nil {
+		since = t
+	}
+	for _, run := range runs {
+		if !run.StartedAt.Before(since) {
+			ms.SpentUSD += run.CostUSD
+		}
+	}
+	ms.SpentUSD = round2(ms.SpentUSD)
+	return ms
+}
+
 // nextStep is a deterministic hint: what the way of working says comes
 // next, given only the recorded state.
 func nextStep(r *StatusReport) string {
@@ -155,7 +161,8 @@ func nextStep(r *StatusReport) string {
 	if m.Status != MilestoneApproved {
 		return fmt.Sprintf("%s awaits approval: a person runs `ape milestone approve %s --by <who>`", m.ID, m.ID)
 	}
-	for _, c := range r.Changes {
+	for i := range r.Changes {
+		c := &r.Changes[i]
 		if c.Milestone != m.ID && c.Milestone != "" {
 			continue
 		}
@@ -170,8 +177,8 @@ func nextStep(r *StatusReport) string {
 			return "apply " + c.ID + ": `ape change check " + c.ID + "`, then `ape change start " + c.ID + "` (apex-apply)"
 		}
 	}
-	for _, c := range r.Changes {
-		if c.Status == StatusBlocked {
+	for i := range r.Changes {
+		if c := &r.Changes[i]; c.Status == StatusBlocked {
 			return "blocked: " + c.ID + " — " + c.BlockedReason + " (re-plan, or a person answers; `ape change start " + c.ID + "` resumes)"
 		}
 	}
@@ -180,6 +187,10 @@ func nextStep(r *StatusReport) string {
 	}
 	return fmt.Sprintf("plan the next change toward %s (apex-change), or `ape milestone gate %s` if the goal looks met", m.ID, m.ID)
 }
+
+// briefReasonMax caps a blocked reason in the brief, so a long question
+// does not push the rest past 25 lines on a narrow terminal.
+const briefReasonMax = 90
 
 // Brief renders the report in at most 25 lines, for the SessionStart hook.
 func (r *StatusReport) Brief() string {
@@ -190,24 +201,7 @@ func (r *StatusReport) Brief() string {
 		return strings.Join(b, "\n") + "\n"
 	}
 	if m := r.Milestone; m != nil {
-		line := fmt.Sprintf("Milestone %s — %s: %s", m.ID, m.Title, m.StatusText)
-		b = append(b, line)
-		gate := "  gate `" + m.Gate + "`"
-		if m.GateLast != nil {
-			verdict := "green"
-			if m.GateLast.Exit != 0 {
-				verdict = fmt.Sprintf("red (exit %d)", m.GateLast.Exit)
-			}
-			gate += fmt.Sprintf(" — last %s at %s (%s)", verdict, m.GateLast.At, short(m.GateLast.SHA))
-		} else {
-			gate += " — not run yet"
-		}
-		b = append(b, gate)
-		spend := fmt.Sprintf("  spent $%.2f", m.SpentUSD)
-		if m.Budget != nil {
-			spend += fmt.Sprintf(" of $%.2f budget", *m.Budget)
-		}
-		b = append(b, spend)
+		b = append(b, m.briefLines()...)
 	} else if len(r.Milestones) == 0 {
 		b = append(b, "No milestones yet.")
 	} else {
@@ -215,11 +209,11 @@ func (r *StatusReport) Brief() string {
 	}
 	const maxChanges = 12
 	var open, blocked []ChangeStatus
-	for _, c := range r.Changes {
-		if c.Status == StatusBlocked {
-			blocked = append(blocked, c)
+	for i := range r.Changes {
+		if r.Changes[i].Status == StatusBlocked {
+			blocked = append(blocked, r.Changes[i])
 		} else {
-			open = append(open, c)
+			open = append(open, r.Changes[i])
 		}
 	}
 	if len(open) == 0 {
@@ -233,7 +227,8 @@ groups:
 		if gi == 1 && len(blocked) > 0 {
 			b = append(b, "Blocked:")
 		}
-		for _, c := range group {
+		for i := range group {
+			c := &group[i]
 			if shown == maxChanges {
 				b = append(b, fmt.Sprintf("  … %d more (`ape status --json`)", len(r.Changes)-maxChanges))
 				break groups
@@ -242,7 +237,7 @@ groups:
 			line := fmt.Sprintf("  %-28s %-11s %s", c.ID, c.Status, c.Milestone)
 			switch {
 			case c.BlockedReason != "":
-				line += " — " + truncate(c.BlockedReason, 90)
+				line += " — " + truncate(c.BlockedReason, briefReasonMax)
 			case len(c.Failing) > 0 && c.Status == StatusInProgress:
 				line += " — red: " + strings.Join(c.Failing, ", ")
 			}
@@ -252,9 +247,26 @@ groups:
 			b = append(b, line)
 		}
 	}
-	b = append(b, fmt.Sprintf("Spend: $%.2f over %d runs", r.Spend.TotalUSD, r.Spend.Runs))
-	b = append(b, "Next: "+r.Next)
+	b = append(b, fmt.Sprintf("Spend: $%.2f over %d runs", r.Spend.TotalUSD, r.Spend.Runs), "Next: "+r.Next)
 	return strings.Join(b, "\n") + "\n"
+}
+
+// briefLines is the milestone's three lines in the brief.
+func (m *MilestoneStatus) briefLines() []string {
+	gate := "  gate `" + m.Gate + "`"
+	switch {
+	case m.GateLast == nil:
+		gate += " — not run yet"
+	case m.GateLast.Exit == 0:
+		gate += fmt.Sprintf(" — last green at %s (%s)", m.GateLast.At, short(m.GateLast.SHA))
+	default:
+		gate += fmt.Sprintf(" — last red (exit %d) at %s (%s)", m.GateLast.Exit, m.GateLast.At, short(m.GateLast.SHA))
+	}
+	spend := fmt.Sprintf("  spent $%.2f", m.SpentUSD)
+	if m.Budget != nil {
+		spend += fmt.Sprintf(" of $%.2f budget", *m.Budget)
+	}
+	return []string{fmt.Sprintf("Milestone %s — %s: %s", m.ID, m.Title, m.StatusText), gate, spend}
 }
 
 func short(sha string) string {
@@ -275,7 +287,7 @@ func truncate(s string, n int) string {
 	return string([]rune(s)[:n-1]) + "…"
 }
 
-func round2(f float64) float64 { return float64(int64(f*100+0.5)) / 100 }
+func round2(f float64) float64 { return math.Round(f*100) / 100 }
 
 func baseName(p string) string {
 	p = strings.TrimRight(p, "/")

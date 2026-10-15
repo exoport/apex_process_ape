@@ -218,6 +218,15 @@ linters:
       - linters:
           - tagliatelle
         path: internal/sessions/registry\.go
+      # APEX v1 trial: state.json, the --json payloads and Claude Code's
+      # hook frames are snake_case by contract (the trial brief and the
+      # hook wire format), like the manifest above.
+      - linters:
+          - tagliatelle
+        path: internal/apexv1/
+      - linters:
+          - tagliatelle
+        path: internal/cost/runcosts\.go
       # PLAN-25 project-data commands: the framework's own variable names
       # (`governance_folder`, `implementation_folder`, `ext_adrs`, …) and the
       # `findings[]` / `files_scanned` payload keys ARE the contract the 91

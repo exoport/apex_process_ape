@@ -75,7 +75,10 @@ func (p *Project) ActiveChanges() []ChangeInfo {
 }
 
 // CheckChange validates change.md against its shape, its caps, the
-// roadmap and the current specs (`ape change check`).
+// roadmap and the current specs (`ape change check`). One flat list of
+// rules, each a few lines: splitting it would scatter the contract.
+//
+//nolint:gocyclo // a checklist, not branching logic
 func (p *Project) CheckChange(id string) []Finding {
 	file := p.Rel(p.ChangeMD(id))
 	doc, err := readFileString(p.ChangeMD(id))
@@ -160,7 +163,8 @@ func (p *Project) CheckChange(id string) []Finding {
 		add(s.Line, "## Delta is empty — add ADDED/MODIFIED/REMOVED blocks, or the single line `none — <reason>`")
 	}
 	seen := map[reqKey]int{}
-	for _, d := range c.Deltas {
+	for i := range c.Deltas {
+		d := &c.Deltas[i]
 		if d.Capability == "" || !slugRe.MatchString(d.Capability) {
 			add(d.Line, "delta capability ["+d.Capability+"] is not a kebab-case slug")
 			continue
@@ -279,7 +283,7 @@ func globsOverlap(a, b string) bool {
 }
 
 // changeSkeleton renders a fresh change.md.
-func changeSkeleton(id, milestone string, touches, paths []string, outOfScope []string) string {
+func changeSkeleton(id, milestone string, touches, paths, outOfScope []string) string {
 	var b strings.Builder
 	b.WriteString("---\n")
 	b.WriteString("id: " + id + "\n")

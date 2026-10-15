@@ -40,7 +40,7 @@ Exit codes: 0 ok (prints the id) · 1 no roadmap.md · 2 usage.`,
 			if err != nil {
 				return err
 			}
-			if err := v1RequireInit(p); err != nil {
+			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
 			var b *float64
@@ -81,7 +81,7 @@ Exit codes: 0 ok · 1 no such milestone, done, or malformed (Gate/Goal missing) 
 			if err != nil {
 				return err
 			}
-			if err := v1RequireInit(p); err != nil {
+			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
 			m, err := p.ApproveMilestone(args[0], by)
@@ -132,7 +132,7 @@ Exit codes: 0 gate green · 1 gate red (last output lines shown) or no such mile
 			if err != nil {
 				return err
 			}
-			if err := v1RequireInit(p); err != nil {
+			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
 			g, err := p.RunGate(cmd.Context(), args[0], f.runOptions())
@@ -171,7 +171,7 @@ Exit codes: 0 done · 1 gate red, changes in flight, or not approved · 2 usage.
 			if err != nil {
 				return err
 			}
-			if err := v1RequireInit(p); err != nil {
+			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
 			g, err := p.CloseMilestone(cmd.Context(), args[0], f.runOptions())
@@ -224,7 +224,7 @@ Exit codes: 0 ok (prints id and path) · 1 slug already used · 2 usage.`,
 			if err != nil {
 				return err
 			}
-			if err := v1RequireInit(p); err != nil {
+			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
 			res, err := p.NewDecision(args[0], title)

@@ -52,7 +52,7 @@ func CurrentBranch(ctx context.Context, dir string) string {
 // differs between sha and HEAD. Commits that only record planning
 // artifacts (review.md, state.json, the next change's draft) do not make a
 // verify or a review stale; a commit to code does.
-func (p *Project) codeMovedSince(ctx context.Context, sha string) (bool, []string, error) {
+func (p *Project) codeMovedSince(ctx context.Context, sha string) (moved bool, files []string, err error) {
 	head := HeadSHA(ctx, p.Root)
 	if sha == "" || head == "" {
 		return sha != head, nil, nil
@@ -64,14 +64,13 @@ func (p *Project) codeMovedSince(ctx context.Context, sha string) (bool, []strin
 	if err != nil {
 		return true, nil, err
 	}
-	var moved []string
-	for _, f := range strings.Split(out, "\n") {
+	for f := range strings.SplitSeq(out, "\n") {
 		if f == "" || p.inDev(f) {
 			continue
 		}
-		moved = append(moved, f)
+		files = append(files, f)
 	}
-	return len(moved) > 0, moved, nil
+	return len(files) > 0, files, nil
 }
 
 // inDev reports whether a project-relative path is inside the development
@@ -89,12 +88,14 @@ func (p *Project) dirtyCode(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Porcelain v1: two status columns, a space, then the path.
+	const pathAt = 3
 	var dirty []string
-	for _, line := range strings.Split(out, "\n") {
-		if len(line) < 4 {
+	for line := range strings.SplitSeq(out, "\n") {
+		if len(line) <= pathAt {
 			continue
 		}
-		path := line[3:]
+		path := line[pathAt:]
 		if i := strings.Index(path, " -> "); i >= 0 {
 			path = path[i+4:]
 		}

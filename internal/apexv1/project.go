@@ -12,7 +12,6 @@ import (
 // Required and optional project.md sections (brief 4.1).
 var (
 	projectRequired = []string{"Vision", "Users", "Scope", "Out of scope", "Constraints"}
-	projectOptional = []string{"Stack", "Notes"}
 )
 
 // ValidateProjectMD checks project.md's shape and caps.
@@ -36,7 +35,7 @@ func ValidateProjectMD(file, doc string) []Finding {
 	if title == "" {
 		out = append(out, Finding{File: file, Line: 1, Message: "missing `# <Project name>`"})
 	}
-	h2 := sections(lines, 2)
+	h2 := h2Sections(lines)
 	byTitle := map[string]section{}
 	for _, s := range h2 {
 		byTitle[strings.ToLower(s.Title)] = s
@@ -93,7 +92,7 @@ func ValidateDecision(file, name, doc string) []Finding {
 		date = date || adrDateRe.MatchString(t)
 		enforced = enforced || adrEnforceRe.MatchString(t)
 	}
-	if tm := adrTitleRe.FindStringSubmatch(title); tm == nil || tm[1] != m[1] {
+	if tm := adrTitleRe.FindStringSubmatch(title); len(tm) < 2 || tm[1] != m[1] {
 		out = append(out, Finding{File: file, Line: 1, Message: "first heading must be `# ADR-" + m[1] + ": <title>`"})
 	}
 	if !status {
@@ -106,7 +105,7 @@ func ValidateDecision(file, name, doc string) []Finding {
 		out = append(out, Finding{File: file, Message: "missing `Enforced by: <command> | hook | review`"})
 	}
 	have := map[string]bool{}
-	for _, s := range sections(lines, 2) {
+	for _, s := range h2Sections(lines) {
 		have[strings.ToLower(s.Title)] = true
 	}
 	for _, want := range []string{"Context", "Decision", "Consequences"} {
@@ -169,7 +168,7 @@ func (p *Project) Check() []Finding {
 	}
 	if doc, err := readFileString(p.ClaudeMD()); err == nil {
 		found := false
-		for _, l := range strings.Split(doc, "\n") {
+		for l := range strings.SplitSeq(doc, "\n") {
 			if strings.TrimSpace(l) == "@AGENTS.md" {
 				found = true
 			}

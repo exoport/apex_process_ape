@@ -1,0 +1,345 @@
+package apexv1
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+// waveChange is a change whose T1 is red until wave.sh exists.
+func waveChange(id string) string {
+	return changeDoc(id, "greeting", addedWave,
+		"- T1 add wave — check: ./wave.sh\n- T2 copy reads well — check: human-review\n")
+}
+
+func startedWave(t *testing.T) *Project {
+	t.Helper()
+	p := fixture(t, baseFiles())
+	addChange(t, p, "add-wave", waveChange("add-wave"))
+	commitAll(t, p, "plan: add-wave")
+	_, err := p.Start(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	return p
+}
+
+func state(t *testing.T, p *Project, id string) *State {
+	t.Helper()
+	st, err := LoadState(p.StateFile(id))
+	require.NoError(t, err)
+	return st
+}
+
+func TestNewChange(t *testing.T) {
+	p := fixture(t, baseFiles())
+	res, err := p.NewChange("add-wave", "M1", []string{"greeting"}, []string{"internal/**"})
+	require.NoError(t, err)
+	require.Equal(t, "development/changes/add-wave/change.md", res.Path)
+	require.Equal(t, StatusDraft, state(t, p, "add-wave").Status)
+	doc := read(t, p, res.Path)
+	require.Contains(t, doc, "- farewells", "the milestone's out of scope is inherited")
+	c := ParseChange("", doc)
+	require.Equal(t, "add-wave", c.Meta.ID)
+	require.Equal(t, []string{"internal/**"}, c.Meta.Paths)
+	require.NotEmpty(t, p.CheckChange("add-wave"), "the skeleton is not a finished change")
+
+	res2, err := p.NewChange("add-wave-two", "M1", []string{"greeting"}, []string{"internal/api/**"})
+	require.NoError(t, err)
+	require.Len(t, res2.Overlaps, 1)
+	require.Equal(t, "add-wave", res2.Overlaps[0].With)
+
+	for _, tc := range []struct {
+		id, ms  string
+		touches []string
+		usage   bool
+		msg     string
+	}{
+		{"Add-Wave", "M1", []string{"greeting"}, true, "must match"},
+		{"ab", "M1", []string{"greeting"}, true, "must match"},
+		{"add-wave", "M1", []string{"greeting"}, false, "already exists"},
+		{"add-other", "M7", []string{"greeting"}, false, "not in roadmap.md"},
+		{"add-other", "M1", nil, true, "--touches"},
+		{"add-other", "M1", []string{"Bad"}, true, "kebab-case"},
+	} {
+		_, err := p.NewChange(tc.id, tc.ms, tc.touches, nil)
+		require.ErrorContains(t, err, tc.msg, tc.id)
+		var ue *UsageError
+		require.Equal(t, tc.usage, errors.As(err, &ue), tc.id)
+	}
+}
+
+func TestNewChange_IDsAreUniqueAcrossTheArchive(t *testing.T) {
+	files := baseFiles()
+	files["development/changes/archive/2026-09-01-add-wave/change.md"] = "old"
+	p := fixture(t, files)
+	_, err := p.NewChange("add-wave", "M1", []string{"greeting"}, nil)
+	require.ErrorContains(t, err, "already archived")
+}
+
+func TestStart(t *testing.T) {
+	p := fixture(t, baseFiles())
+	addChange(t, p, "add-wave", waveChange("add-wave"))
+	commitAll(t, p, "plan")
+	head := HeadSHA(ctx(), p.Root)
+
+	res, err := p.Start(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, head, res.BaseSHA)
+	require.Len(t, res.Baseline, 1, "human-review tasks have no baseline")
+	require.Equal(t, 127, res.Baseline[0].Exit)
+
+	st := state(t, p, "add-wave")
+	require.Equal(t, StatusInProgress, st.Status)
+	require.Equal(t, []Baseline{{Task: "T1", Exit: 127}}, st.Baseline)
+	require.Equal(t, "apex: add-wave in-progress", subjects(t, p)[0], "D5: ape commits state.json")
+	require.Contains(t, run(t, p.Root, "log", "-1", "--format=%b"), "Change: add-wave")
+	require.Equal(t, "development/changes/add-wave/state.json", run(t, p.Root, "show", "--name-only", "--format=", "HEAD"))
+
+	_, err = p.Start(ctx(), "add-wave", RunOptions{})
+	require.ErrorContains(t, err, "is in-progress")
+}
+
+func TestStart_Refusals(t *testing.T) {
+	t.Run("check red", func(t *testing.T) {
+		p := fixture(t, baseFiles())
+		addChange(t, p, "add-wave", changeDoc("add-wave", "greeting", "", ""))
+		_, err := p.Start(ctx(), "add-wave", RunOptions{})
+		var fe *FailError
+		require.ErrorAs(t, err, &fe)
+		require.NotEmpty(t, fe.Findings)
+		require.Equal(t, StatusDraft, state(t, p, "add-wave").Status)
+	})
+	t.Run("milestone not approved", func(t *testing.T) {
+		files := baseFiles()
+		files["development/roadmap.md"] = strings.Replace(roadmapApproved, "approved (by eval 2026-10-15T12:00:00Z)", "proposed", 1)
+		p := fixture(t, files)
+		addChange(t, p, "add-wave", waveChange("add-wave"))
+		_, err := p.Start(ctx(), "add-wave", RunOptions{})
+		require.ErrorContains(t, err, "not approved")
+	})
+}
+
+func TestStart_RequirementConflicts(t *testing.T) {
+	modify := func(id string) string {
+		return changeDoc(id, "greeting",
+			"### MODIFIED [greeting] Requirement: Say hello\nThe system SHALL print Hi.\n#### Scenario: hi\n- check: true\n",
+			"- T1 hi — check: true\n")
+	}
+	remove := func(id string) string {
+		return changeDoc(id, "greeting", "### REMOVED [greeting] Requirement: Say hello\nReason: r\n", "- T1 gone — check: true\n")
+	}
+	for name, tc := range map[string]struct {
+		first, second string
+		firstStatus   string
+		conflict      bool
+	}{
+		"two MODIFIED":           {modify("a-first"), modify("b-second"), StatusInProgress, true},
+		"MODIFIED vs REMOVED":    {modify("a-first"), remove("b-second"), StatusVerified, true},
+		"two ADDED of one name":  {waveChange("a-first"), waveChange("b-second"), StatusReviewed, true},
+		"other is blocked (D6)":  {modify("a-first"), modify("b-second"), StatusBlocked, false},
+		"other is a draft":       {modify("a-first"), modify("b-second"), StatusDraft, false},
+		"different requirements": {modify("a-first"), waveChange("b-second"), StatusInProgress, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := fixture(t, baseFiles())
+			first := strings.Replace(tc.first, "id: "+idOf(tc.first), "id: a-first", 1)
+			addChange(t, p, "a-first", first)
+			require.NoError(t, SaveState(p.StateFile("a-first"), &State{ID: "a-first", Status: tc.firstStatus}))
+			addChange(t, p, "b-second", tc.second)
+			commitAll(t, p, "plan")
+			_, err := p.Start(ctx(), "b-second", RunOptions{})
+			if !tc.conflict {
+				require.NoError(t, err)
+				return
+			}
+			var ce *ConflictError
+			require.ErrorAs(t, err, &ce)
+			require.Contains(t, ce.Error(), "a-first")
+			require.Equal(t, StatusDraft, state(t, p, "b-second").Status, "a refused start writes nothing")
+		})
+	}
+}
+
+func idOf(doc string) string {
+	c := ParseChange("", doc)
+	return c.Meta.ID
+}
+
+func TestVerify(t *testing.T) {
+	p := startedWave(t)
+	before := subjects(t, p)
+
+	// Red on an in-progress change: nothing written, nothing committed (D5).
+	v, err := p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.False(t, v.Green)
+	require.Len(t, v.Failing(), 1)
+	require.NotEmpty(t, v.Failing()[0].Tail)
+	require.Nil(t, state(t, p, "add-wave").Verify)
+	require.Equal(t, before, subjects(t, p))
+
+	// Uncommitted code: refused.
+	write(t, p, "wave.sh", "#!/bin/sh\necho wave\n")
+	_, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	require.ErrorContains(t, err, "uncommitted changes outside development/: wave.sh")
+
+	commitAll(t, p, "feat: wave")
+	v, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.True(t, v.Green)
+	require.Equal(t, []string{"T2"}, v.PendingHuman)
+	st := state(t, p, "add-wave")
+	require.Equal(t, StatusVerified, st.Status)
+	require.Equal(t, v.SHA, st.Verify.SHA)
+	require.Len(t, st.Verify.Results[0].OutputSHA256, 64)
+	require.Equal(t, "apex: add-wave verified", subjects(t, p)[0])
+
+	// Code breaks again: a verified change goes back to in-progress, committed.
+	write(t, p, "wave.sh", "#!/bin/sh\nexit 3\n")
+	commitAll(t, p, "fix: break wave")
+	v, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.False(t, v.Green)
+	require.Equal(t, 3, v.Results[0].Exit)
+	require.Equal(t, StatusInProgress, state(t, p, "add-wave").Status)
+	require.Equal(t, "apex: add-wave in-progress", subjects(t, p)[0])
+}
+
+func TestVerify_DraftAndArchived(t *testing.T) {
+	p := fixture(t, baseFiles())
+	addChange(t, p, "add-wave", waveChange("add-wave"))
+	_, err := p.Verify(ctx(), "add-wave", RunOptions{})
+	require.ErrorContains(t, err, "is a draft")
+	_, err = p.Verify(ctx(), "nope-nope", RunOptions{})
+	require.ErrorContains(t, err, "no change nope-nope")
+}
+
+func verifiedWave(t *testing.T) *Project {
+	t.Helper()
+	p := startedWave(t)
+	write(t, p, "wave.sh", "#!/bin/sh\necho wave\n")
+	commitAll(t, p, "feat: wave")
+	v, err := p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.True(t, v.Green)
+	write(t, p, "development/changes/add-wave/review.md", "fine\n")
+	return p
+}
+
+func TestReview(t *testing.T) {
+	p := verifiedWave(t)
+	_, err := p.Review(ctx(), "add-wave", "maybe", "development/changes/add-wave/review.md")
+	var ue *UsageError
+	require.ErrorAs(t, err, &ue)
+	_, err = p.Review(ctx(), "add-wave", "pass", "nowhere.md")
+	require.ErrorAs(t, err, &ue)
+
+	st, err := p.Review(ctx(), "add-wave", "block", "development/changes/add-wave/review.md")
+	require.NoError(t, err)
+	require.Equal(t, StatusInProgress, st.Status)
+	require.Equal(t, "apex: add-wave in-progress", subjects(t, p)[0])
+
+	_, err = p.Review(ctx(), "add-wave", "pass", "development/changes/add-wave/review.md")
+	require.ErrorContains(t, err, "review applies to a verified change")
+
+	_, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	st, err = p.Review(ctx(), "add-wave", "pass", "development/changes/add-wave/review.md")
+	require.NoError(t, err)
+	require.Equal(t, StatusReviewed, st.Status)
+	require.Equal(t, "development/changes/add-wave/review.md", st.Review.Findings)
+
+	// A re-verify with no code change keeps it reviewed.
+	_, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, StatusReviewed, state(t, p, "add-wave").Status)
+}
+
+func TestReview_PassNeedsAFreshVerify(t *testing.T) {
+	p := verifiedWave(t)
+	write(t, p, "wave.sh", "#!/bin/sh\necho wave2\n")
+	commitAll(t, p, "feat: wave2")
+	_, err := p.Review(ctx(), "add-wave", "pass", "development/changes/add-wave/review.md")
+	require.ErrorContains(t, err, "code changed since the last verify (wave.sh)")
+}
+
+func TestAcceptAndBlock(t *testing.T) {
+	p := verifiedWave(t)
+	_, err := p.Accept(ctx(), "add-wave", "T1", "ann")
+	require.ErrorContains(t, err, "proven by `./wave.sh`")
+	_, err = p.Accept(ctx(), "add-wave", "T9", "ann")
+	require.ErrorContains(t, err, "no task T9")
+	_, err = p.Accept(ctx(), "add-wave", "T2", "")
+	require.ErrorContains(t, err, "--by")
+
+	st, err := p.Accept(ctx(), "add-wave", "T2", "ann")
+	require.NoError(t, err)
+	require.Equal(t, "ann", st.Accepted[0].By)
+	require.Empty(t, st.Verify.PendingHuman)
+	require.Equal(t, "apex: add-wave verified", subjects(t, p)[0])
+
+	_, err = p.Block(ctx(), "add-wave", " ")
+	require.ErrorContains(t, err, "--reason")
+	st, err = p.Block(ctx(), "add-wave", "which wave?")
+	require.NoError(t, err)
+	require.Equal(t, StatusBlocked, st.Status)
+	require.Equal(t, "which wave?", *st.BlockedReason)
+	require.Equal(t, "apex: add-wave blocked", subjects(t, p)[0])
+
+	// start resumes a blocked change and keeps its base.
+	base := st.BaseSHA
+	res, err := p.Start(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, base, res.BaseSHA)
+	require.Nil(t, state(t, p, "add-wave").BlockedReason)
+}
+
+func TestAbandon(t *testing.T) {
+	p := startedWave(t)
+	_, err := p.Abandon(ctx(), "add-wave", "")
+	require.ErrorContains(t, err, "--reason")
+	res, err := p.Abandon(ctx(), "add-wave", "replaced by add-wave-v2")
+	require.NoError(t, err)
+	require.True(t, strings.HasSuffix(res.ArchivedTo, "-add-wave"))
+	require.NoDirExists(t, p.ChangeDir("add-wave"))
+	st, err := LoadState(filepath.Join(p.Root, res.ArchivedTo, "state.json"))
+	require.NoError(t, err)
+	require.Equal(t, StatusAbandoned, st.Status)
+	require.Equal(t, "replaced by add-wave-v2", st.AbandonedReason)
+	require.Equal(t, greetingSpec, read(t, p, "development/specs/greeting/spec.md"), "no delta merged")
+	require.Equal(t, "apex: add-wave abandoned", subjects(t, p)[0])
+	require.Empty(t, run(t, p.Root, "status", "--porcelain"))
+	_, err = p.NewChange("add-wave", "M1", []string{"greeting"}, nil)
+	require.ErrorContains(t, err, "already archived", "an abandoned id stays taken")
+}
+
+func TestStateCommit_LeavesOtherWorkAlone(t *testing.T) {
+	p := fixture(t, baseFiles())
+	addChange(t, p, "add-wave", waveChange("add-wave"))
+	commitAll(t, p, "plan")
+	write(t, p, "notes.txt", "staged by someone\n")
+	run(t, p.Root, "add", "notes.txt")
+	_, err := p.Start(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, "development/changes/add-wave/state.json", run(t, p.Root, "show", "--name-only", "--format=", "HEAD"))
+	require.Equal(t, "A  notes.txt", run(t, p.Root, "status", "--porcelain"), "the operator's staged file stays staged")
+}
+
+func TestStateWritesOutsideGitStillWork(t *testing.T) {
+	root := t.TempDir()
+	for rel, content := range baseFiles() {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o755))
+	}
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(root))
+	p, err := Open(root)
+	require.NoError(t, err)
+	addChange(t, p, "add-wave", waveChange("add-wave"))
+	_, err = p.Block(ctx(), "add-wave", "why")
+	require.NoError(t, err)
+	require.Equal(t, StatusBlocked, state(t, p, "add-wave").Status)
+}

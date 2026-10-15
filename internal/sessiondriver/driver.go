@@ -297,8 +297,9 @@ func (d *Driver) SetStepSkill(skill string) {
 // StopGate reports whether a project hook blocked the main-session Stop
 // that reached the driver at stopAt. ok=false means the gate had no
 // verdict (no hook ran, or none applies) and the Stop completes as
-// usual. It may block for as long as the hook runs.
-type StopGate func(ctx context.Context, sessionID string, stopAt time.Time) (blocked, ok bool)
+// usual. It may block for as long as the hook runs, so the gate bounds
+// its own wait (and ends it with the run).
+type StopGate func(sessionID string, stopAt time.Time) (blocked, ok bool)
 
 // SetStopGate installs a StopGate. Set before the session starts.
 func (d *Driver) SetStopGate(g StopGate) {
@@ -306,10 +307,6 @@ func (d *Driver) SetStopGate(g StopGate) {
 	d.stopGate = g
 	d.stopMu.Unlock()
 }
-
-// stopGateWait bounds how long a Stop waits on the project gate: the
-// stop hook's own timeout (1800 s) plus margin.
-const stopGateWait = 35 * time.Minute
 
 // DeferredStops reports how many Stop hooks this step withheld because
 // work was still outstanding, plus the most recent blocking set. Used by
@@ -529,9 +526,7 @@ func (d *Driver) noteStop(env hookEnvelope) {
 		// runs the project's checks.
 		stopAt := time.Now()
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), stopGateWait)
-			defer cancel()
-			blocked, ok := gate(ctx, env.SessionID, stopAt)
+			blocked, ok := gate(env.SessionID, stopAt)
 			if ok && blocked {
 				// The session continues the turn with the hook's reason;
 				// a later Stop decides again.

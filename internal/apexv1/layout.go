@@ -86,8 +86,10 @@ func Open(root string) (*Project, error) {
 }
 
 // FindRoot walks up from dir to the nearest directory holding
-// _apex/config.yaml or a development/ folder, else the git top level the
-// walk passes, else dir itself.
+// _apex/config.yaml or a v1 development folder (development/.apex or
+// development/project.md), else the git top level the walk passes, else
+// dir itself. A bare development/ folder is not a marker: plenty of repos
+// have one for other reasons (ape's own does).
 func FindRoot(dir string) string {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -95,7 +97,8 @@ func FindRoot(dir string) string {
 	}
 	gitTop := ""
 	for cur := abs; ; {
-		if fileExists(ConfigPath(cur)) || dirExists(filepath.Join(cur, DefaultDevFolder)) {
+		dev := filepath.Join(cur, DefaultDevFolder)
+		if fileExists(ConfigPath(cur)) || dirExists(filepath.Join(dev, ".apex")) || fileExists(filepath.Join(dev, "project.md")) {
 			return cur
 		}
 		if gitTop == "" && fileOrDirExists(filepath.Join(cur, ".git")) {
@@ -196,8 +199,10 @@ func (p *Project) SettingsJSON() string {
 	return filepath.Join(p.Root, ".claude", "settings.json")
 }
 
+// IsV1 reports whether the project has a v1 development folder: one
+// `ape project init` made (.apex/) or one with a project.md.
 func (p *Project) IsV1() bool {
-	return dirExists(p.Dev())
+	return dirExists(p.ApexDir()) || fileExists(p.ProjectMD())
 }
 
 func (p *Project) devPrefix() string {

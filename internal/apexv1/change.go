@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -65,7 +66,7 @@ type Change struct {
 
 var (
 	deltaHeadRe = regexp.MustCompile(`^(ADDED|MODIFIED|REMOVED)\s+\[([^\]]*)\]\s+Requirement:\s*(.*)$`)
-	deltaNoneRe = regexp.MustCompile(`^none\s*(?:—|–|-|:)\s*(\S.*)$`)
+	deltaNoneRe = regexp.MustCompile(`^none\s*[—–:-]\s*(\S.*)$`)
 	taskItemRe  = regexp.MustCompile(`^\s{0,3}[-*+]\s+(.*)$`)
 	taskIDRe    = regexp.MustCompile(`^(\[[ xX]\]\s*)?(T\d+)\b[:.)]?\s*(.*)$`)
 )
@@ -76,7 +77,7 @@ func ParseChange(file, doc string) *Change {
 	c := &Change{file: file}
 	fm, body, err := frontmatter.Split([]byte(doc))
 	if err != nil {
-		c.MetaErr = fmt.Errorf("no YAML frontmatter (--- id/milestone/touches ---)")
+		c.MetaErr = errors.New("no YAML frontmatter (--- id/milestone/touches ---)")
 		body = []byte(doc)
 	} else if err := yaml.Unmarshal(fm, &c.Meta); err != nil {
 		c.MetaErr = fmt.Errorf("frontmatter does not parse: %w", err)
@@ -97,7 +98,7 @@ func ParseChange(file, doc string) *Change {
 			break
 		}
 	}
-	c.H2 = sections(lines, 2)
+	c.H2 = h2Sections(lines)
 	if d := c.section("Delta"); d != nil {
 		c.parseDelta(d.Body)
 	}
@@ -120,6 +121,9 @@ func (c *Change) parseDelta(body []mdLine) {
 	cur := -1
 	var curLines []mdLine
 	var loose []mdLine
+	// skipping is true under a malformed delta heading: its body is part
+	// of that one finding, not a second one.
+	skipping := false
 	flush := func() {
 		if cur < 0 {
 			return
@@ -146,6 +150,7 @@ func (c *Change) parseDelta(body []mdLine) {
 			m := deltaHeadRe.FindStringSubmatch(title)
 			if m == nil {
 				cur = -1
+				skipping = true
 				c.parse = append(c.parse, Finding{
 					File: c.file, Line: l.N,
 					Message: "delta heading must be `### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>`",
@@ -156,16 +161,18 @@ func (c *Change) parseDelta(body []mdLine) {
 				Op: m[1], Capability: strings.TrimSpace(m[2]), Name: strings.TrimSpace(m[3]), Line: l.N,
 			})
 			cur = len(c.Deltas) - 1
+			skipping = false
 			continue
 		}
-		if cur >= 0 {
+		switch {
+		case cur >= 0:
 			curLines = append(curLines, l)
-		} else {
+		case !skipping:
 			loose = append(loose, l)
 		}
 	}
 	flush()
-	if len(c.Deltas) > 0 {
+	if len(c.Deltas) > 0 || skipping {
 		return
 	}
 	// No delta headings: the only other legal shape is one `none — reason` line.
@@ -211,11 +218,9 @@ func (c *Change) parseTasks(body []mdLine) {
 		}
 		rest := tm[3]
 		t := Task{ID: tm[2], Line: l.N}
-		idx := strings.LastIndex(rest, "check:")
-		if idx >= 0 {
-			t.What = strings.TrimRight(strings.TrimSpace(rest[:idx]), " \t—–-")
-			t.Check = strings.TrimSpace(rest[idx+len("check:"):])
-			t.Check = strings.Trim(t.Check, "`")
+		if what, check, ok := strings.CutLast(rest, "check:"); ok {
+			t.What = strings.TrimRight(strings.TrimSpace(what), " \t—–-")
+			t.Check = strings.Trim(strings.TrimSpace(check), "`")
 		} else {
 			t.What = strings.TrimSpace(rest)
 		}

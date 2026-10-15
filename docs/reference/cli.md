@@ -31,11 +31,12 @@ Subcommands:
 - `adr` — Manage Architecture Decision Records
 - `bootstrap` — Bootstrap governance artifacts from traits
 - `capability` — Inspect and maintain the capability registry
-- `change` — Run one maintenance change: dispatch the lane, then commit its goals
+- `change` — The unit of change: new, check, start, verify, review, accept, block, archive
 - `chat` — Bridged claude REPL with hooks captured to a runlog
 - `config` — Resolve the project's APEX configuration
 - `context` — Inspect the project-context document
 - `costs` — Show this project's Claude cost rollup
+- `decision` — Record architecture decisions (ADR-NNNN) in development/decisions/
 - `deferred` — The deferred-work record store
 - `doc` — Shard, assemble and survey Markdown documents
 - `doctor` — Probe the local environment for prerequisites
@@ -43,12 +44,15 @@ Subcommands:
 - `feature` — Inspect and maintain the feature registry
 - `framework` — Install and inspect APEX framework assets in a project
 - `governance` — Answer governance questions about a set of paths
+- `hook` — Claude Code hooks for APEX v1 projects (registered by `ape project init`)
 - `log` — Publish a structured log record over NATS
 - `memory` — Read the team-memory file without loading it whole
 - `metrics` — Scan and publish this session's usage metrics over NATS
+- `milestone` — Add, approve, gate and close roadmap milestones
 - `pattern` — Manage governance patterns
 - `pipeline` — List or run an APEX pipeline
 - `planning` — Show the planning pipeline diagram
+- `project` — Create and check an APEX v1 project layout
 - `prompt` — Drive an unattended Claude session from a prompt or a handoff file
 - `registry` — Verify or reconcile every record registry at once
 - `release` — Project the framework's release record
@@ -59,6 +63,7 @@ Subcommands:
 - `service` — Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply
 - `sessions` — List, prune, or open the URL of live ape sessions
 - `sprint` — Inspect and maintain sprint-status.yaml
+- `status` — Show the current milestone, active changes, blocks, pending human review and spend
 - `story` — Project and verify story frontmatter
 - `task` — Run a single framework skill through the interactive PTY runner
 - `trait` — Manage and inspect traits
@@ -1580,79 +1585,342 @@ Flags:
 
 ## ape change
 
-Run one maintenance change: dispatch the lane, then commit its goals
+The unit of change: new, check, start, verify, review, accept, block, archive
 
 ```
-ape change [request] [flags]
+ape change
 ```
 
-Carry one maintenance request through the lean lane.
+A change is development/changes/<id>/change.md (written by the model) plus state.json
+(written only by ape). Its lifecycle:
 
-ape dispatches the apex-maintenance skill with its hands off git, reads
-the terminal contract the skill writes, and then composes and makes
-every commit itself. The skill never runs git; ape holds the pen.
+  new → draft ──start──▶ in-progress ──verify green──▶ verified ──review pass──▶ reviewed ──archive──▶ archived
+                              ▲   │                        │                         │
+                              └───┴── verify red ◀─────────┴──── review block ◀──────┘
+  any status but archived ──block──▶ blocked ──start──▶ in-progress
+  any status but archived ──abandon──▶ abandoned (moved to the archive, no delta merged)
 
-The request is text that gets TYPED INTO A REPL as keystrokes, so it
-comes from a file or stdin rather than argv:
+Done is a command ape ran at a sha: models never set a status. Every status change is
+committed by ape: state.json alone, subject "apex: <id> <status>", trailer "Change: <id>"
+(archive commits "archive: <id>"). Skills never stage state.json. A blocked change claims
+no requirements: it takes no part in start's conflict check.
 
-  --request-file <path>   read the request from a file
-  --request-file -        read it from stdin
-  <request>               positional, for a human at a shell
+Exit codes for every subcommand: 0 ok · 1 check failed (one-line remediation) · 2 usage ·
+3 conflict (another change claims the same requirement, or the delta no longer applies;
+nothing written).
 
-A newline, a control character or a trailing backslash is refused
-before anything spawns: the first submits the line early, the last
-never submits at all.
+Subcommands:
 
---fixes <deferred-record-id> names the record this change discharges. It
-may be given alone, in which case there is no request and no Request:
-trailer, or together with one.
+- `abandon` — Move a change to the archive as abandoned, merging no delta; commit
+- `accept` — Accept a human-review task
+- `archive` — Apply the delta to specs/, move the change to the archive, commit `archive: <id>`
+- `block` — Set blocked, with the reason shown by ape status
+- `check` — Validate change.md: shape, caps, delta against specs, a check on every task
+- `new` — Validate the id and write the change.md skeleton and state.json (draft)
+- `review` — Record a review verdict; block returns the change to in-progress
+- `start` — Check green + milestone approved → record base_sha and baseline, set in-progress
+- `verify` — Run every command check at HEAD; verified iff all exit 0
 
---queue writes the request down instead of running it, as a maintenance
-record ape commits itself — the lane refuses a dirty tree, and a
-request usually arrives while someone is mid-change. --drain then runs
-every queued record as its own change, skipping any a commit already
-discharged with a Fixes: trailer, and stopping at the first run that
-leaves edits in the tree, because every later run would refuse at
-preflight anyway. A record the drain escalated, had refused, or halted
-part way is marked so a second drain does not retry it.
+## ape change abandon
 
-Artifacts land under {output_folder}/ape/changes/<change-id>/: the
-request verbatim, the skill's contract, the change record, and — where
-a run left edits in the tree — the residue it could not commit.
+Move a change to the archive as abandoned, merging no delta; commit
 
-Exit codes: 0 every goal landed · 1 the run failed, or its contract was
-missing or invalid · 2 usage or preflight · 3 REPL never became ready ·
-4 claude died · 5 upstream API · 6 the commit was refused (ownership,
-reconciliation or validation) · 8 escalated, with the route's commands
-on stdout · 9 refused by the lane · 10 halted part way, with earlier
-goals committed and the rest saved as residue.
+```
+ape change abandon <id> --reason "<text>" [flags]
+```
+
+Drop a change: its folder moves to development/changes/archive/<YYYY-MM-DD>-<id>/ with
+status abandoned and the reason recorded in state.json; its delta is NOT merged into
+specs/. Committed as "apex: <id> abandoned" with trailer "Change: <id>". The id stays
+taken. Abandon a blocked change only after planning its replacement, or with the reason
+none is needed.
+
+Exit codes: 0 abandoned · 1 no such change, archived, or git failed · 2 usage ·
+3 the archive folder already exists.
 
 Examples:
 
 ```
-  ape change "the CLI reference is out of date"
-  ape change --request-file /tmp/request.txt --output-format json
-  printf '%s' "$req" | ape change --request-file -
-  ape change --fixes 20260919-a3f1c2 --review
+  ape change abandon add-tenant-delete --reason "replaced by split-tenant-delete"
 ```
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--contract-out` | string | `—` | Where the skill writes its terminal contract (default: contract.yaml in the change directory; must sit inside it) |
-| `--cwd` | string | `—` | Project root directory (default: current working dir) |
-| `--detach` | bool | `false` | Start the run in the background, detached from this shell, print its id, and return at once; `ape run wait <id>` waits for it |
-| `--drain` | bool | `false` | Run every queued maintenance record as its own change, stopping at the first that leaves the tree dirty |
-| `--dry-run` | bool | `false` | Print the messages ape would compose and commit nothing, leaving the tree as the run left it |
-| `--effort` | string | `—` | Explicit reasoning effort (low\|medium\|high\|xhigh\|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). |
-| `--fixes` | string | `—` | Deferred record id this change discharges (may be given alone) |
-| `--model` | string | `—` | Claude model for the dispatch |
-| `--output-format` | string | `human` | Output format: human\|json |
-| `--queue` | bool | `false` | Write the request down as a maintenance record and commit it, running nothing |
-| `--quiet` | bool | `false` | Suppress the per-event progress stream (the default when stdout is not a terminal) |
-| `--request-file` | string | `—` | File holding the request; "-" reads stdin |
-| `--review` | bool | `false` | Ask the lane to review its own change before reporting |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--reason` | string | `—` | why it is dropped, and what replaces it (required) |
+
+## ape change accept
+
+Accept a human-review task
+
+```
+ape change accept <id> --task <T> --by <who> [flags]
+```
+
+Record that a person accepted a human-review task (one whose check is "human-review").
+Archive requires every human-review task accepted, unless --allow-pending-human.
+
+Exit codes: 0 recorded · 1 the task has a command check · 2 usage (no such task).
+
+Examples:
+
+```
+  ape change accept add-tenant-delete --task T2 --by diego
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--by` | string | `—` | who accepts (required) |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--task` | string | `—` | task id, e.g. T2 (required) |
+
+## ape change archive
+
+Apply the delta to specs/, move the change to the archive, commit `archive: <id>`
+
+```
+ape change archive <id> [flags]
+```
+
+Archive a reviewed change:
+
+  1. needs status reviewed (review pass); re-runs verify when HEAD moved since it (red →
+     in-progress, exit 1); refused if code changed since the review
+  2. human-review tasks must be accepted, unless --allow-pending-human (recorded)
+  3. applies the delta to development/specs/: ADDED appends, MODIFIED replaces, REMOVED
+     deletes; a new capability gets specs/<cap>/spec.md (Purpose from the change's Why).
+     Any conflict → exit 3 and NOTHING is written
+  4. moves the folder to development/changes/archive/<YYYY-MM-DD>-<id>/, status archived
+  5. commits the specs and the move (only those paths; hooks skipped) as
+     "archive: <id>" with trailer "Change: <id>"
+
+Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review,
+pending human-review, or git failed · 2 usage · 3 the delta no longer applies.
+
+Examples:
+
+```
+  ape change archive add-tenant-delete
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--allow-pending-human` | bool | `false` | archive with human-review tasks unaccepted (recorded in state.json) |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--timeout` | duration | `15m0s` | limit for each check command (exit 124 when exceeded) |
+
+## ape change block
+
+Set blocked, with the reason shown by ape status
+
+```
+ape change block <id> --reason "<text>" [flags]
+```
+
+Set a change blocked. The reason is what `ape status` shows: what blocks it, or the
+question only a person can answer. A blocked change lets the stop hook allow a stop.
+`ape change start <id>` resumes it.
+
+Exit codes: 0 blocked · 1 no such change or archived · 2 usage.
+
+Examples:
+
+```
+  ape change block add-tenant-delete --reason "needs a decision: soft or hard delete?"
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--reason` | string | `—` | what blocks it (required) |
+
+## ape change check
+
+Validate change.md: shape, caps, delta against specs, a check on every task
+
+```
+ape change check <id> [flags]
+```
+
+Validate one change and list every failure:
+
+  - frontmatter id = folder, milestone in roadmap.md, touches non-empty kebab slugs,
+    decisions exist in decisions/, paths are valid globs
+  - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
+  - change.md ≤ 8 KB and design.md ≤ 8 KB ("split this change")
+  - ## Delta: "### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>" blocks, or
+    the single line "none — <reason>". The capability must be in touches. ADDED names must
+    not exist in specs/<capability>/spec.md yet; MODIFIED/REMOVED must name an existing
+    heading exactly. ADDED/MODIFIED carry ≥ 1 "#### Scenario:" with exactly one
+    "- check: <command> | human-review"; REMOVED carries "Reason:".
+  - ## Tasks: "- T<n> <what> — check: <command> | human-review", no checkboxes, unique ids
+
+Exit codes: 0 green · 1 findings · 2 usage.
+
+Examples:
+
+```
+  ape change check add-tenant-delete
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape change new
+
+Validate the id and write the change.md skeleton and state.json (draft)
+
+```
+ape change new <id> --milestone <M> --touches a,b [--paths globs] [flags]
+```
+
+Create development/changes/<id>/ with a change.md skeleton (frontmatter id, milestone,
+touches, paths; # title; ## Why, ## Out of scope (pre-filled with the milestone's Out of
+scope bullets), ## Delta, ## Tasks, ## Notes) and state.json with status draft.
+
+<id> is a verb-led kebab slug, ^[a-z][a-z0-9-]{2,39}$, unique across active AND archived
+changes. --touches lists the capabilities the change adds to or modifies (kebab slugs;
+new ones are fine — a capability is born from its first change). --paths are globs used
+for overlap detection. Overlap (shared touches or paths) with another unarchived change
+is a warning, not a failure.
+
+Then fill change.md and run `ape change check <id>`.
+
+Exit codes: 0 ok · 1 id taken (incl. archive) or milestone not in roadmap · 2 usage.
+
+Examples:
+
+```
+  ape change new add-tenant-delete --milestone M2 --touches tenants --paths 'internal/api/**'
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--milestone` | string | `—` | milestone id from roadmap.md (required) |
+| `--paths` | string | `—` | comma-separated globs, for overlap detection |
+| `--touches` | string | `—` | comma-separated capability slugs (required) |
+
+## ape change review
+
+Record a review verdict; block returns the change to in-progress
+
+```
+ape change review <id> --verdict pass|block --findings <file> [flags]
+```
+
+Record the review of a verified change. --findings names the review file (normally
+development/changes/<id>/review.md); it must exist and is recorded by path.
+
+  pass   needs a green verify whose code has not moved since → status reviewed
+  block  → status in-progress (fix, verify, review again)
+
+Exit codes: 0 recorded · 1 not verified, or code changed since the verify · 2 usage
+(bad verdict, findings file missing).
+
+Examples:
+
+```
+  ape change review add-tenant-delete --verdict pass --findings development/changes/add-tenant-delete/review.md
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--findings` | string | `—` | the review file (required) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--verdict` | string | `—` | pass or block (required) |
+
+## ape change start
+
+Check green + milestone approved → record base_sha and baseline, set in-progress
+
+```
+ape change start <id> [flags]
+```
+
+Start a draft (or resume a blocked) change:
+
+  1. `ape change check <id>` must be green, and its milestone approved
+  2. refused with exit 3 if another active change (in-progress, verified, reviewed —
+     not blocked) also ADDs, MODIFIES or REMOVES one of the same requirements
+  3. records base_sha (HEAD) and started_at (kept when resuming a blocked change)
+  4. runs every command check once as the baseline (which were already green), from the
+     project root with sh -c; output under development/.apex/logs/<id>/
+  5. sets in-progress and commits state.json ("apex: <id> in-progress")
+
+Exit codes: 0 started · 1 check red, milestone not approved, or wrong status · 2 usage ·
+3 requirement conflict with another active change.
+
+Examples:
+
+```
+  ape change start add-tenant-delete
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--timeout` | duration | `15m0s` | limit for each check command (exit 124 when exceeded) |
+
+## ape change verify
+
+Run every command check at HEAD; verified iff all exit 0
+
+```
+ape change verify <id> [flags]
+```
+
+Run every task's command check at HEAD and record the results (sha, exit, seconds,
+output sha256) in state.json. The working tree must hold no uncommitted changes outside
+development/ — commit first (trailer "Change: <id>"): a verify belongs to a sha.
+
+All command checks exit 0 → status verified (a reviewed change whose code has not moved
+since its review stays reviewed), state.json committed. Any red → the failing checks' last
+lines are printed; a change that was in-progress is left exactly as it was (nothing written,
+nothing committed), a verified/reviewed one goes back to in-progress (committed). human-review tasks are never run; those not yet accepted are listed as
+pending.
+
+Exit codes: 0 all command checks green · 1 a check is red, uncommitted code, or wrong
+status · 2 usage.
+
+Examples:
+
+```
+  ape change verify add-tenant-delete
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--timeout` | duration | `15m0s` | limit for each check command (exit 124 when exceeded) |
 
 ## ape chat
 
@@ -2129,6 +2397,54 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--from` | string | `—` | Path to a YAML file with model price overrides |
+
+## ape decision
+
+Record architecture decisions (ADR-NNNN) in development/decisions/
+
+```
+ape decision
+```
+
+Subcommands:
+
+- `new` — Allocate the next ADR number and write the skeleton
+
+## ape decision new
+
+Allocate the next ADR number and write the skeleton
+
+```
+ape decision new <slug> [flags]
+```
+
+Write development/decisions/NNNN-<slug>.md with the next free number:
+
+  # ADR-NNNN: <title>
+  Status: proposed
+  Date: YYYY-MM-DD
+  ## Context / ## Decision / ## Consequences
+  Enforced by: review
+
+Fill it in; set Enforced by: to a command, hook or review. Reference it from a change's
+frontmatter (decisions: [ADR-NNNN]) or a requirement (Decisions: ADR-NNNN).
+
+Exit codes: 0 ok (prints id and path) · 1 slug already used · 2 usage.
+
+Examples:
+
+```
+  ape decision new use-sqlite
+  ape decision new use-sqlite --title "Store tenants in SQLite"
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--title` | string | `—` | ADR title (default: from the slug) |
 
 ## ape deferred
 
@@ -3518,6 +3834,91 @@ Flags:
 | `--path` | stringArray | `[]` | A path to match (repeatable) |
 | `--paths-file` | string | `—` | File holding one path per line; "-" reads stdin |
 
+## ape hook
+
+Claude Code hooks for APEX v1 projects (registered by `ape project init`)
+
+```
+ape hook
+```
+
+Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
+
+  session-start   SessionStart: adds `ape status --brief` as context
+  stop            Stop and SubagentStop: blocks a stop while the one in-progress change
+                  has a red command check (at most 3 times in a row)
+  pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit): denies edits to
+                  development/specs/**, changes/*/state.json, changes/archive/**, .apex/**
+
+Every hook exits 0; a block or deny is expressed in its JSON output.
+
+Subcommands:
+
+- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive and .apex
+- `session-start` — SessionStart hook: inject `ape status --brief` as additional context
+- `stop` — Stop/SubagentStop hook: block a stop while the in-progress change's checks are red
+
+## ape hook pre-tool
+
+PreToolUse hook: deny edits to specs, state.json, the archive and .apex
+
+```
+ape hook pre-tool [flags]
+```
+
+PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit. Denies, with
+{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
+"permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
+whose target is under development/specs/, is development/changes/*/state.json, is under
+development/changes/archive/, or is under development/.apex/. Anything else: no output.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the payload's cwd) |
+
+## ape hook session-start
+
+SessionStart hook: inject `ape status --brief` as additional context
+
+```
+ape hook session-start [flags]
+```
+
+SessionStart hook. Prints {"hookSpecificOutput":{"hookEventName":"SessionStart",
+"additionalContext":"<ape status --brief>"}}. Prints nothing outside a v1 project.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the payload's cwd) |
+
+## ape hook stop
+
+Stop/SubagentStop hook: block a stop while the in-progress change's checks are red
+
+```
+ape hook stop [flags]
+```
+
+Stop and SubagentStop hook. When exactly one change is in-progress and any of its
+command checks exits non-zero now, prints {"decision":"block","reason":"<the failing
+checks' last lines and what to do>"}. Allows (prints nothing) when no or several changes
+are in progress, when the change is blocked, when every check is green, or after 3
+consecutive blocks (the count resets when the payload's stop_hook_active is false).
+
+The verdict is also written to development/.apex/stop-gate/<session>[-<agent>].json, which
+is how `ape task` learns that a Stop it saw did not end the turn.
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the payload's cwd) |
+| `--timeout` | duration | `15m0s` | limit for each check command (exit 124 when exceeded) |
+
 ## ape log
 
 Publish a structured log record over NATS
@@ -3741,6 +4142,141 @@ Flags:
 | `--run-id` | string | `—` | Publish a completed run's manifest totals instead of a live session scan. |
 | `--session-id` | string | `—` | Claude session id to report for (default: auto-resolve the current project's newest). |
 | `--transcript` | string | `—` | Explicit transcript file; the session id is parsed from its name. |
+
+## ape milestone
+
+Add, approve, gate and close roadmap milestones
+
+```
+ape milestone
+```
+
+Milestones live in development/roadmap.md as "## M<n> — <title>" sections.
+Their Status: line is written only by ape: proposed → approved (by <who> <ts>) →
+done (<ts> <sha>). Gate runs are recorded in development/.apex/milestones.json.
+
+Subcommands:
+
+- `approve` — Write Status: approved (by <who> <ts>)
+- `close` — Run the gate; on exit 0 write Status: done (<ts> <sha>)
+- `gate` — Run the milestone's gate and record the result
+- `new` — Append a milestone (Status: proposed) to roadmap.md
+
+## ape milestone approve
+
+Write Status: approved (by <who> <ts>)
+
+```
+ape milestone approve <M> --by <who> [flags]
+```
+
+Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)".
+Changes can start only under an approved milestone. Approving an approved milestone is a
+no-op; a done one is refused.
+
+Exit codes: 0 ok · 1 no such milestone, done, or malformed (Gate/Goal missing) · 2 usage.
+
+Examples:
+
+```
+  ape milestone approve M1 --by eval
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--by` | string | `—` | who approves (required) |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape milestone close
+
+Run the gate; on exit 0 write Status: done (<ts> <sha>)
+
+```
+ape milestone close <M> [flags]
+```
+
+Close an approved milestone. Refused while a change of this milestone is in-progress,
+verified or reviewed (archive or block it first). Otherwise runs the gate (recorded as by
+`ape milestone gate`) and, only on exit 0, writes "Status: done (<ts> <sha>)" into
+roadmap.md. A milestone is done when this command exits 0 — never because anyone says so.
+
+Exit codes: 0 done · 1 gate red, changes in flight, or not approved · 2 usage.
+
+Examples:
+
+```
+  ape milestone close M1
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--timeout` | duration | `15m0s` | limit for each check command (exit 124 when exceeded) |
+
+## ape milestone gate
+
+Run the milestone's gate and record the result
+
+```
+ape milestone gate <M> [flags]
+```
+
+Run the milestone's Gate: command from the project root and record exit, sha, time and
+output hash in development/.apex/milestones.json (shown by `ape status`). Does not
+change the milestone's status — `ape milestone close` does.
+
+Exit codes: 0 gate green · 1 gate red (last output lines shown) or no such milestone · 2 usage.
+
+Examples:
+
+```
+  ape milestone gate M1
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--timeout` | duration | `15m0s` | limit for each check command (exit 124 when exceeded) |
+
+## ape milestone new
+
+Append a milestone (Status: proposed) to roadmap.md
+
+```
+ape milestone new "<title>" --gate "<cmd>" [--budget N] [flags]
+```
+
+Append "## M<n> — <title>" to development/roadmap.md with Status: proposed, the gate
+command, the budget (USD list-price equivalent, when given) and a Goal: line. The id is
+the next free M<n>. Write the Goal paragraph and the Out of scope bullets afterwards
+(or pass --goal); the Status: line is ape's.
+
+Exit codes: 0 ok (prints the id) · 1 no roadmap.md · 2 usage.
+
+Examples:
+
+```
+  ape milestone new "Walking skeleton" --gate "./scripts/e2e.sh m1" --budget 30
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--budget` | float64 | `0` | budget in USD list-price equivalent |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--gate` | string | `—` | the one command that is red until the milestone is done (required) |
+| `--goal` | string | `—` | the Goal: paragraph (else a placeholder to fill in) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
 
 ## ape pattern
 
@@ -4066,6 +4602,102 @@ Print an ASCII swimlanes view of the greenfield planning pipeline.
 Lanes are agent personas; rows are topological depth; `←` lists each
 skill's upstream dependencies. Source of truth for edges: the
 apex_process_docs planning-pipeline explanation.
+
+## ape project
+
+Create and check an APEX v1 project layout
+
+```
+ape project
+```
+
+Subcommands:
+
+- `check` — Validate every v1 shape and size cap; list all failures
+- `init` — Create the development/ skeleton and merge ape's hooks (never overwrites)
+
+## ape project check
+
+Validate every v1 shape and size cap; list all failures
+
+```
+ape project check [flags]
+```
+
+Validate the whole project and list every failure, not just the first.
+
+  development/project.md   # <name>, ## Vision, ## Users, ## Scope, ## Out of scope,
+                           ## Constraints (each non-empty); ≤ 150 lines and ≤ 8 KB
+  AGENTS.md                present, ≤ 120 lines; CLAUDE.md (if any) has the line @AGENTS.md
+  development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
+                           Gate, Goal; Budget a number when present
+  specs/<cap>/spec.md      # title, Purpose:, "### Requirement: <name>" each with ≥ 1
+                           "#### Scenario:" and exactly one "- check: <cmd> | human-review"
+                           per scenario; ≤ 20 KB ("split into two capabilities")
+  decisions/NNNN-<slug>.md # ADR-NNNN: title, Status, Date, Context/Decision/Consequences,
+                           Enforced by
+  changes/<id>/            every non-archived change, as `ape change check`
+
+Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
+
+Examples:
+
+```
+  ape project check
+  ape project check --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape project init
+
+Create the development/ skeleton and merge ape's hooks (never overwrites)
+
+```
+ape project init [flags]
+```
+
+Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten.
+
+  _apex/config.yaml                  project_name, development_folder
+  AGENTS.md                          the project map (skeleton)
+  CLAUDE.md                          "@AGENTS.md" (only when there is no CLAUDE.md)
+  development/project.md             vision, users, scope, out of scope, constraints (skeleton)
+  development/roadmap.md             "# Roadmap"
+  development/specs/                 empty: no backfill — a spec is born from its first change
+  development/changes/archive/
+  development/decisions/
+  development/.apex/                 ape's own records (never edited by a model)
+
+Hooks merged into .claude/settings.json (existing keys and hooks are kept):
+  SessionStart          ape hook session-start
+  Stop, SubagentStop    ape hook stop          (timeout 1800 s: it runs the change's checks)
+  PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit)
+
+--brownfield adds nothing; it records in development/.apex/project.json that the
+project existed before APEX.
+
+Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.
+
+Examples:
+
+```
+  ape project init
+  ape project init --brownfield --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--brownfield` | bool | `false` | record that the project existed before APEX |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
 
 ## ape prompt
 
@@ -5853,6 +6485,43 @@ Flags:
 | `--file` | string | `—` | Path to sprint-status.yaml (required) |
 | `--key` | string | `—` | development_status row key (required) |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
+
+## ape status
+
+Show the current milestone, active changes, blocks, pending human review and spend
+
+```
+ape status [flags]
+```
+
+Show where the project stands, from the records ape keeps:
+
+  - the current milestone (the first not done): status, gate and its last recorded run,
+    budget, and the spend of runs started since it was approved
+  - every change not archived, with its status, blocked reason, red checks from its
+    last verify, and human-review tasks not yet accepted
+  - spend so far: the sum of finished ape task/pipeline run manifests
+  - next: what the way of working says comes next, derived from the state alone
+
+--brief renders at most 25 lines (what the SessionStart hook injects).
+
+Exit codes: 0 ok · 2 usage.
+
+Examples:
+
+```
+  ape status
+  ape status --brief
+  ape status --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--brief` | bool | `false` | at most 25 lines |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
 
 ## ape story
 

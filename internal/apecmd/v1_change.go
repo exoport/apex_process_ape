@@ -41,7 +41,7 @@ nothing written).`,
 
 func splitList(s string) []string {
 	var out []string
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		if t := strings.TrimSpace(part); t != "" {
 			out = append(out, t)
 		}
@@ -62,7 +62,7 @@ func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *co
 			if err != nil {
 				return err
 			}
-			if err := v1RequireInit(p); err != nil {
+			if err := v1RequireInit(cmd, f, p); err != nil {
 				return err
 			}
 			return run(cmd, p, args[0])

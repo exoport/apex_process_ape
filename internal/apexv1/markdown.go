@@ -58,7 +58,7 @@ func splitLines(doc string) []mdLine {
 
 // headingLevel returns the ATX heading level of a line outside code, and
 // its text; 0 when the line is not a heading.
-func headingLevel(l mdLine) (int, string) {
+func headingLevel(l mdLine) (level int, text string) {
 	if l.InCode {
 		return 0, ""
 	}
@@ -82,8 +82,10 @@ type section struct {
 	Body  []mdLine
 }
 
-// sections returns every heading of exactly level, with its body.
-func sections(lines []mdLine, level int) []section {
+// h2Sections returns every level-2 heading with its body — the only level
+// the v1 documents are sectioned by.
+func h2Sections(lines []mdLine) []section {
+	const level = 2
 	var out []section
 	cur := -1
 	for _, l := range lines {
@@ -115,7 +117,6 @@ func hasProse(body []mdLine) bool {
 			if inComment {
 				end := strings.Index(t, "-->")
 				if end < 0 {
-					t = ""
 					break
 				}
 				inComment = false

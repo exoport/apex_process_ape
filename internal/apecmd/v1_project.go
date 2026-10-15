@@ -107,7 +107,7 @@ Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --
 			if err != nil {
 				return err
 			}
-			if err := v1RequireInit(p); err != nil {
+			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
 			fs := p.Check()

@@ -10,6 +10,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/atomicfile"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 	"gopkg.in/yaml.v3"
 )
 
@@ -36,11 +37,25 @@ type stopGateRecorder struct {
 // appear before concluding no gate ran for it.
 const stopGateAppear = 10 * time.Second
 
+// stopGateWait bounds one Stop's wait on the hook: the hook's own
+// timeout (apexv1.StopHookTimeout, 1800 s) plus margin.
+const stopGateWait = 35 * time.Minute
+
 func newStopGateRecorder(root string) *stopGateRecorder {
 	return &stopGateRecorder{root: root}
 }
 
-// gate is a sessiondriver.StopGate.
+// bounded adapts gate to sessiondriver.StopGate: each wait ends with the
+// run, or after stopGateWait.
+func (r *stopGateRecorder) bounded(runCtx context.Context) sessiondriver.StopGate {
+	return func(sessionID string, stopAt time.Time) (blocked, ok bool) {
+		ctx, cancel := context.WithTimeout(runCtx, stopGateWait)
+		defer cancel()
+		return r.gate(ctx, sessionID, stopAt)
+	}
+}
+
+// gate decides one Stop.
 func (r *stopGateRecorder) gate(ctx context.Context, sessionID string, stopAt time.Time) (blocked, ok bool) {
 	if !apexv1.StopGateApplies(r.root) {
 		return false, false

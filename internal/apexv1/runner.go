@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,10 @@ const DefaultCheckTimeout = 15 * time.Minute
 
 // tailLines is how many trailing output lines a red check is reported by.
 const tailLines = 40
+
+// outputKeep is how much of a check's output is held in memory for its
+// tail; the log file gets all of it.
+const outputKeep = 4 << 20
 
 // ExitTimeout is the exit a timed-out check records (coreutils' timeout).
 const ExitTimeout = 124
@@ -45,7 +50,7 @@ func RunCheck(ctx context.Context, dir, cmd, logPath string, timeout time.Durati
 	var buf bytes.Buffer
 	hash := sha256.New()
 	var sinks []io.Writer
-	sinks = append(sinks, &capped{w: &buf, max: 4 << 20}, hash)
+	sinks = append(sinks, &capped{w: &buf, max: outputKeep}, hash)
 	var logFile *os.File
 	if logPath != "" {
 		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err == nil {
@@ -62,9 +67,6 @@ func RunCheck(ctx context.Context, dir, cmd, logPath string, timeout time.Durati
 	start := time.Now()
 	err := c.Run()
 	secs := time.Since(start).Seconds()
-	if logFile != nil {
-		_ = logFile.Close()
-	}
 
 	exit := 0
 	if err != nil {
@@ -83,10 +85,15 @@ func RunCheck(ctx context.Context, dir, cmd, logPath string, timeout time.Durati
 			_, _ = io.WriteString(w, "\n[ape] "+err.Error()+"\n")
 		}
 	}
+	// Closed only now: the timeout and start-failure notes above belong
+	// in the log too.
+	if logFile != nil {
+		_ = logFile.Close()
+	}
 	return CheckResult{
 		Cmd:          cmd,
 		Exit:         exit,
-		Secs:         float64(int(secs*10+0.5)) / 10,
+		Secs:         math.Round(secs*10) / 10,
 		OutputSHA256: hex.EncodeToString(hash.Sum(nil)),
 		Tail:         lastLines(buf.String(), tailLines),
 	}

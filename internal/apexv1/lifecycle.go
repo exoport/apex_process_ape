@@ -16,8 +16,9 @@ type RunOptions struct {
 
 // runTasks runs every command task once, logging under .apex/logs/<id>/.
 func (p *Project) runTasks(ctx context.Context, c *Change, id, logPrefix string, opt RunOptions) []CheckResult {
-	var out []CheckResult
-	for _, t := range c.CommandTasks() {
+	tasks := c.CommandTasks()
+	out := make([]CheckResult, 0, len(tasks))
+	for _, t := range tasks {
 		logPath := filepath.Join(p.LogDir(id), logPrefix+t.ID+".log")
 		r := RunCheck(ctx, p.Root, t.Check, logPath, opt.Timeout)
 		r.Task = t.ID
@@ -32,8 +33,10 @@ func (p *Project) runTasks(ctx context.Context, c *Change, id, logPrefix string,
 // both.
 func requirementConflicts(a, b *Change) []string {
 	var out []string
-	for _, da := range a.Deltas {
-		for _, db := range b.Deltas {
+	for i := range a.Deltas {
+		da := &a.Deltas[i]
+		for j := range b.Deltas {
+			db := &b.Deltas[j]
 			if da.key() != db.key() {
 				continue
 			}
@@ -279,13 +282,14 @@ func (p *Project) Accept(ctx context.Context, id, task, by string) (*State, erro
 		return nil, &FailError{Msg: "task " + task + " is proven by `" + t.Check + "`, not by a person — `ape change verify " + id + "` runs it"}
 	}
 	st := ci.State
-	kept := st.Accepted[:0]
+	accepted := make([]Accept, 0, len(st.Accepted)+1)
 	for _, a := range st.Accepted {
 		if a.Task != task {
-			kept = append(kept, a)
+			accepted = append(accepted, a)
 		}
 	}
-	st.Accepted = append(kept, Accept{Task: task, By: by, At: Stamp()})
+	accepted = append(accepted, Accept{Task: task, By: by, At: Stamp()})
+	st.Accepted = accepted
 	if st.Verify != nil {
 		st.Verify.PendingHuman = st.PendingHuman(ci.Doc.HumanTasks())
 		if st.Verify.PendingHuman == nil {

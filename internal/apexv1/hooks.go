@@ -13,8 +13,6 @@ import (
 )
 
 // HookPayload is the subset of Claude Code's hook input ape reads.
-//
-//nolint:tagliatelle // Claude Code's snake_case hook payload; the wire shape is fixed
 type HookPayload struct {
 	SessionID      string          `json:"session_id"`
 	TranscriptPath string          `json:"transcript_path"`
@@ -29,7 +27,7 @@ type HookPayload struct {
 // ParseHookPayload decodes a hook's stdin. Empty input is an empty payload.
 func ParseHookPayload(data []byte) (HookPayload, error) {
 	var p HookPayload
-	if len(strings.TrimSpace(string(data))) == 0 {
+	if strings.TrimSpace(string(data)) == "" {
 		return p, nil
 	}
 	err := json.Unmarshal(data, &p)
@@ -37,11 +35,11 @@ func ParseHookPayload(data []byte) (HookPayload, error) {
 }
 
 // SessionStartOutput is the SessionStart hook's JSON answer.
-func SessionStartOutput(context string) ([]byte, error) {
+func SessionStartOutput(text string) ([]byte, error) {
 	return json.Marshal(map[string]any{
 		"hookSpecificOutput": map[string]any{
 			"hookEventName":     "SessionStart",
-			"additionalContext": context,
+			"additionalContext": text,
 		},
 	})
 }
@@ -114,11 +112,11 @@ var stateJSONRe = regexp.MustCompile(`^changes/[^/]+/state\.json$`)
 func (p *Project) protectedReason(abs string) string {
 	dev := p.Dev()
 	// Resolve symlinked parents so a link into specs/ is still specs/.
-	if real, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
-		if realDev, err := filepath.EvalSymlinks(dev); err == nil {
-			dev = realDev
+	if resolved, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
+		if resolvedDev, err := filepath.EvalSymlinks(dev); err == nil {
+			dev = resolvedDev
 		}
-		abs = filepath.Join(real, filepath.Base(abs))
+		abs = filepath.Join(resolved, filepath.Base(abs))
 	}
 	rel, err := filepath.Rel(dev, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {

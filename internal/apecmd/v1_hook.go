@@ -32,8 +32,28 @@ Every hook exits 0; a block or deny is expressed in its JSON output.`,
 	return cmd
 }
 
+// hookPayloadMax bounds what a hook reads from stdin.
+const hookPayloadMax = 4 << 20
+
+// emitHook writes a hook's JSON answer; nil is an allow and writes
+// nothing. An answer that could not be built is an allow too: a hook
+// never fails the session it serves.
+//
+// Curried so a call reads emitHook(cmd)(decision.Output()).
+func emitHook(cmd *cobra.Command) func(out []byte, err error) {
+	return func(out []byte, err error) {
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "ape hook: %v; allowing\n", err)
+			return
+		}
+		if out != nil {
+			_, _ = cmd.OutOrStdout().Write(append(out, '\n'))
+		}
+	}
+}
+
 func readHookPayload(cmd *cobra.Command) apexv1.HookPayload {
-	data, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 4<<20))
+	data, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), hookPayloadMax))
 	if err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "ape hook: reading stdin: %v\n", err)
 	}
@@ -65,15 +85,9 @@ func newHookSessionStartCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := readHookPayload(cmd)
-			p, err := apexv1.Open(apexv1.FindRoot(hookDir(cwd, payload)))
-			if err != nil || !p.IsV1() {
-				return nil
+			if p, err := apexv1.Open(apexv1.FindRoot(hookDir(cwd, payload))); err == nil && p.IsV1() {
+				emitHook(cmd)(apexv1.SessionStartOutput(p.Status().Brief()))
 			}
-			out, err := apexv1.SessionStartOutput(p.Status().Brief())
-			if err != nil {
-				return nil
-			}
-			_, _ = cmd.OutOrStdout().Write(append(out, '\n'))
 			return nil
 		},
 	}
@@ -103,12 +117,7 @@ is how ` + "`ape task`" + ` learns that a Stop it saw did not end the turn.`,
 			} else if payload.Cwd == "" {
 				payload.Cwd = hookDir("", payload)
 			}
-			d := apexv1.StopHook(cmd.Context(), payload, f.runOptions())
-			out, err := d.Output()
-			if err != nil || out == nil {
-				return nil
-			}
-			_, _ = cmd.OutOrStdout().Write(append(out, '\n'))
+			emitHook(cmd)(apexv1.StopHook(cmd.Context(), payload, f.runOptions()).Output())
 			return nil
 		},
 	}
@@ -133,11 +142,7 @@ development/changes/archive/, or is under development/.apex/. Anything else: no 
 			if cwd != "" {
 				payload.Cwd = cwd
 			}
-			out, err := apexv1.PreTool(payload).Output()
-			if err != nil || out == nil {
-				return nil
-			}
-			_, _ = cmd.OutOrStdout().Write(append(out, '\n'))
+			emitHook(cmd)(apexv1.PreTool(payload).Output())
 			return nil
 		},
 	}

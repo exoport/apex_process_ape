@@ -24,18 +24,17 @@ type SpecUpdate struct {
 // Any conflict — ADDED naming an existing requirement, MODIFIED or
 // REMOVED naming a missing one — is collected, and nothing is returned
 // for writing when there is one.
-func (p *Project) MergeDelta(c *Change) ([]SpecUpdate, []string) {
+func (p *Project) MergeDelta(c *Change) (updates []SpecUpdate, conflicts []string) {
 	byCap := map[string][]Delta{}
 	var order []string
-	for _, d := range c.Deltas {
+	for i := range c.Deltas {
+		d := &c.Deltas[i]
 		if _, ok := byCap[d.Capability]; !ok {
 			order = append(order, d.Capability)
 		}
-		byCap[d.Capability] = append(byCap[d.Capability], d)
+		byCap[d.Capability] = append(byCap[d.Capability], *d)
 	}
 	sort.Strings(order)
-	var updates []SpecUpdate
-	var conflicts []string
 	for _, capName := range order {
 		spec, _, exists := p.LoadSpec(capName)
 		u := SpecUpdate{Capability: capName, Path: p.Rel(p.SpecFile(capName)), Created: !exists}
@@ -56,9 +55,9 @@ func (p *Project) MergeDelta(c *Change) ([]SpecUpdate, []string) {
 }
 
 // applyDeltas merges deltas into spec and returns the rendered result.
-func applyDeltas(spec *Spec, capName string, deltas []Delta, u *SpecUpdate) (string, []string) {
-	var conflicts []string
-	for _, d := range deltas {
+func applyDeltas(spec *Spec, capName string, deltas []Delta, u *SpecUpdate) (merged string, conflicts []string) {
+	for i := range deltas {
+		d := &deltas[i]
 		idx := -1
 		for i := range spec.Requirements {
 			if spec.Requirements[i].Name == d.Name {
@@ -97,31 +96,33 @@ func applyDeltas(spec *Spec, capName string, deltas []Delta, u *SpecUpdate) (str
 // the introducing change's `## Why`, flattened to one line.
 func purposeFrom(c *Change) string {
 	if s := c.section("Why"); s != nil {
-		var para []string
-		inComment := false
-		for _, l := range s.Body {
-			t := strings.TrimSpace(l.Text)
-			if strings.HasPrefix(t, "<!--") {
-				inComment = !strings.Contains(t, "-->")
-				continue
-			}
-			if inComment {
-				inComment = !strings.Contains(t, "-->")
-				continue
-			}
-			if t == "" {
-				if len(para) > 0 {
-					break
-				}
-				continue
-			}
-			para = append(para, t)
-		}
-		if len(para) > 0 {
-			return strings.Join(para, " ")
+		if para := firstParagraph(s.Body); para != "" {
+			return para
 		}
 	}
 	return "Introduced by change " + c.Meta.ID + "."
+}
+
+// firstParagraph is the first run of non-blank lines outside HTML
+// comments, joined with spaces.
+func firstParagraph(body []mdLine) string {
+	var para []string
+	inComment := false
+	for _, l := range body {
+		t := strings.TrimSpace(l.Text)
+		if strings.HasPrefix(t, "<!--") || inComment {
+			inComment = !strings.Contains(t, "-->")
+			continue
+		}
+		if t == "" {
+			if len(para) > 0 {
+				break
+			}
+			continue
+		}
+		para = append(para, t)
+	}
+	return strings.Join(para, " ")
 }
 
 // ArchiveResult is what `ape change archive` reports.
@@ -299,8 +300,9 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 }
 
 func failingNames(v *VerifyResult) string {
-	var names []string
-	for _, r := range v.Failing() {
+	failing := v.Failing()
+	names := make([]string, 0, len(failing))
+	for _, r := range failing {
 		names = append(names, fmt.Sprintf("%s exit %d", r.Task, r.Exit))
 	}
 	return strings.Join(names, ", ")

@@ -145,7 +145,7 @@ func SaveState(path string, s *State) error {
 }
 
 // now is the clock; tests replace it.
-var now = func() time.Time { return time.Now() }
+var now = time.Now
 
 // Stamp is the timestamp format ape writes: RFC 3339, UTC, seconds.
 func Stamp() string { return now().UTC().Format(time.RFC3339) }

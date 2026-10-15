@@ -40,7 +40,7 @@ type Roadmap struct {
 }
 
 var (
-	milestoneHeadRe = regexp.MustCompile(`^(M\d+)\s*(?:—|–|-|:)\s*(.+)$`)
+	milestoneHeadRe = regexp.MustCompile(`^(M\d+)\s*[—–:-]\s*(.+)$`)
 	approvedRe      = regexp.MustCompile(`^approved\s*\(by\s+(.+?)\s+(\S+)\)$`)
 	doneRe          = regexp.MustCompile(`^done\s*\((\S+)\s+([0-9a-f]{7,40})\)$`)
 )
@@ -63,7 +63,7 @@ func ParseRoadmap(file, doc string) *Roadmap {
 			break
 		}
 	}
-	for _, s := range sections(lines, 2) {
+	for _, s := range h2Sections(lines) {
 		m := milestoneHeadRe.FindStringSubmatch(s.Title)
 		if m == nil {
 			r.headErrs = append(r.headErrs, Finding{
@@ -154,8 +154,8 @@ func (r *Roadmap) Current() *Milestone {
 // NextID is the id `ape milestone new` allocates.
 func (r *Roadmap) NextID() string {
 	maxN := 0
-	for _, m := range r.Milestones {
-		if n, err := strconv.Atoi(strings.TrimPrefix(m.ID, "M")); err == nil && n > maxN {
+	for i := range r.Milestones {
+		if n, err := strconv.Atoi(strings.TrimPrefix(r.Milestones[i].ID, "M")); err == nil && n > maxN {
 			maxN = n
 		}
 	}
@@ -214,7 +214,8 @@ func ValidateRoadmap(file, doc string) []Finding {
 		})
 	}
 	seen := map[string]bool{}
-	for _, m := range r.Milestones {
+	for i := range r.Milestones {
+		m := &r.Milestones[i]
 		if seen[m.ID] {
 			out = append(out, Finding{File: file, Line: m.Line, Message: "duplicate milestone " + m.ID})
 		}

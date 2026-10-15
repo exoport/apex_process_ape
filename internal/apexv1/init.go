@@ -137,7 +137,10 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 	}
 	if !fileExists(p.ProjectJSON()) {
 		rec := map[string]any{"initialized_at": Stamp(), "brownfield": brownfield, "base_sha": HeadSHA(ctx, p.Root)}
-		data, _ := json.MarshalIndent(rec, "", "  ")
+		data, err := json.MarshalIndent(rec, "", "  ")
+		if err != nil {
+			return nil, err
+		}
 		if err := writeFileAtomic(p.ProjectJSON(), string(data)+"\n"); err != nil {
 			return nil, err
 		}
