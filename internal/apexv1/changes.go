@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -319,11 +320,12 @@ type NewChangeResult struct {
 	ID       string    `json:"id"`
 	Path     string    `json:"path"`
 	State    string    `json:"state"`
+	Commit   string    `json:"commit,omitempty"`
 	Overlaps []Overlap `json:"overlaps,omitempty"`
 }
 
 // NewChange validates id and writes the change skeleton and a draft state.
-func (p *Project) NewChange(id, milestone string, touches, paths []string) (*NewChangeResult, error) {
+func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, paths []string) (*NewChangeResult, error) {
 	if !ChangeIDRe.MatchString(id) {
 		return nil, &UsageError{Msg: fmt.Sprintf("change id %q must match ^[a-z][a-z0-9-]{2,39}$ (verb-led kebab slug, e.g. add-tenant-delete)", id)}
 	}
@@ -364,8 +366,19 @@ func (p *Project) NewChange(id, milestone string, touches, paths []string) (*New
 	if err := SaveState(p.StateFile(id), st); err != nil {
 		return nil, err
 	}
+	// The skeleton and the draft state are committed together, so no v1
+	// command leaves the tree dirty (D11); the author's edits to change.md
+	// are the skill's own commit.
+	commit := ""
+	if p.isWorkTree(ctx) {
+		sha, err := p.commitPaths(ctx, "apex: "+id+" "+StatusDraft, id, p.Rel(p.ChangeDir(id)))
+		if err != nil {
+			return nil, &FailError{Msg: "change written but its commit failed: " + err.Error()}
+		}
+		commit = sha
+	}
 	return &NewChangeResult{
-		ID: id, Path: p.Rel(p.ChangeMD(id)), State: StatusDraft,
+		ID: id, Path: p.Rel(p.ChangeMD(id)), State: StatusDraft, Commit: commit,
 		Overlaps: p.overlaps(id, touches, paths),
 	}, nil
 }

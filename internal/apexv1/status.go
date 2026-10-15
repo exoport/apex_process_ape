@@ -129,9 +129,7 @@ func (p *Project) Status() *StatusReport {
 // the spend of runs started since its approval.
 func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost) *MilestoneStatus {
 	ms := &MilestoneStatus{ID: m.ID, Title: m.Title, Status: m.Status, StatusText: m.StatusText, Gate: m.Gate, Budget: m.Budget}
-	if recs, err := p.LoadMilestoneRecords(); err == nil && recs[m.ID] != nil {
-		ms.GateLast = recs[m.ID].Last
-	}
+	ms.GateLast = p.LastGateRun(m.ID)
 	since := time.Time{}
 	if t, err := time.Parse(time.RFC3339, m.ApprovedAt); err == nil {
 		since = t

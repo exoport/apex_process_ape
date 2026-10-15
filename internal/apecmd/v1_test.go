@@ -176,11 +176,15 @@ func TestV1Commands_ExitCodes(t *testing.T) {
 	_, _, err = v1Exec(t, newMilestoneCmd, "gate", "M1", "--cwd", root)
 	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "gate.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	v1Git(t, root, "add", "gate.sh")
+	v1Git(t, root, "commit", "-q", "-m", "feat: gate")
 	_, _, err = v1Exec(t, newChangeCmd, "abandon", "add-wave-2", "--reason", "duplicate", "--cwd", root)
 	require.NoError(t, err)
 	stdout, _, err = v1Exec(t, newMilestoneCmd, "close", "M1", "--cwd", root)
 	require.NoError(t, err)
 	require.Contains(t, stdout, "M1 status: done")
+	require.Empty(t, v1Git(t, root, "status", "--porcelain"),
+		"D11: after the whole lifecycle, every v1 command has committed what it wrote")
 
 	stdout, _, err = v1Exec(t, newStatusCmd, "--brief", "--cwd", root)
 	require.NoError(t, err)

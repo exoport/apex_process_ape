@@ -35,10 +35,13 @@ func state(t *testing.T, p *Project, id string) *State {
 
 func TestNewChange(t *testing.T) {
 	p := fixture(t, baseFiles())
-	res, err := p.NewChange("add-wave", "M1", []string{"greeting"}, []string{"internal/**"})
+	res, err := p.NewChange(ctx(), "add-wave", "M1", []string{"greeting"}, []string{"internal/**"})
 	require.NoError(t, err)
 	require.Equal(t, "development/changes/add-wave/change.md", res.Path)
 	require.Equal(t, StatusDraft, state(t, p, "add-wave").Status)
+	require.Equal(t, "apex: add-wave draft", subjects(t, p)[0], "D11: the skeleton and draft state are committed")
+	require.NotEmpty(t, res.Commit)
+	clean(t, p, "change new")
 	doc := read(t, p, res.Path)
 	require.Contains(t, doc, "- farewells", "the milestone's out of scope is inherited")
 	c := ParseChange("", doc)
@@ -46,7 +49,7 @@ func TestNewChange(t *testing.T) {
 	require.Equal(t, []string{"internal/**"}, c.Meta.Paths)
 	require.NotEmpty(t, p.CheckChange("add-wave"), "the skeleton is not a finished change")
 
-	res2, err := p.NewChange("add-wave-two", "M1", []string{"greeting"}, []string{"internal/api/**"})
+	res2, err := p.NewChange(ctx(), "add-wave-two", "M1", []string{"greeting"}, []string{"internal/api/**"})
 	require.NoError(t, err)
 	require.Len(t, res2.Overlaps, 1)
 	require.Equal(t, "add-wave", res2.Overlaps[0].With)
@@ -64,7 +67,7 @@ func TestNewChange(t *testing.T) {
 		{"add-other", "M1", nil, true, "--touches"},
 		{"add-other", "M1", []string{"Bad"}, true, "kebab-case"},
 	} {
-		_, err := p.NewChange(tc.id, tc.ms, tc.touches, nil)
+		_, err := p.NewChange(ctx(), tc.id, tc.ms, tc.touches, nil)
 		require.ErrorContains(t, err, tc.msg, tc.id)
 		var ue *UsageError
 		require.Equal(t, tc.usage, errors.As(err, &ue), tc.id)
@@ -75,7 +78,7 @@ func TestNewChange_IDsAreUniqueAcrossTheArchive(t *testing.T) {
 	files := baseFiles()
 	files["development/changes/archive/2026-09-01-add-wave/change.md"] = "old"
 	p := fixture(t, files)
-	_, err := p.NewChange("add-wave", "M1", []string{"greeting"}, nil)
+	_, err := p.NewChange(ctx(), "add-wave", "M1", []string{"greeting"}, nil)
 	require.ErrorContains(t, err, "already archived")
 }
 
@@ -312,7 +315,7 @@ func TestAbandon(t *testing.T) {
 	require.Equal(t, greetingSpec, read(t, p, "development/specs/greeting/spec.md"), "no delta merged")
 	require.Equal(t, "apex: add-wave abandoned", subjects(t, p)[0])
 	require.Empty(t, run(t, p.Root, "status", "--porcelain"))
-	_, err = p.NewChange("add-wave", "M1", []string{"greeting"}, nil)
+	_, err = p.NewChange(ctx(), "add-wave", "M1", []string{"greeting"}, nil)
 	require.ErrorContains(t, err, "already archived", "an abandoned id stays taken")
 }
 

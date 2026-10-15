@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,7 @@ type DecisionResult struct {
 }
 
 // NewDecision allocates the next ADR number and writes the skeleton.
-func (p *Project) NewDecision(slug, title string) (*DecisionResult, error) {
+func (p *Project) NewDecision(ctx context.Context, slug, title string) (*DecisionResult, error) {
 	if !slugRe.MatchString(slug) {
 		return nil, &UsageError{Msg: fmt.Sprintf("decision slug %q must be kebab-case (e.g. use-sqlite)", slug)}
 	}
@@ -56,5 +57,9 @@ func (p *Project) NewDecision(slug, title string) (*DecisionResult, error) {
 	if err := f.Close(); err != nil {
 		return nil, err
 	}
-	return &DecisionResult{ID: "ADR-" + num, Path: p.Rel(path)}, nil
+	res := &DecisionResult{ID: "ADR-" + num, Path: p.Rel(path)}
+	if _, err := p.commitRecord(ctx, "apex: "+res.ID+" proposed", "", res.Path); err != nil {
+		return res, &FailError{Msg: "decision written but its commit failed: " + err.Error()}
+	}
+	return res, nil
 }

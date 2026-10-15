@@ -1792,7 +1792,9 @@ ape change new <id> --milestone <M> --touches a,b [--paths globs] [flags]
 
 Create development/changes/<id>/ with a change.md skeleton (frontmatter id, milestone,
 touches, paths; # title; ## Why, ## Out of scope (pre-filled with the milestone's Out of
-scope bullets), ## Delta, ## Tasks, ## Notes) and state.json with status draft.
+scope bullets), ## Delta, ## Tasks, ## Notes) and state.json with status draft, and
+commit both as "apex: <id> draft" (trailer "Change: <id>"). Filling change.md in is the
+author's own commit.
 
 <id> is a verb-led kebab slug, ^[a-z][a-z0-9-]{2,39}$, unique across active AND archived
 changes. --touches lists the capabilities the change adds to or modifies (kebab slugs;
@@ -2426,7 +2428,8 @@ Write development/decisions/NNNN-<slug>.md with the next free number:
   ## Context / ## Decision / ## Consequences
   Enforced by: review
 
-Fill it in; set Enforced by: to a command, hook or review. Reference it from a change's
+Committed as "apex: ADR-NNNN proposed". Fill it in (your own commit); set Enforced by: to
+a command, hook or review. Reference it from a change's
 frontmatter (decisions: [ADR-NNNN]) or a requirement (Decisions: ADR-NNNN).
 
 Exit codes: 0 ok (prints id and path) · 1 slug already used · 2 usage.
@@ -4153,7 +4156,12 @@ ape milestone
 
 Milestones live in development/roadmap.md as "## M<n> — <title>" sections.
 Their Status: line is written only by ape: proposed → approved (by <who> <ts>) →
-done (<ts> <sha>). Gate runs are recorded in development/.apex/milestones.json.
+done (<ts> <sha>). Every one of those writes is committed by ape (roadmap.md, plus
+development/.apex/milestones.json when it exists) as "apex: <M> proposed|approved|done"
+with trailer "Milestone: <M>". milestones.json holds each gate's result (green|red)
+and is committed, as "apex: <M> gate green|red", only when that result changes; the
+latest run of any result is in the gitignored development/.apex/logs/gate-<M>.json.
+No milestone command leaves the tree dirty.
 
 Subcommands:
 
@@ -4171,8 +4179,8 @@ ape milestone approve <M> --by <who> [flags]
 ```
 
 Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)".
-Changes can start only under an approved milestone. Approving an approved milestone is a
-no-op; a done one is refused.
+Changes can start only under an approved milestone. Committed as "apex: <M> approved".
+Approving an approved milestone is a no-op; a done one is refused.
 
 Exit codes: 0 ok · 1 no such milestone, done, or malformed (Gate/Goal missing) · 2 usage.
 
@@ -4201,7 +4209,9 @@ ape milestone close <M> [flags]
 Close an approved milestone. Refused while a change of this milestone is in-progress,
 verified or reviewed (archive or block it first). Otherwise runs the gate (recorded as by
 `ape milestone gate`) and, only on exit 0, writes "Status: done (<ts> <sha>)" into
-roadmap.md. A milestone is done when this command exits 0 — never because anyone says so.
+roadmap.md, committed with milestones.json as "apex: <M> done". A red gate is recorded as
+by `ape milestone gate`. A milestone is done when this command exits 0 — never because
+anyone says so.
 
 Exit codes: 0 done · 1 gate red, changes in flight, or not approved · 2 usage.
 
@@ -4227,9 +4237,11 @@ Run the milestone's gate and record the result
 ape milestone gate <M> [flags]
 ```
 
-Run the milestone's Gate: command from the project root and record exit, sha, time and
-output hash in development/.apex/milestones.json (shown by `ape status`). Does not
-change the milestone's status — `ape milestone close` does.
+Run the milestone's Gate: command from the project root. The run (exit, sha, time,
+output hash, last lines) goes to development/.apex/logs/gate-<M>.json (gitignored; shown by
+`ape status`). When the result differs from the recorded one (green vs red), or is
+the first, development/.apex/milestones.json is updated and committed as
+"apex: <M> gate green|red". Does not change the milestone's status — `ape milestone close` does.
 
 Exit codes: 0 gate green · 1 gate red (last output lines shown) or no such milestone · 2 usage.
 
@@ -4258,7 +4270,7 @@ ape milestone new "<title>" --gate "<cmd>" [--budget N] [flags]
 Append "## M<n> — <title>" to development/roadmap.md with Status: proposed, the gate
 command, the budget (USD list-price equivalent, when given) and a Goal: line. The id is
 the next free M<n>. Write the Goal paragraph and the Out of scope bullets afterwards
-(or pass --goal); the Status: line is ape's.
+(or pass --goal); the Status: line is ape's. Committed as "apex: <M> proposed".
 
 Exit codes: 0 ok (prints the id) · 1 no roadmap.md · 2 usage.
 
@@ -4678,6 +4690,9 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
   SessionStart          ape hook session-start
   Stop, SubagentStop    ape hook stop          (timeout 1800 s: it runs the change's checks)
   PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit)
+
+Everything init wrote (and settings.json when it merged hooks) is committed as
+"apex: project init"; files that existed before are not touched and not committed.
 
 --brownfield adds nothing; it records in development/.apex/project.json that the
 project existed before APEX.

@@ -115,9 +115,24 @@ func (p *Project) isWorkTree(ctx context.Context) bool {
 }
 
 // commitPaths stages exactly paths and commits only them (pre-commit
-// hooks skipped: these are ape's own records). Other staged or dirty
-// files are left as they are. A commit with nothing to record is skipped.
+// hooks skipped: these are ape's own records), with trailer
+// `Change: <changeID>`. Other staged or dirty files are left as they are.
+// A commit with nothing to record is skipped.
 func (p *Project) commitPaths(ctx context.Context, subject, changeID string, paths ...string) (string, error) {
+	return p.commitWithTrailer(ctx, subject, "Change: "+changeID, paths...)
+}
+
+// commitRecord commits ape's own record files outside any change (the
+// roadmap, milestones.json, an ADR skeleton, the init skeleton). Outside a
+// git work tree it does nothing.
+func (p *Project) commitRecord(ctx context.Context, subject, trailer string, paths ...string) (string, error) {
+	if !p.isWorkTree(ctx) {
+		return "", nil
+	}
+	return p.commitWithTrailer(ctx, subject, trailer, paths...)
+}
+
+func (p *Project) commitWithTrailer(ctx context.Context, subject, trailer string, paths ...string) (string, error) {
 	if _, err := git(ctx, p.Root, append([]string{"add", "-A", "--"}, paths...)...); err != nil {
 		return "", err
 	}
@@ -128,7 +143,10 @@ func (p *Project) commitPaths(ctx context.Context, subject, changeID string, pat
 	if changed == "" {
 		return "", nil
 	}
-	msg := subject + "\n\nChange: " + changeID + "\n"
+	msg := subject + "\n"
+	if trailer != "" {
+		msg += "\n" + trailer + "\n"
+	}
 	if _, err := git(ctx, p.Root, append([]string{"commit", "--no-verify", "-q", "-m", msg, "--"}, paths...)...); err != nil {
 		return "", err
 	}

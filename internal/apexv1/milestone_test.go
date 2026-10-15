@@ -7,18 +7,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// clean asserts the D11 rule: no v1 command leaves the tree dirty.
+func clean(t *testing.T, p *Project, after string) {
+	t.Helper()
+	require.Empty(t, run(t, p.Root, "status", "--porcelain"), "the tree is dirty after %s", after)
+}
+
 func TestMilestoneLifecycle(t *testing.T) {
 	files := baseFiles()
 	files["development/roadmap.md"] = "# Roadmap\n"
 	p := fixture(t, files)
 
-	_, err := p.NewMilestone("Skeleton", "", nil, "")
+	_, err := p.NewMilestone(ctx(), "Skeleton", "", nil, "")
 	require.ErrorContains(t, err, "--gate is required")
 	budget := 30.0
-	id, err := p.NewMilestone("Skeleton", "./gate.sh", &budget, "A greeter greets.")
+	id, err := p.NewMilestone(ctx(), "Skeleton", "./gate.sh", &budget, "A greeter greets.")
 	require.NoError(t, err)
 	require.Equal(t, "M1", id)
-	id2, err := p.NewMilestone("Second", "./gate2.sh", nil, "")
+	require.Equal(t, "apex: M1 proposed", subjects(t, p)[0])
+	clean(t, p, "milestone new")
+	id2, err := p.NewMilestone(ctx(), "Second", "./gate2.sh", nil, "")
 	require.NoError(t, err)
 	require.Equal(t, "M2", id2)
 	rm := p.roadmap()
@@ -27,63 +35,94 @@ func TestMilestoneLifecycle(t *testing.T) {
 	require.Contains(t, findingMessages(ValidateRoadmap("r", read(t, p, "development/roadmap.md"))), "M2 has no `Goal:`",
 		"a placeholder goal is not a goal")
 
-	_, err = p.ApproveMilestone("M2", "ann")
+	_, err = p.ApproveMilestone(ctx(), "M2", "ann")
 	require.ErrorContains(t, err, "not well-formed")
-	m, err := p.ApproveMilestone("M1", "ann")
+	m, err := p.ApproveMilestone(ctx(), "M1", "ann")
 	require.NoError(t, err)
 	require.Equal(t, MilestoneApproved, m.Status)
 	require.True(t, strings.HasPrefix(m.StatusText, "approved (by ann "))
-	again, err := p.ApproveMilestone("M1", "bob")
+	require.Equal(t, "apex: M1 approved", subjects(t, p)[0])
+	require.Contains(t, run(t, p.Root, "log", "-1", "--format=%b"), "Milestone: M1")
+	require.Equal(t, "development/roadmap.md", run(t, p.Root, "show", "--name-only", "--format=", "HEAD"))
+	clean(t, p, "milestone approve")
+	head := HeadSHA(ctx(), p.Root)
+	again, err := p.ApproveMilestone(ctx(), "M1", "bob")
 	require.NoError(t, err)
 	require.Equal(t, m.StatusText, again.StatusText, "approving twice is a no-op")
+	require.Equal(t, head, HeadSHA(ctx(), p.Root))
 
-	// Gate red: recorded, status unchanged.
+	// The first gate run records a result and commits it.
 	g, err := p.RunGate(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
 	require.Equal(t, 127, g.Run.Exit)
+	require.True(t, g.ResultChanged)
+	require.Equal(t, "apex: M1 gate red", subjects(t, p)[0])
+	require.Equal(t, "development/.apex/milestones.json", run(t, p.Root, "show", "--name-only", "--format=", "HEAD"))
+	clean(t, p, "the first gate run")
 	recs, err := p.LoadMilestoneRecords()
 	require.NoError(t, err)
-	require.Equal(t, 1, recs["M1"].Runs)
-	require.Equal(t, 0, recs["M1"].Green)
+	require.Equal(t, GateRed, recs["M1"].Result)
+
+	// Same result again: nothing committed, nothing dirty, but status
+	// sees the newer run.
+	head = HeadSHA(ctx(), p.Root)
+	g2, err := p.RunGate(ctx(), "M1", RunOptions{})
+	require.NoError(t, err)
+	require.False(t, g2.ResultChanged)
+	require.Equal(t, head, HeadSHA(ctx(), p.Root))
+	clean(t, p, "a gate run with an unchanged result")
+	require.Equal(t, g2.Run.At, p.LastGateRun("M1").At)
 
 	_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
 	require.ErrorContains(t, err, "gate is red")
 	require.Equal(t, MilestoneApproved, p.roadmap().Find("M1").Status)
+	require.Equal(t, head, HeadSHA(ctx(), p.Root), "still red: nothing to commit")
+	clean(t, p, "a red close")
 
 	// A change in flight blocks the close even with a green gate.
 	write(t, p, "gate.sh", "#!/bin/sh\nexit 0\n")
+	commitAll(t, p, "feat: gate")
 	addChange(t, p, "add-wave", waveChange("add-wave"))
 	require.NoError(t, SaveState(p.StateFile("add-wave"), &State{ID: "add-wave", Status: StatusVerified}))
+	commitAll(t, p, "wip")
 	_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
 	require.ErrorContains(t, err, "changes in flight: add-wave (verified)")
 
-	require.NoError(t, SaveState(p.StateFile("add-wave"), &State{ID: "add-wave", Status: StatusBlocked}))
+	_, err = p.Block(ctx(), "add-wave", "parked")
+	require.NoError(t, err)
 	g, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
 	require.Equal(t, MilestoneDone, g.Status)
+	require.Equal(t, "apex: M1 done", subjects(t, p)[0])
+	require.ElementsMatch(t, []string{"development/roadmap.md", "development/.apex/milestones.json"},
+		strings.Split(run(t, p.Root, "show", "--name-only", "--format=", "HEAD"), "\n"),
+		"the done status and the green result land in one commit")
+	clean(t, p, "milestone close")
 	done := p.roadmap().Find("M1")
 	require.Equal(t, MilestoneDone, done.Status)
 	require.Contains(t, done.StatusText, g.Run.SHA)
 	require.Equal(t, "M2", p.roadmap().Current().ID)
 
-	_, err = p.ApproveMilestone("M1", "ann")
+	_, err = p.ApproveMilestone(ctx(), "M1", "ann")
 	require.ErrorContains(t, err, "already done")
 }
 
 func TestNewDecision(t *testing.T) {
 	p := fixture(t, baseFiles())
-	res, err := p.NewDecision("use-sh", "")
+	res, err := p.NewDecision(ctx(), "use-sh", "")
 	require.NoError(t, err)
 	require.Equal(t, "ADR-0001", res.ID)
+	require.Equal(t, "apex: ADR-0001 proposed", subjects(t, p)[0])
+	clean(t, p, "decision new")
 	require.Equal(t, "development/decisions/0001-use-sh.md", res.Path)
 	require.Empty(t, ValidateDecision(res.Path, "0001-use-sh.md", read(t, p, res.Path)))
-	res, err = p.NewDecision("store-in-files", "Store tenants in files")
+	res, err = p.NewDecision(ctx(), "store-in-files", "Store tenants in files")
 	require.NoError(t, err)
 	require.Equal(t, "ADR-0002", res.ID)
 	require.Contains(t, read(t, p, res.Path), "# ADR-0002: Store tenants in files")
-	_, err = p.NewDecision("use-sh", "")
+	_, err = p.NewDecision(ctx(), "use-sh", "")
 	require.ErrorContains(t, err, "already uses slug")
-	_, err = p.NewDecision("Use SH", "")
+	_, err = p.NewDecision(ctx(), "Use SH", "")
 	require.ErrorContains(t, err, "kebab-case")
 	require.True(t, p.decisionExists("ADR-0002"))
 }

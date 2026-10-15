@@ -22,11 +22,20 @@ type GateRun struct {
 	Tail         []string `json:"tail,omitempty"`
 }
 
-// MilestoneRecord is ape's record of one milestone's gate.
+// Gate results as milestones.json records them.
+const (
+	GateGreen = "green"
+	GateRed   = "red"
+)
+
+// MilestoneRecord is ape's committed record of one milestone's gate: its
+// result and the run that produced it. It changes only when the result
+// changes, so a gate re-run with the same result leaves the tree clean
+// (D11); the latest run, whatever its result, is in the gitignored
+// logs/gate-<M>.json.
 type MilestoneRecord struct {
-	Last  *GateRun `json:"last,omitempty"`
-	Runs  int      `json:"runs"`
-	Green int      `json:"green"`
+	Result string   `json:"result"`
+	Since  *GateRun `json:"since"`
 }
 
 // MilestoneRecords is development/.apex/milestones.json.
@@ -56,6 +65,42 @@ func (p *Project) saveMilestoneRecords(r MilestoneRecords) error {
 	return writeFileAtomic(p.MilestonesJSON(), string(data)+"\n")
 }
 
+func (p *Project) lastGatePath(id string) string {
+	return filepath.Join(p.ApexDir(), "logs", "gate-"+id+".json")
+}
+
+// LastGateRun is the milestone's most recent gate run: the gitignored
+// latest-run record, else the committed one.
+func (p *Project) LastGateRun(id string) *GateRun {
+	if data, err := os.ReadFile(p.lastGatePath(id)); err == nil {
+		var run GateRun
+		if json.Unmarshal(data, &run) == nil {
+			return &run
+		}
+	}
+	if recs, err := p.LoadMilestoneRecords(); err == nil && recs[id] != nil {
+		return recs[id].Since
+	}
+	return nil
+}
+
+// milestonePaths are the files a milestone commit records.
+func (p *Project) milestonePaths() []string {
+	paths := []string{p.Rel(p.RoadmapMD())}
+	if fileExists(p.MilestonesJSON()) {
+		paths = append(paths, p.Rel(p.MilestonesJSON()))
+	}
+	return paths
+}
+
+func (p *Project) commitMilestone(ctx context.Context, id, what string) (string, error) {
+	sha, err := p.commitRecord(ctx, "apex: "+id+" "+what, "Milestone: "+id, p.milestonePaths()...)
+	if err != nil {
+		return "", &FailError{Msg: "roadmap written but its commit failed: " + err.Error() + " — fix git (identity, lock) and commit " + strings.Join(p.milestonePaths(), " ")}
+	}
+	return sha, nil
+}
+
 func (p *Project) loadRoadmapDoc() (string, *Roadmap, error) {
 	doc, err := readFileString(p.RoadmapMD())
 	if err != nil {
@@ -65,7 +110,7 @@ func (p *Project) loadRoadmapDoc() (string, *Roadmap, error) {
 }
 
 // NewMilestone appends a milestone to roadmap.md and returns its id.
-func (p *Project) NewMilestone(title, gate string, budget *float64, goal string) (string, error) {
+func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *float64, goal string) (string, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return "", &UsageError{Msg: "a milestone needs a title"}
@@ -84,11 +129,14 @@ func (p *Project) NewMilestone(title, gate string, budget *float64, goal string)
 	if err := writeFileAtomic(p.RoadmapMD(), AppendMilestone(doc, id, title, gate, budget, goal, nil)); err != nil {
 		return "", err
 	}
+	if _, err := p.commitMilestone(ctx, id, MilestoneProposed); err != nil {
+		return id, err
+	}
 	return id, nil
 }
 
 // ApproveMilestone writes `Status: approved (by <who> <ts>)`.
-func (p *Project) ApproveMilestone(id, by string) (*Milestone, error) {
+func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milestone, error) {
 	if strings.TrimSpace(by) == "" {
 		return nil, &UsageError{Msg: "--by names who approves"}
 	}
@@ -116,7 +164,11 @@ func (p *Project) ApproveMilestone(id, by string) (*Milestone, error) {
 	if err := writeFileAtomic(p.RoadmapMD(), updated); err != nil {
 		return nil, err
 	}
-	return ParseRoadmap("", updated).Find(id), nil
+	m = ParseRoadmap("", updated).Find(id)
+	if _, err := p.commitMilestone(ctx, id, MilestoneApproved); err != nil {
+		return m, err
+	}
+	return m, nil
 }
 
 // filterMilestone keeps the findings that name milestone m. Status
@@ -137,10 +189,33 @@ type GateResult struct {
 	Run       GateRun  `json:"run"`
 	Status    string   `json:"status"`
 	InFlight  []string `json:"in_flight,omitempty"`
+	// ResultChanged reports that this run flipped the recorded result
+	// (or recorded the first one), and so was committed.
+	ResultChanged bool   `json:"result_changed"`
+	Commit        string `json:"commit,omitempty"`
 }
 
-// RunGate runs a milestone's gate and records it.
+// RunGate runs a milestone's gate and records it; the committed record
+// (and a commit `apex: <M> gate green|red`) changes only when the result
+// does.
 func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*GateResult, error) {
+	g, err := p.runGate(ctx, id, opt)
+	if err != nil || !g.ResultChanged {
+		return g, err
+	}
+	g.Commit, err = p.commitMilestone(ctx, id, "gate "+gateResult(g.Run.Exit))
+	return g, err
+}
+
+func gateResult(exit int) string {
+	if exit == 0 {
+		return GateGreen
+	}
+	return GateRed
+}
+
+// runGate runs the gate and writes the records, committing nothing.
+func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*GateResult, error) {
 	_, rm, err := p.loadRoadmapDoc()
 	if err != nil {
 		return nil, err
@@ -158,24 +233,24 @@ func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*Gate
 		Exit: r.Exit, At: Stamp(), SHA: HeadSHA(ctx, p.Root), Secs: r.Secs,
 		OutputSHA256: r.OutputSHA256, Cmd: m.Gate, Log: p.Rel(logPath), Tail: lastN(r.Tail, 15),
 	}
+	if data, err := json.MarshalIndent(run, "", "  "); err == nil {
+		_ = writeFileAtomic(p.lastGatePath(id), string(data)+"\n")
+	}
+	g := &GateResult{Milestone: id, Run: run, Status: m.Status}
 	recs, err := p.LoadMilestoneRecords()
 	if err != nil {
 		return nil, err
 	}
-	rec := recs[id]
-	if rec == nil {
-		rec = &MilestoneRecord{}
-		recs[id] = rec
+	result := gateResult(run.Exit)
+	if rec := recs[id]; rec != nil && rec.Result == result {
+		return g, nil
 	}
-	rec.Last = &run
-	rec.Runs++
-	if run.Exit == 0 {
-		rec.Green++
-	}
+	recs[id] = &MilestoneRecord{Result: result, Since: &run}
 	if err := p.saveMilestoneRecords(recs); err != nil {
 		return nil, err
 	}
-	return &GateResult{Milestone: id, Run: run, Status: m.Status}, nil
+	g.ResultChanged = true
+	return g, nil
 }
 
 func lastN(xs []string, n int) []string {
@@ -217,11 +292,16 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 		return &GateResult{Milestone: id, Status: m.Status, InFlight: inFlight},
 			&FailError{Msg: id + " has changes in flight: " + strings.Join(inFlight, ", ") + " — archive or block them, then close"}
 	}
-	g, err := p.RunGate(ctx, id, opt)
+	g, err := p.runGate(ctx, id, opt)
 	if err != nil {
 		return nil, err
 	}
 	if g.Run.Exit != 0 {
+		if g.ResultChanged {
+			if g.Commit, err = p.commitMilestone(ctx, id, "gate "+GateRed); err != nil {
+				return g, err
+			}
+		}
 		return g, &FailError{Msg: id + " gate is red (exit " + strconv.Itoa(g.Run.Exit) + "): `" + m.Gate + "` — the milestone is not done"}
 	}
 	_, rm, err = p.loadRoadmapDoc()
@@ -240,5 +320,8 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 		return nil, err
 	}
 	g.Status = MilestoneDone
+	if g.Commit, err = p.commitMilestone(ctx, id, MilestoneDone); err != nil {
+		return g, err
+	}
 	return g, nil
 }

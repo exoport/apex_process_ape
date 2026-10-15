@@ -14,7 +14,12 @@ func newMilestoneCmd() *cobra.Command {
 		Short: "Add, approve, gate and close roadmap milestones",
 		Long: `Milestones live in development/roadmap.md as "## M<n> — <title>" sections.
 Their Status: line is written only by ape: proposed → approved (by <who> <ts>) →
-done (<ts> <sha>). Gate runs are recorded in development/.apex/milestones.json.`,
+done (<ts> <sha>). Every one of those writes is committed by ape (roadmap.md, plus
+development/.apex/milestones.json when it exists) as "apex: <M> proposed|approved|done"
+with trailer "Milestone: <M>". milestones.json holds each gate's result (green|red)
+and is committed, as "apex: <M> gate green|red", only when that result changes; the
+latest run of any result is in the gitignored development/.apex/logs/gate-<M>.json.
+No milestone command leaves the tree dirty.`,
 	}
 	cmd.AddCommand(newMilestoneNewCmd(), newMilestoneApproveCmd(), newMilestoneGateCmd(), newMilestoneCloseCmd())
 	return cmd
@@ -30,7 +35,7 @@ func newMilestoneNewCmd() *cobra.Command {
 		Long: `Append "## M<n> — <title>" to development/roadmap.md with Status: proposed, the gate
 command, the budget (USD list-price equivalent, when given) and a Goal: line. The id is
 the next free M<n>. Write the Goal paragraph and the Out of scope bullets afterwards
-(or pass --goal); the Status: line is ape's.
+(or pass --goal); the Status: line is ape's. Committed as "apex: <M> proposed".
 
 Exit codes: 0 ok (prints the id) · 1 no roadmap.md · 2 usage.`,
 		Example: `  ape milestone new "Walking skeleton" --gate "./scripts/e2e.sh m1" --budget 30`,
@@ -47,7 +52,7 @@ Exit codes: 0 ok (prints the id) · 1 no roadmap.md · 2 usage.`,
 			if cmd.Flags().Changed("budget") {
 				b = &budget
 			}
-			id, err := p.NewMilestone(args[0], gate, b, goal)
+			id, err := p.NewMilestone(cmd.Context(), args[0], gate, b, goal)
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
@@ -70,8 +75,8 @@ func newMilestoneApproveCmd() *cobra.Command {
 		Use:   "approve <M> --by <who>",
 		Short: "Write Status: approved (by <who> <ts>)",
 		Long: `Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)".
-Changes can start only under an approved milestone. Approving an approved milestone is a
-no-op; a done one is refused.
+Changes can start only under an approved milestone. Committed as "apex: <M> approved".
+Approving an approved milestone is a no-op; a done one is refused.
 
 Exit codes: 0 ok · 1 no such milestone, done, or malformed (Gate/Goal missing) · 2 usage.`,
 		Example: "  ape milestone approve M1 --by eval",
@@ -84,7 +89,7 @@ Exit codes: 0 ok · 1 no such milestone, done, or malformed (Gate/Goal missing) 
 			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
-			m, err := p.ApproveMilestone(args[0], by)
+			m, err := p.ApproveMilestone(cmd.Context(), args[0], by)
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
@@ -120,9 +125,11 @@ func newMilestoneGateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gate <M>",
 		Short: "Run the milestone's gate and record the result",
-		Long: `Run the milestone's Gate: command from the project root and record exit, sha, time and
-output hash in development/.apex/milestones.json (shown by ` + "`ape status`" + `). Does not
-change the milestone's status — ` + "`ape milestone close`" + ` does.
+		Long: `Run the milestone's Gate: command from the project root. The run (exit, sha, time,
+output hash, last lines) goes to development/.apex/logs/gate-<M>.json (gitignored; shown by
+` + "`ape status`" + `). When the result differs from the recorded one (green vs red), or is
+the first, development/.apex/milestones.json is updated and committed as
+"apex: <M> gate green|red". Does not change the milestone's status — ` + "`ape milestone close`" + ` does.
 
 Exit codes: 0 gate green · 1 gate red (last output lines shown) or no such milestone · 2 usage.`,
 		Example: "  ape milestone gate M1",
@@ -161,7 +168,9 @@ func newMilestoneCloseCmd() *cobra.Command {
 		Long: `Close an approved milestone. Refused while a change of this milestone is in-progress,
 verified or reviewed (archive or block it first). Otherwise runs the gate (recorded as by
 ` + "`ape milestone gate`" + `) and, only on exit 0, writes "Status: done (<ts> <sha>)" into
-roadmap.md. A milestone is done when this command exits 0 — never because anyone says so.
+roadmap.md, committed with milestones.json as "apex: <M> done". A red gate is recorded as
+by ` + "`ape milestone gate`" + `. A milestone is done when this command exits 0 — never because
+anyone says so.
 
 Exit codes: 0 done · 1 gate red, changes in flight, or not approved · 2 usage.`,
 		Example: "  ape milestone close M1",
@@ -213,7 +222,8 @@ func newDecisionCmd() *cobra.Command {
   ## Context / ## Decision / ## Consequences
   Enforced by: review
 
-Fill it in; set Enforced by: to a command, hook or review. Reference it from a change's
+Committed as "apex: ADR-NNNN proposed". Fill it in (your own commit); set Enforced by: to
+a command, hook or review. Reference it from a change's
 frontmatter (decisions: [ADR-NNNN]) or a requirement (Decisions: ADR-NNNN).
 
 Exit codes: 0 ok (prints id and path) · 1 slug already used · 2 usage.`,
@@ -227,7 +237,7 @@ Exit codes: 0 ok (prints id and path) · 1 slug already used · 2 usage.`,
 			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
-			res, err := p.NewDecision(args[0], title)
+			res, err := p.NewDecision(cmd.Context(), args[0], title)
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}

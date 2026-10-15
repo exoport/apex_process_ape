@@ -80,7 +80,9 @@ func newChangeNewCmd() *cobra.Command {
 		"Validate the id and write the change.md skeleton and state.json (draft)",
 		`Create development/changes/<id>/ with a change.md skeleton (frontmatter id, milestone,
 touches, paths; # title; ## Why, ## Out of scope (pre-filled with the milestone's Out of
-scope bullets), ## Delta, ## Tasks, ## Notes) and state.json with status draft.
+scope bullets), ## Delta, ## Tasks, ## Notes) and state.json with status draft, and
+commit both as "apex: <id> draft" (trailer "Change: <id>"). Filling change.md in is the
+author's own commit.
 
 <id> is a verb-led kebab slug, ^[a-z][a-z0-9-]{2,39}$, unique across active AND archived
 changes. --touches lists the capabilities the change adds to or modifies (kebab slugs;
@@ -97,7 +99,7 @@ Exit codes: 0 ok · 1 id taken (incl. archive) or milestone not in roadmap · 2 
 			if milestone == "" {
 				return v1Fail(cmd, &f, &apexv1.UsageError{Msg: "--milestone is required (e.g. M1)"}, nil)
 			}
-			res, err := p.NewChange(id, milestone, splitList(touches), splitList(paths))
+			res, err := p.NewChange(cmd.Context(), id, milestone, splitList(touches), splitList(paths))
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}

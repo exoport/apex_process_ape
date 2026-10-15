@@ -28,6 +28,7 @@ type InitResult struct {
 	Kept       []string `json:"kept"`
 	HooksAdded []string `json:"hooks_added"`
 	Brownfield bool     `json:"brownfield"`
+	Commit     string   `json:"commit,omitempty"`
 }
 
 const projectSkeleton = `# %s
@@ -153,6 +154,20 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 		return nil, err
 	}
 	res.HooksAdded = added
+	// Committed as one `apex: project init`, so the tree is clean after
+	// it (D11). Only what init itself wrote: a brownfield repo's own
+	// dirty files stay as they were.
+	paths := append([]string(nil), res.Created...)
+	if len(added) > 0 {
+		paths = append(paths, p.Rel(p.SettingsJSON()))
+	}
+	if len(paths) > 0 {
+		sha, err := p.commitRecord(ctx, "apex: project init", "", paths...)
+		if err != nil {
+			return res, &FailError{Msg: "skeleton written but its commit failed: " + err.Error()}
+		}
+		res.Commit = sha
+	}
 	return res, nil
 }
 

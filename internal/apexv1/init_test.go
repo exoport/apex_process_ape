@@ -28,6 +28,8 @@ func TestInit_Greenfield(t *testing.T) {
 	require.Len(t, res.HooksAdded, 4)
 	p, err := Open(root)
 	require.NoError(t, err)
+	require.Equal(t, "apex: project init", subjects(t, p)[0])
+	clean(t, p, "project init")
 	require.Equal(t, "@AGENTS.md\n", read(t, p, "CLAUDE.md"))
 	require.FileExists(t, filepath.Join(root, filepath.FromSlash("development/specs/.gitkeep")))
 	cfg, err := LoadConfig(root)
@@ -48,8 +50,10 @@ func TestInit_Greenfield(t *testing.T) {
 }
 
 func TestInit_BrownfieldKeepsWhatExists(t *testing.T) {
+	needSh(t)
 	root := t.TempDir()
 	gitEnv(t)
+	run(t, root, "init", "-q")
 	files := map[string]string{
 		"CLAUDE.md":             "# Existing instructions\n",
 		"AGENTS.md":             "# Existing map\n",
@@ -84,6 +88,13 @@ func TestInit_BrownfieldKeepsWhatExists(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, stop, 2, "the existing Stop hook is kept and ape's is added")
 	require.Contains(t, findingMessages(p.Check()), "CLAUDE.md: must import the map")
+
+	// Init commits only what it wrote: the repo's own files stay untracked.
+	committed := run(t, root, "show", "--name-only", "--format=", "HEAD")
+	require.Contains(t, committed, ".claude/settings.json")
+	require.Contains(t, committed, "docs/dev/project.md")
+	require.NotContains(t, committed, "CLAUDE.md")
+	require.NotContains(t, committed, "_apex/config.yaml")
 }
 
 func TestMergeHooks(t *testing.T) {

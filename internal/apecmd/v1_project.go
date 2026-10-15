@@ -42,6 +42,9 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
   Stop, SubagentStop    ape hook stop          (timeout 1800 s: it runs the change's checks)
   PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit)
 
+Everything init wrote (and settings.json when it merged hooks) is committed as
+"apex: project init"; files that existed before are not touched and not committed.
+
 --brownfield adds nothing; it records in development/.apex/project.json that the
 project existed before APEX.
 
