@@ -626,7 +626,10 @@ func assembleInteractivePromptLine(effAgent string, step Step, prompt string) st
 	if effAgent != "" {
 		promptParts = []string{"/" + effAgent, flagAutonomous, "--", step.Skill, flagAutonomous}
 	} else {
-		promptParts = []string{"/" + step.Skill, flagAutonomous, "--no-commit"}
+		promptParts = []string{"/" + step.Skill, flagAutonomous}
+		if !step.ExplicitNoCommit {
+			promptParts = append(promptParts, "--no-commit")
+		}
 	}
 	if step.Args != "" {
 		promptParts = append(promptParts, strings.Fields(step.Args)...)

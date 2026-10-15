@@ -1,0 +1,295 @@
+package apexv1
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// RunOptions tune the command-check runs.
+type RunOptions struct {
+	Timeout time.Duration
+}
+
+// runTasks runs every command task once, logging under .apex/logs/<id>/.
+func (p *Project) runTasks(ctx context.Context, c *Change, id, logPrefix string, opt RunOptions) []CheckResult {
+	var out []CheckResult
+	for _, t := range c.CommandTasks() {
+		logPath := filepath.Join(p.LogDir(id), logPrefix+t.ID+".log")
+		r := RunCheck(ctx, p.Root, t.Check, logPath, opt.Timeout)
+		r.Task = t.ID
+		r.Log = p.Rel(logPath)
+		out = append(out, r)
+	}
+	return out
+}
+
+// requirementConflicts reports the requirements two changes' deltas both
+// claim: the same requirement MODIFIED or REMOVED by either, or ADDED by
+// both.
+func requirementConflicts(a, b *Change) []string {
+	var out []string
+	for _, da := range a.Deltas {
+		for _, db := range b.Deltas {
+			if da.key() != db.key() {
+				continue
+			}
+			// Any pairing conflicts: two MODIFIEDs overwrite each other, a
+			// REMOVED pulls the ground from under the other, and two ADDEDs
+			// of one name would leave the spec with a duplicate heading.
+			out = append(out, fmt.Sprintf("[%s] %q (%s here, %s there)", da.Capability, da.Name, da.Op, db.Op))
+		}
+	}
+	return out
+}
+
+// StartResult is what `ape change start` reports.
+type StartResult struct {
+	ID       string        `json:"id"`
+	Status   string        `json:"status"`
+	BaseSHA  string        `json:"base_sha"`
+	Baseline []CheckResult `json:"baseline"`
+}
+
+// Start moves a draft (or blocked) change to in-progress: check green,
+// milestone approved, no requirement conflict with another active change;
+// then records base_sha and the baseline.
+func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartResult, error) {
+	ci, err := p.requireChange(id)
+	if err != nil {
+		return nil, err
+	}
+	st := ci.State
+	if st.Status != StatusDraft && st.Status != StatusBlocked {
+		return nil, &FailError{Msg: "change " + id + " is " + st.Status + "; start applies to draft or blocked changes"}
+	}
+	if fs := p.CheckChange(id); len(fs) > 0 {
+		return nil, &FailError{Msg: "change " + id + " does not pass `ape change check` — fix change.md first", Findings: fs}
+	}
+	rm := p.roadmap()
+	ms := rm.Find(ci.Doc.Meta.Milestone)
+	if ms == nil || ms.Status != MilestoneApproved {
+		status := "missing"
+		if ms != nil {
+			status = ms.StatusText
+		}
+		return nil, &FailError{Msg: fmt.Sprintf("milestone %s is %s, not approved — a person runs `ape milestone approve %s --by <who>`",
+			ci.Doc.Meta.Milestone, status, ci.Doc.Meta.Milestone)}
+	}
+	var conflicts []string
+	for _, other := range p.ActiveChanges() {
+		if other.ID == id || other.Doc == nil {
+			continue
+		}
+		for _, c := range requirementConflicts(ci.Doc, other.Doc) {
+			conflicts = append(conflicts, other.ID+": "+c)
+		}
+	}
+	if len(conflicts) > 0 {
+		return nil, &ConflictError{Msg: "change " + id + " claims requirements another active change claims — archive or block that one first, or re-scope", Conflicts: conflicts}
+	}
+
+	if st.BaseSHA == "" || st.Status == StatusDraft {
+		st.BaseSHA = HeadSHA(ctx, p.Root)
+		st.StartedAt = Stamp()
+	}
+	results := p.runTasks(ctx, ci.Doc, id, "baseline-", opt)
+	st.Baseline = st.Baseline[:0]
+	for _, r := range results {
+		st.Baseline = append(st.Baseline, Baseline{Task: r.Task, Exit: r.Exit})
+	}
+	st.Status = StatusInProgress
+	st.BlockedReason = nil
+	if err := SaveState(p.StateFile(id), st); err != nil {
+		return nil, err
+	}
+	return &StartResult{ID: id, Status: st.Status, BaseSHA: st.BaseSHA, Baseline: results}, nil
+}
+
+// VerifyResult is what `ape change verify` reports.
+type VerifyResult struct {
+	ID           string        `json:"id"`
+	Status       string        `json:"status"`
+	SHA          string        `json:"sha"`
+	Green        bool          `json:"green"`
+	Results      []CheckResult `json:"results"`
+	PendingHuman []string      `json:"pending_human"`
+}
+
+// Failing returns the red results.
+func (v *VerifyResult) Failing() []CheckResult {
+	var out []CheckResult
+	for _, r := range v.Results {
+		if r.Exit != 0 {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// Verify runs every command check at HEAD and records it. The tree must
+// hold no uncommitted code: a green over uncommitted work belongs to no
+// sha.
+func (p *Project) Verify(ctx context.Context, id string, opt RunOptions) (*VerifyResult, error) {
+	ci, err := p.requireChange(id)
+	if err != nil {
+		return nil, err
+	}
+	switch ci.State.Status {
+	case StatusInProgress, StatusVerified, StatusReviewed:
+	case StatusDraft:
+		return nil, &FailError{Msg: "change " + id + " is a draft — `ape change start " + id + "` first"}
+	default:
+		return nil, &FailError{Msg: "change " + id + " is " + ci.State.Status + " — verify applies to in-progress, verified or reviewed changes"}
+	}
+	return p.verify(ctx, ci, opt)
+}
+
+func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*VerifyResult, error) {
+	id, st := ci.ID, ci.State
+	dirty, err := p.dirtyCode(ctx)
+	if err != nil {
+		return nil, &FailError{Msg: "cannot read git status: " + err.Error()}
+	}
+	if len(dirty) > 0 {
+		return nil, &FailError{Msg: "uncommitted changes outside " + p.DevRel + "/: " + strings.Join(limit(dirty, 8), ", ") +
+			" — commit them (trailer `Change: " + id + "`) and run verify again; verify records a sha"}
+	}
+	sha := HeadSHA(ctx, p.Root)
+	results := p.runTasks(ctx, ci.Doc, id, "", opt)
+	green := true
+	for _, r := range results {
+		if r.Exit != 0 {
+			green = false
+		}
+	}
+	pending := st.PendingHuman(ci.Doc.HumanTasks())
+	if pending == nil {
+		pending = []string{}
+	}
+	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green}
+	switch {
+	case !green:
+		st.Status = StatusInProgress
+	case st.Status == StatusReviewed && st.Review != nil && st.Review.Verdict == "pass":
+		if moved, _, _ := p.codeMovedSince(ctx, st.Review.SHA); moved {
+			st.Status = StatusVerified
+		}
+	default:
+		st.Status = StatusVerified
+	}
+	if err := SaveState(p.StateFile(id), st); err != nil {
+		return nil, err
+	}
+	return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending}, nil
+}
+
+func limit(xs []string, n int) []string {
+	if len(xs) <= n {
+		return xs
+	}
+	return append(append([]string(nil), xs[:n]...), fmt.Sprintf("… %d more", len(xs)-n))
+}
+
+// Review records a review verdict. pass needs a fresh green verify;
+// block returns the change to in-progress.
+func (p *Project) Review(ctx context.Context, id, verdict, findings string) (*State, error) {
+	if verdict != "pass" && verdict != "block" {
+		return nil, &UsageError{Msg: "--verdict must be pass or block"}
+	}
+	ci, err := p.requireChange(id)
+	if err != nil {
+		return nil, err
+	}
+	st := ci.State
+	if st.Status != StatusVerified && st.Status != StatusReviewed {
+		return nil, &FailError{Msg: "change " + id + " is " + st.Status + " — review applies to a verified change (`ape change verify " + id + "`)"}
+	}
+	abs := findings
+	if !filepath.IsAbs(abs) {
+		if cand := filepath.Join(p.Root, findings); fileExists(cand) {
+			abs = cand
+		} else if wd, err := os.Getwd(); err == nil {
+			abs = filepath.Join(wd, findings)
+		}
+	}
+	if !fileExists(abs) {
+		return nil, &UsageError{Msg: "--findings " + findings + " does not exist — write the review to changes/" + id + "/review.md first"}
+	}
+	if verdict == "pass" {
+		if st.Verify == nil || !st.Verify.Green {
+			return nil, &FailError{Msg: "no green verify to review — `ape change verify " + id + "`"}
+		}
+		if moved, files, _ := p.codeMovedSince(ctx, st.Verify.SHA); moved {
+			return nil, &FailError{Msg: "code changed since the last verify (" + strings.Join(limit(files, 5), ", ") + ") — `ape change verify " + id + "` and review again"}
+		}
+	}
+	st.Review = &Review{Verdict: verdict, At: Stamp(), SHA: HeadSHA(ctx, p.Root), Findings: p.Rel(abs)}
+	if verdict == "pass" {
+		st.Status = StatusReviewed
+	} else {
+		st.Status = StatusInProgress
+	}
+	if err := SaveState(p.StateFile(id), st); err != nil {
+		return nil, err
+	}
+	return st, nil
+}
+
+// Accept records a person accepting a human-review task.
+func (p *Project) Accept(id, task, by string) (*State, error) {
+	if strings.TrimSpace(by) == "" {
+		return nil, &UsageError{Msg: "--by names the person accepting"}
+	}
+	ci, err := p.requireChange(id)
+	if err != nil {
+		return nil, err
+	}
+	t := ci.Doc.Task(task)
+	if t == nil {
+		return nil, &UsageError{Msg: "change " + id + " has no task " + task}
+	}
+	if !t.Human() {
+		return nil, &FailError{Msg: "task " + task + " is proven by `" + t.Check + "`, not by a person — `ape change verify " + id + "` runs it"}
+	}
+	st := ci.State
+	kept := st.Accepted[:0]
+	for _, a := range st.Accepted {
+		if a.Task != task {
+			kept = append(kept, a)
+		}
+	}
+	st.Accepted = append(kept, Accept{Task: task, By: by, At: Stamp()})
+	if st.Verify != nil {
+		st.Verify.PendingHuman = st.PendingHuman(ci.Doc.HumanTasks())
+		if st.Verify.PendingHuman == nil {
+			st.Verify.PendingHuman = []string{}
+		}
+	}
+	if err := SaveState(p.StateFile(id), st); err != nil {
+		return nil, err
+	}
+	return st, nil
+}
+
+// Block sets a change blocked with a reason a person can act on.
+func (p *Project) Block(id, reason string) (*State, error) {
+	if strings.TrimSpace(reason) == "" {
+		return nil, &UsageError{Msg: "--reason is required: what blocks it, or the question only a person can answer"}
+	}
+	ci, err := p.requireChange(id)
+	if err != nil {
+		return nil, err
+	}
+	st := ci.State
+	st.Status = StatusBlocked
+	r := strings.TrimSpace(reason)
+	st.BlockedReason = &r
+	if err := SaveState(p.StateFile(id), st); err != nil {
+		return nil, err
+	}
+	return st, nil
+}

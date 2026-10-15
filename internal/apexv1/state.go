@@ -1,0 +1,149 @@
+package apexv1
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/exoport/apex_process_ape/internal/atomicfile"
+)
+
+// Change statuses. Only ape moves a change between them.
+const (
+	StatusDraft      = "draft"
+	StatusInProgress = "in-progress"
+	StatusVerified   = "verified"
+	StatusReviewed   = "reviewed"
+	StatusBlocked    = "blocked"
+	StatusArchived   = "archived"
+)
+
+// CheckResult is one command check's run.
+type CheckResult struct {
+	Task         string  `json:"task"`
+	Cmd          string  `json:"cmd"`
+	Exit         int     `json:"exit"`
+	Secs         float64 `json:"secs"`
+	OutputSHA256 string  `json:"output_sha256"`
+	// Log is the project-relative path of the full output.
+	Log string `json:"log,omitempty"`
+	// Tail is the last lines of output — what a red check is reported by.
+	Tail []string `json:"-"`
+}
+
+// Baseline is one task's result before any work began.
+type Baseline struct {
+	Task string `json:"task"`
+	Exit int    `json:"exit"`
+}
+
+// Verify is the last `ape change verify`.
+type Verify struct {
+	SHA          string        `json:"sha"`
+	At           string        `json:"at"`
+	Results      []CheckResult `json:"results"`
+	PendingHuman []string      `json:"pending_human"`
+	Green        bool          `json:"green"`
+}
+
+// Review is the recorded review verdict.
+type Review struct {
+	Verdict  string `json:"verdict"`
+	At       string `json:"at"`
+	SHA      string `json:"sha"`
+	Findings string `json:"findings"`
+}
+
+// Accept records a person accepting a human-review task.
+type Accept struct {
+	Task string `json:"task"`
+	By   string `json:"by"`
+	At   string `json:"at"`
+}
+
+// State is changes/<id>/state.json. Written only by ape.
+type State struct {
+	ID                string     `json:"id"`
+	Status            string     `json:"status"`
+	BaseSHA           string     `json:"base_sha"`
+	StartedAt         string     `json:"started_at"`
+	Baseline          []Baseline `json:"baseline"`
+	Verify            *Verify    `json:"verify"`
+	Review            *Review    `json:"review"`
+	Accepted          []Accept   `json:"accepted"`
+	BlockedReason     *string    `json:"blocked_reason"`
+	AllowPendingHuman bool       `json:"allow_pending_human,omitempty"`
+	ArchivedAt        string     `json:"archived_at,omitempty"`
+	ArchivedTo        string     `json:"archived_to,omitempty"`
+	CreatedAt         string     `json:"created_at,omitempty"`
+}
+
+// Active reports whether a change is in flight: neither archived nor a
+// draft nobody has started.
+func (s *State) Active() bool {
+	switch s.Status {
+	case StatusInProgress, StatusVerified, StatusReviewed, StatusBlocked:
+		return true
+	}
+	return false
+}
+
+// PendingHuman is the human-review tasks not yet accepted.
+func (s *State) PendingHuman(humanTasks []string) []string {
+	accepted := map[string]bool{}
+	for _, a := range s.Accepted {
+		accepted[a.Task] = true
+	}
+	var out []string
+	for _, t := range humanTasks {
+		if !accepted[t] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// ErrNoState is returned for a change folder without state.json.
+var ErrNoState = errors.New("no state.json")
+
+// LoadState reads a state.json.
+func LoadState(path string) (*State, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, ErrNoState
+	}
+	if err != nil {
+		return nil, err
+	}
+	var s State
+	if err := json.Unmarshal(data, &s); err != nil {
+		return nil, fmt.Errorf("%s does not parse: %w", path, err)
+	}
+	return &s, nil
+}
+
+// SaveState writes a state.json atomically.
+func SaveState(path string, s *State) error {
+	if s.Accepted == nil {
+		s.Accepted = []Accept{}
+	}
+	if s.Baseline == nil {
+		s.Baseline = []Baseline{}
+	}
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicfile.Write(path, append(data, '\n'))
+}
+
+// now is the clock; tests replace it.
+var now = func() time.Time { return time.Now() }
+
+// Stamp is the timestamp format ape writes: RFC 3339, UTC, seconds.
+func Stamp() string { return now().UTC().Format(time.RFC3339) }
+
+// Today is the local date archive folders are named by.
+func Today() string { return now().Format("2006-01-02") }

@@ -1,0 +1,186 @@
+package apecmd
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/spf13/cobra"
+)
+
+func newProjectCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "project",
+		Short: "Create and check an APEX v1 project layout",
+	}
+	cmd.AddCommand(newProjectInitCmd(), newProjectCheckCmd())
+	return cmd
+}
+
+func newProjectInitCmd() *cobra.Command {
+	var f v1Flags
+	var brownfield bool
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "Create the development/ skeleton and merge ape's hooks (never overwrites)",
+		Long: `Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten.
+
+  _apex/config.yaml                  project_name, development_folder
+  AGENTS.md                          the project map (skeleton)
+  CLAUDE.md                          "@AGENTS.md" (only when there is no CLAUDE.md)
+  development/project.md             vision, users, scope, out of scope, constraints (skeleton)
+  development/roadmap.md             "# Roadmap"
+  development/specs/                 empty: no backfill — a spec is born from its first change
+  development/changes/archive/
+  development/decisions/
+  development/.apex/                 ape's own records (never edited by a model)
+
+Hooks merged into .claude/settings.json (existing keys and hooks are kept):
+  SessionStart          ape hook session-start
+  Stop, SubagentStop    ape hook stop          (timeout 1800 s: it runs the change's checks)
+  PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit)
+
+--brownfield adds nothing; it records in development/.apex/project.json that the
+project existed before APEX.
+
+Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`,
+		Example: "  ape project init\n  ape project init --brownfield --json",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			dir := f.cwd
+			if dir == "" {
+				wd, err := os.Getwd()
+				if err != nil {
+					return err
+				}
+				dir = wd
+			}
+			res, err := apexv1.Init(cmd.Context(), dir, brownfield)
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+				for _, c := range res.Created {
+					fmt.Fprintln(w, "created  "+c)
+				}
+				for _, k := range res.Kept {
+					fmt.Fprintln(w, "kept     "+k)
+				}
+				for _, h := range res.HooksAdded {
+					fmt.Fprintln(w, "hook     "+h)
+				}
+				fmt.Fprintln(w, "next: write development/project.md, AGENTS.md and the roadmap (apex-plan), then `ape project check`")
+			})
+		},
+	}
+	addV1Flags(cmd, &f)
+	cmd.Flags().BoolVar(&brownfield, "brownfield", false, "record that the project existed before APEX")
+	return cmd
+}
+
+func newProjectCheckCmd() *cobra.Command {
+	var f v1Flags
+	cmd := &cobra.Command{
+		Use:   "check",
+		Short: "Validate every v1 shape and size cap; list all failures",
+		Long: `Validate the whole project and list every failure, not just the first.
+
+  development/project.md   # <name>, ## Vision, ## Users, ## Scope, ## Out of scope,
+                           ## Constraints (each non-empty); ≤ 150 lines and ≤ 8 KB
+  AGENTS.md                present, ≤ 120 lines; CLAUDE.md (if any) has the line @AGENTS.md
+  development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
+                           Gate, Goal; Budget a number when present
+  specs/<cap>/spec.md      # title, Purpose:, "### Requirement: <name>" each with ≥ 1
+                           "#### Scenario:" and exactly one "- check: <cmd> | human-review"
+                           per scenario; ≤ 20 KB ("split into two capabilities")
+  decisions/NNNN-<slug>.md # ADR-NNNN: title, Status, Date, Context/Decision/Consequences,
+                           Enforced by
+  changes/<id>/            every non-archived change, as ` + "`ape change check`" + `
+
+Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
+		Example: "  ape project check\n  ape project check --json",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			p, err := v1Project(&f)
+			if err != nil {
+				return err
+			}
+			if err := v1RequireInit(p); err != nil {
+				return err
+			}
+			fs := p.Check()
+			if len(fs) > 0 {
+				return v1Fail(cmd, &f, &apexv1.FailError{
+					Msg:      fmt.Sprintf("%d finding(s) — fix them and run `ape project check` again", len(fs)),
+					Findings: fs,
+				}, nil)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, map[string]any{"ok": true, "findings": []apexv1.Finding{}}, func(w io.Writer) {
+				fmt.Fprintln(w, "project check: green")
+			})
+		},
+	}
+	addV1Flags(cmd, &f)
+	return cmd
+}
+
+func newStatusCmd() *cobra.Command {
+	var f v1Flags
+	var brief bool
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show the current milestone, active changes, blocks, pending human review and spend",
+		Long: `Show where the project stands, from the records ape keeps:
+
+  - the current milestone (the first not done): status, gate and its last recorded run,
+    budget, and the spend of runs started since it was approved
+  - every change not archived, with its status, blocked reason, red checks from its
+    last verify, and human-review tasks not yet accepted
+  - spend so far: the sum of finished ape task/pipeline run manifests
+  - next: what the way of working says comes next, derived from the state alone
+
+--brief renders at most 25 lines (what the SessionStart hook injects).
+
+Exit codes: 0 ok · 2 usage.`,
+		Example: "  ape status\n  ape status --brief\n  ape status --json",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			p, err := v1Project(&f)
+			if err != nil {
+				return err
+			}
+			r := p.Status()
+			return v1Emit(cmd.OutOrStdout(), &f, r, func(w io.Writer) {
+				if brief {
+					fmt.Fprint(w, r.Brief())
+					return
+				}
+				fmt.Fprint(w, statusLong(r))
+			})
+		},
+	}
+	addV1Flags(cmd, &f)
+	cmd.Flags().BoolVar(&brief, "brief", false, "at most 25 lines")
+	return cmd
+}
+
+func statusLong(r *apexv1.StatusReport) string {
+	var b strings.Builder
+	b.WriteString(r.Brief())
+	if len(r.Milestones) > 0 {
+		b.WriteString("\nRoadmap:\n")
+		for _, m := range r.Milestones {
+			fmt.Fprintf(&b, "  %-4s %-9s %s\n", m.ID, m.Status, m.Title)
+		}
+	}
+	if r.Milestone != nil && r.Milestone.GateLast != nil && r.Milestone.GateLast.Exit != 0 {
+		fmt.Fprintf(&b, "\nLast gate output (%s):\n", r.Milestone.GateLast.Log)
+		for _, l := range r.Milestone.GateLast.Tail {
+			b.WriteString("  | " + l + "\n")
+		}
+	}
+	fmt.Fprintf(&b, "\nSpend note: %s\n", r.Spend.Note)
+	return b.String()
+}

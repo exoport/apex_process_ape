@@ -24,7 +24,6 @@ func TestRefuseNested_EverySessionStartingCommand(t *testing.T) {
 	}{
 		"pipeline": {newPipelineCmd, []string{"design", "--cwd", root}},
 		"task":     {newTaskCmd, []string{"apex-dev-story", "--cwd", root}},
-		"change":   {newChangeCmd, []string{"fix the typo", "--cwd", root}},
 		"prompt":   {newPromptCmd, []string{"hello", "--cwd", root}},
 		"chat":     {newChatCmd, []string{"--cwd", root}},
 		"script":   {newScriptCmd, []string{"run.star", "--cwd", root}},
@@ -42,8 +41,8 @@ func TestRefuseNested_EverySessionStartingCommand(t *testing.T) {
 	}
 }
 
-// Queueing a change starts nothing, and project-data commands are what
-// skills run inside sessions all day: neither may refuse.
+// Project-data commands and the v1 unit-of-change commands are what
+// skills run inside sessions all day: none may refuse.
 func TestRefuseNested_LeavesNonSessionCommandsAlone(t *testing.T) {
 	t.Setenv(repl.EnvApeSession, "pipeline/fx")
 	root := projectFor(t, allExtensionsConfig)
@@ -53,12 +52,21 @@ func TestRefuseNested_LeavesNonSessionCommandsAlone(t *testing.T) {
 	cmd.SetOut(&bytes.Buffer{})
 	require.NoError(t, cmd.Execute())
 
-	cmd = newChangeCmd()
-	cmd.SetArgs([]string{"--queue", "fix the typo", "--cwd", root})
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetErr(&bytes.Buffer{})
-	if err := cmd.Execute(); err != nil {
-		require.NotContains(t, err.Error(), "ape-spawned session", "--queue is not refused for nesting")
+	for _, run := range []struct {
+		cmd  func() *cobra.Command
+		args []string
+	}{
+		{newStatusCmd, []string{"--cwd", root}},
+		{newProjectCmd, []string{"check", "--cwd", root}},
+		{newChangeCmd, []string{"check", "no-such-change", "--cwd", root}},
+	} {
+		cmd = run.cmd()
+		cmd.SetArgs(run.args)
+		cmd.SetOut(&bytes.Buffer{})
+		cmd.SetErr(&bytes.Buffer{})
+		if err := cmd.Execute(); err != nil {
+			require.NotContains(t, err.Error(), "ape-spawned session", "%v is not refused for nesting", run.args)
+		}
 	}
 }
 

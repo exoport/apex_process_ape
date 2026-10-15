@@ -1,0 +1,362 @@
+package apecmd
+
+import (
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/spf13/cobra"
+)
+
+func newChangeCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "change",
+		Short: "The unit of change: new, check, start, verify, review, accept, block, archive",
+		Long: `A change is development/changes/<id>/change.md (written by the model) plus state.json
+(written only by ape). Its lifecycle:
+
+  new → draft ──start──▶ in-progress ──verify green──▶ verified ──review pass──▶ reviewed ──archive──▶ archived
+                              ▲   │                        │                         │
+                              └───┴── verify red ◀─────────┴──── review block ◀──────┘
+  any status but archived ──block──▶ blocked ──start──▶ in-progress
+
+Done is a command ape ran at a sha: models never set a status.
+
+Exit codes for every subcommand: 0 ok · 1 check failed (one-line remediation) · 2 usage ·
+3 conflict (another change claims the same requirement, or the delta no longer applies;
+nothing written).`,
+	}
+	cmd.AddCommand(
+		newChangeNewCmd(), newChangeCheckCmd(), newChangeStartCmd(), newChangeVerifyCmd(),
+		newChangeReviewCmd(), newChangeAcceptCmd(), newChangeBlockCmd(), newChangeArchiveCmd(),
+	)
+	return cmd
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if t := strings.TrimSpace(part); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// v1ChangeLeaf builds a `ape change <verb> <id>` leaf around run.
+func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *cobra.Command, p *apexv1.Project, id string) error) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     use,
+		Short:   short,
+		Long:    long,
+		Example: example,
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := v1Project(f)
+			if err != nil {
+				return err
+			}
+			if err := v1RequireInit(p); err != nil {
+				return err
+			}
+			return run(cmd, p, args[0])
+		},
+	}
+	addV1Flags(cmd, f)
+	return cmd
+}
+
+func newChangeNewCmd() *cobra.Command {
+	var f v1Flags
+	var milestone, touches, paths string
+	cmd := v1ChangeLeaf(
+		"new <id> --milestone <M> --touches a,b [--paths globs]",
+		"Validate the id and write the change.md skeleton and state.json (draft)",
+		`Create development/changes/<id>/ with a change.md skeleton (frontmatter id, milestone,
+touches, paths; # title; ## Why, ## Out of scope (pre-filled with the milestone's Out of
+scope bullets), ## Delta, ## Tasks, ## Notes) and state.json with status draft.
+
+<id> is a verb-led kebab slug, ^[a-z][a-z0-9-]{2,39}$, unique across active AND archived
+changes. --touches lists the capabilities the change adds to or modifies (kebab slugs;
+new ones are fine — a capability is born from its first change). --paths are globs used
+for overlap detection. Overlap (shared touches or paths) with another unarchived change
+is a warning, not a failure.
+
+Then fill change.md and run `+"`ape change check <id>`"+`.
+
+Exit codes: 0 ok · 1 id taken (incl. archive) or milestone not in roadmap · 2 usage.`,
+		"  ape change new add-tenant-delete --milestone M2 --touches tenants --paths 'internal/api/**'",
+		&f,
+		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			if milestone == "" {
+				return v1Fail(cmd, &f, &apexv1.UsageError{Msg: "--milestone is required (e.g. M1)"}, nil)
+			}
+			res, err := p.NewChange(id, milestone, splitList(touches), splitList(paths))
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			if !f.json {
+				for _, o := range res.Overlaps {
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: overlaps %s (touches %v, paths %v)\n", o.With, o.Touches, o.Paths)
+				}
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+				fmt.Fprintf(w, "%s  draft  %s\n", res.ID, res.Path)
+			})
+		})
+	cmd.Flags().StringVar(&milestone, "milestone", "", "milestone id from roadmap.md (required)")
+	cmd.Flags().StringVar(&touches, "touches", "", "comma-separated capability slugs (required)")
+	cmd.Flags().StringVar(&paths, "paths", "", "comma-separated globs, for overlap detection")
+	return cmd
+}
+
+func newChangeCheckCmd() *cobra.Command {
+	var f v1Flags
+	return v1ChangeLeaf(
+		"check <id>",
+		"Validate change.md: shape, caps, delta against specs, a check on every task",
+		`Validate one change and list every failure:
+
+  - frontmatter id = folder, milestone in roadmap.md, touches non-empty kebab slugs,
+    decisions exist in decisions/, paths are valid globs
+  - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
+  - change.md ≤ 8 KB and design.md ≤ 8 KB ("split this change")
+  - ## Delta: "### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>" blocks, or
+    the single line "none — <reason>". The capability must be in touches. ADDED names must
+    not exist in specs/<capability>/spec.md yet; MODIFIED/REMOVED must name an existing
+    heading exactly. ADDED/MODIFIED carry ≥ 1 "#### Scenario:" with exactly one
+    "- check: <command> | human-review"; REMOVED carries "Reason:".
+  - ## Tasks: "- T<n> <what> — check: <command> | human-review", no checkboxes, unique ids
+
+Exit codes: 0 green · 1 findings · 2 usage.`,
+		"  ape change check add-tenant-delete",
+		&f,
+		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			fs := p.CheckChange(id)
+			if len(fs) > 0 {
+				return v1Fail(cmd, &f, &apexv1.FailError{
+					Msg:      fmt.Sprintf("change %s: %d finding(s) — fix change.md and run `ape change check %s` again", id, len(fs), id),
+					Findings: fs,
+				}, nil)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, map[string]any{"id": id, "ok": true, "findings": []apexv1.Finding{}}, func(w io.Writer) {
+				fmt.Fprintf(w, "change %s: green\n", id)
+			})
+		})
+}
+
+func newChangeStartCmd() *cobra.Command {
+	var f v1Flags
+	cmd := v1ChangeLeaf(
+		"start <id>",
+		"Check green + milestone approved → record base_sha and baseline, set in-progress",
+		`Start a draft (or resume a blocked) change:
+
+  1. `+"`ape change check <id>`"+` must be green, and its milestone approved
+  2. refused with exit 3 if another active change (in-progress, verified, reviewed,
+     blocked) also ADDs, MODIFIES or REMOVES one of the same requirements
+  3. records base_sha (HEAD) and started_at (kept when resuming a blocked change)
+  4. runs every command check once as the baseline (which were already green), from the
+     project root with sh -c; output under development/.apex/logs/<id>/
+  5. sets in-progress
+
+Exit codes: 0 started · 1 check red, milestone not approved, or wrong status · 2 usage ·
+3 requirement conflict with another active change.`,
+		"  ape change start add-tenant-delete",
+		&f,
+		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			res, err := p.Start(cmd.Context(), id, f.runOptions())
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+				fmt.Fprintf(w, "change %s: in-progress from %.7s; baseline:\n", id, res.BaseSHA)
+				printChecks(w, res.Baseline, false)
+			})
+		})
+	addV1TimeoutFlag(cmd, &f)
+	return cmd
+}
+
+func newChangeVerifyCmd() *cobra.Command {
+	var f v1Flags
+	cmd := v1ChangeLeaf(
+		"verify <id>",
+		"Run every command check at HEAD; verified iff all exit 0",
+		`Run every task's command check at HEAD and record the results (sha, exit, seconds,
+output sha256) in state.json. The working tree must hold no uncommitted changes outside
+development/ — commit first (trailer "Change: <id>"): a verify belongs to a sha.
+
+All command checks exit 0 → status verified (a reviewed change whose code has not moved
+since its review stays reviewed). Any red → in-progress, with the failing checks' last
+lines printed. human-review tasks are never run; those not yet accepted are listed as
+pending.
+
+Exit codes: 0 all command checks green · 1 a check is red, uncommitted code, or wrong
+status · 2 usage.`,
+		"  ape change verify add-tenant-delete",
+		&f,
+		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			res, err := p.Verify(cmd.Context(), id, f.runOptions())
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			human := func(w io.Writer) {
+				fmt.Fprintf(w, "change %s at %.7s: %s\n", id, res.SHA, res.Status)
+				printChecks(w, res.Results, true)
+				if len(res.PendingHuman) > 0 {
+					fmt.Fprintf(w, "human-review pending: %s\n", strings.Join(res.PendingHuman, ", "))
+				}
+			}
+			if !res.Green {
+				if !f.json {
+					human(cmd.OutOrStdout())
+				}
+				return v1Fail(cmd, &f, &apexv1.FailError{
+					Msg: fmt.Sprintf("change %s: %d command check(s) red — fix the code (never the check) and verify again, or `ape change block %s --reason ...`",
+						id, len(res.Failing()), id),
+				}, res)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, human)
+		})
+	addV1TimeoutFlag(cmd, &f)
+	return cmd
+}
+
+func newChangeReviewCmd() *cobra.Command {
+	var f v1Flags
+	var verdict, findings string
+	cmd := v1ChangeLeaf(
+		"review <id> --verdict pass|block --findings <file>",
+		"Record a review verdict; block returns the change to in-progress",
+		`Record the review of a verified change. --findings names the review file (normally
+development/changes/<id>/review.md); it must exist and is recorded by path.
+
+  pass   needs a green verify whose code has not moved since → status reviewed
+  block  → status in-progress (fix, verify, review again)
+
+Exit codes: 0 recorded · 1 not verified, or code changed since the verify · 2 usage
+(bad verdict, findings file missing).`,
+		"  ape change review add-tenant-delete --verdict pass --findings development/changes/add-tenant-delete/review.md",
+		&f,
+		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			if findings == "" {
+				return v1Fail(cmd, &f, &apexv1.UsageError{Msg: "--findings <file> is required"}, nil)
+			}
+			st, err := p.Review(cmd.Context(), id, verdict, findings)
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, st, func(w io.Writer) {
+				fmt.Fprintf(w, "change %s: review %s → %s\n", id, st.Review.Verdict, st.Status)
+			})
+		})
+	cmd.Flags().StringVar(&verdict, "verdict", "", "pass or block (required)")
+	cmd.Flags().StringVar(&findings, "findings", "", "the review file (required)")
+	return cmd
+}
+
+func newChangeAcceptCmd() *cobra.Command {
+	var f v1Flags
+	var task, by string
+	cmd := v1ChangeLeaf(
+		"accept <id> --task <T> --by <who>",
+		"Accept a human-review task",
+		`Record that a person accepted a human-review task (one whose check is "human-review").
+Archive requires every human-review task accepted, unless --allow-pending-human.
+
+Exit codes: 0 recorded · 1 the task has a command check · 2 usage (no such task).`,
+		"  ape change accept add-tenant-delete --task T2 --by diego",
+		&f,
+		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			if task == "" {
+				return v1Fail(cmd, &f, &apexv1.UsageError{Msg: "--task <T> is required"}, nil)
+			}
+			st, err := p.Accept(id, task, by)
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, st, func(w io.Writer) {
+				fmt.Fprintf(w, "change %s: %s accepted by %s\n", id, task, by)
+			})
+		})
+	cmd.Flags().StringVar(&task, "task", "", "task id, e.g. T2 (required)")
+	cmd.Flags().StringVar(&by, "by", "", "who accepts (required)")
+	return cmd
+}
+
+func newChangeBlockCmd() *cobra.Command {
+	var f v1Flags
+	var reason string
+	cmd := v1ChangeLeaf(
+		`block <id> --reason "<text>"`,
+		"Set blocked, with the reason shown by ape status",
+		`Set a change blocked. The reason is what `+"`ape status`"+` shows: what blocks it, or the
+question only a person can answer. A blocked change lets the stop hook allow a stop.
+`+"`ape change start <id>`"+` resumes it.
+
+Exit codes: 0 blocked · 1 no such change or archived · 2 usage.`,
+		`  ape change block add-tenant-delete --reason "needs a decision: soft or hard delete?"`,
+		&f,
+		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			st, err := p.Block(id, reason)
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, st, func(w io.Writer) {
+				fmt.Fprintf(w, "change %s: blocked — %s\n", id, *st.BlockedReason)
+			})
+		})
+	cmd.Flags().StringVar(&reason, "reason", "", "what blocks it (required)")
+	return cmd
+}
+
+func newChangeArchiveCmd() *cobra.Command {
+	var f v1Flags
+	var allowPending bool
+	cmd := v1ChangeLeaf(
+		"archive <id>",
+		"Apply the delta to specs/, move the change to the archive, commit `archive: <id>`",
+		`Archive a reviewed change:
+
+  1. needs status reviewed (review pass); re-runs verify when HEAD moved since it (red →
+     in-progress, exit 1); refused if code changed since the review
+  2. human-review tasks must be accepted, unless --allow-pending-human (recorded)
+  3. applies the delta to development/specs/: ADDED appends, MODIFIED replaces, REMOVED
+     deletes; a new capability gets specs/<cap>/spec.md (Purpose from the change's Why).
+     Any conflict → exit 3 and NOTHING is written
+  4. moves the folder to development/changes/archive/<YYYY-MM-DD>-<id>/, status archived
+  5. commits the specs and the move (only those paths; hooks skipped) as
+     "archive: <id>" with trailer "Change: <id>"
+
+Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review,
+pending human-review, or git failed · 2 usage · 3 the delta no longer applies.`,
+		"  ape change archive add-tenant-delete",
+		&f,
+		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			res, err := p.Archive(cmd.Context(), id, allowPending, f.runOptions())
+			if err != nil {
+				if res != nil && res.Verify != nil && !f.json {
+					printChecks(cmd.OutOrStdout(), res.Verify.Results, true)
+				}
+				return v1Fail(cmd, &f, err, res)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+				for _, s := range res.Specs {
+					verb := "updated"
+					if s.Created {
+						verb = "created"
+					}
+					fmt.Fprintf(w, "%s %s (+%d ~%d -%d)\n", verb, s.Path, s.Added, s.Modified, s.Removed)
+				}
+				fmt.Fprintf(w, "archived %s → %s\ncommit %.7s archive: %s\n", id, res.ArchivedTo, res.Commit, id)
+				if res.AllowPendingHuman {
+					fmt.Fprintf(w, "recorded: archived with human-review pending (%s)\n", strings.Join(res.PendingHuman, ", "))
+				}
+			})
+		})
+	cmd.Flags().BoolVar(&allowPending, "allow-pending-human", false, "archive with human-review tasks unaccepted (recorded in state.json)")
+	addV1TimeoutFlag(cmd, &f)
+	return cmd
+}

@@ -18,8 +18,9 @@ import (
 )
 
 // TestBuildTaskStep pins the skill-layer --no-commit injection rules:
-// agent path gets the flag prefixed into Args; no-agent path is left
-// untouched (the PAT-25 convention already carries it).
+// the flag is prefixed into Args on both paths when asked for, and never
+// added implicitly: the no-agent PAT-25 convention is off for `ape task`
+// (v1 trial decision D4 — v1 skills commit).
 func TestBuildTaskStep(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -42,9 +43,14 @@ func TestBuildTaskStep(t *testing.T) {
 			wantArgs: "--from-status draft",
 		},
 		{
-			name:     "no agent + no-commit is a no-op on args",
+			name:     "no agent + no-commit injects prefix",
 			opts:     taskOptions{skill: "apex-shard-doc", args: "--doc prd", skillNoCommit: true},
-			wantArgs: "--doc prd",
+			wantArgs: "--no-commit --doc prd",
+		},
+		{
+			name:     "no agent without no-commit leaves args alone",
+			opts:     taskOptions{skill: "apex-apply", args: "--change add-x"},
+			wantArgs: "--change add-x",
 		},
 	}
 	for _, tc := range cases {
@@ -52,6 +58,7 @@ func TestBuildTaskStep(t *testing.T) {
 		require.Equal(t, tc.wantArgs, step.Args, tc.name)
 		require.Equal(t, tc.opts.skill, step.Skill, tc.name)
 		require.Equal(t, tc.opts.agent, step.Agent, tc.name)
+		require.True(t, step.ExplicitNoCommit, tc.name)
 	}
 }
 

@@ -1,0 +1,245 @@
+package apexv1
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+// SpecUpdate is one capability's spec after a delta merge.
+type SpecUpdate struct {
+	Capability string `json:"capability"`
+	Path       string `json:"path"`
+	Created    bool   `json:"created"`
+	Added      int    `json:"added"`
+	Modified   int    `json:"modified"`
+	Removed    int    `json:"removed"`
+	content    string
+}
+
+// MergeDelta applies a change's delta to the current specs in memory.
+// Any conflict — ADDED naming an existing requirement, MODIFIED or
+// REMOVED naming a missing one — is collected, and nothing is returned
+// for writing when there is one.
+func (p *Project) MergeDelta(c *Change) ([]SpecUpdate, []string) {
+	byCap := map[string][]Delta{}
+	var order []string
+	for _, d := range c.Deltas {
+		if _, ok := byCap[d.Capability]; !ok {
+			order = append(order, d.Capability)
+		}
+		byCap[d.Capability] = append(byCap[d.Capability], d)
+	}
+	sort.Strings(order)
+	var updates []SpecUpdate
+	var conflicts []string
+	for _, capName := range order {
+		spec, _, exists := p.LoadSpec(capName)
+		u := SpecUpdate{Capability: capName, Path: p.Rel(p.SpecFile(capName)), Created: !exists}
+		if !exists {
+			spec = Spec{Preamble: "# " + titleFromSlug(capName) + "\nPurpose: " + purposeFrom(c)}
+		}
+		merged, cs := applyDeltas(&spec, capName, byCap[capName], &u)
+		conflicts = append(conflicts, cs...)
+		if len(cs) == 0 {
+			u.content = merged
+			updates = append(updates, u)
+		}
+	}
+	if len(conflicts) > 0 {
+		return nil, conflicts
+	}
+	return updates, nil
+}
+
+// applyDeltas merges deltas into spec and returns the rendered result.
+func applyDeltas(spec *Spec, capName string, deltas []Delta, u *SpecUpdate) (string, []string) {
+	var conflicts []string
+	for _, d := range deltas {
+		idx := -1
+		for i := range spec.Requirements {
+			if spec.Requirements[i].Name == d.Name {
+				idx = i
+				break
+			}
+		}
+		switch d.Op {
+		case OpAdded:
+			if idx >= 0 {
+				conflicts = append(conflicts, fmt.Sprintf("ADDED [%s] %q already exists in the spec", capName, d.Name))
+				continue
+			}
+			spec.Requirements = append(spec.Requirements, d.Req)
+			u.Added++
+		case OpModified:
+			if idx < 0 {
+				conflicts = append(conflicts, fmt.Sprintf("MODIFIED [%s] %q is not in the spec", capName, d.Name))
+				continue
+			}
+			spec.Requirements[idx] = d.Req
+			u.Modified++
+		case OpRemoved:
+			if idx < 0 {
+				conflicts = append(conflicts, fmt.Sprintf("REMOVED [%s] %q is not in the spec", capName, d.Name))
+				continue
+			}
+			spec.Requirements = append(spec.Requirements[:idx], spec.Requirements[idx+1:]...)
+			u.Removed++
+		}
+	}
+	return spec.Render(), conflicts
+}
+
+// purposeFrom is a new capability's Purpose line: the first paragraph of
+// the introducing change's `## Why`, flattened to one line.
+func purposeFrom(c *Change) string {
+	if s := c.section("Why"); s != nil {
+		var para []string
+		inComment := false
+		for _, l := range s.Body {
+			t := strings.TrimSpace(l.Text)
+			if strings.HasPrefix(t, "<!--") {
+				inComment = !strings.Contains(t, "-->")
+				continue
+			}
+			if inComment {
+				inComment = !strings.Contains(t, "-->")
+				continue
+			}
+			if t == "" {
+				if len(para) > 0 {
+					break
+				}
+				continue
+			}
+			para = append(para, t)
+		}
+		if len(para) > 0 {
+			return strings.Join(para, " ")
+		}
+	}
+	return "Introduced by change " + c.Meta.ID + "."
+}
+
+// ArchiveResult is what `ape change archive` reports.
+type ArchiveResult struct {
+	ID                string        `json:"id"`
+	ArchivedTo        string        `json:"archived_to"`
+	Specs             []SpecUpdate  `json:"specs"`
+	Commit            string        `json:"commit"`
+	Reverified        bool          `json:"reverified"`
+	Verify            *VerifyResult `json:"verify,omitempty"`
+	AllowPendingHuman bool          `json:"allow_pending_human,omitempty"`
+	PendingHuman      []string      `json:"pending_human,omitempty"`
+}
+
+// Archive applies a reviewed change's delta to specs/, moves the change
+// to changes/archive/<date>-<id>/ and commits both as `archive: <id>`.
+func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool, opt RunOptions) (*ArchiveResult, error) {
+	ci, err := p.requireChange(id)
+	if err != nil {
+		return nil, err
+	}
+	st := ci.State
+	if st.Status != StatusReviewed || st.Review == nil || st.Review.Verdict != "pass" {
+		return nil, &FailError{Msg: "change " + id + " is " + st.Status + " — archive needs a green verify and a review pass (`ape change review " + id + " --verdict pass`)"}
+	}
+	if _, err := git(ctx, p.Root, "rev-parse", "--is-inside-work-tree"); err != nil {
+		return nil, &FailError{Msg: "not a git repository — archive commits its result"}
+	}
+	res := &ArchiveResult{ID: id}
+
+	// Verified at HEAD: re-run when HEAD has moved since the verify.
+	if st.Verify == nil || st.Verify.SHA != HeadSHA(ctx, p.Root) {
+		v, err := p.verify(ctx, ci, opt)
+		if err != nil {
+			return nil, err
+		}
+		res.Reverified, res.Verify = true, v
+		if !v.Green {
+			return res, &FailError{Msg: "re-verify at HEAD is red (" + failingNames(v) + ") — the change is back in-progress"}
+		}
+		st = ci.State
+	} else if dirty, _ := p.dirtyCode(ctx); len(dirty) > 0 {
+		return nil, &FailError{Msg: "uncommitted changes outside " + p.DevRel + "/: " + strings.Join(limit(dirty, 8), ", ") + " — commit or discard them first"}
+	}
+	if moved, files, _ := p.codeMovedSince(ctx, st.Review.SHA); moved {
+		return res, &FailError{Msg: "code changed since the review (" + strings.Join(limit(files, 5), ", ") + ") — review again (apex-review), then archive"}
+	}
+
+	pending := st.PendingHuman(ci.Doc.HumanTasks())
+	if len(pending) > 0 && !allowPendingHuman {
+		return res, &FailError{Msg: "human-review tasks not accepted: " + strings.Join(pending, ", ") +
+			" — a person runs `ape change accept " + id + " --task <T> --by <who>`, or archive with --allow-pending-human (recorded)"}
+	}
+
+	updates, conflicts := p.MergeDelta(ci.Doc)
+	if len(conflicts) > 0 {
+		return res, &ConflictError{Msg: "the delta no longer applies to specs/ — nothing was written; re-plan the change against the current specs", Conflicts: conflicts}
+	}
+	folder := Today() + "-" + id
+	dest := filepath.Join(p.ArchiveDir(), folder)
+	if fileOrDirExists(dest) {
+		return res, &ConflictError{Msg: "archive folder " + p.Rel(dest) + " already exists — nothing was written"}
+	}
+	for _, u := range updates {
+		if fs := ValidateSpec(u.Path, u.content); len(fs) > 0 {
+			return res, &FailError{Msg: "merged spec " + u.Path + " would not pass `ape project check` — nothing was written", Findings: fs}
+		}
+	}
+
+	// Everything is decided; write.
+	for _, u := range updates {
+		if err := writeFileAtomic(filepath.Join(p.Root, filepath.FromSlash(u.Path)), u.content); err != nil {
+			return res, err
+		}
+	}
+	trackedBefore, _ := git(ctx, p.Root, "ls-files", "--", p.Rel(p.ChangeDir(id)))
+	if err := os.MkdirAll(p.ArchiveDir(), 0o755); err != nil {
+		return res, err
+	}
+	if err := os.Rename(p.ChangeDir(id), dest); err != nil {
+		return res, err
+	}
+	st.Status = StatusArchived
+	st.ArchivedAt = Stamp()
+	st.ArchivedTo = p.Rel(dest)
+	if len(pending) > 0 {
+		st.AllowPendingHuman = true
+		res.AllowPendingHuman = true
+		res.PendingHuman = pending
+	}
+	if err := SaveState(filepath.Join(dest, "state.json"), st); err != nil {
+		return res, err
+	}
+	res.ArchivedTo = p.Rel(dest)
+	res.Specs = updates
+
+	paths := []string{p.Rel(dest)}
+	if dirExists(p.SpecsDir()) {
+		paths = append(paths, p.Rel(p.SpecsDir()))
+	}
+	if trackedBefore != "" {
+		paths = append(paths, p.Rel(p.ChangeDir(id)))
+	}
+	if _, err := git(ctx, p.Root, append([]string{"add", "-A", "--"}, paths...)...); err != nil {
+		return res, &FailError{Msg: "archived on disk but `git add` failed: " + err.Error() + " — commit " + strings.Join(paths, " ") + " yourself"}
+	}
+	msg := "archive: " + id + "\n\nChange: " + id + "\n"
+	if _, err := git(ctx, p.Root, append([]string{"commit", "--no-verify", "-q", "-m", msg, "--"}, paths...)...); err != nil {
+		return res, &FailError{Msg: "archived on disk but the commit failed: " + err.Error() + " — commit " + strings.Join(paths, " ") + " yourself"}
+	}
+	res.Commit = HeadSHA(ctx, p.Root)
+	return res, nil
+}
+
+func failingNames(v *VerifyResult) string {
+	var names []string
+	for _, r := range v.Failing() {
+		names = append(names, fmt.Sprintf("%s exit %d", r.Task, r.Exit))
+	}
+	return strings.Join(names, ", ")
+}

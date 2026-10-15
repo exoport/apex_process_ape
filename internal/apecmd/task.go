@@ -297,9 +297,11 @@ func resolveHandoffPrompt(handoff string, promptChanged bool) (string, error) {
 }
 
 // buildTaskStep maps taskOptions onto a pipeline.Step. The skill-layer
-// --no-commit is injected by prefixing step.Args on the agent path
-// only — assembleInteractivePromptLine already adds it on the no-agent
-// path by PAT-25 convention, so injecting there would duplicate it.
+// --no-commit is injected by prefixing step.Args, on both paths, and only
+// when the caller asked for it: ExplicitNoCommit switches off the PAT-25
+// convention that adds it to every no-agent line. APEX v1 skills commit
+// their own work, so `ape task <skill>` must not tell them not to (v1
+// trial decision D4).
 func buildTaskStep(o taskOptions) pipeline.Step {
 	step := pipeline.Step{
 		Skill:      o.skill,
@@ -308,8 +310,10 @@ func buildTaskStep(o taskOptions) pipeline.Step {
 		Effort:     o.effort,
 		Args:       o.args,
 		PromptFlag: o.promptFlagName,
+		// v1 trial D4: no implicit --no-commit on the no-agent path.
+		ExplicitNoCommit: true,
 	}
-	if o.skillNoCommit && o.agent != "" {
+	if o.skillNoCommit {
 		step.Args = strings.TrimSpace("--no-commit " + step.Args)
 	}
 	return step

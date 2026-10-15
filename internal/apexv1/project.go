@@ -1,0 +1,218 @@
+package apexv1
+
+import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// Required and optional project.md sections (brief 4.1).
+var (
+	projectRequired = []string{"Vision", "Users", "Scope", "Out of scope", "Constraints"}
+	projectOptional = []string{"Stack", "Notes"}
+)
+
+// ValidateProjectMD checks project.md's shape and caps.
+func ValidateProjectMD(file, doc string) []Finding {
+	var out []Finding
+	const remedy = " — move detail to specs/, decisions/ or docs/explanation/"
+	if n := strings.Count(strings.TrimRight(doc, "\n"), "\n") + 1; n > ProjectMaxLines {
+		out = append(out, Finding{File: file, Message: "project.md is " + strconv.Itoa(n) + " lines, over the 150-line cap" + remedy})
+	}
+	if len(doc) > ProjectMaxBytes {
+		out = append(out, Finding{File: file, Message: "project.md is " + sizeKB(len(doc)) + ", over the 8 KB cap" + remedy})
+	}
+	lines := splitLines(doc)
+	title := ""
+	for _, l := range lines {
+		if lv, t := headingLevel(l); lv == 1 {
+			title = t
+			break
+		}
+	}
+	if title == "" {
+		out = append(out, Finding{File: file, Line: 1, Message: "missing `# <Project name>`"})
+	}
+	h2 := sections(lines, 2)
+	byTitle := map[string]section{}
+	for _, s := range h2 {
+		byTitle[strings.ToLower(s.Title)] = s
+	}
+	for _, want := range projectRequired {
+		s, ok := byTitle[strings.ToLower(want)]
+		switch {
+		case !ok:
+			out = append(out, Finding{File: file, Message: "missing `## " + want + "`"})
+		case !hasProse(s.Body):
+			out = append(out, Finding{File: file, Line: s.Line, Message: "`## " + want + "` is empty"})
+		}
+	}
+	return out
+}
+
+// ValidateAgentsMD checks AGENTS.md exists and stays a map.
+func ValidateAgentsMD(file, doc string) []Finding {
+	if n := strings.Count(strings.TrimRight(doc, "\n"), "\n") + 1; n > AgentsMaxLines {
+		return []Finding{{File: file, Message: "AGENTS.md is " + strconv.Itoa(n) +
+			" lines, over the 120-line cap — it is a map: move detail to docs/ or development/"}}
+	}
+	return nil
+}
+
+var (
+	adrFileRe    = regexp.MustCompile(`^(\d{4})-([a-z0-9][a-z0-9-]*)\.md$`)
+	adrTitleRe   = regexp.MustCompile(`^ADR-(\d{4}):\s*\S`)
+	adrStatusRe  = regexp.MustCompile(`^Status:\s*(proposed|accepted|superseded by ADR-\d{4})\s*$`)
+	adrDateRe    = regexp.MustCompile(`^Date:\s*\d{4}-\d{2}-\d{2}\s*$`)
+	adrEnforceRe = regexp.MustCompile(`^Enforced by:\s*\S`)
+	adrIDRe      = regexp.MustCompile(`^ADR-\d{4}$`)
+)
+
+// ValidateDecision checks one ADR (brief 4.5).
+func ValidateDecision(file, name, doc string) []Finding {
+	var out []Finding
+	m := adrFileRe.FindStringSubmatch(name)
+	if m == nil {
+		return []Finding{{File: file, Message: "decision files are named NNNN-<slug>.md — use `ape decision new <slug>`"}}
+	}
+	lines := splitLines(doc)
+	var title string
+	var status, date, enforced bool
+	for _, l := range lines {
+		if l.InCode {
+			continue
+		}
+		if lv, t := headingLevel(l); lv == 1 && title == "" {
+			title = t
+		}
+		t := strings.TrimSpace(l.Text)
+		status = status || adrStatusRe.MatchString(t)
+		date = date || adrDateRe.MatchString(t)
+		enforced = enforced || adrEnforceRe.MatchString(t)
+	}
+	if tm := adrTitleRe.FindStringSubmatch(title); tm == nil || tm[1] != m[1] {
+		out = append(out, Finding{File: file, Line: 1, Message: "first heading must be `# ADR-" + m[1] + ": <title>`"})
+	}
+	if !status {
+		out = append(out, Finding{File: file, Message: "missing `Status: proposed | accepted | superseded by ADR-NNNN`"})
+	}
+	if !date {
+		out = append(out, Finding{File: file, Message: "missing `Date: YYYY-MM-DD`"})
+	}
+	if !enforced {
+		out = append(out, Finding{File: file, Message: "missing `Enforced by: <command> | hook | review`"})
+	}
+	have := map[string]bool{}
+	for _, s := range sections(lines, 2) {
+		have[strings.ToLower(s.Title)] = true
+	}
+	for _, want := range []string{"Context", "Decision", "Consequences"} {
+		if !have[strings.ToLower(want)] {
+			out = append(out, Finding{File: file, Message: "missing `## " + want + "`"})
+		}
+	}
+	return out
+}
+
+// decisionExists reports whether ADR-NNNN has a file in decisions/.
+func (p *Project) decisionExists(id string) bool {
+	num := strings.TrimPrefix(id, "ADR-")
+	matches, _ := filepath.Glob(filepath.Join(p.DecisionsDir(), num+"-*.md"))
+	return len(matches) > 0
+}
+
+// Capabilities lists the capability folders under specs/.
+func (p *Project) Capabilities() []string {
+	entries, err := os.ReadDir(p.SpecsDir())
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// LoadSpec reads and parses a capability's spec; ok is false when absent.
+func (p *Project) LoadSpec(capability string) (Spec, string, bool) {
+	doc, err := readFileString(p.SpecFile(capability))
+	if err != nil {
+		return Spec{}, "", false
+	}
+	return ParseSpec(doc), doc, true
+}
+
+// Check validates the whole project (`ape project check`).
+func (p *Project) Check() []Finding {
+	var out []Finding
+	add := func(fs ...Finding) { out = append(out, fs...) }
+	missing := func(path, remedy string) {
+		add(Finding{File: p.Rel(path), Message: "missing — " + remedy})
+	}
+
+	if doc, err := readFileString(p.ProjectMD()); err != nil {
+		missing(p.ProjectMD(), "run `ape project init`, then write it (apex-plan)")
+	} else {
+		add(ValidateProjectMD(p.Rel(p.ProjectMD()), doc)...)
+	}
+	if doc, err := readFileString(p.AgentsMD()); err != nil {
+		missing(p.AgentsMD(), "write the project map: commands, NEVER rules, pointers")
+	} else {
+		add(ValidateAgentsMD("AGENTS.md", doc)...)
+	}
+	if doc, err := readFileString(p.ClaudeMD()); err == nil {
+		found := false
+		for _, l := range strings.Split(doc, "\n") {
+			if strings.TrimSpace(l) == "@AGENTS.md" {
+				found = true
+			}
+		}
+		if !found {
+			add(Finding{File: "CLAUDE.md", Message: "must import the map: a line `@AGENTS.md` (move its content into AGENTS.md)"})
+		}
+	}
+	if doc, err := readFileString(p.RoadmapMD()); err != nil {
+		missing(p.RoadmapMD(), "run `ape project init`, then `ape milestone new`")
+	} else {
+		add(ValidateRoadmap(p.Rel(p.RoadmapMD()), doc)...)
+	}
+
+	for _, capName := range p.Capabilities() {
+		file := p.Rel(p.SpecFile(capName))
+		if !slugRe.MatchString(capName) {
+			add(Finding{File: p.Rel(filepath.Join(p.SpecsDir(), capName)), Message: "capability folder must be a kebab-case slug"})
+		}
+		doc, err := readFileString(p.SpecFile(capName))
+		if err != nil {
+			add(Finding{File: file, Message: "capability folder without spec.md"})
+			continue
+		}
+		add(ValidateSpec(file, doc)...)
+	}
+
+	if entries, err := os.ReadDir(p.DecisionsDir()); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			path := filepath.Join(p.DecisionsDir(), e.Name())
+			doc, err := readFileString(path)
+			if err != nil {
+				continue
+			}
+			add(ValidateDecision(p.Rel(path), e.Name(), doc)...)
+		}
+	}
+
+	for _, c := range p.Changes() {
+		add(p.CheckChange(c.ID)...)
+	}
+	return out
+}

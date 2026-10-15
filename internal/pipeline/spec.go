@@ -140,6 +140,12 @@ type Step struct {
 	// prompt as a structured argv element avoids any shell-quoting
 	// round-trip — argv is never serialized to a shell string.
 	PromptFlag string `yaml:"prompt_flag,omitempty"` //nolint:tagliatelle // on-disk spec YAML files use snake_case prompt_flag
+	// ExplicitNoCommit is set by `ape task`: the typed line carries
+	// `--no-commit` only when Args does. Without it the no-agent path adds
+	// one by the PAT-25 convention, which is right for a pipeline step
+	// (ape commits at the boundary) and wrong for an APEX v1 skill, which
+	// commits its own work. Never read from a spec file.
+	ExplicitNoCommit bool `yaml:"-"`
 	// Commit configures the per-step commit boundary (PLAN-4). Omit
 	// to inherit the pipeline-level default (commit with a derived
 	// message); `commit: false` to skip; `commit: "msg"` to override

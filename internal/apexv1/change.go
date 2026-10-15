@@ -1,0 +1,253 @@
+package apexv1
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+
+	"github.com/exoport/apex_process_ape/internal/frontmatter"
+	"gopkg.in/yaml.v3"
+)
+
+// Delta operations.
+const (
+	OpAdded    = "ADDED"
+	OpModified = "MODIFIED"
+	OpRemoved  = "REMOVED"
+)
+
+// ChangeMeta is change.md's frontmatter.
+type ChangeMeta struct {
+	ID        string   `yaml:"id"`
+	Milestone string   `yaml:"milestone"`
+	Touches   []string `yaml:"touches"`
+	Paths     []string `yaml:"paths"`
+	Decisions []string `yaml:"decisions"`
+}
+
+// Delta is one `### ADDED|MODIFIED|REMOVED [cap] Requirement: <name>`.
+type Delta struct {
+	Op         string `json:"op"`
+	Capability string `json:"capability"`
+	Name       string `json:"requirement"`
+	Line       int    `json:"line"`
+	// Req is the requirement as it will read in the spec (ADDED, MODIFIED):
+	// heading rewritten to `### Requirement: <name>`, body verbatim.
+	Req    Requirement `json:"-"`
+	Reason string      `json:"reason,omitempty"`
+}
+
+// Task is one `- T<n> <what> — check: <command|human-review>` line.
+type Task struct {
+	ID    string `json:"id"`
+	What  string `json:"what"`
+	Check string `json:"check"`
+	Line  int    `json:"line"`
+}
+
+// Human reports whether the task can only be proven by a person.
+func (t Task) Human() bool { return t.Check == HumanReview }
+
+// Change is a parsed change.md.
+type Change struct {
+	Meta      ChangeMeta
+	MetaErr   error
+	Title     string
+	H2        []section
+	DeltaNone string
+	Deltas    []Delta
+	Tasks     []Task
+	// parse findings (bad delta headings, malformed task lines), reported
+	// by ValidateChange alongside the shape rules.
+	parse []Finding
+	file  string
+}
+
+var (
+	deltaHeadRe = regexp.MustCompile(`^(ADDED|MODIFIED|REMOVED)\s+\[([^\]]*)\]\s+Requirement:\s*(.*)$`)
+	deltaNoneRe = regexp.MustCompile(`^none\s*(?:—|–|-|:)\s*(\S.*)$`)
+	taskItemRe  = regexp.MustCompile(`^\s{0,3}[-*+]\s+(.*)$`)
+	taskIDRe    = regexp.MustCompile(`^(\[[ xX]\]\s*)?(T\d+)\b[:.)]?\s*(.*)$`)
+)
+
+// ParseChange parses change.md. file is the project-relative path used in
+// findings.
+func ParseChange(file, doc string) *Change {
+	c := &Change{file: file}
+	fm, body, err := frontmatter.Split([]byte(doc))
+	if err != nil {
+		c.MetaErr = fmt.Errorf("no YAML frontmatter (--- id/milestone/touches ---)")
+		body = []byte(doc)
+	} else if err := yaml.Unmarshal(fm, &c.Meta); err != nil {
+		c.MetaErr = fmt.Errorf("frontmatter does not parse: %w", err)
+	}
+	// Line numbers in findings should match the file, so count the lines
+	// the frontmatter occupied.
+	offset := 0
+	if len(body) < len(doc) {
+		offset = strings.Count(doc[:len(doc)-len(body)], "\n")
+	}
+	lines := splitLines(string(body))
+	for i := range lines {
+		lines[i].N += offset
+	}
+	for _, l := range lines {
+		if lv, t := headingLevel(l); lv == 1 {
+			c.Title = t
+			break
+		}
+	}
+	c.H2 = sections(lines, 2)
+	if d := c.section("Delta"); d != nil {
+		c.parseDelta(d.Body)
+	}
+	if t := c.section("Tasks"); t != nil {
+		c.parseTasks(t.Body)
+	}
+	return c
+}
+
+func (c *Change) section(title string) *section {
+	for i := range c.H2 {
+		if strings.EqualFold(c.H2[i].Title, title) {
+			return &c.H2[i]
+		}
+	}
+	return nil
+}
+
+func (c *Change) parseDelta(body []mdLine) {
+	cur := -1
+	var curLines []mdLine
+	var loose []mdLine
+	flush := func() {
+		if cur < 0 {
+			return
+		}
+		d := &c.Deltas[cur]
+		head := mdLine{N: d.Line, Text: "### " + RequirementPrefix + " " + d.Name}
+		var bodyLines []mdLine
+		for _, l := range curLines {
+			if d.Op == OpRemoved && !l.InCode {
+				if t := strings.TrimSpace(l.Text); strings.HasPrefix(t, "Reason:") {
+					d.Reason = strings.TrimSpace(strings.TrimPrefix(t, "Reason:"))
+					continue
+				}
+			}
+			bodyLines = append(bodyLines, l)
+		}
+		d.Req = buildRequirement(Requirement{Name: d.Name, Line: d.Line}, append([]mdLine{head}, bodyLines...))
+		curLines = nil
+	}
+	for _, l := range body {
+		lv, title := headingLevel(l)
+		if lv == 3 {
+			flush()
+			m := deltaHeadRe.FindStringSubmatch(title)
+			if m == nil {
+				cur = -1
+				c.parse = append(c.parse, Finding{File: c.file, Line: l.N,
+					Message: "delta heading must be `### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>`"})
+				continue
+			}
+			c.Deltas = append(c.Deltas, Delta{
+				Op: m[1], Capability: strings.TrimSpace(m[2]), Name: strings.TrimSpace(m[3]), Line: l.N,
+			})
+			cur = len(c.Deltas) - 1
+			continue
+		}
+		if cur >= 0 {
+			curLines = append(curLines, l)
+		} else {
+			loose = append(loose, l)
+		}
+	}
+	flush()
+	if len(c.Deltas) > 0 {
+		return
+	}
+	// No delta headings: the only other legal shape is one `none — reason` line.
+	for _, l := range loose {
+		t := strings.TrimSpace(l.Text)
+		if t == "" || !hasProse([]mdLine{l}) {
+			continue
+		}
+		if m := deltaNoneRe.FindStringSubmatch(t); m != nil && c.DeltaNone == "" {
+			c.DeltaNone = strings.TrimSpace(m[1])
+			continue
+		}
+		c.parse = append(c.parse, Finding{File: c.file, Line: l.N,
+			Message: "## Delta holds delta blocks or the single line `none — <reason>`, nothing else"})
+	}
+}
+
+func (c *Change) parseTasks(body []mdLine) {
+	for _, l := range body {
+		if l.InCode {
+			continue
+		}
+		m := taskItemRe.FindStringSubmatch(l.Text)
+		if m == nil || strings.HasPrefix(l.Text, "    ") || strings.HasPrefix(l.Text, "\t") {
+			continue
+		}
+		item := strings.TrimSpace(m[1])
+		tm := taskIDRe.FindStringSubmatch(item)
+		if tm == nil {
+			c.parse = append(c.parse, Finding{File: c.file, Line: l.N,
+				Message: "task line must read `- T<n> <what> — check: <command> | human-review`"})
+			continue
+		}
+		if tm[1] != "" {
+			c.parse = append(c.parse, Finding{File: c.file, Line: l.N,
+				Message: "tasks have no checkboxes — progress is state.json, written by `ape change verify`"})
+		}
+		rest := tm[3]
+		t := Task{ID: tm[2], Line: l.N}
+		idx := strings.LastIndex(rest, "check:")
+		if idx >= 0 {
+			t.What = strings.TrimRight(strings.TrimSpace(rest[:idx]), " \t—–-")
+			t.Check = strings.TrimSpace(rest[idx+len("check:"):])
+			t.Check = strings.Trim(t.Check, "`")
+		} else {
+			t.What = strings.TrimSpace(rest)
+		}
+		c.Tasks = append(c.Tasks, t)
+	}
+}
+
+// Task returns the task with id, or nil.
+func (c *Change) Task(id string) *Task {
+	for i := range c.Tasks {
+		if c.Tasks[i].ID == id {
+			return &c.Tasks[i]
+		}
+	}
+	return nil
+}
+
+// CommandTasks returns the tasks whose check is a command.
+func (c *Change) CommandTasks() []Task {
+	var out []Task
+	for _, t := range c.Tasks {
+		if t.Check != "" && !t.Human() {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// HumanTasks returns the ids of human-review tasks.
+func (c *Change) HumanTasks() []string {
+	var out []string
+	for _, t := range c.Tasks {
+		if t.Human() {
+			out = append(out, t.ID)
+		}
+	}
+	return out
+}
+
+// reqKey identifies a requirement across capabilities.
+type reqKey struct{ Capability, Name string }
+
+func (d Delta) key() reqKey { return reqKey{d.Capability, d.Name} }

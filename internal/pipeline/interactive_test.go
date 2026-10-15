@@ -122,3 +122,20 @@ func TestBuildInteractiveArgv(t *testing.T) {
 		})
 	}
 }
+
+// ape task sets ExplicitNoCommit: the no-agent line then carries
+// --no-commit only when Args does (v1 trial D4).
+func TestAssembleInteractivePromptLine_ExplicitNoCommit(t *testing.T) {
+	step := Step{Skill: "apex-apply", ExplicitNoCommit: true}
+	if got := assembleInteractivePromptLine("", step, ""); got != "/apex-apply --autonomous" {
+		t.Fatalf("got %q", got)
+	}
+	step.Args = "--no-commit --x"
+	if got := assembleInteractivePromptLine("", step, ""); got != "/apex-apply --autonomous --no-commit --x" {
+		t.Fatalf("got %q", got)
+	}
+	step = Step{Skill: "apex-shard-doc"}
+	if got := assembleInteractivePromptLine("", step, ""); got != "/apex-shard-doc --autonomous --no-commit" {
+		t.Fatalf("pipeline steps keep the convention, got %q", got)
+	}
+}
