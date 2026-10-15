@@ -152,8 +152,14 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	}
 	res := &ArchiveResult{ID: id}
 
-	// Verified at HEAD: re-run when HEAD has moved since the verify.
-	if st.Verify == nil || st.Verify.SHA != HeadSHA(ctx, p.Root) {
+	// Verified at HEAD: re-run when code has moved since the verify. ape's
+	// own state commits (D5) move HEAD on every status change, so "HEAD
+	// moved" means "something outside the development folder changed".
+	codeMoved := st.Verify == nil
+	if !codeMoved {
+		codeMoved, _, _ = p.codeMovedSince(ctx, st.Verify.SHA)
+	}
+	if codeMoved {
 		v, err := p.verify(ctx, ci, opt)
 		if err != nil {
 			return nil, err
@@ -225,14 +231,70 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	if trackedBefore != "" {
 		paths = append(paths, p.Rel(p.ChangeDir(id)))
 	}
-	if _, err := git(ctx, p.Root, append([]string{"add", "-A", "--"}, paths...)...); err != nil {
-		return res, &FailError{Msg: "archived on disk but `git add` failed: " + err.Error() + " — commit " + strings.Join(paths, " ") + " yourself"}
-	}
-	msg := "archive: " + id + "\n\nChange: " + id + "\n"
-	if _, err := git(ctx, p.Root, append([]string{"commit", "--no-verify", "-q", "-m", msg, "--"}, paths...)...); err != nil {
+	sha, err := p.commitPaths(ctx, "archive: "+id, id, paths...)
+	if err != nil {
 		return res, &FailError{Msg: "archived on disk but the commit failed: " + err.Error() + " — commit " + strings.Join(paths, " ") + " yourself"}
 	}
-	res.Commit = HeadSHA(ctx, p.Root)
+	res.Commit = sha
+	return res, nil
+}
+
+// AbandonResult is what `ape change abandon` reports.
+type AbandonResult struct {
+	ID         string `json:"id"`
+	ArchivedTo string `json:"archived_to"`
+	Reason     string `json:"reason"`
+	Commit     string `json:"commit"`
+}
+
+// Abandon moves a change to the archive as abandoned, merging nothing,
+// and commits the move as `apex: <id> abandoned` (trial decision D6).
+func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResult, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, &UsageError{Msg: "--reason is required: why the change is dropped, and what (if anything) replaces it"}
+	}
+	ci, err := p.requireChange(id)
+	if err != nil {
+		return nil, err
+	}
+	folder := Today() + "-" + id
+	dest := filepath.Join(p.ArchiveDir(), folder)
+	if fileOrDirExists(dest) {
+		return nil, &ConflictError{Msg: "archive folder " + p.Rel(dest) + " already exists — nothing was written"}
+	}
+	inGit := p.isWorkTree(ctx)
+	trackedBefore := ""
+	if inGit {
+		trackedBefore, _ = git(ctx, p.Root, "ls-files", "--", p.Rel(p.ChangeDir(id)))
+	}
+	if err := os.MkdirAll(p.ArchiveDir(), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.Rename(p.ChangeDir(id), dest); err != nil {
+		return nil, err
+	}
+	st := ci.State
+	st.Status = StatusAbandoned
+	st.AbandonedReason = reason
+	st.ArchivedAt = Stamp()
+	st.ArchivedTo = p.Rel(dest)
+	if err := SaveState(filepath.Join(dest, "state.json"), st); err != nil {
+		return nil, err
+	}
+	res := &AbandonResult{ID: id, ArchivedTo: p.Rel(dest), Reason: reason}
+	if !inGit {
+		return res, nil
+	}
+	paths := []string{p.Rel(dest)}
+	if trackedBefore != "" {
+		paths = append(paths, p.Rel(p.ChangeDir(id)))
+	}
+	sha, err := p.commitPaths(ctx, "apex: "+id+" "+StatusAbandoned, id, paths...)
+	if err != nil {
+		return res, &FailError{Msg: "abandoned on disk but the commit failed: " + err.Error() + " — commit " + strings.Join(paths, " ") + " yourself"}
+	}
+	res.Commit = sha
 	return res, nil
 }
 

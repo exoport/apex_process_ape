@@ -80,6 +80,7 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 			ci.Doc.Meta.Milestone, status, ci.Doc.Meta.Milestone)}
 	}
 	var conflicts []string
+	// Blocked changes claim nothing (D6): ActiveChanges excludes them.
 	for _, other := range p.ActiveChanges() {
 		if other.ID == id || other.Doc == nil {
 			continue
@@ -103,7 +104,7 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 	}
 	st.Status = StatusInProgress
 	st.BlockedReason = nil
-	if err := SaveState(p.StateFile(id), st); err != nil {
+	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}
 	return &StartResult{ID: id, Status: st.Status, BaseSHA: st.BaseSHA, Baseline: results}, nil
@@ -170,6 +171,11 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 	if pending == nil {
 		pending = []string{}
 	}
+	if !green && st.Status == StatusInProgress {
+		// A verify that stays red changes nothing and commits nothing
+		// (trial decision D5): the results are in the output and the logs.
+		return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending}, nil
+	}
 	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green}
 	switch {
 	case !green:
@@ -181,7 +187,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 	default:
 		st.Status = StatusVerified
 	}
-	if err := SaveState(p.StateFile(id), st); err != nil {
+	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}
 	return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending}, nil
@@ -233,14 +239,31 @@ func (p *Project) Review(ctx context.Context, id, verdict, findings string) (*St
 	} else {
 		st.Status = StatusInProgress
 	}
-	if err := SaveState(p.StateFile(id), st); err != nil {
+	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}
 	return st, nil
 }
 
+// saveAndCommit writes a change's state.json and commits it alone as
+// `apex: <id> <status>` with trailer `Change: <id>` (trial decision D5):
+// state.json is tracked, only ape stages it, and the tree stays clean for
+// the task driver. Outside a git work tree it only writes.
+func (p *Project) saveAndCommit(ctx context.Context, id string, st *State) error {
+	if err := SaveState(p.StateFile(id), st); err != nil {
+		return err
+	}
+	if !p.isWorkTree(ctx) {
+		return nil
+	}
+	if _, err := p.commitPaths(ctx, "apex: "+id+" "+st.Status, id, p.Rel(p.StateFile(id))); err != nil {
+		return &FailError{Msg: "state.json written but its commit failed: " + err.Error() + " — fix git (identity, lock) and re-run the command"}
+	}
+	return nil
+}
+
 // Accept records a person accepting a human-review task.
-func (p *Project) Accept(id, task, by string) (*State, error) {
+func (p *Project) Accept(ctx context.Context, id, task, by string) (*State, error) {
 	if strings.TrimSpace(by) == "" {
 		return nil, &UsageError{Msg: "--by names the person accepting"}
 	}
@@ -269,14 +292,14 @@ func (p *Project) Accept(id, task, by string) (*State, error) {
 			st.Verify.PendingHuman = []string{}
 		}
 	}
-	if err := SaveState(p.StateFile(id), st); err != nil {
+	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}
 	return st, nil
 }
 
 // Block sets a change blocked with a reason a person can act on.
-func (p *Project) Block(id, reason string) (*State, error) {
+func (p *Project) Block(ctx context.Context, id, reason string) (*State, error) {
 	if strings.TrimSpace(reason) == "" {
 		return nil, &UsageError{Msg: "--reason is required: what blocks it, or the question only a person can answer"}
 	}
@@ -288,7 +311,7 @@ func (p *Project) Block(id, reason string) (*State, error) {
 	st.Status = StatusBlocked
 	r := strings.TrimSpace(reason)
 	st.BlockedReason = &r
-	if err := SaveState(p.StateFile(id), st); err != nil {
+	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}
 	return st, nil

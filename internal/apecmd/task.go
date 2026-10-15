@@ -515,9 +515,11 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	// against a spec's declaration.
 	cfg.outputStyleSet = true
 	cfg.manifestDir = manifestDir
+	cfg.stopGate = newStopGateRecorder(o.projectRoot)
 
 	start := time.Now()
 	runErr := runWithInteractive(ctx, spec, o.projectRoot, cfg)
+	recordStopGate(o.projectRoot, o.skill, manifestDir, cfg.stopGate)
 	duration := time.Since(start)
 	if pfe, ok := errors.AsType[*pipeline.PreflightError](runErr); ok {
 		// Nothing spawned, so there is no run to report or assert.

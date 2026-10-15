@@ -163,22 +163,30 @@ func validateRequirementBody(file string, r Requirement) []Finding {
 		out = append(out, Finding{File: file, Line: r.Line, Message: "requirement has no name"})
 	}
 	if len(r.Scenarios) == 0 {
-		out = append(out, Finding{File: file, Line: r.Line,
-			Message: "requirement \"" + r.Name + "\" has no `#### Scenario:` — every requirement needs at least one"})
+		out = append(out, Finding{
+			File: file, Line: r.Line,
+			Message: "requirement \"" + r.Name + "\" has no `#### Scenario:` — every requirement needs at least one",
+		})
 	}
 	for _, sc := range r.Scenarios {
 		switch len(sc.Checks) {
 		case 1:
 			if sc.Checks[0] == "" {
-				out = append(out, Finding{File: file, Line: sc.Line,
-					Message: "scenario \"" + sc.Name + "\" has an empty `check:` — give a command or human-review"})
+				out = append(out, Finding{
+					File: file, Line: sc.Line,
+					Message: "scenario \"" + sc.Name + "\" has an empty `check:` — give a command or human-review",
+				})
 			}
 		case 0:
-			out = append(out, Finding{File: file, Line: sc.Line,
-				Message: "scenario \"" + sc.Name + "\" has no `- check: <command> | human-review` line"})
+			out = append(out, Finding{
+				File: file, Line: sc.Line,
+				Message: "scenario \"" + sc.Name + "\" has no `- check: <command> | human-review` line",
+			})
 		default:
-			out = append(out, Finding{File: file, Line: sc.Line,
-				Message: "scenario \"" + sc.Name + "\" has more than one `check:` line — exactly one per scenario"})
+			out = append(out, Finding{
+				File: file, Line: sc.Line,
+				Message: "scenario \"" + sc.Name + "\" has more than one `check:` line — exactly one per scenario",
+			})
 		}
 	}
 	for _, n := range r.Stray {
@@ -204,15 +212,19 @@ func ValidateSpec(file, doc string) []Finding {
 	seen := map[string]int{}
 	for _, r := range s.Requirements {
 		if prev, dup := seen[r.Name]; dup {
-			out = append(out, Finding{File: file, Line: r.Line,
-				Message: "duplicate requirement \"" + r.Name + "\" (first at line " + strconv.Itoa(prev) + ")"})
+			out = append(out, Finding{
+				File: file, Line: r.Line,
+				Message: "duplicate requirement \"" + r.Name + "\" (first at line " + strconv.Itoa(prev) + ")",
+			})
 		}
 		seen[r.Name] = r.Line
 		out = append(out, validateRequirementBody(file, r)...)
 	}
 	for _, n := range s.Other {
-		out = append(out, Finding{File: file, Line: n,
-			Message: "level-3 heading that is not `### Requirement: <name>`"})
+		out = append(out, Finding{
+			File: file, Line: n,
+			Message: "level-3 heading that is not `### Requirement: <name>`",
+		})
 	}
 	return out
 }

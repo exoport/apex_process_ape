@@ -66,8 +66,10 @@ func ParseRoadmap(file, doc string) *Roadmap {
 	for _, s := range sections(lines, 2) {
 		m := milestoneHeadRe.FindStringSubmatch(s.Title)
 		if m == nil {
-			r.headErrs = append(r.headErrs, Finding{File: file, Line: s.Line,
-				Message: "roadmap section must be `## M<n> — <title>`"})
+			r.headErrs = append(r.headErrs, Finding{
+				File: file, Line: s.Line,
+				Message: "roadmap section must be `## M<n> — <title>`",
+			})
 			continue
 		}
 		ms := Milestone{ID: m[1], Title: strings.TrimSpace(m[2]), Line: s.Line}
@@ -206,8 +208,10 @@ func ValidateRoadmap(file, doc string) []Finding {
 		out = append(out, Finding{File: file, Line: 1, Message: "first heading must be `# Roadmap`"})
 	}
 	if len(r.Milestones) == 0 {
-		out = append(out, Finding{File: file,
-			Message: "no milestones — add one with `ape milestone new \"<title>\" --gate \"<cmd>\"`"})
+		out = append(out, Finding{
+			File:    file,
+			Message: "no milestones — add one with `ape milestone new \"<title>\" --gate \"<cmd>\"`",
+		})
 	}
 	seen := map[string]bool{}
 	for _, m := range r.Milestones {
@@ -220,12 +224,16 @@ func ValidateRoadmap(file, doc string) []Finding {
 		case "":
 			out = append(out, Finding{File: file, Line: m.Line, Message: m.ID + " has no `Status:` line"})
 		default:
-			out = append(out, Finding{File: file, Line: m.StatusLine,
-				Message: m.ID + " status \"" + m.StatusText + "\" is not proposed | approved (by <who> <ts>) | done (<ts> <sha>) — only ape writes it"})
+			out = append(out, Finding{
+				File: file, Line: m.StatusLine,
+				Message: m.ID + " status \"" + m.StatusText + "\" is not proposed | approved (by <who> <ts>) | done (<ts> <sha>) — only ape writes it",
+			})
 		}
 		if m.Gate == "" {
-			out = append(out, Finding{File: file, Line: m.Line,
-				Message: m.ID + " has no `Gate:` — one command that is red until the milestone is done"})
+			out = append(out, Finding{
+				File: file, Line: m.Line,
+				Message: m.ID + " has no `Gate:` — one command that is red until the milestone is done",
+			})
 		}
 		if m.BudgetRaw != "" && m.Budget == nil {
 			out = append(out, Finding{File: file, Line: m.Line, Message: m.ID + " budget \"" + m.BudgetRaw + "\" is not a number (USD)"})

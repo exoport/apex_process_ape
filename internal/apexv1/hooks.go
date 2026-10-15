@@ -240,9 +240,11 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 	}
 	path := p.stopRecordPath(payload.SessionID, agent)
 	prev := p.loadStopRecord(path)
-	rec := StopRecord{SessionID: payload.SessionID, AgentID: payload.AgentID, Event: event,
+	rec := StopRecord{
+		SessionID: payload.SessionID, AgentID: payload.AgentID, Event: event,
 		StartedAt: time.Now().UTC().Format(time.RFC3339Nano), Verdict: StopPending,
-		ConsecutiveBlocks: prev.ConsecutiveBlocks}
+		ConsecutiveBlocks: prev.ConsecutiveBlocks,
+	}
 	if !payload.StopHookActive {
 		rec.ConsecutiveBlocks = 0
 	}

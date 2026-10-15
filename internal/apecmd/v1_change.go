@@ -20,8 +20,12 @@ func newChangeCmd() *cobra.Command {
                               ▲   │                        │                         │
                               └───┴── verify red ◀─────────┴──── review block ◀──────┘
   any status but archived ──block──▶ blocked ──start──▶ in-progress
+  any status but archived ──abandon──▶ abandoned (moved to the archive, no delta merged)
 
-Done is a command ape ran at a sha: models never set a status.
+Done is a command ape ran at a sha: models never set a status. Every status change is
+committed by ape: state.json alone, subject "apex: <id> <status>", trailer "Change: <id>"
+(archive commits "archive: <id>"). Skills never stage state.json. A blocked change claims
+no requirements: it takes no part in start's conflict check.
 
 Exit codes for every subcommand: 0 ok · 1 check failed (one-line remediation) · 2 usage ·
 3 conflict (another change claims the same requirement, or the delta no longer applies;
@@ -30,6 +34,7 @@ nothing written).`,
 	cmd.AddCommand(
 		newChangeNewCmd(), newChangeCheckCmd(), newChangeStartCmd(), newChangeVerifyCmd(),
 		newChangeReviewCmd(), newChangeAcceptCmd(), newChangeBlockCmd(), newChangeArchiveCmd(),
+		newChangeAbandonCmd(),
 	)
 	return cmd
 }
@@ -154,12 +159,12 @@ func newChangeStartCmd() *cobra.Command {
 		`Start a draft (or resume a blocked) change:
 
   1. `+"`ape change check <id>`"+` must be green, and its milestone approved
-  2. refused with exit 3 if another active change (in-progress, verified, reviewed,
-     blocked) also ADDs, MODIFIES or REMOVES one of the same requirements
+  2. refused with exit 3 if another active change (in-progress, verified, reviewed —
+     not blocked) also ADDs, MODIFIES or REMOVES one of the same requirements
   3. records base_sha (HEAD) and started_at (kept when resuming a blocked change)
   4. runs every command check once as the baseline (which were already green), from the
      project root with sh -c; output under development/.apex/logs/<id>/
-  5. sets in-progress
+  5. sets in-progress and commits state.json ("apex: <id> in-progress")
 
 Exit codes: 0 started · 1 check red, milestone not approved, or wrong status · 2 usage ·
 3 requirement conflict with another active change.`,
@@ -189,8 +194,9 @@ output sha256) in state.json. The working tree must hold no uncommitted changes 
 development/ — commit first (trailer "Change: <id>"): a verify belongs to a sha.
 
 All command checks exit 0 → status verified (a reviewed change whose code has not moved
-since its review stays reviewed). Any red → in-progress, with the failing checks' last
-lines printed. human-review tasks are never run; those not yet accepted are listed as
+since its review stays reviewed), state.json committed. Any red → the failing checks' last
+lines are printed; a change that was in-progress is left exactly as it was (nothing written,
+nothing committed), a verified/reviewed one goes back to in-progress (committed). human-review tasks are never run; those not yet accepted are listed as
 pending.
 
 Exit codes: 0 all command checks green · 1 a check is red, uncommitted code, or wrong
@@ -273,7 +279,7 @@ Exit codes: 0 recorded · 1 the task has a command check · 2 usage (no such tas
 			if task == "" {
 				return v1Fail(cmd, &f, &apexv1.UsageError{Msg: "--task <T> is required"}, nil)
 			}
-			st, err := p.Accept(id, task, by)
+			st, err := p.Accept(cmd.Context(), id, task, by)
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
@@ -300,7 +306,7 @@ Exit codes: 0 blocked · 1 no such change or archived · 2 usage.`,
 		`  ape change block add-tenant-delete --reason "needs a decision: soft or hard delete?"`,
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
-			st, err := p.Block(id, reason)
+			st, err := p.Block(cmd.Context(), id, reason)
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
@@ -309,6 +315,39 @@ Exit codes: 0 blocked · 1 no such change or archived · 2 usage.`,
 			})
 		})
 	cmd.Flags().StringVar(&reason, "reason", "", "what blocks it (required)")
+	return cmd
+}
+
+func newChangeAbandonCmd() *cobra.Command {
+	var f v1Flags
+	var reason string
+	cmd := v1ChangeLeaf(
+		`abandon <id> --reason "<text>"`,
+		"Move a change to the archive as abandoned, merging no delta; commit",
+		`Drop a change: its folder moves to development/changes/archive/<YYYY-MM-DD>-<id>/ with
+status abandoned and the reason recorded in state.json; its delta is NOT merged into
+specs/. Committed as "apex: <id> abandoned" with trailer "Change: <id>". The id stays
+taken. Abandon a blocked change only after planning its replacement, or with the reason
+none is needed.
+
+Exit codes: 0 abandoned · 1 no such change, archived, or git failed · 2 usage ·
+3 the archive folder already exists.`,
+		`  ape change abandon add-tenant-delete --reason "replaced by split-tenant-delete"`,
+		&f,
+		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			res, err := p.Abandon(cmd.Context(), id, reason)
+			if err != nil {
+				return v1Fail(cmd, &f, err, res)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+				fmt.Fprintf(w, "abandoned %s → %s", id, res.ArchivedTo)
+				if res.Commit != "" {
+					fmt.Fprintf(w, " (commit %.7s)", res.Commit)
+				}
+				fmt.Fprintln(w)
+			})
+		})
+	cmd.Flags().StringVar(&reason, "reason", "", "why it is dropped, and what replaces it (required)")
 	return cmd
 }
 

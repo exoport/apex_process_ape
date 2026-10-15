@@ -324,7 +324,10 @@ func printPipelineList(res pipelineListResult, format output.Format) error {
 // runners (runWithInteractive / runWithInteractiveTUI / runWithWeb) and
 // to `ape task`. Grouped to keep call-sites stable as new flags land.
 type runConfig struct {
-	prompt      string
+	// stopGate, when set, consults an APEX v1 project's stop-hook verdict
+	// on every main-session Stop (v1 trial D1). `ape task` sets it.
+	stopGate *stopGateRecorder
+	prompt   string
 	manifestDir string
 	fromStage   string
 	// ignoreExtensions is --ignore-extensions; extensions is the set the

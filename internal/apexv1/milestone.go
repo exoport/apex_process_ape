@@ -12,13 +12,13 @@ import (
 
 // GateRun is one run of a milestone gate.
 type GateRun struct {
-	Exit         int     `json:"exit"`
-	At           string  `json:"at"`
-	SHA          string  `json:"sha"`
-	Secs         float64 `json:"secs"`
-	OutputSHA256 string  `json:"output_sha256"`
-	Cmd          string  `json:"cmd"`
-	Log          string  `json:"log,omitempty"`
+	Exit         int      `json:"exit"`
+	At           string   `json:"at"`
+	SHA          string   `json:"sha"`
+	Secs         float64  `json:"secs"`
+	OutputSHA256 string   `json:"output_sha256"`
+	Cmd          string   `json:"cmd"`
+	Log          string   `json:"log,omitempty"`
 	Tail         []string `json:"tail,omitempty"`
 }
 
@@ -154,8 +154,10 @@ func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	}
 	logPath := filepath.Join(p.ApexDir(), "logs", "gate-"+id+".log")
 	r := RunCheck(ctx, p.Root, m.Gate, logPath, opt.Timeout)
-	run := GateRun{Exit: r.Exit, At: Stamp(), SHA: HeadSHA(ctx, p.Root), Secs: r.Secs,
-		OutputSHA256: r.OutputSHA256, Cmd: m.Gate, Log: p.Rel(logPath), Tail: lastN(r.Tail, 15)}
+	run := GateRun{
+		Exit: r.Exit, At: Stamp(), SHA: HeadSHA(ctx, p.Root), Secs: r.Secs,
+		OutputSHA256: r.OutputSHA256, Cmd: m.Gate, Log: p.Rel(logPath), Tail: lastN(r.Tail, 15),
+	}
 	recs, err := p.LoadMilestoneRecords()
 	if err != nil {
 		return nil, err

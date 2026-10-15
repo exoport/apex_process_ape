@@ -63,7 +63,7 @@ func (p *Project) ArchivedIDs() map[string]string {
 }
 
 // ActiveChanges are the changes in flight (in-progress, verified,
-// reviewed, blocked).
+// reviewed); blocked ones are not.
 func (p *Project) ActiveChanges() []ChangeInfo {
 	var out []ChangeInfo
 	for _, c := range p.Changes() {
@@ -89,8 +89,10 @@ func (p *Project) CheckChange(id string) []Finding {
 		add(0, "change.md is "+sizeKB(len(doc))+", over the 8 KB cap — split this change")
 	}
 	if d, err := os.Stat(p.DesignMD(id)); err == nil && d.Size() > DesignMaxBytes {
-		out = append(out, Finding{File: p.Rel(p.DesignMD(id)),
-			Message: "design.md is " + sizeKB(int(d.Size())) + ", over the 8 KB cap — split this change, or move bulk to assets/"})
+		out = append(out, Finding{
+			File:    p.Rel(p.DesignMD(id)),
+			Message: "design.md is " + sizeKB(int(d.Size())) + ", over the 8 KB cap — split this change, or move bulk to assets/",
+		})
 	}
 	if _, err := LoadState(p.StateFile(id)); err != nil {
 		if errors.Is(err, ErrNoState) {

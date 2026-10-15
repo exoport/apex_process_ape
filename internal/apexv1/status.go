@@ -52,15 +52,15 @@ type MilestoneLine struct {
 
 // StatusReport is `ape status`.
 type StatusReport struct {
-	Project    string           `json:"project"`
-	Root       string           `json:"root"`
-	Initialized bool            `json:"initialized"`
-	Milestone  *MilestoneStatus `json:"milestone"`
-	Milestones []MilestoneLine  `json:"milestones"`
-	Changes    []ChangeStatus   `json:"changes"`
-	Archived   int              `json:"archived"`
-	Spend      Spend            `json:"spend"`
-	Next       string           `json:"next"`
+	Project     string           `json:"project"`
+	Root        string           `json:"root"`
+	Initialized bool             `json:"initialized"`
+	Milestone   *MilestoneStatus `json:"milestone"`
+	Milestones  []MilestoneLine  `json:"milestones"`
+	Changes     []ChangeStatus   `json:"changes"`
+	Archived    int              `json:"archived"`
+	Spend       Spend            `json:"spend"`
+	Next        string           `json:"next"`
 }
 
 // Status builds the report.
@@ -214,15 +214,31 @@ func (r *StatusReport) Brief() string {
 		b = append(b, "All milestones done.")
 	}
 	const maxChanges = 12
-	if len(r.Changes) == 0 {
-		b = append(b, fmt.Sprintf("Changes: none active (%d archived)", r.Archived))
+	var open, blocked []ChangeStatus
+	for _, c := range r.Changes {
+		if c.Status == StatusBlocked {
+			blocked = append(blocked, c)
+		} else {
+			open = append(open, c)
+		}
+	}
+	if len(open) == 0 {
+		b = append(b, fmt.Sprintf("Changes: none open (%d archived)", r.Archived))
 	} else {
 		b = append(b, fmt.Sprintf("Changes (%d archived):", r.Archived))
-		for i, c := range r.Changes {
-			if i == maxChanges {
-				b = append(b, fmt.Sprintf("  … %d more (`ape status`)", len(r.Changes)-maxChanges))
-				break
+	}
+	shown := 0
+groups:
+	for gi, group := range [][]ChangeStatus{open, blocked} {
+		if gi == 1 && len(blocked) > 0 {
+			b = append(b, "Blocked:")
+		}
+		for _, c := range group {
+			if shown == maxChanges {
+				b = append(b, fmt.Sprintf("  … %d more (`ape status --json`)", len(r.Changes)-maxChanges))
+				break groups
 			}
+			shown++
 			line := fmt.Sprintf("  %-28s %-11s %s", c.ID, c.Status, c.Milestone)
 			switch {
 			case c.BlockedReason != "":

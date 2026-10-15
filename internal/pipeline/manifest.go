@@ -163,6 +163,29 @@ type Manifest struct {
 	//
 	// Additive under schema_version 2.
 	Termination *TerminationRecord `yaml:"termination,omitempty"`
+
+	// StopGate records each verdict of an APEX v1 project's stop hook on
+	// this run's main-session Stops (v1 trial decision D1): a block kept
+	// the session alive instead of ending the run. Absent when no verdict
+	// was consulted. Additive under schema_version 2.
+	StopGate *StopGateRecord `yaml:"stop_gate,omitempty"`
+}
+
+// StopGateRecord counts and lists the stop-gate verdicts of one run.
+type StopGateRecord struct {
+	// Deferrals is the number of Stops the gate blocked — each one a turn
+	// the session continued rather than a run that ended.
+	Deferrals int             `yaml:"deferrals"`
+	Allowed   int             `yaml:"allowed"`
+	Events    []StopGateEvent `yaml:"events"`
+}
+
+// StopGateEvent is one verdict.
+type StopGateEvent struct {
+	At      time.Time `yaml:"at"`
+	Verdict string    `yaml:"verdict"`
+	Change  string    `yaml:"change,omitempty"`
+	Reason  string    `yaml:"reason,omitempty"`
 }
 
 // TerminationKind names the backstop that ended a run. Stable strings:

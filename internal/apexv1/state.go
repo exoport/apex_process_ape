@@ -18,6 +18,9 @@ const (
 	StatusReviewed   = "reviewed"
 	StatusBlocked    = "blocked"
 	StatusArchived   = "archived"
+	// StatusAbandoned is a change moved to the archive without merging
+	// its delta (`ape change abandon`, trial decision D6).
+	StatusAbandoned = "abandoned"
 )
 
 // CheckResult is one command check's run.
@@ -75,16 +78,18 @@ type State struct {
 	Accepted          []Accept   `json:"accepted"`
 	BlockedReason     *string    `json:"blocked_reason"`
 	AllowPendingHuman bool       `json:"allow_pending_human,omitempty"`
+	AbandonedReason   string     `json:"abandoned_reason,omitempty"`
 	ArchivedAt        string     `json:"archived_at,omitempty"`
 	ArchivedTo        string     `json:"archived_to,omitempty"`
 	CreatedAt         string     `json:"created_at,omitempty"`
 }
 
-// Active reports whether a change is in flight: neither archived nor a
-// draft nobody has started.
+// Active reports whether a change is in flight: started and neither
+// blocked, archived nor abandoned. A blocked change claims nothing: it
+// takes no part in requirement-conflict detection (trial decision D6).
 func (s *State) Active() bool {
 	switch s.Status {
-	case StatusInProgress, StatusVerified, StatusReviewed, StatusBlocked:
+	case StatusInProgress, StatusVerified, StatusReviewed:
 		return true
 	}
 	return false

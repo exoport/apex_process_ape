@@ -235,6 +235,11 @@ type Driver struct {
 	// stepSkill labels the running step in a DetachedAgentError. Empty on
 	// the `ape prompt` path, which has no skill.
 	stepSkill string
+	// stopGate, when set, is asked about every Stop that would otherwise
+	// complete the step: a project hook may have blocked that Stop, in
+	// which case Claude Code is already continuing the turn and tearing
+	// the session down would end it mid-work. See SetStopGate.
+	stopGate StopGate
 
 	activityMu   sync.Mutex
 	lastActivity time.Time
@@ -288,6 +293,23 @@ func (d *Driver) SetStepSkill(skill string) {
 	d.stepSkill = skill
 	d.stopMu.Unlock()
 }
+
+// StopGate reports whether a project hook blocked the main-session Stop
+// that reached the driver at stopAt. ok=false means the gate had no
+// verdict (no hook ran, or none applies) and the Stop completes as
+// usual. It may block for as long as the hook runs.
+type StopGate func(ctx context.Context, sessionID string, stopAt time.Time) (blocked, ok bool)
+
+// SetStopGate installs a StopGate. Set before the session starts.
+func (d *Driver) SetStopGate(g StopGate) {
+	d.stopMu.Lock()
+	d.stopGate = g
+	d.stopMu.Unlock()
+}
+
+// stopGateWait bounds how long a Stop waits on the project gate: the
+// stop hook's own timeout (1800 s) plus margin.
+const stopGateWait = 35 * time.Minute
 
 // DeferredStops reports how many Stop hooks this step withheld because
 // work was still outstanding, plus the most recent blocking set. Used by
@@ -496,7 +518,31 @@ func (d *Driver) noteStop(env hookEnvelope) {
 		d.deferredTasks = blocking
 		d.stopMu.Unlock()
 	case stopComplete:
-		d.SignalStepDone()
+		d.stopMu.Lock()
+		gate := d.stopGate
+		d.stopMu.Unlock()
+		if gate == nil {
+			d.SignalStepDone()
+			return
+		}
+		// Off the hook-delivery goroutine: the gate waits on a hook that
+		// runs the project's checks.
+		stopAt := time.Now()
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), stopGateWait)
+			defer cancel()
+			blocked, ok := gate(ctx, env.SessionID, stopAt)
+			if ok && blocked {
+				// The session continues the turn with the hook's reason;
+				// a later Stop decides again.
+				d.RecordActivity()
+				d.stopMu.Lock()
+				d.deferredStops++
+				d.stopMu.Unlock()
+				return
+			}
+			d.SignalStepDone()
+		}()
 	}
 }
 

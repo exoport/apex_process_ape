@@ -106,3 +106,30 @@ func (p *Project) dirtyCode(ctx context.Context) ([]string, error) {
 	}
 	return dirty, nil
 }
+
+// isWorkTree reports whether the project is inside a git work tree.
+func (p *Project) isWorkTree(ctx context.Context) bool {
+	_, err := git(ctx, p.Root, "rev-parse", "--is-inside-work-tree")
+	return err == nil
+}
+
+// commitPaths stages exactly paths and commits only them (pre-commit
+// hooks skipped: these are ape's own records). Other staged or dirty
+// files are left as they are. A commit with nothing to record is skipped.
+func (p *Project) commitPaths(ctx context.Context, subject, changeID string, paths ...string) (string, error) {
+	if _, err := git(ctx, p.Root, append([]string{"add", "-A", "--"}, paths...)...); err != nil {
+		return "", err
+	}
+	changed, err := git(ctx, p.Root, append([]string{"diff", "--cached", "--name-only", "--"}, paths...)...)
+	if err != nil {
+		return "", err
+	}
+	if changed == "" {
+		return "", nil
+	}
+	msg := subject + "\n\nChange: " + changeID + "\n"
+	if _, err := git(ctx, p.Root, append([]string{"commit", "--no-verify", "-q", "-m", msg, "--"}, paths...)...); err != nil {
+		return "", err
+	}
+	return HeadSHA(ctx, p.Root), nil
+}

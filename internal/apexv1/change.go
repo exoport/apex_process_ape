@@ -146,8 +146,10 @@ func (c *Change) parseDelta(body []mdLine) {
 			m := deltaHeadRe.FindStringSubmatch(title)
 			if m == nil {
 				cur = -1
-				c.parse = append(c.parse, Finding{File: c.file, Line: l.N,
-					Message: "delta heading must be `### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>`"})
+				c.parse = append(c.parse, Finding{
+					File: c.file, Line: l.N,
+					Message: "delta heading must be `### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>`",
+				})
 				continue
 			}
 			c.Deltas = append(c.Deltas, Delta{
@@ -176,8 +178,10 @@ func (c *Change) parseDelta(body []mdLine) {
 			c.DeltaNone = strings.TrimSpace(m[1])
 			continue
 		}
-		c.parse = append(c.parse, Finding{File: c.file, Line: l.N,
-			Message: "## Delta holds delta blocks or the single line `none — <reason>`, nothing else"})
+		c.parse = append(c.parse, Finding{
+			File: c.file, Line: l.N,
+			Message: "## Delta holds delta blocks or the single line `none — <reason>`, nothing else",
+		})
 	}
 }
 
@@ -193,13 +197,17 @@ func (c *Change) parseTasks(body []mdLine) {
 		item := strings.TrimSpace(m[1])
 		tm := taskIDRe.FindStringSubmatch(item)
 		if tm == nil {
-			c.parse = append(c.parse, Finding{File: c.file, Line: l.N,
-				Message: "task line must read `- T<n> <what> — check: <command> | human-review`"})
+			c.parse = append(c.parse, Finding{
+				File: c.file, Line: l.N,
+				Message: "task line must read `- T<n> <what> — check: <command> | human-review`",
+			})
 			continue
 		}
 		if tm[1] != "" {
-			c.parse = append(c.parse, Finding{File: c.file, Line: l.N,
-				Message: "tasks have no checkboxes — progress is state.json, written by `ape change verify`"})
+			c.parse = append(c.parse, Finding{
+				File: c.file, Line: l.N,
+				Message: "tasks have no checkboxes — progress is state.json, written by `ape change verify`",
+			})
 		}
 		rest := tm[3]
 		t := Task{ID: tm[2], Line: l.N}

@@ -124,36 +124,106 @@ func (p *Project) Rel(path string) string {
 	return filepath.ToSlash(path)
 }
 
-func (p *Project) ProjectMD() string    { return filepath.Join(p.Dev(), "project.md") }
-func (p *Project) RoadmapMD() string    { return filepath.Join(p.Dev(), "roadmap.md") }
-func (p *Project) SpecsDir() string     { return filepath.Join(p.Dev(), "specs") }
-func (p *Project) ChangesDir() string   { return filepath.Join(p.Dev(), "changes") }
-func (p *Project) ArchiveDir() string   { return filepath.Join(p.ChangesDir(), "archive") }
-func (p *Project) DecisionsDir() string { return filepath.Join(p.Dev(), "decisions") }
-
-// ApexDir is development/.apex — ape's own records, never edited by a model.
-func (p *Project) ApexDir() string { return filepath.Join(p.Dev(), ".apex") }
-
-func (p *Project) SpecFile(capability string) string {
-	return filepath.Join(p.SpecsDir(), capability, "spec.md")
+func (p *Project) ProjectMD() string {
+	return filepath.Join(p.Dev(), "project.md")
 }
-func (p *Project) ChangeDir(id string) string  { return filepath.Join(p.ChangesDir(), id) }
-func (p *Project) ChangeMD(id string) string   { return filepath.Join(p.ChangeDir(id), "change.md") }
-func (p *Project) DesignMD(id string) string   { return filepath.Join(p.ChangeDir(id), "design.md") }
-func (p *Project) StateFile(id string) string  { return filepath.Join(p.ChangeDir(id), "state.json") }
-func (p *Project) MilestonesJSON() string      { return filepath.Join(p.ApexDir(), "milestones.json") }
-func (p *Project) ProjectJSON() string         { return filepath.Join(p.ApexDir(), "project.json") }
-func (p *Project) LogDir(id string) string     { return filepath.Join(p.ApexDir(), "logs", id) }
-func (p *Project) StopGateDir() string         { return filepath.Join(p.ApexDir(), "stop-gate") }
-func (p *Project) AgentsMD() string            { return filepath.Join(p.Root, "AGENTS.md") }
-func (p *Project) ClaudeMD() string            { return filepath.Join(p.Root, "CLAUDE.md") }
-func (p *Project) SettingsJSON() string        { return filepath.Join(p.Root, ".claude", "settings.json") }
-func (p *Project) IsV1() bool                  { return dirExists(p.Dev()) }
-func (p *Project) devPrefix() string           { return p.DevRel + "/" }
-func fileExists(path string) bool              { st, err := os.Stat(path); return err == nil && !st.IsDir() }
-func dirExists(path string) bool               { st, err := os.Stat(path); return err == nil && st.IsDir() }
-func fileOrDirExists(path string) bool         { _, err := os.Stat(path); return err == nil }
+
+func (p *Project) RoadmapMD() string {
+	return filepath.Join(p.Dev(), "roadmap.md")
+}
+
+func (p *Project) SpecsDir() string {
+	return filepath.Join(p.Dev(), "specs")
+}
+
+func (p *Project) ChangesDir() string {
+	return filepath.Join(p.Dev(), "changes")
+}
+
+func (p *Project) ArchiveDir() string {
+	return filepath.Join(p.ChangesDir(), "archive")
+}
+
+func (p *Project) DecisionsDir() string {
+	return filepath.Join(p.Dev(), "decisions")
+}
+
+func (p *Project) ApexDir() string {
+	return filepath.Join(p.Dev(), ".apex")
+}
+
+func (p *Project) ChangeDir(id string) string {
+	return filepath.Join(p.ChangesDir(), id)
+}
+
+func (p *Project) ChangeMD(id string) string {
+	return filepath.Join(p.ChangeDir(id), "change.md")
+}
+
+func (p *Project) DesignMD(id string) string {
+	return filepath.Join(p.ChangeDir(id), "design.md")
+}
+
+func (p *Project) StateFile(id string) string {
+	return filepath.Join(p.ChangeDir(id), "state.json")
+}
+
+func (p *Project) MilestonesJSON() string {
+	return filepath.Join(p.ApexDir(), "milestones.json")
+}
+
+func (p *Project) ProjectJSON() string {
+	return filepath.Join(p.ApexDir(), "project.json")
+}
+
+func (p *Project) LogDir(id string) string {
+	return filepath.Join(p.ApexDir(), "logs", id)
+}
+
+func (p *Project) StopGateDir() string {
+	return filepath.Join(p.ApexDir(), "stop-gate")
+}
+
+func (p *Project) AgentsMD() string {
+	return filepath.Join(p.Root, "AGENTS.md")
+}
+
+func (p *Project) ClaudeMD() string {
+	return filepath.Join(p.Root, "CLAUDE.md")
+}
+
+func (p *Project) SettingsJSON() string {
+	return filepath.Join(p.Root, ".claude", "settings.json")
+}
+
+func (p *Project) IsV1() bool {
+	return dirExists(p.Dev())
+}
+
+func (p *Project) devPrefix() string {
+	return p.DevRel + "/"
+}
+
+func fileExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && !st.IsDir()
+}
+
+func dirExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
+}
+
+func fileOrDirExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func readFileString(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	return string(data), err
+}
+
+func (p *Project) SpecFile(capability string) string {
+	return filepath.Join(p.SpecsDir(), capability, "spec.md")
 }
