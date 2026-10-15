@@ -234,3 +234,25 @@ func promptPayload(prompt string) json.RawMessage {
 	}
 	return b
 }
+
+// ExplicitNoCommit (`ape task`, v1 trial D4): the no-agent line is
+// `/<skill> --autonomous`, with --no-commit only when the caller asked.
+func TestContractVerifier_ExplicitNoCommit(t *testing.T) {
+	for prompt, ok := range map[string]bool{
+		"/apex-plan --autonomous":                      true,
+		"/apex-plan --autonomous --prompt build it":    true,
+		"/apex-plan --autonomous --no-commit --prompt": true,
+		"/apex-planner --autonomous":                   false,
+		"/apex-plan":                                   false,
+		"/apex-plan --autonomousx":                     false,
+	} {
+		v := NewContractVerifier()
+		var fired []ContractViolation
+		v.OnViolation = func(c ContractViolation) { fired = append(fired, c) }
+		v.BeginStep(StepContract{Stage: "apex-plan", Skill: "apex-plan", ExplicitNoCommit: true})
+		v.Consume(promptPayload(prompt))
+		if ok != (len(fired) == 0) {
+			t.Errorf("%q: want ok=%v, violations %+v", prompt, ok, fired)
+		}
+	}
+}

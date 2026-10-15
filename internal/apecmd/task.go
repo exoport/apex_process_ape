@@ -74,8 +74,9 @@ the prompt is typed as keystrokes, and completion is detected via the
 bridge Stop hook.
 
 Commit control is two-layered:
-  --no-commit     skill layer — tells the skill/framework not to commit
-                  (the no-agent invocation shape already carries it).
+  --no-commit     skill layer — tells the skill/framework not to commit, by
+                  typing --no-commit into the invocation. Without it none is
+                  typed, on either path: APEX v1 skills commit their own work.
   --task-commit   task layer — opt-in git commit of the complete task at
                   the end of the run. Off by default. A bare flag derives
                   the message "ape:task/<skill>".
@@ -225,7 +226,7 @@ ownership (the run itself may have succeeded).`,
 		`File holding the --prompt text; "-" reads stdin. Mutually exclusive with --prompt and --handoff`)
 	cmd.Flags().StringVar(&promptFlagName, "prompt-flag", "", "Skill flag name the --prompt value is forwarded through (spec prompt_flag equivalent)")
 	cmd.Flags().StringVar(&handoffFlag, "handoff", "", "Path to a handoff/context file; derives a \"Read <path> and follow the Resume Protocol\" --prompt value (mutually exclusive with --prompt)")
-	cmd.Flags().BoolVar(&noCommitFlag, "no-commit", false, "Skill layer: tell the skill/framework not to commit (adds skill-level --no-commit on the agent path)")
+	cmd.Flags().BoolVar(&noCommitFlag, "no-commit", false, "Skill layer: tell the skill/framework not to commit (types --no-commit into the skill invocation; without it none is typed)")
 	cmd.Flags().StringVar(&taskCommitFlag, "task-commit", "", "Task layer: commit the complete task at the end; bare flag derives \"ape:task/<skill>\"")
 	cmd.Flags().Lookup("task-commit").NoOptDefVal = taskCommitDerivedSentinel
 	cmd.Flags().BoolVar(&allowDirtyFlag, "commit-allow-dirty", false, "Bypass the dirty-tree gate (relevant only with --task-commit)")

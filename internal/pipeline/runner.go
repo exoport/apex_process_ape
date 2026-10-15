@@ -293,6 +293,10 @@ type InteractiveStepInfo struct {
 	// switch to.
 	ModelDeclared string
 	NoClear       bool
+	// ExplicitNoCommit mirrors Step.ExplicitNoCommit: the no-agent line
+	// carries no implicit --no-commit, so the prompt contract must not
+	// expect one (v1 trial D4).
+	ExplicitNoCommit bool
 	// SessionName is the repl PTY session driving this stage (empty for
 	// non-interactive callers). PLAN-19 D4: lets the interactive core
 	// install a child-liveness probe so a step-termination diagnostic can

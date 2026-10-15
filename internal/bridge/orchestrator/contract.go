@@ -17,6 +17,8 @@ import (
 //     skill prompt shape (PAT-25):
 //     `/<Agent> --autonomous -- <Skill> --autonomous ...` when Agent != ""
 //     `/<Skill> --autonomous --no-commit ...` when Agent == ""
+//     `/<Skill> --autonomous ...` when Agent == "" and ExplicitNoCommit
+//     (`ape task`: the line carries --no-commit only when asked for)
 //
 // `/clear` between steps is driven by the runner (PTY Write) and
 // fires its own UserPromptSubmit hook, but that hook arrives BETWEEN
@@ -40,6 +42,9 @@ type StepContract struct {
 	Agent   string
 	Model   string // informational; verifier no longer enforces /model
 	NoClear bool   // runner uses this to skip inter-step /clear; verifier ignores
+	// ExplicitNoCommit: the no-agent line has no implicit --no-commit
+	// (pipeline.Step.ExplicitNoCommit, v1 trial D4).
+	ExplicitNoCommit bool
 }
 
 // ContractViolation describes a single step-contract failure.
@@ -132,7 +137,7 @@ func (v *ContractVerifier) Consume(payload json.RawMessage) {
 	if !strings.HasPrefix(prompt, "/") {
 		return
 	}
-	if !skillPromptMatches(prompt, v.active.Skill, v.active.Agent) {
+	if !skillPromptMatches(prompt, v.active.Skill, v.active.Agent, v.active.ExplicitNoCommit) {
 		v.violateLocked(fmt.Sprintf("expected skill prompt for %q (agent=%q), got %q",
 			v.active.Skill, v.active.Agent, elide(prompt)))
 		return
@@ -189,10 +194,16 @@ func extractPrompt(payload json.RawMessage) (string, error) {
 //
 //   - With agent: `/<Agent> --autonomous -- <Skill> --autonomous` (then args)
 //   - Without:    `/<Skill> --autonomous --no-commit` (then args)
-func skillPromptMatches(prompt, skill, agent string) bool {
+//   - Without, explicitNoCommit: `/<Skill> --autonomous`, then the end of
+//     the line or a space (so `/apex-plan` never matches `/apex-planner`)
+func skillPromptMatches(prompt, skill, agent string, explicitNoCommit bool) bool {
 	if agent != "" {
 		want := "/" + agent + " --autonomous -- " + skill + " --autonomous"
 		return strings.HasPrefix(prompt, want)
+	}
+	if explicitNoCommit {
+		want := "/" + skill + " --autonomous"
+		return prompt == want || strings.HasPrefix(prompt, want+" ")
 	}
 	want := "/" + skill + " --autonomous --no-commit"
 	return strings.HasPrefix(prompt, want)

@@ -6713,8 +6713,9 @@ the prompt is typed as keystrokes, and completion is detected via the
 bridge Stop hook.
 
 Commit control is two-layered:
-  --no-commit     skill layer — tells the skill/framework not to commit
-                  (the no-agent invocation shape already carries it).
+  --no-commit     skill layer — tells the skill/framework not to commit, by
+                  typing --no-commit into the invocation. Without it none is
+                  typed, on either path: APEX v1 skills commit their own work.
   --task-commit   task layer — opt-in git commit of the complete task at
                   the end of the run. Off by default. A bare flag derives
                   the message "ape:task/<skill>".
@@ -6800,7 +6801,7 @@ Flags:
 | `--model` | string | `—` | Claude model. A bare family (fable, haiku, mythos, opus, sonnet) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly |
 | `--nats-creds` | string | `—` | NATS .creds file; its user identity is baked into every subject (env APE_NATS_CREDS). |
 | `--nats-url` | string | `—` | NATS server URL for progress events + transcript upload (env APE_NATS_URL). Empty disables both. |
-| `--no-commit` | bool | `false` | Skill layer: tell the skill/framework not to commit (adds skill-level --no-commit on the agent path) |
+| `--no-commit` | bool | `false` | Skill layer: tell the skill/framework not to commit (types --no-commit into the skill invocation; without it none is typed) |
 | `--output-format` | string | `human` | Output format: human\|json (json = result envelope on stdout, progress on stderr) |
 | `--output-style` | string | `—` | Output style pinned on the spawned session (default "Default"). Pass "inherit" to keep whatever style the machine is configured with. |
 | `--prompt` | string | `—` | Run prompt forwarded via --prompt-flag (same semantics as pipeline --prompt) |

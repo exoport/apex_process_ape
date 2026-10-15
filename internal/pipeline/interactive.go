@@ -303,6 +303,8 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, skips Sta
 			ModelDeclared: declaredModel,
 			NoClear:       step.NoClear,
 			SessionName:   sessionName,
+
+			ExplicitNoCommit: step.ExplicitNoCommit,
 		}
 
 		// Between steps within a stage: send `/clear` so the next

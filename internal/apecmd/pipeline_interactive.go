@@ -534,6 +534,8 @@ func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 		Agent:   info.Agent,
 		Model:   info.Model,
 		NoClear: info.NoClear,
+
+		ExplicitNoCommit: info.ExplicitNoCommit,
 	})
 }
 
