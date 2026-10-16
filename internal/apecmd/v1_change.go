@@ -35,7 +35,7 @@ nothing written).`,
 	cmd.AddCommand(
 		newChangeNewCmd(), newChangeCheckCmd(), newChangeStartCmd(), newChangeVerifyCmd(),
 		newChangeReviewCmd(), newChangeAcceptCmd(), newChangeBlockCmd(), newChangeArchiveCmd(),
-		newChangeAbandonCmd(),
+		newChangeAbandonCmd(), newChangeDiffCmd(),
 	)
 	return cmd
 }
@@ -400,6 +400,38 @@ Exit codes: 0 blocked · 1 no such change or archived · 2 usage.`,
 		})
 	cmd.Flags().StringVar(&reason, "reason", "", "what blocks it (required)")
 	return cmd
+}
+
+func newChangeDiffCmd() *cobra.Command {
+	var f v1Flags
+	return v1ChangeLeaf(
+		"diff <id>",
+		"Show the specs as archive would leave them (unified diff per capability)",
+		`Merge the change's delta into the current specs in memory — the same merge archive
+makes, nothing written — and print a unified diff per capability it touches (a new
+capability diffs from /dev/null). For review and for handoff: what the living spec will
+say once this change is archived. JSON: {id, specs: [{capability, path, created, added,
+modified, removed, diff}], delta_none?}.
+
+Exit codes: 0 · 1 no such change · 2 usage · 3 the delta no longer applies to the specs
+(conflicts listed).`,
+		"  ape change diff add-tenant-delete\n  ape change diff add-tenant-delete --json",
+		&f,
+		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			res, err := p.PreviewDelta(id)
+			if err != nil {
+				return v1Fail(cmd, &f, err, res)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+				if len(res.Specs) == 0 {
+					fmt.Fprintf(w, "change %s changes no spec (delta: none — %s)\n", id, res.DeltaNone)
+					return
+				}
+				for _, s := range res.Specs {
+					fmt.Fprint(w, s.Diff)
+				}
+			})
+		})
 }
 
 func newChangeAbandonCmd() *cobra.Command {

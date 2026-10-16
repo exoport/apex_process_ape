@@ -8,6 +8,7 @@ const (
 	CodeMilestoneNotApproved = "milestone.not-approved"
 	CodeFolderExists         = "archive.folder-exists"
 	CodeDecisionNotFound     = "decision.not-found"
+	CodeDeltaConflict        = "archive.delta-conflict"
 )
 
 // CodeDoc documents one diagnostic code.
@@ -91,7 +92,7 @@ var DiagnosticCodes = []CodeDoc{
 
 	// conflicts (exit 3)
 	{"archive.base-changed", 3, "a requirement this change modifies or removes changed in the spec since start (another branch); nothing written"},
-	{"archive.delta-conflict", 3, "the delta no longer applies to the current specs; nothing written"},
+	{CodeDeltaConflict, 3, "the delta no longer applies to the current specs; nothing written"},
 	{CodeFolderExists, 3, "the archive folder already exists; nothing written"},
 	{"change.requirement-conflict", 3, "another active change claims the same requirement"},
 	{"conflict.unclassified", 3, "a conflict without a code (a bug: report it)"},

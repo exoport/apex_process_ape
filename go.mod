@@ -6,6 +6,7 @@ toolchain go1.27.2
 
 require (
 	github.com/aymanbagabas/go-pty v0.2.3
+	github.com/aymanbagabas/go-udiff v0.3.1
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0

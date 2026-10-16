@@ -1616,6 +1616,7 @@ Subcommands:
 - `archive` — Apply the delta to specs/, move the change to the archive, commit `archive: <id>`
 - `block` — Set blocked, with the reason shown by ape status
 - `check` — Validate change.md: shape, caps, delta against specs, a check on every task
+- `diff` — Show the specs as archive would leave them (unified diff per capability)
 - `new` — Validate the id and write the change.md skeleton and state.json (draft)
 - `review` — Record a review verdict, or run the review in its own fresh Claude Code session
 - `start` — Check green + milestone approved → record base_sha and baseline, set in-progress
@@ -1779,6 +1780,37 @@ Examples:
 
 ```
   ape change check add-tenant-delete
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape change diff
+
+Show the specs as archive would leave them (unified diff per capability)
+
+```
+ape change diff <id> [flags]
+```
+
+Merge the change's delta into the current specs in memory — the same merge archive
+makes, nothing written — and print a unified diff per capability it touches (a new
+capability diffs from /dev/null). For review and for handoff: what the living spec will
+say once this change is archived. JSON: {id, specs: [{capability, path, created, added,
+modified, removed, diff}], delta_none?}.
+
+Exit codes: 0 · 1 no such change · 2 usage · 3 the delta no longer applies to the specs
+(conflicts listed).
+
+Examples:
+
+```
+  ape change diff add-tenant-delete
+  ape change diff add-tenant-delete --json
 ```
 
 Flags:

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/aymanbagabas/go-udiff"
 )
 
 // SpecUpdate is one capability's spec after a delta merge.
@@ -198,7 +200,7 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	}
 	updates, conflicts := p.MergeDelta(ci.Doc)
 	if len(conflicts) > 0 {
-		return res, &ConflictError{Code: "archive.delta-conflict", Msg: "the delta no longer applies to specs/ — nothing was written; re-plan the change against the current specs", Conflicts: conflicts}
+		return res, &ConflictError{Code: CodeDeltaConflict, Msg: "the delta no longer applies to specs/ — nothing was written; re-plan the change against the current specs", Conflicts: conflicts}
 	}
 	folder := Today() + "-" + id
 	dest := filepath.Join(p.ArchiveDir(), folder)
@@ -367,4 +369,44 @@ func (p *Project) fingerprintConflicts(recorded map[string]string, c *Change) []
 	}
 	sort.Strings(out)
 	return out
+}
+
+// SpecDiff is one capability's spec before and after a change's delta.
+type SpecDiff struct {
+	SpecUpdate
+	Diff string `json:"diff"`
+}
+
+// SpecPreview is `ape change diff`: the specs as archive would leave them
+// (backlog item 10) — for review and for handoff.
+type SpecPreview struct {
+	ID        string     `json:"id"`
+	Specs     []SpecDiff `json:"specs"`
+	DeltaNone string     `json:"delta_none,omitempty"`
+}
+
+// PreviewDelta merges the change's delta in memory and diffs each touched
+// spec. A delta that no longer applies is a ConflictError, as at archive.
+func (p *Project) PreviewDelta(id string) (*SpecPreview, error) {
+	ci, err := p.requireChange(id)
+	if err != nil {
+		return nil, err
+	}
+	out := &SpecPreview{ID: id, Specs: []SpecDiff{}, DeltaNone: ci.Doc.DeltaNone}
+	updates, conflicts := p.MergeDelta(ci.Doc)
+	if len(conflicts) > 0 {
+		return out, &ConflictError{Code: CodeDeltaConflict, Msg: "the delta does not apply to the current specs — re-plan the change against them", Conflicts: conflicts}
+	}
+	for _, u := range updates {
+		before := ""
+		if !u.Created {
+			before, _ = readFileString(filepath.Join(p.Root, filepath.FromSlash(u.Path)))
+		}
+		from := "a/" + u.Path
+		if u.Created {
+			from = "/dev/null"
+		}
+		out.Specs = append(out.Specs, SpecDiff{SpecUpdate: u, Diff: udiff.Unified(from, "b/"+u.Path, before, u.content)})
+	}
+	return out, nil
 }
