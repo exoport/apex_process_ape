@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,10 +48,17 @@ func requirementConflicts(a, b *Change) []string {
 
 // StartResult is what `ape change start` reports.
 type StartResult struct {
-	ID       string        `json:"id"`
-	Status   string        `json:"status"`
-	BaseSHA  string        `json:"base_sha"`
-	Baseline []CheckResult `json:"baseline"`
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	BaseSHA string `json:"base_sha"`
+	// BaseBranch is the branch change/<id> was created from; Branch the
+	// branch now checked out — change/<id> (D38).
+	BaseBranch string        `json:"base_branch,omitempty"`
+	Branch     string        `json:"branch,omitempty"`
+	Baseline   []CheckResult `json:"baseline"`
+	// Resumed: start only checked out the branch of a started change that
+	// needed no re-baselining.
+	Resumed bool `json:"resumed,omitempty"`
 	// Regression is the regression command's baseline run, when this
 	// start took one (a first start, or the command changed).
 	Regression *CheckResult `json:"regression,omitempty"`
@@ -58,9 +66,81 @@ type StartResult struct {
 
 // Start moves a draft (or blocked) change to in-progress: check green,
 // milestone approved, no requirement conflict with another active change;
-// then records base_sha and the baseline.
+// then creates and checks out change/<id> from the current branch (D38),
+// records base_branch, base_sha and the baseline, and commits the state
+// there. On a change whose branch exists it checks that branch out first;
+// a started change that needs no re-baselining is then only resumed.
 func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartResult, error) {
-	ci, err := p.requireChange(id)
+	if !p.isWorkTree(ctx) {
+		return p.start(ctx, id, opt, nil)
+	}
+	branch := ChangeBranch(id)
+	cur := CurrentBranch(ctx, p.Root)
+	switch {
+	case cur == branch:
+		return p.start(ctx, id, opt, nil)
+	case ChangeOfBranch(cur) != "":
+		return nil, p.otherChangeBranch(cur, "start "+id)
+	case cur == "":
+		return nil, &FailError{Code: "branch.detached", Msg: "HEAD is detached — start creates " + branch + " from a branch and records that branch as the change's base: `git switch <branch>` first"}
+	case p.branchExists(ctx, branch):
+		if err := p.requireCleanTree(ctx, "start"); err != nil {
+			return nil, err
+		}
+		if err := p.switchBranch(ctx, branch); err != nil {
+			return nil, err
+		}
+		res, err := p.start(ctx, id, opt, nil)
+		var fe *FailError
+		if errors.As(err, &fe) && fe.Code == CodeNothingToRebaseline {
+			st, lerr := LoadState(p.StateFile(id))
+			if lerr != nil {
+				return nil, err
+			}
+			return &StartResult{ID: id, Status: st.Status, BaseSHA: st.BaseSHA, BaseBranch: st.BaseBranch, Branch: branch, Resumed: true, Baseline: []CheckResult{}}, nil
+		}
+		return res, err
+	}
+	entered := false
+	enter := func(st *State) error {
+		if err := p.requireCleanTree(ctx, "start"); err != nil {
+			return err
+		}
+		if _, err := git(ctx, p.Root, "switch", "-q", "-c", branch); err != nil {
+			return &FailError{Code: CodeBranchFailed, Msg: "cannot create " + branch + ": " + err.Error() + " — fix git and start again"}
+		}
+		entered = true
+		st.BaseBranch = cur
+		return nil
+	}
+	res, err := p.start(ctx, id, opt, enter)
+	if err != nil && entered {
+		// A refused start writes nothing: back to where it began.
+		_, _ = git(ctx, p.Root, "reset", "-q", "--hard")
+		_, _ = git(ctx, p.Root, "switch", "-q", cur)
+		_, _ = git(ctx, p.Root, "branch", "-q", "-D", branch)
+	}
+	return res, err
+}
+
+// otherChangeBranch refuses a command run on another change's branch.
+func (p *Project) otherChangeBranch(cur, what string) error {
+	base := "its base branch"
+	if st, err := LoadState(p.StateFile(ChangeOfBranch(cur))); err == nil && st.BaseBranch != "" {
+		base = st.BaseBranch
+	}
+	return &FailError{Code: CodeWrongBranch, Msg: "HEAD is on " + cur + ", another change's branch — `git switch " + base + "`, then " + what}
+}
+
+// CodeNothingToRebaseline: start on a started change that needs no
+// re-baselining.
+const CodeNothingToRebaseline = "change.nothing-to-rebaseline"
+
+// start is Start in the checked-out tree. enter, when set, runs once every
+// check has passed and before anything is written: it creates the change's
+// branch.
+func (p *Project) start(ctx context.Context, id string, opt RunOptions, enter func(*State) error) (*StartResult, error) {
+	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +158,7 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 		planChanged := st.PlanDigest != "" && st.PlanDigest != digest
 		specChanged := len(p.fingerprintConflicts(st.BaseFingerprints, ci.Doc)) > 0
 		if !planChanged && !specChanged && !p.regressionStale(st) {
-			return nil, &FailError{Code: "change.nothing-to-rebaseline", Msg: "change " + id + " is " + st.Status + " and neither its plan (change.md outside ## Why and ## Notes), the spec it modifies, nor the regression command changed — nothing to re-baseline"}
+			return nil, &FailError{Code: CodeNothingToRebaseline, Msg: "change " + id + " is " + st.Status + " and neither its plan (change.md outside ## Why and ## Notes), the spec it modifies, nor the regression command changed — nothing to re-baseline"}
 		}
 		replan, rebaseline = planChanged || specChanged, true
 	default:
@@ -99,7 +179,7 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 	}
 	var conflicts []string
 	// Blocked changes claim nothing (D6): ActiveChanges excludes them.
-	for _, other := range p.ActiveChanges() {
+	for _, other := range p.ActiveChanges(ctx) {
 		if other.ID == id || other.Doc == nil {
 			continue
 		}
@@ -109,6 +189,11 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 	}
 	if len(conflicts) > 0 {
 		return nil, &ConflictError{Code: "change.requirement-conflict", Msg: "change " + id + " claims requirements another active change claims — archive or block that one first, or re-scope", Conflicts: conflicts}
+	}
+	if enter != nil {
+		if err := enter(st); err != nil {
+			return nil, err
+		}
 	}
 
 	head := HeadSHA(ctx, p.Root)
@@ -132,11 +217,16 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 	st.BlockedReason = nil
 	// A (re-)start is a new plan or a person's answer: its attempts start
 	// over, or a re-planned change would block again at once (backlog 30).
-	st.Attempts = 0
+	if _, err := p.updateAttempts(id, func(a *Attempts) { a.Since = 0 }); err != nil {
+		return nil, err
+	}
 	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}
-	return &StartResult{ID: id, Status: st.Status, BaseSHA: st.BaseSHA, Baseline: results, Regression: regression}, nil
+	return &StartResult{
+		ID: id, Status: st.Status, BaseSHA: st.BaseSHA, BaseBranch: st.BaseBranch, Branch: CurrentBranch(ctx, p.Root),
+		Baseline: results, Regression: regression,
+	}, nil
 }
 
 // rebaseline runs the baseline — every check verify will run: the command
@@ -193,9 +283,11 @@ type VerifyResult struct {
 	// baseline (backlog 32); absent when none is configured.
 	Regression *RegressionVerdict `json:"regression,omitempty"`
 	// Attempts is the change's red verifies since it started, this one
-	// included, and AttemptsCap limits.attempts (backlog 30).
-	Attempts    int `json:"attempts"`
-	AttemptsCap int `json:"attempts_cap"`
+	// included, AttemptsTotal every red verify of it, and AttemptsCap
+	// limits.attempts (backlog 30). Kept in _apex/state/attempts.json.
+	Attempts      int `json:"attempts"`
+	AttemptsTotal int `json:"attempts_total"`
+	AttemptsCap   int `json:"attempts_cap"`
 }
 
 // greenAtBaseline lists the change's own checks — tasks and the scenarios
@@ -239,7 +331,7 @@ func (v *VerifyResult) Failing() []CheckResult {
 // hold no uncommitted code: a green over uncommitted work belongs to no
 // sha.
 func (p *Project) Verify(ctx context.Context, id string, opt RunOptions) (*VerifyResult, error) {
-	ci, err := p.requireChange(id)
+	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -250,17 +342,24 @@ func (p *Project) Verify(ctx context.Context, id string, opt RunOptions) (*Verif
 	default:
 		return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + ci.State.Status + " — verify applies to in-progress, verified or reviewed changes"}
 	}
+	if err := p.requireOnBranch(ctx, id); err != nil {
+		return nil, err
+	}
 	if err := checkPlanFrozen(ci); err != nil {
 		return nil, err
 	}
-	return p.verify(ctx, ci, opt)
+	return p.verify(ctx, ci, opt, false)
 }
 
-func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*VerifyResult, error) {
+// verify runs and records a verify. keepReview is archive's re-verify
+// after rebasing onto a moved base: the review was judged against the
+// change's own code before the rebase, so a green re-verify keeps a
+// reviewed change reviewed.
+func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, keepReview bool) (*VerifyResult, error) {
 	id, st := ci.ID, ci.State
 	dirty, err := p.dirtyCode(ctx)
 	if err != nil {
-		return nil, &FailError{Code: "git.status-failed", Msg: "cannot read git status: " + err.Error()}
+		return nil, &FailError{Code: CodeGitStatusFailed, Msg: "cannot read git status: " + err.Error()}
 	}
 	if len(dirty) > 0 {
 		return nil, &FailError{Code: "tree.dirty", Msg: "uncommitted changes outside " + p.DevRel + "/: " + strings.Join(limit(dirty, 8), ", ") +
@@ -289,17 +388,12 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 	}
 	gab := p.greenAtBaseline(ci.Doc, st)
 	if !green {
-		// Every red verify is an attempt (backlog 30), and is committed —
-		// which revises trial decision D5, under which a red verify of an
-		// in-progress change wrote nothing. The verify record itself is
-		// still left as it was there: the results are in the output and
-		// the logs.
 		return p.redAttempt(ctx, ci, &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), Regression: regression})
 	}
 	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green, GreenAtBaseline: gab}
 	switch {
 	case st.Status == StatusReviewed && st.Review != nil && st.Review.Verdict == "pass":
-		if moved, _, _ := p.codeMovedSince(ctx, st.Review.SHA); moved {
+		if moved, _, _ := p.codeMovedSince(ctx, st.Review.SHA); moved && !keepReview {
 			st.Status = StatusVerified
 		}
 	default:
@@ -308,35 +402,40 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}
+	a := p.attempts(id)
 	return &VerifyResult{
 		ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), Regression: regression,
-		Attempts: st.Attempts, AttemptsCap: p.limits().AttemptsCap(),
+		Attempts: a.Since, AttemptsTotal: a.Total, AttemptsCap: p.limits().AttemptsCap(),
 	}, nil
 }
 
-// redAttempt records a red verify as an attempt (backlog 30): attempts and
-// attempts_total go up by one, a verified or reviewed change goes back to
-// in-progress with this verify recorded (as before), and state.json is
-// committed as "apex: <id> <status> (attempt <n>)". The red verify that
-// brings attempts to limits.attempts blocks the change instead — status
-// blocked, the reason naming the count and the last failing checks,
-// committed as "apex: <id> blocked" — and returns FailError
-// change.attempts-exceeded beside the result.
+// redAttempt records a red verify as an attempt (backlog 30) in the
+// ignored _apex/state/attempts.json — it commits nothing for that (D38
+// restores D5). An in-progress change's state.json is left as it was; a
+// verified or reviewed one goes back to in-progress with this verify
+// recorded, a status change committed like any other ("apex: <id>
+// in-progress", on the change's branch). The red verify that brings the
+// count to limits.attempts blocks the change instead — status blocked,
+// the reason naming the count and the last failing checks, committed as
+// "apex: <id> blocked" — and returns FailError change.attempts-exceeded
+// beside the result.
 func (p *Project) redAttempt(ctx context.Context, ci ChangeInfo, res *VerifyResult) (*VerifyResult, error) {
 	id, st := ci.ID, ci.State
-	st.Attempts++
-	st.AttemptsTotal++
-	if st.Status != StatusInProgress {
-		st.Verify = &Verify{SHA: res.SHA, At: Stamp(), Results: res.Results, PendingHuman: res.PendingHuman, Green: false, GreenAtBaseline: res.GreenAtBaseline}
-		st.Status = StatusInProgress
+	a, err := p.updateAttempts(id, func(a *Attempts) { a.Since++; a.Total++ })
+	if err != nil {
+		return nil, err
 	}
 	capN := p.limits().AttemptsCap()
-	res.Attempts, res.AttemptsCap = st.Attempts, capN
-	if st.Attempts < capN {
-		res.Status = st.Status
-		if err := p.saveAndCommitSubject(ctx, id, st, fmt.Sprintf("apex: %s %s (attempt %d)", id, st.Status, st.Attempts)); err != nil {
-			return nil, err
+	res.Attempts, res.AttemptsTotal, res.AttemptsCap = a.Since, a.Total, capN
+	if a.Since < capN {
+		if st.Status != StatusInProgress {
+			st.Verify = &Verify{SHA: res.SHA, At: Stamp(), Results: res.Results, PendingHuman: res.PendingHuman, Green: false, GreenAtBaseline: res.GreenAtBaseline}
+			st.Status = StatusInProgress
+			if err := p.saveAndCommit(ctx, id, st); err != nil {
+				return nil, err
+			}
 		}
+		res.Status = st.Status
 		return res, nil
 	}
 	var failing []string
@@ -344,7 +443,10 @@ func (p *Project) redAttempt(ctx context.Context, ci ChangeInfo, res *VerifyResu
 	for i := range red {
 		failing = append(failing, fmt.Sprintf("%s (exit %d)", red[i].Task, red[i].Exit))
 	}
-	reason := fmt.Sprintf("attempts exceeded: %d red verifies — %s", st.Attempts, strings.Join(limit(failing, 5), ", "))
+	reason := fmt.Sprintf("attempts exceeded: %d red verifies — %s", a.Since, strings.Join(limit(failing, 5), ", "))
+	if st.Status != StatusInProgress {
+		st.Verify = &Verify{SHA: res.SHA, At: Stamp(), Results: res.Results, PendingHuman: res.PendingHuman, Green: false, GreenAtBaseline: res.GreenAtBaseline}
+	}
 	st.Status = StatusBlocked
 	st.BlockedReason = &reason
 	if err := p.saveAndCommit(ctx, id, st); err != nil {
@@ -352,8 +454,8 @@ func (p *Project) redAttempt(ctx context.Context, ci ChangeInfo, res *VerifyResu
 	}
 	res.Status = st.Status
 	return res, &FailError{Code: "change.attempts-exceeded", Msg: fmt.Sprintf(
-		"change %s: %d red verifies since it started reach limits.attempts (%d), so it is blocked — re-plan it (change.md) and `ape change start %s`, or a person answers what blocks it",
-		id, st.Attempts, capN, id)}
+		"change %s: %d red verifies since it started reach limits.attempts (%d), so it is blocked — re-plan it (change.md, on %s) and `ape change start %s`, or a person answers what blocks it",
+		id, a.Since, capN, ChangeBranch(id), id)}
 }
 
 func limit(xs []string, n int) []string {
@@ -369,13 +471,16 @@ func (p *Project) Review(ctx context.Context, id, verdict, findings string) (*St
 	if verdict != "pass" && verdict != "block" {
 		return nil, &UsageError{Code: "usage.verdict", Msg: "--verdict must be pass or block"}
 	}
-	ci, err := p.requireChange(id)
+	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	st := ci.State
 	if st.Status != StatusVerified && st.Status != StatusReviewed {
 		return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + st.Status + " — review applies to a verified change (`ape change verify " + id + "`)"}
+	}
+	if err := p.requireOnBranch(ctx, id); err != nil {
+		return nil, err
 	}
 	abs := findings
 	if !filepath.IsAbs(abs) {
@@ -435,7 +540,7 @@ func (p *Project) Accept(ctx context.Context, id, task, by string) (*State, erro
 	if strings.TrimSpace(by) == "" {
 		return nil, &UsageError{Code: "usage.by", Msg: "--by names the person accepting"}
 	}
-	ci, err := p.requireChange(id)
+	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -445,6 +550,9 @@ func (p *Project) Accept(ctx context.Context, id, task, by string) (*State, erro
 	}
 	if !t.Human() {
 		return nil, &FailError{Code: "accept.not-human-review", Msg: "task " + task + " is proven by `" + t.Check + "`, not by a person — `ape change verify " + id + "` runs it"}
+	}
+	if err := p.requireOnBranch(ctx, id); err != nil {
+		return nil, err
 	}
 	st := ci.State
 	accepted := make([]Accept, 0, len(st.Accepted)+1)
@@ -472,8 +580,11 @@ func (p *Project) Block(ctx context.Context, id, reason string) (*State, error) 
 	if strings.TrimSpace(reason) == "" {
 		return nil, &UsageError{Code: "usage.reason", Msg: "--reason is required: what blocks it, or the question only a person can answer"}
 	}
-	ci, err := p.requireChange(id)
+	ci, err := p.requireChange(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := p.requireBranchForWrite(ctx, ci); err != nil {
 		return nil, err
 	}
 	st := ci.State

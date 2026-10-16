@@ -238,10 +238,16 @@ func newStatusCmd() *cobra.Command {
     budget_usd, session_usd): sessions ape task stopped at its enforced budget
     (limits.budget: enforce; JSON milestone.budget_enforced), whose measured cost the
     spend counts
+  - the checked-out branch (JSON branch; "(on <branch>)" in the first line)
   - every change not archived, with its status, blocked reason, red checks from its
     last verify, human-review tasks not yet accepted, and for a started change its red
     verifies since it started against limits.attempts (JSON attempts, attempts_cap;
-    "(3/5 attempts)") — a change the cap blocked shows "attempts exceeded" as its reason
+    "(3/5 attempts)"; attempts_total, never reset) — a change the cap blocked shows
+    "attempts exceeded" as its reason. The counts are this checkout's
+    _apex/state/attempts.json (git-ignored). A started change is worked on its own
+    branch, change/<id> (D38; JSON changes[].branch), and its status is read from
+    there whatever branch is checked out — a change branch lists the changes it does
+    not hold too
   - spend so far: the sum of finished ape task/pipeline run manifests
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
     cmd, exit, sha}]): the regression command, and scenario checks of the spec a change

@@ -19,7 +19,13 @@ _apex/state/milestones.json when it exists) as "apex: <M> proposed|approved|done
 with trailer "Milestone: <M>". milestones.json holds each gate's result (green|red)
 and is committed, as "apex: <M> gate green|red", only when that result changes; the
 latest run of any result is in the gitignored _apex/state/logs/gate-<M>.json.
-No milestone command leaves the tree dirty.`,
+No milestone command leaves the tree dirty.
+
+Branches (trial decision D38): every milestone command records on the base branch — the
+one changes are started from and archived into (D11). On a change's branch, change/<id>,
+new, approve, gate and close are refused (exit 1, code branch.change-branch): run
+` + "`git switch <base>`" + ` first. A change's status is read from its own branch, so close sees
+every change in flight wherever it is worked.`,
 	}
 	cmd.AddCommand(newMilestoneNewCmd(), newMilestoneApproveCmd(), newMilestoneGateCmd(), newMilestoneCloseCmd())
 	return cmd
@@ -37,7 +43,9 @@ command, the budget (USD list-price equivalent, when given) and a Goal: line. Th
 the next free M<n>. Write the Goal paragraph and the Out of scope bullets afterwards
 (or pass --goal); the Status: line is ape's. Committed as "apex: <M> proposed".
 
-Exit codes: 0 ok (prints the id) · 1 no roadmap.md · 2 usage.`,
+Refused on a change branch (see ` + "`ape milestone --help`" + `).
+
+Exit codes: 0 ok (prints the id) · 1 no roadmap.md, or HEAD on a change branch · 2 usage.`,
 		Example: `  ape milestone new "Walking skeleton" --gate "./scripts/e2e.sh m1" --budget 30`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -76,9 +84,11 @@ func newMilestoneApproveCmd() *cobra.Command {
 		Short: "Write Status: approved (by <who> <ts>)",
 		Long: `Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)".
 Changes can start only under an approved milestone. Committed as "apex: <M> approved".
-Approving an approved milestone is a no-op; a done one is refused.
+Approving an approved milestone is a no-op; a done one is refused. Refused on a change
+branch (see ` + "`ape milestone --help`" + `).
 
-Exit codes: 0 ok · 1 no such milestone, done, or malformed (Gate/Goal missing) · 2 usage.`,
+Exit codes: 0 ok · 1 no such milestone, done, malformed (Gate/Goal missing), or HEAD on a
+change branch · 2 usage.`,
 		Example: "  ape milestone approve M1 --by eval",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -143,8 +153,10 @@ output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; sho
 ` + "`ape status`" + `). When the result differs from the recorded one (green vs red), or is
 the first, _apex/state/milestones.json is updated and committed as
 "apex: <M> gate green|red". Does not change the milestone's status — ` + "`ape milestone close`" + ` does.
+Refused on a change branch: the gate judges the base branch (see ` + "`ape milestone --help`" + `).
 
-Exit codes: 0 gate green · 1 gate red (last output lines shown) or no such milestone · 2 usage.`,
+Exit codes: 0 gate green · 1 gate red (last output lines shown), no such milestone, or HEAD
+on a change branch · 2 usage.`,
 		Example: "  ape milestone gate M1",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -179,7 +191,8 @@ func newMilestoneCloseCmd() *cobra.Command {
 		Use:   "close <M>",
 		Short: "Run the gate; on exit 0 write Status: done (<ts> <sha>)",
 		Long: `Close an approved milestone. Refused while a change of this milestone is in-progress,
-verified or reviewed (archive or block it first). Otherwise runs the gate (recorded as by
+verified or reviewed (archive or block it first) — each change's status read from its own
+branch, change/<id> — and on a change branch (see ` + "`ape milestone --help`" + `). Otherwise runs the gate (recorded as by
 ` + "`ape milestone gate`" + `) and, only on exit 0, writes "Status: done (<ts> <sha>)" into
 roadmap.md, committed with milestones.json as "apex: <M> done". Green means the gate command
 AND every scenario check of the spec pass, AND the regression command (when configured) is
@@ -188,7 +201,8 @@ not newly red against the milestone's earliest baseline for it — with no basel
 by ` + "`ape milestone gate`" + `. A milestone is done when this command exits 0 — never because
 anyone says so.
 
-Exit codes: 0 done · 1 gate red, changes in flight, or not approved · 2 usage.`,
+Exit codes: 0 done · 1 gate red, changes in flight, not approved, or HEAD on a change
+branch · 2 usage.`,
 		Example: "  ape milestone close M1",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -253,6 +267,10 @@ func newDecisionNewCmd() *cobra.Command {
 Fill it in (your own commit); set Enforced by: to a command, hook or review. Reference it
 from a change's frontmatter (decisions: [ADR-NNNN]) or a requirement (Decisions: ADR-NNNN).
 
+Runs on any branch: an ADR written while a change is worked, on its branch change/<id>,
+lands on the base branch with the change's squash commit at archive (D38) — and can be
+accepted only once it is there.
+
 Exit codes: 0 ok (prints id and path) · 1 slug already used, or the superseded ADR is
 missing or already superseded · 2 usage.`,
 		Example: "  ape decision new use-sqlite\n  ape decision new use-postgres --supersedes ADR-0002 --title \"Store tenants in Postgres\"",
@@ -296,7 +314,11 @@ then on ` + "`ape project check`" + ` fails if the ADR's text (everything but it
 changes: supersede it instead. An ADR accepted by hand is held to the text git first
 committed it accepted with.
 
-Exit codes: 0 accepted · 1 no such ADR, not proposed, or malformed · 2 usage.`,
+A person's acceptance is recorded on the base branch (D11, D38): refused on a change's
+branch, change/<id> (code branch.change-branch; ` + "`git switch <base>`" + ` first).
+
+Exit codes: 0 accepted · 1 no such ADR, not proposed, malformed, or HEAD on a change
+branch · 2 usage.`,
 		Example: "  ape decision accept ADR-0003 --by diego",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -303,8 +303,9 @@ func (p *Project) saveStopRecord(path string, r StopRecord) {
 	_ = writeFileAtomic(path, string(data)+"\n")
 }
 
-// StopHook decides a Stop or SubagentStop. It blocks when exactly one
-// change is in-progress and one of its command checks is red, at most
+// StopHook decides a Stop or SubagentStop. It blocks when HEAD is on a
+// change's branch (D38), that change is in-progress, and one of its
+// command checks is red, at most
 // MaxConsecutiveStopBlocks times in a row (the count resets whenever
 // Claude Code reports the stop is not itself a continuation from a block).
 func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDecision {
@@ -356,19 +357,27 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 		return d
 	}
 
-	var inProgress []ChangeInfo
-	for _, c := range p.Changes() {
-		if c.State != nil && c.State.Status == StatusInProgress && c.Doc != nil {
-			inProgress = append(inProgress, c)
-		}
-	}
-	if len(inProgress) != 1 {
+	// The change under work is the one whose branch is checked out (D38),
+	// read from the working tree.
+	id := p.HeadChange(ctx)
+	if id == "" {
 		rec.Verdict = StopAllow
 		rec.ConsecutiveBlocks = 0
-		rec.Reason = fmt.Sprintf("%d changes in progress", len(inProgress))
+		rec.Reason = "HEAD is not on a change branch"
 		return finish(StopDecision{Record: rec})
 	}
-	ci := inProgress[0]
+	ci := p.loadChange(id)
+	if ci.State == nil || ci.Doc == nil || ci.State.Status != StatusInProgress {
+		status := "unreadable"
+		if ci.State != nil {
+			status = ci.State.Status
+		}
+		rec.Verdict = StopAllow
+		rec.ConsecutiveBlocks = 0
+		rec.Change = id
+		rec.Reason = "change " + id + " on HEAD is " + status
+		return finish(StopDecision{Record: rec})
+	}
 	rec.Change = ci.ID
 	if rec.ConsecutiveBlocks >= MaxConsecutiveStopBlocks {
 		rec.Verdict = StopAllow
@@ -422,7 +431,7 @@ func stopReason(id string, red []CheckResult, n int) string {
 // StopGateConfigured reports whether a project's stop hook runs on a
 // main Stop: a v1 project whose settings register `ape hook stop`. Every
 // such Stop then has a verdict in the session's log — an allow, quickly,
-// when no single change is in progress — so `ape task` consumes one
+// when HEAD is on no in-progress change's branch — so `ape task` consumes one
 // verdict per Stop and the k-th Stop always meets the k-th verdict.
 func StopGateConfigured(root string) bool {
 	p, err := Open(FindRoot(root))

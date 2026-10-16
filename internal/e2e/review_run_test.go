@@ -156,6 +156,26 @@ func TestReviewRun_FreshSessionRecordsTheVerdict(t *testing.T) {
 	status, err := exec.Command("git", "-C", project, "status", "--porcelain").Output()
 	require.NoError(t, err)
 	require.Empty(t, strings.TrimSpace(string(status)))
+	// D38: the session ran in this checkout on the change's branch, and its
+	// review.md and verdict were committed there.
+	branch, err := exec.Command("git", "-C", project, "branch", "--show-current").Output()
+	require.NoError(t, err)
+	require.Equal(t, "change/add-wave", strings.TrimSpace(string(branch)))
+}
+
+// D38: the review session records on the change's branch, so --run off it
+// is refused before any session starts.
+func TestReviewRun_RefusedOffTheChangeBranch(t *testing.T) {
+	ape, project, fake, env := reviewProject(t)
+	base, _ := changeState(t, project)["base_branch"].(string)
+	c := exec.Command("git", "-C", project, "switch", "-q", base)
+	c.Env = env
+	out, err := c.CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	stdout, code := runApe(t, ape, project, env, "change", "review", "add-wave", "--run", "--json")
+	require.Equal(t, 1, code)
+	require.Contains(t, stdout, "change.wrong-branch")
+	require.NoFileExists(t, filepath.Join(fake, "seen"), "no session started")
 }
 
 // A session that changes more than its review.md has its verdict voided.

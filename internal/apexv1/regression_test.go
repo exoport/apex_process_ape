@@ -132,6 +132,7 @@ func TestRegression_ReStartBaselinesOnlyANewCommand(t *testing.T) {
 func TestGate_RegressionJudgedByTheMilestonesEarliestBaseline(t *testing.T) {
 	t.Run("green at baseline, red now: the gate is red", func(t *testing.T) {
 		p := suiteWave(t, false)
+		run(t, p.Root, "switch", "-q", "main")
 		t.Setenv("SUITE_RED", "1")
 		g, err := p.RunGate(ctx(), "M1", RunOptions{})
 		require.NoError(t, err)
@@ -142,6 +143,7 @@ func TestGate_RegressionJudgedByTheMilestonesEarliestBaseline(t *testing.T) {
 	})
 	t.Run("red at baseline, still red: green, reported", func(t *testing.T) {
 		p := suiteWave(t, true)
+		run(t, p.Root, "switch", "-q", "main")
 		t.Setenv("SUITE_RED", "1")
 		g, err := p.RunGate(ctx(), "M1", RunOptions{})
 		require.NoError(t, err)
@@ -150,6 +152,7 @@ func TestGate_RegressionJudgedByTheMilestonesEarliestBaseline(t *testing.T) {
 	})
 	t.Run("the earliest baseline wins, archived changes included", func(t *testing.T) {
 		p := suiteWave(t, true)
+		run(t, p.Root, "switch", "-q", "main")
 		write(t, p, "development/archive/2026-01-01-add-hug/change.md", "---\nid: add-hug\nmilestone: M1\ntouches: [greeting]\n---\n# Add hug\n")
 		require.NoError(t, SaveState(p.ArchiveDir()+"/2026-01-01-add-hug/state.json", &State{
 			ID: "add-hug", Status: StatusArchived,

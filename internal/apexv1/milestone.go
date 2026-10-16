@@ -165,6 +165,9 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 	if strings.Contains(gate, "\n") || strings.Contains(title, "\n") {
 		return "", &UsageError{Code: "usage.one-line", Msg: "title and gate are one line each"}
 	}
+	if err := p.refuseOnChangeBranch(ctx, "a new milestone"); err != nil {
+		return "", err
+	}
 	doc, rm, err := p.loadRoadmapDoc()
 	if err != nil {
 		return "", err
@@ -183,6 +186,9 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milestone, error) {
 	if strings.TrimSpace(by) == "" {
 		return nil, &UsageError{Code: "usage.by", Msg: "--by names who approves"}
+	}
+	if err := p.refuseOnChangeBranch(ctx, "a milestone approval"); err != nil {
+		return nil, err
 	}
 	doc, rm, err := p.loadRoadmapDoc()
 	if err != nil {
@@ -243,6 +249,9 @@ type GateResult struct {
 // (and a commit `apex: <M> gate green|red`) changes only when the result
 // does.
 func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*GateResult, error) {
+	if err := p.refuseOnChangeBranch(ctx, "a milestone gate run"); err != nil {
+		return nil, err
+	}
 	g, err := p.runGate(ctx, id, opt)
 	if err != nil || !g.ResultChanged {
 		return g, err
@@ -291,7 +300,7 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	results := p.RunChecks(ctx, filepath.Join(p.LogsDir(), "gate-"+id), "", checks, opt)
 	run.StrayFiles = StrayFiles(append([]CheckResult{gate}, results...))
 	if regressionCmd != "" {
-		change, base := p.milestoneRegressionBaseline(id, regressionCmd)
+		change, base := p.milestoneRegressionBaseline(ctx, id, regressionCmd)
 		run.Regression = judgeRegression(&results[len(results)-1], base)
 		run.Regression.BaselineChange = change
 		results = results[:len(results)-1]
@@ -336,6 +345,9 @@ func lastN(xs []string, n int) []string {
 // CloseMilestone runs the gate and, on exit 0 with no change of this
 // milestone still in flight, writes `Status: done (<ts> <sha>)`.
 func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions) (*GateResult, error) {
+	if err := p.refuseOnChangeBranch(ctx, "closing a milestone"); err != nil {
+		return nil, err
+	}
 	_, rm, err := p.loadRoadmapDoc()
 	if err != nil {
 		return nil, err
@@ -352,7 +364,7 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 		return nil, &FailError{Code: CodeMilestoneNotApproved, Msg: id + " is " + m.StatusText + ", not approved — nothing to close"}
 	}
 	var inFlight []string
-	for _, c := range p.Changes() {
+	for _, c := range p.changes(ctx) {
 		if c.Doc == nil || c.State == nil || c.Doc.Meta.Milestone != id {
 			continue
 		}

@@ -137,6 +137,15 @@ func TestV1Commands_ExitCodes(t *testing.T) {
 	var started apexv1.StartResult
 	require.NoError(t, json.Unmarshal([]byte(stdout), &started))
 	require.Equal(t, apexv1.StatusInProgress, started.Status)
+	require.Equal(t, "change/add-wave", started.Branch, "D38: start checks out the change's branch")
+	base := started.BaseBranch
+	require.NotEmpty(t, base)
+
+	// A new change is planned on the base branch: refused on a change's.
+	_, stderr, err = v1Exec(t, newChangeCmd, "new", "add-wave-2", "--milestone", "M1", "--touches", "greeting", "--cwd", root)
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
+	require.Contains(t, stderr, "git switch "+base)
+	v1Git(t, root, "switch", "-q", base)
 
 	// conflict → 3: a second change MODIFYing... here ADDing the same requirement
 	require.NoError(t, os.MkdirAll(filepath.Join(root, filepath.FromSlash("development/changes/add-wave-2")), 0o755))
@@ -147,9 +156,19 @@ func TestV1Commands_ExitCodes(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(root, filepath.FromSlash("development/changes/add-wave-2/change.md")),
 		[]byte(strings.Replace(v1ChangeMD, "id: add-wave", "id: add-wave-2", 1)), 0o644))
+	v1Git(t, root, "add", "-A")
+	v1Git(t, root, "commit", "-q", "-m", "plan: add-wave-2")
 	_, stderr, err = v1Exec(t, newChangeCmd, "start", "add-wave-2", "--cwd", root)
 	require.Equal(t, exitV1Conflict, exitCodeOf(t, err))
 	require.Contains(t, stderr, "conflict: add-wave:")
+
+	// Off its branch, verify refuses; start resumes the change there.
+	_, stderr, err = v1Exec(t, newChangeCmd, "verify", "add-wave", "--cwd", root)
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
+	require.Contains(t, stderr, "git switch change/add-wave")
+	stdout, _, err = v1Exec(t, newChangeCmd, "start", "add-wave", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, "resumed on change/add-wave")
 
 	// verify red → 1, the failing tail on stdout
 	stdout, _, err = v1Exec(t, newChangeCmd, "verify", "add-wave", "--cwd", root)
@@ -171,7 +190,8 @@ func TestV1Commands_ExitCodes(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout), &arch))
 	require.Len(t, arch.Specs, 1)
 	require.True(t, arch.Specs[0].Created)
-	require.Equal(t, "archive: add-wave", v1Git(t, root, "log", "-1", "--format=%s"))
+	require.Equal(t, "Add wave", v1Git(t, root, "log", "-1", "--format=%s"), "D38: one squash commit, titled by the change")
+	require.Equal(t, base, v1Git(t, root, "branch", "--show-current"))
 
 	// milestone gate red → 1; close after the gate goes green → 0
 	_, _, err = v1Exec(t, newMilestoneCmd, "gate", "M1", "--cwd", root)

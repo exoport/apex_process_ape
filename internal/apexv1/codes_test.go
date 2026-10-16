@@ -28,6 +28,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeWrongStatus": CodeWrongStatus, "CodeCommitFailed": CodeCommitFailed,
 		"CodeMilestoneNotFound": CodeMilestoneNotFound, "CodeMilestoneNotApproved": CodeMilestoneNotApproved,
 		"CodeFolderExists": CodeFolderExists, "CodeDecisionNotFound": CodeDecisionNotFound, "CodeDeltaConflict": CodeDeltaConflict,
+		"CodeWrongBranch": CodeWrongBranch, "CodeChangeBranch": CodeChangeBranch, "CodeBranchFailed": CodeBranchFailed,
+		"CodeNothingToRebaseline": CodeNothingToRebaseline, "CodeGitStatusFailed": CodeGitStatusFailed,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

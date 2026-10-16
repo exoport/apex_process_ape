@@ -122,7 +122,12 @@ func stopHookRun(t *testing.T, ape string, dropSettingsHooks bool) {
 	require.NoError(t, writeFile(filepath.Join(project, ".claude", "skills", "apex-apply", "SKILL.md"), "# apply\n"))
 	sh("git", "add", "-A")
 	sh("git", "commit", "-q", "-m", "plan")
+	// D38: start checks out change/add-wave; the gate judges the change
+	// whose branch is HEAD.
 	sh(ape, "change", "start", "add-wave")
+	head, err := exec.Command("git", "-C", project, "branch", "--show-current").Output()
+	require.NoError(t, err)
+	require.Equal(t, "change/add-wave", strings.TrimSpace(string(head)))
 	if dropSettingsHooks {
 		require.NoError(t, writeFile(filepath.Join(project, ".claude", "settings.json"), "{}\n"))
 	}
@@ -133,7 +138,7 @@ func stopHookRun(t *testing.T, ape string, dropSettingsHooks bool) {
 	cmd.Env = append(slices.Clone(gitEnv), "PATH="+fake+":"+os.Getenv("PATH"), "APE_CLAUDE_PROBE=off", "FAKE_DIR="+fake)
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	require.NoError(t, err, "stderr:\n%s", tail(stderr.String(), 30))
 
 	turns, err := os.ReadFile(filepath.Join(fake, "turns"))

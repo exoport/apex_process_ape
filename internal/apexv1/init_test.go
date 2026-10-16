@@ -147,9 +147,14 @@ func TestMergeHooks(t *testing.T) {
 
 func TestStatus(t *testing.T) {
 	p := startedWave(t)
+	// Planning happens on the base branch; the started change's status is
+	// read from its branch (D38).
+	run(t, p.Root, "switch", "-q", "main")
 	addChange(t, p, "add-other", waveChange("add-other"))
+	commitAll(t, p, "plan: add-other")
 	_, err := p.Block(ctx(), "add-other", "needs a decision")
 	require.NoError(t, err)
+	require.Equal(t, StatusDraft, state(t, p, "add-wave").Status, "main holds add-wave's draft")
 
 	// Two task manifests, one before the approval and one after.
 	writeManifest(t, p, "apex-plan", "20261014-100000-aaaa", "2026-10-14T10:00:00Z", 1.25)
@@ -162,13 +167,19 @@ func TestStatus(t *testing.T) {
 	require.Equal(t, 2, r.Spend.Runs)
 	require.InDelta(t, 2.5, r.Milestone.SpentUSD, 0.001, "spend since approval at 12:00Z")
 	require.Len(t, r.Changes, 2)
+	require.Equal(t, "main", r.Branch)
+	require.Equal(t, StatusInProgress, r.Changes[1].Status, "add-wave's status comes from change/add-wave")
+	require.Equal(t, "change/add-wave", r.Changes[1].Branch)
+	require.Empty(t, r.Changes[0].Branch, "a draft never started has no branch")
 	require.Contains(t, r.Next, "apply add-wave")
+	require.Contains(t, r.Next, "on change/add-wave (`ape change start add-wave` checks it out)")
 
 	brief := r.Brief()
 	require.LessOrEqual(t, strings.Count(brief, "\n"), 25)
 	require.Contains(t, brief, "Blocked:\n  add-other")
 	require.Contains(t, brief, "needs a decision")
 	require.Contains(t, brief, "Spend: $3.75 over 2 runs")
+	require.Contains(t, brief, "APEX status — "+r.Project+" (on main)")
 }
 
 func TestStatus_BriefStaysUnder25Lines(t *testing.T) {

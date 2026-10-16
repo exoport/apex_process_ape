@@ -116,7 +116,14 @@ func TestStopHook(t *testing.T) {
 		d := StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
 		require.False(t, d.Block)
 		require.Equal(t, StopAllow, d.Record.Verdict)
-		require.Equal(t, "0 changes in progress", d.Record.Reason)
+		require.Equal(t, "HEAD is not on a change branch", d.Record.Reason)
+	})
+	t.Run("the base branch allows while a change is in progress on its branch", func(t *testing.T) {
+		p := startedWave(t)
+		run(t, p.Root, "switch", "-q", "main")
+		d := StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
+		require.False(t, d.Block, "planning on the base branch is not gated by a change's checks (D38)")
+		require.Equal(t, "HEAD is not on a change branch", d.Record.Reason)
 	})
 	t.Run("red check blocks with its last lines, three times, then allows", func(t *testing.T) {
 		p := startedWave(t)
@@ -167,15 +174,19 @@ func TestStopHook(t *testing.T) {
 		p := startedWave(t)
 		_, err := p.Block(ctx(), "add-wave", "question for a person")
 		require.NoError(t, err)
-		require.False(t, StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{}).Block)
+		d := StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
+		require.False(t, d.Block)
+		require.Equal(t, "change add-wave on HEAD is blocked", d.Record.Reason)
 	})
-	t.Run("two changes in progress allow", func(t *testing.T) {
+	t.Run("only the change on HEAD's branch counts", func(t *testing.T) {
 		p := startedWave(t)
+		// Another in-progress change elsewhere does not stop the gate on
+		// this one (D38: the change under work is the one checked out).
 		addChange(t, p, "add-other", waveChange("add-other"))
 		require.NoError(t, SaveState(p.StateFile("add-other"), &State{ID: "add-other", Status: StatusInProgress}))
 		d := StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
-		require.False(t, d.Block)
-		require.Equal(t, "2 changes in progress", d.Record.Reason)
+		require.True(t, d.Block)
+		require.Equal(t, "add-wave", d.Record.Change)
 	})
 	t.Run("SubagentStop blocks too, counted apart from the main session", func(t *testing.T) {
 		p := startedWave(t)

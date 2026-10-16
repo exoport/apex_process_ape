@@ -200,8 +200,9 @@ func TestVerify(t *testing.T) {
 	p := startedWave(t)
 	before := subjects(t, p)
 
-	// Red on an in-progress change: the verify record is left as it was,
-	// but the attempt is counted and committed (backlog 30, revising D5).
+	// Red on an in-progress change: nothing is written to state.json and
+	// nothing is committed (D5, restored by D38); the attempt is counted in
+	// the ignored _apex/state/attempts.json (backlog 30).
 	v, err := p.Verify(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)
 	require.False(t, v.Green)
@@ -212,9 +213,8 @@ func TestVerify(t *testing.T) {
 	require.Equal(t, DefaultAttempts, v.AttemptsCap)
 	st := state(t, p, "add-wave")
 	require.Nil(t, st.Verify)
-	require.Equal(t, 1, st.Attempts)
-	require.Equal(t, append([]string{"apex: add-wave in-progress (attempt 1)"}, before...), subjects(t, p))
-	require.Contains(t, run(t, p.Root, "log", "-1", "--format=%B"), "Change: add-wave")
+	require.Equal(t, Attempts{Since: 1, Total: 1}, p.attempts("add-wave"))
+	require.Equal(t, before, subjects(t, p), "a red verify commits nothing")
 	clean(t, p, "red verify")
 
 	// Uncommitted code: refused.
@@ -229,7 +229,7 @@ func TestVerify(t *testing.T) {
 	require.Equal(t, []string{"T2"}, v.PendingHuman)
 	st = state(t, p, "add-wave")
 	require.Equal(t, StatusVerified, st.Status)
-	require.Equal(t, 1, st.Attempts, "a green verify does not reset the count")
+	require.Equal(t, 1, p.attempts("add-wave").Since, "a green verify does not reset the count")
 	require.Equal(t, v.SHA, st.Verify.SHA)
 	require.Len(t, st.Verify.Results[0].OutputSHA256, 64)
 	require.Equal(t, "apex: add-wave verified", subjects(t, p)[0])
@@ -244,8 +244,9 @@ func TestVerify(t *testing.T) {
 	st = state(t, p, "add-wave")
 	require.Equal(t, StatusInProgress, st.Status)
 	require.False(t, st.Verify.Green, "the red verify is recorded on the way back")
-	require.Equal(t, 2, st.Attempts)
-	require.Equal(t, "apex: add-wave in-progress (attempt 2)", subjects(t, p)[0])
+	require.Equal(t, 2, v.Attempts)
+	require.Equal(t, "apex: add-wave in-progress", subjects(t, p)[0], "a status change, committed on the change's branch")
+	require.Equal(t, ChangeBranch("add-wave"), CurrentBranch(ctx(), p.Root))
 }
 
 // Backlog 30: the red verify that reaches limits.attempts blocks the
@@ -285,17 +286,15 @@ func TestVerify_AttemptsCapBlocks(t *testing.T) {
 	require.Equal(t, 2, r.Changes[0].AttemptsCap, "… against the cap that blocked it")
 	_, err = p.Start(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)
-	st = state(t, p, "add-wave")
-	require.Equal(t, 0, st.Attempts)
-	require.Equal(t, 2, st.AttemptsTotal)
+	require.Equal(t, Attempts{Since: 0, Total: 2}, p.attempts("add-wave"))
 	v, err = p.Verify(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)
 	require.Equal(t, 1, v.Attempts)
-	st = state(t, p, "add-wave")
-	require.Equal(t, 3, st.AttemptsTotal)
+	require.Equal(t, 3, v.AttemptsTotal)
 
 	r = p.Status()
 	require.Equal(t, 1, r.Changes[0].Attempts)
+	require.Equal(t, 3, r.Changes[0].AttemptsTotal)
 	require.Equal(t, 2, r.Changes[0].AttemptsCap)
 	require.Contains(t, r.Brief(), "(1/2 attempts)")
 }
@@ -409,12 +408,10 @@ func TestAbandon(t *testing.T) {
 }
 
 func TestStateCommit_LeavesOtherWorkAlone(t *testing.T) {
-	p := fixture(t, baseFiles())
-	addChange(t, p, "add-wave", waveChange("add-wave"))
-	commitAll(t, p, "plan")
+	p := startedWave(t)
 	write(t, p, "notes.txt", "staged by someone\n")
 	run(t, p.Root, "add", "notes.txt")
-	_, err := p.Start(ctx(), "add-wave", RunOptions{})
+	_, err := p.Block(ctx(), "add-wave", "parked")
 	require.NoError(t, err)
 	require.Equal(t, "development/changes/add-wave/state.json", run(t, p.Root, "show", "--name-only", "--format=", "HEAD"))
 	require.Equal(t, "A  notes.txt", run(t, p.Root, "status", "--porcelain"), "the operator's staged file stays staged")

@@ -24,11 +24,28 @@ func newChangeCmd() *cobra.Command {
   any status but archived ──abandon──▶ abandoned (moved to the archive, no delta merged)
 
 Done is a command ape ran at a sha: models never set a status. Every status change is
-committed by ape: state.json alone, subject "apex: <id> <status>", trailer "Change: <id>"
-(archive commits "archive: <id>"; a red verify "apex: <id> in-progress (attempt <n>)").
-Skills never stage state.json. A blocked change claims no requirements: it takes no part
-in start's conflict check. A change whose red verifies reach limits.attempts is blocked by
-verify itself (see ` + "`ape change verify --help`" + `).
+committed by ape: state.json alone, subject "apex: <id> <status>", trailer "Change: <id>".
+Skills never stage state.json. A red verify of an in-progress change commits nothing (D5):
+its attempt is counted in the git-ignored _apex/state/attempts.json. A blocked change
+claims no requirements: it takes no part in start's conflict check. A change whose red
+verifies reach limits.attempts is blocked by verify itself (see ` + "`ape change verify --help`" + `).
+
+Branch per change (trial decision D38):
+
+  base branch ──change new (draft, planned here)──start──▶ change/<id> ──work, verify,
+  review (ape's status commits land here)──archive──▶ ONE squash commit on the base
+  branch ("<change title>", trailer "Change: <id>"); change/<id> deleted
+
+  - start creates change/<id> from the branch HEAD is on (recorded as base_branch, with
+    base_sha) and checks it out; start on a change whose branch exists checks it out
+  - verify, review, accept and block record a started change's state, and need HEAD on
+    change/<id> (else exit 1, code change.wrong-branch: ` + "`git switch change/<id>`" + `)
+  - new, and the milestone and decision-accept records, need HEAD off every change
+    branch (code branch.change-branch: ` + "`git switch <base>`" + `)
+  - archive rebases change/<id> onto the base branch and squash-merges it; abandon
+    deletes it. The base branch only ever receives verified, reviewed changes.
+  - a change's status is read from its own branch when HEAD is elsewhere, so
+    ` + "`ape status`" + ` on the base branch shows every change's real status
 
 Exit codes for every subcommand: 0 ok · 1 check failed (one-line remediation) · 2 usage ·
 3 conflict (another change claims the same requirement, or the delta no longer applies;
@@ -85,7 +102,8 @@ func newChangeNewCmd() *cobra.Command {
 touches, paths; # title; ## Why, ## Out of scope (pre-filled with the milestone's Out of
 scope bullets), ## Delta, ## Tasks, ## Notes) and state.json with status draft, and
 commit both as "apex: <id> draft" (trailer "Change: <id>"). Filling change.md in is the
-author's own commit.
+author's own commit. A change is planned on the base branch: refused while HEAD is on a
+change branch, change/<other> (exit 1, code branch.change-branch; `+"`git switch <base>`"+`).
 
 <id> is a verb-led kebab slug, ^[a-z][a-z0-9-]{2,39}$, unique across active AND archived
 changes (development/archive/, and an older ape's development/changes/archive/).
@@ -96,7 +114,8 @@ is a warning, not a failure.
 
 Then fill change.md and run `+"`ape change check <id>`"+`.
 
-Exit codes: 0 ok · 1 id taken (incl. archive) or milestone not in roadmap · 2 usage.`,
+Exit codes: 0 ok · 1 id taken (incl. archive), milestone not in roadmap, or HEAD on a
+change branch · 2 usage.`,
 		"  ape change new add-tenant-delete --milestone M2 --touches tenants --paths 'internal/api/**'",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -170,13 +189,18 @@ func newChangeStartCmd() *cobra.Command {
 	var f v1Flags
 	cmd := v1ChangeLeaf(
 		"start <id>",
-		"Check green + milestone approved → record base_sha and baseline, set in-progress",
+		"Check green + milestone approved → create and check out change/<id>, record the baseline, set in-progress",
 		`Start a draft (or resume a blocked) change:
 
   1. `+"`ape change check <id>`"+` must be green, and its milestone approved
   2. refused with exit 3 if another active change (in-progress, verified, reviewed —
-     not blocked) also ADDs, MODIFIES or REMOVES one of the same requirements
-  3. records base_sha (HEAD) and started_at (kept when resuming a blocked change)
+     not blocked; read from its own branch) also ADDs, MODIFIES or REMOVES one of the
+     same requirements
+  3. creates the branch change/<id> at HEAD and checks it out (trial decision D38): the
+     tree must be clean (ignored files aside), HEAD on a branch (not detached, not another
+     change's change/<other>); records that branch as base_branch, and base_sha (HEAD)
+     and started_at (both kept when resuming a blocked change). A refused start leaves no
+     branch and HEAD where it was.
   4. runs every check verify will run once, as the baseline (which were already green):
      the command tasks and the effective spec's scenario checks; from the project root
      with sh -c; output under _apex/state/logs/<id>/. With "regression: <cmd>" in
@@ -184,8 +208,15 @@ func newChangeStartCmd() *cobra.Command {
      records it in state.json (regression_baseline: cmd, exit, output sha256, sha); a red
      regression baseline is recorded, it does not block start
   5. sets in-progress, freezes the plan (SHA-256 of change.md outside ## Why and ## Notes), fingerprints
-     the spec block of every requirement it MODIFIES or REMOVES, and commits state.json
-     ("apex: <id> in-progress")
+     the spec block of every requirement it MODIFIES or REMOVES, commits state.json
+     ("apex: <id> in-progress") on change/<id>, and resets the attempts count since start
+     (_apex/state/attempts.json)
+
+All of the change's work — code commits, ape's status commits — then happens on
+change/<id>. Start on a change whose branch exists, from another branch (the base, say),
+checks change/<id> out first (clean tree); when the change is started and nothing needs
+re-baselining it only resumes there (JSON "resumed": true). Re-start keeps base_branch.
+A blocked change is re-planned on its branch (change.md there), then started again.
 
 Re-start: once the plan is frozen, verify and archive refuse while change.md differs from
 it anywhere but ## Why and ## Notes (frontmatter, title, Out of scope, Delta, Tasks, …). Running start again on an in-progress, verified or reviewed change
@@ -196,7 +227,8 @@ changed, when a spec block the change modifies or removes was changed by another
 since start, or when the regression command has no baseline for it (configured or changed
 since start); otherwise it is refused.
 
-Exit codes: 0 started · 1 check red, milestone not approved, or wrong status · 2 usage ·
+Exit codes: 0 started (or resumed) · 1 check red, milestone not approved, wrong status,
+dirty tree, detached HEAD, HEAD on another change's branch, or git failed · 2 usage ·
 3 requirement conflict with another active change.`,
 		"  ape change start add-tenant-delete",
 		&f,
@@ -206,7 +238,18 @@ Exit codes: 0 started · 1 check red, milestone not approved, or wrong status ·
 				return v1Fail(cmd, &f, err, nil)
 			}
 			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
-				fmt.Fprintf(w, "change %s: in-progress from %.7s; baseline:\n", id, res.BaseSHA)
+				if res.Resumed {
+					fmt.Fprintf(w, "change %s: %s, resumed on %s (base %s)\n", id, res.Status, res.Branch, res.BaseBranch)
+					return
+				}
+				on := ""
+				if res.Branch != "" {
+					on = " on " + res.Branch
+					if res.BaseBranch != "" {
+						on += " (base " + res.BaseBranch + ")"
+					}
+				}
+				fmt.Fprintf(w, "change %s: in-progress%s from %.7s; baseline:\n", id, on, res.BaseSHA)
 				printChecks(w, res.Baseline, false)
 				if r := res.Regression; r != nil {
 					note := "green"
@@ -242,19 +285,21 @@ fails verify only when it is newly red — green at baseline, red now — or whe
 has no baseline for this command (re-start records one). Red at baseline and still red
 is reported (pre_existing_red), not failed: the planner roadmaps it.
 The working tree must hold no uncommitted changes outside development/ — commit first
-(trailer "Change: <id>"): a verify belongs to a sha.
+(trailer "Change: <id>"): a verify belongs to a sha. HEAD must be on the change's branch,
+change/<id> (D38; else exit 1, code change.wrong-branch).
 
 All checks exit 0 → status verified (a reviewed change whose code has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last
 lines are printed. Green at baseline: the change's own checks (tasks, delta scenarios) that
 already passed when they were baselined, before the code, are listed (JSON
 "green_at_baseline", also recorded in state.json) for review to justify or flag.
-On red: every red verify is an attempt. state.json counts it ("attempts", reset to 0 by
-every start or re-start; "attempts_total", never reset; a green verify changes neither)
-and is committed as "apex: <id> in-progress (attempt <n>)" — this replaces trial
-decision D5, under which a red verify of an in-progress change wrote nothing. Otherwise
-an in-progress change keeps its last verify record; a verified/reviewed one goes back to
-in-progress with this verify recorded. The red verify that brings attempts to the cap
+On red: every red verify is an attempt, counted in the git-ignored
+_apex/state/attempts.json (JSON "attempts": since the last start or re-start, which reset
+it; "attempts_total": never reset; a green verify changes neither). A red verify of an
+in-progress change writes nothing to state.json and commits nothing (trial decision D5,
+restored by D38): it keeps its last verify record. A verified/reviewed one goes back to
+in-progress with this verify recorded, a status change committed as "apex: <id>
+in-progress" on change/<id>. The red verify that brings attempts to the cap
 (_apex/config.yaml limits.attempts, default 5) blocks the change instead: status blocked,
 blocked_reason "attempts exceeded: <n> red verifies — <failing checks>", committed as
 "apex: <id> blocked", exit 1 with code change.attempts-exceeded. Re-plan, then
@@ -343,12 +388,18 @@ development/changes/<id>/review.md); it must exist and is recorded by path.
   pass   needs a green verify whose code has not moved since → status reviewed
   block  → status in-progress (fix, verify, review again)
 
+HEAD must be on the change's branch, change/<id> (D38; else exit 1, code
+change.wrong-branch): the verdict is committed there.
+
 --run reviews the change in its own Claude Code session — a separate process with an
 empty context and its own hooks, never a sub-agent of the session that built it:
 ape starts `+"`ape task apex-review --args <id>`"+` detached (survives the caller's shell),
 and that session writes review.md and records the verdict with --verdict/--findings.
 It is the one sanctioned exception to the nesting rule: allowed from inside an ape
 session, never from inside a review session (depth 1), skill fixed to apex-review.
+  - on the change's branch: --run needs HEAD on change/<id>, the session runs in this
+    checkout and records its verdict there; a session that leaves HEAD elsewhere
+    has its verdict voided and the branch checked out again
   - read-only: the session runs with APE_REVIEW=<id>, and `+"`ape hook pre-tool`"+` denies
     every edit inside the project except changes/<id>/review.md (outside the project,
     e.g. a throwaway copy to break, is allowed)
@@ -408,8 +459,11 @@ func newChangeAcceptCmd() *cobra.Command {
 		"Accept a human-review task",
 		`Record that a person accepted a human-review task (one whose check is "human-review").
 Archive requires every human-review task accepted, unless --allow-pending-human.
+HEAD must be on the change's branch, change/<id> (D38; else exit 1, code
+change.wrong-branch): the acceptance is committed there.
 
-Exit codes: 0 recorded · 1 the task has a command check · 2 usage (no such task).`,
+Exit codes: 0 recorded · 1 the task has a command check, or HEAD not on change/<id> ·
+2 usage (no such task).`,
 		"  ape change accept add-tenant-delete --task T2 --by diego",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -437,9 +491,12 @@ func newChangeBlockCmd() *cobra.Command {
 		"Set blocked, with the reason shown by ape status",
 		`Set a change blocked. The reason is what `+"`ape status`"+` shows: what blocks it, or the
 question only a person can answer. A blocked change lets the stop hook allow a stop.
-`+"`ape change start <id>`"+` resumes it.
+`+"`ape change start <id>`"+` resumes it. A started change is blocked on its branch,
+change/<id> (D38; else exit 1, code change.wrong-branch), where it stays — re-plan it
+there and start it again, or abandon it; a change with no branch (a draft) is blocked on
+the branch HEAD is on, unless that is another change's.
 
-Exit codes: 0 blocked · 1 no such change or archived · 2 usage.`,
+Exit codes: 0 blocked · 1 no such change, archived, or the wrong branch · 2 usage.`,
 		`  ape change block add-tenant-delete --reason "needs a decision: soft or hard delete?"`,
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -499,8 +556,16 @@ specs/. Committed as "apex: <id> abandoned" with trailer "Change: <id>". The id 
 taken. Abandon a blocked change only after planning its replacement, or with the reason
 none is needed.
 
-Exit codes: 0 abandoned · 1 no such change, archived, or git failed · 2 usage ·
-3 the archive folder already exists.`,
+A started change (D38): abandon runs from its branch change/<id> — then it switches to the
+base_branch — or from any other non-change branch; the tree must be clean (uncommitted
+files inside the change's own folder are committed on its branch first). The archived
+folder holds the change's files as its branch last had them, the move is committed on the
+base branch, change/<id> is deleted and its last commit recorded as branch_tip in the
+archived state.json. None of the change's code reaches the base branch. A draft never
+started (no branch) is abandoned on the branch HEAD is on, as before.
+
+Exit codes: 0 abandoned · 1 no such change, archived, HEAD on another change's branch,
+dirty tree, or git failed · 2 usage · 3 the archive folder already exists.`,
 		`  ape change abandon add-tenant-delete --reason "replaced by split-tenant-delete"`,
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -512,6 +577,9 @@ Exit codes: 0 abandoned · 1 no such change, archived, or git failed · 2 usage 
 				fmt.Fprintf(w, "abandoned %s → %s", id, res.ArchivedTo)
 				if res.Commit != "" {
 					fmt.Fprintf(w, " (commit %.7s)", res.Commit)
+				}
+				if res.BranchTip != "" {
+					fmt.Fprintf(w, "; deleted %s at %.7s", apexv1.ChangeBranch(id), res.BranchTip)
 				}
 				fmt.Fprintln(w)
 			})
@@ -525,26 +593,41 @@ func newChangeArchiveCmd() *cobra.Command {
 	var allowPending bool
 	cmd := v1ChangeLeaf(
 		"archive <id>",
-		"Apply the delta to specs/, move the change to the archive, commit `archive: <id>`",
-		`Archive a reviewed change:
+		"Rebase change/<id> onto its base, squash-merge it with the delta and the archive move as one commit",
+		`Archive a reviewed change onto its base branch (trial decision D38):
 
-  1. needs status reviewed (review pass) and the plan frozen at start unchanged;
-     re-runs verify when HEAD moved since it (red →
-     in-progress, exit 1, counted as an attempt like any red verify); refused if code changed since the review
-  2. human-review tasks must be accepted, unless --allow-pending-human (recorded)
-  3. applies the delta to development/specs/: ADDED appends, MODIFIED replaces, REMOVED
+  1. needs status reviewed (review pass) and the plan frozen at start unchanged; human-
+     review tasks must be accepted, unless --allow-pending-human (recorded)
+  2. runs with HEAD on change/<id>, or on another non-change branch (it switches to
+     change/<id>); the tree must be clean — uncommitted files inside the change's own
+     folder (review.md a review left) are first committed on change/<id> as
+     "apex: <id> notes"; anything else refuses (code tree.dirty)
+  3. refused if code changed on change/<id> since the review (review.stale)
+  4. rebases change/<id> onto the base branch as it is now; on a conflict the rebase is
+     aborted, the change is blocked naming the conflicting files (committed on its
+     branch), and archive exits 3 (archive.rebase-conflict) — nothing reaches the base
+  5. re-runs verify when the code moved since it — the base had moved (red → the change
+     goes back to in-progress on its branch, exit 1, counted as an attempt; a green one
+     keeps it reviewed: the review judged the change's own code)
+  6. applies the delta to development/specs/: ADDED appends, MODIFIED replaces, REMOVED
      deletes; a new capability gets specs/<cap>/spec.md (Purpose from the change's Why).
      Any conflict — including a MODIFIED that would drop a scenario the current spec has,
      or change its check, or a MODIFIED/REMOVED requirement whose spec block changed since
-     start (another branch archived first: re-plan and re-start) — → exit 3 and NOTHING is
-     written
-  4. moves the folder to development/archive/<YYYY-MM-DD>-<id>/ (beside changes/),
-     status archived
-  5. commits the specs and the move (only those paths; hooks skipped) as
-     "archive: <id>" with trailer "Change: <id>"
+     start (another change archived first: re-plan and re-start) — → exit 3 and nothing
+     reaches the base branch
+  7. switches to the base branch, `+"`git merge --squash change/<id>`"+`, writes the specs,
+     moves the folder to development/archive/<YYYY-MM-DD>-<id>/ (status archived,
+     branch_tip = change/<id>'s last commit) and commits everything as ONE commit —
+     subject the change's # title, trailer "Change: <id>" (hooks skipped: every code
+     commit on the branch already ran them); then deletes change/<id>. If anything fails
+     on the base branch, it is reset to where it was and change/<id> checked out again.
+
+The base branch gets exactly one commit per archived change; ape's status commits stay on
+the change branch, squashed away.
 
 Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review,
-pending human-review, or git failed · 2 usage · 3 the delta no longer applies.`,
+pending human-review, dirty tree, no change branch, or git failed · 2 usage · 3 the
+rebase conflicts or the delta no longer applies.`,
 		"  ape change archive add-tenant-delete",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -563,7 +646,14 @@ pending human-review, or git failed · 2 usage · 3 the delta no longer applies.
 					}
 					fmt.Fprintf(w, "%s %s (+%d ~%d -%d)\n", verb, s.Path, s.Added, s.Modified, s.Removed)
 				}
-				fmt.Fprintf(w, "archived %s → %s\ncommit %.7s archive: %s\n", id, res.ArchivedTo, res.Commit, id)
+				if res.Rebased {
+					fmt.Fprintf(w, "rebased %s onto %s", apexv1.ChangeBranch(id), res.BaseBranch)
+					if res.Reverified {
+						fmt.Fprint(w, " and re-verified green")
+					}
+					fmt.Fprintln(w)
+				}
+				fmt.Fprintf(w, "archived %s → %s\ncommit %.7s %s (on %s; %s deleted)\n", id, res.ArchivedTo, res.Commit, res.Subject, res.BaseBranch, apexv1.ChangeBranch(id))
 				if res.AllowPendingHuman {
 					fmt.Fprintf(w, "recorded: archived with human-review pending (%s)\n", strings.Join(res.PendingHuman, ", "))
 				}

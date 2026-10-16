@@ -37,16 +37,14 @@ func TestOldStateFolderStillMarksAV1Project(t *testing.T) {
 	require.True(t, p.IsV1())
 }
 
-// Ape's own records in _apex/state/ are not code: committing them (a gate
-// result, an accepted ADR) does not make a verify or a review stale, and
-// an uncommitted one is not "uncommitted code".
+// Ape's own records in _apex/state/ are not code: committing them (a limit
+// stop, recorded on whatever branch the stopped session was on) does not
+// make a verify or a review stale, and an uncommitted one is not
+// "uncommitted code".
 func TestStateRecordsAreNotCode(t *testing.T) {
 	p := verifiedWave(t)
 	verified := state(t, p, "add-wave").Verify.SHA
-	g, err := p.RunGate(ctx(), "M1", RunOptions{})
-	require.NoError(t, err)
-	require.True(t, g.ResultChanged)
-	require.NotEmpty(t, g.Commit, "the gate result is committed")
+	require.NoError(t, p.RecordLimitStop(ctx(), "M1", LimitStop{Reason: StopBudget, At: Stamp(), Run: "r1", Skill: "apex-apply"}))
 	require.Equal(t, "_apex/state/milestones.json", run(t, p.Root, "show", "--name-only", "--format=", "HEAD"))
 	moved, files, err := p.codeMovedSince(ctx(), verified)
 	require.NoError(t, err)

@@ -124,11 +124,15 @@ type Accept struct {
 
 // State is changes/<id>/state.json. Written only by ape.
 type State struct {
-	ID        string     `json:"id"`
-	Status    string     `json:"status"`
-	BaseSHA   string     `json:"base_sha"`
-	StartedAt string     `json:"started_at"`
-	Baseline  []Baseline `json:"baseline"`
+	ID     string `json:"id"`
+	Status string `json:"status"`
+	// BaseBranch is the branch `ape change start` created change/<id>
+	// from, and BaseSHA HEAD then (D38): archive rebases the change branch
+	// onto BaseBranch and squash-merges it there.
+	BaseBranch string     `json:"base_branch,omitempty"`
+	BaseSHA    string     `json:"base_sha"`
+	StartedAt  string     `json:"started_at"`
+	Baseline   []Baseline `json:"baseline"`
 	// PlanDigest is the SHA-256 of change.md's ## Delta and ## Tasks at
 	// start. verify and archive refuse while it differs (plan drift).
 	PlanDigest string `json:"plan_digest,omitempty"`
@@ -151,13 +155,9 @@ type State struct {
 	ArchivedAt        string              `json:"archived_at,omitempty"`
 	ArchivedTo        string              `json:"archived_to,omitempty"`
 	CreatedAt         string              `json:"created_at,omitempty"`
-	// Attempts counts the red verifies since the change last started
-	// (backlog 30): every start, re-start included, sets it to 0, a green
-	// verify leaves it. The red verify that brings it to the cap
-	// (limits.attempts, default 5) blocks the change. AttemptsTotal is
-	// every red verify of the change, never reset.
-	Attempts      int `json:"attempts,omitempty"`
-	AttemptsTotal int `json:"attempts_total,omitempty"`
+	// BranchTip is change/<id>'s last commit when archive squash-merged
+	// it or abandon deleted it (D38).
+	BranchTip string `json:"branch_tip,omitempty"`
 }
 
 // Active reports whether a change is in flight: started and neither
@@ -198,9 +198,14 @@ func LoadState(path string) (*State, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseState(path, data)
+}
+
+// parseState parses a state.json's content; name says where it came from.
+func parseState(name string, data []byte) (*State, error) {
 	var s State
 	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, fmt.Errorf("%s does not parse: %w", path, err)
+		return nil, fmt.Errorf("%s does not parse: %w", name, err)
 	}
 	return &s, nil
 }

@@ -128,11 +128,13 @@ func newHookStopCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "stop",
 		Short: "Stop/SubagentStop hook: block a stop while the in-progress change's checks are red",
-		Long: `Stop and SubagentStop hook. When exactly one change is in-progress and any of its
-command checks exits non-zero now, prints {"decision":"block","reason":"<the failing
-checks' last lines and what to do>"}. Allows (prints nothing) when no or several changes
-are in progress, when the change is blocked, when every check is green, or after 3
-consecutive blocks (the count resets when the payload's stop_hook_active is false).
+		Long: `Stop and SubagentStop hook. When HEAD is on a change's branch, change/<id>, that
+change is in-progress (read from the working tree), and any of its command checks exits
+non-zero now, prints {"decision":"block","reason":"<the failing checks' last lines and
+what to do>"}. Allows (prints nothing) when HEAD is on no change branch (the base
+branch: planning, milestones), when the change is not in-progress (blocked, verified,
+reviewed), when every check is green, or after 3 consecutive blocks (the count resets
+when the payload's stop_hook_active is false).
 
 The verdict is also written to _apex/state/hooks/<session>[-<agent>].json, which
 is how ` + "`ape task`" + ` learns that a Stop it saw did not end the turn.`,

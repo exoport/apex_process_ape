@@ -182,6 +182,10 @@ func (p *Project) AcceptDecision(ctx context.Context, id, by string) (*DecisionR
 	if strings.TrimSpace(by) == "" {
 		return nil, &UsageError{Code: "usage.by", Msg: "--by names who accepts the decision"}
 	}
+	// A person's acceptance is recorded on the base branch (D11, D38).
+	if err := p.refuseOnChangeBranch(ctx, "accepting a decision"); err != nil {
+		return nil, err
+	}
 	path, ok := p.adrFile(id)
 	if !ok {
 		return nil, &FailError{Code: CodeDecisionNotFound, Msg: "no decision " + id + " in " + p.Rel(p.DecisionsDir())}

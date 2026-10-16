@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strings"
@@ -42,8 +43,13 @@ type ChangeStatus struct {
 	Error         string   `json:"error,omitempty"`
 	// Attempts / AttemptsCap: red verifies since the change started, and
 	// limits.attempts (backlog 30). Set for a started change.
-	Attempts    int `json:"attempts"`
-	AttemptsCap int `json:"attempts_cap,omitempty"`
+	// AttemptsTotal is every red verify of the change, never reset. All
+	// three come from this checkout's _apex/state/attempts.json.
+	Attempts      int `json:"attempts"`
+	AttemptsTotal int `json:"attempts_total"`
+	AttemptsCap   int `json:"attempts_cap,omitempty"`
+	// Branch is the change's branch, change/<id>, when it has one (D38).
+	Branch string `json:"branch,omitempty"`
 }
 
 // Spend is the cost recorded in the project's run manifests.
@@ -63,13 +69,16 @@ type MilestoneLine struct {
 
 // StatusReport is `ape status`.
 type StatusReport struct {
-	Project     string           `json:"project"`
-	Root        string           `json:"root"`
-	Initialized bool             `json:"initialized"`
-	Milestone   *MilestoneStatus `json:"milestone"`
-	Milestones  []MilestoneLine  `json:"milestones"`
-	Changes     []ChangeStatus   `json:"changes"`
-	Archived    int              `json:"archived"`
+	Project     string `json:"project"`
+	Root        string `json:"root"`
+	Initialized bool   `json:"initialized"`
+	// Branch is the checked-out branch ("" when detached or outside git);
+	// a change branch is change/<id> (D38).
+	Branch     string           `json:"branch"`
+	Milestone  *MilestoneStatus `json:"milestone"`
+	Milestones []MilestoneLine  `json:"milestones"`
+	Changes    []ChangeStatus   `json:"changes"`
+	Archived   int              `json:"archived"`
 	// PreExistingRed is what was red at a change's baseline that is not
 	// the change's own: the planner's to roadmap (backlog 37).
 	PreExistingRed []PreExistingRed `json:"pre_existing_red"`
@@ -103,8 +112,15 @@ func (p *Project) Status() *StatusReport {
 		}
 	}
 
+	ctx := context.Background()
+	r.Branch = CurrentBranch(ctx, p.Root)
+	branches := map[string]bool{}
+	if p.isWorkTree(ctx) {
+		branches = p.changeBranches(ctx)
+	}
 	changes := p.Changes()
 	attemptsCap := p.limits().AttemptsCap()
+	attempts := p.loadAttempts()
 	r.PreExistingRed = p.preExistingRed(changes)
 	for _, c := range changes {
 		cs := ChangeStatus{ID: c.ID}
@@ -120,9 +136,15 @@ func (p *Project) Status() *StatusReport {
 			continue
 		}
 		cs.Status = c.State.Status
-		cs.Attempts = c.State.Attempts
-		if c.State.Active() || c.State.Attempts > 0 {
-			cs.AttemptsCap = attemptsCap
+		if branches[c.ID] {
+			cs.Branch = ChangeBranch(c.ID)
+		}
+		if c.State.Status != StatusDraft {
+			a := attempts[c.ID]
+			cs.Attempts, cs.AttemptsTotal = a.Since, a.Total
+			if c.State.Active() || a.Since > 0 {
+				cs.AttemptsCap = attemptsCap
+			}
 		}
 		if c.State.BlockedReason != nil {
 			cs.BlockedReason = *c.State.BlockedReason
@@ -180,13 +202,18 @@ func nextStep(r *StatusReport) string {
 		if c.Milestone != m.ID && c.Milestone != "" {
 			continue
 		}
+		// A started change is worked on its branch (D38).
+		on := ""
+		if c.Branch != "" && r.Branch != c.Branch {
+			on = " — on " + c.Branch + " (`ape change start " + c.ID + "` checks it out)"
+		}
 		switch c.Status {
 		case StatusReviewed:
-			return "archive " + c.ID + ": `ape change archive " + c.ID + "`"
+			return "archive " + c.ID + ": `ape change archive " + c.ID + "` (squash-merges " + ChangeBranch(c.ID) + " into its base branch)"
 		case StatusVerified:
-			return "review " + c.ID + " (apex-review)"
+			return "review " + c.ID + " (apex-review)" + on
 		case StatusInProgress:
-			return "apply " + c.ID + " until `ape change verify " + c.ID + "` is green (apex-apply)"
+			return "apply " + c.ID + " until `ape change verify " + c.ID + "` is green (apex-apply)" + on
 		case StatusDraft:
 			return "apply " + c.ID + ": `ape change check " + c.ID + "`, then `ape change start " + c.ID + "` (apex-apply)"
 		}
@@ -212,7 +239,11 @@ const briefLineMax = 160
 // Brief renders the report in at most 25 lines, for the SessionStart hook.
 func (r *StatusReport) Brief() string {
 	var b []string
-	b = append(b, "APEX status — "+r.Project)
+	title := "APEX status — " + r.Project
+	if r.Branch != "" {
+		title += " (on " + r.Branch + ")"
+	}
+	b = append(b, title)
 	if !r.Initialized {
 		b = append(b, "not an APEX v1 project yet: run `ape project init`")
 		return strings.Join(b, "\n") + "\n"

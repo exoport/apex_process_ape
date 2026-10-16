@@ -106,10 +106,10 @@ func (p *Project) regressionStale(st *State) bool {
 // milestoneRegressionBaseline is the baseline a milestone gate judges the
 // regression command by: the earliest one, for this command, recorded by
 // any change of the milestone, active or in the archive. nil when none.
-func (p *Project) milestoneRegressionBaseline(milestone, cmd string) (string, *RegressionBaseline) {
+func (p *Project) milestoneRegressionBaseline(ctx context.Context, milestone, cmd string) (string, *RegressionBaseline) {
 	var change string
 	var best *RegressionBaseline
-	for _, c := range append(p.Changes(), p.archivedChanges()...) {
+	for _, c := range append(p.changes(ctx), p.archivedChanges()...) {
 		if c.Doc == nil || c.State == nil || c.Doc.Meta.Milestone != milestone {
 			continue
 		}

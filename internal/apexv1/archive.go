@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -161,114 +162,276 @@ func firstParagraph(body []mdLine) string {
 
 // ArchiveResult is what `ape change archive` reports.
 type ArchiveResult struct {
-	ID                string        `json:"id"`
-	ArchivedTo        string        `json:"archived_to"`
-	Specs             []SpecUpdate  `json:"specs"`
-	Commit            string        `json:"commit"`
+	ID         string       `json:"id"`
+	ArchivedTo string       `json:"archived_to"`
+	Specs      []SpecUpdate `json:"specs"`
+	// Commit is the one commit on the base branch: the squashed change,
+	// the delta merged into specs/ and the archive move (D38).
+	Commit     string `json:"commit"`
+	Subject    string `json:"subject,omitempty"`
+	BaseBranch string `json:"base_branch,omitempty"`
+	// BranchTip is change/<id>'s last commit, squashed into Commit.
+	BranchTip string `json:"branch_tip,omitempty"`
+	// Rebased: the base branch had moved, and archive rebased the change
+	// branch onto it.
+	Rebased           bool          `json:"rebased"`
 	Reverified        bool          `json:"reverified"`
 	Verify            *VerifyResult `json:"verify,omitempty"`
 	AllowPendingHuman bool          `json:"allow_pending_human,omitempty"`
 	PendingHuman      []string      `json:"pending_human,omitempty"`
 }
 
-// Archive applies a reviewed change's delta to specs/, moves the change
-// to archive/<date>-<id>/ (beside changes/) and commits both as `archive: <id>`.
+// Archive lands a reviewed change on its base branch (D38): it rebases
+// change/<id> onto the base branch (a conflict blocks the change, exit 3),
+// re-verifies when that moved the code, then squash-merges the branch into
+// the base branch as ONE commit — subject the change's title, trailer
+// `Change: <id>` — holding the change's code, its delta merged into
+// specs/, and its folder moved to archive/<date>-<id>/; then deletes the
+// branch. Run from the change's branch or from any other non-change
+// branch (it switches); the tree must be clean.
 func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool, opt RunOptions) (*ArchiveResult, error) {
-	ci, err := p.requireChange(id)
+	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	st := ci.State
+	pending, err := p.archivable(ctx, ci, allowPendingHuman)
+	if err != nil {
+		return nil, err
+	}
+	if ci, err = p.enterChangeBranch(ctx, ci); err != nil {
+		return nil, err
+	}
+	base := ci.State.BaseBranch
+	res := &ArchiveResult{ID: id, BaseBranch: base}
+
+	// The review judged the change's own code: refused when that moved
+	// since, judged before the rebase brings the base's code in.
+	if moved, files, _ := p.codeMovedSince(ctx, ci.State.Review.SHA); moved {
+		return res, &FailError{Code: "review.stale", Msg: "code changed since the review (" + strings.Join(limit(files, 5), ", ") + ") — review again (apex-review), then archive"}
+	}
+	before := HeadSHA(ctx, p.Root)
+	if err := p.rebaseOrBlock(ctx, ci); err != nil {
+		return res, err
+	}
+	res.Rebased = HeadSHA(ctx, p.Root) != before
+	if ci, err = p.requireChange(ctx, id); err != nil {
+		return res, err
+	}
+	if err := p.archiveFresh(ctx, ci, res, opt); err != nil {
+		return res, err
+	}
+	updates, dest, err := p.planArchive(ci)
+	if err != nil {
+		return res, err
+	}
+	if len(pending) > 0 {
+		res.AllowPendingHuman, res.PendingHuman = true, pending
+	}
+	res.ArchivedTo, res.Specs = p.Rel(dest), updates
+	res.Subject = archiveSubject(ci.Doc, id)
+	return res, p.squashOntoBase(ctx, ci, updates, dest, pending, res)
+}
+
+// archivable checks what archive needs before it touches git: a review
+// pass, a frozen plan, accepted human-review tasks (or allowPendingHuman),
+// a git repository and the change's branch with its base. It returns the
+// human-review tasks archived pending.
+func (p *Project) archivable(ctx context.Context, ci ChangeInfo, allowPendingHuman bool) ([]string, error) {
+	id, st := ci.ID, ci.State
 	if st.Status != StatusReviewed || st.Review == nil || st.Review.Verdict != "pass" {
 		return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + st.Status + " — archive needs a green verify and a review pass (`ape change review " + id + " --verdict pass`)"}
 	}
-	if _, err := git(ctx, p.Root, "rev-parse", "--is-inside-work-tree"); err != nil {
+	if !p.isWorkTree(ctx) {
 		return nil, &FailError{Code: "git.not-a-repo", Msg: "not a git repository — archive commits its result"}
 	}
 	if err := checkPlanFrozen(ci); err != nil {
 		return nil, err
 	}
-	res := &ArchiveResult{ID: id}
-	if err := p.archiveFresh(ctx, ci, res, opt); err != nil {
-		return res, err
-	}
-	st = ci.State
-
 	pending := st.PendingHuman(ci.Doc.HumanTasks())
 	if len(pending) > 0 && !allowPendingHuman {
-		return res, &FailError{Code: "archive.pending-human", Msg: "human-review tasks not accepted: " + strings.Join(pending, ", ") +
-			" — a person runs `ape change accept " + id + " --task <T> --by <who>`, or archive with --allow-pending-human (recorded)"}
+		return nil, &FailError{Code: "archive.pending-human", Msg: "human-review tasks not accepted: " + strings.Join(pending, ", ") +
+			" — a person runs `ape change accept " + id + " --task <T> --by <who>` (on " + ChangeBranch(id) + "), or archive with --allow-pending-human (recorded)"}
 	}
+	if !p.branchExists(ctx, ChangeBranch(id)) || st.BaseBranch == "" {
+		return nil, &FailError{Code: "change.no-branch", Msg: "change " + id + " has no branch " + ChangeBranch(id) + " with a recorded base_branch — it was started before changes got their own branch (D38); " +
+			"create it from where its work is and record base_branch, or abandon it"}
+	}
+	if !p.branchExists(ctx, st.BaseBranch) {
+		return nil, &FailError{Code: CodeBranchFailed, Msg: "the base branch " + st.BaseBranch + " of " + id + " does not exist — recreate it, or abandon the change"}
+	}
+	return pending, nil
+}
 
+// enterChangeBranch makes the tree clean (committing what the change's own
+// folder holds, on its branch) and checks out the change's branch, from
+// any branch but another change's. It returns the change as read there.
+func (p *Project) enterChangeBranch(ctx context.Context, ci ChangeInfo) (ChangeInfo, error) {
+	id := ci.ID
+	if err := p.commitChangeFolder(ctx, id, "archive"); err != nil {
+		return ci, err
+	}
+	cur := CurrentBranch(ctx, p.Root)
+	if cur == ChangeBranch(id) {
+		return ci, nil
+	}
+	if ChangeOfBranch(cur) != "" {
+		return ci, p.otherChangeBranch(cur, "archive "+id)
+	}
+	if err := p.switchBranch(ctx, ChangeBranch(id)); err != nil {
+		return ci, err
+	}
+	return p.requireChange(ctx, id)
+}
+
+// rebaseOrBlock rebases the change's branch onto its base branch as it is
+// now. On a conflict the rebase is aborted and the change blocked, the
+// reason naming the conflicting files (committed on its branch):
+// ConflictError archive.rebase-conflict.
+func (p *Project) rebaseOrBlock(ctx context.Context, ci ChangeInfo) error {
+	id, base, branch := ci.ID, ci.State.BaseBranch, ChangeBranch(ci.ID)
+	conflicts, err := p.rebaseOnto(ctx, base)
+	if err == nil {
+		return nil
+	}
+	if len(conflicts) == 0 {
+		return &FailError{Code: CodeBranchFailed, Msg: "rebasing " + branch + " onto " + base + " failed: " + err.Error() + " — the rebase was aborted; fix git and archive again"}
+	}
+	reason := "archive: rebasing onto " + base + " conflicts in " + strings.Join(limit(conflicts, 8), ", ") +
+		" — re-plan or redo the work on " + branch + " against " + base + ", then `ape change start " + id + "`"
+	st := ci.State
+	st.Status = StatusBlocked
+	st.BlockedReason = &reason
+	if err := p.saveAndCommit(ctx, id, st); err != nil {
+		return err
+	}
+	return &ConflictError{Code: "archive.rebase-conflict", Msg: "change " + id + " does not rebase cleanly onto " + base +
+		" — the rebase was aborted, nothing was merged, and the change is blocked with the conflicting files", Conflicts: conflicts}
+}
+
+// planArchive decides everything archive writes, writing nothing: the
+// merged specs and the archive folder.
+func (p *Project) planArchive(ci ChangeInfo) (updates []SpecUpdate, dest string, err error) {
+	id, st := ci.ID, ci.State
 	if fc := p.fingerprintConflicts(st.BaseFingerprints, ci.Doc); len(fc) > 0 {
-		return res, &ConflictError{Code: "archive.base-changed", Msg: "requirements this change modifies or removes were changed by another change since it started — nothing was written; " +
+		return nil, "", &ConflictError{Code: "archive.base-changed", Msg: "requirements this change modifies or removes were changed by another change since it started — nothing was written; " +
 			"re-plan against the current spec and re-start (`ape change start " + id + "`)", Conflicts: fc}
 	}
 	updates, conflicts := p.MergeDelta(ci.Doc)
 	if len(conflicts) > 0 {
-		return res, &ConflictError{Code: CodeDeltaConflict, Msg: "the delta no longer applies to specs/ — nothing was written; re-plan the change against the current specs", Conflicts: conflicts}
+		return nil, "", &ConflictError{Code: CodeDeltaConflict, Msg: "the delta no longer applies to specs/ — nothing was written; re-plan the change against the current specs", Conflicts: conflicts}
 	}
-	folder := Today() + "-" + id
-	dest := filepath.Join(p.ArchiveDir(), folder)
+	dest = filepath.Join(p.ArchiveDir(), Today()+"-"+id)
 	if fileOrDirExists(dest) {
-		return res, &ConflictError{Code: CodeFolderExists, Msg: "archive folder " + p.Rel(dest) + " already exists — nothing was written"}
+		return nil, "", &ConflictError{Code: CodeFolderExists, Msg: "archive folder " + p.Rel(dest) + " already exists — nothing was written"}
 	}
 	for _, u := range updates {
 		if u.Retired {
 			continue
 		}
 		if fs := ValidateSpec(u.Path, u.content); len(fs) > 0 {
-			return res, &FailError{Code: "archive.spec-invalid", Msg: "merged spec " + u.Path + " would not pass `ape project check` — nothing was written", Findings: fs}
+			return nil, "", &FailError{Code: "archive.spec-invalid", Msg: "merged spec " + u.Path + " would not pass `ape project check` — nothing was written", Findings: fs}
 		}
 	}
+	return updates, dest, nil
+}
 
-	// Everything is decided; write.
-	specsTracked, _ := git(ctx, p.Root, "ls-files", "--", p.Rel(p.SpecsDir()))
+// squashOntoBase switches to the base branch, squash-merges the change's
+// branch, writes the specs and the archive move, commits it all as ONE
+// commit and deletes the branch. Anything failing before the commit
+// leaves the base branch where it was and the change's branch checked out.
+func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []SpecUpdate, dest string, pending []string, res *ArchiveResult) error {
+	id, base, branch := ci.ID, ci.State.BaseBranch, ChangeBranch(ci.ID)
+	tip := HeadSHA(ctx, p.Root)
+	if err := p.switchBranch(ctx, base); err != nil {
+		return err
+	}
+	baseSHA := HeadSHA(ctx, p.Root)
+	undo := func(cause error) error {
+		_, _ = git(ctx, p.Root, "reset", "-q", "--hard", baseSHA)
+		_, _ = git(ctx, p.Root, "clean", "-fdq", "--", p.DevRel)
+		_, _ = git(ctx, p.Root, "switch", "-q", branch)
+		if fe, ok := errors.AsType[*FailError](cause); ok {
+			fe.Msg += " (nothing was committed: " + base + " is unchanged and " + branch + " is checked out again)"
+			return fe
+		}
+		return &FailError{Code: CodeCommitFailed, Msg: "archive failed on " + base + ": " + cause.Error() + " — nothing was committed: " + base + " is unchanged and " + branch + " is checked out again; fix git and archive again"}
+	}
+	if _, err := git(ctx, p.Root, "merge", "--squash", "-q", branch); err != nil {
+		return undo(err)
+	}
+	if err := p.writeArchive(ctx, id, ci.State, updates, dest, tip, pending); err != nil {
+		return undo(err)
+	}
+	res.BranchTip = tip
+	if _, err := git(ctx, p.Root, "commit", "--no-verify", "-q", "-m", res.Subject+"\n\nChange: "+id+"\n"); err != nil {
+		return undo(err)
+	}
+	res.Commit = HeadSHA(ctx, p.Root)
+	if _, err := git(ctx, p.Root, "branch", "-q", "-D", branch); err != nil {
+		return &FailError{Code: CodeBranchFailed, Msg: "archived as " + short(res.Commit) + " on " + base + ", but deleting " + branch + " failed: " + err.Error() + " — `git branch -D " + branch + "`"}
+	}
+	return nil
+}
+
+// archiveSubject is the squash commit's subject: the change's title.
+func archiveSubject(c *Change, id string) string {
+	if t := strings.TrimSpace(c.Title); t != "" {
+		return t
+	}
+	return titleFromSlug(id)
+}
+
+// writeArchive applies the delta to specs/, moves the change folder to
+// dest with its state archived, and stages both.
+func (p *Project) writeArchive(ctx context.Context, id string, st *State, updates []SpecUpdate, dest, tip string, pending []string) error {
 	for _, u := range updates {
+		path := filepath.Join(p.Root, filepath.FromSlash(u.Path))
 		if u.Retired {
-			if err := os.RemoveAll(filepath.Dir(filepath.Join(p.Root, filepath.FromSlash(u.Path)))); err != nil {
-				return res, err
+			if err := os.RemoveAll(filepath.Dir(path)); err != nil {
+				return err
 			}
 			continue
 		}
-		if err := writeFileAtomic(filepath.Join(p.Root, filepath.FromSlash(u.Path)), u.content); err != nil {
-			return res, err
+		if err := writeFileAtomic(path, u.content); err != nil {
+			return err
 		}
 	}
-	trackedBefore, _ := git(ctx, p.Root, "ls-files", "--", p.Rel(p.ChangeDir(id)))
 	if err := os.MkdirAll(p.ArchiveDir(), 0o755); err != nil {
-		return res, err
+		return err
 	}
 	if err := os.Rename(p.ChangeDir(id), dest); err != nil {
-		return res, err
+		return err
 	}
 	st.Status = StatusArchived
 	st.ArchivedAt = Stamp()
 	st.ArchivedTo = p.Rel(dest)
+	st.BranchTip = tip
 	if len(pending) > 0 {
 		st.AllowPendingHuman = true
-		res.AllowPendingHuman = true
-		res.PendingHuman = pending
 	}
 	if err := SaveState(filepath.Join(dest, "state.json"), st); err != nil {
-		return res, err
+		return err
 	}
-	res.ArchivedTo = p.Rel(dest)
-	res.Specs = updates
+	_, err := git(ctx, p.Root, "add", "-A", "--", p.DevRel)
+	return err
+}
 
-	paths := []string{p.Rel(dest)}
-	if dirExists(p.SpecsDir()) || specsTracked != "" {
-		paths = append(paths, p.Rel(p.SpecsDir()))
+// rebaseOnto rebases the checked-out branch onto base. On a conflict it
+// aborts the rebase and returns the conflicting files with the error.
+func (p *Project) rebaseOnto(ctx context.Context, base string) ([]string, error) {
+	_, err := git(ctx, p.Root, "rebase", "-q", base)
+	if err == nil {
+		return nil, nil
 	}
-	if trackedBefore != "" {
-		paths = append(paths, p.Rel(p.ChangeDir(id)))
+	out, _ := git(ctx, p.Root, "diff", "--name-only", "--diff-filter=U")
+	var conflicts []string
+	for f := range strings.SplitSeq(out, "\n") {
+		if f != "" {
+			conflicts = append(conflicts, f)
+		}
 	}
-	sha, err := p.commitPaths(ctx, "archive: "+id, id, paths...)
-	if err != nil {
-		return res, &FailError{Code: CodeCommitFailed, Msg: "archived on disk but the commit failed: " + err.Error() + " — commit " + strings.Join(paths, " ") + " yourself"}
-	}
-	res.Commit = sha
-	return res, nil
+	_, _ = git(ctx, p.Root, "rebase", "--abort")
+	return conflicts, err
 }
 
 // AbandonResult is what `ape change abandon` reports.
@@ -277,16 +440,21 @@ type AbandonResult struct {
 	ArchivedTo string `json:"archived_to"`
 	Reason     string `json:"reason"`
 	Commit     string `json:"commit"`
+	// BranchTip is the deleted change/<id>'s last commit (D38).
+	BranchTip string `json:"branch_tip,omitempty"`
 }
 
 // Abandon moves a change to the archive as abandoned, merging nothing,
-// and commits the move as `apex: <id> abandoned` (trial decision D6).
+// and commits the move as `apex: <id> abandoned` (trial decision D6) on
+// the base branch; a started change's branch is deleted, its tip recorded
+// as branch_tip (D38). The archived folder holds the change's files as
+// its branch last had them.
 func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResult, error) {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return nil, &UsageError{Code: "usage.reason", Msg: "--reason is required: why the change is dropped, and what (if anything) replaces it"}
 	}
-	ci, err := p.requireChange(id)
+	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -296,6 +464,12 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 		return nil, &ConflictError{Code: CodeFolderExists, Msg: "archive folder " + p.Rel(dest) + " already exists — nothing was written"}
 	}
 	inGit := p.isWorkTree(ctx)
+	branch, tip := ChangeBranch(id), ""
+	if inGit {
+		if ci, tip, err = p.leaveChangeBranch(ctx, ci); err != nil {
+			return nil, err
+		}
+	}
 	trackedBefore := ""
 	if inGit {
 		trackedBefore, _ = git(ctx, p.Root, "ls-files", "--", p.Rel(p.ChangeDir(id)))
@@ -311,10 +485,11 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 	st.AbandonedReason = reason
 	st.ArchivedAt = Stamp()
 	st.ArchivedTo = p.Rel(dest)
+	st.BranchTip = tip
 	if err := SaveState(filepath.Join(dest, "state.json"), st); err != nil {
 		return nil, err
 	}
-	res := &AbandonResult{ID: id, ArchivedTo: p.Rel(dest), Reason: reason}
+	res := &AbandonResult{ID: id, ArchivedTo: p.Rel(dest), Reason: reason, BranchTip: tip}
 	if !inGit {
 		return res, nil
 	}
@@ -327,7 +502,47 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 		return res, &FailError{Code: CodeCommitFailed, Msg: "abandoned on disk but the commit failed: " + err.Error() + " — commit " + strings.Join(paths, " ") + " yourself"}
 	}
 	res.Commit = sha
+	if tip != "" {
+		if _, err := git(ctx, p.Root, "branch", "-q", "-D", branch); err != nil {
+			return res, &FailError{Code: CodeBranchFailed, Msg: "abandoned, but deleting " + branch + " failed: " + err.Error() + " — `git branch -D " + branch + "`"}
+		}
+	}
 	return res, nil
+}
+
+// leaveChangeBranch prepares abandoning a change (D38): refused on another
+// change's branch; a started change's branch is left for its base branch
+// (from the change's branch) and its folder taken as the branch last had
+// it. It returns the change as read then, and the branch's tip ("" when
+// the change has no branch).
+func (p *Project) leaveChangeBranch(ctx context.Context, ci ChangeInfo) (ChangeInfo, string, error) {
+	id, branch := ci.ID, ChangeBranch(ci.ID)
+	cur := CurrentBranch(ctx, p.Root)
+	if ChangeOfBranch(cur) != "" && cur != branch {
+		return ci, "", p.otherChangeBranch(cur, "abandon "+id)
+	}
+	if !p.branchExists(ctx, branch) {
+		return ci, "", nil
+	}
+	if err := p.commitChangeFolder(ctx, id, "abandon"); err != nil {
+		return ci, "", err
+	}
+	if cur == branch {
+		base := ci.State.BaseBranch
+		if base == "" || !p.branchExists(ctx, base) {
+			return ci, "", &FailError{Code: CodeBranchFailed, Msg: "the base branch of " + id + " (" + base + ") is not recorded or does not exist — `git switch <base>` and abandon from there"}
+		}
+		if err := p.switchBranch(ctx, base); err != nil {
+			return ci, "", err
+		}
+	}
+	tip, _ := git(ctx, p.Root, "rev-parse", "--verify", "refs/heads/"+branch)
+	// The archive keeps the change as its branch last had it.
+	if _, err := git(ctx, p.Root, "checkout", branch, "--", p.Rel(p.ChangeDir(id))); err != nil {
+		return ci, "", &FailError{Code: CodeBranchFailed, Msg: "cannot read " + id + "'s folder from " + branch + ": " + err.Error()}
+	}
+	ci, err := checkLoaded(p.loadChange(id))
+	return ci, tip, err
 }
 
 func failingNames(v *VerifyResult) string {
@@ -387,31 +602,29 @@ func (p *Project) fingerprintConflicts(recorded map[string]string, c *Change) []
 	return out
 }
 
-// archiveFresh makes sure the verify and the review still describe HEAD.
-// The verify re-runs when code moved since it: ape's own state commits (D5)
-// move HEAD on every status change, so "HEAD moved" means "something
-// outside the development folder changed". The review is not re-run: a
-// review of other code is refused.
+// archiveFresh re-runs the verify when the code moved since it — after
+// the rebase onto a moved base branch, or a commit since the verify that
+// touched no code the review judged. ape's own state commits (D5) move
+// HEAD on every status change, so "HEAD moved" means "something outside
+// the development folder changed". A green re-verify keeps the change
+// reviewed: the review was of the change's own code, judged before the
+// rebase.
 func (p *Project) archiveFresh(ctx context.Context, ci ChangeInfo, res *ArchiveResult, opt RunOptions) error {
 	st := ci.State
 	codeMoved := st.Verify == nil
 	if !codeMoved {
 		codeMoved, _, _ = p.codeMovedSince(ctx, st.Verify.SHA)
 	}
-	if codeMoved {
-		v, err := p.verify(ctx, ci, opt)
-		if err != nil {
-			return err
-		}
-		res.Reverified, res.Verify = true, v
-		if !v.Green {
-			return &FailError{Code: "verify.red", Msg: "re-verify at HEAD is red (" + failingNames(v) + ") — the change is back in-progress"}
-		}
-	} else if dirty, _ := p.dirtyCode(ctx); len(dirty) > 0 {
-		return &FailError{Code: "tree.dirty", Msg: "uncommitted changes outside " + p.DevRel + "/: " + strings.Join(limit(dirty, 8), ", ") + " — commit or discard them first"}
+	if !codeMoved {
+		return nil
 	}
-	if moved, files, _ := p.codeMovedSince(ctx, ci.State.Review.SHA); moved {
-		return &FailError{Code: "review.stale", Msg: "code changed since the review (" + strings.Join(limit(files, 5), ", ") + ") — review again (apex-review), then archive"}
+	v, err := p.verify(ctx, ci, opt, true)
+	res.Reverified, res.Verify = true, v
+	if err != nil {
+		return err
+	}
+	if !v.Green {
+		return &FailError{Code: "verify.red", Msg: "re-verify at HEAD is red (" + failingNames(v) + ") — the change is back in-progress on " + ChangeBranch(ci.ID) + "; fix it there"}
 	}
 	return nil
 }
@@ -433,7 +646,7 @@ type SpecPreview struct {
 // PreviewDelta merges the change's delta in memory and diffs each touched
 // spec. A delta that no longer applies is a ConflictError, as at archive.
 func (p *Project) PreviewDelta(id string) (*SpecPreview, error) {
-	ci, err := p.requireChange(id)
+	ci, err := p.requireChange(context.Background(), id)
 	if err != nil {
 		return nil, err
 	}

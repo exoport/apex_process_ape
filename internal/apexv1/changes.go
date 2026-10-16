@@ -18,22 +18,46 @@ type ChangeInfo struct {
 	Doc   *Change
 	// Err is a state.json that would not load (ErrNoState included).
 	Err error
+	// Branch is the change branch State and Doc were read from, when
+	// HEAD is not on it (D38); "" when they were read from the working
+	// tree.
+	Branch string
 }
 
-// Changes lists the change folders under changes/, sorted by id. An old
-// changes/archive/ (an older ape's archive, reported by `project check`)
-// is not a change.
-func (p *Project) Changes() []ChangeInfo {
-	entries, err := os.ReadDir(p.ChangesDir())
-	if err != nil {
-		return nil
-	}
-	var out []ChangeInfo
-	for _, e := range entries {
-		if !e.IsDir() || e.Name() == "archive" || strings.HasPrefix(e.Name(), ".") {
-			continue
+// Changes lists the changes, sorted by id: the folders under changes/,
+// and every change/<id> branch's change not archived here. A change with
+// a branch HEAD is not on is read from that branch (D38), so its status
+// is the one its own commits recorded. An old changes/archive/ (an older
+// ape's archive, reported by `project check`) is not a change.
+func (p *Project) Changes() []ChangeInfo { return p.changes(context.Background()) }
+
+// changes is Changes under a caller's context.
+func (p *Project) changes(ctx context.Context) []ChangeInfo {
+	ids := map[string]bool{}
+	if entries, err := os.ReadDir(p.ChangesDir()); err == nil {
+		for _, e := range entries {
+			if e.IsDir() && e.Name() != "archive" && !strings.HasPrefix(e.Name(), ".") {
+				ids[e.Name()] = true
+			}
 		}
-		out = append(out, p.loadChange(e.Name()))
+	}
+	var branches map[string]bool
+	head := ""
+	if p.isWorkTree(ctx) {
+		branches = p.changeBranches(ctx)
+		head = p.HeadChange(ctx)
+	}
+	archived := p.ArchivedIDs()
+	out := make([]ChangeInfo, 0, len(ids)+len(branches))
+	for id := range branches {
+		if !ids[id] && archived[id] == "" {
+			if ci, ok := p.loadChangeAt(ctx, id, ChangeBranch(id)); ok {
+				out = append(out, ci)
+			}
+		}
+	}
+	for id := range ids {
+		out = append(out, p.readChange(ctx, id, head, branches))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -73,9 +97,9 @@ func archivedIDsIn(dir string) map[string]string {
 
 // ActiveChanges are the changes in flight (in-progress, verified,
 // reviewed); blocked ones are not.
-func (p *Project) ActiveChanges() []ChangeInfo {
+func (p *Project) ActiveChanges(ctx context.Context) []ChangeInfo {
 	var out []ChangeInfo
-	for _, c := range p.Changes() {
+	for _, c := range p.changes(ctx) {
 		if c.State != nil && c.State.Active() {
 			out = append(out, c)
 		}
@@ -352,9 +376,9 @@ type Overlap struct {
 
 // overlaps finds active or draft changes (other than id) whose touches or
 // paths intersect the given ones.
-func (p *Project) overlaps(id string, touches, paths []string) []Overlap {
+func (p *Project) overlaps(ctx context.Context, id string, touches, paths []string) []Overlap {
 	var out []Overlap
-	for _, c := range p.Changes() {
+	for _, c := range p.changes(ctx) {
 		if c.ID == id || c.Doc == nil || c.State == nil || c.State.Status == StatusArchived {
 			continue
 		}
@@ -440,6 +464,11 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 	if !ChangeIDRe.MatchString(id) {
 		return nil, &UsageError{Code: "usage.change-id", Msg: fmt.Sprintf("change id %q must match ^[a-z][a-z0-9-]{2,39}$ (verb-led kebab slug, e.g. add-tenant-delete)", id)}
 	}
+	// A new change is planned on the base branch, not inside another
+	// change's branch (D38).
+	if err := p.refuseOnChangeBranch(ctx, "a new change"); err != nil {
+		return nil, err
+	}
 	if dirExists(p.ChangeDir(id)) {
 		return nil, &FailError{Code: "change.exists", Msg: "change " + id + " already exists — pick another id"}
 	}
@@ -494,19 +523,31 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 	}
 	return &NewChangeResult{
 		ID: id, Path: p.Rel(p.ChangeMD(id)), State: StatusDraft, Commit: commit,
-		Overlaps: p.overlaps(id, touches, paths),
+		Overlaps: p.overlaps(ctx, id, touches, paths),
 	}, nil
 }
 
-// requireChange loads a change that must exist.
-func (p *Project) requireChange(id string) (ChangeInfo, error) {
+// requireChange loads a change that must exist — from its branch when
+// HEAD is not on it (D38): the commands that record its state check the
+// branch themselves (requireOnBranch).
+func (p *Project) requireChange(ctx context.Context, id string) (ChangeInfo, error) {
+	if p.isWorkTree(ctx) && p.HeadChange(ctx) != id && p.branchExists(ctx, ChangeBranch(id)) {
+		if ci, ok := p.loadChangeAt(ctx, id, ChangeBranch(id)); ok {
+			return checkLoaded(ci)
+		}
+	}
 	if !dirExists(p.ChangeDir(id)) {
 		if folder, ok := p.ArchivedIDs()[id]; ok {
 			return ChangeInfo{}, &FailError{Code: "change.archived", Msg: "change " + id + " is archived (" + p.Rel(filepath.Join(p.ArchiveDir(), folder)) + ")"}
 		}
 		return ChangeInfo{}, &FailError{Code: "change.not-found", Msg: "no change " + id + " — `ape status` lists the active ones"}
 	}
-	ci := p.loadChange(id)
+	return checkLoaded(p.loadChange(id))
+}
+
+// checkLoaded refuses a change whose state or change.md did not load.
+func checkLoaded(ci ChangeInfo) (ChangeInfo, error) {
+	id := ci.ID
 	if ci.Err != nil {
 		if errors.Is(ci.Err, ErrNoState) {
 			return ci, &FailError{Code: "change.no-state", Msg: "change " + id + " has no state.json — it was not created with `ape change new`"}

@@ -119,6 +119,7 @@ func TestArchive(t *testing.T) {
 	p := reviewedWave(t)
 	now = func() time.Time { return time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC) }
 	t.Cleanup(func() { now = time.Now })
+	mainBefore := run(t, p.Root, "rev-parse", "main")
 
 	_, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
 	require.ErrorContains(t, err, "human-review tasks not accepted: T2")
@@ -127,9 +128,33 @@ func TestArchive(t *testing.T) {
 	res, err := p.Archive(ctx(), "add-wave", true, RunOptions{})
 	require.NoError(t, err)
 	require.Equal(t, "development/archive/2026-10-15-add-wave", res.ArchivedTo)
+	require.False(t, res.Rebased, "main did not move")
 	require.False(t, res.Reverified, "only ape's own state commits moved HEAD since the verify")
 	require.Equal(t, []string{"T2"}, res.PendingHuman)
 	require.NoDirExists(t, p.ChangeDir("add-wave"))
+
+	// D38: archive lands the change on its base branch as ONE commit,
+	// subject the change's title, and deletes the change's branch.
+	require.Equal(t, "main", CurrentBranch(ctx(), p.Root))
+	require.Equal(t, "main", res.BaseBranch)
+	require.Equal(t, res.Commit, HeadSHA(ctx(), p.Root))
+	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "HEAD~1"), "exactly one new commit on main")
+	require.Equal(t, "1", run(t, p.Root, "rev-list", "--count", "--no-merges", "HEAD~1..HEAD"))
+	require.Equal(t, "Add wave", subjects(t, p)[0])
+	require.Equal(t, "Change: add-wave", run(t, p.Root, "log", "-1", "--format=%b"))
+	require.NotContains(t, strings.Join(subjects(t, p), "\n"), "apex: add-wave in-progress", "no change-branch status commit reaches main")
+	require.False(t, p.branchExists(ctx(), "change/add-wave"), "the change branch is deleted")
+	require.NotEmpty(t, res.BranchTip)
+	require.Equal(t, "apex: add-wave notes", run(t, p.Root, "log", "-1", "--format=%s", res.BranchTip),
+		"the review.md the review left uncommitted was committed on the change's branch first")
+	files := strings.Split(run(t, p.Root, "show", "--name-only", "--format=", "HEAD"), "\n")
+	require.ElementsMatch(t, []string{
+		"wave.sh", "development/specs/greeting/spec.md",
+		"development/changes/add-wave/state.json", // change.md shows as renamed
+		"development/archive/2026-10-15-add-wave/change.md", "development/archive/2026-10-15-add-wave/review.md",
+		"development/archive/2026-10-15-add-wave/state.json",
+	}, files, "the code, the merged spec and the archive move")
+	require.Equal(t, "#!/bin/sh\necho wave\n", read(t, p, "wave.sh"), "main's tree holds the change's code")
 
 	spec := read(t, p, "development/specs/greeting/spec.md")
 	require.Contains(t, spec, "### Requirement: Wave")
@@ -137,28 +162,77 @@ func TestArchive(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StatusArchived, st.Status)
 	require.True(t, st.AllowPendingHuman)
+	require.Equal(t, res.BranchTip, st.BranchTip)
+	require.Equal(t, "main", st.BaseBranch)
 
-	require.Equal(t, "archive: add-wave", subjects(t, p)[0])
-	require.Contains(t, run(t, p.Root, "log", "-1", "--format=%b"), "Change: add-wave")
-	require.Equal(t, res.Commit, HeadSHA(ctx(), p.Root))
 	require.Empty(t, run(t, p.Root, "status", "--porcelain"), "the archive commit leaves the tree clean")
 	require.Empty(t, p.Check(), "the merged project passes the project check")
+	require.Empty(t, p.Changes())
 }
 
-func TestArchive_ReverifiesWhenCodeMoved(t *testing.T) {
+// Archive also runs from the base branch: it switches to the change's
+// branch, and lands back on the base.
+func TestArchive_FromTheBaseBranch(t *testing.T) {
 	p := reviewedWave(t)
 	_, err := p.Accept(ctx(), "add-wave", "T2", "ann")
 	require.NoError(t, err)
-
-	write(t, p, "wave.sh", "#!/bin/sh\nexit 1\n")
-	commitAll(t, p, "fix: oops")
+	commitAll(t, p, "review: add-wave")
+	run(t, p.Root, "switch", "-q", "main")
 	res, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
-	require.ErrorContains(t, err, "re-verify at HEAD is red (T1 exit 1")
+	require.NoError(t, err)
+	require.Equal(t, "main", CurrentBranch(ctx(), p.Root))
+	require.Equal(t, "Add wave", subjects(t, p)[0])
+	require.NotEmpty(t, res.Commit)
+}
+
+// The base branch moved while the change was worked on: archive rebases the
+// change branch onto it and re-verifies, because that moved the code.
+func TestArchive_BaseMovedRebasesAndReverifies(t *testing.T) {
+	p := reviewedWave(t)
+	_, err := p.Accept(ctx(), "add-wave", "T2", "ann")
+	require.NoError(t, err)
+	commitAll(t, p, "review: add-wave")
+	run(t, p.Root, "switch", "-q", "main")
+	write(t, p, "hug.sh", "#!/bin/sh\necho hug\n")
+	commitAll(t, p, "feat: hug")
+	mainBefore := HeadSHA(ctx(), p.Root)
+
+	res, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
+	require.NoError(t, err)
+	require.True(t, res.Rebased)
 	require.True(t, res.Reverified)
+	require.True(t, res.Verify.Green)
+	require.Equal(t, StatusReviewed, res.Verify.Status, "a green re-verify keeps the review")
+	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "HEAD~1"), "one commit on top of main's")
+	require.Equal(t, []string{"Add wave", "feat: hug"}, subjects(t, p)[:2])
+	require.FileExists(t, filepath.Join(p.Root, "hug.sh"))
+	require.FileExists(t, filepath.Join(p.Root, "wave.sh"))
+	require.Empty(t, run(t, p.Root, "status", "--porcelain"))
+}
+
+func TestArchive_ReverifiesWhenCodeMoved(t *testing.T) {
+	// The base moved and broke the change: the re-verify after the rebase
+	// is red, the change goes back to in-progress on its branch, and main
+	// is untouched.
+	p := reviewedWave(t)
+	_, err := p.Accept(ctx(), "add-wave", "T2", "ann")
+	require.NoError(t, err)
+	commitAll(t, p, "review: add-wave")
+	run(t, p.Root, "switch", "-q", "main")
+	write(t, p, "greet.sh", "#!/bin/sh\necho Bye $1\n")
+	commitAll(t, p, "fix: say bye")
+	mainBefore := HeadSHA(ctx(), p.Root)
+	res, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
+	require.ErrorContains(t, err, "re-verify at HEAD is red (greeting/Say hello/plain run exit 1")
+	require.True(t, res.Reverified)
+	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root))
 	require.Equal(t, StatusInProgress, state(t, p, "add-wave").Status)
 	require.Equal(t, greetingSpec, read(t, p, "development/specs/greeting/spec.md"))
+	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "main"), "main only ever receives verified, reviewed changes")
+	require.True(t, p.branchExists(ctx(), "change/add-wave"))
 
-	// Code moved but still green: the review no longer covers it.
+	// Code moved on the change's branch since the review: refused, before
+	// any rebase.
 	p2 := reviewedWave(t)
 	_, err = p2.Accept(ctx(), "add-wave", "T2", "ann")
 	require.NoError(t, err)
@@ -169,15 +243,59 @@ func TestArchive_ReverifiesWhenCodeMoved(t *testing.T) {
 	require.DirExists(t, p2.ChangeDir("add-wave"))
 }
 
+// A change branch that does not rebase onto the base branch: the rebase is
+// aborted, nothing is merged, and the change is blocked naming the files.
+func TestArchive_RebaseConflictBlocks(t *testing.T) {
+	p := reviewedWave(t)
+	_, err := p.Accept(ctx(), "add-wave", "T2", "ann")
+	require.NoError(t, err)
+	commitAll(t, p, "review: add-wave")
+	run(t, p.Root, "switch", "-q", "main")
+	write(t, p, "wave.sh", "#!/bin/sh\necho another wave\n")
+	commitAll(t, p, "feat: someone else's wave")
+	mainBefore := HeadSHA(ctx(), p.Root)
+
+	_, err = p.Archive(ctx(), "add-wave", false, RunOptions{})
+	var ce *ConflictError
+	require.ErrorAs(t, err, &ce)
+	require.Equal(t, "archive.rebase-conflict", ce.Code)
+	require.Equal(t, []string{"wave.sh"}, ce.Conflicts)
+	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "main"))
+	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root))
+	require.NoDirExists(t, filepath.Join(p.Root, ".git", "rebase-merge"), "the rebase was aborted")
+	st := state(t, p, "add-wave")
+	require.Equal(t, StatusBlocked, st.Status)
+	require.Contains(t, *st.BlockedReason, "conflicts in wave.sh")
+	require.Equal(t, "apex: add-wave blocked", subjects(t, p)[0])
+	require.Empty(t, run(t, p.Root, "status", "--porcelain"))
+}
+
+// A review session may leave review.md uncommitted: archive commits it on
+// the change's branch, so it is part of the squash. Anything else
+// uncommitted refuses.
+func TestArchive_DirtyTree(t *testing.T) {
+	p := reviewedWave(t)
+	_, err := p.Accept(ctx(), "add-wave", "T2", "ann")
+	require.NoError(t, err)
+	write(t, p, "scratch.txt", "x\n")
+	_, err = p.Archive(ctx(), "add-wave", false, RunOptions{})
+	require.ErrorContains(t, err, "scratch.txt — commit or discard them first")
+	require.NoError(t, os.Remove(filepath.Join(p.Root, "scratch.txt")))
+	_, err = p.Archive(ctx(), "add-wave", false, RunOptions{})
+	require.NoError(t, err)
+}
+
 func TestArchive_ConflictWritesNothing(t *testing.T) {
 	p := reviewedWave(t)
 	_, err := p.Accept(ctx(), "add-wave", "T2", "ann")
 	require.NoError(t, err)
 	// Another change archived "Wave" first.
+	commitAll(t, p, "review: add-wave")
+	run(t, p.Root, "switch", "-q", "main")
 	write(t, p, "development/specs/greeting/spec.md", greetingSpec+"\n"+strings.Replace(addedWave, "### ADDED [greeting] Requirement:", "### Requirement:", 1))
-	commitAll(t, p, "archive: someone-else")
+	commitAll(t, p, "Someone else")
 	specBefore := read(t, p, "development/specs/greeting/spec.md")
-	head := HeadSHA(ctx(), p.Root)
+	mainBefore := HeadSHA(ctx(), p.Root)
 
 	_, err = p.Archive(ctx(), "add-wave", false, RunOptions{})
 	var ce *ConflictError
@@ -186,7 +304,7 @@ func TestArchive_ConflictWritesNothing(t *testing.T) {
 	require.Equal(t, specBefore, read(t, p, "development/specs/greeting/spec.md"))
 	require.DirExists(t, p.ChangeDir("add-wave"))
 	require.Equal(t, StatusReviewed, state(t, p, "add-wave").Status)
-	require.Equal(t, head, HeadSHA(ctx(), p.Root))
+	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "main"))
 }
 
 func TestArchive_DestinationExistsIsAConflict(t *testing.T) {

@@ -9,6 +9,12 @@ const (
 	CodeFolderExists         = "archive.folder-exists"
 	CodeDecisionNotFound     = "decision.not-found"
 	CodeDeltaConflict        = "archive.delta-conflict"
+	CodeGitStatusFailed      = "git.status-failed"
+	// CodeWrongBranch, CodeChangeBranch and CodeBranchFailed are the
+	// branch rules' codes (D38).
+	CodeWrongBranch  = "change.wrong-branch"
+	CodeChangeBranch = "branch.change-branch"
+	CodeBranchFailed = "git.branch-failed"
 )
 
 // CodeDoc documents one diagnostic code.
@@ -48,6 +54,11 @@ var DiagnosticCodes = []CodeDoc{
 	// failures (exit 1)
 	{"accept.not-human-review", 1, "accept: the task has a command check; verify runs it"},
 	{"archive.pending-human", 1, "archive: human-review tasks are not accepted"},
+	{"branch.change-branch", 1, "change new, milestone new/approve/gate/close, decision accept: HEAD is on a change branch; their records belong on the base branch (git switch <base>)"},
+	{"branch.detached", 1, "start: HEAD is detached; a change branch is created from a branch, recorded as its base"},
+	{"change.no-branch", 1, "archive: the change has no change/<id> branch with a recorded base_branch (started before D38)"},
+	{"change.wrong-branch", 1, "the command records a started change's state, and HEAD is not on its branch change/<id> (git switch change/<id>), or is on another change's branch"},
+	{"git.branch-failed", 1, "creating, switching to, rebasing or deleting a branch failed, or the base branch is missing"},
 	{"archive.spec-invalid", 1, "archive: the merged spec would fail project check (e.g. over 20 KB)"},
 	{"change.archived", 1, "the change is already archived"},
 	{"change.attempts-exceeded", 1, "verify: the red verify that reaches limits.attempts since the change started; the change is now blocked"},
@@ -70,7 +81,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"gate.red", 1, "the milestone gate (command, a spec scenario, or a newly red regression command) is red"},
 	{CodeCommitFailed, 1, "ape wrote its record but could not commit it (identity, lock)"},
 	{"git.not-a-repo", 1, "archive needs a git repository"},
-	{"git.status-failed", 1, "git status could not be read"},
+	{CodeGitStatusFailed, 1, "git status could not be read"},
 	{"milestone.budget-exceeded", 1, "ape task: the current milestone's spend is at its enforced budget (limits.budget: enforce); no session starts"},
 	{"milestone.changes-in-flight", 1, "close: changes of the milestone are in-progress, verified or reviewed"},
 	{"milestone.done", 1, "approve: the milestone is already done"},
@@ -94,6 +105,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"error.unclassified", 1, "a failure without a code (a bug: report it)"},
 
 	// conflicts (exit 3)
+	{"archive.rebase-conflict", 3, "archive: change/<id> does not rebase onto its base branch; the rebase was aborted, nothing merged, the change is blocked with the conflicting files"},
 	{"archive.base-changed", 3, "a requirement this change modifies or removes changed in the spec since start (another branch); nothing written"},
 	{CodeDeltaConflict, 3, "the delta no longer applies to the current specs; nothing written"},
 	{CodeFolderExists, 3, "the archive folder already exists; nothing written"},

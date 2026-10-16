@@ -72,13 +72,18 @@ func (p *Project) PrepareReviewRun(ctx context.Context, id string) (ChangeInfo, 
 		return ChangeInfo{}, &UsageError{Code: "review.nested", Msg: "this is a review session (" + EnvReview + "=" + os.Getenv(EnvReview) +
 			"): a review session cannot start another review"}
 	}
-	ci, err := p.requireChange(id)
+	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return ci, err
 	}
 	st := ci.State
 	if st.Status != StatusVerified {
 		return ci, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + st.Status + " — a review session reviews a verified change (`ape change verify " + id + "`)"}
+	}
+	// The session runs in this checkout and records its verdict there:
+	// on the change's branch (D38).
+	if err := p.requireOnBranch(ctx, id); err != nil {
+		return ci, err
 	}
 	if err := checkPlanFrozen(ci); err != nil {
 		return ci, err
@@ -121,6 +126,14 @@ func (p *Project) reviewMayTouch(id, rel string) bool {
 func (p *Project) SettleReviewRun(ctx context.Context, run *ReviewRun) (*ReviewOutcome, error) {
 	id := run.Change
 	var violations []string
+	// A session that left HEAD on another branch changed more than its
+	// review.md; the verdict lives on the change's branch (D38).
+	if cur := CurrentBranch(ctx, p.Root); p.isWorkTree(ctx) && cur != ChangeBranch(id) {
+		violations = append(violations, "switched HEAD to "+branchName(cur))
+		if err := p.switchBranch(ctx, ChangeBranch(id)); err != nil {
+			return nil, err
+		}
+	}
 	if run.HeadSHA != "" {
 		out, err := git(ctx, p.Root, "diff", "--name-only", run.HeadSHA, "HEAD")
 		if err != nil {
@@ -149,7 +162,7 @@ func (p *Project) SettleReviewRun(ctx context.Context, run *ReviewRun) (*ReviewO
 		}
 	}
 
-	ci, err := p.requireChange(id)
+	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return nil, err
 	}
