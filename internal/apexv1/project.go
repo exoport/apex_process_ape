@@ -168,13 +168,7 @@ func (p *Project) Check() []Finding {
 		add(ValidateAgentsMD("AGENTS.md", doc)...)
 	}
 	if doc, err := readFileString(p.ClaudeMD()); err == nil {
-		found := false
-		for l := range strings.SplitSeq(doc, "\n") {
-			if strings.TrimSpace(l) == "@AGENTS.md" {
-				found = true
-			}
-		}
-		if !found {
+		if !hasAgentsImport(doc) {
 			add(Finding{File: "CLAUDE.md", Message: "must import the map: a line `@AGENTS.md` (move its content into AGENTS.md)"})
 		}
 	}

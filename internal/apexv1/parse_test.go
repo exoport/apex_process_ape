@@ -180,3 +180,12 @@ func TestHasProse(t *testing.T) {
 		require.Equal(t, want, hasProse(splitLines(text)), "%q", text)
 	}
 }
+
+// Item 15: unknown frontmatter keys are reported; x-* keys are the team's.
+func TestParseChange_UnknownKeys(t *testing.T) {
+	doc := strings.Replace(changeDoc("add-x", "greeting", "none — chore", "- T1 x — check: true\n"),
+		"milestone: M1", "milestone: M1\nx-jira: ABC-12\nowner: ann\nmilestones: [M2]", 1)
+	c := ParseChange("c.md", doc)
+	require.Equal(t, []string{"milestones", "owner"}, c.UnknownKeys)
+	require.Empty(t, ParseChange("c.md", changeDoc("add-x", "greeting", "none — chore", "- T1 x — check: true\n")).UnknownKeys)
+}

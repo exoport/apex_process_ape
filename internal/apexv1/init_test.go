@@ -75,7 +75,9 @@ func TestInit_BrownfieldKeepsWhatExists(t *testing.T) {
 	require.Contains(t, res.Created, "docs/dev/project.md", "development_folder from config is honoured")
 	p, err := Open(root)
 	require.NoError(t, err)
-	require.Equal(t, "# Existing instructions\n", read(t, p, "CLAUDE.md"))
+	require.Equal(t, "# Existing instructions\n@AGENTS.md\n", read(t, p, "CLAUDE.md"),
+		"item 15: an existing CLAUDE.md gets the import line appended, and nothing else")
+	require.Equal(t, []string{"CLAUDE.md"}, res.Amended)
 	require.Contains(t, read(t, p, "docs/dev/project.md"), "# greeter")
 	var rec map[string]any
 	require.NoError(t, json.Unmarshal([]byte(read(t, p, "docs/dev/.apex/project.json")), &rec))
@@ -89,13 +91,17 @@ func TestInit_BrownfieldKeepsWhatExists(t *testing.T) {
 	stop, ok := hooks["Stop"].([]any)
 	require.True(t, ok)
 	require.Len(t, stop, 2, "the existing Stop hook is kept and ape's is added")
-	require.Contains(t, findingMessages(p.Check()), "CLAUDE.md: must import the map")
+	require.NotContains(t, findingMessages(p.Check()), "CLAUDE.md: must import the map")
+	res2, err := Init(ctx(), root, true)
+	require.NoError(t, err)
+	require.Empty(t, res2.Amended, "idempotent")
+	require.Equal(t, "# Existing instructions\n@AGENTS.md\n", read(t, p, "CLAUDE.md"))
 
 	// Init commits only what it wrote: the repo's own files stay untracked.
 	committed := run(t, root, "show", "--name-only", "--format=", "HEAD")
 	require.Contains(t, committed, ".claude/settings.json")
 	require.Contains(t, committed, "docs/dev/project.md")
-	require.NotContains(t, committed, "CLAUDE.md")
+	require.Contains(t, committed, "CLAUDE.md", "the one-line amendment is committed with the skeleton")
 	require.NotContains(t, committed, "_apex/config.yaml")
 }
 

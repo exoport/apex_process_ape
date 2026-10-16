@@ -139,6 +139,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.too-big", 1, "change.md over 8 KB: split the change"},
 	{"change.design-too-big", 1, "design.md over 8 KB"},
 	{"change.frontmatter", 1, "change.md frontmatter is missing, unparseable, or its id/milestone/touches are wrong"},
+	{"change.unknown-key", 1, "change.md frontmatter has a key v1 does not define (own keys: prefix x-)"},
 	{"change.bad-id", 1, "the change folder name is not a valid id"},
 	{"change.unknown-milestone", 1, "the change's milestone is not in roadmap.md"},
 	{"change.bad-touches", 1, "a touches entry is not kebab-case"},

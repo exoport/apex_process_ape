@@ -110,6 +110,12 @@ func TestCheckChange(t *testing.T) {
 			want: []string{"design.md is", "split this change"},
 		},
 		{
+			name: "unknown frontmatter key; x- keys are free",
+			id:   "add-wave",
+			doc:  strings.Replace(changeDoc("add-wave", "greeting", addedWave, okTasks), "milestone: M1", "milestone: M1\nmilestones: [M2]\nx-jira: ABC-12", 1),
+			want: []string{`frontmatter key "milestones" is not one of`},
+		},
+		{
 			name: "no frontmatter",
 			id:   "add-wave",
 			doc:  "# T\n## Why\nx\n",

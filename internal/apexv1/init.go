@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Hook commands `ape project init` writes. Literal `ape`: inside an
@@ -29,6 +30,19 @@ type InitResult struct {
 	HooksAdded []string `json:"hooks_added"`
 	Brownfield bool     `json:"brownfield"`
 	Commit     string   `json:"commit,omitempty"`
+	// Amended lists existing files init changed: only a CLAUDE.md missing
+	// the @AGENTS.md import.
+	Amended []string `json:"amended,omitempty"`
+}
+
+// hasAgentsImport reports whether a CLAUDE.md imports the map.
+func hasAgentsImport(doc string) bool {
+	for l := range strings.SplitSeq(doc, "\n") {
+		if strings.TrimSpace(l) == "@AGENTS.md" {
+			return true
+		}
+	}
+	return false
 }
 
 const projectSkeleton = `# %s
@@ -136,6 +150,18 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 			return nil, err
 		}
 	}
+	// A CLAUDE.md that existed without the import gets the one line it
+	// needs, and nothing else (item 15, OpenSpec Q8): the project's own
+	// instructions stay as they are.
+	if doc, err := readFileString(p.ClaudeMD()); err == nil && !hasAgentsImport(doc) {
+		if !strings.HasSuffix(doc, "\n") && doc != "" {
+			doc += "\n"
+		}
+		if err := writeFileAtomic(p.ClaudeMD(), doc+"@AGENTS.md\n"); err != nil {
+			return nil, err
+		}
+		res.Amended = append(res.Amended, "CLAUDE.md")
+	}
 	if !fileExists(p.ProjectJSON()) {
 		rec := map[string]any{"initialized_at": Stamp(), "brownfield": brownfield, "base_sha": HeadSHA(ctx, p.Root)}
 		data, err := json.MarshalIndent(rec, "", "  ")
@@ -157,7 +183,7 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 	// Committed as one `apex: project init`, so the tree is clean after
 	// it (D11). Only what init itself wrote: a brownfield repo's own
 	// dirty files stay as they were.
-	paths := append([]string(nil), res.Created...)
+	paths := append(append([]string(nil), res.Created...), res.Amended...)
 	if len(added) > 0 {
 		paths = append(paths, p.Rel(p.SettingsJSON()))
 	}

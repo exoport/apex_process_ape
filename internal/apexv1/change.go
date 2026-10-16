@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/frontmatter"
@@ -73,9 +74,35 @@ type Change struct {
 	Tasks     []Task
 	// parse findings (bad delta headings, malformed task lines), reported
 	// by ValidateChange alongside the shape rules.
-	parse []Finding
-	file  string
-	raw   string
+	// UnknownKeys are frontmatter keys v1 does not define and that do not
+	// start with "x-" (item 15, OpenSpec's rule): a typo such as
+	// "milestones:" would otherwise be ignored silently.
+	UnknownKeys []string
+	parse       []Finding
+	file        string
+	raw         string
+}
+
+// unknownKeys lists the frontmatter's keys that are neither v1's nor x-*.
+func unknownKeys(fm []byte) []string {
+	var keys map[string]any
+	if yaml.Unmarshal(fm, &keys) != nil {
+		return nil
+	}
+	var out []string
+	for k := range keys {
+		if !knownChangeKeys[k] && !strings.HasPrefix(k, "x-") {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// knownChangeKeys are the frontmatter keys change.md may carry; "x-*"
+// keys are the team's own (a tracker id, say) and are ignored.
+var knownChangeKeys = map[string]bool{
+	"id": true, "milestone": true, "touches": true, "paths": true, "decisions": true, "retire": true,
 }
 
 var (
@@ -95,6 +122,8 @@ func ParseChange(file, doc string) *Change {
 		body = []byte(doc)
 	} else if err := yaml.Unmarshal(fm, &c.Meta); err != nil {
 		c.MetaErr = fmt.Errorf("frontmatter does not parse: %w", err)
+	} else {
+		c.UnknownKeys = unknownKeys(fm)
 	}
 	// Line numbers in findings should match the file, so count the lines
 	// the frontmatter occupied.

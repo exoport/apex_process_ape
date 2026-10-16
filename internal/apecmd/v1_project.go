@@ -25,11 +25,13 @@ func newProjectInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create the development/ skeleton and merge ape's hooks (never overwrites)",
-		Long: `Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten.
+		Long: `Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten
+(one exception: the @AGENTS.md line appended to a CLAUDE.md that lacks it).
 
   _apex/config.yaml                  project_name, development_folder
   AGENTS.md                          the project map (skeleton)
-  CLAUDE.md                          "@AGENTS.md" (only when there is no CLAUDE.md)
+  CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
+                                     gets it appended, and nothing else
   development/project.md             vision, users, scope, out of scope, constraints (skeleton)
   development/roadmap.md             "# Roadmap"
   development/specs/                 empty: no backfill — a spec is born from its first change
@@ -70,6 +72,9 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 				}
 				for _, k := range res.Kept {
 					fmt.Fprintln(w, "kept     "+k)
+				}
+				for _, a := range res.Amended {
+					fmt.Fprintln(w, "amended  "+a+" (appended @AGENTS.md)")
 				}
 				for _, h := range res.HooksAdded {
 					fmt.Fprintln(w, "hook     "+h)

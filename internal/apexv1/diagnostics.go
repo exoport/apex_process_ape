@@ -128,6 +128,7 @@ var findingRules = []findingRule{
 	rule("", `^change.md is .* over the 8 KB cap`, "change.too-big"),
 	rule("", `^design.md is`, "change.design-too-big"),
 	rule("", `^no state.json beside it`, "change.no-state"),
+	rule("", `^frontmatter key .* is not one of`, "change.unknown-key"),
 	rule("", `^(no YAML frontmatter|frontmatter)`, "change.frontmatter"),
 	rule("", `^change id must match`, "change.bad-id"),
 	rule("", `^milestone .* is not in roadmap.md`, "change.unknown-milestone"),
