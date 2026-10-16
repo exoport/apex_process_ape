@@ -14,6 +14,9 @@ type RunCost struct {
 	RunID     string    `json:"run_id"`
 	StartedAt time.Time `json:"started_at"`
 	CostUSD   float64   `json:"cost_usd"`
+	// Args is the run's first step's --args: an APEX v1 run names the
+	// change it works on there (`ape task <skill> --args <id>`).
+	Args string `json:"args,omitempty"`
 }
 
 // RunCosts lists every pipeline and task run's cost under the project's
@@ -25,8 +28,8 @@ func RunCosts(projectRoot string) ([]RunCost, error) {
 			continue
 		}
 		kind := tree.Kind
-		err := walkManifestTree(tree.Path, func(name, runID string, day time.Time, totals Totals, _ map[string]Totals) {
-			out = append(out, RunCost{Kind: kind, Name: name, RunID: runID, StartedAt: day, CostUSD: totals.CostUSD})
+		err := walkManifests(tree.Path, func(name string, m *manifestForRollup, day time.Time) {
+			out = append(out, RunCost{Kind: kind, Name: name, RunID: m.RunID, StartedAt: day, CostUSD: m.Totals.CostUSD, Args: m.firstArgs()})
 		})
 		if err != nil {
 			return out, err

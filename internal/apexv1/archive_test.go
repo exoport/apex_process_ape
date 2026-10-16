@@ -200,6 +200,9 @@ func TestArchive_BaseMovedRebasesAndReverifies(t *testing.T) {
 	res, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
 	require.NoError(t, err)
 	require.True(t, res.Rebased)
+	require.NotNil(t, res.CatchUp, "the one catch-up path (D40)")
+	require.Equal(t, StatusReviewed, res.CatchUp.Status, "inside archive a reviewed change stays reviewed")
+	require.True(t, res.CatchUp.VerifyStale)
 	require.True(t, res.Reverified)
 	require.True(t, res.Verify.Green)
 	require.Equal(t, StatusReviewed, res.Verify.Status, "a green re-verify keeps the review")
@@ -258,7 +261,7 @@ func TestArchive_RebaseConflictBlocks(t *testing.T) {
 	_, err = p.Archive(ctx(), "add-wave", false, RunOptions{})
 	var ce *ConflictError
 	require.ErrorAs(t, err, &ce)
-	require.Equal(t, "archive.rebase-conflict", ce.Code)
+	require.Equal(t, CodeRebaseConflict, ce.Code)
 	require.Equal(t, []string{"wave.sh"}, ce.Conflicts)
 	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "main"))
 	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root))

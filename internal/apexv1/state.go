@@ -96,6 +96,34 @@ type Verify struct {
 	// GreenAtBaseline lists the change's own checks that passed before
 	// any code; always present (empty when none).
 	GreenAtBaseline []GreenAtBaseline `json:"green_at_baseline"`
+	// Stale marks a verify taken before ape caught the change up with a
+	// base branch that moved (D40): kept for the record, it proves nothing
+	// about the rebased code. StaleReason says why.
+	Stale       bool   `json:"stale,omitempty"`
+	StaleReason string `json:"stale_reason,omitempty"`
+}
+
+// Approval records a person approving a fix — a change with
+// `milestone: none` (D40), which has no milestone to be approved through.
+type Approval struct {
+	By string `json:"by"`
+	At string `json:"at"`
+	// PlanDigest is the plan (change.md outside ## Why and ## Notes) the
+	// person approved: start refuses a fix whose plan changed since.
+	PlanDigest string `json:"plan_digest"`
+}
+
+// Rebase records ape catching a change up with its base branch, which
+// had moved ahead of base_sha (D40): From is the old base_sha, To the base
+// tip the change now sits on, Head the change branch's HEAD after it.
+// Rebased is false when the branch already held the base's commits (a
+// person rebased it) and only the baseline was re-taken.
+type Rebase struct {
+	At      string `json:"at"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Head    string `json:"head"`
+	Rebased bool   `json:"rebased"`
 }
 
 // Review is the recorded review verdict.
@@ -142,6 +170,10 @@ type State struct {
 	// differs: another change — on another branch — changed it since.
 	BaseFingerprints map[string]string `json:"base_fingerprints,omitempty"`
 	Replans          []Replan          `json:"replans,omitempty"`
+	// Rebases are the catch-ups with a base branch that moved (D40).
+	Rebases []Rebase `json:"rebases,omitempty"`
+	// Approved is a fix's approval (D40); nil for a milestone change.
+	Approved *Approval `json:"approved,omitempty"`
 	// Regression is the regression command's baseline (backlog 32): run
 	// at the first start, kept across re-starts unless the command changed.
 	Regression        *RegressionBaseline `json:"regression_baseline,omitempty"`

@@ -61,6 +61,21 @@ type manifestForRollup struct {
 		NumTurns            int                         `yaml:"num_turns"`
 		ModelUsage          map[string]modelUsageRecord `yaml:"model_usage"`
 	} `yaml:"totals"`
+	Stages []struct {
+		Steps []struct {
+			Args string `yaml:"args"`
+		} `yaml:"steps"`
+	} `yaml:"stages"`
+}
+
+// firstArgs is the run's first step's --args ("" when none).
+func (m *manifestForRollup) firstArgs() string {
+	for _, st := range m.Stages {
+		if len(st.Steps) > 0 {
+			return st.Steps[0].Args
+		}
+	}
+	return ""
 }
 
 // modelUsageRecord mirrors pipeline.ModelUsageRecord's on-disk shape
@@ -78,6 +93,22 @@ type modelUsageRecord struct {
 // (the shared layout of _output/ape/pipelines and _output/ape/tasks) and folds
 // every readable manifest via fold(name, runID, day, totals).
 func walkManifestTree(root string, fold func(name, runID string, day time.Time, totals Totals, perModel map[string]Totals)) error {
+	return walkManifests(root, func(name string, m *manifestForRollup, day time.Time) {
+		totals := Totals{
+			CostUSD:             m.Totals.CostUSD,
+			InputTokens:         m.Totals.TokensInput,
+			OutputTokens:        m.Totals.TokensOutput,
+			CacheReadTokens:     m.Totals.TokensCacheRead,
+			CacheCreationTokens: m.Totals.TokensCacheCreation,
+			NumTurns:            m.Totals.NumTurns,
+		}
+		fold(name, m.RunID, day, totals, perModelTotals(m.Totals.ModelUsage))
+	})
+}
+
+// walkManifests is walkManifestTree's walk: each readable manifest under
+// <root>/<name>/<run-id>/, with the day it started.
+func walkManifests(root string, visit func(name string, m *manifestForRollup, day time.Time)) error {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -113,15 +144,7 @@ func walkManifestTree(root string, fold func(name, runID string, day time.Time, 
 					day = time.Now().UTC()
 				}
 			}
-			totals := Totals{
-				CostUSD:             m.Totals.CostUSD,
-				InputTokens:         m.Totals.TokensInput,
-				OutputTokens:        m.Totals.TokensOutput,
-				CacheReadTokens:     m.Totals.TokensCacheRead,
-				CacheCreationTokens: m.Totals.TokensCacheCreation,
-				NumTurns:            m.Totals.NumTurns,
-			}
-			fold(name, m.RunID, day, totals, perModelTotals(m.Totals.ModelUsage))
+			visit(name, &m, day)
 		}
 	}
 	return nil

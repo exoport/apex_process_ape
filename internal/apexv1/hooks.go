@@ -71,14 +71,19 @@ func (d PreToolDecision) Output() ([]byte, error) {
 }
 
 // PreTool decides whether an edit tool call may touch its target, and
-// whether a Bash call may write a git tag (TagGuard).
+// whether a Bash call may write a git tag (TagGuard) or rebase or merge on
+// a change branch (RebaseGuard, D40).
 func PreTool(payload HookPayload) PreToolDecision {
 	if payload.ToolName == "Bash" {
 		cwd := payload.Cwd
 		if cwd == "" {
 			cwd, _ = os.Getwd()
 		}
-		return TagGuard(bashCommand(payload.ToolInput), cwd)
+		command := bashCommand(payload.ToolInput)
+		if d := TagGuard(command, cwd); d.Deny {
+			return d
+		}
+		return RebaseGuard(command, cwd)
 	}
 	if !editTools[payload.ToolName] {
 		return PreToolDecision{}

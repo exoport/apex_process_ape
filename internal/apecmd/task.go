@@ -539,7 +539,7 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		cfg.spawnSettings.hooks, cfg.spawnEnv = v1InlineHooks()
 		// Backlog 30: the milestone's enforced budget refuses the start, or
 		// stops the session when its live spend reaches it.
-		if cfg.budgetWatch, err = newV1BudgetWatch(p, o.skill); err != nil {
+		if cfg.budgetWatch, err = newV1BudgetWatch(ctx, p, o.skill, o.args); err != nil {
 			return taskRun{}, &taskPreflightError{err: err}
 		}
 		// Backlog 36: the plugins _apex/config.yaml lists are installed at

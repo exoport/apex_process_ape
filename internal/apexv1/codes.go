@@ -15,6 +15,7 @@ const (
 	CodeWrongBranch  = "change.wrong-branch"
 	CodeChangeBranch = "branch.change-branch"
 	CodeBranchFailed = "git.branch-failed"
+	CodeCheckFailed  = "change.check-failed"
 )
 
 // CodeDoc documents one diagnostic code.
@@ -62,12 +63,14 @@ var DiagnosticCodes = []CodeDoc{
 	{"archive.spec-invalid", 1, "archive: the merged spec would fail project check (e.g. over 20 KB)"},
 	{"change.archived", 1, "the change is already archived"},
 	{"change.attempts-exceeded", 1, "verify: the red verify that reaches limits.attempts since the change started; the change is now blocked"},
-	{"change.check-failed", 1, "change.md fails `ape change check` (findings follow)"},
+	{"change.approve-milestone", 1, "change approve: the change belongs to a milestone, which approves it (ape milestone approve); only a fix (milestone: none) is approved on its own"},
+	{CodeCheckFailed, 1, "change.md fails `ape change check` (findings follow)"},
 	{"change.exists", 1, "change new: a change with that id exists"},
 	{"change.id-archived", 1, "change new: the id was used by an archived change"},
 	{"change.no-change-md", 1, "the change folder has no change.md"},
 	{"change.no-state", 1, "the change folder has no state.json (not made by `ape change new`)"},
 	{"change.not-found", 1, "no such change"},
+	{CodeNotApproved, 1, "start of a fix (milestone: none) no person approved, or whose plan changed since the approval: ape change approve <id> --by <who>"},
 	{"change.nothing-to-rebaseline", 1, "start on a started change whose plan, modified spec and regression command did not change"},
 	{"change.plan-drift", 1, "## Tasks or ## Delta changed since start: re-start to re-baseline, or restore"},
 	{"change.state-unreadable", 1, "state.json does not parse"},
@@ -98,14 +101,14 @@ var DiagnosticCodes = []CodeDoc{
 	{"roadmap.missing", 1, "no roadmap.md"},
 	{"settings.invalid-json", 1, "init: .claude/settings.json is not valid JSON"},
 	{"plugins.missing", 1, "a plugin _apex/config.yaml lists is not installed at project scope, or not at its ref, and installing or updating it failed (the message carries the command to run)"},
-	{"tree.dirty", 1, "uncommitted changes outside the development folder"},
+	{"tree.dirty", 1, "uncommitted changes where the command needs a clean tree: code outside the development folder (verify), or anything before a branch switch or a rebase onto a moved base"},
 	{"verify.missing", 1, "no green verify to review"},
 	{"verify.red", 1, "a task check, an effective-spec scenario check, or a newly red regression command is red"},
 	{"verify.stale", 1, "code changed since the last verify"},
 	{"error.unclassified", 1, "a failure without a code (a bug: report it)"},
 
 	// conflicts (exit 3)
-	{"archive.rebase-conflict", 3, "archive: change/<id> does not rebase onto its base branch; the rebase was aborted, nothing merged, the change is blocked with the conflicting files"},
+	{CodeRebaseConflict, 3, "start, verify, archive: the base branch moved and change/<id> does not rebase onto it (D40); the rebase was aborted, nothing else written, the change is blocked with the conflicting files for a person to resolve"},
 	{"archive.base-changed", 3, "a requirement this change modifies or removes changed in the spec since start (another branch); nothing written"},
 	{CodeDeltaConflict, 3, "the delta no longer applies to the current specs; nothing written"},
 	{CodeFolderExists, 3, "the archive folder already exists; nothing written"},

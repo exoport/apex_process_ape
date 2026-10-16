@@ -26,7 +26,7 @@ func newHookCmd() *cobra.Command {
   pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
-                  delete or push a git tag
+                  delete or push a git tag, or rebase or merge on a change branch
 
 Every hook exits 0; a block or deny is expressed in its JSON output.
 
@@ -165,7 +165,7 @@ func newHookPreToolCmd() *cobra.Command {
 	var inline bool
 	cmd := &cobra.Command{
 		Use:   "pre-tool",
-		Short: "PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, and git tag writes",
+		Short: "PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, and rebases on a change branch",
 		Long: `PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
@@ -191,6 +191,13 @@ subshells, NAME=value prefixes, env/sudo/xargs wrappers, git -C/-c, and sh -c / 
 scripts are followed, so ` + "`echo \"git tag v1\"`" + ` is not flagged. Not seen: "$(…)"
 inside double quotes, git aliases, script files. A command without "git" is allowed
 at once. APE_ALLOW_TAG=1 in the session's environment allows tag writes.
+
+Bash, too (trial decision D40, the model never rebases): denies git rebase and git merge
+while the repository the command runs in has a change branch, change/<id>, checked out —
+ape catches a change up with its moved base itself (` + "`ape change start|verify|archive <id>`" + `
+rebase it and re-take the baseline at the base tip). Allowed: rebase/merge --abort and
+--quit, git merge-base, merge-file and merge-tree, and rebase or merge on any other
+branch. Parsed like the tag rule, with the same limits.
 
 Anything else: no output.`,
 		Args: cobra.NoArgs,

@@ -31,7 +31,7 @@ Subcommands:
 - `adr` — Manage Architecture Decision Records
 - `bootstrap` — Bootstrap governance artifacts from traits
 - `capability` — Inspect and maintain the capability registry
-- `change` — The unit of change: new, check, start, verify, review, accept, block, archive
+- `change` — The unit of change: new, check, approve (fixes), start, verify, review, accept, block, archive
 - `chat` — Bridged claude REPL with hooks captured to a runlog
 - `config` — Resolve the project's APEX configuration
 - `context` — Inspect the project-context document
@@ -1585,7 +1585,7 @@ Flags:
 
 ## ape change
 
-The unit of change: new, check, start, verify, review, accept, block, archive
+The unit of change: new, check, approve (fixes), start, verify, review, accept, block, archive
 
 ```
 ape change
@@ -1624,21 +1624,40 @@ Branch per change (trial decision D38):
   - a change's status is read from its own branch when HEAD is elsewhere, so
     `ape status` on the base branch shows every change's real status
 
+Fix lane (trial decision D40): a change with "milestone: none" is a fix — asked for by a
+person outside the roadmap (apex-change with a request). It is approved on its own,
+`ape change approve <id> --by <who>` (on the base branch), instead of through a milestone,
+and otherwise lives like any change: its branch, baseline, checks, a review in a separate
+session, the delta merged at archive. It counts toward no milestone gate, no milestone's
+regression baseline, and no milestone's spend or budget. An approved fix runs ahead of
+milestone work, at the orchestrator's next change boundary, never in parallel; with no
+milestone run active, `ape task apex-orchestrator --args <id>` runs it alone (urgent:
+`ape run stop` the milestone run, run the fix, restart it). `ape status` lists approved
+fixes first.
+
+Resume after the base moved (D40): whenever a started change's base branch has moved
+ahead of its base_sha, ape — at `ape change start` on a change that has its branch, at
+verify and at archive — rebases change/<id> onto the base, re-runs the baseline at the new
+base tip, and marks the old verify stale. A conflict blocks the change with the files
+(exit 3, change.rebase-conflict). The model never rebases or merges on a change branch
+(`ape hook pre-tool` denies it).
+
 Exit codes for every subcommand: 0 ok · 1 check failed (one-line remediation) · 2 usage ·
-3 conflict (another change claims the same requirement, or the delta no longer applies;
-nothing written).
+3 conflict (another change claims the same requirement, the delta no longer applies, or
+the change does not rebase onto its moved base; nothing written but the block).
 
 Subcommands:
 
 - `abandon` — Move a change to the archive as abandoned, merging no delta; commit
 - `accept` — Accept a human-review task
-- `archive` — Rebase change/<id> onto its base, squash-merge it with the delta and the archive move as one commit
+- `approve` — Approve a fix (a change with milestone: none), so it can start
+- `archive` — Catch change/<id> up with its base, squash-merge it with the delta and the archive move as one commit
 - `block` — Set blocked, with the reason shown by ape status
 - `check` — Validate change.md: shape, caps, delta against specs, a check on every task
 - `diff` — Show the specs as archive would leave them (unified diff per capability)
 - `new` — Validate the id and write the change.md skeleton and state.json (draft)
 - `review` — Record a review verdict, or run the review in its own fresh Claude Code session
-- `start` — Check green + milestone approved → create and check out change/<id>, record the baseline, set in-progress
+- `start` — Check green + approved → create and check out change/<id>, record the baseline, set in-progress
 - `verify` — Run the task checks and the effective spec at HEAD; verified iff all exit 0
 
 ## ape change abandon
@@ -1711,9 +1730,55 @@ Flags:
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 | `--task` | string | `—` | task id, e.g. T2 (required) |
 
+## ape change approve
+
+Approve a fix (a change with milestone: none), so it can start
+
+```
+ape change approve <id> --by <who> [flags]
+```
+
+Record a person approving a fix (trial decision D40): a change with "milestone: none",
+written by apex-change for a person's request outside the roadmap. A milestone change is
+approved through its milestone (`ape milestone approve <M> --by <who>`); approve refuses one
+(exit 1, change.approve-milestone). The approval is what `ape change start` of a fix needs
+in place of an approved milestone (else exit 1, change.not-approved).
+
+  - the fix must pass `ape change check <id>` and not be started yet (status draft, no
+    change/<id> branch; else exit 1, change.wrong-status)
+  - recorded in state.json as approved: {by, at, plan_digest} and committed alone on the
+    base branch as "apex: <id> approved" (trailer "Change: <id>"); refused while HEAD is
+    on a change branch (exit 1, branch.change-branch), like change new
+  - the approval is of the plan change.md has now: a fix whose plan (change.md outside
+    ## Why and ## Notes) changed since is refused at start until approved again
+  - re-approving the same plan is a no-op (exit 0, JSON "already": true, nothing written)
+
+An approved fix may be created at any moment. It runs ahead of milestone work, at the
+orchestrator's next change boundary, never in parallel with it; with no milestone run
+active, `ape task apex-orchestrator --args <id>` runs it alone. `ape status` lists approved
+fixes first (JSON "fixes", changes[].lane "fix", changes[].approved) and points next at the
+first. A fix counts toward no milestone gate and no milestone's spend or budget.
+
+Exit codes: 0 approved (or already) · 1 not a fix, check red, started, or HEAD on a change
+branch · 2 usage (no --by).
+
+Examples:
+
+```
+  ape change approve fix-login-redirect --by diego
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--by` | string | `—` | who approves (required) |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
 ## ape change archive
 
-Rebase change/<id> onto its base, squash-merge it with the delta and the archive move as one commit
+Catch change/<id> up with its base, squash-merge it with the delta and the archive move as one commit
 
 ```
 ape change archive <id> [flags]
@@ -1728,12 +1793,15 @@ Archive a reviewed change onto its base branch (trial decision D38):
      folder (review.md a review left) are first committed on change/<id> as
      "apex: <id> notes"; anything else refuses (code tree.dirty)
   3. refused if code changed on change/<id> since the review (review.stale)
-  4. rebases change/<id> onto the base branch as it is now; on a conflict the rebase is
-     aborted, the change is blocked naming the conflicting files (committed on its
-     branch), and archive exits 3 (archive.rebase-conflict) — nothing reaches the base
-  5. re-runs verify when the code moved since it — the base had moved (red → the change
-     goes back to in-progress on its branch, exit 1, counted as an attempt; a green one
-     keeps it reviewed: the review judged the change's own code)
+  4. when the base branch moved ahead of base_sha, catches the change up — the one path
+     start and verify share (D40, `ape change start --help`): rebases change/<id> onto the
+     base (on a conflict the rebase is aborted, the change is blocked naming the
+     conflicting files, committed on its branch, and archive exits 3,
+     change.rebase-conflict — nothing reaches the base), re-runs the baseline at the new
+     base tip and marks the verify stale; here the change stays reviewed
+  5. re-runs verify when the code moved since it or it is stale — the base had moved (red
+     → the change goes back to in-progress on its branch, exit 1, counted as an attempt;
+     a green one keeps it reviewed: the review judged the change's own code)
   6. applies the delta to development/specs/: ADDED appends, MODIFIED replaces, REMOVED
      deletes; a new capability gets specs/<cap>/spec.md (Purpose from the change's Why).
      Any conflict — including a MODIFIED that would drop a scenario the current spec has,
@@ -1810,8 +1878,9 @@ ape change check <id> [flags]
 
 Validate one change and list every failure:
 
-  - frontmatter id = folder, milestone in roadmap.md, touches non-empty kebab slugs,
-    decisions exist in decisions/, paths are valid globs
+  - frontmatter id = folder, milestone in roadmap.md (or "none": a fix, D40, approved
+    with `ape change approve`), touches non-empty kebab slugs, decisions exist in
+    decisions/, paths are valid globs
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
   - change.md ≤ 8 KB and design.md ≤ 8 KB ("split this change")
   - ## Delta: "### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>" blocks, or
@@ -1880,7 +1949,7 @@ Flags:
 Validate the id and write the change.md skeleton and state.json (draft)
 
 ```
-ape change new <id> --milestone <M> --touches a,b [--paths globs] [flags]
+ape change new <id> --milestone <M>|none --touches a,b [--paths globs] [flags]
 ```
 
 Create development/changes/<id>/ with a change.md skeleton (frontmatter id, milestone,
@@ -1892,6 +1961,11 @@ change branch, change/<other> (exit 1, code branch.change-branch; `git switch <b
 
 <id> is a verb-led kebab slug, ^[a-z][a-z0-9-]{2,39}$, unique across active AND archived
 changes (development/archive/, and an older ape's development/changes/archive/).
+--milestone none makes the change a fix (trial decision D40): what apex-change writes for
+a person's request outside the roadmap. It needs no roadmap entry, inherits no Out of
+scope, is approved on its own (`ape change approve <id> --by <who>`) instead of through a
+milestone, and counts toward no milestone; it may touch capabilities and carry a delta
+like any change.
 --touches lists the capabilities the change adds to or modifies (kebab slugs; new ones
 are fine — a capability is born from its first change). --paths are globs used for
 overlap detection. Overlap (shared touches or paths) with another unarchived change
@@ -1906,6 +1980,7 @@ Examples:
 
 ```
   ape change new add-tenant-delete --milestone M2 --touches tenants --paths 'internal/api/**'
+  ape change new fix-login-redirect --milestone none --touches auth
 ```
 
 Flags:
@@ -1914,7 +1989,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--milestone` | string | `—` | milestone id from roadmap.md (required) |
+| `--milestone` | string | `—` | milestone id from roadmap.md, or none for a fix (required) |
 | `--paths` | string | `—` | comma-separated globs, for overlap detection |
 | `--touches` | string | `—` | comma-separated capability slugs (required) |
 
@@ -1988,7 +2063,7 @@ Flags:
 
 ## ape change start
 
-Check green + milestone approved → create and check out change/<id>, record the baseline, set in-progress
+Check green + approved → create and check out change/<id>, record the baseline, set in-progress
 
 ```
 ape change start <id> [flags]
@@ -1996,7 +2071,9 @@ ape change start <id> [flags]
 
 Start a draft (or resume a blocked) change:
 
-  1. `ape change check <id>` must be green, and its milestone approved
+  1. `ape change check <id>` must be green, and its milestone approved — or, for a fix
+     (milestone: none, D40), the fix approved for the plan it has
+     (`ape change approve <id> --by <who>`; else exit 1, change.not-approved)
   2. refused with exit 3 if another active change (in-progress, verified, reviewed —
      not blocked; read from its own branch) also ADDs, MODIFIES or REMOVES one of the
      same requirements
@@ -2022,6 +2099,26 @@ checks change/<id> out first (clean tree); when the change is started and nothin
 re-baselining it only resumes there (JSON "resumed": true). Re-start keeps base_branch.
 A blocked change is re-planned on its branch (change.md there), then started again.
 
+Resume after the base moved (D40): start on a change that has its branch first checks
+whether the base branch moved ahead of base_sha (a fix or another change landed there).
+If so ape catches the change up — the one path start, verify and archive share:
+  - the tree must be clean (uncommitted files in the change's own folder are committed on
+    its branch; anything else: exit 1, tree.dirty)
+  - `git rebase <base_branch>` on change/<id>; a conflict aborts the rebase and blocks the
+    change naming the files (committed on its branch): exit 3, change.rebase-conflict,
+    nothing else written — a person resolves it (`git rebase` on the branch, by hand),
+    then `ape change start <id>` re-baselines without rebasing again
+  - the baseline (task checks, effective-spec scenarios, regression command) is re-run
+    at the NEW BASE TIP, in a temporary detached worktree under the OS temp dir (never at
+    the rebased HEAD, which holds the change's code): a new test of the change is red
+    there; it replaces the old baseline, and green-at-baseline is judged against it
+  - recorded in state.json (rebases: [{at, from, to, head, rebased}]; base_sha = the base
+    tip; the last verify kept with stale: true and stale_reason), a verified or reviewed
+    change goes back to in-progress, and the state is committed on change/<id> as
+    "apex: <id> rebased onto <base>"
+JSON "catch_up": {base_branch, from, to, rebased, baseline, regression, verify_stale,
+status}. The model never rebases: ape does, here, at verify and at archive.
+
 Re-start: once the plan is frozen, verify and archive refuse while change.md differs from
 it anywhere but ## Why and ## Notes (frontmatter, title, Out of scope, Delta, Tasks, …). Running start again on an in-progress, verified or reviewed change
 re-baselines: recorded under "replans" in state.json, verify and review cleared, new or
@@ -2031,9 +2128,10 @@ changed, when a spec block the change modifies or removes was changed by another
 since start, or when the regression command has no baseline for it (configured or changed
 since start); otherwise it is refused.
 
-Exit codes: 0 started (or resumed) · 1 check red, milestone not approved, wrong status,
-dirty tree, detached HEAD, HEAD on another change's branch, or git failed · 2 usage ·
-3 requirement conflict with another active change.
+Exit codes: 0 started (or resumed) · 1 check red, milestone (or fix) not approved, wrong
+status, dirty tree, detached HEAD, HEAD on another change's branch, or git failed · 2 usage ·
+3 requirement conflict with another active change, or the change does not rebase onto
+its moved base.
 
 Examples:
 
@@ -2075,6 +2173,12 @@ is reported (pre_existing_red), not failed: the planner roadmaps it.
 The working tree must hold no uncommitted changes outside development/ — commit first
 (trailer "Change: <id>"): a verify belongs to a sha. HEAD must be on the change's branch,
 change/<id> (D38; else exit 1, code change.wrong-branch).
+When the base branch moved ahead of base_sha, verify first catches the change up exactly
+as `ape change start --help` describes (D40): rebase onto the base (conflict: blocked,
+exit 3, change.rebase-conflict), the baseline re-run at the new base tip, the old verify
+marked stale, a verified/reviewed change back to in-progress, "apex: <id> rebased onto
+<base>" committed; then it verifies the rebased code (JSON "catch_up"). A reviewed change
+caught up here needs a new review.
 
 All checks exit 0 → status verified (a reviewed change whose code has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last
@@ -2097,7 +2201,8 @@ Refused while change.md differs from the plan frozen at start outside ## Why and
 as pending.
 
 Exit codes: 0 all command checks green · 1 a check is red (the attempts cap reached
-included), uncommitted code, or wrong status · 2 usage.
+included), uncommitted code, or wrong status · 2 usage · 3 the change does not rebase onto
+its moved base (blocked).
 
 Examples:
 
@@ -4112,7 +4217,7 @@ Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
   pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
-                  delete or push a git tag
+                  delete or push a git tag, or rebase or merge on a change branch
 
 Every hook exits 0; a block or deny is expressed in its JSON output.
 
@@ -4122,13 +4227,13 @@ them; the settings.json copy then does nothing, so each event is decided once.
 
 Subcommands:
 
-- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, and git tag writes
+- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, and rebases on a change branch
 - `session-start` — SessionStart hook: inject `ape status --brief` as additional context
 - `stop` — Stop/SubagentStop hook: block a stop while the in-progress change's checks are red
 
 ## ape hook pre-tool
 
-PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, and git tag writes
+PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, and rebases on a change branch
 
 ```
 ape hook pre-tool [flags]
@@ -4159,6 +4264,13 @@ subshells, NAME=value prefixes, env/sudo/xargs wrappers, git -C/-c, and sh -c / 
 scripts are followed, so `echo "git tag v1"` is not flagged. Not seen: "$(…)"
 inside double quotes, git aliases, script files. A command without "git" is allowed
 at once. APE_ALLOW_TAG=1 in the session's environment allows tag writes.
+
+Bash, too (trial decision D40, the model never rebases): denies git rebase and git merge
+while the repository the command runs in has a change branch, change/<id>, checked out —
+ape catches a change up with its moved base itself (`ape change start|verify|archive <id>`
+rebase it and re-take the baseline at the base tip). Allowed: rebase/merge --abort and
+--quit, git merge-base, merge-file and merge-tree, and rebase or merge on any other
+branch. Parsed like the tag rule, with the same limits.
 
 Anything else: no output.
 
@@ -4505,7 +4617,8 @@ ape milestone close <M> [flags]
 
 Close an approved milestone. Refused while a change of this milestone is in-progress,
 verified or reviewed (archive or block it first) — each change's status read from its own
-branch, change/<id> — and on a change branch (see `ape milestone --help`). Otherwise runs the gate (recorded as by
+branch, change/<id>; a fix in flight (milestone: none, D40) counts toward no milestone and
+does not hold the close — and on a change branch (see `ape milestone --help`). Otherwise runs the gate (recorded as by
 `ape milestone gate`) and, only on exit 0, writes "Status: done (<ts> <sha>)" into
 roadmap.md, committed with milestones.json as "apex: <M> done". Green means the gate command
 AND every scenario check of the spec pass, AND the regression command (when configured) is
@@ -4544,7 +4657,8 @@ the whole spec beside it as the regression suite (human-review not run; output u
 _apex/state/logs/gate-<M>/), and the project's "regression: <cmd>" from _apex/config.yaml
 when one is configured. The gate is green only when all pass — the regression command
 only needs not to be newly red: it is judged against the earliest regression baseline,
-for the same command, recorded by any change of the milestone (active or archived);
+for the same command, recorded by any change of the milestone (active or archived; a fix,
+milestone: none, is no change of any milestone and never supplies it — D40);
 red there and red now is reported (JSON run.regression.pre_existing_red), not failed.
 When no change of the milestone has a baseline for the command, a red regression fails
 the gate: nothing shows it was red before the milestone's work. Files the gate
@@ -6925,6 +7039,15 @@ Show where the project stands, from the records ape keeps:
     (limits.budget: enforce; JSON milestone.budget_enforced), whose measured cost the
     spend counts
   - the checked-out branch (JSON branch; "(on <branch>)" in the first line)
+  - fixes first (trial decision D40): a change with "milestone: none" is a fix (JSON
+    changes[].lane "fix"; else "milestone"). Approved fixes (changes[].approved: {by, at,
+    plan_digest}) are listed before milestone changes — started ones first, then by
+    approval time — and JSON "fixes" holds the ids of those not blocked, in the order they
+    run: the first runs ahead of milestone work, at the orchestrator's next change boundary
+    (never in parallel), or alone with `ape task apex-orchestrator --args <id>`, and next
+    points at it. A fix awaiting approval is listed last, with the command a person runs
+    (`ape change approve <id> --by <who>`). A fix's runs (`ape task <skill> --args <fix-id>`)
+    count toward no milestone's spend
   - every change not archived, with its status, blocked reason, red checks from its
     last verify, human-review tasks not yet accepted, and for a started change its red
     verifies since it started against limits.attempts (JSON attempts, attempts_cap;

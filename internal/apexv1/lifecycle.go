@@ -62,6 +62,9 @@ type StartResult struct {
 	// Regression is the regression command's baseline run, when this
 	// start took one (a first start, or the command changed).
 	Regression *CheckResult `json:"regression,omitempty"`
+	// CatchUp: start found the base branch moved ahead of the change and
+	// caught it up — rebased, re-baselined at the base tip (D40).
+	CatchUp *CatchUp `json:"catch_up,omitempty"`
 }
 
 // Start moves a draft (or blocked) change to in-progress: check green,
@@ -78,7 +81,7 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 	cur := CurrentBranch(ctx, p.Root)
 	switch {
 	case cur == branch:
-		return p.start(ctx, id, opt, nil)
+		return p.reenter(ctx, id, opt, false)
 	case ChangeOfBranch(cur) != "":
 		return nil, p.otherChangeBranch(cur, "start "+id)
 	case cur == "":
@@ -90,16 +93,7 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 		if err := p.switchBranch(ctx, branch); err != nil {
 			return nil, err
 		}
-		res, err := p.start(ctx, id, opt, nil)
-		var fe *FailError
-		if errors.As(err, &fe) && fe.Code == CodeNothingToRebaseline {
-			st, lerr := LoadState(p.StateFile(id))
-			if lerr != nil {
-				return nil, err
-			}
-			return &StartResult{ID: id, Status: st.Status, BaseSHA: st.BaseSHA, BaseBranch: st.BaseBranch, Branch: branch, Resumed: true, Baseline: []CheckResult{}}, nil
-		}
-		return res, err
+		return p.reenter(ctx, id, opt, true)
 	}
 	entered := false
 	enter := func(st *State) error {
@@ -119,6 +113,39 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 		_, _ = git(ctx, p.Root, "reset", "-q", "--hard")
 		_, _ = git(ctx, p.Root, "switch", "-q", cur)
 		_, _ = git(ctx, p.Root, "branch", "-q", "-D", branch)
+	}
+	return res, err
+}
+
+// reenter is start on a change whose branch is checked out: first the
+// catch-up with a base branch that moved (D40), then start's own work — a
+// re-baseline when the plan, the spec it modifies or the regression
+// command changed, else only a resume. A start run on the change's branch
+// that had nothing to do (no catch-up, nothing to re-baseline) is refused
+// (change.nothing-to-rebaseline); switched says start checked the branch
+// out, which is a resume in itself.
+func (p *Project) reenter(ctx context.Context, id string, opt RunOptions, switched bool) (*StartResult, error) {
+	ci, err := p.requireChange(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	_, cu, err := p.catchUp(ctx, ci, "start", opt, false)
+	if err != nil {
+		return nil, err
+	}
+	res, err := p.start(ctx, id, opt, nil)
+	if fe, ok := errors.AsType[*FailError](err); ok && fe.Code == CodeNothingToRebaseline && (switched || cu != nil) {
+		st, lerr := LoadState(p.StateFile(id))
+		if lerr != nil {
+			return nil, err
+		}
+		return &StartResult{
+			ID: id, Status: st.Status, BaseSHA: st.BaseSHA, BaseBranch: st.BaseBranch, Branch: ChangeBranch(id),
+			Resumed: true, Baseline: []CheckResult{}, CatchUp: cu,
+		}, nil
+	}
+	if res != nil {
+		res.CatchUp = cu
 	}
 	return res, err
 }
@@ -165,17 +192,10 @@ func (p *Project) start(ctx context.Context, id string, opt RunOptions, enter fu
 		return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + st.Status + "; start applies to draft or blocked changes, or re-baselines a changed plan"}
 	}
 	if fs := p.CheckChange(id); len(fs) > 0 {
-		return nil, &FailError{Code: "change.check-failed", Msg: "change " + id + " does not pass `ape change check` — fix change.md first", Findings: fs}
+		return nil, &FailError{Code: CodeCheckFailed, Msg: "change " + id + " does not pass `ape change check` — fix change.md first", Findings: fs}
 	}
-	rm := p.roadmap()
-	ms := rm.Find(ci.Doc.Meta.Milestone)
-	if ms == nil || ms.Status != MilestoneApproved {
-		status := "missing"
-		if ms != nil {
-			status = ms.StatusText
-		}
-		return nil, &FailError{Code: CodeMilestoneNotApproved, Msg: fmt.Sprintf("milestone %s is %s, not approved — a person runs `ape milestone approve %s --by <who>`",
-			ci.Doc.Meta.Milestone, status, ci.Doc.Meta.Milestone)}
+	if err := p.requireApproved(ci); err != nil {
+		return nil, err
 	}
 	var conflicts []string
 	// Blocked changes claim nothing (D6): ActiveChanges excludes them.
@@ -227,6 +247,27 @@ func (p *Project) start(ctx context.Context, id string, opt RunOptions, enter fu
 		ID: id, Status: st.Status, BaseSHA: st.BaseSHA, BaseBranch: st.BaseBranch, Branch: CurrentBranch(ctx, p.Root),
 		Baseline: results, Regression: regression,
 	}, nil
+}
+
+// requireApproved is start's approval gate: a fix's own approval (D40),
+// else the change's milestone approved.
+func (p *Project) requireApproved(ci ChangeInfo) error {
+	if ci.Doc.IsFix() {
+		return requireFixApproved(ci)
+	}
+	var ms *Milestone
+	if rm := p.roadmap(); rm != nil {
+		ms = rm.Find(ci.Doc.Meta.Milestone)
+	}
+	if ms == nil || ms.Status != MilestoneApproved {
+		status := "missing"
+		if ms != nil {
+			status = ms.StatusText
+		}
+		return &FailError{Code: CodeMilestoneNotApproved, Msg: fmt.Sprintf("milestone %s is %s, not approved — a person runs `ape milestone approve %s --by <who>`",
+			ci.Doc.Meta.Milestone, status, ci.Doc.Meta.Milestone)}
+	}
+	return nil
 }
 
 // rebaseline runs the baseline — every check verify will run: the command
@@ -288,6 +329,9 @@ type VerifyResult struct {
 	Attempts      int `json:"attempts"`
 	AttemptsTotal int `json:"attempts_total"`
 	AttemptsCap   int `json:"attempts_cap"`
+	// CatchUp: verify found the base branch moved and caught the change
+	// up first (D40).
+	CatchUp *CatchUp `json:"catch_up,omitempty"`
 }
 
 // greenAtBaseline lists the change's own checks — tasks and the scenarios
@@ -348,7 +392,17 @@ func (p *Project) Verify(ctx context.Context, id string, opt RunOptions) (*Verif
 	if err := checkPlanFrozen(ci); err != nil {
 		return nil, err
 	}
-	return p.verify(ctx, ci, opt, false)
+	// The base moved: ape rebases the change onto it and re-baselines
+	// first (D40), then verifies the rebased code.
+	ci, cu, err := p.catchUp(ctx, ci, "verify", opt, false)
+	if err != nil {
+		return nil, err
+	}
+	res, err := p.verify(ctx, ci, opt, false)
+	if res != nil {
+		res.CatchUp = cu
+	}
+	return res, err
 }
 
 // verify runs and records a verify. keepReview is archive's re-verify

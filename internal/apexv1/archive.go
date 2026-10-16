@@ -174,16 +174,19 @@ type ArchiveResult struct {
 	BranchTip string `json:"branch_tip,omitempty"`
 	// Rebased: the base branch had moved, and archive rebased the change
 	// branch onto it.
-	Rebased           bool          `json:"rebased"`
+	Rebased bool `json:"rebased"`
+	// CatchUp is the catch-up with the moved base (D40), when there was one.
+	CatchUp           *CatchUp      `json:"catch_up,omitempty"`
 	Reverified        bool          `json:"reverified"`
 	Verify            *VerifyResult `json:"verify,omitempty"`
 	AllowPendingHuman bool          `json:"allow_pending_human,omitempty"`
 	PendingHuman      []string      `json:"pending_human,omitempty"`
 }
 
-// Archive lands a reviewed change on its base branch (D38): it rebases
-// change/<id> onto the base branch (a conflict blocks the change, exit 3),
-// re-verifies when that moved the code, then squash-merges the branch into
+// Archive lands a reviewed change on its base branch (D38): it catches
+// change/<id> up with the base branch when that moved (catchUp, D40: a
+// rebase conflict blocks the change, exit 3), re-verifies when that moved
+// the code, then squash-merges the branch into
 // the base branch as ONE commit — subject the change's title, trailer
 // `Change: <id>` — holding the change's code, its delta merged into
 // specs/, and its folder moved to archive/<date>-<id>/; then deletes the
@@ -209,14 +212,15 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	if moved, files, _ := p.codeMovedSince(ctx, ci.State.Review.SHA); moved {
 		return res, &FailError{Code: "review.stale", Msg: "code changed since the review (" + strings.Join(limit(files, 5), ", ") + ") — review again (apex-review), then archive"}
 	}
-	before := HeadSHA(ctx, p.Root)
-	if err := p.rebaseOrBlock(ctx, ci); err != nil {
+	// The one catch-up path (D40): rebased onto the base when it moved,
+	// re-baselined at its tip, the verify marked stale; reviewed stays
+	// reviewed here, and archiveFresh re-verifies.
+	ci, cu, err := p.catchUp(ctx, ci, "archive", opt, true)
+	res.CatchUp = cu
+	if err != nil {
 		return res, err
 	}
-	res.Rebased = HeadSHA(ctx, p.Root) != before
-	if ci, err = p.requireChange(ctx, id); err != nil {
-		return res, err
-	}
+	res.Rebased = cu != nil && cu.Rebased
 	if err := p.archiveFresh(ctx, ci, res, opt); err != nil {
 		return res, err
 	}
@@ -281,31 +285,6 @@ func (p *Project) enterChangeBranch(ctx context.Context, ci ChangeInfo) (ChangeI
 		return ci, err
 	}
 	return p.requireChange(ctx, id)
-}
-
-// rebaseOrBlock rebases the change's branch onto its base branch as it is
-// now. On a conflict the rebase is aborted and the change blocked, the
-// reason naming the conflicting files (committed on its branch):
-// ConflictError archive.rebase-conflict.
-func (p *Project) rebaseOrBlock(ctx context.Context, ci ChangeInfo) error {
-	id, base, branch := ci.ID, ci.State.BaseBranch, ChangeBranch(ci.ID)
-	conflicts, err := p.rebaseOnto(ctx, base)
-	if err == nil {
-		return nil
-	}
-	if len(conflicts) == 0 {
-		return &FailError{Code: CodeBranchFailed, Msg: "rebasing " + branch + " onto " + base + " failed: " + err.Error() + " — the rebase was aborted; fix git and archive again"}
-	}
-	reason := "archive: rebasing onto " + base + " conflicts in " + strings.Join(limit(conflicts, 8), ", ") +
-		" — re-plan or redo the work on " + branch + " against " + base + ", then `ape change start " + id + "`"
-	st := ci.State
-	st.Status = StatusBlocked
-	st.BlockedReason = &reason
-	if err := p.saveAndCommit(ctx, id, st); err != nil {
-		return err
-	}
-	return &ConflictError{Code: "archive.rebase-conflict", Msg: "change " + id + " does not rebase cleanly onto " + base +
-		" — the rebase was aborted, nothing was merged, and the change is blocked with the conflicting files", Conflicts: conflicts}
 }
 
 // planArchive decides everything archive writes, writing nothing: the
@@ -414,24 +393,6 @@ func (p *Project) writeArchive(ctx context.Context, id string, st *State, update
 	}
 	_, err := git(ctx, p.Root, "add", "-A", "--", p.DevRel)
 	return err
-}
-
-// rebaseOnto rebases the checked-out branch onto base. On a conflict it
-// aborts the rebase and returns the conflicting files with the error.
-func (p *Project) rebaseOnto(ctx context.Context, base string) ([]string, error) {
-	_, err := git(ctx, p.Root, "rebase", "-q", base)
-	if err == nil {
-		return nil, nil
-	}
-	out, _ := git(ctx, p.Root, "diff", "--name-only", "--diff-filter=U")
-	var conflicts []string
-	for f := range strings.SplitSeq(out, "\n") {
-		if f != "" {
-			conflicts = append(conflicts, f)
-		}
-	}
-	_, _ = git(ctx, p.Root, "rebase", "--abort")
-	return conflicts, err
 }
 
 // AbandonResult is what `ape change abandon` reports.
@@ -611,7 +572,7 @@ func (p *Project) fingerprintConflicts(recorded map[string]string, c *Change) []
 // rebase.
 func (p *Project) archiveFresh(ctx context.Context, ci ChangeInfo, res *ArchiveResult, opt RunOptions) error {
 	st := ci.State
-	codeMoved := st.Verify == nil
+	codeMoved := st.Verify == nil || st.Verify.Stale
 	if !codeMoved {
 		codeMoved, _, _ = p.codeMovedSince(ctx, st.Verify.SHA)
 	}

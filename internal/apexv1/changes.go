@@ -155,6 +155,8 @@ func (p *Project) CheckChange(id string) []Finding {
 	switch {
 	case c.Meta.Milestone == "":
 		add(1, "frontmatter has no milestone")
+	case c.Meta.Milestone == MilestoneNone:
+		// A fix (D40): approved on its own, in no milestone.
 	case rm == nil || rm.Find(c.Meta.Milestone) == nil:
 		add(1, "milestone "+c.Meta.Milestone+" is not in roadmap.md")
 	}
@@ -435,7 +437,11 @@ func changeSkeleton(id, milestone string, touches, paths, outOfScope []string) s
 	b.WriteString("decisions: []\n")
 	b.WriteString("---\n")
 	b.WriteString("# " + titleFromSlug(id) + "\n\n")
-	b.WriteString("## Why\n<!-- why this change, now, toward " + milestone + " -->\n\n")
+	if milestone == MilestoneNone {
+		b.WriteString("## Why\n<!-- the request this fix answers, and why it cannot wait for a milestone -->\n\n")
+	} else {
+		b.WriteString("## Why\n<!-- why this change, now, toward " + milestone + " -->\n\n")
+	}
 	b.WriteString("## Out of scope\n")
 	if len(outOfScope) == 0 {
 		b.WriteString("<!-- what this change will not do -->\n")
@@ -479,13 +485,19 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 			return nil, &FailError{Code: "change.id-archived", Msg: "change " + id + " was already archived as " + p.Rel(filepath.Join(dir, folder)) + " — ids are unique across the archive; pick another"}
 		}
 	}
-	rm := p.roadmap()
-	if rm == nil {
-		return nil, &FailError{Code: "roadmap.missing", Msg: "no roadmap.md — run `ape project init` and `ape milestone new` first"}
-	}
-	ms := rm.Find(milestone)
-	if ms == nil {
-		return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "milestone " + milestone + " is not in roadmap.md — `ape milestone new` adds one"}
+	// A fix (D40) belongs to no milestone: nothing to look up, no Out of
+	// scope to inherit.
+	var outOfScope []string
+	if milestone != MilestoneNone {
+		rm := p.roadmap()
+		if rm == nil {
+			return nil, &FailError{Code: "roadmap.missing", Msg: "no roadmap.md — run `ape project init` and `ape milestone new` first"}
+		}
+		ms := rm.Find(milestone)
+		if ms == nil {
+			return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "milestone " + milestone + " is not in roadmap.md — `ape milestone new` adds one, or `--milestone none` makes the change a fix"}
+		}
+		outOfScope = ms.OutOfScope
 	}
 	if len(touches) == 0 {
 		return nil, &UsageError{Code: "usage.touches", Msg: "--touches needs at least one capability slug"}
@@ -503,7 +515,7 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 	if err := os.MkdirAll(p.ChangeDir(id), 0o755); err != nil {
 		return nil, err
 	}
-	if err := writeFileAtomic(p.ChangeMD(id), changeSkeleton(id, milestone, touches, paths, ms.OutOfScope)); err != nil {
+	if err := writeFileAtomic(p.ChangeMD(id), changeSkeleton(id, milestone, touches, paths, outOfScope)); err != nil {
 		return nil, err
 	}
 	st := &State{ID: id, Status: StatusDraft, CreatedAt: Stamp()}

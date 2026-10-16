@@ -252,6 +252,15 @@ func newStatusCmd() *cobra.Command {
     (limits.budget: enforce; JSON milestone.budget_enforced), whose measured cost the
     spend counts
   - the checked-out branch (JSON branch; "(on <branch>)" in the first line)
+  - fixes first (trial decision D40): a change with "milestone: none" is a fix (JSON
+    changes[].lane "fix"; else "milestone"). Approved fixes (changes[].approved: {by, at,
+    plan_digest}) are listed before milestone changes — started ones first, then by
+    approval time — and JSON "fixes" holds the ids of those not blocked, in the order they
+    run: the first runs ahead of milestone work, at the orchestrator's next change boundary
+    (never in parallel), or alone with ` + "`ape task apex-orchestrator --args <id>`" + `, and next
+    points at it. A fix awaiting approval is listed last, with the command a person runs
+    (` + "`ape change approve <id> --by <who>`" + `). A fix's runs (` + "`ape task <skill> --args <fix-id>`" + `)
+    count toward no milestone's spend
   - every change not archived, with its status, blocked reason, red checks from its
     last verify, human-review tasks not yet accepted, and for a started change its red
     verifies since it started against limits.attempts (JSON attempts, attempts_cap;

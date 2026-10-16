@@ -13,7 +13,7 @@ import (
 func newChangeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "change",
-		Short: "The unit of change: new, check, start, verify, review, accept, block, archive",
+		Short: "The unit of change: new, check, approve (fixes), start, verify, review, accept, block, archive",
 		Long: `A change is development/changes/<id>/change.md (written by the model) plus state.json
 (written only by ape). Its lifecycle:
 
@@ -47,12 +47,30 @@ Branch per change (trial decision D38):
   - a change's status is read from its own branch when HEAD is elsewhere, so
     ` + "`ape status`" + ` on the base branch shows every change's real status
 
+Fix lane (trial decision D40): a change with "milestone: none" is a fix — asked for by a
+person outside the roadmap (apex-change with a request). It is approved on its own,
+` + "`ape change approve <id> --by <who>`" + ` (on the base branch), instead of through a milestone,
+and otherwise lives like any change: its branch, baseline, checks, a review in a separate
+session, the delta merged at archive. It counts toward no milestone gate, no milestone's
+regression baseline, and no milestone's spend or budget. An approved fix runs ahead of
+milestone work, at the orchestrator's next change boundary, never in parallel; with no
+milestone run active, ` + "`ape task apex-orchestrator --args <id>`" + ` runs it alone (urgent:
+` + "`ape run stop`" + ` the milestone run, run the fix, restart it). ` + "`ape status`" + ` lists approved
+fixes first.
+
+Resume after the base moved (D40): whenever a started change's base branch has moved
+ahead of its base_sha, ape — at ` + "`ape change start`" + ` on a change that has its branch, at
+verify and at archive — rebases change/<id> onto the base, re-runs the baseline at the new
+base tip, and marks the old verify stale. A conflict blocks the change with the files
+(exit 3, change.rebase-conflict). The model never rebases or merges on a change branch
+(` + "`ape hook pre-tool`" + ` denies it).
+
 Exit codes for every subcommand: 0 ok · 1 check failed (one-line remediation) · 2 usage ·
-3 conflict (another change claims the same requirement, or the delta no longer applies;
-nothing written).`,
+3 conflict (another change claims the same requirement, the delta no longer applies, or
+the change does not rebase onto its moved base; nothing written but the block).`,
 	}
 	cmd.AddCommand(
-		newChangeNewCmd(), newChangeCheckCmd(), newChangeStartCmd(), newChangeVerifyCmd(),
+		newChangeNewCmd(), newChangeCheckCmd(), newChangeApproveCmd(), newChangeStartCmd(), newChangeVerifyCmd(),
 		newChangeReviewCmd(), newChangeAcceptCmd(), newChangeBlockCmd(), newChangeArchiveCmd(),
 		newChangeAbandonCmd(), newChangeDiffCmd(),
 	)
@@ -96,7 +114,7 @@ func newChangeNewCmd() *cobra.Command {
 	var f v1Flags
 	var milestone, touches, paths string
 	cmd := v1ChangeLeaf(
-		"new <id> --milestone <M> --touches a,b [--paths globs]",
+		"new <id> --milestone <M>|none --touches a,b [--paths globs]",
 		"Validate the id and write the change.md skeleton and state.json (draft)",
 		`Create development/changes/<id>/ with a change.md skeleton (frontmatter id, milestone,
 touches, paths; # title; ## Why, ## Out of scope (pre-filled with the milestone's Out of
@@ -107,6 +125,11 @@ change branch, change/<other> (exit 1, code branch.change-branch; `+"`git switch
 
 <id> is a verb-led kebab slug, ^[a-z][a-z0-9-]{2,39}$, unique across active AND archived
 changes (development/archive/, and an older ape's development/changes/archive/).
+--milestone none makes the change a fix (trial decision D40): what apex-change writes for
+a person's request outside the roadmap. It needs no roadmap entry, inherits no Out of
+scope, is approved on its own (`+"`ape change approve <id> --by <who>`"+`) instead of through a
+milestone, and counts toward no milestone; it may touch capabilities and carry a delta
+like any change.
 --touches lists the capabilities the change adds to or modifies (kebab slugs; new ones
 are fine — a capability is born from its first change). --paths are globs used for
 overlap detection. Overlap (shared touches or paths) with another unarchived change
@@ -116,11 +139,12 @@ Then fill change.md and run `+"`ape change check <id>`"+`.
 
 Exit codes: 0 ok · 1 id taken (incl. archive), milestone not in roadmap, or HEAD on a
 change branch · 2 usage.`,
-		"  ape change new add-tenant-delete --milestone M2 --touches tenants --paths 'internal/api/**'",
+		"  ape change new add-tenant-delete --milestone M2 --touches tenants --paths 'internal/api/**'\n"+
+			"  ape change new fix-login-redirect --milestone none --touches auth",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
 			if milestone == "" {
-				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.milestone", Msg: "--milestone is required (e.g. M1)"}, nil)
+				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.milestone", Msg: "--milestone is required (e.g. M1, or none for a fix)"}, nil)
 			}
 			res, err := p.NewChange(cmd.Context(), id, milestone, splitList(touches), splitList(paths))
 			if err != nil {
@@ -135,7 +159,7 @@ change branch · 2 usage.`,
 				fmt.Fprintf(w, "%s  draft  %s\n", res.ID, res.Path)
 			})
 		})
-	cmd.Flags().StringVar(&milestone, "milestone", "", "milestone id from roadmap.md (required)")
+	cmd.Flags().StringVar(&milestone, "milestone", "", "milestone id from roadmap.md, or none for a fix (required)")
 	cmd.Flags().StringVar(&touches, "touches", "", "comma-separated capability slugs (required)")
 	cmd.Flags().StringVar(&paths, "paths", "", "comma-separated globs, for overlap detection")
 	return cmd
@@ -148,8 +172,9 @@ func newChangeCheckCmd() *cobra.Command {
 		"Validate change.md: shape, caps, delta against specs, a check on every task",
 		`Validate one change and list every failure:
 
-  - frontmatter id = folder, milestone in roadmap.md, touches non-empty kebab slugs,
-    decisions exist in decisions/, paths are valid globs
+  - frontmatter id = folder, milestone in roadmap.md (or "none": a fix, D40, approved
+    with `+"`ape change approve`"+`), touches non-empty kebab slugs, decisions exist in
+    decisions/, paths are valid globs
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
   - change.md ≤ 8 KB and design.md ≤ 8 KB ("split this change")
   - ## Delta: "### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>" blocks, or
@@ -185,14 +210,65 @@ Exit codes: 0 green · 1 findings · 2 usage.`,
 		})
 }
 
+func newChangeApproveCmd() *cobra.Command {
+	var f v1Flags
+	var by string
+	cmd := v1ChangeLeaf(
+		"approve <id> --by <who>",
+		"Approve a fix (a change with milestone: none), so it can start",
+		`Record a person approving a fix (trial decision D40): a change with "milestone: none",
+written by apex-change for a person's request outside the roadmap. A milestone change is
+approved through its milestone (`+"`ape milestone approve <M> --by <who>`"+`); approve refuses one
+(exit 1, change.approve-milestone). The approval is what `+"`ape change start`"+` of a fix needs
+in place of an approved milestone (else exit 1, change.not-approved).
+
+  - the fix must pass `+"`ape change check <id>`"+` and not be started yet (status draft, no
+    change/<id> branch; else exit 1, change.wrong-status)
+  - recorded in state.json as approved: {by, at, plan_digest} and committed alone on the
+    base branch as "apex: <id> approved" (trailer "Change: <id>"); refused while HEAD is
+    on a change branch (exit 1, branch.change-branch), like change new
+  - the approval is of the plan change.md has now: a fix whose plan (change.md outside
+    ## Why and ## Notes) changed since is refused at start until approved again
+  - re-approving the same plan is a no-op (exit 0, JSON "already": true, nothing written)
+
+An approved fix may be created at any moment. It runs ahead of milestone work, at the
+orchestrator's next change boundary, never in parallel with it; with no milestone run
+active, `+"`ape task apex-orchestrator --args <id>`"+` runs it alone. `+"`ape status`"+` lists approved
+fixes first (JSON "fixes", changes[].lane "fix", changes[].approved) and points next at the
+first. A fix counts toward no milestone gate and no milestone's spend or budget.
+
+Exit codes: 0 approved (or already) · 1 not a fix, check red, started, or HEAD on a change
+branch · 2 usage (no --by).`,
+		"  ape change approve fix-login-redirect --by diego",
+		&f,
+		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			res, err := p.ApproveFix(cmd.Context(), id, by)
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+				if res.Already {
+					fmt.Fprintf(w, "fix %s: already approved by %s at %s (nothing written)\n", id, res.Approved.By, res.Approved.At)
+					return
+				}
+				fmt.Fprintf(w, "fix %s: approved by %s — it runs ahead of milestone work: `ape task apex-orchestrator --args %s`, or the orchestrator's next change boundary\n",
+					id, res.Approved.By, id)
+			})
+		})
+	cmd.Flags().StringVar(&by, "by", "", "who approves (required)")
+	return cmd
+}
+
 func newChangeStartCmd() *cobra.Command {
 	var f v1Flags
 	cmd := v1ChangeLeaf(
 		"start <id>",
-		"Check green + milestone approved → create and check out change/<id>, record the baseline, set in-progress",
+		"Check green + approved → create and check out change/<id>, record the baseline, set in-progress",
 		`Start a draft (or resume a blocked) change:
 
-  1. `+"`ape change check <id>`"+` must be green, and its milestone approved
+  1. `+"`ape change check <id>`"+` must be green, and its milestone approved — or, for a fix
+     (milestone: none, D40), the fix approved for the plan it has
+     (`+"`ape change approve <id> --by <who>`"+`; else exit 1, change.not-approved)
   2. refused with exit 3 if another active change (in-progress, verified, reviewed —
      not blocked; read from its own branch) also ADDs, MODIFIES or REMOVES one of the
      same requirements
@@ -218,6 +294,26 @@ checks change/<id> out first (clean tree); when the change is started and nothin
 re-baselining it only resumes there (JSON "resumed": true). Re-start keeps base_branch.
 A blocked change is re-planned on its branch (change.md there), then started again.
 
+Resume after the base moved (D40): start on a change that has its branch first checks
+whether the base branch moved ahead of base_sha (a fix or another change landed there).
+If so ape catches the change up — the one path start, verify and archive share:
+  - the tree must be clean (uncommitted files in the change's own folder are committed on
+    its branch; anything else: exit 1, tree.dirty)
+  - `+"`git rebase <base_branch>`"+` on change/<id>; a conflict aborts the rebase and blocks the
+    change naming the files (committed on its branch): exit 3, change.rebase-conflict,
+    nothing else written — a person resolves it (`+"`git rebase`"+` on the branch, by hand),
+    then `+"`ape change start <id>`"+` re-baselines without rebasing again
+  - the baseline (task checks, effective-spec scenarios, regression command) is re-run
+    at the NEW BASE TIP, in a temporary detached worktree under the OS temp dir (never at
+    the rebased HEAD, which holds the change's code): a new test of the change is red
+    there; it replaces the old baseline, and green-at-baseline is judged against it
+  - recorded in state.json (rebases: [{at, from, to, head, rebased}]; base_sha = the base
+    tip; the last verify kept with stale: true and stale_reason), a verified or reviewed
+    change goes back to in-progress, and the state is committed on change/<id> as
+    "apex: <id> rebased onto <base>"
+JSON "catch_up": {base_branch, from, to, rebased, baseline, regression, verify_stale,
+status}. The model never rebases: ape does, here, at verify and at archive.
+
 Re-start: once the plan is frozen, verify and archive refuse while change.md differs from
 it anywhere but ## Why and ## Notes (frontmatter, title, Out of scope, Delta, Tasks, …). Running start again on an in-progress, verified or reviewed change
 re-baselines: recorded under "replans" in state.json, verify and review cleared, new or
@@ -227,9 +323,10 @@ changed, when a spec block the change modifies or removes was changed by another
 since start, or when the regression command has no baseline for it (configured or changed
 since start); otherwise it is refused.
 
-Exit codes: 0 started (or resumed) · 1 check red, milestone not approved, wrong status,
-dirty tree, detached HEAD, HEAD on another change's branch, or git failed · 2 usage ·
-3 requirement conflict with another active change.`,
+Exit codes: 0 started (or resumed) · 1 check red, milestone (or fix) not approved, wrong
+status, dirty tree, detached HEAD, HEAD on another change's branch, or git failed · 2 usage ·
+3 requirement conflict with another active change, or the change does not rebase onto
+its moved base.`,
 		"  ape change start add-tenant-delete",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -238,6 +335,7 @@ dirty tree, detached HEAD, HEAD on another change's branch, or git failed · 2 u
 				return v1Fail(cmd, &f, err, nil)
 			}
 			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+				printCatchUp(w, id, res.CatchUp)
 				if res.Resumed {
 					fmt.Fprintf(w, "change %s: %s, resumed on %s (base %s)\n", id, res.Status, res.Branch, res.BaseBranch)
 					return
@@ -287,6 +385,12 @@ is reported (pre_existing_red), not failed: the planner roadmaps it.
 The working tree must hold no uncommitted changes outside development/ — commit first
 (trailer "Change: <id>"): a verify belongs to a sha. HEAD must be on the change's branch,
 change/<id> (D38; else exit 1, code change.wrong-branch).
+When the base branch moved ahead of base_sha, verify first catches the change up exactly
+as `+"`ape change start --help`"+` describes (D40): rebase onto the base (conflict: blocked,
+exit 3, change.rebase-conflict), the baseline re-run at the new base tip, the old verify
+marked stale, a verified/reviewed change back to in-progress, "apex: <id> rebased onto
+<base>" committed; then it verifies the rebased code (JSON "catch_up"). A reviewed change
+caught up here needs a new review.
 
 All checks exit 0 → status verified (a reviewed change whose code has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last
@@ -309,7 +413,8 @@ Refused while change.md differs from the plan frozen at start outside ## Why and
 as pending.
 
 Exit codes: 0 all command checks green · 1 a check is red (the attempts cap reached
-included), uncommitted code, or wrong status · 2 usage.`,
+included), uncommitted code, or wrong status · 2 usage · 3 the change does not rebase onto
+its moved base (blocked).`,
 		"  ape change verify add-tenant-delete",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -318,6 +423,7 @@ included), uncommitted code, or wrong status · 2 usage.`,
 				return v1Fail(cmd, &f, err, nil)
 			}
 			human := func(w io.Writer) {
+				printCatchUp(w, id, res.CatchUp)
 				fmt.Fprintf(w, "change %s at %.7s: %s\n", id, res.SHA, res.Status)
 				printChecks(w, res.Results, true)
 				if len(res.PendingHuman) > 0 {
@@ -349,6 +455,26 @@ included), uncommitted code, or wrong status · 2 usage.`,
 		})
 	addV1TimeoutFlag(cmd, &f)
 	return cmd
+}
+
+// printCatchUp reports a catch-up with a moved base branch (D40): the
+// rebase, and the baseline re-taken at the base tip.
+func printCatchUp(w io.Writer, id string, cu *apexv1.CatchUp) {
+	if cu == nil {
+		return
+	}
+	how := "rebased " + apexv1.ChangeBranch(id) + " onto"
+	if !cu.Rebased {
+		how = apexv1.ChangeBranch(id) + " already holds"
+	}
+	fmt.Fprintf(w, "%s moved (%.7s..%.7s): %s it; baseline re-taken at %.7s:\n", cu.BaseBranch, cu.From, cu.To, how, cu.To)
+	printChecks(w, cu.Baseline, false)
+	if r := cu.Regression; r != nil {
+		fmt.Fprintf(w, "  regression exit %d at the base  %s\n", r.Exit, r.Cmd)
+	}
+	if cu.VerifyStale {
+		fmt.Fprintf(w, "the last verify is stale (kept for the record); %s is %s\n", id, cu.Status)
+	}
 }
 
 // printStrays lists what the checks left in the tree and ape undid.
@@ -593,7 +719,7 @@ func newChangeArchiveCmd() *cobra.Command {
 	var allowPending bool
 	cmd := v1ChangeLeaf(
 		"archive <id>",
-		"Rebase change/<id> onto its base, squash-merge it with the delta and the archive move as one commit",
+		"Catch change/<id> up with its base, squash-merge it with the delta and the archive move as one commit",
 		`Archive a reviewed change onto its base branch (trial decision D38):
 
   1. needs status reviewed (review pass) and the plan frozen at start unchanged; human-
@@ -603,12 +729,15 @@ func newChangeArchiveCmd() *cobra.Command {
      folder (review.md a review left) are first committed on change/<id> as
      "apex: <id> notes"; anything else refuses (code tree.dirty)
   3. refused if code changed on change/<id> since the review (review.stale)
-  4. rebases change/<id> onto the base branch as it is now; on a conflict the rebase is
-     aborted, the change is blocked naming the conflicting files (committed on its
-     branch), and archive exits 3 (archive.rebase-conflict) — nothing reaches the base
-  5. re-runs verify when the code moved since it — the base had moved (red → the change
-     goes back to in-progress on its branch, exit 1, counted as an attempt; a green one
-     keeps it reviewed: the review judged the change's own code)
+  4. when the base branch moved ahead of base_sha, catches the change up — the one path
+     start and verify share (D40, `+"`ape change start --help`"+`): rebases change/<id> onto the
+     base (on a conflict the rebase is aborted, the change is blocked naming the
+     conflicting files, committed on its branch, and archive exits 3,
+     change.rebase-conflict — nothing reaches the base), re-runs the baseline at the new
+     base tip and marks the verify stale; here the change stays reviewed
+  5. re-runs verify when the code moved since it or it is stale — the base had moved (red
+     → the change goes back to in-progress on its branch, exit 1, counted as an attempt;
+     a green one keeps it reviewed: the review judged the change's own code)
   6. applies the delta to development/specs/: ADDED appends, MODIFIED replaces, REMOVED
      deletes; a new capability gets specs/<cap>/spec.md (Purpose from the change's Why).
      Any conflict — including a MODIFIED that would drop a scenario the current spec has,

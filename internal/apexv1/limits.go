@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -160,8 +161,9 @@ func approvedSince(m *Milestone) time.Time {
 // (every run when it is not approved): each run's manifest cost, or what
 // ape measured when a limit stopped it, whichever is more — a stopped
 // session's manifest counts only its completed steps, which for `ape task`
-// is none.
-func milestoneSpend(m *Milestone, runs []cost.RunCost, stops []LimitStop) float64 {
+// is none. A fix's runs — whose --args names a change of `milestone:
+// none` (D40) — count toward no milestone.
+func milestoneSpend(m *Milestone, runs []cost.RunCost, stops []LimitStop, fixes map[string]bool) float64 {
 	since := approvedSince(m)
 	stopped := map[string]float64{}
 	for i := range stops {
@@ -171,7 +173,7 @@ func milestoneSpend(m *Milestone, runs []cost.RunCost, stops []LimitStop) float6
 	}
 	total := 0.0
 	for _, run := range runs {
-		if run.StartedAt.Before(since) {
+		if run.StartedAt.Before(since) || fixes[RunChangeArg(run.Args)] {
 			continue
 		}
 		c := run.CostUSD
@@ -208,6 +210,16 @@ type LimitHit struct {
 // `ape status` derives it, and only when it is approved; with none, or
 // with no budget enforced, nothing applies and it returns nil.
 func (p *Project) TaskLimits(skill string) (*TaskLimits, error) {
+	return p.TaskLimitsFor(context.Background(), skill, "")
+}
+
+// TaskLimitsFor is TaskLimits for a session started with --args args: a
+// fix's session (args names a change of `milestone: none`, D40) counts
+// toward no milestone, so no milestone budget applies to it.
+func (p *Project) TaskLimitsFor(ctx context.Context, skill, args string) (*TaskLimits, error) {
+	if p.IsFixRun(ctx, args) {
+		return nil, nil //nolint:nilnil // a fix's session: no budget applies
+	}
 	var m *Milestone
 	if rm := p.roadmap(); rm != nil {
 		m = rm.Current()
@@ -218,7 +230,7 @@ func (p *Project) TaskLimits(skill string) (*TaskLimits, error) {
 	runs, _ := cost.RunCosts(p.Root)
 	tl := &TaskLimits{
 		Milestone: m.ID, Skill: skill, Budget: *m.Budget,
-		SpentUSD: milestoneSpend(m, runs, p.milestoneStops(m.ID)),
+		SpentUSD: milestoneSpend(m, runs, p.milestoneStops(m.ID), p.fixIDs(ctx)),
 	}
 	if tl.SpentUSD >= tl.Budget {
 		return nil, &FailError{Code: "milestone.budget-exceeded", Msg: fmt.Sprintf(

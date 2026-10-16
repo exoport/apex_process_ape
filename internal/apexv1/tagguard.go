@@ -68,21 +68,43 @@ func TagGuard(command, cwd string) PreToolDecision {
 // tagWrite returns a description of the first tag write in a command line,
 // "" for none.
 func tagWrite(command, cwd string, depth int) string {
+	return scanGit(command, cwd, depth, judgeTag)
+}
+
+// gitJudge judges one git invocation: its subcommand, the arguments after
+// it, and the directory it runs in (-C applied). It returns a description
+// of what the guard denies, "" to allow.
+type gitJudge func(sub string, args []string, dir string) string
+
+// scanGit returns the first non-empty verdict judge gives a git
+// invocation in a command line, "" for none.
+func scanGit(command, cwd string, depth int, judge gitJudge) string {
 	if depth > 3 {
 		return ""
 	}
 	for _, words := range shellCommands(command) {
-		if what := tagWriteIn(words, cwd, depth); what != "" {
+		if what := scanGitIn(words, cwd, depth, judge); what != "" {
 			return what
 		}
 	}
 	return ""
 }
 
+// judgeTag is the tag guard's judge.
+func judgeTag(sub string, args []string, dir string) string {
+	switch sub {
+	case "tag":
+		return gitTagCmd(args)
+	case "push":
+		return gitPushCmd(args, dir)
+	}
+	return ""
+}
+
 var assignRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 
-// tagWriteIn judges one simple command's words.
-func tagWriteIn(words []string, cwd string, depth int) string {
+// scanGitIn judges one simple command's words.
+func scanGitIn(words []string, cwd string, depth int, judge gitJudge) string {
 	// Leading assignments and wrappers.
 	for len(words) > 0 {
 		w := words[0]
@@ -111,20 +133,20 @@ done:
 	case "sh", "bash", "zsh", "dash", "ksh":
 		for i := 1; i < len(words)-1; i++ {
 			if f := words[i]; strings.HasPrefix(f, "-") && !strings.HasPrefix(f, "--") && strings.Contains(f, "c") {
-				return tagWrite(words[i+1], cwd, depth+1)
+				return scanGit(words[i+1], cwd, depth+1, judge)
 			}
 		}
 		return ""
 	case "eval":
-		return tagWrite(strings.Join(words[1:], " "), cwd, depth+1)
+		return scanGit(strings.Join(words[1:], " "), cwd, depth+1, judge)
 	case "git":
-		return gitTagWrite(words[1:], cwd)
+		return gitInvocation(words[1:], cwd, judge)
 	}
 	return ""
 }
 
-// gitTagWrite judges git's arguments.
-func gitTagWrite(args []string, cwd string) string {
+// gitInvocation skips git's global options and judges the rest.
+func gitInvocation(args []string, cwd string, judge gitJudge) string {
 	dir := cwd
 	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
 		switch a := args[0]; {
@@ -145,13 +167,7 @@ func gitTagWrite(args []string, cwd string) string {
 	if len(args) == 0 {
 		return ""
 	}
-	switch args[0] {
-	case "tag":
-		return gitTagCmd(args[1:])
-	case "push":
-		return gitPushCmd(args[1:], dir)
-	}
-	return ""
+	return judge(args[0], args[1:], dir)
 }
 
 // tagValueOpts take the next word as their value.

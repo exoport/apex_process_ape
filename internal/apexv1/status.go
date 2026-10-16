@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/cost"
@@ -50,6 +51,11 @@ type ChangeStatus struct {
 	AttemptsCap   int `json:"attempts_cap,omitempty"`
 	// Branch is the change's branch, change/<id>, when it has one (D38).
 	Branch string `json:"branch,omitempty"`
+	// Lane is "fix" for a change of `milestone: none` (D40), else
+	// "milestone". Approved is a fix's approval; a fix without one awaits
+	// `ape change approve <id> --by <who>`.
+	Lane     string    `json:"lane"`
+	Approved *Approval `json:"approved,omitempty"`
 }
 
 // Spend is the cost recorded in the project's run manifests.
@@ -79,6 +85,11 @@ type StatusReport struct {
 	Milestones []MilestoneLine  `json:"milestones"`
 	Changes    []ChangeStatus   `json:"changes"`
 	Archived   int              `json:"archived"`
+	// Fixes are the approved fixes not archived nor blocked, in the order
+	// they run (D40): started ones first, then by approval time. The first
+	// runs ahead of milestone work, at the orchestrator's next change
+	// boundary — or alone, `ape task apex-orchestrator --args <id>`.
+	Fixes []string `json:"fixes"`
 	// PreExistingRed is what was red at a change's baseline that is not
 	// the change's own: the planner's to roadmap (backlog 37).
 	PreExistingRed []PreExistingRed `json:"pre_existing_red"`
@@ -88,7 +99,7 @@ type StatusReport struct {
 
 // Status builds the report.
 func (p *Project) Status() *StatusReport {
-	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}}
+	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Fixes: []string{}}
 	if cfg, err := LoadConfig(p.Root); err == nil && cfg.ProjectName != "" {
 		r.Project = cfg.ProjectName
 	} else {
@@ -102,17 +113,17 @@ func (p *Project) Status() *StatusReport {
 	r.Spend.TotalUSD = round2(r.Spend.TotalUSD)
 	r.Spend.Note = "sum of finished ape task/pipeline run manifests; a run still in progress is not counted yet"
 
+	ctx := context.Background()
 	if rm := p.roadmap(); rm != nil {
 		for i := range rm.Milestones {
 			m := &rm.Milestones[i]
 			r.Milestones = append(r.Milestones, MilestoneLine{ID: m.ID, Title: m.Title, Status: m.Status})
 		}
 		if m := rm.Current(); m != nil {
-			r.Milestone = p.milestoneStatus(m, runs)
+			r.Milestone = p.milestoneStatus(m, runs, p.fixIDs(ctx))
 		}
 	}
 
-	ctx := context.Background()
 	r.Branch = CurrentBranch(ctx, p.Root)
 	branches := map[string]bool{}
 	if p.isWorkTree(ctx) {
@@ -123,9 +134,12 @@ func (p *Project) Status() *StatusReport {
 	attempts := p.loadAttempts()
 	r.PreExistingRed = p.preExistingRed(changes)
 	for _, c := range changes {
-		cs := ChangeStatus{ID: c.ID}
+		cs := ChangeStatus{ID: c.ID, Lane: LaneMilestone}
 		if c.Doc != nil {
 			cs.Title, cs.Milestone = c.Doc.Title, c.Doc.Meta.Milestone
+			if c.Doc.IsFix() {
+				cs.Lane = LaneFix
+			}
 		}
 		if c.State == nil {
 			cs.Status = "invalid"
@@ -136,6 +150,9 @@ func (p *Project) Status() *StatusReport {
 			continue
 		}
 		cs.Status = c.State.Status
+		if cs.Lane == LaneFix {
+			cs.Approved = c.State.Approved
+		}
 		if branches[c.ID] {
 			cs.Branch = ChangeBranch(c.ID)
 		}
@@ -162,21 +179,73 @@ func (p *Project) Status() *StatusReport {
 		}
 		r.Changes = append(r.Changes, cs)
 	}
+	sortFixesFirst(r.Changes)
+	for i := range r.Changes {
+		if c := &r.Changes[i]; c.runnableFix() {
+			r.Fixes = append(r.Fixes, c.ID)
+		}
+	}
 	r.Archived = len(p.ArchivedIDs())
 	r.Next = nextStep(r)
 	return r
 }
 
+// runnableFix reports an approved fix that is neither blocked nor
+// unreadable: one the orchestrator runs ahead of milestone work (D40).
+func (c *ChangeStatus) runnableFix() bool {
+	return c.Lane == LaneFix && c.Approved != nil && c.Status != StatusBlocked && c.Status != "invalid"
+}
+
+// sortFixesFirst orders the changes as `ape status` lists them (D40):
+// approved fixes first — started ones before drafts, then by approval
+// time — then milestone changes, then fixes awaiting approval; by id
+// within each group.
+func sortFixesFirst(cs []ChangeStatus) {
+	group := func(c *ChangeStatus) int {
+		switch {
+		case c.Lane == LaneFix && c.Approved != nil:
+			return 0
+		case c.Lane == LaneFix:
+			return 2
+		}
+		return 1
+	}
+	rank := func(c *ChangeStatus) int {
+		switch c.Status {
+		case StatusReviewed, StatusVerified, StatusInProgress:
+			return 0
+		case StatusDraft:
+			return 1
+		}
+		return 2
+	}
+	sort.SliceStable(cs, func(i, j int) bool {
+		a, b := &cs[i], &cs[j]
+		if ga, gb := group(a), group(b); ga != gb {
+			return ga < gb
+		}
+		if group(a) == 0 {
+			if ra, rb := rank(a), rank(b); ra != rb {
+				return ra < rb
+			}
+			if a.Approved.At != b.Approved.At {
+				return a.Approved.At < b.Approved.At
+			}
+		}
+		return a.ID < b.ID
+	})
+}
+
 // milestoneStatus is the current milestone with its last gate run and
 // the spend of runs started since its approval.
-func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost) *MilestoneStatus {
+func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost, fixes map[string]bool) *MilestoneStatus {
 	ms := &MilestoneStatus{ID: m.ID, Title: m.Title, Status: m.Status, StatusText: m.StatusText, Gate: m.Gate, Budget: m.Budget}
 	ms.GateLast = p.LastGateRun(m.ID)
 	ms.Stops = p.milestoneStops(m.ID)
 	if ms.Stops == nil {
 		ms.Stops = []LimitStop{}
 	}
-	ms.SpentUSD = round2(milestoneSpend(m, runs, ms.Stops))
+	ms.SpentUSD = round2(milestoneSpend(m, runs, ms.Stops, fixes))
 	ms.BudgetEnforced = p.limits().BudgetEnforced() && m.Budget != nil
 	return ms
 }
@@ -186,6 +255,12 @@ func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost) *MilestoneS
 func nextStep(r *StatusReport) string {
 	if !r.Initialized {
 		return "run `ape project init`"
+	}
+	// An approved fix runs ahead of milestone work (D40).
+	for i := range r.Changes {
+		if c := &r.Changes[i]; c.runnableFix() {
+			return fixNext(c, r.Branch)
+		}
 	}
 	m := r.Milestone
 	if m == nil {
@@ -227,6 +302,18 @@ func nextStep(r *StatusReport) string {
 		return fmt.Sprintf("%s gate was green at %s — `ape milestone close %s`", m.ID, short(m.GateLast.SHA), m.ID)
 	}
 	return fmt.Sprintf("plan the next change toward %s (apex-change), or `ape milestone gate %s` if the goal looks met", m.ID, m.ID)
+}
+
+// fixNext is the next step for an approved fix: it runs ahead of
+// milestone work, at the orchestrator's next change boundary (never in
+// parallel), or alone when no milestone run is active.
+func fixNext(c *ChangeStatus, branch string) string {
+	what := "fix " + c.ID + " (approved by " + c.Approved.By + ", " + c.Status
+	if c.Branch != "" && branch != c.Branch {
+		what += ", on " + c.Branch
+	}
+	return what + ") runs ahead of milestone work: the orchestrator takes it at its next change boundary; " +
+		"with no milestone run active, `ape task apex-orchestrator --args " + c.ID + "` runs it alone"
 }
 
 // briefReasonMax caps a blocked reason in the brief, so a long question
@@ -282,7 +369,7 @@ groups:
 				break groups
 			}
 			shown++
-			line := fmt.Sprintf("  %-28s %-11s %s", c.ID, c.Status, c.Milestone)
+			line := fmt.Sprintf("  %-28s %-11s %s", c.ID, c.Status, c.laneLabel())
 			switch {
 			case c.BlockedReason != "":
 				line += " — " + truncate(c.BlockedReason, briefReasonMax)
@@ -303,6 +390,20 @@ groups:
 	}
 	b = append(b, fmt.Sprintf("Spend: $%.2f over %d runs", r.Spend.TotalUSD, r.Spend.Runs), "Next: "+r.Next)
 	return strings.Join(b, "\n") + "\n"
+}
+
+// laneLabel is the brief's third column: the milestone, or the fix lane
+// and its approval (D40).
+func (c *ChangeStatus) laneLabel() string {
+	switch {
+	case c.Lane != LaneFix:
+		return c.Milestone
+	case c.Approved != nil:
+		return "fix (approved by " + c.Approved.By + ")"
+	case c.Status == StatusDraft:
+		return "fix — awaiting approval: `ape change approve " + c.ID + " --by <who>`"
+	}
+	return "fix"
 }
 
 // preExistingRedLine is one line naming what was red at a baseline and is
