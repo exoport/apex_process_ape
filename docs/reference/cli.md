@@ -3992,8 +3992,9 @@ Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
   session-start   SessionStart: adds `ape status --brief` as context
   stop            Stop and SubagentStop: blocks a stop while the one in-progress change
                   has a red command check (at most 3 times in a row)
-  pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit): denies edits to
-                  development/specs/**, changes/*/state.json, changes/archive/**, .apex/**
+  pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
+                  development/specs/**, changes/*/state.json, changes/archive/**, .apex/**,
+                  and Bash commands that create, delete or push a git tag
 
 Every hook exits 0; a block or deny is expressed in its JSON output.
 
@@ -4003,23 +4004,38 @@ them; the settings.json copy then does nothing, so each event is decided once.
 
 Subcommands:
 
-- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive and .apex
+- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive and .apex, and git tag writes
 - `session-start` — SessionStart hook: inject `ape status --brief` as additional context
 - `stop` — Stop/SubagentStop hook: block a stop while the in-progress change's checks are red
 
 ## ape hook pre-tool
 
-PreToolUse hook: deny edits to specs, state.json, the archive and .apex
+PreToolUse hook: deny edits to specs, state.json, the archive and .apex, and git tag writes
 
 ```
 ape hook pre-tool [flags]
 ```
 
-PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit. Denies, with
+PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
-development/changes/archive/, or is under development/.apex/. Anything else: no output.
+development/changes/archive/, or is under development/.apex/.
+
+Bash: denies a command that writes a git tag — only a person tags or releases:
+  git tag <name> (-a, -s, -f, -m …), git tag -d|--delete
+  git push --tags | --follow-tags | --mirror
+  git push <remote> <ref> where <ref> is refs/tags/… (either side, :refs/tags/x),
+    "tag <name>", or a name the repository has as a tag and not as a branch;
+    git push --delete|-d <remote> <name> likewise
+Listing stays allowed: git tag, -l/--list [<pattern>], -n, --contains, --merged,
+--points-at, --sort, --format, -v. The command is parsed: quotes, && || ; | chains,
+subshells, NAME=value prefixes, env/sudo/xargs wrappers, git -C/-c, and sh -c / eval
+scripts are followed, so `echo "git tag v1"` is not flagged. Not seen: "$(…)"
+inside double quotes, git aliases, script files. A command without "git" is allowed
+at once. APE_ALLOW_TAG=1 in the session's environment allows tag writes.
+
+Anything else: no output.
 
 Flags:
 
@@ -4876,7 +4892,8 @@ Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritt
 Hooks merged into .claude/settings.json (existing keys and hooks are kept):
   SessionStart          ape hook session-start
   Stop, SubagentStop    ape hook stop          (timeout 1800 s: it runs the change's checks)
-  PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit)
+  PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit|Bash:
+                                                the edit guard, and the git tag guard)
 A hook that was altered (another matcher, async, a shorter stop timeout) is replaced
 by the one above; running init again changes nothing. ape task passes the same
 hooks inline as well, so its sessions have them even when settings.json does not.

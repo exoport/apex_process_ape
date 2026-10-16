@@ -15,7 +15,7 @@ const (
 	HookCmdSessionStart = "ape hook session-start"
 	HookCmdStop         = "ape hook stop"
 	HookCmdPreTool      = "ape hook pre-tool"
-	PreToolMatcher      = "Edit|Write|MultiEdit|NotebookEdit"
+	PreToolMatcher      = "Edit|Write|MultiEdit|NotebookEdit|Bash"
 	// StopHookTimeout is the stop hook's timeout in seconds: it runs the
 	// change's command checks, which can take minutes.
 	StopHookTimeout = 1800
