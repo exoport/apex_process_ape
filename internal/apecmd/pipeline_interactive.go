@@ -983,6 +983,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		ClaudeBin:         cfg.claudeBin,
 		Effort:            cfg.effort,
 		EffortTable:       cfg.effortTable,
+		EffortAsArg:       cfg.effortAsArg,
 		SessionKind:       sessionKindOf(cfg),
 		ApeVersion:        Version,
 		ManifestDir:       cfg.manifestDir,

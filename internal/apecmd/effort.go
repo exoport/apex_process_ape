@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/effort"
 	"github.com/exoport/apex_process_ape/internal/output"
@@ -38,6 +39,11 @@ func prepareEffort(spec *pipeline.Spec, projectRoot string, cfg *runConfig) erro
 	}
 	if errs := spec.EffortErrors(); len(errs) > 0 {
 		return usageErr(errors.New("pipeline " + spec.Name + ": " + strings.Join(errs, "; ")))
+	}
+	if cfg.effortAsArg {
+		// APEX v1: the table and the legacy default do not apply.
+		cfg.effortTable = nil
+		return nil
 	}
 	table, err := loadEffortTable(projectRoot)
 	if err != nil {
@@ -69,6 +75,19 @@ type effortReport struct {
 	LegacyDefault string `json:"legacy_default,omitempty" yaml:"legacy_default,omitempty"`
 	// Model is the --model resolution, when asked for.
 	Model *effortForModel `json:"model,omitempty" yaml:"model,omitempty"`
+	// V1 is set in an APEX v1 project, where `ape task` does not use the
+	// table at all (backlog 29).
+	V1 *v1EffortReport `json:"v1,omitempty" yaml:"v1,omitempty"`
+}
+
+// v1EffortReport is what decides an `ape task` session's effort in an
+// APEX v1 project, below --effort, models.<skill>.effort and the parent
+// session's: _apex/config.yaml effort:, else nothing.
+type v1EffortReport struct {
+	// Effort is _apex/config.yaml's top-level effort:, "" for none.
+	Effort string `json:"effort,omitempty" yaml:"effort,omitempty"`
+	// Skills maps each models.<skill> entry to its model and effort.
+	Skills map[string]apexv1.SkillModel `json:"skills,omitempty" yaml:"skills,omitempty"`
 }
 
 type effortForModel struct {
@@ -101,6 +120,11 @@ alias target gets the fallback.
 
 --model resolves one model the way a spawn would.
 
+In an APEX v1 project the table applies to ape pipeline only: ape task
+passes claude --effort from --effort, models.<skill>.effort, the parent
+session's effort or _apex/config.yaml effort:, else nothing (see ape task
+--help). The report's v1 section shows the config's part of that.
+
 Exit codes:
   0  resolved (with or without a table)
   2  the table exists and is invalid, or --model is empty after trimming
@@ -112,6 +136,10 @@ Exit codes:
 			rep, err := buildEffortReport(cfg.Paths.Apex, modelFlag, cmd.Flags().Changed("model"))
 			if err != nil {
 				return usageErr(err)
+			}
+			if _, v1 := v1ProjectAt(cfg.Root); v1 {
+				v1cfg, _ := apexv1.LoadConfig(cfg.Root)
+				rep.V1 = &v1EffortReport{Effort: v1cfg.Effort, Skills: v1cfg.Models}
 			}
 			format := output.Format(outputFormat)
 			if format != output.FormatHuman {
@@ -178,6 +206,22 @@ func emitEffortHuman(w io.Writer, rep *effortReport) error {
 			return err
 		}
 		fmt.Fprintln(w, "\nAn explicit step/stage/pipeline effort or --effort overrides this, process-wide.")
+	}
+	if v := rep.V1; v != nil {
+		top := v.Effort
+		if top == "" {
+			top = "none (claude's own setting)"
+		}
+		fmt.Fprintf(w, "\nAPEX v1 project: ape task does not use this table. Its effort is claude --effort from\n"+
+			"--effort, models.<skill>.effort, the parent session's, else _apex/config.yaml effort: %s\n", top)
+		skills := make([]string, 0, len(v.Skills))
+		for s := range v.Skills {
+			skills = append(skills, s)
+		}
+		sort.Strings(skills)
+		for _, s := range skills {
+			fmt.Fprintf(w, "  models.%s: model %q, effort %q\n", s, v.Skills[s].Model, v.Skills[s].Effort)
+		}
 	}
 	if m := rep.Model; m != nil {
 		fmt.Fprintf(w, "\n--model %s → %s (family %q): %s via %s\n", m.Requested, m.Canonical, m.Family, m.Effort, m.Via)

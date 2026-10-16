@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
-	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/spf13/cobra"
 )
@@ -147,7 +146,7 @@ func startReviewSession(ctx context.Context, p *apexv1.Project, id, model, effor
 		return nil, nil, err
 	}
 	cfg, _ := apexv1.LoadConfig(p.Root)
-	launch := apexv1.DecideReviewLaunch(model, effortFlag, cfg.Models[reviewSkill],
+	launch := apexv1.DecideLaunch(model, effortFlag, cfg.Models[reviewSkill], cfg.Effort,
 		os.Getenv(repl.EnvSessionModel), os.Getenv(repl.EnvSessionEffort))
 	argv := []string{"task", reviewSkill, "--args", id, "--output-format", "json", "--quiet", "--cwd", p.Root}
 	if launch.Model != "" {
@@ -198,23 +197,4 @@ func awaitHandle(ctx context.Context, path string, wait time.Duration) (h *detac
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
-}
-
-// recordReviewLaunch writes a review session's launch decision (passed in
-// APE_REVIEW_LAUNCH by `ape change review --run`) into its run manifest.
-// Best-effort, like recordCommitContract.
-func recordReviewLaunch(projectRoot, skill, manifestDir string) {
-	raw := os.Getenv(envReviewLaunch)
-	if raw == "" || skill != reviewSkill {
-		return
-	}
-	var l apexv1.ReviewLaunch
-	if json.Unmarshal([]byte(raw), &l) != nil {
-		return
-	}
-	rec := &pipeline.ReviewLaunchRecord{
-		Model: l.Model, ModelSource: l.ModelSource, Effort: l.Effort, EffortSource: l.EffortSource,
-		Parent: os.Getenv(envReviewParent),
-	}
-	patchLatestManifest(projectRoot, skill, manifestDir, func(m *pipeline.Manifest) { m.ReviewLaunch = rec })
 }

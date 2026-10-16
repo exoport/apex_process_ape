@@ -376,6 +376,11 @@ type runConfig struct {
 	// effortTable is the project's `_apex/effort-defaults.yaml`, loaded by
 	// prepareEffort before anything spawns; nil when the project has none.
 	effortTable *effort.Defaults
+	// effortAsArg is the APEX v1 effort rule (pipeline.RunOptions.
+	// EffortAsArg): effort is `claude --effort <level>`, and with none
+	// nothing is passed — no table, no legacy default. Set by `ape task`
+	// in a v1 project.
+	effortAsArg bool
 
 	// NATS progress-eventing + transcript-blob upload (PLAN-13). All
 	// strictly opt-in and resolved flags → env (natsconn.Resolve); with no

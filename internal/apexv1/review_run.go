@@ -189,58 +189,16 @@ func (p *Project) SettleReviewRun(ctx context.Context, run *ReviewRun) (*ReviewO
 // ErrNoVerdict: the review session ended without recording one.
 var ErrNoVerdict = errors.New("the review session ended without a verdict")
 
-// Where a review session's model and effort came from (D22), as recorded
-// in its run manifest.
-const (
-	LaunchFromFlag    = "flag"           // `ape change review --run --model/--effort`
-	LaunchFromConfig  = "config"         // _apex/config.yaml models.apex-review
-	LaunchFromParent  = "parent-session" // the ape session that asked for the review
-	LaunchFromDefault = "default"        // claude's default model; the effort table / ape's default
-)
-
-// ReviewLaunch is the model and effort a review session is started with,
-// and what decided each.
-type ReviewLaunch struct {
-	Model        string `json:"model,omitempty"`
-	ModelSource  string `json:"model_source"`
-	Effort       string `json:"effort,omitempty"`
-	EffortSource string `json:"effort_source"`
-}
-
 // ReviewSkill is the skill a review session runs.
 const ReviewSkill = "apex-review"
 
-// DecideReviewLaunch picks a review session's model and effort (v1 trial
-// D22). The model: an explicit flag, else _apex/config.yaml
-// models.apex-review, else the model of the session that asked (so the
-// review runs on the arm's model, not claude's default), else claude's
-// default. The effort follows the model's source: the flag; the config's
-// effort for apex-review (with none, the per-model effort table decides,
-// since the config chose a model of its own); the asking session's
-// explicit effort; else the default.
+// ReviewLaunch is a review session's Launch (D22); the review's run
+// manifest records it as review_launch.
+type ReviewLaunch = Launch
+
+// DecideReviewLaunch is DecideLaunch for a review session with no
+// top-level config effort: the flag, models.apex-review, the asking
+// session, the default.
 func DecideReviewLaunch(flagModel, flagEffort string, cfg SkillModel, parentModel, parentEffort string) ReviewLaunch {
-	var l ReviewLaunch
-	switch {
-	case flagModel != "":
-		l.Model, l.ModelSource = flagModel, LaunchFromFlag
-	case cfg.Model != "":
-		l.Model, l.ModelSource = cfg.Model, LaunchFromConfig
-	case parentModel != "":
-		l.Model, l.ModelSource = parentModel, LaunchFromParent
-	default:
-		l.ModelSource = LaunchFromDefault
-	}
-	switch {
-	case flagEffort != "":
-		l.Effort, l.EffortSource = flagEffort, LaunchFromFlag
-	case cfg.Effort != "":
-		l.Effort, l.EffortSource = cfg.Effort, LaunchFromConfig
-	case cfg.Model != "" && flagModel == "":
-		l.EffortSource = LaunchFromDefault
-	case parentEffort != "":
-		l.Effort, l.EffortSource = parentEffort, LaunchFromParent
-	default:
-		l.EffortSource = LaunchFromDefault
-	}
-	return l
+	return DecideLaunch(flagModel, flagEffort, cfg, "", parentModel, parentEffort)
 }

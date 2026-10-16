@@ -86,6 +86,21 @@ Run artifacts land under <project>/_output/ape/tasks/<skill>/<run-id>/
 (development/.apex/ exists) under development/.apex/runs/tasks/ instead,
 a directory git ignores, where a model clearing _output/ cannot reach.
 
+In an APEX v1 project (development/project.md exists) ape decides the
+session's model and effort itself, and records the decision in the run
+manifest as launch: {model, model_source, effort, effort_source}:
+  model    --model, else _apex/config.yaml models.<skill> ("sonnet" or
+           {model: sonnet, effort: high}), else the model of the ape session
+           that started this one (APE_SESSION_MODEL), else claude's default
+  effort   --effort, else models.<skill>.effort, else the parent session's
+           (APE_SESSION_EFFORT; skipped when models.<skill> names a model
+           without an effort), else _apex/config.yaml effort:, else nothing
+The effort is passed as claude --effort <level>, which sets the session's
+effort only; CLAUDE_CODE_EFFORT_LEVEL is never set (an inherited one is
+removed) and _apex/effort-defaults.yaml is not used. Sources: flag, config,
+parent-session, config-default, default. The session's tools see the
+resolved values as APE_SESSION_MODEL / APE_SESSION_EFFORT.
+
 --prompt-file <path> reads the prompt from a file, and "-" reads it
 from stdin. It is how a printed escalation command carries the
 operator's own words: argv runs command substitution on backticks and
@@ -220,8 +235,8 @@ ownership (the run itself may have succeeded).`,
 		},
 	}
 	cmd.Flags().StringVar(&agentFlag, "agent", "", "Framework agent (slash-command) fronting the skill: /<agent> --autonomous -- <skill> ...")
-	cmd.Flags().StringVar(&modelFlag, "model", "", modelFlagUsage("Claude model."))
-	cmd.Flags().StringVar(&effortFlag, "effort", "", "Explicit reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort).")
+	cmd.Flags().StringVar(&modelFlag, "model", "", modelFlagUsage("Claude model (APEX v1 unset: models.<skill> in _apex/config.yaml, else the parent session's, else claude's default)."))
+	cmd.Flags().StringVar(&effortFlag, "effort", "", "Explicit reasoning effort for the session and its sub-agents (low|medium|high|xhigh|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). In an APEX v1 project: the session's effort only, passed as claude --effort; unset, models.<skill>, the parent session or _apex/config.yaml effort: decide, else none is passed")
 	cmd.Flags().StringVar(&argsFlag, "args", "", "Verbatim skill args appended to the invocation (whitespace-separated)")
 	cmd.Flags().StringVar(&promptFlag, "prompt", "", "Run prompt forwarded via --prompt-flag (same semantics as pipeline --prompt)")
 	cmd.Flags().StringVar(&promptFileFlag, "prompt-file", "",
@@ -487,6 +502,19 @@ func dispatchTask(ctx context.Context, o taskOptions) (taskRun, error) {
 // here and override cfg's, so no caller can dispatch a task without
 // them. `ape script` brings its own eventing and session kind in cfg.
 func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRun, error) {
+	// An APEX v1 project decides the session's model and effort itself
+	// (backlog 29): the effort goes on claude's command line, never in
+	// CLAUDE_CODE_EFFORT_LEVEL, and nothing is passed when nothing decided.
+	var v1Launch *v1TaskLaunch
+	if p, ok := v1ProjectAt(o.projectRoot); ok {
+		l, err := decideV1TaskLaunch(p, o.skill, o.model, o.effort)
+		if err != nil {
+			return taskRun{}, &taskPreflightError{err: err}
+		}
+		v1Launch = &l
+		o.model, o.effort = l.launch.Model, ""
+		cfg.effort, cfg.effortAsArg = l.launch.Effort, true
+	}
 	step := buildTaskStep(o)
 	spec := pipeline.NewSingleStepSpec(o.skill, step, o.taskCommit)
 
@@ -523,7 +551,7 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	start := time.Now()
 	runErr := runWithInteractive(ctx, spec, o.projectRoot, cfg)
 	recordStopGate(o.projectRoot, o.skill, manifestDir, cfg.stopGate)
-	recordReviewLaunch(o.projectRoot, o.skill, manifestDir)
+	recordLaunch(o.projectRoot, o.skill, manifestDir, v1Launch)
 	duration := time.Since(start)
 	if pfe, ok := errors.AsType[*pipeline.PreflightError](runErr); ok {
 		// Nothing spawned, so there is no run to report or assert.

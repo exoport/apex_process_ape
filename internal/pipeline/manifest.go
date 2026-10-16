@@ -175,15 +175,27 @@ type Manifest struct {
 	// each: flag, config (models.apex-review), parent-session, or default
 	// (v1 trial D22). Absent on every other run.
 	ReviewLaunch *ReviewLaunchRecord `yaml:"review_launch,omitempty"`
+
+	// Launch records, for every `ape task` session of an APEX v1 project,
+	// the model and effort it was started with and what decided each:
+	// flag, config (models.<skill>), parent-session, config-default (the
+	// top-level effort:) or default (nothing: claude's own). A review
+	// session carries the same content here and under review_launch.
+	// Absent outside v1 projects.
+	Launch *LaunchRecord `yaml:"launch,omitempty"`
 }
 
 // ReviewLaunchRecord is a review session's launch decision.
-type ReviewLaunchRecord struct {
+type ReviewLaunchRecord = LaunchRecord
+
+// LaunchRecord is a v1 session's launch decision.
+type LaunchRecord struct {
 	Model        string `yaml:"model,omitempty"`
 	ModelSource  string `yaml:"model_source"`
 	Effort       string `yaml:"effort,omitempty"`
 	EffortSource string `yaml:"effort_source"`
-	// Parent is the APE_SESSION of the session that asked for the review.
+	// Parent is the APE_SESSION of the session that started this one (for
+	// a review, the session that asked for it).
 	Parent string `yaml:"parent,omitempty"`
 }
 

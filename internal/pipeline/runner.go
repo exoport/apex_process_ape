@@ -55,6 +55,13 @@ type RunOptions struct {
 	// process-wide default applies.
 	EffortTable *effort.Defaults
 
+	// EffortAsArg is the APEX v1 effort rule: the stage's explicit effort
+	// goes on claude's command line as `--effort <level>` — never as
+	// CLAUDE_CODE_EFFORT_LEVEL, which outranks skill, agent and sub-agent
+	// effort — and with none, nothing is passed: EffortTable and the legacy
+	// default are not consulted. See effort.ArgPlan.
+	EffortAsArg bool
+
 	// SessionKind is the command that owns this run — pipeline, task,
 	// change or script — stamped into every stage's session as
 	// APE_SESSION=<kind>/<run-id> (repl.EnvApeSession). Empty means
