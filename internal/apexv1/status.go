@@ -121,7 +121,7 @@ func (p *Project) Status() *StatusReport {
 		}
 		cs.Status = c.State.Status
 		cs.Attempts = c.State.Attempts
-		if c.State.Active() {
+		if c.State.Active() || c.State.Attempts > 0 {
 			cs.AttemptsCap = attemptsCap
 		}
 		if c.State.BlockedReason != nil {

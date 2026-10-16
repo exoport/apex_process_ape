@@ -533,7 +533,7 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		}
 		v1Launch = &l
 		o.model, o.effort = l.launch.Model, ""
-		cfg.effort, cfg.effortAsArg = l.launch.Effort, true
+		cfg.effort, cfg.effortAsArg, cfg.effortSource = l.launch.Effort, true, l.launch.EffortSource
 		// Backlog 31: the project's hooks ride inline, so a hand-edited
 		// settings.json cannot drop them (apexv1.InlineHooks).
 		cfg.spawnSettings.hooks, cfg.spawnEnv = v1InlineHooks()

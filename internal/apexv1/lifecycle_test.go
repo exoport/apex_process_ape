@@ -281,6 +281,8 @@ func TestVerify_AttemptsCapBlocks(t *testing.T) {
 	// ape status shows the reason; a resumed change starts a fresh count.
 	r := p.Status()
 	require.Equal(t, "attempts exceeded: 2 red verifies — T1 (exit 127), greeting/Wave/wave (exit 127)", r.Changes[0].BlockedReason)
+	require.Equal(t, 2, r.Changes[0].Attempts, "a change the cap blocked still shows its count")
+	require.Equal(t, 2, r.Changes[0].AttemptsCap, "… against the cap that blocked it")
 	_, err = p.Start(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)
 	st = state(t, p, "add-wave")

@@ -194,6 +194,9 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, skips Sta
 	effortPlan := effort.Decide(explicitEffort, effortSource, opts.EffortTable, firstModel)
 	if opts.EffortAsArg {
 		effortPlan = effort.ArgPlan(explicitEffort, effortSource)
+		if opts.EffortSource != "" {
+			effortPlan.Source = opts.EffortSource
+		}
 	}
 
 	plan, planErr := spec.planStageCommits(stage.Name, skips.Steps)

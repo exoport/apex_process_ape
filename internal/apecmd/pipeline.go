@@ -385,6 +385,9 @@ type runConfig struct {
 	// nothing is passed — no table, no legacy default. Set by `ape task`
 	// in a v1 project.
 	effortAsArg bool
+	// effortSource is the v1 launch decision's effort source, recorded on
+	// the step (pipeline.RunOptions.EffortSource).
+	effortSource string
 	// spawnSettings are added to the spawn's --settings beside ape's own,
 	// and spawnEnv entries to its environment: `ape task` in a v1 project
 	// passes the project's own hooks inline (apexv1.InlineHooks), marks the

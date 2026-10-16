@@ -148,6 +148,7 @@ func TestTask_V1LaunchModelAndEffort(t *testing.T) {
 		require.Equal(t, "/medium", seen.session)
 		m := taskManifest(t, project, true)
 		require.Equal(t, &pipeline.LaunchRecord{ModelSource: "default", Effort: "medium", EffortSource: "config-default"}, m.Launch)
+		require.Equal(t, m.Launch.EffortSource, m.Stages[0].Steps[0].EffortSource, "the step records the launch decision's source")
 		require.Nil(t, m.ReviewLaunch)
 	})
 
@@ -161,6 +162,7 @@ func TestTask_V1LaunchModelAndEffort(t *testing.T) {
 		require.Equal(t, "claude-haiku-5-5/high", seen.session)
 		m := taskManifest(t, project, true)
 		require.Equal(t, &pipeline.LaunchRecord{Model: "claude-haiku-5-5", ModelSource: "config", Effort: "high", EffortSource: "flag"}, m.Launch)
+		require.Equal(t, m.Launch.EffortSource, m.Stages[0].Steps[0].EffortSource, "the step records the launch decision's source")
 	})
 
 	t.Run("nothing decides: nothing passed", func(t *testing.T) {
@@ -172,6 +174,7 @@ func TestTask_V1LaunchModelAndEffort(t *testing.T) {
 		require.Empty(t, seen.envEffort, "no silent xhigh")
 		m := taskManifest(t, project, true)
 		require.Equal(t, &pipeline.LaunchRecord{ModelSource: "default", EffortSource: "default"}, m.Launch)
+		require.Equal(t, m.Launch.EffortSource, m.Stages[0].Steps[0].EffortSource, "the step records the launch decision's source")
 	})
 
 	// A project that is not v1 keeps today's rule exactly: an explicit

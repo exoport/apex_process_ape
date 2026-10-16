@@ -990,6 +990,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		Effort:            cfg.effort,
 		EffortTable:       cfg.effortTable,
 		EffortAsArg:       cfg.effortAsArg,
+		EffortSource:      cfg.effortSource,
 		SpawnEnv:          cfg.spawnEnv,
 		SessionKind:       sessionKindOf(cfg),
 		ApeVersion:        Version,

@@ -61,6 +61,11 @@ type RunOptions struct {
 	// effort — and with none, nothing is passed: EffortTable and the legacy
 	// default are not consulted. See effort.ArgPlan.
 	EffortAsArg bool
+	// EffortSource, with EffortAsArg, is where the caller's launch rule
+	// found the effort (apexv1 launch sources: flag, config, parent-session,
+	// config-default, default); the step record carries it rather than
+	// "flag", which is only how the level reached the runner.
+	EffortSource string
 
 	// SpawnEnv is added to every stage's claude environment, after ape's
 	// own entries.
