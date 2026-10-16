@@ -51,6 +51,11 @@ type Config struct {
 	//	  apex-review: sonnet                          # model only
 	//	  apex-review: {model: sonnet, effort: high}   # model and effort
 	Models map[string]SkillModel `yaml:"models"`
+	// Regression is the project's own test suite, one shell command run
+	// from the project root (backlog 32): at a change's start (its
+	// baseline), at verify and at the milestone gate, failing only when
+	// newly red.
+	Regression string `yaml:"regression"`
 }
 
 // SkillModel is one models.<skill> entry.

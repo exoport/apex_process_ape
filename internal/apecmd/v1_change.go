@@ -177,7 +177,10 @@ func newChangeStartCmd() *cobra.Command {
   3. records base_sha (HEAD) and started_at (kept when resuming a blocked change)
   4. runs every check verify will run once, as the baseline (which were already green):
      the command tasks and the effective spec's scenario checks; from the project root
-     with sh -c; output under _apex/state/logs/<id>/
+     with sh -c; output under _apex/state/logs/<id>/. With "regression: <cmd>" in
+     _apex/config.yaml (the project's own test suite) it runs that too, the same way, and
+     records it in state.json (regression_baseline: cmd, exit, output sha256, sha); a red
+     regression baseline is recorded, it does not block start
   5. sets in-progress, freezes the plan (SHA-256 of change.md outside ## Why and ## Notes), fingerprints
      the spec block of every requirement it MODIFIES or REMOVES, and commits state.json
      ("apex: <id> in-progress")
@@ -185,9 +188,11 @@ func newChangeStartCmd() *cobra.Command {
 Re-start: once the plan is frozen, verify and archive refuse while change.md differs from
 it anywhere but ## Why and ## Notes (frontmatter, title, Out of scope, Delta, Tasks, …). Running start again on an in-progress, verified or reviewed change
 re-baselines: recorded under "replans" in state.json, verify and review cleared, new or
-changed checks baselined now (unchanged ones keep their original baseline), fingerprints
-re-taken. It applies when the plan changed, or when a spec block the change modifies or
-removes was changed by another change since start; otherwise it is refused.
+changed checks baselined now (unchanged ones keep their original baseline, and so does the
+regression command unless it changed), fingerprints re-taken. It applies when the plan
+changed, when a spec block the change modifies or removes was changed by another change
+since start, or when the regression command has no baseline for it (configured or changed
+since start); otherwise it is refused.
 
 Exit codes: 0 started · 1 check red, milestone not approved, or wrong status · 2 usage ·
 3 requirement conflict with another active change.`,
@@ -201,6 +206,13 @@ Exit codes: 0 started · 1 check red, milestone not approved, or wrong status ·
 			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
 				fmt.Fprintf(w, "change %s: in-progress from %.7s; baseline:\n", id, res.BaseSHA)
 				printChecks(w, res.Baseline, false)
+				if r := res.Regression; r != nil {
+					note := "green"
+					if r.Exit != 0 {
+						note = fmt.Sprintf("red (exit %d) — recorded: verify fails only if it is newly red; roadmap the fix (apex-plan)", r.Exit)
+					}
+					fmt.Fprintf(w, "  regression %s  %s\n", note, r.Cmd)
+				}
 			})
 		})
 	addV1TimeoutFlag(cmd, &f)
@@ -221,6 +233,12 @@ for scenario checks) are recorded in state.json; output under _apex/state/logs/<
 What a check leaves in the tree outside development/ — files it created, tracked files it
 changed — is undone after it and reported (JSON "stray_files"); files that were there
 before it ran are never touched.
+With "regression: <cmd>" in _apex/config.yaml, the regression command runs too (recorded
+in the results with kind "regression") and is judged against the change's regression
+baseline (JSON "regression": {cmd, exit, baseline_exit, pre_existing_red, failed}): it
+fails verify only when it is newly red — green at baseline, red now — or when the change
+has no baseline for this command (re-start records one). Red at baseline and still red
+is reported (pre_existing_red), not failed: the planner roadmaps it.
 The working tree must hold no uncommitted changes outside development/ — commit first
 (trailer "Change: <id>"): a verify belongs to a sha.
 
@@ -257,11 +275,13 @@ status · 2 usage.`,
 				if !f.json {
 					human(cmd.OutOrStdout())
 				}
-				return v1Fail(cmd, &f, &apexv1.FailError{
-					Code: "verify.red",
-					Msg: fmt.Sprintf("change %s: %d command check(s) red — fix the code (never the check) and verify again, or `ape change block %s --reason ...`",
-						id, len(res.Failing()), id),
-				}, res)
+				msg := fmt.Sprintf("change %s: %d command check(s) red — fix the code (never the check) and verify again, or `ape change block %s --reason ...`",
+					id, len(res.Failing()), id)
+				if r := res.Regression; r != nil && r.Failed && r.BaselineExit == nil {
+					msg = fmt.Sprintf("change %s: %d command check(s) red, the regression command among them with no baseline to judge it by — `ape change start %s` records one (red is fine there); fix the code for the rest",
+						id, len(res.Failing()), id)
+				}
+				return v1Fail(cmd, &f, &apexv1.FailError{Code: "verify.red", Msg: msg}, res)
 			}
 			return v1Emit(cmd.OutOrStdout(), &f, res, human)
 		})

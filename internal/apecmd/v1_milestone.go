@@ -118,6 +118,7 @@ func gateHuman(g *apexv1.GateResult) func(io.Writer) {
 			fmt.Fprintln(w, "  full output: "+g.Run.Log)
 		}
 		printChecks(w, g.Run.SpecFailed, true)
+		printRegression(w, g.Run.Regression)
 		printStrays(w, g.Run.StrayFiles)
 		fmt.Fprintf(w, "%s status: %s\n", g.Milestone, g.Status)
 	}
@@ -130,7 +131,13 @@ func newMilestoneGateCmd() *cobra.Command {
 		Short: "Run the milestone's gate and record the result",
 		Long: `Run the milestone's Gate: command from the project root, and every scenario check of
 the whole spec beside it as the regression suite (human-review not run; output under
-_apex/state/logs/gate-<M>/). The gate is green only when both pass. Files the gate
+_apex/state/logs/gate-<M>/), and the project's "regression: <cmd>" from _apex/config.yaml
+when one is configured. The gate is green only when all pass — the regression command
+only needs not to be newly red: it is judged against the earliest regression baseline,
+for the same command, recorded by any change of the milestone (active or archived);
+red there and red now is reported (JSON run.regression.pre_existing_red), not failed.
+When no change of the milestone has a baseline for the command, a red regression fails
+the gate: nothing shows it was red before the milestone's work. Files the gate
 or a check leaves outside development/ are undone and reported ("stray_files"). The run (exit, sha, time,
 output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; shown by
 ` + "`ape status`" + `). When the result differs from the recorded one (green vs red), or is
@@ -175,7 +182,9 @@ func newMilestoneCloseCmd() *cobra.Command {
 verified or reviewed (archive or block it first). Otherwise runs the gate (recorded as by
 ` + "`ape milestone gate`" + `) and, only on exit 0, writes "Status: done (<ts> <sha>)" into
 roadmap.md, committed with milestones.json as "apex: <M> done". Green means the gate command
-AND every scenario check of the spec pass. A red gate is recorded as
+AND every scenario check of the spec pass, AND the regression command (when configured) is
+not newly red against the milestone's earliest baseline for it — with no baseline, red fails
+(see ` + "`ape milestone gate`" + `). A red gate is recorded as
 by ` + "`ape milestone gate`" + `. A milestone is done when this command exits 0 — never because
 anyone says so.
 

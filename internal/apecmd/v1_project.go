@@ -185,6 +185,11 @@ func newStatusCmd() *cobra.Command {
   - every change not archived, with its status, blocked reason, red checks from its
     last verify, and human-review tasks not yet accepted
   - spend so far: the sum of finished ape task/pipeline run manifests
+  - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
+    cmd, exit, sha}]): the regression command, and scenario checks of the spec a change
+    leaves untouched, that were red when a change was baselined — for the planner to
+    roadmap. A change's own task and delta checks red at baseline are normal test-first
+    and never listed
   - next: what the way of working says comes next, derived from the state alone
 
 --brief renders at most 25 lines (what the SessionStart hook injects).

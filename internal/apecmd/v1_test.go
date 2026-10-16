@@ -371,3 +371,56 @@ func TestV1Commands_DiagnosticEnvelope(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(stdout), &list))
 	require.Len(t, list, len(apexv1.DiagnosticCodes))
 }
+
+// Backlog 32, 37 through the CLI: a regression command red at baseline is
+// recorded by start, reported (not failed) by verify, and listed by status.
+func TestV1Commands_RegressionRedAtBaseline(t *testing.T) {
+	root := v1Repo(t)
+	cfg := filepath.Join(root, "_apex", "config.yaml")
+	data, err := os.ReadFile(cfg)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(cfg, append(data, []byte("regression: ./suite.sh\n")...), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "suite.sh"), []byte("#!/bin/sh\necho flaky; exit 1\n"), 0o755))
+	_, _, err = v1Exec(t, newChangeCmd, "new", "add-wave", "--milestone", "M1", "--touches", "greeting", "--cwd", root)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(root, filepath.FromSlash("development/changes/add-wave/change.md")), []byte(v1ChangeMD), 0o644))
+	v1Git(t, root, "add", "-A")
+	v1Git(t, root, "commit", "-q", "-m", "plan, and a red suite")
+
+	stdout, _, err := v1Exec(t, newChangeCmd, "start", "add-wave", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, "regression red (exit 1) — recorded")
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, "wave.sh"), []byte("#!/bin/sh\necho wave\n"), 0o755))
+	v1Git(t, root, "add", "wave.sh")
+	v1Git(t, root, "commit", "-q", "-m", "feat: wave")
+	stdout, _, err = v1Exec(t, newChangeCmd, "verify", "add-wave", "--json", "--cwd", root)
+	require.NoError(t, err, stdout)
+	var v struct {
+		Green      bool           `json:"green"`
+		Regression map[string]any `json:"regression"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &v))
+	require.True(t, v.Green)
+	require.Equal(t, map[string]any{
+		"cmd": "./suite.sh", "exit": 1.0, "baseline_exit": 1.0, "pre_existing_red": true, "failed": false,
+		"output_sha256": v.Regression["output_sha256"], "log": "_apex/state/logs/add-wave/regression.log",
+		"baseline_sha": v.Regression["baseline_sha"],
+	}, v.Regression)
+
+	stdout, _, err = v1Exec(t, newStatusCmd, "--json", "--cwd", root)
+	require.NoError(t, err)
+	var st struct {
+		PreExistingRed []apexv1.PreExistingRed `json:"pre_existing_red"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &st))
+	require.Len(t, st.PreExistingRed, 1)
+	require.Equal(t, apexv1.PreExistingRed{
+		Change: "add-wave", Kind: "regression", Ref: "regression", Cmd: "./suite.sh", Exit: 1,
+		SHA: st.PreExistingRed[0].SHA,
+	}, st.PreExistingRed[0])
+	stdout, _, err = v1Exec(t, newStatusCmd, "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, "Red at baseline, not any change's own (roadmap it): regression `./suite.sh`")
+	require.Empty(t, v1Git(t, root, "status", "--porcelain"))
+}

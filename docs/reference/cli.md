@@ -1945,7 +1945,10 @@ Start a draft (or resume a blocked) change:
   3. records base_sha (HEAD) and started_at (kept when resuming a blocked change)
   4. runs every check verify will run once, as the baseline (which were already green):
      the command tasks and the effective spec's scenario checks; from the project root
-     with sh -c; output under _apex/state/logs/<id>/
+     with sh -c; output under _apex/state/logs/<id>/. With "regression: <cmd>" in
+     _apex/config.yaml (the project's own test suite) it runs that too, the same way, and
+     records it in state.json (regression_baseline: cmd, exit, output sha256, sha); a red
+     regression baseline is recorded, it does not block start
   5. sets in-progress, freezes the plan (SHA-256 of change.md outside ## Why and ## Notes), fingerprints
      the spec block of every requirement it MODIFIES or REMOVES, and commits state.json
      ("apex: <id> in-progress")
@@ -1953,9 +1956,11 @@ Start a draft (or resume a blocked) change:
 Re-start: once the plan is frozen, verify and archive refuse while change.md differs from
 it anywhere but ## Why and ## Notes (frontmatter, title, Out of scope, Delta, Tasks, …). Running start again on an in-progress, verified or reviewed change
 re-baselines: recorded under "replans" in state.json, verify and review cleared, new or
-changed checks baselined now (unchanged ones keep their original baseline), fingerprints
-re-taken. It applies when the plan changed, or when a spec block the change modifies or
-removes was changed by another change since start; otherwise it is refused.
+changed checks baselined now (unchanged ones keep their original baseline, and so does the
+regression command unless it changed), fingerprints re-taken. It applies when the plan
+changed, when a spec block the change modifies or removes was changed by another change
+since start, or when the regression command has no baseline for it (configured or changed
+since start); otherwise it is refused.
 
 Exit codes: 0 started · 1 check red, milestone not approved, or wrong status · 2 usage ·
 3 requirement conflict with another active change.
@@ -1991,6 +1996,12 @@ for scenario checks) are recorded in state.json; output under _apex/state/logs/<
 What a check leaves in the tree outside development/ — files it created, tracked files it
 changed — is undone after it and reported (JSON "stray_files"); files that were there
 before it ran are never touched.
+With "regression: <cmd>" in _apex/config.yaml, the regression command runs too (recorded
+in the results with kind "regression") and is judged against the change's regression
+baseline (JSON "regression": {cmd, exit, baseline_exit, pre_existing_red, failed}): it
+fails verify only when it is newly red — green at baseline, red now — or when the change
+has no baseline for this command (re-start records one). Red at baseline and still red
+is reported (pre_existing_red), not failed: the planner roadmaps it.
 The working tree must hold no uncommitted changes outside development/ — commit first
 (trailer "Change: <id>"): a verify belongs to a sha.
 
@@ -4349,7 +4360,9 @@ Close an approved milestone. Refused while a change of this milestone is in-prog
 verified or reviewed (archive or block it first). Otherwise runs the gate (recorded as by
 `ape milestone gate`) and, only on exit 0, writes "Status: done (<ts> <sha>)" into
 roadmap.md, committed with milestones.json as "apex: <M> done". Green means the gate command
-AND every scenario check of the spec pass. A red gate is recorded as
+AND every scenario check of the spec pass, AND the regression command (when configured) is
+not newly red against the milestone's earliest baseline for it — with no baseline, red fails
+(see `ape milestone gate`). A red gate is recorded as
 by `ape milestone gate`. A milestone is done when this command exits 0 — never because
 anyone says so.
 
@@ -4379,7 +4392,13 @@ ape milestone gate <M> [flags]
 
 Run the milestone's Gate: command from the project root, and every scenario check of
 the whole spec beside it as the regression suite (human-review not run; output under
-_apex/state/logs/gate-<M>/). The gate is green only when both pass. Files the gate
+_apex/state/logs/gate-<M>/), and the project's "regression: <cmd>" from _apex/config.yaml
+when one is configured. The gate is green only when all pass — the regression command
+only needs not to be newly red: it is judged against the earliest regression baseline,
+for the same command, recorded by any change of the milestone (active or archived);
+red there and red now is reported (JSON run.regression.pre_existing_red), not failed.
+When no change of the milestone has a baseline for the command, a red regression fails
+the gate: nothing shows it was red before the milestone's work. Files the gate
 or a check leaves outside development/ are undone and reported ("stray_files"). The run (exit, sha, time,
 output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; shown by
 `ape status`). When the result differs from the recorded one (green vs red), or is
@@ -6703,6 +6722,11 @@ Show where the project stands, from the records ape keeps:
   - every change not archived, with its status, blocked reason, red checks from its
     last verify, and human-review tasks not yet accepted
   - spend so far: the sum of finished ape task/pipeline run manifests
+  - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
+    cmd, exit, sha}]): the regression command, and scenario checks of the spec a change
+    leaves untouched, that were red when a change was baselined — for the planner to
+    roadmap. A change's own task and delta checks red at baseline are normal test-first
+    and never listed
   - next: what the way of working says comes next, derived from the state alone
 
 --brief renders at most 25 lines (what the SessionStart hook injects).

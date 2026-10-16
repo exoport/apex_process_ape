@@ -28,11 +28,16 @@ type GateRun struct {
 	// StrayFiles: what the gate and its checks left in the tree outside
 	// the development folder and ape undid (item 19).
 	StrayFiles []string `json:"stray_files,omitempty"`
+	// Regression judges the regression command against the milestone's
+	// baseline (backlog 32); absent when none is configured.
+	Regression *RegressionVerdict `json:"regression,omitempty"`
 }
 
-// Green reports a passing gate: its command exited 0 and every scenario
-// check of the spec passed.
-func (r *GateRun) Green() bool { return r.Exit == 0 && len(r.SpecFailed) == 0 }
+// Green reports a passing gate: its command exited 0, every scenario
+// check of the spec passed, and the regression command is not newly red.
+func (r *GateRun) Green() bool {
+	return r.Exit == 0 && len(r.SpecFailed) == 0 && (r.Regression == nil || !r.Regression.Failed)
+}
 
 // Why describes a red gate in one phrase.
 func (r *GateRun) Why() string {
@@ -46,6 +51,13 @@ func (r *GateRun) Why() string {
 			names = append(names, r.SpecFailed[i].Task)
 		}
 		parts = append(parts, strconv.Itoa(n)+" spec scenario(s) red: "+strings.Join(limit(names, 5), ", "))
+	}
+	if g := r.Regression; g != nil && g.Failed {
+		if g.BaselineExit == nil {
+			parts = append(parts, "regression command exit "+strconv.Itoa(g.Exit)+", and no change of the milestone has a baseline for it")
+		} else {
+			parts = append(parts, "regression command exit "+strconv.Itoa(g.Exit)+", green at baseline ("+g.BaselineChange+")")
+		}
 	}
 	return strings.Join(parts, "; ")
 }
@@ -263,11 +275,24 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 		Exit: r.Exit, At: Stamp(), SHA: HeadSHA(ctx, p.Root), Secs: r.Secs,
 		OutputSHA256: r.OutputSHA256, Cmd: m.Gate, Log: r.Log, Tail: lastN(r.Tail, 15),
 	}
-	// The whole spec runs as the regression suite beside the gate.
+	// The whole spec runs as the regression suite beside the gate, and
+	// the project's own regression command with it (backlog 32), judged
+	// by the milestone's earliest baseline for that command.
 	spec := p.EffectiveSpecChecks(nil)
 	run.SpecChecks = len(spec)
-	results := p.RunChecks(ctx, filepath.Join(p.LogsDir(), "gate-"+id), "", spec, opt)
+	checks := spec
+	regressionCmd := p.regressionCmd()
+	if regressionCmd != "" {
+		checks = append(append([]PlannedCheck(nil), spec...), PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: regressionCmd})
+	}
+	results := p.RunChecks(ctx, filepath.Join(p.LogsDir(), "gate-"+id), "", checks, opt)
 	run.StrayFiles = StrayFiles(append([]CheckResult{gate}, results...))
+	if regressionCmd != "" {
+		change, base := p.milestoneRegressionBaseline(id, regressionCmd)
+		run.Regression = judgeRegression(&results[len(results)-1], base)
+		run.Regression.BaselineChange = change
+		results = results[:len(results)-1]
+	}
 	for i := range results {
 		if results[i].Exit != 0 {
 			results[i].Tail = lastN(results[i].Tail, 15)

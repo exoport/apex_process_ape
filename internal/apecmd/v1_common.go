@@ -144,7 +144,10 @@ func printChecks(w io.Writer, rs []apexv1.CheckResult, tails bool) {
 			continue
 		}
 		verdict := "green"
-		if r.Exit != 0 {
+		switch {
+		case r.PreExistingRed:
+			verdict = fmt.Sprintf("red (exit %d), red at baseline too: not a failure", r.Exit)
+		case r.Exit != 0:
 			verdict = fmt.Sprintf("RED (exit %d)", r.Exit)
 		}
 		label := r.Task
@@ -155,7 +158,7 @@ func printChecks(w io.Writer, rs []apexv1.CheckResult, tails bool) {
 			}
 		}
 		fmt.Fprintf(w, "  %-4s %-14s %5.1fs  %s\n", label, verdict, r.Secs, r.Cmd)
-		if tails && r.Exit != 0 {
+		if tails && r.Red() {
 			for _, l := range lastLinesOf(r.Tail, 15) {
 				fmt.Fprintln(w, "       | "+l)
 			}
@@ -166,6 +169,29 @@ func printChecks(w io.Writer, rs []apexv1.CheckResult, tails bool) {
 	}
 	if greenScenarios > 0 {
 		fmt.Fprintf(w, "  %d scenario check(s) of the effective spec green\n", greenScenarios)
+	}
+}
+
+// printRegression is one line on the regression command's verdict at a
+// milestone gate.
+func printRegression(w io.Writer, v *apexv1.RegressionVerdict) {
+	if v == nil {
+		return
+	}
+	base := "no baseline for it in this milestone"
+	if v.BaselineExit != nil {
+		base = fmt.Sprintf("baseline exit %d (%s)", *v.BaselineExit, v.BaselineChange)
+	}
+	verdict := "green"
+	switch {
+	case v.Failed:
+		verdict = fmt.Sprintf("RED (exit %d)", v.Exit)
+	case v.PreExistingRed:
+		verdict = fmt.Sprintf("red (exit %d), red at baseline too: not a failure", v.Exit)
+	}
+	fmt.Fprintf(w, "  regression %s — %s: %s\n", verdict, base, v.Cmd)
+	if v.Exit != 0 && v.Log != "" {
+		fmt.Fprintln(w, "       full output: "+v.Log)
 	}
 }
 

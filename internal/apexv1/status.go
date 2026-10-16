@@ -60,8 +60,11 @@ type StatusReport struct {
 	Milestones  []MilestoneLine  `json:"milestones"`
 	Changes     []ChangeStatus   `json:"changes"`
 	Archived    int              `json:"archived"`
-	Spend       Spend            `json:"spend"`
-	Next        string           `json:"next"`
+	// PreExistingRed is what was red at a change's baseline that is not
+	// the change's own: the planner's to roadmap (backlog 37).
+	PreExistingRed []PreExistingRed `json:"pre_existing_red"`
+	Spend          Spend            `json:"spend"`
+	Next           string           `json:"next"`
 }
 
 // Status builds the report.
@@ -90,7 +93,9 @@ func (p *Project) Status() *StatusReport {
 		}
 	}
 
-	for _, c := range p.Changes() {
+	changes := p.Changes()
+	r.PreExistingRed = p.preExistingRed(changes)
+	for _, c := range changes {
 		cs := ChangeStatus{ID: c.ID}
 		if c.Doc != nil {
 			cs.Title, cs.Milestone = c.Doc.Title, c.Doc.Meta.Milestone
@@ -113,7 +118,7 @@ func (p *Project) Status() *StatusReport {
 		if v := c.State.Verify; v != nil {
 			cs.VerifySHA = v.SHA
 			for i := range v.Results {
-				if v.Results[i].Exit != 0 {
+				if v.Results[i].Red() {
 					cs.Failing = append(cs.Failing, fmt.Sprintf("%s (exit %d)", v.Results[i].Task, v.Results[i].Exit))
 				}
 			}
@@ -190,6 +195,9 @@ func nextStep(r *StatusReport) string {
 // does not push the rest past 25 lines on a narrow terminal.
 const briefReasonMax = 90
 
+// briefLineMax caps the brief's red-at-baseline line.
+const briefLineMax = 160
+
 // Brief renders the report in at most 25 lines, for the SessionStart hook.
 func (r *StatusReport) Brief() string {
 	var b []string
@@ -245,8 +253,32 @@ groups:
 			b = append(b, line)
 		}
 	}
+	if line := r.preExistingRedLine(); line != "" {
+		b = append(b, line)
+	}
 	b = append(b, fmt.Sprintf("Spend: $%.2f over %d runs", r.Spend.TotalUSD, r.Spend.Runs), "Next: "+r.Next)
 	return strings.Join(b, "\n") + "\n"
+}
+
+// preExistingRedLine is one line naming what was red at a baseline and is
+// no change's own, or "" when nothing was.
+func (r *StatusReport) preExistingRedLine() string {
+	if len(r.PreExistingRed) == 0 {
+		return ""
+	}
+	seen := map[string]bool{}
+	var refs []string
+	for _, e := range r.PreExistingRed {
+		ref := e.Ref
+		if e.Kind == KindRegression {
+			ref = "regression `" + e.Cmd + "`"
+		}
+		if !seen[ref] {
+			seen[ref] = true
+			refs = append(refs, ref)
+		}
+	}
+	return truncate("Red at baseline, not any change's own (roadmap it): "+strings.Join(refs, ", "), briefLineMax)
 }
 
 // briefLines is the milestone's three lines in the brief.

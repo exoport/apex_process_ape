@@ -51,6 +51,9 @@ type StartResult struct {
 	Status   string        `json:"status"`
 	BaseSHA  string        `json:"base_sha"`
 	Baseline []CheckResult `json:"baseline"`
+	// Regression is the regression command's baseline run, when this
+	// start took one (a first start, or the command changed).
+	Regression *CheckResult `json:"regression,omitempty"`
 }
 
 // Start moves a draft (or blocked) change to in-progress: check green,
@@ -63,19 +66,21 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 	}
 	st := ci.State
 	digest := ci.Doc.PlanDigest()
-	var replan bool
+	var replan, rebaseline bool
 	switch st.Status {
 	case StatusDraft, StatusBlocked:
 		replan = st.PlanDigest != "" && st.PlanDigest != digest
 	case StatusInProgress, StatusVerified, StatusReviewed:
 		// A started change starts again only to re-baseline: a changed
-		// plan, or a spec its MODIFIED/REMOVED blocks were based on that
-		// another change has since changed (item 9).
+		// plan, a spec its MODIFIED/REMOVED blocks were based on that
+		// another change has since changed (item 9), or a regression
+		// command with no baseline for it (backlog 32).
 		planChanged := st.PlanDigest != "" && st.PlanDigest != digest
-		if !planChanged && len(p.fingerprintConflicts(st.BaseFingerprints, ci.Doc)) == 0 {
-			return nil, &FailError{Code: "change.nothing-to-rebaseline", Msg: "change " + id + " is " + st.Status + " and neither its plan (change.md outside ## Why and ## Notes) nor the spec it modifies changed — nothing to re-baseline"}
+		specChanged := len(p.fingerprintConflicts(st.BaseFingerprints, ci.Doc)) > 0
+		if !planChanged && !specChanged && !p.regressionStale(st) {
+			return nil, &FailError{Code: "change.nothing-to-rebaseline", Msg: "change " + id + " is " + st.Status + " and neither its plan (change.md outside ## Why and ## Notes), the spec it modifies, nor the regression command changed — nothing to re-baseline"}
 		}
-		replan = true
+		replan, rebaseline = planChanged || specChanged, true
 	default:
 		return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + st.Status + "; start applies to draft or blocked changes, or re-baselines a changed plan"}
 	}
@@ -113,10 +118,14 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 	}
 	if replan {
 		st.Replans = append(st.Replans, Replan{At: Stamp(), SHA: head, From: st.PlanDigest, To: digest})
-		// A verify or review of the old plan proves nothing about this one.
+	}
+	if replan || rebaseline {
+		// A verify or review of the old plan, or judged by another
+		// regression command, proves nothing about this one.
 		st.Verify, st.Review = nil, nil
 	}
 	results := p.rebaseline(ctx, ci, st, head, opt)
+	regression := p.rebaselineRegression(ctx, id, st, head, opt)
 	st.PlanDigest = digest
 	st.BaseFingerprints = p.baseFingerprints(ci.Doc)
 	st.Status = StatusInProgress
@@ -124,7 +133,7 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}
-	return &StartResult{ID: id, Status: st.Status, BaseSHA: st.BaseSHA, Baseline: results}, nil
+	return &StartResult{ID: id, Status: st.Status, BaseSHA: st.BaseSHA, Baseline: results, Regression: regression}, nil
 }
 
 // rebaseline runs the baseline — every check verify will run: the command
@@ -177,6 +186,9 @@ type VerifyResult struct {
 	GreenAtBaseline []GreenAtBaseline `json:"green_at_baseline"`
 	// StrayFiles: what the checks left in the tree and ape undid (item 19).
 	StrayFiles []string `json:"stray_files"`
+	// Regression judges the regression command against the change's
+	// baseline (backlog 32); absent when none is configured.
+	Regression *RegressionVerdict `json:"regression,omitempty"`
 }
 
 // greenAtBaseline lists the change's own checks — tasks and the scenarios
@@ -204,11 +216,12 @@ func (p *Project) greenAtBaseline(c *Change, st *State) []GreenAtBaseline {
 	return out
 }
 
-// Failing returns the red results.
+// Failing returns the red results: a regression command red at baseline
+// too is not one.
 func (v *VerifyResult) Failing() []CheckResult {
 	var out []CheckResult
 	for i := range v.Results {
-		if v.Results[i].Exit != 0 {
+		if v.Results[i].Red() {
 			out = append(out, v.Results[i])
 		}
 	}
@@ -247,10 +260,19 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 			" — commit them (trailer `Change: " + id + "`) and run verify again; verify records a sha"}
 	}
 	sha := HeadSHA(ctx, p.Root)
-	results := p.RunChecks(ctx, p.LogDir(id), "", p.ChangeChecks(ci.Doc), opt)
+	checks := p.ChangeChecks(ci.Doc)
+	regressionCmd := p.regressionCmd()
+	if regressionCmd != "" {
+		checks = append(checks, PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: regressionCmd})
+	}
+	results := p.RunChecks(ctx, p.LogDir(id), "", checks, opt)
+	var regression *RegressionVerdict
+	if regressionCmd != "" {
+		regression = judgeRegression(&results[len(results)-1], st.Regression)
+	}
 	green := true
 	for i := range results {
-		if results[i].Exit != 0 {
+		if results[i].Red() {
 			green = false
 		}
 	}
@@ -262,7 +284,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 	if !green && st.Status == StatusInProgress {
 		// A verify that stays red changes nothing and commits nothing
 		// (trial decision D5): the results are in the output and the logs.
-		return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results)}, nil
+		return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), Regression: regression}, nil
 	}
 	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green, GreenAtBaseline: gab}
 	switch {
@@ -278,7 +300,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}
-	return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results)}, nil
+	return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), Regression: regression}, nil
 }
 
 func limit(xs []string, n int) []string {
