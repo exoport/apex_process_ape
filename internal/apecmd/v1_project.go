@@ -42,6 +42,8 @@ func newProjectInitCmd() *cobra.Command {
   development/changes/               the changes in flight
   development/archive/               archived and abandoned changes
   development/decisions/
+  development/briefs/                each plan's input, dated and verbatim (YYYY-MM-DD-<slug>.md,
+                                     written by apex-plan; never edited — see ape project check)
   _apex/state/                       ape's own records (never edited by a model; never touched
                                      by ape framework update): milestones.json, decisions.json
                                      tracked; logs/, runs/, hooks/ ignored. Its .gitignore is a
@@ -146,7 +148,18 @@ func newProjectCheckCmd() *cobra.Command {
                            ## Constraints (each non-empty); ≤ 150 lines and ≤ 8 KB
   AGENTS.md                present, ≤ 120 lines; CLAUDE.md (if any) has the line @AGENTS.md
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
-                           Gate, Goal; Budget a number when present
+                           Gate, Goal; Budget a number when present. Its Delivery: line
+                           links the current brief, e.g.
+                           Delivery: Phase 1 — "…" ([brief](briefs/2026-10-16-<slug>.md));
+                           a Markdown link or a bare briefs/….md path, relative to
+                           roadmap.md (or development/briefs/… from the project root),
+                           must resolve (roadmap.delivery-link); briefs with no linking
+                           Delivery: line are roadmap.delivery-unlinked
+  development/briefs/      YYYY-MM-DD-<slug>.md with a real date (brief.bad-name);
+                           committed with the plan (brief.uncommitted); never changed
+                           from the text of the commit that added it, in the working
+                           tree or a later commit (brief.edited: restore it, write a
+                           new dated brief)
   specs/<cap>/spec.md      # title, Purpose:, "### Requirement: <name>" each with ≥ 1
                            "#### Scenario:" and exactly one "- check: <cmd> | human-review"
                            per scenario; ≤ 20 KB ("split into two capabilities")

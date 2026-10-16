@@ -163,7 +163,7 @@ func (p *Project) protectedReason(abs string) string {
 	}
 	rel, err := filepath.Rel(dev, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return ""
+		return p.briefReason(abs) // a link from outside into development/briefs/
 	}
 	rel = filepath.ToSlash(rel)
 	devRel := p.DevRel
@@ -175,7 +175,7 @@ func (p *Project) protectedReason(abs string) string {
 	case stateJSONRe.MatchString(rel):
 		return devRel + "/" + rel + " is written only by ape (`ape change start|verify|review|accept|block|archive`) — specs change only through ape change archive"
 	}
-	return ""
+	return p.briefReason(abs)
 }
 
 // --- stop -------------------------------------------------------------------

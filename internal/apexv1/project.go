@@ -178,6 +178,7 @@ func (p *Project) Check() []Finding {
 	} else {
 		add(ValidateRoadmap(p.Rel(p.RoadmapMD()), doc)...)
 	}
+	add(p.briefFindings(context.Background())...)
 
 	for _, capName := range p.Capabilities() {
 		file := p.Rel(p.SpecFile(capName))

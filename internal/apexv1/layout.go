@@ -206,6 +206,12 @@ func (p *Project) DecisionsDir() string {
 	return filepath.Join(p.Dev(), "decisions")
 }
 
+// BriefsDir is development/briefs/: every apex-plan run's input, verbatim,
+// as a dated file that is never edited (D39).
+func (p *Project) BriefsDir() string {
+	return filepath.Join(p.Dev(), "briefs")
+}
+
 // StateDir is _apex/state/, ape's own records (backlog 26–28):
 // milestones.json and decisions.json are tracked; logs/, runs/ and hooks/
 // are ignored by its whitelist .gitignore. The path is runlog's, the one

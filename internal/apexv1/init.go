@@ -86,6 +86,7 @@ const agentsSkeleton = `# AGENTS.md
 - development/changes/ — units of change; ` + "`ape status`" + ` shows what is in flight
 - development/archive/ — archived and abandoned changes (read-only)
 - development/decisions/ — ADRs
+- development/briefs/ — each plan's input, dated and verbatim: history, never edited
 `
 
 // Init creates the v1 skeleton where absent and merges ape's hooks into
@@ -132,7 +133,7 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 	if err := write(ConfigPath(p.Root), "project_name: "+yamlScalar(name)+"\ndevelopment_folder: "+p.DevRel+"\n"); err != nil {
 		return nil, err
 	}
-	for _, d := range []string{p.SpecsDir(), p.ChangesDir(), p.ArchiveDir(), p.DecisionsDir()} {
+	for _, d := range []string{p.SpecsDir(), p.ChangesDir(), p.ArchiveDir(), p.DecisionsDir(), p.BriefsDir()} {
 		if err := dir(d, true); err != nil {
 			return nil, err
 		}
