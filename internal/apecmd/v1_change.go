@@ -86,9 +86,10 @@ commit both as "apex: <id> draft" (trailer "Change: <id>"). Filling change.md in
 author's own commit.
 
 <id> is a verb-led kebab slug, ^[a-z][a-z0-9-]{2,39}$, unique across active AND archived
-changes. --touches lists the capabilities the change adds to or modifies (kebab slugs;
-new ones are fine — a capability is born from its first change). --paths are globs used
-for overlap detection. Overlap (shared touches or paths) with another unarchived change
+changes (development/archive/, and an older ape's development/changes/archive/).
+--touches lists the capabilities the change adds to or modifies (kebab slugs; new ones
+are fine — a capability is born from its first change). --paths are globs used for
+overlap detection. Overlap (shared touches or paths) with another unarchived change
 is a warning, not a failure.
 
 Then fill change.md and run `+"`ape change check <id>`"+`.
@@ -454,7 +455,7 @@ func newChangeAbandonCmd() *cobra.Command {
 	cmd := v1ChangeLeaf(
 		`abandon <id> --reason "<text>"`,
 		"Move a change to the archive as abandoned, merging no delta; commit",
-		`Drop a change: its folder moves to development/changes/archive/<YYYY-MM-DD>-<id>/ with
+		`Drop a change: its folder moves to development/archive/<YYYY-MM-DD>-<id>/ with
 status abandoned and the reason recorded in state.json; its delta is NOT merged into
 specs/. Committed as "apex: <id> abandoned" with trailer "Change: <id>". The id stays
 taken. Abandon a blocked change only after planning its replacement, or with the reason
@@ -499,7 +500,8 @@ func newChangeArchiveCmd() *cobra.Command {
      or change its check, or a MODIFIED/REMOVED requirement whose spec block changed since
      start (another branch archived first: re-plan and re-start) — → exit 3 and NOTHING is
      written
-  4. moves the folder to development/changes/archive/<YYYY-MM-DD>-<id>/, status archived
+  4. moves the folder to development/archive/<YYYY-MM-DD>-<id>/ (beside changes/),
+     status archived
   5. commits the specs and the move (only those paths; hooks skipped) as
      "archive: <id>" with trailer "Change: <id>"
 

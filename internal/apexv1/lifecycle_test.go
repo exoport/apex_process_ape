@@ -76,10 +76,25 @@ func TestNewChange(t *testing.T) {
 
 func TestNewChange_IDsAreUniqueAcrossTheArchive(t *testing.T) {
 	files := baseFiles()
-	files["development/changes/archive/2026-09-01-add-wave/change.md"] = "old"
+	files["development/archive/2026-09-01-add-wave/change.md"] = "old"
+	// An older ape archived inside changes/: its ids stay taken too, the
+	// one read of the old place besides project check's report.
+	files["development/changes/archive/2026-08-01-add-hug/change.md"] = "old"
 	p := fixture(t, files)
 	_, err := p.NewChange(ctx(), "add-wave", "M1", []string{"greeting"}, nil)
-	require.ErrorContains(t, err, "already archived")
+	require.ErrorContains(t, err, "already archived as development/archive/2026-09-01-add-wave")
+	_, err = p.NewChange(ctx(), "add-hug", "M1", []string{"greeting"}, nil)
+	require.ErrorContains(t, err, "already archived as development/changes/archive/2026-08-01-add-hug")
+	require.Equal(t, map[string]string{"add-wave": "2026-09-01-add-wave"}, p.ArchivedIDs(), "nothing else reads the old archive")
+	require.Equal(t, []string{}, changeIDs(p.Changes()), "the old archive folder is not a change")
+}
+
+func changeIDs(cs []ChangeInfo) []string {
+	out := make([]string, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, c.ID)
+	}
+	return out
 }
 
 func TestStart(t *testing.T) {
@@ -317,7 +332,7 @@ func TestAbandon(t *testing.T) {
 	require.ErrorContains(t, err, "--reason")
 	res, err := p.Abandon(ctx(), "add-wave", "replaced by add-wave-v2")
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(res.ArchivedTo, "-add-wave"))
+	require.True(t, strings.HasPrefix(res.ArchivedTo, "development/archive/") && strings.HasSuffix(res.ArchivedTo, "-add-wave"), res.ArchivedTo)
 	require.NoDirExists(t, p.ChangeDir("add-wave"))
 	st, err := LoadState(filepath.Join(p.Root, res.ArchivedTo, "state.json"))
 	require.NoError(t, err)

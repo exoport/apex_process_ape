@@ -126,7 +126,7 @@ func TestArchive(t *testing.T) {
 
 	res, err := p.Archive(ctx(), "add-wave", true, RunOptions{})
 	require.NoError(t, err)
-	require.Equal(t, "development/changes/archive/2026-10-15-add-wave", res.ArchivedTo)
+	require.Equal(t, "development/archive/2026-10-15-add-wave", res.ArchivedTo)
 	require.False(t, res.Reverified, "only ape's own state commits moved HEAD since the verify")
 	require.Equal(t, []string{"T2"}, res.PendingHuman)
 	require.NoDirExists(t, p.ChangeDir("add-wave"))

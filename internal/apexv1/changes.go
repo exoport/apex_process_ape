@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 )
 
-// ChangeInfo is one change folder under changes/ (not the archive).
+// ChangeInfo is one change folder under changes/.
 type ChangeInfo struct {
 	ID    string
 	State *State
@@ -19,8 +20,9 @@ type ChangeInfo struct {
 	Err error
 }
 
-// Changes lists the change folders under changes/, archive excluded,
-// sorted by id.
+// Changes lists the change folders under changes/, sorted by id. An old
+// changes/archive/ (an older ape's archive, reported by `project check`)
+// is not a change.
 func (p *Project) Changes() []ChangeInfo {
 	entries, err := os.ReadDir(p.ChangesDir())
 	if err != nil {
@@ -48,8 +50,14 @@ func (p *Project) loadChange(id string) ChangeInfo {
 
 // ArchivedIDs maps every archived change id to its archive folder name.
 func (p *Project) ArchivedIDs() map[string]string {
+	return archivedIDsIn(p.ArchiveDir())
+}
+
+// archivedIDsIn maps the change ids archived in dir to their folder names
+// (<YYYY-MM-DD>-<id>).
+func archivedIDsIn(dir string) map[string]string {
 	out := map[string]string{}
-	entries, err := os.ReadDir(p.ArchiveDir())
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return out
 	}
@@ -435,8 +443,12 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 	if dirExists(p.ChangeDir(id)) {
 		return nil, &FailError{Code: "change.exists", Msg: "change " + id + " already exists — pick another id"}
 	}
-	if folder, ok := p.ArchivedIDs()[id]; ok {
-		return nil, &FailError{Code: "change.id-archived", Msg: "change " + id + " was already archived as changes/archive/" + folder + " — ids are unique across the archive; pick another"}
+	// The old archive (changes/archive/, an older ape's) is scanned too:
+	// an id is never reused, wherever it was archived.
+	for _, dir := range []string{p.ArchiveDir(), p.OldArchiveDir()} {
+		if folder, ok := archivedIDsIn(dir)[id]; ok {
+			return nil, &FailError{Code: "change.id-archived", Msg: "change " + id + " was already archived as " + p.Rel(filepath.Join(dir, folder)) + " — ids are unique across the archive; pick another"}
+		}
 	}
 	rm := p.roadmap()
 	if rm == nil {
@@ -490,7 +502,7 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 func (p *Project) requireChange(id string) (ChangeInfo, error) {
 	if !dirExists(p.ChangeDir(id)) {
 		if folder, ok := p.ArchivedIDs()[id]; ok {
-			return ChangeInfo{}, &FailError{Code: "change.archived", Msg: "change " + id + " is archived (changes/archive/" + folder + ")"}
+			return ChangeInfo{}, &FailError{Code: "change.archived", Msg: "change " + id + " is archived (" + p.Rel(filepath.Join(p.ArchiveDir(), folder)) + ")"}
 		}
 		return ChangeInfo{}, &FailError{Code: "change.not-found", Msg: "no change " + id + " — `ape status` lists the active ones"}
 	}

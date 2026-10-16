@@ -155,7 +155,7 @@ func (p *Project) protectedReason(abs string) string {
 	switch {
 	case rel == "specs" || strings.HasPrefix(rel, "specs/"):
 		return devRel + "/" + rel + " is a living spec: specs change only through `ape change archive` — put the requirement in your change's ## Delta (ADDED/MODIFIED/REMOVED)"
-	case rel == "changes/archive" || strings.HasPrefix(rel, "changes/archive/"):
+	case rel == "archive" || strings.HasPrefix(rel, "archive/"):
 		return devRel + "/" + rel + " is an archived change: the archive is written only by `ape change archive` — specs change only through ape change archive"
 	case stateJSONRe.MatchString(rel):
 		return devRel + "/" + rel + " is written only by ape (`ape change start|verify|review|accept|block|archive`) — specs change only through ape change archive"

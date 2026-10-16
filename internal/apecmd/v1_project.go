@@ -35,7 +35,8 @@ func newProjectInitCmd() *cobra.Command {
   development/project.md             vision, users, scope, out of scope, constraints (skeleton)
   development/roadmap.md             "# Roadmap"
   development/specs/                 empty: no backfill — a spec is born from its first change
-  development/changes/archive/
+  development/changes/               the changes in flight
+  development/archive/               archived and abandoned changes
   development/decisions/
   development/.apex/                 ape's own records (never edited by a model)
 
@@ -106,6 +107,8 @@ func newProjectCheckCmd() *cobra.Command {
   decisions/NNNN-<slug>.md # ADR-NNNN: title, Status, Date, Context/Decision/Consequences,
                            Enforced by
   changes/<id>/            every non-archived change, as ` + "`ape change check`" + `
+  layout                   no development/changes/archive/ (an older ape's archive: move
+                           its folders to development/archive/)
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
 		Example: "  ape project check\n  ape project check --json",

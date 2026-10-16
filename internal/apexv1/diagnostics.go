@@ -88,6 +88,7 @@ func rule(kind, pattern, code string) findingRule {
 // findingRules: one per validation rule. Ordered: specific before general.
 var findingRules = []findingRule{
 	rule("", `^missing — `, "file.missing"),
+	rule("", `is the old archive location`, "layout.old-archive"),
 	rule("", `^project.md is .* lines, over the 150-line cap`, "project.too-long"),
 	rule("", `^project.md is .* over the 8 KB cap`, "project.too-big"),
 	rule("", "^missing `# <Project name>`", "project.no-title"),

@@ -172,8 +172,22 @@ func TestProjectCheck(t *testing.T) {
 
 func TestProjectCheck_ArchivedChangesAreNotChecked(t *testing.T) {
 	files := baseFiles()
-	files["development/changes/archive/2026-10-01-old-thing/change.md"] = "garbage"
+	files["development/archive/2026-10-01-old-thing/change.md"] = "garbage"
 	p := fixture(t, files)
 	require.Empty(t, p.Check())
 	require.Equal(t, "2026-10-01-old-thing", p.ArchivedIDs()["old-thing"])
+}
+
+// Backlog 24: an older ape archived into changes/archive/; this one
+// reports the folder with the move to make, and reads nothing in it.
+func TestProjectCheck_OldArchiveLocationIsAFinding(t *testing.T) {
+	files := baseFiles()
+	files["development/changes/archive/2026-10-01-old-thing/change.md"] = "garbage"
+	p := fixture(t, files)
+	fs := ClassifyFindings(p.Check())
+	require.Len(t, fs, 1, findingMessages(fs))
+	require.Equal(t, "layout.old-archive", fs[0].Code)
+	require.Equal(t, "development/changes/archive", fs[0].File)
+	require.Equal(t, "move development/changes/archive/* to development/archive/", fs[0].Fix)
+	require.Empty(t, p.ArchivedIDs())
 }

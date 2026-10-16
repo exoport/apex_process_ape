@@ -99,6 +99,7 @@ var DiagnosticCodes = []CodeDoc{
 
 	// findings (exit 1, from project check / change check)
 	{"file.missing", 1, "a required file is missing"},
+	{"layout.old-archive", 1, "development/changes/archive/ exists (an older ape's archive): move its folders to development/archive/"},
 	{"project.too-long", 1, "project.md over 150 lines"},
 	{"project.too-big", 1, "project.md over 8 KB"},
 	{"project.no-title", 1, "project.md has no `# <name>`"},

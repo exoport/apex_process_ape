@@ -24,7 +24,7 @@ func newHookCmd() *cobra.Command {
   stop            Stop and SubagentStop: blocks a stop while the one in-progress change
                   has a red command check (at most 3 times in a row)
   pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit): denies edits to
-                  development/specs/**, changes/*/state.json, changes/archive/**, .apex/**
+                  development/specs/**, changes/*/state.json, archive/**, .apex/**
 
 Every hook exits 0; a block or deny is expressed in its JSON output.`,
 	}
@@ -135,7 +135,7 @@ func newHookPreToolCmd() *cobra.Command {
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
-development/changes/archive/, or is under development/.apex/. Anything else: no output.`,
+development/archive/, or is under development/.apex/. Anything else: no output.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := readHookPayload(cmd)

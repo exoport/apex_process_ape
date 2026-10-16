@@ -156,6 +156,7 @@ func (p *Project) Check() []Finding {
 	missing := func(path, remedy string) {
 		add(Finding{File: p.Rel(path), Message: "missing — " + remedy})
 	}
+	add(p.layoutFindings()...)
 
 	if doc, err := readFileString(p.ProjectMD()); err != nil {
 		missing(p.ProjectMD(), "run `ape project init`, then write it (apex-plan)")
@@ -208,6 +209,18 @@ func (p *Project) Check() []Finding {
 
 	for _, c := range p.Changes() {
 		add(p.CheckChange(c.ID)...)
+	}
+	return out
+}
+
+// layoutFindings reports the places an older ape kept things, which this
+// one no longer reads: the move is the project's to make, once.
+func (p *Project) layoutFindings() []Finding {
+	var out []Finding
+	if dirExists(p.OldArchiveDir()) {
+		old, dev := p.Rel(p.OldArchiveDir()), p.DevRel
+		out = append(out, Finding{File: old, Message: old + "/ is the old archive location (archived changes now live in " + dev +
+			"/archive/) — move " + old + "/* to " + dev + "/archive/"})
 	}
 	return out
 }

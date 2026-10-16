@@ -172,7 +172,7 @@ type ArchiveResult struct {
 }
 
 // Archive applies a reviewed change's delta to specs/, moves the change
-// to changes/archive/<date>-<id>/ and commits both as `archive: <id>`.
+// to archive/<date>-<id>/ (beside changes/) and commits both as `archive: <id>`.
 func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool, opt RunOptions) (*ArchiveResult, error) {
 	ci, err := p.requireChange(id)
 	if err != nil {

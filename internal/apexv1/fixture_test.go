@@ -25,7 +25,7 @@ func fixture(t *testing.T, files map[string]string) *Project {
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o755))
 	}
-	for _, d := range []string{"development/specs", "development/changes/archive", "development/decisions", "development/.apex"} {
+	for _, d := range []string{"development/specs", "development/changes", "development/archive", "development/decisions", "development/.apex"} {
 		require.NoError(t, os.MkdirAll(filepath.Join(root, d), 0o755))
 	}
 	run(t, root, "init", "-q", "-b", "main")

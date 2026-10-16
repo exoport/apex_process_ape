@@ -1630,7 +1630,7 @@ Move a change to the archive as abandoned, merging no delta; commit
 ape change abandon <id> --reason "<text>" [flags]
 ```
 
-Drop a change: its folder moves to development/changes/archive/<YYYY-MM-DD>-<id>/ with
+Drop a change: its folder moves to development/archive/<YYYY-MM-DD>-<id>/ with
 status abandoned and the reason recorded in state.json; its delta is NOT merged into
 specs/. Committed as "apex: <id> abandoned" with trailer "Change: <id>". The id stays
 taken. Abandon a blocked change only after planning its replacement, or with the reason
@@ -1701,7 +1701,8 @@ Archive a reviewed change:
      or change its check, or a MODIFIED/REMOVED requirement whose spec block changed since
      start (another branch archived first: re-plan and re-start) — → exit 3 and NOTHING is
      written
-  4. moves the folder to development/changes/archive/<YYYY-MM-DD>-<id>/, status archived
+  4. moves the folder to development/archive/<YYYY-MM-DD>-<id>/ (beside changes/),
+     status archived
   5. commits the specs and the move (only those paths; hooks skipped) as
      "archive: <id>" with trailer "Change: <id>"
 
@@ -1841,9 +1842,10 @@ commit both as "apex: <id> draft" (trailer "Change: <id>"). Filling change.md in
 author's own commit.
 
 <id> is a verb-led kebab slug, ^[a-z][a-z0-9-]{2,39}$, unique across active AND archived
-changes. --touches lists the capabilities the change adds to or modifies (kebab slugs;
-new ones are fine — a capability is born from its first change). --paths are globs used
-for overlap detection. Overlap (shared touches or paths) with another unarchived change
+changes (development/archive/, and an older ape's development/changes/archive/).
+--touches lists the capabilities the change adds to or modifies (kebab slugs; new ones
+are fine — a capability is born from its first change). --paths are globs used for
+overlap detection. Overlap (shared touches or paths) with another unarchived change
 is a warning, not a failure.
 
 Then fill change.md and run `ape change check <id>`.
@@ -3987,7 +3989,7 @@ Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
   stop            Stop and SubagentStop: blocks a stop while the one in-progress change
                   has a red command check (at most 3 times in a row)
   pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit): denies edits to
-                  development/specs/**, changes/*/state.json, changes/archive/**, .apex/**
+                  development/specs/**, changes/*/state.json, archive/**, .apex/**
 
 Every hook exits 0; a block or deny is expressed in its JSON output.
 
@@ -4009,7 +4011,7 @@ PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
-development/changes/archive/, or is under development/.apex/. Anything else: no output.
+development/archive/, or is under development/.apex/. Anything else: no output.
 
 Flags:
 
@@ -4790,6 +4792,8 @@ Validate the whole project and list every failure, not just the first.
   decisions/NNNN-<slug>.md # ADR-NNNN: title, Status, Date, Context/Decision/Consequences,
                            Enforced by
   changes/<id>/            every non-archived change, as `ape change check`
+  layout                   no development/changes/archive/ (an older ape's archive: move
+                           its folders to development/archive/)
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
 
@@ -4856,7 +4860,8 @@ Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritt
   development/project.md             vision, users, scope, out of scope, constraints (skeleton)
   development/roadmap.md             "# Roadmap"
   development/specs/                 empty: no backfill — a spec is born from its first change
-  development/changes/archive/
+  development/changes/               the changes in flight
+  development/archive/               archived and abandoned changes
   development/decisions/
   development/.apex/                 ape's own records (never edited by a model)
 
