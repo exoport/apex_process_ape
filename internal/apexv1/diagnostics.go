@@ -109,6 +109,8 @@ var findingRules = []findingRule{
 	rule("", "^missing `Status:", "decision.no-status"),
 	rule("", "^missing `Date:", "decision.no-date"),
 	rule("", "^missing `Enforced by:", "decision.no-enforced-by"),
+	rule("", `was accepted and its text has changed since`, "decision.accepted-edited"),
+	rule("", `^Supersedes: .* names no decision`, "decision.bad-supersedes"),
 	rule("decision", "^missing `## ", "decision.missing-section"),
 	rule("", `capability folder must be a kebab-case slug`, "spec.bad-capability-name"),
 	rule("", `capability folder without spec.md`, "spec.missing"),

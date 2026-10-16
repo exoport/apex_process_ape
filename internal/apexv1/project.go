@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -207,11 +208,35 @@ func (p *Project) Check() []Finding {
 				continue
 			}
 			add(ValidateDecision(p.Rel(path), e.Name(), doc)...)
+			add(p.checkDecisionLife(path, e.Name(), doc)...)
 		}
 	}
 
 	for _, c := range p.Changes() {
 		add(p.CheckChange(c.ID)...)
+	}
+	return out
+}
+
+var adrSupersedesRe = regexp.MustCompile(`(?m)^Supersedes:[ \t]*(ADR-\d{4})[ \t]*$`)
+
+// checkDecisionLife checks what an ADR's history allows (backlog item 7):
+// an accepted ADR's body is fixed — a different decision is a new ADR
+// that supersedes it — and a Supersedes: line names an ADR that exists.
+func (p *Project) checkDecisionLife(path, name, doc string) []Finding {
+	m := adrFileRe.FindStringSubmatch(name)
+	if m == nil {
+		return nil
+	}
+	id := "ADR-" + m[1]
+	file := p.Rel(path)
+	var out []Finding
+	if p.acceptedBodyChanged(context.Background(), id, path, doc) {
+		out = append(out, Finding{File: file, Message: id + " was accepted and its text has changed since — restore it; " +
+			"a different decision is a new ADR: `ape decision new <slug> --supersedes " + id + "`"})
+	}
+	if sm := adrSupersedesRe.FindStringSubmatch(doc); len(sm) == 2 && !p.decisionExists(sm[1]) {
+		out = append(out, Finding{File: file, Message: "Supersedes: " + sm[1] + " names no decision in decisions/"})
 	}
 	return out
 }

@@ -2454,16 +2454,52 @@ Record architecture decisions (ADR-NNNN) in development/decisions/
 ape decision
 ```
 
+ADRs live in development/decisions/NNNN-<slug>.md. A decision is proposed, then
+accepted (`ape decision accept`); an accepted decision's text is fixed — `ape project check`
+refuses an edit to it — and a different decision is a new ADR that supersedes it
+(`ape decision new <slug> --supersedes ADR-NNNN`).
+
 Subcommands:
 
+- `accept` — Accept a proposed ADR and fix its text
 - `new` — Allocate the next ADR number and write the skeleton
+
+## ape decision accept
+
+Accept a proposed ADR and fix its text
+
+```
+ape decision accept <ADR-NNNN> --by <who> [flags]
+```
+
+Set a proposed ADR's Status to accepted and record the text it was accepted with in
+development/.apex/decisions.json; both are committed as "apex: ADR-NNNN accepted". From
+then on `ape project check` fails if the ADR's text (everything but its Status line)
+changes: supersede it instead. An ADR accepted by hand is held to the text git first
+committed it accepted with.
+
+Exit codes: 0 accepted · 1 no such ADR, not proposed, or malformed · 2 usage.
+
+Examples:
+
+```
+  ape decision accept ADR-0003 --by diego
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--by` | string | `—` | who accepts (required) |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
 
 ## ape decision new
 
 Allocate the next ADR number and write the skeleton
 
 ```
-ape decision new <slug> [flags]
+ape decision new <slug> [--supersedes ADR-NNNN] [flags]
 ```
 
 Write development/decisions/NNNN-<slug>.md with the next free number:
@@ -2471,20 +2507,23 @@ Write development/decisions/NNNN-<slug>.md with the next free number:
   # ADR-NNNN: <title>
   Status: proposed
   Date: YYYY-MM-DD
+  Supersedes: ADR-MMMM        (only with --supersedes)
   ## Context / ## Decision / ## Consequences
   Enforced by: review
 
-Committed as "apex: ADR-NNNN proposed". Fill it in (your own commit); set Enforced by: to
-a command, hook or review. Reference it from a change's
-frontmatter (decisions: [ADR-NNNN]) or a requirement (Decisions: ADR-NNNN).
+--supersedes ADR-MMMM (proposed or accepted) also sets that ADR's Status to
+"superseded by ADR-NNNN". Committed as "apex: ADR-NNNN proposed[, supersedes ADR-MMMM]".
+Fill it in (your own commit); set Enforced by: to a command, hook or review. Reference it
+from a change's frontmatter (decisions: [ADR-NNNN]) or a requirement (Decisions: ADR-NNNN).
 
-Exit codes: 0 ok (prints id and path) · 1 slug already used · 2 usage.
+Exit codes: 0 ok (prints id and path) · 1 slug already used, or the superseded ADR is
+missing or already superseded · 2 usage.
 
 Examples:
 
 ```
   ape decision new use-sqlite
-  ape decision new use-sqlite --title "Store tenants in SQLite"
+  ape decision new use-postgres --supersedes ADR-0002 --title "Store tenants in Postgres"
 ```
 
 Flags:
@@ -2493,6 +2532,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--supersedes` | string | `—` | ADR-NNNN this decision replaces |
 | `--title` | string | `—` | ADR title (default: from the slug) |
 
 ## ape deferred

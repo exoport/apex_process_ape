@@ -7,6 +7,7 @@ const (
 	CodeMilestoneNotFound    = "milestone.not-found"
 	CodeMilestoneNotApproved = "milestone.not-approved"
 	CodeFolderExists         = "archive.folder-exists"
+	CodeDecisionNotFound     = "decision.not-found"
 )
 
 // CodeDoc documents one diagnostic code.
@@ -59,6 +60,10 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.state-unreadable", 1, "state.json does not parse"},
 	{CodeWrongStatus, 1, "the command does not apply to the change's status"},
 	{"decision.slug-taken", 1, "decision new: an ADR already uses the slug"},
+	{CodeDecisionNotFound, 1, "no such ADR"},
+	{"decision.not-supersedable", 1, "decision new --supersedes: the ADR is already superseded"},
+	{"decision.not-proposed", 1, "decision accept: the ADR is not proposed"},
+	{"decision.malformed", 1, "decision accept: the ADR fails its shape (findings follow)"},
 	{"decision.write-failed", 1, "decision new: the ADR file could not be created"},
 	{"gate.red", 1, "the milestone gate (command or a spec scenario) is red"},
 	{CodeCommitFailed, 1, "ape wrote its record but could not commit it (identity, lock)"},
@@ -114,6 +119,8 @@ var DiagnosticCodes = []CodeDoc{
 	{"decision.no-date", 1, "an ADR has no Date:"},
 	{"decision.no-enforced-by", 1, "an ADR has no Enforced by:"},
 	{"decision.missing-section", 1, "an ADR lacks Context/Decision/Consequences"},
+	{"decision.accepted-edited", 1, "an accepted ADR's text changed after acceptance: restore it, supersede instead"},
+	{"decision.bad-supersedes", 1, "a Supersedes: line names no ADR"},
 	{"spec.bad-capability-name", 1, "a capability folder is not kebab-case"},
 	{"spec.missing", 1, "a capability folder has no spec.md"},
 	{"spec.too-big", 1, "a spec over 20 KB: split the capability"},

@@ -215,26 +215,38 @@ func newDecisionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "decision",
 		Short: "Record architecture decisions (ADR-NNNN) in development/decisions/",
+		Long: `ADRs live in development/decisions/NNNN-<slug>.md. A decision is proposed, then
+accepted (` + "`ape decision accept`" + `); an accepted decision's text is fixed — ` + "`ape project check`" + `
+refuses an edit to it — and a different decision is a new ADR that supersedes it
+(` + "`ape decision new <slug> --supersedes ADR-NNNN`" + `).`,
 	}
+	cmd.AddCommand(newDecisionNewCmd(), newDecisionAcceptCmd())
+	return cmd
+}
+
+func newDecisionNewCmd() *cobra.Command {
 	var f v1Flags
-	var title string
+	var title, supersedes string
 	newCmd := &cobra.Command{
-		Use:   "new <slug>",
+		Use:   "new <slug> [--supersedes ADR-NNNN]",
 		Short: "Allocate the next ADR number and write the skeleton",
 		Long: `Write development/decisions/NNNN-<slug>.md with the next free number:
 
   # ADR-NNNN: <title>
   Status: proposed
   Date: YYYY-MM-DD
+  Supersedes: ADR-MMMM        (only with --supersedes)
   ## Context / ## Decision / ## Consequences
   Enforced by: review
 
-Committed as "apex: ADR-NNNN proposed". Fill it in (your own commit); set Enforced by: to
-a command, hook or review. Reference it from a change's
-frontmatter (decisions: [ADR-NNNN]) or a requirement (Decisions: ADR-NNNN).
+--supersedes ADR-MMMM (proposed or accepted) also sets that ADR's Status to
+"superseded by ADR-NNNN". Committed as "apex: ADR-NNNN proposed[, supersedes ADR-MMMM]".
+Fill it in (your own commit); set Enforced by: to a command, hook or review. Reference it
+from a change's frontmatter (decisions: [ADR-NNNN]) or a requirement (Decisions: ADR-NNNN).
 
-Exit codes: 0 ok (prints id and path) · 1 slug already used · 2 usage.`,
-		Example: "  ape decision new use-sqlite\n  ape decision new use-sqlite --title \"Store tenants in SQLite\"",
+Exit codes: 0 ok (prints id and path) · 1 slug already used, or the superseded ADR is
+missing or already superseded · 2 usage.`,
+		Example: "  ape decision new use-sqlite\n  ape decision new use-postgres --supersedes ADR-0002 --title \"Store tenants in Postgres\"",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := v1Project(&f)
@@ -244,17 +256,58 @@ Exit codes: 0 ok (prints id and path) · 1 slug already used · 2 usage.`,
 			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
-			res, err := p.NewDecision(cmd.Context(), args[0], title)
+			res, err := p.NewDecision(cmd.Context(), args[0], title, supersedes)
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
 			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
-				fmt.Fprintf(w, "%s  %s\n", res.ID, res.Path)
+				fmt.Fprintf(w, "%s  %s", res.ID, res.Path)
+				if res.Supersedes != "" {
+					fmt.Fprintf(w, "  (supersedes %s)", res.Supersedes)
+				}
+				fmt.Fprintln(w)
 			})
 		},
 	}
 	addV1Flags(newCmd, &f)
 	newCmd.Flags().StringVar(&title, "title", "", "ADR title (default: from the slug)")
-	cmd.AddCommand(newCmd)
+	newCmd.Flags().StringVar(&supersedes, "supersedes", "", "ADR-NNNN this decision replaces")
+	return newCmd
+}
+
+func newDecisionAcceptCmd() *cobra.Command {
+	var f v1Flags
+	var by string
+	cmd := &cobra.Command{
+		Use:   "accept <ADR-NNNN> --by <who>",
+		Short: "Accept a proposed ADR and fix its text",
+		Long: `Set a proposed ADR's Status to accepted and record the text it was accepted with in
+development/.apex/decisions.json; both are committed as "apex: ADR-NNNN accepted". From
+then on ` + "`ape project check`" + ` fails if the ADR's text (everything but its Status line)
+changes: supersede it instead. An ADR accepted by hand is held to the text git first
+committed it accepted with.
+
+Exit codes: 0 accepted · 1 no such ADR, not proposed, or malformed · 2 usage.`,
+		Example: "  ape decision accept ADR-0003 --by diego",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := v1Project(&f)
+			if err != nil {
+				return err
+			}
+			if err := v1RequireInit(cmd, &f, p); err != nil {
+				return err
+			}
+			res, err := p.AcceptDecision(cmd.Context(), args[0], by)
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+				fmt.Fprintf(w, "%s accepted  %s\n", res.ID, res.Path)
+			})
+		},
+	}
+	addV1Flags(cmd, &f)
+	cmd.Flags().StringVar(&by, "by", "", "who accepts (required)")
 	return cmd
 }
