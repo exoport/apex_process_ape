@@ -212,7 +212,10 @@ The working tree must hold no uncommitted changes outside development/ — commi
 
 All checks exit 0 → status verified (a reviewed change whose code has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last
-lines are printed; a change that was in-progress is left exactly as it was (nothing written,
+lines are printed. Green at baseline: the change's own checks (tasks, delta scenarios) that
+already passed when they were baselined, before the code, are listed (JSON
+"green_at_baseline", also recorded in state.json) for review to justify or flag.
+On red: a change that was in-progress is left exactly as it was (nothing written,
 nothing committed), a verified/reviewed one goes back to in-progress (committed).
 Refused while ## Delta or ## Tasks differ from the plan frozen at start (re-start first). human-review tasks are never run; those not yet accepted are listed as
 pending.
@@ -232,6 +235,7 @@ status · 2 usage.`,
 				if len(res.PendingHuman) > 0 {
 					fmt.Fprintf(w, "human-review pending: %s\n", strings.Join(res.PendingHuman, ", "))
 				}
+				printGreenAtBaseline(w, res.GreenAtBaseline)
 			}
 			if !res.Green {
 				if !f.json {
@@ -246,6 +250,22 @@ status · 2 usage.`,
 		})
 	addV1TimeoutFlag(cmd, &f)
 	return cmd
+}
+
+// printGreenAtBaseline lists the change's own checks that passed before
+// any code: evidence of nothing, for review to justify or flag.
+func printGreenAtBaseline(w io.Writer, gab []apexv1.GreenAtBaseline) {
+	if len(gab) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "green at baseline — passed before any code, so they prove nothing about this change; review must justify or flag each:\n")
+	for _, g := range gab {
+		when := "at start"
+		if g.AtReplan {
+			when = "at a re-plan, after code existed"
+		}
+		fmt.Fprintf(w, "  %-4s %s  (baselined %s)\n", g.Task, g.Cmd, when)
+	}
 }
 
 func newChangeReviewCmd() *cobra.Command {

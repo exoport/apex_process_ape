@@ -61,6 +61,20 @@ type Replan struct {
 	To   string `json:"to_digest"`
 }
 
+// GreenAtBaseline is a check of the change's own — a task, or a scenario
+// of its delta — that already passed at its baseline, before the code it
+// is meant to prove existed. Such a check proves nothing about the change;
+// review must justify or flag each one (backlog item 3).
+type GreenAtBaseline struct {
+	Task string `json:"task"`
+	Kind string `json:"kind"`
+	Cmd  string `json:"cmd"`
+	SHA  string `json:"baseline_sha,omitempty"`
+	// AtReplan: baselined at a re-plan, after code existed, rather than
+	// at the first start.
+	AtReplan bool `json:"at_replan,omitempty"`
+}
+
 // Verify is the last `ape change verify`.
 type Verify struct {
 	SHA          string        `json:"sha"`
@@ -68,6 +82,9 @@ type Verify struct {
 	Results      []CheckResult `json:"results"`
 	PendingHuman []string      `json:"pending_human"`
 	Green        bool          `json:"green"`
+	// GreenAtBaseline lists the change's own checks that passed before
+	// any code; always present (empty when none).
+	GreenAtBaseline []GreenAtBaseline `json:"green_at_baseline"`
 }
 
 // Review is the recorded review verdict.

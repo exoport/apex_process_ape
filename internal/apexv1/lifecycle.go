@@ -168,6 +168,34 @@ type VerifyResult struct {
 	Green        bool          `json:"green"`
 	Results      []CheckResult `json:"results"`
 	PendingHuman []string      `json:"pending_human"`
+	// GreenAtBaseline: the change's own checks (tasks, delta scenarios)
+	// that already passed at baseline — review must justify each.
+	GreenAtBaseline []GreenAtBaseline `json:"green_at_baseline"`
+}
+
+// greenAtBaseline lists the change's own checks — tasks and the scenarios
+// of its delta, not regression scenarios, which are meant to be green —
+// whose recorded baseline exit was 0.
+func (p *Project) greenAtBaseline(c *Change, st *State) []GreenAtBaseline {
+	base := map[string]Baseline{}
+	for _, b := range st.Baseline {
+		base[b.Task] = b
+	}
+	out := []GreenAtBaseline{}
+	for _, pc := range p.ChangeChecks(c) {
+		if pc.Kind == KindScenario && !pc.Delta {
+			continue
+		}
+		b, ok := base[pc.Ref]
+		if !ok || b.Exit != 0 || (b.Cmd != "" && b.Cmd != pc.Cmd) {
+			continue
+		}
+		out = append(out, GreenAtBaseline{
+			Task: pc.Ref, Kind: pc.Kind, Cmd: pc.Cmd, SHA: b.SHA,
+			AtReplan: b.SHA != "" && st.BaseSHA != "" && b.SHA != st.BaseSHA,
+		})
+	}
+	return out
 }
 
 // Failing returns the red results.
@@ -224,12 +252,13 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 	if pending == nil {
 		pending = []string{}
 	}
+	gab := p.greenAtBaseline(ci.Doc, st)
 	if !green && st.Status == StatusInProgress {
 		// A verify that stays red changes nothing and commits nothing
 		// (trial decision D5): the results are in the output and the logs.
-		return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending}, nil
+		return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab}, nil
 	}
-	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green}
+	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green, GreenAtBaseline: gab}
 	switch {
 	case !green:
 		st.Status = StatusInProgress
@@ -243,7 +272,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}
-	return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending}, nil
+	return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending, GreenAtBaseline: gab}, nil
 }
 
 func limit(xs []string, n int) []string {

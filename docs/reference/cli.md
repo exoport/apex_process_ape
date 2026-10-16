@@ -1920,7 +1920,10 @@ The working tree must hold no uncommitted changes outside development/ — commi
 
 All checks exit 0 → status verified (a reviewed change whose code has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last
-lines are printed; a change that was in-progress is left exactly as it was (nothing written,
+lines are printed. Green at baseline: the change's own checks (tasks, delta scenarios) that
+already passed when they were baselined, before the code, are listed (JSON
+"green_at_baseline", also recorded in state.json) for review to justify or flag.
+On red: a change that was in-progress is left exactly as it was (nothing written,
 nothing committed), a verified/reviewed one goes back to in-progress (committed).
 Refused while ## Delta or ## Tasks differ from the plan frozen at start (re-start first). human-review tasks are never run; those not yet accepted are listed as
 pending.
