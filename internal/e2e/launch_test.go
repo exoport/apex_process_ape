@@ -85,7 +85,7 @@ func taskManifest(t *testing.T, project string, v1 bool) pipeline.Manifest {
 	t.Helper()
 	dir := filepath.Join(project, "_output", "ape", "tasks", "apex-foo", "latest")
 	if v1 {
-		dir = filepath.Join(project, "development", ".apex", "runs", "tasks", "apex-foo", "latest")
+		dir = filepath.Join(project, "_apex", "state", "runs", "tasks", "apex-foo", "latest")
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "manifest.yaml"))
 	require.NoError(t, err)
