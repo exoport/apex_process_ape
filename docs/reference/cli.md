@@ -1945,7 +1945,7 @@ Start a draft (or resume a blocked) change:
   3. records base_sha (HEAD) and started_at (kept when resuming a blocked change)
   4. runs every check verify will run once, as the baseline (which were already green):
      the command tasks and the effective spec's scenario checks; from the project root
-     with sh -c; output under development/.apex/logs/<id>/
+     with sh -c; output under _apex/state/logs/<id>/
   5. sets in-progress, freezes the plan (SHA-256 of change.md outside ## Why and ## Notes), fingerprints
      the spec block of every requirement it MODIFIES or REMOVES, and commits state.json
      ("apex: <id> in-progress")
@@ -1987,7 +1987,7 @@ spec — the spec as it will be once this change is archived: each current requi
 change does not MODIFY or REMOVE (regression), plus the scenarios of its own ADDED and
 MODIFIED blocks. human-review checks are not run. A command shared by several checks runs
 once. Results (sha, exit, seconds, output sha256; kind, capability, requirement, scenario
-for scenario checks) are recorded in state.json; output under development/.apex/logs/<id>/.
+for scenario checks) are recorded in state.json; output under _apex/state/logs/<id>/.
 What a check leaves in the tree outside development/ — files it created, tracked files it
 changed — is undone after it and reported (JSON "stray_files"); files that were there
 before it ran are never touched.
@@ -2525,7 +2525,7 @@ ape decision accept <ADR-NNNN> --by <who> [flags]
 ```
 
 Set a proposed ADR's Status to accepted and record the text it was accepted with in
-development/.apex/decisions.json; both are committed as "apex: ADR-NNNN accepted". From
+_apex/state/decisions.json; both are committed as "apex: ADR-NNNN accepted". From
 then on `ape project check` fails if the ADR's text (everything but its Status line)
 changes: supersede it instead. An ADR accepted by hand is held to the text git first
 committed it accepted with.
@@ -3989,19 +3989,20 @@ Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
   stop            Stop and SubagentStop: blocks a stop while the one in-progress change
                   has a red command check (at most 3 times in a row)
   pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit): denies edits to
-                  development/specs/**, changes/*/state.json, archive/**, .apex/**
+                  development/specs/**, changes/*/state.json, archive/**, and
+                  _apex/state/**
 
 Every hook exits 0; a block or deny is expressed in its JSON output.
 
 Subcommands:
 
-- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive and .apex
+- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive and _apex/state
 - `session-start` — SessionStart hook: inject `ape status --brief` as additional context
 - `stop` — Stop/SubagentStop hook: block a stop while the in-progress change's checks are red
 
 ## ape hook pre-tool
 
-PreToolUse hook: deny edits to specs, state.json, the archive and .apex
+PreToolUse hook: deny edits to specs, state.json, the archive and _apex/state
 
 ```
 ape hook pre-tool [flags]
@@ -4011,7 +4012,7 @@ PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
-development/archive/, or is under development/.apex/. Anything else: no output.
+development/archive/, or is under _apex/state/. Anything else: no output.
 
 Flags:
 
@@ -4050,7 +4051,7 @@ checks' last lines and what to do>"}. Allows (prints nothing) when no or several
 are in progress, when the change is blocked, when every check is green, or after 3
 consecutive blocks (the count resets when the payload's stop_hook_active is false).
 
-The verdict is also written to development/.apex/stop-gate/<session>[-<agent>].json, which
+The verdict is also written to _apex/state/hooks/<session>[-<agent>].json, which
 is how `ape task` learns that a Stop it saw did not end the turn.
 
 Flags:
@@ -4295,10 +4296,10 @@ ape milestone
 Milestones live in development/roadmap.md as "## M<n> — <title>" sections.
 Their Status: line is written only by ape: proposed → approved (by <who> <ts>) →
 done (<ts> <sha>). Every one of those writes is committed by ape (roadmap.md, plus
-development/.apex/milestones.json when it exists) as "apex: <M> proposed|approved|done"
+_apex/state/milestones.json when it exists) as "apex: <M> proposed|approved|done"
 with trailer "Milestone: <M>". milestones.json holds each gate's result (green|red)
 and is committed, as "apex: <M> gate green|red", only when that result changes; the
-latest run of any result is in the gitignored development/.apex/logs/gate-<M>.json.
+latest run of any result is in the gitignored _apex/state/logs/gate-<M>.json.
 No milestone command leaves the tree dirty.
 
 Subcommands:
@@ -4378,11 +4379,11 @@ ape milestone gate <M> [flags]
 
 Run the milestone's Gate: command from the project root, and every scenario check of
 the whole spec beside it as the regression suite (human-review not run; output under
-development/.apex/logs/gate-<M>/). The gate is green only when both pass. Files the gate
+_apex/state/logs/gate-<M>/). The gate is green only when both pass. Files the gate
 or a check leaves outside development/ are undone and reported ("stray_files"). The run (exit, sha, time,
-output hash, last lines) goes to development/.apex/logs/gate-<M>.json (gitignored; shown by
+output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; shown by
 `ape status`). When the result differs from the recorded one (green vs red), or is
-the first, development/.apex/milestones.json is updated and committed as
+the first, _apex/state/milestones.json is updated and committed as
 "apex: <M> gate green|red". Does not change the milestone's status — `ape milestone close` does.
 
 Exit codes: 0 gate green · 1 gate red (last output lines shown) or no such milestone · 2 usage.
@@ -4793,7 +4794,10 @@ Validate the whole project and list every failure, not just the first.
                            Enforced by
   changes/<id>/            every non-archived change, as `ape change check`
   layout                   no development/changes/archive/ (an older ape's archive: move
-                           its folders to development/archive/)
+                           its folders to development/archive/), no development/.apex/
+                           (an older ape's state: move milestones.json and decisions.json
+                           to _apex/state/, delete it; `ape project init` then adds
+                           _apex/state/.gitignore)
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
 
@@ -4863,7 +4867,10 @@ Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritt
   development/changes/               the changes in flight
   development/archive/               archived and abandoned changes
   development/decisions/
-  development/.apex/                 ape's own records (never edited by a model)
+  _apex/state/                       ape's own records (never edited by a model; never touched
+                                     by ape framework update): milestones.json, decisions.json
+                                     tracked; logs/, runs/, hooks/ ignored. Its .gitignore is a
+                                     whitelist (*, !.gitignore, !milestones.json, !decisions.json)
 
 Hooks merged into .claude/settings.json (existing keys and hooks are kept):
   SessionStart          ape hook session-start
@@ -4873,7 +4880,7 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
 Everything init wrote (and settings.json when it merged hooks) is committed as
 "apex: project init"; files that existed before are not touched and not committed.
 
---brownfield adds nothing; it records in development/.apex/project.json that the
+--brownfield adds nothing; it records in _apex/state/project.json (ignored) that the
 project existed before APEX.
 
 Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.
@@ -4936,7 +4943,7 @@ confirms the submit through the UserPromptSubmit hook, pressing Enter up
 to twice more; a line still not submitted fails the session (exit 1).
 
 Records land under <project>/_output/ape/prompts/<prompt-id>/ (in an
-APEX v1 project, development/.apex/runs/prompts/<prompt-id>/) (runlog
+APEX v1 project, _apex/state/runs/prompts/<prompt-id>/) (runlog
 streams + copied transcript + prompt.yaml session record) and fold into
 the project cost rollup's Prompts bucket.
 
@@ -6917,8 +6924,8 @@ Commit control is two-layered:
 
 Run artifacts land under <project>/_output/ape/tasks/<skill>/<run-id>/
 (manifest.yaml, per-step ndjson, runlog streams) — in an APEX v1 project
-(development/.apex/ exists) under development/.apex/runs/tasks/ instead,
-a directory git ignores, where a model clearing _output/ cannot reach.
+(_apex/state/ exists) under _apex/state/runs/tasks/ instead, a directory
+git ignores, where a model clearing _output/ cannot reach.
 
 --prompt-file <path> reads the prompt from a file, and "-" reads it
 from stdin. It is how a printed escalation command carries the
@@ -6993,7 +7000,7 @@ Flags:
 | `--handoff` | string | `—` | Path to a handoff/context file; derives a "Read <path> and follow the Resume Protocol" --prompt value (mutually exclusive with --prompt) |
 | `--idle-timeout` | duration | `0s` | Idle backstop: cancel only after this long with no progress across hook events or transcript growth (e.g. 15m); default matches pipeline (60m). PTY output is NOT an anchor here — see `ape prompt` |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
-| `--manifest-dir` | string | `—` | Override the run-artifact base dir (default: <project>/_output/ape/tasks; development/.apex/runs/tasks in an APEX v1 project) |
+| `--manifest-dir` | string | `—` | Override the run-artifact base dir (default: <project>/_output/ape/tasks; _apex/state/runs/tasks in an APEX v1 project) |
 | `--max-duration` | duration | `3h0m0s` | Hard wall-clock ceiling regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item, not per batch. 0 disables the cap. |
 | `--model` | string | `—` | Claude model. A bare family (fable, haiku, mythos, opus, sonnet) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly |
 | `--nats-creds` | string | `—` | NATS .creds file; its user identity is baked into every subject (env APE_NATS_CREDS). |

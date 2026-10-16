@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/framework"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -230,4 +231,71 @@ func TestFrameworkUpdate_KeepsACandidateAheadOfTheNewestRelease(t *testing.T) {
 	meta, err = framework.ReadMetadata(root)
 	require.NoError(t, err)
 	require.Equal(t, "v1.0.0", meta.Framework.VersionTag, "--version goes back when asked")
+}
+
+// Backlog 26: `ape framework setup` and `update` never touch an APEX v1
+// project's _apex/state/ — not even when the framework itself ships a file
+// at that path — and their commits take nothing from it.
+func TestFrameworkInstall_LeavesV1StateByteIdentical(t *testing.T) {
+	withApeVersion(t, "0.4.0")
+	fw := releasedFramework(t, "v1.0.0")
+	for rel, body := range map[string]string{
+		"_apex/state/milestones.json": "{\"from\": \"the framework\"}\n",
+		"_apex/state/.gitignore":      "# the framework's\n",
+	} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(fw, rel)), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(fw, rel), []byte(body), 0o644))
+	}
+	gitCommitAll(t, fw, "a framework that ships _apex/state")
+	gitRun(t, fw, "tag", "v1.0.1")
+
+	root := committedProject(t)
+	state := runlog.V1StateDir(root)
+	for rel, body := range map[string]string{
+		".gitignore":                     runlog.V1StateGitignore,
+		"milestones.json":                "{\"M1\": {\"result\": \"green\"}}\n",
+		"decisions.json":                 "{\"ADR-0001\": {\"by\": \"ann\"}}\n",
+		"project.json":                   "{\"brownfield\": true}\n",
+		"logs/add-wave/T1.log":           "ok\n",
+		"hooks/sess-1.jsonl":             "{\"verdict\": \"allow\"}\n",
+		"runs/tasks/apex-apply/r1/x.txt": "run\n",
+	} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(state, rel)), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(state, rel), []byte(body), 0o644))
+	}
+	gitCommitAll(t, root, "v1 state")
+	baseline := gitRun(t, root, "rev-parse", "HEAD")
+	before := treeBytes(t, state)
+
+	for _, args := range [][]string{
+		{"setup", "--no-fetch", "--no-bootstrap"},
+		{"update", "--no-fetch"},
+		{"setup", "--no-fetch", "--no-bootstrap", "--force"},
+	} {
+		out, err := runFramework(t, args[0], fw, root, args[1:]...)
+		require.NoError(t, err, "%v: %s", args, out)
+		require.Equal(t, before, treeBytes(t, state), "%v changed _apex/state/", args)
+	}
+	require.Empty(t, gitRun(t, root, "log", "--format=%h", "--name-only", baseline+"..HEAD", "--", "_apex/state"),
+		"no install commit touched _apex/state/")
+	require.NotEqual(t, baseline, gitRun(t, root, "rev-parse", "HEAD"), "the install did commit — the assertion means something")
+}
+
+// treeBytes maps every file under dir to its content.
+func treeBytes(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	require.NoError(t, filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, path)
+		out[filepath.ToSlash(rel)] = string(data)
+		return nil
+	}))
+	return out
 }

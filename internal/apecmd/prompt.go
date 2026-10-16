@@ -130,7 +130,7 @@ confirms the submit through the UserPromptSubmit hook, pressing Enter up
 to twice more; a line still not submitted fails the session (exit 1).
 
 Records land under <project>/_output/ape/prompts/<prompt-id>/ (in an
-APEX v1 project, development/.apex/runs/prompts/<prompt-id>/) (runlog
+APEX v1 project, _apex/state/runs/prompts/<prompt-id>/) (runlog
 streams + copied transcript + prompt.yaml session record) and fold into
 the project cost rollup's Prompts bucket.
 

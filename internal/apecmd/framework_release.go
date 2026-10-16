@@ -17,7 +17,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/framework"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/updatecache"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -525,6 +527,12 @@ func commitInstall(ctx context.Context, w io.Writer, projectRoot string, before 
 		if e.untracked && before[e.path] {
 			continue
 		}
+		// An APEX v1 project's _apex/state/ is ape's own record, never
+		// part of a framework install (backlog 26): the install writes
+		// nothing there, and its commit takes nothing from there either.
+		if isV1StatePath(e.path) {
+			continue
+		}
 		paths = append(paths, e.path)
 	}
 	if len(paths) == 0 {
@@ -545,6 +553,13 @@ func commitInstall(ctx context.Context, w io.Writer, projectRoot string, before 
 	}
 	fmt.Fprintf(w, "commit: %s\n", subject)
 	return nil
+}
+
+// isV1StatePath reports whether a project-relative, slash-separated path
+// is inside _apex/state/.
+func isV1StatePath(rel string) bool {
+	state := filepath.ToSlash(filepath.Join(apexcfg.DirName, runlog.V1StateDirName))
+	return rel == state || strings.HasPrefix(rel, state+"/")
 }
 
 // commitPaths stages paths and commits them with msg, running the

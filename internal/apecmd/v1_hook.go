@@ -24,7 +24,8 @@ func newHookCmd() *cobra.Command {
   stop            Stop and SubagentStop: blocks a stop while the one in-progress change
                   has a red command check (at most 3 times in a row)
   pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit): denies edits to
-                  development/specs/**, changes/*/state.json, archive/**, .apex/**
+                  development/specs/**, changes/*/state.json, archive/**, and
+                  _apex/state/**
 
 Every hook exits 0; a block or deny is expressed in its JSON output.`,
 	}
@@ -107,7 +108,7 @@ checks' last lines and what to do>"}. Allows (prints nothing) when no or several
 are in progress, when the change is blocked, when every check is green, or after 3
 consecutive blocks (the count resets when the payload's stop_hook_active is false).
 
-The verdict is also written to development/.apex/stop-gate/<session>[-<agent>].json, which
+The verdict is also written to _apex/state/hooks/<session>[-<agent>].json, which
 is how ` + "`ape task`" + ` learns that a Stop it saw did not end the turn.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -130,12 +131,12 @@ func newHookPreToolCmd() *cobra.Command {
 	var cwd string
 	cmd := &cobra.Command{
 		Use:   "pre-tool",
-		Short: "PreToolUse hook: deny edits to specs, state.json, the archive and .apex",
+		Short: "PreToolUse hook: deny edits to specs, state.json, the archive and _apex/state",
 		Long: `PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
-development/archive/, or is under development/.apex/. Anything else: no output.`,
+development/archive/, or is under _apex/state/. Anything else: no output.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := readHookPayload(cmd)

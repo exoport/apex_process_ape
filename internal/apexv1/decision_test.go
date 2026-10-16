@@ -31,6 +31,7 @@ func TestDecision_AcceptAndSupersede(t *testing.T) {
 	require.Equal(t, ADRAccepted, acc.Status)
 	require.Contains(t, read(t, p, first.Path), "Status: accepted")
 	require.Equal(t, "apex: ADR-0001 accepted", subjects(t, p)[0])
+	require.Contains(t, run(t, p.Root, "show", "--name-only", "--format=", "HEAD"), "_apex/state/decisions.json")
 	clean(t, p, "decision accept")
 	require.Empty(t, p.Check())
 

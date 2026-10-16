@@ -83,8 +83,8 @@ Commit control is two-layered:
 
 Run artifacts land under <project>/_output/ape/tasks/<skill>/<run-id>/
 (manifest.yaml, per-step ndjson, runlog streams) — in an APEX v1 project
-(development/.apex/ exists) under development/.apex/runs/tasks/ instead,
-a directory git ignores, where a model clearing _output/ cannot reach.
+(_apex/state/ exists) under _apex/state/runs/tasks/ instead, a directory
+git ignores, where a model clearing _output/ cannot reach.
 
 --prompt-file <path> reads the prompt from a file, and "-" reads it
 from stdin. It is how a printed escalation command carries the
@@ -237,7 +237,7 @@ ownership (the run itself may have succeeded).`,
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json (json = result envelope on stdout, progress on stderr)")
 	cmd.Flags().BoolVar(&jsonAlias, "json", false, "Alias for --output-format json")
 	cmd.Flags().BoolVar(&quietFlag, "quiet", false, "Suppress the per-event progress stream")
-	cmd.Flags().StringVar(&manifestDirFlag, "manifest-dir", "", "Override the run-artifact base dir (default: <project>/_output/ape/tasks; development/.apex/runs/tasks in an APEX v1 project)")
+	cmd.Flags().StringVar(&manifestDirFlag, "manifest-dir", "", "Override the run-artifact base dir (default: <project>/_output/ape/tasks; _apex/state/runs/tasks in an APEX v1 project)")
 	cmd.Flags().BoolVar(&ignoreProjSettings, "ignore-project-settings", false, "Tell the spawned claude to skip project + local .claude/settings*.json")
 	_ = cmd.Flags().MarkHidden("json")
 	addOutputStyleFlag(cmd, &outputStyleFlag)

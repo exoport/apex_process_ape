@@ -75,7 +75,7 @@ func TestVerify_RunsTheEffectiveSpec(t *testing.T) {
 	require.Equal(t, "greeting/Say hello/plain run", failing[0].Task)
 	require.False(t, failing[0].Delta)
 	require.FileExists(t, filepath.Join(p.Root, filepath.FromSlash(failing[0].Log)))
-	require.True(t, strings.HasPrefix(failing[0].Log, "development/.apex/logs/add-wave/S-"))
+	require.True(t, strings.HasPrefix(failing[0].Log, "_apex/state/logs/add-wave/S-"))
 }
 
 // The milestone gate runs the whole spec as its regression suite: a green

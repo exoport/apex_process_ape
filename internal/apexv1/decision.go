@@ -65,14 +65,14 @@ func adrBodyDigest(doc string) string {
 }
 
 // DecisionRecord is ape's record of an accepted ADR, committed in
-// development/.apex/decisions.json: the body it was accepted with.
+// _apex/state/decisions.json: the body it was accepted with.
 type DecisionRecord struct {
 	AcceptedAt string `json:"accepted_at"`
 	By         string `json:"by"`
 	BodySHA256 string `json:"body_sha256"`
 }
 
-func (p *Project) decisionsJSON() string { return filepath.Join(p.ApexDir(), "decisions.json") }
+func (p *Project) decisionsJSON() string { return filepath.Join(p.StateDir(), "decisions.json") }
 
 func (p *Project) loadDecisionRecords() map[string]DecisionRecord {
 	out := map[string]DecisionRecord{}
@@ -87,6 +87,7 @@ func (p *Project) saveDecisionRecords(r map[string]DecisionRecord) error {
 	if err != nil {
 		return err
 	}
+	p.ensureState()
 	return writeFileAtomic(p.decisionsJSON(), string(data)+"\n")
 }
 

@@ -123,6 +123,7 @@ func (pc *PlannedCheck) logName(prefix string) string {
 func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks []PlannedCheck, opt RunOptions) []CheckResult {
 	done := map[string]CheckResult{}
 	out := make([]CheckResult, 0, len(checks))
+	p.ensureState() // the logs go under _apex/state/
 	inGit := p.isWorkTree(ctx)
 	for i := range checks {
 		pc := &checks[i]

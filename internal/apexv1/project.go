@@ -222,6 +222,11 @@ func (p *Project) layoutFindings() []Finding {
 		out = append(out, Finding{File: old, Message: old + "/ is the old archive location (archived changes now live in " + dev +
 			"/archive/) — move " + old + "/* to " + dev + "/archive/"})
 	}
+	if dirExists(p.OldStateDir()) {
+		old, state := p.Rel(p.OldStateDir()), p.StateRel()
+		out = append(out, Finding{File: old, Message: old + "/ is the old state folder (ape's records now live in " + state +
+			"/) — move " + old + "/{milestones,decisions}.json to " + state + "/ and delete " + old + "/"})
+	}
 	return out
 }
 

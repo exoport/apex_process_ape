@@ -14,7 +14,7 @@ type RunOptions struct {
 	Timeout time.Duration
 }
 
-// runTasks runs every command task once, logging under .apex/logs/<id>/.
+// runTasks runs every command task once, logging under _apex/state/logs/<id>/.
 func (p *Project) runTasks(ctx context.Context, c *Change, id, logPrefix string, opt RunOptions) []CheckResult {
 	tasks := c.CommandTasks()
 	checks := make([]PlannedCheck, 0, len(tasks))

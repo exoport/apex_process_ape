@@ -42,7 +42,11 @@ func TestPreTool(t *testing.T) {
 		{"Write", "development/changes/add-wave/state.json", "", true, "written only by ape"},
 		{"Write", "development/archive/2026-10-01-x/change.md", "", true, "archived change"},
 		{"Write", "development/archive", "", true, "archived change"},
-		{"NotebookEdit", "development/.apex/milestones.json", "", true, "ape's own record"},
+		{"NotebookEdit", "_apex/state/milestones.json", "", true, "ape's own record"},
+		{"Write", "_apex/state/hooks/s.json", "", true, "ape's own record"},
+		{"Write", "_apex/state", "", true, "ape's own record"},
+		{"Write", "_apex/config.yaml", "", false, ""},
+		{"Write", "development/.apex/milestones.json", "", false, ""},
 		{"Edit", "../development/specs/greeting/spec.md", sub, true, "living spec"},
 		{"Write", "development/changes/add-wave/change.md", "", false, ""},
 		{"Write", "development/changes/add-wave/design.md", "", false, ""},
@@ -177,8 +181,9 @@ func TestStopHook(t *testing.T) {
 		p := startedWave(t)
 		d := StopHook(ctx(), stopPayload(p.Root, "SubagentStop", false), RunOptions{})
 		require.True(t, d.Block)
-		require.FileExists(t, filepath.Join(p.StopGateDir(), "sess-1-agent-7.json"))
-		require.NoFileExists(t, filepath.Join(p.StopGateDir(), "sess-1.json"),
+		require.FileExists(t, filepath.Join(p.HooksDir(), "sess-1-agent-7.json"))
+		require.FileExists(t, filepath.Join(p.Root, "_apex", "state", "hooks", "sess-1-agent-7.json"))
+		require.NoFileExists(t, filepath.Join(p.HooksDir(), "sess-1.json"),
 			"the main-session record is what ape task reads; a sub-agent's must not land there")
 	})
 	t.Run("the hook writes nothing tracked", func(t *testing.T) {
@@ -296,6 +301,7 @@ func TestHooks_IgnoreABareDevelopmentFolder(t *testing.T) {
 	require.NotEqual(t, root, FindRoot(sub), "development/ alone is not a marker")
 	require.False(t, StopHook(ctx(), stopPayload(sub, "Stop", false), RunOptions{}).Block)
 	require.NoDirExists(t, filepath.Join(root, "development", ".apex"))
+	require.NoDirExists(t, filepath.Join(root, "_apex", "state"))
 
 	require.NoError(t, os.WriteFile(filepath.Join(root, "development", "project.md"), []byte("# x\n"), 0o644))
 	require.Equal(t, root, FindRoot(sub), "a development/project.md is")

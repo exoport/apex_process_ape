@@ -47,7 +47,7 @@ func (p *Project) snapshot(ctx context.Context) treeSnapshot {
 		if code[0] == 'R' || code[0] == 'C' {
 			i++ // -z puts a rename's source in the next entry
 		}
-		if p.inDev(path) {
+		if p.notCode(path) {
 			continue
 		}
 		if code == "??" {

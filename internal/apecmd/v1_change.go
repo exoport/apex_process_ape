@@ -177,7 +177,7 @@ func newChangeStartCmd() *cobra.Command {
   3. records base_sha (HEAD) and started_at (kept when resuming a blocked change)
   4. runs every check verify will run once, as the baseline (which were already green):
      the command tasks and the effective spec's scenario checks; from the project root
-     with sh -c; output under development/.apex/logs/<id>/
+     with sh -c; output under _apex/state/logs/<id>/
   5. sets in-progress, freezes the plan (SHA-256 of change.md outside ## Why and ## Notes), fingerprints
      the spec block of every requirement it MODIFIES or REMOVES, and commits state.json
      ("apex: <id> in-progress")
@@ -217,7 +217,7 @@ spec — the spec as it will be once this change is archived: each current requi
 change does not MODIFY or REMOVE (regression), plus the scenarios of its own ADDED and
 MODIFIED blocks. human-review checks are not run. A command shared by several checks runs
 once. Results (sha, exit, seconds, output sha256; kind, capability, requirement, scenario
-for scenario checks) are recorded in state.json; output under development/.apex/logs/<id>/.
+for scenario checks) are recorded in state.json; output under _apex/state/logs/<id>/.
 What a check leaves in the tree outside development/ — files it created, tracked files it
 changed — is undone after it and reported (JSON "stray_files"); files that were there
 before it ran are never touched.

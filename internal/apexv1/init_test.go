@@ -21,7 +21,7 @@ func TestInit_Greenfield(t *testing.T) {
 	require.NoError(t, err)
 	for _, want := range []string{
 		"_apex/config.yaml", "development/project.md", "development/roadmap.md", "AGENTS.md", "CLAUDE.md",
-		"development/specs/", "development/changes/", "development/archive/", "development/decisions/", "development/.apex/project.json",
+		"development/specs/", "development/changes/", "development/archive/", "development/decisions/", "_apex/state/", "_apex/state/.gitignore", "_apex/state/project.json",
 	} {
 		require.Contains(t, res.Created, want)
 	}
@@ -32,8 +32,13 @@ func TestInit_Greenfield(t *testing.T) {
 	clean(t, p, "project init")
 	require.Equal(t, "@AGENTS.md\n", read(t, p, "CLAUDE.md"))
 	require.FileExists(t, filepath.Join(root, filepath.FromSlash("development/specs/.gitkeep")))
-	require.Equal(t, "logs/\nstop-gate/\nruns/\n", read(t, p, "development/.apex/.gitignore"),
-		"run records (D16) are ignored by the list a wholesale `git add development/` honours")
+	// Backlog 26: a whitelist, so anything ape adds there later is ignored
+	// by default; init commits it, and project.json stays local.
+	require.Equal(t, "*\n!.gitignore\n!milestones.json\n!decisions.json\n", read(t, p, "_apex/state/.gitignore"))
+	committed := run(t, root, "show", "--name-only", "--format=", "HEAD")
+	require.Contains(t, committed, "_apex/state/.gitignore")
+	require.NotContains(t, committed, "project.json")
+	require.NoDirExists(t, filepath.Join(root, "development", ".apex"), "the old state folder is not made")
 	cfg, err := LoadConfig(root)
 	require.NoError(t, err)
 	require.Equal(t, filepath.Base(root), cfg.ProjectName)
@@ -80,7 +85,7 @@ func TestInit_BrownfieldKeepsWhatExists(t *testing.T) {
 	require.Equal(t, []string{"CLAUDE.md"}, res.Amended)
 	require.Contains(t, read(t, p, "docs/dev/project.md"), "# greeter")
 	var rec map[string]any
-	require.NoError(t, json.Unmarshal([]byte(read(t, p, "docs/dev/.apex/project.json")), &rec))
+	require.NoError(t, json.Unmarshal([]byte(read(t, p, "_apex/state/project.json")), &rec))
 	require.Equal(t, true, rec["brownfield"])
 
 	var settings map[string]any

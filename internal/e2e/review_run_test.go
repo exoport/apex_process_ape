@@ -150,9 +150,9 @@ func TestReviewRun_FreshSessionRecordsTheVerdict(t *testing.T) {
 	require.Contains(t, string(seen), "parent=task/outer-run", "the requesting session is recorded")
 	require.NotContains(t, string(seen), "session=task/outer-run", "the review is its own session, not the caller's")
 
-	_, err = os.Stat(filepath.Join(project, "development", ".apex", "runs", "tasks", "apex-review", "latest", "manifest.yaml"))
+	_, err = os.Stat(filepath.Join(project, "_apex", "state", "runs", "tasks", "apex-review", "latest", "manifest.yaml"))
 	require.NoError(t, err, "the review session's cost is its own manifest")
-	require.NoFileExists(t, filepath.Join(project, "development", ".apex", "logs", "add-wave", "review-run.json"), "settled and cleared")
+	require.NoFileExists(t, filepath.Join(project, "_apex", "state", "logs", "add-wave", "review-run.json"), "settled and cleared")
 	status, err := exec.Command("git", "-C", project, "status", "--porcelain").Output()
 	require.NoError(t, err)
 	require.Empty(t, strings.TrimSpace(string(status)))
@@ -183,7 +183,7 @@ func TestReviewRun_WaitAgainAttaches(t *testing.T) {
 	require.Equal(t, 75, code)
 	out, code := runApe(t, ape, project, env, "change", "review", "add-wave", "--run", "--wait", "90s")
 	require.Equal(t, 0, code, out)
-	handles, err := filepath.Glob(filepath.Join(project, "development", ".apex", "runs", "detached", "*.json"))
+	handles, err := filepath.Glob(filepath.Join(project, "_apex", "state", "runs", "detached", "*.json"))
 	require.NoError(t, err)
 	require.Len(t, handles, 1, "one review session, not two")
 }
@@ -203,7 +203,7 @@ func TestReviewRun_RefusedInsideAReviewSession(t *testing.T) {
 func TestReviewRun_ModelAndEffort(t *testing.T) {
 	launchOf := func(t *testing.T, project string) map[string]any {
 		t.Helper()
-		data, err := os.ReadFile(filepath.Join(project, "development", ".apex", "runs", "tasks", "apex-review", "latest", "manifest.yaml"))
+		data, err := os.ReadFile(filepath.Join(project, "_apex", "state", "runs", "tasks", "apex-review", "latest", "manifest.yaml"))
 		require.NoError(t, err)
 		var m pipeline.Manifest
 		require.NoError(t, yaml.Unmarshal(data, &m))

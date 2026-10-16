@@ -17,7 +17,7 @@ import (
 const EnvReview = "APE_REVIEW"
 
 // ReviewRun is ape's record of one review session it started:
-// development/.apex/logs/<id>/review-run.json (gitignored).
+// _apex/state/logs/<id>/review-run.json (gitignored).
 type ReviewRun struct {
 	Change     string `json:"change"`
 	DetachedID string `json:"detached_id"`
@@ -55,6 +55,7 @@ func (p *Project) SaveReviewRun(r *ReviewRun) error {
 	if err != nil {
 		return err
 	}
+	p.ensureState()
 	return writeFileAtomic(p.ReviewRunPath(r.Change), string(data)+"\n")
 }
 
@@ -107,7 +108,7 @@ func (p *Project) reviewMayTouch(id, rel string) bool {
 	rel = strings.TrimPrefix(rel, "./")
 	changeDir := p.DevRel + "/changes/" + id + "/"
 	return rel == changeDir+"review.md" || rel == changeDir+"state.json" ||
-		strings.HasPrefix(rel, p.DevRel+"/.apex/")
+		strings.HasPrefix(rel, p.StateRel()+"/")
 }
 
 // SettleReviewRun is the post-run assertion. A review session may leave

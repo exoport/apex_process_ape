@@ -57,7 +57,7 @@ func TestMilestoneLifecycle(t *testing.T) {
 	require.Equal(t, 127, g.Run.Exit)
 	require.True(t, g.ResultChanged)
 	require.Equal(t, "apex: M1 gate red", subjects(t, p)[0])
-	require.Equal(t, "development/.apex/milestones.json", run(t, p.Root, "show", "--name-only", "--format=", "HEAD"))
+	require.Equal(t, "_apex/state/milestones.json", run(t, p.Root, "show", "--name-only", "--format=", "HEAD"))
 	clean(t, p, "the first gate run")
 	recs, err := p.LoadMilestoneRecords()
 	require.NoError(t, err)
@@ -94,7 +94,7 @@ func TestMilestoneLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, MilestoneDone, g.Status)
 	require.Equal(t, "apex: M1 done", subjects(t, p)[0])
-	require.ElementsMatch(t, []string{"development/roadmap.md", "development/.apex/milestones.json"},
+	require.ElementsMatch(t, []string{"development/roadmap.md", "_apex/state/milestones.json"},
 		strings.Split(run(t, p.Root, "show", "--name-only", "--format=", "HEAD"), "\n"),
 		"the done status and the green result land in one commit")
 	clean(t, p, "milestone close")

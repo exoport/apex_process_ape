@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +26,7 @@ func fixture(t *testing.T, files map[string]string) *Project {
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 		require.NoError(t, os.WriteFile(path, []byte(content), 0o755))
 	}
-	for _, d := range []string{"development/specs", "development/changes", "development/archive", "development/decisions", "development/.apex"} {
+	for _, d := range []string{"development/specs", "development/changes", "development/archive", "development/decisions", "_apex/state"} {
 		require.NoError(t, os.MkdirAll(filepath.Join(root, d), 0o755))
 	}
 	run(t, root, "init", "-q", "-b", "main")
@@ -130,7 +131,7 @@ func baseFiles() map[string]string {
 		"AGENTS.md":                          "# AGENTS.md\n",
 		"CLAUDE.md":                          "@AGENTS.md\n",
 		"greet.sh":                           "#!/bin/sh\necho Hello $1\n",
-		"development/.apex/.gitignore":       "logs/\nstop-gate/\n",
+		"_apex/state/.gitignore":             runlog.V1StateGitignore,
 	}
 }
 

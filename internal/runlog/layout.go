@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
-	"gopkg.in/yaml.v3"
 )
 
 // The on-disk layout of everything ape writes into a project, in one
@@ -101,64 +100,66 @@ func OutputRoot(projectRoot string) string {
 }
 
 // ApeRoot is the subtree ape owns: {output_folder}/ape — or, in an APEX
-// v1 project, {development_folder}/.apex/runs.
+// v1 project, _apex/state/runs.
 //
 // Why v1 differs (trial decision D16): models treat the output folder as
 // scratch and delete it, and with it every manifest, transcript and log
 // the run's cost and audit trail depend on. A v1 project already has a
-// folder only ape writes, development/.apex/ (the edit hook denies it to
-// models), so the run records live there. The directory ignores itself
-// (a `.gitignore` of `*` inside it), so runs never dirty the tree and no
-// tracked file has to change for an already-initialised project.
+// folder only ape writes, _apex/state/ (the edit hook denies it to
+// models, and `ape framework update` never touches it), so the run records
+// live there. Its .gitignore ignores everything but ape's two tracked
+// records, so runs never dirty the tree.
 func ApeRoot(projectRoot string) string {
-	if apexDir, ok := v1ApexDir(projectRoot); ok {
-		root := filepath.Join(apexDir, V1RunsDirName)
-		ensureSelfIgnored(root)
-		return root
+	if state, ok := v1StateDir(projectRoot); ok {
+		EnsureV1State(projectRoot)
+		return filepath.Join(state, V1RunsDirName)
 	}
 	return filepath.Join(OutputRoot(projectRoot), ApeDirName)
 }
 
 // V1RunsDirName is the run-records directory inside a v1 project's
-// development/.apex/.
+// _apex/state/.
 const V1RunsDirName = "runs"
 
-// v1ApexDir returns {development_folder}/.apex when projectRoot is an APEX
-// v1 project — that directory exists — reading development_folder from
-// _apex/config.yaml (default "development"). Read here, not through
-// internal/apexv1, which depends on this package.
-func v1ApexDir(projectRoot string) (string, bool) {
-	dev := "development"
-	if data, err := os.ReadFile(filepath.Join(projectRoot, apexcfg.DirName, "config.yaml")); err == nil {
-		var cfg struct {
-			DevelopmentFolder string `yaml:"development_folder"` //nolint:tagliatelle // the framework's config key
-		}
-		if yaml.Unmarshal(data, &cfg) == nil {
-			if d := strings.Trim(filepath.ToSlash(cfg.DevelopmentFolder), "/"); d != "" {
-				dev = d
-			}
-		}
-	}
-	apexDir := filepath.Join(projectRoot, filepath.FromSlash(dev), ".apex")
-	if st, err := os.Stat(apexDir); err == nil && st.IsDir() {
-		return apexDir, true
+// V1StateDirName is ape's state directory inside _apex/ in an APEX v1
+// project (backlog 26–28): milestones.json and decisions.json, tracked;
+// logs/, runs/ and hooks/, ignored. `ape project init` creates it.
+const V1StateDirName = "state"
+
+// V1StateGitignore is _apex/state/.gitignore: a whitelist, so a file ape
+// adds there later is ignored unless it is named here.
+const V1StateGitignore = "*\n!.gitignore\n!milestones.json\n!decisions.json\n"
+
+// V1StateDir is a v1 project's _apex/state/, whether or not it exists.
+func V1StateDir(projectRoot string) string {
+	return filepath.Join(projectRoot, apexcfg.DirName, V1StateDirName)
+}
+
+// v1StateDir returns _apex/state when projectRoot is an APEX v1 project:
+// that directory exists. An older ape's {development_folder}/.apex/ is
+// not a marker here; `ape project check` reports it.
+func v1StateDir(projectRoot string) (string, bool) {
+	state := V1StateDir(projectRoot)
+	if st, err := os.Stat(state); err == nil && st.IsDir() {
+		return state, true
 	}
 	return "", false
 }
 
-// ensureSelfIgnored creates root with a `.gitignore` of `*`, so git
-// ignores everything in it, the .gitignore included. Best-effort: a
-// failure here surfaces as the writer's own error when it creates its run
-// directory.
-func ensureSelfIgnored(root string) {
-	marker := filepath.Join(root, ".gitignore")
+// EnsureV1State creates _apex/state/ with its whitelist .gitignore when
+// either is absent, so nothing ape writes there can dirty the tree. An
+// existing .gitignore is left as it is. Best-effort: a failure surfaces
+// as the writer's own error.
+func EnsureV1State(projectRoot string) {
+	state := V1StateDir(projectRoot)
+	marker := filepath.Join(state, ".gitignore")
 	if _, err := os.Stat(marker); err == nil {
 		return
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := os.MkdirAll(state, 0o755); err != nil {
 		return
 	}
-	_ = os.WriteFile(marker, []byte("# ape run records (manifests, transcripts, logs); never tracked\n*\n"), 0o600)
+	_ = os.WriteFile(marker, []byte(V1StateGitignore), 0o644) //nolint:gosec // a .gitignore, meant to be committed
 }
 
 // PipelinesRoot holds one directory per pipeline, each holding run dirs.

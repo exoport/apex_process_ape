@@ -49,9 +49,10 @@ func CurrentBranch(ctx context.Context, dir string) string {
 }
 
 // codeMovedSince reports whether anything outside the development folder
-// differs between sha and HEAD. Commits that only record planning
-// artifacts (review.md, state.json, the next change's draft) do not make a
-// verify or a review stale; a commit to code does.
+// and _apex/state/ differs between sha and HEAD. Commits that only record
+// planning artifacts (review.md, state.json, the next change's draft) or
+// ape's own records (milestones.json, decisions.json) do not make a verify
+// or a review stale; a commit to code does.
 func (p *Project) codeMovedSince(ctx context.Context, sha string) (moved bool, files []string, err error) {
 	head := HeadSHA(ctx, p.Root)
 	if sha == "" || head == "" {
@@ -65,7 +66,7 @@ func (p *Project) codeMovedSince(ctx context.Context, sha string) (moved bool, f
 		return true, nil, err
 	}
 	for f := range strings.SplitSeq(out, "\n") {
-		if f == "" || p.inDev(f) {
+		if f == "" || p.notCode(f) {
 			continue
 		}
 		files = append(files, f)
@@ -73,16 +74,20 @@ func (p *Project) codeMovedSince(ctx context.Context, sha string) (moved bool, f
 	return len(files) > 0, files, nil
 }
 
-// inDev reports whether a project-relative path is inside the development
-// folder.
-func (p *Project) inDev(rel string) bool {
+// notCode reports whether a project-relative path is planning or ape's own
+// record rather than code: inside the development folder, or inside
+// _apex/state/.
+func (p *Project) notCode(rel string) bool {
 	rel = strings.TrimPrefix(rel, "./")
-	return rel == p.DevRel || strings.HasPrefix(rel, p.devPrefix())
+	state := p.StateRel()
+	return rel == p.DevRel || strings.HasPrefix(rel, p.devPrefix()) ||
+		rel == state || strings.HasPrefix(rel, state+"/")
 }
 
 // dirtyCode lists uncommitted paths (tracked changes and untracked files
-// git does not ignore) outside the development folder. A verify over such
-// a tree did not run "at a sha": its green belongs to no commit.
+// git does not ignore) outside the development folder and _apex/state/. A
+// verify over such a tree did not run "at a sha": its green belongs to no
+// commit.
 func (p *Project) dirtyCode(ctx context.Context) ([]string, error) {
 	out, err := gitRaw(ctx, p.Root, "status", "--porcelain=v1", "--untracked-files=normal")
 	if err != nil {
@@ -100,7 +105,7 @@ func (p *Project) dirtyCode(ctx context.Context) ([]string, error) {
 			path = path[i+4:]
 		}
 		path = strings.Trim(path, "\"")
-		if p.inDev(path) {
+		if p.notCode(path) {
 			continue
 		}
 		dirty = append(dirty, path)

@@ -138,13 +138,20 @@ var stateJSONRe = regexp.MustCompile(`^changes/[^/]+/state\.json$`)
 // protectedReason names why ape alone may write path, or "" when a model
 // may edit it.
 func (p *Project) protectedReason(abs string) string {
-	dev := p.Dev()
+	dev, state := p.Dev(), p.StateDir()
 	// Resolve symlinked parents so a link into specs/ is still specs/.
 	if resolved, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
 		if resolvedDev, err := filepath.EvalSymlinks(dev); err == nil {
 			dev = resolvedDev
 		}
+		if resolvedRoot, err := filepath.EvalSymlinks(p.Root); err == nil {
+			state = filepath.Join(resolvedRoot, filepath.FromSlash(p.StateRel()))
+		}
 		abs = filepath.Join(resolved, filepath.Base(abs))
+	}
+	if rel, err := filepath.Rel(state, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return p.StateRel() + "/" + strings.TrimPrefix(filepath.ToSlash(rel), ".") +
+			" is ape's own record (gate runs, logs, hook verdicts) — use the ape command that records it; specs change only through ape change archive"
 	}
 	rel, err := filepath.Rel(dev, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -159,8 +166,6 @@ func (p *Project) protectedReason(abs string) string {
 		return devRel + "/" + rel + " is an archived change: the archive is written only by `ape change archive` — specs change only through ape change archive"
 	case stateJSONRe.MatchString(rel):
 		return devRel + "/" + rel + " is written only by ape (`ape change start|verify|review|accept|block|archive`) — specs change only through ape change archive"
-	case rel == ".apex" || strings.HasPrefix(rel, ".apex/"):
-		return devRel + "/" + rel + " is ape's own record (gate runs, logs) — use the ape command that records it; specs change only through ape change archive"
 	}
 	return ""
 }
@@ -178,7 +183,7 @@ const (
 	StopBlock   = "block"
 )
 
-// StopRecord is development/.apex/stop-gate/<key>.json: the consecutive
+// StopRecord is _apex/state/hooks/<key>.json: the consecutive
 // block count and the latest verdict. `ape task` reads the main session's
 // record to learn whether a Stop it saw actually ended the turn.
 type StopRecord struct {
@@ -216,7 +221,7 @@ func (p *Project) stopRecordPath(sessionID, agentID string) string {
 	if agentID != "" {
 		key += "-" + sanitizeKey(agentID)
 	}
-	return filepath.Join(p.StopGateDir(), key+".json")
+	return filepath.Join(p.HooksDir(), key+".json")
 }
 
 // stopLogPath is the main session's append-only verdict log.
@@ -231,6 +236,7 @@ func (p *Project) appendStopLog(path string, r StopRecord) {
 	if err != nil {
 		return
 	}
+	p.ensureState()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return
 	}
@@ -285,6 +291,7 @@ func (p *Project) saveStopRecord(path string, r StopRecord) {
 	if err != nil {
 		return
 	}
+	p.ensureState()
 	_ = writeFileAtomic(path, string(data)+"\n")
 }
 

@@ -5,8 +5,8 @@
 // every time, so it is code.
 //
 // The contract this implements is the v1 trial brief (r1, 2026-10-15). Only
-// ape writes state.json, development/.apex/ and the specs/ tree; models
-// write change.md, design.md, project.md and the roadmap's prose.
+// ape writes state.json, _apex/state/ and the specs/ tree; models write
+// change.md, design.md, project.md and the roadmap's prose.
 package apexv1
 
 import (
@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"gopkg.in/yaml.v3"
 )
 
@@ -113,9 +114,9 @@ func Open(root string) (*Project, error) {
 }
 
 // FindRoot walks up from dir to the nearest directory holding
-// _apex/config.yaml or a v1 development folder (development/.apex or
-// development/project.md), else the git top level the walk passes, else
-// dir itself. A bare development/ folder is not a marker: plenty of repos
+// _apex/config.yaml, _apex/state/ or a v1 development folder
+// (development/project.md, or an older ape's development/.apex), else the
+// git top level the walk passes, else dir itself. A bare development/ folder is not a marker: plenty of repos
 // have one for other reasons (ape's own does).
 func FindRoot(dir string) string {
 	abs, err := filepath.Abs(dir)
@@ -125,7 +126,7 @@ func FindRoot(dir string) string {
 	gitTop := ""
 	for cur := abs; ; {
 		dev := filepath.Join(cur, DefaultDevFolder)
-		if fileExists(ConfigPath(cur)) || dirExists(filepath.Join(dev, ".apex")) || fileExists(filepath.Join(dev, "project.md")) {
+		if fileExists(ConfigPath(cur)) || dirExists(runlog.V1StateDir(cur)) || dirExists(filepath.Join(dev, ".apex")) || fileExists(filepath.Join(dev, "project.md")) {
 			return cur
 		}
 		if gitTop == "" && fileOrDirExists(filepath.Join(cur, ".git")) {
@@ -188,8 +189,31 @@ func (p *Project) DecisionsDir() string {
 	return filepath.Join(p.Dev(), "decisions")
 }
 
-func (p *Project) ApexDir() string {
+// StateDir is _apex/state/, ape's own records (backlog 26–28):
+// milestones.json and decisions.json are tracked; logs/, runs/ and hooks/
+// are ignored by its whitelist .gitignore. The path is runlog's, the one
+// place it is decided.
+func (p *Project) StateDir() string {
+	return runlog.V1StateDir(p.Root)
+}
+
+// StateRel is StateDir relative to the project root, slash-separated.
+func (p *Project) StateRel() string { return p.Rel(p.StateDir()) }
+
+// OldStateDir is {development_folder}/.apex/, where an older ape kept its
+// state. Read only to recognise the project (IsV1, FindRoot) and by
+// `project check`, which reports it.
+func (p *Project) OldStateDir() string {
 	return filepath.Join(p.Dev(), ".apex")
+}
+
+// ensureState creates _apex/state/ and its whitelist .gitignore before ape
+// writes an ignored record there, so the record cannot dirty the tree.
+func (p *Project) ensureState() { runlog.EnsureV1State(p.Root) }
+
+// StateGitignore is the path of _apex/state/.gitignore.
+func (p *Project) StateGitignore() string {
+	return filepath.Join(p.StateDir(), ".gitignore")
 }
 
 func (p *Project) ChangeDir(id string) string {
@@ -209,19 +233,28 @@ func (p *Project) StateFile(id string) string {
 }
 
 func (p *Project) MilestonesJSON() string {
-	return filepath.Join(p.ApexDir(), "milestones.json")
+	return filepath.Join(p.StateDir(), "milestones.json")
 }
 
+// ProjectJSON is init's record (initialized_at, brownfield, base_sha):
+// ignored, as nothing reads it back.
 func (p *Project) ProjectJSON() string {
-	return filepath.Join(p.ApexDir(), "project.json")
+	return filepath.Join(p.StateDir(), "project.json")
+}
+
+// LogsDir holds the check output of every run of checks.
+func (p *Project) LogsDir() string {
+	return filepath.Join(p.StateDir(), "logs")
 }
 
 func (p *Project) LogDir(id string) string {
-	return filepath.Join(p.ApexDir(), "logs", id)
+	return filepath.Join(p.LogsDir(), id)
 }
 
-func (p *Project) StopGateDir() string {
-	return filepath.Join(p.ApexDir(), "stop-gate")
+// HooksDir holds the Stop/SubagentStop hook's per-session verdict records
+// and logs.
+func (p *Project) HooksDir() string {
+	return filepath.Join(p.StateDir(), "hooks")
 }
 
 func (p *Project) AgentsMD() string {
@@ -236,10 +269,11 @@ func (p *Project) SettingsJSON() string {
 	return filepath.Join(p.Root, ".claude", "settings.json")
 }
 
-// IsV1 reports whether the project has a v1 development folder: one
-// `ape project init` made (.apex/) or one with a project.md.
+// IsV1 reports whether the project is an APEX v1 one: `ape project init`
+// made it (_apex/state/), its development folder has a project.md, or an
+// older ape made it (development/.apex/, which `project check` reports).
 func (p *Project) IsV1() bool {
-	return dirExists(p.ApexDir()) || fileExists(p.ProjectMD())
+	return dirExists(p.StateDir()) || dirExists(p.OldStateDir()) || fileExists(p.ProjectMD())
 }
 
 func (p *Project) devPrefix() string {

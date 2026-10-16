@@ -66,7 +66,7 @@ type MilestoneRecord struct {
 	Since  *GateRun `json:"since"`
 }
 
-// MilestoneRecords is development/.apex/milestones.json.
+// MilestoneRecords is _apex/state/milestones.json.
 type MilestoneRecords map[string]*MilestoneRecord
 
 // LoadMilestoneRecords reads milestones.json; absent is empty.
@@ -90,11 +90,12 @@ func (p *Project) saveMilestoneRecords(r MilestoneRecords) error {
 	if err != nil {
 		return err
 	}
+	p.ensureState()
 	return writeFileAtomic(p.MilestonesJSON(), string(data)+"\n")
 }
 
 func (p *Project) lastGatePath(id string) string {
-	return filepath.Join(p.ApexDir(), "logs", "gate-"+id+".json")
+	return filepath.Join(p.LogsDir(), "gate-"+id+".json")
 }
 
 // LastGateRun is the milestone's most recent gate run: the gitignored
@@ -255,7 +256,7 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	if m.Gate == "" {
 		return nil, &FailError{Code: "milestone.no-gate", Msg: id + " has no Gate: line"}
 	}
-	logPath := filepath.Join(p.ApexDir(), "logs", "gate-"+id+".log")
+	logPath := filepath.Join(p.LogsDir(), "gate-"+id+".log")
 	gate := p.RunChecks(ctx, filepath.Dir(logPath), "", []PlannedCheck{{Ref: "gate-" + id, Kind: "gate", Cmd: m.Gate}}, opt)[0]
 	r := gate
 	run := GateRun{
@@ -265,7 +266,7 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	// The whole spec runs as the regression suite beside the gate.
 	spec := p.EffectiveSpecChecks(nil)
 	run.SpecChecks = len(spec)
-	results := p.RunChecks(ctx, filepath.Join(p.ApexDir(), "logs", "gate-"+id), "", spec, opt)
+	results := p.RunChecks(ctx, filepath.Join(p.LogsDir(), "gate-"+id), "", spec, opt)
 	run.StrayFiles = StrayFiles(append([]CheckResult{gate}, results...))
 	for i := range results {
 		if results[i].Exit != 0 {

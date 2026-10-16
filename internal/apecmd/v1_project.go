@@ -38,7 +38,10 @@ func newProjectInitCmd() *cobra.Command {
   development/changes/               the changes in flight
   development/archive/               archived and abandoned changes
   development/decisions/
-  development/.apex/                 ape's own records (never edited by a model)
+  _apex/state/                       ape's own records (never edited by a model; never touched
+                                     by ape framework update): milestones.json, decisions.json
+                                     tracked; logs/, runs/, hooks/ ignored. Its .gitignore is a
+                                     whitelist (*, !.gitignore, !milestones.json, !decisions.json)
 
 Hooks merged into .claude/settings.json (existing keys and hooks are kept):
   SessionStart          ape hook session-start
@@ -48,7 +51,7 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
 Everything init wrote (and settings.json when it merged hooks) is committed as
 "apex: project init"; files that existed before are not touched and not committed.
 
---brownfield adds nothing; it records in development/.apex/project.json that the
+--brownfield adds nothing; it records in _apex/state/project.json (ignored) that the
 project existed before APEX.
 
 Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`,
@@ -108,7 +111,10 @@ func newProjectCheckCmd() *cobra.Command {
                            Enforced by
   changes/<id>/            every non-archived change, as ` + "`ape change check`" + `
   layout                   no development/changes/archive/ (an older ape's archive: move
-                           its folders to development/archive/)
+                           its folders to development/archive/), no development/.apex/
+                           (an older ape's state: move milestones.json and decisions.json
+                           to _apex/state/, delete it; ` + "`ape project init`" + ` then adds
+                           _apex/state/.gitignore)
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
 		Example: "  ape project check\n  ape project check --json",

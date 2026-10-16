@@ -15,10 +15,10 @@ func newMilestoneCmd() *cobra.Command {
 		Long: `Milestones live in development/roadmap.md as "## M<n> — <title>" sections.
 Their Status: line is written only by ape: proposed → approved (by <who> <ts>) →
 done (<ts> <sha>). Every one of those writes is committed by ape (roadmap.md, plus
-development/.apex/milestones.json when it exists) as "apex: <M> proposed|approved|done"
+_apex/state/milestones.json when it exists) as "apex: <M> proposed|approved|done"
 with trailer "Milestone: <M>". milestones.json holds each gate's result (green|red)
 and is committed, as "apex: <M> gate green|red", only when that result changes; the
-latest run of any result is in the gitignored development/.apex/logs/gate-<M>.json.
+latest run of any result is in the gitignored _apex/state/logs/gate-<M>.json.
 No milestone command leaves the tree dirty.`,
 	}
 	cmd.AddCommand(newMilestoneNewCmd(), newMilestoneApproveCmd(), newMilestoneGateCmd(), newMilestoneCloseCmd())
@@ -130,11 +130,11 @@ func newMilestoneGateCmd() *cobra.Command {
 		Short: "Run the milestone's gate and record the result",
 		Long: `Run the milestone's Gate: command from the project root, and every scenario check of
 the whole spec beside it as the regression suite (human-review not run; output under
-development/.apex/logs/gate-<M>/). The gate is green only when both pass. Files the gate
+_apex/state/logs/gate-<M>/). The gate is green only when both pass. Files the gate
 or a check leaves outside development/ are undone and reported ("stray_files"). The run (exit, sha, time,
-output hash, last lines) goes to development/.apex/logs/gate-<M>.json (gitignored; shown by
+output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; shown by
 ` + "`ape status`" + `). When the result differs from the recorded one (green vs red), or is
-the first, development/.apex/milestones.json is updated and committed as
+the first, _apex/state/milestones.json is updated and committed as
 "apex: <M> gate green|red". Does not change the milestone's status — ` + "`ape milestone close`" + ` does.
 
 Exit codes: 0 gate green · 1 gate red (last output lines shown) or no such milestone · 2 usage.`,
@@ -282,7 +282,7 @@ func newDecisionAcceptCmd() *cobra.Command {
 		Use:   "accept <ADR-NNNN> --by <who>",
 		Short: "Accept a proposed ADR and fix its text",
 		Long: `Set a proposed ADR's Status to accepted and record the text it was accepted with in
-development/.apex/decisions.json; both are committed as "apex: ADR-NNNN accepted". From
+_apex/state/decisions.json; both are committed as "apex: ADR-NNNN accepted". From
 then on ` + "`ape project check`" + ` fails if the ADR's text (everything but its Status line)
 changes: supersede it instead. An ADR accepted by hand is held to the text git first
 committed it accepted with.

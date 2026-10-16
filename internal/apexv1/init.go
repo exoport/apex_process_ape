@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/exoport/apex_process_ape/internal/runlog"
 )
 
 // Hook commands `ape project init` writes. Literal `ape`: inside an
@@ -136,7 +138,7 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 			return nil, err
 		}
 	}
-	if err := dir(p.ApexDir(), false); err != nil {
+	if err := dir(p.StateDir(), false); err != nil {
 		return nil, err
 	}
 	steps := []struct{ path, content string }{
@@ -144,7 +146,9 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 		{p.RoadmapMD(), "# Roadmap\n"},
 		{p.AgentsMD(), agentsSkeleton},
 		{p.ClaudeMD(), "@AGENTS.md\n"},
-		{filepath.Join(p.ApexDir(), ".gitignore"), "logs/\nstop-gate/\nruns/\n"},
+		// A whitelist: whatever ape adds to _apex/state/ later is ignored
+		// unless it is named here.
+		{p.StateGitignore(), runlog.V1StateGitignore},
 	}
 	for _, s := range steps {
 		if err := write(s.path, s.content); err != nil {
@@ -181,14 +185,7 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 		return nil, err
 	}
 	res.HooksAdded = added
-	// Committed as one `apex: project init`, so the tree is clean after
-	// it (D11). Only what init itself wrote: a brownfield repo's own
-	// dirty files stay as they were.
-	paths := append(append([]string(nil), res.Created...), res.Amended...)
-	if len(added) > 0 {
-		paths = append(paths, p.Rel(p.SettingsJSON()))
-	}
-	if len(paths) > 0 {
+	if paths := p.initCommitPaths(res); len(paths) > 0 {
 		sha, err := p.commitRecord(ctx, "apex: project init", "", paths...)
 		if err != nil {
 			return res, &FailError{Code: CodeCommitFailed, Msg: "skeleton written but its commit failed: " + err.Error()}
@@ -196,6 +193,27 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 		res.Commit = sha
 	}
 	return res, nil
+}
+
+// initCommitPaths is what `apex: project init` commits, so the tree is
+// clean after it (D11): only what init itself wrote — a brownfield repo's
+// own dirty files stay as they were. project.json is ignored (the
+// whitelist), so it is not staged; the whitelist always is, in case
+// another ape command wrote it before init ran.
+func (p *Project) initCommitPaths(res *InitResult) []string {
+	var paths []string
+	for _, c := range append(append([]string(nil), res.Created...), res.Amended...) {
+		if c != p.Rel(p.ProjectJSON()) {
+			paths = append(paths, c)
+		}
+	}
+	if fileExists(p.StateGitignore()) {
+		paths = append(paths, p.Rel(p.StateGitignore()))
+	}
+	if len(res.HooksAdded) > 0 {
+		paths = append(paths, p.Rel(p.SettingsJSON()))
+	}
+	return paths
 }
 
 func yamlScalar(s string) string {
