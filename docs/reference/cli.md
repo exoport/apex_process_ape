@@ -7192,8 +7192,8 @@ read from its transcripts, sub-agents included, every 30 s (sooner in its
 first half minute) — reaches it.
 The stop ends the run (exit 1) with termination kind "budget" in the run
 manifest (spent_usd, budget_usd, session_cost_usd) and is recorded under
-the milestone's "stops" in _apex/state/milestones.json, committed alone as
-"apex: <M> stopped: budget"; `ape status` shows it. Raising the Budget:
+the milestone's stops in _apex/state/limit-stops.json (ignored by git:
+nothing is committed, whichever branch the session was on); `ape status` shows it. Raising the Budget:
 line (a person's call) lets sessions start again. An unparseable
 _apex/config.yaml in a v1 project refuses every session (exit 2) rather
 than run it with no limits.

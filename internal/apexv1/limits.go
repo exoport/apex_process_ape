@@ -1,8 +1,10 @@
 package apexv1
 
 import (
-	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -101,38 +103,48 @@ func (s *LimitStop) Describe() string {
 	return "stopped (" + s.Reason + ") " + s.At + " run " + s.Run
 }
 
-// RecordLimitStop appends a stop to the milestone's record in
-// milestones.json and commits that file alone, "apex: <M> stopped:
-// <reason>" with trailer "Milestone: <M>". Only milestones.json: the
-// stopped session may have left other files uncommitted, and they are not
-// ape's to commit.
-func (p *Project) RecordLimitStop(ctx context.Context, milestone string, stop LimitStop) error {
-	recs, err := p.LoadMilestoneRecords()
+// LimitStopsJSON is _apex/state/limit-stops.json: milestone id → the
+// sessions ape stopped at a limit. Ignored by git, like attempts.json: a
+// stop is a run event, not a status change, and the stopped session may be
+// on a change branch (D38), where a commit to a milestone record would
+// break D11 (milestone commits stay on the base branch) and conflict at
+// the change's rebase. The run manifest (termination "budget") is the
+// run's own record of it.
+func (p *Project) LimitStopsJSON() string { return filepath.Join(p.StateDir(), "limit-stops.json") }
+
+func (p *Project) loadLimitStops() map[string][]LimitStop {
+	out := map[string][]LimitStop{}
+	data, err := os.ReadFile(p.LimitStopsJSON())
+	if err != nil {
+		return out
+	}
+	if json.Unmarshal(data, &out) != nil || out == nil {
+		return map[string][]LimitStop{}
+	}
+	return out
+}
+
+// RecordLimitStop appends a stop to the milestone's list in
+// limit-stops.json. It commits nothing.
+func (p *Project) RecordLimitStop(milestone string, stop LimitStop) error {
+	all := p.loadLimitStops()
+	all[milestone] = append(all[milestone], stop)
+	data, err := json.MarshalIndent(all, "", "  ")
 	if err != nil {
 		return err
 	}
-	rec := recs[milestone]
-	if rec == nil {
-		rec = &MilestoneRecord{}
-		recs[milestone] = rec
-	}
-	rec.Stops = append(rec.Stops, stop)
-	if err := p.saveMilestoneRecords(recs); err != nil {
-		return err
-	}
-	if _, err := p.commitRecord(ctx, "apex: "+milestone+" stopped: "+stop.Reason, "Milestone: "+milestone, p.Rel(p.MilestonesJSON())); err != nil {
-		return &FailError{Code: CodeCommitFailed, Msg: "milestones.json written but its commit failed: " + err.Error() + " — fix git (identity, lock) and commit " + p.Rel(p.MilestonesJSON())}
-	}
-	return nil
+	p.ensureState()
+	return writeFileAtomic(p.LimitStopsJSON(), string(data)+"\n")
 }
 
-// milestoneStops is the recorded limit stops of a milestone.
+// milestoneStops is the recorded limit stops of a milestone: those an
+// earlier build committed into milestones.json, then this checkout's.
 func (p *Project) milestoneStops(id string) []LimitStop {
-	recs, err := p.LoadMilestoneRecords()
-	if err != nil || recs[id] == nil {
-		return nil
+	var out []LimitStop
+	if recs, err := p.LoadMilestoneRecords(); err == nil && recs[id] != nil {
+		out = append(out, recs[id].Stops...)
 	}
-	return recs[id].Stops
+	return append(out, p.loadLimitStops()[id]...)
 }
 
 // approvedSince is when m was approved; zero when it was not.

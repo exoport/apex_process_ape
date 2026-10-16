@@ -85,11 +85,11 @@ func TestTaskLimits_Budget(t *testing.T) {
 	// completed); the stop's measured cost is what counts.
 	writeRun(t, p, "apex-apply", "20261015-140000-cccc", "2026-10-15T14:00:00Z", 0)
 	hit.Stop.Run = "20261015-140000-cccc"
-	require.NoError(t, p.RecordLimitStop(ctx(), "M1", hit.Stop))
-	require.Equal(t, "apex: M1 stopped: budget", subjects(t, p)[0])
-	require.Contains(t, run(t, p.Root, "log", "-1", "--format=%B"), "Milestone: M1")
-	require.Equal(t, []string{"_apex/state/milestones.json"},
-		strings.Fields(run(t, p.Root, "show", "--name-only", "--format=", "HEAD")), "the stop commits milestones.json alone")
+	head := run(t, p.Root, "rev-parse", "HEAD")
+	require.NoError(t, p.RecordLimitStop("M1", hit.Stop))
+	require.Equal(t, head, run(t, p.Root, "rev-parse", "HEAD"), "a stop commits nothing (D38)")
+	require.FileExists(t, p.LimitStopsJSON())
+	require.Empty(t, run(t, p.Root, "status", "--porcelain", "--", "_apex/state"), "limit-stops.json is ignored")
 
 	_, err = p.TaskLimits("apex-apply")
 	var fe *FailError
@@ -116,7 +116,7 @@ func TestTaskLimits_Budget(t *testing.T) {
 	recs, err := p.LoadMilestoneRecords()
 	require.NoError(t, err)
 	require.Equal(t, GateRed, recs["M1"].Result)
-	require.Len(t, recs["M1"].Stops, 1)
+	require.Len(t, p.milestoneStops("M1"), 1)
 
 	// A raised budget lets a session start again.
 	write(t, p, "development/roadmap.md", strings.Replace(roadmapApproved, "Budget: 30", "Budget: 50", 1))

@@ -94,7 +94,7 @@ func v1TaskManifest(t *testing.T, project string) pipeline.Manifest {
 
 // Backlog 30 (a) end to end: with limits.budget: enforce, ape task stops a
 // session whose live cost takes the milestone over its Budget:, records
-// why in the manifest and in milestones.json (committed), shows it in
+// why in the manifest and in the ignored limit-stops.json (no commit), shows it in
 // ape status, and then refuses to start another session.
 func TestTask_V1BudgetStopsTheSession(t *testing.T) {
 	for _, bin := range []string{"bash", "git"} {
@@ -119,16 +119,14 @@ func TestTask_V1BudgetStopsTheSession(t *testing.T) {
 	require.InDelta(t, 2.0, m.Termination.BudgetUSD, 0.001)
 	require.Contains(t, m.Termination.Message, "M1 budget reached")
 
-	require.Equal(t, "apex: M1 stopped: budget", gitOut(t, project, "log", "-1", "--format=%s"))
+	require.NotContains(t, gitOut(t, project, "log", "--format=%s"), "stopped", "a stop commits nothing (D38)")
 	require.Empty(t, gitOut(t, project, "status", "--porcelain"))
-	var recs map[string]struct {
-		Stops []map[string]any `json:"stops"`
-	}
-	data, err := os.ReadFile(filepath.Join(project, "_apex", "state", "milestones.json"))
+	var recs map[string][]map[string]any
+	data, err := os.ReadFile(filepath.Join(project, "_apex", "state", "limit-stops.json"))
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(data, &recs))
-	require.Len(t, recs["M1"].Stops, 1)
-	stop := recs["M1"].Stops[0]
+	require.Len(t, recs["M1"], 1)
+	stop := recs["M1"][0]
 	require.Equal(t, "budget", stop["reason"])
 	require.Equal(t, m.RunID, stop["run"])
 	require.Equal(t, "apex-foo", stop["skill"])

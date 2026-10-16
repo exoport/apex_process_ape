@@ -130,7 +130,7 @@ func (c *interactiveCore) liveSessionCost() float64 {
 // (committed alone), naming the stopped run, so `ape status` shows it and
 // the milestone's spend counts the session at its measured cost.
 // Best-effort beyond a warning: the run is over and already reported.
-func recordBudgetStop(ctx context.Context, projectRoot, skill, manifestDir string, w *v1BudgetWatch) {
+func recordBudgetStop(projectRoot, skill, manifestDir string, w *v1BudgetWatch) {
 	hit := w.stopped()
 	if hit == nil {
 		return
@@ -145,7 +145,7 @@ func recordBudgetStop(ctx context.Context, projectRoot, skill, manifestDir strin
 			}
 		}
 	}
-	if err := w.p.RecordLimitStop(context.WithoutCancel(ctx), w.limits.Milestone, stop); err != nil {
+	if err := w.p.RecordLimitStop(w.limits.Milestone, stop); err != nil {
 		fmt.Fprintf(os.Stderr, "⚠ budget stop not recorded in milestones.json: %v\n", err)
 	}
 }
