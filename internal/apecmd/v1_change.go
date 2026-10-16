@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/spf13/cobra"
@@ -270,21 +271,48 @@ func printGreenAtBaseline(w io.Writer, gab []apexv1.GreenAtBaseline) {
 
 func newChangeReviewCmd() *cobra.Command {
 	var f v1Flags
-	var verdict, findings string
+	var verdict, findings, model string
+	var runSession bool
+	var wait time.Duration
 	cmd := v1ChangeLeaf(
-		"review <id> --verdict pass|block --findings <file>",
-		"Record a review verdict; block returns the change to in-progress",
+		"review <id> (--verdict pass|block --findings <file> | --run [--wait 9m] [--model M])",
+		"Record a review verdict, or run the review in its own fresh Claude Code session",
 		`Record the review of a verified change. --findings names the review file (normally
 development/changes/<id>/review.md); it must exist and is recorded by path.
 
   pass   needs a green verify whose code has not moved since → status reviewed
   block  → status in-progress (fix, verify, review again)
 
-Exit codes: 0 recorded · 1 not verified, or code changed since the verify · 2 usage
-(bad verdict, findings file missing).`,
-		"  ape change review add-tenant-delete --verdict pass --findings development/changes/add-tenant-delete/review.md",
+--run reviews the change in its own Claude Code session — a separate process with an
+empty context and its own hooks, never a sub-agent of the session that built it:
+ape starts `+"`ape task apex-review --args <id>`"+` detached (survives the caller's shell),
+and that session writes review.md and records the verdict with --verdict/--findings.
+It is the one sanctioned exception to the nesting rule: allowed from inside an ape
+session, never from inside a review session (depth 1), skill fixed to apex-review.
+  - read-only: the session runs with APE_REVIEW=<id>, and `+"`ape hook pre-tool`"+` denies
+    every edit inside the project except changes/<id>/review.md (outside the project,
+    e.g. a throwaway copy to break, is allowed)
+  - post-run assertion: a session that committed or left anything but review.md (and
+    the state.json ape commits) has its verdict voided (recorded under review_voided)
+  - --wait (default 9m, under the Bash tool's 10-minute cap) bounds one call; exit 75
+    means still running: call `+"`ape change review <id> --run`"+` again to keep waiting —
+    it attaches to the running session, it never starts a second one
+  - the session's cost is its own ape task manifest (ape status sums it)
+
+Exit codes: 0 recorded / review passed · 1 not verified, code changed since the verify,
+review block (--run: findings in JSON "outcome"), verdict voided, or no verdict · 2 usage
+(bad verdict, findings file missing, --run inside a review session) · 75 --run: still
+running, call again.`,
+		"  ape change review add-tenant-delete --verdict pass --findings development/changes/add-tenant-delete/review.md\n"+
+			"  ape change review add-tenant-delete --run --wait 9m --json",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			if runSession {
+				if verdict != "" || findings != "" {
+					return v1Fail(cmd, &f, &apexv1.UsageError{Msg: "--run records its verdict from the review session; drop --verdict/--findings"}, nil)
+				}
+				return runReviewSession(cmd, &f, p, id, model, wait)
+			}
 			if findings == "" {
 				return v1Fail(cmd, &f, &apexv1.UsageError{Msg: "--findings <file> is required"}, nil)
 			}
@@ -296,8 +324,11 @@ Exit codes: 0 recorded · 1 not verified, or code changed since the verify · 2 
 				fmt.Fprintf(w, "change %s: review %s → %s\n", id, st.Review.Verdict, st.Status)
 			})
 		})
-	cmd.Flags().StringVar(&verdict, "verdict", "", "pass or block (required)")
-	cmd.Flags().StringVar(&findings, "findings", "", "the review file (required)")
+	cmd.Flags().StringVar(&verdict, "verdict", "", "pass or block (required without --run)")
+	cmd.Flags().StringVar(&findings, "findings", "", "the review file (required without --run)")
+	cmd.Flags().BoolVar(&runSession, "run", false, "review in a fresh, detached, read-only Claude Code session (apex-review)")
+	cmd.Flags().DurationVar(&wait, "wait", defaultReviewWait, "--run: how long this call waits for the session (exit 75 when it is still running)")
+	cmd.Flags().StringVar(&model, "model", "", "--run: model for the review session (default: as ape task)")
 	return cmd
 }
 

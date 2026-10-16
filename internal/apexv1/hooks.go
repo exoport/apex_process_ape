@@ -102,7 +102,35 @@ func PreTool(payload HookPayload) PreToolDecision {
 	if reason := p.protectedReason(target); reason != "" {
 		return PreToolDecision{Deny: true, Path: p.Rel(target), Reason: reason}
 	}
+	if id := os.Getenv(EnvReview); id != "" {
+		if reason := p.reviewConfinement(id, target); reason != "" {
+			return PreToolDecision{Deny: true, Path: p.Rel(target), Reason: reason}
+		}
+	}
 	return PreToolDecision{}
+}
+
+// reviewConfinement is the read-only rule of a review session (D18):
+// inside the project, only the change's review.md may be written. Outside
+// it — a throwaway copy the reviewer breaks to prove a check would fail —
+// anything goes.
+func (p *Project) reviewConfinement(id, abs string) string {
+	root := p.Root
+	if resolved, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
+		abs = filepath.Join(resolved, filepath.Base(abs))
+		if r, err := filepath.EvalSymlinks(root); err == nil {
+			root = r
+		}
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	if filepath.ToSlash(rel) == p.DevRel+"/changes/"+id+"/review.md" {
+		return ""
+	}
+	return "this is a read-only review session for change " + id + ": the only file it may write in the project is " +
+		p.DevRel + "/changes/" + id + "/review.md (break code in a throwaway copy outside the repository instead)"
 }
 
 var stateJSONRe = regexp.MustCompile(`^changes/[^/]+/state\.json$`)

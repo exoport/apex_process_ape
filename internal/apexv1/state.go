@@ -95,6 +95,15 @@ type Review struct {
 	Findings string `json:"findings"`
 }
 
+// ReviewVoid records a verdict voided because its review session changed
+// more than its review.md (D18 post-run assertion).
+type ReviewVoid struct {
+	At         string   `json:"at"`
+	Run        string   `json:"run"`
+	Verdict    string   `json:"verdict,omitempty"`
+	Violations []string `json:"violations"`
+}
+
 // Accept records a person accepting a human-review task.
 type Accept struct {
 	Task string `json:"task"`
@@ -111,17 +120,18 @@ type State struct {
 	Baseline  []Baseline `json:"baseline"`
 	// PlanDigest is the SHA-256 of change.md's ## Delta and ## Tasks at
 	// start. verify and archive refuse while it differs (plan drift).
-	PlanDigest        string   `json:"plan_digest,omitempty"`
-	Replans           []Replan `json:"replans,omitempty"`
-	Verify            *Verify  `json:"verify"`
-	Review            *Review  `json:"review"`
-	Accepted          []Accept `json:"accepted"`
-	BlockedReason     *string  `json:"blocked_reason"`
-	AllowPendingHuman bool     `json:"allow_pending_human,omitempty"`
-	AbandonedReason   string   `json:"abandoned_reason,omitempty"`
-	ArchivedAt        string   `json:"archived_at,omitempty"`
-	ArchivedTo        string   `json:"archived_to,omitempty"`
-	CreatedAt         string   `json:"created_at,omitempty"`
+	PlanDigest        string       `json:"plan_digest,omitempty"`
+	Replans           []Replan     `json:"replans,omitempty"`
+	Verify            *Verify      `json:"verify"`
+	Review            *Review      `json:"review"`
+	Accepted          []Accept     `json:"accepted"`
+	BlockedReason     *string      `json:"blocked_reason"`
+	ReviewVoided      []ReviewVoid `json:"review_voided,omitempty"`
+	AllowPendingHuman bool         `json:"allow_pending_human,omitempty"`
+	AbandonedReason   string       `json:"abandoned_reason,omitempty"`
+	ArchivedAt        string       `json:"archived_at,omitempty"`
+	ArchivedTo        string       `json:"archived_to,omitempty"`
+	CreatedAt         string       `json:"created_at,omitempty"`
 }
 
 // Active reports whether a change is in flight: started and neither

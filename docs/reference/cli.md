@@ -1617,7 +1617,7 @@ Subcommands:
 - `block` — Set blocked, with the reason shown by ape status
 - `check` — Validate change.md: shape, caps, delta against specs, a check on every task
 - `new` — Validate the id and write the change.md skeleton and state.json (draft)
-- `review` — Record a review verdict; block returns the change to in-progress
+- `review` — Record a review verdict, or run the review in its own fresh Claude Code session
 - `start` — Check green + milestone approved → record base_sha and baseline, set in-progress
 - `verify` — Run the task checks and the effective spec at HEAD; verified iff all exit 0
 
@@ -1828,10 +1828,10 @@ Flags:
 
 ## ape change review
 
-Record a review verdict; block returns the change to in-progress
+Record a review verdict, or run the review in its own fresh Claude Code session
 
 ```
-ape change review <id> --verdict pass|block --findings <file> [flags]
+ape change review <id> (--verdict pass|block --findings <file> | --run [--wait 9m] [--model M]) [flags]
 ```
 
 Record the review of a verified change. --findings names the review file (normally
@@ -1840,13 +1840,32 @@ development/changes/<id>/review.md); it must exist and is recorded by path.
   pass   needs a green verify whose code has not moved since → status reviewed
   block  → status in-progress (fix, verify, review again)
 
-Exit codes: 0 recorded · 1 not verified, or code changed since the verify · 2 usage
-(bad verdict, findings file missing).
+--run reviews the change in its own Claude Code session — a separate process with an
+empty context and its own hooks, never a sub-agent of the session that built it:
+ape starts `ape task apex-review --args <id>` detached (survives the caller's shell),
+and that session writes review.md and records the verdict with --verdict/--findings.
+It is the one sanctioned exception to the nesting rule: allowed from inside an ape
+session, never from inside a review session (depth 1), skill fixed to apex-review.
+  - read-only: the session runs with APE_REVIEW=<id>, and `ape hook pre-tool` denies
+    every edit inside the project except changes/<id>/review.md (outside the project,
+    e.g. a throwaway copy to break, is allowed)
+  - post-run assertion: a session that committed or left anything but review.md (and
+    the state.json ape commits) has its verdict voided (recorded under review_voided)
+  - --wait (default 9m, under the Bash tool's 10-minute cap) bounds one call; exit 75
+    means still running: call `ape change review <id> --run` again to keep waiting —
+    it attaches to the running session, it never starts a second one
+  - the session's cost is its own ape task manifest (ape status sums it)
+
+Exit codes: 0 recorded / review passed · 1 not verified, code changed since the verify,
+review block (--run: findings in JSON "outcome"), verdict voided, or no verdict · 2 usage
+(bad verdict, findings file missing, --run inside a review session) · 75 --run: still
+running, call again.
 
 Examples:
 
 ```
   ape change review add-tenant-delete --verdict pass --findings development/changes/add-tenant-delete/review.md
+  ape change review add-tenant-delete --run --wait 9m --json
 ```
 
 Flags:
@@ -1854,9 +1873,12 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
-| `--findings` | string | `—` | the review file (required) |
+| `--findings` | string | `—` | the review file (required without --run) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--verdict` | string | `—` | pass or block (required) |
+| `--model` | string | `—` | --run: model for the review session (default: as ape task) |
+| `--run` | bool | `false` | review in a fresh, detached, read-only Claude Code session (apex-review) |
+| `--verdict` | string | `—` | pass or block (required without --run) |
+| `--wait` | duration | `9m0s` | --run: how long this call waits for the session (exit 75 when it is still running) |
 
 ## ape change start
 

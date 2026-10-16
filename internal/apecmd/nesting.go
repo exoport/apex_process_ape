@@ -21,6 +21,11 @@ import (
 // this: skills run them inside sessions all the time, and they start
 // nothing. There is deliberately no escape hatch: a variable that disables
 // the rule is a variable a session can set.
+//
+// One sanctioned exception, decided in code rather than by a variable:
+// `ape change review <id> --run` (v1_review_run.go, trial decision D18)
+// starts a detached, read-only apex-review session from inside a session —
+// its own process and manifest, depth 1, skill fixed.
 func refuseNested(command string) error {
 	owner := os.Getenv(repl.EnvApeSession)
 	if owner == "" {

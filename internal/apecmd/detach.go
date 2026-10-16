@@ -157,49 +157,60 @@ func startDetached(cmd *cobra.Command, projectRoot string) error {
 	if err != nil {
 		return usageErr(err)
 	}
-	id := time.Now().UTC().Format("20060102-150405") + "-" + randomHex(3)
-	dir := runlog.DetachedRoot(root)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return usageErr(err)
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return usageErr(err)
-	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return usageErr(err)
 	}
+	h, err := launchDetached(root, wd, withoutDetach(os.Args[1:]), nil)
+	if err != nil {
+		return usageErr(err)
+	}
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "detached: %s\n", h.ID)
+	fmt.Fprintf(out, "wait:     ape run wait %s --cwd %s\n", h.ID, root)
+	fmt.Fprintf(out, "log:      %s\n", h.Log)
+	fmt.Fprintf(out, "stdout:   %s\n", h.Stdout)
+	return nil
+}
+
+// launchDetached starts a supervisor running this binary with argv, in
+// dir, orphaned from the caller, and returns its handle. env, when non-nil,
+// is the supervisor's (and so the run's) whole environment.
+func launchDetached(root, dir string, argv, env []string) (*detachedHandle, error) {
+	id := time.Now().UTC().Format("20060102-150405") + "-" + randomHex(3)
+	hdir := runlog.DetachedRoot(root)
+	if err := os.MkdirAll(hdir, 0o755); err != nil {
+		return nil, err
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
 	h := &detachedHandle{
 		ID:        id,
-		Argv:      withoutDetach(os.Args[1:]),
-		Dir:       wd,
-		Log:       filepath.Join(dir, id+".log"),
-		Stdout:    filepath.Join(dir, id+".out"),
+		Argv:      argv,
+		Dir:       dir,
+		Log:       filepath.Join(hdir, id+".log"),
+		Stdout:    filepath.Join(hdir, id+".out"),
 		StartedAt: time.Now().UTC(),
 	}
 	path := handlePath(root, id)
 	if err := writeHandle(path, h); err != nil {
-		return usageErr(err)
+		return nil, err
 	}
 	sup := exec.Command(exe, "run", "supervise", "--handle", path) //nolint:noctx // this binary; the supervisor must outlive this process's context
-	sup.Dir = wd
+	sup.Dir = dir
+	sup.Env = env
 	sup.SysProcAttr = detachedProcAttr()
 	if err := sup.Start(); err != nil {
-		return usageErr(fmt.Errorf("start the supervisor: %w", err))
+		return nil, fmt.Errorf("start the supervisor: %w", err)
 	}
 	h.SupervisorPID = sup.Process.Pid
 	if err := recordSupervisorPID(path, h.SupervisorPID); err != nil {
-		return usageErr(err)
+		return nil, err
 	}
 	_ = sup.Process.Release()
-
-	out := cmd.OutOrStdout()
-	fmt.Fprintf(out, "detached: %s\n", id)
-	fmt.Fprintf(out, "wait:     ape run wait %s --cwd %s\n", id, root)
-	fmt.Fprintf(out, "log:      %s\n", h.Log)
-	fmt.Fprintf(out, "stdout:   %s\n", h.Stdout)
-	return nil
+	return h, nil
 }
 
 func randomHex(n int) string {
