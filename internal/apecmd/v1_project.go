@@ -28,7 +28,11 @@ func newProjectInitCmd() *cobra.Command {
 		Long: `Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten
 (one exception: the @AGENTS.md line appended to a CLAUDE.md that lacks it).
 
-  _apex/config.yaml                  project_name, development_folder
+  _apex/config.yaml                  project_name, development_folder (also read, never
+                                     written: regression, models, effort, and limits —
+                                     budget: enforce|off (default off; see ape task --help),
+                                     attempts: N red verifies per start (default 5; see
+                                     ape change verify --help))
   AGENTS.md                          the project map (skeleton)
   CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
                                      gets it appended, and nothing else
@@ -188,8 +192,14 @@ func newStatusCmd() *cobra.Command {
 
   - the current milestone (the first not done): status, gate and its last recorded run,
     budget, and the spend of runs started since it was approved
+  - the milestone's limit stops (JSON milestone.stops: reason, at, run, skill, spent_usd,
+    budget_usd, session_usd): sessions ape task stopped at its enforced budget
+    (limits.budget: enforce; JSON milestone.budget_enforced), whose measured cost the
+    spend counts
   - every change not archived, with its status, blocked reason, red checks from its
-    last verify, and human-review tasks not yet accepted
+    last verify, human-review tasks not yet accepted, and for a started change its red
+    verifies since it started against limits.attempts (JSON attempts, attempts_cap;
+    "(3/5 attempts)") — a change the cap blocked shows "attempts exceeded" as its reason
   - spend so far: the sum of finished ape task/pipeline run manifests
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
     cmd, exit, sha}]): the regression command, and scenario checks of the spec a change

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 
 	"github.com/exoport/apex_process_ape/internal/cost"
 )
@@ -19,8 +18,15 @@ type MilestoneStatus struct {
 	Budget     *float64 `json:"budget,omitempty"`
 	GateLast   *GateRun `json:"gate_last,omitempty"`
 	// SpentUSD is the spend of runs started since the milestone was
-	// approved (all runs when it is not approved yet).
+	// approved (all runs when it is not approved yet); a session stopped
+	// at the budget counts at the cost ape measured when it stopped it.
 	SpentUSD float64 `json:"spent_usd"`
+	// BudgetEnforced: limits.budget is enforce and the milestone has a
+	// Budget:, so ape task stops at it (backlog 30).
+	BudgetEnforced bool `json:"budget_enforced"`
+	// Stops are the sessions ape stopped at the milestone's budget,
+	// oldest first.
+	Stops []LimitStop `json:"stops"`
 }
 
 // ChangeStatus is one change as `ape status` shows it.
@@ -34,6 +40,10 @@ type ChangeStatus struct {
 	Failing       []string `json:"failing,omitempty"`
 	VerifySHA     string   `json:"verify_sha,omitempty"`
 	Error         string   `json:"error,omitempty"`
+	// Attempts / AttemptsCap: red verifies since the change started, and
+	// limits.attempts (backlog 30). Set for a started change.
+	Attempts    int `json:"attempts"`
+	AttemptsCap int `json:"attempts_cap,omitempty"`
 }
 
 // Spend is the cost recorded in the project's run manifests.
@@ -94,6 +104,7 @@ func (p *Project) Status() *StatusReport {
 	}
 
 	changes := p.Changes()
+	attemptsCap := p.limits().AttemptsCap()
 	r.PreExistingRed = p.preExistingRed(changes)
 	for _, c := range changes {
 		cs := ChangeStatus{ID: c.ID}
@@ -109,6 +120,10 @@ func (p *Project) Status() *StatusReport {
 			continue
 		}
 		cs.Status = c.State.Status
+		cs.Attempts = c.State.Attempts
+		if c.State.Active() {
+			cs.AttemptsCap = attemptsCap
+		}
 		if c.State.BlockedReason != nil {
 			cs.BlockedReason = *c.State.BlockedReason
 		}
@@ -135,16 +150,12 @@ func (p *Project) Status() *StatusReport {
 func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost) *MilestoneStatus {
 	ms := &MilestoneStatus{ID: m.ID, Title: m.Title, Status: m.Status, StatusText: m.StatusText, Gate: m.Gate, Budget: m.Budget}
 	ms.GateLast = p.LastGateRun(m.ID)
-	since := time.Time{}
-	if t, err := time.Parse(time.RFC3339, m.ApprovedAt); err == nil {
-		since = t
+	ms.Stops = p.milestoneStops(m.ID)
+	if ms.Stops == nil {
+		ms.Stops = []LimitStop{}
 	}
-	for _, run := range runs {
-		if !run.StartedAt.Before(since) {
-			ms.SpentUSD += run.CostUSD
-		}
-	}
-	ms.SpentUSD = round2(ms.SpentUSD)
+	ms.SpentUSD = round2(milestoneSpend(m, runs, ms.Stops))
+	ms.BudgetEnforced = p.limits().BudgetEnforced() && m.Budget != nil
 	return ms
 }
 
@@ -250,6 +261,9 @@ groups:
 			if len(c.PendingHuman) > 0 {
 				line += " — human-review pending: " + strings.Join(c.PendingHuman, ",")
 			}
+			if c.AttemptsCap > 0 && c.Attempts > 0 {
+				line += fmt.Sprintf(" (%d/%d attempts)", c.Attempts, c.AttemptsCap)
+			}
 			b = append(b, line)
 		}
 	}
@@ -281,7 +295,8 @@ func (r *StatusReport) preExistingRedLine() string {
 	return truncate("Red at baseline, not any change's own (roadmap it): "+strings.Join(refs, ", "), briefLineMax)
 }
 
-// briefLines is the milestone's three lines in the brief.
+// briefLines is the milestone's lines in the brief: three, and a fourth
+// naming its last limit stop when it has one.
 func (m *MilestoneStatus) briefLines() []string {
 	gate := "  gate `" + m.Gate + "`"
 	switch {
@@ -295,8 +310,19 @@ func (m *MilestoneStatus) briefLines() []string {
 	spend := fmt.Sprintf("  spent $%.2f", m.SpentUSD)
 	if m.Budget != nil {
 		spend += fmt.Sprintf(" of $%.2f budget", *m.Budget)
+		if m.BudgetEnforced {
+			spend += " (enforced)"
+		}
 	}
-	return []string{fmt.Sprintf("Milestone %s — %s: %s", m.ID, m.Title, m.StatusText), gate, spend}
+	lines := []string{fmt.Sprintf("Milestone %s — %s: %s", m.ID, m.Title, m.StatusText), gate, spend}
+	if n := len(m.Stops); n > 0 {
+		line := "  " + m.Stops[n-1].Describe()
+		if n > 1 {
+			line = fmt.Sprintf("  %d limit stops, last %s", n, m.Stops[n-1].Describe())
+		}
+		lines = append(lines, truncate(line, briefLineMax))
+	}
+	return lines
 }
 
 func short(sha string) string {

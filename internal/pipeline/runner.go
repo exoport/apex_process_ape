@@ -579,8 +579,17 @@ func newTerminationRecord(runErr error) *TerminationRecord {
 		mde *sessiondriver.MaxDurationError
 		tae *sessiondriver.TerminalAPIError
 		nse *repl.NotSubmittedError
+		lse *LimitStopError
 	)
 	switch {
+	case errors.As(runErr, &lse):
+		return &TerminationRecord{
+			Kind:           lse.Kind,
+			Message:        lse.Error(),
+			SpentUSD:       lse.SpentUSD,
+			BudgetUSD:      lse.BudgetUSD,
+			SessionCostUSD: lse.SessionCostUSD,
+		}
 	case errors.As(runErr, &ite):
 		return &TerminationRecord{
 			Kind:       TerminationIdle,

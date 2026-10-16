@@ -151,6 +151,13 @@ type State struct {
 	ArchivedAt        string              `json:"archived_at,omitempty"`
 	ArchivedTo        string              `json:"archived_to,omitempty"`
 	CreatedAt         string              `json:"created_at,omitempty"`
+	// Attempts counts the red verifies since the change last started
+	// (backlog 30): every start, re-start included, sets it to 0, a green
+	// verify leaves it. The red verify that brings it to the cap
+	// (limits.attempts, default 5) blocks the change. AttemptsTotal is
+	// every red verify of the change, never reset.
+	Attempts      int `json:"attempts,omitempty"`
+	AttemptsTotal int `json:"attempts_total,omitempty"`
 }
 
 // Active reports whether a change is in flight: started and neither

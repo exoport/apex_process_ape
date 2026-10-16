@@ -101,6 +101,25 @@ removed) and _apex/effort-defaults.yaml is not used. Sources: flag, config,
 parent-session, config-default, default. The session's tools see the
 resolved values as APE_SESSION_MODEL / APE_SESSION_EFFORT.
 
+In an APEX v1 project ape also enforces the milestone budget, when
+_apex/config.yaml says so (it is off by default):
+  limits:
+    budget: enforce   # or off
+With enforce, and a Budget: line on the current milestone (the first not
+done, and only when approved), a session that would start with the
+milestone's spend already at its budget is refused (exit 1, code
+milestone.budget-exceeded); a running session is stopped when the
+milestone's spend — its runs since approval, plus this session's live cost
+read from its transcripts, sub-agents included, every 30 s (sooner in its
+first half minute) — reaches it.
+The stop ends the run (exit 1) with termination kind "budget" in the run
+manifest (spent_usd, budget_usd, session_cost_usd) and is recorded under
+the milestone's "stops" in _apex/state/milestones.json, committed alone as
+"apex: <M> stopped: budget"; ` + "`ape status`" + ` shows it. Raising the Budget:
+line (a person's call) lets sessions start again. An unparseable
+_apex/config.yaml in a v1 project refuses every session (exit 2) rather
+than run it with no limits.
+
 --prompt-file <path> reads the prompt from a file, and "-" reads it
 from stdin. It is how a printed escalation command carries the
 operator's own words: argv runs command substitution on backticks and
@@ -144,8 +163,9 @@ judged against a skill's declaration.
 The verdict is written to the run manifest as commit_contract, so a
 failure stays diagnosable after the fact.
 
-Exit codes: 0 success · 1 run failed, idle timeout, or the typed line
-never submitted · 2 usage or
+Exit codes: 0 success · 1 run failed, idle timeout, the typed line
+never submitted, or an APEX v1 milestone budget stopped or refused the
+session · 2 usage or
 preflight error · 3 REPL never became ready (last pane on stderr) ·
 5 upstream API failure · 6 the dispatch violated its declared commit
 ownership (the run itself may have succeeded).`,
@@ -517,6 +537,13 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		// Backlog 31: the project's hooks ride inline, so a hand-edited
 		// settings.json cannot drop them (apexv1.InlineHooks).
 		cfg.extraHooks, cfg.spawnEnv = v1InlineHooks()
+		// Backlog 30: the milestone's enforced budget refuses the start, or
+		// stops the session when its live spend reaches it.
+		if cfg.budgetWatch, err = newV1BudgetWatch(p, o.skill); err != nil {
+			return taskRun{}, &taskPreflightError{err: err}
+		}
+	} else if err := v1ConfigError(o.projectRoot); err != nil {
+		return taskRun{}, &taskPreflightError{err: err}
 	}
 	step := buildTaskStep(o)
 	spec := pipeline.NewSingleStepSpec(o.skill, step, o.taskCommit)
@@ -616,6 +643,8 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	}
 	fillEnvelopeFromManifest(&env, o.projectRoot, o.skill, manifestDir)
 	recordCommitContract(o.projectRoot, o.skill, manifestDir, contract)
+	// After the assertion: the stop's commit is ape's, not the skill's.
+	recordBudgetStop(ctx, o.projectRoot, o.skill, manifestDir, cfg.budgetWatch)
 
 	return taskRun{
 		Envelope:    env,
@@ -633,7 +662,7 @@ func runTask(ctx context.Context, o taskOptions) error {
 	res, err := dispatchTask(ctx, o)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		os.Exit(ExitUsage)
+		os.Exit(taskPreflightExit(err))
 	}
 	env := res.Envelope
 

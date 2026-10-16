@@ -66,6 +66,11 @@ func TestNewTerminationRecord_ClassifiesThroughWrapping(t *testing.T) {
 			wantKind: TerminationAPIError,
 		},
 		{
+			name:     "v1 budget stop",
+			err:      fmt.Errorf("stage x: %w", &LimitStopError{Kind: TerminationBudget, Message: "M1 budget reached"}),
+			wantKind: TerminationBudget,
+		},
+		{
 			name:     "context cancelled",
 			err:      fmt.Errorf("stage x: %w", context.Canceled),
 			wantKind: TerminationCancelled,
@@ -229,4 +234,17 @@ func TestFinalizeManifest_REPLNotReadyIsFailedNotCancelled(t *testing.T) {
 			require.Equal(t, tc.kind, m.Termination.Kind)
 		})
 	}
+}
+
+// A budget stop carries the spend that decided it, and the report says
+// that the session's cost is not in the totals.
+func TestNewTerminationRecord_BudgetStop(t *testing.T) {
+	t.Parallel()
+	rec := newTerminationRecord(fmt.Errorf("stage x: %w", &LimitStopError{
+		Kind: TerminationBudget, Message: "M1 budget reached", SpentUSD: 5, BudgetUSD: 2, SessionCostUSD: 5,
+	}))
+	require.Equal(t, &TerminationRecord{Kind: TerminationBudget, Message: "M1 budget reached", SpentUSD: 5, BudgetUSD: 2, SessionCostUSD: 5}, rec)
+	got := renderReport(&Manifest{Termination: rec})
+	require.Contains(t, got, "- reason: **budget**")
+	require.Contains(t, got, "spent $5.00 of its $2.00 budget, $5.00 of it this session")
 }

@@ -25,8 +25,10 @@ func newChangeCmd() *cobra.Command {
 
 Done is a command ape ran at a sha: models never set a status. Every status change is
 committed by ape: state.json alone, subject "apex: <id> <status>", trailer "Change: <id>"
-(archive commits "archive: <id>"). Skills never stage state.json. A blocked change claims
-no requirements: it takes no part in start's conflict check.
+(archive commits "archive: <id>"; a red verify "apex: <id> in-progress (attempt <n>)").
+Skills never stage state.json. A blocked change claims no requirements: it takes no part
+in start's conflict check. A change whose red verifies reach limits.attempts is blocked by
+verify itself (see ` + "`ape change verify --help`" + `).
 
 Exit codes for every subcommand: 0 ok · 1 check failed (one-line remediation) · 2 usage ·
 3 conflict (another change claims the same requirement, or the delta no longer applies;
@@ -247,19 +249,27 @@ since its review stays reviewed), state.json committed. Any red → the failing 
 lines are printed. Green at baseline: the change's own checks (tasks, delta scenarios) that
 already passed when they were baselined, before the code, are listed (JSON
 "green_at_baseline", also recorded in state.json) for review to justify or flag.
-On red: a change that was in-progress is left exactly as it was (nothing written,
-nothing committed), a verified/reviewed one goes back to in-progress (committed).
+On red: every red verify is an attempt. state.json counts it ("attempts", reset to 0 by
+every start or re-start; "attempts_total", never reset; a green verify changes neither)
+and is committed as "apex: <id> in-progress (attempt <n>)" — this replaces trial
+decision D5, under which a red verify of an in-progress change wrote nothing. Otherwise
+an in-progress change keeps its last verify record; a verified/reviewed one goes back to
+in-progress with this verify recorded. The red verify that brings attempts to the cap
+(_apex/config.yaml limits.attempts, default 5) blocks the change instead: status blocked,
+blocked_reason "attempts exceeded: <n> red verifies — <failing checks>", committed as
+"apex: <id> blocked", exit 1 with code change.attempts-exceeded. Re-plan, then
+`+"`ape change start <id>`"+` resumes it with a fresh count.
 Refused while change.md differs from the plan frozen at start outside ## Why and ## Notes
 (re-start first). human-review tasks are never run; those not yet accepted are listed
 as pending.
 
-Exit codes: 0 all command checks green · 1 a check is red, uncommitted code, or wrong
-status · 2 usage.`,
+Exit codes: 0 all command checks green · 1 a check is red (the attempts cap reached
+included), uncommitted code, or wrong status · 2 usage.`,
 		"  ape change verify add-tenant-delete",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
 			res, err := p.Verify(cmd.Context(), id, f.runOptions())
-			if err != nil {
+			if err != nil && res == nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
 			human := func(w io.Writer) {
@@ -271,12 +281,19 @@ status · 2 usage.`,
 				printGreenAtBaseline(w, res.GreenAtBaseline)
 				printStrays(w, res.StrayFiles)
 			}
+			if err != nil {
+				// The attempts cap blocked the change: the red results first.
+				if !f.json {
+					human(cmd.OutOrStdout())
+				}
+				return v1Fail(cmd, &f, err, res)
+			}
 			if !res.Green {
 				if !f.json {
 					human(cmd.OutOrStdout())
 				}
-				msg := fmt.Sprintf("change %s: %d command check(s) red — fix the code (never the check) and verify again, or `ape change block %s --reason ...`",
-					id, len(res.Failing()), id)
+				msg := fmt.Sprintf("change %s: %d command check(s) red, attempt %d of %d — fix the code (never the check) and verify again, or `ape change block %s --reason ...`",
+					id, len(res.Failing()), res.Attempts, res.AttemptsCap, id)
 				if r := res.Regression; r != nil && r.Failed && r.BaselineExit == nil {
 					msg = fmt.Sprintf("change %s: %d command check(s) red, the regression command among them with no baseline to judge it by — `ape change start %s` records one (red is fine there); fix the code for the rest",
 						id, len(res.Failing()), id)
@@ -513,7 +530,7 @@ func newChangeArchiveCmd() *cobra.Command {
 
   1. needs status reviewed (review pass) and the plan frozen at start unchanged;
      re-runs verify when HEAD moved since it (red →
-     in-progress, exit 1); refused if code changed since the review
+     in-progress, exit 1, counted as an attempt like any red verify); refused if code changed since the review
   2. human-review tasks must be accepted, unless --allow-pending-human (recorded)
   3. applies the delta to development/specs/: ADDED appends, MODIFIED replaces, REMOVED
      deletes; a new capability gets specs/<cap>/spec.md (Purpose from the change's Why).

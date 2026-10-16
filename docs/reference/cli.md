@@ -1602,8 +1602,10 @@ A change is development/changes/<id>/change.md (written by the model) plus state
 
 Done is a command ape ran at a sha: models never set a status. Every status change is
 committed by ape: state.json alone, subject "apex: <id> <status>", trailer "Change: <id>"
-(archive commits "archive: <id>"). Skills never stage state.json. A blocked change claims
-no requirements: it takes no part in start's conflict check.
+(archive commits "archive: <id>"; a red verify "apex: <id> in-progress (attempt <n>)").
+Skills never stage state.json. A blocked change claims no requirements: it takes no part
+in start's conflict check. A change whose red verifies reach limits.attempts is blocked by
+verify itself (see `ape change verify --help`).
 
 Exit codes for every subcommand: 0 ok · 1 check failed (one-line remediation) · 2 usage ·
 3 conflict (another change claims the same requirement, or the delta no longer applies;
@@ -1693,7 +1695,7 @@ Archive a reviewed change:
 
   1. needs status reviewed (review pass) and the plan frozen at start unchanged;
      re-runs verify when HEAD moved since it (red →
-     in-progress, exit 1); refused if code changed since the review
+     in-progress, exit 1, counted as an attempt like any red verify); refused if code changed since the review
   2. human-review tasks must be accepted, unless --allow-pending-human (recorded)
   3. applies the delta to development/specs/: ADDED appends, MODIFIED replaces, REMOVED
      deletes; a new capability gets specs/<cap>/spec.md (Purpose from the change's Why).
@@ -2011,14 +2013,22 @@ since its review stays reviewed), state.json committed. Any red → the failing 
 lines are printed. Green at baseline: the change's own checks (tasks, delta scenarios) that
 already passed when they were baselined, before the code, are listed (JSON
 "green_at_baseline", also recorded in state.json) for review to justify or flag.
-On red: a change that was in-progress is left exactly as it was (nothing written,
-nothing committed), a verified/reviewed one goes back to in-progress (committed).
+On red: every red verify is an attempt. state.json counts it ("attempts", reset to 0 by
+every start or re-start; "attempts_total", never reset; a green verify changes neither)
+and is committed as "apex: <id> in-progress (attempt <n>)" — this replaces trial
+decision D5, under which a red verify of an in-progress change wrote nothing. Otherwise
+an in-progress change keeps its last verify record; a verified/reviewed one goes back to
+in-progress with this verify recorded. The red verify that brings attempts to the cap
+(_apex/config.yaml limits.attempts, default 5) blocks the change instead: status blocked,
+blocked_reason "attempts exceeded: <n> red verifies — <failing checks>", committed as
+"apex: <id> blocked", exit 1 with code change.attempts-exceeded. Re-plan, then
+`ape change start <id>` resumes it with a fresh count.
 Refused while change.md differs from the plan frozen at start outside ## Why and ## Notes
 (re-start first). human-review tasks are never run; those not yet accepted are listed
 as pending.
 
-Exit codes: 0 all command checks green · 1 a check is red, uncommitted code, or wrong
-status · 2 usage.
+Exit codes: 0 all command checks green · 1 a check is red (the attempts cap reached
+included), uncommitted code, or wrong status · 2 usage.
 
 Examples:
 
@@ -4889,7 +4899,11 @@ ape project init [flags]
 Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten
 (one exception: the @AGENTS.md line appended to a CLAUDE.md that lacks it).
 
-  _apex/config.yaml                  project_name, development_folder
+  _apex/config.yaml                  project_name, development_folder (also read, never
+                                     written: regression, models, effort, and limits —
+                                     budget: enforce|off (default off; see ape task --help),
+                                     attempts: N red verifies per start (default 5; see
+                                     ape change verify --help))
   AGENTS.md                          the project map (skeleton)
   CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
                                      gets it appended, and nothing else
@@ -6735,8 +6749,14 @@ Show where the project stands, from the records ape keeps:
 
   - the current milestone (the first not done): status, gate and its last recorded run,
     budget, and the spend of runs started since it was approved
+  - the milestone's limit stops (JSON milestone.stops: reason, at, run, skill, spent_usd,
+    budget_usd, session_usd): sessions ape task stopped at its enforced budget
+    (limits.budget: enforce; JSON milestone.budget_enforced), whose measured cost the
+    spend counts
   - every change not archived, with its status, blocked reason, red checks from its
-    last verify, and human-review tasks not yet accepted
+    last verify, human-review tasks not yet accepted, and for a started change its red
+    verifies since it started against limits.attempts (JSON attempts, attempts_cap;
+    "(3/5 attempts)") — a change the cap blocked shows "attempts exceeded" as its reason
   - spend so far: the sum of finished ape task/pipeline run manifests
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
     cmd, exit, sha}]): the regression command, and scenario checks of the spec a change
@@ -6982,6 +7002,25 @@ removed) and _apex/effort-defaults.yaml is not used. Sources: flag, config,
 parent-session, config-default, default. The session's tools see the
 resolved values as APE_SESSION_MODEL / APE_SESSION_EFFORT.
 
+In an APEX v1 project ape also enforces the milestone budget, when
+_apex/config.yaml says so (it is off by default):
+  limits:
+    budget: enforce   # or off
+With enforce, and a Budget: line on the current milestone (the first not
+done, and only when approved), a session that would start with the
+milestone's spend already at its budget is refused (exit 1, code
+milestone.budget-exceeded); a running session is stopped when the
+milestone's spend — its runs since approval, plus this session's live cost
+read from its transcripts, sub-agents included, every 30 s (sooner in its
+first half minute) — reaches it.
+The stop ends the run (exit 1) with termination kind "budget" in the run
+manifest (spent_usd, budget_usd, session_cost_usd) and is recorded under
+the milestone's "stops" in _apex/state/milestones.json, committed alone as
+"apex: <M> stopped: budget"; `ape status` shows it. Raising the Budget:
+line (a person's call) lets sessions start again. An unparseable
+_apex/config.yaml in a v1 project refuses every session (exit 2) rather
+than run it with no limits.
+
 --prompt-file <path> reads the prompt from a file, and "-" reads it
 from stdin. It is how a printed escalation command carries the
 operator's own words: argv runs command substitution on backticks and
@@ -7025,8 +7064,9 @@ judged against a skill's declaration.
 The verdict is written to the run manifest as commit_contract, so a
 failure stays diagnosable after the fact.
 
-Exit codes: 0 success · 1 run failed, idle timeout, or the typed line
-never submitted · 2 usage or
+Exit codes: 0 success · 1 run failed, idle timeout, the typed line
+never submitted, or an APEX v1 milestone budget stopped or refused the
+session · 2 usage or
 preflight error · 3 REPL never became ready (last pane on stderr) ·
 5 upstream API failure · 6 the dispatch violated its declared commit
 ownership (the run itself may have succeeded).

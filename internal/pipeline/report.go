@@ -64,6 +64,9 @@ func renderReport(m *Manifest) string {
 		case TerminationNotSubmitted:
 			fmt.Fprintf(&b, "- ape typed the step's line and pressed Enter for %s without claude submitting it; the step never started\n",
 				formatDuration(t.ElapsedSecs))
+		case TerminationBudget:
+			fmt.Fprintf(&b, "- the milestone had spent $%.2f of its $%.2f budget, $%.2f of it this session (measured live; the totals below count only completed steps)\n",
+				t.SpentUSD, t.BudgetUSD, t.SessionCostUSD)
 		}
 		if t.Diagnostic != "" {
 			fmt.Fprintf(&b, "- diagnostic: `%s`\n", t.Diagnostic)

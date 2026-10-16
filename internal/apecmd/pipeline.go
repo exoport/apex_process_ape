@@ -327,7 +327,10 @@ func printPipelineList(res pipelineListResult, format output.Format) error {
 type runConfig struct {
 	// stopGate, when set, consults an APEX v1 project's stop-hook verdict
 	// on every main-session Stop (v1 trial D1). `ape task` sets it.
-	stopGate    *stopGateRecorder
+	stopGate *stopGateRecorder
+	// budgetWatch, when set, stops the session at its APEX v1 milestone's
+	// enforced budget (backlog 30). `ape task` sets it.
+	budgetWatch *v1BudgetWatch
 	prompt      string
 	manifestDir string
 	fromStage   string

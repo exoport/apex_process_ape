@@ -247,6 +247,10 @@ const (
 	TerminationCancelled = "cancelled"
 	// TerminationError — any other run error.
 	TerminationError = "error"
+	// TerminationBudget — ape stopped an APEX v1 session because its
+	// milestone's spend reached the milestone's budget (limits.budget:
+	// enforce, backlog 30). The spend fields say how far it got.
+	TerminationBudget = "budget"
 )
 
 // TerminationRecord is the durable "why" behind a non-completed run.
@@ -270,7 +274,26 @@ type TerminationRecord struct {
 	ElapsedSecs float64 `yaml:"elapsed_seconds,omitempty"`
 	MaxSecs     float64 `yaml:"max_seconds,omitempty"`
 	QuietSecs   float64 `yaml:"quiet_seconds,omitempty"`
+	// SpentUSD / BudgetUSD / SessionCostUSD describe a budget stop: the
+	// milestone's spend (recorded runs plus this session), its budget, and
+	// this session's cost as ape measured it live — which the totals below
+	// do not hold, since they count only completed steps.
+	SpentUSD       float64 `yaml:"spent_usd,omitempty"`
+	BudgetUSD      float64 `yaml:"budget_usd,omitempty"`
+	SessionCostUSD float64 `yaml:"session_cost_usd,omitempty"`
 }
+
+// LimitStopError is a session ape stopped at an APEX v1 limit (backlog
+// 30). Kind is the termination kind it is recorded as.
+type LimitStopError struct {
+	Kind           string
+	Message        string
+	SpentUSD       float64
+	BudgetUSD      float64
+	SessionCostUSD float64
+}
+
+func (e *LimitStopError) Error() string { return e.Message }
 
 // CommitContractRecord is the manifest's copy of the commit-ownership
 // verdict. A local shape rather than internal/commitowners' own, so the

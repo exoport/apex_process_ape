@@ -910,6 +910,9 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	if cfg.stopGate != nil {
 		core.driver.SetStopGate(cfg.stopGate.bounded(runCtx))
 	}
+	if cfg.budgetWatch != nil {
+		go cfg.budgetWatch.run(runCtx, core.liveSessionCost, core.driver.SignalStepFatal)
+	}
 
 	// PLAN-13: optional NATS eventing + transcript upload. Fire-and-forget —
 	// conn is nil when NATS is off or unreachable, and every publish/upload

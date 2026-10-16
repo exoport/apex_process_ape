@@ -60,6 +60,10 @@ type Config struct {
 	// that no flag, models.<skill> entry or parent session decides
 	// (DecideLaunch). Empty: Claude Code's own setting.
 	Effort string `yaml:"effort"`
+	// Limits are the loop limits ape enforces (backlog 30): the
+	// milestone budget (off unless enforce) and the attempts cap per
+	// change start.
+	Limits Limits `yaml:"limits"`
 }
 
 // SkillModel is one models.<skill> entry.

@@ -130,6 +130,9 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 	st.BaseFingerprints = p.baseFingerprints(ci.Doc)
 	st.Status = StatusInProgress
 	st.BlockedReason = nil
+	// A (re-)start is a new plan or a person's answer: its attempts start
+	// over, or a re-planned change would block again at once (backlog 30).
+	st.Attempts = 0
 	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}
@@ -189,6 +192,10 @@ type VerifyResult struct {
 	// Regression judges the regression command against the change's
 	// baseline (backlog 32); absent when none is configured.
 	Regression *RegressionVerdict `json:"regression,omitempty"`
+	// Attempts is the change's red verifies since it started, this one
+	// included, and AttemptsCap limits.attempts (backlog 30).
+	Attempts    int `json:"attempts"`
+	AttemptsCap int `json:"attempts_cap"`
 }
 
 // greenAtBaseline lists the change's own checks — tasks and the scenarios
@@ -281,15 +288,16 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 		pending = []string{}
 	}
 	gab := p.greenAtBaseline(ci.Doc, st)
-	if !green && st.Status == StatusInProgress {
-		// A verify that stays red changes nothing and commits nothing
-		// (trial decision D5): the results are in the output and the logs.
-		return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), Regression: regression}, nil
+	if !green {
+		// Every red verify is an attempt (backlog 30), and is committed —
+		// which revises trial decision D5, under which a red verify of an
+		// in-progress change wrote nothing. The verify record itself is
+		// still left as it was there: the results are in the output and
+		// the logs.
+		return p.redAttempt(ctx, ci, &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), Regression: regression})
 	}
 	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green, GreenAtBaseline: gab}
 	switch {
-	case !green:
-		st.Status = StatusInProgress
 	case st.Status == StatusReviewed && st.Review != nil && st.Review.Verdict == "pass":
 		if moved, _, _ := p.codeMovedSince(ctx, st.Review.SHA); moved {
 			st.Status = StatusVerified
@@ -300,7 +308,52 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}
-	return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), Regression: regression}, nil
+	return &VerifyResult{
+		ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), Regression: regression,
+		Attempts: st.Attempts, AttemptsCap: p.limits().AttemptsCap(),
+	}, nil
+}
+
+// redAttempt records a red verify as an attempt (backlog 30): attempts and
+// attempts_total go up by one, a verified or reviewed change goes back to
+// in-progress with this verify recorded (as before), and state.json is
+// committed as "apex: <id> <status> (attempt <n>)". The red verify that
+// brings attempts to limits.attempts blocks the change instead — status
+// blocked, the reason naming the count and the last failing checks,
+// committed as "apex: <id> blocked" — and returns FailError
+// change.attempts-exceeded beside the result.
+func (p *Project) redAttempt(ctx context.Context, ci ChangeInfo, res *VerifyResult) (*VerifyResult, error) {
+	id, st := ci.ID, ci.State
+	st.Attempts++
+	st.AttemptsTotal++
+	if st.Status != StatusInProgress {
+		st.Verify = &Verify{SHA: res.SHA, At: Stamp(), Results: res.Results, PendingHuman: res.PendingHuman, Green: false, GreenAtBaseline: res.GreenAtBaseline}
+		st.Status = StatusInProgress
+	}
+	capN := p.limits().AttemptsCap()
+	res.Attempts, res.AttemptsCap = st.Attempts, capN
+	if st.Attempts < capN {
+		res.Status = st.Status
+		if err := p.saveAndCommitSubject(ctx, id, st, fmt.Sprintf("apex: %s %s (attempt %d)", id, st.Status, st.Attempts)); err != nil {
+			return nil, err
+		}
+		return res, nil
+	}
+	var failing []string
+	red := res.Failing()
+	for i := range red {
+		failing = append(failing, fmt.Sprintf("%s (exit %d)", red[i].Task, red[i].Exit))
+	}
+	reason := fmt.Sprintf("attempts exceeded: %d red verifies — %s", st.Attempts, strings.Join(limit(failing, 5), ", "))
+	st.Status = StatusBlocked
+	st.BlockedReason = &reason
+	if err := p.saveAndCommit(ctx, id, st); err != nil {
+		return nil, err
+	}
+	res.Status = st.Status
+	return res, &FailError{Code: "change.attempts-exceeded", Msg: fmt.Sprintf(
+		"change %s: %d red verifies since it started reach limits.attempts (%d), so it is blocked — re-plan it (change.md) and `ape change start %s`, or a person answers what blocks it",
+		id, st.Attempts, capN, id)}
 }
 
 func limit(xs []string, n int) []string {
@@ -360,13 +413,18 @@ func (p *Project) Review(ctx context.Context, id, verdict, findings string) (*St
 // state.json is tracked, only ape stages it, and the tree stays clean for
 // the task driver. Outside a git work tree it only writes.
 func (p *Project) saveAndCommit(ctx context.Context, id string, st *State) error {
+	return p.saveAndCommitSubject(ctx, id, st, "apex: "+id+" "+st.Status)
+}
+
+// saveAndCommitSubject is saveAndCommit with its own subject.
+func (p *Project) saveAndCommitSubject(ctx context.Context, id string, st *State, subject string) error {
 	if err := SaveState(p.StateFile(id), st); err != nil {
 		return err
 	}
 	if !p.isWorkTree(ctx) {
 		return nil
 	}
-	if _, err := p.commitPaths(ctx, "apex: "+id+" "+st.Status, id, p.Rel(p.StateFile(id))); err != nil {
+	if _, err := p.commitPaths(ctx, subject, id, p.Rel(p.StateFile(id))); err != nil {
 		return &FailError{Code: CodeCommitFailed, Msg: "state.json written but its commit failed: " + err.Error() + " — fix git (identity, lock) and re-run the command"}
 	}
 	return nil

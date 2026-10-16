@@ -76,6 +76,9 @@ const (
 type MilestoneRecord struct {
 	Result string   `json:"result"`
 	Since  *GateRun `json:"since"`
+	// Stops are the sessions ape stopped at the milestone's enforced
+	// budget (backlog 30).
+	Stops []LimitStop `json:"stops,omitempty"`
 }
 
 // MilestoneRecords is _apex/state/milestones.json.
@@ -311,7 +314,11 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	if rec := recs[id]; rec != nil && rec.Result == result {
 		return g, nil
 	}
-	recs[id] = &MilestoneRecord{Result: result, Since: &run}
+	var stops []LimitStop
+	if rec := recs[id]; rec != nil {
+		stops = rec.Stops
+	}
+	recs[id] = &MilestoneRecord{Result: result, Since: &run, Stops: stops}
 	if err := p.saveMilestoneRecords(recs); err != nil {
 		return nil, err
 	}

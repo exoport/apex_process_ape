@@ -200,15 +200,22 @@ func TestVerify(t *testing.T) {
 	p := startedWave(t)
 	before := subjects(t, p)
 
-	// Red on an in-progress change: nothing written, nothing committed (D5).
+	// Red on an in-progress change: the verify record is left as it was,
+	// but the attempt is counted and committed (backlog 30, revising D5).
 	v, err := p.Verify(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)
 	require.False(t, v.Green)
 	require.Len(t, v.Failing(), 2, "the task and the delta's own scenario")
 	require.NotEmpty(t, v.Failing()[0].Tail)
 	require.Equal(t, KindScenario, v.Failing()[1].Kind)
-	require.Nil(t, state(t, p, "add-wave").Verify)
-	require.Equal(t, before, subjects(t, p))
+	require.Equal(t, 1, v.Attempts)
+	require.Equal(t, DefaultAttempts, v.AttemptsCap)
+	st := state(t, p, "add-wave")
+	require.Nil(t, st.Verify)
+	require.Equal(t, 1, st.Attempts)
+	require.Equal(t, append([]string{"apex: add-wave in-progress (attempt 1)"}, before...), subjects(t, p))
+	require.Contains(t, run(t, p.Root, "log", "-1", "--format=%B"), "Change: add-wave")
+	clean(t, p, "red verify")
 
 	// Uncommitted code: refused.
 	write(t, p, "wave.sh", "#!/bin/sh\necho wave\n")
@@ -220,8 +227,9 @@ func TestVerify(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, v.Green)
 	require.Equal(t, []string{"T2"}, v.PendingHuman)
-	st := state(t, p, "add-wave")
+	st = state(t, p, "add-wave")
 	require.Equal(t, StatusVerified, st.Status)
+	require.Equal(t, 1, st.Attempts, "a green verify does not reset the count")
 	require.Equal(t, v.SHA, st.Verify.SHA)
 	require.Len(t, st.Verify.Results[0].OutputSHA256, 64)
 	require.Equal(t, "apex: add-wave verified", subjects(t, p)[0])
@@ -233,8 +241,61 @@ func TestVerify(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, v.Green)
 	require.Equal(t, 3, v.Results[0].Exit)
-	require.Equal(t, StatusInProgress, state(t, p, "add-wave").Status)
-	require.Equal(t, "apex: add-wave in-progress", subjects(t, p)[0])
+	st = state(t, p, "add-wave")
+	require.Equal(t, StatusInProgress, st.Status)
+	require.False(t, st.Verify.Green, "the red verify is recorded on the way back")
+	require.Equal(t, 2, st.Attempts)
+	require.Equal(t, "apex: add-wave in-progress (attempt 2)", subjects(t, p)[0])
+}
+
+// Backlog 30: the red verify that reaches limits.attempts blocks the
+// change, with a reason naming the count and the failing checks; a
+// re-start resets the count but not the running total.
+func TestVerify_AttemptsCapBlocks(t *testing.T) {
+	p := startedWave(t)
+	write(t, p, "_apex/config.yaml", "limits:\n  attempts: 2\n")
+	commitAll(t, p, "config: attempts 2")
+
+	v, err := p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 1, v.Attempts)
+	require.Equal(t, 2, v.AttemptsCap)
+
+	v, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	var fe *FailError
+	require.ErrorAs(t, err, &fe)
+	require.Equal(t, "change.attempts-exceeded", fe.Code)
+	require.NotNil(t, v, "the red results come back beside the error")
+	require.Equal(t, StatusBlocked, v.Status)
+	st := state(t, p, "add-wave")
+	require.Equal(t, StatusBlocked, st.Status)
+	require.NotNil(t, st.BlockedReason)
+	require.Equal(t, "attempts exceeded: 2 red verifies — T1 (exit 127), greeting/Wave/wave (exit 127)", *st.BlockedReason)
+	require.Equal(t, "apex: add-wave blocked", subjects(t, p)[0])
+	clean(t, p, "attempts cap")
+
+	// Blocked: verify no longer applies, so nothing more is counted.
+	_, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	require.ErrorContains(t, err, "is blocked")
+
+	// ape status shows the reason; a resumed change starts a fresh count.
+	r := p.Status()
+	require.Equal(t, "attempts exceeded: 2 red verifies — T1 (exit 127), greeting/Wave/wave (exit 127)", r.Changes[0].BlockedReason)
+	_, err = p.Start(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	st = state(t, p, "add-wave")
+	require.Equal(t, 0, st.Attempts)
+	require.Equal(t, 2, st.AttemptsTotal)
+	v, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 1, v.Attempts)
+	st = state(t, p, "add-wave")
+	require.Equal(t, 3, st.AttemptsTotal)
+
+	r = p.Status()
+	require.Equal(t, 1, r.Changes[0].Attempts)
+	require.Equal(t, 2, r.Changes[0].AttemptsCap)
+	require.Contains(t, r.Brief(), "(1/2 attempts)")
 }
 
 func TestVerify_DraftAndArchived(t *testing.T) {
