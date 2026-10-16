@@ -150,7 +150,7 @@ func newProjectCheckCmd() *cobra.Command {
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
                            Gate, Goal; Budget a number when present. Its Delivery: line
                            links the current brief, e.g.
-                           Delivery: Phase 1 — "…" ([brief](briefs/2026-10-16-<slug>.md));
+                           ` + "`Delivery: Phase 1 — \"…\" ([brief](briefs/2026-10-16-<slug>.md))`" + `;
                            a Markdown link or a bare briefs/….md path, relative to
                            roadmap.md (or development/briefs/… from the project root),
                            must resolve (roadmap.delivery-link); briefs with no linking
