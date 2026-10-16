@@ -1937,12 +1937,12 @@ Start a draft (or resume a blocked) change:
   4. runs every check verify will run once, as the baseline (which were already green):
      the command tasks and the effective spec's scenario checks; from the project root
      with sh -c; output under development/.apex/logs/<id>/
-  5. sets in-progress, freezes the plan (SHA-256 of ## Delta + ## Tasks), fingerprints
+  5. sets in-progress, freezes the plan (SHA-256 of change.md outside ## Why and ## Notes), fingerprints
      the spec block of every requirement it MODIFIES or REMOVES, and commits state.json
      ("apex: <id> in-progress")
 
-Re-start: once the plan is frozen, verify and archive refuse while ## Delta or ## Tasks
-differ from it. Running start again on an in-progress, verified or reviewed change
+Re-start: once the plan is frozen, verify and archive refuse while change.md differs from
+it anywhere but ## Why and ## Notes (frontmatter, title, Out of scope, Delta, Tasks, …). Running start again on an in-progress, verified or reviewed change
 re-baselines: recorded under "replans" in state.json, verify and review cleared, new or
 changed checks baselined now (unchanged ones keep their original baseline), fingerprints
 re-taken. It applies when the plan changed, or when a spec block the change modifies or
@@ -1992,8 +1992,9 @@ already passed when they were baselined, before the code, are listed (JSON
 "green_at_baseline", also recorded in state.json) for review to justify or flag.
 On red: a change that was in-progress is left exactly as it was (nothing written,
 nothing committed), a verified/reviewed one goes back to in-progress (committed).
-Refused while ## Delta or ## Tasks differ from the plan frozen at start (re-start first). human-review tasks are never run; those not yet accepted are listed as
-pending.
+Refused while change.md differs from the plan frozen at start outside ## Why and ## Notes
+(re-start first). human-review tasks are never run; those not yet accepted are listed
+as pending.
 
 Exit codes: 0 all command checks green · 1 a check is red, uncommitted code, or wrong
 status · 2 usage.

@@ -73,7 +73,7 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 		// another change has since changed (item 9).
 		planChanged := st.PlanDigest != "" && st.PlanDigest != digest
 		if !planChanged && len(p.fingerprintConflicts(st.BaseFingerprints, ci.Doc)) == 0 {
-			return nil, &FailError{Code: "change.nothing-to-rebaseline", Msg: "change " + id + " is " + st.Status + " and neither its ## Tasks and ## Delta nor the spec they modify changed — nothing to re-baseline"}
+			return nil, &FailError{Code: "change.nothing-to-rebaseline", Msg: "change " + id + " is " + st.Status + " and neither its plan (change.md outside ## Why and ## Notes) nor the spec it modifies changed — nothing to re-baseline"}
 		}
 		replan = true
 	default:
@@ -160,7 +160,7 @@ func checkPlanFrozen(ci ChangeInfo) error {
 	if ci.State.PlanDigest == "" || ci.State.PlanDigest == ci.Doc.PlanDigest() {
 		return nil
 	}
-	return &FailError{Code: "change.plan-drift", Msg: "change " + ci.ID + ": ## Tasks or ## Delta changed since start (plan drift) — run `ape change start " + ci.ID +
+	return &FailError{Code: "change.plan-drift", Msg: "change " + ci.ID + ": change.md changed outside ## Why and ## Notes since start (plan drift) — run `ape change start " + ci.ID +
 		"` to re-baseline the new plan (recorded), or restore change.md"}
 }
 

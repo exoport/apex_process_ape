@@ -211,6 +211,12 @@ func (p *Project) checkDeltas(file string, c *Change, touches map[string]bool) [
 		}
 		switch d.Op {
 		case OpAdded:
+			switch {
+			case d.PurposeLine > 0 && specExists:
+				add(d.PurposeLine, "`Purpose:` in an ADDED block names a new capability's purpose, and ["+d.Capability+"] already has one — drop it, or change the spec's Purpose through its own change")
+			case d.PurposeLine > 0 && d.Purpose == "":
+				add(d.PurposeLine, "`Purpose:` is empty — one or more sentences on what the capability is for")
+			}
 			if existing != nil {
 				add(d.Line, fmt.Sprintf("ADDED requirement %q already exists in specs/%s — use MODIFIED", d.Name, d.Capability))
 			} else if near := nearMiss(spec, d.Name); specExists && near != "" {

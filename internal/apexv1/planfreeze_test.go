@@ -136,3 +136,28 @@ func TestPlanDigest_IgnoresTrailingWhitespace(t *testing.T) {
 	require.Equal(t, a.PlanDigest(), b.PlanDigest())
 	require.NotEqual(t, a.PlanDigest(), c.PlanDigest())
 }
+
+// Item 12: after start, change.md is editable only in ## Why and ## Notes.
+func TestPlanDigest_OnlyWhyAndNotesAreFree(t *testing.T) {
+	base := changeDoc("x-y-z", "greeting", "none — chore", "- T1 x — check: true\n")
+	digest := ParseChange("", base).PlanDigest()
+	for name, tc := range map[string]struct {
+		old, new string
+		drift    bool
+	}{
+		"Why":          {"Because the greeter must change.", "Because, honestly, it must.", false},
+		"Notes":        {"## Notes\n", "## Notes\nRemember the copy deck.\n", false},
+		"blank lines":  {"## Out of scope\n", "## Out of scope\n\n\n", false},
+		"Out of scope": {"- farewells", "- farewells and goodbyes", true},
+		"frontmatter":  {"touches: [greeting]", "touches: [greeting, cli]", true},
+		"title":        {"# X y z", "# Something else", true},
+		"Tasks":        {"check: true", "check: false", true},
+		"new section":  {"## Notes\n", "## Risks\nNone.\n## Notes\n", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Contains(t, base, tc.old)
+			changed := ParseChange("", strings.Replace(base, tc.old, tc.new, 1)).PlanDigest()
+			require.Equal(t, tc.drift, changed != digest)
+		})
+	}
+}

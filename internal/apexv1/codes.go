@@ -160,6 +160,8 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.dropped-text", 1, "delta text that archive would not carry into any spec"},
 	{"change.capability-emptied", 1, "the delta removes a capability's last requirement without retire:"},
 	{"change.bad-retire", 1, "retire: lists a capability the delta does not empty"},
+	{"change.purpose-existing", 1, "an ADDED block's Purpose: names a capability that already exists"},
+	{"change.purpose-empty", 1, "an ADDED block's Purpose: is empty"},
 	{"change.scenario-loss", 1, "MODIFIED drops a scenario or changes its check"},
 	{"change.modified-missing", 1, "MODIFIED names no existing requirement"},
 	{"change.removed-missing", 1, "REMOVED names no existing requirement"},

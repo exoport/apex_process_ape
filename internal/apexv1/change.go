@@ -44,6 +44,11 @@ type Delta struct {
 	// Extra is a REMOVED block's first line of prose other than Reason:
 	// — text archive would drop.
 	Extra int `json:"-"`
+	// Purpose is an ADDED block's `Purpose:` line: the new capability's
+	// Purpose (item 11), kept out of the requirement text. PurposeLine is
+	// where it was.
+	Purpose     string `json:"purpose,omitempty"`
+	PurposeLine int    `json:"-"`
 }
 
 // Task is one `- T<n> <what> — check: <command|human-review>` line.
@@ -70,6 +75,7 @@ type Change struct {
 	// by ValidateChange alongside the shape rules.
 	parse []Finding
 	file  string
+	raw   string
 }
 
 var (
@@ -82,7 +88,7 @@ var (
 // ParseChange parses change.md. file is the project-relative path used in
 // findings.
 func ParseChange(file, doc string) *Change {
-	c := &Change{file: file}
+	c := &Change{file: file, raw: doc}
 	fm, body, err := frontmatter.Split([]byte(doc))
 	if err != nil {
 		c.MetaErr = errors.New("no YAML frontmatter (--- id/milestone/touches ---)")
@@ -140,6 +146,13 @@ func (c *Change) parseDelta(body []mdLine) {
 		head := mdLine{N: d.Line, Text: "### " + RequirementPrefix + " " + d.Name}
 		var bodyLines []mdLine
 		for _, l := range curLines {
+			if d.Op == OpAdded && !l.InCode && d.PurposeLine == 0 {
+				if t := strings.TrimSpace(l.Text); strings.HasPrefix(t, "Purpose:") {
+					d.Purpose = strings.TrimSpace(strings.TrimPrefix(t, "Purpose:"))
+					d.PurposeLine = l.N
+					continue
+				}
+			}
 			if d.Op == OpRemoved {
 				if t := strings.TrimSpace(l.Text); !l.InCode && strings.HasPrefix(t, "Reason:") {
 					d.Reason = strings.TrimSpace(strings.TrimPrefix(t, "Reason:"))
@@ -290,24 +303,28 @@ type reqKey struct{ Capability, Name string }
 
 func (d Delta) key() reqKey { return reqKey{d.Capability, d.Name} }
 
-// PlanDigest is the SHA-256 of the change's ## Delta and ## Tasks, lines
-// right-trimmed and trailing blank lines dropped: the plan `ape change
-// start` freezes. Prose elsewhere (Why, Notes) may change freely.
+// PlanDigest is the SHA-256 of change.md minus its ## Why and ## Notes
+// sections — the plan `ape change start` freezes (items 1 and 12): the
+// frontmatter, the title, ## Out of scope, ## Delta, ## Tasks and any other
+// section. Lines are right-trimmed and blank lines dropped, so reflowing
+// whitespace is not a change. Why and Notes may change freely after start.
 func (c *Change) PlanDigest() string {
 	h := sha256.New()
-	for _, name := range []string{"Delta", "Tasks"} {
-		h.Write([]byte("## " + name + "\n"))
-		if s := c.section(name); s != nil {
-			var lines []string
-			for _, l := range s.Body {
-				lines = append(lines, strings.TrimRight(l.Text, " \t"))
+	skip := false
+	for _, l := range splitLines(c.raw) {
+		if lv, title := headingLevel(l); lv > 0 && lv <= 2 {
+			skip = lv == 2 && (strings.EqualFold(title, "Why") || strings.EqualFold(title, "Notes"))
+			if skip {
+				h.Write([]byte("## " + title + "\n"))
+				continue
 			}
-			for len(lines) > 0 && lines[len(lines)-1] == "" {
-				lines = lines[:len(lines)-1]
-			}
-			h.Write([]byte(strings.Join(lines, "\n")))
 		}
-		h.Write([]byte("\n"))
+		if skip {
+			continue
+		}
+		if t := strings.TrimRight(l.Text, " \t"); t != "" {
+			h.Write([]byte(t + "\n"))
+		}
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

@@ -50,7 +50,7 @@ func (p *Project) MergeDelta(c *Change) (updates []SpecUpdate, conflicts []strin
 		spec, _, exists := p.LoadSpec(capName)
 		u := SpecUpdate{Capability: capName, Path: p.Rel(p.SpecFile(capName)), Created: !exists}
 		if !exists {
-			spec = Spec{Preamble: "# " + titleFromSlug(capName) + "\nPurpose: " + purposeFrom(c)}
+			spec = Spec{Preamble: "# " + titleFromSlug(capName) + "\nPurpose: " + capabilityPurpose(c, capName)}
 		}
 		merged, cs := applyDeltas(&spec, capName, byCap[capName], &u)
 		if len(cs) == 0 && exists && len(spec.Requirements) == 0 {
@@ -114,8 +114,20 @@ func applyDeltas(spec *Spec, capName string, deltas []Delta, u *SpecUpdate) (mer
 	return spec.Render(), conflicts
 }
 
-// purposeFrom is a new capability's Purpose line: the first paragraph of
-// the introducing change's `## Why`, flattened to one line.
+// capabilityPurpose is a new capability's Purpose: the `Purpose:` line of
+// one of the change's ADDED blocks for it (item 11), else purposeFrom.
+func capabilityPurpose(c *Change, capName string) string {
+	for i := range c.Deltas {
+		if d := &c.Deltas[i]; d.Op == OpAdded && d.Capability == capName && d.Purpose != "" {
+			return d.Purpose
+		}
+	}
+	return purposeFrom(c)
+}
+
+// purposeFrom is a new capability's Purpose line when the change gives
+// none: the first paragraph of the introducing change's `## Why`,
+// flattened to one line.
 func purposeFrom(c *Change) string {
 	if s := c.section("Why"); s != nil {
 		if para := firstParagraph(s.Body); para != "" {

@@ -144,6 +144,8 @@ var findingRules = []findingRule{
 	rule("", `nearly matches the existing`, "change.added-near-duplicate"),
 	rule("", `^the delta removes every requirement of`, "change.capability-emptied"),
 	rule("", `^retire: lists`, "change.bad-retire"),
+	rule("", "^`Purpose:` in an ADDED block names a new capability", "change.purpose-existing"),
+	rule("", "^`Purpose:` is empty", "change.purpose-empty"),
 	rule("", `^## Delta holds`, "change.bad-delta"),
 	rule("", `^delta heading must be`, "change.bad-delta-heading"),
 	rule("", `^delta capability .* is not a kebab-case slug`, "change.bad-delta-capability"),
