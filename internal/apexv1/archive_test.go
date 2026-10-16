@@ -11,7 +11,7 @@ import (
 )
 
 func TestMergeDelta(t *testing.T) {
-	hi := "### MODIFIED [greeting] Requirement: Say hello\nThe system SHALL print Hi.\n#### Scenario: hi\n- check: ./greet.sh | grep -q Hi\n"
+	hi := "### MODIFIED [greeting] Requirement: Say hello\nThe system SHALL print Hello, then Hi.\n#### Scenario: plain run\n- GIVEN nothing WHEN greet runs THEN it prints Hello\n- check: ./greet.sh | grep -q Hello\n#### Scenario: hi\n- check: ./greet.sh | grep -q Hi\n"
 	cases := []struct {
 		name      string
 		delta     string
@@ -29,8 +29,8 @@ func TestMergeDelta(t *testing.T) {
 		{
 			name:  "MODIFIED replaces in place",
 			delta: hi, touches: "greeting",
-			want:   map[string]string{"greeting": "The system SHALL print Hi."},
-			absent: map[string]string{"greeting": "The system SHALL print Hello."},
+			want:   map[string]string{"greeting": "The system SHALL print Hello, then Hi."},
+			absent: map[string]string{"greeting": "The system SHALL print Hello.\n"},
 			order:  []string{"Say hello", "Say name"},
 		},
 		{

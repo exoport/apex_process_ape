@@ -163,6 +163,29 @@ func (p *Project) CheckChange(id string) []Finding {
 	if s := c.section("Delta"); s != nil && len(c.Deltas) == 0 && c.DeltaNone == "" {
 		add(s.Line, "## Delta is empty — add ADDED/MODIFIED/REMOVED blocks, or the single line `none — <reason>`")
 	}
+	out = append(out, p.checkDeltas(file, c, touches)...)
+
+	if s := c.section("Tasks"); s != nil && len(c.Tasks) == 0 {
+		add(s.Line, "## Tasks has no tasks — `- T1 <what> — check: <command> | human-review`")
+	}
+	ids := map[string]bool{}
+	for _, t := range c.Tasks {
+		if ids[t.ID] {
+			add(t.Line, "duplicate task "+t.ID)
+		}
+		ids[t.ID] = true
+		if t.Check == "" {
+			add(t.Line, "task "+t.ID+" has no `check: <command> | human-review`")
+		}
+	}
+	return out
+}
+
+// checkDeltas checks each delta block against the change's touches and
+// the current specs.
+func (p *Project) checkDeltas(file string, c *Change, touches map[string]bool) []Finding {
+	var out []Finding
+	add := func(line int, msg string) { out = append(out, Finding{File: file, Line: line, Message: msg}) }
 	seen := map[reqKey]int{}
 	for i := range c.Deltas {
 		d := &c.Deltas[i]
@@ -195,6 +218,11 @@ func (p *Project) CheckChange(id string) []Finding {
 		case OpModified:
 			if existing == nil {
 				add(d.Line, fmt.Sprintf("MODIFIED names %q, which is not a requirement heading in specs/%s/spec.md — name it exactly", d.Name, d.Capability))
+			} else {
+				for _, loss := range scenarioLoss(existing, &d.Req) {
+					add(d.Line, fmt.Sprintf("MODIFIED [%s] %q %s — a MODIFIED block keeps every scenario and its check; changed behaviour is REMOVED + ADDED under a new name",
+						d.Capability, d.Name, loss))
+				}
 			}
 			out = append(out, validateRequirementBody(file, d.Req)...)
 		case OpRemoved:
@@ -204,20 +232,6 @@ func (p *Project) CheckChange(id string) []Finding {
 			if d.Reason == "" {
 				add(d.Line, "REMOVED needs a `Reason:` line")
 			}
-		}
-	}
-
-	if s := c.section("Tasks"); s != nil && len(c.Tasks) == 0 {
-		add(s.Line, "## Tasks has no tasks — `- T1 <what> — check: <command> | human-review`")
-	}
-	ids := map[string]bool{}
-	for _, t := range c.Tasks {
-		if ids[t.ID] {
-			add(t.Line, "duplicate task "+t.ID)
-		}
-		ids[t.ID] = true
-		if t.Check == "" {
-			add(t.Line, "task "+t.ID+" has no `check: <command> | human-review`")
 		}
 	}
 	return out

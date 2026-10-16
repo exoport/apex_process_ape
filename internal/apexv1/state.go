@@ -36,10 +36,22 @@ type CheckResult struct {
 	Tail []string `json:"-"`
 }
 
-// Baseline is one task's result before any work began.
+// Baseline is one task's result before any work began — or, for a task
+// added or changed by a re-plan, at the re-plan (SHA says which).
 type Baseline struct {
 	Task string `json:"task"`
 	Exit int    `json:"exit"`
+	Cmd  string `json:"cmd,omitempty"`
+	SHA  string `json:"sha,omitempty"`
+}
+
+// Replan records a re-start that re-baselined a change whose ## Tasks or
+// ## Delta changed after it started.
+type Replan struct {
+	At   string `json:"at"`
+	SHA  string `json:"sha"`
+	From string `json:"from_digest"`
+	To   string `json:"to_digest"`
 }
 
 // Verify is the last `ape change verify`.
@@ -68,20 +80,24 @@ type Accept struct {
 
 // State is changes/<id>/state.json. Written only by ape.
 type State struct {
-	ID                string     `json:"id"`
-	Status            string     `json:"status"`
-	BaseSHA           string     `json:"base_sha"`
-	StartedAt         string     `json:"started_at"`
-	Baseline          []Baseline `json:"baseline"`
-	Verify            *Verify    `json:"verify"`
-	Review            *Review    `json:"review"`
-	Accepted          []Accept   `json:"accepted"`
-	BlockedReason     *string    `json:"blocked_reason"`
-	AllowPendingHuman bool       `json:"allow_pending_human,omitempty"`
-	AbandonedReason   string     `json:"abandoned_reason,omitempty"`
-	ArchivedAt        string     `json:"archived_at,omitempty"`
-	ArchivedTo        string     `json:"archived_to,omitempty"`
-	CreatedAt         string     `json:"created_at,omitempty"`
+	ID        string     `json:"id"`
+	Status    string     `json:"status"`
+	BaseSHA   string     `json:"base_sha"`
+	StartedAt string     `json:"started_at"`
+	Baseline  []Baseline `json:"baseline"`
+	// PlanDigest is the SHA-256 of change.md's ## Delta and ## Tasks at
+	// start. verify and archive refuse while it differs (plan drift).
+	PlanDigest        string   `json:"plan_digest,omitempty"`
+	Replans           []Replan `json:"replans,omitempty"`
+	Verify            *Verify  `json:"verify"`
+	Review            *Review  `json:"review"`
+	Accepted          []Accept `json:"accepted"`
+	BlockedReason     *string  `json:"blocked_reason"`
+	AllowPendingHuman bool     `json:"allow_pending_human,omitempty"`
+	AbandonedReason   string   `json:"abandoned_reason,omitempty"`
+	ArchivedAt        string   `json:"archived_at,omitempty"`
+	ArchivedTo        string   `json:"archived_to,omitempty"`
+	CreatedAt         string   `json:"created_at,omitempty"`
 }
 
 // Active reports whether a change is in flight: started and neither

@@ -133,7 +133,9 @@ func newChangeCheckCmd() *cobra.Command {
     the single line "none — <reason>". The capability must be in touches. ADDED names must
     not exist in specs/<capability>/spec.md yet; MODIFIED/REMOVED must name an existing
     heading exactly. ADDED/MODIFIED carry ≥ 1 "#### Scenario:" with exactly one
-    "- check: <command> | human-review"; REMOVED carries "Reason:".
+    "- check: <command> | human-review"; REMOVED carries "Reason:". A MODIFIED block
+    keeps every scenario of the requirement it replaces, each with the same check
+    (it may add scenarios); changed behaviour is REMOVED + ADDED under a new name.
   - ## Tasks: "- T<n> <what> — check: <command> | human-review", no checkboxes, unique ids
 
 Exit codes: 0 green · 1 findings · 2 usage.`,
@@ -166,7 +168,14 @@ func newChangeStartCmd() *cobra.Command {
   3. records base_sha (HEAD) and started_at (kept when resuming a blocked change)
   4. runs every command check once as the baseline (which were already green), from the
      project root with sh -c; output under development/.apex/logs/<id>/
-  5. sets in-progress and commits state.json ("apex: <id> in-progress")
+  5. sets in-progress, freezes the plan (SHA-256 of ## Delta + ## Tasks) and commits
+     state.json ("apex: <id> in-progress")
+
+Re-start: once the plan is frozen, verify and archive refuse while ## Delta or ## Tasks
+differ from it. Running start again on an in-progress, verified or reviewed change
+re-baselines the new plan: recorded under "replans" in state.json, verify and review
+cleared, new or changed tasks baselined now; unchanged tasks keep their original
+baseline. With no plan change it is refused.
 
 Exit codes: 0 started · 1 check red, milestone not approved, or wrong status · 2 usage ·
 3 requirement conflict with another active change.`,
@@ -198,7 +207,8 @@ development/ — commit first (trailer "Change: <id>"): a verify belongs to a sh
 All command checks exit 0 → status verified (a reviewed change whose code has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last
 lines are printed; a change that was in-progress is left exactly as it was (nothing written,
-nothing committed), a verified/reviewed one goes back to in-progress (committed). human-review tasks are never run; those not yet accepted are listed as
+nothing committed), a verified/reviewed one goes back to in-progress (committed).
+Refused while ## Delta or ## Tasks differ from the plan frozen at start (re-start first). human-review tasks are never run; those not yet accepted are listed as
 pending.
 
 Exit codes: 0 all command checks green · 1 a check is red, uncommitted code, or wrong
@@ -361,12 +371,14 @@ func newChangeArchiveCmd() *cobra.Command {
 		"Apply the delta to specs/, move the change to the archive, commit `archive: <id>`",
 		`Archive a reviewed change:
 
-  1. needs status reviewed (review pass); re-runs verify when HEAD moved since it (red →
+  1. needs status reviewed (review pass) and the plan frozen at start unchanged;
+     re-runs verify when HEAD moved since it (red →
      in-progress, exit 1); refused if code changed since the review
   2. human-review tasks must be accepted, unless --allow-pending-human (recorded)
   3. applies the delta to development/specs/: ADDED appends, MODIFIED replaces, REMOVED
      deletes; a new capability gets specs/<cap>/spec.md (Purpose from the change's Why).
-     Any conflict → exit 3 and NOTHING is written
+     Any conflict — including a MODIFIED that would drop a scenario the current spec has,
+     or change its check — → exit 3 and NOTHING is written
   4. moves the folder to development/changes/archive/<YYYY-MM-DD>-<id>/, status archived
   5. commits the specs and the move (only those paths; hooks skipped) as
      "archive: <id>" with trailer "Change: <id>"

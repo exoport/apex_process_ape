@@ -1,6 +1,8 @@
 package apexv1
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
@@ -264,3 +266,57 @@ func (c *Change) HumanTasks() []string {
 type reqKey struct{ Capability, Name string }
 
 func (d Delta) key() reqKey { return reqKey{d.Capability, d.Name} }
+
+// PlanDigest is the SHA-256 of the change's ## Delta and ## Tasks, lines
+// right-trimmed and trailing blank lines dropped: the plan `ape change
+// start` freezes. Prose elsewhere (Why, Notes) may change freely.
+func (c *Change) PlanDigest() string {
+	h := sha256.New()
+	for _, name := range []string{"Delta", "Tasks"} {
+		h.Write([]byte("## " + name + "\n"))
+		if s := c.section(name); s != nil {
+			var lines []string
+			for _, l := range s.Body {
+				lines = append(lines, strings.TrimRight(l.Text, " \t"))
+			}
+			for len(lines) > 0 && lines[len(lines)-1] == "" {
+				lines = lines[:len(lines)-1]
+			}
+			h.Write([]byte(strings.Join(lines, "\n")))
+		}
+		h.Write([]byte("\n"))
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// scenarioLoss lists what a MODIFIED block takes away from the requirement
+// it replaces: a scenario it drops, or a scenario whose check it changes.
+// Both silently weaken the living spec — the behaviour stays "specified"
+// while the proof of it goes — so neither is a modification ape accepts.
+// Changed behaviour is a REMOVED plus an ADDED under a new name.
+func scenarioLoss(existing, modified *Requirement) []string {
+	byName := map[string]*Scenario{}
+	for i := range modified.Scenarios {
+		byName[modified.Scenarios[i].Name] = &modified.Scenarios[i]
+	}
+	var out []string
+	for i := range existing.Scenarios {
+		old := &existing.Scenarios[i]
+		now, ok := byName[old.Name]
+		if !ok {
+			out = append(out, fmt.Sprintf("drops scenario %q", old.Name))
+			continue
+		}
+		if oldCheck, newCheck := firstCheck(old), firstCheck(now); oldCheck != newCheck {
+			out = append(out, fmt.Sprintf("changes the check of scenario %q from %#q to %#q", old.Name, oldCheck, newCheck))
+		}
+	}
+	return out
+}
+
+func firstCheck(s *Scenario) string {
+	if len(s.Checks) == 0 {
+		return ""
+	}
+	return s.Checks[0]
+}

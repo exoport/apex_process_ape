@@ -25,7 +25,7 @@ func TestCheckChange(t *testing.T) {
 			name: "green MODIFIED + REMOVED",
 			id:   "rework-hello",
 			doc: changeDoc("rework-hello", "greeting",
-				"### MODIFIED [greeting] Requirement: Say hello\nThe system SHALL print Hi.\n#### Scenario: hi\n- check: ./greet.sh | grep -q Hi\n\n### REMOVED [greeting] Requirement: Say name\nReason: unused\n",
+				"### MODIFIED [greeting] Requirement: Say hello\nThe system SHALL print Hello, then Hi.\n#### Scenario: plain run\n- GIVEN nothing WHEN greet runs THEN it prints Hello\n- check: ./greet.sh | grep -q Hello\n#### Scenario: hi\n- check: ./greet.sh | grep -q Hi\n\n### REMOVED [greeting] Requirement: Say name\nReason: unused\n",
 				"- T1 hi — check: ./greet.sh | grep -q Hi\n"),
 		},
 		{

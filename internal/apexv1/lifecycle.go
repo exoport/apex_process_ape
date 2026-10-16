@@ -66,8 +66,19 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 		return nil, err
 	}
 	st := ci.State
-	if st.Status != StatusDraft && st.Status != StatusBlocked {
-		return nil, &FailError{Msg: "change " + id + " is " + st.Status + "; start applies to draft or blocked changes"}
+	digest := ci.Doc.PlanDigest()
+	var replan bool
+	switch st.Status {
+	case StatusDraft, StatusBlocked:
+		replan = st.PlanDigest != "" && st.PlanDigest != digest
+	case StatusInProgress, StatusVerified, StatusReviewed:
+		// A started change starts again only to re-baseline a changed plan.
+		if st.PlanDigest == "" || st.PlanDigest == digest {
+			return nil, &FailError{Msg: "change " + id + " is " + st.Status + " and its ## Tasks and ## Delta are unchanged — nothing to re-baseline"}
+		}
+		replan = true
+	default:
+		return nil, &FailError{Msg: "change " + id + " is " + st.Status + "; start applies to draft or blocked changes, or re-baselines a changed plan"}
 	}
 	if fs := p.CheckChange(id); len(fs) > 0 {
 		return nil, &FailError{Msg: "change " + id + " does not pass `ape change check` — fix change.md first", Findings: fs}
@@ -96,21 +107,61 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 		return nil, &ConflictError{Msg: "change " + id + " claims requirements another active change claims — archive or block that one first, or re-scope", Conflicts: conflicts}
 	}
 
-	if st.BaseSHA == "" || st.Status == StatusDraft {
-		st.BaseSHA = HeadSHA(ctx, p.Root)
+	head := HeadSHA(ctx, p.Root)
+	if st.BaseSHA == "" || st.Status == StatusDraft && !replan {
+		st.BaseSHA = head
 		st.StartedAt = Stamp()
 	}
-	results := p.runTasks(ctx, ci.Doc, id, "baseline-", opt)
-	st.Baseline = st.Baseline[:0]
-	for _, r := range results {
-		st.Baseline = append(st.Baseline, Baseline{Task: r.Task, Exit: r.Exit})
+	if replan {
+		st.Replans = append(st.Replans, Replan{At: Stamp(), SHA: head, From: st.PlanDigest, To: digest})
+		// A verify or review of the old plan proves nothing about this one.
+		st.Verify, st.Review = nil, nil
 	}
+	results := p.rebaseline(ctx, ci, st, head, opt)
+	st.PlanDigest = digest
 	st.Status = StatusInProgress
 	st.BlockedReason = nil
 	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}
 	return &StartResult{ID: id, Status: st.Status, BaseSHA: st.BaseSHA, Baseline: results}, nil
+}
+
+// rebaseline runs the baseline: every command task on a first start, and
+// on a re-start only the tasks that are new or whose check changed. A task
+// keeps the baseline it had before any code was written — the evidence
+// green-at-baseline (item 3) is judged by; a re-plan cannot launder it.
+func (p *Project) rebaseline(ctx context.Context, ci ChangeInfo, st *State, head string, opt RunOptions) []CheckResult {
+	kept := map[string]Baseline{}
+	for _, b := range st.Baseline {
+		kept[b.Task] = b
+	}
+	var out []CheckResult
+	var baseline []Baseline
+	for _, t := range ci.Doc.CommandTasks() {
+		if b, ok := kept[t.ID]; ok && b.Cmd == t.Check {
+			baseline = append(baseline, b)
+			continue
+		}
+		logPath := filepath.Join(p.LogDir(ci.ID), "baseline-"+t.ID+".log")
+		r := RunCheck(ctx, p.Root, t.Check, logPath, opt.Timeout)
+		r.Task = t.ID
+		r.Log = p.Rel(logPath)
+		out = append(out, r)
+		baseline = append(baseline, Baseline{Task: t.ID, Exit: r.Exit, Cmd: t.Check, SHA: head})
+	}
+	st.Baseline = baseline
+	return out
+}
+
+// checkPlanFrozen refuses a change whose ## Tasks or ## Delta changed
+// since start: its baseline, verify and review describe a different plan.
+func checkPlanFrozen(ci ChangeInfo) error {
+	if ci.State.PlanDigest == "" || ci.State.PlanDigest == ci.Doc.PlanDigest() {
+		return nil
+	}
+	return &FailError{Msg: "change " + ci.ID + ": ## Tasks or ## Delta changed since start (plan drift) — run `ape change start " + ci.ID +
+		"` to re-baseline the new plan (recorded), or restore change.md"}
 }
 
 // VerifyResult is what `ape change verify` reports.
@@ -148,6 +199,9 @@ func (p *Project) Verify(ctx context.Context, id string, opt RunOptions) (*Verif
 		return nil, &FailError{Msg: "change " + id + " is a draft — `ape change start " + id + "` first"}
 	default:
 		return nil, &FailError{Msg: "change " + id + " is " + ci.State.Status + " — verify applies to in-progress, verified or reviewed changes"}
+	}
+	if err := checkPlanFrozen(ci); err != nil {
+		return nil, err
 	}
 	return p.verify(ctx, ci, opt)
 }

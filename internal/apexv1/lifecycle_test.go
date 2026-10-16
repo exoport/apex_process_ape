@@ -96,7 +96,8 @@ func TestStart(t *testing.T) {
 
 	st := state(t, p, "add-wave")
 	require.Equal(t, StatusInProgress, st.Status)
-	require.Equal(t, []Baseline{{Task: "T1", Exit: 127}}, st.Baseline)
+	require.Equal(t, []Baseline{{Task: "T1", Exit: 127, Cmd: "./wave.sh", SHA: head}}, st.Baseline)
+	require.Equal(t, ParseChange("", read(t, p, "development/changes/add-wave/change.md")).PlanDigest(), st.PlanDigest)
 	require.Equal(t, "apex: add-wave in-progress", subjects(t, p)[0], "D5: ape commits state.json")
 	require.Contains(t, run(t, p.Root, "log", "-1", "--format=%b"), "Change: add-wave")
 	require.Equal(t, "development/changes/add-wave/state.json", run(t, p.Root, "show", "--name-only", "--format=", "HEAD"))
@@ -128,7 +129,7 @@ func TestStart_Refusals(t *testing.T) {
 func TestStart_RequirementConflicts(t *testing.T) {
 	modify := func(id string) string {
 		return changeDoc(id, "greeting",
-			"### MODIFIED [greeting] Requirement: Say hello\nThe system SHALL print Hi.\n#### Scenario: hi\n- check: true\n",
+			"### MODIFIED [greeting] Requirement: Say hello\nThe system SHALL print Hello, then Hi.\n#### Scenario: plain run\n- GIVEN nothing WHEN greet runs THEN it prints Hello\n- check: ./greet.sh | grep -q Hello\n#### Scenario: hi\n- check: true\n",
 			"- T1 hi — check: true\n")
 	}
 	remove := func(id string) string {

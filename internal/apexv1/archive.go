@@ -78,6 +78,10 @@ func applyDeltas(spec *Spec, capName string, deltas []Delta, u *SpecUpdate) (mer
 				conflicts = append(conflicts, fmt.Sprintf("MODIFIED [%s] %q is not in the spec", capName, d.Name))
 				continue
 			}
+			if loss := scenarioLoss(&spec.Requirements[idx], &d.Req); len(loss) > 0 {
+				conflicts = append(conflicts, fmt.Sprintf("MODIFIED [%s] %q %s of the current spec", capName, d.Name, strings.Join(loss, "; ")))
+				continue
+			}
 			spec.Requirements[idx] = d.Req
 			u.Modified++
 		case OpRemoved:
@@ -150,6 +154,9 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	}
 	if _, err := git(ctx, p.Root, "rev-parse", "--is-inside-work-tree"); err != nil {
 		return nil, &FailError{Msg: "not a git repository — archive commits its result"}
+	}
+	if err := checkPlanFrozen(ci); err != nil {
+		return nil, err
 	}
 	res := &ArchiveResult{ID: id}
 
