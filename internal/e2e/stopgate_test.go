@@ -16,12 +16,13 @@ import (
 )
 
 // fakeClaudeV1 is fakeClaude plus what Claude Code does with a v1
-// project's own Stop hook: it runs `ape hook stop` (from the project's
-// .claude/settings.json) beside ape's injected Stop hook, and when the
-// project hook blocks it continues the turn — here by writing the missing
-// wave.sh, as a model fixing its red check would — and stops again with
-// stop_hook_active true. `ape` resolves to the running binary: ape task
-// puts it first on the session's PATH.
+// project's own Stop hook: it runs every distinct Stop command — `ape hook
+// stop` when the project's .claude/settings.json registers it, and the
+// copy ape task passes inline in --settings — beside ape's injected Stop
+// hook, and when any of them blocks it continues the turn — here by
+// writing the missing wave.sh, as a model fixing its red check would — and
+// stops again with stop_hook_active true. `ape` resolves to the running
+// binary: ape task puts it first on the session's PATH.
 const fakeClaudeV1 = `#!/bin/bash
 if [ "$1" = "--version" ]; then echo "2.1.300 (Claude Code)"; exit 0; fi
 settings=""
@@ -32,6 +33,9 @@ done
 hook() { printf '%s' "$settings" | grep -o "env APE_BRIDGE_PORT=[0-9]* [^\"]* notify --event $1" | head -1; }
 ups=$(hook UserPromptSubmit)
 stop=$(hook Stop)
+inline=$(printf '%s' "$settings" | grep -o "ape hook stop --inline" | head -1)
+fromfile=""
+if grep -q '"ape hook stop"' .claude/settings.json 2>/dev/null; then fromfile="ape hook stop"; fi
 printf '\n  bypass permissions on (shift+tab to cycle)\n❯ '
 IFS= read -r line
 line=${line%$'\r'}
@@ -39,10 +43,12 @@ printf '{"session_id":"fake-1","hook_event_name":"UserPromptSubmit","cwd":"%s","
 active=false
 for turn in 1 2 3 4 5; do
   payload=$(printf '{"session_id":"fake-1","hook_event_name":"Stop","cwd":"%s","stop_hook_active":%s,"background_tasks":[]}' "$PWD" "$active")
-  printf '%s' "$payload" | ape hook stop > "$FAKE_DIR/project-hook-$turn.out" &
-  project=$!
+  : > "$FAKE_DIR/project-hook-$turn.out"
+  if [ -n "$fromfile" ]; then printf '%s' "$payload" | $fromfile > "$FAKE_DIR/file-hook-$turn.out" & a=$!; fi
+  if [ -n "$inline" ]; then printf '%s' "$payload" | $inline > "$FAKE_DIR/inline-hook-$turn.out" & b=$!; fi
   printf '%s' "$payload" | sh -c "$stop"
-  wait $project
+  [ -n "$fromfile" ] && wait $a && cat "$FAKE_DIR/file-hook-$turn.out" >> "$FAKE_DIR/project-hook-$turn.out"
+  [ -n "$inline" ] && wait $b && cat "$FAKE_DIR/inline-hook-$turn.out" >> "$FAKE_DIR/project-hook-$turn.out"
   if ! grep -q '"decision":"block"' "$FAKE_DIR/project-hook-$turn.out"; then break; fi
   echo "turn $turn blocked" >> "$FAKE_DIR/turns"
   printf '#!/bin/sh\necho wave\n' > wave.sh; chmod +x wave.sh
@@ -76,6 +82,10 @@ The system SHALL wave.
 // instead of ending the run on that Stop, the session fixes the check,
 // the next Stop is allowed, and the run completes — with both verdicts
 // recorded under stop_gate in the run manifest.
+//
+// Backlog 31: the stop hook reaches the session whether or not the
+// project's settings.json still registers it — ape task passes it inline —
+// and when both copies run, exactly one decides each Stop.
 func TestTask_ProjectStopHookBlockKeepsTheRunAlive(t *testing.T) {
 	for _, bin := range []string{"bash", "git"} {
 		if _, err := exec.LookPath(bin); err != nil {
@@ -83,6 +93,12 @@ func TestTask_ProjectStopHookBlockKeepsTheRunAlive(t *testing.T) {
 		}
 	}
 	ape := buildApe(t)
+	t.Run("settings.json and inline", func(t *testing.T) { stopHookRun(t, ape, false) })
+	t.Run("hooks removed from settings.json", func(t *testing.T) { stopHookRun(t, ape, true) })
+}
+
+func stopHookRun(t *testing.T, ape string, dropSettingsHooks bool) {
+	t.Helper()
 	project := t.TempDir()
 	gitEnv := append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
 		"GIT_CONFIG_GLOBAL=/dev/null", "APE_SESSION=")
@@ -107,6 +123,9 @@ func TestTask_ProjectStopHookBlockKeepsTheRunAlive(t *testing.T) {
 	sh("git", "add", "-A")
 	sh("git", "commit", "-q", "-m", "plan")
 	sh(ape, "change", "start", "add-wave")
+	if dropSettingsHooks {
+		require.NoError(t, writeFile(filepath.Join(project, ".claude", "settings.json"), "{}\n"))
+	}
 
 	fake := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(fake, "claude"), []byte(fakeClaudeV1), 0o755))
@@ -139,4 +158,12 @@ func TestTask_ProjectStopHookBlockKeepsTheRunAlive(t *testing.T) {
 	require.Equal(t, 1, m.StopGate.Allowed)
 	require.Equal(t, "block", m.StopGate.Events[0].Verdict)
 	require.Equal(t, "add-wave", m.StopGate.Events[0].Change)
+	if !dropSettingsHooks {
+		out, err := os.ReadFile(filepath.Join(fake, "file-hook-1.out"))
+		require.NoError(t, err, "the settings.json copy ran")
+		require.Empty(t, string(out), "the settings.json copy stands down for the inline one")
+	}
+	inline, err := os.ReadFile(filepath.Join(fake, "inline-hook-1.out"))
+	require.NoError(t, err)
+	require.Contains(t, string(inline), `"decision":"block"`)
 }

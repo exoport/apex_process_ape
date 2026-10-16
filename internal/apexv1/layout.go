@@ -56,12 +56,16 @@ type Config struct {
 	// baseline), at verify and at the milestone gate, failing only when
 	// newly red.
 	Regression string `yaml:"regression"`
+	// Effort is the project's default effort for an ape-launched session
+	// that no flag, models.<skill> entry or parent session decides
+	// (DecideLaunch). Empty: Claude Code's own setting.
+	Effort string `yaml:"effort"`
 }
 
 // SkillModel is one models.<skill> entry.
 type SkillModel struct {
-	Model  string `yaml:"model"`
-	Effort string `yaml:"effort"`
+	Model  string `json:"model,omitempty"  yaml:"model"`
+	Effort string `json:"effort,omitempty" yaml:"effort"`
 }
 
 // UnmarshalYAML accepts the scalar form (a model name) and the mapping.

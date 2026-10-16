@@ -343,10 +343,11 @@ session, never from inside a review session (depth 1), skill fixed to apex-revie
   - the session's cost is its own ape task manifest (ape status sums it)
   - model and effort: --model/--effort; else _apex/config.yaml models.apex-review
     ("apex-review: sonnet" or "apex-review: {model: sonnet, effort: high}"; a config
-    model without an effort leaves the effort to the per-model table); else the model
-    and explicit effort of the ape session that asked (so a review runs like the arm
-    that requested it); else claude's default model and ape's default effort. The
-    review session's manifest records each and its source under review_launch.
+    model without an effort does not take the asking session's effort); else the
+    model and effort of the ape session that asked (so a review runs like the arm
+    that requested it); else, for the effort, _apex/config.yaml effort:; else claude's
+    defaults. The effort is passed as claude --effort. The review session's manifest
+    records each and its source under review_launch (and, the same, under launch).
 
 Exit codes: 0 recorded / review passed · 1 not verified, code changed since the verify,
 review block (--run: findings in JSON "outcome"), verdict voided, or no verdict · 2 usage

@@ -214,6 +214,9 @@ const (
 	// SourceLegacy is LegacyDefault, process-wide, for a project with no
 	// table.
 	SourceLegacy = "legacy-default"
+	// SourceClaudeDefault is an APEX v1 spawn with no effort at all: ape
+	// passes nothing and Claude Code's own setting decides.
+	SourceClaudeDefault = "claude-default"
 )
 
 // Plan is what one spawn gets. snake_case: it lands in run records.
@@ -237,6 +240,28 @@ type Plan struct {
 	Resolved string `json:"resolved" yaml:"resolved"`
 	// FromFamily is true when Resolved came from the model's family row.
 	FromFamily bool `json:"from_family,omitempty" yaml:"from_family,omitempty"`
+	// Arg is the `claude --effort` value, set only by ArgPlan (APEX v1).
+	Arg string `json:"arg,omitempty" yaml:"arg,omitempty"`
+}
+
+// ArgPlan is an APEX v1 spawn's effort: the level goes on claude's command
+// line as `--effort <level>`, which sets the session's effort only, where
+// CLAUDE_CODE_EFFORT_LEVEL would outrank every skill's, agent's and
+// sub-agent's own. No table and no legacy default: an empty level passes
+// nothing, and Claude Code's own setting decides.
+func ArgPlan(level, source string) Plan {
+	if level == "" {
+		return Plan{Source: SourceClaudeDefault}
+	}
+	return Plan{Arg: level, Source: source, Resolved: level}
+}
+
+// ArgEntries returns the claude command-line flags the plan needs, if any.
+func (p Plan) ArgEntries() []string {
+	if p.Arg == "" {
+		return nil
+	}
+	return []string{"--effort", p.Arg}
 }
 
 // Decide resolves a spawn's effort. explicit is the first non-empty of

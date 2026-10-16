@@ -27,10 +27,30 @@ func newHookCmd() *cobra.Command {
                   development/specs/**, changes/*/state.json, archive/**, and
                   _apex/state/**
 
-Every hook exits 0; a block or deny is expressed in its JSON output.`,
+Every hook exits 0; a block or deny is expressed in its JSON output.
+
+In a session ape task launches in a v1 project, the three hooks also come inline
+in ape's --settings (with --inline), so a hand-edited settings.json cannot drop
+them; the settings.json copy then does nothing, so each event is decided once.`,
 	}
 	cmd.AddCommand(newHookSessionStartCmd(), newHookStopCmd(), newHookPreToolCmd())
 	return cmd
+}
+
+// shadowedHook reports whether this hook run is the .claude/settings.json
+// copy of a hook `ape task` already runs inline (apexv1.InlineHooks): the
+// session carries apexv1.EnvInlineHooks and this run lacks --inline. It
+// does nothing then, so exactly one copy acts on each event — whether or
+// not Claude Code deduplicates them.
+func shadowedHook(inline bool) bool {
+	return !inline && os.Getenv(apexv1.EnvInlineHooks) != ""
+}
+
+// addInlineFlag registers the hidden --inline flag ape task's injected
+// hooks carry.
+func addInlineFlag(cmd *cobra.Command, inline *bool) {
+	cmd.Flags().BoolVar(inline, "inline", false, "this run is the copy ape task injected (the settings.json copy then does nothing)")
+	_ = cmd.Flags().MarkHidden("inline")
 }
 
 // hookPayloadMax bounds what a hook reads from stdin.
@@ -78,6 +98,7 @@ func hookDir(cwd string, payload apexv1.HookPayload) string {
 
 func newHookSessionStartCmd() *cobra.Command {
 	var cwd string
+	var inline bool
 	cmd := &cobra.Command{
 		Use:   "session-start",
 		Short: "SessionStart hook: inject `ape status --brief` as additional context",
@@ -86,6 +107,9 @@ func newHookSessionStartCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := readHookPayload(cmd)
+			if shadowedHook(inline) {
+				return nil
+			}
 			if p, err := apexv1.Open(apexv1.FindRoot(hookDir(cwd, payload))); err == nil && p.IsV1() {
 				emitHook(cmd)(apexv1.SessionStartOutput(p.Status().Brief()))
 			}
@@ -93,11 +117,13 @@ func newHookSessionStartCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&cwd, "cwd", "", "project directory (default: the payload's cwd)")
+	addInlineFlag(cmd, &inline)
 	return cmd
 }
 
 func newHookStopCmd() *cobra.Command {
 	var cwd string
+	var inline bool
 	var f v1Flags
 	cmd := &cobra.Command{
 		Use:   "stop",
@@ -113,6 +139,9 @@ is how ` + "`ape task`" + ` learns that a Stop it saw did not end the turn.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := readHookPayload(cmd)
+			if shadowedHook(inline) {
+				return nil
+			}
 			if cwd != "" {
 				payload.Cwd = cwd
 			} else if payload.Cwd == "" {
@@ -124,11 +153,13 @@ is how ` + "`ape task`" + ` learns that a Stop it saw did not end the turn.`,
 	}
 	cmd.Flags().StringVar(&cwd, "cwd", "", "project directory (default: the payload's cwd)")
 	addV1TimeoutFlag(cmd, &f)
+	addInlineFlag(cmd, &inline)
 	return cmd
 }
 
 func newHookPreToolCmd() *cobra.Command {
 	var cwd string
+	var inline bool
 	cmd := &cobra.Command{
 		Use:   "pre-tool",
 		Short: "PreToolUse hook: deny edits to specs, state.json, the archive and _apex/state",
@@ -140,6 +171,9 @@ development/archive/, or is under _apex/state/. Anything else: no output.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := readHookPayload(cmd)
+			if shadowedHook(inline) {
+				return nil
+			}
 			if cwd != "" {
 				payload.Cwd = cwd
 			}
@@ -148,5 +182,6 @@ development/archive/, or is under _apex/state/. Anything else: no output.`,
 		},
 	}
 	cmd.Flags().StringVar(&cwd, "cwd", "", "project directory (default: the payload's cwd)")
+	addInlineFlag(cmd, &inline)
 	return cmd
 }

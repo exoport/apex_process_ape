@@ -47,6 +47,9 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
   SessionStart          ape hook session-start
   Stop, SubagentStop    ape hook stop          (timeout 1800 s: it runs the change's checks)
   PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit)
+A hook that was altered (another matcher, async, a shorter stop timeout) is replaced
+by the one above; running init again changes nothing. ape task passes the same
+hooks inline as well, so its sessions have them even when settings.json does not.
 
 Everything init wrote (and settings.json when it merged hooks) is committed as
 "apex: project init"; files that existed before are not touched and not committed.
@@ -115,6 +118,9 @@ func newProjectCheckCmd() *cobra.Command {
                            (an older ape's state: move milestones.json and decisions.json
                            to _apex/state/, delete it; ` + "`ape project init`" + ` then adds
                            _apex/state/.gitignore)
+  .claude/settings.json    ape's hooks registered as ` + "`ape project init`" + ` writes them:
+                           hooks.missing / hooks.altered (matcher, type, async, a
+                           stop timeout below 1800 s); ` + "`ape project init`" + ` restores them
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
 		Example: "  ape project check\n  ape project check --json",
@@ -127,7 +133,7 @@ Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --
 			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
-			fs := p.Check()
+			fs := append(p.Check(), p.CheckHooks()...)
 			if len(fs) > 0 {
 				return v1Fail(cmd, &f, &apexv1.FailError{
 					Code:     "project.check-failed",

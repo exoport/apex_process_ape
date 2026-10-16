@@ -208,6 +208,7 @@ func TestReviewRun_ModelAndEffort(t *testing.T) {
 		var m pipeline.Manifest
 		require.NoError(t, yaml.Unmarshal(data, &m))
 		require.NotNil(t, m.ReviewLaunch, "manifest:\n%s", data)
+		require.Equal(t, m.ReviewLaunch, m.Launch, "launch: and review_launch: say the same thing")
 		l := m.ReviewLaunch
 		return map[string]any{
 			"model": l.Model, "model_source": l.ModelSource, "effort": l.Effort,
@@ -223,7 +224,10 @@ func TestReviewRun_ModelAndEffort(t *testing.T) {
 		launch, err := os.ReadFile(filepath.Join(fake, "launch"))
 		require.NoError(t, err)
 		require.Contains(t, string(launch), "--model claude-sonnet-5-5")
-		require.Contains(t, string(launch), "effort=high")
+		// Backlog 29: a v1 session's effort is claude's --effort, never the
+		// process-wide CLAUDE_CODE_EFFORT_LEVEL.
+		require.Contains(t, string(launch), "--effort high")
+		require.Contains(t, string(launch), " effort=\n")
 		l := launchOf(t, project)
 		require.Equal(t, "claude-sonnet-5-5", l["model"])
 		require.Equal(t, "parent-session", l["model_source"])
@@ -251,7 +255,8 @@ func TestReviewRun_ModelAndEffort(t *testing.T) {
 		launch, err := os.ReadFile(filepath.Join(fake, "launch"))
 		require.NoError(t, err)
 		require.Contains(t, string(launch), "--model claude-haiku-5-5")
-		require.Contains(t, string(launch), "effort=low")
+		require.Contains(t, string(launch), "--effort low")
+		require.Contains(t, string(launch), " effort=\n")
 		l := launchOf(t, project)
 		require.Equal(t, "config", l["model_source"])
 		require.Equal(t, "config", l["effort_source"])
@@ -265,6 +270,7 @@ func TestReviewRun_ModelAndEffort(t *testing.T) {
 		launch, err := os.ReadFile(filepath.Join(fake, "launch"))
 		require.NoError(t, err)
 		require.NotContains(t, string(launch), "--model")
+		require.NotContains(t, string(launch), "--effort")
 		l := launchOf(t, project)
 		require.Equal(t, "default", l["model_source"])
 		require.Equal(t, "default", l["effort_source"])

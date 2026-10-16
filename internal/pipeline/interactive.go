@@ -192,6 +192,9 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, skips Sta
 		return StatusFailed, fmt.Errorf("stage %q: resolve effort: %w", stage.Name, effErr)
 	}
 	effortPlan := effort.Decide(explicitEffort, effortSource, opts.EffortTable, firstModel)
+	if opts.EffortAsArg {
+		effortPlan = effort.ArgPlan(explicitEffort, effortSource)
+	}
 
 	plan, planErr := spec.planStageCommits(stage.Name, skips.Steps)
 	if planErr != nil {
@@ -202,9 +205,11 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, skips Sta
 	if argvErr != nil {
 		return StatusFailed, argvErr
 	}
+	argv = append(argv, effortPlan.ArgEntries()...)
 
 	stageEnv := append(effortPlan.EnvEntries(), repl.SessionMarkerEnv(sessionKind(opts), runIDOf(mw, spec))...)
 	stageEnv = append(stageEnv, repl.LaunchEnv(firstModel, explicitEffort)...)
+	stageEnv = append(stageEnv, opts.SpawnEnv...)
 
 	sessionName := fmt.Sprintf("ape-%s-%d", sanitizeSessionName(stage.Name), os.Getpid())
 	// Ensure no stale session by that name; ignore not-found error.

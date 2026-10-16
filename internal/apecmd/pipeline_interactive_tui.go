@@ -159,6 +159,7 @@ func runWithInteractiveTUI(ctx context.Context, spec *pipeline.Spec, projectRoot
 			AllowDirty:             cfg.allowDirty,
 			Effort:                 cfg.effort,
 			EffortTable:            cfg.effortTable,
+			EffortAsArg:            cfg.effortAsArg,
 			SessionKind:            sessionKindOf(cfg),
 			PrependFlags:           prepend,
 			StagePrependFlags:      stagePrepend,

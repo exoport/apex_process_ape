@@ -1899,10 +1899,11 @@ session, never from inside a review session (depth 1), skill fixed to apex-revie
   - the session's cost is its own ape task manifest (ape status sums it)
   - model and effort: --model/--effort; else _apex/config.yaml models.apex-review
     ("apex-review: sonnet" or "apex-review: {model: sonnet, effort: high}"; a config
-    model without an effort leaves the effort to the per-model table); else the model
-    and explicit effort of the ape session that asked (so a review runs like the arm
-    that requested it); else claude's default model and ape's default effort. The
-    review session's manifest records each and its source under review_launch.
+    model without an effort does not take the asking session's effort); else the
+    model and effort of the ape session that asked (so a review runs like the arm
+    that requested it); else, for the effort, _apex/config.yaml effort:; else claude's
+    defaults. The effort is passed as claude --effort. The review session's manifest
+    records each and its source under review_launch (and, the same, under launch).
 
 Exit codes: 0 recorded / review passed · 1 not verified, code changed since the verify,
 review block (--run: findings in JSON "outcome"), verdict voided, or no verdict · 2 usage
@@ -2108,6 +2109,11 @@ this ape knows. A model id newer than this binary that is not its family's
 alias target gets the fallback.
 
 --model resolves one model the way a spawn would.
+
+In an APEX v1 project the table applies to ape pipeline only: ape task
+passes claude --effort from --effort, models.<skill>.effort, the parent
+session's effort or _apex/config.yaml effort:, else nothing (see ape task
+--help). The report's v1 section shows the config's part of that.
 
 Exit codes:
   0  resolved (with or without a table)
@@ -4005,6 +4011,10 @@ Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
 
 Every hook exits 0; a block or deny is expressed in its JSON output.
 
+In a session ape task launches in a v1 project, the three hooks also come inline
+in ape's --settings (with --inline), so a hand-edited settings.json cannot drop
+them; the settings.json copy then does nothing, so each event is decided once.
+
 Subcommands:
 
 - `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive and _apex/state
@@ -4817,6 +4827,9 @@ Validate the whole project and list every failure, not just the first.
                            (an older ape's state: move milestones.json and decisions.json
                            to _apex/state/, delete it; `ape project init` then adds
                            _apex/state/.gitignore)
+  .claude/settings.json    ape's hooks registered as `ape project init` writes them:
+                           hooks.missing / hooks.altered (matcher, type, async, a
+                           stop timeout below 1800 s); `ape project init` restores them
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
 
@@ -4895,6 +4908,9 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
   SessionStart          ape hook session-start
   Stop, SubagentStop    ape hook stop          (timeout 1800 s: it runs the change's checks)
   PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit)
+A hook that was altered (another matcher, async, a shorter stop timeout) is replaced
+by the one above; running init again changes nothing. ape task passes the same
+hooks inline as well, so its sessions have them even when settings.json does not.
 
 Everything init wrote (and settings.json when it merged hooks) is committed as
 "apex: project init"; files that existed before are not touched and not committed.
@@ -6951,6 +6967,21 @@ Run artifacts land under <project>/_output/ape/tasks/<skill>/<run-id>/
 (_apex/state/ exists) under _apex/state/runs/tasks/ instead, a directory
 git ignores, where a model clearing _output/ cannot reach.
 
+In an APEX v1 project (development/project.md exists) ape decides the
+session's model and effort itself, and records the decision in the run
+manifest as launch: {model, model_source, effort, effort_source}:
+  model    --model, else _apex/config.yaml models.<skill> ("sonnet" or
+           {model: sonnet, effort: high}), else the model of the ape session
+           that started this one (APE_SESSION_MODEL), else claude's default
+  effort   --effort, else models.<skill>.effort, else the parent session's
+           (APE_SESSION_EFFORT; skipped when models.<skill> names a model
+           without an effort), else _apex/config.yaml effort:, else nothing
+The effort is passed as claude --effort <level>, which sets the session's
+effort only; CLAUDE_CODE_EFFORT_LEVEL is never set (an inherited one is
+removed) and _apex/effort-defaults.yaml is not used. Sources: flag, config,
+parent-session, config-default, default. The session's tools see the
+resolved values as APE_SESSION_MODEL / APE_SESSION_EFFORT.
+
 --prompt-file <path> reads the prompt from a file, and "-" reads it
 from stdin. It is how a printed escalation command carries the
 operator's own words: argv runs command substitution on backticks and
@@ -7019,14 +7050,14 @@ Flags:
 | `--commit-allow-dirty` | bool | `false` | Bypass the dirty-tree gate (relevant only with --task-commit) |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
 | `--detach` | bool | `false` | Start the run in the background, detached from this shell, print its id, and return at once; `ape run wait <id>` waits for it |
-| `--effort` | string | `—` | Explicit reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). |
+| `--effort` | string | `—` | Explicit reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). In an APEX v1 project: the session's effort only, passed as claude --effort; unset, models.<skill>, the parent session or _apex/config.yaml effort: decide, else none is passed |
 | `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
 | `--handoff` | string | `—` | Path to a handoff/context file; derives a "Read <path> and follow the Resume Protocol" --prompt value (mutually exclusive with --prompt) |
 | `--idle-timeout` | duration | `0s` | Idle backstop: cancel only after this long with no progress across hook events or transcript growth (e.g. 15m); default matches pipeline (60m). PTY output is NOT an anchor here — see `ape prompt` |
 | `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json |
 | `--manifest-dir` | string | `—` | Override the run-artifact base dir (default: <project>/_output/ape/tasks; _apex/state/runs/tasks in an APEX v1 project) |
 | `--max-duration` | duration | `3h0m0s` | Hard wall-clock ceiling regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a sequential batch skill is bounded per item, not per batch. 0 disables the cap. |
-| `--model` | string | `—` | Claude model. A bare family (fable, haiku, mythos, opus, sonnet) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly |
+| `--model` | string | `—` | Claude model (APEX v1 unset: models.<skill> in _apex/config.yaml, else the parent session's, else claude's default). A bare family (fable, haiku, mythos, opus, sonnet) resolves to its current generation; sonnet-5 / claude-sonnet-5 / opus[1m] pin explicitly |
 | `--nats-creds` | string | `—` | NATS .creds file; its user identity is baked into every subject (env APE_NATS_CREDS). |
 | `--nats-url` | string | `—` | NATS server URL for progress events + transcript upload (env APE_NATS_URL). Empty disables both. |
 | `--no-commit` | bool | `false` | Skill layer: tell the skill/framework not to commit (types --no-commit into the skill invocation; without it none is typed) |
