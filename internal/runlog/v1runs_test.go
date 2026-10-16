@@ -70,3 +70,33 @@ func TestApeRoot_V1RunsAreNeverTracked(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, strings.TrimSpace(string(out)))
 }
+
+// The framework's apex-plan commits development/ wholesale (`git add
+// development/`); the run records must not ride along, in a project
+// initialised before `runs/` was listed in .apex/.gitignore too.
+func TestApeRoot_V1RunsStayOutOfAWholesaleAdd(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	apexDir := filepath.Join(root, "development", ".apex")
+	require.NoError(t, os.MkdirAll(apexDir, 0o755))
+	// The pre-D16 ignore list: no runs/ entry.
+	require.NoError(t, os.WriteFile(filepath.Join(apexDir, ".gitignore"), []byte("logs/\nstop-gate/\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "development", "project.md"), []byte("# x\n"), 0o644))
+	gitIn := func(args ...string) string {
+		c := exec.Command("git", args...)
+		c.Dir = root
+		out, err := c.CombinedOutput()
+		require.NoError(t, err, "git %v: %s", args, out)
+		return string(out)
+	}
+	gitIn("init", "-q")
+	dir := TaskRunDir(root, "apex-plan", "r1")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte("run_id: r1\n"), 0o644))
+	gitIn("add", "development/")
+	staged := gitIn("diff", "--cached", "--name-only")
+	require.Contains(t, staged, "development/project.md")
+	require.NotContains(t, staged, "runs")
+}

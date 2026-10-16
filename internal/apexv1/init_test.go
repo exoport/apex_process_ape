@@ -32,6 +32,8 @@ func TestInit_Greenfield(t *testing.T) {
 	clean(t, p, "project init")
 	require.Equal(t, "@AGENTS.md\n", read(t, p, "CLAUDE.md"))
 	require.FileExists(t, filepath.Join(root, filepath.FromSlash("development/specs/.gitkeep")))
+	require.Equal(t, "logs/\nstop-gate/\nruns/\n", read(t, p, "development/.apex/.gitignore"),
+		"run records (D16) are ignored by the list a wholesale `git add development/` honours")
 	cfg, err := LoadConfig(root)
 	require.NoError(t, err)
 	require.Equal(t, filepath.Base(root), cfg.ProjectName)
