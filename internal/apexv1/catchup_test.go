@@ -207,3 +207,42 @@ func TestCatchUp_NeedsACleanTree(t *testing.T) {
 	require.NotNil(t, v.CatchUp)
 	require.Contains(t, subjects(t, p), "apex: add-wave notes")
 }
+
+// The baseline at the base tip runs in the project's own checkout, so the
+// project's ignored files — here deps/, which the suite needs, as a real
+// suite needs node_modules or a build cache — are there. In a fresh
+// worktree the suite would be red at the new baseline, and every later
+// red would pass as pre-existing.
+func TestCatchUp_BaselineSeesIgnoredFiles(t *testing.T) {
+	files := suiteFiles()
+	files["suite.sh"] = "#!/bin/sh\n[ -f deps/ready ]\n"
+	files[".gitignore"] = "deps/\n"
+	p := fixture(t, files)
+	write(t, p, "deps/ready", "x\n")
+	addChange(t, p, "add-wave", waveChange("add-wave"))
+	commitAll(t, p, "plan: add-wave")
+	_, err := p.Start(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 0, state(t, p, "add-wave").Regression.Exit)
+	write(t, p, "wave.sh", "#!/bin/sh\necho wave\n")
+	commitAll(t, p, "feat: wave")
+	tip := moveMain(t, p, map[string]string{"hug.sh": "#!/bin/sh\necho hug\n"})
+
+	v, err := p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.NotNil(t, v.CatchUp)
+	st := state(t, p, "add-wave")
+	require.Equal(t, tip, st.Regression.SHA)
+	require.Equal(t, 0, st.Regression.Exit, "the ignored deps/ is present at the new baseline")
+	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root), "back on the change branch")
+	require.FileExists(t, filepath.Join(p.Root, "deps", "ready"))
+	require.Equal(t, 1, worktrees(t, p), "no extra worktree")
+
+	// A suite the base itself breaks is still caught as pre-existing, and
+	// one the change breaks after the catch-up is newly red.
+	write(t, p, "suite.sh", "#!/bin/sh\nexit 1\n")
+	commitAll(t, p, "break the suite")
+	v, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.False(t, v.Green, "red against a green baseline: newly red")
+}

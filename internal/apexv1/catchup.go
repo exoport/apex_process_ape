@@ -3,8 +3,6 @@ package apexv1
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -22,8 +20,8 @@ import (
 //     rebase and blocks the change naming the files (committed on its
 //     branch), ConflictError change.rebase-conflict, exit 3, nothing else
 //     written;
-//  3. re-runs the baseline at the NEW BASE TIP, in a temporary detached
-//     worktree: the baseline means "before this change's code", so taking
+//  3. re-runs the baseline at the NEW BASE TIP, in place (the checkout
+//     detached there, then back — see baselineAt): the baseline means "before this change's code", so taking
 //     it at the rebased HEAD would show the change's own checks green at
 //     baseline. Every check verify runs (task checks and the effective
 //     spec's scenarios, as the change's plan has them) and the regression
@@ -198,43 +196,37 @@ func (p *Project) rebaseOnto(ctx context.Context, base string) ([]string, error)
 }
 
 // baselineAt runs the change's baseline — every check verify runs, and the
-// regression command — at sha, in a temporary detached worktree under the
-// OS temp dir, removed afterwards. The checks are the change's as its
-// plan has them now; their output is logged under the project's
-// _apex/state/logs/<id>/ (baseline-*).
+// regression command — at sha, IN PLACE: the project's checkout is
+// detached at sha for the run and switched back to change/<id> after it.
+// In place rather than in a separate worktree, because a project's
+// ignored files (node_modules, build caches, generated code) belong to the
+// checkout: a fresh worktree lacks them, so a brownfield regression suite
+// would be red there, and every later red would read as pre-existing —
+// hiding real regressions. The caller has made the tree clean and holds
+// the change's state in memory; the state is written only after the
+// switch back. The checks are the change's as its plan has them now;
+// output is logged under _apex/state/logs/<id>/ (baseline-*), which
+// survives the checkout (ignored).
 func (p *Project) baselineAt(ctx context.Context, ci ChangeInfo, sha string, opt RunOptions) (results []CheckResult, regression *CheckResult, err error) {
-	prefix, err := git(ctx, p.Root, "rev-parse", "--show-prefix")
-	if err != nil {
-		return nil, nil, &FailError{Code: CodeBranchFailed, Msg: "cannot locate the project in its repository: " + err.Error() + " — fix git and run the command again"}
-	}
-	tmp, err := os.MkdirTemp("", "ape-baseline-")
-	if err != nil {
-		return nil, nil, err
-	}
-	defer func() { _ = os.RemoveAll(tmp) }()
-	tree := filepath.Join(tmp, "tree")
-	if _, err := git(ctx, p.Root, "worktree", "add", "-q", "--detach", tree, sha); err != nil {
-		return nil, nil, &FailError{Code: CodeBranchFailed, Msg: "cannot check out " + short(sha) + " in a temporary worktree for the baseline: " + err.Error() + " — fix git and run the command again"}
+	branch := ChangeBranch(ci.ID)
+	if _, err := git(ctx, p.Root, "checkout", "-q", "--detach", sha); err != nil {
+		return nil, nil, &FailError{Code: CodeBranchFailed, Msg: "cannot check out " + short(sha) + " for the baseline: " + err.Error() + " — fix git and run the command again"}
 	}
 	defer func() {
-		_, _ = git(context.WithoutCancel(ctx), p.Root, "worktree", "remove", "--force", tree)
-		_, _ = git(context.WithoutCancel(ctx), p.Root, "worktree", "prune")
-	}()
-	at := &Project{Root: filepath.Join(tree, filepath.FromSlash(prefix)), DevRel: p.DevRel}
-	logDir := p.LogDir(ci.ID)
-	relog := func(r *CheckResult) {
-		if r.Log != "" {
-			r.Log = p.Rel(filepath.Join(at.Root, filepath.FromSlash(r.Log)))
+		if _, berr := git(context.WithoutCancel(ctx), p.Root, "checkout", "-q", branch); berr != nil && err == nil {
+			results, regression = nil, nil
+			err = &FailError{Code: CodeBranchFailed, Msg: "the baseline ran at " + short(sha) + " but switching back to " + branch + " failed: " + berr.Error() +
+				" — run `git switch " + branch + "`, then the command again"}
 		}
-		r.StrayFiles = nil
-	}
-	results = at.RunChecks(ctx, logDir, "baseline-", p.ChangeChecks(ci.Doc), opt)
+	}()
+	logDir := p.LogDir(ci.ID)
+	results = p.RunChecks(ctx, logDir, "baseline-", p.ChangeChecks(ci.Doc), opt)
 	for i := range results {
-		relog(&results[i])
+		results[i].StrayFiles = nil
 	}
 	if cmd := p.regressionCmd(); cmd != "" {
-		r := at.runRegression(ctx, cmd, logDir, "baseline-", opt)
-		relog(&r)
+		r := p.runRegression(ctx, cmd, logDir, "baseline-", opt)
+		r.StrayFiles = nil
 		regression = &r
 	}
 	return results, regression, nil

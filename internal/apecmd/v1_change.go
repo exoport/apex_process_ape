@@ -304,8 +304,9 @@ If so ape catches the change up — the one path start, verify and archive share
     nothing else written — a person resolves it (`+"`git rebase`"+` on the branch, by hand),
     then `+"`ape change start <id>`"+` re-baselines without rebasing again
   - the baseline (task checks, effective-spec scenarios, regression command) is re-run
-    at the NEW BASE TIP, in a temporary detached worktree under the OS temp dir (never at
-    the rebased HEAD, which holds the change's code): a new test of the change is red
+    at the NEW BASE TIP, in place — the checkout detached there, then switched back, so
+    ignored files (dependencies, build caches) are present as usual — never at the
+    rebased HEAD, which holds the change's code: a new test of the change is red
     there; it replaces the old baseline, and green-at-baseline is judged against it
   - recorded in state.json (rebases: [{at, from, to, head, rebased}]; base_sha = the base
     tip; the last verify kept with stale: true and stale_reason), a verified or reviewed
