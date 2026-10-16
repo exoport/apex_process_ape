@@ -12,6 +12,7 @@ import (
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/migration"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/stamp"
 )
 
@@ -144,7 +145,7 @@ func runUpgradeMigrationsApplied(ctx context.Context, w io.Writer, projectRoot s
 		return nil, nil
 	}
 
-	res := migration.Apply(ctx, w, projectRoot, plan, runner, stamp.New(projectRoot, nil).Issue)
+	res := migration.Apply(ctx, w, projectRoot, plan, runner, ledgerStamp(projectRoot))
 
 	rows := make([]framework.AppliedMigration, 0, len(res.Applied))
 	ids := make([]string, 0, len(res.Applied))
@@ -161,6 +162,18 @@ func runUpgradeMigrationsApplied(ctx context.Context, w io.Writer, projectRoot s
 
 	emitApplyResult(w, res)
 	return ids, nil
+}
+
+// ledgerStamp issues the ledger's applied_at stamps. In an APEX v1
+// project the monotonic floor lives under _apex/state/, which `ape
+// framework update` never writes (backlog 26): the stamps are read
+// against the floor there, and not recorded in it.
+func ledgerStamp(projectRoot string) func() string {
+	iss := stamp.New(projectRoot, nil)
+	if !runlog.IsV1Project(projectRoot) {
+		return iss.Issue
+	}
+	return func() string { return iss.Peek().Format(apexcfg.TimestampLayout) }
 }
 
 func emitApplyResult(w io.Writer, res *migration.ApplyResult) {

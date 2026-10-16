@@ -146,6 +146,13 @@ func v1StateDir(projectRoot string) (string, bool) {
 	return "", false
 }
 
+// IsV1Project reports whether projectRoot is an APEX v1 project: its
+// _apex/state/ exists.
+func IsV1Project(projectRoot string) bool {
+	_, ok := v1StateDir(projectRoot)
+	return ok
+}
+
 // EnsureV1State creates _apex/state/ with its whitelist .gitignore when
 // either is absent, so nothing ape writes there can dirty the tree. An
 // existing .gitignore is left as it is. Best-effort: a failure surfaces
