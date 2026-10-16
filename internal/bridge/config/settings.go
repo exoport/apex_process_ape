@@ -57,6 +57,11 @@ type SettingsOptions struct {
 	// settings.json says (apexv1.InlineHooks). Claude Code runs every
 	// matching hook of every group.
 	ExtraHooks []ExtraHook
+	// Extra is written as top-level keys, after ape's own (an Extra key
+	// never replaces outputStyle, the effort keys, env or hooks): an APEX
+	// v1 project's enabledPlugins and extraKnownMarketplaces, which `ape
+	// task` passes inline (apexv1.PluginSettings).
+	Extra map[string]any
 }
 
 // ExtraHook is one hook command for SettingsOptions.ExtraHooks. Timeout is
@@ -240,6 +245,9 @@ func BuildSettings(opts SettingsOptions) (json.RawMessage, error) {
 	}
 
 	root := map[string]any{}
+	for key, value := range opts.Extra {
+		root[key] = value
+	}
 	if style, write := resolveOutputStyle(opts.OutputStyle); write {
 		root["outputStyle"] = style
 	}

@@ -84,6 +84,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"review.voided", 1, "review --run: the session changed more than review.md; verdict voided"},
 	{"roadmap.missing", 1, "no roadmap.md"},
 	{"settings.invalid-json", 1, "init: .claude/settings.json is not valid JSON"},
+	{"plugins.missing", 1, "a plugin _apex/config.yaml lists is not installed at project scope, or not at its ref, and installing or updating it failed (the message carries the command to run)"},
 	{"tree.dirty", 1, "uncommitted changes outside the development folder"},
 	{"verify.missing", 1, "no green verify to review"},
 	{"verify.red", 1, "a task check or an effective-spec scenario check is red"},
@@ -174,5 +175,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.task-no-check", 1, "a task has no check:"},
 	{"hooks.missing", 1, "an ape hook is not registered in .claude/settings.json: `ape project init` merges it back"},
 	{"hooks.altered", 1, "an ape hook in .claude/settings.json has a changed matcher, type, async or timeout: `ape project init` restores it"},
+	{"plugins.config", 1, "_apex/config.yaml marketplaces/plugins are malformed (unknown source, missing repo/url/path, a plugin listed twice)"},
+	{"plugins.drift", 1, "settings.json's extraKnownMarketplaces/enabledPlugins differ from _apex/config.yaml, or a listed plugin is not installed or not at its ref: `ape doctor --fix`"},
 	{UnclassifiedFinding, 1, "a finding no rule classifies (a bug: report it)"},
 }

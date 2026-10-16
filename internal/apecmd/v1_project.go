@@ -51,6 +51,25 @@ hooks inline as well, so its sessions have them even when settings.json does not
 Everything init wrote (and settings.json when it merged hooks) is committed as
 "apex: project init"; files that existed before are not touched and not committed.
 
+Plugins: when _apex/config.yaml lists marketplaces/plugins, init installs each
+plugin at project scope through the claude plugin CLI (marketplace add, install,
+or marketplace update + update when it is off its ref), writes
+extraKnownMarketplaces and enabledPlugins into .claude/settings.json (other keys
+kept) and commits that as "apex: plugins". ape framework update and ape doctor
+--fix do the same; ape task installs a missing one before it spawns.
+
+  marketplaces:
+    team-tools: {source: github, repo: org/claude-plugins}   # or {source: git, url: …},
+                                                             # {source: directory, path: …}
+  plugins:
+    - {name: nats-expert, marketplace: team-tools, ref: v1.4.0}
+
+ref is the version the install must report (claude plugin list; a leading v is
+ignored; a commit matches by prefix). Claude Code cannot pin a plugin version
+from the consumer side: a marketplace serves one version of each plugin, so pin
+by pointing the marketplace at a ref (github/git: ref: <branch|tag>). A plugin
+the marketplace does not serve at ref fails with the command to run.
+
 --brownfield adds nothing; it records in development/.apex/project.json that the
 project existed before APEX.
 
@@ -70,7 +89,22 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
-			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+			// Backlog 36: the plugins _apex/config.yaml lists, installed
+			// and written into settings.json (committed as "apex: plugins").
+			p, err := apexv1.Open(res.Root)
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			var pluginOut strings.Builder
+			plugins, err := syncPluginsReport(cmd.Context(), &pluginOut, p, true)
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			out := struct {
+				*apexv1.InitResult
+				Plugins *apexv1.PluginSync `json:"plugins,omitempty"`
+			}{res, plugins}
+			return v1Emit(cmd.OutOrStdout(), &f, out, func(w io.Writer) {
 				for _, c := range res.Created {
 					fmt.Fprintln(w, "created  "+c)
 				}
@@ -83,6 +117,7 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 				for _, h := range res.HooksAdded {
 					fmt.Fprintln(w, "hook     "+h)
 				}
+				fmt.Fprint(w, pluginOut.String())
 				fmt.Fprintln(w, "next: write development/project.md, AGENTS.md and the roadmap (apex-plan), then `ape project check`")
 			})
 		},
@@ -113,6 +148,11 @@ func newProjectCheckCmd() *cobra.Command {
   .claude/settings.json    ape's hooks registered as ` + "`ape project init`" + ` writes them:
                            hooks.missing / hooks.altered (matcher, type, async, a
                            stop timeout below 1800 s); ` + "`ape project init`" + ` restores them
+  plugins                  _apex/config.yaml marketplaces/plugins: settings.json's
+                           extraKnownMarketplaces/enabledPlugins match them, and (when
+                           claude is on PATH) each plugin is installed at project scope
+                           at its ref (plugins.drift; plugins.config for a bad config);
+                           ` + "`ape doctor --fix`" + ` puts them right
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
 		Example: "  ape project check\n  ape project check --json",
@@ -126,6 +166,7 @@ Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --
 				return err
 			}
 			fs := append(p.Check(), p.CheckHooks()...)
+			fs = append(fs, p.CheckPlugins(cmd.Context(), pluginCLIOrNil(""))...)
 			if len(fs) > 0 {
 				return v1Fail(cmd, &f, &apexv1.FailError{
 					Code:     "project.check-failed",

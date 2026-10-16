@@ -275,6 +275,11 @@ output is never committed.
 Does NOT touch _apex/config.yaml — that's the one-time bootstrap from
 'ape framework setup'. To re-bootstrap, pass --force to 'setup'.
 
+In an APEX v1 project, the plugins _apex/config.yaml lists are installed or
+updated at project scope and written into .claude/settings.json, which the
+update commit carries (see ape project init --help); a plugin that cannot be
+put right is a warning with the command to run, not a failed update.
+
   --plan        print the upgrade-migration plan and do NOTHING ELSE — no
                 install, no fetch, no migration. The plan is the list the
                 project will hold AFTER this update: the installed entries
@@ -449,6 +454,14 @@ func migrateAndCommitUpdate(cmd *cobra.Command, projectRoot string, prior *frame
 		var err error
 		if applied, err = runUpgradeMigrationsApplied(cmd.Context(), cmd.OutOrStdout(), projectRoot); err != nil {
 			return err
+		}
+	}
+	// Backlog 36: an APEX v1 project's plugins, installed at their refs
+	// and written into settings.json, which this update's commit carries.
+	// A failure is reported, never fatal: the framework install stands.
+	if p, ok := v1ProjectAt(projectRoot); ok {
+		if _, err := syncPluginsReport(cmd.Context(), cmd.OutOrStdout(), p, false); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "WARNING: plugins: %v\n", err)
 		}
 	}
 	if !commit {

@@ -54,6 +54,10 @@ type Config struct {
 	// that no flag, models.<skill> entry or parent session decides
 	// (DecideLaunch). Empty: Claude Code's own setting.
 	Effort string `yaml:"effort"`
+	// Marketplaces and Plugins are the Claude Code plugins the project
+	// uses; ape keeps them installed at project scope (plugins.go).
+	Marketplaces map[string]Marketplace `yaml:"marketplaces"`
+	Plugins      []PluginRef            `yaml:"plugins"`
 }
 
 // SkillModel is one models.<skill> entry.

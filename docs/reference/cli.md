@@ -3337,6 +3337,17 @@ silent:
 Both SKIP or report INFO when there is nothing to judge — absence of
 evidence is not coverage.
 
+  plugins.project               (APEX v1) whether the plugins
+                                _apex/config.yaml lists are installed at
+                                project scope at their refs, and
+                                .claude/settings.json declares and enables
+                                them. --fix puts them right: it installs or
+                                updates each through the claude plugin CLI,
+                                writes the settings and commits them as
+                                "apex: plugins", before the checks run.
+                                --fix fixes nothing else; other rows print
+                                their fix command.
+
 --only runs just the named checks, so one gate can be scripted on its own:
 
   ape doctor --only hooks.contract_drift --strict --cwd <project>
@@ -3360,6 +3371,7 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root to probe (default: current working directory) |
+| `--fix` | bool | `false` | APEX v1: first install/update the plugins _apex/config.yaml lists and write their settings (the only fixer) |
 | `--only` | string | `—` | Run ONLY these checks (comma-separated). Errors on an unknown name; applied before --skip |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--skip` | string | `—` | Comma-separated list of check names to skip (e.g. node.binary,npx.binary) |
@@ -3840,6 +3852,11 @@ output is never committed.
 
 Does NOT touch _apex/config.yaml — that's the one-time bootstrap from
 'ape framework setup'. To re-bootstrap, pass --force to 'setup'.
+
+In an APEX v1 project, the plugins _apex/config.yaml lists are installed or
+updated at project scope and written into .claude/settings.json, which the
+update commit carries (see ape project init --help); a plugin that cannot be
+put right is a warning with the command to run, not a failed update.
 
   --plan        print the upgrade-migration plan and do NOTHING ELSE — no
                 install, no fetch, no migration. The plan is the list the
@@ -4819,6 +4836,11 @@ Validate the whole project and list every failure, not just the first.
   .claude/settings.json    ape's hooks registered as `ape project init` writes them:
                            hooks.missing / hooks.altered (matcher, type, async, a
                            stop timeout below 1800 s); `ape project init` restores them
+  plugins                  _apex/config.yaml marketplaces/plugins: settings.json's
+                           extraKnownMarketplaces/enabledPlugins match them, and (when
+                           claude is on PATH) each plugin is installed at project scope
+                           at its ref (plugins.drift; plugins.config for a bad config);
+                           `ape doctor --fix` puts them right
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
 
@@ -4900,6 +4922,25 @@ hooks inline as well, so its sessions have them even when settings.json does not
 
 Everything init wrote (and settings.json when it merged hooks) is committed as
 "apex: project init"; files that existed before are not touched and not committed.
+
+Plugins: when _apex/config.yaml lists marketplaces/plugins, init installs each
+plugin at project scope through the claude plugin CLI (marketplace add, install,
+or marketplace update + update when it is off its ref), writes
+extraKnownMarketplaces and enabledPlugins into .claude/settings.json (other keys
+kept) and commits that as "apex: plugins". ape framework update and ape doctor
+--fix do the same; ape task installs a missing one before it spawns.
+
+  marketplaces:
+    team-tools: {source: github, repo: org/claude-plugins}   # or {source: git, url: …},
+                                                             # {source: directory, path: …}
+  plugins:
+    - {name: nats-expert, marketplace: team-tools, ref: v1.4.0}
+
+ref is the version the install must report (claude plugin list; a leading v is
+ignored; a commit matches by prefix). Claude Code cannot pin a plugin version
+from the consumer side: a marketplace serves one version of each plugin, so pin
+by pointing the marketplace at a ref (github/git: ref: <branch|tag>). A plugin
+the marketplace does not serve at ref fails with the command to run.
 
 --brownfield adds nothing; it records in development/.apex/project.json that the
 project existed before APEX.

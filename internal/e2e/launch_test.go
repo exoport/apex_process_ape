@@ -17,9 +17,26 @@ import (
 // fakeLaunchRecorder is fakeClaude that first writes how it was launched:
 // its argv, the CLAUDE_CODE_EFFORT_LEVEL it inherited and the launch ape
 // exported to its tools.
-var fakeLaunchRecorder = strings.Replace(fakeClaude, `settings=""`,
+//
+// It also answers the `claude plugin` CLI from a state file: list prints
+// $FAKE_DIR/installed.json, install records the plugin at 1.4.0 (or fails
+// when FAKE_PLUGIN_FAIL is set), anything else succeeds; every call is
+// appended to $FAKE_DIR/plugin-calls.
+var fakeLaunchRecorder = strings.Replace(fakeClaude, `settings=""`, fakePluginCLI+
 	`printf 'args=%s\nenv_effort=%s\nsession=%s/%s\n' "$*" "$CLAUDE_CODE_EFFORT_LEVEL" "$APE_SESSION_MODEL" "$APE_SESSION_EFFORT" > "$FAKE_DIR/launch"
 settings=""`, 1)
+
+const fakePluginCLI = `if [ "$1" = "plugin" ]; then
+  echo "$*" >> "$FAKE_DIR/plugin-calls"
+  case "$2" in
+    list) cat "$FAKE_DIR/installed.json" 2>/dev/null || echo '[]' ;;
+    install)
+      if [ -n "$FAKE_PLUGIN_FAIL" ]; then echo '{"outcome":"failed","message":"Plugin not found in marketplace"}'; exit 1; fi
+      printf '[{"id":"%s","version":"1.4.0","scope":"project","projectPath":"%s"}]' "$3" "$PWD" > "$FAKE_DIR/installed.json" ;;
+  esac
+  exit 0
+fi
+`
 
 type launchSeen struct {
 	args, envEffort, session string
@@ -173,5 +190,63 @@ func TestTask_V1LaunchModelAndEffort(t *testing.T) {
 		seen = readLaunch(t, fake)
 		require.NotContains(t, seen.args, "--effort")
 		require.Equal(t, "xhigh", seen.envEffort, "the legacy default")
+	})
+}
+
+// Backlog 36 end to end: ape task installs a configured plugin at project
+// scope before it spawns, leaves settings.json as it was, and enables the
+// plugin inline; when the install fails it refuses with the command to run
+// and never spawns the session.
+func TestTask_V1PluginsPreflight(t *testing.T) {
+	for _, bin := range []string{"bash", "git"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skip(bin + " not installed")
+		}
+	}
+	ape := buildApe(t)
+	const plugins = "marketplaces:\n  team-tools: {source: github, repo: org/claude-plugins}\n" +
+		"plugins:\n  - {name: nats-expert, marketplace: team-tools, ref: v1.4.0}\n"
+
+	t.Run("installed, then enabled inline", func(t *testing.T) {
+		project, fake, env := launchProject(t, ape, true)
+		setConfig(t, project, plugins)
+		commit := exec.Command("git", "-C", project, "commit", "-qam", "plugins")
+		commit.Env = env
+		require.NoError(t, commit.Run())
+		_, code := runApe(t, ape, project, env, "task", "apex-foo", "--idle-timeout", "30s", "--output-format", "json", "--cwd", project)
+		require.Equal(t, 0, code)
+		calls, err := os.ReadFile(filepath.Join(fake, "plugin-calls"))
+		require.NoError(t, err)
+		require.Contains(t, string(calls), "plugin marketplace add org/claude-plugins --scope project --json")
+		require.Contains(t, string(calls), "plugin install nats-expert@team-tools --scope project --json")
+		seen := readLaunch(t, fake)
+		require.Contains(t, seen.args, `"enabledPlugins":{"nats-expert@team-tools":true}`)
+		require.Contains(t, seen.args, `"extraKnownMarketplaces":{"team-tools":{"source":{"repo":"org/claude-plugins","source":"github"}}}`)
+		status, err := exec.Command("git", "-C", project, "status", "--porcelain").Output()
+		require.NoError(t, err)
+		require.Empty(t, string(status), "the preflight leaves the tree as it was")
+
+		// Already at its ref: one list call, nothing installed.
+		require.NoError(t, os.Remove(filepath.Join(fake, "plugin-calls")))
+		_, code = runApe(t, ape, project, env, "task", "apex-foo", "--idle-timeout", "30s", "--output-format", "json", "--cwd", project)
+		require.Equal(t, 0, code)
+		calls, err = os.ReadFile(filepath.Join(fake, "plugin-calls"))
+		require.NoError(t, err)
+		require.Equal(t, "plugin list --json\n", string(calls))
+	})
+
+	t.Run("install fails: refused before the spawn", func(t *testing.T) {
+		project, fake, env := launchProject(t, ape, true)
+		setConfig(t, project, plugins)
+		env = append(env, "FAKE_PLUGIN_FAIL=1")
+		c := exec.Command(ape, "task", "apex-foo", "--idle-timeout", "30s", "--cwd", project)
+		c.Env = env
+		out, err := c.CombinedOutput()
+		require.Equal(t, 2, exitStatus(err), "%s", out)
+		require.Contains(t, string(out), "plugins.missing")
+		require.Contains(t, string(out), "nats-expert@team-tools is not installed at project scope")
+		require.Contains(t, string(out), "Plugin not found in marketplace")
+		require.Contains(t, string(out), "claude plugin install nats-expert@team-tools --scope project")
+		require.NoFileExists(t, filepath.Join(fake, "launch"), "no session was spawned")
 	})
 }

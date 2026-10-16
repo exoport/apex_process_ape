@@ -433,7 +433,7 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	if err != nil {
 		return promptResult{}, ExitUsage, err
 	}
-	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, o.ignoreProjectSettings, o.outputStyle, effortPlan.Table, nil)
+	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, o.ignoreProjectSettings, o.outputStyle, effortPlan.Table, spawnSettings{})
 	if err != nil {
 		return promptResult{}, ExitRunFailed, err
 	}

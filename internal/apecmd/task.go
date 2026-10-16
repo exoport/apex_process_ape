@@ -516,7 +516,14 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		cfg.effort, cfg.effortAsArg = l.launch.Effort, true
 		// Backlog 31: the project's hooks ride inline, so a hand-edited
 		// settings.json cannot drop them (apexv1.InlineHooks).
-		cfg.extraHooks, cfg.spawnEnv = v1InlineHooks()
+		cfg.spawnSettings.hooks, cfg.spawnEnv = v1InlineHooks()
+		// Backlog 36: the plugins _apex/config.yaml lists are installed at
+		// their refs before anything spawns, and enabled inline.
+		plugins, err := v1TaskPlugins(ctx, p, cfg.claudeBin)
+		if err != nil {
+			return taskRun{}, &taskPreflightError{err: err}
+		}
+		cfg.spawnSettings.settings = plugins
 	}
 	step := buildTaskStep(o)
 	spec := pipeline.NewSingleStepSpec(o.skill, step, o.taskCommit)
