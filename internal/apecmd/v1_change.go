@@ -208,6 +208,9 @@ change does not MODIFY or REMOVE (regression), plus the scenarios of its own ADD
 MODIFIED blocks. human-review checks are not run. A command shared by several checks runs
 once. Results (sha, exit, seconds, output sha256; kind, capability, requirement, scenario
 for scenario checks) are recorded in state.json; output under development/.apex/logs/<id>/.
+What a check leaves in the tree outside development/ — files it created, tracked files it
+changed — is undone after it and reported (JSON "stray_files"); files that were there
+before it ran are never touched.
 The working tree must hold no uncommitted changes outside development/ — commit first
 (trailer "Change: <id>"): a verify belongs to a sha.
 
@@ -237,6 +240,7 @@ status · 2 usage.`,
 					fmt.Fprintf(w, "human-review pending: %s\n", strings.Join(res.PendingHuman, ", "))
 				}
 				printGreenAtBaseline(w, res.GreenAtBaseline)
+				printStrays(w, res.StrayFiles)
 			}
 			if !res.Green {
 				if !f.json {
@@ -251,6 +255,13 @@ status · 2 usage.`,
 		})
 	addV1TimeoutFlag(cmd, &f)
 	return cmd
+}
+
+// printStrays lists what the checks left in the tree and ape undid.
+func printStrays(w io.Writer, strays []string) {
+	if len(strays) > 0 {
+		fmt.Fprintf(w, "cleaned up after the checks (created or changed by them, outside development/): %s\n", strings.Join(strays, ", "))
+	}
 }
 
 // printGreenAtBaseline lists the change's own checks that passed before

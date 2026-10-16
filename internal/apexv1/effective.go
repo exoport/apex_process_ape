@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"path/filepath"
+	"sort"
 )
 
 // Check kinds in a run of checks.
@@ -107,7 +108,7 @@ func (p *Project) ChangeChecks(c *Change) []PlannedCheck {
 // logName is a check's log file name: the task id, or a short hash of a
 // scenario ref (refs carry spaces and punctuation).
 func (pc *PlannedCheck) logName(prefix string) string {
-	if pc.Kind == KindTask {
+	if pc.Kind != KindScenario {
 		return prefix + pc.Ref + ".log"
 	}
 	sum := sha256.Sum256([]byte(pc.Ref))
@@ -116,17 +117,27 @@ func (pc *PlannedCheck) logName(prefix string) string {
 
 // RunChecks runs each planned check from the project root, logging under
 // logDir. A command shared by several checks runs once: a scenario whose
-// check is also a task's is not paid for twice.
+// check is also a task's is not paid for twice. What a check leaves in the
+// tree outside the development folder is undone and reported in its
+// StrayFiles (item 19).
 func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks []PlannedCheck, opt RunOptions) []CheckResult {
 	done := map[string]CheckResult{}
 	out := make([]CheckResult, 0, len(checks))
+	inGit := p.isWorkTree(ctx)
 	for i := range checks {
 		pc := &checks[i]
 		r, ok := done[pc.Cmd]
 		if !ok {
 			logPath := filepath.Join(logDir, pc.logName(prefix))
+			var before treeSnapshot
+			if inGit {
+				before = p.snapshot(ctx)
+			}
 			r = RunCheck(ctx, p.Root, pc.Cmd, logPath, opt.Timeout)
 			r.Log = p.Rel(logPath)
+			if inGit {
+				r.StrayFiles = p.undoStrays(ctx, before)
+			}
 			done[pc.Cmd] = r
 		}
 		r.Task = pc.Ref
@@ -134,5 +145,21 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 		r.Capability, r.Requirement, r.Scenario, r.Delta = pc.Capability, pc.Requirement, pc.Scenario, pc.Delta
 		out = append(out, r)
 	}
+	return out
+}
+
+// StrayFiles is the sorted union of the paths checks left and ape undid.
+func StrayFiles(results []CheckResult) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for i := range results {
+		for _, f := range results[i].StrayFiles {
+			if !seen[f] {
+				seen[f] = true
+				out = append(out, f)
+			}
+		}
+	}
+	sort.Strings(out)
 	return out
 }

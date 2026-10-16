@@ -118,6 +118,7 @@ func gateHuman(g *apexv1.GateResult) func(io.Writer) {
 			fmt.Fprintln(w, "  full output: "+g.Run.Log)
 		}
 		printChecks(w, g.Run.SpecFailed, true)
+		printStrays(w, g.Run.StrayFiles)
 		fmt.Fprintf(w, "%s status: %s\n", g.Milestone, g.Status)
 	}
 }
@@ -129,7 +130,8 @@ func newMilestoneGateCmd() *cobra.Command {
 		Short: "Run the milestone's gate and record the result",
 		Long: `Run the milestone's Gate: command from the project root, and every scenario check of
 the whole spec beside it as the regression suite (human-review not run; output under
-development/.apex/logs/gate-<M>/). The gate is green only when both pass. The run (exit, sha, time,
+development/.apex/logs/gate-<M>/). The gate is green only when both pass. Files the gate
+or a check leaves outside development/ are undone and reported ("stray_files"). The run (exit, sha, time,
 output hash, last lines) goes to development/.apex/logs/gate-<M>.json (gitignored; shown by
 ` + "`ape status`" + `). When the result differs from the recorded one (green vs red), or is
 the first, development/.apex/milestones.json is updated and committed as

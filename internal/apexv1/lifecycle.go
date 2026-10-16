@@ -171,6 +171,8 @@ type VerifyResult struct {
 	// GreenAtBaseline: the change's own checks (tasks, delta scenarios)
 	// that already passed at baseline — review must justify each.
 	GreenAtBaseline []GreenAtBaseline `json:"green_at_baseline"`
+	// StrayFiles: what the checks left in the tree and ape undid (item 19).
+	StrayFiles []string `json:"stray_files"`
 }
 
 // greenAtBaseline lists the change's own checks — tasks and the scenarios
@@ -256,7 +258,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 	if !green && st.Status == StatusInProgress {
 		// A verify that stays red changes nothing and commits nothing
 		// (trial decision D5): the results are in the output and the logs.
-		return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab}, nil
+		return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results)}, nil
 	}
 	st.Verify = &Verify{SHA: sha, At: Stamp(), Results: results, PendingHuman: pending, Green: green, GreenAtBaseline: gab}
 	switch {
@@ -272,7 +274,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}
-	return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending, GreenAtBaseline: gab}, nil
+	return &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: green, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results)}, nil
 }
 
 func limit(xs []string, n int) []string {

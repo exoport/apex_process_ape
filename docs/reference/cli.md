@@ -1937,6 +1937,9 @@ change does not MODIFY or REMOVE (regression), plus the scenarios of its own ADD
 MODIFIED blocks. human-review checks are not run. A command shared by several checks runs
 once. Results (sha, exit, seconds, output sha256; kind, capability, requirement, scenario
 for scenario checks) are recorded in state.json; output under development/.apex/logs/<id>/.
+What a check leaves in the tree outside development/ — files it created, tracked files it
+changed — is undone after it and reported (JSON "stray_files"); files that were there
+before it ran are never touched.
 The working tree must hold no uncommitted changes outside development/ — commit first
 (trailer "Change: <id>"): a verify belongs to a sha.
 
@@ -4283,7 +4286,8 @@ ape milestone gate <M> [flags]
 
 Run the milestone's Gate: command from the project root, and every scenario check of
 the whole spec beside it as the regression suite (human-review not run; output under
-development/.apex/logs/gate-<M>/). The gate is green only when both pass. The run (exit, sha, time,
+development/.apex/logs/gate-<M>/). The gate is green only when both pass. Files the gate
+or a check leaves outside development/ are undone and reported ("stray_files"). The run (exit, sha, time,
 output hash, last lines) goes to development/.apex/logs/gate-<M>.json (gitignored; shown by
 `ape status`). When the result differs from the recorded one (green vs red), or is
 the first, development/.apex/milestones.json is updated and committed as

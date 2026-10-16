@@ -41,6 +41,10 @@ type CheckResult struct {
 	Log string `json:"log,omitempty"`
 	// Tail is the last lines of output — what a red check is reported by.
 	Tail []string `json:"-"`
+	// StrayFiles is what this check left in the tree outside the
+	// development folder and ape undid: files it created (removed) and
+	// tracked files it changed (restored). Item 19.
+	StrayFiles []string `json:"stray_files,omitempty"`
 }
 
 // Baseline is one task's result before any work began — or, for a task

@@ -25,6 +25,9 @@ type GateRun struct {
 	// — and SpecFailed the red ones.
 	SpecChecks int           `json:"spec_checks"`
 	SpecFailed []CheckResult `json:"spec_failed,omitempty"`
+	// StrayFiles: what the gate and its checks left in the tree outside
+	// the development folder and ape undid (item 19).
+	StrayFiles []string `json:"stray_files,omitempty"`
 }
 
 // Green reports a passing gate: its command exited 0 and every scenario
@@ -253,15 +256,17 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 		return nil, &FailError{Msg: id + " has no Gate: line"}
 	}
 	logPath := filepath.Join(p.ApexDir(), "logs", "gate-"+id+".log")
-	r := RunCheck(ctx, p.Root, m.Gate, logPath, opt.Timeout)
+	gate := p.RunChecks(ctx, filepath.Dir(logPath), "", []PlannedCheck{{Ref: "gate-" + id, Kind: "gate", Cmd: m.Gate}}, opt)[0]
+	r := gate
 	run := GateRun{
 		Exit: r.Exit, At: Stamp(), SHA: HeadSHA(ctx, p.Root), Secs: r.Secs,
-		OutputSHA256: r.OutputSHA256, Cmd: m.Gate, Log: p.Rel(logPath), Tail: lastN(r.Tail, 15),
+		OutputSHA256: r.OutputSHA256, Cmd: m.Gate, Log: r.Log, Tail: lastN(r.Tail, 15),
 	}
 	// The whole spec runs as the regression suite beside the gate.
 	spec := p.EffectiveSpecChecks(nil)
 	run.SpecChecks = len(spec)
 	results := p.RunChecks(ctx, filepath.Join(p.ApexDir(), "logs", "gate-"+id), "", spec, opt)
+	run.StrayFiles = StrayFiles(append([]CheckResult{gate}, results...))
 	for i := range results {
 		if results[i].Exit != 0 {
 			results[i].Tail = lastN(results[i].Tail, 15)
