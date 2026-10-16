@@ -44,6 +44,33 @@ type Project struct {
 type Config struct {
 	ProjectName       string `yaml:"project_name"`
 	DevelopmentFolder string `yaml:"development_folder"`
+	// Models pins a skill's model (and optionally effort), keyed by skill:
+	//
+	//	models:
+	//	  apex-review: sonnet                          # model only
+	//	  apex-review: {model: sonnet, effort: high}   # model and effort
+	Models map[string]SkillModel `yaml:"models"`
+}
+
+// SkillModel is one models.<skill> entry.
+type SkillModel struct {
+	Model  string `yaml:"model"`
+	Effort string `yaml:"effort"`
+}
+
+// UnmarshalYAML accepts the scalar form (a model name) and the mapping.
+func (m *SkillModel) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		m.Model = strings.TrimSpace(n.Value)
+		return nil
+	}
+	type plain SkillModel
+	var p plain
+	if err := n.Decode(&p); err != nil {
+		return err
+	}
+	*m = SkillModel{Model: strings.TrimSpace(p.Model), Effort: strings.TrimSpace(p.Effort)}
+	return nil
 }
 
 // ConfigPath is the project's _apex/config.yaml.

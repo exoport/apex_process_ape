@@ -169,6 +169,22 @@ type Manifest struct {
 	// the session alive instead of ending the run. Absent when no verdict
 	// was consulted. Additive under schema_version 2.
 	StopGate *StopGateRecord `yaml:"stop_gate,omitempty"`
+
+	// ReviewLaunch records, for a review session started by `ape change
+	// review --run`, the model and effort it was given and what decided
+	// each: flag, config (models.apex-review), parent-session, or default
+	// (v1 trial D22). Absent on every other run.
+	ReviewLaunch *ReviewLaunchRecord `yaml:"review_launch,omitempty"`
+}
+
+// ReviewLaunchRecord is a review session's launch decision.
+type ReviewLaunchRecord struct {
+	Model        string `yaml:"model,omitempty"`
+	ModelSource  string `yaml:"model_source"`
+	Effort       string `yaml:"effort,omitempty"`
+	EffortSource string `yaml:"effort_source"`
+	// Parent is the APE_SESSION of the session that asked for the review.
+	Parent string `yaml:"parent,omitempty"`
 }
 
 // StopGateRecord counts and lists the stop-gate verdicts of one run.

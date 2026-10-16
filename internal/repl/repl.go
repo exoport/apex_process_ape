@@ -249,6 +249,29 @@ func SessionMarkerEnv(kind, runID string) []string {
 	return []string{EnvApeSession + "=" + kind + "/" + runID}
 }
 
+// EnvSessionModel and EnvSessionEffort tell a spawned session's tools the
+// model and the explicit effort it was launched with — empty is claude's
+// default model, or the framework's per-model effort table. `ape change
+// review --run` reads them to start its review session on the same model
+// and effort as the session that asked (v1 trial D22).
+const (
+	EnvSessionModel  = "APE_SESSION_MODEL"
+	EnvSessionEffort = "APE_SESSION_EFFORT"
+)
+
+// LaunchEnv returns the EnvSessionModel/EnvSessionEffort entries for a
+// spawn; an empty value is left out.
+func LaunchEnv(model, explicitEffort string) []string {
+	var out []string
+	if model != "" {
+		out = append(out, EnvSessionModel+"="+model)
+	}
+	if explicitEffort != "" {
+		out = append(out, EnvSessionEffort+"="+explicitEffort)
+	}
+	return out
+}
+
 // EffortEnv returns the CLAUDE_CODE_EFFORT_LEVEL entry for an effort, or
 // nothing for "". It no longer substitutes a default: whether a spawn gets
 // a process-wide level at all is effort.Decide's call, and a hidden default

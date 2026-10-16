@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -87,4 +88,38 @@ func TestSettleReviewRun(t *testing.T) {
 		require.Empty(t, out.Verdict)
 		require.False(t, out.Voided)
 	})
+}
+
+func TestDecideReviewLaunch(t *testing.T) {
+	cfg := SkillModel{Model: "claude-haiku-5-5", Effort: "low"}
+	cfgModelOnly := SkillModel{Model: "claude-haiku-5-5"}
+	for name, tc := range map[string]struct {
+		flagModel, flagEffort string
+		cfg                   SkillModel
+		pModel, pEffort       string
+		want                  ReviewLaunch
+	}{
+		"parent":          {pModel: "sonnet", pEffort: "high", want: ReviewLaunch{"sonnet", LaunchFromParent, "high", LaunchFromParent}},
+		"parent, table":   {pModel: "sonnet", want: ReviewLaunch{"sonnet", LaunchFromParent, "", LaunchFromDefault}},
+		"config wins":     {cfg: cfg, pModel: "sonnet", pEffort: "high", want: ReviewLaunch{"claude-haiku-5-5", LaunchFromConfig, "low", LaunchFromConfig}},
+		"config model":    {cfg: cfgModelOnly, pModel: "sonnet", pEffort: "high", want: ReviewLaunch{"claude-haiku-5-5", LaunchFromConfig, "", LaunchFromDefault}},
+		"flags win":       {flagModel: "opus", flagEffort: "max", cfg: cfg, pModel: "sonnet", want: ReviewLaunch{"opus", LaunchFromFlag, "max", LaunchFromFlag}},
+		"flag model only": {flagModel: "opus", cfg: cfgModelOnly, pEffort: "high", want: ReviewLaunch{"opus", LaunchFromFlag, "high", LaunchFromParent}},
+		"nothing":         {want: ReviewLaunch{"", LaunchFromDefault, "", LaunchFromDefault}},
+	} {
+		require.Equal(t, tc.want, DecideReviewLaunch(tc.flagModel, tc.flagEffort, tc.cfg, tc.pModel, tc.pEffort), name)
+	}
+}
+
+func TestConfig_ModelsBothForms(t *testing.T) {
+	root := t.TempDir()
+	write := func(s string) {
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex"), 0o755))
+		require.NoError(t, os.WriteFile(ConfigPath(root), []byte(s), 0o644))
+	}
+	write("models:\n  apex-review: sonnet\n  apex-apply: {model: opus, effort: high}\n")
+	cfg, err := LoadConfig(root)
+	require.NoError(t, err)
+	require.Equal(t, SkillModel{Model: "sonnet"}, cfg.Models["apex-review"])
+	require.Equal(t, SkillModel{Model: "opus", Effort: "high"}, cfg.Models["apex-apply"])
 }

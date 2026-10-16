@@ -1895,6 +1895,12 @@ session, never from inside a review session (depth 1), skill fixed to apex-revie
     means still running: call `ape change review <id> --run` again to keep waiting —
     it attaches to the running session, it never starts a second one
   - the session's cost is its own ape task manifest (ape status sums it)
+  - model and effort: --model/--effort; else _apex/config.yaml models.apex-review
+    ("apex-review: sonnet" or "apex-review: {model: sonnet, effort: high}"; a config
+    model without an effort leaves the effort to the per-model table); else the model
+    and explicit effort of the ape session that asked (so a review runs like the arm
+    that requested it); else claude's default model and ape's default effort. The
+    review session's manifest records each and its source under review_launch.
 
 Exit codes: 0 recorded / review passed · 1 not verified, code changed since the verify,
 review block (--run: findings in JSON "outcome"), verdict voided, or no verdict · 2 usage
@@ -1913,9 +1919,10 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--effort` | string | `—` | --run: effort for the review session (default: models.apex-review's effort, else the asking session's) |
 | `--findings` | string | `—` | the review file (required without --run) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--model` | string | `—` | --run: model for the review session (default: as ape task) |
+| `--model` | string | `—` | --run: model for the review session (default: models.apex-review in _apex/config.yaml, else the asking session's) |
 | `--run` | bool | `false` | review in a fresh, detached, read-only Claude Code session (apex-review) |
 | `--verdict` | string | `—` | pass or block (required without --run) |
 | `--wait` | duration | `9m0s` | --run: how long this call waits for the session (exit 75 when it is still running) |

@@ -293,7 +293,7 @@ func printGreenAtBaseline(w io.Writer, gab []apexv1.GreenAtBaseline) {
 
 func newChangeReviewCmd() *cobra.Command {
 	var f v1Flags
-	var verdict, findings, model string
+	var verdict, findings, model, effort string
 	var runSession bool
 	var wait time.Duration
 	cmd := v1ChangeLeaf(
@@ -320,6 +320,12 @@ session, never from inside a review session (depth 1), skill fixed to apex-revie
     means still running: call `+"`ape change review <id> --run`"+` again to keep waiting —
     it attaches to the running session, it never starts a second one
   - the session's cost is its own ape task manifest (ape status sums it)
+  - model and effort: --model/--effort; else _apex/config.yaml models.apex-review
+    ("apex-review: sonnet" or "apex-review: {model: sonnet, effort: high}"; a config
+    model without an effort leaves the effort to the per-model table); else the model
+    and explicit effort of the ape session that asked (so a review runs like the arm
+    that requested it); else claude's default model and ape's default effort. The
+    review session's manifest records each and its source under review_launch.
 
 Exit codes: 0 recorded / review passed · 1 not verified, code changed since the verify,
 review block (--run: findings in JSON "outcome"), verdict voided, or no verdict · 2 usage
@@ -333,7 +339,7 @@ running, call again.`,
 				if verdict != "" || findings != "" {
 					return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.review-run", Msg: "--run records its verdict from the review session; drop --verdict/--findings"}, nil)
 				}
-				return runReviewSession(cmd, &f, p, id, model, wait)
+				return runReviewSession(cmd, &f, p, id, model, effort, wait)
 			}
 			if findings == "" {
 				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.findings", Msg: "--findings <file> is required"}, nil)
@@ -350,7 +356,8 @@ running, call again.`,
 	cmd.Flags().StringVar(&findings, "findings", "", "the review file (required without --run)")
 	cmd.Flags().BoolVar(&runSession, "run", false, "review in a fresh, detached, read-only Claude Code session (apex-review)")
 	cmd.Flags().DurationVar(&wait, "wait", defaultReviewWait, "--run: how long this call waits for the session (exit 75 when it is still running)")
-	cmd.Flags().StringVar(&model, "model", "", "--run: model for the review session (default: as ape task)")
+	cmd.Flags().StringVar(&model, "model", "", "--run: model for the review session (default: models.apex-review in _apex/config.yaml, else the asking session's)")
+	cmd.Flags().StringVar(&effort, "effort", "", "--run: effort for the review session (default: models.apex-review's effort, else the asking session's)")
 	return cmd
 }
 

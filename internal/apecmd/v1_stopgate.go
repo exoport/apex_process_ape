@@ -114,6 +114,12 @@ func recordStopGate(projectRoot, skill, manifestDir string, r *stopGateRecorder)
 	if rec == nil {
 		return
 	}
+	patchLatestManifest(projectRoot, skill, manifestDir, func(m *pipeline.Manifest) { m.StopGate = rec })
+}
+
+// patchLatestManifest applies change to the latest run manifest of skill
+// and writes it back. Best-effort: the run is over and reported.
+func patchLatestManifest(projectRoot, skill, manifestDir string, change func(*pipeline.Manifest)) {
 	runDir := pipeline.ResolveLatestRunDir(projectRoot, skill, manifestDir)
 	if runDir == "" {
 		return
@@ -127,7 +133,7 @@ func recordStopGate(projectRoot, skill, manifestDir string, r *stopGateRecorder)
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return
 	}
-	m.StopGate = rec
+	change(&m)
 	out, err := yaml.Marshal(&m)
 	if err != nil {
 		return

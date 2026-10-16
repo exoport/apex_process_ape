@@ -523,6 +523,7 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	start := time.Now()
 	runErr := runWithInteractive(ctx, spec, o.projectRoot, cfg)
 	recordStopGate(o.projectRoot, o.skill, manifestDir, cfg.stopGate)
+	recordReviewLaunch(o.projectRoot, o.skill, manifestDir)
 	duration := time.Since(start)
 	if pfe, ok := errors.AsType[*pipeline.PreflightError](runErr); ok {
 		// Nothing spawned, so there is no run to report or assert.

@@ -11,7 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // fakeReviewer is a stand-in for the claude session `ape change review
@@ -24,6 +26,7 @@ import (
 // FAKE_SLEEP delays the work.
 const fakeReviewer = `#!/bin/bash
 if [ "$1" = "--version" ]; then echo "2.1.300 (Claude Code)"; exit 0; fi
+echo "args=$* effort=$CLAUDE_CODE_EFFORT_LEVEL" > "$FAKE_DIR/launch"
 settings=""
 while [ $# -gt 0 ]; do
   if [ "$1" = "--settings" ]; then settings="$2"; shift; fi
@@ -192,4 +195,96 @@ func TestReviewRun_RefusedInsideAReviewSession(t *testing.T) {
 	out, code := runApe(t, ape, project, env, "change", "review", "add-wave", "--run", "--json")
 	require.Equal(t, 2, code)
 	require.Contains(t, out, "a review session cannot start another review")
+}
+
+// D22: the review session runs on the model and effort of the session
+// that asked for it, unless _apex/config.yaml models.apex-review says
+// otherwise; the session's manifest records which source decided.
+func TestReviewRun_ModelAndEffort(t *testing.T) {
+	launchOf := func(t *testing.T, project string) map[string]any {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(project, "development", ".apex", "runs", "tasks", "apex-review", "latest", "manifest.yaml"))
+		require.NoError(t, err)
+		var m pipeline.Manifest
+		require.NoError(t, yaml.Unmarshal(data, &m))
+		require.NotNil(t, m.ReviewLaunch, "manifest:\n%s", data)
+		l := m.ReviewLaunch
+		return map[string]any{
+			"model": l.Model, "model_source": l.ModelSource, "effort": l.Effort,
+			"effort_source": l.EffortSource, "parent": l.Parent,
+		}
+	}
+
+	t.Run("inherits the asking session", func(t *testing.T) {
+		ape, project, fake, env := reviewProject(t)
+		env = append(slices.Clone(env), "APE_SESSION=task/outer", "APE_SESSION_MODEL=claude-sonnet-5-5", "APE_SESSION_EFFORT=high")
+		out, code := runApe(t, ape, project, env, "change", "review", "add-wave", "--run", "--wait", "90s", "--json")
+		require.Equal(t, 0, code, out)
+		launch, err := os.ReadFile(filepath.Join(fake, "launch"))
+		require.NoError(t, err)
+		require.Contains(t, string(launch), "--model claude-sonnet-5-5")
+		require.Contains(t, string(launch), "effort=high")
+		l := launchOf(t, project)
+		require.Equal(t, "claude-sonnet-5-5", l["model"])
+		require.Equal(t, "parent-session", l["model_source"])
+		require.Equal(t, "high", l["effort"])
+		require.Equal(t, "parent-session", l["effort_source"])
+		require.Equal(t, "task/outer", l["parent"])
+		require.Contains(t, out, `"model_source": "parent-session"`)
+	})
+
+	t.Run("config models.apex-review wins", func(t *testing.T) {
+		ape, project, fake, env := reviewProject(t)
+		cfg := filepath.Join(project, "_apex", "config.yaml")
+		data, err := os.ReadFile(cfg)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(cfg, append(data, []byte("models:\n  apex-review: {model: claude-haiku-5-5, effort: low}\n")...), 0o644))
+		commit := exec.Command("git", "-C", project, "commit", "-qam", "config: review on haiku")
+		commit.Env = env
+		cout, cerr := commit.CombinedOutput()
+		require.NoError(t, cerr, "%s", cout)
+		_, vcode := runApe(t, ape, project, env, "change", "verify", "add-wave")
+		require.Equal(t, 0, vcode, "the config commit moved HEAD past the verify")
+		env = append(slices.Clone(env), "APE_SESSION_MODEL=claude-sonnet-5-5", "APE_SESSION_EFFORT=high")
+		out, code := runApe(t, ape, project, env, "change", "review", "add-wave", "--run", "--wait", "90s", "--json")
+		require.Equal(t, 0, code, out)
+		launch, err := os.ReadFile(filepath.Join(fake, "launch"))
+		require.NoError(t, err)
+		require.Contains(t, string(launch), "--model claude-haiku-5-5")
+		require.Contains(t, string(launch), "effort=low")
+		l := launchOf(t, project)
+		require.Equal(t, "config", l["model_source"])
+		require.Equal(t, "config", l["effort_source"])
+	})
+
+	t.Run("a plain shell: claude's default, said so", func(t *testing.T) {
+		ape, project, fake, env := reviewProject(t)
+		env = append(slices.Clone(env), "APE_SESSION_MODEL=", "APE_SESSION_EFFORT=")
+		_, code := runApe(t, ape, project, env, "change", "review", "add-wave", "--run", "--wait", "90s")
+		require.Equal(t, 0, code)
+		launch, err := os.ReadFile(filepath.Join(fake, "launch"))
+		require.NoError(t, err)
+		require.NotContains(t, string(launch), "--model")
+		l := launchOf(t, project)
+		require.Equal(t, "default", l["model_source"])
+		require.Equal(t, "default", l["effort_source"])
+	})
+}
+
+// The other half of D22: every ape session tells its tools the model and
+// explicit effort it was launched with.
+func TestTask_ExportsItsModelAndEffort(t *testing.T) {
+	ape, project, fake, env := reviewProject(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(project, ".claude", "skills", "apex-foo"), 0o755))
+	require.NoError(t, writeFile(filepath.Join(project, ".claude", "skills", "apex-foo", "SKILL.md"), "# foo\n"))
+	// The fake reviewer doubles as any skill's session; it records its env.
+	require.NoError(t, os.WriteFile(filepath.Join(fake, "claude"), []byte(strings.Replace(fakeReviewer,
+		`echo "args=$* effort=$CLAUDE_CODE_EFFORT_LEVEL" > "$FAKE_DIR/launch"`,
+		`echo "model=$APE_SESSION_MODEL effort=$APE_SESSION_EFFORT" > "$FAKE_DIR/session-env"`, 1)), 0o755))
+	_, code := runApe(t, ape, project, env, "task", "apex-foo", "--args", "add-wave", "--model", "claude-sonnet-5-5", "--effort", "high",
+		"--idle-timeout", "20s", "--output-format", "json", "--cwd", project)
+	require.Equal(t, 0, code)
+	data, err := os.ReadFile(filepath.Join(fake, "session-env"))
+	require.NoError(t, err)
+	require.Equal(t, "model=claude-sonnet-5-5 effort=high\n", string(data))
 }
