@@ -173,6 +173,8 @@ var allChecks = []doctorCheck{
 	// disk state, this one is the framework's authored upgrade list with a
 	// ledger. Different subject, different remediation, different owner.
 	{Name: "migrations.pending", Run: checkUpgradeMigrations},
+	// Backlog 36: an APEX v1 project's plugins, installed at their refs.
+	{Name: "plugins.project", Run: checkPluginsProject},
 }
 
 func newDoctorCmd() *cobra.Command {
@@ -182,6 +184,7 @@ func newDoctorCmd() *cobra.Command {
 		skipCSV      string
 		onlyCSV      string
 		cwdFlag      string
+		fix          bool
 	)
 
 	cmd := &cobra.Command{
@@ -284,6 +287,17 @@ silent:
 Both SKIP or report INFO when there is nothing to judge — absence of
 evidence is not coverage.
 
+  plugins.project               (APEX v1) whether the plugins
+                                _apex/config.yaml lists are installed at
+                                project scope at their refs, and
+                                .claude/settings.json declares and enables
+                                them. --fix puts them right: it installs or
+                                updates each through the claude plugin CLI,
+                                writes the settings and commits them as
+                                "apex: plugins", before the checks run.
+                                --fix fixes nothing else; other rows print
+                                their fix command.
+
 --only runs just the named checks, so one gate can be scripted on its own:
 
   ape doctor --only hooks.contract_drift --strict --cwd <project>
@@ -307,6 +321,13 @@ Exit codes:
 			if err != nil {
 				return err
 			}
+			if fix {
+				if p, ok := v1ProjectAt(env.ProjectRoot); ok {
+					if _, err := syncPluginsReport(cmd.Context(), cmd.ErrOrStderr(), p, true); err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "plugins: %v\n", err)
+					}
+				}
+			}
 			checks, err := selectChecks(allChecks, parseSkipList(onlyCSV))
 			if err != nil {
 				return err
@@ -326,6 +347,7 @@ Exit codes:
 
 	cmd.Flags().StringVar(&outputFormat, "output-format", "human", "Output format: human|json|yaml")
 	cmd.Flags().BoolVar(&strict, "strict", false, "Treat WARN-level findings as failures (exit 1)")
+	cmd.Flags().BoolVar(&fix, "fix", false, "APEX v1: first install/update the plugins _apex/config.yaml lists and write their settings (the only fixer)")
 	cmd.Flags().StringVar(&skipCSV, "skip", "", "Comma-separated list of check names to skip (e.g. node.binary,npx.binary)")
 	cmd.Flags().StringVar(&onlyCSV, "only", "", "Run ONLY these checks (comma-separated). Errors on an unknown name; applied before --skip")
 	cmd.Flags().StringVar(&cwdFlag, "cwd", "", "Project root to probe (default: current working directory)")

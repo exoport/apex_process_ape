@@ -536,12 +536,19 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		cfg.effort, cfg.effortAsArg = l.launch.Effort, true
 		// Backlog 31: the project's hooks ride inline, so a hand-edited
 		// settings.json cannot drop them (apexv1.InlineHooks).
-		cfg.extraHooks, cfg.spawnEnv = v1InlineHooks()
+		cfg.spawnSettings.hooks, cfg.spawnEnv = v1InlineHooks()
 		// Backlog 30: the milestone's enforced budget refuses the start, or
 		// stops the session when its live spend reaches it.
 		if cfg.budgetWatch, err = newV1BudgetWatch(p, o.skill); err != nil {
 			return taskRun{}, &taskPreflightError{err: err}
 		}
+		// Backlog 36: the plugins _apex/config.yaml lists are installed at
+		// their refs before anything spawns, and enabled inline.
+		plugins, err := v1TaskPlugins(ctx, p, cfg.claudeBin)
+		if err != nil {
+			return taskRun{}, &taskPreflightError{err: err}
+		}
+		cfg.spawnSettings.settings = plugins
 	} else if err := v1ConfigError(o.projectRoot); err != nil {
 		return taskRun{}, &taskPreflightError{err: err}
 	}

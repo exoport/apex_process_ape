@@ -64,6 +64,10 @@ type Config struct {
 	// milestone budget (off unless enforce) and the attempts cap per
 	// change start.
 	Limits Limits `yaml:"limits"`
+	// Marketplaces and Plugins are the Claude Code plugins the project
+	// uses; ape keeps them installed at project scope (plugins.go).
+	Marketplaces map[string]Marketplace `yaml:"marketplaces"`
+	Plugins      []PluginRef            `yaml:"plugins"`
 }
 
 // SkillModel is one models.<skill> entry.

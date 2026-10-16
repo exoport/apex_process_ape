@@ -3360,6 +3360,17 @@ silent:
 Both SKIP or report INFO when there is nothing to judge — absence of
 evidence is not coverage.
 
+  plugins.project               (APEX v1) whether the plugins
+                                _apex/config.yaml lists are installed at
+                                project scope at their refs, and
+                                .claude/settings.json declares and enables
+                                them. --fix puts them right: it installs or
+                                updates each through the claude plugin CLI,
+                                writes the settings and commits them as
+                                "apex: plugins", before the checks run.
+                                --fix fixes nothing else; other rows print
+                                their fix command.
+
 --only runs just the named checks, so one gate can be scripted on its own:
 
   ape doctor --only hooks.contract_drift --strict --cwd <project>
@@ -3383,6 +3394,7 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root to probe (default: current working directory) |
+| `--fix` | bool | `false` | APEX v1: first install/update the plugins _apex/config.yaml lists and write their settings (the only fixer) |
 | `--only` | string | `—` | Run ONLY these checks (comma-separated). Errors on an unknown name; applied before --skip |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 | `--skip` | string | `—` | Comma-separated list of check names to skip (e.g. node.binary,npx.binary) |
@@ -3864,6 +3876,11 @@ output is never committed.
 Does NOT touch _apex/config.yaml — that's the one-time bootstrap from
 'ape framework setup'. To re-bootstrap, pass --force to 'setup'.
 
+In an APEX v1 project, the plugins _apex/config.yaml lists are installed or
+updated at project scope and written into .claude/settings.json, which the
+update commit carries (see ape project init --help); a plugin that cannot be
+put right is a warning with the command to run, not a failed update.
+
   --plan        print the upgrade-migration plan and do NOTHING ELSE — no
                 install, no fetch, no migration. The plan is the list the
                 project will hold AFTER this update: the installed entries
@@ -4015,9 +4032,9 @@ Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
   session-start   SessionStart: adds `ape status --brief` as context
   stop            Stop and SubagentStop: blocks a stop while the one in-progress change
                   has a red command check (at most 3 times in a row)
-  pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit): denies edits to
-                  development/specs/**, changes/*/state.json, archive/**, and
-                  _apex/state/**
+  pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
+                  development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
+                  and Bash commands that create, delete or push a git tag
 
 Every hook exits 0; a block or deny is expressed in its JSON output.
 
@@ -4027,23 +4044,38 @@ them; the settings.json copy then does nothing, so each event is decided once.
 
 Subcommands:
 
-- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive and _apex/state
+- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive and _apex/state, and git tag writes
 - `session-start` — SessionStart hook: inject `ape status --brief` as additional context
 - `stop` — Stop/SubagentStop hook: block a stop while the in-progress change's checks are red
 
 ## ape hook pre-tool
 
-PreToolUse hook: deny edits to specs, state.json, the archive and _apex/state
+PreToolUse hook: deny edits to specs, state.json, the archive and _apex/state, and git tag writes
 
 ```
 ape hook pre-tool [flags]
 ```
 
-PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit. Denies, with
+PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
-development/archive/, or is under _apex/state/. Anything else: no output.
+development/archive/, or is under _apex/state/.
+
+Bash: denies a command that writes a git tag — only a person tags or releases:
+  git tag <name> (-a, -s, -f, -m …), git tag -d|--delete
+  git push --tags | --follow-tags | --mirror
+  git push <remote> <ref> where <ref> is refs/tags/… (either side, :refs/tags/x),
+    "tag <name>", or a name the repository has as a tag and not as a branch;
+    git push --delete|-d <remote> <name> likewise
+Listing stays allowed: git tag, -l/--list [<pattern>], -n, --contains, --merged,
+--points-at, --sort, --format, -v. The command is parsed: quotes, && || ; | chains,
+subshells, NAME=value prefixes, env/sudo/xargs wrappers, git -C/-c, and sh -c / eval
+scripts are followed, so `echo "git tag v1"` is not flagged. Not seen: "$(…)"
+inside double quotes, git aliases, script files. A command without "git" is allowed
+at once. APE_ALLOW_TAG=1 in the session's environment allows tag writes.
+
+Anything else: no output.
 
 Flags:
 
@@ -4840,6 +4872,11 @@ Validate the whole project and list every failure, not just the first.
   .claude/settings.json    ape's hooks registered as `ape project init` writes them:
                            hooks.missing / hooks.altered (matcher, type, async, a
                            stop timeout below 1800 s); `ape project init` restores them
+  plugins                  _apex/config.yaml marketplaces/plugins: settings.json's
+                           extraKnownMarketplaces/enabledPlugins match them, and (when
+                           claude is on PATH) each plugin is installed at project scope
+                           at its ref (plugins.drift; plugins.config for a bad config);
+                           `ape doctor --fix` puts them right
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
 
@@ -4921,13 +4958,33 @@ Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritt
 Hooks merged into .claude/settings.json (existing keys and hooks are kept):
   SessionStart          ape hook session-start
   Stop, SubagentStop    ape hook stop          (timeout 1800 s: it runs the change's checks)
-  PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit)
+  PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit|Bash:
+                                                the edit guard, and the git tag guard)
 A hook that was altered (another matcher, async, a shorter stop timeout) is replaced
 by the one above; running init again changes nothing. ape task passes the same
 hooks inline as well, so its sessions have them even when settings.json does not.
 
 Everything init wrote (and settings.json when it merged hooks) is committed as
 "apex: project init"; files that existed before are not touched and not committed.
+
+Plugins: when _apex/config.yaml lists marketplaces/plugins, init installs each
+plugin at project scope through the claude plugin CLI (marketplace add, install,
+or marketplace update + update when it is off its ref), writes
+extraKnownMarketplaces and enabledPlugins into .claude/settings.json (other keys
+kept) and commits that as "apex: plugins". ape framework update and ape doctor
+--fix do the same; ape task installs a missing one before it spawns.
+
+  marketplaces:
+    team-tools: {source: github, repo: org/claude-plugins}   # or {source: git, url: …},
+                                                             # {source: directory, path: …}
+  plugins:
+    - {name: nats-expert, marketplace: team-tools, ref: v1.4.0}
+
+ref is the version the install must report (claude plugin list; a leading v is
+ignored; a commit matches by prefix). Claude Code cannot pin a plugin version
+from the consumer side: a marketplace serves one version of each plugin, so pin
+by pointing the marketplace at a ref (github/git: ref: <branch|tag>). A plugin
+the marketplace does not serve at ref fails with the command to run.
 
 --brownfield adds nothing; it records in _apex/state/project.json (ignored) that the
 project existed before APEX.

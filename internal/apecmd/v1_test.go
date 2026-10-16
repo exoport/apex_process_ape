@@ -239,6 +239,39 @@ func TestHookCommands(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, stdout, "nothing in progress: allow")
 
+	// Item 10: a Bash call that writes a tag is denied with PreToolUse
+	// JSON; any other Bash call is allowed with no output; the session's
+	// APE_ALLOW_TAG=1 lets it through.
+	t.Setenv("APE_ALLOW_TAG", "")
+	bash := func(command string) string {
+		t.Helper()
+		out, _, err := v1ExecIn(t, newHookCmd, payload(map[string]any{
+			"session_id": "s", "hook_event_name": "PreToolUse", "tool_name": "Bash",
+			"tool_input": map[string]any{"command": command},
+		}), "pre-tool")
+		require.NoError(t, err)
+		return out
+	}
+	stdout = bash("go test ./... && git -C . tag -a v1 -m release")
+	require.Contains(t, stdout, `"permissionDecision":"deny"`)
+	require.Contains(t, stdout, "only a person tags or releases")
+	require.Empty(t, bash("git tag --list && git push origin main"))
+	t.Setenv("APE_ALLOW_TAG", "1")
+	require.Empty(t, bash("git tag v1"))
+
+	// Backlog 31: in a session ape task injected the hooks into, the
+	// settings.json copy (no --inline) stands down; the inline one acts.
+	t.Setenv("APE_ALLOW_TAG", "")
+	t.Setenv("APE_V1_HOOKS", "inline")
+	require.Empty(t, bash("git tag v1"), "the settings.json copy does nothing")
+	stdout, _, err = v1ExecIn(t, newHookCmd, payload(map[string]any{
+		"session_id": "s", "hook_event_name": "PreToolUse", "tool_name": "Bash",
+		"tool_input": map[string]any{"command": "git tag v1"},
+	}), "pre-tool", "--inline")
+	require.NoError(t, err)
+	require.Contains(t, stdout, `"permissionDecision":"deny"`)
+	t.Setenv("APE_V1_HOOKS", "")
+
 	// A payload that is not JSON never fails the session. (From the
 	// project dir: with no payload cwd the hook falls back to its own.)
 	t.Chdir(root)

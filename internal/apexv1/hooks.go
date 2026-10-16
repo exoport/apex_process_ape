@@ -70,8 +70,16 @@ func (d PreToolDecision) Output() ([]byte, error) {
 	})
 }
 
-// PreTool decides whether an edit tool call may touch its target.
+// PreTool decides whether an edit tool call may touch its target, and
+// whether a Bash call may write a git tag (TagGuard).
 func PreTool(payload HookPayload) PreToolDecision {
+	if payload.ToolName == "Bash" {
+		cwd := payload.Cwd
+		if cwd == "" {
+			cwd, _ = os.Getwd()
+		}
+		return TagGuard(bashCommand(payload.ToolInput), cwd)
+	}
 	if !editTools[payload.ToolName] {
 		return PreToolDecision{}
 	}

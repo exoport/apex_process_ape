@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -88,4 +89,27 @@ func TestInlineHooks_CarryTheFlag(t *testing.T) {
 	for i, h := range InlineHooks() {
 		require.Equal(t, APEHooks()[i].Command+" --inline", h.Command)
 	}
+}
+
+// Item 10 widened the pre-tool matcher to Bash: a project initialised
+// before it reports the old matcher as altered, and init upgrades it.
+func TestCheckHooks_PreItem10MatcherIsUpgraded(t *testing.T) {
+	p := settingsProject(t, "")
+	_, err := MergeHooks(p.SettingsJSON())
+	require.NoError(t, err)
+	data, err := os.ReadFile(p.SettingsJSON())
+	require.NoError(t, err)
+	old := []byte(`"matcher": "Edit|Write|MultiEdit|NotebookEdit"`)
+	require.NoError(t, os.WriteFile(p.SettingsJSON(), bytesReplace(data, []byte(`"matcher": "`+PreToolMatcher+`"`), old), 0o644))
+	fs := p.CheckHooks()
+	findingMessages(fs)
+	require.Equal(t, []string{"hooks.altered"}, codesOf(fs))
+	added, err := MergeHooks(p.SettingsJSON())
+	require.NoError(t, err)
+	require.Equal(t, []string{"PreToolUse: ape hook pre-tool (restored)"}, added)
+	require.Empty(t, p.CheckHooks())
+}
+
+func bytesReplace(s, old, repl []byte) []byte {
+	return []byte(strings.Replace(string(s), string(old), string(repl), 1))
 }

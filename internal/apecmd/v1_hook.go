@@ -23,9 +23,9 @@ func newHookCmd() *cobra.Command {
   session-start   SessionStart: adds ` + "`ape status --brief`" + ` as context
   stop            Stop and SubagentStop: blocks a stop while the one in-progress change
                   has a red command check (at most 3 times in a row)
-  pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit): denies edits to
-                  development/specs/**, changes/*/state.json, archive/**, and
-                  _apex/state/**
+  pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
+                  development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
+                  and Bash commands that create, delete or push a git tag
 
 Every hook exits 0; a block or deny is expressed in its JSON output.
 
@@ -162,12 +162,27 @@ func newHookPreToolCmd() *cobra.Command {
 	var inline bool
 	cmd := &cobra.Command{
 		Use:   "pre-tool",
-		Short: "PreToolUse hook: deny edits to specs, state.json, the archive and _apex/state",
-		Long: `PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit. Denies, with
+		Short: "PreToolUse hook: deny edits to specs, state.json, the archive and _apex/state, and git tag writes",
+		Long: `PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
-development/archive/, or is under _apex/state/. Anything else: no output.`,
+development/archive/, or is under _apex/state/.
+
+Bash: denies a command that writes a git tag — only a person tags or releases:
+  git tag <name> (-a, -s, -f, -m …), git tag -d|--delete
+  git push --tags | --follow-tags | --mirror
+  git push <remote> <ref> where <ref> is refs/tags/… (either side, :refs/tags/x),
+    "tag <name>", or a name the repository has as a tag and not as a branch;
+    git push --delete|-d <remote> <name> likewise
+Listing stays allowed: git tag, -l/--list [<pattern>], -n, --contains, --merged,
+--points-at, --sort, --format, -v. The command is parsed: quotes, && || ; | chains,
+subshells, NAME=value prefixes, env/sudo/xargs wrappers, git -C/-c, and sh -c / eval
+scripts are followed, so ` + "`echo \"git tag v1\"`" + ` is not flagged. Not seen: "$(…)"
+inside double quotes, git aliases, script files. A command without "git" is allowed
+at once. APE_ALLOW_TAG=1 in the session's environment allows tag writes.
+
+Anything else: no output.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := readHookPayload(cmd)

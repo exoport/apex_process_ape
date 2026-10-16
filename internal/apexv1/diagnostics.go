@@ -168,6 +168,8 @@ var findingRules = []findingRule{
 	rule("", "^hook `ape hook .* is not registered for", "hooks.missing"),
 	rule("", "^hook `ape hook .* is altered", "hooks.altered"),
 	rule("", `^settings.json is (not valid JSON|unreadable)`, "settings.invalid-json"),
+	rule("", `^plugins config: `, "plugins.config"),
+	rule("", `^plugins: `, "plugins.drift"),
 }
 
 // UnclassifiedFinding is the code of a finding no rule matches — a
