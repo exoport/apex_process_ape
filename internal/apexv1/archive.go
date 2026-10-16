@@ -2,6 +2,8 @@ package apexv1
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -190,6 +192,10 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 			" — a person runs `ape change accept " + id + " --task <T> --by <who>`, or archive with --allow-pending-human (recorded)"}
 	}
 
+	if fc := p.fingerprintConflicts(st.BaseFingerprints, ci.Doc); len(fc) > 0 {
+		return res, &ConflictError{Code: "archive.base-changed", Msg: "requirements this change modifies or removes were changed by another change since it started — nothing was written; " +
+			"re-plan against the current spec and re-start (`ape change start " + id + "`)", Conflicts: fc}
+	}
 	updates, conflicts := p.MergeDelta(ci.Doc)
 	if len(conflicts) > 0 {
 		return res, &ConflictError{Code: "archive.delta-conflict", Msg: "the delta no longer applies to specs/ — nothing was written; re-plan the change against the current specs", Conflicts: conflicts}
@@ -313,4 +319,52 @@ func failingNames(v *VerifyResult) string {
 		names = append(names, fmt.Sprintf("%s exit %d", failing[i].Task, failing[i].Exit))
 	}
 	return strings.Join(names, ", ")
+}
+
+// requirementFingerprint is the SHA-256 of a requirement block, trailing
+// whitespace trimmed per line.
+func requirementFingerprint(r *Requirement) string {
+	lines := strings.Split(r.Text, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " \t")
+	}
+	sum := sha256.Sum256([]byte(strings.TrimRight(strings.Join(lines, "\n"), "\n")))
+	return hex.EncodeToString(sum[:])
+}
+
+// baseFingerprints fingerprints the current spec block of every requirement
+// c MODIFIES or REMOVES.
+func (p *Project) baseFingerprints(c *Change) map[string]string {
+	out := map[string]string{}
+	for i := range c.Deltas {
+		d := &c.Deltas[i]
+		if d.Op == OpAdded {
+			continue
+		}
+		spec, _, ok := p.LoadSpec(d.Capability)
+		if !ok {
+			continue
+		}
+		if r := spec.Find(d.Name); r != nil {
+			out[d.Capability+"/"+d.Name] = requirementFingerprint(r)
+		}
+	}
+	return out
+}
+
+// fingerprintConflicts lists the requirements whose live block no longer
+// matches the fingerprint recorded at start.
+func (p *Project) fingerprintConflicts(recorded map[string]string, c *Change) []string {
+	if len(recorded) == 0 {
+		return nil
+	}
+	live := p.baseFingerprints(c)
+	var out []string
+	for key, sha := range recorded {
+		if now, ok := live[key]; ok && now != sha {
+			out = append(out, "["+strings.Replace(key, "/", "] ", 1)+" changed in the spec since this change started")
+		}
+	}
+	sort.Strings(out)
+	return out
 }

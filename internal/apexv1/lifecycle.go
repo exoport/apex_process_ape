@@ -68,9 +68,12 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 	case StatusDraft, StatusBlocked:
 		replan = st.PlanDigest != "" && st.PlanDigest != digest
 	case StatusInProgress, StatusVerified, StatusReviewed:
-		// A started change starts again only to re-baseline a changed plan.
-		if st.PlanDigest == "" || st.PlanDigest == digest {
-			return nil, &FailError{Code: "change.nothing-to-rebaseline", Msg: "change " + id + " is " + st.Status + " and its ## Tasks and ## Delta are unchanged — nothing to re-baseline"}
+		// A started change starts again only to re-baseline: a changed
+		// plan, or a spec its MODIFIED/REMOVED blocks were based on that
+		// another change has since changed (item 9).
+		planChanged := st.PlanDigest != "" && st.PlanDigest != digest
+		if !planChanged && len(p.fingerprintConflicts(st.BaseFingerprints, ci.Doc)) == 0 {
+			return nil, &FailError{Code: "change.nothing-to-rebaseline", Msg: "change " + id + " is " + st.Status + " and neither its ## Tasks and ## Delta nor the spec they modify changed — nothing to re-baseline"}
 		}
 		replan = true
 	default:
@@ -115,6 +118,7 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 	}
 	results := p.rebaseline(ctx, ci, st, head, opt)
 	st.PlanDigest = digest
+	st.BaseFingerprints = p.baseFingerprints(ci.Doc)
 	st.Status = StatusInProgress
 	st.BlockedReason = nil
 	if err := p.saveAndCommit(ctx, id, st); err != nil {

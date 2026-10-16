@@ -124,18 +124,23 @@ type State struct {
 	Baseline  []Baseline `json:"baseline"`
 	// PlanDigest is the SHA-256 of change.md's ## Delta and ## Tasks at
 	// start. verify and archive refuse while it differs (plan drift).
-	PlanDigest        string       `json:"plan_digest,omitempty"`
-	Replans           []Replan     `json:"replans,omitempty"`
-	Verify            *Verify      `json:"verify"`
-	Review            *Review      `json:"review"`
-	Accepted          []Accept     `json:"accepted"`
-	BlockedReason     *string      `json:"blocked_reason"`
-	ReviewVoided      []ReviewVoid `json:"review_voided,omitempty"`
-	AllowPendingHuman bool         `json:"allow_pending_human,omitempty"`
-	AbandonedReason   string       `json:"abandoned_reason,omitempty"`
-	ArchivedAt        string       `json:"archived_at,omitempty"`
-	ArchivedTo        string       `json:"archived_to,omitempty"`
-	CreatedAt         string       `json:"created_at,omitempty"`
+	PlanDigest string `json:"plan_digest,omitempty"`
+	// BaseFingerprints maps "<capability>/<requirement>" to the SHA-256 of
+	// the spec block each MODIFIED or REMOVED delta replaces, as it was at
+	// start (backlog item 9). Archive refuses (exit 3) when the live block
+	// differs: another change — on another branch — changed it since.
+	BaseFingerprints  map[string]string `json:"base_fingerprints,omitempty"`
+	Replans           []Replan          `json:"replans,omitempty"`
+	Verify            *Verify           `json:"verify"`
+	Review            *Review           `json:"review"`
+	Accepted          []Accept          `json:"accepted"`
+	BlockedReason     *string           `json:"blocked_reason"`
+	ReviewVoided      []ReviewVoid      `json:"review_voided,omitempty"`
+	AllowPendingHuman bool              `json:"allow_pending_human,omitempty"`
+	AbandonedReason   string            `json:"abandoned_reason,omitempty"`
+	ArchivedAt        string            `json:"archived_at,omitempty"`
+	ArchivedTo        string            `json:"archived_to,omitempty"`
+	CreatedAt         string            `json:"created_at,omitempty"`
 }
 
 // Active reports whether a change is in flight: started and neither

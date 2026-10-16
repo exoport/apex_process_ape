@@ -1697,7 +1697,9 @@ Archive a reviewed change:
   3. applies the delta to development/specs/: ADDED appends, MODIFIED replaces, REMOVED
      deletes; a new capability gets specs/<cap>/spec.md (Purpose from the change's Why).
      Any conflict — including a MODIFIED that would drop a scenario the current spec has,
-     or change its check — → exit 3 and NOTHING is written
+     or change its check, or a MODIFIED/REMOVED requirement whose spec block changed since
+     start (another branch archived first: re-plan and re-start) — → exit 3 and NOTHING is
+     written
   4. moves the folder to development/changes/archive/<YYYY-MM-DD>-<id>/, status archived
   5. commits the specs and the move (only those paths; hooks skipped) as
      "archive: <id>" with trailer "Change: <id>"
@@ -1897,14 +1899,16 @@ Start a draft (or resume a blocked) change:
   4. runs every check verify will run once, as the baseline (which were already green):
      the command tasks and the effective spec's scenario checks; from the project root
      with sh -c; output under development/.apex/logs/<id>/
-  5. sets in-progress, freezes the plan (SHA-256 of ## Delta + ## Tasks) and commits
-     state.json ("apex: <id> in-progress")
+  5. sets in-progress, freezes the plan (SHA-256 of ## Delta + ## Tasks), fingerprints
+     the spec block of every requirement it MODIFIES or REMOVES, and commits state.json
+     ("apex: <id> in-progress")
 
 Re-start: once the plan is frozen, verify and archive refuse while ## Delta or ## Tasks
 differ from it. Running start again on an in-progress, verified or reviewed change
-re-baselines the new plan: recorded under "replans" in state.json, verify and review
-cleared, new or changed tasks baselined now; unchanged tasks keep their original
-baseline. With no plan change it is refused.
+re-baselines: recorded under "replans" in state.json, verify and review cleared, new or
+changed checks baselined now (unchanged ones keep their original baseline), fingerprints
+re-taken. It applies when the plan changed, or when a spec block the change modifies or
+removes was changed by another change since start; otherwise it is refused.
 
 Exit codes: 0 started · 1 check red, milestone not approved, or wrong status · 2 usage ·
 3 requirement conflict with another active change.

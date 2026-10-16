@@ -90,6 +90,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"error.unclassified", 1, "a failure without a code (a bug: report it)"},
 
 	// conflicts (exit 3)
+	{"archive.base-changed", 3, "a requirement this change modifies or removes changed in the spec since start (another branch); nothing written"},
 	{"archive.delta-conflict", 3, "the delta no longer applies to the current specs; nothing written"},
 	{CodeFolderExists, 3, "the archive folder already exists; nothing written"},
 	{"change.requirement-conflict", 3, "another active change claims the same requirement"},
