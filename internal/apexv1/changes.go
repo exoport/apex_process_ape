@@ -213,11 +213,14 @@ func (p *Project) checkDeltas(file string, c *Change, touches map[string]bool) [
 		case OpAdded:
 			if existing != nil {
 				add(d.Line, fmt.Sprintf("ADDED requirement %q already exists in specs/%s — use MODIFIED", d.Name, d.Capability))
+			} else if near := nearMiss(spec, d.Name); specExists && near != "" {
+				add(d.Line, fmt.Sprintf("ADDED requirement %q nearly matches the existing %q in specs/%s — MODIFIED %q if it is the same requirement, or pick a clearly different name",
+					d.Name, near, d.Capability, near))
 			}
 			out = append(out, validateRequirementBody(file, d.Req)...)
 		case OpModified:
 			if existing == nil {
-				add(d.Line, fmt.Sprintf("MODIFIED names %q, which is not a requirement heading in specs/%s/spec.md — name it exactly", d.Name, d.Capability))
+				add(d.Line, fmt.Sprintf("MODIFIED names %q, which is not a requirement heading in specs/%s/spec.md — %s", d.Name, d.Capability, nearMissFix(spec, d.Name)))
 			} else {
 				for _, loss := range scenarioLoss(existing, &d.Req) {
 					add(d.Line, fmt.Sprintf("MODIFIED [%s] %q %s — a MODIFIED block keeps every scenario and its check; changed behaviour is REMOVED + ADDED under a new name",
@@ -227,13 +230,90 @@ func (p *Project) checkDeltas(file string, c *Change, touches map[string]bool) [
 			out = append(out, validateRequirementBody(file, d.Req)...)
 		case OpRemoved:
 			if existing == nil {
-				add(d.Line, fmt.Sprintf("REMOVED names %q, which is not a requirement heading in specs/%s/spec.md — name it exactly", d.Name, d.Capability))
+				add(d.Line, fmt.Sprintf("REMOVED names %q, which is not a requirement heading in specs/%s/spec.md — %s", d.Name, d.Capability, nearMissFix(spec, d.Name)))
 			}
 			if d.Reason == "" {
 				add(d.Line, "REMOVED needs a `Reason:` line")
 			}
+			if d.Extra > 0 {
+				add(d.Extra, "a REMOVED block carries only `Reason:` — archive would drop this text; move it to ## Why or ## Notes")
+			}
 		}
 	}
+	out = append(out, p.checkRetire(file, c)...)
+	return out
+}
+
+// checkRetire enforces item 8's retirement rule: a change that REMOVES
+// every requirement of a capability (adding none back) must list it under
+// retire:, and retire: lists only capabilities the change empties.
+func (p *Project) checkRetire(file string, c *Change) []Finding {
+	var out []Finding
+	retire := map[string]bool{}
+	for _, r := range c.Meta.Retire {
+		retire[r] = true
+	}
+	emptied := p.emptiedCapabilities(c)
+	for _, capName := range sortedKeys(emptied) {
+		if !retire[capName] {
+			out = append(out, Finding{File: file, Line: 1, Message: "the delta removes every requirement of [" + capName +
+				"] — add `retire: [" + capName + "]` to the frontmatter to delete the capability, or keep a requirement"})
+		}
+	}
+	for _, capName := range c.Meta.Retire {
+		if !emptied[capName] {
+			out = append(out, Finding{File: file, Line: 1, Message: "retire: lists [" + capName +
+				"], but the delta does not remove every one of its requirements — REMOVE them all, or drop it from retire:"})
+		}
+	}
+	return out
+}
+
+// emptiedCapabilities are the existing capabilities whose every
+// requirement c REMOVES, with nothing ADDED or MODIFIED in them.
+func (p *Project) emptiedCapabilities(c *Change) map[string]bool {
+	removed := map[string]map[string]bool{}
+	kept := map[string]bool{}
+	for i := range c.Deltas {
+		d := &c.Deltas[i]
+		if d.Op == OpRemoved {
+			if removed[d.Capability] == nil {
+				removed[d.Capability] = map[string]bool{}
+			}
+			removed[d.Capability][d.Name] = true
+		} else {
+			kept[d.Capability] = true
+		}
+	}
+	out := map[string]bool{}
+	for capName, names := range removed {
+		if kept[capName] {
+			continue
+		}
+		spec, _, ok := p.LoadSpec(capName)
+		if !ok || len(spec.Requirements) == 0 {
+			continue
+		}
+		all := true
+		for i := range spec.Requirements {
+			if !names[spec.Requirements[i].Name] {
+				all = false
+				break
+			}
+		}
+		if all {
+			out[capName] = true
+		}
+	}
+	return out
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
 	return out
 }
 

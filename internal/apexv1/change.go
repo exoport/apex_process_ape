@@ -26,6 +26,9 @@ type ChangeMeta struct {
 	Touches   []string `yaml:"touches"`
 	Paths     []string `yaml:"paths"`
 	Decisions []string `yaml:"decisions"`
+	// Retire lists capabilities this change removes entirely: the only way
+	// a change may REMOVE a capability's last requirement (item 8, G7).
+	Retire []string `yaml:"retire"`
 }
 
 // Delta is one `### ADDED|MODIFIED|REMOVED [cap] Requirement: <name>`.
@@ -38,6 +41,9 @@ type Delta struct {
 	// heading rewritten to `### Requirement: <name>`, body verbatim.
 	Req    Requirement `json:"-"`
 	Reason string      `json:"reason,omitempty"`
+	// Extra is a REMOVED block's first line of prose other than Reason:
+	// — text archive would drop.
+	Extra int `json:"-"`
 }
 
 // Task is one `- T<n> <what> — check: <command|human-review>` line.
@@ -134,10 +140,13 @@ func (c *Change) parseDelta(body []mdLine) {
 		head := mdLine{N: d.Line, Text: "### " + RequirementPrefix + " " + d.Name}
 		var bodyLines []mdLine
 		for _, l := range curLines {
-			if d.Op == OpRemoved && !l.InCode {
-				if t := strings.TrimSpace(l.Text); strings.HasPrefix(t, "Reason:") {
+			if d.Op == OpRemoved {
+				if t := strings.TrimSpace(l.Text); !l.InCode && strings.HasPrefix(t, "Reason:") {
 					d.Reason = strings.TrimSpace(strings.TrimPrefix(t, "Reason:"))
 					continue
+				}
+				if d.Extra == 0 && strings.TrimSpace(l.Text) != "" && hasProse([]mdLine{l}) {
+					d.Extra = l.N
 				}
 			}
 			bodyLines = append(bodyLines, l)
@@ -174,7 +183,21 @@ func (c *Change) parseDelta(body []mdLine) {
 		}
 	}
 	flush()
-	if len(c.Deltas) > 0 || skipping {
+	if len(c.Deltas) > 0 {
+		// Prose before the first delta block is not carried into any
+		// spec: archive would drop it silently (item 8, OpenSpec G3).
+		for _, l := range loose {
+			if strings.TrimSpace(l.Text) != "" && hasProse([]mdLine{l}) {
+				c.parse = append(c.parse, Finding{
+					File: c.file, Line: l.N,
+					Message: "text before the first delta block is not carried into any spec — archive would drop it; move it to ## Why or ## Notes",
+				})
+				break
+			}
+		}
+		return
+	}
+	if skipping {
 		return
 	}
 	// No delta headings: the only other legal shape is one `none — reason` line.

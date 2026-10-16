@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -227,4 +228,58 @@ func ValidateSpec(file, doc string) []Finding {
 		})
 	}
 	return out
+}
+
+// nearMiss returns the requirement in spec whose name most nearly matches
+// name — equal after folding case and whitespace, or within a small edit
+// distance — or "" (item 8, OpenSpec G4: a precise "did you mean" saves a
+// model a turn per typo).
+func nearMiss(spec Spec, name string) string {
+	fold := func(s string) string { return strings.ToLower(strings.Join(strings.Fields(s), " ")) }
+	want := fold(name)
+	best, bestDist := "", -1
+	for i := range spec.Requirements {
+		have := spec.Requirements[i].Name
+		if have == name {
+			continue
+		}
+		if fold(have) == want {
+			return have
+		}
+		limit := max(len(want)/5, 2)
+		if d := editDistance(want, fold(have)); d <= limit && (bestDist < 0 || d < bestDist) {
+			best, bestDist = have, d
+		}
+	}
+	return best
+}
+
+// nearMissFix is the remediation for a delta naming a missing requirement.
+func nearMissFix(spec Spec, name string) string {
+	if near := nearMiss(spec, name); near != "" {
+		return fmt.Sprintf("did you mean %q? Name the heading exactly", near)
+	}
+	return "name it exactly"
+}
+
+// editDistance is the Levenshtein distance between a and b, by rune.
+func editDistance(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
+	cur := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		cur[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(rb)]
 }

@@ -137,6 +137,12 @@ func newChangeCheckCmd() *cobra.Command {
     "- check: <command> | human-review"; REMOVED carries "Reason:". A MODIFIED block
     keeps every scenario of the requirement it replaces, each with the same check
     (it may add scenarios); changed behaviour is REMOVED + ADDED under a new name.
+    A name that nearly matches an existing heading (case, spacing, a typo) gets a
+    "did you mean"; an ADDED that nearly matches one is refused.
+  - nothing archive would drop: no prose before the first delta block, nothing but
+    "Reason:" in a REMOVED block
+  - a delta that REMOVES every requirement of a capability needs "retire: [<cap>]" in
+    the frontmatter (archive then deletes its spec); retire: lists only such capabilities
   - ## Tasks: "- T<n> <what> — check: <command> | human-review", no checkboxes, unique ids
 
 Exit codes: 0 green · 1 findings · 2 usage.`,

@@ -18,10 +18,13 @@ type SpecUpdate struct {
 	Capability string `json:"capability"`
 	Path       string `json:"path"`
 	Created    bool   `json:"created"`
-	Added      int    `json:"added"`
-	Modified   int    `json:"modified"`
-	Removed    int    `json:"removed"`
-	content    string
+	// Retired: the change removed the capability's last requirement and
+	// lists it under retire:; archive deletes the spec.
+	Retired  bool `json:"retired,omitempty"`
+	Added    int  `json:"added"`
+	Modified int  `json:"modified"`
+	Removed  int  `json:"removed"`
+	content  string
 }
 
 // MergeDelta applies a change's delta to the current specs in memory.
@@ -39,6 +42,10 @@ func (p *Project) MergeDelta(c *Change) (updates []SpecUpdate, conflicts []strin
 		byCap[d.Capability] = append(byCap[d.Capability], *d)
 	}
 	sort.Strings(order)
+	retire := map[string]bool{}
+	for _, r := range c.Meta.Retire {
+		retire[r] = true
+	}
 	for _, capName := range order {
 		spec, _, exists := p.LoadSpec(capName)
 		u := SpecUpdate{Capability: capName, Path: p.Rel(p.SpecFile(capName)), Created: !exists}
@@ -46,6 +53,13 @@ func (p *Project) MergeDelta(c *Change) (updates []SpecUpdate, conflicts []strin
 			spec = Spec{Preamble: "# " + titleFromSlug(capName) + "\nPurpose: " + purposeFrom(c)}
 		}
 		merged, cs := applyDeltas(&spec, capName, byCap[capName], &u)
+		if len(cs) == 0 && exists && len(spec.Requirements) == 0 {
+			if retire[capName] {
+				u.Retired = true
+			} else {
+				cs = append(cs, fmt.Sprintf("the delta leaves [%s] with no requirement — add `retire: [%s]` to delete the capability", capName, capName))
+			}
+		}
 		conflicts = append(conflicts, cs...)
 		if len(cs) == 0 {
 			u.content = merged
@@ -79,7 +93,7 @@ func applyDeltas(spec *Spec, capName string, deltas []Delta, u *SpecUpdate) (mer
 			u.Added++
 		case OpModified:
 			if idx < 0 {
-				conflicts = append(conflicts, fmt.Sprintf("MODIFIED [%s] %q is not in the spec", capName, d.Name))
+				conflicts = append(conflicts, fmt.Sprintf("MODIFIED [%s] %q is not in the spec (%s)", capName, d.Name, nearMissFix(*spec, d.Name)))
 				continue
 			}
 			if loss := scenarioLoss(&spec.Requirements[idx], &d.Req); len(loss) > 0 {
@@ -90,7 +104,7 @@ func applyDeltas(spec *Spec, capName string, deltas []Delta, u *SpecUpdate) (mer
 			u.Modified++
 		case OpRemoved:
 			if idx < 0 {
-				conflicts = append(conflicts, fmt.Sprintf("REMOVED [%s] %q is not in the spec", capName, d.Name))
+				conflicts = append(conflicts, fmt.Sprintf("REMOVED [%s] %q is not in the spec (%s)", capName, d.Name, nearMissFix(*spec, d.Name)))
 				continue
 			}
 			spec.Requirements = append(spec.Requirements[:idx], spec.Requirements[idx+1:]...)
@@ -163,30 +177,10 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 		return nil, err
 	}
 	res := &ArchiveResult{ID: id}
-
-	// Verified at HEAD: re-run when code has moved since the verify. ape's
-	// own state commits (D5) move HEAD on every status change, so "HEAD
-	// moved" means "something outside the development folder changed".
-	codeMoved := st.Verify == nil
-	if !codeMoved {
-		codeMoved, _, _ = p.codeMovedSince(ctx, st.Verify.SHA)
+	if err := p.archiveFresh(ctx, ci, res, opt); err != nil {
+		return res, err
 	}
-	if codeMoved {
-		v, err := p.verify(ctx, ci, opt)
-		if err != nil {
-			return nil, err
-		}
-		res.Reverified, res.Verify = true, v
-		if !v.Green {
-			return res, &FailError{Code: "verify.red", Msg: "re-verify at HEAD is red (" + failingNames(v) + ") — the change is back in-progress"}
-		}
-		st = ci.State
-	} else if dirty, _ := p.dirtyCode(ctx); len(dirty) > 0 {
-		return nil, &FailError{Code: "tree.dirty", Msg: "uncommitted changes outside " + p.DevRel + "/: " + strings.Join(limit(dirty, 8), ", ") + " — commit or discard them first"}
-	}
-	if moved, files, _ := p.codeMovedSince(ctx, st.Review.SHA); moved {
-		return res, &FailError{Code: "review.stale", Msg: "code changed since the review (" + strings.Join(limit(files, 5), ", ") + ") — review again (apex-review), then archive"}
-	}
+	st = ci.State
 
 	pending := st.PendingHuman(ci.Doc.HumanTasks())
 	if len(pending) > 0 && !allowPendingHuman {
@@ -208,13 +202,23 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 		return res, &ConflictError{Code: CodeFolderExists, Msg: "archive folder " + p.Rel(dest) + " already exists — nothing was written"}
 	}
 	for _, u := range updates {
+		if u.Retired {
+			continue
+		}
 		if fs := ValidateSpec(u.Path, u.content); len(fs) > 0 {
 			return res, &FailError{Code: "archive.spec-invalid", Msg: "merged spec " + u.Path + " would not pass `ape project check` — nothing was written", Findings: fs}
 		}
 	}
 
 	// Everything is decided; write.
+	specsTracked, _ := git(ctx, p.Root, "ls-files", "--", p.Rel(p.SpecsDir()))
 	for _, u := range updates {
+		if u.Retired {
+			if err := os.RemoveAll(filepath.Dir(filepath.Join(p.Root, filepath.FromSlash(u.Path)))); err != nil {
+				return res, err
+			}
+			continue
+		}
 		if err := writeFileAtomic(filepath.Join(p.Root, filepath.FromSlash(u.Path)), u.content); err != nil {
 			return res, err
 		}
@@ -241,7 +245,7 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	res.Specs = updates
 
 	paths := []string{p.Rel(dest)}
-	if dirExists(p.SpecsDir()) {
+	if dirExists(p.SpecsDir()) || specsTracked != "" {
 		paths = append(paths, p.Rel(p.SpecsDir()))
 	}
 	if trackedBefore != "" {
@@ -371,6 +375,35 @@ func (p *Project) fingerprintConflicts(recorded map[string]string, c *Change) []
 	return out
 }
 
+// archiveFresh makes sure the verify and the review still describe HEAD.
+// The verify re-runs when code moved since it: ape's own state commits (D5)
+// move HEAD on every status change, so "HEAD moved" means "something
+// outside the development folder changed". The review is not re-run: a
+// review of other code is refused.
+func (p *Project) archiveFresh(ctx context.Context, ci ChangeInfo, res *ArchiveResult, opt RunOptions) error {
+	st := ci.State
+	codeMoved := st.Verify == nil
+	if !codeMoved {
+		codeMoved, _, _ = p.codeMovedSince(ctx, st.Verify.SHA)
+	}
+	if codeMoved {
+		v, err := p.verify(ctx, ci, opt)
+		if err != nil {
+			return err
+		}
+		res.Reverified, res.Verify = true, v
+		if !v.Green {
+			return &FailError{Code: "verify.red", Msg: "re-verify at HEAD is red (" + failingNames(v) + ") — the change is back in-progress"}
+		}
+	} else if dirty, _ := p.dirtyCode(ctx); len(dirty) > 0 {
+		return &FailError{Code: "tree.dirty", Msg: "uncommitted changes outside " + p.DevRel + "/: " + strings.Join(limit(dirty, 8), ", ") + " — commit or discard them first"}
+	}
+	if moved, files, _ := p.codeMovedSince(ctx, ci.State.Review.SHA); moved {
+		return &FailError{Code: "review.stale", Msg: "code changed since the review (" + strings.Join(limit(files, 5), ", ") + ") — review again (apex-review), then archive"}
+	}
+	return nil
+}
+
 // SpecDiff is one capability's spec before and after a change's delta.
 type SpecDiff struct {
 	SpecUpdate
@@ -402,11 +435,14 @@ func (p *Project) PreviewDelta(id string) (*SpecPreview, error) {
 		if !u.Created {
 			before, _ = readFileString(filepath.Join(p.Root, filepath.FromSlash(u.Path)))
 		}
-		from := "a/" + u.Path
+		from, to, after := "a/"+u.Path, "b/"+u.Path, u.content
 		if u.Created {
 			from = "/dev/null"
 		}
-		out.Specs = append(out.Specs, SpecDiff{SpecUpdate: u, Diff: udiff.Unified(from, "b/"+u.Path, before, u.content)})
+		if u.Retired {
+			to, after = "/dev/null", ""
+		}
+		out.Specs = append(out.Specs, SpecDiff{SpecUpdate: u, Diff: udiff.Unified(from, to, before, after)})
 	}
 	return out, nil
 }
