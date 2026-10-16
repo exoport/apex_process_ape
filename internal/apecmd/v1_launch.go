@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/bridge/config"
 	"github.com/exoport/apex_process_ape/internal/effort"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/repl"
@@ -120,4 +121,16 @@ func recordLaunch(projectRoot, skill, manifestDir string, v1 *v1TaskLaunch) {
 			m.ReviewLaunch = review
 		}
 	})
+}
+
+// v1InlineHooks are a v1 project's own hooks as ape task injects them,
+// and the environment entry that tells the settings.json copies to stand
+// down (apexv1.EnvInlineHooks).
+func v1InlineHooks() (hooks []config.ExtraHook, env []string) {
+	specs := apexv1.InlineHooks()
+	hooks = make([]config.ExtraHook, 0, len(specs))
+	for _, h := range specs {
+		hooks = append(hooks, config.ExtraHook{Event: h.Event, Matcher: h.Matcher, Command: h.Command, Timeout: h.Timeout})
+	}
+	return hooks, []string{apexv1.EnvInlineHooks + "=inline"}
 }

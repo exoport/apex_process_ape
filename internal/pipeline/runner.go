@@ -62,6 +62,10 @@ type RunOptions struct {
 	// default are not consulted. See effort.ArgPlan.
 	EffortAsArg bool
 
+	// SpawnEnv is added to every stage's claude environment, after ape's
+	// own entries.
+	SpawnEnv []string
+
 	// SessionKind is the command that owns this run — pipeline, task,
 	// change or script — stamped into every stage's session as
 	// APE_SESSION=<kind>/<run-id> (repl.EnvApeSession). Empty means

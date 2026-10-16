@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/bridge/config"
 	"github.com/exoport/apex_process_ape/internal/effort"
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/output"
@@ -381,6 +382,13 @@ type runConfig struct {
 	// nothing is passed — no table, no legacy default. Set by `ape task`
 	// in a v1 project.
 	effortAsArg bool
+	// extraHooks are hooks added to the spawn's --settings beside ape's
+	// bridge hooks, and spawnEnv entries added to its environment: `ape
+	// task` in a v1 project passes the project's own hooks inline
+	// (apexv1.InlineHooks) and marks the session with
+	// apexv1.EnvInlineHooks.
+	extraHooks []config.ExtraHook
+	spawnEnv   []string
 
 	// NATS progress-eventing + transcript-blob upload (PLAN-13). All
 	// strictly opt-in and resolved flags → env (natsconn.Resolve); with no

@@ -3997,6 +3997,10 @@ Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
 
 Every hook exits 0; a block or deny is expressed in its JSON output.
 
+In a session ape task launches in a v1 project, the three hooks also come inline
+in ape's --settings (with --inline), so a hand-edited settings.json cannot drop
+them; the settings.json copy then does nothing, so each event is decided once.
+
 Subcommands:
 
 - `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive and .apex
@@ -4796,6 +4800,9 @@ Validate the whole project and list every failure, not just the first.
   decisions/NNNN-<slug>.md # ADR-NNNN: title, Status, Date, Context/Decision/Consequences,
                            Enforced by
   changes/<id>/            every non-archived change, as `ape change check`
+  .claude/settings.json    ape's hooks registered as `ape project init` writes them:
+                           hooks.missing / hooks.altered (matcher, type, async, a
+                           stop timeout below 1800 s); `ape project init` restores them
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
 
@@ -4870,6 +4877,9 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
   SessionStart          ape hook session-start
   Stop, SubagentStop    ape hook stop          (timeout 1800 s: it runs the change's checks)
   PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit)
+A hook that was altered (another matcher, async, a shorter stop timeout) is replaced
+by the one above; running init again changes nothing. ape task passes the same
+hooks inline as well, so its sessions have them even when settings.json does not.
 
 Everything init wrote (and settings.json when it merged hooks) is committed as
 "apex: project init"; files that existed before are not touched and not committed.

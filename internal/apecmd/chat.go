@@ -214,7 +214,7 @@ func runChat(
 
 	// No effort table: chat is a person's own session and keeps claude's
 	// native effort unless --effort says otherwise (see chatSpawnEnv).
-	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, ignoreProjectSettings, outputStyle, nil)
+	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, ignoreProjectSettings, outputStyle, nil, nil)
 	if err != nil {
 		return err
 	}

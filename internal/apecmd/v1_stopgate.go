@@ -31,6 +31,10 @@ type stopGateRecorder struct {
 	root string
 	// appear is how long a Stop waits for its hook run to show up.
 	appear time.Duration
+	// inline is set when ape task passed the project's hooks in its
+	// --settings: the stop hook runs on every Stop whatever settings.json
+	// says.
+	inline bool
 
 	// gateMu serialises Stops: each is decided in arrival order, so the
 	// k-th Stop takes the k-th verdict in the hook's log.
@@ -68,7 +72,7 @@ func (r *stopGateRecorder) bounded(runCtx context.Context) sessiondriver.StopGat
 func (r *stopGateRecorder) gate(ctx context.Context, sessionID string, stopAt time.Time) (blocked, ok bool) {
 	r.gateMu.Lock()
 	defer r.gateMu.Unlock()
-	if !apexv1.StopGateConfigured(r.root) {
+	if !r.inline && !apexv1.StopGateConfigured(r.root) {
 		return false, false
 	}
 	r.mu.Lock()

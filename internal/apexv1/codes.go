@@ -172,5 +172,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.task-checkbox", 1, "a task has a checkbox"},
 	{"change.bad-task-line", 1, "a ## Tasks list item is not - T<n> <what> — check: …"},
 	{"change.task-no-check", 1, "a task has no check:"},
+	{"hooks.missing", 1, "an ape hook is not registered in .claude/settings.json: `ape project init` merges it back"},
+	{"hooks.altered", 1, "an ape hook in .claude/settings.json has a changed matcher, type, async or timeout: `ape project init` restores it"},
 	{UnclassifiedFinding, 1, "a finding no rule classifies (a bug: report it)"},
 }

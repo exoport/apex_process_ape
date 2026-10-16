@@ -765,6 +765,7 @@ func (c *interactiveCore) WaitStepDone(ctx context.Context, _ string, _ int) err
 func buildInteractivePrepend(
 	apeBin string, ipcPort int, mode config.Mode,
 	ignoreProjectSettings bool, outputStyle string, table *effort.Defaults,
+	extraHooks []config.ExtraHook,
 ) ([]string, error) {
 	var effortSettings map[string]any
 	if table != nil {
@@ -784,7 +785,8 @@ func buildInteractivePrepend(
 		// The Read cap goes in --settings as well as the environment: a
 		// settings-file `env` would otherwise override the exported value
 		// and the recorded 30000 would be false.
-		Env: map[string]string{repl.EnvFileReadMaxOutputTokens: strconv.Itoa(repl.FileReadMaxOutputTokens)},
+		Env:        map[string]string{repl.EnvFileReadMaxOutputTokens: strconv.Itoa(repl.FileReadMaxOutputTokens)},
+		ExtraHooks: extraHooks,
 	})
 	if err != nil {
 		return nil, err
@@ -823,7 +825,7 @@ func buildSpecPrepends(
 	if !cfg.outputStyleSet && spec.OutputStyle != "" {
 		runStyle = spec.OutputStyle
 	}
-	runFlags, err = buildInteractivePrepend(apeBin, ipcPort, mode, cfg.ignoreProjectSettings, runStyle, cfg.effortTable)
+	runFlags, err = buildInteractivePrepend(apeBin, ipcPort, mode, cfg.ignoreProjectSettings, runStyle, cfg.effortTable, cfg.extraHooks)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -847,7 +849,7 @@ func buildSpecPrepends(
 			continue
 		}
 		style := declared
-		stageFlags, stageErr := buildInteractivePrepend(apeBin, ipcPort, mode, cfg.ignoreProjectSettings, style, cfg.effortTable)
+		stageFlags, stageErr := buildInteractivePrepend(apeBin, ipcPort, mode, cfg.ignoreProjectSettings, style, cfg.effortTable, cfg.extraHooks)
 		if stageErr != nil {
 			return nil, nil, stageErr
 		}
@@ -984,6 +986,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		Effort:            cfg.effort,
 		EffortTable:       cfg.effortTable,
 		EffortAsArg:       cfg.effortAsArg,
+		SpawnEnv:          cfg.spawnEnv,
 		SessionKind:       sessionKindOf(cfg),
 		ApeVersion:        Version,
 		ManifestDir:       cfg.manifestDir,

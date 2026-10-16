@@ -3,7 +3,6 @@ package apexv1
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -203,83 +202,4 @@ func yamlScalar(s string) string {
 		return `""`
 	}
 	return string(data)
-}
-
-type hookWant struct {
-	event, matcher, command string
-	timeout                 int
-}
-
-var wantedHooks = []hookWant{
-	{"SessionStart", "", HookCmdSessionStart, 0},
-	{"Stop", "", HookCmdStop, StopHookTimeout},
-	{"SubagentStop", "", HookCmdStop, StopHookTimeout},
-	{"PreToolUse", PreToolMatcher, HookCmdPreTool, 0},
-}
-
-// MergeHooks adds ape's hooks to a settings.json, keeping every other key
-// and hook. A hook whose command is already registered for its event is
-// left as it is. Returns "<Event>: <command>" for each one added.
-func MergeHooks(path string) ([]string, error) {
-	root := map[string]any{}
-	data, err := os.ReadFile(path)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-	case err != nil:
-		return nil, err
-	default:
-		if err := json.Unmarshal(data, &root); err != nil {
-			return nil, &FailError{Code: "settings.invalid-json", Msg: path + " is not valid JSON (" + err.Error() + ") — fix it, then run `ape project init` again"}
-		}
-		if root == nil {
-			root = map[string]any{}
-		}
-	}
-	hooks, _ := root["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-	}
-	var added []string
-	for _, w := range wantedHooks {
-		groups, _ := hooks[w.event].([]any)
-		if hasHookCommand(groups, w.command) {
-			continue
-		}
-		cmd := map[string]any{"type": "command", "command": w.command}
-		if w.timeout > 0 {
-			cmd["timeout"] = w.timeout
-		}
-		group := map[string]any{"hooks": []any{cmd}}
-		if w.matcher != "" {
-			group["matcher"] = w.matcher
-		}
-		hooks[w.event] = append(groups, group)
-		added = append(added, w.event+": "+w.command)
-	}
-	if len(added) == 0 {
-		return nil, nil
-	}
-	root["hooks"] = hooks
-	out, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
-	}
-	return added, writeFileAtomic(path, string(out)+"\n")
-}
-
-func hasHookCommand(groups []any, command string) bool {
-	for _, g := range groups {
-		gm, _ := g.(map[string]any)
-		hs, _ := gm["hooks"].([]any)
-		for _, h := range hs {
-			hm, _ := h.(map[string]any)
-			if c, _ := hm["command"].(string); c == command {
-				return true
-			}
-		}
-	}
-	return false
 }

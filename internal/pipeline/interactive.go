@@ -209,6 +209,7 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, skips Sta
 
 	stageEnv := append(effortPlan.EnvEntries(), repl.SessionMarkerEnv(sessionKind(opts), runIDOf(mw, spec))...)
 	stageEnv = append(stageEnv, repl.LaunchEnv(firstModel, explicitEffort)...)
+	stageEnv = append(stageEnv, opts.SpawnEnv...)
 
 	sessionName := fmt.Sprintf("ape-%s-%d", sanitizeSessionName(stage.Name), os.Getpid())
 	// Ensure no stale session by that name; ignore not-found error.

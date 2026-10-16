@@ -514,6 +514,9 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		v1Launch = &l
 		o.model, o.effort = l.launch.Model, ""
 		cfg.effort, cfg.effortAsArg = l.launch.Effort, true
+		// Backlog 31: the project's hooks ride inline, so a hand-edited
+		// settings.json cannot drop them (apexv1.InlineHooks).
+		cfg.extraHooks, cfg.spawnEnv = v1InlineHooks()
 	}
 	step := buildTaskStep(o)
 	spec := pipeline.NewSingleStepSpec(o.skill, step, o.taskCommit)
@@ -547,6 +550,7 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	cfg.outputStyleSet = true
 	cfg.manifestDir = manifestDir
 	cfg.stopGate = newStopGateRecorder(o.projectRoot)
+	cfg.stopGate.inline = v1Launch != nil
 
 	start := time.Now()
 	runErr := runWithInteractive(ctx, spec, o.projectRoot, cfg)

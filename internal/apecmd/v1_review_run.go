@@ -46,7 +46,7 @@ func reviewEnv(id string, launch apexv1.ReviewLaunch) []string {
 	for _, e := range os.Environ() {
 		k, _, _ := strings.Cut(e, "=")
 		if k == repl.EnvApeSession || k == apexv1.EnvReview || k == envReviewParent || k == envDetachedID ||
-			k == envReviewLaunch || k == repl.EnvSessionModel || k == repl.EnvSessionEffort ||
+			k == envReviewLaunch || k == repl.EnvSessionModel || k == repl.EnvSessionEffort || k == apexv1.EnvInlineHooks ||
 			strings.HasPrefix(k, "APE_BRIDGE") {
 			continue
 		}

@@ -163,6 +163,9 @@ var findingRules = []findingRule{
 	rule("", `^tasks have no checkboxes`, "change.task-checkbox"),
 	rule("", `^task line must read`, "change.bad-task-line"),
 	rule("", "^task .* has no `check:", "change.task-no-check"),
+	rule("", "^hook `ape hook .* is not registered for", "hooks.missing"),
+	rule("", "^hook `ape hook .* is altered", "hooks.altered"),
+	rule("", `^settings.json is (not valid JSON|unreadable)`, "settings.invalid-json"),
 }
 
 // UnclassifiedFinding is the code of a finding no rule matches — a

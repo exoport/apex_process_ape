@@ -51,6 +51,19 @@ type SettingsOptions struct {
 	// three. Only enterprise-managed settings sit above it. nil writes no
 	// key.
 	Env map[string]string
+	// ExtraHooks are added beside ape's bridge hooks, one group each, when
+	// hooks are injected: an APEX v1 project's own hooks, which `ape task`
+	// passes inline so a session has them whatever the project's
+	// settings.json says (apexv1.InlineHooks). Claude Code runs every
+	// matching hook of every group.
+	ExtraHooks []ExtraHook
+}
+
+// ExtraHook is one hook command for SettingsOptions.ExtraHooks. Timeout is
+// in seconds, 0 for Claude Code's default.
+type ExtraHook struct {
+	Event, Matcher, Command string
+	Timeout                 int
 }
 
 // Output-style pinning.
@@ -203,7 +216,8 @@ type hookCommand struct {
 	// Async lets the tool loop proceed without waiting for the hook
 	// to return. Stop is the only event where ape needs the hook to
 	// complete (run-log flush) so it stays sync.
-	Async bool `json:"async"`
+	Async   bool `json:"async"`
+	Timeout int  `json:"timeout,omitempty"`
 }
 
 // BuildSettings produces the JSON blob handed to `claude --settings`.
@@ -302,6 +316,13 @@ func BuildSettings(opts SettingsOptions) (json.RawMessage, error) {
 		"Stop": {{
 			Hooks: []hookCommand{{Type: "command", Command: cmd("Stop"), Async: false}},
 		}},
+	}
+
+	for _, h := range opts.ExtraHooks {
+		hooks[h.Event] = append(hooks[h.Event], hookSpec{
+			Matcher: h.Matcher,
+			Hooks:   []hookCommand{{Type: "command", Command: h.Command, Timeout: h.Timeout}},
+		})
 	}
 
 	root["hooks"] = hooks
