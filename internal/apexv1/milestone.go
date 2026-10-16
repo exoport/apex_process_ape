@@ -20,6 +20,31 @@ type GateRun struct {
 	Cmd          string   `json:"cmd"`
 	Log          string   `json:"log,omitempty"`
 	Tail         []string `json:"tail,omitempty"`
+	// SpecChecks is how many scenario checks of the whole spec ran beside
+	// the gate command — the milestone's regression suite (backlog item 2)
+	// — and SpecFailed the red ones.
+	SpecChecks int           `json:"spec_checks"`
+	SpecFailed []CheckResult `json:"spec_failed,omitempty"`
+}
+
+// Green reports a passing gate: its command exited 0 and every scenario
+// check of the spec passed.
+func (r *GateRun) Green() bool { return r.Exit == 0 && len(r.SpecFailed) == 0 }
+
+// Why describes a red gate in one phrase.
+func (r *GateRun) Why() string {
+	var parts []string
+	if r.Exit != 0 {
+		parts = append(parts, "gate command exit "+strconv.Itoa(r.Exit))
+	}
+	if n := len(r.SpecFailed); n > 0 {
+		names := make([]string, 0, n)
+		for i := range r.SpecFailed {
+			names = append(names, r.SpecFailed[i].Task)
+		}
+		parts = append(parts, strconv.Itoa(n)+" spec scenario(s) red: "+strings.Join(limit(names, 5), ", "))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // Gate results as milestones.json records them.
@@ -203,12 +228,12 @@ func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	if err != nil || !g.ResultChanged {
 		return g, err
 	}
-	g.Commit, err = p.commitMilestone(ctx, id, "gate "+gateResult(g.Run.Exit))
+	g.Commit, err = p.commitMilestone(ctx, id, "gate "+gateResult(&g.Run))
 	return g, err
 }
 
-func gateResult(exit int) string {
-	if exit == 0 {
+func gateResult(run *GateRun) string {
+	if run.Green() {
 		return GateGreen
 	}
 	return GateRed
@@ -233,6 +258,16 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 		Exit: r.Exit, At: Stamp(), SHA: HeadSHA(ctx, p.Root), Secs: r.Secs,
 		OutputSHA256: r.OutputSHA256, Cmd: m.Gate, Log: p.Rel(logPath), Tail: lastN(r.Tail, 15),
 	}
+	// The whole spec runs as the regression suite beside the gate.
+	spec := p.EffectiveSpecChecks(nil)
+	run.SpecChecks = len(spec)
+	results := p.RunChecks(ctx, filepath.Join(p.ApexDir(), "logs", "gate-"+id), "", spec, opt)
+	for i := range results {
+		if results[i].Exit != 0 {
+			results[i].Tail = lastN(results[i].Tail, 15)
+			run.SpecFailed = append(run.SpecFailed, results[i])
+		}
+	}
 	if data, err := json.MarshalIndent(run, "", "  "); err == nil {
 		_ = writeFileAtomic(p.lastGatePath(id), string(data)+"\n")
 	}
@@ -241,7 +276,7 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	if err != nil {
 		return nil, err
 	}
-	result := gateResult(run.Exit)
+	result := gateResult(&run)
 	if rec := recs[id]; rec != nil && rec.Result == result {
 		return g, nil
 	}
@@ -296,13 +331,13 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 	if err != nil {
 		return nil, err
 	}
-	if g.Run.Exit != 0 {
+	if !g.Run.Green() {
 		if g.ResultChanged {
 			if g.Commit, err = p.commitMilestone(ctx, id, "gate "+GateRed); err != nil {
 				return g, err
 			}
 		}
-		return g, &FailError{Msg: id + " gate is red (exit " + strconv.Itoa(g.Run.Exit) + "): `" + m.Gate + "` — the milestone is not done"}
+		return g, &FailError{Msg: id + " gate is red (" + g.Run.Why() + ") — the milestone is not done"}
 	}
 	_, rm, err = p.loadRoadmapDoc()
 	if err != nil {

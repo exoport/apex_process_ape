@@ -114,8 +114,15 @@ func TestPlanDrift(t *testing.T) {
 	require.Equal(t, frozen, st.Replans[0].From)
 	require.Equal(t, st.PlanDigest, st.Replans[0].To)
 	require.Equal(t, firstBaseline[0], st.Baseline[0], "T1 keeps the baseline from before any code")
-	require.Equal(t, 0, st.Baseline[1].Exit, "T3 baselined at the re-plan, after the code")
-	require.Equal(t, st.Replans[0].SHA, st.Baseline[1].SHA)
+	var t3 *Baseline
+	for i := range st.Baseline {
+		if st.Baseline[i].Task == "T3" {
+			t3 = &st.Baseline[i]
+		}
+	}
+	require.NotNil(t, t3)
+	require.Equal(t, 0, t3.Exit, "T3 baselined at the re-plan, after the code")
+	require.Equal(t, st.Replans[0].SHA, t3.SHA)
 
 	v, err = p.Verify(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)

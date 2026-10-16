@@ -17,15 +17,11 @@ type RunOptions struct {
 // runTasks runs every command task once, logging under .apex/logs/<id>/.
 func (p *Project) runTasks(ctx context.Context, c *Change, id, logPrefix string, opt RunOptions) []CheckResult {
 	tasks := c.CommandTasks()
-	out := make([]CheckResult, 0, len(tasks))
+	checks := make([]PlannedCheck, 0, len(tasks))
 	for _, t := range tasks {
-		logPath := filepath.Join(p.LogDir(id), logPrefix+t.ID+".log")
-		r := RunCheck(ctx, p.Root, t.Check, logPath, opt.Timeout)
-		r.Task = t.ID
-		r.Log = p.Rel(logPath)
-		out = append(out, r)
+		checks = append(checks, PlannedCheck{Ref: t.ID, Kind: KindTask, Cmd: t.Check})
 	}
-	return out
+	return p.RunChecks(ctx, p.LogDir(id), logPrefix, checks, opt)
 }
 
 // requirementConflicts reports the requirements two changes' deltas both
@@ -127,28 +123,28 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 	return &StartResult{ID: id, Status: st.Status, BaseSHA: st.BaseSHA, Baseline: results}, nil
 }
 
-// rebaseline runs the baseline: every command task on a first start, and
-// on a re-start only the tasks that are new or whose check changed. A task
-// keeps the baseline it had before any code was written — the evidence
-// green-at-baseline (item 3) is judged by; a re-plan cannot launder it.
+// rebaseline runs the baseline — every check verify will run: the command
+// tasks and the effective spec's scenarios — on a first start, and on a
+// re-start only the checks that are new or whose command changed. A check
+// keeps the baseline it had before any code was written: the evidence
+// green-at-baseline (item 3) is judged by, which a re-plan cannot launder.
 func (p *Project) rebaseline(ctx context.Context, ci ChangeInfo, st *State, head string, opt RunOptions) []CheckResult {
 	kept := map[string]Baseline{}
 	for _, b := range st.Baseline {
 		kept[b.Task] = b
 	}
-	var out []CheckResult
+	var todo []PlannedCheck
 	var baseline []Baseline
-	for _, t := range ci.Doc.CommandTasks() {
-		if b, ok := kept[t.ID]; ok && b.Cmd == t.Check {
+	for _, pc := range p.ChangeChecks(ci.Doc) {
+		if b, ok := kept[pc.Ref]; ok && b.Cmd == pc.Cmd {
 			baseline = append(baseline, b)
 			continue
 		}
-		logPath := filepath.Join(p.LogDir(ci.ID), "baseline-"+t.ID+".log")
-		r := RunCheck(ctx, p.Root, t.Check, logPath, opt.Timeout)
-		r.Task = t.ID
-		r.Log = p.Rel(logPath)
-		out = append(out, r)
-		baseline = append(baseline, Baseline{Task: t.ID, Exit: r.Exit, Cmd: t.Check, SHA: head})
+		todo = append(todo, pc)
+	}
+	out := p.RunChecks(ctx, p.LogDir(ci.ID), "baseline-", todo, opt)
+	for i := range out {
+		baseline = append(baseline, Baseline{Task: out[i].Task, Exit: out[i].Exit, Cmd: out[i].Cmd, SHA: head})
 	}
 	st.Baseline = baseline
 	return out
@@ -177,9 +173,9 @@ type VerifyResult struct {
 // Failing returns the red results.
 func (v *VerifyResult) Failing() []CheckResult {
 	var out []CheckResult
-	for _, r := range v.Results {
-		if r.Exit != 0 {
-			out = append(out, r)
+	for i := range v.Results {
+		if v.Results[i].Exit != 0 {
+			out = append(out, v.Results[i])
 		}
 	}
 	return out
@@ -217,10 +213,10 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 			" — commit them (trailer `Change: " + id + "`) and run verify again; verify records a sha"}
 	}
 	sha := HeadSHA(ctx, p.Root)
-	results := p.runTasks(ctx, ci.Doc, id, "", opt)
+	results := p.RunChecks(ctx, p.LogDir(id), "", p.ChangeChecks(ci.Doc), opt)
 	green := true
-	for _, r := range results {
-		if r.Exit != 0 {
+	for i := range results {
+		if results[i].Exit != 0 {
 			green = false
 		}
 	}

@@ -133,13 +133,28 @@ func v1Fail(cmd *cobra.Command, f *v1Flags, err error, partial any) error {
 	return reportedErr(code, err)
 }
 
+// printChecks prints every task check, and of the effective spec's
+// scenario checks only the red ones and a count of the green.
 func printChecks(w io.Writer, rs []apexv1.CheckResult, tails bool) {
-	for _, r := range rs {
+	greenScenarios := 0
+	for i := range rs {
+		r := &rs[i]
+		if r.Kind == apexv1.KindScenario && r.Exit == 0 {
+			greenScenarios++
+			continue
+		}
 		verdict := "green"
 		if r.Exit != 0 {
 			verdict = fmt.Sprintf("RED (exit %d)", r.Exit)
 		}
-		fmt.Fprintf(w, "  %-4s %-14s %5.1fs  %s\n", r.Task, verdict, r.Secs, r.Cmd)
+		label := r.Task
+		if r.Kind == apexv1.KindScenario {
+			label = "scenario " + r.Task
+			if r.Delta {
+				label += " (this change)"
+			}
+		}
+		fmt.Fprintf(w, "  %-4s %-14s %5.1fs  %s\n", label, verdict, r.Secs, r.Cmd)
 		if tails && r.Exit != 0 {
 			for _, l := range lastLinesOf(r.Tail, 15) {
 				fmt.Fprintln(w, "       | "+l)
@@ -148,6 +163,9 @@ func printChecks(w io.Writer, rs []apexv1.CheckResult, tails bool) {
 				fmt.Fprintln(w, "       full output: "+r.Log)
 			}
 		}
+	}
+	if greenScenarios > 0 {
+		fmt.Fprintf(w, "  %d scenario check(s) of the effective spec green\n", greenScenarios)
 	}
 }
 

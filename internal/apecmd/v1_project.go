@@ -178,7 +178,7 @@ func statusLong(r *apexv1.StatusReport) string {
 			fmt.Fprintf(&b, "  %-4s %-9s %s\n", m.ID, m.Status, m.Title)
 		}
 	}
-	if r.Milestone != nil && r.Milestone.GateLast != nil && r.Milestone.GateLast.Exit != 0 {
+	if r.Milestone != nil && r.Milestone.GateLast != nil && !r.Milestone.GateLast.Green() {
 		fmt.Fprintf(&b, "\nLast gate output (%s):\n", r.Milestone.GateLast.Log)
 		for _, l := range r.Milestone.GateLast.Tail {
 			b.WriteString("  | " + l + "\n")

@@ -335,9 +335,9 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 	}
 	results := p.runTasks(ctx, ci.Doc, ci.ID, "stop-", opt)
 	var red []CheckResult
-	for _, r := range results {
-		if r.Exit != 0 {
-			red = append(red, r)
+	for i := range results {
+		if results[i].Exit != 0 {
+			red = append(red, results[i])
 		}
 	}
 	if len(red) == 0 {
@@ -358,7 +358,8 @@ func stopReason(id string, red []CheckResult, n int) string {
 	fmt.Fprintf(&b, "Change %s is in progress and %d command check(s) are red (stop blocked %d/%d):\n",
 		id, len(red), n, MaxConsecutiveStopBlocks)
 	budget := 3000
-	for _, r := range red {
+	for i := range red {
+		r := &red[i]
 		fmt.Fprintf(&b, "\n%s `%s` exit %d (full output: %s)\n", r.Task, r.Cmd, r.Exit, r.Log)
 		tail := lastN(r.Tail, 15)
 		for _, l := range tail {

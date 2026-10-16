@@ -106,16 +106,18 @@ Exit codes: 0 ok · 1 no such milestone, done, or malformed (Gate/Goal missing) 
 func gateHuman(g *apexv1.GateResult) func(io.Writer) {
 	return func(w io.Writer) {
 		verdict := "GREEN"
-		if g.Run.Exit != 0 {
-			verdict = fmt.Sprintf("RED (exit %d)", g.Run.Exit)
+		if !g.Run.Green() {
+			verdict = "RED (" + g.Run.Why() + ")"
 		}
-		fmt.Fprintf(w, "%s gate %s in %.1fs at %.7s: `%s`\n", g.Milestone, verdict, g.Run.Secs, g.Run.SHA, g.Run.Cmd)
+		fmt.Fprintf(w, "%s gate %s in %.1fs at %.7s: `%s` + %d spec scenario check(s)\n",
+			g.Milestone, verdict, g.Run.Secs, g.Run.SHA, g.Run.Cmd, g.Run.SpecChecks)
 		if g.Run.Exit != 0 {
 			for _, l := range g.Run.Tail {
 				fmt.Fprintln(w, "  | "+l)
 			}
 			fmt.Fprintln(w, "  full output: "+g.Run.Log)
 		}
+		printChecks(w, g.Run.SpecFailed, true)
 		fmt.Fprintf(w, "%s status: %s\n", g.Milestone, g.Status)
 	}
 }
@@ -125,7 +127,9 @@ func newMilestoneGateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gate <M>",
 		Short: "Run the milestone's gate and record the result",
-		Long: `Run the milestone's Gate: command from the project root. The run (exit, sha, time,
+		Long: `Run the milestone's Gate: command from the project root, and every scenario check of
+the whole spec beside it as the regression suite (human-review not run; output under
+development/.apex/logs/gate-<M>/). The gate is green only when both pass. The run (exit, sha, time,
 output hash, last lines) goes to development/.apex/logs/gate-<M>.json (gitignored; shown by
 ` + "`ape status`" + `). When the result differs from the recorded one (green vs red), or is
 the first, development/.apex/milestones.json is updated and committed as
@@ -146,11 +150,11 @@ Exit codes: 0 gate green · 1 gate red (last output lines shown) or no such mile
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
-			if g.Run.Exit != 0 {
+			if !g.Run.Green() {
 				if !f.json {
 					gateHuman(g)(cmd.OutOrStdout())
 				}
-				return v1Fail(cmd, &f, &apexv1.FailError{Msg: fmt.Sprintf("%s gate is red (exit %d) — plan the next change toward it", args[0], g.Run.Exit)}, g)
+				return v1Fail(cmd, &f, &apexv1.FailError{Msg: fmt.Sprintf("%s gate is red (%s) — plan the next change toward it", args[0], g.Run.Why())}, g)
 			}
 			return v1Emit(cmd.OutOrStdout(), &f, g, gateHuman(g))
 		},
@@ -168,7 +172,8 @@ func newMilestoneCloseCmd() *cobra.Command {
 		Long: `Close an approved milestone. Refused while a change of this milestone is in-progress,
 verified or reviewed (archive or block it first). Otherwise runs the gate (recorded as by
 ` + "`ape milestone gate`" + `) and, only on exit 0, writes "Status: done (<ts> <sha>)" into
-roadmap.md, committed with milestones.json as "apex: <M> done". A red gate is recorded as
+roadmap.md, committed with milestones.json as "apex: <M> done". Green means the gate command
+AND every scenario check of the spec pass. A red gate is recorded as
 by ` + "`ape milestone gate`" + `. A milestone is done when this command exits 0 — never because
 anyone says so.
 

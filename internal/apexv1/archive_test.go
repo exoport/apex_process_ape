@@ -153,7 +153,7 @@ func TestArchive_ReverifiesWhenCodeMoved(t *testing.T) {
 	write(t, p, "wave.sh", "#!/bin/sh\nexit 1\n")
 	commitAll(t, p, "fix: oops")
 	res, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
-	require.ErrorContains(t, err, "re-verify at HEAD is red (T1 exit 1)")
+	require.ErrorContains(t, err, "re-verify at HEAD is red (T1 exit 1")
 	require.True(t, res.Reverified)
 	require.Equal(t, StatusInProgress, state(t, p, "add-wave").Status)
 	require.Equal(t, greetingSpec, read(t, p, "development/specs/greeting/spec.md"))

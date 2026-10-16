@@ -309,8 +309,8 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 func failingNames(v *VerifyResult) string {
 	failing := v.Failing()
 	names := make([]string, 0, len(failing))
-	for _, r := range failing {
-		names = append(names, fmt.Sprintf("%s exit %d", r.Task, r.Exit))
+	for i := range failing {
+		names = append(names, fmt.Sprintf("%s exit %d", failing[i].Task, failing[i].Exit))
 	}
 	return strings.Join(names, ", ")
 }

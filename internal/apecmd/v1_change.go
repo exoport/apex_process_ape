@@ -166,8 +166,9 @@ func newChangeStartCmd() *cobra.Command {
   2. refused with exit 3 if another active change (in-progress, verified, reviewed —
      not blocked) also ADDs, MODIFIES or REMOVES one of the same requirements
   3. records base_sha (HEAD) and started_at (kept when resuming a blocked change)
-  4. runs every command check once as the baseline (which were already green), from the
-     project root with sh -c; output under development/.apex/logs/<id>/
+  4. runs every check verify will run once, as the baseline (which were already green):
+     the command tasks and the effective spec's scenario checks; from the project root
+     with sh -c; output under development/.apex/logs/<id>/
   5. sets in-progress, freezes the plan (SHA-256 of ## Delta + ## Tasks) and commits
      state.json ("apex: <id> in-progress")
 
@@ -199,12 +200,17 @@ func newChangeVerifyCmd() *cobra.Command {
 	var f v1Flags
 	cmd := v1ChangeLeaf(
 		"verify <id>",
-		"Run every command check at HEAD; verified iff all exit 0",
-		`Run every task's command check at HEAD and record the results (sha, exit, seconds,
-output sha256) in state.json. The working tree must hold no uncommitted changes outside
-development/ — commit first (trailer "Change: <id>"): a verify belongs to a sha.
+		"Run the task checks and the effective spec at HEAD; verified iff all exit 0",
+		`Run, at HEAD, every task's command check and every scenario check of the effective
+spec — the spec as it will be once this change is archived: each current requirement the
+change does not MODIFY or REMOVE (regression), plus the scenarios of its own ADDED and
+MODIFIED blocks. human-review checks are not run. A command shared by several checks runs
+once. Results (sha, exit, seconds, output sha256; kind, capability, requirement, scenario
+for scenario checks) are recorded in state.json; output under development/.apex/logs/<id>/.
+The working tree must hold no uncommitted changes outside development/ — commit first
+(trailer "Change: <id>"): a verify belongs to a sha.
 
-All command checks exit 0 → status verified (a reviewed change whose code has not moved
+All checks exit 0 → status verified (a reviewed change whose code has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last
 lines are printed; a change that was in-progress is left exactly as it was (nothing written,
 nothing committed), a verified/reviewed one goes back to in-progress (committed).

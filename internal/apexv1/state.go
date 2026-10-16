@@ -23,9 +23,16 @@ const (
 	StatusAbandoned = "abandoned"
 )
 
-// CheckResult is one command check's run.
+// CheckResult is one command check's run: a task's, or a scenario's of
+// the effective spec (Kind, Capability, Requirement, Scenario say which;
+// Task then holds "<capability>/<requirement>/<scenario>").
 type CheckResult struct {
 	Task         string  `json:"task"`
+	Kind         string  `json:"kind,omitempty"`
+	Capability   string  `json:"capability,omitempty"`
+	Requirement  string  `json:"requirement,omitempty"`
+	Scenario     string  `json:"scenario,omitempty"`
+	Delta        bool    `json:"delta,omitempty"`
 	Cmd          string  `json:"cmd"`
 	Exit         int     `json:"exit"`
 	Secs         float64 `json:"secs"`

@@ -112,9 +112,9 @@ func (p *Project) Status() *StatusReport {
 		}
 		if v := c.State.Verify; v != nil {
 			cs.VerifySHA = v.SHA
-			for _, res := range v.Results {
-				if res.Exit != 0 {
-					cs.Failing = append(cs.Failing, fmt.Sprintf("%s (exit %d)", res.Task, res.Exit))
+			for i := range v.Results {
+				if v.Results[i].Exit != 0 {
+					cs.Failing = append(cs.Failing, fmt.Sprintf("%s (exit %d)", v.Results[i].Task, v.Results[i].Exit))
 				}
 			}
 		}
@@ -180,7 +180,7 @@ func nextStep(r *StatusReport) string {
 			return "blocked: " + c.ID + " — " + c.BlockedReason + " (re-plan, or a person answers; `ape change start " + c.ID + "` resumes)"
 		}
 	}
-	if m.GateLast != nil && m.GateLast.Exit == 0 && m.GateLast.SHA != "" {
+	if m.GateLast != nil && m.GateLast.Green() && m.GateLast.SHA != "" {
 		return fmt.Sprintf("%s gate was green at %s — `ape milestone close %s`", m.ID, short(m.GateLast.SHA), m.ID)
 	}
 	return fmt.Sprintf("plan the next change toward %s (apex-change), or `ape milestone gate %s` if the goal looks met", m.ID, m.ID)
@@ -255,10 +255,10 @@ func (m *MilestoneStatus) briefLines() []string {
 	switch {
 	case m.GateLast == nil:
 		gate += " — not run yet"
-	case m.GateLast.Exit == 0:
+	case m.GateLast.Green():
 		gate += fmt.Sprintf(" — last green at %s (%s)", m.GateLast.At, short(m.GateLast.SHA))
 	default:
-		gate += fmt.Sprintf(" — last red (exit %d) at %s (%s)", m.GateLast.Exit, m.GateLast.At, short(m.GateLast.SHA))
+		gate += fmt.Sprintf(" — last red (%s) at %s (%s)", m.GateLast.Why(), m.GateLast.At, short(m.GateLast.SHA))
 	}
 	spend := fmt.Sprintf("  spent $%.2f", m.SpentUSD)
 	if m.Budget != nil {
