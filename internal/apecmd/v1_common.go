@@ -59,7 +59,7 @@ func v1Project(f *v1Flags) (*apexv1.Project, error) {
 // v1RequireInit refuses a command that needs the development folder.
 func v1RequireInit(cmd *cobra.Command, f *v1Flags, p *apexv1.Project) error {
 	if !p.IsV1() {
-		return v1Fail(cmd, f, &apexv1.UsageError{Msg: fmt.Sprintf("%s has no %s/ — run `ape project init` first", p.Root, p.DevRel)}, nil)
+		return v1Fail(cmd, f, &apexv1.UsageError{Code: "project.not-initialized", Msg: fmt.Sprintf("%s has no %s/ — run `ape project init` first", p.Root, p.DevRel)}, nil)
 	}
 	return nil
 }
@@ -101,9 +101,9 @@ func v1Fail(cmd *cobra.Command, f *v1Flags, err error, partial any) error {
 		conflicts = ce.Conflicts
 	}
 	if f.json {
-		out := map[string]any{"ok": false, "exit": code, "error": err.Error()}
+		out := map[string]any{"ok": false, "exit": code, "error": err.Error(), "diagnostics": apexv1.Diagnostics(err)}
 		if len(findings) > 0 {
-			out["findings"] = findings
+			out["findings"] = apexv1.ClassifyFindings(findings)
 		}
 		if len(conflicts) > 0 {
 			out["conflicts"] = conflicts

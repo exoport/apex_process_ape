@@ -68,7 +68,7 @@ func (p *Project) ClearReviewRun(id string) {
 // has not drifted. Returns the change.
 func (p *Project) PrepareReviewRun(ctx context.Context, id string) (ChangeInfo, error) {
 	if os.Getenv(EnvReview) != "" {
-		return ChangeInfo{}, &UsageError{Msg: "this is a review session (" + EnvReview + "=" + os.Getenv(EnvReview) +
+		return ChangeInfo{}, &UsageError{Code: "review.nested", Msg: "this is a review session (" + EnvReview + "=" + os.Getenv(EnvReview) +
 			"): a review session cannot start another review"}
 	}
 	ci, err := p.requireChange(id)
@@ -77,16 +77,16 @@ func (p *Project) PrepareReviewRun(ctx context.Context, id string) (ChangeInfo, 
 	}
 	st := ci.State
 	if st.Status != StatusVerified {
-		return ci, &FailError{Msg: "change " + id + " is " + st.Status + " — a review session reviews a verified change (`ape change verify " + id + "`)"}
+		return ci, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + st.Status + " — a review session reviews a verified change (`ape change verify " + id + "`)"}
 	}
 	if err := checkPlanFrozen(ci); err != nil {
 		return ci, err
 	}
 	if st.Verify == nil || !st.Verify.Green {
-		return ci, &FailError{Msg: "no green verify to review — `ape change verify " + id + "`"}
+		return ci, &FailError{Code: "verify.missing", Msg: "no green verify to review — `ape change verify " + id + "`"}
 	}
 	if moved, files, _ := p.codeMovedSince(ctx, st.Verify.SHA); moved {
-		return ci, &FailError{Msg: "code changed since the last verify (" + strings.Join(limit(files, 5), ", ") + ") — `ape change verify " + id + "` first"}
+		return ci, &FailError{Code: "verify.stale", Msg: "code changed since the last verify (" + strings.Join(limit(files, 5), ", ") + ") — `ape change verify " + id + "` first"}
 	}
 	return ci, nil
 }

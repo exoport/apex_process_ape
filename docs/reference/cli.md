@@ -4676,6 +4676,7 @@ ape project
 Subcommands:
 
 - `check` — Validate every v1 shape and size cap; list all failures
+- `codes` — List the diagnostic codes v1 commands report in --json failures
 - `init` — Create the development/ skeleton and merge ape's hooks (never overwrites)
 
 ## ape project check
@@ -4714,6 +4715,37 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape project codes
+
+List the diagnostic codes v1 commands report in --json failures
+
+```
+ape project codes [flags]
+```
+
+List every diagnostic code an APEX v1 command (project, status, milestone, change,
+decision) can report, with the exit status it comes with and what it means.
+
+Every --json failure is {"ok": false, "exit": N, "error": "<one line>",
+"diagnostics": [{"severity", "code", "message", "fix", "file"?, "line"?}], ...}: the
+first diagnostic is the failure itself, the rest its findings or conflicts. Branch on
+"code"; "message" and "fix" are for people. Codes are stable: a new rule gets a new
+code, and a code's meaning never changes. severity is always "error" (no warning tier).
+Exit: 1 check failed · 2 usage · 3 conflict (nothing written).
+
+Examples:
+
+```
+  ape project codes
+  ape project codes --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 
 ## ape project init

@@ -12,6 +12,7 @@ import (
 
 // FailError is "the check ran and failed" — exit 1.
 type FailError struct {
+	Code     string
 	Msg      string
 	Findings []Finding
 }
@@ -19,13 +20,14 @@ type FailError struct {
 func (e *FailError) Error() string { return e.Msg }
 
 // UsageError is a bad invocation — exit 2.
-type UsageError struct{ Msg string }
+type UsageError struct{ Code, Msg string }
 
 func (e *UsageError) Error() string { return e.Msg }
 
 // ConflictError is a conflict with another change or with the specs —
 // exit 3, and nothing was written.
 type ConflictError struct {
+	Code      string
 	Msg       string
 	Conflicts []string
 }

@@ -98,7 +98,7 @@ Exit codes: 0 ok · 1 id taken (incl. archive) or milestone not in roadmap · 2 
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
 			if milestone == "" {
-				return v1Fail(cmd, &f, &apexv1.UsageError{Msg: "--milestone is required (e.g. M1)"}, nil)
+				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.milestone", Msg: "--milestone is required (e.g. M1)"}, nil)
 			}
 			res, err := p.NewChange(cmd.Context(), id, milestone, splitList(touches), splitList(paths))
 			if err != nil {
@@ -146,6 +146,7 @@ Exit codes: 0 green · 1 findings · 2 usage.`,
 			fs := p.CheckChange(id)
 			if len(fs) > 0 {
 				return v1Fail(cmd, &f, &apexv1.FailError{
+					Code:     "change.check-failed",
 					Msg:      fmt.Sprintf("change %s: %d finding(s) — fix change.md and run `ape change check %s` again", id, len(fs), id),
 					Findings: fs,
 				}, nil)
@@ -247,6 +248,7 @@ status · 2 usage.`,
 					human(cmd.OutOrStdout())
 				}
 				return v1Fail(cmd, &f, &apexv1.FailError{
+					Code: "verify.red",
 					Msg: fmt.Sprintf("change %s: %d command check(s) red — fix the code (never the check) and verify again, or `ape change block %s --reason ...`",
 						id, len(res.Failing()), id),
 				}, res)
@@ -320,12 +322,12 @@ running, call again.`,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
 			if runSession {
 				if verdict != "" || findings != "" {
-					return v1Fail(cmd, &f, &apexv1.UsageError{Msg: "--run records its verdict from the review session; drop --verdict/--findings"}, nil)
+					return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.review-run", Msg: "--run records its verdict from the review session; drop --verdict/--findings"}, nil)
 				}
 				return runReviewSession(cmd, &f, p, id, model, wait)
 			}
 			if findings == "" {
-				return v1Fail(cmd, &f, &apexv1.UsageError{Msg: "--findings <file> is required"}, nil)
+				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.findings", Msg: "--findings <file> is required"}, nil)
 			}
 			st, err := p.Review(cmd.Context(), id, verdict, findings)
 			if err != nil {
@@ -357,7 +359,7 @@ Exit codes: 0 recorded · 1 the task has a command check · 2 usage (no such tas
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
 			if task == "" {
-				return v1Fail(cmd, &f, &apexv1.UsageError{Msg: "--task <T> is required"}, nil)
+				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.task", Msg: "--task <T> is required"}, nil)
 			}
 			st, err := p.Accept(cmd.Context(), id, task, by)
 			if err != nil {

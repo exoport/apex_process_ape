@@ -156,7 +156,7 @@ Exit codes: 0 gate green · 1 gate red (last output lines shown) or no such mile
 				if !f.json {
 					gateHuman(g)(cmd.OutOrStdout())
 				}
-				return v1Fail(cmd, &f, &apexv1.FailError{Msg: fmt.Sprintf("%s gate is red (%s) — plan the next change toward it", args[0], g.Run.Why())}, g)
+				return v1Fail(cmd, &f, &apexv1.FailError{Code: "gate.red", Msg: fmt.Sprintf("%s gate is red (%s) — plan the next change toward it", args[0], g.Run.Why())}, g)
 			}
 			return v1Emit(cmd.OutOrStdout(), &f, g, gateHuman(g))
 		},

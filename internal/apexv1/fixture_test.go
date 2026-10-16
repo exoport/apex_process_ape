@@ -150,7 +150,15 @@ func addChange(t *testing.T, p *Project, id, doc string) {
 
 func ctx() context.Context { return context.Background() }
 
+// findingMessages renders findings for substring assertions. Every
+// validator test goes through it, so it is also where item 13's promise is
+// kept: no finding any test produces may lack a published code.
 func findingMessages(fs []Finding) string {
+	for _, f := range ClassifyFindings(fs) {
+		if f.Code == UnclassifiedFinding {
+			panic("finding has no diagnostic code (add a rule to findingRules): " + f.File + ": " + f.Message)
+		}
+	}
 	var b strings.Builder
 	for _, f := range fs {
 		b.WriteString(f.String())

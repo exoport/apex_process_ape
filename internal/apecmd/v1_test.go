@@ -311,3 +311,63 @@ func TestStopGateRecorder_WithoutAVerdict(t *testing.T) {
 	require.False(t, ok)
 	require.Less(t, time.Since(start), 200*time.Millisecond, "no wait when no hook is registered")
 }
+
+// Item 13: a --json failure carries diagnostics whose first code is the
+// failure's own and comes with the exit the published list gives it.
+func TestV1Commands_DiagnosticEnvelope(t *testing.T) {
+	root := v1Repo(t)
+	exitOf := map[string]int{}
+	for _, c := range apexv1.DiagnosticCodes {
+		exitOf[c.Code] = c.Exit
+	}
+	type envelope struct {
+		OK          bool                `json:"ok"`
+		Exit        int                 `json:"exit"`
+		Diagnostics []apexv1.Diagnostic `json:"diagnostics"`
+	}
+	cases := []struct {
+		build func() *cobra.Command
+		args  []string
+		code  string
+	}{
+		{newChangeCmd, []string{"new", "BAD", "--milestone", "M1", "--touches", "greeting"}, "usage.change-id"},
+		{newChangeCmd, []string{"verify", "nope-nope"}, "change.not-found"},
+		{newMilestoneCmd, []string{"gate", "M1"}, "gate.red"},
+		{newMilestoneCmd, []string{"approve", "M7", "--by", "x"}, "milestone.not-found"},
+	}
+	for _, tc := range cases {
+		stdout, _, err := v1Exec(t, tc.build, append(tc.args, "--json", "--cwd", root)...)
+		var env envelope
+		require.NoError(t, json.Unmarshal([]byte(stdout), &env), stdout)
+		require.False(t, env.OK)
+		require.NotEmpty(t, env.Diagnostics, stdout)
+		d := env.Diagnostics[0]
+		require.Equal(t, tc.code, d.Code, stdout)
+		require.Equal(t, "error", d.Severity)
+		require.NotEmpty(t, d.Message)
+		require.Equal(t, exitOf[d.Code], env.Exit, "the published exit for %s", d.Code)
+		require.Equal(t, env.Exit, exitCodeOf(t, err))
+	}
+
+	// change check: the failure, then one diagnostic per finding.
+	_, _, err := v1Exec(t, newChangeCmd, "new", "add-wave", "--milestone", "M1", "--touches", "greeting", "--cwd", root)
+	require.NoError(t, err)
+	stdout, _, _ := v1Exec(t, newChangeCmd, "check", "add-wave", "--json", "--cwd", root)
+	var env envelope
+	require.NoError(t, json.Unmarshal([]byte(stdout), &env))
+	require.Equal(t, "change.check-failed", env.Diagnostics[0].Code)
+	codes := make([]string, 0, len(env.Diagnostics))
+	for _, d := range env.Diagnostics[1:] {
+		require.NotEqual(t, apexv1.UnclassifiedFinding, d.Code, d.Message)
+		codes = append(codes, d.Code)
+	}
+	require.Contains(t, codes, "change.empty-section")
+	require.Contains(t, codes, "change.empty-delta")
+	require.Contains(t, codes, "change.no-tasks")
+
+	stdout, _, err = v1Exec(t, newProjectCmd, "codes", "--json")
+	require.NoError(t, err)
+	var list []apexv1.CodeDoc
+	require.NoError(t, json.Unmarshal([]byte(stdout), &list))
+	require.Len(t, list, len(apexv1.DiagnosticCodes))
+}

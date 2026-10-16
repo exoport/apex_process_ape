@@ -150,10 +150,10 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	}
 	st := ci.State
 	if st.Status != StatusReviewed || st.Review == nil || st.Review.Verdict != "pass" {
-		return nil, &FailError{Msg: "change " + id + " is " + st.Status + " — archive needs a green verify and a review pass (`ape change review " + id + " --verdict pass`)"}
+		return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + st.Status + " — archive needs a green verify and a review pass (`ape change review " + id + " --verdict pass`)"}
 	}
 	if _, err := git(ctx, p.Root, "rev-parse", "--is-inside-work-tree"); err != nil {
-		return nil, &FailError{Msg: "not a git repository — archive commits its result"}
+		return nil, &FailError{Code: "git.not-a-repo", Msg: "not a git repository — archive commits its result"}
 	}
 	if err := checkPlanFrozen(ci); err != nil {
 		return nil, err
@@ -174,34 +174,34 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 		}
 		res.Reverified, res.Verify = true, v
 		if !v.Green {
-			return res, &FailError{Msg: "re-verify at HEAD is red (" + failingNames(v) + ") — the change is back in-progress"}
+			return res, &FailError{Code: "verify.red", Msg: "re-verify at HEAD is red (" + failingNames(v) + ") — the change is back in-progress"}
 		}
 		st = ci.State
 	} else if dirty, _ := p.dirtyCode(ctx); len(dirty) > 0 {
-		return nil, &FailError{Msg: "uncommitted changes outside " + p.DevRel + "/: " + strings.Join(limit(dirty, 8), ", ") + " — commit or discard them first"}
+		return nil, &FailError{Code: "tree.dirty", Msg: "uncommitted changes outside " + p.DevRel + "/: " + strings.Join(limit(dirty, 8), ", ") + " — commit or discard them first"}
 	}
 	if moved, files, _ := p.codeMovedSince(ctx, st.Review.SHA); moved {
-		return res, &FailError{Msg: "code changed since the review (" + strings.Join(limit(files, 5), ", ") + ") — review again (apex-review), then archive"}
+		return res, &FailError{Code: "review.stale", Msg: "code changed since the review (" + strings.Join(limit(files, 5), ", ") + ") — review again (apex-review), then archive"}
 	}
 
 	pending := st.PendingHuman(ci.Doc.HumanTasks())
 	if len(pending) > 0 && !allowPendingHuman {
-		return res, &FailError{Msg: "human-review tasks not accepted: " + strings.Join(pending, ", ") +
+		return res, &FailError{Code: "archive.pending-human", Msg: "human-review tasks not accepted: " + strings.Join(pending, ", ") +
 			" — a person runs `ape change accept " + id + " --task <T> --by <who>`, or archive with --allow-pending-human (recorded)"}
 	}
 
 	updates, conflicts := p.MergeDelta(ci.Doc)
 	if len(conflicts) > 0 {
-		return res, &ConflictError{Msg: "the delta no longer applies to specs/ — nothing was written; re-plan the change against the current specs", Conflicts: conflicts}
+		return res, &ConflictError{Code: "archive.delta-conflict", Msg: "the delta no longer applies to specs/ — nothing was written; re-plan the change against the current specs", Conflicts: conflicts}
 	}
 	folder := Today() + "-" + id
 	dest := filepath.Join(p.ArchiveDir(), folder)
 	if fileOrDirExists(dest) {
-		return res, &ConflictError{Msg: "archive folder " + p.Rel(dest) + " already exists — nothing was written"}
+		return res, &ConflictError{Code: CodeFolderExists, Msg: "archive folder " + p.Rel(dest) + " already exists — nothing was written"}
 	}
 	for _, u := range updates {
 		if fs := ValidateSpec(u.Path, u.content); len(fs) > 0 {
-			return res, &FailError{Msg: "merged spec " + u.Path + " would not pass `ape project check` — nothing was written", Findings: fs}
+			return res, &FailError{Code: "archive.spec-invalid", Msg: "merged spec " + u.Path + " would not pass `ape project check` — nothing was written", Findings: fs}
 		}
 	}
 
@@ -241,7 +241,7 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	}
 	sha, err := p.commitPaths(ctx, "archive: "+id, id, paths...)
 	if err != nil {
-		return res, &FailError{Msg: "archived on disk but the commit failed: " + err.Error() + " — commit " + strings.Join(paths, " ") + " yourself"}
+		return res, &FailError{Code: CodeCommitFailed, Msg: "archived on disk but the commit failed: " + err.Error() + " — commit " + strings.Join(paths, " ") + " yourself"}
 	}
 	res.Commit = sha
 	return res, nil
@@ -260,7 +260,7 @@ type AbandonResult struct {
 func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResult, error) {
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
-		return nil, &UsageError{Msg: "--reason is required: why the change is dropped, and what (if anything) replaces it"}
+		return nil, &UsageError{Code: "usage.reason", Msg: "--reason is required: why the change is dropped, and what (if anything) replaces it"}
 	}
 	ci, err := p.requireChange(id)
 	if err != nil {
@@ -269,7 +269,7 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 	folder := Today() + "-" + id
 	dest := filepath.Join(p.ArchiveDir(), folder)
 	if fileOrDirExists(dest) {
-		return nil, &ConflictError{Msg: "archive folder " + p.Rel(dest) + " already exists — nothing was written"}
+		return nil, &ConflictError{Code: CodeFolderExists, Msg: "archive folder " + p.Rel(dest) + " already exists — nothing was written"}
 	}
 	inGit := p.isWorkTree(ctx)
 	trackedBefore := ""
@@ -300,7 +300,7 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 	}
 	sha, err := p.commitPaths(ctx, "apex: "+id+" "+StatusAbandoned, id, paths...)
 	if err != nil {
-		return res, &FailError{Msg: "abandoned on disk but the commit failed: " + err.Error() + " — commit " + strings.Join(paths, " ") + " yourself"}
+		return res, &FailError{Code: CodeCommitFailed, Msg: "abandoned on disk but the commit failed: " + err.Error() + " — commit " + strings.Join(paths, " ") + " yourself"}
 	}
 	res.Commit = sha
 	return res, nil

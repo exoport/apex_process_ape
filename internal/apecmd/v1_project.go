@@ -15,7 +15,7 @@ func newProjectCmd() *cobra.Command {
 		Use:   "project",
 		Short: "Create and check an APEX v1 project layout",
 	}
-	cmd.AddCommand(newProjectInitCmd(), newProjectCheckCmd())
+	cmd.AddCommand(newProjectInitCmd(), newProjectCheckCmd(), newProjectCodesCmd())
 	return cmd
 }
 
@@ -116,6 +116,7 @@ Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --
 			fs := p.Check()
 			if len(fs) > 0 {
 				return v1Fail(cmd, &f, &apexv1.FailError{
+					Code:     "project.check-failed",
 					Msg:      fmt.Sprintf("%d finding(s) — fix them and run `ape project check` again", len(fs)),
 					Findings: fs,
 				}, nil)
@@ -126,6 +127,34 @@ Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --
 		},
 	}
 	addV1Flags(cmd, &f)
+	return cmd
+}
+
+func newProjectCodesCmd() *cobra.Command {
+	var f v1Flags
+	cmd := &cobra.Command{
+		Use:   "codes",
+		Short: "List the diagnostic codes v1 commands report in --json failures",
+		Long: `List every diagnostic code an APEX v1 command (project, status, milestone, change,
+decision) can report, with the exit status it comes with and what it means.
+
+Every --json failure is {"ok": false, "exit": N, "error": "<one line>",
+"diagnostics": [{"severity", "code", "message", "fix", "file"?, "line"?}], ...}: the
+first diagnostic is the failure itself, the rest its findings or conflicts. Branch on
+"code"; "message" and "fix" are for people. Codes are stable: a new rule gets a new
+code, and a code's meaning never changes. severity is always "error" (no warning tier).
+Exit: 1 check failed · 2 usage · 3 conflict (nothing written).`,
+		Example: "  ape project codes\n  ape project codes --json",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return v1Emit(cmd.OutOrStdout(), &f, apexv1.DiagnosticCodes, func(w io.Writer) {
+				for _, c := range apexv1.DiagnosticCodes {
+					fmt.Fprintf(w, "%-30s %d  %s\n", c.Code, c.Exit, c.Meaning)
+				}
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&f.json, "json", false, "machine output (JSON on stdout)")
 	return cmd
 }
 

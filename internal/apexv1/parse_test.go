@@ -148,24 +148,24 @@ func TestRoadmap_StatusForms(t *testing.T) {
 }
 
 func TestValidateProjectMD(t *testing.T) {
-	require.Empty(t, ValidateProjectMD("p.md", projectMD))
+	require.Empty(t, ValidateProjectMD("development/project.md", projectMD))
 	skeleton := strings.ReplaceAll(projectSkeleton, "%s", "X")
-	require.Contains(t, findingMessages(ValidateProjectMD("p.md", skeleton)), "`## Vision` is empty")
-	require.Contains(t, findingMessages(ValidateProjectMD("p.md", "# X\n## Vision\nv\n")), "missing `## Users`")
+	require.Contains(t, findingMessages(ValidateProjectMD("development/project.md", skeleton)), "`## Vision` is empty")
+	require.Contains(t, findingMessages(ValidateProjectMD("development/project.md", "# X\n## Vision\nv\n")), "missing `## Users`")
 	long := projectMD + strings.Repeat("line\n", ProjectMaxLines)
-	require.Contains(t, findingMessages(ValidateProjectMD("p.md", long)), "over the 150-line cap")
+	require.Contains(t, findingMessages(ValidateProjectMD("development/project.md", long)), "over the 150-line cap")
 	big := projectMD + strings.Repeat("x", ProjectMaxBytes)
-	require.Contains(t, findingMessages(ValidateProjectMD("p.md", big)), "over the 8 KB cap")
+	require.Contains(t, findingMessages(ValidateProjectMD("development/project.md", big)), "over the 8 KB cap")
 }
 
 func TestValidateDecision(t *testing.T) {
 	good := "# ADR-0001: Use sh\nStatus: accepted\nDate: 2026-10-15\n## Context\nc\n## Decision\nd\n## Consequences\nx\nEnforced by: review\n"
-	require.Empty(t, ValidateDecision("d.md", "0001-use-sh.md", good))
-	require.Contains(t, findingMessages(ValidateDecision("d.md", "use-sh.md", good)), "NNNN-<slug>.md")
-	require.Contains(t, findingMessages(ValidateDecision("d.md", "0002-use-sh.md", good)), "ADR-0002")
+	require.Empty(t, ValidateDecision("development/decisions/0001-use-sh.md", "0001-use-sh.md", good))
+	require.Contains(t, findingMessages(ValidateDecision("development/decisions/0001-use-sh.md", "use-sh.md", good)), "NNNN-<slug>.md")
+	require.Contains(t, findingMessages(ValidateDecision("development/decisions/0001-use-sh.md", "0002-use-sh.md", good)), "ADR-0002")
 	bad := strings.Replace(good, "Status: accepted", "Status: maybe", 1)
-	require.Contains(t, findingMessages(ValidateDecision("d.md", "0001-use-sh.md", bad)), "missing `Status:")
-	require.Empty(t, ValidateDecision("d.md", "0001-use-sh.md", strings.Replace(good, "accepted", "superseded by ADR-0007", 1)))
+	require.Contains(t, findingMessages(ValidateDecision("development/decisions/0001-use-sh.md", "0001-use-sh.md", bad)), "missing `Status:")
+	require.Empty(t, ValidateDecision("development/decisions/0001-use-sh.md", "0001-use-sh.md", strings.Replace(good, "accepted", "superseded by ADR-0007", 1)))
 }
 
 func TestHasProse(t *testing.T) {

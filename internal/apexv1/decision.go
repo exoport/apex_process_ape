@@ -17,7 +17,7 @@ type DecisionResult struct {
 // NewDecision allocates the next ADR number and writes the skeleton.
 func (p *Project) NewDecision(ctx context.Context, slug, title string) (*DecisionResult, error) {
 	if !slugRe.MatchString(slug) {
-		return nil, &UsageError{Msg: fmt.Sprintf("decision slug %q must be kebab-case (e.g. use-sqlite)", slug)}
+		return nil, &UsageError{Code: "usage.decision-slug", Msg: fmt.Sprintf("decision slug %q must be kebab-case (e.g. use-sqlite)", slug)}
 	}
 	maxN := 0
 	entries, _ := os.ReadDir(p.DecisionsDir())
@@ -27,7 +27,7 @@ func (p *Project) NewDecision(ctx context.Context, slug, title string) (*Decisio
 				maxN = n
 			}
 			if m[2] == slug {
-				return nil, &FailError{Msg: "decision " + e.Name() + " already uses slug " + slug}
+				return nil, &FailError{Code: "decision.slug-taken", Msg: "decision " + e.Name() + " already uses slug " + slug}
 			}
 		}
 	}
@@ -48,7 +48,7 @@ func (p *Project) NewDecision(ctx context.Context, slug, title string) (*Decisio
 	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		return nil, &FailError{Msg: "cannot create " + p.Rel(path) + ": " + err.Error()}
+		return nil, &FailError{Code: "decision.write-failed", Msg: "cannot create " + p.Rel(path) + ": " + err.Error()}
 	}
 	if _, err := f.WriteString(body); err != nil {
 		_ = f.Close()
@@ -59,7 +59,7 @@ func (p *Project) NewDecision(ctx context.Context, slug, title string) (*Decisio
 	}
 	res := &DecisionResult{ID: "ADR-" + num, Path: p.Rel(path)}
 	if _, err := p.commitRecord(ctx, "apex: "+res.ID+" proposed", "", res.Path); err != nil {
-		return res, &FailError{Msg: "decision written but its commit failed: " + err.Error()}
+		return res, &FailError{Code: CodeCommitFailed, Msg: "decision written but its commit failed: " + err.Error()}
 	}
 	return res, nil
 }

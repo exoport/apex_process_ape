@@ -70,14 +70,14 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 	case StatusInProgress, StatusVerified, StatusReviewed:
 		// A started change starts again only to re-baseline a changed plan.
 		if st.PlanDigest == "" || st.PlanDigest == digest {
-			return nil, &FailError{Msg: "change " + id + " is " + st.Status + " and its ## Tasks and ## Delta are unchanged — nothing to re-baseline"}
+			return nil, &FailError{Code: "change.nothing-to-rebaseline", Msg: "change " + id + " is " + st.Status + " and its ## Tasks and ## Delta are unchanged — nothing to re-baseline"}
 		}
 		replan = true
 	default:
-		return nil, &FailError{Msg: "change " + id + " is " + st.Status + "; start applies to draft or blocked changes, or re-baselines a changed plan"}
+		return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + st.Status + "; start applies to draft or blocked changes, or re-baselines a changed plan"}
 	}
 	if fs := p.CheckChange(id); len(fs) > 0 {
-		return nil, &FailError{Msg: "change " + id + " does not pass `ape change check` — fix change.md first", Findings: fs}
+		return nil, &FailError{Code: "change.check-failed", Msg: "change " + id + " does not pass `ape change check` — fix change.md first", Findings: fs}
 	}
 	rm := p.roadmap()
 	ms := rm.Find(ci.Doc.Meta.Milestone)
@@ -86,7 +86,7 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 		if ms != nil {
 			status = ms.StatusText
 		}
-		return nil, &FailError{Msg: fmt.Sprintf("milestone %s is %s, not approved — a person runs `ape milestone approve %s --by <who>`",
+		return nil, &FailError{Code: CodeMilestoneNotApproved, Msg: fmt.Sprintf("milestone %s is %s, not approved — a person runs `ape milestone approve %s --by <who>`",
 			ci.Doc.Meta.Milestone, status, ci.Doc.Meta.Milestone)}
 	}
 	var conflicts []string
@@ -100,7 +100,7 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 		}
 	}
 	if len(conflicts) > 0 {
-		return nil, &ConflictError{Msg: "change " + id + " claims requirements another active change claims — archive or block that one first, or re-scope", Conflicts: conflicts}
+		return nil, &ConflictError{Code: "change.requirement-conflict", Msg: "change " + id + " claims requirements another active change claims — archive or block that one first, or re-scope", Conflicts: conflicts}
 	}
 
 	head := HeadSHA(ctx, p.Root)
@@ -156,7 +156,7 @@ func checkPlanFrozen(ci ChangeInfo) error {
 	if ci.State.PlanDigest == "" || ci.State.PlanDigest == ci.Doc.PlanDigest() {
 		return nil
 	}
-	return &FailError{Msg: "change " + ci.ID + ": ## Tasks or ## Delta changed since start (plan drift) — run `ape change start " + ci.ID +
+	return &FailError{Code: "change.plan-drift", Msg: "change " + ci.ID + ": ## Tasks or ## Delta changed since start (plan drift) — run `ape change start " + ci.ID +
 		"` to re-baseline the new plan (recorded), or restore change.md"}
 }
 
@@ -222,9 +222,9 @@ func (p *Project) Verify(ctx context.Context, id string, opt RunOptions) (*Verif
 	switch ci.State.Status {
 	case StatusInProgress, StatusVerified, StatusReviewed:
 	case StatusDraft:
-		return nil, &FailError{Msg: "change " + id + " is a draft — `ape change start " + id + "` first"}
+		return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is a draft — `ape change start " + id + "` first"}
 	default:
-		return nil, &FailError{Msg: "change " + id + " is " + ci.State.Status + " — verify applies to in-progress, verified or reviewed changes"}
+		return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + ci.State.Status + " — verify applies to in-progress, verified or reviewed changes"}
 	}
 	if err := checkPlanFrozen(ci); err != nil {
 		return nil, err
@@ -236,10 +236,10 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions) (*V
 	id, st := ci.ID, ci.State
 	dirty, err := p.dirtyCode(ctx)
 	if err != nil {
-		return nil, &FailError{Msg: "cannot read git status: " + err.Error()}
+		return nil, &FailError{Code: "git.status-failed", Msg: "cannot read git status: " + err.Error()}
 	}
 	if len(dirty) > 0 {
-		return nil, &FailError{Msg: "uncommitted changes outside " + p.DevRel + "/: " + strings.Join(limit(dirty, 8), ", ") +
+		return nil, &FailError{Code: "tree.dirty", Msg: "uncommitted changes outside " + p.DevRel + "/: " + strings.Join(limit(dirty, 8), ", ") +
 			" — commit them (trailer `Change: " + id + "`) and run verify again; verify records a sha"}
 	}
 	sha := HeadSHA(ctx, p.Root)
@@ -288,7 +288,7 @@ func limit(xs []string, n int) []string {
 // block returns the change to in-progress.
 func (p *Project) Review(ctx context.Context, id, verdict, findings string) (*State, error) {
 	if verdict != "pass" && verdict != "block" {
-		return nil, &UsageError{Msg: "--verdict must be pass or block"}
+		return nil, &UsageError{Code: "usage.verdict", Msg: "--verdict must be pass or block"}
 	}
 	ci, err := p.requireChange(id)
 	if err != nil {
@@ -296,7 +296,7 @@ func (p *Project) Review(ctx context.Context, id, verdict, findings string) (*St
 	}
 	st := ci.State
 	if st.Status != StatusVerified && st.Status != StatusReviewed {
-		return nil, &FailError{Msg: "change " + id + " is " + st.Status + " — review applies to a verified change (`ape change verify " + id + "`)"}
+		return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + st.Status + " — review applies to a verified change (`ape change verify " + id + "`)"}
 	}
 	abs := findings
 	if !filepath.IsAbs(abs) {
@@ -307,14 +307,14 @@ func (p *Project) Review(ctx context.Context, id, verdict, findings string) (*St
 		}
 	}
 	if !fileExists(abs) {
-		return nil, &UsageError{Msg: "--findings " + findings + " does not exist — write the review to changes/" + id + "/review.md first"}
+		return nil, &UsageError{Code: "usage.findings-missing", Msg: "--findings " + findings + " does not exist — write the review to changes/" + id + "/review.md first"}
 	}
 	if verdict == "pass" {
 		if st.Verify == nil || !st.Verify.Green {
-			return nil, &FailError{Msg: "no green verify to review — `ape change verify " + id + "`"}
+			return nil, &FailError{Code: "verify.missing", Msg: "no green verify to review — `ape change verify " + id + "`"}
 		}
 		if moved, files, _ := p.codeMovedSince(ctx, st.Verify.SHA); moved {
-			return nil, &FailError{Msg: "code changed since the last verify (" + strings.Join(limit(files, 5), ", ") + ") — `ape change verify " + id + "` and review again"}
+			return nil, &FailError{Code: "verify.stale", Msg: "code changed since the last verify (" + strings.Join(limit(files, 5), ", ") + ") — `ape change verify " + id + "` and review again"}
 		}
 	}
 	st.Review = &Review{Verdict: verdict, At: Stamp(), SHA: HeadSHA(ctx, p.Root), Findings: p.Rel(abs)}
@@ -341,7 +341,7 @@ func (p *Project) saveAndCommit(ctx context.Context, id string, st *State) error
 		return nil
 	}
 	if _, err := p.commitPaths(ctx, "apex: "+id+" "+st.Status, id, p.Rel(p.StateFile(id))); err != nil {
-		return &FailError{Msg: "state.json written but its commit failed: " + err.Error() + " — fix git (identity, lock) and re-run the command"}
+		return &FailError{Code: CodeCommitFailed, Msg: "state.json written but its commit failed: " + err.Error() + " — fix git (identity, lock) and re-run the command"}
 	}
 	return nil
 }
@@ -349,7 +349,7 @@ func (p *Project) saveAndCommit(ctx context.Context, id string, st *State) error
 // Accept records a person accepting a human-review task.
 func (p *Project) Accept(ctx context.Context, id, task, by string) (*State, error) {
 	if strings.TrimSpace(by) == "" {
-		return nil, &UsageError{Msg: "--by names the person accepting"}
+		return nil, &UsageError{Code: "usage.by", Msg: "--by names the person accepting"}
 	}
 	ci, err := p.requireChange(id)
 	if err != nil {
@@ -357,10 +357,10 @@ func (p *Project) Accept(ctx context.Context, id, task, by string) (*State, erro
 	}
 	t := ci.Doc.Task(task)
 	if t == nil {
-		return nil, &UsageError{Msg: "change " + id + " has no task " + task}
+		return nil, &UsageError{Code: "usage.no-such-task", Msg: "change " + id + " has no task " + task}
 	}
 	if !t.Human() {
-		return nil, &FailError{Msg: "task " + task + " is proven by `" + t.Check + "`, not by a person — `ape change verify " + id + "` runs it"}
+		return nil, &FailError{Code: "accept.not-human-review", Msg: "task " + task + " is proven by `" + t.Check + "`, not by a person — `ape change verify " + id + "` runs it"}
 	}
 	st := ci.State
 	accepted := make([]Accept, 0, len(st.Accepted)+1)
@@ -386,7 +386,7 @@ func (p *Project) Accept(ctx context.Context, id, task, by string) (*State, erro
 // Block sets a change blocked with a reason a person can act on.
 func (p *Project) Block(ctx context.Context, id, reason string) (*State, error) {
 	if strings.TrimSpace(reason) == "" {
-		return nil, &UsageError{Msg: "--reason is required: what blocks it, or the question only a person can answer"}
+		return nil, &UsageError{Code: "usage.reason", Msg: "--reason is required: what blocks it, or the question only a person can answer"}
 	}
 	ci, err := p.requireChange(id)
 	if err != nil {

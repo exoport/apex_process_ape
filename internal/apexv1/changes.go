@@ -341,33 +341,33 @@ type NewChangeResult struct {
 // NewChange validates id and writes the change skeleton and a draft state.
 func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, paths []string) (*NewChangeResult, error) {
 	if !ChangeIDRe.MatchString(id) {
-		return nil, &UsageError{Msg: fmt.Sprintf("change id %q must match ^[a-z][a-z0-9-]{2,39}$ (verb-led kebab slug, e.g. add-tenant-delete)", id)}
+		return nil, &UsageError{Code: "usage.change-id", Msg: fmt.Sprintf("change id %q must match ^[a-z][a-z0-9-]{2,39}$ (verb-led kebab slug, e.g. add-tenant-delete)", id)}
 	}
 	if dirExists(p.ChangeDir(id)) {
-		return nil, &FailError{Msg: "change " + id + " already exists — pick another id"}
+		return nil, &FailError{Code: "change.exists", Msg: "change " + id + " already exists — pick another id"}
 	}
 	if folder, ok := p.ArchivedIDs()[id]; ok {
-		return nil, &FailError{Msg: "change " + id + " was already archived as changes/archive/" + folder + " — ids are unique across the archive; pick another"}
+		return nil, &FailError{Code: "change.id-archived", Msg: "change " + id + " was already archived as changes/archive/" + folder + " — ids are unique across the archive; pick another"}
 	}
 	rm := p.roadmap()
 	if rm == nil {
-		return nil, &FailError{Msg: "no roadmap.md — run `ape project init` and `ape milestone new` first"}
+		return nil, &FailError{Code: "roadmap.missing", Msg: "no roadmap.md — run `ape project init` and `ape milestone new` first"}
 	}
 	ms := rm.Find(milestone)
 	if ms == nil {
-		return nil, &FailError{Msg: "milestone " + milestone + " is not in roadmap.md — `ape milestone new` adds one"}
+		return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "milestone " + milestone + " is not in roadmap.md — `ape milestone new` adds one"}
 	}
 	if len(touches) == 0 {
-		return nil, &UsageError{Msg: "--touches needs at least one capability slug"}
+		return nil, &UsageError{Code: "usage.touches", Msg: "--touches needs at least one capability slug"}
 	}
 	for _, t := range touches {
 		if !slugRe.MatchString(t) {
-			return nil, &UsageError{Msg: "--touches entry \"" + t + "\" is not a kebab-case capability slug"}
+			return nil, &UsageError{Code: "usage.touches", Msg: "--touches entry \"" + t + "\" is not a kebab-case capability slug"}
 		}
 	}
 	for _, g := range paths {
 		if _, err := path.Match(g, ""); err != nil {
-			return nil, &UsageError{Msg: "--paths entry \"" + g + "\" is not a valid glob"}
+			return nil, &UsageError{Code: "usage.paths", Msg: "--paths entry \"" + g + "\" is not a valid glob"}
 		}
 	}
 	if err := os.MkdirAll(p.ChangeDir(id), 0o755); err != nil {
@@ -387,7 +387,7 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 	if p.isWorkTree(ctx) {
 		sha, err := p.commitPaths(ctx, "apex: "+id+" "+StatusDraft, id, p.Rel(p.ChangeDir(id)))
 		if err != nil {
-			return nil, &FailError{Msg: "change written but its commit failed: " + err.Error()}
+			return nil, &FailError{Code: CodeCommitFailed, Msg: "change written but its commit failed: " + err.Error()}
 		}
 		commit = sha
 	}
@@ -401,19 +401,19 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 func (p *Project) requireChange(id string) (ChangeInfo, error) {
 	if !dirExists(p.ChangeDir(id)) {
 		if folder, ok := p.ArchivedIDs()[id]; ok {
-			return ChangeInfo{}, &FailError{Msg: "change " + id + " is archived (changes/archive/" + folder + ")"}
+			return ChangeInfo{}, &FailError{Code: "change.archived", Msg: "change " + id + " is archived (changes/archive/" + folder + ")"}
 		}
-		return ChangeInfo{}, &FailError{Msg: "no change " + id + " — `ape status` lists the active ones"}
+		return ChangeInfo{}, &FailError{Code: "change.not-found", Msg: "no change " + id + " — `ape status` lists the active ones"}
 	}
 	ci := p.loadChange(id)
 	if ci.Err != nil {
 		if errors.Is(ci.Err, ErrNoState) {
-			return ci, &FailError{Msg: "change " + id + " has no state.json — it was not created with `ape change new`"}
+			return ci, &FailError{Code: "change.no-state", Msg: "change " + id + " has no state.json — it was not created with `ape change new`"}
 		}
-		return ci, &FailError{Msg: ci.Err.Error()}
+		return ci, &FailError{Code: "change.state-unreadable", Msg: ci.Err.Error()}
 	}
 	if ci.Doc == nil {
-		return ci, &FailError{Msg: "change " + id + " has no change.md"}
+		return ci, &FailError{Code: "change.no-change-md", Msg: "change " + id + " has no change.md"}
 	}
 	return ci, nil
 }

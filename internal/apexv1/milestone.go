@@ -124,7 +124,7 @@ func (p *Project) milestonePaths() []string {
 func (p *Project) commitMilestone(ctx context.Context, id, what string) (string, error) {
 	sha, err := p.commitRecord(ctx, "apex: "+id+" "+what, "Milestone: "+id, p.milestonePaths()...)
 	if err != nil {
-		return "", &FailError{Msg: "roadmap written but its commit failed: " + err.Error() + " — fix git (identity, lock) and commit " + strings.Join(p.milestonePaths(), " ")}
+		return "", &FailError{Code: CodeCommitFailed, Msg: "roadmap written but its commit failed: " + err.Error() + " — fix git (identity, lock) and commit " + strings.Join(p.milestonePaths(), " ")}
 	}
 	return sha, nil
 }
@@ -132,7 +132,7 @@ func (p *Project) commitMilestone(ctx context.Context, id, what string) (string,
 func (p *Project) loadRoadmapDoc() (string, *Roadmap, error) {
 	doc, err := readFileString(p.RoadmapMD())
 	if err != nil {
-		return "", nil, &FailError{Msg: "no " + p.Rel(p.RoadmapMD()) + " — run `ape project init`"}
+		return "", nil, &FailError{Code: "roadmap.missing", Msg: "no " + p.Rel(p.RoadmapMD()) + " — run `ape project init`"}
 	}
 	return doc, ParseRoadmap(p.Rel(p.RoadmapMD()), doc), nil
 }
@@ -141,13 +141,13 @@ func (p *Project) loadRoadmapDoc() (string, *Roadmap, error) {
 func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *float64, goal string) (string, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
-		return "", &UsageError{Msg: "a milestone needs a title"}
+		return "", &UsageError{Code: "usage.title", Msg: "a milestone needs a title"}
 	}
 	if strings.TrimSpace(gate) == "" {
-		return "", &UsageError{Msg: "--gate is required: one command that is red until the milestone is done"}
+		return "", &UsageError{Code: "usage.gate", Msg: "--gate is required: one command that is red until the milestone is done"}
 	}
 	if strings.Contains(gate, "\n") || strings.Contains(title, "\n") {
-		return "", &UsageError{Msg: "title and gate are one line each"}
+		return "", &UsageError{Code: "usage.one-line", Msg: "title and gate are one line each"}
 	}
 	doc, rm, err := p.loadRoadmapDoc()
 	if err != nil {
@@ -166,7 +166,7 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 // ApproveMilestone writes `Status: approved (by <who> <ts>)`.
 func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milestone, error) {
 	if strings.TrimSpace(by) == "" {
-		return nil, &UsageError{Msg: "--by names who approves"}
+		return nil, &UsageError{Code: "usage.by", Msg: "--by names who approves"}
 	}
 	doc, rm, err := p.loadRoadmapDoc()
 	if err != nil {
@@ -174,16 +174,16 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milesto
 	}
 	m := rm.Find(id)
 	if m == nil {
-		return nil, &FailError{Msg: "no milestone " + id + " in roadmap.md"}
+		return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "no milestone " + id + " in roadmap.md"}
 	}
 	switch m.Status {
 	case MilestoneDone:
-		return nil, &FailError{Msg: id + " is already done"}
+		return nil, &FailError{Code: "milestone.done", Msg: id + " is already done"}
 	case MilestoneApproved:
 		return m, nil
 	}
 	if fs := ValidateRoadmap(p.Rel(p.RoadmapMD()), doc); len(filterMilestone(fs, m)) > 0 {
-		return nil, &FailError{Msg: id + " is not well-formed — fix roadmap.md before approving", Findings: filterMilestone(fs, m)}
+		return nil, &FailError{Code: "milestone.malformed", Msg: id + " is not well-formed — fix roadmap.md before approving", Findings: filterMilestone(fs, m)}
 	}
 	updated, err := rm.WithStatus(id, "approved (by "+strings.TrimSpace(by)+" "+Stamp()+")")
 	if err != nil {
@@ -250,10 +250,10 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	}
 	m := rm.Find(id)
 	if m == nil {
-		return nil, &FailError{Msg: "no milestone " + id + " in roadmap.md"}
+		return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "no milestone " + id + " in roadmap.md"}
 	}
 	if m.Gate == "" {
-		return nil, &FailError{Msg: id + " has no Gate: line"}
+		return nil, &FailError{Code: "milestone.no-gate", Msg: id + " has no Gate: line"}
 	}
 	logPath := filepath.Join(p.ApexDir(), "logs", "gate-"+id+".log")
 	gate := p.RunChecks(ctx, filepath.Dir(logPath), "", []PlannedCheck{{Ref: "gate-" + id, Kind: "gate", Cmd: m.Gate}}, opt)[0]
@@ -309,14 +309,14 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 	}
 	m := rm.Find(id)
 	if m == nil {
-		return nil, &FailError{Msg: "no milestone " + id + " in roadmap.md"}
+		return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "no milestone " + id + " in roadmap.md"}
 	}
 	switch m.Status {
 	case MilestoneDone:
 		return &GateResult{Milestone: id, Status: MilestoneDone}, nil
 	case MilestoneApproved:
 	default:
-		return nil, &FailError{Msg: id + " is " + m.StatusText + ", not approved — nothing to close"}
+		return nil, &FailError{Code: CodeMilestoneNotApproved, Msg: id + " is " + m.StatusText + ", not approved — nothing to close"}
 	}
 	var inFlight []string
 	for _, c := range p.Changes() {
@@ -330,7 +330,7 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 	}
 	if len(inFlight) > 0 {
 		return &GateResult{Milestone: id, Status: m.Status, InFlight: inFlight},
-			&FailError{Msg: id + " has changes in flight: " + strings.Join(inFlight, ", ") + " — archive or block them, then close"}
+			&FailError{Code: "milestone.changes-in-flight", Msg: id + " has changes in flight: " + strings.Join(inFlight, ", ") + " — archive or block them, then close"}
 	}
 	g, err := p.runGate(ctx, id, opt)
 	if err != nil {
@@ -342,7 +342,7 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 				return g, err
 			}
 		}
-		return g, &FailError{Msg: id + " gate is red (" + g.Run.Why() + ") — the milestone is not done"}
+		return g, &FailError{Code: "gate.red", Msg: id + " gate is red (" + g.Run.Why() + ") — the milestone is not done"}
 	}
 	_, rm, err = p.loadRoadmapDoc()
 	if err != nil {

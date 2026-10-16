@@ -12,6 +12,9 @@ type Finding struct {
 	File    string `json:"file"`
 	Line    int    `json:"line,omitempty"`
 	Message string `json:"message"`
+	// Code and Fix are filled by ClassifyFindings for machine output.
+	Code string `json:"code,omitempty"`
+	Fix  string `json:"fix,omitempty"`
 }
 
 func (f Finding) String() string {

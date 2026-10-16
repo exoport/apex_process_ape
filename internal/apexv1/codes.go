@@ -1,0 +1,160 @@
+package apexv1
+
+// Codes set in more than one place.
+const (
+	CodeWrongStatus          = "change.wrong-status"
+	CodeCommitFailed         = "git.commit-failed"
+	CodeMilestoneNotFound    = "milestone.not-found"
+	CodeMilestoneNotApproved = "milestone.not-approved"
+	CodeFolderExists         = "archive.folder-exists"
+)
+
+// CodeDoc documents one diagnostic code.
+type CodeDoc struct {
+	Code    string `json:"code"`
+	Exit    int    `json:"exit"`
+	Meaning string `json:"meaning"`
+}
+
+// DiagnosticCodes is the published list of every code a v1 command can
+// put in a --json diagnostic (item 13). Exit is the process status that
+// code comes with: 1 a check failed, 2 usage, 3 conflict. Finding codes
+// (from `project check` and `change check`) come with exit 1. A test
+// fails when code and list disagree.
+var DiagnosticCodes = []CodeDoc{
+	// usage (exit 2)
+	{"usage.by", 2, "--by is required: who approves or accepts"},
+	{"usage.change-id", 2, "the change id is not ^[a-z][a-z0-9-]{2,39}$"},
+	{"usage.decision-slug", 2, "the decision slug is not kebab-case"},
+	{"usage.findings", 2, "review: --findings is required without --run"},
+	{"usage.findings-missing", 2, "review: the --findings file does not exist"},
+	{"usage.gate", 2, "milestone new: --gate is required"},
+	{"usage.milestone", 2, "change new: --milestone is required"},
+	{"usage.no-such-task", 2, "accept: the change has no such task"},
+	{"usage.one-line", 2, "milestone new: title and gate must be one line each"},
+	{"usage.paths", 2, "change new: a --paths entry is not a valid glob"},
+	{"usage.reason", 2, "block/abandon: --reason is required"},
+	{"usage.review-run", 2, "review: --run takes no --verdict/--findings"},
+	{"usage.task", 2, "accept: --task is required"},
+	{"usage.title", 2, "milestone new: a title is required"},
+	{"usage.touches", 2, "change new: --touches is empty or holds a non-kebab-case slug"},
+	{"usage.verdict", 2, "review: --verdict is not pass or block"},
+	{"review.nested", 2, "review --run inside a review session (depth 1)"},
+	{"project.not-initialized", 2, "no development folder: run `ape project init`"},
+	{"usage.unclassified", 2, "a usage error without a code (a bug: report it)"},
+
+	// failures (exit 1)
+	{"accept.not-human-review", 1, "accept: the task has a command check; verify runs it"},
+	{"archive.pending-human", 1, "archive: human-review tasks are not accepted"},
+	{"archive.spec-invalid", 1, "archive: the merged spec would fail project check (e.g. over 20 KB)"},
+	{"change.archived", 1, "the change is already archived"},
+	{"change.check-failed", 1, "change.md fails `ape change check` (findings follow)"},
+	{"change.exists", 1, "change new: a change with that id exists"},
+	{"change.id-archived", 1, "change new: the id was used by an archived change"},
+	{"change.no-change-md", 1, "the change folder has no change.md"},
+	{"change.no-state", 1, "the change folder has no state.json (not made by `ape change new`)"},
+	{"change.not-found", 1, "no such change"},
+	{"change.nothing-to-rebaseline", 1, "start on a started change whose plan did not change"},
+	{"change.plan-drift", 1, "## Tasks or ## Delta changed since start: re-start to re-baseline, or restore"},
+	{"change.state-unreadable", 1, "state.json does not parse"},
+	{CodeWrongStatus, 1, "the command does not apply to the change's status"},
+	{"decision.slug-taken", 1, "decision new: an ADR already uses the slug"},
+	{"decision.write-failed", 1, "decision new: the ADR file could not be created"},
+	{"gate.red", 1, "the milestone gate (command or a spec scenario) is red"},
+	{CodeCommitFailed, 1, "ape wrote its record but could not commit it (identity, lock)"},
+	{"git.not-a-repo", 1, "archive needs a git repository"},
+	{"git.status-failed", 1, "git status could not be read"},
+	{"milestone.changes-in-flight", 1, "close: changes of the milestone are in-progress, verified or reviewed"},
+	{"milestone.done", 1, "approve: the milestone is already done"},
+	{"milestone.malformed", 1, "approve: the milestone lacks a Gate or Goal (findings follow)"},
+	{"milestone.no-gate", 1, "the milestone has no Gate: line"},
+	{CodeMilestoneNotApproved, 1, "the milestone is not approved"},
+	{CodeMilestoneNotFound, 1, "no such milestone in roadmap.md"},
+	{"project.check-failed", 1, "`ape project check` found problems (findings follow)"},
+	{"review.block", 1, "review --run: the review session's verdict is block"},
+	{"review.no-verdict", 1, "review --run: the session ended without recording a verdict"},
+	{"review.stale", 1, "archive: code changed since the review"},
+	{"review.start-failed", 1, "review --run: the review session could not be started"},
+	{"review.voided", 1, "review --run: the session changed more than review.md; verdict voided"},
+	{"roadmap.missing", 1, "no roadmap.md"},
+	{"settings.invalid-json", 1, "init: .claude/settings.json is not valid JSON"},
+	{"tree.dirty", 1, "uncommitted changes outside the development folder"},
+	{"verify.missing", 1, "no green verify to review"},
+	{"verify.red", 1, "a task check or an effective-spec scenario check is red"},
+	{"verify.stale", 1, "code changed since the last verify"},
+	{"error.unclassified", 1, "a failure without a code (a bug: report it)"},
+
+	// conflicts (exit 3)
+	{"archive.delta-conflict", 3, "the delta no longer applies to the current specs; nothing written"},
+	{CodeFolderExists, 3, "the archive folder already exists; nothing written"},
+	{"change.requirement-conflict", 3, "another active change claims the same requirement"},
+	{"conflict.unclassified", 3, "a conflict without a code (a bug: report it)"},
+
+	// findings (exit 1, from project check / change check)
+	{"file.missing", 1, "a required file is missing"},
+	{"project.too-long", 1, "project.md over 150 lines"},
+	{"project.too-big", 1, "project.md over 8 KB"},
+	{"project.no-title", 1, "project.md has no `# <name>`"},
+	{"project.missing-section", 1, "project.md lacks a required ## section"},
+	{"project.empty-section", 1, "a required project.md section is empty"},
+	{"agents.too-long", 1, "AGENTS.md over 120 lines"},
+	{"claude-md.no-import", 1, "CLAUDE.md lacks the line @AGENTS.md"},
+	{"roadmap.title", 1, "roadmap.md does not start with # Roadmap"},
+	{"roadmap.no-milestones", 1, "roadmap.md has no milestone"},
+	{"roadmap.bad-heading", 1, "a roadmap section is not ## M<n> — <title>"},
+	{"roadmap.duplicate-milestone", 1, "a milestone id appears twice"},
+	{"roadmap.no-status", 1, "a milestone has no Status: line"},
+	{"roadmap.bad-status", 1, "a milestone Status: is not one ape writes"},
+	{"roadmap.no-gate", 1, "a milestone has no Gate:"},
+	{"roadmap.no-goal", 1, "a milestone has no Goal:"},
+	{"roadmap.bad-budget", 1, "a milestone Budget: is not a number"},
+	{"decision.bad-name", 1, "an ADR file is not NNNN-<slug>.md"},
+	{"decision.bad-title", 1, "an ADR's heading is not # ADR-NNNN: <title>"},
+	{"decision.no-status", 1, "an ADR has no valid Status:"},
+	{"decision.no-date", 1, "an ADR has no Date:"},
+	{"decision.no-enforced-by", 1, "an ADR has no Enforced by:"},
+	{"decision.missing-section", 1, "an ADR lacks Context/Decision/Consequences"},
+	{"spec.bad-capability-name", 1, "a capability folder is not kebab-case"},
+	{"spec.missing", 1, "a capability folder has no spec.md"},
+	{"spec.too-big", 1, "a spec over 20 KB: split the capability"},
+	{"spec.no-title", 1, "a spec has no # title"},
+	{"spec.no-purpose", 1, "a spec has no Purpose: line"},
+	{"spec.duplicate-requirement", 1, "a requirement name appears twice"},
+	{"spec.bad-heading", 1, "a level-3 heading that is not ### Requirement:"},
+	{"spec.unnamed-requirement", 1, "a requirement has no name"},
+	{"spec.no-scenario", 1, "a requirement has no scenario"},
+	{"spec.no-check", 1, "a scenario has no check: line"},
+	{"spec.multiple-checks", 1, "a scenario has more than one check:"},
+	{"spec.empty-check", 1, "a scenario's check: is empty"},
+	{"spec.stray-check", 1, "a check: line outside any scenario"},
+	{"change.too-big", 1, "change.md over 8 KB: split the change"},
+	{"change.design-too-big", 1, "design.md over 8 KB"},
+	{"change.frontmatter", 1, "change.md frontmatter is missing, unparseable, or its id/milestone/touches are wrong"},
+	{"change.bad-id", 1, "the change folder name is not a valid id"},
+	{"change.unknown-milestone", 1, "the change's milestone is not in roadmap.md"},
+	{"change.bad-touches", 1, "a touches entry is not kebab-case"},
+	{"change.bad-decision-ref", 1, "a decisions entry is not ADR-NNNN"},
+	{"change.unknown-decision", 1, "a referenced ADR has no file"},
+	{"change.bad-path-glob", 1, "a paths entry is not a valid glob"},
+	{"change.no-title", 1, "change.md has no # title"},
+	{"change.missing-section", 1, "change.md lacks a required ## section"},
+	{"change.empty-section", 1, "## Why or ## Out of scope is empty"},
+	{"change.empty-delta", 1, "## Delta is empty"},
+	{"change.bad-delta", 1, "## Delta holds something other than delta blocks or `none — <reason>`"},
+	{"change.bad-delta-heading", 1, "a delta heading is malformed"},
+	{"change.bad-delta-capability", 1, "a delta capability is not kebab-case"},
+	{"change.delta-not-touched", 1, "a delta capability is not in touches"},
+	{"change.unnamed-delta", 1, "a delta block has no requirement name"},
+	{"change.duplicate-delta", 1, "a requirement appears twice in the delta"},
+	{"change.added-exists", 1, "ADDED names an existing requirement"},
+	{"change.scenario-loss", 1, "MODIFIED drops a scenario or changes its check"},
+	{"change.modified-missing", 1, "MODIFIED names no existing requirement"},
+	{"change.removed-missing", 1, "REMOVED names no existing requirement"},
+	{"change.removed-no-reason", 1, "REMOVED has no Reason:"},
+	{"change.no-tasks", 1, "## Tasks has no tasks"},
+	{"change.duplicate-task", 1, "a task id appears twice"},
+	{"change.task-checkbox", 1, "a task has a checkbox"},
+	{"change.bad-task-line", 1, "a ## Tasks list item is not - T<n> <what> — check: …"},
+	{"change.task-no-check", 1, "a task has no check:"},
+	{UnclassifiedFinding, 1, "a finding no rule classifies (a bug: report it)"},
+}

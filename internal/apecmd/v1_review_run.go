@@ -72,7 +72,7 @@ type reviewRunResult struct {
 func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, model string, wait time.Duration) error {
 	ctx := cmd.Context()
 	if v := os.Getenv(apexv1.EnvReview); v != "" {
-		return v1Fail(cmd, f, &apexv1.UsageError{Msg: "this is a review session (" + apexv1.EnvReview + "=" + v +
+		return v1Fail(cmd, f, &apexv1.UsageError{Code: "review.nested", Msg: "this is a review session (" + apexv1.EnvReview + "=" + v +
 			"): a review session cannot start another review"}, nil)
 	}
 	run := p.LoadReviewRun(id)
@@ -95,7 +95,7 @@ func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, mod
 		var err error
 		h, err = launchDetached(p.Root, p.Root, argv, reviewEnv(id))
 		if err != nil {
-			return v1Fail(cmd, f, &apexv1.FailError{Msg: "could not start the review session: " + err.Error()}, nil)
+			return v1Fail(cmd, f, &apexv1.FailError{Code: "review.start-failed", Msg: "could not start the review session: " + err.Error()}, nil)
 		}
 		run.DetachedID = h.ID
 		if err := p.SaveReviewRun(run); err != nil {
@@ -126,17 +126,17 @@ func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, mod
 	res.Outcome = outcome
 	switch {
 	case outcome.Voided:
-		return v1Fail(cmd, f, &apexv1.FailError{Msg: "review of " + id + " voided: the session changed more than its review.md (" +
+		return v1Fail(cmd, f, &apexv1.FailError{Code: "review.voided", Msg: "review of " + id + " voided: the session changed more than its review.md (" +
 			strings.Join(outcome.Violations, ", ") + ") — the change is " + outcome.Status + "; review again"}, res)
 	case outcome.Verdict == "":
 		why := "the session was lost"
 		if res.TaskExit != nil {
 			why = fmt.Sprintf("ape task exited %d", *res.TaskExit)
 		}
-		return v1Fail(cmd, f, &apexv1.FailError{Msg: "the review session for " + id + " ended without a verdict (" + why + "; log " + h.Log +
+		return v1Fail(cmd, f, &apexv1.FailError{Code: "review.no-verdict", Msg: "the review session for " + id + " ended without a verdict (" + why + "; log " + h.Log +
 			") — run `ape change review " + id + " --run` again"}, res)
 	case outcome.Verdict == "block":
-		return v1Fail(cmd, f, &apexv1.FailError{Msg: "review of " + id + ": block — findings in " + outcome.Findings +
+		return v1Fail(cmd, f, &apexv1.FailError{Code: "review.block", Msg: "review of " + id + ": block — findings in " + outcome.Findings +
 			"; the change is back in-progress"}, res)
 	}
 	return v1Emit(cmd.OutOrStdout(), f, res, func(w io.Writer) {

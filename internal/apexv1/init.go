@@ -164,7 +164,7 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 	if len(paths) > 0 {
 		sha, err := p.commitRecord(ctx, "apex: project init", "", paths...)
 		if err != nil {
-			return res, &FailError{Msg: "skeleton written but its commit failed: " + err.Error()}
+			return res, &FailError{Code: CodeCommitFailed, Msg: "skeleton written but its commit failed: " + err.Error()}
 		}
 		res.Commit = sha
 	}
@@ -203,7 +203,7 @@ func MergeHooks(path string) ([]string, error) {
 		return nil, err
 	default:
 		if err := json.Unmarshal(data, &root); err != nil {
-			return nil, &FailError{Msg: path + " is not valid JSON (" + err.Error() + ") — fix it, then run `ape project init` again"}
+			return nil, &FailError{Code: "settings.invalid-json", Msg: path + " is not valid JSON (" + err.Error() + ") — fix it, then run `ape project init` again"}
 		}
 		if root == nil {
 			root = map[string]any{}
