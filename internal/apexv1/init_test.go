@@ -21,7 +21,7 @@ func TestInit_Greenfield(t *testing.T) {
 	require.NoError(t, err)
 	for _, want := range []string{
 		"_apex/config.yaml", "development/project.md", "development/roadmap.md", "AGENTS.md", "CLAUDE.md",
-		"development/specs/", "development/changes/", "development/archive/", "development/decisions/", "_apex/state/", "_apex/state/.gitignore", "_apex/state/project.json",
+		"development/specs/", "development/changes/", "development/archive/", "development/decisions/", "development/briefs/", "_apex/state/", "_apex/state/.gitignore", "_apex/state/project.json",
 	} {
 		require.Contains(t, res.Created, want)
 	}

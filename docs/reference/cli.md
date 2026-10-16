@@ -4111,7 +4111,8 @@ Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
                   has a red command check (at most 3 times in a row)
   pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
-                  and Bash commands that create, delete or push a git tag
+                  an existing development/briefs/** file, and Bash commands that create,
+                  delete or push a git tag
 
 Every hook exits 0; a block or deny is expressed in its JSON output.
 
@@ -4121,13 +4122,13 @@ them; the settings.json copy then does nothing, so each event is decided once.
 
 Subcommands:
 
-- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive and _apex/state, and git tag writes
+- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, and git tag writes
 - `session-start` — SessionStart hook: inject `ape status --brief` as additional context
 - `stop` — Stop/SubagentStop hook: block a stop while the in-progress change's checks are red
 
 ## ape hook pre-tool
 
-PreToolUse hook: deny edits to specs, state.json, the archive and _apex/state, and git tag writes
+PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, and git tag writes
 
 ```
 ape hook pre-tool [flags]
@@ -4138,6 +4139,13 @@ PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash. Denies, with
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
 development/archive/, or is under _apex/state/.
+
+Briefs: denies an edit to a file that already exists under development/briefs/ (any
+depth) — a brief is a plan's input, dated and verbatim, and is history: a new or
+changed request is a new dated brief (development/briefs/YYYY-MM-DD-<slug>.md), linked
+from the roadmap's Delivery: line. Writing a new file there is allowed. Symlinked
+folders and links to a brief are resolved. A Bash write is not seen here;
+`ape project check` reports it (brief.edited).
 
 Bash: denies a command that writes a git tag — only a person tags or releases:
   git tag <name> (-a, -s, -f, -m …), git tag -d|--delete
@@ -4950,7 +4958,18 @@ Validate the whole project and list every failure, not just the first.
                            ## Constraints (each non-empty); ≤ 150 lines and ≤ 8 KB
   AGENTS.md                present, ≤ 120 lines; CLAUDE.md (if any) has the line @AGENTS.md
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
-                           Gate, Goal; Budget a number when present
+                           Gate, Goal; Budget a number when present. Its Delivery: line
+                           links the current brief, e.g.
+                           Delivery: Phase 1 — "…" ([brief](briefs/2026-10-16-<slug>.md));
+                           a Markdown link or a bare briefs/….md path, relative to
+                           roadmap.md (or development/briefs/… from the project root),
+                           must resolve (roadmap.delivery-link); briefs with no linking
+                           Delivery: line are roadmap.delivery-unlinked
+  development/briefs/      YYYY-MM-DD-<slug>.md with a real date (brief.bad-name);
+                           committed with the plan (brief.uncommitted); never changed
+                           from the text of the commit that added it, in the working
+                           tree or a later commit (brief.edited: restore it, write a
+                           new dated brief)
   specs/<cap>/spec.md      # title, Purpose:, "### Requirement: <name>" each with ≥ 1
                            "#### Scenario:" and exactly one "- check: <cmd> | human-review"
                            per scenario; ≤ 20 KB ("split into two capabilities")
@@ -5043,6 +5062,8 @@ Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritt
   development/changes/               the changes in flight
   development/archive/               archived and abandoned changes
   development/decisions/
+  development/briefs/                each plan's input, dated and verbatim (YYYY-MM-DD-<slug>.md,
+                                     written by apex-plan; never edited — see ape project check)
   _apex/state/                       ape's own records (never edited by a model; never touched
                                      by ape framework update): milestones.json, decisions.json
                                      tracked; logs/, runs/, hooks/ ignored. Its .gitignore is a

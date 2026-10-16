@@ -25,7 +25,8 @@ func newHookCmd() *cobra.Command {
                   has a red command check (at most 3 times in a row)
   pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
-                  and Bash commands that create, delete or push a git tag
+                  an existing development/briefs/** file, and Bash commands that create,
+                  delete or push a git tag
 
 Every hook exits 0; a block or deny is expressed in its JSON output.
 
@@ -164,12 +165,19 @@ func newHookPreToolCmd() *cobra.Command {
 	var inline bool
 	cmd := &cobra.Command{
 		Use:   "pre-tool",
-		Short: "PreToolUse hook: deny edits to specs, state.json, the archive and _apex/state, and git tag writes",
+		Short: "PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, and git tag writes",
 		Long: `PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
 whose target is under development/specs/, is development/changes/*/state.json, is under
 development/archive/, or is under _apex/state/.
+
+Briefs: denies an edit to a file that already exists under development/briefs/ (any
+depth) — a brief is a plan's input, dated and verbatim, and is history: a new or
+changed request is a new dated brief (development/briefs/YYYY-MM-DD-<slug>.md), linked
+from the roadmap's Delivery: line. Writing a new file there is allowed. Symlinked
+folders and links to a brief are resolved. A Bash write is not seen here;
+` + "`ape project check`" + ` reports it (brief.edited).
 
 Bash: denies a command that writes a git tag — only a person tags or releases:
   git tag <name> (-a, -s, -f, -m …), git tag -d|--delete
