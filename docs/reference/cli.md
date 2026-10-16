@@ -2106,8 +2106,8 @@ If so ape catches the change up — the one path start, verify and archive share
     its branch; anything else: exit 1, tree.dirty)
   - `git rebase <base_branch>` on change/<id>; a conflict aborts the rebase and blocks the
     change naming the files (committed on its branch): exit 3, change.rebase-conflict,
-    nothing else written — a person resolves it (`git rebase` on the branch, by hand),
-    then `ape change start <id>` re-baselines without rebasing again
+    nothing else written — the orchestrator re-plans (D43): it abandons the change and
+    apex-change plans a replacement from the current base, the conflicting files as hint
   - the baseline (task checks, effective-spec scenarios, regression command) is re-run
     at the NEW BASE TIP, in place — the checkout detached there, then switched back, so
     ignored files (dependencies, build caches) are present as usual — never at the

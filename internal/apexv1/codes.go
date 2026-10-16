@@ -108,7 +108,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"error.unclassified", 1, "a failure without a code (a bug: report it)"},
 
 	// conflicts (exit 3)
-	{CodeRebaseConflict, 3, "start, verify, archive: the base branch moved and change/<id> does not rebase onto it (D40); the rebase was aborted, nothing else written, the change is blocked with the conflicting files for a person to resolve"},
+	{CodeRebaseConflict, 3, "start, verify, archive: the base branch moved and change/<id> does not rebase onto it (D40); the rebase was aborted, nothing else written, the change is blocked with the conflicting files; the orchestrator abandons it and apex-change re-plans a replacement from the current base (D43)"},
 	{"archive.base-changed", 3, "a requirement this change modifies or removes changed in the spec since start (another branch); nothing written"},
 	{CodeDeltaConflict, 3, "the delta no longer applies to the current specs; nothing written"},
 	{CodeFolderExists, 3, "the archive folder already exists; nothing written"},

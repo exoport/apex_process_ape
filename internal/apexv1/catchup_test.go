@@ -156,7 +156,7 @@ func TestCatchUp_ConflictBlocks(t *testing.T) {
 	st := state(t, p, "add-wave")
 	require.Equal(t, StatusBlocked, st.Status)
 	require.Contains(t, *st.BlockedReason, "verify: main moved, and rebasing change/add-wave onto it conflicts in wave.sh")
-	require.Contains(t, *st.BlockedReason, "a person rebases it")
+	require.Contains(t, *st.BlockedReason, "the orchestrator re-plans")
 	require.Equal(t, before.BaseSHA, st.BaseSHA)
 	require.Equal(t, before.Baseline, st.Baseline)
 	require.Empty(t, st.Rebases)
@@ -164,7 +164,8 @@ func TestCatchUp_ConflictBlocks(t *testing.T) {
 	require.Equal(t, 1, worktrees(t, p))
 	clean(t, p, "a rebase conflict")
 
-	// A person resolves it by hand (the change's side wins).
+	// Resolved by hand anyway (still accepted, though D43 has the orchestrator
+	// re-plan instead): the change's side wins.
 	run(t, p.Root, "rebase", "-q", "-X", "theirs", "main")
 	res, err := p.Start(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)

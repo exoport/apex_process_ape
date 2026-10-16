@@ -166,7 +166,7 @@ func (p *Project) rebaseOrBlock(ctx context.Context, ci ChangeInfo, what string)
 		return &FailError{Code: CodeBranchFailed, Msg: "rebasing " + branch + " onto " + base + " failed: " + err.Error() + " — the rebase was aborted; fix git and run `ape change " + what + " " + id + "` again"}
 	}
 	reason := what + ": " + base + " moved, and rebasing " + branch + " onto it conflicts in " + strings.Join(limit(conflicts, 8), ", ") +
-		" — a person rebases it (`git switch " + branch + " && git rebase " + base + "`, resolving those files), or the change is re-planned or abandoned; then `ape change start " + id + "`"
+		" — the orchestrator re-plans: `ape change abandon " + id + " --reason \"rebase conflict with " + strings.Join(limit(conflicts, 8), ", ") + "; replaced by <new-id>\"` and apex-change plans a replacement from " + base + " with those files as the hint; nobody rebases or merges by hand"
 	st := ci.State
 	st.Status = StatusBlocked
 	st.BlockedReason = &reason
@@ -174,7 +174,7 @@ func (p *Project) rebaseOrBlock(ctx context.Context, ci ChangeInfo, what string)
 		return err
 	}
 	return &ConflictError{Code: CodeRebaseConflict, Msg: "change " + id + " does not rebase cleanly onto " + base +
-		" — the rebase was aborted, nothing else was written, and the change is blocked with the conflicting files (a person resolves them)", Conflicts: conflicts}
+		" — the rebase was aborted, nothing else was written, and the change is blocked with the conflicting files (the orchestrator abandons it and has apex-change re-plan it from the current base)", Conflicts: conflicts}
 }
 
 // rebaseOnto rebases the checked-out branch onto base. On a conflict it
