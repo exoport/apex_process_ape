@@ -272,5 +272,9 @@ var DiagnosticCodes = []CodeDoc{
 	{"hooks.altered", 1, "person", "an ape hook in .claude/settings.json has a changed matcher, type, async or timeout: `ape project init` restores it"},
 	{"plugins.config", 1, "person", "_apex/config.yaml marketplaces/plugins are malformed (unknown source, missing repo/url/path, a plugin listed twice)"},
 	{"plugins.drift", 1, "person", "settings.json's extraKnownMarketplaces/enabledPlugins differ from _apex/config.yaml, or a listed plugin is not installed or not at its ref: `ape doctor --fix`"},
+	{"plugin.hooks-or-mcp", 1, "person", "a plugin _apex/config.yaml lists carries hooks (hooks/hooks.json, plugin.json hooks) or MCP servers (.mcp.json, plugin.json mcpServers) its entry does not allow (D59 Q5): a person reviews them and adds allow: [hooks, mcp] to the entry, or drops the plugin"},
+	{"tools.invalid", 1, "person", "_apex/config.yaml tools: is malformed (D59 Q4): an unknown slot (the slots are design and review), an entry that is not {name, skill, when} or misses one, a skill that is not <skill> or <plugin>:<skill>, a name used twice"},
+	{"tools.not-installed", 1, "person", "a skill tools: names is not installed: a plugin skill whose plugin is not listed in plugins: or not installed or has no such skill, or no project or user skill of that name"},
+	{"tools.not-invocable", 1, "person", "a skill tools: names has user-invocable: false, so ape task cannot type it as a slash command: drop the flag, or name another skill"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

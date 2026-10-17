@@ -196,6 +196,10 @@ var findingRules = []findingRule{
 	rule("", "^hook `ape hook .* is altered", "hooks.altered"),
 	rule("", `^settings.json is (not valid JSON|unreadable)`, "settings.invalid-json"),
 	rule("", `^plugins config: `, "plugins.config"),
+	rule("", `^plugin \S+ carries `, "plugin.hooks-or-mcp"),
+	rule("", `^tools config: `, "tools.invalid"),
+	rule("", `^tool \S+: skill \S+ is not installed`, "tools.not-installed"),
+	rule("", `^tool \S+: skill \S+ is not slash-invocable`, "tools.not-invocable"),
 	rule("", `^plugins: `, "plugins.drift"),
 }
 
