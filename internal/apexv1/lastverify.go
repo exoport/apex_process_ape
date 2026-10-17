@@ -10,7 +10,8 @@ import (
 // _apex/state/logs/<id>/last-verify.json (ignored) records it. state.json
 // keeps only a green verify, and a status change's: a red verify of an
 // in-progress change writes nothing there (D5), so the stop hook could not
-// learn from it which checks were red (H10).
+// learn from it which checks were red (H10), nor `ape status` which passed
+// only on a retry (H12).
 type LastVerify struct {
 	SHA string `json:"sha"`
 	At  string `json:"at"`
@@ -22,6 +23,8 @@ type LastVerify struct {
 	// each, as `ape status` lists them ("T1 (exit 1)", "T2 (vacuous: …)").
 	Red     map[string]string `json:"red"`
 	Failing []string          `json:"failing,omitempty"`
+	// Flaky lists the checks green only on a retry (H12).
+	Flaky []string `json:"flaky,omitempty"`
 }
 
 func (p *Project) lastVerifyPath(id string) string {
@@ -37,6 +40,9 @@ func (p *Project) saveLastVerify(id string, st *State, sha string, green bool, r
 		if r.Red() {
 			lv.Red[r.Task] = r.Cmd
 			lv.Failing = append(lv.Failing, r.Task+" ("+r.Outcome()+")")
+		}
+		if r.Flaky {
+			lv.Flaky = append(lv.Flaky, r.Task)
 		}
 	}
 	data, err := json.MarshalIndent(lv, "", "  ")

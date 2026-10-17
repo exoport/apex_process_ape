@@ -34,6 +34,9 @@ type GateRun struct {
 	// Reason and Detail: the gate command was vacuous or unrun (H11).
 	Reason string `json:"reason,omitempty"`
 	Detail string `json:"detail,omitempty"`
+	// Flaky lists what passed only on a retry (H12): the gate command
+	// ("gate-<M>"), scenarios, the regression command.
+	Flaky []string `json:"flaky,omitempty"`
 }
 
 // Green reports a passing gate: its command exited 0, every scenario
@@ -312,6 +315,11 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	}
 	results := p.RunChecks(ctx, filepath.Join(p.LogsDir(), "gate-"+id), "", checks, opt)
 	run.StrayFiles = StrayFiles(append([]CheckResult{gate}, results...))
+	for _, r := range append([]CheckResult{gate}, results...) {
+		if r.Flaky {
+			run.Flaky = append(run.Flaky, r.Task)
+		}
+	}
 	if regressionCmd != "" {
 		change, base := p.milestoneRegressionBaseline(ctx, id, regressionCmd)
 		run.Regression = judgeRegression(&results[len(results)-1], base)

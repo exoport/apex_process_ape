@@ -397,7 +397,10 @@ nothing (_apex/config.yaml checks.vacuous_output; default "no tests to run", "ru
 tests", "Ran 0 tests", "0 passing", "collected 0 items") is red with reason "vacuous"
 (exit -2); a check whose requirement (requires: {NAME: env|cmd}) is missing — it mentions
 $NAME and NAME is unset, or runs NAME and NAME is not on PATH — is not run and is red with
-reason "unrun" (exit -3). JSON results carry "reason" and "detail" for both. Results (sha, exit, seconds, output sha256; kind, capability, requirement, scenario
+reason "unrun" (exit -3). JSON results carry "reason" and "detail" for both.
+Flaky checks (H12): with "retries: <n>" in _apex/config.yaml a red check runs again up
+to n times; a pass on a retry is green, recorded "flaky": true with "tries" (the failed
+runs' output beside its log as <name>.try<k>.log), and listed by `+"`ape status`"+`. Results (sha, exit, seconds, output sha256; kind, capability, requirement, scenario
 for scenario checks) are recorded in state.json; output under _apex/state/logs/<id>/.
 What a check leaves in the tree outside development/ — files it created, tracked files it
 changed — is undone after it and reported (JSON "stray_files"); files that were there

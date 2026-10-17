@@ -54,6 +54,11 @@ type CheckResult struct {
 	// Detail says which phrase or requirement.
 	Reason string `json:"reason,omitempty"`
 	Detail string `json:"detail,omitempty"`
+	// Flaky: red, then green on a retry (H12, retries:); the result is
+	// green. Tries counts the runs when there was more than one; Log is the
+	// last run's, the earlier ones beside it as <name>.try<k>.log.
+	Flaky bool `json:"flaky,omitempty"`
+	Tries int  `json:"tries,omitempty"`
 }
 
 // Red reports a result that fails its run: a non-zero exit that was not

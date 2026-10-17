@@ -141,7 +141,7 @@ func printChecks(w io.Writer, rs []apexv1.CheckResult, tails bool) {
 	greenScenarios := 0
 	for i := range rs {
 		r := &rs[i]
-		if r.Kind == apexv1.KindScenario && r.Exit == 0 {
+		if r.Kind == apexv1.KindScenario && r.Exit == 0 && !r.Flaky {
 			greenScenarios++
 			continue
 		}
@@ -153,6 +153,8 @@ func printChecks(w io.Writer, rs []apexv1.CheckResult, tails bool) {
 			verdict = "RED (" + r.Reason + ")"
 		case r.Exit != 0:
 			verdict = fmt.Sprintf("RED (exit %d)", r.Exit)
+		case r.Flaky:
+			verdict = fmt.Sprintf("green (flaky: %d tries)", r.Tries)
 		}
 		label := r.Task
 		if r.Kind == apexv1.KindScenario {

@@ -95,6 +95,10 @@ unparseable and every command refuses it):
                                      Go durations; defaults 15m per check, 30m for the
                                      regression command, 30m for a Gate: command; a
                                      command's --timeout flag overrides them
+  retries: 1                         a red check runs again up to n times (0–5, default
+                                     0); a pass on a retry is green and recorded flaky:
+                                     true (JSON results[].flaky, tries; listed by ape
+                                     status). Vacuous and unrun checks are not retried
   checks: {vacuous_output: ["no tests to run", …]}
                                      a check that exits 0 but whose output says it ran
                                      nothing is red, reason "vacuous" (exit -2). Default
@@ -300,7 +304,8 @@ func newStatusCmd() *cobra.Command {
   - every change not archived, with its status, blocked reason, red checks from its
     last verify (JSON failing: "T1 (exit 1)", "T2 (vacuous: …)", "S (unrun: $X is unset
     …)" — a red verify of an in-progress change comes from this checkout's
-    _apex/state/logs/<id>/last-verify.json), human-review tasks not yet accepted, and for a started change its red
+    _apex/state/logs/<id>/last-verify.json), the checks that passed only on a retry
+    (JSON flaky; "flaky: T2" in the brief; retries: in _apex/config.yaml), human-review tasks not yet accepted, and for a started change its red
     verifies since it started against limits.attempts (JSON attempts, attempts_cap;
     "(3/5 attempts)"; attempts_total, never reset) — a change the cap blocked shows
     "attempts exceeded" as its reason. The counts are this checkout's

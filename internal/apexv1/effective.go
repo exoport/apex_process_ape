@@ -4,8 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // Check kinds in a run of checks.
@@ -152,18 +156,11 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 		r, ok := done[pc.Cmd]
 		if !ok {
 			logPath := filepath.Join(logDir, pc.logName(prefix))
-			var before treeSnapshot
-			if inGit {
-				before = p.snapshot(ctx)
-			}
 			if missing := unmetRequirement(pc.Cmd, cfg.Requires); missing != "" {
 				r = unrunResult(pc.Cmd, logPath, missing)
+				r.Log = p.Rel(logPath)
 			} else {
-				r = runCheck(ctx, p.Root, pc.Cmd, logPath, timeouts.For(pc.Kind, opt.Timeout), vacuous)
-			}
-			r.Log = p.Rel(logPath)
-			if inGit {
-				r.StrayFiles = p.undoStrays(ctx, before)
+				r = p.runWithRetries(ctx, pc, logPath, timeouts.For(pc.Kind, opt.Timeout), vacuous, int(cfg.Retries), inGit)
 			}
 			done[pc.Cmd] = r
 		}
@@ -173,6 +170,45 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 		out = append(out, r)
 	}
 	return out
+}
+
+// runWithRetries runs one check, and runs a red one again up to retries
+// times (H12): the first green run ends it, flaky when it was not the
+// first. Each run's strays are undone after it; the earlier runs' logs
+// stay beside the last as <name>.try<k>.log.
+func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath string, timeout time.Duration, vacuous []string, retries int, inGit bool) CheckResult {
+	var r CheckResult
+	var strays []string
+	for try := 0; ; try++ {
+		path := logPath
+		if try < retries {
+			// Every run but the last possible one may be kept as a try log:
+			// write it under its own name, rename it after a green run.
+			path = strings.TrimSuffix(logPath, ".log") + ".try" + strconv.Itoa(try+1) + ".log"
+		}
+		var before treeSnapshot
+		if inGit {
+			before = p.snapshot(ctx)
+		}
+		r = runCheck(ctx, p.Root, pc.Cmd, path, timeout, vacuous)
+		if inGit {
+			strays = append(strays, p.undoStrays(ctx, before)...)
+		}
+		retry := r.Exit != 0 && r.Reason == "" && try < retries && ctx.Err() == nil
+		if !retry {
+			if path != logPath {
+				_ = os.Rename(path, logPath)
+			}
+			r.Log = p.Rel(logPath)
+			if try > 0 {
+				r.Tries = try + 1
+				r.Flaky = r.Exit == 0
+			}
+			break
+		}
+	}
+	r.StrayFiles = strays
+	return r
 }
 
 // StrayFiles is the sorted union of the paths checks left and ape undid.

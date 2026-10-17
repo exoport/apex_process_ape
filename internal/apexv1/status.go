@@ -56,6 +56,9 @@ type ChangeStatus struct {
 	// `ape change approve <id> --by <who>`.
 	Lane     string    `json:"lane"`
 	Approved *Approval `json:"approved,omitempty"`
+	// Flaky lists the checks that passed only on a retry at the change's
+	// last verify (H12, retries:): green, but for review to see.
+	Flaky []string `json:"flaky,omitempty"`
 }
 
 // Spend is the cost recorded in the project's run manifests.
@@ -181,7 +184,13 @@ func (p *Project) Status() *StatusReport {
 		// the checkout's last-verify record has it, vacuous and unrun
 		// checks included (H11).
 		if lv := p.currentLastVerify(c.ID, c.State); lv != nil {
-			cs.Failing = lv.Failing
+			cs.Failing, cs.Flaky = lv.Failing, lv.Flaky
+		} else if v := c.State.Verify; v != nil {
+			for i := range v.Results {
+				if v.Results[i].Flaky {
+					cs.Flaky = append(cs.Flaky, v.Results[i].Task)
+				}
+			}
 		}
 		r.Changes = append(r.Changes, cs)
 	}
@@ -384,6 +393,9 @@ groups:
 			}
 			if len(c.PendingHuman) > 0 {
 				line += " — human-review pending: " + strings.Join(c.PendingHuman, ",")
+			}
+			if len(c.Flaky) > 0 {
+				line += " — flaky: " + strings.Join(c.Flaky, ", ")
 			}
 			if c.AttemptsCap > 0 && c.Attempts > 0 {
 				line += fmt.Sprintf(" (%d/%d attempts)", c.Attempts, c.AttemptsCap)

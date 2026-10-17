@@ -152,6 +152,27 @@ func checkKeys(n *yaml.Node, what string, keys ...string) error {
 	return nil
 }
 
+// MaxRetries bounds retries:: a check that needs more is broken, not
+// flaky.
+const MaxRetries = 5
+
+// Retries is retries: (H12) — how many times a red check runs again
+// before it counts as red. A pass on a retry is green and recorded
+// flaky: true, which `ape status` lists and review sees. Default 0.
+// Vacuous and unrun results are not retried: running nothing again runs
+// nothing.
+type Retries int
+
+// UnmarshalYAML validates the count.
+func (r *Retries) UnmarshalYAML(n *yaml.Node) error {
+	var v int
+	if err := n.Decode(&v); err != nil || v < 0 || v > MaxRetries {
+		return fmt.Errorf("retries: %q is not a whole number from 0 to %d", n.Value, MaxRetries)
+	}
+	*r = Retries(v)
+	return nil
+}
+
 // DefaultVacuousOutput are test runners' own words for "ran nothing" on a
 // zero exit (H11) — each checked against the tool that prints it:
 //

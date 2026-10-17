@@ -71,6 +71,9 @@ type Config struct {
 	// Timeouts bound one run of a check, the regression command and a
 	// gate command (H10); a --timeout flag wins.
 	Timeouts Timeouts `yaml:"timeouts"`
+	// Retries is how many times a red check is run again (H12, default
+	// 0); a pass on a retry is green and recorded flaky.
+	Retries Retries `yaml:"retries"`
 	// Checks and Requires keep a check from passing by running nothing
 	// (H11): output that says it ran nothing, and a requirement the
 	// machine lacks.
