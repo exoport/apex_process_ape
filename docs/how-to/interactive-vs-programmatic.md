@@ -40,7 +40,7 @@ If your pipeline YAML doesn't mention `commit:` at any level, you get **no commi
   ```
 - Or keep per-step commits by setting `commit: true` on each step (the PLAN-4 shape; still works).
 
-See [pipeline-yaml-schema.md](../reference/pipeline-yaml-schema.md) for the full precedence rules.
+See pipeline-yaml-schema.md for the full precedence rules.
 
 ## Mutual-exclusion errors
 
@@ -53,5 +53,5 @@ These exit with code 2 and a one-line error to stderr.
 
 - [why-pty-only.md](../explanation/why-pty-only.md) — why PTY is the only exec mode.
 - [exec-modes.md](../explanation/exec-modes.md) — the per-stage interactive runtime in depth.
-- [invocation-matrix.md](../reference/invocation-matrix.md)
-- [pipeline-yaml-schema.md](../reference/pipeline-yaml-schema.md)
+- invocation-matrix.md
+- pipeline-yaml-schema.md

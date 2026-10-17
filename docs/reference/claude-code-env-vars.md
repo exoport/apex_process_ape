@@ -125,7 +125,7 @@ The same scrub applies to the inherited-stdio spawn in `ape chat`.
 
 The inherited `CLAUDE_CODE_EFFORT_LEVEL` is always stripped first. What ape
 puts back depends on where the effort comes from (see
-[Pipeline spec § Reasoning effort](pipeline-spec.md#reasoning-effort)):
+Pipeline spec § Reasoning effort):
 
 - **An explicit effort** (`step.effort ?? stage.effort ?? pipeline.effort ?? --effort`
   on `ape pipeline` / `ape task` / `ape change`, or `--effort` on `ape prompt`)

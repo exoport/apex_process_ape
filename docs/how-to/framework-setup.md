@@ -170,6 +170,6 @@ You ran `setup` non-interactively (no TTY, or `--output-format json|yaml`) witho
 ## Related
 
 - [How to update the framework](framework-update.md) — refresh-only command, used after the initial setup.
-- [Pipeline spec reference](../reference/pipeline-spec.md) — the YAML shape of `_apex/pipelines/*.yaml`.
+- Pipeline spec reference — the YAML shape of `_apex/pipelines/*.yaml`.
 - [framework.yaml reference](../reference/framework-yaml.md) — the metadata file written on every install.
-- [Why project-local pipelines](../explanation/why-project-local-pipelines.md) — design rationale.
+- Why project-local pipelines — design rationale.

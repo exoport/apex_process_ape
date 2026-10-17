@@ -32,9 +32,9 @@ func resolveMaxDuration(d time.Duration) time.Duration {
 	return d
 }
 
-// scriptRunner implements the apescript orchestration hooks (RunPipeline /
-// RunTask / RunPrompt) by driving the exact same interactive runners the
-// `ape pipeline` / `ape task` / `ape prompt` commands use. It carries the
+// scriptRunner implements the apescript orchestration hooks (RunTask /
+// RunPrompt; RunPipeline only refuses) by driving the exact same
+// interactive runners the `ape task` / `ape prompt` commands use. It carries the
 // per-invocation defaults (project root, quiet, NATS config) and accumulates
 // the total cost of every run a script launches so `--output-format` can
 // report it.
@@ -140,27 +140,15 @@ func commitContractError(c commitowners.Result) error {
 	return fmt.Errorf("%s broke its commit-ownership declaration: %s", c.Skill, strings.Join(lines, "; "))
 }
 
-func (r *scriptRunner) runPipeline(ctx context.Context, o apescript.PipelineOpts) (apescript.RunResult, error) {
-	root := r.resolveRoot(o.Cwd)
-	spec, err := pipeline.LoadSpec(o.Name, root)
-	if err != nil {
-		return apescript.RunResult{}, err
-	}
-	warnSpecModels(spec)
-	cfg := r.runCfg("", eventing.KindPipeline)
-	cfg.prompt = o.Prompt
-	cfg.fromStage = o.From
-	cfg.noCommit = o.NoCommit
-	cfg.maxDuration = resolveMaxDuration(o.MaxDuration)
+// errPipelineRetired is apescript.RunPipeline's answer: `ape pipeline` was
+// an APEX v0 command, retired with the rest of v0's ceremony. The hook
+// stays wired, so a script that still calls it gets this rather than
+// apescript.ErrNoRuntime, which would read as "not under ape script".
+var errPipelineRetired = errors.New("apescript.RunPipeline: `ape pipeline` was retired with APEX v0 — " +
+	"run the skill with apescript.RunTask, or run this script with the project's pinned v0 ape (.bingo)")
 
-	headBefore := gitHeadFull(ctx, root)
-	start := time.Now()
-	runErr := runWithInteractive(ctx, spec, root, cfg)
-	dur := time.Since(start)
-
-	runDir := pipeline.ResolveLatestRunDir(root, spec.Name, "")
-	res := r.manifestToResult(ctx, root, runDir, headBefore, dur)
-	return res, runErr
+func (r *scriptRunner) runPipeline(_ context.Context, _ apescript.PipelineOpts) (apescript.RunResult, error) {
+	return apescript.RunResult{}, errPipelineRetired
 }
 
 func (r *scriptRunner) runPrompt(ctx context.Context, o apescript.PromptOpts) (apescript.RunResult, error) {

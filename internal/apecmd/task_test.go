@@ -296,17 +296,6 @@ func TestTaskCommandFlagSurface(t *testing.T) {
 	require.Equal(t, sessiondriver.DefaultMaxDuration.String(), md.DefValue)
 }
 
-// TestPipelineCommandTimeoutFlags asserts PLAN-19 D3 closed the pipeline
-// flag gap: --idle-timeout is registered (was missing) and --max-duration
-// ships with the 3h default.
-func TestPipelineCommandTimeoutFlags(t *testing.T) {
-	cmd := newPipelineCmd()
-	require.NotNil(t, cmd.Flags().Lookup("idle-timeout"), "pipeline must expose --idle-timeout (D3)")
-	md := cmd.Flags().Lookup("max-duration")
-	require.NotNil(t, md, "pipeline must expose --max-duration (D3)")
-	require.Equal(t, sessiondriver.DefaultMaxDuration.String(), md.DefValue)
-}
-
 // TestPromptCommandTimeoutFlags asserts ape prompt carries the 3h
 // --max-duration default alongside --idle-timeout (D3).
 func TestPromptCommandTimeoutFlags(t *testing.T) {

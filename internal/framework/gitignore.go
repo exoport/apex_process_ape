@@ -21,8 +21,8 @@ import (
 // then sits untracked beside the tracker waiting for a `git add -A`. One
 // reached a commit in ape's own repository exactly that way.
 //
-// `ape doctor`'s sprint.lock_ignored row reports the state; setup and
-// update fix it, so a project is born ignoring the artifact rather than
+// `ape sprint` was retired with APEX v0, but a v0 project's pinned v0 ape
+// still takes the lock; setup and update keep ignoring it, so a project is born ignoring the artifact rather than
 // finding out after the first stray commit.
 
 // GitignoreLockPattern is the entry written into the project .gitignore.

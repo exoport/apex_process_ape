@@ -95,6 +95,10 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 				}
 				dir = wd
 			}
+			// A v0 project is lifted, not initialised beside its v0 tree.
+			if apexv1.IsV0Project(apexv1.FindRoot(dir)) {
+				return v1Fail(cmd, &f, apexv1.V0ProjectError(), nil)
+			}
 			res, err := apexv1.Init(cmd.Context(), dir, brownfield)
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
@@ -292,6 +296,9 @@ Exit codes: 0 ok · 2 usage.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := v1Project(&f)
 			if err != nil {
+				return err
+			}
+			if err := v1RefuseV0(cmd, &f, p); err != nil {
 				return err
 			}
 			r := p.Status()

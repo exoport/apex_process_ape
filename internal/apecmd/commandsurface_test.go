@@ -42,7 +42,7 @@ func TestCommandSurface_AllProvided(t *testing.T) {
 	t.Parallel()
 	res := runCommandSurface(t, commandSurfaceProject(t, `
 required_commands:
-  - ape story fields
+  - ape change start
   - ape doctor
   - ape framework update
 `))
@@ -56,7 +56,7 @@ func TestCommandSurface_ReportsEveryMissingCommand(t *testing.T) {
 	t.Parallel()
 	res := runCommandSurface(t, commandSurfaceProject(t, `
 required_commands:
-  - ape story fields
+  - ape change start
   - ape totally bogus
   - ape doctor
   - ape another missing
@@ -75,10 +75,10 @@ func TestCommandSurface_PartialMatchIsMissing(t *testing.T) {
 	t.Parallel()
 	res := runCommandSurface(t, commandSurfaceProject(t, `
 required_commands:
-  - ape story definitelynotasubcommand
+  - ape change definitelynotasubcommand
 `))
 	require.Equal(t, StatusFail, res.Status,
-		"`ape story` exists but the subcommand does not — that is missing, not present")
+		"`ape change` exists but the subcommand does not — that is missing, not present")
 	require.Contains(t, res.Message, "definitelynotasubcommand")
 }
 
@@ -139,21 +139,16 @@ func TestCommandPath_DropsTheBinaryName(t *testing.T) {
 
 // The gate this check exists for. The framework's real shipped manifest is
 // the authority on what the surface is; this pins that ape resolves the
-// SHAPES it uses — multi-level paths, bare top-level commands, and the
-// plural registry aliases whose whole point is that shipped prose names
-// both spellings.
+// SHAPES it uses — multi-level paths and bare top-level commands.
 func TestCommandSurface_ResolvesTheShippedManifestShapes(t *testing.T) {
 	t.Parallel()
 	for _, entry := range []string{
-		"ape memory index",    // two levels
+		"ape change start",    // two levels
 		"ape doctor",          // one level
 		"ape framework setup", // nested group
 		"ape costs run",       // nested group
-		"ape adr update",      // singular family
-		"ape adrs update",     // plural alias — both must answer
-		"ape capabilities update",
-		"ape deferred migrate",
-		"ape sprint check",
+		"ape project lift",
+		"ape milestone gate",
 	} {
 		require.Empty(t, missingCommands([]string{entry}),
 			"the framework ships %q in required_commands and this binary must provide it", entry)
@@ -162,7 +157,8 @@ func TestCommandSurface_ResolvesTheShippedManifestShapes(t *testing.T) {
 
 // Deliberately absent from the manifest, and it must stay that way:
 // apex-orchestrator/SKILL.md states "There is no `ape pipeline dev` — never
-// invent one." Pinned so nobody adds it to satisfy a check.
+// invent one." Pinned so nobody adds it to satisfy a check (`ape pipeline`
+// itself was retired with APEX v0).
 func TestCommandSurface_NoPipelineDev(t *testing.T) {
 	t.Parallel()
 	require.NotEmpty(t, missingCommands([]string{"ape pipeline dev"}),
@@ -184,6 +180,13 @@ func TestCommandSurface_AgainstRealManifest(t *testing.T) {
 
 	root := commandSurfaceProject(t, string(body))
 	res := runCommandSurface(t, root)
+	// An APEX v1 framework ships the one-key manifest (min_ape_version, D47
+	// Q1): no command list to resolve, only the floor, which must parse.
+	if manifest, err := framework.LoadApeCommands(root); err == nil && manifest != nil &&
+		len(manifest.Required) == 0 && manifest.MinApeVersion != "" {
+		t.Logf("v1 manifest: no required_commands, min_ape_version %s", manifest.MinApeVersion)
+		return
+	}
 	require.Equal(t, StatusOK, res.Status,
 		"this binary does not provide everything the framework requires: %s", res.Message)
 }

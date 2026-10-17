@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/atomicfile"
 	"github.com/exoport/apex_process_ape/internal/claudeprobe"
 	"github.com/exoport/apex_process_ape/internal/commitowners"
@@ -191,6 +192,10 @@ ownership (the run itself may have succeeded).`,
 					return fmt.Errorf("cannot determine working directory: %w", err)
 				}
 				projectRoot = wd
+			}
+			// Backlog 38: a v0 project runs its skills on its pinned v0 ape.
+			if apexv1.IsV0Project(apexv1.FindRoot(projectRoot)) {
+				return usageErr(errors.New(apexv1.V0ProjectMsg))
 			}
 			if detachFlag {
 				return startDetached(cmd, projectRoot)

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/commitowners"
-	"github.com/exoport/apex_process_ape/internal/story"
 	"github.com/stretchr/testify/require"
 )
 
@@ -85,11 +84,5 @@ func TestSummaryLinesCannotBeQuotedWithoutTheirSkips(t *testing.T) {
 	})
 	t.Run("task: no contract at all", func(t *testing.T) {
 		require.Empty(t, contractSkipSuffix(nil))
-	})
-	t.Run("story verify: classes skipped", func(t *testing.T) {
-		require.Empty(t, skipSuffix(nil))
-		require.Contains(t,
-			skipSuffix([]story.SkippedCheck{{Check: "story.adr_unresolved", Reason: "x"}}),
-			"SKIPPED")
 	})
 }

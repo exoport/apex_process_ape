@@ -14,13 +14,11 @@ import (
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
 	"github.com/exoport/apex_process_ape/internal/change"
 	"github.com/exoport/apex_process_ape/internal/framework"
-	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/registry"
 	"github.com/exoport/apex_process_ape/internal/sandbox"
 	"github.com/exoport/apex_process_ape/internal/sprint"
 	"github.com/exoport/apex_process_ape/internal/story"
 	"github.com/exoport/apex_process_ape/internal/workspace"
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
@@ -408,18 +406,6 @@ func TestContract_SandboxCapacityStillReportsUnknownMemory(t *testing.T) {
 
 // --- helpers -------------------------------------------------------------
 
-func runCmdAllowError(t *testing.T, cmd *cobra.Command, args ...string) string {
-	t.Helper()
-	var buf bytes.Buffer
-	cmd.SetOut(&buf)
-	cmd.SetErr(&buf)
-	cmd.SetArgs(args)
-	if err := cmd.Execute(); err != nil {
-		buf.WriteString("\nerror: " + err.Error())
-	}
-	return buf.String()
-}
-
 func gitInit(t *testing.T, dir string) {
 	t.Helper()
 	for _, args := range [][]string{
@@ -633,29 +619,5 @@ func TestContract_LiveApexTreeIsFullyAccountedFor(t *testing.T) {
 			"A project set up by `ape framework setup` will not have it and nothing will say so — "+
 			"a table nobody installed is indistinguishable from a framework that never shipped one.\n"+
 			"Add it to framework.SimpleTables(), or decline it by name here with the reason.", name)
-	}
-}
-
-// TestContract_LivePipelinesLoad loads every pipeline the framework ships
-// with this binary's loader. Each must parse, pass the extension-gate
-// validation, and declare no key this ape would ignore.
-//
-// It is the check for a spec change in either repo. A key the framework
-// adds before ape reads it would otherwise be a warning nobody sees until
-// a run, and a mapping inside `requires.files` made a 0.7.0 ape refuse
-// `epics` outright.
-func TestContract_LivePipelinesLoad(t *testing.T) {
-	root := frameworkSubtreeRoot(t)
-	names := pipeline.AvailablePipelines(root)
-	require.NotEmpty(t, names, "no pipelines under %s", pipeline.PipelinesDir(root))
-	for _, name := range names {
-		spec, err := pipeline.LoadSpec(name, root)
-		if err != nil {
-			t.Errorf("pipeline %s: %v", name, err)
-			continue
-		}
-		for _, k := range spec.UnknownKeyWarnings() {
-			t.Errorf("pipeline %s: %s: key %q (line %d) is not one this ape reads", name, k.Location, k.Key, k.Line)
-		}
 	}
 }

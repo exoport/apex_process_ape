@@ -56,10 +56,23 @@ func v1Project(f *v1Flags) (*apexv1.Project, error) {
 	return p, nil
 }
 
-// v1RequireInit refuses a command that needs the development folder.
+// v1RequireInit refuses a command that needs the development folder, and
+// any v1 command in an APEX v0 project (backlog 38).
 func v1RequireInit(cmd *cobra.Command, f *v1Flags, p *apexv1.Project) error {
+	if err := v1RefuseV0(cmd, f, p); err != nil {
+		return err
+	}
 	if !p.IsV1() {
 		return v1Fail(cmd, f, &apexv1.UsageError{Code: "project.not-initialized", Msg: fmt.Sprintf("%s has no %s/ — run `ape project init` first", p.Root, p.DevRel)}, nil)
+	}
+	return nil
+}
+
+// v1RefuseV0 refuses a v1 command in an APEX v0 project: its pinned v0 ape
+// runs it, or the project is lifted first.
+func v1RefuseV0(cmd *cobra.Command, f *v1Flags, p *apexv1.Project) error {
+	if apexv1.IsV0Project(p.Root) {
+		return v1Fail(cmd, f, apexv1.V0ProjectError(), nil)
 	}
 	return nil
 }

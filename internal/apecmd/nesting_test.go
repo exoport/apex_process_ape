@@ -22,11 +22,10 @@ func TestRefuseNested_EverySessionStartingCommand(t *testing.T) {
 		cmd  func() *cobra.Command
 		args []string
 	}{
-		"pipeline": {newPipelineCmd, []string{"design", "--cwd", root}},
-		"task":     {newTaskCmd, []string{"apex-dev-story", "--cwd", root}},
-		"prompt":   {newPromptCmd, []string{"hello", "--cwd", root}},
-		"chat":     {newChatCmd, []string{"--cwd", root}},
-		"script":   {newScriptCmd, []string{"run.star", "--cwd", root}},
+		"task":   {newTaskCmd, []string{"apex-dev-story", "--cwd", root}},
+		"prompt": {newPromptCmd, []string{"hello", "--cwd", root}},
+		"chat":   {newChatCmd, []string{"--cwd", root}},
+		"script": {newScriptCmd, []string{"run.star", "--cwd", root}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cmd := run.cmd()

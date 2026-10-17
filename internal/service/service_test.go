@@ -139,7 +139,7 @@ func TestRejectionCodes(t *testing.T) {
 		want     string
 	}{
 		{"missing project_root", "pipeline.run", RunRequest{Pipeline: "p"}, CodeValidation},
-		{"missing pipeline name", "pipeline.run", RunRequest{ProjectRoot: root}, CodeValidation},
+		{"pipeline retired", "pipeline.run", RunRequest{ProjectRoot: root, Pipeline: "p"}, CodeValidation},
 		{"missing skill", "task.run", RunRequest{ProjectRoot: root}, CodeValidation},
 		{"project not allowed", "pipeline.run", RunRequest{ProjectRoot: "/not/allowed", Pipeline: "p"}, CodeProjectNotAllowed},
 		{"prompt missing selector", "prompt.run", RunRequest{ProjectRoot: root}, CodeValidation},

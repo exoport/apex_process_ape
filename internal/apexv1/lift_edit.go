@@ -190,8 +190,6 @@ func editComments(rel, src string, lang liftLang, vocab *liftVocab, adr *adrRewr
 	return res, nil
 }
 
-func isSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
-
 // identWordRe is an identifier-shaped word.
 var identWordRe = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
 

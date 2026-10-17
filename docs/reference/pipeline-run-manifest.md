@@ -1,11 +1,13 @@
-# Pipeline run manifest
+# Run manifest
 
-Every `ape pipeline <name>` invocation writes a structured on-disk record of the run. The record lives under the project root so it survives the TUI closing, supports `--no-tui` and eval-harness invocations identically, and gives downstream tooling (notably the [apex_process_framework_eval](https://github.com/diegosz/apex_process_framework_eval) consumer) a stable contract.
+Every `ape task <skill>` run writes a structured on-disk record of the run: a one-stage, one-step run in the shape below. (`ape pipeline <name>`, an APEX v0 command retired in ape v1, wrote the same record with one stage per pipeline stage; its runs stay readable.) The record lives under the project root and gives downstream tooling (notably the [apex_process_framework_eval](https://github.com/diegosz/apex_process_framework_eval) consumer) a stable contract.
 
 ## Layout
 
+In an APEX v1 project the runs live under `_apex/state/runs/` (git-ignored, out of a model's reach): `_apex/state/runs/tasks/<skill>/<run_id>/`. Elsewhere, under the output folder:
+
 ```
-<project_root>/_output/ape/pipelines/<pipeline_name>/<run_id>/
+<project_root>/_output/ape/tasks/<skill>/<run_id>/     (an older ape's pipelines: _output/ape/pipelines/<pipeline_name>/<run_id>/)
   manifest.yaml             # canonical schema (this document)
   pipeline-report.md        # human-readable summary rendered from the manifest
   stages/
@@ -16,7 +18,7 @@ Every `ape pipeline <name>` invocation writes a structured on-disk record of the
     02-<stage_name>/...
 ```
 
-A symlink at `<pipeline_name>/latest` points at the most recent `<run_id>`. On filesystems that don't support symlinks the symlink is best-effort.
+A symlink at `<skill>/latest` (`<pipeline_name>/latest`) points at the most recent `<run_id>`. On filesystems that don't support symlinks the symlink is best-effort.
 
 `<run_id>` is `YYYYMMDD-HHMMSS-<7-char-hash>` (UTC). The hash mixes the run start time, the pipeline name, and the project root, so concurrent invocations against the same project do not collide.
 
@@ -36,7 +38,7 @@ Since v2, additional fields have been added **without bumping the schema version
 - `claude_version` — the resolved `claude --version` at run start (best-effort).
 - `file_read_max_output_tokens` (ape v0.5.0+) — the per-Read token cap ape pinned on the session (`CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS`, 30000), so a run's evidence says how much of a file one Read could show. Set in the spawn environment and in ape's `--settings` `env`, which outranks project, local and user settings; only an enterprise-managed setting could still move it. `prompt.yaml` records the same field.
 - per-step `telemetry_note` — a diagnosability breadcrumb explaining why a numeric field is zero or approximate. Two causes: the transcript was unavailable / had no complete assistant turn (everything zero), or a model had no price in the table (tokens and turns correct, `cost_usd` a lower bound). More than one cause is joined with `; `.
-- per-step `model_declared` (ape v0.0.68+) — present **only** when the spec's resolved `model:` for that step is not the one the step ran on. A stage is one `claude` process launched with its first step's model and ape sends no `/model`, so a later step's `model:` cannot take effect. `model` now records what ran; `model_declared` records what was asked for. Absent on every step where the two agree, so its presence is itself the signal. Older manifests carry the *declared* value in `model` with no way to tell whether it was applied — see [pipeline-yaml-schema.md](pipeline-yaml-schema.md#model-resolves-per-step-but-applies-per-stage).
+- per-step `model_declared` (ape v0.0.68+) — present **only** when the spec's resolved `model:` for that step is not the one the step ran on. A stage is one `claude` process launched with its first step's model and ape sends no `/model`, so a later step's `model:` cannot take effect. `model` now records what ran; `model_declared` records what was asked for. Absent on every step where the two agree, so its presence is itself the signal. Older manifests carry the *declared* value in `model` with no way to tell whether it was applied — see pipeline-yaml-schema.md.
 - per-step `effort`, `effort_declared` and `effort_source` (ape v0.2.0+). `effort` is what the step's launch model actually ran at, resolved. It used to be the step's own `effort:` field, so a step inheriting from its stage, the pipeline, `--effort` or the default recorded nothing, and a later step's declaration read as though it had applied. `effort_declared` appears only when the step asked for a different effort, which a running session cannot switch to. `effort_source` names the rule: `step`, `stage`, `pipeline`, `flag` (`--effort`), `table` (`_apex/effort-defaults.yaml`) or `legacy-default` (no table, so `xhigh` process-wide). An eval report reads it to tell a run that got the framework's table from one that did not. Under `table`, a sub-agent on another model family runs at its own family's row, and the transcript records the effort of each request. With no `--model`, `effort` is the row of the model the step's main session actually ran on, taken from the step's own telemetry.
 - per-step `context_window` and per-`model_usage`-entry `context_window` (ape v0.0.60+) — the model's usable context in tokens, from ape's maintained table. **Omitted when unknown**, never defaulted. See [reading the `context_window` fields](#reading-the-context_window-fields) — there are two of them and they can legitimately disagree.
 - per-step `contract` (ape v0.0.60+) — the terminal-contract verdict: `present`, `missing`, or `no-transcript`. **Omitted** when the step's skill declares no contract in the framework's `_apex/terminal-contracts.csv`, so the field is present exactly when the skill was enrolled. See [reading the `contract` field](#reading-the-contract-field) before using it as a quality metric — it measures TEXT, not work.
@@ -289,7 +291,7 @@ floor, so a machine whose clock is behind cannot stamp a record backwards.
 The two can therefore disagree, and when they do the disagreement is the
 point. Empty when the run had no project to issue against.
 
-See [work with project data](../how-to/work-with-project-data.md) for the
+See work with project data for the
 floor's persistence and its fresh-clone seed.
 
 ### Forward compatibility

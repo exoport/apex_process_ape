@@ -13,11 +13,6 @@ import (
 	"golang.org/x/term"
 )
 
-const (
-	cmdUseList   = "list"
-	keyConflicts = "conflicts"
-)
-
 // rootShell is ape's root command WITHOUT its subcommands.
 //
 // Split out so newRootCmd can build a private tree from the same literal
@@ -27,18 +22,24 @@ func rootShell() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ape",
 		Short: "APE — APEX Process Engine CLI",
-		Long: `ape runs APEX framework work against your project through an
-interactive Claude Code REPL.
+		Long: `ape runs APEX v1 work against your project through an interactive
+Claude Code REPL.
 
 Common commands:
-  ape pipeline <name>   Run a multi-stage pipeline (design, governance, epics).
-  ape task <skill>      Run a single framework skill without a pipeline YAML.
+  ape project init      Make this repository an APEX v1 project.
+  ape status            Where the project stands: milestones, changes, runs.
+  ape change <verb>     The unit of change: new, approve, start, verify, archive.
+  ape task <skill>      Run a single framework skill in a Claude session.
   ape chat              Open an interactive Claude session in the project.
   ape costs             Show this project's Claude cost rollup.
 
-Also: framework setup/update, doctor, sessions, planning, trait/pattern/adr
-inspection. Every claude invocation runs in an in-process PTY — there is no
-"claude -p" programmatic path.`,
+Also: milestone, decision, hook, framework setup/update, doctor, sessions.
+Every claude invocation runs in an in-process PTY — there is no "claude -p"
+programmatic path.
+
+The APEX v0 commands (pipeline, story, sprint, adr, registry, …) are retired:
+a v0 project keeps the v0 ape its .bingo pins, until ` + "`ape framework update`" + `
+to v1 lifts it (` + "`ape project lift`" + `).`,
 		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 			if !shouldCheckForUpdates(cmd, term.IsTerminal(int(os.Stderr.Fd()))) {
 				return
@@ -83,25 +84,9 @@ func rootSubcommands() []*cobra.Command {
 
 	subs := []*cobra.Command{
 		newVersionCmd(),
-		newBootstrapCmd(),
 		newConfigCmd(),
-		newTraitCmd(),
-		newPatternCmd(),
-		newADRCmd(),
-		newFeatureCmd(),
-		newCapabilityCmd(),
-		newRegistryCmd(),
-		newMemoryCmd(),
-		newContextCmd(),
-		newStoryCmd(),
-		newSprintCmd(),
-		newReleaseCmd(),
-		newDeferredCmd(),
-		newDocCmd(),
-		newSyncCmd(),
 		newUpdateCmd(),
 		newRollbackCmd(),
-		newPipelineCmd(),
 		newTaskCmd(),
 		newRunCmd(),
 		// APEX v1: the unit-of-change commands. `ape change` replaced the
@@ -112,10 +97,8 @@ func rootSubcommands() []*cobra.Command {
 		newChangeCmd(),
 		newDecisionCmd(),
 		newHookCmd(),
-		newGovernanceCmd(),
 		newPromptCmd(),
 		newScriptCmd(),
-		newPlanningCmd(),
 		newFrameworkCmd(),
 		newChatCmd(),
 		newMCPBridgeCmd(),

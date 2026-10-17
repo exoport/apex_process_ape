@@ -163,7 +163,6 @@ var allChecks = []doctorCheck{
 	{Name: "registry.drift", Run: checkRegistryDrift},
 	{Name: "story.frontmatter", Run: checkStoryFrontmatter},
 	{Name: "sprint.divergence", Run: checkSprintDivergence},
-	{Name: "sprint.lock_ignored", Run: checkSprintLockIgnored},
 	{Name: "output.ape_ignored", Run: checkOutputApeIgnored},
 	{Name: "memory.size", Required: true, Run: checkMemorySize},
 	{Name: "migration.pending", Run: checkMigrationPending},

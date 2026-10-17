@@ -96,7 +96,7 @@ func runProjectMigrations(ctx context.Context, w io.Writer, projectRoot string) 
 		fmt.Fprintf(w,
 			"migration: SKIPPED — these paths have uncommitted changes, so `git status` could not\n"+
 				"           tell ape's work from yours: %v\n"+
-				"           Commit or stash them, then run `ape deferred migrate`.\n", dirty)
+				"           Commit or stash them, then run `ape framework update` again.\n", dirty)
 		return nil
 	}
 

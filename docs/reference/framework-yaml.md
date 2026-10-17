@@ -146,4 +146,4 @@ Tools that read `framework.yaml` should rely on:
 ## Related
 
 - [How to install the framework](../how-to/framework-update.md) — generates this file.
-- [Pipeline spec reference](pipeline-spec.md) — the YAML shape of the files listed under `sources.pipelines.paths`.
+- Pipeline spec reference — the YAML shape of the files listed under `sources.pipelines.paths`.

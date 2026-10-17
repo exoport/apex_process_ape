@@ -3,11 +3,8 @@ package apecmd
 import (
 	"bytes"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,39 +32,6 @@ func TestReport_PrintsWhatNoCommandPrinted(t *testing.T) {
 			var stderr bytes.Buffer
 			require.Equal(t, tc.code, Report(tc.err, &stderr))
 			require.Equal(t, tc.stderr, stderr.String())
-		})
-	}
-}
-
-// The paths measured silent on the pre-fix binary — exit 2, empty stderr —
-// through the real commands and Report, the same route main takes.
-func TestReport_TheMeasuredSilentPathsNowSayWhy(t *testing.T) {
-	root := t.TempDir()
-	require.NoError(t, os.CopyFS(root, os.DirFS(filepath.Join("..", "..", "testdata", "apexproject"))))
-
-	for _, tc := range []struct {
-		name string
-		cmd  func() *cobra.Command
-		args []string
-		want string
-	}{
-		{"memory show, an ordinal the file does not have", newMemoryShowCmd, []string{"999", "--cwd", root}, "Error: "},
-		{"release status, an unknown slice", newReleaseStatusCmd, []string{"--slice", "nope", "--cwd", root}, "Error: "},
-		{"story fields, no --select", newStoryFieldsCmd, []string{"--cwd", root}, "Error: "},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cmd := tc.cmd()
-			cmd.SetOut(&bytes.Buffer{})
-			cmd.SetErr(&bytes.Buffer{})
-			cmd.SetArgs(tc.args)
-			err := cmd.Execute()
-			require.Error(t, err)
-
-			var stderr bytes.Buffer
-			code := Report(err, &stderr)
-			require.NotEqual(t, ExitOK, code)
-			require.Contains(t, stderr.String(), tc.want,
-				"exit %d with nothing on stderr is the defect: %v", code, err)
 		})
 	}
 }

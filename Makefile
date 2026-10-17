@@ -215,9 +215,10 @@ check-hooks:  ## Seed a throwaway project with one real Claude session, then jud
 	@# TestParity_* gates in v0.0.55: a skip is not a pass, and a gate that
 	@# can only skip reads as one.
 	@#
-	@# So it now produces its own corpus: copies testdata/apexproject to a temp
-	@# dir, drives ONE unattended `ape prompt` session, and judges the runlog
-	@# that session wrote. Reproducible on any machine with claude + auth, no
+	@# So it now produces its own corpus: copies the APEX v1 fixture
+	@# testdata/apexv1project to a temp dir (a git repo, committed as `apex:
+	@# project init`), drives ONE unattended `ape prompt` session, and judges
+	@# the runlog that session wrote (under the copy's _apex/state/runs/). Reproducible on any machine with claude + auth, no
 	@# pre-existing project required, and it always returns a verdict.
 	@#
 	@# The observational read did NOT go away — it is `ape doctor --only
@@ -240,15 +241,17 @@ check-hooks:  ## Seed a throwaway project with one real Claude session, then jud
 #   APEX_FRAMEWORK_REPO  a CHECKOUT of apex_process_framework — the framework's
 #                        own source. Unset means the checkout gates cannot run;
 #                        they report that rather than passing.
-#   APEX_PROJECT         a project with the framework INSTALLED — one carrying
-#                        _apex/ape-commands.yaml. Used for the installed-command-
-#                        surface half, which is the manifest as a skill actually
-#                        meets it at run time.
+#   APEX_PROJECT         an APEX v1 project with the framework INSTALLED — one
+#                        carrying _apex/ape-commands.yaml. Used for the installed
+#                        half (the ape floor, min_ape_version, and any command
+#                        list), which is the manifest as a skill actually meets it
+#                        at run time.
 #
-#                        The default is this repo, and THIS REPO IS NOT SUCH A
-#                        PROJECT: its _apex/ holds a README and nothing else. So
-#                        the default skips, loudly, and the half is verified only
-#                        when you point it somewhere real. It is also VERSIONED —
+#                        The default is the v1 fixture testdata/apexv1project:
+#                        the layout `ape project init` makes, but NOT an install
+#                        (it carries no _apex/ape-commands.yaml). So the default
+#                        skips, loudly, and the half is verified only when you
+#                        point it at a real install. It is also VERSIONED —
 #                        a project installed from an older framework verifies the
 #                        older contract, which is a stale gate wearing a green
 #                        result. v0.15.0 declares 82 required commands, v0.16.0
@@ -258,7 +261,7 @@ check-hooks:  ## Seed a throwaway project with one real Claude session, then jud
 # project at all (it now seeds its own runlog). The name then described
 # nothing it did, so it follows the one gate that still uses it.
 APEX_FRAMEWORK_REPO ?=
-APEX_PROJECT ?= .
+APEX_PROJECT ?= testdata/apexv1project
 
 # HOOK_PROJECT is gone. Without this guard, a stale `make check-framework
 # HOOK_PROJECT=~/proj` would silently ignore the flag and gate the default `.`
@@ -288,9 +291,6 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	@#     fork — and it fires on a dependency bump rather than months later. The
 	@#     fork sat frozen at v0.2.1 through a v0.3.0 release with nothing on
 	@#     either side reporting it.
-	@#   TestContract_LivePipelinesLoad  every pipeline the framework ships loads
-	@#     with this binary — extension gates valid, no key this ape ignores. A
-	@#     mapping inside requires.files once made an older ape refuse `epics`.
 	@#
 	@# The eight TestParity_* gates were removed in v0.0.55. They ran the ten
 	@# retired Python scripts side by side with the commands replacing them, so
@@ -325,14 +325,17 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	@# a framework INSTALL — the manifest as a project actually received it,
 	@# which is what a skill meets at run time.
 	@#
-	@# framework.output_styles rides here for the same reason as the contract
-	@# table: both are framework-owned files whose ABSENCE is silent, and the
-	@# install is the only place to see whether one arrived. Under --strict it
-	@# reports Info (not Warn) when the table is absent, so a project on a
-	@# framework that predates it stays green — version skew, not a failure —
-	@# while a table that is present and unusable fails the gate.
+	@# The terminal-contracts table is APEX v0's and is not checked in a v1
+	@# project (a v1 manifest declares only min_ape_version, which a dev build
+	@# cannot be compared with, so framework.ape_version is left to doctor).
+	@# framework.output_styles rides here because it is a framework-owned file
+	@# whose ABSENCE is silent, and the install is the only place to see
+	@# whether one arrived. Under --strict it reports Info (not Warn) when the
+	@# table is absent, so a project on a framework that predates it stays
+	@# green — version skew, not a failure — while a table that is present
+	@# and unusable fails the gate.
 	@# Guarded on the FILE the check reads, not on the directory. `-d _apex`
-	@# is true of this repo — it holds a README and nothing else — so the
+	@# is true of this repo and of the v1 fixture — neither is an install — so the
 	@# guard passed, the doctor ran, both checks reported "not installed",
 	@# and the gate printed "0 fail" while verifying nothing. That is the
 	@# skip-looks-like-a-pass shape this whole target exists to refuse, and
@@ -340,7 +343,7 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	@if [ -f "$(APEX_PROJECT)/_apex/ape-commands.yaml" ]; then \
 		echo "==> installed command surface in $(APEX_PROJECT)"; \
 		go run ./cmd/ape doctor --strict --cwd "$(APEX_PROJECT)" \
-		  --only framework.command_surface,framework.terminal_contracts,framework.output_styles; \
+		  --only framework.command_surface,framework.output_styles; \
 	else \
 		echo "installed command surface NOT verified — this is a skip, not a pass."; \
 		echo "  APEX_PROJECT=$(APEX_PROJECT) has no _apex/ape-commands.yaml, so there is no"; \

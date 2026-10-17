@@ -28,11 +28,8 @@ How-to guides are **recipes** — they answer "how do I X?" for a reader who alr
 
 ## Planned guides
 
-- **How to run ape in CI.** Non-interactive (`--no-tui`), exit code semantics, environment requirements (`ANTHROPIC_API_KEY`, etc.).
-- **How to manage ADRs.** `ape adr list` / `validate` / `new` workflow; per-project ADR conventions.
-- **How to manage governance patterns.** `ape pattern list` and the pattern catalog.
-- **How to inspect APEX traits.** `ape trait list` / `show` / `validate` / `conflicts`.
-- **How to bootstrap governance from traits.** `ape bootstrap` for new projects.
+- **How to run ape in CI.** Exit code semantics, environment requirements (`ANTHROPIC_API_KEY`, etc.).
+- **How to record a decision.** `ape decision new` / `accept`, and superseding an accepted ADR.
 
 ## Writing a how-to guide
 

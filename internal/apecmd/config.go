@@ -223,22 +223,3 @@ func resolveMonotonic(start string) (*apexcfg.Resolved, error) {
 	res.OnStampUsed(func() { iss.Commit(issued) })
 	return res, nil
 }
-
-// tryResolveProjectConfig is resolveProjectConfig for callers that must
-// degrade instead of exiting — the legacy `list` commands, which have
-// always been a soft no-op outside a project.
-func tryResolveProjectConfig(cwdFlag string) *apexcfg.Resolved {
-	start := cwdFlag
-	if start == "" {
-		wd, err := os.Getwd()
-		if err != nil {
-			return nil
-		}
-		start = wd
-	}
-	res, err := resolveMonotonic(start)
-	if err != nil {
-		return nil
-	}
-	return res
-}

@@ -18,7 +18,12 @@ import (
 	"golang.org/x/term"
 )
 
-// repairSkill is the framework skill `ape deferred repair` dispatches.
+// The deferred-record migration and its judgment phase, which `ape
+// framework update` (and --repair) still run on a v0 project. The `ape
+// deferred` commands themselves were retired with APEX v0; a v0 project's
+// pinned v0 ape keeps them.
+
+// repairSkill is the framework skill the repair phase dispatches.
 // The prompt lives there — versioned and reviewable — rather than as a Go
 // string literal, which is what keeps ape free of an HTTP client, API
 // credentials and a model constant.
@@ -66,148 +71,6 @@ func resolveRepairSkill(projectRoot string) (name string, found bool) {
 // existing PTY task runner's --model, not an API call.
 const repairModel = "opus"
 
-func newDeferredMigrateCmd() *cobra.Command {
-	var (
-		cwdFlag          string
-		fromFlag         string
-		recoverDeleted   bool
-		noRecoverDeleted bool
-		dryRun           bool
-		format           string
-	)
-	cmd := &cobra.Command{
-		Use:   "migrate",
-		Short: "Convert the legacy deferred-work.md into record files",
-		Long: `Convert a single-file deferred-work.md into one file per record.
-
-Four properties, all asserted rather than assumed:
-
-  VERIFIED BEFORE WRITE   every significant line of the ledger must come
-                          back out in something this writes — a record
-                          body, a record's source_heading, or the preamble
-                          file — N records parsed must equal N files
-                          written, and every body must survive a round
-                          trip, or NOTHING is written. The first of those
-                          three is checked against the LEDGER, not just
-                          against the parser's own output: a conversion
-                          that silently lost text while reporting success
-                          is the one failure here that git cannot undo.
-                          Line endings are the single normalisation — a
-                          CRLF ledger yields LF bodies.
-  IDEMPOTENT              detected from disk state — does the store hold
-                          records, is the legacy file already a stub. No
-                          version marker is stored, so nothing can drift.
-  NEVER DELETES THE SOURCE  the legacy file becomes a short signpost; its
-                          content stays in git, and its preamble is kept
-                          verbatim beside the records.
-  NO COMMIT               the files land in the working tree. You commit
-                          them, as one commit or two, however you like.
-
-Each record carries the ledger heading it sat under verbatim, in
-source_heading, alongside the source/source_story/created extracted from
-it. A heading holds more than three fields can take, and that remainder is
-often attribution.
-
-A record whose tail does not match the expected shape keeps its full text
-as the body and takes its title from the first line, with NO fields parsed
-from it — 'free_form: true' means nothing in it was interpreted. Any real
-ledger has records that land there. What fraction is not quoted here on
-purpose: it is a property of your corpus, and a number measured against
-someone else's would only invite you to trust it. 'ape deferred verify'
-flags them and 'ape deferred repair' completes or retires them.
-
-The migration MOVES cited text out of the folder it was living in. A
-repo-wide gate scoped to that folder — anchor counts, citation ratchets —
-will drop the moment this lands, without anything regressing. The
-completion output says how much moved so that drop is explainable.
-
-Re-migrating after a parser fix: record ids are derived from the ledger,
-so a corrected parse yields different ids and the two sets cannot be
-merged. Restore the ledger from git and delete the store directory; this
-refuses to run into a store that still holds records rather than
-interleaving two migrations on disk.
-
-HISTORY RECOVERY IS ON BY DEFAULT, AND IS FIRST-RUN-ONLY. The migration
-mines the ledger's git history for records removed from it and writes them
-straight to closed/ as tombstones. The ledger's own preamble documents
-'git log -p' as the recovery route; this automates exactly that. Failure to
-read history is a warning, never fatal.
-
-It defaults on because the choice is not symmetric. Recovery only ever
-writes to closed/, so it cannot put anything in the working set; the cost
-is one 'git show' per revision touching the ledger. But it runs only on the
-FIRST migration — afterwards this command reports 'already migrated' and
-returns before the recovery step — so skipping it forfeits that history
-permanently. One project lost 180 recoverable records that way.
-
-Pass --no-recover-deleted to skip it. Use 'ape deferred recover' to run it
-against a store that has already been migrated.`,
-		Args: cobra.NoArgs,
-		Example: "  ape deferred migrate --dry-run\n" +
-			"  ape deferred migrate --recover-deleted",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg := resolveProjectConfig(cwdFlag)
-			store := deferred.New(cfg.Paths.Deferred)
-			from := fromFlag
-			if from == "" {
-				from = cfg.Paths.DeferredLegacy
-			}
-			if from == "" {
-				return usageErr(errors.New("no legacy ledger resolved; pass --from"))
-			}
-			if _, err := os.Stat(from); err != nil {
-				return usageErr(fmt.Errorf("%s does not exist", from))
-			}
-
-			// The clean gate is scoped to the paths this migration touches,
-			// not the whole tree. With no commit to isolate ape's work,
-			// `git status` is the only separation between it and the
-			// operator's WIP — so those paths have to start clean, while
-			// unrelated WIP elsewhere is nobody's business.
-			if !dryRun {
-				if dirty := dirtyPaths(cmd.Context(), cfg.Root, migrationPaths(cfg.Paths.Deferred, from)); len(dirty) > 0 {
-					return usageErr(fmt.Errorf(
-						"migration paths have uncommitted changes, so `git status` could not tell ape's work from yours: %s",
-						strings.Join(dirty, ", "),
-					))
-				}
-			}
-
-			res, err := store.Migrate(cmd.Context(), deferred.MigrateOptions{
-				From:           from,
-				RecoverDeleted: recoverDeleted && !noRecoverDeleted,
-				DryRun:         dryRun,
-			})
-			if err != nil {
-				return err
-			}
-			if f := output.Format(format); f != output.FormatHuman {
-				return output.Print(cmd.OutOrStdout(), f, res)
-			}
-			emitMigrateHuman(cmd.OutOrStdout(), res, cfg.Root)
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&cwdFlag, "cwd", "", helpCwd)
-	cmd.Flags().StringVar(&fromFlag, "from", "", "Legacy ledger path (default: resolved from config)")
-	// ON by default. Recovery only ever writes tombstones into closed/, so
-	// it cannot touch the working set; the cost is one `git show` per
-	// revision touching the ledger; and the cost of skipping it is
-	// PERMANENT, because Migrate short-circuits on AlreadyDone before it
-	// reaches the recovery branch. Opting in cost seconds and missing it
-	// cost one project 180 records, silently — so the default moved.
-	//
-	// `--recover-deleted` is still accepted, and must be: the framework's
-	// preflight guidance already tells operators to pass it.
-	cmd.Flags().BoolVar(&recoverDeleted, "recover-deleted", true,
-		"Recover records removed from the ledger, from git history, into closed/ (default true)")
-	cmd.Flags().BoolVar(&noRecoverDeleted, "no-recover-deleted", false,
-		"Skip history recovery. This is a ONE-WAY choice: after the migration the history is unreachable")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Parse and verify, writing nothing")
-	cmd.Flags().StringVar(&format, "output-format", "human", helpFormat)
-	return cmd
-}
-
 // migrationPaths is the write set: the store and the legacy ledger. This
 // is deliberately disjoint from what `ape framework update` installs
 // (.claude/skills, _apex/*, CLAUDE.md), which is what makes the two
@@ -226,7 +89,7 @@ func emitMigrateHuman(w io.Writer, res *deferred.MigrateResult, root string) {
 			fmt.Fprintln(w,
 				"  NOTE: history recovery was requested but NOT run — migration recovers only on the first run.")
 			fmt.Fprintln(w,
-				"        run `ape deferred recover` to mine history into an already-migrated store.")
+				"        the project's pinned v0 ape mines history into an already-migrated store (`ape deferred recover`).")
 		}
 		fmt.Fprintf(w, "  to re-migrate after a parser fix: restore %s from git and remove %s\n",
 			relTo(root, res.From), relTo(root, res.To))
@@ -255,7 +118,7 @@ func emitMigrateHuman(w io.Writer, res *deferred.MigrateResult, root string) {
 			res.Closed, relTo(root, filepath.Join(res.To, deferred.ClosedDirName)))
 	}
 	if res.FreeForm > 0 {
-		fmt.Fprintf(w, "           %d free-form record(s) kept verbatim, flagged for `ape deferred verify`\n",
+		fmt.Fprintf(w, "           %d free-form record(s) kept verbatim, flagged for `ape framework update --repair`\n",
 			res.FreeForm)
 	}
 	for _, warning := range res.Warnings {
@@ -392,7 +255,7 @@ Three guards this command adds:
 
 Nothing is committed.`,
 		Args:    cobra.NoArgs,
-		Example: "  ape deferred repair --dry-run",
+		Example: "  ape framework update --repair",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg := resolveProjectConfig(cwdFlag)
 			store := deferred.New(cfg.Paths.Deferred)

@@ -32,8 +32,10 @@ func newSessionsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sessions",
 		Short: "List, prune, or open the URL of live ape sessions",
-		Long: `Live ape chat / ape pipeline (web mode) invocations are tracked in
-~/.ape/registry.json. This subcommand inspects that registry.
+		Long: `Live web-mode sessions are tracked in ~/.ape/registry.json, and this
+subcommand inspects that registry. The only writer was ` + "`ape pipeline`" + `'s web
+mode, retired with APEX v0, so this ape adds no rows: it reads and prunes
+what an older ape left.
 
   ape sessions               Show one row per live session.
   ape sessions prune         Drop rows whose PID is no longer running.

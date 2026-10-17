@@ -179,5 +179,5 @@ it at runtime. To verify resolution, drive a real session and check `/memory`.
 
 ## Related
 
-- [Pipeline spec reference](../reference/pipeline-spec.md) — what each check guards against at pipeline-run time.
+- Pipeline spec reference — what each check guards against at pipeline-run time.
 - [How to install ape](install.md) — used by the GitHub Actions snippet above.

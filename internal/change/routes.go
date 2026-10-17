@@ -154,15 +154,6 @@ func routeKey(route string) string {
 	return route
 }
 
-// StoryKeyFrom reads the story key out of a `rung 2 <key>` route string.
-func StoryKeyFrom(route string) string {
-	fields := strings.Fields(route)
-	if len(fields) >= 3 && strings.EqualFold(fields[0], "rung") && fields[1] == "2" {
-		return fields[2]
-	}
-	return ""
-}
-
 // fillCommand substitutes the closed placeholder set.
 func fillCommand(cmd string, fill RouteFill) (string, error) {
 	var bad error
@@ -197,17 +188,6 @@ func fillCommand(cmd string, fill RouteFill) (string, error) {
 		return "", bad
 	}
 	return out, nil
-}
-
-// ShellQuote wraps a path for the single-quoted shell context the
-// printed commands are read in.
-//
-// The printed line is meant to be pasted into a shell. A path with a
-// space, a quote or a `$` in it would otherwise split into two
-// arguments or expand — and this path comes from a project's own
-// output_folder, which ape does not get to choose.
-func ShellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // RouteProblem is one reason a route would print nothing useful.

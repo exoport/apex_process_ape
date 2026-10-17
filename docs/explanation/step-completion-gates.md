@@ -92,5 +92,5 @@ Treating the unknown case as benign would silently re-open the hole these gates 
 ## Related
 
 - [step-contract.md](../reference/step-contract.md) — the per-step prompt contract the runner enforces
-- [bridge-architecture.md](bridge-architecture.md) — how hook events reach `ape` at all
+- bridge-architecture.md — how hook events reach `ape` at all
 - [exec-modes.md](exec-modes.md) — the per-stage interactive runtime
