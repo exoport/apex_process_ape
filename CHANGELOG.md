@@ -1,5 +1,109 @@
 # CHANGELOG
 
+## v1.0.0-rc.3 (draft)
+
+The candidate for the session-per-skill loop (D61), on top of rc.2 and rc.1
+below. At promotion the three drafts become the one dated `## v1.0.0` section.
+
+### Long-running checks (D58, D69)
+
+- **`timeouts:` takes an idle limit and a ceiling per tier**:
+  `timeouts: {check: {idle: 15m, max: 2h}, regression: {idle: 30m, max: 2h},
+  gate: {idle: 30m, max: 4h}}` are the defaults. A check is stopped when it
+  makes no progress for `idle` — no output and no CPU growth in its process
+  group — or when it reaches `max`, and is recorded as exit 124 with
+  `reason: idle|ceiling`. A scalar keeps its old meaning (the ceiling). The
+  ceilings cannot be configured past 4h (check), 8h (regression) and 12h
+  (gate). A timed-out check is no longer retried under `retries:`.
+- **`change start`, `verify`, `archive`, `milestone gate` and `close` run
+  detached** and take `--wait <dur>` (default 9m, at most 9m30s). When the run
+  is still going the call exits **75**; calling the same command again attaches
+  to it and never starts a second run. Killing the call — a session ending,
+  the Bash tool's cap — stops nothing.
+- **One run per change or milestone**: a second call of the same verb
+  attaches; a different verb is refused with `run.busy` (exit 3, retry).
+- **An interrupted run is not red**: SIGTERM or SIGINT records nothing — no
+  attempt, no verify, no commit — and reports `run.interrupted` (retry). A
+  check never outlives the ape that runs it.
+- **The Stop hook never re-runs a long check**: a check whose last run took
+  over 60 s is judged from the last verify at HEAD, and the hook spends at most
+  600 s per stop. An `ape task` session whose project has a live run counts as
+  making progress.
+
+### Sessions and nesting (D61, D62)
+
+- **Depth replaces the blanket nesting refusal.** Outside any ape session
+  (depth 0) any model session may start. Inside one, only ape's own
+  `apex-orchestrator` run may start a child, one at a time, from an
+  allow-list: apex-plan, apex-change, apex-apply, apex-review, apex-release,
+  apex-accept, the `human_review` delegate and the `tools:` skills. A child
+  starts nothing. Depth comes from the environment ape set and from the
+  process ancestry, so unsetting the variables does not escape it. Refusals:
+  `session.depth`, `session.not-allowed` (exit 2, stop),
+  `session.child-running`, `session.orchestrator-running` (exit 3, retry).
+  `ape change review --run` from any session but the orchestrator is now
+  refused.
+- A child dies with its orchestrator, and its manifest records `depth` and
+  `parent_run`; the orchestrator's manifest lists its `children` and
+  `tree_cost_usd` (its `totals` stay its own). `ape status --json` lists the
+  running `sessions`, and `ape costs run` shows the lineage.
+- `ape run wait` takes `--wait` (an alias of `--timeout`) and `--json`, whose
+  `result` is the child's last reply (at most 2 KB). `ape task --detach
+  --output-format json` prints the handle as JSON.
+
+### Human review, tools and plugins (D59, D75–D78)
+
+- **Delegated acceptance** (off by default): with `human_review: {delegate:
+  <skill>}` in `_apex/config.yaml`, `ape change accept <id> T<n> --delegate`
+  runs the delegate (default `apex-accept`) in its own session; it records its
+  verdict with `ape change accept … --verdict pass|fail`. On a pass ape records
+  the acceptance as `by: delegate:<skill>` with the run id — in `ape status`,
+  the archived state and an `Accepted-By:` trailer on the archive squash. A
+  fail, or no verdict, leaves the task to a person, with no retry on the same
+  tip. Refused while an unaccepted config change touches `human_review`.
+- **The tools slot**: `tools: {design: [{name, skill, when, args?, model?,
+  effort?}], review: [...]}`. A change names a design tool on a task line (`—
+  tool: <name>`) and review tools in `review_tools:`; `ape change check`
+  refuses an undeclared one (`tools.unknown`), and `ape status --json` lists
+  them. `ape change tool <id> <name>` runs one with its `args` template filled
+  (`{id}`, `{task}`, `{assets}`, `{change}`). A review tool's report in
+  `assets/review-<name>.md` no longer voids a review.
+- **`ape plugins sync`** installs what the config lists and commits the
+  settings; **`ape plugins status`** reports each plugin's model-invocable
+  skills, hooks and MCP servers. A plugin carrying hooks or MCP servers is a
+  finding unless its entry says `allow: [hooks, mcp]`.
+
+### Guard rails, caps and defaults (D65, D69, D70)
+
+- **`config.changed` now guards** `timeouts`, `caps`, `regression`, `commit`,
+  `evidence`, `marketplaces`, `plugins`, `tools` and `human_review`, beside
+  `limits`, `checks`, `retries` and `requires`.
+- **`milestone approve` runs the gate once**: a gate already green is refused
+  (`milestone.gate-green`), and one that cannot run — a missing script, a shell
+  syntax error, exit 126/127, a timeout — is refused (`milestone.gate-broken`),
+  both with action `replan`. A gate must be red until the milestone's work is
+  done.
+- **Artefact caps are configurable** in a `caps:` block, each a default with a
+  hard ceiling: `project.md`, `AGENTS.md`, `change.md` and `design.md` 16 KB
+  (ceiling 48 KB), a spec 24 KB (64 KB), an evidence log 1 MiB (16 MiB). The
+  line caps are gone; `agents.too-long` is now `agents.too-big`, and
+  `change.md` is also measured at abandon.
+- **`ape project init` writes `models:` defaults** for a new config:
+  apex-apply and apex-orchestrator sonnet/high, apex-plan, apex-change and
+  apex-review opus/medium.
+
+### Status
+
+- **An aboard status tab**: in a project with `.aboard/`, every state-changing
+  v1 command refreshes an "APEX status" tab (milestones, changes, what awaits
+  a person, fixes, Next, work outside the flow, the latest run); `ape status
+  --board` refreshes it on request. The board is never read back. The tab is
+  marked `quiet`; until the aboard release that honours it, a changed view
+  still raises the unread dot.
+- `ape status --json` gains `roadmap_next` (the roadmap's Next items).
+- An apex-release commit (`Release:` trailer) that touches only the changelog
+  is not listed as work outside the change flow.
+
 ## v1.0.0-rc.2 (draft)
 
 Fixes from the framework's rc.1 smoke, on top of everything in rc.1 below. At
