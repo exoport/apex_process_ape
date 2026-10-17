@@ -172,3 +172,49 @@ func TestEditComments_GoCRLF(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "package x\r\n\r\n/* Why\r\n */\r\nvar s = `a\r\nb`\r\nvar y = 1\r\n", res.New)
 }
+
+// L7, from atomix: the alert pack's `# pending: <signal> | owner: <story
+// key> | supplies: …` comments are parsed by a test; stripping the key
+// left "owner: |". A data-shaped comment's ids are listed, never stripped.
+func TestEditComments_DataCommentsListedNotStripped(t *testing.T) {
+	v := testVocab()
+	src := "groups:\n" +
+		"  # pending: queue_depth | owner: Story 3.2 | supplies: alerts\n" +
+		"  # owner: Story 3.2\n" +
+		"  # Owner: x; Story: Story 3.2 | Area: alerts\n" +
+		"  - name: q # Story 3.2: the queue alert\n"
+	res, err := editComments("alerts.yaml", src, langYAML, v, nil)
+	require.NoError(t, err)
+	require.Equal(t, "groups:\n"+
+		"  # pending: queue_depth | owner: Story 3.2 | supplies: alerts\n"+
+		"  # owner: Story 3.2\n"+
+		"  # Owner: x; Story: Story 3.2 | Area: alerts\n"+
+		"  - name: q # The queue alert\n", res.New)
+	var data []string
+	for _, l := range res.Left {
+		if l.Where == "data comment" {
+			data = append(data, l.Text)
+		}
+	}
+	require.Equal(t, []string{"Story 3.2", "Story 3.2", "Story 3.2"}, data)
+
+	goSrc := "package x\n\n// pending: depth | owner: Story 3.2\nvar x = 1 // Note: Story 3.2 added it.\n"
+	res, err = editComments("x.go", goSrc, langGo, v, nil)
+	require.NoError(t, err)
+	require.Equal(t, "package x\n\n// pending: depth | owner: Story 3.2\nvar x = 1 // Note: added it.\n", res.New)
+}
+
+func TestIsDataComment(t *testing.T) {
+	for text, want := range map[string]bool{
+		"# pending: q | owner: 3-2":       true,
+		"// owner: Story 3.2":             true,
+		"/* a\n * replicas: 3\n */":       true,
+		"# Owner: a | Supplies: b":        true,
+		"// Note: Story 3.2 added it.":    false,
+		"// Story 3.2: retry":             false,
+		"// See http://x for Story 3.2":   false,
+		"# Retries: three; see Story 3.2": false,
+	} {
+		require.Equal(t, want, isDataComment(text), text)
+	}
+}

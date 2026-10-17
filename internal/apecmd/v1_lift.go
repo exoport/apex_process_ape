@@ -65,7 +65,10 @@ The commit:
                  it (Story 3.2, Task 2 · Subtask 3.1 of Story 5.10 · AC 2), and the
                  separator a removal leaves by a bracket or a mark goes too
                  ("(ADR-0019, Story 3.2)" → "(ADR-0019)"). Comments only: ids in
-                 identifiers, strings and directives are listed, not edited.
+                 identifiers, strings and directives are listed, not edited — and
+                 so are ids in a data-shaped comment, which a tool may parse: one
+                 opening with a lowercase key ("# owner: …") or a record of
+                 key: value fields ("# pending: q | owner: …").
                  Tokenized: Go (go/scanner), shell, Python, JS/TS (JSX/TSX: comments
                  that begin their line only), Dart, YAML, Makefile (recipe lines are
                  the shell's: left), C/C++. A file the tokenizer cannot read, a

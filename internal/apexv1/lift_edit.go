@@ -129,6 +129,10 @@ func editComments(rel, src string, lang liftLang, vocab *liftVocab, adr *adrRewr
 			listIDs(s.Start, text, "directive")
 			continue
 		}
+		if isDataComment(text) {
+			listIDs(s.Start, text, "data comment")
+			continue
+		}
 		newText, emptied, nIDs, nADR, unresolved := cleanComment(text, s.Block, vocab, adr)
 		for _, u := range unresolved {
 			res.Unresolved = append(res.Unresolved, LiftIDRef{File: rel, Line: lineAt(src, s.Start), Text: u, Where: "comment"})
@@ -195,6 +199,30 @@ func editComments(rel, src string, lang liftLang, vocab *liftVocab, adr *adrRewr
 		return nil, err
 	}
 	return res, nil
+}
+
+var (
+	// dataLeadRe is a comment line that opens with a lowercase key —
+	// "# owner: …", a commented-out setting; dataKeyRe one key: value
+	// field of a record.
+	dataLeadRe = regexp.MustCompile(`^[a-z][a-z0-9_.-]*:\s+\S`)
+	dataKeyRe  = regexp.MustCompile(`(?:^|[|,;]\s*)[A-Za-z][A-Za-z0-9_.-]*:\s+\S`)
+)
+
+// isDataComment reports a comment that carries data rather than prose:
+// a line opening with a lowercase key ("# pending: <signal> | owner: …",
+// which atomix's alert-pack test parses), or a record of two or more
+// key: value fields. Stripping an id from one leaves "owner: |" for its
+// reader, so the ids in it are listed, never stripped (L7).
+func isDataComment(text string) bool {
+	for l := range strings.SplitSeq(text, "\n") {
+		l = strings.TrimSpace(l)
+		l = strings.TrimSpace(strings.TrimLeft(l, "/#*-;!"))
+		if dataLeadRe.MatchString(l) || len(dataKeyRe.FindAllString(l, 3)) >= 2 && strings.ContainsAny(l, "|;") {
+			return true
+		}
+	}
+	return false
 }
 
 // identWordRe is an identifier-shaped word.
