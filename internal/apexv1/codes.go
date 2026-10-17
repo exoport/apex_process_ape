@@ -91,6 +91,8 @@ var DiagnosticCodes = []CodeDoc{
 	{"branch.detached", 1, "stop", "start: HEAD is detached; a change branch is created from a branch, recorded as its base"},
 	{"change.no-branch", 1, "person", "archive: the change has no change/<id> branch with a recorded base_branch (started before D38)"},
 	{"change.wrong-branch", 1, "stop", "the command records a started change's state, and HEAD is not on its branch change/<id> (git switch change/<id>), or is on another change's branch"},
+	{CodeBaseCheckedOut, 1, "stop", "the branch a record belongs on (the base branch, or a change's) is checked out in another worktree: ape does not commit behind that worktree's index; the message names the worktree — run the command there, or switch it off the branch"},
+	{CodeRefMoved, 1, "retry", "the branch moved while ape wrote its record there without a checkout; nothing was written"},
 	{"git.branch-failed", 1, "stop", "creating, switching to, rebasing or deleting a branch failed, or the base branch is missing"},
 	{"archive.spec-invalid", 1, "replan", "archive: the merged spec would fail project check (e.g. over 20 KB)"},
 	{"change.archived", 1, "stop", "the change is already archived"},
