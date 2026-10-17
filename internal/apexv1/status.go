@@ -76,6 +76,45 @@ type ChangeStatus struct {
 	// Answer is a person's answer to what blocked the change (H9): set on
 	// an answered change, and kept once it is started again.
 	Answer *Answer `json:"answer,omitempty"`
+	// Accepted is the change's human-review acceptances, the base's
+	// included (D52 Q18): {task, by, at, evidence}, and for one a delegate
+	// recorded (D75) by "delegate:<skill>", its run.
+	Accepted []Accept `json:"accepted,omitempty"`
+	// Delegate is the newest delegate verdict per human-review task (D75),
+	// from this checkout's _apex/state/runs/delegate/: a fail leaves the
+	// task awaiting a person, and says why.
+	Delegate map[string]DelegateStatus `json:"delegate,omitempty"`
+}
+
+// DelegateStatus is a task's newest delegate verdict as `ape status`
+// shows it. Voided lists why ape voided it, when it did.
+type DelegateStatus struct {
+	Verdict string   `json:"verdict"`
+	Reason  string   `json:"reason"`
+	Run     string   `json:"run"`
+	At      string   `json:"at"`
+	Voided  []string `json:"voided,omitempty"`
+}
+
+// delegateStatuses is change id's newest delegate verdict per task.
+func (p *Project) delegateStatuses(id string) map[string]DelegateStatus {
+	vs := p.lastDelegateVerdicts(id)
+	if len(vs) == 0 {
+		return nil
+	}
+	out := make(map[string]DelegateStatus, len(vs))
+	for task, v := range vs {
+		out[task] = DelegateStatus{Verdict: v.Verdict, Reason: v.Reason, Run: v.Run, At: v.At, Voided: v.Voided}
+	}
+	return out
+}
+
+// delegable reports a task the configured delegate may still try: no
+// verdict yet, or a pass not recorded. A fail or a voided run is a
+// person's to look at.
+func (c *ChangeStatus) delegable(task string) bool {
+	d, ok := c.Delegate[task]
+	return !ok || d.Verdict == "pass" && len(d.Voided) == 0
 }
 
 // Spend is the cost recorded in the project's run manifests.
@@ -139,6 +178,9 @@ type StatusReport struct {
 	// LatestRun is the newest ape task run's outcome (H20): a usage-limit
 	// stop carries its reset. Absent before the first run.
 	LatestRun *LatestRun `json:"latest_run,omitempty"`
+	// delegate is human_review's delegate skill, "" when acceptance is a
+	// person's alone (D75): next names the delegate first.
+	delegate string
 }
 
 // Status builds the report.
@@ -153,6 +195,7 @@ func (p *Project) Status() *StatusReport {
 		r.Project = baseName(p.Root)
 	}
 	r.Docs = cfg.Docs
+	r.delegate = cfg.HumanReview.Skill()
 	runs, _ := cost.RunCosts(p.Root)
 	for _, run := range runs {
 		r.Spend.TotalUSD += run.CostUSD
@@ -226,6 +269,8 @@ func (p *Project) Status() *StatusReport {
 			acc := p.withBaseAccepted(ctx, c.ID, c.State)
 			cs.PendingHuman = acc.PendingHuman(c.Doc.HumanTasks())
 			cs.AwaitingHuman = awaitingHuman(acc, c.Doc)
+			cs.Accepted = acc.Accepted
+			cs.Delegate = p.delegateStatuses(c.ID)
 		}
 		if v := c.State.Verify; v != nil {
 			cs.VerifySHA = v.SHA
@@ -391,6 +436,9 @@ func nextStep(r *StatusReport) string {
 		switch c.Status {
 		case StatusReviewed:
 			if len(c.AwaitingHuman) > 0 {
+				if next := r.delegateNext(c); next != "" {
+					return next
+				}
 				continue // a person's to accept first (D45): the orchestrator moves on
 			}
 			return "archive " + c.ID + ": `ape change archive " + c.ID + "` (squash-merges " + ChangeBranch(c.ID) + " into its base branch)"
@@ -422,6 +470,21 @@ func nextStep(r *StatusReport) string {
 		return fmt.Sprintf("%s gate was green at %s — `ape milestone close %s`", m.ID, short(m.GateLast.SHA), m.ID)
 	}
 	return fmt.Sprintf("plan the next change toward %s (apex-change), or `ape milestone gate %s` if the goal looks met", m.ID, m.ID)
+}
+
+// delegateNext is the next step for a reviewed change awaiting a person
+// when human_review delegates (D75): its first task the delegate has not
+// judged; "" when there is none, or no delegate.
+func (r *StatusReport) delegateNext(c *ChangeStatus) string {
+	if r.delegate == "" {
+		return ""
+	}
+	for _, task := range c.AwaitingHuman {
+		if c.delegable(task) {
+			return "delegate " + task + " of " + c.ID + " to " + r.delegate + ": `ape change accept " + c.ID + " " + task + " --delegate --wait 9m`"
+		}
+	}
+	return ""
 }
 
 // fixNext is the next step for an approved fix: it runs ahead of
@@ -519,6 +582,11 @@ groups:
 			}
 			if len(c.PendingHuman) > 0 {
 				line += " — human-review pending: " + strings.Join(c.PendingHuman, ",")
+				for _, task := range c.PendingHuman {
+					if d, ok := c.Delegate[task]; ok && (d.Verdict == "fail" || len(d.Voided) > 0) {
+						line += " (" + task + " " + d.describe() + ")"
+					}
+				}
 			}
 			if len(c.Flaky) > 0 {
 				line += " — flaky: " + strings.Join(c.Flaky, ", ")
@@ -537,6 +605,14 @@ groups:
 	}
 	b = append(b, fmt.Sprintf("Spend: $%.2f over %d runs", r.Spend.TotalUSD, r.Spend.Runs), "Next: "+r.Next)
 	return strings.Join(b, "\n") + "\n"
+}
+
+// describe is a delegate verdict in a few words for the brief.
+func (d DelegateStatus) describe() string {
+	if len(d.Voided) > 0 {
+		return "delegate voided: " + truncate(strings.Join(d.Voided, ", "), briefReasonMax)
+	}
+	return "delegate " + d.Verdict + ": " + truncate(d.Reason, briefReasonMax)
 }
 
 // acceptedRedLine names the last done milestone when a person closed it

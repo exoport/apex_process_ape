@@ -94,6 +94,9 @@ type Config struct {
 	// blocked, with APE_EVENT (stop|block), APE_CHANGE and APE_REASON in
 	// its environment (H20). Its failure never changes the outcome.
 	Notify string `yaml:"notify"`
+	// HumanReview delegates a human-review task's acceptance to a skill
+	// (D75, D76; delegate.go): absent, only a person accepts one.
+	HumanReview *HumanReviewConfig `yaml:"human_review"`
 }
 
 // SkillModel is one models.<skill> entry.

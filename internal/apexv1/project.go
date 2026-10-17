@@ -159,6 +159,7 @@ func (p *Project) Check() []Finding {
 	add(p.layoutFindings()...)
 	add(p.liftDispositionFindings(context.Background())...)
 	add(p.docsFindings()...)
+	add(p.humanReviewFindings()...)
 	add(p.settingsIgnoredFindings(context.Background())...)
 	add(p.provenanceFindings(context.Background())...)
 

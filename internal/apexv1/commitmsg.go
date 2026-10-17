@@ -109,9 +109,10 @@ func archiveSubject(tmpl string, c *Change, id string) string {
 
 // squashMessage is the squash commit's message: the subject; the branch
 // commits' own subjects (not ape's `apex:` ones), deduplicated, oldest
-// first; then their trailers other than `Change:`, deduplicated, and
+// first; then their trailers other than `Change:`, and extra (one
+// `Accepted-By:` line per delegated acceptance, D75), deduplicated, and
 // `Change: <id>` last.
-func (p *Project) squashMessage(ctx context.Context, subject, base, branch, id string) string {
+func (p *Project) squashMessage(ctx context.Context, subject, base, branch, id string, extra ...string) string {
 	log, _ := git(ctx, p.Root, "log", "--reverse", "--format=%s%x1f%(trailers:only,unfold)%x1e", "refs/heads/"+base+"..refs/heads/"+branch)
 	var subjects, trailers []string
 	seen := map[string]bool{}
@@ -127,6 +128,12 @@ func (p *Project) squashMessage(ctx context.Context, subject, base, branch, id s
 			if !ok || strings.EqualFold(strings.TrimSpace(key), "Change") || seen["t:"+line] {
 				continue
 			}
+			seen["t:"+line] = true
+			trailers = append(trailers, line)
+		}
+	}
+	for _, line := range extra {
+		if !seen["t:"+line] {
 			seen["t:"+line] = true
 			trailers = append(trailers, line)
 		}

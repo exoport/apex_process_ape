@@ -725,14 +725,17 @@ running, call again.`,
 
 func newChangeAcceptCmd() *cobra.Command {
 	var f v1Flags
-	var task, by string
+	var task, posTask, by, verdict, reason string
 	var evidence []string
+	var delegate bool
+	var wait time.Duration
 	cmd := v1ChangeLeaf(
-		"accept <id> --task <T> --by <who> [--evidence <path|url>]...",
-		"Accept a human-review task, in flight or archived",
+		"accept <id> [T<n>] (--task <T> --by <who> [--evidence <path|url>]... | --delegate [--wait 9m] | --verdict pass|fail --reason \"<text>\" [--evidence <path|url>]...)",
+		"Accept a human-review task, in flight or archived — a person's act, or a delegate's (D75)",
 		`Record that a person accepted a human-review task (one whose check is "human-review"),
 in state.json's accepted: [{task, by, at, evidence}]. Archive requires every human-review
-task accepted, unless a person archives with --allow-pending-human.
+task accepted, unless a person archives with --allow-pending-human. The task is the
+second argument (T<n>) or --task.
 
   - a change in flight: committed on its branch, change/<id> (D38) — from any branch
     (D51 Q17): without a checkout when HEAD is elsewhere (refused when that branch is
@@ -763,13 +766,84 @@ task accepted, unless a person archives with --allow-pending-human.
 
 Accepting a task again replaces its earlier acceptance.
 
+--delegate: autonomous acceptance (D75, D76). Only when _apex/config.yaml delegates it:
+
+    human_review:
+      delegate: apex-accept                  # the default when the block is present
+      args: "--task {task} --change {id}"    # the default; placeholders {id}, {task},
+                                             # {assets}, {change} (D77)
+      model: sonnet                          # optional, else models.<delegate>
+      effort: high                           # optional, else models.<delegate>'s
+
+  - the task must be awaiting a person: the change reviewed (or archived) and the task
+    not accepted (else delegate.not-awaiting); no human_review block is
+    delegate.not-configured; human_review is under the config.changed guard, and
+    --delegate refuses while a commit no person accepted changed it, or while the
+    working tree's block differs from HEAD's (delegate.unaccepted-config, action person):
+    a model cannot add the block and accept its own work. Not person-only: that is the
+    point
+  - ape starts `+"`ape task <delegate> --args \"<args filled>\"`"+` detached, as review --run
+    does, with APE_DELEGATE=<id>/<T> (and APE_DELEGATE_PARENT=<the asking session>). Model
+    and effort: human_review's, else models.<delegate>'s, else the asking session's, else
+    _apex/config.yaml effort:, else claude's
+  - the delegate inspects the task's artefact read-only and records its verdict with
+    --verdict (below); `+"`ape hook pre-tool`"+` denies it every edit inside the project but
+    an evidence note, changes/<id>/assets/accept-* (the archive folder's, for an
+    archived change)
+  - when the session ends ape settles it. A session that committed, switched branch or
+    left any file other than its accept-* notes has its verdict voided (delegate.voided,
+    action person; recorded in the verdict file, shown by ape status). On a pass ape
+    records the acceptance exactly as a person's (the same record and branch rules as
+    above), by "delegate:<skill>" — never a person — with "run": <run-id>; its evidence
+    is the verdict's --evidence, else the verdict file; its accept-* notes are committed
+    with the record, which carries the trailer
+    "Accepted-By: delegate:<skill> <T> run <run-id>" (and so does the archive squash).
+    On a fail nothing is accepted: the task stays awaiting_human, ape status shows the
+    verdict (JSON changes[].delegate.<T>: {verdict, reason, run, at}), exit 1
+    delegate.fail (action person). No verdict: delegate.no-verdict (retry)
+  - --wait (default 9m) bounds one call; exit 75 means still running: call
+    `+"`ape change accept <id> <T> --delegate`"+` again — it attaches to the running session
+  - JSON: {id, task, skill, args, running, detached_id, log, task_exit, launch,
+    outcome: {verdict, reason, evidence, notes, violations, voided, accepted,
+    verdict_file}}
+
+--verdict pass|fail --reason "<text>" [--evidence <path|url>]...: the delegate session
+records its verdict — only the session --delegate started for that change and task
+(APE_DELEGATE=<id>/<T>, its run in progress; elsewhere exit 2, delegate.not-in-session).
+It writes _apex/state/runs/delegate/<run-id>.json {change, task, skill, run, verdict,
+reason, evidence, at} — ignored state, never a commit. ape, not the session, records the
+acceptance.
+
 Exit codes: 0 recorded · 1 the task has a command check, a draft, or the branch it is
-recorded on is checked out elsewhere · 2 usage (no such task, bad evidence).`,
-		"  ape change accept add-tenant-delete --task T2 --by diego\n  ape change accept add-tenant-delete --task T2 --by diego --evidence docs/review/tenant-delete.png --evidence https://ci.example.com/run/812",
+recorded on is checked out elsewhere; --delegate: not configured, config not accepted,
+not awaiting, fail, voided, no verdict · 2 usage (no such task, bad evidence, --verdict
+outside its session) · 75 --delegate: still running, call again.`,
+		"  ape change accept add-tenant-delete --task T2 --by diego\n"+
+			"  ape change accept add-tenant-delete T2 --by diego --evidence docs/review/tenant-delete.png --evidence https://ci.example.com/run/812\n"+
+			"  ape change accept add-tenant-delete T2 --delegate --wait 9m --json\n"+
+			"  ape change accept add-tenant-delete T2 --verdict pass --reason \"matches the task\" --evidence development/changes/add-tenant-delete/assets/accept-T2.md",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			switch {
+			case posTask != "" && task != "" && posTask != task:
+				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.task", Msg: "the task is given twice (" + posTask + ", --task " + task + "): give it once"}, nil)
+			case posTask != "":
+				task = posTask
+			}
 			if task == "" {
-				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.task", Msg: "--task <T> is required"}, nil)
+				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.task", Msg: "the task is required: `ape change accept <id> T<n> …` (or --task)"}, nil)
+			}
+			switch {
+			case delegate && (verdict != "" || by != "" || len(evidence) > 0 || reason != ""):
+				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.delegate", Msg: "--delegate starts the delegate session, which records its own verdict and evidence: drop --verdict, --reason, --by and --evidence"}, nil)
+			case verdict != "" && by != "":
+				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.delegate", Msg: "--verdict is the delegate's, --by a person's: one or the other"}, nil)
+			case reason != "" && verdict == "":
+				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.delegate", Msg: "--reason goes with --verdict (the delegate's)"}, nil)
+			case delegate:
+				return runDelegateSession(cmd, &f, p, id, task, wait)
+			case verdict != "":
+				return recordDelegateVerdict(cmd, &f, p, id, task, verdict, reason, evidence)
 			}
 			st, err := p.Accept(cmd.Context(), id, task, by, evidence...)
 			if err != nil {
@@ -779,9 +853,20 @@ recorded on is checked out elsewhere · 2 usage (no such task, bad evidence).`,
 				fmt.Fprintf(w, "change %s: %s accepted by %s\n", id, task, by)
 			})
 		})
-	cmd.Flags().StringVar(&task, "task", "", "task id, e.g. T2 (required)")
-	cmd.Flags().StringVar(&by, "by", "", "who accepts (required)")
-	cmd.Flags().StringArrayVar(&evidence, "evidence", nil, "a file in the repository or a URL the acceptance rests on (repeatable)")
+	cmd.Args = cobra.RangeArgs(1, 2)
+	cmd.PreRunE = func(_ *cobra.Command, args []string) error {
+		if len(args) == 2 {
+			posTask = args[1]
+		}
+		return nil
+	}
+	cmd.Flags().StringVar(&task, "task", "", "task id, e.g. T2 (or the second argument)")
+	cmd.Flags().StringVar(&by, "by", "", "who accepts (required for a person's acceptance)")
+	cmd.Flags().StringArrayVar(&evidence, "evidence", nil, "a file in the repository or a URL the acceptance (or --verdict) rests on (repeatable)")
+	cmd.Flags().BoolVar(&delegate, "delegate", false, "accept through _apex/config.yaml human_review.delegate, in its own detached session (D75)")
+	cmd.Flags().DurationVar(&wait, "wait", defaultReviewWait, "--delegate: how long this call waits for the session (exit 75 when it is still running)")
+	cmd.Flags().StringVar(&verdict, "verdict", "", "pass or fail: the delegate session's verdict (only inside that session)")
+	cmd.Flags().StringVar(&reason, "reason", "", "--verdict: why")
 	return cmd
 }
 

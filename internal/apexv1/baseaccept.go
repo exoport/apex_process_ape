@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"path"
 	"path/filepath"
 	"strings"
@@ -104,28 +105,35 @@ func (p *Project) withBaseAccepted(ctx context.Context, id string, st *State) *S
 // off its branch: accepted.json on the change's base branch, from any
 // branch, without a checkout when HEAD is elsewhere (editOnBranch). It
 // returns the change's state with the base's acceptances folded in.
-func (p *Project) acceptOnBase(ctx context.Context, ci ChangeInfo, task, by string, items []string) (*State, error) {
+func (p *Project) acceptOnBase(ctx context.Context, ci ChangeInfo, a acceptance) (*State, error) {
 	id, base := ci.ID, ci.State.BaseBranch
 	if base == "" || !p.branchExists(ctx, base) {
 		return nil, &FailError{Code: CodeBranchFailed, Msg: "the base branch of " + id + " (" + base + ") is not recorded or does not exist — `git switch " + ChangeBranch(id) + "` and accept there"}
 	}
-	ev, err := p.resolveEvidenceAt(ctx, base, items)
+	ev, err := a.evidence(func(items []string) ([]Evidence, error) { return p.resolveEvidenceAt(ctx, base, items) })
+	if err != nil {
+		return nil, err
+	}
+	notes, err := p.readNotes(a.notes)
 	if err != nil {
 		return nil, err
 	}
 	rel := p.acceptedRel(id)
 	var recorded []Accept
-	_, err = p.editOnBranch(ctx, base, "apex: "+id+" accepted "+task+"\n\nChange: "+id, []string{rel}, func(cur map[string][]byte) (map[string][]byte, error) {
-		recorded = mergeAccepted(parseBaseAccepted(cur[rel]), []Accept{{Task: task, By: by, At: Stamp(), Evidence: ev}})
+	_, err = p.editOnBranch(ctx, base, "apex: "+id+" accepted "+a.task+"\n\n"+a.trailers(id), []string{rel}, func(cur map[string][]byte) (map[string][]byte, error) {
+		recorded = mergeAccepted(parseBaseAccepted(cur[rel]), []Accept{a.record(ev)})
 		data, err := json.MarshalIndent(baseAccepted{Accepted: recorded}, "", "  ")
 		if err != nil {
 			return nil, err
 		}
-		return map[string][]byte{rel: append(data, '\n')}, nil
+		files := map[string][]byte{rel: append(data, '\n')}
+		maps.Copy(files, notes)
+		return files, nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	p.dropCommittedNotes(ctx, base, notes)
 	st := *ci.State
 	st.Accepted = mergeAccepted(st.Accepted, recorded)
 	refreshPending(&st, ci.Doc)

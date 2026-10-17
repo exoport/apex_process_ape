@@ -179,13 +179,17 @@ type Answer struct {
 	ReplansBefore int `json:"replans_before,omitempty"`
 }
 
-// Accept records a person accepting a human-review task.
+// Accept records a person accepting a human-review task — or a delegate
+// skill in a person's place (D75): By "delegate:<skill>", Run its run.
 type Accept struct {
 	Task string `json:"task"`
 	By   string `json:"by"`
 	At   string `json:"at"`
 	// Evidence is what the acceptance rests on (`accept --evidence`).
 	Evidence []Evidence `json:"evidence,omitempty"`
+	// Run is the delegate run whose pass this acceptance records (`ape
+	// change accept --delegate`); empty for a person's.
+	Run string `json:"run,omitempty"`
 }
 
 // State is changes/<id>/state.json. Written only by ape.

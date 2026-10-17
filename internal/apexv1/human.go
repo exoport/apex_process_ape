@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -68,16 +69,55 @@ func (p *Project) resolveEvidence(ctx context.Context, items []string) ([]Eviden
 	return out, nil
 }
 
-// withAcceptance records in st that by accepted task, replacing an
-// earlier acceptance of it, and refreshes the last verify's pending list.
-func withAcceptance(st *State, c *Change, task, by string, ev []Evidence) {
+// acceptance is one acceptance to record: a person's (Accept), or a
+// delegate's on its pass (AcceptDelegated, D75), which also names its run,
+// brings its evidence resolved already, and has its notes committed with
+// the record.
+type acceptance struct {
+	task, by string
+	// items are --evidence values, resolved where the record lands.
+	items []string
+	// run is a delegate's run id; ev its evidence, used instead of items.
+	run string
+	ev  []Evidence
+	// notes are project-relative files (a delegate's accept-* notes)
+	// committed with the record.
+	notes []string
+}
+
+// evidence resolves a's evidence: a delegate's as given, else items
+// through resolve.
+func (a acceptance) evidence(resolve func([]string) ([]Evidence, error)) ([]Evidence, error) {
+	if a.run != "" {
+		return a.ev, nil
+	}
+	return resolve(a.items)
+}
+
+// record is the Accept a records, with its evidence.
+func (a acceptance) record(ev []Evidence) Accept {
+	return Accept{Task: a.task, By: a.by, At: Stamp(), Evidence: ev, Run: a.run}
+}
+
+// trailers is the record commit's trailer block: a delegate's
+// Accepted-By line (the archive squash carries it too), then Change.
+func (a acceptance) trailers(id string) string {
+	if a.run == "" {
+		return "Change: " + id
+	}
+	return acceptedByTrailer(Accept{Task: a.task, By: a.by, Run: a.run}) + "\nChange: " + id
+}
+
+// withAcceptance records rec in st, replacing an earlier acceptance of its
+// task, and refreshes the last verify's pending list.
+func withAcceptance(st *State, c *Change, rec Accept) {
 	accepted := make([]Accept, 0, len(st.Accepted)+1)
 	for _, a := range st.Accepted {
-		if a.Task != task {
+		if a.Task != rec.Task {
 			accepted = append(accepted, a)
 		}
 	}
-	accepted = append(accepted, Accept{Task: task, By: by, At: Stamp(), Evidence: ev})
+	accepted = append(accepted, rec)
 	st.Accepted = accepted
 	refreshPending(st, c)
 }
@@ -112,7 +152,8 @@ func humanTask(c *Change, id, task string) error {
 // on the base branch it was archived into — wherever HEAD is
 // (editOnBranch): the archive folder lives there, and the change's own
 // branch is gone.
-func (p *Project) acceptArchived(ctx context.Context, id, task, by string, ev []Evidence) (*State, error) {
+func (p *Project) acceptArchived(ctx context.Context, id string, a acceptance, ev []Evidence) (*State, error) {
+	task := a.task
 	// The base is the branch the change was archived into, as its state
 	// records it; else, when this tree does not hold the archive, the base
 	// of the branch HEAD is on.
@@ -135,8 +176,12 @@ func (p *Project) acceptArchived(ctx context.Context, id, task, by string, ev []
 	}
 	stateRel := p.Rel(filepath.Join(p.ArchiveDir(), folder, "state.json"))
 	docRel := p.Rel(filepath.Join(p.ArchiveDir(), folder, "change.md"))
+	notes, err := p.readNotes(a.notes)
+	if err != nil {
+		return nil, err
+	}
 	var st *State
-	_, err := p.editOnBranch(ctx, base, "apex: "+id+" accepted "+task+" (archived)\n\nChange: "+id, []string{stateRel, docRel},
+	_, err = p.editOnBranch(ctx, base, "apex: "+id+" accepted "+task+" (archived)\n\n"+a.trailers(id), []string{stateRel, docRel},
 		func(cur map[string][]byte) (map[string][]byte, error) {
 			if cur[stateRel] == nil || cur[docRel] == nil {
 				return nil, &FailError{Code: "change.no-state", Msg: "the archived change " + id + " (" + folder + ") has no state.json or change.md"}
@@ -152,7 +197,7 @@ func (p *Project) acceptArchived(ctx context.Context, id, task, by string, ev []
 			if err := humanTask(doc, id, task); err != nil {
 				return nil, err
 			}
-			withAcceptance(s, doc, task, by, ev)
+			withAcceptance(s, doc, a.record(ev))
 			if s.Baseline == nil {
 				s.Baseline = []Baseline{}
 			}
@@ -161,11 +206,14 @@ func (p *Project) acceptArchived(ctx context.Context, id, task, by string, ev []
 				return nil, err
 			}
 			st = s
-			return map[string][]byte{stateRel: append(data, '\n')}, nil
+			files := map[string][]byte{stateRel: append(data, '\n')}
+			maps.Copy(files, notes)
+			return files, nil
 		})
 	if err != nil {
 		return nil, err
 	}
+	p.dropCommittedNotes(ctx, base, notes)
 	return st, nil
 }
 
@@ -213,6 +261,7 @@ func (p *Project) archivedAwaitingHuman() []ChangeStatus {
 		cs := ChangeStatus{
 			ID: c.ID, Title: c.Doc.Title, Milestone: c.Doc.Meta.Milestone, Status: StatusArchived, Lane: LaneMilestone,
 			PendingHuman: pending, AwaitingHuman: pending,
+			Accepted: c.State.Accepted, Delegate: p.delegateStatuses(c.ID),
 		}
 		if c.Doc.IsFix() {
 			cs.Lane = LaneFix
