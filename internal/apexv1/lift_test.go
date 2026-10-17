@@ -181,6 +181,8 @@ func liftFiles() map[string]string {
 		"development/planning/product-brief.md":                  "# Brief\n",
 		"development/planning/sprint-change-proposal-2026-09.md": "# Proposal\n",
 		"main.go":         liftMainGo,
+		"pages.go":        "package main\n\n// Pages splits the trace.\n//\n// Story 1.1: Automatic Pagination\n//\n// More text.\nfunc Pages() {}\n",
+		"messy.go":        "package main\n\n// Story 1.1: messy\nfunc  messy() {}\n",
 		"check.sh":        "#!/bin/sh\n# Story 1.1: the unit check\ntest -f main.go # Epic 1\n",
 		"tool.py":         "# DW-42: retry\ndef story_1_1():\n    return '# Story 1.1'  # see Story 1.1\n",
 		"docs/guide.md":   "Read ADR-0004 and development/governance/adrs/adr-0006_limit-64.md. Story 1.1 stays in docs.\n",
@@ -364,6 +366,10 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	after, err := goTokens(gotGo)
 	require.NoError(t, err)
 	require.Equal(t, before, after)
+	// L5: gofmt on what the lift edits, not on what it did not format.
+	require.Equal(t, "package main\n\n// Pages splits the trace.\n//\n// # Automatic Pagination\n//\n// More text.\nfunc Pages() {}\n", read(t, p, "pages.go"))
+	require.Equal(t, "package main\n\n// Messy\nfunc  messy() {}\n", read(t, p, "messy.go"))
+	require.Equal(t, []string{"messy.go"}, res.GoUnformatted)
 	require.Equal(t, "#!/bin/sh\n# The unit check\ntest -f main.go\n", read(t, p, "check.sh"))
 	st, err := os.Stat(filepath.Join(root, "check.sh"))
 	require.NoError(t, err)

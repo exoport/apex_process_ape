@@ -218,3 +218,24 @@ func TestIsDataComment(t *testing.T) {
 		require.Equal(t, want, isDataComment(text), text)
 	}
 }
+
+// L5, from mdpdf: removing "Story 5.10: " left a short capitalised line
+// between blank comment lines, which gofmt reads as a heading; lint went
+// red on it. An edited Go file that was gofmt-clean at the tag comes back
+// formatted; one that was not is left as edited.
+func TestGofmtLifted(t *testing.T) {
+	v := testVocab()
+	src := "package x\n\n// Paginate splits the trace.\n//\n// Story 5.10: Automatic ECG Pagination\n//\n// More text.\nfunc Paginate() {}\n"
+	ed, err := editComments("x.go", src, langGo, v, nil)
+	require.NoError(t, err)
+	require.Contains(t, ed.New, "\n// Automatic ECG Pagination\n", "unformatted, gofmt would flag it")
+	out, why := gofmtLifted(src, ed.New)
+	require.Empty(t, why)
+	require.Equal(t, "package x\n\n// Paginate splits the trace.\n//\n// # Automatic ECG Pagination\n//\n// More text.\nfunc Paginate() {}\n", out)
+
+	unclean := "package x\n\n// Story 5.10: Automatic ECG Pagination\nfunc  Paginate() {}\n"
+	ed, err = editComments("x.go", unclean, langGo, v, nil)
+	require.NoError(t, err)
+	out, why = gofmtLifted(unclean, ed.New)
+	require.Empty(t, out+why, "not gofmt-clean at the tag: left as edited, not reformatted")
+}

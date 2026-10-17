@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"go/format"
 	"regexp"
 	"slices"
 	"strings"
@@ -223,6 +224,30 @@ func isDataComment(text string) bool {
 		}
 	}
 	return false
+}
+
+// gofmtLifted formats an edited Go file as gofmt would (L5): stripping an
+// id can leave a short line that the doc-comment rules read as a heading,
+// or an indent they read as a code block, and lint-gated projects went red
+// on exactly that. A file that was gofmt-clean at the tag comes back
+// formatted; one that was not is left as edited ("" and no reason), so the
+// lift does not reformat code it did not touch. why is set when the edit
+// does not format, or formatting changed the token stream: the file is
+// then left unedited, never written broken.
+func gofmtLifted(oldSrc, newSrc string) (out, why string) {
+	if was, err := format.Source([]byte(oldSrc)); err != nil || string(was) != oldSrc {
+		return "", ""
+	}
+	got, err := format.Source([]byte(newSrc))
+	if err != nil {
+		return "", "the edited file does not format (" + err.Error() + ")"
+	}
+	a, errA := goTokens(oldSrc)
+	b, errB := goTokens(string(got))
+	if errA != nil || errB != nil || !slices.Equal(a, b) {
+		return "", "formatting the edited file changed its token stream"
+	}
+	return string(got), ""
 }
 
 // identWordRe is an identifier-shaped word.

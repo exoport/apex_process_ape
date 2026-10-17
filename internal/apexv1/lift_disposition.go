@@ -217,6 +217,14 @@ func (lf *lifter) disposition() string {
 		p("\n")
 	}
 
+	if len(r.GoUnformatted) > 0 {
+		p("Go files that were not gofmt-clean at %s: edited, not formatted — `gofmt -l` flags them as it did before:\n\n", LiftTag)
+		for _, f := range r.GoUnformatted {
+			p("- `%s`\n", f)
+		}
+		p("\n")
+	}
+
 	p("## References to removed paths\n\n")
 	if len(r.DanglingRefs) == 0 {
 		p("None.\n\n")

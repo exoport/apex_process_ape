@@ -76,7 +76,11 @@ The commit:
                  token stream without comments is checked unchanged; other languages:
                  the text outside comments, re-tokenized, is checked unchanged (blank
                  lines and trailing whitespace aside) — a file failing its check is
-                 left unedited and listed
+                 left unedited and listed. An edited Go file that was gofmt-clean at
+                 the tag is formatted with go/format (an id's removal can leave a
+                 line gofmt reads as a heading or a code block); one that then does
+                 not format is left unedited and listed, and one that was not clean
+                 at the tag is edited, not reformatted, and listed
   carries        ## Code Validation (project-context.md) into AGENTS.md ## Commands,
                  and the runnable ones, joined with &&, into regression: in
                  _apex/config.yaml (rewritten to project_name, development_folder,
@@ -163,6 +167,9 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 	}
 	for _, s := range r.Skipped {
 		fmt.Fprintf(w, "left      %s — %s\n", s.File, s.Reason)
+	}
+	for _, f := range r.GoUnformatted {
+		fmt.Fprintf(w, "gofmt     %s — not gofmt-clean at %s: edited, not formatted\n", f, apexv1.LiftTag)
 	}
 	if n := len(r.IDsLeft); n > 0 {
 		fmt.Fprintf(w, "ids left  %d in identifiers, strings or directives (listed in %s)\n", n, r.Disposition)

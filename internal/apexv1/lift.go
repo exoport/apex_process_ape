@@ -88,20 +88,23 @@ type LiftResult struct {
 	Changed   []LiftFileChange `json:"changed"`
 	// ADRsNotConverted are record-shaped files no id could be read from:
 	// left in place.
-	ADRsNotConverted    []string        `json:"adrs_not_converted,omitempty"`
-	UnresolvedCitations []LiftIDRef     `json:"unresolved_adr_citations,omitempty"`
-	IDsLeft             []LiftIDRef     `json:"ids_left,omitempty"`
-	Skipped             []LiftSkip      `json:"skipped,omitempty"`
-	DanglingRefs        []LiftIDRef     `json:"references_to_removed_paths,omitempty"`
-	Gates               LiftGates       `json:"gates"`
-	Candidates          []LiftCandidate `json:"rule_candidates"`
-	Readings            []string        `json:"readings,omitempty"`
-	Disposition         string          `json:"disposition"`
-	Init                *InitResult     `json:"init,omitempty"`
-	CommitMessage       string          `json:"commit_message"`
-	Commit              string          `json:"commit,omitempty"`
-	Regression          *CheckResult    `json:"regression,omitempty"`
-	RegressionNote      string          `json:"regression_note,omitempty"`
+	ADRsNotConverted    []string    `json:"adrs_not_converted,omitempty"`
+	UnresolvedCitations []LiftIDRef `json:"unresolved_adr_citations,omitempty"`
+	IDsLeft             []LiftIDRef `json:"ids_left,omitempty"`
+	Skipped             []LiftSkip  `json:"skipped,omitempty"`
+	// GoUnformatted are edited Go files that were not gofmt-clean at the
+	// tag: their edit is not formatted either (L5).
+	GoUnformatted  []string        `json:"go_not_formatted,omitempty"`
+	DanglingRefs   []LiftIDRef     `json:"references_to_removed_paths,omitempty"`
+	Gates          LiftGates       `json:"gates"`
+	Candidates     []LiftCandidate `json:"rule_candidates"`
+	Readings       []string        `json:"readings,omitempty"`
+	Disposition    string          `json:"disposition"`
+	Init           *InitResult     `json:"init,omitempty"`
+	CommitMessage  string          `json:"commit_message"`
+	Commit         string          `json:"commit,omitempty"`
+	Regression     *CheckResult    `json:"regression,omitempty"`
+	RegressionNote string          `json:"regression_note,omitempty"`
 }
 
 type lifter struct {
@@ -543,6 +546,20 @@ func (lf *lifter) plan() error {
 					lf.res.Skipped = append(lf.res.Skipped, LiftSkip{File: rel, Reason: lang.String() + ": " + err.Error(), IDs: n, ADRCitations: a})
 				}
 				continue
+			}
+			if lang == langGo && ed.New != src {
+				out, why := gofmtLifted(src, ed.New)
+				switch {
+				case why != "":
+					if n, a := len(vocab.spans(src)), len(citedADRs(src)); n+a > 0 {
+						lf.res.Skipped = append(lf.res.Skipped, LiftSkip{File: rel, Reason: "go: " + why + ": left unedited", IDs: n, ADRCitations: a})
+					}
+					continue
+				case out == "":
+					lf.res.GoUnformatted = append(lf.res.GoUnformatted, rel)
+				default:
+					ed.New = out
+				}
 			}
 			if ed.New != src {
 				lf.writes[rel] = ed.New
