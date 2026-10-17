@@ -399,6 +399,10 @@ func newStatusCmd() *cobra.Command {
     it — the next writing command rolls a crashed one back (archive.interrupted; see
     ` + "`ape change archive --help`" + `)
   - next: what the way of working says comes next, derived from the state alone
+  - the roadmap's Next (JSON "roadmap_next": ["2026-10-16 <text> (from <id>)", …], []
+    when none; a count line in the human output): the findings noticed out of scope that
+    apex-plan triages, as the base branch's roadmap.md holds them (` + "`ape next add`" + ` writes
+    there from any branch). Not the same field as "next", the step above
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
   - the latest ape task run (JSON "latest_run": {skill, run_id, status, stopped,
@@ -456,6 +460,9 @@ func statusLong(r *apexv1.StatusReport) string {
 	if n := len(r.OutsideFlow); n > 0 {
 		fmt.Fprintf(&b, "\nOutside the change flow: %d commit(s) on the base since the last archive touch code with no Change: trailer (newest %.7s %s; ape status --json: outside_flow)\n",
 			n, r.OutsideFlow[0].SHA, r.OutsideFlow[0].Subject)
+	}
+	if n := len(r.RoadmapNext); n > 0 {
+		fmt.Fprintf(&b, "\nNext (roadmap): %d finding(s) to triage at the next delivery (ape status --json: roadmap_next)\n", n)
 	}
 	if u := r.BaseUpstream; u != nil && u.Behind == 0 {
 		// Behind is in the brief already.

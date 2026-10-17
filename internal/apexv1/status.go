@@ -117,6 +117,10 @@ type StatusReport struct {
 	PreExistingRed []PreExistingRed `json:"pre_existing_red"`
 	Spend          Spend            `json:"spend"`
 	Next           string           `json:"next"`
+	// RoadmapNext is the roadmap's Next items (H26, D60): findings noticed
+	// out of scope, one line each without the list marker, from the base
+	// branch's roadmap.md. Always present ([] when none).
+	RoadmapNext []string `json:"roadmap_next"`
 	// Docs is _apex/config.yaml's docs: block (H21), always present ({}
 	// when unset): the changelog and user docs a user-visible change
 	// updates, for apex-change and apex-review to read.
@@ -145,7 +149,7 @@ type StatusReport struct {
 //
 //nolint:gocyclo // one section per part of the report, each guarded by what it reads
 func (p *Project) Status() *StatusReport {
-	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Fixes: []string{}, OutsideFlow: []OutsideFlow{}}
+	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Fixes: []string{}, OutsideFlow: []OutsideFlow{}, RoadmapNext: []string{}}
 	cfg, cfgErr := LoadConfig(p.Root)
 	if cfgErr == nil && cfg.ProjectName != "" {
 		r.Project = cfg.ProjectName
@@ -267,6 +271,7 @@ func (p *Project) Status() *StatusReport {
 	base := p.statusBase(r.Branch)
 	r.BaseUpstream = p.upstreamOf(ctx, base)
 	r.OutsideFlow = p.outsideFlow(ctx, base)
+	r.RoadmapNext = p.roadmapNext(ctx, base)
 	if j := p.LoadArchiveJournal(); j != nil {
 		r.ArchiveJournal, r.ArchiveRunning = j, j.Running()
 	}
