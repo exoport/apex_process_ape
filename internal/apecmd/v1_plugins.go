@@ -68,7 +68,7 @@ func checkPluginsProject(ctx context.Context, env doctorEnv) CheckResult {
 	res := CheckResult{Name: "plugins.project"}
 	p, ok := v1ProjectAt(env.ProjectRoot)
 	if !ok {
-		res.Status, res.Message = StatusSkip, "not an APEX v1 project"
+		res.Status, res.Message = StatusSkip, msgNotV1Project
 		return res
 	}
 	cfg, err := apexv1.LoadConfig(p.Root)

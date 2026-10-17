@@ -32,6 +32,8 @@ const CodeRefMoved = "git.ref-moved"
 // content; nil content deletes the file) on the base branch as one commit
 // with msg, wherever HEAD is. It returns the new commit, "" when the
 // files already hold that content.
+//
+//nolint:unparam // base is the caller's branch, as in every branch write here; only the tests call it, on main
 func (p *Project) commitOnBase(ctx context.Context, base string, files map[string][]byte, msg string) (string, error) {
 	return p.commitOnBranch(ctx, base, files, msg)
 }

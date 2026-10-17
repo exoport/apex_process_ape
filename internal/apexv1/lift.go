@@ -3,6 +3,7 @@ package apexv1
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -104,7 +105,7 @@ type LiftResult struct {
 }
 
 type lifter struct {
-	ctx    context.Context
+	ctx    context.Context //nolint:containedctx // a lifter lives for one Lift call and carries that call's ctx
 	root   string
 	opt    LiftOptions
 	layout *liftLayout
@@ -172,11 +173,10 @@ func Lift(ctx context.Context, root string, opt LiftOptions) (*LiftResult, error
 		lf.devRel = r
 	}
 	lf.res.Version, lf.res.VersionSource = lf.layout.Version, lf.layout.VersionSource
-	for _, e := range lf.preflight() {
+	for _, fe := range lf.preflight() {
 		if !opt.DryRun {
-			return nil, e
+			return nil, fe
 		}
-		fe := e.(*FailError) //nolint:errcheck // preflight returns only FailErrors
 		lf.res.Preflight = append(lf.res.Preflight, LiftProblem{Code: fe.Code, Message: fe.Msg})
 	}
 	if err := lf.plan(); err != nil {
@@ -235,18 +235,18 @@ func installTerritory(rel string) bool {
 	case rel == ".gitignore", strings.HasPrefix(rel, ".claude/skills/"), strings.HasPrefix(rel, ".aboard/"):
 		return true
 	case strings.HasPrefix(rel, "_apex/"):
-		return rel != "_apex/config.yaml" && !strings.HasPrefix(rel, "_apex/state/")
+		return rel != configYAML && !strings.HasPrefix(rel, "_apex/state/")
 	}
 	return false
 }
 
 // preflight checks the tree and the tag. The tag check is the one network
 // call: git ls-remote against the current branch's upstream remote.
-func (lf *lifter) preflight() []error {
-	var out []error
+func (lf *lifter) preflight() []*FailError {
+	var out []*FailError
 	status, err := gitRaw(lf.ctx, lf.root, "status", "--porcelain=v1", "--untracked-files=normal")
 	if err != nil {
-		return []error{&FailError{Code: CodeGitStatusFailed, Msg: "git status: " + err.Error() + " — fix the repository, then lift"}}
+		return []*FailError{{Code: CodeGitStatusFailed, Msg: "git status: " + err.Error() + " — fix the repository, then lift"}}
 	}
 	var dirty []string
 	for line := range strings.SplitSeq(status, "\n") {
@@ -290,7 +290,7 @@ func (lf *lifter) preflight() []error {
 		remote, _ = git(lf.ctx, lf.root, "config", "--get", "branch."+branch+".remote")
 	}
 	if remote == "" || remote == "." {
-		return append(out, &FailError{Code: "lift.tag-not-pushed", Msg: "the current branch has no upstream remote, so " + LiftTag +
+		return append(out, &FailError{Code: CodeTagNotPushed, Msg: "the current branch has no upstream remote, so " + LiftTag +
 			" cannot be shown to be pushed — set one (`git branch -u <remote>/<branch>`), `git push <remote> " + LiftTag + "`, then lift"})
 	}
 	lf.res.Remote = remote
@@ -316,9 +316,9 @@ func (lf *lifter) preflight() []error {
 	}
 	switch {
 	case remoteSHA == "":
-		out = append(out, &FailError{Code: "lift.tag-not-pushed", Msg: LiftTag + " is not on " + remote + " — `git push " + remote + " " + LiftTag + "`, then lift"})
+		out = append(out, &FailError{Code: CodeTagNotPushed, Msg: LiftTag + " is not on " + remote + " — `git push " + remote + " " + LiftTag + "`, then lift"})
 	case remoteSHA != tagSHA:
-		out = append(out, &FailError{Code: "lift.tag-not-pushed", Msg: LiftTag + " on " + remote + " is " + short(remoteSHA) + ", not " + short(tagSHA) +
+		out = append(out, &FailError{Code: CodeTagNotPushed, Msg: LiftTag + " on " + remote + " is " + short(remoteSHA) + ", not " + short(tagSHA) +
 			" — the archive must be the commit being lifted: a person resolves which is right, then pushes it"})
 	}
 	return out
@@ -362,7 +362,7 @@ func (lf *lifter) dirtyAt(rel string) bool {
 func globRegexp(g string) (*regexp.Regexp, error) {
 	g = strings.TrimPrefix(filepath.ToSlash(strings.TrimSpace(g)), "./")
 	if g == "" {
-		return nil, fmt.Errorf("empty")
+		return nil, errors.New("empty")
 	}
 	if strings.HasSuffix(g, "/") {
 		g += "**"
@@ -396,6 +396,11 @@ func globRegexp(g string) (*regexp.Regexp, error) {
 
 const liftMaxFileBytes = 4 << 20
 
+// liftBinarySniff is how much of a file is searched for a NUL byte to
+// call it binary: git's own heuristic.
+const liftBinarySniff = 8000
+
+//nolint:gocyclo,maintidx // the lift plan is one ordered pass — ADRs, renumbering, edits, gates, CLAUDE.md — each step reading the last's results
 func (lf *lifter) plan() error {
 	ctx := lf.ctx
 	paths := lf.layout.Cfg.Paths
@@ -433,7 +438,8 @@ func (lf *lifter) plan() error {
 	next := 1
 	var all []v0ADR
 	dups := map[int]string{} // index in all → the ADR its id's citations go to
-	for _, a := range local {
+	for i := range local {
+		a := local[i]
 		if first, dup := num[a.num]; dup {
 			a.slug += "-" + fmtNum4(next)
 			dups[len(all)] = "ADR-" + fmtNum4(first)
@@ -451,8 +457,8 @@ func (lf *lifter) plan() error {
 			}
 		}
 	}
-	for _, a := range local {
-		for _, n := range citedADRs(a.body) {
+	for i := range local {
+		for _, n := range citedADRs(local[i].body) {
 			if _, ok := num[n]; !ok {
 				cited[n] = true
 			}
@@ -466,14 +472,14 @@ func (lf *lifter) plan() error {
 				"; the governance repository is not resolvable here (governance_repository_path/url), so no canon ADR was copied — they are listed under unresolved citations"
 		default:
 			canon := findCanonADRs(gov, cited)
-			for _, a := range canon {
-				num[a.num] = next
-				all = append(all, a)
+			for i := range canon {
+				num[canon[i].num] = next
+				all = append(all, canon[i])
 				next++
 			}
 			var got []string
-			for _, a := range canon {
-				got = append(got, "ADR-"+fmtNum4(a.num))
+			for i := range canon {
+				got = append(got, "ADR-"+fmtNum4(canon[i].num))
 			}
 			lf.res.Canon = "governance repository " + gov + ": copied " + strings.Join(got, ", ")
 			if len(got) == 0 {
@@ -481,19 +487,20 @@ func (lf *lifter) plan() error {
 			}
 		}
 	}
-	for i, a := range all {
-		if !a.canon {
+	for i := range all {
+		if a := &all[i]; !a.canon {
 			pathMap[a.rel] = decisionsRel + "/" + fmtNum4(i+1) + "-" + a.slug + ".md"
 		}
 	}
 	rw := newADRRewriter(num, pathMap, lf.rel(paths.ADRs))
 	lf.rw = rw
-	for i, a := range all {
+	for i := range all {
+		a := &all[i]
 		date := ""
 		if !a.canon {
 			date = gitFirstDate(ctx, lf.root, a.rel)
 		}
-		la := convertADR(a, i+1, rw, date)
+		la := convertADR(*a, i+1, rw, date)
 		la.Path = decisionsRel + "/" + la.Path
 		if first, ok := dups[i]; ok {
 			la.Gaps = append(la.Gaps, "a second v0 record with id "+la.Old+": citations of that id were rewritten to "+first)
@@ -567,7 +574,7 @@ func (lf *lifter) plan() error {
 			lf.writes["CLAUDE.md"] = out
 		}
 	}
-	lf.writes["_apex/config.yaml"] = lf.v1Config()
+	lf.writes[configYAML] = lf.v1Config()
 	lf.res.Candidates = lf.candidates()
 	lf.res.Readings = lf.readings()
 	lf.res.DanglingRefs = lf.dangling()
@@ -579,12 +586,12 @@ func (lf *lifter) plan() error {
 }
 
 func intList(set map[int]bool) string {
-	var ns []int
+	ns := make([]int, 0, len(set))
 	for n := range set {
 		ns = append(ns, n)
 	}
 	sort.Ints(ns)
-	var out []string
+	out := make([]string, 0, len(ns))
 	for _, n := range ns {
 		out = append(out, "ADR-"+fmtNum4(n))
 	}
@@ -641,21 +648,21 @@ func (lf *lifter) loadFiles() error {
 		return &FailError{Code: CodeGitStatusFailed, Msg: "git ls-files: " + err.Error() + " — fix the repository, then lift"}
 	}
 	for entry := range strings.SplitSeq(out, "\x00") {
-		tab := strings.IndexByte(entry, '\t')
-		if tab < 0 {
+		_, rel, ok := strings.Cut(entry, "\t")
+		if !ok {
 			continue
 		}
-		mode, rel := entry[:6], entry[tab+1:]
+		mode := entry[:6]
 		if mode != "100644" && mode != "100755" {
 			continue
 		}
 		// config.yaml is rewritten whole; vendored code is not the
 		// project's.
-		if rel == "_apex/config.yaml" || lf.isDeleted(rel) || lf.dirtyAt(rel) || strings.HasPrefix(rel, "vendor/") || strings.Contains(rel, "node_modules/") {
+		if rel == configYAML || lf.isDeleted(rel) || lf.dirtyAt(rel) || strings.HasPrefix(rel, "vendor/") || strings.Contains(rel, "node_modules/") {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(lf.root, filepath.FromSlash(rel)))
-		if err != nil || len(data) > liftMaxFileBytes || bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0 {
+		if err != nil || len(data) > liftMaxFileBytes || bytes.IndexByte(data[:min(len(data), liftBinarySniff)], 0) >= 0 {
 			continue
 		}
 		lf.files = append(lf.files, rel)
@@ -668,7 +675,7 @@ func (lf *lifter) loadFiles() error {
 // listKeptApex names what stays under _apex/ that is not v1's own.
 func (lf *lifter) listKeptApex() {
 	out, _ := git(lf.ctx, lf.root, "ls-files", "--", "_apex")
-	known := map[string]bool{"_apex/config.yaml": true, frameworkYAML: true}
+	known := map[string]bool{configYAML: true, frameworkYAML: true}
 	for f := range strings.SplitSeq(out, "\n") {
 		if f == "" || known[f] || lf.isDeleted(f) || strings.HasPrefix(f, "_apex/state/") {
 			continue
@@ -688,7 +695,7 @@ const (
 // a file the lift deletes.
 func (lf *lifter) dropV0Imports(doc string) string {
 	lines := strings.SplitAfter(doc, "\n")
-	var out []string
+	out := make([]string, 0, len(lines))
 	in := false
 	for _, l := range lines {
 		t := strings.TrimSpace(l)
@@ -739,7 +746,7 @@ func yamlString(s string) string {
 // dangling lists references to removed paths left in kept text files:
 // CI guards and scripts that police the v0 corpus surface here.
 func (lf *lifter) dangling() []LiftIDRef {
-	var tops []string
+	tops := make([]string, 0, len(lf.deletes))
 	for _, d := range lf.deletes {
 		tops = append(tops, regexp.QuoteMeta(d))
 	}
@@ -822,7 +829,7 @@ func (lf *lifter) apply() error {
 	}
 	if len(rm) > 0 {
 		if _, err := git(ctx, lf.root, append([]string{"rm", "-r", "-q", "--ignore-unmatch"}, pathspec(rm)...)...); err != nil {
-			return &FailError{Code: "lift.write-failed", Msg: "removing the v0 families: " + err.Error() + " — `git reset --hard` restores the tree; fix the cause, then lift again"}
+			return &FailError{Code: CodeLiftWriteFailed, Msg: "removing the v0 families: " + err.Error() + " — `git reset --hard` restores the tree; fix the cause, then lift again"}
 		}
 	}
 	commit := append([]string(nil), rm...)
@@ -836,7 +843,7 @@ func (lf *lifter) apply() error {
 			continue
 		}
 		if err := liftWrite(filepath.Join(lf.root, filepath.FromSlash(rel)), lf.writes[rel]); err != nil {
-			return &FailError{Code: "lift.write-failed", Msg: "writing " + rel + ": " + err.Error() + " — `git reset --hard` restores the tree; fix the cause, then lift again"}
+			return &FailError{Code: CodeLiftWriteFailed, Msg: "writing " + rel + ": " + err.Error() + " — `git reset --hard` restores the tree; fix the cause, then lift again"}
 		}
 		commit = append(commit, rel)
 	}
@@ -911,13 +918,13 @@ func (lf *lifter) apply() error {
 
 // liftWrite writes a file, keeping an existing file's mode (a script
 // stays executable).
-func liftWrite(path, content string) error {
-	st, statErr := os.Stat(path)
-	if err := writeFileAtomic(path, content); err != nil {
+func liftWrite(file, content string) error {
+	st, statErr := os.Stat(file)
+	if err := writeFileAtomic(file, content); err != nil {
 		return err
 	}
 	if statErr == nil {
-		return os.Chmod(path, st.Mode().Perm())
+		return os.Chmod(file, st.Mode().Perm())
 	}
 	return nil
 }
@@ -967,7 +974,8 @@ func (lf *lifter) commitMessage() string {
 	fmt.Fprintf(&b, "- writes %s for apex-plan and the person\n", r.Disposition)
 	if len(r.ADRs) > 0 {
 		b.WriteString("\nADRs, old -> new:\n")
-		for _, a := range r.ADRs {
+		for i := range r.ADRs {
+			a := &r.ADRs[i]
 			from := ""
 			if a.Canon {
 				from = " (canon)"

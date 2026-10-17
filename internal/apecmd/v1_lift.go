@@ -136,7 +136,8 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 	for _, d := range r.Deleted {
 		fmt.Fprintf(w, "%-9s %s  (%s)\n", verb("deleted", "delete"), d.Path, d.Family)
 	}
-	for _, a := range r.ADRs {
+	for i := range r.ADRs {
+		a := &r.ADRs[i]
 		line := fmt.Sprintf("adr       %s -> %s  %s  [%s]", a.Old, a.New, a.Path, a.Status)
 		if len(a.Gaps) > 0 {
 			line += "  gaps: " + strings.Join(a.Gaps, "; ")

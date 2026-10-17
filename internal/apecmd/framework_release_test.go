@@ -80,7 +80,7 @@ func TestContract_FrameworkUpdateNoCommitWritesNoCommits(t *testing.T) {
 	fakeFrameworkForContract(t, fwRepo)
 	root := newTestProject(t, realProjectConfig)
 	gitInit(t, root)
-	writeLegacyLedger(t, root, legacyLedgerFixture)
+	writeLegacyLedger(t, root)
 	gitCommitAll(t, root, "project baseline")
 	before := gitLog(t, root)
 

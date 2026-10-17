@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -52,7 +53,7 @@ func (c *CommitConfig) UnmarshalYAML(n *yaml.Node) error {
 		return fmt.Errorf("commit.hooks: %q is not run or skip", p.Hooks)
 	}
 	if strings.Contains(p.Subject, "\n") {
-		return fmt.Errorf("commit.subject: must be one line")
+		return errors.New("commit.subject: must be one line")
 	}
 	rest := strings.NewReplacer("{type}", "", "{title}", "", "{id}", "").Replace(p.Subject)
 	if strings.ContainsAny(rest, "{}") {

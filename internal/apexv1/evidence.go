@@ -75,30 +75,27 @@ func evidenceName(i int, ref string) string {
 }
 
 // writeEvidence replaces dir with one evidence file per result, and the
-// extra files given (name → content). It returns the files written.
-func (p *Project) writeEvidence(dir string, results []CheckResult, extra map[string][]byte) ([]string, error) {
+// extra files given (name → content).
+func (p *Project) writeEvidence(dir string, results []CheckResult, extra map[string][]byte) error {
 	if err := os.RemoveAll(dir); err != nil {
-		return nil, err
+		return err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
+		return err
 	}
-	var written []string
 	for i := range results {
 		path := filepath.Join(dir, evidenceName(i, results[i].Task))
 		if err := writeFileAtomic(path, p.evidenceFile(&results[i])); err != nil {
-			return written, err
+			return err
 		}
-		written = append(written, p.Rel(path))
 	}
 	for name, data := range extra {
 		path := filepath.Join(dir, name)
 		if err := writeFileAtomic(path, string(data)); err != nil {
-			return written, err
+			return err
 		}
-		written = append(written, p.Rel(path))
 	}
-	return written, nil
+	return nil
 }
 
 // evidenceFile renders one check: its record, then its output from the
@@ -173,7 +170,7 @@ func (p *Project) writeMilestoneEvidence(id string, checks []CheckResult) (strin
 		}
 		extra["accept-red.json"] = append(append([]byte(nil), raw...), '\n')
 	}
-	if _, err := p.writeEvidence(dir, checks, extra); err != nil {
+	if err := p.writeEvidence(dir, checks, extra); err != nil {
 		return "", err
 	}
 	return p.Rel(dir), nil

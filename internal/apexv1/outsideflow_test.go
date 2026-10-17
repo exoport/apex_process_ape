@@ -7,7 +7,7 @@ import (
 )
 
 func outsideSubjects(r *StatusReport) []string {
-	out := []string{}
+	out := make([]string, 0, len(r.OutsideFlow))
 	for _, o := range r.OutsideFlow {
 		out = append(out, o.Subject)
 	}

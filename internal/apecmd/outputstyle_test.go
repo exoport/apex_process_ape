@@ -159,7 +159,7 @@ stages:
     chain:
       - skill: two
 `)
-	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, config.ModeTUI, spec, runConfig{})
+	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, spec, runConfig{})
 	require.NoError(t, err)
 	require.Equal(t, "Concise", styleOf(t, run))
 	require.Empty(t, perStage, "one style for the whole run needs no per-stage override")
@@ -179,7 +179,7 @@ stages:
     chain:
       - skill: two
 `)
-	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, config.ModeTUI, spec, runConfig{})
+	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, spec, runConfig{})
 	require.NoError(t, err)
 	require.Equal(t, config.DefaultOutputStyle, styleOf(t, run))
 	require.Len(t, perStage, 1)
@@ -202,7 +202,7 @@ stages:
     chain:
       - skill: two
 `)
-	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, config.ModeTUI, spec, runConfig{})
+	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, spec, runConfig{})
 	require.NoError(t, err)
 	require.Equal(t, "Concise", styleOf(t, run))
 	require.Len(t, perStage, 1)
@@ -222,7 +222,7 @@ stages:
       - skill: one
 `)
 	cfg := runConfig{outputStyle: "Learning", outputStyleSet: true}
-	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, config.ModeTUI, spec, cfg)
+	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, spec, cfg)
 	require.NoError(t, err)
 	require.Equal(t, "Learning", styleOf(t, run))
 	require.Empty(t, perStage)
@@ -241,7 +241,7 @@ stages:
       - skill: one
 `)
 	cfg := runConfig{outputStyle: config.InheritOutputStyle, outputStyleSet: true}
-	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, config.ModeTUI, spec, cfg)
+	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, spec, cfg)
 	require.NoError(t, err)
 	require.Empty(t, styleOf(t, run))
 	require.Empty(t, perStage)
@@ -270,7 +270,7 @@ stages:
       - skill: two
 `)
 	cfg := runConfig{outputStyle: "Concise"} // resolved from the CSV, flag untyped
-	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, config.ModeTUI, spec, cfg)
+	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, spec, cfg)
 	require.NoError(t, err)
 	require.Equal(t, "Concise", styleOf(t, run))
 	require.Empty(t, perStage, "an undeclared stage inherits; it must not be given an override")
@@ -289,7 +289,7 @@ func TestBuildSpecPrepends_SingleStepTaskSpecKeepsItsResolvedStyle(t *testing.T)
 	spec := pipeline.NewSingleStepSpec("apex-pattern-survey", step, nil)
 
 	cfg := runConfig{outputStyle: "Concise", outputStyleSet: true}
-	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, config.ModeTUI, spec, cfg)
+	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, spec, cfg)
 	require.NoError(t, err)
 	require.Empty(t, perStage)
 
@@ -307,7 +307,7 @@ stages:
     chain:
       - skill: one
 `)
-	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, config.ModeTUI, spec, runConfig{})
+	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, spec, runConfig{})
 	require.NoError(t, err)
 	require.Equal(t, config.DefaultOutputStyle, styleOf(t, run))
 	require.Nil(t, perStage)
@@ -348,14 +348,14 @@ stages:
       - skill: one
 `)
 	// From the spec's stage declaration.
-	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, config.ModeTUI, spec, runConfig{})
+	run, perStage, err := buildSpecPrepends("/usr/bin/ape", 4242, spec, runConfig{})
 	require.NoError(t, err)
 	require.Equal(t, "Concise", styleOf(t, perStage["a"]), "stage declaration folded")
 	require.Equal(t, config.DefaultOutputStyle, styleOf(t, run))
 
 	// From outside the spec: the flag, or ape task's per-skill table.
 	cfg := runConfig{outputStyle: "concise", outputStyleSet: true}
-	run, _, err = buildSpecPrepends("/usr/bin/ape", 4242, config.ModeTUI, spec, cfg)
+	run, _, err = buildSpecPrepends("/usr/bin/ape", 4242, spec, cfg)
 	require.NoError(t, err)
 	require.Equal(t, "Concise", styleOf(t, run), "externally-supplied style folded")
 }

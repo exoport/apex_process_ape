@@ -36,6 +36,8 @@ func NextLine(date, text, from string) string {
 // above the first milestone (apex-plan's form), after the list that
 // follows it; else in a new `## Next` section at the end. Code blocks are
 // skipped. The rest of the document is left as it is.
+//
+//nolint:gocyclo // three placements, tried in order, over one line scan that skips code blocks
 func AppendNextLines(roadmap []byte, lines []string) []byte {
 	if len(lines) == 0 {
 		return roadmap

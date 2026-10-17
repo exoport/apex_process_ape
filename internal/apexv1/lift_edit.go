@@ -37,11 +37,15 @@ var (
 	blockDecoRe = regexp.MustCompile(`^[ \t]*\*+(?:[ \t]|$)`)
 )
 
+// generatedHead is how much of a file is searched for a generator's
+// marker.
+const generatedHead = 2048
+
 // isGenerated reports a file a generator owns: its edits would be undone.
 func isGenerated(src string) bool {
 	head := src
-	if len(head) > 2048 {
-		head = head[:2048]
+	if len(head) > generatedHead {
+		head = head[:generatedHead]
 	}
 	return generatedRe.MatchString(head)
 }
@@ -52,6 +56,8 @@ func lineAt(src string, off int) int { return strings.Count(src[:off], "\n") + 1
 // editComments strips ids from, and renumbers ADR citations in, the
 // comments of one file, and lists the ids it leaves in code and strings.
 // An error means the file is left as it is (and listed).
+//
+//nolint:gocyclo // one pass over a file's segments: each branch is a reason a comment is left as written or how its removal is spliced
 func editComments(rel, src string, lang liftLang, vocab *liftVocab, adr *adrRewriter) (*liftFileEdit, error) {
 	res := &liftFileEdit{Rel: rel, Old: src, New: src}
 	var segs []tokSeg
@@ -226,8 +232,8 @@ func cleanComment(text string, block bool, vocab *liftVocab, adr *adrRewriter) (
 	var kept []string
 	for i, l := range lines {
 		lcr := ""
-		if strings.HasSuffix(l, "\r") {
-			l, lcr = strings.TrimSuffix(l, "\r"), "\r"
+		if trimmed, ok := strings.CutSuffix(l, "\r"); ok {
+			l, lcr = trimmed, "\r"
 		}
 		deco := blockDecoRe.FindString(l)
 		content := l[len(deco):]

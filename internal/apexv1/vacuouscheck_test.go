@@ -23,8 +23,9 @@ func TestParseTasks_Regression(t *testing.T) {
 		{ID: "T5", What: "suite stays green", Check: "make test", Regression: true, Line: c.Tasks[4].Line},
 	}, c.Tasks)
 	require.Empty(t, c.parse)
-	var cmds []string
-	for _, task := range c.CommandTasks() {
+	tasks := c.CommandTasks()
+	cmds := make([]string, 0, len(tasks))
+	for _, task := range tasks {
 		cmds = append(cmds, task.ID)
 	}
 	require.Equal(t, []string{"T1", "T2", "T3", "T5"}, cmds, "a regression task is a command task")

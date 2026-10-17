@@ -37,7 +37,7 @@ func (p *Project) Notify(ctx context.Context, event, change, reason string, warn
 	}
 	nctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), NotifyTimeout)
 	defer cancel()
-	c := exec.CommandContext(nctx, "sh", "-c", cfg.Notify)
+	c := exec.CommandContext(nctx, "sh", "-c", cfg.Notify) //nolint:gosec // the notifier is a shell command the project's _apex/config.yaml names, by design
 	c.Dir = p.Root
 	c.Env = append(os.Environ(), "APE_EVENT="+event, "APE_CHANGE="+change, "APE_REASON="+reason)
 	// A notifier that leaves a child holding the pipes must not hold ape.

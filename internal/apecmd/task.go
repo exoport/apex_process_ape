@@ -35,39 +35,9 @@ import (
 // collide with a user-typed message.
 const taskCommitDerivedSentinel = "\x01derived"
 
-func newTaskCmd() *cobra.Command {
-	var (
-		agentFlag          string
-		modelFlag          string
-		effortFlag         string
-		argsFlag           string
-		promptFlag         string
-		promptFileFlag     string
-		promptFlagName     string
-		handoffFlag        string
-		noCommitFlag       bool
-		taskCommitFlag     string
-		allowDirtyFlag     bool
-		idleTimeoutFlag    time.Duration
-		maxDurationFlag    time.Duration
-		outputFormat       string
-		jsonAlias          bool
-		cwdFlag            string
-		detachFlag         bool
-		quietFlag          bool
-		manifestDirFlag    string
-		ignoreProjSettings bool
-		outputStyleFlag    string
-		natsURLFlag        string
-		natsCredsFlag      string
-		eventsPrefixFlag   string
-		uploadTranscripts  bool
-		transcriptStore    string
-	)
-	cmd := &cobra.Command{
-		Use:   "task <skill>",
-		Short: "Run a single framework skill through the interactive PTY runner",
-		Long: `Run one framework skill as a single-step interactive run — everything a
+// taskLongHelp is `ape task --help`'s long text, kept out of newTaskCmd
+// so the constructor reads as flags and wiring.
+const taskLongHelp = `Run one framework skill as a single-step interactive run — everything a
 pipeline step gets (agent prefix, preflight, bridge hooks, manifest,
 telemetry) with all parameters passed as flags instead of a pipeline
 YAML file. Execution is PTY-interactive only: claude runs as a REPL,
@@ -200,7 +170,41 @@ session, or a v1 limit or ape floor refused it · 2 usage or
 preflight error, or an APEX v0 project (run its pinned v0 ape) · 3 REPL
 never became ready (last pane on stderr) · 5 upstream API failure ·
 6 the dispatch violated its declared commit ownership (the run itself
-may have succeeded) · 14 a claude.ai usage limit stopped the session.`,
+may have succeeded) · 14 a claude.ai usage limit stopped the session.`
+
+func newTaskCmd() *cobra.Command {
+	var (
+		agentFlag          string
+		modelFlag          string
+		effortFlag         string
+		argsFlag           string
+		promptFlag         string
+		promptFileFlag     string
+		promptFlagName     string
+		handoffFlag        string
+		noCommitFlag       bool
+		taskCommitFlag     string
+		allowDirtyFlag     bool
+		idleTimeoutFlag    time.Duration
+		maxDurationFlag    time.Duration
+		outputFormat       string
+		jsonAlias          bool
+		cwdFlag            string
+		detachFlag         bool
+		quietFlag          bool
+		manifestDirFlag    string
+		ignoreProjSettings bool
+		outputStyleFlag    string
+		natsURLFlag        string
+		natsCredsFlag      string
+		eventsPrefixFlag   string
+		uploadTranscripts  bool
+		transcriptStore    string
+	)
+	cmd := &cobra.Command{
+		Use:   "task <skill>",
+		Short: "Run a single framework skill through the interactive PTY runner",
+		Long:  taskLongHelp,
 		Example: `  ape task apex-shard-doc --args "--doc prd"
   ape task apex-create-prd --agent apex-agent-pm --model "opus[1m]" --prompt "a greeter CLI" --prompt-flag --prompt
   ape task apex-create-prd --agent apex-agent-pm --handoff _output/handoffs/2026-07-05-x.md --prompt-flag --prompt
@@ -567,39 +571,11 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	// CLAUDE_CODE_EFFORT_LEVEL, and nothing is passed when nothing decided.
 	var v1Launch *v1TaskLaunch
 	if p, ok := v1ProjectAt(o.projectRoot); ok {
-		// H1: the installed framework's ape floor, before anything else.
-		if err := v1ApeFloor(o.projectRoot, os.Stderr); err != nil {
-			return taskRun{}, &taskPreflightError{err: err}
-		}
-		l, err := decideV1TaskLaunch(p, o.skill, o.model, o.effort)
+		l, err := prepareV1Task(ctx, p, &o, &cfg)
 		if err != nil {
-			return taskRun{}, &taskPreflightError{err: err}
+			return taskRun{}, err
 		}
-		v1Launch = &l
-		o.model, o.effort = l.launch.Model, ""
-		cfg.effort, cfg.effortAsArg, cfg.effortSource = l.launch.Effort, true, l.launch.EffortSource
-		// Backlog 31: the project's hooks ride inline, so a hand-edited
-		// settings.json cannot drop them (apexv1.InlineHooks).
-		cfg.spawnSettings.hooks, cfg.spawnEnv = v1InlineHooks()
-		// H19, D49: an orchestrator does not run a milestone whose changes
-		// were blocked limits.consecutive_blocks times in a row.
-		if o.skill == v1OrchestratorSkill {
-			if err := p.OrchestratorLimits(ctx, o.args); err != nil {
-				return taskRun{}, &taskPreflightError{err: err}
-			}
-		}
-		// Backlog 30: the milestone's enforced budget refuses the start, or
-		// stops the session when its live spend reaches it.
-		if cfg.budgetWatch, err = newV1BudgetWatch(ctx, p, o.skill, o.args); err != nil {
-			return taskRun{}, &taskPreflightError{err: err}
-		}
-		// Backlog 36: the plugins _apex/config.yaml lists are installed at
-		// their refs before anything spawns, and enabled inline.
-		plugins, err := v1TaskPlugins(ctx, p, cfg.claudeBin)
-		if err != nil {
-			return taskRun{}, &taskPreflightError{err: err}
-		}
-		cfg.spawnSettings.settings = plugins
+		v1Launch = l
 	} else if err := v1ConfigError(o.projectRoot); err != nil {
 		return taskRun{}, &taskPreflightError{err: err}
 	}
@@ -720,6 +696,45 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		ManifestDir: manifestDir,
 		HeadBefore:  headBefore,
 	}, nil
+}
+
+// prepareV1Task makes an APEX v1 project's launch decisions for
+// dispatchTaskWith, writing them into o and cfg. Every error is a
+// preflight failure.
+func prepareV1Task(ctx context.Context, p *apexv1.Project, o *taskOptions, cfg *runConfig) (*v1TaskLaunch, error) {
+	// H1: the installed framework's ape floor, before anything else.
+	if err := v1ApeFloor(o.projectRoot, os.Stderr); err != nil {
+		return nil, &taskPreflightError{err: err}
+	}
+	l, err := decideV1TaskLaunch(p, o.skill, o.model, o.effort)
+	if err != nil {
+		return nil, &taskPreflightError{err: err}
+	}
+	o.model, o.effort = l.launch.Model, ""
+	cfg.effort, cfg.effortAsArg, cfg.effortSource = l.launch.Effort, true, l.launch.EffortSource
+	// Backlog 31: the project's hooks ride inline, so a hand-edited
+	// settings.json cannot drop them (apexv1.InlineHooks).
+	cfg.spawnSettings.hooks, cfg.spawnEnv = v1InlineHooks()
+	// H19, D49: an orchestrator does not run a milestone whose changes
+	// were blocked limits.consecutive_blocks times in a row.
+	if o.skill == v1OrchestratorSkill {
+		if err := p.OrchestratorLimits(ctx, o.args); err != nil {
+			return nil, &taskPreflightError{err: err}
+		}
+	}
+	// Backlog 30: the milestone's enforced budget refuses the start, or
+	// stops the session when its live spend reaches it.
+	if cfg.budgetWatch, err = newV1BudgetWatch(ctx, p, o.skill, o.args); err != nil {
+		return nil, &taskPreflightError{err: err}
+	}
+	// Backlog 36: the plugins _apex/config.yaml lists are installed at
+	// their refs before anything spawns, and enabled inline.
+	plugins, err := v1TaskPlugins(ctx, p, cfg.claudeBin)
+	if err != nil {
+		return nil, &taskPreflightError{err: err}
+	}
+	cfg.spawnSettings.settings = plugins
+	return &l, nil
 }
 
 // runTask is `ape task`: dispatch, report, exit. The exiting half of the

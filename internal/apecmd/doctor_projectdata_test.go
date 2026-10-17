@@ -302,7 +302,7 @@ func TestCheckMigrationPending(t *testing.T) {
 	require.Equal(t, StatusOK, res.Status, res.Message)
 
 	// A legacy ledger with no store: pending.
-	writeLegacyLedger(t, root, legacyLedgerFixture)
+	writeLegacyLedger(t, root)
 	res = checkMigrationPending(ctx, projectDataEnv(root))
 	require.Equal(t, StatusWarn, res.Status)
 	require.Contains(t, res.Message, "deferred")
@@ -316,7 +316,7 @@ func TestPendingMigrations_DetectedFromDiskState(t *testing.T) {
 	require.Len(t, pendingMigrations(root), 1)
 	require.False(t, pendingMigrations(root)[0].Pending, "no legacy file, nothing to do")
 
-	writeLegacyLedger(t, root, legacyLedgerFixture)
+	writeLegacyLedger(t, root)
 	require.True(t, pendingMigrations(root)[0].Pending)
 
 	// After migrating, it reads as done — with no version marker stored
@@ -335,7 +335,7 @@ func TestRunProjectMigrations_NothingPending(t *testing.T) {
 
 func TestRunProjectMigrations_RunsAndPrintsTheGitAddLine(t *testing.T) {
 	root := projectFor(t, realProjectConfig)
-	writeLegacyLedger(t, root, legacyLedgerFixture)
+	writeLegacyLedger(t, root)
 
 	var buf bytes.Buffer
 	require.NoError(t, runProjectMigrations(context.Background(), &buf, root))
@@ -368,7 +368,7 @@ func TestFrameworkUpdate_Flags(t *testing.T) {
 
 func TestEmitFrameworkDryRun_ReportsPendingMigrations(t *testing.T) {
 	root := projectFor(t, realProjectConfig)
-	writeLegacyLedger(t, root, legacyLedgerFixture)
+	writeLegacyLedger(t, root)
 
 	var buf bytes.Buffer
 	// No framework repo configured: the framework half is reported as

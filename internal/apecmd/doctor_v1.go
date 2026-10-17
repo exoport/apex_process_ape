@@ -90,12 +90,16 @@ func checkApexV0(_ context.Context, env doctorEnv) CheckResult {
 	}
 }
 
+// msgNotV1Project is the skip message of every v1 doctor row outside an
+// APEX v1 project.
+const msgNotV1Project = "not an APEX v1 project"
+
 // checkV1Project is `ape project check` minus the hooks and plugins, which
 // have their own rows.
 func checkV1Project(_ context.Context, env doctorEnv) CheckResult {
 	p, ok := v1ProjectAt(env.ProjectRoot)
 	if !ok {
-		return CheckResult{Status: StatusSkip, Message: "not an APEX v1 project"}
+		return CheckResult{Status: StatusSkip, Message: msgNotV1Project}
 	}
 	fs := p.Check()
 	if len(fs) == 0 {
@@ -114,7 +118,7 @@ func checkV1Project(_ context.Context, env doctorEnv) CheckResult {
 func checkV1Hooks(_ context.Context, env doctorEnv) CheckResult {
 	p, ok := v1ProjectAt(env.ProjectRoot)
 	if !ok {
-		return CheckResult{Status: StatusSkip, Message: "not an APEX v1 project"}
+		return CheckResult{Status: StatusSkip, Message: msgNotV1Project}
 	}
 	fs := p.CheckHooks()
 	if len(fs) == 0 {
@@ -150,7 +154,7 @@ func checkClaudeVersion(ctx context.Context, _ doctorEnv) CheckResult {
 func checkV1StateGitignore(ctx context.Context, env doctorEnv) CheckResult {
 	p, ok := v1ProjectAt(env.ProjectRoot)
 	if !ok {
-		return CheckResult{Status: StatusSkip, Message: "not an APEX v1 project"}
+		return CheckResult{Status: StatusSkip, Message: msgNotV1Project}
 	}
 	problems := p.StateIgnoreProblems(ctx)
 	if len(problems) == 0 {
@@ -169,7 +173,7 @@ func checkV1StateGitignore(ctx context.Context, env doctorEnv) CheckResult {
 func checkV1SettingsShared(ctx context.Context, env doctorEnv) CheckResult {
 	p, ok := v1ProjectAt(env.ProjectRoot)
 	if !ok {
-		return CheckResult{Status: StatusSkip, Message: "not an APEX v1 project"}
+		return CheckResult{Status: StatusSkip, Message: msgNotV1Project}
 	}
 	if msg := p.SettingsIgnored(ctx); msg != "" {
 		what, fix, _ := strings.Cut(msg, " — ")

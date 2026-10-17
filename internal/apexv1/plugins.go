@@ -577,7 +577,7 @@ func (p *Project) writePluginSettings(ctx context.Context, cfg Config, before []
 // plugins not installed at project scope or off their ref. A nil cli
 // (claude not on PATH) checks the settings only.
 func (p *Project) CheckPlugins(ctx context.Context, cli PluginCLI) []Finding {
-	const file = "_apex/config.yaml"
+	const file = configYAML
 	cfg, err := LoadConfig(p.Root)
 	if err != nil || (len(cfg.Marketplaces) == 0 && len(cfg.Plugins) == 0) {
 		return nil

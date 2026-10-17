@@ -68,8 +68,8 @@ func (p *Project) resolveEvidence(ctx context.Context, items []string) ([]Eviden
 	return out, nil
 }
 
-// withAcceptance records task accepted by by in st, replacing an earlier
-// acceptance of it, and refreshes the last verify's pending list.
+// withAcceptance records in st that by accepted task, replacing an
+// earlier acceptance of it, and refreshes the last verify's pending list.
 func withAcceptance(st *State, c *Change, task, by string, ev []Evidence) {
 	accepted := make([]Accept, 0, len(st.Accepted)+1)
 	for _, a := range st.Accepted {
@@ -77,7 +77,8 @@ func withAcceptance(st *State, c *Change, task, by string, ev []Evidence) {
 			accepted = append(accepted, a)
 		}
 	}
-	st.Accepted = append(accepted, Accept{Task: task, By: by, At: Stamp(), Evidence: ev})
+	accepted = append(accepted, Accept{Task: task, By: by, At: Stamp(), Evidence: ev})
+	st.Accepted = accepted
 	if st.Verify != nil {
 		st.Verify.PendingHuman = st.PendingHuman(c.HumanTasks())
 		if st.Verify.PendingHuman == nil {
@@ -121,7 +122,7 @@ func (p *Project) acceptArchived(ctx context.Context, id, task, by string, ev []
 	}
 	folder := p.archivedFolderOn(ctx, base, id)
 	if folder == "" {
-		return nil, &FailError{Code: "change.not-found", Msg: "no change " + id + " in the archive on " + base + " — `ape status` lists the changes"}
+		return nil, &FailError{Code: CodeChangeNotFound, Msg: "no change " + id + " in the archive on " + base + " — `ape status` lists the changes"}
 	}
 	stateRel := p.Rel(filepath.Join(p.ArchiveDir(), folder, "state.json"))
 	docRel := p.Rel(filepath.Join(p.ArchiveDir(), folder, "change.md"))
@@ -133,7 +134,7 @@ func (p *Project) acceptArchived(ctx context.Context, id, task, by string, ev []
 			}
 			s, err := parseState(stateRel, cur[stateRel])
 			if err != nil {
-				return nil, &FailError{Code: "change.state-unreadable", Msg: err.Error()}
+				return nil, &FailError{Code: CodeStateUnreadable, Msg: err.Error()}
 			}
 			if s.Status != StatusArchived {
 				return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + s.Status + " — accept applies to a change in flight or archived, not abandoned"}

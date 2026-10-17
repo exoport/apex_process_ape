@@ -142,6 +142,8 @@ type StatusReport struct {
 }
 
 // Status builds the report.
+//
+//nolint:gocyclo // one section per part of the report, each guarded by what it reads
 func (p *Project) Status() *StatusReport {
 	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Fixes: []string{}, OutsideFlow: []OutsideFlow{}}
 	cfg, cfgErr := LoadConfig(p.Root)
@@ -260,7 +262,7 @@ func (p *Project) Status() *StatusReport {
 		}
 	}
 	r.Archived = len(p.ArchivedIDs())
-	base := p.statusBase(ctx, r.Branch)
+	base := p.statusBase(r.Branch)
 	r.BaseUpstream = p.upstreamOf(ctx, base)
 	r.OutsideFlow = p.outsideFlow(ctx, base)
 	if j := p.LoadArchiveJournal(); j != nil {
@@ -272,7 +274,7 @@ func (p *Project) Status() *StatusReport {
 
 // statusBase is the base branch status measures: the checked-out branch,
 // or, on a change's branch, the base it records; "" when detached.
-func (p *Project) statusBase(ctx context.Context, branch string) string {
+func (p *Project) statusBase(branch string) string {
 	id := ChangeOfBranch(branch)
 	if id == "" {
 		return branch
@@ -440,6 +442,8 @@ const briefReasonMax = 90
 const briefLineMax = 160
 
 // Brief renders the report in at most 25 lines, for the SessionStart hook.
+//
+//nolint:gocyclo // one line per part of the report, each shown only when it has something to say
 func (r *StatusReport) Brief() string {
 	var b []string
 	title := "APEX status — " + r.Project

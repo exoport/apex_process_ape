@@ -3,7 +3,6 @@ package apexv1
 import (
 	"encoding/json"
 	"errors"
-	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,7 +33,7 @@ func TestClose_AcceptRed(t *testing.T) {
 	clean(t, p, "close --accept-red")
 	m := p.roadmap().Find("M1")
 	require.Equal(t, MilestoneDone, m.Status)
-	require.Regexp(t, regexp.MustCompile(`^done \(accepted red by Ann Lee \S+ [0-9a-f]{40}\)$`), m.StatusText)
+	require.Regexp(t, `^done \(accepted red by Ann Lee \S+ [0-9a-f]{40}\)$`, m.StatusText)
 	require.Empty(t, p.Check(), "project check accepts the accepted-red done line")
 
 	recs, err := p.LoadMilestoneRecords()

@@ -1,7 +1,6 @@
 package apexv1
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -63,7 +62,7 @@ func TestEditComments_GoCommentOnly(t *testing.T) {
 		"var x = 1 + 2\n"
 	require.Equal(t, want, res.New)
 	require.NoError(t, verifyCommentOnly(langGo, src, res.New))
-	var where []string
+	where := make([]string, 0, len(res.Left))
 	for _, l := range res.Left {
 		where = append(where, l.Where+":"+l.Text)
 	}
@@ -147,7 +146,7 @@ func TestEditComments_Untokenizable(t *testing.T) {
 		langGo:     "package x\nvar s = \"open\n",
 	} {
 		_, err := editComments("f", src, lang, v, nil)
-		var ue *errUntokenizable
+		var ue *untokenizableError
 		require.ErrorAs(t, err, &ue, lang.String())
 	}
 }
@@ -157,7 +156,6 @@ func TestIdentIDs(t *testing.T) {
 	require.Equal(t, []string{"epic12"}, identIDs("epic12Gate"))
 	require.Empty(t, identIDs("History2"))
 	require.Equal(t, []string{"ADR0017"}, identIDs("TestADR0017Honesty"))
-	require.True(t, strings.Contains("x", "x"))
 }
 
 // CRLF files: go/scanner strips carriage returns from comments and raw

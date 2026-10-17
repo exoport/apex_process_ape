@@ -16,7 +16,7 @@ func TestVerify_EntryIncompleteFollowsEachFamilysSchema(t *testing.T) {
 	f.capabilityIndex("CAP-1", "CAP-2")
 	require.Empty(t, f.verify("capabilities").Findings)
 
-	f.raw("capabilities", IndexFileName, "generated_at: '20260101000000'\ncapabilities:\n"+
+	f.rawIndex("capabilities", "generated_at: '20260101000000'\ncapabilities:\n"+
 		"  - id: CAP-1\n    slug: a\n    name: A\n    status: accepted\n"+
 		"    created_at: '20260101000000'\n    updated_at: '20260101000000'\n"+
 		"  - id: CAP-2\n    slug: b\n    name: B\n    status: accepted\n    components: []\n"+

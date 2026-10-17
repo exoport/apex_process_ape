@@ -38,6 +38,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeRefMoved":           CodeRefMoved,
 		"CodeStatusUnrecorded":   CodeStatusUnrecorded, "CodeGateChanged": CodeGateChanged, "CodeDecisionUnrecorded": CodeDecisionUnrecorded,
 		"CodeAttemptsTotalExceeded": CodeAttemptsTotalExceeded, "CodeReplansExceeded": CodeReplansExceeded, "CodeBlocksExceeded": CodeBlocksExceeded,
+		"CodeChangeNotFound": CodeChangeNotFound, "CodeStateUnreadable": CodeStateUnreadable,
+		"CodeUnsupportedLayout": CodeUnsupportedLayout, "CodeTagNotPushed": CodeTagNotPushed, "CodeLiftWriteFailed": CodeLiftWriteFailed,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

@@ -235,12 +235,10 @@ func liftFixture(t *testing.T, tag bool) string {
 }
 
 func liftCode(err error) string {
-	var fe *FailError
-	if errors.As(err, &fe) {
+	if fe, ok := errors.AsType[*FailError](err); ok {
 		return fe.Code
 	}
-	var ue *UsageError
-	if errors.As(err, &ue) {
+	if ue, ok := errors.AsType[*UsageError](err); ok {
 		return ue.Code
 	}
 	return ""
@@ -284,7 +282,8 @@ func TestLift_FullRun(t *testing.T) {
 	require.Contains(t, res.KeptApex, "_apex/custom-notes.md")
 
 	// ADRs: renumbered in order, superseded and proposed included.
-	var olds, news []string
+	olds := make([]string, 0, len(res.ADRs))
+	news := make([]string, 0, len(res.ADRs))
 	for _, a := range res.ADRs {
 		olds = append(olds, a.Old)
 		news = append(news, a.New+" "+a.Status)
@@ -312,8 +311,9 @@ func TestLift_FullRun(t *testing.T) {
 	got := findingMessages(p.Check())
 	require.NotContains(t, got, "decisions/")
 	require.Contains(t, got, "development/lift-disposition.md: the lift's disposition list awaits review")
-	var codes []string
-	for _, f := range ClassifyFindings(p.Check()) {
+	found := ClassifyFindings(p.Check())
+	codes := make([]string, 0, len(found))
+	for _, f := range found {
 		codes = append(codes, f.Code)
 	}
 	require.Contains(t, codes, "lift.disposition-pending")
@@ -373,7 +373,7 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	require.True(t, left["main.go string (ADR id, not renumbered) ADR-0004"], "%v", left)
 	require.True(t, left["main.go directive Story 1.2"], "%v", left)
 	require.True(t, left["tool.py identifier story_1"], "%v", left)
-	var skipped []string
+	skipped := make([]string, 0, len(res.Skipped))
 	for _, s := range res.Skipped {
 		skipped = append(skipped, s.File+": "+s.Reason)
 	}
@@ -445,7 +445,7 @@ func TestLift_DryRunWritesNothing(t *testing.T) {
 	require.Contains(t, res.CommitMessage, "apex: lift from APEX v0 v0.30.0")
 	require.Equal(t, head, run(t, root, "rev-parse", "HEAD"))
 	require.Empty(t, run(t, root, "status", "--porcelain", "--ignored"))
-	require.FileExists(t, filepath.Join(root, "development/project-context.md"))
+	require.FileExists(t, filepath.Join(root, "development", "project-context.md"))
 }
 
 func TestLift_Refusals(t *testing.T) {
@@ -510,7 +510,7 @@ func TestLift_Refusals(t *testing.T) {
 	})
 	t.Run("too old", func(t *testing.T) {
 		root := liftFixture(t, true)
-		require.NoError(t, os.WriteFile(filepath.Join(root, "_apex/framework.yaml"),
+		require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "framework.yaml"),
 			[]byte(strings.Replace(liftFrameworkYAML, "v0.30.0", "v0.14.2", 1)), 0o644))
 		run(t, root, "commit", "-q", "-am", "old")
 		_, err := Lift(ctx(), root, LiftOptions{})
@@ -537,14 +537,14 @@ func TestLift_Refusals(t *testing.T) {
 func TestLift_FromUpdate(t *testing.T) {
 	root := liftFixture(t, true)
 	v1 := strings.NewReplacer("v0.30.0", "v1.0.0", "      - .claude/skills/apex-dev-story\n", "      - .claude/skills/apex-plan\n").Replace(liftFrameworkYAML)
-	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex/framework.yaml"), []byte(v1), 0o644))
-	require.NoError(t, os.RemoveAll(filepath.Join(root, ".claude/skills/apex-dev-story")))
-	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude/skills/apex-orchestrator/SKILL.md"), []byte("---\nname: apex-orchestrator\nv1: true\n---\n"), 0o644))
-	require.NoError(t, os.MkdirAll(filepath.Join(root, ".claude/skills/apex-plan"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude/skills/apex-plan/SKILL.md"), []byte("v1\n"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex/ape-commands.yaml"), []byte("min_ape_version: 1.0.0\n"), 0o644))
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex/migrations"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex/migrations/v1.0.0_seq-01_lift.md"), []byte("---\nid: x\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "framework.yaml"), []byte(v1), 0o644))
+	require.NoError(t, os.RemoveAll(filepath.Join(root, ".claude", "skills", "apex-dev-story")))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", "skills", "apex-orchestrator", "SKILL.md"), []byte("---\nname: apex-orchestrator\nv1: true\n---\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".claude", "skills", "apex-plan"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".claude", "skills", "apex-plan", "SKILL.md"), []byte("v1\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "ape-commands.yaml"), []byte("min_ape_version: 1.0.0\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex", "migrations"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "migrations", "v1.0.0_seq-01_lift.md"), []byte("---\nid: x\n---\n"), 0o644))
 
 	_, err := Lift(ctx(), root, LiftOptions{NoVerifyRun: true})
 	require.Equal(t, "lift.dirty", liftCode(err), "a person's lift needs a clean tree")
@@ -568,7 +568,7 @@ func TestLift_FromUpdate(t *testing.T) {
 		"?? .claude/skills/apex-plan/", "?? _apex/migrations/",
 		"M .claude/skills/apex-orchestrator/SKILL.md", "M _apex/ape-commands.yaml", "M _apex/framework.yaml",
 	}, status)
-	require.FileExists(t, filepath.Join(root, ".claude/skills/apex-plan/SKILL.md"))
+	require.FileExists(t, filepath.Join(root, ".claude", "skills", "apex-plan", "SKILL.md"))
 	require.Equal(t, "lift", mustRecord(t, root, "ADR-0001").By)
 }
 
@@ -590,7 +590,7 @@ func TestLift_CanonADRs(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(gov, "adrs", "adr-0070_org-wide-rule.md"),
 		[]byte("---\nid: ADR-0070\nstatus: accepted\ntitle: Org-wide rule\ncreated_at: 2026-01-02\n---\n## Context\nc\n## Decision\nd\n## Consequences\nq\n"), 0o644))
 	cfg := read(t, &Project{Root: root}, "_apex/config.yaml")
-	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex/config.yaml"), []byte(strings.Replace(cfg, `governance_repository_path: ""`, "governance_repository_path: "+gov, 1)), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "config.yaml"), []byte(strings.Replace(cfg, `governance_repository_path: ""`, "governance_repository_path: "+gov, 1)), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "rule.go"), []byte("package main\n\n// Follows ADR-0070 and ADR-0099.\nvar rule = 1\n"), 0o644))
 	run(t, root, "add", "-A")
 	run(t, root, "commit", "-q", "-m", "cite canon")

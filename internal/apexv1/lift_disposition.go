@@ -158,8 +158,8 @@ func (lf *lifter) disposition() string {
 	}
 
 	p("## Gate commands\n\n")
-	switch {
-	case r.Gates.Source == "":
+	switch r.Gates.Source {
+	case "":
 		p("No `## Code Validation` section was found: AGENTS.md has no commands and `regression:` is not set.\n\n")
 	default:
 		p("From `%s` at %s, into AGENTS.md `## Commands`:\n\n", r.Gates.Source, LiftTag)
@@ -180,7 +180,8 @@ func (lf *lifter) disposition() string {
 		p("No ADRs.\n\n")
 	} else {
 		p("| Old | New | Status | Gaps |\n|---|---|---|---|\n")
-		for _, a := range r.ADRs {
+		for i := range r.ADRs {
+			a := &r.ADRs[i]
 			old := a.Old
 			if a.Canon {
 				old += " (canon)"

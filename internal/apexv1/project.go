@@ -233,7 +233,7 @@ func (p *Project) docsFindings() []Finding {
 	var out []Finding
 	for _, d := range []struct{ key, path string }{{"changelog", cfg.Docs.Changelog}, {"user_docs", cfg.Docs.UserDocs}} {
 		if d.path != "" && !fileOrDirExists(filepath.Join(p.Root, filepath.FromSlash(d.path))) {
-			out = append(out, Finding{File: "_apex/config.yaml", Message: "docs." + d.key + ": " + d.path +
+			out = append(out, Finding{File: configYAML, Message: "docs." + d.key + ": " + d.path +
 				" does not exist — create it, or fix (or drop) docs." + d.key + " in _apex/config.yaml"})
 		}
 	}

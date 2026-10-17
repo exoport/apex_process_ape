@@ -740,13 +740,12 @@ func (c *interactiveCore) WaitStepDone(ctx context.Context, _ string, _ int) err
 }
 
 // buildInteractivePrepend constructs the --strict-mcp-config /
-// --mcp-config / --settings prepend-flags slice used by both the
-// no-UI and web interactive variants. ipcPort is the BridgeRuntime
-// or Hub's IPC port. Mode picks the settings shape: ModeWeb for
-// web mode (legacy hooks-via-Mode path), ModeTUI for everywhere
-// else (hooks-via-InjectHooks path).
+// --mcp-config / --settings prepend-flags slice used by the
+// interactive runs. ipcPort is the BridgeRuntime or Hub's IPC port.
+// Every caller runs in ModeTUI, so the settings take its shape (the
+// hooks-via-InjectHooks path).
 func buildInteractivePrepend(
-	apeBin string, ipcPort int, mode config.Mode,
+	apeBin string, ipcPort int,
 	ignoreProjectSettings bool, outputStyle string, table *effort.Defaults,
 	extra spawnSettings,
 ) ([]string, error) {
@@ -761,8 +760,8 @@ func buildInteractivePrepend(
 	settings, err := config.BuildSettings(config.SettingsOptions{
 		APEBin:      apeBin,
 		BridgePort:  ipcPort,
-		Mode:        mode,
-		InjectHooks: mode != config.ModeWeb, // ModeWeb auto-injects; other modes need the explicit flag
+		Mode:        config.ModeTUI,
+		InjectHooks: true, // ModeTUI needs the explicit flag (only ModeWeb auto-injects)
 		OutputStyle: outputStyle,
 		Effort:      effortSettings,
 		// The Read cap goes in --settings as well as the environment: a
@@ -802,14 +801,14 @@ func buildInteractivePrepend(
 // error handling here, where a bad settings blob fails the run before
 // any model time is spent, instead of inside the runner's stage loop.
 func buildSpecPrepends(
-	apeBin string, ipcPort int, mode config.Mode,
+	apeBin string, ipcPort int,
 	spec *pipeline.Spec, cfg runConfig,
 ) (runFlags []string, perStage map[string][]string, err error) {
 	runStyle := cfg.outputStyle
 	if !cfg.outputStyleSet && spec.OutputStyle != "" {
 		runStyle = spec.OutputStyle
 	}
-	runFlags, err = buildInteractivePrepend(apeBin, ipcPort, mode, cfg.ignoreProjectSettings, runStyle, cfg.effortTable, cfg.spawnSettings)
+	runFlags, err = buildInteractivePrepend(apeBin, ipcPort, cfg.ignoreProjectSettings, runStyle, cfg.effortTable, cfg.spawnSettings)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -833,7 +832,7 @@ func buildSpecPrepends(
 			continue
 		}
 		style := declared
-		stageFlags, stageErr := buildInteractivePrepend(apeBin, ipcPort, mode, cfg.ignoreProjectSettings, style, cfg.effortTable, cfg.spawnSettings)
+		stageFlags, stageErr := buildInteractivePrepend(apeBin, ipcPort, cfg.ignoreProjectSettings, style, cfg.effortTable, cfg.spawnSettings)
 		if stageErr != nil {
 			return nil, nil, stageErr
 		}
@@ -924,7 +923,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		runLogMu.Unlock()
 	}()
 
-	prepend, stagePrepend, err := buildSpecPrepends(apeBin, rt.IPCPort(), config.ModeTUI, spec, cfg)
+	prepend, stagePrepend, err := buildSpecPrepends(apeBin, rt.IPCPort(), spec, cfg)
 	if err != nil {
 		return err
 	}

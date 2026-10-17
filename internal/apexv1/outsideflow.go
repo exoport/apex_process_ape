@@ -45,6 +45,10 @@ func (p *Project) v1Epoch(ctx context.Context, rev string) string {
 	return ""
 }
 
+// outsideFlowFields are a log record's fields: sha, subject, Change
+// trailer, files.
+const outsideFlowFields = 4
+
 // outsideFlow lists base's commits outside the change flow, newest first.
 func (p *Project) outsideFlow(ctx context.Context, base string) []OutsideFlow {
 	out := []OutsideFlow{}
@@ -65,8 +69,8 @@ func (p *Project) outsideFlow(ctx context.Context, base string) []OutsideFlow {
 	}
 	archive := p.devPrefix() + "archive/"
 	for rec := range strings.SplitSeq(log, "\x1e") {
-		f := strings.SplitN(rec, "\x1f", 4)
-		if len(f) < 4 {
+		f := strings.SplitN(rec, "\x1f", outsideFlowFields)
+		if len(f) < outsideFlowFields {
 			continue
 		}
 		sha, subject, change := f[0], f[1], strings.TrimSpace(f[2])

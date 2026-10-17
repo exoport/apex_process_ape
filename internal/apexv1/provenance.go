@@ -128,7 +128,7 @@ func (p *Project) resolvesConflict(ctx context.Context, parent, rel string) bool
 		return false
 	}
 	m := conflictedRe.FindStringSubmatch(subject)
-	return m != nil && m[1] == id
+	return len(m) > 1 && m[1] == id
 }
 
 // revertsRe is the line `git revert` writes into a revert's message.

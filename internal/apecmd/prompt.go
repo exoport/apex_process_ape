@@ -14,7 +14,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/exoport/apex_process_ape/internal/bridge/config"
 	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/exoport/apex_process_ape/internal/cost"
 	"github.com/exoport/apex_process_ape/internal/effort"
@@ -433,7 +432,7 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	if err != nil {
 		return promptResult{}, ExitUsage, err
 	}
-	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, o.ignoreProjectSettings, o.outputStyle, effortPlan.Table, spawnSettings{})
+	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), o.ignoreProjectSettings, o.outputStyle, effortPlan.Table, spawnSettings{})
 	if err != nil {
 		return promptResult{}, ExitRunFailed, err
 	}

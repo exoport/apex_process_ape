@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/stretchr/testify/require"
@@ -99,10 +99,7 @@ func TestUsageLimit_RecordedAndShownInStatus(t *testing.T) {
 	stdout, _, err := v1Exec(t, newStatusCmd, "--json", "--cwd", root)
 	require.NoError(t, err)
 	var st struct {
-		LatestRun struct {
-			Skill, Stopped, Resets string
-			ResetsAt               *time.Time `json:"resets_at"`
-		} `json:"latest_run"`
+		LatestRun apexv1.LatestRun `json:"latest_run"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 	}
 	require.NoError(t, json.Unmarshal([]byte(stdout), &st), stdout)
 	require.Equal(t, "apex-orchestrator", st.LatestRun.Skill)
@@ -145,7 +142,7 @@ func TestNotifier_OnBlock(t *testing.T) {
 
 	// Blocked again: no transition, no second notice.
 	require.NoError(t, os.Remove(out))
-	_, _, _ = v1Exec(t, newChangeCmd, "block", "add-wave", "--reason", "still", "--cwd", root)
+	_, _, _ = v1Exec(t, newChangeCmd, "block", "add-wave", "--reason", "still", "--cwd", root) //nolint:dogsled // only the notifier's silence is under test
 	_, statErr = os.Stat(out)
 	require.True(t, os.IsNotExist(statErr))
 
@@ -155,5 +152,5 @@ func TestNotifier_OnBlock(t *testing.T) {
 	require.NoError(t, err)
 	_, stderr, err := v1Exec(t, newChangeCmd, "block", "add-bow", "--reason", "x", "--cwd", root)
 	require.NoError(t, err)
-	require.True(t, strings.Contains(stderr, "notify (block)"), stderr)
+	require.Contains(t, stderr, "notify (block)")
 }

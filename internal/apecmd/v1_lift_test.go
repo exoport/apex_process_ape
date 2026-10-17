@@ -57,7 +57,7 @@ func TestProjectLift_CLI(t *testing.T) {
 	require.Equal(t, "ADR-0003", plan.ADRs[0].Old)
 	require.Equal(t, "ADR-0001", plan.ADRs[0].New)
 	require.Equal(t, "main.go", plan.Changed[0].File)
-	require.FileExists(t, filepath.Join(root, "development/implementation/3-2_retry-publish.md"), "nothing written")
+	require.FileExists(t, filepath.Join(root, "development", "implementation", "3-2_retry-publish.md"), "nothing written")
 
 	// The real run refuses, with the code and its action.
 	stdout, _, err = v1Exec(t, newProjectCmd, "lift", "--json", "--cwd", root)

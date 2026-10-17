@@ -450,7 +450,7 @@ func (p *Project) writeArchive(ctx context.Context, id string, st *State, update
 		return err
 	}
 	if p.evidenceOn() && st.Verify != nil {
-		if _, err := p.writeEvidence(filepath.Join(dest, "evidence"), st.Verify.Results, nil); err != nil {
+		if err := p.writeEvidence(filepath.Join(dest, "evidence"), st.Verify.Results, nil); err != nil {
 			return err
 		}
 	}

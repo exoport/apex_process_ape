@@ -48,7 +48,7 @@ func TestJournal_CrashWithAHalfSquash(t *testing.T) {
 	run(t, p.Root, "switch", "-q", "main")
 	run(t, p.Root, "merge", "--squash", "-q", "change/add-wave")
 	dest := "development/archive/2026-10-16-add-wave"
-	require.NoError(t, os.MkdirAll(filepath.Join(p.Root, "development/archive"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(p.Root, "development", "archive"), 0o755))
 	require.NoError(t, os.Rename(p.ChangeDir("add-wave"), filepath.Join(p.Root, dest)))
 	write(t, p, "development/person-notes.md", "mine\n")
 	crashJournal(t, p, &ArchiveJournal{ID: "add-wave", Base: "main", BaseSHA: mainSHA, Branch: "change/add-wave", BranchTip: tip, Step: JournalSquash, Written: []string{dest}})
@@ -68,11 +68,11 @@ func TestJournal_CrashWithAHalfSquash(t *testing.T) {
 	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root))
 	require.Equal(t, tip, HeadSHA(ctx(), p.Root))
 	require.NoDirExists(t, filepath.Join(p.Root, dest))
-	require.FileExists(t, filepath.Join(p.Root, "development/person-notes.md"), "only what archive wrote is cleaned")
+	require.FileExists(t, filepath.Join(p.Root, "development", "person-notes.md"), "only what archive wrote is cleaned")
 	require.Equal(t, "?? development/person-notes.md", run(t, p.Root, "status", "--porcelain"))
 	require.Nil(t, p.LoadArchiveJournal())
 
-	require.NoError(t, os.Remove(filepath.Join(p.Root, "development/person-notes.md")))
+	require.NoError(t, os.Remove(filepath.Join(p.Root, "development", "person-notes.md")))
 	_, err = p.Archive(ctx(), "add-wave", false, RunOptions{})
 	require.NoError(t, err)
 	require.Equal(t, mainSHA, run(t, p.Root, "rev-parse", "HEAD~1"))

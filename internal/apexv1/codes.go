@@ -19,6 +19,12 @@ const (
 	// CodeHookFailed: a project git hook refused the archive's squash
 	// commit (H15).
 	CodeHookFailed = "archive.hook-failed"
+
+	CodeChangeNotFound    = "change.not-found"
+	CodeStateUnreadable   = "change.state-unreadable"
+	CodeUnsupportedLayout = "lift.unsupported-layout"
+	CodeTagNotPushed      = "lift.tag-not-pushed"
+	CodeLiftWriteFailed   = "lift.write-failed"
 )
 
 // CodeDoc documents one diagnostic code.
@@ -114,12 +120,12 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.id-archived", 1, "replan", "change new: the id was used by an archived change"},
 	{"change.no-change-md", 1, "replan", "the change folder has no change.md"},
 	{"change.no-state", 1, "replan", "the change folder has no state.json (not made by `ape change new`)"},
-	{"change.not-found", 1, "stop", "no such change"},
+	{CodeChangeNotFound, 1, "stop", "no such change"},
 	{CodeNotApproved, 1, "person", "start of a fix (milestone: none) no person approved, or whose plan changed since the approval: ape change approve <id> --by <who>"},
 	{CodeVacuousCheck, 1, "replan", "start: the change ADDs or MODIFIES behaviour and a task check already passes before any of its code (backlog 43); rewrite it to fail until the change is done, or mark a check meant to stay green `— regression: <command>`; nothing written"},
 	{"change.nothing-to-rebaseline", 1, "stop", "start on a started change whose plan, modified spec and regression command did not change"},
 	{"change.plan-drift", 1, "apply", "## Tasks or ## Delta changed since start: re-start to re-baseline, or restore"},
-	{"change.state-unreadable", 1, "person", "state.json does not parse"},
+	{CodeStateUnreadable, 1, "person", "state.json does not parse"},
 	{CodeWrongStatus, 1, "stop", "the command does not apply to the change's status (answer: only a blocked change)"},
 	{"decision.slug-taken", 1, "replan", "decision new: an ADR already uses the slug"},
 	{CodeDecisionNotFound, 1, "replan", "no such ADR"},
@@ -131,13 +137,13 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeCommitFailed, 1, "stop", "ape wrote its record but could not commit it (identity, lock)"},
 	{"git.not-a-repo", 1, "stop", "archive and lift need a git repository"},
 	{"lift.not-v0", 1, "person", "lift: no APEX v0 install here (no _apex/framework.yaml recording a v0 version), or the project is APEX v1 already (_apex/state/, development/project.md, or an `apex: lift` commit)"},
-	{"lift.unsupported-layout", 1, "person", "lift: the v0 framework version is outside v0.15.0–v0.31.x, unknown, or its _apex/config.yaml does not resolve; the message lists what was found"},
+	{CodeUnsupportedLayout, 1, "person", "lift: the v0 framework version is outside v0.15.0–v0.31.x, unknown, or its _apex/config.yaml does not resolve; the message lists what was found"},
 	{"lift.dirty", 1, "person", "lift: uncommitted changes (inside ape framework update: outside the paths the install writes)"},
 	{"lift.no-tag", 1, "person", "lift: no tag apex-v0-final; a person tags the commit to lift and pushes the tag"},
 	{"lift.tag-not-head", 1, "person", "lift: apex-v0-final does not point at HEAD"},
-	{"lift.tag-not-pushed", 1, "person", "lift: the current branch has no upstream remote, or apex-v0-final is not on it, or points elsewhere there (git ls-remote)"},
+	{CodeTagNotPushed, 1, "person", "lift: the current branch has no upstream remote, or apex-v0-final is not on it, or points elsewhere there (git ls-remote)"},
 	{"lift.remote-unreachable", 1, "retry", "lift: git ls-remote against the upstream remote failed (network, credentials)"},
-	{"lift.write-failed", 1, "stop", "lift: removing the v0 families or writing a file failed mid-lift; git reset --hard restores the tree"},
+	{CodeLiftWriteFailed, 1, "stop", "lift: removing the v0 families or writing a file failed mid-lift; git reset --hard restores the tree"},
 	{CodeGitStatusFailed, 1, "stop", "git status could not be read"},
 	{"ape.below-floor", 1, "person", "ape task: the installed framework's _apex/ape-commands.yaml declares a min_ape_version above this ape (H1); no session starts — a person updates ape (the message carries the command)"},
 	{CodeBlocksExceeded, 1, "stop", "the milestone's changes blocked in a row reached limits.consecutive_blocks (default 2): change new and change start of its changes and ape task apex-orchestrator for it refuse, and ape status --json reports it under milestone.diagnostics; the run stops — a person deals with the blocked changes and re-approves the milestone (ape milestone approve), which resets the count (H19, D49)"},

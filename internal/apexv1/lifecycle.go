@@ -171,6 +171,8 @@ const CodeNothingToRebaseline = "change.nothing-to-rebaseline"
 // start is Start in the checked-out tree. enter, when set, runs once every
 // check has passed and before anything is written: it creates the change's
 // branch.
+//
+//nolint:gocyclo // an ordered list of refusals before the start is written, each a few lines
 func (p *Project) start(ctx context.Context, id string, opt RunOptions, enter func(*State) error) (*StartResult, error) {
 	ci, err := p.requireChange(ctx, id)
 	if err != nil {
@@ -595,8 +597,8 @@ func (p *Project) redAttempt(ctx context.Context, ci ChangeInfo, res *VerifyResu
 // milestone, and returns fe beside the result.
 func (p *Project) redBlock(ctx context.Context, ci ChangeInfo, res *VerifyResult, what string, fe *FailError) (*VerifyResult, error) {
 	st := ci.State
-	var failing []string
 	red := res.Failing()
+	failing := make([]string, 0, len(red))
 	for i := range red {
 		failing = append(failing, fmt.Sprintf("%s (%s)", red[i].Task, red[i].Outcome()))
 	}
@@ -709,9 +711,9 @@ func (p *Project) Accept(ctx context.Context, id, task, by string, evidence ...s
 	ci, err := p.requireChange(ctx, id)
 	// An archived change — or one this checkout's tree does not hold, as
 	// on a change branch from before its archive — is accepted on the base.
-	if fe, ok := errors.AsType[*FailError](err); ok && (fe.Code == "change.archived" || fe.Code == "change.not-found") && p.isWorkTree(ctx) {
+	if fe, ok := errors.AsType[*FailError](err); ok && (fe.Code == "change.archived" || fe.Code == CodeChangeNotFound) && p.isWorkTree(ctx) {
 		st, aerr := p.acceptArchived(ctx, id, task, by, ev)
-		if afe, ok := errors.AsType[*FailError](aerr); fe.Code == "change.archived" || !ok || afe.Code != "change.not-found" {
+		if afe, ok := errors.AsType[*FailError](aerr); fe.Code == "change.archived" || !ok || afe.Code != CodeChangeNotFound {
 			return st, aerr
 		}
 	}

@@ -54,7 +54,7 @@ func (p *Project) AnswerChange(ctx context.Context, id, text, by string) (*State
 			}
 			s, err := parseState(rel+" on "+branch, cur[rel])
 			if err != nil {
-				return nil, &FailError{Code: "change.state-unreadable", Msg: err.Error()}
+				return nil, &FailError{Code: CodeStateUnreadable, Msg: err.Error()}
 			}
 			if s.Status != StatusBlocked {
 				return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + s.Status + " on " + branch + " — answer applies to a blocked change"}

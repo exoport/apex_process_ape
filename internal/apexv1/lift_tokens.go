@@ -98,13 +98,16 @@ type tokSeg struct {
 	Block bool
 }
 
-// errUntokenizable says why a file was skipped.
-type errUntokenizable struct{ why string }
+// blockDelims is the length of a block comment's /* and */.
+const blockDelims = len("/*") + len("*/")
 
-func (e *errUntokenizable) Error() string { return e.why }
+// untokenizableError says why a file was skipped.
+type untokenizableError struct{ why string }
+
+func (e *untokenizableError) Error() string { return e.why }
 
 func untok(format string, args ...any) error {
-	return &errUntokenizable{why: fmt.Sprintf(format, args...)}
+	return &untokenizableError{why: fmt.Sprintf(format, args...)}
 }
 
 // tokenize returns the comment and string spans of src.
@@ -127,8 +130,9 @@ func tokenize(lang liftLang, src string) ([]tokSeg, error) {
 		return tokenizeMake(src)
 	case langC:
 		return tokenizeC(src)
+	default:
+		return nil, errors.New("no tokenizer")
 	}
-	return nil, errors.New("no tokenizer")
 }
 
 // goIdent is an identifier token of a Go file, for the ids-in-identifiers list.
@@ -174,6 +178,9 @@ func tokenizeGo(src string) ([]tokSeg, []goIdent, error) {
 			segs = append(segs, tokSeg{Kind: segString, Start: off, End: end})
 		case token.IDENT:
 			idents = append(idents, goIdent{Start: off, Name: lit})
+		default:
+			// Operators, keywords and numbers hold no comment, string or
+			// identifier.
 		}
 	}
 	if firstErr != nil {
@@ -227,6 +234,7 @@ func shellWordStart(src string, i int) bool {
 	return strings.IndexByte(" \t\n;&|()<>", src[i-1]) >= 0
 }
 
+//nolint:gocyclo // a hand-written lexer: one case per token class
 func tokenizeShell(src string) ([]tokSeg, error) {
 	var out []tokSeg
 	var pending []heredoc
@@ -490,12 +498,12 @@ func tokenizePython(src string) ([]tokSeg, error) {
 	i := 0
 	for i < n {
 		c := src[i]
-		switch {
-		case c == '#':
+		switch c {
+		case '#':
 			end := lineEnd(src, i)
 			out = append(out, tokSeg{Kind: segComment, Start: i, End: end})
 			i = end
-		case c == '\'' || c == '"':
+		case '\'', '"':
 			start := i
 			// A string prefix (r, b, f, rb, …) is the identifier just before.
 			k := i
@@ -558,6 +566,7 @@ var jsRegexKeywords = map[string]bool{
 	"void": true, "throw": true, "case": true, "do": true, "else": true, "yield": true, "await": true,
 }
 
+//nolint:gocyclo // a hand-written lexer: one case per token class
 func tokenizeJS(src string) ([]tokSeg, error) {
 	var out []tokSeg
 	n := len(src)
@@ -583,8 +592,8 @@ func tokenizeJS(src string) ([]tokSeg, error) {
 			if j < 0 {
 				return nil, untok("unterminated block comment")
 			}
-			out = append(out, tokSeg{Kind: segComment, Start: i, End: i + j + 4, Block: true})
-			i += j + 4
+			out = append(out, tokSeg{Kind: segComment, Start: i, End: i + j + blockDelims, Block: true})
+			i += j + blockDelims
 		case c == '/' && jsRegexAllowed(prev):
 			j, err := jsRegex(src, i)
 			if err != nil {
@@ -615,22 +624,21 @@ func tokenizeJS(src string) ([]tokSeg, error) {
 				tmpl[len(tmpl)-1]++
 			}
 			i, prev = i+1, "{"
+		case c == '}' && len(tmpl) > 0 && tmpl[len(tmpl)-1] == 0:
+			// The } closing a ${ resumes its template.
+			tmpl = tmpl[:len(tmpl)-1]
+			j, interp, err := jsTemplate(src, i+1)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, tokSeg{Kind: segString, Start: i, End: j})
+			i, prev = j, "num"
+			if interp {
+				tmpl = append(tmpl, 0)
+				prev = "{"
+			}
 		case c == '}':
 			if len(tmpl) > 0 {
-				if tmpl[len(tmpl)-1] == 0 {
-					tmpl = tmpl[:len(tmpl)-1]
-					j, interp, err := jsTemplate(src, i+1)
-					if err != nil {
-						return nil, err
-					}
-					out = append(out, tokSeg{Kind: segString, Start: i, End: j})
-					i, prev = j, "num"
-					if interp {
-						tmpl = append(tmpl, 0)
-						prev = "{"
-					}
-					continue
-				}
 				tmpl[len(tmpl)-1]--
 			}
 			i, prev = i+1, "}"
@@ -667,7 +675,7 @@ func jsRegexAllowed(prev string) bool {
 	if prev == "id" || prev == "num" || prev == ")" || prev == "]" || prev == "}" {
 		return false
 	}
-	return strings.Contains("(,=:[!&|?{};+-*%<>~^", prev)
+	return strings.Contains("(,=:[!&|?{};+-*%<>~^", prev) //nolint:gocritic // argOrder: the punctuator set is the haystack, prev the needle
 }
 
 func jsRegex(src string, i int) (int, error) {
@@ -718,7 +726,7 @@ func jsQuoted(src string, i int) (int, error) {
 
 // jsTemplate scans template text from i to its closing ` (interp false)
 // or to just after a ${ (interp true).
-func jsTemplate(src string, i int) (int, bool, error) {
+func jsTemplate(src string, i int) (end int, interp bool, err error) {
 	for i < len(src) {
 		switch {
 		case src[i] == '\\':
@@ -784,24 +792,22 @@ func tokenizeDart(src string) ([]tokSeg, error) {
 				stack[len(stack)-1].braces++
 			}
 			i++
+		case c == '}' && len(stack) > 0 && stack[len(stack)-1].braces == 0:
+			// The } closing a ${ resumes its string.
+			q := stack[len(stack)-1].quote
+			stack = stack[:len(stack)-1]
+			j, interp, err := dartString(src, i+1, q, false)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, tokSeg{Kind: segString, Start: i, End: j})
+			i = j
+			if interp {
+				stack = append(stack, dartStr{quote: q})
+			}
 		case c == '}':
 			if len(stack) > 0 {
-				top := &stack[len(stack)-1]
-				if top.braces == 0 {
-					q := top.quote
-					stack = stack[:len(stack)-1]
-					j, interp, err := dartString(src, i+1, q, false)
-					if err != nil {
-						return nil, err
-					}
-					out = append(out, tokSeg{Kind: segString, Start: i, End: j})
-					i = j
-					if interp {
-						stack = append(stack, dartStr{quote: q})
-					}
-					continue
-				}
-				top.braces--
+				stack[len(stack)-1].braces--
 			}
 			i++
 		default:
@@ -836,7 +842,7 @@ func dartBlock(src string, i int) (int, error) {
 }
 
 // dartString scans string text to its closing quote, or to just after a ${.
-func dartString(src string, i int, q string, raw bool) (int, bool, error) {
+func dartString(src string, i int, q string, raw bool) (end int, interp bool, err error) {
 	for i < len(src) {
 		switch {
 		case !raw && src[i] == '\\':
@@ -856,6 +862,7 @@ func dartString(src string, i int, q string, raw bool) (int, bool, error) {
 
 // ---- C / C++ ----------------------------------------------------------
 
+//nolint:gocyclo // a hand-written lexer: one case per token class
 func tokenizeC(src string) ([]tokSeg, error) {
 	var out []tokSeg
 	n := len(src)
@@ -875,8 +882,8 @@ func tokenizeC(src string) ([]tokSeg, error) {
 			if j < 0 {
 				return nil, untok("unterminated block comment")
 			}
-			out = append(out, tokSeg{Kind: segComment, Start: i, End: i + j + 4, Block: true})
-			i += j + 4
+			out = append(out, tokSeg{Kind: segComment, Start: i, End: i + j + blockDelims, Block: true})
+			i += j + blockDelims
 		case c >= '0' && c <= '9' || c == '.' && i+1 < n && src[i+1] >= '0' && src[i+1] <= '9':
 			// A pp-number, digit separators (1'000) included.
 			j := i + 1

@@ -582,7 +582,7 @@ func (p *Project) requireChange(ctx context.Context, id string) (ChangeInfo, err
 		if folder, ok := p.ArchivedIDs()[id]; ok {
 			return ChangeInfo{}, &FailError{Code: "change.archived", Msg: "change " + id + " is archived (" + p.Rel(filepath.Join(p.ArchiveDir(), folder)) + ")"}
 		}
-		return ChangeInfo{}, &FailError{Code: "change.not-found", Msg: "no change " + id + " — `ape status` lists the active ones"}
+		return ChangeInfo{}, &FailError{Code: CodeChangeNotFound, Msg: "no change " + id + " — `ape status` lists the active ones"}
 	}
 	return checkLoaded(p.loadChange(id))
 }
@@ -594,7 +594,7 @@ func checkLoaded(ci ChangeInfo) (ChangeInfo, error) {
 		if errors.Is(ci.Err, ErrNoState) {
 			return ci, &FailError{Code: "change.no-state", Msg: "change " + id + " has no state.json — it was not created with `ape change new`"}
 		}
-		return ci, &FailError{Code: "change.state-unreadable", Msg: ci.Err.Error()}
+		return ci, &FailError{Code: CodeStateUnreadable, Msg: ci.Err.Error()}
 	}
 	if ci.Doc == nil {
 		return ci, &FailError{Code: "change.no-change-md", Msg: "change " + id + " has no change.md"}

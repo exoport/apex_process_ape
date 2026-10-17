@@ -27,7 +27,7 @@ var (
 	codeSpanRe     = regexp.MustCompile("`([^`]+)`")
 	listItemRe     = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s+(.*)$`)
 	tableRowRe     = regexp.MustCompile(`^\s*\|.*\|\s*$`)
-	placeholderRe  = regexp.MustCompile(`<[^<>\s][^<>]*>|\{\{?[A-Za-z_][^{}]*\}?\}|\.\.\.|…`)
+	placeholderRe  = regexp.MustCompile(`<[^<>\s][^<>]*>|\{\{?[A-Za-z_][^{}]*\}?\}|\.{3}|…`)
 	commandSpanRe  = regexp.MustCompile(`^(?:\./|[A-Za-z0-9_][A-Za-z0-9_.+-]*\s+\S)`)
 	compoundLineRe = regexp.MustCompile(`^\s*(?:for|while|until|if|case|do|done|then|else|elif|fi|esac|\{|\})\b`)
 	fileSpanRe     = regexp.MustCompile(`^[\w./-]+\.(?:md|ya?ml|json|txt|go|sh|py)$`)
@@ -79,8 +79,8 @@ func extractGates(file, doc string) LiftGates {
 			if compoundLineRe.MatchString(t) {
 				compound = true
 			}
-			if strings.HasSuffix(t, "\\") {
-				cont += strings.TrimSuffix(t, "\\") + " "
+			if head, ok := strings.CutSuffix(t, "\\"); ok {
+				cont += head + " "
 				continue
 			}
 			cmds = append(cmds, cont+t)

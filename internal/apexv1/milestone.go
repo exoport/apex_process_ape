@@ -66,11 +66,12 @@ func (r *GateRun) Why() string {
 		parts = append(parts, strconv.Itoa(n)+" spec scenario(s) red: "+strings.Join(limit(names, 5), ", "))
 	}
 	if g := r.Regression; g != nil && g.Failed {
-		if g.Reason != "" {
+		switch {
+		case g.Reason != "":
 			parts = append(parts, "regression command "+g.Reason+": "+g.Detail)
-		} else if g.BaselineExit == nil {
+		case g.BaselineExit == nil:
 			parts = append(parts, "regression command exit "+strconv.Itoa(g.Exit)+", and no change of the milestone has a baseline for it")
-		} else {
+		default:
 			parts = append(parts, "regression command exit "+strconv.Itoa(g.Exit)+", green at baseline ("+g.BaselineChange+")")
 		}
 	}
@@ -491,6 +492,8 @@ func (p *Project) CloseMilestoneAcceptRed(ctx context.Context, id, reason, by st
 
 // closeMilestone is close; red, when set, is a person's acceptance of a
 // red gate.
+//
+//nolint:gocyclo // an ordered list of refusals before the close is written, each a few lines
 func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions, red *AcceptRed) (*GateResult, error) {
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err

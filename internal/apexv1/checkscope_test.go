@@ -104,7 +104,7 @@ func TestVerify_RunsTheTouchedCapabilities(t *testing.T) {
 	v, err := p.Verify(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)
 	require.True(t, v.Green, "%+v", v.Results)
-	var refs []string
+	refs := make([]string, 0, len(v.Results))
 	for i := range v.Results {
 		refs = append(refs, v.Results[i].Task)
 	}
@@ -121,7 +121,7 @@ func TestVerify_RunsTheTouchedCapabilities(t *testing.T) {
 	g, err := p.RunGate(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
 	require.False(t, g.Run.Green(), "the gate runs the whole spec")
-	var failed []string
+	failed := make([]string, 0, len(g.Run.SpecFailed))
 	for i := range g.Run.SpecFailed {
 		failed = append(failed, g.Run.SpecFailed[i].Task)
 	}

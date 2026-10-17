@@ -363,7 +363,7 @@ func TestArchive_MergedSpecOverCapIsRefused(t *testing.T) {
 
 	// H18: change check (and so start) finds it first.
 	fs := ClassifyFindings(p.CheckChange("add-big"))
-	var codes []string
+	codes := make([]string, 0, len(fs))
 	for _, f := range fs {
 		codes = append(codes, f.Code)
 	}

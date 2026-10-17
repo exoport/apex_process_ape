@@ -64,10 +64,10 @@ func (f *fixture) record(familyName, name, id string) {
 	require.NoError(f.t, os.WriteFile(filepath.Join(f.dir(familyName), name), []byte(body), 0o644))
 }
 
-// raw writes an arbitrary file into a family directory.
-func (f *fixture) raw(familyName, name, body string) {
+// rawIndex writes an arbitrary index file into a family directory.
+func (f *fixture) rawIndex(familyName, body string) {
 	f.t.Helper()
-	path := filepath.Join(f.dir(familyName), name)
+	path := filepath.Join(f.dir(familyName), IndexFileName)
 	require.NoError(f.t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(f.t, os.WriteFile(path, []byte(body), 0o644))
 }
@@ -103,7 +103,7 @@ func (f *fixture) capabilityIndex(ids ...string) {
 			"    status: accepted\n    components: []\n    created_at: '20260101000000'\n"+
 			"    updated_at: '20260101000000'\n", id, strings.ToLower(id), id)
 	}
-	f.raw("capabilities", IndexFileName, b.String())
+	f.rawIndex("capabilities", b.String())
 }
 
 // TestVerify_CapabilitiesNeedNoFileField is the false-positive that shipped:
@@ -122,7 +122,7 @@ func TestVerify_CapabilitiesNeedNoFileField(t *testing.T) {
 
 	// The other three families DO require one, and still say so.
 	f.record("adrs", "adr-0001_first.md", "ADR-0001")
-	f.raw("adrs", IndexFileName,
+	f.rawIndex("adrs",
 		"generated_at: '20260821120000'\nadrs:\n  - id: ADR-0001\n    status: accepted\n")
 	require.Len(t, findingsOf(f.verify("adrs"), CheckFileUnresolved), 1,
 		"an ADR entry without file: is still a finding")
@@ -208,7 +208,7 @@ func TestVerify_UnknownFamilyIsAnError(t *testing.T) {
 
 func TestLoadIndex_NotAMapping(t *testing.T) {
 	f := newFixture(t)
-	f.raw("adrs", IndexFileName, "- just\n- a\n- list\n")
+	f.rawIndex("adrs", "- just\n- a\n- list\n")
 	family, err := FamilyByName("adrs")
 	require.NoError(t, err)
 	_, err = LoadIndex(f.dir("adrs"), family)
@@ -217,7 +217,7 @@ func TestLoadIndex_NotAMapping(t *testing.T) {
 
 func TestLoadIndex_EmptyFileIsAnEmptyIndex(t *testing.T) {
 	f := newFixture(t)
-	f.raw("adrs", IndexFileName, "")
+	f.rawIndex("adrs", "")
 	family, err := FamilyByName("adrs")
 	require.NoError(t, err)
 	idx, err := LoadIndex(f.dir("adrs"), family)
@@ -230,7 +230,7 @@ func TestLoadIndex_EmptyFileIsAnEmptyIndex(t *testing.T) {
 
 func TestEntries_ReportsMalformedEntries(t *testing.T) {
 	f := newFixture(t)
-	f.raw("adrs", IndexFileName, `adrs:
+	f.rawIndex("adrs", `adrs:
   - id: ADR-0001
     file: a.md
   - "just a string"

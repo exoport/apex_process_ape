@@ -26,7 +26,7 @@ functionality_folder: development/functionality
 
 // seedADRCorpus writes n ADR records and an index listing all but the
 // ids in skip — the ADR-0050 shape.
-func seedADRCorpus(t *testing.T, root string, n int, skip ...int) string {
+func seedADRCorpus(t *testing.T, root string, n int, skip ...int) {
 	t.Helper()
 	dir := filepath.Join(root, "development", "governance", "adrs")
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "changelog"), 0o755))
@@ -57,7 +57,6 @@ func seedADRCorpus(t *testing.T, root string, n int, skip ...int) string {
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "index.yaml"), []byte(index.String()), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "README.md"), []byte("# ADRs\n"), 0o644))
-	return dir
 }
 
 const legacyLedgerFixture = "# Deferred Work\n\n" +
@@ -66,12 +65,12 @@ const legacyLedgerFixture = "# Deferred Work\n\n" +
 	"- [Defer] Second thing [pkg/b.go:2] — defer: owner=data\n\n" +
 	"A pasted paragraph with no marker at all, which must survive.\n"
 
-// writeLegacyLedger drops the legacy file where the config resolves it.
-func writeLegacyLedger(t *testing.T, root, body string) string {
+// writeLegacyLedger drops legacyLedgerFixture where the config resolves
+// the legacy file.
+func writeLegacyLedger(t *testing.T, root string) {
 	t.Helper()
 	dir := filepath.Join(root, "development", "implementation")
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	path := filepath.Join(dir, "deferred-work.md")
-	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
-	return path
+	require.NoError(t, os.WriteFile(path, []byte(legacyLedgerFixture), 0o644))
 }

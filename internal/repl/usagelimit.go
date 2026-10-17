@@ -2,6 +2,7 @@ package repl
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -54,9 +55,8 @@ type UsageLimit struct {
 // ParseUsageLimit returns the usage-limit line of pane, if it shows one.
 // now anchors a reset printed without a date (the next such time).
 func ParseUsageLimit(pane string, now time.Time) (UsageLimit, bool) {
-	lines := strings.Split(pane, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
+	for _, line := range slices.Backward(strings.Split(pane, "\n")) {
+		line = strings.TrimSpace(line)
 		m := usageLimitLineRe.FindStringSubmatch(line)
 		if m == nil {
 			continue

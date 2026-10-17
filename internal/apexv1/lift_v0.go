@@ -32,6 +32,13 @@ const (
 	// to the development folder (D47 Q4).
 	LiftDisposition = "lift-disposition.md"
 	frameworkYAML   = "_apex/framework.yaml"
+	configYAML      = "_apex/config.yaml"
+	// v0SHALen is how much of the commit a v0 version was read from the
+	// report names.
+	v0SHALen = 12
+	// skillPathParts splits a skill file's path into .claude, skills, the
+	// skill and the rest.
+	skillPathParts = 4
 )
 
 // v0Meta is the part of _apex/framework.yaml the lift reads.
@@ -127,7 +134,7 @@ func detectV0(ctx context.Context, root string) (*liftLayout, error) {
 				continue
 			}
 			if m := readMeta(data); m != nil && m.major() == "v0" {
-				v0, v0src = m, frameworkYAML+" at "+sha[:min(12, len(sha))]
+				v0, v0src = m, frameworkYAML+" at "+sha[:min(v0SHALen, len(sha))]
 				break
 			}
 		}
@@ -136,7 +143,7 @@ func detectV0(ctx context.Context, root string) (*liftLayout, error) {
 	if v0 == nil {
 		if data, err := os.ReadFile(cfgPath); err == nil && v0ConfigRe.Match(data) {
 			found = append(found, "_apex/config.yaml with v0 folder keys, and no framework.yaml that records a v0 version")
-			return nil, &FailError{Code: "lift.unsupported-layout", Msg: "found " + strings.Join(found, "; ") +
+			return nil, &FailError{Code: CodeUnsupportedLayout, Msg: "found " + strings.Join(found, "; ") +
 				" — install a v0.15–v0.31 framework with `ape framework update` (pinned v0 ape), commit it, then lift"}
 		}
 		msg := "no APEX v0 install here (no " + frameworkYAML + " recording a v0 version)"
@@ -160,14 +167,14 @@ func detectV0(ctx context.Context, root string) (*liftLayout, error) {
 		if l.Version == "" {
 			what = "no framework version (" + v0src + " records git_hash " + v0.Framework.GitHash + " and no tag; no update commit names one)"
 		}
-		return nil, &FailError{Code: "lift.unsupported-layout", Msg: "found " + what + " in " + l.VersionSource +
+		return nil, &FailError{Code: CodeUnsupportedLayout, Msg: "found " + what + " in " + l.VersionSource +
 			"; the lift reads v0.15.0–v0.31.x — `ape framework update` to a v0.31 release (pinned v0 ape) first, commit it, then lift"}
 	}
 	l.Skills = v0.Sources.Skills.Paths
 	l.SkillsSource = "the v0 install manifest (" + v0src + ")"
 	cfg, err := apexcfg.ResolveAt(root, nil)
 	if err != nil {
-		return nil, &FailError{Code: "lift.unsupported-layout", Msg: "found framework " + l.Version + " but _apex/config.yaml does not resolve: " + err.Error() +
+		return nil, &FailError{Code: CodeUnsupportedLayout, Msg: "found framework " + l.Version + " but _apex/config.yaml does not resolve: " + err.Error() +
 			" — fix the YAML (and config.local.yaml), then lift"}
 	}
 	l.Cfg = cfg
@@ -245,7 +252,8 @@ func (lf *lifter) families(ctx context.Context) []liftFamily {
 		out, _ := git(ctx, lf.root, "ls-files", "--", ".claude/skills/apex-*")
 		seen := map[string]bool{}
 		for f := range strings.SplitSeq(out, "\n") {
-			if parts := strings.SplitN(f, "/", 4); len(parts) >= 3 && !seen[parts[2]] {
+			// .claude/skills/<skill>/…
+			if parts := strings.SplitN(f, "/", skillPathParts); len(parts) >= 3 && !seen[parts[2]] {
 				seen[parts[2]] = true
 				skills = append(skills, ".claude/skills/"+parts[2])
 			}
@@ -312,7 +320,7 @@ func storyKeys(implAbs string) map[string]bool {
 		return keys
 	}
 	re := regexp.MustCompile(`^(\d+)-(\d+)[_-]`)
-	_ = filepath.WalkDir(implAbs, func(path string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(implAbs, func(_ string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil //nolint:nilerr // an unreadable folder holds no keys
 		}

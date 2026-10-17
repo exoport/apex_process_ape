@@ -261,10 +261,10 @@ func findCanonADRs(govAbs string, want map[int]bool) []v0ADR {
 	sort.Strings(ds)
 	for _, d := range ds {
 		adrs, _ := loadADRs(govAbs, d, true)
-		for _, a := range adrs {
-			if want[a.num] && !seen[a.num] {
-				seen[a.num] = true
-				out = append(out, a)
+		for i := range adrs {
+			if n := adrs[i].num; want[n] && !seen[n] {
+				seen[n] = true
+				out = append(out, adrs[i])
 			}
 		}
 	}
@@ -305,13 +305,15 @@ func convertADR(a v0ADR, newNum int, rw *adrRewriter, gitDate string) LiftADR {
 			gap("heading `## " + t + "` renamed `## " + to + "`")
 		}
 	}
-	body = strings.Join(raw, "\n")
+	var sb strings.Builder
+	sb.WriteString(strings.Join(raw, "\n"))
 	for _, want := range []string{"Context", "Decision", "Consequences"} {
 		if !have[strings.ToLower(want)] {
-			body += "\n\n## " + want + "\n_Not recorded in the v0 ADR; the section was added at the lift so the record has the v1 shape._"
+			sb.WriteString("\n\n## " + want + "\n_Not recorded in the v0 ADR; the section was added at the lift so the record has the v1 shape._")
 			gap("no `## " + want + "` in the v0 record: marked not recorded")
 		}
 	}
+	body = sb.String()
 	enforced := false
 	for _, l := range splitLines(body) {
 		if !l.InCode && adrEnforceRe.MatchString(strings.TrimSpace(l.Text)) {
@@ -393,7 +395,8 @@ func gitFirstDate(ctx context.Context, root, rel string) string {
 // a superseded ADR was accepted once, and its text is held too.
 func recordLiftedDecisions(p *Project, adrs []LiftADR) error {
 	recs := p.loadDecisionRecords()
-	for _, a := range adrs {
+	for i := range adrs {
+		a := &adrs[i]
 		if a.Status != ADRAccepted && !strings.HasPrefix(a.Status, "superseded by ") {
 			continue
 		}

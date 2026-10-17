@@ -209,7 +209,7 @@ func fmtNum4(n int) string {
 func citedADRs(s string) []int {
 	var out []int
 	for _, m := range adrCiteRe.FindAllStringSubmatch(s, -1) {
-		for _, p := range strings.Split(m[1]+m[2], "/") {
+		for p := range strings.SplitSeq(m[1]+m[2], "/") {
 			if p == "" {
 				continue
 			}
@@ -243,7 +243,7 @@ var (
 	// goes whole.
 	idPointerRe = regexp.MustCompile(`(^|[.!?]\s+)(?i:see(?: also)?|cf\.?|refs?:?)\s+` + idMark + `[^.!?` + idMark + `]*(?:[.!?]|$)\s*`)
 	idMidGlueRe = regexp.MustCompile(`\s+(?i:` + glueWords + `)\s+` + idMark)
-	cutRe       = regexp.MustCompile(`[ \t]*(?:` + idMark + `|` + cutMark + `)+[ \t]*`)
+	cutRe       = regexp.MustCompile(`[ \t]*[` + idMark + cutMark + `]+[ \t]*`)
 	emptyPairRe = regexp.MustCompile(`\(\s*\)|\[\s*\]`)
 	dupPunctRe  = regexp.MustCompile(`([,;:])\s*([.,;:])`)
 	spaceBefRe  = regexp.MustCompile(`[ \t]+([.,;:!?)\]])`)
@@ -277,7 +277,7 @@ func stripIDsFromText(s string, spans [][2]int) (out string, empty bool) {
 	t = idLeadRe.ReplaceAllString(t, "")
 	t = idTrailRe.ReplaceAllString(t, "$1")
 	t = idMidGlueRe.ReplaceAllString(t, cutMark)
-	t = cutRe.ReplaceAllStringFunc(t, func(m string) string { return cutMark })
+	t = cutRe.ReplaceAllStringFunc(t, func(string) string { return cutMark })
 	t = joinCuts(t)
 	t = emptyPairRe.ReplaceAllString(t, "")
 	t = dupPunctRe.ReplaceAllString(t, "$2")

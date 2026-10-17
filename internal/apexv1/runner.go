@@ -123,7 +123,7 @@ func unrunResult(cmd, logPath, detail string) CheckResult {
 	note := "[ape] unrun: " + detail + " — the check was not run (requires:)"
 	if logPath != "" {
 		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err == nil {
-			_ = os.WriteFile(logPath, []byte(note+"\n"), 0o644)
+			_ = os.WriteFile(logPath, []byte(note+"\n"), 0o644) //nolint:gosec // a check's log, same mode as the logs a run writes beside it
 		}
 	}
 	return CheckResult{Cmd: cmd, Exit: ExitUnrun, Tail: []string{note}, Reason: ReasonUnrun, Detail: detail}

@@ -12,7 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/exoport/apex_process_ape/internal/bridge/config"
 	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
 	"github.com/exoport/apex_process_ape/internal/repl"
 	"github.com/exoport/apex_process_ape/internal/runlog"
@@ -214,7 +213,7 @@ func runChat(
 
 	// No effort table: chat is a person's own session and keeps claude's
 	// native effort unless --effort says otherwise (see chatSpawnEnv).
-	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), config.ModeTUI, ignoreProjectSettings, outputStyle, nil, spawnSettings{})
+	prepend, err := buildInteractivePrepend(apeBin, rt.IPCPort(), ignoreProjectSettings, outputStyle, nil, spawnSettings{})
 	if err != nil {
 		return err
 	}
