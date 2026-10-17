@@ -25,6 +25,7 @@ import (
 //	                                                         # or {source: directory, path: ...}
 //	plugins:
 //	  - {name: nats-expert, marketplace: team-tools, ref: v1.4.0}
+//	  - {name: kb, marketplace: team-tools, allow: [mcp]}   # D59 Q5
 //
 // ape writes them into .claude/settings.json (extraKnownMarketplaces,
 // enabledPlugins) and installs each at PROJECT scope through the `claude
@@ -45,6 +46,13 @@ import (
 // marketplace does not have. To pin, point the marketplace at a ref: a
 // github or git marketplace takes `ref:` (written as the source's ref, and
 // as <repo>#<ref> to the CLI). An empty ref accepts any version.
+//
+// What "allow" means (D59 Q5). A tool is a skill only (D59 Q4): a listed
+// plugin that carries hooks or MCP servers is a finding
+// (plugin.hooks-or-mcp, action person) in `ape project check` and `ape
+// plugins status` until a person allows that plugin explicitly, per kind:
+// allow: [hooks], [mcp] or [hooks, mcp]. plugins: is under the
+// config.changed guard, so adding an allowance is itself a person's act.
 
 // Marketplace is one marketplaces.<name> entry.
 type Marketplace struct {
@@ -60,7 +68,18 @@ type PluginRef struct {
 	Name        string `json:"name"          yaml:"name"`
 	Marketplace string `json:"marketplace"   yaml:"marketplace"`
 	Ref         string `json:"ref,omitempty" yaml:"ref"`
+	// Allow lists what the plugin may carry besides skills: hooks, mcp.
+	Allow []string `json:"allow,omitempty" yaml:"allow"`
 }
+
+// The allow: values (D59 Q5).
+const (
+	AllowHooks = "hooks"
+	AllowMCP   = "mcp"
+)
+
+// Allows reports whether the entry allows kind (AllowHooks, AllowMCP).
+func (r PluginRef) Allows(kind string) bool { return slices.Contains(r.Allow, kind) }
 
 // ID is the plugin's Claude Code id, <name>@<marketplace>.
 func (r PluginRef) ID() string { return r.Name + "@" + r.Marketplace }
@@ -115,6 +134,11 @@ func pluginConfigErrors(cfg Config) []string {
 			out = append(out, "plugins: "+pl.ID()+" is listed twice")
 		}
 		seen[pl.ID()] = true
+		for _, a := range pl.Allow {
+			if a != AllowHooks && a != AllowMCP {
+				out = append(out, fmt.Sprintf("plugins[%d] (%s): allow %q is not hooks or mcp", i, pl.Name, a))
+			}
+		}
 	}
 	return out
 }
@@ -251,6 +275,9 @@ type InstalledPlugin struct {
 	Version     string `json:"version"`
 	Scope       string `json:"scope"`
 	ProjectPath string `json:"projectPath"`
+	// InstallPath is the versioned copy Claude Code loads the plugin from
+	// (under <config dir>/plugins/cache/): what plugins status inspects.
+	InstallPath string `json:"installPath"`
 }
 
 // PluginCLI is the `claude plugin` CLI, at project scope, run in the
@@ -360,9 +387,10 @@ func RefMatches(version, ref string) bool {
 
 // PluginState is one configured plugin as installed for this project.
 type PluginState struct {
-	Plugin    PluginRef `json:"plugin"`
-	Installed bool      `json:"installed"`
-	Version   string    `json:"version,omitempty"`
+	Plugin      PluginRef `json:"plugin"`
+	Installed   bool      `json:"installed"`
+	Version     string    `json:"version,omitempty"`
+	InstallPath string    `json:"install_path,omitempty"`
 }
 
 // OK reports whether the plugin is installed at its ref.
@@ -388,7 +416,7 @@ func (p *Project) pluginStates(ctx context.Context, cli PluginCLI, cfg Config) (
 		st := PluginState{Plugin: pl}
 		for _, ip := range list {
 			if ip.ID == pl.ID() && ip.Scope == "project" && samePath(ip.ProjectPath, p.Root) {
-				st.Installed, st.Version = true, ip.Version
+				st.Installed, st.Version, st.InstallPath = true, ip.Version, ip.InstallPath
 				break
 			}
 		}

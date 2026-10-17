@@ -152,11 +152,16 @@ type ReviewOutcome struct {
 }
 
 // reviewMayTouch reports whether a review session may change path
-// (project-relative): its review.md, the state ape commits for it, and
+// (project-relative): its review.md, the review tools' reports
+// (assets/review-<name>.md, written before the session and committed by
+// apex-review with review.md, D74 Q23), the state ape commits for it, and
 // ape's own records.
 func (p *Project) reviewMayTouch(id, rel string) bool {
 	rel = strings.TrimPrefix(rel, "./")
 	changeDir := p.DevRel + "/changes/" + id + "/"
+	if report, ok := strings.CutPrefix(rel, changeDir+"assets/review-"); ok && strings.HasSuffix(report, ".md") && !strings.Contains(report, "/") {
+		return true
+	}
 	return rel == changeDir+"review.md" || rel == changeDir+"state.json" ||
 		strings.HasPrefix(rel, p.StateRel()+"/")
 }

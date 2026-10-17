@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 
@@ -76,6 +77,78 @@ type ChangeStatus struct {
 	// Answer is a person's answer to what blocked the change (H9): set on
 	// an answered change, and kept once it is started again.
 	Answer *Answer `json:"answer,omitempty"`
+	// Tools are the change's design-tool tasks (`— tool: <name>`) and
+	// ReviewTools its review_tools: (D59 Q4, D74), each resolved to the
+	// skill tools: names ("" when it names none: change check refuses
+	// it). The orchestrator reads them here, not in change.md. Always
+	// present.
+	Tools       []ChangeTool `json:"tools"`
+	ReviewTools []ChangeTool `json:"review_tools"`
+}
+
+// ChangeTool is one tool a change calls for. Task and Done are a design
+// tool's: Done is its task green at the change's latest verify of the
+// current plan (a human-review task: accepted by a person).
+type ChangeTool struct {
+	Task  string `json:"task,omitempty"`
+	Name  string `json:"name"`
+	Skill string `json:"skill"`
+	Done  *bool  `json:"done,omitempty"`
+	// Args (the unfilled template), Model and Effort are the tools: entry's
+	// (D77); empty when it sets none.
+	Args   string `json:"args,omitempty"`
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
+}
+
+// changeTools resolves a change's design and review tools against the
+// config's tools: slots.
+func changeTools(tools ToolsConfig, c *Change, st *State, lv *LastVerify, pending []string) (design, review []ChangeTool) {
+	design, review = []ChangeTool{}, []ChangeTool{}
+	if c == nil {
+		return design, review
+	}
+	entry := func(slot, name string) ChangeTool {
+		ct := ChangeTool{Name: name}
+		if t := tools.Find(slot, name); t != nil {
+			ct.Skill, ct.Args, ct.Model, ct.Effort = t.Skill, t.Args, t.Model, t.Effort
+		}
+		return ct
+	}
+	for _, t := range c.Tasks {
+		if t.Tool == "" {
+			continue
+		}
+		done := taskDone(t, st, lv, pending)
+		ct := entry("design", t.Tool)
+		ct.Task, ct.Done = t.ID, &done
+		design = append(design, ct)
+	}
+	for _, name := range c.Meta.ReviewTools {
+		review = append(review, entry("review", name))
+	}
+	return design, review
+}
+
+// taskDone: a human-review task accepted (not pending), a command task
+// green at the latest verify of the current plan.
+func taskDone(t Task, st *State, lv *LastVerify, pending []string) bool {
+	if t.Human() {
+		return st != nil && !slices.Contains(pending, t.ID)
+	}
+	if lv != nil {
+		_, red := lv.Red[t.ID]
+		return !red
+	}
+	if st == nil || st.Verify == nil {
+		return false
+	}
+	for i := range st.Verify.Results {
+		if r := &st.Verify.Results[i]; r.Task == t.ID {
+			return !r.Red()
+		}
+	}
+	return false
 }
 
 // Spend is the cost recorded in the project's run manifests.
@@ -221,12 +294,15 @@ func (p *Project) Status() *StatusReport {
 			cs.BlockedReason = *c.State.BlockedReason
 		}
 		cs.Answer = c.State.Answer
+		var pendingHuman []string
 		if c.Doc != nil {
 			// Acceptances recorded on the base count (D52 Q18).
 			acc := p.withBaseAccepted(ctx, c.ID, c.State)
 			cs.PendingHuman = acc.PendingHuman(c.Doc.HumanTasks())
 			cs.AwaitingHuman = awaitingHuman(acc, c.Doc)
+			pendingHuman = cs.PendingHuman
 		}
+		cs.Tools, cs.ReviewTools = changeTools(cfg.Tools, c.Doc, c.State, p.currentLastVerify(c.ID, c.State), pendingHuman)
 		if v := c.State.Verify; v != nil {
 			cs.VerifySHA = v.SHA
 			for i := range v.Results {
@@ -256,6 +332,9 @@ func (p *Project) Status() *StatusReport {
 	for i := range r.Changes {
 		if r.Changes[i].AwaitingHuman == nil {
 			r.Changes[i].AwaitingHuman = []string{}
+		}
+		if r.Changes[i].Tools == nil {
+			r.Changes[i].Tools, r.Changes[i].ReviewTools = changeTools(cfg.Tools, nil, nil, nil, nil)
 		}
 	}
 	for i := range r.Changes {

@@ -97,6 +97,7 @@ func rootSubcommands() []*cobra.Command {
 		newChangeCmd(),
 		newDecisionCmd(),
 		newNextCmd(),
+		newPluginsCmd(),
 		newHookCmd(),
 		newPromptCmd(),
 		newScriptCmd(),

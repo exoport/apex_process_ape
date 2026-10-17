@@ -18,6 +18,8 @@ type fakePluginCLI struct {
 	installed map[string]string
 	calls     []string
 	failAdd   bool
+	// paths is each installed plugin's installPath.
+	paths map[string]string
 	// settingsWrite mimics the CLI rewriting settings.json.
 	settingsWrite bool
 }
@@ -26,7 +28,7 @@ func (f *fakePluginCLI) Installed(_ context.Context, root string) ([]InstalledPl
 	f.calls = append(f.calls, "list")
 	out := make([]InstalledPlugin, 0, len(f.installed)+1)
 	for id, v := range f.installed {
-		out = append(out, InstalledPlugin{ID: id, Version: v, Scope: "project", ProjectPath: root})
+		out = append(out, InstalledPlugin{ID: id, Version: v, Scope: "project", ProjectPath: root, InstallPath: f.paths[id]})
 	}
 	out = append(out, InstalledPlugin{ID: "other@x", Version: "1", Scope: "project", ProjectPath: "/elsewhere"})
 	return out, nil

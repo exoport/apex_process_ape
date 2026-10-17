@@ -33,6 +33,9 @@ type ChangeMeta struct {
 	// Type is the change's commit type (D47), one of CommitTypes: the
 	// archive squash's {type}. Required only when commit.subject uses it.
 	Type string `yaml:"type"`
+	// ReviewTools names the tools.review entries whose when: this change
+	// matches (D59 Q4, D74): the orchestrator runs each before the review.
+	ReviewTools []string `yaml:"review_tools"`
 }
 
 // Delta is one `### ADDED|MODIFIED|REMOVED [cap] Requirement: <name>`.
@@ -61,11 +64,17 @@ type Delta struct {
 // command — and is only allowed to be green at baseline, where start
 // refuses any other task check of a change that adds or modifies
 // behaviour (change.vacuous-check).
+//
+// A design-tool task (D59 Q4, D74) names its tool between <what> and the
+// check: `- T<n> <what> — tool: <name> — check: <command|human-review>`;
+// <name> is a tools.design entry, which the orchestrator runs before
+// apex-apply.
 type Task struct {
 	ID         string `json:"id"`
 	What       string `json:"what"`
 	Check      string `json:"check"`
 	Regression bool   `json:"regression,omitempty"`
+	Tool       string `json:"tool,omitempty"`
 	Line       int    `json:"line"`
 }
 
@@ -112,6 +121,7 @@ func unknownKeys(fm []byte) []string {
 // keys are the team's own (a tracker id, say) and are ignored.
 var knownChangeKeys = map[string]bool{
 	"id": true, "milestone": true, "touches": true, "paths": true, "decisions": true, "retire": true, "type": true,
+	"review_tools": true,
 }
 
 var (
@@ -122,6 +132,8 @@ var (
 	// taskCheckRe is a task line's separator: a dash, then check: or
 	// regression:. The first one ends <what>.
 	taskCheckRe = regexp.MustCompile(`(?:^|\s)[—–-]+\s*(check|regression):`)
+	// taskToolRe is the `— tool: <name>` segment that ends <what>.
+	taskToolRe = regexp.MustCompile(`(?:^|\s)[—–-]+\s*tool:\s*(\S(?:.*\S)?)\s*$`)
 )
 
 // ParseChange parses change.md. file is the project-relative path used in
@@ -307,6 +319,10 @@ func (c *Change) parseTasks(body []mdLine) {
 		} else {
 			t.What = strings.TrimSpace(rest)
 		}
+		if m := taskToolRe.FindStringSubmatchIndex(t.What); m != nil {
+			t.Tool = strings.Trim(t.What[m[2]:m[3]], "`")
+			t.What = strings.TrimSpace(t.What[:m[0]])
+		}
 		if t.Regression && (t.Check == HumanReview || t.Check == "") {
 			c.parse = append(c.parse, Finding{
 				File: c.file, Line: l.N,
@@ -318,7 +334,8 @@ func (c *Change) parseTasks(body []mdLine) {
 }
 
 // TaskLineGrammar is the task line's shape, as findings quote it.
-const TaskLineGrammar = "task line must read `- T<n> <what> — check: <command> | human-review` or `- T<n> <what> — regression: <command>`"
+const TaskLineGrammar = "task line must read `- T<n> <what> — check: <command> | human-review` or `- T<n> <what> — regression: <command>`" +
+	" (a design-tool task: `- T<n> <what> — tool: <name> — check: …`)"
 
 // Task returns the task with id, or nil.
 func (c *Change) Task(id string) *Task {

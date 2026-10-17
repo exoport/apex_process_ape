@@ -239,8 +239,10 @@ func newChangeCheckCmd() *cobra.Command {
     with `+"`ape change approve`"+`), touches non-empty kebab slugs, decisions exist in
     decisions/, paths are valid globs; type: (the archive commit's {type}, D47) one of
     feat, fix, perf, refactor, docs, test, build, ci, chore — required only when
-    _apex/config.yaml commit.subject uses {type} (change.no-type; change.bad-type); any
-    other key must start with x-
+    _apex/config.yaml commit.subject uses {type} (change.no-type; change.bad-type);
+    review_tools: [<name>, …] names tools.review entries of _apex/config.yaml whose
+    when: the change matches (the orchestrator runs each before the review; else
+    tools.unknown, D74); any other key must start with x-
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
   - change.md ≤ 8 KB and design.md ≤ 8 KB ("split this change")
   - every spec the delta touches stays ≤ 20 KB once merged — the in-memory merge
@@ -262,7 +264,10 @@ func newChangeCheckCmd() *cobra.Command {
   - ## Tasks: "- T<n> <what> — check: <command> | human-review", or "- T<n> <what> —
     regression: <command>" for a check that may already pass before the change (it runs
     like any check task; `+"`ape change start`"+` lets it be green at baseline); no checkboxes,
-    unique ids
+    unique ids. A design-tool task names its tool before the check:
+    "- T<n> <what> — tool: <name> — check: <command> | human-review", <name> a
+    tools.design entry of _apex/config.yaml (else tools.unknown, D74; see
+    `+"`ape plugins --help`"+`); ape status --json lists it under changes[].tools
 
 The change is checked as the branch holding its records has it, against that branch's
 specs and roadmap (D51 Q17; `+"`ape change --help`"+`): HEAD needs to be on no particular branch.
@@ -674,8 +679,11 @@ session, never from inside a review session (depth 1), skill fixed to apex-revie
   - read-only: the session runs with APE_REVIEW=<id>, and `+"`ape hook pre-tool`"+` denies
     every edit inside the project except changes/<id>/review.md (outside the project,
     e.g. a throwaway copy to break, is allowed)
-  - post-run assertion: a session that committed or left anything but review.md (and
-    the state.json ape commits) has its verdict voided (recorded under review_voided)
+  - post-run assertion: a session that committed or left anything but review.md, the
+    review tools' reports changes/<id>/assets/review-<name>.md (written before --run,
+    committed with review.md; D74) and the state.json ape commits has its verdict
+    voided (recorded under review_voided). A commit touching only development/ (assets/
+    included) after the verify or the review leaves both fresh
   - --wait (default 9m, under the Bash tool's 10-minute cap) bounds one call; exit 75
     means still running: call `+"`ape change review <id> --run`"+` again to keep waiting —
     it attaches to the running session, it never starts a second one

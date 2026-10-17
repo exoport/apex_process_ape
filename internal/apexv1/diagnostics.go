@@ -155,6 +155,7 @@ var findingRules = []findingRule{
 	rule("", `^change.md is .* over the 8 KB cap`, "change.too-big"),
 	rule("", `^design.md is`, "change.design-too-big"),
 	rule("", `^no state.json beside it`, "change.no-state"),
+	rule("", `^(task \S+'s tool: |review_tools: ).* is not declared in tools\.(design|review)`, "tools.unknown"),
 	rule("", `^frontmatter key .* is not one of`, "change.unknown-key"),
 	rule("", "^frontmatter has no `type:`", "change.no-type"),
 	rule("", `^frontmatter type .* is not one of`, "change.bad-type"),
@@ -196,6 +197,10 @@ var findingRules = []findingRule{
 	rule("", "^hook `ape hook .* is altered", "hooks.altered"),
 	rule("", `^settings.json is (not valid JSON|unreadable)`, "settings.invalid-json"),
 	rule("", `^plugins config: `, "plugins.config"),
+	rule("", `^plugin \S+ carries `, "plugin.hooks-or-mcp"),
+	rule("", `^tools config: `, "tools.invalid"),
+	rule("", `^tool \S+: skill \S+ is not installed`, "tools.not-installed"),
+	rule("", `^tool \S+: skill \S+ is not slash-invocable`, "tools.not-invocable"),
 	rule("", `^plugins: `, "plugins.drift"),
 }
 
