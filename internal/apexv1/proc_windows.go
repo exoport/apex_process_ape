@@ -12,3 +12,7 @@ func killProcessGroup(c *exec.Cmd) error {
 	}
 	return c.Process.Kill()
 }
+
+// processAlive is false on Windows: a journal left there is always
+// treated as a crash.
+func processAlive(int) bool { return false }

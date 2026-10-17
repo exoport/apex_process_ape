@@ -74,6 +74,9 @@ type StartResult struct {
 // there. On a change whose branch exists it checks that branch out first;
 // a started change that needs no re-baselining is then only resumed.
 func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	if !p.isWorkTree(ctx) {
 		return p.start(ctx, id, opt, nil)
 	}
@@ -378,6 +381,9 @@ func (v *VerifyResult) Failing() []CheckResult {
 // hold no uncommitted code: a green over uncommitted work belongs to no
 // sha.
 func (p *Project) Verify(ctx context.Context, id string, opt RunOptions) (*VerifyResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return nil, err
@@ -531,6 +537,9 @@ func limit(xs []string, n int) []string {
 // Review records a review verdict. pass needs a fresh green verify;
 // block returns the change to in-progress.
 func (p *Project) Review(ctx context.Context, id, verdict, findings string) (*State, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	if verdict != "pass" && verdict != "block" {
 		return nil, &UsageError{Code: "usage.verdict", Msg: "--verdict must be pass or block"}
 	}
@@ -600,6 +609,9 @@ func (p *Project) saveAndCommitSubject(ctx context.Context, id string, st *State
 
 // Accept records a person accepting a human-review task.
 func (p *Project) Accept(ctx context.Context, id, task, by string) (*State, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(by) == "" {
 		return nil, &UsageError{Code: "usage.by", Msg: "--by names the person accepting"}
 	}
@@ -640,6 +652,9 @@ func (p *Project) Accept(ctx context.Context, id, task, by string) (*State, erro
 
 // Block sets a change blocked with a reason a person can act on.
 func (p *Project) Block(ctx context.Context, id, reason string) (*State, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(reason) == "" {
 		return nil, &UsageError{Code: "usage.reason", Msg: "--reason is required: what blocks it, or the question only a person can answer"}
 	}

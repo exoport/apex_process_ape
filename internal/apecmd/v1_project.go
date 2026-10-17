@@ -299,6 +299,10 @@ func newStatusCmd() *cobra.Command {
     archive squash — else since the v1 epoch, the newest "apex: project init" or "apex:
     lift" commit — that touch paths outside development/ and _apex/, carry no "Change:"
     trailer and have no "apex:" subject. Shown, never failed
+  - an archive in flight or interrupted by a crash (JSON "archive_journal", with
+    "archive_running" when its process is alive; on the first line): status only reports
+    it — the next writing command rolls a crashed one back (archive.interrupted; see
+    ` + "`ape change archive --help`" + `)
   - next: what the way of working says comes next, derived from the state alone
 
 --brief renders at most 25 lines (what the SessionStart hook injects).

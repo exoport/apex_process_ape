@@ -155,6 +155,9 @@ func (p *Project) loadRoadmapDoc() (string, *Roadmap, error) {
 
 // NewMilestone appends a milestone to roadmap.md and returns its id.
 func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *float64, goal string) (string, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return "", err
+	}
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return "", &UsageError{Code: "usage.title", Msg: "a milestone needs a title"}
@@ -184,6 +187,9 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 
 // ApproveMilestone writes `Status: approved (by <who> <ts>)`.
 func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milestone, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(by) == "" {
 		return nil, &UsageError{Code: "usage.by", Msg: "--by names who approves"}
 	}
@@ -255,6 +261,9 @@ type GateResult struct {
 // (and a commit `apex: <M> gate green|red`) changes only when the result
 // does.
 func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*GateResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	if err := p.refuseOnChangeBranch(ctx, "a milestone gate run"); err != nil {
 		return nil, err
 	}
@@ -352,6 +361,9 @@ func lastN(xs []string, n int) []string {
 // CloseMilestone runs the gate and, on exit 0 with no change of this
 // milestone still in flight, writes `Status: done (<ts> <sha>)`.
 func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions) (*GateResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	if err := p.refuseOnChangeBranch(ctx, "closing a milestone"); err != nil {
 		return nil, err
 	}

@@ -197,6 +197,9 @@ type ArchiveResult struct {
 // branch. Run from the change's branch or from any other non-change
 // branch (it switches); the tree must be clean.
 func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool, opt RunOptions) (*ArchiveResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return nil, err
@@ -218,6 +221,14 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	}
 	base := ci.State.BaseBranch
 	res := &ArchiveResult{ID: id, BaseBranch: base}
+	// The journal (H28): what a crash from here on is rolled back to. Any
+	// return — success, a refusal, a conflict laid out — removes it.
+	baseSHA, _ := git(ctx, p.Root, "rev-parse", "--verify", "--quiet", "refs/heads/"+base)
+	j := &ArchiveJournal{ID: id, Base: base, BaseSHA: baseSHA, Branch: ChangeBranch(id), BranchTip: HeadSHA(ctx, p.Root), Step: JournalRebase}
+	if err := p.writeJournal(j); err != nil {
+		return res, err
+	}
+	defer p.removeJournal()
 
 	// The review judged the change's own code: refused when that moved
 	// since, judged before the rebase brings the base's code in.
@@ -247,7 +258,7 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	cc := p.commitConfig()
 	res.Subject = archiveSubject(cc.SubjectTemplate(), ci.Doc, id)
 	res.Hooks = cc.RunHooks()
-	return res, p.squashOntoBase(ctx, ci, updates, dest, pending, res)
+	return res, p.squashOntoBase(ctx, ci, updates, dest, pending, res, j)
 }
 
 // archivable checks what archive needs before it touches git: a review
@@ -336,16 +347,29 @@ func (p *Project) planArchive(ci ChangeInfo) (updates []SpecUpdate, dest string,
 // branch, writes the specs and the archive move, commits it all as ONE
 // commit and deletes the branch. Anything failing before the commit
 // leaves the base branch where it was and the change's branch checked out.
-func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []SpecUpdate, dest string, pending []string, res *ArchiveResult) error {
+func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []SpecUpdate, dest string, pending []string, res *ArchiveResult, j *ArchiveJournal) error {
 	id, base, branch := ci.ID, ci.State.BaseBranch, ChangeBranch(ci.ID)
 	tip := HeadSHA(ctx, p.Root)
+	// What the squash writes beside what git merges: all a rollback may
+	// clean (H28) — never the whole development folder, where a person's
+	// untracked files may be.
+	written := []string{p.Rel(dest)}
+	for _, u := range updates {
+		if u.Created {
+			written = append(written, u.Path)
+		}
+	}
+	j.Step, j.BranchTip, j.Written = JournalSquash, tip, written
+	if err := p.writeJournal(j); err != nil {
+		return err
+	}
 	if err := p.switchBranch(ctx, base); err != nil {
 		return err
 	}
 	baseSHA := HeadSHA(ctx, p.Root)
 	undo := func(cause error) error {
 		_, _ = git(ctx, p.Root, "reset", "-q", "--hard", baseSHA)
-		_, _ = git(ctx, p.Root, "clean", "-fdq", "--", p.DevRel)
+		p.cleanWritten(ctx, written)
 		_, _ = git(ctx, p.Root, "switch", "-q", branch)
 		if fe, ok := errors.AsType[*FailError](cause); ok {
 			fe.Msg += " (nothing was committed: " + base + " is unchanged and " + branch + " is checked out again)"
@@ -438,6 +462,9 @@ type AbandonResult struct {
 // as branch_tip (D38). The archived folder holds the change's files as
 // its branch last had them.
 func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return nil, &UsageError{Code: "usage.reason", Msg: "--reason is required: why the change is dropped, and what (if anything) replaces it"}

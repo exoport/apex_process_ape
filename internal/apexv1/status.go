@@ -105,6 +105,11 @@ type StatusReport struct {
 	// and no `apex:` subject: work that bypassed the change flow (H7).
 	// Shown, never failed.
 	OutsideFlow []OutsideFlow `json:"outside_flow"`
+	// ArchiveJournal is an archive in flight, or one that crashed (H28):
+	// the next writing command rolls a crashed one back. Status only
+	// reports it. ArchiveRunning: its process is still alive.
+	ArchiveJournal *ArchiveJournal `json:"archive_journal,omitempty"`
+	ArchiveRunning bool            `json:"archive_running,omitempty"`
 }
 
 // Status builds the report.
@@ -199,6 +204,9 @@ func (p *Project) Status() *StatusReport {
 	base := p.statusBase(ctx, r.Branch)
 	r.BaseUpstream = p.upstreamOf(ctx, base)
 	r.OutsideFlow = p.outsideFlow(ctx, base)
+	if j := p.LoadArchiveJournal(); j != nil {
+		r.ArchiveJournal, r.ArchiveRunning = j, j.Running()
+	}
 	r.Next = nextStep(r)
 	return r
 }
@@ -355,6 +363,14 @@ func (r *StatusReport) Brief() string {
 	title := "APEX status — " + r.Project
 	if r.Branch != "" {
 		title += " (on " + r.Branch + ")"
+	}
+	// On the title line, so the brief keeps its 25-line cap.
+	if j := r.ArchiveJournal; j != nil {
+		if r.ArchiveRunning {
+			title += fmt.Sprintf(" — archive of %s in progress (pid %d, %s step)", j.ID, j.PID, j.Step)
+		} else {
+			title += fmt.Sprintf(" — archive of %s INTERRUPTED at its %s step: the next ape command that writes rolls it back (archive.interrupted), then archive again", j.ID, j.Step)
+		}
 	}
 	b = append(b, title)
 	if !r.Initialized {

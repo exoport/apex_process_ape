@@ -97,6 +97,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"git.branch-failed", 1, "stop", "creating, switching to, rebasing or deleting a branch failed, or the base branch is missing"},
 	{CodeBehindUpstream, 1, "person", "start (a new start, or a re-entry that catches up) and archive: the base branch is behind its upstream (the local remote-tracking ref; ape never fetches) — a person pulls (D45: one operator per checkout, local trunk)"},
 	{CodeBaseCheckedOut, 1, "stop", "archive, abandon (or any command that switches branches): the branch ape must switch to — the base branch — is checked out in another worktree (the message names its path); an environment problem: stop, do not re-plan (D45)"},
+	{CodeArchiveInterrupted, 1, "retry", "a writing command found the journal of an archive that crashed (_apex/state/archive-journal.json) and rolled the checkout back to it — the base at its pre-archive sha, change/<id> at its recorded tip, checked out; the message says what was undone; archive again, then the command (H28)"},
 	{CodeHookFailed, 1, "apply", "archive: a project git hook (pre-commit, commit-msg; commit.hooks: run, the default) refused the squash commit; archive rolled back (the base unchanged, change/<id> checked out again) and the message carries the hook output's tail — fix it on the branch, verify, archive again"},
 	{"archive.spec-invalid", 1, "replan", "archive: the merged spec would fail project check (e.g. over 20 KB)"},
 	{"change.archived", 1, "stop", "the change is already archived"},

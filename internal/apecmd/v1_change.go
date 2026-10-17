@@ -804,6 +804,16 @@ func newChangeArchiveCmd() *cobra.Command {
 The base branch gets exactly one commit per archived change; ape's status commits stay on
 the change branch, squashed away.
 
+A crash mid-archive (H28): archive keeps a journal, _apex/state/archive-journal.json
+(ignored; base, its sha before, the branch and its tip, the step), from before the
+catch-up until it returns. A journal that outlives its process is rolled back by the next
+v1 command that writes (start, verify, review, accept, block, archive, abandon, change /
+milestone / decision new, approve, gate, close, decision accept): the base branch back at
+its pre-archive sha (a squash commit undone, a half squash dropped — cleaning only the
+paths archive writes), change/<id> at its recorded tip and checked out. That command then
+exits 1, archive.interrupted (retry), saying what was rolled back; archive again.
+`+"`ape status`"+` reports the journal (JSON "archive_journal") and changes nothing.
+
 Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review, a
 git hook refused the squash,
 pending human-review, dirty tree, no change branch, the base behind its upstream

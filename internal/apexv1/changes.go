@@ -489,6 +489,9 @@ type NewChangeResult struct {
 
 // NewChange validates id and writes the change skeleton and a draft state.
 func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, paths []string) (*NewChangeResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	if !ChangeIDRe.MatchString(id) {
 		return nil, &UsageError{Code: "usage.change-id", Msg: fmt.Sprintf("change id %q must match ^[a-z][a-z0-9-]{2,39}$ (verb-led kebab slug, e.g. add-tenant-delete)", id)}
 	}

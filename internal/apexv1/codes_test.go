@@ -34,6 +34,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeConflicted": CodeConflicted, "CodeUnresolvedConflict": CodeUnresolvedConflict, "CodeNotApproved": CodeNotApproved, "CodeCheckFailed": CodeCheckFailed,
 		"CodePersonOnly": CodePersonOnly, "CodeBaseCheckedOut": CodeBaseCheckedOut,
 		"CodeBehindUpstream": CodeBehindUpstream, "CodeHookFailed": CodeHookFailed,
+		"CodeArchiveInterrupted": CodeArchiveInterrupted,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

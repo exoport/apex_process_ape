@@ -52,6 +52,9 @@ type ApproveResult struct {
 // not be started. Re-approving the same plan is a no-op; a plan changed
 // since its approval is approved again (recorded anew).
 func (p *Project) ApproveFix(ctx context.Context, id, by string) (*ApproveResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	by = strings.TrimSpace(by)
 	if by == "" {
 		return nil, &UsageError{Code: "usage.by", Msg: "--by names the person approving the fix"}
