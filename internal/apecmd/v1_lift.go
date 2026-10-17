@@ -32,12 +32,16 @@ or did in git history) and no v1 layout or earlier lift (lift.not-v0); a version
 v0.15.0–v0.31.x and a resolvable _apex/config.yaml (lift.unsupported-layout); a clean
 tree (lift.dirty); apex-v0-final exists (lift.no-tag), is HEAD (lift.tag-not-head),
 and is on the current branch's upstream remote at the same commit, checked with
-git ls-remote — the one network call (lift.tag-not-pushed; lift.remote-unreachable).
+git ls-remote — the one network call (lift.tag-not-pushed; lift.remote-unreachable);
+and git ignores nothing the lift commits (lift.claude-ignored) — above all
+.claude/settings.json, where the v1 hooks go: un-ignore it with .claude/* and
+!.claude/settings.json, commit, and re-tag. --dry-run lists every problem, not the first.
 
 The commit:
   deletes        the v0 families, at the paths _apex/config.yaml's folder variables
                  resolve to: the skills the v0 install manifest lists (only those —
-                 never a project's own), the v0 _apex tables and pipelines, stories,
+                 never a project's own; ones git never tracked, under an ignored
+                 .claude/, leave the working tree after the commit), the v0 _apex tables and pipelines, stories,
                  the sprint tracker, retrospectives, planning (PRD, architecture,
                  epics, proposals, release records), ADR and pattern records and
                  indexes, capability and feature registries, deferred records, team
@@ -156,7 +160,11 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 		fmt.Fprintf(w, "would refuse  %s — %s\n", p.Code, p.Message)
 	}
 	for _, d := range r.Deleted {
-		fmt.Fprintf(w, "%-9s %s  (%s)\n", verb("deleted", "delete"), d.Path, d.Family)
+		family := d.Family
+		if d.Untracked {
+			family += "; untracked, so not archived by " + apexv1.LiftTag
+		}
+		fmt.Fprintf(w, "%-9s %s  (%s)\n", verb("deleted", "delete"), d.Path, family)
 	}
 	for i := range r.ADRs {
 		a := &r.ADRs[i]

@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -129,6 +130,9 @@ type lifter struct {
 	// the ADR folder it could not convert (kept).
 	deletes []string
 	keepADR map[string]bool
+	// untracked are the manifest's v0 skill folders git does not track:
+	// removed from the working tree after the commit (L2).
+	untracked []string
 	// texts caches the tracked text files read for the plan.
 	texts map[string]string
 	files []string
@@ -187,6 +191,12 @@ func Lift(ctx context.Context, root string, opt LiftOptions) (*LiftResult, error
 	}
 	if err := lf.plan(); err != nil {
 		return nil, err
+	}
+	if fe := lf.ignoredWrites(); fe != nil {
+		if !opt.DryRun {
+			return nil, fe
+		}
+		lf.res.Preflight = append(lf.res.Preflight, LiftProblem{Code: fe.Code, Message: fe.Msg})
 	}
 	if opt.DryRun {
 		return lf.res, nil
@@ -279,16 +289,19 @@ func (lf *lifter) preflight() []*FailError {
 			" — commit or stash them (on a branch of their own if they are work in flight), then tag and lift"})
 	}
 
+	// Every problem is reported, not only the first (L14): a dry run is
+	// the person's one look before the real run.
 	tagSHA, err := git(lf.ctx, lf.root, "rev-parse", "-q", "--verify", "refs/tags/"+LiftTag+"^{commit}")
 	if err != nil || tagSHA == "" {
-		return append(out, &FailError{Code: "lift.no-tag", Msg: "no tag " + LiftTag + " — the tag is the archive of everything the lift deletes: " +
+		tagSHA = ""
+		out = append(out, &FailError{Code: "lift.no-tag", Msg: "no tag " + LiftTag + " — the tag is the archive of everything the lift deletes: " +
 			"`git tag -a " + LiftTag + " -m \"APEX v0 final\"` on this commit, push it, then lift"})
-	}
-	lf.res.TagSHA = tagSHA
-	if head := HeadSHA(lf.ctx, lf.root); head != tagSHA {
-		out = append(out, &FailError{Code: "lift.tag-not-head", Msg: LiftTag + " is " + short(tagSHA) + ", HEAD is " + short(head) +
-			" — the lift starts from the tagged commit: check it out, or (a person's call) move the tag to HEAD and push it again"})
-		return out
+	} else {
+		lf.res.TagSHA = tagSHA
+		if head := HeadSHA(lf.ctx, lf.root); head != tagSHA {
+			out = append(out, &FailError{Code: "lift.tag-not-head", Msg: LiftTag + " is " + short(tagSHA) + ", HEAD is " + short(head) +
+				" — the lift starts from the tagged commit: check it out, or (a person's call) move the tag to HEAD and push it again"})
+		}
 	}
 	branch := CurrentBranch(lf.ctx, lf.root)
 	remote := ""
@@ -304,6 +317,9 @@ func (lf *lifter) preflight() []*FailError {
 	if err != nil {
 		return append(out, &FailError{Code: "lift.remote-unreachable", Msg: "git ls-remote " + remote + ": " + err.Error() +
 			" — reach the remote (network, credentials), then lift again"})
+	}
+	if tagSHA == "" {
+		return out
 	}
 	remoteSHA, peeled := "", ""
 	for line := range strings.SplitSeq(ls, "\n") {
@@ -328,6 +344,37 @@ func (lf *lifter) preflight() []*FailError {
 			" — the archive must be the commit being lifted: a person resolves which is right, then pushes it"})
 	}
 	return out
+}
+
+// ignoredWrites is the pre-flight check a real lift used to fail on after
+// a passing dry run (L2, mdpdf and pdfa): a path the lift commits that git
+// ignores. `git add` refuses it, and the lift stopped half-staged. Above
+// all .claude/settings.json, where the v1 hooks go: an ignored .claude/
+// would also keep them from every other checkout. Tracked paths are never
+// ignored, so only the ones the lift creates count.
+func (lf *lifter) ignoredWrites() *FailError {
+	p := &Project{Root: lf.root, DevRel: lf.devRel}
+	paths := []string{
+		p.Rel(p.SettingsJSON()), p.Rel(p.ProjectMD()), p.Rel(p.RoadmapMD()), p.Rel(p.AgentsMD()), p.Rel(p.ClaudeMD()),
+		p.Rel(p.StateGitignore()), p.Rel(p.decisionsJSON()),
+	}
+	for _, d := range []string{p.SpecsDir(), p.ChangesDir(), p.ArchiveDir(), p.DecisionsDir(), p.BriefsDir()} {
+		paths = append(paths, p.Rel(filepath.Join(d, ".gitkeep")))
+	}
+	for rel := range lf.writes {
+		paths = append(paths, rel)
+	}
+	sort.Strings(paths)
+	ignored := gitIgnored(lf.ctx, lf.root, false, uniqueStrings(paths)...)
+	if len(ignored) == 0 {
+		return nil
+	}
+	fix := "un-ignore them"
+	if slices.Contains(ignored, ".claude/settings.json") {
+		fix = "un-ignore them — for .claude/, `.claude/*` and `!.claude/settings.json` in .gitignore, which also shares the v1 hooks with every checkout"
+	}
+	return &FailError{Code: CodeClaudeIgnored, Msg: "git ignores what the lift commits: " + strings.Join(ignored, ", ") +
+		", so `git add` would refuse it mid-lift — " + fix + "; commit that, move " + LiftTag + " to it and push the tag, then lift"}
 }
 
 // excluded reports a path --exclude names.
@@ -428,6 +475,9 @@ func (lf *lifter) plan() error {
 			lf.deletes = append(lf.deletes, p)
 			lf.res.Deleted = append(lf.res.Deleted, LiftDeletion{Path: p, Family: f.Name})
 		}
+	}
+	for _, s := range lf.untracked {
+		lf.res.Deleted = append(lf.res.Deleted, LiftDeletion{Path: s, Family: "v0 skills", Untracked: true})
 	}
 	lf.res.SkillsSource = lf.layout.SkillsSource
 	lf.listKeptApex()
@@ -918,6 +968,13 @@ func (lf *lifter) apply() error {
 		return &FailError{Code: CodeCommitFailed, Msg: "the lift commit failed: " + err.Error() + " — `git reset --hard` restores the tree; fix the cause (identity, lock), then lift again"}
 	}
 	lf.res.Commit = HeadSHA(ctx, lf.root)
+	// The manifest's v0 skills git never tracked (an ignored .claude/):
+	// installer-owned, so they go too, once the commit stands.
+	for _, s := range lf.untracked {
+		if err := os.RemoveAll(filepath.Join(lf.root, filepath.FromSlash(s))); err != nil {
+			return &FailError{Code: CodeLiftWriteFailed, Msg: "removing the untracked v0 skill " + s + ": " + err.Error() + " — the lift commit stands; remove the folder by hand"}
+		}
+	}
 
 	// The regression command, once, at the lift commit: the baseline red
 	// gates are judged against (backlog 37). A red run is recorded, not a

@@ -193,6 +193,10 @@ type liftFamily struct {
 type LiftDeletion struct {
 	Path   string `json:"path"`
 	Family string `json:"family"`
+	// Untracked is a v0 skill folder the manifest lists that git does not
+	// track (an ignored .claude/, L2): removed from the working tree after
+	// the commit, and not archived by the tag.
+	Untracked bool `json:"untracked,omitempty"`
 }
 
 // v0Tables are the framework-owned files and folders a v0 install wrote
@@ -275,8 +279,11 @@ func (lf *lifter) families(ctx context.Context) []liftFamily {
 	// update`): a deletion git still has to record.
 	var skKeep []string
 	for _, s := range sk {
-		if lf.tracked(ctx, s) {
+		switch {
+		case lf.tracked(ctx, s):
 			skKeep = append(skKeep, s)
+		case !lf.dirtyAt(s) && dirExists(filepath.Join(lf.root, filepath.FromSlash(s))):
+			lf.untracked = append(lf.untracked, s)
 		}
 	}
 	if len(skKeep) > 0 {
