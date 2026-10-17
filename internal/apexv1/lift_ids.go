@@ -38,7 +38,9 @@ var (
 	parenKeyRe = regexp.MustCompile(`\((\d+)-(\d+)\)`)
 	// "3-2_retry-publish": a story file's stem.
 	storyStemRe = regexp.MustCompile(`\b(\d+)-(\d+)_[a-z0-9][a-z0-9-]*(?:\.md)?\b`)
-	// ADR citations: "ADR-0017", "ADR-17", "ADR-0001/0002".
+	// ADR citations: "ADR-0017", "ADR-17", "ADR-0001/0002". Only the
+	// four-digit form is the project's own (its records' ids, ADR-NNNN);
+	// a shorter one cites another decision log (L8).
 	adrCiteRe = regexp.MustCompile(`\bADR-(\d{1,4})((?:/\d{4})*)\b`)
 	// ids inside identifiers: TestStory35_1, epic12Gate, DW42, ADR0017.
 	identIDRe = regexp.MustCompile(`(Story|STORY|story|Epic|EPIC|epic)_?\d+|(DW|Dw|dw)_?\d+|(ADR|Adr|adr)_?\d{2,4}`)
@@ -156,9 +158,14 @@ func newADRRewriter(num map[int]int, paths map[string]string, adrsRel string) *a
 	return r
 }
 
+// adrOwnDigits is the width of the v0 records' own ids: ADR-NNNN.
+const adrOwnDigits = 4
+
 // rewrite renumbers every citation in s; n counts the ids changed, and
-// unresolved lists the cited numbers no ADR has.
-func (r *adrRewriter) rewrite(s string) (out string, n int, unresolved []int) {
+// unresolved lists, as written, the citations it left: a number no ADR
+// has, or a short form (ADR-08) — another log's id, never the project's
+// own, so it is never rewritten even when the project has an ADR-0008.
+func (r *adrRewriter) rewrite(s string) (out string, n int, unresolved []string) {
 	if r == nil {
 		return s, 0, nil
 	}
@@ -175,10 +182,14 @@ func (r *adrRewriter) rewrite(s string) (out string, n int, unresolved []int) {
 		parts := strings.Split(strings.TrimPrefix(m, "ADR-"), "/")
 		changed := false
 		for i, p := range parts {
+			if len(p) != adrOwnDigits {
+				unresolved = append(unresolved, "ADR-"+p)
+				continue
+			}
 			old, _ := strconv.Atoi(p)
 			nw, ok := r.num[old]
 			if !ok {
-				unresolved = append(unresolved, old)
+				unresolved = append(unresolved, "ADR-"+p)
 				continue
 			}
 			if s := adrNum(nw); s != p {
@@ -205,12 +216,13 @@ func fmtNum4(n int) string {
 	return s
 }
 
-// citedADRs returns the ADR numbers cited in s.
+// citedADRs returns the ADR numbers cited in s in the project's own
+// form (a short ADR-08 is another log's).
 func citedADRs(s string) []int {
 	var out []int
 	for _, m := range adrCiteRe.FindAllStringSubmatch(s, -1) {
 		for p := range strings.SplitSeq(m[1]+m[2], "/") {
-			if p == "" {
+			if len(p) != adrOwnDigits {
 				continue
 			}
 			n, _ := strconv.Atoi(p)

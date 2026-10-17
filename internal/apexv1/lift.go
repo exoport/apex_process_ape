@@ -505,8 +505,8 @@ func (lf *lifter) plan() error {
 		if first, ok := dups[i]; ok {
 			la.Gaps = append(la.Gaps, "a second v0 record with id "+la.Old+": citations of that id were rewritten to "+first)
 		}
-		for _, n := range la.unresolved {
-			lf.res.UnresolvedCitations = append(lf.res.UnresolvedCitations, LiftIDRef{File: la.Path, Text: "ADR-" + fmtNum4(n), Where: "decision"})
+		for _, u := range la.unresolved {
+			lf.res.UnresolvedCitations = append(lf.res.UnresolvedCitations, LiftIDRef{File: la.Path, Text: u, Where: "decision"})
 		}
 		lf.writes[la.Path] = la.doc
 		lf.res.ADRs = append(lf.res.ADRs, la)
@@ -598,18 +598,20 @@ func intList(set map[int]bool) string {
 	return strings.Join(out, ", ")
 }
 
-func (lf *lifter) unresolvedIn(rel, src string, nums []int) {
-	if len(nums) == 0 {
+func (lf *lifter) unresolvedIn(rel, src string, cites []string) {
+	if len(cites) == 0 {
 		return
 	}
-	want := map[int]bool{}
-	for _, n := range nums {
-		want[n] = true
+	want := map[string]bool{}
+	for _, c := range cites {
+		want[c] = true
 	}
 	for i, l := range strings.Split(src, "\n") {
-		for _, n := range citedADRs(l) {
-			if want[n] {
-				lf.res.UnresolvedCitations = append(lf.res.UnresolvedCitations, LiftIDRef{File: rel, Line: i + 1, Text: "ADR-" + fmtNum4(n), Where: "docs"})
+		for _, m := range adrCiteRe.FindAllStringSubmatch(l, -1) {
+			for p := range strings.SplitSeq(m[1]+m[2], "/") {
+				if p != "" && want["ADR-"+p] {
+					lf.res.UnresolvedCitations = append(lf.res.UnresolvedCitations, LiftIDRef{File: rel, Line: i + 1, Text: "ADR-" + p, Where: "docs"})
+				}
 			}
 		}
 	}

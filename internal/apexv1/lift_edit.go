@@ -26,7 +26,8 @@ type liftFileEdit struct {
 	IDsRemoved    int
 	ADRsRewritten int
 	Left          []LiftIDRef
-	// Unresolved are ADR numbers cited in comments that no ADR has.
+	// Unresolved are ADR citations in comments that name no ADR of the
+	// project's.
 	Unresolved []LiftIDRef
 }
 
@@ -130,7 +131,7 @@ func editComments(rel, src string, lang liftLang, vocab *liftVocab, adr *adrRewr
 		}
 		newText, emptied, nIDs, nADR, unresolved := cleanComment(text, s.Block, vocab, adr)
 		for _, u := range unresolved {
-			res.Unresolved = append(res.Unresolved, LiftIDRef{File: rel, Line: lineAt(src, s.Start), Text: "ADR-" + fmtNum4(u), Where: "comment"})
+			res.Unresolved = append(res.Unresolved, LiftIDRef{File: rel, Line: lineAt(src, s.Start), Text: u, Where: "comment"})
 		}
 		if newText == text && !emptied {
 			continue
@@ -201,7 +202,7 @@ var identWordRe = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
 
 // cleanComment rewrites one comment: ADR citations renumbered, ids
 // stripped. emptied: nothing but ids was in it, and it goes.
-func cleanComment(text string, block bool, vocab *liftVocab, adr *adrRewriter) (out string, emptied bool, nIDs, nADR int, unresolved []int) {
+func cleanComment(text string, block bool, vocab *liftVocab, adr *adrRewriter) (out string, emptied bool, nIDs, nADR int, unresolved []string) {
 	cr := ""
 	if !block && strings.HasSuffix(text, "\r") {
 		text, cr = strings.TrimSuffix(text, "\r"), "\r"

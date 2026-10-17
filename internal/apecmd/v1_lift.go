@@ -54,7 +54,10 @@ The commit:
                  here on. Canon ADRs the project cites and has no record of are copied
                  from the governance clone when _apex/config.yaml resolves one
   rewrites       every ADR citation (ADR-NNNN, and paths to the old records) in
-                 Markdown and in code comments to the new number
+                 Markdown and in code comments to the new number. Only that
+                 four-digit form is the project's own: a short ADR-08 cites
+                 another decision log, and is listed as unresolved, never
+                 rewritten — even where the project has an ADR-0008
   strips         epic, story and deferred ids from code comments — Story 3.2,
                  Epic 12, (3-2) (a known story key), DW-…, paths into the deferred
                  store or the implementation folder — keeping the rest of the comment;
