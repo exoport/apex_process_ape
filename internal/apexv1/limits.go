@@ -18,9 +18,19 @@ import (
 // not converge ends with a recorded reason instead of running on:
 //
 //	limits:
-//	  budget: enforce      # optional; default off
-//	  attempts: 5          # red verifies per change start; default 5
+//	  budget: enforce          # optional; default off
+//	  attempts: 5              # red verifies per change start; default 5
+//	  attempts_total: 15       # red verifies per change, re-starts included; default 15
+//	  replans: 3               # re-plans (re-starts with a changed plan) per change; default 3
+//	  consecutive_blocks: 2    # blocked changes in a row per milestone; default 2
 const DefaultAttempts = 5
+
+// The defaults of the limits re-planning cannot reset (H19, D47 Q9).
+const (
+	DefaultAttemptsTotal     = 15
+	DefaultReplans           = 3
+	DefaultConsecutiveBlocks = 2
+)
 
 // StopBudget is the limit-stop reason milestones.json and the run
 // manifest's termination kind record for a session stopped at the
@@ -36,6 +46,17 @@ type Limits struct {
 	// Attempts caps red verifies per change start: the red verify that
 	// reaches it blocks the change.
 	Attempts *int `yaml:"attempts"`
+	// AttemptsTotal caps a change's red verifies across its re-starts —
+	// a re-plan resets Attempts' count, not this one (H19) — since a
+	// person last answered it.
+	AttemptsTotal *int `yaml:"attempts_total"`
+	// Replans caps a change's re-plans since a person last answered it:
+	// the re-start past it blocks the change.
+	Replans *int `yaml:"replans"`
+	// ConsecutiveBlocks caps a milestone's changes blocked in a row
+	// (milestones.json consecutive_blocks): past it, no change of the
+	// milestone is planned or started and no orchestrator runs it.
+	ConsecutiveBlocks *int `yaml:"consecutive_blocks"`
 }
 
 // UnmarshalYAML validates the block as it parses.
@@ -51,8 +72,13 @@ func (l *Limits) UnmarshalYAML(n *yaml.Node) error {
 	default:
 		return fmt.Errorf("limits.budget: %q is not enforce or off", p.Budget)
 	}
-	if p.Attempts != nil && *p.Attempts < 1 {
-		return fmt.Errorf("limits.attempts: %d is not a positive whole number", *p.Attempts)
+	for name, v := range map[string]*int{"attempts": p.Attempts, "attempts_total": p.AttemptsTotal, "consecutive_blocks": p.ConsecutiveBlocks} {
+		if v != nil && *v < 1 {
+			return fmt.Errorf("limits.%s: %d is not a positive whole number", name, *v)
+		}
+	}
+	if p.Replans != nil && *p.Replans < 0 {
+		return fmt.Errorf("limits.replans: %d is not a whole number", *p.Replans)
 	}
 	*l = Limits(p)
 	return nil
@@ -67,6 +93,25 @@ func (l Limits) AttemptsCap() int {
 		return *l.Attempts
 	}
 	return DefaultAttempts
+}
+
+// AttemptsTotalCap is limits.attempts_total, or DefaultAttemptsTotal.
+func (l Limits) AttemptsTotalCap() int { return intOr(l.AttemptsTotal, DefaultAttemptsTotal) }
+
+// ReplansCap is limits.replans, or DefaultReplans.
+func (l Limits) ReplansCap() int { return intOr(l.Replans, DefaultReplans) }
+
+// ConsecutiveBlocksCap is limits.consecutive_blocks, or
+// DefaultConsecutiveBlocks.
+func (l Limits) ConsecutiveBlocksCap() int {
+	return intOr(l.ConsecutiveBlocks, DefaultConsecutiveBlocks)
+}
+
+func intOr(v *int, def int) int {
+	if v != nil {
+		return *v
+	}
+	return def
 }
 
 // limits is the project's limits, defaults when the config cannot be read

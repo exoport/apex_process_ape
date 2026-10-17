@@ -152,6 +152,9 @@ type Answer struct {
 	By   string `json:"by"`
 	At   string `json:"at"`
 	Text string `json:"text"`
+	// ReplansBefore is how many re-plans the change had when it was
+	// answered: limits.replans judges the ones since (H19).
+	ReplansBefore int `json:"replans_before,omitempty"`
 }
 
 // Accept records a person accepting a human-review task.

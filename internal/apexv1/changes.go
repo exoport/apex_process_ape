@@ -498,6 +498,10 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 			return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "milestone " + milestone + " is not in roadmap.md — `ape milestone new` adds one, or `--milestone none` makes the change a fix"}
 		}
 		outOfScope = ms.OutOfScope
+		// Past limits.consecutive_blocks, no change of it is planned (D49).
+		if err := p.blocksExceeded(ctx, milestone); err != nil {
+			return nil, err
+		}
 	}
 	if len(touches) == 0 {
 		return nil, &UsageError{Code: "usage.touches", Msg: "--touches needs at least one capability slug"}

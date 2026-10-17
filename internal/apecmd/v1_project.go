@@ -260,6 +260,11 @@ func newStatusCmd() *cobra.Command {
     budget_usd, session_usd): sessions ape task stopped at its enforced budget
     (limits.budget: enforce; JSON milestone.budget_enforced), whose measured cost the
     spend counts
+  - the milestone's changes blocked in a row (JSON milestone.consecutive_blocks and
+    consecutive_blocks_cap, limits.consecutive_blocks) and, when that cap is reached, the
+    limit that stops work on it: milestone.diagnostics, in the shape of a --json failure's
+    diagnostics — [{code: "milestone.blocks-exceeded", action: "stop", …}] (D49; [] when
+    none), and next says so
   - the checked-out branch (JSON branch; "(on <branch>)" in the first line)
   - fixes first (trial decision D40): a change with "milestone: none" is a fix (JSON
     changes[].lane "fix"; else "milestone"). Approved fixes (changes[].approved: {by, at,

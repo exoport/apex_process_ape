@@ -18,6 +18,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// v1OrchestratorSkill is the skill that runs a milestone unattended.
+const v1OrchestratorSkill = "apex-orchestrator"
+
 // v1BudgetWatch stops an `ape task` session of an APEX v1 project when its
 // milestone's spend reaches the milestone's budget (backlog 30, only with
 // limits.budget: enforce and a Budget: line). The spend is live: what the

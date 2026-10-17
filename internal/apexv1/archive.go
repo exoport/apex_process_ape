@@ -347,6 +347,10 @@ func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []S
 	if err := p.writeArchive(ctx, id, ci.State, updates, dest, tip, pending); err != nil {
 		return undo(err)
 	}
+	// An archived change ends its milestone's run of blocks (H19).
+	if err := p.resetBlocks(ctx, ci.Doc); err != nil {
+		return undo(err)
+	}
 	res.BranchTip = tip
 	if _, err := git(ctx, p.Root, "commit", "--no-verify", "-q", "-m", res.Subject+"\n\nChange: "+id+"\n"); err != nil {
 		return undo(err)

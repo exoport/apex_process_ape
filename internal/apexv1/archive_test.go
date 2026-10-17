@@ -263,7 +263,7 @@ func TestArchive_RebaseConflictBlocks(t *testing.T) {
 	require.ErrorAs(t, err, &ce)
 	require.Equal(t, CodeRebaseConflict, ce.Code)
 	require.Equal(t, []string{"wave.sh"}, ce.Conflicts)
-	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "main"))
+	onlyBlockCounted(t, p, mainBefore, "apex: M1 consecutive blocks 1 (add-wave)")
 	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root))
 	require.NoDirExists(t, filepath.Join(p.Root, ".git", "rebase-merge"), "the rebase was aborted")
 	st := state(t, p, "add-wave")

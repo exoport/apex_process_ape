@@ -221,3 +221,13 @@ func needSh(t *testing.T) {
 		}
 	}
 }
+
+// onlyBlockCounted asserts that main moved from before by exactly the one
+// commit that counts a block toward the milestone (H19), and that it
+// holds milestones.json alone: nothing of the change reached main.
+func onlyBlockCounted(t *testing.T, p *Project, before, subject string) {
+	t.Helper()
+	require.Equal(t, before, run(t, p.Root, "rev-parse", "main~1"))
+	require.Equal(t, subject, run(t, p.Root, "log", "-1", "--format=%s", "main"))
+	require.Equal(t, "_apex/state/milestones.json", run(t, p.Root, "show", "--name-only", "--format=", "main"))
+}

@@ -152,7 +152,7 @@ func TestCatchUp_ConflictBlocks(t *testing.T) {
 	require.Equal(t, []string{"wave.sh"}, ce.Conflicts)
 	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root))
 	require.NoDirExists(t, filepath.Join(p.Root, ".git", "rebase-merge"), "the rebase was aborted")
-	require.Equal(t, tip, run(t, p.Root, "rev-parse", "main"))
+	onlyBlockCounted(t, p, tip, "apex: M1 consecutive blocks 1 (add-wave)")
 	st := state(t, p, "add-wave")
 	require.Equal(t, StatusBlocked, st.Status)
 	require.Contains(t, *st.BlockedReason, "verify: main moved, and rebasing change/add-wave onto it conflicts in wave.sh")
@@ -173,7 +173,7 @@ func TestCatchUp_ConflictBlocks(t *testing.T) {
 	require.False(t, res.CatchUp.Rebased, "the branch already holds main's commits")
 	require.Equal(t, StatusInProgress, res.Status)
 	st = state(t, p, "add-wave")
-	require.Equal(t, tip, st.BaseSHA)
+	require.Equal(t, run(t, p.Root, "rev-parse", "main"), st.BaseSHA, "main's tip: the block's count on top of tip")
 	require.Len(t, st.Rebases, 1)
 	require.False(t, st.Rebases[0].Rebased)
 	for _, b := range st.Baseline {

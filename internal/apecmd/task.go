@@ -127,6 +127,12 @@ line (a person's call) lets sessions start again. An unparseable
 _apex/config.yaml in a v1 project refuses every session (exit 2) rather
 than run it with no limits.
 
+A session of apex-orchestrator is also refused (exit 1, code
+milestone.blocks-exceeded) when the milestone it runs — --args M<n>, else
+the current one — has had limits.consecutive_blocks (default 2) changes
+blocked in a row; a person deals with them and re-approves the milestone,
+which resets the count. A fix's run (--args <fix-id>) is not refused.
+
 --prompt-file <path> reads the prompt from a file, and "-" reads it
 from stdin. It is how a printed escalation command carries the
 operator's own words: argv runs command substitution on backticks and
@@ -548,6 +554,13 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		// Backlog 31: the project's hooks ride inline, so a hand-edited
 		// settings.json cannot drop them (apexv1.InlineHooks).
 		cfg.spawnSettings.hooks, cfg.spawnEnv = v1InlineHooks()
+		// H19, D49: an orchestrator does not run a milestone whose changes
+		// were blocked limits.consecutive_blocks times in a row.
+		if o.skill == v1OrchestratorSkill {
+			if err := p.OrchestratorLimits(ctx, o.args); err != nil {
+				return taskRun{}, &taskPreflightError{err: err}
+			}
+		}
 		// Backlog 30: the milestone's enforced budget refuses the start, or
 		// stops the session when its live spend reaches it.
 		if cfg.budgetWatch, err = newV1BudgetWatch(ctx, p, o.skill, o.args); err != nil {

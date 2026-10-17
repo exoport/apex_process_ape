@@ -138,8 +138,19 @@ is a warning, not a failure.
 
 Then fill change.md and run `+"`ape change check <id>`"+`.
 
-Exit codes: 0 ok · 1 id taken (incl. archive), milestone not in roadmap, or HEAD on a
-change branch · 2 usage.`,
+Consecutive blocks (H19, D49): every block of a milestone's change (`+"`ape change block`"+`, a
+limit reached at verify or start, a rebase conflict) counts toward its milestone in
+_apex/state/milestones.json (consecutive_blocks), committed on the base branch from
+whichever branch as "apex: <M> consecutive blocks <n> (<id>)"; an archived change of the
+milestone sets it back to 0, inside the archive's commit. At limits.consecutive_blocks
+(default 2), change new and change start of the milestone's changes and
+`+"`ape task apex-orchestrator`"+` for it refuse with exit 1, code milestone.blocks-exceeded,
+action stop, and `+"`ape status --json`"+` reports it under milestone.diagnostics. A person deals
+with the blocked changes (answer or abandon them) and resets the count by approving the
+milestone again: `+"`ape milestone approve <M> --by <who>`"+`. Fixes count toward no milestone.
+
+Exit codes: 0 ok · 1 id taken (incl. archive), milestone not in roadmap, the milestone past
+limits.consecutive_blocks, or HEAD on a change branch · 2 usage.`,
 		"  ape change new add-tenant-delete --milestone M2 --touches tenants --paths 'internal/api/**'\n"+
 			"  ape change new fix-login-redirect --milestone none --touches auth",
 		&f,
@@ -330,6 +341,12 @@ changed, when a spec block the change modifies or removes was changed by another
 since start, or when the regression command has no baseline for it (configured or changed
 since start); otherwise it is refused.
 
+Loop limits (H19): a re-plan past limits.replans (default 3) since a person last answered
+the change blocks it instead (reason "replans exceeded: …", exit 1, code
+change.replans-exceeded, action person; the refused re-plan is not recorded). A change of a
+milestone whose changes were blocked limits.consecutive_blocks (default 2) times in a row is
+not started (exit 1, code milestone.blocks-exceeded, action stop; see `+"`ape change new --help`"+`).
+
 Exit codes: 0 started (or resumed) · 1 check red, milestone (or fix) not approved, wrong
 status, dirty tree, detached HEAD, HEAD on another change's branch, or git failed · 2 usage ·
 3 requirement conflict with another active change, or the change does not rebase onto
@@ -415,6 +432,14 @@ in-progress" on change/<id>. The red verify that brings attempts to the cap
 blocked_reason "attempts exceeded: <n> red verifies — <failing checks>", committed as
 "apex: <id> blocked", exit 1 with code change.attempts-exceeded. Re-plan, then
 `+"`ape change start <id>`"+` resumes it with a fresh count.
+Re-planning does not reset limits.attempts_total (default 15, H19): the red verify that
+brings the change's red verifies across all its starts — since a person last answered it
+(`+"`ape change answer`"+`) — to it blocks the change (reason "attempts_total exceeded: …"),
+exit 1 with code change.attempts-total-exceeded, action person: re-planning did not converge; a person answers, abandons it, or raises the
+limit.
+Every block of a milestone's change — here, by `+"`ape change block`"+`, by start's replans cap,
+or by a rebase conflict — also counts toward the milestone's consecutive blocks, committed
+on the base branch as "apex: <M> consecutive blocks <n> (<id>)" (see `+"`ape change new --help`"+`).
 Refused while change.md differs from the plan frozen at start outside ## Why and ## Notes
 (re-start first). human-review tasks are never run; those not yet accepted are listed
 as pending.

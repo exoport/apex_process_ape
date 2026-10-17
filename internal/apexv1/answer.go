@@ -35,6 +35,7 @@ func (p *Project) AnswerChange(ctx context.Context, id, text, by string) (*State
 	answer := &Answer{By: by, At: Stamp(), Text: text}
 	if !p.isWorkTree(ctx) {
 		st := ci.State
+		answer.ReplansBefore = len(st.Replans)
 		st.Status, st.Answer = StatusAnswered, answer
 		return st, SaveState(p.StateFile(id), st)
 	}
@@ -58,6 +59,7 @@ func (p *Project) AnswerChange(ctx context.Context, id, text, by string) (*State
 			if s.Status != StatusBlocked {
 				return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + s.Status + " on " + branch + " — answer applies to a blocked change"}
 			}
+			answer.ReplansBefore = len(s.Replans)
 			s.Status, s.Answer = StatusAnswered, answer
 			if s.Accepted == nil {
 				s.Accepted = []Accept{}
@@ -73,6 +75,10 @@ func (p *Project) AnswerChange(ctx context.Context, id, text, by string) (*State
 			return map[string][]byte{rel: append(data, '\n')}, nil
 		})
 	if err != nil {
+		return nil, err
+	}
+	// The answer restarts the count limits.attempts_total judges (H19).
+	if _, err := p.updateAttempts(id, func(a *Attempts) { a.AtAnswer = a.Total }); err != nil {
 		return nil, err
 	}
 	return st, nil

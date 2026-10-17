@@ -29,6 +29,14 @@ type MilestoneStatus struct {
 	// Stops are the sessions ape stopped at the milestone's budget,
 	// oldest first.
 	Stops []LimitStop `json:"stops"`
+	// ConsecutiveBlocks is the milestone's changes blocked in a row, and
+	// ConsecutiveBlocksCap limits.consecutive_blocks (H19).
+	ConsecutiveBlocks    int `json:"consecutive_blocks"`
+	ConsecutiveBlocksCap int `json:"consecutive_blocks_cap"`
+	// Diagnostics are the limits that stop work on the milestone, in the
+	// shape of a --json failure's: milestone.blocks-exceeded (action stop)
+	// when ConsecutiveBlocks reached its cap (D49). Always present.
+	Diagnostics []Diagnostic `json:"diagnostics"`
 }
 
 // ChangeStatus is one change as `ape status` shows it.
@@ -266,6 +274,12 @@ func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost, fixes map[s
 	}
 	ms.SpentUSD = round2(milestoneSpend(m, runs, ms.Stops, fixes))
 	ms.BudgetEnforced = p.limits().BudgetEnforced() && m.Budget != nil
+	ctx := context.Background()
+	ms.ConsecutiveBlocks, ms.ConsecutiveBlocksCap = p.consecutiveBlocks(ctx, m.ID), p.limits().ConsecutiveBlocksCap()
+	ms.Diagnostics = Diagnostics(p.blocksExceeded(ctx, m.ID))
+	if ms.Diagnostics == nil {
+		ms.Diagnostics = []Diagnostic{}
+	}
 	return ms
 }
 
@@ -290,6 +304,9 @@ func nextStep(r *StatusReport) string {
 	}
 	if m.Status != MilestoneApproved {
 		return fmt.Sprintf("%s awaits approval: a person runs `ape milestone approve %s --by <who>`", m.ID, m.ID)
+	}
+	if len(m.Diagnostics) > 0 {
+		return "stopped: " + m.Diagnostics[0].Message + " — " + m.Diagnostics[0].Fix
 	}
 	for i := range r.Changes {
 		c := &r.Changes[i]
@@ -488,6 +505,9 @@ func (m *MilestoneStatus) briefLines() []string {
 		}
 	}
 	lines := []string{fmt.Sprintf("Milestone %s — %s: %s", m.ID, m.Title, m.StatusText), gate, spend}
+	if m.ConsecutiveBlocks > 0 {
+		lines = append(lines, fmt.Sprintf("  %d of %d changes blocked in a row (limits.consecutive_blocks)", m.ConsecutiveBlocks, m.ConsecutiveBlocksCap))
+	}
 	if n := len(m.Stops); n > 0 {
 		line := "  " + m.Stops[n-1].Describe()
 		if n > 1 {

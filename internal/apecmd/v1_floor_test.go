@@ -3,6 +3,7 @@ package apecmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -96,4 +97,32 @@ func TestDoctor_FrameworkApeVersion_V1Project(t *testing.T) {
 
 func errorsAsFail(err error) (*apexv1.FailError, bool) {
 	return errors.AsType[*apexv1.FailError](err)
+}
+
+// H19, D49: ape task apex-orchestrator refuses a milestone past
+// limits.consecutive_blocks, before anything spawns; other skills, and
+// another milestone, are not refused by it.
+func TestDispatchTask_OrchestratorRefusedPastConsecutiveBlocks(t *testing.T) {
+	root := v1Repo(t)
+	path := filepath.Join(root, "_apex", "state", "milestones.json")
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var recs map[string]map[string]any
+	require.NoError(t, json.Unmarshal(data, &recs))
+	recs["M1"]["consecutive_blocks"] = 2
+	data, err = json.Marshal(recs)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(path, data, 0o644))
+	v1Git(t, root, "commit", "-qam", "two blocks")
+
+	_, err = dispatchTask(context.Background(), taskOptions{skill: "apex-orchestrator", projectRoot: root, args: "M1"})
+	var preflight *taskPreflightError
+	require.ErrorAs(t, err, &preflight)
+	require.Contains(t, err.Error(), "M1 has 2 changes blocked in a row")
+	require.Equal(t, ExitRunFailed, taskPreflightExit(err))
+	require.Equal(t, apexv1.ActionStop, apexv1.Diagnostics(errors.Unwrap(err))[0].Action)
+
+	stdout, _, err := v1Exec(t, newStatusCmd, "--json", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, `"code": "milestone.blocks-exceeded"`)
 }

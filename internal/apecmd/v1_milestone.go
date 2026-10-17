@@ -102,7 +102,8 @@ approved".
 
 Approving an approved milestone records the approval again — "apex: <M> re-approved", the
 Status line kept as it was (the milestone's spend counts from it) — when ape holds no
-record of it or its gate changed since; otherwise it is a no-op. A done one is refused.
+record of it, its gate changed since, or changes of it were blocked in a row (which resets
+that count, limits.consecutive_blocks: ` + "`ape change new --help`" + `); otherwise it is a no-op. A done one is refused.
 Refused on a change branch (see ` + "`ape milestone --help`" + `).
 
 Only a person approves (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE

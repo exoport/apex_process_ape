@@ -81,6 +81,9 @@ type MilestoneRecord struct {
 	Approval *MilestoneApproval `json:"approval,omitempty"`
 	// DoneAt is when `ape milestone close` wrote the milestone done.
 	DoneAt string `json:"done_at,omitempty"`
+	// ConsecutiveBlocks counts the milestone's changes blocked since one
+	// of them last archived, or a person last approved it (H19).
+	ConsecutiveBlocks int `json:"consecutive_blocks,omitempty"`
 	// Stops are the sessions ape stopped at the milestone's enforced
 	// budget (backlog 30).
 	Stops []LimitStop `json:"stops,omitempty"`
@@ -190,9 +193,9 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 // ApproveMilestone writes `Status: approved (by <who> <ts>)` and records
 // the approval in milestones.json (H2): who, when, and the gate approved
 // — its command and its files' content. Both are committed together. On
-// an approved milestone it records the approval again when ape holds none
-// or the gate changed since (the Status line is kept); otherwise it is a
-// no-op.
+// an approved milestone it records the approval again when ape holds none,
+// the gate changed since, or changes of it were blocked in a row (the
+// count goes back to 0; the Status line is kept); otherwise it is a no-op.
 func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milestone, error) {
 	// A model never approves its own milestone (D47 Q6).
 	if err := requirePerson("ape milestone approve"); err != nil {
@@ -223,7 +226,7 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milesto
 	case MilestoneApproved:
 		// Re-approval: only when ape holds no record of the approval, or
 		// the gate changed since it.
-		if rec != nil && rec.Approval != nil && len(p.gateDrift(m, rec.Approval)) == 0 {
+		if rec != nil && rec.Approval != nil && len(p.gateDrift(m, rec.Approval)) == 0 && rec.ConsecutiveBlocks == 0 {
 			return m, nil
 		}
 	}
@@ -250,6 +253,8 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milesto
 		recs[id] = rec
 	}
 	rec.Approval = p.newApproval(m.Gate, strings.TrimSpace(by))
+	// A person's approval resets the run of blocked changes (H19).
+	rec.ConsecutiveBlocks = 0
 	if err := p.saveMilestoneRecords(recs); err != nil {
 		return nil, err
 	}

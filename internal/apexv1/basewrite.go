@@ -56,6 +56,14 @@ func (p *Project) commitOnBranch(ctx context.Context, branch string, files map[s
 // and returns what to commit; the commit is compare-and-swapped against
 // that tip, so a write made meanwhile is never overwritten.
 func (p *Project) editOnBranch(ctx context.Context, branch, msg string, paths []string, edit func(cur map[string][]byte) (map[string][]byte, error)) (string, error) {
+	return p.editOnBranchMsg(ctx, branch, paths, func(cur map[string][]byte) (map[string][]byte, string, error) {
+		files, err := edit(cur)
+		return files, msg, err
+	})
+}
+
+// editOnBranchMsg is editOnBranch whose edit also decides the message.
+func (p *Project) editOnBranchMsg(ctx context.Context, branch string, paths []string, edit func(cur map[string][]byte) (map[string][]byte, string, error)) (string, error) {
 	here, err := p.checkedOutHere(ctx, branch)
 	if err != nil {
 		return "", err
@@ -76,7 +84,7 @@ func (p *Project) editOnBranch(ctx context.Context, branch, msg string, paths []
 			cur[rel] = []byte(data)
 		}
 	}
-	files, err := edit(cur)
+	files, msg, err := edit(cur)
 	if err != nil || len(files) == 0 {
 		return "", err
 	}
@@ -235,6 +243,53 @@ func (p *Project) commitDetached(ctx context.Context, branch, tip string, files 
 		return "", &FailError{Code: CodeRefMoved, Msg: branch + " moved while ape wrote its record there (" + err.Error() + ") — nothing was written; run the command again"}
 	}
 	return commit, nil
+}
+
+// recordsOnlyMoved reports a base branch that moved from base to tip only
+// by ape's own base-branch records — milestones.json, decisions.json, the
+// roadmap, an archived change's folder — which the change's branch has not
+// touched since base: a block counted, a `ape next add`, an archived
+// change's acceptance, a gate result. Such a move changes no code, so it
+// does not make a change catch up (rebase, re-baseline, re-verify); the
+// squash at archive takes the records along. Any other file, or one the
+// branch touched too, is a move.
+func (p *Project) recordsOnlyMoved(ctx context.Context, base, tip string) bool {
+	if base == "" {
+		return false
+	}
+	changed := func(from, to string) ([]string, bool) {
+		out, err := git(ctx, p.Root, "diff", "--name-only", "--relative", from, to)
+		if err != nil {
+			return nil, false
+		}
+		var files []string
+		for f := range strings.SplitSeq(out, "\n") {
+			if f != "" {
+				files = append(files, f)
+			}
+		}
+		return files, true
+	}
+	onBase, ok := changed(base, tip)
+	if !ok || len(onBase) == 0 {
+		return false
+	}
+	onBranch, ok := changed(base, "HEAD")
+	if !ok {
+		return false
+	}
+	touched := map[string]bool{}
+	for _, f := range onBranch {
+		touched[f] = true
+	}
+	records := map[string]bool{p.Rel(p.MilestonesJSON()): true, p.Rel(p.decisionsJSON()): true, p.Rel(p.RoadmapMD()): true}
+	archive := p.Rel(p.ArchiveDir()) + "/"
+	for _, f := range onBase {
+		if touched[f] || !records[f] && !strings.HasPrefix(f, archive) {
+			return false
+		}
+	}
+	return true
 }
 
 // gitWith is git with extra environment and stdin; output trimmed.

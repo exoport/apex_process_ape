@@ -74,6 +74,12 @@ type StartResult struct {
 // there. On a change whose branch exists it checks that branch out first;
 // a started change that needs no re-baselining is then only resumed.
 func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartResult, error) {
+	// No change of a milestone past limits.consecutive_blocks starts (D49).
+	if ci, err := p.requireChange(ctx, id); err == nil && !ci.Doc.IsFix() {
+		if err := p.blocksExceeded(ctx, ci.Doc.Meta.Milestone); err != nil {
+			return nil, err
+		}
+	}
 	if !p.isWorkTree(ctx) {
 		return p.start(ctx, id, opt, nil)
 	}
@@ -210,6 +216,16 @@ func (p *Project) start(ctx context.Context, id string, opt RunOptions, enter fu
 	if len(conflicts) > 0 {
 		return nil, &ConflictError{Code: "change.requirement-conflict", Msg: "change " + id + " claims requirements another active change claims — archive or block that one first, or re-scope", Conflicts: conflicts}
 	}
+	if replan {
+		if n, capN := replansSinceAnswer(st)+1, p.limits().ReplansCap(); n > capN {
+			if err := p.blockAndCount(ctx, ci, fmt.Sprintf("replans exceeded: re-plan %d of at most %d", n, capN)); err != nil {
+				return nil, err
+			}
+			return nil, &FailError{Code: CodeReplansExceeded, Msg: fmt.Sprintf(
+				"change %s: re-plan %d is past limits.replans (%d), so it is blocked — re-planning did not converge; a person answers what blocks it (`ape change answer %s --text \"…\" --by <who>`), abandons it, or raises the limit",
+				id, n, capN, id)}
+		}
+	}
 	if enter != nil {
 		if err := enter(st); err != nil {
 			return nil, err
@@ -247,6 +263,15 @@ func (p *Project) start(ctx context.Context, id string, opt RunOptions, enter fu
 		ID: id, Status: st.Status, BaseSHA: st.BaseSHA, BaseBranch: st.BaseBranch, Branch: CurrentBranch(ctx, p.Root),
 		Baseline: results, Regression: regression,
 	}, nil
+}
+
+// replansSinceAnswer is the change's re-plans since a person last
+// answered it (all of them when nobody has).
+func replansSinceAnswer(st *State) int {
+	if st.Answer == nil || st.Answer.ReplansBefore > len(st.Replans) {
+		return len(st.Replans)
+	}
+	return len(st.Replans) - st.Answer.ReplansBefore
 }
 
 // requireApproved is start's approval gate: a fix's own approval (D40),
@@ -481,8 +506,14 @@ func (p *Project) redAttempt(ctx context.Context, ci ChangeInfo, res *VerifyResu
 	if err != nil {
 		return nil, err
 	}
-	capN := p.limits().AttemptsCap()
+	capN, totalCap := p.limits().AttemptsCap(), p.limits().AttemptsTotalCap()
 	res.Attempts, res.AttemptsTotal, res.AttemptsCap = a.Since, a.Total, capN
+	if total := a.Total - a.AtAnswer; total >= totalCap {
+		return p.redBlock(ctx, ci, res, fmt.Sprintf("attempts_total exceeded: %d red verifies across its starts", total),
+			&FailError{Code: CodeAttemptsTotalExceeded, Msg: fmt.Sprintf(
+				"change %s: %d red verifies across its starts reach limits.attempts_total (%d), so it is blocked — re-planning did not converge; a person answers what blocks it (`ape change answer %s --text \"…\" --by <who>`), abandons it, or raises the limit",
+				id, total, totalCap, id)})
+	}
 	if a.Since < capN {
 		if st.Status != StatusInProgress {
 			st.Verify = &Verify{SHA: res.SHA, At: Stamp(), Results: res.Results, PendingHuman: res.PendingHuman, Green: false, GreenAtBaseline: res.GreenAtBaseline}
@@ -494,24 +525,29 @@ func (p *Project) redAttempt(ctx context.Context, ci ChangeInfo, res *VerifyResu
 		res.Status = st.Status
 		return res, nil
 	}
+	return p.redBlock(ctx, ci, res, fmt.Sprintf("attempts exceeded: %d red verifies", a.Since), &FailError{Code: "change.attempts-exceeded", Msg: fmt.Sprintf(
+		"change %s: %d red verifies since it started reach limits.attempts (%d), so it is blocked — re-plan it (change.md, on %s) and `ape change start %s`, or a person answers what blocks it",
+		id, a.Since, capN, ChangeBranch(id), id)})
+}
+
+// redBlock blocks a change at a red verify that reached a limit — the
+// reason what, and the last failing checks — counts the block toward its
+// milestone, and returns fe beside the result.
+func (p *Project) redBlock(ctx context.Context, ci ChangeInfo, res *VerifyResult, what string, fe *FailError) (*VerifyResult, error) {
+	st := ci.State
 	var failing []string
 	red := res.Failing()
 	for i := range red {
 		failing = append(failing, fmt.Sprintf("%s (exit %d)", red[i].Task, red[i].Exit))
 	}
-	reason := fmt.Sprintf("attempts exceeded: %d red verifies — %s", a.Since, strings.Join(limit(failing, 5), ", "))
 	if st.Status != StatusInProgress {
 		st.Verify = &Verify{SHA: res.SHA, At: Stamp(), Results: res.Results, PendingHuman: res.PendingHuman, Green: false, GreenAtBaseline: res.GreenAtBaseline}
 	}
-	st.Status = StatusBlocked
-	st.BlockedReason = &reason
-	if err := p.saveAndCommit(ctx, id, st); err != nil {
+	if err := p.blockAndCount(ctx, ci, what+" — "+strings.Join(limit(failing, 5), ", ")); err != nil {
 		return nil, err
 	}
 	res.Status = st.Status
-	return res, &FailError{Code: "change.attempts-exceeded", Msg: fmt.Sprintf(
-		"change %s: %d red verifies since it started reach limits.attempts (%d), so it is blocked — re-plan it (change.md, on %s) and `ape change start %s`, or a person answers what blocks it",
-		id, a.Since, capN, ChangeBranch(id), id)}
+	return res, fe
 }
 
 func limit(xs []string, n int) []string {
@@ -643,10 +679,13 @@ func (p *Project) Block(ctx context.Context, id, reason string) (*State, error) 
 		return nil, err
 	}
 	st := ci.State
-	st.Status = StatusBlocked
-	r := strings.TrimSpace(reason)
-	st.BlockedReason = &r
-	if err := p.saveAndCommit(ctx, id, st); err != nil {
+	if st.Status == StatusBlocked {
+		// A new reason, not a new block: the milestone's count stays.
+		r := strings.TrimSpace(reason)
+		st.BlockedReason = &r
+		return st, p.saveAndCommit(ctx, id, st)
+	}
+	if err := p.blockAndCount(ctx, ci, strings.TrimSpace(reason)); err != nil {
 		return nil, err
 	}
 	return st, nil

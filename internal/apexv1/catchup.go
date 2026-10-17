@@ -92,7 +92,7 @@ func (p *Project) catchUp(ctx context.Context, ci ChangeInfo, what string, opt R
 		return ci, nil, nil
 	}
 	tip, moved, needRebase := p.baseMoved(ctx, st)
-	if !moved {
+	if !moved || p.recordsOnlyMoved(ctx, st.BaseSHA, tip) {
 		return ci, nil, nil
 	}
 	id, base := ci.ID, st.BaseBranch
@@ -167,10 +167,7 @@ func (p *Project) rebaseOrBlock(ctx context.Context, ci ChangeInfo, what string)
 	}
 	reason := what + ": " + base + " moved, and rebasing " + branch + " onto it conflicts in " + strings.Join(limit(conflicts, 8), ", ") +
 		" — the orchestrator re-plans: `ape change abandon " + id + " --reason \"rebase conflict with " + strings.Join(limit(conflicts, 8), ", ") + "; replaced by <new-id>\"` and apex-change plans a replacement from " + base + " with those files as the hint; nobody rebases or merges by hand"
-	st := ci.State
-	st.Status = StatusBlocked
-	st.BlockedReason = &reason
-	if err := p.saveAndCommit(ctx, id, st); err != nil {
+	if err := p.blockAndCount(ctx, ci, reason); err != nil {
 		return err
 	}
 	return &ConflictError{Code: CodeRebaseConflict, Msg: "change " + id + " does not rebase cleanly onto " + base +
