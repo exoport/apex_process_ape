@@ -195,7 +195,7 @@ func (p *Project) milestoneRecordFindings() []Finding {
 					" — a person reviews the gate and approves it again: `ape milestone approve " + m.ID + " --by <who>`"})
 			}
 		case MilestoneDone:
-			if rec == nil || rec.DoneAt == "" && rec.Result != GateGreen {
+			if rec == nil || rec.DoneAt == "" && rec.Result != GateGreen && rec.AcceptRed == nil {
 				out = append(out, Finding{File: file, Line: m.StatusLine, Message: m.ID + " says done, but ape recorded no close of it (a green gate, or a red one a person accepted)" +
 					" — restore its Status: line; `ape milestone close " + m.ID + "` writes it"})
 			}

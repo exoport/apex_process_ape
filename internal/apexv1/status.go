@@ -88,6 +88,8 @@ type MilestoneLine struct {
 	ID     string `json:"id"`
 	Title  string `json:"title"`
 	Status string `json:"status"`
+	// AcceptRed: a person closed it with its gate red (H22).
+	AcceptRed *AcceptRed `json:"accept_red,omitempty"`
 }
 
 // StatusReport is `ape status`.
@@ -132,9 +134,14 @@ func (p *Project) Status() *StatusReport {
 
 	ctx := context.Background()
 	if rm := p.roadmap(); rm != nil {
+		recs, _ := p.LoadMilestoneRecords()
 		for i := range rm.Milestones {
 			m := &rm.Milestones[i]
-			r.Milestones = append(r.Milestones, MilestoneLine{ID: m.ID, Title: m.Title, Status: m.Status})
+			line := MilestoneLine{ID: m.ID, Title: m.Title, Status: m.Status}
+			if rec := recs[m.ID]; rec != nil && m.Status == MilestoneDone {
+				line.AcceptRed = rec.AcceptRed
+			}
+			r.Milestones = append(r.Milestones, line)
 		}
 		if m := rm.Current(); m != nil {
 			r.Milestone = p.milestoneStatus(m, runs, p.fixIDs(ctx))
@@ -385,6 +392,9 @@ func (r *StatusReport) Brief() string {
 		b = append(b, "not an APEX v1 project yet: run `ape project init`")
 		return strings.Join(b, "\n") + "\n"
 	}
+	if line := r.acceptedRedLine(); line != "" {
+		b = append(b, line)
+	}
 	if m := r.Milestone; m != nil {
 		b = append(b, m.briefLines()...)
 	} else if len(r.Milestones) == 0 {
@@ -448,6 +458,26 @@ groups:
 	}
 	b = append(b, fmt.Sprintf("Spend: $%.2f over %d runs", r.Spend.TotalUSD, r.Spend.Runs), "Next: "+r.Next)
 	return strings.Join(b, "\n") + "\n"
+}
+
+// acceptedRedLine names the last done milestone when a person closed it
+// with its gate red (H22), "" otherwise.
+func (r *StatusReport) acceptedRedLine() string {
+	for i := len(r.Milestones) - 1; i >= 0; i-- {
+		m := &r.Milestones[i]
+		if m.Status != MilestoneDone {
+			continue
+		}
+		if a := m.AcceptRed; a != nil {
+			why := ""
+			if a.Gate != nil {
+				why = " (" + a.Gate.Why() + ")"
+			}
+			return truncate(m.ID+" was closed with its gate red"+why+", accepted by "+a.By+": "+a.Reason, briefLineMax)
+		}
+		return ""
+	}
+	return ""
 }
 
 // laneLabel is the brief's third column: the milestone, or the fix lane

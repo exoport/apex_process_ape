@@ -14,7 +14,8 @@ func newMilestoneCmd() *cobra.Command {
 		Short: "Add, approve, gate and close roadmap milestones",
 		Long: `Milestones live in development/roadmap.md as "## M<n> — <title>" sections.
 Their Status: line is written only by ape: proposed → approved (by <who> <ts>) →
-done (<ts> <sha>). Every one of those writes is committed by ape (roadmap.md, plus
+done (<ts> <sha>), or done (accepted red by <who> <ts> <sha>) when a person closed it
+with its gate red (` + "`ape milestone close --help`" + `). Every one of those writes is committed by ape (roadmap.md, plus
 _apex/state/milestones.json when it exists) as "apex: <M> proposed|approved|done"
 with trailer "Milestone: <M>". milestones.json holds each gate's result (green|red)
 and is committed, as "apex: <M> gate green|red", only when that result changes; the
@@ -213,8 +214,9 @@ approval record, a changed gate, or HEAD on a change branch · 2 usage.`,
 
 func newMilestoneCloseCmd() *cobra.Command {
 	var f v1Flags
+	var acceptRed, by string
 	cmd := &cobra.Command{
-		Use:   "close <M>",
+		Use:   `close <M> [--accept-red "<reason>" --by <who>]`,
 		Short: "Run the gate; on exit 0 write Status: done (<ts> <sha>)",
 		Long: `Close an approved milestone. Refused while a change of this milestone is in-progress,
 verified or reviewed (archive or block it first) — each change's status read from its own
@@ -232,9 +234,21 @@ gate changed since the approval (H2). ape records the close in milestones.json (
 Changes in flight refuse with milestone.changes-in-flight, action apply — or person when
 one of them is reviewed with human-review tasks not accepted (awaiting_human; D49).
 
-Exit codes: 0 done · 1 gate red, changes in flight, not approved, no approval record, a
-changed gate, or HEAD on a change branch · 2 usage.`,
-		Example: "  ape milestone close M1",
+--accept-red "<reason>" --by <who> (H22, D45): a person closes the milestone although its
+gate is red — a release shipped with known defects, say. Everything else is as without it
+(approval record, gate as approved, no change in flight); when the gate is red, the
+milestone is done anyway: milestones.json records accept_red: {reason, by, at, gate: the red
+run}, the Status line reads "done (accepted red by <who> <ts> <sha>)", committed as
+"apex: <M> done (accepted red)", and ` + "`ape status`" + ` shows it (JSON milestones[].accept_red;
+the brief names the last such milestone). A green gate closes as usual and accepts nothing.
+Only a person passes it: refused in a model session (APE_SESSION or CLAUDECODE set, a ` + "`!`" + `
+line inside Claude Code included) with exit 2, session.person-only. A person tags after
+close.
+
+Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
+no approval record, a changed gate, or HEAD on a change branch · 2 usage, or --accept-red
+from a model session.`,
+		Example: "  ape milestone close M1\n  ape milestone close M3 --accept-red \"ships with the known RF drift; fixed in M4\" --by diego",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := v1Project(&f)
@@ -244,7 +258,15 @@ changed gate, or HEAD on a change branch · 2 usage.`,
 			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
-			g, err := p.CloseMilestone(cmd.Context(), args[0], f.runOptions())
+			var g *apexv1.GateResult
+			switch {
+			case cmd.Flags().Changed("accept-red"):
+				g, err = p.CloseMilestoneAcceptRed(cmd.Context(), args[0], acceptRed, by, f.runOptions())
+			case by != "":
+				err = &apexv1.UsageError{Code: "usage.by", Msg: "--by goes with --accept-red — drop it, or give the reason the red gate is accepted"}
+			default:
+				g, err = p.CloseMilestone(cmd.Context(), args[0], f.runOptions())
+			}
 			if err != nil {
 				if g != nil && !f.json && g.Run.Cmd != "" {
 					gateHuman(g)(cmd.OutOrStdout())
@@ -257,11 +279,16 @@ changed gate, or HEAD on a change branch · 2 usage.`,
 				} else {
 					fmt.Fprintf(w, "%s is already done\n", g.Milestone)
 				}
+				if a := g.AcceptRed; a != nil {
+					fmt.Fprintf(w, "recorded: closed with its gate red, accepted by %s — %s\n", a.By, a.Reason)
+				}
 			})
 		},
 	}
 	addV1Flags(cmd, &f)
 	addV1TimeoutFlag(cmd, &f)
+	cmd.Flags().StringVar(&acceptRed, "accept-red", "", "close although the gate is red, for this reason (a person only; with --by)")
+	cmd.Flags().StringVar(&by, "by", "", "who accepts the red gate (with --accept-red)")
 	return cmd
 }
 

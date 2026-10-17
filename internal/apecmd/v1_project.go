@@ -265,6 +265,9 @@ func newStatusCmd() *cobra.Command {
     limit that stops work on it: milestone.diagnostics, in the shape of a --json failure's
     diagnostics — [{code: "milestone.blocks-exceeded", action: "stop", …}] (D49; [] when
     none), and next says so
+  - a milestone a person closed with its gate red (` + "`ape milestone close --accept-red`" + `):
+    JSON milestones[].accept_red {reason, by, at, gate}; the brief names the last one, and
+    the roadmap lines say "accepted red by <who>: <reason>"
   - the checked-out branch (JSON branch; "(on <branch>)" in the first line)
   - fixes first (trial decision D40): a change with "milestone: none" is a fix (JSON
     changes[].lane "fix"; else "milestone"). Approved fixes (changes[].approved: {by, at,
@@ -333,7 +336,11 @@ func statusLong(r *apexv1.StatusReport) string {
 	if len(r.Milestones) > 0 {
 		b.WriteString("\nRoadmap:\n")
 		for _, m := range r.Milestones {
-			fmt.Fprintf(&b, "  %-4s %-9s %s\n", m.ID, m.Status, m.Title)
+			fmt.Fprintf(&b, "  %-4s %-9s %s", m.ID, m.Status, m.Title)
+			if a := m.AcceptRed; a != nil {
+				fmt.Fprintf(&b, " — accepted red by %s: %s", a.By, a.Reason)
+			}
+			b.WriteString("\n")
 		}
 	}
 	if r.Milestone != nil && r.Milestone.GateLast != nil && !r.Milestone.GateLast.Green() {

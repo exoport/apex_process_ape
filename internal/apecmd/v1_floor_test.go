@@ -126,3 +126,16 @@ func TestDispatchTask_OrchestratorRefusedPastConsecutiveBlocks(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, stdout, `"code": "milestone.blocks-exceeded"`)
 }
+
+// H22: close --accept-red from the command line.
+func TestMilestoneClose_AcceptRedCLI(t *testing.T) {
+	root := v1Repo(t)
+	_, _, err := v1Exec(t, newMilestoneCmd, "close", "M1", "--by", "ann", "--cwd", root)
+	require.Equal(t, ExitUsage, exitCodeOf(t, err))
+	stdout, _, err := v1Exec(t, newMilestoneCmd, "close", "M1", "--accept-red", "known defect", "--by", "ann", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, "recorded: closed with its gate red, accepted by ann — known defect")
+	stdout, _, err = v1Exec(t, newStatusCmd, "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, "accepted red by ann: known defect")
+}

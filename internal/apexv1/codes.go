@@ -74,7 +74,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"usage.no-such-task", 2, "stop", "accept: the change has no such task"},
 	{"usage.one-line", 2, "stop", "milestone new: title and gate must be one line each"},
 	{"usage.paths", 2, "stop", "change new: a --paths entry is not a valid glob"},
-	{"usage.reason", 2, "stop", "block/abandon: --reason is required"},
+	{"usage.reason", 2, "stop", "block/abandon: --reason is required; close --accept-red: its reason is empty or more than one line"},
 	{"usage.review-run", 2, "stop", "review: --run takes no --verdict/--findings"},
 	{"usage.task", 2, "stop", "accept: --task is required"},
 	{"usage.text", 2, "person", "answer: --text is required (the answer)"},
