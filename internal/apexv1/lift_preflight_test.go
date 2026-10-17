@@ -102,6 +102,7 @@ func TestLift_IgnoredClaudeFolder(t *testing.T) {
 func TestLift_MovesThePin(t *testing.T) {
 	const pinned = "module _\n\ngo 1.27.0\n\nrequire github.com/exoport/apex_process_ape v0.9.0 // cmd/ape\n"
 	setup := func(t *testing.T) string {
+		t.Helper()
 		root := liftFixture(t, false)
 		require.NoError(t, os.MkdirAll(filepath.Join(root, ".bingo"), 0o755))
 		require.NoError(t, os.WriteFile(filepath.Join(root, ".bingo", "ape.mod"), []byte(pinned), 0o644))
