@@ -68,6 +68,10 @@ type Config struct {
 	// uses; ape keeps them installed at project scope (plugins.go).
 	Marketplaces map[string]Marketplace `yaml:"marketplaces"`
 	Plugins      []PluginRef            `yaml:"plugins"`
+	// Evidence is "archive" to commit the final check outputs with the
+	// archive and the milestone close (H23); "off" (the default) keeps them
+	// in the ignored logs only.
+	Evidence EvidenceMode `yaml:"evidence"`
 	// Commit shapes the archive's squash commit (H15): its subject
 	// template and whether the project's git hooks run on it.
 	Commit CommitConfig `yaml:"commit"`

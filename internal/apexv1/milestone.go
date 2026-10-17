@@ -137,8 +137,8 @@ func (p *Project) milestonePaths() []string {
 	return paths
 }
 
-func (p *Project) commitMilestone(ctx context.Context, id, what string) (string, error) {
-	sha, err := p.commitRecord(ctx, "apex: "+id+" "+what, "Milestone: "+id, p.milestonePaths()...)
+func (p *Project) commitMilestone(ctx context.Context, id, what string, extra ...string) (string, error) {
+	sha, err := p.commitRecord(ctx, "apex: "+id+" "+what, "Milestone: "+id, append(p.milestonePaths(), extra...)...)
 	if err != nil {
 		return "", &FailError{Code: CodeCommitFailed, Msg: "roadmap written but its commit failed: " + err.Error() + " — fix git (identity, lock) and commit " + strings.Join(p.milestonePaths(), " ")}
 	}
@@ -243,6 +243,12 @@ type GateResult struct {
 	// (or recorded the first one), and so was committed.
 	ResultChanged bool   `json:"result_changed"`
 	Commit        string `json:"commit,omitempty"`
+	// Evidence is the folder a close wrote the gate's evidence to
+	// (evidence: archive, H23).
+	Evidence string `json:"evidence,omitempty"`
+	// checks are every check the run ran, the gate command first: what
+	// the evidence is written from.
+	checks []CheckResult
 }
 
 // RunGate runs a milestone's gate and records it; the committed record
@@ -298,6 +304,7 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 		checks = append(append([]PlannedCheck(nil), spec...), PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: regressionCmd})
 	}
 	results := p.RunChecks(ctx, filepath.Join(p.LogsDir(), "gate-"+id), "", checks, opt)
+	ran := append([]CheckResult{gate}, results...)
 	run.StrayFiles = StrayFiles(append([]CheckResult{gate}, results...))
 	if regressionCmd != "" {
 		change, base := p.milestoneRegressionBaseline(ctx, id, regressionCmd)
@@ -314,7 +321,7 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	if data, err := json.MarshalIndent(run, "", "  "); err == nil {
 		_ = writeFileAtomic(p.lastGatePath(id), string(data)+"\n")
 	}
-	g := &GateResult{Milestone: id, Run: run, Status: m.Status}
+	g := &GateResult{Milestone: id, Run: run, Status: m.Status, checks: ran}
 	recs, err := p.LoadMilestoneRecords()
 	if err != nil {
 		return nil, err
@@ -405,7 +412,14 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 		return nil, err
 	}
 	g.Status = MilestoneDone
-	if g.Commit, err = p.commitMilestone(ctx, id, MilestoneDone); err != nil {
+	var extra []string
+	if p.evidenceOn() {
+		if g.Evidence, err = p.writeMilestoneEvidence(id, g.checks); err != nil {
+			return g, err
+		}
+		extra = append(extra, g.Evidence)
+	}
+	if g.Commit, err = p.commitMilestone(ctx, id, MilestoneDone, extra...); err != nil {
 		return g, err
 	}
 	return g, nil

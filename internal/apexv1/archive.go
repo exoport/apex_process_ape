@@ -411,6 +411,11 @@ func (p *Project) writeArchive(ctx context.Context, id string, st *State, update
 	if err := SaveState(filepath.Join(dest, "state.json"), st); err != nil {
 		return err
 	}
+	if p.evidenceOn() && st.Verify != nil {
+		if _, err := p.writeEvidence(filepath.Join(dest, "evidence"), st.Verify.Results, nil); err != nil {
+			return err
+		}
+	}
 	_, err := git(ctx, p.Root, "add", "-A", "--", p.DevRel)
 	return err
 }

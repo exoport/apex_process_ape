@@ -784,7 +784,11 @@ func newChangeArchiveCmd() *cobra.Command {
      reaches the base branch
   7. switches to the base branch, `+"`git merge --squash change/<id>`"+`, writes the specs,
      moves the folder to development/archive/<YYYY-MM-DD>-<id>/ (status archived,
-     branch_tip = change/<id>'s last commit) and commits everything as ONE commit (H15):
+     branch_tip = change/<id>'s last commit) — with "evidence: archive" in
+     _apex/config.yaml (H23; default off) also its evidence/: one file per check of the
+     final verify (command, exit, duration, output sha256, and the output from the log,
+     capped at 256 KB: head and tail kept, the full log named by path and sha256) — and
+     commits everything as ONE commit (H15):
      subject from _apex/config.yaml commit.subject — placeholders {type} (change.md's
      type:), {title} (its # title) and {id}; default "{title}" — and a body holding the
      branch commits' own subjects (not ape's "apex:" ones) and every trailer of theirs but
