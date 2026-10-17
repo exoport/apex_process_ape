@@ -35,10 +35,13 @@ var boardRefreshVerbs = map[string]bool{
 // status reports (check, diff, codes, status itself — `status --board`
 // refreshes on request), or they run inside a model session's every turn
 // (the hooks), where the latency is paid on every tool call or stop.
+// The plugins verbs change installs and settings, which status does not
+// report.
 var boardSkipVerbs = map[string]bool{
 	"project check": true, "project codes": true, "status": true,
 	"change check": true, "change diff": true,
 	"hook session-start": true, "hook stop": true, "hook pre-tool": true,
+	"plugins sync": true, "plugins status": true,
 }
 
 // boardGroups are the top-level commands whose leaves must each be in one
