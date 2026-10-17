@@ -157,6 +157,7 @@ func (p *Project) Check() []Finding {
 		add(Finding{File: p.Rel(path), Message: "missing — " + remedy})
 	}
 	add(p.layoutFindings()...)
+	add(p.liftDispositionFindings(context.Background())...)
 
 	if doc, err := readFileString(p.ProjectMD()); err != nil {
 		missing(p.ProjectMD(), "run `ape project init`, then write it (apex-plan)")
@@ -233,6 +234,21 @@ func (p *Project) layoutFindings() []Finding {
 			"/) — move " + old + "/{milestones,decisions}.json to " + state + "/ and delete " + old + "/"})
 	}
 	return out
+}
+
+// liftDispositionFindings reports the lift's disposition list while it
+// awaits review (D49 Q14): the file exists, and the project's v1 epoch
+// is a lift commit. The person deletes it after the review; until then
+// the project is not done lifting.
+func (p *Project) liftDispositionFindings(ctx context.Context) []Finding {
+	path := filepath.Join(p.Dev(), LiftDisposition)
+	if !fileExists(path) {
+		return nil
+	}
+	if out, err := git(ctx, p.Root, "log", "-1", "--format=%h", "--grep=^"+LiftSubjectPrefix); err != nil || out == "" {
+		return nil
+	}
+	return []Finding{{File: p.Rel(path), Message: "the lift's disposition list awaits review: apex-plan fills it, a fresh read-only session reviews it, then the operator — delete the file when done"}}
 }
 
 var adrSupersedesRe = regexp.MustCompile(`(?m)^Supersedes:[ \t]*(ADR-\d{4})[ \t]*$`)

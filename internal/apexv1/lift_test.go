@@ -307,8 +307,16 @@ func TestLift_FullRun(t *testing.T) {
 			require.Contains(t, strings.Join(a.Gaps, "\n"), "no `## Consequences`")
 		}
 	}
-	// Every converted ADR passes the v1 shape and life checks.
-	require.NotContains(t, findingMessages(p.Check()), "decisions/")
+	// Every converted ADR passes the v1 shape and life checks; the
+	// disposition list is pending until the person deletes it (D49 Q14).
+	got := findingMessages(p.Check())
+	require.NotContains(t, got, "decisions/")
+	require.Contains(t, got, "development/lift-disposition.md: the lift's disposition list awaits review")
+	var codes []string
+	for _, f := range ClassifyFindings(p.Check()) {
+		codes = append(codes, f.Code)
+	}
+	require.Contains(t, codes, "lift.disposition-pending")
 	var recs map[string]DecisionRecord
 	require.NoError(t, json.Unmarshal([]byte(read(t, p, "_apex/state/decisions.json")), &recs))
 	require.Len(t, recs, 4, "accepted and superseded, not the proposed one")
@@ -415,6 +423,10 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	}
 	require.NotContains(t, disp, "Every story gets two reviews", "only the don't-miss section")
 	require.NotContains(t, disp, "| ok |", "a list item under three words is not a rule")
+
+	// Deleted after the review, it is no finding any more.
+	require.NoError(t, os.Remove(filepath.Join(root, "development", LiftDisposition)))
+	require.NotContains(t, findingMessages(p.Check()), "disposition")
 
 	// A second lift refuses: the project is v1 now.
 	_, err = Lift(ctx(), root, LiftOptions{})
@@ -596,4 +608,14 @@ func TestLift_CanonADRs(t *testing.T) {
 	require.Contains(t, read(t, p, "development/decisions/0006-org-wide-rule.md"), "Lifted from: ADR-0070, adrs/adr-0070_org-wide-rule.md at the governance repository (canon)")
 	require.Equal(t, []LiftIDRef{{File: "rule.go", Line: 3, Text: "ADR-0099", Where: "comment"}}, res.UnresolvedCitations)
 	require.Contains(t, read(t, p, "development/lift-disposition.md"), "`rule.go:3` `ADR-0099` — comment")
+}
+
+// The disposition file is pending only in a lifted project: the same file
+// in a project that began with `ape project init` is nobody's business.
+func TestLiftDisposition_PendingOnlyAfterALift(t *testing.T) {
+	p := fixture(t, baseFiles())
+	write(t, p, "development/"+LiftDisposition, "# notes\n")
+	require.NotContains(t, findingMessages(p.Check()), "disposition")
+	commitAll(t, p, LiftSubjectPrefix+" from APEX v0 v0.30.0")
+	require.Contains(t, findingMessages(p.Check()), "development/lift-disposition.md: the lift's disposition list awaits review")
 }

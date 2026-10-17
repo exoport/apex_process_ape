@@ -159,6 +159,7 @@ var DiagnosticCodes = []CodeDoc{
 	// findings (exit 1, from project check / change check)
 	{"file.missing", 1, "person", "a required file is missing"},
 	{"layout.old-archive", 1, "person", "development/changes/archive/ exists (an older ape's archive): move its folders to development/archive/"},
+	{"lift.disposition-pending", 1, "person", "development/lift-disposition.md exists after a lift: apex-plan fills it, a fresh read-only session then the operator review it; the operator deletes it"},
 	{"layout.old-state", 1, "person", "development/.apex/ exists (an older ape's state): move milestones.json and decisions.json to _apex/state/, delete it"},
 	{"project.too-long", 1, "person", "project.md over 150 lines"},
 	{"project.too-big", 1, "person", "project.md over 8 KB"},

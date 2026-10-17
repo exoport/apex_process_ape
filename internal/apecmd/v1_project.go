@@ -171,6 +171,9 @@ func newProjectCheckCmd() *cobra.Command {
                            (an older ape's state: move milestones.json and decisions.json
                            to _apex/state/, delete it; ` + "`ape project init`" + ` then adds
                            _apex/state/.gitignore)
+  lift                     development/lift-disposition.md in a project whose v1 epoch is a
+                           lift commit ("apex: lift …"): the disposition list awaits review
+                           (lift.disposition-pending) until the person deletes the file
   .claude/settings.json    ape's hooks registered as ` + "`ape project init`" + ` writes them:
                            hooks.missing / hooks.altered (matcher, type, async, a
                            stop timeout below 1800 s); ` + "`ape project init`" + ` restores them
