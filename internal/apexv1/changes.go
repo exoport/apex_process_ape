@@ -202,6 +202,7 @@ func (p *Project) CheckChange(id string) []Finding {
 		add(s.Line, "## Delta is empty — add ADDED/MODIFIED/REMOVED blocks, or the single line `none — <reason>`")
 	}
 	out = append(out, p.checkDeltas(file, c, touches)...)
+	out = append(out, p.mergedSpecFindings(file, c)...)
 
 	if s := c.section("Tasks"); s != nil && len(c.Tasks) == 0 {
 		add(s.Line, "## Tasks has no tasks — `- T1 <what> — check: <command> | human-review`")
@@ -214,6 +215,26 @@ func (p *Project) CheckChange(id string) []Finding {
 		ids[t.ID] = true
 		if t.Check == "" {
 			add(t.Line, "task "+t.ID+" has no `check: <command> | human-review`")
+		}
+	}
+	return out
+}
+
+// mergedSpecFindings merges the delta into the current specs in memory —
+// the merge `ape change diff` shows and archive makes — and reports a spec
+// the merge would take over the cap (H18): found at check and start, before
+// apply and review are paid for, not at archive. A delta that does not
+// merge is checkDeltas' to report.
+func (p *Project) mergedSpecFindings(file string, c *Change) []Finding {
+	updates, conflicts := p.MergeDelta(c)
+	if len(conflicts) > 0 {
+		return nil
+	}
+	var out []Finding
+	for _, u := range updates {
+		if !u.Retired && len(u.content) > SpecMaxBytes {
+			out = append(out, Finding{File: file, Line: 0, Message: "after this change, " + u.Path + " would be " + sizeKB(len(u.content)) +
+				", over the 20 KB spec cap — split the capability first (its own change, moving requirements to a new capability), then re-plan this one"})
 		}
 	}
 	return out

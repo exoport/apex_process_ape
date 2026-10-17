@@ -125,6 +125,7 @@ var findingRules = []findingRule{
 	rule("decision", "^missing `## ", "decision.missing-section"),
 	rule("", `capability folder must be a kebab-case slug`, "spec.bad-capability-name"),
 	rule("", `capability folder without spec.md`, "spec.missing"),
+	rule("", `^after this change, .* would be .* over the 20 KB spec cap`, "change.spec-too-big"),
 	rule("", `over the 20 KB cap`, "spec.too-big"),
 	rule("", "^missing `# <Capability title>`", "spec.no-title"),
 	rule("", "^missing `Purpose:`", "spec.no-purpose"),

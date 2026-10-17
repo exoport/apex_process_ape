@@ -360,6 +360,20 @@ func TestArchive_MergedSpecOverCapIsRefused(t *testing.T) {
 	updates, conflicts := p.MergeDelta(c)
 	require.Empty(t, conflicts)
 	require.Contains(t, findingMessages(ValidateSpec("s", updates[0].content)), "split into two capabilities")
+
+	// H18: change check (and so start) finds it first.
+	fs := ClassifyFindings(p.CheckChange("add-big"))
+	var codes []string
+	for _, f := range fs {
+		codes = append(codes, f.Code)
+	}
+	require.Contains(t, codes, "change.spec-too-big")
+	require.Contains(t, findingMessages(fs), "after this change, development/specs/greeting/spec.md would be")
+	require.Contains(t, findingMessages(fs), "split the capability first")
+	commitAll(t, p, "plan: add-big")
+	_, err := p.Start(ctx(), "add-big", RunOptions{})
+	require.Equal(t, CodeCheckFailed, failCode(t, err))
+	require.Equal(t, "main", CurrentBranch(ctx(), p.Root))
 }
 
 // H15: commit.subject renders the squash subject from the change's type,

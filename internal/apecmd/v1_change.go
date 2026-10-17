@@ -190,6 +190,9 @@ func newChangeCheckCmd() *cobra.Command {
     other key must start with x-
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
   - change.md ≤ 8 KB and design.md ≤ 8 KB ("split this change")
+  - every spec the delta touches stays ≤ 20 KB once merged — the in-memory merge
+    `+"`ape change diff`"+` shows and archive makes (else change.spec-too-big: split the
+    capability first; start runs this check too, so it fails before any work, H18)
   - ## Delta: "### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>" blocks, or
     the single line "none — <reason>". The capability must be in touches. ADDED names must
     not exist in specs/<capability>/spec.md yet; MODIFIED/REMOVED must name an existing

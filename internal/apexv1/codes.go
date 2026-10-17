@@ -204,6 +204,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.design-too-big", 1, "replan", "design.md over 8 KB"},
 	{"change.frontmatter", 1, "replan", "change.md frontmatter is missing, unparseable, or its id/milestone/touches are wrong"},
 	{"change.unknown-key", 1, "replan", "change.md frontmatter has a key v1 does not define (own keys: prefix x-)"},
+	{"change.spec-too-big", 1, "replan", "change check / start: merging the delta would take a spec over the 20 KB cap — split the capability first (H18)"},
 	{"change.no-type", 1, "replan", "change.md has no type: and _apex/config.yaml commit.subject uses {type} (D47)"},
 	{"change.bad-type", 1, "replan", "change.md type: is not one of feat, fix, perf, refactor, docs, test, build, ci, chore (D47)"},
 	{"change.bad-id", 1, "replan", "the change folder name is not a valid id"},
