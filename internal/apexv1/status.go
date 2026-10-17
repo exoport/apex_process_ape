@@ -173,9 +173,15 @@ func (p *Project) Status() *StatusReport {
 			cs.VerifySHA = v.SHA
 			for i := range v.Results {
 				if v.Results[i].Red() {
-					cs.Failing = append(cs.Failing, fmt.Sprintf("%s (exit %d)", v.Results[i].Task, v.Results[i].Exit))
+					cs.Failing = append(cs.Failing, fmt.Sprintf("%s (%s)", v.Results[i].Task, v.Results[i].Outcome()))
 				}
 			}
+		}
+		// A red verify of an in-progress change is not in state.json (D5):
+		// the checkout's last-verify record has it, vacuous and unrun
+		// checks included (H11).
+		if lv := p.currentLastVerify(c.ID, c.State); lv != nil {
+			cs.Failing = lv.Failing
 		}
 		r.Changes = append(r.Changes, cs)
 	}

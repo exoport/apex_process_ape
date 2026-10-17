@@ -148,7 +148,9 @@ func printChecks(w io.Writer, rs []apexv1.CheckResult, tails bool) {
 		verdict := "green"
 		switch {
 		case r.PreExistingRed:
-			verdict = fmt.Sprintf("red (exit %d), red at baseline too: not a failure", r.Exit)
+			verdict = fmt.Sprintf("red (%s), red at baseline too: not a failure", r.Outcome())
+		case r.Reason != "":
+			verdict = "RED (" + r.Reason + ")"
 		case r.Exit != 0:
 			verdict = fmt.Sprintf("RED (exit %d)", r.Exit)
 		}
@@ -160,6 +162,9 @@ func printChecks(w io.Writer, rs []apexv1.CheckResult, tails bool) {
 			}
 		}
 		fmt.Fprintf(w, "  %-4s %-14s %5.1fs  %s\n", label, verdict, r.Secs, r.Cmd)
+		if r.Reason != "" {
+			fmt.Fprintln(w, "       "+r.Reason+": "+r.Detail)
+		}
 		if tails && r.Red() {
 			for _, l := range lastLinesOf(r.Tail, 15) {
 				fmt.Fprintln(w, "       | "+l)
@@ -186,6 +191,8 @@ func printRegression(w io.Writer, v *apexv1.RegressionVerdict) {
 	}
 	verdict := "green"
 	switch {
+	case v.Failed && v.Reason != "":
+		verdict = "RED (" + v.Reason + ": " + v.Detail + ")"
 	case v.Failed:
 		verdict = fmt.Sprintf("RED (exit %d)", v.Exit)
 	case v.PreExistingRed:

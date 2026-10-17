@@ -55,6 +55,10 @@ type RegressionVerdict struct {
 	// PreExistingRed: red now and red at baseline — reported, not failed.
 	PreExistingRed bool `json:"pre_existing_red"`
 	Failed         bool `json:"failed"`
+	// Reason and Detail: the run was vacuous or unrun (H11). An unrun
+	// command always fails: nothing shows it would pass.
+	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // regressionCmd is the configured regression command's change tier — what
@@ -84,15 +88,16 @@ func (p *Project) runRegression(ctx context.Context, cmd, logDir, prefix string,
 }
 
 // judgeRegression marks r PreExistingRed when it is red and so was base
-// (same command), and returns the verdict.
+// (same command), and returns the verdict. An unrun command is never
+// pre-existing red: it is red for want of a requirement, not by its tests.
 func judgeRegression(r *CheckResult, base *RegressionBaseline) *RegressionVerdict {
-	v := &RegressionVerdict{Cmd: r.Cmd, Exit: r.Exit, OutputSHA256: r.OutputSHA256, Log: r.Log}
+	v := &RegressionVerdict{Cmd: r.Cmd, Exit: r.Exit, OutputSHA256: r.OutputSHA256, Log: r.Log, Reason: r.Reason, Detail: r.Detail}
 	if base != nil && base.Cmd == r.Cmd {
 		exit := base.Exit
 		v.BaselineExit, v.BaselineSHA = &exit, base.SHA
 	}
 	if r.Exit != 0 {
-		v.PreExistingRed = v.BaselineExit != nil && *v.BaselineExit != 0
+		v.PreExistingRed = r.Reason != ReasonUnrun && v.BaselineExit != nil && *v.BaselineExit != 0
 		v.Failed = !v.PreExistingRed
 	}
 	r.PreExistingRed = v.PreExistingRed

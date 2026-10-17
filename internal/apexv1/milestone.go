@@ -31,6 +31,9 @@ type GateRun struct {
 	// Regression judges the regression command against the milestone's
 	// baseline (backlog 32); absent when none is configured.
 	Regression *RegressionVerdict `json:"regression,omitempty"`
+	// Reason and Detail: the gate command was vacuous or unrun (H11).
+	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // Green reports a passing gate: its command exited 0, every scenario
@@ -42,18 +45,27 @@ func (r *GateRun) Green() bool {
 // Why describes a red gate in one phrase.
 func (r *GateRun) Why() string {
 	var parts []string
-	if r.Exit != 0 {
+	switch {
+	case r.Reason != "":
+		parts = append(parts, "gate command "+r.Reason+": "+r.Detail)
+	case r.Exit != 0:
 		parts = append(parts, "gate command exit "+strconv.Itoa(r.Exit))
 	}
 	if n := len(r.SpecFailed); n > 0 {
 		names := make([]string, 0, n)
 		for i := range r.SpecFailed {
-			names = append(names, r.SpecFailed[i].Task)
+			name := r.SpecFailed[i].Task
+			if reason := r.SpecFailed[i].Reason; reason != "" {
+				name += " (" + reason + ")"
+			}
+			names = append(names, name)
 		}
 		parts = append(parts, strconv.Itoa(n)+" spec scenario(s) red: "+strings.Join(limit(names, 5), ", "))
 	}
 	if g := r.Regression; g != nil && g.Failed {
-		if g.BaselineExit == nil {
+		if g.Reason != "" {
+			parts = append(parts, "regression command "+g.Reason+": "+g.Detail)
+		} else if g.BaselineExit == nil {
 			parts = append(parts, "regression command exit "+strconv.Itoa(g.Exit)+", and no change of the milestone has a baseline for it")
 		} else {
 			parts = append(parts, "regression command exit "+strconv.Itoa(g.Exit)+", green at baseline ("+g.BaselineChange+")")
@@ -286,6 +298,7 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	run := GateRun{
 		Exit: r.Exit, At: Stamp(), SHA: HeadSHA(ctx, p.Root), Secs: r.Secs,
 		OutputSHA256: r.OutputSHA256, Cmd: m.Gate, Log: r.Log, Tail: lastN(r.Tail, 15),
+		Reason: r.Reason, Detail: r.Detail,
 	}
 	// The whole spec runs as the regression suite beside the gate, and
 	// the project's own regression command with it (backlog 32), judged

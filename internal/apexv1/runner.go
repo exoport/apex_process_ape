@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -32,6 +33,12 @@ const ExitTimeout = 124
 // when it is non-empty; the result carries its SHA-256 and last lines.
 // A command that cannot start records exit 127, as a shell would.
 func RunCheck(ctx context.Context, dir, cmd, logPath string, timeout time.Duration) CheckResult {
+	return runCheck(ctx, dir, cmd, logPath, timeout, nil)
+}
+
+// runCheck is RunCheck that also judges a zero exit against the vacuous
+// phrases (H11): an output vacuousPhrase finds one in records ExitVacuous.
+func runCheck(ctx context.Context, dir, cmd, logPath string, timeout time.Duration, vacuous []string) CheckResult {
 	if timeout <= 0 {
 		timeout = DefaultCheckTimeout
 	}
@@ -85,8 +92,17 @@ func RunCheck(ctx context.Context, dir, cmd, logPath string, timeout time.Durati
 			_, _ = io.WriteString(w, "\n[ape] "+err.Error()+"\n")
 		}
 	}
-	// Closed only now: the timeout and start-failure notes above belong
-	// in the log too.
+	sum := hex.EncodeToString(hash.Sum(nil)) // of the command's own output
+	var reason, detail string
+	if exit == 0 {
+		if ph := vacuousPhrase(buf.String(), vacuous); ph != "" {
+			exit, reason = ExitVacuous, ReasonVacuous
+			detail = "exit 0, but the output says " + strconv.Quote(ph) + " and nothing shows a test ran"
+			_, _ = io.WriteString(w, "\n[ape] vacuous: "+detail+" (checks.vacuous_output)\n")
+		}
+	}
+	// Closed only now: the timeout, start-failure and vacuous notes above
+	// belong in the log too.
 	if logFile != nil {
 		_ = logFile.Close()
 	}
@@ -94,9 +110,23 @@ func RunCheck(ctx context.Context, dir, cmd, logPath string, timeout time.Durati
 		Cmd:          cmd,
 		Exit:         exit,
 		Secs:         math.Round(secs*10) / 10,
-		OutputSHA256: hex.EncodeToString(hash.Sum(nil)),
+		OutputSHA256: sum,
 		Tail:         lastLines(buf.String(), tailLines),
+		Reason:       reason,
+		Detail:       detail,
 	}
+}
+
+// unrunResult is a check not run because a requirement is missing (H11);
+// the note goes to its log, so the log the result names exists.
+func unrunResult(cmd, logPath, detail string) CheckResult {
+	note := "[ape] unrun: " + detail + " — the check was not run (requires:)"
+	if logPath != "" {
+		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err == nil {
+			_ = os.WriteFile(logPath, []byte(note+"\n"), 0o644)
+		}
+	}
+	return CheckResult{Cmd: cmd, Exit: ExitUnrun, Tail: []string{note}, Reason: ReasonUnrun, Detail: detail}
 }
 
 func lastLines(s string, n int) []string {

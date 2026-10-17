@@ -48,6 +48,12 @@ type CheckResult struct {
 	// PreExistingRed marks a regression command that is red and was red
 	// at its baseline: reported, not a failure (backlog 32).
 	PreExistingRed bool `json:"pre_existing_red,omitempty"`
+	// Reason marks a check red for what it did not run (H11): "vacuous"
+	// (exit 0, output saying it ran nothing; Exit is ExitVacuous) or
+	// "unrun" (a requirement missing, never run; Exit is ExitUnrun).
+	// Detail says which phrase or requirement.
+	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // Red reports a result that fails its run: a non-zero exit that was not

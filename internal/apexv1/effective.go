@@ -135,7 +135,9 @@ func (pc *PlannedCheck) logName(prefix string) string {
 
 // RunChecks runs each planned check from the project root, logging under
 // logDir. A command shared by several checks runs once: a scenario whose
-// check is also a task's is not paid for twice. What a check leaves in the
+// check is also a task's is not paid for twice. A check whose requires:
+// the machine lacks is not run (unrun), and a green one whose output says
+// it ran nothing is vacuous (H11): both red. What a check leaves in the
 // tree outside the development folder is undone and reported in its
 // StrayFiles (item 19).
 func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks []PlannedCheck, opt RunOptions) []CheckResult {
@@ -144,7 +146,7 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 	p.ensureState() // the logs go under _apex/state/
 	inGit := p.isWorkTree(ctx)
 	cfg, _ := LoadConfig(p.Root) // Open refused an unparseable one
-	timeouts := cfg.Timeouts
+	timeouts, vacuous := cfg.Timeouts, cfg.Checks.Vacuous()
 	for i := range checks {
 		pc := &checks[i]
 		r, ok := done[pc.Cmd]
@@ -154,7 +156,11 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 			if inGit {
 				before = p.snapshot(ctx)
 			}
-			r = RunCheck(ctx, p.Root, pc.Cmd, logPath, timeouts.For(pc.Kind, opt.Timeout))
+			if missing := unmetRequirement(pc.Cmd, cfg.Requires); missing != "" {
+				r = unrunResult(pc.Cmd, logPath, missing)
+			} else {
+				r = runCheck(ctx, p.Root, pc.Cmd, logPath, timeouts.For(pc.Kind, opt.Timeout), vacuous)
+			}
 			r.Log = p.Rel(logPath)
 			if inGit {
 				r.StrayFiles = p.undoStrays(ctx, before)

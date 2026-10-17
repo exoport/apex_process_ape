@@ -95,6 +95,23 @@ unparseable and every command refuses it):
                                      Go durations; defaults 15m per check, 30m for the
                                      regression command, 30m for a Gate: command; a
                                      command's --timeout flag overrides them
+  checks: {vacuous_output: ["no tests to run", …]}
+                                     a check that exits 0 but whose output says it ran
+                                     nothing is red, reason "vacuous" (exit -2). Default
+                                     list: "no tests to run" (go test), "running 0 tests"
+                                     (cargo), "Ran 0 tests" (unittest < 3.12), "0 passing"
+                                     (mocha), "collected 0 items" (pytest with exit 5
+                                     masked); [] turns it off. A phrase counts as a whole
+                                     word, and not when a line without one starts like a
+                                     line with one (go test ./... -run X that ran X in one
+                                     package: "ok pkgA 0.4s" beside "ok pkgB … [no tests
+                                     to run]" is not vacuous)
+  requires: {RADIX_DSN: env, docker: cmd}
+                                     a check that mentions $RADIX_DSN / ${RADIX_DSN (a
+                                     comment counts: "go test ./store/... # needs
+                                     $RADIX_DSN") while it is unset or empty, or runs
+                                     docker as a command while it is not on PATH, is not
+                                     run: reason "unrun" (exit -3), red, never green
 
 --brownfield adds nothing; it records in _apex/state/project.json (ignored) that the
 project existed before APEX.
@@ -281,7 +298,9 @@ func newStatusCmd() *cobra.Command {
     (` + "`ape change approve <id> --by <who>`" + `). A fix's runs (` + "`ape task <skill> --args <fix-id>`" + `)
     count toward no milestone's spend
   - every change not archived, with its status, blocked reason, red checks from its
-    last verify, human-review tasks not yet accepted, and for a started change its red
+    last verify (JSON failing: "T1 (exit 1)", "T2 (vacuous: …)", "S (unrun: $X is unset
+    …)" — a red verify of an in-progress change comes from this checkout's
+    _apex/state/logs/<id>/last-verify.json), human-review tasks not yet accepted, and for a started change its red
     verifies since it started against limits.attempts (JSON attempts, attempts_cap;
     "(3/5 attempts)"; attempts_total, never reset) — a change the cap blocked shows
     "attempts exceeded" as its reason. The counts are this checkout's

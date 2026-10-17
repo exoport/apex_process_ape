@@ -18,8 +18,10 @@ type LastVerify struct {
 	// makes the record describe checks the plan no longer has.
 	PlanDigest string `json:"plan_digest"`
 	Green      bool   `json:"green"`
-	// Red maps each red check's ref to its command.
-	Red map[string]string `json:"red"`
+	// Red maps each red check's ref to its command; Failing describes
+	// each, as `ape status` lists them ("T1 (exit 1)", "T2 (vacuous: …)").
+	Red     map[string]string `json:"red"`
+	Failing []string          `json:"failing,omitempty"`
 }
 
 func (p *Project) lastVerifyPath(id string) string {
@@ -34,6 +36,7 @@ func (p *Project) saveLastVerify(id string, st *State, sha string, green bool, r
 		r := &results[i]
 		if r.Red() {
 			lv.Red[r.Task] = r.Cmd
+			lv.Failing = append(lv.Failing, r.Task+" ("+r.Outcome()+")")
 		}
 	}
 	data, err := json.MarshalIndent(lv, "", "  ")
@@ -44,6 +47,17 @@ func (p *Project) saveLastVerify(id string, st *State, sha string, green bool, r
 	if os.MkdirAll(p.LogDir(id), 0o755) == nil {
 		_ = writeFileAtomic(p.lastVerifyPath(id), string(data)+"\n")
 	}
+}
+
+// currentLastVerify is the change's last verify record when it is of the
+// change's current plan and no older than the verify state.json holds;
+// nil otherwise.
+func (p *Project) currentLastVerify(id string, st *State) *LastVerify {
+	lv := p.lastVerify(id)
+	if lv == nil || lv.PlanDigest != st.PlanDigest || (st.Verify != nil && st.Verify.At > lv.At) {
+		return nil
+	}
+	return lv
 }
 
 // lastVerify is the change's latest verify record, nil when there is none

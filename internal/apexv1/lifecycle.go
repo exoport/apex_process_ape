@@ -489,7 +489,7 @@ func (p *Project) redAttempt(ctx context.Context, ci ChangeInfo, res *VerifyResu
 	var failing []string
 	red := res.Failing()
 	for i := range red {
-		failing = append(failing, fmt.Sprintf("%s (exit %d)", red[i].Task, red[i].Exit))
+		failing = append(failing, fmt.Sprintf("%s (%s)", red[i].Task, red[i].Outcome()))
 	}
 	reason := fmt.Sprintf("attempts exceeded: %d red verifies — %s", a.Since, strings.Join(limit(failing, 5), ", "))
 	if st.Status != StatusInProgress {

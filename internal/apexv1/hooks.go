@@ -482,7 +482,7 @@ func stopReason(id string, red []CheckResult, n int) string {
 	budget := 3000
 	for i := range red {
 		r := &red[i]
-		fmt.Fprintf(&b, "\n%s `%s` exit %d (full output: %s)\n", r.Task, r.Cmd, r.Exit, r.Log)
+		fmt.Fprintf(&b, "\n%s `%s` %s (full output: %s)\n", r.Task, r.Cmd, r.Outcome(), r.Log)
 		tail := lastN(r.Tail, 15)
 		for _, l := range tail {
 			if budget <= 0 {

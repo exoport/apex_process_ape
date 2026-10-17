@@ -71,6 +71,11 @@ type Config struct {
 	// Timeouts bound one run of a check, the regression command and a
 	// gate command (H10); a --timeout flag wins.
 	Timeouts Timeouts `yaml:"timeouts"`
+	// Checks and Requires keep a check from passing by running nothing
+	// (H11): output that says it ran nothing, and a requirement the
+	// machine lacks.
+	Checks   ChecksConfig `yaml:"checks"`
+	Requires Requires     `yaml:"requires"`
 }
 
 // SkillModel is one models.<skill> entry.

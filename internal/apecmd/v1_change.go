@@ -354,8 +354,11 @@ its moved base.`,
 				printChecks(w, res.Baseline, false)
 				if r := res.Regression; r != nil {
 					note := "green"
-					if r.Exit != 0 {
-						note = fmt.Sprintf("red (exit %d) — recorded: verify fails only if it is newly red; roadmap the fix (apex-plan)", r.Exit)
+					switch {
+					case r.Reason == apexv1.ReasonUnrun:
+						note = "unrun (" + r.Detail + ") — recorded; verify fails while it stays unrun"
+					case r.Exit != 0:
+						note = fmt.Sprintf("red (%s) — recorded: verify fails only if it is newly red; roadmap the fix (apex-plan)", r.Outcome())
 					}
 					fmt.Fprintf(w, "  regression %s  %s\n", note, r.Cmd)
 				}
@@ -378,7 +381,13 @@ other scenario whose check command is identical to a task's (H10). The rest of t
 is the milestone gate's to run (`+"`ape milestone gate`"+` runs all of it). human-review checks
 are not run. A command shared by several checks runs once. Each check runs under
 _apex/config.yaml timeouts.check (default 15m), the regression command under
-timeouts.regression (default 30m); --timeout overrides both. Results (sha, exit, seconds, output sha256; kind, capability, requirement, scenario
+timeouts.regression (default 30m); --timeout overrides both.
+Ran nothing is not green (H11): a check that exits 0 but whose output says it ran
+nothing (_apex/config.yaml checks.vacuous_output; default "no tests to run", "running 0
+tests", "Ran 0 tests", "0 passing", "collected 0 items") is red with reason "vacuous"
+(exit -2); a check whose requirement (requires: {NAME: env|cmd}) is missing — it mentions
+$NAME and NAME is unset, or runs NAME and NAME is not on PATH — is not run and is red with
+reason "unrun" (exit -3). JSON results carry "reason" and "detail" for both. Results (sha, exit, seconds, output sha256; kind, capability, requirement, scenario
 for scenario checks) are recorded in state.json; output under _apex/state/logs/<id>/.
 What a check leaves in the tree outside development/ — files it created, tracked files it
 changed — is undone after it and reported (JSON "stray_files"); files that were there

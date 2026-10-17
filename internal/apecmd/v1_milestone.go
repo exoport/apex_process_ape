@@ -153,7 +153,8 @@ the gate: nothing shows it was red before the milestone's work — always the ca
 milestone tier that differs from the change tier, which no change baselines. Timeouts:
 the Gate: command runs under timeouts.gate (default 30m), each scenario check under
 timeouts.check (15m), the regression command under timeouts.regression (30m); --timeout
-overrides all three. Files the gate
+overrides all three. A vacuous or unrun gate command, scenario or regression command is
+red (see ` + "`ape change verify --help`" + `; JSON reason/detail). Files the gate
 or a check leaves outside development/ are undone and reported ("stray_files"). The run (exit, sha, time,
 output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; shown by
 ` + "`ape status`" + `). When the result differs from the recorded one (green vs red), or is

@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -128,6 +129,8 @@ func (r RegressionConfig) MilestoneCmd() string {
 	return r.Change
 }
 
+var envNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // checkKeys refuses a mapping key outside keys (and a non-mapping node).
 func checkKeys(n *yaml.Node, what string, keys ...string) error {
 	if n.Kind == yaml.ScalarNode && n.Tag == "!!null" {
@@ -146,5 +149,112 @@ func checkKeys(n *yaml.Node, what string, keys ...string) error {
 			return fmt.Errorf("%s.%s: not a key ape knows (%s)", what, k, strings.Join(keys, ", "))
 		}
 	}
+	return nil
+}
+
+// DefaultVacuousOutput are test runners' own words for "ran nothing" on a
+// zero exit (H11) — each checked against the tool that prints it:
+//
+//	no tests to run     go test, when -run matches no test of a package:
+//	                    `ok  pkg 0.01s [no tests to run]` (and, with -v,
+//	                    `testing: warning: no tests to run`), exit 0
+//	running 0 tests     cargo test (Rust libtest), when a filter matches
+//	                    nothing, per test binary; exit 0
+//	Ran 0 tests         Python unittest before 3.12 ("OK", exit 0; 3.12
+//	                    exits 5 itself)
+//	0 passing           mocha, when --grep or the spec glob matches nothing;
+//	                    exit 0
+//	collected 0 items   pytest — which exits 5 for it by itself, so this
+//	                    catches only a wrapper that turned 5 into 0
+//
+// Not "no test files": `go test ./...` prints `? pkg [no test files]` for
+// every package without tests beside the packages that ran, under a first
+// word ("?") no running package's line shares, so it would make an
+// ordinary whole-module run vacuous.
+var DefaultVacuousOutput = []string{"no tests to run", "running 0 tests", "Ran 0 tests", "0 passing", "collected 0 items"}
+
+// ChecksConfig is checks: (H11).
+//
+//	checks:
+//	  vacuous_output: ["no tests to run", "0 examples"]   # replaces the default list
+//	  vacuous_output: []                                   # turns the rule off
+//
+// Absent, the rule uses DefaultVacuousOutput.
+type ChecksConfig struct {
+	VacuousOutput []string
+	// vacuousSet: vacuous_output: was given (an empty list turns the rule
+	// off), as opposed to absent (the default list).
+	vacuousSet bool
+}
+
+// UnmarshalYAML parses and validates the block.
+func (c *ChecksConfig) UnmarshalYAML(n *yaml.Node) error {
+	if err := checkKeys(n, "checks", "vacuous_output"); err != nil {
+		return err
+	}
+	var raw map[string][]string
+	if err := n.Decode(&raw); err != nil {
+		return fmt.Errorf("checks.vacuous_output: %w — a list of phrases", err)
+	}
+	phrases, ok := raw["vacuous_output"]
+	if !ok {
+		return nil
+	}
+	c.vacuousSet = true
+	c.VacuousOutput = []string{}
+	for _, ph := range phrases {
+		if strings.TrimSpace(ph) == "" {
+			return fmt.Errorf("checks.vacuous_output: an empty phrase would match every output")
+		}
+		c.VacuousOutput = append(c.VacuousOutput, ph)
+	}
+	return nil
+}
+
+// Vacuous is the phrase list in force.
+func (c ChecksConfig) Vacuous() []string {
+	if c.vacuousSet {
+		return c.VacuousOutput
+	}
+	return DefaultVacuousOutput
+}
+
+// Requirement kinds of requires: (H11).
+const (
+	RequireEnv = "env"
+	RequireCmd = "cmd"
+)
+
+// Requires is requires: — what a check needs from the machine it runs on
+// (H11), name → env|cmd:
+//
+//	requires:
+//	  RADIX_DSN: env    # a check that mentions $RADIX_DSN needs it set
+//	  docker: cmd       # a check that runs docker needs it on PATH
+//
+// A check whose requirement is missing is not run: it records unrun,
+// which counts as red and is never green.
+type Requires map[string]string
+
+// UnmarshalYAML parses and validates the block.
+func (r *Requires) UnmarshalYAML(n *yaml.Node) error {
+	var raw map[string]string
+	if err := n.Decode(&raw); err != nil {
+		return fmt.Errorf("requires: %w — a mapping NAME: env|cmd", err)
+	}
+	out := Requires{}
+	for name, kind := range raw {
+		kind = strings.TrimSpace(kind)
+		switch {
+		case kind != RequireEnv && kind != RequireCmd:
+			return fmt.Errorf("requires.%s: %q is not env or cmd", name, kind)
+		case kind == RequireEnv && !envNameRe.MatchString(name):
+			return fmt.Errorf("requires.%s: not an environment variable name", name)
+		case kind == RequireCmd && (name == "" || strings.ContainsAny(name, "/ \t")):
+			return fmt.Errorf("requires.%s: a command is named by its program name, without a path", name)
+		}
+		out[name] = kind
+	}
+	*r = out
 	return nil
 }
