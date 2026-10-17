@@ -4,6 +4,7 @@ Explanation docs answer "why" — design rationale, conceptual background, the s
 
 ## Available explanation
 
+- [apex-v1-scope.md](apex-v1-scope.md) — what APEX v1.0 promises (code reaches the base only as a reviewed squash), the shape it is built for (one operator per checkout, local trunk), the fix queue, and what only a person does.
 - [why-pty-only.md](why-pty-only.md) — why every run drives an interactive `claude` REPL inside a PTY, and why the programmatic `claude -p` axis was removed in v0.0.36.
 - [chat-task-prompt.md](chat-task-prompt.md) — the three ways ape drives a Claude session (`ape chat` / `ape task` / `ape prompt`) and how to choose between them.
 - [exec-modes.md](exec-modes.md) — the per-stage interactive runtime: process-spawn cost, context sharing, the step contract, and what hooks add.
