@@ -12,61 +12,51 @@ APE — APEX Process Engine CLI
 ape
 ```
 
-ape runs APEX framework work against your project through an
-interactive Claude Code REPL.
+ape runs APEX v1 work against your project through an interactive
+Claude Code REPL.
 
 Common commands:
-  ape pipeline <name>   Run a multi-stage pipeline (design, governance, epics).
-  ape task <skill>      Run a single framework skill without a pipeline YAML.
+  ape project init      Make this repository an APEX v1 project.
+  ape status            Where the project stands: milestones, changes, runs.
+  ape change <verb>     The unit of change: new, approve, start, verify, archive.
+  ape task <skill>      Run a single framework skill in a Claude session.
   ape chat              Open an interactive Claude session in the project.
   ape costs             Show this project's Claude cost rollup.
 
-Also: framework setup/update, doctor, sessions, planning, trait/pattern/adr
-inspection. Every claude invocation runs in an in-process PTY — there is no
-"claude -p" programmatic path.
+Also: milestone, decision, hook, framework setup/update, doctor, sessions.
+Every claude invocation runs in an in-process PTY — there is no "claude -p"
+programmatic path.
+
+The APEX v0 commands (pipeline, story, sprint, adr, registry, …) are retired:
+a v0 project keeps the v0 ape its .bingo pins, until `ape framework update`
+to v1 lifts it (`ape project lift`).
 
 Subcommands:
 
 - `aboard` — A shared visual board for a human and one or more agent sessions
-- `adr` — Manage Architecture Decision Records
-- `bootstrap` — Bootstrap governance artifacts from traits
-- `capability` — Inspect and maintain the capability registry
-- `change` — The unit of change: new, check, approve (fixes), start, verify, review, accept, block, archive
+- `change` — The unit of change: new, check, approve (fixes), start, verify, review, accept, block, answer, archive
 - `chat` — Bridged claude REPL with hooks captured to a runlog
 - `config` — Resolve the project's APEX configuration
-- `context` — Inspect the project-context document
 - `costs` — Show this project's Claude cost rollup
 - `decision` — Record architecture decisions (ADR-NNNN) in development/decisions/
-- `deferred` — The deferred-work record store
-- `doc` — Shard, assemble and survey Markdown documents
 - `doctor` — Probe the local environment for prerequisites
 - `event` — Publish a session progress event over NATS
-- `feature` — Inspect and maintain the feature registry
 - `framework` — Install and inspect APEX framework assets in a project
-- `governance` — Answer governance questions about a set of paths
 - `hook` — Claude Code hooks for APEX v1 projects (registered by `ape project init`)
 - `log` — Publish a structured log record over NATS
-- `memory` — Read the team-memory file without loading it whole
 - `metrics` — Scan and publish this session's usage metrics over NATS
 - `milestone` — Add, approve, gate and close roadmap milestones
-- `pattern` — Manage governance patterns
-- `pipeline` — List or run an APEX pipeline
-- `planning` — Show the planning pipeline diagram
+- `next` — Record a finding for later under the roadmap's Next
 - `project` — Create and check an APEX v1 project layout
 - `prompt` — Drive an unattended Claude session from a prompt or a handoff file
-- `registry` — Verify or reconcile every record registry at once
-- `release` — Project the framework's release record
 - `rollback` — Rollback ape to the previous version
 - `run` — Wait for, or inspect, a run started with --detach
 - `sandbox` — Provision and operate hardware-isolated Kata VM workspaces (via aped)
 - `script` — Run a Go orchestration script through the yaegi interpreter
-- `service` — Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply
+- `service` — Run a NATS-micro job daemon that accepts task/prompt/script jobs over request/reply
 - `sessions` — List, prune, or open the URL of live ape sessions
-- `sprint` — Inspect and maintain sprint-status.yaml
 - `status` — Show the current milestone, active changes, blocks, pending human review and spend
-- `story` — Project and verify story frontmatter
 - `task` — Run a single framework skill through the interactive PTY runner
-- `trait` — Manage and inspect traits
 - `transcript` — Work with Claude session transcripts
 - `update` — Update ape to the latest version
 - `version` — Print version information
@@ -1091,501 +1081,9 @@ Global flags:
 | `--cwd` | string | `—` | directory to resolve the project root from (default: the working directory) |
 | `--name` | string | `—` | board name, for a second isolated board in the same project (env ABOARD_NAME) |
 
-## ape adr
-
-Manage Architecture Decision Records
-
-```
-ape adr
-```
-
-Aliases: `adrs`
-
-Subcommands:
-
-- `backfill` — Fill absent required fields of existing adrs index entries from their records
-- `list` — List all ADRs
-- `new` — Scaffold a new ADR file
-- `sync` — Reconcile the adrs index against records on disk
-- `update` — Apply field deltas to existing adrs index entries
-- `verify` — Verify the adrs registry against its index
-
-## ape adr backfill
-
-Fill absent required fields of existing adrs index entries from their records
-
-```
-ape adr backfill [flags]
-```
-
-Complete the index entries that already exist. A field the family's index
-schema requires that is ABSENT from an entry is copied in from that
-entry's record: its frontmatter, or its file name for slug. It is the same
-rule sync uses when it adds an entry.
-
-It does nothing else. No entry is added, removed or repointed, a value
-that is present is never changed (even an empty one), and file: is never
-filled, because an entry with no file is sync's repair. That narrowness is
-the point: this runs unattended as a framework migration on
-`ape framework update`, where a structural index change is not wanted.
-
-A required field the record has no value for stays absent and is reported
-as a gap. An entry whose record is absent or unreadable is also a gap.
-Gaps are not pending work: nothing on disk can close them, so re-running
-finds the same ones.
-
---check writes nothing and answers in its exit code: 0 when there is
-nothing to fill, 1 when fills are pending. Those two are the only answers
-about the index. Anything else means the check itself failed: 2 for an
-unknown family or an index or record that cannot be read, 4 with no
-project config.
-
-Examples:
-
-```
-  ape adr backfill --check
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--check` | bool | `false` | Write nothing; exit 0 when nothing is fillable, 1 when fills are pending (2 or 4 if the check itself failed) |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape adr list
-
-List all ADRs
-
-```
-ape adr list [flags]
-```
-
-Examples:
-
-```
-  ape adr list --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape adr new
-
-Scaffold a new ADR file
-
-```
-ape adr new <title>
-```
-
-## ape adr sync
-
-Reconcile the adrs index against records on disk
-
-```
-ape adr sync [flags]
-```
-
-Reconcile index.yaml against the records on disk: records with no entry
-are added, entries whose id no record claims are removed, and an entry
-whose file: no longer resolves is repointed at the record claiming its id.
-
-This is the repair for the findings `verify` reports, and nothing more —
-it copies what a record's own frontmatter states and invents no titles,
-statuses or any other field. A renamed record keeps its authored entry
-rather than being dropped and re-added.
-
-An added entry carries every field of the family's index schema the record
-has a value for: its frontmatter, or its file name for slug. A required
-field with no value is left out and listed in the change's missing. An
-entry that is already listed is never completed here; that is
-`backfill`.
-
---check makes it a dry run: the same diff, nothing written, and the answer
-in the exit code: 0 when there is nothing to change, 1 when changes are
-pending, 2 when the check itself failed (an unknown family, or an index
-that cannot be read), 4 with no project config. Withheld removals alone
-exit 0: sync cannot make them. generated_at moves only when something
-else did.
-
-Examples:
-
-```
-  ape adr sync --check
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--check` | bool | `false` | Report the diff without writing; exit 0 nothing to change, 1 changes pending (2 or 4 if the check itself failed) |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape adr update
-
-Apply field deltas to existing adrs index entries
-
-```
-ape adr update [flags]
-```
-
-Apply per-entry field deltas to index.yaml and refresh generated_at.
-
---updates takes {"<id>": {"<field>": <value>}} as a file path or '-' for
-stdin. Only entries ALREADY listed may be updated: an unknown id is an
-error raised before anything is written, because creating an index entry
-is the job of the skill that authors the document it points at.
-
-A value is either a SCALAR or a LIST OF SCALARS. A scalar is written as
-text, so a status of "no" stays a string and an id of "0001" keeps its
-zeros instead of becoming a bool or an int. A list is written as a YAML
-sequence — depends_on: [FEAT-1-1, FEAT-1-2] — which is what the
-dependency fields hold. Anything else (a nested object, or a list
-containing one) is refused, naming the entry and field, rather than
-written in a form that cannot be read back.
-
-Re-running an update is how a field is repaired: the value is replaced
-outright, so a dependency list that an older ape stored as the quoted
-string '[FEAT-1-2 FEAT-1-3]' becomes a real sequence again without
-hand-editing index.yaml.
-
-The rendered index is round-trip parsed before it replaces the file, and
-the write is atomic — a crash mid-write cannot truncate an index. Key
-order and comments survive, which a PyYAML round trip does not manage.
-
-Exit codes:
-  0  applied
-  1  unknown id, unreadable updates, or an unwritable index (nothing written)
-
-Examples:
-
-```
-  echo '{"ADR-0001":{"status":"superseded"}}' | ape adr update --updates -
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--generated-at` | string | `—` | Timestamp to write as generated_at (default: resolved config timestamp) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--updates` | string | `-` | JSON file with per-entry field deltas, or '-' for stdin |
-
-## ape adr verify
-
-Verify the adrs registry against its index
-
-```
-ape adr verify [flags]
-```
-
-Exactly five checks, and no others:
-
-  1. registry.orphan_record / registry.phantom_entry
-     set equality between the record directory and index.yaml, both
-     directions
-  2. registry.file_unresolved
-     every index file: resolves, relative to the index's own directory
-  3. registry.duplicate_id
-     duplicate ids, in the index and on disk
-  4. registry.record_unparseable
-     the record parses as frontmatter at all
-  5. registry.entry_incomplete
-     every index entry carries each field its family's index schema
-     requires (file: excepted: its absence is check 2).
-     `ape registry backfill --all` fills the ones its record states
-
-Check 5 is presence only. No type or value validation, no field drift, no
-tag comparison, no updated_at comparison — those are judgment, and a
-verifier that wanders into them stops being trustworthy.
-
-An index.yaml that is absent while records exist is reported once, as
-registry.index_missing: the degenerate case of check 1, not a fifth check.
-One finding beats one orphan per record, which would bury the only fact
-that matters.
-
-Findings travel in the payload. Exit is 0 even with findings unless
---strict is passed, so this is safe to call from anywhere.
-
-Examples:
-
-```
-  ape adr verify --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) |
-
-## ape bootstrap
-
-Bootstrap governance artifacts from traits
-
-```
-ape bootstrap [flags]
-```
-
-Bootstrap a project's governance artifacts by composing traits from the catalog.
-
-Examples:
-
-```
-  ape bootstrap --traits go-service,http-api
-  ape bootstrap --no-picker --traits go-service --dry-run
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--dry-run` | bool | `false` | Print what would be generated without writing files |
-| `--no-picker` | bool | `false` | Disable the interactive trait picker (TUI) |
-| `--on-conflict` | string | `first` | Conflict resolution strategy: first\|last\|all\|error |
-| `--out` | string | `.` | Output directory for generated artifacts |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--traits` | string | `—` | Comma-separated list of trait names |
-
-## ape capability
-
-Inspect and maintain the capability registry
-
-```
-ape capability
-```
-
-Aliases: `capabilities`
-
-Subcommands:
-
-- `backfill` — Fill absent required fields of existing capabilities index entries from their records
-- `list` — List capabilities from the registry index
-- `sync` — Reconcile the capabilities index against records on disk
-- `update` — Apply field deltas to existing capabilities index entries
-- `verify` — Verify the capabilities registry against its index
-
-## ape capability backfill
-
-Fill absent required fields of existing capabilities index entries from their records
-
-```
-ape capability backfill [flags]
-```
-
-Complete the index entries that already exist. A field the family's index
-schema requires that is ABSENT from an entry is copied in from that
-entry's record: its frontmatter, or its file name for slug. It is the same
-rule sync uses when it adds an entry.
-
-It does nothing else. No entry is added, removed or repointed, a value
-that is present is never changed (even an empty one), and file: is never
-filled, because an entry with no file is sync's repair. That narrowness is
-the point: this runs unattended as a framework migration on
-`ape framework update`, where a structural index change is not wanted.
-
-A required field the record has no value for stays absent and is reported
-as a gap. An entry whose record is absent or unreadable is also a gap.
-Gaps are not pending work: nothing on disk can close them, so re-running
-finds the same ones.
-
---check writes nothing and answers in its exit code: 0 when there is
-nothing to fill, 1 when fills are pending. Those two are the only answers
-about the index. Anything else means the check itself failed: 2 for an
-unknown family or an index or record that cannot be read, 4 with no
-project config.
-
-Examples:
-
-```
-  ape capability backfill --check
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--check` | bool | `false` | Write nothing; exit 0 when nothing is fillable, 1 when fills are pending (2 or 4 if the check itself failed) |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape capability list
-
-List capabilities from the registry index
-
-```
-ape capability list [flags]
-```
-
-Examples:
-
-```
-  ape capability list --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape capability sync
-
-Reconcile the capabilities index against records on disk
-
-```
-ape capability sync [flags]
-```
-
-Reconcile index.yaml against the records on disk: records with no entry
-are added, entries whose id no record claims are removed, and an entry
-whose file: no longer resolves is repointed at the record claiming its id.
-
-This is the repair for the findings `verify` reports, and nothing more —
-it copies what a record's own frontmatter states and invents no titles,
-statuses or any other field. A renamed record keeps its authored entry
-rather than being dropped and re-added.
-
-An added entry carries every field of the family's index schema the record
-has a value for: its frontmatter, or its file name for slug. A required
-field with no value is left out and listed in the change's missing. An
-entry that is already listed is never completed here; that is
-`backfill`.
-
---check makes it a dry run: the same diff, nothing written, and the answer
-in the exit code: 0 when there is nothing to change, 1 when changes are
-pending, 2 when the check itself failed (an unknown family, or an index
-that cannot be read), 4 with no project config. Withheld removals alone
-exit 0: sync cannot make them. generated_at moves only when something
-else did.
-
-Examples:
-
-```
-  ape capability sync --check
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--check` | bool | `false` | Report the diff without writing; exit 0 nothing to change, 1 changes pending (2 or 4 if the check itself failed) |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape capability update
-
-Apply field deltas to existing capabilities index entries
-
-```
-ape capability update [flags]
-```
-
-Apply per-entry field deltas to index.yaml and refresh generated_at.
-
---updates takes {"<id>": {"<field>": <value>}} as a file path or '-' for
-stdin. Only entries ALREADY listed may be updated: an unknown id is an
-error raised before anything is written, because creating an index entry
-is the job of the skill that authors the document it points at.
-
-A value is either a SCALAR or a LIST OF SCALARS. A scalar is written as
-text, so a status of "no" stays a string and an id of "0001" keeps its
-zeros instead of becoming a bool or an int. A list is written as a YAML
-sequence — depends_on: [FEAT-1-1, FEAT-1-2] — which is what the
-dependency fields hold. Anything else (a nested object, or a list
-containing one) is refused, naming the entry and field, rather than
-written in a form that cannot be read back.
-
-Re-running an update is how a field is repaired: the value is replaced
-outright, so a dependency list that an older ape stored as the quoted
-string '[FEAT-1-2 FEAT-1-3]' becomes a real sequence again without
-hand-editing index.yaml.
-
-The rendered index is round-trip parsed before it replaces the file, and
-the write is atomic — a crash mid-write cannot truncate an index. Key
-order and comments survive, which a PyYAML round trip does not manage.
-
-Exit codes:
-  0  applied
-  1  unknown id, unreadable updates, or an unwritable index (nothing written)
-
-Examples:
-
-```
-  echo '{"CAP-1":{"status":"superseded"}}' | ape capability update --updates -
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--generated-at` | string | `—` | Timestamp to write as generated_at (default: resolved config timestamp) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--updates` | string | `-` | JSON file with per-entry field deltas, or '-' for stdin |
-
-## ape capability verify
-
-Verify the capabilities registry against its index
-
-```
-ape capability verify [flags]
-```
-
-Exactly five checks, and no others:
-
-  1. registry.orphan_record / registry.phantom_entry
-     set equality between the record directory and index.yaml, both
-     directions
-  2. registry.file_unresolved
-     every index file: resolves, relative to the index's own directory
-  3. registry.duplicate_id
-     duplicate ids, in the index and on disk
-  4. registry.record_unparseable
-     the record parses as frontmatter at all
-  5. registry.entry_incomplete
-     every index entry carries each field its family's index schema
-     requires (file: excepted: its absence is check 2).
-     `ape registry backfill --all` fills the ones its record states
-
-Check 5 is presence only. No type or value validation, no field drift, no
-tag comparison, no updated_at comparison — those are judgment, and a
-verifier that wanders into them stops being trustworthy.
-
-An index.yaml that is absent while records exist is reported once, as
-registry.index_missing: the degenerate case of check 1, not a fifth check.
-One finding beats one orphan per record, which would bury the only fact
-that matters.
-
-Findings travel in the payload. Exit is 0 even with findings unless
---strict is passed, so this is safe to call from anywhere.
-
-Examples:
-
-```
-  ape capability verify --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) |
-
 ## ape change
 
-The unit of change: new, check, approve (fixes), start, verify, review, accept, block, archive
+The unit of change: new, check, approve (fixes), start, verify, review, accept, block, answer, archive
 
 ```
 ape change
@@ -1598,6 +1096,7 @@ A change is development/changes/<id>/change.md (written by the model) plus state
                               ▲   │                        │                         │
                               └───┴── verify red ◀─────────┴──── review block ◀──────┘
   any status but archived ──block──▶ blocked ──start──▶ in-progress
+  blocked ──answer (a person)──▶ answered ──re-plan, start──▶ in-progress
   any status but archived ──abandon──▶ abandoned (moved to the archive, no delta merged)
 
 Done is a command ape ran at a sha: models never set a status. Every status change is
@@ -1629,27 +1128,50 @@ person outside the roadmap (apex-change with a request). It is approved on its o
 `ape change approve <id> --by <who>` (on the base branch), instead of through a milestone,
 and otherwise lives like any change: its branch, baseline, checks, a review in a separate
 session, the delta merged at archive. It counts toward no milestone gate, no milestone's
-regression baseline, and no milestone's spend or budget. An approved fix runs ahead of
-milestone work, at the orchestrator's next change boundary, never in parallel; with no
-milestone run active, `ape task apex-orchestrator --args <id>` runs it alone (urgent:
-`ape run stop` the milestone run, run the fix, restart it). `ape status` lists approved
-fixes first.
+regression baseline, and no milestone's spend or budget. Fixes form a queue: planned and
+approved between runs (or `ape run stop`, plan, approve, restart), never overlapping a
+run (D45). An approved fix runs ahead of milestone work, at the orchestrator's next change
+boundary; with no milestone run active, `ape task apex-orchestrator --args <id>` runs it
+alone. `ape status` lists approved fixes first.
+
+One checkout, one operator (D45): archive and abandon switch to the base branch, so they
+refuse when another worktree has it checked out (exit 1, git.base-checked-out, naming that
+worktree; nothing written) — an environment problem: the orchestrator stops, it does not
+re-plan.
 
 Resume after the base moved (D40): whenever a started change's base branch has moved
 ahead of its base_sha, ape — at `ape change start` on a change that has its branch, at
 verify and at archive — rebases change/<id> onto the base, re-runs the baseline at the new
-base tip, and marks the old verify stale. A conflict blocks the change with the files
-(exit 3, change.rebase-conflict). The model never rebases or merges on a change branch
+base tip, and marks the old verify stale. A conflict is left on change/<id> for
+apex-apply (H8): markers in the tree, HEAD on the branch, the change in-progress (exit 3,
+change.conflicted, the files listed); apex-apply resolves them, `git add`s and commits, verify
+refuses until it has (change.unresolved-conflict), and the review runs again. When
+apex-apply cannot resolve them it blocks the change, and the orchestrator re-plans it
+(D43). The model never rebases, merges or cherry-picks on a change branch
 (`ape hook pre-tool` denies it).
 
+Provenance (H14): start, verify and archive first walk the history since the v1 epoch
+(the newest "apex: project init" or "apex: lift" commit) and refuse (exit 1, code
+change.provenance, action person, findings spec.edited / state.forged) when a commit wrote
+development/specs/** outside an archive squash (a "Change: <id>" trailer of an archived
+change) or a state.json outside an "apex: …" commit or a squash. A person reverts the
+commit (git revert), which clears it.
+
+Notifier (H20): a subcommand that leaves the change blocked (block, verify at its attempts
+limit, a rebase conflict) runs _apex/config.yaml's optional notify: command with
+APE_EVENT=block, APE_CHANGE=<id> and APE_REASON=<the blocked reason>; best effort, it never
+changes the outcome (see ape task --help).
+
 Exit codes for every subcommand: 0 ok · 1 check failed (one-line remediation) · 2 usage ·
-3 conflict (another change claims the same requirement, the delta no longer applies, or
-the change does not rebase onto its moved base; nothing written but the block).
+3 conflict (another change claims the same requirement or the delta no longer applies:
+nothing written; or the change does not rebase onto its moved base: the conflict is left
+on its branch).
 
 Subcommands:
 
 - `abandon` — Move a change to the archive as abandoned, merging no delta; commit
-- `accept` — Accept a human-review task
+- `accept` — Accept a human-review task, in flight or archived
+- `answer` — A person answers a blocked change: status answered, the answer recorded
 - `approve` — Approve a fix (a change with milestone: none), so it can start
 - `archive` — Catch change/<id> up with its base, squash-merge it with the delta and the archive move as one commit
 - `block` — Set blocked, with the reason shown by ape status
@@ -1679,11 +1201,12 @@ base_branch — or from any other non-change branch; the tree must be clean (unc
 files inside the change's own folder are committed on its branch first). The archived
 folder holds the change's files as its branch last had them, the move is committed on the
 base branch, change/<id> is deleted and its last commit recorded as branch_tip in the
-archived state.json. None of the change's code reaches the base branch. A draft never
+archived state.json, kept reachable as refs/apex/abandoned/<id> (tip_ref; H16, local). None of the change's code reaches the base branch. A draft never
 started (no branch) is abandoned on the branch HEAD is on, as before.
 
 Exit codes: 0 abandoned · 1 no such change, archived, HEAD on another change's branch,
-dirty tree, or git failed · 2 usage · 3 the archive folder already exists.
+dirty tree, the base branch checked out in another worktree (git.base-checked-out), or git
+failed · 2 usage · 3 the archive folder already exists.
 
 Examples:
 
@@ -1701,24 +1224,39 @@ Flags:
 
 ## ape change accept
 
-Accept a human-review task
+Accept a human-review task, in flight or archived
 
 ```
-ape change accept <id> --task <T> --by <who> [flags]
+ape change accept <id> --task <T> --by <who> [--evidence <path|url>]... [flags]
 ```
 
-Record that a person accepted a human-review task (one whose check is "human-review").
-Archive requires every human-review task accepted, unless --allow-pending-human.
-HEAD must be on the change's branch, change/<id> (D38; else exit 1, code
-change.wrong-branch): the acceptance is committed there.
+Record that a person accepted a human-review task (one whose check is "human-review"),
+in state.json's accepted: [{task, by, at, evidence}]. Archive requires every human-review
+task accepted, unless a person archives with --allow-pending-human.
 
-Exit codes: 0 recorded · 1 the task has a command check, or HEAD not on change/<id> ·
-2 usage (no such task).
+  - a change in flight: HEAD must be on its branch, change/<id> (D38; else exit 1, code
+    change.wrong-branch): the acceptance is committed there
+  - an archived change (H4): its archived state.json, under
+    development/archive/<date>-<id>/, is updated and committed on the base branch it was
+    archived into — "apex: <id> accepted <T> (archived)", trailer "Change: <id>" — from any
+    branch, without a checkout when HEAD is elsewhere (refused when that branch is checked
+    out in another worktree: git.base-checked-out). `ape status` lists archived changes
+    with unaccepted human-review tasks until then (JSON awaiting_human)
+  - --evidence <path|url>, repeatable: what the acceptance rests on. A URL
+    (scheme://…) is recorded as given; a path — relative to the project root — must be a
+    regular file in the repository, recorded with its SHA-256 (else exit 2,
+    usage.evidence)
+
+Accepting a task again replaces its earlier acceptance.
+
+Exit codes: 0 recorded · 1 the task has a command check, HEAD not on change/<id>, or the
+base branch is checked out elsewhere · 2 usage (no such task, bad evidence).
 
 Examples:
 
 ```
   ape change accept add-tenant-delete --task T2 --by diego
+  ape change accept add-tenant-delete --task T2 --by diego --evidence docs/review/tenant-delete.png --evidence https://ci.example.com/run/812
 ```
 
 Flags:
@@ -1727,8 +1265,51 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--by` | string | `—` | who accepts (required) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--evidence` | stringArray | `[]` | a file in the repository or a URL the acceptance rests on (repeatable) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 | `--task` | string | `—` | task id, e.g. T2 (required) |
+
+## ape change answer
+
+A person answers a blocked change: status answered, the answer recorded
+
+```
+ape change answer <id> --text "<answer>" --by <who> [flags]
+```
+
+Record a person's answer to what blocks a change (H9, D47): status answered, and
+answer: {by, at, text} in its state.json (also in `ape status --json`, changes[].answer).
+Only for a blocked change (else exit 1, change.wrong-status). Committed as
+"apex: <id> answered" (trailer "Change: <id>") where the change's state lives — its branch
+change/<id> when it has one, else the branch the draft was planned on — from any branch:
+without a checkout when HEAD is elsewhere (refused when that branch is checked out in
+another worktree: git.base-checked-out).
+
+The orchestrator then has apex-change re-plan the change with the answer as the hint and
+starts it again: `ape change start` takes an answered change as it takes a blocked one (a
+re-plan is recorded as a re-start). The answer also restarts the counts limits.replans and
+limits.attempts_total judge (`ape change verify --help`).
+
+Only a person answers (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE set,
+a `!` line inside Claude Code included — with exit 2, session.person-only.
+
+Exit codes: 0 answered · 1 not blocked, no such change, or the branch is checked out in
+another worktree · 2 usage (no --text or --by), or a model session.
+
+Examples:
+
+```
+  ape change answer add-tenant-delete --text "soft delete; keep rows 30 days" --by diego
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--by` | string | `—` | who answers (required) |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--text` | string | `—` | the answer (required) |
 
 ## ape change approve
 
@@ -1752,15 +1333,19 @@ in place of an approved milestone (else exit 1, change.not-approved).
   - the approval is of the plan change.md has now: a fix whose plan (change.md outside
     ## Why and ## Notes) changed since is refused at start until approved again
   - re-approving the same plan is a no-op (exit 0, JSON "already": true, nothing written)
+  - only a person approves (D47 Q6): refused in a model session — APE_SESSION or
+    CLAUDECODE set, a `!` line inside Claude Code included — with exit 2, code
+    session.person-only; run it from a plain terminal
 
-An approved fix may be created at any moment. It runs ahead of milestone work, at the
-orchestrator's next change boundary, never in parallel with it; with no milestone run
-active, `ape task apex-orchestrator --args <id>` runs it alone. `ape status` lists approved
+Fixes form a queue: planned and approved between runs (or `ape run stop`, plan, approve,
+restart), never overlapping a run (D45). An approved fix runs ahead of milestone work, at
+the orchestrator's next change boundary; with no milestone run active,
+`ape task apex-orchestrator --args <id>` runs it alone. `ape status` lists approved
 fixes first (JSON "fixes", changes[].lane "fix", changes[].approved) and points next at the
 first. A fix counts toward no milestone gate and no milestone's spend or budget.
 
 Exit codes: 0 approved (or already) · 1 not a fix, check red, started, or HEAD on a change
-branch · 2 usage (no --by).
+branch · 2 usage (no --by), or a model session.
 
 Examples:
 
@@ -1787,17 +1372,23 @@ ape change archive <id> [flags]
 Archive a reviewed change onto its base branch (trial decision D38):
 
   1. needs status reviewed (review pass) and the plan frozen at start unchanged; human-
-     review tasks must be accepted, unless --allow-pending-human (recorded)
+     review tasks must be accepted, unless --allow-pending-human (recorded) — a person's
+     flag only (D45): refused in a model session (APE_SESSION or CLAUDECODE set) with exit
+     2, session.person-only; the orchestrator leaves such a change reviewed and moves on.
+     An archived change's unaccepted tasks stay in `ape status` and stay acceptable
+     (`ape change accept --help`)
   2. runs with HEAD on change/<id>, or on another non-change branch (it switches to
      change/<id>); the tree must be clean — uncommitted files inside the change's own
      folder (review.md a review left) are first committed on change/<id> as
      "apex: <id> notes"; anything else refuses (code tree.dirty)
-  3. refused if code changed on change/<id> since the review (review.stale)
+  3. refused if code changed on change/<id> since the review (review.stale); refused up
+     front while the base branch is behind its upstream (base.behind-upstream: pull;
+     the local remote-tracking ref, never fetched — D45)
   4. when the base branch moved ahead of base_sha, catches the change up — the one path
      start and verify share (D40, `ape change start --help`): rebases change/<id> onto the
-     base (on a conflict the rebase is aborted, the change is blocked naming the
-     conflicting files, committed on its branch, and archive exits 3,
-     change.rebase-conflict — nothing reaches the base), re-runs the baseline at the new
+     base (on a conflict nothing reaches the base: the conflict is left on change/<id>
+     for apex-apply, the change back to in-progress, and archive exits 3,
+     change.conflicted), re-runs the baseline at the new
      base tip and marks the verify stale; here the change stays reviewed
   5. re-runs verify when the code moved since it or it is stale — the base had moved (red
      → the change goes back to in-progress on its branch, exit 1, counted as an attempt;
@@ -1810,16 +1401,42 @@ Archive a reviewed change onto its base branch (trial decision D38):
      reaches the base branch
   7. switches to the base branch, `git merge --squash change/<id>`, writes the specs,
      moves the folder to development/archive/<YYYY-MM-DD>-<id>/ (status archived,
-     branch_tip = change/<id>'s last commit) and commits everything as ONE commit —
-     subject the change's # title, trailer "Change: <id>" (hooks skipped: every code
-     commit on the branch already ran them); then deletes change/<id>. If anything fails
+     branch_tip = change/<id>'s last commit) — with "evidence: archive" in
+     _apex/config.yaml (H23; default off) also its evidence/: one file per check of the
+     final verify (command, exit, duration, output sha256, and the output from the log,
+     capped at 256 KB: head and tail kept, the full log named by path and sha256) — and
+     commits everything as ONE commit (H15):
+     subject from _apex/config.yaml commit.subject — placeholders {type} (change.md's
+     type:), {title} (its # title) and {id}; default "{title}" — and a body holding the
+     branch commits' own subjects (not ape's "apex:" ones) and every trailer of theirs but
+     "Change:", deduplicated, then "Change: <id>". The project's git hooks run on this
+     commit (commit.hooks: run, the default; skip opts out) — ape's status commits keep
+     skipping them. A hook that refuses rolls archive back: exit 1, archive.hook-failed,
+     the hook output's tail in the message. Then keeps change/<id>'s tip as
+     refs/apex/archive/<id> (H16: recorded as tip_ref in the archived state.json, so
+     branch_tip and the verify and review shas survive git gc; local, never pushed by
+     ape) and deletes change/<id>. If anything fails
      on the base branch, it is reset to where it was and change/<id> checked out again.
 
 The base branch gets exactly one commit per archived change; ape's status commits stay on
 the change branch, squashed away.
 
-Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review,
-pending human-review, dirty tree, no change branch, or git failed · 2 usage · 3 the
+A crash mid-archive (H28): archive keeps a journal, _apex/state/archive-journal.json
+(ignored; base, its sha before, the branch and its tip, the step), from before the
+catch-up until it returns. A journal that outlives its process is rolled back by the next
+v1 command that writes (start, verify, review, accept, block, archive, abandon, change /
+milestone / decision new, approve, gate, close, decision accept): the base branch back at
+its pre-archive sha (a squash commit undone, a half squash dropped — cleaning only the
+paths archive writes), change/<id> at its recorded tip and checked out. That command then
+exits 1, archive.interrupted (retry), saying what was rolled back; archive again.
+`ape status` reports the journal (JSON "archive_journal") and changes nothing.
+
+Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review, a
+git hook refused the squash,
+pending human-review, dirty tree, no change branch, the base behind its upstream
+(base.behind-upstream), the base branch checked out in another
+worktree (git.base-checked-out: stop, do not re-plan), or git failed · 2 usage, or
+--allow-pending-human from a model session · 3 the
 rebase conflicts or the delta no longer applies.
 
 Examples:
@@ -1832,10 +1449,10 @@ Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--allow-pending-human` | bool | `false` | archive with human-review tasks unaccepted (recorded in state.json) |
+| `--allow-pending-human` | bool | `false` | archive with human-review tasks unaccepted (recorded in state.json; a person only) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--timeout` | duration | `15m0s` | limit for each check command (exit 124 when exceeded) |
+| `--timeout` | duration | `0s` | limit for each command run, overriding _apex/config.yaml timeouts: (default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; timeouts.gate, else 30m, for a gate command); exit 124 when exceeded |
 
 ## ape change block
 
@@ -1880,9 +1497,15 @@ Validate one change and list every failure:
 
   - frontmatter id = folder, milestone in roadmap.md (or "none": a fix, D40, approved
     with `ape change approve`), touches non-empty kebab slugs, decisions exist in
-    decisions/, paths are valid globs
+    decisions/, paths are valid globs; type: (the archive commit's {type}, D47) one of
+    feat, fix, perf, refactor, docs, test, build, ci, chore — required only when
+    _apex/config.yaml commit.subject uses {type} (change.no-type; change.bad-type); any
+    other key must start with x-
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
   - change.md ≤ 8 KB and design.md ≤ 8 KB ("split this change")
+  - every spec the delta touches stays ≤ 20 KB once merged — the in-memory merge
+    `ape change diff` shows and archive makes (else change.spec-too-big: split the
+    capability first; start runs this check too, so it fails before any work, H18)
   - ## Delta: "### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>" blocks, or
     the single line "none — <reason>". The capability must be in touches. ADDED names must
     not exist in specs/<capability>/spec.md yet; MODIFIED/REMOVED must name an existing
@@ -1896,7 +1519,10 @@ Validate one change and list every failure:
     "Reason:" in a REMOVED block
   - a delta that REMOVES every requirement of a capability needs "retire: [<cap>]" in
     the frontmatter (archive then deletes its spec); retire: lists only such capabilities
-  - ## Tasks: "- T<n> <what> — check: <command> | human-review", no checkboxes, unique ids
+  - ## Tasks: "- T<n> <what> — check: <command> | human-review", or "- T<n> <what> —
+    regression: <command>" for a check that may already pass before the change (it runs
+    like any check task; `ape change start` lets it be green at baseline); no checkboxes,
+    unique ids
 
 Exit codes: 0 green · 1 findings · 2 usage.
 
@@ -1973,8 +1599,19 @@ is a warning, not a failure.
 
 Then fill change.md and run `ape change check <id>`.
 
-Exit codes: 0 ok · 1 id taken (incl. archive), milestone not in roadmap, or HEAD on a
-change branch · 2 usage.
+Consecutive blocks (H19, D49): every block of a milestone's change (`ape change block`, a
+limit reached at verify or start, a rebase conflict) counts toward its milestone in
+_apex/state/milestones.json (consecutive_blocks), committed on the base branch from
+whichever branch as "apex: <M> consecutive blocks <n> (<id>)"; an archived change of the
+milestone sets it back to 0, inside the archive's commit. At limits.consecutive_blocks
+(default 2), change new and change start of the milestone's changes and
+`ape task apex-orchestrator` for it refuse with exit 1, code milestone.blocks-exceeded,
+action stop, and `ape status --json` reports it under milestone.diagnostics. A person deals
+with the blocked changes (answer or abandon them) and resets the count by approving the
+milestone again: `ape milestone approve <M> --by <who>`. Fixes count toward no milestone.
+
+Exit codes: 0 ok · 1 id taken (incl. archive), milestone not in roadmap, the milestone past
+limits.consecutive_blocks, or HEAD on a change branch · 2 usage.
 
 Examples:
 
@@ -2069,9 +1706,11 @@ Check green + approved → create and check out change/<id>, record the baseline
 ape change start <id> [flags]
 ```
 
-Start a draft (or resume a blocked) change:
+Start a draft (or resume a blocked or answered) change:
 
-  1. `ape change check <id>` must be green, and its milestone approved — or, for a fix
+  1. `ape change check <id>` must be green, and its milestone approved — through ape: the
+     approval record in milestones.json, not the Status line alone (H2; else exit 1,
+     milestone.status-unrecorded: a person runs `ape milestone approve <M> --by <who>`) — or, for a fix
      (milestone: none, D40), the fix approved for the plan it has
      (`ape change approve <id> --by <who>`; else exit 1, change.not-approved)
   2. refused with exit 3 if another active change (in-progress, verified, reviewed —
@@ -2081,13 +1720,23 @@ Start a draft (or resume a blocked) change:
      tree must be clean (ignored files aside), HEAD on a branch (not detached, not another
      change's change/<other>); records that branch as base_branch, and base_sha (HEAD)
      and started_at (both kept when resuming a blocked change). A refused start leaves no
-     branch and HEAD where it was.
+     branch and HEAD where it was. Refused while that branch is behind its upstream
+     (exit 1, base.behind-upstream: pull; compared with the local remote-tracking ref,
+     never fetched; no upstream, no check — D45: one operator per checkout, local trunk)
   4. runs every check verify will run once, as the baseline (which were already green):
-     the command tasks and the effective spec's scenario checks; from the project root
-     with sh -c; output under _apex/state/logs/<id>/. With "regression: <cmd>" in
-     _apex/config.yaml (the project's own test suite) it runs that too, the same way, and
-     records it in state.json (regression_baseline: cmd, exit, output sha256, sha); a red
-     regression baseline is recorded, it does not block start
+     the command tasks and the effective spec's scenario checks of the capabilities the
+     change touches (plus any scenario sharing a task's command — see ape change verify
+     --help); from the project root with sh -c; output under _apex/state/logs/<id>/. With
+     "regression: <cmd>" in _apex/config.yaml (the project's own test suite; with tiers,
+     "regression: {change: <cmd>, milestone: <cmd>}", its change tier) it runs that too,
+     the same way, and records it in state.json (regression_baseline: cmd, exit, output
+     sha256, sha); a red regression baseline is recorded, it does not block start.
+     Vacuous checks (backlog 43): when the change has an ADDED or MODIFIED delta, a task
+     check that already passes here, before any of the change's code, proves nothing
+     about it — start refuses (exit 1, change.vacuous-check, nothing written, no branch
+     left): rewrite the check to fail until the change is done, or write a check meant to
+     stay green as "- T<n> <what> — regression: <command>". Not judged for Delta: none,
+     a REMOVED-only delta, or a task a re-plan adds after the change has code
   5. sets in-progress, freezes the plan (SHA-256 of change.md outside ## Why and ## Notes), fingerprints
      the spec block of every requirement it MODIFIES or REMOVES, commits state.json
      ("apex: <id> in-progress") on change/<id>, and resets the attempts count since start
@@ -2102,12 +1751,24 @@ A blocked change is re-planned on its branch (change.md there), then started aga
 Resume after the base moved (D40): start on a change that has its branch first checks
 whether the base branch moved ahead of base_sha (a fix or another change landed there).
 If so ape catches the change up — the one path start, verify and archive share:
+  - start only: refused while the base branch is behind its upstream (exit 1,
+    base.behind-upstream: pull)
   - the tree must be clean (uncommitted files in the change's own folder are committed on
     its branch; anything else: exit 1, tree.dirty)
-  - `git rebase <base_branch>` on change/<id>; a conflict aborts the rebase and blocks the
-    change naming the files (committed on its branch): exit 3, change.rebase-conflict,
-    nothing else written — the orchestrator re-plans (D43): it abandons the change and
-    apex-change plans a replacement from the current base, the conflicting files as hint
+  - `git rebase <base_branch>` on change/<id>. A conflict (H8, D47 Q3) aborts the rebase;
+    ape takes the baseline below at the base tip, keeps the old tip as
+    refs/apex/pre-rebase/<id>/<n>, recreates change/<id> at the base tip with the change's
+    folder as the old tip had it and the state recorded (status in-progress, the verify
+    stale, rebases[] with old_tip_ref and conflicts), committed as "apex: <id> conflicted
+    rebasing onto <base>"; then it cherry-picks the branch's net diff (merge-base..old
+    tip) --no-commit, which leaves conflict markers and unmerged paths in the tree with
+    HEAD on change/<id>: exit 3, change.conflicted, the files listed. apex-apply resolves
+    them (edit, `git add`, commit with trailer "Change: <id>"); verify refuses until no
+    unmerged path or marker remains (exit 1, change.unresolved-conflict); verify and the
+    review then run again. When apex-apply cannot resolve them it blocks the change, and
+    the orchestrator re-plans it (D43). A net diff that applies cleanly after all is
+    committed as "apex: <id> re-applied onto <base> as one commit", and the catch-up ends
+    as a clean one
   - the baseline (task checks, effective-spec scenarios, regression command) is re-run
     at the NEW BASE TIP, in place — the checkout detached there, then switched back, so
     ignored files (dependencies, build caches) are present as usual — never at the
@@ -2129,8 +1790,15 @@ changed, when a spec block the change modifies or removes was changed by another
 since start, or when the regression command has no baseline for it (configured or changed
 since start); otherwise it is refused.
 
-Exit codes: 0 started (or resumed) · 1 check red, milestone (or fix) not approved, wrong
-status, dirty tree, detached HEAD, HEAD on another change's branch, or git failed · 2 usage ·
+Loop limits (H19): a re-plan past limits.replans (default 3) since a person last answered
+the change blocks it instead (reason "replans exceeded: …", exit 1, code
+change.replans-exceeded, action person; the refused re-plan is not recorded). A change of a
+milestone whose changes were blocked limits.consecutive_blocks (default 2) times in a row is
+not started (exit 1, code milestone.blocks-exceeded, action stop; see `ape change new --help`).
+
+Exit codes: 0 started (or resumed) · 1 check red, milestone (or fix) not approved, a vacuous
+task check, wrong status, dirty tree, detached HEAD, HEAD on another change's branch, the base
+behind its upstream, or git failed · 2 usage ·
 3 requirement conflict with another active change, or the change does not rebase onto
 its moved base.
 
@@ -2146,7 +1814,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--timeout` | duration | `15m0s` | limit for each check command (exit 124 when exceeded) |
+| `--timeout` | duration | `0s` | limit for each command run, overriding _apex/config.yaml timeouts: (default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; timeouts.gate, else 30m, for a gate command); exit 124 when exceeded |
 
 ## ape change verify
 
@@ -2156,17 +1824,30 @@ Run the task checks and the effective spec at HEAD; verified iff all exit 0
 ape change verify <id> [flags]
 ```
 
-Run, at HEAD, every task's command check and every scenario check of the effective
+Run, at HEAD, every task's command check and the scenario checks of the effective
 spec — the spec as it will be once this change is archived: each current requirement the
 change does not MODIFY or REMOVE (regression), plus the scenarios of its own ADDED and
-MODIFIED blocks. human-review checks are not run. A command shared by several checks runs
-once. Results (sha, exit, seconds, output sha256; kind, capability, requirement, scenario
+MODIFIED blocks — of the capabilities the change touches (frontmatter touches:), plus any
+other scenario whose check command is identical to a task's (H10). The rest of the spec
+is the milestone gate's to run (`ape milestone gate` runs all of it). human-review checks
+are not run. A command shared by several checks runs once. Each check runs under
+_apex/config.yaml timeouts.check (default 15m), the regression command under
+timeouts.regression (default 30m); --timeout overrides both.
+Ran nothing is not green (H11): a check that exits 0 but whose output says it ran
+nothing (_apex/config.yaml checks.vacuous_output; default "no tests to run", "running 0
+tests", "Ran 0 tests", "0 passing", "collected 0 items") is red with reason "vacuous"
+(exit -2); a check whose requirement (requires: {NAME: env|cmd}) is missing — it mentions
+$NAME and NAME is unset, or runs NAME and NAME is not on PATH — is not run and is red with
+reason "unrun" (exit -3). JSON results carry "reason" and "detail" for both.
+Flaky checks (H12): with "retries: <n>" in _apex/config.yaml a red check runs again up
+to n times; a pass on a retry is green, recorded "flaky": true with "tries" (the failed
+runs' output beside its log as <name>.try<k>.log), and listed by `ape status`. Results (sha, exit, seconds, output sha256; kind, capability, requirement, scenario
 for scenario checks) are recorded in state.json; output under _apex/state/logs/<id>/.
 What a check leaves in the tree outside development/ — files it created, tracked files it
 changed — is undone after it and reported (JSON "stray_files"); files that were there
 before it ran are never touched.
-With "regression: <cmd>" in _apex/config.yaml, the regression command runs too (recorded
-in the results with kind "regression") and is judged against the change's regression
+With "regression: <cmd>" in _apex/config.yaml (with tiers, its change tier), the
+regression command runs too (recorded in the results with kind "regression") and is judged against the change's regression
 baseline (JSON "regression": {cmd, exit, baseline_exit, pre_existing_red, failed}): it
 fails verify only when it is newly red — green at baseline, red now — or when the change
 has no baseline for this command (re-start records one). Red at baseline and still red
@@ -2175,11 +1856,13 @@ The working tree must hold no uncommitted changes outside development/ — commi
 (trailer "Change: <id>"): a verify belongs to a sha. HEAD must be on the change's branch,
 change/<id> (D38; else exit 1, code change.wrong-branch).
 When the base branch moved ahead of base_sha, verify first catches the change up exactly
-as `ape change start --help` describes (D40): rebase onto the base (conflict: blocked,
-exit 3, change.rebase-conflict), the baseline re-run at the new base tip, the old verify
+as `ape change start --help` describes (D40): rebase onto the base (a conflict is left on
+the branch: exit 3, change.conflicted), the baseline re-run at the new base tip, the old verify
 marked stale, a verified/reviewed change back to in-progress, "apex: <id> rebased onto
 <base>" committed; then it verifies the rebased code (JSON "catch_up"). A reviewed change
-caught up here needs a new review.
+caught up here needs a new review. Refused while a conflicted catch-up is unresolved —
+unmerged paths, or conflict markers in a file the rebase conflicted in (exit 1,
+change.unresolved-conflict: resolve, `git add`, commit).
 
 All checks exit 0 → status verified (a reviewed change whose code has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last
@@ -2197,13 +1880,21 @@ in-progress" on change/<id>. The red verify that brings attempts to the cap
 blocked_reason "attempts exceeded: <n> red verifies — <failing checks>", committed as
 "apex: <id> blocked", exit 1 with code change.attempts-exceeded. Re-plan, then
 `ape change start <id>` resumes it with a fresh count.
+Re-planning does not reset limits.attempts_total (default 15, H19): the red verify that
+brings the change's red verifies across all its starts — since a person last answered it
+(`ape change answer`) — to it blocks the change (reason "attempts_total exceeded: …"),
+exit 1 with code change.attempts-total-exceeded, action person: re-planning did not converge; a person answers, abandons it, or raises the
+limit.
+Every block of a milestone's change — here, by `ape change block`, by start's replans cap,
+or by a rebase conflict — also counts toward the milestone's consecutive blocks, committed
+on the base branch as "apex: <M> consecutive blocks <n> (<id>)" (see `ape change new --help`).
 Refused while change.md differs from the plan frozen at start outside ## Why and ## Notes
 (re-start first). human-review tasks are never run; those not yet accepted are listed
 as pending.
 
 Exit codes: 0 all command checks green · 1 a check is red (the attempts cap reached
-included), uncommitted code, or wrong status · 2 usage · 3 the change does not rebase onto
-its moved base (blocked).
+included), uncommitted code, an unresolved conflict, or wrong status · 2 usage · 3 the change
+does not rebase onto its moved base (the conflict is left on its branch).
 
 Examples:
 
@@ -2217,7 +1908,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--timeout` | duration | `15m0s` | limit for each check command (exit 124 when exceeded) |
+| `--timeout` | duration | `0s` | limit for each command run, overriding _apex/config.yaml timeouts: (default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; timeouts.gate, else 30m, for a gate command); exit 124 when exceeded |
 
 ## ape chat
 
@@ -2295,8 +1986,8 @@ alias target gets the fallback.
 
 --model resolves one model the way a spawn would.
 
-In an APEX v1 project the table applies to ape pipeline only: ape task
-passes claude --effort from --effort, models.<skill>.effort, the parent
+In an APEX v1 project the table does not apply: ape task passes
+claude --effort from --effort, models.<skill>.effort, the parent
 session's effort or _apex/config.yaml effort:, else nothing (see ape task
 --help). The report's v1 section shows the config's part of that.
 
@@ -2401,90 +2092,6 @@ Flags:
 | `--cwd` | string | `—` | Project root to resolve from (default: current working dir) |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
-## ape context
-
-Inspect the project-context document
-
-```
-ape context
-```
-
-project-context.md is the standards document every skill loads whole —
-architecture, ADR and pattern passes, both story batches, the reviewers.
-It grows by append, and it meets the same two Read limits team-memory.md
-does: past ~25,000 tokens (about 72 KB of markdown) a Read returns only
-part of it, and at Claude Code's 256 KiB byte cap a Read fails outright.
-The same two budgets apply. For a file skills load whole, the soft
-budget (~14k tokens) is the one that keeps it inside a single Read.
-
-  check  size against the soft budget and hard ceiling, from a stat alone
-
-Subcommands:
-
-- `check` — Report project-context size against the soft budget and hard ceiling
-
-## ape context check
-
-Report project-context size against the soft budget and hard ceiling
-
-```
-ape context check [flags]
-```
-
-Classify {development_folder}/project-context.md against two budgets,
-from an os.Stat alone — the file is never read, which is what lets the
-generator take the measurement BEFORE the full read it would otherwise
-die on.
-
-  state: absent      no project-context.md yet (the governance pipeline
-                     writes it; before that, not a problem)
-  state: ok          under the soft budget
-  state: over-soft   compaction is due; past ~72 KB a whole-file Read is
-                     already partial
-  state: over-hard   compaction is overdue: far past what one Read shows
-                     and nearing Claude Code's 256 KiB byte cap, where a
-                     Read fails outright
-
-The budgets are the pair 'ape memory check' already enforces on
-team-memory.md, from one set of constants rather than two restatements of
-the numbers: soft 40960 B, hard 204800 B.
-
-Only the canonical path is measured. Reader skills carry a
-'**/project-context.md' fallback for a lifted project that put the file
-somewhere else; a size gate has to name the file it measured, so an
-'absent' verdict here prints the path it looked at rather than searching
-for another candidate.
-
-EXIT 0 BY DEFAULT, whatever the state — the same contract 'ape memory
-check' keeps, and for the same reason: the framework's prose convention
-is "on non-zero exit: HALT", so a failing exit would abort the generator
-at exactly the moment compaction is due.
-
---fail-at opts into a non-zero exit for CI, which wants one:
-  never  (default) always exit 0
-  soft   exit 1 at over-soft or worse
-  hard   exit 1 at over-hard
-
-The token count in the output is bytes/2.9 (the ratio measured on APEX
-markdown), an estimate, and nothing gates on it.
-
-Examples:
-
-```
-  ape context check
-  ape context check --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--fail-at` | string | `never` | Exit 1 at this state or worse: never\|soft\|hard |
-| `--hard` | int64 | `0` | Hard ceiling in bytes (default 204800) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--soft` | int64 | `0` | Soft budget in bytes (default 40960) |
-
 ## ape costs
 
 Show this project's Claude cost rollup
@@ -2494,10 +2101,11 @@ ape costs [flags]
 ```
 
 Reads <project>/_output/ape/cost-rollup.json and prints
-totals — today, this week, all-time — broken down per pipeline + chat.
+totals — today, this week, all-time — broken down per task, chat and (from
+an older ape) pipeline.
 
   ape costs                          Project rollup (human / json).
-  ape costs run <run-id>             Single pipeline run (reads manifest.yaml).
+  ape costs run <run-id>             Single task run (reads manifest.yaml).
   ape costs chat <chat-id>           Single chat session (reads session.yaml).
   ape costs prompt <prompt-id>       Single prompt session (reads prompt.yaml).
   ape costs update --from <file>     Refresh the price table from a YAML file.
@@ -2729,8 +2337,14 @@ ape decision accept <ADR-NNNN> --by <who> [flags]
 Set a proposed ADR's Status to accepted and record the text it was accepted with in
 _apex/state/decisions.json; both are committed as "apex: ADR-NNNN accepted". From
 then on `ape project check` fails if the ADR's text (everything but its Status line)
-changes: supersede it instead. An ADR accepted by hand is held to the text git first
-committed it accepted with.
+changes: supersede it instead.
+
+An ADR whose Status says accepted with no record in decisions.json — accepted by hand, or
+before ape recorded acceptances — is reported by `ape project check`
+(decision.accepted-unrecorded) and held to the text git first committed it accepted with.
+Accept records it as it is ("apex: ADR-NNNN accepted (recorded)"), unless its text changed
+since that commit (decision.accepted-edited: restore it first). The lift migration's
+records (by "lift") count as records.
 
 A person's acceptance is recorded on the base branch (D11, D38): refused on a change's
 branch, change/<id> (code branch.change-branch; `git switch <base>` first).
@@ -2797,647 +2411,6 @@ Flags:
 | `--supersedes` | string | `—` | ADR-NNNN this decision replaces |
 | `--title` | string | `—` | ADR title (default: from the slug) |
 
-## ape deferred
-
-The deferred-work record store
-
-```
-ape deferred
-```
-
-One file per deferred record under {development_folder}/deferred/, with
-YAML frontmatter and a verbatim Markdown body.
-
-This replaces a single 456,144-byte deferred-work.md whose only eviction
-mechanism was deletion — git shows 524 records removed in one commit — and
-which had grown too large for the skills that append to it to read.
-
-One file per record is not a style choice: the single-store alternative
-returns ZERO records when handed one malformed entry, while this shape
-loses exactly the one bad file.
-
-The store sits OUTSIDE {implementation_folder} deliberately. Ten skills
-glob {implementation_folder}/**/*.md across 17 sites, and one record file
-per deferred item under that folder would feed every one of them.
-
-Subcommands:
-
-- `close` — Discharge a record, moving it to closed/
-- `discard` — Retire a record as never-needed, moving it to closed/
-- `ingest` — Store defer bullets as records (bullets on stdin)
-- `list` — List deferred records (open by default)
-- `migrate` — Convert the legacy deferred-work.md into record files
-- `recover` — Recover ledger records deleted before the migration, into closed/
-- `repair` — Complete or retire free-form records (judgment, on opus)
-- `verify` — Check the store: invariants, and candidates for a human
-
-## ape deferred close
-
-Discharge a record, moving it to closed/
-
-```
-ape deferred close <id> [flags]
-```
-
-Mark a record closed and move it to closed/. The record is NEVER deleted:
-deletion is what destroyed the audit trail the first time, and an LLM that
-cannot see a closed defer re-files it.
-
-The body gains a discharge marker in the shape apex-pattern-reconciliation
-established, and keeps everything it already said.
-
-Closing is judgment — it requires re-verifying the record's premises
-against HEAD — so this is invoked by a person or a skill, never
-automatically. 'ape deferred verify' flags CANDIDATES and never closes one.
-
-Examples:
-
-```
-  ape deferred close DW-20260822-a1b2c3 --by "54-2"
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--by` | string | `—` | Story key or reason that discharged it (required) |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape deferred discard
-
-Retire a record as never-needed, moving it to closed/
-
-```
-ape deferred discard <id> [flags]
-```
-
-Mark a record discarded and move it to closed/. The record is NEVER
-deleted, exactly as with 'close'.
-
-DISCARD IS NOT CLOSE. They record incompatible claims:
-
-  close    the work was done       -> resolved_by, resolved_at
-  discard  the work was not needed -> discard_reason, discard_evidence
-
-Using 'close' for a discard asserts that work happened, and it also
-APPENDS A DISCHARGE MARKER TO THE BODY — which breaks the byte-identity
-the migration's whole verification design exists to protect. This command
-leaves the body untouched.
-
-Nothing here re-derives the judgment. Deciding a deferred item is moot
-requires re-verifying its premises against HEAD, so --reason is required
-and --evidence carries what was checked. 'ape deferred verify' flags
-CANDIDATES and never discards one.
-
-The result is visible as 'ape deferred list --status discarded', and under
-'--status closed' too, since both statuses have left the working set.
-
-Examples:
-
-```
-  ape deferred discard DW-20260822-a1b2c3 \
-    --reason "superseded by the 91-2 rewrite" \
-    --evidence "pkg/a.go:12 no longer exists at HEAD"
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--evidence` | string | `—` | What was checked to establish that |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--reason` | string | `—` | Why the work is not needed (required) |
-
-## ape deferred ingest
-
-Store defer bullets as records (bullets on stdin)
-
-```
-ape deferred ingest [flags]
-```
-
-Read defer bullets and write one record per bullet.
-
-Input comes from --body-file or stdin, NEVER from an argv string: 108 of
-109 real bodies contain backticks, which shell-expand inside an argument.
---body-file is the form the framework calls, because
-apex-review-story/steps/step-04-present.md:13 restricts shell constructs
-inside code blocks and a plain path argument sidesteps the question
-entirely. The skill writes the bullets with the Write tool (never a
-heredoc) and passes the path.
-
-EXIT-CODE CONTRACT — this command is reachable from apex-review-story's
-emit path, where a non-zero exit converts a defer into a patch, raises
-unfixed_patches, and DEMOTES THE STORY to in-progress. Therefore:
-
-  - a bullet whose shape is unrecognised is stored verbatim as free-form,
-    with a warning on stderr;
-  - empty input is a rc-0 no-op;
-  - only a genuine setup failure (an unwritable store) fails.
-
-Nothing about the CONTENT of a defer can make this command exit non-zero.
-
-Examples:
-
-```
-  ape deferred ingest --story 54-1 --skill apex-review-story --body-file /tmp/defer-54-1.txt
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--body-file` | string | `—` | File holding the bullets (default: stdin) |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--cycle` | int | `0` | Review cycle number |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--skill` | string | `—` | Skill that filed it (e.g. apex-review-story) |
-| `--story` | string | `—` | Story key this defer was filed from |
-
-## ape deferred list
-
-List deferred records (open by default)
-
-```
-ape deferred list [flags]
-```
-
-Project the record set. Open records only unless --status says otherwise:
-closed records stay on disk but leave the working set, which is what stops
-an LLM re-filing work it already did.
-
-Three statuses exist, not two. A record is open, closed (the work was done)
-or discarded (the work was never needed) — and those last two are different
-claims, so they are not interchangeable. --status closed matches BOTH, since
-both have left the working set; --status discarded narrows to just the
-discards.
-
---detail picks how much the human rendering shows; --output-format picks
-the encoding. They are separate axes.
-
---id <id> reads ONE record by id, open or closed, ignoring every filter.
-It is the by-id read the store has had internally and no command
-exposed, and it is what a caller naming a record — ape change --fixes
-<id> — needs to check that the id it was handed is real. An unknown id
-exits 2 rather than printing an empty list, because "no such record"
-and "no records match" are different answers.
-
-Examples:
-
-```
-  ape deferred list --owner platform
-  ape deferred list --status all --output-format json
-  ape deferred list --id DW-20260919-a1b2c3 --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--detail` | string | `brief` | Human rendering detail: brief\|full |
-| `--group` | string | `—` | Only records in this group |
-| `--id` | string | `—` | Read one record by id, open or closed, ignoring every other filter |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--owner` | string | `—` | Only records with this owner |
-| `--path` | string | `—` | Only records anchored under this path prefix |
-| `--status` | string | `open` | Which records: open\|closed\|discarded\|all (closed includes discarded) |
-| `--story` | string | `—` | Only records filed from this story |
-
-## ape deferred migrate
-
-Convert the legacy deferred-work.md into record files
-
-```
-ape deferred migrate [flags]
-```
-
-Convert a single-file deferred-work.md into one file per record.
-
-Four properties, all asserted rather than assumed:
-
-  VERIFIED BEFORE WRITE   every significant line of the ledger must come
-                          back out in something this writes — a record
-                          body, a record's source_heading, or the preamble
-                          file — N records parsed must equal N files
-                          written, and every body must survive a round
-                          trip, or NOTHING is written. The first of those
-                          three is checked against the LEDGER, not just
-                          against the parser's own output: a conversion
-                          that silently lost text while reporting success
-                          is the one failure here that git cannot undo.
-                          Line endings are the single normalisation — a
-                          CRLF ledger yields LF bodies.
-  IDEMPOTENT              detected from disk state — does the store hold
-                          records, is the legacy file already a stub. No
-                          version marker is stored, so nothing can drift.
-  NEVER DELETES THE SOURCE  the legacy file becomes a short signpost; its
-                          content stays in git, and its preamble is kept
-                          verbatim beside the records.
-  NO COMMIT               the files land in the working tree. You commit
-                          them, as one commit or two, however you like.
-
-Each record carries the ledger heading it sat under verbatim, in
-source_heading, alongside the source/source_story/created extracted from
-it. A heading holds more than three fields can take, and that remainder is
-often attribution.
-
-A record whose tail does not match the expected shape keeps its full text
-as the body and takes its title from the first line, with NO fields parsed
-from it — 'free_form: true' means nothing in it was interpreted. Any real
-ledger has records that land there. What fraction is not quoted here on
-purpose: it is a property of your corpus, and a number measured against
-someone else's would only invite you to trust it. 'ape deferred verify'
-flags them and 'ape deferred repair' completes or retires them.
-
-The migration MOVES cited text out of the folder it was living in. A
-repo-wide gate scoped to that folder — anchor counts, citation ratchets —
-will drop the moment this lands, without anything regressing. The
-completion output says how much moved so that drop is explainable.
-
-Re-migrating after a parser fix: record ids are derived from the ledger,
-so a corrected parse yields different ids and the two sets cannot be
-merged. Restore the ledger from git and delete the store directory; this
-refuses to run into a store that still holds records rather than
-interleaving two migrations on disk.
-
-HISTORY RECOVERY IS ON BY DEFAULT, AND IS FIRST-RUN-ONLY. The migration
-mines the ledger's git history for records removed from it and writes them
-straight to closed/ as tombstones. The ledger's own preamble documents
-'git log -p' as the recovery route; this automates exactly that. Failure to
-read history is a warning, never fatal.
-
-It defaults on because the choice is not symmetric. Recovery only ever
-writes to closed/, so it cannot put anything in the working set; the cost
-is one 'git show' per revision touching the ledger. But it runs only on the
-FIRST migration — afterwards this command reports 'already migrated' and
-returns before the recovery step — so skipping it forfeits that history
-permanently. One project lost 180 recoverable records that way.
-
-Pass --no-recover-deleted to skip it. Use 'ape deferred recover' to run it
-against a store that has already been migrated.
-
-Examples:
-
-```
-  ape deferred migrate --dry-run
-  ape deferred migrate --recover-deleted
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--dry-run` | bool | `false` | Parse and verify, writing nothing |
-| `--from` | string | `—` | Legacy ledger path (default: resolved from config) |
-| `--no-recover-deleted` | bool | `false` | Skip history recovery. This is a ONE-WAY choice: after the migration the history is unreachable |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--recover-deleted` | bool | `true` | Recover records removed from the ledger, from git history, into closed/ (default true) |
-
-## ape deferred recover
-
-Recover ledger records deleted before the migration, into closed/
-
-```
-ape deferred recover [flags]
-```
-
-Mine the legacy ledger's git history for records that were removed from
-it, and write them to closed/ as tombstones.
-
-The ledger's only eviction mechanism was deletion — closing a record
-destroyed its own audit trail — which is the failure the record store
-exists to end. This is the repair for the history that predates it.
-
-WHY THIS IS A SEPARATE COMMAND. 'ape deferred migrate --recover-deleted'
-does the same work, but only on the FIRST migration: afterwards migrate
-reports 'already migrated' and returns before the recovery step, so the
-flag is silently inert. The route out of that ("restore the ledger, remove
-the store, re-migrate") costs every close, discard and repair edit made
-since the migration. This does not.
-
-SAFE TO RE-RUN. Recovery only ever writes to closed/, so it can never add
-anything to the open working set. It de-duplicates against what is on disk
-— open records AND existing tombstones — so a second run recovers nothing.
-
-The ledger path is normally a stub by now. That is fine: git history is
-read THROUGH the path, not out of the file at it, so every revision that
-held the real ledger is still reachable. A repo with no history for that
-path is a warning, never fatal.
-
-Nothing is committed.
-
-Examples:
-
-```
-  ape deferred recover --dry-run
-  ape deferred recover
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--dry-run` | bool | `false` | Report what would be recovered, writing nothing |
-| `--from` | string | `—` | Legacy ledger path (default: resolved from config) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape deferred repair
-
-Complete or retire free-form records (judgment, on opus)
-
-```
-ape deferred repair [flags]
-```
-
-Dispatch the free-form records to a framework skill for completion.
-
-The deterministic migration cannot finish a record that has no fields to
-read. Deciding whether a messy note is real work, what it points at, and
-whether it is already dead is JUDGMENT — so an LLM does it, in its own
-phase, never inside the verified migration. That separation is what keeps
-the migration assertable and revertible: a model's output can never
-invalidate a byte-identity check.
-
-Mechanism: this spawns apex-deferred-repair on opus through
-the same PTY task runner `ape task` uses. The prompt lives in the
-framework as a versioned, reviewable skill rather than a Go string
-literal, so ape gains no HTTP client, no credentials and no model
-constant. apex-defer-repair is accepted as the pre-rename name, so
-an older framework install still works.
-
-Three guards this command adds:
-
-  It REFUSES when neither skill is installed, --dry-run included. A real
-  dispatch is already caught by the runner's skill preflight, but a dry
-  run never reaches the runner — so without this it would print a plan
-  naming a skill that does not exist, say "no session spawned", and read
-  as fine.
-
-  It REFUSES without a TTY unless --force. It spends real money, and it
-  should not do that from a script that did not ask — the same refusal
-  'ape framework setup' already makes rather than seeding silently.
-
-  The on-disk record count MUST NOT FALL. "discard never deletes" is an
-  absolute rule that otherwise lives only in a prompt, and a prompt is not
-  an enforcement mechanism. If records vanish, this says so and names
-  them, so you can restore those paths before committing anything.
-
-Nothing is committed.
-
-Examples:
-
-```
-  ape deferred repair --dry-run
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--dry-run` | bool | `false` | Show the plan without spawning a session |
-| `--force` | bool | `false` | Spawn the session even without a TTY |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape deferred verify
-
-Check the store: invariants, and candidates for a human
-
-```
-ape deferred verify [flags]
-```
-
-Aliases: `lint`
-
-Two kinds of finding, and the tag on each is the important part:
-
-  confidence: certain    a fact. Schema problems, related[]/supersedes[]
-                         pointing at records that do not exist, and an open
-                         record whose own body says it was discharged.
-  confidence: candidate  a heuristic, NEVER auto-actionable. A dead anchor
-                         (the record may be moot, or the code may just have
-                         moved), a trigger naming a story that is now done
-                         (the closing condition MAY have fired), a
-                         near-duplicate title, a free-form record.
-
-An open record that says it was discharged is TWO checks, not one, because
-the two mean opposite things and need opposite remediations:
-
-  deferred.closure_marker_in_open_record     the work was DONE
-  deferred.superseded_marker_in_open_record  the work was OVERTAKEN, never
-                                             done — a discard, not a close
-
-Branch on the check name. Re-deriving it from the message is what a consumer
-got backwards, closing records whose whole point was that nobody did them.
-
-Nothing here ever closes a record. Closing requires re-verifying the
-premises against HEAD, which is judgment — and on the reference ledger an
-unbiased sample of 20 records found 5 already delivered, including its own
-flagship entry, whose defect had been eliminated four weeks earlier.
-
-Exit 0 even with findings; --strict makes it 1.
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) |
-
-## ape doc
-
-Shard, assemble and survey Markdown documents
-
-```
-ape doc
-```
-
-Aliases: `docs`
-
-Markdown document operations.
-
-  verify    refuse-to-shard gate: duplicate heading slugs at a level
-  shard     split a document into section files, rewriting relative links
-  assemble  concatenate the shards back, reversing the rewrite
-  analyze   survey a set of source documents: sizes, groups, routing
-
-Subcommands:
-
-- `analyze` — Survey source documents: sizes, groups, routing
-- `assemble` — Concatenate shards back into one document
-- `shard` — Split a document into section files
-- `verify` — Check a document for duplicate heading slugs
-
-## ape doc analyze
-
-Survey source documents: sizes, groups, routing
-
-```
-ape doc analyze <path|dir|glob>... [flags]
-```
-
-Enumerate source documents and report sizes, estimated tokens, detected
-types, suggested groupings, a routing recommendation and a split
-prediction.
-
-Inputs may be file paths, directories (walked for .md/.txt/.yaml/.yml/
-.json) or glob patterns. node_modules, .git, __pycache__, .venv, .claude,
-.cursor and .vscode are never source documents.
-
-Routing is 'single' when the corpus is BOTH at or under the file limit and
-at or under the token limit; otherwise 'fan-out'. The split prediction
-estimates a distillate at a third of its sources.
-
-Every token number here is bytes/2.9 — the ratio Claude Code's own count
-gives on APEX markdown, and the one ape memory check uses. It is still an
-estimate, labelled as one. The three thresholds are flags so the boundaries are
-testable without building a 15k-token fixture; the defaults are the ones
-the framework has always used.
-
-This command carries no --cwd. It resolves nothing from the project's
-config — every input is an explicit path argument — so there is no
-project for --cwd to select. Relative paths resolve against the
-working directory, as they would for any other tool.
-
-Examples:
-
-```
-  ape doc analyze _output/handoffs --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--single-max-files` | int | `0` | File count at or below which routing is single (default 3) |
-| `--single-max-tokens` | int64 | `0` | Estimated tokens at or below which routing is single (default 15000) |
-| `--split-min-tokens` | int64 | `0` | Estimated distillate tokens above which a split is likely (default 5000) |
-
-## ape doc assemble
-
-Concatenate shards back into one document
-
-```
-ape doc assemble <dir> <file> [flags]
-```
-
-Reverse a shard: concatenate the section files in index.md order and
-strip the ../ that sharding added.
-
-index.md supplies the ordering and its preamble, and is never itself
-concatenated as a section. A ../ link that predated the shard survives
-untouched, because the strip only applies when the target actually resolves
-one level up.
-
-A section file named in the index but missing on disk is reported and
-skipped rather than fatal — an incomplete assembly you can see beats none.
-
-This command carries no --cwd. It resolves nothing from the project's
-config — every input is an explicit path argument — so there is no
-project for --cwd to select. Relative paths resolve against the
-working directory, as they would for any other tool.
-
-Examples:
-
-```
-  ape doc assemble development/planning/prd development/planning/prd.md
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape doc shard
-
-Split a document into section files
-
-```
-ape doc shard <file> <dir> [flags]
-```
-
-Split a document at a heading level, one file per section, and rewrite
-relative links to account for the extra directory depth.
-
-It ALWAYS writes an index.md listing and linking every section file. That
-is a contract, not a convenience: apex-shard-doc treats a missing index.md
-as proof the command did not complete, and verifies it in its own step. A
-replacement that split and rewrote links perfectly but omitted the index
-would pass a round-trip test and then fail its real caller.
-
-It REFUSES when two headings slugify to the same value, rather than writing
-'foo-2.md' siblings that hardcoded consumers cannot distinguish. Nothing is
-written in that case — fix the source document.
-
-A document with no headings at the requested level becomes index.md whole,
-so 'assemble' still has something to work from.
-
-This command carries no --cwd. It resolves nothing from the project's
-config — every input is an explicit path argument — so there is no
-project for --cwd to select. Relative paths resolve against the
-working directory, as they would for any other tool.
-
-Examples:
-
-```
-  ape doc shard development/planning/prd.md development/planning/prd
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--level` | int | `2` | Heading level to split at |
-| `--numbered` | bool | `false` | Prefix filenames with a zero-padded ordinal |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape doc verify
-
-Check a document for duplicate heading slugs
-
-```
-ape doc verify <file> [flags]
-```
-
-Scan a document for two headings at the same level that slugify to the
-same value.
-
-This is a GATE, not a report — the one exception to the verify contract,
-and for the same reason as 'ape story verify --file': its caller relies on
-the non-zero exit to stop before writing anything. Downstream skills
-reference shard files by exact slug, so a deduplicated 'foo-2.md' sibling
-would silently break them; the source document has to be fixed instead.
-
-Exit codes:
-  0  no duplicate slugs
-  1  duplicates found (each pair is printed with its line numbers)
-
-This command carries no --cwd. It resolves nothing from the project's
-config — every input is an explicit path argument — so there is no
-project for --cwd to select. Relative paths resolve against the
-working directory, as they would for any other tool.
-
-Examples:
-
-```
-  ape doc verify development/planning/prd.md --level 2
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--level` | int | `2` | Heading level to check |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
 ## ape doctor
 
 Probe the local environment for prerequisites
@@ -3451,27 +2424,51 @@ verdict.
 
 Doctor runs a fixed set of checks against the host (claude / git /
 node / npx binaries, Playwright host compatibility, ~/.claude
-writability) and the project at --cwd (framework metadata, installed
-skills + pipelines, and the always-on operating-rules fragment +
-CLAUDE.md managed block). Project-scoped checks degrade to INFO when run
-outside a project root; the operating-rules checks only hard-fail when a
-framework install that manages them has lost the fragment, import, or
-apex-orchestrator skill.
+writability) and the project at --cwd. Which project rows run depends on
+the project (H27):
 
-Eight checks report on PROJECT DATA rather than on the host: whether the
-config resolves at all (nothing else can see the project's artifacts
-without it), registry drift, story frontmatter, tracker divergence,
-whether the tracker's lock sidecar is gitignored, whether ape's own run
-subtree is gitignored, team-memory size, and any pending project-data
-migration. All eight degrade to INFO outside a project root.
+  APEX v1 (_apex/state/ or development/project.md): the host rows, the
+  framework rows that apply to any install (skills, output styles,
+  command surface, the ape floor framework.ape_version, tag_moved,
+  upgrade migrations), and the v1 rows:
+    project.check     ape project check (its hooks and plugins have rows
+                      of their own); WARN with the first findings
+    hooks.project     ape's hooks missing from or altered in
+                      .claude/settings.json (ape project init restores them)
+    plugins.project   see below
+    claude.version    the installed Claude Code's version, reported only
+                      (a tested range comes later)
+    state.gitignore   _apex/state/'s whitelist: milestones.json and
+                      decisions.json tracked, ape's run records, logs,
+                      hook verdicts and counters ignored and untracked
+    settings.shared   .claude/settings.json not ignored by git: an ignored
+                      one shares ape's hooks with no other checkout (only
+                      ape task sessions get them inline)
+  None of v0's rows run there: --strict is green on a healthy v1 project.
 
-The two "is it gitignored" rows report and never write. .gitignore is the
+  Anywhere else: the rows below, v0's included, plus apex.v0, which WARNs
+  in an APEX v0 project: this ape retired the v0 commands its skills
+  call, so use the project's pinned v0 ape (.bingo), or lift it
+  (ape framework update to v1 runs ape project lift).
+
+  --only runs exactly the checks it names, whatever the project.
+
+The v0 rows: framework metadata, installed pipelines, the always-on
+operating-rules fragment + CLAUDE.md managed block (hard-failing only when
+a framework install that manages them has lost the fragment, import, or
+apex-orchestrator skill), and seven that report on v0 PROJECT DATA:
+whether the config resolves at all, registry drift, story frontmatter,
+tracker divergence, whether ape's own run subtree is gitignored,
+team-memory size, and any pending project-data migration. Project-scoped
+checks degrade to INFO outside a project root.
+
+The "is it gitignored" rows report and never write. .gitignore is the
 operator's file; a tool that edits it uninvited is worse than one that
 points. Both also distinguish COMMITTED from merely unignored, because an
 ignore line does not untrack anything — on a project that already
 committed the path, adding the line changes nothing at all.
 
-memory.size is one of only two Required checks in that group, deliberately:
+memory.size is one of only two Required checks among the v0 rows, deliberately:
 a non-required FAIL is downgraded to WARN, so nothing else could surface a
 team-memory.md past its hard ceiling: far past what one Read shows, and
 nearing the 256 KiB byte cap at which a Read fails outright.
@@ -3522,12 +2519,13 @@ silent:
                                 than degrading.
 
                                 It compares command NAMES ONLY. A binary
-                                can provide "ape story fields" with an
+                                can provide "ape change start" with an
                                 older flag set and still pass, so this is
                                 a version-skew guard and not a statement
                                 of version compatibility. A framework that
-                                ships no manifest predates the contract
-                                and the check reports a skip.
+                                ships no manifest predates the contract,
+                                and a v1 manifest declares only
+                                min_ape_version: both report a skip.
   aboard.skill_reference        whether a .claude/skills/aboard reference
                                 copied into this project still describes
                                 the board this binary serves, by capsHash.
@@ -3559,8 +2557,9 @@ evidence is not coverage.
   ape doctor --only hooks.contract_drift --strict --cwd <project>
 
 Note the --cwd: hook drift is observed from the runlogs ape itself wrote
-(<project>/_output/ape), so it can only be judged against a project ape has
-actually run pipelines in, not against the ape repo. This is the
+(<project>/_apex/state/runs in a v1 project, else <project>/_output/ape), so
+it can only be judged against a project ape has actually run sessions in,
+not against the ape repo. This is the
 observational read — point it at a real project. The release gate takes the
 other route: "make check-hooks" seeds its own runlog with one unattended
 session, so it always has a corpus to judge. An unknown name in --only is
@@ -3626,234 +2625,6 @@ Flags:
 | `--quiet` | bool | `false` | Suppress the human-mode confirmation line. |
 | `--session-id` | string | `—` | Claude session id to report for (default: auto-resolve the current project's newest). |
 | `--transcript` | string | `—` | Explicit transcript file; the session id is parsed from its name. |
-
-## ape feature
-
-Inspect and maintain the feature registry
-
-```
-ape feature
-```
-
-Aliases: `features`
-
-Subcommands:
-
-- `backfill` — Fill absent required fields of existing features index entries from their records
-- `list` — List features from the registry index
-- `sync` — Reconcile the features index against records on disk
-- `update` — Apply field deltas to existing features index entries
-- `verify` — Verify the features registry against its index
-
-## ape feature backfill
-
-Fill absent required fields of existing features index entries from their records
-
-```
-ape feature backfill [flags]
-```
-
-Complete the index entries that already exist. A field the family's index
-schema requires that is ABSENT from an entry is copied in from that
-entry's record: its frontmatter, or its file name for slug. It is the same
-rule sync uses when it adds an entry.
-
-It does nothing else. No entry is added, removed or repointed, a value
-that is present is never changed (even an empty one), and file: is never
-filled, because an entry with no file is sync's repair. That narrowness is
-the point: this runs unattended as a framework migration on
-`ape framework update`, where a structural index change is not wanted.
-
-A required field the record has no value for stays absent and is reported
-as a gap. An entry whose record is absent or unreadable is also a gap.
-Gaps are not pending work: nothing on disk can close them, so re-running
-finds the same ones.
-
---check writes nothing and answers in its exit code: 0 when there is
-nothing to fill, 1 when fills are pending. Those two are the only answers
-about the index. Anything else means the check itself failed: 2 for an
-unknown family or an index or record that cannot be read, 4 with no
-project config.
-
-Examples:
-
-```
-  ape feature backfill --check
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--check` | bool | `false` | Write nothing; exit 0 when nothing is fillable, 1 when fills are pending (2 or 4 if the check itself failed) |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape feature list
-
-List features from the registry index
-
-```
-ape feature list [flags]
-```
-
-Examples:
-
-```
-  ape feature list --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape feature sync
-
-Reconcile the features index against records on disk
-
-```
-ape feature sync [flags]
-```
-
-Reconcile index.yaml against the records on disk: records with no entry
-are added, entries whose id no record claims are removed, and an entry
-whose file: no longer resolves is repointed at the record claiming its id.
-
-This is the repair for the findings `verify` reports, and nothing more —
-it copies what a record's own frontmatter states and invents no titles,
-statuses or any other field. A renamed record keeps its authored entry
-rather than being dropped and re-added.
-
-An added entry carries every field of the family's index schema the record
-has a value for: its frontmatter, or its file name for slug. A required
-field with no value is left out and listed in the change's missing. An
-entry that is already listed is never completed here; that is
-`backfill`.
-
---check makes it a dry run: the same diff, nothing written, and the answer
-in the exit code: 0 when there is nothing to change, 1 when changes are
-pending, 2 when the check itself failed (an unknown family, or an index
-that cannot be read), 4 with no project config. Withheld removals alone
-exit 0: sync cannot make them. generated_at moves only when something
-else did.
-
-Examples:
-
-```
-  ape feature sync --check
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--check` | bool | `false` | Report the diff without writing; exit 0 nothing to change, 1 changes pending (2 or 4 if the check itself failed) |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape feature update
-
-Apply field deltas to existing features index entries
-
-```
-ape feature update [flags]
-```
-
-Apply per-entry field deltas to index.yaml and refresh generated_at.
-
---updates takes {"<id>": {"<field>": <value>}} as a file path or '-' for
-stdin. Only entries ALREADY listed may be updated: an unknown id is an
-error raised before anything is written, because creating an index entry
-is the job of the skill that authors the document it points at.
-
-A value is either a SCALAR or a LIST OF SCALARS. A scalar is written as
-text, so a status of "no" stays a string and an id of "0001" keeps its
-zeros instead of becoming a bool or an int. A list is written as a YAML
-sequence — depends_on: [FEAT-1-1, FEAT-1-2] — which is what the
-dependency fields hold. Anything else (a nested object, or a list
-containing one) is refused, naming the entry and field, rather than
-written in a form that cannot be read back.
-
-Re-running an update is how a field is repaired: the value is replaced
-outright, so a dependency list that an older ape stored as the quoted
-string '[FEAT-1-2 FEAT-1-3]' becomes a real sequence again without
-hand-editing index.yaml.
-
-The rendered index is round-trip parsed before it replaces the file, and
-the write is atomic — a crash mid-write cannot truncate an index. Key
-order and comments survive, which a PyYAML round trip does not manage.
-
-Exit codes:
-  0  applied
-  1  unknown id, unreadable updates, or an unwritable index (nothing written)
-
-Examples:
-
-```
-  echo '{"FEAT-1-1":{"status":"superseded"}}' | ape feature update --updates -
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--generated-at` | string | `—` | Timestamp to write as generated_at (default: resolved config timestamp) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--updates` | string | `-` | JSON file with per-entry field deltas, or '-' for stdin |
-
-## ape feature verify
-
-Verify the features registry against its index
-
-```
-ape feature verify [flags]
-```
-
-Exactly five checks, and no others:
-
-  1. registry.orphan_record / registry.phantom_entry
-     set equality between the record directory and index.yaml, both
-     directions
-  2. registry.file_unresolved
-     every index file: resolves, relative to the index's own directory
-  3. registry.duplicate_id
-     duplicate ids, in the index and on disk
-  4. registry.record_unparseable
-     the record parses as frontmatter at all
-  5. registry.entry_incomplete
-     every index entry carries each field its family's index schema
-     requires (file: excepted: its absence is check 2).
-     `ape registry backfill --all` fills the ones its record states
-
-Check 5 is presence only. No type or value validation, no field drift, no
-tag comparison, no updated_at comparison — those are judgment, and a
-verifier that wanders into them stops being trustworthy.
-
-An index.yaml that is absent while records exist is reported once, as
-registry.index_missing: the degenerate case of check 1, not a fifth check.
-One finding beats one orphan per record, which would bury the only fact
-that matters.
-
-Findings travel in the payload. Exit is 0 even with findings unless
---strict is passed, so this is safe to call from anywhere.
-
-Examples:
-
-```
-  ape feature verify --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) |
 
 ## ape framework
 
@@ -4129,79 +2900,6 @@ Global flags:
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
 | `--repo` | string | `—` | Path to a checked-out apex_process_framework repo (default: $APEX_FRAMEWORK_REPO) |
 
-## ape governance
-
-Answer governance questions about a set of paths
-
-```
-ape governance
-```
-
-Subcommands:
-
-- `match` — Which stories own these paths, and what that means for a maintenance change
-
-## ape governance match
-
-Which stories own these paths, and what that means for a maintenance change
-
-```
-ape governance match [flags]
-```
-
-Answer, for each path, which stories' File Lists claim it and what
-follows for the lean maintenance lane.
-
-A story owns a path when its "### File List" names it as a whole path
-token. A (planned) or (deferred) entry claims nothing — it records an
-intention, not a change — and a mention under "## Tasks" is advisory
-and is never read here at all.
-
-The owner's status decides:
-
-  in-progress, review              veto — the path is owned
-  the two statuses disagree        veto — fail-closed
-  no status on either side         veto — ownership not established
-  blocked                          Carries: <story-key> <path>
-  backlog, ready-for-dev           Carries: <story-key> <path>
-  done, cancelled                  Carries: <story-key> <path>
-  no owner                         nothing
-
-The status is read from the story file and its tracker row together,
-after normalisation — the tracker writes "drafted" where a file reads
-"ready-for-dev" — and where one side is missing the other is used.
-More than five finished owners collapse to one "shared <path> (<N>
-owners)" row, because a commit message is read by a person.
-
-Paths come from --path (repeatable), --paths-file, or stdin. Never a
-comma-separated list: a path may contain a comma, and a prescan lists
-many.
-
-This answers the OWNER question only. There is no adrs or patterns
-field, not even an empty one: an empty list would read as "nothing
-applies", where the truth is that this ape does not answer that.
-
-Always exits 0 when it could answer. The verdict is the veto field, not
-the exit code — a skill reading a non-zero exit as a content verdict is
-the failure mode the framework's own rules warn about.
-
-Examples:
-
-```
-  ape governance match --path internal/repl/pty.go --path docs/reference/cli.md
-  ape governance match --paths-file changed.txt --output-format json
-  git diff --name-only | ape governance match --paths-file -
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--path` | stringArray | `[]` | A path to match (repeatable) |
-| `--paths-file` | string | `—` | File holding one path per line; "-" reads stdin |
-
 ## ape hook
 
 Claude Code hooks for APEX v1 projects (registered by `ape project init`)
@@ -4213,12 +2911,14 @@ ape hook
 Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
 
   session-start   SessionStart: adds `ape status --brief` as context
-  stop            Stop and SubagentStop: blocks a stop while the one in-progress change
-                  has a red command check (at most 3 times in a row)
+  stop            Stop and SubagentStop: in a session ape launched, blocks a stop while the
+                  in-progress change has a red command check (at most 3 times in a row);
+                  in a person's own session, only shows what was red
   pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
-                  delete or push a git tag, or rebase or merge on a change branch
+                  delete or push a git tag, push at all, stop processes by name (pkill,
+                  killall), or rebase or merge on a change branch
 
 Every hook exits 0; a block or deny is expressed in its JSON output.
 
@@ -4228,13 +2928,13 @@ them; the settings.json copy then does nothing, so each event is decided once.
 
 Subcommands:
 
-- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, and rebases on a change branch
+- `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, and rebases on a change branch
 - `session-start` — SessionStart hook: inject `ape status --brief` as additional context
 - `stop` — Stop/SubagentStop hook: block a stop while the in-progress change's checks are red
 
 ## ape hook pre-tool
 
-PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, and rebases on a change branch
+PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, and rebases on a change branch
 
 ```
 ape hook pre-tool [flags]
@@ -4264,7 +2964,23 @@ Listing stays allowed: git tag, -l/--list [<pattern>], -n, --contains, --merged,
 subshells, NAME=value prefixes, env/sudo/xargs wrappers, git -C/-c, and sh -c / eval
 scripts are followed, so `echo "git tag v1"` is not flagged. Not seen: "$(…)"
 inside double quotes, git aliases, script files. A command without "git" is allowed
-at once. APE_ALLOW_TAG=1 in the session's environment allows tag writes.
+at once.
+
+Bash, too (D45): denies every git push, in any form — a remote, a refspec, --dry-run,
+git -C, sh -c, a chain: only a person pushes (with push.followTags set, even a branch
+push publishes every reachable unpushed tag). A tag push needs both overrides below.
+
+Bash, too (D46): denies pkill, killall, killall5 and skill in any form (sudo, env,
+timeout, xargs, sh -c, a chain, an absolute path): they stop processes the session did
+not start. The deny says: stop the process you started by its PID (kill <pid>), which
+stays allowed.
+
+Overrides: APE_ALLOW_TAG=1 allows tag writes, APE_ALLOW_PUSH=1 git push,
+APE_ALLOW_KILL=1 pkill/killall. Each counts ONLY in the environment the person launches
+the session with (`APE_ALLOW_PUSH=1 claude`, or `APE_ALLOW_PUSH=1 ape task …`),
+which the hook inherits. Set inside a command the model runs — APE_ALLOW_PUSH=1 git
+push, env APE_ALLOW_PUSH=1 …, export APE_ALLOW_PUSH=1; … — it does not count: the
+command is denied as if it were not there (D47 Q6).
 
 Bash, too (trial decision D40, the model never rebases): denies git rebase and git merge
 while the repository the command runs in has a change branch, change/<id>, checked out —
@@ -4307,12 +3023,22 @@ ape hook stop [flags]
 ```
 
 Stop and SubagentStop hook. When HEAD is on a change's branch, change/<id>, that
-change is in-progress (read from the working tree), and any of its command checks exits
-non-zero now, prints {"decision":"block","reason":"<the failing checks' last lines and
-what to do>"}. Allows (prints nothing) when HEAD is on no change branch (the base
-branch: planning, milestones), when the change is not in-progress (blocked, verified,
-reviewed), when every check is green, or after 3 consecutive blocks (the count resets
-when the payload's stop_hook_active is false).
+change is in-progress (read from the working tree), and any of the checks it re-runs
+exits non-zero now, prints {"decision":"block","reason":"<the failing checks' last lines
+and what to do>"}. It re-runs only the checks that were red at the change's last verify
+of its current plan (the regression command too, when it was newly red), recorded in
+_apex/state/logs/<id>/last-verify.json; before any verify, the task checks (H10).
+Allows (prints nothing) when HEAD is on no change branch (the base branch: planning,
+milestones), when the change is not in-progress (blocked, verified, reviewed), when the
+last verify had nothing red, when every re-run check is green, or after 3 consecutive
+blocks (the count resets when the payload's stop_hook_active is false).
+
+Only in a session ape launched (H13): the hook blocks when its process carries
+APE_SESSION, which every session ape spawns has and Claude Code hands to its hooks. In a
+person's own Claude Code session (plain `claude`, the settings.json copy of the hook) it
+never blocks and runs no check: on an in-progress change whose last verify had red
+checks it allows the stop with {"systemMessage":"APEX: change <id> is in progress, and at
+its last verify … check(s) were red: …"}, shown to the person; otherwise it prints nothing.
 
 The verdict is also written to _apex/state/hooks/<session>[-<agent>].json, which
 is how `ape task` learns that a Stop it saw did not end the turn.
@@ -4322,7 +3048,7 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the payload's cwd) |
-| `--timeout` | duration | `15m0s` | limit for each check command (exit 124 when exceeded) |
+| `--timeout` | duration | `0s` | limit for each command run, overriding _apex/config.yaml timeouts: (default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; timeouts.gate, else 30m, for a gate command); exit 124 when exceeded |
 
 ## ape log
 
@@ -4361,148 +3087,6 @@ Flags:
 | `--quiet` | bool | `false` | Suppress the human-mode confirmation line. |
 | `--session-id` | string | `—` | Claude session id to report for (default: auto-resolve the current project's newest). |
 | `--transcript` | string | `—` | Explicit transcript file; the session id is parsed from its name. |
-
-## ape memory
-
-Read the team-memory file without loading it whole
-
-```
-ape memory
-```
-
-team-memory.md outgrew whole-file reading. Past ~25,000 tokens (about
-72 KB of markdown) a Read returns only part of the file, with a paging
-banner; at 431,950 bytes on the reference project it fails outright
-("exceeds maximum allowed size (256KB)") — including for the
-retrospective that is instructed to re-read it before editing it.
-
-  index  what is in there: ordinal, section, date, size, title
-  show   the verbatim body of named entries
-  check  size against two budgets, from a stat alone
-
-Subcommands:
-
-- `check` — Report team-memory size against the soft budget and hard ceiling
-- `index` — List every team-memory entry
-- `show` — Print the verbatim body of the named entries
-
-## ape memory check
-
-Report team-memory size against the soft budget and hard ceiling
-
-```
-ape memory check [flags]
-```
-
-Classify team-memory.md against two budgets, from an os.Stat alone —
-the file is never read, which is what makes this cheap enough to run on
-every retrospective.
-
-  state: absent      no team-memory.md yet (a fresh project, not a problem)
-  state: ok          under the soft budget
-  state: over-soft   compaction is due; schedule it at the next epic close
-  state: over-hard   compaction is overdue: far past what one Read shows
-                     (~25k tokens, about 72 KB) and nearing Claude Code's
-                     256 KiB byte cap, where a Read fails outright
-
-EXIT 0 BY DEFAULT, whatever the state. The verdict is the 'state' field,
-not the exit code, and that is deliberate: the framework's prose
-convention is "on non-zero exit: HALT", so a failing exit here would abort
-the retrospective at exactly the moment compaction is most needed — the
-gate would break the ceremony it exists to trigger.
-
---fail-at opts into a non-zero exit for CI, which wants one:
-  never  (default) always exit 0
-  soft   exit 1 at over-soft or worse
-  hard   exit 1 at over-hard
-
-'ape doctor' maps the state to WARN/FAIL itself, so a hard-ceiling breach
-is still visible and non-ignorable without this flag.
-
-The token count in the output is bytes/2.9 (the ratio measured on APEX
-markdown), an estimate, and nothing gates on it.
-
-Examples:
-
-```
-  ape memory check
-  ape memory check --fail-at hard
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--fail-at` | string | `never` | Exit 1 at this state or worse: never\|soft\|hard |
-| `--hard` | int64 | `0` | Hard ceiling in bytes (default 204800) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--soft` | int64 | `0` | Soft budget in bytes (default 40960) |
-
-## ape memory index
-
-List every team-memory entry
-
-```
-ape memory index [flags]
-```
-
-One line per '### ' entry: ordinal, section, date, byte size, title.
-
-Structurally lossless, and carrying no filter, ranking or predicate —
-deliberately. Most call sites sit inside '## On Activation', which runs
-BEFORE the story is identified, so no predicate keyed on "this story's
-domain" could work there. Selection has to be possible from ordinal,
-section, date, size and title alone.
-
-A '### ' line inside a fenced code block is content, not an entry. That
-matters more than it sounds: counting one would shift every ordinal after
-it, and 'show <n>' would then hand back the wrong entry with nothing to
-signal the mistake.
-
-Examples:
-
-```
-  ape memory index --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape memory show
-
-Print the verbatim body of the named entries
-
-```
-ape memory show <n>[,<n>...] | <n> [<n>...] [flags]
-```
-
-Print entries by ordinal, in the order asked for, byte-for-byte as they
-appear in the file.
-
-Ordinals may be one comma list (3,7,12), separate arguments (3 7 12), or a
-mix (3,7 12): all three ask for the same entries in the same order.
-
-Exit codes:
-  0  printed
-  2  an ordinal the file does not have, or one that is not a number
-
-Examples:
-
-```
-  ape memory show 3,7,12
-  ape memory show 3 7 12
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
 
 ## ape metrics
 
@@ -4558,12 +3142,21 @@ ape milestone
 
 Milestones live in development/roadmap.md as "## M<n> — <title>" sections.
 Their Status: line is written only by ape: proposed → approved (by <who> <ts>) →
-done (<ts> <sha>). Every one of those writes is committed by ape (roadmap.md, plus
+done (<ts> <sha>), or done (accepted red by <who> <ts> <sha>) when a person closed it
+with its gate red (`ape milestone close --help`). Every one of those writes is committed by ape (roadmap.md, plus
 _apex/state/milestones.json when it exists) as "apex: <M> proposed|approved|done"
 with trailer "Milestone: <M>". milestones.json holds each gate's result (green|red)
 and is committed, as "apex: <M> gate green|red", only when that result changes; the
 latest run of any result is in the gitignored _apex/state/logs/gate-<M>.json.
 No milestone command leaves the tree dirty.
+
+Approvals are records (H2): `ape milestone approve` records who approved, when, and the gate
+approved — its command and the SHA-256 of every file it names — under the milestone's
+"approval" in milestones.json. change start, gate and close trust that record, never the
+Status line alone: an approved milestone with no record (approved by hand, or before ape
+recorded approvals) is refused with milestone.status-unrecorded, and gate and close refuse
+one whose gate changed since with milestone.gate-changed — in both cases a person runs
+`ape milestone approve <M> --by <who>` (again). `ape project check` reports both.
 
 Branches (trial decision D38): every milestone command records on the base branch — the
 one changes are started from and archived into (D11). On a change's branch, change/<id>,
@@ -4586,13 +3179,28 @@ Write Status: approved (by <who> <ts>)
 ape milestone approve <M> --by <who> [flags]
 ```
 
-Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)".
-Changes can start only under an approved milestone. Committed as "apex: <M> approved".
-Approving an approved milestone is a no-op; a done one is refused. Refused on a change
-branch (see `ape milestone --help`).
+Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)", and
+milestones.json records the approval (H2): {by, at, gate_cmd, gate_files, gate_files_sha256}
+— the Gate: command, and the SHA-256 of each gate file: every word of the command (split at
+whitespace and ; | & < > ( ), the value of a KEY=value or --flag=value word) that names a
+regular file under the project root, e.g. ./scripts/e2e.sh (absolute paths, paths leaving
+the root, options and words with $ or a glob are not looked up; what a script runs in
+turn is not covered). Changes can start only under an approved milestone; gate and close
+refuse a gate that differs from the approved one. Committed together as "apex: <M>
+approved".
+
+Approving an approved milestone records the approval again — "apex: <M> re-approved", the
+Status line kept as it was (the milestone's spend counts from it) — when ape holds no
+record of it, its gate changed since, or changes of it were blocked in a row (which resets
+that count, limits.consecutive_blocks: `ape change new --help`); otherwise it is a no-op. A done one is refused.
+Refused on a change branch (see `ape milestone --help`).
+
+Only a person approves (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE
+set, which includes a `!` line inside Claude Code — with exit 2, code
+session.person-only. Run it from a plain terminal.
 
 Exit codes: 0 ok · 1 no such milestone, done, malformed (Gate/Goal missing), or HEAD on a
-change branch · 2 usage.
+change branch · 2 usage, or a model session.
 
 Examples:
 
@@ -4613,7 +3221,7 @@ Flags:
 Run the gate; on exit 0 write Status: done (<ts> <sha>)
 
 ```
-ape milestone close <M> [flags]
+ape milestone close <M> [--accept-red "<reason>" --by <who>] [flags]
 ```
 
 Close an approved milestone. Refused while a change of this milestone is in-progress,
@@ -4626,24 +3234,50 @@ AND every scenario check of the spec pass, AND the regression command (when conf
 not newly red against the milestone's earliest baseline for it — with no baseline, red fails
 (see `ape milestone gate`). A red gate is recorded as
 by `ape milestone gate`. A milestone is done when this command exits 0 — never because
-anyone says so.
+anyone says so. Refused, as by `ape milestone gate`, when ape holds no approval record or the
+gate changed since the approval (H2). ape records the close in milestones.json (done_at).
 
-Exit codes: 0 done · 1 gate red, changes in flight, not approved, or HEAD on a change
-branch · 2 usage.
+With "evidence: archive" in _apex/config.yaml (H23; default off), a green close writes the
+gate run's evidence to development/archive/milestones/<M>/evidence/ — one file per check
+(the gate command, every spec scenario, the regression command): command, exit, duration,
+output sha256 and the output, capped at 256 KB (head and tail kept, the full log named by
+path and sha256) — plus accept-red.json when milestones.json records an accept_red for
+<M>; committed with the close record (JSON "evidence").
+
+Changes in flight refuse with milestone.changes-in-flight, action apply — or person when
+one of them is reviewed with human-review tasks not accepted (awaiting_human; D49).
+
+--accept-red "<reason>" --by <who> (H22, D45): a person closes the milestone although its
+gate is red — a release shipped with known defects, say. Everything else is as without it
+(approval record, gate as approved, no change in flight); when the gate is red, the
+milestone is done anyway: milestones.json records accept_red: {reason, by, at, gate: the red
+run}, the Status line reads "done (accepted red by <who> <ts> <sha>)", committed as
+"apex: <M> done (accepted red)", and `ape status` shows it (JSON milestones[].accept_red;
+the brief names the last such milestone). A green gate closes as usual and accepts nothing.
+Only a person passes it: refused in a model session (APE_SESSION or CLAUDECODE set, a `!`
+line inside Claude Code included) with exit 2, session.person-only. A person tags after
+close.
+
+Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
+no approval record, a changed gate, or HEAD on a change branch · 2 usage, or --accept-red
+from a model session.
 
 Examples:
 
 ```
   ape milestone close M1
+  ape milestone close M3 --accept-red "ships with the known RF drift; fixed in M4" --by diego
 ```
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--accept-red` | string | `—` | close although the gate is red, for this reason (a person only; with --by) |
+| `--by` | string | `—` | who accepts the red gate (with --accept-red) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--timeout` | duration | `15m0s` | limit for each check command (exit 124 when exceeded) |
+| `--timeout` | duration | `0s` | limit for each command run, overriding _apex/config.yaml timeouts: (default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; timeouts.gate, else 30m, for a gate command); exit 124 when exceeded |
 
 ## ape milestone gate
 
@@ -4655,23 +3289,31 @@ ape milestone gate <M> [flags]
 
 Run the milestone's Gate: command from the project root, and every scenario check of
 the whole spec beside it as the regression suite (human-review not run; output under
-_apex/state/logs/gate-<M>/), and the project's "regression: <cmd>" from _apex/config.yaml
-when one is configured. The gate is green only when all pass — the regression command
+_apex/state/logs/gate-<M>/), and the project's regression command from _apex/config.yaml
+when one is configured — its milestone tier, "regression: {change: <cmd>, milestone:
+<cmd>}", else the one command (H10). The gate is green only when all pass — the regression command
 only needs not to be newly red: it is judged against the earliest regression baseline,
 for the same command, recorded by any change of the milestone (active or archived; a fix,
 milestone: none, is no change of any milestone and never supplies it — D40);
 red there and red now is reported (JSON run.regression.pre_existing_red), not failed.
 When no change of the milestone has a baseline for the command, a red regression fails
-the gate: nothing shows it was red before the milestone's work. Files the gate
+the gate: nothing shows it was red before the milestone's work — always the case for a
+milestone tier that differs from the change tier, which no change baselines. Timeouts:
+the Gate: command runs under timeouts.gate (default 30m), each scenario check under
+timeouts.check (15m), the regression command under timeouts.regression (30m); --timeout
+overrides all three. A vacuous or unrun gate command, scenario or regression command is
+red (see `ape change verify --help`; JSON reason/detail). Files the gate
 or a check leaves outside development/ are undone and reported ("stray_files"). The run (exit, sha, time,
 output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; shown by
 `ape status`). When the result differs from the recorded one (green vs red), or is
 the first, _apex/state/milestones.json is updated and committed as
 "apex: <M> gate green|red". Does not change the milestone's status — `ape milestone close` does.
 Refused on a change branch: the gate judges the base branch (see `ape milestone --help`).
+On an approved milestone, refused when ape holds no approval record (milestone.status-unrecorded)
+or the gate differs from the approved one (milestone.gate-changed): a person approves it again.
 
-Exit codes: 0 gate green · 1 gate red (last output lines shown), no such milestone, or HEAD
-on a change branch · 2 usage.
+Exit codes: 0 gate green · 1 gate red (last output lines shown), no such milestone, no
+approval record, a changed gate, or HEAD on a change branch · 2 usage.
 
 Examples:
 
@@ -4685,7 +3327,7 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--timeout` | duration | `15m0s` | limit for each check command (exit 124 when exceeded) |
+| `--timeout` | duration | `0s` | limit for each command run, overriding _apex/config.yaml timeouts: (default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; timeouts.gate, else 30m, for a gate command); exit 124 when exceeded |
 
 ## ape milestone new
 
@@ -4720,330 +3362,62 @@ Flags:
 | `--goal` | string | `—` | the Goal: paragraph (else a placeholder to fill in) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 
-## ape pattern
+## ape next
 
-Manage governance patterns
+Record a finding for later under the roadmap's Next
 
 ```
-ape pattern
+ape next
 ```
 
-Aliases: `patterns`
+The roadmap's Next holds what was noticed but is out of scope now (H26): one dated line
+per finding, which apex-plan triages at the next delivery — a milestone, kept, or deleted
+with the reason in its commit. A "## Next" section of roadmap.md is not a milestone.
 
 Subcommands:
 
-- `backfill` — Fill absent required fields of existing patterns index entries from their records
-- `list` — List all governance patterns
-- `sync` — Reconcile the patterns index against records on disk
-- `update` — Apply field deltas to existing patterns index entries
-- `verify` — Verify the patterns registry against its index
+- `add` — Append a dated finding under the roadmap's Next, on the base branch
 
-## ape pattern backfill
+## ape next add
 
-Fill absent required fields of existing patterns index entries from their records
+Append a dated finding under the roadmap's Next, on the base branch
 
 ```
-ape pattern backfill [flags]
+ape next add "<text>" [--from <change-id>] [flags]
 ```
 
-Complete the index entries that already exist. A field the family's index
-schema requires that is ABSENT from an entry is copied in from that
-entry's record: its frontmatter, or its file name for slug. It is the same
-rule sync uses when it adds an entry.
+Append one line to development/roadmap.md's Next:
 
-It does nothing else. No entry is added, removed or repointed, a value
-that is present is never changed (even an empty one), and file: is never
-filled, because an entry with no file is sync's repair. That narrowness is
-the point: this runs unattended as a framework migration on
-`ape framework update`, where a structural index change is not wanted.
+  - YYYY-MM-DD <text> (from <change-id>)
 
-A required field the record has no value for stays absent and is reported
-as a gap. An entry whose record is absent or unreadable is also a gap.
-Gaps are not pending work: nothing on disk can close them, so re-running
-finds the same ones.
+(without "(from …)" when --from is not given) at the end of its "## Next" section; else
+under apex-plan's "Next — not milestones:" label above the first milestone, after its list;
+else in a new "## Next" section at the end of the file. Committed alone on the base branch
+as "apex: next — <text>": from the base branch itself, or from a change's branch,
+change/<id>, without a checkout — the change's branch and working tree do not move, and a
+base branch moved only by such a record does not make the change catch up. Refused when
+the base branch is checked out in another worktree (git.base-checked-out).
 
---check writes nothing and answers in its exit code: 0 when there is
-nothing to fill, 1 when fills are pending. Those two are the only answers
-about the index. Anything else means the check itself failed: 2 for an
-unknown family or an index or record that cannot be read, 4 with no
-project config.
+For models and people alike: apex-apply and apex-change record what they notice outside
+the change's scope here instead of building it (--from <id>, the change that noticed it).
+
+Exit codes: 0 recorded · 1 no roadmap.md, or the base branch is checked out elsewhere ·
+2 usage (empty or multi-line text, --from not a change id).
 
 Examples:
 
 ```
-  ape pattern backfill --check
+  ape next add "the CSV export ignores --tz" --from add-tenant-export
+  ape next add "ask finance whether refunds need an audit trail"
 ```
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--check` | bool | `false` | Write nothing; exit 0 when nothing is fillable, 1 when fills are pending (2 or 4 if the check itself failed) |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape pattern list
-
-List all governance patterns
-
-```
-ape pattern list [flags]
-```
-
-Examples:
-
-```
-  ape pattern list --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape pattern sync
-
-Reconcile the patterns index against records on disk
-
-```
-ape pattern sync [flags]
-```
-
-Reconcile index.yaml against the records on disk: records with no entry
-are added, entries whose id no record claims are removed, and an entry
-whose file: no longer resolves is repointed at the record claiming its id.
-
-This is the repair for the findings `verify` reports, and nothing more —
-it copies what a record's own frontmatter states and invents no titles,
-statuses or any other field. A renamed record keeps its authored entry
-rather than being dropped and re-added.
-
-An added entry carries every field of the family's index schema the record
-has a value for: its frontmatter, or its file name for slug. A required
-field with no value is left out and listed in the change's missing. An
-entry that is already listed is never completed here; that is
-`backfill`.
-
---check makes it a dry run: the same diff, nothing written, and the answer
-in the exit code: 0 when there is nothing to change, 1 when changes are
-pending, 2 when the check itself failed (an unknown family, or an index
-that cannot be read), 4 with no project config. Withheld removals alone
-exit 0: sync cannot make them. generated_at moves only when something
-else did.
-
-Examples:
-
-```
-  ape pattern sync --check
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--check` | bool | `false` | Report the diff without writing; exit 0 nothing to change, 1 changes pending (2 or 4 if the check itself failed) |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape pattern update
-
-Apply field deltas to existing patterns index entries
-
-```
-ape pattern update [flags]
-```
-
-Apply per-entry field deltas to index.yaml and refresh generated_at.
-
---updates takes {"<id>": {"<field>": <value>}} as a file path or '-' for
-stdin. Only entries ALREADY listed may be updated: an unknown id is an
-error raised before anything is written, because creating an index entry
-is the job of the skill that authors the document it points at.
-
-A value is either a SCALAR or a LIST OF SCALARS. A scalar is written as
-text, so a status of "no" stays a string and an id of "0001" keeps its
-zeros instead of becoming a bool or an int. A list is written as a YAML
-sequence — depends_on: [FEAT-1-1, FEAT-1-2] — which is what the
-dependency fields hold. Anything else (a nested object, or a list
-containing one) is refused, naming the entry and field, rather than
-written in a form that cannot be read back.
-
-Re-running an update is how a field is repaired: the value is replaced
-outright, so a dependency list that an older ape stored as the quoted
-string '[FEAT-1-2 FEAT-1-3]' becomes a real sequence again without
-hand-editing index.yaml.
-
-The rendered index is round-trip parsed before it replaces the file, and
-the write is atomic — a crash mid-write cannot truncate an index. Key
-order and comments survive, which a PyYAML round trip does not manage.
-
-Exit codes:
-  0  applied
-  1  unknown id, unreadable updates, or an unwritable index (nothing written)
-
-Examples:
-
-```
-  echo '{"PAT-0001":{"status":"superseded"}}' | ape pattern update --updates -
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--generated-at` | string | `—` | Timestamp to write as generated_at (default: resolved config timestamp) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--updates` | string | `-` | JSON file with per-entry field deltas, or '-' for stdin |
-
-## ape pattern verify
-
-Verify the patterns registry against its index
-
-```
-ape pattern verify [flags]
-```
-
-Exactly five checks, and no others:
-
-  1. registry.orphan_record / registry.phantom_entry
-     set equality between the record directory and index.yaml, both
-     directions
-  2. registry.file_unresolved
-     every index file: resolves, relative to the index's own directory
-  3. registry.duplicate_id
-     duplicate ids, in the index and on disk
-  4. registry.record_unparseable
-     the record parses as frontmatter at all
-  5. registry.entry_incomplete
-     every index entry carries each field its family's index schema
-     requires (file: excepted: its absence is check 2).
-     `ape registry backfill --all` fills the ones its record states
-
-Check 5 is presence only. No type or value validation, no field drift, no
-tag comparison, no updated_at comparison — those are judgment, and a
-verifier that wanders into them stops being trustworthy.
-
-An index.yaml that is absent while records exist is reported once, as
-registry.index_missing: the degenerate case of check 1, not a fifth check.
-One finding beats one orphan per record, which would bury the only fact
-that matters.
-
-Findings travel in the payload. Exit is 0 even with findings unless
---strict is passed, so this is safe to call from anywhere.
-
-Examples:
-
-```
-  ape pattern verify --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) |
-
-## ape pipeline
-
-List or run an APEX pipeline
-
-```
-ape pipeline [name] [flags]
-```
-
-List or run a named APEX pipeline against the project in the current
-working directory.
-
-  ape pipeline                 List installed pipelines (also accepts
-                               --output-format human|json|yaml).
-  ape pipeline <name>          Run the named pipeline.
-
-Available pipelines are read from <project>/_apex/pipelines/. To
-install the canonical set (design, governance, epics) from the
-framework repo, run "ape framework update".
-
-Each pipeline is a sequence of stages; each stage is a chain of skill
-invocations. ape runs one interactive "claude" REPL per stage inside an
-in-process PTY (never "claude -p"): steps are typed as real REPL
-keystrokes following PAT-25 passthrough conventions —
-
-    /<agent> --autonomous -- <skill> --autonomous <args>
-
-Skills without an agent skip the passthrough hop:
-
-    /<skill> --autonomous --no-commit <args>
-
-Stages and steps may declare the extensions they need
-(requires-extensions). ape reads the project's effective extensions
-once at run start and skips — and records as skipped — every stage or
-step whose extensions are not configured, so governance runs ADR,
-pattern, capability and feature governance as configured.
---ignore-extensions runs everything.
-
-Rendering surface: --tui (default) shows the Bubble Tea panels, --web
-serves the bridged web UI, --no-tui prints plain stdout progress lines.
-
-The --prompt flag is forwarded only to skills whose pipeline definition
-declares prompt_flag; no canonical framework pipeline declares it, so
-the flag only reaches a step in a pipeline you have added it to. The
-prompt value passes through as REPL keystrokes directly, so embedded
-quotes/specials survive without shell quoting.
-
-Examples:
-
-```
-  ape pipeline                       # list installed pipelines
-  ape pipeline design                # run the design pipeline (TUI)
-  ape pipeline governance --no-tui   # plain stdout progress
-  ape pipeline epics --web --open    # bridged web UI, open the browser
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--commit-allow-dirty` | bool | `false` | Bypass the dirty-tree pre-run gate. The first committing step's diff will include any pre-existing uncommitted changes. |
-| `--cwd` | string | `—` | Project root directory (default: current working dir) |
-| `--detach` | bool | `false` | Start the run in the background, detached from this shell, print its id, and return at once; `ape run wait <id>` waits for it |
-| `--effort` | string | `—` | Explicit reasoning effort (low\|medium\|high\|xhigh\|max) applied when a step/stage/pipeline does not set one in the YAML. Process-wide, sub-agents included. Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). |
-| `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
-| `--from` | string | `—` | Skip stages before the named one and start execution there (a stage skipped for its extensions starts the run at the next one that is not) |
-| `--idle-timeout` | duration | `0s` | Per-step idle backstop: cancel a step only after this long with no progress across hook events or transcript growth (e.g. 90m). Default 60m. PTY output is NOT an anchor here — see `ape prompt`. |
-| `--ignore-extensions` | bool | `false` | Run every stage and step regardless of its `requires-extensions:` gate, and check every conditional preflight file |
-| `--ignore-project-settings` | bool | `false` | Tell the spawned claude to skip project + local .claude/settings*.json. Honoured in --web mode. |
-| `--manifest-dir` | string | `—` | Override the directory for run manifest artifacts (default: <project>/_output/ape/pipelines) |
-| `--max-duration` | duration | `3h0m0s` | Hard wall-clock ceiling per step regardless of progress (e.g. 3h); the clock resets on each sub-agent boundary, so a sequential batch step is bounded per item, not per batch. 0 disables the cap. |
-| `--nats-creds` | string | `—` | NATS .creds file; its user identity is baked into every subject (env APE_NATS_CREDS). |
-| `--nats-url` | string | `—` | NATS server URL for progress events + transcript upload (env APE_NATS_URL). Empty disables both. |
-| `--no-commit` | bool | `false` | Do not commit anything during the run; leave the working tree dirty. Overrides any `commit:` field in the pipeline YAML. |
-| `--no-tui` | bool | `false` | No UI surface: plain stdout progress lines. Exec is still the interactive per-stage claude REPL in an in-process PTY. |
-| `--open` | bool | `false` | With --web (or default): xdg-open the broker URL on start. |
-| `--output-format` | string | `human` | Output format for list mode (no positional arg): human\|json\|yaml |
-| `--output-style` | string | `—` | Output style pinned on the spawned session (default "Default"). Pass "inherit" to keep whatever style the machine is configured with. |
-| `--prompt` | string | `—` | Optional prompt forwarded to steps whose pipeline declares prompt_flag (no canonical pipeline does) |
-| `--prompt-file` | string | `—` | File holding the --prompt text; "-" reads stdin. Mutually exclusive with --prompt |
-| `--quiet` | bool | `false` | With --no-tui: suppress per-event stream; print only stage/step start/end markers |
-| `--transcript-store` | string | `nats-object` | Transcript blob backend: nats-object\|uri-offload (env APE_TRANSCRIPT_STORE). |
-| `--tui` | bool | `false` | Bubble Tea TUI (the default; explicit form for scripts). |
-| `--upload-transcripts` | bool | `false` | At run end, upload the transcript set as content-addressed blobs (env APE_UPLOAD_TRANSCRIPTS=1). |
-| `--web` | bool | `false` | Bridged web UI. Explicit form for scripts. |
-
-## ape planning
-
-Show the planning pipeline diagram
-
-```
-ape planning
-```
-
-Print an ASCII swimlanes view of the greenfield planning pipeline.
-Lanes are agent personas; rows are topological depth; `←` lists each
-skill's upstream dependencies. Source of truth for edges: the
-apex_process_docs planning-pipeline explanation.
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--from` | string | `—` | the change that found it |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
 
 ## ape project
 
@@ -5058,6 +3432,7 @@ Subcommands:
 - `check` — Validate every v1 shape and size cap; list all failures
 - `codes` — List the diagnostic codes v1 commands report in --json failures
 - `init` — Create the development/ skeleton and merge ape's hooks (never overwrites)
+- `lift` — Lift an APEX v0 project to v1 in one commit (the mechanical half of the migration)
 
 ## ape project check
 
@@ -5073,13 +3448,17 @@ Validate the whole project and list every failure, not just the first.
                            ## Constraints (each non-empty); ≤ 150 lines and ≤ 8 KB
   AGENTS.md                present, ≤ 120 lines; CLAUDE.md (if any) has the line @AGENTS.md
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
-                           Gate, Goal; Budget a number when present. Its Delivery: line
+                           Gate, Goal; Budget a number when present; a "## Next"
+                           section holds findings (`ape next add`), not a milestone. Its Delivery: line
                            links the current brief, e.g.
                            `Delivery: Phase 1 — "…" ([brief](briefs/2026-10-16-<slug>.md))`;
                            a Markdown link or a bare briefs/….md path, relative to
                            roadmap.md (or development/briefs/… from the project root),
                            must resolve (roadmap.delivery-link); briefs with no linking
-                           Delivery: line are roadmap.delivery-unlinked
+                           Delivery: line are roadmap.delivery-unlinked. An approved
+                           milestone has ape's approval record (milestone.status-
+                           unrecorded; a done one, ape's close) and its gate as approved
+                           (milestone.gate-changed): a person approves it again
   development/briefs/      YYYY-MM-DD-<slug>.md with a real date (brief.bad-name);
                            committed with the plan (brief.uncommitted); never changed
                            from the text of the commit that added it, in the working
@@ -5089,16 +3468,32 @@ Validate the whole project and list every failure, not just the first.
                            "#### Scenario:" and exactly one "- check: <cmd> | human-review"
                            per scenario; ≤ 20 KB ("split into two capabilities")
   decisions/NNNN-<slug>.md # ADR-NNNN: title, Status, Date, Context/Decision/Consequences,
-                           Enforced by
+                           Enforced by; an accepted one recorded in decisions.json
+                           (decision.accepted-unrecorded: `ape decision accept` records it)
   changes/<id>/            every non-archived change, as `ape change check`
   layout                   no development/changes/archive/ (an older ape's archive: move
                            its folders to development/archive/), no development/.apex/
                            (an older ape's state: move milestones.json and decisions.json
                            to _apex/state/, delete it; `ape project init` then adds
                            _apex/state/.gitignore)
+  lift                     development/lift-disposition.md in a project whose v1 epoch is a
+                           lift commit ("apex: lift …"): the disposition list awaits review
+                           (lift.disposition-pending) until the person deletes the file
+  docs                     each path _apex/config.yaml docs: names (changelog, user_docs)
+                           exists (docs.missing: create it, or fix the path)
   .claude/settings.json    ape's hooks registered as `ape project init` writes them:
                            hooks.missing / hooks.altered (matcher, type, async, a
-                           stop timeout below 1800 s); `ape project init` restores them
+                           stop timeout below 1800 s); `ape project init` restores them;
+                           and shared through git: settings.ignored when git ignores it
+                           (and does not track it), since its hooks then reach no other
+                           checkout — only `ape task` sessions get them inline
+  provenance               since the v1 epoch (the newest "apex: project init" or "apex: lift"
+                           commit; nothing before it is judged), one git log walk: a commit
+                           touching development/specs/** must be an archive squash — a
+                           "Change: <id>" trailer whose change is archived, whatever its
+                           subject — else spec.edited; a change's state.json may change only
+                           in an "apex: …" commit or an archive squash, else state.forged.
+                           A git revert of such a commit clears both (both action person)
   plugins                  _apex/config.yaml marketplaces/plugins: settings.json's
                            extraKnownMarketplaces/enabledPlugins match them, and (when
                            claude is on PATH) each plugin is installed at project scope
@@ -5133,9 +3528,14 @@ List every diagnostic code an APEX v1 command (project, status, milestone, chang
 decision) can report, with the exit status it comes with and what it means.
 
 Every --json failure is {"ok": false, "exit": N, "error": "<one line>",
-"diagnostics": [{"severity", "code", "message", "fix", "file"?, "line"?}], ...}: the
-first diagnostic is the failure itself, the rest its findings or conflicts. Branch on
-"code"; "message" and "fix" are for people. Codes are stable: a new rule gets a new
+"diagnostics": [{"severity", "code", "message", "fix", "action", "file"?, "line"?}], ...}:
+the first diagnostic is the failure itself, the rest its findings or conflicts. Branch on
+"action" (D47): retry (run the same command again), apply (apex-apply: code work or a
+re-start), review (review again), replan (apex-change re-plans), stop (the run stops), person
+(a person must act: list it, go on with other work). A code's action is the one listed here;
+where its meaning names a case that changes it (milestone.changes-in-flight), the diagnostic
+carries the action of the case (D49). "code" says which rule; "message" and
+"fix" are for people. Codes are stable: a new rule gets a new
 code, and a code's meaning never changes. severity is always "error" (no warning tier).
 Exit: 1 check failed · 2 usage · 3 conflict (nothing written).
 
@@ -5167,7 +3567,12 @@ Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritt
                                      written: regression, models, effort, and limits —
                                      budget: enforce|off (default off; see ape task --help),
                                      attempts: N red verifies per start (default 5; see
-                                     ape change verify --help))
+                                     ape change verify --help); commit: {subject,
+                                     hooks} for the archive's squash, and evidence:
+                                     archive|off (default off) — see ape change archive
+                                     --help; notify: <command>, run on a limit stop or a
+                                     blocked change — see ape task --help); see "Check
+                                     settings" below
   AGENTS.md                          the project map (skeleton)
   CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
                                      gets it appended, and nothing else
@@ -5188,7 +3593,9 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
   SessionStart          ape hook session-start
   Stop, SubagentStop    ape hook stop          (timeout 1800 s: it runs the change's checks)
   PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit|Bash:
-                                                the edit guard, and the git tag guard)
+                                                the edit guard, and the Bash guards:
+                                                git tag writes, git push, pkill/killall,
+                                                rebase/merge on a change branch)
 A hook that was altered (another matcher, async, a shorter stop timeout) is replaced
 by the one above; running init again changes nothing. ape task passes the same
 hooks inline as well, so its sessions have them even when settings.json does not.
@@ -5215,6 +3622,51 @@ from the consumer side: a marketplace serves one version of each plugin, so pin
 by pointing the marketplace at a ref (github/git: ref: <branch|tag>). A plugin
 the marketplace does not serve at ref fails with the command to run.
 
+Check settings in _apex/config.yaml (read by start, verify, the gate and the hooks; a
+value ape cannot use, or a key it does not know inside these blocks, makes the config
+unparseable and every command refuses it):
+
+  regression: make test              the project's own suite, at start/verify/gate, failing
+                                     only when newly red; or in tiers:
+  regression: {change: make test, milestone: make test-all}
+                                     change: at start and verify (baseline-aware);
+                                     milestone (else change): at the milestone gate
+  timeouts: {check: 20m, regression: 45m, gate: 1h}
+                                     Go durations; defaults 15m per check, 30m for the
+                                     regression command, 30m for a Gate: command; a
+                                     command's --timeout flag overrides them
+  retries: 1                         a red check runs again up to n times (0–5, default
+                                     0); a pass on a retry is green and recorded flaky:
+                                     true (JSON results[].flaky, tries; listed by ape
+                                     status). Vacuous and unrun checks are not retried
+  checks: {vacuous_output: ["no tests to run", …]}
+                                     a check that exits 0 but whose output says it ran
+                                     nothing is red, reason "vacuous" (exit -2). Default
+                                     list: "no tests to run" (go test), "running 0 tests"
+                                     (cargo), "Ran 0 tests" (unittest < 3.12), "0 passing"
+                                     (mocha), "collected 0 items" (pytest with exit 5
+                                     masked); [] turns it off. A phrase counts as a whole
+                                     word, and not when a line without one starts like a
+                                     line with one (go test ./... -run X that ran X in one
+                                     package: "ok pkgA 0.4s" beside "ok pkgB … [no tests
+                                     to run]" is not vacuous)
+  requires: {RADIX_DSN: env, docker: cmd}
+                                     a check that mentions $RADIX_DSN / ${RADIX_DSN (a
+                                     comment counts: "go test ./store/... # needs
+                                     $RADIX_DSN") while it is unset or empty, or runs
+                                     docker as a command while it is not on PATH, is not
+                                     run: reason "unrun" (exit -3), red, never green
+  docs: {changelog: CHANGELOG.md, user_docs: docs/}
+                                     both optional, project-relative: the changelog and
+                                     user docs a user-visible change updates (apex-change
+                                     adds the task, apex-review checks it); ape project
+                                     check reports a missing path (docs.missing); ape
+                                     status --json carries the block as "docs"
+
+Scope (D45): v1.0: one operator per checkout, on a local trunk; PR mode comes later. Init
+says so (JSON "scope"); change start and archive refuse while the base branch is behind its
+upstream (base.behind-upstream).
+
 --brownfield adds nothing; it records in _apex/state/project.json (ignored) that the
 project existed before APEX.
 
@@ -5234,6 +3686,109 @@ Flags:
 | `--brownfield` | bool | `false` | record that the project existed before APEX |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape project lift
+
+Lift an APEX v0 project to v1 in one commit (the mechanical half of the migration)
+
+```
+ape project lift [flags]
+```
+
+Lift an APEX v0 project (framework v0.15.0–v0.31.x) to the v1 layout, in ONE commit
+whose subject starts "apex: lift" — the v1 epoch. The judgment half (which rule lives
+where, what M1 delivers) is apex-plan's, from the disposition file this writes.
+
+Before: a person tags the commit to lift and pushes the tag. The tag is the archive of
+everything the lift deletes; v0 files stay readable as `git show apex-v0-final:<path>`.
+
+  git tag -a apex-v0-final -m "APEX v0 final" && git push origin apex-v0-final
+  ape project lift --dry-run        # the whole plan, nothing written
+  ape project lift
+
+Pre-flight (refused, exit 1): a v0 install (_apex/framework.yaml records a v0 version,
+or did in git history) and no v1 layout or earlier lift (lift.not-v0); a version in
+v0.15.0–v0.31.x and a resolvable _apex/config.yaml (lift.unsupported-layout); a clean
+tree (lift.dirty); apex-v0-final exists (lift.no-tag), is HEAD (lift.tag-not-head),
+and is on the current branch's upstream remote at the same commit, checked with
+git ls-remote — the one network call (lift.tag-not-pushed; lift.remote-unreachable).
+
+The commit:
+  deletes        the v0 families, at the paths _apex/config.yaml's folder variables
+                 resolve to: the skills the v0 install manifest lists (only those —
+                 never a project's own), the v0 _apex tables and pipelines, stories,
+                 the sprint tracker, retrospectives, planning (PRD, architecture,
+                 epics, proposals, release records), ADR and pattern records and
+                 indexes, capability and feature registries, deferred records, team
+                 memory, project-context. Kept: docs, CHANGELOG, evidence, research,
+                 code, _apex/framework.yaml (the migration ledger)
+  converts       every ADR (accepted, superseded, proposed) into
+                 development/decisions/NNNN-<slug>.md, renumbered from 0001 in the
+                 original order, with Status, Date, Supersedes and a "Lifted from:"
+                 line. Nothing is invented: no date → git's first date of the file; no
+                 Enforced by → "review" (what ape decision new writes); a missing
+                 Context/Decision/Consequences → the section, marked "not recorded";
+                 each is listed as a gap. Accepted and superseded ones are recorded
+                 in _apex/state/decisions.json (by: lift), so their text is held from
+                 here on. Canon ADRs the project cites and has no record of are copied
+                 from the governance clone when _apex/config.yaml resolves one
+  rewrites       every ADR citation (ADR-NNNN, and paths to the old records) in
+                 Markdown and in code comments to the new number
+  strips         epic, story and deferred ids from code comments — Story 3.2,
+                 Epic 12, (3-2) (a known story key), DW-…, paths into the deferred
+                 store or the implementation folder — keeping the rest of the comment;
+                 a comment that was only an id goes. Comments only: ids in
+                 identifiers, strings and directives are listed, not edited.
+                 Tokenized: Go (go/scanner), shell, Python, JS/TS (JSX/TSX: comments
+                 that begin their line only), Dart, YAML, Makefile (recipe lines are
+                 the shell's: left), C/C++. A file the tokenizer cannot read, a
+                 generated file, or an --exclude match is left and listed. Go: the
+                 token stream without comments is checked unchanged; other languages:
+                 the text outside comments, re-tokenized, is checked unchanged (blank
+                 lines and trailing whitespace aside) — a file failing its check is
+                 left unedited and listed
+  carries        ## Code Validation (project-context.md) into AGENTS.md ## Commands,
+                 and the runnable ones, joined with &&, into regression: in
+                 _apex/config.yaml (rewritten to project_name, development_folder,
+                 regression)
+  lays down      the v1 skeleton, as `ape project init --brownfield` (CLAUDE.md keeps its
+                 content, loses the v0 apex:managed block and gains @AGENTS.md)
+  writes         development/lift-disposition.md: the binding-rule candidates
+                 (CLAUDE.md list items, project-context "don't miss" items, team-memory
+                 gotcha titles) with an empty Disposition column for apex-plan, then a
+                 fresh read-only review, then the person — who deletes the file — and
+                 the ids left, ADR gaps, files not edited, references to removed paths
+                 (CI guards over the v0 corpus show up there), readings at the tag
+
+After the commit the regression command runs once (--no-verify-run skips it): its result
+is the baseline; red is recorded, not a lift failure.
+
+--from-update is how the framework's v1.0.0 migration entry runs it inside
+`ape framework update`: uncommitted changes under .claude/skills/, _apex/ (not
+config.yaml or state/), .aboard/ and .gitignore are the install's, left out of the lift
+commit for the update's own; skills the v1 install placed are never deleted.
+
+Exit codes: 0 lifted (or planned) · 1 refused or failed (code in --json) · 2 usage.
+
+Examples:
+
+```
+  ape project lift --dry-run
+  ape project lift --json
+  ape project lift --exclude 'schema/core/**' --exclude deploy/init/00-bootstrap.sh
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--dry-run` | bool | `false` | print the whole plan; write nothing (pre-flight problems are reported, not refused) |
+| `--exclude` | stringArray | `[]` | a glob (** allowed) of files the lift must not edit, e.g. a byte-identity perimeter; repeatable |
+| `--from-update` | bool | `false` | run inside ape framework update (the v1.0.0 migration entry): the install's uncommitted files are left to it |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--no-verify-run` | bool | `false` | do not run the regression command after the commit |
+| `--timeout` | duration | `0s` | limit for each command run, overriding _apex/config.yaml timeouts: (default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; timeouts.gate, else 30m, for a gate command); exit 124 when exceeded |
 
 ## ape prompt
 
@@ -5308,292 +3863,6 @@ Flags:
 | `--ultracode` | bool | `false` | Prepend the ultracode keyword (session runs workflows by default) |
 | `--workflow` | bool | `false` | Append a directive to run the task through a Claude Code workflow |
 
-## ape registry
-
-Verify or reconcile every record registry at once
-
-```
-ape registry
-```
-
-Cross-family fan-out over the four record registries — ADRs, patterns,
-features and capabilities. Each family also carries these verbs on its own
-noun (`ape adr verify`); this is the whole-project view.
-
-Subcommands:
-
-- `backfill` — Fill absent required fields of existing index entries from their records
-- `restore-headers` — Rebuild a headerless record's frontmatter from its index entry
-- `sync` — Reconcile every record index against records on disk
-- `verify` — Verify every record registry (or a named subset)
-
-## ape registry backfill
-
-Fill absent required fields of existing index entries from their records
-
-```
-ape registry backfill [flags]
-```
-
-Complete the index entries that already exist. A field the family's index
-schema requires that is ABSENT from an entry is copied in from that
-entry's record: its frontmatter, or its file name for slug. It is the same
-rule sync uses when it adds an entry.
-
-It does nothing else. No entry is added, removed or repointed, a value
-that is present is never changed (even an empty one), and file: is never
-filled, because an entry with no file is sync's repair. That narrowness is
-the point: this runs unattended as a framework migration on
-`ape framework update`, where a structural index change is not wanted.
-
-A required field the record has no value for stays absent and is reported
-as a gap. An entry whose record is absent or unreadable is also a gap.
-Gaps are not pending work: nothing on disk can close them, so re-running
-finds the same ones.
-
---check writes nothing and answers in its exit code: 0 when there is
-nothing to fill, 1 when fills are pending. Those two are the only answers
-about the index. Anything else means the check itself failed: 2 for an
-unknown family or an index or record that cannot be read, 4 with no
-project config.
-
-Examples:
-
-```
-  ape registry backfill --all --check
-  ape registry backfill --all
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--all` | bool | `false` | Every family (the default when --family is not given) |
-| `--check` | bool | `false` | Write nothing; exit 0 when nothing is fillable, 1 when fills are pending (2 or 4 if the check itself failed) |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--family` | stringSlice | `[]` | Families to backfill: adrs,patterns,features,capabilities |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape registry restore-headers
-
-Rebuild a headerless record's frontmatter from its index entry
-
-```
-ape registry restore-headers [flags]
-```
-
-Give a headerless record back the frontmatter its index entry already
-states. This is `sync` run in the other direction, and it is the
-non-destructive answer to the one finding pair that had none.
-
-A record with no frontmatter block claims no id. So `verify` reports it
-twice — registry.record_unparseable for the record, registry.phantom_entry
-for the index entry nothing appears to claim — and `sync` reads that
-entry as dead and offers to delete it. That entry is the last copy of the
-record's id, title, type, status, version and dates: deleting it turns a
-missing header into an unrecoverable loss, on a file that was on disk the
-whole time. `sync` now withholds those removals; this is what clears
-them.
-
-Every value is copied verbatim from the entry — sequences like `tags`
-included — minus the two keys that are index bookkeeping (`file`,
-`slug`), plus the `output_document` self-reference every record in
-these families carries. Nothing is invented.
-
-IT WILL NOT TOUCH A RECORD THAT HAS A FRONTMATTER BLOCK, even one that
-fails to parse. Overwriting a header someone authored to satisfy a checker
-is a different and far worse operation than giving a headerless file the
-header its index says it always had; that case is reported and left for a
-person.
-
---check makes it a dry run.
-
-Examples:
-
-```
-  ape registry restore-headers --check
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--all` | bool | `false` | Every family (the default when --family is not given) |
-| `--check` | bool | `false` | Report what would be written, without writing |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--family` | stringSlice | `[]` | Families to repair: adrs,patterns,features,capabilities |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape registry sync
-
-Reconcile every record index against records on disk
-
-```
-ape registry sync [flags]
-```
-
-Reconcile index.yaml against the records on disk: records with no entry
-are added, entries whose id no record claims are removed, and an entry
-whose file: no longer resolves is repointed at the record claiming its id.
-
-This is the repair for the findings `verify` reports, and nothing more —
-it copies what a record's own frontmatter states and invents no titles,
-statuses or any other field. A renamed record keeps its authored entry
-rather than being dropped and re-added.
-
-An added entry carries every field of the family's index schema the record
-has a value for: its frontmatter, or its file name for slug. A required
-field with no value is left out and listed in the change's missing. An
-entry that is already listed is never completed here; that is
-`backfill`.
-
---check makes it a dry run: the same diff, nothing written, and the answer
-in the exit code: 0 when there is nothing to change, 1 when changes are
-pending, 2 when the check itself failed (an unknown family, or an index
-that cannot be read), 4 with no project config. Withheld removals alone
-exit 0: sync cannot make them. generated_at moves only when something
-else did.
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--all` | bool | `false` | Reconcile every family (the default when --family is not given) |
-| `--check` | bool | `false` | Report the diff without writing; exit 0 nothing to change, 1 changes pending (2 or 4 if the check itself failed) |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--family` | stringSlice | `[]` | Families to reconcile: adrs,patterns,features,capabilities |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape registry verify
-
-Verify every record registry (or a named subset)
-
-```
-ape registry verify [flags]
-```
-
-Exactly five checks, and no others:
-
-  1. registry.orphan_record / registry.phantom_entry
-     set equality between the record directory and index.yaml, both
-     directions
-  2. registry.file_unresolved
-     every index file: resolves, relative to the index's own directory
-  3. registry.duplicate_id
-     duplicate ids, in the index and on disk
-  4. registry.record_unparseable
-     the record parses as frontmatter at all
-  5. registry.entry_incomplete
-     every index entry carries each field its family's index schema
-     requires (file: excepted: its absence is check 2).
-     `ape registry backfill --all` fills the ones its record states
-
-Check 5 is presence only. No type or value validation, no field drift, no
-tag comparison, no updated_at comparison — those are judgment, and a
-verifier that wanders into them stops being trustworthy.
-
-An index.yaml that is absent while records exist is reported once, as
-registry.index_missing: the degenerate case of check 1, not a fifth check.
-One finding beats one orphan per record, which would bury the only fact
-that matters.
-
-Findings travel in the payload. Exit is 0 even with findings unless
---strict is passed, so this is safe to call from anywhere.
-
-Examples:
-
-```
-  ape registry verify --all --output-format json
-  ape registry verify --family adrs,patterns
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--all` | bool | `false` | Verify every family (the default when --family is not given) |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--family` | stringSlice | `[]` | Families to verify: adrs,patterns,features,capabilities |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) |
-
-## ape release
-
-Project the framework's release record
-
-```
-ape release
-```
-
-A release slice is an operator-declared set of epics, living in
-sprint-status.yaml's release_slices: and active_slice: keys. A release
-record is one file per release under {planning_folder}/releases/, whose
-frontmatter asserts that release's status.
-
-  status  project the records and the slices they decide
-
-Subcommands:
-
-- `status` — Report the declared slices and the state each record asserts
-
-## ape release status
-
-Report the declared slices and the state each record asserts
-
-```
-ape release status [flags]
-```
-
-Read sprint-status.yaml's release_slices: and active_slice: keys and,
-for each slice, the frontmatter of {planning_folder}/releases/release-<id>.md.
-
-Two things this reads and never computes.
-
-THE STATUS IS THE RECORD'S. A release's status is asserted in exactly one
-place — the record's own 'status:' field — so a slice is released when its
-record says so and by no other route. A release_slices: entry deliberately
-carries no status of its own, which is what stops a shipped release being
-counted as unshipped by a writer that only ever wrote 'declared'. An
-absent releases/ folder, an absent record and an UNREADABLE one all mean
-"not released"; the unreadable one is reported as unreadable rather than
-given a status it never asserted.
-
-ONLY THE FRONTMATTER. The record's body carries nine assembled tables,
-including the gate table with its per-row PASS / RED / NOT-RUN / PENDING
-results. Those belong to apex-release-record, and re-deriving them from a
-Markdown table here would put a second source of truth behind the
-release's own verdict. What is reported about gates is the declaration —
-how many, how many required — never a result. The verdict is in the
-frontmatter already: 'status:' asserts it, 'blocking:' says why it is not
-'prepared', 'acceptance:' says why a run that reached no verdict reached
-one.
-
-The active scope resolves the way the framework's own prose does:
-active_slice names a declared slice, or — absent, empty, or naming a slice
-release_slices: does not carry — the scope is every epic not inside a
-released slice. Epics are enumerated from tracker rows, so with NO tracker
-the epic sets come back null rather than empty: "no tracker to enumerate
-from" and "no epics" are different answers, and only one of them is true.
-
-EXIT 0 ALWAYS. The record's 'status:' is the verdict, not the exit code —
-a projection that halted on one bad record could not report the others.
-
-Examples:
-
-```
-  ape release status
-  ape release status --output-format json
-  ape release status --slice v1.2.0
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--slice` | string | `—` | Report one slice by id instead of every declared slice |
-
 ## ape rollback
 
 Rollback ape to the previous version
@@ -5612,7 +3881,7 @@ Wait for, or inspect, a run started with --detach
 ape run
 ```
 
-A run started with --detach (ape pipeline|task|change --detach) returns an id at
+A run started with --detach (ape task|change --detach) returns an id at
 once and continues in the background, orphaned from the shell that started
 it, so a tool's time limit on that shell does not reach it.
 
@@ -6653,10 +4922,11 @@ ape script <file.go> [flags] [-- script-args...]
 
 Run a plain Go file inside ape's process under the yaegi interpreter,
 with the apescript library injected so the script can drive ape's
-primitives — run a pipeline, task, or prompt (all PTY-backed, the same
-runners the CLI uses), read manifests, scan transcripts, log, publish
-events, and upload blobs — as one deterministic, version-controlled Go
-file instead of a shell wrapper around the CLI.
+primitives — run a task or a prompt (PTY-backed, the same runners the
+CLI uses), read manifests, scan transcripts, log, publish events, and
+upload blobs — as one deterministic, version-controlled Go file instead
+of a shell wrapper around the CLI. RunPipeline returns an error: `ape pipeline`
+was retired with APEX v0.
 
 The file must define:
 
@@ -6697,7 +4967,7 @@ Flags:
 
 ## ape service
 
-Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply
+Run a NATS-micro job daemon that accepts task/prompt/script jobs over request/reply
 
 ```
 ape service [flags]
@@ -6708,12 +4978,13 @@ daemon registers a NATS micro service on
 
   ape.svc.<name>.<project-slug>.<endpoint>
 
-and accepts JSON request/reply jobs: pipeline.run and task.run dispatch an
-ape child process (headless, PTY-only); job.status / job.list / job.stop
-manage them; status / health report the daemon. NATS-micro $SRV.PING /
+and accepts JSON request/reply jobs: task.run dispatches an ape child
+process (headless, PTY-only); job.status / job.list / job.stop manage
+them; status / health report the daemon. NATS-micro $SRV.PING /
 $SRV.INFO / $SRV.STATS discovery is available for free. prompt.run and
 script.run are registered but rejected (VALIDATION) until their runners
-ship.
+ship. pipeline.run is registered and always rejected (VALIDATION): `ape pipeline`
+was retired with APEX v0.
 
 Admission is keyed exclusivity, exclusive by default: a job holds its
 exclusivity_key (default "") exclusively unless nonexclusive:true. Conflicts
@@ -6728,7 +4999,7 @@ from _apex/service.yaml (or ~/.ape/service.yaml, or --config):
     - /abs/path/main-project
     - /abs/path/component-repo
 
-SECURITY: anyone who can publish on the service subjects can run pipelines on
+SECURITY: anyone who can publish on the service subjects can run skills on
 this machine. Scope the NATS credential's publish/subscribe permissions to
 ape.svc.<name>.<project-slug>.> on the server — that is the real trust
 boundary (see docs/how-to/run-ape-as-a-service.md).
@@ -6770,8 +5041,10 @@ List, prune, or open the URL of live ape sessions
 ape sessions [flags]
 ```
 
-Live ape chat / ape pipeline (web mode) invocations are tracked in
-~/.ape/registry.json. This subcommand inspects that registry.
+Live web-mode sessions are tracked in ~/.ape/registry.json, and this
+subcommand inspects that registry. The only writer was `ape pipeline`'s web
+mode, retired with APEX v0, so this ape adds no rows: it reads and prunes
+what an older ape left.
 
   ape sessions               Show one row per live session.
   ape sessions prune         Drop rows whose PID is no longer running.
@@ -6832,197 +5105,6 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
-## ape sprint
-
-Inspect and maintain sprint-status.yaml
-
-```
-ape sprint
-```
-
-Three operations on the tracker, with deliberately different contracts:
-
-  check      compare tracker rows against story files; report divergence,
-             never pick a winner, always exit 0
-  verify     assert one row landed as written (a gate, exit 0/2/3/4/5)
-  reconcile  project an epic's row from its story rows (a mutation)
-
-Subcommands:
-
-- `check` — Report divergence between the tracker and story files
-- `reconcile` — Project epic rows from their story rows
-- `verify` — Verify one tracker row landed as written
-
-## ape sprint check
-
-Report divergence between the tracker and story files
-
-```
-ape sprint check [flags]
-```
-
-Set-compare sprint-status.yaml's story rows against story files on disk,
-and compare each row's status against that story's own frontmatter.
-
-A story file is one that declares story_id, or one a tracker story row
-names. The second is a brownfield story with no frontmatter: its status is
-its body's Status: line. A named file stating no status anywhere is
-reported as row_without_story, saying so rather than claiming no file.
-
-epic-* and *-retrospective rows are classified out: they have no story
-file to diverge from. The tracker's 'drafted' is normalised to a story
-file's 'ready-for-dev' for comparison only — neither file is touched — or
-every drafted story would report a false divergence.
-
-ALWAYS EXITS 0, even with findings, and there is no --strict. Which side of
-a divergence is right is judgment, so this reports both values and picks
-neither; wiring it into a build loop would stop runs over something no tool
-can resolve. It belongs in 'ape doctor' and nowhere else.
-
-Examples:
-
-```
-  ape sprint check --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape sprint reconcile
-
-Project epic rows from their story rows
-
-```
-ape sprint reconcile [flags]
-```
-
-An epic's status is not a fact any skill asserts — it is a projection of
-the story rows beneath it. This is the single implementation of that
-projection, tracker-only, with no story-file reads:
-
-  rows   = development_status keys matching ^{N}-\d+[-_]
-  active = rows whose status is not 'cancelled'
-
-  no rows              -> leave unchanged (never close an epic with none)
-  no active rows       -> leave unchanged (all-cancelled is a scope call)
-  all active 'done'    -> done
-  all active 'backlog' -> backlog
-  otherwise            -> in-progress
-
-'blocked' lands in the final clause, so a blocked story holds its epic
-open. An unrecognised status can only ever hold an epic open, never close
-it, and is named in the output rather than swallowed.
-
-The write is TARGETED: only the matched epic-N line and the body
-updated_at change. Comments, key order, story rows and the sync-generated
-header are untouched. updated_at moves only on mutation and never
-backwards — it is clamped, reported, and never fatal.
-
-The read-modify-write takes an exclusive lock on a sidecar file, because
-concurrent per-epic sub-agents reconcile the same tracker and the last
-writer would otherwise silently drop a sibling's update.
-
-Exit 0 for every content outcome, including an unrecognised status.
-Exit 2 for a usage error: neither --epic nor --all, both at once, an
-epic number below 1, or no tracker resolved and no --file. Exit 1 only
-for a genuine I/O failure.
-
-If the project has a board (see 'ape aboard'), reconcile also refreshes a
-'Sprint' tab in it — story and epic counts, what is in flight, and what is
-blocked, all derived from the tracker. That is how a long or autonomous run
-can be watched without interrupting it: reconcile already runs at every
-boundary that moves a story, so it is the thing that OBSERVES tracker
-changes rather than the thing that causes them.
-
-Two write paths, chosen by whether a board answers. A board that is
-listening is POSTed to, which is the only way a page already showing the
-board is pushed the change, and which gets the write a real compare-and-set.
-When nothing is listening the file is written directly, so the tab is
-current before anyone starts a board. A server that IS there and refuses —
-a 409, a timeout — stops the refresh rather than writing around it.
-
-The refresh is STRICTLY BEST-EFFORT and cannot affect this command. A
-board that is absent, unreadable or unwritable changes neither the exit
-code nor a byte of stdout; anything it has to say goes to stderr. That is
-not politeness: reconcile sits on mutation paths where a non-zero exit is
-read as a content verdict, so a broken board would otherwise convert a
-defer into a patch and demote a story. --check skips it entirely, since a
-dry run that writes to a board is not a dry run. Nothing here creates a
-board: starting one, and initialising one, are yours to do.
-
-Examples:
-
-```
-  ape sprint reconcile --epic 12
-  ape sprint reconcile --all --check
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--all` | bool | `false` | Reconcile every epic with rows |
-| `--check` | bool | `false` | Report the projection without writing |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--epic` | int | `0` | Reconcile one epic by number |
-| `--file` | string | `—` | Tracker path (default: resolved from config) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape sprint verify
-
-Verify one tracker row landed as written
-
-```
-ape sprint verify [flags]
-```
-
-Re-read the tracker from disk and confirm the write landed: the row
-equals --expected, updated_at does not precede created_at, and updated_at
-is not earlier than the value in the last committed revision.
-
-That last comparison is the one that matters. A row write can silently
-fail to land, and comparing updated_at against created_at alone passes
-trivially because both are written in the same operation.
-
-Exit codes, preserved exactly from verify-sprint-status-row.py because two
-review skills branch on them:
-  0  the row matches and the timestamps are ordered
-  2  file unreadable or YAML malformed
-  3  key missing from development_status, or its value differs
-  4  updated_at precedes created_at (a corrupt write)
-  5  updated_at is earlier than the last committed value (a backwards
-     write). Deterministically repairable: re-write the field as the
-     reported clamp value or later, re-run, and report the clamp. NEVER a
-     reason to stop the run.
-
-Exit 1 is deliberately unreachable. In the Python it meant "PyYAML is not
-installed" — an environment failure that forced apex-review-story and
-apex-code-review to carry an eye-check fallback. A static binary cannot
-produce it, which is what lets those fallback branches be deleted.
-
-This command carries no --cwd. --file is required and names the tracker
-outright, so nothing is resolved from the project's config and there is no
-project for --cwd to select.
-
-Examples:
-
-```
-  ape sprint verify --file development/implementation/sprint-status.yaml --key 1-1 --expected done
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--expected` | string | `—` | Status the row must equal (required) |
-| `--file` | string | `—` | Path to sprint-status.yaml (required) |
-| `--key` | string | `—` | development_status row key (required) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
 ## ape status
 
 Show the current milestone, active changes, blocks, pending human review and spend
@@ -7039,6 +5121,14 @@ Show where the project stands, from the records ape keeps:
     budget_usd, session_usd): sessions ape task stopped at its enforced budget
     (limits.budget: enforce; JSON milestone.budget_enforced), whose measured cost the
     spend counts
+  - the milestone's changes blocked in a row (JSON milestone.consecutive_blocks and
+    consecutive_blocks_cap, limits.consecutive_blocks) and, when that cap is reached, the
+    limit that stops work on it: milestone.diagnostics, in the shape of a --json failure's
+    diagnostics — [{code: "milestone.blocks-exceeded", action: "stop", …}] (D49; [] when
+    none), and next says so
+  - a milestone a person closed with its gate red (`ape milestone close --accept-red`):
+    JSON milestones[].accept_red {reason, by, at, gate}; the brief names the last one, and
+    the roadmap lines say "accepted red by <who>: <reason>"
   - the checked-out branch (JSON branch; "(on <branch>)" in the first line)
   - fixes first (trial decision D40): a change with "milestone: none" is a fix (JSON
     changes[].lane "fix"; else "milestone"). Approved fixes (changes[].approved: {by, at,
@@ -7050,7 +5140,10 @@ Show where the project stands, from the records ape keeps:
     (`ape change approve <id> --by <who>`). A fix's runs (`ape task <skill> --args <fix-id>`)
     count toward no milestone's spend
   - every change not archived, with its status, blocked reason, red checks from its
-    last verify, human-review tasks not yet accepted, and for a started change its red
+    last verify (JSON failing: "T1 (exit 1)", "T2 (vacuous: …)", "S (unrun: $X is unset
+    …)" — a red verify of an in-progress change comes from this checkout's
+    _apex/state/logs/<id>/last-verify.json), the checks that passed only on a retry
+    (JSON flaky; "flaky: T2" in the brief; retries: in _apex/config.yaml), human-review tasks not yet accepted, and for a started change its red
     verifies since it started against limits.attempts (JSON attempts, attempts_cap;
     "(3/5 attempts)"; attempts_total, never reset) — a change the cap blocked shows
     "attempts exceeded" as its reason. The counts are this checkout's
@@ -7058,13 +5151,43 @@ Show where the project stands, from the records ape keeps:
     branch, change/<id> (D38; JSON changes[].branch), and its status is read from
     there whatever branch is checked out — a change branch lists the changes it does
     not hold too
+  - an answered change (H9): a person's answer to what blocked it (JSON changes[].answer:
+    {by, at, text}, kept once it is started again); next has it re-planned and started
+  - human review (H4, D47): every change lists awaiting_human (always present in JSON, []
+    when none): its human-review tasks no person has accepted, once only the person is
+    left — the change is reviewed, or archived. The orchestrator skips such a change. A
+    reviewed change awaiting a person is not archived next — next names the accept a
+    person runs. Archived changes
+    with unaccepted human-review tasks (archived past them by a person) are listed after
+    the rest, status "archived", under "Archived, human review not accepted"; they stay
+    acceptable (`ape change accept --help`)
   - spend so far: the sum of finished ape task/pipeline run manifests
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
     cmd, exit, sha}]): the regression command, and scenario checks of the spec a change
     leaves untouched, that were red when a change was baselined — for the planner to
     roadmap. A change's own task and delta checks red at baseline are normal test-first
     and never listed
+  - the base branch (the checked-out one, or the base of the change whose branch is
+    checked out) against its upstream (JSON "base_upstream": {branch, upstream, ahead,
+    behind}; null without one), from the local remote-tracking ref — ape never fetches.
+    v1.0 is one operator per checkout on a local trunk (D45): start and archive refuse
+    while the base is behind (base.behind-upstream: pull)
+  - work outside the change flow (JSON "outside_flow": [{sha, subject, files}], newest
+    first; a count line in the human output): commits on that base branch since the last
+    archive squash — else since the v1 epoch, the newest "apex: project init" or "apex:
+    lift" commit — that touch paths outside development/ and _apex/, carry no "Change:"
+    trailer and have no "apex:" subject. Shown, never failed
+  - an archive in flight or interrupted by a crash (JSON "archive_journal", with
+    "archive_running" when its process is alive; on the first line): status only reports
+    it — the next writing command rolls a crashed one back (archive.interrupted; see
+    `ape change archive --help`)
   - next: what the way of working says comes next, derived from the state alone
+  - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
+    the skills that keep a changelog and user docs current
+  - the latest ape task run (JSON "latest_run": {skill, run_id, status, stopped,
+    resets, resets_at, message}): how it ended, e.g. "stopped: usage-limit, resets
+    2026-10-16T23:00:00+02:00" when a claude.ai usage limit stopped it (see ape task
+    --help, exit 14)
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 
@@ -7085,180 +5208,6 @@ Flags:
 | `--brief` | bool | `false` | at most 25 lines |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-
-## ape story
-
-Project and verify story frontmatter
-
-```
-ape story
-```
-
-Aliases: `stories`
-
-Subcommands:
-
-- `fields` — Project named frontmatter keys across every story
-- `verify` — Verify story frontmatter and shape (corpus report, or a single-file gate)
-
-## ape story fields
-
-Project named frontmatter keys across every story
-
-```
-ape story fields [flags]
-```
-
-Walk the implementation folder, read at most 8 KiB per .md file, stop at
-the closing '---', and emit only the named top-level keys plus their
-nested blocks. A body is never opened.
-
-A file counts as a story only if it has a story_id — which is what keeps
-retrospectives, epic briefs and the deferred-work stub out of the result
-without teaching this command about each of them.
-
-The trailer carries files_scanned, stories_matched, per-field presence
-counts and bytes_read. Those numbers are the point: "this field is absent
-everywhere" and "this field was never looked for" are different answers,
-and only the trailer distinguishes them. A field present in zero stories
-reports 0 and exits 0.
-
-One unreadable file loses that file and nothing else — it is named in
-warnings and the rest are still returned.
-
-Examples:
-
-```
-  ape story fields --select story_id,epic,status,features --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--select` | string | `—` | Comma-separated frontmatter keys to emit (required) |
-
-## ape story verify
-
-Verify story frontmatter and shape (corpus report, or a single-file gate)
-
-```
-ape story verify [flags]
-```
-
-Three check classes over story frontmatter, and no others:
-
-  1. presence  the four required keys, plus the extension-gated ones
-               (governance.adrs, governance.patterns, features,
-               capabilities) for whichever ext_* flags are set
-  2. type      features items must be objects, not bare strings;
-               depends_on items must be strings, not YAML floats
-  3. refs      every cited ADR / pattern / feature / capability id
-               resolves to a record on disk
-
-No enum checks, no contribution vocabulary, no JSON Schema engine. The
-contribution field has no normative source, so coercing it would fabricate
-a lifecycle edge — a test asserts this command reports nothing for any
-value of it.
-
---file mode adds the STORY-SHAPE classes over the body:
-
-  story.section_missing           a section the derived set requires is
-                                  absent. The set is a function of the
-                                  resolved config alone (## Feature Scope
-                                  on ext_features, the two governance
-                                  headers on ext_adrs / ext_patterns); an
-                                  empty section is accepted, a missing
-                                  header is not
-  story.file_list_marker          a File List entry with no status marker,
-                                  an unknown one, or the forbidden
-                                  em-dash-prose form in place of one
-  story.placeholder_residue       a template placeholder surviving at
-                                  status: review. Debug Log References'
-                                  "_No issues encountered._" is a terminal
-                                  convention, never residue
-  story.compliance_table_header   a compliance table whose header row is
-                                  not the declared shape
-  story.gcc_line_form             a Governance Compliance Criteria line
-                                  that is not
-                                  "- [ ] **[ID]** {instruction} -- {scope}"
-  story.adrs_considered           adrs_applicable does not bind against
-                                  the recomputed tag-match candidate count
-  story.adr_unresolved            a governance.adrs id that resolves to no
-                                  ADR at HEAD
-
-And one class that is REPORTED WITHOUT GATING:
-
-  story.adr_not_accepted          a cited ADR that resolves but is not
-                                  accepted. Exit 0 — a story may
-                                  legitimately cite a proposed ADR
-
-The two governance classes need the project's ADR corpus, which is found
-by walking up from the story's own path. Against a story outside any
-project they SKIP and say so; they never silently pass.
-
-TWO MODES, with deliberately different contracts:
-
-  corpus (default)  a REPORT, over frontmatter only. Exit 0 even with
-                    findings; --strict makes it 1. --strict must never be
-                    set from inside apex-review-story, apex-code-review or
-                    apex-epic-batch-review: a non-zero exit on those paths
-                    converts a defer into a patch and demotes the story.
-                    The shape classes are deliberately NOT run here: the
-                    corpus scan reads at most 8 KiB per file and never
-                    opens a body, which is what keeps a 465-story sweep at
-                    67 KB instead of 23.5 MB.
-
-  --file <path>     a GATE, replacing verify-story-frontmatter.py with its
-                    exit codes intact:
-                      0  valid
-                      2  parse failure (bad YAML, or no --- delimiters)
-                      3  a required or extension-conditional key is absent,
-                         or an optional key is present but malformed
-                      4  the keys are fine and the BODY is not — one of the
-                         story-shape classes above
-                    3 wins over 4 when a file has both; the keys are the
-                    more fundamental failure. Referential integrity across
-                    the four families is not asserted here — a single file
-                    cannot see the corpus, exactly as the Python could
-                    not — though the ADR family alone is, by the walk
-                    described above.
-
---fix REPAIRS ONE CLASS AND SAYS SO. A depends_on item that decoded as a
-number is re-quoted: same characters, one right answer, no second source
-needed. Nothing else is touched, and the findings --fix does not own are
-reported as remaining rather than dropped.
-
-The two classes it declines look mechanical and are not. A features item
-needs a contribution, whose only source is the prose table inside the
-feature record — and where that table has no row for the story, the
-disagreement IS the defect. A missing features:/capabilities: key needs a
-value, and [] claims the story contributes to nothing, which is a registry
-question. Both belong to apex-frontmatter-repair, which may read documents
-and judge. Every touched file is re-verified and rolled back if its
-finding count did not fall.
-
-Examples:
-
-```
-  ape story verify --output-format json
-  ape story verify --file development/implementation/1-1_thing.md --active-extensions ext-adrs
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--active-extensions` | string | `—` | Comma-separated active extensions for --file mode (e.g. ext-adrs,ext-features) |
-| `--check` | bool | `false` | With --fix: report the repairs without writing |
-| `--cwd` | string | `—` | Project root (default: current working dir) |
-| `--file` | string | `—` | Verify one story file as a gate (exit 0/2/3/4) |
-| `--fix` | bool | `false` | Repair the findings with a single derivable answer (depends_on quoting), and report the rest |
-| `--include-advisory` | bool | `false` | Also report the advisory classes (story.requirement_ids_missing). Off by default: they fire on every story until a backfill completes, and `ape doctor` reds may not be worked around. |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-| `--strict` | bool | `false` | Exit 1 when there are findings (default: report and exit 0) — NEVER set this from apex-review-story, apex-code-review or apex-epic-batch-review |
 
 ## ape task
 
@@ -7303,6 +5252,13 @@ removed) and _apex/effort-defaults.yaml is not used. Sources: flag, config,
 parent-session, config-default, default. The session's tools see the
 resolved values as APE_SESSION_MODEL / APE_SESSION_EFFORT.
 
+In an APEX v1 project ape first checks the floor the installed framework
+sets: when _apex/ape-commands.yaml declares a min_ape_version above this
+ape, the session is refused (exit 1, code ape.below-floor) with the
+command that updates ape — the same floor `ape framework update` refuses an
+install by (exit 11). A dev build or a pseudo-version cannot be compared:
+a warning, and the session runs.
+
 In an APEX v1 project ape also enforces the milestone budget, when
 _apex/config.yaml says so (it is off by default):
   limits:
@@ -7321,6 +5277,12 @@ nothing is committed, whichever branch the session was on); `ape status` shows i
 line (a person's call) lets sessions start again. An unparseable
 _apex/config.yaml in a v1 project refuses every session (exit 2) rather
 than run it with no limits.
+
+A session of apex-orchestrator is also refused (exit 1, code
+milestone.blocks-exceeded) when the milestone it runs — --args M<n>, else
+the current one — has had limits.consecutive_blocks (default 2) changes
+blocked in a row; a person deals with them and re-approves the milestone,
+which resets the count. A fix's run (--args <fix-id>) is not refused.
 
 --prompt-file <path> reads the prompt from a file, and "-" reads it
 from stdin. It is how a printed escalation command carries the
@@ -7365,12 +5327,30 @@ judged against a skill's declaration.
 The verdict is written to the run manifest as commit_contract, so a
 failure stays diagnosable after the fact.
 
+Usage limits (H20): when a claude.ai plan's usage limit stops the session,
+Claude Code draws its limit line ("You've hit your usage limit · resets
+11pm (Europe/Madrid)", or "Usage limit reached · limit resets …") and no
+hook fires again. ape reads the PTY pane every 15 s; the same line on two
+reads with no hook between them ends the run (exit 14) with termination
+kind "usage_limit" in the run manifest, resets as printed and resets_at
+parsed; `ape status` shows it as the latest run ("stopped: usage-limit,
+resets <ts>"). Run again after the reset. Matched against Claude Code
+2.1.302's text, unmeasured live.
+
+Notifier: in an APEX v1 project, _apex/config.yaml's optional
+  notify: <shell command>
+runs (sh -c, 10 s timeout, output dropped, a failure only warned about)
+when a run stops on a limit (usage limit, budget) — and, from ape change,
+when a change becomes blocked — with APE_EVENT=stop|block, APE_CHANGE
+(the change --args names, if any) and APE_REASON in its environment.
+
 Exit codes: 0 success · 1 run failed, idle timeout, the typed line
-never submitted, or an APEX v1 milestone budget stopped or refused the
-session · 2 usage or
-preflight error · 3 REPL never became ready (last pane on stderr) ·
-5 upstream API failure · 6 the dispatch violated its declared commit
-ownership (the run itself may have succeeded).
+never submitted, an APEX v1 milestone budget stopped or refused the
+session, or a v1 limit or ape floor refused it · 2 usage or
+preflight error, or an APEX v0 project (run its pinned v0 ape) · 3 REPL
+never became ready (last pane on stderr) · 5 upstream API failure ·
+6 the dispatch violated its declared commit ownership (the run itself
+may have succeeded) · 14 a claude.ai usage limit stopped the session.
 
 Examples:
 
@@ -7411,83 +5391,6 @@ Flags:
 | `--task-commit` | string | `—` | Task layer: commit the complete task at the end; bare flag derives "ape:task/<skill>" |
 | `--transcript-store` | string | `nats-object` | Transcript blob backend: nats-object\|uri-offload (env APE_TRANSCRIPT_STORE). |
 | `--upload-transcripts` | bool | `false` | At run end, upload the transcript set as content-addressed blobs (env APE_UPLOAD_TRANSCRIPTS=1). |
-
-## ape trait
-
-Manage and inspect traits
-
-```
-ape trait
-```
-
-Subcommands:
-
-- `conflicts` — Check for conflicts between traits
-- `list` — List all available traits
-- `show` — Show details of a trait
-- `validate` — Validate a trait YAML file
-
-## ape trait conflicts
-
-Check for conflicts between traits
-
-```
-ape trait conflicts <trait1> <trait2> [...] [flags]
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape trait list
-
-List all available traits
-
-```
-ape trait list [flags]
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape trait show
-
-Show details of a trait
-
-```
-ape trait show <name> [flags]
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
-
-## ape trait validate
-
-Validate a trait YAML file
-
-```
-ape trait validate <file> [flags]
-```
-
-Examples:
-
-```
-  ape trait validate ./mytrait.yaml --output-format json
-```
-
-Flags:
-
-| Flag | Type | Default | Description |
-| ---- | ---- | ------- | ----------- |
-| `--output-format` | string | `human` | Output format: human\|json\|yaml |
 
 ## ape transcript
 
