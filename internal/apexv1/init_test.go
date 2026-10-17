@@ -43,6 +43,15 @@ func TestInit_Greenfield(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, filepath.Base(root), cfg.ProjectName)
 	require.Equal(t, "development", cfg.DevelopmentFolder)
+	// D65: a new config starts with the model defaults.
+	require.Equal(t, map[string]SkillModel{
+		"apex-apply":        {Model: "sonnet", Effort: "high"},
+		"apex-orchestrator": {Model: "sonnet", Effort: "high"},
+		"apex-review":       {Model: "opus", Effort: "medium"},
+		"apex-plan":         {Model: "opus", Effort: "medium"},
+		"apex-change":       {Model: "opus", Effort: "medium"},
+	}, cfg.Models)
+	require.Contains(t, committed, "_apex/config.yaml")
 
 	// The skeleton is not a finished plan.
 	got := findingMessages(p.Check())
@@ -108,6 +117,54 @@ func TestInit_BrownfieldKeepsWhatExists(t *testing.T) {
 	require.Contains(t, committed, "docs/dev/project.md")
 	require.Contains(t, committed, "CLAUDE.md", "the one-line amendment is committed with the skeleton")
 	require.NotContains(t, committed, "_apex/config.yaml")
+	require.Equal(t, files["_apex/config.yaml"], read(t, p, "_apex/config.yaml"), "an existing config gets no models: block")
+}
+
+// An existing _apex/config.yaml with its own models: and timeouts: is kept
+// byte for byte (eval Q6). Committed before init, it is the baseline the
+// config.changed guard judges from: the epoch is the init commit. Left
+// uncommitted, init does not commit it (init commits only what it wrote),
+// so the person's later commit of it is judged like any other: its
+// guarded blocks (retries:, timeouts:) are config.changed until a person accepts
+// them; models: is not guarded.
+func TestInit_ExistingConfigBlocksAreKept(t *testing.T) {
+	const cfg = "project_name: greeter\ndevelopment_folder: development\nmodels:\n  apex-apply: opus\nretries: 2\ntimeouts:\n  gate: 1h\n"
+	setup := func(t *testing.T, commitFirst bool) *Project {
+		t.Helper()
+		needSh(t)
+		root := t.TempDir()
+		gitEnv(t)
+		asPerson(t)
+		run(t, root, "init", "-q", "-b", "main")
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "config.yaml"), []byte(cfg), 0o644))
+		if commitFirst {
+			run(t, root, "add", "-A")
+			run(t, root, "commit", "-q", "-m", "chore: apex config")
+		}
+		res, err := Init(ctx(), root, true)
+		require.NoError(t, err)
+		require.Contains(t, res.Kept, "_apex/config.yaml")
+		p, err := Open(root)
+		require.NoError(t, err)
+		require.Equal(t, cfg, read(t, p, "_apex/config.yaml"))
+		return p
+	}
+	t.Run("committed before init: baseline", func(t *testing.T) {
+		p := setup(t, true)
+		require.Empty(t, p.configFindings(ctx(), HeadSHA(ctx(), p.Root)))
+		require.NotContains(t, findingMessages(p.Check()), "guarded config keys")
+	})
+	t.Run("uncommitted at init: judged when committed", func(t *testing.T) {
+		p := setup(t, false)
+		require.NotContains(t, run(t, p.Root, "show", "--name-only", "--format=", "HEAD"), "_apex/config.yaml")
+		epoch := HeadSHA(ctx(), p.Root)
+		run(t, p.Root, "add", "_apex/config.yaml")
+		run(t, p.Root, "commit", "-q", "-m", "chore: apex config")
+		fs := p.configFindings(ctx(), epoch)
+		require.Len(t, fs, 1)
+		require.Contains(t, fs[0].Message, "guarded config keys (retries) changed")
+	})
 }
 
 func TestMergeHooks(t *testing.T) {

@@ -28,8 +28,14 @@ func newProjectInitCmd() *cobra.Command {
 		Long: `Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten
 (one exception: the @AGENTS.md line appended to a CLAUDE.md that lacks it).
 
-  _apex/config.yaml                  project_name, development_folder (also read, never
-                                     written: regression, models, effort, and limits —
+  _apex/config.yaml                  project_name, development_folder, and the models:
+                                     defaults (D65) — apex-apply and apex-orchestrator
+                                     {model: sonnet, effort: high}; apex-review, apex-plan
+                                     and apex-change {model: opus, effort: medium} — written
+                                     only when the file does not exist: an existing config
+                                     is kept as it is, nothing merged in (also read, never
+                                     written: regression, effort, caps (see ape project
+                                     check --help), timeouts, and limits —
                                      budget: enforce|off (default off; see ape task --help),
                                      attempts: N red verifies per start (default 5; see
                                      ape change verify --help); commit: {subject,

@@ -386,6 +386,7 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	cfg, err := LoadConfig(root)
 	require.NoError(t, err)
 	require.Equal(t, "sh ./check.sh && test -f main.go", cfg.Regression.Change)
+	require.Equal(t, SkillModel{Model: "sonnet", Effort: "high"}, cfg.Models["apex-apply"], "a lifted config starts with the D65 model defaults, as init's does")
 	require.Equal(t, "greeter", cfg.ProjectName)
 	require.Equal(t, "development", cfg.DevelopmentFolder)
 	agents := read(t, p, "AGENTS.md")

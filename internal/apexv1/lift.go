@@ -731,7 +731,7 @@ func (lf *lifter) v1Config() string {
 	if r := lf.res.Gates.Regression; r != "" {
 		out += "regression: " + yamlString(r) + "\n"
 	}
-	return out
+	return out + modelDefaultsYAML
 }
 
 // yamlString renders s as a YAML scalar, quoted only when it must be.
