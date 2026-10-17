@@ -92,6 +92,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.no-branch", 1, "person", "archive: the change has no change/<id> branch with a recorded base_branch (started before D38)"},
 	{"change.wrong-branch", 1, "stop", "the command records a started change's state, and HEAD is not on its branch change/<id> (git switch change/<id>), or is on another change's branch"},
 	{"git.branch-failed", 1, "stop", "creating, switching to, rebasing or deleting a branch failed, or the base branch is missing"},
+	{CodeBaseCheckedOut, 1, "stop", "archive, abandon (or any command that switches branches): the branch ape must switch to — the base branch — is checked out in another worktree (the message names its path); an environment problem: stop, do not re-plan (D45)"},
 	{"archive.spec-invalid", 1, "replan", "archive: the merged spec would fail project check (e.g. over 20 KB)"},
 	{"change.archived", 1, "stop", "the change is already archived"},
 	{"change.attempts-exceeded", 1, "replan", "verify: the red verify that reaches limits.attempts since the change started; the change is now blocked"},

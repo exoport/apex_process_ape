@@ -52,11 +52,16 @@ person outside the roadmap (apex-change with a request). It is approved on its o
 ` + "`ape change approve <id> --by <who>`" + ` (on the base branch), instead of through a milestone,
 and otherwise lives like any change: its branch, baseline, checks, a review in a separate
 session, the delta merged at archive. It counts toward no milestone gate, no milestone's
-regression baseline, and no milestone's spend or budget. An approved fix runs ahead of
-milestone work, at the orchestrator's next change boundary, never in parallel; with no
-milestone run active, ` + "`ape task apex-orchestrator --args <id>`" + ` runs it alone (urgent:
-` + "`ape run stop`" + ` the milestone run, run the fix, restart it). ` + "`ape status`" + ` lists approved
-fixes first.
+regression baseline, and no milestone's spend or budget. Fixes form a queue: planned and
+approved between runs (or ` + "`ape run stop`" + `, plan, approve, restart), never overlapping a
+run (D45). An approved fix runs ahead of milestone work, at the orchestrator's next change
+boundary; with no milestone run active, ` + "`ape task apex-orchestrator --args <id>`" + ` runs it
+alone. ` + "`ape status`" + ` lists approved fixes first.
+
+One checkout, one operator (D45): archive and abandon switch to the base branch, so they
+refuse when another worktree has it checked out (exit 1, git.base-checked-out, naming that
+worktree; nothing written) — an environment problem: the orchestrator stops, it does not
+re-plan.
 
 Resume after the base moved (D40): whenever a started change's base branch has moved
 ahead of its base_sha, ape — at ` + "`ape change start`" + ` on a change that has its branch, at
@@ -231,9 +236,10 @@ in place of an approved milestone (else exit 1, change.not-approved).
     ## Why and ## Notes) changed since is refused at start until approved again
   - re-approving the same plan is a no-op (exit 0, JSON "already": true, nothing written)
 
-An approved fix may be created at any moment. It runs ahead of milestone work, at the
-orchestrator's next change boundary, never in parallel with it; with no milestone run
-active, `+"`ape task apex-orchestrator --args <id>`"+` runs it alone. `+"`ape status`"+` lists approved
+Fixes form a queue: planned and approved between runs (or `+"`ape run stop`"+`, plan, approve,
+restart), never overlapping a run (D45). An approved fix runs ahead of milestone work, at
+the orchestrator's next change boundary; with no milestone run active,
+`+"`ape task apex-orchestrator --args <id>`"+` runs it alone. `+"`ape status`"+` lists approved
 fixes first (JSON "fixes", changes[].lane "fix", changes[].approved) and points next at the
 first. A fix counts toward no milestone gate and no milestone's spend or budget.
 
@@ -692,7 +698,8 @@ archived state.json. None of the change's code reaches the base branch. A draft 
 started (no branch) is abandoned on the branch HEAD is on, as before.
 
 Exit codes: 0 abandoned · 1 no such change, archived, HEAD on another change's branch,
-dirty tree, or git failed · 2 usage · 3 the archive folder already exists.`,
+dirty tree, the base branch checked out in another worktree (git.base-checked-out), or git
+failed · 2 usage · 3 the archive folder already exists.`,
 		`  ape change abandon add-tenant-delete --reason "replaced by split-tenant-delete"`,
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -756,7 +763,8 @@ The base branch gets exactly one commit per archived change; ape's status commit
 the change branch, squashed away.
 
 Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review,
-pending human-review, dirty tree, no change branch, or git failed · 2 usage · 3 the
+pending human-review, dirty tree, no change branch, the base branch checked out in another
+worktree (git.base-checked-out: stop, do not re-plan), or git failed · 2 usage · 3 the
 rebase conflicts or the delta no longer applies.`,
 		"  ape change archive add-tenant-delete",
 		&f,

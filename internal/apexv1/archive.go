@@ -201,6 +201,11 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	if err != nil {
 		return nil, err
 	}
+	// Archive ends on the base branch: refused up front, before any
+	// rebase or re-verify, when another worktree holds it (D45).
+	if err := p.requireBranchFree(ctx, ci.State.BaseBranch, "archive "+id); err != nil {
+		return nil, err
+	}
 	if ci, err = p.enterChangeBranch(ctx, ci); err != nil {
 		return nil, err
 	}
@@ -484,6 +489,11 @@ func (p *Project) leaveChangeBranch(ctx context.Context, ci ChangeInfo) (ChangeI
 	}
 	if !p.branchExists(ctx, branch) {
 		return ci, "", nil
+	}
+	if base := ci.State.BaseBranch; cur == branch && base != "" {
+		if err := p.requireBranchFree(ctx, base, "abandon "+id); err != nil {
+			return ci, "", err
+		}
 	}
 	if err := p.commitChangeFolder(ctx, id, "abandon"); err != nil {
 		return ci, "", err
