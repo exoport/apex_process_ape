@@ -92,9 +92,26 @@ const agentsSkeleton = `# AGENTS.md
 // Init creates the v1 skeleton where absent and merges ape's hooks into
 // .claude/settings.json. It never overwrites a file.
 func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error) {
+	res, p, err := initSkeleton(ctx, root, brownfield)
+	if err != nil {
+		return res, err
+	}
+	if paths := p.initCommitPaths(res); len(paths) > 0 {
+		sha, err := p.commitRecord(ctx, "apex: project init", "", paths...)
+		if err != nil {
+			return res, &FailError{Code: CodeCommitFailed, Msg: "skeleton written but its commit failed: " + err.Error()}
+		}
+		res.Commit = sha
+	}
+	return res, nil
+}
+
+// initSkeleton is Init without its commit: `ape project lift` lays the
+// same skeleton down inside the lift commit.
+func initSkeleton(ctx context.Context, root string, brownfield bool) (*InitResult, *Project, error) {
 	p, err := Open(root)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	res := &InitResult{Root: p.Root, Brownfield: brownfield}
 	name := filepath.Base(p.Root)
@@ -131,15 +148,15 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 	}
 
 	if err := write(ConfigPath(p.Root), "project_name: "+yamlScalar(name)+"\ndevelopment_folder: "+p.DevRel+"\n"); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for _, d := range []string{p.SpecsDir(), p.ChangesDir(), p.ArchiveDir(), p.DecisionsDir(), p.BriefsDir()} {
 		if err := dir(d, true); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	if err := dir(p.StateDir(), false); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	steps := []struct{ path, content string }{
 		{p.ProjectMD(), fmt.Sprintf(projectSkeleton, name)},
@@ -152,7 +169,7 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 	}
 	for _, s := range steps {
 		if err := write(s.path, s.content); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 	// A CLAUDE.md that existed without the import gets the one line it
@@ -163,7 +180,7 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 			doc += "\n"
 		}
 		if err := writeFileAtomic(p.ClaudeMD(), doc+"@AGENTS.md\n"); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		res.Amended = append(res.Amended, "CLAUDE.md")
 	}
@@ -171,10 +188,10 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 		rec := map[string]any{"initialized_at": Stamp(), "brownfield": brownfield, "base_sha": HeadSHA(ctx, p.Root)}
 		data, err := json.MarshalIndent(rec, "", "  ")
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := writeFileAtomic(p.ProjectJSON(), string(data)+"\n"); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		res.Created = append(res.Created, p.Rel(p.ProjectJSON()))
 	} else {
@@ -182,17 +199,10 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 	}
 	added, err := MergeHooks(p.SettingsJSON())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	res.HooksAdded = added
-	if paths := p.initCommitPaths(res); len(paths) > 0 {
-		sha, err := p.commitRecord(ctx, "apex: project init", "", paths...)
-		if err != nil {
-			return res, &FailError{Code: CodeCommitFailed, Msg: "skeleton written but its commit failed: " + err.Error()}
-		}
-		res.Commit = sha
-	}
-	return res, nil
+	return res, p, nil
 }
 
 // initCommitPaths is what `apex: project init` commits, so the tree is
