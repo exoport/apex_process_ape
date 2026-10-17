@@ -52,8 +52,8 @@ The commit:
   deletes        the v0 families, at the paths _apex/config.yaml's folder variables
                  resolve to: the skills the v0 install manifest lists (only those —
                  never a project's own; ones git never tracked, under an ignored
-                 .claude/, leave the working tree after the commit), the v0 _apex tables and pipelines, stories,
-                 the sprint tracker, retrospectives, planning (PRD, architecture,
+                 .claude/, leave the working tree after the commit), the v0 _apex
+                 tables and pipelines, stories, the sprint tracker, retrospectives, planning (PRD, architecture,
                  epics, proposals, release records), ADR and pattern records and
                  indexes, capability and feature registries, deferred records, team
                  memory, project-context. Kept: docs, CHANGELOG, evidence, research,
@@ -107,12 +107,12 @@ The commit:
   writes         development/lift-disposition.md: the binding-rule candidates
                  (CLAUDE.md list items, project-context "don't miss" items, team-memory
                  gotcha titles) with an empty Disposition column for apex-plan, then a
-                 fresh read-only review, then the person — who deletes the file — and
-                 summaries — code and CI that still read removed paths first (CI guards
-                 over the v0 corpus show up there), edited files a guard hashes, ADR
-                 gaps, ids left and files not edited counted per file, references in
-                 evidence and docs counted — and readings at the tag; and
-                 development/lift-disposition.json beside it, every list whole
+                 fresh read-only review, then the person, who deletes it. Then, as
+                 summaries: code and CI that still read removed paths (CI guards over
+                 the v0 corpus show up there) and edited files a guard hashes first;
+                 ADR gaps; ids left and files not edited, counted per file;
+                 references in evidence and docs, counted; readings at the tag.
+                 development/lift-disposition.json, beside it, holds every list whole
 
 A byte-identity perimeter: a file a test, CI script or lock file hashes goes red once
 the lift edits a comment in it. The plan lists, as "hashed", the edited files that a lock
@@ -174,7 +174,7 @@ Exit codes: 0 lifted (or planned) · 1 refused or failed (code in --json) · 2 u
 	addV1TimeoutFlag(cmd, &f)
 	cmd.Flags().BoolVar(&opt.DryRun, "dry-run", false, "print the whole plan; write nothing (pre-flight problems are reported, not refused)")
 	cmd.Flags().BoolVar(&opt.FromUpdate, "from-update", false, "run inside ape framework update (the v1.0.0 migration entry): the install's uncommitted files are left to it")
-	cmd.Flags().BoolVar(&opt.NoVerifyRun, "no-verify-run", false, "do not run the regression command after the commit")
+	cmd.Flags().BoolVar(&opt.NoVerifyRun, "no-verify-run", false, "do not run the regression command (at the tag, and after the commit)")
 	cmd.Flags().StringArrayVar(&opt.Exclude, "exclude", nil, "a glob (** allowed) of files the lift must not edit, e.g. a byte-identity perimeter; repeatable")
 	return cmd
 }
