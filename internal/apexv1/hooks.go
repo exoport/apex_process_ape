@@ -316,6 +316,8 @@ func (p *Project) saveStopRecord(path string, r StopRecord) {
 // command checks is red, at most
 // MaxConsecutiveStopBlocks times in a row (the count resets whenever
 // Claude Code reports the stop is not itself a continuation from a block).
+// The checks it runs are the ones red at the change's last verify, or its
+// task checks before any verify (H10, stopChecks).
 func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDecision {
 	cwd := payload.Cwd
 	if cwd == "" {
@@ -393,10 +395,20 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 		rec.ConsecutiveBlocks = 0
 		return finish(StopDecision{Record: rec})
 	}
-	results := p.runTasks(ctx, ci.Doc, ci.ID, "stop-", opt)
+	checks, nothingRed := p.stopChecks(ci)
+	if nothingRed {
+		rec.Verdict = StopAllow
+		rec.ConsecutiveBlocks = 0
+		rec.Reason = "no check was red at the last verify"
+		return finish(StopDecision{Record: rec})
+	}
+	results := p.RunChecks(ctx, p.LogDir(ci.ID), "stop-", checks, opt)
 	var red []CheckResult
 	for i := range results {
-		if results[i].Exit != 0 {
+		if results[i].Kind == KindRegression {
+			judgeRegression(&results[i], ci.State.Regression)
+		}
+		if results[i].Red() {
 			red = append(red, results[i])
 		}
 	}

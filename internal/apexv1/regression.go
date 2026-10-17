@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 )
 
 // Backlog 32, 37: the project's own test suite as a regression command,
@@ -15,6 +14,12 @@ import (
 // milestone gate, and fails only when it is newly red: a suite that was
 // already red before the work began is the planner's to roadmap, not the
 // change's to fix.
+//
+// Tiers (H10): `regression: {change: <cmd>, milestone: <cmd>}` runs the
+// change tier at start and verify and the milestone tier at the gate. The
+// gate judges it by the earliest baseline a change of the milestone
+// recorded for that same command, so a milestone tier that differs from
+// the change tier has no baseline: red at the gate is red.
 
 // KindRegression is the regression command's kind in a run of checks.
 const KindRegression = "regression"
@@ -52,13 +57,24 @@ type RegressionVerdict struct {
 	Failed         bool `json:"failed"`
 }
 
-// regressionCmd is the configured regression command, "" when none.
+// regressionCmd is the configured regression command's change tier — what
+// a change's baseline and verify run — "" when none.
 func (p *Project) regressionCmd() string {
 	cfg, err := LoadConfig(p.Root)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(cfg.Regression)
+	return cfg.Regression.Change
+}
+
+// milestoneRegressionCmd is the tier the milestone gate runs (H10): the
+// milestone command, else the change tier's, "" when none.
+func (p *Project) milestoneRegressionCmd() string {
+	cfg, err := LoadConfig(p.Root)
+	if err != nil {
+		return ""
+	}
+	return cfg.Regression.MilestoneCmd()
 }
 
 // runRegression runs the regression command like any check: sh -c from

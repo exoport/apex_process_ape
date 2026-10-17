@@ -131,12 +131,15 @@ func newHookStopCmd() *cobra.Command {
 		Use:   "stop",
 		Short: "Stop/SubagentStop hook: block a stop while the in-progress change's checks are red",
 		Long: `Stop and SubagentStop hook. When HEAD is on a change's branch, change/<id>, that
-change is in-progress (read from the working tree), and any of its command checks exits
-non-zero now, prints {"decision":"block","reason":"<the failing checks' last lines and
-what to do>"}. Allows (prints nothing) when HEAD is on no change branch (the base
-branch: planning, milestones), when the change is not in-progress (blocked, verified,
-reviewed), when every check is green, or after 3 consecutive blocks (the count resets
-when the payload's stop_hook_active is false).
+change is in-progress (read from the working tree), and any of the checks it re-runs
+exits non-zero now, prints {"decision":"block","reason":"<the failing checks' last lines
+and what to do>"}. It re-runs only the checks that were red at the change's last verify
+of its current plan (the regression command too, when it was newly red), recorded in
+_apex/state/logs/<id>/last-verify.json; before any verify, the task checks (H10).
+Allows (prints nothing) when HEAD is on no change branch (the base branch: planning,
+milestones), when the change is not in-progress (blocked, verified, reviewed), when the
+last verify had nothing red, when every re-run check is green, or after 3 consecutive
+blocks (the count resets when the payload's stop_hook_active is false).
 
 The verdict is also written to _apex/state/hooks/<session>[-<agent>].json, which
 is how ` + "`ape task`" + ` learns that a Stop it saw did not end the turn.`,

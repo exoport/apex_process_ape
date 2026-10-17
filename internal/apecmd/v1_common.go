@@ -34,7 +34,9 @@ func addV1Flags(cmd *cobra.Command, f *v1Flags) {
 }
 
 func addV1TimeoutFlag(cmd *cobra.Command, f *v1Flags) {
-	cmd.Flags().DurationVar(&f.timeout, "timeout", apexv1.DefaultCheckTimeout, "limit for each check command (exit 124 when exceeded)")
+	cmd.Flags().DurationVar(&f.timeout, "timeout", 0, "limit for each command run, overriding _apex/config.yaml timeouts: "+
+		"(default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; "+
+		"timeouts.gate, else 30m, for a gate command); exit 124 when exceeded")
 }
 
 func (f *v1Flags) runOptions() apexv1.RunOptions { return apexv1.RunOptions{Timeout: f.timeout} }

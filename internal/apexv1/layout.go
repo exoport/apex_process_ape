@@ -51,11 +51,11 @@ type Config struct {
 	//	  apex-review: sonnet                          # model only
 	//	  apex-review: {model: sonnet, effort: high}   # model and effort
 	Models map[string]SkillModel `yaml:"models"`
-	// Regression is the project's own test suite, one shell command run
+	// Regression is the project's own test suite, a shell command run
 	// from the project root (backlog 32): at a change's start (its
 	// baseline), at verify and at the milestone gate, failing only when
-	// newly red.
-	Regression string `yaml:"regression"`
+	// newly red. One command, or two tiers (H10, RegressionConfig).
+	Regression RegressionConfig `yaml:"regression"`
 	// Effort is the project's default effort for an ape-launched session
 	// that no flag, models.<skill> entry or parent session decides
 	// (DecideLaunch). Empty: Claude Code's own setting.
@@ -68,6 +68,9 @@ type Config struct {
 	// uses; ape keeps them installed at project scope (plugins.go).
 	Marketplaces map[string]Marketplace `yaml:"marketplaces"`
 	Plugins      []PluginRef            `yaml:"plugins"`
+	// Timeouts bound one run of a check, the regression command and a
+	// gate command (H10); a --timeout flag wins.
+	Timeouts Timeouts `yaml:"timeouts"`
 }
 
 // SkillModel is one models.<skill> entry.

@@ -278,11 +278,13 @@ func newChangeStartCmd() *cobra.Command {
      and started_at (both kept when resuming a blocked change). A refused start leaves no
      branch and HEAD where it was.
   4. runs every check verify will run once, as the baseline (which were already green):
-     the command tasks and the effective spec's scenario checks; from the project root
-     with sh -c; output under _apex/state/logs/<id>/. With "regression: <cmd>" in
-     _apex/config.yaml (the project's own test suite) it runs that too, the same way, and
-     records it in state.json (regression_baseline: cmd, exit, output sha256, sha); a red
-     regression baseline is recorded, it does not block start
+     the command tasks and the effective spec's scenario checks of the capabilities the
+     change touches (plus any scenario sharing a task's command — see ape change verify
+     --help); from the project root with sh -c; output under _apex/state/logs/<id>/. With
+     "regression: <cmd>" in _apex/config.yaml (the project's own test suite; with tiers,
+     "regression: {change: <cmd>, milestone: <cmd>}", its change tier) it runs that too,
+     the same way, and records it in state.json (regression_baseline: cmd, exit, output
+     sha256, sha); a red regression baseline is recorded, it does not block start
   5. sets in-progress, freezes the plan (SHA-256 of change.md outside ## Why and ## Notes), fingerprints
      the spec block of every requirement it MODIFIES or REMOVES, commits state.json
      ("apex: <id> in-progress") on change/<id>, and resets the attempts count since start
@@ -368,17 +370,21 @@ func newChangeVerifyCmd() *cobra.Command {
 	cmd := v1ChangeLeaf(
 		"verify <id>",
 		"Run the task checks and the effective spec at HEAD; verified iff all exit 0",
-		`Run, at HEAD, every task's command check and every scenario check of the effective
+		`Run, at HEAD, every task's command check and the scenario checks of the effective
 spec — the spec as it will be once this change is archived: each current requirement the
 change does not MODIFY or REMOVE (regression), plus the scenarios of its own ADDED and
-MODIFIED blocks. human-review checks are not run. A command shared by several checks runs
-once. Results (sha, exit, seconds, output sha256; kind, capability, requirement, scenario
+MODIFIED blocks — of the capabilities the change touches (frontmatter touches:), plus any
+other scenario whose check command is identical to a task's (H10). The rest of the spec
+is the milestone gate's to run (`+"`ape milestone gate`"+` runs all of it). human-review checks
+are not run. A command shared by several checks runs once. Each check runs under
+_apex/config.yaml timeouts.check (default 15m), the regression command under
+timeouts.regression (default 30m); --timeout overrides both. Results (sha, exit, seconds, output sha256; kind, capability, requirement, scenario
 for scenario checks) are recorded in state.json; output under _apex/state/logs/<id>/.
 What a check leaves in the tree outside development/ — files it created, tracked files it
 changed — is undone after it and reported (JSON "stray_files"); files that were there
 before it ran are never touched.
-With "regression: <cmd>" in _apex/config.yaml, the regression command runs too (recorded
-in the results with kind "regression") and is judged against the change's regression
+With "regression: <cmd>" in _apex/config.yaml (with tiers, its change tier), the
+regression command runs too (recorded in the results with kind "regression") and is judged against the change's regression
 baseline (JSON "regression": {cmd, exit, baseline_exit, pre_existing_red, failed}): it
 fails verify only when it is newly red — green at baseline, red now — or when the change
 has no baseline for this command (re-start records one). Red at baseline and still red

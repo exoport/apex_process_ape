@@ -12,6 +12,8 @@ import (
 const (
 	KindTask     = "task"
 	KindScenario = "scenario"
+	// KindGate is a milestone's Gate: command.
+	KindGate = "gate"
 )
 
 // PlannedCheck is one command a verify, baseline or gate runs.
@@ -95,14 +97,30 @@ func (p *Project) EffectiveSpecChecks(c *Change) []PlannedCheck {
 	return out
 }
 
-// ChangeChecks is what verify runs for a change: its command tasks, then
-// the effective spec's scenarios.
+// ChangeChecks is what a change's baseline and verify run (H10): its
+// command tasks, then the effective spec's scenarios of the capabilities
+// it touches (touches:, which names every capability its delta does),
+// plus any other scenario whose command is one of its tasks' — free, as a
+// shared command runs once. The rest of the spec is the milestone gate's
+// to run (EffectiveSpecChecks(nil)), so a verify does not pay for a spec
+// of hundreds of scenarios the change cannot have broken.
 func (p *Project) ChangeChecks(c *Change) []PlannedCheck {
 	var out []PlannedCheck
+	taskCmds := map[string]bool{}
 	for _, t := range c.CommandTasks() {
 		out = append(out, PlannedCheck{Ref: t.ID, Kind: KindTask, Cmd: t.Check})
+		taskCmds[t.Check] = true
 	}
-	return append(out, p.EffectiveSpecChecks(c)...)
+	touched := map[string]bool{}
+	for _, capName := range c.Meta.Touches {
+		touched[capName] = true
+	}
+	for _, pc := range p.EffectiveSpecChecks(c) {
+		if pc.Delta || touched[pc.Capability] || taskCmds[pc.Cmd] {
+			out = append(out, pc)
+		}
+	}
+	return out
 }
 
 // logName is a check's log file name: the task id, or a short hash of a
@@ -125,6 +143,8 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 	out := make([]CheckResult, 0, len(checks))
 	p.ensureState() // the logs go under _apex/state/
 	inGit := p.isWorkTree(ctx)
+	cfg, _ := LoadConfig(p.Root) // Open refused an unparseable one
+	timeouts := cfg.Timeouts
 	for i := range checks {
 		pc := &checks[i]
 		r, ok := done[pc.Cmd]
@@ -134,7 +154,7 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 			if inGit {
 				before = p.snapshot(ctx)
 			}
-			r = RunCheck(ctx, p.Root, pc.Cmd, logPath, opt.Timeout)
+			r = RunCheck(ctx, p.Root, pc.Cmd, logPath, timeouts.For(pc.Kind, opt.Timeout))
 			r.Log = p.Rel(logPath)
 			if inGit {
 				r.StrayFiles = p.undoStrays(ctx, before)

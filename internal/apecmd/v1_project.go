@@ -32,7 +32,7 @@ func newProjectInitCmd() *cobra.Command {
                                      written: regression, models, effort, and limits —
                                      budget: enforce|off (default off; see ape task --help),
                                      attempts: N red verifies per start (default 5; see
-                                     ape change verify --help))
+                                     ape change verify --help)); see "Check settings" below
   AGENTS.md                          the project map (skeleton)
   CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
                                      gets it appended, and nothing else
@@ -81,6 +81,20 @@ ignored; a commit matches by prefix). Claude Code cannot pin a plugin version
 from the consumer side: a marketplace serves one version of each plugin, so pin
 by pointing the marketplace at a ref (github/git: ref: <branch|tag>). A plugin
 the marketplace does not serve at ref fails with the command to run.
+
+Check settings in _apex/config.yaml (read by start, verify, the gate and the hooks; a
+value ape cannot use, or a key it does not know inside these blocks, makes the config
+unparseable and every command refuses it):
+
+  regression: make test              the project's own suite, at start/verify/gate, failing
+                                     only when newly red; or in tiers:
+  regression: {change: make test, milestone: make test-all}
+                                     change: at start and verify (baseline-aware);
+                                     milestone (else change): at the milestone gate
+  timeouts: {check: 20m, regression: 45m, gate: 1h}
+                                     Go durations; defaults 15m per check, 30m for the
+                                     regression command, 30m for a Gate: command; a
+                                     command's --timeout flag overrides them
 
 --brownfield adds nothing; it records in _apex/state/project.json (ignored) that the
 project existed before APEX.

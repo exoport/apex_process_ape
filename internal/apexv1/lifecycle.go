@@ -12,17 +12,10 @@ import (
 
 // RunOptions tune the command-check runs.
 type RunOptions struct {
+	// Timeout, when set (the --timeout flag), bounds every command of the
+	// run; zero takes _apex/config.yaml's timeouts: per kind, else the
+	// defaults (Timeouts.For).
 	Timeout time.Duration
-}
-
-// runTasks runs every command task once, logging under _apex/state/logs/<id>/.
-func (p *Project) runTasks(ctx context.Context, c *Change, id, logPrefix string, opt RunOptions) []CheckResult {
-	tasks := c.CommandTasks()
-	checks := make([]PlannedCheck, 0, len(tasks))
-	for _, t := range tasks {
-		checks = append(checks, PlannedCheck{Ref: t.ID, Kind: KindTask, Cmd: t.Check})
-	}
-	return p.RunChecks(ctx, p.LogDir(id), logPrefix, checks, opt)
 }
 
 // requirementConflicts reports the requirements two changes' deltas both
@@ -441,6 +434,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 		pending = []string{}
 	}
 	gab := p.greenAtBaseline(ci.Doc, st)
+	p.saveLastVerify(id, st, sha, green, results)
 	if !green {
 		return p.redAttempt(ctx, ci, &VerifyResult{ID: id, Status: st.Status, SHA: sha, Green: false, Results: results, PendingHuman: pending, GreenAtBaseline: gab, StrayFiles: StrayFiles(results), Regression: regression})
 	}

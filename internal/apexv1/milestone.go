@@ -281,7 +281,7 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 		return nil, &FailError{Code: "milestone.no-gate", Msg: id + " has no Gate: line"}
 	}
 	logPath := filepath.Join(p.LogsDir(), "gate-"+id+".log")
-	gate := p.RunChecks(ctx, filepath.Dir(logPath), "", []PlannedCheck{{Ref: "gate-" + id, Kind: "gate", Cmd: m.Gate}}, opt)[0]
+	gate := p.RunChecks(ctx, filepath.Dir(logPath), "", []PlannedCheck{{Ref: "gate-" + id, Kind: KindGate, Cmd: m.Gate}}, opt)[0]
 	r := gate
 	run := GateRun{
 		Exit: r.Exit, At: Stamp(), SHA: HeadSHA(ctx, p.Root), Secs: r.Secs,
@@ -293,7 +293,7 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	spec := p.EffectiveSpecChecks(nil)
 	run.SpecChecks = len(spec)
 	checks := spec
-	regressionCmd := p.regressionCmd()
+	regressionCmd := p.milestoneRegressionCmd()
 	if regressionCmd != "" {
 		checks = append(append([]PlannedCheck(nil), spec...), PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: regressionCmd})
 	}
