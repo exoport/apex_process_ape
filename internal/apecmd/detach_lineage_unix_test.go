@@ -140,10 +140,7 @@ func TestRecordLineage_RollsChildrenUpUnderTheOrchestrator(t *testing.T) {
 	}, m.Children)
 
 	// A child's own cost entry names its parent.
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(root))
-	t.Cleanup(func() { _ = os.Chdir(wd) })
+	t.Chdir(root)
 	out := captureStdout(t, func() {
 		cmd := newCostsRunCmd()
 		cmd.SetArgs([]string{"20261017-100000-aaa", "--output-format", "json"})

@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"bytes"
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,9 +16,7 @@ func selfCheckProject(t *testing.T, gate string, extra map[string]string) *Proje
 	t.Helper()
 	files := baseFiles()
 	files["development/roadmap.md"] = "# Roadmap\n\n## M1 — Skeleton\nStatus: proposed\nGate: " + gate + "\nGoal: A greeter.\n"
-	for k, v := range extra {
-		files[k] = v
-	}
+	maps.Copy(files, extra)
 	return fixture(t, files)
 }
 

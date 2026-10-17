@@ -16,7 +16,7 @@ import (
 )
 
 // runRunCmd runs an `ape run` verb and returns its stdout and exit code.
-func runRunCmd(t *testing.T, args ...string) (string, int) {
+func runRunCmd(t *testing.T, args ...string) (stdout string, exit int) {
 	t.Helper()
 	cmd := newRunCmd()
 	cmd.SilenceUsage, cmd.SilenceErrors = true, true
@@ -61,7 +61,9 @@ func TestRunWait_WaitAliasAndJSONStates(t *testing.T) {
 	require.Equal(t, "running", rep["state"])
 	require.Nil(t, rep["exit_code"])
 	require.EqualValues(t, 1, rep["depth"])
-	require.Equal(t, "", rep["parent_run"])
+	parent, isString := rep["parent_run"].(string)
+	require.True(t, isString, "parent_run is reported")
+	require.Empty(t, parent)
 
 	out, code = runRunCmd(t, "wait", "lost", "--cwd", root, "--json")
 	require.Equal(t, exitCodeRunLost, code)
@@ -122,7 +124,7 @@ func TestRunWait_JSONCarriesTheSessionsResult(t *testing.T) {
 	require.Equal(t, true, rep["result_truncated"])
 	require.LessOrEqual(t, len(got), resultCap)
 	require.True(t, utf8.ValidString(got))
-	require.Equal(t, 2048, len(got))
+	require.Len(t, got, 2048)
 }
 
 func TestCapUTF8(t *testing.T) {

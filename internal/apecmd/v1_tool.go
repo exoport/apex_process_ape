@@ -120,10 +120,7 @@ func runToolSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, name,
 		res.TaskExit = h.ExitCode
 	}
 	if lost || res.TaskExit == nil || *res.TaskExit != 0 {
-		why := "the session was lost"
-		if res.TaskExit != nil {
-			why = fmt.Sprintf("ape task exited %d", *res.TaskExit)
-		}
+		why := sessionEnded(res.TaskExit)
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "tool.failed", Msg: "tool " + name + " (" + run.Skill + ") for " + id + " did not finish: " + why +
 			" (log " + res.Log + ") — run `ape change tool " + id + " " + name + "` again"}, res)
 	}

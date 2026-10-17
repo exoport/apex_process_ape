@@ -48,11 +48,11 @@ func groupCPU(pgid int) (time.Duration, bool) {
 // parentheses, may hold spaces and parentheses: fields count from the last
 // ')'.
 func parseProcStat(line string) (pgid int, ticks int64, ok bool) {
-	i := strings.LastIndexByte(line, ')')
-	if i < 0 {
+	_, rest, found := strings.CutLast(line, ")")
+	if !found {
 		return 0, 0, false
 	}
-	f := strings.Fields(line[i+1:])
+	f := strings.Fields(rest)
 	// state ppid pgrp session tty_nr tpgid flags minflt cminflt majflt
 	// cmajflt utime stime cutime cstime …
 	if len(f) < 15 {

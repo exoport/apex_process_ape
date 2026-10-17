@@ -702,7 +702,7 @@ func checkLoaded(ci ChangeInfo) (ChangeInfo, error) {
 		return ci, &FailError{Code: CodeStateUnreadable, Msg: ci.Err.Error()}
 	}
 	if ci.Doc == nil {
-		return ci, &FailError{Code: "change.no-change-md", Msg: "change " + id + " has no change.md"}
+		return ci, &FailError{Code: CodeNoChangeMD, Msg: "change " + id + " has no change.md"}
 	}
 	return ci, nil
 }

@@ -85,7 +85,7 @@ func currentSession(projectRoot string) sessionAt {
 	rows, _ := sessions.Alive(sessions.Path())
 	if row := ancestorSession(rows); row != nil {
 		at := sessionAt{
-			SessionAt: apexv1.SessionAt{Depth: rowDepth(*row), Run: row.RunID, Skill: row.Skill, Kind: row.Command},
+			Depth: rowDepth(*row), Run: row.RunID, Skill: row.Skill, Kind: row.Command,
 			RunnerPID: row.PID, Source: "ancestry",
 		}
 		at.Depth = max(at.Depth, env.Depth)
@@ -95,10 +95,10 @@ func currentSession(projectRoot string) sessionAt {
 		return sessionAt{}
 	}
 	at := sessionAt{SessionAt: env, Source: "env"}
-	for _, row := range rows {
-		if row.RunID != "" && row.RunID == env.Run {
+	for i := range rows {
+		if row := &rows[i]; row.RunID != "" && row.RunID == env.Run {
 			at.Skill, at.RunnerPID = row.Skill, row.PID
-			at.Depth = max(at.Depth, rowDepth(row))
+			at.Depth = max(at.Depth, rowDepth(*row))
 			return at
 		}
 	}
@@ -256,7 +256,7 @@ func refuseInSession(verb string) error {
 // message, then its code and action, with the code's exit (2, or 3 for a
 // lock another run holds).
 func sessionRefusal(err error) error {
-	code, action := "", apexv1.ActionStop
+	var code, action string
 	exit := ExitUsage
 	var ue *apexv1.UsageError
 	var ce *apexv1.ConflictError
@@ -347,7 +347,8 @@ func readSessionLock(path string) (sessionLock, error) {
 	if err != nil {
 		return s, err
 	}
-	return s, json.Unmarshal(data, &s)
+	err = json.Unmarshal(data, &s)
+	return s, err
 }
 
 // acquireSessionLock creates path for rec, exclusively: written to a
@@ -366,7 +367,7 @@ func acquireSessionLock(path string, rec sessionLock, child bool) error {
 	data = append(data, '\n')
 	for range 5 {
 		tmp := path + "." + rec.Token + ".tmp"
-		if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		if err := os.WriteFile(tmp, data, 0o644); err != nil { //nolint:gosec // a session lock, the mode of the run locks beside it (atomicfile.Mode)
 			return err
 		}
 		err := os.Link(tmp, path)
@@ -466,7 +467,7 @@ var errParentGone = errors.New("the orchestrator run that started this session e
 // watchParent returns ctx cancelled with errParentGone once the process
 // parentPID is gone (checked every parentPollInterval); parentPID 0 watches
 // nothing.
-func watchParent(ctx context.Context, parentPID int) (context.Context, func()) {
+func watchParent(ctx context.Context, parentPID int) (watched context.Context, stop func()) {
 	if parentPID <= 0 {
 		return ctx, func() {}
 	}

@@ -30,6 +30,15 @@ const outputKeep = 4 << 20
 // killed at its idle window (reason idle) or its ceiling (reason ceiling).
 const ExitTimeout = 124
 
+// The shell's exits for a command that could not run — 126 not executable,
+// 127 not found (a check that cannot start records 127, as a shell does) —
+// and 130 (128+SIGINT), a check not started because ape was interrupted.
+const (
+	exitNotExecutable = 126
+	exitNotFound      = 127
+	exitInterrupted   = 130
+)
+
 // The reasons a timed-out check records (D58 2.4).
 const (
 	ReasonIdle    = "idle"
@@ -63,8 +72,6 @@ func RunCheck(ctx context.Context, dir, cmd, logPath string, timeout time.Durati
 // in its process group kills the group when ape's end of a pipe closes,
 // however ape ended (SIGKILL included) — on Linux the shell also has
 // Pdeathsig; on Windows the group is a job object that closes with ape.
-//
-//nolint:gocyclo // one run: start, watch, classify the end, each a few lines
 func runCheck(ctx context.Context, dir, cmd, logPath string, lim TierTimeout, vacuous []string) CheckResult {
 	if lim.Max <= 0 {
 		lim = Timeouts{}.Limits(KindTask, 0)
@@ -75,14 +82,14 @@ func runCheck(ctx context.Context, dir, cmd, logPath string, lim TierTimeout, va
 	runCtx, idle := context.WithCancelCause(ctx)
 	defer idle(nil)
 
-	c := exec.CommandContext(runCtx, "sh", "-c", cmd)
+	c := exec.CommandContext(runCtx, "sh", "-c", cmd) //nolint:gosec // a check is a shell command the project's own change.md or config names, by design
 	c.Dir = dir
 	c.Stdin = nil
 	// A check is a test, not a session: it must not inherit a terminal.
 	c.Env = os.Environ()
 	g, err := prepareCheck(c, cmd)
 	if err != nil {
-		return CheckResult{Cmd: cmd, Exit: 127, Tail: []string{"[ape] " + err.Error()}}
+		return CheckResult{Cmd: cmd, Exit: exitNotFound, Tail: []string{"[ape] " + err.Error()}}
 	}
 	c.Cancel = func() error { return g.kill(c) }
 	c.WaitDelay = 5 * time.Second
@@ -148,7 +155,7 @@ func runCheck(ctx context.Context, dir, cmd, logPath string, lim TierTimeout, va
 				_, _ = io.WriteString(w, "\n[ape] interrupted\n")
 			}
 		default:
-			exit = 127
+			exit = exitNotFound
 			_, _ = io.WriteString(w, "\n[ape] "+err.Error()+"\n")
 		}
 	}

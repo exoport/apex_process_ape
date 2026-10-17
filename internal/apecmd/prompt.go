@@ -366,24 +366,7 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	// the value loses nothing.
 	o.model = resolveModelArg(o.model)
 
-	// Preflight (exit 2): agent must resolve; handoff/prompt derivation
-	// must succeed. Detected before any claude process spawns.
-	if err := refuseOrchestrator(o.agent); err != nil {
-		return promptResult{}, ExitUsage, err
-	}
-	if o.launch == nil {
-		l, err := gateSession("ape prompt", "", o.projectRoot)
-		if err != nil {
-			return promptResult{}, ExitUsage, err
-		}
-		o.launch = l
-	}
-	if o.agent != "" {
-		if _, _, found := framework.ResolveSkill(o.agent, o.projectRoot); !found {
-			return promptResult{}, ExitUsage, fmt.Errorf("--agent %q did not resolve under .claude/skills (project or user)", o.agent)
-		}
-	}
-	delivered, err := resolveDeliveredPrompt(o)
+	delivered, err := promptPreflight(&o)
 	if err != nil {
 		return promptResult{}, ExitUsage, err
 	}
@@ -532,33 +515,59 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 		}
 	}
 
+	status, exitCode := promptStatus(waitErr)
+	res := finishPrompt(o, driver, promptRecordExtras{
+		sessionID: driver.SessionID(), transcript: driver.TranscriptPath(), effort: effortPlan, argsFile: argsFile,
+	}, promptID, runDir, status, start, waitErr, progressf)
+	return res, exitCode, waitErr
+}
+
+// promptPreflight is runPromptCore's preflight (exit 2), detected before
+// any claude process spawns: the agent must resolve and the handoff/prompt
+// derivation succeed. It fills o.launch when the caller did not, and
+// returns the prompt to deliver.
+func promptPreflight(o *promptOptions) (string, error) {
+	if err := refuseOrchestrator(o.agent); err != nil {
+		return "", err
+	}
+	if o.launch == nil {
+		l, err := gateSession("ape prompt", "", o.projectRoot)
+		if err != nil {
+			return "", err
+		}
+		o.launch = l
+	}
+	if o.agent != "" {
+		if _, _, found := framework.ResolveSkill(o.agent, o.projectRoot); !found {
+			return "", fmt.Errorf("--agent %q did not resolve under .claude/skills (project or user)", o.agent)
+		}
+	}
+	return resolveDeliveredPrompt(*o)
+}
+
+// finishPrompt persists the session record, folds the cost rollup, and
+// assembles the result of a session that ended with status. Best-effort: a
+// record write failure must not change the run's exit code.
+func finishPrompt(o promptOptions, driver *sessiondriver.Driver, x promptRecordExtras, promptID, runDir, status string, start time.Time, waitErr error, progressf func(string, ...any)) promptResult {
 	tele := driver.Telemetry()
 	duration := time.Since(start)
-	status, exitCode := promptStatus(waitErr)
-
-	// Persist the session record + fold the rollup. Best-effort: a
-	// record write failure must not change the run's exit code.
 	perModel := perModelTotals(tele)
-	writePromptRecord(runDir, promptID, o, promptRecordExtras{
-		sessionID: driver.SessionID(), transcript: driver.TranscriptPath(), effort: effortPlan, argsFile: argsFile,
-	}, status, start, tele, perModel)
+	writePromptRecord(runDir, promptID, o, x, status, start, tele, perModel)
 	if _, rerr := cost.RebuildRollup(o.projectRoot); rerr != nil {
 		progressf("ape prompt: rebuild cost rollup: %v\n", rerr)
 	}
-
-	res := promptResult{
+	return promptResult{
 		PromptID:        promptID,
 		Status:          status,
 		DurationSeconds: duration.Seconds(),
 		CostUSD:         tele.Totals.CostUSD,
 		PerModel:        perModel,
 		TranscriptPaths: collectTranscriptPaths(o.projectRoot, runDir),
-		SessionID:       driver.SessionID(),
+		SessionID:       x.sessionID,
 		telemetry:       tele,
 		runDir:          runDir,
 		waitErr:         waitErr,
 	}
-	return res, exitCode, waitErr
 }
 
 // promptStatus maps the wait outcome onto a (status, exit-code) pair.

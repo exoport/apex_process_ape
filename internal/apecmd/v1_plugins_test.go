@@ -76,7 +76,7 @@ tools:
 	require.NotEmpty(t, res.Settings)
 	require.NotEmpty(t, res.Commit)
 	require.Equal(t, "apex: plugins", v1Git(t, root, "log", "-1", "--format=%s"))
-	codes := []string{}
+	codes := make([]string, 0, len(res.Findings))
 	for _, f := range res.Findings {
 		codes = append(codes, f.Code)
 	}
@@ -96,13 +96,13 @@ tools:
 	stdout, stderr, err = v1Exec(t, newPluginsCmd, "status", "--cwd", root, "--json")
 	require.NoError(t, err, stderr)
 	var rep struct {
-		InstallsChecked bool `json:"installs_checked"`
+		InstallsChecked bool `json:"installs_checked"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 		Plugins         []struct {
 			ID             string `json:"id"`
 			Installed      bool   `json:"installed"`
 			Enabled        bool   `json:"enabled"`
 			Skills         int    `json:"skills"`
-			ModelInvocable int    `json:"model_invocable"`
+			ModelInvocable int    `json:"model_invocable"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 			MCP            bool   `json:"mcp"`
 			Allowed        bool   `json:"allowed"`
 		} `json:"plugins"`

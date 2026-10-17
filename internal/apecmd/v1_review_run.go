@@ -157,10 +157,7 @@ func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, mod
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "review.voided", Msg: "review of " + id + " voided: the session changed more than its review.md (" +
 			strings.Join(outcome.Violations, ", ") + ") — the change is " + outcome.Status + "; review again"}, res)
 	case outcome.Verdict == "":
-		why := "the session was lost"
-		if res.TaskExit != nil {
-			why = fmt.Sprintf("ape task exited %d", *res.TaskExit)
-		}
+		why := sessionEnded(res.TaskExit)
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "review.no-verdict", Msg: "the review session for " + id + " ended without a verdict (" + why + "; log " + h.Log +
 			") — run `ape change review " + id + " --run` again"}, res)
 	case outcome.Verdict == "block":

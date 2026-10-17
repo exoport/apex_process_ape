@@ -307,8 +307,6 @@ func FindPromptSession(projectRoot, promptID string) (PromptSession, bool) {
 
 // RunManifest is one run's cost summary, read by `ape costs run <id>`.
 // PLAN-10 D5.
-//
-//nolint:tagliatelle // snake_case, like the rest of ape's cost JSON
 type RunManifest struct {
 	Name     string            `json:"name"` // pipeline name or task skill
 	RunID    string            `json:"run_id"`
@@ -326,8 +324,6 @@ type RunManifest struct {
 }
 
 // ChildRun is one run another run started (its manifest's parent_run).
-//
-//nolint:tagliatelle // snake_case, like the rest of ape's cost JSON
 type ChildRun struct {
 	Run     string  `json:"run"`
 	Skill   string  `json:"skill"`

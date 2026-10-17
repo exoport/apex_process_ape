@@ -52,7 +52,7 @@ import (
 // HEAD's.
 
 func init() {
-	findingRules = append(findingRules, rule("", `^human_review config: `, "delegate.invalid-config"))
+	findingRules = append(findingRules, rule("", `^human_review config: `, CodeDelegateInvalidConfig))
 }
 
 // humanReviewFindings is `ape project check` on the human_review block:
@@ -291,10 +291,10 @@ func (p *Project) PrepareDelegate(ctx context.Context, id, task string) (*Delega
 	}
 	args, err := FillArgs(hr.ArgsTemplate(), ArgsVarsFor(id, task, folder))
 	if err != nil {
-		return nil, &FailError{Code: "delegate.invalid-config", Msg: "human_review.args: " + err.Error() + " — a person fixes _apex/config.yaml"}
+		return nil, &FailError{Code: CodeDelegateInvalidConfig, Msg: "human_review.args: " + err.Error() + " — a person fixes _apex/config.yaml"}
 	}
 	if err := effort.CheckLevel(strings.TrimSpace(hr.Effort)); err != nil {
-		return nil, &FailError{Code: "delegate.invalid-config", Msg: "human_review.effort: " + err.Error() + " — a person fixes _apex/config.yaml"}
+		return nil, &FailError{Code: CodeDelegateInvalidConfig, Msg: "human_review.effort: " + err.Error() + " — a person fixes _apex/config.yaml"}
 	}
 	return &DelegatePlan{Change: id, Task: task, Skill: hr.Skill(), Args: args, Folder: folder, Model: hr.SessionModel(cfg.Models), ChangeTip: tip}, nil
 }
@@ -316,7 +316,7 @@ func (p *Project) refuseUnacceptedHumanReview(ctx context.Context) error {
 	}
 	if epoch := p.v1Epoch(ctx, "HEAD"); epoch != "" {
 		for _, f := range p.configFindings(ctx, epoch) {
-			if m := guardedKeysRe.FindStringSubmatch(f.Message); m != nil && slices.Contains(strings.Split(m[1], ", "), "human_review") {
+			if m := guardedKeysRe.FindStringSubmatch(f.Message); len(m) > 1 && slices.Contains(strings.Split(m[1], ", "), "human_review") {
 				return refuse("was changed by a commit no person accepted (config.changed: " + f.Message + ")")
 			}
 		}
@@ -336,31 +336,10 @@ func (p *Project) refuseUnacceptedHumanReview(ctx context.Context) error {
 // change's folder, project-relative: changes/<id> in flight, its archive
 // folder once archived (as this checkout's tree holds it).
 func (p *Project) delegateTarget(ctx context.Context, id, task string) (folder string, archived bool, err error) {
-	notAwaiting := func(why string) error {
-		return &FailError{Code: "delegate.not-awaiting", Msg: "task " + task + " of " + id + " is not awaiting a person: " + why}
-	}
 	ci, err := p.requireChange(ctx, id)
 	if fe, ok := errors.AsType[*FailError](err); ok && fe.Code == "change.archived" {
-		name, ok := p.ArchivedIDs()[id]
-		if !ok {
-			return "", false, &FailError{Code: CodeChangeNotFound, Msg: "the archived change " + id + " is not in this checkout's tree — run the delegate on the branch it was archived into"}
-		}
-		dir := filepath.Join(p.ArchiveDir(), name)
-		st, serr := LoadState(filepath.Join(dir, "state.json"))
-		if serr != nil {
-			return "", false, &FailError{Code: CodeStateUnreadable, Msg: serr.Error()}
-		}
-		doc := p.loadChangeDoc(filepath.Join(dir, "change.md"))
-		if doc == nil {
-			return "", false, &FailError{Code: "change.no-change-md", Msg: "the archived change " + id + " has no change.md"}
-		}
-		if err := humanTask(doc, id, task); err != nil {
-			return "", false, err
-		}
-		if !slices.Contains(awaitingHuman(st, doc), task) {
-			return "", false, notAwaiting("it is accepted already")
-		}
-		return p.Rel(dir), true, nil
+		folder, err := p.archivedDelegateTarget(id, task)
+		return folder, err == nil, err
 	}
 	if err != nil {
 		return "", false, err
@@ -371,11 +350,41 @@ func (p *Project) delegateTarget(ctx context.Context, id, task string) (folder s
 	st := p.withBaseAccepted(ctx, id, ci.State)
 	if !slices.Contains(awaitingHuman(st, ci.Doc), task) {
 		if st.Status != StatusReviewed {
-			return "", false, notAwaiting("the change is " + st.Status + ", and a human-review task awaits a person once the change is reviewed")
+			return "", false, notAwaiting(id, task, "the change is "+st.Status+", and a human-review task awaits a person once the change is reviewed")
 		}
-		return "", false, notAwaiting("it is accepted already")
+		return "", false, notAwaiting(id, task, "it is accepted already")
 	}
 	return p.Rel(p.ChangeDir(id)), false, nil
+}
+
+// archivedDelegateTarget is delegateTarget for an archived change: its
+// archive folder, as this checkout's tree holds it.
+func (p *Project) archivedDelegateTarget(id, task string) (string, error) {
+	name, ok := p.ArchivedIDs()[id]
+	if !ok {
+		return "", &FailError{Code: CodeChangeNotFound, Msg: "the archived change " + id + " is not in this checkout's tree — run the delegate on the branch it was archived into"}
+	}
+	dir := filepath.Join(p.ArchiveDir(), name)
+	st, err := LoadState(filepath.Join(dir, "state.json"))
+	if err != nil {
+		return "", &FailError{Code: CodeStateUnreadable, Msg: err.Error()}
+	}
+	doc := p.loadChangeDoc(filepath.Join(dir, "change.md"))
+	if doc == nil {
+		return "", &FailError{Code: CodeNoChangeMD, Msg: "the archived change " + id + " has no change.md"}
+	}
+	if err := humanTask(doc, id, task); err != nil {
+		return "", err
+	}
+	if !slices.Contains(awaitingHuman(st, doc), task) {
+		return "", notAwaiting(id, task, "it is accepted already")
+	}
+	return p.Rel(dir), nil
+}
+
+// notAwaiting is delegate.not-awaiting for task of change id.
+func notAwaiting(id, task, why string) error {
+	return &FailError{Code: "delegate.not-awaiting", Msg: "task " + task + " of " + id + " is not awaiting a person: " + why}
 }
 
 // changeTip is what a delegate judges, as a revision: change/<id>'s tip
@@ -551,7 +560,7 @@ func (p *Project) SettleDelegateRun(ctx context.Context, run *DelegateRun) (*Del
 				violations = append(violations, "committed "+line)
 			}
 		}
-		if len(out) == 0 {
+		if out == "" {
 			violations = append(violations, "moved HEAD from "+short(run.HeadSHA))
 		}
 	}
@@ -655,9 +664,6 @@ func (p *Project) AcceptDelegated(ctx context.Context, run *DelegateRun, v *Dele
 // readNotes is the content of the notes (project-relative files) to
 // commit with an acceptance.
 func (p *Project) readNotes(rels []string) (map[string][]byte, error) {
-	if len(rels) == 0 {
-		return nil, nil
-	}
 	out := make(map[string][]byte, len(rels))
 	for _, rel := range rels {
 		data, err := os.ReadFile(filepath.Join(p.Root, filepath.FromSlash(rel)))

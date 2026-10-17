@@ -59,7 +59,7 @@ func (p *Project) PrepareTool(ctx context.Context, id, name, task string) (*Tool
 		return nil, err
 	}
 	if task != "" && ci.Doc.Task(task) == nil {
-		return nil, &UsageError{Code: "usage.no-such-task", Msg: "change " + id + " has no task " + task}
+		return nil, &UsageError{Code: CodeNoSuchTask, Msg: "change " + id + " has no task " + task}
 	}
 	// A design tool runs for the task whose line names it (`— tool:
 	// <name>`); a review tool for a change whose review_tools: names it.

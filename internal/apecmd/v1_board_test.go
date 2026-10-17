@@ -32,7 +32,7 @@ func TestBoardRefresh_EveryV1LeafIsClassified(t *testing.T) {
 		}
 		p := boardPath(c)
 		seen[p] = true
-		require.True(t, boardRefreshVerbs[p] != boardSkipVerbs[p],
+		require.NotEqual(t, boardRefreshVerbs[p], boardSkipVerbs[p],
 			"%q must be in exactly one of boardRefreshVerbs and boardSkipVerbs (v1_board.go)", p)
 	}
 	for _, name := range boardGroups {
@@ -42,7 +42,7 @@ func TestBoardRefresh_EveryV1LeafIsClassified(t *testing.T) {
 			}
 		}
 	}
-	var listed []string
+	listed := make([]string, 0, len(boardRefreshVerbs)+len(boardSkipVerbs))
 	for p := range boardRefreshVerbs {
 		listed = append(listed, p)
 	}
@@ -102,7 +102,7 @@ func TestBoardRefresh_AfterAStateChangingVerb(t *testing.T) {
 	require.NoError(t, err)
 	var st struct {
 		Next        string   `json:"next"`
-		RoadmapNext []string `json:"roadmap_next"`
+		RoadmapNext []string `json:"roadmap_next"` //nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &st))
 	require.NotEmpty(t, st.Next, "the next step is still a string")

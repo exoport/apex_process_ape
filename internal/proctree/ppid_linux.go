@@ -21,11 +21,11 @@ func Parent(pid int) (int, bool) {
 }
 
 func parseStat(stat string) (int, bool) {
-	i := strings.LastIndexByte(stat, ')')
-	if i < 0 {
+	_, rest, found := strings.CutLast(stat, ")")
+	if !found {
 		return 0, false
 	}
-	fields := strings.Fields(stat[i+1:])
+	fields := strings.Fields(rest)
 	if len(fields) < 2 {
 		return 0, false
 	}

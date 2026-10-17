@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -486,8 +487,8 @@ func sessionResult(runDir string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	for i := len(m.Stages) - 1; i >= 0; i-- {
-		for j := len(m.Stages[i].Steps) - 1; j >= 0; j-- {
+	for i := range slices.Backward(m.Stages) {
+		for j := range slices.Backward(m.Stages[i].Steps) {
 			for _, sess := range m.Stages[i].Steps[j].Sessions {
 				if sess.ParentSessionID != "" || sess.SessionID == "" {
 					continue

@@ -111,9 +111,9 @@ func newSessionsOpenCmd() *cobra.Command {
 				prefix = args[0]
 			}
 			var matches []sessions.Session
-			for _, r := range rows {
-				if prefix == "" || strings.HasPrefix(r.CWD, prefix) {
-					matches = append(matches, r)
+			for i := range rows {
+				if prefix == "" || strings.HasPrefix(rows[i].CWD, prefix) {
+					matches = append(matches, rows[i])
 				}
 			}
 			if len(matches) == 0 {
@@ -143,7 +143,8 @@ func printSessions(rows []sessions.Session, format output.Format) error {
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(tw, "PID\tAGE\tCOMMAND\tRUN\tSKILL\tDEPTH\tPARENT\tURL\tCWD")
 		now := time.Now()
-		for _, r := range rows {
+		for i := range rows {
+			r := &rows[i]
 			fmt.Fprintf(
 				tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				r.PID,

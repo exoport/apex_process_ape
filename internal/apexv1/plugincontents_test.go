@@ -47,7 +47,7 @@ func TestInspectPlugin_SkillsHooksMCP(t *testing.T) {
 		"hooks/hooks.json":            `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"x"}]}]}}`,
 	})
 	pc := InspectPlugin(root)
-	var names []string
+	names := make([]string, 0, len(pc.Skills))
 	for _, s := range pc.Skills {
 		names = append(names, s.Name)
 	}

@@ -140,7 +140,7 @@ func refreshPending(st *State, c *Change) {
 func humanTask(c *Change, id, task string) error {
 	t := c.Task(task)
 	if t == nil {
-		return &UsageError{Code: "usage.no-such-task", Msg: "change " + id + " has no task " + task}
+		return &UsageError{Code: CodeNoSuchTask, Msg: "change " + id + " has no task " + task}
 	}
 	if !t.Human() {
 		return &FailError{Code: "accept.not-human-review", Msg: "task " + task + " is proven by `" + t.Check + "`, not by a person — `ape change verify " + id + "` runs it"}

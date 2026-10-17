@@ -102,6 +102,9 @@ func (c *Caps) UnmarshalYAML(n *yaml.Node) error {
 
 var byteSizeRe = regexp.MustCompile(`^(\d+)\s*([A-Za-z]*)$`)
 
+// maxCapBytes is the largest size a cap may name: 1 TiB.
+const maxCapBytes = 1 << 40
+
 // ParseByteSize reads a caps: size: plain bytes, or a whole number with
 // B, KB, KiB, MB or MiB (KB = KiB = 1024 bytes, MB = MiB = 1024 KB).
 func ParseByteSize(s string) (int, error) {
@@ -123,7 +126,7 @@ func ParseByteSize(s string) (int, error) {
 	default:
 		return 0, fmt.Errorf("%q: the unit is not B, KB, KiB, MB or MiB", s)
 	}
-	if n > (1<<40)/unit {
+	if n > maxCapBytes/unit {
 		return 0, fmt.Errorf("%q is too large", s)
 	}
 	return n * unit, nil

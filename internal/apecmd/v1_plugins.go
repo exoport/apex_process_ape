@@ -16,10 +16,8 @@ import (
 
 // pluginCLIOrNil is the `claude plugin` CLI, nil when claude is not on
 // PATH (project check then judges settings.json only).
-func pluginCLIOrNil(bin string) apexv1.PluginCLI {
-	if bin == "" {
-		bin = "claude"
-	}
+func pluginCLIOrNil() apexv1.PluginCLI {
+	const bin = "claude"
 	if _, err := exec.LookPath(bin); err != nil {
 		return nil
 	}
@@ -77,7 +75,7 @@ func checkPluginsProject(ctx context.Context, env doctorEnv) CheckResult {
 		res.Status, res.Message = StatusSkip, "_apex/config.yaml lists no plugins"
 		return res
 	}
-	cli := pluginCLIOrNil("")
+	cli := pluginCLIOrNil()
 	fs := p.CheckPlugins(ctx, cli)
 	if len(fs) == 0 {
 		res.Status, res.Message = StatusOK, fmt.Sprintf("%d plugin(s) installed at their refs, settings.json in step", len(cfg.Plugins))
@@ -176,7 +174,7 @@ failed · 2 usage.`,
 			if err != nil {
 				return v1Fail(cmd, &f, err, res)
 			}
-			rep, err := p.PluginsStatus(cmd.Context(), pluginCLIOrNil(""))
+			rep, err := p.PluginsStatus(cmd.Context(), pluginCLIOrNil())
 			if err != nil {
 				return v1Fail(cmd, &f, err, res)
 			}
@@ -234,7 +232,7 @@ Exit codes: 0 reported (findings or not) · 1 the config cannot be read · 2 usa
 			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
-			rep, err := p.PluginsStatus(cmd.Context(), pluginCLIOrNil(""))
+			rep, err := p.PluginsStatus(cmd.Context(), pluginCLIOrNil())
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
@@ -251,7 +249,8 @@ func printPluginsReport(w io.Writer, rep *apexv1.PluginsReport) {
 	if len(rep.Plugins) == 0 {
 		fmt.Fprintln(w, "plugins: none listed")
 	}
-	for _, pl := range rep.Plugins {
+	for i := range rep.Plugins {
+		pl := &rep.Plugins[i]
 		state := "not installed"
 		switch {
 		case !rep.InstallsChecked:
@@ -267,25 +266,11 @@ func printPluginsReport(w io.Writer, rep *apexv1.PluginsReport) {
 		}
 		fmt.Fprintf(w, "plugin  %s  %s, %s\n", pl.ID, state, enabled)
 		if pl.Installed {
-			var extra []string
-			if pl.Hooks {
-				extra = append(extra, "hooks")
-			}
-			if pl.MCP {
-				extra = append(extra, "MCP servers")
-			}
-			carries := ""
-			if len(extra) > 0 {
-				verdict := "allowed"
-				if !pl.Allowed {
-					verdict = "NOT allowed"
-				}
-				carries = "; carries " + strings.Join(extra, " and ") + " (" + verdict + ")"
-			}
-			fmt.Fprintf(w, "        %d skill(s), %d model-invocable%s\n", pl.Skills, pl.ModelInvocable, carries)
+			fmt.Fprintf(w, "        %d skill(s), %d model-invocable%s\n", pl.Skills, pl.ModelInvocable, pluginCarries(pl))
 		}
 	}
-	for _, t := range rep.Tools {
+	for i := range rep.Tools {
+		t := &rep.Tools[i]
 		where := t.Source
 		if t.Path != "" {
 			where += " " + t.Path
@@ -293,6 +278,26 @@ func printPluginsReport(w io.Writer, rep *apexv1.PluginsReport) {
 		fmt.Fprintf(w, "tool    %s/%s  %s  %s  %s\n", t.Slot, t.Name, t.Skill, t.State, strings.TrimSpace(where))
 	}
 	printPluginFindings(w, rep.Findings)
+}
+
+// pluginCarries is an installed plugin's "; carries hooks and MCP servers
+// (allowed)" note, "" when it carries neither.
+func pluginCarries(pl *apexv1.PluginStatus) string {
+	var extra []string
+	if pl.Hooks {
+		extra = append(extra, "hooks")
+	}
+	if pl.MCP {
+		extra = append(extra, "MCP servers")
+	}
+	if len(extra) == 0 {
+		return ""
+	}
+	verdict := "allowed"
+	if !pl.Allowed {
+		verdict = "NOT allowed"
+	}
+	return "; carries " + strings.Join(extra, " and ") + " (" + verdict + ")"
 }
 
 // printPluginFindings lists findings with their codes.

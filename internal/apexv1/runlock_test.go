@@ -42,7 +42,7 @@ func TestRunLock_AttachBusyStale(t *testing.T) {
 	require.Equal(t, lock.ID, held.ID)
 	busy := RunBusy(held)
 	var ce *ConflictError
-	require.True(t, errors.As(busy, &ce))
+	require.ErrorAs(t, busy, &ce)
 	require.Equal(t, CodeRunBusy, ce.Code)
 	require.Equal(t, ActionRetry, ActionFor(ce.Code))
 	require.Contains(t, ce.Msg, "`ape change verify add-wave` is running on it since "+lock.Started)
@@ -98,13 +98,16 @@ func TestRunLock_FileShape(t *testing.T) {
 func requireCode(t *testing.T, err error, code string) {
 	t.Helper()
 	require.Error(t, err)
-	switch e := err.(type) {
-	case *FailError:
-		require.Equal(t, code, e.Code)
-	case *ConflictError:
-		require.Equal(t, code, e.Code)
-	case *UsageError:
-		require.Equal(t, code, e.Code)
+	var fe *FailError
+	var ce *ConflictError
+	var ue *UsageError
+	switch {
+	case errors.As(err, &fe):
+		require.Equal(t, code, fe.Code)
+	case errors.As(err, &ce):
+		require.Equal(t, code, ce.Code)
+	case errors.As(err, &ue):
+		require.Equal(t, code, ue.Code)
 	default:
 		t.Fatalf("%T %v", err, err)
 	}

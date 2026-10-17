@@ -233,12 +233,19 @@ func deliverRun(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, r *apexv1.Run
 	return &exitError{code: r.Exit, err: errors.New(r.Err), reported: r.Silent}
 }
 
+// awaitRun polls the run lock every awaitPollFirst at first, doubling up to
+// awaitPollMax.
+const (
+	awaitPollFirst = 50 * time.Millisecond
+	awaitPollMax   = 500 * time.Millisecond
+)
+
 // awaitRun waits up to --wait for the run holding lock to end, and prints
 // its result; exit 75 when it is still running.
 func awaitRun(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, lock *apexv1.RunLock) error {
 	ctx := cmd.Context()
 	deadline := time.Now().Add(f.wait)
-	poll := 50 * time.Millisecond
+	poll := awaitPollFirst
 	for {
 		cur := p.LoadRunLock(lock.Scope)
 		if cur == nil || cur.ID != lock.ID || !cur.Alive() {
@@ -261,7 +268,7 @@ func awaitRun(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, lock *apexv1.Ru
 			return longStillRunning(cmd, f, p, cur)
 		case <-time.After(poll):
 		}
-		poll = min(poll*2, 500*time.Millisecond)
+		poll = min(poll*2, awaitPollMax)
 	}
 }
 
@@ -329,7 +336,7 @@ func launchWorker(cmd *cobra.Command, p *apexv1.Project, lock *apexv1.RunLock, a
 	if err != nil {
 		return err
 	}
-	spawn := exec.CommandContext(context.WithoutCancel(cmd.Context()), exe, append([]string{"__run", "--spawn", "--log", logPath, lock.ID}, argv...)...) //nolint:gosec // this binary
+	spawn := exec.CommandContext(context.WithoutCancel(cmd.Context()), exe, append([]string{"__run", "--spawn", "--log", logPath, lock.ID}, argv...)...)
 	spawn.Dir = p.Root
 	var stderr bytes.Buffer
 	spawn.Stderr = &stderr
@@ -411,12 +418,12 @@ func spawnWorker(cmd *cobra.Command, logPath string, args []string) error {
 	if err != nil {
 		return failErr(err)
 	}
-	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644) //nolint:gosec // the run's log, ignored
+	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return failErr(err)
 	}
 	defer func() { _ = logf.Close() }()
-	w := exec.Command(exe, append([]string{"__run"}, args...)...) //nolint:gosec,noctx // this binary; the worker must outlive this process
+	w := exec.Command(exe, append([]string{"__run"}, args...)...) //nolint:noctx // this binary; the worker must outlive this process
 	w.Stdout, w.Stderr = logf, logf
 	w.SysProcAttr = detachedProcAttr()
 	if err := w.Start(); err != nil {

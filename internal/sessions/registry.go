@@ -22,8 +22,6 @@ import (
 )
 
 // Session is one row in the registry.
-//
-//nolint:tagliatelle // snake_case, like every other file ape writes for tools to read
 type Session struct {
 	PID       int       `json:"pid"`
 	CWD       string    `json:"cwd"`
@@ -93,9 +91,9 @@ func Deregister(path string, pid int) error {
 			return err
 		}
 		out := reg.Sessions[:0]
-		for _, row := range reg.Sessions {
-			if row.PID != pid {
-				out = append(out, row)
+		for i := range reg.Sessions {
+			if reg.Sessions[i].PID != pid {
+				out = append(out, reg.Sessions[i])
 			}
 		}
 		reg.Sessions = out
@@ -112,9 +110,9 @@ func DeregisterRun(path string, pid int, runID string) error {
 			return err
 		}
 		out := reg.Sessions[:0]
-		for _, row := range reg.Sessions {
-			if row.PID != pid || row.RunID != runID {
-				out = append(out, row)
+		for i := range reg.Sessions {
+			if row := &reg.Sessions[i]; row.PID != pid || row.RunID != runID {
+				out = append(out, *row)
 			}
 		}
 		reg.Sessions = out
@@ -148,9 +146,9 @@ func Alive(path string) ([]Session, error) {
 		return nil, err
 	}
 	out := rows[:0]
-	for _, row := range rows {
-		if pidAlive(row.PID) {
-			out = append(out, row)
+	for i := range rows {
+		if pidAlive(rows[i].PID) {
+			out = append(out, rows[i])
 		}
 	}
 	return out, nil
@@ -165,9 +163,9 @@ func Prune(path string) ([]Session, error) {
 		if err != nil {
 			return err
 		}
-		for _, row := range reg.Sessions {
-			if pidAlive(row.PID) {
-				alive = append(alive, row)
+		for i := range reg.Sessions {
+			if pidAlive(reg.Sessions[i].PID) {
+				alive = append(alive, reg.Sessions[i])
 			}
 		}
 		reg.Sessions = alive

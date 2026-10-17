@@ -27,7 +27,10 @@ func detachedIDOf(t *testing.T, out string) string {
 		return m[1]
 	}
 	var obj struct {
-		ID, Wait, Log, Stdout string
+		ID     string `json:"id"`
+		Wait   string `json:"wait"`
+		Log    string `json:"log"`
+		Stdout string `json:"stdout"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &obj), "no id in: %s", out)
 	require.NotEmpty(t, obj.ID, "no id in: %s", out)
@@ -185,7 +188,7 @@ func writeFile(path, body string) error { return os.WriteFile(path, []byte(body)
 // which exists and is red until wave.sh is written, as `ape milestone
 // approve` requires (D70 B: a gate must run, red).
 func writeWaveGate(project string) error {
-	return os.WriteFile(filepath.Join(project, "gate.sh"), []byte("#!/bin/sh\n./wave.sh 2>/dev/null | grep -q wave\n"), 0o755) //nolint:gosec // a test fixture's script
+	return os.WriteFile(filepath.Join(project, "gate.sh"), []byte("#!/bin/sh\n./wave.sh 2>/dev/null | grep -q wave\n"), 0o755)
 }
 
 func fileExists(path string) bool {

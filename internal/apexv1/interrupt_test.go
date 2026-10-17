@@ -20,8 +20,8 @@ func cancelAfter(t *testing.T, d time.Duration) context.Context {
 
 func requireInterrupted(t *testing.T, err error) {
 	t.Helper()
-	fe, ok := err.(*FailError)
-	require.True(t, ok, "%v", err)
+	var fe *FailError
+	require.ErrorAs(t, err, &fe, "%v", err)
 	require.Equal(t, CodeRunInterrupted, fe.Code)
 	require.Equal(t, ActionRetry, ActionFor(fe.Code))
 	require.Contains(t, fe.Msg, "nothing was recorded and no attempt counted")

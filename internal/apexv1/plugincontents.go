@@ -414,8 +414,8 @@ func (p *Project) pluginsReport(ctx context.Context, cli PluginCLI) (*PluginsRep
 			rows, _, _ = p.pluginStatuses(ctx, nil, cfg)
 		}
 		rep.Plugins = rows
-		for i, st := range rows {
-			if f := hooksOrMCPFinding(st, cfg.Plugins[i]); f != nil {
+		for i := range rows {
+			if f := hooksOrMCPFinding(rows[i], cfg.Plugins[i]); f != nil {
 				rep.Findings = append(rep.Findings, *f)
 			}
 		}

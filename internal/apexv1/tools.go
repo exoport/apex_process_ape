@@ -135,12 +135,10 @@ func (t *ToolsConfig) UnmarshalYAML(n *yaml.Node) error {
 }
 
 // parseTool reads one entry, and what is wrong with it.
-func parseTool(n *yaml.Node, at string) (Tool, []string) {
-	var tool Tool
+func parseTool(n *yaml.Node, at string) (tool Tool, probs []string) {
 	if n.Kind != yaml.MappingNode {
 		return tool, []string{at + ": is not a mapping {name, skill, when}"}
 	}
-	var probs []string
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		k, v := n.Content[i].Value, n.Content[i+1]
 		if v.Kind != yaml.ScalarNode {

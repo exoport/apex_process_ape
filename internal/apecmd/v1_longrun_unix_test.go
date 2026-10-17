@@ -54,6 +54,7 @@ func detachedRepo(t *testing.T, script string) (string, *apexv1.Project) {
 	return root, p
 }
 
+//nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 type runningJSON struct {
 	Running bool     `json:"running"`
 	Verb    string   `json:"verb"`

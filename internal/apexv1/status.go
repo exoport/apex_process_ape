@@ -670,12 +670,14 @@ groups:
 				line += " — red: " + strings.Join(c.Failing, ", ")
 			}
 			if len(c.PendingHuman) > 0 {
-				line += " — human-review pending: " + strings.Join(c.PendingHuman, ",")
+				var pending strings.Builder
+				pending.WriteString(" — human-review pending: " + strings.Join(c.PendingHuman, ","))
 				for _, task := range c.PendingHuman {
 					if d, ok := c.Delegate[task]; ok && (d.Verdict == "fail" || len(d.Voided) > 0) {
-						line += " (" + task + " " + d.describe() + ")"
+						pending.WriteString(" (" + task + " " + d.describe() + ")")
 					}
 				}
+				line += pending.String()
 			}
 			if len(c.Flaky) > 0 {
 				line += " — flaky: " + strings.Join(c.Flaky, ", ")

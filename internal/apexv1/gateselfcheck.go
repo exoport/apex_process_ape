@@ -98,22 +98,22 @@ func (p *Project) gateSelfCheck(ctx context.Context, m *Milestone, progress io.W
 	if len(r.Tail) > 0 {
 		last = ". Last output (" + r.Log + "): " + strings.Join(lastN(r.Tail, 5), " | ")
 	}
-	switch {
-	case r.Exit == 0:
+	switch r.Exit {
+	case 0:
 		fmt.Fprintf(progress, "%s: the gate is GREEN (exit 0 in %.1fs) — refused\n", m.ID, r.Secs)
 		return nil, &FailError{Code: CodeGateGreen, Msg: fmt.Sprintf("%s's gate is already green on the current tree (exit 0 in %.1fs at %.7s)", m.ID, r.Secs, sha) +
 			" — a green gate proves nothing the milestone adds: re-plan the gate (apex-plan) so it is red until the milestone's work is done, then approve again" + last}
-	case r.Exit == ExitTimeout:
+	case ExitTimeout:
 		why := "it reached its ceiling of " + lim.Max.String() + " (timeouts.gate max)"
 		if r.Reason == ReasonIdle {
 			why = "it made no progress (no output, no CPU) for " + lim.Idle.String() + " (timeouts.gate idle)"
 		}
 		fmt.Fprintf(progress, "%s: the gate timed out — refused: %s\n", m.ID, why)
 		return nil, broken(why + last)
-	case r.Exit == 126 || r.Exit == 127:
+	case exitNotExecutable, exitNotFound:
 		fmt.Fprintf(progress, "%s: the gate exited %d — refused\n", m.ID, r.Exit)
 		why := "it exited 127 (a command it runs was not found)"
-		if r.Exit == 126 {
+		if r.Exit == exitNotExecutable {
 			why = "it exited 126 (a command it runs is not executable)"
 		}
 		return nil, broken(why + last)
@@ -151,7 +151,7 @@ func shellSyntax(ctx context.Context, path string) (string, bool) {
 			return "", false
 		}
 	}
-	out, err := exec.CommandContext(ctx, shell, "-n", path).CombinedOutput() //nolint:gosec // a gate script of this project, parsed, never run
+	out, err := exec.CommandContext(ctx, shell, "-n", path).CombinedOutput()
 	if err == nil {
 		return "", false
 	}

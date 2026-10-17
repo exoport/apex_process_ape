@@ -28,6 +28,15 @@ import (
 // delegate session, for the record.
 const envDelegateParent = "APE_DELEGATE_PARENT"
 
+// sessionEnded says how a detached session's `ape task` ended: its exit
+// status, or that the session was lost when none was recorded.
+func sessionEnded(taskExit *int) string {
+	if taskExit == nil {
+		return "the session was lost"
+	}
+	return fmt.Sprintf("ape task exited %d", *taskExit)
+}
+
 // childSessionEnv is the environment of a session a v1 verb starts
 // detached (a delegate, a tool): the caller's, without the review and
 // delegate markers of the session it came from — the same filter as
@@ -125,11 +134,7 @@ func runDelegateSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, t
 		why := outcome.Reason
 		if why == apexv1.NoVerdictReason {
 			// D78: a session that recorded no verdict failed the task.
-			ended := "the session was lost"
-			if res.TaskExit != nil {
-				ended = fmt.Sprintf("ape task exited %d", *res.TaskExit)
-			}
-			why += " (" + ended + "; log " + res.Log + ")"
+			why += " (" + sessionEnded(res.TaskExit) + "; log " + res.Log + ")"
 		}
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "delegate.fail", Msg: "the delegate failed " + task + " of " + id + ": " + why +
 			" — the task still awaits a person (`ape change accept " + id + " --task " + task + " --by <who>`)"}, res)

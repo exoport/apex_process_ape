@@ -56,8 +56,6 @@ func (r *LatestRun) Describe() string {
 
 // LiveSession is a model session ape launched that is running in the
 // project now (the live-session registry, D62).
-//
-//nolint:tagliatelle // the v1 --json payloads are snake_case by contract
 type LiveSession struct {
 	RunID     string    `json:"run_id"`
 	Kind      string    `json:"kind"`
@@ -73,7 +71,8 @@ type LiveSession struct {
 func (p *Project) LiveSessions() []LiveSession {
 	rows, _ := sessions.Alive(sessions.Path())
 	out := []LiveSession{}
-	for _, r := range rows {
+	for i := range rows {
+		r := &rows[i]
 		if r.RunID == "" || filepath.Clean(r.CWD) != filepath.Clean(p.Root) {
 			continue
 		}

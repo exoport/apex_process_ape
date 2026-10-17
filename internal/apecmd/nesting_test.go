@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -68,9 +67,10 @@ func withAncestors(t *testing.T, pids ...int) {
 	parentOf = func(pid int) (int, bool) { pp, ok := table[pid]; return pp, ok }
 }
 
-// An orchestrator run: a live registry row for ape task apex-orchestrator.
-func orchestratorRow(run string) sessions.Session {
-	return sessions.Session{PID: os.Getppid(), ClaudePID: 7000, Command: "task", RunID: run, Skill: apexv1.OrchestratorSkill, Depth: 1, StartedAt: time.Now()}
+// An orchestrator run, orch-run: a live registry row for ape task
+// apex-orchestrator.
+func orchestratorRow() sessions.Session {
+	return sessions.Session{PID: os.Getppid(), ClaudePID: 7000, Command: "task", RunID: "orch-run", Skill: apexv1.OrchestratorSkill, Depth: 1, StartedAt: time.Now()}
 }
 
 // Every session-starting command refuses from a depth-1 session that is
@@ -154,17 +154,20 @@ func TestNesting_RefusalMatrix(t *testing.T) {
 		setup func(t *testing.T)
 		want  func(skill string) want
 	}{
-		{"depth 0: a terminal starts anything", func(*testing.T) {}, func(string) want { return want{depth: 1} }},
+		{"depth 0: a terminal starts anything", func(t *testing.T) { t.Helper() }, func(string) want { return want{depth: 1} }},
 		{"depth 1, not an orchestrator: nothing", func(t *testing.T) {
+			t.Helper()
 			inSession(t, "task/apply-run", 1)
 			registerRow(t, sessions.Session{PID: os.Getppid(), Command: "task", RunID: "apply-run", Skill: "apex-apply", Depth: 1})
 		}, func(string) want { return want{code: apexv1.CodeSessionDepth} }},
 		{"depth 1, a prompt session: nothing", func(t *testing.T) {
+			t.Helper()
 			inSession(t, "prompt/p1", 1)
 		}, func(string) want { return want{code: apexv1.CodeSessionDepth} }},
 		{"depth 1, the orchestrator: allow-listed skills only", func(t *testing.T) {
+			t.Helper()
 			inSession(t, "task/orch-run", 1)
-			registerRow(t, orchestratorRow("orch-run"))
+			registerRow(t, orchestratorRow())
 		}, func(skill string) want {
 			if skill == "apex-change" || skill == apexv1.ReviewSkill {
 				return want{depth: 2}
@@ -172,6 +175,7 @@ func TestNesting_RefusalMatrix(t *testing.T) {
 			return want{code: apexv1.CodeSessionNotAllowed}
 		}},
 		{"depth 2: nothing, allow-listed or not", func(t *testing.T) {
+			t.Helper()
 			inSession(t, "task/child-run", 2)
 		}, func(string) want { return want{code: apexv1.CodeSessionDepth} }},
 	}
@@ -185,7 +189,7 @@ func TestNesting_RefusalMatrix(t *testing.T) {
 				if w.code != "" {
 					require.Error(t, err)
 					var ue *apexv1.UsageError
-					require.True(t, errors.As(err, &ue), "%T", err)
+					require.ErrorAs(t, err, &ue, "%T", err)
 					require.Equal(t, w.code, ue.Code)
 					require.Equal(t, apexv1.ActionStop, ue.Action)
 					require.Contains(t, err.Error(), s.verb)
@@ -216,17 +220,17 @@ func TestNesting_AncestryOutranksAScrubbedEnvironment(t *testing.T) {
 		registerRow(t, sessions.Session{PID: os.Getppid(), ClaudePID: 7000, Command: "task", RunID: "child-run", Skill: "apex-apply", Depth: 2, ParentRun: "orch-run"})
 		withAncestors(t, 7001, 7000, os.Getppid())
 		_, err := gateSession("ape task", "apex-change", root)
-		requireCode(t, err, apexv1.CodeSessionDepth)
+		requireSessionDepth(t, err)
 	})
 
 	t.Run("a forged marker naming the orchestrator", func(t *testing.T) {
 		outsideEverySession(t)
-		registerRow(t, orchestratorRow("orch-run"))
+		registerRow(t, orchestratorRow())
 		registerRow(t, sessions.Session{PID: os.Getppid(), ClaudePID: 8000, Command: "task", RunID: "apply-run", Skill: "apex-apply", Depth: 1})
 		inSession(t, "task/orch-run", 1)
 		withAncestors(t, 8001, 8000, os.Getppid())
 		_, err := gateSession("ape task", "apex-change", root)
-		requireCode(t, err, apexv1.CodeSessionDepth)
+		requireSessionDepth(t, err)
 	})
 
 	t.Run("an env claiming less depth than ape recorded", func(t *testing.T) {
@@ -241,7 +245,7 @@ func TestNesting_AncestryOutranksAScrubbedEnvironment(t *testing.T) {
 
 	t.Run("the orchestrator found by its claude pid, env scrubbed", func(t *testing.T) {
 		outsideEverySession(t)
-		registerRow(t, orchestratorRow("orch-run"))
+		registerRow(t, orchestratorRow())
 		withAncestors(t, 7001, 7000)
 		l, err := gateSession("ape task", "apex-plan", root)
 		require.NoError(t, err)
@@ -251,7 +255,7 @@ func TestNesting_AncestryOutranksAScrubbedEnvironment(t *testing.T) {
 
 	t.Run("found by the ape process running it, before the claude pid is recorded", func(t *testing.T) {
 		outsideEverySession(t)
-		row := orchestratorRow("orch-run")
+		row := orchestratorRow()
 		row.ClaudePID = 0
 		registerRow(t, row)
 		withAncestors(t, 7001, 7000, os.Getppid())
@@ -285,7 +289,7 @@ func TestNesting_OrchestratorKnownFromItsManifest(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte("run_id: orch-run\nstatus: completed\n"), 0o644))
 	_, err = gateSession("ape task", "apex-apply", root)
-	requireCode(t, err, apexv1.CodeSessionDepth)
+	requireSessionDepth(t, err)
 }
 
 // Q6: a script is a depth-0 conductor; it refuses at any depth, the
@@ -294,8 +298,8 @@ func TestNesting_ScriptRefusesAtAnyDepth(t *testing.T) {
 	outsideEverySession(t)
 	require.NoError(t, refuseInSession("ape script"))
 	inSession(t, "task/orch-run", 1)
-	registerRow(t, orchestratorRow("orch-run"))
-	requireCode(t, refuseInSession("ape script"), apexv1.CodeSessionDepth)
+	registerRow(t, orchestratorRow())
+	requireSessionDepth(t, refuseInSession("ape script"))
 }
 
 // One child at a time per orchestrator run; one orchestrator per project.
@@ -311,7 +315,7 @@ func TestNesting_SessionLocks(t *testing.T) {
 	require.Len(t, first.locks, 1)
 	err := child().acquire(root, "pid-2")
 	var ce *apexv1.ConflictError
-	require.True(t, errors.As(err, &ce), "%v", err)
+	require.ErrorAs(t, err, &ce, "%v", err)
 	require.Equal(t, apexv1.CodeChildRunning, ce.Code)
 	require.Equal(t, apexv1.ActionRetry, ce.Action)
 	require.Contains(t, err.Error(), "detached run detached-1")
@@ -331,7 +335,7 @@ func TestNesting_SessionLocks(t *testing.T) {
 	orch := &sessionLaunch{depth: 1, skill: apexv1.OrchestratorSkill}
 	require.NoError(t, orch.acquire(root, "pid-5"))
 	err = (&sessionLaunch{depth: 1, skill: apexv1.OrchestratorSkill}).acquire(root, "pid-6")
-	require.True(t, errors.As(err, &ce), "%v", err)
+	require.ErrorAs(t, err, &ce, "%v", err)
 	require.Equal(t, apexv1.CodeOrchestratorRunning, ce.Code)
 	orch.release()
 	require.NoError(t, (&sessionLaunch{depth: 1, skill: apexv1.OrchestratorSkill}).acquire(root, "pid-6"))
@@ -348,12 +352,13 @@ func TestNesting_ARefusalCarriesItsCode(t *testing.T) {
 	require.Contains(t, err.Error(), "code session.child-running, action retry")
 }
 
-func requireCode(t *testing.T, err error, code string) {
+// requireSessionDepth requires err to be the session.depth refusal.
+func requireSessionDepth(t *testing.T, err error) {
 	t.Helper()
 	require.Error(t, err)
 	var ue *apexv1.UsageError
-	require.True(t, errors.As(err, &ue), "%T: %v", err, err)
-	require.Equal(t, code, ue.Code)
+	require.ErrorAs(t, err, &ue, "%T: %v", err, err)
+	require.Equal(t, apexv1.CodeSessionDepth, ue.Code)
 }
 
 // The orchestrator conducts ape runs as `ape task apex-orchestrator`, where

@@ -25,6 +25,10 @@ const (
 	CodeUnsupportedLayout = "lift.unsupported-layout"
 	CodeTagNotPushed      = "lift.tag-not-pushed"
 	CodeLiftWriteFailed   = "lift.write-failed"
+
+	CodeNoSuchTask            = "usage.no-such-task"
+	CodeNoChangeMD            = "change.no-change-md"
+	CodeDelegateInvalidConfig = "delegate.invalid-config"
 )
 
 // CodeDoc documents one diagnostic code.
@@ -80,7 +84,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"usage.findings-missing", 2, "stop", "review: the --findings file does not exist"},
 	{"usage.gate", 2, "stop", "milestone new: --gate is required"},
 	{"usage.milestone", 2, "stop", "change new: --milestone is required"},
-	{"usage.no-such-task", 2, "stop", "accept: the change has no such task"},
+	{CodeNoSuchTask, 2, "stop", "accept: the change has no such task"},
 	{"usage.one-line", 2, "stop", "milestone new: title and gate must be one line each"},
 	{"usage.paths", 2, "stop", "change new: a --paths entry is not a valid glob"},
 	{"usage.reason", 2, "stop", "block/abandon/accept --verdict: --reason is required; close --accept-red: its reason is empty or more than one line"},
@@ -126,7 +130,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeCheckFailed, 1, "replan", "change.md fails `ape change check` (findings follow)"},
 	{"change.exists", 1, "replan", "change new: a change with that id exists"},
 	{"change.id-archived", 1, "replan", "change new: the id was used by an archived change"},
-	{"change.no-change-md", 1, "replan", "the change folder has no change.md"},
+	{CodeNoChangeMD, 1, "replan", "the change folder has no change.md"},
 	{"change.no-state", 1, "replan", "the change folder has no state.json (not made by `ape change new`)"},
 	{CodeChangeNotFound, 1, "stop", "no such change"},
 	{CodeNotApproved, 1, "person", "start of a fix (milestone: none) no person approved, or whose plan changed since the approval: ape change approve <id> --by <who>"},
@@ -173,7 +177,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"delegate.off", 1, "person", "accept --delegate: delegation is off — _apex/config.yaml has no human_review: block (project init writes none), so only a person accepts the task (D75, D78)"},
 	{"delegate.already-failed", 1, "person", "accept --delegate: the task's last delegate verdict is a fail at the change's current tip (change/<id>'s tip; the archive folder once archived) — no automatic retry on the same artefact: a person reviews it, or the change moves first (D78)"},
 	{"delegate.unaccepted-config", 1, "person", "accept --delegate: the human_review block was changed by a commit no person accepted (config.changed), or differs uncommitted from HEAD's — a model may not delegate a person's acceptance; a person runs `ape project accept-config --by <who>` or reverts it (D75)"},
-	{"delegate.invalid-config", 1, "person", "human_review in _apex/config.yaml: args holds a placeholder other than {id}, {task}, {assets}, {change} or does not fill (a value that is not one shell-safe token), or effort is not a level; also a project check finding (D77)"},
+	{CodeDelegateInvalidConfig, 1, "person", "human_review in _apex/config.yaml: args holds a placeholder other than {id}, {task}, {assets}, {change} or does not fill (a value that is not one shell-safe token), or effort is not a level; also a project check finding (D77)"},
 	{"delegate.not-awaiting", 1, "stop", "accept --delegate: the task is not awaiting a person — the change is not reviewed (or archived) yet, or the task is accepted already"},
 	{"delegate.voided", 1, "person", "accept --delegate: the delegate session committed, switched branch or left a file other than changes/<id>/assets/accept-*; its verdict is voided (recorded in its verdict file, shown by ape status) and nothing is accepted"},
 	{"delegate.fail", 1, "person", "accept --delegate: the delegate's verdict is fail — or it ended without one (reason \"no verdict\", D78); the task stays awaiting_human and ape status shows the verdict (changes[].delegate.<T>) — a person reviews it"},

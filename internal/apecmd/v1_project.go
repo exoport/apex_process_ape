@@ -317,7 +317,7 @@ Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --
 				return err
 			}
 			fs := append(p.Check(), p.CheckHooks()...)
-			cli := apexv1.ListOnce(pluginCLIOrNil(""))
+			cli := apexv1.ListOnce(pluginCLIOrNil())
 			fs = append(fs, p.CheckPlugins(cmd.Context(), cli)...)
 			fs = append(fs, p.CheckPluginContents(cmd.Context(), cli)...)
 			if len(fs) > 0 {
@@ -552,7 +552,8 @@ func statusLong(r *apexv1.StatusReport) string {
 		}
 	}
 	var delegated []string
-	for _, c := range r.Changes {
+	for i := range r.Changes {
+		c := &r.Changes[i]
 		for _, a := range c.Accepted {
 			if strings.HasPrefix(a.By, apexv1.DelegateByPrefix) {
 				delegated = append(delegated, fmt.Sprintf("  %-28s %-4s by %s (run %s)", c.ID, a.Task, a.By, a.Run))
