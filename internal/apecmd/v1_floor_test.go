@@ -139,3 +139,16 @@ func TestMilestoneClose_AcceptRedCLI(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, stdout, "accepted red by ann: known defect")
 }
+
+// H26: ape next add from the command line.
+func TestNextAddCLI(t *testing.T) {
+	root := v1Repo(t)
+	stdout, _, err := v1Exec(t, newNextCmd, "add", "the CSV export ignores --tz", "--from", "add-wave", "--json", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, `(from add-wave)"`)
+	_, _, err = v1Exec(t, newNextCmd, "add", "", "--cwd", root)
+	require.Equal(t, ExitUsage, exitCodeOf(t, err))
+	require.Equal(t, "apex: next — the CSV export ignores --tz", v1Git(t, root, "log", "-1", "--format=%s"))
+	_, _, err = v1Exec(t, newProjectCmd, "check", "--cwd", root)
+	require.NoError(t, err, "## Next keeps the roadmap valid")
+}

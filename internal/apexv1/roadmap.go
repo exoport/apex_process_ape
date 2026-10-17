@@ -64,11 +64,14 @@ func ParseRoadmap(file, doc string) *Roadmap {
 		}
 	}
 	for _, s := range h2Sections(lines) {
+		if nextHeadingRe.MatchString(s.Title) {
+			continue // `## Next`: findings to triage, not a milestone (next.go)
+		}
 		m := milestoneHeadRe.FindStringSubmatch(s.Title)
 		if m == nil {
 			r.headErrs = append(r.headErrs, Finding{
 				File: file, Line: s.Line,
-				Message: "roadmap section must be `## M<n> — <title>`",
+				Message: "roadmap section must be `## M<n> — <title>` (or `## Next`)",
 			})
 			continue
 		}

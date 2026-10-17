@@ -148,7 +148,8 @@ func newProjectCheckCmd() *cobra.Command {
                            ## Constraints (each non-empty); ≤ 150 lines and ≤ 8 KB
   AGENTS.md                present, ≤ 120 lines; CLAUDE.md (if any) has the line @AGENTS.md
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
-                           Gate, Goal; Budget a number when present. Its Delivery: line
+                           Gate, Goal; Budget a number when present; a "## Next"
+                           section holds findings (` + "`ape next add`" + `), not a milestone. Its Delivery: line
                            links the current brief, e.g.
                            ` + "`Delivery: Phase 1 — \"…\" ([brief](briefs/2026-10-16-<slug>.md))`" + `;
                            a Markdown link or a bare briefs/….md path, relative to
