@@ -32,7 +32,9 @@ func newProjectInitCmd() *cobra.Command {
                                      written: regression, models, effort, and limits —
                                      budget: enforce|off (default off; see ape task --help),
                                      attempts: N red verifies per start (default 5; see
-                                     ape change verify --help))
+                                     ape change verify --help), and notify: <command>,
+                                     run on a limit stop or a blocked change (see ape
+                                     task --help))
   AGENTS.md                          the project map (skeleton)
   CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
                                      gets it appended, and nothing else
@@ -290,6 +292,10 @@ func newStatusCmd() *cobra.Command {
     roadmap. A change's own task and delta checks red at baseline are normal test-first
     and never listed
   - next: what the way of working says comes next, derived from the state alone
+  - the latest ape task run (JSON "latest_run": {skill, run_id, status, stopped,
+    resets, resets_at, message}): how it ended, e.g. "stopped: usage-limit, resets
+    2026-10-16T23:00:00+02:00" when a claude.ai usage limit stopped it (see ape task
+    --help, exit 14)
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 
@@ -333,6 +339,9 @@ func statusLong(r *apexv1.StatusReport) string {
 		for _, l := range r.Milestone.GateLast.Tail {
 			b.WriteString("  | " + l + "\n")
 		}
+	}
+	if r.LatestRun != nil {
+		fmt.Fprintf(&b, "\nLatest run: %s\n", r.LatestRun.Describe())
 	}
 	fmt.Fprintf(&b, "\nSpend note: %s\n", r.Spend.Note)
 	return b.String()

@@ -68,6 +68,11 @@ type Config struct {
 	// uses; ape keeps them installed at project scope (plugins.go).
 	Marketplaces map[string]Marketplace `yaml:"marketplaces"`
 	Plugins      []PluginRef            `yaml:"plugins"`
+	// Notify is a shell command ape runs, best effort, when an ape task
+	// run stops on a limit (usage limit, budget, …) or a change becomes
+	// blocked, with APE_EVENT (stop|block), APE_CHANGE and APE_REASON in
+	// its environment (H20). Its failure never changes the outcome.
+	Notify string `yaml:"notify"`
 }
 
 // SkillModel is one models.<skill> entry.

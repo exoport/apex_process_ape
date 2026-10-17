@@ -210,6 +210,9 @@ type runConfig struct {
 	// budgetWatch, when set, stops the session at its APEX v1 milestone's
 	// enforced budget (backlog 30). `ape task` sets it.
 	budgetWatch *v1BudgetWatch
+	// usageLimit, when set, ends the session when Claude Code draws its
+	// usage-limit line (H20; task_usagelimit.go).
+	usageLimit  *usageLimitWatch
 	prompt      string
 	manifestDir string
 	fromStage   string

@@ -165,7 +165,7 @@ completed run, where `status` already says everything. Additive under
 
 ```yaml
 termination:
-  kind: idle_timeout          # idle_timeout | max_duration | api_error | prompt_not_submitted | repl_not_ready | cancelled | error
+  kind: idle_timeout          # idle_timeout | max_duration | api_error | prompt_not_submitted | repl_not_ready | budget | usage_limit | cancelled | error
   message: "interactive step idle for 1h0m0s without progress (window 1h0m0s): …"
   diagnostic: "last progress hook 1h0m0s ago (hook 1h0m0s ago; transcript none for 3h44m; pty n/a); child pid 4242 alive"
   last_source: hook           # idle only: hook | transcript | pty | none
@@ -174,7 +174,17 @@ termination:
   elapsed_seconds: 14400.0    # max_duration; prompt_not_submitted: how long ape pressed Enter
   max_seconds: 10800.0        # max_duration only
   quiet_seconds: 90.0         # api_error only
+  resets: "11pm (Europe/Madrid)"          # usage_limit only: the reset as Claude Code printed it
+  resets_at: 2026-10-16T23:00:00+02:00    # usage_limit only: parsed; absent when it does not parse
 ```
+
+`usage_limit` means a claude.ai plan's usage limit stopped the session: ape
+read Claude Code's limit line in the PTY pane ("You've hit your usage limit ·
+resets 11pm (Europe/Madrid)", or "Usage limit reached · limit resets …") on two
+reads 15 s apart with no hook between them, and ended the run. `ape task` exits
+14, and `ape status` shows the run as "stopped: usage-limit, resets <ts>". The
+patterns are Claude Code 2.1.302's text, unmeasured live. Before this kind
+existed, such a run sat until `idle_timeout`.
 
 `prompt_not_submitted` means ape typed a step's line and claude never
 submitted it: no `UserPromptSubmit` hook followed, through the Enter press and

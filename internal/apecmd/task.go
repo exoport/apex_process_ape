@@ -164,12 +164,30 @@ judged against a skill's declaration.
 The verdict is written to the run manifest as commit_contract, so a
 failure stays diagnosable after the fact.
 
+Usage limits (H20): when a claude.ai plan's usage limit stops the session,
+Claude Code draws its limit line ("You've hit your usage limit · resets
+11pm (Europe/Madrid)", or "Usage limit reached · limit resets …") and no
+hook fires again. ape reads the PTY pane every 15 s; the same line on two
+reads with no hook between them ends the run (exit 14) with termination
+kind "usage_limit" in the run manifest, resets as printed and resets_at
+parsed; ` + "`ape status`" + ` shows it as the latest run ("stopped: usage-limit,
+resets <ts>"). Run again after the reset. Matched against Claude Code
+2.1.302's text, unmeasured live.
+
+Notifier: in an APEX v1 project, _apex/config.yaml's optional
+  notify: <shell command>
+runs (sh -c, 10 s timeout, output dropped, a failure only warned about)
+when a run stops on a limit (usage limit, budget) — and, from ape change,
+when a change becomes blocked — with APE_EVENT=stop|block, APE_CHANGE
+(the change --args names, if any) and APE_REASON in its environment.
+
 Exit codes: 0 success · 1 run failed, idle timeout, the typed line
 never submitted, or an APEX v1 milestone budget stopped or refused the
 session · 2 usage or
-preflight error · 3 REPL never became ready (last pane on stderr) ·
-5 upstream API failure · 6 the dispatch violated its declared commit
-ownership (the run itself may have succeeded).`,
+preflight error, or an APEX v0 project (run its pinned v0 ape) · 3 REPL
+never became ready (last pane on stderr) · 5 upstream API failure ·
+6 the dispatch violated its declared commit ownership (the run itself
+may have succeeded) · 14 a claude.ai usage limit stopped the session.`,
 		Example: `  ape task apex-shard-doc --args "--doc prd"
   ape task apex-create-prd --agent apex-agent-pm --model "opus[1m]" --prompt "a greeter CLI" --prompt-flag --prompt
   ape task apex-create-prd --agent apex-agent-pm --handoff _output/handoffs/2026-07-05-x.md --prompt-flag --prompt
@@ -453,6 +471,10 @@ func taskExitCode(runErr error) int {
 	if _, ok := errors.AsType[*sessiondriver.TerminalAPIError](runErr); ok {
 		return ExitUpstreamAPI
 	}
+	// H20: the plan's usage limit, not the skill: run again after the reset.
+	if isUsageLimitStop(runErr) {
+		return ExitUsageLimit
+	}
 	return ExitRunFailed
 }
 
@@ -590,6 +612,8 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	cfg.manifestDir = manifestDir
 	cfg.stopGate = newStopGateRecorder(o.projectRoot)
 	cfg.stopGate.inline = v1Launch != nil
+	// H20: a claude.ai usage limit ends the run when Claude Code draws it.
+	cfg.usageLimit = &usageLimitWatch{}
 
 	start := time.Now()
 	runErr := runWithInteractive(ctx, spec, o.projectRoot, cfg)
@@ -657,6 +681,13 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	recordCommitContract(o.projectRoot, o.skill, manifestDir, contract)
 	// After the assertion: the stop's commit is ape's, not the skill's.
 	recordBudgetStop(o.projectRoot, o.skill, manifestDir, cfg.budgetWatch)
+	// H20: a run stopped on a limit runs the project's notifier.
+	if lse, ok := errors.AsType[*pipeline.LimitStopError](runErr); ok && v1Launch != nil {
+		if p, ok := v1ProjectAt(o.projectRoot); ok {
+			nctx := context.WithoutCancel(ctx)
+			p.Notify(nctx, apexv1.NotifyStop, p.ChangeIDIn(nctx, o.args), lse.Message, os.Stderr)
+		}
+	}
 
 	return taskRun{
 		Envelope:    env,

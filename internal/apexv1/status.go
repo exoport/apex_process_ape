@@ -95,6 +95,9 @@ type StatusReport struct {
 	PreExistingRed []PreExistingRed `json:"pre_existing_red"`
 	Spend          Spend            `json:"spend"`
 	Next           string           `json:"next"`
+	// LatestRun is the newest ape task run's outcome (H20): a usage-limit
+	// stop carries its reset. Absent before the first run.
+	LatestRun *LatestRun `json:"latest_run,omitempty"`
 }
 
 // Status builds the report.
@@ -112,6 +115,7 @@ func (p *Project) Status() *StatusReport {
 	}
 	r.Spend.TotalUSD = round2(r.Spend.TotalUSD)
 	r.Spend.Note = "sum of finished ape task/pipeline run manifests; a run still in progress is not counted yet"
+	r.LatestRun = p.LatestRun()
 
 	ctx := context.Background()
 	if rm := p.roadmap(); rm != nil {

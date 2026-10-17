@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
@@ -65,6 +66,11 @@ base tip, and marks the old verify stale. A conflict blocks the change with the 
 (exit 3, change.rebase-conflict). The model never rebases or merges on a change branch
 (` + "`ape hook pre-tool`" + ` denies it).
 
+Notifier (H20): a subcommand that leaves the change blocked (block, verify at its attempts
+limit, a rebase conflict) runs _apex/config.yaml's optional notify: command with
+APE_EVENT=block, APE_CHANGE=<id> and APE_REASON=<the blocked reason>; best effort, it never
+changes the outcome (see ape task --help).
+
 Exit codes for every subcommand: 0 ok · 1 check failed (one-line remediation) · 2 usage ·
 3 conflict (another change claims the same requirement, the delta no longer applies, or
 the change does not rebase onto its moved base; nothing written but the block).`,
@@ -103,7 +109,15 @@ func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *co
 			if err := v1RequireInit(cmd, f, p); err != nil {
 				return err
 			}
-			return run(cmd, p, args[0])
+			// H20: a change this command blocked (block, an attempts limit,
+			// a rebase conflict) runs the project's notifier.
+			before, _ := p.ChangeStatus(cmd.Context(), args[0])
+			err = run(cmd, p, args[0])
+			ctx := context.WithoutCancel(cmd.Context())
+			if after, reason := p.ChangeStatus(ctx, args[0]); after == apexv1.StatusBlocked && before != apexv1.StatusBlocked {
+				p.Notify(ctx, apexv1.NotifyBlock, args[0], reason, cmd.ErrOrStderr())
+			}
+			return err
 		},
 	}
 	addV1Flags(cmd, f)

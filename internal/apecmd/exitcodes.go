@@ -32,7 +32,13 @@ package apecmd
 //	   framework declared it would be, which is a different thing to
 //	   report and a different thing to fix
 //
-// Codes above 6 are command-local and are NOT declared here, because no
+//	14 a claude.ai plan usage limit stopped the session (H20): ape read
+//	   Claude Code's usage-limit line in the PTY pane and ended the run
+//	   (termination usage_limit, with the reset when the line names it).
+//	   Distinct from 1 and 5: nothing failed, and re-running before the
+//	   reset fails the same way, so a caller waits for the reset
+//
+// Other codes above 6 are command-local and are NOT declared here, because no
 // two commands mean the same thing by them. `ape framework` uses 3..7 for
 // its own install failures (framework.go), and 8, 9 and 10 are reserved
 // for `ape change`'s three outcomes — escalated, refused, halted
@@ -50,4 +56,7 @@ const (
 	// ExitCommitContract is a failed per-dispatch commit-ownership
 	// assertion (PLAN-26 D2).
 	ExitCommitContract = 6
+	// ExitUsageLimit is a usage-limit stop (H20): the next code no
+	// command uses (11–13 are framework's and the toolchain's).
+	ExitUsageLimit = 14
 )

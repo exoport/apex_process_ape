@@ -80,6 +80,9 @@ type interactiveCore struct {
 	// `[1m]` suffix is the only carrier of the 1M-vs-200K context
 	// distinction, and NormalizeModel strips it because both bill alike.
 	activeModel string
+	// activeSession is the step's PTY session name, for the usage-limit
+	// watch's pane reads.
+	activeSession string
 
 	// pub publishes PLAN-13 progress events. Set once via setPublisher when
 	// the run dir resolves (the run id is the <id> subject segment). Guarded
@@ -422,6 +425,13 @@ func (c *interactiveCore) FeedCall(call orchestrator.ToolCall) {
 	}
 }
 
+// sessionName is the running step's PTY session, "" before the first step.
+func (c *interactiveCore) sessionName() string {
+	c.stepMu.Lock()
+	defer c.stepMu.Unlock()
+	return c.activeSession
+}
+
 // FeedReply is the OnReply fan-out target — writes the runlog
 // checkpoints.jsonl entry.
 func (c *interactiveCore) FeedReply(content string) {
@@ -443,6 +453,7 @@ func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 	c.activeStep = pipeline.StepLabel(info.Stage, info.StepIdx+1, info.Skill)
 	c.activeSkill = info.Skill
 	c.activeModel = info.Model
+	c.activeSession = info.SessionName
 	c.stepMu.Unlock()
 	// Label the step on the Driver so a detached-agent failure names the
 	// skill that spawned it, not just the stage/step index the runner adds.
@@ -868,6 +879,9 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	}
 	if cfg.budgetWatch != nil {
 		go cfg.budgetWatch.run(runCtx, core.liveSessionCost, core.driver.SignalStepFatal)
+	}
+	if cfg.usageLimit != nil {
+		go cfg.usageLimit.run(runCtx, core.sessionName, core.driver.LastActivityAt, core.driver.SignalStepFatal)
 	}
 
 	// PLAN-13: optional NATS eventing + transcript upload. Fire-and-forget —

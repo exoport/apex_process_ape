@@ -588,13 +588,19 @@ func newTerminationRecord(runErr error) *TerminationRecord {
 	)
 	switch {
 	case errors.As(runErr, &lse):
-		return &TerminationRecord{
+		rec := &TerminationRecord{
 			Kind:           lse.Kind,
 			Message:        lse.Error(),
 			SpentUSD:       lse.SpentUSD,
 			BudgetUSD:      lse.BudgetUSD,
 			SessionCostUSD: lse.SessionCostUSD,
+			Resets:         lse.Resets,
 		}
+		if !lse.ResetsAt.IsZero() {
+			at := lse.ResetsAt
+			rec.ResetsAt = &at
+		}
+		return rec
 	case errors.As(runErr, &ite):
 		return &TerminationRecord{
 			Kind:       TerminationIdle,

@@ -248,3 +248,19 @@ func TestNewTerminationRecord_BudgetStop(t *testing.T) {
 	require.Contains(t, got, "- reason: **budget**")
 	require.Contains(t, got, "spent $5.00 of its $2.00 budget, $5.00 of it this session")
 }
+
+// H20: a usage-limit stop keeps its reset, as printed and parsed, and the
+// report says when the limit resets.
+func TestNewTerminationRecord_UsageLimitCarriesTheReset(t *testing.T) {
+	at := time.Date(2026, 10, 16, 23, 0, 0, 0, time.UTC)
+	rec := newTerminationRecord(fmt.Errorf("stage x: %w", &LimitStopError{
+		Kind: TerminationUsageLimit, Message: "usage limit", Resets: "11pm (UTC)", ResetsAt: at,
+	}))
+	require.Equal(t, TerminationUsageLimit, rec.Kind)
+	require.Equal(t, "11pm (UTC)", rec.Resets)
+	require.NotNil(t, rec.ResetsAt)
+	require.True(t, at.Equal(*rec.ResetsAt))
+
+	none := newTerminationRecord(&LimitStopError{Kind: TerminationUsageLimit, Message: "usage limit"})
+	require.Nil(t, none.ResetsAt, "no reset parsed, none recorded")
+}
