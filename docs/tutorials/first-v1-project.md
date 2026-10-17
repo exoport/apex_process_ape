@@ -63,7 +63,9 @@ ape doctor --strict
 `status` shows M1 approved with no changes in flight, and what comes next.
 `doctor --strict` runs the host checks plus the v1 project checks (project check,
 hooks, plugins, the ape floor, the Claude Code version, the `_apex/state` ignore
-rules) and exits 0 on a healthy project.
+rules, whether `.claude/settings.json` is shared through git). Every v1 row reads
+OK here; `skills.project` warns until the framework's skills are installed in the
+project, and once they are, `--strict` exits 0 on a healthy project.
 
 ## Where to go next
 
