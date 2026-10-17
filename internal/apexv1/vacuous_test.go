@@ -133,8 +133,8 @@ The system SHALL store each greeting.
 	require.NoError(t, err)
 	require.False(t, v.Green)
 	byRef := map[string]CheckResult{}
-	for _, r := range v.Results {
-		byRef[r.Task] = r
+	for i := range v.Results {
+		byRef[v.Results[i].Task] = v.Results[i]
 	}
 	t2 := byRef["T2"]
 	require.Equal(t, ReasonVacuous, t2.Reason)

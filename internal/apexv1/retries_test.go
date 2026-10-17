@@ -99,9 +99,9 @@ func TestVerify_FlakyIsGreenAndListed(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, v.Green)
 	var t2 CheckResult
-	for _, r := range v.Results {
-		if r.Task == "T2" {
-			t2 = r
+	for i := range v.Results {
+		if v.Results[i].Task == "T2" {
+			t2 = v.Results[i]
 		}
 	}
 	require.True(t, t2.Flaky)

@@ -314,10 +314,11 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 		checks = append(append([]PlannedCheck(nil), spec...), PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: regressionCmd})
 	}
 	results := p.RunChecks(ctx, filepath.Join(p.LogsDir(), "gate-"+id), "", checks, opt)
-	run.StrayFiles = StrayFiles(append([]CheckResult{gate}, results...))
-	for _, r := range append([]CheckResult{gate}, results...) {
-		if r.Flaky {
-			run.Flaky = append(run.Flaky, r.Task)
+	all := append([]CheckResult{gate}, results...)
+	run.StrayFiles = StrayFiles(all)
+	for i := range all {
+		if all[i].Flaky {
+			run.Flaky = append(run.Flaky, all[i].Task)
 		}
 	}
 	if regressionCmd != "" {
