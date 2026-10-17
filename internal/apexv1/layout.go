@@ -68,6 +68,9 @@ type Config struct {
 	// uses; ape keeps them installed at project scope (plugins.go).
 	Marketplaces map[string]Marketplace `yaml:"marketplaces"`
 	Plugins      []PluginRef            `yaml:"plugins"`
+	// Commit shapes the archive's squash commit (H15): its subject
+	// template and whether the project's git hooks run on it.
+	Commit CommitConfig `yaml:"commit"`
 }
 
 // SkillModel is one models.<skill> entry.

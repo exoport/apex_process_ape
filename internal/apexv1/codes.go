@@ -16,6 +16,9 @@ const (
 	CodeChangeBranch = "branch.change-branch"
 	CodeBranchFailed = "git.branch-failed"
 	CodeCheckFailed  = "change.check-failed"
+	// CodeHookFailed: a project git hook refused the archive's squash
+	// commit (H15).
+	CodeHookFailed = "archive.hook-failed"
 )
 
 // CodeDoc documents one diagnostic code.
@@ -94,6 +97,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"git.branch-failed", 1, "stop", "creating, switching to, rebasing or deleting a branch failed, or the base branch is missing"},
 	{CodeBehindUpstream, 1, "person", "start (a new start, or a re-entry that catches up) and archive: the base branch is behind its upstream (the local remote-tracking ref; ape never fetches) — a person pulls (D45: one operator per checkout, local trunk)"},
 	{CodeBaseCheckedOut, 1, "stop", "archive, abandon (or any command that switches branches): the branch ape must switch to — the base branch — is checked out in another worktree (the message names its path); an environment problem: stop, do not re-plan (D45)"},
+	{CodeHookFailed, 1, "apply", "archive: a project git hook (pre-commit, commit-msg; commit.hooks: run, the default) refused the squash commit; archive rolled back (the base unchanged, change/<id> checked out again) and the message carries the hook output's tail — fix it on the branch, verify, archive again"},
 	{"archive.spec-invalid", 1, "replan", "archive: the merged spec would fail project check (e.g. over 20 KB)"},
 	{"change.archived", 1, "stop", "the change is already archived"},
 	{"change.attempts-exceeded", 1, "replan", "verify: the red verify that reaches limits.attempts since the change started; the change is now blocked"},
@@ -200,6 +204,8 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.design-too-big", 1, "replan", "design.md over 8 KB"},
 	{"change.frontmatter", 1, "replan", "change.md frontmatter is missing, unparseable, or its id/milestone/touches are wrong"},
 	{"change.unknown-key", 1, "replan", "change.md frontmatter has a key v1 does not define (own keys: prefix x-)"},
+	{"change.no-type", 1, "replan", "change.md has no type: and _apex/config.yaml commit.subject uses {type} (D47)"},
+	{"change.bad-type", 1, "replan", "change.md type: is not one of feat, fix, perf, refactor, docs, test, build, ci, chore (D47)"},
 	{"change.bad-id", 1, "replan", "the change folder name is not a valid id"},
 	{"change.unknown-milestone", 1, "replan", "the change's milestone is not in roadmap.md"},
 	{"change.bad-touches", 1, "replan", "a touches entry is not kebab-case"},

@@ -184,7 +184,10 @@ func newChangeCheckCmd() *cobra.Command {
 
   - frontmatter id = folder, milestone in roadmap.md (or "none": a fix, D40, approved
     with `+"`ape change approve`"+`), touches non-empty kebab slugs, decisions exist in
-    decisions/, paths are valid globs
+    decisions/, paths are valid globs; type: (the archive commit's {type}, D47) one of
+    feat, fix, perf, refactor, docs, test, build, ci, chore — required only when
+    _apex/config.yaml commit.subject uses {type} (change.no-type; change.bad-type); any
+    other key must start with x-
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
   - change.md ≤ 8 KB and design.md ≤ 8 KB ("split this change")
   - ## Delta: "### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>" blocks, or
@@ -778,15 +781,21 @@ func newChangeArchiveCmd() *cobra.Command {
      reaches the base branch
   7. switches to the base branch, `+"`git merge --squash change/<id>`"+`, writes the specs,
      moves the folder to development/archive/<YYYY-MM-DD>-<id>/ (status archived,
-     branch_tip = change/<id>'s last commit) and commits everything as ONE commit —
-     subject the change's # title, trailer "Change: <id>" (hooks skipped: every code
-     commit on the branch already ran them); then deletes change/<id>. If anything fails
+     branch_tip = change/<id>'s last commit) and commits everything as ONE commit (H15):
+     subject from _apex/config.yaml commit.subject — placeholders {type} (change.md's
+     type:), {title} (its # title) and {id}; default "{title}" — and a body holding the
+     branch commits' own subjects (not ape's "apex:" ones) and every trailer of theirs but
+     "Change:", deduplicated, then "Change: <id>". The project's git hooks run on this
+     commit (commit.hooks: run, the default; skip opts out) — ape's status commits keep
+     skipping them. A hook that refuses rolls archive back: exit 1, archive.hook-failed,
+     the hook output's tail in the message. Then deletes change/<id>. If anything fails
      on the base branch, it is reset to where it was and change/<id> checked out again.
 
 The base branch gets exactly one commit per archived change; ape's status commits stay on
 the change branch, squashed away.
 
-Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review,
+Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review, a
+git hook refused the squash,
 pending human-review, dirty tree, no change branch, the base behind its upstream
 (base.behind-upstream), the base branch checked out in another
 worktree (git.base-checked-out: stop, do not re-plan), or git failed · 2 usage · 3 the

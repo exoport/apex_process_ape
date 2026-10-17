@@ -32,7 +32,9 @@ func newProjectInitCmd() *cobra.Command {
                                      written: regression, models, effort, and limits —
                                      budget: enforce|off (default off; see ape task --help),
                                      attempts: N red verifies per start (default 5; see
-                                     ape change verify --help))
+                                     ape change verify --help); commit: {subject,
+                                     hooks} for the archive's squash (see ape change
+                                     archive --help))
   AGENTS.md                          the project map (skeleton)
   CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
                                      gets it appended, and nothing else

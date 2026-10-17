@@ -167,8 +167,10 @@ type ArchiveResult struct {
 	Specs      []SpecUpdate `json:"specs"`
 	// Commit is the one commit on the base branch: the squashed change,
 	// the delta merged into specs/ and the archive move (D38).
-	Commit     string `json:"commit"`
-	Subject    string `json:"subject,omitempty"`
+	Commit  string `json:"commit"`
+	Subject string `json:"subject,omitempty"`
+	// Hooks: the project's git hooks ran on the squash (commit.hooks).
+	Hooks      bool   `json:"hooks"`
 	BaseBranch string `json:"base_branch,omitempty"`
 	// BranchTip is change/<id>'s last commit, squashed into Commit.
 	BranchTip string `json:"branch_tip,omitempty"`
@@ -240,7 +242,9 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 		res.AllowPendingHuman, res.PendingHuman = true, pending
 	}
 	res.ArchivedTo, res.Specs = p.Rel(dest), updates
-	res.Subject = archiveSubject(ci.Doc, id)
+	cc := p.commitConfig()
+	res.Subject = archiveSubject(cc.SubjectTemplate(), ci.Doc, id)
+	res.Hooks = cc.RunHooks()
 	return res, p.squashOntoBase(ctx, ci, updates, dest, pending, res)
 }
 
@@ -303,6 +307,10 @@ func (p *Project) planArchive(ci ChangeInfo) (updates []SpecUpdate, dest string,
 		return nil, "", &ConflictError{Code: "archive.base-changed", Msg: "requirements this change modifies or removes were changed by another change since it started — nothing was written; " +
 			"re-plan against the current spec and re-start (`ape change start " + id + "`)", Conflicts: fc}
 	}
+	// The subject template may have come to use {type} since start.
+	if fs := typeFindings(p.Rel(p.ChangeMD(id)), ci.Doc, p.commitConfig().SubjectTemplate()); len(fs) > 0 {
+		return nil, "", &FailError{Code: CodeCheckFailed, Msg: "change " + id + " cannot be archived with the configured commit subject — fix change.md's type: (a plan change: re-start), then archive", Findings: fs}
+	}
 	updates, conflicts := p.MergeDelta(ci.Doc)
 	if len(conflicts) > 0 {
 		return nil, "", &ConflictError{Code: CodeDeltaConflict, Msg: "the delta no longer applies to specs/ — nothing was written; re-plan the change against the current specs", Conflicts: conflicts}
@@ -350,22 +358,19 @@ func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []S
 		return undo(err)
 	}
 	res.BranchTip = tip
-	if _, err := git(ctx, p.Root, "commit", "--no-verify", "-q", "-m", res.Subject+"\n\nChange: "+id+"\n"); err != nil {
-		return undo(err)
+	msg := p.squashMessage(ctx, res.Subject, base, branch, id)
+	if out, err := p.commitSquash(ctx, msg, res.Hooks); err != nil {
+		if res.Hooks && p.hasCommitHooks(ctx) {
+			return undo(&FailError{Code: CodeHookFailed, Msg: "a git hook refused the squash commit on " + base + ": " + strings.Join(lastLines(out, 15), " | ") +
+				" — fix what it reports on " + branch + " (commit there, verify), then archive again; or set commit.hooks: skip in _apex/config.yaml"})
+		}
+		return undo(fmt.Errorf("%w: %s", err, strings.TrimSpace(out)))
 	}
 	res.Commit = HeadSHA(ctx, p.Root)
 	if _, err := git(ctx, p.Root, "branch", "-q", "-D", branch); err != nil {
 		return &FailError{Code: CodeBranchFailed, Msg: "archived as " + short(res.Commit) + " on " + base + ", but deleting " + branch + " failed: " + err.Error() + " — `git branch -D " + branch + "`"}
 	}
 	return nil
-}
-
-// archiveSubject is the squash commit's subject: the change's title.
-func archiveSubject(c *Change, id string) string {
-	if t := strings.TrimSpace(c.Title); t != "" {
-		return t
-	}
-	return titleFromSlug(id)
 }
 
 // writeArchive applies the delta to specs/, moves the change folder to

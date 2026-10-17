@@ -143,8 +143,9 @@ func (p *Project) CheckChange(id string) []Finding {
 		add(1, c.MetaErr.Error())
 	}
 	for _, k := range c.UnknownKeys {
-		add(1, "frontmatter key \""+k+"\" is not one of id, milestone, touches, paths, decisions, retire — fix the name, or prefix your own keys with x-")
+		add(1, "frontmatter key \""+k+"\" is not one of id, milestone, touches, paths, decisions, retire, type — fix the name, or prefix your own keys with x-")
 	}
+	out = append(out, typeFindings(file, c, p.commitConfig().SubjectTemplate())...)
 	if c.Meta.ID != id {
 		add(1, fmt.Sprintf("frontmatter id %q does not match the folder name %q", c.Meta.ID, id))
 	}
