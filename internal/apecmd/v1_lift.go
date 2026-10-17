@@ -71,7 +71,9 @@ The commit:
   carries        ## Code Validation (project-context.md) into AGENTS.md ## Commands,
                  and the runnable ones, joined with &&, into regression: in
                  _apex/config.yaml (rewritten to project_name, development_folder,
-                 regression)
+                 regression). A command with a placeholder — <…>, {…} (not a
+                 shell ${…}) or a lone … — is listed, not run; Go's ./... is no
+                 placeholder. A trailing " # …" shell comment is dropped first
   lays down      the v1 skeleton, as ` + "`ape project init --brownfield`" + ` (CLAUDE.md keeps its
                  content, loses the v0 apex:managed block and gains @AGENTS.md)
   writes         development/lift-disposition.md: the binding-rule candidates
