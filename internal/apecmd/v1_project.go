@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
+	"github.com/exoport/apex_process_ape/internal/statusboard"
 	"github.com/spf13/cobra"
 )
 
@@ -326,7 +327,7 @@ Exit: 1 check failed · 2 usage · 3 conflict (nothing written).`,
 
 func newStatusCmd() *cobra.Command {
 	var f v1Flags
-	var brief bool
+	var brief, board bool
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show the current milestone, active changes, blocks, pending human review and spend",
@@ -412,8 +413,21 @@ func newStatusCmd() *cobra.Command {
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 
-Exit codes: 0 ok · 2 usage.`,
-		Example: "  ape status\n  ape status --brief\n  ape status --json",
+The board (D60): in a project with a board (.aboard/, see ` + "`ape aboard --help`" + `), ape keeps
+one tab, "APEX status" (key ape-status), in step with this report. It is refreshed best
+effort after every v1 command that changes what status reports — project init, lift and
+accept-config; milestone new, approve, gate and close; decision new and accept; next add;
+every change verb but check and diff — and by --board, which refreshes it now and says
+where it wrote (JSON "board": {action: posted|wrote|unchanged|no-board|skipped, where,
+detail}). A running board is posted to; with none running, .aboard/aboard.json is
+rewritten in place. ape never creates a board. The tab is not authoritative: it is a view
+of this report, nothing reads it back, and where the two disagree the tab is wrong. A
+refresh never changes a command's exit code or stdout (a problem is one line on stderr),
+and one that would change nothing writes nothing. A changed view posted to a running
+board marks the tab changed (the dot), which aboard v0.3.0 has no way to switch off.
+
+Exit codes: 0 ok · 2 usage. --board exits 0 whatever the board did.`,
+		Example: "  ape status\n  ape status --brief\n  ape status --json\n  ape status --board",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := v1Project(&f)
@@ -424,6 +438,17 @@ Exit codes: 0 ok · 2 usage.`,
 				return err
 			}
 			r := p.Status()
+			if board {
+				o := refreshBoardNow(cmd.Context(), p, r, cmd.ErrOrStderr())
+				return v1Emit(cmd.OutOrStdout(), &f, statusWithBoard{StatusReport: r, Board: &o}, func(w io.Writer) {
+					if brief {
+						fmt.Fprint(w, r.Brief())
+					} else {
+						fmt.Fprint(w, statusLong(r))
+					}
+					fmt.Fprintln(w, boardLine(p, o))
+				})
+			}
 			return v1Emit(cmd.OutOrStdout(), &f, r, func(w io.Writer) {
 				if brief {
 					fmt.Fprint(w, r.Brief())
@@ -435,7 +460,16 @@ Exit codes: 0 ok · 2 usage.`,
 	}
 	addV1Flags(cmd, &f)
 	cmd.Flags().BoolVar(&brief, "brief", false, "at most 25 lines")
+	cmd.Flags().BoolVar(&board, "board", false, "refresh the project's aboard status tab now and say where it wrote (JSON \"board\"); "+
+		"the tab is a view, never a record")
 	return cmd
+}
+
+// statusWithBoard is `ape status --board --json`: the report, plus what
+// the board refresh did.
+type statusWithBoard struct {
+	*apexv1.StatusReport
+	Board *statusboard.Outcome `json:"board"`
 }
 
 func statusLong(r *apexv1.StatusReport) string {

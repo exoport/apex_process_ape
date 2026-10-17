@@ -144,6 +144,9 @@ func rootSubcommands() []*cobra.Command {
 		// own.
 		guardArgsDeep(cmd)
 	}
+	// D60: the v1 verbs that change what `ape status` reports refresh the
+	// project's aboard status tab after they run (v1_board.go).
+	installBoardRefresh(subs)
 
 	return subs
 }
