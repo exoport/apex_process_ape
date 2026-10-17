@@ -37,7 +37,9 @@ import (
 //     and naming the SAME model Claude Code's own family word starts;
 //   - a spawned claude persisting a session transcript at all, which every
 //     transcript-derived telemetry value depends on;
-//   - `--version` printing something the manifest stamp can parse.
+//   - `--version` printing something the manifest stamp can parse;
+//   - the args-file route (ArgsPointer) delivering text with runs of
+//     spaces, tabs and newlines byte-exact, which TypesVerbatim relies on.
 //
 // When one of these moves, nothing errors. ape keeps running and silently
 // stops doing the thing the coupling bought — the same "believed-present
@@ -53,7 +55,9 @@ import (
 //
 // All subtests but transcript_persists cost zero tokens: they only launch
 // the REPL and read the pane. transcript_persists submits one Haiku turn
-// (fractions of a cent) and is skippable with APE_CLAUDE_LIVE_TOKENS=0.
+// (fractions of a cent) and is skippable with APE_CLAUDE_LIVE_TOKENS=0;
+// so are the other turn-submitting subtests, args_whitespace (two Haiku
+// turns) among them.
 func TestLive_ClaudeCodeContract(t *testing.T) {
 	if os.Getenv("APE_CLAUDE_LIVE") != "1" {
 		t.Skip("set APE_CLAUDE_LIVE=1 (needs claude on PATH + auth + network) to run the live Claude Code contract gate")
@@ -76,6 +80,7 @@ func TestLive_ClaudeCodeContract(t *testing.T) {
 	t.Run("transcript_persists", func(t *testing.T) { liveTranscriptPersists(t, claudeBin) })
 	t.Run("pty_repaints_during_tool", func(t *testing.T) { livePTYRepaintsDuringTool(t, claudeBin) })
 	t.Run("typed_line_renders", func(t *testing.T) { liveTypedLineRenders(t, claudeBin) })
+	t.Run("args_whitespace", func(t *testing.T) { liveArgsWhitespace(t, claudeBin) })
 }
 
 // liveTypedLineRenders checks what Deliver's Enter waits for: that a line
