@@ -56,6 +56,11 @@ type ChangeStatus struct {
 	// `ape change approve <id> --by <who>`.
 	Lane     string    `json:"lane"`
 	Approved *Approval `json:"approved,omitempty"`
+	// AwaitingHuman is the change's human-review tasks no person has
+	// accepted yet (D47), for a change in flight and for an archived one
+	// (archived past them by a person, --allow-pending-human): what waits
+	// for a person, not for the orchestrator. Always present.
+	AwaitingHuman []string `json:"awaiting_human"`
 }
 
 // Spend is the cost recorded in the project's run manifests.
@@ -168,6 +173,7 @@ func (p *Project) Status() *StatusReport {
 		}
 		if c.Doc != nil {
 			cs.PendingHuman = c.State.PendingHuman(c.Doc.HumanTasks())
+			cs.AwaitingHuman = cs.PendingHuman
 		}
 		if v := c.State.Verify; v != nil {
 			cs.VerifySHA = v.SHA
@@ -180,6 +186,14 @@ func (p *Project) Status() *StatusReport {
 		r.Changes = append(r.Changes, cs)
 	}
 	sortFixesFirst(r.Changes)
+	// Archived changes a person has yet to accept human-review tasks of
+	// (H4): listed last, so they stay visible after the archive.
+	r.Changes = append(r.Changes, p.awaitingHuman()...)
+	for i := range r.Changes {
+		if r.Changes[i].AwaitingHuman == nil {
+			r.Changes[i].AwaitingHuman = []string{}
+		}
+	}
 	for i := range r.Changes {
 		if c := &r.Changes[i]; c.runnableFix() {
 			r.Fixes = append(r.Fixes, c.ID)
@@ -193,7 +207,7 @@ func (p *Project) Status() *StatusReport {
 // runnableFix reports an approved fix that is neither blocked nor
 // unreadable: one the orchestrator runs ahead of milestone work (D40).
 func (c *ChangeStatus) runnableFix() bool {
-	return c.Lane == LaneFix && c.Approved != nil && c.Status != StatusBlocked && c.Status != "invalid"
+	return c.Lane == LaneFix && c.Approved != nil && c.Status != StatusBlocked && c.Status != "invalid" && c.Status != StatusArchived
 }
 
 // sortFixesFirst orders the changes as `ape status` lists them (D40):
@@ -284,6 +298,9 @@ func nextStep(r *StatusReport) string {
 		}
 		switch c.Status {
 		case StatusReviewed:
+			if len(c.AwaitingHuman) > 0 {
+				continue // a person's to accept first (D45): the orchestrator moves on
+			}
 			return "archive " + c.ID + ": `ape change archive " + c.ID + "` (squash-merges " + ChangeBranch(c.ID) + " into its base branch)"
 		case StatusVerified:
 			return "review " + c.ID + " (apex-review)" + on
@@ -296,6 +313,12 @@ func nextStep(r *StatusReport) string {
 	for i := range r.Changes {
 		if c := &r.Changes[i]; c.Status == StatusBlocked {
 			return "blocked: " + c.ID + " — " + c.BlockedReason + " (re-plan, or a person answers; `ape change start " + c.ID + "` resumes)"
+		}
+	}
+	for i := range r.Changes {
+		if c := &r.Changes[i]; c.Status == StatusReviewed && len(c.AwaitingHuman) > 0 {
+			return "a person reviews " + c.ID + ": `ape change accept " + c.ID + " --task " + c.AwaitingHuman[0] + " --by <who>` for each of " +
+				strings.Join(c.AwaitingHuman, ", ") + ", then `ape change archive " + c.ID + "`"
 		}
 	}
 	if m.GateLast != nil && m.GateLast.Green() && m.GateLast.SHA != "" {
@@ -343,11 +366,14 @@ func (r *StatusReport) Brief() string {
 		b = append(b, "All milestones done.")
 	}
 	const maxChanges = 12
-	var open, blocked []ChangeStatus
+	var open, blocked, archived []ChangeStatus
 	for i := range r.Changes {
-		if r.Changes[i].Status == StatusBlocked {
+		switch r.Changes[i].Status {
+		case StatusBlocked:
 			blocked = append(blocked, r.Changes[i])
-		} else {
+		case StatusArchived:
+			archived = append(archived, r.Changes[i])
+		default:
 			open = append(open, r.Changes[i])
 		}
 	}
@@ -358,9 +384,12 @@ func (r *StatusReport) Brief() string {
 	}
 	shown := 0
 groups:
-	for gi, group := range [][]ChangeStatus{open, blocked} {
-		if gi == 1 && len(blocked) > 0 {
+	for gi, group := range [][]ChangeStatus{open, blocked, archived} {
+		switch {
+		case gi == 1 && len(blocked) > 0:
 			b = append(b, "Blocked:")
+		case gi == 2 && len(archived) > 0:
+			b = append(b, "Archived, human review not accepted (`ape change accept <id> --task <T> --by <who>`):")
 		}
 		for i := range group {
 			c := &group[i]

@@ -66,6 +66,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"usage.by", 2, "stop", "--by is required: who approves or accepts"},
 	{"usage.change-id", 2, "stop", "the change id is not ^[a-z][a-z0-9-]{2,39}$"},
 	{"usage.decision-slug", 2, "stop", "the decision slug is not kebab-case"},
+	{"usage.evidence", 2, "person", "accept: an --evidence value is neither a URL (scheme://…) nor a regular file in the repository"},
 	{"usage.findings", 2, "stop", "review: --findings is required without --run"},
 	{"usage.findings-missing", 2, "stop", "review: the --findings file does not exist"},
 	{"usage.gate", 2, "stop", "milestone new: --gate is required"},
@@ -86,7 +87,7 @@ var DiagnosticCodes = []CodeDoc{
 
 	// failures (exit 1)
 	{"accept.not-human-review", 1, "stop", "accept: the task has a command check; verify runs it"},
-	{"archive.pending-human", 1, "person", "archive: human-review tasks are not accepted"},
+	{"archive.pending-human", 1, "person", "archive: human-review tasks are not accepted; the orchestrator leaves the change reviewed and moves on (D45) — a person accepts them, or archives past them with --allow-pending-human (a person only)"},
 	{"branch.change-branch", 1, "stop", "change new, milestone new/approve/gate/close, decision accept: HEAD is on a change branch; their records belong on the base branch (git switch <base>)"},
 	{"branch.detached", 1, "stop", "start: HEAD is detached; a change branch is created from a branch, recorded as its base"},
 	{"change.no-branch", 1, "person", "archive: the change has no change/<id> branch with a recorded base_branch (started before D38)"},

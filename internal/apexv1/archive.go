@@ -193,6 +193,12 @@ type ArchiveResult struct {
 // branch. Run from the change's branch or from any other non-change
 // branch (it switches); the tree must be clean.
 func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool, opt RunOptions) (*ArchiveResult, error) {
+	// Archiving past a person's review is a person's call (D45).
+	if allowPendingHuman {
+		if err := requirePerson("--allow-pending-human"); err != nil {
+			return nil, err
+		}
+	}
 	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return nil, err
@@ -254,7 +260,7 @@ func (p *Project) archivable(ctx context.Context, ci ChangeInfo, allowPendingHum
 	pending := st.PendingHuman(ci.Doc.HumanTasks())
 	if len(pending) > 0 && !allowPendingHuman {
 		return nil, &FailError{Code: "archive.pending-human", Msg: "human-review tasks not accepted: " + strings.Join(pending, ", ") +
-			" — a person runs `ape change accept " + id + " --task <T> --by <who>` (on " + ChangeBranch(id) + "), or archive with --allow-pending-human (recorded)"}
+			" — a person runs `ape change accept " + id + " --task <T> --by <who>` (on " + ChangeBranch(id) + "), or archives it with --allow-pending-human (recorded; a person only, from a terminal)"}
 	}
 	if !p.branchExists(ctx, ChangeBranch(id)) || st.BaseBranch == "" {
 		return nil, &FailError{Code: "change.no-branch", Msg: "change " + id + " has no branch " + ChangeBranch(id) + " with a recorded base_branch — it was started before changes got their own branch (D38); " +

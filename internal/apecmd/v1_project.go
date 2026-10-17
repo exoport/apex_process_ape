@@ -277,6 +277,12 @@ func newStatusCmd() *cobra.Command {
     branch, change/<id> (D38; JSON changes[].branch), and its status is read from
     there whatever branch is checked out — a change branch lists the changes it does
     not hold too
+  - human review (H4, D47): every change lists awaiting_human, its human-review tasks no
+    person has accepted (always present in JSON, [] when none). A reviewed change awaiting
+    a person is not archived next — next names the accept a person runs. Archived changes
+    with unaccepted human-review tasks (archived past them by a person) are listed after
+    the rest, status "archived", under "Archived, human review not accepted"; they stay
+    acceptable (` + "`ape change accept --help`" + `)
   - spend so far: the sum of finished ape task/pipeline run manifests
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
     cmd, exit, sha}]): the regression command, and scenario checks of the spec a change

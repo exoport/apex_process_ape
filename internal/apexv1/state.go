@@ -148,6 +148,8 @@ type Accept struct {
 	Task string `json:"task"`
 	By   string `json:"by"`
 	At   string `json:"at"`
+	// Evidence is what the acceptance rests on (`accept --evidence`).
+	Evidence []Evidence `json:"evidence,omitempty"`
 }
 
 // State is changes/<id>/state.json. Written only by ape.

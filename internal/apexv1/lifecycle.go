@@ -591,40 +591,39 @@ func (p *Project) saveAndCommitSubject(ctx context.Context, id string, st *State
 	return nil
 }
 
-// Accept records a person accepting a human-review task.
-func (p *Project) Accept(ctx context.Context, id, task, by string) (*State, error) {
-	if strings.TrimSpace(by) == "" {
+// Accept records a person accepting a human-review task, with the
+// evidence it rests on (paths in the repository or URLs, H4). A change in
+// flight records it on its branch; an archived change, in its archived
+// state.json on the base branch, wherever HEAD is (acceptArchived).
+func (p *Project) Accept(ctx context.Context, id, task, by string, evidence ...string) (*State, error) {
+	by = strings.TrimSpace(by)
+	if by == "" {
 		return nil, &UsageError{Code: "usage.by", Msg: "--by names the person accepting"}
 	}
-	ci, err := p.requireChange(ctx, id)
+	ev, err := p.resolveEvidence(ctx, evidence)
 	if err != nil {
 		return nil, err
 	}
-	t := ci.Doc.Task(task)
-	if t == nil {
-		return nil, &UsageError{Code: "usage.no-such-task", Msg: "change " + id + " has no task " + task}
+	ci, err := p.requireChange(ctx, id)
+	// An archived change — or one this checkout's tree does not hold, as
+	// on a change branch from before its archive — is accepted on the base.
+	if fe, ok := errors.AsType[*FailError](err); ok && (fe.Code == "change.archived" || fe.Code == "change.not-found") && p.isWorkTree(ctx) {
+		st, aerr := p.acceptArchived(ctx, id, task, by, ev)
+		if afe, ok := errors.AsType[*FailError](aerr); fe.Code == "change.archived" || !ok || afe.Code != "change.not-found" {
+			return st, aerr
+		}
 	}
-	if !t.Human() {
-		return nil, &FailError{Code: "accept.not-human-review", Msg: "task " + task + " is proven by `" + t.Check + "`, not by a person — `ape change verify " + id + "` runs it"}
+	if err != nil {
+		return nil, err
+	}
+	if err := humanTask(ci.Doc, id, task); err != nil {
+		return nil, err
 	}
 	if err := p.requireOnBranch(ctx, id); err != nil {
 		return nil, err
 	}
 	st := ci.State
-	accepted := make([]Accept, 0, len(st.Accepted)+1)
-	for _, a := range st.Accepted {
-		if a.Task != task {
-			accepted = append(accepted, a)
-		}
-	}
-	accepted = append(accepted, Accept{Task: task, By: by, At: Stamp()})
-	st.Accepted = accepted
-	if st.Verify != nil {
-		st.Verify.PendingHuman = st.PendingHuman(ci.Doc.HumanTasks())
-		if st.Verify.PendingHuman == nil {
-			st.Verify.PendingHuman = []string{}
-		}
-	}
+	withAcceptance(st, ci.Doc, task, by, ev)
 	if err := p.saveAndCommit(ctx, id, st); err != nil {
 		return nil, err
 	}

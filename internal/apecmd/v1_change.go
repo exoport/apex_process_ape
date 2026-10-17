@@ -586,23 +586,38 @@ running, call again.`,
 func newChangeAcceptCmd() *cobra.Command {
 	var f v1Flags
 	var task, by string
+	var evidence []string
 	cmd := v1ChangeLeaf(
-		"accept <id> --task <T> --by <who>",
-		"Accept a human-review task",
-		`Record that a person accepted a human-review task (one whose check is "human-review").
-Archive requires every human-review task accepted, unless --allow-pending-human.
-HEAD must be on the change's branch, change/<id> (D38; else exit 1, code
-change.wrong-branch): the acceptance is committed there.
+		"accept <id> --task <T> --by <who> [--evidence <path|url>]...",
+		"Accept a human-review task, in flight or archived",
+		`Record that a person accepted a human-review task (one whose check is "human-review"),
+in state.json's accepted: [{task, by, at, evidence}]. Archive requires every human-review
+task accepted, unless a person archives with --allow-pending-human.
 
-Exit codes: 0 recorded · 1 the task has a command check, or HEAD not on change/<id> ·
-2 usage (no such task).`,
-		"  ape change accept add-tenant-delete --task T2 --by diego",
+  - a change in flight: HEAD must be on its branch, change/<id> (D38; else exit 1, code
+    change.wrong-branch): the acceptance is committed there
+  - an archived change (H4): its archived state.json, under
+    development/archive/<date>-<id>/, is updated and committed on the base branch it was
+    archived into — "apex: <id> accepted <T> (archived)", trailer "Change: <id>" — from any
+    branch, without a checkout when HEAD is elsewhere (refused when that branch is checked
+    out in another worktree: git.base-checked-out). `+"`ape status`"+` lists archived changes
+    with unaccepted human-review tasks until then (JSON awaiting_human)
+  - --evidence <path|url>, repeatable: what the acceptance rests on. A URL
+    (scheme://…) is recorded as given; a path — relative to the project root — must be a
+    regular file in the repository, recorded with its SHA-256 (else exit 2,
+    usage.evidence)
+
+Accepting a task again replaces its earlier acceptance.
+
+Exit codes: 0 recorded · 1 the task has a command check, HEAD not on change/<id>, or the
+base branch is checked out elsewhere · 2 usage (no such task, bad evidence).`,
+		"  ape change accept add-tenant-delete --task T2 --by diego\n  ape change accept add-tenant-delete --task T2 --by diego --evidence docs/review/tenant-delete.png --evidence https://ci.example.com/run/812",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
 			if task == "" {
 				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.task", Msg: "--task <T> is required"}, nil)
 			}
-			st, err := p.Accept(cmd.Context(), id, task, by)
+			st, err := p.Accept(cmd.Context(), id, task, by, evidence...)
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
@@ -612,6 +627,7 @@ Exit codes: 0 recorded · 1 the task has a command check, or HEAD not on change/
 		})
 	cmd.Flags().StringVar(&task, "task", "", "task id, e.g. T2 (required)")
 	cmd.Flags().StringVar(&by, "by", "", "who accepts (required)")
+	cmd.Flags().StringArrayVar(&evidence, "evidence", nil, "a file in the repository or a URL the acceptance rests on (repeatable)")
 	return cmd
 }
 
@@ -729,7 +745,11 @@ func newChangeArchiveCmd() *cobra.Command {
 		`Archive a reviewed change onto its base branch (trial decision D38):
 
   1. needs status reviewed (review pass) and the plan frozen at start unchanged; human-
-     review tasks must be accepted, unless --allow-pending-human (recorded)
+     review tasks must be accepted, unless --allow-pending-human (recorded) — a person's
+     flag only (D45): refused in a model session (APE_SESSION or CLAUDECODE set) with exit
+     2, session.person-only; the orchestrator leaves such a change reviewed and moves on.
+     An archived change's unaccepted tasks stay in `+"`ape status`"+` and stay acceptable
+     (`+"`ape change accept --help`"+`)
   2. runs with HEAD on change/<id>, or on another non-change branch (it switches to
      change/<id>); the tree must be clean — uncommitted files inside the change's own
      folder (review.md a review left) are first committed on change/<id> as
@@ -761,7 +781,8 @@ The base branch gets exactly one commit per archived change; ape's status commit
 the change branch, squashed away.
 
 Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review,
-pending human-review, dirty tree, no change branch, or git failed · 2 usage · 3 the
+pending human-review, dirty tree, no change branch, or git failed · 2 usage, or
+--allow-pending-human from a model session · 3 the
 rebase conflicts or the delta no longer applies.`,
 		"  ape change archive add-tenant-delete",
 		&f,
@@ -794,7 +815,7 @@ rebase conflicts or the delta no longer applies.`,
 				}
 			})
 		})
-	cmd.Flags().BoolVar(&allowPending, "allow-pending-human", false, "archive with human-review tasks unaccepted (recorded in state.json)")
+	cmd.Flags().BoolVar(&allowPending, "allow-pending-human", false, "archive with human-review tasks unaccepted (recorded in state.json; a person only)")
 	addV1TimeoutFlag(cmd, &f)
 	return cmd
 }
