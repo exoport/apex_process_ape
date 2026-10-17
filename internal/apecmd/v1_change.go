@@ -490,8 +490,11 @@ MODIFIED blocks — of the capabilities the change touches (frontmatter touches:
 other scenario whose check command is identical to a task's (H10). The rest of the spec
 is the milestone gate's to run (`+"`ape milestone gate`"+` runs all of it). human-review checks
 are not run. A command shared by several checks runs once. Each check runs under
-_apex/config.yaml timeouts.check (default 15m), the regression command under
-timeouts.regression (default 30m); --timeout overrides both.
+_apex/config.yaml timeouts.check (default idle 15m, max 2h), the regression command under
+timeouts.regression (idle 30m, max 2h): a command that makes no progress — no output, no
+CPU time used by its process group — for idle, or still runs at max, is killed with its
+whole process group and is red, exit 124, reason idle or ceiling (its last output lines
+kept), never retried; --timeout sets max for both (see `+"`ape project init --help`"+`).
 Ran nothing is not green (H11): a check that exits 0 but whose output says it ran
 nothing (_apex/config.yaml checks.vacuous_output; default "no tests to run", "running 0
 tests", "Ran 0 tests", "0 passing", "collected 0 items") is red with reason "vacuous"

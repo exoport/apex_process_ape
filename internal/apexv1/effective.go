@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Check kinds in a run of checks.
@@ -160,7 +159,7 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 				r = unrunResult(pc.Cmd, logPath, missing)
 				r.Log = p.Rel(logPath)
 			} else {
-				r = p.runWithRetries(ctx, pc, logPath, timeouts.For(pc.Kind, opt.Timeout), vacuous, int(cfg.Retries), inGit)
+				r = p.runWithRetries(ctx, pc, logPath, timeouts.Limits(pc.Kind, opt.Timeout), vacuous, int(cfg.Retries), inGit)
 			}
 			done[pc.Cmd] = r
 		}
@@ -176,7 +175,7 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 // times (H12): the first green run ends it, flaky when it was not the
 // first. Each run's strays are undone after it; the earlier runs' logs
 // stay beside the last as <name>.try<k>.log.
-func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath string, timeout time.Duration, vacuous []string, retries int, inGit bool) CheckResult {
+func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath string, lim TierTimeout, vacuous []string, retries int, inGit bool) CheckResult {
 	var r CheckResult
 	var strays []string
 	for try := 0; ; try++ {
@@ -190,7 +189,7 @@ func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath 
 		if inGit {
 			before = p.snapshot(ctx)
 		}
-		r = runCheck(ctx, p.Root, pc.Cmd, path, timeout, vacuous)
+		r = runCheck(ctx, p.Root, pc.Cmd, path, lim, vacuous)
 		if inGit {
 			strays = append(strays, p.undoStrays(ctx, before)...)
 		}

@@ -186,9 +186,10 @@ red there and red now is reported (JSON run.regression.pre_existing_red), not fa
 When no change of the milestone has a baseline for the command, a red regression fails
 the gate: nothing shows it was red before the milestone's work — always the case for a
 milestone tier that differs from the change tier, which no change baselines. Timeouts:
-the Gate: command runs under timeouts.gate (default 30m), each scenario check under
-timeouts.check (15m), the regression command under timeouts.regression (30m); --timeout
-overrides all three. A vacuous or unrun gate command, scenario or regression command is
+the Gate: command runs under timeouts.gate (default idle 30m, max 4h), each scenario check
+under timeouts.check (idle 15m, max 2h), the regression command under timeouts.regression
+(idle 30m, max 2h) — killed at idle without progress (output or CPU time) or at max: exit
+124, reason idle|ceiling; --timeout sets max for all three. A vacuous or unrun gate command, scenario or regression command is
 red (see ` + "`ape change verify --help`" + `; JSON reason/detail). Files the gate
 or a check leaves outside development/ are undone and reported ("stray_files"). The run (exit, sha, time,
 output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; shown by
