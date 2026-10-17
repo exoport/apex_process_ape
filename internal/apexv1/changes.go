@@ -172,7 +172,7 @@ func (p *Project) CheckChange(id string) []Finding {
 		add(1, c.MetaErr.Error())
 	}
 	for _, k := range c.UnknownKeys {
-		add(1, "frontmatter key \""+k+"\" is not one of id, milestone, touches, paths, decisions, retire, type — fix the name, or prefix your own keys with x-")
+		add(1, "frontmatter key \""+k+"\" is not one of id, milestone, touches, paths, decisions, retire, type, review_tools — fix the name, or prefix your own keys with x-")
 	}
 	out = append(out, typeFindings(file, c, p.commitConfig().SubjectTemplate())...)
 	if c.Meta.ID != id {
@@ -246,7 +246,42 @@ func (p *Project) CheckChange(id string) []Finding {
 			add(t.Line, "task "+t.ID+" has no `check: <command> | human-review` (or `regression: <command>`)")
 		}
 	}
+	return append(out, p.toolFindings(file, c)...)
+}
+
+// toolFindings refuses a design-tool task or a review_tools: entry that
+// names no tools.design / tools.review entry of _apex/config.yaml
+// (tools.unknown, D74): the orchestrator could not tell which skill to run.
+func (p *Project) toolFindings(file string, c *Change) []Finding {
+	var tools ToolsConfig
+	if cfg, err := LoadConfig(p.Root); err == nil {
+		tools = cfg.Tools
+	}
+	var out []Finding
+	for _, t := range c.Tasks {
+		if t.Tool != "" && tools.Find("design", t.Tool) == nil {
+			out = append(out, Finding{File: file, Line: t.Line, Message: "task " + t.ID + "'s tool: " + t.Tool + " is not declared in tools.design of _apex/config.yaml" +
+				" — name a declared design tool (" + toolNames(tools.Design) + "), or drop the `— tool:` segment"})
+		}
+	}
+	for _, name := range c.Meta.ReviewTools {
+		if tools.Find("review", name) == nil {
+			out = append(out, Finding{File: file, Line: 1, Message: "review_tools: " + name + " is not declared in tools.review of _apex/config.yaml" +
+				" — name a declared review tool (" + toolNames(tools.Review) + "), or drop it"})
+		}
+	}
 	return out
+}
+
+func toolNames(ts []Tool) string {
+	if len(ts) == 0 {
+		return "none declared"
+	}
+	names := make([]string, 0, len(ts))
+	for _, t := range ts {
+		names = append(names, t.Name)
+	}
+	return strings.Join(names, ", ")
 }
 
 // mergedSpecFindings merges the delta into the current specs in memory —

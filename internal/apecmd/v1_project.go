@@ -391,6 +391,11 @@ func newStatusCmd() *cobra.Command {
     with unaccepted human-review tasks (archived past them by a person) are listed after
     the rest, status "archived", under "Archived, human review not accepted"; they stay
     acceptable (` + "`ape change accept --help`" + `)
+  - tools (D59 Q4, D74): every change lists tools, its design-tool tasks
+    ("— tool: <name>"), as [{task, name, skill, done}] — done: the task green at the
+    latest verify of the current plan, or a human-review one accepted — and
+    review_tools, its review_tools: frontmatter, as [{name, skill}]; skill is what
+    _apex/config.yaml tools: names ("" when it names none). Both always present ([])
   - spend so far: the sum of finished ape task/pipeline run manifests
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
     cmd, exit, sha}]): the regression command, and scenario checks of the spec a change

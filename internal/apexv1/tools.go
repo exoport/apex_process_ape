@@ -61,6 +61,17 @@ func (t ToolsConfig) Slot(slot string) []Tool {
 	return nil
 }
 
+// Find returns the slot's entry named name, or nil.
+func (t ToolsConfig) Find(slot, name string) *Tool {
+	ts := t.Slot(slot)
+	for i := range ts {
+		if ts[i].Name == name {
+			return &ts[i]
+		}
+	}
+	return nil
+}
+
 // toolSkillRe is a skill name, optionally namespaced by its plugin.
 var toolSkillRe = regexp.MustCompile(`^(?:[A-Za-z0-9][A-Za-z0-9._-]*:)?[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
