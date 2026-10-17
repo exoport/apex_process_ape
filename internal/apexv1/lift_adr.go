@@ -388,15 +388,16 @@ func gitFirstDate(ctx context.Context, root, rel string) string {
 
 // recordLiftedDecisions records the converted ADRs that are accepted (or
 // were, before being superseded) in _apex/state/decisions.json, by
-// "lift", so `ape project check` holds their text from here on. One
-// function, so a shared RecordLiftedDecisions can replace it.
+// LiftBy, so `ape project check` holds their text from here on. Not
+// RecordLiftedDecisions (approval.go), which takes only ADRs accepted now:
+// a superseded ADR was accepted once, and its text is held too.
 func recordLiftedDecisions(p *Project, adrs []LiftADR) error {
 	recs := p.loadDecisionRecords()
 	for _, a := range adrs {
 		if a.Status != ADRAccepted && !strings.HasPrefix(a.Status, "superseded by ") {
 			continue
 		}
-		recs[a.New] = DecisionRecord{AcceptedAt: Stamp(), By: "lift", BodySHA256: adrBodyDigest(a.doc)}
+		recs[a.New] = DecisionRecord{AcceptedAt: Stamp(), By: LiftBy, BodySHA256: adrBodyDigest(a.doc)}
 	}
 	if len(recs) == 0 {
 		return nil
