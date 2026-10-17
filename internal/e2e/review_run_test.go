@@ -78,9 +78,17 @@ func reviewProject(t *testing.T) (ape, project, fake string, env []string) {
 	sh("git", "init", "-q")
 	sh("git", "commit", "-q", "--allow-empty", "-m", "base")
 	sh(ape, "project", "init")
+	// The review inherits the asking session's model here: drop init's
+	// models.apex-review default (D65), which would otherwise decide it.
+	cfgPath := filepath.Join(project, "_apex", "config.yaml")
+	cfg, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	require.Contains(t, string(cfg), "  apex-review: {model: opus, effort: medium}\n")
+	require.NoError(t, writeFile(cfgPath, strings.Replace(string(cfg), "  apex-review: {model: opus, effort: medium}\n", "", 1)))
 	require.NoError(t, writeFile(filepath.Join(project, "development", "project.md"),
 		"# G\n## Vision\nv\n## Users\nu\n## Scope\ns\n## Out of scope\no\n## Constraints\nc\n"))
-	sh(ape, "milestone", "new", "Skeleton", "--gate", "./wave.sh", "--goal", "waves")
+	require.NoError(t, writeWaveGate(project))
+	sh(ape, "milestone", "new", "Skeleton", "--gate", "./gate.sh", "--goal", "waves")
 	sh(ape, "milestone", "approve", "M1", "--by", "test")
 	sh(ape, "change", "new", "add-wave", "--milestone", "M1", "--touches", "greeting")
 	require.NoError(t, writeFile(filepath.Join(project, "development", "changes", "add-wave", "change.md"), v1Change))
@@ -299,7 +307,7 @@ func TestReviewRun_ModelAndEffort(t *testing.T) {
 		cfg := filepath.Join(project, "_apex", "config.yaml")
 		data, err := os.ReadFile(cfg)
 		require.NoError(t, err)
-		require.NoError(t, os.WriteFile(cfg, append(data, []byte("models:\n  apex-review: {model: claude-haiku-5-5, effort: low}\n")...), 0o644))
+		require.NoError(t, os.WriteFile(cfg, []byte(strings.Replace(string(data), "models:\n", "models:\n  apex-review: {model: claude-haiku-5-5, effort: low}\n", 1)), 0o644))
 		commit := exec.Command("git", "-C", project, "commit", "-qam", "config: review on haiku")
 		commit.Env = env
 		cout, cerr := commit.CombinedOutput()
