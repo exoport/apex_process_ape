@@ -107,8 +107,13 @@ checksum, fingerprint, byte-identical, …), or that sit beside a hashing test t
 or names them — run --dry-run, then --exclude them. It is a heuristic: a copy compared
 byte for byte with no hash (an embedded mirror of a hashed file) needs its own --exclude.
 
-After the commit the regression command runs once (--no-verify-run skips it): its result
-is the baseline; red is recorded, not a lift failure.
+The regression command runs twice (--no-verify-run skips both): at the tag, before
+anything is written, and at the lift commit — the baseline red gates are judged against.
+regression_verdict says whose a red is: green · red-at-tag (red there too: pre-existing,
+for apex-plan to roadmap) · red-after-lift (green at the tag: the LIFT broke it — fix it
+in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127: a
+tool it runs is missing here, which is not a red) · red-no-baseline. The exit code stays
+0: the commit stands either way, and the verdict is in --json and the output.
 
 --from-update is how the framework's v1.0.0 migration entry runs it inside
 ` + "`ape framework update`" + `: uncommitted changes under .claude/skills/, _apex/ (not
@@ -213,8 +218,11 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 		return
 	}
 	fmt.Fprintf(w, "commit    %s  %s\n", r.Commit, strings.SplitN(r.CommitMessage, "\n", 2)[0])
+	if t := r.RegressionAtTag; t != nil {
+		fmt.Fprintf(w, "regression at %s exit %d (%.1fs)\n", apexv1.LiftTag, t.Exit, t.Secs)
+	}
 	if r.Regression != nil {
-		fmt.Fprintf(w, "regression exit %d — %s\n", r.Regression.Exit, r.RegressionNote)
+		fmt.Fprintf(w, "regression exit %d [%s] — %s\n", r.Regression.Exit, r.RegressionVerdict, r.RegressionNote)
 	} else if r.RegressionNote != "" {
 		fmt.Fprintln(w, "regression "+r.RegressionNote)
 	}

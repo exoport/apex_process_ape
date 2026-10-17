@@ -408,6 +408,12 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	require.Contains(t, agents, "- `sh ./check.sh`\n- `./gate.sh <board>`\n- `test -f main.go`\n")
 	require.NotNil(t, res.Regression)
 	require.Equal(t, 0, res.Regression.Exit)
+	// L4: the same command ran at the tag first, its log kept beside.
+	require.NotNil(t, res.RegressionAtTag)
+	require.Equal(t, 0, res.RegressionAtTag.Exit)
+	require.Equal(t, "_apex/state/logs/lift/regression-at-tag.log", res.RegressionAtTag.Log)
+	require.FileExists(t, filepath.Join(root, "_apex", "state", "logs", "lift", "regression-at-tag.log"))
+	require.Equal(t, LiftRegressionGreen, res.RegressionVerdict)
 
 	// CLAUDE.md keeps its rules, loses the managed block, imports the map.
 	require.Equal(t, "# Greeter\n\nProject rules (see ADR-0003).\n\n"+

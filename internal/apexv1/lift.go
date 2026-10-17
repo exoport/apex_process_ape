@@ -99,17 +99,42 @@ type LiftResult struct {
 	DanglingRefs  []LiftIDRef `json:"references_to_removed_paths,omitempty"`
 	// Hashed are edited files a test, CI script or lock file seems to pin
 	// the bytes of: a perimeter to --exclude before lifting (L6).
-	Hashed         []LiftHashed    `json:"edited_but_hashed,omitempty"`
-	Gates          LiftGates       `json:"gates"`
-	Candidates     []LiftCandidate `json:"rule_candidates"`
-	Readings       []string        `json:"readings,omitempty"`
-	Disposition    string          `json:"disposition"`
-	Init           *InitResult     `json:"init,omitempty"`
-	CommitMessage  string          `json:"commit_message"`
-	Commit         string          `json:"commit,omitempty"`
-	Regression     *CheckResult    `json:"regression,omitempty"`
-	RegressionNote string          `json:"regression_note,omitempty"`
+	Hashed        []LiftHashed    `json:"edited_but_hashed,omitempty"`
+	Gates         LiftGates       `json:"gates"`
+	Candidates    []LiftCandidate `json:"rule_candidates"`
+	Readings      []string        `json:"readings,omitempty"`
+	Disposition   string          `json:"disposition"`
+	Init          *InitResult     `json:"init,omitempty"`
+	CommitMessage string          `json:"commit_message"`
+	Commit        string          `json:"commit,omitempty"`
+	Regression    *CheckResult    `json:"regression,omitempty"`
+	// RegressionAtTag is the same command run at the tag, before anything
+	// is written: the baseline that tells a pre-existing red from one the
+	// lift caused (L4).
+	RegressionAtTag *CheckResult `json:"regression_at_tag,omitempty"`
+	// RegressionVerdict is one of the LiftRegression* values.
+	RegressionVerdict string `json:"regression_verdict,omitempty"`
+	RegressionNote    string `json:"regression_note,omitempty"`
 }
+
+// The lift's regression verdicts: the command at the lift commit judged
+// against the same command at the tag (L4).
+const (
+	LiftRegressionGreen = "green"
+	// LiftRegressionRedAtTag: red at the tag too — pre-existing, for
+	// apex-plan to roadmap.
+	LiftRegressionRedAtTag = "red-at-tag"
+	// LiftRegressionRedAfterLift: green at the tag, red at the lift
+	// commit — the lift broke it, a lift failure for the person.
+	LiftRegressionRedAfterLift = "red-after-lift"
+	// LiftRegressionCannotRun: exit 126 or 127 at the lift commit as at
+	// the tag — a tool it runs is missing or not executable here, which
+	// is not a red (D70 B).
+	LiftRegressionCannotRun = "cannot-run"
+	// LiftRegressionNoBaseline: red at the lift commit, and the run at
+	// the tag could not run, so nothing says whose red it is.
+	LiftRegressionNoBaseline = "red-no-baseline"
+)
 
 type lifter struct {
 	ctx    context.Context //nolint:containedctx // a lifter lives for one Lift call and carries that call's ctx
@@ -877,6 +902,27 @@ func (lf *lifter) readings() []string {
 
 func (lf *lifter) apply() error {
 	ctx := lf.ctx
+	// The regression command at the tag, first, before anything is
+	// written: HEAD is the tag (pre-flight) and the tree is clean. Its log
+	// is kept outside the tree until the lift's state folder exists.
+	tagLog := ""
+	if lf.res.Gates.Regression != "" && !lf.opt.NoVerifyRun {
+		tmp, err := os.MkdirTemp("", "ape-lift-tag-*")
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(tmp) }()
+		tagLog = filepath.Join(tmp, "regression-at-tag.log")
+		p0 := &Project{Root: lf.root, DevRel: lf.devRel}
+		progressf(lf.opt.Run.Progress, "%s regression at %s started: %s", Stamp(), LiftTag, lf.res.Gates.Regression)
+		r := p0.runWithRetries(ctx, &PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: lf.res.Gates.Regression}, tagLog,
+			Timeouts{}.Limits(KindRegression, lf.opt.Run.Timeout), nil, 0, p0.isWorkTree(ctx))
+		r.Task, r.Kind = regressionRef, KindRegression
+		lf.res.RegressionAtTag = &r
+		if ctx.Err() != nil {
+			return &FailError{Code: CodeRunInterrupted, Msg: "interrupted while the regression ran at " + LiftTag + " — nothing was written; lift again"}
+		}
+	}
 	pathsFile, err := os.CreateTemp("", "ape-lift-paths-*")
 	if err != nil {
 		return err
@@ -976,9 +1022,9 @@ func (lf *lifter) apply() error {
 		}
 	}
 
-	// The regression command, once, at the lift commit: the baseline red
-	// gates are judged against (backlog 37). A red run is recorded, not a
-	// failure of the lift.
+	// The regression command at the lift commit, judged against its run
+	// at the tag: the baseline red gates are judged against (backlog 37),
+	// and the one way to tell a red the lift caused from one it found (L4).
 	switch {
 	case lf.res.Gates.Regression == "":
 		lf.res.RegressionNote = "no regression command was extracted: apex-plan sets `regression:` in _apex/config.yaml"
@@ -987,13 +1033,44 @@ func (lf *lifter) apply() error {
 	default:
 		r := p.runRegression(ctx, lf.res.Gates.Regression, p.LogDir("lift"), "", lf.opt.Run)
 		lf.res.Regression = &r
-		if r.Exit != 0 {
-			lf.res.RegressionNote = fmt.Sprintf("red at the lift commit (exit %d): a pre-existing failure for apex-plan to roadmap, not a lift failure; full output in %s", r.Exit, r.Log)
-		} else {
-			lf.res.RegressionNote = "green at the lift commit"
+		if t := lf.res.RegressionAtTag; t != nil && tagLog != "" {
+			dst := filepath.Join(p.LogDir("lift"), "regression-at-tag.log")
+			if err := os.Rename(tagLog, dst); err == nil {
+				t.Log = p.Rel(dst)
+			} else if data, rerr := os.ReadFile(tagLog); rerr == nil && os.WriteFile(dst, data, 0o644) == nil {
+				t.Log = p.Rel(dst)
+			}
 		}
+		lf.res.RegressionVerdict, lf.res.RegressionNote = judgeLiftRegression(lf.res.RegressionAtTag, &r)
 	}
 	return nil
+}
+
+// judgeLiftRegression compares the regression command at the lift commit
+// (after) with its run at the tag (before, nil when it did not run).
+func judgeLiftRegression(before, after *CheckResult) (verdict, note string) {
+	cannotRun := func(r *CheckResult) bool { return r != nil && (r.Exit == 126 || r.Exit == 127) }
+	tag := "not run"
+	if before != nil {
+		tag = fmt.Sprintf("exit %d", before.Exit)
+	}
+	switch {
+	case after.Exit == 0:
+		if before != nil && before.Exit != 0 {
+			return LiftRegressionGreen, fmt.Sprintf("green at the lift commit (red at %s, %s: check that run's log for a flaky test)", LiftTag, tag)
+		}
+		return LiftRegressionGreen, "green at the lift commit, as at " + LiftTag
+	case cannotRun(after) && (before == nil || before.Exit != 0):
+		return LiftRegressionCannotRun, fmt.Sprintf("cannot run here (exit %d at the lift commit, %s at %s): a command it runs is missing or not executable on this machine — not a red; run it where its tools are, or set `regression:` to what can run; output in %s", after.Exit, tag, LiftTag, after.Log)
+	case before == nil:
+		return LiftRegressionNoBaseline, fmt.Sprintf("red at the lift commit (exit %d), with no run at %s to compare: output in %s", after.Exit, LiftTag, after.Log)
+	case cannotRun(before):
+		return LiftRegressionNoBaseline, fmt.Sprintf("red at the lift commit (exit %d); at %s it could not run (%s), so nothing says whose red it is: output in %s", after.Exit, LiftTag, tag, after.Log)
+	case before.Exit != 0:
+		return LiftRegressionRedAtTag, fmt.Sprintf("red at the lift commit (exit %d) and at %s (%s): a pre-existing failure for apex-plan to roadmap, not a lift failure; output in %s and %s", after.Exit, LiftTag, tag, after.Log, before.Log)
+	default:
+		return LiftRegressionRedAfterLift, fmt.Sprintf("LIFT FAILURE: red at the lift commit (exit %d), green at %s — the lift broke it (an edited file a test or CI pins, a removed path code still reads); output in %s. Fix it in a commit of its own, or `git reset --hard %s` and lift again with --exclude", after.Exit, LiftTag, after.Log, LiftTag)
+	}
 }
 
 // liftWrite writes a file, keeping an existing file's mode (a script
