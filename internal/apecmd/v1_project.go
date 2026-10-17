@@ -218,9 +218,12 @@ func newProjectCodesCmd() *cobra.Command {
 decision) can report, with the exit status it comes with and what it means.
 
 Every --json failure is {"ok": false, "exit": N, "error": "<one line>",
-"diagnostics": [{"severity", "code", "message", "fix", "file"?, "line"?}], ...}: the
-first diagnostic is the failure itself, the rest its findings or conflicts. Branch on
-"code"; "message" and "fix" are for people. Codes are stable: a new rule gets a new
+"diagnostics": [{"severity", "code", "message", "fix", "action", "file"?, "line"?}], ...}:
+the first diagnostic is the failure itself, the rest its findings or conflicts. Branch on
+"action" (D47): retry (run the same command again), apply (apex-apply: code work or a
+re-start), review (review again), replan (apex-change re-plans), stop (the run stops), person
+(a person must act: list it, go on with other work). "code" says which rule; "message" and
+"fix" are for people. Codes are stable: a new rule gets a new
 code, and a code's meaning never changes. severity is always "error" (no warning tier).
 Exit: 1 check failed · 2 usage · 3 conflict (nothing written).`,
 		Example: "  ape project codes\n  ape project codes --json",
@@ -228,7 +231,7 @@ Exit: 1 check failed · 2 usage · 3 conflict (nothing written).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return v1Emit(cmd.OutOrStdout(), &f, apexv1.DiagnosticCodes, func(w io.Writer) {
 				for _, c := range apexv1.DiagnosticCodes {
-					fmt.Fprintf(w, "%-30s %d  %s\n", c.Code, c.Exit, c.Meaning)
+					fmt.Fprintf(w, "%-30s %d  %-7s %s\n", c.Code, c.Exit, c.Action, c.Meaning)
 				}
 			})
 		},

@@ -19,6 +19,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		require.False(t, dup, "duplicate published code %s", c.Code)
 		require.Contains(t, []int{1, 2, 3}, c.Exit, c.Code)
 		require.NotEmpty(t, c.Meaning, c.Code)
+		require.Contains(t, Actions, c.Action, c.Code)
 		published[c.Code] = c.Exit
 	}
 	used := map[string]bool{}
@@ -71,8 +72,8 @@ func TestDiagnostics(t *testing.T) {
 		{File: "development/changes/x/change.md", Line: 3, Message: "REMOVED needs a `Reason:` line"},
 	}})
 	require.Equal(t, []Diagnostic{
-		{Severity: "error", Code: "verify.red", Message: "change x: 1 check red", Fix: "fix the code"},
-		{Severity: "error", Code: "change.removed-no-reason", Message: "REMOVED needs a `Reason:` line", File: "development/changes/x/change.md", Line: 3},
+		{Severity: "error", Code: "verify.red", Message: "change x: 1 check red", Fix: "fix the code", Action: "apply"},
+		{Severity: "error", Code: "change.removed-no-reason", Message: "REMOVED needs a `Reason:` line", Action: "replan", File: "development/changes/x/change.md", Line: 3},
 	}, d)
 	d = Diagnostics(&ConflictError{Code: "archive.delta-conflict", Msg: "the delta no longer applies", Conflicts: []string{"a", "b"}})
 	require.Len(t, d, 3)

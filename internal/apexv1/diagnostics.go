@@ -18,8 +18,11 @@ type Diagnostic struct {
 	Code     string `json:"code"`
 	Message  string `json:"message"`
 	Fix      string `json:"fix"`
-	File     string `json:"file,omitempty"`
-	Line     int    `json:"line,omitempty"`
+	// Action is the code's published action (D47): what the orchestrator
+	// does next.
+	Action string `json:"action"`
+	File   string `json:"file,omitempty"`
+	Line   int    `json:"line,omitempty"`
 }
 
 // SeverityError is the only severity: v1 has no warning tier (backlog
@@ -46,14 +49,15 @@ func Diagnostics(err error) []Diagnostic {
 	case errors.As(err, &fe):
 		out = append(out, newDiagnostic(codeOr(fe.Code, "error.unclassified"), fe.Msg))
 		for _, f := range ClassifyFindings(fe.Findings) {
-			out = append(out, Diagnostic{Severity: SeverityError, Code: f.Code, Message: f.Message, Fix: f.Fix, File: f.File, Line: f.Line})
+			out = append(out, Diagnostic{Severity: SeverityError, Code: f.Code, Message: f.Message, Fix: f.Fix, Action: ActionFor(f.Code), File: f.File, Line: f.Line})
 		}
 	case errors.As(err, &ue):
 		out = append(out, newDiagnostic(codeOr(ue.Code, "usage.unclassified"), ue.Msg))
 	case errors.As(err, &ce):
 		out = append(out, newDiagnostic(codeOr(ce.Code, "conflict.unclassified"), ce.Msg))
 		for _, c := range ce.Conflicts {
-			out = append(out, Diagnostic{Severity: SeverityError, Code: codeOr(ce.Code, "conflict.unclassified"), Message: c})
+			code := codeOr(ce.Code, "conflict.unclassified")
+			out = append(out, Diagnostic{Severity: SeverityError, Code: code, Message: c, Action: ActionFor(code)})
 		}
 	case err != nil:
 		out = append(out, newDiagnostic("error.unclassified", err.Error()))
@@ -63,7 +67,7 @@ func Diagnostics(err error) []Diagnostic {
 
 func newDiagnostic(code, msg string) Diagnostic {
 	m, fix := splitFix(msg)
-	return Diagnostic{Severity: SeverityError, Code: code, Message: m, Fix: fix}
+	return Diagnostic{Severity: SeverityError, Code: code, Message: m, Fix: fix, Action: ActionFor(code)}
 }
 
 func codeOr(code, fallback string) string {
