@@ -100,11 +100,16 @@ type StatusReport struct {
 	// upstream, from the local remote-tracking ref; null when it has none
 	// (H6, D45).
 	BaseUpstream *BaseUpstream `json:"base_upstream"`
+	// OutsideFlow are the base branch's commits since the last archive
+	// squash (else the v1 epoch) that touch code with no `Change:` trailer
+	// and no `apex:` subject: work that bypassed the change flow (H7).
+	// Shown, never failed.
+	OutsideFlow []OutsideFlow `json:"outside_flow"`
 }
 
 // Status builds the report.
 func (p *Project) Status() *StatusReport {
-	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Fixes: []string{}}
+	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Fixes: []string{}, OutsideFlow: []OutsideFlow{}}
 	if cfg, err := LoadConfig(p.Root); err == nil && cfg.ProjectName != "" {
 		r.Project = cfg.ProjectName
 	} else {
@@ -191,7 +196,9 @@ func (p *Project) Status() *StatusReport {
 		}
 	}
 	r.Archived = len(p.ArchivedIDs())
-	r.BaseUpstream = p.upstreamOf(ctx, p.statusBase(ctx, r.Branch))
+	base := p.statusBase(ctx, r.Branch)
+	r.BaseUpstream = p.upstreamOf(ctx, base)
+	r.OutsideFlow = p.outsideFlow(ctx, base)
 	r.Next = nextStep(r)
 	return r
 }

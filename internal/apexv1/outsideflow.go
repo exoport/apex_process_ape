@@ -1,0 +1,94 @@
+package apexv1
+
+import (
+	"context"
+	"strings"
+)
+
+// Work outside the change flow (H7). A base-branch commit that touches
+// code — paths outside the development folder and _apex/ — with no
+// `Change:` trailer and no `apex:` subject reached the base without a
+// change: no plan, no checks, no review. `ape status --json` lists those
+// since the last archive squash, else since the v1 epoch (the newest
+// `apex: project init` or `apex: lift` commit; D47 Q5 exempts everything
+// before it). Shown, never failed: v1 has no warning tier.
+
+// OutsideFlow is one such commit.
+type OutsideFlow struct {
+	SHA     string `json:"sha"`
+	Subject string `json:"subject"`
+	// Files are the paths it touched outside the development folder and
+	// _apex/ (at most outsideFlowFiles).
+	Files []string `json:"files"`
+}
+
+const outsideFlowFiles = 10
+
+// v1EpochSubjects start the commit that makes a project v1.
+var v1EpochSubjects = []string{"apex: project init", "apex: lift"}
+
+// v1Epoch is the newest commit on rev whose subject starts the v1 epoch,
+// "" when there is none.
+func (p *Project) v1Epoch(ctx context.Context, rev string) string {
+	out, err := git(ctx, p.Root, "log", "--format=%H%x1f%s", "-E", "--grep=^apex: (project init|lift)", rev)
+	if err != nil {
+		return ""
+	}
+	for line := range strings.SplitSeq(out, "\n") {
+		sha, subject, _ := strings.Cut(line, "\x1f")
+		for _, s := range v1EpochSubjects {
+			if strings.HasPrefix(subject, s) {
+				return sha
+			}
+		}
+	}
+	return ""
+}
+
+// outsideFlow lists base's commits outside the change flow, newest first.
+func (p *Project) outsideFlow(ctx context.Context, base string) []OutsideFlow {
+	out := []OutsideFlow{}
+	if base == "" || !p.isWorkTree(ctx) || !p.branchExists(ctx, base) {
+		return out
+	}
+	rev := "refs/heads/" + base
+	epoch := p.v1Epoch(ctx, rev)
+	if epoch == "" {
+		return out
+	}
+	// --relative: paths relative to the project, which may sit below the
+	// repository's root.
+	log, err := gitRaw(ctx, p.Root, "log", "--format=%x1e%H%x1f%s%x1f%(trailers:key=Change,valueonly,separator=%x2C)%x1f",
+		"--name-only", "--relative", epoch+".."+rev)
+	if err != nil {
+		return out
+	}
+	archive := p.devPrefix() + "archive/"
+	for rec := range strings.SplitSeq(log, "\x1e") {
+		f := strings.SplitN(rec, "\x1f", 4)
+		if len(f) < 4 {
+			continue
+		}
+		sha, subject, change := f[0], f[1], strings.TrimSpace(f[2])
+		var files []string
+		squash := false
+		for path := range strings.SplitSeq(f[3], "\n") {
+			path = strings.TrimSpace(path)
+			switch {
+			case path == "":
+			case strings.HasPrefix(path, archive):
+				squash = true
+			case !p.notCode(path) && path != "_apex" && !strings.HasPrefix(path, "_apex/"):
+				files = append(files, path)
+			}
+		}
+		if change != "" && squash && !strings.HasPrefix(subject, "apex:") {
+			break // the last archive squash: what precedes it was reported before it
+		}
+		if change != "" || strings.HasPrefix(subject, "apex:") || len(files) == 0 {
+			continue
+		}
+		out = append(out, OutsideFlow{SHA: sha, Subject: subject, Files: limit(files, outsideFlowFiles)})
+	}
+	return out
+}

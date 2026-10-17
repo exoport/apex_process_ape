@@ -291,6 +291,11 @@ func newStatusCmd() *cobra.Command {
     behind}; null without one), from the local remote-tracking ref — ape never fetches.
     v1.0 is one operator per checkout on a local trunk (D45): start and archive refuse
     while the base is behind (base.behind-upstream: pull)
+  - work outside the change flow (JSON "outside_flow": [{sha, subject, files}], newest
+    first; a count line in the human output): commits on that base branch since the last
+    archive squash — else since the v1 epoch, the newest "apex: project init" or "apex:
+    lift" commit — that touch paths outside development/ and _apex/, carry no "Change:"
+    trailer and have no "apex:" subject. Shown, never failed
   - next: what the way of working says comes next, derived from the state alone
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
@@ -332,6 +337,10 @@ func statusLong(r *apexv1.StatusReport) string {
 		for _, l := range r.Milestone.GateLast.Tail {
 			b.WriteString("  | " + l + "\n")
 		}
+	}
+	if n := len(r.OutsideFlow); n > 0 {
+		fmt.Fprintf(&b, "\nOutside the change flow: %d commit(s) on the base since the last archive touch code with no Change: trailer (newest %.7s %s; ape status --json: outside_flow)\n",
+			n, r.OutsideFlow[0].SHA, r.OutsideFlow[0].Subject)
 	}
 	if u := r.BaseUpstream; u != nil && u.Behind == 0 {
 		// Behind is in the brief already.
