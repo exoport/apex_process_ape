@@ -15,7 +15,7 @@ func newProjectCmd() *cobra.Command {
 		Use:   "project",
 		Short: "Create and check an APEX v1 project layout",
 	}
-	cmd.AddCommand(newProjectInitCmd(), newProjectCheckCmd(), newProjectCodesCmd(), newProjectLiftCmd())
+	cmd.AddCommand(newProjectInitCmd(), newProjectCheckCmd(), newProjectCodesCmd(), newProjectLiftCmd(), newProjectAcceptConfigCmd())
 	return cmd
 }
 
@@ -238,6 +238,9 @@ func newProjectCheckCmd() *cobra.Command {
   lift                     development/lift-disposition.md in a project whose v1 epoch is a
                            lift commit ("apex: lift …"): the disposition list awaits review
                            (lift.disposition-pending) until the person deletes the file
+  config                   since the v1 epoch, a commit that changed limits, checks, retries
+                           or requires in _apex/config.yaml and is not ape's (config.changed,
+                           D50) — a person reverts it or accepts it: ` + "`ape project accept-config`" + `
   docs                     each path _apex/config.yaml docs: names (changelog, user_docs)
                            exists (docs.missing: create it, or fix the path)
   .claude/settings.json    ape's hooks registered as ` + "`ape project init`" + ` writes them:

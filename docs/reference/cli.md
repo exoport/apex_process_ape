@@ -3429,10 +3429,50 @@ ape project
 
 Subcommands:
 
+- `accept-config` — Accept the committed _apex/config.yaml's limits, checks, retries and requires
 - `check` — Validate every v1 shape and size cap; list all failures
 - `codes` — List the diagnostic codes v1 commands report in --json failures
 - `init` — Create the development/ skeleton and merge ape's hooks (never overwrites)
 - `lift` — Lift an APEX v0 project to v1 in one commit (the mechanical half of the migration)
+
+## ape project accept-config
+
+Accept the committed _apex/config.yaml's limits, checks, retries and requires
+
+```
+ape project accept-config --by <who> [flags]
+```
+
+Four blocks of _apex/config.yaml loosen what ape enforces: limits (attempts, re-plans,
+consecutive blocks), checks (vacuous output), requires (unrun checks) and retries. Since the
+project's v1 epoch, a commit that changes one of them and is not ape's own ("apex: …") is
+the finding config.changed (action person; D50), and change start, verify and archive
+refuse (change.provenance) — so a session cannot loosen its own limits with an Edit.
+
+A person who made the change, or approves it, accepts it: this command commits an empty
+"apex: config accepted by <who>" on the base branch, and every guarded change before it
+is clean. A later change is judged again. A git revert of the change also clears it.
+
+Only a person accepts (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE set,
+which includes a `!` line inside Claude Code — with exit 2, code session.person-only.
+Refused on a change branch, and with staged changes in the index.
+
+Exit codes: 0 accepted (prints the commit) · 1 HEAD on a change branch, staged changes, or
+git failed · 2 usage, or a model session.
+
+Examples:
+
+```
+  ape project accept-config --by diego
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--by` | string | `—` | who accepts (required) |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
 
 ## ape project check
 
@@ -3479,6 +3519,9 @@ Validate the whole project and list every failure, not just the first.
   lift                     development/lift-disposition.md in a project whose v1 epoch is a
                            lift commit ("apex: lift …"): the disposition list awaits review
                            (lift.disposition-pending) until the person deletes the file
+  config                   since the v1 epoch, a commit that changed limits, checks, retries
+                           or requires in _apex/config.yaml and is not ape's (config.changed,
+                           D50) — a person reverts it or accepts it: `ape project accept-config`
   docs                     each path _apex/config.yaml docs: names (changelog, user_docs)
                            exists (docs.missing: create it, or fix the path)
   .claude/settings.json    ape's hooks registered as `ape project init` writes them:

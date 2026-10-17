@@ -105,7 +105,7 @@ func (p *Project) provenanceFindings(ctx context.Context) []Finding {
 			}
 		}
 	}
-	return fs
+	return append(fs, p.configFindings(ctx, epoch)...)
 }
 
 // conflictedRe is the subject of ape's commit that leaves a rebase
@@ -143,5 +143,5 @@ func (p *Project) Provenance(ctx context.Context) error {
 		return nil
 	}
 	return &FailError{Code: "change.provenance", Findings: fs, Msg: fmt.Sprintf(
-		"%d spec or state.json write(s) since the v1 epoch did not come from ape — a person restores them (`ape project check` lists them)", len(fs))}
+		"%d spec, state.json or guarded config write(s) since the v1 epoch did not come from ape — a person restores or accepts them (`ape project check` lists them)", len(fs))}
 }
