@@ -106,6 +106,27 @@ func TestMergeDelta(t *testing.T) {
 	}
 }
 
+// reviewedWaveFrom is add-wave reviewed, T2 accepted, in a project made
+// of files.
+func reviewedWaveFrom(t *testing.T, files map[string]string) *Project {
+	t.Helper()
+	p := fixture(t, files)
+	addChange(t, p, "add-wave", waveChange("add-wave"))
+	commitAll(t, p, "plan: add-wave")
+	_, err := p.Start(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	write(t, p, "wave.sh", "#!/bin/sh\necho wave\n")
+	commitAll(t, p, "feat: wave")
+	_, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	write(t, p, "development/changes/add-wave/review.md", "fine\n")
+	_, err = p.Review(ctx(), "add-wave", "pass", "development/changes/add-wave/review.md")
+	require.NoError(t, err)
+	_, err = p.Accept(ctx(), "add-wave", "T2", "ann")
+	require.NoError(t, err)
+	return p
+}
+
 // reviewedWave is a change ready to archive.
 func reviewedWave(t *testing.T) *Project {
 	t.Helper()
@@ -141,7 +162,8 @@ func TestArchive(t *testing.T) {
 	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "HEAD~1"), "exactly one new commit on main")
 	require.Equal(t, "1", run(t, p.Root, "rev-list", "--count", "--no-merges", "HEAD~1..HEAD"))
 	require.Equal(t, "Add wave", subjects(t, p)[0])
-	require.Equal(t, "Change: add-wave", run(t, p.Root, "log", "-1", "--format=%b"))
+	require.Equal(t, "- feat: wave\n\nChange: add-wave", run(t, p.Root, "log", "-1", "--format=%b"),
+		"the body carries the branch's own commit subjects, not ape's, then the trailer (H15)")
 	require.NotContains(t, strings.Join(subjects(t, p), "\n"), "apex: add-wave in-progress", "no change-branch status commit reaches main")
 	require.False(t, p.branchExists(ctx(), "change/add-wave"), "the change branch is deleted")
 	require.NotEmpty(t, res.BranchTip)
@@ -164,6 +186,10 @@ func TestArchive(t *testing.T) {
 	require.True(t, st.AllowPendingHuman)
 	require.Equal(t, res.BranchTip, st.BranchTip)
 	require.Equal(t, "main", st.BaseBranch)
+	// H16: the deleted branch's tip stays reachable.
+	require.Equal(t, "refs/apex/archive/add-wave", st.TipRef)
+	require.Equal(t, st.TipRef, res.TipRef)
+	require.Equal(t, res.BranchTip, run(t, p.Root, "rev-parse", "refs/apex/archive/add-wave"))
 
 	require.Empty(t, run(t, p.Root, "status", "--porcelain"), "the archive commit leaves the tree clean")
 	require.Empty(t, p.Check(), "the merged project passes the project check")
@@ -246,9 +272,10 @@ func TestArchive_ReverifiesWhenCodeMoved(t *testing.T) {
 	require.DirExists(t, p2.ChangeDir("add-wave"))
 }
 
-// A change branch that does not rebase onto the base branch: the rebase is
-// aborted, nothing is merged, and the change is blocked naming the files.
-func TestArchive_RebaseConflictBlocks(t *testing.T) {
+// A change branch that does not rebase onto the base branch: nothing
+// reaches the base; the conflict is left on change/<id> (H8), the change
+// back to in-progress for apex-apply.
+func TestArchive_RebaseConflictLeftOnTheBranch(t *testing.T) {
 	p := reviewedWave(t)
 	_, err := p.Accept(ctx(), "add-wave", "T2", "ann")
 	require.NoError(t, err)
@@ -261,16 +288,14 @@ func TestArchive_RebaseConflictBlocks(t *testing.T) {
 	_, err = p.Archive(ctx(), "add-wave", false, RunOptions{})
 	var ce *ConflictError
 	require.ErrorAs(t, err, &ce)
-	require.Equal(t, CodeRebaseConflict, ce.Code)
+	require.Equal(t, CodeConflicted, ce.Code)
 	require.Equal(t, []string{"wave.sh"}, ce.Conflicts)
 	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "main"))
 	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root))
-	require.NoDirExists(t, filepath.Join(p.Root, ".git", "rebase-merge"), "the rebase was aborted")
+	require.Equal(t, []string{"wave.sh"}, p.unmergedPaths(ctx()))
 	st := state(t, p, "add-wave")
-	require.Equal(t, StatusBlocked, st.Status)
-	require.Contains(t, *st.BlockedReason, "conflicts in wave.sh")
-	require.Equal(t, "apex: add-wave blocked", subjects(t, p)[0])
-	require.Empty(t, run(t, p.Root, "status", "--porcelain"))
+	require.Equal(t, StatusInProgress, st.Status, "the review is stale: in-progress, not reviewed")
+	require.Equal(t, "apex: add-wave conflicted rebasing onto main", subjects(t, p)[0])
 }
 
 // A review session may leave review.md uncommitted: archive commits it on
@@ -335,4 +360,111 @@ func TestArchive_MergedSpecOverCapIsRefused(t *testing.T) {
 	updates, conflicts := p.MergeDelta(c)
 	require.Empty(t, conflicts)
 	require.Contains(t, findingMessages(ValidateSpec("s", updates[0].content)), "split into two capabilities")
+
+	// H18: change check (and so start) finds it first.
+	fs := ClassifyFindings(p.CheckChange("add-big"))
+	var codes []string
+	for _, f := range fs {
+		codes = append(codes, f.Code)
+	}
+	require.Contains(t, codes, "change.spec-too-big")
+	require.Contains(t, findingMessages(fs), "after this change, development/specs/greeting/spec.md would be")
+	require.Contains(t, findingMessages(fs), "split the capability first")
+	commitAll(t, p, "plan: add-big")
+	_, err := p.Start(ctx(), "add-big", RunOptions{})
+	require.Equal(t, CodeCheckFailed, failCode(t, err))
+	require.Equal(t, "main", CurrentBranch(ctx(), p.Root))
+}
+
+// H15: commit.subject renders the squash subject from the change's type,
+// title and id; the project's hooks run on the squash (and only on it); a
+// hook that refuses rolls archive back with archive.hook-failed and its
+// output; the body carries the branch's own subjects and trailers.
+func TestArchive_CommitSubjectHooksAndBody(t *testing.T) {
+	files := baseFiles()
+	files["_apex/config.yaml"] = "project_name: greeter\ncommit:\n  subject: \"{type}: {title} ({id})\"\n"
+	p := fixture(t, files)
+	doc := strings.Replace(waveChange("add-wave"), "milestone: M1\n", "milestone: M1\ntype: feat\n", 1)
+	addChange(t, p, "add-wave", doc)
+	commitAll(t, p, "plan: add-wave")
+	_, err := p.Start(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	write(t, p, "wave.sh", "#!/bin/sh\necho wave\n")
+	run(t, p.Root, "add", "-A")
+	run(t, p.Root, "commit", "-q", "-m", "feat: wave\n\nCarries: goldens/wave.txt\nChange: add-wave")
+	write(t, p, "wave.sh", "#!/bin/sh\necho wave\n# tidy\n")
+	run(t, p.Root, "add", "-A")
+	run(t, p.Root, "commit", "-q", "-m", "feat: wave\n\nCarries: goldens/wave.txt\nRefs: #12")
+	_, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	write(t, p, "development/changes/add-wave/review.md", "fine\n")
+	_, err = p.Review(ctx(), "add-wave", "pass", "development/changes/add-wave/review.md")
+	require.NoError(t, err)
+	_, err = p.Accept(ctx(), "add-wave", "T2", "ann")
+	require.NoError(t, err)
+
+	// A refusing pre-commit hook: ape's own status commits skip it, the
+	// squash does not.
+	hook := filepath.Join(p.Root, ".git", "hooks", "pre-commit")
+	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\necho lint: wave.sh is untidy >&2\nexit 1\n"), 0o755))
+	mainBefore := run(t, p.Root, "rev-parse", "main")
+	_, err = p.Archive(ctx(), "add-wave", false, RunOptions{})
+	require.Equal(t, CodeHookFailed, failCode(t, err))
+	require.ErrorContains(t, err, "lint: wave.sh is untidy")
+	require.ErrorContains(t, err, "nothing was committed")
+	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "main"))
+	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root))
+	require.DirExists(t, p.ChangeDir("add-wave"))
+	clean(t, p, "a hook-refused archive")
+
+	require.NoError(t, os.WriteFile(hook, []byte("#!/bin/sh\necho ran > \"$(git rev-parse --git-dir)/hook-ran\"\n"), 0o755))
+	res, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
+	require.NoError(t, err)
+	require.True(t, res.Hooks)
+	require.FileExists(t, filepath.Join(p.Root, ".git", "hook-ran"))
+	require.Equal(t, "feat: Add wave (add-wave)", res.Subject)
+	require.Equal(t, "feat: Add wave (add-wave)", subjects(t, p)[0])
+	require.Equal(t, "- feat: wave\n\nCarries: goldens/wave.txt\nRefs: #12\nChange: add-wave", run(t, p.Root, "log", "-1", "--format=%b"))
+	require.Equal(t, "add-wave", run(t, p.Root, "log", "-1", "--format=%(trailers:key=Change,valueonly)"))
+}
+
+// commit.hooks: skip keeps --no-verify on the squash too.
+func TestArchive_CommitHooksSkip(t *testing.T) {
+	files := baseFiles()
+	files["_apex/config.yaml"] = "commit:\n  hooks: skip\n"
+	p := reviewedWaveFrom(t, files)
+	require.NoError(t, os.WriteFile(filepath.Join(p.Root, ".git", "hooks", "pre-commit"), []byte("#!/bin/sh\nexit 1\n"), 0o755))
+	res, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
+	require.NoError(t, err)
+	require.False(t, res.Hooks)
+	require.Equal(t, "Add wave", res.Subject, "the default subject is the title")
+}
+
+// D47: type: is checked against the list, and required when the subject
+// template uses {type}.
+func TestCheckChange_Type(t *testing.T) {
+	files := baseFiles()
+	files["_apex/config.yaml"] = "commit:\n  subject: \"{type}: {title}\"\n"
+	p := fixture(t, files)
+	addChange(t, p, "add-wave", waveChange("add-wave"))
+	got := findingMessages(p.CheckChange("add-wave"))
+	require.Contains(t, got, "frontmatter has no `type:`")
+	require.Equal(t, "change.no-type", ClassifyFindings(p.CheckChange("add-wave"))[0].Code)
+	addChange(t, p, "add-hug", strings.Replace(changeDoc("add-hug", "greeting", addedWave, "- T1 x — check: true"), "milestone: M1\n", "milestone: M1\ntype: feature\n", 1))
+	fs := ClassifyFindings(p.CheckChange("add-hug"))
+	require.Len(t, fs, 1)
+	require.Equal(t, "change.bad-type", fs[0].Code)
+
+	_, err := Open(writeConfig(t, "commit:\n  hooks: sometimes\n"))
+	require.ErrorContains(t, err, "commit.hooks")
+	_, err = Open(writeConfig(t, "commit:\n  subject: \"{kind}: {title}\"\n"))
+	require.ErrorContains(t, err, "commit.subject")
+}
+
+func writeConfig(t *testing.T, cfg string) string {
+	t.Helper()
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex"), 0o755))
+	require.NoError(t, os.WriteFile(ConfigPath(root), []byte(cfg), 0o644))
+	return root
 }

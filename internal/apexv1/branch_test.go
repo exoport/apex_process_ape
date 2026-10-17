@@ -162,5 +162,41 @@ func TestAbandon_AStartedChangeDeletesItsBranch(t *testing.T) {
 	require.Equal(t, StatusAbandoned, st.Status)
 	require.Equal(t, tip, st.BranchTip)
 	require.Equal(t, "main", st.BaseBranch, "the archive holds the state as the branch had it")
+	require.Equal(t, "refs/apex/abandoned/add-wave", st.TipRef, "H16: the tip stays reachable")
+	require.Equal(t, tip, run(t, p.Root, "rev-parse", "refs/apex/abandoned/add-wave"))
 	require.Empty(t, run(t, p.Root, "status", "--porcelain"))
+}
+
+// D45: the base branch checked out in another worktree. Archive and
+// abandon must switch to it, so they refuse up front with
+// git.base-checked-out naming that worktree, and write nothing.
+func TestBaseCheckedOutElsewhere(t *testing.T) {
+	p := reviewedWave(t)
+	_, err := p.Accept(ctx(), "add-wave", "T2", "ann")
+	require.NoError(t, err)
+	commitAll(t, p, "review: add-wave")
+	other := filepath.Join(t.TempDir(), "planning")
+	run(t, p.Root, "worktree", "add", "-q", other, "main")
+	mainBefore := run(t, p.Root, "rev-parse", "main")
+	head := HeadSHA(ctx(), p.Root)
+
+	_, err = p.Archive(ctx(), "add-wave", false, RunOptions{})
+	require.Equal(t, CodeBaseCheckedOut, failCode(t, err))
+	require.ErrorContains(t, err, "main is checked out in another worktree, "+other)
+	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "main"))
+	require.Equal(t, head, HeadSHA(ctx(), p.Root), "nothing was written")
+	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root))
+	require.DirExists(t, p.ChangeDir("add-wave"))
+
+	_, err = p.Abandon(ctx(), "add-wave", "dropped")
+	require.Equal(t, CodeBaseCheckedOut, failCode(t, err))
+	require.Equal(t, head, HeadSHA(ctx(), p.Root))
+	require.True(t, p.branchExists(ctx(), "change/add-wave"))
+	clean(t, p, "a refused archive and abandon")
+
+	// Freed there, archive goes through.
+	run(t, other, "switch", "-q", "--detach")
+	_, err = p.Archive(ctx(), "add-wave", false, RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, "main", CurrentBranch(ctx(), p.Root))
 }

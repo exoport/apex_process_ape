@@ -152,8 +152,8 @@ func (p *Project) milestonePaths() []string {
 	return paths
 }
 
-func (p *Project) commitMilestone(ctx context.Context, id, what string) (string, error) {
-	sha, err := p.commitRecord(ctx, "apex: "+id+" "+what, "Milestone: "+id, p.milestonePaths()...)
+func (p *Project) commitMilestone(ctx context.Context, id, what string, extra ...string) (string, error) {
+	sha, err := p.commitRecord(ctx, "apex: "+id+" "+what, "Milestone: "+id, append(p.milestonePaths(), extra...)...)
 	if err != nil {
 		return "", &FailError{Code: CodeCommitFailed, Msg: "roadmap written but its commit failed: " + err.Error() + " — fix git (identity, lock) and commit " + strings.Join(p.milestonePaths(), " ")}
 	}
@@ -170,6 +170,9 @@ func (p *Project) loadRoadmapDoc() (string, *Roadmap, error) {
 
 // NewMilestone appends a milestone to roadmap.md and returns its id.
 func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *float64, goal string) (string, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return "", err
+	}
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return "", &UsageError{Code: "usage.title", Msg: "a milestone needs a title"}
@@ -199,6 +202,9 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 
 // ApproveMilestone writes `Status: approved (by <who> <ts>)`.
 func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milestone, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(by) == "" {
 		return nil, &UsageError{Code: "usage.by", Msg: "--by names who approves"}
 	}
@@ -258,12 +264,21 @@ type GateResult struct {
 	// (or recorded the first one), and so was committed.
 	ResultChanged bool   `json:"result_changed"`
 	Commit        string `json:"commit,omitempty"`
+	// Evidence is the folder a close wrote the gate's evidence to
+	// (evidence: archive, H23).
+	Evidence string `json:"evidence,omitempty"`
+	// checks are every check the run ran, the gate command first: what
+	// the evidence is written from.
+	checks []CheckResult
 }
 
 // RunGate runs a milestone's gate and records it; the committed record
 // (and a commit `apex: <M> gate green|red`) changes only when the result
 // does.
 func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*GateResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	if err := p.refuseOnChangeBranch(ctx, "a milestone gate run"); err != nil {
 		return nil, err
 	}
@@ -314,11 +329,11 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 		checks = append(append([]PlannedCheck(nil), spec...), PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: regressionCmd})
 	}
 	results := p.RunChecks(ctx, filepath.Join(p.LogsDir(), "gate-"+id), "", checks, opt)
-	all := append([]CheckResult{gate}, results...)
-	run.StrayFiles = StrayFiles(all)
-	for i := range all {
-		if all[i].Flaky {
-			run.Flaky = append(run.Flaky, all[i].Task)
+	ran := append([]CheckResult{gate}, results...)
+	run.StrayFiles = StrayFiles(ran)
+	for i := range ran {
+		if ran[i].Flaky {
+			run.Flaky = append(run.Flaky, ran[i].Task)
 		}
 	}
 	if regressionCmd != "" {
@@ -336,7 +351,7 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	if data, err := json.MarshalIndent(run, "", "  "); err == nil {
 		_ = writeFileAtomic(p.lastGatePath(id), string(data)+"\n")
 	}
-	g := &GateResult{Milestone: id, Run: run, Status: m.Status}
+	g := &GateResult{Milestone: id, Run: run, Status: m.Status, checks: ran}
 	recs, err := p.LoadMilestoneRecords()
 	if err != nil {
 		return nil, err
@@ -367,6 +382,9 @@ func lastN(xs []string, n int) []string {
 // CloseMilestone runs the gate and, on exit 0 with no change of this
 // milestone still in flight, writes `Status: done (<ts> <sha>)`.
 func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions) (*GateResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	if err := p.refuseOnChangeBranch(ctx, "closing a milestone"); err != nil {
 		return nil, err
 	}
@@ -427,7 +445,14 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 		return nil, err
 	}
 	g.Status = MilestoneDone
-	if g.Commit, err = p.commitMilestone(ctx, id, MilestoneDone); err != nil {
+	var extra []string
+	if p.evidenceOn() {
+		if g.Evidence, err = p.writeMilestoneEvidence(id, g.checks); err != nil {
+			return g, err
+		}
+		extra = append(extra, g.Evidence)
+	}
+	if g.Commit, err = p.commitMilestone(ctx, id, MilestoneDone, extra...); err != nil {
 		return g, err
 	}
 	return g, nil

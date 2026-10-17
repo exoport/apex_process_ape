@@ -132,12 +132,20 @@ type Approval struct {
 // tip the change now sits on, Head the change branch's HEAD after it.
 // Rebased is false when the branch already held the base's commits (a
 // person rebased it) and only the baseline was re-taken.
+//
+// A rebase that conflicted (H8) records OldTipRef, the ref keeping the
+// branch's tip from before it (refs/apex/pre-rebase/<id>/<n>), and
+// Conflicts, the files left with conflict markers on the branch for
+// apex-apply to resolve; Head is then the base tip the branch was
+// recreated at.
 type Rebase struct {
-	At      string `json:"at"`
-	From    string `json:"from"`
-	To      string `json:"to"`
-	Head    string `json:"head"`
-	Rebased bool   `json:"rebased"`
+	At        string   `json:"at"`
+	From      string   `json:"from"`
+	To        string   `json:"to"`
+	Head      string   `json:"head"`
+	Rebased   bool     `json:"rebased"`
+	OldTipRef string   `json:"old_tip_ref,omitempty"`
+	Conflicts []string `json:"conflicts,omitempty"`
 }
 
 // Review is the recorded review verdict.
@@ -204,6 +212,10 @@ type State struct {
 	// BranchTip is change/<id>'s last commit when archive squash-merged
 	// it or abandon deleted it (D38).
 	BranchTip string `json:"branch_tip,omitempty"`
+	// TipRef keeps BranchTip reachable once the branch is deleted (H16):
+	// refs/apex/archive/<id> at archive, refs/apex/abandoned/<id> at
+	// abandon. Local; pushed only by the project's own policy.
+	TipRef string `json:"tip_ref,omitempty"`
 }
 
 // Active reports whether a change is in flight: started and neither

@@ -167,11 +167,15 @@ type ArchiveResult struct {
 	Specs      []SpecUpdate `json:"specs"`
 	// Commit is the one commit on the base branch: the squashed change,
 	// the delta merged into specs/ and the archive move (D38).
-	Commit     string `json:"commit"`
-	Subject    string `json:"subject,omitempty"`
+	Commit  string `json:"commit"`
+	Subject string `json:"subject,omitempty"`
+	// Hooks: the project's git hooks ran on the squash (commit.hooks).
+	Hooks      bool   `json:"hooks"`
 	BaseBranch string `json:"base_branch,omitempty"`
-	// BranchTip is change/<id>'s last commit, squashed into Commit.
+	// BranchTip is change/<id>'s last commit, squashed into Commit, and
+	// kept reachable as TipRef, refs/apex/archive/<id> (H16).
 	BranchTip string `json:"branch_tip,omitempty"`
+	TipRef    string `json:"tip_ref,omitempty"`
 	// Rebased: the base branch had moved, and archive rebased the change
 	// branch onto it.
 	Rebased bool `json:"rebased"`
@@ -185,7 +189,7 @@ type ArchiveResult struct {
 
 // Archive lands a reviewed change on its base branch (D38): it catches
 // change/<id> up with the base branch when that moved (catchUp, D40: a
-// rebase conflict blocks the change, exit 3), re-verifies when that moved
+// rebase conflict is left on the branch, exit 3 — H8), re-verifies when that moved
 // the code, then squash-merges the branch into
 // the base branch as ONE commit — subject the change's title, trailer
 // `Change: <id>` — holding the change's code, its delta merged into
@@ -193,6 +197,9 @@ type ArchiveResult struct {
 // branch. Run from the change's branch or from any other non-change
 // branch (it switches); the tree must be clean.
 func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool, opt RunOptions) (*ArchiveResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return nil, err
@@ -201,11 +208,27 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	if err != nil {
 		return nil, err
 	}
+	// Archive ends on the base branch: refused up front, before any
+	// rebase or re-verify, when another worktree holds it (D45).
+	if err := p.requireBranchFree(ctx, ci.State.BaseBranch, "archive "+id); err != nil {
+		return nil, err
+	}
+	if err := p.refuseBehindUpstream(ctx, ci.State.BaseBranch, "archive "+id); err != nil {
+		return nil, err
+	}
 	if ci, err = p.enterChangeBranch(ctx, ci); err != nil {
 		return nil, err
 	}
 	base := ci.State.BaseBranch
 	res := &ArchiveResult{ID: id, BaseBranch: base}
+	// The journal (H28): what a crash from here on is rolled back to. Any
+	// return — success, a refusal, a conflict laid out — removes it.
+	baseSHA, _ := git(ctx, p.Root, "rev-parse", "--verify", "--quiet", "refs/heads/"+base)
+	j := &ArchiveJournal{ID: id, Base: base, BaseSHA: baseSHA, Branch: ChangeBranch(id), BranchTip: HeadSHA(ctx, p.Root), Step: JournalRebase}
+	if err := p.writeJournal(j); err != nil {
+		return res, err
+	}
+	defer p.removeJournal()
 
 	// The review judged the change's own code: refused when that moved
 	// since, judged before the rebase brings the base's code in.
@@ -232,8 +255,10 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 		res.AllowPendingHuman, res.PendingHuman = true, pending
 	}
 	res.ArchivedTo, res.Specs = p.Rel(dest), updates
-	res.Subject = archiveSubject(ci.Doc, id)
-	return res, p.squashOntoBase(ctx, ci, updates, dest, pending, res)
+	cc := p.commitConfig()
+	res.Subject = archiveSubject(cc.SubjectTemplate(), ci.Doc, id)
+	res.Hooks = cc.RunHooks()
+	return res, p.squashOntoBase(ctx, ci, updates, dest, pending, res, j)
 }
 
 // archivable checks what archive needs before it touches git: a review
@@ -295,6 +320,10 @@ func (p *Project) planArchive(ci ChangeInfo) (updates []SpecUpdate, dest string,
 		return nil, "", &ConflictError{Code: "archive.base-changed", Msg: "requirements this change modifies or removes were changed by another change since it started — nothing was written; " +
 			"re-plan against the current spec and re-start (`ape change start " + id + "`)", Conflicts: fc}
 	}
+	// The subject template may have come to use {type} since start.
+	if fs := typeFindings(p.Rel(p.ChangeMD(id)), ci.Doc, p.commitConfig().SubjectTemplate()); len(fs) > 0 {
+		return nil, "", &FailError{Code: CodeCheckFailed, Msg: "change " + id + " cannot be archived with the configured commit subject — fix change.md's type: (a plan change: re-start), then archive", Findings: fs}
+	}
 	updates, conflicts := p.MergeDelta(ci.Doc)
 	if len(conflicts) > 0 {
 		return nil, "", &ConflictError{Code: CodeDeltaConflict, Msg: "the delta no longer applies to specs/ — nothing was written; re-plan the change against the current specs", Conflicts: conflicts}
@@ -318,16 +347,29 @@ func (p *Project) planArchive(ci ChangeInfo) (updates []SpecUpdate, dest string,
 // branch, writes the specs and the archive move, commits it all as ONE
 // commit and deletes the branch. Anything failing before the commit
 // leaves the base branch where it was and the change's branch checked out.
-func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []SpecUpdate, dest string, pending []string, res *ArchiveResult) error {
+func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []SpecUpdate, dest string, pending []string, res *ArchiveResult, j *ArchiveJournal) error {
 	id, base, branch := ci.ID, ci.State.BaseBranch, ChangeBranch(ci.ID)
 	tip := HeadSHA(ctx, p.Root)
+	// What the squash writes beside what git merges: all a rollback may
+	// clean (H28) — never the whole development folder, where a person's
+	// untracked files may be.
+	written := []string{p.Rel(dest)}
+	for _, u := range updates {
+		if u.Created {
+			written = append(written, u.Path)
+		}
+	}
+	j.Step, j.BranchTip, j.Written = JournalSquash, tip, written
+	if err := p.writeJournal(j); err != nil {
+		return err
+	}
 	if err := p.switchBranch(ctx, base); err != nil {
 		return err
 	}
 	baseSHA := HeadSHA(ctx, p.Root)
 	undo := func(cause error) error {
 		_, _ = git(ctx, p.Root, "reset", "-q", "--hard", baseSHA)
-		_, _ = git(ctx, p.Root, "clean", "-fdq", "--", p.DevRel)
+		p.cleanWritten(ctx, written)
 		_, _ = git(ctx, p.Root, "switch", "-q", branch)
 		if fe, ok := errors.AsType[*FailError](cause); ok {
 			fe.Msg += " (nothing was committed: " + base + " is unchanged and " + branch + " is checked out again)"
@@ -342,22 +384,23 @@ func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []S
 		return undo(err)
 	}
 	res.BranchTip = tip
-	if _, err := git(ctx, p.Root, "commit", "--no-verify", "-q", "-m", res.Subject+"\n\nChange: "+id+"\n"); err != nil {
-		return undo(err)
+	msg := p.squashMessage(ctx, res.Subject, base, branch, id)
+	if out, err := p.commitSquash(ctx, msg, res.Hooks); err != nil {
+		if res.Hooks && p.hasCommitHooks(ctx) {
+			return undo(&FailError{Code: CodeHookFailed, Msg: "a git hook refused the squash commit on " + base + ": " + strings.Join(lastLines(out, 15), " | ") +
+				" — fix what it reports on " + branch + " (commit there, verify), then archive again; or set commit.hooks: skip in _apex/config.yaml"})
+		}
+		return undo(fmt.Errorf("%w: %s", err, strings.TrimSpace(out)))
 	}
 	res.Commit = HeadSHA(ctx, p.Root)
+	if err := p.keepTip(ctx, archiveRef(id), tip, "archived as "+short(res.Commit)+" on "+base, branch); err != nil {
+		return err
+	}
+	res.TipRef = archiveRef(id)
 	if _, err := git(ctx, p.Root, "branch", "-q", "-D", branch); err != nil {
 		return &FailError{Code: CodeBranchFailed, Msg: "archived as " + short(res.Commit) + " on " + base + ", but deleting " + branch + " failed: " + err.Error() + " — `git branch -D " + branch + "`"}
 	}
 	return nil
-}
-
-// archiveSubject is the squash commit's subject: the change's title.
-func archiveSubject(c *Change, id string) string {
-	if t := strings.TrimSpace(c.Title); t != "" {
-		return t
-	}
-	return titleFromSlug(id)
 }
 
 // writeArchive applies the delta to specs/, moves the change folder to
@@ -385,11 +428,17 @@ func (p *Project) writeArchive(ctx context.Context, id string, st *State, update
 	st.ArchivedAt = Stamp()
 	st.ArchivedTo = p.Rel(dest)
 	st.BranchTip = tip
+	st.TipRef = archiveRef(id)
 	if len(pending) > 0 {
 		st.AllowPendingHuman = true
 	}
 	if err := SaveState(filepath.Join(dest, "state.json"), st); err != nil {
 		return err
+	}
+	if p.evidenceOn() && st.Verify != nil {
+		if _, err := p.writeEvidence(filepath.Join(dest, "evidence"), st.Verify.Results, nil); err != nil {
+			return err
+		}
 	}
 	_, err := git(ctx, p.Root, "add", "-A", "--", p.DevRel)
 	return err
@@ -401,8 +450,10 @@ type AbandonResult struct {
 	ArchivedTo string `json:"archived_to"`
 	Reason     string `json:"reason"`
 	Commit     string `json:"commit"`
-	// BranchTip is the deleted change/<id>'s last commit (D38).
+	// BranchTip is the deleted change/<id>'s last commit (D38), kept
+	// reachable as TipRef (H16).
 	BranchTip string `json:"branch_tip,omitempty"`
+	TipRef    string `json:"tip_ref,omitempty"`
 }
 
 // Abandon moves a change to the archive as abandoned, merging nothing,
@@ -411,6 +462,9 @@ type AbandonResult struct {
 // as branch_tip (D38). The archived folder holds the change's files as
 // its branch last had them.
 func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return nil, &UsageError{Code: "usage.reason", Msg: "--reason is required: why the change is dropped, and what (if anything) replaces it"}
@@ -447,10 +501,13 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 	st.ArchivedAt = Stamp()
 	st.ArchivedTo = p.Rel(dest)
 	st.BranchTip = tip
+	if tip != "" {
+		st.TipRef = abandonedRef(id)
+	}
 	if err := SaveState(filepath.Join(dest, "state.json"), st); err != nil {
 		return nil, err
 	}
-	res := &AbandonResult{ID: id, ArchivedTo: p.Rel(dest), Reason: reason, BranchTip: tip}
+	res := &AbandonResult{ID: id, ArchivedTo: p.Rel(dest), Reason: reason, BranchTip: tip, TipRef: st.TipRef}
 	if !inGit {
 		return res, nil
 	}
@@ -464,6 +521,9 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 	}
 	res.Commit = sha
 	if tip != "" {
+		if err := p.keepTip(ctx, abandonedRef(id), tip, "abandoned", branch); err != nil {
+			return res, err
+		}
 		if _, err := git(ctx, p.Root, "branch", "-q", "-D", branch); err != nil {
 			return res, &FailError{Code: CodeBranchFailed, Msg: "abandoned, but deleting " + branch + " failed: " + err.Error() + " — `git branch -D " + branch + "`"}
 		}
@@ -485,6 +545,11 @@ func (p *Project) leaveChangeBranch(ctx context.Context, ci ChangeInfo) (ChangeI
 	if !p.branchExists(ctx, branch) {
 		return ci, "", nil
 	}
+	if base := ci.State.BaseBranch; cur == branch && base != "" {
+		if err := p.requireBranchFree(ctx, base, "abandon "+id); err != nil {
+			return ci, "", err
+		}
+	}
 	if err := p.commitChangeFolder(ctx, id, "abandon"); err != nil {
 		return ci, "", err
 	}
@@ -504,6 +569,23 @@ func (p *Project) leaveChangeBranch(ctx context.Context, ci ChangeInfo) (ChangeI
 	}
 	ci, err := checkLoaded(p.loadChange(id))
 	return ci, tip, err
+}
+
+// archiveRef and abandonedRef keep an archived or abandoned change's
+// branch tip reachable after its branch is deleted (H16): the archived
+// state.json's branch_tip, verify and review shas would otherwise be
+// pruned by git gc. Local refs, outside refs/heads and refs/tags.
+func archiveRef(id string) string   { return "refs/apex/archive/" + id }
+func abandonedRef(id string) string { return "refs/apex/abandoned/" + id }
+
+// keepTip points ref at tip before branch is deleted; done says what was
+// already done, for the message when it fails (the branch is then kept).
+func (p *Project) keepTip(ctx context.Context, ref, tip, done, branch string) error {
+	if _, err := git(ctx, p.Root, "update-ref", ref, tip); err != nil {
+		return &FailError{Code: CodeBranchFailed, Msg: done + ", but keeping " + branch + "'s tip as " + ref + " failed: " + err.Error() +
+			" — `git update-ref " + ref + " " + tip + "`, then `git branch -D " + branch + "`"}
+	}
+	return nil
 }
 
 func failingNames(v *VerifyResult) string {

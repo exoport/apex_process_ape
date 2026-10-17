@@ -52,22 +52,32 @@ person outside the roadmap (apex-change with a request). It is approved on its o
 ` + "`ape change approve <id> --by <who>`" + ` (on the base branch), instead of through a milestone,
 and otherwise lives like any change: its branch, baseline, checks, a review in a separate
 session, the delta merged at archive. It counts toward no milestone gate, no milestone's
-regression baseline, and no milestone's spend or budget. An approved fix runs ahead of
-milestone work, at the orchestrator's next change boundary, never in parallel; with no
-milestone run active, ` + "`ape task apex-orchestrator --args <id>`" + ` runs it alone (urgent:
-` + "`ape run stop`" + ` the milestone run, run the fix, restart it). ` + "`ape status`" + ` lists approved
-fixes first.
+regression baseline, and no milestone's spend or budget. Fixes form a queue: planned and
+approved between runs (or ` + "`ape run stop`" + `, plan, approve, restart), never overlapping a
+run (D45). An approved fix runs ahead of milestone work, at the orchestrator's next change
+boundary; with no milestone run active, ` + "`ape task apex-orchestrator --args <id>`" + ` runs it
+alone. ` + "`ape status`" + ` lists approved fixes first.
+
+One checkout, one operator (D45): archive and abandon switch to the base branch, so they
+refuse when another worktree has it checked out (exit 1, git.base-checked-out, naming that
+worktree; nothing written) — an environment problem: the orchestrator stops, it does not
+re-plan.
 
 Resume after the base moved (D40): whenever a started change's base branch has moved
 ahead of its base_sha, ape — at ` + "`ape change start`" + ` on a change that has its branch, at
 verify and at archive — rebases change/<id> onto the base, re-runs the baseline at the new
-base tip, and marks the old verify stale. A conflict blocks the change with the files
-(exit 3, change.rebase-conflict). The model never rebases or merges on a change branch
+base tip, and marks the old verify stale. A conflict is left on change/<id> for
+apex-apply (H8): markers in the tree, HEAD on the branch, the change in-progress (exit 3,
+change.conflicted, the files listed); apex-apply resolves them, ` + "`git add`" + `s and commits, verify
+refuses until it has (change.unresolved-conflict), and the review runs again. When
+apex-apply cannot resolve them it blocks the change, and the orchestrator re-plans it
+(D43). The model never rebases, merges or cherry-picks on a change branch
 (` + "`ape hook pre-tool`" + ` denies it).
 
 Exit codes for every subcommand: 0 ok · 1 check failed (one-line remediation) · 2 usage ·
-3 conflict (another change claims the same requirement, the delta no longer applies, or
-the change does not rebase onto its moved base; nothing written but the block).`,
+3 conflict (another change claims the same requirement or the delta no longer applies:
+nothing written; or the change does not rebase onto its moved base: the conflict is left
+on its branch).`,
 	}
 	cmd.AddCommand(
 		newChangeNewCmd(), newChangeCheckCmd(), newChangeApproveCmd(), newChangeStartCmd(), newChangeVerifyCmd(),
@@ -174,9 +184,15 @@ func newChangeCheckCmd() *cobra.Command {
 
   - frontmatter id = folder, milestone in roadmap.md (or "none": a fix, D40, approved
     with `+"`ape change approve`"+`), touches non-empty kebab slugs, decisions exist in
-    decisions/, paths are valid globs
+    decisions/, paths are valid globs; type: (the archive commit's {type}, D47) one of
+    feat, fix, perf, refactor, docs, test, build, ci, chore — required only when
+    _apex/config.yaml commit.subject uses {type} (change.no-type; change.bad-type); any
+    other key must start with x-
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
   - change.md ≤ 8 KB and design.md ≤ 8 KB ("split this change")
+  - every spec the delta touches stays ≤ 20 KB once merged — the in-memory merge
+    `+"`ape change diff`"+` shows and archive makes (else change.spec-too-big: split the
+    capability first; start runs this check too, so it fails before any work, H18)
   - ## Delta: "### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>" blocks, or
     the single line "none — <reason>". The capability must be in touches. ADDED names must
     not exist in specs/<capability>/spec.md yet; MODIFIED/REMOVED must name an existing
@@ -234,9 +250,10 @@ in place of an approved milestone (else exit 1, change.not-approved).
     ## Why and ## Notes) changed since is refused at start until approved again
   - re-approving the same plan is a no-op (exit 0, JSON "already": true, nothing written)
 
-An approved fix may be created at any moment. It runs ahead of milestone work, at the
-orchestrator's next change boundary, never in parallel with it; with no milestone run
-active, `+"`ape task apex-orchestrator --args <id>`"+` runs it alone. `+"`ape status`"+` lists approved
+Fixes form a queue: planned and approved between runs (or `+"`ape run stop`"+`, plan, approve,
+restart), never overlapping a run (D45). An approved fix runs ahead of milestone work, at
+the orchestrator's next change boundary; with no milestone run active,
+`+"`ape task apex-orchestrator --args <id>`"+` runs it alone. `+"`ape status`"+` lists approved
 fixes first (JSON "fixes", changes[].lane "fix", changes[].approved) and points next at the
 first. A fix counts toward no milestone gate and no milestone's spend or budget.
 
@@ -279,7 +296,9 @@ func newChangeStartCmd() *cobra.Command {
      tree must be clean (ignored files aside), HEAD on a branch (not detached, not another
      change's change/<other>); records that branch as base_branch, and base_sha (HEAD)
      and started_at (both kept when resuming a blocked change). A refused start leaves no
-     branch and HEAD where it was.
+     branch and HEAD where it was. Refused while that branch is behind its upstream
+     (exit 1, base.behind-upstream: pull; compared with the local remote-tracking ref,
+     never fetched; no upstream, no check — D45: one operator per checkout, local trunk)
   4. runs every check verify will run once, as the baseline (which were already green):
      the command tasks and the effective spec's scenario checks of the capabilities the
      change touches (plus any scenario sharing a task's command — see ape change verify
@@ -308,12 +327,24 @@ A blocked change is re-planned on its branch (change.md there), then started aga
 Resume after the base moved (D40): start on a change that has its branch first checks
 whether the base branch moved ahead of base_sha (a fix or another change landed there).
 If so ape catches the change up — the one path start, verify and archive share:
+  - start only: refused while the base branch is behind its upstream (exit 1,
+    base.behind-upstream: pull)
   - the tree must be clean (uncommitted files in the change's own folder are committed on
     its branch; anything else: exit 1, tree.dirty)
-  - `+"`git rebase <base_branch>`"+` on change/<id>; a conflict aborts the rebase and blocks the
-    change naming the files (committed on its branch): exit 3, change.rebase-conflict,
-    nothing else written — the orchestrator re-plans (D43): it abandons the change and
-    apex-change plans a replacement from the current base, the conflicting files as hint
+  - `+"`git rebase <base_branch>`"+` on change/<id>. A conflict (H8, D47 Q3) aborts the rebase;
+    ape takes the baseline below at the base tip, keeps the old tip as
+    refs/apex/pre-rebase/<id>/<n>, recreates change/<id> at the base tip with the change's
+    folder as the old tip had it and the state recorded (status in-progress, the verify
+    stale, rebases[] with old_tip_ref and conflicts), committed as "apex: <id> conflicted
+    rebasing onto <base>"; then it cherry-picks the branch's net diff (merge-base..old
+    tip) --no-commit, which leaves conflict markers and unmerged paths in the tree with
+    HEAD on change/<id>: exit 3, change.conflicted, the files listed. apex-apply resolves
+    them (edit, `+"`git add`"+`, commit with trailer "Change: <id>"); verify refuses until no
+    unmerged path or marker remains (exit 1, change.unresolved-conflict); verify and the
+    review then run again. When apex-apply cannot resolve them it blocks the change, and
+    the orchestrator re-plans it (D43). A net diff that applies cleanly after all is
+    committed as "apex: <id> re-applied onto <base> as one commit", and the catch-up ends
+    as a clean one
   - the baseline (task checks, effective-spec scenarios, regression command) is re-run
     at the NEW BASE TIP, in place — the checkout detached there, then switched back, so
     ignored files (dependencies, build caches) are present as usual — never at the
@@ -336,8 +367,8 @@ since start, or when the regression command has no baseline for it (configured o
 since start); otherwise it is refused.
 
 Exit codes: 0 started (or resumed) · 1 check red, milestone (or fix) not approved, a vacuous
-task check, wrong status, dirty tree, detached HEAD, HEAD on another change's branch, or git
-failed · 2 usage ·
+task check, wrong status, dirty tree, detached HEAD, HEAD on another change's branch, the base
+behind its upstream, or git failed · 2 usage ·
 3 requirement conflict with another active change, or the change does not rebase onto
 its moved base.`,
 		"  ape change start add-tenant-delete",
@@ -415,11 +446,13 @@ The working tree must hold no uncommitted changes outside development/ — commi
 (trailer "Change: <id>"): a verify belongs to a sha. HEAD must be on the change's branch,
 change/<id> (D38; else exit 1, code change.wrong-branch).
 When the base branch moved ahead of base_sha, verify first catches the change up exactly
-as `+"`ape change start --help`"+` describes (D40): rebase onto the base (conflict: blocked,
-exit 3, change.rebase-conflict), the baseline re-run at the new base tip, the old verify
+as `+"`ape change start --help`"+` describes (D40): rebase onto the base (a conflict is left on
+the branch: exit 3, change.conflicted), the baseline re-run at the new base tip, the old verify
 marked stale, a verified/reviewed change back to in-progress, "apex: <id> rebased onto
 <base>" committed; then it verifies the rebased code (JSON "catch_up"). A reviewed change
-caught up here needs a new review.
+caught up here needs a new review. Refused while a conflicted catch-up is unresolved —
+unmerged paths, or conflict markers in a file the rebase conflicted in (exit 1,
+change.unresolved-conflict: resolve, `+"`git add`"+`, commit).
 
 All checks exit 0 → status verified (a reviewed change whose code has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last
@@ -442,8 +475,8 @@ Refused while change.md differs from the plan frozen at start outside ## Why and
 as pending.
 
 Exit codes: 0 all command checks green · 1 a check is red (the attempts cap reached
-included), uncommitted code, or wrong status · 2 usage · 3 the change does not rebase onto
-its moved base (blocked).`,
+included), uncommitted code, an unresolved conflict, or wrong status · 2 usage · 3 the change
+does not rebase onto its moved base (the conflict is left on its branch).`,
 		"  ape change verify add-tenant-delete",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -716,11 +749,12 @@ base_branch — or from any other non-change branch; the tree must be clean (unc
 files inside the change's own folder are committed on its branch first). The archived
 folder holds the change's files as its branch last had them, the move is committed on the
 base branch, change/<id> is deleted and its last commit recorded as branch_tip in the
-archived state.json. None of the change's code reaches the base branch. A draft never
+archived state.json, kept reachable as refs/apex/abandoned/<id> (tip_ref; H16, local). None of the change's code reaches the base branch. A draft never
 started (no branch) is abandoned on the branch HEAD is on, as before.
 
 Exit codes: 0 abandoned · 1 no such change, archived, HEAD on another change's branch,
-dirty tree, or git failed · 2 usage · 3 the archive folder already exists.`,
+dirty tree, the base branch checked out in another worktree (git.base-checked-out), or git
+failed · 2 usage · 3 the archive folder already exists.`,
 		`  ape change abandon add-tenant-delete --reason "replaced by split-tenant-delete"`,
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -757,12 +791,14 @@ func newChangeArchiveCmd() *cobra.Command {
      change/<id>); the tree must be clean — uncommitted files inside the change's own
      folder (review.md a review left) are first committed on change/<id> as
      "apex: <id> notes"; anything else refuses (code tree.dirty)
-  3. refused if code changed on change/<id> since the review (review.stale)
+  3. refused if code changed on change/<id> since the review (review.stale); refused up
+     front while the base branch is behind its upstream (base.behind-upstream: pull;
+     the local remote-tracking ref, never fetched — D45)
   4. when the base branch moved ahead of base_sha, catches the change up — the one path
      start and verify share (D40, `+"`ape change start --help`"+`): rebases change/<id> onto the
-     base (on a conflict the rebase is aborted, the change is blocked naming the
-     conflicting files, committed on its branch, and archive exits 3,
-     change.rebase-conflict — nothing reaches the base), re-runs the baseline at the new
+     base (on a conflict nothing reaches the base: the conflict is left on change/<id>
+     for apex-apply, the change back to in-progress, and archive exits 3,
+     change.conflicted), re-runs the baseline at the new
      base tip and marks the verify stale; here the change stays reviewed
   5. re-runs verify when the code moved since it or it is stale — the base had moved (red
      → the change goes back to in-progress on its branch, exit 1, counted as an attempt;
@@ -775,16 +811,41 @@ func newChangeArchiveCmd() *cobra.Command {
      reaches the base branch
   7. switches to the base branch, `+"`git merge --squash change/<id>`"+`, writes the specs,
      moves the folder to development/archive/<YYYY-MM-DD>-<id>/ (status archived,
-     branch_tip = change/<id>'s last commit) and commits everything as ONE commit —
-     subject the change's # title, trailer "Change: <id>" (hooks skipped: every code
-     commit on the branch already ran them); then deletes change/<id>. If anything fails
+     branch_tip = change/<id>'s last commit) — with "evidence: archive" in
+     _apex/config.yaml (H23; default off) also its evidence/: one file per check of the
+     final verify (command, exit, duration, output sha256, and the output from the log,
+     capped at 256 KB: head and tail kept, the full log named by path and sha256) — and
+     commits everything as ONE commit (H15):
+     subject from _apex/config.yaml commit.subject — placeholders {type} (change.md's
+     type:), {title} (its # title) and {id}; default "{title}" — and a body holding the
+     branch commits' own subjects (not ape's "apex:" ones) and every trailer of theirs but
+     "Change:", deduplicated, then "Change: <id>". The project's git hooks run on this
+     commit (commit.hooks: run, the default; skip opts out) — ape's status commits keep
+     skipping them. A hook that refuses rolls archive back: exit 1, archive.hook-failed,
+     the hook output's tail in the message. Then keeps change/<id>'s tip as
+     refs/apex/archive/<id> (H16: recorded as tip_ref in the archived state.json, so
+     branch_tip and the verify and review shas survive git gc; local, never pushed by
+     ape) and deletes change/<id>. If anything fails
      on the base branch, it is reset to where it was and change/<id> checked out again.
 
 The base branch gets exactly one commit per archived change; ape's status commits stay on
 the change branch, squashed away.
 
-Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review,
-pending human-review, dirty tree, no change branch, or git failed · 2 usage · 3 the
+A crash mid-archive (H28): archive keeps a journal, _apex/state/archive-journal.json
+(ignored; base, its sha before, the branch and its tip, the step), from before the
+catch-up until it returns. A journal that outlives its process is rolled back by the next
+v1 command that writes (start, verify, review, accept, block, archive, abandon, change /
+milestone / decision new, approve, gate, close, decision accept): the base branch back at
+its pre-archive sha (a squash commit undone, a half squash dropped — cleaning only the
+paths archive writes), change/<id> at its recorded tip and checked out. That command then
+exits 1, archive.interrupted (retry), saying what was rolled back; archive again.
+`+"`ape status`"+` reports the journal (JSON "archive_journal") and changes nothing.
+
+Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review, a
+git hook refused the squash,
+pending human-review, dirty tree, no change branch, the base behind its upstream
+(base.behind-upstream), the base branch checked out in another
+worktree (git.base-checked-out: stop, do not re-plan), or git failed · 2 usage · 3 the
 rebase conflicts or the delta no longer applies.`,
 		"  ape change archive add-tenant-delete",
 		&f,

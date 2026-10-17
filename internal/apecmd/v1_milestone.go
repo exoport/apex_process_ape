@@ -209,6 +209,13 @@ not newly red against the milestone's earliest baseline for it — with no basel
 by ` + "`ape milestone gate`" + `. A milestone is done when this command exits 0 — never because
 anyone says so.
 
+With "evidence: archive" in _apex/config.yaml (H23; default off), a green close writes the
+gate run's evidence to development/archive/milestones/<M>/evidence/ — one file per check
+(the gate command, every spec scenario, the regression command): command, exit, duration,
+output sha256 and the output, capped at 256 KB (head and tail kept, the full log named by
+path and sha256) — plus accept-red.json when milestones.json records an accept_red for
+<M>; committed with the close record (JSON "evidence").
+
 Exit codes: 0 done · 1 gate red, changes in flight, not approved, or HEAD on a change
 branch · 2 usage.`,
 		Example: "  ape milestone close M1",

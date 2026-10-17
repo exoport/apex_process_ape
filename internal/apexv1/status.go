@@ -102,11 +102,26 @@ type StatusReport struct {
 	// when unset): the changelog and user docs a user-visible change
 	// updates, for apex-change and apex-review to read.
 	Docs DocsConfig `json:"docs"`
+	// BaseUpstream is the base branch (the checked-out branch, or the
+	// base of the change whose branch is checked out) against its
+	// upstream, from the local remote-tracking ref; null when it has none
+	// (H6, D45).
+	BaseUpstream *BaseUpstream `json:"base_upstream"`
+	// OutsideFlow are the base branch's commits since the last archive
+	// squash (else the v1 epoch) that touch code with no `Change:` trailer
+	// and no `apex:` subject: work that bypassed the change flow (H7).
+	// Shown, never failed.
+	OutsideFlow []OutsideFlow `json:"outside_flow"`
+	// ArchiveJournal is an archive in flight, or one that crashed (H28):
+	// the next writing command rolls a crashed one back. Status only
+	// reports it. ArchiveRunning: its process is still alive.
+	ArchiveJournal *ArchiveJournal `json:"archive_journal,omitempty"`
+	ArchiveRunning bool            `json:"archive_running,omitempty"`
 }
 
 // Status builds the report.
 func (p *Project) Status() *StatusReport {
-	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Fixes: []string{}}
+	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Fixes: []string{}, OutsideFlow: []OutsideFlow{}}
 	cfg, cfgErr := LoadConfig(p.Root)
 	if cfgErr == nil && cfg.ProjectName != "" {
 		r.Project = cfg.ProjectName
@@ -207,8 +222,27 @@ func (p *Project) Status() *StatusReport {
 		}
 	}
 	r.Archived = len(p.ArchivedIDs())
+	base := p.statusBase(ctx, r.Branch)
+	r.BaseUpstream = p.upstreamOf(ctx, base)
+	r.OutsideFlow = p.outsideFlow(ctx, base)
+	if j := p.LoadArchiveJournal(); j != nil {
+		r.ArchiveJournal, r.ArchiveRunning = j, j.Running()
+	}
 	r.Next = nextStep(r)
 	return r
+}
+
+// statusBase is the base branch status measures: the checked-out branch,
+// or, on a change's branch, the base it records; "" when detached.
+func (p *Project) statusBase(ctx context.Context, branch string) string {
+	id := ChangeOfBranch(branch)
+	if id == "" {
+		return branch
+	}
+	if st, err := LoadState(p.StateFile(id)); err == nil {
+		return st.BaseBranch
+	}
+	return ""
 }
 
 // runnableFix reports an approved fix that is neither blocked nor
@@ -351,6 +385,14 @@ func (r *StatusReport) Brief() string {
 	if r.Branch != "" {
 		title += " (on " + r.Branch + ")"
 	}
+	// On the title line, so the brief keeps its 25-line cap.
+	if j := r.ArchiveJournal; j != nil {
+		if r.ArchiveRunning {
+			title += fmt.Sprintf(" — archive of %s in progress (pid %d, %s step)", j.ID, j.PID, j.Step)
+		} else {
+			title += fmt.Sprintf(" — archive of %s INTERRUPTED at its %s step: the next ape command that writes rolls it back (archive.interrupted), then archive again", j.ID, j.Step)
+		}
+	}
 	b = append(b, title)
 	if !r.Initialized {
 		b = append(b, "not an APEX v1 project yet: run `ape project init`")
@@ -411,6 +453,9 @@ groups:
 	}
 	if line := r.preExistingRedLine(); line != "" {
 		b = append(b, line)
+	}
+	if u := r.BaseUpstream; u != nil && u.Behind > 0 {
+		b = append(b, truncate("Base: "+u.Describe(), briefLineMax))
 	}
 	b = append(b, fmt.Sprintf("Spend: $%.2f over %d runs", r.Spend.TotalUSD, r.Spend.Runs), "Next: "+r.Next)
 	return strings.Join(b, "\n") + "\n"

@@ -82,6 +82,13 @@ type Config struct {
 	// Docs names the changelog and user docs a user-visible change
 	// updates (H21).
 	Docs DocsConfig `yaml:"docs"`
+	// Evidence is "archive" to commit the final check outputs with the
+	// archive and the milestone close (H23); "off" (the default) keeps them
+	// in the ignored logs only.
+	Evidence EvidenceMode `yaml:"evidence"`
+	// Commit shapes the archive's squash commit (H15): its subject
+	// template and whether the project's git hooks run on it.
+	Commit CommitConfig `yaml:"commit"`
 }
 
 // SkillModel is one models.<skill> entry.

@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 )
 
@@ -203,8 +204,64 @@ func (p *Project) commitChangeFolder(ctx context.Context, id, what string) error
 	return nil
 }
 
+// CodeBaseCheckedOut: ape must switch to a branch — the base branch, to
+// archive or abandon onto it — that another worktree of the repository has
+// checked out, which git refuses (D45). An environment problem, not the
+// change's: the orchestrator stops on it and does not re-plan.
+const CodeBaseCheckedOut = "git.base-checked-out"
+
+// worktreeHolding is the path of another worktree of the repository that
+// has branch checked out, "" when none does. Read from `git worktree list
+// --porcelain`, not from git's error text.
+func (p *Project) worktreeHolding(ctx context.Context, branch string) string {
+	out, err := git(ctx, p.Root, "worktree", "list", "--porcelain")
+	if err != nil {
+		return ""
+	}
+	self, _ := git(ctx, p.Root, "rev-parse", "--show-toplevel")
+	self = canonicalPath(self)
+	for block := range strings.SplitSeq(out, "\n\n") {
+		var path, ref string
+		for line := range strings.SplitSeq(block, "\n") {
+			if v, ok := strings.CutPrefix(line, "worktree "); ok {
+				path = v
+			}
+			if v, ok := strings.CutPrefix(line, "branch "); ok {
+				ref = v
+			}
+		}
+		if ref == "refs/heads/"+branch && path != "" && canonicalPath(path) != self {
+			return path
+		}
+	}
+	return ""
+}
+
+// canonicalPath resolves symlinks (a temp dir under a symlinked /tmp), so
+// two spellings of one worktree compare equal.
+func canonicalPath(path string) string {
+	if r, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(r)
+	}
+	return filepath.Clean(path)
+}
+
+// requireBranchFree refuses, before anything is written, a command that
+// must switch to branch while another worktree has it checked out.
+func (p *Project) requireBranchFree(ctx context.Context, branch, what string) error {
+	path := p.worktreeHolding(ctx, branch)
+	if path == "" {
+		return nil
+	}
+	return &FailError{Code: CodeBaseCheckedOut, Msg: branch + " is checked out in another worktree, " + path + ", and " + what + " must switch to it — nothing was written; " +
+		"switch that worktree off it (`git -C " + path + " switch --detach`) and run this again. An environment problem, not the change's: stop, do not re-plan"}
+}
+
 // switchBranch checks out an existing branch.
 func (p *Project) switchBranch(ctx context.Context, branch string) error {
+	if err := p.requireBranchFree(ctx, branch, "ape"); err != nil {
+		return err
+	}
 	if _, err := git(ctx, p.Root, "switch", "-q", branch); err != nil {
 		return &FailError{Code: CodeBranchFailed, Msg: "cannot switch to " + branch + ": " + err.Error() + " — fix git and run the command again"}
 	}

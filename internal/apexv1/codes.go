@@ -16,6 +16,9 @@ const (
 	CodeChangeBranch = "branch.change-branch"
 	CodeBranchFailed = "git.branch-failed"
 	CodeCheckFailed  = "change.check-failed"
+	// CodeHookFailed: a project git hook refused the archive's squash
+	// commit (H15).
+	CodeHookFailed = "archive.hook-failed"
 )
 
 // CodeDoc documents one diagnostic code.
@@ -93,6 +96,10 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.no-branch", 1, "person", "archive: the change has no change/<id> branch with a recorded base_branch (started before D38)"},
 	{"change.wrong-branch", 1, "stop", "the command records a started change's state, and HEAD is not on its branch change/<id> (git switch change/<id>), or is on another change's branch"},
 	{"git.branch-failed", 1, "stop", "creating, switching to, rebasing or deleting a branch failed, or the base branch is missing"},
+	{CodeBehindUpstream, 1, "person", "start (a new start, or a re-entry that catches up) and archive: the base branch is behind its upstream (the local remote-tracking ref; ape never fetches) — a person pulls (D45: one operator per checkout, local trunk)"},
+	{CodeBaseCheckedOut, 1, "stop", "archive, abandon (or any command that switches branches): the branch ape must switch to — the base branch — is checked out in another worktree (the message names its path); an environment problem: stop, do not re-plan (D45)"},
+	{CodeArchiveInterrupted, 1, "retry", "a writing command found the journal of an archive that crashed (_apex/state/archive-journal.json) and rolled the checkout back to it — the base at its pre-archive sha, change/<id> at its recorded tip, checked out; the message says what was undone; archive again, then the command (H28)"},
+	{CodeHookFailed, 1, "apply", "archive: a project git hook (pre-commit, commit-msg; commit.hooks: run, the default) refused the squash commit; archive rolled back (the base unchanged, change/<id> checked out again) and the message carries the hook output's tail — fix it on the branch, verify, archive again"},
 	{"archive.spec-invalid", 1, "replan", "archive: the merged spec would fail project check (e.g. over 20 KB)"},
 	{"change.archived", 1, "stop", "the change is already archived"},
 	{"change.attempts-exceeded", 1, "replan", "verify: the red verify that reaches limits.attempts since the change started; the change is now blocked"},
@@ -147,10 +154,11 @@ var DiagnosticCodes = []CodeDoc{
 	{"verify.missing", 1, "apply", "no green verify to review"},
 	{"verify.red", 1, "apply", "a task check, an effective-spec scenario check, or a newly red regression command is red"},
 	{"verify.stale", 1, "apply", "code changed since the last verify"},
+	{CodeUnresolvedConflict, 1, "apply", "verify: a conflicted catch-up (change.conflicted) is not resolved yet — unmerged paths in the index, or conflict markers left in a file the rebase conflicted in; apex-apply resolves, `git add`s and commits (H8)"},
 	{"error.unclassified", 1, "stop", "a failure without a code (a bug: report it)"},
 
 	// conflicts (exit 3)
-	{CodeRebaseConflict, 3, "replan", "start, verify, archive: the base branch moved and change/<id> does not rebase onto it (D40); the rebase was aborted, nothing else written, the change is blocked with the conflicting files; the orchestrator abandons it and apex-change re-plans a replacement from the current base (D43)"},
+	{CodeConflicted, 3, "apply", "start, verify, archive: the base branch moved and change/<id> does not rebase onto it (D40, H8); ape aborted the rebase, kept the old tip under refs/apex/pre-rebase/<id>/<n>, recreated change/<id> at the base tip and cherry-picked the branch's net diff --no-commit: conflict markers and unmerged paths are in the tree, HEAD on the branch, the change in-progress (verify stale, review to run again); apex-apply resolves and commits — when it cannot, it blocks the change and the orchestrator re-plans (D43)"},
 	{"archive.base-changed", 3, "replan", "a requirement this change modifies or removes changed in the spec since start (another branch); nothing written"},
 	{CodeDeltaConflict, 3, "replan", "the delta no longer applies to the current specs; nothing written"},
 	{CodeFolderExists, 3, "stop", "the archive folder already exists; nothing written"},
@@ -209,6 +217,9 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.design-too-big", 1, "replan", "design.md over 8 KB"},
 	{"change.frontmatter", 1, "replan", "change.md frontmatter is missing, unparseable, or its id/milestone/touches are wrong"},
 	{"change.unknown-key", 1, "replan", "change.md frontmatter has a key v1 does not define (own keys: prefix x-)"},
+	{"change.spec-too-big", 1, "replan", "change check / start: merging the delta would take a spec over the 20 KB cap — split the capability first (H18)"},
+	{"change.no-type", 1, "replan", "change.md has no type: and _apex/config.yaml commit.subject uses {type} (D47)"},
+	{"change.bad-type", 1, "replan", "change.md type: is not one of feat, fix, perf, refactor, docs, test, build, ci, chore (D47)"},
 	{"change.bad-id", 1, "replan", "the change folder name is not a valid id"},
 	{"change.unknown-milestone", 1, "replan", "the change's milestone is not in roadmap.md"},
 	{"change.bad-touches", 1, "replan", "a touches entry is not kebab-case"},

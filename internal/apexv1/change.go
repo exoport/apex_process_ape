@@ -30,6 +30,9 @@ type ChangeMeta struct {
 	// Retire lists capabilities this change removes entirely: the only way
 	// a change may REMOVE a capability's last requirement (item 8, G7).
 	Retire []string `yaml:"retire"`
+	// Type is the change's commit type (D47), one of CommitTypes: the
+	// archive squash's {type}. Required only when commit.subject uses it.
+	Type string `yaml:"type"`
 }
 
 // Delta is one `### ADDED|MODIFIED|REMOVED [cap] Requirement: <name>`.
@@ -108,7 +111,7 @@ func unknownKeys(fm []byte) []string {
 // knownChangeKeys are the frontmatter keys change.md may carry; "x-*"
 // keys are the team's own (a tracker id, say) and are ignored.
 var knownChangeKeys = map[string]bool{
-	"id": true, "milestone": true, "touches": true, "paths": true, "decisions": true, "retire": true,
+	"id": true, "milestone": true, "touches": true, "paths": true, "decisions": true, "retire": true, "type": true,
 }
 
 var (

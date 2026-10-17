@@ -96,6 +96,9 @@ func (p *Project) saveDecisionRecords(r map[string]DecisionRecord) error {
 // `Supersedes: <old>` and the old one's Status becomes `superseded by
 // <new>`; both are committed together.
 func (p *Project) NewDecision(ctx context.Context, slug, title, supersedes string) (*DecisionResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	if !slugRe.MatchString(slug) {
 		return nil, &UsageError{Code: "usage.decision-slug", Msg: fmt.Sprintf("decision slug %q must be kebab-case (e.g. use-sqlite)", slug)}
 	}
@@ -179,6 +182,9 @@ func (p *Project) NewDecision(ctx context.Context, slug, title, supersedes strin
 // body it was accepted with; from then on `ape project check` refuses an
 // edit to it (supersede it instead).
 func (p *Project) AcceptDecision(ctx context.Context, id, by string) (*DecisionResult, error) {
+	if err := p.recoverArchive(ctx); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(by) == "" {
 		return nil, &UsageError{Code: "usage.by", Msg: "--by names who accepts the decision"}
 	}

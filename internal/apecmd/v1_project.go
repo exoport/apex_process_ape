@@ -32,7 +32,10 @@ func newProjectInitCmd() *cobra.Command {
                                      written: regression, models, effort, and limits —
                                      budget: enforce|off (default off; see ape task --help),
                                      attempts: N red verifies per start (default 5; see
-                                     ape change verify --help)); see "Check settings" below
+                                     ape change verify --help); commit: {subject,
+                                     hooks} for the archive's squash, and evidence:
+                                     archive|off (default off) — see ape change archive
+                                     --help); see "Check settings" below
   AGENTS.md                          the project map (skeleton)
   CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
                                      gets it appended, and nothing else
@@ -123,6 +126,10 @@ unparseable and every command refuses it):
                                      check reports a missing path (docs.missing); ape
                                      status --json carries the block as "docs"
 
+Scope (D45): v1.0: one operator per checkout, on a local trunk; PR mode comes later. Init
+says so (JSON "scope"); change start and archive refuse while the base branch is behind its
+upstream (base.behind-upstream).
+
 --brownfield adds nothing; it records in _apex/state/project.json (ignored) that the
 project existed before APEX.
 
@@ -156,7 +163,9 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 			out := struct {
 				*apexv1.InitResult
 				Plugins *apexv1.PluginSync `json:"plugins,omitempty"`
-			}{res, plugins}
+				// Scope is what v1.0 supports (D45).
+				Scope string `json:"scope"`
+			}{res, plugins, apexv1.Scope}
 			return v1Emit(cmd.OutOrStdout(), &f, out, func(w io.Writer) {
 				for _, c := range res.Created {
 					fmt.Fprintln(w, "created  "+c)
@@ -171,6 +180,7 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 					fmt.Fprintln(w, "hook     "+h)
 				}
 				fmt.Fprint(w, pluginOut.String())
+				fmt.Fprintln(w, "scope: "+apexv1.Scope)
 				fmt.Fprintln(w, "next: write development/project.md, AGENTS.md and the roadmap (apex-plan), then `ape project check`")
 			})
 		},
@@ -330,6 +340,20 @@ func newStatusCmd() *cobra.Command {
     leaves untouched, that were red when a change was baselined — for the planner to
     roadmap. A change's own task and delta checks red at baseline are normal test-first
     and never listed
+  - the base branch (the checked-out one, or the base of the change whose branch is
+    checked out) against its upstream (JSON "base_upstream": {branch, upstream, ahead,
+    behind}; null without one), from the local remote-tracking ref — ape never fetches.
+    v1.0 is one operator per checkout on a local trunk (D45): start and archive refuse
+    while the base is behind (base.behind-upstream: pull)
+  - work outside the change flow (JSON "outside_flow": [{sha, subject, files}], newest
+    first; a count line in the human output): commits on that base branch since the last
+    archive squash — else since the v1 epoch, the newest "apex: project init" or "apex:
+    lift" commit — that touch paths outside development/ and _apex/, carry no "Change:"
+    trailer and have no "apex:" subject. Shown, never failed
+  - an archive in flight or interrupted by a crash (JSON "archive_journal", with
+    "archive_running" when its process is alive; on the first line): status only reports
+    it — the next writing command rolls a crashed one back (archive.interrupted; see
+    ` + "`ape change archive --help`" + `)
   - next: what the way of working says comes next, derived from the state alone
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
@@ -373,6 +397,14 @@ func statusLong(r *apexv1.StatusReport) string {
 		for _, l := range r.Milestone.GateLast.Tail {
 			b.WriteString("  | " + l + "\n")
 		}
+	}
+	if n := len(r.OutsideFlow); n > 0 {
+		fmt.Fprintf(&b, "\nOutside the change flow: %d commit(s) on the base since the last archive touch code with no Change: trailer (newest %.7s %s; ape status --json: outside_flow)\n",
+			n, r.OutsideFlow[0].SHA, r.OutsideFlow[0].Subject)
+	}
+	if u := r.BaseUpstream; u != nil && u.Behind == 0 {
+		// Behind is in the brief already.
+		fmt.Fprintf(&b, "\nBase: %s\n", u.Describe())
 	}
 	fmt.Fprintf(&b, "\nSpend note: %s\n", r.Spend.Note)
 	return b.String()
