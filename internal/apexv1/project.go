@@ -172,6 +172,10 @@ func (p *Project) Check() []Finding {
 		missing(p.AgentsMD(), "write the project map: commands, NEVER rules, pointers")
 	} else {
 		add(ValidateAgentsMD("AGENTS.md", doc, caps.AgentsMD)...)
+		if !hasProjectContext(doc, p.DevRel) {
+			add(Finding{File: "AGENTS.md", Message: "AGENTS.md does not import " + p.DevRel + "/project.md — add the line \"" + projectContextLine(p.DevRel) +
+				"\" under its title, as plain text (not in code); `ape project init` adds it"})
+		}
 	}
 	if doc, err := readFileString(p.ClaudeMD()); err == nil {
 		if !hasAgentsImport(doc) {

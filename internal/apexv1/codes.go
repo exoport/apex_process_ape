@@ -308,5 +308,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"tools.not-installed", 1, "person", "a skill tools: names is not installed: a plugin skill whose plugin is not listed in plugins: or not installed or has no such skill, or no project or user skill of that name"},
 	{"tools.unknown", 1, "replan", "a change.md design-tool task (`— tool: <name>`) or review_tools: entry names no tools.design / tools.review entry of _apex/config.yaml (D74): re-plan with a declared tool"},
 	{"tools.not-invocable", 1, "person", "a skill tools: names has user-invocable: false, so ape task cannot type it as a slash command: drop the flag, or name another skill"},
+	// rc.4 phase 1 (rc4-a).
+	{"agents.no-project-context", 1, "person", "AGENTS.md has no line importing <development_folder>/project.md (D82): add \"Project context: read @development/project.md before planning or changing anything.\" under its title, outside code — `ape project init` adds it"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

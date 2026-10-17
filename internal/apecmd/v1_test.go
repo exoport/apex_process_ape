@@ -518,3 +518,26 @@ func TestV1Commands_RegressionRedAtBaseline(t *testing.T) {
 	require.Contains(t, stdout, "Red at baseline, not any change's own (roadmap it): regression `./suite.sh`")
 	require.Empty(t, v1Git(t, root, "status", "--porcelain"))
 }
+
+// D82: init says which existing file it amended, and how.
+func TestV1_ProjectInitAmendsAgentsMD(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("git fixture")
+	}
+	root := t.TempDir()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	t.Setenv("APE_SESSION", "")
+	t.Setenv("CLAUDECODE", "")
+	for _, kv := range [][2]string{{"GIT_AUTHOR_NAME", "t"}, {"GIT_AUTHOR_EMAIL", "t@t"}, {"GIT_COMMITTER_NAME", "t"}, {"GIT_COMMITTER_EMAIL", "t@t"}} {
+		t.Setenv(kv[0], kv[1])
+	}
+	v1Git(t, root, "init", "-q")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("# Map\n"), 0o644))
+	stdout, _, err := v1Exec(t, newProjectCmd, "init", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, "amended  AGENTS.md (added the project-context line)\n")
+	stdout, _, err = v1Exec(t, newProjectCmd, "init", "--cwd", root)
+	require.NoError(t, err)
+	require.NotContains(t, stdout, "amended")
+}

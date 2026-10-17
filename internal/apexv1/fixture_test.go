@@ -175,7 +175,7 @@ func baseFiles() map[string]string {
 		"development/project.md":             projectMD,
 		"development/roadmap.md":             roadmapApproved,
 		"development/specs/greeting/spec.md": greetingSpec,
-		"AGENTS.md":                          "# AGENTS.md\n",
+		"AGENTS.md":                          "# AGENTS.md\n\n" + projectContextLine("development") + "\n",
 		"CLAUDE.md":                          "@AGENTS.md\n",
 		"greet.sh":                           "#!/bin/sh\necho Hello $1\n",
 		"_apex/state/.gitignore":             runlog.V1StateGitignore,

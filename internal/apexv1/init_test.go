@@ -31,6 +31,9 @@ func TestInit_Greenfield(t *testing.T) {
 	require.Equal(t, "apex: project init", subjects(t, p)[0])
 	clean(t, p, "project init")
 	require.Equal(t, "@AGENTS.md\n", read(t, p, "CLAUDE.md"))
+	require.True(t, strings.HasPrefix(read(t, p, "AGENTS.md"), "# AGENTS.md\n\n"+
+		"Project context: read @development/project.md before planning or changing anything.\n\n<!--"),
+		"D82: the project-context line, plain text, right under the title")
 	require.FileExists(t, filepath.Join(root, filepath.FromSlash("development/specs/.gitkeep")))
 	// Backlog 26: a whitelist, so anything ape adds there later is ignored
 	// by default; init commits it, and project.json stays local.
@@ -91,7 +94,9 @@ func TestInit_BrownfieldKeepsWhatExists(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "# Existing instructions\n@AGENTS.md\n", read(t, p, "CLAUDE.md"),
 		"item 15: an existing CLAUDE.md gets the import line appended, and nothing else")
-	require.Equal(t, []string{"CLAUDE.md"}, res.Amended)
+	require.Equal(t, []string{"CLAUDE.md", "AGENTS.md"}, res.Amended)
+	require.Equal(t, "# Existing map\n\nProject context: read @docs/dev/project.md before planning or changing anything.\n", read(t, p, "AGENTS.md"),
+		"D82: an existing AGENTS.md gets the line under its title, naming the configured folder, and nothing else")
 	require.Contains(t, read(t, p, "docs/dev/project.md"), "# greeter")
 	var rec map[string]any
 	require.NoError(t, json.Unmarshal([]byte(read(t, p, "_apex/state/project.json")), &rec))
@@ -106,6 +111,7 @@ func TestInit_BrownfieldKeepsWhatExists(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, stop, 2, "the existing Stop hook is kept and ape's is added")
 	require.NotContains(t, findingMessages(p.Check()), "CLAUDE.md: must import the map")
+	require.NotContains(t, findingMessages(p.Check()), "does not import")
 	res2, err := Init(ctx(), root, true)
 	require.NoError(t, err)
 	require.Empty(t, res2.Amended, "idempotent")
@@ -116,6 +122,7 @@ func TestInit_BrownfieldKeepsWhatExists(t *testing.T) {
 	require.Contains(t, committed, ".claude/settings.json")
 	require.Contains(t, committed, "docs/dev/project.md")
 	require.Contains(t, committed, "CLAUDE.md", "the one-line amendment is committed with the skeleton")
+	require.Contains(t, committed, "AGENTS.md", "so is the project-context line")
 	require.NotContains(t, committed, "_apex/config.yaml")
 	require.Equal(t, files["_apex/config.yaml"], read(t, p, "_apex/config.yaml"), "an existing config gets no models: block")
 }
@@ -291,4 +298,76 @@ func TestConfigChanged_GuardsAKeyOutsideTheStruct(t *testing.T) {
 	fs = p.configFindings(ctx(), epoch)
 	require.Len(t, fs, 2)
 	require.Contains(t, fs[0].Message, "guarded config keys (human_review) changed")
+}
+
+// D82: the project-context line goes after the first H1 outside code, or
+// at the very top; a document that already carries the reference is left
+// alone.
+func TestWithProjectContext(t *testing.T) {
+	line := projectContextLine("development") + "\n"
+	for name, c := range map[string]struct{ in, want string }{
+		"empty":            {"", line},
+		"no title":         {"Build with make.\n", line + "\nBuild with make.\n"},
+		"no title, blank":  {"\nBuild with make.\n", line + "\nBuild with make.\n"},
+		"title only":       {"# Map\n", "# Map\n\n" + line},
+		"no final newline": {"# Map", "# Map\n\n" + line},
+		"title and blank":  {"# Map\n\n## Commands\n", "# Map\n\n" + line + "\n## Commands\n"},
+		"title then text":  {"# Map\nSome text.\n", "# Map\n\n" + line + "\nSome text.\n"},
+		"H2 first":         {"## Commands\n# Map\nx\n", "## Commands\n# Map\n\n" + line + "\nx\n"},
+		"H1 in a fence":    {"```\n# not a title\n```\n# Map\n", "```\n# not a title\n```\n# Map\n\n" + line},
+	} {
+		got := withProjectContext(c.in, "development")
+		require.Equal(t, c.want, got, name)
+		require.True(t, hasProjectContext(got, "development"), name)
+	}
+}
+
+// Q38: the reference counts, not the sentence — but only outside code,
+// and only the configured folder's project.md.
+func TestHasProjectContext(t *testing.T) {
+	for doc, want := range map[string]bool{
+		"Project context: read @development/project.md before planning or changing anything.\n": true,
+		"Read @development/project.md first.\n":                                                 true,
+		"- vision: @development/project.md\n":                                                   true,
+		"(see @development/project.md)\n":                                                       true,
+		"Read `@development/project.md` first.\n":                                               false,
+		"Read ``x @development/project.md y`` first.\n":                                         false,
+		"```\n@development/project.md\n```\n":                                                   false,
+		"Read development/project.md first.\n":                                                  false,
+		"Read @docs/dev/project.md first.\n":                                                    false,
+		"Read @development/project.mdx first.\n":                                                false,
+		"Mail x@development/project.md.\n":                                                      false,
+		"Read `code` and @development/project.md.\n":                                            true,
+		"An unclosed ` then @development/project.md\n":                                          true,
+	} {
+		require.Equal(t, want, hasProjectContext(doc, "development"), doc)
+	}
+}
+
+// D82: project check requires the reference (agents.no-project-context, a
+// person's), and re-running init adds it: a project initialised before
+// rc.4 is fixed by init, once.
+func TestProjectCheck_AgentsProjectContext(t *testing.T) {
+	p := fixture(t, baseFiles())
+	write(t, p, "AGENTS.md", "# AGENTS.md\n\n## Commands\n- `make test`\n")
+	commitAll(t, p, "chore: an rc.3 map")
+	fs := ClassifyFindings(p.Check())
+	require.Len(t, fs, 1)
+	require.Equal(t, "agents.no-project-context", fs[0].Code)
+	require.Equal(t, ActionPerson, ActionFor(fs[0].Code))
+	require.Equal(t, "AGENTS.md", fs[0].File)
+	require.Contains(t, fs[0].Message, `add the line "Project context: read @development/project.md before planning or changing anything."`)
+	require.Contains(t, fs[0].Fix, "`ape project init` adds it")
+
+	res, err := Init(ctx(), p.Root, false)
+	require.NoError(t, err)
+	require.Equal(t, []string{"AGENTS.md"}, res.Amended)
+	require.Equal(t, "# AGENTS.md\n\n"+projectContextLine("development")+"\n\n## Commands\n- `make test`\n", read(t, p, "AGENTS.md"))
+	require.Contains(t, run(t, p.Root, "show", "--name-only", "--format=", "HEAD"), "AGENTS.md")
+	require.NotContains(t, findingMessages(p.Check()), "does not import")
+
+	res, err = Init(ctx(), p.Root, false)
+	require.NoError(t, err)
+	require.Empty(t, res.Amended, "idempotent")
+	require.Empty(t, res.Commit)
 }

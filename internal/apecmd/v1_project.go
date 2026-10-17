@@ -27,7 +27,8 @@ func newProjectInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Create the development/ skeleton and merge ape's hooks (never overwrites)",
 		Long: `Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten
-(one exception: the @AGENTS.md line appended to a CLAUDE.md that lacks it).
+(the exceptions: the @AGENTS.md line appended to a CLAUDE.md that lacks it, and the
+project-context line added to an AGENTS.md that lacks it).
 
   _apex/config.yaml                  project_name, development_folder, and the models:
                                      defaults (D65) — apex-apply and apex-orchestrator
@@ -45,7 +46,16 @@ func newProjectInitCmd() *cobra.Command {
                                      --help; notify: <command>, run on a limit stop or a
                                      blocked change — see ape task --help); see "Check
                                      settings" below
-  AGENTS.md                          the project map (skeleton)
+  AGENTS.md                          the project map (skeleton). Right under its title:
+                                     Project context: read @development/project.md before
+                                     planning or changing anything.
+                                     (the configured development folder; plain text, so
+                                     Claude Code imports project.md into every session).
+                                     An existing AGENTS.md whose lines carry no
+                                     @development/project.md outside code gets that line
+                                     after its first # heading (or at the top), and
+                                     nothing else — re-run init on a project made before
+                                     rc.4 to add it
   CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
                                      gets it appended, and nothing else
   development/project.md             vision, users, scope, out of scope, constraints (skeleton)
@@ -199,7 +209,7 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 					fmt.Fprintln(w, "kept     "+k)
 				}
 				for _, a := range res.Amended {
-					fmt.Fprintln(w, "amended  "+a+" (appended @AGENTS.md)")
+					fmt.Fprintln(w, "amended  "+a+" ("+initAmendNote(a)+")")
 				}
 				for _, h := range res.HooksAdded {
 					fmt.Fprintln(w, "hook     "+h)
@@ -215,6 +225,17 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 	return cmd
 }
 
+// initAmendNote says what init changed in an existing file.
+func initAmendNote(rel string) string {
+	switch rel {
+	case "CLAUDE.md":
+		return "appended @AGENTS.md"
+	case "AGENTS.md":
+		return "added the project-context line"
+	}
+	return "amended"
+}
+
 func newProjectCheckCmd() *cobra.Command {
 	var f v1Flags
 	cmd := &cobra.Command{
@@ -226,6 +247,9 @@ func newProjectCheckCmd() *cobra.Command {
                            ## Constraints (each non-empty); ≤ caps.project_md (16 KB;
                            no line cap)
   AGENTS.md                present, ≤ caps.agents_md (16 KB; its lines are not measured);
+                           a line outside code carries @development/project.md (the
+                           configured folder; the reference counts, not the wording —
+                           agents.no-project-context: ` + "`ape project init`" + ` adds the line);
                            CLAUDE.md (if any) has the line @AGENTS.md
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
                            Gate, Goal; Budget a number when present; a "## Next"

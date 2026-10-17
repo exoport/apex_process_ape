@@ -202,6 +202,8 @@ var findingRules = []findingRule{
 	rule("", `^tool \S+: skill \S+ is not installed`, "tools.not-installed"),
 	rule("", `^tool \S+: skill \S+ is not slash-invocable`, "tools.not-invocable"),
 	rule("", `^plugins: `, "plugins.drift"),
+	// rc.4 phase 1 (rc4-a).
+	rule("", `^AGENTS.md does not import .*project\.md`, "agents.no-project-context"),
 }
 
 // UnclassifiedFinding is the code of a finding no rule matches — a

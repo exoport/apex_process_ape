@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/runlog"
@@ -34,8 +35,9 @@ type InitResult struct {
 	HooksAdded []string `json:"hooks_added"`
 	Brownfield bool     `json:"brownfield"`
 	Commit     string   `json:"commit,omitempty"`
-	// Amended lists existing files init changed: only a CLAUDE.md missing
-	// the @AGENTS.md import.
+	// Amended lists existing files init changed: a CLAUDE.md missing the
+	// @AGENTS.md import, and an AGENTS.md missing the project-context
+	// line (D82).
 	Amended []string `json:"amended,omitempty"`
 }
 
@@ -70,10 +72,15 @@ const projectSkeleton = `# %s
 <!-- languages, frameworks, runtime -->
 `
 
-const agentsSkeleton = `# AGENTS.md
+// agentsSkeletonTemplate is the AGENTS.md init writes, {dev} the
+// development folder. Its first line under the title is the
+// project-context import (D82).
+const agentsSkeletonTemplate = `# AGENTS.md
+
+{context}
 
 <!-- The project map, at most 16 KB (caps.agents_md): what this is, how to build, test and run the e2e
-     checks, the NEVER rules, and pointers. Detail lives in development/ and docs/. -->
+     checks, the NEVER rules, and pointers. Detail lives in {dev}/ and docs/. -->
 
 ## What this is
 
@@ -83,14 +90,115 @@ const agentsSkeleton = `# AGENTS.md
 ## NEVER
 
 ## Pointers
-- development/project.md — vision, users, scope, constraints
-- development/roadmap.md — milestones and their gates
-- development/specs/ — living behaviour specs; they change only through ` + "`ape change archive`" + `
-- development/changes/ — units of change; ` + "`ape status`" + ` shows what is in flight
-- development/archive/ — archived and abandoned changes (read-only)
-- development/decisions/ — ADRs
-- development/briefs/ — each plan's input, dated and verbatim: history, never edited
+- {dev}/project.md — vision, users, scope, constraints
+- {dev}/roadmap.md — milestones and their gates
+- {dev}/specs/ — living behaviour specs; they change only through ` + "`ape change archive`" + `
+- {dev}/changes/ — units of change; ` + "`ape status`" + ` shows what is in flight
+- {dev}/archive/ — archived and abandoned changes (read-only)
+- {dev}/decisions/ — ADRs
+- {dev}/briefs/ — each plan's input, dated and verbatim: history, never edited
 `
+
+// agentsSkeleton is the AGENTS.md skeleton for a project whose
+// development folder is dev.
+func agentsSkeleton(dev string) string {
+	return strings.NewReplacer("{context}", projectContextLine(dev), "{dev}", dev).Replace(agentsSkeletonTemplate)
+}
+
+// projectContextLine is the line AGENTS.md carries so every session reads
+// project.md first (D82): Claude Code expands the inline @path import
+// (outside code), other harnesses read it as an instruction. Plain text:
+// in a code span the import would not expand.
+func projectContextLine(dev string) string {
+	return "Project context: read @" + dev + "/project.md before planning or changing anything."
+}
+
+// hasProjectContext reports whether AGENTS.md imports project.md: a line
+// outside fenced code carrying the token @<dev>/project.md outside a code
+// span. The reference counts, not the sentence (Q38): a person may reword it.
+func hasProjectContext(doc, dev string) bool {
+	re := regexp.MustCompile(`(^|[\s(\[])@` + regexp.QuoteMeta(dev+"/project.md") + `($|[^\w./-]|\.($|\s))`)
+	for _, l := range splitLines(doc) {
+		if !l.InCode && re.MatchString(stripCodeSpans(l.Text)) {
+			return true
+		}
+	}
+	return false
+}
+
+// stripCodeSpans drops a line's inline code spans: a run of n backticks
+// up to the next run of exactly n. An unmatched run is literal text.
+func stripCodeSpans(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] != '`' {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		n := 0
+		for i+n < len(s) && s[i+n] == '`' {
+			n++
+		}
+		end := -1
+		for j := i + n; j < len(s); {
+			if s[j] != '`' {
+				j++
+				continue
+			}
+			m := 0
+			for j+m < len(s) && s[j+m] == '`' {
+				m++
+			}
+			if m == n {
+				end = j + m
+				break
+			}
+			j += m
+		}
+		if end < 0 {
+			b.WriteString(s[i : i+n])
+			i += n
+			continue
+		}
+		i = end
+	}
+	return b.String()
+}
+
+// withProjectContext inserts the project-context line into an AGENTS.md
+// that lacks it: after its first H1 (outside code), set off by blank
+// lines, or at the very top when it has none. Nothing else changes.
+func withProjectContext(doc, dev string) string {
+	line := projectContextLine(dev) + "\n"
+	raw := strings.SplitAfter(doc, "\n")
+	at := -1
+	for _, l := range splitLines(doc) {
+		if lv, _ := headingLevel(l); lv == 1 {
+			at = l.N
+			break
+		}
+	}
+	blank := func(i int) bool { return i >= len(raw) || strings.TrimSpace(raw[i]) == "" }
+	if at < 0 {
+		if doc == "" {
+			return line
+		}
+		if blank(0) {
+			return line + doc
+		}
+		return line + "\n" + doc
+	}
+	head := strings.Join(raw[:at], "")
+	if !strings.HasSuffix(head, "\n") {
+		head += "\n"
+	}
+	out := head + "\n" + line
+	if !blank(at) {
+		out += "\n"
+	}
+	return out + strings.Join(raw[at:], "")
+}
 
 // modelDefaultsYAML is the models: block a new _apex/config.yaml starts
 // with (D65): the build (apex-apply, the orchestrator) on sonnet/high,
@@ -179,7 +287,7 @@ func initSkeleton(ctx context.Context, root string, brownfield bool) (*InitResul
 	steps := []struct{ path, content string }{
 		{p.ProjectMD(), fmt.Sprintf(projectSkeleton, name)},
 		{p.RoadmapMD(), "# Roadmap\n"},
-		{p.AgentsMD(), agentsSkeleton},
+		{p.AgentsMD(), agentsSkeleton(p.DevRel)},
 		{p.ClaudeMD(), "@AGENTS.md\n"},
 		// A whitelist: whatever ape adds to _apex/state/ later is ignored
 		// unless it is named here.
@@ -201,6 +309,14 @@ func initSkeleton(ctx context.Context, root string, brownfield bool) (*InitResul
 			return nil, nil, err
 		}
 		res.Amended = append(res.Amended, "CLAUDE.md")
+	}
+	// So is an AGENTS.md without the project-context line (D82; one made
+	// before rc.4, or the project's own): that line goes under its title.
+	if doc, err := readFileString(p.AgentsMD()); err == nil && !hasProjectContext(doc, p.DevRel) {
+		if err := writeFileAtomic(p.AgentsMD(), withProjectContext(doc, p.DevRel)); err != nil {
+			return nil, nil, err
+		}
+		res.Amended = append(res.Amended, "AGENTS.md")
 	}
 	if !fileExists(p.ProjectJSON()) {
 		rec := map[string]any{"initialized_at": Stamp(), "brownfield": brownfield, "base_sha": HeadSHA(ctx, p.Root)}

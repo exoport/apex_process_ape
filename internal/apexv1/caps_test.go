@@ -58,11 +58,12 @@ func TestCaps_DefaultsCeilingsAndParse(t *testing.T) {
 // line cap.
 func TestCaps_AgentsAndProjectAreBytesOnly(t *testing.T) {
 	p := fixture(t, baseFiles())
-	write(t, p, "AGENTS.md", "# AGENTS.md\n"+strings.Repeat("- x\n", 1000))
+	agents := baseFiles()["AGENTS.md"]
+	write(t, p, "AGENTS.md", agents+strings.Repeat("- x\n", 1000))
 	write(t, p, "development/project.md", projectMD+strings.Repeat("- note\n", 500))
 	require.Empty(t, p.Check(), "a thousand short lines under the byte caps pass")
 
-	write(t, p, "AGENTS.md", strings.Repeat("x", 16<<10+1))
+	write(t, p, "AGENTS.md", agents+strings.Repeat("x", 16<<10+1-len(agents)))
 	got := ClassifyFindings(p.Check())
 	require.Len(t, got, 1)
 	require.Equal(t, "agents.too-big", got[0].Code)
