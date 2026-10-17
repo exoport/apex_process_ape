@@ -13,12 +13,14 @@ import (
 // in _apex/config.yaml's caps: block, under the config.changed guard:
 //
 //	caps:
-//	  project_md: 16KB     # development/project.md          (default 16 KB, ceiling 48 KB)
-//	  agents_md: 16KB      # AGENTS.md                       (default 16 KB, ceiling 48 KB)
-//	  change_md: 16KB      # a change's change.md            (default 16 KB, ceiling 48 KB)
-//	  design_md: 16KB      # a change's design.md            (default 16 KB, ceiling 48 KB)
-//	  spec: 24KB           # one capability's spec.md        (default 24 KB, ceiling 64 KB)
-//	  evidence_log: 1MiB   # one check's output in evidence  (default 1 MiB, ceiling 16 MiB)
+//	  project_md: 16KB        # development/project.md          (default 16 KB, ceiling 48 KB)
+//	  agents_md: 16KB         # AGENTS.md                       (default 16 KB, ceiling 48 KB)
+//	  change_md: 16KB         # a change's change.md            (default 16 KB, ceiling 48 KB)
+//	  design_md: 16KB         # a change's design.md            (default 16 KB, ceiling 48 KB)
+//	  spec: 24KB              # one capability's spec.md        (default 24 KB, ceiling 64 KB)
+//	  evidence_log: 1MiB      # one check's output in evidence  (default 1 MiB, ceiling 16 MiB)
+//	  architecture_md: 16KB   # development/architecture.md     (default 16 KB, ceiling 48 KB;
+//	                          #   optional: absent, nothing is measured — D84)
 //
 // A size is plain bytes (16384) or a number with a unit: B, KB or KiB
 // (1024 bytes: a KB is 1024 here, as everywhere ape states a cap), MB or
@@ -42,6 +44,9 @@ const (
 	CapDesignMD    = "design_md"
 	CapSpec        = "spec"
 	CapEvidenceLog = "evidence_log"
+	// CapArchitectureMD caps development/architecture.md (D84), which is
+	// optional: absent, nothing is measured.
+	CapArchitectureMD = "architecture_md"
 )
 
 // CodeCapsOverCeiling: a caps: value above its hard ceiling.
@@ -62,17 +67,19 @@ var capDefs = []capDef{
 	{CapDesignMD, "design.md", 16 << 10, 48 << 10, func(c *Caps) *int { return &c.DesignMD }},
 	{CapSpec, "a capability's spec.md", 24 << 10, 64 << 10, func(c *Caps) *int { return &c.Spec }},
 	{CapEvidenceLog, "one check's output in its evidence file", 1 << 20, 16 << 20, func(c *Caps) *int { return &c.EvidenceLog }},
+	{CapArchitectureMD, "architecture.md", 16 << 10, 48 << 10, func(c *Caps) *int { return &c.ArchitectureMD }},
 }
 
 // Caps is caps:, in bytes: as configured (0 is unset), or, from Limits,
 // the caps in force.
 type Caps struct {
-	ProjectMD   int `json:"project_md"`
-	AgentsMD    int `json:"agents_md"`
-	ChangeMD    int `json:"change_md"`
-	DesignMD    int `json:"design_md"`
-	Spec        int `json:"spec"`
-	EvidenceLog int `json:"evidence_log"`
+	ProjectMD      int `json:"project_md"`
+	AgentsMD       int `json:"agents_md"`
+	ChangeMD       int `json:"change_md"`
+	DesignMD       int `json:"design_md"`
+	Spec           int `json:"spec"`
+	EvidenceLog    int `json:"evidence_log"`
+	ArchitectureMD int `json:"architecture_md"`
 }
 
 // UnmarshalYAML parses and validates the block: a key ape does not know,

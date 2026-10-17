@@ -200,6 +200,12 @@ func (p *Project) ProjectMD() string {
 	return filepath.Join(p.Dev(), "project.md")
 }
 
+// ArchitectureMD is development/architecture.md: optional, under
+// caps.architecture_md when present (D84).
+func (p *Project) ArchitectureMD() string {
+	return filepath.Join(p.Dev(), "architecture.md")
+}
+
 func (p *Project) RoadmapMD() string {
 	return filepath.Join(p.Dev(), "roadmap.md")
 }

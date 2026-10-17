@@ -27,14 +27,24 @@ func newProjectInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Create the development/ skeleton and merge ape's hooks (never overwrites)",
 		Long: `Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten
-(one exception: the @AGENTS.md line appended to a CLAUDE.md that lacks it).
+(the exceptions: the @AGENTS.md line appended to a CLAUDE.md that lacks it, the
+project-context line added to an AGENTS.md that lacks it, and the models: defaults
+appended to an _apex/config.yaml that has no models: block).
 
   _apex/config.yaml                  project_name, development_folder, and the models:
-                                     defaults (D65) — apex-apply and apex-orchestrator
-                                     {model: sonnet, effort: high}; apex-review, apex-plan
-                                     and apex-change {model: opus, effort: medium} — written
-                                     only when the file does not exist: an existing config
-                                     is kept as it is, nothing merged in (also read, never
+                                     defaults (D65, D93) — apex-apply, apex-orchestrator
+                                     and apex-release {model: sonnet, effort: high};
+                                     apex-review, apex-plan, apex-change and apex-accept
+                                     {model: opus, effort: medium}. An existing config
+                                     with no top-level models: gets that block appended,
+                                     its own text kept byte for byte (restored, with a
+                                     warning, if the result would not parse); the
+                                     amendment is committed with "apex: project init"
+                                     only when the config was tracked and clean before,
+                                     else left for you to commit. An existing models: is
+                                     left alone: init warns (stderr; JSON "warnings") for
+                                     each of those skills it has no entry for, which then
+                                     runs on claude's default model (also read, never
                                      written: regression, effort, caps (see ape project
                                      check --help), timeouts, and limits —
                                      budget: enforce|off (default off; see ape task --help),
@@ -45,7 +55,16 @@ func newProjectInitCmd() *cobra.Command {
                                      --help; notify: <command>, run on a limit stop or a
                                      blocked change — see ape task --help); see "Check
                                      settings" below
-  AGENTS.md                          the project map (skeleton)
+  AGENTS.md                          the project map (skeleton). Right under its title:
+                                     Project context: read @development/project.md before
+                                     planning or changing anything.
+                                     (the configured development folder; plain text, so
+                                     Claude Code imports project.md into every session).
+                                     An existing AGENTS.md whose lines carry no
+                                     @development/project.md outside code gets that line
+                                     after its first # heading (or at the top), and
+                                     nothing else — re-run init on a project made before
+                                     rc.4 to add it
   CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
                                      gets it appended, and nothing else
   development/project.md             vision, users, scope, out of scope, constraints (skeleton)
@@ -73,7 +92,10 @@ by the one above; running init again changes nothing. ape task passes the same
 hooks inline as well, so its sessions have them even when settings.json does not.
 
 Everything init wrote (and settings.json when it merged hooks) is committed as
-"apex: project init"; files that existed before are not touched and not committed.
+"apex: project init", with the files it amended (CLAUDE.md, AGENTS.md, and the config
+when it was tracked and clean); other files that existed before are not touched and
+not committed. JSON: "amended" lists the files init changed, "amended_uncommitted"
+those it left out of the commit.
 
 Plugins: when _apex/config.yaml lists marketplaces/plugins, init installs each
 plugin at project scope through the claude plugin CLI (marketplace add, install,
@@ -198,13 +220,24 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 				for _, k := range res.Kept {
 					fmt.Fprintln(w, "kept     "+k)
 				}
+				uncommitted := map[string]bool{}
+				for _, u := range res.AmendedUncommitted {
+					uncommitted[u] = true
+				}
 				for _, a := range res.Amended {
-					fmt.Fprintln(w, "amended  "+a+" (appended @AGENTS.md)")
+					note := initAmendNote(a)
+					if uncommitted[a] {
+						note += "; not committed: it was untracked or had uncommitted changes — commit it yourself"
+					}
+					fmt.Fprintln(w, "amended  "+a+" ("+note+")")
 				}
 				for _, h := range res.HooksAdded {
 					fmt.Fprintln(w, "hook     "+h)
 				}
 				fmt.Fprint(w, pluginOut.String())
+				for _, warn := range res.Warnings {
+					fmt.Fprintln(cmd.ErrOrStderr(), "warning: "+warn)
+				}
 				fmt.Fprintln(w, "scope: "+apexv1.Scope)
 				fmt.Fprintln(w, "next: write development/project.md, AGENTS.md and the roadmap (apex-plan), then `ape project check`")
 			})
@@ -213,6 +246,19 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 	addV1Flags(cmd, &f)
 	cmd.Flags().BoolVar(&brownfield, "brownfield", false, "record that the project existed before APEX")
 	return cmd
+}
+
+// initAmendNote says what init changed in an existing file.
+func initAmendNote(rel string) string {
+	switch rel {
+	case "CLAUDE.md":
+		return "appended @AGENTS.md"
+	case "AGENTS.md":
+		return "added the project-context line"
+	case "_apex/config.yaml":
+		return "appended the models: defaults"
+	}
+	return "amended"
 }
 
 func newProjectCheckCmd() *cobra.Command {
@@ -225,7 +271,14 @@ func newProjectCheckCmd() *cobra.Command {
   development/project.md   # <name>, ## Vision, ## Users, ## Scope, ## Out of scope,
                            ## Constraints (each non-empty); ≤ caps.project_md (16 KB;
                            no line cap)
+  development/architecture.md
+                           optional; when present ≤ caps.architecture_md (16 KB;
+                           architecture.too-big: move detail to specs/, decisions/ or
+                           docs/explanation/)
   AGENTS.md                present, ≤ caps.agents_md (16 KB; its lines are not measured);
+                           a line outside code carries @development/project.md (the
+                           configured folder; the reference counts, not the wording —
+                           agents.no-project-context: ` + "`ape project init`" + ` adds the line);
                            CLAUDE.md (if any) has the line @AGENTS.md
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
                            Gate, Goal; Budget a number when present; a "## Next"
@@ -271,6 +324,7 @@ func newProjectCheckCmd() *cobra.Command {
                              change_md    16 KB / 48 KB    design_md    16 KB / 48 KB
                              spec         24 KB / 64 KB    (per capability)
                              evidence_log  1 MiB / 16 MiB  (per check, evidence: archive)
+                             architecture_md 16 KB / 48 KB (development/architecture.md, optional)
                            A value above its ceiling is caps.over-ceiling (action person):
                            reported here, and change check, start and archive refuse
                            until a person fixes it (abandon measures nothing, D89)

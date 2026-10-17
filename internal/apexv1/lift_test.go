@@ -406,6 +406,7 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	agents := read(t, p, "AGENTS.md")
 	require.Contains(t, agents, "## Commands\n<!-- build / test / e2e, one line each -->\n<!-- lifted from development/project-context.md:")
 	require.Contains(t, agents, "- `sh ./check.sh`\n- `./gate.sh <board>`\n- `test -f main.go`\n")
+	require.True(t, hasProjectContext(agents, "development"), "D82: the lift's map imports project.md, as init's does")
 	require.NotNil(t, res.Regression)
 	require.Equal(t, 0, res.Regression.Exit)
 	// L4: the same command ran at the tag first, its log kept beside.

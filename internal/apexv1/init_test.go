@@ -31,6 +31,9 @@ func TestInit_Greenfield(t *testing.T) {
 	require.Equal(t, "apex: project init", subjects(t, p)[0])
 	clean(t, p, "project init")
 	require.Equal(t, "@AGENTS.md\n", read(t, p, "CLAUDE.md"))
+	require.True(t, strings.HasPrefix(read(t, p, "AGENTS.md"), "# AGENTS.md\n\n"+
+		"Project context: read @development/project.md before planning or changing anything.\n\n<!--"),
+		"D82: the project-context line, plain text, right under the title")
 	require.FileExists(t, filepath.Join(root, filepath.FromSlash("development/specs/.gitkeep")))
 	// Backlog 26: a whitelist, so anything ape adds there later is ignored
 	// by default; init commits it, and project.json stays local.
@@ -50,7 +53,10 @@ func TestInit_Greenfield(t *testing.T) {
 		"apex-review":       {Model: "opus", Effort: "medium"},
 		"apex-plan":         {Model: "opus", Effort: "medium"},
 		"apex-change":       {Model: "opus", Effort: "medium"},
-	}, cfg.Models)
+		"apex-accept":       {Model: "opus", Effort: "medium"},
+		"apex-release":      {Model: "sonnet", Effort: "high"},
+	}, cfg.Models, "D93: apex-accept and apex-release too")
+	require.Empty(t, res.Warnings)
 	require.Contains(t, committed, "_apex/config.yaml")
 
 	// The skeleton is not a finished plan.
@@ -91,7 +97,11 @@ func TestInit_BrownfieldKeepsWhatExists(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "# Existing instructions\n@AGENTS.md\n", read(t, p, "CLAUDE.md"),
 		"item 15: an existing CLAUDE.md gets the import line appended, and nothing else")
-	require.Equal(t, []string{"CLAUDE.md"}, res.Amended)
+	require.Equal(t, []string{"_apex/config.yaml", "CLAUDE.md", "AGENTS.md"}, res.Amended)
+	require.Equal(t, []string{"_apex/config.yaml"}, res.AmendedUncommitted, "D86: an untracked config is amended, not committed")
+	require.Empty(t, res.Warnings)
+	require.Equal(t, "# Existing map\n\nProject context: read @docs/dev/project.md before planning or changing anything.\n", read(t, p, "AGENTS.md"),
+		"D82: an existing AGENTS.md gets the line under its title, naming the configured folder, and nothing else")
 	require.Contains(t, read(t, p, "docs/dev/project.md"), "# greeter")
 	var rec map[string]any
 	require.NoError(t, json.Unmarshal([]byte(read(t, p, "_apex/state/project.json")), &rec))
@@ -106,9 +116,11 @@ func TestInit_BrownfieldKeepsWhatExists(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, stop, 2, "the existing Stop hook is kept and ape's is added")
 	require.NotContains(t, findingMessages(p.Check()), "CLAUDE.md: must import the map")
+	require.NotContains(t, findingMessages(p.Check()), "does not import")
 	res2, err := Init(ctx(), root, true)
 	require.NoError(t, err)
 	require.Empty(t, res2.Amended, "idempotent")
+	require.Empty(t, res2.Warnings, "the appended block names every skill")
 	require.Equal(t, "# Existing instructions\n@AGENTS.md\n", read(t, p, "CLAUDE.md"))
 
 	// Init commits only what it wrote: the repo's own files stay untracked.
@@ -116,8 +128,10 @@ func TestInit_BrownfieldKeepsWhatExists(t *testing.T) {
 	require.Contains(t, committed, ".claude/settings.json")
 	require.Contains(t, committed, "docs/dev/project.md")
 	require.Contains(t, committed, "CLAUDE.md", "the one-line amendment is committed with the skeleton")
+	require.Contains(t, committed, "AGENTS.md", "so is the project-context line")
 	require.NotContains(t, committed, "_apex/config.yaml")
-	require.Equal(t, files["_apex/config.yaml"], read(t, p, "_apex/config.yaml"), "an existing config gets no models: block")
+	require.Equal(t, files["_apex/config.yaml"]+modelDefaultsYAML, read(t, p, "_apex/config.yaml"),
+		"D86: an existing config without models: gets the defaults appended, its own text kept")
 }
 
 // An existing _apex/config.yaml with its own models: and timeouts: is kept
@@ -145,6 +159,14 @@ func TestInit_ExistingConfigBlocksAreKept(t *testing.T) {
 		res, err := Init(ctx(), root, true)
 		require.NoError(t, err)
 		require.Contains(t, res.Kept, "_apex/config.yaml")
+		require.NotContains(t, res.Amended, "_apex/config.yaml", "D86: a models: block is left alone")
+		// D86: each skill init has a default for and models: does not
+		// name is a warning, apex-apply's own entry aside.
+		require.Len(t, res.Warnings, 6)
+		for i, skill := range []string{"apex-orchestrator", "apex-review", "apex-plan", "apex-change", "apex-accept", "apex-release"} {
+			require.Equal(t, "_apex/config.yaml models: has no "+skill+" entry — "+skill+" runs on claude's default model; "+
+				"add one to models: to choose its model and effort (see ape project init --help)", res.Warnings[i])
+		}
 		p, err := Open(root)
 		require.NoError(t, err)
 		require.Equal(t, cfg, read(t, p, "_apex/config.yaml"))
@@ -291,4 +313,213 @@ func TestConfigChanged_GuardsAKeyOutsideTheStruct(t *testing.T) {
 	fs = p.configFindings(ctx(), epoch)
 	require.Len(t, fs, 2)
 	require.Contains(t, fs[0].Message, "guarded config keys (human_review) changed")
+}
+
+// D82: the project-context line goes after the first H1 outside code, or
+// at the very top; a document that already carries the reference is left
+// alone.
+func TestWithProjectContext(t *testing.T) {
+	line := projectContextLine("development") + "\n"
+	for name, c := range map[string]struct{ in, want string }{
+		"empty":            {"", line},
+		"no title":         {"Build with make.\n", line + "\nBuild with make.\n"},
+		"no title, blank":  {"\nBuild with make.\n", line + "\nBuild with make.\n"},
+		"title only":       {"# Map\n", "# Map\n\n" + line},
+		"no final newline": {"# Map", "# Map\n\n" + line},
+		"title and blank":  {"# Map\n\n## Commands\n", "# Map\n\n" + line + "\n## Commands\n"},
+		"title then text":  {"# Map\nSome text.\n", "# Map\n\n" + line + "\nSome text.\n"},
+		"H2 first":         {"## Commands\n# Map\nx\n", "## Commands\n# Map\n\n" + line + "\nx\n"},
+		"H1 in a fence":    {"```\n# not a title\n```\n# Map\n", "```\n# not a title\n```\n# Map\n\n" + line},
+	} {
+		got := withProjectContext(c.in, "development")
+		require.Equal(t, c.want, got, name)
+		require.True(t, hasProjectContext(got, "development"), name)
+	}
+}
+
+// Q38: the reference counts, not the sentence — but only outside code,
+// and only the configured folder's project.md.
+func TestHasProjectContext(t *testing.T) {
+	for doc, want := range map[string]bool{
+		"Project context: read @development/project.md before planning or changing anything.\n": true,
+		"Read @development/project.md first.\n":                                                 true,
+		"- vision: @development/project.md\n":                                                   true,
+		"(see @development/project.md)\n":                                                       true,
+		"Read `@development/project.md` first.\n":                                               false,
+		"Read ``x @development/project.md y`` first.\n":                                         false,
+		"```\n@development/project.md\n```\n":                                                   false,
+		"Read development/project.md first.\n":                                                  false,
+		"Read @docs/dev/project.md first.\n":                                                    false,
+		"Read @development/project.mdx first.\n":                                                false,
+		"Mail x@development/project.md.\n":                                                      false,
+		"Read `code` and @development/project.md.\n":                                            true,
+		"An unclosed ` then @development/project.md\n":                                          true,
+	} {
+		require.Equal(t, want, hasProjectContext(doc, "development"), doc)
+	}
+}
+
+// D82: project check requires the reference (agents.no-project-context, a
+// person's), and re-running init adds it: a project initialised before
+// rc.4 is fixed by init, once.
+func TestProjectCheck_AgentsProjectContext(t *testing.T) {
+	p := fixture(t, baseFiles())
+	write(t, p, "AGENTS.md", "# AGENTS.md\n\n## Commands\n- `make test`\n")
+	commitAll(t, p, "chore: an rc.3 map")
+	fs := ClassifyFindings(p.Check())
+	require.Len(t, fs, 1)
+	require.Equal(t, "agents.no-project-context", fs[0].Code)
+	require.Equal(t, ActionPerson, ActionFor(fs[0].Code))
+	require.Equal(t, "AGENTS.md", fs[0].File)
+	require.Contains(t, fs[0].Message, `add the line "Project context: read @development/project.md before planning or changing anything."`)
+	require.Contains(t, fs[0].Fix, "`ape project init` adds it")
+
+	res, err := Init(ctx(), p.Root, false)
+	require.NoError(t, err)
+	require.Equal(t, []string{"AGENTS.md"}, res.Amended)
+	require.Equal(t, "# AGENTS.md\n\n"+projectContextLine("development")+"\n\n## Commands\n- `make test`\n", read(t, p, "AGENTS.md"))
+	require.Contains(t, run(t, p.Root, "show", "--name-only", "--format=", "HEAD"), "AGENTS.md")
+	require.NotContains(t, findingMessages(p.Check()), "does not import")
+
+	res, err = Init(ctx(), p.Root, false)
+	require.NoError(t, err)
+	require.Empty(t, res.Amended, "idempotent")
+	require.Empty(t, res.Commit)
+}
+
+// D86: an existing config without a top-level models: gets init's
+// defaults appended, byte for byte after its own text. The amendment is
+// committed with the skeleton only when the config was tracked and clean;
+// a person's untracked or edited config is amended and left for them.
+func TestInit_AppendsModelDefaultsToExistingConfig(t *testing.T) {
+	setup := func(t *testing.T, cfg string, commit bool) (string, *Project) {
+		t.Helper()
+		needSh(t)
+		root := t.TempDir()
+		gitEnv(t)
+		asPerson(t)
+		run(t, root, "init", "-q", "-b", "main")
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "config.yaml"), []byte(cfg), 0o644))
+		if commit {
+			run(t, root, "add", "-A")
+			run(t, root, "commit", "-q", "-m", "chore: apex config")
+		}
+		return root, &Project{Root: root}
+	}
+	allSeven := func(t *testing.T, root string) {
+		t.Helper()
+		c, err := LoadConfig(root)
+		require.NoError(t, err)
+		require.Len(t, c.Models, 7)
+		require.Equal(t, SkillModel{Model: "opus", Effort: "medium"}, c.Models["apex-accept"])
+		require.Equal(t, SkillModel{Model: "sonnet", Effort: "high"}, c.Models["apex-release"])
+	}
+
+	t.Run("tracked and clean: committed with the skeleton", func(t *testing.T) {
+		const cfg = "project_name: greeter\n# a comment, kept\nretries: 1   # odd spacing, kept\n"
+		root, p := setup(t, cfg, true)
+		res, err := Init(ctx(), root, true)
+		require.NoError(t, err)
+		require.Equal(t, []string{"_apex/config.yaml"}, res.Amended)
+		require.Empty(t, res.AmendedUncommitted)
+		require.Empty(t, res.Warnings)
+		require.Equal(t, cfg+modelDefaultsYAML, read(t, p, "_apex/config.yaml"))
+		allSeven(t, root)
+		require.Contains(t, run(t, root, "show", "--name-only", "--format=", "HEAD"), "_apex/config.yaml")
+		require.Equal(t, "apex: project init", subjects(t, p)[0])
+		clean(t, p, "project init")
+
+		res, err = Init(ctx(), root, true)
+		require.NoError(t, err)
+		require.Empty(t, res.Amended, "idempotent")
+		require.Empty(t, res.Warnings)
+	})
+	t.Run("tracked but dirty: amended, not committed", func(t *testing.T) {
+		root, p := setup(t, "project_name: greeter\n", true)
+		dirty := "project_name: greeter\nretries: 2\n"
+		require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "config.yaml"), []byte(dirty), 0o644))
+		res, err := Init(ctx(), root, true)
+		require.NoError(t, err)
+		require.Equal(t, []string{"_apex/config.yaml"}, res.Amended)
+		require.Equal(t, []string{"_apex/config.yaml"}, res.AmendedUncommitted)
+		require.Equal(t, dirty+modelDefaultsYAML, read(t, p, "_apex/config.yaml"))
+		require.NotContains(t, run(t, root, "show", "--name-only", "--format=", "HEAD"), "_apex/config.yaml")
+		require.Equal(t, "M _apex/config.yaml", run(t, root, "status", "--porcelain"), "the person's edit, and the block, stay theirs to commit")
+	})
+	t.Run("staged: amended, not committed", func(t *testing.T) {
+		root, _ := setup(t, "project_name: greeter\n", true)
+		require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "config.yaml"), []byte("project_name: other\n"), 0o644))
+		run(t, root, "add", "_apex/config.yaml")
+		res, err := Init(ctx(), root, true)
+		require.NoError(t, err)
+		require.Equal(t, []string{"_apex/config.yaml"}, res.AmendedUncommitted)
+		require.NotContains(t, run(t, root, "show", "--name-only", "--format=", "HEAD"), "_apex/config.yaml")
+	})
+	t.Run("no final newline", func(t *testing.T) {
+		root, p := setup(t, "project_name: greeter", false)
+		res, err := Init(ctx(), root, true)
+		require.NoError(t, err)
+		require.Equal(t, []string{"_apex/config.yaml"}, res.AmendedUncommitted)
+		require.Equal(t, "project_name: greeter\n"+modelDefaultsYAML, read(t, p, "_apex/config.yaml"))
+		allSeven(t, root)
+	})
+	t.Run("empty file", func(t *testing.T) {
+		root, p := setup(t, "", false)
+		_, err := Init(ctx(), root, true)
+		require.NoError(t, err)
+		require.Equal(t, modelDefaultsYAML, read(t, p, "_apex/config.yaml"))
+	})
+	t.Run("models: in a comment or a string is not a models: block", func(t *testing.T) {
+		const cfg = "# models: are set below\nnotify: |\n  models: echo\n"
+		root, p := setup(t, cfg, false)
+		res, err := Init(ctx(), root, true)
+		require.NoError(t, err)
+		require.Equal(t, []string{"_apex/config.yaml"}, res.Amended)
+		require.Equal(t, cfg+modelDefaultsYAML, read(t, p, "_apex/config.yaml"))
+		c, err := LoadConfig(root)
+		require.NoError(t, err)
+		require.Equal(t, "models: echo\n", c.Notify, "the block scalar ends where the appended block starts")
+	})
+	// YAML reads the first document only: a block appended after a flow
+	// mapping or a "---" parses, and is never read.
+	for name, cfg := range map[string]string{"flow mapping": "{project_name: greeter}\n", "second document": "project_name: greeter\n---\n"} {
+		t.Run("an append YAML would not read is restored, with a warning: "+name, func(t *testing.T) {
+			root, p := setup(t, cfg, true)
+			res, err := Init(ctx(), root, true)
+			require.NoError(t, err)
+			require.Empty(t, res.Amended)
+			require.Equal(t, []string{"_apex/config.yaml has no models: block, and appending init's defaults would not be read " +
+				"(the file's first YAML document ends before them) — it is restored as it was; add a models: block by hand (see ape project init --help)"}, res.Warnings)
+			require.Equal(t, cfg, read(t, p, "_apex/config.yaml"))
+			require.NotContains(t, run(t, root, "show", "--name-only", "--format=", "HEAD"), "_apex/config.yaml")
+		})
+	}
+	t.Run("an empty models: names no skill", func(t *testing.T) {
+		const cfg = "project_name: greeter\nmodels:\n"
+		root, p := setup(t, cfg, false)
+		res, err := Init(ctx(), root, true)
+		require.NoError(t, err)
+		require.Empty(t, res.Amended)
+		require.Len(t, res.Warnings, 7)
+		require.Equal(t, cfg, read(t, p, "_apex/config.yaml"))
+	})
+}
+
+// D86 outside a git repo: the config is amended, and nothing is committed.
+func TestInit_AppendsModelDefaultsOutsideGit(t *testing.T) {
+	root := t.TempDir()
+	asPerson(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "_apex"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "_apex", "config.yaml"), []byte("project_name: greeter\n"), 0o644))
+	res, err := Init(ctx(), root, false)
+	require.NoError(t, err)
+	require.Equal(t, []string{"_apex/config.yaml"}, res.Amended)
+	require.Equal(t, []string{"_apex/config.yaml"}, res.AmendedUncommitted)
+	require.Empty(t, res.Commit)
+	require.Equal(t, "project_name: greeter\n"+modelDefaultsYAML, read(t, &Project{Root: root}, "_apex/config.yaml"))
+}
+
+func TestModelDefaultSkills(t *testing.T) {
+	require.Equal(t, []string{"apex-apply", "apex-orchestrator", "apex-review", "apex-plan", "apex-change", "apex-accept", "apex-release"}, modelDefaultSkills())
 }

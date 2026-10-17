@@ -518,3 +518,67 @@ func TestV1Commands_RegressionRedAtBaseline(t *testing.T) {
 	require.Contains(t, stdout, "Red at baseline, not any change's own (roadmap it): regression `./suite.sh`")
 	require.Empty(t, v1Git(t, root, "status", "--porcelain"))
 }
+
+// initGitRepo is an empty git repo, with a person at the terminal.
+func initGitRepo(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("git fixture")
+	}
+	root := t.TempDir()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	t.Setenv("APE_SESSION", "")
+	t.Setenv("CLAUDECODE", "")
+	for _, kv := range [][2]string{{"GIT_AUTHOR_NAME", "t"}, {"GIT_AUTHOR_EMAIL", "t@t"}, {"GIT_COMMITTER_NAME", "t"}, {"GIT_COMMITTER_EMAIL", "t@t"}} {
+		t.Setenv(kv[0], kv[1])
+	}
+	v1Git(t, root, "init", "-q")
+	return root
+}
+
+// D82: init says which existing file it amended, and how.
+func TestV1_ProjectInitAmendsAgentsMD(t *testing.T) {
+	root := initGitRepo(t)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("# Map\n"), 0o644))
+	stdout, _, err := v1Exec(t, newProjectCmd, "init", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, "amended  AGENTS.md (added the project-context line)\n")
+	stdout, _, err = v1Exec(t, newProjectCmd, "init", "--cwd", root)
+	require.NoError(t, err)
+	require.NotContains(t, stdout, "amended")
+}
+
+// D86: an untracked config without models: is amended and said to be left
+// uncommitted; a models: block missing skills is a warning on stderr
+// (human) or under "warnings" (JSON).
+func TestV1_ProjectInitModelDefaults(t *testing.T) {
+	root := initGitRepo(t)
+	cfgPath := filepath.Join(root, "_apex", "config.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(cfgPath), 0o755))
+	require.NoError(t, os.WriteFile(cfgPath, []byte("project_name: g\n"), 0o644))
+	stdout, stderr, err := v1Exec(t, newProjectCmd, "init", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, "amended  _apex/config.yaml (appended the models: defaults; not committed: it was untracked or had uncommitted changes — commit it yourself)\n")
+	require.NotContains(t, stderr, "warning:")
+
+	root = initGitRepo(t)
+	cfgPath = filepath.Join(root, "_apex", "config.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(cfgPath), 0o755))
+	require.NoError(t, os.WriteFile(cfgPath, []byte("project_name: g\nmodels:\n  apex-apply: opus\n"), 0o644))
+	stdout, stderr, err = v1Exec(t, newProjectCmd, "init", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stderr, "warning: _apex/config.yaml models: has no apex-accept entry — apex-accept runs on claude's default model")
+	require.Equal(t, 6, strings.Count(stderr, "warning: "))
+	require.NotContains(t, stdout, "warning")
+
+	stdout, stderr, err = v1Exec(t, newProjectCmd, "init", "--cwd", root, "--json")
+	require.NoError(t, err)
+	require.Empty(t, stderr)
+	var out struct {
+		Warnings []string `json:"warnings"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &out))
+	require.Len(t, out.Warnings, 6)
+	require.Contains(t, out.Warnings[5], "apex-release")
+}

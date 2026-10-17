@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -27,7 +28,7 @@ func TestParseByteSize(t *testing.T) {
 }
 
 func TestCaps_DefaultsCeilingsAndParse(t *testing.T) {
-	require.Equal(t, Caps{ProjectMD: 16 << 10, AgentsMD: 16 << 10, ChangeMD: 16 << 10, DesignMD: 16 << 10, Spec: 24 << 10, EvidenceLog: 1 << 20}, DefaultCaps())
+	require.Equal(t, Caps{ProjectMD: 16 << 10, AgentsMD: 16 << 10, ChangeMD: 16 << 10, DesignMD: 16 << 10, Spec: 24 << 10, EvidenceLog: 1 << 20, ArchitectureMD: 16 << 10}, DefaultCaps())
 
 	var cfg Config
 	require.NoError(t, yaml.Unmarshal([]byte("caps:\n  project_md: 32KB\n  spec: 40960\n  evidence_log: 4MiB\n"), &cfg))
@@ -59,11 +60,12 @@ func TestCaps_DefaultsCeilingsAndParse(t *testing.T) {
 // line cap.
 func TestCaps_AgentsAndProjectAreBytesOnly(t *testing.T) {
 	p := fixture(t, baseFiles())
-	write(t, p, "AGENTS.md", "# AGENTS.md\n"+strings.Repeat("- x\n", 1000))
+	agents := baseFiles()["AGENTS.md"]
+	write(t, p, "AGENTS.md", agents+strings.Repeat("- x\n", 1000))
 	write(t, p, "development/project.md", projectMD+strings.Repeat("- note\n", 500))
 	require.Empty(t, p.Check(), "a thousand short lines under the byte caps pass")
 
-	write(t, p, "AGENTS.md", strings.Repeat("x", 16<<10+1))
+	write(t, p, "AGENTS.md", agents+strings.Repeat("x", 16<<10+1-len(agents)))
 	got := ClassifyFindings(p.Check())
 	require.Len(t, got, 1)
 	require.Equal(t, "agents.too-big", got[0].Code)
@@ -215,4 +217,31 @@ func TestCaps_EvidenceLogConfigured(t *testing.T) {
 	ev := p.evidenceFile(&r)
 	require.Contains(t, ev, "output: 4000 bytes, over the 1 KB cap (caps.evidence_log)")
 	require.Less(t, len(ev), 1024+1024)
+}
+
+// D84: architecture.md is optional; when present it is under
+// caps.architecture_md (default 16 KB, ceiling 48 KB).
+func TestCaps_ArchitectureMD(t *testing.T) {
+	require.Equal(t, 16<<10, DefaultCaps().ArchitectureMD)
+	p := fixture(t, baseFiles())
+	require.Equal(t, filepath.Join(p.Root, "development", "architecture.md"), p.ArchitectureMD())
+	require.Empty(t, p.Check(), "absent: nothing to measure")
+
+	write(t, p, "development/architecture.md", "# Architecture\n"+strings.Repeat("x", 8<<10))
+	require.Empty(t, p.Check(), "under the cap")
+
+	write(t, p, "development/architecture.md", strings.Repeat("x", 16<<10+1))
+	got := ClassifyFindings(p.Check())
+	require.Len(t, got, 1)
+	require.Equal(t, "architecture.too-big", got[0].Code)
+	require.Equal(t, ActionPerson, ActionFor(got[0].Code))
+	require.Equal(t, "development/architecture.md", got[0].File)
+	require.Equal(t, "architecture.md is 16.0 KB, over the 16 KB cap (caps.architecture_md) — move detail to specs/, decisions/ or docs/explanation/", got[0].Message)
+
+	write(t, p, "_apex/config.yaml", "caps:\n  architecture_md: 20KB\n")
+	require.Empty(t, p.Check(), "a configured cap is the one measured")
+
+	write(t, p, "_apex/config.yaml", "caps:\n  architecture_md: 64KB\n")
+	require.Contains(t, findingMessages(p.Check()), "caps.architecture_md: 64 KB is over its 48 KB ceiling (architecture.md)")
+	require.Equal(t, 48<<10, p.caps().ArchitectureMD, "measured at its ceiling meanwhile")
 }

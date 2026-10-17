@@ -168,10 +168,19 @@ func (p *Project) Check() []Finding {
 	} else {
 		add(ValidateProjectMD(p.Rel(p.ProjectMD()), doc, caps.ProjectMD)...)
 	}
+	// architecture.md is optional (D84): only its size is checked.
+	if doc, err := readFileString(p.ArchitectureMD()); err == nil && len(doc) > caps.ArchitectureMD {
+		add(Finding{File: p.Rel(p.ArchitectureMD()), Message: "architecture.md is " + sizeKB(len(doc)) + ", over the " + capSize(caps.ArchitectureMD) +
+			" cap (caps.architecture_md) — move detail to specs/, decisions/ or docs/explanation/"})
+	}
 	if doc, err := readFileString(p.AgentsMD()); err != nil {
 		missing(p.AgentsMD(), "write the project map: commands, NEVER rules, pointers")
 	} else {
 		add(ValidateAgentsMD("AGENTS.md", doc, caps.AgentsMD)...)
+		if !hasProjectContext(doc, p.DevRel) {
+			add(Finding{File: "AGENTS.md", Message: "AGENTS.md does not import " + p.DevRel + "/project.md — add the line \"" + projectContextLine(p.DevRel) +
+				"\" under its title, as plain text (not in code); `ape project init` adds it"})
+		}
 	}
 	if doc, err := readFileString(p.ClaudeMD()); err == nil {
 		if !hasAgentsImport(doc) {

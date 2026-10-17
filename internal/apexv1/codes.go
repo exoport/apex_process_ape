@@ -229,7 +229,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"project.missing-section", 1, "person", "project.md lacks a required ## section"},
 	{"project.empty-section", 1, "person", "a required project.md section is empty"},
 	{"agents.too-big", 1, "person", "AGENTS.md over its caps.agents_md cap (default 16 KB, ceiling 48 KB; its lines are not measured, D69)"},
-	{CodeCapsOverCeiling, 1, "person", "_apex/config.yaml caps: holds a value above its hard ceiling (project_md, agents_md, change_md, design_md 48 KB; spec 64 KB; evidence_log 16 MiB): a project check finding, and change check, start and archive refuse until a person fixes it (D69; abandon does not, D89 Q40)"},
+	{CodeCapsOverCeiling, 1, "person", "_apex/config.yaml caps: holds a value above its hard ceiling (project_md, agents_md, change_md, design_md, architecture_md 48 KB; spec 64 KB; evidence_log 16 MiB): a project check finding, and change check, start and archive refuse until a person fixes it (D69; abandon does not, D89 Q40)"},
 	{"claude-md.no-import", 1, "person", "CLAUDE.md lacks the line @AGENTS.md"},
 	{"roadmap.title", 1, "person", "roadmap.md does not start with # Roadmap"},
 	{"roadmap.no-milestones", 1, "person", "roadmap.md has no milestone"},

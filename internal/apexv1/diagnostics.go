@@ -205,6 +205,10 @@ var findingRules = []findingRule{
 
 	// D89 (rc.4).
 	rule("", `^change.md is .* in all, over the .* file ceiling`, CodeChangeOverCeiling),
+
+	// rc.4 phase 1 (rc4-a).
+	rule("", `^AGENTS.md does not import .*project\.md`, "agents.no-project-context"),
+	rule("", `^architecture.md is .* over the .* cap \(caps.architecture_md\)`, "architecture.too-big"),
 }
 
 // UnclassifiedFinding is the code of a finding no rule matches — a
