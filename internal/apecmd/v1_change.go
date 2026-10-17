@@ -14,7 +14,7 @@ import (
 func newChangeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "change",
-		Short: "The unit of change: new, check, approve (fixes), start, verify, review, accept, block, answer, archive",
+		Short: "The unit of change: new, check, approve (fixes), start, verify, review, accept, block, answer, archive, tool",
 		Long: `A change is development/changes/<id>/change.md (written by the model) plus state.json
 (written only by ape). Its lifecycle:
 
@@ -106,7 +106,7 @@ on its branch).`,
 	cmd.AddCommand(
 		newChangeNewCmd(), newChangeCheckCmd(), newChangeApproveCmd(), newChangeStartCmd(), newChangeVerifyCmd(),
 		newChangeReviewCmd(), newChangeAcceptCmd(), newChangeBlockCmd(), newChangeAnswerCmd(), newChangeArchiveCmd(),
-		newChangeAbandonCmd(), newChangeDiffCmd(),
+		newChangeAbandonCmd(), newChangeDiffCmd(), newChangeToolCmd(),
 	)
 	return cmd
 }
