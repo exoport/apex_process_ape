@@ -101,7 +101,7 @@ Check settings in _apex/config.yaml (read by start, verify, the gate and the hoo
 value ape cannot use, or a key it does not know inside these blocks, makes the config
 unparseable and every command refuses it):
 
-  regression: make test              the project's own suite, at start/verify/gate, failing
+  regression: make test              the project's own check command, at start/verify/gate, failing
                                      only when newly red; or in tiers:
   regression: {change: make test, milestone: make test-all}
                                      change: at start and verify (baseline-aware);
@@ -347,7 +347,7 @@ decision) can report, with the exit status it comes with and what it means.
 Every --json failure is {"ok": false, "exit": N, "error": "<one line>",
 "diagnostics": [{"severity", "code", "message", "fix", "action", "file"?, "line"?}], ...}:
 the first diagnostic is the failure itself, the rest its findings or conflicts. Branch on
-"action" (D47): retry (run the same command again), apply (apex-apply: code work or a
+"action" (D47): retry (run the same command again), apply (apex-apply: the work, or a
 re-start), review (review again), replan (apex-change re-plans), stop (the run stops), person
 (a person must act: list it, go on with other work). A code's action is the one listed here;
 where its meaning names a case that changes it (milestone.changes-in-flight), the diagnostic
@@ -439,7 +439,7 @@ func newStatusCmd() *cobra.Command {
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
     cmd, exit, sha}]): the regression command, and scenario checks of the spec a change
     leaves untouched, that were red when a change was baselined — for the planner to
-    roadmap. A change's own task and delta checks red at baseline are normal test-first
+    roadmap. A change's own task and delta checks red at baseline are normal check-first
     and never listed
   - the base branch (the checked-out one, or the base of the change whose branch is
     checked out) against its upstream (JSON "base_upstream": {branch, upstream, ahead,

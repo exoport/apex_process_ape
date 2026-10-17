@@ -40,7 +40,7 @@ Branch per change (trial decision D38):
 
   - start creates change/<id> from the branch HEAD is on (recorded as base_branch, with
     base_sha) and checks it out; start on a change whose branch exists checks it out
-  - start, verify, review and archive run the change's code, and need HEAD on
+  - start, verify, review and archive run the change's checks, and need HEAD on
     change/<id> (start and archive switch to it; verify and review refuse elsewhere with
     exit 1, code change.wrong-branch: ` + "`git switch change/<id>`" + `)
   - records from any branch (D51 Q17): check, diff, approve, accept, block, answer and
@@ -377,22 +377,22 @@ func newChangeStartCmd() *cobra.Command {
      the command tasks and the effective spec's scenario checks of the capabilities the
      change touches (plus any scenario sharing a task's command — see ape change verify
      --help); from the project root with sh -c; output under _apex/state/logs/<id>/. With
-     "regression: <cmd>" in _apex/config.yaml (the project's own test suite; with tiers,
+     "regression: <cmd>" in _apex/config.yaml (the project's own check command; with tiers,
      "regression: {change: <cmd>, milestone: <cmd>}", its change tier) it runs that too,
      the same way, and records it in state.json (regression_baseline: cmd, exit, output
      sha256, sha); a red regression baseline is recorded, it does not block start.
      Vacuous checks (backlog 43): when the change has an ADDED or MODIFIED delta, a task
-     check that already passes here, before any of the change's code, proves nothing
+     check that already passes here, before any of the change's work, proves nothing
      about it — start refuses (exit 1, change.vacuous-check, nothing written, no branch
      left): rewrite the check to fail until the change is done, or write a check meant to
      stay green as "- T<n> <what> — regression: <command>". Not judged for Delta: none,
-     a REMOVED-only delta, or a task a re-plan adds after the change has code
+     a REMOVED-only delta, or a task a re-plan adds after the change has work
   5. sets in-progress, freezes the plan (SHA-256 of change.md outside ## Why and ## Notes), fingerprints
      the spec block of every requirement it MODIFIES or REMOVES, commits state.json
      ("apex: <id> in-progress") on change/<id>, and resets the attempts count since start
      (_apex/state/attempts.json)
 
-All of the change's work — code commits, ape's status commits — then happens on
+All of the change's work — work commits, ape's status commits — then happens on
 change/<id>. Start on a change whose branch exists, from another branch (the base, say),
 checks change/<id> out first (clean tree); when the change is started and nothing needs
 re-baselining it only resumes there (JSON "resumed": true). Re-start keeps base_branch.
@@ -422,7 +422,7 @@ If so ape catches the change up — the one path start, verify and archive share
   - the baseline (task checks, effective-spec scenarios, regression command) is re-run
     at the NEW BASE TIP, in place — the checkout detached there, then switched back, so
     ignored files (dependencies, build caches) are present as usual — never at the
-    rebased HEAD, which holds the change's code: a new test of the change is red
+    rebased HEAD, which holds the change's work: a new check of the change is red
     there; it replaces the old baseline, and green-at-baseline is judged against it
   - recorded in state.json (rebases: [{at, from, to, head, rebased}]; base_sha = the base
     tip; the last verify kept with stale: true and stale_reason), a verified or reviewed
@@ -540,15 +540,15 @@ When the base branch moved ahead of base_sha, verify first catches the change up
 as `+"`ape change start --help`"+` describes (D40): rebase onto the base (a conflict is left on
 the branch: exit 3, change.conflicted), the baseline re-run at the new base tip, the old verify
 marked stale, a verified/reviewed change back to in-progress, "apex: <id> rebased onto
-<base>" committed; then it verifies the rebased code (JSON "catch_up"). A reviewed change
+<base>" committed; then it verifies the rebased work (JSON "catch_up"). A reviewed change
 caught up here needs a new review. Refused while a conflicted catch-up is unresolved —
 unmerged paths, or conflict markers in a file the rebase conflicted in (exit 1,
 change.unresolved-conflict: resolve, `+"`git add`"+`, commit).
 
-All checks exit 0 → status verified (a reviewed change whose code has not moved
+All checks exit 0 → status verified (a reviewed change whose work has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last
 lines are printed. Green at baseline: the change's own checks (tasks, delta scenarios) that
-already passed when they were baselined, before the code, are listed (JSON
+already passed when they were baselined, before the work, are listed (JSON
 "green_at_baseline", also recorded in state.json) for review to justify or flag.
 On red: every red verify is an attempt, counted in the git-ignored
 _apex/state/attempts.json (JSON "attempts": since the last start or re-start, which reset
@@ -574,7 +574,7 @@ Refused while change.md differs from the plan frozen at start outside ## Why and
 as pending.
 
 Exit codes: 0 all command checks green · 1 a check is red (the attempts cap reached
-included), uncommitted code, an unresolved conflict, or wrong status · 2 usage · 3 the change
+included), uncommitted work, an unresolved conflict, or wrong status · 2 usage · 3 the change
 does not rebase onto its moved base (the conflict is left on its branch).`,
 		"  ape change verify add-tenant-delete",
 		&f,
@@ -680,14 +680,14 @@ func newChangeReviewCmd() *cobra.Command {
 		`Record the review of a verified change. --findings names the review file (normally
 development/changes/<id>/review.md); it must exist and is recorded by path.
 
-  pass   needs a green verify whose code has not moved since → status reviewed
+  pass   needs a green verify whose work has not moved since → status reviewed
   block  → status in-progress (fix, verify, review again)
 
 HEAD must be on the change's branch, change/<id> (D38; else exit 1, code
 change.wrong-branch): the verdict is committed there.
 
 --run reviews the change in its own Claude Code session — a separate process with an
-empty context and its own hooks, never a sub-agent of the session that built it:
+empty context and its own hooks, never a sub-agent of the session that did the work:
 ape starts `+"`ape task apex-review --args <id>`"+` detached (survives the caller's shell),
 and that session writes review.md and records the verdict with --verdict/--findings.
 It counts as starting apex-review under the nesting rule (D62; see ape task --help):
@@ -697,7 +697,7 @@ another child runs); from any other session — apex-apply a person ran with ape
 say — refused (exit 2, session.depth); never from inside a review session. The
 review session is depth 2 under an orchestrator, its manifest records depth and
 parent_run, and it is stopped when that orchestrator's run ends.
-  - which changes: a verified one; or a reviewed one whose review is stale — code
+  - which changes: a verified one; or a reviewed one whose review is stale — the work
     changed since the review's sha, what archive refuses as review.stale (D51 Q16):
     --run first verifies it again in-process, as `+"`ape change verify <id>`"+` would
     (JSON "verify"; a red verify is returned as its error, verify.red, and no session
@@ -729,7 +729,7 @@ parent_run, and it is stopped when that orchestrator's run ends.
     defaults. The effort is passed as claude --effort. The review session's manifest
     records each and its source under review_launch (and, the same, under launch).
 
-Exit codes: 0 recorded / review passed · 1 not verified, code changed since the verify,
+Exit codes: 0 recorded / review passed · 1 not verified, the work changed since the verify,
 --run: a fresh review, or a red re-verify of a stale one, review block (--run: findings
 in JSON "outcome"), verdict voided, or no verdict · 2 usage
 (bad verdict, findings file missing, --run inside a review session, or the nesting
@@ -1048,7 +1048,7 @@ without a checkout, the folder taken as the branch holding its records has it (i
 branch, or the base for a draft), and the working tree is not touched. The archived
 folder holds the change's files as its branch last had them, the move is committed on the
 base branch, change/<id> is deleted and its last commit recorded as branch_tip in the
-archived state.json, kept reachable as refs/apex/abandoned/<id> (tip_ref; H16, local). None of the change's code reaches the base branch. A draft never
+archived state.json, kept reachable as refs/apex/abandoned/<id> (tip_ref; H16, local). None of the change's work reaches the base branch. A draft never
 started (no branch) is abandoned on the branch HEAD is on, as before.
 
 change.md's cap holds here too (D69): over caps.change_md (default 16 KB) abandon refuses
@@ -1100,7 +1100,7 @@ func newChangeArchiveCmd() *cobra.Command {
      change/<id>); the tree must be clean — uncommitted files inside the change's own
      folder (review.md a review left) are first committed on change/<id> as
      "apex: <id> notes"; anything else refuses (code tree.dirty)
-  3. refused if code changed on change/<id> since the review (review.stale); refused up
+  3. refused if the work changed on change/<id> since the review (review.stale); refused up
      front while the base branch is behind its upstream (base.behind-upstream: pull;
      the local remote-tracking ref, never fetched — D45)
   4. when the base branch moved ahead of base_sha, catches the change up — the one path
@@ -1109,9 +1109,9 @@ func newChangeArchiveCmd() *cobra.Command {
      for apex-apply, the change back to in-progress, and archive exits 3,
      change.conflicted), re-runs the baseline at the new
      base tip and marks the verify stale; here the change stays reviewed
-  5. re-runs verify when the code moved since it or it is stale — the base had moved (red
+  5. re-runs verify when the work moved since it or it is stale — the base had moved (red
      → the change goes back to in-progress on its branch, exit 1, counted as an attempt;
-     a green one keeps it reviewed: the review judged the change's own code)
+     a green one keeps it reviewed: the review judged the change's own work)
   6. applies the delta to development/specs/: ADDED appends, MODIFIED replaces, REMOVED
      deletes; a new capability gets specs/<cap>/spec.md (Purpose from the change's Why).
      Any conflict — including a MODIFIED that would drop a scenario the current spec has,
