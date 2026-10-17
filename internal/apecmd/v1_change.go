@@ -719,7 +719,7 @@ base_branch — or from any other non-change branch; the tree must be clean (unc
 files inside the change's own folder are committed on its branch first). The archived
 folder holds the change's files as its branch last had them, the move is committed on the
 base branch, change/<id> is deleted and its last commit recorded as branch_tip in the
-archived state.json. None of the change's code reaches the base branch. A draft never
+archived state.json, kept reachable as refs/apex/abandoned/<id> (tip_ref; H16, local). None of the change's code reaches the base branch. A draft never
 started (no branch) is abandoned on the branch HEAD is on, as before.
 
 Exit codes: 0 abandoned · 1 no such change, archived, HEAD on another change's branch,
@@ -788,7 +788,10 @@ func newChangeArchiveCmd() *cobra.Command {
      "Change:", deduplicated, then "Change: <id>". The project's git hooks run on this
      commit (commit.hooks: run, the default; skip opts out) — ape's status commits keep
      skipping them. A hook that refuses rolls archive back: exit 1, archive.hook-failed,
-     the hook output's tail in the message. Then deletes change/<id>. If anything fails
+     the hook output's tail in the message. Then keeps change/<id>'s tip as
+     refs/apex/archive/<id> (H16: recorded as tip_ref in the archived state.json, so
+     branch_tip and the verify and review shas survive git gc; local, never pushed by
+     ape) and deletes change/<id>. If anything fails
      on the base branch, it is reset to where it was and change/<id> checked out again.
 
 The base branch gets exactly one commit per archived change; ape's status commits stay on

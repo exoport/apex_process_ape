@@ -186,6 +186,10 @@ func TestArchive(t *testing.T) {
 	require.True(t, st.AllowPendingHuman)
 	require.Equal(t, res.BranchTip, st.BranchTip)
 	require.Equal(t, "main", st.BaseBranch)
+	// H16: the deleted branch's tip stays reachable.
+	require.Equal(t, "refs/apex/archive/add-wave", st.TipRef)
+	require.Equal(t, st.TipRef, res.TipRef)
+	require.Equal(t, res.BranchTip, run(t, p.Root, "rev-parse", "refs/apex/archive/add-wave"))
 
 	require.Empty(t, run(t, p.Root, "status", "--porcelain"), "the archive commit leaves the tree clean")
 	require.Empty(t, p.Check(), "the merged project passes the project check")

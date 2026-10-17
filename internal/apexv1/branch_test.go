@@ -162,6 +162,8 @@ func TestAbandon_AStartedChangeDeletesItsBranch(t *testing.T) {
 	require.Equal(t, StatusAbandoned, st.Status)
 	require.Equal(t, tip, st.BranchTip)
 	require.Equal(t, "main", st.BaseBranch, "the archive holds the state as the branch had it")
+	require.Equal(t, "refs/apex/abandoned/add-wave", st.TipRef, "H16: the tip stays reachable")
+	require.Equal(t, tip, run(t, p.Root, "rev-parse", "refs/apex/abandoned/add-wave"))
 	require.Empty(t, run(t, p.Root, "status", "--porcelain"))
 }
 

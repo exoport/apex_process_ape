@@ -198,6 +198,10 @@ type State struct {
 	// BranchTip is change/<id>'s last commit when archive squash-merged
 	// it or abandon deleted it (D38).
 	BranchTip string `json:"branch_tip,omitempty"`
+	// TipRef keeps BranchTip reachable once the branch is deleted (H16):
+	// refs/apex/archive/<id> at archive, refs/apex/abandoned/<id> at
+	// abandon. Local; pushed only by the project's own policy.
+	TipRef string `json:"tip_ref,omitempty"`
 }
 
 // Active reports whether a change is in flight: started and neither

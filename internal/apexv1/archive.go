@@ -172,8 +172,10 @@ type ArchiveResult struct {
 	// Hooks: the project's git hooks ran on the squash (commit.hooks).
 	Hooks      bool   `json:"hooks"`
 	BaseBranch string `json:"base_branch,omitempty"`
-	// BranchTip is change/<id>'s last commit, squashed into Commit.
+	// BranchTip is change/<id>'s last commit, squashed into Commit, and
+	// kept reachable as TipRef, refs/apex/archive/<id> (H16).
 	BranchTip string `json:"branch_tip,omitempty"`
+	TipRef    string `json:"tip_ref,omitempty"`
 	// Rebased: the base branch had moved, and archive rebased the change
 	// branch onto it.
 	Rebased bool `json:"rebased"`
@@ -367,6 +369,10 @@ func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []S
 		return undo(fmt.Errorf("%w: %s", err, strings.TrimSpace(out)))
 	}
 	res.Commit = HeadSHA(ctx, p.Root)
+	if err := p.keepTip(ctx, archiveRef(id), tip, "archived as "+short(res.Commit)+" on "+base, branch); err != nil {
+		return err
+	}
+	res.TipRef = archiveRef(id)
 	if _, err := git(ctx, p.Root, "branch", "-q", "-D", branch); err != nil {
 		return &FailError{Code: CodeBranchFailed, Msg: "archived as " + short(res.Commit) + " on " + base + ", but deleting " + branch + " failed: " + err.Error() + " — `git branch -D " + branch + "`"}
 	}
@@ -398,6 +404,7 @@ func (p *Project) writeArchive(ctx context.Context, id string, st *State, update
 	st.ArchivedAt = Stamp()
 	st.ArchivedTo = p.Rel(dest)
 	st.BranchTip = tip
+	st.TipRef = archiveRef(id)
 	if len(pending) > 0 {
 		st.AllowPendingHuman = true
 	}
@@ -414,8 +421,10 @@ type AbandonResult struct {
 	ArchivedTo string `json:"archived_to"`
 	Reason     string `json:"reason"`
 	Commit     string `json:"commit"`
-	// BranchTip is the deleted change/<id>'s last commit (D38).
+	// BranchTip is the deleted change/<id>'s last commit (D38), kept
+	// reachable as TipRef (H16).
 	BranchTip string `json:"branch_tip,omitempty"`
+	TipRef    string `json:"tip_ref,omitempty"`
 }
 
 // Abandon moves a change to the archive as abandoned, merging nothing,
@@ -460,10 +469,13 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 	st.ArchivedAt = Stamp()
 	st.ArchivedTo = p.Rel(dest)
 	st.BranchTip = tip
+	if tip != "" {
+		st.TipRef = abandonedRef(id)
+	}
 	if err := SaveState(filepath.Join(dest, "state.json"), st); err != nil {
 		return nil, err
 	}
-	res := &AbandonResult{ID: id, ArchivedTo: p.Rel(dest), Reason: reason, BranchTip: tip}
+	res := &AbandonResult{ID: id, ArchivedTo: p.Rel(dest), Reason: reason, BranchTip: tip, TipRef: st.TipRef}
 	if !inGit {
 		return res, nil
 	}
@@ -477,6 +489,9 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 	}
 	res.Commit = sha
 	if tip != "" {
+		if err := p.keepTip(ctx, abandonedRef(id), tip, "abandoned", branch); err != nil {
+			return res, err
+		}
 		if _, err := git(ctx, p.Root, "branch", "-q", "-D", branch); err != nil {
 			return res, &FailError{Code: CodeBranchFailed, Msg: "abandoned, but deleting " + branch + " failed: " + err.Error() + " — `git branch -D " + branch + "`"}
 		}
@@ -522,6 +537,23 @@ func (p *Project) leaveChangeBranch(ctx context.Context, ci ChangeInfo) (ChangeI
 	}
 	ci, err := checkLoaded(p.loadChange(id))
 	return ci, tip, err
+}
+
+// archiveRef and abandonedRef keep an archived or abandoned change's
+// branch tip reachable after its branch is deleted (H16): the archived
+// state.json's branch_tip, verify and review shas would otherwise be
+// pruned by git gc. Local refs, outside refs/heads and refs/tags.
+func archiveRef(id string) string   { return "refs/apex/archive/" + id }
+func abandonedRef(id string) string { return "refs/apex/abandoned/" + id }
+
+// keepTip points ref at tip before branch is deleted; done says what was
+// already done, for the message when it fails (the branch is then kept).
+func (p *Project) keepTip(ctx context.Context, ref, tip, done, branch string) error {
+	if _, err := git(ctx, p.Root, "update-ref", ref, tip); err != nil {
+		return &FailError{Code: CodeBranchFailed, Msg: done + ", but keeping " + branch + "'s tip as " + ref + " failed: " + err.Error() +
+			" — `git update-ref " + ref + " " + tip + "`, then `git branch -D " + branch + "`"}
+	}
+	return nil
 }
 
 func failingNames(v *VerifyResult) string {
