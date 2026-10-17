@@ -1,0 +1,979 @@
+package apexv1
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+// `ape project lift` is the mechanical half of the v0 → v1 migration
+// (backlog 39, BRIEF D36, D37, D47 Q4): one commit, on a tree whose v0
+// state is archived at the pushed tag apex-v0-final, that deletes the v0
+// families, converts the ADRs, strips v0 ids from code comments, carries
+// the gate commands over, lays down the v1 skeleton and writes the
+// disposition file apex-plan works from. Everything it does is
+// deterministic; the judgment (which rule lives where, what M1 delivers)
+// is apex-plan's and the person's.
+
+// LiftOptions are the knobs of one lift.
+type LiftOptions struct {
+	// DryRun computes and returns the whole plan and writes nothing;
+	// pre-flight problems are reported instead of refused.
+	DryRun bool
+	// FromUpdate is the lift run by `ape framework update` (the v1.0.0
+	// migration entry): uncommitted changes are allowed where the
+	// framework install writes (.claude/skills/, _apex/, .aboard/,
+	// .gitignore), and the lift leaves them to the install's own commit.
+	FromUpdate bool
+	// NoVerifyRun skips running the regression command after the commit.
+	NoVerifyRun bool
+	// Exclude are globs (** allowed) of files the lift must not edit —
+	// a byte-identity perimeter, say. Deletions are not affected.
+	Exclude []string
+	Run     RunOptions
+}
+
+// LiftProblem is a pre-flight refusal a dry run reports.
+type LiftProblem struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// LiftSkip is a file the lift did not edit, and why.
+type LiftSkip struct {
+	File         string `json:"file"`
+	Reason       string `json:"reason"`
+	IDs          int    `json:"ids,omitempty"`
+	ADRCitations int    `json:"adr_citations,omitempty"`
+}
+
+// LiftFileChange is one file the lift edited.
+type LiftFileChange struct {
+	File          string `json:"file"`
+	IDsRemoved    int    `json:"comments_stripped,omitempty"`
+	ADRsRewritten int    `json:"adr_citations_rewritten,omitempty"`
+}
+
+// LiftCandidate is one binding-rule candidate for the disposition file.
+type LiftCandidate struct {
+	Text   string `json:"text"`
+	Source string `json:"source"`
+}
+
+// LiftResult is the lift's report (and, with DryRun, its plan).
+type LiftResult struct {
+	Root          string `json:"root"`
+	DryRun        bool   `json:"dry_run"`
+	Version       string `json:"v0_version"`
+	VersionSource string `json:"v0_version_source"`
+	SkillsSource  string `json:"skills_source"`
+	Tag           string `json:"tag"`
+	TagSHA        string `json:"tag_sha,omitempty"`
+	Remote        string `json:"remote,omitempty"`
+	// Preflight lists what a real run would refuse (dry run only).
+	Preflight []LiftProblem    `json:"preflight,omitempty"`
+	Deleted   []LiftDeletion   `json:"deleted"`
+	KeptApex  []string         `json:"kept_apex,omitempty"`
+	ADRs      []LiftADR        `json:"adrs"`
+	Canon     string           `json:"canon,omitempty"`
+	Changed   []LiftFileChange `json:"changed"`
+	// ADRsNotConverted are record-shaped files no id could be read from:
+	// left in place.
+	ADRsNotConverted    []string        `json:"adrs_not_converted,omitempty"`
+	UnresolvedCitations []LiftIDRef     `json:"unresolved_adr_citations,omitempty"`
+	IDsLeft             []LiftIDRef     `json:"ids_left,omitempty"`
+	Skipped             []LiftSkip      `json:"skipped,omitempty"`
+	DanglingRefs        []LiftIDRef     `json:"references_to_removed_paths,omitempty"`
+	Gates               LiftGates       `json:"gates"`
+	Candidates          []LiftCandidate `json:"rule_candidates"`
+	Readings            []string        `json:"readings,omitempty"`
+	Disposition         string          `json:"disposition"`
+	Init                *InitResult     `json:"init,omitempty"`
+	CommitMessage       string          `json:"commit_message"`
+	Commit              string          `json:"commit,omitempty"`
+	Regression          *CheckResult    `json:"regression,omitempty"`
+	RegressionNote      string          `json:"regression_note,omitempty"`
+}
+
+type lifter struct {
+	ctx    context.Context
+	root   string
+	opt    LiftOptions
+	layout *liftLayout
+	devRel string
+	// projectContext is the project-context.md the lift reads, relative.
+	projectContext string
+	// dirty are paths the framework install changed (FromUpdate): left
+	// alone.
+	dirty    map[string]bool
+	excludes []*regexp.Regexp
+	res      *LiftResult
+	// writes are the files the lift writes, relative path → content.
+	writes map[string]string
+	// deletes are the pathspecs it removes; keepADR the record files of
+	// the ADR folder it could not convert (kept).
+	deletes []string
+	keepADR map[string]bool
+	// texts caches the tracked text files read for the plan.
+	texts map[string]string
+	files []string
+	// claudeBefore is CLAUDE.md with citations rewritten, managed block
+	// still in: the line numbers of the tag.
+	claudeBefore string
+	rw           *adrRewriter
+}
+
+// readRel reads a file as the tag has it — for the inputs the lift
+// deletes (project-context, team memory) — with ADR citations
+// renumbered.
+func (lf *lifter) readRel(rel string) string {
+	data, err := os.ReadFile(filepath.Join(lf.root, filepath.FromSlash(rel)))
+	if err != nil {
+		return ""
+	}
+	out, _, _ := lf.rw.rewrite(string(data))
+	return out
+}
+
+// Lift runs (or, with DryRun, plans) the lift of the v0 project at root.
+func Lift(ctx context.Context, root string, opt LiftOptions) (*LiftResult, error) {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	lf := &lifter{ctx: ctx, root: abs, opt: opt, writes: map[string]string{}, keepADR: map[string]bool{}, texts: map[string]string{}, dirty: map[string]bool{}}
+	lf.res = &LiftResult{Root: abs, DryRun: opt.DryRun, Tag: LiftTag}
+	for _, g := range opt.Exclude {
+		re, err := globRegexp(g)
+		if err != nil {
+			return nil, &UsageError{Code: "usage.lift-exclude", Msg: "--exclude " + g + " is not a valid glob: " + err.Error() + " — use path globs like schema/** or deploy/init/*.sh"}
+		}
+		lf.excludes = append(lf.excludes, re)
+	}
+	if _, err := git(ctx, abs, "rev-parse", "--is-inside-work-tree"); err != nil {
+		return nil, &FailError{Code: "git.not-a-repo", Msg: abs + " is not a git repository — the lift is one commit, archived by a tag"}
+	}
+	if err := lf.refuseV1(); err != nil {
+		return nil, err
+	}
+	if lf.layout, err = detectV0(ctx, abs); err != nil {
+		return nil, err
+	}
+	lf.devRel = DefaultDevFolder
+	if r := lf.rel(lf.layout.Cfg.Paths.Development); r != "" {
+		lf.devRel = r
+	}
+	lf.res.Version, lf.res.VersionSource = lf.layout.Version, lf.layout.VersionSource
+	for _, e := range lf.preflight() {
+		if !opt.DryRun {
+			return nil, e
+		}
+		fe := e.(*FailError) //nolint:errcheck // preflight returns only FailErrors
+		lf.res.Preflight = append(lf.res.Preflight, LiftProblem{Code: fe.Code, Message: fe.Msg})
+	}
+	if err := lf.plan(); err != nil {
+		return nil, err
+	}
+	if opt.DryRun {
+		return lf.res, nil
+	}
+	if err := lf.apply(); err != nil {
+		return lf.res, err
+	}
+	return lf.res, nil
+}
+
+func (lf *lifter) rel(abs string) string {
+	if abs == "" {
+		return ""
+	}
+	r, err := filepath.Rel(lf.root, abs)
+	if err != nil || r == "." || strings.HasPrefix(r, "..") {
+		return ""
+	}
+	return filepath.ToSlash(r)
+}
+
+// refuseV1 refuses a project that already has the v1 layout or a lift
+// commit.
+func (lf *lifter) refuseV1() error {
+	dev := DefaultDevFolder
+	if data, err := os.ReadFile(ConfigPath(lf.root)); err == nil {
+		var c Config
+		if yaml.Unmarshal(data, &c) == nil && c.DevelopmentFolder != "" {
+			dev = strings.Trim(filepath.ToSlash(c.DevelopmentFolder), "/")
+		}
+	}
+	p := &Project{Root: lf.root, DevRel: dev}
+	why := ""
+	switch {
+	case p.IsV1():
+		why = "it has the v1 layout (" + p.StateRel() + "/ or " + dev + "/project.md)"
+	default:
+		if out, _ := git(lf.ctx, lf.root, "log", "-1", "--format=%h %s", "--grep=^"+LiftSubjectPrefix); out != "" {
+			why = "it was lifted already (" + out + ")"
+		}
+	}
+	if why != "" {
+		return &FailError{Code: "lift.not-v0", Msg: "the project is APEX v1 already: " + why + " — nothing to lift; `ape project check` and `ape status` show where it stands"}
+	}
+	return nil
+}
+
+// installTerritory is where `ape framework update` writes: the paths a
+// lift run from inside it tolerates as uncommitted.
+func installTerritory(rel string) bool {
+	switch {
+	case rel == ".gitignore", strings.HasPrefix(rel, ".claude/skills/"), strings.HasPrefix(rel, ".aboard/"):
+		return true
+	case strings.HasPrefix(rel, "_apex/"):
+		return rel != "_apex/config.yaml" && !strings.HasPrefix(rel, "_apex/state/")
+	}
+	return false
+}
+
+// preflight checks the tree and the tag. The tag check is the one network
+// call: git ls-remote against the current branch's upstream remote.
+func (lf *lifter) preflight() []error {
+	var out []error
+	status, err := gitRaw(lf.ctx, lf.root, "status", "--porcelain=v1", "--untracked-files=normal")
+	if err != nil {
+		return []error{&FailError{Code: CodeGitStatusFailed, Msg: "git status: " + err.Error() + " — fix the repository, then lift"}}
+	}
+	var dirty []string
+	for line := range strings.SplitSeq(status, "\n") {
+		if len(line) <= 3 {
+			continue
+		}
+		p := line[3:]
+		if i := strings.Index(p, " -> "); i >= 0 {
+			p = p[i+4:]
+		}
+		p = strings.Trim(p, "\"")
+		if lf.opt.FromUpdate && installTerritory(p) {
+			lf.dirty[strings.TrimSuffix(p, "/")] = true
+			continue
+		}
+		dirty = append(dirty, p)
+	}
+	if len(dirty) > 0 {
+		shown := dirty
+		if len(shown) > 5 {
+			shown = append(shown[:5:5], fmt.Sprintf("and %d more", len(dirty)-5))
+		}
+		out = append(out, &FailError{Code: "lift.dirty", Msg: "uncommitted changes: " + strings.Join(shown, ", ") +
+			" — commit or stash them (on a branch of their own if they are work in flight), then tag and lift"})
+	}
+
+	tagSHA, err := git(lf.ctx, lf.root, "rev-parse", "-q", "--verify", "refs/tags/"+LiftTag+"^{commit}")
+	if err != nil || tagSHA == "" {
+		return append(out, &FailError{Code: "lift.no-tag", Msg: "no tag " + LiftTag + " — the tag is the archive of everything the lift deletes: " +
+			"`git tag -a " + LiftTag + " -m \"APEX v0 final\"` on this commit, push it, then lift"})
+	}
+	lf.res.TagSHA = tagSHA
+	if head := HeadSHA(lf.ctx, lf.root); head != tagSHA {
+		out = append(out, &FailError{Code: "lift.tag-not-head", Msg: LiftTag + " is " + short(tagSHA) + ", HEAD is " + short(head) +
+			" — the lift starts from the tagged commit: check it out, or (a person's call) move the tag to HEAD and push it again"})
+		return out
+	}
+	branch := CurrentBranch(lf.ctx, lf.root)
+	remote := ""
+	if branch != "" {
+		remote, _ = git(lf.ctx, lf.root, "config", "--get", "branch."+branch+".remote")
+	}
+	if remote == "" || remote == "." {
+		return append(out, &FailError{Code: "lift.tag-not-pushed", Msg: "the current branch has no upstream remote, so " + LiftTag +
+			" cannot be shown to be pushed — set one (`git branch -u <remote>/<branch>`), `git push <remote> " + LiftTag + "`, then lift"})
+	}
+	lf.res.Remote = remote
+	ls, err := git(lf.ctx, lf.root, "ls-remote", "--tags", remote, "refs/tags/"+LiftTag, "refs/tags/"+LiftTag+"^{}")
+	if err != nil {
+		return append(out, &FailError{Code: "lift.remote-unreachable", Msg: "git ls-remote " + remote + ": " + err.Error() +
+			" — reach the remote (network, credentials), then lift again"})
+	}
+	remoteSHA, peeled := "", ""
+	for line := range strings.SplitSeq(ls, "\n") {
+		f := strings.Fields(line)
+		if len(f) != 2 {
+			continue
+		}
+		if strings.HasSuffix(f[1], "^{}") {
+			peeled = f[0]
+		} else {
+			remoteSHA = f[0]
+		}
+	}
+	if peeled != "" {
+		remoteSHA = peeled
+	}
+	switch {
+	case remoteSHA == "":
+		out = append(out, &FailError{Code: "lift.tag-not-pushed", Msg: LiftTag + " is not on " + remote + " — `git push " + remote + " " + LiftTag + "`, then lift"})
+	case remoteSHA != tagSHA:
+		out = append(out, &FailError{Code: "lift.tag-not-pushed", Msg: LiftTag + " on " + remote + " is " + short(remoteSHA) + ", not " + short(tagSHA) +
+			" — the archive must be the commit being lifted: a person resolves which is right, then pushes it"})
+	}
+	return out
+}
+
+// excluded reports a path --exclude names.
+func (lf *lifter) excluded(rel string) bool {
+	for _, re := range lf.excludes {
+		if re.MatchString(rel) {
+			return true
+		}
+	}
+	return false
+}
+
+// isDeleted reports whether rel goes with a deleted family.
+func (lf *lifter) isDeleted(rel string) bool {
+	if lf.keepADR[rel] {
+		return false
+	}
+	for _, d := range lf.deletes {
+		if rel == d || strings.HasPrefix(rel, d+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// dirtyAt reports a path the framework install changed (FromUpdate).
+func (lf *lifter) dirtyAt(rel string) bool {
+	for d := range lf.dirty {
+		if d == rel || strings.HasPrefix(d, rel+"/") || strings.HasPrefix(rel, d+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// globRegexp compiles a path glob: ** any depth, * and ? within a
+// segment; a trailing / names a folder.
+func globRegexp(g string) (*regexp.Regexp, error) {
+	g = strings.TrimPrefix(filepath.ToSlash(strings.TrimSpace(g)), "./")
+	if g == "" {
+		return nil, fmt.Errorf("empty")
+	}
+	if strings.HasSuffix(g, "/") {
+		g += "**"
+	}
+	if _, err := path.Match(strings.ReplaceAll(g, "**", "*"), ""); err != nil {
+		return nil, err
+	}
+	var b strings.Builder
+	b.WriteString("^")
+	for i := 0; i < len(g); i++ {
+		switch c := g[i]; {
+		case strings.HasPrefix(g[i:], "**/"):
+			b.WriteString("(?:.*/)?")
+			i += 2
+		case strings.HasPrefix(g[i:], "**"):
+			b.WriteString(".*")
+			i++
+		case c == '*':
+			b.WriteString("[^/]*")
+		case c == '?':
+			b.WriteString("[^/]")
+		default:
+			b.WriteString(regexp.QuoteMeta(string(c)))
+		}
+	}
+	b.WriteString("$")
+	return regexp.Compile(b.String())
+}
+
+// ---- plan ---------------------------------------------------------------
+
+const liftMaxFileBytes = 4 << 20
+
+func (lf *lifter) plan() error {
+	ctx := lf.ctx
+	paths := lf.layout.Cfg.Paths
+	lf.projectContext = lf.findProjectContext()
+
+	// The ADR records, before their folder's deletion is planned: a record
+	// no id can be read from stays.
+	var local []v0ADR
+	if paths.ADRs != "" {
+		var bad []string
+		local, bad = loadADRs(lf.root, paths.ADRs, false)
+		for _, b := range bad {
+			lf.keepADR[b] = true
+		}
+		lf.res.ADRsNotConverted = bad
+	}
+	for _, f := range lf.families(ctx) {
+		for _, p := range f.Paths {
+			lf.deletes = append(lf.deletes, p)
+			lf.res.Deleted = append(lf.res.Deleted, LiftDeletion{Path: p, Family: f.Name})
+		}
+	}
+	lf.res.SkillsSource = lf.layout.SkillsSource
+	lf.listKeptApex()
+
+	if err := lf.loadFiles(); err != nil {
+		return err
+	}
+
+	// Old → new ADR numbers: the local records in order, then the canon
+	// records the project cites and has no local record of.
+	num := map[int]int{}
+	pathMap := map[string]string{}
+	decisionsRel := lf.devRel + "/decisions"
+	next := 1
+	var all []v0ADR
+	dups := map[int]string{} // index in all → the ADR its id's citations go to
+	for _, a := range local {
+		if first, dup := num[a.num]; dup {
+			a.slug += "-" + fmtNum4(next)
+			dups[len(all)] = "ADR-" + fmtNum4(first)
+		} else {
+			num[a.num] = next
+		}
+		all = append(all, a)
+		next++
+	}
+	cited := map[int]bool{}
+	for _, t := range lf.texts {
+		for _, n := range citedADRs(t) {
+			if _, ok := num[n]; !ok {
+				cited[n] = true
+			}
+		}
+	}
+	for _, a := range local {
+		for _, n := range citedADRs(a.body) {
+			if _, ok := num[n]; !ok {
+				cited[n] = true
+			}
+		}
+	}
+	if len(cited) > 0 {
+		gov := lf.layout.Cfg.GovernanceRepositoryPath
+		switch {
+		case gov == "" || !dirExists(gov):
+			lf.res.Canon = "cited ADR numbers with no local record: " + intList(cited) +
+				"; the governance repository is not resolvable here (governance_repository_path/url), so no canon ADR was copied — they are listed under unresolved citations"
+		default:
+			canon := findCanonADRs(gov, cited)
+			for _, a := range canon {
+				num[a.num] = next
+				all = append(all, a)
+				next++
+			}
+			var got []string
+			for _, a := range canon {
+				got = append(got, "ADR-"+fmtNum4(a.num))
+			}
+			lf.res.Canon = "governance repository " + gov + ": copied " + strings.Join(got, ", ")
+			if len(got) == 0 {
+				lf.res.Canon = "governance repository " + gov + ": none of " + intList(cited) + " found there"
+			}
+		}
+	}
+	for i, a := range all {
+		if !a.canon {
+			pathMap[a.rel] = decisionsRel + "/" + fmtNum4(i+1) + "-" + a.slug + ".md"
+		}
+	}
+	rw := newADRRewriter(num, pathMap, lf.rel(paths.ADRs))
+	lf.rw = rw
+	for i, a := range all {
+		date := ""
+		if !a.canon {
+			date = gitFirstDate(ctx, lf.root, a.rel)
+		}
+		la := convertADR(a, i+1, rw, date)
+		la.Path = decisionsRel + "/" + la.Path
+		if first, ok := dups[i]; ok {
+			la.Gaps = append(la.Gaps, "a second v0 record with id "+la.Old+": citations of that id were rewritten to "+first)
+		}
+		for _, n := range la.unresolved {
+			lf.res.UnresolvedCitations = append(lf.res.UnresolvedCitations, LiftIDRef{File: la.Path, Text: "ADR-" + fmtNum4(n), Where: "decision"})
+		}
+		lf.writes[la.Path] = la.doc
+		lf.res.ADRs = append(lf.res.ADRs, la)
+	}
+
+	// Edits: ADR citations everywhere they are prose or comments, ids out
+	// of comments.
+	vocab := newLiftVocab(storyKeys(paths.Implementation), []string{lf.rel(paths.Deferred), lf.rel(paths.Implementation)})
+	for _, rel := range lf.files {
+		src, ok := lf.texts[rel]
+		if !ok {
+			continue
+		}
+		lang := liftLangOf(rel, []byte(src[:min(len(src), 256)]))
+		isMD := strings.HasSuffix(strings.ToLower(rel), ".md") || strings.HasSuffix(strings.ToLower(rel), ".markdown")
+		if lf.excluded(rel) {
+			if n, a := len(vocab.spans(src)), len(citedADRs(src)); n+a > 0 {
+				lf.res.Skipped = append(lf.res.Skipped, LiftSkip{File: rel, Reason: "excluded (--exclude)", IDs: n, ADRCitations: a})
+			}
+			continue
+		}
+		switch {
+		case isMD:
+			out, n, unresolved := rw.rewrite(src)
+			if n > 0 {
+				lf.writes[rel] = out
+				lf.res.Changed = append(lf.res.Changed, LiftFileChange{File: rel, ADRsRewritten: n})
+			}
+			lf.unresolvedIn(rel, src, unresolved)
+		case lang != langNone:
+			ed, err := editComments(rel, src, lang, vocab, rw)
+			if err != nil {
+				if n, a := len(vocab.spans(src)), len(citedADRs(src)); n+a > 0 {
+					lf.res.Skipped = append(lf.res.Skipped, LiftSkip{File: rel, Reason: lang.String() + ": " + err.Error(), IDs: n, ADRCitations: a})
+				}
+				continue
+			}
+			if ed.New != src {
+				lf.writes[rel] = ed.New
+				lf.res.Changed = append(lf.res.Changed, LiftFileChange{File: rel, IDsRemoved: ed.IDsRemoved, ADRsRewritten: ed.ADRsRewritten})
+			}
+			lf.res.IDsLeft = append(lf.res.IDsLeft, ed.Left...)
+			lf.res.UnresolvedCitations = append(lf.res.UnresolvedCitations, ed.Unresolved...)
+		default:
+			if n, a := len(vocab.spans(src)), len(citedADRs(src)); n+a > 0 {
+				lf.res.Skipped = append(lf.res.Skipped, LiftSkip{File: rel, Reason: "not tokenized (" + path.Ext(rel) + "): ids and ADR citations left as written", IDs: n, ADRCitations: a})
+			}
+		}
+	}
+
+	// Gate commands.
+	if lf.projectContext != "" {
+		lf.res.Gates = extractGates(lf.projectContext, lf.readRel(lf.projectContext))
+	}
+	if lf.res.Gates.Source == "" {
+		if doc, ok := lf.texts["CLAUDE.md"]; ok {
+			lf.res.Gates = extractGates("CLAUDE.md", doc)
+		}
+	}
+
+	// CLAUDE.md: the managed block imports a fragment the lift deletes.
+	if doc, ok := lf.current("CLAUDE.md"); ok {
+		lf.claudeBefore = doc
+		if out := lf.dropV0Imports(doc); out != doc {
+			lf.writes["CLAUDE.md"] = out
+		}
+	}
+	lf.writes["_apex/config.yaml"] = lf.v1Config()
+	lf.res.Candidates = lf.candidates()
+	lf.res.Readings = lf.readings()
+	lf.res.DanglingRefs = lf.dangling()
+	sort.Slice(lf.res.Changed, func(i, j int) bool { return lf.res.Changed[i].File < lf.res.Changed[j].File })
+	lf.res.Disposition = lf.devRel + "/" + LiftDisposition
+	lf.writes[lf.res.Disposition] = lf.disposition()
+	lf.res.CommitMessage = lf.commitMessage()
+	return nil
+}
+
+func intList(set map[int]bool) string {
+	var ns []int
+	for n := range set {
+		ns = append(ns, n)
+	}
+	sort.Ints(ns)
+	var out []string
+	for _, n := range ns {
+		out = append(out, "ADR-"+fmtNum4(n))
+	}
+	return strings.Join(out, ", ")
+}
+
+func (lf *lifter) unresolvedIn(rel, src string, nums []int) {
+	if len(nums) == 0 {
+		return
+	}
+	want := map[int]bool{}
+	for _, n := range nums {
+		want[n] = true
+	}
+	for i, l := range strings.Split(src, "\n") {
+		for _, n := range citedADRs(l) {
+			if want[n] {
+				lf.res.UnresolvedCitations = append(lf.res.UnresolvedCitations, LiftIDRef{File: rel, Line: i + 1, Text: "ADR-" + fmtNum4(n), Where: "docs"})
+			}
+		}
+	}
+}
+
+// current is a file's content as the lift will leave it.
+func (lf *lifter) current(rel string) (string, bool) {
+	if s, ok := lf.writes[rel]; ok {
+		return s, true
+	}
+	s, ok := lf.texts[rel]
+	return s, ok
+}
+
+// findProjectContext is the project-context.md the v0 layout keeps: the
+// derived path, else the one tracked file of that name (the skills'
+// **/project-context.md fallback).
+func (lf *lifter) findProjectContext() string {
+	if r := lf.rel(lf.layout.Cfg.Paths.ProjectContext); r != "" && lf.tracked(lf.ctx, r) {
+		return r
+	}
+	out, _ := git(lf.ctx, lf.root, "ls-files", "--", "*project-context.md")
+	for f := range strings.SplitSeq(out, "\n") {
+		if path.Base(f) == "project-context.md" {
+			return f
+		}
+	}
+	return ""
+}
+
+// loadFiles reads every tracked text file the lift may edit: regular
+// files, not deleted, not vendored, not changed by a framework install.
+func (lf *lifter) loadFiles() error {
+	out, err := gitRaw(lf.ctx, lf.root, "ls-files", "-z", "-s")
+	if err != nil {
+		return &FailError{Code: CodeGitStatusFailed, Msg: "git ls-files: " + err.Error() + " — fix the repository, then lift"}
+	}
+	for entry := range strings.SplitSeq(out, "\x00") {
+		tab := strings.IndexByte(entry, '\t')
+		if tab < 0 {
+			continue
+		}
+		mode, rel := entry[:6], entry[tab+1:]
+		if mode != "100644" && mode != "100755" {
+			continue
+		}
+		// config.yaml is rewritten whole; vendored code is not the
+		// project's.
+		if rel == "_apex/config.yaml" || lf.isDeleted(rel) || lf.dirtyAt(rel) || strings.HasPrefix(rel, "vendor/") || strings.Contains(rel, "node_modules/") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(lf.root, filepath.FromSlash(rel)))
+		if err != nil || len(data) > liftMaxFileBytes || bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0 {
+			continue
+		}
+		lf.files = append(lf.files, rel)
+		lf.texts[rel] = string(data)
+	}
+	sort.Strings(lf.files)
+	return nil
+}
+
+// listKeptApex names what stays under _apex/ that is not v1's own.
+func (lf *lifter) listKeptApex() {
+	out, _ := git(lf.ctx, lf.root, "ls-files", "--", "_apex")
+	known := map[string]bool{"_apex/config.yaml": true, frameworkYAML: true}
+	for f := range strings.SplitSeq(out, "\n") {
+		if f == "" || known[f] || lf.isDeleted(f) || strings.HasPrefix(f, "_apex/state/") {
+			continue
+		}
+		lf.res.KeptApex = append(lf.res.KeptApex, f)
+	}
+}
+
+// The v0 installer's markers around the CLAUDE.md block it owned
+// (internal/framework's ManagedBlockBegin/End).
+const (
+	v0ManagedBegin = "<!-- apex:managed:begin -->"
+	v0ManagedEnd   = "<!-- apex:managed:end -->"
+)
+
+// dropV0Imports removes CLAUDE.md's apex:managed block and any import of
+// a file the lift deletes.
+func (lf *lifter) dropV0Imports(doc string) string {
+	lines := strings.SplitAfter(doc, "\n")
+	var out []string
+	in := false
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		switch {
+		case t == v0ManagedBegin:
+			in = true
+			continue
+		case t == v0ManagedEnd:
+			in = false
+			continue
+		case in:
+			continue
+		case strings.HasPrefix(t, "@") && lf.isDeleted(strings.TrimPrefix(t, "@")):
+			continue
+		}
+		out = append(out, l)
+	}
+	res := strings.Join(out, "")
+	for strings.Contains(res, "\n\n\n") {
+		res = strings.ReplaceAll(res, "\n\n\n", "\n\n")
+	}
+	return strings.TrimLeft(res, "\n")
+}
+
+// v1Config is the minimal v1 _apex/config.yaml: the name, the
+// development folder, and the regression command.
+func (lf *lifter) v1Config() string {
+	name := lf.layout.Cfg.ProjectName
+	if name == "" {
+		name = filepath.Base(lf.root)
+	}
+	out := "project_name: " + yamlScalar(name) + "\ndevelopment_folder: " + lf.devRel + "\n"
+	if r := lf.res.Gates.Regression; r != "" {
+		out += "regression: " + yamlString(r) + "\n"
+	}
+	return out
+}
+
+// yamlString renders s as a YAML scalar, quoted only when it must be.
+func yamlString(s string) string {
+	data, err := yaml.Marshal(s)
+	if err != nil {
+		return yamlScalar(s)
+	}
+	return strings.TrimSuffix(string(data), "\n")
+}
+
+// dangling lists references to removed paths left in kept text files:
+// CI guards and scripts that police the v0 corpus surface here.
+func (lf *lifter) dangling() []LiftIDRef {
+	var tops []string
+	for _, d := range lf.deletes {
+		tops = append(tops, regexp.QuoteMeta(d))
+	}
+	if len(tops) == 0 {
+		return nil
+	}
+	sort.Slice(tops, func(i, j int) bool { return len(tops[i]) > len(tops[j]) })
+	re := regexp.MustCompile(`(?:^|[^A-Za-z0-9_./-])((?:\./)?(?:` + strings.Join(tops, "|") + `)(?:/[^\s"'` + "`" + `)\]]*)?)`)
+	var out []LiftIDRef
+	for _, rel := range lf.files {
+		src, _ := lf.current(rel)
+		// framework.yaml is the install's record of what it wrote.
+		if rel == frameworkYAML || !re.MatchString(src) {
+			continue
+		}
+		for i, l := range strings.Split(src, "\n") {
+			for _, m := range re.FindAllStringSubmatch(l, -1) {
+				out = append(out, LiftIDRef{File: rel, Line: i + 1, Text: strings.TrimRight(m[1], ".,:;"), Where: "reference"})
+			}
+		}
+	}
+	return out
+}
+
+// readings are the v0 documents apex-plan may read at the tag: the
+// product briefs and the newest sprint-change proposal.
+func (lf *lifter) readings() []string {
+	planning := lf.rel(lf.layout.Cfg.Paths.Planning)
+	if planning == "" {
+		return nil
+	}
+	out, _ := git(lf.ctx, lf.root, "ls-files", "--", planning)
+	var briefs, proposals []string
+	for f := range strings.SplitSeq(out, "\n") {
+		base := strings.ToLower(path.Base(f))
+		switch {
+		case strings.Contains(base, "brief") && strings.HasSuffix(base, ".md"):
+			briefs = append(briefs, f)
+		case strings.Contains(base, "sprint-change-proposal") && strings.HasSuffix(base, ".md"):
+			proposals = append(proposals, f)
+		}
+	}
+	var res []string
+	for _, b := range briefs {
+		res = append(res, "product brief: "+LiftTag+":"+b)
+	}
+	if len(proposals) > 0 {
+		sort.Strings(proposals)
+		res = append(res, "newest sprint-change proposal: "+LiftTag+":"+proposals[len(proposals)-1])
+	}
+	return res
+}
+
+// ---- apply ----------------------------------------------------------------
+
+func (lf *lifter) apply() error {
+	ctx := lf.ctx
+	pathsFile, err := os.CreateTemp("", "ape-lift-paths-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(pathsFile.Name()) }()
+	_ = pathsFile.Close()
+	pathspec := func(paths []string) []string {
+		_ = os.WriteFile(pathsFile.Name(), []byte(strings.Join(paths, "\x00")), 0o600)
+		return []string{"--pathspec-from-file=" + pathsFile.Name(), "--pathspec-file-nul"}
+	}
+	var rm []string
+	for _, d := range lf.deletes {
+		if d == lf.rel(lf.layout.Cfg.Paths.ADRs) && len(lf.keepADR) > 0 {
+			out, _ := git(ctx, lf.root, "ls-files", "--", d)
+			for f := range strings.SplitSeq(out, "\n") {
+				if f != "" && !lf.keepADR[f] {
+					rm = append(rm, f)
+				}
+			}
+			continue
+		}
+		rm = append(rm, d)
+	}
+	if len(rm) > 0 {
+		if _, err := git(ctx, lf.root, append([]string{"rm", "-r", "-q", "--ignore-unmatch"}, pathspec(rm)...)...); err != nil {
+			return &FailError{Code: "lift.write-failed", Msg: "removing the v0 families: " + err.Error() + " — `git reset --hard` restores the tree; fix the cause, then lift again"}
+		}
+	}
+	commit := append([]string(nil), rm...)
+	writeOrder := make([]string, 0, len(lf.writes))
+	for rel := range lf.writes {
+		writeOrder = append(writeOrder, rel)
+	}
+	sort.Strings(writeOrder)
+	for _, rel := range writeOrder {
+		if rel == lf.res.Disposition {
+			continue
+		}
+		if err := liftWrite(filepath.Join(lf.root, filepath.FromSlash(rel)), lf.writes[rel]); err != nil {
+			return &FailError{Code: "lift.write-failed", Msg: "writing " + rel + ": " + err.Error() + " — `git reset --hard` restores the tree; fix the cause, then lift again"}
+		}
+		commit = append(commit, rel)
+	}
+
+	// The v1 skeleton, as `ape project init --brownfield` lays it down,
+	// committed with the rest.
+	initRes, p, err := initSkeleton(ctx, lf.root, true)
+	if err != nil {
+		return err
+	}
+	lf.res.Init = initRes
+	commit = append(commit, p.initCommitPaths(initRes)...)
+	if doc, err := readFileString(p.AgentsMD()); err == nil {
+		if out := withCommands(doc, lf.res.Gates); out != doc {
+			if err := liftWrite(p.AgentsMD(), out); err != nil {
+				return err
+			}
+		}
+		commit = append(commit, "AGENTS.md")
+	}
+	if err := recordLiftedDecisions(p, lf.res.ADRs); err != nil {
+		return err
+	}
+	if fileExists(p.decisionsJSON()) {
+		commit = append(commit, p.Rel(p.decisionsJSON()))
+	}
+	if err := liftWrite(filepath.Join(lf.root, filepath.FromSlash(lf.res.Disposition)), lf.writes[lf.res.Disposition]); err != nil {
+		return err
+	}
+	commit = append(commit, lf.res.Disposition)
+
+	commit = uniqueStrings(commit)
+	// git rm staged the deletions; what was written is staged here (a
+	// removed folder no longer matches a pathspec for add).
+	removed := map[string]bool{}
+	for _, r := range rm {
+		removed[r] = true
+	}
+	var add []string
+	for _, c := range commit {
+		if !removed[c] {
+			add = append(add, c)
+		}
+	}
+	if _, err := git(ctx, lf.root, append([]string{"add", "-A"}, pathspec(add)...)...); err != nil {
+		return &FailError{Code: CodeCommitFailed, Msg: "staging the lift: " + err.Error() + " — `git reset --hard` restores the tree; fix the cause, then lift again"}
+	}
+	if _, err := git(ctx, lf.root, append([]string{"commit", "--no-verify", "-q", "-m", lf.res.CommitMessage}, pathspec(commit)...)...); err != nil {
+		return &FailError{Code: CodeCommitFailed, Msg: "the lift commit failed: " + err.Error() + " — `git reset --hard` restores the tree; fix the cause (identity, lock), then lift again"}
+	}
+	lf.res.Commit = HeadSHA(ctx, lf.root)
+
+	// The regression command, once, at the lift commit: the baseline red
+	// gates are judged against (backlog 37). A red run is recorded, not a
+	// failure of the lift.
+	switch {
+	case lf.res.Gates.Regression == "":
+		lf.res.RegressionNote = "no regression command was extracted: apex-plan sets `regression:` in _apex/config.yaml"
+	case lf.opt.NoVerifyRun:
+		lf.res.RegressionNote = "not run (--no-verify-run)"
+	default:
+		r := p.runRegression(ctx, lf.res.Gates.Regression, p.LogDir("lift"), "", lf.opt.Run)
+		lf.res.Regression = &r
+		if r.Exit != 0 {
+			lf.res.RegressionNote = fmt.Sprintf("red at the lift commit (exit %d): a pre-existing failure for apex-plan to roadmap, not a lift failure; full output in %s", r.Exit, r.Log)
+		} else {
+			lf.res.RegressionNote = "green at the lift commit"
+		}
+	}
+	return nil
+}
+
+// liftWrite writes a file, keeping an existing file's mode (a script
+// stays executable).
+func liftWrite(path, content string) error {
+	st, statErr := os.Stat(path)
+	if err := writeFileAtomic(path, content); err != nil {
+		return err
+	}
+	if statErr == nil {
+		return os.Chmod(path, st.Mode().Perm())
+	}
+	return nil
+}
+
+func uniqueStrings(in []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range in {
+		s = strings.TrimSuffix(s, "/")
+		if s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// commitMessage is the lift commit's message: the subject other code
+// finds the v1 epoch by, a summary, and the old → new ADR table.
+func (lf *lifter) commitMessage() string {
+	r := lf.res
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s from APEX v0 %s\n\n", LiftSubjectPrefix, r.Version)
+	fmt.Fprintf(&b, "The v0 state is archived at %s (%s). This commit:\n", LiftTag, short(r.TagSHA))
+	fams := map[string]int{}
+	var order []string
+	for _, d := range r.Deleted {
+		if fams[d.Family] == 0 {
+			order = append(order, d.Family)
+		}
+		fams[d.Family]++
+	}
+	for _, f := range order {
+		fmt.Fprintf(&b, "- deletes %s (%d path(s))\n", f, fams[f])
+	}
+	fmt.Fprintf(&b, "- converts %d ADR(s) into %s/decisions/, renumbered from ADR-0001\n", len(r.ADRs), lf.devRel)
+	stripped, cited := 0, 0
+	for _, c := range r.Changed {
+		stripped += c.IDsRemoved
+		cited += c.ADRsRewritten
+	}
+	fmt.Fprintf(&b, "- rewrites %d ADR citation(s) and strips v0 ids from %d comment(s), in %d file(s)\n", cited, stripped, len(r.Changed))
+	if r.Gates.Regression != "" {
+		fmt.Fprintf(&b, "- carries %d gate command(s) from %s into AGENTS.md and regression:\n", len(r.Gates.Commands), r.Gates.Source)
+	}
+	b.WriteString("- lays down the v1 skeleton (ape project init --brownfield)\n")
+	fmt.Fprintf(&b, "- writes %s for apex-plan and the person\n", r.Disposition)
+	if len(r.ADRs) > 0 {
+		b.WriteString("\nADRs, old -> new:\n")
+		for _, a := range r.ADRs {
+			from := ""
+			if a.Canon {
+				from = " (canon)"
+			}
+			fmt.Fprintf(&b, "  %s -> %s%s  %s\n", a.Old, a.New, from, path.Base(a.Path))
+		}
+	}
+	return b.String()
+}

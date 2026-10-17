@@ -15,7 +15,7 @@ func newProjectCmd() *cobra.Command {
 		Use:   "project",
 		Short: "Create and check an APEX v1 project layout",
 	}
-	cmd.AddCommand(newProjectInitCmd(), newProjectCheckCmd(), newProjectCodesCmd())
+	cmd.AddCommand(newProjectInitCmd(), newProjectCheckCmd(), newProjectCodesCmd(), newProjectLiftCmd())
 	return cmd
 }
 
