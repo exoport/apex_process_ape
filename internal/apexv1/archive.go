@@ -282,10 +282,11 @@ func (p *Project) archivable(ctx context.Context, ci ChangeInfo, allowPendingHum
 	if err := checkPlanFrozen(ci); err != nil {
 		return nil, err
 	}
-	pending := st.PendingHuman(ci.Doc.HumanTasks())
+	// Acceptances recorded on the base (accepted.json, D52 Q18) count.
+	pending := p.withBaseAccepted(ctx, id, st).PendingHuman(ci.Doc.HumanTasks())
 	if len(pending) > 0 && !allowPendingHuman {
 		return nil, &FailError{Code: "archive.pending-human", Msg: "human-review tasks not accepted: " + strings.Join(pending, ", ") +
-			" — a person runs `ape change accept " + id + " --task <T> --by <who>` (on " + ChangeBranch(id) + "), or archives it with --allow-pending-human (recorded; a person only, from a terminal)"}
+			" — a person runs `ape change accept " + id + " --task <T> --by <who>` (from any branch), or archives it with --allow-pending-human (recorded; a person only, from a terminal)"}
 	}
 	if !p.branchExists(ctx, ChangeBranch(id)) || st.BaseBranch == "" {
 		return nil, &FailError{Code: "change.no-branch", Msg: "change " + id + " has no branch " + ChangeBranch(id) + " with a recorded base_branch — it was started before changes got their own branch (D38); " +
@@ -386,7 +387,14 @@ func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []S
 	if _, err := git(ctx, p.Root, "merge", "--squash", "-q", branch); err != nil {
 		return undo(err)
 	}
-	if err := p.writeArchive(ctx, id, ci.State, updates, dest, tip, pending); err != nil {
+	// The base's acceptances (accepted.json, D52 Q18) are folded into the
+	// archived state.json; writeArchive drops the file with the folder.
+	st := ci.State
+	if merged := p.withBaseAccepted(ctx, id, st); merged != st {
+		refreshPending(merged, ci.Doc)
+		st = merged
+	}
+	if err := p.writeArchive(ctx, id, st, updates, dest, tip, pending); err != nil {
 		return undo(err)
 	}
 	// An archived change ends its milestone's run of blocks (H19).
@@ -436,6 +444,9 @@ func (p *Project) writeArchive(ctx context.Context, id string, st *State, update
 		return err
 	}
 	if err := os.Rename(p.ChangeDir(id), dest); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(dest, acceptedFile)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	st.Status = StatusArchived

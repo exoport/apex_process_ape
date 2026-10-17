@@ -738,6 +738,18 @@ task accepted, unless a person archives with --allow-pending-human.
     (D51 Q17): without a checkout when HEAD is elsewhere (refused when that branch is
     checked out in another worktree: git.base-checked-out). A draft (no branch) is
     refused (change.wrong-branch: start it first)
+  - a reviewed change with HEAD off change/<id> — on the base branch, say, where a
+    person commits the evidence (D52 Q18): recorded on its base branch, in
+    development/changes/<id>/accepted.json ({"accepted": [{task, by, at, evidence}]}),
+    committed there as "apex: <id> accepted <T>" (trailer "Change: <id>"; without a
+    checkout when HEAD is elsewhere). --evidence paths are resolved at the base's tip:
+    the file must be committed there (else exit 2, usage.evidence), and that content's
+    SHA-256 is recorded. The record never makes the review stale, and a base moved only
+    by it (and ape's other records) is not a move archive rebases for. Every reader
+    counts it — archive's pending-human check, `+"`ape status`"+` awaiting_human and
+    pending_human, milestone close — and archive folds it into the archived state.json
+    and drops the file with the folder. With HEAD on change/<id> it is recorded there,
+    as before
   - an archived change (H4): its archived state.json, under
     development/archive/<date>-<id>/, is updated and committed on the base branch it was
     archived into — "apex: <id> accepted <T> (archived)", trailer "Change: <id>" — from any

@@ -524,7 +524,7 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 			green = false
 		}
 	}
-	pending := st.PendingHuman(ci.Doc.HumanTasks())
+	pending := p.withBaseAccepted(ctx, id, st).PendingHuman(ci.Doc.HumanTasks())
 	if pending == nil {
 		pending = []string{}
 	}
@@ -694,8 +694,11 @@ func (p *Project) saveAndCommitSubject(ctx context.Context, id string, st *State
 
 // Accept records a person accepting a human-review task, with the
 // evidence it rests on (paths in the repository or URLs, H4). A change in
-// flight records it on its branch; an archived change, in its archived
-// state.json on the base branch, wherever HEAD is (acceptArchived).
+// flight records it on its branch, from any branch (D51 Q17) — but a
+// reviewed one accepted with HEAD off its branch records it on its base
+// branch, in accepted.json, its evidence resolved at the base's tip (D52
+// Q18, acceptOnBase); an archived change, in its archived state.json on
+// the base branch, wherever HEAD is (acceptArchived).
 func (p *Project) Accept(ctx context.Context, id, task, by string, evidence ...string) (*State, error) {
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err
@@ -704,14 +707,14 @@ func (p *Project) Accept(ctx context.Context, id, task, by string, evidence ...s
 	if by == "" {
 		return nil, &UsageError{Code: "usage.by", Msg: "--by names the person accepting"}
 	}
-	ev, err := p.resolveEvidence(ctx, evidence)
-	if err != nil {
-		return nil, err
-	}
 	ci, err := p.requireChange(ctx, id)
 	// An archived change — or one this checkout's tree does not hold, as
 	// on a change branch from before its archive — is accepted on the base.
 	if fe, ok := errors.AsType[*FailError](err); ok && (fe.Code == "change.archived" || fe.Code == CodeChangeNotFound) && p.isWorkTree(ctx) {
+		ev, everr := p.resolveEvidence(ctx, evidence)
+		if everr != nil {
+			return nil, everr
+		}
 		st, aerr := p.acceptArchived(ctx, id, task, by, ev)
 		if afe, ok := errors.AsType[*FailError](aerr); fe.Code == "change.archived" || !ok || afe.Code != CodeChangeNotFound {
 			return st, aerr
@@ -724,11 +727,19 @@ func (p *Project) Accept(ctx context.Context, id, task, by string, evidence ...s
 		return nil, err
 	}
 	// A started change read from its branch, HEAD elsewhere, is accepted
-	// there without a checkout (D51 Q17); else HEAD must be on its branch.
+	// there without a checkout (D51 Q17) — on its base when it is
+	// reviewed (D52 Q18); else HEAD must be on its branch.
+	if ci.Branch == ChangeBranch(id) && ci.State.Status == StatusReviewed {
+		return p.acceptOnBase(ctx, ci, task, by, evidence)
+	}
 	if ci.Branch != ChangeBranch(id) {
 		if err := p.requireOnBranch(ctx, id); err != nil {
 			return nil, err
 		}
+	}
+	ev, err := p.resolveEvidence(ctx, evidence)
+	if err != nil {
+		return nil, err
 	}
 	st := ci.State
 	withAcceptance(st, ci.Doc, task, by, ev)

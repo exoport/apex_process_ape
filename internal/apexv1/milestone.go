@@ -528,7 +528,7 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 		switch c.State.Status {
 		case StatusInProgress, StatusVerified, StatusReviewed:
 			inFlight = append(inFlight, c.ID+" ("+c.State.Status+")")
-			if pending := awaitingHuman(c.State, c.Doc); len(pending) > 0 {
+			if pending := awaitingHuman(p.withBaseAccepted(ctx, c.ID, c.State), c.Doc); len(pending) > 0 {
 				awaiting = append(awaiting, c.ID+" ("+strings.Join(pending, ", ")+")")
 			}
 		}

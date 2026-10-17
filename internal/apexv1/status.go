@@ -222,8 +222,10 @@ func (p *Project) Status() *StatusReport {
 		}
 		cs.Answer = c.State.Answer
 		if c.Doc != nil {
-			cs.PendingHuman = c.State.PendingHuman(c.Doc.HumanTasks())
-			cs.AwaitingHuman = awaitingHuman(c.State, c.Doc)
+			// Acceptances recorded on the base count (D52 Q18).
+			acc := p.withBaseAccepted(ctx, c.ID, c.State)
+			cs.PendingHuman = acc.PendingHuman(c.Doc.HumanTasks())
+			cs.AwaitingHuman = awaitingHuman(acc, c.Doc)
 		}
 		if v := c.State.Verify; v != nil {
 			cs.VerifySHA = v.SHA

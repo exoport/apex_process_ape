@@ -79,12 +79,21 @@ func withAcceptance(st *State, c *Change, task, by string, ev []Evidence) {
 	}
 	accepted = append(accepted, Accept{Task: task, By: by, At: Stamp(), Evidence: ev})
 	st.Accepted = accepted
-	if st.Verify != nil {
-		st.Verify.PendingHuman = st.PendingHuman(c.HumanTasks())
-		if st.Verify.PendingHuman == nil {
-			st.Verify.PendingHuman = []string{}
-		}
+	refreshPending(st, c)
+}
+
+// refreshPending recomputes the last verify's pending list from st's
+// acceptances — on a copy of the verify, which st may share.
+func refreshPending(st *State, c *Change) {
+	if st.Verify == nil {
+		return
 	}
+	v := *st.Verify
+	v.PendingHuman = st.PendingHuman(c.HumanTasks())
+	if v.PendingHuman == nil {
+		v.PendingHuman = []string{}
+	}
+	st.Verify = &v
 }
 
 // humanTask is the change's task, which must be a human-review one.
