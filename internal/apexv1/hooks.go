@@ -166,6 +166,17 @@ func (p *Project) protectedReason(abs string) string {
 		}
 		abs = filepath.Join(resolved, filepath.Base(abs))
 	}
+	// The hooks and the session environment (where an APE_ALLOW_* override
+	// would take effect) are a person's: `ape project init` writes the hooks.
+	root := p.Root
+	if resolvedRoot, err := filepath.EvalSymlinks(p.Root); err == nil {
+		root = resolvedRoot
+	}
+	for _, name := range []string{"settings.json", "settings.local.json"} {
+		if abs == filepath.Join(root, ".claude", name) || abs == filepath.Join(p.Root, ".claude", name) {
+			return ".claude/" + name + " holds ape's hooks and the session's environment: a person edits it, and `ape project init` restores the hooks"
+		}
+	}
 	if rel, err := filepath.Rel(state, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return p.StateRel() + "/" + strings.TrimPrefix(filepath.ToSlash(rel), ".") +
 			" is ape's own record (gate runs, logs, hook verdicts) — use the ape command that records it; specs change only through ape change archive"

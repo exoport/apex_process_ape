@@ -352,3 +352,15 @@ func TestStopHook_OutsideAnApeSession(t *testing.T) {
 	d = StopHook(ctx(), stopPayload(p.Root, "SubagentStop", false), RunOptions{})
 	require.False(t, d.Block, "nor a sub-agent's stop")
 }
+
+// The hooks and the session environment are a person's: a model cannot
+// set an APE_ALLOW_* override there with Edit or Write (D47 Q6).
+func TestPreTool_ClaudeSettingsArePersons(t *testing.T) {
+	p := fixture(t, baseFiles())
+	for _, path := range []string{".claude/settings.json", ".claude/settings.local.json", filepath.Join(p.Root, ".claude", "settings.json")} {
+		d := PreTool(editPayload(t, p.Root, "Edit", path))
+		require.True(t, d.Deny, path)
+		require.Contains(t, d.Reason, "a person edits it")
+	}
+	require.False(t, PreTool(editPayload(t, p.Root, "Write", ".claude/agents/x.md")).Deny)
+}
