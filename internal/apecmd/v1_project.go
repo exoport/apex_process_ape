@@ -154,7 +154,10 @@ func newProjectCheckCmd() *cobra.Command {
                            a Markdown link or a bare briefs/….md path, relative to
                            roadmap.md (or development/briefs/… from the project root),
                            must resolve (roadmap.delivery-link); briefs with no linking
-                           Delivery: line are roadmap.delivery-unlinked
+                           Delivery: line are roadmap.delivery-unlinked. An approved
+                           milestone has ape's approval record (milestone.status-
+                           unrecorded; a done one, ape's close) and its gate as approved
+                           (milestone.gate-changed): a person approves it again
   development/briefs/      YYYY-MM-DD-<slug>.md with a real date (brief.bad-name);
                            committed with the plan (brief.uncommitted); never changed
                            from the text of the commit that added it, in the working
@@ -164,7 +167,8 @@ func newProjectCheckCmd() *cobra.Command {
                            "#### Scenario:" and exactly one "- check: <cmd> | human-review"
                            per scenario; ≤ 20 KB ("split into two capabilities")
   decisions/NNNN-<slug>.md # ADR-NNNN: title, Status, Date, Context/Decision/Consequences,
-                           Enforced by
+                           Enforced by; an accepted one recorded in decisions.json
+                           (decision.accepted-unrecorded: ` + "`ape decision accept`" + ` records it)
   changes/<id>/            every non-archived change, as ` + "`ape change check`" + `
   layout                   no development/changes/archive/ (an older ape's archive: move
                            its folders to development/archive/), no development/.apex/

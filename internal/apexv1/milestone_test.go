@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -43,8 +44,14 @@ func TestMilestoneLifecycle(t *testing.T) {
 	require.True(t, strings.HasPrefix(m.StatusText, "approved (by ann "))
 	require.Equal(t, "apex: M1 approved", subjects(t, p)[0])
 	require.Contains(t, run(t, p.Root, "log", "-1", "--format=%b"), "Milestone: M1")
-	require.Equal(t, "development/roadmap.md", run(t, p.Root, "show", "--name-only", "--format=", "HEAD"))
+	require.ElementsMatch(t, []string{"development/roadmap.md", "_apex/state/milestones.json"},
+		strings.Split(run(t, p.Root, "show", "--name-only", "--format=", "HEAD"), "\n"), "the approval is recorded with the Status line")
 	clean(t, p, "milestone approve")
+	recs, err := p.LoadMilestoneRecords()
+	require.NoError(t, err)
+	require.Equal(t, "ann", recs["M1"].Approval.By)
+	require.Equal(t, "./gate.sh", recs["M1"].Approval.GateCmd)
+	require.Empty(t, recs["M1"].Approval.GateFiles, "gate.sh does not exist yet")
 	head := HeadSHA(ctx(), p.Root)
 	again, err := p.ApproveMilestone(ctx(), "M1", "bob")
 	require.NoError(t, err)
@@ -59,9 +66,10 @@ func TestMilestoneLifecycle(t *testing.T) {
 	require.Equal(t, "apex: M1 gate red", subjects(t, p)[0])
 	require.Equal(t, "_apex/state/milestones.json", run(t, p.Root, "show", "--name-only", "--format=", "HEAD"))
 	clean(t, p, "the first gate run")
-	recs, err := p.LoadMilestoneRecords()
+	recs, err = p.LoadMilestoneRecords()
 	require.NoError(t, err)
 	require.Equal(t, GateRed, recs["M1"].Result)
+	require.Equal(t, "ann", recs["M1"].Approval.By, "a gate run keeps the approval")
 
 	// Same result again: nothing committed, nothing dirty, but status
 	// sees the newer run.
@@ -79,9 +87,25 @@ func TestMilestoneLifecycle(t *testing.T) {
 	require.Equal(t, head, HeadSHA(ctx(), p.Root), "still red: nothing to commit")
 	clean(t, p, "a red close")
 
-	// A change in flight blocks the close even with a green gate.
+	// A gate file that appeared since the approval refuses gate and close
+	// until a person approves the gate again (H2).
 	write(t, p, "gate.sh", "#!/bin/sh\nexit 0\n")
 	commitAll(t, p, "feat: gate")
+	_, err = p.RunGate(ctx(), "M1", RunOptions{})
+	require.ErrorContains(t, err, "M1's gate changed since ann approved it: gate.sh is new")
+	_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
+	fe, ok := errors.AsType[*FailError](err)
+	require.True(t, ok)
+	require.Equal(t, CodeGateChanged, fe.Code)
+	require.Contains(t, findingMessages(p.Check()), "M1 gate changed since it was approved (gate.sh is new)")
+	statusLine := p.roadmap().Find("M1").StatusText
+	_, err = p.ApproveMilestone(ctx(), "M1", "bob")
+	require.NoError(t, err)
+	require.Equal(t, "apex: M1 re-approved", subjects(t, p)[0])
+	require.Equal(t, statusLine, p.roadmap().Find("M1").StatusText, "the Status line keeps the first approval")
+	require.NotContains(t, findingMessages(p.Check()), "M1 ")
+
+	// A change in flight blocks the close even with a green gate.
 	addChange(t, p, "add-wave", waveChange("add-wave"))
 	require.NoError(t, SaveState(p.StateFile("add-wave"), &State{ID: "add-wave", Status: StatusVerified}))
 	commitAll(t, p, "wip")

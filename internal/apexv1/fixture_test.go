@@ -30,12 +30,43 @@ func fixture(t *testing.T, files map[string]string) *Project {
 	for _, d := range []string{"development/specs", "development/changes", "development/archive", "development/decisions", "_apex/state"} {
 		require.NoError(t, os.MkdirAll(filepath.Join(root, d), 0o755))
 	}
+	p, err := Open(root)
+	require.NoError(t, err)
+	// A milestone the fixture's roadmap says is approved was approved by a
+	// person through ape (H2), unless the fixture brings its own records.
+	if _, ok := files["_apex/state/milestones.json"]; !ok {
+		recordApprovals(t, p)
+	}
 	run(t, root, "init", "-q", "-b", "main")
 	run(t, root, "add", "-A")
 	run(t, root, "commit", "-q", "--allow-empty", "-m", "fixture")
-	p, err := Open(root)
-	require.NoError(t, err)
 	return p
+}
+
+// recordApprovals writes milestones.json approval records, by "eval", for
+// every milestone the roadmap says is approved, gate as it is now. It
+// commits nothing.
+func recordApprovals(t *testing.T, p *Project) {
+	t.Helper()
+	rm := p.roadmap()
+	if rm == nil {
+		return
+	}
+	recs, err := p.LoadMilestoneRecords()
+	require.NoError(t, err)
+	n := 0
+	for i := range rm.Milestones {
+		if m := &rm.Milestones[i]; m.Status == MilestoneApproved {
+			if recs[m.ID] == nil {
+				recs[m.ID] = &MilestoneRecord{}
+			}
+			recs[m.ID].Approval = p.newApproval(m.Gate, "eval")
+			n++
+		}
+	}
+	if n > 0 {
+		require.NoError(t, p.saveMilestoneRecords(recs))
+	}
 }
 
 // asPerson runs the test as a person at a terminal: no model session

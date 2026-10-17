@@ -74,8 +74,13 @@ const (
 // (D11); the latest run, whatever its result, is in the gitignored
 // logs/gate-<M>.json.
 type MilestoneRecord struct {
-	Result string   `json:"result"`
-	Since  *GateRun `json:"since"`
+	Result string   `json:"result,omitempty"`
+	Since  *GateRun `json:"since,omitempty"`
+	// Approval is a person's approval of the milestone and its gate (H2):
+	// what change start, gate and close trust, never the Status line alone.
+	Approval *MilestoneApproval `json:"approval,omitempty"`
+	// DoneAt is when `ape milestone close` wrote the milestone done.
+	DoneAt string `json:"done_at,omitempty"`
 	// Stops are the sessions ape stopped at the milestone's enforced
 	// budget (backlog 30).
 	Stops []LimitStop `json:"stops,omitempty"`
@@ -182,7 +187,12 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 	return id, nil
 }
 
-// ApproveMilestone writes `Status: approved (by <who> <ts>)`.
+// ApproveMilestone writes `Status: approved (by <who> <ts>)` and records
+// the approval in milestones.json (H2): who, when, and the gate approved
+// — its command and its files' content. Both are committed together. On
+// an approved milestone it records the approval again when ape holds none
+// or the gate changed since (the Status line is kept); otherwise it is a
+// no-op.
 func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milestone, error) {
 	// A model never approves its own milestone (D47 Q6).
 	if err := requirePerson("ape milestone approve"); err != nil {
@@ -202,24 +212,48 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milesto
 	if m == nil {
 		return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "no milestone " + id + " in roadmap.md"}
 	}
+	recs, err := p.LoadMilestoneRecords()
+	if err != nil {
+		return nil, err
+	}
+	rec := recs[id]
 	switch m.Status {
 	case MilestoneDone:
 		return nil, &FailError{Code: "milestone.done", Msg: id + " is already done"}
 	case MilestoneApproved:
-		return m, nil
+		// Re-approval: only when ape holds no record of the approval, or
+		// the gate changed since it.
+		if rec != nil && rec.Approval != nil && len(p.gateDrift(m, rec.Approval)) == 0 {
+			return m, nil
+		}
 	}
 	if fs := ValidateRoadmap(p.Rel(p.RoadmapMD()), doc); len(filterMilestone(fs, m)) > 0 {
 		return nil, &FailError{Code: "milestone.malformed", Msg: id + " is not well-formed — fix roadmap.md before approving", Findings: filterMilestone(fs, m)}
 	}
-	updated, err := rm.WithStatus(id, "approved (by "+strings.TrimSpace(by)+" "+Stamp()+")")
-	if err != nil {
+	what := MilestoneApproved
+	if m.Status == MilestoneApproved {
+		// The Status line keeps the first approval: the milestone's spend
+		// counts from it, and a re-approval must not reset that.
+		what = "re-approved"
+	} else {
+		updated, err := rm.WithStatus(id, "approved (by "+strings.TrimSpace(by)+" "+Stamp()+")")
+		if err != nil {
+			return nil, err
+		}
+		if err := writeFileAtomic(p.RoadmapMD(), updated); err != nil {
+			return nil, err
+		}
+		m = ParseRoadmap("", updated).Find(id)
+	}
+	if rec == nil {
+		rec = &MilestoneRecord{}
+		recs[id] = rec
+	}
+	rec.Approval = p.newApproval(m.Gate, strings.TrimSpace(by))
+	if err := p.saveMilestoneRecords(recs); err != nil {
 		return nil, err
 	}
-	if err := writeFileAtomic(p.RoadmapMD(), updated); err != nil {
-		return nil, err
-	}
-	m = ParseRoadmap("", updated).Find(id)
-	if _, err := p.commitMilestone(ctx, id, MilestoneApproved); err != nil {
+	if _, err := p.commitMilestone(ctx, id, what); err != nil {
 		return m, err
 	}
 	return m, nil
@@ -255,6 +289,14 @@ type GateResult struct {
 func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*GateResult, error) {
 	if err := p.refuseOnChangeBranch(ctx, "a milestone gate run"); err != nil {
 		return nil, err
+	}
+	// An approved milestone's gate is the one a person approved (H2).
+	if _, rm, err := p.loadRoadmapDoc(); err == nil {
+		if m := rm.Find(id); m != nil && m.Status == MilestoneApproved {
+			if err := p.requireApprovalRecord(m, true); err != nil {
+				return nil, err
+			}
+		}
 	}
 	g, err := p.runGate(ctx, id, opt)
 	if err != nil || !g.ResultChanged {
@@ -327,16 +369,30 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	if rec := recs[id]; rec != nil && rec.Result == result {
 		return g, nil
 	}
-	var stops []LimitStop
-	if rec := recs[id]; rec != nil {
-		stops = rec.Stops
+	rec := recs[id]
+	if rec == nil {
+		rec = &MilestoneRecord{}
+		recs[id] = rec
 	}
-	recs[id] = &MilestoneRecord{Result: result, Since: &run, Stops: stops}
+	rec.Result, rec.Since = result, &run
 	if err := p.saveMilestoneRecords(recs); err != nil {
 		return nil, err
 	}
 	g.ResultChanged = true
 	return g, nil
+}
+
+// markDone records in milestones.json that ape closed the milestone.
+func (p *Project) markDone(id, at string) error {
+	recs, err := p.LoadMilestoneRecords()
+	if err != nil {
+		return err
+	}
+	if recs[id] == nil {
+		recs[id] = &MilestoneRecord{}
+	}
+	recs[id].DoneAt = at
+	return p.saveMilestoneRecords(recs)
 }
 
 func lastN(xs []string, n int) []string {
@@ -364,6 +420,9 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 	case MilestoneDone:
 		return &GateResult{Milestone: id, Status: MilestoneDone}, nil
 	case MilestoneApproved:
+		if err := p.requireApprovalRecord(m, true); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, &FailError{Code: CodeMilestoneNotApproved, Msg: id + " is " + m.StatusText + ", not approved — nothing to close"}
 	}
@@ -406,6 +465,9 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 		return nil, err
 	}
 	if err := writeFileAtomic(p.RoadmapMD(), updated); err != nil {
+		return nil, err
+	}
+	if err := p.markDone(id, g.Run.At); err != nil {
 		return nil, err
 	}
 	g.Status = MilestoneDone

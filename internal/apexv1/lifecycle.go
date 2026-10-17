@@ -267,7 +267,9 @@ func (p *Project) requireApproved(ci ChangeInfo) error {
 		return &FailError{Code: CodeMilestoneNotApproved, Msg: fmt.Sprintf("milestone %s is %s, not approved — a person runs `ape milestone approve %s --by <who>`",
 			ci.Doc.Meta.Milestone, status, ci.Doc.Meta.Milestone)}
 	}
-	return nil
+	// The Status line alone is text anyone can write: ape's record of the
+	// approval is what start trusts (H2).
+	return p.requireApprovalRecord(ms, false)
 }
 
 // rebaseline runs the baseline — every check verify will run: the command

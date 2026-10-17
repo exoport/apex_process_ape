@@ -269,7 +269,9 @@ func newChangeStartCmd() *cobra.Command {
 		"Check green + approved → create and check out change/<id>, record the baseline, set in-progress",
 		`Start a draft (or resume a blocked) change:
 
-  1. `+"`ape change check <id>`"+` must be green, and its milestone approved — or, for a fix
+  1. `+"`ape change check <id>`"+` must be green, and its milestone approved — through ape: the
+     approval record in milestones.json, not the Status line alone (H2; else exit 1,
+     milestone.status-unrecorded: a person runs `+"`ape milestone approve <M> --by <who>`"+`) — or, for a fix
      (milestone: none, D40), the fix approved for the plan it has
      (`+"`ape change approve <id> --by <who>`"+`; else exit 1, change.not-approved)
   2. refused with exit 3 if another active change (in-progress, verified, reviewed —

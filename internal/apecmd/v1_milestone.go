@@ -21,6 +21,14 @@ and is committed, as "apex: <M> gate green|red", only when that result changes; 
 latest run of any result is in the gitignored _apex/state/logs/gate-<M>.json.
 No milestone command leaves the tree dirty.
 
+Approvals are records (H2): ` + "`ape milestone approve`" + ` records who approved, when, and the gate
+approved — its command and the SHA-256 of every file it names — under the milestone's
+"approval" in milestones.json. change start, gate and close trust that record, never the
+Status line alone: an approved milestone with no record (approved by hand, or before ape
+recorded approvals) is refused with milestone.status-unrecorded, and gate and close refuse
+one whose gate changed since with milestone.gate-changed — in both cases a person runs
+` + "`ape milestone approve <M> --by <who>`" + ` (again). ` + "`ape project check`" + ` reports both.
+
 Branches (trial decision D38): every milestone command records on the base branch — the
 one changes are started from and archived into (D11). On a change's branch, change/<id>,
 new, approve, gate and close are refused (exit 1, code branch.change-branch): run
@@ -82,10 +90,20 @@ func newMilestoneApproveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "approve <M> --by <who>",
 		Short: "Write Status: approved (by <who> <ts>)",
-		Long: `Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)".
-Changes can start only under an approved milestone. Committed as "apex: <M> approved".
-Approving an approved milestone is a no-op; a done one is refused. Refused on a change
-branch (see ` + "`ape milestone --help`" + `).
+		Long: `Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)", and
+milestones.json records the approval (H2): {by, at, gate_cmd, gate_files, gate_files_sha256}
+— the Gate: command, and the SHA-256 of each gate file: every word of the command (split at
+whitespace and ; | & < > ( ), the value of a KEY=value or --flag=value word) that names a
+regular file under the project root, e.g. ./scripts/e2e.sh (absolute paths, paths leaving
+the root, options and words with $ or a glob are not looked up; what a script runs in
+turn is not covered). Changes can start only under an approved milestone; gate and close
+refuse a gate that differs from the approved one. Committed together as "apex: <M>
+approved".
+
+Approving an approved milestone records the approval again — "apex: <M> re-approved", the
+Status line kept as it was (the milestone's spend counts from it) — when ape holds no
+record of it or its gate changed since; otherwise it is a no-op. A done one is refused.
+Refused on a change branch (see ` + "`ape milestone --help`" + `).
 
 Only a person approves (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE
 set, which includes a ` + "`!`" + ` line inside Claude Code — with exit 2, code
@@ -159,9 +177,11 @@ output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; sho
 the first, _apex/state/milestones.json is updated and committed as
 "apex: <M> gate green|red". Does not change the milestone's status — ` + "`ape milestone close`" + ` does.
 Refused on a change branch: the gate judges the base branch (see ` + "`ape milestone --help`" + `).
+On an approved milestone, refused when ape holds no approval record (milestone.status-unrecorded)
+or the gate differs from the approved one (milestone.gate-changed): a person approves it again.
 
-Exit codes: 0 gate green · 1 gate red (last output lines shown), no such milestone, or HEAD
-on a change branch · 2 usage.`,
+Exit codes: 0 gate green · 1 gate red (last output lines shown), no such milestone, no
+approval record, a changed gate, or HEAD on a change branch · 2 usage.`,
 		Example: "  ape milestone gate M1",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -205,10 +225,11 @@ AND every scenario check of the spec pass, AND the regression command (when conf
 not newly red against the milestone's earliest baseline for it — with no baseline, red fails
 (see ` + "`ape milestone gate`" + `). A red gate is recorded as
 by ` + "`ape milestone gate`" + `. A milestone is done when this command exits 0 — never because
-anyone says so.
+anyone says so. Refused, as by ` + "`ape milestone gate`" + `, when ape holds no approval record or the
+gate changed since the approval (H2). ape records the close in milestones.json (done_at).
 
-Exit codes: 0 done · 1 gate red, changes in flight, not approved, or HEAD on a change
-branch · 2 usage.`,
+Exit codes: 0 done · 1 gate red, changes in flight, not approved, no approval record, a
+changed gate, or HEAD on a change branch · 2 usage.`,
 		Example: "  ape milestone close M1",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -317,8 +338,14 @@ func newDecisionAcceptCmd() *cobra.Command {
 		Long: `Set a proposed ADR's Status to accepted and record the text it was accepted with in
 _apex/state/decisions.json; both are committed as "apex: ADR-NNNN accepted". From
 then on ` + "`ape project check`" + ` fails if the ADR's text (everything but its Status line)
-changes: supersede it instead. An ADR accepted by hand is held to the text git first
-committed it accepted with.
+changes: supersede it instead.
+
+An ADR whose Status says accepted with no record in decisions.json — accepted by hand, or
+before ape recorded acceptances — is reported by ` + "`ape project check`" + `
+(decision.accepted-unrecorded) and held to the text git first committed it accepted with.
+Accept records it as it is ("apex: ADR-NNNN accepted (recorded)"), unless its text changed
+since that commit (decision.accepted-edited: restore it first). The lift migration's
+records (by "lift") count as records.
 
 A person's acceptance is recorded on the base branch (D11, D38): refused on a change's
 branch, change/<id> (code branch.change-branch; ` + "`git switch <base>`" + ` first).

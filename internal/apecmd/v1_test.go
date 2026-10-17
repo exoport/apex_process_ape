@@ -204,6 +204,13 @@ func TestV1Commands_ExitCodes(t *testing.T) {
 	v1Git(t, root, "commit", "-q", "-m", "feat: gate")
 	_, _, err = v1Exec(t, newChangeCmd, "abandon", "add-wave-2", "--reason", "duplicate", "--cwd", root)
 	require.NoError(t, err)
+	// gate.sh is new since M1 was approved (H2): a person approves it again.
+	stdout, _, err = v1Exec(t, newMilestoneCmd, "close", "M1", "--json", "--cwd", root)
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
+	require.Contains(t, stdout, `"code": "milestone.gate-changed"`)
+	require.Contains(t, stdout, `"action": "person"`)
+	_, _, err = v1Exec(t, newMilestoneCmd, "approve", "M1", "--by", "eval", "--cwd", root)
+	require.NoError(t, err)
 	stdout, _, err = v1Exec(t, newMilestoneCmd, "close", "M1", "--cwd", root)
 	require.NoError(t, err)
 	require.Contains(t, stdout, "M1 status: done")

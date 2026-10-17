@@ -21,7 +21,7 @@ func TestProjectCheck_OldStateFolderIsAFinding(t *testing.T) {
 	require.Equal(t, "move development/.apex/{milestones,decisions}.json to _apex/state/ and delete development/.apex/", fs[0].Fix)
 	recs, err := p.LoadMilestoneRecords()
 	require.NoError(t, err)
-	require.Empty(t, recs, "the old milestones.json is not read")
+	require.Empty(t, recs["M1"].Result, "the old milestones.json is not read")
 }
 
 // A project only an older ape touched is still recognised, so its

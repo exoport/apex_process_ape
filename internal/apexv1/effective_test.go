@@ -81,8 +81,9 @@ func TestVerify_RunsTheEffectiveSpec(t *testing.T) {
 // The milestone gate runs the whole spec as its regression suite: a green
 // gate command does not close a milestone whose spec has a red scenario.
 func TestGate_RunsTheSpecAsRegressionSuite(t *testing.T) {
-	p := fixture(t, baseFiles())
-	write(t, p, "gate.sh", "#!/bin/sh\nexit 0\n")
+	files := baseFiles()
+	files["gate.sh"] = "#!/bin/sh\nexit 0\n"
+	p := fixture(t, files)
 	write(t, p, "greet.sh", "#!/bin/sh\necho Hi $1\n")
 	commitAll(t, p, "break hello")
 	g, err := p.RunGate(ctx(), "M1", RunOptions{})

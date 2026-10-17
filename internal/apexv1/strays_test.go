@@ -56,9 +56,9 @@ func TestArchive_AfterALitteringCheck(t *testing.T) {
 }
 
 func TestGate_UndoesWhatItLeft(t *testing.T) {
-	p := fixture(t, baseFiles())
-	write(t, p, "gate.sh", "#!/bin/sh\necho log > gate.log\nexit 0\n")
-	commitAll(t, p, "gate")
+	files := baseFiles()
+	files["gate.sh"] = "#!/bin/sh\necho log > gate.log\nexit 0\n"
+	p := fixture(t, files)
 	g, err := p.RunGate(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
 	require.True(t, g.Run.Green())

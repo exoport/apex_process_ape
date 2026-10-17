@@ -73,10 +73,47 @@ func TestDecision_HandAcceptedIsHeldToItsFirstAcceptedCommit(t *testing.T) {
 	fillADR(t, p, d.Path)
 	write(t, p, d.Path, strings.Replace(read(t, p, d.Path), "Status: proposed", "Status: accepted", 1))
 	commitAll(t, p, "docs: accept ADR-0001 by hand")
-	require.Empty(t, p.Check())
+	fs := ClassifyFindings(p.Check())
+	require.Len(t, fs, 1, findingMessages(fs))
+	require.Equal(t, CodeDecisionUnrecorded, fs[0].Code, "accepted by hand is not recorded (H2)")
 	write(t, p, d.Path, strings.Replace(read(t, p, d.Path), "Some prose.", "Edited.", 1))
 	commitAll(t, p, "docs: edit an accepted ADR")
 	require.Contains(t, findingMessages(p.Check()), "was accepted and its text has changed since")
+	_, err = p.AcceptDecision(ctx(), "ADR-0001", "ann")
+	require.ErrorContains(t, err, "restore it, then record it", "an edited ADR is not recorded as it is")
+
+	// Restored, a person records it as it is.
+	write(t, p, d.Path, strings.Replace(read(t, p, d.Path), "Edited.", "Some prose.", 1))
+	commitAll(t, p, "docs: restore ADR-0001")
+	res, err := p.AcceptDecision(ctx(), "ADR-0001", "ann")
+	require.NoError(t, err)
+	require.Equal(t, "apex: ADR-0001 accepted (recorded)", subjects(t, p)[0])
+	require.NotEmpty(t, res.Commit)
+	require.Empty(t, p.Check())
+	require.Equal(t, "ann", p.loadDecisionRecords()["ADR-0001"].By)
+}
+
+// The lift's records (by "lift") make a converted ADR recorded, and hold
+// it to its text from then on.
+func TestRecordLiftedDecisions(t *testing.T) {
+	p := fixture(t, baseFiles())
+	d, err := p.NewDecision(ctx(), "use-sh", "", "")
+	require.NoError(t, err)
+	fillADR(t, p, d.Path)
+	write(t, p, d.Path, strings.Replace(read(t, p, d.Path), "Status: proposed", "Status: accepted", 1))
+	commitAll(t, p, "lift")
+	require.Contains(t, findingMessages(p.Check()), "ADR-0001 is accepted, but ape has no record")
+	require.Error(t, p.RecordLiftedDecisions([]string{"ADR-0009"}))
+	require.NoError(t, p.RecordLiftedDecisions([]string{"ADR-0001"}))
+	require.Equal(t, LiftBy, p.loadDecisionRecords()["ADR-0001"].By)
+	require.Contains(t, run(t, p.Root, "status", "--porcelain"), "decisions.json", "written, not committed")
+	commitAll(t, p, "lift records")
+	require.Empty(t, p.Check())
+	write(t, p, d.Path, strings.Replace(read(t, p, d.Path), "Some prose.", "Edited.", 1))
+	require.Contains(t, findingMessages(p.Check()), "was accepted and its text has changed since")
+	d2, err := p.NewDecision(ctx(), "use-awk", "", "")
+	require.NoError(t, err)
+	require.ErrorContains(t, p.RecordLiftedDecisions([]string{d2.ID}), "not accepted")
 }
 
 func TestDecision_SupersedesMustNameAnADR(t *testing.T) {
