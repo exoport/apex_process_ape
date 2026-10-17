@@ -159,7 +159,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"project.check-failed", 1, "person", "`ape project check` found problems (findings follow)"},
 	{"review.block", 1, "apply", "review --run: the review session's verdict is block"},
 	{"review.no-verdict", 1, "retry", "review --run: the session ended without recording a verdict"},
-	{"review.stale", 1, "review", "archive: code changed since the review"},
+	{"review.stale", 1, "review", "archive: code changed since the review; `ape change review <id> --run` verifies it again first, then reviews it (D51 Q16)"},
 	{"review.start-failed", 1, "retry", "review --run: the review session could not be started"},
 	{"review.voided", 1, "retry", "review --run: the session changed more than review.md; verdict voided"},
 	{"roadmap.missing", 1, "person", "no roadmap.md"},

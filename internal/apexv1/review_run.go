@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,6 +78,13 @@ func (p *Project) PrepareReviewRun(ctx context.Context, id string) (ChangeInfo, 
 		return ci, err
 	}
 	st := ci.State
+	if st.Status == StatusReviewed {
+		if stale, files := p.reviewStale(ctx, st); stale {
+			return ci, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is reviewed and its review is stale (code changed since: " + strings.Join(limit(files, 5), ", ") +
+				") — `ape change review " + id + " --run` re-verifies it first, then reviews it again"}
+		}
+		return ci, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is reviewed and its review is fresh (no code changed since it) — nothing to review again; `ape change archive " + id + "`"}
+	}
 	if st.Status != StatusVerified {
 		return ci, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + st.Status + " — a review session reviews a verified change (`ape change verify " + id + "`)"}
 	}
@@ -95,6 +103,43 @@ func (p *Project) PrepareReviewRun(ctx context.Context, id string) (ChangeInfo, 
 		return ci, &FailError{Code: "verify.stale", Msg: "code changed since the last verify (" + strings.Join(limit(files, 5), ", ") + ") — `ape change verify " + id + "` first"}
 	}
 	return ci, nil
+}
+
+// reviewStale reports whether code moved since st's review — the
+// archive's review.stale — with the files that moved. A reviewed change
+// with no review recorded is stale.
+func (p *Project) reviewStale(ctx context.Context, st *State) (stale bool, files []string) {
+	if st.Review == nil {
+		return true, nil
+	}
+	stale, files, _ = p.codeMovedSince(ctx, st.Review.SHA)
+	return stale, files
+}
+
+// ReverifyStaleReview is `ape change review --run`'s first step (D51
+// Q16): a reviewed change whose review is stale — code moved since its
+// SHA, as the archive's review.stale judges it — is verified again first,
+// in-process as `ape change verify` would (a green one makes it verified,
+// so the review session reviews it as any verified change). A red verify
+// returns verify.red (or the attempts limit's block) beside the result.
+// Any other change is left alone: nil, nil.
+func (p *Project) ReverifyStaleReview(ctx context.Context, id string, opt RunOptions) (*VerifyResult, error) {
+	ci, err := p.requireChange(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if ci.State.Status != StatusReviewed {
+		return nil, nil //nolint:nilnil // not reviewed: nothing to verify, the documented nil
+	}
+	if stale, _ := p.reviewStale(ctx, ci.State); !stale {
+		return nil, nil //nolint:nilnil // a fresh review: nothing to verify, the documented nil
+	}
+	res, err := p.Verify(ctx, id, opt)
+	if err != nil || res.Green {
+		return res, err
+	}
+	return res, &FailError{Code: "verify.red", Msg: fmt.Sprintf("change %s: its review was stale and the verify before reviewing it again is red: %d command check(s) red, attempt %d of %d — fix the code (never the check) and verify again, or `ape change block %s --reason ...`",
+		id, len(res.Failing()), res.Attempts, res.AttemptsCap, id)}
 }
 
 // ReviewOutcome is what a finished review session left behind.

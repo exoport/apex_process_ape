@@ -647,6 +647,12 @@ ape starts `+"`ape task apex-review --args <id>`"+` detached (survives the calle
 and that session writes review.md and records the verdict with --verdict/--findings.
 It is the one sanctioned exception to the nesting rule: allowed from inside an ape
 session, never from inside a review session (depth 1), skill fixed to apex-review.
+  - which changes: a verified one; or a reviewed one whose review is stale — code
+    changed since the review's sha, what archive refuses as review.stale (D51 Q16):
+    --run first verifies it again in-process, as `+"`ape change verify <id>`"+` would
+    (JSON "verify"; a red verify is returned as its error, verify.red, and no session
+    starts), then reviews it as a verified change. A reviewed change whose review is
+    fresh is refused (change.wrong-status): archive it.
   - on the change's branch: --run needs HEAD on change/<id>, the session runs in this
     checkout and records its verdict there; a session that leaves HEAD elsewhere
     has its verdict voided and the branch checked out again
@@ -668,7 +674,8 @@ session, never from inside a review session (depth 1), skill fixed to apex-revie
     records each and its source under review_launch (and, the same, under launch).
 
 Exit codes: 0 recorded / review passed · 1 not verified, code changed since the verify,
-review block (--run: findings in JSON "outcome"), verdict voided, or no verdict · 2 usage
+--run: a fresh review, or a red re-verify of a stale one, review block (--run: findings
+in JSON "outcome"), verdict voided, or no verdict · 2 usage
 (bad verdict, findings file missing, --run inside a review session) · 75 --run: still
 running, call again.`,
 		"  ape change review add-tenant-delete --verdict pass --findings development/changes/add-tenant-delete/review.md\n"+

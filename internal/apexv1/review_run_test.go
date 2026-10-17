@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -122,4 +123,55 @@ func TestConfig_ModelsBothForms(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, SkillModel{Model: "sonnet"}, cfg.Models["apex-review"])
 	require.Equal(t, SkillModel{Model: "opus", Effort: "high"}, cfg.Models["apex-apply"])
+}
+
+// D51 Q16: archive refuses a reviewed change whose review went stale
+// (review.stale, action review); review --run then verifies it again
+// first and reviews it as a verified change. A fresh review is refused.
+func TestReviewRun_StaleReviewReverifies(t *testing.T) {
+	p := reviewedWave(t)
+	_, err := p.Accept(ctx(), "add-wave", "T2", "ann")
+	require.NoError(t, err)
+	_, err = p.PrepareReviewRun(ctx(), "add-wave")
+	fe, ok := errors.AsType[*FailError](err)
+	require.True(t, ok, "%v", err)
+	require.Equal(t, CodeWrongStatus, fe.Code)
+	require.Contains(t, fe.Msg, "is reviewed and its review is fresh")
+	res, err := p.ReverifyStaleReview(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.Nil(t, res, "a fresh review: nothing verified")
+	require.Equal(t, StatusReviewed, state(t, p, "add-wave").Status)
+
+	// A person commits an evidence file on the change's branch.
+	write(t, p, "evidence/screen.txt", "looks right\n")
+	commitAll(t, p, "evidence")
+	_, err = p.Archive(ctx(), "add-wave", false, RunOptions{})
+	fe, ok = errors.AsType[*FailError](err)
+	require.True(t, ok, "%v", err)
+	require.Equal(t, "review.stale", fe.Code)
+	require.Equal(t, ActionReview, ActionFor(fe.Code))
+	_, err = p.PrepareReviewRun(ctx(), "add-wave")
+	require.ErrorContains(t, err, "its review is stale")
+
+	head := HeadSHA(ctx(), p.Root)
+	res, err = p.ReverifyStaleReview(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.True(t, res.Green)
+	require.Equal(t, StatusVerified, res.Status)
+	require.Equal(t, "apex: add-wave verified", subjects(t, p)[0])
+	require.NotEqual(t, head, HeadSHA(ctx(), p.Root))
+	_, err = p.PrepareReviewRun(ctx(), "add-wave")
+	require.NoError(t, err, "now a verified change, reviewed as any")
+
+	// A red re-verify returns its error.
+	_, err = p.Review(ctx(), "add-wave", "pass", "development/changes/add-wave/review.md")
+	require.NoError(t, err)
+	write(t, p, "wave.sh", "#!/bin/sh\nexit 1\n")
+	commitAll(t, p, "break")
+	res, err = p.ReverifyStaleReview(ctx(), "add-wave", RunOptions{})
+	fe, ok = errors.AsType[*FailError](err)
+	require.True(t, ok, "%v", err)
+	require.Equal(t, "verify.red", fe.Code)
+	require.False(t, res.Green)
+	require.Equal(t, StatusInProgress, state(t, p, "add-wave").Status)
 }

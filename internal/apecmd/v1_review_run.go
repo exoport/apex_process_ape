@@ -77,6 +77,9 @@ type reviewRunResult struct {
 	TaskExit   *int                  `json:"task_exit,omitempty"`
 	Launch     apexv1.ReviewLaunch   `json:"launch"`
 	Outcome    *apexv1.ReviewOutcome `json:"outcome,omitempty"`
+	// Verify is the verify --run ran first, for a reviewed change whose
+	// review was stale (D51 Q16).
+	Verify *apexv1.VerifyResult `json:"verify,omitempty"`
 }
 
 func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, model, effortFlag string, wait time.Duration) error {
@@ -90,13 +93,19 @@ func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, mod
 	if run != nil {
 		h, _ = readHandle(handlePath(p.Root, run.DetachedID))
 	}
+	var verified *apexv1.VerifyResult
 	if run == nil || h == nil {
+		// A reviewed change whose review went stale is verified again
+		// first, then reviewed as a verified one (D51 Q16).
 		var err error
+		if verified, err = p.ReverifyStaleReview(ctx, id, f.runOptions()); err != nil {
+			return failReverify(cmd, f, id, verified, err)
+		}
 		if run, h, err = startReviewSession(ctx, p, id, model, effortFlag); err != nil {
 			return v1Fail(cmd, f, err, nil)
 		}
 	}
-	res := &reviewRunResult{ID: id, DetachedID: run.DetachedID, Log: h.Log, Launch: run.Launch}
+	res := &reviewRunResult{ID: id, DetachedID: run.DetachedID, Log: h.Log, Launch: run.Launch, Verify: verified}
 
 	h, ended, lost := awaitHandle(ctx, handlePath(p.Root, run.DetachedID), wait)
 	if !ended && !lost {
@@ -136,6 +145,21 @@ func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, mod
 	return v1Emit(cmd.OutOrStdout(), f, res, func(w io.Writer) {
 		fmt.Fprintf(w, "review of %s: pass (findings: %s) — status %s\n", id, outcome.Findings, outcome.Status)
 	})
+}
+
+// failReverify reports the red verify --run ran before reviewing a stale
+// review again: its results, then its error.
+func failReverify(cmd *cobra.Command, f *v1Flags, id string, verified *apexv1.VerifyResult, err error) error {
+	if verified == nil {
+		return v1Fail(cmd, f, err, nil)
+	}
+	if !f.json {
+		out := cmd.OutOrStdout()
+		printCatchUp(out, id, verified.CatchUp)
+		fmt.Fprintf(out, "change %s at %.7s: %s\n", id, verified.SHA, verified.Status)
+		printChecks(out, verified.Results, true)
+	}
+	return v1Fail(cmd, f, err, &reviewRunResult{ID: id, Verify: verified})
 }
 
 // startReviewSession starts the detached review session for a verified

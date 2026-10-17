@@ -238,8 +238,8 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 
 	// The review judged the change's own code: refused when that moved
 	// since, judged before the rebase brings the base's code in.
-	if moved, files, _ := p.codeMovedSince(ctx, ci.State.Review.SHA); moved {
-		return res, &FailError{Code: "review.stale", Msg: "code changed since the review (" + strings.Join(limit(files, 5), ", ") + ") — review again (apex-review), then archive"}
+	if stale, files := p.reviewStale(ctx, ci.State); stale {
+		return res, &FailError{Code: "review.stale", Msg: "code changed since the review (" + strings.Join(limit(files, 5), ", ") + ") — review again (apex-review; `ape change review " + id + " --run` re-verifies it first), then archive"}
 	}
 	// The one catch-up path (D40): rebased onto the base when it moved,
 	// re-baselined at its tip, the verify marked stale; reviewed stays

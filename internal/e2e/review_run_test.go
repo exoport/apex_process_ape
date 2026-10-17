@@ -163,6 +163,43 @@ func TestReviewRun_FreshSessionRecordsTheVerdict(t *testing.T) {
 	require.Equal(t, "change/add-wave", strings.TrimSpace(string(branch)))
 }
 
+// D51 Q16: a reviewed change whose review went stale (a person committed
+// an evidence file on its branch) is verified again by review --run, then
+// reviewed in a fresh session; a fresh review is refused.
+func TestReviewRun_StaleReviewIsVerifiedAgain(t *testing.T) {
+	ape, project, _, env := reviewProject(t)
+	out, code := runApe(t, ape, project, env, "change", "review", "add-wave", "--run", "--wait", "90s", "--json")
+	require.Equal(t, 0, code, "stdout: %s", out)
+	out, code = runApe(t, ape, project, env, "change", "review", "add-wave", "--run", "--json")
+	require.Equal(t, 1, code, "stdout: %s", out)
+	require.Contains(t, out, "is reviewed and its review is fresh")
+
+	require.NoError(t, writeFile(filepath.Join(project, "evidence.txt"), "looked at it\n"))
+	for _, args := range [][]string{{"add", "evidence.txt"}, {"commit", "-q", "-m", "evidence"}} {
+		c := exec.Command("git", args...)
+		c.Dir, c.Env = project, env
+		o, err := c.CombinedOutput()
+		require.NoError(t, err, "%s", o)
+	}
+	out, code = runApe(t, ape, project, env, "change", "review", "add-wave", "--run", "--wait", "90s", "--json")
+	require.Equal(t, 0, code, "stdout: %s", out)
+	var res struct {
+		Verify struct {
+			Green  bool   `json:"green"`
+			Status string `json:"status"`
+		} `json:"verify"`
+		Outcome struct {
+			Verdict string `json:"verdict"`
+			Status  string `json:"status"`
+		} `json:"outcome"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &res), out)
+	require.True(t, res.Verify.Green)
+	require.Equal(t, "verified", res.Verify.Status)
+	require.Equal(t, "pass", res.Outcome.Verdict)
+	require.Equal(t, "reviewed", changeState(t, project)["status"])
+}
+
 // D38: the review session records on the change's branch, so --run off it
 // is refused before any session starts.
 func TestReviewRun_RefusedOffTheChangeBranch(t *testing.T) {
