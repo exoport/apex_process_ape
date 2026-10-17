@@ -26,7 +26,8 @@ func newHookCmd() *cobra.Command {
   pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
-                  delete or push a git tag, or rebase or merge on a change branch
+                  delete or push a git tag, push at all, stop processes by name (pkill,
+                  killall), or rebase or merge on a change branch
 
 Every hook exits 0; a block or deny is expressed in its JSON output.
 
@@ -165,7 +166,7 @@ func newHookPreToolCmd() *cobra.Command {
 	var inline bool
 	cmd := &cobra.Command{
 		Use:   "pre-tool",
-		Short: "PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, and rebases on a change branch",
+		Short: "PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, and rebases on a change branch",
 		Long: `PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
@@ -190,7 +191,23 @@ Listing stays allowed: git tag, -l/--list [<pattern>], -n, --contains, --merged,
 subshells, NAME=value prefixes, env/sudo/xargs wrappers, git -C/-c, and sh -c / eval
 scripts are followed, so ` + "`echo \"git tag v1\"`" + ` is not flagged. Not seen: "$(…)"
 inside double quotes, git aliases, script files. A command without "git" is allowed
-at once. APE_ALLOW_TAG=1 in the session's environment allows tag writes.
+at once.
+
+Bash, too (D45): denies every git push, in any form — a remote, a refspec, --dry-run,
+git -C, sh -c, a chain: only a person pushes (with push.followTags set, even a branch
+push publishes every reachable unpushed tag). A tag push needs both overrides below.
+
+Bash, too (D46): denies pkill, killall, killall5 and skill in any form (sudo, env,
+timeout, xargs, sh -c, a chain, an absolute path): they stop processes the session did
+not start. The deny says: stop the process you started by its PID (kill <pid>), which
+stays allowed.
+
+Overrides: APE_ALLOW_TAG=1 allows tag writes, APE_ALLOW_PUSH=1 git push,
+APE_ALLOW_KILL=1 pkill/killall. Each counts ONLY in the environment the person launches
+the session with (` + "`APE_ALLOW_PUSH=1 claude`" + `, or ` + "`APE_ALLOW_PUSH=1 ape task …`" + `),
+which the hook inherits. Set inside a command the model runs — APE_ALLOW_PUSH=1 git
+push, env APE_ALLOW_PUSH=1 …, export APE_ALLOW_PUSH=1; … — it does not count: the
+command is denied as if it were not there (D47 Q6).
 
 Bash, too (trial decision D40, the model never rebases): denies git rebase and git merge
 while the repository the command runs in has a change branch, change/<id>, checked out —
