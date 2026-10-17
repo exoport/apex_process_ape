@@ -94,8 +94,11 @@ type LiftResult struct {
 	Skipped             []LiftSkip  `json:"skipped,omitempty"`
 	// GoUnformatted are edited Go files that were not gofmt-clean at the
 	// tag: their edit is not formatted either (L5).
-	GoUnformatted  []string        `json:"go_not_formatted,omitempty"`
-	DanglingRefs   []LiftIDRef     `json:"references_to_removed_paths,omitempty"`
+	GoUnformatted []string    `json:"go_not_formatted,omitempty"`
+	DanglingRefs  []LiftIDRef `json:"references_to_removed_paths,omitempty"`
+	// Hashed are edited files a test, CI script or lock file seems to pin
+	// the bytes of: a perimeter to --exclude before lifting (L6).
+	Hashed         []LiftHashed    `json:"edited_but_hashed,omitempty"`
 	Gates          LiftGates       `json:"gates"`
 	Candidates     []LiftCandidate `json:"rule_candidates"`
 	Readings       []string        `json:"readings,omitempty"`
@@ -595,6 +598,7 @@ func (lf *lifter) plan() error {
 	lf.res.Candidates = lf.candidates()
 	lf.res.Readings = lf.readings()
 	lf.res.DanglingRefs = lf.dangling()
+	lf.res.Hashed = lf.hashed()
 	sort.Slice(lf.res.Changed, func(i, j int) bool { return lf.res.Changed[i].File < lf.res.Changed[j].File })
 	lf.res.Disposition = lf.devRel + "/" + LiftDisposition
 	lf.writes[lf.res.Disposition] = lf.disposition()

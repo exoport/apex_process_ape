@@ -96,6 +96,13 @@ The commit:
                  the ids left, ADR gaps, files not edited, references to removed paths
                  (CI guards over the v0 corpus show up there), readings at the tag
 
+A byte-identity perimeter: a file a test, CI script or lock file hashes goes red once
+the lift edits a comment in it. The plan lists, as "hashed", the edited files that a lock
+file names, that a test or CI file names within 3 lines of a hash word (sha256,
+checksum, fingerprint, byte-identical, …), or that sit beside a hashing test that globs
+or names them — run --dry-run, then --exclude them. It is a heuristic: a copy compared
+byte for byte with no hash (an embedded mirror of a hashed file) needs its own --exclude.
+
 After the commit the regression command runs once (--no-verify-run skips it): its result
 is the baseline; red is recorded, not a lift failure.
 
@@ -176,6 +183,9 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 	}
 	if n := len(r.UnresolvedCitations); n > 0 {
 		fmt.Fprintf(w, "unresolved  %d ADR citation(s) name no ADR (listed in %s)\n", n, r.Disposition)
+	}
+	for _, h := range r.Hashed {
+		fmt.Fprintf(w, "hashed    %s — %s seems to pin its bytes: --exclude it to keep them\n", h.File, strings.Join(h.By, ", "))
 	}
 	if n := len(r.DanglingRefs); n > 0 {
 		fmt.Fprintf(w, "refs      %d reference(s) to removed paths remain (listed in %s)\n", n, r.Disposition)

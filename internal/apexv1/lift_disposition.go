@@ -225,6 +225,14 @@ func (lf *lifter) disposition() string {
 		p("\n")
 	}
 
+	if len(r.Hashed) > 0 {
+		p("Edited files a test, CI script or lock file seems to pin the bytes of (re-run that guard; if it is red, the file belonged under --exclude):\n\n")
+		for _, h := range r.Hashed {
+			p("- `%s` — %s\n", h.File, "`"+strings.Join(h.By, "`, `")+"`")
+		}
+		p("\n")
+	}
+
 	p("## References to removed paths\n\n")
 	if len(r.DanglingRefs) == 0 {
 		p("None.\n\n")
