@@ -40,6 +40,9 @@ IFS= read -r line
 line=${line%$'\r'}
 printf '{"session_id":"rev-1","hook_event_name":"UserPromptSubmit","cwd":"%s","prompt":"%s"}' "$PWD" "$line" | sh -c "$ups"
 echo "line=$line review=$APE_REVIEW parent=$APE_REVIEW_PARENT session=$APE_SESSION" > "$FAKE_DIR/seen"
+echo "depth=$APE_DEPTH parent_run=$APE_PARENT_RUN" > "$FAKE_DIR/lineage"
+env -u APE_SESSION -u APE_DEPTH -u APE_PARENT_RUN -u APE_PARENT_PID ape task apex-plan > "$FAKE_DIR/nested.out" 2>&1
+echo "nested=$?" >> "$FAKE_DIR/nested.out"
 sleep "${FAKE_SLEEP:-0}"
 id=${line##* }
 printf 'no findings\n' > "development/changes/$id/review.md"
@@ -120,12 +123,26 @@ func changeState(t *testing.T, project string) map[string]any {
 	return st
 }
 
-// D18: from inside an ape session (APE_SESSION set — where ape task would
-// refuse to nest), `ape change review --run` starts apex-review in its own
-// detached session, which records a verdict; the caller gets it back.
+// asOrchestrator makes run the project's apex-orchestrator run as ape's own
+// record shows it: a task run of the skill, still running. A session whose
+// marker names it may start one allow-listed child (D62).
+func asOrchestrator(t *testing.T, project, run string) {
+	t.Helper()
+	dir := filepath.Join(project, "_apex", "state", "runs", "tasks", "apex-orchestrator", run)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, writeFile(filepath.Join(dir, "manifest.yaml"), "run_id: "+run+"\nstatus: running\n"))
+}
+
+// D18, D62: from inside the orchestrator's session (APE_SESSION set), `ape
+// change review --run` starts apex-review as its child, in its own detached
+// session, which records a verdict; the caller gets it back. The child is
+// depth 2 with its parent run recorded, and starts nothing itself — not
+// even with its environment scrubbed: ape finds it by its process ancestry,
+// the stand-in claude's pid included.
 func TestReviewRun_FreshSessionRecordsTheVerdict(t *testing.T) {
 	ape, project, fake, env := reviewProject(t)
-	env = append(slices.Clone(env), "APE_SESSION=task/outer-run")
+	asOrchestrator(t, project, "outer-run")
+	env = append(slices.Clone(env), "APE_SESSION=task/outer-run", "APE_DEPTH=1")
 
 	out, code := runApe(t, ape, project, env, "change", "review", "add-wave", "--run", "--wait", "90s", "--json")
 	require.Equal(t, 0, code, "stdout: %s", out)
@@ -149,9 +166,24 @@ func TestReviewRun_FreshSessionRecordsTheVerdict(t *testing.T) {
 	require.Contains(t, string(seen), "review=add-wave", "the session is read-only: APE_REVIEW reaches its tools")
 	require.Contains(t, string(seen), "parent=task/outer-run", "the requesting session is recorded")
 	require.NotContains(t, string(seen), "session=task/outer-run", "the review is its own session, not the caller's")
+	lineage, err := os.ReadFile(filepath.Join(fake, "lineage"))
+	require.NoError(t, err)
+	require.Equal(t, "depth=2 parent_run=outer-run\n", string(lineage))
+	nested, err := os.ReadFile(filepath.Join(fake, "nested.out"))
+	require.NoError(t, err)
+	require.Contains(t, string(nested), "code session.depth", "a depth-2 session starts nothing, its marker scrubbed or not")
+	require.Contains(t, string(nested), "nested=2")
 
-	_, err = os.Stat(filepath.Join(project, "_apex", "state", "runs", "tasks", "apex-review", "latest", "manifest.yaml"))
+	data, err := os.ReadFile(filepath.Join(project, "_apex", "state", "runs", "tasks", "apex-review", "latest", "manifest.yaml"))
 	require.NoError(t, err, "the review session's cost is its own manifest")
+	var rm pipeline.Manifest
+	require.NoError(t, yaml.Unmarshal(data, &rm))
+	require.Equal(t, 2, rm.Depth)
+	require.Equal(t, "outer-run", rm.ParentRun, "the child records its parent run")
+	require.NoDirExists(t, filepath.Join(project, "_apex", "state", "runs", "tasks", "apex-plan"), "the nested probe started nothing")
+	locks, err := filepath.Glob(filepath.Join(project, "_apex", "state", "runs", "sessions", "*.json"))
+	require.NoError(t, err)
+	require.Empty(t, locks, "the child's lock is released when it ends")
 	require.NoFileExists(t, filepath.Join(project, "_apex", "state", "logs", "add-wave", "review-run.json"), "settled and cleared")
 	status, err := exec.Command("git", "-C", project, "status", "--porcelain").Output()
 	require.NoError(t, err)
@@ -245,6 +277,18 @@ func TestReviewRun_WaitAgainAttaches(t *testing.T) {
 	require.Len(t, handles, 1, "one review session, not two")
 }
 
+// D62 (RC3-PLAN Q3): review --run counts as starting apex-review, and a
+// depth-1 session that is not the orchestrator — apex-apply a person ran
+// through ape task — starts nothing: refused before any session starts.
+func TestReviewRun_RefusedFromASkillSession(t *testing.T) {
+	ape, project, fake, env := reviewProject(t)
+	env = append(slices.Clone(env), "APE_SESSION=task/apply-run", "APE_DEPTH=1")
+	out, code := runApe(t, ape, project, env, "change", "review", "add-wave", "--run", "--json")
+	require.Equal(t, 2, code, out)
+	require.Contains(t, out, `"code": "session.depth"`)
+	require.NoFileExists(t, filepath.Join(fake, "seen"), "no session started")
+}
+
 // Depth 1: a review session cannot start another review.
 func TestReviewRun_RefusedInsideAReviewSession(t *testing.T) {
 	ape, project, _, env := reviewProject(t)
@@ -275,6 +319,7 @@ func TestReviewRun_ModelAndEffort(t *testing.T) {
 
 	t.Run("inherits the asking session", func(t *testing.T) {
 		ape, project, fake, env := reviewProject(t)
+		asOrchestrator(t, project, "outer")
 		env = append(slices.Clone(env), "APE_SESSION=task/outer", "APE_SESSION_MODEL=claude-sonnet-5-5", "APE_SESSION_EFFORT=high")
 		out, code := runApe(t, ape, project, env, "change", "review", "add-wave", "--run", "--wait", "90s", "--json")
 		require.Equal(t, 0, code, out)

@@ -686,7 +686,16 @@ func supervise(ctx context.Context, path string) error {
 	child.Dir = h.Dir
 	child.Stdout, child.Stderr = stdout, logf
 	child.Env = append(os.Environ(), envDetachedID+"="+h.ID)
+	// The session locks the run holds under this handle's id are released
+	// before its exit is recorded, so a caller that saw the exit may start
+	// the next session at once.
+	releaseLocks := func() {
+		for _, lock := range h.Locks {
+			releaseSessionLock(lock, h.ID)
+		}
+	}
 	if err := child.Start(); err != nil {
+		releaseLocks()
 		return recordExit(path, h, ExitRunFailed, err.Error())
 	}
 	h.ChildPID = child.Process.Pid
@@ -694,13 +703,6 @@ func supervise(ctx context.Context, path string) error {
 
 	done := make(chan error, 1)
 	go func() { done <- child.Wait() }()
-	// Released whatever happens next: the run holds them under this
-	// handle's id, and it has ended (or never took them over).
-	defer func() {
-		for _, lock := range h.Locks {
-			releaseSessionLock(lock, h.ID)
-		}
-	}()
 	var parentGone <-chan time.Time
 	if h.ParentPID > 0 {
 		tick := time.NewTicker(parentPollInterval)
@@ -733,6 +735,7 @@ wait:
 			break wait
 		}
 	}
+	releaseLocks()
 	if h.StopReason == stopParentGone {
 		markParentGone(path, h.ParentRun, h.ParentPID)
 	}
