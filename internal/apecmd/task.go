@@ -164,13 +164,49 @@ when a run stops on a limit (usage limit, budget) — and, from ape change,
 when a change becomes blocked — with APE_EVENT=stop|block, APE_CHANGE
 (the change --args names, if any) and APE_REASON in its environment.
 
+Sessions and the nesting rule (D61, D62): every skill of the v1 loop runs
+as its own ape task session, and depth counts only the model sessions ape
+launched (ape task, ape prompt, ape chat, ape change review --run, and the
+ape service task/prompt jobs, which run those commands):
+  depth 0  a terminal, a Claude Code session ape did not launch, a shell,
+           ape script, the service daemon: may start any session
+  depth 1  a session started from depth 0: may start a child only when it
+           is ape's own apex-orchestrator run (ape task apex-orchestrator),
+           only a skill on its allow-list (apex-plan, apex-change,
+           apex-apply, apex-review, apex-release, and the tools: skills),
+           and one child at a time
+  depth 2  a session an orchestrator started: starts nothing
+A refusal is exit 2, code session.depth or session.not-allowed (action
+stop); a second child while one runs is exit 3, session.child-running, and
+a second apex-orchestrator run in a project exit 3,
+session.orchestrator-running (action retry). Deterministic ape commands are
+never limited. ape decides the depth from what it recorded, never from the
+model: the session's marker (APE_SESSION, APE_DEPTH) and the process
+ancestry — every session it launches is a row in ~/.ape/registry.json
+naming the ape process and the claude it spawned, so a scrubbed environment
+changes nothing. Every session carries APE_DEPTH, and a child also
+APE_PARENT_RUN (the orchestrator's run) and APE_PARENT_PID (the ape process
+running it); its manifest records depth and parent_run, and it is stopped,
+termination parent_gone, when that process is gone. An orchestrator's
+manifest lists its children and tree_cost_usd when it ends (totals stay its
+own). There is no switch to turn the rule off.
+
+An orchestrator dispatches a skill as
+  ape task <skill> --args <id> --detach --output-format json
+which prints {"id", "wait", "log", "stdout"} (four lines without json), then
+  ape run wait <id> --wait 9m --json
+until it stops exiting 75; its JSON carries the session's last message as
+result (see ape run wait --help).
+
 Exit codes: 0 success · 1 run failed, idle timeout, the typed line
 never submitted, an APEX v1 milestone budget stopped or refused the
 session, or a v1 limit or ape floor refused it · 2 usage or
-preflight error, or an APEX v0 project (run its pinned v0 ape) · 3 REPL
-never became ready (last pane on stderr) · 5 upstream API failure ·
-6 the dispatch violated its declared commit ownership (the run itself
-may have succeeded) · 14 a claude.ai usage limit stopped the session.`
+preflight error, an APEX v0 project (run its pinned v0 ape), or the nesting
+rule refused the session (session.depth, session.not-allowed) · 3 REPL
+never became ready (last pane on stderr), or a session lock another run
+holds (session.child-running, session.orchestrator-running) · 5 upstream
+API failure · 6 the dispatch violated its declared commit ownership (the run
+itself may have succeeded) · 14 a claude.ai usage limit stopped the session.`
 
 func newTaskCmd() *cobra.Command {
 	var (

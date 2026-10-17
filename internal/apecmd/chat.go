@@ -68,8 +68,12 @@ terminal for its lifetime — there is no detach/reattach. To run
 claude in the background, use a real terminal multiplexer
 separately (e.g. wrap ape chat in tmux or screen).
 
+A chat is a model session under the nesting rule (D62; see ape task
+--help): it starts only outside every ape session (depth 0), and is refused
+inside one (exit 2, session.depth or session.not-allowed).
+
 Exit codes: 0 success · 1 claude/bridge failure · 2 usage or preflight
-error (no _apex/config.yaml, bad cwd).`,
+error (no _apex/config.yaml, bad cwd, the nesting rule).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// The nesting rule (D62): a chat runs no skill an orchestrator
 			// may start, so only depth 0 starts one.

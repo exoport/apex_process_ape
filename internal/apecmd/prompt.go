@@ -139,9 +139,14 @@ the project cost rollup's Prompts bucket.
 ape prompt must run from a project root (a directory with
 _apex/config.yaml). It makes no commits of its own.
 
+A prompt session is a model session under the nesting rule (D62; see ape
+task --help): it starts only outside every ape session (depth 0), and is
+refused inside one (exit 2, session.depth — or session.not-allowed from an
+apex-orchestrator run, which starts only allow-listed skills with ape task).
+
 Exit codes: 0 session completed (Stop hook) · 1 idle-timeout, session
 failed, or the typed line never submitted · 2 usage or preflight error (no _apex/config.yaml, unresolved
---agent, missing --handoff file) · 3 the claude REPL never became ready
+--agent, missing --handoff file, the nesting rule) · 3 the claude REPL never became ready
 · 4 claude exited before the Stop hook.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

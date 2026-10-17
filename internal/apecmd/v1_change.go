@@ -660,8 +660,13 @@ change.wrong-branch): the verdict is committed there.
 empty context and its own hooks, never a sub-agent of the session that built it:
 ape starts `+"`ape task apex-review --args <id>`"+` detached (survives the caller's shell),
 and that session writes review.md and records the verdict with --verdict/--findings.
-It is the one sanctioned exception to the nesting rule: allowed from inside an ape
-session, never from inside a review session (depth 1), skill fixed to apex-review.
+It counts as starting apex-review under the nesting rule (D62; see ape task --help):
+from a terminal (depth 0) always; from inside an ape session only from ape's own
+apex-orchestrator run, as its one child (exit 3, session.child-running, while
+another child runs); from any other session — apex-apply a person ran with ape task,
+say — refused (exit 2, session.depth); never from inside a review session. The
+review session is depth 2 under an orchestrator, its manifest records depth and
+parent_run, and it is stopped when that orchestrator's run ends.
   - which changes: a verified one; or a reviewed one whose review is stale — code
     changed since the review's sha, what archive refuses as review.stale (D51 Q16):
     --run first verifies it again in-process, as `+"`ape change verify <id>`"+` would
@@ -691,8 +696,9 @@ session, never from inside a review session (depth 1), skill fixed to apex-revie
 Exit codes: 0 recorded / review passed · 1 not verified, code changed since the verify,
 --run: a fresh review, or a red re-verify of a stale one, review block (--run: findings
 in JSON "outcome"), verdict voided, or no verdict · 2 usage
-(bad verdict, findings file missing, --run inside a review session) · 75 --run: still
-running, call again.`,
+(bad verdict, findings file missing, --run inside a review session, or the nesting
+rule: session.depth) · 3 --run: the orchestrator's child session is running
+(session.child-running) · 75 --run: still running, call again.`,
 		"  ape change review add-tenant-delete --verdict pass --findings development/changes/add-tenant-delete/review.md\n"+
 			"  ape change review add-tenant-delete --run --wait 9m --json",
 		&f,

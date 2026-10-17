@@ -1,36 +1,38 @@
-# Why `ape` never runs inside a session `ape` started
+# When `ape` runs inside a session `ape` started
 
-From v0.2.0, a session-starting command (`ape pipeline`, `ape task`, `ape change`, `ape prompt`, `ape chat` and `ape script`) refuses with exit 2 when it finds itself inside a `claude` session that ape spawned. `ape prompt --agent apex-orchestrator` is refused outright. Project-data commands (`ape story`, `ape sprint`, `ape config`, `ape registry` and the rest) are unaffected: skills run them inside sessions all the time, and they start nothing.
+A model session is one ape launches: `ape task`, `ape prompt`, `ape chat`, `ape change review --run`, and the `ape service` task and prompt jobs, which run those commands. From APEX v1 rc.3 (decisions D61 and D62), ape allows exactly one structured level of nesting under it:
 
-Up to v0.1.x this nesting was supported by design. The orchestrator persona ran as an `ape prompt` session and dispatched `ape task`, `ape pipeline` and `ape change` from inside it. This page records why that path was closed, and what replaced it.
+| Depth | What sits there                                                                                                                                                    | May start a model session?                                                       |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| 0     | Anything outside an ape-launched session: a terminal, a Claude Code session ape did not launch, a shell, an `ape script` program, the `ape service` daemon         | Yes, any                                                                         |
+| 1     | A session ape launched from depth 0                                                                                                                                | Only when it is ape's own `apex-orchestrator` run, one child at a time, allow-listed skills only |
+| 2     | A session an orchestrator started                                                                                                                                  | No                                                                               |
+
+The allow-list is the core skills (`apex-plan`, `apex-change`, `apex-apply`, `apex-review`, `apex-release`) plus the skills a project declares under `tools:`. `ape change review --run` counts as starting `apex-review`. Deterministic commands (`ape status`, `ape change new|check|start|verify|archive`, `ape milestone gate|close`, `ape next add` and the rest) are never limited: skills run them inside sessions all the time, and they start nothing. `ape script` is a conductor and refuses inside any ape session.
+
+A refusal is exit 2 with code `session.depth` (a session that may not start one) or `session.not-allowed` (an orchestrator starting a skill outside its allow-list), both action `stop`. A second child while one runs is exit 3, `session.child-running`, and a second `apex-orchestrator` run in the same project exit 3, `session.orchestrator-running`, both action `retry`.
 
 ## How ape knows
 
-Every `claude` session ape spawns carries `APE_SESSION=<kind>/<run-id>`, where `<kind>` is `pipeline`, `task`, `change`, `script`, `prompt` or `chat`, and `<run-id>` is that run's id. Claude Code hands its environment to every tool subprocess, so an `ape task` a skill types into the session's Bash tool sees the marker, refuses, and names the owning run:
+Every `claude` session ape spawns carries `APE_SESSION=<kind>/<run-id>` and `APE_DEPTH`; a child also carries `APE_PARENT_RUN` (the orchestrator's run id) and `APE_PARENT_PID` (the ape process running the orchestrator). Claude Code hands its environment to every tool subprocess, so an `ape task` a skill types into the session's Bash tool sees them.
 
-```
-Error: ape task refused: this process is inside the ape session prompt/20260926-120638-929faf6 (APE_SESSION is set), and ape never runs inside an ape-spawned session. Start it from a plain shell or a plain Claude Code session
-```
+The environment alone is not trusted: a model can run `env -u APE_SESSION ape task …`. So every session ape launches is also a row in the live-session registry, `~/.ape/registry.json` (what `ape sessions` lists), naming the ape process running it, the `claude` it spawned, the skill ape typed, and its depth. A session-starting command walks its own parent processes, and when one of them is a process a row names, it runs inside that session. Its depth is the larger of the two answers. Rows are matched by pid, never by process name, so a stand-in `claude` (a test or eval stub) gets the same answer a real session does. Whether a session is the orchestrator is decided from ape's record of the skill it typed, never from the model.
 
-That was measured live: an `ape prompt` session's Bash tool printed its own marker, `ape task` exited 2 with the message above, and `ape config effort` ran normally in the same shell.
+What remains open, and is documented rather than chased: a model that scrubs its environment and also double-forks into a daemon leaves no ancestor ape knows. On Windows an ancestor that exited may have had its pid reused, so the walk there is best effort.
 
-The marker is not set by the framework-migration shell runner or by the service daemon, because neither spawns a `claude` session. There is no variable that disables the refusal. A switch a session can flip is a switch a session will flip.
+There is no variable that disables the rule. A switch a session can flip is a switch a session will flip.
 
-The framework's orchestrator skill checks the same variable and HALTs on activation when it is set.
+## Children die with their parent, and record it
 
-## Why nesting was closed
+The orchestrator dispatches every skill detached: `ape task <skill> --args <id> --detach`, then `ape run wait <id> --wait 9m` until it stops exiting 75. The detached child's supervisor checks the orchestrator's ape process every two seconds; when it is gone, it stops the child the way `ape run stop` does, and the child's manifest records `termination: {kind: parent_gone}`. Each child's manifest records `depth: 2` and `parent_run`; `ape status --json` lists the live sessions with their parent, and `ape costs run <orchestrator-run>` and the orchestrator's own manifest list its children with `tree_cost_usd`. A manifest's `totals` stay its own session's, so a sum over every manifest counts each child once.
 
-Nothing about nesting was broken at the mechanism level. The child got its own transcript, because ape scrubs the parent's `CLAUDE_CODE_*` markers. Hooks could not cross runs, because each run's hook command bakes in its own bridge port. The PATH pin was transitive. What made it fragile was the **outer** run, which could not see the inner one:
+## Why nesting was closed before, and what changed
 
-- **A foreground call cannot work.** Claude Code's Bash tool times out after about two minutes by default, and ten at most. A dispatch routinely runs longer, and while it blocks, the outer run's idle anchor sees no hook events, no transcript growth and no PTY bytes, so it eventually stops itself.
-- **A background shell only worked because of polling.** Every poll was a tool call, and so the outer run's proof of life. Replace the polling with one long sleep and the outer run was killed, with no error naming the cause. On claude 2.1.278 a poll is a `Read` of `…/tasks/<id>.output`, not `BashOutput`, so anything keyed on the tool name misses it.
-- **Yielding the turn tore the outer run down.** ape derives completion from the `Stop` hook. A conductor that started an inner run in the background and ended its turn finished its own run, and orphaned the inner one.
-- **Two runs raced on one working tree.** The outer run's own dispatches were the likeliest source of the uncommitted work the inner run's pre-flight then refused.
+Up to v0.1.x nesting was open: the orchestrator ran as an `ape prompt` session and dispatched `ape task`, `ape pipeline` and `ape change` from inside it. v0.2.0 closed it outright, because the **outer** run could not see the inner one:
 
-Each of these needed a conductor that behaved exactly right, with the failure silent when it did not. One level of ape removes all four.
+- **A foreground call cannot work.** Claude Code's Bash tool times out after about two minutes by default, and ten at most. While a dispatch blocks, the outer run's idle anchor sees no progress and eventually stops itself.
+- **A background shell only worked because of polling.** Every poll was a tool call, and so the outer run's proof of life. One long sleep instead, and the outer run was killed with no error naming the cause.
+- **Yielding the turn tore the outer run down.** ape derives completion from the `Stop` hook, so a conductor that started an inner run in the background and ended its turn finished its own run and orphaned the inner one.
+- **Two runs raced on one working tree.**
 
-## What replaces it
-
-The orchestrator runs in a **plain** Claude Code session, with the operator present: start `claude` from a plain shell and run `/apex-orchestrator <request>`. It has no unattended mode of its own. The orchestrator then runs `ape task`, `ape pipeline` and `ape change`, and each of those is the only ape in its process tree. Each marks its own session, writes its own manifest under `{output_folder}/ape/`, and is governed by its own lifecycle, while the plain session around it has no ape lifecycle to trip over. The skills those commands dispatch still run unattended, because ape appends `--autonomous` to every dispatch.
-
-v0.2.0 also shipped a hidden, eval-only host for the orchestrator, `ape eval conduct`. v0.2.1 removed it: the orchestrator no longer has an unattended mode for it to drive, and the eval retired the stages that used it.
+D62 keeps what those lessons bought and allows the one level D61 needs. The structure is ape's, not the model's: only the orchestrator nests, its children are detached and re-attached within the Bash tool's limit (exit 75), one runs at a time, each has its own manifest and lifecycle, and none outlives the orchestrator. v0's failures came from models deciding when to nest; depth, parent and allow-list are set by ape and cannot be widened from inside a session.
