@@ -184,6 +184,10 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 
 // ApproveMilestone writes `Status: approved (by <who> <ts>)`.
 func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milestone, error) {
+	// A model never approves its own milestone (D47 Q6).
+	if err := requirePerson("ape milestone approve"); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(by) == "" {
 		return nil, &UsageError{Code: "usage.by", Msg: "--by names who approves"}
 	}

@@ -101,7 +101,7 @@ func stopHookRun(t *testing.T, ape string, dropSettingsHooks bool) {
 	t.Helper()
 	project := t.TempDir()
 	gitEnv := append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
-		"GIT_CONFIG_GLOBAL=/dev/null", "APE_SESSION=")
+		"GIT_CONFIG_GLOBAL=/dev/null", "APE_SESSION=", "CLAUDECODE=")
 	sh := func(name string, args ...string) {
 		c := exec.Command(name, args...)
 		c.Dir = project

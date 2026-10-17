@@ -230,6 +230,9 @@ in place of an approved milestone (else exit 1, change.not-approved).
   - the approval is of the plan change.md has now: a fix whose plan (change.md outside
     ## Why and ## Notes) changed since is refused at start until approved again
   - re-approving the same plan is a no-op (exit 0, JSON "already": true, nothing written)
+  - only a person approves (D47 Q6): refused in a model session — APE_SESSION or
+    CLAUDECODE set, a `+"`!`"+` line inside Claude Code included — with exit 2, code
+    session.person-only; run it from a plain terminal
 
 An approved fix may be created at any moment. It runs ahead of milestone work, at the
 orchestrator's next change boundary, never in parallel with it; with no milestone run
@@ -238,7 +241,7 @@ fixes first (JSON "fixes", changes[].lane "fix", changes[].approved) and points 
 first. A fix counts toward no milestone gate and no milestone's spend or budget.
 
 Exit codes: 0 approved (or already) · 1 not a fix, check red, started, or HEAD on a change
-branch · 2 usage (no --by).`,
+branch · 2 usage (no --by), or a model session.`,
 		"  ape change approve fix-login-redirect --by diego",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {

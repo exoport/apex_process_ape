@@ -21,6 +21,7 @@ func fixture(t *testing.T, files map[string]string) *Project {
 	needSh(t)
 	root := t.TempDir()
 	gitEnv(t)
+	asPerson(t)
 	for rel, content := range files {
 		path := filepath.Join(root, filepath.FromSlash(rel))
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
@@ -35,6 +36,14 @@ func fixture(t *testing.T, files map[string]string) *Project {
 	p, err := Open(root)
 	require.NoError(t, err)
 	return p
+}
+
+// asPerson runs the test as a person at a terminal: no model session
+// (requirePerson), whatever session runs the tests.
+func asPerson(t *testing.T) {
+	t.Helper()
+	t.Setenv("APE_SESSION", "")
+	t.Setenv("CLAUDECODE", "")
 }
 
 // gitEnv isolates git from the machine's config and gives it an identity.

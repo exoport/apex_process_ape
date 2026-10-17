@@ -70,7 +70,7 @@ func launchProject(t *testing.T, ape string, v1 bool) (project, fake string, env
 	project, fake = t.TempDir(), t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(fake, "claude"), []byte(fakeLaunchRecorder), 0o755))
 	env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
-		"GIT_CONFIG_GLOBAL=/dev/null", "APE_SESSION=", "APE_SESSION_MODEL=", "APE_SESSION_EFFORT=", "APE_REVIEW=",
+		"GIT_CONFIG_GLOBAL=/dev/null", "APE_SESSION=", "CLAUDECODE=", "APE_SESSION_MODEL=", "APE_SESSION_EFFORT=", "APE_REVIEW=",
 		"PATH="+fake+":"+os.Getenv("PATH"), "APE_CLAUDE_PROBE=off", "FAKE_DIR="+fake,
 		"FAKE_CLAUDE_LINE="+filepath.Join(fake, "line"), "CLAUDE_CODE_EFFORT_LEVEL=max")
 	sh := func(name string, args ...string) {

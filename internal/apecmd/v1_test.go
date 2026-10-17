@@ -29,6 +29,9 @@ func v1Repo(t *testing.T) string {
 	root := t.TempDir()
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	// A person at a terminal (person-only commands), whatever runs the tests.
+	t.Setenv("APE_SESSION", "")
+	t.Setenv("CLAUDECODE", "")
 	for _, kv := range [][2]string{{"GIT_AUTHOR_NAME", "t"}, {"GIT_AUTHOR_EMAIL", "t@t"}, {"GIT_COMMITTER_NAME", "t"}, {"GIT_COMMITTER_EMAIL", "t@t"}} {
 		t.Setenv(kv[0], kv[1])
 	}

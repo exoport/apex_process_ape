@@ -81,7 +81,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"usage.verdict", 2, "stop", "review: --verdict is not pass or block"},
 	{"review.nested", 2, "stop", "review --run inside a review session (depth 1)"},
 	{"project.not-initialized", 2, "person", "no development folder: run `ape project init`"},
-	{"session.person-only", 2, "person", "--allow-pending-human or --accept-red from a model session (APE_SESSION or CLAUDECODE set): only a person passes them, from a terminal (D45)"},
+	{"session.person-only", 2, "person", "a person-only flag or command from a model session (APE_SESSION or CLAUDECODE set): --allow-pending-human, --accept-red (D45), ape milestone approve, ape change approve, ape change answer (D47 Q6) — a person runs it from a terminal outside Claude Code (a `!` line inside Claude Code is a model session)"},
 	{"usage.unclassified", 2, "stop", "a usage error without a code (a bug: report it)"},
 
 	// failures (exit 1)

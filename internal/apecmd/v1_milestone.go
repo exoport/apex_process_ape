@@ -87,8 +87,12 @@ Changes can start only under an approved milestone. Committed as "apex: <M> appr
 Approving an approved milestone is a no-op; a done one is refused. Refused on a change
 branch (see ` + "`ape milestone --help`" + `).
 
+Only a person approves (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE
+set, which includes a ` + "`!`" + ` line inside Claude Code — with exit 2, code
+session.person-only. Run it from a plain terminal.
+
 Exit codes: 0 ok · 1 no such milestone, done, malformed (Gate/Goal missing), or HEAD on a
-change branch · 2 usage.`,
+change branch · 2 usage, or a model session.`,
 		Example: "  ape milestone approve M1 --by eval",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
