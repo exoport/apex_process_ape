@@ -283,7 +283,7 @@ func TestTypesVerbatim(t *testing.T) {
 		{"one word", "M3", true},
 		{"single spaces", "--task T2 --change c-7", true},
 		{"single leading and trailing space", " a b ", true},
-		{"unicode", "café — naïve 日本語 ✓", true},
+		{"unicode", "café — naïve ñ ✓ ∑", true},
 		{"no-break space is a letter", "a\u00a0\u00a0b", true},
 		{"single-spaced past the budget", strings.TrimSpace(strings.Repeat("word ", TypedLineBudget/5+20)), true},
 		{"double space", "a  b", false},

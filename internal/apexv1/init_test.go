@@ -468,7 +468,7 @@ func TestInit_AppendsModelDefaultsToExistingConfig(t *testing.T) {
 		root, p := setup(t, "", false)
 		_, err := Init(ctx(), root, true)
 		require.NoError(t, err)
-		require.Equal(t, modelDefaultsYAML, read(t, p, "_apex/config.yaml"))
+		require.Equal(t, modelDefaultsYAML, read(t, p, "_apex/config.yaml")) //nolint:testifylint // byte-exact, not only YAML-equal
 	})
 	t.Run("models: in a comment or a string is not a models: block", func(t *testing.T) {
 		const cfg = "# models: are set below\nnotify: |\n  models: echo\n"

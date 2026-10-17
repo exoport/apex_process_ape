@@ -198,7 +198,6 @@ func scanArgsProbe(projects string) argsProbeScan {
 					}
 				}
 			}
-			//nolint:tagliatelle // Claude Code's transcript field names, not ours
 			var res struct {
 				File struct {
 					FilePath string  `json:"filePath"`

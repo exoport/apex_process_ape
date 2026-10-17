@@ -99,11 +99,11 @@ func TestCaps_OverCeilingRefusesTheCapVerbs(t *testing.T) {
 	require.NoError(t, err, "abandon measures nothing (D89 Q40)")
 }
 
-// whyGrown is change.md with n bytes more in ## Why, which may change
-// after start.
-func whyGrown(doc string, n int) string {
+// whyGrown is change.md with 16 KB more in ## Why, which may change
+// after start: over the default cap.
+func whyGrown(doc string) string {
 	const why = "## Why\nBecause the greeter must change.\n"
-	return strings.Replace(doc, why, why+strings.Repeat("w", n)+"\n", 1)
+	return strings.Replace(doc, why, why+strings.Repeat("w", 16<<10)+"\n", 1)
 }
 
 func TestPlanBytes(t *testing.T) {
@@ -136,7 +136,7 @@ func TestPlanBytes(t *testing.T) {
 func TestCaps_ChangeMDMeasuresThePlan(t *testing.T) {
 	t.Run("check and start", func(t *testing.T) {
 		p := fixture(t, baseFiles())
-		addChange(t, p, "add-wave", whyGrown(waveChange("add-wave"), 16<<10))
+		addChange(t, p, "add-wave", whyGrown(waveChange("add-wave")))
 		commitAll(t, p, "plan: add-wave")
 		fs := ClassifyFindings(p.CheckChange("add-wave"))
 		require.Contains(t, findingMessages(fs), "without ## Notes, over the 16 KB cap (caps.change_md) — split this change")
@@ -174,13 +174,13 @@ func TestCaps_ChangeMDMeasuresThePlan(t *testing.T) {
 		path := "development/changes/add-wave/change.md"
 		doc := read(t, p, path)
 		// ## Why may change after start: it grew past the cap.
-		write(t, p, path, whyGrown(doc, 16<<10))
+		write(t, p, path, whyGrown(doc))
 		_, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
 		require.Equal(t, "change.too-big", failCode(t, err))
 		require.ErrorContains(t, err, "without ## Notes, over the 16 KB cap (caps.change_md)")
 		require.ErrorContains(t, err, "move what ## Why gained since start to ## Notes, commit, then archive again")
 		require.DirExists(t, p.ChangeDir("add-wave"), "nothing was archived")
-		require.Equal(t, whyGrown(doc, 16<<10), read(t, p, path), "archive never edits change.md")
+		require.Equal(t, whyGrown(doc), read(t, p, path), "archive never edits change.md")
 
 		// Notes past the ceiling: refused.
 		write(t, p, path, doc+strings.Repeat("a note that grew after the plan froze\n", 1400))
@@ -197,7 +197,7 @@ func TestCaps_ChangeMDMeasuresThePlan(t *testing.T) {
 	})
 	t.Run("abandon never refuses for size", func(t *testing.T) {
 		p := fixture(t, baseFiles())
-		big := whyGrown(waveChange("add-wave"), 16<<10) + strings.Repeat("n", 48<<10)
+		big := whyGrown(waveChange("add-wave")) + strings.Repeat("n", 48<<10)
 		addChange(t, p, "add-wave", big)
 		commitAll(t, p, "plan: add-wave")
 		res, err := p.Abandon(ctx(), "add-wave", "too big")

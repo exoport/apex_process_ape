@@ -256,7 +256,7 @@ func noticedItems(review string) []string {
 			}
 			continue
 		}
-		if in == 0 || l.InCode || !(strings.HasPrefix(l.Text, "- ") || strings.HasPrefix(l.Text, "* ")) {
+		if in == 0 || l.InCode || !strings.HasPrefix(l.Text, "- ") && !strings.HasPrefix(l.Text, "* ") {
 			continue
 		}
 		item := strings.TrimSpace(l.Text[2:])
