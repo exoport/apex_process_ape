@@ -92,6 +92,26 @@ below. At promotion the three drafts become the one dated `## v1.0.0` section.
   apex-apply and apex-orchestrator sonnet/high, apex-plan, apex-change and
   apex-review opus/medium.
 
+### Lifting a v0 project (D80)
+
+- **`ape project lift` runs with the ape you invoke**, never the project's
+  `.bingo` pin: it says which binary runs, moves the pin to it (a release
+  build, with bingo on PATH) or prints the one command that does.
+- **The dry run reports every pre-flight problem**, not only the first,
+  including the new `lift.claude-ignored` (a file the lift must commit is
+  git-ignored). Untracked v0 skill folders the manifest names are removed.
+- **The regression also runs at the tag**: red at the tag is told apart from
+  red only after the lift, and exit 126/127 is "cannot run", not red.
+- **Safer edits**: Go's `./...` is not a placeholder and a trailing ` # …`
+  comment is dropped; `<<<` here-strings are not heredocs; only the project's
+  own `ADR-NNNN` form is rewritten (short or foreign ids are listed); ids in
+  data-shaped comments are listed, never stripped; a removed story id takes its
+  task/AC fragments and the punctuation around it; every edited Go file is
+  gofmt-formatted, or left unedited and listed.
+- **A reviewable disposition**: `development/lift-disposition.md` holds
+  summaries and `lift-disposition.json` the full lists; the dry run also lists
+  edited files that a test, CI script or lock file seems to hash.
+
 ### Status
 
 - **An aboard status tab**: in a project with `.aboard/`, every state-changing
