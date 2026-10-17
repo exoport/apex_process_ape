@@ -468,3 +468,30 @@ func writeConfig(t *testing.T, cfg string) string {
 	require.NoError(t, os.WriteFile(ConfigPath(root), []byte(cfg), 0o644))
 	return root
 }
+
+// H26: what the review noticed outside the change reaches the roadmap's
+// Next with the squash, one dated line per item, naming the change.
+func TestArchive_NoticedGoesToNext(t *testing.T) {
+	p := verifiedWave(t)
+	now = func() time.Time { return time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { now = time.Now })
+	write(t, p, "development/changes/add-wave/review.md",
+		"fine\n\n## Noticed, out of scope\n\n- greet.sh ignores LANG\n- none\n\n## Other\n\n- not carried\n")
+	_, err := p.Review(ctx(), "add-wave", "pass", "development/changes/add-wave/review.md")
+	require.NoError(t, err)
+
+	res, err := p.Archive(ctx(), "add-wave", true, RunOptions{})
+	require.NoError(t, err)
+	roadmap := read(t, p, "development/roadmap.md")
+	require.Contains(t, roadmap, "- 2026-10-15 greet.sh ignores LANG (from add-wave)")
+	require.NotContains(t, roadmap, "not carried")
+	require.NotContains(t, roadmap, "- 2026-10-15 none")
+	files := run(t, p.Root, "show", "--name-only", "--format=", res.Commit)
+	require.Contains(t, files, "development/roadmap.md", "Next is written in the squash")
+	require.Empty(t, p.Check(), "the roadmap with Next still passes the project check")
+}
+
+func TestNoticedItems(t *testing.T) {
+	require.Equal(t, []string{"a", "b c"}, noticedItems("x\n## Noticed out of scope\n- a\n* b c\n- None.\n## Next\n- d\n"))
+	require.Empty(t, noticedItems("no section\n- a\n"))
+}

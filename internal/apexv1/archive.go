@@ -393,6 +393,10 @@ func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []S
 	if err := p.resetBlocks(ctx, ci.Doc); err != nil {
 		return undo(err)
 	}
+	// What the review noticed outside the change goes to Next (H26).
+	if err := p.appendNoticed(ctx, id, dest); err != nil {
+		return undo(err)
+	}
 	res.BranchTip = tip
 	msg := p.squashMessage(ctx, res.Subject, base, branch, id)
 	if out, err := p.commitSquash(ctx, msg, res.Hooks); err != nil {

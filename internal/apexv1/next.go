@@ -2,6 +2,8 @@ package apexv1
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -155,4 +157,57 @@ func (p *Project) AddNext(ctx context.Context, text, from string) (*NextResult, 
 		return nil, err
 	}
 	return res, nil
+}
+
+// noticedHeadingRe is review.md's section of findings outside the change
+// (H26, D48 Q6): apex-review writes it, archive carries it into Next.
+var noticedHeadingRe = regexp.MustCompile(`(?i)^##\s+noticed,?\s+out of scope\s*$`)
+
+// noticedItems are the list items of review.md's `## Noticed, out of
+// scope` section, one line each ("none" and empty items left out).
+func noticedItems(review string) []string {
+	var out []string
+	in := false
+	for l := range strings.SplitSeq(strings.ReplaceAll(review, "\r\n", "\n"), "\n") {
+		t := strings.TrimSpace(l)
+		switch {
+		case noticedHeadingRe.MatchString(t):
+			in = true
+		case strings.HasPrefix(t, "#"):
+			in = false
+		case in && (strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ")):
+			item := strings.TrimSpace(t[2:])
+			if item != "" && !strings.EqualFold(strings.TrimRight(item, "."), "none") {
+				out = append(out, item)
+			}
+		}
+	}
+	return out
+}
+
+// appendNoticed carries the archived change's noticed findings into the
+// roadmap's Next, staged with the squash (H26): dest is the archived
+// folder, which holds review.md.
+func (p *Project) appendNoticed(ctx context.Context, id, dest string) error {
+	data, err := os.ReadFile(filepath.Join(dest, "review.md"))
+	if err != nil {
+		return nil //nolint:nilerr // no review.md: nothing noticed
+	}
+	items := noticedItems(string(data))
+	if len(items) == 0 {
+		return nil
+	}
+	roadmap, err := os.ReadFile(p.RoadmapMD())
+	if err != nil {
+		return err
+	}
+	lines := make([]string, len(items))
+	for i, it := range items {
+		lines[i] = NextLine(Today(), it, id)
+	}
+	if err := writeFileAtomic(p.RoadmapMD(), string(AppendNextLines(roadmap, lines))); err != nil {
+		return err
+	}
+	_, err = git(ctx, p.Root, "add", "--", p.Rel(p.RoadmapMD()))
+	return err
 }
