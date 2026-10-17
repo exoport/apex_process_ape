@@ -113,6 +113,74 @@ func isListLine(l string) bool {
 	return strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ") || t != "" && (strings.HasPrefix(l, " ") || strings.HasPrefix(l, "\t"))
 }
 
+// NextItems are the roadmap's Next items, each without its list marker:
+// those of the `## Next` section, and those under apex-plan's `Next …:`
+// label above the first milestone. An item's indented continuation lines
+// are joined onto it; code blocks are skipped. [] when there are none.
+func NextItems(roadmap string) []string {
+	lines := splitLines(roadmap)
+	out := []string{}
+	// collect reads one list. Under the label it ends at the first line
+	// that is not a list line, as AppendNextLines places them; in the
+	// section, blank lines and prose between items are passed over.
+	collect := func(body []mdLine, label bool) {
+		in := false
+		for _, l := range body {
+			if l.InCode {
+				continue
+			}
+			if lv, _ := headingLevel(l); lv > 0 {
+				return
+			}
+			t := strings.TrimSpace(l.Text)
+			switch {
+			case strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* "):
+				if item := strings.TrimSpace(t[2:]); item != "" {
+					out = append(out, item)
+					in = true
+				}
+			case in && t != "" && isListLine(l.Text):
+				out[len(out)-1] += " " + t
+			case label:
+				return
+			default:
+				in = false
+			}
+		}
+	}
+	for i, l := range lines {
+		if lv, _ := headingLevel(l); lv == 2 {
+			break
+		}
+		if !l.InCode && nextLabelRe.MatchString(strings.TrimSpace(l.Text)) {
+			collect(lines[i+1:], true)
+			break
+		}
+	}
+	for _, s := range h2Sections(lines) {
+		if nextHeadingRe.MatchString(s.Title) {
+			collect(s.Body, false)
+		}
+	}
+	return out
+}
+
+// roadmapNext is the base branch's Next (D60): `ape next add` writes it
+// there from any branch, so on a change's branch the working tree's
+// roadmap may not have the newest lines yet.
+func (p *Project) roadmapNext(ctx context.Context, base string) []string {
+	if base != "" && p.isWorkTree(ctx) {
+		if data, ok := p.readOnBranch(ctx, base, p.Rel(p.RoadmapMD())); ok {
+			return NextItems(string(data))
+		}
+	}
+	doc, err := readFileString(p.RoadmapMD())
+	if err != nil {
+		return []string{}
+	}
+	return NextItems(doc)
+}
+
 // NextResult is what `ape next add` reports.
 type NextResult struct {
 	Line   string `json:"line"`

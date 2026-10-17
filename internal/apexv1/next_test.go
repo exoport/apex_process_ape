@@ -74,3 +74,38 @@ func TestAddNext(t *testing.T) {
 	require.Len(t, p.roadmap().Milestones, 1)
 	clean(t, p, "next add")
 }
+
+// D60: status reads the roadmap's Next back — the section's items and
+// those under apex-plan's label, continuations joined, code skipped.
+func TestNextItems(t *testing.T) {
+	cases := map[string]struct {
+		in   string
+		want []string
+	}{
+		"none":    {"# Roadmap\n\n## M1 — A\nStatus: proposed\n", []string{}},
+		"section": {"# Roadmap\n## M1 — A\n\n## Next\n- 2026-10-01 a\n\n* 2026-10-02 b (from add-x)\n", []string{"2026-10-01 a", "2026-10-02 b (from add-x)"}},
+		"apex-plan's label": {
+			"# Roadmap\nNext — not milestones:\n- a\n  more of a\n\nprose\n- not next\n## M1 — A\n- not next either\n",
+			[]string{"a more of a"},
+		},
+		"label and section":                    {"# Roadmap\nNext:\n- a\n## M1 — A\n## Next\n- b\n", []string{"a", "b"}},
+		"code is skipped":                      {"# Roadmap\n## Next\n```\n- not an item\n```\n- c\n## M1 — A\n- d\n", []string{"c"}},
+		"a label below a milestone is not one": {"# Roadmap\n## M1 — A\nNext:\n- x\n", []string{}},
+	}
+	for name, c := range cases {
+		require.Equal(t, c.want, NextItems(c.in), name)
+	}
+}
+
+// D60: status --json lists the base branch's Next, from a change's
+// branch too, where the working tree's roadmap lags behind.
+func TestStatusRoadmapNext(t *testing.T) {
+	now = func() time.Time { return time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { now = time.Now })
+	p := startedWave(t) // HEAD on change/add-wave
+	require.Equal(t, []string{}, p.Status().RoadmapNext)
+	_, err := p.AddNext(ctx(), "the CSV export ignores --tz", "add-wave")
+	require.NoError(t, err)
+	require.NotContains(t, read(t, p, "development/roadmap.md"), "--tz", "the change's branch has not caught up")
+	require.Equal(t, []string{"2026-10-16 the CSV export ignores --tz (from add-wave)"}, p.Status().RoadmapNext)
+}
