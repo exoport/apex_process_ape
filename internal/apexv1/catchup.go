@@ -259,7 +259,7 @@ func (p *Project) layOutConflict(ctx context.Context, ci ChangeInfo, cu *CatchUp
 	}
 	// Committed with the files the rebase stopped on; the net diff's
 	// unmerged paths, what is left to resolve, replace them once known.
-	status := ci.State.Status
+	status, blocked := ci.State.Status, ci.State.BlockedReason
 	if ci, err = p.recordCatchUp(ctx, ci, cu, tip, inArchive, "apex: "+id+" conflicted rebasing onto "+base); err != nil {
 		return ci, cu, err
 	}
@@ -276,7 +276,7 @@ func (p *Project) layOutConflict(ctx context.Context, ci ChangeInfo, cu *CatchUp
 		}
 		cu.Conflicts, last.Conflicts, last.Head = nil, nil, HeadSHA(ctx, p.Root)
 		// recordCatchUp put it in-progress for a conflict there was not.
-		st.Status = status
+		st.Status, st.BlockedReason = status, blocked
 		if !inArchive && (status == StatusVerified || status == StatusReviewed) {
 			st.Status = StatusInProgress
 		}
