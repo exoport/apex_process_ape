@@ -82,6 +82,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"review.nested", 2, "stop", "review --run inside a review session (depth 1)"},
 	{"project.not-initialized", 2, "person", "no development folder: run `ape project init`"},
 	{"session.person-only", 2, "person", "--allow-pending-human or --accept-red from a model session (APE_SESSION or CLAUDECODE set): only a person passes them, from a terminal (D45)"},
+	{"usage.lift-exclude", 2, "stop", "lift: an --exclude glob does not compile"},
 	{"usage.unclassified", 2, "stop", "a usage error without a code (a bug: report it)"},
 
 	// failures (exit 1)
@@ -115,7 +116,15 @@ var DiagnosticCodes = []CodeDoc{
 	{"decision.write-failed", 1, "stop", "decision new: the ADR file could not be created"},
 	{"gate.red", 1, "replan", "the milestone gate (command, a spec scenario, or a newly red regression command) is red"},
 	{CodeCommitFailed, 1, "stop", "ape wrote its record but could not commit it (identity, lock)"},
-	{"git.not-a-repo", 1, "stop", "archive needs a git repository"},
+	{"git.not-a-repo", 1, "stop", "archive and lift need a git repository"},
+	{"lift.not-v0", 1, "person", "lift: no APEX v0 install here (no _apex/framework.yaml recording a v0 version), or the project is APEX v1 already (_apex/state/, development/project.md, or an `apex: lift` commit)"},
+	{"lift.unsupported-layout", 1, "person", "lift: the v0 framework version is outside v0.15.0–v0.31.x, unknown, or its _apex/config.yaml does not resolve; the message lists what was found"},
+	{"lift.dirty", 1, "person", "lift: uncommitted changes (inside ape framework update: outside the paths the install writes)"},
+	{"lift.no-tag", 1, "person", "lift: no tag apex-v0-final; a person tags the commit to lift and pushes the tag"},
+	{"lift.tag-not-head", 1, "person", "lift: apex-v0-final does not point at HEAD"},
+	{"lift.tag-not-pushed", 1, "person", "lift: the current branch has no upstream remote, or apex-v0-final is not on it, or points elsewhere there (git ls-remote)"},
+	{"lift.remote-unreachable", 1, "retry", "lift: git ls-remote against the upstream remote failed (network, credentials)"},
+	{"lift.write-failed", 1, "stop", "lift: removing the v0 families or writing a file failed mid-lift; git reset --hard restores the tree"},
 	{CodeGitStatusFailed, 1, "stop", "git status could not be read"},
 	{"milestone.budget-exceeded", 1, "person", "ape task: the current milestone's spend is at its enforced budget (limits.budget: enforce); no session starts"},
 	{"milestone.changes-in-flight", 1, "apply", "close: changes of the milestone are in-progress, verified or reviewed"},
@@ -150,6 +159,7 @@ var DiagnosticCodes = []CodeDoc{
 	// findings (exit 1, from project check / change check)
 	{"file.missing", 1, "person", "a required file is missing"},
 	{"layout.old-archive", 1, "person", "development/changes/archive/ exists (an older ape's archive): move its folders to development/archive/"},
+	{"lift.disposition-pending", 1, "person", "development/lift-disposition.md exists after a lift: apex-plan fills it, a fresh read-only session then the operator review it; the operator deletes it"},
 	{"layout.old-state", 1, "person", "development/.apex/ exists (an older ape's state): move milestones.json and decisions.json to _apex/state/, delete it"},
 	{"project.too-long", 1, "person", "project.md over 150 lines"},
 	{"project.too-big", 1, "person", "project.md over 8 KB"},
