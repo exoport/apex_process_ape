@@ -34,7 +34,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeConflicted": CodeConflicted, "CodeUnresolvedConflict": CodeUnresolvedConflict, "CodeNotApproved": CodeNotApproved, "CodeCheckFailed": CodeCheckFailed, "CodeVacuousCheck": CodeVacuousCheck,
 		"CodePersonOnly": CodePersonOnly, "CodeBaseCheckedOut": CodeBaseCheckedOut,
 		"CodeBehindUpstream": CodeBehindUpstream, "CodeHookFailed": CodeHookFailed,
-		"CodeArchiveInterrupted": CodeArchiveInterrupted, "CodeRunInterrupted": CodeRunInterrupted,
+		"CodeArchiveInterrupted": CodeArchiveInterrupted, "CodeRunInterrupted": CodeRunInterrupted, "CodeRunBusy": CodeRunBusy,
 		"CodeRefMoved":         CodeRefMoved,
 		"CodeStatusUnrecorded": CodeStatusUnrecorded, "CodeGateChanged": CodeGateChanged, "CodeDecisionUnrecorded": CodeDecisionUnrecorded,
 		"CodeAttemptsTotalExceeded": CodeAttemptsTotalExceeded, "CodeReplansExceeded": CodeReplansExceeded, "CodeBlocksExceeded": CodeBlocksExceeded,

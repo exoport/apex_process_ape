@@ -26,6 +26,13 @@ type v1Flags struct {
 	cwd     string
 	json    bool
 	timeout time.Duration
+	// wait and noDetach are a long verb's (v1_longrun.go): long marks one,
+	// ranHere a call whose body ran in this process (the worker, or
+	// --no-detach) rather than in a worker it waited for.
+	wait     time.Duration
+	noDetach bool
+	long     bool
+	ranHere  bool
 }
 
 func addV1Flags(cmd *cobra.Command, f *v1Flags) {

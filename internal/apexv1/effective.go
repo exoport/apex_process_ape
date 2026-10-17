@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -164,7 +166,13 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 				r = unrunResult(pc.Cmd, logPath, missing)
 				r.Log = p.Rel(logPath)
 			} else {
+				progressf(opt.Progress, "%s %s started: %s (output: %s)", Stamp(), pc.Ref, pc.Cmd, p.Rel(logPath))
 				r = p.runWithRetries(ctx, pc, logPath, timeouts.Limits(pc.Kind, opt.Timeout), vacuous, int(cfg.Retries), inGit)
+				verdict := "green"
+				if r.Exit != 0 {
+					verdict = "red (" + r.Outcome() + ")"
+				}
+				progressf(opt.Progress, "%s %s %s in %.1fs", Stamp(), pc.Ref, verdict, r.Secs)
 			}
 			done[pc.Cmd] = r
 		}
@@ -174,6 +182,13 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 		out = append(out, r)
 	}
 	return out
+}
+
+// progressf writes one progress line to w, when there is one.
+func progressf(w io.Writer, format string, args ...any) {
+	if w != nil {
+		_, _ = fmt.Fprintf(w, "[ape] "+format+"\n", args...)
+	}
 }
 
 // runWithRetries runs one check, and runs a red one again up to retries

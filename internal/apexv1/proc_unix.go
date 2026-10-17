@@ -80,3 +80,6 @@ func processAlive(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || err == syscall.EPERM
 }
+
+// ProcessGroup is this process's group id.
+func ProcessGroup() int { return syscall.Getpgrp() }

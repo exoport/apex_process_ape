@@ -89,6 +89,7 @@ func rootSubcommands() []*cobra.Command {
 		newRollbackCmd(),
 		newTaskCmd(),
 		newRunCmd(),
+		newRunWorkerCmd(),
 		// APEX v1: the unit-of-change commands. `ape change` replaced the
 		// maintenance lane on this branch.
 		newProjectCmd(),

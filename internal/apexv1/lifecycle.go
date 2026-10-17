@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,9 @@ type RunOptions struct {
 	// run; zero takes _apex/config.yaml's timeouts: per kind, else the
 	// defaults (Timeouts.For).
 	Timeout time.Duration
+	// Progress, when set, gets one line as each check starts and ends: a
+	// detached run's log, which a call that attaches to it shows (D58 2.3).
+	Progress io.Writer
 }
 
 // requirementConflicts reports the requirements two changes' deltas both

@@ -34,8 +34,9 @@ const reviewSkill = apexv1.ReviewSkill
 // the `ape task` it starts, which records it in its manifest.
 const envReviewLaunch = "APE_REVIEW_LAUNCH"
 
-// defaultReviewWait keeps one call under the Bash tool's 10-minute cap.
-const defaultReviewWait = 9 * time.Minute
+// defaultReviewWait keeps one call under the Bash tool's 10-minute cap:
+// the long verbs' wait (v1_longrun.go), whose contract this is.
+const defaultReviewWait = defaultLongWait
 
 // reviewEnv is the review session's environment: the caller's, without the
 // marker of the session it came from (or ape task would refuse to nest),
@@ -70,13 +71,18 @@ const envReviewParent = "APE_REVIEW_PARENT"
 //
 //nolint:tagliatelle // the v1 --json payloads are snake_case by contract, like state.json
 type reviewRunResult struct {
-	ID         string                `json:"id"`
-	Running    bool                  `json:"running"`
-	DetachedID string                `json:"detached_id"`
-	Log        string                `json:"log,omitempty"`
-	TaskExit   *int                  `json:"task_exit,omitempty"`
-	Launch     apexv1.ReviewLaunch   `json:"launch"`
-	Outcome    *apexv1.ReviewOutcome `json:"outcome,omitempty"`
+	ID         string `json:"id"`
+	Running    bool   `json:"running"`
+	DetachedID string `json:"detached_id"`
+	Log        string `json:"log,omitempty"`
+	// Verb, Scope and Since: the fields every still-running (exit 75)
+	// payload has (runningPayload).
+	Verb     string                `json:"verb"`
+	Scope    string                `json:"scope"`
+	Since    string                `json:"since"`
+	TaskExit *int                  `json:"task_exit,omitempty"`
+	Launch   apexv1.ReviewLaunch   `json:"launch"`
+	Outcome  *apexv1.ReviewOutcome `json:"outcome,omitempty"`
 	// Verify is the verify --run ran first, for a reviewed change whose
 	// review was stale (D51 Q16).
 	Verify *apexv1.VerifyResult `json:"verify,omitempty"`
@@ -88,6 +94,9 @@ func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, mod
 		return v1Fail(cmd, f, &apexv1.UsageError{Code: "review.nested", Msg: "this is a review session (" + apexv1.EnvReview + "=" + v +
 			"): a review session cannot start another review"}, nil)
 	}
+	if err := validateWait(wait); err != nil {
+		return v1Fail(cmd, f, err, nil)
+	}
 	run := p.LoadReviewRun(id)
 	var h *detachedHandle
 	if run != nil {
@@ -96,27 +105,34 @@ func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, mod
 	var verified *apexv1.VerifyResult
 	if run == nil || h == nil {
 		// A reviewed change whose review went stale is verified again
-		// first, then reviewed as a verified one (D51 Q16).
-		var err error
-		if verified, err = p.ReverifyStaleReview(ctx, id, f.runOptions()); err != nil {
+		// first, then reviewed as a verified one (D51 Q16) — under the
+		// change's run lock, so never beside a detached verify (D58 2.1).
+		lock, held, err := p.TakeRunLock(ctx, "change review", id)
+		if err != nil {
+			return v1Fail(cmd, f, err, nil)
+		}
+		if held != nil {
+			return v1Fail(cmd, f, apexv1.RunBusy(held), nil)
+		}
+		verified, err = p.ReverifyStaleReview(ctx, id, f.runOptions())
+		p.ReleaseRunLock(lock)
+		if err != nil {
 			return failReverify(cmd, f, id, verified, err)
 		}
 		if run, h, err = startReviewSession(ctx, p, id, model, effortFlag); err != nil {
 			return v1Fail(cmd, f, err, nil)
 		}
 	}
-	res := &reviewRunResult{ID: id, DetachedID: run.DetachedID, Log: h.Log, Launch: run.Launch, Verify: verified}
+	res := &reviewRunResult{
+		ID: id, DetachedID: run.DetachedID, Log: h.Log, Launch: run.Launch, Verify: verified,
+		Verb: "change review", Scope: id, Since: run.StartedAt,
+	}
 
 	h, ended, lost := awaitHandle(ctx, handlePath(p.Root, run.DetachedID), wait)
 	if !ended && !lost {
 		res.Running = true
-		if f.json {
-			_ = v1Emit(cmd.OutOrStdout(), f, res, nil)
-		} else {
-			fmt.Fprintf(cmd.OutOrStdout(), "review session %s for %s still running — run `ape change review %s --run` again to keep waiting\n",
-				run.DetachedID, id, id)
-		}
-		return reportedErr(exitCodeStillRunning, fmt.Errorf("review session %s still running", run.DetachedID))
+		return stillRunning(cmd, f, res, fmt.Sprintf("review session %s for %s still running since %s — run `ape change review %s --run` again to keep waiting",
+			run.DetachedID, id, run.StartedAt, id))
 	}
 	if h != nil {
 		res.TaskExit = h.ExitCode
@@ -194,8 +210,8 @@ func startReviewSession(ctx context.Context, p *apexv1.Project, id, model, effor
 	return run, h, nil
 }
 
-// awaitHandle waits up to wait for a detached run to end. lost reports a
-// supervisor gone without recording an exit.
+// awaitHandle waits up to wait for a detached run to end (0: it only
+// looks). lost reports a supervisor gone without recording an exit.
 func awaitHandle(ctx context.Context, path string, wait time.Duration) (h *detachedHandle, ended, lost bool) {
 	deadline := time.Now().Add(wait)
 	for {
@@ -212,7 +228,7 @@ func awaitHandle(ctx context.Context, path string, wait time.Duration) (h *detac
 			}
 			return h, false, true
 		}
-		if wait > 0 && time.Now().After(deadline) {
+		if !time.Now().Before(deadline) {
 			return h, false, false
 		}
 		select {

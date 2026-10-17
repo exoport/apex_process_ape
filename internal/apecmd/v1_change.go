@@ -148,9 +148,14 @@ func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *co
 				}
 			}
 			// H20: a change this command blocked (block, an attempts limit,
-			// a rebase conflict) runs the project's notifier.
+			// a rebase conflict) runs the project's notifier — where the
+			// body ran: a long verb's detached worker notifies, not the
+			// call that waited for it.
 			before, _ := p.ChangeStatus(cmd.Context(), args[0])
 			err = run(cmd, p, args[0])
+			if f.long && !f.ranHere {
+				return err
+			}
 			ctx := context.WithoutCancel(cmd.Context())
 			if after, reason := p.ChangeStatus(ctx, args[0]); after == apexv1.StatusBlocked && before != apexv1.StatusBlocked {
 				p.Notify(ctx, apexv1.NotifyBlock, args[0], reason, cmd.ErrOrStderr())
@@ -443,39 +448,47 @@ its moved base.`,
 		"  ape change start add-tenant-delete",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
-			res, err := p.Start(cmd.Context(), id, f.runOptions())
-			if err != nil {
-				return v1Fail(cmd, &f, err, nil)
-			}
-			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
-				printCatchUp(w, id, res.CatchUp)
-				if res.Resumed {
-					fmt.Fprintf(w, "change %s: %s, resumed on %s (base %s)\n", id, res.Status, res.Branch, res.BaseBranch)
-					return
-				}
-				on := ""
-				if res.Branch != "" {
-					on = " on " + res.Branch
-					if res.BaseBranch != "" {
-						on += " (base " + res.BaseBranch + ")"
-					}
-				}
-				fmt.Fprintf(w, "change %s: in-progress%s from %.7s; baseline:\n", id, on, res.BaseSHA)
-				printChecks(w, res.Baseline, false)
-				if r := res.Regression; r != nil {
-					note := "green"
-					switch {
-					case r.Reason == apexv1.ReasonUnrun:
-						note = "unrun (" + r.Detail + ") — recorded; verify fails while it stays unrun"
-					case r.Exit != 0:
-						note = fmt.Sprintf("red (%s) — recorded: verify fails only if it is newly red; roadmap the fix (apex-plan)", r.Outcome())
-					}
-					fmt.Fprintf(w, "  regression %s  %s\n", note, r.Cmd)
-				}
+			return runLong(cmd, &f, p, id, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
+				res, err := p.Start(ctx, id, opt)
+				return func(cmd *cobra.Command, f *v1Flags) error { return renderStart(cmd, f, id, res, err) }
 			})
 		})
 	addV1TimeoutFlag(cmd, &f)
+	addV1WaitFlags(cmd, &f)
 	return cmd
+}
+
+// renderStart prints a start's outcome.
+func renderStart(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.StartResult, err error) error {
+	if err != nil {
+		return v1Fail(cmd, f, err, nil)
+	}
+	return v1Emit(cmd.OutOrStdout(), f, res, func(w io.Writer) {
+		printCatchUp(w, id, res.CatchUp)
+		if res.Resumed {
+			fmt.Fprintf(w, "change %s: %s, resumed on %s (base %s)\n", id, res.Status, res.Branch, res.BaseBranch)
+			return
+		}
+		on := ""
+		if res.Branch != "" {
+			on = " on " + res.Branch
+			if res.BaseBranch != "" {
+				on += " (base " + res.BaseBranch + ")"
+			}
+		}
+		fmt.Fprintf(w, "change %s: in-progress%s from %.7s; baseline:\n", id, on, res.BaseSHA)
+		printChecks(w, res.Baseline, false)
+		if r := res.Regression; r != nil {
+			note := "green"
+			switch {
+			case r.Reason == apexv1.ReasonUnrun:
+				note = "unrun (" + r.Detail + ") — recorded; verify fails while it stays unrun"
+			case r.Exit != 0:
+				note = fmt.Sprintf("red (%s) — recorded: verify fails only if it is newly red; roadmap the fix (apex-plan)", r.Outcome())
+			}
+			fmt.Fprintf(w, "  regression %s  %s\n", note, r.Cmd)
+		}
+	})
 }
 
 func newChangeVerifyCmd() *cobra.Command {
@@ -560,43 +573,51 @@ does not rebase onto its moved base (the conflict is left on its branch).`,
 		"  ape change verify add-tenant-delete",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
-			res, err := p.Verify(cmd.Context(), id, f.runOptions())
-			if err != nil && res == nil {
-				return v1Fail(cmd, &f, err, nil)
-			}
-			human := func(w io.Writer) {
-				printCatchUp(w, id, res.CatchUp)
-				fmt.Fprintf(w, "change %s at %.7s: %s\n", id, res.SHA, res.Status)
-				printChecks(w, res.Results, true)
-				if len(res.PendingHuman) > 0 {
-					fmt.Fprintf(w, "human-review pending: %s\n", strings.Join(res.PendingHuman, ", "))
-				}
-				printGreenAtBaseline(w, res.GreenAtBaseline)
-				printStrays(w, res.StrayFiles)
-			}
-			if err != nil {
-				// The attempts cap blocked the change: the red results first.
-				if !f.json {
-					human(cmd.OutOrStdout())
-				}
-				return v1Fail(cmd, &f, err, res)
-			}
-			if !res.Green {
-				if !f.json {
-					human(cmd.OutOrStdout())
-				}
-				msg := fmt.Sprintf("change %s: %d command check(s) red, attempt %d of %d — fix the code (never the check) and verify again, or `ape change block %s --reason ...`",
-					id, len(res.Failing()), res.Attempts, res.AttemptsCap, id)
-				if r := res.Regression; r != nil && r.Failed && r.BaselineExit == nil {
-					msg = fmt.Sprintf("change %s: %d command check(s) red, the regression command among them with no baseline to judge it by — `ape change start %s` records one (red is fine there); fix the code for the rest",
-						id, len(res.Failing()), id)
-				}
-				return v1Fail(cmd, &f, &apexv1.FailError{Code: "verify.red", Msg: msg}, res)
-			}
-			return v1Emit(cmd.OutOrStdout(), &f, res, human)
+			return runLong(cmd, &f, p, id, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
+				res, err := p.Verify(ctx, id, opt)
+				return func(cmd *cobra.Command, f *v1Flags) error { return renderVerify(cmd, f, id, res, err) }
+			})
 		})
 	addV1TimeoutFlag(cmd, &f)
+	addV1WaitFlags(cmd, &f)
 	return cmd
+}
+
+// renderVerify prints a verify's outcome.
+func renderVerify(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.VerifyResult, err error) error {
+	if err != nil && res == nil {
+		return v1Fail(cmd, f, err, nil)
+	}
+	human := func(w io.Writer) {
+		printCatchUp(w, id, res.CatchUp)
+		fmt.Fprintf(w, "change %s at %.7s: %s\n", id, res.SHA, res.Status)
+		printChecks(w, res.Results, true)
+		if len(res.PendingHuman) > 0 {
+			fmt.Fprintf(w, "human-review pending: %s\n", strings.Join(res.PendingHuman, ", "))
+		}
+		printGreenAtBaseline(w, res.GreenAtBaseline)
+		printStrays(w, res.StrayFiles)
+	}
+	if err != nil {
+		// The attempts cap blocked the change: the red results first.
+		if !f.json {
+			human(cmd.OutOrStdout())
+		}
+		return v1Fail(cmd, f, err, res)
+	}
+	if !res.Green {
+		if !f.json {
+			human(cmd.OutOrStdout())
+		}
+		msg := fmt.Sprintf("change %s: %d command check(s) red, attempt %d of %d — fix the code (never the check) and verify again, or `ape change block %s --reason ...`",
+			id, len(res.Failing()), res.Attempts, res.AttemptsCap, id)
+		if r := res.Regression; r != nil && r.Failed && r.BaselineExit == nil {
+			msg = fmt.Sprintf("change %s: %d command check(s) red, the regression command among them with no baseline to judge it by — `ape change start %s` records one (red is fine there); fix the code for the rest",
+				id, len(res.Failing()), id)
+		}
+		return v1Fail(cmd, f, &apexv1.FailError{Code: "verify.red", Msg: msg}, res)
+	}
+	return v1Emit(cmd.OutOrStdout(), f, res, human)
 }
 
 // printCatchUp reports a catch-up with a moved base branch (D40): the
@@ -679,9 +700,12 @@ session, never from inside a review session (depth 1), skill fixed to apex-revie
     e.g. a throwaway copy to break, is allowed)
   - post-run assertion: a session that committed or left anything but review.md (and
     the state.json ape commits) has its verdict voided (recorded under review_voided)
-  - --wait (default 9m, under the Bash tool's 10-minute cap) bounds one call; exit 75
-    means still running: call `+"`ape change review <id> --run`"+` again to keep waiting —
-    it attaches to the running session, it never starts a second one
+  - --wait (default 9m, at most 9m30s, under the Bash tool's 10-minute cap; 0 returns
+    at once) bounds one call; exit 75 means still running: call
+    `+"`ape change review <id> --run`"+` again to keep waiting — it attaches to the running
+    session, it never starts a second one. The --json payload of a 75 has the fields every
+    long verb's has (`+"`ape change verify --help`"+`): "running": true, "verb", "scope",
+    "since", "log"
   - the session's cost is its own ape task manifest (ape status sums it)
   - model and effort: --model/--effort; else _apex/config.yaml models.apex-review
     ("apex-review: sonnet" or "apex-review: {model: sonnet, effort: high}"; a config
@@ -720,7 +744,7 @@ running, call again.`,
 	cmd.Flags().StringVar(&verdict, "verdict", "", "pass or block (required without --run)")
 	cmd.Flags().StringVar(&findings, "findings", "", "the review file (required without --run)")
 	cmd.Flags().BoolVar(&runSession, "run", false, "review in a fresh, detached, read-only Claude Code session (apex-review)")
-	cmd.Flags().DurationVar(&wait, "wait", defaultReviewWait, "--run: how long this call waits for the session (exit 75 when it is still running)")
+	cmd.Flags().DurationVar(&wait, "wait", defaultReviewWait, "--run: how long this call waits for the session (at most 9m30s; 0 returns at once); exit 75 when it is still running")
 	cmd.Flags().StringVar(&model, "model", "", "--run: model for the review session (default: models.apex-review in _apex/config.yaml, else the asking session's)")
 	cmd.Flags().StringVar(&effort, "effort", "", "--run: effort for the review session (default: models.apex-review's effort, else the asking session's)")
 	return cmd
@@ -1019,35 +1043,43 @@ rebase conflicts or the delta no longer applies.`,
 		"  ape change archive add-tenant-delete",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
-			res, err := p.Archive(cmd.Context(), id, allowPending, f.runOptions())
-			if err != nil {
-				if res != nil && res.Verify != nil && !f.json {
-					printChecks(cmd.OutOrStdout(), res.Verify.Results, true)
-				}
-				return v1Fail(cmd, &f, err, res)
-			}
-			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
-				for _, s := range res.Specs {
-					verb := "updated"
-					if s.Created {
-						verb = "created"
-					}
-					fmt.Fprintf(w, "%s %s (+%d ~%d -%d)\n", verb, s.Path, s.Added, s.Modified, s.Removed)
-				}
-				if res.Rebased {
-					fmt.Fprintf(w, "rebased %s onto %s", apexv1.ChangeBranch(id), res.BaseBranch)
-					if res.Reverified {
-						fmt.Fprint(w, " and re-verified green")
-					}
-					fmt.Fprintln(w)
-				}
-				fmt.Fprintf(w, "archived %s → %s\ncommit %.7s %s (on %s; %s deleted)\n", id, res.ArchivedTo, res.Commit, res.Subject, res.BaseBranch, apexv1.ChangeBranch(id))
-				if res.AllowPendingHuman {
-					fmt.Fprintf(w, "recorded: archived with human-review pending (%s)\n", strings.Join(res.PendingHuman, ", "))
-				}
+			return runLong(cmd, &f, p, id, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
+				res, err := p.Archive(ctx, id, allowPending, opt)
+				return func(cmd *cobra.Command, f *v1Flags) error { return renderArchive(cmd, f, id, res, err) }
 			})
 		})
 	cmd.Flags().BoolVar(&allowPending, "allow-pending-human", false, "archive with human-review tasks unaccepted (recorded in state.json; a person only)")
 	addV1TimeoutFlag(cmd, &f)
+	addV1WaitFlags(cmd, &f)
 	return cmd
+}
+
+// renderArchive prints an archive's outcome.
+func renderArchive(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.ArchiveResult, err error) error {
+	if err != nil {
+		if res != nil && res.Verify != nil && !f.json {
+			printChecks(cmd.OutOrStdout(), res.Verify.Results, true)
+		}
+		return v1Fail(cmd, f, err, res)
+	}
+	return v1Emit(cmd.OutOrStdout(), f, res, func(w io.Writer) {
+		for _, s := range res.Specs {
+			verb := "updated"
+			if s.Created {
+				verb = "created"
+			}
+			fmt.Fprintf(w, "%s %s (+%d ~%d -%d)\n", verb, s.Path, s.Added, s.Modified, s.Removed)
+		}
+		if res.Rebased {
+			fmt.Fprintf(w, "rebased %s onto %s", apexv1.ChangeBranch(id), res.BaseBranch)
+			if res.Reverified {
+				fmt.Fprint(w, " and re-verified green")
+			}
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintf(w, "archived %s → %s\ncommit %.7s %s (on %s; %s deleted)\n", id, res.ArchivedTo, res.Commit, res.Subject, res.BaseBranch, apexv1.ChangeBranch(id))
+		if res.AllowPendingHuman {
+			fmt.Fprintf(w, "recorded: archived with human-review pending (%s)\n", strings.Join(res.PendingHuman, ", "))
+		}
+	})
 }

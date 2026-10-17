@@ -97,3 +97,6 @@ func processAlive(pid int) bool {
 	var code uint32
 	return windows.GetExitCodeProcess(h, &code) == nil && code == 259 // STILL_ACTIVE
 }
+
+// ProcessGroup: Windows has no process groups to record.
+func ProcessGroup() int { return 0 }
