@@ -766,7 +766,9 @@ second argument (T<n>) or --task.
 
 Accepting a task again replaces its earlier acceptance.
 
---delegate: autonomous acceptance (D75, D76). Only when _apex/config.yaml delegates it:
+--delegate: autonomous acceptance (D75, D76). Off by default (D78: project init writes no
+human_review block; without one, delegate.off, action person). Only when
+_apex/config.yaml delegates it:
 
     human_review:
       delegate: apex-accept                  # the default when the block is present
@@ -776,8 +778,8 @@ Accepting a task again replaces its earlier acceptance.
       effort: high                           # optional, else models.<delegate>'s
 
   - the task must be awaiting a person: the change reviewed (or archived) and the task
-    not accepted (else delegate.not-awaiting); no human_review block is
-    delegate.not-configured; human_review is under the config.changed guard, and
+    not accepted (else delegate.not-awaiting); human_review is under the config.changed
+    guard, and
     --delegate refuses while a commit no person accepted changed it, or while the
     working tree's block differs from HEAD's (delegate.unaccepted-config, action person):
     a model cannot add the block and accept its own work. Not person-only: that is the
@@ -800,7 +802,11 @@ Accepting a task again replaces its earlier acceptance.
     "Accepted-By: delegate:<skill> <T> run <run-id>" (and so does the archive squash).
     On a fail nothing is accepted: the task stays awaiting_human, ape status shows the
     verdict (JSON changes[].delegate.<T>: {verdict, reason, run, at}), exit 1
-    delegate.fail (action person). No verdict: delegate.no-verdict (retry)
+    delegate.fail (action person). A session that records no verdict is a fail, reason
+    "no verdict" (D78; its last message is never read for one)
+  - no automatic retry on the same artefact (D78): after a fail, --delegate for that task
+    refuses (delegate.already-failed, action person) until the change's tip moves
+    (change/<id>'s tip; the archive folder's content once archived)
   - --wait (default 9m) bounds one call; exit 75 means still running: call
     `+"`ape change accept <id> <T> --delegate`"+` again — it attaches to the running session
   - JSON: {id, task, skill, args, running, detached_id, log, task_exit, launch,
@@ -811,12 +817,17 @@ Accepting a task again replaces its earlier acceptance.
 records its verdict — only the session --delegate started for that change and task
 (APE_DELEGATE=<id>/<T>, its run in progress; elsewhere exit 2, delegate.not-in-session).
 It writes _apex/state/runs/delegate/<run-id>.json {change, task, skill, run, verdict,
-reason, evidence, at} — ignored state, never a commit. ape, not the session, records the
-acceptance.
+reason, evidence, at, change_tip} — ignored state, never a commit. ape, not the session,
+records the acceptance. --evidence (D78): a URL as given; the session's own
+assets/accept-* note as it is on disk (ape commits it with the acceptance); any other
+path must be committed at change/<id>'s tip while the change is unarchived — where its
+design artefacts live, whatever branch HEAD is on — and a file in the working tree once
+it is archived; each recorded with its SHA-256 (else exit 2, usage.evidence). With no
+--evidence the acceptance rests on the verdict file, recorded by its path and SHA-256.
 
 Exit codes: 0 recorded · 1 the task has a command check, a draft, or the branch it is
-recorded on is checked out elsewhere; --delegate: not configured, config not accepted,
-not awaiting, fail, voided, no verdict · 2 usage (no such task, bad evidence, --verdict
+recorded on is checked out elsewhere; --delegate: off, config not accepted, not
+awaiting, already failed at this tip, fail (no verdict included), voided · 2 usage (no such task, bad evidence, --verdict
 outside its session) · 75 --delegate: still running, call again.`,
 		"  ape change accept add-tenant-delete --task T2 --by diego\n"+
 			"  ape change accept add-tenant-delete T2 --by diego --evidence docs/review/tenant-delete.png --evidence https://ci.example.com/run/812\n"+

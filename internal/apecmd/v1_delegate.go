@@ -120,15 +120,17 @@ func runDelegateSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, t
 	case outcome.Voided:
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "delegate.voided", Msg: "the delegate's verdict on " + task + " of " + id + " is voided: its session changed more than its accept-* notes (" +
 			strings.Join(outcome.Violations, ", ") + ") — nothing is accepted; a person looks at it"}, res)
-	case outcome.Verdict == "":
-		why := "the session was lost"
-		if res.TaskExit != nil {
-			why = fmt.Sprintf("ape task exited %d", *res.TaskExit)
+	case outcome.Verdict != "pass":
+		why := outcome.Reason
+		if why == apexv1.NoVerdictReason {
+			// D78: a session that recorded no verdict failed the task.
+			ended := "the session was lost"
+			if res.TaskExit != nil {
+				ended = fmt.Sprintf("ape task exited %d", *res.TaskExit)
+			}
+			why += " (" + ended + "; log " + res.Log + ")"
 		}
-		return v1Fail(cmd, f, &apexv1.FailError{Code: "delegate.no-verdict", Msg: "the delegate session for " + task + " of " + id + " ended without a verdict (" + why + "; log " + res.Log +
-			") — run `ape change accept " + id + " " + task + " --delegate` again"}, res)
-	case outcome.Verdict == "fail":
-		return v1Fail(cmd, f, &apexv1.FailError{Code: "delegate.fail", Msg: "the delegate failed " + task + " of " + id + ": " + outcome.Reason +
+		return v1Fail(cmd, f, &apexv1.FailError{Code: "delegate.fail", Msg: "the delegate failed " + task + " of " + id + ": " + why +
 			" — the task still awaits a person (`ape change accept " + id + " --task " + task + " --by <who>`)"}, res)
 	}
 	return v1Emit(cmd.OutOrStdout(), f, res, func(w io.Writer) {
@@ -151,7 +153,7 @@ func startDelegateSession(ctx context.Context, p *apexv1.Project, id, task strin
 	argv := childTaskArgv(p.Root, plan.Skill, plan.Args, launch)
 	run := &apexv1.DelegateRun{
 		Change: id, Task: task, Skill: plan.Skill, Args: plan.Args, Folder: plan.Folder,
-		StartedAt: apexv1.Stamp(), HeadSHA: apexv1.HeadSHA(ctx, p.Root), Branch: apexv1.CurrentBranch(ctx, p.Root),
+		StartedAt: apexv1.Stamp(), HeadSHA: apexv1.HeadSHA(ctx, p.Root), Branch: apexv1.CurrentBranch(ctx, p.Root), ChangeTip: plan.ChangeTip,
 		Parent: os.Getenv(repl.EnvApeSession), Launch: launch,
 	}
 	h, err := launchDetached(p.Root, p.Root, argv, delegateEnv(id, task))

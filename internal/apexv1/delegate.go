@@ -27,6 +27,9 @@ import (
 //	  model: sonnet                          # optional; else models.<skill>
 //	  effort: high                           # optional
 //
+// Delegation is off by default (D78): `project init` writes no human_review
+// block, and without one --delegate is refused (delegate.off).
+//
 // `ape change accept <id> T<n> --delegate` starts the delegate skill in its
 // own detached session (an ape task, like `change review --run`), marked
 // APE_DELEGATE=<id>/<T>. The skill inspects the task's artefact read-only
@@ -37,7 +40,11 @@ import (
 // branch or left a file outside the change's assets/accept-* is voided;
 // a pass is recorded by ape exactly as a person's acceptance is, by
 // "delegate:<skill>" with the run's id — never as a person; a fail leaves
-// the task awaiting a person, its verdict shown by `ape status`.
+// the task awaiting a person, its verdict shown by `ape status`. A session
+// that ends without recording a verdict is a fail, "no verdict" (D78): its
+// last message is never read for one. A fail is not retried on the same
+// artefact: --delegate refuses (delegate.already-failed) until the change's
+// tip moves.
 //
 // human_review is under the config.changed guard: a model cannot add the
 // block and accept its own work. --delegate refuses while a commit nobody
@@ -155,6 +162,9 @@ type DelegateRun struct {
 	// neither.
 	HeadSHA string `json:"head_sha"`
 	Branch  string `json:"branch,omitempty"`
+	// ChangeTip is what the session judged (changeTip): a fail there is
+	// not delegated again until it moves.
+	ChangeTip string `json:"change_tip,omitempty"`
 	// Parent is the APE_SESSION of the session that asked, "" from a shell.
 	Parent string `json:"parent,omitempty"`
 	Launch Launch `json:"launch"`
@@ -197,6 +207,8 @@ type DelegateVerdict struct {
 	Evidence []Evidence `json:"evidence,omitempty"`
 	At       string     `json:"at"`
 	Voided   []string   `json:"voided,omitempty"`
+	// ChangeTip is the change's tip the verdict judged (DelegateRun).
+	ChangeTip string `json:"change_tip,omitempty"`
 }
 
 // DelegateVerdictPath is run's verdict file.
@@ -242,6 +254,8 @@ type DelegatePlan struct {
 	Args   string
 	Folder string
 	Model  SkillModel
+	// ChangeTip is the change's tip now (changeTip).
+	ChangeTip string
 }
 
 // PrepareDelegate checks that task of change id may be accepted by the
@@ -260,15 +274,20 @@ func (p *Project) PrepareDelegate(ctx context.Context, id, task string) (*Delega
 	}
 	hr := cfg.HumanReview
 	if hr == nil {
-		return nil, &FailError{Code: "delegate.not-configured", Msg: "_apex/config.yaml has no human_review: block, so only a person accepts " + task +
+		return nil, &FailError{Code: "delegate.off", Msg: "delegation is off: _apex/config.yaml has no human_review: block, so only a person accepts " + task +
 			" — a person runs `ape change accept " + id + " --task " + task + " --by <who>`, or adds human_review: {delegate: " + DefaultDelegateSkill + "} (a person's change: config.changed guards it)"}
 	}
 	if err := p.refuseUnacceptedHumanReview(ctx); err != nil {
 		return nil, err
 	}
-	folder, err := p.delegateTarget(ctx, id, task)
+	folder, archived, err := p.delegateTarget(ctx, id, task)
 	if err != nil {
 		return nil, err
+	}
+	tip := p.changeTip(ctx, id, folder, archived)
+	if last := p.lastDelegateVerdicts(id)[task]; last != nil && last.Verdict == "fail" && len(last.Voided) == 0 && last.ChangeTip != "" && last.ChangeTip == tip {
+		return nil, &FailError{Code: "delegate.already-failed", Msg: "the delegate failed " + task + " of " + id + " at this tip already (run " + last.Run + ": " + last.Reason +
+			") — a person reviews it (`ape change accept " + id + " --task " + task + " --by <who>`); the delegate runs again only once the change moves"}
 	}
 	args, err := FillArgs(hr.ArgsTemplate(), ArgsVarsFor(id, task, folder))
 	if err != nil {
@@ -277,7 +296,7 @@ func (p *Project) PrepareDelegate(ctx context.Context, id, task string) (*Delega
 	if err := effort.CheckLevel(strings.TrimSpace(hr.Effort)); err != nil {
 		return nil, &FailError{Code: "delegate.invalid-config", Msg: "human_review.effort: " + err.Error() + " — a person fixes _apex/config.yaml"}
 	}
-	return &DelegatePlan{Change: id, Task: task, Skill: hr.Skill(), Args: args, Folder: folder, Model: hr.SessionModel(cfg.Models)}, nil
+	return &DelegatePlan{Change: id, Task: task, Skill: hr.Skill(), Args: args, Folder: folder, Model: hr.SessionModel(cfg.Models), ChangeTip: tip}, nil
 }
 
 // guardedKeysRe reads the keys out of a config.changed finding.
@@ -316,47 +335,62 @@ func (p *Project) refuseUnacceptedHumanReview(ctx context.Context) error {
 // delegateTarget checks task of change id awaits a person, and returns the
 // change's folder, project-relative: changes/<id> in flight, its archive
 // folder once archived (as this checkout's tree holds it).
-func (p *Project) delegateTarget(ctx context.Context, id, task string) (string, error) {
+func (p *Project) delegateTarget(ctx context.Context, id, task string) (folder string, archived bool, err error) {
 	notAwaiting := func(why string) error {
 		return &FailError{Code: "delegate.not-awaiting", Msg: "task " + task + " of " + id + " is not awaiting a person: " + why}
 	}
 	ci, err := p.requireChange(ctx, id)
 	if fe, ok := errors.AsType[*FailError](err); ok && fe.Code == "change.archived" {
-		folder, ok := p.ArchivedIDs()[id]
+		name, ok := p.ArchivedIDs()[id]
 		if !ok {
-			return "", &FailError{Code: CodeChangeNotFound, Msg: "the archived change " + id + " is not in this checkout's tree — run the delegate on the branch it was archived into"}
+			return "", false, &FailError{Code: CodeChangeNotFound, Msg: "the archived change " + id + " is not in this checkout's tree — run the delegate on the branch it was archived into"}
 		}
-		dir := filepath.Join(p.ArchiveDir(), folder)
+		dir := filepath.Join(p.ArchiveDir(), name)
 		st, serr := LoadState(filepath.Join(dir, "state.json"))
 		if serr != nil {
-			return "", &FailError{Code: CodeStateUnreadable, Msg: serr.Error()}
+			return "", false, &FailError{Code: CodeStateUnreadable, Msg: serr.Error()}
 		}
 		doc := p.loadChangeDoc(filepath.Join(dir, "change.md"))
 		if doc == nil {
-			return "", &FailError{Code: "change.no-change-md", Msg: "the archived change " + id + " has no change.md"}
+			return "", false, &FailError{Code: "change.no-change-md", Msg: "the archived change " + id + " has no change.md"}
 		}
 		if err := humanTask(doc, id, task); err != nil {
-			return "", err
+			return "", false, err
 		}
 		if !slices.Contains(awaitingHuman(st, doc), task) {
-			return "", notAwaiting("it is accepted already")
+			return "", false, notAwaiting("it is accepted already")
 		}
-		return p.Rel(dir), nil
+		return p.Rel(dir), true, nil
 	}
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if err := humanTask(ci.Doc, id, task); err != nil {
-		return "", err
+		return "", false, err
 	}
 	st := p.withBaseAccepted(ctx, id, ci.State)
 	if !slices.Contains(awaitingHuman(st, ci.Doc), task) {
 		if st.Status != StatusReviewed {
-			return "", notAwaiting("the change is " + st.Status + ", and a human-review task awaits a person once the change is reviewed")
+			return "", false, notAwaiting("the change is " + st.Status + ", and a human-review task awaits a person once the change is reviewed")
 		}
-		return "", notAwaiting("it is accepted already")
+		return "", false, notAwaiting("it is accepted already")
 	}
-	return p.Rel(p.ChangeDir(id)), nil
+	return p.Rel(p.ChangeDir(id)), false, nil
+}
+
+// changeTip is what a delegate judges, as a revision: change/<id>'s tip
+// while the change is unarchived, the archive folder's tree at HEAD once
+// archived; "" when there is none.
+func (p *Project) changeTip(ctx context.Context, id, folder string, archived bool) string {
+	rev := "refs/heads/" + ChangeBranch(id)
+	if archived {
+		rev = "HEAD:./" + folder
+	}
+	out, err := git(ctx, p.Root, "rev-parse", "--verify", "--quiet", rev)
+	if err != nil {
+		return ""
+	}
+	return out
 }
 
 // loadChangeDoc parses a change.md; nil when it cannot be read.
@@ -399,15 +433,55 @@ func (p *Project) RecordDelegateVerdict(ctx context.Context, id, task, verdict, 
 	if reason == "" {
 		return nil, &UsageError{Code: "usage.reason", Msg: "--reason is required: why the artefact passes or fails the task"}
 	}
-	ev, err := p.resolveEvidence(ctx, evidence)
+	ev, err := p.resolveDelegateEvidence(ctx, run, evidence)
 	if err != nil {
 		return nil, err
 	}
-	v := &DelegateVerdict{Change: id, Task: task, Skill: run.Skill, Run: run.DetachedID, Verdict: verdict, Reason: reason, Evidence: ev, At: Stamp()}
+	v := &DelegateVerdict{
+		Change: id, Task: task, Skill: run.Skill, Run: run.DetachedID, Verdict: verdict, Reason: reason, Evidence: ev, At: Stamp(),
+		ChangeTip: run.ChangeTip,
+	}
 	if err := p.saveDelegateVerdict(v); err != nil {
 		return nil, err
 	}
 	return v, nil
+}
+
+// resolveDelegateEvidence resolves a delegate's --evidence (D78): a URL as
+// given; the session's own accept-* note as it is on disk (ape commits it
+// with the acceptance); any other path at change/<id>'s tip while the
+// change is unarchived — where its design artefacts live, whatever branch
+// HEAD is on — and in the working tree once it is archived, as a person's.
+func (p *Project) resolveDelegateEvidence(ctx context.Context, run *DelegateRun, items []string) ([]Evidence, error) {
+	archived := strings.HasPrefix(run.Folder, p.Rel(p.ArchiveDir())+"/")
+	var out []Evidence
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		rel := item
+		if !urlRe.MatchString(item) {
+			abs := item
+			if !filepath.IsAbs(abs) {
+				abs = filepath.Join(p.Root, filepath.FromSlash(item))
+			}
+			rel = p.Rel(filepath.Clean(abs))
+		}
+		var ev []Evidence
+		var err error
+		switch {
+		case urlRe.MatchString(item), archived, p.delegateMayTouch(run, rel) && !strings.HasPrefix(rel, p.StateRel()+"/"):
+			ev, err = p.resolveEvidence(ctx, []string{item})
+		default:
+			ev, err = p.resolveEvidenceAt(ctx, ChangeBranch(run.Change), []string{item})
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ev...)
+	}
+	return out, nil
 }
 
 // envDetachedRun is the variable a detached run's supervisor sets on what
@@ -421,6 +495,10 @@ func (p *Project) saveDelegateVerdict(v *DelegateVerdict) error {
 	}
 	return writeJSON(p.DelegateVerdictPath(v.Run), v)
 }
+
+// NoVerdictReason is the reason of the fail ape records for a delegate
+// session that ended without a verdict (D78).
+const NoVerdictReason = "no verdict"
 
 // DelegateOutcome is what a settled delegate session came to.
 type DelegateOutcome struct {
@@ -511,7 +589,7 @@ func (p *Project) SettleDelegateRun(ctx context.Context, run *DelegateRun) (*Del
 	}
 	if len(violations) > 0 {
 		if v == nil {
-			v = &DelegateVerdict{Change: run.Change, Task: run.Task, Skill: run.Skill, Run: run.DetachedID, At: Stamp()}
+			v = &DelegateVerdict{Change: run.Change, Task: run.Task, Skill: run.Skill, Run: run.DetachedID, At: Stamp(), ChangeTip: run.ChangeTip}
 		}
 		v.Voided = violations
 		if err := p.saveDelegateVerdict(v); err != nil {
@@ -520,7 +598,20 @@ func (p *Project) SettleDelegateRun(ctx context.Context, run *DelegateRun) (*Del
 		out.Voided = true
 		return out, nil
 	}
-	if v == nil || v.Verdict != "pass" {
+	if v == nil {
+		// No verdict is a fail (D78), recorded as one: the session's last
+		// message is never read for a verdict.
+		v = &DelegateVerdict{
+			Change: run.Change, Task: run.Task, Skill: run.Skill, Run: run.DetachedID, Verdict: "fail", Reason: NoVerdictReason,
+			At: Stamp(), ChangeTip: run.ChangeTip,
+		}
+		if err := p.saveDelegateVerdict(v); err != nil {
+			return nil, err
+		}
+		out.Verdict, out.Reason = v.Verdict, v.Reason
+		out.VerdictFile = p.Rel(p.DelegateVerdictPath(run.DetachedID))
+	}
+	if v.Verdict != "pass" {
 		return out, nil
 	}
 	a, err := p.AcceptDelegated(ctx, run, v, notes)
@@ -535,8 +626,9 @@ func (p *Project) SettleDelegateRun(ctx context.Context, run *DelegateRun) (*Del
 // person's acceptance is recorded (Accept: on the change's branch, on its
 // base when reviewed off it, in the archive once archived), by
 // "delegate:<skill>" with the run's id — never as a person — on the
-// verdict's evidence, else the verdict file itself; the session's accept-*
-// notes are committed with the record.
+// verdict's evidence, else the verdict file itself (ignored state, so
+// recorded by its path and content's SHA-256 as it is on disk: it is on
+// no branch); the session's accept-* notes are committed with the record.
 func (p *Project) AcceptDelegated(ctx context.Context, run *DelegateRun, v *DelegateVerdict, notes []string) (*Accept, error) {
 	ev := v.Evidence
 	if len(ev) == 0 {

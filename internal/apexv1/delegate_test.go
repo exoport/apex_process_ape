@@ -45,7 +45,7 @@ func startDelegate(t *testing.T, p *Project, runID string) *DelegateRun {
 	require.NoError(t, err)
 	r := &DelegateRun{
 		Change: "add-wave", Task: "T2", Skill: plan.Skill, Args: plan.Args, Folder: plan.Folder, DetachedID: runID,
-		StartedAt: Stamp(), HeadSHA: HeadSHA(ctx(), p.Root), Branch: CurrentBranch(ctx(), p.Root),
+		StartedAt: Stamp(), HeadSHA: HeadSHA(ctx(), p.Root), Branch: CurrentBranch(ctx(), p.Root), ChangeTip: plan.ChangeTip,
 	}
 	require.NoError(t, p.SaveDelegateRun(r))
 	t.Setenv(EnvDelegate, "add-wave/T2")
@@ -61,12 +61,13 @@ func leaveSession(t *testing.T) {
 }
 
 func TestPrepareDelegate(t *testing.T) {
-	t.Run("no human_review: only a person accepts", func(t *testing.T) {
+	t.Run("no human_review: delegation is off, only a person accepts", func(t *testing.T) {
 		p := delegatedWave(t, "")
 		_, err := p.PrepareDelegate(ctx(), "add-wave", "T2")
 		fe, ok := errors.AsType[*FailError](err)
 		require.True(t, ok, "%v", err)
-		require.Equal(t, "delegate.not-configured", fe.Code)
+		require.Equal(t, "delegate.off", fe.Code)
+		require.Equal(t, ActionPerson, ActionFor(fe.Code))
 	})
 	t.Run("the default delegate and args", func(t *testing.T) {
 		p := delegatedWave(t, "human_review: {}\n")
@@ -257,6 +258,73 @@ func TestDelegate_FailLeavesTheTaskAwaiting(t *testing.T) {
 	require.Equal(t, DelegateStatus{Verdict: "fail", Reason: "the greeting is truncated on narrow screens", Run: "run-2", At: c.Delegate["T2"].At}, c.Delegate["T2"])
 	require.Contains(t, r.Brief(), "(T2 delegate fail: the greeting is truncated on narrow screens)")
 	require.Contains(t, r.Next, "a person reviews add-wave", "a failed delegate hands the task to a person")
+}
+
+// D78: a session that records no verdict failed the task — recorded as a
+// fail, "no verdict" — and a fail is not delegated again until the
+// change's tip moves.
+func TestDelegate_NoVerdictIsAFailNotRetriedOnTheSameTip(t *testing.T) {
+	p := delegatedWave(t, "human_review: {}\n")
+	dr := startDelegate(t, p, "run-8")
+	require.Equal(t, run(t, p.Root, "rev-parse", "change/add-wave"), dr.ChangeTip)
+	leaveSession(t)
+	out, err := p.SettleDelegateRun(ctx(), dr)
+	require.NoError(t, err)
+	require.False(t, out.Voided)
+	require.Equal(t, "fail", out.Verdict)
+	require.Equal(t, NoVerdictReason, out.Reason)
+	require.Nil(t, out.Accepted)
+	d := p.Status().Changes[0].Delegate["T2"]
+	require.Equal(t, "fail", d.Verdict)
+	require.Equal(t, "no verdict", d.Reason)
+	require.Equal(t, []string{"T2"}, p.Status().Changes[0].AwaitingHuman)
+
+	_, err = p.PrepareDelegate(ctx(), "add-wave", "T2")
+	fe, ok := errors.AsType[*FailError](err)
+	require.True(t, ok, "%v", err)
+	require.Equal(t, "delegate.already-failed", fe.Code)
+	require.Equal(t, ActionPerson, ActionFor(fe.Code))
+	require.Contains(t, fe.Msg, "run run-8: no verdict")
+
+	// The change moves (an artefact committed on its branch): the
+	// delegate may judge it again.
+	write(t, p, "development/changes/add-wave/assets/mock.txt", "v2\n")
+	commitAll(t, p, "design: add-wave mock v2")
+	_, err = p.PrepareDelegate(ctx(), "add-wave", "T2")
+	require.NoError(t, err)
+}
+
+// D78: the delegate's evidence is resolved at change/<id>'s tip while the
+// change is unarchived — where its design artefacts live — whatever branch
+// HEAD is on; the record lands where a person's would (here, the base).
+func TestDelegate_EvidenceResolvesAtTheChangeBranchTip(t *testing.T) {
+	p := delegatedWave(t, "human_review: {}\n")
+	write(t, p, "development/changes/add-wave/assets/mock.png", "png v1\n")
+	commitAll(t, p, "design: add-wave mock")
+	run(t, p.Root, "switch", "-q", "main")
+	require.NoFileExists(t, p.Root+"/development/changes/add-wave/assets/mock.png", "only on change/add-wave")
+	write(t, p, "main-only.txt", "x\n")
+	commitAll(t, p, "docs: something on main")
+
+	dr := startDelegate(t, p, "run-9")
+	_, err := p.RecordDelegateVerdict(ctx(), "add-wave", "T2", "pass", "fine", []string{"main-only.txt"})
+	ue, ok := errors.AsType[*UsageError](err)
+	require.True(t, ok, "%v", err)
+	require.Equal(t, "usage.evidence", ue.Code, "not on change/add-wave")
+	require.Contains(t, ue.Msg, "committed on change/add-wave")
+	v, err := p.RecordDelegateVerdict(ctx(), "add-wave", "T2", "pass", "matches the mock",
+		[]string{"development/changes/add-wave/assets/mock.png", "https://example.com/run/1"})
+	require.NoError(t, err)
+	require.Equal(t, "development/changes/add-wave/assets/mock.png", v.Evidence[0].Path)
+	require.Len(t, v.Evidence[0].SHA256, 64)
+	leaveSession(t)
+
+	out, err := p.SettleDelegateRun(ctx(), dr)
+	require.NoError(t, err)
+	require.NotNil(t, out.Accepted, "%+v", out)
+	require.Equal(t, v.Evidence, out.Accepted.Evidence)
+	require.Equal(t, "apex: add-wave accepted T2", subjects(t, p)[0], "on the base, as a person's accept from it")
+	require.Contains(t, read(t, p, "development/changes/add-wave/accepted.json"), "assets/mock.png")
 }
 
 // Only the delegate session records a verdict.
