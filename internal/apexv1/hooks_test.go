@@ -114,6 +114,7 @@ func TestStopHook(t *testing.T) {
 	t.Setenv(envApeSession, "task/test") // blocking is for sessions ape launched (H13)
 	t.Run("no change in progress allows", func(t *testing.T) {
 		p := fixture(t, baseFiles())
+		inApeSession(t) // the fixture runs as a person; the hook needs ape's marker (H13)
 		d := StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
 		require.False(t, d.Block)
 		require.Equal(t, StopAllow, d.Record.Verdict)
@@ -121,6 +122,7 @@ func TestStopHook(t *testing.T) {
 	})
 	t.Run("the base branch allows while a change is in progress on its branch", func(t *testing.T) {
 		p := startedWave(t)
+		inApeSession(t) // the fixture runs as a person; the hook needs ape's marker (H13)
 		run(t, p.Root, "switch", "-q", "main")
 		d := StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
 		require.False(t, d.Block, "planning on the base branch is not gated by a change's checks (D38)")
@@ -128,6 +130,7 @@ func TestStopHook(t *testing.T) {
 	})
 	t.Run("red check blocks with its last lines, three times, then allows", func(t *testing.T) {
 		p := startedWave(t)
+		inApeSession(t) // the fixture runs as a person; the hook needs ape's marker (H13)
 		d := StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
 		require.True(t, d.Block)
 		require.Contains(t, d.Reason, "Change add-wave is in progress and 1 command check(s) are red (stop blocked 1/3)")
@@ -157,6 +160,7 @@ func TestStopHook(t *testing.T) {
 	})
 	t.Run("stop_hook_active false resets the count", func(t *testing.T) {
 		p := startedWave(t)
+		inApeSession(t) // the fixture runs as a person; the hook needs ape's marker (H13)
 		for range 2 {
 			require.True(t, StopHook(ctx(), stopPayload(p.Root, "Stop", true), RunOptions{}).Block)
 		}
@@ -166,6 +170,7 @@ func TestStopHook(t *testing.T) {
 	})
 	t.Run("green checks allow", func(t *testing.T) {
 		p := startedWave(t)
+		inApeSession(t) // the fixture runs as a person; the hook needs ape's marker (H13)
 		write(t, p, "wave.sh", "#!/bin/sh\necho wave\n")
 		d := StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
 		require.False(t, d.Block)
@@ -173,6 +178,7 @@ func TestStopHook(t *testing.T) {
 	})
 	t.Run("a blocked change allows", func(t *testing.T) {
 		p := startedWave(t)
+		inApeSession(t) // the fixture runs as a person; the hook needs ape's marker (H13)
 		_, err := p.Block(ctx(), "add-wave", "question for a person")
 		require.NoError(t, err)
 		d := StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
@@ -181,6 +187,7 @@ func TestStopHook(t *testing.T) {
 	})
 	t.Run("only the change on HEAD's branch counts", func(t *testing.T) {
 		p := startedWave(t)
+		inApeSession(t) // the fixture runs as a person; the hook needs ape's marker (H13)
 		// Another in-progress change elsewhere does not stop the gate on
 		// this one (D38: the change under work is the one checked out).
 		addChange(t, p, "add-other", waveChange("add-other"))
@@ -191,6 +198,7 @@ func TestStopHook(t *testing.T) {
 	})
 	t.Run("SubagentStop blocks too, counted apart from the main session", func(t *testing.T) {
 		p := startedWave(t)
+		inApeSession(t) // the fixture runs as a person; the hook needs ape's marker (H13)
 		d := StopHook(ctx(), stopPayload(p.Root, "SubagentStop", false), RunOptions{})
 		require.True(t, d.Block)
 		require.FileExists(t, filepath.Join(p.HooksDir(), "sess-1-agent-7.json"))
@@ -200,6 +208,7 @@ func TestStopHook(t *testing.T) {
 	})
 	t.Run("the hook writes nothing tracked", func(t *testing.T) {
 		p := startedWave(t)
+		inApeSession(t) // the fixture runs as a person; the hook needs ape's marker (H13)
 		StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
 		require.Empty(t, run(t, p.Root, "status", "--porcelain"))
 	})
@@ -220,6 +229,7 @@ func TestStopGateConfigured(t *testing.T) {
 func TestWaitStopVerdict(t *testing.T) {
 	t.Setenv(envApeSession, "task/test")
 	p := startedWave(t)
+	inApeSession(t) // the fixture runs as a person; the hook needs ape's marker (H13)
 	stopAt := time.Now()
 	none := map[string]bool{}
 

@@ -165,6 +165,7 @@ func TestStopHook_RerunsTheLastVerifysRedChecks(t *testing.T) {
 	t.Setenv(envApeSession, "1")
 	files := baseFiles()
 	p := fixture(t, files)
+	inApeSession(t) // the fixture runs as a person; the hook needs ape's marker (H13)
 	addChange(t, p, "two-tasks", changeDoc("two-tasks", "greeting", addedWave,
 		"- T1 add wave — check: ./wave.sh\n- T2 count waves — check: ./count.sh\n"))
 	commitAll(t, p, "plan: two-tasks")

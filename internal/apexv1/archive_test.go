@@ -290,7 +290,7 @@ func TestArchive_RebaseConflictLeftOnTheBranch(t *testing.T) {
 	require.ErrorAs(t, err, &ce)
 	require.Equal(t, CodeConflicted, ce.Code)
 	require.Equal(t, []string{"wave.sh"}, ce.Conflicts)
-	onlyBlockCounted(t, p, mainBefore, "apex: M1 consecutive blocks 1 (add-wave)")
+	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "main"), "a conflict left for apply is not a block: main is untouched (H8, H19)")
 	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root))
 	require.Equal(t, []string{"wave.sh"}, p.unmergedPaths(ctx()))
 	st := state(t, p, "add-wave")

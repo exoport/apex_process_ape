@@ -74,7 +74,7 @@ func TestLimits_Replans(t *testing.T) {
 	p := wavedWith(t, "  replans: 1\n  consecutive_blocks: 9\n")
 	replan := func(n string) {
 		write(t, p, "development/changes/add-wave/change.md", strings.Replace(read(t, p, "development/changes/add-wave/change.md"),
-			"- T2 copy reads well", "- T"+n+" also "+n+" — check: true\n- T2 copy reads well", 1))
+			"- T2 copy reads well", "- T"+n+" also "+n+" — regression: true\n- T2 copy reads well", 1))
 		commitAll(t, p, "replan "+n)
 	}
 	replan("3")

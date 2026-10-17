@@ -77,6 +77,13 @@ func asPerson(t *testing.T) {
 	t.Setenv("CLAUDECODE", "")
 }
 
+// inApeSession marks the test as running inside a session ape launched
+// (APE_SESSION), after a fixture that ran as a person.
+func inApeSession(t *testing.T) {
+	t.Helper()
+	t.Setenv(envApeSession, "task/test")
+}
+
 // gitEnv isolates git from the machine's config and gives it an identity.
 func gitEnv(t *testing.T) {
 	t.Helper()
@@ -220,14 +227,4 @@ func needSh(t *testing.T) {
 			t.Skipf("%s not on PATH", bin)
 		}
 	}
-}
-
-// onlyBlockCounted asserts that main moved from before by exactly the one
-// commit that counts a block toward the milestone (H19), and that it
-// holds milestones.json alone: nothing of the change reached main.
-func onlyBlockCounted(t *testing.T, p *Project, before, subject string) {
-	t.Helper()
-	require.Equal(t, before, run(t, p.Root, "rev-parse", "main~1"))
-	require.Equal(t, subject, run(t, p.Root, "log", "-1", "--format=%s", "main"))
-	require.Equal(t, "_apex/state/milestones.json", run(t, p.Root, "show", "--name-only", "--format=", "main"))
 }
