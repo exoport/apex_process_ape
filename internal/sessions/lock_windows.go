@@ -4,6 +4,8 @@ package sessions
 
 import (
 	"os"
+
+	"github.com/exoport/apex_process_ape/internal/proctree"
 )
 
 // Windows: skip flock. The registry is best-effort and two ape
@@ -14,17 +16,7 @@ import (
 func lockExclusive(_ *os.File) error { return nil }
 func unlock(_ *os.File)              {}
 
-// pidAlive uses os.FindProcess; on Windows FindProcess never fails
-// for a pid that doesn't exist (it returns a handle that errors on
-// later operations). We probe via Signal(syscall.Signal(0)) which is
-// safe on Windows: it returns an error for dead PIDs.
-func pidAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return p.Signal(nil) == nil
-}
+// pidAlive asks Windows whether the process runs (proctree.Alive):
+// os.Process.Signal supports only Kill there, so a signal-0 probe would
+// call every process dead.
+func pidAlive(pid int) bool { return proctree.Alive(pid) }
