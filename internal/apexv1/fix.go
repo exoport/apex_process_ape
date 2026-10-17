@@ -46,7 +46,8 @@ type ApproveResult struct {
 
 // ApproveFix records a person approving a fix (D40): its approval, like a
 // milestone's, is a record on the base branch — committed there as
-// "apex: <id> approved", refused while HEAD is on a change branch. Only a
+// "apex: <id> approved", from any branch (D51 Q17: without a checkout when
+// HEAD is on a change's branch, the fix checked as the base holds it). Only a
 // fix (`milestone: none`) is approved this way; a milestone change is
 // approved through its milestone. The fix must pass `ape change check` and
 // not be started. Re-approving the same plan is a no-op; a plan changed
@@ -63,9 +64,6 @@ func (p *Project) ApproveFix(ctx context.Context, id, by string) (*ApproveResult
 	if by == "" {
 		return nil, &UsageError{Code: "usage.by", Msg: "--by names the person approving the fix"}
 	}
-	if err := p.refuseOnChangeBranch(ctx, "a fix's approval"); err != nil {
-		return nil, err
-	}
 	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return nil, err
@@ -76,11 +74,11 @@ func (p *Project) ApproveFix(ctx context.Context, id, by string) (*ApproveResult
 			", and a milestone change is approved through its milestone — a person runs `ape milestone approve " + m + " --by <who>`"}
 	}
 	st := ci.State
-	started := ci.Branch != "" || st.BaseSHA != "" || p.isWorkTree(ctx) && p.branchExists(ctx, ChangeBranch(id))
+	started := ci.Branch == ChangeBranch(id) || st.BaseSHA != "" || p.isWorkTree(ctx) && p.branchExists(ctx, ChangeBranch(id))
 	if (st.Status != StatusDraft && st.Status != StatusBlocked && st.Status != StatusAnswered) || started {
 		return nil, &FailError{Code: CodeWrongStatus, Msg: "fix " + id + " is " + st.Status + " and was started — approve applies to a fix not started yet (a draft)"}
 	}
-	if fs := p.CheckChange(id); len(fs) > 0 {
+	if fs := p.CheckChangeAnywhere(ctx, id); len(fs) > 0 {
 		return nil, &FailError{Code: CodeCheckFailed, Msg: "fix " + id + " does not pass `ape change check` — fix change.md first, then approve", Findings: fs}
 	}
 	digest := ci.Doc.PlanDigest()
@@ -88,10 +86,14 @@ func (p *Project) ApproveFix(ctx context.Context, id, by string) (*ApproveResult
 		return &ApproveResult{ID: id, Status: st.Status, Approved: a, Already: true}, nil
 	}
 	st.Approved = &Approval{By: by, At: Stamp(), PlanDigest: digest}
-	if err := p.saveAndCommitSubject(ctx, id, st, "apex: "+id+" approved"); err != nil {
+	if err := p.saveChangeState(ctx, ci, st, "apex: "+id+" approved"); err != nil {
 		return nil, err
 	}
-	return &ApproveResult{ID: id, Status: st.Status, Approved: st.Approved, Commit: HeadSHA(ctx, p.Root)}, nil
+	commit := HeadSHA(ctx, p.Root)
+	if ci.Branch != "" {
+		commit, _ = git(ctx, p.Root, "rev-parse", "refs/heads/"+ci.Branch)
+	}
+	return &ApproveResult{ID: id, Status: st.Status, Approved: st.Approved, Commit: commit}, nil
 }
 
 // requireFixApproved is start's gate for a fix, in place of an approved

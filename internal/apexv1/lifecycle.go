@@ -723,12 +723,16 @@ func (p *Project) Accept(ctx context.Context, id, task, by string, evidence ...s
 	if err := humanTask(ci.Doc, id, task); err != nil {
 		return nil, err
 	}
-	if err := p.requireOnBranch(ctx, id); err != nil {
-		return nil, err
+	// A started change read from its branch, HEAD elsewhere, is accepted
+	// there without a checkout (D51 Q17); else HEAD must be on its branch.
+	if ci.Branch != ChangeBranch(id) {
+		if err := p.requireOnBranch(ctx, id); err != nil {
+			return nil, err
+		}
 	}
 	st := ci.State
 	withAcceptance(st, ci.Doc, task, by, ev)
-	if err := p.saveAndCommit(ctx, id, st); err != nil {
+	if err := p.saveChangeState(ctx, ci, st, "apex: "+id+" "+st.Status); err != nil {
 		return nil, err
 	}
 	return st, nil
@@ -746,15 +750,19 @@ func (p *Project) Block(ctx context.Context, id, reason string) (*State, error) 
 	if err != nil {
 		return nil, err
 	}
-	if err := p.requireBranchForWrite(ctx, ci); err != nil {
-		return nil, err
+	// Recorded where the change's records live, from any branch (D51 Q17):
+	// read from another branch, it is committed there without a checkout.
+	if ci.Branch == "" {
+		if err := p.requireBranchForWrite(ctx, ci); err != nil {
+			return nil, err
+		}
 	}
 	st := ci.State
 	if st.Status == StatusBlocked {
 		// A new reason, not a new block: the milestone's count stays.
 		r := strings.TrimSpace(reason)
 		st.BlockedReason = &r
-		return st, p.saveAndCommit(ctx, id, st)
+		return st, p.saveChangeState(ctx, ci, st, "apex: "+id+" "+st.Status)
 	}
 	if err := p.blockAndCount(ctx, ci, strings.TrimSpace(reason)); err != nil {
 		return nil, err

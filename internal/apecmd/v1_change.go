@@ -40,8 +40,17 @@ Branch per change (trial decision D38):
 
   - start creates change/<id> from the branch HEAD is on (recorded as base_branch, with
     base_sha) and checks it out; start on a change whose branch exists checks it out
-  - verify, review, accept and block record a started change's state, and need HEAD on
-    change/<id> (else exit 1, code change.wrong-branch: ` + "`git switch change/<id>`" + `)
+  - start, verify, review and archive run the change's code, and need HEAD on
+    change/<id> (start and archive switch to it; verify and review refuse elsewhere with
+    exit 1, code change.wrong-branch: ` + "`git switch change/<id>`" + `)
+  - records from any branch (D51 Q17): check, diff, approve, accept, block, answer and
+    abandon find a change wherever its records live — a started change's on change/<id>,
+    a change with no branch of its own (a draft, an approved fix not started) on the base
+    branch, read from the base's tip when HEAD is on another change's branch (that
+    branch's copy is the one it was cut with) — and commit there, without a checkout
+    when HEAD is elsewhere: HEAD, the index and the working tree stay as they were
+    (refused when that branch is checked out in another worktree: git.base-checked-out).
+    ` + "`ape status`" + ` lists the changes the same way, so what it lists these find
   - new, and the milestone and decision-accept records, need HEAD off every change
     branch (code branch.change-branch: ` + "`git switch <base>`" + `)
   - archive rebases change/<id> onto the base branch and squash-merges it; abandon
@@ -60,8 +69,9 @@ run (D45). An approved fix runs ahead of milestone work, at the orchestrator's n
 boundary; with no milestone run active, ` + "`ape task apex-orchestrator --args <id>`" + ` runs it
 alone. ` + "`ape status`" + ` lists approved fixes first.
 
-One checkout, one operator (D45): archive and abandon switch to the base branch, so they
-refuse when another worktree has it checked out (exit 1, git.base-checked-out, naming that
+One checkout, one operator (D45): archive and abandon switch to the base branch (abandon
+from another change's branch commits on it without a checkout), so they refuse when another
+worktree has it checked out (exit 1, git.base-checked-out, naming that
 worktree; nothing written) — an environment problem: the orchestrator stops, it does not
 re-plan.
 
@@ -254,11 +264,14 @@ func newChangeCheckCmd() *cobra.Command {
     like any check task; `+"`ape change start`"+` lets it be green at baseline); no checkboxes,
     unique ids
 
+The change is checked as the branch holding its records has it, against that branch's
+specs and roadmap (D51 Q17; `+"`ape change --help`"+`): HEAD needs to be on no particular branch.
+
 Exit codes: 0 green · 1 findings · 2 usage.`,
 		"  ape change check add-tenant-delete",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
-			fs := p.CheckChange(id)
+			fs := p.CheckChangeAnywhere(cmd.Context(), id)
 			if len(fs) > 0 {
 				return v1Fail(cmd, &f, &apexv1.FailError{
 					Code:     "change.check-failed",
@@ -287,8 +300,10 @@ in place of an approved milestone (else exit 1, change.not-approved).
   - the fix must pass `+"`ape change check <id>`"+` and not be started yet (status draft, no
     change/<id> branch; else exit 1, change.wrong-status)
   - recorded in state.json as approved: {by, at, plan_digest} and committed alone on the
-    base branch as "apex: <id> approved" (trailer "Change: <id>"); refused while HEAD is
-    on a change branch (exit 1, branch.change-branch), like change new
+    base branch as "apex: <id> approved" (trailer "Change: <id>"), from any branch (D51
+    Q17): with HEAD on a change's branch, the fix is read and checked as the base holds
+    it and the approval committed there without a checkout (refused when the base is
+    checked out in another worktree: git.base-checked-out)
   - the approval is of the plan change.md has now: a fix whose plan (change.md outside
     ## Why and ## Notes) changed since is refused at start until approved again
   - re-approving the same plan is a no-op (exit 0, JSON "already": true, nothing written)
@@ -303,8 +318,8 @@ the orchestrator's next change boundary; with no milestone run active,
 fixes first (JSON "fixes", changes[].lane "fix", changes[].approved) and points next at the
 first. A fix counts toward no milestone gate and no milestone's spend or budget.
 
-Exit codes: 0 approved (or already) · 1 not a fix, check red, started, or HEAD on a change
-branch · 2 usage (no --by), or a model session.`,
+Exit codes: 0 approved (or already) · 1 not a fix, check red, started, or the base branch
+checked out in another worktree · 2 usage (no --by), or a model session.`,
 		"  ape change approve fix-login-redirect --by diego",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -719,8 +734,10 @@ func newChangeAcceptCmd() *cobra.Command {
 in state.json's accepted: [{task, by, at, evidence}]. Archive requires every human-review
 task accepted, unless a person archives with --allow-pending-human.
 
-  - a change in flight: HEAD must be on its branch, change/<id> (D38; else exit 1, code
-    change.wrong-branch): the acceptance is committed there
+  - a change in flight: committed on its branch, change/<id> (D38) — from any branch
+    (D51 Q17): without a checkout when HEAD is elsewhere (refused when that branch is
+    checked out in another worktree: git.base-checked-out). A draft (no branch) is
+    refused (change.wrong-branch: start it first)
   - an archived change (H4): its archived state.json, under
     development/archive/<date>-<id>/, is updated and committed on the base branch it was
     archived into — "apex: <id> accepted <T> (archived)", trailer "Change: <id>" — from any
@@ -734,8 +751,8 @@ task accepted, unless a person archives with --allow-pending-human.
 
 Accepting a task again replaces its earlier acceptance.
 
-Exit codes: 0 recorded · 1 the task has a command check, HEAD not on change/<id>, or the
-base branch is checked out elsewhere · 2 usage (no such task, bad evidence).`,
+Exit codes: 0 recorded · 1 the task has a command check, a draft, or the branch it is
+recorded on is checked out elsewhere · 2 usage (no such task, bad evidence).`,
 		"  ape change accept add-tenant-delete --task T2 --by diego\n  ape change accept add-tenant-delete --task T2 --by diego --evidence docs/review/tenant-delete.png --evidence https://ci.example.com/run/812",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -764,12 +781,15 @@ func newChangeBlockCmd() *cobra.Command {
 		"Set blocked, with the reason shown by ape status",
 		`Set a change blocked. The reason is what `+"`ape status`"+` shows: what blocks it, or the
 question only a person can answer. A blocked change lets the stop hook allow a stop.
-`+"`ape change start <id>`"+` resumes it. A started change is blocked on its branch,
-change/<id> (D38; else exit 1, code change.wrong-branch), where it stays — re-plan it
-there and start it again, or abandon it; a change with no branch (a draft) is blocked on
-the branch HEAD is on, unless that is another change's.
+`+"`ape change start <id>`"+` resumes it. Recorded where the change's records live, from any
+branch (D51 Q17; `+"`ape change --help`"+`): a started change on its branch, change/<id>
+(D38), where it stays — re-plan it there and start it again, or abandon it; a change with
+no branch (a draft, an approved fix) on the base branch. Without a checkout when HEAD is
+elsewhere. A milestone change's block is counted in milestones.json on the base branch
+(limits.consecutive_blocks).
 
-Exit codes: 0 blocked · 1 no such change, archived, or the wrong branch · 2 usage.`,
+Exit codes: 0 blocked · 1 no such change, archived, or the branch it is recorded on is
+checked out in another worktree · 2 usage.`,
 		`  ape change block add-tenant-delete --reason "needs a decision: soft or hard delete?"`,
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -832,7 +852,8 @@ func newChangeDiffCmd() *cobra.Command {
 		"Show the specs as archive would leave them (unified diff per capability)",
 		`Merge the change's delta into the current specs in memory — the same merge archive
 makes, nothing written — and print a unified diff per capability it touches (a new
-capability diffs from /dev/null). For review and for handoff: what the living spec will
+capability diffs from /dev/null). The change and the specs are read as the branch holding
+its records has them, from any branch (D51 Q17). For review and for handoff: what the living spec will
 say once this change is archived. JSON: {id, specs: [{capability, path, created, added,
 modified, removed, diff}], delta_none?}.
 
@@ -841,7 +862,7 @@ Exit codes: 0 · 1 no such change · 2 usage · 3 the delta no longer applies to
 		"  ape change diff add-tenant-delete\n  ape change diff add-tenant-delete --json",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
-			res, err := p.PreviewDelta(id)
+			res, err := p.PreviewDeltaAnywhere(cmd.Context(), id)
 			if err != nil {
 				return v1Fail(cmd, &f, err, res)
 			}
@@ -871,14 +892,17 @@ none is needed.
 
 A started change (D38): abandon runs from its branch change/<id> — then it switches to the
 base_branch — or from any other non-change branch; the tree must be clean (uncommitted
-files inside the change's own folder are committed on its branch first). The archived
+files inside the change's own folder are committed on its branch first). From another
+change's branch (D51 Q17) nothing is switched: the move is committed on the base branch
+without a checkout, the folder taken as the branch holding its records has it (its own
+branch, or the base for a draft), and the working tree is not touched. The archived
 folder holds the change's files as its branch last had them, the move is committed on the
 base branch, change/<id> is deleted and its last commit recorded as branch_tip in the
 archived state.json, kept reachable as refs/apex/abandoned/<id> (tip_ref; H16, local). None of the change's code reaches the base branch. A draft never
 started (no branch) is abandoned on the branch HEAD is on, as before.
 
-Exit codes: 0 abandoned · 1 no such change, archived, HEAD on another change's branch,
-dirty tree, the base branch checked out in another worktree (git.base-checked-out), or git
+Exit codes: 0 abandoned · 1 no such change, archived, dirty tree, change/<id> checked out in
+another worktree, the base branch checked out in another worktree (git.base-checked-out), or git
 failed · 2 usage · 3 the archive folder already exists.`,
 		`  ape change abandon add-tenant-delete --reason "replaced by split-tenant-delete"`,
 		&f,

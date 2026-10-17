@@ -487,6 +487,9 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 	if err != nil {
 		return nil, err
 	}
+	if cur := p.HeadChange(ctx); cur != "" && cur != id && ci.Branch != "" {
+		return p.abandonElsewhere(ctx, ci, reason)
+	}
 	folder := Today() + "-" + id
 	dest := filepath.Join(p.ArchiveDir(), folder)
 	if fileOrDirExists(dest) {
@@ -543,6 +546,89 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 		}
 	}
 	return res, nil
+}
+
+// abandonElsewhere is Abandon with HEAD on another change's branch (D51
+// Q17): the change's folder, as the branch holding its records has it (its
+// own branch, or the base for a change with none), is moved into the
+// archive on the base branch in one commit there, without a checkout —
+// the base's copy of the folder deleted, the archived state.json
+// abandoned — and a started change's branch is deleted, its tip kept as
+// refs/apex/abandoned/<id>. The working tree, its index and HEAD are not
+// touched.
+func (p *Project) abandonElsewhere(ctx context.Context, ci ChangeInfo, reason string) (*AbandonResult, error) {
+	id, src := ci.ID, ci.Branch
+	base := ci.State.BaseBranch
+	if base == "" || !p.branchExists(ctx, base) {
+		b, err := p.baseBranch(ctx)
+		if err != nil {
+			return nil, err
+		}
+		base = b
+	}
+	branch, tip := ChangeBranch(id), ""
+	if src == branch {
+		if wt := p.worktreeOf(ctx, branch); wt != "" {
+			return nil, &FailError{Code: CodeBaseCheckedOut, Msg: branch + " is checked out in another worktree, " + wt + ", and abandon deletes it — nothing was written; switch that worktree off it and run this again"}
+		}
+		tip, _ = git(ctx, p.Root, "rev-parse", "--verify", "refs/heads/"+branch)
+	}
+	folder := Today() + "-" + id
+	destRel := p.Rel(filepath.Join(p.ArchiveDir(), folder))
+	if _, err := git(ctx, p.Root, "rev-parse", "--verify", "--quiet", "refs/heads/"+base+":./"+destRel); err == nil {
+		return nil, &ConflictError{Code: CodeFolderExists, Msg: "archive folder " + destRel + " already exists on " + base + " — nothing was written"}
+	}
+	dirRel := p.Rel(p.ChangeDir(id))
+	files := map[string][]byte{}
+	for _, name := range p.filesAt(ctx, base, dirRel) {
+		files[dirRel+"/"+name] = nil
+	}
+	for _, name := range p.filesAt(ctx, src, dirRel) {
+		data, err := p.showAt(ctx, "refs/heads/"+src, dirRel+"/"+name)
+		if err != nil {
+			return nil, &FailError{Code: CodeBranchFailed, Msg: "cannot read " + id + "'s folder from " + src + ": " + err.Error()}
+		}
+		files[destRel+"/"+name] = []byte(data)
+	}
+	st := *ci.State
+	st.Status, st.AbandonedReason, st.ArchivedAt, st.ArchivedTo, st.BranchTip = StatusAbandoned, reason, Stamp(), destRel, tip
+	if tip != "" {
+		st.TipRef = abandonedRef(id)
+	}
+	data, err := stateBytes(&st)
+	if err != nil {
+		return nil, err
+	}
+	files[destRel+"/state.json"] = data
+	res := &AbandonResult{ID: id, ArchivedTo: destRel, Reason: reason, BranchTip: tip, TipRef: st.TipRef}
+	if res.Commit, err = p.commitOnBranch(ctx, base, files, "apex: "+id+" "+StatusAbandoned+"\n\nChange: "+id); err != nil {
+		return nil, err
+	}
+	if tip != "" {
+		if err := p.keepTip(ctx, abandonedRef(id), tip, "abandoned", branch); err != nil {
+			return res, err
+		}
+		if _, err := git(ctx, p.Root, "branch", "-q", "-D", branch); err != nil {
+			return res, &FailError{Code: CodeBranchFailed, Msg: "abandoned, but deleting " + branch + " failed: " + err.Error() + " — `git branch -D " + branch + "`"}
+		}
+	}
+	return res, nil
+}
+
+// filesAt lists the files under dir (project-relative) on branch, relative
+// to dir; none when branch does not hold dir.
+func (p *Project) filesAt(ctx context.Context, branch, dir string) []string {
+	out, err := git(ctx, p.Root, "ls-tree", "-r", "--name-only", "refs/heads/"+branch+":./"+dir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for name := range strings.SplitSeq(out, "\n") {
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // leaveChangeBranch prepares abandoning a change (D38): refused on another
@@ -700,10 +786,28 @@ type SpecPreview struct {
 	DeltaNone string     `json:"delta_none,omitempty"`
 }
 
+// PreviewDeltaAnywhere is PreviewDelta of the change as the branch
+// holding its records has it, against that branch's specs (D51 Q17).
+func (p *Project) PreviewDeltaAnywhere(ctx context.Context, id string) (*SpecPreview, error) {
+	if _, err := p.requireChange(ctx, id); err != nil {
+		return nil, err
+	}
+	view, done, err := p.viewAt(ctx, p.changeBranchOf(ctx, id))
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	return view.previewDelta(ctx, id)
+}
+
 // PreviewDelta merges the change's delta in memory and diffs each touched
 // spec. A delta that no longer applies is a ConflictError, as at archive.
 func (p *Project) PreviewDelta(id string) (*SpecPreview, error) {
-	ci, err := p.requireChange(context.Background(), id)
+	return p.previewDelta(context.Background(), id)
+}
+
+func (p *Project) previewDelta(ctx context.Context, id string) (*SpecPreview, error) {
+	ci, err := p.requireChange(ctx, id)
 	if err != nil {
 		return nil, err
 	}

@@ -78,15 +78,17 @@ func (p *Project) noteBlocked(ctx context.Context, ci ChangeInfo) error {
 	return err
 }
 
-// blockAndCount blocks a change with reason — committed on its branch as
-// "apex: <id> blocked" — and counts the block toward its milestone.
+// blockAndCount blocks a change with reason — committed where its
+// records live (saveChangeState) as "apex: <id> blocked" — and counts the
+// block toward its milestone.
 func (p *Project) blockAndCount(ctx context.Context, ci ChangeInfo, reason string) error {
-	st := ci.State
+	st := *ci.State
 	st.Status = StatusBlocked
 	st.BlockedReason = &reason
-	if err := p.saveAndCommit(ctx, ci.ID, st); err != nil {
+	if err := p.saveChangeState(ctx, ci, &st, "apex: "+ci.ID+" "+StatusBlocked); err != nil {
 		return err
 	}
+	*ci.State = st
 	return p.noteBlocked(ctx, ci)
 }
 

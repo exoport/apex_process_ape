@@ -85,12 +85,12 @@ func TestApproveFix(t *testing.T) {
 	require.Equal(t, "ann", again.Approved.By)
 	require.Equal(t, "apex: fix-hug approved", subjects(t, p)[0])
 
-	// Started, it is approved already; on its branch, approve is refused
-	// like change new.
+	// Started, it is approved already: approve is refused, on its branch
+	// or off it.
 	_, err = p.Start(ctx(), "fix-hug", RunOptions{})
 	require.NoError(t, err)
 	_, err = p.ApproveFix(ctx(), "fix-hug", "ann")
-	require.Equal(t, CodeChangeBranch, failCode(t, err))
+	require.Equal(t, CodeWrongStatus, failCode(t, err))
 	run(t, p.Root, "switch", "-q", "main")
 	_, err = p.ApproveFix(ctx(), "fix-hug", "ann")
 	require.Equal(t, CodeWrongStatus, failCode(t, err))
@@ -174,11 +174,13 @@ func TestStatus_FixesFirst(t *testing.T) {
 	run(t, p.Root, "switch", "-q", "change/fix-hug")
 	_, err = p.Block(ctx(), "fix-hug", "needs a person")
 	require.NoError(t, err)
-	_, err = p.Block(ctx(), "fix-zed", "needs a person")
-	require.Error(t, err, "fix-zed is a draft on main, and HEAD is on another change's branch")
-	run(t, p.Root, "switch", "-q", "main")
+	// fix-zed is a draft on main: blocked there from another change's
+	// branch (D51 Q17).
 	_, err = p.Block(ctx(), "fix-zed", "needs a person")
 	require.NoError(t, err)
+	require.Equal(t, "apex: fix-zed blocked", run(t, p.Root, "log", "-1", "--format=%s", "main"))
+	run(t, p.Root, "switch", "-q", "main")
+	require.Equal(t, StatusBlocked, state(t, p, "fix-zed").Status)
 	r = p.Status()
 	require.Empty(t, r.Fixes)
 	require.Contains(t, r.Next, "apply add-wave", "with no runnable fix, milestone work is next")

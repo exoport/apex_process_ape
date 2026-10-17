@@ -18,9 +18,10 @@ type ChangeInfo struct {
 	Doc   *Change
 	// Err is a state.json that would not load (ErrNoState included).
 	Err error
-	// Branch is the change branch State and Doc were read from, when
-	// HEAD is not on it (D38); "" when they were read from the working
-	// tree.
+	// Branch is the branch State and Doc were read from, when HEAD is not
+	// on it: the change's own branch (D38), or, with HEAD on another
+	// change's branch, the base branch for a change with no branch of its
+	// own (D51 Q17); "" when they were read from the working tree.
 	Branch string
 }
 
@@ -56,8 +57,36 @@ func (p *Project) changes(ctx context.Context) []ChangeInfo {
 			}
 		}
 	}
+	// On a change's branch, a change with no branch of its own is read from
+	// the base, where its records live (D51 Q17): this branch's copy is the
+	// one it was cut with. One the base archived since is gone; one planned
+	// there since is listed.
+	var bv *baseView
+	if head != "" {
+		bv = p.baseViewOf(ctx)
+	}
 	for id := range ids {
+		if bv != nil && id != head && !branches[id] {
+			if bv.changes[id] {
+				if ci, ok := p.loadChangeAt(ctx, id, bv.branch); ok {
+					out = append(out, ci)
+					continue
+				}
+			}
+			if bv.archived[id] != "" {
+				continue
+			}
+		}
 		out = append(out, p.readChange(ctx, id, head, branches))
+	}
+	if bv != nil {
+		for id := range bv.changes {
+			if !ids[id] && !branches[id] && id != head && archived[id] == "" {
+				if ci, ok := p.loadChangeAt(ctx, id, bv.branch); ok {
+					out = append(out, ci)
+				}
+			}
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -569,13 +598,16 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 	}, nil
 }
 
-// requireChange loads a change that must exist — from its branch when
-// HEAD is not on it (D38): the commands that record its state check the
-// branch themselves (requireOnBranch).
+// requireChange loads a change that must exist from wherever its records
+// live (anybranch.go): its branch when HEAD is not on it (D38); with HEAD
+// on another change's branch, the base branch for a change with no branch
+// of its own (D51 Q17). ci.Branch names the branch read, "" for the
+// working tree; the commands that record its state write there
+// (saveChangeState), or check the branch themselves (requireOnBranch).
 func (p *Project) requireChange(ctx context.Context, id string) (ChangeInfo, error) {
-	if p.isWorkTree(ctx) && p.HeadChange(ctx) != id && p.branchExists(ctx, ChangeBranch(id)) {
-		if ci, ok := p.loadChangeAt(ctx, id, ChangeBranch(id)); ok {
-			return checkLoaded(ci)
+	if p.isWorkTree(ctx) {
+		if ci, found, err := p.changeElsewhere(ctx, id); found || err != nil {
+			return ci, err
 		}
 	}
 	if !dirExists(p.ChangeDir(id)) {
@@ -585,6 +617,34 @@ func (p *Project) requireChange(ctx context.Context, id string) (ChangeInfo, err
 		return ChangeInfo{}, &FailError{Code: CodeChangeNotFound, Msg: "no change " + id + " — `ape status` lists the active ones"}
 	}
 	return checkLoaded(p.loadChange(id))
+}
+
+// changeElsewhere is requireChange's read of a change from a branch HEAD
+// is not on: its own, or the base (see requireChange). found is false
+// when its records are in the working tree.
+func (p *Project) changeElsewhere(ctx context.Context, id string) (ci ChangeInfo, found bool, err error) {
+	head := p.HeadChange(ctx)
+	if head == id {
+		return ChangeInfo{}, false, nil
+	}
+	if p.branchExists(ctx, ChangeBranch(id)) {
+		if ci, ok := p.loadChangeAt(ctx, id, ChangeBranch(id)); ok {
+			ci, err := checkLoaded(ci)
+			return ci, true, err
+		}
+	}
+	bv := p.baseViewOf(ctx)
+	switch {
+	case bv == nil:
+	case bv.changes[id]:
+		if ci, ok := p.loadChangeAt(ctx, id, bv.branch); ok {
+			ci, err := checkLoaded(ci)
+			return ci, true, err
+		}
+	case bv.archived[id] != "":
+		return ChangeInfo{}, true, &FailError{Code: "change.archived", Msg: "change " + id + " is archived (" + p.Rel(filepath.Join(p.ArchiveDir(), bv.archived[id])) + " on " + bv.branch + ")"}
+	}
+	return ChangeInfo{}, false, nil
 }
 
 // checkLoaded refuses a change whose state or change.md did not load.

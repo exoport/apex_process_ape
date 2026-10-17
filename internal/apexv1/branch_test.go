@@ -43,14 +43,12 @@ func TestStart_CreatesTheChangeBranch(t *testing.T) {
 	require.Equal(t, "change/add-wave", ci.Branch)
 	require.Equal(t, StatusDraft, state(t, p, "add-wave").Status, "main's working tree still holds the draft")
 
-	// Commands that record the change's state refuse off its branch.
+	// Commands that run the change's code refuse off its branch; those
+	// that only record its state write it there from any branch (D51 Q17,
+	// anybranch_test.go).
 	_, err = p.Verify(ctx(), "add-wave", RunOptions{})
 	require.Equal(t, CodeWrongBranch, failCode(t, err))
 	require.ErrorContains(t, err, "`git switch change/add-wave`")
-	_, err = p.Accept(ctx(), "add-wave", "T2", "ann")
-	require.Equal(t, CodeWrongBranch, failCode(t, err))
-	_, err = p.Block(ctx(), "add-wave", "why")
-	require.Equal(t, CodeWrongBranch, failCode(t, err))
 
 	// Start on main again resumes: it only checks the branch out.
 	res, err = p.Start(ctx(), "add-wave", RunOptions{})
