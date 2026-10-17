@@ -21,6 +21,7 @@ func fixture(t *testing.T, files map[string]string) *Project {
 	needSh(t)
 	root := t.TempDir()
 	gitEnv(t)
+	asPerson(t)
 	for rel, content := range files {
 		path := filepath.Join(root, filepath.FromSlash(rel))
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
@@ -29,12 +30,51 @@ func fixture(t *testing.T, files map[string]string) *Project {
 	for _, d := range []string{"development/specs", "development/changes", "development/archive", "development/decisions", "_apex/state"} {
 		require.NoError(t, os.MkdirAll(filepath.Join(root, d), 0o755))
 	}
+	p, err := Open(root)
+	require.NoError(t, err)
+	// A milestone the fixture's roadmap says is approved was approved by a
+	// person through ape (H2), unless the fixture brings its own records.
+	if _, ok := files["_apex/state/milestones.json"]; !ok {
+		recordApprovals(t, p)
+	}
 	run(t, root, "init", "-q", "-b", "main")
 	run(t, root, "add", "-A")
 	run(t, root, "commit", "-q", "--allow-empty", "-m", "fixture")
-	p, err := Open(root)
-	require.NoError(t, err)
 	return p
+}
+
+// recordApprovals writes milestones.json approval records, by "eval", for
+// every milestone the roadmap says is approved, gate as it is now. It
+// commits nothing.
+func recordApprovals(t *testing.T, p *Project) {
+	t.Helper()
+	rm := p.roadmap()
+	if rm == nil {
+		return
+	}
+	recs, err := p.LoadMilestoneRecords()
+	require.NoError(t, err)
+	n := 0
+	for i := range rm.Milestones {
+		if m := &rm.Milestones[i]; m.Status == MilestoneApproved {
+			if recs[m.ID] == nil {
+				recs[m.ID] = &MilestoneRecord{}
+			}
+			recs[m.ID].Approval = p.newApproval(m.Gate, "eval")
+			n++
+		}
+	}
+	if n > 0 {
+		require.NoError(t, p.saveMilestoneRecords(recs))
+	}
+}
+
+// asPerson runs the test as a person at a terminal: no model session
+// (requirePerson), whatever session runs the tests.
+func asPerson(t *testing.T) {
+	t.Helper()
+	t.Setenv("APE_SESSION", "")
+	t.Setenv("CLAUDECODE", "")
 }
 
 // gitEnv isolates git from the machine's config and gives it an identity.
@@ -180,4 +220,14 @@ func needSh(t *testing.T) {
 			t.Skipf("%s not on PATH", bin)
 		}
 	}
+}
+
+// onlyBlockCounted asserts that main moved from before by exactly the one
+// commit that counts a block toward the milestone (H19), and that it
+// holds milestones.json alone: nothing of the change reached main.
+func onlyBlockCounted(t *testing.T, p *Project, before, subject string) {
+	t.Helper()
+	require.Equal(t, before, run(t, p.Root, "rev-parse", "main~1"))
+	require.Equal(t, subject, run(t, p.Root, "log", "-1", "--format=%s", "main"))
+	require.Equal(t, "_apex/state/milestones.json", run(t, p.Root, "show", "--name-only", "--format=", "main"))
 }

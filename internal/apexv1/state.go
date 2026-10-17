@@ -21,6 +21,10 @@ const (
 	// StatusAbandoned is a change moved to the archive without merging
 	// its delta (`ape change abandon`, trial decision D6).
 	StatusAbandoned = "abandoned"
+	// StatusAnswered is a blocked change a person answered (`ape change
+	// answer`, H9): the orchestrator re-plans it with the answer as the
+	// hint and starts it again.
+	StatusAnswered = "answered"
 )
 
 // CheckResult is one command check's run: a task's, or a scenario's of
@@ -165,11 +169,23 @@ type ReviewVoid struct {
 	Violations []string `json:"violations"`
 }
 
+// Answer records a person answering a blocked change (H9).
+type Answer struct {
+	By   string `json:"by"`
+	At   string `json:"at"`
+	Text string `json:"text"`
+	// ReplansBefore is how many re-plans the change had when it was
+	// answered: limits.replans judges the ones since (H19).
+	ReplansBefore int `json:"replans_before,omitempty"`
+}
+
 // Accept records a person accepting a human-review task.
 type Accept struct {
 	Task string `json:"task"`
 	By   string `json:"by"`
 	At   string `json:"at"`
+	// Evidence is what the acceptance rests on (`accept --evidence`).
+	Evidence []Evidence `json:"evidence,omitempty"`
 }
 
 // State is changes/<id>/state.json. Written only by ape.
@@ -205,10 +221,12 @@ type State struct {
 	BlockedReason     *string             `json:"blocked_reason"`
 	ReviewVoided      []ReviewVoid        `json:"review_voided,omitempty"`
 	AllowPendingHuman bool                `json:"allow_pending_human,omitempty"`
-	AbandonedReason   string              `json:"abandoned_reason,omitempty"`
-	ArchivedAt        string              `json:"archived_at,omitempty"`
-	ArchivedTo        string              `json:"archived_to,omitempty"`
-	CreatedAt         string              `json:"created_at,omitempty"`
+	// Answer is a person's answer to what blocked the change (H9).
+	Answer          *Answer `json:"answer,omitempty"`
+	AbandonedReason string  `json:"abandoned_reason,omitempty"`
+	ArchivedAt      string  `json:"archived_at,omitempty"`
+	ArchivedTo      string  `json:"archived_to,omitempty"`
+	CreatedAt       string  `json:"created_at,omitempty"`
 	// BranchTip is change/<id>'s last commit when archive squash-merged
 	// it or abandon deleted it (D38).
 	BranchTip string `json:"branch_tip,omitempty"`

@@ -111,6 +111,7 @@ func rootSubcommands() []*cobra.Command {
 		newMilestoneCmd(),
 		newChangeCmd(),
 		newDecisionCmd(),
+		newNextCmd(),
 		newHookCmd(),
 		newGovernanceCmd(),
 		newPromptCmd(),

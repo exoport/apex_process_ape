@@ -201,6 +201,9 @@ func (p *Project) AcceptDecision(ctx context.Context, id, by string) (*DecisionR
 		return nil, err
 	}
 	if st := adrStatus(doc); st != ADRProposed {
+		if _, recorded := p.loadDecisionRecords()[id]; st == ADRAccepted && !recorded {
+			return p.recordAcceptedDecision(ctx, id, path, doc, strings.TrimSpace(by))
+		}
 		return nil, &FailError{Code: "decision.not-proposed", Msg: id + " is " + st + " — only a proposed decision is accepted"}
 	}
 	if fs := ValidateDecision(p.Rel(path), filepath.Base(path), doc); len(fs) > 0 {

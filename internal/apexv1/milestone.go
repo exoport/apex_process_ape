@@ -89,8 +89,19 @@ const (
 // (D11); the latest run, whatever its result, is in the gitignored
 // logs/gate-<M>.json.
 type MilestoneRecord struct {
-	Result string   `json:"result"`
-	Since  *GateRun `json:"since"`
+	Result string   `json:"result,omitempty"`
+	Since  *GateRun `json:"since,omitempty"`
+	// Approval is a person's approval of the milestone and its gate (H2):
+	// what change start, gate and close trust, never the Status line alone.
+	Approval *MilestoneApproval `json:"approval,omitempty"`
+	// DoneAt is when `ape milestone close` wrote the milestone done.
+	DoneAt string `json:"done_at,omitempty"`
+	// AcceptRed is a person's close of the milestone with its gate red
+	// (H22): `ape milestone close --accept-red`.
+	AcceptRed *AcceptRed `json:"accept_red,omitempty"`
+	// ConsecutiveBlocks counts the milestone's changes blocked since one
+	// of them last archived, or a person last approved it (H19).
+	ConsecutiveBlocks int `json:"consecutive_blocks,omitempty"`
 	// Stops are the sessions ape stopped at the milestone's enforced
 	// budget (backlog 30).
 	Stops []LimitStop `json:"stops,omitempty"`
@@ -200,8 +211,17 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 	return id, nil
 }
 
-// ApproveMilestone writes `Status: approved (by <who> <ts>)`.
+// ApproveMilestone writes `Status: approved (by <who> <ts>)` and records
+// the approval in milestones.json (H2): who, when, and the gate approved
+// — its command and its files' content. Both are committed together. On
+// an approved milestone it records the approval again when ape holds none,
+// the gate changed since, or changes of it were blocked in a row (the
+// count goes back to 0; the Status line is kept); otherwise it is a no-op.
 func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milestone, error) {
+	// A model never approves its own milestone (D47 Q6).
+	if err := requirePerson("ape milestone approve"); err != nil {
+		return nil, err
+	}
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err
 	}
@@ -219,24 +239,50 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milesto
 	if m == nil {
 		return nil, &FailError{Code: CodeMilestoneNotFound, Msg: "no milestone " + id + " in roadmap.md"}
 	}
+	recs, err := p.LoadMilestoneRecords()
+	if err != nil {
+		return nil, err
+	}
+	rec := recs[id]
 	switch m.Status {
 	case MilestoneDone:
 		return nil, &FailError{Code: "milestone.done", Msg: id + " is already done"}
 	case MilestoneApproved:
-		return m, nil
+		// Re-approval: only when ape holds no record of the approval, or
+		// the gate changed since it.
+		if rec != nil && rec.Approval != nil && len(p.gateDrift(m, rec.Approval)) == 0 && rec.ConsecutiveBlocks == 0 {
+			return m, nil
+		}
 	}
 	if fs := ValidateRoadmap(p.Rel(p.RoadmapMD()), doc); len(filterMilestone(fs, m)) > 0 {
 		return nil, &FailError{Code: "milestone.malformed", Msg: id + " is not well-formed — fix roadmap.md before approving", Findings: filterMilestone(fs, m)}
 	}
-	updated, err := rm.WithStatus(id, "approved (by "+strings.TrimSpace(by)+" "+Stamp()+")")
-	if err != nil {
+	what := MilestoneApproved
+	if m.Status == MilestoneApproved {
+		// The Status line keeps the first approval: the milestone's spend
+		// counts from it, and a re-approval must not reset that.
+		what = "re-approved"
+	} else {
+		updated, err := rm.WithStatus(id, "approved (by "+strings.TrimSpace(by)+" "+Stamp()+")")
+		if err != nil {
+			return nil, err
+		}
+		if err := writeFileAtomic(p.RoadmapMD(), updated); err != nil {
+			return nil, err
+		}
+		m = ParseRoadmap("", updated).Find(id)
+	}
+	if rec == nil {
+		rec = &MilestoneRecord{}
+		recs[id] = rec
+	}
+	rec.Approval = p.newApproval(m.Gate, strings.TrimSpace(by))
+	// A person's approval resets the run of blocked changes (H19).
+	rec.ConsecutiveBlocks = 0
+	if err := p.saveMilestoneRecords(recs); err != nil {
 		return nil, err
 	}
-	if err := writeFileAtomic(p.RoadmapMD(), updated); err != nil {
-		return nil, err
-	}
-	m = ParseRoadmap("", updated).Find(id)
-	if _, err := p.commitMilestone(ctx, id, MilestoneApproved); err != nil {
+	if _, err := p.commitMilestone(ctx, id, what); err != nil {
 		return m, err
 	}
 	return m, nil
@@ -270,6 +316,8 @@ type GateResult struct {
 	// checks are every check the run ran, the gate command first: what
 	// the evidence is written from.
 	checks []CheckResult
+	// AcceptRed: a person closed the milestone with its gate red.
+	AcceptRed *AcceptRed `json:"accept_red,omitempty"`
 }
 
 // RunGate runs a milestone's gate and records it; the committed record
@@ -281,6 +329,14 @@ func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	}
 	if err := p.refuseOnChangeBranch(ctx, "a milestone gate run"); err != nil {
 		return nil, err
+	}
+	// An approved milestone's gate is the one a person approved (H2).
+	if _, rm, err := p.loadRoadmapDoc(); err == nil {
+		if m := rm.Find(id); m != nil && m.Status == MilestoneApproved {
+			if err := p.requireApprovalRecord(m, true); err != nil {
+				return nil, err
+			}
+		}
 	}
 	g, err := p.runGate(ctx, id, opt)
 	if err != nil || !g.ResultChanged {
@@ -360,16 +416,34 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	if rec := recs[id]; rec != nil && rec.Result == result {
 		return g, nil
 	}
-	var stops []LimitStop
-	if rec := recs[id]; rec != nil {
-		stops = rec.Stops
+	rec := recs[id]
+	if rec == nil {
+		rec = &MilestoneRecord{}
+		recs[id] = rec
 	}
-	recs[id] = &MilestoneRecord{Result: result, Since: &run, Stops: stops}
+	rec.Result, rec.Since = result, &run
 	if err := p.saveMilestoneRecords(recs); err != nil {
 		return nil, err
 	}
 	g.ResultChanged = true
 	return g, nil
+}
+
+// markDone records in milestones.json that ape closed the milestone, and
+// the red gate a person accepted, if any.
+func (p *Project) markDone(id, at string, red *AcceptRed) error {
+	recs, err := p.LoadMilestoneRecords()
+	if err != nil {
+		return err
+	}
+	if recs[id] == nil {
+		recs[id] = &MilestoneRecord{}
+	}
+	recs[id].DoneAt = at
+	if red != nil {
+		recs[id].AcceptRed = red
+	}
+	return p.saveMilestoneRecords(recs)
 }
 
 func lastN(xs []string, n int) []string {
@@ -382,6 +456,42 @@ func lastN(xs []string, n int) []string {
 // CloseMilestone runs the gate and, on exit 0 with no change of this
 // milestone still in flight, writes `Status: done (<ts> <sha>)`.
 func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions) (*GateResult, error) {
+	return p.closeMilestone(ctx, id, opt, nil)
+}
+
+// AcceptRed is a person closing a milestone whose gate is red (H22,
+// D45), in milestones.json under the milestone's "accept_red": the
+// reason, who and when, and the red gate run it accepted.
+type AcceptRed struct {
+	Reason string   `json:"reason"`
+	By     string   `json:"by"`
+	At     string   `json:"at"`
+	Gate   *GateRun `json:"gate"`
+}
+
+// CloseMilestoneAcceptRed is close for a person who accepts a red gate:
+// as CloseMilestone — approval record, gate as approved, no change in
+// flight — and when the gate is red, the milestone is done anyway, the
+// acceptance recorded (accept_red) and the Status line saying so: `done
+// (accepted red by <who> <ts> <sha>)`. A green gate closes it as usual,
+// accepting nothing. A person's flag: refused in a model session.
+func (p *Project) CloseMilestoneAcceptRed(ctx context.Context, id, reason, by string, opt RunOptions) (*GateResult, error) {
+	if err := requirePerson("--accept-red"); err != nil {
+		return nil, err
+	}
+	reason, by = strings.TrimSpace(reason), strings.TrimSpace(by)
+	if reason == "" || strings.Contains(reason, "\n") {
+		return nil, &UsageError{Code: "usage.reason", Msg: "--accept-red needs a one-line reason: why the milestone is done with its gate red"}
+	}
+	if by == "" {
+		return nil, &UsageError{Code: "usage.by", Msg: "--by names the person who accepts the red gate"}
+	}
+	return p.closeMilestone(ctx, id, opt, &AcceptRed{Reason: reason, By: by})
+}
+
+// closeMilestone is close; red, when set, is a person's acceptance of a
+// red gate.
+func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions, red *AcceptRed) (*GateResult, error) {
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err
 	}
@@ -400,10 +510,13 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 	case MilestoneDone:
 		return &GateResult{Milestone: id, Status: MilestoneDone}, nil
 	case MilestoneApproved:
+		if err := p.requireApprovalRecord(m, true); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, &FailError{Code: CodeMilestoneNotApproved, Msg: id + " is " + m.StatusText + ", not approved — nothing to close"}
 	}
-	var inFlight []string
+	var inFlight, awaiting []string
 	for _, c := range p.changes(ctx) {
 		if c.Doc == nil || c.State == nil || c.Doc.Meta.Milestone != id {
 			continue
@@ -411,23 +524,36 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 		switch c.State.Status {
 		case StatusInProgress, StatusVerified, StatusReviewed:
 			inFlight = append(inFlight, c.ID+" ("+c.State.Status+")")
+			if pending := awaitingHuman(c.State, c.Doc); len(pending) > 0 {
+				awaiting = append(awaiting, c.ID+" ("+strings.Join(pending, ", ")+")")
+			}
 		}
 	}
 	if len(inFlight) > 0 {
-		return &GateResult{Milestone: id, Status: m.Status, InFlight: inFlight},
-			&FailError{Code: "milestone.changes-in-flight", Msg: id + " has changes in flight: " + strings.Join(inFlight, ", ") + " — archive or block them, then close"}
+		fe := &FailError{Code: "milestone.changes-in-flight", Msg: id + " has changes in flight: " + strings.Join(inFlight, ", ") + " — archive or block them, then close"}
+		if len(awaiting) > 0 {
+			// A change that waits for a person's acceptance is not the
+			// orchestrator's to move (D49).
+			fe.Action = ActionPerson
+			fe.Msg = id + " has changes in flight: " + strings.Join(inFlight, ", ") + "; awaiting a person's acceptance: " + strings.Join(awaiting, ", ") +
+				" — a person accepts them (`ape change accept <id> --task <T> --by <who>`), the changes are archived, then close"
+		}
+		return &GateResult{Milestone: id, Status: m.Status, InFlight: inFlight}, fe
 	}
 	g, err := p.runGate(ctx, id, opt)
 	if err != nil {
 		return nil, err
 	}
-	if !g.Run.Green() {
+	if !g.Run.Green() && red == nil {
 		if g.ResultChanged {
 			if g.Commit, err = p.commitMilestone(ctx, id, "gate "+GateRed); err != nil {
 				return g, err
 			}
 		}
 		return g, &FailError{Code: "gate.red", Msg: id + " gate is red (" + g.Run.Why() + ") — the milestone is not done"}
+	}
+	if g.Run.Green() {
+		red = nil // nothing red to accept
 	}
 	_, rm, err = p.loadRoadmapDoc()
 	if err != nil {
@@ -437,14 +563,22 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 	if sha == "" {
 		sha = "0000000"
 	}
-	updated, err := rm.WithStatus(id, "done ("+g.Run.At+" "+sha+")")
+	status, what := "done ("+g.Run.At+" "+sha+")", MilestoneDone
+	if red != nil {
+		red.At, red.Gate = Stamp(), &g.Run
+		status, what = "done (accepted red by "+red.By+" "+red.At+" "+sha+")", MilestoneDone+" (accepted red)"
+	}
+	updated, err := rm.WithStatus(id, status)
 	if err != nil {
 		return nil, err
 	}
 	if err := writeFileAtomic(p.RoadmapMD(), updated); err != nil {
 		return nil, err
 	}
-	g.Status = MilestoneDone
+	if err := p.markDone(id, g.Run.At, red); err != nil {
+		return nil, err
+	}
+	g.Status, g.AcceptRed = MilestoneDone, red
 	var extra []string
 	if p.evidenceOn() {
 		if g.Evidence, err = p.writeMilestoneEvidence(id, g.checks); err != nil {
@@ -452,7 +586,7 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 		}
 		extra = append(extra, g.Evidence)
 	}
-	if g.Commit, err = p.commitMilestone(ctx, id, MilestoneDone, extra...); err != nil {
+	if g.Commit, err = p.commitMilestone(ctx, id, what, extra...); err != nil {
 		return g, err
 	}
 	return g, nil

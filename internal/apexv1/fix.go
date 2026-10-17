@@ -52,6 +52,10 @@ type ApproveResult struct {
 // not be started. Re-approving the same plan is a no-op; a plan changed
 // since its approval is approved again (recorded anew).
 func (p *Project) ApproveFix(ctx context.Context, id, by string) (*ApproveResult, error) {
+	// A model never approves its own fix (D47 Q6).
+	if err := requirePerson("ape change approve"); err != nil {
+		return nil, err
+	}
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err
 	}
@@ -73,7 +77,7 @@ func (p *Project) ApproveFix(ctx context.Context, id, by string) (*ApproveResult
 	}
 	st := ci.State
 	started := ci.Branch != "" || st.BaseSHA != "" || p.isWorkTree(ctx) && p.branchExists(ctx, ChangeBranch(id))
-	if (st.Status != StatusDraft && st.Status != StatusBlocked) || started {
+	if (st.Status != StatusDraft && st.Status != StatusBlocked && st.Status != StatusAnswered) || started {
 		return nil, &FailError{Code: CodeWrongStatus, Msg: "fix " + id + " is " + st.Status + " and was started — approve applies to a fix not started yet (a draft)"}
 	}
 	if fs := p.CheckChange(id); len(fs) > 0 {

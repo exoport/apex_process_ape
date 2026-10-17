@@ -29,6 +29,9 @@ func v1Repo(t *testing.T) string {
 	root := t.TempDir()
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+	// A person at a terminal (person-only commands), whatever runs the tests.
+	t.Setenv("APE_SESSION", "")
+	t.Setenv("CLAUDECODE", "")
 	for _, kv := range [][2]string{{"GIT_AUTHOR_NAME", "t"}, {"GIT_AUTHOR_EMAIL", "t@t"}, {"GIT_COMMITTER_NAME", "t"}, {"GIT_COMMITTER_EMAIL", "t@t"}} {
 		t.Setenv(kv[0], kv[1])
 	}
@@ -200,6 +203,13 @@ func TestV1Commands_ExitCodes(t *testing.T) {
 	v1Git(t, root, "add", "gate.sh")
 	v1Git(t, root, "commit", "-q", "-m", "feat: gate")
 	_, _, err = v1Exec(t, newChangeCmd, "abandon", "add-wave-2", "--reason", "duplicate", "--cwd", root)
+	require.NoError(t, err)
+	// gate.sh is new since M1 was approved (H2): a person approves it again.
+	stdout, _, err = v1Exec(t, newMilestoneCmd, "close", "M1", "--json", "--cwd", root)
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
+	require.Contains(t, stdout, `"code": "milestone.gate-changed"`)
+	require.Contains(t, stdout, `"action": "person"`)
+	_, _, err = v1Exec(t, newMilestoneCmd, "approve", "M1", "--by", "eval", "--cwd", root)
 	require.NoError(t, err)
 	stdout, _, err = v1Exec(t, newMilestoneCmd, "close", "M1", "--cwd", root)
 	require.NoError(t, err)

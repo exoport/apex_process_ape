@@ -29,6 +29,14 @@ type MilestoneStatus struct {
 	// Stops are the sessions ape stopped at the milestone's budget,
 	// oldest first.
 	Stops []LimitStop `json:"stops"`
+	// ConsecutiveBlocks is the milestone's changes blocked in a row, and
+	// ConsecutiveBlocksCap limits.consecutive_blocks (H19).
+	ConsecutiveBlocks    int `json:"consecutive_blocks"`
+	ConsecutiveBlocksCap int `json:"consecutive_blocks_cap"`
+	// Diagnostics are the limits that stop work on the milestone, in the
+	// shape of a --json failure's: milestone.blocks-exceeded (action stop)
+	// when ConsecutiveBlocks reached its cap (D49). Always present.
+	Diagnostics []Diagnostic `json:"diagnostics"`
 }
 
 // ChangeStatus is one change as `ape status` shows it.
@@ -59,6 +67,15 @@ type ChangeStatus struct {
 	// Flaky lists the checks that passed only on a retry at the change's
 	// last verify (H12, retries:): green, but for review to see.
 	Flaky []string `json:"flaky,omitempty"`
+	// AwaitingHuman is the change's human-review tasks no person has
+	// accepted yet once only the person is left (D47): a reviewed change,
+	// or an archived one (archived past them by a person,
+	// --allow-pending-human). What waits for a person, not for the
+	// orchestrator: it skips such a change. Always present.
+	AwaitingHuman []string `json:"awaiting_human"`
+	// Answer is a person's answer to what blocked the change (H9): set on
+	// an answered change, and kept once it is started again.
+	Answer *Answer `json:"answer,omitempty"`
 }
 
 // Spend is the cost recorded in the project's run manifests.
@@ -74,6 +91,8 @@ type MilestoneLine struct {
 	ID     string `json:"id"`
 	Title  string `json:"title"`
 	Status string `json:"status"`
+	// AcceptRed: a person closed it with its gate red (H22).
+	AcceptRed *AcceptRed `json:"accept_red,omitempty"`
 }
 
 // StatusReport is `ape status`.
@@ -139,9 +158,14 @@ func (p *Project) Status() *StatusReport {
 
 	ctx := context.Background()
 	if rm := p.roadmap(); rm != nil {
+		recs, _ := p.LoadMilestoneRecords()
 		for i := range rm.Milestones {
 			m := &rm.Milestones[i]
-			r.Milestones = append(r.Milestones, MilestoneLine{ID: m.ID, Title: m.Title, Status: m.Status})
+			line := MilestoneLine{ID: m.ID, Title: m.Title, Status: m.Status}
+			if rec := recs[m.ID]; rec != nil && m.Status == MilestoneDone {
+				line.AcceptRed = rec.AcceptRed
+			}
+			r.Milestones = append(r.Milestones, line)
 		}
 		if m := rm.Current(); m != nil {
 			r.Milestone = p.milestoneStatus(m, runs, p.fixIDs(ctx))
@@ -190,8 +214,10 @@ func (p *Project) Status() *StatusReport {
 		if c.State.BlockedReason != nil {
 			cs.BlockedReason = *c.State.BlockedReason
 		}
+		cs.Answer = c.State.Answer
 		if c.Doc != nil {
 			cs.PendingHuman = c.State.PendingHuman(c.Doc.HumanTasks())
+			cs.AwaitingHuman = awaitingHuman(c.State, c.Doc)
 		}
 		if v := c.State.Verify; v != nil {
 			cs.VerifySHA = v.SHA
@@ -216,6 +242,14 @@ func (p *Project) Status() *StatusReport {
 		r.Changes = append(r.Changes, cs)
 	}
 	sortFixesFirst(r.Changes)
+	// Archived changes a person has yet to accept human-review tasks of
+	// (H4): listed last, so they stay visible after the archive.
+	r.Changes = append(r.Changes, p.archivedAwaitingHuman()...)
+	for i := range r.Changes {
+		if r.Changes[i].AwaitingHuman == nil {
+			r.Changes[i].AwaitingHuman = []string{}
+		}
+	}
 	for i := range r.Changes {
 		if c := &r.Changes[i]; c.runnableFix() {
 			r.Fixes = append(r.Fixes, c.ID)
@@ -248,7 +282,7 @@ func (p *Project) statusBase(ctx context.Context, branch string) string {
 // runnableFix reports an approved fix that is neither blocked nor
 // unreadable: one the orchestrator runs ahead of milestone work (D40).
 func (c *ChangeStatus) runnableFix() bool {
-	return c.Lane == LaneFix && c.Approved != nil && c.Status != StatusBlocked && c.Status != "invalid"
+	return c.Lane == LaneFix && c.Approved != nil && c.Status != StatusBlocked && c.Status != "invalid" && c.Status != StatusArchived
 }
 
 // sortFixesFirst orders the changes as `ape status` lists them (D40):
@@ -302,6 +336,12 @@ func (p *Project) milestoneStatus(m *Milestone, runs []cost.RunCost, fixes map[s
 	}
 	ms.SpentUSD = round2(milestoneSpend(m, runs, ms.Stops, fixes))
 	ms.BudgetEnforced = p.limits().BudgetEnforced() && m.Budget != nil
+	ctx := context.Background()
+	ms.ConsecutiveBlocks, ms.ConsecutiveBlocksCap = p.consecutiveBlocks(ctx, m.ID), p.limits().ConsecutiveBlocksCap()
+	ms.Diagnostics = Diagnostics(p.blocksExceeded(ctx, m.ID))
+	if ms.Diagnostics == nil {
+		ms.Diagnostics = []Diagnostic{}
+	}
 	return ms
 }
 
@@ -327,6 +367,9 @@ func nextStep(r *StatusReport) string {
 	if m.Status != MilestoneApproved {
 		return fmt.Sprintf("%s awaits approval: a person runs `ape milestone approve %s --by <who>`", m.ID, m.ID)
 	}
+	if len(m.Diagnostics) > 0 {
+		return "stopped: " + m.Diagnostics[0].Message + " — " + m.Diagnostics[0].Fix
+	}
 	for i := range r.Changes {
 		c := &r.Changes[i]
 		if c.Milestone != m.ID && c.Milestone != "" {
@@ -339,6 +382,9 @@ func nextStep(r *StatusReport) string {
 		}
 		switch c.Status {
 		case StatusReviewed:
+			if len(c.AwaitingHuman) > 0 {
+				continue // a person's to accept first (D45): the orchestrator moves on
+			}
 			return "archive " + c.ID + ": `ape change archive " + c.ID + "` (squash-merges " + ChangeBranch(c.ID) + " into its base branch)"
 		case StatusVerified:
 			return "review " + c.ID + " (apex-review)" + on
@@ -349,8 +395,19 @@ func nextStep(r *StatusReport) string {
 		}
 	}
 	for i := range r.Changes {
+		if c := &r.Changes[i]; c.Status == StatusAnswered && c.Answer != nil {
+			return "answered: " + c.ID + " — " + c.Answer.By + " answered; re-plan it with the answer as the hint (apex-change), then `ape change start " + c.ID + "`"
+		}
+	}
+	for i := range r.Changes {
 		if c := &r.Changes[i]; c.Status == StatusBlocked {
-			return "blocked: " + c.ID + " — " + c.BlockedReason + " (re-plan, or a person answers; `ape change start " + c.ID + "` resumes)"
+			return "blocked: " + c.ID + " — " + c.BlockedReason + " (re-plan, or a person answers: `ape change answer " + c.ID + " --text \"…\" --by <who>`; `ape change start " + c.ID + "` resumes)"
+		}
+	}
+	for i := range r.Changes {
+		if c := &r.Changes[i]; c.Status == StatusReviewed && len(c.AwaitingHuman) > 0 {
+			return "a person reviews " + c.ID + ": `ape change accept " + c.ID + " --task " + c.AwaitingHuman[0] + " --by <who>` for each of " +
+				strings.Join(c.AwaitingHuman, ", ") + ", then `ape change archive " + c.ID + "`"
 		}
 	}
 	if m.GateLast != nil && m.GateLast.Green() && m.GateLast.SHA != "" {
@@ -398,6 +455,9 @@ func (r *StatusReport) Brief() string {
 		b = append(b, "not an APEX v1 project yet: run `ape project init`")
 		return strings.Join(b, "\n") + "\n"
 	}
+	if line := r.acceptedRedLine(); line != "" {
+		b = append(b, line)
+	}
 	if m := r.Milestone; m != nil {
 		b = append(b, m.briefLines()...)
 	} else if len(r.Milestones) == 0 {
@@ -406,11 +466,14 @@ func (r *StatusReport) Brief() string {
 		b = append(b, "All milestones done.")
 	}
 	const maxChanges = 12
-	var open, blocked []ChangeStatus
+	var open, blocked, archived []ChangeStatus
 	for i := range r.Changes {
-		if r.Changes[i].Status == StatusBlocked {
+		switch r.Changes[i].Status {
+		case StatusBlocked:
 			blocked = append(blocked, r.Changes[i])
-		} else {
+		case StatusArchived:
+			archived = append(archived, r.Changes[i])
+		default:
 			open = append(open, r.Changes[i])
 		}
 	}
@@ -421,9 +484,12 @@ func (r *StatusReport) Brief() string {
 	}
 	shown := 0
 groups:
-	for gi, group := range [][]ChangeStatus{open, blocked} {
-		if gi == 1 && len(blocked) > 0 {
+	for gi, group := range [][]ChangeStatus{open, blocked, archived} {
+		switch {
+		case gi == 1 && len(blocked) > 0:
 			b = append(b, "Blocked:")
+		case gi == 2 && len(archived) > 0:
+			b = append(b, "Archived, human review not accepted (`ape change accept <id> --task <T> --by <who>`):")
 		}
 		for i := range group {
 			c := &group[i]
@@ -434,6 +500,8 @@ groups:
 			shown++
 			line := fmt.Sprintf("  %-28s %-11s %s", c.ID, c.Status, c.laneLabel())
 			switch {
+			case c.Status == StatusAnswered && c.Answer != nil:
+				line += " — answered by " + c.Answer.By + ": " + truncate(c.Answer.Text, briefReasonMax)
 			case c.BlockedReason != "":
 				line += " — " + truncate(c.BlockedReason, briefReasonMax)
 			case len(c.Failing) > 0 && c.Status == StatusInProgress:
@@ -459,6 +527,26 @@ groups:
 	}
 	b = append(b, fmt.Sprintf("Spend: $%.2f over %d runs", r.Spend.TotalUSD, r.Spend.Runs), "Next: "+r.Next)
 	return strings.Join(b, "\n") + "\n"
+}
+
+// acceptedRedLine names the last done milestone when a person closed it
+// with its gate red (H22), "" otherwise.
+func (r *StatusReport) acceptedRedLine() string {
+	for i := len(r.Milestones) - 1; i >= 0; i-- {
+		m := &r.Milestones[i]
+		if m.Status != MilestoneDone {
+			continue
+		}
+		if a := m.AcceptRed; a != nil {
+			why := ""
+			if a.Gate != nil {
+				why = " (" + a.Gate.Why() + ")"
+			}
+			return truncate(m.ID+" was closed with its gate red"+why+", accepted by "+a.By+": "+a.Reason, briefLineMax)
+		}
+		return ""
+	}
+	return ""
 }
 
 // laneLabel is the brief's third column: the milestone, or the fix lane
@@ -516,6 +604,9 @@ func (m *MilestoneStatus) briefLines() []string {
 		}
 	}
 	lines := []string{fmt.Sprintf("Milestone %s — %s: %s", m.ID, m.Title, m.StatusText), gate, spend}
+	if m.ConsecutiveBlocks > 0 {
+		lines = append(lines, fmt.Sprintf("  %d of %d changes blocked in a row (limits.consecutive_blocks)", m.ConsecutiveBlocks, m.ConsecutiveBlocksCap))
+	}
 	if n := len(m.Stops); n > 0 {
 		line := "  " + m.Stops[n-1].Describe()
 		if n > 1 {

@@ -101,6 +101,13 @@ removed) and _apex/effort-defaults.yaml is not used. Sources: flag, config,
 parent-session, config-default, default. The session's tools see the
 resolved values as APE_SESSION_MODEL / APE_SESSION_EFFORT.
 
+In an APEX v1 project ape first checks the floor the installed framework
+sets: when _apex/ape-commands.yaml declares a min_ape_version above this
+ape, the session is refused (exit 1, code ape.below-floor) with the
+command that updates ape — the same floor ` + "`ape framework update`" + ` refuses an
+install by (exit 11). A dev build or a pseudo-version cannot be compared:
+a warning, and the session runs.
+
 In an APEX v1 project ape also enforces the milestone budget, when
 _apex/config.yaml says so (it is off by default):
   limits:
@@ -119,6 +126,12 @@ nothing is committed, whichever branch the session was on); ` + "`ape status`" +
 line (a person's call) lets sessions start again. An unparseable
 _apex/config.yaml in a v1 project refuses every session (exit 2) rather
 than run it with no limits.
+
+A session of apex-orchestrator is also refused (exit 1, code
+milestone.blocks-exceeded) when the milestone it runs — --args M<n>, else
+the current one — has had limits.consecutive_blocks (default 2) changes
+blocked in a row; a person deals with them and re-approves the milestone,
+which resets the count. A fix's run (--args <fix-id>) is not refused.
 
 --prompt-file <path> reads the prompt from a file, and "-" reads it
 from stdin. It is how a printed escalation command carries the
@@ -164,8 +177,8 @@ The verdict is written to the run manifest as commit_contract, so a
 failure stays diagnosable after the fact.
 
 Exit codes: 0 success · 1 run failed, idle timeout, the typed line
-never submitted, or an APEX v1 milestone budget stopped or refused the
-session · 2 usage or
+never submitted, an APEX v1 milestone budget stopped or refused the
+session, or a v1 limit or ape floor refused it · 2 usage or
 preflight error · 3 REPL never became ready (last pane on stderr) ·
 5 upstream API failure · 6 the dispatch violated its declared commit
 ownership (the run itself may have succeeded).`,
@@ -527,6 +540,10 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	// CLAUDE_CODE_EFFORT_LEVEL, and nothing is passed when nothing decided.
 	var v1Launch *v1TaskLaunch
 	if p, ok := v1ProjectAt(o.projectRoot); ok {
+		// H1: the installed framework's ape floor, before anything else.
+		if err := v1ApeFloor(o.projectRoot, os.Stderr); err != nil {
+			return taskRun{}, &taskPreflightError{err: err}
+		}
 		l, err := decideV1TaskLaunch(p, o.skill, o.model, o.effort)
 		if err != nil {
 			return taskRun{}, &taskPreflightError{err: err}
@@ -537,6 +554,13 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		// Backlog 31: the project's hooks ride inline, so a hand-edited
 		// settings.json cannot drop them (apexv1.InlineHooks).
 		cfg.spawnSettings.hooks, cfg.spawnEnv = v1InlineHooks()
+		// H19, D49: an orchestrator does not run a milestone whose changes
+		// were blocked limits.consecutive_blocks times in a row.
+		if o.skill == v1OrchestratorSkill {
+			if err := p.OrchestratorLimits(ctx, o.args); err != nil {
+				return taskRun{}, &taskPreflightError{err: err}
+			}
+		}
 		// Backlog 30: the milestone's enforced budget refuses the start, or
 		// stops the session when its live spend reaches it.
 		if cfg.budgetWatch, err = newV1BudgetWatch(ctx, p, o.skill, o.args); err != nil {

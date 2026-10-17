@@ -179,6 +179,7 @@ func (p *Project) Check() []Finding {
 		missing(p.RoadmapMD(), "run `ape project init`, then `ape milestone new`")
 	} else {
 		add(ValidateRoadmap(p.Rel(p.RoadmapMD()), doc)...)
+		add(p.milestoneRecordFindings()...)
 	}
 	add(p.briefFindings(context.Background())...)
 
@@ -282,6 +283,7 @@ func (p *Project) checkDecisionLife(path, name, doc string) []Finding {
 	id := "ADR-" + m[1]
 	file := p.Rel(path)
 	var out []Finding
+	out = append(out, p.decisionRecordFinding(id, file, doc)...)
 	if p.acceptedBodyChanged(context.Background(), id, path, doc) {
 		out = append(out, Finding{File: file, Message: id + " was accepted and its text has changed since — restore it; " +
 			"a different decision is a new ADR: `ape decision new <slug> --supersedes " + id + "`"})

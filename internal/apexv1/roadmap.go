@@ -42,7 +42,7 @@ type Roadmap struct {
 var (
 	milestoneHeadRe = regexp.MustCompile(`^(M\d+)\s*[—–:-]\s*(.+)$`)
 	approvedRe      = regexp.MustCompile(`^approved\s*\(by\s+(.+?)\s+(\S+)\)$`)
-	doneRe          = regexp.MustCompile(`^done\s*\((\S+)\s+([0-9a-f]{7,40})\)$`)
+	doneRe          = regexp.MustCompile(`^done\s*\((?:accepted red by (.+?)\s+)?(\S+)\s+([0-9a-f]{7,40})\)$`)
 )
 
 // stripComment drops a trailing ` # comment` from a field value.
@@ -64,11 +64,14 @@ func ParseRoadmap(file, doc string) *Roadmap {
 		}
 	}
 	for _, s := range h2Sections(lines) {
+		if nextHeadingRe.MatchString(s.Title) {
+			continue // `## Next`: findings to triage, not a milestone (next.go)
+		}
 		m := milestoneHeadRe.FindStringSubmatch(s.Title)
 		if m == nil {
 			r.headErrs = append(r.headErrs, Finding{
 				File: file, Line: s.Line,
-				Message: "roadmap section must be `## M<n> — <title>`",
+				Message: "roadmap section must be `## M<n> — <title>` (or `## Next`)",
 			})
 			continue
 		}
@@ -227,7 +230,7 @@ func ValidateRoadmap(file, doc string) []Finding {
 		default:
 			out = append(out, Finding{
 				File: file, Line: m.StatusLine,
-				Message: m.ID + " status \"" + m.StatusText + "\" is not proposed | approved (by <who> <ts>) | done (<ts> <sha>) — only ape writes it",
+				Message: m.ID + " status \"" + m.StatusText + "\" is not proposed | approved (by <who> <ts>) | done (<ts> <sha>) | done (accepted red by <who> <ts> <sha>) — only ape writes it",
 			})
 		}
 		if m.Gate == "" {

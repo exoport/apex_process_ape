@@ -13,7 +13,7 @@ import (
 func newChangeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "change",
-		Short: "The unit of change: new, check, approve (fixes), start, verify, review, accept, block, archive",
+		Short: "The unit of change: new, check, approve (fixes), start, verify, review, accept, block, answer, archive",
 		Long: `A change is development/changes/<id>/change.md (written by the model) plus state.json
 (written only by ape). Its lifecycle:
 
@@ -21,6 +21,7 @@ func newChangeCmd() *cobra.Command {
                               ▲   │                        │                         │
                               └───┴── verify red ◀─────────┴──── review block ◀──────┘
   any status but archived ──block──▶ blocked ──start──▶ in-progress
+  blocked ──answer (a person)──▶ answered ──re-plan, start──▶ in-progress
   any status but archived ──abandon──▶ abandoned (moved to the archive, no delta merged)
 
 Done is a command ape ran at a sha: models never set a status. Every status change is
@@ -81,7 +82,7 @@ on its branch).`,
 	}
 	cmd.AddCommand(
 		newChangeNewCmd(), newChangeCheckCmd(), newChangeApproveCmd(), newChangeStartCmd(), newChangeVerifyCmd(),
-		newChangeReviewCmd(), newChangeAcceptCmd(), newChangeBlockCmd(), newChangeArchiveCmd(),
+		newChangeReviewCmd(), newChangeAcceptCmd(), newChangeBlockCmd(), newChangeAnswerCmd(), newChangeArchiveCmd(),
 		newChangeAbandonCmd(), newChangeDiffCmd(),
 	)
 	return cmd
@@ -147,8 +148,19 @@ is a warning, not a failure.
 
 Then fill change.md and run `+"`ape change check <id>`"+`.
 
-Exit codes: 0 ok · 1 id taken (incl. archive), milestone not in roadmap, or HEAD on a
-change branch · 2 usage.`,
+Consecutive blocks (H19, D49): every block of a milestone's change (`+"`ape change block`"+`, a
+limit reached at verify or start, a rebase conflict) counts toward its milestone in
+_apex/state/milestones.json (consecutive_blocks), committed on the base branch from
+whichever branch as "apex: <M> consecutive blocks <n> (<id>)"; an archived change of the
+milestone sets it back to 0, inside the archive's commit. At limits.consecutive_blocks
+(default 2), change new and change start of the milestone's changes and
+`+"`ape task apex-orchestrator`"+` for it refuse with exit 1, code milestone.blocks-exceeded,
+action stop, and `+"`ape status --json`"+` reports it under milestone.diagnostics. A person deals
+with the blocked changes (answer or abandon them) and resets the count by approving the
+milestone again: `+"`ape milestone approve <M> --by <who>`"+`. Fixes count toward no milestone.
+
+Exit codes: 0 ok · 1 id taken (incl. archive), milestone not in roadmap, the milestone past
+limits.consecutive_blocks, or HEAD on a change branch · 2 usage.`,
 		"  ape change new add-tenant-delete --milestone M2 --touches tenants --paths 'internal/api/**'\n"+
 			"  ape change new fix-login-redirect --milestone none --touches auth",
 		&f,
@@ -249,6 +261,9 @@ in place of an approved milestone (else exit 1, change.not-approved).
   - the approval is of the plan change.md has now: a fix whose plan (change.md outside
     ## Why and ## Notes) changed since is refused at start until approved again
   - re-approving the same plan is a no-op (exit 0, JSON "already": true, nothing written)
+  - only a person approves (D47 Q6): refused in a model session — APE_SESSION or
+    CLAUDECODE set, a `+"`!`"+` line inside Claude Code included — with exit 2, code
+    session.person-only; run it from a plain terminal
 
 Fixes form a queue: planned and approved between runs (or `+"`ape run stop`"+`, plan, approve,
 restart), never overlapping a run (D45). An approved fix runs ahead of milestone work, at
@@ -258,7 +273,7 @@ fixes first (JSON "fixes", changes[].lane "fix", changes[].approved) and points 
 first. A fix counts toward no milestone gate and no milestone's spend or budget.
 
 Exit codes: 0 approved (or already) · 1 not a fix, check red, started, or HEAD on a change
-branch · 2 usage (no --by).`,
+branch · 2 usage (no --by), or a model session.`,
 		"  ape change approve fix-login-redirect --by diego",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
@@ -284,9 +299,11 @@ func newChangeStartCmd() *cobra.Command {
 	cmd := v1ChangeLeaf(
 		"start <id>",
 		"Check green + approved → create and check out change/<id>, record the baseline, set in-progress",
-		`Start a draft (or resume a blocked) change:
+		`Start a draft (or resume a blocked or answered) change:
 
-  1. `+"`ape change check <id>`"+` must be green, and its milestone approved — or, for a fix
+  1. `+"`ape change check <id>`"+` must be green, and its milestone approved — through ape: the
+     approval record in milestones.json, not the Status line alone (H2; else exit 1,
+     milestone.status-unrecorded: a person runs `+"`ape milestone approve <M> --by <who>`"+`) — or, for a fix
      (milestone: none, D40), the fix approved for the plan it has
      (`+"`ape change approve <id> --by <who>`"+`; else exit 1, change.not-approved)
   2. refused with exit 3 if another active change (in-progress, verified, reviewed —
@@ -365,6 +382,12 @@ regression command unless it changed), fingerprints re-taken. It applies when th
 changed, when a spec block the change modifies or removes was changed by another change
 since start, or when the regression command has no baseline for it (configured or changed
 since start); otherwise it is refused.
+
+Loop limits (H19): a re-plan past limits.replans (default 3) since a person last answered
+the change blocks it instead (reason "replans exceeded: …", exit 1, code
+change.replans-exceeded, action person; the refused re-plan is not recorded). A change of a
+milestone whose changes were blocked limits.consecutive_blocks (default 2) times in a row is
+not started (exit 1, code milestone.blocks-exceeded, action stop; see `+"`ape change new --help`"+`).
 
 Exit codes: 0 started (or resumed) · 1 check red, milestone (or fix) not approved, a vacuous
 task check, wrong status, dirty tree, detached HEAD, HEAD on another change's branch, the base
@@ -470,6 +493,14 @@ in-progress" on change/<id>. The red verify that brings attempts to the cap
 blocked_reason "attempts exceeded: <n> red verifies — <failing checks>", committed as
 "apex: <id> blocked", exit 1 with code change.attempts-exceeded. Re-plan, then
 `+"`ape change start <id>`"+` resumes it with a fresh count.
+Re-planning does not reset limits.attempts_total (default 15, H19): the red verify that
+brings the change's red verifies across all its starts — since a person last answered it
+(`+"`ape change answer`"+`) — to it blocks the change (reason "attempts_total exceeded: …"),
+exit 1 with code change.attempts-total-exceeded, action person: re-planning did not converge; a person answers, abandons it, or raises the
+limit.
+Every block of a milestone's change — here, by `+"`ape change block`"+`, by start's replans cap,
+or by a rebase conflict — also counts toward the milestone's consecutive blocks, committed
+on the base branch as "apex: <M> consecutive blocks <n> (<id>)" (see `+"`ape change new --help`"+`).
 Refused while change.md differs from the plan frozen at start outside ## Why and ## Notes
 (re-start first). human-review tasks are never run; those not yet accepted are listed
 as pending.
@@ -642,23 +673,38 @@ running, call again.`,
 func newChangeAcceptCmd() *cobra.Command {
 	var f v1Flags
 	var task, by string
+	var evidence []string
 	cmd := v1ChangeLeaf(
-		"accept <id> --task <T> --by <who>",
-		"Accept a human-review task",
-		`Record that a person accepted a human-review task (one whose check is "human-review").
-Archive requires every human-review task accepted, unless --allow-pending-human.
-HEAD must be on the change's branch, change/<id> (D38; else exit 1, code
-change.wrong-branch): the acceptance is committed there.
+		"accept <id> --task <T> --by <who> [--evidence <path|url>]...",
+		"Accept a human-review task, in flight or archived",
+		`Record that a person accepted a human-review task (one whose check is "human-review"),
+in state.json's accepted: [{task, by, at, evidence}]. Archive requires every human-review
+task accepted, unless a person archives with --allow-pending-human.
 
-Exit codes: 0 recorded · 1 the task has a command check, or HEAD not on change/<id> ·
-2 usage (no such task).`,
-		"  ape change accept add-tenant-delete --task T2 --by diego",
+  - a change in flight: HEAD must be on its branch, change/<id> (D38; else exit 1, code
+    change.wrong-branch): the acceptance is committed there
+  - an archived change (H4): its archived state.json, under
+    development/archive/<date>-<id>/, is updated and committed on the base branch it was
+    archived into — "apex: <id> accepted <T> (archived)", trailer "Change: <id>" — from any
+    branch, without a checkout when HEAD is elsewhere (refused when that branch is checked
+    out in another worktree: git.base-checked-out). `+"`ape status`"+` lists archived changes
+    with unaccepted human-review tasks until then (JSON awaiting_human)
+  - --evidence <path|url>, repeatable: what the acceptance rests on. A URL
+    (scheme://…) is recorded as given; a path — relative to the project root — must be a
+    regular file in the repository, recorded with its SHA-256 (else exit 2,
+    usage.evidence)
+
+Accepting a task again replaces its earlier acceptance.
+
+Exit codes: 0 recorded · 1 the task has a command check, HEAD not on change/<id>, or the
+base branch is checked out elsewhere · 2 usage (no such task, bad evidence).`,
+		"  ape change accept add-tenant-delete --task T2 --by diego\n  ape change accept add-tenant-delete --task T2 --by diego --evidence docs/review/tenant-delete.png --evidence https://ci.example.com/run/812",
 		&f,
 		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
 			if task == "" {
 				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.task", Msg: "--task <T> is required"}, nil)
 			}
-			st, err := p.Accept(cmd.Context(), id, task, by)
+			st, err := p.Accept(cmd.Context(), id, task, by, evidence...)
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
@@ -668,6 +714,7 @@ Exit codes: 0 recorded · 1 the task has a command check, or HEAD not on change/
 		})
 	cmd.Flags().StringVar(&task, "task", "", "task id, e.g. T2 (required)")
 	cmd.Flags().StringVar(&by, "by", "", "who accepts (required)")
+	cmd.Flags().StringArrayVar(&evidence, "evidence", nil, "a file in the repository or a URL the acceptance rests on (repeatable)")
 	return cmd
 }
 
@@ -697,6 +744,46 @@ Exit codes: 0 blocked · 1 no such change, archived, or the wrong branch · 2 us
 			})
 		})
 	cmd.Flags().StringVar(&reason, "reason", "", "what blocks it (required)")
+	return cmd
+}
+
+func newChangeAnswerCmd() *cobra.Command {
+	var f v1Flags
+	var text, by string
+	cmd := v1ChangeLeaf(
+		`answer <id> --text "<answer>" --by <who>`,
+		"A person answers a blocked change: status answered, the answer recorded",
+		`Record a person's answer to what blocks a change (H9, D47): status answered, and
+answer: {by, at, text} in its state.json (also in `+"`ape status --json`"+`, changes[].answer).
+Only for a blocked change (else exit 1, change.wrong-status). Committed as
+"apex: <id> answered" (trailer "Change: <id>") where the change's state lives — its branch
+change/<id> when it has one, else the branch the draft was planned on — from any branch:
+without a checkout when HEAD is elsewhere (refused when that branch is checked out in
+another worktree: git.base-checked-out).
+
+The orchestrator then has apex-change re-plan the change with the answer as the hint and
+starts it again: `+"`ape change start`"+` takes an answered change as it takes a blocked one (a
+re-plan is recorded as a re-start). The answer also restarts the counts limits.replans and
+limits.attempts_total judge (`+"`ape change verify --help`"+`).
+
+Only a person answers (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE set,
+a `+"`!`"+` line inside Claude Code included — with exit 2, session.person-only.
+
+Exit codes: 0 answered · 1 not blocked, no such change, or the branch is checked out in
+another worktree · 2 usage (no --text or --by), or a model session.`,
+		`  ape change answer add-tenant-delete --text "soft delete; keep rows 30 days" --by diego`,
+		&f,
+		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			st, err := p.AnswerChange(cmd.Context(), id, text, by)
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, st, func(w io.Writer) {
+				fmt.Fprintf(w, "change %s: answered by %s — the orchestrator re-plans it with the answer, then `ape change start %s`\n", id, st.Answer.By, id)
+			})
+		})
+	cmd.Flags().StringVar(&text, "text", "", "the answer (required)")
+	cmd.Flags().StringVar(&by, "by", "", "who answers (required)")
 	return cmd
 }
 
@@ -786,7 +873,11 @@ func newChangeArchiveCmd() *cobra.Command {
 		`Archive a reviewed change onto its base branch (trial decision D38):
 
   1. needs status reviewed (review pass) and the plan frozen at start unchanged; human-
-     review tasks must be accepted, unless --allow-pending-human (recorded)
+     review tasks must be accepted, unless --allow-pending-human (recorded) — a person's
+     flag only (D45): refused in a model session (APE_SESSION or CLAUDECODE set) with exit
+     2, session.person-only; the orchestrator leaves such a change reviewed and moves on.
+     An archived change's unaccepted tasks stay in `+"`ape status`"+` and stay acceptable
+     (`+"`ape change accept --help`"+`)
   2. runs with HEAD on change/<id>, or on another non-change branch (it switches to
      change/<id>); the tree must be clean — uncommitted files inside the change's own
      folder (review.md a review left) are first committed on change/<id> as
@@ -845,7 +936,8 @@ Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, sta
 git hook refused the squash,
 pending human-review, dirty tree, no change branch, the base behind its upstream
 (base.behind-upstream), the base branch checked out in another
-worktree (git.base-checked-out: stop, do not re-plan), or git failed · 2 usage · 3 the
+worktree (git.base-checked-out: stop, do not re-plan), or git failed · 2 usage, or
+--allow-pending-human from a model session · 3 the
 rebase conflicts or the delta no longer applies.`,
 		"  ape change archive add-tenant-delete",
 		&f,
@@ -878,7 +970,7 @@ rebase conflicts or the delta no longer applies.`,
 				}
 			})
 		})
-	cmd.Flags().BoolVar(&allowPending, "allow-pending-human", false, "archive with human-review tasks unaccepted (recorded in state.json)")
+	cmd.Flags().BoolVar(&allowPending, "allow-pending-human", false, "archive with human-review tasks unaccepted (recorded in state.json; a person only)")
 	addV1TimeoutFlag(cmd, &f)
 	return cmd
 }

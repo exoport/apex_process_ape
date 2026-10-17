@@ -16,6 +16,9 @@ import (
 type Attempts struct {
 	Since int `json:"since_start"`
 	Total int `json:"total"`
+	// AtAnswer is Total when a person last answered the change:
+	// limits.attempts_total judges the red verifies since (H19).
+	AtAnswer int `json:"total_at_answer,omitempty"`
 }
 
 // AttemptsJSON is _apex/state/attempts.json: change id → Attempts.

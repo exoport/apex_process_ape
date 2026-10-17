@@ -2,8 +2,9 @@ package apexv1
 
 import "os"
 
-// CodePersonOnly: a flag only a person may pass was given from a model
-// session (BRIEF D45: --allow-pending-human, --accept-red).
+// CodePersonOnly: a flag or command only a person may use was given from a
+// model session (BRIEF D45: --allow-pending-human, --accept-red; D47 Q6:
+// ape milestone approve, ape change approve, ape change answer).
 const CodePersonOnly = "session.person-only"
 
 // envApeSession is repl.EnvApeSession: every session ape spawns carries it.
@@ -23,7 +24,7 @@ func ModelSession() string {
 	return ""
 }
 
-// requirePerson refuses a person-only flag in a model session.
+// requirePerson refuses a person-only flag or command in a model session.
 func requirePerson(flag string) error {
 	if k := ModelSession(); k != "" {
 		return &UsageError{Code: CodePersonOnly, Msg: flag + " is for a person, and this runs in a model session (" + k + " is set)" +

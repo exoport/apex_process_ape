@@ -14,12 +14,21 @@ func newMilestoneCmd() *cobra.Command {
 		Short: "Add, approve, gate and close roadmap milestones",
 		Long: `Milestones live in development/roadmap.md as "## M<n> — <title>" sections.
 Their Status: line is written only by ape: proposed → approved (by <who> <ts>) →
-done (<ts> <sha>). Every one of those writes is committed by ape (roadmap.md, plus
+done (<ts> <sha>), or done (accepted red by <who> <ts> <sha>) when a person closed it
+with its gate red (` + "`ape milestone close --help`" + `). Every one of those writes is committed by ape (roadmap.md, plus
 _apex/state/milestones.json when it exists) as "apex: <M> proposed|approved|done"
 with trailer "Milestone: <M>". milestones.json holds each gate's result (green|red)
 and is committed, as "apex: <M> gate green|red", only when that result changes; the
 latest run of any result is in the gitignored _apex/state/logs/gate-<M>.json.
 No milestone command leaves the tree dirty.
+
+Approvals are records (H2): ` + "`ape milestone approve`" + ` records who approved, when, and the gate
+approved — its command and the SHA-256 of every file it names — under the milestone's
+"approval" in milestones.json. change start, gate and close trust that record, never the
+Status line alone: an approved milestone with no record (approved by hand, or before ape
+recorded approvals) is refused with milestone.status-unrecorded, and gate and close refuse
+one whose gate changed since with milestone.gate-changed — in both cases a person runs
+` + "`ape milestone approve <M> --by <who>`" + ` (again). ` + "`ape project check`" + ` reports both.
 
 Branches (trial decision D38): every milestone command records on the base branch — the
 one changes are started from and archived into (D11). On a change's branch, change/<id>,
@@ -82,13 +91,28 @@ func newMilestoneApproveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "approve <M> --by <who>",
 		Short: "Write Status: approved (by <who> <ts>)",
-		Long: `Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)".
-Changes can start only under an approved milestone. Committed as "apex: <M> approved".
-Approving an approved milestone is a no-op; a done one is refused. Refused on a change
-branch (see ` + "`ape milestone --help`" + `).
+		Long: `Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)", and
+milestones.json records the approval (H2): {by, at, gate_cmd, gate_files, gate_files_sha256}
+— the Gate: command, and the SHA-256 of each gate file: every word of the command (split at
+whitespace and ; | & < > ( ), the value of a KEY=value or --flag=value word) that names a
+regular file under the project root, e.g. ./scripts/e2e.sh (absolute paths, paths leaving
+the root, options and words with $ or a glob are not looked up; what a script runs in
+turn is not covered). Changes can start only under an approved milestone; gate and close
+refuse a gate that differs from the approved one. Committed together as "apex: <M>
+approved".
+
+Approving an approved milestone records the approval again — "apex: <M> re-approved", the
+Status line kept as it was (the milestone's spend counts from it) — when ape holds no
+record of it, its gate changed since, or changes of it were blocked in a row (which resets
+that count, limits.consecutive_blocks: ` + "`ape change new --help`" + `); otherwise it is a no-op. A done one is refused.
+Refused on a change branch (see ` + "`ape milestone --help`" + `).
+
+Only a person approves (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE
+set, which includes a ` + "`!`" + ` line inside Claude Code — with exit 2, code
+session.person-only. Run it from a plain terminal.
 
 Exit codes: 0 ok · 1 no such milestone, done, malformed (Gate/Goal missing), or HEAD on a
-change branch · 2 usage.`,
+change branch · 2 usage, or a model session.`,
 		Example: "  ape milestone approve M1 --by eval",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -161,9 +185,11 @@ output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; sho
 the first, _apex/state/milestones.json is updated and committed as
 "apex: <M> gate green|red". Does not change the milestone's status — ` + "`ape milestone close`" + ` does.
 Refused on a change branch: the gate judges the base branch (see ` + "`ape milestone --help`" + `).
+On an approved milestone, refused when ape holds no approval record (milestone.status-unrecorded)
+or the gate differs from the approved one (milestone.gate-changed): a person approves it again.
 
-Exit codes: 0 gate green · 1 gate red (last output lines shown), no such milestone, or HEAD
-on a change branch · 2 usage.`,
+Exit codes: 0 gate green · 1 gate red (last output lines shown), no such milestone, no
+approval record, a changed gate, or HEAD on a change branch · 2 usage.`,
 		Example: "  ape milestone gate M1",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -194,8 +220,9 @@ on a change branch · 2 usage.`,
 
 func newMilestoneCloseCmd() *cobra.Command {
 	var f v1Flags
+	var acceptRed, by string
 	cmd := &cobra.Command{
-		Use:   "close <M>",
+		Use:   `close <M> [--accept-red "<reason>" --by <who>]`,
 		Short: "Run the gate; on exit 0 write Status: done (<ts> <sha>)",
 		Long: `Close an approved milestone. Refused while a change of this milestone is in-progress,
 verified or reviewed (archive or block it first) — each change's status read from its own
@@ -207,7 +234,8 @@ AND every scenario check of the spec pass, AND the regression command (when conf
 not newly red against the milestone's earliest baseline for it — with no baseline, red fails
 (see ` + "`ape milestone gate`" + `). A red gate is recorded as
 by ` + "`ape milestone gate`" + `. A milestone is done when this command exits 0 — never because
-anyone says so.
+anyone says so. Refused, as by ` + "`ape milestone gate`" + `, when ape holds no approval record or the
+gate changed since the approval (H2). ape records the close in milestones.json (done_at).
 
 With "evidence: archive" in _apex/config.yaml (H23; default off), a green close writes the
 gate run's evidence to development/archive/milestones/<M>/evidence/ — one file per check
@@ -216,9 +244,24 @@ output sha256 and the output, capped at 256 KB (head and tail kept, the full log
 path and sha256) — plus accept-red.json when milestones.json records an accept_red for
 <M>; committed with the close record (JSON "evidence").
 
-Exit codes: 0 done · 1 gate red, changes in flight, not approved, or HEAD on a change
-branch · 2 usage.`,
-		Example: "  ape milestone close M1",
+Changes in flight refuse with milestone.changes-in-flight, action apply — or person when
+one of them is reviewed with human-review tasks not accepted (awaiting_human; D49).
+
+--accept-red "<reason>" --by <who> (H22, D45): a person closes the milestone although its
+gate is red — a release shipped with known defects, say. Everything else is as without it
+(approval record, gate as approved, no change in flight); when the gate is red, the
+milestone is done anyway: milestones.json records accept_red: {reason, by, at, gate: the red
+run}, the Status line reads "done (accepted red by <who> <ts> <sha>)", committed as
+"apex: <M> done (accepted red)", and ` + "`ape status`" + ` shows it (JSON milestones[].accept_red;
+the brief names the last such milestone). A green gate closes as usual and accepts nothing.
+Only a person passes it: refused in a model session (APE_SESSION or CLAUDECODE set, a ` + "`!`" + `
+line inside Claude Code included) with exit 2, session.person-only. A person tags after
+close.
+
+Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
+no approval record, a changed gate, or HEAD on a change branch · 2 usage, or --accept-red
+from a model session.`,
+		Example: "  ape milestone close M1\n  ape milestone close M3 --accept-red \"ships with the known RF drift; fixed in M4\" --by diego",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := v1Project(&f)
@@ -228,7 +271,15 @@ branch · 2 usage.`,
 			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
-			g, err := p.CloseMilestone(cmd.Context(), args[0], f.runOptions())
+			var g *apexv1.GateResult
+			switch {
+			case cmd.Flags().Changed("accept-red"):
+				g, err = p.CloseMilestoneAcceptRed(cmd.Context(), args[0], acceptRed, by, f.runOptions())
+			case by != "":
+				err = &apexv1.UsageError{Code: "usage.by", Msg: "--by goes with --accept-red — drop it, or give the reason the red gate is accepted"}
+			default:
+				g, err = p.CloseMilestone(cmd.Context(), args[0], f.runOptions())
+			}
 			if err != nil {
 				if g != nil && !f.json && g.Run.Cmd != "" {
 					gateHuman(g)(cmd.OutOrStdout())
@@ -241,11 +292,16 @@ branch · 2 usage.`,
 				} else {
 					fmt.Fprintf(w, "%s is already done\n", g.Milestone)
 				}
+				if a := g.AcceptRed; a != nil {
+					fmt.Fprintf(w, "recorded: closed with its gate red, accepted by %s — %s\n", a.By, a.Reason)
+				}
 			})
 		},
 	}
 	addV1Flags(cmd, &f)
 	addV1TimeoutFlag(cmd, &f)
+	cmd.Flags().StringVar(&acceptRed, "accept-red", "", "close although the gate is red, for this reason (a person only; with --by)")
+	cmd.Flags().StringVar(&by, "by", "", "who accepts the red gate (with --accept-red)")
 	return cmd
 }
 
@@ -326,8 +382,14 @@ func newDecisionAcceptCmd() *cobra.Command {
 		Long: `Set a proposed ADR's Status to accepted and record the text it was accepted with in
 _apex/state/decisions.json; both are committed as "apex: ADR-NNNN accepted". From
 then on ` + "`ape project check`" + ` fails if the ADR's text (everything but its Status line)
-changes: supersede it instead. An ADR accepted by hand is held to the text git first
-committed it accepted with.
+changes: supersede it instead.
+
+An ADR whose Status says accepted with no record in decisions.json — accepted by hand, or
+before ape recorded acceptances — is reported by ` + "`ape project check`" + `
+(decision.accepted-unrecorded) and held to the text git first committed it accepted with.
+Accept records it as it is ("apex: ADR-NNNN accepted (recorded)"), unless its text changed
+since that commit (decision.accepted-edited: restore it first). The lift migration's
+records (by "lift") count as records.
 
 A person's acceptance is recorded on the base branch (D11, D38): refused on a change's
 branch, change/<id> (code branch.change-branch; ` + "`git switch <base>`" + ` first).

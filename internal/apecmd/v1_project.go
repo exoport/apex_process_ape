@@ -201,13 +201,17 @@ func newProjectCheckCmd() *cobra.Command {
                            ## Constraints (each non-empty); ≤ 150 lines and ≤ 8 KB
   AGENTS.md                present, ≤ 120 lines; CLAUDE.md (if any) has the line @AGENTS.md
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
-                           Gate, Goal; Budget a number when present. Its Delivery: line
+                           Gate, Goal; Budget a number when present; a "## Next"
+                           section holds findings (` + "`ape next add`" + `), not a milestone. Its Delivery: line
                            links the current brief, e.g.
                            ` + "`Delivery: Phase 1 — \"…\" ([brief](briefs/2026-10-16-<slug>.md))`" + `;
                            a Markdown link or a bare briefs/….md path, relative to
                            roadmap.md (or development/briefs/… from the project root),
                            must resolve (roadmap.delivery-link); briefs with no linking
-                           Delivery: line are roadmap.delivery-unlinked
+                           Delivery: line are roadmap.delivery-unlinked. An approved
+                           milestone has ape's approval record (milestone.status-
+                           unrecorded; a done one, ape's close) and its gate as approved
+                           (milestone.gate-changed): a person approves it again
   development/briefs/      YYYY-MM-DD-<slug>.md with a real date (brief.bad-name);
                            committed with the plan (brief.uncommitted); never changed
                            from the text of the commit that added it, in the working
@@ -217,7 +221,8 @@ func newProjectCheckCmd() *cobra.Command {
                            "#### Scenario:" and exactly one "- check: <cmd> | human-review"
                            per scenario; ≤ 20 KB ("split into two capabilities")
   decisions/NNNN-<slug>.md # ADR-NNNN: title, Status, Date, Context/Decision/Consequences,
-                           Enforced by
+                           Enforced by; an accepted one recorded in decisions.json
+                           (decision.accepted-unrecorded: ` + "`ape decision accept`" + ` records it)
   changes/<id>/            every non-archived change, as ` + "`ape change check`" + `
   layout                   no development/changes/archive/ (an older ape's archive: move
                            its folders to development/archive/), no development/.apex/
@@ -280,7 +285,9 @@ Every --json failure is {"ok": false, "exit": N, "error": "<one line>",
 the first diagnostic is the failure itself, the rest its findings or conflicts. Branch on
 "action" (D47): retry (run the same command again), apply (apex-apply: code work or a
 re-start), review (review again), replan (apex-change re-plans), stop (the run stops), person
-(a person must act: list it, go on with other work). "code" says which rule; "message" and
+(a person must act: list it, go on with other work). A code's action is the one listed here;
+where its meaning names a case that changes it (milestone.changes-in-flight), the diagnostic
+carries the action of the case (D49). "code" says which rule; "message" and
 "fix" are for people. Codes are stable: a new rule gets a new
 code, and a code's meaning never changes. severity is always "error" (no warning tier).
 Exit: 1 check failed · 2 usage · 3 conflict (nothing written).`,
@@ -312,6 +319,14 @@ func newStatusCmd() *cobra.Command {
     budget_usd, session_usd): sessions ape task stopped at its enforced budget
     (limits.budget: enforce; JSON milestone.budget_enforced), whose measured cost the
     spend counts
+  - the milestone's changes blocked in a row (JSON milestone.consecutive_blocks and
+    consecutive_blocks_cap, limits.consecutive_blocks) and, when that cap is reached, the
+    limit that stops work on it: milestone.diagnostics, in the shape of a --json failure's
+    diagnostics — [{code: "milestone.blocks-exceeded", action: "stop", …}] (D49; [] when
+    none), and next says so
+  - a milestone a person closed with its gate red (` + "`ape milestone close --accept-red`" + `):
+    JSON milestones[].accept_red {reason, by, at, gate}; the brief names the last one, and
+    the roadmap lines say "accepted red by <who>: <reason>"
   - the checked-out branch (JSON branch; "(on <branch>)" in the first line)
   - fixes first (trial decision D40): a change with "milestone: none" is a fix (JSON
     changes[].lane "fix"; else "milestone"). Approved fixes (changes[].approved: {by, at,
@@ -334,6 +349,16 @@ func newStatusCmd() *cobra.Command {
     branch, change/<id> (D38; JSON changes[].branch), and its status is read from
     there whatever branch is checked out — a change branch lists the changes it does
     not hold too
+  - an answered change (H9): a person's answer to what blocked it (JSON changes[].answer:
+    {by, at, text}, kept once it is started again); next has it re-planned and started
+  - human review (H4, D47): every change lists awaiting_human (always present in JSON, []
+    when none): its human-review tasks no person has accepted, once only the person is
+    left — the change is reviewed, or archived. The orchestrator skips such a change. A
+    reviewed change awaiting a person is not archived next — next names the accept a
+    person runs. Archived changes
+    with unaccepted human-review tasks (archived past them by a person) are listed after
+    the rest, status "archived", under "Archived, human review not accepted"; they stay
+    acceptable (` + "`ape change accept --help`" + `)
   - spend so far: the sum of finished ape task/pipeline run manifests
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
     cmd, exit, sha}]): the regression command, and scenario checks of the spec a change
@@ -389,7 +414,11 @@ func statusLong(r *apexv1.StatusReport) string {
 	if len(r.Milestones) > 0 {
 		b.WriteString("\nRoadmap:\n")
 		for _, m := range r.Milestones {
-			fmt.Fprintf(&b, "  %-4s %-9s %s\n", m.ID, m.Status, m.Title)
+			fmt.Fprintf(&b, "  %-4s %-9s %s", m.ID, m.Status, m.Title)
+			if a := m.AcceptRed; a != nil {
+				fmt.Fprintf(&b, " — accepted red by %s: %s", a.By, a.Reason)
+			}
+			b.WriteString("\n")
 		}
 	}
 	if r.Milestone != nil && r.Milestone.GateLast != nil && !r.Milestone.GateLast.Green() {

@@ -117,7 +117,7 @@ func (p *Project) catchUp(ctx context.Context, ci ChangeInfo, what string, opt R
 		return ci, nil, nil
 	}
 	tip, moved, needRebase := p.baseMoved(ctx, st)
-	if !moved {
+	if !moved || p.recordsOnlyMoved(ctx, st.BaseSHA, tip) {
 		return ci, nil, nil
 	}
 	id, base := ci.ID, st.BaseBranch
