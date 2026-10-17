@@ -306,53 +306,58 @@ check-framework:  ## LOCAL ONLY: verify ape still satisfies the APEX framework's
 	@# build (nested under framework/). The whole guard is ONE shell block
 	@# because a bare `exit 0` in a make recipe ends only that line's shell —
 	@# the first draft printed "NOT verified" and then ran the tests anyway.
-	@if [ -z "$(APEX_FRAMEWORK_REPO)" ]; then \
+	@# APEX v1 (D53): a v1 framework ships no command list, only the floor, so
+	@# its contract is what its skills and migration entries run. A tree is v1
+	@# when it holds framework-v1/ (the build repo during the v1 work), or is
+	@# itself a v1 tree: _apex/ape-commands.yaml and skills, with no v0
+	@# _apex/config.yaml. For a v1 tree the v0 manifest half never runs — the
+	@# v0 framework/ beside framework-v1/ declares v0's 79 commands, which v1
+	@# retired. APE_BIN=<binary> judges a built binary instead of this tree.
+	@repo="$(APEX_FRAMEWORK_REPO)"; v1=""; \
+	if [ -n "$$repo" ] && [ -f "$$repo/framework-v1/_apex/ape-commands.yaml" ]; then v1="$$repo/framework-v1"; \
+	elif [ -n "$$repo" ] && [ -f "$$repo/_apex/ape-commands.yaml" ] && [ ! -f "$$repo/_apex/config.yaml" ] \
+	  && { [ -d "$$repo/.claude/skills" ] || [ -d "$$repo/_claude/skills" ]; }; then v1="$$repo"; fi; \
+	if [ -z "$$repo" ]; then \
 		echo "framework contract NOT verified — this is a skip, not a pass."; \
 		echo "  set APEX_FRAMEWORK_REPO=/path/to/apex_process_framework to run it."; \
-	elif [ ! -f "$(APEX_FRAMEWORK_REPO)/_apex/config.yaml" ] \
-	  && [ ! -f "$(APEX_FRAMEWORK_REPO)/framework/_apex/config.yaml" ]; then \
-		echo "APEX_FRAMEWORK_REPO=$(APEX_FRAMEWORK_REPO) is not a framework checkout:"; \
-		echo "  no _apex/config.yaml there (released layout) or under framework/ (build layout)."; \
+	elif [ -n "$$v1" ]; then \
+		echo "==> APEX v1 framework contract against $$v1$${APE_BIN:+ (binary $(APE_BIN))}"; \
+		APEX_FRAMEWORK_V1="$$v1" APE_BIN="$(APE_BIN)" go test ./internal/apecmd/ -count=1 -v \
+		  -run 'TestFrameworkV1_(SkillCommandsResolve|Floor)$$' || exit 1; \
+		if [ -f "$(APEX_PROJECT)/_apex/ape-commands.yaml" ]; then \
+			echo "==> APEX v1 installed contract in $(APEX_PROJECT)"; \
+			APEX_FRAMEWORK_V1="$(APEX_PROJECT)" APE_BIN="$(APE_BIN)" go test ./internal/apecmd/ -count=1 -v \
+			  -run 'TestFrameworkV1_(SkillCommandsResolve|Floor)$$' || exit 1; \
+		else \
+			echo "installed v1 contract NOT verified — this is a skip, not a pass."; \
+			echo "  APEX_PROJECT=$(APEX_PROJECT) has no _apex/ape-commands.yaml: it is not an install."; \
+			echo "  Set APEX_PROJECT=<a v1 install of that framework> to check what a project received."; \
+		fi; \
+	elif [ ! -f "$$repo/_apex/config.yaml" ] && [ ! -f "$$repo/framework/_apex/config.yaml" ]; then \
+		echo "APEX_FRAMEWORK_REPO=$$repo is not a framework checkout:"; \
+		echo "  no _apex/config.yaml there (released layout) or under framework/ (build layout),"; \
+		echo "  and not an APEX v1 tree (framework-v1/, or _apex/ape-commands.yaml with skills)."; \
 		echo "  Setting the variable says you want this gate to RUN, so a path that resolves to"; \
 		echo "  nothing is a typo rather than a skip — every gate would have passed green."; \
 		exit 1; \
 	else \
-		echo "==> framework contract against $(APEX_FRAMEWORK_REPO)"; \
-		APEX_FRAMEWORK_REPO="$(APEX_FRAMEWORK_REPO)" go test ./internal/apecmd/ -count=1 -v \
-		  -run 'TestCommandSurface_AgainstRealManifest|TestContract_Live'; \
-	fi
-	@# The gates above compare ape to a framework CHECKOUT. This compares it to
-	@# a framework INSTALL — the manifest as a project actually received it,
-	@# which is what a skill meets at run time.
-	@#
-	@# The terminal-contracts table is APEX v0's and is not checked in a v1
-	@# project (a v1 manifest declares only min_ape_version, which a dev build
-	@# cannot be compared with, so framework.ape_version is left to doctor).
-	@# framework.output_styles rides here because it is a framework-owned file
-	@# whose ABSENCE is silent, and the install is the only place to see
-	@# whether one arrived. Under --strict it reports Info (not Warn) when the
-	@# table is absent, so a project on a framework that predates it stays
-	@# green — version skew, not a failure — while a table that is present
-	@# and unusable fails the gate.
-	@# Guarded on the FILE the check reads, not on the directory. `-d _apex`
-	@# is true of this repo and of the v1 fixture — neither is an install — so the
-	@# guard passed, the doctor ran, both checks reported "not installed",
-	@# and the gate printed "0 fail" while verifying nothing. That is the
-	@# skip-looks-like-a-pass shape this whole target exists to refuse, and
-	@# it fooled the author of these lines for a whole release.
-	@if [ -f "$(APEX_PROJECT)/_apex/ape-commands.yaml" ]; then \
-		echo "==> installed command surface in $(APEX_PROJECT)"; \
-		go run ./cmd/ape doctor --strict --cwd "$(APEX_PROJECT)" \
-		  --only framework.command_surface,framework.output_styles; \
-	else \
-		echo "installed command surface NOT verified — this is a skip, not a pass."; \
-		echo "  APEX_PROJECT=$(APEX_PROJECT) has no _apex/ape-commands.yaml, so there is no"; \
-		echo "  installed manifest to check this binary against."; \
-		echo "  Point it at a project that has run \`ape framework update\` against the"; \
-		echo "  framework version you are releasing for:"; \
-		echo "    make check-framework APEX_FRAMEWORK_REPO=<checkout> APEX_PROJECT=<project>"; \
-		echo "  A project installed from an OLDER framework verifies the OLDER contract —"; \
-		echo "  the manifest is versioned, so a stale install is a stale gate."; \
+		echo "==> framework contract against $$repo"; \
+		APEX_FRAMEWORK_REPO="$$repo" go test ./internal/apecmd/ -count=1 -v \
+		  -run 'TestCommandSurface_AgainstRealManifest|TestContract_Live' || exit 1; \
+		if [ -f "$(APEX_PROJECT)/_apex/ape-commands.yaml" ]; then \
+			echo "==> installed command surface in $(APEX_PROJECT)"; \
+			go run ./cmd/ape doctor --strict --cwd "$(APEX_PROJECT)" \
+			  --only framework.command_surface,framework.output_styles || exit 1; \
+		else \
+			echo "installed command surface NOT verified — this is a skip, not a pass."; \
+			echo "  APEX_PROJECT=$(APEX_PROJECT) has no _apex/ape-commands.yaml, so there is no"; \
+			echo "  installed manifest to check this binary against."; \
+			echo "  Point it at a project that has run \`ape framework update\` against the"; \
+			echo "  framework version you are releasing for:"; \
+			echo "    make check-framework APEX_FRAMEWORK_REPO=<checkout> APEX_PROJECT=<project>"; \
+			echo "  A project installed from an OLDER framework verifies the OLDER contract —"; \
+			echo "  the manifest is versioned, so a stale install is a stale gate."; \
+		fi; \
 	fi
 
 .PHONY: check-claude-surface
