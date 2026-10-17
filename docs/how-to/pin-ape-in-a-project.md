@@ -33,6 +33,8 @@ The pinned binary is looked for where bingo puts it: `$GOBIN`, then the first `$
 
 **`ape update` never hands over.** It updates the machine's launcher, the `ape` on PATH, whatever `.bingo/ape.mod` says. It never touches `.bingo/` unless asked, because moving the pin is a tracked, team-wide change. When the project's pin is behind the newest release, it prints the bingo command that moves it. `ape update --pin` also moves the pin, committed on its own as `chore(ape): update ape to vA.B.C`. If the launcher is itself a bingo pin (`~/go/bin/ape → ape-vX.Y.Z`), it is not self-updated: plain `ape update` refuses and names `--pin`, and `--pin` moves the project's pin (with `-l` when the launcher is bingo's link, so the bare `ape` follows).
 
+**`ape project lift` never hands over.** It lifts a v0 project, whose pin names a v0 ape with no `project` command, so it runs on the binary you invoked and its first lines say which one (version and path). The lift commit moves the pin to that version when it is a release and bingo is on PATH; otherwise the lift prints the `bingo get` command that does, and until the pin moves every other v1 command in the project needs `APE_TOOLCHAIN=local`.
+
 **`ape framework update --update-ape`** moves the pin to the newest release before installing, also in its own `chore(ape)` commit. At a terminal it asks first, defaulting to No. See [the framework update guide](framework-update.md#apes-minimum-version).
 
 ## Check which ape ran
