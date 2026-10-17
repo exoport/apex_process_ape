@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -15,8 +16,21 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 
 // gitRaw is git without trimming: porcelain output's leading column is data.
 func gitRaw(ctx context.Context, dir string, args ...string) (string, error) {
+	return gitRawEnv(ctx, dir, nil, args...)
+}
+
+// gitWithEnv is git with extra environment (GIT_INDEX_FILE, say), trimmed.
+func gitWithEnv(ctx context.Context, dir string, env []string, args ...string) (string, error) {
+	out, err := gitRawEnv(ctx, dir, env, args...)
+	return strings.TrimSpace(out), err
+}
+
+func gitRawEnv(ctx context.Context, dir string, env []string, args ...string) (string, error) {
 	c := exec.CommandContext(ctx, "git", args...)
 	c.Dir = dir
+	if env != nil {
+		c.Env = append(os.Environ(), env...)
+	}
 	var out, errb bytes.Buffer
 	c.Stdout = &out
 	c.Stderr = &errb

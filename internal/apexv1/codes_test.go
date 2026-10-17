@@ -31,7 +31,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeFolderExists": CodeFolderExists, "CodeDecisionNotFound": CodeDecisionNotFound, "CodeDeltaConflict": CodeDeltaConflict,
 		"CodeWrongBranch": CodeWrongBranch, "CodeChangeBranch": CodeChangeBranch, "CodeBranchFailed": CodeBranchFailed,
 		"CodeNothingToRebaseline": CodeNothingToRebaseline, "CodeGitStatusFailed": CodeGitStatusFailed,
-		"CodeRebaseConflict": CodeRebaseConflict, "CodeNotApproved": CodeNotApproved, "CodeCheckFailed": CodeCheckFailed,
+		"CodeConflicted": CodeConflicted, "CodeUnresolvedConflict": CodeUnresolvedConflict, "CodeNotApproved": CodeNotApproved, "CodeCheckFailed": CodeCheckFailed,
 		"CodePersonOnly": CodePersonOnly, "CodeBaseCheckedOut": CodeBaseCheckedOut,
 		"CodeBehindUpstream": CodeBehindUpstream,
 	}

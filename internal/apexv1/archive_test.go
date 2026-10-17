@@ -246,9 +246,10 @@ func TestArchive_ReverifiesWhenCodeMoved(t *testing.T) {
 	require.DirExists(t, p2.ChangeDir("add-wave"))
 }
 
-// A change branch that does not rebase onto the base branch: the rebase is
-// aborted, nothing is merged, and the change is blocked naming the files.
-func TestArchive_RebaseConflictBlocks(t *testing.T) {
+// A change branch that does not rebase onto the base branch: nothing
+// reaches the base; the conflict is left on change/<id> (H8), the change
+// back to in-progress for apex-apply.
+func TestArchive_RebaseConflictLeftOnTheBranch(t *testing.T) {
 	p := reviewedWave(t)
 	_, err := p.Accept(ctx(), "add-wave", "T2", "ann")
 	require.NoError(t, err)
@@ -261,16 +262,14 @@ func TestArchive_RebaseConflictBlocks(t *testing.T) {
 	_, err = p.Archive(ctx(), "add-wave", false, RunOptions{})
 	var ce *ConflictError
 	require.ErrorAs(t, err, &ce)
-	require.Equal(t, CodeRebaseConflict, ce.Code)
+	require.Equal(t, CodeConflicted, ce.Code)
 	require.Equal(t, []string{"wave.sh"}, ce.Conflicts)
 	require.Equal(t, mainBefore, run(t, p.Root, "rev-parse", "main"))
 	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root))
-	require.NoDirExists(t, filepath.Join(p.Root, ".git", "rebase-merge"), "the rebase was aborted")
+	require.Equal(t, []string{"wave.sh"}, p.unmergedPaths(ctx()))
 	st := state(t, p, "add-wave")
-	require.Equal(t, StatusBlocked, st.Status)
-	require.Contains(t, *st.BlockedReason, "conflicts in wave.sh")
-	require.Equal(t, "apex: add-wave blocked", subjects(t, p)[0])
-	require.Empty(t, run(t, p.Root, "status", "--porcelain"))
+	require.Equal(t, StatusInProgress, st.Status, "the review is stale: in-progress, not reviewed")
+	require.Equal(t, "apex: add-wave conflicted rebasing onto main", subjects(t, p)[0])
 }
 
 // A review session may leave review.md uncommitted: archive commits it on

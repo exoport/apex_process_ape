@@ -136,55 +136,117 @@ func TestCatchUp_StartReentryMarksTheVerifyStale(t *testing.T) {
 	require.Equal(t, CodeWrongStatus, failCode(t, err), "a stale verify is reviewed by no one")
 }
 
-// A rebase that conflicts: aborted, the change blocked naming the files,
-// exit 3 — and nothing else written: no baseline, no base_sha, no catch-up
-// record. A person who rebases by hand then starts it: ape re-baselines at
-// the base tip without rebasing again.
-func TestCatchUp_ConflictBlocks(t *testing.T) {
+// H8 (D47 Q3): a rebase that conflicts leaves the conflict on the change's
+// branch for apex-apply. The old tip is kept under refs/apex/pre-rebase,
+// change/<id> is recreated at the base tip with HEAD attached, the markers
+// and the unmerged path are in the tree, the baseline is the base tip's,
+// and the state says in-progress with the conflict recorded. verify
+// refuses until the markers are resolved and committed; then verify is
+// green, the review runs again, and archive lands ONE squash on main.
+func TestCatchUp_ConflictLeftOnTheBranch(t *testing.T) {
 	p := verifiedWaveOnSuite(t)
 	before := state(t, p, "add-wave")
+	oldTip := HeadSHA(ctx(), p.Root)
 	tip := moveMain(t, p, map[string]string{"wave.sh": "#!/bin/sh\necho another wave\n"})
 
 	_, err := p.Verify(ctx(), "add-wave", RunOptions{})
 	var ce *ConflictError
 	require.ErrorAs(t, err, &ce)
-	require.Equal(t, CodeRebaseConflict, ce.Code)
+	require.Equal(t, CodeConflicted, ce.Code)
 	require.Equal(t, []string{"wave.sh"}, ce.Conflicts)
-	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root))
-	require.NoDirExists(t, filepath.Join(p.Root, ".git", "rebase-merge"), "the rebase was aborted")
-	require.Equal(t, tip, run(t, p.Root, "rev-parse", "main"))
-	st := state(t, p, "add-wave")
-	require.Equal(t, StatusBlocked, st.Status)
-	require.Contains(t, *st.BlockedReason, "verify: main moved, and rebasing change/add-wave onto it conflicts in wave.sh")
-	require.Contains(t, *st.BlockedReason, "the orchestrator re-plans")
-	require.Equal(t, before.BaseSHA, st.BaseSHA)
-	require.Equal(t, before.Baseline, st.Baseline)
-	require.Empty(t, st.Rebases)
-	require.Equal(t, "apex: add-wave blocked", subjects(t, p)[0])
-	require.Equal(t, 1, worktrees(t, p))
-	clean(t, p, "a rebase conflict")
+	require.Equal(t, ActionApply, ActionFor(ce.Code))
 
-	// Resolved by hand anyway (still accepted, though D43 has the orchestrator
-	// re-plan instead): the change's side wins.
-	run(t, p.Root, "rebase", "-q", "-X", "theirs", "main")
-	res, err := p.Start(ctx(), "add-wave", RunOptions{})
-	require.NoError(t, err)
-	require.NotNil(t, res.CatchUp)
-	require.False(t, res.CatchUp.Rebased, "the branch already holds main's commits")
-	require.Equal(t, StatusInProgress, res.Status)
-	st = state(t, p, "add-wave")
+	// HEAD on the branch, recreated at main's tip plus ape's state commit.
+	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root), "HEAD is attached")
+	require.Equal(t, tip, run(t, p.Root, "rev-parse", "HEAD~1"))
+	require.Equal(t, "apex: add-wave conflicted rebasing onto main", subjects(t, p)[0])
+	require.Equal(t, oldTip, run(t, p.Root, "rev-parse", "refs/apex/pre-rebase/add-wave/1"))
+	require.NoDirExists(t, filepath.Join(p.Root, ".git", "rebase-merge"))
+	require.NoFileExists(t, filepath.Join(p.Root, ".git", "CHERRY_PICK_HEAD"))
+	require.NoDirExists(t, filepath.Join(p.Root, ".git", "sequencer"))
+	require.Equal(t, []string{"wave.sh"}, p.unmergedPaths(ctx()))
+	require.Contains(t, read(t, p, "wave.sh"), "<<<<<<< ")
+	require.Equal(t, 1, worktrees(t, p))
+
+	st := state(t, p, "add-wave")
+	require.Equal(t, StatusInProgress, st.Status)
 	require.Equal(t, tip, st.BaseSHA)
+	require.NotEqual(t, before.Baseline, st.Baseline, "re-baselined at the base tip")
+	require.True(t, st.Verify.Stale)
 	require.Len(t, st.Rebases, 1)
-	require.False(t, st.Rebases[0].Rebased)
-	for _, b := range st.Baseline {
-		if b.Task == "T1" {
-			require.Equal(t, 0, b.Exit, "main's own wave.sh passes T1 at the base tip")
-		}
-	}
+	require.Equal(t, "refs/apex/pre-rebase/add-wave/1", st.Rebases[0].OldTipRef)
+	require.Equal(t, []string{"wave.sh"}, st.Rebases[0].Conflicts)
+
+	// verify refuses while unmerged, and while markers remain once added.
+	_, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	require.Equal(t, CodeUnresolvedConflict, failCode(t, err))
+	require.ErrorContains(t, err, "wave.sh (unmerged)")
+	run(t, p.Root, "add", "wave.sh")
+	_, err = p.Verify(ctx(), "add-wave", RunOptions{})
+	require.Equal(t, CodeUnresolvedConflict, failCode(t, err))
+	require.ErrorContains(t, err, "wave.sh (conflict markers)")
+
+	// apex-apply resolves (the change's side), adds and commits.
+	write(t, p, "wave.sh", "#!/bin/sh\necho wave\n")
+	run(t, p.Root, "add", "-A")
+	run(t, p.Root, "commit", "-q", "-m", "fix: resolve wave.sh\n\nChange: add-wave")
+	clean(t, p, "the resolution")
 	v, err := p.Verify(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)
 	require.True(t, v.Green)
-	require.NotEmpty(t, v.GreenAtBaseline, "judged against the new baseline: T1 was green at the base tip")
+	require.Nil(t, v.CatchUp, "already on the base tip")
+	require.Equal(t, StatusVerified, v.Status)
+	write(t, p, "development/changes/add-wave/review.md", "fine\n")
+	_, err = p.Review(ctx(), "add-wave", "pass", "development/changes/add-wave/review.md")
+	require.NoError(t, err)
+	_, err = p.Accept(ctx(), "add-wave", "T2", "ann")
+	require.NoError(t, err)
+	res, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
+	require.NoError(t, err)
+	require.Equal(t, "main", CurrentBranch(ctx(), p.Root))
+	require.Equal(t, tip, run(t, p.Root, "rev-parse", "HEAD~1"), "one squash on main")
+	require.Equal(t, res.Commit, HeadSHA(ctx(), p.Root))
+	require.Equal(t, "#!/bin/sh\necho wave\n", read(t, p, "wave.sh"))
+	clean(t, p, "the archive")
+}
+
+// A rebase that conflicts commit by commit while the branch's net diff
+// applies cleanly (a change made and reverted on the branch): the net diff
+// is committed as the rebased code, and the catch-up ends as a clean one.
+func TestCatchUp_NetDiffAppliesCleanly(t *testing.T) {
+	p := verifiedWaveOnSuite(t)
+	write(t, p, "greet.sh", "#!/bin/sh\necho Howdy $1\n")
+	commitAll(t, p, "try: howdy")
+	write(t, p, "greet.sh", "#!/bin/sh\necho Hello $1\n")
+	commitAll(t, p, "revert: hello again")
+	tip := moveMain(t, p, map[string]string{"greet.sh": "#!/bin/sh\necho Hello $1 !\n"})
+
+	v, err := p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.True(t, v.Green)
+	require.NotNil(t, v.CatchUp)
+	require.Empty(t, v.CatchUp.Conflicts)
+	require.Equal(t, "refs/apex/pre-rebase/add-wave/1", v.CatchUp.OldTipRef)
+	subj := subjects(t, p)
+	require.Equal(t, []string{"apex: add-wave verified", "apex: add-wave rebased onto main", "apex: add-wave re-applied onto main as one commit", "apex: add-wave conflicted rebasing onto main"}, subj[:4])
+	require.True(t, p.isAncestor(ctx(), tip, "HEAD"))
+	require.Equal(t, "#!/bin/sh\necho Hello $1 !\n", read(t, p, "greet.sh"), "main's side kept")
+	require.Equal(t, "#!/bin/sh\necho wave\n", read(t, p, "wave.sh"), "the change's code re-applied")
+	st := state(t, p, "add-wave")
+	require.Empty(t, st.Rebases[0].Conflicts)
+	clean(t, p, "a clean net diff")
+}
+
+// A second conflicted catch-up keeps its own old tip: n counts up.
+func TestKeepPreRebaseTip_Numbers(t *testing.T) {
+	p := fixture(t, baseFiles())
+	head := HeadSHA(ctx(), p.Root)
+	ref, err := p.keepPreRebaseTip(ctx(), "add-wave", head)
+	require.NoError(t, err)
+	require.Equal(t, "refs/apex/pre-rebase/add-wave/1", ref)
+	ref, err = p.keepPreRebaseTip(ctx(), "add-wave", head)
+	require.NoError(t, err)
+	require.Equal(t, "refs/apex/pre-rebase/add-wave/2", ref)
 }
 
 // A catch-up needs a clean tree: anything uncommitted outside the change's

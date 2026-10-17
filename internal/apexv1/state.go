@@ -118,12 +118,20 @@ type Approval struct {
 // tip the change now sits on, Head the change branch's HEAD after it.
 // Rebased is false when the branch already held the base's commits (a
 // person rebased it) and only the baseline was re-taken.
+//
+// A rebase that conflicted (H8) records OldTipRef, the ref keeping the
+// branch's tip from before it (refs/apex/pre-rebase/<id>/<n>), and
+// Conflicts, the files left with conflict markers on the branch for
+// apex-apply to resolve; Head is then the base tip the branch was
+// recreated at.
 type Rebase struct {
-	At      string `json:"at"`
-	From    string `json:"from"`
-	To      string `json:"to"`
-	Head    string `json:"head"`
-	Rebased bool   `json:"rebased"`
+	At        string   `json:"at"`
+	From      string   `json:"from"`
+	To        string   `json:"to"`
+	Head      string   `json:"head"`
+	Rebased   bool     `json:"rebased"`
+	OldTipRef string   `json:"old_tip_ref,omitempty"`
+	Conflicts []string `json:"conflicts,omitempty"`
 }
 
 // Review is the recorded review verdict.

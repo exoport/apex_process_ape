@@ -139,10 +139,11 @@ var DiagnosticCodes = []CodeDoc{
 	{"verify.missing", 1, "apply", "no green verify to review"},
 	{"verify.red", 1, "apply", "a task check, an effective-spec scenario check, or a newly red regression command is red"},
 	{"verify.stale", 1, "apply", "code changed since the last verify"},
+	{CodeUnresolvedConflict, 1, "apply", "verify: a conflicted catch-up (change.conflicted) is not resolved yet — unmerged paths in the index, or conflict markers left in a file the rebase conflicted in; apex-apply resolves, `git add`s and commits (H8)"},
 	{"error.unclassified", 1, "stop", "a failure without a code (a bug: report it)"},
 
 	// conflicts (exit 3)
-	{CodeRebaseConflict, 3, "replan", "start, verify, archive: the base branch moved and change/<id> does not rebase onto it (D40); the rebase was aborted, nothing else written, the change is blocked with the conflicting files; the orchestrator abandons it and apex-change re-plans a replacement from the current base (D43)"},
+	{CodeConflicted, 3, "apply", "start, verify, archive: the base branch moved and change/<id> does not rebase onto it (D40, H8); ape aborted the rebase, kept the old tip under refs/apex/pre-rebase/<id>/<n>, recreated change/<id> at the base tip and cherry-picked the branch's net diff --no-commit: conflict markers and unmerged paths are in the tree, HEAD on the branch, the change in-progress (verify stale, review to run again); apex-apply resolves and commits — when it cannot, it blocks the change and the orchestrator re-plans (D43)"},
 	{"archive.base-changed", 3, "replan", "a requirement this change modifies or removes changed in the spec since start (another branch); nothing written"},
 	{CodeDeltaConflict, 3, "replan", "the delta no longer applies to the current specs; nothing written"},
 	{CodeFolderExists, 3, "stop", "the archive folder already exists; nothing written"},

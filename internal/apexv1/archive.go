@@ -185,7 +185,7 @@ type ArchiveResult struct {
 
 // Archive lands a reviewed change on its base branch (D38): it catches
 // change/<id> up with the base branch when that moved (catchUp, D40: a
-// rebase conflict blocks the change, exit 3), re-verifies when that moved
+// rebase conflict is left on the branch, exit 3 — H8), re-verifies when that moved
 // the code, then squash-merges the branch into
 // the base branch as ONE commit — subject the change's title, trailer
 // `Change: <id>` — holding the change's code, its delta merged into

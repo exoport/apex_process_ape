@@ -392,6 +392,12 @@ func (p *Project) Verify(ctx context.Context, id string, opt RunOptions) (*Verif
 	if err := p.requireOnBranch(ctx, id); err != nil {
 		return nil, err
 	}
+	// A conflicted catch-up (H8) is resolved by apex-apply before anything
+	// is verified.
+	if open := p.unresolvedConflicts(ctx, ci.State); len(open) > 0 {
+		return nil, &FailError{Code: CodeUnresolvedConflict, Msg: "change " + id + " has an unresolved rebase conflict: " + strings.Join(limit(open, 8), ", ") +
+			" — resolve the markers (edit, `git add`), commit on " + ChangeBranch(id) + " with trailer `Change: " + id + "`, then verify again"}
+	}
 	if err := checkPlanFrozen(ci); err != nil {
 		return nil, err
 	}
