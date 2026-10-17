@@ -268,9 +268,10 @@ func PromptRunDir(projectRoot, promptID string) string {
 	return filepath.Join(PromptsRoot(projectRoot), promptID)
 }
 
-// PromptArgsPath is where `ape prompt --agent` writes the delivered text
-// when it is too long to type (repl.TypedLineBudget), inside the prompt's
-// own run directory.
+// PromptArgsPath is where `ape prompt` writes the delivered text when it
+// is too long to type after --agent (repl.TypedLineBudget), or would not
+// type as written (repl.TypesVerbatim), inside the prompt's own run
+// directory.
 func PromptArgsPath(runDir string) string {
 	return filepath.Join(runDir, PromptArgsFile)
 }

@@ -22,13 +22,45 @@ import (
 // of both.
 //
 // Callers with free text that would push a line past the budget write it
-// to a file and type ArgsPointer instead.
+// to a file and type ArgsPointer instead, and so do callers whose free
+// text fails TypesVerbatim, whatever its length.
 const TypedLineBudget = 700
 
 // FitsTypedLine reports whether line is within TypedLineBudget, counted in
 // characters, as Claude Code counts them, not bytes.
 func FitsTypedLine(line string) bool {
 	return utf8.RuneCountInString(line) <= TypedLineBudget
+}
+
+// TypesVerbatim reports whether free text arrives in the session as it
+// was written when typed: no run of two or more spaces, no tab, no line
+// break, no other control character. Callers judge their own free text
+// with it (an --args value, a prompt), not the fixed part of the line ape
+// puts around it, and write text that fails it to a file and type
+// ArgsPointer instead, as for a line past TypedLineBudget.
+//
+// Each refused shape is altered on the way: a run of spaces collapses
+// (ape's own line assembly splits --args on whitespace, and the
+// args_whitespace subtest of TestLive_ClaudeCodeContract records what
+// Claude Code does with one typed as is), a line break submits the line
+// early or merges into a paste, and a tab or an escape is a key, not a
+// letter.
+func TypesVerbatim(text string) bool {
+	prevSpace := false
+	for _, r := range text {
+		if r == ' ' {
+			if prevSpace {
+				return false
+			}
+			prevSpace = true
+			continue
+		}
+		prevSpace = false
+		if unicode.IsControl(r) { // \t, \n and \r included
+			return false
+		}
+	}
+	return true
 }
 
 // ArgsPointer is what ape types in place of arguments it wrote to path.

@@ -125,7 +125,13 @@ burst past 800 characters into a "[Pasted text #N]" placeholder that
 never runs as one. So past 700 characters the prompt is written,
 verbatim, to prompt.md in the record directory, and the typed line
 names that file (prompt.yaml records it as args_file). A plain prompt is
-typed as is.
+typed as is, whatever its length.
+
+A prompt that would not arrive as written when typed goes to prompt.md
+the same way, with or without --agent, whatever its length: one holding
+two or more spaces in a row, a tab, a line break (a newline typed
+mid-text submits the line early) or any other control character.
+Single-spaced text on one line is typed exactly as before.
 
 After typing, ape presses Enter once claude has drawn the line, then
 confirms the submit through the UserPromptSubmit hook, pressing Enter up
@@ -279,15 +285,21 @@ func deliverAndWait(ctx context.Context, sessionName, line string, driver *sessi
 	return driver.WaitStepDone(ctx), nil
 }
 
-// spillPromptLine keeps an --agent line typeable. With --agent the line is
+// spillPromptLine keeps a prompt line typeable. With --agent the line is
 // a slash command, and Claude Code turns a typed burst past 800 characters
-// into a "[Pasted text #N]" placeholder that never runs as one. Past
+// into a "[Pasted text #N]" placeholder that never runs as one, so past
 // repl.TypedLineBudget the delivered text goes to the record directory,
 // verbatim, and the returned line names it; argsFile is then that file's
-// run-relative name. A plain prompt is a plain message either way, so it
-// is returned as is.
+// run-relative name. A plain prompt is a plain message, which a paste
+// placeholder does not break, so its length alone never moves it.
+//
+// With or without --agent, delivered text that does not type as written
+// (repl.TypesVerbatim: a run of spaces, a tab, a line break, another
+// control character) goes to the same file: a line break typed mid-text
+// submits the line early, and the rest would be typed into a session
+// already working on half of it.
 func spillPromptLine(agent, delivered, line, runDir string) (typed, argsFile string, err error) {
-	if agent == "" || repl.FitsTypedLine(line) {
+	if repl.TypesVerbatim(delivered) && (agent == "" || repl.FitsTypedLine(line)) {
 		return line, "", nil
 	}
 	path := runlog.PromptArgsPath(runDir)
