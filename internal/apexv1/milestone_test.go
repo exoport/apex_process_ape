@@ -87,22 +87,28 @@ func TestMilestoneLifecycle(t *testing.T) {
 	require.Equal(t, head, HeadSHA(ctx(), p.Root), "still red: nothing to commit")
 	clean(t, p, "a red close")
 
-	// A gate file that appeared since the approval refuses gate and close
-	// until a person approves the gate again (H2).
+	// A gate script that appeared since the approval is not drift (D51
+	// Q15: it was never approved, and the gate failed without it); a person
+	// approving again freezes it.
 	write(t, p, "gate.sh", "#!/bin/sh\nexit 0\n")
 	commitAll(t, p, "feat: gate")
-	_, err = p.RunGate(ctx(), "M1", RunOptions{})
-	require.ErrorContains(t, err, "M1's gate changed since ann approved it: gate.sh is new")
-	_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
-	fe, ok := errors.AsType[*FailError](err)
-	require.True(t, ok)
-	require.Equal(t, CodeGateChanged, fe.Code)
-	require.Contains(t, findingMessages(p.Check()), "M1 gate changed since it was approved (gate.sh is new)")
+	require.NotContains(t, findingMessages(p.Check()), "M1 ")
 	statusLine := p.roadmap().Find("M1").StatusText
 	_, err = p.ApproveMilestone(ctx(), "M1", "bob")
 	require.NoError(t, err)
 	require.Equal(t, "apex: M1 re-approved", subjects(t, p)[0])
 	require.Equal(t, statusLine, p.roadmap().Find("M1").StatusText, "the Status line keeps the first approval")
+	recs, err = p.LoadMilestoneRecords()
+	require.NoError(t, err)
+	require.Contains(t, recs["M1"].Approval.GateFiles, "gate.sh")
+	write(t, p, "gate.sh", "#!/bin/sh\nexit 0 # weaker\n")
+	_, err = p.RunGate(ctx(), "M1", RunOptions{})
+	require.ErrorContains(t, err, "M1's gate changed since bob approved it: gate.sh changed")
+	_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
+	fe, ok := errors.AsType[*FailError](err)
+	require.True(t, ok)
+	require.Equal(t, CodeGateChanged, fe.Code)
+	write(t, p, "gate.sh", "#!/bin/sh\nexit 0\n")
 	require.NotContains(t, findingMessages(p.Check()), "M1 ")
 
 	// A change in flight blocks the close even with a green gate.

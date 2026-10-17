@@ -23,7 +23,7 @@ latest run of any result is in the gitignored _apex/state/logs/gate-<M>.json.
 No milestone command leaves the tree dirty.
 
 Approvals are records (H2): ` + "`ape milestone approve`" + ` records who approved, when, and the gate
-approved — its command and the SHA-256 of every file it names — under the milestone's
+approved — its command and the SHA-256 of each script it runs — under the milestone's
 "approval" in milestones.json. change start, gate and close trust that record, never the
 Status line alone: an approved milestone with no record (approved by hand, or before ape
 recorded approvals) is refused with milestone.status-unrecorded, and gate and close refuse
@@ -93,17 +93,28 @@ func newMilestoneApproveCmd() *cobra.Command {
 		Short: "Write Status: approved (by <who> <ts>)",
 		Long: `Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)", and
 milestones.json records the approval (H2): {by, at, gate_cmd, gate_files, gate_files_sha256}
-— the Gate: command, and the SHA-256 of each gate file: every word of the command (split at
-whitespace and ; | & < > ( ), the value of a KEY=value or --flag=value word) that names a
-regular file under the project root, e.g. ./scripts/e2e.sh (absolute paths, paths leaving
-the root, options and words with $ or a glob are not looked up; what a script runs in
-turn is not covered). Changes can start only under an approved milestone; gate and close
-refuse a gate that differs from the approved one. Committed together as "apex: <M>
-approved".
+— the Gate: command, exactly as written, and the SHA-256 of each gate file: a script the
+command runs that is a regular file under the project root at approval. Of each simple
+command (split at ; && || | & newlines and parentheses; leading NAME=value assignments,
+env, exec, command, time, !, if/then/else/elif/while/until/do skipped) the gate file is
+the executable word when it is a path (it has a slash: ./scripts/e2e.sh, scripts/x.sh),
+or the script given to an interpreter — sh bash zsh dash python python3 node ruby perl —
+after its options (bash scripts/gate.sh, python3 scripts/gate.py; python3 -m/-c, bash -c,
+node -e and friends name no script). No other word is hashed: arguments and data files
+(grep -q x CHANGELOG.md), commands inside $(…) or backquotes (test "$(python3 greet.py)"
+= Hello hashes nothing), bare command names (looked up on PATH), absolute paths, paths
+leaving the root and words with $ or a glob; what a script runs in turn is not covered.
+gate_files_sha256 digests the gate files. The gate differs from the approved one when its
+command changed, or a recorded gate file it still runs is gone or changed (compared file
+by file); a gate file created since the approval, and a file an older approval recorded
+that the gate does not run as a script, are not drift. Changes can start only under an
+approved milestone; gate and close refuse a gate that differs from the approved one.
+Committed together as "apex: <M> approved".
 
 Approving an approved milestone records the approval again — "apex: <M> re-approved", the
 Status line kept as it was (the milestone's spend counts from it) — when ape holds no
-record of it, its gate changed since, or changes of it were blocked in a row (which resets
+record of it, its gate changed since, it runs a gate file the record does not hold (created
+since: approving freezes it), or changes of it were blocked in a row (which resets
 that count, limits.consecutive_blocks: ` + "`ape change new --help`" + `); otherwise it is a no-op. A done one is refused.
 Refused on a change branch (see ` + "`ape milestone --help`" + `).
 

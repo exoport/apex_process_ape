@@ -204,13 +204,18 @@ func TestV1Commands_ExitCodes(t *testing.T) {
 	v1Git(t, root, "commit", "-q", "-m", "feat: gate")
 	_, _, err = v1Exec(t, newChangeCmd, "abandon", "add-wave-2", "--reason", "duplicate", "--cwd", root)
 	require.NoError(t, err)
-	// gate.sh is new since M1 was approved (H2): a person approves it again.
+	// gate.sh is new since M1 was approved: not drift (D51 Q15), but
+	// approving again freezes it, and a changed gate.sh is then refused
+	// until a person approves it again (H2).
+	_, _, err = v1Exec(t, newMilestoneCmd, "approve", "M1", "--by", "eval", "--cwd", root)
+	require.NoError(t, err)
+	require.Equal(t, "apex: M1 re-approved", v1Git(t, root, "log", "-1", "--format=%s"))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "gate.sh"), []byte("#!/bin/sh\ntrue\n"), 0o755))
 	stdout, _, err = v1Exec(t, newMilestoneCmd, "close", "M1", "--json", "--cwd", root)
 	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
 	require.Contains(t, stdout, `"code": "milestone.gate-changed"`)
 	require.Contains(t, stdout, `"action": "person"`)
-	_, _, err = v1Exec(t, newMilestoneCmd, "approve", "M1", "--by", "eval", "--cwd", root)
-	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "gate.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755))
 	stdout, _, err = v1Exec(t, newMilestoneCmd, "close", "M1", "--cwd", root)
 	require.NoError(t, err)
 	require.Contains(t, stdout, "M1 status: done")

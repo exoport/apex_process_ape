@@ -9,14 +9,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode"
 )
 
 // Approvals are records, not text (H2). A milestone's `Status: approved
 // (by <who> <ts>)` line is what a person reads; what ape trusts is the
 // record `ape milestone approve` commits beside it in milestones.json:
 // who approved, when, and the gate as it was approved — its command and
-// the content of the files that command names. change start, milestone
+// the content of the scripts that command runs (gateScripts). change start, milestone
 // gate and milestone close refuse an approved milestone with no record
 // (milestone.status-unrecorded: approved by hand, or before ape recorded
 // approvals — a person approves it again), and gate and close refuse one
@@ -38,48 +37,42 @@ type MilestoneApproval struct {
 	At string `json:"at"`
 	// GateCmd is the Gate: command approved.
 	GateCmd string `json:"gate_cmd"`
-	// GateFiles maps each gate file — a word of the gate command that
-	// names a regular file under the project root, e.g. ./scripts/e2e.sh
-	// (gateFiles) — to its content's SHA-256 at approval;
-	// GateFilesSHA256 digests the whole map (sorted "path sha" lines).
+	// GateFiles maps each gate file — a script of the gate command
+	// (gateScripts) that was a regular file under the project root — to its
+	// content's SHA-256 at approval; GateFilesSHA256 digests the whole map
+	// (sorted "path sha" lines). Approvals recorded by rc.1 may hold more
+	// files (every word that named one); gateDrift ignores the extra ones.
 	GateFiles       map[string]string `json:"gate_files,omitempty"`
 	GateFilesSHA256 string            `json:"gate_files_sha256"`
 }
 
-// gateFiles are the gate files of a gate command: its words, split at
-// whitespace and the shell's ; | & < > ( ) and backquote, unquoted, the
-// value of a KEY=value or --flag=value word, that name a regular file
-// under the project root as it is now — absolute paths, paths leaving the
-// root, options and words with $ or a glob character are not looked up.
-// What the gate runs beyond the files it names (a script's own includes,
-// package.json behind `npm run e2e`) is not covered.
+// gateFiles are the gate files of a gate command: each of its scripts
+// (gateScripts) that is a regular file under the project root as it is
+// now, with its content's SHA-256. What a script runs in turn (its own
+// includes, package.json behind `npm run e2e`) is not covered.
 func (p *Project) gateFiles(gate string) map[string]string {
 	out := map[string]string{}
-	words := strings.FieldsFunc(gate, func(r rune) bool { return unicode.IsSpace(r) || strings.ContainsRune(";|&<>()`", r) })
-	for _, w := range words {
-		w = strings.Trim(w, `"'`)
-		if _, v, ok := strings.Cut(w, "="); ok {
-			w = strings.Trim(v, `"'`)
+	for _, rel := range gateScripts(gate) {
+		if sum, ok := p.fileSHA256(rel); ok {
+			out[rel] = sum
 		}
-		if w == "" || strings.HasPrefix(w, "-") || strings.ContainsAny(w, "$*?[~") || filepath.IsAbs(w) {
-			continue
-		}
-		rel := filepath.Clean(filepath.FromSlash(w))
-		if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			continue
-		}
-		path := filepath.Join(p.Root, rel)
-		if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() {
-			continue
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		sum := sha256.Sum256(data)
-		out[filepath.ToSlash(rel)] = hex.EncodeToString(sum[:])
 	}
 	return out
+}
+
+// fileSHA256 is the SHA-256 of rel's content, when rel is a regular file
+// under the project root.
+func (p *Project) fileSHA256(rel string) (string, bool) {
+	path := filepath.Join(p.Root, filepath.FromSlash(rel))
+	if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() {
+		return "", false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), true
 }
 
 func gateFilesDigest(files map[string]string) string {
@@ -107,41 +100,41 @@ func (p *Project) newApproval(gate, by string) *MilestoneApproval {
 }
 
 // gateDrift lists how m's gate differs from the approved one: its
-// command, and each gate file added, removed or changed. Empty when it
-// does not.
+// command, and each recorded gate file that is gone or changed. It
+// compares file by file, only the recorded files the gate still runs as a
+// script: a script that did not exist at approval is not drift (it was
+// never approved, and the gate fails without it), nor is a file an older
+// approval recorded that the gate does not run (rc.1 recorded data files
+// too). Empty when it does not differ.
 func (p *Project) gateDrift(m *Milestone, a *MilestoneApproval) []string {
 	var out []string
 	if strings.TrimSpace(m.Gate) != strings.TrimSpace(a.GateCmd) {
 		out = append(out, "the command was `"+a.GateCmd+"`, is `"+m.Gate+"`")
 	}
-	now := p.gateFiles(m.Gate)
-	if gateFilesDigest(now) == a.GateFilesSHA256 {
-		return out
-	}
-	for _, n := range sortedKeys(keysOf(now, a.GateFiles)) {
-		switch was, is := a.GateFiles[n], now[n]; {
-		case was == "":
-			out = append(out, n+" is new")
-		case is == "":
+	for _, n := range gateScripts(m.Gate) {
+		was, ok := a.GateFiles[n]
+		if !ok {
+			continue
+		}
+		switch is, exists := p.fileSHA256(n); {
+		case !exists:
 			out = append(out, n+" is gone")
 		case was != is:
 			out = append(out, n+" changed")
 		}
 	}
-	if len(out) == 0 {
-		out = append(out, "the gate files changed")
-	}
 	return out
 }
 
-func keysOf(ms ...map[string]string) map[string]bool {
-	out := map[string]bool{}
-	for _, m := range ms {
-		for k := range m {
-			out[k] = true
+// gateScriptUnrecorded reports a script of m's gate that exists now and
+// that a's record does not hold.
+func (p *Project) gateScriptUnrecorded(m *Milestone, a *MilestoneApproval) bool {
+	for n := range p.gateFiles(m.Gate) {
+		if _, ok := a.GateFiles[n]; !ok {
+			return true
 		}
 	}
-	return out
+	return false
 }
 
 // requireApprovalRecord refuses an approved milestone ape holds no

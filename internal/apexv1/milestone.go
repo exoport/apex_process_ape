@@ -249,9 +249,10 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milesto
 	case MilestoneDone:
 		return nil, &FailError{Code: "milestone.done", Msg: id + " is already done"}
 	case MilestoneApproved:
-		// Re-approval: only when ape holds no record of the approval, or
-		// the gate changed since it.
-		if rec != nil && rec.Approval != nil && len(p.gateDrift(m, rec.Approval)) == 0 && rec.ConsecutiveBlocks == 0 {
+		// Re-approval: only when ape holds no record of the approval, the
+		// gate changed since it, or it runs a script the record does not
+		// hold (created since: not drift, but approving freezes it).
+		if rec != nil && rec.Approval != nil && len(p.gateDrift(m, rec.Approval)) == 0 && !p.gateScriptUnrecorded(m, rec.Approval) && rec.ConsecutiveBlocks == 0 {
 			return m, nil
 		}
 	}
