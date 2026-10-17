@@ -308,7 +308,7 @@ func (d *DocsConfig) UnmarshalYAML(n *yaml.Node) error {
 	}
 	for k, v := range raw {
 		v = strings.TrimSpace(v)
-		if v != "" && (filepath.IsAbs(v) || v == ".." || strings.HasPrefix(filepath.ToSlash(filepath.Clean(v)), "../")) {
+		if v != "" && (filepath.IsAbs(v) || strings.HasPrefix(v, "/") || v == ".." || strings.HasPrefix(filepath.ToSlash(filepath.Clean(v)), "../")) {
 			return fmt.Errorf("docs.%s: %q is not a path inside the project — write it relative to the project root", k, v)
 		}
 		switch k {
