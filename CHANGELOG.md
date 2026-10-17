@@ -1,5 +1,110 @@
 # CHANGELOG
 
+## v1.0.0-rc.1 (draft)
+
+APEX v1: the framework's small loop replaces v0's story ceremony, and ape owns
+every record in it. A person approves a milestone; the orchestrator plans each
+change, applies it on its own `change/<id>` branch, verifies it, has a separate
+session review it, and archives it as one squash commit. What v1.0 promises,
+and the shape of work it was built for (one operator per checkout, on a local
+trunk), is in `docs/explanation/apex-v1-scope.md`. Every change below is class
+B or C unless marked.
+
+- **The v1 command set**: `ape project init|check|codes|lift`, `ape status`,
+  `ape milestone new|approve|gate|close`, `ape change
+  new|check|approve|start|verify|review|accept|answer|block|abandon|archive|diff`,
+  `ape decision new|accept`, `ape next add`, and `ape hook
+  session-start|stop|pre-tool`. Every `--json` failure carries an `action`
+  (`retry`, `apply`, `review`, `replan`, `stop`, `person`), so a skill branches
+  on one field; `ape project codes` lists every code with its exit and action.
+- **The 17 v0 ceremony commands are retired**: adr, pattern, capability,
+  feature, trait, bootstrap, registry, governance, sprint, story, deferred,
+  memory, context, pipeline, planning, doc, release. In a v0 project, ape refuses
+  with `project.v0`: keep its pinned v0 ape (`.bingo`) until it is lifted. The
+  platform commands stay (task, prompt, chat, run, costs, doctor, framework,
+  aboard, sandbox, service, script, transcript, …). `service` answers
+  `pipeline.run` with a refusal and `script`'s `RunPipeline` returns an error.
+- **`ape project lift`** is the mechanical half of the v0 → v1 migration, run by
+  the framework's v1.0.0 migration entry. It needs the tag `apex-v0-final` on HEAD
+  and pushed. In one commit it deletes the v0 families, converts and renumbers
+  the ADRs and rewrites their citations, strips epic/story/deferred ids from
+  code comments (comment-only, verified on Go by token stream; ids in
+  identifiers and strings are listed, not edited), carries `## Code Validation`
+  into AGENTS.md and `regression:`, writes the v1 skeleton, and writes
+  `development/lift-disposition.md` for apex-plan and two reviews. Accepts layouts
+  v0.15 to v0.31; `--dry-run`, `--exclude` for byte-identical perimeters.
+- **Branch per change**: `change start` creates `change/<id>`; work and ape's
+  status commits stay there. Archive rebases, re-verifies when the code moved,
+  and lands ONE squash commit (subject from `commit.subject`, the branch's own
+  subjects and trailers in the body, `Change: <id>`). The project's git hooks
+  run on the squash by default (`commit.hooks: skip`). Deleted branch tips stay
+  reachable as `refs/apex/archive/<id>` and `refs/apex/abandoned/<id>`. A crash
+  mid-archive is rolled back by the next writing command (`archive.interrupted`).
+- **A base that moved is caught up by ape**: the change branch is rebased at
+  start, verify and archive. A conflict is left on the branch for apex-apply to
+  resolve (`change.conflicted`; verify refuses until it is, and the review runs
+  again). ape refuses while the base is behind its upstream
+  (`base.behind-upstream`; ape never fetches), and refuses an archive whose base
+  is checked out in another worktree (`git.base-checked-out`).
+- **What only a person does**: approving a milestone or a fix, answering a
+  blocked change (`ape change answer`), archiving past an unaccepted
+  human-review task (`--allow-pending-human`), and closing a milestone on a red
+  gate (`ape milestone close --accept-red "<reason>" --by <who>`). Each is refused
+  under `APE_SESSION` or `CLAUDECODE`, a `!` line inside Claude Code included:
+  run them from a terminal. Approvals are records in `milestones.json` with the
+  gate frozen (`milestone.gate-changed`), and a Status line ape did not record is
+  a finding (`milestone.status-unrecorded`, `decision.accepted-unrecorded`).
+  **Milestones approved by an earlier v1 build must be approved again.**
+- **Human review survives the archive**: `awaiting_human` per change in
+  `ape status --json`, accepting works on an archived change from any branch,
+  and `ape change accept --evidence <path|url>` records what the acceptance rests
+  on.
+- **Checks that cannot pass by accident**: a check whose output says it ran
+  nothing is red (`checks.vacuous_output`); a check whose requirement is missing
+  is `unrun`, never green (`requires:`); `change start` refuses a task check
+  already green before any code (`change.vacuous-check`) unless the task is
+  written `— regression: <cmd>`; `retries:` re-runs a red check and records a
+  pass on a retry as `flaky`. Config `timeouts: {check, regression, gate}`,
+  and `regression:` may be tiered `{change, milestone}`. Verify runs the touched
+  capabilities' scenarios; the milestone gate runs the whole spec.
+- **Loop limits ape enforces**: attempts per start, `limits.attempts_total`,
+  `limits.replans`, and `limits.consecutive_blocks` per milestone
+  (`milestone.blocks-exceeded`; `ape task apex-orchestrator` refuses until a
+  person re-approves the milestone). Budget enforcement stays opt-in.
+- **Guards in v1 sessions** (the pre-tool hook): `git tag`, `git push` (any
+  form), `git rebase|merge|cherry-pick` on a change branch, and `pkill`/`killall`
+  are denied. `APE_ALLOW_TAG`, `APE_ALLOW_PUSH` and `APE_ALLOW_KILL` count only
+  when the person who launched the session set them. `.claude/settings.json`
+  and `settings.local.json` are a person's to edit. The Stop hook blocks only in
+  sessions ape launched; elsewhere it shows the red checks.
+- **History ape can vouch for**: since the project's v1 epoch, a spec edited
+  outside an archive squash (`spec.edited`) or a `state.json` changed outside
+  ape's commits (`state.forged`) is a finding, and start, verify and archive
+  refuse (`change.provenance`). `ape status --json` lists `outside_flow` commits
+  on the base that bypassed the change flow.
+- **Records for people and audits**: `evidence: archive` commits the final
+  check outputs with each archive and milestone close (256 KB per check, larger
+  logs by path and sha256), `accept-red.json` included. `ape next add "<text>"
+  --from <id>` and review.md's `## Noticed, out of scope` land under the roadmap's
+  `## Next`. Config `docs: {changelog, user_docs}` (`docs.missing`) and the change
+  frontmatter `type:` (required when `commit.subject` uses `{type}`).
+- **The ape floor**: `ape task` refuses a v1 run when the installed
+  `_apex/ape-commands.yaml` declares a `min_ape_version` above it
+  (`ape.below-floor`); `ape framework update` has refused one since v0.4.0. Apes
+  older than v0.4.0 cannot see the floor: update ape first.
+- **A claude.ai usage limit ends a run** with exit **14**, recorded as
+  `usage_limit` with `resets`/`resets_at` in the manifest and `latest_run` in
+  `ape status`. Matched against the limit screen of Claude Code 2.1.302;
+  measured on synthetic panes only. An optional `notify: <command>` runs on a
+  limit stop or a blocked change (`APE_EVENT`, `APE_CHANGE`, `APE_REASON`).
+- **`ape doctor` in a v1 project** runs the host checks and v1 checks
+  (`project.check`, `hooks.project`, `claude.version`, `state.gitignore`,
+  `settings.shared`), not v0's (class D).
+- Effort is passed as `claude --effort`, never `CLAUDE_CODE_EFFORT_LEVEL`, in v1
+  sessions, so a skill's or agent's frontmatter effort wins.
+- Docs: `docs/explanation/apex-v1-scope.md` and the tutorial
+  `docs/tutorials/first-v1-project.md` (class D).
+
 ## v0.10.0 (2026-10-13)
 
 - **Pipelines skip the stages and steps whose extensions are not
