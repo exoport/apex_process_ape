@@ -73,7 +73,7 @@ The system SHALL wave.
 - check: ./wave.sh
 ## Tasks
 - T1 wave — check: ./wave.sh
-- T2 the wave reads well — check: human-review
+- T2 the wave reads well — tool: ui-mockup — check: human-review
 `
 
 // delegateProject is a v1 project whose config delegates human review
@@ -112,7 +112,8 @@ func delegateProject(t *testing.T) (ape, project, fake string, env []string) {
 	sh(ape, "project", "accept-config", "--by", "test")
 	require.NoError(t, writeFile(filepath.Join(project, "development", "project.md"),
 		"# G\n## Vision\nv\n## Users\nu\n## Scope\ns\n## Out of scope\no\n## Constraints\nc\n"))
-	sh(ape, "milestone", "new", "Skeleton", "--gate", "./wave.sh", "--goal", "waves")
+	require.NoError(t, writeWaveGate(project))
+	sh(ape, "milestone", "new", "Skeleton", "--gate", "./gate.sh", "--goal", "waves")
 	sh(ape, "milestone", "approve", "M1", "--by", "test")
 	sh(ape, "change", "new", "add-wave", "--milestone", "M1", "--touches", "greeting")
 	require.NoError(t, writeFile(filepath.Join(project, "development", "changes", "add-wave", "change.md"), delegateChange))
@@ -171,7 +172,8 @@ func statusChange(t *testing.T, ape, project string, env []string) map[string]an
 // with the run id, shown by ape status, and named in the archive squash.
 func TestDelegate_PassIsRecordedByApe(t *testing.T) {
 	ape, project, fake, env := delegateProject(t)
-	env = append(slices.Clone(env), "APE_SESSION=task/orchestrator-run")
+	asOrchestrator(t, project, "orchestrator-run")
+	env = append(slices.Clone(env), "APE_SESSION=task/orchestrator-run", "APE_DEPTH=1")
 	out, code := runApe(t, ape, project, env, "change", "accept", "add-wave", "T2", "--delegate", "--wait", "90s", "--json")
 	require.Equal(t, 0, code, "stdout: %s", out)
 	var res delegateResult
