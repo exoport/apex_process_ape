@@ -80,6 +80,10 @@ from the consumer side: a marketplace serves one version of each plugin, so pin
 by pointing the marketplace at a ref (github/git: ref: <branch|tag>). A plugin
 the marketplace does not serve at ref fails with the command to run.
 
+Scope (D45): v1.0: one operator per checkout, on a local trunk; PR mode comes later. Init
+says so (JSON "scope"); change start and archive refuse while the base branch is behind its
+upstream (base.behind-upstream).
+
 --brownfield adds nothing; it records in _apex/state/project.json (ignored) that the
 project existed before APEX.
 
@@ -113,7 +117,9 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 			out := struct {
 				*apexv1.InitResult
 				Plugins *apexv1.PluginSync `json:"plugins,omitempty"`
-			}{res, plugins}
+				// Scope is what v1.0 supports (D45).
+				Scope string `json:"scope"`
+			}{res, plugins, apexv1.Scope}
 			return v1Emit(cmd.OutOrStdout(), &f, out, func(w io.Writer) {
 				for _, c := range res.Created {
 					fmt.Fprintln(w, "created  "+c)
@@ -128,6 +134,7 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 					fmt.Fprintln(w, "hook     "+h)
 				}
 				fmt.Fprint(w, pluginOut.String())
+				fmt.Fprintln(w, "scope: "+apexv1.Scope)
 				fmt.Fprintln(w, "next: write development/project.md, AGENTS.md and the roadmap (apex-plan), then `ape project check`")
 			})
 		},
@@ -279,6 +286,11 @@ func newStatusCmd() *cobra.Command {
     leaves untouched, that were red when a change was baselined — for the planner to
     roadmap. A change's own task and delta checks red at baseline are normal test-first
     and never listed
+  - the base branch (the checked-out one, or the base of the change whose branch is
+    checked out) against its upstream (JSON "base_upstream": {branch, upstream, ahead,
+    behind}; null without one), from the local remote-tracking ref — ape never fetches.
+    v1.0 is one operator per checkout on a local trunk (D45): start and archive refuse
+    while the base is behind (base.behind-upstream: pull)
   - next: what the way of working says comes next, derived from the state alone
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
@@ -320,6 +332,10 @@ func statusLong(r *apexv1.StatusReport) string {
 		for _, l := range r.Milestone.GateLast.Tail {
 			b.WriteString("  | " + l + "\n")
 		}
+	}
+	if u := r.BaseUpstream; u != nil && u.Behind == 0 {
+		// Behind is in the brief already.
+		fmt.Fprintf(&b, "\nBase: %s\n", u.Describe())
 	}
 	fmt.Fprintf(&b, "\nSpend note: %s\n", r.Spend.Note)
 	return b.String()

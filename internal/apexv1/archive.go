@@ -206,6 +206,9 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	if err := p.requireBranchFree(ctx, ci.State.BaseBranch, "archive "+id); err != nil {
 		return nil, err
 	}
+	if err := p.refuseBehindUpstream(ctx, ci.State.BaseBranch, "archive "+id); err != nil {
+		return nil, err
+	}
 	if ci, err = p.enterChangeBranch(ctx, ci); err != nil {
 		return nil, err
 	}

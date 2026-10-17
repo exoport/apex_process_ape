@@ -95,6 +95,9 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 		}
 		return p.reenter(ctx, id, opt, true)
 	}
+	if err := p.refuseBehindUpstream(ctx, cur, "start "+id); err != nil {
+		return nil, err
+	}
 	entered := false
 	enter := func(st *State) error {
 		if err := p.requireCleanTree(ctx, "start"); err != nil {

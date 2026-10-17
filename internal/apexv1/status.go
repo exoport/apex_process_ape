@@ -95,6 +95,11 @@ type StatusReport struct {
 	PreExistingRed []PreExistingRed `json:"pre_existing_red"`
 	Spend          Spend            `json:"spend"`
 	Next           string           `json:"next"`
+	// BaseUpstream is the base branch (the checked-out branch, or the
+	// base of the change whose branch is checked out) against its
+	// upstream, from the local remote-tracking ref; null when it has none
+	// (H6, D45).
+	BaseUpstream *BaseUpstream `json:"base_upstream"`
 }
 
 // Status builds the report.
@@ -186,8 +191,22 @@ func (p *Project) Status() *StatusReport {
 		}
 	}
 	r.Archived = len(p.ArchivedIDs())
+	r.BaseUpstream = p.upstreamOf(ctx, p.statusBase(ctx, r.Branch))
 	r.Next = nextStep(r)
 	return r
+}
+
+// statusBase is the base branch status measures: the checked-out branch,
+// or, on a change's branch, the base it records; "" when detached.
+func (p *Project) statusBase(ctx context.Context, branch string) string {
+	id := ChangeOfBranch(branch)
+	if id == "" {
+		return branch
+	}
+	if st, err := LoadState(p.StateFile(id)); err == nil {
+		return st.BaseBranch
+	}
+	return ""
 }
 
 // runnableFix reports an approved fix that is neither blocked nor
@@ -387,6 +406,9 @@ groups:
 	}
 	if line := r.preExistingRedLine(); line != "" {
 		b = append(b, line)
+	}
+	if u := r.BaseUpstream; u != nil && u.Behind > 0 {
+		b = append(b, truncate("Base: "+u.Describe(), briefLineMax))
 	}
 	b = append(b, fmt.Sprintf("Spend: $%.2f over %d runs", r.Spend.TotalUSD, r.Spend.Runs), "Next: "+r.Next)
 	return strings.Join(b, "\n") + "\n"

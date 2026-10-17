@@ -282,7 +282,9 @@ func newChangeStartCmd() *cobra.Command {
      tree must be clean (ignored files aside), HEAD on a branch (not detached, not another
      change's change/<other>); records that branch as base_branch, and base_sha (HEAD)
      and started_at (both kept when resuming a blocked change). A refused start leaves no
-     branch and HEAD where it was.
+     branch and HEAD where it was. Refused while that branch is behind its upstream
+     (exit 1, base.behind-upstream: pull; compared with the local remote-tracking ref,
+     never fetched; no upstream, no check — D45: one operator per checkout, local trunk)
   4. runs every check verify will run once, as the baseline (which were already green):
      the command tasks and the effective spec's scenario checks; from the project root
      with sh -c; output under _apex/state/logs/<id>/. With "regression: <cmd>" in
@@ -303,6 +305,8 @@ A blocked change is re-planned on its branch (change.md there), then started aga
 Resume after the base moved (D40): start on a change that has its branch first checks
 whether the base branch moved ahead of base_sha (a fix or another change landed there).
 If so ape catches the change up — the one path start, verify and archive share:
+  - start only: refused while the base branch is behind its upstream (exit 1,
+    base.behind-upstream: pull)
   - the tree must be clean (uncommitted files in the change's own folder are committed on
     its branch; anything else: exit 1, tree.dirty)
   - `+"`git rebase <base_branch>`"+` on change/<id>; a conflict aborts the rebase and blocks the
@@ -331,7 +335,8 @@ since start, or when the regression command has no baseline for it (configured o
 since start); otherwise it is refused.
 
 Exit codes: 0 started (or resumed) · 1 check red, milestone (or fix) not approved, wrong
-status, dirty tree, detached HEAD, HEAD on another change's branch, or git failed · 2 usage ·
+status, dirty tree, detached HEAD, HEAD on another change's branch, the base behind its
+upstream, or git failed · 2 usage ·
 3 requirement conflict with another active change, or the change does not rebase onto
 its moved base.`,
 		"  ape change start add-tenant-delete",
@@ -736,7 +741,9 @@ func newChangeArchiveCmd() *cobra.Command {
      change/<id>); the tree must be clean — uncommitted files inside the change's own
      folder (review.md a review left) are first committed on change/<id> as
      "apex: <id> notes"; anything else refuses (code tree.dirty)
-  3. refused if code changed on change/<id> since the review (review.stale)
+  3. refused if code changed on change/<id> since the review (review.stale); refused up
+     front while the base branch is behind its upstream (base.behind-upstream: pull;
+     the local remote-tracking ref, never fetched — D45)
   4. when the base branch moved ahead of base_sha, catches the change up — the one path
      start and verify share (D40, `+"`ape change start --help`"+`): rebases change/<id> onto the
      base (on a conflict the rebase is aborted, the change is blocked naming the
@@ -763,7 +770,8 @@ The base branch gets exactly one commit per archived change; ape's status commit
 the change branch, squashed away.
 
 Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review,
-pending human-review, dirty tree, no change branch, the base branch checked out in another
+pending human-review, dirty tree, no change branch, the base behind its upstream
+(base.behind-upstream), the base branch checked out in another
 worktree (git.base-checked-out: stop, do not re-plan), or git failed · 2 usage · 3 the
 rebase conflicts or the delta no longer applies.`,
 		"  ape change archive add-tenant-delete",

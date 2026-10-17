@@ -96,6 +96,13 @@ func (p *Project) catchUp(ctx context.Context, ci ChangeInfo, what string, opt R
 		return ci, nil, nil
 	}
 	id, base := ci.ID, st.BaseBranch
+	// A re-entry catches up with the local base: refused when that is
+	// behind its upstream (archive checks it up front itself).
+	if what == "start" {
+		if err := p.refuseBehindUpstream(ctx, base, "catching "+id+" up"); err != nil {
+			return ci, nil, err
+		}
+	}
 	if err := p.cleanForCatchUp(ctx, id, base, what); err != nil {
 		return ci, nil, err
 	}
