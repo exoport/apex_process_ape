@@ -61,7 +61,10 @@ The commit:
   strips         epic, story and deferred ids from code comments — Story 3.2,
                  Epic 12, (3-2) (a known story key), DW-…, paths into the deferred
                  store or the implementation folder — keeping the rest of the comment;
-                 a comment that was only an id goes. Comments only: ids in
+                 a comment that was only an id goes. A story takes its fragments with
+                 it (Story 3.2, Task 2 · Subtask 3.1 of Story 5.10 · AC 2), and the
+                 separator a removal leaves by a bracket or a mark goes too
+                 ("(ADR-0019, Story 3.2)" → "(ADR-0019)"). Comments only: ids in
                  identifiers, strings and directives are listed, not edited.
                  Tokenized: Go (go/scanner), shell, Python, JS/TS (JSX/TSX: comments
                  that begin their line only), Dart, YAML, Makefile (recipe lines are

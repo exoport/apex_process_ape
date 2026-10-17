@@ -28,8 +28,10 @@ type liftVocab struct {
 }
 
 var (
-	// "Story 3.2", "stories 3.1 and 3.2", "story 35-1 AC4".
-	storyIDRe = regexp.MustCompile(`(?i)\b(?:user\s+)?stor(?:y|ies)\s+#?\d+[.-]\d+[a-z]?(?:\s*(?:,|&|/|\band\b|\bor\b)\s*#?\d+[.-]\d+[a-z]?)*(?:\s+ACs?\s*#?\d+(?:\s*(?:,|&|/|\band\b)\s*(?:AC\s*)?#?\d+)*)?\b`)
+	// "Story 3.2", "stories 3.1 and 3.2", "story 35-1 AC4", with the story
+	// fragments next to it — "Story 3.2, Task 2", "Subtask 3.1 of Story
+	// 5.10" — which mean nothing once the story is gone (L9).
+	storyIDRe = regexp.MustCompile(`(?i)\b(?:` + storyFrag + `\s+(?:of|in|for|from)\s+)?(?:user\s+)?stor(?:y|ies)\s+#?\d+[.-]\d+[a-z]?(?:\s*(?:,|&|/|\band\b|\bor\b)\s*#?\d+[.-]\d+[a-z]?)*(?:\s*(?:[,/;]|—|–)?\s*` + storyFrag + `)*\b`)
 	// "Epic 12", "epics 3, 4".
 	epicIDRe = regexp.MustCompile(`(?i)\bepics?\s+#?\d+(?:\s*(?:,|&|/|\band\b|\bor\b)\s*#?\d+)*\b`)
 	// "DW-20261001-ab12_slug", "DW-42".
@@ -45,6 +47,10 @@ var (
 	// ids inside identifiers: TestStory35_1, epic12Gate, DW42, ADR0017.
 	identIDRe = regexp.MustCompile(`(Story|STORY|story|Epic|EPIC|epic)_?\d+|(DW|Dw|dw)_?\d+|(ADR|Adr|adr)_?\d{2,4}`)
 )
+
+// storyFrag is a part of a story: a task, subtask or acceptance
+// criterion, "Task 2", "Subtask 3.1", "AC4", "ACs 1 and 2".
+const storyFrag = `(?:sub-?tasks?|tasks?|ACs?)\s*#?\d+(?:\.\d+)*(?:\s*(?:,|&|/|\band\b)\s*(?:(?:sub-?tasks?|tasks?|ACs?)\s*)?#?\d+(?:\.\d+)*)*`
 
 func newLiftVocab(storyKeys map[string]bool, removedIDPaths []string) *liftVocab {
 	v := &liftVocab{storyKeys: storyKeys}
@@ -256,6 +262,11 @@ var (
 	idPointerRe = regexp.MustCompile(`(^|[.!?]\s+)(?i:see(?: also)?|cf\.?|refs?:?)\s+` + idMark + `[^.!?` + idMark + `]*(?:[.!?]|$)\s*`)
 	idMidGlueRe = regexp.MustCompile(`\s+(?i:` + glueWords + `)\s+` + idMark)
 	cutRe       = regexp.MustCompile(`[ \t]*[` + idMark + cutMark + `]+[ \t]*`)
+	// The separator a removal leaves next to a bracket or a punctuation
+	// mark goes with it (L9): "(ADR-0019,)", "(, ADR-0017", "ADR-0011 /,".
+	openSepRe   = regexp.MustCompile(`([(\[])` + cutMark + `(?:[,;/&+]|(?i:and|or)\b)?[ \t]*`)
+	sepCloseRe  = regexp.MustCompile(`[ \t]*(?:[,;/&+]|\b(?i:and|or))[ \t]*` + cutMark + `([)\]])`)
+	sepPunctRe  = regexp.MustCompile(`[ \t]*[,;/&+][ \t]*` + cutMark + `([,;:.!?])`)
 	emptyPairRe = regexp.MustCompile(`\(\s*\)|\[\s*\]`)
 	dupPunctRe  = regexp.MustCompile(`([,;:])\s*([.,;:])`)
 	spaceBefRe  = regexp.MustCompile(`[ \t]+([.,;:!?)\]])`)
@@ -290,6 +301,9 @@ func stripIDsFromText(s string, spans [][2]int) (out string, empty bool) {
 	t = idTrailRe.ReplaceAllString(t, "$1")
 	t = idMidGlueRe.ReplaceAllString(t, cutMark)
 	t = cutRe.ReplaceAllStringFunc(t, func(string) string { return cutMark })
+	t = openSepRe.ReplaceAllString(t, "$1")
+	t = sepCloseRe.ReplaceAllString(t, "$1")
+	t = sepPunctRe.ReplaceAllString(t, "$1")
 	t = joinCuts(t)
 	t = emptyPairRe.ReplaceAllString(t, "")
 	t = dupPunctRe.ReplaceAllString(t, "$2")
