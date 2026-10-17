@@ -36,9 +36,13 @@ func TestMilestoneLifecycle(t *testing.T) {
 	require.Contains(t, findingMessages(ValidateRoadmap("r", read(t, p, "development/roadmap.md"))), "M2 has no `Goal:`",
 		"a placeholder goal is not a goal")
 
-	_, err = p.ApproveMilestone(ctx(), "M2", "ann")
+	_, err = p.ApproveMilestone(ctx(), "M2", "ann", nil)
 	require.ErrorContains(t, err, "not well-formed")
-	m, err := p.ApproveMilestone(ctx(), "M1", "ann")
+	// The gate exists and is red until the milestone's work (done.flag)
+	// is done: approve runs it once (D70 B).
+	write(t, p, "gate.sh", "#!/bin/sh\ntest -f done.flag\n")
+	commitAll(t, p, "test: the gate")
+	m, err := p.ApproveMilestone(ctx(), "M1", "ann", nil)
 	require.NoError(t, err)
 	require.Equal(t, MilestoneApproved, m.Status)
 	require.True(t, strings.HasPrefix(m.StatusText, "approved (by ann "))
@@ -51,9 +55,13 @@ func TestMilestoneLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "ann", recs["M1"].Approval.By)
 	require.Equal(t, "./gate.sh", recs["M1"].Approval.GateCmd)
-	require.Empty(t, recs["M1"].Approval.GateFiles, "gate.sh does not exist yet")
+	require.Equal(t, []string{"gate.sh"}, sortedKeys(keysOf(recs["M1"].Approval.GateFiles)))
+	sc := recs["M1"].Approval.SelfCheck
+	require.NotNil(t, sc)
+	require.Equal(t, 1, sc.Exit)
+	require.Equal(t, "_apex/state/logs/gate-M1-approve.log", sc.Log)
 	head := HeadSHA(ctx(), p.Root)
-	again, err := p.ApproveMilestone(ctx(), "M1", "bob")
+	again, err := p.ApproveMilestone(ctx(), "M1", "bob", nil)
 	require.NoError(t, err)
 	require.Equal(t, m.StatusText, again.StatusText, "approving twice is a no-op")
 	require.Equal(t, head, HeadSHA(ctx(), p.Root))
@@ -61,7 +69,7 @@ func TestMilestoneLifecycle(t *testing.T) {
 	// The first gate run records a result and commits it.
 	g, err := p.RunGate(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)
-	require.Equal(t, 127, g.Run.Exit)
+	require.Equal(t, 1, g.Run.Exit)
 	require.True(t, g.ResultChanged)
 	require.Equal(t, "apex: M1 gate red", subjects(t, p)[0])
 	require.Equal(t, "_apex/state/milestones.json", run(t, p.Root, "show", "--name-only", "--format=", "HEAD"))
@@ -87,29 +95,23 @@ func TestMilestoneLifecycle(t *testing.T) {
 	require.Equal(t, head, HeadSHA(ctx(), p.Root), "still red: nothing to commit")
 	clean(t, p, "a red close")
 
-	// A gate script that appeared since the approval is not drift (D51
-	// Q15: it was never approved, and the gate failed without it); a person
-	// approving again freezes it.
-	write(t, p, "gate.sh", "#!/bin/sh\nexit 0\n")
-	commitAll(t, p, "feat: gate")
-	require.NotContains(t, findingMessages(p.Check()), "M1 ")
-	statusLine := p.roadmap().Find("M1").StatusText
-	_, err = p.ApproveMilestone(ctx(), "M1", "bob")
-	require.NoError(t, err)
-	require.Equal(t, "apex: M1 re-approved", subjects(t, p)[0])
-	require.Equal(t, statusLine, p.roadmap().Find("M1").StatusText, "the Status line keeps the first approval")
-	recs, err = p.LoadMilestoneRecords()
-	require.NoError(t, err)
-	require.Contains(t, recs["M1"].Approval.GateFiles, "gate.sh")
+	// A gate weakened since the approval is refused, and a person cannot
+	// approve it again while it is green (D70 B).
 	write(t, p, "gate.sh", "#!/bin/sh\nexit 0 # weaker\n")
 	_, err = p.RunGate(ctx(), "M1", RunOptions{})
-	require.ErrorContains(t, err, "M1's gate changed since bob approved it: gate.sh changed")
+	require.ErrorContains(t, err, "M1's gate changed since ann approved it: gate.sh changed")
 	_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
 	fe, ok := errors.AsType[*FailError](err)
 	require.True(t, ok)
 	require.Equal(t, CodeGateChanged, fe.Code)
-	write(t, p, "gate.sh", "#!/bin/sh\nexit 0\n")
+	_, err = p.ApproveMilestone(ctx(), "M1", "bob", nil)
+	require.Equal(t, CodeGateGreen, failCode(t, err))
+	write(t, p, "gate.sh", "#!/bin/sh\ntest -f done.flag\n")
 	require.NotContains(t, findingMessages(p.Check()), "M1 ")
+
+	// The milestone's work turns the gate green.
+	write(t, p, "done.flag", "done\n")
+	commitAll(t, p, "feat: done")
 
 	// A change in flight blocks the close even with a green gate.
 	addChange(t, p, "add-wave", waveChange("add-wave"))
@@ -133,7 +135,7 @@ func TestMilestoneLifecycle(t *testing.T) {
 	require.Contains(t, done.StatusText, g.Run.SHA)
 	require.Equal(t, "M2", p.roadmap().Current().ID)
 
-	_, err = p.ApproveMilestone(ctx(), "M1", "ann")
+	_, err = p.ApproveMilestone(ctx(), "M1", "ann", nil)
 	require.ErrorContains(t, err, "already done")
 }
 

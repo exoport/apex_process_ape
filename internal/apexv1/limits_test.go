@@ -111,7 +111,7 @@ func TestTaskLimits_Budget(t *testing.T) {
 	// A gate run keeps the recorded stops.
 	write(t, p, "gate.sh", "#!/bin/sh\nexit 1\n")
 	commitAll(t, p, "gate")
-	_, err = p.ApproveMilestone(ctx(), "M1", "ann") // the new gate file, approved
+	_, err = p.ApproveMilestone(ctx(), "M1", "ann", nil) // the new gate file, approved
 	require.NoError(t, err)
 	_, err = p.RunGate(ctx(), "M1", RunOptions{})
 	require.NoError(t, err)

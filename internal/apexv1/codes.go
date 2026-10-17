@@ -177,6 +177,8 @@ var DiagnosticCodes = []CodeDoc{
 	{"archive.base-changed", 3, "replan", "a requirement this change modifies or removes changed in the spec since start (another branch); nothing written"},
 	{CodeDeltaConflict, 3, "replan", "the delta no longer applies to the current specs; nothing written"},
 	{CodeFolderExists, 3, "stop", "the archive folder already exists; nothing written"},
+	{CodeGateGreen, 1, "replan", "milestone approve (and a re-approval): the gate, run once against the current tree (D70 B), exits 0 — a gate must be red until the milestone's work is done; apex-plan re-plans the gate"},
+	{CodeGateBroken, 1, "replan", "milestone approve (and a re-approval): the gate cannot run (D70 B) — a script it names is missing or fails `bash -n`, it exits 126 or 127, a requires: entry is missing, or it times out (timeouts.gate); apex-plan re-plans the gate"},
 	{"change.requirement-conflict", 3, "replan", "another active change claims the same requirement"},
 	{"conflict.unclassified", 3, "stop", "a conflict without a code (a bug: report it)"},
 
