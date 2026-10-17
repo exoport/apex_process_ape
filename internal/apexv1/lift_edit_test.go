@@ -88,6 +88,12 @@ func TestEditComments_OtherLanguages(t *testing.T) {
 			"#!/bin/sh\n# Build it\necho \"# Story 3.2\"\ncat <<EOF\n# Story 3.2 stays\nEOF\nx=${y#Story 3.2}\n",
 		},
 		{
+			// L10: a here-string is not a heredoc (radix, tenax, atomix).
+			"shell here-string", langShell,
+			"read -r a b <<< \"${x}\" # Story 3.2: split it\ngrep -q y <<<\"$a\"\n# Epic 4: the rest\n",
+			"read -r a b <<< \"${x}\" # Split it\ngrep -q y <<<\"$a\"\n# The rest\n",
+		},
+		{
 			"shell continuation", langShell,
 			"run \\\n# Story 3.2\n  --flag\n",
 			"run \\\n# Story 3.2\n  --flag\n",
