@@ -285,7 +285,7 @@ func (p *Project) archivable(ctx context.Context, ci ChangeInfo, allowPendingHum
 	if err := checkPlanFrozen(ci); err != nil {
 		return nil, err
 	}
-	if err := p.requireChangeFits(ci, "archive"); err != nil {
+	if err := p.requireChangeFits(ci); err != nil {
 		return nil, err
 	}
 	// Acceptances recorded on the base (accepted.json, D52 Q18) count.
@@ -505,9 +505,6 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 	}
 	ci, err := p.requireChange(ctx, id)
 	if err != nil {
-		return nil, err
-	}
-	if err := p.requireChangeFits(ci, "abandon"); err != nil {
 		return nil, err
 	}
 	if cur := p.HeadChange(ctx); cur != "" && cur != id && ci.Branch != "" {

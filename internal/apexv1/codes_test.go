@@ -43,6 +43,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeUnsupportedLayout": CodeUnsupportedLayout, "CodeTagNotPushed": CodeTagNotPushed, "CodeLiftWriteFailed": CodeLiftWriteFailed, "CodeClaudeIgnored": CodeClaudeIgnored,
 		"CodeCapsOverCeiling": CodeCapsOverCeiling, "CodeGateGreen": CodeGateGreen, "CodeGateBroken": CodeGateBroken,
 		"CodeNoSuchTask": CodeNoSuchTask, "CodeNoChangeMD": CodeNoChangeMD, "CodeDelegateInvalidConfig": CodeDelegateInvalidConfig,
+		// D89 (rc.4).
+		"CodeChangeOverCeiling": CodeChangeOverCeiling,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

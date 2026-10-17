@@ -229,28 +229,43 @@ func (p *Project) AddNext(ctx context.Context, text, from string) (*NextResult, 
 	return res, nil
 }
 
-// noticedHeadingRe is review.md's section of findings outside the change
-// (H26, D48 Q6): apex-review writes it, archive carries it into Next.
-var noticedHeadingRe = regexp.MustCompile(`(?i)^##\s+noticed,?\s+out of scope\s*$`)
+// noticedTitleRe is the title of review.md's section of findings outside
+// the change (H26, D48 Q6): apex-review writes it, archive carries it into
+// Next.
+var noticedTitleRe = regexp.MustCompile(`(?i)^noticed,?\s+out of scope$`)
 
-// noticedItems are the list items of review.md's `## Noticed, out of
-// scope` section, one line each ("none" and empty items left out).
+// noticedItems are the top-level list items of every `Noticed, out of
+// scope` section of review.md, one line each, first-seen order, each item
+// once ("none", empty items and answers left out). The framework writes one
+// `## Review <n>` section per round (D89 Q41), so the heading may come once
+// per round and at level 2 to 4; a section ends at the next heading of its
+// level or higher, outside code. Only a line that starts with `- ` or `* `
+// is an item: an answer written under a finding, indented or blockquoted —
+// or a top-level `- Answer:` line — never reaches the roadmap's Next.
 func noticedItems(review string) []string {
 	var out []string
-	in := false
-	for l := range strings.SplitSeq(strings.ReplaceAll(review, "\r\n", "\n"), "\n") {
-		t := strings.TrimSpace(l)
-		switch {
-		case noticedHeadingRe.MatchString(t):
-			in = true
-		case strings.HasPrefix(t, "#"):
-			in = false
-		case in && (strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ")):
-			item := strings.TrimSpace(t[2:])
-			if item != "" && !strings.EqualFold(strings.TrimRight(item, "."), "none") {
-				out = append(out, item)
+	seen := map[string]bool{}
+	in := 0 // the level of the Noticed section the line is in; 0 outside one
+	for _, l := range splitLines(review) {
+		if lv, title := headingLevel(l); lv > 0 {
+			switch {
+			case lv >= 2 && lv <= 4 && noticedTitleRe.MatchString(title):
+				in = lv
+			case lv <= in:
+				in = 0
 			}
+			continue
 		}
+		if in == 0 || l.InCode || !(strings.HasPrefix(l.Text, "- ") || strings.HasPrefix(l.Text, "* ")) {
+			continue
+		}
+		item := strings.TrimSpace(l.Text[2:])
+		if item == "" || strings.EqualFold(strings.TrimRight(item, "."), "none") ||
+			len(item) >= 7 && strings.EqualFold(item[:7], "answer:") || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
 	}
 	return out
 }

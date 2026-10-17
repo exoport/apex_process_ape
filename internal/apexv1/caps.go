@@ -26,8 +26,13 @@ import (
 // has to read, and bytes are what a context window pays for. A ceiling
 // keeps an artefact readable in one Read call; a configured value above
 // it is caps.over-ceiling — `project check` reports it, and the verbs that
-// enforce a cap (change check, start, archive, abandon) refuse until a
-// person fixes the config. Measured meanwhile, a cap stops at its ceiling.
+// enforce a cap (change check, start, archive) refuse until a person
+// fixes the config. Abandon enforces none (D89 Q40): it moves a change
+// out of the way as used. Measured meanwhile, a cap stops at its ceiling.
+//
+// change_md measures the plan: change.md less its ## Notes section
+// (Change.PlanBytes, D89). The whole file, Notes included, is held to the
+// change_md ceiling whatever the cap (change.over-ceiling).
 
 // Cap keys, as caps: names them.
 const (
@@ -196,19 +201,47 @@ func (p *Project) requireCaps() error {
 	return nil
 }
 
-// requireChangeFits refuses verb (archive, abandon) on a change whose
-// change.md is over its cap (D69): the cap is one measure everywhere, not
-// only at check and start.
-func (p *Project) requireChangeFits(ci ChangeInfo, verb string) error {
+// capCeiling is key's hard ceiling in bytes.
+func capCeiling(key string) int {
+	for _, d := range capDefs {
+		if d.key == key {
+			return d.ceiling
+		}
+	}
+	panic("apexv1: no cap " + key)
+}
+
+// changeMDCeiling is the whole change.md's ceiling, ## Notes included,
+// whatever caps.change_md says (D89): the change_md ceiling.
+func changeMDCeiling() int { return capCeiling(CapChangeMD) }
+
+// overCeilingMsg is change.over-ceiling's message, the size given.
+func overCeilingMsg(size int) string {
+	return "change.md is " + sizeKB(size) + " in all, over the " + capSize(changeMDCeiling()) +
+		" file ceiling — ## Notes is for working notes only: move bulk to the change's assets/"
+}
+
+// requireChangeFits refuses archive on a change whose plan is over
+// caps.change_md or whose change.md is over the file ceiling: the measure
+// of check and start (D69, D89). Nothing here edits the change — the plan
+// is frozen at start, so only ## Why can have grown since; the remedy is
+// the model's, and archive moves the folder exactly as used. Abandon
+// measures nothing (D89 Q40): moving a change out of the way never
+// requires editing it.
+func (p *Project) requireChangeFits(ci ChangeInfo) error {
 	if err := p.requireCaps(); err != nil {
 		return err
 	}
 	if ci.Doc == nil {
 		return nil
 	}
-	if limit := p.caps().ChangeMD; len(ci.Doc.raw) > limit {
-		return &FailError{Code: "change.too-big", Msg: "change.md of " + ci.ID + " is " + sizeKB(len(ci.Doc.raw)) + ", over the " + capSize(limit) + " cap (caps.change_md) — " +
-			"trim it under the cap (detail the plan no longer needs goes to its design.md or the brief), commit, then " + verb + " again"}
+	if limit, plan := p.caps().ChangeMD, ci.Doc.PlanBytes(); plan > limit {
+		return &FailError{Code: "change.too-big", Msg: "change.md of " + ci.ID + " is " + sizeKB(plan) + " without ## Notes, over the " + capSize(limit) + " cap (caps.change_md) — " +
+			"the plan is frozen at start, so only ## Why can have grown: move what ## Why gained since start to ## Notes, commit, then archive again"}
+	}
+	if size := len(ci.Doc.raw); size > changeMDCeiling() {
+		return &FailError{Code: CodeChangeOverCeiling, Msg: "change.md of " + ci.ID + " is " + sizeKB(size) + " in all, over the " + capSize(changeMDCeiling()) +
+			" file ceiling — ## Notes is for working notes only: move bulk to the change's assets/, commit, then archive again"}
 	}
 	return nil
 }

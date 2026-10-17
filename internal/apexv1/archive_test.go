@@ -494,4 +494,20 @@ func TestArchive_NoticedGoesToNext(t *testing.T) {
 func TestNoticedItems(t *testing.T) {
 	require.Equal(t, []string{"a", "b c"}, noticedItems("x\n## Noticed out of scope\n- a\n* b c\n- None.\n## Next\n- d\n"))
 	require.Empty(t, noticedItems("no section\n- a\n"))
+	// Only top-level items (D89): an answer written under a finding,
+	// indented or blockquoted, is not carried into Next.
+	review := "## Noticed, out of scope\n- a\n  - Answer: fixed in T3\n    * deeper\n\t- tabbed\n> - quoted answer\n* b\n"
+	require.Equal(t, []string{"a", "b"}, noticedItems(review))
+	require.Equal(t, []string{"a", "b"}, noticedItems(strings.ReplaceAll(review, "\n", "\r\n")))
+
+	// The framework's form (D89 Q41): one ## Review <n> section per round,
+	// a ### Noticed section in each, Answer: lines under findings.
+	rounds := "# Review of add-wave\n" +
+		"## Review 1\n### Findings\n- F1 the copy is terse\n  Answer: reworded in T2\n" +
+		"### Noticed, out of scope\n- greet.sh ignores LANG\n  - Answer: not this change's\n" +
+		"#### detail\n- the README is stale\n```\n- not an item: code\n```\n" +
+		"## Review 2\n### Findings\n- none\n" +
+		"### Noticed, out of scope\n- Answer: carried to Next by archive\n- answer: lower case too\n" +
+		"- greet.sh ignores LANG\n- the CI cache is cold\n### Verdict\n- pass: not noticed\n"
+	require.Equal(t, []string{"greet.sh ignores LANG", "the README is stale", "the CI cache is cold"}, noticedItems(rounds))
 }

@@ -32,6 +32,13 @@ const (
 	CodeDelegateInvalidConfig = "delegate.invalid-config"
 )
 
+// D89 (rc.4).
+const (
+	// CodeChangeOverCeiling: change.md as a whole, ## Notes included, over
+	// the change_md file ceiling.
+	CodeChangeOverCeiling = "change.over-ceiling"
+)
+
 // CodeDoc documents one diagnostic code.
 type CodeDoc struct {
 	Code string `json:"code"`
@@ -222,7 +229,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"project.missing-section", 1, "person", "project.md lacks a required ## section"},
 	{"project.empty-section", 1, "person", "a required project.md section is empty"},
 	{"agents.too-big", 1, "person", "AGENTS.md over its caps.agents_md cap (default 16 KB, ceiling 48 KB; its lines are not measured, D69)"},
-	{CodeCapsOverCeiling, 1, "person", "_apex/config.yaml caps: holds a value above its hard ceiling (project_md, agents_md, change_md, design_md 48 KB; spec 64 KB; evidence_log 16 MiB): a project check finding, and change check, start, archive and abandon refuse until a person fixes it (D69)"},
+	{CodeCapsOverCeiling, 1, "person", "_apex/config.yaml caps: holds a value above its hard ceiling (project_md, agents_md, change_md, design_md 48 KB; spec 64 KB; evidence_log 16 MiB): a project check finding, and change check, start and archive refuse until a person fixes it (D69; abandon does not, D89 Q40)"},
 	{"claude-md.no-import", 1, "person", "CLAUDE.md lacks the line @AGENTS.md"},
 	{"roadmap.title", 1, "person", "roadmap.md does not start with # Roadmap"},
 	{"roadmap.no-milestones", 1, "person", "roadmap.md has no milestone"},
@@ -260,7 +267,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"spec.multiple-checks", 1, "person", "a scenario has more than one check:"},
 	{"spec.empty-check", 1, "person", "a scenario's check: is empty"},
 	{"spec.stray-check", 1, "person", "a check: line outside any scenario"},
-	{"change.too-big", 1, "replan", "change.md over its caps.change_md cap (default 16 KB, ceiling 48 KB): split the change; at archive and abandon (D69), trim it under the cap"},
+	{"change.too-big", 1, "replan", "change.md without its ## Notes section (D89) over its caps.change_md cap (default 16 KB, ceiling 48 KB): at check and start, split the change; at archive (D69), where the plan is frozen and only ## Why can have grown, move what ## Why gained since start to ## Notes — ape never trims a change, and abandon never measures one (Q40)"},
 	{"change.design-too-big", 1, "replan", "design.md over its caps.design_md cap (default 16 KB, ceiling 48 KB)"},
 	{"change.frontmatter", 1, "replan", "change.md frontmatter is missing, unparseable, or its id/milestone/touches are wrong"},
 	{"change.unknown-key", 1, "replan", "change.md frontmatter has a key v1 does not define (own keys: prefix x-)"},
@@ -308,5 +315,9 @@ var DiagnosticCodes = []CodeDoc{
 	{"tools.not-installed", 1, "person", "a skill tools: names is not installed: a plugin skill whose plugin is not listed in plugins: or not installed or has no such skill, or no project or user skill of that name"},
 	{"tools.unknown", 1, "replan", "a change.md design-tool task (`— tool: <name>`) or review_tools: entry names no tools.design / tools.review entry of _apex/config.yaml (D74): re-plan with a declared tool"},
 	{"tools.not-invocable", 1, "person", "a skill tools: names has user-invocable: false, so ape task cannot type it as a slash command: drop the flag, or name another skill"},
+
+	// D89 (rc.4).
+	{CodeChangeOverCeiling, 1, "apply", "change.md as a whole, ## Notes included, over the 48 KB change_md file ceiling, whatever caps.change_md says (D89): ## Notes is for working notes only — move bulk to the change's assets/; reported at change check and start, refused at archive"},
+
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

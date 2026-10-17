@@ -272,8 +272,11 @@ func newProjectCheckCmd() *cobra.Command {
                              spec         24 KB / 64 KB    (per capability)
                              evidence_log  1 MiB / 16 MiB  (per check, evidence: archive)
                            A value above its ceiling is caps.over-ceiling (action person):
-                           reported here, and change check, start, archive and abandon
-                           refuse until a person fixes it
+                           reported here, and change check, start and archive refuse
+                           until a person fixes it (abandon measures nothing, D89)
+                           change_md counts change.md without ## Notes (D89); the whole
+                           change.md, Notes included, has the 48 KB ceiling whatever the
+                           cap (change.over-ceiling, action apply)
   docs                     each path _apex/config.yaml docs: names (changelog, user_docs)
                            exists (docs.missing: create it, or fix the path)
   .claude/settings.json    ape's hooks registered as ` + "`ape project init`" + ` writes them:
