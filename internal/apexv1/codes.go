@@ -119,6 +119,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeCommitFailed, 1, "stop", "ape wrote its record but could not commit it (identity, lock)"},
 	{"git.not-a-repo", 1, "stop", "archive needs a git repository"},
 	{CodeGitStatusFailed, 1, "stop", "git status could not be read"},
+	{"ape.below-floor", 1, "person", "ape task: the installed framework's _apex/ape-commands.yaml declares a min_ape_version above this ape (H1); no session starts — a person updates ape (the message carries the command)"},
 	{"milestone.budget-exceeded", 1, "person", "ape task: the current milestone's spend is at its enforced budget (limits.budget: enforce); no session starts"},
 	{"milestone.changes-in-flight", 1, "apply", "close: changes of the milestone are in-progress, verified or reviewed"},
 	{"milestone.done", 1, "stop", "approve: the milestone is already done"},

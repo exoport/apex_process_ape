@@ -101,6 +101,13 @@ removed) and _apex/effort-defaults.yaml is not used. Sources: flag, config,
 parent-session, config-default, default. The session's tools see the
 resolved values as APE_SESSION_MODEL / APE_SESSION_EFFORT.
 
+In an APEX v1 project ape first checks the floor the installed framework
+sets: when _apex/ape-commands.yaml declares a min_ape_version above this
+ape, the session is refused (exit 1, code ape.below-floor) with the
+command that updates ape — the same floor ` + "`ape framework update`" + ` refuses an
+install by (exit 11). A dev build or a pseudo-version cannot be compared:
+a warning, and the session runs.
+
 In an APEX v1 project ape also enforces the milestone budget, when
 _apex/config.yaml says so (it is off by default):
   limits:
@@ -164,8 +171,8 @@ The verdict is written to the run manifest as commit_contract, so a
 failure stays diagnosable after the fact.
 
 Exit codes: 0 success · 1 run failed, idle timeout, the typed line
-never submitted, or an APEX v1 milestone budget stopped or refused the
-session · 2 usage or
+never submitted, an APEX v1 milestone budget stopped or refused the
+session, or a v1 limit or ape floor refused it · 2 usage or
 preflight error · 3 REPL never became ready (last pane on stderr) ·
 5 upstream API failure · 6 the dispatch violated its declared commit
 ownership (the run itself may have succeeded).`,
@@ -527,6 +534,10 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	// CLAUDE_CODE_EFFORT_LEVEL, and nothing is passed when nothing decided.
 	var v1Launch *v1TaskLaunch
 	if p, ok := v1ProjectAt(o.projectRoot); ok {
+		// H1: the installed framework's ape floor, before anything else.
+		if err := v1ApeFloor(o.projectRoot, os.Stderr); err != nil {
+			return taskRun{}, &taskPreflightError{err: err}
+		}
 		l, err := decideV1TaskLaunch(p, o.skill, o.model, o.effort)
 		if err != nil {
 			return taskRun{}, &taskPreflightError{err: err}

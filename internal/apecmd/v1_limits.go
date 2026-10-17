@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/cost"
+	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"gopkg.in/yaml.v3"
@@ -165,11 +167,47 @@ func v1ConfigError(root string) error {
 	return nil
 }
 
+// v1ApeFloor refuses a session of a v1 project whose installed
+// _apex/ape-commands.yaml declares a min_ape_version above this ape (H1,
+// D47 Q1): its skills would call commands and behaviour this ape lacks,
+// and fail mid-run instead of up front. It is the floor `ape framework
+// update` already refuses an install by (exit 11), judged the same way
+// (framework.CompareApeVersion): a dev build or a Go pseudo-version cannot
+// be compared, and is warned about on warn and let run, as there; no file,
+// or no min_ape_version in it, is no floor. An unparseable file refuses
+// (a usage error), as it does there.
+func v1ApeFloor(root string, warn io.Writer) error {
+	manifest, err := framework.LoadApeCommands(root)
+	if err != nil {
+		return fmt.Errorf("%w — `ape framework update` reinstalls it", err)
+	}
+	minimum := ""
+	if manifest != nil {
+		minimum = manifest.MinApeVersion
+	}
+	switch framework.CompareApeVersion(Version, minimum) {
+	case framework.ApeVersionBelow:
+		route := apeUpdateRoute(root)
+		return &apexv1.FailError{Code: "ape.below-floor", Msg: fmt.Sprintf(
+			"ape %s is older than the installed framework's min_ape_version %s (%s) — update ape first (%s): %s",
+			Version, minimum, framework.ProjectApeCommands, route.name, route.command("v"+trimV(minimum)))}
+	case framework.ApeVersionUnknown:
+		fmt.Fprintf(warn, "warning: ape %s cannot be compared with the installed framework's min_ape_version %s (a dev build or a pseudo-version) — continuing\n",
+			Version, minimum)
+	case framework.ApeVersionOK, framework.ApeVersionNoMinimum:
+	}
+	return nil
+}
+
 // taskPreflightExit is `ape task`'s exit for a failure before any spawn: 1
-// for a v1 limit that refused the start (a check that failed), else 2.
+// for a v1 limit or floor that refused the start (a check that failed),
+// else 2.
 func taskPreflightExit(err error) int {
-	if fe, ok := errors.AsType[*apexv1.FailError](err); ok && fe.Code == "milestone.budget-exceeded" {
-		return ExitRunFailed
+	if fe, ok := errors.AsType[*apexv1.FailError](err); ok {
+		switch fe.Code {
+		case "milestone.budget-exceeded", "milestone.blocks-exceeded", "ape.below-floor":
+			return ExitRunFailed
+		}
 	}
 	return ExitUsage
 }
