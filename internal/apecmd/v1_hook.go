@@ -137,6 +137,13 @@ exits non-zero now, prints {"decision":"block","reason":"<the failing checks' la
 and what to do>"}. It re-runs only the checks that were red at the change's last verify
 of its current plan (the regression command too, when it was newly red), recorded in
 _apex/state/logs/<id>/last-verify.json; before any verify, the task checks (H10).
+Re-run budget (D58 2.5): a check whose last recorded run took longer than 60s (or
+timeouts.check.max, if lower) is never re-run, nor any once one hook run has spent 600s;
+a check with no recorded run is re-run under that budget, and one that outruns it is not
+red. Such a check is judged from the last verify at HEAD — red stays red, with its last
+lines — or, when code moved since that verify, the stop is blocked telling the model to
+run ` + "`ape change verify <id> --wait 9m`" + `. The hook's timeout stays 1800s: it never runs a
+long check, the verify does.
 Allows (prints nothing) when HEAD is on no change branch (the base branch: planning,
 milestones), when the change is not in-progress (blocked, verified, reviewed), when the
 last verify had nothing red, when every re-run check is green, or after 3 consecutive

@@ -18,8 +18,11 @@ const (
 	HookCmdStop         = "ape hook stop"
 	HookCmdPreTool      = "ape hook pre-tool"
 	PreToolMatcher      = "Edit|Write|MultiEdit|NotebookEdit|Bash"
-	// StopHookTimeout is the stop hook's timeout in seconds: it runs the
-	// change's command checks, which can take minutes.
+	// StopHookTimeout is the stop hook's timeout in seconds: it re-runs
+	// the change's short command checks, within StopRunBudget (600s), and
+	// never a long one (D58 2.5) — so it is not derived from
+	// timeouts.check, as D55 proposed: a longer timeout would only let a
+	// wedged hook hold the session longer.
 	StopHookTimeout = 1800
 )
 

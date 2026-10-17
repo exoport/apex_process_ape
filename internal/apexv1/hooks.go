@@ -437,7 +437,7 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 		rec.Reason = "no check was red at the last verify"
 		return finish(StopDecision{Record: rec})
 	}
-	results := p.RunChecks(ctx, p.LogDir(ci.ID), "stop-", checks, opt)
+	results, judged, unknown := p.stopRun(ctx, ci, checks, opt)
 	var red []CheckResult
 	for i := range results {
 		if results[i].Kind == KindRegression {
@@ -447,7 +447,7 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 			red = append(red, results[i])
 		}
 	}
-	if len(red) == 0 {
+	if len(red) == 0 && len(judged) == 0 && len(unknown) == 0 {
 		rec.Verdict = StopAllow
 		rec.ConsecutiveBlocks = 0
 		rec.Reason = "all command checks green"
@@ -455,7 +455,7 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 	}
 	rec.ConsecutiveBlocks++
 	rec.Verdict = StopBlock
-	reason := stopReason(ci.ID, red, rec.ConsecutiveBlocks)
+	reason := stopReason(ci.ID, red, judged, unknown, rec.ConsecutiveBlocks)
 	rec.Reason = truncate(reason, 300)
 	return finish(StopDecision{Block: true, Reason: reason, Record: rec})
 }
@@ -486,14 +486,24 @@ func (p *Project) stopNotice(ci ChangeInfo) string {
 		ci.ID, lv.At, short(lv.SHA), len(refs), strings.Join(lines, ", "), ci.ID)
 }
 
-func stopReason(id string, red []CheckResult, n int) string {
+func stopReason(id string, ran, judged []CheckResult, unknown []PlannedCheck, n int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Change %s is in progress and %d command check(s) are red (stop blocked %d/%d):\n",
-		id, len(red), n, MaxConsecutiveStopBlocks)
+	red := append(append([]CheckResult(nil), ran...), judged...)
+	if len(red) > 0 {
+		fmt.Fprintf(&b, "Change %s is in progress and %d command check(s) are red (stop blocked %d/%d):\n",
+			id, len(red), n, MaxConsecutiveStopBlocks)
+	} else {
+		fmt.Fprintf(&b, "Change %s is in progress and %d command check(s) could not be judged here (stop blocked %d/%d).\n",
+			id, len(unknown), n, MaxConsecutiveStopBlocks)
+	}
 	budget := 3000
 	for i := range red {
 		r := &red[i]
-		fmt.Fprintf(&b, "\n%s `%s` %s (full output: %s)\n", r.Task, r.Cmd, r.Outcome(), r.Log)
+		from := ""
+		if i >= len(ran) {
+			from = " — from the last verify at HEAD, not re-run: too long for the stop hook"
+		}
+		fmt.Fprintf(&b, "\n%s `%s` %s (full output: %s)%s\n", r.Task, r.Cmd, r.Outcome(), r.Log, from)
 		tail := lastN(r.Tail, 15)
 		for _, l := range tail {
 			if budget <= 0 {
@@ -503,8 +513,88 @@ func stopReason(id string, red []CheckResult, n int) string {
 			budget -= len(l) + 3
 		}
 	}
-	fmt.Fprintf(&b, "\nMake the checks pass and run `ape change verify %s`. If a task cannot be met, run `ape change block %s --reason \"<why>\"` — never edit a check to make it pass.", id, id)
+	if len(unknown) > 0 {
+		refs := make([]string, 0, len(unknown))
+		for i := range unknown {
+			refs = append(refs, unknown[i].Ref)
+		}
+		fmt.Fprintf(&b, "\nNot re-run here, and no verify at HEAD judged them: %s — longer than the stop hook re-runs (%s a check, %s in all). "+
+			"Run `ape change verify %s --wait 9m` (exit 75 means still running: run it again, never end your turn on it), then stop.\n",
+			strings.Join(limit(refs, 10), ", "), StopCheckBudget, StopRunBudget, id)
+	}
+	fmt.Fprintf(&b, "\nMake the checks pass and run `ape change verify %s --wait 9m`. If a task cannot be met, run `ape change block %s --reason \"<why>\"` — never edit a check to make it pass.", id, id)
 	return b.String()
+}
+
+// The stop hook's re-run budget (D58 2.5): a check whose last recorded run
+// took longer than StopCheckBudget (or timeouts.check.max, if lower) is
+// never re-run by the hook, nor any once StopRunBudget is spent in one
+// hook run. Such a check is judged from the last verify at HEAD — red
+// stays red, with its tail — or, with no verify at HEAD, the model is
+// told to run the verify. The hook's own timeout stays StopHookTimeout:
+// the hook never runs a long check, so it needs no more.
+var (
+	StopCheckBudget = 60 * time.Second
+	StopRunBudget   = 600 * time.Second
+)
+
+// stopRun re-runs the stop hook's checks within its budget. ran are the
+// results of the checks it ran; judged the red ones it took from the last
+// verify at HEAD instead (too long to re-run); unknown the ones too long
+// to re-run with no verify at HEAD to judge them by.
+func (p *Project) stopRun(ctx context.Context, ci ChangeInfo, checks []PlannedCheck, opt RunOptions) (ran, judged []CheckResult, unknown []PlannedCheck) {
+	cfg, _ := LoadConfig(p.Root)
+	perCheck := min(StopCheckBudget, cfg.Timeouts.For(KindTask, 0))
+	remaining := StopRunBudget
+	lv := p.lastVerify(ci.ID)
+	if lv != nil && lv.PlanDigest != ci.State.PlanDigest {
+		lv = nil
+	}
+	atHead := lv != nil && lv.SHA == HeadSHA(ctx, p.Root)
+	over := func(pc PlannedCheck) {
+		if atHead {
+			if c, red := lv.RedChecks[pc.Ref]; red {
+				judged = append(judged, CheckResult{
+					Task: pc.Ref, Kind: pc.Kind, Cmd: pc.Cmd, Exit: c.Exit, Reason: c.Reason,
+					Detail: c.Detail, Tail: c.Tail, Log: c.Log, Secs: lv.Secs[pc.Ref],
+				})
+				return
+			}
+		}
+		unknown = append(unknown, pc)
+	}
+	done := map[string]CheckResult{}
+	for _, pc := range checks {
+		if r, ok := done[pc.Cmd]; ok {
+			r.Task, r.Kind = pc.Ref, pc.Kind
+			ran = append(ran, r)
+			continue
+		}
+		if lv != nil {
+			if secs, ok := lv.Secs[pc.Ref]; ok && time.Duration(secs*float64(time.Second)) > min(perCheck, remaining) {
+				over(pc)
+				continue
+			}
+		}
+		limit := min(perCheck, remaining)
+		if limit < time.Second {
+			over(pc)
+			continue
+		}
+		o := opt
+		o.Timeout = limit
+		r := p.RunChecks(ctx, p.LogDir(ci.ID), "stop-", []PlannedCheck{pc}, o)[0]
+		remaining -= time.Duration(r.Secs * float64(time.Second))
+		// Stopped at the hook's own limit, below the project's: too long
+		// for the hook, not red.
+		if r.Reason == ReasonCeiling && limit < cfg.Timeouts.For(pc.Kind, 0) {
+			over(pc)
+			continue
+		}
+		done[pc.Cmd] = r
+		ran = append(ran, r)
+	}
+	return ran, judged, unknown
 }
 
 // --- the ape task side of the stop gate --------------------------------------
