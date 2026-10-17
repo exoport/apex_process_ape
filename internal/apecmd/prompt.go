@@ -73,6 +73,9 @@ type promptOptions struct {
 	ignoreProjectSettings bool
 	outputStyle           string
 	format                output.Format
+	// launch is the session's place in the nesting rule (D62); nil
+	// decides it in runPromptCore.
+	launch *sessionLaunch
 }
 
 func newPromptCmd() *cobra.Command {
@@ -142,8 +145,11 @@ failed, or the typed line never submitted · 2 usage or preflight error (no _ape
 · 4 claude exited before the Stop hook.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := refuseNested("ape prompt"); err != nil {
-				return err
+			// The nesting rule (D62): a prompt session runs no skill an
+			// orchestrator may start, so only depth 0 starts one.
+			launch, err := gateSession("ape prompt", "", cwdFlag)
+			if err != nil {
+				return sessionRefusal(err)
 			}
 			warnUnknownOutputStyleFlag(cmd, outputStyleFlag)
 			format := output.Format(outputFormat)
@@ -196,6 +202,7 @@ failed, or the typed line never submitted · 2 usage or preflight error (no _ape
 				ignoreProjectSettings: ignoreProjSettings,
 				outputStyle:           outputStyleFlag,
 				format:                format,
+				launch:                launch,
 			})
 		},
 	}
@@ -359,6 +366,13 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	if err := refuseOrchestrator(o.agent); err != nil {
 		return promptResult{}, ExitUsage, err
 	}
+	if o.launch == nil {
+		l, err := gateSession("ape prompt", "", o.projectRoot)
+		if err != nil {
+			return promptResult{}, ExitUsage, err
+		}
+		o.launch = l
+	}
 	if o.agent != "" {
 		if _, _, found := framework.ResolveSkill(o.agent, o.projectRoot); !found {
 			return promptResult{}, ExitUsage, fmt.Errorf("--agent %q did not resolve under .claude/skills (project or user)", o.agent)
@@ -456,8 +470,14 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 
 	sessionName := fmt.Sprintf("ape-prompt-%d", os.Getpid())
 	_ = repl.KillSession(runCtx, sessionName)
-	if err := repl.NewSessionWithEnv(runCtx, sessionName, o.projectRoot, argv, promptSpawnEnv(effortPlan, promptID)); err != nil {
+	live := registerSession("prompt", o.projectRoot, promptID, o.launch)
+	defer live.end()
+	if err := repl.NewSessionWithEnv(runCtx, sessionName, o.projectRoot, argv,
+		append(promptSpawnEnv(effortPlan, promptID), o.launch.env()...)); err != nil {
 		return promptResult{}, ExitRunFailed, fmt.Errorf("ape prompt: spawn claude: %w", err)
+	}
+	if pid, ok := repl.SessionPID(sessionName); ok {
+		live.spawned(pid)
 	}
 	defer func() { _ = repl.KillSession(context.Background(), sessionName) }() //nolint:contextcheck // cleanup-on-exit
 
@@ -667,10 +687,11 @@ func printPromptSummary(res promptResult, tele *sessiondriver.Telemetry, runDir,
 	}
 }
 
-// orchestratorAgent conducts `ape task`, `ape pipeline` and `ape change`
-// runs, so an ape-spawned session running it would be ape inside ape —
-// exactly what refuseNested forbids, one level up. Its autonomous mode runs
-// in a plain Claude Code session instead, with one level of ape under it.
+// orchestratorAgent is apex-orchestrator, which runs as `ape task
+// apex-orchestrator` (D61, D62) — ape's own record of the skill it typed is
+// what lets it start child sessions — or as /apex-orchestrator in a plain
+// Claude Code session; never as an `ape prompt` agent, whose session the
+// nesting rule does not know as an orchestrator.
 const orchestratorAgent = "apex-orchestrator"
 
 // refuseOrchestrator is the preflight check for orchestratorAgent.
@@ -720,6 +741,6 @@ func promptEffortPlan(o promptOptions) (effort.Plan, error) {
 	return effort.Decide(o.effort, source, table, o.model), nil
 }
 
-const orchestratorRefusal = "ape prompt --agent apex-orchestrator is refused: the orchestrator starts ape runs, " +
-	"and ape never runs inside an ape-spawned session. Run it in a plain Claude Code session instead: " +
-	"start `claude` from a plain shell and run `/apex-orchestrator <request>` there"
+const orchestratorRefusal = "ape prompt --agent apex-orchestrator is refused: the orchestrator starts ape sessions, " +
+	"and only an `ape task apex-orchestrator` run may (D62). Run `ape task apex-orchestrator --args <M> --detach`, " +
+	"or start `claude` from a plain shell and run `/apex-orchestrator <request>` there"

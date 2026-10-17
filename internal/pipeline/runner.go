@@ -71,6 +71,16 @@ type RunOptions struct {
 	// own entries.
 	SpawnEnv []string
 
+	// Depth and ParentRun are the run's place in the nesting rule (D62),
+	// recorded in its manifest; 0 and "" record nothing.
+	Depth     int
+	ParentRun string
+
+	// OnSessionSpawn fires with the pid of each claude the runner spawns,
+	// once it has started. `ape task` records it in the live-session
+	// registry the nesting rule reads.
+	OnSessionSpawn func(pid int)
+
 	// SessionKind is the command that owns this run — pipeline, task,
 	// change or script — stamped into every stage's session as
 	// APE_SESSION=<kind>/<run-id> (repl.EnvApeSession). Empty means
@@ -393,6 +403,7 @@ func Run(ctx context.Context, spec *Spec, opts RunOptions) error {
 	if mw != nil {
 		mw.manifest.ClaudeVersion = claudeVersion(ctx, opts.ClaudeBin)
 		mw.manifest.FileReadMaxOutputTokens = repl.FileReadMaxOutputTokens
+		mw.manifest.Depth, mw.manifest.ParentRun = opts.Depth, opts.ParentRun
 		if ext != nil {
 			enabled := ext.Enabled
 			if enabled == nil {

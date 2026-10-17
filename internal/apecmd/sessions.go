@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -32,10 +33,15 @@ func newSessionsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sessions",
 		Short: "List, prune, or open the URL of live ape sessions",
-		Long: `Live web-mode sessions are tracked in ~/.ape/registry.json, and this
-subcommand inspects that registry. The only writer was ` + "`ape pipeline`" + `'s web
-mode, retired with APEX v0, so this ape adds no rows: it reads and prunes
-what an older ape left.
+		Long: `Live ape sessions are tracked in ~/.ape/registry.json, and this
+subcommand inspects that registry. Every model session ape launches is a row
+while it runs — ape task, ape prompt, ape chat, and the change review --run
+and ape script sessions that run through them — with its run id, the skill
+ape typed, its depth and parent run (the nesting rule, D62), the ape
+process running it (PID) and the claude it spawned (claude_pid in JSON).
+ape reads those rows to tell which session a command runs under, so a
+pruned row only ever belongs to a process that is gone. Rows an older ape
+wrote for ` + "`ape pipeline`" + `'s web mode, retired with APEX v0, carry a port and URL.
 
   ape sessions               Show one row per live session.
   ape sessions prune         Drop rows whose PID is no longer running.
@@ -44,7 +50,7 @@ what an older ape left.
                              multiple sessions match.`,
 		Example: "  ape sessions\n  ape sessions --output-format json",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			rows, err := sessions.Prune(sessions.DefaultPath())
+			rows, err := sessions.Prune(sessions.Path())
 			if err != nil {
 				return err
 			}
@@ -67,7 +73,7 @@ func newSessionsPruneCmd() *cobra.Command {
 		Short:   "Drop registry rows whose PID is no longer running",
 		Example: "  ape sessions prune\n  ape sessions prune --output-format json",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			rows, err := sessions.Prune(sessions.DefaultPath())
+			rows, err := sessions.Prune(sessions.Path())
 			if err != nil {
 				return err
 			}
@@ -96,7 +102,7 @@ func newSessionsOpenCmd() *cobra.Command {
 		Example: "  ape sessions open ~/projects/foo",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			rows, err := sessions.Prune(sessions.DefaultPath())
+			rows, err := sessions.Prune(sessions.Path())
 			if err != nil {
 				return err
 			}
@@ -135,21 +141,31 @@ func printSessions(rows []sessions.Session, format output.Format) error {
 			return nil
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(tw, "PID\tAGE\tPORT\tURL\tCOMMAND\tCWD")
+		fmt.Fprintln(tw, "PID\tAGE\tCOMMAND\tRUN\tSKILL\tDEPTH\tPARENT\tURL\tCWD")
 		now := time.Now()
 		for _, r := range rows {
 			fmt.Fprintf(
-				tw, "%d\t%s\t%d\t%s\t%s\t%s\n",
+				tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				r.PID,
 				ageOf(now, r.StartedAt),
-				r.Port,
-				r.URL,
 				r.Command,
+				orDash(r.RunID),
+				orDash(r.Skill),
+				orDash(depthText(r.Depth)),
+				orDash(r.ParentRun),
+				orDash(r.URL),
 				r.CWD,
 			)
 		}
 		return tw.Flush()
 	}
+}
+
+func depthText(d int) string {
+	if d <= 0 {
+		return ""
+	}
+	return strconv.Itoa(d)
 }
 
 func ageOf(now, t time.Time) string {

@@ -3,6 +3,7 @@ package cost
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -52,6 +53,10 @@ func RebuildRollup(projectRoot string) (*Rollup, error) {
 type manifestForRollup struct {
 	RunID     string    `yaml:"run_id"`
 	StartedAt time.Time `yaml:"started_at"`
+	Status    string    `yaml:"status"`
+	// ParentRun / Depth: the run's place in the nesting rule (D62).
+	ParentRun string `yaml:"parent_run"`
+	Depth     int    `yaml:"depth"`
 	Totals    struct {
 		CostUSD             float64                     `yaml:"cost_usd"`
 		TokensInput         int                         `yaml:"tokens_input"`
@@ -302,12 +307,49 @@ func FindPromptSession(projectRoot, promptID string) (PromptSession, bool) {
 
 // RunManifest is one run's cost summary, read by `ape costs run <id>`.
 // PLAN-10 D5.
+//
+//nolint:tagliatelle // snake_case, like the rest of ape's cost JSON
 type RunManifest struct {
 	Name     string            `json:"name"` // pipeline name or task skill
 	RunID    string            `json:"run_id"`
 	Kind     string            `json:"kind"` // "pipeline" or "task"
 	Totals   Totals            `json:"totals"`
 	PerModel map[string]Totals `json:"per_model,omitempty"`
+	// ParentRun / Depth: the run's place in the nesting rule (D62); a child
+	// of an orchestrator run names it.
+	ParentRun string `json:"parent_run,omitempty"`
+	Depth     int    `json:"depth,omitempty"`
+	// Children are the runs this one started, and TreeCostUSD its own cost
+	// plus theirs. Totals stay the run's own session.
+	Children    []ChildRun `json:"children,omitempty"`
+	TreeCostUSD float64    `json:"tree_cost_usd,omitempty"`
+}
+
+// ChildRun is one run another run started (its manifest's parent_run).
+//
+//nolint:tagliatelle // snake_case, like the rest of ape's cost JSON
+type ChildRun struct {
+	Run     string  `json:"run"`
+	Skill   string  `json:"skill"`
+	CostUSD float64 `json:"cost_usd"`
+	Status  string  `json:"status,omitempty"`
+}
+
+// ChildRuns lists the task runs whose manifest names parentRun as their
+// parent, oldest first, and the sum of their costs.
+func ChildRuns(projectRoot, parentRun string) (children []ChildRun, costUSD float64) {
+	if parentRun == "" {
+		return nil, 0
+	}
+	_ = walkManifests(runlog.TasksRoot(projectRoot), func(name string, m *manifestForRollup, _ time.Time) {
+		if m.ParentRun != parentRun {
+			return
+		}
+		children = append(children, ChildRun{Run: m.RunID, Skill: name, CostUSD: m.Totals.CostUSD, Status: m.Status})
+		costUSD += m.Totals.CostUSD
+	})
+	sort.Slice(children, func(i, j int) bool { return children[i].Run < children[j].Run })
+	return children, costUSD
 }
 
 // FindRunManifest locates a run by run-id under _output/ape/pipelines/
@@ -333,10 +375,14 @@ func FindRunManifest(projectRoot, runID string) (RunManifest, bool) {
 			if !ok {
 				continue
 			}
-			return RunManifest{
-				Name:  ent.Name(),
-				RunID: m.RunID,
-				Kind:  tree.Kind,
+			children, childCost := ChildRuns(projectRoot, m.RunID)
+			rm := RunManifest{
+				Name:      ent.Name(),
+				RunID:     m.RunID,
+				Kind:      tree.Kind,
+				ParentRun: m.ParentRun,
+				Depth:     m.Depth,
+				Children:  children,
 				Totals: Totals{
 					CostUSD:             m.Totals.CostUSD,
 					InputTokens:         m.Totals.TokensInput,
@@ -346,7 +392,11 @@ func FindRunManifest(projectRoot, runID string) (RunManifest, bool) {
 					NumTurns:            m.Totals.NumTurns,
 				},
 				PerModel: perModelTotals(m.Totals.ModelUsage),
-			}, true
+			}
+			if len(children) > 0 {
+				rm.TreeCostUSD = m.Totals.CostUSD + childCost
+			}
+			return rm, true
 		}
 	}
 	return RunManifest{}, false

@@ -212,14 +212,6 @@ func newTaskCmd() *cobra.Command {
   ape task apex-create-prd --agent apex-agent-pm --output-format json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := refuseNested("ape task"); err != nil {
-				return err
-			}
-			jsonMode := jsonAlias || outputFormat == "json"
-			if !jsonMode && outputFormat != "human" {
-				fmt.Fprintf(os.Stderr, "Error: --output-format must be human or json, got %q\n", outputFormat)
-				os.Exit(ExitUsage)
-			}
 			projectRoot := cwdFlag
 			if projectRoot == "" {
 				wd, err := os.Getwd()
@@ -228,13 +220,28 @@ func newTaskCmd() *cobra.Command {
 				}
 				projectRoot = wd
 			}
+			// The nesting rule (D62), before anything else is read or
+			// started: what the session this runs in may start.
+			launch, err := gateSession("ape task", args[0], projectRoot)
+			if err != nil {
+				return sessionRefusal(err)
+			}
+			jsonMode := jsonAlias || outputFormat == "json"
+			if !jsonMode && outputFormat != "human" {
+				fmt.Fprintf(os.Stderr, "Error: --output-format must be human or json, got %q\n", outputFormat)
+				os.Exit(ExitUsage)
+			}
 			// Backlog 38: a v0 project runs its skills on its pinned v0 ape.
 			if apexv1.IsV0Project(apexv1.FindRoot(projectRoot)) {
 				return usageErr(errors.New(apexv1.V0ProjectMsg))
 			}
 			if detachFlag {
-				return startDetached(cmd, projectRoot)
+				return startDetached(cmd, projectRoot, launch, jsonMode)
 			}
+			if err := launch.acquire(projectRoot, lockToken()); err != nil {
+				return sessionRefusal(err)
+			}
+			defer launch.release()
 			if handoffFlag != "" {
 				prompt, err := resolveHandoffPrompt(handoffFlag, cmd.Flags().Changed("prompt"))
 				if err != nil {
@@ -290,6 +297,7 @@ func newTaskCmd() *cobra.Command {
 				eventsPrefix:          eventsPrefixFlag,
 				uploadTranscripts:     uploadTranscripts,
 				transcriptStore:       transcriptStore,
+				launch:                launch,
 			}
 			return runTask(cmd.Context(), opts)
 		},
@@ -353,6 +361,9 @@ type taskOptions struct {
 	eventsPrefix      string
 	uploadTranscripts bool
 	transcriptStore   string
+	// launch is the session's place in the nesting rule (D62), decided by
+	// the caller's gateSession; nil decides it at dispatch.
+	launch *sessionLaunch
 }
 
 // resolveHandoffPrompt derives the --prompt value from --handoff: a
@@ -566,6 +577,22 @@ func dispatchTask(ctx context.Context, o taskOptions) (taskRun, error) {
 // here and override cfg's, so no caller can dispatch a task without
 // them. `ape script` brings its own eventing and session kind in cfg.
 func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRun, error) {
+	// The nesting rule (D62): a caller that has not applied it yet gets it
+	// here, so no dispatch starts a session the rule would refuse.
+	if o.launch == nil {
+		l, err := gateSession("ape task", o.skill, o.projectRoot)
+		if err != nil {
+			return taskRun{}, &taskPreflightError{err: err}
+		}
+		o.launch = l
+	}
+	cfg.launch = o.launch
+	// A child session dies with the orchestrator run that started it: when
+	// that run's ape process is gone, the session is stopped (a detached
+	// one's supervisor does the same, and marks its handle).
+	ctx, stopWatch := watchParent(ctx, o.launch.parentPID)
+	defer stopWatch()
+
 	// An APEX v1 project decides the session's model and effort itself
 	// (backlog 29): the effort goes on claude's command line, never in
 	// CLAUDE_CODE_EFFORT_LEVEL, and nothing is passed when nothing decided.
@@ -619,6 +646,7 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	runErr := runWithInteractive(ctx, spec, o.projectRoot, cfg)
 	recordStopGate(o.projectRoot, o.skill, manifestDir, cfg.stopGate)
 	recordLaunch(o.projectRoot, o.skill, manifestDir, v1Launch)
+	recordLineage(ctx, o.projectRoot, o.skill, manifestDir, o.launch)
 	duration := time.Since(start)
 	if pfe, ok := errors.AsType[*pipeline.PreflightError](runErr); ok {
 		// Nothing spawned, so there is no run to report or assert.
@@ -744,6 +772,7 @@ func runTask(ctx context.Context, o taskOptions) error {
 	res, err := dispatchTask(ctx, o)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		o.launch.release()
 		os.Exit(taskPreflightExit(err))
 	}
 	env := res.Envelope
@@ -770,6 +799,7 @@ func runTask(ctx context.Context, o taskOptions) error {
 		for _, v := range res.Contract.Violations {
 			fmt.Fprintf(os.Stderr, "Error: %s: %s\n", v.Check, v.Message)
 		}
+		o.launch.release()
 		os.Exit(env.ExitCode)
 	}
 	return nil

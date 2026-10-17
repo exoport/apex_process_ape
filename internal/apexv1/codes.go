@@ -92,6 +92,8 @@ var DiagnosticCodes = []CodeDoc{
 	{"usage.verdict", 2, "stop", "review: --verdict is not pass or block"},
 	{"review.nested", 2, "stop", "review --run inside a review session (depth 1)"},
 	{"project.not-initialized", 2, "person", "no development folder: run `ape project init`"},
+	{CodeSessionDepth, 2, "stop", "ape task, prompt, chat or change review --run from a model session that may not start one (D62): depth 1 that is not ape's own apex-orchestrator run, or depth 2 (a session an orchestrator started); depth comes from what ape recorded at launch (APE_DEPTH and the process ancestry), never from the model — the session finishes its own work; a person or the orchestrator starts the next session. ape script refuses at any depth >= 1"},
+	{CodeSessionNotAllowed, 2, "stop", "an apex-orchestrator run starting a session that is not `ape task <skill>` / `ape change review --run` for a skill on its allow-list (the core skills apex-plan, apex-change, apex-apply, apex-review, apex-release, plus tools: skills) (D62)"},
 	{"session.person-only", 2, "person", "a person-only flag or command from a model session (APE_SESSION or CLAUDECODE set): --allow-pending-human, --accept-red (D45), ape milestone approve, ape change approve, ape change answer (D47 Q6) — a person runs it from a terminal outside Claude Code (a `!` line inside Claude Code is a model session)"},
 	{"usage.lift-exclude", 2, "stop", "lift: an --exclude glob does not compile"},
 	{"usage.unclassified", 2, "stop", "a usage error without a code (a bug: report it)"},
@@ -178,6 +180,8 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeDeltaConflict, 3, "replan", "the delta no longer applies to the current specs; nothing written"},
 	{CodeFolderExists, 3, "stop", "the archive folder already exists; nothing written"},
 	{"change.requirement-conflict", 3, "replan", "another active change claims the same requirement"},
+	{CodeChildRunning, 3, "retry", "ape task / change review --run from an apex-orchestrator run that already has a child session running (D62: one at a time) — wait for it (`ape run wait <id> --wait 9m`), then start the next"},
+	{CodeOrchestratorRunning, 3, "retry", "ape task apex-orchestrator in a project that already has a live apex-orchestrator run (D62: one per project) — wait for it to end, or stop it, then start again"},
 	{"conflict.unclassified", 3, "stop", "a conflict without a code (a bug: report it)"},
 
 	// findings (exit 1, from project check / change check)

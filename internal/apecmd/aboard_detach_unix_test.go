@@ -17,25 +17,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// asApeBinary turns this test binary into ape for a subprocess, so a detached
-// board start — which re-runs os.Executable() — can be tested without a build
-// step. The child goes through Execute and ExitCode exactly as cmd/ape does.
-const asApeBinary = "APE_APECMD_TEST_AS_BINARY"
-
-func TestMain(m *testing.M) {
-	if os.Getenv(asApeBinary) == "1" {
-		if err := Execute(); err != nil {
-			code, silent := ExitCode(err)
-			if !silent {
-				_, _ = os.Stderr.WriteString("Error: " + err.Error() + "\n")
-			}
-			os.Exit(code)
-		}
-		os.Exit(ExitOK)
-	}
-	os.Exit(m.Run())
-}
-
 // apeProcess runs this binary as `ape <args>` and returns what it printed.
 func apeProcess(t *testing.T, args ...string) (out string, code int) {
 	t.Helper()

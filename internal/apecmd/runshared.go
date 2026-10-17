@@ -295,6 +295,12 @@ type runConfig struct {
 	// runner and set their own.
 	sessionKind string
 
+	// launch is the session's place in the nesting rule (D62): its lineage
+	// goes into the session's environment and the run's manifest, and the
+	// run is a row in the live-session registry while it lasts. Nil records
+	// nothing.
+	launch *sessionLaunch
+
 	// claudeBin overrides the claude executable the interactive runner
 	// spawns. Empty defaults to "claude" (pipeline.RunOptions default). A
 	// test seam — `apescript` orchestration runs set it to a bash stand-in

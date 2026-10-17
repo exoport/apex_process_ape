@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -928,7 +929,13 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		return err
 	}
 
+	var live *liveSession
+	defer func() { live.end() }()
 	onRunDir := func(dir string) {
+		// The run's row in the live-session registry, and its record on
+		// the detached run's handle when it is one (D62).
+		live = registerSession(sessionKindOf(cfg), projectRoot, runIDFromDir(dir), cfg.launch)
+		noteDetachedRun(projectRoot, dir)
 		runLogMu.Lock()
 		if rl == nil {
 			if w, openErr := runlog.New(dir, runlog.WithClaudeBin(cfg.claudeBin)); openErr == nil {
@@ -959,8 +966,11 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 		EffortTable:       cfg.effortTable,
 		EffortAsArg:       cfg.effortAsArg,
 		EffortSource:      cfg.effortSource,
-		SpawnEnv:          cfg.spawnEnv,
+		SpawnEnv:          append(slices.Clone(cfg.spawnEnv), cfg.launch.env()...),
 		SessionKind:       sessionKindOf(cfg),
+		Depth:             cfg.launch.depthOrZero(),
+		ParentRun:         cfg.launch.parentRunOrEmpty(),
+		OnSessionSpawn:    func(pid int) { live.spawned(pid) },
 		ApeVersion:        Version,
 		ManifestDir:       cfg.manifestDir,
 		FromStage:         cfg.fromStage,

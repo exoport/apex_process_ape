@@ -98,8 +98,10 @@ Exit codes: 0 success · 1 the script returned an error, panicked, or a
 launched run failed · 2 usage or read error (no file, bad flags).`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := refuseNested("ape script"); err != nil {
-				return err
+			// A script starts model sessions: a conductor, at depth 0 only
+			// (D62, RC3-PLAN Q6).
+			if err := refuseInSession("ape script"); err != nil {
+				return sessionRefusal(err)
 			}
 			format := output.Format(outputFormat)
 			if format != output.FormatHuman && format != output.FormatJSON && format != output.FormatYAML {

@@ -139,6 +139,10 @@ type StatusReport struct {
 	// LatestRun is the newest ape task run's outcome (H20): a usage-limit
 	// stop carries its reset. Absent before the first run.
 	LatestRun *LatestRun `json:"latest_run,omitempty"`
+	// Sessions are the model sessions ape launched that run in the project
+	// now, with their depth and parent run (D62): an apex-orchestrator run
+	// at depth 1 and its one child at depth 2. Always present ([] when none).
+	Sessions []LiveSession `json:"sessions"`
 }
 
 // Status builds the report.
@@ -161,6 +165,7 @@ func (p *Project) Status() *StatusReport {
 	r.Spend.TotalUSD = round2(r.Spend.TotalUSD)
 	r.Spend.Note = "sum of finished ape task/pipeline run manifests; a run still in progress is not counted yet"
 	r.LatestRun = p.LatestRun()
+	r.Sessions = p.LiveSessions()
 
 	ctx := context.Background()
 	if rm := p.roadmap(); rm != nil {

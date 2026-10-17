@@ -1,6 +1,14 @@
 // Package sessions maintains ~/.ape/registry.json — the cross-project
-// list of live `ape chat` / `ape pipeline` (web mode) invocations so
-// users can list, prune, and reopen them. PLAN-5 / C5.
+// list of live ape sessions: every model session ape launches (`ape task`,
+// `ape prompt`, `ape chat`, and the `ape change review --run` and `ape
+// script` sessions that run through them), and the web-mode sessions an
+// older ape wrote. PLAN-5 / C5.
+//
+// The rows for model sessions are also how ape tells what session a
+// command runs under (the nesting rule, D62): a row names the ape process
+// that runs the session and the claude process it spawned, and a command
+// whose ancestors include either runs inside that session, whatever its
+// environment says.
 package sessions
 
 import (
@@ -14,6 +22,8 @@ import (
 )
 
 // Session is one row in the registry.
+//
+//nolint:tagliatelle // snake_case, like every other file ape writes for tools to read
 type Session struct {
 	PID       int       `json:"pid"`
 	CWD       string    `json:"cwd"`
@@ -21,6 +31,21 @@ type Session struct {
 	Port      int       `json:"port"`
 	URL       string    `json:"url"`
 	StartedAt time.Time `json:"started_at"`
+
+	// The fields below are a model session's (D62), absent on a web-mode
+	// row. PID is then the ape process running the session, and ClaudePID
+	// the claude it spawned (0 until the spawn).
+	ClaudePID int `json:"claude_pid,omitempty"`
+	// RunID is the run's id: the manifest's run id (task), the prompt or
+	// chat id.
+	RunID string `json:"run_id,omitempty"`
+	// Skill is the skill ape typed into the session (task), "" otherwise.
+	Skill string `json:"skill,omitempty"`
+	// Depth is the session's nesting depth: 1 for one a terminal, a script
+	// or the service daemon started, 2 for one an orchestrator started.
+	Depth int `json:"depth,omitempty"`
+	// ParentRun is the run of the session that started this one (depth 2).
+	ParentRun string `json:"parent_run,omitempty"`
 }
 
 // registryShape is the on-disk container; we keep the wrapper so a
@@ -40,6 +65,10 @@ func DefaultPath() string {
 	}
 	return filepath.Join(home, ".ape", "registry.json")
 }
+
+// Path is the registry every reader and writer uses: DefaultPath, replaced
+// by tests that must not touch the user's registry.
+var Path = DefaultPath
 
 // Register appends s to the registry at path. Acquires an exclusive
 // flock for the write so concurrent ape invocations cannot interleave.
@@ -72,6 +101,59 @@ func Deregister(path string, pid int) error {
 		reg.Sessions = out
 		return writeBack(f, reg)
 	})
+}
+
+// DeregisterRun removes the row of run runID that process pid registered:
+// one process (an `ape script`) may run several sessions at once.
+func DeregisterRun(path string, pid int, runID string) error {
+	return withLockedFile(path, func(f *os.File) error {
+		reg, err := decode(f)
+		if err != nil {
+			return err
+		}
+		out := reg.Sessions[:0]
+		for _, row := range reg.Sessions {
+			if row.PID != pid || row.RunID != runID {
+				out = append(out, row)
+			}
+		}
+		reg.Sessions = out
+		return writeBack(f, reg)
+	})
+}
+
+// UpdateRun applies change to the row of run runID that process pid
+// registered. No-op if not found.
+func UpdateRun(path string, pid int, runID string, change func(*Session)) error {
+	return withLockedFile(path, func(f *os.File) error {
+		reg, err := decode(f)
+		if err != nil {
+			return err
+		}
+		for i := range reg.Sessions {
+			if reg.Sessions[i].PID == pid && reg.Sessions[i].RunID == runID {
+				change(&reg.Sessions[i])
+			}
+		}
+		return writeBack(f, reg)
+	})
+}
+
+// Alive lists the rows whose PID is running, without taking the write lock
+// or rewriting the file: what a reader that must not block on, or modify,
+// another process's registry needs.
+func Alive(path string) ([]Session, error) {
+	rows, err := List(path)
+	if err != nil {
+		return nil, err
+	}
+	out := rows[:0]
+	for _, row := range rows {
+		if pidAlive(row.PID) {
+			out = append(out, row)
+		}
+	}
+	return out, nil
 }
 
 // Prune drops rows whose PID is no longer running. Returns the rows
