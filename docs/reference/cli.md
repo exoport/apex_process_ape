@@ -1115,7 +1115,7 @@ Branch per change (trial decision D38):
 
   - start creates change/<id> from the branch HEAD is on (recorded as base_branch, with
     base_sha) and checks it out; start on a change whose branch exists checks it out
-  - start, verify, review and archive run the change's code, and need HEAD on
+  - start, verify, review and archive run the change's checks, and need HEAD on
     change/<id> (start and archive switch to it; verify and review refuse elsewhere with
     exit 1, code change.wrong-branch: `git switch change/<id>`)
   - records from any branch (D51 Q17): check, diff, approve, accept, block, answer and
@@ -1216,14 +1216,13 @@ without a checkout, the folder taken as the branch holding its records has it (i
 branch, or the base for a draft), and the working tree is not touched. The archived
 folder holds the change's files as its branch last had them, the move is committed on the
 base branch, change/<id> is deleted and its last commit recorded as branch_tip in the
-archived state.json, kept reachable as refs/apex/abandoned/<id> (tip_ref; H16, local). None of the change's code reaches the base branch. A draft never
+archived state.json, kept reachable as refs/apex/abandoned/<id> (tip_ref; H16, local). None of the change's work reaches the base branch. A draft never
 started (no branch) is abandoned on the branch HEAD is on, as before.
 
-change.md's cap holds here too (D69): over caps.change_md (default 16 KB) abandon refuses
-with change.too-big — trim it under the cap, commit, abandon again — and while
-_apex/config.yaml caps: holds a value above its ceiling, with caps.over-ceiling.
+Abandon never refuses for size (D89): no caps.change_md, file ceiling or caps: check — it
+moves the folder as used and never trims or edits it.
 
-Exit codes: 0 abandoned · 1 no such change, archived, change.md over its cap, caps.over-ceiling, dirty tree, change/<id> checked out in
+Exit codes: 0 abandoned · 1 no such change, archived, dirty tree, change/<id> checked out in
 another worktree, the base branch checked out in another worktree (git.base-checked-out), or git
 failed · 2 usage · 3 the archive folder already exists.
 
@@ -1475,8 +1474,11 @@ ape change archive <id> [flags]
 Archive a reviewed change onto its base branch (trial decision D38):
 
   1. needs status reviewed (review pass), the plan frozen at start unchanged, and change.md
-     within caps.change_md (default 16 KB; ## Notes counts — change.too-big: trim it, D69;
-     caps.over-ceiling while caps: holds a value above its ceiling); human-
+     without ## Notes within caps.change_md (default 16 KB, D69, D89 — change.too-big: the
+     plan is frozen at start, so only ## Why can have grown; move what it gained since
+     start to ## Notes, commit, archive again), the whole change.md within the 48 KB file
+     ceiling (change.over-ceiling: move bulk to the change's assets/), and no
+     caps.over-ceiling (caps: holding a value above its ceiling); human-
      review tasks must be accepted, unless --allow-pending-human (recorded) — a person's
      flag only (D45): refused in a model session (APE_SESSION or CLAUDECODE set) with exit
      2, session.person-only; the orchestrator leaves such a change reviewed and moves on.
@@ -1486,7 +1488,7 @@ Archive a reviewed change onto its base branch (trial decision D38):
      change/<id>); the tree must be clean — uncommitted files inside the change's own
      folder (review.md a review left) are first committed on change/<id> as
      "apex: <id> notes"; anything else refuses (code tree.dirty)
-  3. refused if code changed on change/<id> since the review (review.stale); refused up
+  3. refused if the work changed on change/<id> since the review (review.stale); refused up
      front while the base branch is behind its upstream (base.behind-upstream: pull;
      the local remote-tracking ref, never fetched — D45)
   4. when the base branch moved ahead of base_sha, catches the change up — the one path
@@ -1495,9 +1497,9 @@ Archive a reviewed change onto its base branch (trial decision D38):
      for apex-apply, the change back to in-progress, and archive exits 3,
      change.conflicted), re-runs the baseline at the new
      base tip and marks the verify stale; here the change stays reviewed
-  5. re-runs verify when the code moved since it or it is stale — the base had moved (red
+  5. re-runs verify when the work moved since it or it is stale — the base had moved (red
      → the change goes back to in-progress on its branch, exit 1, counted as an attempt;
-     a green one keeps it reviewed: the review judged the change's own code)
+     a green one keeps it reviewed: the review judged the change's own work)
   6. applies the delta to development/specs/: ADDED appends, MODIFIED replaces, REMOVED
      deletes; a new capability gets specs/<cap>/spec.md (Purpose from the change's Why).
      Any conflict — including a MODIFIED that would drop a scenario the current spec has,
@@ -1505,7 +1507,8 @@ Archive a reviewed change onto its base branch (trial decision D38):
      start (another change archived first: re-plan and re-start) — → exit 3 and nothing
      reaches the base branch
   7. switches to the base branch, `git merge --squash change/<id>`, writes the specs,
-     moves the folder to development/archive/<YYYY-MM-DD>-<id>/ (status archived,
+     moves the folder, exactly as used — archive never trims it or edits change.md —
+     to development/archive/<YYYY-MM-DD>-<id>/ (status archived,
      branch_tip = change/<id>'s last commit) — with "evidence: archive" in
      _apex/config.yaml (H23; default off) also its evidence/: one file per check of the
      final verify (command, exit, duration, output sha256, and the output from the log,
@@ -1539,7 +1542,8 @@ exits 1, archive.interrupted (retry), saying what was rolled back; archive again
 
 Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review, a
 git hook refused the squash,
-pending human-review, dirty tree, no change branch, the base behind its upstream
+pending human-review, change.md over its cap or the file ceiling, dirty tree, no change
+branch, the base behind its upstream
 (base.behind-upstream), the base branch checked out in another
 worktree (git.base-checked-out: stop, do not re-plan), or git failed · 2 usage, or
 --allow-pending-human from a model session · 3 the
@@ -1636,8 +1640,11 @@ Validate one change and list every failure:
     when: the change matches (the orchestrator runs each before the review; else
     tools.unknown, D74); any other key must start with x-
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
-  - change.md ≤ caps.change_md and design.md ≤ caps.design_md (16 KB each by default;
-    _apex/config.yaml caps:, see `ape project check --help`) ("split this change")
+  - change.md without its ## Notes section ≤ caps.change_md (D89; change.too-big) and
+    design.md ≤ caps.design_md (16 KB each by default; _apex/config.yaml caps:, see
+    `ape project check --help`) ("split this change"); ## Notes is bounded only by
+    the 48 KB file ceiling on the whole change.md, whatever the cap (change.over-ceiling:
+    ## Notes is for working notes — move bulk to the change's assets/)
   - every spec the delta touches stays ≤ caps.spec (24 KB) once merged — the in-memory merge
     `ape change diff` shows and archive makes (else change.spec-too-big: split the
     capability first; start runs this check too, so it fails before any work, H18)
@@ -1783,14 +1790,14 @@ ape change review <id> (--verdict pass|block --findings <file> | --run [--wait 9
 Record the review of a verified change. --findings names the review file (normally
 development/changes/<id>/review.md); it must exist and is recorded by path.
 
-  pass   needs a green verify whose code has not moved since → status reviewed
+  pass   needs a green verify whose work has not moved since → status reviewed
   block  → status in-progress (fix, verify, review again)
 
 HEAD must be on the change's branch, change/<id> (D38; else exit 1, code
 change.wrong-branch): the verdict is committed there.
 
 --run reviews the change in its own Claude Code session — a separate process with an
-empty context and its own hooks, never a sub-agent of the session that built it:
+empty context and its own hooks, never a sub-agent of the session that did the work:
 ape starts `ape task apex-review --args <id>` detached (survives the caller's shell),
 and that session writes review.md and records the verdict with --verdict/--findings.
 It counts as starting apex-review under the nesting rule (D62; see ape task --help):
@@ -1800,7 +1807,7 @@ another child runs); from any other session — apex-apply a person ran with ape
 say — refused (exit 2, session.depth); never from inside a review session. The
 review session is depth 2 under an orchestrator, its manifest records depth and
 parent_run, and it is stopped when that orchestrator's run ends.
-  - which changes: a verified one; or a reviewed one whose review is stale — code
+  - which changes: a verified one; or a reviewed one whose review is stale — the work
     changed since the review's sha, what archive refuses as review.stale (D51 Q16):
     --run first verifies it again in-process, as `ape change verify <id>` would
     (JSON "verify"; a red verify is returned as its error, verify.red, and no session
@@ -1832,7 +1839,7 @@ parent_run, and it is stopped when that orchestrator's run ends.
     defaults. The effort is passed as claude --effort. The review session's manifest
     records each and its source under review_launch (and, the same, under launch).
 
-Exit codes: 0 recorded / review passed · 1 not verified, code changed since the verify,
+Exit codes: 0 recorded / review passed · 1 not verified, the work changed since the verify,
 --run: a fresh review, or a red re-verify of a stale one, review block (--run: findings
 in JSON "outcome"), verdict voided, or no verdict · 2 usage
 (bad verdict, findings file missing, --run inside a review session, or the nesting
@@ -1888,22 +1895,22 @@ Start a draft (or resume a blocked or answered) change:
      the command tasks and the effective spec's scenario checks of the capabilities the
      change touches (plus any scenario sharing a task's command — see ape change verify
      --help); from the project root with sh -c; output under _apex/state/logs/<id>/. With
-     "regression: <cmd>" in _apex/config.yaml (the project's own test suite; with tiers,
+     "regression: <cmd>" in _apex/config.yaml (the project's own check command; with tiers,
      "regression: {change: <cmd>, milestone: <cmd>}", its change tier) it runs that too,
      the same way, and records it in state.json (regression_baseline: cmd, exit, output
      sha256, sha); a red regression baseline is recorded, it does not block start.
      Vacuous checks (backlog 43): when the change has an ADDED or MODIFIED delta, a task
-     check that already passes here, before any of the change's code, proves nothing
+     check that already passes here, before any of the change's work, proves nothing
      about it — start refuses (exit 1, change.vacuous-check, nothing written, no branch
      left): rewrite the check to fail until the change is done, or write a check meant to
      stay green as "- T<n> <what> — regression: <command>". Not judged for Delta: none,
-     a REMOVED-only delta, or a task a re-plan adds after the change has code
+     a REMOVED-only delta, or a task a re-plan adds after the change has work
   5. sets in-progress, freezes the plan (SHA-256 of change.md outside ## Why and ## Notes), fingerprints
      the spec block of every requirement it MODIFIES or REMOVES, commits state.json
      ("apex: <id> in-progress") on change/<id>, and resets the attempts count since start
      (_apex/state/attempts.json)
 
-All of the change's work — code commits, ape's status commits — then happens on
+All of the change's work — work commits, ape's status commits — then happens on
 change/<id>. Start on a change whose branch exists, from another branch (the base, say),
 checks change/<id> out first (clean tree); when the change is started and nothing needs
 re-baselining it only resumes there (JSON "resumed": true). Re-start keeps base_branch.
@@ -1933,7 +1940,7 @@ If so ape catches the change up — the one path start, verify and archive share
   - the baseline (task checks, effective-spec scenarios, regression command) is re-run
     at the NEW BASE TIP, in place — the checkout detached there, then switched back, so
     ignored files (dependencies, build caches) are present as usual — never at the
-    rebased HEAD, which holds the change's code: a new test of the change is red
+    rebased HEAD, which holds the change's work: a new check of the change is red
     there; it replaces the old baseline, and green-at-baseline is judged against it
   - recorded in state.json (rebases: [{at, from, to, head, rebased}]; base_sha = the base
     tip; the last verify kept with stale: true and stale_reason), a verified or reviewed
@@ -2103,15 +2110,15 @@ When the base branch moved ahead of base_sha, verify first catches the change up
 as `ape change start --help` describes (D40): rebase onto the base (a conflict is left on
 the branch: exit 3, change.conflicted), the baseline re-run at the new base tip, the old verify
 marked stale, a verified/reviewed change back to in-progress, "apex: <id> rebased onto
-<base>" committed; then it verifies the rebased code (JSON "catch_up"). A reviewed change
+<base>" committed; then it verifies the rebased work (JSON "catch_up"). A reviewed change
 caught up here needs a new review. Refused while a conflicted catch-up is unresolved —
 unmerged paths, or conflict markers in a file the rebase conflicted in (exit 1,
 change.unresolved-conflict: resolve, `git add`, commit).
 
-All checks exit 0 → status verified (a reviewed change whose code has not moved
+All checks exit 0 → status verified (a reviewed change whose work has not moved
 since its review stays reviewed), state.json committed. Any red → the failing checks' last
 lines are printed. Green at baseline: the change's own checks (tasks, delta scenarios) that
-already passed when they were baselined, before the code, are listed (JSON
+already passed when they were baselined, before the work, are listed (JSON
 "green_at_baseline", also recorded in state.json) for review to justify or flag.
 On red: every red verify is an attempt, counted in the git-ignored
 _apex/state/attempts.json (JSON "attempts": since the last start or re-start, which reset
@@ -2137,7 +2144,7 @@ Refused while change.md differs from the plan frozen at start outside ## Why and
 as pending.
 
 Exit codes: 0 all command checks green · 1 a check is red (the attempts cap reached
-included), uncommitted code, an unresolved conflict, or wrong status · 2 usage · 3 the change
+included), uncommitted work, an unresolved conflict, or wrong status · 2 usage · 3 the change
 does not rebase onto its moved base (the conflict is left on its branch).
 
 Detached runs (D58 2.3): the command takes the run lock of its change (or milestone),
@@ -3310,7 +3317,7 @@ Re-run budget (D58 2.5): a check whose last recorded run took longer than 60s (o
 timeouts.check.max, if lower) is never re-run, nor any once one hook run has spent 600s;
 a check with no recorded run is re-run under that budget, and one that outruns it is not
 red. Such a check is judged from the last verify at HEAD — red stays red, with its last
-lines — or, when code moved since that verify, the stop is blocked telling the model to
+lines — or, when the work moved since that verify, the stop is blocked telling the model to
 run `ape change verify <id> --wait 9m`. The hook's timeout stays 1800s: it never runs a
 long check, the verify does.
 Allows (prints nothing) when HEAD is on no change branch (the base branch: planning,
@@ -3625,7 +3632,7 @@ ape milestone gate <M> [flags]
 ```
 
 Run the milestone's Gate: command from the project root, and every scenario check of
-the whole spec beside it as the regression suite (human-review not run; output under
+the whole spec beside it as the regression set (human-review not run; output under
 _apex/state/logs/gate-<M>/), and the project's regression command from _apex/config.yaml
 when one is configured — its milestone tier, "regression: {change: <cmd>, milestone:
 <cmd>}", else the one command (H10). The gate is green only when all pass — the regression command
@@ -3943,7 +3950,7 @@ Thirteen blocks of _apex/config.yaml can loosen what ape enforces, and are guard
   requires      unrun checks
   timeouts      how long a check, the regression command or a gate may run
   caps          the artefact size caps (D69; see ape project check --help)
-  regression    the project's own suite (unset: the net is off)
+  regression    the project's own check command (unset: the net is off)
   commit        the archive's squash (hooks: skip skips the project's hooks)
   evidence      archive|off (off keeps no evidence)
   marketplaces, plugins, tools   what runs inside a session (hooks, MCP, skills)
@@ -3994,7 +4001,14 @@ Validate the whole project and list every failure, not just the first.
   development/project.md   # <name>, ## Vision, ## Users, ## Scope, ## Out of scope,
                            ## Constraints (each non-empty); ≤ caps.project_md (16 KB;
                            no line cap)
+  development/architecture.md
+                           optional; when present ≤ caps.architecture_md (16 KB;
+                           architecture.too-big: move detail to specs/, decisions/ or
+                           docs/explanation/)
   AGENTS.md                present, ≤ caps.agents_md (16 KB; its lines are not measured);
+                           a line outside code carries @development/project.md (the
+                           configured folder; the reference counts, not the wording —
+                           agents.no-project-context: `ape project init` adds the line);
                            CLAUDE.md (if any) has the line @AGENTS.md
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
                            Gate, Goal; Budget a number when present; a "## Next"
@@ -4040,9 +4054,13 @@ Validate the whole project and list every failure, not just the first.
                              change_md    16 KB / 48 KB    design_md    16 KB / 48 KB
                              spec         24 KB / 64 KB    (per capability)
                              evidence_log  1 MiB / 16 MiB  (per check, evidence: archive)
+                             architecture_md 16 KB / 48 KB (development/architecture.md, optional)
                            A value above its ceiling is caps.over-ceiling (action person):
-                           reported here, and change check, start, archive and abandon
-                           refuse until a person fixes it
+                           reported here, and change check, start and archive refuse
+                           until a person fixes it (abandon measures nothing, D89)
+                           change_md counts change.md without ## Notes (D89); the whole
+                           change.md, Notes included, has the 48 KB ceiling whatever the
+                           cap (change.over-ceiling, action apply)
   docs                     each path _apex/config.yaml docs: names (changelog, user_docs)
                            exists (docs.missing: create it, or fix the path)
   .claude/settings.json    ape's hooks registered as `ape project init` writes them:
@@ -4104,7 +4122,7 @@ decision) can report, with the exit status it comes with and what it means.
 Every --json failure is {"ok": false, "exit": N, "error": "<one line>",
 "diagnostics": [{"severity", "code", "message", "fix", "action", "file"?, "line"?}], ...}:
 the first diagnostic is the failure itself, the rest its findings or conflicts. Branch on
-"action" (D47): retry (run the same command again), apply (apex-apply: code work or a
+"action" (D47): retry (run the same command again), apply (apex-apply: the work, or a
 re-start), review (review again), replan (apex-change re-plans), stop (the run stops), person
 (a person must act: list it, go on with other work). A code's action is the one listed here;
 where its meaning names a case that changes it (milestone.changes-in-flight), the diagnostic
@@ -4135,14 +4153,24 @@ ape project init [flags]
 ```
 
 Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten
-(one exception: the @AGENTS.md line appended to a CLAUDE.md that lacks it).
+(the exceptions: the @AGENTS.md line appended to a CLAUDE.md that lacks it, the
+project-context line added to an AGENTS.md that lacks it, and the models: defaults
+appended to an _apex/config.yaml that has no models: block).
 
   _apex/config.yaml                  project_name, development_folder, and the models:
-                                     defaults (D65) — apex-apply and apex-orchestrator
-                                     {model: sonnet, effort: high}; apex-review, apex-plan
-                                     and apex-change {model: opus, effort: medium} — written
-                                     only when the file does not exist: an existing config
-                                     is kept as it is, nothing merged in (also read, never
+                                     defaults (D65, D93) — apex-apply, apex-orchestrator
+                                     and apex-release {model: sonnet, effort: high};
+                                     apex-review, apex-plan, apex-change and apex-accept
+                                     {model: opus, effort: medium}. An existing config
+                                     with no top-level models: gets that block appended,
+                                     its own text kept byte for byte (restored, with a
+                                     warning, if the result would not parse); the
+                                     amendment is committed with "apex: project init"
+                                     only when the config was tracked and clean before,
+                                     else left for you to commit. An existing models: is
+                                     left alone: init warns (stderr; JSON "warnings") for
+                                     each of those skills it has no entry for, which then
+                                     runs on claude's default model (also read, never
                                      written: regression, effort, caps (see ape project
                                      check --help), timeouts, and limits —
                                      budget: enforce|off (default off; see ape task --help),
@@ -4153,7 +4181,16 @@ Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritt
                                      --help; notify: <command>, run on a limit stop or a
                                      blocked change — see ape task --help); see "Check
                                      settings" below
-  AGENTS.md                          the project map (skeleton)
+  AGENTS.md                          the project map (skeleton). Right under its title:
+                                     Project context: read @development/project.md before
+                                     planning or changing anything.
+                                     (the configured development folder; plain text, so
+                                     Claude Code imports project.md into every session).
+                                     An existing AGENTS.md whose lines carry no
+                                     @development/project.md outside code gets that line
+                                     after its first # heading (or at the top), and
+                                     nothing else — re-run init on a project made before
+                                     rc.4 to add it
   CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
                                      gets it appended, and nothing else
   development/project.md             vision, users, scope, out of scope, constraints (skeleton)
@@ -4181,7 +4218,10 @@ by the one above; running init again changes nothing. ape task passes the same
 hooks inline as well, so its sessions have them even when settings.json does not.
 
 Everything init wrote (and settings.json when it merged hooks) is committed as
-"apex: project init"; files that existed before are not touched and not committed.
+"apex: project init", with the files it amended (CLAUDE.md, AGENTS.md, and the config
+when it was tracked and clean); other files that existed before are not touched and
+not committed. JSON: "amended" lists the files init changed, "amended_uncommitted"
+those it left out of the commit.
 
 Plugins: when _apex/config.yaml lists marketplaces/plugins, init installs each
 plugin at project scope through the claude plugin CLI (marketplace add, install,
@@ -4209,7 +4249,7 @@ Check settings in _apex/config.yaml (read by start, verify, the gate and the hoo
 value ape cannot use, or a key it does not know inside these blocks, makes the config
 unparseable and every command refuses it):
 
-  regression: make test              the project's own suite, at start/verify/gate, failing
+  regression: make test              the project's own check command, at start/verify/gate, failing
                                      only when newly red; or in tiers:
   regression: {change: make test, milestone: make test-all}
                                      change: at start and verify (baseline-aware);
@@ -4459,7 +4499,13 @@ burst past 800 characters into a "[Pasted text #N]" placeholder that
 never runs as one. So past 700 characters the prompt is written,
 verbatim, to prompt.md in the record directory, and the typed line
 names that file (prompt.yaml records it as args_file). A plain prompt is
-typed as is.
+typed as is, whatever its length.
+
+A prompt that would not arrive as written when typed goes to prompt.md
+the same way, with or without --agent, whatever its length: one holding
+two or more spaces in a row, a tab, a line break (a newline typed
+mid-text submits the line early) or any other control character.
+Single-spaced text on one line is typed exactly as before.
 
 After typing, ape presses Enter once claude has drawn the line, then
 confirms the submit through the UserPromptSubmit hook, pressing Enter up
@@ -5851,7 +5897,7 @@ Show where the project stands, from the records ape keeps:
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
     cmd, exit, sha}]): the regression command, and scenario checks of the spec a change
     leaves untouched, that were red when a change was baselined — for the planner to
-    roadmap. A change's own task and delta checks red at baseline are normal test-first
+    roadmap. A change's own task and delta checks red at baseline are normal check-first
     and never listed
   - the base branch (the checked-out one, or the base of the change whose branch is
     checked out) against its upstream (JSON "base_upstream": {branch, upstream, ahead,
@@ -6017,7 +6063,14 @@ that never runs as a skill, so ape writes the step's --args and prompt
 text, verbatim and with its newlines, to
 stages/NN-<stage>/step-NN-<skill>.args.md in the run directory, and
 types a line that names that file instead. The step-start event records
-it as args_file. Shorter lines are typed exactly as before.
+it as args_file.
+
+The same file is used, whatever the length, when the --args or prompt
+text would not arrive as written if typed: when it holds two or more
+spaces in a row, a tab, a line break or any other control character.
+The typed line splits --args on whitespace, and a line break submits
+early. Leading and trailing whitespace of --args is not part of the
+text. Shorter, single-spaced, one-line text is typed exactly as before.
 
 After typing, ape presses Enter once claude has drawn the line, then
 confirms the submit through the UserPromptSubmit hook, pressing Enter up
