@@ -74,7 +74,7 @@ func TestCaps_AgentsAndProjectAreBytesOnly(t *testing.T) {
 }
 
 // A value above its ceiling is a project check finding, and the verbs that
-// enforce a cap refuse until a person fixes it.
+// enforce a cap refuse until a person fixes it; abandon enforces none.
 func TestCaps_OverCeilingRefusesTheCapVerbs(t *testing.T) {
 	p := fixture(t, baseFiles())
 	addChange(t, p, "add-wave", waveChange("add-wave"))
@@ -94,8 +94,7 @@ func TestCaps_OverCeilingRefusesTheCapVerbs(t *testing.T) {
 	_, err := p.Start(ctx(), "add-wave", RunOptions{})
 	require.Equal(t, CodeCheckFailed, failCode(t, err))
 	_, err = p.Abandon(ctx(), "add-wave", "dropped")
-	require.Equal(t, CodeCapsOverCeiling, failCode(t, err))
-	require.DirExists(t, p.ChangeDir("add-wave"))
+	require.NoError(t, err, "abandon measures nothing (D89 Q40)")
 }
 
 // whyGrown is change.md with n bytes more in ## Why, which may change
@@ -130,8 +129,8 @@ func TestPlanBytes(t *testing.T) {
 }
 
 // change.md's cap (16 KB by default) measures the plan — change.md less
-// ## Notes (D89) — at check and start, and at archive and abandon too
-// (D69); the whole file is held to the 48 KB ceiling.
+// ## Notes (D89) — at check and start, and at archive too (D69); the whole
+// file is held to the 48 KB ceiling. Abandon measures nothing (Q40).
 func TestCaps_ChangeMDMeasuresThePlan(t *testing.T) {
 	t.Run("check and start", func(t *testing.T) {
 		p := fixture(t, baseFiles())
@@ -194,18 +193,14 @@ func TestCaps_ChangeMDMeasuresThePlan(t *testing.T) {
 		require.NoError(t, err, "## Notes does not count against the cap")
 		require.Equal(t, grown, read(t, p, res.ArchivedTo+"/change.md"), "the folder moves exactly as used")
 	})
-	t.Run("abandon", func(t *testing.T) {
+	t.Run("abandon never refuses for size", func(t *testing.T) {
 		p := fixture(t, baseFiles())
-		addChange(t, p, "add-wave", whyGrown(waveChange("add-wave"), 16<<10))
+		big := whyGrown(waveChange("add-wave"), 16<<10) + strings.Repeat("n", 48<<10)
+		addChange(t, p, "add-wave", big)
 		commitAll(t, p, "plan: add-wave")
-		_, err := p.Abandon(ctx(), "add-wave", "too big")
-		require.Equal(t, "change.too-big", failCode(t, err))
-		require.DirExists(t, p.ChangeDir("add-wave"))
-
-		write(t, p, "development/changes/add-wave/change.md", waveChange("add-wave")+strings.Repeat("n", 16<<10))
-		commitAll(t, p, "to notes")
-		_, err = p.Abandon(ctx(), "add-wave", "too big")
-		require.NoError(t, err, "## Notes does not count")
+		res, err := p.Abandon(ctx(), "add-wave", "too big")
+		require.NoError(t, err, "over the cap and the ceiling, it is moved out of the way")
+		require.Equal(t, big, read(t, p, res.ArchivedTo+"/change.md"), "as used, never trimmed")
 	})
 }
 

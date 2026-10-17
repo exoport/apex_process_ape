@@ -1054,14 +1054,10 @@ base branch, change/<id> is deleted and its last commit recorded as branch_tip i
 archived state.json, kept reachable as refs/apex/abandoned/<id> (tip_ref; H16, local). None of the change's code reaches the base branch. A draft never
 started (no branch) is abandoned on the branch HEAD is on, as before.
 
-change.md is measured here as at archive (D69, D89): change.md without ## Notes over
-caps.change_md (default 16 KB) refuses with change.too-big — move what ## Why gained to
-## Notes, commit, abandon again — the whole file over the 48 KB ceiling with
-change.over-ceiling (move bulk to the change's assets/), and while _apex/config.yaml caps:
-holds a value above its ceiling, with caps.over-ceiling. Abandon moves the folder as used
-and never trims it.
+Abandon never refuses for size (D89): no caps.change_md, file ceiling or caps: check — it
+moves the folder as used and never trims or edits it.
 
-Exit codes: 0 abandoned · 1 no such change, archived, change.md over its cap or the file ceiling, caps.over-ceiling, dirty tree, change/<id> checked out in
+Exit codes: 0 abandoned · 1 no such change, archived, dirty tree, change/<id> checked out in
 another worktree, the base branch checked out in another worktree (git.base-checked-out), or git
 failed · 2 usage · 3 the archive folder already exists.`,
 		`  ape change abandon add-tenant-delete --reason "replaced by split-tenant-delete"`,
