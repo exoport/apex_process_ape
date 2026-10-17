@@ -86,7 +86,8 @@ func TestV1_ChangeBranchLifecycle(t *testing.T) {
 	require.Equal(t, base, git("branch", "--show-current"))
 	require.Equal(t, arch.Commit, git("rev-parse", "HEAD"))
 	require.Equal(t, baseBefore, git("rev-parse", "HEAD~1"), "exactly one commit per archived change")
-	require.Equal(t, "Add wave\n\nChange: add-wave", git("log", "-1", "--format=%B"))
+	require.Equal(t, "Add wave\n\n- feat: wave\n- review: add-wave\n\nChange: add-wave", git("log", "-1", "--format=%B"),
+		"the subject is the title; the body the branch's own commit subjects (not ape's), then the trailer (H15)")
 	require.Empty(t, git("branch", "--list", "change/*"), "the change branch is deleted")
 	for s := range strings.SplitSeq(git("log", "--format=%s"), "\n") {
 		require.NotRegexp(t, `^apex: add-wave (in-progress|verified|reviewed|notes)`, s, "a change-branch status commit reached the base")
