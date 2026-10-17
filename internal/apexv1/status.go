@@ -94,6 +94,11 @@ type ChangeTool struct {
 	Name  string `json:"name"`
 	Skill string `json:"skill"`
 	Done  *bool  `json:"done,omitempty"`
+	// Args (the unfilled template), Model and Effort are the tools: entry's
+	// (D77); empty when it sets none.
+	Args   string `json:"args,omitempty"`
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
 }
 
 // changeTools resolves a change's design and review tools against the
@@ -103,21 +108,24 @@ func changeTools(tools ToolsConfig, c *Change, st *State, lv *LastVerify, pendin
 	if c == nil {
 		return design, review
 	}
-	skill := func(slot, name string) string {
+	entry := func(slot, name string) ChangeTool {
+		ct := ChangeTool{Name: name}
 		if t := tools.Find(slot, name); t != nil {
-			return t.Skill
+			ct.Skill, ct.Args, ct.Model, ct.Effort = t.Skill, t.Args, t.Model, t.Effort
 		}
-		return ""
+		return ct
 	}
 	for _, t := range c.Tasks {
 		if t.Tool == "" {
 			continue
 		}
 		done := taskDone(t, st, lv, pending)
-		design = append(design, ChangeTool{Task: t.ID, Name: t.Tool, Skill: skill("design", t.Tool), Done: &done})
+		ct := entry("design", t.Tool)
+		ct.Task, ct.Done = t.ID, &done
+		design = append(design, ct)
 	}
 	for _, name := range c.Meta.ReviewTools {
-		review = append(review, ChangeTool{Name: name, Skill: skill("review", name)})
+		review = append(review, entry("review", name))
 	}
 	return design, review
 }

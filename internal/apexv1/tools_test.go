@@ -18,6 +18,9 @@ func TestToolsConfig_Schema(t *testing.T) {
     - {skill: s, when: x}
     - {name: extra, skill: s, when: x, mcp: srv}
     - just-a-string
+    - {name: tmpl, skill: s, when: x, args: "{change} {nope}"}
+    - {name: eff, skill: s, when: x, effort: huge}
+    - {name: full, skill: s, when: x, args: "{id} --task {task} --out {assets} {change}", model: sonnet, effort: high}
   review:
     - {name: sec, skill: "kit:security", when: "auth"}
     - {name: perf, skill: perf}
@@ -26,7 +29,10 @@ func TestToolsConfig_Schema(t *testing.T) {
 `)
 	cfg, err := LoadConfig(p.Root)
 	require.NoError(t, err, "a bad tools: block never makes the config unparseable")
-	require.Equal(t, []Tool{{Name: "mock", Skill: "mockups", When: "a screen changes"}}, cfg.Tools.Design)
+	require.Equal(t, []Tool{
+		{Name: "mock", Skill: "mockups", When: "a screen changes"},
+		{Name: "full", Skill: "s", When: "x", Args: "{id} --task {task} --out {assets} {change}", Model: "sonnet", Effort: "high"},
+	}, cfg.Tools.Design)
 	require.Equal(t, []Tool{{Name: "sec", Skill: "kit:security", When: "auth"}}, cfg.Tools.Review)
 
 	fs := p.CheckPluginContents(ctx(), nil)
@@ -37,13 +43,15 @@ func TestToolsConfig_Schema(t *testing.T) {
 		`tools.design[3]: missing name`,
 		`tools.design[4]: unknown key "mcp"`,
 		`tools.design[5]: is not a mapping`,
+		`tools.design[6]: args "{change} {nope}": unknown placeholder {nope}`,
+		`tools.design[7]: effort "huge" is not one of low, medium, high, xhigh, max`,
 		`tools.review[1]: missing when`,
 		`tools.deploy: unknown slot`,
 	} {
 		require.Contains(t, msgs, want)
 	}
 	codes := codesOf(fs)
-	require.Equal(t, 7, strings.Count(strings.Join(codes, " "), "tools.invalid"))
+	require.Equal(t, 9, strings.Count(strings.Join(codes, " "), "tools.invalid"))
 	require.Equal(t, ActionPerson, ActionFor("tools.invalid"))
 
 	for _, bad := range []string{"tools: [a, b]\n", "tools: {design: x}\n"} {
@@ -127,7 +135,7 @@ func TestTools_InstalledAndInvocable(t *testing.T) {
 
 func TestChildSkillAllowList(t *testing.T) {
 	p := settingsProject(t, "")
-	require.Equal(t, []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-release"}, p.ChildSkillAllowList(Config{}))
+	require.Equal(t, []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-release", "apex-accept"}, p.ChildSkillAllowList(Config{}))
 	writeConfigForTest(t, p.Root, `tools:
   review:
     - {name: sec, skill: "kit:security", when: a}
@@ -140,7 +148,7 @@ func TestChildSkillAllowList(t *testing.T) {
 	cfg, err := LoadConfig(p.Root)
 	require.NoError(t, err)
 	got := p.ChildSkillAllowList(cfg)
-	require.Equal(t, []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-release", "mockups", "kit:security"}, got)
+	require.Equal(t, []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-release", "apex-accept", "mockups", "kit:security"}, got)
 	require.NotContains(t, got, "apex-handoff")
 	require.NotContains(t, got, "apex-orchestrator")
 }

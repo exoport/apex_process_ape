@@ -113,7 +113,8 @@ guard: a commit that changes them and is not ape's is a person's to accept):
     - {name: kb, marketplace: team-tools, allow: [mcp]}
   tools:
     design:
-      - {name: ui-mockup, skill: frontend-design:mockup, when: "the change adds or changes a screen"}
+      - {name: ui-mockup, skill: frontend-design:mockup, when: "the change adds or changes a screen",
+         args: "{change} --out {assets}", model: sonnet, effort: high}
     review:
       - {name: security, skill: security-lens, when: "the change touches auth, secrets or input parsing"}
 
@@ -124,13 +125,16 @@ finding plugin.hooks-or-mcp (action person): a tool is a skill only. Another all
 value is a config error (plugins.config).
 
 tools: has two slots, design and review; each entry is {name, skill, when}, names
-unique. A skill is <plugin>:<skill> (the plugin listed in plugins:), or a project
+unique, plus optional args: (the template ape fills into ape task <skill> --args;
+placeholders {id}, {task}, {assets}, {change}, no other), model: and effort: (low,
+medium, high, xhigh, max; unset: the D65 defaults). A skill is <plugin>:<skill> (the plugin listed in plugins:), or a project
 skill (.claude/skills/<skill>/SKILL.md) or user skill ($CLAUDE_CONFIG_DIR, else
 ~/.claude, /skills/<skill>/SKILL.md; a user skill wins over a project one). Each must
 be installed (tools.not-installed) and slash-invocable — not user-invocable: false
 (tools.not-invocable) — because ape task types it as a slash command; a malformed
 block is tools.invalid. The orchestrator may start these skills as children, beside
-apex-plan, apex-change, apex-apply, apex-review and apex-release (D62).
+apex-plan, apex-change, apex-apply, apex-review, apex-release and apex-accept (D62,
+D76); apex-handoff and apex-orchestrator never.
 
 ape project check reports the same findings (exit 1).`,
 	}

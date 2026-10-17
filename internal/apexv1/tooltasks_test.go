@@ -11,7 +11,7 @@ const toolsConfig = `project_name: x
 tools:
   design:
     - {name: ui-mockup, skill: "kit:mockup", when: "a screen changes"}
-    - {name: notes, skill: design-notes, when: "always"}
+    - {name: notes, skill: design-notes, when: "always", args: "{change} --out {assets}", model: sonnet, effort: high}
   review:
     - {name: security, skill: security-lens, when: "auth"}
 `
@@ -80,7 +80,7 @@ func TestStatus_ChangeTools(t *testing.T) {
 	f := false
 	require.Equal(t, []ChangeTool{
 		{Task: "T2", Name: "ui-mockup", Skill: "kit:mockup", Done: &f},
-		{Task: "T3", Name: "notes", Skill: "design-notes", Done: &f},
+		{Task: "T3", Name: "notes", Skill: "design-notes", Done: &f, Args: "{change} --out {assets}", Model: "sonnet", Effort: "high"},
 	}, cs.Tools)
 	require.Equal(t, []ChangeTool{{Name: "security", Skill: "security-lens"}}, cs.ReviewTools)
 

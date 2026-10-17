@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
+	"github.com/exoport/apex_process_ape/internal/effort"
 	"gopkg.in/yaml.v3"
 )
 
@@ -15,9 +17,15 @@ import (
 //
 //	tools:
 //	  design:
-//	    - {name: ui-mockup, skill: frontend-design:mockup, when: "the change adds or changes a screen"}
+//	    - {name: ui-mockup, skill: frontend-design:mockup, when: "the change adds or changes a screen",
+//	       args: "{change} --out {assets}", model: sonnet, effort: high}
 //	  review:
 //	    - {name: security, skill: security-lens, when: "the change touches auth, secrets or input parsing"}
+//
+// args: (D77, optional) is the template ape fills into `ape task <skill>
+// --args "…"`: {id}, {task}, {assets} and {change} are its placeholders
+// (ValidateArgsTemplate); model: and effort: (optional) pick the tool
+// session's model and effort, else the D65 defaults.
 //
 // A tool is a skill only (no MCP): a plugin skill (<plugin>:<skill>, the
 // plugin listed in plugins:), a project skill (.claude/skills/<skill>/) or
@@ -34,9 +42,12 @@ import (
 
 // Tool is one tools.<slot> entry.
 type Tool struct {
-	Name  string `json:"name"`
-	Skill string `json:"skill"`
-	When  string `json:"when"`
+	Name   string `json:"name"             yaml:"name"`
+	Skill  string `json:"skill"            yaml:"skill"`
+	When   string `json:"when"             yaml:"when"`
+	Args   string `json:"args,omitempty"   yaml:"args"`
+	Model  string `json:"model,omitempty"  yaml:"model"`
+	Effort string `json:"effort,omitempty" yaml:"effort"`
 }
 
 // ToolsConfig is tools:.
@@ -144,8 +155,14 @@ func parseTool(n *yaml.Node, at string) (Tool, []string) {
 			tool.Skill = val
 		case "when":
 			tool.When = val
+		case "args":
+			tool.Args = val
+		case "model":
+			tool.Model = val
+		case "effort":
+			tool.Effort = val
 		default:
-			probs = append(probs, fmt.Sprintf("%s: unknown key %q — an entry is {name, skill, when}", at, k))
+			probs = append(probs, fmt.Sprintf("%s: unknown key %q — an entry is {name, skill, when, args?, model?, effort?}", at, k))
 		}
 	}
 	for _, f := range []struct{ key, val string }{{"name", tool.Name}, {"skill", tool.Skill}, {"when", tool.When}} {
@@ -156,14 +173,23 @@ func parseTool(n *yaml.Node, at string) (Tool, []string) {
 	if tool.Skill != "" && !toolSkillRe.MatchString(tool.Skill) {
 		probs = append(probs, fmt.Sprintf("%s: skill %q is not a skill name (<skill>, or <plugin>:<skill> for a plugin's; no leading /)", at, tool.Skill))
 	}
+	if err := ValidateArgsTemplate(tool.Args); err != nil {
+		probs = append(probs, fmt.Sprintf("%s: args %q: %v", at, tool.Args, err))
+	}
+	if tool.Effort != "" && !slices.Contains(effort.Levels, tool.Effort) {
+		probs = append(probs, fmt.Sprintf("%s: effort %q is not one of %s", at, tool.Effort, strings.Join(effort.Levels, ", ")))
+	}
 	return tool, probs
 }
 
 // ToolStatus is one tools: entry as `ape plugins status` reports it.
 type ToolStatus struct {
-	Slot  string `json:"slot"`
-	Name  string `json:"name"`
-	Skill string `json:"skill"`
+	Slot   string `json:"slot"`
+	Name   string `json:"name"`
+	Skill  string `json:"skill"`
+	Args   string `json:"args,omitempty"`
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
 	// Source is where the skill was found: plugin, project or user.
 	Source string `json:"source,omitempty"`
 	Path   string `json:"path,omitempty"`
@@ -219,7 +245,7 @@ func (p *Project) toolStatuses(cfg Config, rows []PluginStatus, checked bool) ([
 	out := []ToolStatus{}
 	var fs []Finding
 	for _, prob := range cfg.Tools.problems {
-		fs = append(fs, Finding{File: configYAML, Message: "tools config: " + prob + " — fix the tools: block (an entry is {name, skill, when})"})
+		fs = append(fs, Finding{File: configYAML, Message: "tools config: " + prob + " — fix the tools: block (an entry is {name, skill, when, args?, model?, effort?})"})
 	}
 	for _, slot := range ToolSlots {
 		for _, tool := range cfg.Tools.Slot(slot) {
@@ -249,7 +275,7 @@ func installHint(skill string) string {
 // resolveTool finds one tool's skill. Path is where it was found or, when
 // it was not, where it was looked for.
 func (p *Project) resolveTool(cfg Config, rows []PluginStatus, checked bool, slot string, tool Tool) ToolStatus {
-	st := ToolStatus{Slot: slot, Name: tool.Name, Skill: tool.Skill, State: ToolNotInstalled}
+	st := ToolStatus{Slot: slot, Name: tool.Name, Skill: tool.Skill, Args: tool.Args, Model: tool.Model, Effort: tool.Effort, State: ToolNotInstalled}
 	judge := func(s SkillInfo) ToolStatus {
 		st.Path, st.State = s.Path, ToolOK
 		if !s.UserInvocable {

@@ -266,8 +266,10 @@ func newProjectCheckCmd() *cobra.Command {
                            ` + "`ape plugins sync`" + ` (or ` + "`ape doctor --fix`" + `) puts them right;
                            an installed one that carries hooks or MCP servers its entry
                            does not allow (allow: [hooks, mcp]) is plugin.hooks-or-mcp
-  tools                    _apex/config.yaml tools: {design: [{name, skill, when}],
-                           review: [...]}: well-formed (tools.invalid), each skill
+  tools                    _apex/config.yaml tools: {design: [{name, skill, when, args?,
+                           model?, effort?}], review: [...]}: well-formed — args:
+                           placeholders only {id} {task} {assets} {change}, effort: a
+                           level — (tools.invalid), each skill
                            installed — <plugin>:<skill> of a listed plugin, or a project
                            or user skill — (tools.not-installed) and not
                            user-invocable: false (tools.not-invocable); a plugin skill
