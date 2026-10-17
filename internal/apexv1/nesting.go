@@ -42,11 +42,6 @@ const (
 // sessions.
 const OrchestratorSkill = "apex-orchestrator"
 
-// CoreChildSkills are the core skills an orchestrator run may start
-// (D62, RC3-PLAN Q3): the loop's skills and apex-release. Not apex-handoff
-// (a person's or a peer's tool) and not apex-orchestrator itself.
-var CoreChildSkills = []string{"apex-plan", "apex-change", "apex-apply", ReviewSkill, "apex-release"}
-
 // MaxDepth is the deepest session: an orchestrator's child.
 const MaxDepth = 2
 
