@@ -13,7 +13,7 @@ import (
 func newChangeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "change",
-		Short: "The unit of change: new, check, approve (fixes), start, verify, review, accept, block, archive",
+		Short: "The unit of change: new, check, approve (fixes), start, verify, review, accept, block, answer, archive",
 		Long: `A change is development/changes/<id>/change.md (written by the model) plus state.json
 (written only by ape). Its lifecycle:
 
@@ -21,6 +21,7 @@ func newChangeCmd() *cobra.Command {
                               ▲   │                        │                         │
                               └───┴── verify red ◀─────────┴──── review block ◀──────┘
   any status but archived ──block──▶ blocked ──start──▶ in-progress
+  blocked ──answer (a person)──▶ answered ──re-plan, start──▶ in-progress
   any status but archived ──abandon──▶ abandoned (moved to the archive, no delta merged)
 
 Done is a command ape ran at a sha: models never set a status. Every status change is
@@ -71,7 +72,7 @@ the change does not rebase onto its moved base; nothing written but the block).`
 	}
 	cmd.AddCommand(
 		newChangeNewCmd(), newChangeCheckCmd(), newChangeApproveCmd(), newChangeStartCmd(), newChangeVerifyCmd(),
-		newChangeReviewCmd(), newChangeAcceptCmd(), newChangeBlockCmd(), newChangeArchiveCmd(),
+		newChangeReviewCmd(), newChangeAcceptCmd(), newChangeBlockCmd(), newChangeAnswerCmd(), newChangeArchiveCmd(),
 		newChangeAbandonCmd(), newChangeDiffCmd(),
 	)
 	return cmd
@@ -267,7 +268,7 @@ func newChangeStartCmd() *cobra.Command {
 	cmd := v1ChangeLeaf(
 		"start <id>",
 		"Check green + approved → create and check out change/<id>, record the baseline, set in-progress",
-		`Start a draft (or resume a blocked) change:
+		`Start a draft (or resume a blocked or answered) change:
 
   1. `+"`ape change check <id>`"+` must be green, and its milestone approved — through ape: the
      approval record in milestones.json, not the Status line alone (H2; else exit 1,
@@ -657,6 +658,46 @@ Exit codes: 0 blocked · 1 no such change, archived, or the wrong branch · 2 us
 			})
 		})
 	cmd.Flags().StringVar(&reason, "reason", "", "what blocks it (required)")
+	return cmd
+}
+
+func newChangeAnswerCmd() *cobra.Command {
+	var f v1Flags
+	var text, by string
+	cmd := v1ChangeLeaf(
+		`answer <id> --text "<answer>" --by <who>`,
+		"A person answers a blocked change: status answered, the answer recorded",
+		`Record a person's answer to what blocks a change (H9, D47): status answered, and
+answer: {by, at, text} in its state.json (also in `+"`ape status --json`"+`, changes[].answer).
+Only for a blocked change (else exit 1, change.wrong-status). Committed as
+"apex: <id> answered" (trailer "Change: <id>") where the change's state lives — its branch
+change/<id> when it has one, else the branch the draft was planned on — from any branch:
+without a checkout when HEAD is elsewhere (refused when that branch is checked out in
+another worktree: git.base-checked-out).
+
+The orchestrator then has apex-change re-plan the change with the answer as the hint and
+starts it again: `+"`ape change start`"+` takes an answered change as it takes a blocked one (a
+re-plan is recorded as a re-start). The answer also restarts the counts limits.replans and
+limits.attempts_total judge (`+"`ape change verify --help`"+`).
+
+Only a person answers (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE set,
+a `+"`!`"+` line inside Claude Code included — with exit 2, session.person-only.
+
+Exit codes: 0 answered · 1 not blocked, no such change, or the branch is checked out in
+another worktree · 2 usage (no --text or --by), or a model session.`,
+		`  ape change answer add-tenant-delete --text "soft delete; keep rows 30 days" --by diego`,
+		&f,
+		func(cmd *cobra.Command, p *apexv1.Project, id string) error {
+			st, err := p.AnswerChange(cmd.Context(), id, text, by)
+			if err != nil {
+				return v1Fail(cmd, &f, err, nil)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, st, func(w io.Writer) {
+				fmt.Fprintf(w, "change %s: answered by %s — the orchestrator re-plans it with the answer, then `ape change start %s`\n", id, st.Answer.By, id)
+			})
+		})
+	cmd.Flags().StringVar(&text, "text", "", "the answer (required)")
+	cmd.Flags().StringVar(&by, "by", "", "who answers (required)")
 	return cmd
 }
 

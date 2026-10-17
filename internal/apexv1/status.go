@@ -62,6 +62,9 @@ type ChangeStatus struct {
 	// --allow-pending-human). What waits for a person, not for the
 	// orchestrator: it skips such a change. Always present.
 	AwaitingHuman []string `json:"awaiting_human"`
+	// Answer is a person's answer to what blocked the change (H9): set on
+	// an answered change, and kept once it is started again.
+	Answer *Answer `json:"answer,omitempty"`
 }
 
 // Spend is the cost recorded in the project's run manifests.
@@ -172,6 +175,7 @@ func (p *Project) Status() *StatusReport {
 		if c.State.BlockedReason != nil {
 			cs.BlockedReason = *c.State.BlockedReason
 		}
+		cs.Answer = c.State.Answer
 		if c.Doc != nil {
 			cs.PendingHuman = c.State.PendingHuman(c.Doc.HumanTasks())
 			cs.AwaitingHuman = awaitingHuman(c.State, c.Doc)
@@ -312,8 +316,13 @@ func nextStep(r *StatusReport) string {
 		}
 	}
 	for i := range r.Changes {
+		if c := &r.Changes[i]; c.Status == StatusAnswered && c.Answer != nil {
+			return "answered: " + c.ID + " — " + c.Answer.By + " answered; re-plan it with the answer as the hint (apex-change), then `ape change start " + c.ID + "`"
+		}
+	}
+	for i := range r.Changes {
 		if c := &r.Changes[i]; c.Status == StatusBlocked {
-			return "blocked: " + c.ID + " — " + c.BlockedReason + " (re-plan, or a person answers; `ape change start " + c.ID + "` resumes)"
+			return "blocked: " + c.ID + " — " + c.BlockedReason + " (re-plan, or a person answers: `ape change answer " + c.ID + " --text \"…\" --by <who>`; `ape change start " + c.ID + "` resumes)"
 		}
 	}
 	for i := range r.Changes {
@@ -401,6 +410,8 @@ groups:
 			shown++
 			line := fmt.Sprintf("  %-28s %-11s %s", c.ID, c.Status, c.laneLabel())
 			switch {
+			case c.Status == StatusAnswered && c.Answer != nil:
+				line += " — answered by " + c.Answer.By + ": " + truncate(c.Answer.Text, briefReasonMax)
 			case c.BlockedReason != "":
 				line += " — " + truncate(c.BlockedReason, briefReasonMax)
 			case len(c.Failing) > 0 && c.Status == StatusInProgress:

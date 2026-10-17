@@ -175,7 +175,7 @@ func (p *Project) start(ctx context.Context, id string, opt RunOptions, enter fu
 	digest := ci.Doc.PlanDigest()
 	var replan, rebaseline bool
 	switch st.Status {
-	case StatusDraft, StatusBlocked:
+	case StatusDraft, StatusBlocked, StatusAnswered:
 		replan = st.PlanDigest != "" && st.PlanDigest != digest
 	case StatusInProgress, StatusVerified, StatusReviewed:
 		// A started change starts again only to re-baseline: a changed
@@ -189,7 +189,7 @@ func (p *Project) start(ctx context.Context, id string, opt RunOptions, enter fu
 		}
 		replan, rebaseline = planChanged || specChanged, true
 	default:
-		return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + st.Status + "; start applies to draft or blocked changes, or re-baselines a changed plan"}
+		return nil, &FailError{Code: CodeWrongStatus, Msg: "change " + id + " is " + st.Status + "; start applies to draft, blocked or answered changes, or re-baselines a changed plan"}
 	}
 	if fs := p.CheckChange(id); len(fs) > 0 {
 		return nil, &FailError{Code: CodeCheckFailed, Msg: "change " + id + " does not pass `ape change check` — fix change.md first", Findings: fs}

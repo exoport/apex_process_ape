@@ -279,6 +279,8 @@ func newStatusCmd() *cobra.Command {
     branch, change/<id> (D38; JSON changes[].branch), and its status is read from
     there whatever branch is checked out — a change branch lists the changes it does
     not hold too
+  - an answered change (H9): a person's answer to what blocked it (JSON changes[].answer:
+    {by, at, text}, kept once it is started again); next has it re-planned and started
   - human review (H4, D47): every change lists awaiting_human (always present in JSON, []
     when none): its human-review tasks no person has accepted, once only the person is
     left — the change is reviewed, or archived. The orchestrator skips such a change. A
