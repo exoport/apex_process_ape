@@ -85,7 +85,10 @@ ref is the version the install must report (claude plugin list; a leading v is
 ignored; a commit matches by prefix). Claude Code cannot pin a plugin version
 from the consumer side: a marketplace serves one version of each plugin, so pin
 by pointing the marketplace at a ref (github/git: ref: <branch|tag>). A plugin
-the marketplace does not serve at ref fails with the command to run.
+the marketplace does not serve at ref fails with the command to run. An entry's
+allow: [hooks, mcp] lets the plugin carry hooks or MCP servers; ape plugins sync
+re-syncs at any time and ape plugins status reports them, and the tools: slot
+(see ape plugins --help).
 
 Check settings in _apex/config.yaml (read by start, verify, the gate and the hooks; a
 value ape cannot use, or a key it does not know inside these blocks, makes the config
@@ -260,7 +263,15 @@ func newProjectCheckCmd() *cobra.Command {
                            extraKnownMarketplaces/enabledPlugins match them, and (when
                            claude is on PATH) each plugin is installed at project scope
                            at its ref (plugins.drift; plugins.config for a bad config);
-                           ` + "`ape doctor --fix`" + ` puts them right
+                           ` + "`ape plugins sync`" + ` (or ` + "`ape doctor --fix`" + `) puts them right;
+                           an installed one that carries hooks or MCP servers its entry
+                           does not allow (allow: [hooks, mcp]) is plugin.hooks-or-mcp
+  tools                    _apex/config.yaml tools: {design: [{name, skill, when}],
+                           review: [...]}: well-formed (tools.invalid), each skill
+                           installed — <plugin>:<skill> of a listed plugin, or a project
+                           or user skill — (tools.not-installed) and not
+                           user-invocable: false (tools.not-invocable); a plugin skill
+                           is judged only when claude is on PATH. See ape plugins --help
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
 		Example: "  ape project check\n  ape project check --json",
@@ -274,7 +285,9 @@ Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --
 				return err
 			}
 			fs := append(p.Check(), p.CheckHooks()...)
-			fs = append(fs, p.CheckPlugins(cmd.Context(), pluginCLIOrNil(""))...)
+			cli := apexv1.ListOnce(pluginCLIOrNil(""))
+			fs = append(fs, p.CheckPlugins(cmd.Context(), cli)...)
+			fs = append(fs, p.CheckPluginContents(cmd.Context(), cli)...)
 			if len(fs) > 0 {
 				return v1Fail(cmd, &f, &apexv1.FailError{
 					Code:     "project.check-failed",
