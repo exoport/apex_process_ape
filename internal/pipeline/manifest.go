@@ -183,6 +183,30 @@ type Manifest struct {
 	// session carries the same content here and under review_launch.
 	// Absent outside v1 projects.
 	Launch *LaunchRecord `yaml:"launch,omitempty"`
+
+	// Depth is the session's place in the nesting rule (D62): 1 for a run
+	// a terminal, a script or the service daemon started, 2 for one an
+	// apex-orchestrator run started. ParentRun is that orchestrator's run
+	// id. Absent on runs older than the rule. Additive under
+	// schema_version 2.
+	Depth     int    `yaml:"depth,omitempty"`
+	ParentRun string `yaml:"parent_run,omitempty"`
+
+	// Children are the runs this one started (their manifests' parent_run),
+	// and TreeCostUSD this run's cost plus theirs: written when the run
+	// ends, for an orchestrator. Totals stay this session's own, so a
+	// reader that sums every manifest counts each child once. Additive under
+	// schema_version 2.
+	Children    []ChildRunRecord `yaml:"children,omitempty"`
+	TreeCostUSD float64          `yaml:"tree_cost_usd,omitempty"`
+}
+
+// ChildRunRecord is one child run of an orchestrator run.
+type ChildRunRecord struct {
+	Run     string  `yaml:"run"`
+	Skill   string  `yaml:"skill"`
+	CostUSD float64 `yaml:"cost_usd"`
+	Status  string  `yaml:"status,omitempty"`
 }
 
 // ReviewLaunchRecord is a review session's launch decision.
@@ -256,6 +280,10 @@ const (
 	// ended the run. resets / resets_at say when the limit resets, when the
 	// line named it.
 	TerminationUsageLimit = "usage_limit"
+	// TerminationParentGone — the apex-orchestrator run that started this
+	// session ended first (D62: a child dies with its parent), and ape
+	// stopped the session.
+	TerminationParentGone = "parent_gone"
 )
 
 // TerminationRecord is the durable "why" behind a non-completed run.

@@ -55,7 +55,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [Choosing between `ape chat`, `ape task`, and `ape prompt`](explanation/chat-task-prompt.md) — the three ways ape drives a Claude session and how to pick one
 - [The per-stage interactive runtime](explanation/exec-modes.md) — process-spawn cost, context sharing, the step contract, and what hooks add
 - [Why a `Stop` hook is not proof a step finished](explanation/step-completion-gates.md) — detached agents, the four completion gates, and why they degrade safely on an older Claude Code
-- [Why `ape` never runs inside a session `ape` started](explanation/nested-ape-runs.md) — the `APE_SESSION` marker, the nesting refusal, and why the outer run's lifecycle closed that path
+- [When `ape` runs inside a session `ape` started](explanation/nested-ape-runs.md) — the nesting rule (D62): depth 0/1/2, the orchestrator's one child, how ape knows (marker and process ancestry), and why v0 closed nesting
 - [`ape framework update` installs releases](explanation/framework-updates-from-releases.md) — why setup and update install a release tag rather than the clone's `main` (v0.4.0), how `min_ape_version` is checked, and the commits that record an install
 - [The framework and governance clones are caches](explanation/framework-and-governance-clones.md) — why setup and update check the newest release out in both clones (v0.7.0), where each clone lives when nothing names one, and how a skill finds the governance clone
 - [Why setup and update are separate](explanation/why-setup-and-update-are-separate.md) — the v0.0.7 split of `framework update` into two commands

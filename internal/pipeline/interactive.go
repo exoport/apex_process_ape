@@ -220,6 +220,9 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, skips Sta
 	if err := repl.NewSessionWithEnv(ctx, sessionName, opts.ProjectRoot, argv, stageEnv); err != nil {
 		return StatusFailed, fmt.Errorf("stage %q: %w", stage.Name, err)
 	}
+	if pid, ok := repl.SessionPID(sessionName); ok && opts.OnSessionSpawn != nil {
+		opts.OnSessionSpawn(pid)
+	}
 	// Cleanup must run even after ctx is cancelled — Background is intentional.
 	defer func() { _ = repl.KillSession(context.Background(), sessionName) }() //nolint:contextcheck // cleanup-on-exit; ctx is already done here
 

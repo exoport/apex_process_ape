@@ -53,13 +53,13 @@ or `~/.claude/skills/` (user) — an unresolved `--agent` fails preflight
 with exit code 2 and never spawns claude. `--agent` composes with
 `--handoff` (it wraps the envelope prompt).
 
-**Two refusals (v0.2.0).** `--agent apex-orchestrator` exits 2 at preflight.
-The orchestrator starts ape runs, and ape never runs inside a session it
-started, so it runs in a plain Claude Code session instead, with you present:
-start `claude` from a plain shell and run `/apex-orchestrator <request>`. For the same
-reason, `ape prompt` itself exits 2 when it finds itself inside an ape-spawned
-session (`APE_SESSION` is set) and names the owning run. See
-[Why `ape` never runs inside a session `ape` started](../explanation/nested-ape-runs.md).
+**Two refusals.** `--agent apex-orchestrator` exits 2 at preflight: the
+orchestrator runs as `ape task apex-orchestrator`, where ape knows it as one,
+or as `/apex-orchestrator <request>` in a plain Claude Code session. And
+`ape prompt` itself exits 2 inside any ape-launched session (code
+`session.depth`, or `session.not-allowed` from an orchestrator, which starts
+only allow-listed skills with `ape task`), naming the owning run. See
+[When `ape` runs inside a session `ape` started](../explanation/nested-ape-runs.md).
 
 ## `--workflow` and `--ultracode`
 

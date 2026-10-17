@@ -94,12 +94,21 @@ yaegi's restricted symbol set, which blocks os/exec, os.Exit, syscall,
 and unsafe while keeping the apescript orchestration surface fully
 available. See docs/reference/apescript.md for the per-group rules.
 
+A script is a conductor (D62): it runs at depth 0, from a terminal, and the
+sessions it starts are depth 1 — an apex-orchestrator among them holds the
+project's one orchestrator lock. It refuses inside any ape session (exit 2,
+code session.depth), the orchestrator's included, because a script starts
+model sessions.
+
 Exit codes: 0 success · 1 the script returned an error, panicked, or a
-launched run failed · 2 usage or read error (no file, bad flags).`,
+launched run failed · 2 usage or read error (no file, bad flags), or the
+nesting rule.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := refuseNested("ape script"); err != nil {
-				return err
+			// A script starts model sessions: a conductor, at depth 0 only
+			// (D62, RC3-PLAN Q6).
+			if err := refuseInSession("ape script"); err != nil {
+				return sessionRefusal(err)
 			}
 			format := output.Format(outputFormat)
 			if format != output.FormatHuman && format != output.FormatJSON && format != output.FormatYAML {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -108,12 +109,23 @@ func (r *scriptRunner) runTask(ctx context.Context, o apescript.TaskOpts) (apesc
 	cfg.idleTimeout = o.IdleTimeout
 	cfg.maxDuration = resolveMaxDuration(o.MaxDuration)
 
+	// The nesting rule (D62): a script is a depth-0 conductor, and an
+	// apex-orchestrator it starts holds the project's one orchestrator lock.
+	launch, err := gateSession("apescript.RunTask", o.Skill, root)
+	if err != nil {
+		return apescript.RunResult{}, err
+	}
+	if err := launch.acquire(root, "pid-"+strconv.Itoa(os.Getpid())+"-"+randomHex(3)); err != nil {
+		return apescript.RunResult{}, err
+	}
+	defer launch.release()
 	run, err := dispatchTaskWith(ctx, taskOptions{
 		skill: o.Skill, agent: o.Agent, model: o.Model, args: o.Args,
 		prompt: o.Prompt, promptFlagName: o.PromptFlag, skillNoCommit: o.NoCommit,
 		taskCommit:  taskCommit,
 		projectRoot: root,
 		manifestDir: manifestDir,
+		launch:      launch,
 	}, cfg)
 	if err != nil {
 		return apescript.RunResult{}, err

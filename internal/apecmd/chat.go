@@ -68,11 +68,18 @@ terminal for its lifetime — there is no detach/reattach. To run
 claude in the background, use a real terminal multiplexer
 separately (e.g. wrap ape chat in tmux or screen).
 
+A chat is a model session under the nesting rule (D62; see ape task
+--help): it starts only outside every ape session (depth 0), and is refused
+inside one (exit 2, session.depth or session.not-allowed).
+
 Exit codes: 0 success · 1 claude/bridge failure · 2 usage or preflight
-error (no _apex/config.yaml, bad cwd).`,
+error (no _apex/config.yaml, bad cwd, the nesting rule).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := refuseNested("ape chat"); err != nil {
-				return err
+			// The nesting rule (D62): a chat runs no skill an orchestrator
+			// may start, so only depth 0 starts one.
+			launch, err := gateSession("ape chat", "", cwdFlag)
+			if err != nil {
+				return sessionRefusal(err)
 			}
 			warnUnknownOutputStyleFlag(cmd, outputStyleFlag)
 			projectRoot := cwdFlag
@@ -90,7 +97,7 @@ error (no _apex/config.yaml, bad cwd).`,
 				os.Exit(ExitUsage)
 			}
 			if err := runChat(cmd.Context(), projectRoot, resolveModelArg(modelFlag), effortFlag,
-				ignoreProjectSettings, outputStyleFlag); err != nil {
+				ignoreProjectSettings, outputStyleFlag, launch); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 				os.Exit(ExitRunFailed)
 			}
@@ -130,13 +137,15 @@ error (no _apex/config.yaml, bad cwd).`,
 //  5. The Read cap is pinned (repl.EnvFileReadMaxOutputTokens), as on
 //     every other spawn path, so a Claude Code default change cannot move
 //     how much of a file one Read shows.
-//  6. APE_SESSION marks the session as ape's (repl.EnvApeSession), so an
-//     `ape task` a skill shells out to inside it refuses rather than nesting.
-func chatSpawnEnv(base []string, effortArg, chatID string) (env []string, unpin func(), notice string) {
+//  6. APE_SESSION marks the session as ape's (repl.EnvApeSession), with its
+//     depth (launch, the nesting rule D62), so an `ape task` a skill shells
+//     out to inside it refuses rather than nesting.
+func chatSpawnEnv(base []string, effortArg, chatID string, launch *sessionLaunch) (env []string, unpin func(), notice string) {
 	env, unpin, notice = selfpath.Pin(repl.ScrubClaudeCodeEnv(base))
 	env = append(env, repl.DisableBGShellReapEnv()...)
 	env = append(env, repl.FileReadCapEnv()...)
 	env = append(env, repl.SessionMarkerEnv("chat", chatID)...)
+	env = append(env, launch.env()...)
 	if effortArg != "" {
 		env = append(env, repl.EnvClaudeEffortLevel+"="+effortArg)
 	}
@@ -148,7 +157,7 @@ func chatSpawnEnv(base []string, effortArg, chatID string) (env []string, unpin 
 // Returns when claude exits.
 func runChat(
 	ctx context.Context, projectRoot, modelArg, effortArg string,
-	ignoreProjectSettings bool, outputStyle string,
+	ignoreProjectSettings bool, outputStyle string, launch *sessionLaunch,
 ) error {
 	apeBin, err := os.Executable()
 	if err != nil {
@@ -254,7 +263,7 @@ func runChat(
 	// `ape` exactly as one inside a dispatch does, and without the pin it
 	// gets whatever the machine has installed rather than the binary
 	// hosting the session. See internal/selfpath.
-	env, unpin, pathNotice := chatSpawnEnv(os.Environ(), effortArg, chatID)
+	env, unpin, pathNotice := chatSpawnEnv(os.Environ(), effortArg, chatID, launch)
 	defer unpin()
 	if pathNotice != "" {
 		fmt.Fprintf(os.Stderr, "ape chat: %s\n", pathNotice)
@@ -263,7 +272,13 @@ func runChat(
 	claude.Stdin = os.Stdin
 	claude.Stdout = os.Stdout
 	claude.Stderr = os.Stderr
-	if err := claude.Run(); err != nil {
+	live := registerSession("chat", projectRoot, chatID, launch)
+	defer live.end()
+	if err := claude.Start(); err != nil {
+		return fmt.Errorf("ape chat: claude: %w", err)
+	}
+	live.spawned(claude.Process.Pid)
+	if err := claude.Wait(); err != nil {
 		// Non-zero exit from claude itself is treated as a clean exit
 		// — same behaviour the PLAN-6 tmux-era attach path provided.
 		if _, ok := errors.AsType[*exec.ExitError](err); !ok {

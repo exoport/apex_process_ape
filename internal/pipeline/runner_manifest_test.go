@@ -48,6 +48,7 @@ func TestRun_EmitsManifest(t *testing.T) {
 		TokensCacheCreation: 10,
 		NumTurns:            3,
 	}
+	var spawned []int
 	err = Run(context.Background(), spec, RunOptions{
 		ProjectRoot:     root,
 		ClaudeBin:       claudeREPLShim(t),
@@ -55,9 +56,16 @@ func TestRun_EmitsManifest(t *testing.T) {
 		NoCommit:        true, // PLAN-3 contract: manifest only, no git
 		WaitStepDone:    fastStepDone,
 		StepTelemetryFn: func(_ string, _ int) *StepTelemetry { return tele },
+		// D62: a child session's place in the nesting rule.
+		Depth:          2,
+		ParentRun:      "20261017-100000-orch",
+		OnSessionSpawn: func(pid int) { spawned = append(spawned, pid) },
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
+	}
+	if len(spawned) != 1 || spawned[0] <= 0 {
+		t.Errorf("OnSessionSpawn got %v, want the one claude's pid", spawned)
 	}
 
 	pipelineDir := filepath.Join(root, "_output", "ape", "pipelines", "smoke")
@@ -87,6 +95,9 @@ func TestRun_EmitsManifest(t *testing.T) {
 	}
 	if m.Status != StatusCompleted {
 		t.Errorf("status %q, want completed", m.Status)
+	}
+	if m.Depth != 2 || m.ParentRun != "20261017-100000-orch" {
+		t.Errorf("depth %d parent_run %q, want 2 and the orchestrator's run", m.Depth, m.ParentRun)
 	}
 	if m.ApeVersion != "0.0.9-test" {
 		t.Errorf("ape_version %q, want 0.0.9-test", m.ApeVersion)

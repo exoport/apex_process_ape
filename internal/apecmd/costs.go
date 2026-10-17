@@ -25,7 +25,14 @@ totals — today, this week, all-time — broken down per task, chat and (from
 an older ape) pipeline.
 
   ape costs                          Project rollup (human / json).
-  ape costs run <run-id>             Single task run (reads manifest.yaml).
+  ape costs run <run-id>             Single task run (reads manifest.yaml):
+                                     its own totals, its parent_run and depth
+                                     (D62), and for an orchestrator run the
+                                     children it started and tree_cost_usd
+                                     (its own cost plus theirs). Totals are
+                                     always the run's own session, here and in
+                                     the manifest, so a sum over every run
+                                     counts each child once.
   ape costs chat <chat-id>           Single chat session (reads session.yaml).
   ape costs prompt <prompt-id>       Single prompt session (reads prompt.yaml).
   ape costs update --from <file>     Refresh the price table from a YAML file.
@@ -114,8 +121,18 @@ func newCostsRunCmd() *cobra.Command {
 				return enc.Encode(m)
 			}
 			fmt.Printf("%s %s (run %s)\n", m.Kind, m.Name, m.RunID)
+			if m.ParentRun != "" {
+				fmt.Printf("  started by run %s (depth %d)\n", m.ParentRun, m.Depth)
+			}
 			printTotalsLine("total", m.Totals)
 			printPerModel(m.PerModel)
+			if len(m.Children) > 0 {
+				fmt.Printf("  children (%d):\n", len(m.Children))
+				for _, c := range m.Children {
+					fmt.Printf("    %-28s %-20s $%.4f %s\n", c.Run, c.Skill, c.CostUSD, c.Status)
+				}
+				fmt.Printf("  with children: $%.4f\n", m.TreeCostUSD)
+			}
 			return nil
 		},
 	}

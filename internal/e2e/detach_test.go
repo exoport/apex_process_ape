@@ -19,6 +19,24 @@ import (
 
 var detachedID = regexp.MustCompile(`(?m)^detached: (\S+)$`)
 
+// detachedIDOf is the run id --detach printed: the "detached:" line, or the
+// id of the object --output-format json prints instead.
+func detachedIDOf(t *testing.T, out string) string {
+	t.Helper()
+	if m := detachedID.FindStringSubmatch(out); m != nil {
+		return m[1]
+	}
+	var obj struct {
+		ID, Wait, Log, Stdout string
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &obj), "no id in: %s", out)
+	require.NotEmpty(t, obj.ID, "no id in: %s", out)
+	require.Contains(t, obj.Wait, "ape run wait "+obj.ID)
+	require.NotEmpty(t, obj.Log)
+	require.NotEmpty(t, obj.Stdout)
+	return obj.ID
+}
+
 func exitStatus(err error) int {
 	if err == nil {
 		return 0
@@ -88,9 +106,7 @@ func TestDetach_SurvivesTheStartingShellsTree(t *testing.T) {
 		"--detach did not return")
 	out, err := os.ReadFile(marker + ".out")
 	require.NoError(t, err)
-	m := detachedID.FindStringSubmatch(string(out))
-	require.NotNil(t, m, "no id in: %s", out)
-	id := m[1]
+	id := detachedIDOf(t, string(out)) // --output-format json: {id, wait, log, stdout}
 	sup := supervisorPID(t, project, id)
 	t.Cleanup(func() { _ = syscall.Kill(sup, syscall.SIGKILL) })
 

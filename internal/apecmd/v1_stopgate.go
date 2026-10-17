@@ -125,7 +125,11 @@ func recordStopGate(projectRoot, skill, manifestDir string, r *stopGateRecorder)
 // patchLatestManifest applies change to the latest run manifest of skill
 // and writes it back. Best-effort: the run is over and reported.
 func patchLatestManifest(projectRoot, skill, manifestDir string, change func(*pipeline.Manifest)) {
-	runDir := pipeline.ResolveLatestRunDir(projectRoot, skill, manifestDir)
+	patchManifestAt(pipeline.ResolveLatestRunDir(projectRoot, skill, manifestDir), change)
+}
+
+// patchManifestAt is patchLatestManifest for a run directory already known.
+func patchManifestAt(runDir string, change func(*pipeline.Manifest)) {
 	if runDir == "" {
 		return
 	}

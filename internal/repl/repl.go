@@ -237,8 +237,8 @@ const EnvClaudeEffortLevel = "CLAUDE_CODE_EFFORT_LEVEL"
 // one of pipeline, task, change, script, prompt, chat. Claude passes its
 // environment to every tool subprocess, so a skill that shells out to
 // `ape task` inside the session carries it, and the session-starting
-// commands refuse to run under it: ape never runs inside an ape session.
-// The framework's orchestrator HALTs on activation when it is set.
+// commands apply the nesting rule under it (D62, EnvDepth): only ape's own
+// apex-orchestrator run starts a session from inside one.
 //
 // Deliberately NOT set by the migration shell runner or the service
 // daemon — neither spawns a claude session.
@@ -247,6 +247,37 @@ const EnvApeSession = "APE_SESSION"
 // SessionMarkerEnv returns the EnvApeSession entry for a spawned session.
 func SessionMarkerEnv(kind, runID string) []string {
 	return []string{EnvApeSession + "=" + kind + "/" + runID}
+}
+
+// The session's place in the nesting rule (D62), which ape sets beside
+// EnvApeSession on every model session it launches:
+//
+//   - EnvDepth: the session's depth — 1 for a session a terminal, a script
+//     or the service daemon started, 2 for one an apex-orchestrator run
+//     started (its parent's depth + 1);
+//   - EnvParentRun: the run id of the session that started this one, empty
+//     at depth 1;
+//   - EnvParentPID: the pid of the ape process running that parent
+//     session, empty at depth 1. The child dies with it.
+//
+// They are always written, empty when there is no parent, so a value
+// inherited from the environment ape itself runs in never reaches a session
+// it did not describe. ape reads them, with the process ancestry, to decide
+// what a session may start; the model's environment is not trusted alone.
+const (
+	EnvDepth     = "APE_DEPTH"
+	EnvParentRun = "APE_PARENT_RUN"
+	EnvParentPID = "APE_PARENT_PID"
+)
+
+// LineageEnv returns the EnvDepth/EnvParentRun/EnvParentPID entries for a
+// spawned session; parentPID 0 is written empty.
+func LineageEnv(depth int, parentRun string, parentPID int) []string {
+	pid := ""
+	if parentPID > 0 {
+		pid = strconv.Itoa(parentPID)
+	}
+	return []string{EnvDepth + "=" + strconv.Itoa(depth), EnvParentRun + "=" + parentRun, EnvParentPID + "=" + pid}
 }
 
 // EnvSessionModel and EnvSessionEffort tell a spawned session's tools the

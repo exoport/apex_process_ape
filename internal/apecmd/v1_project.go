@@ -449,9 +449,13 @@ func newStatusCmd() *cobra.Command {
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
   - the latest ape task run (JSON "latest_run": {skill, run_id, status, stopped,
-    resets, resets_at, message}): how it ended, e.g. "stopped: usage-limit, resets
-    2026-10-16T23:00:00+02:00" when a claude.ai usage limit stopped it (see ape task
-    --help, exit 14)
+    resets, resets_at, message, depth, parent_run}): how it ended, e.g. "stopped:
+    usage-limit, resets 2026-10-16T23:00:00+02:00" when a claude.ai usage limit
+    stopped it (see ape task --help, exit 14); a session an orchestrator started
+    names that run ("started by <run>"; depth 2, parent_run)
+  - JSON "sessions": the model sessions ape launched that run in this project now
+    ([{run_id, kind, skill, depth, parent_run, pid, started_at}], [] when none): an
+    apex-orchestrator run at depth 1 and its one child at depth 2 (D62)
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 
@@ -550,6 +554,16 @@ func statusLong(r *apexv1.StatusReport) string {
 	}
 	if r.LatestRun != nil {
 		fmt.Fprintf(&b, "\nLatest run: %s\n", r.LatestRun.Describe())
+	}
+	for i, s := range r.Sessions {
+		if i == 0 {
+			b.WriteString("\nRunning sessions:\n")
+		}
+		fmt.Fprintf(&b, "  %s %s %s, depth %d", s.Kind, s.RunID, s.Skill, s.Depth)
+		if s.ParentRun != "" {
+			fmt.Fprintf(&b, ", started by %s", s.ParentRun)
+		}
+		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, "\nSpend note: %s\n", r.Spend.Note)
 	return b.String()

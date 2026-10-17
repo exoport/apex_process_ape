@@ -164,13 +164,49 @@ when a run stops on a limit (usage limit, budget) — and, from ape change,
 when a change becomes blocked — with APE_EVENT=stop|block, APE_CHANGE
 (the change --args names, if any) and APE_REASON in its environment.
 
+Sessions and the nesting rule (D61, D62): every skill of the v1 loop runs
+as its own ape task session, and depth counts only the model sessions ape
+launched (ape task, ape prompt, ape chat, ape change review --run, and the
+ape service task/prompt jobs, which run those commands):
+  depth 0  a terminal, a Claude Code session ape did not launch, a shell,
+           ape script, the service daemon: may start any session
+  depth 1  a session started from depth 0: may start a child only when it
+           is ape's own apex-orchestrator run (ape task apex-orchestrator),
+           only a skill on its allow-list (apex-plan, apex-change,
+           apex-apply, apex-review, apex-release, and the tools: skills),
+           and one child at a time
+  depth 2  a session an orchestrator started: starts nothing
+A refusal is exit 2, code session.depth or session.not-allowed (action
+stop); a second child while one runs is exit 3, session.child-running, and
+a second apex-orchestrator run in a project exit 3,
+session.orchestrator-running (action retry). Deterministic ape commands are
+never limited. ape decides the depth from what it recorded, never from the
+model: the session's marker (APE_SESSION, APE_DEPTH) and the process
+ancestry — every session it launches is a row in ~/.ape/registry.json
+naming the ape process and the claude it spawned, so a scrubbed environment
+changes nothing. Every session carries APE_DEPTH, and a child also
+APE_PARENT_RUN (the orchestrator's run) and APE_PARENT_PID (the ape process
+running it); its manifest records depth and parent_run, and it is stopped,
+termination parent_gone, when that process is gone. An orchestrator's
+manifest lists its children and tree_cost_usd when it ends (totals stay its
+own). There is no switch to turn the rule off.
+
+An orchestrator dispatches a skill as
+  ape task <skill> --args <id> --detach --output-format json
+which prints {"id", "wait", "log", "stdout"} (four lines without json), then
+  ape run wait <id> --wait 9m --json
+until it stops exiting 75; its JSON carries the session's last message as
+result (see ape run wait --help).
+
 Exit codes: 0 success · 1 run failed, idle timeout, the typed line
 never submitted, an APEX v1 milestone budget stopped or refused the
 session, or a v1 limit or ape floor refused it · 2 usage or
-preflight error, or an APEX v0 project (run its pinned v0 ape) · 3 REPL
-never became ready (last pane on stderr) · 5 upstream API failure ·
-6 the dispatch violated its declared commit ownership (the run itself
-may have succeeded) · 14 a claude.ai usage limit stopped the session.`
+preflight error, an APEX v0 project (run its pinned v0 ape), or the nesting
+rule refused the session (session.depth, session.not-allowed) · 3 REPL
+never became ready (last pane on stderr), or a session lock another run
+holds (session.child-running, session.orchestrator-running) · 5 upstream
+API failure · 6 the dispatch violated its declared commit ownership (the run
+itself may have succeeded) · 14 a claude.ai usage limit stopped the session.`
 
 func newTaskCmd() *cobra.Command {
 	var (
@@ -212,14 +248,6 @@ func newTaskCmd() *cobra.Command {
   ape task apex-create-prd --agent apex-agent-pm --output-format json`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := refuseNested("ape task"); err != nil {
-				return err
-			}
-			jsonMode := jsonAlias || outputFormat == "json"
-			if !jsonMode && outputFormat != "human" {
-				fmt.Fprintf(os.Stderr, "Error: --output-format must be human or json, got %q\n", outputFormat)
-				os.Exit(ExitUsage)
-			}
 			projectRoot := cwdFlag
 			if projectRoot == "" {
 				wd, err := os.Getwd()
@@ -228,13 +256,28 @@ func newTaskCmd() *cobra.Command {
 				}
 				projectRoot = wd
 			}
+			// The nesting rule (D62), before anything else is read or
+			// started: what the session this runs in may start.
+			launch, err := gateSession("ape task", args[0], projectRoot)
+			if err != nil {
+				return sessionRefusal(err)
+			}
+			jsonMode := jsonAlias || outputFormat == "json"
+			if !jsonMode && outputFormat != "human" {
+				fmt.Fprintf(os.Stderr, "Error: --output-format must be human or json, got %q\n", outputFormat)
+				os.Exit(ExitUsage)
+			}
 			// Backlog 38: a v0 project runs its skills on its pinned v0 ape.
 			if apexv1.IsV0Project(apexv1.FindRoot(projectRoot)) {
 				return usageErr(errors.New(apexv1.V0ProjectMsg))
 			}
 			if detachFlag {
-				return startDetached(cmd, projectRoot)
+				return startDetached(cmd, projectRoot, launch, jsonMode)
 			}
+			if err := launch.acquire(projectRoot, lockToken()); err != nil {
+				return sessionRefusal(err)
+			}
+			defer launch.release()
 			if handoffFlag != "" {
 				prompt, err := resolveHandoffPrompt(handoffFlag, cmd.Flags().Changed("prompt"))
 				if err != nil {
@@ -290,6 +333,7 @@ func newTaskCmd() *cobra.Command {
 				eventsPrefix:          eventsPrefixFlag,
 				uploadTranscripts:     uploadTranscripts,
 				transcriptStore:       transcriptStore,
+				launch:                launch,
 			}
 			return runTask(cmd.Context(), opts)
 		},
@@ -353,6 +397,9 @@ type taskOptions struct {
 	eventsPrefix      string
 	uploadTranscripts bool
 	transcriptStore   string
+	// launch is the session's place in the nesting rule (D62), decided by
+	// the caller's gateSession; nil decides it at dispatch.
+	launch *sessionLaunch
 }
 
 // resolveHandoffPrompt derives the --prompt value from --handoff: a
@@ -566,6 +613,22 @@ func dispatchTask(ctx context.Context, o taskOptions) (taskRun, error) {
 // here and override cfg's, so no caller can dispatch a task without
 // them. `ape script` brings its own eventing and session kind in cfg.
 func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRun, error) {
+	// The nesting rule (D62): a caller that has not applied it yet gets it
+	// here, so no dispatch starts a session the rule would refuse.
+	if o.launch == nil {
+		l, err := gateSession("ape task", o.skill, o.projectRoot)
+		if err != nil {
+			return taskRun{}, &taskPreflightError{err: err}
+		}
+		o.launch = l
+	}
+	cfg.launch = o.launch
+	// A child session dies with the orchestrator run that started it: when
+	// that run's ape process is gone, the session is stopped (a detached
+	// one's supervisor does the same, and marks its handle).
+	ctx, stopWatch := watchParent(ctx, o.launch.parentPID)
+	defer stopWatch()
+
 	// An APEX v1 project decides the session's model and effort itself
 	// (backlog 29): the effort goes on claude's command line, never in
 	// CLAUDE_CODE_EFFORT_LEVEL, and nothing is passed when nothing decided.
@@ -619,6 +682,7 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 	runErr := runWithInteractive(ctx, spec, o.projectRoot, cfg)
 	recordStopGate(o.projectRoot, o.skill, manifestDir, cfg.stopGate)
 	recordLaunch(o.projectRoot, o.skill, manifestDir, v1Launch)
+	recordLineage(ctx, o.projectRoot, o.skill, manifestDir, o.launch)
 	duration := time.Since(start)
 	if pfe, ok := errors.AsType[*pipeline.PreflightError](runErr); ok {
 		// Nothing spawned, so there is no run to report or assert.
@@ -744,6 +808,7 @@ func runTask(ctx context.Context, o taskOptions) error {
 	res, err := dispatchTask(ctx, o)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+		o.launch.release()
 		os.Exit(taskPreflightExit(err))
 	}
 	env := res.Envelope
@@ -770,6 +835,7 @@ func runTask(ctx context.Context, o taskOptions) error {
 		for _, v := range res.Contract.Violations {
 			fmt.Fprintf(os.Stderr, "Error: %s: %s\n", v.Check, v.Message)
 		}
+		o.launch.release()
 		os.Exit(env.ExitCode)
 	}
 	return nil

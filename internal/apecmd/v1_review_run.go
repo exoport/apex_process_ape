@@ -19,13 +19,15 @@ import (
 // context, its own hooks — rather than as an Agent-tool sub-agent of the
 // session that built the change.
 //
-// It is the one sanctioned exception to the nesting rule (nesting.go). The
-// rule exists because an outer run's Stop hook, idle anchor and cost record
-// wrapped work they could not see. This session is detached — a separate
-// `ape task` under the --detach supervisor, with its own manifest — and
-// the caller only polls. There is no variable that switches the rule off:
-// only this verb starts such a session, its skill is fixed to apex-review,
-// and a review session (APE_REVIEW set) cannot start another (depth 1).
+// It starts a model session, so the nesting rule applies (D62, nesting.go):
+// it counts as starting apex-review. From a terminal (depth 0) it always
+// may; from inside an ape session only ape's own apex-orchestrator run may,
+// as its one child (session.child-running while another child runs); any
+// other session — apex-apply run by a person through `ape task`, say — is
+// refused with session.depth. The session is detached — a separate `ape
+// task` under the --detach supervisor, with its own manifest, its parent
+// run recorded — and the caller only polls. A review session (APE_REVIEW
+// set) cannot start another.
 
 // reviewSkill is the only skill a review session runs.
 const reviewSkill = apexv1.ReviewSkill
@@ -37,15 +39,17 @@ const envReviewLaunch = "APE_REVIEW_LAUNCH"
 // defaultReviewWait keeps one call under the Bash tool's 10-minute cap.
 const defaultReviewWait = 9 * time.Minute
 
-// reviewEnv is the review session's environment: the caller's, without the
-// marker of the session it came from (or ape task would refuse to nest),
-// with the review marker that confines its edits.
+// reviewEnv is the review session's environment: the caller's, with the
+// review marker that confines its edits. The caller's session marker and
+// depth (APE_SESSION, APE_DEPTH) stay: the `ape task` it starts applies the
+// nesting rule from them, as this command did, and stamps the review
+// session with its own.
 func reviewEnv(id string, launch apexv1.ReviewLaunch) []string {
 	parent := os.Getenv(repl.EnvApeSession)
 	out := make([]string, 0, len(os.Environ())+2)
 	for _, e := range os.Environ() {
 		k, _, _ := strings.Cut(e, "=")
-		if k == repl.EnvApeSession || k == apexv1.EnvReview || k == envReviewParent || k == envDetachedID ||
+		if k == apexv1.EnvReview || k == envReviewParent || k == envDetachedID ||
 			k == envReviewLaunch || k == repl.EnvSessionModel || k == repl.EnvSessionEffort || k == apexv1.EnvInlineHooks ||
 			strings.HasPrefix(k, "APE_BRIDGE") {
 			continue
@@ -88,6 +92,11 @@ func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, mod
 		return v1Fail(cmd, f, &apexv1.UsageError{Code: "review.nested", Msg: "this is a review session (" + apexv1.EnvReview + "=" + v +
 			"): a review session cannot start another review"}, nil)
 	}
+	// The nesting rule (D62): this starts apex-review.
+	launch, err := gateSession("ape change review --run", reviewSkill, p.Root)
+	if err != nil {
+		return v1Fail(cmd, f, err, nil)
+	}
 	run := p.LoadReviewRun(id)
 	var h *detachedHandle
 	if run != nil {
@@ -101,7 +110,7 @@ func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, mod
 		if verified, err = p.ReverifyStaleReview(ctx, id, f.runOptions()); err != nil {
 			return failReverify(cmd, f, id, verified, err)
 		}
-		if run, h, err = startReviewSession(ctx, p, id, model, effortFlag); err != nil {
+		if run, h, err = startReviewSession(ctx, p, id, model, effortFlag, launch); err != nil {
 			return v1Fail(cmd, f, err, nil)
 		}
 	}
@@ -165,8 +174,14 @@ func failReverify(cmd *cobra.Command, f *v1Flags, id string, verified *apexv1.Ve
 // startReviewSession starts the detached review session for a verified
 // change, on the model and effort DecideReviewLaunch picks (D22), and
 // records it.
-func startReviewSession(ctx context.Context, p *apexv1.Project, id, model, effortFlag string) (*apexv1.ReviewRun, *detachedHandle, error) {
+func startReviewSession(ctx context.Context, p *apexv1.Project, id, model, effortFlag string, session *sessionLaunch) (*apexv1.ReviewRun, *detachedHandle, error) {
 	if _, err := p.PrepareReviewRun(ctx, id); err != nil {
+		return nil, nil, err
+	}
+	// An orchestrator's one child at a time, held under the detached run's
+	// id; the review session's `ape task` takes it over.
+	detachedID := newDetachedID()
+	if err := session.acquire(p.Root, detachedID); err != nil {
 		return nil, nil, err
 	}
 	cfg, _ := apexv1.LoadConfig(p.Root)
@@ -183,8 +198,9 @@ func startReviewSession(ctx context.Context, p *apexv1.Project, id, model, effor
 		Change: id, StartedAt: apexv1.Stamp(), HeadSHA: apexv1.HeadSHA(ctx, p.Root),
 		Parent: os.Getenv(repl.EnvApeSession), Launch: launch,
 	}
-	h, err := launchDetached(p.Root, p.Root, argv, reviewEnv(id, launch))
+	h, err := launchDetached(p.Root, p.Root, argv, reviewEnv(id, launch), detachMeta{id: detachedID, launch: session})
 	if err != nil {
+		session.release()
 		return nil, nil, &apexv1.FailError{Code: "review.start-failed", Msg: "could not start the review session: " + err.Error()}
 	}
 	run.DetachedID = h.ID

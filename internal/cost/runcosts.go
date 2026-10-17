@@ -17,6 +17,10 @@ type RunCost struct {
 	// Args is the run's first step's --args: an APEX v1 run names the
 	// change it works on there (`ape task <skill> --args <id>`).
 	Args string `json:"args,omitempty"`
+	// ParentRun is the orchestrator run that started this one (D62), and
+	// Depth the run's nesting depth; both absent on older runs.
+	ParentRun string `json:"parent_run,omitempty"`
+	Depth     int    `json:"depth,omitempty"`
 }
 
 // RunCosts lists every pipeline and task run's cost under the project's
@@ -29,7 +33,10 @@ func RunCosts(projectRoot string) ([]RunCost, error) {
 		}
 		kind := tree.Kind
 		err := walkManifests(tree.Path, func(name string, m *manifestForRollup, day time.Time) {
-			out = append(out, RunCost{Kind: kind, Name: name, RunID: m.RunID, StartedAt: day, CostUSD: m.Totals.CostUSD, Args: m.firstArgs()})
+			out = append(out, RunCost{
+				Kind: kind, Name: name, RunID: m.RunID, StartedAt: day, CostUSD: m.Totals.CostUSD, Args: m.firstArgs(),
+				ParentRun: m.ParentRun, Depth: m.Depth,
+			})
 		})
 		if err != nil {
 			return out, err
