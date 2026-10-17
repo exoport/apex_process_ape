@@ -222,7 +222,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"project.missing-section", 1, "person", "project.md lacks a required ## section"},
 	{"project.empty-section", 1, "person", "a required project.md section is empty"},
 	{"agents.too-big", 1, "person", "AGENTS.md over its caps.agents_md cap (default 16 KB, ceiling 48 KB; its lines are not measured, D69)"},
-	{CodeCapsOverCeiling, 1, "person", "_apex/config.yaml caps: holds a value above its hard ceiling (project_md, agents_md, change_md, design_md 48 KB; spec 64 KB; evidence_log 16 MiB): a project check finding, and change check, start, archive and abandon refuse until a person fixes it (D69)"},
+	{CodeCapsOverCeiling, 1, "person", "_apex/config.yaml caps: holds a value above its hard ceiling (project_md, agents_md, change_md, design_md, architecture_md 48 KB; spec 64 KB; evidence_log 16 MiB): a project check finding, and change check, start, archive and abandon refuse until a person fixes it (D69)"},
 	{"claude-md.no-import", 1, "person", "CLAUDE.md lacks the line @AGENTS.md"},
 	{"roadmap.title", 1, "person", "roadmap.md does not start with # Roadmap"},
 	{"roadmap.no-milestones", 1, "person", "roadmap.md has no milestone"},
@@ -310,5 +310,6 @@ var DiagnosticCodes = []CodeDoc{
 	{"tools.not-invocable", 1, "person", "a skill tools: names has user-invocable: false, so ape task cannot type it as a slash command: drop the flag, or name another skill"},
 	// rc.4 phase 1 (rc4-a).
 	{"agents.no-project-context", 1, "person", "AGENTS.md has no line importing <development_folder>/project.md (D82): add \"Project context: read @development/project.md before planning or changing anything.\" under its title, outside code — `ape project init` adds it"},
+	{"architecture.too-big", 1, "person", "development/architecture.md (optional) over its caps.architecture_md cap (default 16 KB, ceiling 48 KB; D84): move detail to specs/, decisions/ or docs/explanation/"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

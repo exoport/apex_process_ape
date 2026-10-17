@@ -168,6 +168,11 @@ func (p *Project) Check() []Finding {
 	} else {
 		add(ValidateProjectMD(p.Rel(p.ProjectMD()), doc, caps.ProjectMD)...)
 	}
+	// architecture.md is optional (D84): only its size is checked.
+	if doc, err := readFileString(p.ArchitectureMD()); err == nil && len(doc) > caps.ArchitectureMD {
+		add(Finding{File: p.Rel(p.ArchitectureMD()), Message: "architecture.md is " + sizeKB(len(doc)) + ", over the " + capSize(caps.ArchitectureMD) +
+			" cap (caps.architecture_md) — move detail to specs/, decisions/ or docs/explanation/"})
+	}
 	if doc, err := readFileString(p.AgentsMD()); err != nil {
 		missing(p.AgentsMD(), "write the project map: commands, NEVER rules, pointers")
 	} else {

@@ -246,6 +246,10 @@ func newProjectCheckCmd() *cobra.Command {
   development/project.md   # <name>, ## Vision, ## Users, ## Scope, ## Out of scope,
                            ## Constraints (each non-empty); ≤ caps.project_md (16 KB;
                            no line cap)
+  development/architecture.md
+                           optional; when present ≤ caps.architecture_md (16 KB;
+                           architecture.too-big: move detail to specs/, decisions/ or
+                           docs/explanation/)
   AGENTS.md                present, ≤ caps.agents_md (16 KB; its lines are not measured);
                            a line outside code carries @development/project.md (the
                            configured folder; the reference counts, not the wording —
@@ -295,6 +299,7 @@ func newProjectCheckCmd() *cobra.Command {
                              change_md    16 KB / 48 KB    design_md    16 KB / 48 KB
                              spec         24 KB / 64 KB    (per capability)
                              evidence_log  1 MiB / 16 MiB  (per check, evidence: archive)
+                             architecture_md 16 KB / 48 KB (development/architecture.md, optional)
                            A value above its ceiling is caps.over-ceiling (action person):
                            reported here, and change check, start, archive and abandon
                            refuse until a person fixes it
