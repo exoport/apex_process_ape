@@ -52,12 +52,18 @@ type Delta struct {
 	PurposeLine int    `json:"-"`
 }
 
-// Task is one `- T<n> <what> — check: <command|human-review>` line.
+// Task is one `- T<n> <what> — check: <command|human-review>` line, or
+// `- T<n> <what> — regression: <command>` (backlog 43, D47): a regression
+// task runs exactly like a check task everywhere — Check holds its
+// command — and is only allowed to be green at baseline, where start
+// refuses any other task check of a change that adds or modifies
+// behaviour (change.vacuous-check).
 type Task struct {
-	ID    string `json:"id"`
-	What  string `json:"what"`
-	Check string `json:"check"`
-	Line  int    `json:"line"`
+	ID         string `json:"id"`
+	What       string `json:"what"`
+	Check      string `json:"check"`
+	Regression bool   `json:"regression,omitempty"`
+	Line       int    `json:"line"`
 }
 
 // Human reports whether the task can only be proven by a person.
@@ -110,6 +116,9 @@ var (
 	deltaNoneRe = regexp.MustCompile(`^none\s*[—–:-]\s*(\S.*)$`)
 	taskItemRe  = regexp.MustCompile(`^\s{0,3}[-*+]\s+(.*)$`)
 	taskIDRe    = regexp.MustCompile(`^(\[[ xX]\]\s*)?(T\d+)\b[:.)]?\s*(.*)$`)
+	// taskCheckRe is a task line's separator: a dash, then check: or
+	// regression:. The first one ends <what>.
+	taskCheckRe = regexp.MustCompile(`(?:^|\s)[—–-]+\s*(check|regression):`)
 )
 
 // ParseChange parses change.md. file is the project-relative path used in
@@ -273,7 +282,7 @@ func (c *Change) parseTasks(body []mdLine) {
 		if tm == nil {
 			c.parse = append(c.parse, Finding{
 				File: c.file, Line: l.N,
-				Message: "task line must read `- T<n> <what> — check: <command> | human-review`",
+				Message: TaskLineGrammar,
 			})
 			continue
 		}
@@ -285,15 +294,28 @@ func (c *Change) parseTasks(body []mdLine) {
 		}
 		rest := tm[3]
 		t := Task{ID: tm[2], Line: l.N}
-		if what, check, ok := strings.CutLast(rest, "check:"); ok {
+		if loc := taskCheckRe.FindStringSubmatchIndex(rest); loc != nil {
+			t.What = strings.TrimSpace(rest[:loc[0]])
+			t.Check = strings.Trim(strings.TrimSpace(rest[loc[1]:]), "`")
+			t.Regression = rest[loc[2]:loc[3]] == "regression"
+		} else if what, check, ok := strings.CutLast(rest, "check:"); ok {
 			t.What = strings.TrimRight(strings.TrimSpace(what), " \t—–-")
 			t.Check = strings.Trim(strings.TrimSpace(check), "`")
 		} else {
 			t.What = strings.TrimSpace(rest)
 		}
+		if t.Regression && (t.Check == HumanReview || t.Check == "") {
+			c.parse = append(c.parse, Finding{
+				File: c.file, Line: l.N,
+				Message: TaskLineGrammar + "; " + t.ID + "'s regression: names no command — a regression task runs a command, which may already pass at baseline",
+			})
+		}
 		c.Tasks = append(c.Tasks, t)
 	}
 }
+
+// TaskLineGrammar is the task line's shape, as findings quote it.
+const TaskLineGrammar = "task line must read `- T<n> <what> — check: <command> | human-review` or `- T<n> <what> — regression: <command>`"
 
 // Task returns the task with id, or nil.
 func (c *Change) Task(id string) *Task {

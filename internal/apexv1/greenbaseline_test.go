@@ -13,7 +13,7 @@ import (
 func TestVerify_GreenAtBaseline(t *testing.T) {
 	p := fixture(t, baseFiles())
 	addChange(t, p, "add-wave", changeDoc("add-wave", "greeting", addedWave,
-		"- T1 add wave — check: ./wave.sh\n- T2 greet still works — check: ./greet.sh | grep -q Hello\n"))
+		"- T1 add wave — check: ./wave.sh\n- T2 greet still works — regression: ./greet.sh | grep -q Hello\n"))
 	commitAll(t, p, "plan")
 	_, err := p.Start(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)
@@ -28,6 +28,7 @@ func TestVerify_GreenAtBaseline(t *testing.T) {
 	require.Equal(t, "T2", g.Task)
 	require.Equal(t, KindTask, g.Kind)
 	require.False(t, g.AtReplan)
+	require.True(t, g.Regression, "declared a regression task, so start let it be green")
 	require.Equal(t, v.GreenAtBaseline, state(t, p, "add-wave").Verify.GreenAtBaseline, "recorded for review")
 
 	// A task added at a re-plan, after the code, is green at its baseline

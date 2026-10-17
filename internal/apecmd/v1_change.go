@@ -190,7 +190,10 @@ func newChangeCheckCmd() *cobra.Command {
     "Reason:" in a REMOVED block
   - a delta that REMOVES every requirement of a capability needs "retire: [<cap>]" in
     the frontmatter (archive then deletes its spec); retire: lists only such capabilities
-  - ## Tasks: "- T<n> <what> — check: <command> | human-review", no checkboxes, unique ids
+  - ## Tasks: "- T<n> <what> — check: <command> | human-review", or "- T<n> <what> —
+    regression: <command>" for a check that may already pass before the change (it runs
+    like any check task; `+"`ape change start`"+` lets it be green at baseline); no checkboxes,
+    unique ids
 
 Exit codes: 0 green · 1 findings · 2 usage.`,
 		"  ape change check add-tenant-delete",
@@ -284,7 +287,13 @@ func newChangeStartCmd() *cobra.Command {
      "regression: <cmd>" in _apex/config.yaml (the project's own test suite; with tiers,
      "regression: {change: <cmd>, milestone: <cmd>}", its change tier) it runs that too,
      the same way, and records it in state.json (regression_baseline: cmd, exit, output
-     sha256, sha); a red regression baseline is recorded, it does not block start
+     sha256, sha); a red regression baseline is recorded, it does not block start.
+     Vacuous checks (backlog 43): when the change has an ADDED or MODIFIED delta, a task
+     check that already passes here, before any of the change's code, proves nothing
+     about it — start refuses (exit 1, change.vacuous-check, nothing written, no branch
+     left): rewrite the check to fail until the change is done, or write a check meant to
+     stay green as "- T<n> <what> — regression: <command>". Not judged for Delta: none,
+     a REMOVED-only delta, or a task a re-plan adds after the change has code
   5. sets in-progress, freezes the plan (SHA-256 of change.md outside ## Why and ## Notes), fingerprints
      the spec block of every requirement it MODIFIES or REMOVES, commits state.json
      ("apex: <id> in-progress") on change/<id>, and resets the attempts count since start
@@ -326,8 +335,9 @@ changed, when a spec block the change modifies or removes was changed by another
 since start, or when the regression command has no baseline for it (configured or changed
 since start); otherwise it is refused.
 
-Exit codes: 0 started (or resumed) · 1 check red, milestone (or fix) not approved, wrong
-status, dirty tree, detached HEAD, HEAD on another change's branch, or git failed · 2 usage ·
+Exit codes: 0 started (or resumed) · 1 check red, milestone (or fix) not approved, a vacuous
+task check, wrong status, dirty tree, detached HEAD, HEAD on another change's branch, or git
+failed · 2 usage ·
 3 requirement conflict with another active change, or the change does not rebase onto
 its moved base.`,
 		"  ape change start add-tenant-delete",

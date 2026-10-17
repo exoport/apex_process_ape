@@ -223,6 +223,9 @@ func (p *Project) start(ctx context.Context, id string, opt RunOptions, enter fu
 		st.Verify, st.Review = nil, nil
 	}
 	results := p.rebaseline(ctx, ci, st, head, opt)
+	if err := p.refuseVacuousChecks(ctx, ci, st, results); err != nil {
+		return nil, err
+	}
 	regression := p.rebaselineRegression(ctx, id, st, head, opt)
 	st.PlanDigest = digest
 	st.BaseFingerprints = p.baseFingerprints(ci.Doc)
@@ -290,6 +293,50 @@ func (p *Project) rebaseline(ctx context.Context, ci ChangeInfo, st *State, head
 	return out
 }
 
+// CodeVacuousCheck: start found a task check of a change that adds or
+// modifies behaviour already green before any of its code (backlog 43).
+const CodeVacuousCheck = "change.vacuous-check"
+
+// refuseVacuousChecks is start's backlog 43 rule (D45, D47): a change with
+// an ADDED or MODIFIED delta promises behaviour that does not exist yet,
+// so a task check that passes before any of its code proves nothing — a
+// `go test -run` for a test not written yet that matched an old one, a
+// grep that already matches. Judged on the checks this start baselined,
+// while the change's branch holds no code of its own (codeMovedSince
+// base_sha): a task added by a re-plan after code exists may be green.
+// A task written `— regression: <command>` is exempt: it is meant to be
+// green at baseline. Nothing is written when it refuses.
+func (p *Project) refuseVacuousChecks(ctx context.Context, ci ChangeInfo, st *State, baselined []CheckResult) error {
+	adds := false
+	for i := range ci.Doc.Deltas {
+		adds = adds || ci.Doc.Deltas[i].Op != OpRemoved
+	}
+	if !adds {
+		return nil
+	}
+	var green []string
+	for i := range baselined {
+		r := &baselined[i]
+		if r.Kind != KindTask || r.Exit != 0 {
+			continue
+		}
+		if t := ci.Doc.Task(r.Task); t != nil && !t.Regression {
+			green = append(green, r.Task+" `"+r.Cmd+"`")
+		}
+	}
+	if len(green) == 0 {
+		return nil
+	}
+	if moved, _, err := p.codeMovedSince(ctx, st.BaseSHA); err == nil && moved {
+		return nil
+	}
+	return &FailError{Code: CodeVacuousCheck, Msg: fmt.Sprintf(
+		"change %s adds or modifies behaviour, yet %s already pass(es) before any of its code (vacuous) — "+
+			"rewrite each so it fails until the change is done (test the new behaviour; a -run for a test not written yet must not match an existing one), "+
+			"or write a check meant to stay green as `- T<n> <what> — regression: <command>`; then `ape change start %s`",
+		ci.ID, strings.Join(green, ", "), ci.ID)}
+}
+
 // checkPlanFrozen refuses a change whose ## Tasks or ## Delta changed
 // since start: its baseline, verify and review describe a different plan.
 func checkPlanFrozen(ci ChangeInfo) error {
@@ -344,10 +391,14 @@ func (p *Project) greenAtBaseline(c *Change, st *State) []GreenAtBaseline {
 		if !ok || b.Exit != 0 || (b.Cmd != "" && b.Cmd != pc.Cmd) {
 			continue
 		}
-		out = append(out, GreenAtBaseline{
+		g := GreenAtBaseline{
 			Task: pc.Ref, Kind: pc.Kind, Cmd: pc.Cmd, SHA: b.SHA,
 			AtReplan: b.SHA != "" && st.BaseSHA != "" && b.SHA != st.BaseSHA,
-		})
+		}
+		if t := c.Task(pc.Ref); pc.Kind == KindTask && t != nil {
+			g.Regression = t.Regression
+		}
+		out = append(out, g)
 	}
 	return out
 }

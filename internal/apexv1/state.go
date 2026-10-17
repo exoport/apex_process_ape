@@ -90,6 +90,9 @@ type GreenAtBaseline struct {
 	// AtReplan: baselined at a re-plan, after code existed, rather than
 	// at the first start.
 	AtReplan bool `json:"at_replan,omitempty"`
+	// Regression: the task is written `— regression: <command>`, a check
+	// the plan declares may already pass (backlog 43).
+	Regression bool `json:"regression,omitempty"`
 }
 
 // Verify is the last `ape change verify`.
