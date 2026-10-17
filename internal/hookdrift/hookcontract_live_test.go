@@ -182,12 +182,15 @@ func runSeed(t *testing.T, apeBin, project string) {
 		"without a runlog there is nothing to judge")
 }
 
-// seedProject copies the testdata project into a temp dir. `ape prompt`
-// refuses to run outside a project root (it needs _apex/config.yaml), and
-// a copy keeps the session's blast radius off the real checkout.
+// seedProject copies the APEX v1 fixture (testdata/apexv1project) into a
+// temp dir, adds the CLAUDE.md `ape project init` writes (the fixture omits
+// it: a CLAUDE.md inside this repository is one too many), and commits it
+// as init does. `ape prompt` refuses to run outside a project root (it needs
+// _apex/config.yaml), and a copy keeps the session's blast radius off the
+// real checkout.
 func seedProject(t *testing.T) string {
 	t.Helper()
-	src, err := filepath.Abs(filepath.Join("..", "..", "testdata", "apexproject"))
+	src, err := filepath.Abs(filepath.Join("..", "..", "testdata", "apexv1project"))
 	require.NoError(t, err)
 	require.FileExists(t, filepath.Join(src, "_apex", "config.yaml"),
 		"the seed needs a project root to run in")
@@ -196,6 +199,17 @@ func seedProject(t *testing.T) string {
 	// CopyFS will not write into a non-empty dir, so seed a fresh subdir.
 	dst = filepath.Join(dst, "project")
 	require.NoError(t, os.CopyFS(dst, os.DirFS(src)))
+	require.NoError(t, os.WriteFile(filepath.Join(dst, "CLAUDE.md"), []byte("@AGENTS.md\n"), 0o644))
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"add", "-A"},
+		{"-c", "user.email=seed@example.com", "-c", "user.name=seed", "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "apex: project init"},
+	} {
+		c := exec.Command("git", args...)
+		c.Dir = dst
+		out, err := c.CombinedOutput()
+		require.NoErrorf(t, err, "git %v: %s", args, out)
+	}
 	return dst
 }
 

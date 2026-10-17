@@ -13,12 +13,8 @@ For ape, reference is the surface area: every command, every flag, every config 
 - [claude-spawn-modes.md](claude-spawn-modes.md) — how ape delivers prompts to the PTY-hosted `claude` REPL, per command.
 - [apesandbox-yaml.md](apesandbox-yaml.md) — `.apesandbox.yaml` schema: the committed per-project sandbox descriptor (repos, mounts, egress, toolchain) and the request-vs-grant boundary aped enforces over it.
 - [framework-yaml.md](framework-yaml.md) — `_apex/framework.yaml` schema.
-- [invocation-matrix.md](invocation-matrix.md) — the `ape pipeline` UI selector (`tui` default, `web`, `no-tui`).
-- [pipeline-run-manifest.md](pipeline-run-manifest.md) — `manifest.yaml` schema written per pipeline run.
-- [pipeline-spec.md](pipeline-spec.md) — internal Go shape of a parsed pipeline.
-- [pipeline-yaml-schema.md](pipeline-yaml-schema.md) — `_apex/pipelines/*.yaml` schema (model/agent/commit defaults, `no-clear`, etc.).
+- [pipeline-run-manifest.md](pipeline-run-manifest.md) — `manifest.yaml` schema written per `ape task` run (and per run of the retired `ape pipeline`).
 - [step-contract.md](step-contract.md) — per-step contract enforced by the bridge verifier.
-- [tui-keybindings.md](tui-keybindings.md) — Bubble Tea TUI keybindings.
 - [events.md](events.md) — NATS subject taxonomy + event/log/metrics payload schemas (PLAN-13 `ape.evt` + `ape.blob` shipped; PLAN-14/17-CLI/18 subtrees proposed).
 - [service-api.md](service-api.md) — the `ape service` (PLAN-14) `ape.svc` endpoint contract: every endpoint subject, request/reply body, error code, admission, and the allowlist/script security boundary.
 - [blob-offload.md](blob-offload.md) — the `ape.blob.uri-request` transcript-offload request/reply contract (for building an offload service).
@@ -26,9 +22,7 @@ For ape, reference is the surface area: every command, every flag, every config 
 ## Planned reference
 
 - **Command reference.** Every `ape` subcommand, every flag, every argument. Auto-generatable from cobra (`cobra-cli docs`) — likely the right path once the command surface stabilizes.
-- **Pipeline catalog.** Every built-in pipeline (`design`, `governance`, `epics`, …) with its stages, the skills each stage runs, and the pre-flight files each pipeline expects.
 - **Configuration reference.** The `_apex/config.yaml` schema: every field, type, default, and where it's consumed.
-- **Trait reference.** Available APEX traits, their conflicts, and the artifacts they produce.
 - **Exit codes.** What each non-zero exit means and which command emits it.
 
 ## Writing reference

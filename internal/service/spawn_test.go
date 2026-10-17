@@ -20,21 +20,23 @@ func TestBuildArgs(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name: "pipeline minimal",
-			kind: KindPipeline,
-			req:  RunRequest{ProjectRoot: "/p", Pipeline: "shard"},
-			want: []string{"pipeline", "shard", "--no-tui", "--quiet", "--cwd", "/p"},
-		},
-		{
-			name: "pipeline full",
+			// Retired with APEX v0: refused, whatever the request says.
+			name: "pipeline retired",
 			kind: KindPipeline,
 			req: RunRequest{
 				ProjectRoot: "/p", Pipeline: "shard", From: "review", Prompt: "go",
+			},
+			wantErr: ErrValidation,
+		},
+		{
+			name: "task common flags",
+			kind: KindTask,
+			req: RunRequest{
+				ProjectRoot: "/p", Skill: "apex-shard-doc",
 				NoCommit: true, CommitAllowDirty: true, UploadTranscripts: true,
 			},
 			want: []string{
-				"pipeline", "shard", "--no-tui", "--quiet", "--cwd", "/p",
-				"--from", "review", "--prompt", "go",
+				"task", "apex-shard-doc", "--quiet", "--cwd", "/p",
 				"--no-commit", "--commit-allow-dirty", "--upload-transcripts",
 			},
 		},
@@ -147,8 +149,8 @@ func TestBuildArgs(t *testing.T) {
 		},
 		{
 			name:    "missing project_root",
-			kind:    KindPipeline,
-			req:     RunRequest{Pipeline: "x"},
+			kind:    KindTask,
+			req:     RunRequest{Skill: "x"},
 			wantErr: ErrValidation,
 		},
 	}

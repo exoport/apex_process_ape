@@ -31,22 +31,6 @@ func TestScanHeads_AnAbsentRootIsAnEmptyAnswerNotAnError(t *testing.T) {
 	require.Empty(t, scan.Heads)
 }
 
-// The projection over an absent folder is well-formed, so a caller
-// reading `stories_matched` gets a number rather than an exit code —
-// and `implementation_folder_missing` keeps "nowhere to look" distinct
-// from "looked and found nothing".
-func TestProject_AbsentRootProjectsEmptyAndSaysSo(t *testing.T) {
-	absent := filepath.Join(t.TempDir(), "never-planned")
-
-	res, err := Project(absent, []string{"story_id", "status"})
-	require.NoError(t, err)
-	require.Equal(t, 0, res.Trailer.FilesScanned)
-	require.Equal(t, 0, res.Trailer.StoriesMatched)
-	require.True(t, res.Trailer.RootMissing)
-	require.Equal(t, map[string]int{"story_id": 0, "status": 0}, res.Trailer.PerFieldPresent,
-		"every requested field still reports zero rather than being absent")
-}
-
 // An unreadable root is NOT the tolerated case: it says the answer
 // cannot be trusted, where an absent root says the answer is empty.
 func TestScanHeads_AnUnreadableRootIsStillAnError(t *testing.T) {

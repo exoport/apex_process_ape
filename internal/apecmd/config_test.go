@@ -11,9 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// realProjectConfig is the shape that broke `ape adr list`: governance
-// artifacts under development/governance, which neither hardcoded probe
-// in findADRDir ever looked at.
+// realProjectConfig is a real v0 project's config: governance artifacts
+// under development/governance, a non-default layout.
 const realProjectConfig = `config_schema_version: "1"
 project_name: axon
 extensions: [ext-adrs, ext-patterns]
@@ -45,44 +44,6 @@ func newTestProject(t *testing.T, cfg string) string {
 	))
 	t.Chdir(root)
 	return root
-}
-
-// seedADRs writes n ADR records plus an index that lists them, in the
-// real corpus layout: {governance_folder}/adrs/.
-func seedADRs(t *testing.T, root string, n int) {
-	t.Helper()
-	dir := filepath.Join(root, "development", "governance", "adrs")
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "changelog"), 0o755))
-	var index bytes.Buffer
-	index.WriteString("generated_at: \"20260821120000\"\nadrs:\n")
-	for i := 1; i <= n; i++ {
-		name := adrFixtureName(i)
-		body := "---\nid: " + adrFixtureID(i) + "\ntitle: Decision " + adrFixtureID(i) +
-			"\nstatus: accepted\n---\n\n## Context\n\nx\n"
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644))
-		index.WriteString("  - id: " + adrFixtureID(i) + "\n")
-		index.WriteString("    title: Decision " + adrFixtureID(i) + "\n")
-		index.WriteString("    status: accepted\n")
-		index.WriteString("    file: " + name + "\n")
-	}
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "index.yaml"), index.Bytes(), 0o644))
-}
-
-func adrFixtureID(i int) string {
-	return "ADR-" + zeroPad4(i)
-}
-
-func adrFixtureName(i int) string {
-	return "adr-" + zeroPad4(i) + "_decision.md"
-}
-
-func zeroPad4(i int) string {
-	s := []byte("0000")
-	for pos := 3; pos >= 0 && i > 0; pos-- {
-		s[pos] = byte('0' + i%10)
-		i /= 10
-	}
-	return string(s)
 }
 
 // TestConfigResolve_JSONPayload covers the wire contract the framework
@@ -170,85 +131,4 @@ func TestConfigResolve_CwdFlag(t *testing.T) {
 	cmd.SetArgs([]string{"--cwd", root, "--output-format", "json"})
 	require.NoError(t, cmd.Execute())
 	require.Contains(t, buf.String(), "axon")
-}
-
-// TestADRList_ResolvesThroughConfig is the D1 regression and the
-// definition of done: against a project whose governance_folder is
-// development/governance, `ape adr list` must return every record. Before
-// PLAN-25 it printed "no ADR directory found" and exited 0.
-func TestADRList_ResolvesThroughConfig(t *testing.T) {
-	const wantRecords = 64
-	root := newTestProject(t, realProjectConfig)
-	seedADRs(t, root, wantRecords)
-
-	// The resolver is what regressed; assert on it directly so the test
-	// pins the behaviour rather than the rendering.
-	dir := findADRDir()
-	require.Equal(t, filepath.Join(root, "development", "governance", "adrs"), dir,
-		"findADRDir must resolve through _apex/config.yaml, not a hardcoded probe")
-
-	var buf bytes.Buffer
-	cmd := newADRListCmd()
-	cmd.SetOut(&buf)
-	cmd.SetArgs([]string{"--output-format", "json"})
-	require.NoError(t, cmd.Execute())
-
-	var records []map[string]any
-	require.NoError(t, json.Unmarshal(buf.Bytes(), &records))
-	require.Len(t, records, wantRecords, "every ADR on disk must be listed")
-	require.Equal(t, "ADR-0001", records[0]["id"])
-}
-
-// TestFindADRDir_LegacyFallback keeps the pre-PLAN-25 behaviour working
-// for a tree with no _apex/config.yaml at all.
-func TestFindADRDir_LegacyFallback(t *testing.T) {
-	root := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(root, "development", "adrs"), 0o755))
-	t.Chdir(root)
-
-	require.Equal(t, filepath.Join("development", "adrs"), findADRDir(),
-		"with no config, the legacy candidate still resolves")
-}
-
-func TestFindADRDir_NoProjectNoLegacy(t *testing.T) {
-	t.Chdir(t.TempDir())
-	require.Empty(t, findADRDir())
-	require.Empty(t, findPatternsDir())
-}
-
-// TestFirstExistingDir_SkipsEmptyAndRoot guards the $APE_PROCESS_REPO
-// candidate: unset, filepath.Join would yield "/development/adrs" — and
-// a bare separator must never count as a hit.
-func TestFirstExistingDir_SkipsEmptyAndRoot(t *testing.T) {
-	require.Empty(t, firstExistingDir("", string(filepath.Separator)))
-	dir := t.TempDir()
-	require.Equal(t, dir, firstExistingDir("", dir))
-	file := filepath.Join(dir, "f")
-	require.NoError(t, os.WriteFile(file, []byte("x"), 0o644))
-	require.Empty(t, firstExistingDir(file), "a file is not a directory")
-}
-
-// TestPatternDir_ResolvesThroughConfig mirrors the ADR regression for
-// the patterns family.
-func TestPatternDir_ResolvesThroughConfig(t *testing.T) {
-	root := newTestProject(t, realProjectConfig)
-	dir := filepath.Join(root, "development", "governance", "patterns")
-	require.NoError(t, os.MkdirAll(dir, 0o755))
-	require.Equal(t, dir, findPatternsDir())
-}
-
-// TestADRNew_WritesWhereListReads closes the disagreement between the
-// two commands: `new` used to fall back to development/adrs while `list`
-// read the resolved governance folder.
-func TestADRNew_WritesWhereListReads(t *testing.T) {
-	root := newTestProject(t, realProjectConfig)
-
-	cmd := newADRNewCmd()
-	cmd.SetOut(&bytes.Buffer{})
-	cmd.SetArgs([]string{"Use", "Markdown", "ADRs"})
-	require.NoError(t, cmd.Execute())
-
-	want := filepath.Join(root, "development", "governance", "adrs", "ADR-use-markdown-adrs.md")
-	_, err := os.Stat(want)
-	require.NoError(t, err, "adr new must write into the resolved governance folder")
 }

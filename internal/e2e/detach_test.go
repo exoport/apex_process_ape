@@ -31,15 +31,21 @@ func exitStatus(err error) int {
 
 // --detach returns at once with an id, and `ape run wait` exits with the
 // run's own exit code — the same one the command gives when run in the
-// foreground. A pipeline that does not exist fails without any claude.
+// foreground. A skill that does not exist fails its preflight without any
+// claude.
 func TestDetach_WaitReturnsTheRunsOwnExitCode(t *testing.T) {
 	ape := buildApe(t)
 	project := t.TempDir()
-	_, fgErr := exec.Command(ape, "pipeline", "no-such-pipeline", "--cwd", project).CombinedOutput()
+	run := func(args ...string) *exec.Cmd {
+		c := exec.Command(ape, args...)
+		c.Env = append(os.Environ(), "APE_CLAUDE_PROBE=off")
+		return c
+	}
+	_, fgErr := run("task", "apex-no-such-skill", "--cwd", project).CombinedOutput()
 	foreground := exitStatus(fgErr)
 	require.NotZero(t, foreground, "the fixture must fail, or this compares nothing")
 
-	out, err := exec.Command(ape, "pipeline", "no-such-pipeline", "--detach", "--cwd", project).CombinedOutput()
+	out, err := run("task", "apex-no-such-skill", "--detach", "--cwd", project).CombinedOutput()
 	require.NoError(t, err, "--detach itself succeeds: %s", out)
 	m := detachedID.FindStringSubmatch(string(out))
 	require.NotNil(t, m, "no id in: %s", out)

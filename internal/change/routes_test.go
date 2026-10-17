@@ -152,21 +152,6 @@ func TestRouteTable_Degradations(t *testing.T) {
 	})
 }
 
-func TestStoryKeyFrom(t *testing.T) {
-	require.Equal(t, "12-3_do-the-thing", StoryKeyFrom("rung 2 12-3_do-the-thing"))
-	require.Empty(t, StoryKeyFrom("lean-story"))
-	require.Empty(t, StoryKeyFrom("rung 2"))
-}
-
-// The printed line is pasted into a shell, and the path comes from a
-// project's own output_folder — which ape does not get to choose.
-func TestShellQuote(t *testing.T) {
-	require.Equal(t, "'/p/a b/request.txt'", ShellQuote("/p/a b/request.txt"))
-	require.Equal(t, `'/p/it'\''s/request.txt'`, ShellQuote("/p/it's/request.txt"))
-	require.NotContains(t, ShellQuote("/p/$(whoami)/r.txt"), "\"")
-	require.True(t, strings.HasPrefix(ShellQuote("/p/$(whoami)/r.txt"), "'"))
-}
-
 // InspectRoutes is the rule `ape doctor` and `make check-framework`
 // share, so the two cannot disagree about the same file.
 func TestInspectRoutes_ReportsWhatARouteWouldPrint(t *testing.T) {

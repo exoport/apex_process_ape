@@ -62,7 +62,7 @@ stages:
 
 ## Related
 
-- [invocation-matrix.md](invocation-matrix.md)
-- [pipeline-yaml-schema.md](pipeline-yaml-schema.md)
+- invocation-matrix.md
+- pipeline-yaml-schema.md
 - [bridge-ipc.md](bridge-ipc.md)
 - [../explanation/exec-modes.md](../explanation/exec-modes.md)

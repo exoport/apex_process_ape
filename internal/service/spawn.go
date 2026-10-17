@@ -162,21 +162,13 @@ func underAnyRoot(roots []string, p string) bool {
 	return false
 }
 
-func buildPipelineArgs(req RunRequest) ([]string, error) {
-	if strings.TrimSpace(req.Pipeline) == "" {
-		return nil, fmt.Errorf("%w: pipeline is required for pipeline.run", ErrValidation)
-	}
-	// --no-tui --quiet: headless, plain progress; the child's PLAN-13
-	// events (not stdout) carry progress to remote consumers.
-	args := []string{"pipeline", req.Pipeline, "--no-tui", "--quiet", "--cwd", req.ProjectRoot}
-	if req.From != "" {
-		args = append(args, "--from", req.From)
-	}
-	if req.Prompt != "" {
-		args = append(args, "--prompt", req.Prompt)
-	}
-	args = appendCommonRunFlags(args, req)
-	return args, nil
+// buildPipelineArgs refuses every pipeline.run: `ape pipeline` was an APEX
+// v0 command, retired with the rest of v0's ceremony. The endpoint stays
+// registered so a client still sending it gets this VALIDATION answer, not a
+// NATS "no responders" it would read as a daemon that is down.
+func buildPipelineArgs(RunRequest) ([]string, error) {
+	return nil, fmt.Errorf("%w: pipeline.run is retired — `ape pipeline` was an APEX v0 command; submit task.run, "+
+		"or serve the v0 project with its pinned v0 ape", ErrValidation)
 }
 
 func buildTaskArgs(req RunRequest) ([]string, error) {
@@ -213,8 +205,7 @@ func buildTaskArgs(req RunRequest) ([]string, error) {
 	return args, nil
 }
 
-// appendCommonRunFlags adds the commit/upload flags shared by pipeline and
-// task.
+// appendCommonRunFlags adds the commit/upload flags of a task.
 func appendCommonRunFlags(args []string, req RunRequest) []string {
 	if req.NoCommit {
 		args = append(args, "--no-commit")

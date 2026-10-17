@@ -368,13 +368,13 @@ does not block anything.
 
 With `--no-migrate`, `ape doctor`'s `migration.pending` check reports the
 outstanding work, so the state is visible rather than silent. See
-[How to work with project data](work-with-project-data.md) for what the
+How to work with project data for what the
 migration does and how to run it on its own.
 
 ## Related
 
-- [How to work with project data](work-with-project-data.md) — the commands the migration uses.
+- How to work with project data — the commands the migration uses.
 - [How to set up the framework (first install)](framework-setup.md) — run this before `update`.
-- [Pipeline spec reference](../reference/pipeline-spec.md) — the YAML shape of `_apex/pipelines/*.yaml`.
+- Pipeline spec reference — the YAML shape of `_apex/pipelines/*.yaml`.
 - [framework.yaml reference](../reference/framework-yaml.md) — the metadata file written on every install.
 - [Why setup and update are separate](../explanation/why-setup-and-update-are-separate.md) — design rationale for the split.

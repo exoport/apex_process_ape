@@ -21,10 +21,11 @@ func newCostsCmd() *cobra.Command {
 		Use:   "costs",
 		Short: "Show this project's Claude cost rollup",
 		Long: `Reads <project>/_output/ape/cost-rollup.json and prints
-totals — today, this week, all-time — broken down per pipeline + chat.
+totals — today, this week, all-time — broken down per task, chat and (from
+an older ape) pipeline.
 
   ape costs                          Project rollup (human / json).
-  ape costs run <run-id>             Single pipeline run (reads manifest.yaml).
+  ape costs run <run-id>             Single task run (reads manifest.yaml).
   ape costs chat <chat-id>           Single chat session (reads session.yaml).
   ape costs prompt <prompt-id>       Single prompt session (reads prompt.yaml).
   ape costs update --from <file>     Refresh the price table from a YAML file.
@@ -286,7 +287,7 @@ func printCostsHuman(r *cost.Rollup) {
 	}
 
 	if r.UpdatedAt.IsZero() {
-		fmt.Fprintln(os.Stderr, "rollup never populated. Run `ape pipeline` or `ape chat` to seed it.")
+		fmt.Fprintln(os.Stderr, "rollup never populated. Run `ape task` or `ape chat` to seed it.")
 	} else {
 		fmt.Fprintf(os.Stderr, "rollup updated %s\n", r.UpdatedAt.Format(time.RFC3339))
 	}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,9 +12,6 @@ import (
 // IndexFileName is the derived listing every family keeps beside its
 // records.
 const IndexFileName = "index.yaml"
-
-// generatedAtKey is the top-level timestamp both index shapes carry.
-const generatedAtKey = "generated_at"
 
 // Entry is one index entry, flattened from either shape.
 type Entry struct {
@@ -97,19 +93,6 @@ func mappingValue(mapping *yaml.Node, key string) *yaml.Node {
 	return nil
 }
 
-// setMappingValue sets key to value, appending at the end when the key is
-// new so existing key order is preserved.
-func setMappingValue(mapping *yaml.Node, key string, value *yaml.Node) {
-	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		if mapping.Content[i].Value == key {
-			mapping.Content[i+1] = value
-			return
-		}
-	}
-	mapping.Content = append(mapping.Content,
-		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, value)
-}
-
 // Entries flattens the index into id-ordered entries. A malformed entry
 // (not a mapping, or missing an id) is returned in bad so the caller can
 // report it rather than silently skipping it.
@@ -175,47 +158,6 @@ func entryFromMapping(node *yaml.Node, idFromKey string) (Entry, error) {
 	return e, nil
 }
 
-// ApplyDeltas sets per-entry field values, exactly as
-// `render-index-update.py` does: only entries already present may be
-// updated, and an unknown id is an error raised BEFORE anything is
-// written. Creating an index entry is the job of the skill that authors
-// the document it points at.
-func (idx *Index) ApplyDeltas(updates map[string]map[string]UpdateValue, generatedAt string) (fields int, err error) {
-	if idx.Missing || idx.root == nil {
-		return 0, fmt.Errorf("%s does not exist", idx.Path)
-	}
-	entries, _ := idx.Entries()
-	byID := make(map[string]Entry, len(entries))
-	for _, e := range entries {
-		byID[e.ID] = e
-	}
-	var unknown []string
-	for id := range updates {
-		if _, ok := byID[id]; !ok {
-			unknown = append(unknown, id)
-		}
-	}
-	if len(unknown) > 0 {
-		sortStrings(unknown)
-		return 0, fmt.Errorf("unknown %s IDs (not in index): %s",
-			idx.Family.Name, strings.Join(unknown, ", "))
-	}
-	for id, deltas := range updates {
-		target := idx.entryNode(byID[id])
-		if target == nil {
-			return 0, fmt.Errorf("entry %q has no node in %s", id, idx.Path)
-		}
-		for _, key := range sortedKeys(deltas) {
-			setMappingValue(target, key, updateNode(deltas[key]))
-			fields++
-		}
-	}
-	if generatedAt != "" {
-		setMappingValue(idx.root, generatedAtKey, scalar(generatedAt))
-	}
-	return fields, nil
-}
-
 // entryNode returns the mapping node backing an entry.
 func (idx *Index) entryNode(e Entry) *yaml.Node {
 	if idx.entries == nil {
@@ -232,123 +174,4 @@ func (idx *Index) entryNode(e Entry) *yaml.Node {
 		}
 	}
 	return nil
-}
-
-// scalar builds a scalar node, quoting values that YAML would otherwise
-// re-read as a number, bool or null. `render-index-update.py` does the
-// same with a custom representer, and for the same reason: an ADR id like
-// `0001` or a status of `no` must survive as a string.
-func scalar(value string) *yaml.Node {
-	n := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value}
-	if needsQuoting(value) {
-		n.Style = yaml.SingleQuotedStyle
-	}
-	return n
-}
-
-// updateNode renders one field delta as the YAML node to store.
-//
-// A list becomes a real sequence node in FLOW style ([a, b]), matching how
-// the framework's own generators write `depends_on` — the index stays
-// diffable line-per-entry, and a reader cannot tell an ape-written list
-// from a generator-written one.
-func updateNode(v UpdateValue) *yaml.Node {
-	if !v.IsList {
-		return scalar(v.Scalar)
-	}
-	n := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Style: yaml.FlowStyle}
-	for _, item := range v.Items {
-		n.Content = append(n.Content, scalar(item))
-	}
-	return n
-}
-
-func needsQuoting(value string) bool {
-	if value == "" {
-		return true
-	}
-	switch strings.ToLower(value) {
-	case "true", "false", "null", "yes", "no", "on", "off", "~":
-		return true
-	}
-	// A value that round-trips through YAML as a non-string needs quotes.
-	var probe any
-	if err := yaml.Unmarshal([]byte(value), &probe); err == nil {
-		if _, isString := probe.(string); !isString && probe != nil {
-			return true
-		}
-	}
-	return false
-}
-
-// Render encodes the index back to YAML: block style, two-space indent,
-// key order and comments preserved.
-func (idx *Index) Render() ([]byte, error) {
-	if idx.root == nil {
-		return nil, fmt.Errorf("%s: nothing loaded", idx.Path)
-	}
-	var buf strings.Builder
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	if err := enc.Encode(idx.root); err != nil {
-		return nil, fmt.Errorf("encode %s: %w", idx.Path, err)
-	}
-	if err := enc.Close(); err != nil {
-		return nil, fmt.Errorf("encode %s: %w", idx.Path, err)
-	}
-	return []byte(buf.String()), nil
-}
-
-// Save renders the index, verifies the result parses back to a mapping,
-// and only then replaces the file — a write-then-verify would leave a
-// corrupt index on disk, which is what the round-trip check exists to
-// prevent.
-func (idx *Index) Save() error {
-	data, err := idx.Render()
-	if err != nil {
-		return err
-	}
-	var probe yaml.Node
-	if err := yaml.Unmarshal(data, &probe); err != nil {
-		return fmt.Errorf("round-trip parse of rendered %s failed: %w", idx.Path, err)
-	}
-	if root := documentRoot(&probe); root == nil || root.Kind != yaml.MappingNode {
-		return fmt.Errorf("round-trip parse of rendered %s did not produce a mapping", idx.Path)
-	}
-	return writeFileAtomic(idx.Path, data)
-}
-
-// writeFileAtomic writes via a temp file in the same directory and a
-// rename, so a crash mid-write cannot truncate an index.
-func writeFileAtomic(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".ape-"+filepath.Base(path)+".*")
-	if err != nil {
-		return fmt.Errorf("create temp beside %s: %w", path, err)
-	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write %s: %w", tmpName, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close %s: %w", tmpName, err)
-	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		return fmt.Errorf("chmod %s: %w", tmpName, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return fmt.Errorf("rename onto %s: %w", path, err)
-	}
-	return nil
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sortStrings(out)
-	return out
 }

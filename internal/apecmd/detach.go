@@ -5,7 +5,7 @@ package apecmd
 // Why: Claude Code 2.1.285 stops a Bash tool's background command after at
 // most 2 h (30 min by default), SIGTERM then SIGKILL ~3 s later, and it
 // stops setsid'd and nohup'd descendants too. The apex-orchestrator runs
-// every `ape pipeline|task|change` from such a shell, so a long dispatch
+// every `ape task|change` from such a shell, so a long dispatch
 // was killed mid-run. The framework measured that a process ORPHANED at
 // launch survives, and worked around it in shell. This gives it a
 // supported form: `--detach` starts a supervisor in its own session and
@@ -223,7 +223,7 @@ func newRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Wait for, or inspect, a run started with --detach",
-		Long: `A run started with --detach (ape pipeline|task|change --detach) returns an id at
+		Long: `A run started with --detach (ape task|change --detach) returns an id at
 once and continues in the background, orphaned from the shell that started
 it, so a tool's time limit on that shell does not reach it.
 

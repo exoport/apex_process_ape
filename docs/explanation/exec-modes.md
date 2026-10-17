@@ -6,7 +6,7 @@ Until v0.0.35 a second, **programmatic** path existed (one `claude -p <prompt>` 
 
 ## What changed
 
-Before PLAN-6, every `ape pipeline` invocation (including `--web`) used programmatic exec — `--web` layered the bridge MCP subprocess and hook observability on top of the per-step `claude -p` shape, interactive-looking in the browser but still programmatic underneath. PLAN-6 (2026-05-20) added the interactive per-stage path and made it the default. v0.0.36 removed the programmatic path outright, collapsing the two orthogonal axes (UI × Exec) to a single **UI axis**: where output renders — `tui` (default), `web`, or `none`. See the [invocation matrix](../reference/invocation-matrix.md).
+Before PLAN-6, every `ape pipeline` invocation (including `--web`) used programmatic exec — `--web` layered the bridge MCP subprocess and hook observability on top of the per-step `claude -p` shape, interactive-looking in the browser but still programmatic underneath. PLAN-6 (2026-05-20) added the interactive per-stage path and made it the default. v0.0.36 removed the programmatic path outright, collapsing the two orthogonal axes (UI × Exec) to a single **UI axis**: where output renders — `tui` (default), `web`, or `none`. See the invocation matrix.
 
 ## Why per-stage interactive
 
@@ -67,8 +67,8 @@ Hooks fire **before** a tool runs and can block or modify the call (returning no
 ## Related
 
 - [why-pty-only.md](why-pty-only.md) — why the programmatic exec axis was removed.
-- [invocation-matrix.md](../reference/invocation-matrix.md)
+- invocation-matrix.md
 - [claude-spawn-modes.md](../reference/claude-spawn-modes.md) — how ape delivers prompts to the PTY-hosted REPL.
-- [pipeline-yaml-schema.md](../reference/pipeline-yaml-schema.md)
+- pipeline-yaml-schema.md
 - [step-contract.md](../reference/step-contract.md)
-- [bridge-architecture.md](bridge-architecture.md)
+- bridge-architecture.md

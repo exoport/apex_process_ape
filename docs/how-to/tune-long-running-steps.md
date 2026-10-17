@@ -149,6 +149,6 @@ early stalls are caught quickly while long runs poll cheaply.
 
 ## Related
 
-- [Pipeline spec reference § Step completion backstop](../reference/pipeline-spec.md#step-completion-backstop)
+- Pipeline spec reference § Step completion backstop
 - [Choosing between `ape chat`, `ape task`, and `ape prompt`](../explanation/chat-task-prompt.md)
 - [CLI reference](../reference/cli.md)

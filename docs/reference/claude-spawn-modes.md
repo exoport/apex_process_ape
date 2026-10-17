@@ -212,7 +212,7 @@ evidence that a value was honoured.
 
 ## Related
 
-- [invocation-matrix.md](invocation-matrix.md) — the UI axis (`tui` default, `web`, `no-tui`).
+- invocation-matrix.md — the UI axis (`tui` default, `web`, `no-tui`).
 - [step-contract.md](step-contract.md) — what the runner types into the REPL between steps.
 - [../explanation/why-pty-only.md](../explanation/why-pty-only.md) — why PTY is the only exec mode.
 - [../explanation/exec-modes.md](../explanation/exec-modes.md) — the per-stage interactive runtime in depth.

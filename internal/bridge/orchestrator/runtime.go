@@ -161,50 +161,12 @@ func (r *BridgeRuntime) SendStepBind(sessionID, step string) {
 	_ = ipc.Write(conn, ipc.Message{Type: ipc.TypeStepBind, SessionID: sessionID, Step: step})
 }
 
-// SendMessage forwards a user-supplied message back to the bridge as
-// a TypeMessage frame. The web broker calls this on POST /api/send;
-// the TUI await-reply input calls it directly.
-func (r *BridgeRuntime) SendMessage(content string) {
-	r.bridgeMu.Lock()
-	conn := r.bridgeConn
-	r.bridgeMu.Unlock()
-	if conn == nil {
-		return
-	}
-	_ = ipc.Write(conn, ipc.Message{Type: ipc.TypeMessage, Content: content})
-}
-
 // SetStopFn registers a callback that fires when RequestStop is called.
 // The pipeline runner cancels its run context inside the callback.
 func (r *BridgeRuntime) SetStopFn(fn func()) {
 	r.stopMu.Lock()
 	r.stopFn = fn
 	r.stopMu.Unlock()
-}
-
-// RequestStop invokes the registered stop callback, if any. The web
-// broker calls this on POST /api/stop; the TUI's stop modal calls it
-// directly.
-func (r *BridgeRuntime) RequestStop() {
-	r.stopMu.Lock()
-	fn := r.stopFn
-	r.stopMu.Unlock()
-	if fn != nil {
-		fn()
-	}
-}
-
-// Subscribe returns a channel that receives every RuntimeEvent. The
-// channel is buffered (32 slots) and the runtime drops events when a
-// subscriber falls behind to avoid backpressure into the accept loop;
-// drops are silent. Callers should drain quickly. The returned channel
-// is closed when the runtime's Serve context cancels.
-func (r *BridgeRuntime) Subscribe() <-chan RuntimeEvent {
-	ch := make(chan RuntimeEvent, 32)
-	r.subsMu.Lock()
-	r.subs = append(r.subs, ch)
-	r.subsMu.Unlock()
-	return ch
 }
 
 func (r *BridgeRuntime) publish(evt RuntimeEvent) {

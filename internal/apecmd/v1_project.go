@@ -35,7 +35,9 @@ func newProjectInitCmd() *cobra.Command {
                                      ape change verify --help); commit: {subject,
                                      hooks} for the archive's squash, and evidence:
                                      archive|off (default off) — see ape change archive
-                                     --help); see "Check settings" below
+                                     --help; notify: <command>, run on a limit stop or a
+                                     blocked change — see ape task --help); see "Check
+                                     settings" below
   AGENTS.md                          the project map (skeleton)
   CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
                                      gets it appended, and nothing else
@@ -145,6 +147,10 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 				}
 				dir = wd
 			}
+			// A v0 project is lifted, not initialised beside its v0 tree.
+			if apexv1.IsV0Project(apexv1.FindRoot(dir)) {
+				return v1Fail(cmd, &f, apexv1.V0ProjectError(), nil)
+			}
 			res, err := apexv1.Init(cmd.Context(), dir, brownfield)
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
@@ -236,7 +242,17 @@ func newProjectCheckCmd() *cobra.Command {
                            exists (docs.missing: create it, or fix the path)
   .claude/settings.json    ape's hooks registered as ` + "`ape project init`" + ` writes them:
                            hooks.missing / hooks.altered (matcher, type, async, a
-                           stop timeout below 1800 s); ` + "`ape project init`" + ` restores them
+                           stop timeout below 1800 s); ` + "`ape project init`" + ` restores them;
+                           and shared through git: settings.ignored when git ignores it
+                           (and does not track it), since its hooks then reach no other
+                           checkout — only ` + "`ape task`" + ` sessions get them inline
+  provenance               since the v1 epoch (the newest "apex: project init" or "apex: lift"
+                           commit; nothing before it is judged), one git log walk: a commit
+                           touching development/specs/** must be an archive squash — a
+                           "Change: <id>" trailer whose change is archived, whatever its
+                           subject — else spec.edited; a change's state.json may change only
+                           in an "apex: …" commit or an archive squash, else state.forged.
+                           A git revert of such a commit clears both (both action person)
   plugins                  _apex/config.yaml marketplaces/plugins: settings.json's
                            extraKnownMarketplaces/enabledPlugins match them, and (when
                            claude is on PATH) each plugin is installed at project scope
@@ -382,6 +398,10 @@ func newStatusCmd() *cobra.Command {
   - next: what the way of working says comes next, derived from the state alone
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
+  - the latest ape task run (JSON "latest_run": {skill, run_id, status, stopped,
+    resets, resets_at, message}): how it ended, e.g. "stopped: usage-limit, resets
+    2026-10-16T23:00:00+02:00" when a claude.ai usage limit stopped it (see ape task
+    --help, exit 14)
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 
@@ -391,6 +411,9 @@ Exit codes: 0 ok · 2 usage.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := v1Project(&f)
 			if err != nil {
+				return err
+			}
+			if err := v1RefuseV0(cmd, &f, p); err != nil {
 				return err
 			}
 			r := p.Status()
@@ -434,6 +457,9 @@ func statusLong(r *apexv1.StatusReport) string {
 	if u := r.BaseUpstream; u != nil && u.Behind == 0 {
 		// Behind is in the brief already.
 		fmt.Fprintf(&b, "\nBase: %s\n", u.Describe())
+	}
+	if r.LatestRun != nil {
+		fmt.Fprintf(&b, "\nLatest run: %s\n", r.LatestRun.Describe())
 	}
 	fmt.Fprintf(&b, "\nSpend note: %s\n", r.Spend.Note)
 	return b.String()

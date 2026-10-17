@@ -15,6 +15,7 @@ import (
 
 	"github.com/exoport/apex_process_ape/internal/pipeline"
 	"github.com/exoport/apex_process_ape/internal/repl"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 )
@@ -295,23 +296,27 @@ func countHooks(t *testing.T, path string) map[string]int {
 
 func latestRunDir(t *testing.T, project string) string {
 	t.Helper()
-	dir, err := filepath.EvalSymlinks(filepath.Join(project, "_output", "ape", "tasks", probeSkill, "latest"))
+	// runlog decides where a run lands: _apex/state/runs/tasks in a v1 project.
+	dir, err := filepath.EvalSymlinks(filepath.Join(runlog.TasksRoot(project), probeSkill, "latest"))
 	require.NoError(t, err, "no run directory: ape task wrote no record")
 	return dir
 }
 
-// seedProject copies testdata/apexproject into a temp dir and makes it a
-// git repository, as a framework install is.
+// seedProject copies the APEX v1 fixture (testdata/apexv1project) into a
+// temp dir, adds the CLAUDE.md `ape project init` writes (the fixture omits
+// it: a CLAUDE.md inside this repository is one too many), and makes it a
+// git repository committed the way init commits it.
 func seedProject(t *testing.T) string {
 	t.Helper()
-	src, err := filepath.Abs(filepath.Join("..", "..", "testdata", "apexproject"))
+	src, err := filepath.Abs(filepath.Join("..", "..", "testdata", "apexv1project"))
 	require.NoError(t, err)
 	dst := filepath.Join(t.TempDir(), "project")
 	require.NoError(t, os.CopyFS(dst, os.DirFS(src)))
+	require.NoError(t, os.WriteFile(filepath.Join(dst, "CLAUDE.md"), []byte("@AGENTS.md\n"), 0o644))
 	for _, args := range [][]string{
 		{"init", "-q"},
 		{"add", "-A"},
-		{"-c", "user.email=probe@example.com", "-c", "user.name=probe", "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "seed"},
+		{"-c", "user.email=probe@example.com", "-c", "user.name=probe", "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "apex: project init"},
 	} {
 		c := exec.Command("git", args...)
 		c.Dir = dst

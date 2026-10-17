@@ -89,6 +89,11 @@ type Config struct {
 	// Commit shapes the archive's squash commit (H15): its subject
 	// template and whether the project's git hooks run on it.
 	Commit CommitConfig `yaml:"commit"`
+	// Notify is a shell command ape runs, best effort, when an ape task
+	// run stops on a limit (usage limit, budget, …) or a change becomes
+	// blocked, with APE_EVENT (stop|block), APE_CHANGE and APE_REASON in
+	// its environment (H20). Its failure never changes the outcome.
+	Notify string `yaml:"notify"`
 }
 
 // SkillModel is one models.<skill> entry.

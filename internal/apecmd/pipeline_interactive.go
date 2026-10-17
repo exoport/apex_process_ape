@@ -3,11 +3,9 @@ package apecmd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -42,12 +40,6 @@ type hookEnvelope struct {
 	AgentID             string `json:"agent_id"`
 }
 
-// extractTranscriptPath pulls transcript_path from a hook payload.
-// Returns "" on absent / malformed (rare; the wire shape is stable).
-func extractTranscriptPath(payload json.RawMessage) string {
-	return parseHookEnvelope(payload).TranscriptPath
-}
-
 // parseHookEnvelope decodes the minimal hook payload shape. Zero-value
 // fields on absent / malformed payloads.
 func parseHookEnvelope(payload json.RawMessage) hookEnvelope {
@@ -56,13 +48,6 @@ func parseHookEnvelope(payload json.RawMessage) hookEnvelope {
 		_ = json.Unmarshal(payload, &env)
 	}
 	return env
-}
-
-// transcriptLinkName converts a step label (`<stage>/<idx>-<skill>`)
-// into a filesystem-safe symlink name under transcripts/. Slashes
-// become hyphens; the `.jsonl` extension is appended for clarity.
-func transcriptLinkName(stepLabel string) string {
-	return strings.ReplaceAll(stepLabel, "/", "-") + ".jsonl"
 }
 
 // interactiveCore bundles the per-step verification + step-done
@@ -95,6 +80,9 @@ type interactiveCore struct {
 	// `[1m]` suffix is the only carrier of the 1M-vs-200K context
 	// distinction, and NormalizeModel strips it because both bill alike.
 	activeModel string
+	// activeSession is the step's PTY session name, for the usage-limit
+	// watch's pane reads.
+	activeSession string
 
 	// pub publishes PLAN-13 progress events. Set once via setPublisher when
 	// the run dir resolves (the run id is the <id> subject segment). Guarded
@@ -437,6 +425,13 @@ func (c *interactiveCore) FeedCall(call orchestrator.ToolCall) {
 	}
 }
 
+// sessionName is the running step's PTY session, "" before the first step.
+func (c *interactiveCore) sessionName() string {
+	c.stepMu.Lock()
+	defer c.stepMu.Unlock()
+	return c.activeSession
+}
+
 // FeedReply is the OnReply fan-out target — writes the runlog
 // checkpoints.jsonl entry.
 func (c *interactiveCore) FeedReply(content string) {
@@ -458,6 +453,7 @@ func (c *interactiveCore) OnStepStart(info pipeline.InteractiveStepInfo) {
 	c.activeStep = pipeline.StepLabel(info.Stage, info.StepIdx+1, info.Skill)
 	c.activeSkill = info.Skill
 	c.activeModel = info.Model
+	c.activeSession = info.SessionName
 	c.stepMu.Unlock()
 	// Label the step on the Driver so a detached-agent failure names the
 	// skill that spawned it, not just the stage/step index the runner adds.
@@ -547,19 +543,6 @@ func (c *interactiveCore) OnStepEnd(_ pipeline.InteractiveStepInfo) {
 	c.activeStep = ""
 	c.activeModel = ""
 	c.stepMu.Unlock()
-}
-
-// ActiveStep returns the currently-running step label
-// ("<stage>/<idx>-<skill>") or "" between steps. PLAN-7 / FC: the
-// TUI observer uses this to backfill h.Step on hook events that
-// arrived from `ape notify` with the field empty (the PTY-driven
-// runner has no step-bind plumbing to populate it on the wire).
-// Thread-safe; reads are guarded by stepMu the same way FeedHook
-// reads it for its runlog write.
-func (c *interactiveCore) ActiveStep() string {
-	c.stepMu.Lock()
-	defer c.stepMu.Unlock()
-	return c.activeStep
 }
 
 // ResetStageTelemetry clears the per-stage transcript path and
@@ -862,30 +845,13 @@ func buildSpecPrepends(
 	return runFlags, perStage, nil
 }
 
-// runWithInteractive runs a pipeline in PLAN-6 interactive exec mode
-// with **no UI**: plain stdout streaming, BridgeRuntime for hook
-// observability, ContractVerifier for the step contract, runlog
-// alongside PLAN-3's manifest path. This is the `--no-tui`
-// (interactive) variant; the `--tui` variant routes through
-// runWithInteractiveTUI in pipeline_interactive_tui.go.
-// exitOnPreflight is the `ape pipeline` command's handling of a
-// *pipeline.PreflightError from runWithInteractive: print it and exit
-// ExitUsage. Any other error is returned unchanged.
-func exitOnPreflight(err error) error {
-	if pfe, ok := errors.AsType[*pipeline.PreflightError](err); ok {
-		fmt.Fprintf(os.Stderr, "%s\n", pfe.Error())
-		os.Exit(ExitUsage)
-	}
-	return err
-}
-
 func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot string, cfg runConfig) error {
 	if err := prepareEffort(spec, projectRoot, &cfg); err != nil {
 		return err
 	}
 	apeBin, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("ape pipeline --interactive: locate self: %w", err)
+		return fmt.Errorf("ape: locate self: %w", err)
 	}
 	// Before any stage spawns: a claude this ape cannot drive fails here, in
 	// seconds, rather than as a stalled first stage.
@@ -914,6 +880,9 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	if cfg.budgetWatch != nil {
 		go cfg.budgetWatch.run(runCtx, core.liveSessionCost, core.driver.SignalStepFatal)
 	}
+	if cfg.usageLimit != nil {
+		go cfg.usageLimit.run(runCtx, core.sessionName, core.driver.LastActivityAt, core.driver.SignalStepFatal)
+	}
 
 	// PLAN-13: optional NATS eventing + transcript upload. Fire-and-forget —
 	// conn is nil when NATS is off or unreachable, and every publish/upload
@@ -934,7 +903,7 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	})
 	if err := rt.Listen(runCtx); err != nil {
 		runCancel()
-		return fmt.Errorf("ape pipeline --interactive: runtime listen: %w", err)
+		return fmt.Errorf("ape: bridge runtime listen: %w", err)
 	}
 	rt.SetStopFn(runCancel)
 

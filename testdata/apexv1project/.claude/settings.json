@@ -1,0 +1,47 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "ape hook pre-tool",
+            "type": "command"
+          }
+        ],
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "ape hook session-start",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "ape hook stop",
+            "timeout": 1800,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "command": "ape hook stop",
+            "timeout": 1800,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

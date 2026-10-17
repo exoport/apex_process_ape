@@ -56,7 +56,9 @@ type RunRequest struct {
 	// as the child's working directory.
 	ProjectRoot string `json:"project_root"`
 
-	// Pipeline job selector + options (pipeline.run).
+	// Pipeline job selector + options (pipeline.run). Retired with APEX
+	// v0: every pipeline.run is refused (spawn.go buildPipelineArgs); the
+	// fields stay so the wire contract still decodes.
 	Pipeline string `json:"pipeline,omitempty"`
 	From     string `json:"from,omitempty"`
 

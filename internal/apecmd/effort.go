@@ -120,8 +120,8 @@ alias target gets the fallback.
 
 --model resolves one model the way a spawn would.
 
-In an APEX v1 project the table applies to ape pipeline only: ape task
-passes claude --effort from --effort, models.<skill>.effort, the parent
+In an APEX v1 project the table does not apply: ape task passes
+claude --effort from --effort, models.<skill>.effort, the parent
 session's effort or _apex/config.yaml effort:, else nothing (see ape task
 --help). The report's v1 section shows the config's part of that.
 

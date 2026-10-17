@@ -38,8 +38,8 @@ The old eval-harness path was `ape pipeline <name> --eval`, a byte-equivalence-l
 
 ## Related
 
-- [invocation-matrix.md](../reference/invocation-matrix.md) — the UI axis: `--tui` (default), `--web`, `--no-tui`.
+- invocation-matrix.md — the UI axis: `--tui` (default), `--web`, `--no-tui`.
 - [claude-spawn-modes.md](../reference/claude-spawn-modes.md) — how ape delivers prompts to the PTY-hosted REPL.
 - [step-contract.md](../reference/step-contract.md) — what the runner types into the REPL between steps.
 - [exec-modes.md](exec-modes.md) — the per-stage interactive runtime in depth.
-- [bridge-architecture.md](bridge-architecture.md) — the MCP bridge and hook observability.
+- bridge-architecture.md — the MCP bridge and hook observability.

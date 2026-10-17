@@ -57,17 +57,17 @@ func TestShouldCheckForUpdates(t *testing.T) {
 // Every gate in this binary uses exit 1 to mean "I looked and found
 // something", and cobra reported a flag it did not recognise as an
 // ordinary error, which the exit table then mapped to the same 1. So
-// `ape doc verify --doc epics` exited 1 having read no document, and a
+// `ape doc verify --doc epics` (a v0 command, since retired) exited 1
+// having read no document, and a
 // caller whose help text calls it "a GATE … the caller relies on the
 // non-zero exit to stop" concluded the document had duplicates. The
 // explanation went to stderr, where a caller reading stdout never saw
 // it.
 func TestFlagErrors_ExitUsageNotTheVerdictCode(t *testing.T) {
 	for _, args := range [][]string{
-		{"doc", "verify", "--doc", "epics"},
-		{"doc", "verify", "--file", "development/planning/epics.md"},
-		{"sprint", "verify", "--nonsense"},
-		{"story", "fields", "--nonsense"},
+		{"project", "check", "--nonsense"},
+		{"change", "verify", "x", "--nonsense"},
+		{"doctor", "--nonsense"},
 		{"--nonsense"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
@@ -87,19 +87,18 @@ func TestFlagErrors_ExitUsageNotTheVerdictCode(t *testing.T) {
 // move. A gate that started answering 2 for a finding would be the same
 // collision in reverse.
 func TestFlagErrors_ContentVerdictsAreUnchanged(t *testing.T) {
-	dir := t.TempDir()
-	dup := filepath.Join(dir, "dup.md")
-	require.NoError(t, os.WriteFile(dup, []byte("# t\n\n## a\n\n## a\n"), 0o644))
-	clean := filepath.Join(dir, "clean.md")
-	require.NoError(t, os.WriteFile(clean, []byte("# t\n\n## a\n\n## b\n"), 0o644))
+	clean := v1Repo(t)
+	broken := v1Repo(t)
+	// A project.md without its required sections is a finding: exit 1.
+	require.NoError(t, os.WriteFile(filepath.Join(broken, "development", "project.md"), []byte("# G\n"), 0o644))
 
 	for _, tc := range []struct {
 		name string
 		args []string
 		want int
 	}{
-		{"duplicates are still 1", []string{"doc", "verify", dup, "--level", "2"}, ExitRunFailed},
-		{"a clean document is still 0", []string{"doc", "verify", clean, "--level", "2"}, ExitOK},
+		{"a finding is still 1", []string{"project", "check", "--cwd", broken}, ExitRunFailed},
+		{"a clean project is still 0", []string{"project", "check", "--cwd", clean}, ExitOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := newRootCmd()
@@ -125,7 +124,6 @@ func TestArgErrors_ExitUsageNotTheVerdictCode(t *testing.T) {
 	for _, args := range [][]string{
 		{"doctor", "zzbogus"},
 		{"metrics", "zzbogus"},
-		{"planning", "zzbogus"},
 		{"version", "zzbogus"},
 		{"task"}, // a required positional, absent
 	} {
@@ -173,7 +171,7 @@ func TestVersion_RefusesAnArgumentItCannotMean(t *testing.T) {
 // it, or the two would disagree about who decided.
 func TestArgGuard_LeavesAnAlreadyCodedErrorAlone(t *testing.T) {
 	root := newRootCmd()
-	root.SetArgs([]string{"sprint", "zzbogus"})
+	root.SetArgs([]string{"milestone", "zzbogus"})
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
 

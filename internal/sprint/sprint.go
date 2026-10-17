@@ -207,17 +207,6 @@ func IsBareStoryRowKey(key string) bool {
 	return storyRowRe.MatchString(key) && !canonicalStoryRowRe.MatchString(key)
 }
 
-// BareStoryRowKeys lists the story rows whose keys are bare, in row order.
-func BareStoryRowKeys(rows []Row) []string {
-	var out []string
-	for _, r := range rows {
-		if r.Kind == KindStory && IsBareStoryRowKey(r.Key) {
-			out = append(out, r.Key)
-		}
-	}
-	return out
-}
-
 // BareRowKeyRemediation is the fix for a caller that CANNOT LOOK — the one
 // that has not read the implementation folder and so does not know whether a
 // story file matches the row.
@@ -291,21 +280,6 @@ func RemediationFor(rowKey string, candidates []string) string {
 		)
 	}
 }
-
-// LockSuffix is appended to the tracker path to name the advisory-lock
-// sidecar. Exported because the file OUTLIVES the run that made it: nothing
-// unlinks it — releasing the lock and deleting the file are different acts,
-// and deleting one another process may be waiting on is how you lose the
-// mutual exclusion the lock exists for — so it lands in the project as a
-// permanent, untracked artifact that wants a `.gitignore` entry.
-//
-// `ape doctor`'s sprint.lock_ignored row is what makes that visible. One
-// definition here so the locker, the doctor check and the remediation text
-// cannot drift apart.
-const LockSuffix = ".lock"
-
-// LockPath is the advisory-lock sidecar for a tracker.
-func LockPath(trackerPath string) string { return trackerPath + LockSuffix }
 
 // StoryKeyFromPath derives a story's tracker key from its file path.
 //
@@ -431,17 +405,6 @@ func Project(rows []Row, epic int) (target string, unrecognised []string) {
 	}
 }
 
-// HasStoryRows reports whether the epic has any story rows at all, which
-// the projection needs to distinguish "no rows" from "no active rows".
-func HasStoryRows(rows []Row, epic int) bool {
-	for _, r := range rows {
-		if r.Kind == KindStory && r.Epic == epic {
-			return true
-		}
-	}
-	return false
-}
-
 // EpicNumbers lists every epic that has a row or a story, ascending.
 func EpicNumbers(rows []Row) []int {
 	seen := map[int]bool{}
@@ -456,25 +419,4 @@ func EpicNumbers(rows []Row) []int {
 	}
 	sort.Ints(out)
 	return out
-}
-
-// RowStatus returns a row's status and whether the key exists.
-func (t *Tracker) RowStatus(key string) (string, bool) {
-	for _, r := range t.Rows {
-		if r.Key == key {
-			return r.Status, true
-		}
-	}
-	return "", false
-}
-
-// TopLevelString reads a top-level scalar (updated_at, created_at).
-func (t *Tracker) TopLevelString(key string) string {
-	if t.Raw == nil {
-		return ""
-	}
-	if v, ok := t.Raw[key]; ok && v != nil {
-		return fmt.Sprintf("%v", v)
-	}
-	return ""
 }

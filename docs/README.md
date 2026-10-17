@@ -15,7 +15,7 @@ The four quadrants serve different needs and are written in different styles. Tu
 
 ### Tutorials — _learning by doing_
 
-- [Your first pipeline](tutorials/first-pipeline.md) — install → doctor → framework setup → run the `design` pipeline → read the artifacts → `ape costs`
+- [Your first APEX v1 project](tutorials/first-v1-project.md) — install → doctor → `project init` → a milestone → green `project check` and `doctor --strict`
 
 ### How-to guides — _recipes for specific problems_
 
@@ -38,17 +38,14 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [How to read run artefacts](how-to/run-artefacts.md)
 - [How to keep cost pricing current](how-to/keep-cost-pricing-current.md)
 - [How to run `ape doctor` in CI](how-to/run-doctor-in-ci.md)
-- [How to work with project data (registries, stories, memory, deferred work)](how-to/work-with-project-data.md)
 - [How to verify a release before tagging](how-to/pre-tag-release.md)
 
 ### Reference — _technical descriptions_
 
 - [CLI reference](reference/cli.md) — every command, flag, and default (generated from the command tree)
 - [`apescript` library reference](reference/apescript.md) — the public v1 surface `ape script` files import (orchestration, introspection, plumbing, sandbox rules)
-- [Pipeline spec reference](reference/pipeline-spec.md) — schema for `_apex/pipelines/*.yaml`
 - [`framework.yaml` reference](reference/framework-yaml.md) — schema for `_apex/framework.yaml`
 - [Sandbox profile reference](reference/sandbox-profile.md) — schema for `_apex/sandbox/*.yaml` (Kata VM workspaces)
-- [Pipeline TUI keybindings](reference/tui-keybindings.md) — `ape pipeline` three-panel display, modes, and key map
 - [Claude Code environment variables](reference/claude-code-env-vars.md) — `CLAUDECODE` / `CLAUDE_CODE_*`, nested-session protection, and why ape scrubs them from spawned sessions
 - [NATS subjects & event payloads](reference/events.md) — the `ape.evt`/`log`/`metrics`/`svc`/`vmm`/`audit` subject taxonomy + payload schemas (**proposed** — the single contract for the PLAN-13/14/17/18 NATS work)
 
@@ -59,12 +56,9 @@ The four quadrants serve different needs and are written in different styles. Tu
 - [The per-stage interactive runtime](explanation/exec-modes.md) — process-spawn cost, context sharing, the step contract, and what hooks add
 - [Why a `Stop` hook is not proof a step finished](explanation/step-completion-gates.md) — detached agents, the four completion gates, and why they degrade safely on an older Claude Code
 - [Why `ape` never runs inside a session `ape` started](explanation/nested-ape-runs.md) — the `APE_SESSION` marker, the nesting refusal, and why the outer run's lifecycle closed that path
-- [Bridge architecture](explanation/bridge-architecture.md) — the MCP bridge, SSE broker, and orchestrator behind `--web`
-- [Why project-local pipelines](explanation/why-project-local-pipelines.md) — design rationale for moving from embedded to on-disk specs in v0.0.6
 - [`ape framework update` installs releases](explanation/framework-updates-from-releases.md) — why setup and update install a release tag rather than the clone's `main` (v0.4.0), how `min_ape_version` is checked, and the commits that record an install
 - [The framework and governance clones are caches](explanation/framework-and-governance-clones.md) — why setup and update check the newest release out in both clones (v0.7.0), where each clone lives when nothing names one, and how a skill finds the governance clone
 - [Why setup and update are separate](explanation/why-setup-and-update-are-separate.md) — the v0.0.7 split of `framework update` into two commands
-- [Why streaming events](explanation/why-streaming-events.md) — design rationale for live event streaming in the v0.0.7 pipeline TUI
 
 ## Contributing to the docs
 

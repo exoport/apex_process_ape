@@ -393,6 +393,15 @@ func (d *Driver) RecordActivity() {
 	d.activityMu.Unlock()
 }
 
+// LastActivityAt is when RecordActivity last ran (a hook event); zero
+// before the first. The usage-limit watch reads it: a session still
+// sending hooks is not stopped by a limit, whatever its pane shows.
+func (d *Driver) LastActivityAt() time.Time {
+	d.activityMu.Lock()
+	defer d.activityMu.Unlock()
+	return d.lastActivity
+}
+
 // RecordItemBoundary advances the hard max-duration anchor to now. A
 // sub-agent lifecycle event (SubagentStart/SubagentStop) is unambiguous
 // real progress — a batch item just started or finished — and a stronger

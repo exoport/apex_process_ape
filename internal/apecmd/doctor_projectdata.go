@@ -215,75 +215,8 @@ func checkMigrationPending(_ context.Context, env doctorEnv) CheckResult {
 	return CheckResult{
 		Status:      StatusWarn,
 		Message:     "pending: " + strings.Join(names, ", "),
-		Remediation: "`ape framework update` runs them, or `ape deferred migrate --dry-run` to look first. Nothing is committed either way.",
-		FixCommand:  "ape deferred migrate --dry-run",
-	}
-}
-
-// checkSprintLockIgnored reports a `sprint-status.yaml.lock` that git is
-// not ignoring.
-//
-// `ape sprint reconcile` takes an advisory lock on that sidecar and does
-// NOT unlink it — releasing a lock and deleting the file are different
-// acts, and deleting one another process may be waiting on is how the
-// mutual exclusion is lost. So the file stays, and the framework invokes
-// reconcile at six boundaries, so it appears on essentially every project
-// that runs a batch.
-//
-// It is a runtime artifact and belongs in nobody's history. Left
-// unignored it sits in `git status` waiting to be swept up by a
-// `git add -A` — which is exactly how it reached a commit in ape's own
-// repository while this check was being written. `reconcile-epic-status.py`
-// leaves the same file, so this is not a regression ape introduced; it is a
-// hygiene problem neither side had noticed and that only a tool looking for
-// it will surface.
-//
-// Never more than a WARN, and never a write: `.gitignore` is the operator's
-// file, and a tool that edits it uninvited is worse than one that points.
-func checkSprintLockIgnored(ctx context.Context, env doctorEnv) CheckResult {
-	cfg, res := projectDataConfig(env)
-	if res != nil {
-		return *res
-	}
-	tracker := cfg.Paths.SprintStatus
-	if tracker == "" {
-		return CheckResult{Status: StatusInfo, Message: apexcfg.MsgImplementationFolderUnset}
-	}
-	lock := sprint.LockPath(tracker)
-	rel := relTo(cfg.Root, lock)
-
-	if _, err := os.Stat(tracker); err != nil {
-		// No tracker means reconcile has nothing to lock. Warning here would
-		// be a finding about a file that cannot yet exist.
-		return CheckResult{Status: StatusOK, Message: "no sprint-status.yaml yet — nothing to lock"}
-	}
-
-	switch gitIgnores(ctx, cfg.Root, lock) {
-	case ignoreYes:
-		return CheckResult{Status: StatusOK, Message: rel + " is ignored"}
-	case ignoreNotARepo:
-		// Nothing to ignore into, and nothing that can accidentally commit it.
-		return CheckResult{Status: StatusInfo, Message: "not a git repository"}
-	}
-
-	// Worse if it is already tracked: the artifact is in history, so
-	// ignoring it now changes nothing until it is also removed from the index.
-	if gitTracked(ctx, cfg.Root, lock) {
-		return CheckResult{
-			Status:  StatusWarn,
-			Message: rel + " is COMMITTED — a lock sidecar is in the project's history",
-			Remediation: "Add `" + rel + "` to .gitignore and untrack it. It is a runtime artifact of " +
-				"`ape sprint reconcile`, which never unlinks it, so it will keep reappearing.",
-			FixCommand: "git rm --cached " + rel,
-		}
-	}
-	return CheckResult{
-		Status:  StatusWarn,
-		Message: rel + " is not ignored by git",
-		Remediation: "`ape sprint reconcile` leaves this advisory-lock sidecar behind on every run and " +
-			"never unlinks it, so an untracked file sits beside the tracker waiting for a `git add -A`. " +
-			"Add `" + rel + "` (or `*" + sprint.LockSuffix + "`) to .gitignore.",
-		FixCommand: "echo '" + rel + "' >> .gitignore",
+		Remediation: "`ape framework update` runs them, and `ape framework update --dry-run` shows them first. Nothing is committed either way.",
+		FixCommand:  "ape framework update --dry-run",
 	}
 }
 

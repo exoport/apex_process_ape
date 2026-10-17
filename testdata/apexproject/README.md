@@ -1,5 +1,9 @@
 # `testdata/apexproject` — a project shaped like a real one
 
+An **APEX v0** project. Since ape v1 retired the v0 ceremony commands, it is the
+v0 source `ape project lift`'s tests convert and the contract fixture of the v0
+doctor checks; the live gates that run sessions use `testdata/apexv1project`.
+
 Every package under `internal/` that reads project data builds its own fixture
 with `t.TempDir()`. Those fixtures are convenient, and convenience is exactly
 how two shipped commands came to be wrong on every real project: a hand-built

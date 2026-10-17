@@ -60,5 +60,5 @@ If the step has no `prompt_flag`, the CLI `--prompt` value is silently ignored f
 
 ## Related
 
-- [Pipeline spec reference](../reference/pipeline-spec.md) — full field table for steps.
-- [Pipeline YAML schema](../reference/pipeline-yaml-schema.md) — annotated schema example.
+- Pipeline spec reference — full field table for steps.
+- Pipeline YAML schema — annotated schema example.

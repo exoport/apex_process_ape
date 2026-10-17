@@ -70,27 +70,6 @@ type FieldsTrailer struct {
 	RootMissing bool `json:"implementation_folder_missing,omitempty" yaml:"implementation_folder_missing,omitempty"`
 }
 
-// ParseSelect splits and validates the --select list.
-func ParseSelect(arg string) ([]string, error) {
-	out := make([]string, 0, strings.Count(arg, ",")+1)
-	seen := map[string]bool{}
-	for part := range strings.SplitSeq(arg, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if seen[part] {
-			continue
-		}
-		seen[part] = true
-		out = append(out, part)
-	}
-	if len(out) == 0 {
-		return nil, errors.New("--select needs at least one frontmatter key")
-	}
-	return out, nil
-}
-
 // Head is a story file's frontmatter, parsed once and reused by both
 // Fields and Verify.
 type Head struct {
@@ -278,61 +257,4 @@ func opensWithDelimiter(data []byte) bool {
 	rest := d[3:]
 	rest = bytes.TrimLeft(rest, " \t\r")
 	return len(rest) == 0 || rest[0] == '\n'
-}
-
-// Project builds the FieldsResult for the selected keys.
-func Project(root string, selected []string) (*FieldsResult, error) {
-	scan, err := ScanHeads(root)
-	if err != nil {
-		return nil, err
-	}
-	heads := scan.Heads
-	res := &FieldsResult{
-		Trailer: FieldsTrailer{
-			Fields:          selected,
-			PerFieldPresent: make(map[string]int, len(selected)),
-			RootMissing:     scan.RootMissing,
-		},
-	}
-	// Seed every requested field at zero, so a field present in no story
-	// reports `0` rather than being absent from the payload. "Nobody has
-	// it" is a true answer to a legitimate question.
-	for _, key := range selected {
-		res.Trailer.PerFieldPresent[key] = 0
-	}
-	for _, h := range heads {
-		res.Trailer.FilesScanned++
-		res.Trailer.BytesRead += h.BytesRead
-		if h.Err != nil {
-			// A .md with no frontmatter at all is simply not a story —
-			// retrospectives, epic briefs and the deferred-work stub all
-			// live under implementation_folder. Only a file that MEANT to
-			// carry data and failed (malformed YAML, a block past the cap,
-			// an I/O error) is worth a warning; one such file loses that
-			// file and nothing else.
-			if !errors.Is(h.Err, frontmatter.ErrNoFrontmatter) {
-				res.Warnings = append(res.Warnings, fmt.Sprintf("%s: %v", h.Path, h.Err))
-			}
-			continue
-		}
-		if !h.IsStory() {
-			continue
-		}
-		res.Trailer.StoriesMatched++
-		values := make(map[string]any, len(selected))
-		for _, key := range selected {
-			v, ok := h.Raw[key]
-			if !ok || v == nil {
-				continue
-			}
-			values[key] = v
-			res.Trailer.PerFieldPresent[key]++
-		}
-		res.Stories = append(res.Stories, Fields{
-			Path:    h.Path,
-			StoryID: h.StoryID(),
-			Values:  values,
-		})
-	}
-	return res, nil
 }

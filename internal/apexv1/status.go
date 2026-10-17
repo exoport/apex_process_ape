@@ -136,6 +136,9 @@ type StatusReport struct {
 	// reports it. ArchiveRunning: its process is still alive.
 	ArchiveJournal *ArchiveJournal `json:"archive_journal,omitempty"`
 	ArchiveRunning bool            `json:"archive_running,omitempty"`
+	// LatestRun is the newest ape task run's outcome (H20): a usage-limit
+	// stop carries its reset. Absent before the first run.
+	LatestRun *LatestRun `json:"latest_run,omitempty"`
 }
 
 // Status builds the report.
@@ -155,6 +158,7 @@ func (p *Project) Status() *StatusReport {
 	}
 	r.Spend.TotalUSD = round2(r.Spend.TotalUSD)
 	r.Spend.Note = "sum of finished ape task/pipeline run manifests; a run still in progress is not counted yet"
+	r.LatestRun = p.LatestRun()
 
 	ctx := context.Background()
 	if rm := p.roadmap(); rm != nil {

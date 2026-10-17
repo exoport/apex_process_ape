@@ -9,18 +9,15 @@ Explanation docs answer "why" — design rationale, conceptual background, the s
 - [chat-task-prompt.md](chat-task-prompt.md) — the three ways ape drives a Claude session (`ape chat` / `ape task` / `ape prompt`) and how to choose between them.
 - [exec-modes.md](exec-modes.md) — the per-stage interactive runtime: process-spawn cost, context sharing, the step contract, and what hooks add.
 - [step-completion-gates.md](step-completion-gates.md) — why a `Stop` hook alone is not proof a step finished, and the four gates that decide completion since v0.0.52.
-- [bridge-architecture.md](bridge-architecture.md) — design narrative for the MCP bridge, SSE broker, and orchestrator behind `--web`.
-- [why-project-local-pipelines.md](why-project-local-pipelines.md) — moving from embedded to on-disk specs in v0.0.6.
 - [why-setup-and-update-are-separate.md](why-setup-and-update-are-separate.md) — the v0.0.7 split of `framework update` into two commands.
 - [framework-and-governance-clones.md](framework-and-governance-clones.md) — why `framework setup/update` keep the framework and governance clones at their newest release (v0.7.0), and where ape keeps its own clones.
-- [why-streaming-events.md](why-streaming-events.md) — design rationale for live event streaming in the pipeline TUI.
 
 ## Planned explanation
 
 - **What is ape.** What ape is, what APEX is, the relationship between them, and why a separate CLI exists when APEX skills can be invoked directly from Claude Code.
-- **How ape works.** The pipeline runner architecture: pre-flight checks, stage chains, Claude CLI dispatch, the Bubble Tea TUI, exit-code semantics.
+- **How ape works.** The task runner: pre-flight checks, Claude CLI dispatch over a PTY, the completion gates, exit-code semantics.
 - **Why Go.** Why ape ships as a single Go binary instead of a Python package or a shell script. Trade-offs of that choice.
-- **Pipeline design philosophy.** Why pipelines are the unit of work, not skills. Why pre-flight checks are declarative rather than discovered. Why ape doesn't auto-commit between stages.
+- **The unit of change.** Why APEX v1 replaced v0's pipelines and story ceremony with changes ape validates and records.
 
 ## Writing explanation
 

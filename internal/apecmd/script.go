@@ -68,10 +68,11 @@ func newScriptCmd() *cobra.Command {
 		Short: "Run a Go orchestration script through the yaegi interpreter",
 		Long: `Run a plain Go file inside ape's process under the yaegi interpreter,
 with the apescript library injected so the script can drive ape's
-primitives — run a pipeline, task, or prompt (all PTY-backed, the same
-runners the CLI uses), read manifests, scan transcripts, log, publish
-events, and upload blobs — as one deterministic, version-controlled Go
-file instead of a shell wrapper around the CLI.
+primitives — run a task or a prompt (PTY-backed, the same runners the
+CLI uses), read manifests, scan transcripts, log, publish events, and
+upload blobs — as one deterministic, version-controlled Go file instead
+of a shell wrapper around the CLI. RunPipeline returns an error: ` + "`ape pipeline`" + `
+was retired with APEX v0.
 
 The file must define:
 

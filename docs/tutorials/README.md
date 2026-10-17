@@ -6,18 +6,17 @@ Good ape tutorials hold the reader's hand from "I haven't used ape before" to "I
 
 ## Available tutorials
 
-- [Your first pipeline](first-pipeline.md) — greenfield walk-through: install ape, `ape doctor`, `ape framework setup`, run `ape pipeline design`, read the run artifacts, and `ape costs`.
+- [Your first APEX v1 project](first-v1-project.md) — doctor → `project init` → project.md → a milestone a person approves → a green `project check` and `doctor --strict`
 
 ## Planned tutorials
 
-- **Beyond design.** Continue the greenfield project through `governance` and `epics`. End state: a project with a real PRD, architecture, and an epic story ready to implement.
-- **Lift a brownfield project.** Use `ape pipeline lift` (when available) on an existing codebase. End state: a brownfield repo with APEX-aware planning artifacts derived from its current state.
+- **Lift a v0 project.** `ape framework update` to v1 on an APEX v0 project, which runs `ape project lift`. End state: the v1 layout in one commit, with the disposition list a person reviews.
 
 ## Writing a tutorial
 
 - One linear path. No "if you want X, do Y instead" branches.
 - Concrete commands the reader copy-pastes.
-- Verifiable checkpoints (`ape version` should print this; `ls development/planning/` should show these files).
+- Verifiable checkpoints (`ape version` should print this; `ape project check` should be green).
 - A clear end state — readers know they're done when they see X.
 
 See the [Diátaxis tutorials guide](https://diataxis.fr/tutorials/) for the full rubric.

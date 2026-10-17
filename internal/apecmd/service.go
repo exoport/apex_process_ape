@@ -33,18 +33,19 @@ func newServiceCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "service",
-		Short: "Run a NATS-micro job daemon that accepts pipeline/task jobs over request/reply",
+		Short: "Run a NATS-micro job daemon that accepts task/prompt/script jobs over request/reply",
 		Long: `Turn this machine into a remotely drivable ape worker (PLAN-14). The
 daemon registers a NATS micro service on
 
   ape.svc.<name>.<project-slug>.<endpoint>
 
-and accepts JSON request/reply jobs: pipeline.run and task.run dispatch an
-ape child process (headless, PTY-only); job.status / job.list / job.stop
-manage them; status / health report the daemon. NATS-micro $SRV.PING /
+and accepts JSON request/reply jobs: task.run dispatches an ape child
+process (headless, PTY-only); job.status / job.list / job.stop manage
+them; status / health report the daemon. NATS-micro $SRV.PING /
 $SRV.INFO / $SRV.STATS discovery is available for free. prompt.run and
 script.run are registered but rejected (VALIDATION) until their runners
-ship.
+ship. pipeline.run is registered and always rejected (VALIDATION): ` + "`ape pipeline`" + `
+was retired with APEX v0.
 
 Admission is keyed exclusivity, exclusive by default: a job holds its
 exclusivity_key (default "") exclusively unless nonexclusive:true. Conflicts
@@ -59,7 +60,7 @@ from _apex/service.yaml (or ~/.ape/service.yaml, or --config):
     - /abs/path/main-project
     - /abs/path/component-repo
 
-SECURITY: anyone who can publish on the service subjects can run pipelines on
+SECURITY: anyone who can publish on the service subjects can run skills on
 this machine. Scope the NATS credential's publish/subscribe permissions to
 ape.svc.<name>.<project-slug>.> on the server — that is the real trust
 boundary (see docs/how-to/run-ape-as-a-service.md).

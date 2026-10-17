@@ -251,6 +251,11 @@ const (
 	// milestone's spend reached the milestone's budget (limits.budget:
 	// enforce, backlog 30). The spend fields say how far it got.
 	TerminationBudget = "budget"
+	// TerminationUsageLimit — the session's claude.ai plan limit stopped it
+	// (H20): ape read Claude Code's usage-limit line in the PTY pane and
+	// ended the run. resets / resets_at say when the limit resets, when the
+	// line named it.
+	TerminationUsageLimit = "usage_limit"
 )
 
 // TerminationRecord is the durable "why" behind a non-completed run.
@@ -281,6 +286,10 @@ type TerminationRecord struct {
 	SpentUSD       float64 `yaml:"spent_usd,omitempty"`
 	BudgetUSD      float64 `yaml:"budget_usd,omitempty"`
 	SessionCostUSD float64 `yaml:"session_cost_usd,omitempty"`
+	// Resets / ResetsAt describe a usage-limit stop: the reset as Claude
+	// Code printed it, and parsed (RFC 3339; absent when it did not parse).
+	Resets   string     `yaml:"resets,omitempty"`
+	ResetsAt *time.Time `yaml:"resets_at,omitempty"`
 }
 
 // LimitStopError is a session ape stopped at an APEX v1 limit (backlog
@@ -291,6 +300,9 @@ type LimitStopError struct {
 	SpentUSD       float64
 	BudgetUSD      float64
 	SessionCostUSD float64
+	// Resets / ResetsAt: a usage-limit stop's reset (zero ResetsAt: none parsed).
+	Resets   string
+	ResetsAt time.Time
 }
 
 func (e *LimitStopError) Error() string { return e.Message }

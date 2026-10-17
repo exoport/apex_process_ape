@@ -10,8 +10,6 @@ import (
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
-	"github.com/exoport/apex_process_ape/internal/sprint"
-	"github.com/exoport/apex_process_ape/internal/story"
 	"github.com/stretchr/testify/require"
 )
 
@@ -128,15 +126,14 @@ func TestProjectDataChecks_DegradeOutsideAProject(t *testing.T) {
 	ctx := context.Background()
 	env := projectDataEnv(t.TempDir())
 	checks := map[string]func(context.Context, doctorEnv) CheckResult{
-		"config.resolved":     checkConfigResolved,
-		"config.folders":      checkConfigFolders,
-		"registry.drift":      checkRegistryDrift,
-		"story.frontmatter":   checkStoryFrontmatter,
-		"sprint.divergence":   checkSprintDivergence,
-		"sprint.lock_ignored": checkSprintLockIgnored,
-		"output.ape_ignored":  checkOutputApeIgnored,
-		"memory.size":         checkMemorySize,
-		"migration.pending":   checkMigrationPending,
+		"config.resolved":    checkConfigResolved,
+		"config.folders":     checkConfigFolders,
+		"registry.drift":     checkRegistryDrift,
+		"story.frontmatter":  checkStoryFrontmatter,
+		"sprint.divergence":  checkSprintDivergence,
+		"output.ape_ignored": checkOutputApeIgnored,
+		"memory.size":        checkMemorySize,
+		"migration.pending":  checkMigrationPending,
 	}
 	// The table has to hold every project-data check, or a new one degrades
 	// however it happens to and nobody notices until it fires on a host.
@@ -203,70 +200,6 @@ func TestCheckStoryFrontmatterAndSprintDivergence(t *testing.T) {
 	res = checkSprintDivergence(ctx, projectDataEnv(root))
 	require.Equal(t, StatusWarn, res.Status)
 	require.Contains(t, res.Message, "divergence")
-}
-
-// TestCheckSprintLockIgnored walks every state, because the one that
-// matters — the sidecar already committed — is the one a project reaches by
-// accident and never notices. ape's own repository reached it while this
-// check was being written: `ape sprint reconcile` ran against a test
-// fixture, left the lock behind, and `git add` swept it into a commit.
-func TestCheckSprintLockIgnored(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not on PATH")
-	}
-	ctx := context.Background()
-	root := projectFor(t, realProjectConfig)
-	dir := filepath.Join(root, "development", "implementation")
-	require.NoError(t, os.MkdirAll(dir, 0o755))
-	tracker := filepath.Join(dir, "sprint-status.yaml")
-	lock := sprint.LockPath(tracker)
-	rel := filepath.Join("development", "implementation", "sprint-status.yaml.lock")
-
-	// No tracker: reconcile has nothing to lock, so a warning here would be
-	// about a file that cannot yet exist.
-	res := checkSprintLockIgnored(ctx, projectDataEnv(root))
-	require.Equal(t, StatusOK, res.Status, res.Message)
-	require.Contains(t, res.Message, "nothing to lock")
-
-	require.NoError(t, os.WriteFile(tracker,
-		[]byte("development_status:\n  epic-1: backlog\n  1-1_x: done\n"), 0o644))
-
-	// A tracker but no repository: nothing to ignore into, and nothing that
-	// can accidentally commit it either.
-	res = checkSprintLockIgnored(ctx, projectDataEnv(root))
-	require.Equal(t, StatusInfo, res.Status, res.Message)
-	require.Contains(t, res.Message, "not a git repository")
-
-	gitInit(t, root)
-	res = checkSprintLockIgnored(ctx, projectDataEnv(root))
-	require.Equal(t, StatusWarn, res.Status)
-	require.Contains(t, res.Message, "not ignored")
-	require.Contains(t, res.Remediation, "never unlinks it",
-		"the remediation says WHY the file keeps coming back")
-
-	// Reconcile really does leave it behind — the premise of the check.
-	_, err := sprint.Reconcile(tracker, sprint.ReconcileOptions{Epic: 1, Timestamp: "20260401090000"})
-	require.NoError(t, err)
-	require.FileExists(t, lock, "the lock sidecar outlives the run that took it")
-
-	// Swept into a commit by a routine `git add -A`.
-	gitCommitAll(t, root, "everything")
-	res = checkSprintLockIgnored(ctx, projectDataEnv(root))
-	require.Equal(t, StatusWarn, res.Status)
-	require.Contains(t, res.Message, "COMMITTED",
-		"already in history is a worse state than merely unignored, and says so")
-	require.Contains(t, res.FixCommand, "git rm --cached",
-		"ignoring it now changes nothing until it is also untracked")
-
-	// Untracked and ignored: clean.
-	untrack := exec.CommandContext(ctx, "git", "rm", "--cached", "-q", "--", rel)
-	untrack.Dir = root
-	require.NoError(t, untrack.Run())
-	require.NoError(t, os.WriteFile(filepath.Join(root, ".gitignore"),
-		[]byte("*"+sprint.LockSuffix+"\n"), 0o644))
-	res = checkSprintLockIgnored(ctx, projectDataEnv(root))
-	require.Equal(t, StatusOK, res.Status, res.Message)
-	require.Contains(t, res.Message, "is ignored")
 }
 
 // TestCheckOutputApeIgnored walks the four states in the order a real
@@ -565,19 +498,6 @@ func TestCheckConfigFolders(t *testing.T) {
 		res := checkConfigFolders(ctx, projectDataEnv(t.TempDir()))
 		require.Equal(t, StatusInfo, res.Status)
 	})
-}
-
-// The trade this row pays for: a projection over an absent folder is an
-// empty answer rather than an error, and it says which.
-func TestStoryFields_AbsentImplementationFolderAnswersEmpty(t *testing.T) {
-	root := projectFor(t, allExtensionsConfig)
-	require.NoDirExists(t, filepath.Join(root, "development", "implementation"))
-
-	res, err := story.Project(resolveProjectConfig(root).Paths.Implementation,
-		[]string{"story_id", "status"})
-	require.NoError(t, err)
-	require.True(t, res.Trailer.RootMissing)
-	require.Equal(t, 0, res.Trailer.StoriesMatched)
 }
 
 func TestCountsLine(t *testing.T) {
