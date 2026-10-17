@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,9 @@ type RunOptions struct {
 	// run; zero takes _apex/config.yaml's timeouts: per kind, else the
 	// defaults (Timeouts.For).
 	Timeout time.Duration
+	// Progress, when set, gets one line as each check starts and ends: a
+	// detached run's log, which a call that attaches to it shows (D58 2.3).
+	Progress io.Writer
 }
 
 // requirementConflicts reports the requirements two changes' deltas both
@@ -114,10 +118,12 @@ func (p *Project) Start(ctx context.Context, id string, opt RunOptions) (*StartR
 	}
 	res, err := p.start(ctx, id, opt, enter)
 	if err != nil && entered {
-		// A refused start writes nothing: back to where it began.
-		_, _ = git(ctx, p.Root, "reset", "-q", "--hard")
-		_, _ = git(ctx, p.Root, "switch", "-q", cur)
-		_, _ = git(ctx, p.Root, "branch", "-q", "-D", branch)
+		// A refused (or interrupted) start writes nothing: back to where it
+		// began, even after a signal cancelled ctx.
+		wctx := context.WithoutCancel(ctx)
+		_, _ = git(wctx, p.Root, "reset", "-q", "--hard")
+		_, _ = git(wctx, p.Root, "switch", "-q", cur)
+		_, _ = git(wctx, p.Root, "branch", "-q", "-D", branch)
 	}
 	return res, err
 }
@@ -247,10 +253,18 @@ func (p *Project) start(ctx context.Context, id string, opt RunOptions, enter fu
 		st.Verify, st.Review = nil, nil
 	}
 	results := p.rebaseline(ctx, ci, st, head, opt)
+	if err := interrupted(ctx, "the start of "+id); err != nil {
+		return nil, err
+	}
 	if err := p.refuseVacuousChecks(ctx, ci, st, results); err != nil {
 		return nil, err
 	}
 	regression := p.rebaselineRegression(ctx, id, st, head, opt)
+	if err := interrupted(ctx, "the start of "+id); err != nil {
+		return nil, err
+	}
+	// The checks are done: what they found is recorded, a signal or not.
+	ctx = context.WithoutCancel(ctx)
 	st.PlanDigest = digest
 	st.BaseFingerprints = p.baseFingerprints(ci.Doc)
 	st.Status = StatusInProgress
@@ -514,6 +528,11 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 		checks = append(checks, PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: regressionCmd})
 	}
 	results := p.RunChecks(ctx, p.LogDir(id), "", checks, opt)
+	if err := interrupted(ctx, "the verify of "+id); err != nil {
+		return nil, err
+	}
+	// The checks are done: what they found is recorded, a signal or not.
+	ctx = context.WithoutCancel(ctx)
 	var regression *RegressionVerdict
 	if regressionCmd != "" {
 		regression = judgeRegression(&results[len(results)-1], st.Regression)

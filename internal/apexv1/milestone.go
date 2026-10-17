@@ -354,7 +354,7 @@ func (p *Project) RunGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	if err != nil || !g.ResultChanged {
 		return g, err
 	}
-	g.Commit, err = p.commitMilestone(ctx, id, "gate "+gateResult(&g.Run))
+	g.Commit, err = p.commitMilestone(context.WithoutCancel(ctx), id, "gate "+gateResult(&g.Run))
 	return g, err
 }
 
@@ -380,6 +380,9 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	}
 	logPath := filepath.Join(p.LogsDir(), "gate-"+id+".log")
 	gate := p.RunChecks(ctx, filepath.Dir(logPath), "", []PlannedCheck{{Ref: "gate-" + id, Kind: KindGate, Cmd: m.Gate}}, opt)[0]
+	if err := interrupted(ctx, "the gate run of "+id); err != nil {
+		return nil, err
+	}
 	r := gate
 	run := GateRun{
 		Exit: r.Exit, At: Stamp(), SHA: HeadSHA(ctx, p.Root), Secs: r.Secs,
@@ -397,6 +400,10 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 		checks = append(append([]PlannedCheck(nil), spec...), PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: regressionCmd})
 	}
 	results := p.RunChecks(ctx, filepath.Join(p.LogsDir(), "gate-"+id), "", checks, opt)
+	if err := interrupted(ctx, "the gate run of "+id); err != nil {
+		return nil, err
+	}
+	ctx = context.WithoutCancel(ctx)
 	ran := append([]CheckResult{gate}, results...)
 	run.StrayFiles = StrayFiles(ran)
 	for i := range ran {
@@ -558,6 +565,7 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 	if err != nil {
 		return nil, err
 	}
+	ctx = context.WithoutCancel(ctx) // the gate ran: what it found is recorded
 	if !g.Run.Green() && red == nil {
 		if g.ResultChanged {
 			if g.Commit, err = p.commitMilestone(ctx, id, "gate "+GateRed); err != nil {

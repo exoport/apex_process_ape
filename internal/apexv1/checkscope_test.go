@@ -22,7 +22,7 @@ func TestConfig_TimeoutsAndRegressionTiers(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, RegressionConfig{Change: "make test"}, cfg.Regression)
 	require.Equal(t, "make test", cfg.Regression.MilestoneCmd(), "one command is both tiers")
-	require.Equal(t, Timeouts{Check: 20 * time.Minute, Regression: 45 * time.Minute, Gate: 90 * time.Minute}, cfg.Timeouts)
+	require.Equal(t, Timeouts{Check: TierTimeout{Max: 20 * time.Minute}, Regression: TierTimeout{Max: 45 * time.Minute}, Gate: TierTimeout{Max: 90 * time.Minute}}, cfg.Timeouts)
 
 	cfg, err = load(t, "regression:\n  change: make test\n  milestone: make test-all\n")
 	require.NoError(t, err)
@@ -31,10 +31,10 @@ func TestConfig_TimeoutsAndRegressionTiers(t *testing.T) {
 
 	cfg, err = load(t, "project_name: x\n")
 	require.NoError(t, err)
-	require.Equal(t, DefaultCheckTimeout, cfg.Timeouts.For(KindTask, 0))
-	require.Equal(t, DefaultCheckTimeout, cfg.Timeouts.For(KindScenario, 0))
-	require.Equal(t, DefaultRegressionTimeout, cfg.Timeouts.For(KindRegression, 0))
-	require.Equal(t, DefaultGateTimeout, cfg.Timeouts.For(KindGate, 0))
+	require.Equal(t, DefaultCheckMax, cfg.Timeouts.For(KindTask, 0))
+	require.Equal(t, DefaultCheckMax, cfg.Timeouts.For(KindScenario, 0))
+	require.Equal(t, DefaultRegressionMax, cfg.Timeouts.For(KindRegression, 0))
+	require.Equal(t, DefaultGateMax, cfg.Timeouts.For(KindGate, 0))
 	require.Equal(t, time.Minute, cfg.Timeouts.For(KindGate, time.Minute), "the flag wins")
 
 	for yaml, want := range map[string]string{

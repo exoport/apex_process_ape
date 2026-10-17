@@ -91,6 +91,7 @@ const (
 	progressHook       = "hook"
 	progressTranscript = "transcript"
 	progressPTY        = "pty"
+	progressWork       = "work"
 	progressNone       = "none"
 )
 
@@ -215,6 +216,11 @@ type Driver struct {
 	// byte seen — a progress signal orthogonal to hooks + transcript
 	// (PLAN-19 D1, optional). nil → the PTY signal is not watched.
 	ptyProbe func() (at time.Time, ok bool)
+	// workProbe, when set, reports work the session waits on that is
+	// running outside it: an APEX v1 long run (a detached verify, gate, …)
+	// holding its run lock (D58 2.3). Polled each tick; true counts as
+	// progress, so a model waiting quietly on a long check is not idle.
+	workProbe func() bool
 
 	stepDoneCh chan struct{}
 	// fatalCh carries a condition WaitStepDone must fail on immediately
@@ -362,6 +368,10 @@ func (d *Driver) SetMaxDuration(t time.Duration) { d.maxDuration = t }
 // termination diagnostic. nil (the default) yields "child liveness
 // unknown".
 func (d *Driver) SetChildAliveProbe(fn func() (pid int, alive bool)) { d.childAliveProbe = fn }
+
+// SetWorkProbe installs the optional outside-work progress signal: true
+// while work the session waits on runs elsewhere (see workProbe).
+func (d *Driver) SetWorkProbe(fn func() bool) { d.workProbe = fn }
 
 // SetPTYProbe installs the optional PTY-output progress signal (PLAN-19
 // D1): fn reports the timestamp of the last output byte the PTY reader
@@ -696,6 +706,7 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 	// under activityMu since FeedHook writes it on the bridge goroutine).
 	lastTranscript := stepStart
 	lastPTY := stepStart
+	lastWork := stepStart
 	// Bare mtime bumps: counted for the diagnostic, never progress.
 	var (
 		touches   int
@@ -745,6 +756,10 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 				ptySeen = at
 				lastPTY = now
 			}
+			// Work running outside the session (optional signal).
+			if d.workProbe != nil && d.workProbe() {
+				lastWork = now
+			}
 			d.activityMu.Lock()
 			lastHook := d.lastActivity
 			capAnchor := d.maxDurationAnchor
@@ -756,7 +771,7 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 			// sub-agent boundary (== step start when the step spawns none),
 			// so a sequential batch is bounded per item, not per batch.
 			if capElapsed := now.Sub(capAnchor); d.maxDuration > 0 && capElapsed > d.maxDuration {
-				_, diag := d.diagnose(now, stepStart, lastHook, lastTranscript, lastPTY, touches, lastTouch)
+				_, diag := d.diagnose(now, stepStart, lastHook, lastTranscript, lastPTY, lastWork, touches, lastTouch)
 				return &MaxDurationError{
 					Label:      d.idleErrLabel,
 					Elapsed:    capElapsed,
@@ -764,7 +779,7 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 					Diagnostic: diag,
 				}
 			}
-			lastProgress := latest(lastHook, lastTranscript, lastPTY)
+			lastProgress := latest(lastHook, lastTranscript, lastPTY, lastWork)
 
 			// A terminal API error is decidable long before the idle
 			// ceiling, but only once EVERY signal has gone quiet: a session
@@ -778,7 +793,7 @@ func (d *Driver) WaitStepDone(ctx context.Context) error {
 			}
 
 			if idle := now.Sub(lastProgress); idle > d.idleTimeout {
-				src, diag := d.diagnose(now, stepStart, lastHook, lastTranscript, lastPTY, touches, lastTouch)
+				src, diag := d.diagnose(now, stepStart, lastHook, lastTranscript, lastPTY, lastWork, touches, lastTouch)
 				return &IdleTimeoutError{
 					Label:      d.idleErrLabel,
 					Idle:       idle,
@@ -901,7 +916,7 @@ func IsTerminalAPIError(text string) bool {
 	return strings.HasPrefix(strings.TrimSpace(text), "API Error")
 }
 
-func (d *Driver) diagnose(now, stepStart, lastHook, lastTranscript, lastPTY time.Time, touches int, lastTouch time.Time) (source, diagnostic string) {
+func (d *Driver) diagnose(now, stepStart, lastHook, lastTranscript, lastPTY, lastWork time.Time, touches int, lastTouch time.Time) (source, diagnostic string) {
 	d.mu.Lock()
 	transcriptWatched := d.activeTranscript != ""
 	d.mu.Unlock()
@@ -918,6 +933,9 @@ func (d *Driver) diagnose(now, stepStart, lastHook, lastTranscript, lastPTY time
 	if ptyWatched && lastPTY.After(best) {
 		best, source = lastPTY, progressPTY
 	}
+	if d.workProbe != nil && lastWork.After(best) {
+		best, source = lastWork, progressWork
+	}
 
 	var b strings.Builder
 	if source == progressNone {
@@ -929,6 +947,9 @@ func (d *Driver) diagnose(now, stepStart, lastHook, lastTranscript, lastPTY time
 		sourceAge(now, stepStart, lastHook, true),
 		sourceAge(now, stepStart, lastTranscript, transcriptWatched),
 		sourceAge(now, stepStart, lastPTY, ptyWatched))
+	if d.workProbe != nil {
+		fmt.Fprintf(&b, "; ape run lock %s", sourceAge(now, stepStart, lastWork, true))
+	}
 	// The touch count separates "nothing happened" from "something kept
 	// touching the file without writing to it" — the shape of a hung
 	// session, and invisible in every other field here.

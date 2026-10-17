@@ -26,6 +26,13 @@ type v1Flags struct {
 	cwd     string
 	json    bool
 	timeout time.Duration
+	// wait and noDetach are a long verb's (v1_longrun.go): long marks one,
+	// ranHere a call whose body ran in this process (the worker, or
+	// --no-detach) rather than in a worker it waited for.
+	wait     time.Duration
+	noDetach bool
+	long     bool
+	ranHere  bool
 }
 
 func addV1Flags(cmd *cobra.Command, f *v1Flags) {
@@ -34,9 +41,9 @@ func addV1Flags(cmd *cobra.Command, f *v1Flags) {
 }
 
 func addV1TimeoutFlag(cmd *cobra.Command, f *v1Flags) {
-	cmd.Flags().DurationVar(&f.timeout, "timeout", 0, "limit for each command run, overriding _apex/config.yaml timeouts: "+
-		"(default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; "+
-		"timeouts.gate, else 30m, for a gate command); exit 124 when exceeded")
+	cmd.Flags().DurationVar(&f.timeout, "timeout", 0, "ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max "+
+		"(default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window "+
+		"still applies; exit 124 when exceeded")
 }
 
 func (f *v1Flags) runOptions() apexv1.RunOptions { return apexv1.RunOptions{Timeout: f.timeout} }

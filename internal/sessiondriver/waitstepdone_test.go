@@ -336,3 +336,29 @@ func TestWaitStepDone_SessionRotationKeepsAlive(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded,
 		"a rotating session is progressing and must not be declared idle: %v", err)
 }
+
+// TestWaitStepDone_WorkProbeCountsAsProgress: a live APEX v1 run lock — a
+// detached verify the session waits on quietly — is progress (D58 2.3);
+// once it ends, the idle window runs again.
+func TestWaitStepDone_WorkProbeCountsAsProgress(t *testing.T) {
+	d := newTestDriver(1500 * time.Millisecond)
+	var mu sync.Mutex
+	working := true
+	d.SetWorkProbe(func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return working
+	})
+	d.Begin()
+	ctx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
+	defer cancel()
+	require.ErrorIs(t, d.WaitStepDone(ctx), context.DeadlineExceeded, "a live run lock must count as progress")
+
+	mu.Lock()
+	working = false
+	mu.Unlock()
+	err := d.WaitStepDone(t.Context())
+	var ite *IdleTimeoutError
+	require.ErrorAs(t, err, &ite)
+	require.Contains(t, ite.Diagnostic, "ape run lock")
+}

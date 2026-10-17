@@ -89,10 +89,15 @@ func (j *ArchiveJournal) Running() bool {
 
 // recoverArchive rolls back an archive that crashed (see the comment
 // above) and returns archive.interrupted saying what it did; nil when
-// there is no journal, or its archive is still running.
+// there is no journal, or its archive is still running — its process
+// alive, or a living run holding the change's run lock (D58 2.3: a
+// detached archive worker is never rolled back under itself).
 func (p *Project) recoverArchive(ctx context.Context) error {
 	j := p.LoadArchiveJournal()
 	if j == nil || j.Running() {
+		return nil
+	}
+	if l := p.LoadRunLock(j.ID); l != nil && l.PID != os.Getpid() && l.Alive() {
 		return nil
 	}
 	if !p.isWorkTree(ctx) {

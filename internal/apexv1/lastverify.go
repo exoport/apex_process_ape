@@ -25,6 +25,21 @@ type LastVerify struct {
 	Failing []string          `json:"failing,omitempty"`
 	// Flaky lists the checks green only on a retry (H12).
 	Flaky []string `json:"flaky,omitempty"`
+	// Secs is how long each check ran (ref → seconds): what the stop hook
+	// budgets its re-runs by (D58 2.5). RedChecks describe each red check,
+	// so one too long for the hook is judged from this verify.
+	Secs      map[string]float64   `json:"secs,omitempty"`
+	RedChecks map[string]LastCheck `json:"red_checks,omitempty"`
+}
+
+// LastCheck is one red check of a last verify: its exit, reason and last
+// output lines.
+type LastCheck struct {
+	Exit   int      `json:"exit"`
+	Reason string   `json:"reason,omitempty"`
+	Detail string   `json:"detail,omitempty"`
+	Tail   []string `json:"tail,omitempty"`
+	Log    string   `json:"log,omitempty"`
 }
 
 func (p *Project) lastVerifyPath(id string) string {
@@ -34,12 +49,17 @@ func (p *Project) lastVerifyPath(id string) string {
 // saveLastVerify records a verify's outcome; a write that fails loses only
 // the stop hook's narrowing (it falls back to the task checks).
 func (p *Project) saveLastVerify(id string, st *State, sha string, green bool, results []CheckResult) {
-	lv := LastVerify{SHA: sha, At: Stamp(), PlanDigest: st.PlanDigest, Green: green, Red: map[string]string{}}
+	lv := LastVerify{
+		SHA: sha, At: Stamp(), PlanDigest: st.PlanDigest, Green: green, Red: map[string]string{},
+		Secs: map[string]float64{}, RedChecks: map[string]LastCheck{},
+	}
 	for i := range results {
 		r := &results[i]
+		lv.Secs[r.Task] = r.Secs
 		if r.Red() {
 			lv.Red[r.Task] = r.Cmd
 			lv.Failing = append(lv.Failing, r.Task+" ("+r.Outcome()+")")
+			lv.RedChecks[r.Task] = LastCheck{Exit: r.Exit, Reason: r.Reason, Detail: r.Detail, Tail: lastN(r.Tail, 15), Log: r.Log}
 		}
 		if r.Flaky {
 			lv.Flaky = append(lv.Flaky, r.Task)

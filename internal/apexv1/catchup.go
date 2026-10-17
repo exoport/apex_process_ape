@@ -148,6 +148,12 @@ func (p *Project) catchUp(ctx context.Context, ci ChangeInfo, what string, opt R
 	if err != nil {
 		return ci, nil, err
 	}
+	// Interrupted: the rebase stands, unrecorded — the next catch-up finds
+	// the branch holding the base and re-takes only the baseline.
+	if err := interrupted(ctx, "the catch-up of "+id+" (its baseline at "+short(tip)+")"); err != nil {
+		return ci, nil, err
+	}
+	ctx = context.WithoutCancel(ctx)
 	cu := &CatchUp{BaseBranch: base, From: ci.State.BaseSHA, To: tip, Rebased: needRebase, Baseline: baseline, Regression: regression}
 	if len(conflicts) > 0 {
 		cu.Conflicts = conflicts

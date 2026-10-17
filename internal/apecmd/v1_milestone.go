@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -206,9 +207,10 @@ red there and red now is reported (JSON run.regression.pre_existing_red), not fa
 When no change of the milestone has a baseline for the command, a red regression fails
 the gate: nothing shows it was red before the milestone's work — always the case for a
 milestone tier that differs from the change tier, which no change baselines. Timeouts:
-the Gate: command runs under timeouts.gate (default 30m), each scenario check under
-timeouts.check (15m), the regression command under timeouts.regression (30m); --timeout
-overrides all three. A vacuous or unrun gate command, scenario or regression command is
+the Gate: command runs under timeouts.gate (default idle 30m, max 4h), each scenario check
+under timeouts.check (idle 15m, max 2h), the regression command under timeouts.regression
+(idle 30m, max 2h) — killed at idle without progress (output or CPU time) or at max: exit
+124, reason idle|ceiling; --timeout sets max for all three. A vacuous or unrun gate command, scenario or regression command is
 red (see ` + "`ape change verify --help`" + `; JSON reason/detail). Files the gate
 or a check leaves outside development/ are undone and reported ("stray_files"). The run (exit, sha, time,
 output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; shown by
@@ -231,21 +233,27 @@ approval record, a changed gate, or HEAD on a change branch · 2 usage.`,
 			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
-			g, err := p.RunGate(cmd.Context(), args[0], f.runOptions())
-			if err != nil {
-				return v1Fail(cmd, &f, err, nil)
-			}
-			if !g.Run.Green() {
-				if !f.json {
-					gateHuman(g)(cmd.OutOrStdout())
+			id := args[0]
+			return runLong(cmd, &f, p, id, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
+				g, err := p.RunGate(ctx, id, opt)
+				return func(cmd *cobra.Command, f *v1Flags) error {
+					if err != nil {
+						return v1Fail(cmd, f, err, nil)
+					}
+					if !g.Run.Green() {
+						if !f.json {
+							gateHuman(g)(cmd.OutOrStdout())
+						}
+						return v1Fail(cmd, f, &apexv1.FailError{Code: "gate.red", Msg: fmt.Sprintf("%s gate is red (%s) — plan the next change toward it", id, g.Run.Why())}, g)
+					}
+					return v1Emit(cmd.OutOrStdout(), f, g, gateHuman(g))
 				}
-				return v1Fail(cmd, &f, &apexv1.FailError{Code: "gate.red", Msg: fmt.Sprintf("%s gate is red (%s) — plan the next change toward it", args[0], g.Run.Why())}, g)
-			}
-			return v1Emit(cmd.OutOrStdout(), &f, g, gateHuman(g))
+			})
 		},
 	}
 	addV1Flags(cmd, &f)
 	addV1TimeoutFlag(cmd, &f)
+	addV1WaitFlags(cmd, &f)
 	return cmd
 }
 
@@ -302,35 +310,42 @@ from a model session.`,
 			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
-			var g *apexv1.GateResult
-			switch {
-			case cmd.Flags().Changed("accept-red"):
-				g, err = p.CloseMilestoneAcceptRed(cmd.Context(), args[0], acceptRed, by, f.runOptions())
-			case by != "":
-				err = &apexv1.UsageError{Code: "usage.by", Msg: "--by goes with --accept-red — drop it, or give the reason the red gate is accepted"}
-			default:
-				g, err = p.CloseMilestone(cmd.Context(), args[0], f.runOptions())
+			if by != "" && !cmd.Flags().Changed("accept-red") {
+				return v1Fail(cmd, &f, &apexv1.UsageError{Code: "usage.by", Msg: "--by goes with --accept-red — drop it, or give the reason the red gate is accepted"}, nil)
 			}
-			if err != nil {
-				if g != nil && !f.json && g.Run.Cmd != "" {
-					gateHuman(g)(cmd.OutOrStdout())
-				}
-				return v1Fail(cmd, &f, err, g)
-			}
-			return v1Emit(cmd.OutOrStdout(), &f, g, func(w io.Writer) {
-				if g.Run.Cmd != "" {
-					gateHuman(g)(w)
+			id, accepting := args[0], cmd.Flags().Changed("accept-red")
+			return runLong(cmd, &f, p, id, func(ctx context.Context, opt apexv1.RunOptions) renderFn {
+				var g *apexv1.GateResult
+				var err error
+				if accepting {
+					g, err = p.CloseMilestoneAcceptRed(ctx, id, acceptRed, by, opt)
 				} else {
-					fmt.Fprintf(w, "%s is already done\n", g.Milestone)
+					g, err = p.CloseMilestone(ctx, id, opt)
 				}
-				if a := g.AcceptRed; a != nil {
-					fmt.Fprintf(w, "recorded: closed with its gate red, accepted by %s — %s\n", a.By, a.Reason)
+				return func(cmd *cobra.Command, f *v1Flags) error {
+					if err != nil {
+						if g != nil && !f.json && g.Run.Cmd != "" {
+							gateHuman(g)(cmd.OutOrStdout())
+						}
+						return v1Fail(cmd, f, err, g)
+					}
+					return v1Emit(cmd.OutOrStdout(), f, g, func(w io.Writer) {
+						if g.Run.Cmd != "" {
+							gateHuman(g)(w)
+						} else {
+							fmt.Fprintf(w, "%s is already done\n", g.Milestone)
+						}
+						if a := g.AcceptRed; a != nil {
+							fmt.Fprintf(w, "recorded: closed with its gate red, accepted by %s — %s\n", a.By, a.Reason)
+						}
+					})
 				}
 			})
 		},
 	}
 	addV1Flags(cmd, &f)
 	addV1TimeoutFlag(cmd, &f)
+	addV1WaitFlags(cmd, &f)
 	cmd.Flags().StringVar(&acceptRed, "accept-red", "", "close although the gate is red, for this reason (a person only; with --by)")
 	cmd.Flags().StringVar(&by, "by", "", "who accepts the red gate (with --accept-red)")
 	return cmd

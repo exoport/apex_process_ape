@@ -16,68 +16,191 @@ import (
 // key ape does not know is refused the same way, so a typo is not a
 // silently ignored setting.
 
-// Default timeouts (H10). A check is one test command; the regression
-// command is the project's whole suite, and the gate command a milestone's
-// end-to-end proof, so both get longer.
+// Default timeouts (H10, D58 2.4, D69). Each tier has an idle window — a
+// check that makes no progress for it is killed — and a ceiling — a check
+// still running at it is killed, progress or not. A check is one test
+// command; the regression command is the project's whole suite, and the
+// gate command a milestone's end-to-end proof, so both get longer.
 const (
-	DefaultRegressionTimeout = 30 * time.Minute
-	DefaultGateTimeout       = 30 * time.Minute
+	DefaultCheckIdle      = 15 * time.Minute
+	DefaultCheckMax       = 2 * time.Hour
+	DefaultRegressionIdle = 30 * time.Minute
+	DefaultRegressionMax  = 2 * time.Hour
+	DefaultGateIdle       = 30 * time.Minute
+	DefaultGateMax        = 4 * time.Hour
 )
 
-// Timeouts is timeouts: — Go durations (`20m`, `90s`, `1h30m`), each
-// bounding one run of one command:
+// Hard ceilings (D69): no config value or --timeout goes past them, so a
+// typo cannot hold a check — and the worker running it — for days.
+const (
+	CeilingCheck      = 4 * time.Hour
+	CeilingRegression = 8 * time.Hour
+	CeilingGate       = 12 * time.Hour
+)
+
+// TierTimeout bounds one run of one command: Idle is the longest it may go
+// without progress (new output bytes, or CPU time used by its process
+// group), Max the longest it may run at all. Zero is unset: the default.
+type TierTimeout struct {
+	Idle time.Duration
+	Max  time.Duration
+	// tier names the config tier, and flag a max the --timeout flag set:
+	// what a timed-out check's detail cites.
+	tier string
+	flag bool
+}
+
+// key is the setting a timed-out check's detail cites.
+func (t TierTimeout) key(which string) string {
+	if which == "max" && t.flag {
+		return "--timeout"
+	}
+	tier := t.tier
+	if tier == "" {
+		tier = "check"
+	}
+	return "timeouts." + tier + "." + which
+}
+
+// Timeouts is timeouts: — per tier, a Go duration (`20m`, `90s`,
+// `1h30m`), which is the ceiling (max), or {idle, max}:
 //
 //	timeouts:
-//	  check: 20m        # a task or scenario check (default 15m)
-//	  regression: 45m   # the regression command (default 30m)
-//	  gate: 1h          # a milestone's Gate: command (default 30m)
+//	  check: 20m                     # max 20m, idle the default (15m)
+//	  regression: {idle: 10m, max: 1h}
+//	  gate: {idle: 3m}               # max the default (4h)
 //
-// A --timeout flag on the command, when given, wins over all three.
+// Defaults: check idle 15m / max 2h, regression 30m / 2h, gate 30m / 4h.
+// Any positive duration is accepted, with no floor; an idle above its
+// tier's max, or a max above ape's hard ceiling for the tier (check 4h,
+// regression 8h, gate 12h), makes the config unparseable. A scalar's idle
+// is the tier default clamped to that max. A --timeout flag on the
+// command, when given, is the max of every tier (still capped by the
+// ceiling).
 type Timeouts struct {
-	Check      time.Duration
-	Regression time.Duration
-	Gate       time.Duration
+	Check      TierTimeout
+	Regression TierTimeout
+	Gate       TierTimeout
 }
 
 // UnmarshalYAML parses and validates the block.
 func (t *Timeouts) UnmarshalYAML(n *yaml.Node) error {
-	var raw map[string]string
 	if err := checkKeys(n, "timeouts", "check", "regression", "gate"); err != nil {
 		return err
 	}
-	if err := n.Decode(&raw); err != nil {
-		return fmt.Errorf("timeouts: %w", err)
+	if n.Kind != yaml.MappingNode {
+		return nil
 	}
-	for k, v := range raw {
-		d, err := time.ParseDuration(strings.TrimSpace(v))
-		if err != nil || d <= 0 {
-			return fmt.Errorf("timeouts.%s: %q is not a positive Go duration (e.g. 20m, 90s, 1h30m)", k, v)
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k, v := n.Content[i].Value, n.Content[i+1]
+		tt, err := parseTier(k, v)
+		if err != nil {
+			return err
 		}
 		switch k {
 		case "check":
-			t.Check = d
+			t.Check = tt
 		case "regression":
-			t.Regression = d
+			t.Regression = tt
 		case "gate":
-			t.Gate = d
+			t.Gate = tt
 		}
 	}
 	return nil
 }
 
-// For is the timeout a check of kind runs under: the flag's when given,
-// else the configured one, else the default.
-func (t Timeouts) For(kind string, flag time.Duration) time.Duration {
-	if flag > 0 {
-		return flag
+// parseTier reads one tier: a scalar max, or {idle, max}.
+func parseTier(tier string, n *yaml.Node) (TierTimeout, error) {
+	var tt TierTimeout
+	dur := func(key, v string) (time.Duration, error) {
+		d, err := time.ParseDuration(strings.TrimSpace(v))
+		if err != nil || d <= 0 {
+			return 0, fmt.Errorf("timeouts.%s: %q is not a positive Go duration (e.g. 20m, 90s, 1h30m)", key, v)
+		}
+		return d, nil
 	}
+	if n.Kind == yaml.ScalarNode {
+		d, err := dur(tier, n.Value)
+		if err != nil {
+			return tt, err
+		}
+		tt.Max = d
+	} else {
+		if err := checkKeys(n, "timeouts."+tier, "idle", "max"); err != nil {
+			return tt, err
+		}
+		var raw map[string]string
+		if err := n.Decode(&raw); err != nil {
+			return tt, fmt.Errorf("timeouts.%s: %w — a duration, or {idle: <duration>, max: <duration>}", tier, err)
+		}
+		for k, v := range raw {
+			d, err := dur(tier+"."+k, v)
+			if err != nil {
+				return tt, err
+			}
+			if k == "idle" {
+				tt.Idle = d
+			} else {
+				tt.Max = d
+			}
+		}
+	}
+	def, ceiling := tierDefaults(tier)
+	if tt.Max > ceiling {
+		return tt, fmt.Errorf("timeouts.%s: max %s is above ape's hard ceiling for %s checks (%s)", tier, tt.Max, tier, ceiling)
+	}
+	if max := orDuration(tt.Max, def.Max); tt.Idle > max {
+		return tt, fmt.Errorf("timeouts.%s: idle %s is above its max %s — a check is killed at max first, so this idle never applies", tier, tt.Idle, max)
+	}
+	return tt, nil
+}
+
+// tierDefaults is a tier's defaults and its hard ceiling, by config key.
+func tierDefaults(tier string) (TierTimeout, time.Duration) {
+	switch tier {
+	case "regression":
+		return TierTimeout{Idle: DefaultRegressionIdle, Max: DefaultRegressionMax}, CeilingRegression
+	case "gate":
+		return TierTimeout{Idle: DefaultGateIdle, Max: DefaultGateMax}, CeilingGate
+	}
+	return TierTimeout{Idle: DefaultCheckIdle, Max: DefaultCheckMax}, CeilingCheck
+}
+
+// tierOf is the config tier a check of kind runs under.
+func tierOf(kind string) string {
 	switch kind {
 	case KindRegression:
-		return orDuration(t.Regression, DefaultRegressionTimeout)
+		return "regression"
 	case KindGate:
-		return orDuration(t.Gate, DefaultGateTimeout)
+		return "gate"
 	}
-	return orDuration(t.Check, DefaultCheckTimeout)
+	return "check"
+}
+
+// Limits is the idle window and ceiling a check of kind runs under: the
+// configured ones, else the defaults; flag, when set, is the max (capped
+// by the tier's hard ceiling). Idle never exceeds max.
+func (t Timeouts) Limits(kind string, flag time.Duration) TierTimeout {
+	tier := tierOf(kind)
+	def, ceiling := tierDefaults(tier)
+	conf := t.Check
+	switch tier {
+	case "regression":
+		conf = t.Regression
+	case "gate":
+		conf = t.Gate
+	}
+	out := TierTimeout{Idle: orDuration(conf.Idle, def.Idle), Max: orDuration(conf.Max, def.Max), tier: tier}
+	if flag > 0 {
+		out.Max, out.flag = min(flag, ceiling), true
+	}
+	out.Idle = min(out.Idle, out.Max)
+	return out
+}
+
+// For is the ceiling a check of kind runs under (Limits' max).
+func (t Timeouts) For(kind string, flag time.Duration) time.Duration {
+	return t.Limits(kind, flag).Max
 }
 
 func orDuration(d, def time.Duration) time.Duration {

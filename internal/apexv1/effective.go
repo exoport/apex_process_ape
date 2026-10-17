@@ -4,12 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Check kinds in a run of checks.
@@ -154,13 +155,24 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 	for i := range checks {
 		pc := &checks[i]
 		r, ok := done[pc.Cmd]
+		if !ok && ctx.Err() != nil {
+			// Interrupted (D58 2.2): the rest is not started; the caller
+			// records nothing of this run.
+			r, ok = CheckResult{Cmd: pc.Cmd, Exit: 130, Tail: []string{"[ape] not run: interrupted"}}, true
+		}
 		if !ok {
 			logPath := filepath.Join(logDir, pc.logName(prefix))
 			if missing := unmetRequirement(pc.Cmd, cfg.Requires); missing != "" {
 				r = unrunResult(pc.Cmd, logPath, missing)
 				r.Log = p.Rel(logPath)
 			} else {
-				r = p.runWithRetries(ctx, pc, logPath, timeouts.For(pc.Kind, opt.Timeout), vacuous, int(cfg.Retries), inGit)
+				progressf(opt.Progress, "%s %s started: %s (output: %s)", Stamp(), pc.Ref, pc.Cmd, p.Rel(logPath))
+				r = p.runWithRetries(ctx, pc, logPath, timeouts.Limits(pc.Kind, opt.Timeout), vacuous, int(cfg.Retries), inGit)
+				verdict := "green"
+				if r.Exit != 0 {
+					verdict = "red (" + r.Outcome() + ")"
+				}
+				progressf(opt.Progress, "%s %s %s in %.1fs", Stamp(), pc.Ref, verdict, r.Secs)
 			}
 			done[pc.Cmd] = r
 		}
@@ -172,11 +184,18 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 	return out
 }
 
+// progressf writes one progress line to w, when there is one.
+func progressf(w io.Writer, format string, args ...any) {
+	if w != nil {
+		_, _ = fmt.Fprintf(w, "[ape] "+format+"\n", args...)
+	}
+}
+
 // runWithRetries runs one check, and runs a red one again up to retries
 // times (H12): the first green run ends it, flaky when it was not the
 // first. Each run's strays are undone after it; the earlier runs' logs
 // stay beside the last as <name>.try<k>.log.
-func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath string, timeout time.Duration, vacuous []string, retries int, inGit bool) CheckResult {
+func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath string, lim TierTimeout, vacuous []string, retries int, inGit bool) CheckResult {
 	var r CheckResult
 	var strays []string
 	for try := 0; ; try++ {
@@ -190,7 +209,7 @@ func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath 
 		if inGit {
 			before = p.snapshot(ctx)
 		}
-		r = runCheck(ctx, p.Root, pc.Cmd, path, timeout, vacuous)
+		r = runCheck(ctx, p.Root, pc.Cmd, path, lim, vacuous)
 		if inGit {
 			strays = append(strays, p.undoStrays(ctx, before)...)
 		}

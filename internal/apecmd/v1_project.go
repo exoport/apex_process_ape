@@ -106,10 +106,19 @@ unparseable and every command refuses it):
   regression: {change: make test, milestone: make test-all}
                                      change: at start and verify (baseline-aware);
                                      milestone (else change): at the milestone gate
-  timeouts: {check: 20m, regression: 45m, gate: 1h}
-                                     Go durations; defaults 15m per check, 30m for the
-                                     regression command, 30m for a Gate: command; a
-                                     command's --timeout flag overrides them
+  timeouts: {check: 20m, regression: {idle: 10m, max: 1h}, gate: {idle: 3m}}
+                                     per tier, a Go duration (its max) or {idle, max}. A
+                                     command is killed (exit 124, reason idle|ceiling, its
+                                     last output lines kept) when it makes no progress —
+                                     no new output bytes and no CPU time used by its
+                                     process group — for idle, or when it reaches max.
+                                     Defaults: check idle 15m / max 2h, regression 30m /
+                                     2h, gate 30m / 4h. Any positive duration (no floor);
+                                     a scalar's idle is the default clamped to it; idle
+                                     above max, or max above ape's hard ceiling (check 4h,
+                                     regression 8h, gate 12h), is a config error. A
+                                     command's --timeout flag is every tier's max (capped
+                                     at the ceiling). A timed-out command is not retried
   retries: 1                         a red check runs again up to n times (0–5, default
                                      0); a pass on a retry is green and recorded flaky:
                                      true (JSON results[].flaky, tries; listed by ape

@@ -67,7 +67,8 @@ func (p *Project) gateSelfCheck(ctx context.Context, m *Milestone, progress io.W
 	if missing := unmetRequirement(m.Gate, cfg.Requires); missing != "" {
 		return nil, broken(missing + " (requires:)")
 	}
-	timeout := cfg.Timeouts.For(KindGate, 0)
+	lim := cfg.Timeouts.Limits(KindGate, 0)
+	timeout := lim.Max
 	sha := HeadSHA(ctx, p.Root)
 	fmt.Fprintf(progress, "%s: running the gate once against %.7s before approving (D70; timeout %s): %s\n", m.ID, sha, timeout, m.Gate)
 	done := make(chan struct{})
@@ -87,8 +88,11 @@ func (p *Project) gateSelfCheck(ctx context.Context, m *Milestone, progress io.W
 	logPath := filepath.Join(p.LogsDir(), "gate-"+m.ID+"-approve.log")
 	p.ensureState()
 	pc := PlannedCheck{Ref: "gate-" + m.ID + "-approve", Kind: KindGate, Cmd: m.Gate}
-	r := p.runWithRetries(ctx, &pc, logPath, timeout, nil, 0, p.isWorkTree(ctx))
+	r := p.runWithRetries(ctx, &pc, logPath, lim, nil, 0, p.isWorkTree(ctx))
 	close(done)
+	if err := interrupted(ctx, m.ID+"'s gate self-check"); err != nil {
+		return nil, err // D58 2.2: an interrupted run judges nothing
+	}
 	sc := &GateSelfCheck{At: Stamp(), SHA: sha, Exit: r.Exit, Secs: r.Secs, Log: r.Log, OutputSHA256: r.OutputSHA256}
 	last := ""
 	if len(r.Tail) > 0 {
@@ -100,8 +104,12 @@ func (p *Project) gateSelfCheck(ctx context.Context, m *Milestone, progress io.W
 		return nil, &FailError{Code: CodeGateGreen, Msg: fmt.Sprintf("%s's gate is already green on the current tree (exit 0 in %.1fs at %.7s)", m.ID, r.Secs, sha) +
 			" — a green gate proves nothing the milestone adds: re-plan the gate (apex-plan) so it is red until the milestone's work is done, then approve again" + last}
 	case r.Exit == ExitTimeout:
-		fmt.Fprintf(progress, "%s: the gate timed out after %s — refused\n", m.ID, timeout)
-		return nil, broken("it timed out after " + timeout.String() + " (timeouts.gate)" + last)
+		why := "it reached its ceiling of " + lim.Max.String() + " (timeouts.gate max)"
+		if r.Reason == ReasonIdle {
+			why = "it made no progress (no output, no CPU) for " + lim.Idle.String() + " (timeouts.gate idle)"
+		}
+		fmt.Fprintf(progress, "%s: the gate timed out — refused: %s\n", m.ID, why)
+		return nil, broken(why + last)
 	case r.Exit == 126 || r.Exit == 127:
 		fmt.Fprintf(progress, "%s: the gate exited %d — refused\n", m.ID, r.Exit)
 		why := "it exited 127 (a command it runs was not found)"

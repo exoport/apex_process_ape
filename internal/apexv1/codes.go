@@ -90,6 +90,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"usage.title", 2, "stop", "milestone new: a title is required"},
 	{"usage.touches", 2, "stop", "change new: --touches is empty or holds a non-kebab-case slug"},
 	{"usage.verdict", 2, "stop", "review: --verdict is not pass or block"},
+	{"usage.wait", 2, "stop", "--wait is outside 0–9m30s: one call must stay under Claude Code's 10-minute Bash cap; run the same command again to wait longer (D58 2.3)"},
 	{"review.nested", 2, "stop", "review --run inside a review session (depth 1)"},
 	{"project.not-initialized", 2, "person", "no development folder: run `ape project init`"},
 	{CodeSessionDepth, 2, "stop", "ape task, prompt, chat or change review --run from a model session that may not start one (D62): depth 1 that is not ape's own apex-orchestrator run, or depth 2 (a session an orchestrator started); depth comes from what ape recorded at launch (APE_DEPTH and the process ancestry), never from the model — the session finishes its own work; a person or the orchestrator starts the next session. ape script refuses at any depth >= 1"},
@@ -110,6 +111,8 @@ var DiagnosticCodes = []CodeDoc{
 	{"git.branch-failed", 1, "stop", "creating, switching to, rebasing or deleting a branch failed, or the base branch is missing"},
 	{CodeBehindUpstream, 1, "person", "start (a new start, or a re-entry that catches up) and archive: the base branch is behind its upstream (the local remote-tracking ref; ape never fetches) — a person pulls (D45: one operator per checkout, local trunk)"},
 	{CodeArchiveInterrupted, 1, "retry", "a writing command found the journal of an archive that crashed (_apex/state/archive-journal.json) and rolled the checkout back to it — the base at its pre-archive sha, change/<id> at its recorded tip, checked out; the message says what was undone; archive again, then the command (H28)"},
+	{CodeRunInterrupted, 1, "retry", "a start, verify, archive, gate or close was interrupted (SIGTERM/SIGINT mid-check, or its run lock's process is gone without a result — killed, or the machine restarted): its checks were stopped and NOTHING was recorded — no attempt, no state commit, no gate run (D58 2.2); run the same command again"},
+	{"run.start-failed", 1, "retry", "start, verify, archive, gate, close: the detached worker could not be started (D58 2.3); nothing ran"},
 	{CodeHookFailed, 1, "apply", "archive: a project git hook (pre-commit, commit-msg; commit.hooks: run, the default) refused the squash commit; archive rolled back (the base unchanged, change/<id> checked out again) and the message carries the hook output's tail — fix it on the branch, verify, archive again"},
 	{"archive.spec-invalid", 1, "replan", "archive: the merged spec would fail project check (e.g. over its caps.spec cap)"},
 	{"change.archived", 1, "stop", "the change is already archived"},
@@ -184,6 +187,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"change.requirement-conflict", 3, "replan", "another active change claims the same requirement"},
 	{CodeChildRunning, 3, "retry", "ape task / change review --run from an apex-orchestrator run that already has a child session running (D62: one at a time) — wait for it (`ape run wait <id> --wait 9m`), then start the next"},
 	{CodeOrchestratorRunning, 3, "retry", "ape task apex-orchestrator in a project that already has a live apex-orchestrator run (D62: one per project) — wait for it to end, or stop it, then start again"},
+	{CodeRunBusy, 3, "retry", "start, verify, archive, gate, close (and review --run's re-verify): another of these verbs is running on the same change or milestone (its run lock, _apex/state/runs/<id|M>.json); the message names it and since when — wait for it (running that command attaches), then run this one again (D58 2.1)"},
 	{"conflict.unclassified", 3, "stop", "a conflict without a code (a bug: report it)"},
 
 	// findings (exit 1, from project check / change check)

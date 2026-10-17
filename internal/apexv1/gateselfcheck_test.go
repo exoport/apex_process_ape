@@ -65,7 +65,7 @@ func TestApprove_GateSelfCheck(t *testing.T) {
 			"a timeout", "./gate.sh",
 			map[string]string{"gate.sh": "#!/bin/sh\necho waiting\nsleep 30\n"},
 			"timeouts:\n  gate: 1s\n", CodeGateBroken,
-			"it timed out after 1s (timeouts.gate)",
+			"it reached its ceiling of 1s (timeouts.gate max)",
 		},
 	}
 	for _, tc := range refused {

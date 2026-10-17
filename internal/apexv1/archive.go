@@ -253,6 +253,9 @@ func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool
 	if err := p.archiveFresh(ctx, ci, res, opt); err != nil {
 		return res, err
 	}
+	// Every check has run: the squash is short, and finishing it beats
+	// leaving it half made, a signal or not.
+	ctx = context.WithoutCancel(ctx)
 	updates, dest, err := p.planArchive(ci)
 	if err != nil {
 		return res, err
