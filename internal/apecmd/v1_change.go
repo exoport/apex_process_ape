@@ -66,6 +66,13 @@ base tip, and marks the old verify stale. A conflict blocks the change with the 
 (exit 3, change.rebase-conflict). The model never rebases or merges on a change branch
 (` + "`ape hook pre-tool`" + ` denies it).
 
+Provenance (H14): start, verify and archive first walk the history since the v1 epoch
+(the newest "apex: project init" or "apex: lift" commit) and refuse (exit 1, code
+change.provenance, action person, findings spec.edited / state.forged) when a commit wrote
+development/specs/** outside an archive squash (a "Change: <id>" trailer of an archived
+change) or a state.json outside an "apex: …" commit or a squash. A person reverts the
+commit (git revert), which clears it.
+
 Notifier (H20): a subcommand that leaves the change blocked (block, verify at its attempts
 limit, a rebase conflict) runs _apex/config.yaml's optional notify: command with
 APE_EVENT=block, APE_CHANGE=<id> and APE_REASON=<the blocked reason>; best effort, it never
@@ -93,6 +100,9 @@ func splitList(s string) []string {
 	return out
 }
 
+// provenanceVerbs are the change verbs that check provenance first (H14).
+var provenanceVerbs = map[string]bool{"start": true, "verify": true, "archive": true}
+
 // v1ChangeLeaf builds a `ape change <verb> <id>` leaf around run.
 func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *cobra.Command, p *apexv1.Project, id string) error) *cobra.Command {
 	cmd := &cobra.Command{
@@ -108,6 +118,13 @@ func v1ChangeLeaf(use, short, long, example string, f *v1Flags, run func(cmd *co
 			}
 			if err := v1RequireInit(cmd, f, p); err != nil {
 				return err
+			}
+			// H14: start, verify and archive refuse on a history since the
+			// v1 epoch that wrote a spec or a state.json around ape.
+			if provenanceVerbs[cmd.Name()] {
+				if err := p.Provenance(cmd.Context()); err != nil {
+					return v1Fail(cmd, f, err, nil)
+				}
 			}
 			// H20: a change this command blocked (block, an attempts limit,
 			// a rebase conflict) runs the project's notifier.

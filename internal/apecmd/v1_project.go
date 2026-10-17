@@ -186,6 +186,13 @@ func newProjectCheckCmd() *cobra.Command {
                            and shared through git: settings.ignored when git ignores it
                            (and does not track it), since its hooks then reach no other
                            checkout — only ` + "`ape task`" + ` sessions get them inline
+  provenance               since the v1 epoch (the newest "apex: project init" or "apex: lift"
+                           commit; nothing before it is judged), one git log walk: a commit
+                           touching development/specs/** must be an archive squash — a
+                           "Change: <id>" trailer whose change is archived, whatever its
+                           subject — else spec.edited; a change's state.json may change only
+                           in an "apex: …" commit or an archive squash, else state.forged.
+                           A git revert of such a commit clears both (both action person)
   plugins                  _apex/config.yaml marketplaces/plugins: settings.json's
                            extraKnownMarketplaces/enabledPlugins match them, and (when
                            claude is on PATH) each plugin is installed at project scope
