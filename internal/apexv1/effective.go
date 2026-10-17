@@ -153,6 +153,11 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 	for i := range checks {
 		pc := &checks[i]
 		r, ok := done[pc.Cmd]
+		if !ok && ctx.Err() != nil {
+			// Interrupted (D58 2.2): the rest is not started; the caller
+			// records nothing of this run.
+			r, ok = CheckResult{Cmd: pc.Cmd, Exit: 130, Tail: []string{"[ape] not run: interrupted"}}, true
+		}
 		if !ok {
 			logPath := filepath.Join(logDir, pc.logName(prefix))
 			if missing := unmetRequirement(pc.Cmd, cfg.Requires); missing != "" {
