@@ -153,6 +153,7 @@ func TestRefreshWritesWithNoServerRunning(t *testing.T) {
 	require.Len(t, doc["tabs"], 1)
 	require.Equal(t, TabKey, tabAt(t, doc, 0)["key"])
 	require.NotContains(t, tabAt(t, doc, 0), "touched", "a file write raised the dot")
+	require.Equal(t, true, tabAt(t, doc, 0)[keyQuiet], "the tab is not marked quiet (D75)")
 
 	// The second refresh with the same view writes nothing.
 	again := Refresh(context.Background(), proj, sampleReport(), time.Now().Add(time.Minute), &errOut)
@@ -337,11 +338,13 @@ func TestRefreshPostsToARunningBoard(t *testing.T) {
 	require.Equal(t, ActionPosted, out.Action)
 	require.Equal(t, srv.URL, out.Where)
 	require.Len(t, posted, 1, "a running board was posted to %d times, want 1", len(posted))
-	require.Contains(t, string(<-posted), TabKey, "the posted document has no status tab")
+	body := string(<-posted)
+	require.Contains(t, body, TabKey, "the posted document has no status tab")
+	require.Contains(t, body, `"quiet":true`, "the posted tab is not marked quiet (D75)")
 
-	body, err := os.ReadFile(filepath.Join(proj, ".aboard", "aboard.json"))
+	onDisk, err := os.ReadFile(filepath.Join(proj, ".aboard", "aboard.json"))
 	require.NoError(t, err)
-	require.JSONEq(t, document, string(body), "the file was written behind a live server")
+	require.JSONEq(t, document, string(onDisk), "the file was written behind a live server")
 }
 
 // A server that is THERE and refuses is not a reason to write the file: a

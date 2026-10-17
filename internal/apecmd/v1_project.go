@@ -423,8 +423,11 @@ detail}). A running board is posted to; with none running, .aboard/aboard.json i
 rewritten in place. ape never creates a board. The tab is not authoritative: it is a view
 of this report, nothing reads it back, and where the two disagree the tab is wrong. A
 refresh never changes a command's exit code or stdout (a problem is one line on stderr),
-and one that would change nothing writes nothing. A changed view posted to a running
-board marks the tab changed (the dot), which aboard v0.3.0 has no way to switch off.
+and one that would change nothing writes nothing. The tab is marked quiet: true, so the
+board raises no unread dot or banner for ape's refreshes — from the aboard release that
+honours it. Until ape pins that release, a changed view posted to a running board still
+raises the tab's unread dot (aboard v0.3.0 ignores quiet, silently); a refresh written to
+the file, with no board running, raises none.
 
 Exit codes: 0 ok · 2 usage. --board exits 0 whatever the board did.`,
 		Example: "  ape status\n  ape status --brief\n  ape status --json\n  ape status --board",
@@ -461,7 +464,8 @@ Exit codes: 0 ok · 2 usage. --board exits 0 whatever the board did.`,
 	addV1Flags(cmd, &f)
 	cmd.Flags().BoolVar(&brief, "brief", false, "at most 25 lines")
 	cmd.Flags().BoolVar(&board, "board", false, "refresh the project's aboard status tab now and say where it wrote (JSON \"board\"); "+
-		"the tab is a view, never a record")
+		"the tab is a view, never a record; until ape pins the aboard release that honours its quiet flag, "+
+		"a changed view posted to a running board raises the tab's unread dot")
 	return cmd
 }
 
