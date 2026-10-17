@@ -42,9 +42,12 @@ func TestApproval_StatusLineAloneIsNotTrusted(t *testing.T) {
 	_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
 	require.ErrorContains(t, err, "ape has no record of a person approving it")
 
-	// A person re-approves: recorded, the Status line kept.
+	// A person re-approves: recorded, the Status line kept. The gate runs
+	// first and must be red (D70 B): ./gate.sh exists and fails.
+	write(t, p, "gate.sh", "#!/bin/sh\nexit 1\n")
+	commitAll(t, p, "test: the gate")
 	before := p.roadmap().Find("M1").StatusText
-	_, err = p.ApproveMilestone(ctx(), "M1", "ann")
+	_, err = p.ApproveMilestone(ctx(), "M1", "ann", nil)
 	require.NoError(t, err)
 	require.Equal(t, before, p.roadmap().Find("M1").StatusText)
 	require.Equal(t, "apex: M1 re-approved", subjects(t, p)[0])
@@ -226,7 +229,7 @@ func TestApproval_RC1RecordExtraFiles(t *testing.T) {
 	commitAll(t, p, "the milestone's work")
 	require.Empty(t, p.Check(), "data files the rc.1 record holds are ignored")
 	head := HeadSHA(ctx(), p.Root)
-	_, err = p.ApproveMilestone(ctx(), "M1", "ann")
+	_, err = p.ApproveMilestone(ctx(), "M1", "ann", nil)
 	require.NoError(t, err)
 	require.Equal(t, head, HeadSHA(ctx(), p.Root), "nothing to re-approve")
 

@@ -69,9 +69,10 @@ func budgetProject(t *testing.T, ape string) (project, fake string, env []string
 		"# G\n## Vision\nv\n## Users\nu\n## Scope\ns\n## Out of scope\no\n## Constraints\nc\n"))
 	require.NoError(t, os.MkdirAll(filepath.Join(project, ".claude", "skills", "apex-foo"), 0o755))
 	require.NoError(t, writeFile(filepath.Join(project, ".claude", "skills", "apex-foo", "SKILL.md"), "# foo\n"))
+	require.NoError(t, writeWaveGate(project))
 	sh("git", "add", "-A")
 	sh("git", "commit", "-q", "-m", "setup")
-	sh(ape, "milestone", "new", "Skeleton", "--gate", "./wave.sh", "--goal", "waves", "--budget", "2")
+	sh(ape, "milestone", "new", "Skeleton", "--gate", "./gate.sh", "--goal", "waves", "--budget", "2")
 	sh(ape, "milestone", "approve", "M1", "--by", "test")
 	return project, fake, env
 }

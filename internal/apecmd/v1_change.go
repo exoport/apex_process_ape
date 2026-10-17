@@ -244,8 +244,9 @@ func newChangeCheckCmd() *cobra.Command {
     when: the change matches (the orchestrator runs each before the review; else
     tools.unknown, D74); any other key must start with x-
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
-  - change.md ≤ 8 KB and design.md ≤ 8 KB ("split this change")
-  - every spec the delta touches stays ≤ 20 KB once merged — the in-memory merge
+  - change.md ≤ caps.change_md and design.md ≤ caps.design_md (16 KB each by default;
+    _apex/config.yaml caps:, see `+"`ape project check --help`"+`) ("split this change")
+  - every spec the delta touches stays ≤ caps.spec (24 KB) once merged — the in-memory merge
     `+"`ape change diff`"+` shows and archive makes (else change.spec-too-big: split the
     capability first; start runs this check too, so it fails before any work, H18)
   - ## Delta: "### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>" blocks, or
@@ -921,7 +922,11 @@ base branch, change/<id> is deleted and its last commit recorded as branch_tip i
 archived state.json, kept reachable as refs/apex/abandoned/<id> (tip_ref; H16, local). None of the change's code reaches the base branch. A draft never
 started (no branch) is abandoned on the branch HEAD is on, as before.
 
-Exit codes: 0 abandoned · 1 no such change, archived, dirty tree, change/<id> checked out in
+change.md's cap holds here too (D69): over caps.change_md (default 16 KB) abandon refuses
+with change.too-big — trim it under the cap, commit, abandon again — and while
+_apex/config.yaml caps: holds a value above its ceiling, with caps.over-ceiling.
+
+Exit codes: 0 abandoned · 1 no such change, archived, change.md over its cap, caps.over-ceiling, dirty tree, change/<id> checked out in
 another worktree, the base branch checked out in another worktree (git.base-checked-out), or git
 failed · 2 usage · 3 the archive folder already exists.`,
 		`  ape change abandon add-tenant-delete --reason "replaced by split-tenant-delete"`,
@@ -954,7 +959,9 @@ func newChangeArchiveCmd() *cobra.Command {
 		"Catch change/<id> up with its base, squash-merge it with the delta and the archive move as one commit",
 		`Archive a reviewed change onto its base branch (trial decision D38):
 
-  1. needs status reviewed (review pass) and the plan frozen at start unchanged; human-
+  1. needs status reviewed (review pass), the plan frozen at start unchanged, and change.md
+     within caps.change_md (default 16 KB; ## Notes counts — change.too-big: trim it, D69;
+     caps.over-ceiling while caps: holds a value above its ceiling); human-
      review tasks must be accepted, unless --allow-pending-human (recorded) — a person's
      flag only (D45): refused in a model session (APE_SESSION or CLAUDECODE set) with exit
      2, session.person-only; the orchestrator leaves such a change reviewed and moves on.
@@ -987,7 +994,8 @@ func newChangeArchiveCmd() *cobra.Command {
      branch_tip = change/<id>'s last commit) — with "evidence: archive" in
      _apex/config.yaml (H23; default off) also its evidence/: one file per check of the
      final verify (command, exit, duration, output sha256, and the output from the log,
-     capped at 256 KB: head and tail kept, the full log named by path and sha256) — and
+     capped at caps.evidence_log, default 1 MiB: head and tail kept, the full log named by
+     path and sha256) — and
      commits everything as ONE commit (H15):
      subject from _apex/config.yaml commit.subject — placeholders {type} (change.md's
      type:), {title} (its # title) and {id}; default "{title}" — and a body holding the

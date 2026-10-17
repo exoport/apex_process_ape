@@ -139,9 +139,13 @@ func (p *Project) ActiveChanges(ctx context.Context) []ChangeInfo {
 // CheckChange validates change.md against its shape, its caps, the
 // roadmap and the current specs (`ape change check`). One flat list of
 // rules, each a few lines: splitting it would scatter the contract.
+func (p *Project) CheckChange(id string) []Finding { return p.checkChange(id, true) }
+
+// checkChange is CheckChange; withCaps adds caps.over-ceiling, which
+// `project check` reports once for the project rather than per change.
 //
 //nolint:gocyclo // a checklist, not branching logic
-func (p *Project) CheckChange(id string) []Finding {
+func (p *Project) checkChange(id string, withCaps bool) []Finding {
 	file := p.Rel(p.ChangeMD(id))
 	doc, err := readFileString(p.ChangeMD(id))
 	if err != nil {
@@ -150,13 +154,18 @@ func (p *Project) CheckChange(id string) []Finding {
 	var out []Finding
 	add := func(line int, msg string) { out = append(out, Finding{File: file, Line: line, Message: msg}) }
 
-	if len(doc) > ChangeMaxBytes {
-		add(0, "change.md is "+sizeKB(len(doc))+", over the 8 KB cap — split this change")
+	cfgCaps := p.capsConfig()
+	if withCaps {
+		out = append(out, cfgCaps.OverCeiling()...)
 	}
-	if d, err := os.Stat(p.DesignMD(id)); err == nil && d.Size() > DesignMaxBytes {
+	caps := cfgCaps.Limits()
+	if len(doc) > caps.ChangeMD {
+		add(0, "change.md is "+sizeKB(len(doc))+", over the "+capSize(caps.ChangeMD)+" cap (caps.change_md) — split this change")
+	}
+	if d, err := os.Stat(p.DesignMD(id)); err == nil && d.Size() > int64(caps.DesignMD) {
 		out = append(out, Finding{
 			File:    p.Rel(p.DesignMD(id)),
-			Message: "design.md is " + sizeKB(int(d.Size())) + ", over the 8 KB cap — split this change, or move bulk to assets/",
+			Message: "design.md is " + sizeKB(int(d.Size())) + ", over the " + capSize(caps.DesignMD) + " cap (caps.design_md) — split this change, or move bulk to assets/",
 		})
 	}
 	if _, err := LoadState(p.StateFile(id)); err != nil {
@@ -295,10 +304,11 @@ func (p *Project) mergedSpecFindings(file string, c *Change) []Finding {
 		return nil
 	}
 	var out []Finding
+	limit := p.caps().Spec
 	for _, u := range updates {
-		if !u.Retired && len(u.content) > SpecMaxBytes {
+		if !u.Retired && len(u.content) > limit {
 			out = append(out, Finding{File: file, Line: 0, Message: "after this change, " + u.Path + " would be " + sizeKB(len(u.content)) +
-				", over the 20 KB spec cap — split the capability first (its own change, moving requirements to a new capability), then re-plan this one"})
+				", over the " + capSize(limit) + " spec cap (caps.spec) — split the capability first (its own change, moving requirements to a new capability), then re-plan this one"})
 		}
 	}
 	return out

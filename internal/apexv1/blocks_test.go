@@ -143,8 +143,11 @@ func TestLimits_ConsecutiveBlocks(t *testing.T) {
 	require.NoError(t, err, "a fix counts toward no milestone")
 	require.NoError(t, p.OrchestratorLimits(ctx(), "fix-typo"))
 
-	// A person's re-approval resets the count.
-	_, err = p.ApproveMilestone(ctx(), "M1", "ann")
+	// A person's re-approval resets the count; its gate must run, red
+	// (D70 B).
+	write(t, p, "gate.sh", "#!/bin/sh\nexit 1\n")
+	commitAll(t, p, "test: the gate")
+	_, err = p.ApproveMilestone(ctx(), "M1", "ann", nil)
 	require.NoError(t, err)
 	require.Equal(t, "apex: M1 re-approved", subjects(t, p)[0])
 	require.Equal(t, 0, p.consecutiveBlocks(ctx(), "M1"))

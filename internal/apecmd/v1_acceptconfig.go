@@ -12,16 +12,30 @@ func newProjectAcceptConfigCmd() *cobra.Command {
 	var by string
 	cmd := &cobra.Command{
 		Use:   "accept-config --by <who>",
-		Short: "Accept the committed _apex/config.yaml's limits, checks, retries and requires",
-		Long: `Four blocks of _apex/config.yaml loosen what ape enforces: limits (attempts, re-plans,
-consecutive blocks), checks (vacuous output), requires (unrun checks) and retries. Since the
-project's v1 epoch, a commit that changes one of them and is not ape's own ("apex: …") is
-the finding config.changed (action person; D50), and change start, verify and archive
-refuse (change.provenance) — so a session cannot loosen its own limits with an Edit.
+		Short: "Accept the committed _apex/config.yaml's guarded blocks (limits, checks, caps, …)",
+		Long: `Thirteen blocks of _apex/config.yaml can loosen what ape enforces, and are guarded:
+  limits        attempts, re-plans, consecutive blocks, the budget
+  checks        vacuous output
+  retries       red checks run again
+  requires      unrun checks
+  timeouts      how long a check, the regression command or a gate may run
+  caps          the artefact size caps (D69; see ape project check --help)
+  regression    the project's own suite (unset: the net is off)
+  commit        the archive's squash (hooks: skip skips the project's hooks)
+  evidence      archive|off (off keeps no evidence)
+  marketplaces, plugins, tools   what runs inside a session (hooks, MCP, skills)
+  human_review  who accepts a human-review task in a person's place (D75)
+The guard compares whole blocks, either way: raising a cap or a timeout loosens as surely
+as lowering one. Since the project's v1 epoch (the newest "apex: project init" or "apex:
+lift" commit; a block committed before it, or in it, is the baseline), a commit that
+changes one of them and is not ape's own ("apex: …") is the finding config.changed (action
+person; D50), and change start, verify and archive refuse (change.provenance) — so a
+session cannot loosen its own limits with an Edit. Unguarded: project_name,
+development_folder, models, effort, docs, notify.
 
 A person who made the change, or approves it, accepts it: this command commits an empty
-"apex: config accepted by <who>" on the base branch, and every guarded change before it
-is clean. A later change is judged again. A git revert of the change also clears it.
+"apex: config accepted by <who>" on the base branch (its body lists the guarded blocks),
+and every guarded change before it is clean. A later change is judged again. A git revert of the change also clears it.
 
 Only a person accepts (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE set,
 which includes a ` + "`!`" + ` line inside Claude Code — with exit 2, code session.person-only.

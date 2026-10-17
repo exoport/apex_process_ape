@@ -162,6 +162,10 @@ func liftFiles() map[string]string {
 		"_apex/ape-commands.yaml":                                "min_ape_version: 0.9.0\n",
 		"_apex/pipelines/design.yaml":                            "name: design\n",
 		"_apex/custom-notes.md":                                  "ours\n",
+		"_apex/aboard/recipes/project-status-dashboard.md":       "# Project status dashboard\n",
+		"_apex/aboard/recipes/sprint-board.md":                   "# A forked recipe\n",
+		"_apex/aboard/recipes/release-train.md":                  "# Another forked recipe\n",
+		".aboard/aboard.json":                                    "{\"tabs\":{}}\n",
 		".claude/skills/apex-dev-story/SKILL.md":                 "---\nname: apex-dev-story\n---\n",
 		".claude/skills/apex-orchestrator/SKILL.md":              "---\nname: apex-orchestrator\n---\n",
 		".claude/skills/apex-unlisted/SKILL.md":                  "---\nname: apex-unlisted\n---\n",
@@ -266,10 +270,14 @@ func TestLift_FullRun(t *testing.T) {
 		"_apex/terminal-contracts.csv", "_apex/ape-commands.yaml", "_apex/pipelines", "development/implementation",
 		"development/planning", "development/governance/adrs", "development/governance/patterns",
 		"development/functionality", "development/deferred", "development/team-memory.md", "development/project-context.md",
+		// v0's aboard recipes (the status dashboard and forks of it), and
+		// _apex/aboard/ with them once empty (framework Q27).
+		"_apex/aboard/recipes", "_apex/aboard",
 	} {
 		require.NoFileExists(t, filepath.Join(root, gone), gone)
 		require.NoDirExists(t, filepath.Join(root, gone), gone)
 	}
+	require.FileExists(t, filepath.Join(root, ".aboard", "aboard.json"), "the live board is never touched")
 	// Kept: a skill the manifest does not list, the project's own, docs,
 	// evidence, research, the framework record, an unknown _apex file.
 	for _, kept := range []string{
@@ -386,6 +394,7 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	cfg, err := LoadConfig(root)
 	require.NoError(t, err)
 	require.Equal(t, "sh ./check.sh && test -f main.go", cfg.Regression.Change)
+	require.Equal(t, SkillModel{Model: "sonnet", Effort: "high"}, cfg.Models["apex-apply"], "a lifted config starts with the D65 model defaults, as init's does")
 	require.Equal(t, "greeter", cfg.ProjectName)
 	require.Equal(t, "development", cfg.DevelopmentFolder)
 	agents := read(t, p, "AGENTS.md")

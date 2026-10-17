@@ -69,7 +69,7 @@ const projectSkeleton = `# %s
 
 const agentsSkeleton = `# AGENTS.md
 
-<!-- The project map, at most 120 lines: what this is, how to build, test and run the e2e
+<!-- The project map, at most 16 KB (caps.agents_md): what this is, how to build, test and run the e2e
      checks, the NEVER rules, and pointers. Detail lives in development/ and docs/. -->
 
 ## What this is
@@ -87,6 +87,19 @@ const agentsSkeleton = `# AGENTS.md
 - development/archive/ — archived and abandoned changes (read-only)
 - development/decisions/ — ADRs
 - development/briefs/ — each plan's input, dated and verbatim: history, never edited
+`
+
+// modelDefaultsYAML is the models: block a new _apex/config.yaml starts
+// with (D65): the build (apex-apply, the orchestrator) on sonnet/high,
+// review and planning on opus/medium. A project overrides any of them;
+// models: is not guarded (config.changed), as it loosens nothing.
+const modelDefaultsYAML = `# The model and effort each skill's session runs on (D65); change them freely.
+models:
+  apex-apply: {model: sonnet, effort: high}
+  apex-orchestrator: {model: sonnet, effort: high}
+  apex-review: {model: opus, effort: medium}
+  apex-plan: {model: opus, effort: medium}
+  apex-change: {model: opus, effort: medium}
 `
 
 // Init creates the v1 skeleton where absent and merges ape's hooks into
@@ -147,7 +160,9 @@ func initSkeleton(ctx context.Context, root string, brownfield bool) (*InitResul
 		return nil
 	}
 
-	if err := write(ConfigPath(p.Root), "project_name: "+yamlScalar(name)+"\ndevelopment_folder: "+p.DevRel+"\n"); err != nil {
+	// An existing config is kept as it is, models: or not: init never
+	// overwrites or merges into a file.
+	if err := write(ConfigPath(p.Root), "project_name: "+yamlScalar(name)+"\ndevelopment_folder: "+p.DevRel+"\n"+modelDefaultsYAML); err != nil {
 		return nil, nil, err
 	}
 	for _, d := range []string{p.SpecsDir(), p.ChangesDir(), p.ArchiveDir(), p.DecisionsDir(), p.BriefsDir()} {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -218,7 +219,11 @@ func (p *Project) NewMilestone(ctx context.Context, title, gate string, budget *
 // an approved milestone it records the approval again when ape holds none,
 // the gate changed since, or changes of it were blocked in a row (the
 // count goes back to 0; the Status line is kept); otherwise it is a no-op.
-func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milestone, error) {
+// Before it records anything it runs the gate once (D70 B,
+// gateSelfCheck), printing its progress to progress (nil: nowhere): a
+// green or broken gate is refused, a red one's run is recorded with the
+// approval.
+func (p *Project) ApproveMilestone(ctx context.Context, id, by string, progress io.Writer) (*Milestone, error) {
 	// A model never approves its own milestone (D47 Q6).
 	if err := requirePerson("ape milestone approve"); err != nil {
 		return nil, err
@@ -259,6 +264,10 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milesto
 	if fs := ValidateRoadmap(p.Rel(p.RoadmapMD()), doc); len(filterMilestone(fs, m)) > 0 {
 		return nil, &FailError{Code: "milestone.malformed", Msg: id + " is not well-formed — fix roadmap.md before approving", Findings: filterMilestone(fs, m)}
 	}
+	selfCheck, err := p.gateSelfCheck(ctx, m, progress)
+	if err != nil {
+		return nil, err
+	}
 	what := MilestoneApproved
 	if m.Status == MilestoneApproved {
 		// The Status line keeps the first approval: the milestone's spend
@@ -279,6 +288,7 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string) (*Milesto
 		recs[id] = rec
 	}
 	rec.Approval = p.newApproval(m.Gate, strings.TrimSpace(by))
+	rec.Approval.SelfCheck = selfCheck
 	// A person's approval resets the run of blocked changes (H19).
 	rec.ConsecutiveBlocks = 0
 	if err := p.saveMilestoneRecords(recs); err != nil {

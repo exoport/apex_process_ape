@@ -62,7 +62,7 @@ func TestStart_CreatesTheChangeBranch(t *testing.T) {
 	_, err = p.NewChange(ctx(), "add-hug", "M1", []string{"greeting"}, nil)
 	require.Equal(t, CodeChangeBranch, failCode(t, err))
 	require.ErrorContains(t, err, "`git switch main`")
-	_, err = p.ApproveMilestone(ctx(), "M1", "ann")
+	_, err = p.ApproveMilestone(ctx(), "M1", "ann", nil)
 	require.Equal(t, CodeChangeBranch, failCode(t, err))
 	_, err = p.NewMilestone(ctx(), "Next", "./gate.sh", nil, "more")
 	require.Equal(t, CodeChangeBranch, failCode(t, err))

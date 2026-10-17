@@ -19,17 +19,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Size caps from the brief. Bytes, not runes: a cap is about what a model
-// has to read, and bytes are what a context window pays for.
-const (
-	ProjectMaxLines = 150
-	ProjectMaxBytes = 8 * 1024
-	SpecMaxBytes    = 20 * 1024
-	ChangeMaxBytes  = 8 * 1024
-	DesignMaxBytes  = 8 * 1024
-	AgentsMaxLines  = 120
-)
-
 // DefaultDevFolder is the development folder when _apex/config.yaml does
 // not name one.
 const DefaultDevFolder = "development"
@@ -97,6 +86,9 @@ type Config struct {
 	// Tools are the skills the design and review steps may call (D59 Q4,
 	// tools.go); they join the orchestrator's child allow-list.
 	Tools ToolsConfig `yaml:"tools"`
+	// Caps are the artefact size caps (D69): each a default with a hard
+	// ceiling (caps.go).
+	Caps Caps `yaml:"caps"`
 }
 
 // SkillModel is one models.<skill> entry.

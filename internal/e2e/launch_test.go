@@ -154,7 +154,11 @@ func TestTask_V1LaunchModelAndEffort(t *testing.T) {
 
 	t.Run("flags, then models.<skill>", func(t *testing.T) {
 		project, fake, env := launchProject(t, ape, true)
-		setConfig(t, project, "effort: medium\nmodels:\n  apex-foo: {model: claude-haiku-5-5, effort: low}\n")
+		setConfig(t, project, "effort: medium\n")
+		cfg := filepath.Join(project, "_apex", "config.yaml")
+		data, err := os.ReadFile(cfg)
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(cfg, []byte(strings.Replace(string(data), "models:\n", "models:\n  apex-foo: {model: claude-haiku-5-5, effort: low}\n", 1)), 0o644))
 		run(t, project, env, "--effort", "high")
 		seen := readLaunch(t, fake)
 		require.Contains(t, seen.args, "--model claude-haiku-5-5 --effort high")

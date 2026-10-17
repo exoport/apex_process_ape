@@ -44,6 +44,9 @@ type MilestoneApproval struct {
 	// files (every word that named one); gateDrift ignores the extra ones.
 	GateFiles       map[string]string `json:"gate_files,omitempty"`
 	GateFilesSHA256 string            `json:"gate_files_sha256"`
+	// SelfCheck is the gate's run at approval (D70 B): red, its exit,
+	// duration and log. Absent on approvals before rc.3.
+	SelfCheck *GateSelfCheck `json:"self_check,omitempty"`
 }
 
 // gateFiles are the gate files of a gate command: each of its scripts

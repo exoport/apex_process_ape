@@ -165,6 +165,13 @@ func supervisorPID(t *testing.T, project, id string) int {
 
 func writeFile(path, body string) error { return os.WriteFile(path, []byte(body), 0o644) }
 
+// writeWaveGate writes the M1 gate the v1 fixtures approve: ./gate.sh,
+// which exists and is red until wave.sh is written, as `ape milestone
+// approve` requires (D70 B: a gate must run, red).
+func writeWaveGate(project string) error {
+	return os.WriteFile(filepath.Join(project, "gate.sh"), []byte("#!/bin/sh\n./wave.sh 2>/dev/null | grep -q wave\n"), 0o755) //nolint:gosec // a test fixture's script
+}
+
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil

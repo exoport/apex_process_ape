@@ -19,6 +19,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// v1Gate is v1Repo's M1 gate: red until done.flag exists.
+const v1Gate = "#!/bin/sh\ntest -f done.flag\n"
+
 // v1Repo is a git repo with `ape project init` run, a filled project.md
 // and an approved M1.
 func v1Repo(t *testing.T) string {
@@ -42,6 +45,9 @@ func v1Repo(t *testing.T) string {
 		[]byte("# G\n## Vision\nv\n## Users\nu\n## Scope\ns\n## Out of scope\no\n## Constraints\nc\n"), 0o644))
 	_, _, err = v1Exec(t, newMilestoneCmd, "new", "Skeleton", "--gate", "./gate.sh", "--goal", "greets", "--cwd", root)
 	require.NoError(t, err)
+	// The gate exists and is red until the milestone's work is done:
+	// approve runs it once (D70 B).
+	require.NoError(t, os.WriteFile(filepath.Join(root, "gate.sh"), []byte(v1Gate), 0o755))
 	_, _, err = v1Exec(t, newMilestoneCmd, "approve", "M1", "--by", "eval", "--cwd", root)
 	require.NoError(t, err)
 	v1Git(t, root, "add", "-A")
@@ -199,23 +205,24 @@ func TestV1Commands_ExitCodes(t *testing.T) {
 	// milestone gate red → 1; close after the gate goes green → 0
 	_, _, err = v1Exec(t, newMilestoneCmd, "gate", "M1", "--cwd", root)
 	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
-	require.NoError(t, os.WriteFile(filepath.Join(root, "gate.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755))
-	v1Git(t, root, "add", "gate.sh")
-	v1Git(t, root, "commit", "-q", "-m", "feat: gate")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "done.flag"), []byte("done\n"), 0o644))
+	v1Git(t, root, "add", "done.flag")
+	v1Git(t, root, "commit", "-q", "-m", "feat: done")
 	_, _, err = v1Exec(t, newChangeCmd, "abandon", "add-wave-2", "--reason", "duplicate", "--cwd", root)
 	require.NoError(t, err)
-	// gate.sh is new since M1 was approved: not drift (D51 Q15), but
-	// approving again freezes it, and a changed gate.sh is then refused
-	// until a person approves it again (H2).
-	_, _, err = v1Exec(t, newMilestoneCmd, "approve", "M1", "--by", "eval", "--cwd", root)
-	require.NoError(t, err)
-	require.Equal(t, "apex: M1 re-approved", v1Git(t, root, "log", "-1", "--format=%s"))
+	// gate.sh was frozen at the approval: a changed one is refused until a
+	// person approves it again (H2), and a green gate cannot be (D70 B).
 	require.NoError(t, os.WriteFile(filepath.Join(root, "gate.sh"), []byte("#!/bin/sh\ntrue\n"), 0o755))
 	stdout, _, err = v1Exec(t, newMilestoneCmd, "close", "M1", "--json", "--cwd", root)
 	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
 	require.Contains(t, stdout, `"code": "milestone.gate-changed"`)
 	require.Contains(t, stdout, `"action": "person"`)
-	require.NoError(t, os.WriteFile(filepath.Join(root, "gate.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755))
+	stdout, stderr, err = v1Exec(t, newMilestoneCmd, "approve", "M1", "--by", "eval", "--json", "--cwd", root)
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err))
+	require.Contains(t, stdout, `"code": "milestone.gate-green"`)
+	require.Contains(t, stdout, `"action": "replan"`)
+	require.Contains(t, stderr, "M1: running the gate once against")
+	require.NoError(t, os.WriteFile(filepath.Join(root, "gate.sh"), []byte(v1Gate), 0o755))
 	stdout, _, err = v1Exec(t, newMilestoneCmd, "close", "M1", "--cwd", root)
 	require.NoError(t, err)
 	require.Contains(t, stdout, "M1 status: done")
@@ -470,6 +477,9 @@ func TestV1Commands_RegressionRedAtBaseline(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, filepath.FromSlash("development/changes/add-wave/change.md")), []byte(v1ChangeMD), 0o644))
 	v1Git(t, root, "add", "-A")
 	v1Git(t, root, "commit", "-q", "-m", "plan, and a red suite")
+	// regression: is guarded (config.changed): a person accepts it.
+	_, _, err = v1Exec(t, newProjectCmd, "accept-config", "--by", "t", "--cwd", root)
+	require.NoError(t, err)
 
 	stdout, _, err := v1Exec(t, newChangeCmd, "start", "add-wave", "--cwd", root)
 	require.NoError(t, err)

@@ -29,8 +29,14 @@ func newProjectInitCmd() *cobra.Command {
 		Long: `Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten
 (one exception: the @AGENTS.md line appended to a CLAUDE.md that lacks it).
 
-  _apex/config.yaml                  project_name, development_folder (also read, never
-                                     written: regression, models, effort, and limits —
+  _apex/config.yaml                  project_name, development_folder, and the models:
+                                     defaults (D65) — apex-apply and apex-orchestrator
+                                     {model: sonnet, effort: high}; apex-review, apex-plan
+                                     and apex-change {model: opus, effort: medium} — written
+                                     only when the file does not exist: an existing config
+                                     is kept as it is, nothing merged in (also read, never
+                                     written: regression, effort, caps (see ape project
+                                     check --help), timeouts, and limits —
                                      budget: enforce|off (default off; see ape task --help),
                                      attempts: N red verifies per start (default 5; see
                                      ape change verify --help); commit: {subject,
@@ -208,8 +214,10 @@ func newProjectCheckCmd() *cobra.Command {
 		Long: `Validate the whole project and list every failure, not just the first.
 
   development/project.md   # <name>, ## Vision, ## Users, ## Scope, ## Out of scope,
-                           ## Constraints (each non-empty); ≤ 150 lines and ≤ 8 KB
-  AGENTS.md                present, ≤ 120 lines; CLAUDE.md (if any) has the line @AGENTS.md
+                           ## Constraints (each non-empty); ≤ caps.project_md (16 KB;
+                           no line cap)
+  AGENTS.md                present, ≤ caps.agents_md (16 KB; its lines are not measured);
+                           CLAUDE.md (if any) has the line @AGENTS.md
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
                            Gate, Goal; Budget a number when present; a "## Next"
                            section holds findings (` + "`ape next add`" + `), not a milestone. Its Delivery: line
@@ -229,7 +237,7 @@ func newProjectCheckCmd() *cobra.Command {
                            new dated brief)
   specs/<cap>/spec.md      # title, Purpose:, "### Requirement: <name>" each with ≥ 1
                            "#### Scenario:" and exactly one "- check: <cmd> | human-review"
-                           per scenario; ≤ 20 KB ("split into two capabilities")
+                           per scenario; ≤ caps.spec (24 KB; "split into two capabilities")
   decisions/NNNN-<slug>.md # ADR-NNNN: title, Status, Date, Context/Decision/Consequences,
                            Enforced by; an accepted one recorded in decisions.json
                            (decision.accepted-unrecorded: ` + "`ape decision accept`" + ` records it)
@@ -242,9 +250,21 @@ func newProjectCheckCmd() *cobra.Command {
   lift                     development/lift-disposition.md in a project whose v1 epoch is a
                            lift commit ("apex: lift …"): the disposition list awaits review
                            (lift.disposition-pending) until the person deletes the file
-  config                   since the v1 epoch, a commit that changed limits, checks, retries
-                           or requires in _apex/config.yaml and is not ape's (config.changed,
-                           D50) — a person reverts it or accepts it: ` + "`ape project accept-config`" + `
+  config                   since the v1 epoch, a commit that changed a guarded block of
+                           _apex/config.yaml — limits, checks, retries, requires, timeouts,
+                           caps, regression, commit, evidence, marketplaces, plugins, tools,
+                           human_review —
+                           and is not ape's (config.changed, D50) — a person reverts it or
+                           accepts it: ` + "`ape project accept-config`" + `
+  caps                     _apex/config.yaml caps: (D69) — sizes like 16KB, 1MiB or plain
+                           bytes, KB = KiB = 1024 bytes; default / hard ceiling:
+                             project_md   16 KB / 48 KB    agents_md    16 KB / 48 KB
+                             change_md    16 KB / 48 KB    design_md    16 KB / 48 KB
+                             spec         24 KB / 64 KB    (per capability)
+                             evidence_log  1 MiB / 16 MiB  (per check, evidence: archive)
+                           A value above its ceiling is caps.over-ceiling (action person):
+                           reported here, and change check, start, archive and abandon
+                           refuse until a person fixes it
   docs                     each path _apex/config.yaml docs: names (changelog, user_docs)
                            exists (docs.missing: create it, or fix the path)
   .claude/settings.json    ape's hooks registered as ` + "`ape project init`" + ` writes them:

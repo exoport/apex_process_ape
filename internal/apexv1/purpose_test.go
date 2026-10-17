@@ -18,7 +18,7 @@ func TestNewCapabilityPurpose(t *testing.T) {
 	updates, conflicts := p.MergeDelta(c)
 	require.Empty(t, conflicts)
 	require.Contains(t, updates[0].content, "# Cli\nPurpose: Lets people discover the greeter's options.\n")
-	require.Empty(t, ValidateSpec(updates[0].Path, updates[0].content))
+	require.Empty(t, ValidateSpec(updates[0].Path, updates[0].content, DefaultCaps().Spec))
 
 	noPurpose := ParseChange("", changeDoc("add-cli", "cli",
 		"### ADDED [cli] Requirement: Help\nThe system SHALL print help.\n#### Scenario: h\n- check: true\n", "- T1 x — check: true\n"))

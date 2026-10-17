@@ -30,13 +30,14 @@ func TestModelSession(t *testing.T) {
 func TestApprovals_PersonOnly(t *testing.T) {
 	files := baseFiles()
 	files["development/roadmap.md"] = "# Roadmap\n\n## M1 — Skeleton\nStatus: proposed\nGate: ./gate.sh\nGoal: A greeter.\n"
+	files["gate.sh"] = "#!/bin/sh\nexit 1\n" // red, as a gate is at approval (D70 B)
 	p := fixture(t, files)
 	addChange(t, p, "fix-typo", strings.Replace(changeDoc("fix-typo", "greeting", "none — a typo", "- T1 fix — check: true"), "milestone: M1", "milestone: none", 1))
 	commitAll(t, p, "fix")
 	head := HeadSHA(ctx(), p.Root)
 	for _, k := range []string{"CLAUDECODE", "APE_SESSION"} {
 		t.Setenv(k, "1")
-		_, err := p.ApproveMilestone(ctx(), "M1", "ann")
+		_, err := p.ApproveMilestone(ctx(), "M1", "ann", nil)
 		ue, ok := errors.AsType[*UsageError](err)
 		require.True(t, ok, "%v", err)
 		require.Equal(t, CodePersonOnly, ue.Code)
@@ -46,7 +47,7 @@ func TestApprovals_PersonOnly(t *testing.T) {
 		t.Setenv(k, "")
 	}
 	require.Equal(t, head, HeadSHA(ctx(), p.Root), "nothing written")
-	_, err := p.ApproveMilestone(ctx(), "M1", "ann")
+	_, err := p.ApproveMilestone(ctx(), "M1", "ann", nil)
 	require.NoError(t, err)
 	_, err = p.ApproveFix(ctx(), "fix-typo", "ann")
 	require.NoError(t, err)

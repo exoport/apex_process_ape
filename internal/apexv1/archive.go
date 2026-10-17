@@ -282,6 +282,9 @@ func (p *Project) archivable(ctx context.Context, ci ChangeInfo, allowPendingHum
 	if err := checkPlanFrozen(ci); err != nil {
 		return nil, err
 	}
+	if err := p.requireChangeFits(ci, "archive"); err != nil {
+		return nil, err
+	}
 	// Acceptances recorded on the base (accepted.json, D52 Q18) count.
 	pending := p.withBaseAccepted(ctx, id, st).PendingHuman(ci.Doc.HumanTasks())
 	if len(pending) > 0 && !allowPendingHuman {
@@ -339,11 +342,12 @@ func (p *Project) planArchive(ci ChangeInfo) (updates []SpecUpdate, dest string,
 	if fileOrDirExists(dest) {
 		return nil, "", &ConflictError{Code: CodeFolderExists, Msg: "archive folder " + p.Rel(dest) + " already exists — nothing was written"}
 	}
+	specCap := p.caps().Spec
 	for _, u := range updates {
 		if u.Retired {
 			continue
 		}
-		if fs := ValidateSpec(u.Path, u.content); len(fs) > 0 {
+		if fs := ValidateSpec(u.Path, u.content, specCap); len(fs) > 0 {
 			return nil, "", &FailError{Code: "archive.spec-invalid", Msg: "merged spec " + u.Path + " would not pass `ape project check` — nothing was written", Findings: fs}
 		}
 	}
@@ -496,6 +500,9 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 	}
 	ci, err := p.requireChange(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := p.requireChangeFits(ci, "abandon"); err != nil {
 		return nil, err
 	}
 	if cur := p.HeadChange(ctx); cur != "" && cur != id && ci.Branch != "" {

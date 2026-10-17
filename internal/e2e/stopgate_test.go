@@ -114,7 +114,8 @@ func stopHookRun(t *testing.T, ape string, dropSettingsHooks bool) {
 	sh(ape, "project", "init")
 	require.NoError(t, writeFile(filepath.Join(project, "development", "project.md"),
 		"# G\n## Vision\nv\n## Users\nu\n## Scope\ns\n## Out of scope\no\n## Constraints\nc\n"))
-	sh(ape, "milestone", "new", "Skeleton", "--gate", "./wave.sh", "--goal", "waves")
+	require.NoError(t, writeWaveGate(project))
+	sh(ape, "milestone", "new", "Skeleton", "--gate", "./gate.sh", "--goal", "waves")
 	sh(ape, "milestone", "approve", "M1", "--by", "test")
 	sh(ape, "change", "new", "add-wave", "--milestone", "M1", "--touches", "greeting")
 	require.NoError(t, writeFile(filepath.Join(project, "development", "changes", "add-wave", "change.md"), v1Change))

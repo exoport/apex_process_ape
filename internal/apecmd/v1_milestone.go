@@ -51,6 +51,8 @@ func newMilestoneNewCmd() *cobra.Command {
 command, the budget (USD list-price equivalent, when given) and a Goal: line. The id is
 the next free M<n>. Write the Goal paragraph and the Out of scope bullets afterwards
 (or pass --goal); the Status: line is ape's. Committed as "apex: <M> proposed".
+The gate's scripts must exist, and the gate must run red, before a person approves it
+(D70 B: ` + "`ape milestone approve --help`" + `).
 
 Refused on a change branch (see ` + "`ape milestone --help`" + `).
 
@@ -111,6 +113,24 @@ that the gate does not run as a script, are not drift. Changes can start only un
 approved milestone; gate and close refuse a gate that differs from the approved one.
 Committed together as "apex: <M> approved".
 
+Before it records anything, approve runs the gate once against the current tree (D70 B),
+synchronously, under timeouts.gate (default 30m), with progress lines on stderr. A new
+gate must run and be red — it is red until the milestone's work is done:
+  exit 0                                  refused, milestone.gate-green (action replan):
+                                          a green gate proves nothing the milestone adds
+  a gate file missing (a script the gate  refused, milestone.gate-broken (action replan)
+  runs, as above), a shell gate file that
+  fails ` + "`bash -n`" + `, exit 126 or 127, a
+  requires: entry missing, or a timeout
+  any other exit                          red: approved, and the run recorded in the
+                                          approval as self_check {at, sha, exit, secs, log,
+                                          output_sha256}; its full output is
+                                          _apex/state/logs/gate-<M>-approve.log
+A refusal writes nothing and its message ends with the gate's last output lines. So a gate
+whose script the milestone's work would write cannot be approved: the script exists at
+approval and fails until the work is done (test -x ./bin/app || exit 1, not a bare
+./bin/app, which exits 127). A re-approval runs the same check.
+
 Approving an approved milestone records the approval again — "apex: <M> re-approved", the
 Status line kept as it was (the milestone's spend counts from it) — when ape holds no
 record of it, its gate changed since, it runs a gate file the record does not hold (created
@@ -122,8 +142,8 @@ Only a person approves (D47 Q6): refused in a model session — APE_SESSION or C
 set, which includes a ` + "`!`" + ` line inside Claude Code — with exit 2, code
 session.person-only. Run it from a plain terminal.
 
-Exit codes: 0 ok · 1 no such milestone, done, malformed (Gate/Goal missing), or HEAD on a
-change branch · 2 usage, or a model session.`,
+Exit codes: 0 ok · 1 no such milestone, done, malformed (Gate/Goal missing), the gate green
+or broken, or HEAD on a change branch · 2 usage, or a model session.`,
 		Example: "  ape milestone approve M1 --by eval",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -134,7 +154,7 @@ change branch · 2 usage, or a model session.`,
 			if err := v1RequireInit(cmd, &f, p); err != nil {
 				return err
 			}
-			m, err := p.ApproveMilestone(cmd.Context(), args[0], by)
+			m, err := p.ApproveMilestone(cmd.Context(), args[0], by, cmd.ErrOrStderr())
 			if err != nil {
 				return v1Fail(cmd, &f, err, nil)
 			}
@@ -251,8 +271,8 @@ gate changed since the approval (H2). ape records the close in milestones.json (
 With "evidence: archive" in _apex/config.yaml (H23; default off), a green close writes the
 gate run's evidence to development/archive/milestones/<M>/evidence/ — one file per check
 (the gate command, every spec scenario, the regression command): command, exit, duration,
-output sha256 and the output, capped at 256 KB (head and tail kept, the full log named by
-path and sha256) — plus accept-red.json when milestones.json records an accept_red for
+output sha256 and the output, capped at caps.evidence_log, default 1 MiB (head and tail
+kept, the full log named by path and sha256) — plus accept-red.json when milestones.json records an accept_red for
 <M>; committed with the close record (JSON "evidence").
 
 Changes in flight refuse with milestone.changes-in-flight, action apply — or person when

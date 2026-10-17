@@ -59,6 +59,9 @@ tools:
     - {name: perf, skill: perf-lens, when: "hot paths"}
 `)...), 0o644))
 	v1Git(t, root, "commit", "-qam", "config")
+	// marketplaces, plugins and tools are guarded: the person accepts them.
+	_, _, err = v1Exec(t, newProjectCmd, "accept-config", "--by", "ann", "--cwd", root)
+	require.NoError(t, err)
 
 	stdout, stderr, err := v1Exec(t, newPluginsCmd, "sync", "--cwd", root, "--json")
 	require.NoError(t, err, stderr)
@@ -138,6 +141,9 @@ tools:
 	skill := filepath.Join(root, ".claude", "skills", "perf-lens", "SKILL.md")
 	require.NoError(t, os.MkdirAll(filepath.Dir(skill), 0o755))
 	require.NoError(t, os.WriteFile(skill, []byte("---\nname: perf-lens\ndescription: p\n---\n"), 0o644))
+	v1Git(t, root, "commit", "-qam", "allow mcp")
+	_, _, err = v1Exec(t, newProjectCmd, "accept-config", "--by", "ann", "--cwd", root)
+	require.NoError(t, err)
 	stdout, stderr, err = v1Exec(t, newProjectCmd, "check", "--cwd", root)
 	require.NoError(t, err, "stdout: %s\nstderr: %s", stdout, stderr)
 }
