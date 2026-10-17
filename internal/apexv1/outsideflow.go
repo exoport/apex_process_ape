@@ -12,6 +12,12 @@ import (
 // since the last archive squash, else since the v1 epoch (the newest
 // `apex: project init` or `apex: lift` commit; D47 Q5 exempts everything
 // before it). Shown, never failed: v1 has no warning tier.
+//
+// One more exemption: apex-release's commit (`release: <version>`, trailer
+// `Release: <version>`) is the person-reviewed release record, made on the
+// base outside any change. It is not outside the flow when the only code
+// path it touches is the changelog (docs.changelog, else CHANGELOG.md). A
+// release commit that touches anything else is listed like any other.
 
 // OutsideFlow is one such commit.
 type OutsideFlow struct {
@@ -47,7 +53,7 @@ func (p *Project) v1Epoch(ctx context.Context, rev string) string {
 
 // outsideFlowFields are a log record's fields: sha, subject, Change
 // trailer, files.
-const outsideFlowFields = 4
+const outsideFlowFields = 5
 
 // outsideFlow lists base's commits outside the change flow, newest first.
 func (p *Project) outsideFlow(ctx context.Context, base string) []OutsideFlow {
@@ -62,21 +68,22 @@ func (p *Project) outsideFlow(ctx context.Context, base string) []OutsideFlow {
 	}
 	// --relative: paths relative to the project, which may sit below the
 	// repository's root.
-	log, err := gitRaw(ctx, p.Root, "log", "--format=%x1e%H%x1f%s%x1f%(trailers:key=Change,valueonly,separator=%x2C)%x1f",
+	log, err := gitRaw(ctx, p.Root, "log", "--format=%x1e%H%x1f%s%x1f%(trailers:key=Change,valueonly,separator=%x2C)%x1f%(trailers:key=Release,valueonly,separator=%x2C)%x1f",
 		"--name-only", "--relative", epoch+".."+rev)
 	if err != nil {
 		return out
 	}
 	archive := p.devPrefix() + "archive/"
+	changelog := p.releaseChangelog()
 	for rec := range strings.SplitSeq(log, "\x1e") {
 		f := strings.SplitN(rec, "\x1f", outsideFlowFields)
 		if len(f) < outsideFlowFields {
 			continue
 		}
-		sha, subject, change := f[0], f[1], strings.TrimSpace(f[2])
+		sha, subject, change, release := f[0], f[1], strings.TrimSpace(f[2]), strings.TrimSpace(f[3])
 		var files []string
 		squash := false
-		for path := range strings.SplitSeq(f[3], "\n") {
+		for path := range strings.SplitSeq(f[4], "\n") {
 			path = strings.TrimSpace(path)
 			switch {
 			case path == "":
@@ -92,7 +99,19 @@ func (p *Project) outsideFlow(ctx context.Context, base string) []OutsideFlow {
 		if change != "" || strings.HasPrefix(subject, "apex:") || len(files) == 0 {
 			continue
 		}
+		if release != "" && len(files) == 1 && files[0] == changelog {
+			continue // apex-release's changelog commit
+		}
 		out = append(out, OutsideFlow{SHA: sha, Subject: subject, Files: limit(files, outsideFlowFiles)})
 	}
 	return out
+}
+
+// releaseChangelog is the changelog an apex-release commit may touch
+// without being outside the flow: docs.changelog, else CHANGELOG.md.
+func (p *Project) releaseChangelog() string {
+	if cfg, err := LoadConfig(p.Root); err == nil && cfg.Docs.Changelog != "" {
+		return strings.TrimPrefix(cfg.Docs.Changelog, "./")
+	}
+	return "CHANGELOG.md"
 }

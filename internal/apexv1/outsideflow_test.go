@@ -53,3 +53,25 @@ func TestStatus_OutsideFlow(t *testing.T) {
 	commitAll(t, p, "quick: tweak")
 	require.Equal(t, []string{"quick: tweak"}, outsideSubjects(p.Status()))
 }
+
+// framework Q32: apex-release's `release: <version>` commit, trailer
+// `Release:`, touching only the changelog is not outside the flow; one that
+// touches more, or a changelog commit without the trailer, is.
+func TestStatus_OutsideFlowReleaseCommit(t *testing.T) {
+	p := reviewedWave(t)
+	run(t, p.Root, "switch", "-q", "main")
+	run(t, p.Root, "commit", "-q", "--allow-empty", "-m", "apex: project init")
+
+	write(t, p, "CHANGELOG.md", "# Changelog\n\n## v0.1.0\n- wave\n")
+	run(t, p.Root, "add", "-A")
+	run(t, p.Root, "commit", "-q", "-m", "release: v0.1.0\n\nRelease: v0.1.0")
+	require.Empty(t, p.Status().OutsideFlow, "the release commit touches only the changelog")
+
+	write(t, p, "CHANGELOG.md", "# Changelog\n\n## v0.1.1\n")
+	write(t, p, "greet.sh", "#!/bin/sh\necho Hi\n")
+	run(t, p.Root, "add", "-A")
+	run(t, p.Root, "commit", "-q", "-m", "release: v0.1.1\n\nRelease: v0.1.1")
+	write(t, p, "CHANGELOG.md", "# Changelog\n\n## v0.1.2\n")
+	commitAll(t, p, "docs: changelog by hand")
+	require.Equal(t, []string{"docs: changelog by hand", "release: v0.1.1"}, outsideSubjects(p.Status()))
+}

@@ -414,7 +414,9 @@ func newStatusCmd() *cobra.Command {
     first; a count line in the human output): commits on that base branch since the last
     archive squash — else since the v1 epoch, the newest "apex: project init" or "apex:
     lift" commit — that touch paths outside development/ and _apex/, carry no "Change:"
-    trailer and have no "apex:" subject. Shown, never failed
+    trailer and have no "apex:" subject. An apex-release commit ("Release:" trailer)
+    that touches only the changelog (docs.changelog, else CHANGELOG.md) is not
+    listed. Shown, never failed
   - an archive in flight or interrupted by a crash (JSON "archive_journal", with
     "archive_running" when its process is alive; on the first line): status only reports
     it — the next writing command rolls a crashed one back (archive.interrupted; see
