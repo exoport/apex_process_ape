@@ -50,6 +50,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"usage.verdict", 2, "review: --verdict is not pass or block"},
 	{"review.nested", 2, "review --run inside a review session (depth 1)"},
 	{"project.not-initialized", 2, "no development folder: run `ape project init`"},
+	{"session.person-only", 2, "--allow-pending-human or --accept-red from a model session (APE_SESSION or CLAUDECODE set): only a person passes them, from a terminal (D45)"},
 	{"usage.unclassified", 2, "a usage error without a code (a bug: report it)"},
 
 	// failures (exit 1)
