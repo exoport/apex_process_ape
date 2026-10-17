@@ -27,15 +27,24 @@ func newProjectInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Create the development/ skeleton and merge ape's hooks (never overwrites)",
 		Long: `Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten
-(the exceptions: the @AGENTS.md line appended to a CLAUDE.md that lacks it, and the
-project-context line added to an AGENTS.md that lacks it).
+(the exceptions: the @AGENTS.md line appended to a CLAUDE.md that lacks it, the
+project-context line added to an AGENTS.md that lacks it, and the models: defaults
+appended to an _apex/config.yaml that has no models: block).
 
   _apex/config.yaml                  project_name, development_folder, and the models:
-                                     defaults (D65) — apex-apply and apex-orchestrator
-                                     {model: sonnet, effort: high}; apex-review, apex-plan
-                                     and apex-change {model: opus, effort: medium} — written
-                                     only when the file does not exist: an existing config
-                                     is kept as it is, nothing merged in (also read, never
+                                     defaults (D65, D93) — apex-apply, apex-orchestrator
+                                     and apex-release {model: sonnet, effort: high};
+                                     apex-review, apex-plan, apex-change and apex-accept
+                                     {model: opus, effort: medium}. An existing config
+                                     with no top-level models: gets that block appended,
+                                     its own text kept byte for byte (restored, with a
+                                     warning, if the result would not parse); the
+                                     amendment is committed with "apex: project init"
+                                     only when the config was tracked and clean before,
+                                     else left for you to commit. An existing models: is
+                                     left alone: init warns (stderr; JSON "warnings") for
+                                     each of those skills it has no entry for, which then
+                                     runs on claude's default model (also read, never
                                      written: regression, effort, caps (see ape project
                                      check --help), timeouts, and limits —
                                      budget: enforce|off (default off; see ape task --help),
@@ -83,7 +92,10 @@ by the one above; running init again changes nothing. ape task passes the same
 hooks inline as well, so its sessions have them even when settings.json does not.
 
 Everything init wrote (and settings.json when it merged hooks) is committed as
-"apex: project init"; files that existed before are not touched and not committed.
+"apex: project init", with the files it amended (CLAUDE.md, AGENTS.md, and the config
+when it was tracked and clean); other files that existed before are not touched and
+not committed. JSON: "amended" lists the files init changed, "amended_uncommitted"
+those it left out of the commit.
 
 Plugins: when _apex/config.yaml lists marketplaces/plugins, init installs each
 plugin at project scope through the claude plugin CLI (marketplace add, install,
@@ -208,13 +220,24 @@ Exit codes: 0 ok · 1 failed (e.g. settings.json is not valid JSON) · 2 usage.`
 				for _, k := range res.Kept {
 					fmt.Fprintln(w, "kept     "+k)
 				}
+				uncommitted := map[string]bool{}
+				for _, u := range res.AmendedUncommitted {
+					uncommitted[u] = true
+				}
 				for _, a := range res.Amended {
-					fmt.Fprintln(w, "amended  "+a+" ("+initAmendNote(a)+")")
+					note := initAmendNote(a)
+					if uncommitted[a] {
+						note += "; not committed: it was untracked or had uncommitted changes — commit it yourself"
+					}
+					fmt.Fprintln(w, "amended  "+a+" ("+note+")")
 				}
 				for _, h := range res.HooksAdded {
 					fmt.Fprintln(w, "hook     "+h)
 				}
 				fmt.Fprint(w, pluginOut.String())
+				for _, warn := range res.Warnings {
+					fmt.Fprintln(cmd.ErrOrStderr(), "warning: "+warn)
+				}
 				fmt.Fprintln(w, "scope: "+apexv1.Scope)
 				fmt.Fprintln(w, "next: write development/project.md, AGENTS.md and the roadmap (apex-plan), then `ape project check`")
 			})
@@ -232,6 +255,8 @@ func initAmendNote(rel string) string {
 		return "appended @AGENTS.md"
 	case "AGENTS.md":
 		return "added the project-context line"
+	case "_apex/config.yaml":
+		return "appended the models: defaults"
 	}
 	return "amended"
 }
