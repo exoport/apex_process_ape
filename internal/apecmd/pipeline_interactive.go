@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/exoport/apex_process_ape/internal/apexv1"
+
 	"github.com/exoport/apex_process_ape/internal/bridge/config"
 	"github.com/exoport/apex_process_ape/internal/bridge/ipc"
 	"github.com/exoport/apex_process_ape/internal/bridge/orchestrator"
@@ -873,6 +875,9 @@ func runWithInteractive(ctx context.Context, spec *pipeline.Spec, projectRoot st
 	core := newInteractiveCore(runCancel, getRunLog)
 	core.applyTimeouts(cfg)
 	core.setContracts(projectRoot)
+	// An APEX v1 long run (a detached verify, gate, …) the session waits
+	// on is the session working, however quiet it is (D58 2.3).
+	core.driver.SetWorkProbe(func() bool { return apexv1.AnyRunLive(projectRoot) })
 	if cfg.stopGate != nil {
 		core.driver.SetStopGate(cfg.stopGate.bounded(runCtx))
 	}
