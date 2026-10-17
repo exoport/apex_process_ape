@@ -18,16 +18,18 @@ type LiftGates struct {
 	Commands []string `json:"commands,omitempty"`
 	// Regression is the runnable commands joined with &&.
 	Regression string `json:"regression,omitempty"`
-	// NotRunnable are commands with a placeholder (<board>, {name}, …):
-	// listed in AGENTS.md, left out of the regression command.
+	// NotRunnable are commands with a placeholder (<board>, {name}, a lone
+	// …): listed in AGENTS.md, left out of the regression command.
 	NotRunnable []string `json:"not_runnable,omitempty"`
 }
 
 var (
-	codeSpanRe     = regexp.MustCompile("`([^`]+)`")
-	listItemRe     = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s+(.*)$`)
-	tableRowRe     = regexp.MustCompile(`^\s*\|.*\|\s*$`)
-	placeholderRe  = regexp.MustCompile(`<[^<>\s][^<>]*>|\{\{?[A-Za-z_][^{}]*\}?\}|\.{3}|…`)
+	codeSpanRe = regexp.MustCompile("`([^`]+)`")
+	listItemRe = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s+(.*)$`)
+	tableRowRe = regexp.MustCompile(`^\s*\|.*\|\s*$`)
+	// A placeholder is <…>, {…} (not a shell ${…}) or a lone … — never the
+	// ... of a Go package pattern like ./... (L3).
+	placeholderRe  = regexp.MustCompile(`<[^<>\s][^<>]*>|\{\{?[A-Za-z_][^{}]*\}?\}|(?:^|\s)(?:…|\.{3})(?:\s|$)`)
 	commandSpanRe  = regexp.MustCompile(`^(?:\./|[A-Za-z0-9_][A-Za-z0-9_.+-]*\s+\S)`)
 	compoundLineRe = regexp.MustCompile(`^\s*(?:for|while|until|if|case|do|done|then|else|elif|fi|esac|\{|\})\b`)
 	fileSpanRe     = regexp.MustCompile(`^[\w./-]+\.(?:md|ya?ml|json|txt|go|sh|py)$`)
@@ -61,7 +63,7 @@ func extractGates(file, doc string) LiftGates {
 		}
 		seen[c] = true
 		g.Commands = append(g.Commands, c)
-		if placeholderRe.MatchString(c) {
+		if hasPlaceholder(c) {
 			g.NotRunnable = append(g.NotRunnable, c)
 		}
 	}
@@ -73,6 +75,9 @@ func extractGates(file, doc string) LiftGates {
 		cont := ""
 		for _, l := range fence {
 			t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "$ "))
+			if !strings.HasPrefix(t, "#") {
+				t = stripShellComment(t)
+			}
 			if t == "" || strings.HasPrefix(t, "#") {
 				continue
 			}
@@ -116,7 +121,7 @@ func extractGates(file, doc string) LiftGates {
 			continue
 		}
 		for _, m := range codeSpanRe.FindAllStringSubmatch(l.Text, -1) {
-			c := strings.TrimSpace(m[1])
+			c := stripShellComment(strings.TrimSpace(m[1]))
 			if commandSpanRe.MatchString(c) && !fileSpanRe.MatchString(c) {
 				add(c)
 			}
@@ -124,12 +129,55 @@ func extractGates(file, doc string) LiftGates {
 	}
 	var run []string
 	for _, c := range g.Commands {
-		if !placeholderRe.MatchString(c) {
+		if !hasPlaceholder(c) {
 			run = append(run, c)
 		}
 	}
 	g.Regression = strings.Join(run, " && ")
 	return g
+}
+
+// hasPlaceholder reports a command that names something to fill in. A
+// {…} right after a $ is the shell's parameter expansion, not one.
+func hasPlaceholder(c string) bool {
+	for _, m := range placeholderRe.FindAllStringIndex(c, -1) {
+		if c[m[0]] == '{' && m[0] > 0 && c[m[0]-1] == '$' {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// stripShellComment drops a trailing ` # …` comment from one command
+// line: a # that starts a word outside quotes. Joined with &&, a kept
+// comment would swallow every command after it (L3: atomix's regression
+// ran `make smoke` alone).
+func stripShellComment(line string) string {
+	var quote byte
+	blank := false // the previous byte was unescaped, unquoted whitespace
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		wasBlank := blank
+		blank = false
+		switch {
+		case quote != 0:
+			if c == '\\' && quote == '"' {
+				i++
+			} else if c == quote {
+				quote = 0
+			}
+		case c == '\\':
+			i++
+		case c == '\'' || c == '"':
+			quote = c
+		case c == ' ' || c == '\t':
+			blank = true
+		case c == '#' && wasBlank:
+			return strings.TrimRight(line[:i], " \t")
+		}
+	}
+	return line
 }
 
 // withCommands puts the commands under AGENTS.md's `## Commands` heading

@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -40,6 +41,31 @@ type LiftOptions struct {
 	// a byte-identity perimeter, say. Deletions are not affected.
 	Exclude []string
 	Run     RunOptions
+	// Ape is the binary running the lift and the project's pin of ape,
+	// filled by the command (L1); nil leaves the pin alone.
+	Ape *LiftApe
+}
+
+// LiftApe is which ape runs the lift, and what happens to the project's
+// ape pin (.bingo/ape.mod): a v0 pin names an ape with no v1 commands, so
+// the lift moves it to the running version in its commit, or says the
+// one command that does.
+type LiftApe struct {
+	Version string `json:"version"`
+	Path    string `json:"path,omitempty"`
+	// PinFile is the project's pin, "" when it has none; Pinned the
+	// version it names.
+	PinFile string `json:"pin_file,omitempty"`
+	Pinned  string `json:"pinned,omitempty"`
+	// PinMoved: the lift commit moves the pin to Version.
+	PinMoved bool `json:"pin_moved,omitempty"`
+	// PinCommand is the one command that moves the pin, when the lift did
+	// not (or, in a dry run, will not).
+	PinCommand string `json:"pin_command,omitempty"`
+	PinNote    string `json:"pin_note,omitempty"`
+	// MovePin moves the pin in the working tree (bingo get); nil when the
+	// lift cannot, and PinNote says why.
+	MovePin func(ctx context.Context) error `json:"-"`
 }
 
 // LiftProblem is a pre-flight refusal a dry run reports.
@@ -71,14 +97,16 @@ type LiftCandidate struct {
 
 // LiftResult is the lift's report (and, with DryRun, its plan).
 type LiftResult struct {
-	Root          string `json:"root"`
-	DryRun        bool   `json:"dry_run"`
-	Version       string `json:"v0_version"`
-	VersionSource string `json:"v0_version_source"`
-	SkillsSource  string `json:"skills_source"`
-	Tag           string `json:"tag"`
-	TagSHA        string `json:"tag_sha,omitempty"`
-	Remote        string `json:"remote,omitempty"`
+	Root   string `json:"root"`
+	DryRun bool   `json:"dry_run"`
+	// Ape is the binary that runs the lift and the fate of the pin (L1).
+	Ape           *LiftApe `json:"ape,omitempty"`
+	Version       string   `json:"v0_version"`
+	VersionSource string   `json:"v0_version_source"`
+	SkillsSource  string   `json:"skills_source"`
+	Tag           string   `json:"tag"`
+	TagSHA        string   `json:"tag_sha,omitempty"`
+	Remote        string   `json:"remote,omitempty"`
 	// Preflight lists what a real run would refuse (dry run only).
 	Preflight []LiftProblem    `json:"preflight,omitempty"`
 	Deleted   []LiftDeletion   `json:"deleted"`
@@ -88,21 +116,54 @@ type LiftResult struct {
 	Changed   []LiftFileChange `json:"changed"`
 	// ADRsNotConverted are record-shaped files no id could be read from:
 	// left in place.
-	ADRsNotConverted    []string        `json:"adrs_not_converted,omitempty"`
-	UnresolvedCitations []LiftIDRef     `json:"unresolved_adr_citations,omitempty"`
-	IDsLeft             []LiftIDRef     `json:"ids_left,omitempty"`
-	Skipped             []LiftSkip      `json:"skipped,omitempty"`
-	DanglingRefs        []LiftIDRef     `json:"references_to_removed_paths,omitempty"`
-	Gates               LiftGates       `json:"gates"`
-	Candidates          []LiftCandidate `json:"rule_candidates"`
-	Readings            []string        `json:"readings,omitempty"`
-	Disposition         string          `json:"disposition"`
-	Init                *InitResult     `json:"init,omitempty"`
-	CommitMessage       string          `json:"commit_message"`
-	Commit              string          `json:"commit,omitempty"`
-	Regression          *CheckResult    `json:"regression,omitempty"`
-	RegressionNote      string          `json:"regression_note,omitempty"`
+	ADRsNotConverted    []string    `json:"adrs_not_converted,omitempty"`
+	UnresolvedCitations []LiftIDRef `json:"unresolved_adr_citations,omitempty"`
+	IDsLeft             []LiftIDRef `json:"ids_left,omitempty"`
+	Skipped             []LiftSkip  `json:"skipped,omitempty"`
+	// GoUnformatted are edited Go files that were not gofmt-clean at the
+	// tag: their edit is not formatted either (L5).
+	GoUnformatted []string    `json:"go_not_formatted,omitempty"`
+	DanglingRefs  []LiftIDRef `json:"references_to_removed_paths,omitempty"`
+	// Hashed are edited files a test, CI script or lock file seems to pin
+	// the bytes of: a perimeter to --exclude before lifting (L6).
+	Hashed      []LiftHashed    `json:"edited_but_hashed,omitempty"`
+	Gates       LiftGates       `json:"gates"`
+	Candidates  []LiftCandidate `json:"rule_candidates"`
+	Readings    []string        `json:"readings,omitempty"`
+	Disposition string          `json:"disposition"`
+	// Report is the disposition's full lists, as JSON (L11).
+	Report        string       `json:"report"`
+	Init          *InitResult  `json:"init,omitempty"`
+	CommitMessage string       `json:"commit_message"`
+	Commit        string       `json:"commit,omitempty"`
+	Regression    *CheckResult `json:"regression,omitempty"`
+	// RegressionAtTag is the same command run at the tag, before anything
+	// is written: the baseline that tells a pre-existing red from one the
+	// lift caused (L4).
+	RegressionAtTag *CheckResult `json:"regression_at_tag,omitempty"`
+	// RegressionVerdict is one of the LiftRegression* values.
+	RegressionVerdict string `json:"regression_verdict,omitempty"`
+	RegressionNote    string `json:"regression_note,omitempty"`
 }
+
+// The lift's regression verdicts: the command at the lift commit judged
+// against the same command at the tag (L4).
+const (
+	LiftRegressionGreen = "green"
+	// LiftRegressionRedAtTag: red at the tag too — pre-existing, for
+	// apex-plan to roadmap.
+	LiftRegressionRedAtTag = "red-at-tag"
+	// LiftRegressionRedAfterLift: green at the tag, red at the lift
+	// commit — the lift broke it, a lift failure for the person.
+	LiftRegressionRedAfterLift = "red-after-lift"
+	// LiftRegressionCannotRun: exit 126 or 127 at the lift commit as at
+	// the tag — a tool it runs is missing or not executable here, which
+	// is not a red (D70 B).
+	LiftRegressionCannotRun = "cannot-run"
+	// LiftRegressionNoBaseline: red at the lift commit, and the run at
+	// the tag could not run, so nothing says whose red it is.
+	LiftRegressionNoBaseline = "red-no-baseline"
+)
 
 type lifter struct {
 	ctx    context.Context //nolint:containedctx // a lifter lives for one Lift call and carries that call's ctx
@@ -123,6 +184,9 @@ type lifter struct {
 	// the ADR folder it could not convert (kept).
 	deletes []string
 	keepADR map[string]bool
+	// untracked are the manifest's v0 skill folders git does not track:
+	// removed from the working tree after the commit (L2).
+	untracked []string
 	// texts caches the tracked text files read for the plan.
 	texts map[string]string
 	files []string
@@ -151,7 +215,7 @@ func Lift(ctx context.Context, root string, opt LiftOptions) (*LiftResult, error
 		return nil, err
 	}
 	lf := &lifter{ctx: ctx, root: abs, opt: opt, writes: map[string]string{}, keepADR: map[string]bool{}, texts: map[string]string{}, dirty: map[string]bool{}}
-	lf.res = &LiftResult{Root: abs, DryRun: opt.DryRun, Tag: LiftTag}
+	lf.res = &LiftResult{Root: abs, DryRun: opt.DryRun, Tag: LiftTag, Ape: opt.Ape}
 	for _, g := range opt.Exclude {
 		re, err := globRegexp(g)
 		if err != nil {
@@ -181,6 +245,12 @@ func Lift(ctx context.Context, root string, opt LiftOptions) (*LiftResult, error
 	}
 	if err := lf.plan(); err != nil {
 		return nil, err
+	}
+	if fe := lf.ignoredWrites(); fe != nil {
+		if !opt.DryRun {
+			return nil, fe
+		}
+		lf.res.Preflight = append(lf.res.Preflight, LiftProblem{Code: fe.Code, Message: fe.Msg})
 	}
 	if opt.DryRun {
 		return lf.res, nil
@@ -273,16 +343,19 @@ func (lf *lifter) preflight() []*FailError {
 			" — commit or stash them (on a branch of their own if they are work in flight), then tag and lift"})
 	}
 
+	// Every problem is reported, not only the first (L14): a dry run is
+	// the person's one look before the real run.
 	tagSHA, err := git(lf.ctx, lf.root, "rev-parse", "-q", "--verify", "refs/tags/"+LiftTag+"^{commit}")
 	if err != nil || tagSHA == "" {
-		return append(out, &FailError{Code: "lift.no-tag", Msg: "no tag " + LiftTag + " — the tag is the archive of everything the lift deletes: " +
+		tagSHA = ""
+		out = append(out, &FailError{Code: "lift.no-tag", Msg: "no tag " + LiftTag + " — the tag is the archive of everything the lift deletes: " +
 			"`git tag -a " + LiftTag + " -m \"APEX v0 final\"` on this commit, push it, then lift"})
-	}
-	lf.res.TagSHA = tagSHA
-	if head := HeadSHA(lf.ctx, lf.root); head != tagSHA {
-		out = append(out, &FailError{Code: "lift.tag-not-head", Msg: LiftTag + " is " + short(tagSHA) + ", HEAD is " + short(head) +
-			" — the lift starts from the tagged commit: check it out, or (a person's call) move the tag to HEAD and push it again"})
-		return out
+	} else {
+		lf.res.TagSHA = tagSHA
+		if head := HeadSHA(lf.ctx, lf.root); head != tagSHA {
+			out = append(out, &FailError{Code: "lift.tag-not-head", Msg: LiftTag + " is " + short(tagSHA) + ", HEAD is " + short(head) +
+				" — the lift starts from the tagged commit: check it out, or (a person's call) move the tag to HEAD and push it again"})
+		}
 	}
 	branch := CurrentBranch(lf.ctx, lf.root)
 	remote := ""
@@ -298,6 +371,9 @@ func (lf *lifter) preflight() []*FailError {
 	if err != nil {
 		return append(out, &FailError{Code: "lift.remote-unreachable", Msg: "git ls-remote " + remote + ": " + err.Error() +
 			" — reach the remote (network, credentials), then lift again"})
+	}
+	if tagSHA == "" {
+		return out
 	}
 	remoteSHA, peeled := "", ""
 	for line := range strings.SplitSeq(ls, "\n") {
@@ -322,6 +398,39 @@ func (lf *lifter) preflight() []*FailError {
 			" — the archive must be the commit being lifted: a person resolves which is right, then pushes it"})
 	}
 	return out
+}
+
+// ignoredWrites is the pre-flight check a real lift used to fail on after
+// a passing dry run (L2, mdpdf and pdfa): a path the lift commits that git
+// ignores. `git add` refuses it, and the lift stopped half-staged. Above
+// all .claude/settings.json, where the v1 hooks go: an ignored .claude/
+// would also keep them from every other checkout. Tracked paths are never
+// ignored, so only the ones the lift creates count.
+func (lf *lifter) ignoredWrites() *FailError {
+	p := &Project{Root: lf.root, DevRel: lf.devRel}
+	files := []string{p.SettingsJSON(), p.ProjectMD(), p.RoadmapMD(), p.AgentsMD(), p.ClaudeMD(), p.StateGitignore(), p.decisionsJSON()}
+	dirs := []string{p.SpecsDir(), p.ChangesDir(), p.ArchiveDir(), p.DecisionsDir(), p.BriefsDir()}
+	paths := make([]string, 0, len(files)+len(dirs)+len(lf.writes))
+	for _, f := range files {
+		paths = append(paths, p.Rel(f))
+	}
+	for _, d := range dirs {
+		paths = append(paths, p.Rel(filepath.Join(d, ".gitkeep")))
+	}
+	for rel := range lf.writes {
+		paths = append(paths, rel)
+	}
+	sort.Strings(paths)
+	ignored := gitIgnored(lf.ctx, lf.root, false, uniqueStrings(paths)...)
+	if len(ignored) == 0 {
+		return nil
+	}
+	fix := "un-ignore them"
+	if slices.Contains(ignored, ".claude/settings.json") {
+		fix = "un-ignore them — for .claude/, `.claude/*` and `!.claude/settings.json` in .gitignore, which also shares the v1 hooks with every checkout"
+	}
+	return &FailError{Code: CodeClaudeIgnored, Msg: "git ignores what the lift commits: " + strings.Join(ignored, ", ") +
+		", so `git add` would refuse it mid-lift — " + fix + "; commit that, move " + LiftTag + " to it and push the tag, then lift"}
 }
 
 // excluded reports a path --exclude names.
@@ -423,6 +532,9 @@ func (lf *lifter) plan() error {
 			lf.res.Deleted = append(lf.res.Deleted, LiftDeletion{Path: p, Family: f.Name})
 		}
 	}
+	for _, s := range lf.untracked {
+		lf.res.Deleted = append(lf.res.Deleted, LiftDeletion{Path: s, Family: "v0 skills", Untracked: true})
+	}
 	lf.res.SkillsSource = lf.layout.SkillsSource
 	lf.listKeptApex()
 
@@ -505,8 +617,8 @@ func (lf *lifter) plan() error {
 		if first, ok := dups[i]; ok {
 			la.Gaps = append(la.Gaps, "a second v0 record with id "+la.Old+": citations of that id were rewritten to "+first)
 		}
-		for _, n := range la.unresolved {
-			lf.res.UnresolvedCitations = append(lf.res.UnresolvedCitations, LiftIDRef{File: la.Path, Text: "ADR-" + fmtNum4(n), Where: "decision"})
+		for _, u := range la.unresolved {
+			lf.res.UnresolvedCitations = append(lf.res.UnresolvedCitations, LiftIDRef{File: la.Path, Text: u, Where: "decision"})
 		}
 		lf.writes[la.Path] = la.doc
 		lf.res.ADRs = append(lf.res.ADRs, la)
@@ -544,6 +656,20 @@ func (lf *lifter) plan() error {
 				}
 				continue
 			}
+			if lang == langGo && ed.New != src {
+				out, why := gofmtLifted(src, ed.New)
+				switch {
+				case why != "":
+					if n, a := len(vocab.spans(src)), len(citedADRs(src)); n+a > 0 {
+						lf.res.Skipped = append(lf.res.Skipped, LiftSkip{File: rel, Reason: "go: " + why + ": left unedited", IDs: n, ADRCitations: a})
+					}
+					continue
+				case out == "":
+					lf.res.GoUnformatted = append(lf.res.GoUnformatted, rel)
+				default:
+					ed.New = out
+				}
+			}
 			if ed.New != src {
 				lf.writes[rel] = ed.New
 				lf.res.Changed = append(lf.res.Changed, LiftFileChange{File: rel, IDsRemoved: ed.IDsRemoved, ADRsRewritten: ed.ADRsRewritten})
@@ -578,8 +704,11 @@ func (lf *lifter) plan() error {
 	lf.res.Candidates = lf.candidates()
 	lf.res.Readings = lf.readings()
 	lf.res.DanglingRefs = lf.dangling()
+	lf.res.Hashed = lf.hashed()
 	sort.Slice(lf.res.Changed, func(i, j int) bool { return lf.res.Changed[i].File < lf.res.Changed[j].File })
 	lf.res.Disposition = lf.devRel + "/" + LiftDisposition
+	lf.res.Report = lf.devRel + "/" + LiftReport
+	lf.writes[lf.res.Report] = lf.report()
 	lf.writes[lf.res.Disposition] = lf.disposition()
 	lf.res.CommitMessage = lf.commitMessage()
 	return nil
@@ -598,18 +727,20 @@ func intList(set map[int]bool) string {
 	return strings.Join(out, ", ")
 }
 
-func (lf *lifter) unresolvedIn(rel, src string, nums []int) {
-	if len(nums) == 0 {
+func (lf *lifter) unresolvedIn(rel, src string, cites []string) {
+	if len(cites) == 0 {
 		return
 	}
-	want := map[int]bool{}
-	for _, n := range nums {
-		want[n] = true
+	want := map[string]bool{}
+	for _, c := range cites {
+		want[c] = true
 	}
 	for i, l := range strings.Split(src, "\n") {
-		for _, n := range citedADRs(l) {
-			if want[n] {
-				lf.res.UnresolvedCitations = append(lf.res.UnresolvedCitations, LiftIDRef{File: rel, Line: i + 1, Text: "ADR-" + fmtNum4(n), Where: "docs"})
+		for _, m := range adrCiteRe.FindAllStringSubmatch(l, -1) {
+			for p := range strings.SplitSeq(m[1]+m[2], "/") {
+				if p != "" && want["ADR-"+p] {
+					lf.res.UnresolvedCitations = append(lf.res.UnresolvedCitations, LiftIDRef{File: rel, Line: i + 1, Text: "ADR-" + p, Where: "docs"})
+				}
 			}
 		}
 	}
@@ -804,6 +935,11 @@ func (lf *lifter) readings() []string {
 
 func (lf *lifter) apply() error {
 	ctx := lf.ctx
+	tagLog, cleanup, err := lf.regressionAtTag()
+	defer cleanup()
+	if err != nil {
+		return err
+	}
 	pathsFile, err := os.CreateTemp("", "ape-lift-paths-*")
 	if err != nil {
 		return err
@@ -864,6 +1000,9 @@ func (lf *lifter) apply() error {
 		}
 		commit = append(commit, "AGENTS.md")
 	}
+	if lf.movePin() {
+		commit = append(commit, ".bingo")
+	}
 	if err := recordLiftedDecisions(p, lf.res.ADRs); err != nil {
 		return err
 	}
@@ -895,25 +1034,126 @@ func (lf *lifter) apply() error {
 		return &FailError{Code: CodeCommitFailed, Msg: "the lift commit failed: " + err.Error() + " — `git reset --hard` restores the tree; fix the cause (identity, lock), then lift again"}
 	}
 	lf.res.Commit = HeadSHA(ctx, lf.root)
+	if err := lf.removeUntracked(); err != nil {
+		return err
+	}
+	lf.liftRegression(p, tagLog)
+	return nil
+}
 
-	// The regression command, once, at the lift commit: the baseline red
-	// gates are judged against (backlog 37). A red run is recorded, not a
-	// failure of the lift.
+// liftRegression runs the regression command at the lift commit and
+// judges it against its run at the tag: the baseline red gates are
+// judged against (backlog 37), and the one way to tell a red the lift
+// caused from one it found (L4).
+func (lf *lifter) liftRegression(p *Project, tagLog string) {
 	switch {
 	case lf.res.Gates.Regression == "":
 		lf.res.RegressionNote = "no regression command was extracted: apex-plan sets `regression:` in _apex/config.yaml"
+		return
 	case lf.opt.NoVerifyRun:
 		lf.res.RegressionNote = "not run (--no-verify-run)"
-	default:
-		r := p.runRegression(ctx, lf.res.Gates.Regression, p.LogDir("lift"), "", lf.opt.Run)
-		lf.res.Regression = &r
-		if r.Exit != 0 {
-			lf.res.RegressionNote = fmt.Sprintf("red at the lift commit (exit %d): a pre-existing failure for apex-plan to roadmap, not a lift failure; full output in %s", r.Exit, r.Log)
-		} else {
-			lf.res.RegressionNote = "green at the lift commit"
+		return
+	}
+	r := p.runRegression(lf.ctx, lf.res.Gates.Regression, p.LogDir("lift"), "", lf.opt.Run)
+	lf.res.Regression = &r
+	if t := lf.res.RegressionAtTag; t != nil && tagLog != "" {
+		dst := filepath.Join(p.LogDir("lift"), "regression-at-tag.log")
+		if err := os.Rename(tagLog, dst); err == nil {
+			t.Log = p.Rel(dst)
+		} else if data, rerr := os.ReadFile(tagLog); rerr == nil && os.WriteFile(dst, data, 0o600) == nil {
+			t.Log = p.Rel(dst)
+		}
+	}
+	lf.res.RegressionVerdict, lf.res.RegressionNote = judgeLiftRegression(lf.res.RegressionAtTag, &r)
+}
+
+// removeUntracked removes the manifest's v0 skills git never tracked (an
+// ignored .claude/, L2): installer-owned, so they go too, once the commit
+// stands.
+func (lf *lifter) removeUntracked() error {
+	for _, s := range lf.untracked {
+		if err := os.RemoveAll(filepath.Join(lf.root, filepath.FromSlash(s))); err != nil {
+			return &FailError{Code: CodeLiftWriteFailed, Msg: "removing the untracked v0 skill " + s + ": " + err.Error() + " — the lift commit stands; remove the folder by hand"}
 		}
 	}
 	return nil
+}
+
+// regressionAtTag runs the regression command at the tag, first, before
+// anything is written: HEAD is the tag (pre-flight) and the tree is
+// clean. Its log stays outside the tree until the lift's state folder
+// exists; cleanup removes it. No command, or --no-verify-run: nothing.
+func (lf *lifter) regressionAtTag() (logPath string, cleanup func(), err error) {
+	cleanup = func() {}
+	if lf.res.Gates.Regression == "" || lf.opt.NoVerifyRun {
+		return "", cleanup, nil
+	}
+	tmp, err := os.MkdirTemp("", "ape-lift-tag-*")
+	if err != nil {
+		return "", cleanup, err
+	}
+	cleanup = func() { _ = os.RemoveAll(tmp) }
+	logPath = filepath.Join(tmp, "regression-at-tag.log")
+	p := &Project{Root: lf.root, DevRel: lf.devRel}
+	progressf(lf.opt.Run.Progress, "%s regression at %s started: %s", Stamp(), LiftTag, lf.res.Gates.Regression)
+	r := p.runWithRetries(lf.ctx, &PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: lf.res.Gates.Regression}, logPath,
+		Timeouts{}.Limits(KindRegression, lf.opt.Run.Timeout), nil, 0, p.isWorkTree(lf.ctx))
+	r.Task, r.Kind = regressionRef, KindRegression
+	lf.res.RegressionAtTag = &r
+	if lf.ctx.Err() != nil {
+		return "", cleanup, &FailError{Code: CodeRunInterrupted, Msg: "interrupted while the regression ran at " + LiftTag + " — nothing was written; lift again"}
+	}
+	return logPath, cleanup, nil
+}
+
+// movePin moves the project's ape pin to the running version (L1), and
+// reports whether .bingo/ goes in the lift commit. When bingo fails, .bingo/
+// goes back to the tag's and the note names the command.
+func (lf *lifter) movePin() bool {
+	a := lf.res.Ape
+	if a == nil || a.MovePin == nil {
+		return false
+	}
+	to := "v" + strings.TrimPrefix(a.Version, "v")
+	if err := a.MovePin(lf.ctx); err != nil {
+		// bingo may have half-written .bingo/: back to the tag's.
+		_, _ = git(lf.ctx, lf.root, "checkout", "--", ".bingo")
+		a.PinNote = "could not move the pin (" + err.Error() + "): after the lift, run " + a.PinCommand +
+			" and commit .bingo/; until then a bare ape here runs " + a.Pinned + ", so run v1 commands with APE_TOOLCHAIN=local"
+		return false
+	}
+	a.PinMoved = true
+	a.PinNote = "the lift commit moves " + a.PinFile + " from " + a.Pinned + " to " + to
+	lf.res.CommitMessage = strings.Replace(lf.res.CommitMessage, "- lays down the v1 skeleton",
+		"- moves the ape pin ("+a.PinFile+") from "+a.Pinned+" to "+to+"\n- lays down the v1 skeleton", 1)
+	return true
+}
+
+// judgeLiftRegression compares the regression command at the lift commit
+// (after) with its run at the tag (before, nil when it did not run).
+func judgeLiftRegression(before, after *CheckResult) (verdict, note string) {
+	cannotRun := func(r *CheckResult) bool { return r != nil && (r.Exit == 126 || r.Exit == 127) }
+	tag := "not run"
+	if before != nil {
+		tag = fmt.Sprintf("exit %d", before.Exit)
+	}
+	switch {
+	case after.Exit == 0:
+		if before != nil && before.Exit != 0 {
+			return LiftRegressionGreen, fmt.Sprintf("green at the lift commit (red at %s, %s: check that run's log for a flaky test)", LiftTag, tag)
+		}
+		return LiftRegressionGreen, "green at the lift commit, as at " + LiftTag
+	case cannotRun(after) && (before == nil || before.Exit != 0):
+		return LiftRegressionCannotRun, fmt.Sprintf("cannot run here (exit %d at the lift commit, %s at %s): a command it runs is missing or not executable on this machine — not a red; run it where its tools are, or set `regression:` to what can run; output in %s", after.Exit, tag, LiftTag, after.Log)
+	case before == nil:
+		return LiftRegressionNoBaseline, fmt.Sprintf("red at the lift commit (exit %d), with no run at %s to compare: output in %s", after.Exit, LiftTag, after.Log)
+	case cannotRun(before):
+		return LiftRegressionNoBaseline, fmt.Sprintf("red at the lift commit (exit %d); at %s it could not run (%s), so nothing says whose red it is: output in %s", after.Exit, LiftTag, tag, after.Log)
+	case before.Exit != 0:
+		return LiftRegressionRedAtTag, fmt.Sprintf("red at the lift commit (exit %d) and at %s (%s): a pre-existing failure for apex-plan to roadmap, not a lift failure; output in %s and %s", after.Exit, LiftTag, tag, after.Log, before.Log)
+	default:
+		return LiftRegressionRedAfterLift, fmt.Sprintf("LIFT FAILURE: red at the lift commit (exit %d), green at %s — the lift broke it (an edited file a test or CI pins, a removed path code still reads); output in %s. Fix it in a commit of its own, or `git reset --hard %s` and lift again with --exclude", after.Exit, LiftTag, after.Log, LiftTag)
+	}
 }
 
 // liftWrite writes a file, keeping an existing file's mode (a script
@@ -971,7 +1211,7 @@ func (lf *lifter) commitMessage() string {
 		fmt.Fprintf(&b, "- carries %d gate command(s) from %s into AGENTS.md and regression:\n", len(r.Gates.Commands), r.Gates.Source)
 	}
 	b.WriteString("- lays down the v1 skeleton (ape project init --brownfield)\n")
-	fmt.Fprintf(&b, "- writes %s for apex-plan and the person\n", r.Disposition)
+	fmt.Fprintf(&b, "- writes %s for apex-plan and the person, its full lists in %s\n", r.Disposition, path.Base(r.Report))
 	if len(r.ADRs) > 0 {
 		b.WriteString("\nADRs, old -> new:\n")
 		for i := range r.ADRs {

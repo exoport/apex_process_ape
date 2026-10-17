@@ -31,8 +31,8 @@ type LiftADR struct {
 	Canon  bool     `json:"canon,omitempty"`
 	Gaps   []string `json:"gaps,omitempty"`
 	doc    string
-	// unresolved are ADR numbers the record cites that no ADR has.
-	unresolved []int
+	// unresolved are the ADR citations of the record that name no ADR.
+	unresolved []string
 }
 
 // v0ADR is one v0 ADR record as read.

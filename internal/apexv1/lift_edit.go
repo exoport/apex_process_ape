@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"go/format"
 	"regexp"
 	"slices"
 	"strings"
@@ -26,7 +27,8 @@ type liftFileEdit struct {
 	IDsRemoved    int
 	ADRsRewritten int
 	Left          []LiftIDRef
-	// Unresolved are ADR numbers cited in comments that no ADR has.
+	// Unresolved are ADR citations in comments that name no ADR of the
+	// project's.
 	Unresolved []LiftIDRef
 }
 
@@ -128,9 +130,13 @@ func editComments(rel, src string, lang liftLang, vocab *liftVocab, adr *adrRewr
 			listIDs(s.Start, text, "directive")
 			continue
 		}
+		if isDataComment(text) {
+			listIDs(s.Start, text, "data comment")
+			continue
+		}
 		newText, emptied, nIDs, nADR, unresolved := cleanComment(text, s.Block, vocab, adr)
 		for _, u := range unresolved {
-			res.Unresolved = append(res.Unresolved, LiftIDRef{File: rel, Line: lineAt(src, s.Start), Text: "ADR-" + fmtNum4(u), Where: "comment"})
+			res.Unresolved = append(res.Unresolved, LiftIDRef{File: rel, Line: lineAt(src, s.Start), Text: u, Where: "comment"})
 		}
 		if newText == text && !emptied {
 			continue
@@ -196,12 +202,60 @@ func editComments(rel, src string, lang liftLang, vocab *liftVocab, adr *adrRewr
 	return res, nil
 }
 
+var (
+	// dataLeadRe is a comment line that opens with a lowercase key —
+	// "# owner: …", a commented-out setting; dataKeyRe one key: value
+	// field of a record.
+	dataLeadRe = regexp.MustCompile(`^[a-z][a-z0-9_.-]*:\s+\S`)
+	dataKeyRe  = regexp.MustCompile(`(?:^|[|,;]\s*)[A-Za-z][A-Za-z0-9_.-]*:\s+\S`)
+)
+
+// isDataComment reports a comment that carries data rather than prose:
+// a line opening with a lowercase key ("# pending: <signal> | owner: …",
+// which atomix's alert-pack test parses), or a record of two or more
+// key: value fields. Stripping an id from one leaves "owner: |" for its
+// reader, so the ids in it are listed, never stripped (L7).
+func isDataComment(text string) bool {
+	for l := range strings.SplitSeq(text, "\n") {
+		l = strings.TrimSpace(l)
+		l = strings.TrimSpace(strings.TrimLeft(l, "/#*-;!"))
+		if dataLeadRe.MatchString(l) || len(dataKeyRe.FindAllString(l, 3)) >= 2 && strings.ContainsAny(l, "|;") {
+			return true
+		}
+	}
+	return false
+}
+
+// gofmtLifted formats an edited Go file as gofmt would (L5): stripping an
+// id can leave a short line that the doc-comment rules read as a heading,
+// or an indent they read as a code block, and lint-gated projects went red
+// on exactly that. A file that was gofmt-clean at the tag comes back
+// formatted; one that was not is left as edited ("" and no reason), so the
+// lift does not reformat code it did not touch. why is set when the edit
+// does not format, or formatting changed the token stream: the file is
+// then left unedited, never written broken.
+func gofmtLifted(oldSrc, newSrc string) (out, why string) {
+	if was, err := format.Source([]byte(oldSrc)); err != nil || string(was) != oldSrc {
+		return "", ""
+	}
+	got, err := format.Source([]byte(newSrc))
+	if err != nil {
+		return "", "the edited file does not format (" + err.Error() + ")"
+	}
+	a, errA := goTokens(oldSrc)
+	b, errB := goTokens(string(got))
+	if errA != nil || errB != nil || !slices.Equal(a, b) {
+		return "", "formatting the edited file changed its token stream"
+	}
+	return string(got), ""
+}
+
 // identWordRe is an identifier-shaped word.
 var identWordRe = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
 
 // cleanComment rewrites one comment: ADR citations renumbered, ids
 // stripped. emptied: nothing but ids was in it, and it goes.
-func cleanComment(text string, block bool, vocab *liftVocab, adr *adrRewriter) (out string, emptied bool, nIDs, nADR int, unresolved []int) {
+func cleanComment(text string, block bool, vocab *liftVocab, adr *adrRewriter) (out string, emptied bool, nIDs, nADR int, unresolved []string) {
 	cr := ""
 	if !block && strings.HasSuffix(text, "\r") {
 		text, cr = strings.TrimSuffix(text, "\r"), "\r"

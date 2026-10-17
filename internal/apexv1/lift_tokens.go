@@ -307,7 +307,11 @@ func tokenizeShell(src string) ([]tokSeg, error) {
 			end := lineEnd(src, i)
 			out = append(out, tokSeg{Kind: segComment, Start: i, End: end})
 			i = end
-		case c == '<' && strings.HasPrefix(src[i:], "<<") && !strings.HasPrefix(src[i:], "<<<"):
+		case strings.HasPrefix(src[i:], "<<<"):
+			// A here-string: its word follows on the same line. Skipping
+			// only its first < would read the rest as a heredoc (L10).
+			i += 3
+		case c == '<' && strings.HasPrefix(src[i:], "<<"):
 			h, j, ok := shellHeredocOp(src, i+2)
 			if ok {
 				pending = append(pending, h)

@@ -88,6 +88,12 @@ func TestEditComments_OtherLanguages(t *testing.T) {
 			"#!/bin/sh\n# Build it\necho \"# Story 3.2\"\ncat <<EOF\n# Story 3.2 stays\nEOF\nx=${y#Story 3.2}\n",
 		},
 		{
+			// L10: a here-string is not a heredoc (radix, tenax, atomix).
+			"shell here-string", langShell,
+			"read -r a b <<< \"${x}\" # Story 3.2: split it\ngrep -q y <<<\"$a\"\n# Epic 4: the rest\n",
+			"read -r a b <<< \"${x}\" # Split it\ngrep -q y <<<\"$a\"\n# The rest\n",
+		},
+		{
 			"shell continuation", langShell,
 			"run \\\n# Story 3.2\n  --flag\n",
 			"run \\\n# Story 3.2\n  --flag\n",
@@ -165,4 +171,71 @@ func TestEditComments_GoCRLF(t *testing.T) {
 	res, err := editComments("x.go", src, langGo, testVocab(), nil)
 	require.NoError(t, err)
 	require.Equal(t, "package x\r\n\r\n/* Why\r\n */\r\nvar s = `a\r\nb`\r\nvar y = 1\r\n", res.New)
+}
+
+// L7, from atomix: the alert pack's `# pending: <signal> | owner: <story
+// key> | supplies: …` comments are parsed by a test; stripping the key
+// left "owner: |". A data-shaped comment's ids are listed, never stripped.
+func TestEditComments_DataCommentsListedNotStripped(t *testing.T) {
+	v := testVocab()
+	src := "groups:\n" +
+		"  # pending: queue_depth | owner: Story 3.2 | supplies: alerts\n" +
+		"  # owner: Story 3.2\n" +
+		"  # Owner: x; Story: Story 3.2 | Area: alerts\n" +
+		"  - name: q # Story 3.2: the queue alert\n"
+	res, err := editComments("alerts.yaml", src, langYAML, v, nil)
+	require.NoError(t, err)
+	require.Equal(t, "groups:\n"+
+		"  # pending: queue_depth | owner: Story 3.2 | supplies: alerts\n"+
+		"  # owner: Story 3.2\n"+
+		"  # Owner: x; Story: Story 3.2 | Area: alerts\n"+
+		"  - name: q # The queue alert\n", res.New)
+	var data []string
+	for _, l := range res.Left {
+		if l.Where == "data comment" {
+			data = append(data, l.Text)
+		}
+	}
+	require.Equal(t, []string{"Story 3.2", "Story 3.2", "Story 3.2"}, data)
+
+	goSrc := "package x\n\n// pending: depth | owner: Story 3.2\nvar x = 1 // Note: Story 3.2 added it.\n"
+	res, err = editComments("x.go", goSrc, langGo, v, nil)
+	require.NoError(t, err)
+	require.Equal(t, "package x\n\n// pending: depth | owner: Story 3.2\nvar x = 1 // Note: added it.\n", res.New)
+}
+
+func TestIsDataComment(t *testing.T) {
+	for text, want := range map[string]bool{
+		"# pending: q | owner: 3-2":       true,
+		"// owner: Story 3.2":             true,
+		"/* a\n * replicas: 3\n */":       true,
+		"# Owner: a | Supplies: b":        true,
+		"// Note: Story 3.2 added it.":    false,
+		"// Story 3.2: retry":             false,
+		"// See http://x for Story 3.2":   false,
+		"# Retries: three; see Story 3.2": false,
+	} {
+		require.Equal(t, want, isDataComment(text), text)
+	}
+}
+
+// L5, from mdpdf: removing "Story 5.10: " left a short capitalised line
+// between blank comment lines, which gofmt reads as a heading; lint went
+// red on it. An edited Go file that was gofmt-clean at the tag comes back
+// formatted; one that was not is left as edited.
+func TestGofmtLifted(t *testing.T) {
+	v := testVocab()
+	src := "package x\n\n// Paginate splits the trace.\n//\n// Story 5.10: Automatic ECG Pagination\n//\n// More text.\nfunc Paginate() {}\n"
+	ed, err := editComments("x.go", src, langGo, v, nil)
+	require.NoError(t, err)
+	require.Contains(t, ed.New, "\n// Automatic ECG Pagination\n", "unformatted, gofmt would flag it")
+	out, why := gofmtLifted(src, ed.New)
+	require.Empty(t, why)
+	require.Equal(t, "package x\n\n// Paginate splits the trace.\n//\n// # Automatic ECG Pagination\n//\n// More text.\nfunc Paginate() {}\n", out)
+
+	unclean := "package x\n\n// Story 5.10: Automatic ECG Pagination\nfunc  Paginate() {}\n"
+	ed, err = editComments("x.go", unclean, langGo, v, nil)
+	require.NoError(t, err)
+	out, why = gofmtLifted(unclean, ed.New)
+	require.Empty(t, out+why, "not gofmt-clean at the tag: left as edited, not reformatted")
 }

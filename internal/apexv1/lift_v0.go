@@ -31,8 +31,10 @@ const (
 	// LiftDisposition is the file the lift writes for review, relative
 	// to the development folder (D47 Q4).
 	LiftDisposition = "lift-disposition.md"
-	frameworkYAML   = "_apex/framework.yaml"
-	configYAML      = "_apex/config.yaml"
+	// LiftReport holds the disposition's lists whole, beside it (L11).
+	LiftReport    = "lift-disposition.json"
+	frameworkYAML = "_apex/framework.yaml"
+	configYAML    = "_apex/config.yaml"
 	// v0SHALen is how much of the commit a v0 version was read from the
 	// report names.
 	v0SHALen = 12
@@ -193,6 +195,10 @@ type liftFamily struct {
 type LiftDeletion struct {
 	Path   string `json:"path"`
 	Family string `json:"family"`
+	// Untracked is a v0 skill folder the manifest lists that git does not
+	// track (an ignored .claude/, L2): removed from the working tree after
+	// the commit, and not archived by the tag.
+	Untracked bool `json:"untracked,omitempty"`
 }
 
 // v0Tables are the framework-owned files and folders a v0 install wrote
@@ -275,8 +281,11 @@ func (lf *lifter) families(ctx context.Context) []liftFamily {
 	// update`): a deletion git still has to record.
 	var skKeep []string
 	for _, s := range sk {
-		if lf.tracked(ctx, s) {
+		switch {
+		case lf.tracked(ctx, s):
 			skKeep = append(skKeep, s)
+		case !lf.dirtyAt(s) && dirExists(filepath.Join(lf.root, filepath.FromSlash(s))):
+			lf.untracked = append(lf.untracked, s)
 		}
 	}
 	if len(skKeep) > 0 {

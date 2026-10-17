@@ -86,3 +86,57 @@ func TestProjectLift_CLI(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "package main\n\n// Retry (ADR-0001).\nfunc main() {}\n", string(main))
 }
+
+// L1: which ape runs the lift, and what becomes of the project's pin.
+func TestLiftApe(t *testing.T) {
+	bingo := func() bool { return true }
+	noBingo := func() bool { return false }
+	root, _ := pinProject(t, "v0.9.0")
+
+	a := liftApe(root, "1.0.0-rc.3", "/bin/ape", true, bingo)
+	require.Equal(t, ".bingo/ape.mod", a.PinFile)
+	require.Equal(t, "v0.9.0", a.Pinned)
+	require.Equal(t, "bingo get github.com/exoport/apex_process_ape/cmd/ape@v1.0.0-rc.3", a.PinCommand)
+	require.Contains(t, a.PinNote, "the lift moves the pin from v0.9.0 to v1.0.0-rc.3")
+	require.Nil(t, a.MovePin, "a dry run moves nothing")
+
+	a = liftApe(root, "1.0.0", "/bin/ape", false, bingo)
+	require.NotNil(t, a.MovePin, "a release, with bingo: the lift moves it")
+
+	a = liftApe(root, "1.0.0", "/bin/ape", false, noBingo)
+	require.Nil(t, a.MovePin)
+	require.Contains(t, a.PinNote, "bingo is not on PATH")
+	require.Contains(t, a.PinNote, "APE_TOOLCHAIN=local")
+
+	a = liftApe(root, "0.10.1-0.20261017042934-7f19dc3a009e", "/bin/ape", false, bingo)
+	require.Nil(t, a.MovePin)
+	require.Contains(t, a.PinNote, "is no release a pin can name")
+	require.Equal(t, "bingo get github.com/exoport/apex_process_ape/cmd/ape@v0.10.1-0.20261017042934-7f19dc3a009e", a.PinCommand)
+
+	a = liftApe(root, "0.9.0", "/bin/ape", false, bingo)
+	require.Nil(t, a.MovePin)
+	require.Empty(t, a.PinCommand)
+	require.Equal(t, "the pin is this version already", a.PinNote)
+
+	a = liftApe(t.TempDir(), "1.0.0", "/bin/ape", false, bingo)
+	require.Empty(t, a.PinFile, "no pin")
+	require.Equal(t, "1.0.0", a.Version)
+	require.Equal(t, "/bin/ape", a.Path)
+}
+
+func TestProjectLift_SaysWhichApeRuns(t *testing.T) {
+	root := v0Repo(t)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".bingo"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".bingo", "ape.mod"),
+		[]byte("module _\n\ngo 1.27.0\n\nrequire github.com/exoport/apex_process_ape v0.9.0 // cmd/ape\n"), 0o644))
+	v1Git(t, root, "add", "-A")
+	v1Git(t, root, "commit", "-q", "-m", "pin")
+	stdout, _, err := v1Exec(t, newProjectCmd, "lift", "--dry-run", "--cwd", root)
+	require.NoError(t, err)
+	self, _ := os.Executable()
+	if r, rerr := filepath.EvalSymlinks(self); rerr == nil {
+		self = r
+	}
+	require.Contains(t, stdout, "ape       "+Version+" ("+self+") runs this lift — exempt from the project's ape pin\n")
+	require.Contains(t, stdout, "pin       .bingo/ape.mod pins v0.9.0: ")
+}

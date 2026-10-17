@@ -40,7 +40,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeStatusUnrecorded": CodeStatusUnrecorded, "CodeGateChanged": CodeGateChanged, "CodeDecisionUnrecorded": CodeDecisionUnrecorded,
 		"CodeAttemptsTotalExceeded": CodeAttemptsTotalExceeded, "CodeReplansExceeded": CodeReplansExceeded, "CodeBlocksExceeded": CodeBlocksExceeded,
 		"CodeChangeNotFound": CodeChangeNotFound, "CodeStateUnreadable": CodeStateUnreadable,
-		"CodeUnsupportedLayout": CodeUnsupportedLayout, "CodeTagNotPushed": CodeTagNotPushed, "CodeLiftWriteFailed": CodeLiftWriteFailed,
+		"CodeUnsupportedLayout": CodeUnsupportedLayout, "CodeTagNotPushed": CodeTagNotPushed, "CodeLiftWriteFailed": CodeLiftWriteFailed, "CodeClaudeIgnored": CodeClaudeIgnored,
 		"CodeCapsOverCeiling": CodeCapsOverCeiling, "CodeGateGreen": CodeGateGreen, "CodeGateBroken": CodeGateBroken,
 		"CodeNoSuchTask": CodeNoSuchTask, "CodeNoChangeMD": CodeNoChangeMD, "CodeDelegateInvalidConfig": CodeDelegateInvalidConfig,
 	}

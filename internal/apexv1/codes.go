@@ -25,6 +25,7 @@ const (
 	CodeUnsupportedLayout = "lift.unsupported-layout"
 	CodeTagNotPushed      = "lift.tag-not-pushed"
 	CodeLiftWriteFailed   = "lift.write-failed"
+	CodeClaudeIgnored     = "lift.claude-ignored"
 
 	CodeNoSuchTask            = "usage.no-such-task"
 	CodeNoChangeMD            = "change.no-change-md"
@@ -118,7 +119,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"git.branch-failed", 1, "stop", "creating, switching to, rebasing or deleting a branch failed, or the base branch is missing"},
 	{CodeBehindUpstream, 1, "person", "start (a new start, or a re-entry that catches up) and archive: the base branch is behind its upstream (the local remote-tracking ref; ape never fetches) — a person pulls (D45: one operator per checkout, local trunk)"},
 	{CodeArchiveInterrupted, 1, "retry", "a writing command found the journal of an archive that crashed (_apex/state/archive-journal.json) and rolled the checkout back to it — the base at its pre-archive sha, change/<id> at its recorded tip, checked out; the message says what was undone; archive again, then the command (H28)"},
-	{CodeRunInterrupted, 1, "retry", "a start, verify, archive, gate or close was interrupted (SIGTERM/SIGINT mid-check, or its run lock's process is gone without a result — killed, or the machine restarted): its checks were stopped and NOTHING was recorded — no attempt, no state commit, no gate run (D58 2.2); run the same command again"},
+	{CodeRunInterrupted, 1, "retry", "a start, verify, archive, gate, close or lift (its regression run at apex-v0-final) was interrupted (SIGTERM/SIGINT mid-check, or its run lock's process is gone without a result — killed, or the machine restarted): its checks were stopped and NOTHING was recorded — no attempt, no state commit, no gate run (D58 2.2); run the same command again"},
 	{"run.start-failed", 1, "retry", "start, verify, archive, gate, close: the detached worker could not be started (D58 2.3); nothing ran"},
 	{CodeHookFailed, 1, "apply", "archive: a project git hook (pre-commit, commit-msg; commit.hooks: run, the default) refused the squash commit; archive rolled back (the base unchanged, change/<id> checked out again) and the message carries the hook output's tail — fix it on the branch, verify, archive again"},
 	{"archive.spec-invalid", 1, "replan", "archive: the merged spec would fail project check (e.g. over its caps.spec cap)"},
@@ -155,6 +156,7 @@ var DiagnosticCodes = []CodeDoc{
 	{"lift.tag-not-head", 1, "person", "lift: apex-v0-final does not point at HEAD"},
 	{CodeTagNotPushed, 1, "person", "lift: the current branch has no upstream remote, or apex-v0-final is not on it, or points elsewhere there (git ls-remote)"},
 	{"lift.remote-unreachable", 1, "retry", "lift: git ls-remote against the upstream remote failed (network, credentials)"},
+	{CodeClaudeIgnored, 1, "person", "lift: git ignores a path the lift commits — .claude/settings.json (the v1 hooks) as a rule, under an ignored .claude/ — so git add would refuse it mid-lift; a person un-ignores it (.claude/* and !.claude/settings.json), commits, moves apex-v0-final to that commit and pushes it"},
 	{CodeLiftWriteFailed, 1, "stop", "lift: removing the v0 families or writing a file failed mid-lift; git reset --hard restores the tree"},
 	{CodeGitStatusFailed, 1, "stop", "git status could not be read"},
 	{"ape.below-floor", 1, "person", "ape task: the installed framework's _apex/ape-commands.yaml declares a min_ape_version above this ape (H1); no session starts — a person updates ape (the message carries the command)"},
@@ -212,7 +214,7 @@ var DiagnosticCodes = []CodeDoc{
 	// findings (exit 1, from project check / change check)
 	{"file.missing", 1, "person", "a required file is missing"},
 	{"layout.old-archive", 1, "person", "development/changes/archive/ exists (an older ape's archive): move its folders to development/archive/"},
-	{"lift.disposition-pending", 1, "person", "development/lift-disposition.md exists after a lift: apex-plan fills it, a fresh read-only session then the operator review it; the operator deletes it"},
+	{"lift.disposition-pending", 1, "person", "development/lift-disposition.md exists after a lift: apex-plan fills it, a fresh read-only session then the operator review it; the operator deletes it and lift-disposition.json"},
 	{"docs.missing", 1, "person", "a docs.changelog or docs.user_docs path in _apex/config.yaml does not exist (H21): create it, or fix the path"},
 	{"layout.old-state", 1, "person", "development/.apex/ exists (an older ape's state): move milestones.json and decisions.json to _apex/state/, delete it"},
 	{"project.too-big", 1, "person", "project.md over its caps.project_md cap (default 16 KB, ceiling 48 KB; no line cap, D69)"},

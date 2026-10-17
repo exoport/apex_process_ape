@@ -270,7 +270,7 @@ func (p *Project) liftDispositionFindings(ctx context.Context) []Finding {
 	if out, err := git(ctx, p.Root, "log", "-1", "--format=%h", "--grep=^"+LiftSubjectPrefix); err != nil || out == "" {
 		return nil
 	}
-	return []Finding{{File: p.Rel(path), Message: "the lift's disposition list awaits review: apex-plan fills it, a fresh read-only session reviews it, then the operator — delete the file when done"}}
+	return []Finding{{File: p.Rel(path), Message: "the lift's disposition list awaits review: apex-plan fills it, a fresh read-only session reviews it, then the operator — delete it and lift-disposition.json when done"}}
 }
 
 var adrSupersedesRe = regexp.MustCompile(`(?m)^Supersedes:[ \t]*(ADR-\d{4})[ \t]*$`)

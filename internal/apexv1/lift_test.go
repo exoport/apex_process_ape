@@ -181,6 +181,8 @@ func liftFiles() map[string]string {
 		"development/planning/product-brief.md":                  "# Brief\n",
 		"development/planning/sprint-change-proposal-2026-09.md": "# Proposal\n",
 		"main.go":         liftMainGo,
+		"pages.go":        "package main\n\n// Pages splits the trace.\n//\n// Story 1.1: Automatic Pagination\n//\n// More text.\nfunc Pages() {}\n",
+		"messy.go":        "package main\n\n// Story 1.1: messy\nfunc  messy() {}\n",
 		"check.sh":        "#!/bin/sh\n# Story 1.1: the unit check\ntest -f main.go # Epic 1\n",
 		"tool.py":         "# DW-42: retry\ndef story_1_1():\n    return '# Story 1.1'  # see Story 1.1\n",
 		"docs/guide.md":   "Read ADR-0004 and development/governance/adrs/adr-0006_limit-64.md. Story 1.1 stays in docs.\n",
@@ -364,6 +366,10 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	after, err := goTokens(gotGo)
 	require.NoError(t, err)
 	require.Equal(t, before, after)
+	// L5: gofmt on what the lift edits, not on what it did not format.
+	require.Equal(t, "package main\n\n// Pages splits the trace.\n//\n// # Automatic Pagination\n//\n// More text.\nfunc Pages() {}\n", read(t, p, "pages.go"))
+	require.Equal(t, "package main\n\n// Messy\nfunc  messy() {}\n", read(t, p, "messy.go"))
+	require.Equal(t, []string{"messy.go"}, res.GoUnformatted)
 	require.Equal(t, "#!/bin/sh\n# The unit check\ntest -f main.go\n", read(t, p, "check.sh"))
 	st, err := os.Stat(filepath.Join(root, "check.sh"))
 	require.NoError(t, err)
@@ -402,6 +408,12 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	require.Contains(t, agents, "- `sh ./check.sh`\n- `./gate.sh <board>`\n- `test -f main.go`\n")
 	require.NotNil(t, res.Regression)
 	require.Equal(t, 0, res.Regression.Exit)
+	// L4: the same command ran at the tag first, its log kept beside.
+	require.NotNil(t, res.RegressionAtTag)
+	require.Equal(t, 0, res.RegressionAtTag.Exit)
+	require.Equal(t, "_apex/state/logs/lift/regression-at-tag.log", res.RegressionAtTag.Log)
+	require.FileExists(t, filepath.Join(root, "_apex", "state", "logs", "lift", "regression-at-tag.log"))
+	require.Equal(t, LiftRegressionGreen, res.RegressionVerdict)
 
 	// CLAUDE.md keeps its rules, loses the managed block, imports the map.
 	require.Equal(t, "# Greeter\n\nProject rules (see ADR-0003).\n\n"+
@@ -422,7 +434,9 @@ func main() { fmt.Println(greet("ADR-0004")) }
 		"The greeting is byte-identical across runs (ADR-0004) | `apex-v0-final:development/project-context.md:5`",
 		"Never log a visitor's name at any level",
 		"NATS err_code 10164 misses the CAS classifier",
-		"`main.go:17` `Story1` — identifier",
+		"- `main.go` — 4: identifier, string, directive, string (ADR id, not renumbered)",
+		"- 1 × not tokenized (.sql)",
+		"- `schema/fixed.sh` — excluded (--exclude) (1 id(s), 0 ADR citation(s))",
 		"`.github/ci.yml:2` `development/implementation/sprint-status.yaml` — reference",
 		"product brief: apex-v0-final:development/planning/product-brief.md",
 		"newest sprint-change proposal: apex-v0-final:development/planning/sprint-change-proposal-2026-09.md",
@@ -431,6 +445,13 @@ func main() { fmt.Println(greet("ADR-0004")) }
 		require.Contains(t, disp, want)
 	}
 	require.NotContains(t, disp, "Every story gets two reviews", "only the don't-miss section")
+	// The full lists, whole, beside it (L11).
+	var report struct {
+		IDsLeft []LiftIDRef `json:"ids_left"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(read(t, p, "development/lift-disposition.json")), &report))
+	require.Contains(t, report.IDsLeft, LiftIDRef{File: "main.go", Line: 17, Text: "Story1", Where: "identifier"})
+	require.Equal(t, "development/lift-disposition.json", res.Report)
 	require.NotContains(t, disp, "| ok |", "a list item under three words is not a rule")
 
 	// Deleted after the review, it is no finding any more.
@@ -616,7 +637,7 @@ func TestLift_CanonADRs(t *testing.T) {
 	require.Equal(t, "package main\n\n// Follows ADR-0006 and ADR-0099.\nvar rule = 1\n", read(t, p, "rule.go"))
 	require.Contains(t, read(t, p, "development/decisions/0006-org-wide-rule.md"), "Lifted from: ADR-0070, adrs/adr-0070_org-wide-rule.md at the governance repository (canon)")
 	require.Equal(t, []LiftIDRef{{File: "rule.go", Line: 3, Text: "ADR-0099", Where: "comment"}}, res.UnresolvedCitations)
-	require.Contains(t, read(t, p, "development/lift-disposition.md"), "`rule.go:3` `ADR-0099` — comment")
+	require.Contains(t, read(t, p, "development/lift-disposition.md"), "- `rule.go` — 1: ADR-0099\n")
 }
 
 // The disposition file is pending only in a lifted project: the same file
