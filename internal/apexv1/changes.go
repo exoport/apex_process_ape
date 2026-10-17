@@ -203,7 +203,7 @@ func (p *Project) CheckChange(id string) []Finding {
 	out = append(out, p.checkDeltas(file, c, touches)...)
 
 	if s := c.section("Tasks"); s != nil && len(c.Tasks) == 0 {
-		add(s.Line, "## Tasks has no tasks — `- T1 <what> — check: <command> | human-review`")
+		add(s.Line, "## Tasks has no tasks — `- T1 <what> — check: <command> | human-review` (or `— regression: <command>`)")
 	}
 	ids := map[string]bool{}
 	for _, t := range c.Tasks {
@@ -211,8 +211,8 @@ func (p *Project) CheckChange(id string) []Finding {
 			add(t.Line, "duplicate task "+t.ID)
 		}
 		ids[t.ID] = true
-		if t.Check == "" {
-			add(t.Line, "task "+t.ID+" has no `check: <command> | human-review`")
+		if t.Check == "" && !t.Regression {
+			add(t.Line, "task "+t.ID+" has no `check: <command> | human-review` (or `regression: <command>`)")
 		}
 	}
 	return out
@@ -451,7 +451,8 @@ func changeSkeleton(id, milestone string, touches, paths, outOfScope []string) s
 	}
 	b.WriteString("\n## Delta\n<!-- ### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>, with scenarios\n")
 	b.WriteString("     and one `- check: <command> | human-review` per scenario; or the single line `none — <reason>` -->\n\n")
-	b.WriteString("## Tasks\n<!-- - T1 <what> — check: <command> | human-review   (no checkboxes) -->\n\n")
+	b.WriteString("## Tasks\n<!-- - T1 <what> — check: <command> | human-review   (no checkboxes)\n")
+	b.WriteString("     - T2 <what> — regression: <command>   (a check that may already pass before the change) -->\n\n")
 	b.WriteString("## Notes\n")
 	return b.String()
 }

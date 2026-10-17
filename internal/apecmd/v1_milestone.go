@@ -141,14 +141,20 @@ func newMilestoneGateCmd() *cobra.Command {
 		Short: "Run the milestone's gate and record the result",
 		Long: `Run the milestone's Gate: command from the project root, and every scenario check of
 the whole spec beside it as the regression suite (human-review not run; output under
-_apex/state/logs/gate-<M>/), and the project's "regression: <cmd>" from _apex/config.yaml
-when one is configured. The gate is green only when all pass — the regression command
+_apex/state/logs/gate-<M>/), and the project's regression command from _apex/config.yaml
+when one is configured — its milestone tier, "regression: {change: <cmd>, milestone:
+<cmd>}", else the one command (H10). The gate is green only when all pass — the regression command
 only needs not to be newly red: it is judged against the earliest regression baseline,
 for the same command, recorded by any change of the milestone (active or archived; a fix,
 milestone: none, is no change of any milestone and never supplies it — D40);
 red there and red now is reported (JSON run.regression.pre_existing_red), not failed.
 When no change of the milestone has a baseline for the command, a red regression fails
-the gate: nothing shows it was red before the milestone's work. Files the gate
+the gate: nothing shows it was red before the milestone's work — always the case for a
+milestone tier that differs from the change tier, which no change baselines. Timeouts:
+the Gate: command runs under timeouts.gate (default 30m), each scenario check under
+timeouts.check (15m), the regression command under timeouts.regression (30m); --timeout
+overrides all three. A vacuous or unrun gate command, scenario or regression command is
+red (see ` + "`ape change verify --help`" + `; JSON reason/detail). Files the gate
 or a check leaves outside development/ are undone and reported ("stray_files"). The run (exit, sha, time,
 output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; shown by
 ` + "`ape status`" + `). When the result differs from the recorded one (green vs red), or is

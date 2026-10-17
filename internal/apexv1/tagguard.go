@@ -3,7 +3,6 @@ package apexv1
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -13,8 +12,9 @@ import (
 
 // The tag guard (item 10): `ape hook pre-tool` denies a Bash command that
 // creates, deletes or pushes a git tag. A tag is a release, and only a
-// person releases. EnvAllowTag=1 in the session's environment — the hook's,
-// which a command cannot set for itself — lets a session tag.
+// person releases. EnvAllowTag=1 in the environment the person launched
+// the session with — the hook's, which a command cannot set for itself
+// (overrideSet) — lets a session tag.
 //
 // What is denied:
 //
@@ -35,9 +35,11 @@ import (
 // The command is parsed, not grepped: quotes and escapes are honoured;
 // commands are split at && || ; | & newlines, parentheses and backticks;
 // leading NAME=value assignments and the wrappers env, command, exec,
-// nohup, time, sudo and xargs are skipped; git's global options (-C <dir>,
+// nohup, time, sudo, doas, xargs, timeout, nice, setsid, busybox and
+// stdbuf (by base name, with their options) are skipped; git's global options (-C <dir>,
 // -c k=v, --git-dir, --work-tree, ...) are skipped; `sh|bash|zsh -c
-// <script>` and `eval <words>` are parsed recursively (three levels). So
+// <script>`, `eval <words>` and `env -S <string>` are parsed recursively
+// (three levels). So
 // `echo "git tag v1"` is not flagged. Limits: a command substitution
 // inside double quotes ("$(git tag x)"), a git alias, a script file, or a
 // git invoked through a variable is not seen; and a short refspec name is
@@ -56,11 +58,11 @@ const tagGuardReason = "only a person tags or releases: %s — leave the tag to 
 
 // TagGuard decides a Bash command; Deny is set for a tag write.
 func TagGuard(command, cwd string) PreToolDecision {
-	if !strings.Contains(command, "git") || os.Getenv(EnvAllowTag) == "1" {
+	if !strings.Contains(command, "git") || overrideSet(EnvAllowTag) {
 		return PreToolDecision{}
 	}
 	if what := tagWrite(command, cwd, 0); what != "" {
-		return PreToolDecision{Deny: true, Reason: strings.Replace(tagGuardReason, "%s", what, 1)}
+		return PreToolDecision{Deny: true, Reason: strings.Replace(tagGuardReason, "%s", what, 1) + inlineOverrideNote(command)}
 	}
 	return PreToolDecision{}
 }
@@ -76,14 +78,32 @@ func tagWrite(command, cwd string, depth int) string {
 // of what the guard denies, "" to allow.
 type gitJudge func(sub string, args []string, dir string) string
 
+// cmdJudge judges one simple command: its words with the leading
+// assignments and wrappers removed, so words[0] is the program run, and
+// the directory it runs in. It returns a description of what the guard
+// denies, "" to allow.
+type cmdJudge func(words []string, cwd string) string
+
 // scanGit returns the first non-empty verdict judge gives a git
 // invocation in a command line, "" for none.
 func scanGit(command, cwd string, depth int, judge gitJudge) string {
+	return scanCmds(command, cwd, depth, func(words []string, cwd string) string {
+		if filepath.Base(words[0]) != "git" {
+			return ""
+		}
+		return gitInvocation(words[1:], cwd, judge)
+	})
+}
+
+// scanCmds returns the first non-empty verdict judge gives a simple
+// command of a command line, "" for none. `sh -c <script>`, `eval
+// <words>` and `env -S <string>` are followed into (three levels).
+func scanCmds(command, cwd string, depth int, judge cmdJudge) string {
 	if depth > 3 {
 		return ""
 	}
 	for _, words := range shellCommands(command) {
-		if what := scanGitIn(words, cwd, depth, judge); what != "" {
+		if what := scanCmd(words, cwd, depth, judge); what != "" {
 			return what
 		}
 	}
@@ -103,29 +123,59 @@ func judgeTag(sub string, args []string, dir string) string {
 
 var assignRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 
-// scanGitIn judges one simple command's words.
-func scanGitIn(words []string, cwd string, depth int, judge gitJudge) string {
+// wrappers run the command that follows their options; matched by base
+// name, so /usr/bin/sudo is sudo.
+var wrappers = map[string]bool{
+	"env": true, "command": true, "exec": true, "nohup": true, "time": true, "sudo": true, "doas": true,
+	"xargs": true, "timeout": true, "nice": true, "setsid": true, "busybox": true, "stdbuf": true,
+}
+
+// wrapperValueOpts are a wrapper's options that take the next word as
+// their value (`sudo -u root pkill x`: root is not the command).
+var wrapperValueOpts = map[string]map[string]bool{
+	"sudo":    {"-u": true, "-g": true, "-p": true, "-C": true, "-D": true, "-r": true, "-t": true, "-U": true, "-T": true, "-R": true},
+	"doas":    {"-u": true, "-C": true},
+	"env":     {"-u": true, "--unset": true, "-C": true, "--chdir": true},
+	"exec":    {"-a": true},
+	"timeout": {"-s": true, "--signal": true, "-k": true, "--kill-after": true},
+	"nice":    {"-n": true, "--adjustment": true},
+	"xargs":   {"-I": true, "-n": true, "-P": true, "-d": true, "-E": true, "-L": true, "-s": true, "-a": true},
+	"stdbuf":  {"-i": true, "-o": true, "-e": true},
+}
+
+// scanCmd judges one simple command's words.
+func scanCmd(words []string, cwd string, depth int, judge cmdJudge) string {
 	// Leading assignments and wrappers.
 	for len(words) > 0 {
 		w := words[0]
-		switch {
-		case assignRe.MatchString(w):
+		base := filepath.Base(w)
+		if assignRe.MatchString(w) {
 			words = words[1:]
-		case w == "env":
+			continue
+		}
+		if !wrappers[base] {
+			break
+		}
+		words = words[1:]
+	opts:
+		for len(words) > 0 && strings.HasPrefix(words[0], "-") {
+			o := words[0]
 			words = words[1:]
-			for len(words) > 0 && (strings.HasPrefix(words[0], "-") || assignRe.MatchString(words[0])) {
+			switch {
+			case o == "--":
+				break opts
+			case base == "command" && (o == "-v" || o == "-V"):
+				return "" // a lookup: `command -v pkill` runs nothing
+			case base == "env" && (o == "-S" || o == "--split-string") && len(words) > 0:
+				return scanCmds(strings.Join(words, " "), cwd, depth+1, judge)
+			case wrapperValueOpts[base][o] && len(words) > 0:
 				words = words[1:]
 			}
-		case w == "command" || w == "exec" || w == "nohup" || w == "time" || w == "sudo" || w == "xargs":
-			words = words[1:]
-			for len(words) > 0 && strings.HasPrefix(words[0], "-") {
-				words = words[1:]
-			}
-		default:
-			goto done
+		}
+		if base == "timeout" && len(words) > 0 {
+			words = words[1:] // the duration
 		}
 	}
-done:
 	if len(words) == 0 {
 		return ""
 	}
@@ -133,16 +183,14 @@ done:
 	case "sh", "bash", "zsh", "dash", "ksh":
 		for i := 1; i < len(words)-1; i++ {
 			if f := words[i]; strings.HasPrefix(f, "-") && !strings.HasPrefix(f, "--") && strings.Contains(f, "c") {
-				return scanGit(words[i+1], cwd, depth+1, judge)
+				return scanCmds(words[i+1], cwd, depth+1, judge)
 			}
 		}
 		return ""
 	case "eval":
-		return scanGit(strings.Join(words[1:], " "), cwd, depth+1, judge)
-	case "git":
-		return gitInvocation(words[1:], cwd, judge)
+		return scanCmds(strings.Join(words[1:], " "), cwd, depth+1, judge)
 	}
-	return ""
+	return judge(words, cwd)
 }
 
 // gitInvocation skips git's global options and judges the rest.

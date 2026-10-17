@@ -158,6 +158,7 @@ func (p *Project) Check() []Finding {
 	}
 	add(p.layoutFindings()...)
 	add(p.liftDispositionFindings(context.Background())...)
+	add(p.docsFindings()...)
 
 	if doc, err := readFileString(p.ProjectMD()); err != nil {
 		missing(p.ProjectMD(), "run `ape project init`, then write it (apex-plan)")
@@ -214,6 +215,23 @@ func (p *Project) Check() []Finding {
 		// by its branch (D38) is checked there.
 		if dirExists(p.ChangeDir(c.ID)) {
 			add(p.CheckChange(c.ID)...)
+		}
+	}
+	return out
+}
+
+// docsFindings reports a docs: path in _apex/config.yaml that does not
+// exist (H21): a skill told to update it would create it, or fail.
+func (p *Project) docsFindings() []Finding {
+	cfg, err := LoadConfig(p.Root)
+	if err != nil {
+		return nil
+	}
+	var out []Finding
+	for _, d := range []struct{ key, path string }{{"changelog", cfg.Docs.Changelog}, {"user_docs", cfg.Docs.UserDocs}} {
+		if d.path != "" && !fileOrDirExists(filepath.Join(p.Root, filepath.FromSlash(d.path))) {
+			out = append(out, Finding{File: "_apex/config.yaml", Message: "docs." + d.key + ": " + d.path +
+				" does not exist — create it, or fix (or drop) docs." + d.key + " in _apex/config.yaml"})
 		}
 	}
 	return out

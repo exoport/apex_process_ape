@@ -4,14 +4,20 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // Check kinds in a run of checks.
 const (
 	KindTask     = "task"
 	KindScenario = "scenario"
+	// KindGate is a milestone's Gate: command.
+	KindGate = "gate"
 )
 
 // PlannedCheck is one command a verify, baseline or gate runs.
@@ -95,14 +101,30 @@ func (p *Project) EffectiveSpecChecks(c *Change) []PlannedCheck {
 	return out
 }
 
-// ChangeChecks is what verify runs for a change: its command tasks, then
-// the effective spec's scenarios.
+// ChangeChecks is what a change's baseline and verify run (H10): its
+// command tasks, then the effective spec's scenarios of the capabilities
+// it touches (touches:, which names every capability its delta does),
+// plus any other scenario whose command is one of its tasks' — free, as a
+// shared command runs once. The rest of the spec is the milestone gate's
+// to run (EffectiveSpecChecks(nil)), so a verify does not pay for a spec
+// of hundreds of scenarios the change cannot have broken.
 func (p *Project) ChangeChecks(c *Change) []PlannedCheck {
 	var out []PlannedCheck
+	taskCmds := map[string]bool{}
 	for _, t := range c.CommandTasks() {
 		out = append(out, PlannedCheck{Ref: t.ID, Kind: KindTask, Cmd: t.Check})
+		taskCmds[t.Check] = true
 	}
-	return append(out, p.EffectiveSpecChecks(c)...)
+	touched := map[string]bool{}
+	for _, capName := range c.Meta.Touches {
+		touched[capName] = true
+	}
+	for _, pc := range p.EffectiveSpecChecks(c) {
+		if pc.Delta || touched[pc.Capability] || taskCmds[pc.Cmd] {
+			out = append(out, pc)
+		}
+	}
+	return out
 }
 
 // logName is a check's log file name: the task id, or a short hash of a
@@ -117,7 +139,9 @@ func (pc *PlannedCheck) logName(prefix string) string {
 
 // RunChecks runs each planned check from the project root, logging under
 // logDir. A command shared by several checks runs once: a scenario whose
-// check is also a task's is not paid for twice. What a check leaves in the
+// check is also a task's is not paid for twice. A check whose requires:
+// the machine lacks is not run (unrun), and a green one whose output says
+// it ran nothing is vacuous (H11): both red. What a check leaves in the
 // tree outside the development folder is undone and reported in its
 // StrayFiles (item 19).
 func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks []PlannedCheck, opt RunOptions) []CheckResult {
@@ -125,19 +149,18 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 	out := make([]CheckResult, 0, len(checks))
 	p.ensureState() // the logs go under _apex/state/
 	inGit := p.isWorkTree(ctx)
+	cfg, _ := LoadConfig(p.Root) // Open refused an unparseable one
+	timeouts, vacuous := cfg.Timeouts, cfg.Checks.Vacuous()
 	for i := range checks {
 		pc := &checks[i]
 		r, ok := done[pc.Cmd]
 		if !ok {
 			logPath := filepath.Join(logDir, pc.logName(prefix))
-			var before treeSnapshot
-			if inGit {
-				before = p.snapshot(ctx)
-			}
-			r = RunCheck(ctx, p.Root, pc.Cmd, logPath, opt.Timeout)
-			r.Log = p.Rel(logPath)
-			if inGit {
-				r.StrayFiles = p.undoStrays(ctx, before)
+			if missing := unmetRequirement(pc.Cmd, cfg.Requires); missing != "" {
+				r = unrunResult(pc.Cmd, logPath, missing)
+				r.Log = p.Rel(logPath)
+			} else {
+				r = p.runWithRetries(ctx, pc, logPath, timeouts.For(pc.Kind, opt.Timeout), vacuous, int(cfg.Retries), inGit)
 			}
 			done[pc.Cmd] = r
 		}
@@ -147,6 +170,45 @@ func (p *Project) RunChecks(ctx context.Context, logDir, prefix string, checks [
 		out = append(out, r)
 	}
 	return out
+}
+
+// runWithRetries runs one check, and runs a red one again up to retries
+// times (H12): the first green run ends it, flaky when it was not the
+// first. Each run's strays are undone after it; the earlier runs' logs
+// stay beside the last as <name>.try<k>.log.
+func (p *Project) runWithRetries(ctx context.Context, pc *PlannedCheck, logPath string, timeout time.Duration, vacuous []string, retries int, inGit bool) CheckResult {
+	var r CheckResult
+	var strays []string
+	for try := 0; ; try++ {
+		path := logPath
+		if try < retries {
+			// Every run but the last possible one may be kept as a try log:
+			// write it under its own name, rename it after a green run.
+			path = strings.TrimSuffix(logPath, ".log") + ".try" + strconv.Itoa(try+1) + ".log"
+		}
+		var before treeSnapshot
+		if inGit {
+			before = p.snapshot(ctx)
+		}
+		r = runCheck(ctx, p.Root, pc.Cmd, path, timeout, vacuous)
+		if inGit {
+			strays = append(strays, p.undoStrays(ctx, before)...)
+		}
+		retry := r.Exit != 0 && r.Reason == "" && try < retries && ctx.Err() == nil
+		if !retry {
+			if path != logPath {
+				_ = os.Rename(path, logPath)
+			}
+			r.Log = p.Rel(logPath)
+			if try > 0 {
+				r.Tries = try + 1
+				r.Flaky = r.Exit == 0
+			}
+			break
+		}
+	}
+	r.StrayFiles = strays
+	return r
 }
 
 // StrayFiles is the sorted union of the paths checks left and ape undid.

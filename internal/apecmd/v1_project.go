@@ -32,7 +32,7 @@ func newProjectInitCmd() *cobra.Command {
                                      written: regression, models, effort, and limits —
                                      budget: enforce|off (default off; see ape task --help),
                                      attempts: N red verifies per start (default 5; see
-                                     ape change verify --help))
+                                     ape change verify --help)); see "Check settings" below
   AGENTS.md                          the project map (skeleton)
   CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
                                      gets it appended, and nothing else
@@ -53,7 +53,9 @@ Hooks merged into .claude/settings.json (existing keys and hooks are kept):
   SessionStart          ape hook session-start
   Stop, SubagentStop    ape hook stop          (timeout 1800 s: it runs the change's checks)
   PreToolUse            ape hook pre-tool      (matcher Edit|Write|MultiEdit|NotebookEdit|Bash:
-                                                the edit guard, and the git tag guard)
+                                                the edit guard, and the Bash guards:
+                                                git tag writes, git push, pkill/killall,
+                                                rebase/merge on a change branch)
 A hook that was altered (another matcher, async, a shorter stop timeout) is replaced
 by the one above; running init again changes nothing. ape task passes the same
 hooks inline as well, so its sessions have them even when settings.json does not.
@@ -79,6 +81,47 @@ ignored; a commit matches by prefix). Claude Code cannot pin a plugin version
 from the consumer side: a marketplace serves one version of each plugin, so pin
 by pointing the marketplace at a ref (github/git: ref: <branch|tag>). A plugin
 the marketplace does not serve at ref fails with the command to run.
+
+Check settings in _apex/config.yaml (read by start, verify, the gate and the hooks; a
+value ape cannot use, or a key it does not know inside these blocks, makes the config
+unparseable and every command refuses it):
+
+  regression: make test              the project's own suite, at start/verify/gate, failing
+                                     only when newly red; or in tiers:
+  regression: {change: make test, milestone: make test-all}
+                                     change: at start and verify (baseline-aware);
+                                     milestone (else change): at the milestone gate
+  timeouts: {check: 20m, regression: 45m, gate: 1h}
+                                     Go durations; defaults 15m per check, 30m for the
+                                     regression command, 30m for a Gate: command; a
+                                     command's --timeout flag overrides them
+  retries: 1                         a red check runs again up to n times (0–5, default
+                                     0); a pass on a retry is green and recorded flaky:
+                                     true (JSON results[].flaky, tries; listed by ape
+                                     status). Vacuous and unrun checks are not retried
+  checks: {vacuous_output: ["no tests to run", …]}
+                                     a check that exits 0 but whose output says it ran
+                                     nothing is red, reason "vacuous" (exit -2). Default
+                                     list: "no tests to run" (go test), "running 0 tests"
+                                     (cargo), "Ran 0 tests" (unittest < 3.12), "0 passing"
+                                     (mocha), "collected 0 items" (pytest with exit 5
+                                     masked); [] turns it off. A phrase counts as a whole
+                                     word, and not when a line without one starts like a
+                                     line with one (go test ./... -run X that ran X in one
+                                     package: "ok pkgA 0.4s" beside "ok pkgB … [no tests
+                                     to run]" is not vacuous)
+  requires: {RADIX_DSN: env, docker: cmd}
+                                     a check that mentions $RADIX_DSN / ${RADIX_DSN (a
+                                     comment counts: "go test ./store/... # needs
+                                     $RADIX_DSN") while it is unset or empty, or runs
+                                     docker as a command while it is not on PATH, is not
+                                     run: reason "unrun" (exit -3), red, never green
+  docs: {changelog: CHANGELOG.md, user_docs: docs/}
+                                     both optional, project-relative: the changelog and
+                                     user docs a user-visible change updates (apex-change
+                                     adds the task, apex-review checks it); ape project
+                                     check reports a missing path (docs.missing); ape
+                                     status --json carries the block as "docs"
 
 --brownfield adds nothing; it records in _apex/state/project.json (ignored) that the
 project existed before APEX.
@@ -174,6 +217,8 @@ func newProjectCheckCmd() *cobra.Command {
   lift                     development/lift-disposition.md in a project whose v1 epoch is a
                            lift commit ("apex: lift …"): the disposition list awaits review
                            (lift.disposition-pending) until the person deletes the file
+  docs                     each path _apex/config.yaml docs: names (changelog, user_docs)
+                           exists (docs.missing: create it, or fix the path)
   .claude/settings.json    ape's hooks registered as ` + "`ape project init`" + ` writes them:
                            hooks.missing / hooks.altered (matcher, type, async, a
                            stop timeout below 1800 s); ` + "`ape project init`" + ` restores them
@@ -268,7 +313,10 @@ func newStatusCmd() *cobra.Command {
     (` + "`ape change approve <id> --by <who>`" + `). A fix's runs (` + "`ape task <skill> --args <fix-id>`" + `)
     count toward no milestone's spend
   - every change not archived, with its status, blocked reason, red checks from its
-    last verify, human-review tasks not yet accepted, and for a started change its red
+    last verify (JSON failing: "T1 (exit 1)", "T2 (vacuous: …)", "S (unrun: $X is unset
+    …)" — a red verify of an in-progress change comes from this checkout's
+    _apex/state/logs/<id>/last-verify.json), the checks that passed only on a retry
+    (JSON flaky; "flaky: T2" in the brief; retries: in _apex/config.yaml), human-review tasks not yet accepted, and for a started change its red
     verifies since it started against limits.attempts (JSON attempts, attempts_cap;
     "(3/5 attempts)"; attempts_total, never reset) — a change the cap blocked shows
     "attempts exceeded" as its reason. The counts are this checkout's
@@ -283,6 +331,8 @@ func newStatusCmd() *cobra.Command {
     roadmap. A change's own task and delta checks red at baseline are normal test-first
     and never listed
   - next: what the way of working says comes next, derived from the state alone
+  - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
+    the skills that keep a changelog and user docs current
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 

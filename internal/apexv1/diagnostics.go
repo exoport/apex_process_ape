@@ -95,6 +95,7 @@ var findingRules = []findingRule{
 	rule("", `is the old archive location`, "layout.old-archive"),
 	rule("", `is the old state folder`, "layout.old-state"),
 	rule("", `^the lift's disposition list awaits review`, "lift.disposition-pending"),
+	rule("", `^docs\.(changelog|user_docs): .* does not exist`, "docs.missing"),
 	rule("", `^project.md is .* lines, over the 150-line cap`, "project.too-long"),
 	rule("", `^project.md is .* over the 8 KB cap`, "project.too-big"),
 	rule("", "^missing `# <Project name>`", "project.no-title"),

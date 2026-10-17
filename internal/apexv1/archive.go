@@ -510,7 +510,7 @@ func failingNames(v *VerifyResult) string {
 	failing := v.Failing()
 	names := make([]string, 0, len(failing))
 	for i := range failing {
-		names = append(names, fmt.Sprintf("%s exit %d", failing[i].Task, failing[i].Exit))
+		names = append(names, failing[i].Task+" "+failing[i].Outcome())
 	}
 	return strings.Join(names, ", ")
 }

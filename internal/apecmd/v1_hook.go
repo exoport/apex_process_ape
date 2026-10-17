@@ -21,12 +21,14 @@ func newHookCmd() *cobra.Command {
 		Long: `Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
 
   session-start   SessionStart: adds ` + "`ape status --brief`" + ` as context
-  stop            Stop and SubagentStop: blocks a stop while the one in-progress change
-                  has a red command check (at most 3 times in a row)
+  stop            Stop and SubagentStop: in a session ape launched, blocks a stop while the
+                  in-progress change has a red command check (at most 3 times in a row);
+                  in a person's own session, only shows what was red
   pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
-                  delete or push a git tag, or rebase or merge on a change branch
+                  delete or push a git tag, push at all, stop processes by name (pkill,
+                  killall), or rebase or merge on a change branch
 
 Every hook exits 0; a block or deny is expressed in its JSON output.
 
@@ -130,12 +132,22 @@ func newHookStopCmd() *cobra.Command {
 		Use:   "stop",
 		Short: "Stop/SubagentStop hook: block a stop while the in-progress change's checks are red",
 		Long: `Stop and SubagentStop hook. When HEAD is on a change's branch, change/<id>, that
-change is in-progress (read from the working tree), and any of its command checks exits
-non-zero now, prints {"decision":"block","reason":"<the failing checks' last lines and
-what to do>"}. Allows (prints nothing) when HEAD is on no change branch (the base
-branch: planning, milestones), when the change is not in-progress (blocked, verified,
-reviewed), when every check is green, or after 3 consecutive blocks (the count resets
-when the payload's stop_hook_active is false).
+change is in-progress (read from the working tree), and any of the checks it re-runs
+exits non-zero now, prints {"decision":"block","reason":"<the failing checks' last lines
+and what to do>"}. It re-runs only the checks that were red at the change's last verify
+of its current plan (the regression command too, when it was newly red), recorded in
+_apex/state/logs/<id>/last-verify.json; before any verify, the task checks (H10).
+Allows (prints nothing) when HEAD is on no change branch (the base branch: planning,
+milestones), when the change is not in-progress (blocked, verified, reviewed), when the
+last verify had nothing red, when every re-run check is green, or after 3 consecutive
+blocks (the count resets when the payload's stop_hook_active is false).
+
+Only in a session ape launched (H13): the hook blocks when its process carries
+APE_SESSION, which every session ape spawns has and Claude Code hands to its hooks. In a
+person's own Claude Code session (plain ` + "`claude`" + `, the settings.json copy of the hook) it
+never blocks and runs no check: on an in-progress change whose last verify had red
+checks it allows the stop with {"systemMessage":"APEX: change <id> is in progress, and at
+its last verify … check(s) were red: …"}, shown to the person; otherwise it prints nothing.
 
 The verdict is also written to _apex/state/hooks/<session>[-<agent>].json, which
 is how ` + "`ape task`" + ` learns that a Stop it saw did not end the turn.`,
@@ -165,7 +177,7 @@ func newHookPreToolCmd() *cobra.Command {
 	var inline bool
 	cmd := &cobra.Command{
 		Use:   "pre-tool",
-		Short: "PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, and rebases on a change branch",
+		Short: "PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, and rebases on a change branch",
 		Long: `PreToolUse hook for Edit|Write|MultiEdit|NotebookEdit|Bash. Denies, with
 {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
 "permissionDecisionReason":"… specs change only through ape change archive"}}, an edit
@@ -190,7 +202,23 @@ Listing stays allowed: git tag, -l/--list [<pattern>], -n, --contains, --merged,
 subshells, NAME=value prefixes, env/sudo/xargs wrappers, git -C/-c, and sh -c / eval
 scripts are followed, so ` + "`echo \"git tag v1\"`" + ` is not flagged. Not seen: "$(…)"
 inside double quotes, git aliases, script files. A command without "git" is allowed
-at once. APE_ALLOW_TAG=1 in the session's environment allows tag writes.
+at once.
+
+Bash, too (D45): denies every git push, in any form — a remote, a refspec, --dry-run,
+git -C, sh -c, a chain: only a person pushes (with push.followTags set, even a branch
+push publishes every reachable unpushed tag). A tag push needs both overrides below.
+
+Bash, too (D46): denies pkill, killall, killall5 and skill in any form (sudo, env,
+timeout, xargs, sh -c, a chain, an absolute path): they stop processes the session did
+not start. The deny says: stop the process you started by its PID (kill <pid>), which
+stays allowed.
+
+Overrides: APE_ALLOW_TAG=1 allows tag writes, APE_ALLOW_PUSH=1 git push,
+APE_ALLOW_KILL=1 pkill/killall. Each counts ONLY in the environment the person launches
+the session with (` + "`APE_ALLOW_PUSH=1 claude`" + `, or ` + "`APE_ALLOW_PUSH=1 ape task …`" + `),
+which the hook inherits. Set inside a command the model runs — APE_ALLOW_PUSH=1 git
+push, env APE_ALLOW_PUSH=1 …, export APE_ALLOW_PUSH=1; … — it does not count: the
+command is denied as if it were not there (D47 Q6).
 
 Bash, too (trial decision D40, the model never rebases): denies git rebase and git merge
 while the repository the command runs in has a change branch, change/<id>, checked out —

@@ -34,7 +34,9 @@ func addV1Flags(cmd *cobra.Command, f *v1Flags) {
 }
 
 func addV1TimeoutFlag(cmd *cobra.Command, f *v1Flags) {
-	cmd.Flags().DurationVar(&f.timeout, "timeout", apexv1.DefaultCheckTimeout, "limit for each check command (exit 124 when exceeded)")
+	cmd.Flags().DurationVar(&f.timeout, "timeout", 0, "limit for each command run, overriding _apex/config.yaml timeouts: "+
+		"(default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; "+
+		"timeouts.gate, else 30m, for a gate command); exit 124 when exceeded")
 }
 
 func (f *v1Flags) runOptions() apexv1.RunOptions { return apexv1.RunOptions{Timeout: f.timeout} }
@@ -139,16 +141,20 @@ func printChecks(w io.Writer, rs []apexv1.CheckResult, tails bool) {
 	greenScenarios := 0
 	for i := range rs {
 		r := &rs[i]
-		if r.Kind == apexv1.KindScenario && r.Exit == 0 {
+		if r.Kind == apexv1.KindScenario && r.Exit == 0 && !r.Flaky {
 			greenScenarios++
 			continue
 		}
 		verdict := "green"
 		switch {
 		case r.PreExistingRed:
-			verdict = fmt.Sprintf("red (exit %d), red at baseline too: not a failure", r.Exit)
+			verdict = fmt.Sprintf("red (%s), red at baseline too: not a failure", r.Outcome())
+		case r.Reason != "":
+			verdict = "RED (" + r.Reason + ")"
 		case r.Exit != 0:
 			verdict = fmt.Sprintf("RED (exit %d)", r.Exit)
+		case r.Flaky:
+			verdict = fmt.Sprintf("green (flaky: %d tries)", r.Tries)
 		}
 		label := r.Task
 		if r.Kind == apexv1.KindScenario {
@@ -158,6 +164,9 @@ func printChecks(w io.Writer, rs []apexv1.CheckResult, tails bool) {
 			}
 		}
 		fmt.Fprintf(w, "  %-4s %-14s %5.1fs  %s\n", label, verdict, r.Secs, r.Cmd)
+		if r.Reason != "" {
+			fmt.Fprintln(w, "       "+r.Reason+": "+r.Detail)
+		}
 		if tails && r.Red() {
 			for _, l := range lastLinesOf(r.Tail, 15) {
 				fmt.Fprintln(w, "       | "+l)
@@ -184,6 +193,8 @@ func printRegression(w io.Writer, v *apexv1.RegressionVerdict) {
 	}
 	verdict := "green"
 	switch {
+	case v.Failed && v.Reason != "":
+		verdict = "RED (" + v.Reason + ": " + v.Detail + ")"
 	case v.Failed:
 		verdict = fmt.Sprintf("RED (exit %d)", v.Exit)
 	case v.PreExistingRed:

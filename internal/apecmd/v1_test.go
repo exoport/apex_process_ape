@@ -275,9 +275,24 @@ func TestHookCommands(t *testing.T) {
 	stdout = bash("go test ./... && git -C . tag -a v1 -m release")
 	require.Contains(t, stdout, `"permissionDecision":"deny"`)
 	require.Contains(t, stdout, "only a person tags or releases")
-	require.Empty(t, bash("git tag --list && git push origin main"))
+	require.Empty(t, bash("git tag --list && git log -1"))
 	t.Setenv("APE_ALLOW_TAG", "1")
 	require.Empty(t, bash("git tag v1"))
+	// D45/D46: every git push and pkill/killall are denied too, unless the
+	// session was launched with APE_ALLOW_PUSH=1 / APE_ALLOW_KILL=1.
+	t.Setenv("APE_ALLOW_PUSH", "")
+	t.Setenv("APE_ALLOW_KILL", "")
+	stdout = bash("git push origin main")
+	require.Contains(t, stdout, `"permissionDecision":"deny"`)
+	require.Contains(t, stdout, "only a person pushes")
+	stdout = bash("APE_ALLOW_KILL=1 pkill -f server")
+	require.Contains(t, stdout, "stop the process you started by its PID (kill ")
+	require.Empty(t, bash("kill 4242"))
+	t.Setenv("APE_ALLOW_PUSH", "1")
+	t.Setenv("APE_ALLOW_KILL", "1")
+	require.Empty(t, bash("git push origin main && pkill -f server"))
+	t.Setenv("APE_ALLOW_PUSH", "")
+	t.Setenv("APE_ALLOW_KILL", "")
 
 	// Backlog 31: in a session ape task injected the hooks into, the
 	// settings.json copy (no --inline) stands down; the inline one acts.
@@ -305,6 +320,7 @@ func TestHookCommands(t *testing.T) {
 // the hook's verdict, counts a block as a deferral, and writes the
 // verdicts into the run manifest.
 func TestStopGateRecorder(t *testing.T) {
+	t.Setenv("APE_SESSION", "task/test") // the hook blocks only in sessions ape launched (H13)
 	root := v1Repo(t)
 	_, _, err := v1Exec(t, newChangeCmd, "new", "add-wave", "--milestone", "M1", "--touches", "greeting", "--cwd", root)
 	require.NoError(t, err)

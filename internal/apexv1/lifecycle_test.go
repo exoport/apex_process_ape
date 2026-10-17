@@ -154,7 +154,7 @@ func TestStart_RequirementConflicts(t *testing.T) {
 	modify := func(id string) string {
 		return changeDoc(id, "greeting",
 			"### MODIFIED [greeting] Requirement: Say hello\nThe system SHALL print Hello, then Hi.\n#### Scenario: plain run\n- GIVEN nothing WHEN greet runs THEN it prints Hello\n- check: ./greet.sh | grep -q Hello\n#### Scenario: hi\n- check: true\n",
-			"- T1 hi — check: true\n")
+			"- T1 hi — regression: true\n")
 	}
 	remove := func(id string) string {
 		return changeDoc(id, "greeting", "### REMOVED [greeting] Requirement: Say hello\nReason: r\n", "- T1 gone — check: true\n")

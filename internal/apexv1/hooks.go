@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -71,8 +72,9 @@ func (d PreToolDecision) Output() ([]byte, error) {
 }
 
 // PreTool decides whether an edit tool call may touch its target, and
-// whether a Bash call may write a git tag (TagGuard) or rebase or merge on
-// a change branch (RebaseGuard, D40).
+// whether a Bash call may write a git tag (TagGuard), push (PushGuard,
+// D45), stop processes by name (KillGuard, D46) or rebase or merge on a
+// change branch (RebaseGuard, D40).
 func PreTool(payload HookPayload) PreToolDecision {
 	if payload.ToolName == "Bash" {
 		cwd := payload.Cwd
@@ -80,8 +82,10 @@ func PreTool(payload HookPayload) PreToolDecision {
 			cwd, _ = os.Getwd()
 		}
 		command := bashCommand(payload.ToolInput)
-		if d := TagGuard(command, cwd); d.Deny {
-			return d
+		for _, guard := range []func(command, cwd string) PreToolDecision{TagGuard, PushGuard, KillGuard} {
+			if d := guard(command, cwd); d.Deny {
+				return d
+			}
 		}
 		return RebaseGuard(command, cwd)
 	}
@@ -215,16 +219,27 @@ type StopRecord struct {
 type StopDecision struct {
 	Block  bool
 	Reason string
+	// Notice is shown to the person when the stop is allowed but a check
+	// was red: outside an ape session the hook informs and never blocks
+	// (H13).
+	Notice string
 	Record StopRecord
 }
 
-// Output renders the decision as Stop/SubagentStop hook JSON; nil allows.
+// Output renders the decision as Stop/SubagentStop hook JSON; nil allows
+// silently, a Notice allows with a systemMessage.
 func (d StopDecision) Output() ([]byte, error) {
 	if !d.Block {
-		return nil, nil
+		if d.Notice == "" {
+			return nil, nil
+		}
+		return json.Marshal(map[string]any{"systemMessage": d.Notice})
 	}
 	return json.Marshal(map[string]any{"decision": "block", "reason": d.Reason})
 }
+
+// StopNotApeSession is the allow reason outside a session ape launched.
+const StopNotApeSession = "not a session ape launched (no APE_SESSION): the stop hook informs, never blocks"
 
 func (p *Project) stopRecordPath(sessionID, agentID string) string {
 	key := sanitizeKey(sessionID)
@@ -313,6 +328,8 @@ func (p *Project) saveStopRecord(path string, r StopRecord) {
 // command checks is red, at most
 // MaxConsecutiveStopBlocks times in a row (the count resets whenever
 // Claude Code reports the stop is not itself a continuation from a block).
+// The checks it runs are the ones red at the change's last verify, or its
+// task checks before any verify (H10, stopChecks).
 func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDecision {
 	cwd := payload.Cwd
 	if cwd == "" {
@@ -384,16 +401,38 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 		return finish(StopDecision{Record: rec})
 	}
 	rec.Change = ci.ID
+	// H13: the settings.json copy of the hook also runs in a person's own
+	// Claude Code session. There it never blocks — a person asking the
+	// model a question on a change branch must not have it sent back to
+	// work — and runs no check: it shows the person what was red at the
+	// change's last verify. ape's sessions carry APE_SESSION, which Claude
+	// Code hands to its hooks.
+	if os.Getenv(envApeSession) == "" {
+		rec.Verdict = StopAllow
+		rec.ConsecutiveBlocks = 0
+		rec.Reason = StopNotApeSession
+		return finish(StopDecision{Record: rec, Notice: p.stopNotice(ci)})
+	}
 	if rec.ConsecutiveBlocks >= MaxConsecutiveStopBlocks {
 		rec.Verdict = StopAllow
 		rec.Reason = fmt.Sprintf("allowed after %d consecutive blocks", rec.ConsecutiveBlocks)
 		rec.ConsecutiveBlocks = 0
 		return finish(StopDecision{Record: rec})
 	}
-	results := p.runTasks(ctx, ci.Doc, ci.ID, "stop-", opt)
+	checks, nothingRed := p.stopChecks(ci)
+	if nothingRed {
+		rec.Verdict = StopAllow
+		rec.ConsecutiveBlocks = 0
+		rec.Reason = "no check was red at the last verify"
+		return finish(StopDecision{Record: rec})
+	}
+	results := p.RunChecks(ctx, p.LogDir(ci.ID), "stop-", checks, opt)
 	var red []CheckResult
 	for i := range results {
-		if results[i].Exit != 0 {
+		if results[i].Kind == KindRegression {
+			judgeRegression(&results[i], ci.State.Regression)
+		}
+		if results[i].Red() {
 			red = append(red, results[i])
 		}
 	}
@@ -410,6 +449,32 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 	return finish(StopDecision{Block: true, Reason: reason, Record: rec})
 }
 
+// stopNotice tells a person outside an ape session which checks of the
+// in-progress change were red at its last verify of the current plan; ""
+// when none were, or there is no such verify.
+func (p *Project) stopNotice(ci ChangeInfo) string {
+	lv := p.lastVerify(ci.ID)
+	if lv == nil || lv.PlanDigest != ci.State.PlanDigest || len(lv.Red) == 0 {
+		return ""
+	}
+	refs := make([]string, 0, len(lv.Red))
+	for ref := range lv.Red {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	lines := make([]string, 0, len(refs))
+	for _, ref := range limit(refs, 10) {
+		if cmd, ok := lv.Red[ref]; ok {
+			lines = append(lines, ref+" `"+cmd+"`")
+		} else {
+			lines = append(lines, ref)
+		}
+	}
+	return fmt.Sprintf("APEX: change %s is in progress, and at its last verify (%s, %s) %d check(s) were red: %s. "+
+		"Not blocking: this session was not launched by ape. `ape change verify %s` re-runs them.",
+		ci.ID, lv.At, short(lv.SHA), len(refs), strings.Join(lines, ", "), ci.ID)
+}
+
 func stopReason(id string, red []CheckResult, n int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Change %s is in progress and %d command check(s) are red (stop blocked %d/%d):\n",
@@ -417,7 +482,7 @@ func stopReason(id string, red []CheckResult, n int) string {
 	budget := 3000
 	for i := range red {
 		r := &red[i]
-		fmt.Fprintf(&b, "\n%s `%s` exit %d (full output: %s)\n", r.Task, r.Cmd, r.Exit, r.Log)
+		fmt.Fprintf(&b, "\n%s `%s` %s (full output: %s)\n", r.Task, r.Cmd, r.Outcome(), r.Log)
 		tail := lastN(r.Tail, 15)
 		for _, l := range tail {
 			if budget <= 0 {

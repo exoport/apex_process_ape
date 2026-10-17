@@ -48,6 +48,17 @@ type CheckResult struct {
 	// PreExistingRed marks a regression command that is red and was red
 	// at its baseline: reported, not a failure (backlog 32).
 	PreExistingRed bool `json:"pre_existing_red,omitempty"`
+	// Reason marks a check red for what it did not run (H11): "vacuous"
+	// (exit 0, output saying it ran nothing; Exit is ExitVacuous) or
+	// "unrun" (a requirement missing, never run; Exit is ExitUnrun).
+	// Detail says which phrase or requirement.
+	Reason string `json:"reason,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	// Flaky: red, then green on a retry (H12, retries:); the result is
+	// green. Tries counts the runs when there was more than one; Log is the
+	// last run's, the earlier ones beside it as <name>.try<k>.log.
+	Flaky bool `json:"flaky,omitempty"`
+	Tries int  `json:"tries,omitempty"`
 }
 
 // Red reports a result that fails its run: a non-zero exit that was not
@@ -84,6 +95,9 @@ type GreenAtBaseline struct {
 	// AtReplan: baselined at a re-plan, after code existed, rather than
 	// at the first start.
 	AtReplan bool `json:"at_replan,omitempty"`
+	// Regression: the task is written `— regression: <command>`, a check
+	// the plan declares may already pass (backlog 43).
+	Regression bool `json:"regression,omitempty"`
 }
 
 // Verify is the last `ape change verify`.

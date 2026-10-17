@@ -15,7 +15,7 @@ func TestArchive_RefusesWhenTheBaseRequirementChanged(t *testing.T) {
 	addChange(t, p, "rework-hello", changeDoc("rework-hello", "greeting",
 		"### MODIFIED [greeting] Requirement: Say hello\nThe system SHALL print Hello, kindly.\n"+
 			"#### Scenario: plain run\n- check: ./greet.sh | grep -q Hello\n",
-		"- T1 hello — check: ./greet.sh | grep -q Hello\n"))
+		"- T1 hello — regression: ./greet.sh | grep -q Hello\n"))
 	commitAll(t, p, "plan")
 	_, err := p.Start(ctx(), "rework-hello", RunOptions{})
 	require.NoError(t, err)

@@ -56,6 +56,9 @@ type ChangeStatus struct {
 	// `ape change approve <id> --by <who>`.
 	Lane     string    `json:"lane"`
 	Approved *Approval `json:"approved,omitempty"`
+	// Flaky lists the checks that passed only on a retry at the change's
+	// last verify (H12, retries:): green, but for review to see.
+	Flaky []string `json:"flaky,omitempty"`
 }
 
 // Spend is the cost recorded in the project's run manifests.
@@ -95,16 +98,22 @@ type StatusReport struct {
 	PreExistingRed []PreExistingRed `json:"pre_existing_red"`
 	Spend          Spend            `json:"spend"`
 	Next           string           `json:"next"`
+	// Docs is _apex/config.yaml's docs: block (H21), always present ({}
+	// when unset): the changelog and user docs a user-visible change
+	// updates, for apex-change and apex-review to read.
+	Docs DocsConfig `json:"docs"`
 }
 
 // Status builds the report.
 func (p *Project) Status() *StatusReport {
 	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Fixes: []string{}}
-	if cfg, err := LoadConfig(p.Root); err == nil && cfg.ProjectName != "" {
+	cfg, cfgErr := LoadConfig(p.Root)
+	if cfgErr == nil && cfg.ProjectName != "" {
 		r.Project = cfg.ProjectName
 	} else {
 		r.Project = baseName(p.Root)
 	}
+	r.Docs = cfg.Docs
 	runs, _ := cost.RunCosts(p.Root)
 	for _, run := range runs {
 		r.Spend.TotalUSD += run.CostUSD
@@ -173,7 +182,19 @@ func (p *Project) Status() *StatusReport {
 			cs.VerifySHA = v.SHA
 			for i := range v.Results {
 				if v.Results[i].Red() {
-					cs.Failing = append(cs.Failing, fmt.Sprintf("%s (exit %d)", v.Results[i].Task, v.Results[i].Exit))
+					cs.Failing = append(cs.Failing, fmt.Sprintf("%s (%s)", v.Results[i].Task, v.Results[i].Outcome()))
+				}
+			}
+		}
+		// A red verify of an in-progress change is not in state.json (D5):
+		// the checkout's last-verify record has it, vacuous and unrun
+		// checks included (H11).
+		if lv := p.currentLastVerify(c.ID, c.State); lv != nil {
+			cs.Failing, cs.Flaky = lv.Failing, lv.Flaky
+		} else if v := c.State.Verify; v != nil {
+			for i := range v.Results {
+				if v.Results[i].Flaky {
+					cs.Flaky = append(cs.Flaky, v.Results[i].Task)
 				}
 			}
 		}
@@ -378,6 +399,9 @@ groups:
 			}
 			if len(c.PendingHuman) > 0 {
 				line += " — human-review pending: " + strings.Join(c.PendingHuman, ",")
+			}
+			if len(c.Flaky) > 0 {
+				line += " — flaky: " + strings.Join(c.Flaky, ", ")
 			}
 			if c.AttemptsCap > 0 && c.Attempts > 0 {
 				line += fmt.Sprintf(" (%d/%d attempts)", c.Attempts, c.AttemptsCap)
