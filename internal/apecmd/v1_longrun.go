@@ -71,8 +71,9 @@ most 9m30s; 0 returns at once); a run that ends in time is printed as always, wi
 exit code and --json shape. Otherwise the call exits 75, still running: "… still running
 since <time> — run the same command again to attach" (--json: {"running": true, "verb",
 "scope", "since", "log", "pid", "log_tail"}, the shape ` + "`ape change review --run`" + ` has).
-Running the same command again attaches: it waits again, printing the log lines since the
-last call, and prints the run's result once it ends — never a second run. A result no call
+Running the same command again attaches: it waits again and prints the run's result once it
+ends — never a second run — or exits 75 again with the log lines the run wrote since the
+last call (stderr; --json: "log_tail"). A result no call
 printed yet is printed by the next call of the same verb while HEAD has not moved. While a
 run holds the lock, another of these verbs on the same change or milestone is refused:
 run.busy (exit 3, action retry; the message names the running verb and since when). A lock
