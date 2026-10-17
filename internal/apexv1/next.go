@@ -233,8 +233,11 @@ func (p *Project) AddNext(ctx context.Context, text, from string) (*NextResult, 
 // (H26, D48 Q6): apex-review writes it, archive carries it into Next.
 var noticedHeadingRe = regexp.MustCompile(`(?i)^##\s+noticed,?\s+out of scope\s*$`)
 
-// noticedItems are the list items of review.md's `## Noticed, out of
-// scope` section, one line each ("none" and empty items left out).
+// noticedItems are the top-level list items of review.md's `## Noticed,
+// out of scope` section, one line each ("none" and empty items left out).
+// Only a line that starts with `- ` or `* ` is an item (D89): an answer
+// apex-apply writes under a finding, indented or blockquoted, is not one,
+// so it never reaches the roadmap's Next.
 func noticedItems(review string) []string {
 	var out []string
 	in := false
@@ -245,7 +248,7 @@ func noticedItems(review string) []string {
 			in = true
 		case strings.HasPrefix(t, "#"):
 			in = false
-		case in && (strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ")):
+		case in && (strings.HasPrefix(l, "- ") || strings.HasPrefix(l, "* ")):
 			item := strings.TrimSpace(t[2:])
 			if item != "" && !strings.EqualFold(strings.TrimRight(item, "."), "none") {
 				out = append(out, item)

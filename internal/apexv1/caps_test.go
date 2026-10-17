@@ -3,6 +3,7 @@ package apexv1
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 
@@ -97,38 +98,114 @@ func TestCaps_OverCeilingRefusesTheCapVerbs(t *testing.T) {
 	require.DirExists(t, p.ChangeDir("add-wave"))
 }
 
-// change.md's cap (16 KB by default) holds at check and start, and at
-// archive and abandon too (D69).
-func TestCaps_ChangeMDAtArchiveAndAbandon(t *testing.T) {
+// whyGrown is change.md with n bytes more in ## Why, which may change
+// after start.
+func whyGrown(doc string, n int) string {
+	const why = "## Why\nBecause the greeter must change.\n"
+	return strings.Replace(doc, why, why+strings.Repeat("w", n)+"\n", 1)
+}
+
+func TestPlanBytes(t *testing.T) {
+	plan := "---\nid: x\n---\n# X\n## Why\nwhy\n## Tasks\n- T1 a — check: true\n"
+	notes := "## Notes\nsome notes\n### a sub-heading in the notes\nmore\n"
+	for name, tc := range map[string]struct {
+		doc  string
+		want int
+	}{
+		"no notes":              {plan, len(plan)},
+		"notes last":            {plan + notes, len(plan)},
+		"notes in the middle":   {strings.Replace(plan, "## Tasks", notes+"## Tasks", 1), len(plan)},
+		"notes up to an h1":     {plan + notes + "# Appendix\nkept\n", len(plan) + len("# Appendix\nkept\n")},
+		"case-insensitive":      {plan + "## NOTES\nn\n", len(plan)},
+		"no trailing newline":   {plan + "## Notes\nn", len(plan)},
+		"notes in a code block": {plan + "```\n## Notes\nnot a heading\n```\n", len(plan + "```\n## Notes\nnot a heading\n```\n")},
+		"an h3 notes counts":    {plan + "### Notes\nn\n", len(plan + "### Notes\nn\n")},
+	} {
+		require.Equal(t, tc.want, ParseChange("change.md", tc.doc).PlanBytes(), name)
+	}
+	// Bytes, not runes; CRLF lines are measured as they are on disk.
+	crlf := strings.ReplaceAll(plan+"## Why\n— ünïcode\n", "\n", "\r\n")
+	require.Equal(t, len(crlf), ParseChange("change.md", crlf+"## Notes\r\nn\r\n").PlanBytes())
+	require.Equal(t, len(crlf), ParseChange("change.md", crlf).PlanBytes())
+}
+
+// change.md's cap (16 KB by default) measures the plan — change.md less
+// ## Notes (D89) — at check and start, and at archive and abandon too
+// (D69); the whole file is held to the 48 KB ceiling.
+func TestCaps_ChangeMDMeasuresThePlan(t *testing.T) {
+	t.Run("check and start", func(t *testing.T) {
+		p := fixture(t, baseFiles())
+		addChange(t, p, "add-wave", whyGrown(waveChange("add-wave"), 16<<10))
+		commitAll(t, p, "plan: add-wave")
+		fs := ClassifyFindings(p.CheckChange("add-wave"))
+		require.Contains(t, findingMessages(fs), "without ## Notes, over the 16 KB cap (caps.change_md) — split this change")
+		require.Equal(t, "change.too-big", fs[0].Code)
+		_, err := p.Start(ctx(), "add-wave", RunOptions{})
+		require.Equal(t, CodeCheckFailed, failCode(t, err), "start runs the check")
+		fe, ok := errors.AsType[*FailError](err)
+		require.True(t, ok)
+		require.Contains(t, findingMessages(fe.Findings), "without ## Notes, over the 16 KB cap")
+
+		// The same bytes in ## Notes: under the cap, start goes ahead.
+		write(t, p, "development/changes/add-wave/change.md", waveChange("add-wave")+strings.Repeat("a working note\n", 2000))
+		commitAll(t, p, "notes")
+		require.Empty(t, p.CheckChange("add-wave"))
+		_, err = p.Start(ctx(), "add-wave", RunOptions{})
+		require.NoError(t, err)
+	})
+	t.Run("the file ceiling, whatever the cap", func(t *testing.T) {
+		p := fixture(t, baseFiles())
+		write(t, p, "_apex/config.yaml", "caps:\n  change_md: 48KB\n")
+		addChange(t, p, "add-wave", waveChange("add-wave")+strings.Repeat("n", 48<<10))
+		commitAll(t, p, "plan: add-wave")
+		fs := ClassifyFindings(p.CheckChange("add-wave"))
+		require.Len(t, fs, 1)
+		require.Equal(t, CodeChangeOverCeiling, fs[0].Code)
+		require.Contains(t, fs[0].Message, "in all, over the 48 KB file ceiling — ## Notes is for working notes only: move bulk to the change's assets/")
+		_, err := p.Start(ctx(), "add-wave", RunOptions{})
+		require.Equal(t, CodeCheckFailed, failCode(t, err))
+		fe, ok := errors.AsType[*FailError](err)
+		require.True(t, ok)
+		require.Contains(t, findingMessages(fe.Findings), "over the 48 KB file ceiling")
+	})
 	t.Run("archive", func(t *testing.T) {
 		p := reviewedWaveFrom(t, baseFiles())
 		path := "development/changes/add-wave/change.md"
 		doc := read(t, p, path)
-		// ## Notes is append-only after start: it grew past the cap.
-		write(t, p, path, doc+strings.Repeat("a note that grew after the plan froze\n", 450))
+		// ## Why may change after start: it grew past the cap.
+		write(t, p, path, whyGrown(doc, 16<<10))
 		_, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
 		require.Equal(t, "change.too-big", failCode(t, err))
-		require.ErrorContains(t, err, "over the 16 KB cap (caps.change_md)")
+		require.ErrorContains(t, err, "without ## Notes, over the 16 KB cap (caps.change_md)")
+		require.ErrorContains(t, err, "move what ## Why gained since start to ## Notes, commit, then archive again")
 		require.DirExists(t, p.ChangeDir("add-wave"), "nothing was archived")
+		require.Equal(t, whyGrown(doc, 16<<10), read(t, p, path), "archive never edits change.md")
 
-		write(t, p, path, doc+"a short note\n")
+		// Notes past the ceiling: refused.
+		write(t, p, path, doc+strings.Repeat("a note that grew after the plan froze\n", 1400))
 		_, err = p.Archive(ctx(), "add-wave", false, RunOptions{})
-		require.NoError(t, err, "trimmed under the cap, it archives")
+		require.Equal(t, CodeChangeOverCeiling, failCode(t, err))
+		require.ErrorContains(t, err, "move bulk to the change's assets/, commit, then archive again")
+
+		// Notes past the cap but under the ceiling: archived as used.
+		grown := doc + strings.Repeat("a note that grew after the plan froze\n", 450)
+		write(t, p, path, grown)
+		res, err := p.Archive(ctx(), "add-wave", false, RunOptions{})
+		require.NoError(t, err, "## Notes does not count against the cap")
+		require.Equal(t, grown, read(t, p, res.ArchivedTo+"/change.md"), "the folder moves exactly as used")
 	})
 	t.Run("abandon", func(t *testing.T) {
 		p := fixture(t, baseFiles())
-		big := waveChange("add-wave") + strings.Repeat("n", 16<<10)
-		addChange(t, p, "add-wave", big)
+		addChange(t, p, "add-wave", whyGrown(waveChange("add-wave"), 16<<10))
 		commitAll(t, p, "plan: add-wave")
-		require.Contains(t, findingMessages(p.CheckChange("add-wave")), "over the 16 KB cap (caps.change_md) — split this change")
 		_, err := p.Abandon(ctx(), "add-wave", "too big")
 		require.Equal(t, "change.too-big", failCode(t, err))
 		require.DirExists(t, p.ChangeDir("add-wave"))
 
-		write(t, p, "development/changes/add-wave/change.md", waveChange("add-wave"))
-		commitAll(t, p, "trim")
+		write(t, p, "development/changes/add-wave/change.md", waveChange("add-wave")+strings.Repeat("n", 16<<10))
+		commitAll(t, p, "to notes")
 		_, err = p.Abandon(ctx(), "add-wave", "too big")
-		require.NoError(t, err)
+		require.NoError(t, err, "## Notes does not count")
 	})
 }
 

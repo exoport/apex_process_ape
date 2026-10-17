@@ -159,8 +159,14 @@ func (p *Project) checkChange(id string, withCaps bool) []Finding {
 		out = append(out, cfgCaps.OverCeiling()...)
 	}
 	caps := cfgCaps.Limits()
-	if len(doc) > caps.ChangeMD {
-		add(0, "change.md is "+sizeKB(len(doc))+", over the "+capSize(caps.ChangeMD)+" cap (caps.change_md) — split this change")
+	c := ParseChange(file, doc)
+	// The cap measures the plan, ## Notes left out; the whole file has the
+	// ceiling (D89).
+	if plan := c.PlanBytes(); plan > caps.ChangeMD {
+		add(0, "change.md is "+sizeKB(plan)+" without ## Notes, over the "+capSize(caps.ChangeMD)+" cap (caps.change_md) — split this change")
+	}
+	if len(doc) > changeMDCeiling() {
+		add(0, overCeilingMsg(len(doc)))
 	}
 	if d, err := os.Stat(p.DesignMD(id)); err == nil && d.Size() > int64(caps.DesignMD) {
 		out = append(out, Finding{
@@ -176,7 +182,6 @@ func (p *Project) checkChange(id string, withCaps bool) []Finding {
 		}
 	}
 
-	c := ParseChange(file, doc)
 	if c.MetaErr != nil {
 		add(1, c.MetaErr.Error())
 	}

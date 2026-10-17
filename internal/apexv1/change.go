@@ -400,6 +400,28 @@ func (c *Change) PlanDigest() string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// PlanBytes is what caps.change_md measures (D89): change.md's length in
+// bytes, less its ## Notes section — the heading line and its body up to
+// the next level-1 or level-2 heading, found as PlanDigest finds it. ## Why
+// counts. Notes are working notes, bounded only by the file ceiling
+// (change.over-ceiling), so a change never has to be trimmed to archive.
+func (c *Change) PlanBytes() int {
+	// splitLines keeps one line per "\n", so raw[i] is line i as it is on
+	// disk, CRLF included.
+	raw := strings.SplitAfter(c.raw, "\n")
+	n := len(c.raw)
+	notes := false
+	for i, l := range splitLines(c.raw) {
+		if lv, title := headingLevel(l); lv > 0 && lv <= 2 {
+			notes = lv == 2 && strings.EqualFold(title, "Notes")
+		}
+		if notes {
+			n -= len(raw[i])
+		}
+	}
+	return n
+}
+
 // scenarioLoss lists what a MODIFIED block takes away from the requirement
 // it replaces: a scenario it drops, or a scenario whose check it changes.
 // Both silently weaken the living spec — the behaviour stays "specified"

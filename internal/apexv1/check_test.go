@@ -96,8 +96,8 @@ func TestCheckChange(t *testing.T) {
 		{
 			name: "over the 16 KB cap",
 			id:   "add-wave",
-			doc:  changeDoc("add-wave", "greeting", addedWave, okTasks) + strings.Repeat("x", 16<<10),
-			want: []string{"over the 16 KB cap (caps.change_md) — split this change"},
+			doc:  strings.Replace(changeDoc("add-wave", "greeting", addedWave, okTasks), "## Out of scope", strings.Repeat("x", 16<<10)+"\n## Out of scope", 1),
+			want: []string{"without ## Notes, over the 16 KB cap (caps.change_md) — split this change"},
 		},
 		{
 			name: "design.md over the cap",

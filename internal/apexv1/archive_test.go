@@ -494,4 +494,9 @@ func TestArchive_NoticedGoesToNext(t *testing.T) {
 func TestNoticedItems(t *testing.T) {
 	require.Equal(t, []string{"a", "b c"}, noticedItems("x\n## Noticed out of scope\n- a\n* b c\n- None.\n## Next\n- d\n"))
 	require.Empty(t, noticedItems("no section\n- a\n"))
+	// Only top-level items (D89): an answer written under a finding,
+	// indented or blockquoted, is not carried into Next.
+	review := "## Noticed, out of scope\n- a\n  - Answer: fixed in T3\n    * deeper\n\t- tabbed\n> - quoted answer\n* b\n"
+	require.Equal(t, []string{"a", "b"}, noticedItems(review))
+	require.Equal(t, []string{"a", "b"}, noticedItems(strings.ReplaceAll(review, "\n", "\r\n")))
 }

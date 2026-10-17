@@ -249,8 +249,11 @@ func newChangeCheckCmd() *cobra.Command {
     when: the change matches (the orchestrator runs each before the review; else
     tools.unknown, D74); any other key must start with x-
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
-  - change.md ≤ caps.change_md and design.md ≤ caps.design_md (16 KB each by default;
-    _apex/config.yaml caps:, see `+"`ape project check --help`"+`) ("split this change")
+  - change.md without its ## Notes section ≤ caps.change_md (D89; change.too-big) and
+    design.md ≤ caps.design_md (16 KB each by default; _apex/config.yaml caps:, see
+    `+"`ape project check --help`"+`) ("split this change"); ## Notes is bounded only by
+    the 48 KB file ceiling on the whole change.md, whatever the cap (change.over-ceiling:
+    ## Notes is for working notes — move bulk to the change's assets/)
   - every spec the delta touches stays ≤ caps.spec (24 KB) once merged — the in-memory merge
     `+"`ape change diff`"+` shows and archive makes (else change.spec-too-big: split the
     capability first; start runs this check too, so it fails before any work, H18)
@@ -1051,11 +1054,14 @@ base branch, change/<id> is deleted and its last commit recorded as branch_tip i
 archived state.json, kept reachable as refs/apex/abandoned/<id> (tip_ref; H16, local). None of the change's code reaches the base branch. A draft never
 started (no branch) is abandoned on the branch HEAD is on, as before.
 
-change.md's cap holds here too (D69): over caps.change_md (default 16 KB) abandon refuses
-with change.too-big — trim it under the cap, commit, abandon again — and while
-_apex/config.yaml caps: holds a value above its ceiling, with caps.over-ceiling.
+change.md is measured here as at archive (D69, D89): change.md without ## Notes over
+caps.change_md (default 16 KB) refuses with change.too-big — move what ## Why gained to
+## Notes, commit, abandon again — the whole file over the 48 KB ceiling with
+change.over-ceiling (move bulk to the change's assets/), and while _apex/config.yaml caps:
+holds a value above its ceiling, with caps.over-ceiling. Abandon moves the folder as used
+and never trims it.
 
-Exit codes: 0 abandoned · 1 no such change, archived, change.md over its cap, caps.over-ceiling, dirty tree, change/<id> checked out in
+Exit codes: 0 abandoned · 1 no such change, archived, change.md over its cap or the file ceiling, caps.over-ceiling, dirty tree, change/<id> checked out in
 another worktree, the base branch checked out in another worktree (git.base-checked-out), or git
 failed · 2 usage · 3 the archive folder already exists.`,
 		`  ape change abandon add-tenant-delete --reason "replaced by split-tenant-delete"`,
@@ -1089,8 +1095,11 @@ func newChangeArchiveCmd() *cobra.Command {
 		`Archive a reviewed change onto its base branch (trial decision D38):
 
   1. needs status reviewed (review pass), the plan frozen at start unchanged, and change.md
-     within caps.change_md (default 16 KB; ## Notes counts — change.too-big: trim it, D69;
-     caps.over-ceiling while caps: holds a value above its ceiling); human-
+     without ## Notes within caps.change_md (default 16 KB, D69, D89 — change.too-big: the
+     plan is frozen at start, so only ## Why can have grown; move what it gained since
+     start to ## Notes, commit, archive again), the whole change.md within the 48 KB file
+     ceiling (change.over-ceiling: move bulk to the change's assets/), and no
+     caps.over-ceiling (caps: holding a value above its ceiling); human-
      review tasks must be accepted, unless --allow-pending-human (recorded) — a person's
      flag only (D45): refused in a model session (APE_SESSION or CLAUDECODE set) with exit
      2, session.person-only; the orchestrator leaves such a change reviewed and moves on.
@@ -1119,7 +1128,8 @@ func newChangeArchiveCmd() *cobra.Command {
      start (another change archived first: re-plan and re-start) — → exit 3 and nothing
      reaches the base branch
   7. switches to the base branch, `+"`git merge --squash change/<id>`"+`, writes the specs,
-     moves the folder to development/archive/<YYYY-MM-DD>-<id>/ (status archived,
+     moves the folder, exactly as used — archive never trims it or edits change.md —
+     to development/archive/<YYYY-MM-DD>-<id>/ (status archived,
      branch_tip = change/<id>'s last commit) — with "evidence: archive" in
      _apex/config.yaml (H23; default off) also its evidence/: one file per check of the
      final verify (command, exit, duration, output sha256, and the output from the log,
@@ -1153,7 +1163,8 @@ exits 1, archive.interrupted (retry), saying what was rolled back; archive again
 
 Exit codes: 0 archived (prints the commit) · 1 not reviewed, re-verify red, stale review, a
 git hook refused the squash,
-pending human-review, dirty tree, no change branch, the base behind its upstream
+pending human-review, change.md over its cap or the file ceiling, dirty tree, no change
+branch, the base behind its upstream
 (base.behind-upstream), the base branch checked out in another
 worktree (git.base-checked-out: stop, do not re-plan), or git failed · 2 usage, or
 --allow-pending-human from a model session · 3 the
