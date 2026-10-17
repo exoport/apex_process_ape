@@ -1,0 +1,333 @@
+package apexv1
+
+import (
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
+
+// The ids the lift strips from code comments (D37): epic and story ids,
+// deferred-record ids and paths, story-file paths. v1 has none of these
+// things, so a comment citing one points at nothing the tree holds; the
+// explanation around it stays. Old ids stay findable through
+// `git log --grep` at the apex-v0-final tag.
+
+// liftVocab is one project's id vocabulary: the patterns are fixed, the
+// paths and the story keys come from its v0 corpus.
+type liftVocab struct {
+	// storyKeys are the corpus's story keys ("3-2"), from the story files
+	// and the tracker. A bare "(3-2)" or "3-2_slug" is stripped only when
+	// it names one of them: "(0-1)" in a comment is usually a range.
+	storyKeys map[string]bool
+	// pathRes match a path under a removed id-bearing folder (the deferred
+	// store, the implementation folder).
+	pathRes []*regexp.Regexp
+}
+
+var (
+	// "Story 3.2", "stories 3.1 and 3.2", "story 35-1 AC4".
+	storyIDRe = regexp.MustCompile(`(?i)\b(?:user\s+)?stor(?:y|ies)\s+#?\d+[.-]\d+[a-z]?(?:\s*(?:,|&|/|\band\b|\bor\b)\s*#?\d+[.-]\d+[a-z]?)*(?:\s+ACs?\s*#?\d+(?:\s*(?:,|&|/|\band\b)\s*(?:AC\s*)?#?\d+)*)?\b`)
+	// "Epic 12", "epics 3, 4".
+	epicIDRe = regexp.MustCompile(`(?i)\bepics?\s+#?\d+(?:\s*(?:,|&|/|\band\b|\bor\b)\s*#?\d+)*\b`)
+	// "DW-20261001-ab12_slug", "DW-42".
+	deferredIDRe = regexp.MustCompile(`\bDW-\d[0-9A-Za-z_-]*[0-9A-Za-z](?:\.md)?\b|\bDW-\d\b`)
+	// "(3-2)": a story key in parentheses.
+	parenKeyRe = regexp.MustCompile(`\((\d+)-(\d+)\)`)
+	// "3-2_retry-publish": a story file's stem.
+	storyStemRe = regexp.MustCompile(`\b(\d+)-(\d+)_[a-z0-9][a-z0-9-]*(?:\.md)?\b`)
+	// ADR citations: "ADR-0017", "ADR-17", "ADR-0001/0002".
+	adrCiteRe = regexp.MustCompile(`\bADR-(\d{1,4})((?:/\d{4})*)\b`)
+	// ids inside identifiers: TestStory35_1, epic12Gate, DW42, ADR0017.
+	identIDRe = regexp.MustCompile(`(Story|STORY|story|Epic|EPIC|epic)_?\d+|(DW|Dw|dw)_?\d+|(ADR|Adr|adr)_?\d{2,4}`)
+)
+
+func newLiftVocab(storyKeys map[string]bool, removedIDPaths []string) *liftVocab {
+	v := &liftVocab{storyKeys: storyKeys}
+	for _, rel := range removedIDPaths {
+		if rel == "" || rel == "." {
+			continue
+		}
+		v.pathRes = append(v.pathRes, regexp.MustCompile(`(?:^|[\s("'`+"`"+`\[])((?:\./)?`+regexp.QuoteMeta(rel)+`(?:/[^\s)\]"'`+"`"+`,;]*)?)`))
+	}
+	return v
+}
+
+// spans returns the merged byte spans of the strippable ids in s: the ids
+// and the paths into removed id-bearing folders.
+func (v *liftVocab) spans(s string) [][2]int { return v.find(s, true) }
+
+// idSpans is spans without the paths, which the references-to-removed-
+// paths list already reports.
+func (v *liftVocab) idSpans(s string) [][2]int { return v.find(s, false) }
+
+func (v *liftVocab) find(s string, paths bool) [][2]int {
+	var out [][2]int
+	add := func(a, b int) { out = append(out, [2]int{a, b}) }
+	for _, re := range []*regexp.Regexp{storyIDRe, epicIDRe, deferredIDRe} {
+		for _, m := range re.FindAllStringIndex(s, -1) {
+			// "epic 12-hour": a number glued to a word is not an id.
+			if m[1] < len(s)-1 && s[m[1]] == '-' && unicode.IsLetter(rune(s[m[1]+1])) {
+				continue
+			}
+			add(m[0], m[1])
+		}
+	}
+	for _, m := range parenKeyRe.FindAllStringSubmatchIndex(s, -1) {
+		if v.storyKeys[s[m[2]:m[3]]+"-"+s[m[4]:m[5]]] {
+			add(m[0], m[1])
+		}
+	}
+	for _, m := range storyStemRe.FindAllStringSubmatchIndex(s, -1) {
+		if v.storyKeys[s[m[2]:m[3]]+"-"+s[m[4]:m[5]]] {
+			add(m[0], m[1])
+		}
+	}
+	for _, re := range v.pathRes {
+		if !paths {
+			break
+		}
+		for _, m := range re.FindAllStringSubmatchIndex(s, -1) {
+			a, b := m[2], m[3]
+			for b > a && strings.IndexByte(".:", s[b-1]) >= 0 {
+				b--
+			}
+			add(a, b)
+		}
+	}
+	return mergeSpans(out)
+}
+
+func mergeSpans(in [][2]int) [][2]int {
+	if len(in) == 0 {
+		return nil
+	}
+	sort.Slice(in, func(i, j int) bool { return in[i][0] < in[j][0] })
+	out := [][2]int{in[0]}
+	for _, s := range in[1:] {
+		last := &out[len(out)-1]
+		if s[0] <= last[1] {
+			last[1] = max(last[1], s[1])
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// identIDs returns the ids inside an identifier-ish text: a match counts
+// only at a word boundary — start, after `_`, or a camel-case hump — so
+// "History2" is not "story2".
+func identIDs(s string) []string {
+	var out []string
+	for _, m := range identIDRe.FindAllStringIndex(s, -1) {
+		a := m[0]
+		if a > 0 {
+			prev := rune(s[a-1])
+			first := rune(s[a])
+			hump := unicode.IsUpper(first) && (unicode.IsLower(prev) || unicode.IsDigit(prev))
+			if prev != '_' && !hump && (unicode.IsLetter(prev) || unicode.IsDigit(prev)) {
+				continue
+			}
+		}
+		out = append(out, s[m[0]:m[1]])
+	}
+	return out
+}
+
+// ---- ADR citations ----------------------------------------------------
+
+// adrRewriter renumbers ADR citations: old number → new number, and old
+// record paths → new decision paths.
+type adrRewriter struct {
+	num   map[int]int
+	paths map[string]string // old project-relative path → new
+	// pathRe matches a path to a v0 ADR record ("…/adrs/adr-0004_slug.md").
+	pathRe *regexp.Regexp
+}
+
+func newADRRewriter(num map[int]int, paths map[string]string, adrsRel string) *adrRewriter {
+	r := &adrRewriter{num: num, paths: paths}
+	if adrsRel != "" {
+		r.pathRe = regexp.MustCompile(`(?:\./)?` + regexp.QuoteMeta(adrsRel) + `/[A-Za-z0-9_.-]+\.md`)
+	}
+	return r
+}
+
+// rewrite renumbers every citation in s; n counts the ids changed, and
+// unresolved lists the cited numbers no ADR has.
+func (r *adrRewriter) rewrite(s string) (out string, n int, unresolved []int) {
+	if r == nil {
+		return s, 0, nil
+	}
+	if r.pathRe != nil {
+		s = r.pathRe.ReplaceAllStringFunc(s, func(m string) string {
+			if np, ok := r.paths[strings.TrimPrefix(m, "./")]; ok {
+				n++
+				return np
+			}
+			return m
+		})
+	}
+	out = adrCiteRe.ReplaceAllStringFunc(s, func(m string) string {
+		parts := strings.Split(strings.TrimPrefix(m, "ADR-"), "/")
+		changed := false
+		for i, p := range parts {
+			old, _ := strconv.Atoi(p)
+			nw, ok := r.num[old]
+			if !ok {
+				unresolved = append(unresolved, old)
+				continue
+			}
+			if s := adrNum(nw); s != p {
+				parts[i] = s
+				changed = true
+			}
+		}
+		if !changed {
+			return m
+		}
+		n++
+		return "ADR-" + strings.Join(parts, "/")
+	})
+	return out, n, unresolved
+}
+
+func adrNum(n int) string { return fmtNum4(n) }
+
+func fmtNum4(n int) string {
+	s := strconv.Itoa(n)
+	for len(s) < 4 {
+		s = "0" + s
+	}
+	return s
+}
+
+// citedADRs returns the ADR numbers cited in s.
+func citedADRs(s string) []int {
+	var out []int
+	for _, m := range adrCiteRe.FindAllStringSubmatch(s, -1) {
+		for _, p := range strings.Split(m[1]+m[2], "/") {
+			if p == "" {
+				continue
+			}
+			n, _ := strconv.Atoi(p)
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// ---- comment text -------------------------------------------------------
+
+const (
+	idMark  = "\x01" // an id, before it is removed
+	cutMark = "\x02" // where text was removed
+)
+
+// glue words that only lead into an id: "see", "per", "tracked in".
+const glueWords = `(?:see also|see|per|cf\.?|refs?:?|from|in|by|via|since|for|under|also|tracked (?:in|as|by)|follow-?ups?(?: in)?|as of|after|until|before|was|formerly)`
+
+var (
+	idListRe = regexp.MustCompile(idMark + `(?:\s*(?:,|;|/|&|\+|\band\b|\bor\b)\s*` + idMark + `)+`)
+	// An aside that starts with an id ("(DW-42 tracks the gap)") goes
+	// whole.
+	idAsideRe    = regexp.MustCompile(`[ \t]*[(\[]\s*(?i:` + glueWords + `\s+)?` + idMark + `[^()\[\]]*[)\]]`)
+	idParenRe    = regexp.MustCompile(`[ \t]*[(\[]\s*(?i:` + glueWords + `\s+)?` + idMark + `\s*[)\]]`)
+	idSentenceRe = regexp.MustCompile(`([.!?:;])\s+(?i:` + glueWords + `\s+)?` + idMark + `\s*[.;]`)
+	idLeadRe     = regexp.MustCompile(`^(?i:` + glueWords + `\s+)?` + idMark + `\s*(?:[:,;.]|—|–|--?)?\s*`)
+	idTrailRe    = regexp.MustCompile(`\s*(?:[,;:]|—|–|--?)?\s*(?i:(?:` + glueWords + `|with|to|at|of|on|against|into)\s+)?` + idMark + `\s*([.!?]?)\s*$`)
+	// A sentence that only points at an id ("See DW-42 for the history.")
+	// goes whole.
+	idPointerRe = regexp.MustCompile(`(^|[.!?]\s+)(?i:see(?: also)?|cf\.?|refs?:?)\s+` + idMark + `[^.!?` + idMark + `]*(?:[.!?]|$)\s*`)
+	idMidGlueRe = regexp.MustCompile(`\s+(?i:` + glueWords + `)\s+` + idMark)
+	cutRe       = regexp.MustCompile(`[ \t]*(?:` + idMark + `|` + cutMark + `)+[ \t]*`)
+	emptyPairRe = regexp.MustCompile(`\(\s*\)|\[\s*\]`)
+	dupPunctRe  = regexp.MustCompile(`([,;:])\s*([.,;:])`)
+	spaceBefRe  = regexp.MustCompile(`[ \t]+([.,;:!?)\]])`)
+)
+
+// stripIDsFromText removes the id spans from one line of comment text,
+// keeping its explanation. empty reports a line that held nothing but ids
+// (and glue); the caller drops it.
+func stripIDsFromText(s string, spans [][2]int) (out string, empty bool) {
+	if len(spans) == 0 {
+		return s, false
+	}
+	lead := s[:len(s)-len(strings.TrimLeft(s, " \t"))]
+	var b strings.Builder
+	prev := 0
+	for _, sp := range spans {
+		b.WriteString(s[prev:sp[0]])
+		b.WriteString(idMark)
+		prev = sp[1]
+	}
+	b.WriteString(s[prev:])
+	t := strings.TrimLeft(b.String(), " \t")
+	origTrim := strings.TrimSpace(s)
+	startsWithID := strings.HasPrefix(t, idMark) || idLeadRe.MatchString(t)
+
+	t = idListRe.ReplaceAllString(t, idMark)
+	t = idPointerRe.ReplaceAllString(t, "$1")
+	t = idAsideRe.ReplaceAllString(t, cutMark)
+	t = idParenRe.ReplaceAllString(t, cutMark)
+	t = idSentenceRe.ReplaceAllString(t, "$1"+cutMark)
+	t = idLeadRe.ReplaceAllString(t, "")
+	t = idTrailRe.ReplaceAllString(t, "$1")
+	t = idMidGlueRe.ReplaceAllString(t, cutMark)
+	t = cutRe.ReplaceAllStringFunc(t, func(m string) string { return cutMark })
+	t = joinCuts(t)
+	t = emptyPairRe.ReplaceAllString(t, "")
+	t = dupPunctRe.ReplaceAllString(t, "$2")
+	t = spaceBefRe.ReplaceAllString(t, "$1")
+	t = strings.TrimSpace(t)
+	t = strings.TrimLeft(t, ",;:—–- ")
+	t = strings.TrimRight(t, ",;:—– ")
+	t = strings.TrimSpace(t)
+	if !hasWordRune(t) {
+		return "", true
+	}
+	if startsWithID {
+		r, size := utf8.DecodeRuneInString(t)
+		if unicode.IsLower(r) {
+			t = string(unicode.ToUpper(r)) + t[size:]
+		}
+	}
+	if strings.HasSuffix(origTrim, ".") && !strings.ContainsAny(t[len(t)-1:], ".!?:") {
+		t += "."
+	}
+	return lead + t, false
+}
+
+// joinCuts closes each gap left by a removal: nothing next to punctuation
+// or a bracket, one space between words.
+func joinCuts(t string) string {
+	for {
+		i := strings.Index(t, cutMark)
+		if i < 0 {
+			return t
+		}
+		before, after := t[:i], t[i+len(cutMark):]
+		sep := " "
+		switch {
+		case before == "" || after == "":
+			sep = ""
+		case strings.ContainsAny(after[:1], ".,;:!?)]"+cutMark):
+			sep = ""
+		case strings.ContainsAny(before[len(before)-1:], "(["):
+			sep = ""
+		}
+		t = before + sep + after
+	}
+}
+
+func hasWordRune(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
+}
