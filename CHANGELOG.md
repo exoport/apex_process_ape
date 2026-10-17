@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## v1.0.0-rc.2 (draft)
+
+Fixes from the framework's rc.1 smoke, on top of everything in rc.1 below. At
+promotion both drafts become the one dated `## v1.0.0` section.
+
+- **`milestone approve` freezes only the scripts a gate runs** (class B): the
+  executable word of each simple command when it is a repo path
+  (`./scripts/e2e.sh`), or the script an interpreter runs (`bash
+  scripts/gate.sh`, `python3 scripts/gate.py`). Arguments and data files are
+  never hashed, nor is anything inside `$(…)`. A script created after approval
+  is not drift, and approving again freezes it. rc.1 hashed every file the gate
+  named, so a gate like `test "$(python3 greet.py)" = … && grep -q … CHANGELOG.md`
+  drifted as soon as the milestone's change landed (`milestone.gate-changed`).
+  Approvals recorded by rc.1 are compared on the new rule.
+- **`ape change review --run` re-verifies a reviewed change whose review went
+  stale**, then reviews it again; a fresh review is still refused.
+- **Change verbs find a change's records from any branch**: with HEAD on
+  another change's branch, `check`, `diff`, `approve`, `block`, `answer`,
+  `accept` and `abandon` read and write where the change's records live (its
+  own branch, or the base for a draft or a fix), without a checkout. `approve`
+  is no longer refused on a change branch. start, verify, review and archive
+  keep their branch rules.
+- **Accept a reviewed change from the base branch**: `--evidence` paths are
+  resolved at the base's tip, the acceptance is an `apex:` commit on the base
+  (`development/changes/<id>/accepted.json`, folded into the archived state),
+  and it never makes the review stale or forces a rebase at archive.
+- **`config.changed`**: since the v1 epoch, a commit that changes `limits`,
+  `checks`, `retries` or `requires` in `_apex/config.yaml` and is not ape's own
+  is a finding, and start, verify and archive refuse (`change.provenance`), so
+  a session cannot loosen its own limits. A person keeps such an edit with the
+  new `ape project accept-config --by <who>` (person-only), or reverts it.
+
 ## v1.0.0-rc.1 (draft)
 
 APEX v1: the framework's small loop replaces v0's story ceremony, and ape owns
