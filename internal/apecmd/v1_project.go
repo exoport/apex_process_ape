@@ -468,6 +468,16 @@ func statusLong(r *apexv1.StatusReport) string {
 	if r.LatestRun != nil {
 		fmt.Fprintf(&b, "\nLatest run: %s\n", r.LatestRun.Describe())
 	}
+	for i, s := range r.Sessions {
+		if i == 0 {
+			b.WriteString("\nRunning sessions:\n")
+		}
+		fmt.Fprintf(&b, "  %s %s %s, depth %d", s.Kind, s.RunID, s.Skill, s.Depth)
+		if s.ParentRun != "" {
+			fmt.Fprintf(&b, ", started by %s", s.ParentRun)
+		}
+		b.WriteString("\n")
+	}
 	fmt.Fprintf(&b, "\nSpend note: %s\n", r.Spend.Note)
 	return b.String()
 }
