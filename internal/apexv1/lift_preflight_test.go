@@ -12,7 +12,7 @@ import (
 )
 
 func preflightCodes(res *LiftResult) []string {
-	var out []string
+	out := make([]string, 0, len(res.Preflight))
 	for _, p := range res.Preflight {
 		out = append(out, p.Code)
 	}

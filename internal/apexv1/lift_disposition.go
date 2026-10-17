@@ -180,8 +180,6 @@ func (lf *lifter) report() string {
 }
 
 // disposition renders the disposition file.
-//
-//nolint:gocyclo // one document, section by section
 func (lf *lifter) disposition() string {
 	r := lf.res
 	report := path.Base(r.Report)
@@ -280,42 +278,7 @@ func (lf *lifter) disposition() string {
 		p("%d id(s) in %d file(s), by file and kind:\n\n", len(r.IDsLeft), countFiles(r.IDsLeft))
 		writeCounts(&b, r.IDsLeft, func(x LiftIDRef) string { return x.Where }, summaryFiles, report)
 	}
-	if len(r.Skipped) > 0 {
-		reasons := map[string]int{}
-		var order []string
-		for _, sk := range r.Skipped {
-			why := sk.Reason
-			if i := strings.Index(why, "):"); i > 0 && strings.HasPrefix(why, "not tokenized") {
-				why = why[:i+1]
-			}
-			if reasons[why] == 0 {
-				order = append(order, why)
-			}
-			reasons[why]++
-		}
-		p("Files not edited (%d), by reason:\n\n", len(r.Skipped))
-		for _, why := range order {
-			p("- %d × %s\n", reasons[why], why)
-		}
-		p("\n")
-		var tokens []string
-		for _, sk := range r.Skipped {
-			if !strings.HasPrefix(sk.Reason, "not tokenized") {
-				tokens = append(tokens, fmt.Sprintf("`%s` — %s (%d id(s), %d ADR citation(s))", sk.File, sk.Reason, sk.IDs, sk.ADRCitations))
-			}
-		}
-		if len(tokens) > 0 {
-			p("Left for a reason other than the file type:\n\n")
-			for i, l := range tokens {
-				if i == summaryFiles {
-					p("- … and %d more (in `%s`)\n", len(tokens)-summaryFiles, report)
-					break
-				}
-				p("- %s\n", l)
-			}
-			p("\n")
-		}
-	}
+	writeSkipped(&b, r.Skipped, report)
 
 	p("## References to removed paths in records and docs\n\n")
 	if len(records) == 0 {
@@ -337,6 +300,45 @@ func (lf *lifter) disposition() string {
 		p("- %s\n", s)
 	}
 	return b.String()
+}
+
+// writeSkipped summarises the files the lift did not edit: a count per
+// reason, then the files left for a reason other than their type.
+func writeSkipped(b *strings.Builder, skipped []LiftSkip, report string) {
+	if len(skipped) == 0 {
+		return
+	}
+	reasons := map[string]int{}
+	var order, other []string
+	for _, sk := range skipped {
+		why := sk.Reason
+		if i := strings.Index(why, "):"); i > 0 && strings.HasPrefix(why, "not tokenized") {
+			why = why[:i+1]
+		} else {
+			other = append(other, fmt.Sprintf("%#q — %s (%d id(s), %d ADR citation(s))", sk.File, sk.Reason, sk.IDs, sk.ADRCitations))
+		}
+		if reasons[why] == 0 {
+			order = append(order, why)
+		}
+		reasons[why]++
+	}
+	fmt.Fprintf(b, "Files not edited (%d), by reason:\n\n", len(skipped))
+	for _, why := range order {
+		fmt.Fprintf(b, "- %d × %s\n", reasons[why], why)
+	}
+	b.WriteString("\n")
+	if len(other) == 0 {
+		return
+	}
+	b.WriteString("Left for a reason other than the file type:\n\n")
+	for i, l := range other {
+		if i == summaryFiles {
+			fmt.Fprintf(b, "- … and %d more (in `%s`)\n", len(other)-summaryFiles, report)
+			break
+		}
+		fmt.Fprintf(b, "- %s\n", l)
+	}
+	b.WriteString("\n")
 }
 
 // splitRefs parts references to removed paths into those in code and CI
@@ -366,9 +368,8 @@ func countFiles(refs []LiftIDRef) int {
 
 // byFile groups refs by file, files sorted by count (most first), then
 // name.
-func byFile(refs []LiftIDRef) ([]string, map[string][]LiftIDRef) {
-	m := map[string][]LiftIDRef{}
-	var files []string
+func byFile(refs []LiftIDRef) (files []string, m map[string][]LiftIDRef) {
+	m = map[string][]LiftIDRef{}
 	for _, r := range refs {
 		if _, ok := m[r.File]; !ok {
 			files = append(files, r.File)

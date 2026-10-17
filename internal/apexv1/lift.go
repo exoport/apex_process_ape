@@ -408,11 +408,13 @@ func (lf *lifter) preflight() []*FailError {
 // ignored, so only the ones the lift creates count.
 func (lf *lifter) ignoredWrites() *FailError {
 	p := &Project{Root: lf.root, DevRel: lf.devRel}
-	paths := []string{
-		p.Rel(p.SettingsJSON()), p.Rel(p.ProjectMD()), p.Rel(p.RoadmapMD()), p.Rel(p.AgentsMD()), p.Rel(p.ClaudeMD()),
-		p.Rel(p.StateGitignore()), p.Rel(p.decisionsJSON()),
+	files := []string{p.SettingsJSON(), p.ProjectMD(), p.RoadmapMD(), p.AgentsMD(), p.ClaudeMD(), p.StateGitignore(), p.decisionsJSON()}
+	dirs := []string{p.SpecsDir(), p.ChangesDir(), p.ArchiveDir(), p.DecisionsDir(), p.BriefsDir()}
+	paths := make([]string, 0, len(files)+len(dirs)+len(lf.writes))
+	for _, f := range files {
+		paths = append(paths, p.Rel(f))
 	}
-	for _, d := range []string{p.SpecsDir(), p.ChangesDir(), p.ArchiveDir(), p.DecisionsDir(), p.BriefsDir()} {
+	for _, d := range dirs {
 		paths = append(paths, p.Rel(filepath.Join(d, ".gitkeep")))
 	}
 	for rel := range lf.writes {
@@ -933,26 +935,10 @@ func (lf *lifter) readings() []string {
 
 func (lf *lifter) apply() error {
 	ctx := lf.ctx
-	// The regression command at the tag, first, before anything is
-	// written: HEAD is the tag (pre-flight) and the tree is clean. Its log
-	// is kept outside the tree until the lift's state folder exists.
-	tagLog := ""
-	if lf.res.Gates.Regression != "" && !lf.opt.NoVerifyRun {
-		tmp, err := os.MkdirTemp("", "ape-lift-tag-*")
-		if err != nil {
-			return err
-		}
-		defer func() { _ = os.RemoveAll(tmp) }()
-		tagLog = filepath.Join(tmp, "regression-at-tag.log")
-		p0 := &Project{Root: lf.root, DevRel: lf.devRel}
-		progressf(lf.opt.Run.Progress, "%s regression at %s started: %s", Stamp(), LiftTag, lf.res.Gates.Regression)
-		r := p0.runWithRetries(ctx, &PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: lf.res.Gates.Regression}, tagLog,
-			Timeouts{}.Limits(KindRegression, lf.opt.Run.Timeout), nil, 0, p0.isWorkTree(ctx))
-		r.Task, r.Kind = regressionRef, KindRegression
-		lf.res.RegressionAtTag = &r
-		if ctx.Err() != nil {
-			return &FailError{Code: CodeRunInterrupted, Msg: "interrupted while the regression ran at " + LiftTag + " — nothing was written; lift again"}
-		}
+	tagLog, cleanup, err := lf.regressionAtTag()
+	defer cleanup()
+	if err != nil {
+		return err
 	}
 	pathsFile, err := os.CreateTemp("", "ape-lift-paths-*")
 	if err != nil {
@@ -1014,19 +1000,8 @@ func (lf *lifter) apply() error {
 		}
 		commit = append(commit, "AGENTS.md")
 	}
-	if a := lf.res.Ape; a != nil && a.MovePin != nil {
-		if err := a.MovePin(ctx); err != nil {
-			// bingo may have half-written .bingo/: back to the tag's.
-			_, _ = git(ctx, lf.root, "checkout", "--", ".bingo")
-			a.PinNote = "could not move the pin (" + err.Error() + "): after the lift, run " + a.PinCommand +
-				" and commit .bingo/; until then a bare ape here runs " + a.Pinned + ", so run v1 commands with APE_TOOLCHAIN=local"
-		} else {
-			a.PinMoved = true
-			a.PinNote = "the lift commit moves " + a.PinFile + " from " + a.Pinned + " to v" + strings.TrimPrefix(a.Version, "v")
-			commit = append(commit, ".bingo")
-			lf.res.CommitMessage = strings.Replace(lf.res.CommitMessage, "- lays down the v1 skeleton",
-				"- moves the ape pin ("+a.PinFile+") from "+a.Pinned+" to v"+strings.TrimPrefix(a.Version, "v")+"\n- lays down the v1 skeleton", 1)
-		}
+	if lf.movePin() {
+		commit = append(commit, ".bingo")
 	}
 	if err := recordLiftedDecisions(p, lf.res.ADRs); err != nil {
 		return err
@@ -1059,36 +1034,99 @@ func (lf *lifter) apply() error {
 		return &FailError{Code: CodeCommitFailed, Msg: "the lift commit failed: " + err.Error() + " — `git reset --hard` restores the tree; fix the cause (identity, lock), then lift again"}
 	}
 	lf.res.Commit = HeadSHA(ctx, lf.root)
-	// The manifest's v0 skills git never tracked (an ignored .claude/):
-	// installer-owned, so they go too, once the commit stands.
+	if err := lf.removeUntracked(); err != nil {
+		return err
+	}
+	lf.liftRegression(p, tagLog)
+	return nil
+}
+
+// liftRegression runs the regression command at the lift commit and
+// judges it against its run at the tag: the baseline red gates are
+// judged against (backlog 37), and the one way to tell a red the lift
+// caused from one it found (L4).
+func (lf *lifter) liftRegression(p *Project, tagLog string) {
+	switch {
+	case lf.res.Gates.Regression == "":
+		lf.res.RegressionNote = "no regression command was extracted: apex-plan sets `regression:` in _apex/config.yaml"
+		return
+	case lf.opt.NoVerifyRun:
+		lf.res.RegressionNote = "not run (--no-verify-run)"
+		return
+	}
+	r := p.runRegression(lf.ctx, lf.res.Gates.Regression, p.LogDir("lift"), "", lf.opt.Run)
+	lf.res.Regression = &r
+	if t := lf.res.RegressionAtTag; t != nil && tagLog != "" {
+		dst := filepath.Join(p.LogDir("lift"), "regression-at-tag.log")
+		if err := os.Rename(tagLog, dst); err == nil {
+			t.Log = p.Rel(dst)
+		} else if data, rerr := os.ReadFile(tagLog); rerr == nil && os.WriteFile(dst, data, 0o600) == nil {
+			t.Log = p.Rel(dst)
+		}
+	}
+	lf.res.RegressionVerdict, lf.res.RegressionNote = judgeLiftRegression(lf.res.RegressionAtTag, &r)
+}
+
+// removeUntracked removes the manifest's v0 skills git never tracked (an
+// ignored .claude/, L2): installer-owned, so they go too, once the commit
+// stands.
+func (lf *lifter) removeUntracked() error {
 	for _, s := range lf.untracked {
 		if err := os.RemoveAll(filepath.Join(lf.root, filepath.FromSlash(s))); err != nil {
 			return &FailError{Code: CodeLiftWriteFailed, Msg: "removing the untracked v0 skill " + s + ": " + err.Error() + " — the lift commit stands; remove the folder by hand"}
 		}
 	}
-
-	// The regression command at the lift commit, judged against its run
-	// at the tag: the baseline red gates are judged against (backlog 37),
-	// and the one way to tell a red the lift caused from one it found (L4).
-	switch {
-	case lf.res.Gates.Regression == "":
-		lf.res.RegressionNote = "no regression command was extracted: apex-plan sets `regression:` in _apex/config.yaml"
-	case lf.opt.NoVerifyRun:
-		lf.res.RegressionNote = "not run (--no-verify-run)"
-	default:
-		r := p.runRegression(ctx, lf.res.Gates.Regression, p.LogDir("lift"), "", lf.opt.Run)
-		lf.res.Regression = &r
-		if t := lf.res.RegressionAtTag; t != nil && tagLog != "" {
-			dst := filepath.Join(p.LogDir("lift"), "regression-at-tag.log")
-			if err := os.Rename(tagLog, dst); err == nil {
-				t.Log = p.Rel(dst)
-			} else if data, rerr := os.ReadFile(tagLog); rerr == nil && os.WriteFile(dst, data, 0o644) == nil {
-				t.Log = p.Rel(dst)
-			}
-		}
-		lf.res.RegressionVerdict, lf.res.RegressionNote = judgeLiftRegression(lf.res.RegressionAtTag, &r)
-	}
 	return nil
+}
+
+// regressionAtTag runs the regression command at the tag, first, before
+// anything is written: HEAD is the tag (pre-flight) and the tree is
+// clean. Its log stays outside the tree until the lift's state folder
+// exists; cleanup removes it. No command, or --no-verify-run: nothing.
+func (lf *lifter) regressionAtTag() (logPath string, cleanup func(), err error) {
+	cleanup = func() {}
+	if lf.res.Gates.Regression == "" || lf.opt.NoVerifyRun {
+		return "", cleanup, nil
+	}
+	tmp, err := os.MkdirTemp("", "ape-lift-tag-*")
+	if err != nil {
+		return "", cleanup, err
+	}
+	cleanup = func() { _ = os.RemoveAll(tmp) }
+	logPath = filepath.Join(tmp, "regression-at-tag.log")
+	p := &Project{Root: lf.root, DevRel: lf.devRel}
+	progressf(lf.opt.Run.Progress, "%s regression at %s started: %s", Stamp(), LiftTag, lf.res.Gates.Regression)
+	r := p.runWithRetries(lf.ctx, &PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: lf.res.Gates.Regression}, logPath,
+		Timeouts{}.Limits(KindRegression, lf.opt.Run.Timeout), nil, 0, p.isWorkTree(lf.ctx))
+	r.Task, r.Kind = regressionRef, KindRegression
+	lf.res.RegressionAtTag = &r
+	if lf.ctx.Err() != nil {
+		return "", cleanup, &FailError{Code: CodeRunInterrupted, Msg: "interrupted while the regression ran at " + LiftTag + " — nothing was written; lift again"}
+	}
+	return logPath, cleanup, nil
+}
+
+// movePin moves the project's ape pin to the running version (L1), and
+// reports whether .bingo/ goes in the lift commit. When bingo fails, .bingo/
+// goes back to the tag's and the note names the command.
+func (lf *lifter) movePin() bool {
+	a := lf.res.Ape
+	if a == nil || a.MovePin == nil {
+		return false
+	}
+	to := "v" + strings.TrimPrefix(a.Version, "v")
+	if err := a.MovePin(lf.ctx); err != nil {
+		// bingo may have half-written .bingo/: back to the tag's.
+		_, _ = git(lf.ctx, lf.root, "checkout", "--", ".bingo")
+		a.PinNote = "could not move the pin (" + err.Error() + "): after the lift, run " + a.PinCommand +
+			" and commit .bingo/; until then a bare ape here runs " + a.Pinned + ", so run v1 commands with APE_TOOLCHAIN=local"
+		return false
+	}
+	a.PinMoved = true
+	a.PinNote = "the lift commit moves " + a.PinFile + " from " + a.Pinned + " to " + to
+	lf.res.CommitMessage = strings.Replace(lf.res.CommitMessage, "- lays down the v1 skeleton",
+		"- moves the ape pin ("+a.PinFile+") from "+a.Pinned+" to "+to+"\n- lays down the v1 skeleton", 1)
+	return true
 }
 
 // judgeLiftRegression compares the regression command at the lift commit

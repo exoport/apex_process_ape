@@ -222,6 +222,6 @@ func TestDecidePin_ProjectLiftIsExempt(t *testing.T) {
 	in.locate = func(string) (string, bool) { return "", false }
 	d = decidePin(in)
 	require.True(t, d.run, "not installed: still runs here")
-	require.Nil(t, d.refuse)
+	require.NoError(t, d.refuse)
 	require.Equal(t, "/gobin/ape-v0.9.0", decidePin(pinInput(sub, "1.0.0-rc.3", "ape project check")).exec, "other v1 verbs still honour the pin")
 }
