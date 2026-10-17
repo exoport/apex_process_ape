@@ -79,6 +79,9 @@ type Config struct {
 	// machine lacks.
 	Checks   ChecksConfig `yaml:"checks"`
 	Requires Requires     `yaml:"requires"`
+	// Docs names the changelog and user docs a user-visible change
+	// updates (H21).
+	Docs DocsConfig `yaml:"docs"`
 }
 
 // SkillModel is one models.<skill> entry.

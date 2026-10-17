@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -277,5 +278,45 @@ func (r *Requires) UnmarshalYAML(n *yaml.Node) error {
 		out[name] = kind
 	}
 	*r = out
+	return nil
+}
+
+// DocsConfig is docs: (H21, D45) — where the project keeps the documents a
+// user-visible change must update, both optional, project-relative:
+//
+//	docs:
+//	  changelog: CHANGELOG.md
+//	  user_docs: docs/
+//
+// `ape project check` reports a configured path that does not exist
+// (docs.missing), and `ape status --json` carries the block as "docs" so
+// skills read it: apex-change adds an update task for a user-visible
+// change, apex-review checks it.
+type DocsConfig struct {
+	Changelog string `json:"changelog,omitempty"`
+	UserDocs  string `json:"user_docs,omitempty"`
+}
+
+// UnmarshalYAML parses and validates the block.
+func (d *DocsConfig) UnmarshalYAML(n *yaml.Node) error {
+	if err := checkKeys(n, "docs", "changelog", "user_docs"); err != nil {
+		return err
+	}
+	var raw map[string]string
+	if err := n.Decode(&raw); err != nil {
+		return fmt.Errorf("docs: %w", err)
+	}
+	for k, v := range raw {
+		v = strings.TrimSpace(v)
+		if v != "" && (filepath.IsAbs(v) || v == ".." || strings.HasPrefix(filepath.ToSlash(filepath.Clean(v)), "../")) {
+			return fmt.Errorf("docs.%s: %q is not a path inside the project — write it relative to the project root", k, v)
+		}
+		switch k {
+		case "changelog":
+			d.Changelog = v
+		case "user_docs":
+			d.UserDocs = v
+		}
+	}
 	return nil
 }

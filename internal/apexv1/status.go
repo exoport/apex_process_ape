@@ -98,16 +98,22 @@ type StatusReport struct {
 	PreExistingRed []PreExistingRed `json:"pre_existing_red"`
 	Spend          Spend            `json:"spend"`
 	Next           string           `json:"next"`
+	// Docs is _apex/config.yaml's docs: block (H21), always present ({}
+	// when unset): the changelog and user docs a user-visible change
+	// updates, for apex-change and apex-review to read.
+	Docs DocsConfig `json:"docs"`
 }
 
 // Status builds the report.
 func (p *Project) Status() *StatusReport {
 	r := &StatusReport{Root: p.Root, Initialized: p.IsV1(), Changes: []ChangeStatus{}, Milestones: []MilestoneLine{}, Fixes: []string{}}
-	if cfg, err := LoadConfig(p.Root); err == nil && cfg.ProjectName != "" {
+	cfg, cfgErr := LoadConfig(p.Root)
+	if cfgErr == nil && cfg.ProjectName != "" {
 		r.Project = cfg.ProjectName
 	} else {
 		r.Project = baseName(p.Root)
 	}
+	r.Docs = cfg.Docs
 	runs, _ := cost.RunCosts(p.Root)
 	for _, run := range runs {
 		r.Spend.TotalUSD += run.CostUSD

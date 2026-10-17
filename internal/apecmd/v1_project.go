@@ -116,6 +116,12 @@ unparseable and every command refuses it):
                                      $RADIX_DSN") while it is unset or empty, or runs
                                      docker as a command while it is not on PATH, is not
                                      run: reason "unrun" (exit -3), red, never green
+  docs: {changelog: CHANGELOG.md, user_docs: docs/}
+                                     both optional, project-relative: the changelog and
+                                     user docs a user-visible change updates (apex-change
+                                     adds the task, apex-review checks it); ape project
+                                     check reports a missing path (docs.missing); ape
+                                     status --json carries the block as "docs"
 
 --brownfield adds nothing; it records in _apex/state/project.json (ignored) that the
 project existed before APEX.
@@ -208,6 +214,8 @@ func newProjectCheckCmd() *cobra.Command {
                            (an older ape's state: move milestones.json and decisions.json
                            to _apex/state/, delete it; ` + "`ape project init`" + ` then adds
                            _apex/state/.gitignore)
+  docs                     each path _apex/config.yaml docs: names (changelog, user_docs)
+                           exists (docs.missing: create it, or fix the path)
   .claude/settings.json    ape's hooks registered as ` + "`ape project init`" + ` writes them:
                            hooks.missing / hooks.altered (matcher, type, async, a
                            stop timeout below 1800 s); ` + "`ape project init`" + ` restores them
@@ -320,6 +328,8 @@ func newStatusCmd() *cobra.Command {
     roadmap. A change's own task and delta checks red at baseline are normal test-first
     and never listed
   - next: what the way of working says comes next, derived from the state alone
+  - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
+    the skills that keep a changelog and user docs current
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 
