@@ -246,9 +246,12 @@ func newProjectCheckCmd() *cobra.Command {
   lift                     development/lift-disposition.md in a project whose v1 epoch is a
                            lift commit ("apex: lift …"): the disposition list awaits review
                            (lift.disposition-pending) until the person deletes the file
-  config                   since the v1 epoch, a commit that changed limits, checks, retries
-                           or requires in _apex/config.yaml and is not ape's (config.changed,
-                           D50) — a person reverts it or accepts it: ` + "`ape project accept-config`" + `
+  config                   since the v1 epoch, a commit that changed a guarded block of
+                           _apex/config.yaml — limits, checks, retries, requires, timeouts,
+                           caps, regression, commit, evidence, marketplaces, plugins, tools,
+                           human_review —
+                           and is not ape's (config.changed, D50) — a person reverts it or
+                           accepts it: ` + "`ape project accept-config`" + `
   caps                     _apex/config.yaml caps: (D69) — sizes like 16KB, 1MiB or plain
                            bytes, KB = KiB = 1024 bytes; default / hard ceiling:
                              project_md   16 KB / 48 KB    agents_md    16 KB / 48 KB

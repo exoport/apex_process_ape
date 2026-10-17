@@ -10,23 +10,35 @@ import (
 )
 
 // D50 (rc.2): config.changed. _apex/config.yaml is writable by an Edit, and
-// four of its blocks loosen what ape enforces: limits (H19), checks and
-// requires (H11) and retries (H12). Since the v1 epoch, a commit that
-// changes one of them must be ape's own (`apex: …`), or a person accepts it
-// afterwards with `ape project accept-config`; else config.changed. A
-// revert clears it, as for spec.edited.
+// some of its blocks loosen what ape enforces: limits (H19), checks and
+// requires (H11), retries (H12), timeouts (H10), caps (D69), regression
+// (backlog 32: unset, the net is off), commit (hooks: skip skips the
+// project's hooks on the squash), evidence (off keeps no evidence), and
+// marketplaces, plugins and tools (what runs inside a session: hooks, MCP
+// servers, the skills a session may start), and human_review (D75: who
+// accepts a human-review task in a person's place). Since the v1 epoch, a commit
+// that changes one of them must be ape's own (`apex: …`), or a person
+// accepts it afterwards with `ape project accept-config`; else
+// config.changed. A revert clears it, as for spec.edited. The guard
+// compares whole blocks and is blind to direction: raising a cap removes a
+// split trigger, lowering one hides work, and both are a person's call.
 
 // configAcceptedSubject starts the commit `ape project accept-config`
 // makes: every guarded change before it is a person's.
 const configAcceptedSubject = "apex: config accepted"
 
 // guardedConfigKeys are the config blocks a model must not loosen.
-var guardedConfigKeys = []string{"limits", "checks", "retries", "requires"}
+// A key the Config struct does not hold yet is compared all the same (a
+// block absent on both sides is equal), so the list can name it first.
+var guardedConfigKeys = []string{
+	"limits", "checks", "retries", "requires", "timeouts", "caps", "regression",
+	"commit", "evidence", "marketplaces", "plugins", "tools", "human_review",
+}
 
 func init() {
 	findingRules = append(findingRules, rule("", `^guarded config keys`, "config.changed"))
 	DiagnosticCodes = append(DiagnosticCodes,
-		CodeDoc{"config.changed", 1, ActionPerson, "a commit since the v1 epoch changed limits, checks, retries or requires in _apex/config.yaml and is not ape's (`apex: …`), and no person accepted it since (`ape project accept-config --by <who>`); a revert also clears it (D50)"},
+		CodeDoc{"config.changed", 1, ActionPerson, "a commit since the v1 epoch changed a guarded block of _apex/config.yaml — limits, checks, retries, requires, timeouts, caps, regression, commit, evidence, marketplaces, plugins, tools or human_review — and is not ape's (`apex: …`), and no person accepted it since (`ape project accept-config --by <who>`); a revert also clears it (D50, D69, D75)"},
 	)
 }
 
@@ -71,7 +83,7 @@ func (p *Project) configFindings(ctx context.Context, epoch string) []Finding {
 		}
 		short := c.sha[:min(7, len(c.sha))]
 		fs = append(fs, Finding{File: rel, Message: fmt.Sprintf("guarded config keys (%s) changed by commit %s (%q), which is not ape's"+
-			" — limits and check rules are a person's: a person reverts it (git revert %s), or accepts it: `ape project accept-config --by <who>`",
+			" — limits, check rules and caps are a person's: a person reverts it (git revert %s), or accepts it: `ape project accept-config --by <who>`",
 			strings.Join(changed, ", "), short, c.subject, short)})
 	}
 	return fs

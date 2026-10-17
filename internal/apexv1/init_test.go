@@ -163,7 +163,7 @@ func TestInit_ExistingConfigBlocksAreKept(t *testing.T) {
 		run(t, p.Root, "commit", "-q", "-m", "chore: apex config")
 		fs := p.configFindings(ctx(), epoch)
 		require.Len(t, fs, 1)
-		require.Contains(t, fs[0].Message, "guarded config keys (retries) changed")
+		require.Contains(t, fs[0].Message, "guarded config keys (retries, timeouts) changed")
 	})
 }
 
@@ -272,4 +272,23 @@ func writeManifest(t *testing.T, p *Project, skill, runID, started string, usd f
 	require.NoError(t, os.MkdirAll(dir, 0o755))
 	m := "run_id: " + runID + "\nstarted_at: " + started + "\ntotals:\n  cost_usd: " + strconv.FormatFloat(usd, 'f', -1, 64) + "\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte(m), 0o644))
+}
+
+// A guarded key the Config struct does not hold (tools:, before the tools
+// slot) is compared as a raw block all the same.
+func TestConfigChanged_GuardsAKeyOutsideTheStruct(t *testing.T) {
+	p := fixture(t, baseFiles())
+	epoch := HeadSHA(ctx(), p.Root)
+	write(t, p, "_apex/config.yaml", "tools:\n  review:\n    - {name: lint, skill: lint-review, when: always}\n")
+	commitAll(t, p, "chore: a review tool")
+	fs := p.configFindings(ctx(), epoch)
+	require.Len(t, fs, 1)
+	require.Contains(t, fs[0].Message, "guarded config keys (tools) changed")
+	require.Empty(t, p.guardedConfigDiff(ctx(), epoch, epoch, configYAML), "absent on both sides: equal")
+
+	write(t, p, "_apex/config.yaml", "tools:\n  review:\n    - {name: lint, skill: lint-review, when: always}\nhuman_review: {delegate: apex-accept}\n")
+	commitAll(t, p, "chore: a delegate")
+	fs = p.configFindings(ctx(), epoch)
+	require.Len(t, fs, 2)
+	require.Contains(t, fs[0].Message, "guarded config keys (human_review) changed")
 }

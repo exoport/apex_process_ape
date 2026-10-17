@@ -470,6 +470,9 @@ func TestV1Commands_RegressionRedAtBaseline(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(root, filepath.FromSlash("development/changes/add-wave/change.md")), []byte(v1ChangeMD), 0o644))
 	v1Git(t, root, "add", "-A")
 	v1Git(t, root, "commit", "-q", "-m", "plan, and a red suite")
+	// regression: is guarded (config.changed): a person accepts it.
+	_, _, err = v1Exec(t, newProjectCmd, "accept-config", "--by", "t", "--cwd", root)
+	require.NoError(t, err)
 
 	stdout, _, err := v1Exec(t, newChangeCmd, "start", "add-wave", "--cwd", root)
 	require.NoError(t, err)
