@@ -320,6 +320,7 @@ func TestHookCommands(t *testing.T) {
 // the hook's verdict, counts a block as a deferral, and writes the
 // verdicts into the run manifest.
 func TestStopGateRecorder(t *testing.T) {
+	t.Setenv("APE_SESSION", "task/test") // the hook blocks only in sessions ape launched (H13)
 	root := v1Repo(t)
 	_, _, err := v1Exec(t, newChangeCmd, "new", "add-wave", "--milestone", "M1", "--touches", "greeting", "--cwd", root)
 	require.NoError(t, err)

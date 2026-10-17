@@ -111,6 +111,7 @@ func stopPayload(cwd, event string, active bool) HookPayload {
 }
 
 func TestStopHook(t *testing.T) {
+	t.Setenv(envApeSession, "task/test") // blocking is for sessions ape launched (H13)
 	t.Run("no change in progress allows", func(t *testing.T) {
 		p := fixture(t, baseFiles())
 		d := StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
@@ -217,6 +218,7 @@ func TestStopGateConfigured(t *testing.T) {
 }
 
 func TestWaitStopVerdict(t *testing.T) {
+	t.Setenv(envApeSession, "task/test")
 	p := startedWave(t)
 	stopAt := time.Now()
 	none := map[string]bool{}
@@ -316,4 +318,37 @@ func TestHooks_IgnoreABareDevelopmentFolder(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(filepath.Join(root, "development", "project.md"), []byte("# x\n"), 0o644))
 	require.Equal(t, root, FindRoot(sub), "a development/project.md is")
+}
+
+// H13: outside a session ape launched, the hook never blocks and runs no
+// check; it shows the person what was red at the last verify.
+func TestStopHook_OutsideAnApeSession(t *testing.T) {
+	t.Setenv(envApeSession, "")
+	p := startedWave(t)
+	d := StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
+	require.False(t, d.Block, "a red check does not block a person's own session")
+	require.Equal(t, StopNotApeSession, d.Record.Reason)
+	require.Empty(t, d.Notice, "no verify yet: nothing known to show")
+	out, err := d.Output()
+	require.NoError(t, err)
+	require.Nil(t, out)
+	require.NoFileExists(t, filepath.Join(p.LogDir("add-wave"), "stop-T1.log"), "no check runs")
+
+	v, err := p.Verify(ctx(), "add-wave", RunOptions{})
+	require.NoError(t, err)
+	require.False(t, v.Green)
+	d = StopHook(ctx(), stopPayload(p.Root, "Stop", false), RunOptions{})
+	require.False(t, d.Block)
+	require.Contains(t, d.Notice, "change add-wave is in progress")
+	require.Contains(t, d.Notice, "T1 `./wave.sh`")
+	require.Contains(t, d.Notice, "Not blocking")
+	out, err = d.Output()
+	require.NoError(t, err)
+	var got map[string]string
+	require.NoError(t, json.Unmarshal(out, &got))
+	require.Equal(t, d.Notice, got["systemMessage"])
+	require.NotContains(t, got, "decision")
+
+	d = StopHook(ctx(), stopPayload(p.Root, "SubagentStop", false), RunOptions{})
+	require.False(t, d.Block, "nor a sub-agent's stop")
 }

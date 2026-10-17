@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -218,16 +219,27 @@ type StopRecord struct {
 type StopDecision struct {
 	Block  bool
 	Reason string
+	// Notice is shown to the person when the stop is allowed but a check
+	// was red: outside an ape session the hook informs and never blocks
+	// (H13).
+	Notice string
 	Record StopRecord
 }
 
-// Output renders the decision as Stop/SubagentStop hook JSON; nil allows.
+// Output renders the decision as Stop/SubagentStop hook JSON; nil allows
+// silently, a Notice allows with a systemMessage.
 func (d StopDecision) Output() ([]byte, error) {
 	if !d.Block {
-		return nil, nil
+		if d.Notice == "" {
+			return nil, nil
+		}
+		return json.Marshal(map[string]any{"systemMessage": d.Notice})
 	}
 	return json.Marshal(map[string]any{"decision": "block", "reason": d.Reason})
 }
+
+// StopNotApeSession is the allow reason outside a session ape launched.
+const StopNotApeSession = "not a session ape launched (no APE_SESSION): the stop hook informs, never blocks"
 
 func (p *Project) stopRecordPath(sessionID, agentID string) string {
 	key := sanitizeKey(sessionID)
@@ -389,6 +401,18 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 		return finish(StopDecision{Record: rec})
 	}
 	rec.Change = ci.ID
+	// H13: the settings.json copy of the hook also runs in a person's own
+	// Claude Code session. There it never blocks — a person asking the
+	// model a question on a change branch must not have it sent back to
+	// work — and runs no check: it shows the person what was red at the
+	// change's last verify. ape's sessions carry APE_SESSION, which Claude
+	// Code hands to its hooks.
+	if os.Getenv(envApeSession) == "" {
+		rec.Verdict = StopAllow
+		rec.ConsecutiveBlocks = 0
+		rec.Reason = StopNotApeSession
+		return finish(StopDecision{Record: rec, Notice: p.stopNotice(ci)})
+	}
 	if rec.ConsecutiveBlocks >= MaxConsecutiveStopBlocks {
 		rec.Verdict = StopAllow
 		rec.Reason = fmt.Sprintf("allowed after %d consecutive blocks", rec.ConsecutiveBlocks)
@@ -423,6 +447,32 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 	reason := stopReason(ci.ID, red, rec.ConsecutiveBlocks)
 	rec.Reason = truncate(reason, 300)
 	return finish(StopDecision{Block: true, Reason: reason, Record: rec})
+}
+
+// stopNotice tells a person outside an ape session which checks of the
+// in-progress change were red at its last verify of the current plan; ""
+// when none were, or there is no such verify.
+func (p *Project) stopNotice(ci ChangeInfo) string {
+	lv := p.lastVerify(ci.ID)
+	if lv == nil || lv.PlanDigest != ci.State.PlanDigest || len(lv.Red) == 0 {
+		return ""
+	}
+	refs := make([]string, 0, len(lv.Red))
+	for ref := range lv.Red {
+		refs = append(refs, ref)
+	}
+	sort.Strings(refs)
+	lines := make([]string, 0, len(refs))
+	for _, ref := range limit(refs, 10) {
+		if cmd, ok := lv.Red[ref]; ok {
+			lines = append(lines, ref+" `"+cmd+"`")
+		} else {
+			lines = append(lines, ref)
+		}
+	}
+	return fmt.Sprintf("APEX: change %s is in progress, and at its last verify (%s, %s) %d check(s) were red: %s. "+
+		"Not blocking: this session was not launched by ape. `ape change verify %s` re-runs them.",
+		ci.ID, lv.At, short(lv.SHA), len(refs), strings.Join(lines, ", "), ci.ID)
 }
 
 func stopReason(id string, red []CheckResult, n int) string {

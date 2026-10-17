@@ -21,8 +21,9 @@ func newHookCmd() *cobra.Command {
 		Long: `Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
 
   session-start   SessionStart: adds ` + "`ape status --brief`" + ` as context
-  stop            Stop and SubagentStop: blocks a stop while the one in-progress change
-                  has a red command check (at most 3 times in a row)
+  stop            Stop and SubagentStop: in a session ape launched, blocks a stop while the
+                  in-progress change has a red command check (at most 3 times in a row);
+                  in a person's own session, only shows what was red
   pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
@@ -140,6 +141,13 @@ Allows (prints nothing) when HEAD is on no change branch (the base branch: plann
 milestones), when the change is not in-progress (blocked, verified, reviewed), when the
 last verify had nothing red, when every re-run check is green, or after 3 consecutive
 blocks (the count resets when the payload's stop_hook_active is false).
+
+Only in a session ape launched (H13): the hook blocks when its process carries
+APE_SESSION, which every session ape spawns has and Claude Code hands to its hooks. In a
+person's own Claude Code session (plain ` + "`claude`" + `, the settings.json copy of the hook) it
+never blocks and runs no check: on an in-progress change whose last verify had red
+checks it allows the stop with {"systemMessage":"APEX: change <id> is in progress, and at
+its last verify … check(s) were red: …"}, shown to the person; otherwise it prints nothing.
 
 The verdict is also written to _apex/state/hooks/<session>[-<agent>].json, which
 is how ` + "`ape task`" + ` learns that a Stop it saw did not end the turn.`,
