@@ -413,7 +413,9 @@ func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []S
 		return undo(err)
 	}
 	res.BranchTip = tip
-	msg := p.squashMessage(ctx, res.Subject, base, branch, id)
+	// A delegate's acceptance is named in the squash (D75), whichever
+	// branch recorded it.
+	msg := p.squashMessage(ctx, res.Subject, base, branch, id, delegatedTrailers(st)...)
 	if out, err := p.commitSquash(ctx, msg, res.Hooks); err != nil {
 		if res.Hooks && p.hasCommitHooks(ctx) {
 			return undo(&FailError{Code: CodeHookFailed, Msg: "a git hook refused the squash commit on " + base + ": " + strings.Join(lastLines(out, 15), " | ") +

@@ -428,6 +428,13 @@ func newStatusCmd() *cobra.Command {
     latest verify of the current plan, or a human-review one accepted — and
     review_tools, its review_tools: frontmatter, as [{name, skill}]; skill is what
     _apex/config.yaml tools: names ("" when it names none). Both always present ([])
+  - acceptances (JSON changes[].accepted: [{task, by, at, evidence, run}]): by a person,
+    or by "delegate:<skill>" with its run when _apex/config.yaml human_review delegates
+    them (D75; "Accepted by a delegate" in the long output); and each human-review task's
+    newest delegate verdict (JSON changes[].delegate: {"T2": {verdict, reason, run, at,
+    voided}}): a fail or a voided run leaves the task awaiting a person, and the brief
+    says why. With human_review set, next names the delegate for an awaiting task it has
+    not judged (` + "`ape change accept <id> <T> --delegate --wait 9m`" + `) before a person
   - spend so far: the sum of finished ape task/pipeline run manifests
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
     cmd, exit, sha}]): the regression command, and scenario checks of the spec a change
@@ -543,6 +550,17 @@ func statusLong(r *apexv1.StatusReport) string {
 			}
 			b.WriteString("\n")
 		}
+	}
+	var delegated []string
+	for _, c := range r.Changes {
+		for _, a := range c.Accepted {
+			if strings.HasPrefix(a.By, apexv1.DelegateByPrefix) {
+				delegated = append(delegated, fmt.Sprintf("  %-28s %-4s by %s (run %s)", c.ID, a.Task, a.By, a.Run))
+			}
+		}
+	}
+	if len(delegated) > 0 {
+		b.WriteString("\nAccepted by a delegate (D75):\n" + strings.Join(delegated, "\n") + "\n")
 	}
 	if r.Milestone != nil && r.Milestone.GateLast != nil && !r.Milestone.GateLast.Green() {
 		fmt.Fprintf(&b, "\nLast gate output (%s):\n", r.Milestone.GateLast.Log)

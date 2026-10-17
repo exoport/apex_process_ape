@@ -225,6 +225,14 @@ func SessionLocksRoot(projectRoot string) string {
 	return filepath.Join(ApeRoot(projectRoot), "sessions")
 }
 
+// DelegateRoot holds one verdict per human-review delegate run (APEX v1,
+// D75: `ape change accept --delegate`), <run-id>.json, written by the
+// delegate session's `ape change accept --verdict`. Like a handle, not a
+// run: the session's own manifest is under TasksRoot.
+func DelegateRoot(projectRoot string) string {
+	return filepath.Join(ApeRoot(projectRoot), "delegate")
+}
+
 // ServiceRoot is `ape service`'s state directory.
 func ServiceRoot(projectRoot string) string {
 	return filepath.Join(ApeRoot(projectRoot), "service")

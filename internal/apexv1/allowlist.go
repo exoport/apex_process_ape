@@ -11,7 +11,8 @@ package apexv1
 var CoreChildSkills = []string{"apex-plan", "apex-change", "apex-apply", "apex-review", "apex-release", "apex-accept"}
 
 // ChildSkillAllowList is the depth-1 allow-list (D62, D59 Q4, D76): the
-// core skills, then every skill the config's tools: slots name (design,
+// core skills, then human_review's delegate, then every skill the config's
+// tools: slots name (design,
 // then review, in config order), each once. A tool's skill is listed as
 // declared — <plugin>:<skill> for a plugin's — which is the name ape task
 // types. Only valid tools: entries count (an invalid one is a
@@ -22,8 +23,12 @@ func (p *Project) ChildSkillAllowList(cfg Config) []string {
 	for _, s := range out {
 		seen[s] = true
 	}
-	// rc3-f: + human_review.delegate (the configured delegate skill, when
-	// set), appended here once Config carries HumanReview.
+	// The configured human-review delegate (D75, D76), when it is not
+	// apex-accept.
+	if d := cfg.HumanReview.Skill(); d != "" && !seen[d] {
+		seen[d] = true
+		out = append(out, d)
+	}
 	for _, slot := range ToolSlots {
 		for _, t := range cfg.Tools.Slot(slot) {
 			if !seen[t.Skill] {

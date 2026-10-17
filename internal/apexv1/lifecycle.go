@@ -719,22 +719,28 @@ func (p *Project) saveAndCommitSubject(ctx context.Context, id string, st *State
 // Q18, acceptOnBase); an archived change, in its archived state.json on
 // the base branch, wherever HEAD is (acceptArchived).
 func (p *Project) Accept(ctx context.Context, id, task, by string, evidence ...string) (*State, error) {
+	return p.accept(ctx, id, acceptance{task: task, by: by, items: evidence})
+}
+
+// accept records a, for a person (Accept) or a delegate (AcceptDelegated).
+func (p *Project) accept(ctx context.Context, id string, a acceptance) (*State, error) {
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err
 	}
-	by = strings.TrimSpace(by)
-	if by == "" {
+	a.by = strings.TrimSpace(a.by)
+	if a.by == "" {
 		return nil, &UsageError{Code: "usage.by", Msg: "--by names the person accepting"}
 	}
+	task := a.task
 	ci, err := p.requireChange(ctx, id)
 	// An archived change — or one this checkout's tree does not hold, as
 	// on a change branch from before its archive — is accepted on the base.
 	if fe, ok := errors.AsType[*FailError](err); ok && (fe.Code == "change.archived" || fe.Code == CodeChangeNotFound) && p.isWorkTree(ctx) {
-		ev, everr := p.resolveEvidence(ctx, evidence)
+		ev, everr := a.evidence(func(items []string) ([]Evidence, error) { return p.resolveEvidence(ctx, items) })
 		if everr != nil {
 			return nil, everr
 		}
-		st, aerr := p.acceptArchived(ctx, id, task, by, ev)
+		st, aerr := p.acceptArchived(ctx, id, a, ev)
 		if afe, ok := errors.AsType[*FailError](aerr); fe.Code == "change.archived" || !ok || afe.Code != CodeChangeNotFound {
 			return st, aerr
 		}
@@ -749,20 +755,32 @@ func (p *Project) Accept(ctx context.Context, id, task, by string, evidence ...s
 	// there without a checkout (D51 Q17) — on its base when it is
 	// reviewed (D52 Q18); else HEAD must be on its branch.
 	if ci.Branch == ChangeBranch(id) && ci.State.Status == StatusReviewed {
-		return p.acceptOnBase(ctx, ci, task, by, evidence)
+		return p.acceptOnBase(ctx, ci, a)
 	}
 	if ci.Branch != ChangeBranch(id) {
 		if err := p.requireOnBranch(ctx, id); err != nil {
 			return nil, err
 		}
 	}
-	ev, err := p.resolveEvidence(ctx, evidence)
+	ev, err := a.evidence(func(items []string) ([]Evidence, error) { return p.resolveEvidence(ctx, items) })
 	if err != nil {
 		return nil, err
 	}
 	st := ci.State
-	withAcceptance(st, ci.Doc, task, by, ev)
-	if err := p.saveChangeState(ctx, ci, st, "apex: "+id+" "+st.Status); err != nil {
+	withAcceptance(st, ci.Doc, a.record(ev))
+	subject := "apex: " + id + " " + st.Status
+	if ci.Branch == "" && a.run != "" && p.isWorkTree(ctx) {
+		// A delegate's acceptance commits its notes beside the state, and
+		// says who accepted in a trailer the archive squash carries.
+		if err := SaveState(p.StateFile(id), st); err != nil {
+			return nil, err
+		}
+		if _, err := p.commitWithTrailer(ctx, subject, a.trailers(id), append([]string{p.Rel(p.StateFile(id))}, a.notes...)...); err != nil {
+			return nil, &FailError{Code: CodeCommitFailed, Msg: "state.json written but its commit failed: " + err.Error() + " — fix git (identity, lock) and re-run the command"}
+		}
+		return st, nil
+	}
+	if err := p.saveChangeState(ctx, ci, st, subject); err != nil {
 		return nil, err
 	}
 	return st, nil

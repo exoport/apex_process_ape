@@ -174,7 +174,7 @@ func parseTool(n *yaml.Node, at string) (Tool, []string) {
 		probs = append(probs, fmt.Sprintf("%s: skill %q is not a skill name (<skill>, or <plugin>:<skill> for a plugin's; no leading /)", at, tool.Skill))
 	}
 	if err := ValidateArgsTemplate(tool.Args); err != nil {
-		probs = append(probs, fmt.Sprintf("%s: args %q: %v", at, tool.Args, err))
+		probs = append(probs, fmt.Sprintf("%s: %v", at, err))
 	}
 	if tool.Effort != "" && !slices.Contains(effort.Levels, tool.Effort) {
 		probs = append(probs, fmt.Sprintf("%s: effort %q is not one of %s", at, tool.Effort, strings.Join(effort.Levels, ", ")))

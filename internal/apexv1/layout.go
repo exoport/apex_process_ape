@@ -89,6 +89,9 @@ type Config struct {
 	// Caps are the artefact size caps (D69): each a default with a hard
 	// ceiling (caps.go).
 	Caps Caps `yaml:"caps"`
+	// HumanReview delegates a human-review task's acceptance to a skill
+	// (D75, D76; delegate.go): absent, only a person accepts one.
+	HumanReview *HumanReviewConfig `yaml:"human_review"`
 }
 
 // SkillModel is one models.<skill> entry.

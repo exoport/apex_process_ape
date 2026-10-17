@@ -28,7 +28,7 @@ var boardRefreshVerbs = map[string]bool{
 	"next add":   true,
 	"change new": true, "change approve": true, "change start": true, "change verify": true,
 	"change review": true, "change accept": true, "change block": true, "change answer": true,
-	"change archive": true, "change abandon": true,
+	"change archive": true, "change abandon": true, "change tool": true,
 }
 
 // boardSkipVerbs are the v1 leaves that do not refresh: they write nothing

@@ -124,7 +124,39 @@ func PreTool(payload HookPayload) PreToolDecision {
 			return PreToolDecision{Deny: true, Path: p.Rel(target), Reason: reason}
 		}
 	}
+	if marker := os.Getenv(EnvDelegate); marker != "" {
+		if reason := p.delegateConfinement(marker, target); reason != "" {
+			return PreToolDecision{Deny: true, Path: p.Rel(target), Reason: reason}
+		}
+	}
 	return PreToolDecision{}
+}
+
+// delegateConfinement is the read-only rule of a delegate session (D75):
+// inside the project, only an accept-* note in the change's assets folder
+// may be written. Outside it, anything goes, as for a review session.
+func (p *Project) delegateConfinement(marker, abs string) string {
+	id, task, _ := strings.Cut(marker, "/")
+	folder := p.DevRel + "/changes/" + id
+	if run := p.LoadDelegateRun(id, task); run != nil && run.Folder != "" {
+		folder = run.Folder
+	}
+	root := p.Root
+	if resolved, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
+		abs = filepath.Join(resolved, filepath.Base(abs))
+		if r, err := filepath.EvalSymlinks(root); err == nil {
+			root = r
+		}
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	if name, ok := strings.CutPrefix(filepath.ToSlash(rel), folder+"/assets/accept-"); ok && name != "" && !strings.Contains(name, "/") {
+		return ""
+	}
+	return "this is a read-only delegate session for " + task + " of change " + id + ": the only files it may write in the project are " +
+		folder + "/assets/accept-* (its evidence notes)"
 }
 
 // reviewConfinement is the read-only rule of a review session (D18):
