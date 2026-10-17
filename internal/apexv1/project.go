@@ -158,6 +158,7 @@ func (p *Project) Check() []Finding {
 	}
 	add(p.layoutFindings()...)
 	add(p.liftDispositionFindings(context.Background())...)
+	add(p.settingsIgnoredFindings(context.Background())...)
 
 	if doc, err := readFileString(p.ProjectMD()); err != nil {
 		missing(p.ProjectMD(), "run `ape project init`, then write it (apex-plan)")

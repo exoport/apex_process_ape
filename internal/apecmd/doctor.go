@@ -194,27 +194,51 @@ verdict.
 
 Doctor runs a fixed set of checks against the host (claude / git /
 node / npx binaries, Playwright host compatibility, ~/.claude
-writability) and the project at --cwd (framework metadata, installed
-skills + pipelines, and the always-on operating-rules fragment +
-CLAUDE.md managed block). Project-scoped checks degrade to INFO when run
-outside a project root; the operating-rules checks only hard-fail when a
-framework install that manages them has lost the fragment, import, or
-apex-orchestrator skill.
+writability) and the project at --cwd. Which project rows run depends on
+the project (H27):
 
-Eight checks report on PROJECT DATA rather than on the host: whether the
-config resolves at all (nothing else can see the project's artifacts
-without it), registry drift, story frontmatter, tracker divergence,
-whether the tracker's lock sidecar is gitignored, whether ape's own run
-subtree is gitignored, team-memory size, and any pending project-data
-migration. All eight degrade to INFO outside a project root.
+  APEX v1 (_apex/state/ or development/project.md): the host rows, the
+  framework rows that apply to any install (skills, output styles,
+  command surface, the ape floor framework.ape_version, tag_moved,
+  upgrade migrations), and the v1 rows:
+    project.check     ape project check (its hooks and plugins have rows
+                      of their own); WARN with the first findings
+    hooks.project     ape's hooks missing from or altered in
+                      .claude/settings.json (ape project init restores them)
+    plugins.project   see below
+    claude.version    the installed Claude Code's version, reported only
+                      (a tested range comes later)
+    state.gitignore   _apex/state/'s whitelist: milestones.json and
+                      decisions.json tracked, ape's run records, logs,
+                      hook verdicts and counters ignored and untracked
+    settings.shared   .claude/settings.json not ignored by git: an ignored
+                      one shares ape's hooks with no other checkout (only
+                      ape task sessions get them inline)
+  None of v0's rows run there: --strict is green on a healthy v1 project.
 
-The two "is it gitignored" rows report and never write. .gitignore is the
+  Anywhere else: the rows below, v0's included, plus apex.v0, which WARNs
+  in an APEX v0 project: this ape retired the v0 commands its skills
+  call, so use the project's pinned v0 ape (.bingo), or lift it
+  (ape framework update to v1 runs ape project lift).
+
+  --only runs exactly the checks it names, whatever the project.
+
+The v0 rows: framework metadata, installed pipelines, the always-on
+operating-rules fragment + CLAUDE.md managed block (hard-failing only when
+a framework install that manages them has lost the fragment, import, or
+apex-orchestrator skill), and seven that report on v0 PROJECT DATA:
+whether the config resolves at all, registry drift, story frontmatter,
+tracker divergence, whether ape's own run subtree is gitignored,
+team-memory size, and any pending project-data migration. Project-scoped
+checks degrade to INFO outside a project root.
+
+The "is it gitignored" rows report and never write. .gitignore is the
 operator's file; a tool that edits it uninvited is worse than one that
 points. Both also distinguish COMMITTED from merely unignored, because an
 ignore line does not untrack anything — on a project that already
 committed the path, adding the line changes nothing at all.
 
-memory.size is one of only two Required checks in that group, deliberately:
+memory.size is one of only two Required checks among the v0 rows, deliberately:
 a non-required FAIL is downgraded to WARN, so nothing else could surface a
 team-memory.md past its hard ceiling: far past what one Read shows, and
 nearing the 256 KiB byte cap at which a Read fails outright.
@@ -265,12 +289,13 @@ silent:
                                 than degrading.
 
                                 It compares command NAMES ONLY. A binary
-                                can provide "ape story fields" with an
+                                can provide "ape change start" with an
                                 older flag set and still pass, so this is
                                 a version-skew guard and not a statement
                                 of version compatibility. A framework that
-                                ships no manifest predates the contract
-                                and the check reports a skip.
+                                ships no manifest predates the contract,
+                                and a v1 manifest declares only
+                                min_ape_version: both report a skip.
   aboard.skill_reference        whether a .claude/skills/aboard reference
                                 copied into this project still describes
                                 the board this binary serves, by capsHash.
@@ -302,8 +327,9 @@ evidence is not coverage.
   ape doctor --only hooks.contract_drift --strict --cwd <project>
 
 Note the --cwd: hook drift is observed from the runlogs ape itself wrote
-(<project>/_output/ape), so it can only be judged against a project ape has
-actually run pipelines in, not against the ape repo. This is the
+(<project>/_apex/state/runs in a v1 project, else <project>/_output/ape), so
+it can only be judged against a project ape has actually run sessions in,
+not against the ape repo. This is the
 observational read — point it at a real project. The release gate takes the
 other route: "make check-hooks" seeds its own runlog with one unattended
 session, so it always has a corpus to judge. An unknown name in --only is
@@ -327,10 +353,12 @@ Exit codes:
 					}
 				}
 			}
-			checks, err := selectChecks(allChecks, parseSkipList(onlyCSV))
+			only := parseSkipList(onlyCSV)
+			checks, err := selectChecks(allChecks, only)
 			if err != nil {
 				return err
 			}
+			checks = scopeChecks(checks, env, only)
 			skip := parseSkipList(skipCSV)
 			report := runDoctor(cmd.Context(), checks, env, skip)
 			format := output.Format(outputFormat)

@@ -180,7 +180,10 @@ func newProjectCheckCmd() *cobra.Command {
                            (lift.disposition-pending) until the person deletes the file
   .claude/settings.json    ape's hooks registered as ` + "`ape project init`" + ` writes them:
                            hooks.missing / hooks.altered (matcher, type, async, a
-                           stop timeout below 1800 s); ` + "`ape project init`" + ` restores them
+                           stop timeout below 1800 s); ` + "`ape project init`" + ` restores them;
+                           and shared through git: settings.ignored when git ignores it
+                           (and does not track it), since its hooks then reach no other
+                           checkout — only ` + "`ape task`" + ` sessions get them inline
   plugins                  _apex/config.yaml marketplaces/plugins: settings.json's
                            extraKnownMarketplaces/enabledPlugins match them, and (when
                            claude is on PATH) each plugin is installed at project scope

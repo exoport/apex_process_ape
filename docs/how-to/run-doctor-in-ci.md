@@ -13,6 +13,8 @@ Exit codes:
 - `0` — every required check passed and no warnings (under `--strict`, any WARN is treated as failure).
 - `1` — at least one required check failed, or at least one WARN was raised under `--strict`.
 
+In an APEX v1 project doctor runs the host rows and the v1 project rows (`project.check`, `hooks.project`, `plugins.project`, `framework.ape_version`, `claude.version`, `state.gitignore`, `settings.shared`) and none of APEX v0's, so `--strict` is green on a healthy v1 project. In a v0 project the v0 rows run and `apex.v0` warns that the project needs its pinned v0 ape. `ape doctor --help` lists every row.
+
 Drop `--strict` if you want WARN-level findings (e.g. "node not on PATH" for a pipeline you don't run) to remain advisory rather than fail the job.
 
 ## GitHub Actions snippet
