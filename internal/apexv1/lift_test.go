@@ -385,7 +385,7 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	require.Equal(t, "sh ./check.sh && test -f main.go", res.Gates.Regression)
 	cfg, err := LoadConfig(root)
 	require.NoError(t, err)
-	require.Equal(t, "sh ./check.sh && test -f main.go", cfg.Regression)
+	require.Equal(t, "sh ./check.sh && test -f main.go", cfg.Regression.Change)
 	require.Equal(t, "greeter", cfg.ProjectName)
 	require.Equal(t, "development", cfg.DevelopmentFolder)
 	agents := read(t, p, "AGENTS.md")
