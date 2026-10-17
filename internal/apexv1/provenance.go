@@ -41,26 +41,27 @@ func (p *Project) provenanceFindings(ctx context.Context) []Finding {
 	}
 	dev := p.DevRel + "/"
 	out, err := gitRaw(ctx, p.Root, "log", "--no-renames", "--relative", "--name-only",
-		"--format=%x1e%H%x1f%s%x1f%(trailers:key=Change,valueonly,separator=%x2c)%x1f%b%x1d",
+		"--format=%x1e%H%x1f%s%x1f%(trailers:key=Change,valueonly,separator=%x2c)%x1f%P%x1f%b%x1d",
 		epoch+"..HEAD", "--", dev+"specs", dev+"changes", dev+"archive")
 	if err != nil {
 		return nil
 	}
 	type commit struct {
-		sha, subject string
-		squash, apex bool
-		files        []string
+		sha, subject, parent string
+		squash, apex         bool
+		files                []string
 	}
 	archived := p.ArchivedIDs()
 	reverted := map[string]bool{}
 	var commits []commit
 	for rec := range strings.SplitSeq(out, "\x1e") {
 		head, files, ok := strings.Cut(rec, "\x1d")
-		parts := strings.SplitN(head, "\x1f", 4)
-		if !ok || len(parts) < 4 {
+		parts := strings.SplitN(head, "\x1f", 5)
+		if !ok || len(parts) < 5 {
 			continue
 		}
-		c := commit{sha: parts[0], subject: parts[1], apex: strings.HasPrefix(parts[1], "apex:")}
+		parent, _, _ := strings.Cut(parts[3], " ")
+		c := commit{sha: parts[0], subject: parts[1], parent: parent, apex: strings.HasPrefix(parts[1], "apex:")}
 		for id := range strings.SplitSeq(parts[2], ",") {
 			if id = strings.TrimSpace(id); id != "" {
 				if _, ok := archived[id]; ok {
@@ -68,7 +69,7 @@ func (p *Project) provenanceFindings(ctx context.Context) []Finding {
 				}
 			}
 		}
-		if m := revertsRe.FindStringSubmatch(parts[3]); m != nil {
+		if m := revertsRe.FindStringSubmatch(parts[4]); m != nil {
 			reverted[m[1]], reverted[c.sha] = true, true
 		}
 		for f := range strings.SplitSeq(files, "\n") {
@@ -97,7 +98,7 @@ func (p *Project) provenanceFindings(ctx context.Context) []Finding {
 				fs = append(fs, Finding{File: f, Message: "edited outside an archive squash by " + by +
 					", which carries no `Change:` trailer of an archived change — specs change only through `ape change archive`: " +
 					"a person reverts it (git revert " + short + ") and re-plans the edit as a change"})
-			case stateJSONPathRe.MatchString(rel) && !c.apex && !c.squash:
+			case stateJSONPathRe.MatchString(rel) && !c.apex && !c.squash && !p.resolvesConflict(ctx, c.parent, rel):
 				reported[f] = true
 				fs = append(fs, Finding{File: f, Message: "changed outside an apex: commit by " + by +
 					" — only ape writes state.json: a person reverts it (git revert " + short + ") and lets the ape command record the status"})
@@ -105,6 +106,29 @@ func (p *Project) provenanceFindings(ctx context.Context) []Finding {
 		}
 	}
 	return fs
+}
+
+// conflictedRe is the subject of ape's commit that leaves a rebase
+// conflict on change/<id> (H8): the change's state, with its conflict list
+// staged for the resolution commit.
+var conflictedRe = regexp.MustCompile(`^apex: (\S+) conflicted rebasing onto `)
+
+// resolvesConflict reports a commit whose first parent is ape's
+// conflicted-rebase commit of the change whose state.json (rel, under the
+// development folder) it writes: apex-apply's resolution commit, which
+// carries the state ape staged and could not commit itself (D47 Q3).
+func (p *Project) resolvesConflict(ctx context.Context, parent, rel string) bool {
+	id, ok := strings.CutPrefix(rel, "changes/")
+	if !ok || parent == "" {
+		return false
+	}
+	id = strings.TrimSuffix(id, "/state.json")
+	subject, err := git(ctx, p.Root, "log", "-1", "--format=%s", parent)
+	if err != nil {
+		return false
+	}
+	m := conflictedRe.FindStringSubmatch(subject)
+	return m != nil && m[1] == id
 }
 
 // revertsRe is the line `git revert` writes into a revert's message.

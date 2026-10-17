@@ -191,6 +191,12 @@ func TestCatchUp_ConflictLeftOnTheBranch(t *testing.T) {
 	run(t, p.Root, "add", "-A")
 	run(t, p.Root, "commit", "-q", "-m", "fix: resolve wave.sh\n\nChange: add-wave")
 	clean(t, p, "the resolution")
+	require.Empty(t, p.provenanceFindings(ctx()), "the resolution commit carries the state ape staged: not state.forged (H14)")
+	require.False(t, p.resolvesConflict(ctx(), HeadSHA(ctx(), p.Root), "changes/add-wave/state.json"),
+		"only a commit whose parent is the conflicted commit is exempt")
+	require.False(t, p.resolvesConflict(ctx(), run(t, p.Root, "rev-parse", "HEAD~1"), "changes/other/state.json"),
+		"…and only for that change's state")
+	require.True(t, p.resolvesConflict(ctx(), run(t, p.Root, "rev-parse", "HEAD~1"), "changes/add-wave/state.json"))
 	v, err := p.Verify(ctx(), "add-wave", RunOptions{})
 	require.NoError(t, err)
 	require.True(t, v.Green)
