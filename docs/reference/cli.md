@@ -34,7 +34,7 @@ to v1 lifts it (`ape project lift`).
 Subcommands:
 
 - `aboard` — A shared visual board for a human and one or more agent sessions
-- `change` — The unit of change: new, check, approve (fixes), start, verify, review, accept, block, answer, archive
+- `change` — The unit of change: new, check, approve (fixes), start, verify, review, accept, block, answer, archive, tool
 - `chat` — Bridged claude REPL with hooks captured to a runlog
 - `config` — Resolve the project's APEX configuration
 - `costs` — Show this project's Claude cost rollup
@@ -47,6 +47,7 @@ Subcommands:
 - `metrics` — Scan and publish this session's usage metrics over NATS
 - `milestone` — Add, approve, gate and close roadmap milestones
 - `next` — Record a finding for later under the roadmap's Next
+- `plugins` — Install the plugins _apex/config.yaml lists, and report what they and the tools slot bring
 - `project` — Create and check an APEX v1 project layout
 - `prompt` — Drive an unattended Claude session from a prompt or a handoff file
 - `rollback` — Rollback ape to the previous version
@@ -1083,7 +1084,7 @@ Global flags:
 
 ## ape change
 
-The unit of change: new, check, approve (fixes), start, verify, review, accept, block, answer, archive
+The unit of change: new, check, approve (fixes), start, verify, review, accept, block, answer, archive, tool
 
 ```
 ape change
@@ -1180,7 +1181,7 @@ on its branch).
 Subcommands:
 
 - `abandon` — Move a change to the archive as abandoned, merging no delta; commit
-- `accept` — Accept a human-review task, in flight or archived
+- `accept` — Accept a human-review task, in flight or archived — a person's act, or a delegate's (D75)
 - `answer` — A person answers a blocked change: status answered, the answer recorded
 - `approve` — Approve a fix (a change with milestone: none), so it can start
 - `archive` — Catch change/<id> up with its base, squash-merge it with the delta and the archive move as one commit
@@ -1190,6 +1191,7 @@ Subcommands:
 - `new` — Validate the id and write the change.md skeleton and state.json (draft)
 - `review` — Record a review verdict, or run the review in its own fresh Claude Code session
 - `start` — Check green + approved → create and check out change/<id>, record the baseline, set in-progress
+- `tool` — Run a tools.design or tools.review entry for a change, in its own detached session (D74, D77)
 - `verify` — Run the task checks and the effective spec at HEAD; verified iff all exit 0
 
 ## ape change abandon
@@ -1217,7 +1219,11 @@ base branch, change/<id> is deleted and its last commit recorded as branch_tip i
 archived state.json, kept reachable as refs/apex/abandoned/<id> (tip_ref; H16, local). None of the change's code reaches the base branch. A draft never
 started (no branch) is abandoned on the branch HEAD is on, as before.
 
-Exit codes: 0 abandoned · 1 no such change, archived, dirty tree, change/<id> checked out in
+change.md's cap holds here too (D69): over caps.change_md (default 16 KB) abandon refuses
+with change.too-big — trim it under the cap, commit, abandon again — and while
+_apex/config.yaml caps: holds a value above its ceiling, with caps.over-ceiling.
+
+Exit codes: 0 abandoned · 1 no such change, archived, change.md over its cap, caps.over-ceiling, dirty tree, change/<id> checked out in
 another worktree, the base branch checked out in another worktree (git.base-checked-out), or git
 failed · 2 usage · 3 the archive folder already exists.
 
@@ -1237,15 +1243,16 @@ Flags:
 
 ## ape change accept
 
-Accept a human-review task, in flight or archived
+Accept a human-review task, in flight or archived — a person's act, or a delegate's (D75)
 
 ```
-ape change accept <id> --task <T> --by <who> [--evidence <path|url>]... [flags]
+ape change accept <id> [T<n>] (--task <T> --by <who> [--evidence <path|url>]... | --delegate [--wait 9m] | --verdict pass|fail --reason "<text>" [--evidence <path|url>]...) [flags]
 ```
 
 Record that a person accepted a human-review task (one whose check is "human-review"),
 in state.json's accepted: [{task, by, at, evidence}]. Archive requires every human-review
-task accepted, unless a person archives with --allow-pending-human.
+task accepted, unless a person archives with --allow-pending-human. The task is the
+second argument (T<n>) or --task.
 
   - a change in flight: committed on its branch, change/<id> (D38) — from any branch
     (D51 Q17): without a checkout when HEAD is elsewhere (refused when that branch is
@@ -1276,25 +1283,92 @@ task accepted, unless a person archives with --allow-pending-human.
 
 Accepting a task again replaces its earlier acceptance.
 
+--delegate: autonomous acceptance (D75, D76). Off by default (D78: project init writes no
+human_review block; without one, delegate.off, action person). Only when
+_apex/config.yaml delegates it:
+
+    human_review:
+      delegate: apex-accept                  # the default when the block is present
+      args: "--task {task} --change {id}"    # the default; placeholders {id}, {task},
+                                             # {assets}, {change} (D77)
+      model: sonnet                          # optional, else models.<delegate>
+      effort: high                           # optional, else models.<delegate>'s
+
+  - the task must be awaiting a person: the change reviewed (or archived) and the task
+    not accepted (else delegate.not-awaiting); human_review is under the config.changed
+    guard, and
+    --delegate refuses while a commit no person accepted changed it, or while the
+    working tree's block differs from HEAD's (delegate.unaccepted-config, action person):
+    a model cannot add the block and accept its own work. Not person-only: that is the
+    point
+  - ape starts `ape task <delegate> --args "<args filled>"` detached, as review --run
+    does, with APE_DELEGATE=<id>/<T> (and APE_DELEGATE_PARENT=<the asking session>). Model
+    and effort: human_review's, else models.<delegate>'s, else the asking session's, else
+    _apex/config.yaml effort:, else claude's
+  - the delegate inspects the task's artefact read-only and records its verdict with
+    --verdict (below); `ape hook pre-tool` denies it every edit inside the project but
+    an evidence note, changes/<id>/assets/accept-* (the archive folder's, for an
+    archived change)
+  - when the session ends ape settles it. A session that committed, switched branch or
+    left any file other than its accept-* notes has its verdict voided (delegate.voided,
+    action person; recorded in the verdict file, shown by ape status). On a pass ape
+    records the acceptance exactly as a person's (the same record and branch rules as
+    above), by "delegate:<skill>" — never a person — with "run": <run-id>; its evidence
+    is the verdict's --evidence, else the verdict file; its accept-* notes are committed
+    with the record, which carries the trailer
+    "Accepted-By: delegate:<skill> <T> run <run-id>" (and so does the archive squash).
+    On a fail nothing is accepted: the task stays awaiting_human, ape status shows the
+    verdict (JSON changes[].delegate.<T>: {verdict, reason, run, at}), exit 1
+    delegate.fail (action person). A session that records no verdict is a fail, reason
+    "no verdict" (D78; its last message is never read for one)
+  - no automatic retry on the same artefact (D78): after a fail, --delegate for that task
+    refuses (delegate.already-failed, action person) until the change's tip moves
+    (change/<id>'s tip; the archive folder's content once archived)
+  - --wait (default 9m) bounds one call; exit 75 means still running: call
+    `ape change accept <id> <T> --delegate` again — it attaches to the running session
+  - JSON: {id, task, skill, args, running, detached_id, log, task_exit, launch,
+    outcome: {verdict, reason, evidence, notes, violations, voided, accepted,
+    verdict_file}}
+
+--verdict pass|fail --reason "<text>" [--evidence <path|url>]...: the delegate session
+records its verdict — only the session --delegate started for that change and task
+(APE_DELEGATE=<id>/<T>, its run in progress; elsewhere exit 2, delegate.not-in-session).
+It writes _apex/state/runs/delegate/<run-id>.json {change, task, skill, run, verdict,
+reason, evidence, at, change_tip} — ignored state, never a commit. ape, not the session,
+records the acceptance. --evidence (D78): a URL as given; the session's own
+assets/accept-* note as it is on disk (ape commits it with the acceptance); any other
+path must be committed at change/<id>'s tip while the change is unarchived — where its
+design artefacts live, whatever branch HEAD is on — and a file in the working tree once
+it is archived; each recorded with its SHA-256 (else exit 2, usage.evidence). With no
+--evidence the acceptance rests on the verdict file, recorded by its path and SHA-256.
+
 Exit codes: 0 recorded · 1 the task has a command check, a draft, or the branch it is
-recorded on is checked out elsewhere · 2 usage (no such task, bad evidence).
+recorded on is checked out elsewhere; --delegate: off, config not accepted, not
+awaiting, already failed at this tip, fail (no verdict included), voided · 2 usage (no such task, bad evidence, --verdict
+outside its session) · 75 --delegate: still running, call again.
 
 Examples:
 
 ```
   ape change accept add-tenant-delete --task T2 --by diego
-  ape change accept add-tenant-delete --task T2 --by diego --evidence docs/review/tenant-delete.png --evidence https://ci.example.com/run/812
+  ape change accept add-tenant-delete T2 --by diego --evidence docs/review/tenant-delete.png --evidence https://ci.example.com/run/812
+  ape change accept add-tenant-delete T2 --delegate --wait 9m --json
+  ape change accept add-tenant-delete T2 --verdict pass --reason "matches the task" --evidence development/changes/add-tenant-delete/assets/accept-T2.md
 ```
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
-| `--by` | string | `—` | who accepts (required) |
+| `--by` | string | `—` | who accepts (required for a person's acceptance) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
-| `--evidence` | stringArray | `[]` | a file in the repository or a URL the acceptance rests on (repeatable) |
+| `--delegate` | bool | `false` | accept through _apex/config.yaml human_review.delegate, in its own detached session (D75) |
+| `--evidence` | stringArray | `[]` | a file in the repository or a URL the acceptance (or --verdict) rests on (repeatable) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--task` | string | `—` | task id, e.g. T2 (required) |
+| `--reason` | string | `—` | --verdict: why |
+| `--task` | string | `—` | task id, e.g. T2 (or the second argument) |
+| `--verdict` | string | `—` | pass or fail: the delegate session's verdict (only inside that session) |
+| `--wait` | duration | `9m0s` | --delegate: how long this call waits for the session (exit 75 when it is still running) |
 
 ## ape change answer
 
@@ -1400,7 +1474,9 @@ ape change archive <id> [flags]
 
 Archive a reviewed change onto its base branch (trial decision D38):
 
-  1. needs status reviewed (review pass) and the plan frozen at start unchanged; human-
+  1. needs status reviewed (review pass), the plan frozen at start unchanged, and change.md
+     within caps.change_md (default 16 KB; ## Notes counts — change.too-big: trim it, D69;
+     caps.over-ceiling while caps: holds a value above its ceiling); human-
      review tasks must be accepted, unless --allow-pending-human (recorded) — a person's
      flag only (D45): refused in a model session (APE_SESSION or CLAUDECODE set) with exit
      2, session.person-only; the orchestrator leaves such a change reviewed and moves on.
@@ -1433,7 +1509,8 @@ Archive a reviewed change onto its base branch (trial decision D38):
      branch_tip = change/<id>'s last commit) — with "evidence: archive" in
      _apex/config.yaml (H23; default off) also its evidence/: one file per check of the
      final verify (command, exit, duration, output sha256, and the output from the log,
-     capped at 256 KB: head and tail kept, the full log named by path and sha256) — and
+     capped at caps.evidence_log, default 1 MiB: head and tail kept, the full log named by
+     path and sha256) — and
      commits everything as ONE commit (H15):
      subject from _apex/config.yaml commit.subject — placeholders {type} (change.md's
      type:), {title} (its # title) and {id}; default "{title}" — and a body holding the
@@ -1468,6 +1545,28 @@ worktree (git.base-checked-out: stop, do not re-plan), or git failed · 2 usage,
 --allow-pending-human from a model session · 3 the
 rebase conflicts or the delta no longer applies.
 
+Detached runs (D58 2.3): the command takes the run lock of its change (or milestone),
+_apex/state/runs/<id|M>.json, and runs in a detached worker (`ape __run`, its own
+session, output in _apex/state/runs/<id|M>.log), so the call that started it can be cut,
+backgrounded or killed without stopping it. The call waits up to --wait (default 9m, at
+most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
+exit code and --json shape. Otherwise the call exits 75, still running: "… still running
+since <time> — run the same command again to attach" (--json: {"running": true, "verb",
+"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has).
+Running the same command again attaches: it waits again and prints the run's result once it
+ends — never a second run — or exits 75 again with the log lines the run wrote since the
+last call (stderr; --json: "log_tail"). A result no call
+printed yet is printed by the next call of the same verb while HEAD has not moved. While a
+run holds the lock, another of these verbs on the same change or milestone is refused:
+run.busy (exit 3, action retry; the message names the running verb and since when). A lock
+whose process is gone (killed, the machine restarted) is removed and reported as
+run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
+kills its checks and records nothing — no attempt, no state commit, no gate run — and
+reports run.interrupted. No check outlives the worker. Never run these with
+run_in_background, and never end a turn on an exit 75: run the same command again.
+Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
+--wait outside 0–9m30s (usage.wait).
+
 Examples:
 
 ```
@@ -1481,7 +1580,8 @@ Flags:
 | `--allow-pending-human` | bool | `false` | archive with human-review tasks unaccepted (recorded in state.json; a person only) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--timeout` | duration | `0s` | limit for each command run, overriding _apex/config.yaml timeouts: (default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; timeouts.gate, else 30m, for a gate command); exit 124 when exceeded |
+| `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
+| `--wait` | duration | `9m0s` | how long this call waits for the detached run (at most 9m30s; 0 returns at once); exit 75 while it still runs — run the same command again to attach |
 
 ## ape change block
 
@@ -1531,11 +1631,14 @@ Validate one change and list every failure:
     with `ape change approve`), touches non-empty kebab slugs, decisions exist in
     decisions/, paths are valid globs; type: (the archive commit's {type}, D47) one of
     feat, fix, perf, refactor, docs, test, build, ci, chore — required only when
-    _apex/config.yaml commit.subject uses {type} (change.no-type; change.bad-type); any
-    other key must start with x-
+    _apex/config.yaml commit.subject uses {type} (change.no-type; change.bad-type);
+    review_tools: [<name>, …] names tools.review entries of _apex/config.yaml whose
+    when: the change matches (the orchestrator runs each before the review; else
+    tools.unknown, D74); any other key must start with x-
   - # title; ## Why and ## Out of scope non-empty; ## Delta; ## Tasks
-  - change.md ≤ 8 KB and design.md ≤ 8 KB ("split this change")
-  - every spec the delta touches stays ≤ 20 KB once merged — the in-memory merge
+  - change.md ≤ caps.change_md and design.md ≤ caps.design_md (16 KB each by default;
+    _apex/config.yaml caps:, see `ape project check --help`) ("split this change")
+  - every spec the delta touches stays ≤ caps.spec (24 KB) once merged — the in-memory merge
     `ape change diff` shows and archive makes (else change.spec-too-big: split the
     capability first; start runs this check too, so it fails before any work, H18)
   - ## Delta: "### ADDED|MODIFIED|REMOVED [<capability>] Requirement: <name>" blocks, or
@@ -1554,7 +1657,10 @@ Validate one change and list every failure:
   - ## Tasks: "- T<n> <what> — check: <command> | human-review", or "- T<n> <what> —
     regression: <command>" for a check that may already pass before the change (it runs
     like any check task; `ape change start` lets it be green at baseline); no checkboxes,
-    unique ids
+    unique ids. A design-tool task names its tool before the check:
+    "- T<n> <what> — tool: <name> — check: <command> | human-review", <name> a
+    tools.design entry of _apex/config.yaml (else tools.unknown, D74; see
+    `ape plugins --help`); ape status --json lists it under changes[].tools
 
 The change is checked as the branch holding its records has it, against that branch's
 specs and roadmap (D51 Q17; `ape change --help`): HEAD needs to be on no particular branch.
@@ -1687,8 +1793,13 @@ change.wrong-branch): the verdict is committed there.
 empty context and its own hooks, never a sub-agent of the session that built it:
 ape starts `ape task apex-review --args <id>` detached (survives the caller's shell),
 and that session writes review.md and records the verdict with --verdict/--findings.
-It is the one sanctioned exception to the nesting rule: allowed from inside an ape
-session, never from inside a review session (depth 1), skill fixed to apex-review.
+It counts as starting apex-review under the nesting rule (D62; see ape task --help):
+from a terminal (depth 0) always; from inside an ape session only from ape's own
+apex-orchestrator run, as its one child (exit 3, session.child-running, while
+another child runs); from any other session — apex-apply a person ran with ape task,
+say — refused (exit 2, session.depth); never from inside a review session. The
+review session is depth 2 under an orchestrator, its manifest records depth and
+parent_run, and it is stopped when that orchestrator's run ends.
   - which changes: a verified one; or a reviewed one whose review is stale — code
     changed since the review's sha, what archive refuses as review.stale (D51 Q16):
     --run first verifies it again in-process, as `ape change verify <id>` would
@@ -1701,11 +1812,17 @@ session, never from inside a review session (depth 1), skill fixed to apex-revie
   - read-only: the session runs with APE_REVIEW=<id>, and `ape hook pre-tool` denies
     every edit inside the project except changes/<id>/review.md (outside the project,
     e.g. a throwaway copy to break, is allowed)
-  - post-run assertion: a session that committed or left anything but review.md (and
-    the state.json ape commits) has its verdict voided (recorded under review_voided)
-  - --wait (default 9m, under the Bash tool's 10-minute cap) bounds one call; exit 75
-    means still running: call `ape change review <id> --run` again to keep waiting —
-    it attaches to the running session, it never starts a second one
+  - post-run assertion: a session that committed or left anything but review.md, the
+    review tools' reports changes/<id>/assets/review-<name>.md (written before --run,
+    committed with review.md; D74) and the state.json ape commits has its verdict
+    voided (recorded under review_voided). A commit touching only development/ (assets/
+    included) after the verify or the review leaves both fresh
+  - --wait (default 9m, at most 9m30s, under the Bash tool's 10-minute cap; 0 returns
+    at once) bounds one call; exit 75 means still running: call
+    `ape change review <id> --run` again to keep waiting — it attaches to the running
+    session, it never starts a second one. The --json payload of a 75 has the fields every
+    long verb's has (`ape change verify --help`): "running": true, "verb", "scope",
+    "since", "log"
   - the session's cost is its own ape task manifest (ape status sums it)
   - model and effort: --model/--effort; else _apex/config.yaml models.apex-review
     ("apex-review: sonnet" or "apex-review: {model: sonnet, effort: high}"; a config
@@ -1718,8 +1835,9 @@ session, never from inside a review session (depth 1), skill fixed to apex-revie
 Exit codes: 0 recorded / review passed · 1 not verified, code changed since the verify,
 --run: a fresh review, or a red re-verify of a stale one, review block (--run: findings
 in JSON "outcome"), verdict voided, or no verdict · 2 usage
-(bad verdict, findings file missing, --run inside a review session) · 75 --run: still
-running, call again.
+(bad verdict, findings file missing, --run inside a review session, or the nesting
+rule: session.depth) · 3 --run: the orchestrator's child session is running
+(session.child-running) · 75 --run: still running, call again.
 
 Examples:
 
@@ -1739,7 +1857,7 @@ Flags:
 | `--model` | string | `—` | --run: model for the review session (default: models.apex-review in _apex/config.yaml, else the asking session's) |
 | `--run` | bool | `false` | review in a fresh, detached, read-only Claude Code session (apex-review) |
 | `--verdict` | string | `—` | pass or block (required without --run) |
-| `--wait` | duration | `9m0s` | --run: how long this call waits for the session (exit 75 when it is still running) |
+| `--wait` | duration | `9m0s` | --run: how long this call waits for the session (at most 9m30s; 0 returns at once); exit 75 when it is still running |
 
 ## ape change start
 
@@ -1845,6 +1963,28 @@ behind its upstream, or git failed · 2 usage ·
 3 requirement conflict with another active change, or the change does not rebase onto
 its moved base.
 
+Detached runs (D58 2.3): the command takes the run lock of its change (or milestone),
+_apex/state/runs/<id|M>.json, and runs in a detached worker (`ape __run`, its own
+session, output in _apex/state/runs/<id|M>.log), so the call that started it can be cut,
+backgrounded or killed without stopping it. The call waits up to --wait (default 9m, at
+most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
+exit code and --json shape. Otherwise the call exits 75, still running: "… still running
+since <time> — run the same command again to attach" (--json: {"running": true, "verb",
+"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has).
+Running the same command again attaches: it waits again and prints the run's result once it
+ends — never a second run — or exits 75 again with the log lines the run wrote since the
+last call (stderr; --json: "log_tail"). A result no call
+printed yet is printed by the next call of the same verb while HEAD has not moved. While a
+run holds the lock, another of these verbs on the same change or milestone is refused:
+run.busy (exit 3, action retry; the message names the running verb and since when). A lock
+whose process is gone (killed, the machine restarted) is removed and reported as
+run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
+kills its checks and records nothing — no attempt, no state commit, no gate run — and
+reports run.interrupted. No check outlives the worker. Never run these with
+run_in_background, and never end a turn on an exit 75: run the same command again.
+Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
+--wait outside 0–9m30s (usage.wait).
+
 Examples:
 
 ```
@@ -1857,7 +1997,65 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--timeout` | duration | `0s` | limit for each command run, overriding _apex/config.yaml timeouts: (default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; timeouts.gate, else 30m, for a gate command); exit 124 when exceeded |
+| `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
+| `--wait` | duration | `9m0s` | how long this call waits for the detached run (at most 9m30s; 0 returns at once); exit 75 while it still runs — run the same command again to attach |
+
+## ape change tool
+
+Run a tools.design or tools.review entry for a change, in its own detached session (D74, D77)
+
+```
+ape change tool <id> <name> [--task T<n>] [--wait 9m] [flags]
+```
+
+Run the skill of a tools: entry in _apex/config.yaml for change <id>, in its own Claude
+Code session: ape starts `ape task <skill> --args "<args filled>"` detached, as
+`ape change review --run` does, and waits for it.
+
+    tools:
+      design:
+        - {name: ui-mockup, skill: frontend-design:mockup, when: "…",
+           args: "{change} --out {assets}", model: sonnet, effort: high}
+      review:
+        - {name: security, skill: security-lens, when: "…"}
+
+  - <name> is a tools.design or tools.review entry (else tool.unknown, action replan).
+    A design tool runs for the task whose line names it (`- T<n> <what> — tool: <name> —
+check: …`), given with --task; a review tool, for a change whose review_tools:
+    name it, before the review
+  - args (D77): the entry's args: template, else "--change {id}" (plus " --task {task}"
+    with --task). Placeholders: {id} the change id, {task} the task, {assets} the
+    change's assets folder (development/changes/<id>/assets), {change} its change.md,
+    both project-relative; a template using {task} needs --task (usage.task)
+  - model and effort: the entry's model:/effort:, else models.<skill>, else the asking
+    session's, else _apex/config.yaml effort:, else claude's
+  - the session writes what its skill writes (a mock-up, a report under assets/): no
+    read-only rule and no verdict; its exit is the result (non-zero or lost:
+    tool.failed, action retry)
+  - --wait (default 9m) bounds one call; exit 75 means still running: call it again —
+    it attaches to the running session for that change and tool
+  - JSON: {id, tool, slot, skill, task, args, running, detached_id, log, stdout,
+    task_exit, launch}; stdout holds the session's `ape task --output-format json`
+    envelope
+
+Exit codes: 0 the session ended 0 · 1 tool.unknown, tool.args, tool.failed, a change not
+found · 2 usage (no such task, {task} without --task) · 75 still running, call again.
+
+Examples:
+
+```
+  ape change tool add-tenant-delete ui-mockup --task T3 --wait 9m --json
+  ape change tool add-tenant-delete security --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+| `--task` | string | `—` | the task the tool runs for, e.g. T3 (a design tool's) |
+| `--wait` | duration | `9m0s` | how long this call waits for the session (exit 75 when it is still running) |
 
 ## ape change verify
 
@@ -1874,8 +2072,11 @@ MODIFIED blocks — of the capabilities the change touches (frontmatter touches:
 other scenario whose check command is identical to a task's (H10). The rest of the spec
 is the milestone gate's to run (`ape milestone gate` runs all of it). human-review checks
 are not run. A command shared by several checks runs once. Each check runs under
-_apex/config.yaml timeouts.check (default 15m), the regression command under
-timeouts.regression (default 30m); --timeout overrides both.
+_apex/config.yaml timeouts.check (default idle 15m, max 2h), the regression command under
+timeouts.regression (idle 30m, max 2h): a command that makes no progress — no output, no
+CPU time used by its process group — for idle, or still runs at max, is killed with its
+whole process group and is red, exit 124, reason idle or ceiling (its last output lines
+kept), never retried; --timeout sets max for both (see `ape project init --help`).
 Ran nothing is not green (H11): a check that exits 0 but whose output says it ran
 nothing (_apex/config.yaml checks.vacuous_output; default "no tests to run", "running 0
 tests", "Ran 0 tests", "0 passing", "collected 0 items") is red with reason "vacuous"
@@ -1939,6 +2140,28 @@ Exit codes: 0 all command checks green · 1 a check is red (the attempts cap rea
 included), uncommitted code, an unresolved conflict, or wrong status · 2 usage · 3 the change
 does not rebase onto its moved base (the conflict is left on its branch).
 
+Detached runs (D58 2.3): the command takes the run lock of its change (or milestone),
+_apex/state/runs/<id|M>.json, and runs in a detached worker (`ape __run`, its own
+session, output in _apex/state/runs/<id|M>.log), so the call that started it can be cut,
+backgrounded or killed without stopping it. The call waits up to --wait (default 9m, at
+most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
+exit code and --json shape. Otherwise the call exits 75, still running: "… still running
+since <time> — run the same command again to attach" (--json: {"running": true, "verb",
+"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has).
+Running the same command again attaches: it waits again and prints the run's result once it
+ends — never a second run — or exits 75 again with the log lines the run wrote since the
+last call (stderr; --json: "log_tail"). A result no call
+printed yet is printed by the next call of the same verb while HEAD has not moved. While a
+run holds the lock, another of these verbs on the same change or milestone is refused:
+run.busy (exit 3, action retry; the message names the running verb and since when). A lock
+whose process is gone (killed, the machine restarted) is removed and reported as
+run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
+kills its checks and records nothing — no attempt, no state commit, no gate run — and
+reports run.interrupted. No check outlives the worker. Never run these with
+run_in_background, and never end a turn on an exit 75: run the same command again.
+Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
+--wait outside 0–9m30s (usage.wait).
+
 Examples:
 
 ```
@@ -1951,7 +2174,8 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--timeout` | duration | `0s` | limit for each command run, overriding _apex/config.yaml timeouts: (default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; timeouts.gate, else 30m, for a gate command); exit 124 when exceeded |
+| `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
+| `--wait` | duration | `9m0s` | how long this call waits for the detached run (at most 9m30s; 0 returns at once); exit 75 while it still runs — run the same command again to attach |
 
 ## ape chat
 
@@ -1978,8 +2202,12 @@ terminal for its lifetime — there is no detach/reattach. To run
 claude in the background, use a real terminal multiplexer
 separately (e.g. wrap ape chat in tmux or screen).
 
+A chat is a model session under the nesting rule (D62; see ape task
+--help): it starts only outside every ape session (depth 0), and is refused
+inside one (exit 2, session.depth or session.not-allowed).
+
 Exit codes: 0 success · 1 claude/bridge failure · 2 usage or preflight
-error (no _apex/config.yaml, bad cwd).
+error (no _apex/config.yaml, bad cwd, the nesting rule).
 
 Flags:
 
@@ -2148,7 +2376,14 @@ totals — today, this week, all-time — broken down per task, chat and (from
 an older ape) pipeline.
 
   ape costs                          Project rollup (human / json).
-  ape costs run <run-id>             Single task run (reads manifest.yaml).
+  ape costs run <run-id>             Single task run (reads manifest.yaml):
+                                     its own totals, its parent_run and depth
+                                     (D62), and for an orchestrator run the
+                                     children it started and tree_cost_usd
+                                     (its own cost plus theirs). Totals are
+                                     always the run's own session, here and in
+                                     the manifest, so a sum over every run
+                                     counts each child once.
   ape costs chat <chat-id>           Single chat session (reads session.yaml).
   ape costs prompt <prompt-id>       Single prompt session (reads prompt.yaml).
   ape costs update --from <file>     Refresh the price table from a YAML file.
@@ -3071,6 +3306,13 @@ exits non-zero now, prints {"decision":"block","reason":"<the failing checks' la
 and what to do>"}. It re-runs only the checks that were red at the change's last verify
 of its current plan (the regression command too, when it was newly red), recorded in
 _apex/state/logs/<id>/last-verify.json; before any verify, the task checks (H10).
+Re-run budget (D58 2.5): a check whose last recorded run took longer than 60s (or
+timeouts.check.max, if lower) is never re-run, nor any once one hook run has spent 600s;
+a check with no recorded run is re-run under that budget, and one that outruns it is not
+red. Such a check is judged from the last verify at HEAD — red stays red, with its last
+lines — or, when code moved since that verify, the stop is blocked telling the model to
+run `ape change verify <id> --wait 9m`. The hook's timeout stays 1800s: it never runs a
+long check, the verify does.
 Allows (prints nothing) when HEAD is on no change branch (the base branch: planning,
 milestones), when the change is not in-progress (blocked, verified, reviewed), when the
 last verify had nothing red, when every re-run check is green, or after 3 consecutive
@@ -3091,7 +3333,7 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the payload's cwd) |
-| `--timeout` | duration | `0s` | limit for each command run, overriding _apex/config.yaml timeouts: (default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; timeouts.gate, else 30m, for a gate command); exit 124 when exceeded |
+| `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
 
 ## ape log
 
@@ -3242,6 +3484,24 @@ that the gate does not run as a script, are not drift. Changes can start only un
 approved milestone; gate and close refuse a gate that differs from the approved one.
 Committed together as "apex: <M> approved".
 
+Before it records anything, approve runs the gate once against the current tree (D70 B),
+synchronously, under timeouts.gate (default 30m), with progress lines on stderr. A new
+gate must run and be red — it is red until the milestone's work is done:
+  exit 0                                  refused, milestone.gate-green (action replan):
+                                          a green gate proves nothing the milestone adds
+  a gate file missing (a script the gate  refused, milestone.gate-broken (action replan)
+  runs, as above), a shell gate file that
+  fails `bash -n`, exit 126 or 127, a
+  requires: entry missing, or a timeout
+  any other exit                          red: approved, and the run recorded in the
+                                          approval as self_check {at, sha, exit, secs, log,
+                                          output_sha256}; its full output is
+                                          _apex/state/logs/gate-<M>-approve.log
+A refusal writes nothing and its message ends with the gate's last output lines. So a gate
+whose script the milestone's work would write cannot be approved: the script exists at
+approval and fails until the work is done (test -x ./bin/app || exit 1, not a bare
+./bin/app, which exits 127). A re-approval runs the same check.
+
 Approving an approved milestone records the approval again — "apex: <M> re-approved", the
 Status line kept as it was (the milestone's spend counts from it) — when ape holds no
 record of it, its gate changed since, it runs a gate file the record does not hold (created
@@ -3253,8 +3513,8 @@ Only a person approves (D47 Q6): refused in a model session — APE_SESSION or C
 set, which includes a `!` line inside Claude Code — with exit 2, code
 session.person-only. Run it from a plain terminal.
 
-Exit codes: 0 ok · 1 no such milestone, done, malformed (Gate/Goal missing), or HEAD on a
-change branch · 2 usage, or a model session.
+Exit codes: 0 ok · 1 no such milestone, done, malformed (Gate/Goal missing), the gate green
+or broken, or HEAD on a change branch · 2 usage, or a model session.
 
 Examples:
 
@@ -3294,8 +3554,8 @@ gate changed since the approval (H2). ape records the close in milestones.json (
 With "evidence: archive" in _apex/config.yaml (H23; default off), a green close writes the
 gate run's evidence to development/archive/milestones/<M>/evidence/ — one file per check
 (the gate command, every spec scenario, the regression command): command, exit, duration,
-output sha256 and the output, capped at 256 KB (head and tail kept, the full log named by
-path and sha256) — plus accept-red.json when milestones.json records an accept_red for
+output sha256 and the output, capped at caps.evidence_log, default 1 MiB (head and tail
+kept, the full log named by path and sha256) — plus accept-red.json when milestones.json records an accept_red for
 <M>; committed with the close record (JSON "evidence").
 
 Changes in flight refuse with milestone.changes-in-flight, action apply — or person when
@@ -3316,6 +3576,28 @@ Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not 
 no approval record, a changed gate, or HEAD on a change branch · 2 usage, or --accept-red
 from a model session.
 
+Detached runs (D58 2.3): the command takes the run lock of its change (or milestone),
+_apex/state/runs/<id|M>.json, and runs in a detached worker (`ape __run`, its own
+session, output in _apex/state/runs/<id|M>.log), so the call that started it can be cut,
+backgrounded or killed without stopping it. The call waits up to --wait (default 9m, at
+most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
+exit code and --json shape. Otherwise the call exits 75, still running: "… still running
+since <time> — run the same command again to attach" (--json: {"running": true, "verb",
+"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has).
+Running the same command again attaches: it waits again and prints the run's result once it
+ends — never a second run — or exits 75 again with the log lines the run wrote since the
+last call (stderr; --json: "log_tail"). A result no call
+printed yet is printed by the next call of the same verb while HEAD has not moved. While a
+run holds the lock, another of these verbs on the same change or milestone is refused:
+run.busy (exit 3, action retry; the message names the running verb and since when). A lock
+whose process is gone (killed, the machine restarted) is removed and reported as
+run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
+kills its checks and records nothing — no attempt, no state commit, no gate run — and
+reports run.interrupted. No check outlives the worker. Never run these with
+run_in_background, and never end a turn on an exit 75: run the same command again.
+Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
+--wait outside 0–9m30s (usage.wait).
+
 Examples:
 
 ```
@@ -3331,7 +3613,8 @@ Flags:
 | `--by` | string | `—` | who accepts the red gate (with --accept-red) |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--timeout` | duration | `0s` | limit for each command run, overriding _apex/config.yaml timeouts: (default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; timeouts.gate, else 30m, for a gate command); exit 124 when exceeded |
+| `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
+| `--wait` | duration | `9m0s` | how long this call waits for the detached run (at most 9m30s; 0 returns at once); exit 75 while it still runs — run the same command again to attach |
 
 ## ape milestone gate
 
@@ -3353,9 +3636,10 @@ red there and red now is reported (JSON run.regression.pre_existing_red), not fa
 When no change of the milestone has a baseline for the command, a red regression fails
 the gate: nothing shows it was red before the milestone's work — always the case for a
 milestone tier that differs from the change tier, which no change baselines. Timeouts:
-the Gate: command runs under timeouts.gate (default 30m), each scenario check under
-timeouts.check (15m), the regression command under timeouts.regression (30m); --timeout
-overrides all three. A vacuous or unrun gate command, scenario or regression command is
+the Gate: command runs under timeouts.gate (default idle 30m, max 4h), each scenario check
+under timeouts.check (idle 15m, max 2h), the regression command under timeouts.regression
+(idle 30m, max 2h) — killed at idle without progress (output or CPU time) or at max: exit
+124, reason idle|ceiling; --timeout sets max for all three. A vacuous or unrun gate command, scenario or regression command is
 red (see `ape change verify --help`; JSON reason/detail). Files the gate
 or a check leaves outside development/ are undone and reported ("stray_files"). The run (exit, sha, time,
 output hash, last lines) goes to _apex/state/logs/gate-<M>.json (gitignored; shown by
@@ -3369,6 +3653,28 @@ or the gate differs from the approved one (milestone.gate-changed): a person app
 Exit codes: 0 gate green · 1 gate red (last output lines shown), no such milestone, no
 approval record, a changed gate, or HEAD on a change branch · 2 usage.
 
+Detached runs (D58 2.3): the command takes the run lock of its change (or milestone),
+_apex/state/runs/<id|M>.json, and runs in a detached worker (`ape __run`, its own
+session, output in _apex/state/runs/<id|M>.log), so the call that started it can be cut,
+backgrounded or killed without stopping it. The call waits up to --wait (default 9m, at
+most 9m30s; 0 returns at once); a run that ends in time is printed as always, with the same
+exit code and --json shape. Otherwise the call exits 75, still running: "… still running
+since <time> — run the same command again to attach" (--json: {"running": true, "verb",
+"scope", "since", "log", "pid", "log_tail"}, the shape `ape change review --run` has).
+Running the same command again attaches: it waits again and prints the run's result once it
+ends — never a second run — or exits 75 again with the log lines the run wrote since the
+last call (stderr; --json: "log_tail"). A result no call
+printed yet is printed by the next call of the same verb while HEAD has not moved. While a
+run holds the lock, another of these verbs on the same change or milestone is refused:
+run.busy (exit 3, action retry; the message names the running verb and since when). A lock
+whose process is gone (killed, the machine restarted) is removed and reported as
+run.interrupted (exit 1, action retry) — never an attempt. A run stopped by SIGTERM/SIGINT
+kills its checks and records nothing — no attempt, no state commit, no gate run — and
+reports run.interrupted. No check outlives the worker. Never run these with
+run_in_background, and never end a turn on an exit 75: run the same command again.
+Beside the exit codes above: 75 still running · 3 run.busy · 1 run.interrupted · 2 a
+--wait outside 0–9m30s (usage.wait).
+
 Examples:
 
 ```
@@ -3381,7 +3687,8 @@ Flags:
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--timeout` | duration | `0s` | limit for each command run, overriding _apex/config.yaml timeouts: (default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; timeouts.gate, else 30m, for a gate command); exit 124 when exceeded |
+| `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
+| `--wait` | duration | `9m0s` | how long this call waits for the detached run (at most 9m30s; 0 returns at once); exit 75 while it still runs — run the same command again to attach |
 
 ## ape milestone new
 
@@ -3395,6 +3702,8 @@ Append "## M<n> — <title>" to development/roadmap.md with Status: proposed, th
 command, the budget (USD list-price equivalent, when given) and a Goal: line. The id is
 the next free M<n>. Write the Goal paragraph and the Out of scope bullets afterwards
 (or pass --goal); the Status: line is ape's. Committed as "apex: <M> proposed".
+The gate's scripts must exist, and the gate must run red, before a person approves it
+(D70 B: `ape milestone approve --help`).
 
 Refused on a change branch (see `ape milestone --help`).
 
@@ -3473,6 +3782,136 @@ Flags:
 | `--from` | string | `—` | the change that found it |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 
+## ape plugins
+
+Install the plugins _apex/config.yaml lists, and report what they and the tools slot bring
+
+```
+ape plugins
+```
+
+The Claude Code plugins an APEX v1 project uses, and the tools slot (D59 Q4–Q6).
+
+_apex/config.yaml (marketplaces, plugins and tools are under the config.changed
+guard: a commit that changes them and is not ape's is a person's to accept):
+
+  marketplaces:
+    team-tools: {source: github, repo: org/claude-plugins, ref: v2}   # or {source: git, url: …},
+                                                                      # {source: directory, path: …}
+  plugins:
+    - {name: nats-expert, marketplace: team-tools, ref: v1.4.0}
+    - {name: kb, marketplace: team-tools, allow: [mcp]}
+  tools:
+    design:
+      - {name: ui-mockup, skill: frontend-design:mockup, when: "the change adds or changes a screen",
+         args: "{change} --out {assets}", model: sonnet, effort: high}
+    review:
+      - {name: security, skill: security-lens, when: "the change touches auth, secrets or input parsing"}
+
+allow: lists what a plugin may carry besides skills — hooks, mcp. A listed plugin
+that carries hooks (hooks/hooks.json, or hooks in .claude-plugin/plugin.json) or MCP
+servers (.mcp.json, or mcpServers in plugin.json) its entry does not allow is the
+finding plugin.hooks-or-mcp (action person): a tool is a skill only. Another allow:
+value is a config error (plugins.config).
+
+tools: has two slots, design and review; each entry is {name, skill, when}, names
+unique, plus optional args: (the template ape fills into ape task <skill> --args;
+placeholders {id}, {task}, {assets}, {change}, no other), model: and effort: (low,
+medium, high, xhigh, max; unset: the D65 defaults). A skill is <plugin>:<skill> (the plugin listed in plugins:), or a project
+skill (.claude/skills/<skill>/SKILL.md) or user skill ($CLAUDE_CONFIG_DIR, else
+~/.claude, /skills/<skill>/SKILL.md; a user skill wins over a project one). Each must
+be installed (tools.not-installed) and slash-invocable — not user-invocable: false
+(tools.not-invocable) — because ape task types it as a slash command; a malformed
+block is tools.invalid. The orchestrator may start these skills as children, beside
+apex-plan, apex-change, apex-apply, apex-review, apex-release and apex-accept (D62,
+D76); apex-handoff and apex-orchestrator never.
+
+ape project check reports the same findings (exit 1).
+
+Subcommands:
+
+- `status` — Report each listed plugin and tools: skill, and their findings
+- `sync` — Install or update every plugin _apex/config.yaml lists and write their settings
+
+## ape plugins status
+
+Report each listed plugin and tools: skill, and their findings
+
+```
+ape plugins status [flags]
+```
+
+Report, for each plugin _apex/config.yaml lists: whether it is installed at project
+scope, its version against ref, whether settings.json enables it, how many skills it
+adds and how many of them are model-invocable (no disable-model-invocation: true —
+each one's description is listed in every session, the plugin's per-session cost),
+whether it carries hooks or MCP servers, and whether its allow: covers them. And for
+each tools: entry: where its skill was found (plugin, project, user) and its state —
+ok, not-installed, not-invocable, or unchecked (a plugin skill while claude is not on
+PATH, so the installs cannot be read).
+
+Findings: plugins.config, plugins.drift (ape plugins sync puts it right),
+plugin.hooks-or-mcp, tools.invalid, tools.not-installed, tools.not-invocable — see
+ape plugins --help. They are reported, not failed on: ape project check is the gate.
+
+JSON: {"installs_checked", "plugins": [{"id", "ref", "installed", "version", "at_ref",
+"enabled", "install_path", "skills", "model_invocable", "hooks", "mcp", "allow",
+"allowed"}], "tools": [{"slot", "name", "skill", "source", "path", "state"}],
+"findings": [{"file", "message", "code", "fix"}]}.
+
+Exit codes: 0 reported (findings or not) · 1 the config cannot be read · 2 usage.
+
+Examples:
+
+```
+  ape plugins status
+  ape plugins status --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape plugins sync
+
+Install or update every plugin _apex/config.yaml lists and write their settings
+
+```
+ape plugins sync [flags]
+```
+
+Make the project's plugins what _apex/config.yaml says: each marketplace added, each
+plugin installed at project scope (or, off its ref, updated after its marketplace is
+refreshed) through the claude plugin CLI, and extraKnownMarketplaces and enabledPlugins
+written into .claude/settings.json (other keys kept). A settings.json that changed is
+committed as "apex: plugins" (that file only). A second run installs, writes and
+commits nothing.
+
+ape project init, ape framework update and ape doctor --fix do the same; ape task
+installs a missing plugin before it spawns. Afterwards the findings ape plugins status
+reports (plugin.hooks-or-mcp, tools.*) are listed; they do not fail the sync.
+
+Exit codes: 0 synced · 1 a plugin is still missing or off its ref (plugins.missing,
+with the command to run), the config is malformed (plugins.config), or the commit
+failed · 2 usage.
+
+Examples:
+
+```
+  ape plugins sync
+  ape plugins sync --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
 ## ape project
 
 Create and check an APEX v1 project layout
@@ -3483,7 +3922,7 @@ ape project
 
 Subcommands:
 
-- `accept-config` — Accept the committed _apex/config.yaml's limits, checks, retries and requires
+- `accept-config` — Accept the committed _apex/config.yaml's guarded blocks (limits, checks, caps, …)
 - `check` — Validate every v1 shape and size cap; list all failures
 - `codes` — List the diagnostic codes v1 commands report in --json failures
 - `init` — Create the development/ skeleton and merge ape's hooks (never overwrites)
@@ -3491,21 +3930,35 @@ Subcommands:
 
 ## ape project accept-config
 
-Accept the committed _apex/config.yaml's limits, checks, retries and requires
+Accept the committed _apex/config.yaml's guarded blocks (limits, checks, caps, …)
 
 ```
 ape project accept-config --by <who> [flags]
 ```
 
-Four blocks of _apex/config.yaml loosen what ape enforces: limits (attempts, re-plans,
-consecutive blocks), checks (vacuous output), requires (unrun checks) and retries. Since the
-project's v1 epoch, a commit that changes one of them and is not ape's own ("apex: …") is
-the finding config.changed (action person; D50), and change start, verify and archive
-refuse (change.provenance) — so a session cannot loosen its own limits with an Edit.
+Thirteen blocks of _apex/config.yaml can loosen what ape enforces, and are guarded:
+  limits        attempts, re-plans, consecutive blocks, the budget
+  checks        vacuous output
+  retries       red checks run again
+  requires      unrun checks
+  timeouts      how long a check, the regression command or a gate may run
+  caps          the artefact size caps (D69; see ape project check --help)
+  regression    the project's own suite (unset: the net is off)
+  commit        the archive's squash (hooks: skip skips the project's hooks)
+  evidence      archive|off (off keeps no evidence)
+  marketplaces, plugins, tools   what runs inside a session (hooks, MCP, skills)
+  human_review  who accepts a human-review task in a person's place (D75)
+The guard compares whole blocks, either way: raising a cap or a timeout loosens as surely
+as lowering one. Since the project's v1 epoch (the newest "apex: project init" or "apex:
+lift" commit; a block committed before it, or in it, is the baseline), a commit that
+changes one of them and is not ape's own ("apex: …") is the finding config.changed (action
+person; D50), and change start, verify and archive refuse (change.provenance) — so a
+session cannot loosen its own limits with an Edit. Unguarded: project_name,
+development_folder, models, effort, docs, notify.
 
 A person who made the change, or approves it, accepts it: this command commits an empty
-"apex: config accepted by <who>" on the base branch, and every guarded change before it
-is clean. A later change is judged again. A git revert of the change also clears it.
+"apex: config accepted by <who>" on the base branch (its body lists the guarded blocks),
+and every guarded change before it is clean. A later change is judged again. A git revert of the change also clears it.
 
 Only a person accepts (D47 Q6): refused in a model session — APE_SESSION or CLAUDECODE set,
 which includes a `!` line inside Claude Code — with exit 2, code session.person-only.
@@ -3539,8 +3992,10 @@ ape project check [flags]
 Validate the whole project and list every failure, not just the first.
 
   development/project.md   # <name>, ## Vision, ## Users, ## Scope, ## Out of scope,
-                           ## Constraints (each non-empty); ≤ 150 lines and ≤ 8 KB
-  AGENTS.md                present, ≤ 120 lines; CLAUDE.md (if any) has the line @AGENTS.md
+                           ## Constraints (each non-empty); ≤ caps.project_md (16 KB;
+                           no line cap)
+  AGENTS.md                present, ≤ caps.agents_md (16 KB; its lines are not measured);
+                           CLAUDE.md (if any) has the line @AGENTS.md
   development/roadmap.md   # Roadmap, ≥ 1 "## M<n> — <title>" with Status (ape-written),
                            Gate, Goal; Budget a number when present; a "## Next"
                            section holds findings (`ape next add`), not a milestone. Its Delivery: line
@@ -3560,7 +4015,7 @@ Validate the whole project and list every failure, not just the first.
                            new dated brief)
   specs/<cap>/spec.md      # title, Purpose:, "### Requirement: <name>" each with ≥ 1
                            "#### Scenario:" and exactly one "- check: <cmd> | human-review"
-                           per scenario; ≤ 20 KB ("split into two capabilities")
+                           per scenario; ≤ caps.spec (24 KB; "split into two capabilities")
   decisions/NNNN-<slug>.md # ADR-NNNN: title, Status, Date, Context/Decision/Consequences,
                            Enforced by; an accepted one recorded in decisions.json
                            (decision.accepted-unrecorded: `ape decision accept` records it)
@@ -3573,9 +4028,21 @@ Validate the whole project and list every failure, not just the first.
   lift                     development/lift-disposition.md in a project whose v1 epoch is a
                            lift commit ("apex: lift …"): the disposition list awaits review
                            (lift.disposition-pending) until the person deletes the file
-  config                   since the v1 epoch, a commit that changed limits, checks, retries
-                           or requires in _apex/config.yaml and is not ape's (config.changed,
-                           D50) — a person reverts it or accepts it: `ape project accept-config`
+  config                   since the v1 epoch, a commit that changed a guarded block of
+                           _apex/config.yaml — limits, checks, retries, requires, timeouts,
+                           caps, regression, commit, evidence, marketplaces, plugins, tools,
+                           human_review —
+                           and is not ape's (config.changed, D50) — a person reverts it or
+                           accepts it: `ape project accept-config`
+  caps                     _apex/config.yaml caps: (D69) — sizes like 16KB, 1MiB or plain
+                           bytes, KB = KiB = 1024 bytes; default / hard ceiling:
+                             project_md   16 KB / 48 KB    agents_md    16 KB / 48 KB
+                             change_md    16 KB / 48 KB    design_md    16 KB / 48 KB
+                             spec         24 KB / 64 KB    (per capability)
+                             evidence_log  1 MiB / 16 MiB  (per check, evidence: archive)
+                           A value above its ceiling is caps.over-ceiling (action person):
+                           reported here, and change check, start, archive and abandon
+                           refuse until a person fixes it
   docs                     each path _apex/config.yaml docs: names (changelog, user_docs)
                            exists (docs.missing: create it, or fix the path)
   .claude/settings.json    ape's hooks registered as `ape project init` writes them:
@@ -3595,7 +4062,17 @@ Validate the whole project and list every failure, not just the first.
                            extraKnownMarketplaces/enabledPlugins match them, and (when
                            claude is on PATH) each plugin is installed at project scope
                            at its ref (plugins.drift; plugins.config for a bad config);
-                           `ape doctor --fix` puts them right
+                           `ape plugins sync` (or `ape doctor --fix`) puts them right;
+                           an installed one that carries hooks or MCP servers its entry
+                           does not allow (allow: [hooks, mcp]) is plugin.hooks-or-mcp
+  tools                    _apex/config.yaml tools: {design: [{name, skill, when, args?,
+                           model?, effort?}], review: [...]}: well-formed — args:
+                           placeholders only {id} {task} {assets} {change}, effort: a
+                           level — (tools.invalid), each skill
+                           installed — <plugin>:<skill> of a listed plugin, or a project
+                           or user skill — (tools.not-installed) and not
+                           user-invocable: false (tools.not-invocable); a plugin skill
+                           is judged only when claude is on PATH. See ape plugins --help
 
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
 
@@ -3660,8 +4137,14 @@ ape project init [flags]
 Create the APEX v1 skeleton where it is absent. Nothing that exists is overwritten
 (one exception: the @AGENTS.md line appended to a CLAUDE.md that lacks it).
 
-  _apex/config.yaml                  project_name, development_folder (also read, never
-                                     written: regression, models, effort, and limits —
+  _apex/config.yaml                  project_name, development_folder, and the models:
+                                     defaults (D65) — apex-apply and apex-orchestrator
+                                     {model: sonnet, effort: high}; apex-review, apex-plan
+                                     and apex-change {model: opus, effort: medium} — written
+                                     only when the file does not exist: an existing config
+                                     is kept as it is, nothing merged in (also read, never
+                                     written: regression, effort, caps (see ape project
+                                     check --help), timeouts, and limits —
                                      budget: enforce|off (default off; see ape task --help),
                                      attempts: N red verifies per start (default 5; see
                                      ape change verify --help); commit: {subject,
@@ -3717,7 +4200,10 @@ ref is the version the install must report (claude plugin list; a leading v is
 ignored; a commit matches by prefix). Claude Code cannot pin a plugin version
 from the consumer side: a marketplace serves one version of each plugin, so pin
 by pointing the marketplace at a ref (github/git: ref: <branch|tag>). A plugin
-the marketplace does not serve at ref fails with the command to run.
+the marketplace does not serve at ref fails with the command to run. An entry's
+allow: [hooks, mcp] lets the plugin carry hooks or MCP servers; ape plugins sync
+re-syncs at any time and ape plugins status reports them, and the tools: slot
+(see ape plugins --help).
 
 Check settings in _apex/config.yaml (read by start, verify, the gate and the hooks; a
 value ape cannot use, or a key it does not know inside these blocks, makes the config
@@ -3728,10 +4214,19 @@ unparseable and every command refuses it):
   regression: {change: make test, milestone: make test-all}
                                      change: at start and verify (baseline-aware);
                                      milestone (else change): at the milestone gate
-  timeouts: {check: 20m, regression: 45m, gate: 1h}
-                                     Go durations; defaults 15m per check, 30m for the
-                                     regression command, 30m for a Gate: command; a
-                                     command's --timeout flag overrides them
+  timeouts: {check: 20m, regression: {idle: 10m, max: 1h}, gate: {idle: 3m}}
+                                     per tier, a Go duration (its max) or {idle, max}. A
+                                     command is killed (exit 124, reason idle|ceiling, its
+                                     last output lines kept) when it makes no progress —
+                                     no new output bytes and no CPU time used by its
+                                     process group — for idle, or when it reaches max.
+                                     Defaults: check idle 15m / max 2h, regression 30m /
+                                     2h, gate 30m / 4h. Any positive duration (no floor);
+                                     a scalar's idle is the default clamped to it; idle
+                                     above max, or max above ape's hard ceiling (check 4h,
+                                     regression 8h, gate 12h), is a config error. A
+                                     command's --timeout flag is every tier's max (capped
+                                     at the ceiling). A timed-out command is not retried
   retries: 1                         a red check runs again up to n times (0–5, default
                                      0); a pass on a retry is green and recorded flaky:
                                      true (JSON results[].flaky, tries; listed by ape
@@ -3803,18 +4298,29 @@ everything the lift deletes; v0 files stay readable as `git show apex-v0-final:<
   ape project lift --dry-run        # the whole plan, nothing written
   ape project lift
 
+Which ape: the lift runs on the binary invoked, whatever the project's .bingo/ape.mod
+pins — it is exempt from the pin swap, since a v0 pin names an ape with no v1 commands.
+The output's first lines say which binary runs (version, path) and what becomes of the
+pin: when this ape is a release (vX.Y.Z or vX.Y.Z-rc.N) and bingo is on PATH, the lift
+commit moves the pin to it (bingo get); otherwise the lift prints the one command that
+does, and until the pin moves every other v1 command there needs APE_TOOLCHAIN=local.
+
 Pre-flight (refused, exit 1): a v0 install (_apex/framework.yaml records a v0 version,
 or did in git history) and no v1 layout or earlier lift (lift.not-v0); a version in
 v0.15.0–v0.31.x and a resolvable _apex/config.yaml (lift.unsupported-layout); a clean
 tree (lift.dirty); apex-v0-final exists (lift.no-tag), is HEAD (lift.tag-not-head),
 and is on the current branch's upstream remote at the same commit, checked with
-git ls-remote — the one network call (lift.tag-not-pushed; lift.remote-unreachable).
+git ls-remote — the one network call (lift.tag-not-pushed; lift.remote-unreachable);
+and git ignores nothing the lift commits (lift.claude-ignored) — above all
+.claude/settings.json, where the v1 hooks go: un-ignore it with .claude/* and
+!.claude/settings.json, commit, and re-tag. --dry-run lists every problem, not the first.
 
 The commit:
   deletes        the v0 families, at the paths _apex/config.yaml's folder variables
                  resolve to: the skills the v0 install manifest lists (only those —
-                 never a project's own), the v0 _apex tables and pipelines, stories,
-                 the sprint tracker, retrospectives, planning (PRD, architecture,
+                 never a project's own; ones git never tracked, under an ignored
+                 .claude/, leave the working tree after the commit), the v0 _apex
+                 tables and pipelines, stories, the sprint tracker, retrospectives, planning (PRD, architecture,
                  epics, proposals, release records), ADR and pattern records and
                  indexes, capability and feature registries, deferred records, team
                  memory, project-context. Kept: docs, CHANGELOG, evidence, research,
@@ -3830,12 +4336,21 @@ The commit:
                  here on. Canon ADRs the project cites and has no record of are copied
                  from the governance clone when _apex/config.yaml resolves one
   rewrites       every ADR citation (ADR-NNNN, and paths to the old records) in
-                 Markdown and in code comments to the new number
+                 Markdown and in code comments to the new number. Only that
+                 four-digit form is the project's own: a short ADR-08 cites
+                 another decision log, and is listed as unresolved, never
+                 rewritten — even where the project has an ADR-0008
   strips         epic, story and deferred ids from code comments — Story 3.2,
                  Epic 12, (3-2) (a known story key), DW-…, paths into the deferred
                  store or the implementation folder — keeping the rest of the comment;
-                 a comment that was only an id goes. Comments only: ids in
-                 identifiers, strings and directives are listed, not edited.
+                 a comment that was only an id goes. A story takes its fragments with
+                 it (Story 3.2, Task 2 · Subtask 3.1 of Story 5.10 · AC 2), and the
+                 separator a removal leaves by a bracket or a mark goes too
+                 ("(ADR-0019, Story 3.2)" → "(ADR-0019)"). Comments only: ids in
+                 identifiers, strings and directives are listed, not edited — and
+                 so are ids in a data-shaped comment, which a tool may parse: one
+                 opening with a lowercase key ("# owner: …") or a record of
+                 key: value fields ("# pending: q | owner: …").
                  Tokenized: Go (go/scanner), shell, Python, JS/TS (JSX/TSX: comments
                  that begin their line only), Dart, YAML, Makefile (recipe lines are
                  the shell's: left), C/C++. A file the tokenizer cannot read, a
@@ -3843,22 +4358,43 @@ The commit:
                  token stream without comments is checked unchanged; other languages:
                  the text outside comments, re-tokenized, is checked unchanged (blank
                  lines and trailing whitespace aside) — a file failing its check is
-                 left unedited and listed
+                 left unedited and listed. An edited Go file that was gofmt-clean at
+                 the tag is formatted with go/format (an id's removal can leave a
+                 line gofmt reads as a heading or a code block); one that then does
+                 not format is left unedited and listed, and one that was not clean
+                 at the tag is edited, not reformatted, and listed
   carries        ## Code Validation (project-context.md) into AGENTS.md ## Commands,
                  and the runnable ones, joined with &&, into regression: in
                  _apex/config.yaml (rewritten to project_name, development_folder,
-                 regression)
+                 regression). A command with a placeholder — <…>, {…} (not a
+                 shell ${…}) or a lone … — is listed, not run; Go's ./... is no
+                 placeholder. A trailing " # …" shell comment is dropped first
   lays down      the v1 skeleton, as `ape project init --brownfield` (CLAUDE.md keeps its
                  content, loses the v0 apex:managed block and gains @AGENTS.md)
   writes         development/lift-disposition.md: the binding-rule candidates
                  (CLAUDE.md list items, project-context "don't miss" items, team-memory
                  gotcha titles) with an empty Disposition column for apex-plan, then a
-                 fresh read-only review, then the person — who deletes the file — and
-                 the ids left, ADR gaps, files not edited, references to removed paths
-                 (CI guards over the v0 corpus show up there), readings at the tag
+                 fresh read-only review, then the person, who deletes it. Then, as
+                 summaries: code and CI that still read removed paths (CI guards over
+                 the v0 corpus show up there) and edited files a guard hashes first;
+                 ADR gaps; ids left and files not edited, counted per file;
+                 references in evidence and docs, counted; readings at the tag.
+                 development/lift-disposition.json, beside it, holds every list whole
 
-After the commit the regression command runs once (--no-verify-run skips it): its result
-is the baseline; red is recorded, not a lift failure.
+A byte-identity perimeter: a file a test, CI script or lock file hashes goes red once
+the lift edits a comment in it. The plan lists, as "hashed", the edited files that a lock
+file names, that a test or CI file names within 3 lines of a hash word (sha256,
+checksum, fingerprint, byte-identical, …), or that sit beside a hashing test that globs
+or names them — run --dry-run, then --exclude them. It is a heuristic: a copy compared
+byte for byte with no hash (an embedded mirror of a hashed file) needs its own --exclude.
+
+The regression command runs twice (--no-verify-run skips both): at the tag, before
+anything is written, and at the lift commit — the baseline red gates are judged against.
+regression_verdict says whose a red is: green · red-at-tag (red there too: pre-existing,
+for apex-plan to roadmap) · red-after-lift (green at the tag: the LIFT broke it — fix it
+in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127: a
+tool it runs is missing here, which is not a red) · red-no-baseline. The exit code stays
+0: the commit stands either way, and the verdict is in --json and the output.
 
 --from-update is how the framework's v1.0.0 migration entry runs it inside
 `ape framework update`: uncommitted changes under .claude/skills/, _apex/ (not
@@ -3884,8 +4420,8 @@ Flags:
 | `--exclude` | stringArray | `[]` | a glob (** allowed) of files the lift must not edit, e.g. a byte-identity perimeter; repeatable |
 | `--from-update` | bool | `false` | run inside ape framework update (the v1.0.0 migration entry): the install's uncommitted files are left to it |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
-| `--no-verify-run` | bool | `false` | do not run the regression command after the commit |
-| `--timeout` | duration | `0s` | limit for each command run, overriding _apex/config.yaml timeouts: (default: timeouts.check, else 15m, per check; timeouts.regression, else 30m, for the regression command; timeouts.gate, else 30m, for a gate command); exit 124 when exceeded |
+| `--no-verify-run` | bool | `false` | do not run the regression command (at the tag, and after the commit) |
+| `--timeout` | duration | `0s` | ceiling for each command run, overriding _apex/config.yaml timeouts.<tier>.max (default: check 2h, regression 2h, gate 4h; capped at ape's hard ceilings 4h/8h/12h); the tier's idle window still applies; exit 124 when exceeded |
 
 ## ape prompt
 
@@ -3937,9 +4473,14 @@ the project cost rollup's Prompts bucket.
 ape prompt must run from a project root (a directory with
 _apex/config.yaml). It makes no commits of its own.
 
+A prompt session is a model session under the nesting rule (D62; see ape
+task --help): it starts only outside every ape session (depth 0), and is
+refused inside one (exit 2, session.depth — or session.not-allowed from an
+apex-orchestrator run, which starts only allow-listed skills with ape task).
+
 Exit codes: 0 session completed (Stop hook) · 1 idle-timeout, session
 failed, or the typed line never submitted · 2 usage or preflight error (no _apex/config.yaml, unresolved
---agent, missing --handoff file) · 3 the claude REPL never became ready
+--agent, missing --handoff file, the nesting rule) · 3 the claude REPL never became ready
 · 4 claude exited before the Stop hook.
 
 Flags:
@@ -3983,8 +4524,8 @@ once and continues in the background, orphaned from the shell that started
 it, so a tool's time limit on that shell does not reach it.
 
   ape run wait <id>     wait for it; exit with the run's own exit code
-                        (75: --timeout expired, wait again; 76: its
-                        supervisor is gone without recording an exit)
+                        (75: --wait/--timeout expired, wait again; 76:
+                        its supervisor is gone without recording an exit)
   ape run status <id>   show its handle: command, pids, stdout and log
                         files, and the exit code once it has ended
   ape run stop <id>     stop it (gracefully on Linux/macOS, hard on
@@ -4004,11 +4545,20 @@ Show a detached run's handle
 ape run status <id> [flags]
 ```
 
+Show a detached run's handle, with its state: running, "ended, exit N", or
+"gone without recording an exit".
+
+--json prints the object `ape run wait --json` does instead — id, state
+(running, ended or lost), exit_code, log, stdout, run_id, run_dir, depth,
+parent_run, stop_reason, and result (the session's last assistant message,
+at most 2048 bytes; absent without a transcript) — and exits 0.
+
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
+| `--json` | bool | `false` | Print the run as `ape run wait --json` does (id, state, exit_code, …, result) |
 
 ## ape run stop
 
@@ -4056,24 +4606,39 @@ ape run wait <id> [flags]
 Wait for a run started with --detach, print where its log is and how it
 ended, and exit with the run's own exit code.
 
---timeout bounds the wait. When it expires with the run still going, the
-command exits 75 and the run is untouched: wait again. That is how a caller
-under a tool time limit waits for a run longer than the limit — each wait
-stays inside it.
+--wait (or its older name --timeout) bounds the wait. When it expires with
+the run still going, the command exits 75 and the run is untouched: wait
+again. That is how a caller under a tool time limit waits for a run longer
+than the limit — each wait stays inside it. An orchestrator dispatches a
+skill as `ape task <skill> --args <id> --detach` and then
+`ape run wait <id> --wait 9m` until it stops exiting 75 (D61).
 
-A run whose supervisor is gone without recording an exit (killed, or the
-machine rebooted) is reported as such, exit 76, rather than waited on
-forever — its own code, so it is never mistaken for a run that exited 1.
+Exit 76 means the run's supervisor is gone without recording an exit
+(killed, or the machine restarted), so ape cannot report how the run ended
+— it does NOT mean the run did nothing: the ape commands its session ran may
+have committed state, so read `ape status` before starting it again. A
+code of its own, so it is never mistaken for a run that exited 1.
 
 The run's stdout is in its own file (the handle's "stdout"), apart from
 stderr (its "log"), so a --output-format json envelope reads clean.
+
+--json prints one object instead of the lines: id, state (running, ended or
+lost), exit_code (null until it ends), log, stdout, run_id and run_dir (the
+run's own record, once it has one), depth and parent_run (the nesting rule:
+2 and the orchestrator's run for a session an orchestrator started),
+stop_reason ("parent_gone" when ape stopped it because that orchestrator
+ended), and result: the session's last assistant message, read from its
+transcript, at most 2048 bytes (result_truncated: true when cut). result is
+absent when there is no transcript to read. The exit codes are the same.
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
-| `--timeout` | duration | `0s` | Stop waiting after this long (e.g. 25m) and exit 75 if the run is still going; 0 waits until it ends |
+| `--json` | bool | `false` | Print the run as one JSON object (id, state, exit_code, log, stdout, depth, parent_run, result, …) |
+| `--timeout` | duration | `0s` | Alias of --wait |
+| `--wait` | duration | `0s` | Stop waiting after this long (e.g. 9m) and exit 75 if the run is still going; 0 waits until it ends |
 
 ## ape sandbox
 
@@ -5045,8 +5610,15 @@ yaegi's restricted symbol set, which blocks os/exec, os.Exit, syscall,
 and unsafe while keeping the apescript orchestration surface fully
 available. See docs/reference/apescript.md for the per-group rules.
 
+A script is a conductor (D62): it runs at depth 0, from a terminal, and the
+sessions it starts are depth 1 — an apex-orchestrator among them holds the
+project's one orchestrator lock. It refuses inside any ape session (exit 2,
+code session.depth), the orchestrator's included, because a script starts
+model sessions.
+
 Exit codes: 0 success · 1 the script returned an error, panicked, or a
-launched run failed · 2 usage or read error (no file, bad flags).
+launched run failed · 2 usage or read error (no file, bad flags), or the
+nesting rule.
 
 Flags:
 
@@ -5138,10 +5710,15 @@ List, prune, or open the URL of live ape sessions
 ape sessions [flags]
 ```
 
-Live web-mode sessions are tracked in ~/.ape/registry.json, and this
-subcommand inspects that registry. The only writer was `ape pipeline`'s web
-mode, retired with APEX v0, so this ape adds no rows: it reads and prunes
-what an older ape left.
+Live ape sessions are tracked in ~/.ape/registry.json, and this
+subcommand inspects that registry. Every model session ape launches is a row
+while it runs — ape task, ape prompt, ape chat, and the change review --run
+and ape script sessions that run through them — with its run id, the skill
+ape typed, its depth and parent run (the nesting rule, D62), the ape
+process running it (PID) and the claude it spawned (claude_pid in JSON).
+ape reads those rows to tell which session a command runs under, so a
+pruned row only ever belongs to a process that is gone. Rows an older ape
+wrote for `ape pipeline`'s web mode, retired with APEX v0, carry a port and URL.
 
   ape sessions               Show one row per live session.
   ape sessions prune         Drop rows whose PID is no longer running.
@@ -5258,6 +5835,18 @@ Show where the project stands, from the records ape keeps:
     with unaccepted human-review tasks (archived past them by a person) are listed after
     the rest, status "archived", under "Archived, human review not accepted"; they stay
     acceptable (`ape change accept --help`)
+  - tools (D59 Q4, D74): every change lists tools, its design-tool tasks
+    ("— tool: <name>"), as [{task, name, skill, done}] — done: the task green at the
+    latest verify of the current plan, or a human-review one accepted — and
+    review_tools, its review_tools: frontmatter, as [{name, skill}]; skill is what
+    _apex/config.yaml tools: names ("" when it names none). Both always present ([])
+  - acceptances (JSON changes[].accepted: [{task, by, at, evidence, run}]): by a person,
+    or by "delegate:<skill>" with its run when _apex/config.yaml human_review delegates
+    them (D75; "Accepted by a delegate" in the long output); and each human-review task's
+    newest delegate verdict (JSON changes[].delegate: {"T2": {verdict, reason, run, at,
+    voided}}): a fail or a voided run leaves the task awaiting a person, and the brief
+    says why. With human_review set, next names the delegate for an awaiting task it has
+    not judged (`ape change accept <id> <T> --delegate --wait 9m`) before a person
   - spend so far: the sum of finished ape task/pipeline run manifests
   - red at baseline, not any change's own (JSON "pre_existing_red": [{change, kind, ref,
     cmd, exit, sha}]): the regression command, and scenario checks of the spec a change
@@ -5273,22 +5862,48 @@ Show where the project stands, from the records ape keeps:
     first; a count line in the human output): commits on that base branch since the last
     archive squash — else since the v1 epoch, the newest "apex: project init" or "apex:
     lift" commit — that touch paths outside development/ and _apex/, carry no "Change:"
-    trailer and have no "apex:" subject. Shown, never failed
+    trailer and have no "apex:" subject. An apex-release commit ("Release:" trailer)
+    that touches only the changelog (docs.changelog, else CHANGELOG.md) is not
+    listed. Shown, never failed
   - an archive in flight or interrupted by a crash (JSON "archive_journal", with
     "archive_running" when its process is alive; on the first line): status only reports
     it — the next writing command rolls a crashed one back (archive.interrupted; see
     `ape change archive --help`)
   - next: what the way of working says comes next, derived from the state alone
+  - the roadmap's Next (JSON "roadmap_next": ["2026-10-16 <text> (from <id>)", …], []
+    when none; a count line in the human output): the findings noticed out of scope that
+    apex-plan triages, as the base branch's roadmap.md holds them (`ape next add` writes
+    there from any branch). Not the same field as "next", the step above
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
   - the latest ape task run (JSON "latest_run": {skill, run_id, status, stopped,
-    resets, resets_at, message}): how it ended, e.g. "stopped: usage-limit, resets
-    2026-10-16T23:00:00+02:00" when a claude.ai usage limit stopped it (see ape task
-    --help, exit 14)
+    resets, resets_at, message, depth, parent_run}): how it ended, e.g. "stopped:
+    usage-limit, resets 2026-10-16T23:00:00+02:00" when a claude.ai usage limit
+    stopped it (see ape task --help, exit 14); a session an orchestrator started
+    names that run ("started by <run>"; depth 2, parent_run)
+  - JSON "sessions": the model sessions ape launched that run in this project now
+    ([{run_id, kind, skill, depth, parent_run, pid, started_at}], [] when none): an
+    apex-orchestrator run at depth 1 and its one child at depth 2 (D62)
 
 --brief renders at most 25 lines (what the SessionStart hook injects).
 
-Exit codes: 0 ok · 2 usage.
+The board (D60): in a project with a board (.aboard/, see `ape aboard --help`), ape keeps
+one tab, "APEX status" (key ape-status), in step with this report. It is refreshed best
+effort after every v1 command that changes what status reports — project init, lift and
+accept-config; milestone new, approve, gate and close; decision new and accept; next add;
+every change verb but check and diff — and by --board, which refreshes it now and says
+where it wrote (JSON "board": {action: posted|wrote|unchanged|no-board|skipped, where,
+detail}). A running board is posted to; with none running, .aboard/aboard.json is
+rewritten in place. ape never creates a board. The tab is not authoritative: it is a view
+of this report, nothing reads it back, and where the two disagree the tab is wrong. A
+refresh never changes a command's exit code or stdout (a problem is one line on stderr),
+and one that would change nothing writes nothing. The tab is marked quiet: true, so the
+board raises no unread dot or banner for ape's refreshes — from the aboard release that
+honours it. Until ape pins that release, a changed view posted to a running board still
+raises the tab's unread dot (aboard v0.3.0 ignores quiet, silently); a refresh written to
+the file, with no board running, raises none.
+
+Exit codes: 0 ok · 2 usage. --board exits 0 whatever the board did.
 
 Examples:
 
@@ -5296,12 +5911,14 @@ Examples:
   ape status
   ape status --brief
   ape status --json
+  ape status --board
 ```
 
 Flags:
 
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
+| `--board` | bool | `false` | refresh the project's aboard status tab now and say where it wrote (JSON "board"); the tab is a view, never a record; until ape pins the aboard release that honours its quiet flag, a changed view posted to a running board raises the tab's unread dot |
 | `--brief` | bool | `false` | at most 25 lines |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
@@ -5441,13 +6058,49 @@ when a run stops on a limit (usage limit, budget) — and, from ape change,
 when a change becomes blocked — with APE_EVENT=stop|block, APE_CHANGE
 (the change --args names, if any) and APE_REASON in its environment.
 
+Sessions and the nesting rule (D61, D62): every skill of the v1 loop runs
+as its own ape task session, and depth counts only the model sessions ape
+launched (ape task, ape prompt, ape chat, ape change review --run, and the
+ape service task/prompt jobs, which run those commands):
+  depth 0  a terminal, a Claude Code session ape did not launch, a shell,
+           ape script, the service daemon: may start any session
+  depth 1  a session started from depth 0: may start a child only when it
+           is ape's own apex-orchestrator run (ape task apex-orchestrator),
+           only a skill on its allow-list (apex-plan, apex-change,
+           apex-apply, apex-review, apex-release, and the tools: skills),
+           and one child at a time
+  depth 2  a session an orchestrator started: starts nothing
+A refusal is exit 2, code session.depth or session.not-allowed (action
+stop); a second child while one runs is exit 3, session.child-running, and
+a second apex-orchestrator run in a project exit 3,
+session.orchestrator-running (action retry). Deterministic ape commands are
+never limited. ape decides the depth from what it recorded, never from the
+model: the session's marker (APE_SESSION, APE_DEPTH) and the process
+ancestry — every session it launches is a row in ~/.ape/registry.json
+naming the ape process and the claude it spawned, so a scrubbed environment
+changes nothing. Every session carries APE_DEPTH, and a child also
+APE_PARENT_RUN (the orchestrator's run) and APE_PARENT_PID (the ape process
+running it); its manifest records depth and parent_run, and it is stopped,
+termination parent_gone, when that process is gone. An orchestrator's
+manifest lists its children and tree_cost_usd when it ends (totals stay its
+own). There is no switch to turn the rule off.
+
+An orchestrator dispatches a skill as
+  ape task <skill> --args <id> --detach --output-format json
+which prints {"id", "wait", "log", "stdout"} (four lines without json), then
+  ape run wait <id> --wait 9m --json
+until it stops exiting 75; its JSON carries the session's last message as
+result (see ape run wait --help).
+
 Exit codes: 0 success · 1 run failed, idle timeout, the typed line
 never submitted, an APEX v1 milestone budget stopped or refused the
 session, or a v1 limit or ape floor refused it · 2 usage or
-preflight error, or an APEX v0 project (run its pinned v0 ape) · 3 REPL
-never became ready (last pane on stderr) · 5 upstream API failure ·
-6 the dispatch violated its declared commit ownership (the run itself
-may have succeeded) · 14 a claude.ai usage limit stopped the session.
+preflight error, an APEX v0 project (run its pinned v0 ape), or the nesting
+rule refused the session (session.depth, session.not-allowed) · 3 REPL
+never became ready (last pane on stderr), or a session lock another run
+holds (session.child-running, session.orchestrator-running) · 5 upstream
+API failure · 6 the dispatch violated its declared commit ownership (the run
+itself may have succeeded) · 14 a claude.ai usage limit stopped the session.
 
 Examples:
 
@@ -5467,7 +6120,7 @@ Flags:
 | `--args` | string | `—` | Verbatim skill args appended to the invocation (whitespace-separated) |
 | `--commit-allow-dirty` | bool | `false` | Bypass the dirty-tree gate (relevant only with --task-commit) |
 | `--cwd` | string | `—` | Project root directory (default: current working dir) |
-| `--detach` | bool | `false` | Start the run in the background, detached from this shell, print its id, and return at once; `ape run wait <id>` waits for it |
+| `--detach` | bool | `false` | Start the run in the background, detached from this shell, print its id (with --output-format json: {id, wait, log, stdout}), and return at once; `ape run wait <id> --wait 9m` waits for it |
 | `--effort` | string | `—` | Explicit reasoning effort for the session and its sub-agents (low\|medium\|high\|xhigh\|max). Unset: the project's _apex/effort-defaults.yaml per model, or xhigh without one (see ape config effort). In an APEX v1 project: the session's effort only, passed as claude --effort; unset, models.<skill>, the parent session or _apex/config.yaml effort: decide, else none is passed |
 | `--events-subject-prefix` | string | `ape.evt` | Subject root for progress events. |
 | `--handoff` | string | `—` | Path to a handoff/context file; derives a "Read <path> and follow the Resume Protocol" --prompt value (mutually exclusive with --prompt) |
