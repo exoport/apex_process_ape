@@ -426,7 +426,7 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 	default:
 		return nil, &FailError{Code: CodeMilestoneNotApproved, Msg: id + " is " + m.StatusText + ", not approved — nothing to close"}
 	}
-	var inFlight []string
+	var inFlight, awaiting []string
 	for _, c := range p.changes(ctx) {
 		if c.Doc == nil || c.State == nil || c.Doc.Meta.Milestone != id {
 			continue
@@ -434,11 +434,21 @@ func (p *Project) CloseMilestone(ctx context.Context, id string, opt RunOptions)
 		switch c.State.Status {
 		case StatusInProgress, StatusVerified, StatusReviewed:
 			inFlight = append(inFlight, c.ID+" ("+c.State.Status+")")
+			if pending := awaitingHuman(c.State, c.Doc); len(pending) > 0 {
+				awaiting = append(awaiting, c.ID+" ("+strings.Join(pending, ", ")+")")
+			}
 		}
 	}
 	if len(inFlight) > 0 {
-		return &GateResult{Milestone: id, Status: m.Status, InFlight: inFlight},
-			&FailError{Code: "milestone.changes-in-flight", Msg: id + " has changes in flight: " + strings.Join(inFlight, ", ") + " — archive or block them, then close"}
+		fe := &FailError{Code: "milestone.changes-in-flight", Msg: id + " has changes in flight: " + strings.Join(inFlight, ", ") + " — archive or block them, then close"}
+		if len(awaiting) > 0 {
+			// A change that waits for a person's acceptance is not the
+			// orchestrator's to move (D49).
+			fe.Action = ActionPerson
+			fe.Msg = id + " has changes in flight: " + strings.Join(inFlight, ", ") + "; awaiting a person's acceptance: " + strings.Join(awaiting, ", ") +
+				" — a person accepts them (`ape change accept <id> --task <T> --by <who>`), the changes are archived, then close"
+		}
+		return &GateResult{Milestone: id, Status: m.Status, InFlight: inFlight}, fe
 	}
 	g, err := p.runGate(ctx, id, opt)
 	if err != nil {

@@ -10,17 +10,20 @@ import (
 // a check that failed (1), a usage error (2) and a conflict (3). Each
 // carries the one-line remediation the command prints.
 
-// FailError is "the check ran and failed" — exit 1.
+// FailError is "the check ran and failed" — exit 1. Action, when set,
+// overrides the code's published action for this one error (D49): a code
+// whose next step depends on the case documents both in its meaning.
 type FailError struct {
 	Code     string
 	Msg      string
 	Findings []Finding
+	Action   string
 }
 
 func (e *FailError) Error() string { return e.Msg }
 
-// UsageError is a bad invocation — exit 2.
-type UsageError struct{ Code, Msg string }
+// UsageError is a bad invocation — exit 2. Action as for FailError.
+type UsageError struct{ Code, Msg, Action string }
 
 func (e *UsageError) Error() string { return e.Msg }
 
@@ -30,6 +33,7 @@ type ConflictError struct {
 	Code      string
 	Msg       string
 	Conflicts []string
+	Action    string
 }
 
 func (e *ConflictError) Error() string {

@@ -57,9 +57,10 @@ type ChangeStatus struct {
 	Lane     string    `json:"lane"`
 	Approved *Approval `json:"approved,omitempty"`
 	// AwaitingHuman is the change's human-review tasks no person has
-	// accepted yet (D47), for a change in flight and for an archived one
-	// (archived past them by a person, --allow-pending-human): what waits
-	// for a person, not for the orchestrator. Always present.
+	// accepted yet once only the person is left (D47): a reviewed change,
+	// or an archived one (archived past them by a person,
+	// --allow-pending-human). What waits for a person, not for the
+	// orchestrator: it skips such a change. Always present.
 	AwaitingHuman []string `json:"awaiting_human"`
 }
 
@@ -173,7 +174,7 @@ func (p *Project) Status() *StatusReport {
 		}
 		if c.Doc != nil {
 			cs.PendingHuman = c.State.PendingHuman(c.Doc.HumanTasks())
-			cs.AwaitingHuman = cs.PendingHuman
+			cs.AwaitingHuman = awaitingHuman(c.State, c.Doc)
 		}
 		if v := c.State.Verify; v != nil {
 			cs.VerifySHA = v.SHA
@@ -188,7 +189,7 @@ func (p *Project) Status() *StatusReport {
 	sortFixesFirst(r.Changes)
 	// Archived changes a person has yet to accept human-review tasks of
 	// (H4): listed last, so they stay visible after the archive.
-	r.Changes = append(r.Changes, p.awaitingHuman()...)
+	r.Changes = append(r.Changes, p.archivedAwaitingHuman()...)
 	for i := range r.Changes {
 		if r.Changes[i].AwaitingHuman == nil {
 			r.Changes[i].AwaitingHuman = []string{}

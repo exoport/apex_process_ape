@@ -47,27 +47,36 @@ func Diagnostics(err error) []Diagnostic {
 	var ce *ConflictError
 	switch {
 	case errors.As(err, &fe):
-		out = append(out, newDiagnostic(codeOr(fe.Code, "error.unclassified"), fe.Msg))
+		out = append(out, newDiagnostic(codeOr(fe.Code, "error.unclassified"), fe.Msg, fe.Action))
 		for _, f := range ClassifyFindings(fe.Findings) {
 			out = append(out, Diagnostic{Severity: SeverityError, Code: f.Code, Message: f.Message, Fix: f.Fix, Action: ActionFor(f.Code), File: f.File, Line: f.Line})
 		}
 	case errors.As(err, &ue):
-		out = append(out, newDiagnostic(codeOr(ue.Code, "usage.unclassified"), ue.Msg))
+		out = append(out, newDiagnostic(codeOr(ue.Code, "usage.unclassified"), ue.Msg, ue.Action))
 	case errors.As(err, &ce):
-		out = append(out, newDiagnostic(codeOr(ce.Code, "conflict.unclassified"), ce.Msg))
+		out = append(out, newDiagnostic(codeOr(ce.Code, "conflict.unclassified"), ce.Msg, ce.Action))
 		for _, c := range ce.Conflicts {
 			code := codeOr(ce.Code, "conflict.unclassified")
-			out = append(out, Diagnostic{Severity: SeverityError, Code: code, Message: c, Action: ActionFor(code)})
+			out = append(out, Diagnostic{Severity: SeverityError, Code: code, Message: c, Action: actionOr(ce.Action, code)})
 		}
 	case err != nil:
-		out = append(out, newDiagnostic("error.unclassified", err.Error()))
+		out = append(out, newDiagnostic("error.unclassified", err.Error(), ""))
 	}
 	return out
 }
 
-func newDiagnostic(code, msg string) Diagnostic {
+// newDiagnostic is the error's own diagnostic; action, when set, is the
+// error's override of the code's published action (D49).
+func newDiagnostic(code, msg, action string) Diagnostic {
 	m, fix := splitFix(msg)
-	return Diagnostic{Severity: SeverityError, Code: code, Message: m, Fix: fix, Action: ActionFor(code)}
+	return Diagnostic{Severity: SeverityError, Code: code, Message: m, Fix: fix, Action: actionOr(action, code)}
+}
+
+func actionOr(action, code string) string {
+	if action != "" {
+		return action
+	}
+	return ActionFor(code)
 }
 
 func codeOr(code, fallback string) string {

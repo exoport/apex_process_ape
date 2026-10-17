@@ -107,3 +107,32 @@ func TestAccept_InFlightWithEvidence(t *testing.T) {
 	require.True(t, strings.HasPrefix(subjects(t, p)[0], "apex: add-wave "))
 	require.Equal(t, "change/add-wave", CurrentBranch(ctx(), p.Root))
 }
+
+// D49 Q12: closing past a change that waits for a person is the person's
+// to unblock (action person); past one the orchestrator can move, apply.
+func TestClose_ChangesInFlightAction(t *testing.T) {
+	p := startedWave(t)
+	run(t, p.Root, "switch", "-q", "main")
+	_, err := p.CloseMilestone(ctx(), "M1", RunOptions{})
+	d := Diagnostics(err)
+	require.Equal(t, "milestone.changes-in-flight", d[0].Code)
+	require.Equal(t, ActionApply, d[0].Action, "in-progress with T2 pending is still the orchestrator's")
+	require.Empty(t, p.Status().Changes[0].AwaitingHuman)
+
+	p = reviewedWave(t)
+	run(t, p.Root, "switch", "-q", "main")
+	_, err = p.CloseMilestone(ctx(), "M1", RunOptions{})
+	d = Diagnostics(err)
+	require.Equal(t, "milestone.changes-in-flight", d[0].Code)
+	require.Equal(t, ActionPerson, d[0].Action)
+	require.Contains(t, d[0].Message, "awaiting a person's acceptance: add-wave (T2)")
+	require.Equal(t, ActionApply, ActionFor("milestone.changes-in-flight"), "the published action stays apply")
+}
+
+func TestDiagnostics_ActionOverride(t *testing.T) {
+	require.Equal(t, ActionStop, Diagnostics(&UsageError{Code: "usage.by", Msg: "x"})[0].Action)
+	require.Equal(t, ActionPerson, Diagnostics(&UsageError{Code: "usage.by", Msg: "x", Action: ActionPerson})[0].Action)
+	d := Diagnostics(&ConflictError{Code: CodeDeltaConflict, Msg: "x", Conflicts: []string{"a"}, Action: ActionStop})
+	require.Equal(t, ActionStop, d[0].Action)
+	require.Equal(t, ActionStop, d[1].Action)
+}

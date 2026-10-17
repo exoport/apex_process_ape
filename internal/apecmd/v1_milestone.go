@@ -228,6 +228,9 @@ by ` + "`ape milestone gate`" + `. A milestone is done when this command exits 0
 anyone says so. Refused, as by ` + "`ape milestone gate`" + `, when ape holds no approval record or the
 gate changed since the approval (H2). ape records the close in milestones.json (done_at).
 
+Changes in flight refuse with milestone.changes-in-flight, action apply — or person when
+one of them is reviewed with human-review tasks not accepted (awaiting_human; D49).
+
 Exit codes: 0 done · 1 gate red, changes in flight, not approved, no approval record, a
 changed gate, or HEAD on a change branch · 2 usage.`,
 		Example: "  ape milestone close M1",

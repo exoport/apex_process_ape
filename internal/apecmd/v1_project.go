@@ -226,7 +226,9 @@ Every --json failure is {"ok": false, "exit": N, "error": "<one line>",
 the first diagnostic is the failure itself, the rest its findings or conflicts. Branch on
 "action" (D47): retry (run the same command again), apply (apex-apply: code work or a
 re-start), review (review again), replan (apex-change re-plans), stop (the run stops), person
-(a person must act: list it, go on with other work). "code" says which rule; "message" and
+(a person must act: list it, go on with other work). A code's action is the one listed here;
+where its meaning names a case that changes it (milestone.changes-in-flight), the diagnostic
+carries the action of the case (D49). "code" says which rule; "message" and
 "fix" are for people. Codes are stable: a new rule gets a new
 code, and a code's meaning never changes. severity is always "error" (no warning tier).
 Exit: 1 check failed · 2 usage · 3 conflict (nothing written).`,
@@ -277,9 +279,11 @@ func newStatusCmd() *cobra.Command {
     branch, change/<id> (D38; JSON changes[].branch), and its status is read from
     there whatever branch is checked out — a change branch lists the changes it does
     not hold too
-  - human review (H4, D47): every change lists awaiting_human, its human-review tasks no
-    person has accepted (always present in JSON, [] when none). A reviewed change awaiting
-    a person is not archived next — next names the accept a person runs. Archived changes
+  - human review (H4, D47): every change lists awaiting_human (always present in JSON, []
+    when none): its human-review tasks no person has accepted, once only the person is
+    left — the change is reviewed, or archived. The orchestrator skips such a change. A
+    reviewed change awaiting a person is not archived next — next names the accept a
+    person runs. Archived changes
     with unaccepted human-review tasks (archived past them by a person) are listed after
     the rest, status "archived", under "Archived, human review not accepted"; they stay
     acceptable (` + "`ape change accept --help`" + `)

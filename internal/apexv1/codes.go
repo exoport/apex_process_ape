@@ -122,7 +122,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeGitStatusFailed, 1, "stop", "git status could not be read"},
 	{"ape.below-floor", 1, "person", "ape task: the installed framework's _apex/ape-commands.yaml declares a min_ape_version above this ape (H1); no session starts — a person updates ape (the message carries the command)"},
 	{"milestone.budget-exceeded", 1, "person", "ape task: the current milestone's spend is at its enforced budget (limits.budget: enforce); no session starts"},
-	{"milestone.changes-in-flight", 1, "apply", "close: changes of the milestone are in-progress, verified or reviewed"},
+	{"milestone.changes-in-flight", 1, "apply", "close: changes of the milestone are in-progress, verified or reviewed; the action is person instead when one of them has a non-empty awaiting_human (reviewed, human-review tasks not accepted: D49)"},
 	{CodeStatusUnrecorded, 1, "person", "a milestone's Status says approved (or done) and ape holds no record of it in milestones.json — approved by hand, or before ape recorded approvals (H2); change start, gate and close refuse it: a person runs `ape milestone approve <M> --by <who>` (a done one: restore its Status line)"},
 	{CodeGateChanged, 1, "person", "the milestone's Gate: command, or a file it names, differs from what a person approved (H2); gate and close refuse it: a person reviews the gate and runs `ape milestone approve <M> --by <who>` again"},
 	{"milestone.done", 1, "stop", "approve: the milestone is already done"},

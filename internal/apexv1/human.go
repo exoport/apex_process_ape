@@ -177,9 +177,20 @@ func (p *Project) archivedFolderOn(ctx context.Context, branch, id string) strin
 	return ""
 }
 
-// awaitingHuman is the archived changes whose human-review tasks are not
+// awaitingHuman is a change's human-review tasks that wait for a person:
+// those not accepted, once the change is reviewed or archived — nothing
+// but the person is left. Earlier, the tasks are pending but the change is
+// still the orchestrator's to verify and review. nil when none.
+func awaitingHuman(st *State, c *Change) []string {
+	if c == nil || st.Status != StatusReviewed && st.Status != StatusArchived {
+		return nil
+	}
+	return st.PendingHuman(c.HumanTasks())
+}
+
+// archivedAwaitingHuman is the archived changes whose human-review tasks are not
 // all accepted, as `ape status` lists them.
-func (p *Project) awaitingHuman() []ChangeStatus {
+func (p *Project) archivedAwaitingHuman() []ChangeStatus {
 	var out []ChangeStatus
 	for _, c := range p.archivedChanges() {
 		if c.State == nil || c.Doc == nil || c.State.Status != StatusArchived {
