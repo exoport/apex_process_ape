@@ -1,5 +1,65 @@
 # CHANGELOG
 
+## v1.0.0-rc.4 (draft)
+
+On top of rc.3, rc.2 and rc.1 below. Phase 1 of two (D90); phase 2 (the
+`ape service` depth rule, the lift follow-ups and the Stop hook's background
+work) follows.
+
+### Project context and caps
+
+- **AGENTS.md imports project.md** (D82): `ape project init` writes
+  `Project context: read @development/project.md before planning or changing
+  anything.` (with the configured development folder) under AGENTS.md's title,
+  and adds that one line to an existing AGENTS.md that lacks it. `ape project
+  check` reports `agents.no-project-context` (action person) when no line
+  outside code carries the `@<dev>/project.md` reference; re-running `ape
+  project init` adds it. Claude Code follows the import, so project.md is in
+  every session's context.
+- **`caps.architecture_md`** (D84): an optional `development/architecture.md`
+  is capped at 16 KB by default, 48 KB at most, under the guarded `caps:` block;
+  `ape project check` reports `architecture.too-big` (action person).
+- **The change.md cap measures the plan** (D89): `caps.change_md` counts
+  change.md without its `## Notes` section, at check, start and archive. The
+  whole file, Notes included, is held to the 48 KB ceiling whatever the cap
+  (`change.over-ceiling`, action apply: move the bulk to the change's
+  `assets/`). At archive the plan is frozen, so only `## Why` can have grown
+  past the cap: the remedy is to move what it gained to `## Notes`. Archive moves
+  the change folder exactly as used and never trims it; abandon never refuses
+  for size.
+- **review.md rounds** (D89): archive carries into the roadmap's Next the
+  top-level items of every `Noticed, out of scope` section (any heading level
+  2–4, one per `## Review <n>` round), once each; indented, quoted and
+  `Answer:` items are not findings. A commit touching only review.md (or
+  anything in the development folder) keeps a verify and a review fresh.
+
+### Models
+
+- **`ape project init` writes the `models:` defaults into an existing
+  config** that has none (D86), and commits it with the init when the config
+  was committed and clean; otherwise the config is amended and left for a
+  person (`amended_uncommitted`). With a `models:` block present it changes
+  nothing and warns about each default skill that has no entry. The defaults
+  now cover apex-accept (opus/medium) and apex-release (sonnet/high) too (D93).
+
+### Session delivery
+
+- **Text that would not type as written goes through the args file** (Q36,
+  D92): `ape task --args`, `ape prompt` and the lines ape composes for
+  `change accept --delegate`, `change tool` and `change review --run` are
+  typed only when the caller's text has no run of spaces, tab, line break or
+  other control character; otherwise it is written verbatim to the run's args
+  file and the session is pointed at it, as for a line over 700 characters.
+  Before, ape itself collapsed runs of spaces in `--args`. `make check-claude`
+  gains `args_whitespace`, which checks the file route byte for byte on the
+  installed Claude Code.
+
+### Wording
+
+- **Domain-neutral help** (D85 A): help text says "work", "checks" and "the
+  project's own check command" where it meant the change's work rather than
+  code specifically. No flag, key, field or code changed.
+
 ## v1.0.0-rc.3 (draft)
 
 The candidate for the session-per-skill loop (D61), on top of rc.2 and rc.1
