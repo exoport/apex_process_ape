@@ -196,7 +196,7 @@ func newMilestoneGateCmd() *cobra.Command {
 		Use:   "gate <M>",
 		Short: "Run the milestone's gate and record the result",
 		Long: `Run the milestone's Gate: command from the project root, and every scenario check of
-the whole spec beside it as the regression suite (human-review not run; output under
+the whole spec beside it as the regression set (human-review not run; output under
 _apex/state/logs/gate-<M>/), and the project's regression command from _apex/config.yaml
 when one is configured — its milestone tier, "regression: {change: <cmd>, milestone:
 <cmd>}", else the one command (H10). The gate is green only when all pass — the regression command

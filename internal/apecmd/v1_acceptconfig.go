@@ -20,7 +20,7 @@ func newProjectAcceptConfigCmd() *cobra.Command {
   requires      unrun checks
   timeouts      how long a check, the regression command or a gate may run
   caps          the artefact size caps (D69; see ape project check --help)
-  regression    the project's own suite (unset: the net is off)
+  regression    the project's own check command (unset: the net is off)
   commit        the archive's squash (hooks: skip skips the project's hooks)
   evidence      archive|off (off keeps no evidence)
   marketplaces, plugins, tools   what runs inside a session (hooks, MCP, skills)
