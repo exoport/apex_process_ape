@@ -123,7 +123,14 @@ that never runs as a skill, so ape writes the step's --args and prompt
 text, verbatim and with its newlines, to
 stages/NN-<stage>/step-NN-<skill>.args.md in the run directory, and
 types a line that names that file instead. The step-start event records
-it as args_file. Shorter lines are typed exactly as before.
+it as args_file.
+
+The same file is used, whatever the length, when the --args or prompt
+text would not arrive as written if typed: when it holds two or more
+spaces in a row, a tab, a line break or any other control character.
+The typed line splits --args on whitespace, and a line break submits
+early. Leading and trailing whitespace of --args is not part of the
+text. Shorter, single-spaced, one-line text is typed exactly as before.
 
 After typing, ape presses Enter once claude has drawn the line, then
 confirms the submit through the UserPromptSubmit hook, pressing Enter up

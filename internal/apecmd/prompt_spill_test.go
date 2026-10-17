@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,9 +40,49 @@ func TestSpillPromptLine(t *testing.T) {
 	})
 	t.Run("plain prompt, long", func(t *testing.T) {
 		dir := t.TempDir()
-		line, argsFile, err := spillPromptLine("", long, long, dir)
+		oneLine := strings.TrimSpace(strings.Repeat("More of the brief. ", 50))
+		line, argsFile, err := spillPromptLine("", oneLine, oneLine, dir)
 		require.NoError(t, err)
-		require.Equal(t, long, line, "a plain prompt is a plain message either way")
+		require.Equal(t, oneLine, line, "a plain prompt is a plain message whatever its length")
 		require.Empty(t, argsFile)
+		require.NoFileExists(t, filepath.Join(dir, runlog.PromptArgsFile))
+	})
+}
+
+// TestSpillPromptLine_Whitespace — a prompt that would not arrive as
+// written when typed goes to prompt.md byte for byte, with or without
+// --agent and whatever its length; a single-spaced one is typed as before.
+func TestSpillPromptLine_Whitespace(t *testing.T) {
+	for _, text := range []string{
+		"keep  this  gap",
+		"col one\tcol two",
+		"Line one of the brief.\nLine two.",
+		"windows\r\nline",
+		"bell\x07",
+	} {
+		for _, agent := range []string{"", "apex-agent-sm"} {
+			t.Run(fmt.Sprintf("%q/agent=%q", text, agent), func(t *testing.T) {
+				dir := t.TempDir()
+				line, argsFile, err := spillPromptLine(agent, text, assemblePromptLine(agent, text), dir)
+				require.NoError(t, err)
+				require.Equal(t, runlog.PromptArgsFile, argsFile)
+				path := runlog.PromptArgsPath(dir)
+				require.Equal(t, assemblePromptLine(agent, repl.ArgsPointer(path)), line)
+				got, err := os.ReadFile(path)
+				require.NoError(t, err)
+				require.Equal(t, []byte(text+"\n"), got, "byte-exact")
+			})
+		}
+	}
+	t.Run("single-spaced", func(t *testing.T) {
+		for _, agent := range []string{"", "apex-agent-sm"} {
+			dir := t.TempDir()
+			in := assemblePromptLine(agent, "fix the parser — naïvely")
+			line, argsFile, err := spillPromptLine(agent, "fix the parser — naïvely", in, dir)
+			require.NoError(t, err)
+			require.Equal(t, in, line)
+			require.Empty(t, argsFile)
+			require.NoFileExists(t, filepath.Join(dir, runlog.PromptArgsFile))
+		}
 	})
 }

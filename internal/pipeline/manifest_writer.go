@@ -175,7 +175,8 @@ func (w *manifestWriter) OpenStepLog(stageIdx, stepIdx int, stageName, skill str
 }
 
 // StepArgsPath is where a step's arguments go when they are too long to
-// type (repl.TypedLineBudget): beside the step's own event log, sharing
+// type (repl.TypedLineBudget) or would not type as written
+// (repl.TypesVerbatim): beside the step's own event log, sharing
 // its stem, so the two cannot drift apart. Returns the absolute path and
 // the run-relative one, forward-slashed like events_path.
 func (w *manifestWriter) StepArgsPath(stageIdx, stepIdx int, stageName, skill string) (abs, rel string) {

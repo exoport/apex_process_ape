@@ -655,28 +655,40 @@ func assembleInteractivePromptLine(effAgent string, step Step, prompt string) st
 }
 
 // stepLine returns the line to type for a step. Within
-// repl.TypedLineBudget it is assembleInteractivePromptLine's line,
-// unchanged. Past it, the step's arguments are written to argsPath
+// repl.TypedLineBudget, and with the step's own text typeable as written
+// (repl.TypesVerbatim), it is assembleInteractivePromptLine's line,
+// unchanged. Otherwise the step's arguments are written to argsPath
 // verbatim, newlines kept, and the line ends with repl.ArgsPointer
 // instead: Claude Code turns a longer burst into a "[Pasted text #N]"
-// placeholder that never runs as a command.
+// placeholder that never runs as a command, and text with a run of
+// spaces, a tab, a line break or another control character would not
+// arrive as written — the typed line splits Args on whitespace, and a
+// line break submits early.
 //
 // What moves is the step's own text: its Args and its prompt flag and
 // value. The persona prefix and the skill name stay, and so does a
 // leading `--no-commit`, which `ape task` puts in front of Args on the
-// agent path: it is ape's flag, not the caller's text. An empty argsPath
-// (no run directory) types the long line as before.
+// agent path: it is ape's flag, not the caller's text, and only the
+// caller's text is judged. Args' leading and trailing whitespace is not
+// part of it (the typed line drops it too); the prompt is judged and
+// written whole. An empty argsPath (no run directory) types the line as
+// before.
 func stepLine(effAgent string, step Step, prompt, argsPath string) (line string, spilled bool, err error) {
 	line = assembleInteractivePromptLine(effAgent, step, prompt)
-	if repl.FitsTypedLine(line) || argsPath == "" {
+	if argsPath == "" {
 		return line, false, nil
 	}
 	keep, rest := splitLeadingNoCommit(step.Args)
+	withPrompt := step.PromptFlag != "" && prompt != ""
+	verbatim := repl.TypesVerbatim(rest) && (!withPrompt || repl.TypesVerbatim(prompt))
+	if repl.FitsTypedLine(line) && verbatim {
+		return line, false, nil
+	}
 	parts := make([]string, 0, 2)
 	if rest != "" {
 		parts = append(parts, rest)
 	}
-	if step.PromptFlag != "" && prompt != "" {
+	if withPrompt {
 		parts = append(parts, step.PromptFlag+" "+prompt)
 	}
 	if len(parts) == 0 {

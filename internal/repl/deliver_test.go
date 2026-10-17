@@ -267,4 +267,38 @@ func TestArgsPointerNamesThePath(t *testing.T) {
 	p := ArgsPointer("/abs/run/stages/01-x/step-01-apex-x.args.md")
 	require.Contains(t, p, "/abs/run/stages/01-x/step-01-apex-x.args.md")
 	require.True(t, FitsTypedLine(p))
+	require.True(t, TypesVerbatim(p), "the pointer itself must type as written")
+}
+
+// TestTypesVerbatim — single-spaced text on one line types as written, at
+// any length; a run of spaces, a tab, a line break or any other control
+// character does not.
+func TestTypesVerbatim(t *testing.T) {
+	cases := []struct {
+		label string
+		text  string
+		want  bool
+	}{
+		{"empty", "", true},
+		{"one word", "M3", true},
+		{"single spaces", "--task T2 --change c-7", true},
+		{"single leading and trailing space", " a b ", true},
+		{"unicode", "café — naïve 日本語 ✓", true},
+		{"no-break space is a letter", "a\u00a0\u00a0b", true},
+		{"single-spaced past the budget", strings.TrimSpace(strings.Repeat("word ", TypedLineBudget/5+20)), true},
+		{"double space", "a  b", false},
+		{"trailing double space", "a  ", false},
+		{"tab", "a\tb", false},
+		{"newline", "line one\nline two", false},
+		{"trailing newline", "a\n", false},
+		{"carriage return", "a\rb", false},
+		{"NUL", "a\x00b", false},
+		{"ESC", "a\x1b[Bb", false},
+		{"DEL", "a\x7fb", false},
+		{"C1 control", "a\u0085b", false},
+	}
+	for _, tc := range cases {
+		require.Equal(t, tc.want, TypesVerbatim(tc.text), "%s: %q", tc.label, tc.text)
+	}
+	require.False(t, FitsTypedLine(cases[6].text), "the long fixture must be past the budget")
 }

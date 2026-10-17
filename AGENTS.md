@@ -106,7 +106,9 @@ make check-claude  # LOCAL ONLY: spawn the installed Claude Code and verify ape'
                    #   foreground_agent_sync: a run_in_background:false Agent call still
                    #   returns synchronously under ape's CLAUDE_CODE_FORK_SUBAGENT=0; and
                    #   model_aliases: each family word starts the model ape's alias pins,
-                   #   and that model has an exact price)
+                   #   and that model has an exact price; and args_whitespace: what a typed
+                   #   run of spaces reaches a skill as (logged), and the args-file route
+                   #   delivering spaces, a tab and a newline byte-exact — two Haiku turns)
 make check-hooks   # LOCAL ONLY: verify Claude Code still sends the hook fields the completion gates read.
                    #   Seeds its own corpus (one `ape prompt` session in a temp copy of
                    #   testdata/apexv1project), so it needs no pre-existing project.
