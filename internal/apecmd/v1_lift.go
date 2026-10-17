@@ -1,9 +1,13 @@
 package apecmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
@@ -26,6 +30,13 @@ everything the lift deletes; v0 files stay readable as ` + "`git show apex-v0-fi
   git tag -a apex-v0-final -m "APEX v0 final" && git push origin apex-v0-final
   ape project lift --dry-run        # the whole plan, nothing written
   ape project lift
+
+Which ape: the lift runs on the binary invoked, whatever the project's .bingo/ape.mod
+pins — it is exempt from the pin swap, since a v0 pin names an ape with no v1 commands.
+The output's first lines say which binary runs (version, path) and what becomes of the
+pin: when this ape is a release (vX.Y.Z or vX.Y.Z-rc.N) and bingo is on PATH, the lift
+commit moves the pin to it (bingo get); otherwise the lift prints the one command that
+does, and until the pin moves every other v1 command there needs APE_TOOLCHAIN=local.
 
 Pre-flight (refused, exit 1): a v0 install (_apex/framework.yaml records a v0 version,
 or did in git history) and no v1 layout or earlier lift (lift.not-v0); a version in
@@ -133,6 +144,18 @@ Exit codes: 0 lifted (or planned) · 1 refused or failed (code in --json) · 2 u
 				dir = apexv1.FindRoot(wd)
 			}
 			opt.Run = f.runOptions()
+			self, _ := os.Executable()
+			if r, rerr := filepath.EvalSymlinks(self); rerr == nil {
+				self = r
+			}
+			absDir, err := filepath.Abs(dir)
+			if err != nil {
+				return err
+			}
+			opt.Ape = liftApe(absDir, Version, self, opt.DryRun, func() bool {
+				_, err := exec.LookPath("bingo")
+				return err == nil
+			})
 			res, err := apexv1.Lift(cmd.Context(), dir, opt)
 			if err != nil {
 				var partial any
@@ -153,12 +176,56 @@ Exit codes: 0 lifted (or planned) · 1 refused or failed (code in --json) · 2 u
 	return cmd
 }
 
+// releaseVersionRe is a version a pin can name and bingo can fetch: a
+// release or a release candidate, not a dev or pseudo-version build.
+var releaseVersionRe = regexp.MustCompile(`^v?\d+\.\d+\.\d+(?:-rc\.\d+)?$`)
+
+// liftApe says which ape runs the lift and what becomes of the project's
+// pin (L1): moved to this version in the lift commit by bingo, when this
+// is a release and bingo is here; otherwise the one command that moves it.
+// dryRun plans the move without it.
+func liftApe(root, running, self string, dryRun bool, haveBingo func() bool) *apexv1.LiftApe {
+	a := &apexv1.LiftApe{Version: running, Path: self}
+	pin, err := findApePin(root)
+	if err != nil || pin == nil || pin.root != root {
+		if err != nil {
+			a.PinNote = err.Error()
+		}
+		return a
+	}
+	a.PinFile, a.Pinned = ".bingo/ape.mod", pin.version
+	if sameApeVersion(running, pin.version) {
+		a.PinNote = "the pin is this version already"
+		return a
+	}
+	tag := "v" + trimV(running)
+	a.PinCommand = "bingo get " + apeModulePath + "@" + tag
+	switch {
+	case !releaseVersionRe.MatchString(running):
+		a.PinNote = "this ape (" + running + ") is no release a pin can name: the lift leaves " + pin.version +
+			"; once this version is published, run " + a.PinCommand + " and commit .bingo/ — until then run v1 commands here with " + envToolchain + "=local"
+	case !haveBingo():
+		a.PinNote = "bingo is not on PATH: after the lift, run " + a.PinCommand + " and commit .bingo/ — until then run v1 commands here with " + envToolchain + "=local"
+	case dryRun:
+		a.PinNote = "the lift moves the pin from " + pin.version + " to " + tag + " (" + a.PinCommand + ") in its commit"
+	default:
+		a.MovePin = func(ctx context.Context) error { return movePin(ctx, io.Discard, root, tag, false) }
+	}
+	return a
+}
+
 func printLift(w io.Writer, r *apexv1.LiftResult) {
 	verb := func(done, plan string) string {
 		if r.DryRun {
 			return plan
 		}
 		return done
+	}
+	if a := r.Ape; a != nil {
+		fmt.Fprintf(w, "ape       %s (%s) runs this lift — exempt from the project's ape pin\n", a.Version, a.Path)
+		if a.PinFile != "" {
+			fmt.Fprintf(w, "pin       %s pins %s: %s\n", a.PinFile, a.Pinned, a.PinNote)
+		}
 	}
 	fmt.Fprintf(w, "APEX v0 %s (%s); skills from %s\n", r.Version, r.VersionSource, r.SkillsSource)
 	for _, p := range r.Preflight {

@@ -41,6 +41,31 @@ type LiftOptions struct {
 	// a byte-identity perimeter, say. Deletions are not affected.
 	Exclude []string
 	Run     RunOptions
+	// Ape is the binary running the lift and the project's pin of ape,
+	// filled by the command (L1); nil leaves the pin alone.
+	Ape *LiftApe
+}
+
+// LiftApe is which ape runs the lift, and what happens to the project's
+// ape pin (.bingo/ape.mod): a v0 pin names an ape with no v1 commands, so
+// the lift moves it to the running version in its commit, or says the
+// one command that does.
+type LiftApe struct {
+	Version string `json:"version"`
+	Path    string `json:"path,omitempty"`
+	// PinFile is the project's pin, "" when it has none; Pinned the
+	// version it names.
+	PinFile string `json:"pin_file,omitempty"`
+	Pinned  string `json:"pinned,omitempty"`
+	// PinMoved: the lift commit moves the pin to Version.
+	PinMoved bool `json:"pin_moved,omitempty"`
+	// PinCommand is the one command that moves the pin, when the lift did
+	// not (or, in a dry run, will not).
+	PinCommand string `json:"pin_command,omitempty"`
+	PinNote    string `json:"pin_note,omitempty"`
+	// MovePin moves the pin in the working tree (bingo get); nil when the
+	// lift cannot, and PinNote says why.
+	MovePin func(ctx context.Context) error `json:"-"`
 }
 
 // LiftProblem is a pre-flight refusal a dry run reports.
@@ -72,14 +97,16 @@ type LiftCandidate struct {
 
 // LiftResult is the lift's report (and, with DryRun, its plan).
 type LiftResult struct {
-	Root          string `json:"root"`
-	DryRun        bool   `json:"dry_run"`
-	Version       string `json:"v0_version"`
-	VersionSource string `json:"v0_version_source"`
-	SkillsSource  string `json:"skills_source"`
-	Tag           string `json:"tag"`
-	TagSHA        string `json:"tag_sha,omitempty"`
-	Remote        string `json:"remote,omitempty"`
+	Root   string `json:"root"`
+	DryRun bool   `json:"dry_run"`
+	// Ape is the binary that runs the lift and the fate of the pin (L1).
+	Ape           *LiftApe `json:"ape,omitempty"`
+	Version       string   `json:"v0_version"`
+	VersionSource string   `json:"v0_version_source"`
+	SkillsSource  string   `json:"skills_source"`
+	Tag           string   `json:"tag"`
+	TagSHA        string   `json:"tag_sha,omitempty"`
+	Remote        string   `json:"remote,omitempty"`
 	// Preflight lists what a real run would refuse (dry run only).
 	Preflight []LiftProblem    `json:"preflight,omitempty"`
 	Deleted   []LiftDeletion   `json:"deleted"`
@@ -186,7 +213,7 @@ func Lift(ctx context.Context, root string, opt LiftOptions) (*LiftResult, error
 		return nil, err
 	}
 	lf := &lifter{ctx: ctx, root: abs, opt: opt, writes: map[string]string{}, keepADR: map[string]bool{}, texts: map[string]string{}, dirty: map[string]bool{}}
-	lf.res = &LiftResult{Root: abs, DryRun: opt.DryRun, Tag: LiftTag}
+	lf.res = &LiftResult{Root: abs, DryRun: opt.DryRun, Tag: LiftTag, Ape: opt.Ape}
 	for _, g := range opt.Exclude {
 		re, err := globRegexp(g)
 		if err != nil {
@@ -982,6 +1009,20 @@ func (lf *lifter) apply() error {
 			}
 		}
 		commit = append(commit, "AGENTS.md")
+	}
+	if a := lf.res.Ape; a != nil && a.MovePin != nil {
+		if err := a.MovePin(ctx); err != nil {
+			// bingo may have half-written .bingo/: back to the tag's.
+			_, _ = git(ctx, lf.root, "checkout", "--", ".bingo")
+			a.PinNote = "could not move the pin (" + err.Error() + "): after the lift, run " + a.PinCommand +
+				" and commit .bingo/; until then a bare ape here runs " + a.Pinned + ", so run v1 commands with APE_TOOLCHAIN=local"
+		} else {
+			a.PinMoved = true
+			a.PinNote = "the lift commit moves " + a.PinFile + " from " + a.Pinned + " to v" + strings.TrimPrefix(a.Version, "v")
+			commit = append(commit, ".bingo")
+			lf.res.CommitMessage = strings.Replace(lf.res.CommitMessage, "- lays down the v1 skeleton",
+				"- moves the ape pin ("+a.PinFile+") from "+a.Pinned+" to v"+strings.TrimPrefix(a.Version, "v")+"\n- lays down the v1 skeleton", 1)
+		}
 	}
 	if err := recordLiftedDecisions(p, lf.res.ADRs); err != nil {
 		return err

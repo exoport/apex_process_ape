@@ -156,8 +156,15 @@ var recoveryVerbs = map[string]bool{
 // verbFrameworkUpdate is the command path of `ape framework update`.
 const verbFrameworkUpdate = "ape framework update"
 
+// verbProjectLift is the command path of `ape project lift`. It is exempt
+// from the pin (L1): it runs on a v0 project, whose pin names a v0 ape
+// that has no `project` command — every rehearsal stopped there. The lift
+// runs on the binary invoked, says which in its output, and moves the pin
+// to it (or prints the command that does).
+const verbProjectLift = "ape project lift"
+
 func decidePin(in pinCheckInput) pinDecision {
-	if strings.EqualFold(in.env(envToolchain), "local") {
+	if strings.EqualFold(in.env(envToolchain), "local") || in.verb == verbProjectLift {
 		return pinDecision{run: true}
 	}
 	pin, err := findApePin(in.cwd)

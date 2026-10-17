@@ -209,3 +209,19 @@ func TestDecidePin(t *testing.T) {
 		require.True(t, d.run, "a nested repo with no pin of its own is not the outer repo's project")
 	})
 }
+
+// L1: every lift rehearsal stopped on the pin swap — the project pins a
+// v0 ape, which has no `project` command (or is not installed). The lift
+// runs on the binary invoked, however the pin reads.
+func TestDecidePin_ProjectLiftIsExempt(t *testing.T) {
+	_, sub := pinProject(t, "v0.9.0")
+	in := pinInput(sub, "1.0.0-rc.3", verbProjectLift)
+	d := decidePin(in)
+	require.True(t, d.run)
+	require.Empty(t, d.exec)
+	in.locate = func(string) (string, bool) { return "", false }
+	d = decidePin(in)
+	require.True(t, d.run, "not installed: still runs here")
+	require.Nil(t, d.refuse)
+	require.Equal(t, "/gobin/ape-v0.9.0", decidePin(pinInput(sub, "1.0.0-rc.3", "ape project check")).exec, "other v1 verbs still honour the pin")
+}
