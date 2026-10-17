@@ -82,7 +82,7 @@ func TestParseSpec_RoundTrip(t *testing.T) {
 	require.Len(t, s.Requirements, 2)
 	require.Equal(t, "Say name", s.Requirements[1].Name)
 	require.Equal(t, greetingSpec, s.Render())
-	require.Empty(t, ValidateSpec("spec.md", greetingSpec))
+	require.Empty(t, ValidateSpec("spec.md", greetingSpec, DefaultCaps().Spec))
 }
 
 func TestValidateSpec(t *testing.T) {
@@ -99,10 +99,10 @@ func TestValidateSpec(t *testing.T) {
 		"duplicate":   {"# T\nPurpose: p\n### Requirement: R\n#### Scenario: s\n- check: a\n### Requirement: R\n#### Scenario: s\n- check: a\n", "duplicate requirement"},
 		"other h3":    {"# T\nPurpose: p\n### Notes\n", "not `### Requirement:"},
 		"empty check": {"# T\nPurpose: p\n### Requirement: R\n#### Scenario: s\n- check:\n", "empty `check:`"},
-		"over 20KB":   {"# T\nPurpose: p\n" + strings.Repeat("x", SpecMaxBytes), "split into two capabilities"},
+		"over 24KB":   {"# T\nPurpose: p\n" + strings.Repeat("x", 24<<10), "over the 24 KB cap (caps.spec) — split into two capabilities"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			require.Contains(t, findingMessages(ValidateSpec("spec.md", tc.doc)), tc.want)
+			require.Contains(t, findingMessages(ValidateSpec("spec.md", tc.doc, DefaultCaps().Spec)), tc.want)
 		})
 	}
 }
@@ -148,14 +148,18 @@ func TestRoadmap_StatusForms(t *testing.T) {
 }
 
 func TestValidateProjectMD(t *testing.T) {
-	require.Empty(t, ValidateProjectMD("development/project.md", projectMD))
+	limit := DefaultCaps().ProjectMD
+	require.Equal(t, 16<<10, limit)
+	require.Empty(t, ValidateProjectMD("development/project.md", projectMD, limit))
 	skeleton := strings.ReplaceAll(projectSkeleton, "%s", "X")
-	require.Contains(t, findingMessages(ValidateProjectMD("development/project.md", skeleton)), "`## Vision` is empty")
-	require.Contains(t, findingMessages(ValidateProjectMD("development/project.md", "# X\n## Vision\nv\n")), "missing `## Users`")
-	long := projectMD + strings.Repeat("line\n", ProjectMaxLines)
-	require.Contains(t, findingMessages(ValidateProjectMD("development/project.md", long)), "over the 150-line cap")
-	big := projectMD + strings.Repeat("x", ProjectMaxBytes)
-	require.Contains(t, findingMessages(ValidateProjectMD("development/project.md", big)), "over the 8 KB cap")
+	require.Contains(t, findingMessages(ValidateProjectMD("development/project.md", skeleton, limit)), "`## Vision` is empty")
+	require.Contains(t, findingMessages(ValidateProjectMD("development/project.md", "# X\n## Vision\nv\n", limit)), "missing `## Users`")
+	// No line cap (D69): 400 short lines under the byte cap pass.
+	long := projectMD + strings.Repeat("line\n", 400)
+	require.Empty(t, ValidateProjectMD("development/project.md", long, limit))
+	big := projectMD + strings.Repeat("x", limit)
+	require.Contains(t, findingMessages(ValidateProjectMD("development/project.md", big, limit)), "over the 16 KB cap (caps.project_md)")
+	require.Empty(t, ValidateProjectMD("development/project.md", big, 48<<10), "a configured cap is the one measured")
 }
 
 func TestValidateDecision(t *testing.T) {

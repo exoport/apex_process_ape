@@ -251,8 +251,8 @@ gate changed since the approval (H2). ape records the close in milestones.json (
 With "evidence: archive" in _apex/config.yaml (H23; default off), a green close writes the
 gate run's evidence to development/archive/milestones/<M>/evidence/ — one file per check
 (the gate command, every spec scenario, the regression command): command, exit, duration,
-output sha256 and the output, capped at 256 KB (head and tail kept, the full log named by
-path and sha256) — plus accept-red.json when milestones.json records an accept_red for
+output sha256 and the output, capped at caps.evidence_log, default 1 MiB (head and tail
+kept, the full log named by path and sha256) — plus accept-red.json when milestones.json records an accept_red for
 <M>; committed with the close record (JSON "evidence").
 
 Changes in flight refuse with milestone.changes-in-flight, action apply — or person when

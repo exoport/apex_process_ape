@@ -45,13 +45,15 @@ func TestEvidence_OffByDefault(t *testing.T) {
 // check's output.
 func TestEvidence_FileCapsAndRefusesAStaleLog(t *testing.T) {
 	p := fixture(t, baseFiles())
-	big := strings.Repeat("h", EvidenceMaxBytes) + strings.Repeat("m", 1000) + strings.Repeat("t", EvidenceMaxBytes)
+	limit := DefaultCaps().EvidenceLog
+	require.Equal(t, 1<<20, limit)
+	big := strings.Repeat("h", limit) + strings.Repeat("m", 1000) + strings.Repeat("t", limit)
 	write(t, p, "_apex/state/logs/x/T1.log", big)
 	sum := sha256.Sum256([]byte(big))
 	r := CheckResult{Task: "T1", Cmd: "./big.sh", Exit: 1, Secs: 2, OutputSHA256: hex.EncodeToString(sum[:]), Log: "_apex/state/logs/x/T1.log"}
 	ev := p.evidenceFile(&r)
-	require.Less(t, len(ev), EvidenceMaxBytes+2048)
-	require.Contains(t, ev, "over the 256 KB cap — head and tail kept; the full output is _apex/state/logs/x/T1.log (sha256 "+r.OutputSHA256)
+	require.Less(t, len(ev), limit+2048)
+	require.Contains(t, ev, "over the 1 MiB cap (caps.evidence_log) — head and tail kept; the full output is _apex/state/logs/x/T1.log (sha256 "+r.OutputSHA256)
 	require.Contains(t, ev, "bytes omitted — full output: _apex/state/logs/x/T1.log")
 	require.NotContains(t, ev, "mmm")
 	require.True(t, strings.HasSuffix(ev, "ttt"))

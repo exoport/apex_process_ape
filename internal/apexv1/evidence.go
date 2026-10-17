@@ -25,8 +25,9 @@ import (
 // inside the squash; at a green `ape milestone close`, the gate run's into
 // development/archive/milestones/<M>/evidence/, with the close record. One
 // file per check: what ran, its exit, duration and output sha256, then the
-// output — capped at EvidenceMaxBytes, keeping its head and tail and
-// naming the full log by path and sha256.
+// output — capped at caps.evidence_log (default 1 MiB, ceiling 16 MiB;
+// caps.go), keeping its head and tail and naming the full log by path
+// and sha256. The ignored log itself is never capped.
 
 // EvidenceMode is _apex/config.yaml's evidence: "off" (also when absent)
 // or "archive".
@@ -45,9 +46,6 @@ func (m *EvidenceMode) UnmarshalYAML(n *yaml.Node) error {
 	}
 	return fmt.Errorf("evidence: %q is not archive or off", n.Value)
 }
-
-// EvidenceMaxBytes caps one check's output in its evidence file.
-const EvidenceMaxBytes = 256 << 10
 
 // evidenceOn reports evidence: archive.
 func (p *Project) evidenceOn() bool {
@@ -101,6 +99,7 @@ func (p *Project) writeEvidence(dir string, results []CheckResult, extra map[str
 // evidenceFile renders one check: its record, then its output from the
 // log — only when the log still holds what the check recorded.
 func (p *Project) evidenceFile(r *CheckResult) string {
+	limit := p.caps().EvidenceLog
 	var b strings.Builder
 	fmt.Fprintf(&b, "check: %s\n", r.Task)
 	if r.Kind != "" {
@@ -119,14 +118,14 @@ func (p *Project) evidenceFile(r *CheckResult) string {
 	case hex.EncodeToString(sum[:]) != r.OutputSHA256:
 		b.WriteString("output: unavailable — the log no longer holds what this check recorded (a later run overwrote it)\n")
 		return b.String()
-	case len(data) <= EvidenceMaxBytes:
+	case len(data) <= limit:
 		fmt.Fprintf(&b, "output: complete, %d bytes\n\n", len(data))
 		b.Write(data)
 		return b.String()
 	}
-	half := EvidenceMaxBytes / 2
-	fmt.Fprintf(&b, "output: %d bytes, over the %d KB cap — head and tail kept; the full output is %s (sha256 %s, in this checkout's ignored logs)\n\n",
-		len(data), EvidenceMaxBytes>>10, r.Log, r.OutputSHA256)
+	half := limit / 2
+	fmt.Fprintf(&b, "output: %d bytes, over the %s cap (caps.evidence_log) — head and tail kept; the full output is %s (sha256 %s, in this checkout's ignored logs)\n\n",
+		len(data), capSize(limit), r.Log, r.OutputSHA256)
 	b.Write(data[:half])
 	fmt.Fprintf(&b, "\n[… %d bytes omitted — full output: %s, sha256 %s …]\n", len(data)-2*half, r.Log, r.OutputSHA256)
 	b.Write(data[len(data)-half:])

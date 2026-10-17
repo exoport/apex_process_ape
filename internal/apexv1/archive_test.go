@@ -87,7 +87,7 @@ func TestMergeDelta(t *testing.T) {
 			byCap := map[string]SpecUpdate{}
 			for _, u := range updates {
 				byCap[u.Capability] = u
-				require.Empty(t, ValidateSpec(u.Path, u.content), "every merged spec passes the project check")
+				require.Empty(t, ValidateSpec(u.Path, u.content, DefaultCaps().Spec), "every merged spec passes the project check")
 			}
 			for capName, want := range tc.want {
 				require.Contains(t, byCap[capName].content, want)
@@ -354,12 +354,12 @@ func TestArchive_NeedsReviewPass(t *testing.T) {
 
 func TestArchive_MergedSpecOverCapIsRefused(t *testing.T) {
 	p := fixture(t, baseFiles())
-	big := "### ADDED [greeting] Requirement: Big\n" + strings.Repeat("The system SHALL be big.\n", 900) + "#### Scenario: s\n- check: true\n"
+	big := "### ADDED [greeting] Requirement: Big\n" + strings.Repeat("The system SHALL be big.\n", 1100) + "#### Scenario: s\n- check: true\n"
 	addChange(t, p, "add-big", changeDoc("add-big", "greeting", big, "- T1 x — check: true\n"))
 	c := ParseChange("", read(t, p, "development/changes/add-big/change.md"))
 	updates, conflicts := p.MergeDelta(c)
 	require.Empty(t, conflicts)
-	require.Contains(t, findingMessages(ValidateSpec("s", updates[0].content)), "split into two capabilities")
+	require.Contains(t, findingMessages(ValidateSpec("s", updates[0].content, DefaultCaps().Spec)), "split into two capabilities")
 
 	// H18: change check (and so start) finds it first.
 	fs := ClassifyFindings(p.CheckChange("add-big"))

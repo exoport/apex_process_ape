@@ -196,12 +196,13 @@ func validateRequirementBody(file string, r Requirement) []Finding {
 	return out
 }
 
-// ValidateSpec checks a capability spec's shape and cap.
-func ValidateSpec(file, doc string) []Finding {
+// ValidateSpec checks a capability spec's shape and its cap (maxBytes,
+// caps.spec).
+func ValidateSpec(file, doc string, maxBytes int) []Finding {
 	var out []Finding
-	if len(doc) > SpecMaxBytes {
+	if len(doc) > maxBytes {
 		out = append(out, Finding{File: file, Message: "spec is " + sizeKB(len(doc)) +
-			", over the 20 KB cap — split into two capabilities (a change like any other)"})
+			", over the " + capSize(maxBytes) + " cap (caps.spec) — split into two capabilities (a change like any other)"})
 	}
 	s := ParseSpec(doc)
 	if s.Title == "" {

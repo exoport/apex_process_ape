@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -15,15 +14,13 @@ var (
 	projectRequired = []string{"Vision", "Users", "Scope", "Out of scope", "Constraints"}
 )
 
-// ValidateProjectMD checks project.md's shape and caps.
-func ValidateProjectMD(file, doc string) []Finding {
+// ValidateProjectMD checks project.md's shape and its byte cap (maxBytes,
+// caps.project_md; D69 dropped the line cap).
+func ValidateProjectMD(file, doc string, maxBytes int) []Finding {
 	var out []Finding
-	const remedy = " — move detail to specs/, decisions/ or docs/explanation/"
-	if n := strings.Count(strings.TrimRight(doc, "\n"), "\n") + 1; n > ProjectMaxLines {
-		out = append(out, Finding{File: file, Message: "project.md is " + strconv.Itoa(n) + " lines, over the 150-line cap" + remedy})
-	}
-	if len(doc) > ProjectMaxBytes {
-		out = append(out, Finding{File: file, Message: "project.md is " + sizeKB(len(doc)) + ", over the 8 KB cap" + remedy})
+	if len(doc) > maxBytes {
+		out = append(out, Finding{File: file, Message: "project.md is " + sizeKB(len(doc)) + ", over the " + capSize(maxBytes) +
+			" cap (caps.project_md) — move detail to specs/, decisions/ or docs/explanation/"})
 	}
 	lines := splitLines(doc)
 	title := ""
@@ -53,11 +50,12 @@ func ValidateProjectMD(file, doc string) []Finding {
 	return out
 }
 
-// ValidateAgentsMD checks AGENTS.md exists and stays a map.
-func ValidateAgentsMD(file, doc string) []Finding {
-	if n := strings.Count(strings.TrimRight(doc, "\n"), "\n") + 1; n > AgentsMaxLines {
-		return []Finding{{File: file, Message: "AGENTS.md is " + strconv.Itoa(n) +
-			" lines, over the 120-line cap — it is a map: move detail to docs/ or development/"}}
+// ValidateAgentsMD checks AGENTS.md stays a map: its byte cap (maxBytes,
+// caps.agents_md). Its lines are not measured (D69).
+func ValidateAgentsMD(file, doc string, maxBytes int) []Finding {
+	if len(doc) > maxBytes {
+		return []Finding{{File: file, Message: "AGENTS.md is " + sizeKB(len(doc)) + ", over the " + capSize(maxBytes) +
+			" cap (caps.agents_md) — it is a map: move detail to docs/ or development/"}}
 	}
 	return nil
 }
@@ -161,16 +159,18 @@ func (p *Project) Check() []Finding {
 	add(p.docsFindings()...)
 	add(p.settingsIgnoredFindings(context.Background())...)
 	add(p.provenanceFindings(context.Background())...)
+	add(p.capsConfig().OverCeiling()...)
+	caps := p.caps()
 
 	if doc, err := readFileString(p.ProjectMD()); err != nil {
 		missing(p.ProjectMD(), "run `ape project init`, then write it (apex-plan)")
 	} else {
-		add(ValidateProjectMD(p.Rel(p.ProjectMD()), doc)...)
+		add(ValidateProjectMD(p.Rel(p.ProjectMD()), doc, caps.ProjectMD)...)
 	}
 	if doc, err := readFileString(p.AgentsMD()); err != nil {
 		missing(p.AgentsMD(), "write the project map: commands, NEVER rules, pointers")
 	} else {
-		add(ValidateAgentsMD("AGENTS.md", doc)...)
+		add(ValidateAgentsMD("AGENTS.md", doc, caps.AgentsMD)...)
 	}
 	if doc, err := readFileString(p.ClaudeMD()); err == nil {
 		if !hasAgentsImport(doc) {
@@ -195,7 +195,7 @@ func (p *Project) Check() []Finding {
 			add(Finding{File: file, Message: "capability folder without spec.md"})
 			continue
 		}
-		add(ValidateSpec(file, doc)...)
+		add(ValidateSpec(file, doc, caps.Spec)...)
 	}
 
 	if entries, err := os.ReadDir(p.DecisionsDir()); err == nil {
@@ -217,7 +217,7 @@ func (p *Project) Check() []Finding {
 		// The tree checked out is what is checked: a change held only
 		// by its branch (D38) is checked there.
 		if dirExists(p.ChangeDir(c.ID)) {
-			add(p.CheckChange(c.ID)...)
+			add(p.checkChange(c.ID, false)...)
 		}
 	}
 	return out

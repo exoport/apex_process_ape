@@ -94,10 +94,10 @@ func TestCheckChange(t *testing.T) {
 			want: []string{"`## Why` is empty", "missing `## Out of scope`", "missing `## Delta`", "missing `## Tasks`"},
 		},
 		{
-			name: "over the 8 KB cap",
+			name: "over the 16 KB cap",
 			id:   "add-wave",
-			doc:  changeDoc("add-wave", "greeting", addedWave, okTasks) + strings.Repeat("x", ChangeMaxBytes),
-			want: []string{"over the 8 KB cap — split this change"},
+			doc:  changeDoc("add-wave", "greeting", addedWave, okTasks) + strings.Repeat("x", 16<<10),
+			want: []string{"over the 16 KB cap (caps.change_md) — split this change"},
 		},
 		{
 			name: "design.md over the cap",
@@ -105,9 +105,9 @@ func TestCheckChange(t *testing.T) {
 			doc:  changeDoc("add-wave", "greeting", addedWave, okTasks),
 			mutate: func(t *testing.T, p *Project) {
 				t.Helper()
-				write(t, p, "development/changes/add-wave/design.md", strings.Repeat("y", DesignMaxBytes+1))
+				write(t, p, "development/changes/add-wave/design.md", strings.Repeat("y", 16<<10+1))
 			},
-			want: []string{"design.md is", "split this change"},
+			want: []string{"design.md is 16.0 KB, over the 16 KB cap (caps.design_md)", "split this change"},
 		},
 		{
 			name: "unknown frontmatter key; x- keys are free",
@@ -152,7 +152,7 @@ func TestProjectCheck(t *testing.T) {
 	require.Empty(t, p.Check())
 
 	write(t, p, "CLAUDE.md", "# old instructions\n")
-	write(t, p, "AGENTS.md", strings.Repeat("l\n", AgentsMaxLines+1))
+	write(t, p, "AGENTS.md", strings.Repeat("l\n", 8<<10+1))
 	write(t, p, "development/specs/Bad_Cap/spec.md", "# x\n")
 	write(t, p, "development/specs/empty/.keep", "")
 	write(t, p, "development/decisions/0001-x.md", "# ADR-0001: x\n")
@@ -160,7 +160,7 @@ func TestProjectCheck(t *testing.T) {
 	got := findingMessages(p.Check())
 	for _, w := range []string{
 		"CLAUDE.md: must import the map",
-		"AGENTS.md is 121 lines",
+		"AGENTS.md is 16.0 KB, over the 16 KB cap (caps.agents_md)",
 		"capability folder must be a kebab-case slug",
 		"capability folder without spec.md",
 		"missing `Status:",
