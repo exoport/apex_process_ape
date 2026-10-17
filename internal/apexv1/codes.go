@@ -318,6 +318,8 @@ var DiagnosticCodes = []CodeDoc{
 
 	// D89 (rc.4).
 	{CodeChangeOverCeiling, 1, "apply", "change.md as a whole, ## Notes included, over the 48 KB change_md file ceiling, whatever caps.change_md says (D89): ## Notes is for working notes only — move bulk to the change's assets/; reported at change check and start, refused at archive"},
-
+	// rc.4 phase 1 (rc4-a).
+	{"agents.no-project-context", 1, "person", "AGENTS.md has no line importing <development_folder>/project.md (D82): add \"Project context: read @development/project.md before planning or changing anything.\" under its title, outside code — `ape project init` adds it"},
+	{"architecture.too-big", 1, "person", "development/architecture.md (optional) over its caps.architecture_md cap (default 16 KB, ceiling 48 KB; D84): move detail to specs/, decisions/ or docs/explanation/"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }
