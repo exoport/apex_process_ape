@@ -210,7 +210,7 @@ var DiagnosticCodes = []CodeDoc{
 	// findings (exit 1, from project check / change check)
 	{"file.missing", 1, "person", "a required file is missing"},
 	{"layout.old-archive", 1, "person", "development/changes/archive/ exists (an older ape's archive): move its folders to development/archive/"},
-	{"lift.disposition-pending", 1, "person", "development/lift-disposition.md exists after a lift: apex-plan fills it, a fresh read-only session then the operator review it; the operator deletes it"},
+	{"lift.disposition-pending", 1, "person", "development/lift-disposition.md exists after a lift: apex-plan fills it, a fresh read-only session then the operator review it; the operator deletes it and lift-disposition.json"},
 	{"docs.missing", 1, "person", "a docs.changelog or docs.user_docs path in _apex/config.yaml does not exist (H21): create it, or fix the path"},
 	{"layout.old-state", 1, "person", "development/.apex/ exists (an older ape's state): move milestones.json and decisions.json to _apex/state/, delete it"},
 	{"project.too-big", 1, "person", "project.md over its caps.project_md cap (default 16 KB, ceiling 48 KB; no line cap, D69)"},

@@ -1,6 +1,8 @@
 package apexv1
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,4 +90,51 @@ func TestLift_RegressionAtTheTag(t *testing.T) {
 		require.Nil(t, res.RegressionAtTag)
 		require.Empty(t, res.RegressionVerdict)
 	})
+}
+
+// L11, from the dry runs: the disposition file reached 379 KB (radix),
+// most of it references to removed paths in evidence logs — past any
+// reader's cap. It summarises now; the JSON report beside it is whole.
+func TestLift_DispositionStaysReviewable(t *testing.T) {
+	root := liftFixture(t, false)
+	var log strings.Builder
+	for i := range 3000 {
+		fmt.Fprintf(&log, "run %d read development/implementation/sprint-status.yaml\n", i)
+	}
+	files := map[string]string{"development/governance/evidence/ratchet.md": log.String()}
+	for i := range 120 {
+		files[fmt.Sprintf("pkg/p%03d/p.go", i)] = fmt.Sprintf("package p%03d\n\nfunc TestStory1_%d() {}\n\nvar s = \"Story 1.1\"\n", i, i)
+	}
+	for i := range 30 {
+		files[fmt.Sprintf("tools/ci/guard%02d.sh", i)] = "#!/bin/sh\ntest -d development/governance/adrs\n"
+	}
+	for rel, content := range files {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
+	}
+	run(t, root, "add", "-A")
+	run(t, root, "commit", "-q", "-m", "a big corpus")
+	run(t, root, "tag", "-a", LiftTag, "-m", "final")
+	run(t, root, "push", "-q", "origin", LiftTag)
+	res, err := Lift(ctx(), root, LiftOptions{NoVerifyRun: true})
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(res.DanglingRefs), 3030)
+	require.GreaterOrEqual(t, len(res.IDsLeft), 240)
+
+	disp, err := os.ReadFile(filepath.Join(root, "development", LiftDisposition))
+	require.NoError(t, err)
+	require.Less(t, len(disp), 16<<10, "summaries, not lists")
+	d := string(disp)
+	require.Contains(t, d, "- `development/governance/evidence/ratchet.md` — 3000\n")
+	require.Contains(t, d, "- `tools/ci/guard00.sh:2` `development/governance/adrs` — reference\n", "code and CI references are listed")
+	require.Contains(t, d, "more file(s) (in `lift-disposition.json`)")
+	require.Less(t, strings.Index(d, "## Code and CI that still read removed paths"), strings.Index(d, "## ADRs"), "what can break comes first")
+
+	var report liftReport
+	data, err := os.ReadFile(filepath.Join(root, "development", LiftReport))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &report))
+	require.Len(t, report.DanglingRefs, len(res.DanglingRefs))
+	require.Len(t, report.IDsLeft, len(res.IDsLeft))
 }

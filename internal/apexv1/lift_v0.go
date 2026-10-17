@@ -31,8 +31,10 @@ const (
 	// LiftDisposition is the file the lift writes for review, relative
 	// to the development folder (D47 Q4).
 	LiftDisposition = "lift-disposition.md"
-	frameworkYAML   = "_apex/framework.yaml"
-	configYAML      = "_apex/config.yaml"
+	// LiftReport holds the disposition's lists whole, beside it (L11).
+	LiftReport    = "lift-disposition.json"
+	frameworkYAML = "_apex/framework.yaml"
+	configYAML    = "_apex/config.yaml"
 	// v0SHALen is how much of the commit a v0 version was read from the
 	// report names.
 	v0SHALen = 12

@@ -1,7 +1,9 @@
 package apexv1
 
 import (
+	"encoding/json"
 	"fmt"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -132,18 +134,64 @@ func cell(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "|", `\|`), "\n", " ")
 }
 
-// listCap bounds a per-file list in the Markdown; the JSON report is whole.
-const listCap = 20
+// The disposition file is what apex-plan, a fresh reviewer and the person
+// read whole, so it holds summaries (L11): the dry runs wrote 12–379 KB,
+// most of it references to removed paths inside evidence logs, past any
+// reader's cap. The full lists go to lift-disposition.json beside it.
+const (
+	// summaryFiles bounds how many files a summary names; the rest are
+	// counted, and the JSON report has them all.
+	summaryFiles = 40
+	// codeRefsPerFile bounds the code and CI references listed for one
+	// file: those are the ones to act on, so they are shown, not counted.
+	codeRefsPerFile = 10
+)
+
+// liftReport is lift-disposition.json: every list the lift made, whole.
+type liftReport struct {
+	Version             string           `json:"v0_version"`
+	Tag                 string           `json:"tag"`
+	TagSHA              string           `json:"tag_sha,omitempty"`
+	Deleted             []LiftDeletion   `json:"deleted"`
+	ADRs                []LiftADR        `json:"adrs"`
+	Changed             []LiftFileChange `json:"changed"`
+	Skipped             []LiftSkip       `json:"skipped,omitempty"`
+	GoUnformatted       []string         `json:"go_not_formatted,omitempty"`
+	Hashed              []LiftHashed     `json:"edited_but_hashed,omitempty"`
+	UnresolvedCitations []LiftIDRef      `json:"unresolved_adr_citations,omitempty"`
+	IDsLeft             []LiftIDRef      `json:"ids_left,omitempty"`
+	DanglingRefs        []LiftIDRef      `json:"references_to_removed_paths,omitempty"`
+	Candidates          []LiftCandidate  `json:"rule_candidates"`
+	Gates               LiftGates        `json:"gates"`
+	Readings            []string         `json:"readings,omitempty"`
+}
+
+func (lf *lifter) report() string {
+	r := lf.res
+	data, err := json.MarshalIndent(liftReport{
+		Version: r.Version, Tag: LiftTag, TagSHA: r.TagSHA, Deleted: r.Deleted, ADRs: r.ADRs, Changed: r.Changed,
+		Skipped: r.Skipped, GoUnformatted: r.GoUnformatted, Hashed: r.Hashed, UnresolvedCitations: r.UnresolvedCitations,
+		IDsLeft: r.IDsLeft, DanglingRefs: r.DanglingRefs, Candidates: r.Candidates, Gates: r.Gates, Readings: r.Readings,
+	}, "", "  ")
+	if err != nil {
+		return "{}\n"
+	}
+	return string(data) + "\n"
+}
 
 // disposition renders the disposition file.
+//
+//nolint:gocyclo // one document, section by section
 func (lf *lifter) disposition() string {
 	r := lf.res
+	report := path.Base(r.Report)
 	var b strings.Builder
 	p := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	p("# Lift disposition\n\n")
 	p("Lifted from APEX v0 %s; the v0 state is archived at the tag `%s` (%s), read it as `git show %s:<path>`.\n\n", r.Version, LiftTag, short(r.TagSHA), LiftTag)
 	p("This file is the lift's hand-off. apex-plan fills the Disposition column and carries each kept rule to its one home;\n")
-	p("a fresh read-only session reviews the result; then the person does, and deletes this file.\n\n")
+	p("a fresh read-only session reviews the result; then the person does, and deletes this file and `%s`.\n", report)
+	p("Long lists are summarised here; `%s`, beside this file, holds every one whole.\n\n", report)
 
 	p("## Binding-rule candidates\n\n")
 	p("Disposition is one of: `kept in AGENTS.md` · `gated by <cmd>` · `ADR-NNNN` · `docs/<page>` · `dropped: <reason>`.\n\n")
@@ -175,6 +223,27 @@ func (lf *lifter) disposition() string {
 		p("\n")
 	}
 
+	// What can break the build or a guard comes before what only reads.
+	code, records := lf.splitRefs(r.DanglingRefs)
+	p("## Code and CI that still read removed paths\n\n")
+	if len(code) == 0 {
+		p("None.\n\n")
+	} else {
+		p("Kept code, scripts and CI files that name a path the lift removed — guards over the v0 corpus, tests reading the tracker: retire or repoint them (%d reference(s) in %d file(s)):\n\n", len(code), countFiles(code))
+		writeRefs(&b, code, codeRefsPerFile, summaryFiles, report)
+	}
+	if len(r.Hashed) > 0 {
+		p("Edited files a test, CI script or lock file seems to pin the bytes of (re-run that guard; if it is red, the file belonged under --exclude):\n\n")
+		for _, h := range r.Hashed {
+			p("- `%s` — %s\n", h.File, "`"+strings.Join(h.By, "`, `")+"`")
+		}
+		p("\n")
+	}
+	if len(r.GoUnformatted) > 0 {
+		p("Go files that were not gofmt-clean at %s: edited, not formatted — `gofmt -l` flags them as it did before:\n\n", LiftTag)
+		writeList(&b, r.GoUnformatted, summaryFiles, report)
+	}
+
 	p("## ADRs\n\n")
 	if len(r.ADRs) == 0 {
 		p("No ADRs.\n\n")
@@ -197,48 +266,64 @@ func (lf *lifter) disposition() string {
 		p("- not converted (no ADR id in it), left in place: `%s`\n", f)
 	}
 	if len(r.UnresolvedCitations) > 0 {
-		p("ADR citations that name no ADR (left as written):\n\n")
-		writeRefs(&b, r.UnresolvedCitations)
+		p("ADR citations that name no ADR of the project's, left as written — another log's short id (ADR-08) or a number no record has (%d in %d file(s)):\n\n",
+			len(r.UnresolvedCitations), countFiles(r.UnresolvedCitations))
+		writeCounts(&b, r.UnresolvedCitations, func(x LiftIDRef) string { return x.Text }, summaryFiles, report)
 	}
 
 	p("## Ids left in code\n\n")
-	p("The lift edits comments only (D37). These ids sit in identifiers, strings, directives or files it does not edit:\n")
+	p("The lift edits comments only (D37). These ids sit in identifiers, strings, directives, data-shaped comments or files it does not edit:\n")
 	p("rename them in a change if they should go. An ADR id here still has its OLD number.\n\n")
 	if len(r.IDsLeft) == 0 {
 		p("None.\n\n")
 	} else {
-		writeRefs(&b, r.IDsLeft)
+		p("%d id(s) in %d file(s), by file and kind:\n\n", len(r.IDsLeft), countFiles(r.IDsLeft))
+		writeCounts(&b, r.IDsLeft, func(x LiftIDRef) string { return x.Where }, summaryFiles, report)
 	}
 	if len(r.Skipped) > 0 {
-		p("Files not edited:\n\n")
-		for _, s := range r.Skipped {
-			p("- `%s` — %s (%d id(s), %d ADR citation(s))\n", s.File, s.Reason, s.IDs, s.ADRCitations)
+		reasons := map[string]int{}
+		var order []string
+		for _, sk := range r.Skipped {
+			why := sk.Reason
+			if i := strings.Index(why, "):"); i > 0 && strings.HasPrefix(why, "not tokenized") {
+				why = why[:i+1]
+			}
+			if reasons[why] == 0 {
+				order = append(order, why)
+			}
+			reasons[why]++
+		}
+		p("Files not edited (%d), by reason:\n\n", len(r.Skipped))
+		for _, why := range order {
+			p("- %d × %s\n", reasons[why], why)
 		}
 		p("\n")
-	}
-
-	if len(r.GoUnformatted) > 0 {
-		p("Go files that were not gofmt-clean at %s: edited, not formatted — `gofmt -l` flags them as it did before:\n\n", LiftTag)
-		for _, f := range r.GoUnformatted {
-			p("- `%s`\n", f)
+		var tokens []string
+		for _, sk := range r.Skipped {
+			if !strings.HasPrefix(sk.Reason, "not tokenized") {
+				tokens = append(tokens, fmt.Sprintf("`%s` — %s (%d id(s), %d ADR citation(s))", sk.File, sk.Reason, sk.IDs, sk.ADRCitations))
+			}
 		}
-		p("\n")
-	}
-
-	if len(r.Hashed) > 0 {
-		p("Edited files a test, CI script or lock file seems to pin the bytes of (re-run that guard; if it is red, the file belonged under --exclude):\n\n")
-		for _, h := range r.Hashed {
-			p("- `%s` — %s\n", h.File, "`"+strings.Join(h.By, "`, `")+"`")
+		if len(tokens) > 0 {
+			p("Left for a reason other than the file type:\n\n")
+			for i, l := range tokens {
+				if i == summaryFiles {
+					p("- … and %d more (in `%s`)\n", len(tokens)-summaryFiles, report)
+					break
+				}
+				p("- %s\n", l)
+			}
+			p("\n")
 		}
-		p("\n")
 	}
 
-	p("## References to removed paths\n\n")
-	if len(r.DanglingRefs) == 0 {
+	p("## References to removed paths in records and docs\n\n")
+	if len(records) == 0 {
 		p("None.\n\n")
 	} else {
-		p("Kept files that still name a path the lift removed — CI guards and scripts that police the v0 corpus show up here; retire or repoint them:\n\n")
-		writeRefs(&b, r.DanglingRefs)
+		p("Evidence logs, research notes and docs that name a removed path (%d reference(s) in %d file(s)); they read at %s. Counted, not listed:\n\n",
+			len(records), countFiles(records), LiftTag)
+		writeCounts(&b, records, nil, summaryFiles, report)
 	}
 	if len(r.KeptApex) > 0 {
 		p("Left under `_apex/` (not v0 framework tables): %s\n\n", "`"+strings.Join(r.KeptApex, "`, `")+"`")
@@ -254,27 +339,120 @@ func (lf *lifter) disposition() string {
 	return b.String()
 }
 
-// writeRefs lists refs grouped by file, at most listCap per file.
-func writeRefs(b *strings.Builder, refs []LiftIDRef) {
-	byFile := map[string][]LiftIDRef{}
+// splitRefs parts references to removed paths into those in code and CI
+// (to act on) and those in records and docs: the development folder,
+// docs/, and prose and log files.
+func (lf *lifter) splitRefs(refs []LiftIDRef) (code, records []LiftIDRef) {
+	for _, r := range refs {
+		ext := strings.ToLower(path.Ext(r.File))
+		switch {
+		case strings.HasPrefix(r.File, lf.devRel+"/"), strings.HasPrefix(r.File, "docs/"),
+			ext == ".md", ext == ".markdown", ext == ".txt", ext == ".log", ext == ".jsonl", ext == ".rst", ext == ".adoc":
+			records = append(records, r)
+		default:
+			code = append(code, r)
+		}
+	}
+	return code, records
+}
+
+func countFiles(refs []LiftIDRef) int {
+	seen := map[string]bool{}
+	for _, r := range refs {
+		seen[r.File] = true
+	}
+	return len(seen)
+}
+
+// byFile groups refs by file, files sorted by count (most first), then
+// name.
+func byFile(refs []LiftIDRef) ([]string, map[string][]LiftIDRef) {
+	m := map[string][]LiftIDRef{}
 	var files []string
 	for _, r := range refs {
-		if _, ok := byFile[r.File]; !ok {
+		if _, ok := m[r.File]; !ok {
 			files = append(files, r.File)
 		}
-		byFile[r.File] = append(byFile[r.File], r)
+		m[r.File] = append(m[r.File], r)
 	}
-	sort.Strings(files)
-	for _, f := range files {
-		rs := byFile[f]
+	sort.Slice(files, func(i, j int) bool {
+		if a, b := len(m[files[i]]), len(m[files[j]]); a != b {
+			return a > b
+		}
+		return files[i] < files[j]
+	})
+	return files, m
+}
+
+// writeRefs lists refs grouped by file, at most perFile per file and
+// maxFiles files; the rest are counted.
+func writeRefs(b *strings.Builder, refs []LiftIDRef, perFile, maxFiles int, report string) {
+	files, m := byFile(refs)
+	for fi, f := range files {
+		if fi == maxFiles {
+			fmt.Fprintf(b, "- … and %d more file(s) (in `%s`)\n", len(files)-maxFiles, report)
+			break
+		}
+		rs := m[f]
 		sort.SliceStable(rs, func(i, j int) bool { return rs[i].Line < rs[j].Line })
 		for i, r := range rs {
-			if i == listCap {
-				fmt.Fprintf(b, "- `%s`: … and %d more\n", f, len(rs)-listCap)
+			if i == perFile {
+				fmt.Fprintf(b, "- `%s`: … and %d more\n", f, len(rs)-perFile)
 				break
 			}
 			fmt.Fprintf(b, "- `%s:%d` `%s` — %s\n", f, r.Line, strings.ReplaceAll(r.Text, "`", "'"), r.Where)
 		}
+	}
+	b.WriteString("\n")
+}
+
+// writeCounts writes one line per file: its count, and with key the
+// count of each key ("identifier ×3, string ×2").
+func writeCounts(b *strings.Builder, refs []LiftIDRef, key func(LiftIDRef) string, maxFiles int, report string) {
+	files, m := byFile(refs)
+	for fi, f := range files {
+		if fi == maxFiles {
+			rest := 0
+			for _, g := range files[maxFiles:] {
+				rest += len(m[g])
+			}
+			fmt.Fprintf(b, "- … and %d more in %d more file(s) (in `%s`)\n", rest, len(files)-maxFiles, report)
+			break
+		}
+		rs := m[f]
+		if key == nil {
+			fmt.Fprintf(b, "- `%s` — %d\n", f, len(rs))
+			continue
+		}
+		counts := map[string]int{}
+		var order []string
+		for _, r := range rs {
+			k := strings.ReplaceAll(key(r), "`", "'")
+			if counts[k] == 0 {
+				order = append(order, k)
+			}
+			counts[k]++
+		}
+		parts := make([]string, 0, len(order))
+		for _, k := range order {
+			if counts[k] > 1 {
+				parts = append(parts, fmt.Sprintf("%s ×%d", k, counts[k]))
+			} else {
+				parts = append(parts, k)
+			}
+		}
+		fmt.Fprintf(b, "- `%s` — %d: %s\n", f, len(rs), strings.Join(parts, ", "))
+	}
+	b.WriteString("\n")
+}
+
+func writeList(b *strings.Builder, items []string, maxItems int, report string) {
+	for i, it := range items {
+		if i == maxItems {
+			fmt.Fprintf(b, "- … and %d more (in `%s`)\n", len(items)-maxItems, report)
+			break
+		}
+		fmt.Fprintf(b, "- `%s`\n", it)
 	}
 	b.WriteString("\n")
 }

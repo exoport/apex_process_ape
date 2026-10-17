@@ -126,15 +126,17 @@ type LiftResult struct {
 	DanglingRefs  []LiftIDRef `json:"references_to_removed_paths,omitempty"`
 	// Hashed are edited files a test, CI script or lock file seems to pin
 	// the bytes of: a perimeter to --exclude before lifting (L6).
-	Hashed        []LiftHashed    `json:"edited_but_hashed,omitempty"`
-	Gates         LiftGates       `json:"gates"`
-	Candidates    []LiftCandidate `json:"rule_candidates"`
-	Readings      []string        `json:"readings,omitempty"`
-	Disposition   string          `json:"disposition"`
-	Init          *InitResult     `json:"init,omitempty"`
-	CommitMessage string          `json:"commit_message"`
-	Commit        string          `json:"commit,omitempty"`
-	Regression    *CheckResult    `json:"regression,omitempty"`
+	Hashed      []LiftHashed    `json:"edited_but_hashed,omitempty"`
+	Gates       LiftGates       `json:"gates"`
+	Candidates  []LiftCandidate `json:"rule_candidates"`
+	Readings    []string        `json:"readings,omitempty"`
+	Disposition string          `json:"disposition"`
+	// Report is the disposition's full lists, as JSON (L11).
+	Report        string       `json:"report"`
+	Init          *InitResult  `json:"init,omitempty"`
+	CommitMessage string       `json:"commit_message"`
+	Commit        string       `json:"commit,omitempty"`
+	Regression    *CheckResult `json:"regression,omitempty"`
 	// RegressionAtTag is the same command run at the tag, before anything
 	// is written: the baseline that tells a pre-existing red from one the
 	// lift caused (L4).
@@ -703,6 +705,8 @@ func (lf *lifter) plan() error {
 	lf.res.Hashed = lf.hashed()
 	sort.Slice(lf.res.Changed, func(i, j int) bool { return lf.res.Changed[i].File < lf.res.Changed[j].File })
 	lf.res.Disposition = lf.devRel + "/" + LiftDisposition
+	lf.res.Report = lf.devRel + "/" + LiftReport
+	lf.writes[lf.res.Report] = lf.report()
 	lf.writes[lf.res.Disposition] = lf.disposition()
 	lf.res.CommitMessage = lf.commitMessage()
 	return nil
@@ -1169,7 +1173,7 @@ func (lf *lifter) commitMessage() string {
 		fmt.Fprintf(&b, "- carries %d gate command(s) from %s into AGENTS.md and regression:\n", len(r.Gates.Commands), r.Gates.Source)
 	}
 	b.WriteString("- lays down the v1 skeleton (ape project init --brownfield)\n")
-	fmt.Fprintf(&b, "- writes %s for apex-plan and the person\n", r.Disposition)
+	fmt.Fprintf(&b, "- writes %s for apex-plan and the person, its full lists in %s\n", r.Disposition, path.Base(r.Report))
 	if len(r.ADRs) > 0 {
 		b.WriteString("\nADRs, old -> new:\n")
 		for i := range r.ADRs {

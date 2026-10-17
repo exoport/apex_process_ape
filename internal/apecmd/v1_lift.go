@@ -108,8 +108,11 @@ The commit:
                  (CLAUDE.md list items, project-context "don't miss" items, team-memory
                  gotcha titles) with an empty Disposition column for apex-plan, then a
                  fresh read-only review, then the person — who deletes the file — and
-                 the ids left, ADR gaps, files not edited, references to removed paths
-                 (CI guards over the v0 corpus show up there), readings at the tag
+                 summaries — code and CI that still read removed paths first (CI guards
+                 over the v0 corpus show up there), edited files a guard hashes, ADR
+                 gaps, ids left and files not edited counted per file, references in
+                 evidence and docs counted — and readings at the tag; and
+                 development/lift-disposition.json beside it, every list whole
 
 A byte-identity perimeter: a file a test, CI script or lock file hashes goes red once
 the lift edits a comment in it. The plan lists, as "hashed", the edited files that a lock
@@ -276,6 +279,7 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 		fmt.Fprintln(w, "gates     no ## Code Validation found: no commands, no regression")
 	}
 	fmt.Fprintf(w, "rules     %d binding-rule candidate(s) in %s\n", len(r.Candidates), r.Disposition)
+	fmt.Fprintf(w, "report    %s: every list whole (the disposition file summarises them)\n", r.Report)
 	if r.DryRun {
 		fmt.Fprintln(w, "commit message:")
 		for l := range strings.SplitSeq(strings.TrimRight(r.CommitMessage, "\n"), "\n") {
