@@ -172,12 +172,12 @@ func TestGitCommitSubjectsSince(t *testing.T) {
 
 	before := gitHeadFull(ctx, dir)
 	require.NotEmpty(t, before)
-	require.Empty(t, gitCommitSubjectsSince(ctx, dir, before))
+	require.Empty(t, commitSubjects(gitCommitsSince(ctx, dir, before)))
 
 	git("commit", "--allow-empty", "-m", "SKILL:create-prd")
 	git("commit", "--allow-empty", "-m", "ape:task/apex-shard-doc")
 
-	subjects := gitCommitSubjectsSince(ctx, dir, before)
+	subjects := commitSubjects(gitCommitsSince(ctx, dir, before))
 	require.Equal(t, []string{"SKILL:create-prd", "ape:task/apex-shard-doc"}, subjects)
 
 	// Empty `before` means the repository had NO COMMITS when the run
@@ -189,7 +189,7 @@ func TestGitCommitSubjectsSince(t *testing.T) {
 	// suppressing the very commit it had just made.
 	require.Equal(t,
 		[]string{"base", "SKILL:create-prd", "ape:task/apex-shard-doc"},
-		gitCommitSubjectsSince(ctx, dir, ""),
+		commitSubjects(gitCommitsSince(ctx, dir, "")),
 		"with no HEAD at run start, the whole history is the run's work")
 }
 
@@ -206,7 +206,7 @@ func TestGitCommitSubjectsSince_NoHeadAtAll(t *testing.T) {
 	cmd.Dir = dir
 	require.NoError(t, cmd.Run())
 
-	require.Empty(t, gitCommitSubjectsSince(ctx, dir, ""))
+	require.Empty(t, commitSubjects(gitCommitsSince(ctx, dir, "")))
 }
 
 // TestFillEnvelopeFromManifest is the eval-facing regression guard:
@@ -330,4 +330,13 @@ func TestDispatchTask_MalformedOwnersIsReturnedNotExited(t *testing.T) {
 	require.ErrorAs(t, err, &preflight, "a preflight failure is returned, not exited")
 	require.Contains(t, err.Error(), "malformed")
 	require.Equal(t, taskRun{}, res, "nothing dispatched, so there is no outcome to report")
+}
+
+// commitSubjects is the subjects of commits, in order.
+func commitSubjects(commits []runCommit) []string {
+	out := []string{}
+	for _, c := range commits {
+		out = append(out, c.Subject)
+	}
+	return out
 }

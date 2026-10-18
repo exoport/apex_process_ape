@@ -187,6 +187,13 @@ judged against a skill's declaration.
 The verdict is written to the run manifest as commit_contract, so a
 failure stays diagnosable after the fact.
 
+A run's commits are the range its HEAD moved over. A commit in it that was
+made while another ape session's run in the same checkout went (not this
+run's parent orchestrator, not its own children) cannot be told apart, so
+neither run claims it: both list it under commits_shared, in the JSON
+envelope and the run manifest, and it is left out of commits and of the
+commit-message check.
+
 Usage limits (H20): when a claude.ai plan's usage limit stops the session,
 Claude Code draws its limit line ("You've hit your usage limit · resets
 11pm (Europe/Madrid)", or "Usage limit reached · limit resets …") and no
@@ -544,8 +551,12 @@ type taskEnvelope struct {
 	ModelUsage      map[string]taskModelUsage `json:"model_usage,omitempty"`
 	Sessions        []taskSessionUsage        `json:"sessions,omitempty"`
 	Commits         []string                  `json:"commits"`
-	ManifestPath    string                    `json:"manifest_path,omitempty"`
-	TelemetryNote   string                    `json:"telemetry_note,omitempty"`
+	// CommitsShared are the commits of the run's range made while another
+	// ape session's run in the same checkout went: claimed by neither run,
+	// listed in both (commitshare.go).
+	CommitsShared []string `json:"commits_shared,omitempty"`
+	ManifestPath  string   `json:"manifest_path,omitempty"`
+	TelemetryNote string   `json:"telemetry_note,omitempty"`
 	// CommitContract is the per-dispatch commit-ownership verdict. Always
 	// emitted, including when it passed and when it had to be skipped:
 	// a consumer must be able to tell "asserted and clean" from "could
@@ -726,7 +737,17 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		return taskRun{}, &taskPreflightError{err: pfe}
 	}
 
-	subjects := gitCommitSubjectsSince(ctx, o.projectRoot, headBefore)
+	// The run's commits, less those another session's run in this checkout
+	// may have made while this one went (commitshare.go): those are
+	// commits_shared, claimed by neither run, and not asserted below.
+	runDir := pipeline.ResolveLatestRunDir(o.projectRoot, o.skill, manifestDir)
+	runID := ""
+	if runDir != "" {
+		runID = runIDFromDir(runDir)
+	}
+	subjects, shared := splitSharedCommits(o.projectRoot, runID, o.launch.parentRunOrEmpty(),
+		gitCommitsSince(ctx, o.projectRoot, headBefore), time.Now())
+	recordCommitsShared(runDir, shared)
 
 	// The two per-dispatch assertions. They run whether or not the skill
 	// itself succeeded: a run that failed halfway can still have left a
@@ -772,6 +793,7 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		ExitCode:        exitCode,
 		DurationSeconds: duration.Seconds(),
 		Commits:         subjects,
+		CommitsShared:   shared,
 		CommitContract:  &contract,
 	}
 	if runErr != nil {
@@ -1023,6 +1045,12 @@ func printTaskSummary(env taskEnvelope, runErr error) {
 			fmt.Fprintf(os.Stdout, "   %s\n", c)
 		}
 	}
+	if len(env.CommitsShared) > 0 {
+		fmt.Fprintf(os.Stdout, "📌 commits shared with another session's run in this checkout (claimed by neither): %d\n", len(env.CommitsShared))
+		for _, c := range env.CommitsShared {
+			fmt.Fprintf(os.Stdout, "   %s\n", c)
+		}
+	}
 	printCommitContract(env.CommitContract)
 }
 
@@ -1072,36 +1100,4 @@ func gitHeadFull(ctx context.Context, projectRoot string) string {
 		return ""
 	}
 	return strings.TrimSpace(stdout.String())
-}
-
-// gitCommitSubjectsSince returns the subjects of commits made after
-// `before` (oldest first) — the run's complete commit trail, framework
-// commits included, not just ape's boundary commit. Best-effort.
-//
-// An empty `before` means the repository had no commits when the run
-// started, so every commit reachable from HEAD was made BY the run. That
-// case has to list them rather than return nothing: the commit-ownership
-// assertion reads this list, and reporting an empty trail there would
-// accuse a declared committer of suppressing the very commit it just
-// made. A repo that still has no commits has no HEAD, the log fails, and
-// the empty result is then correct.
-func gitCommitSubjectsSince(ctx context.Context, projectRoot, before string) []string {
-	revRange := before + "..HEAD"
-	if before == "" {
-		revRange = "HEAD"
-	}
-	var stdout bytes.Buffer
-	// revRange is built from a SHA captured by rev-parse at run start, or
-	// the literal "HEAD" — never from user input.
-	cmd := exec.CommandContext(ctx, "git", "log", "--reverse", "--format=%s", revRange)
-	cmd.Dir = projectRoot
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
-		return []string{}
-	}
-	out := strings.TrimSpace(stdout.String())
-	if out == "" {
-		return []string{}
-	}
-	return strings.Split(out, "\n")
 }

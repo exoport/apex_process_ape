@@ -201,6 +201,14 @@ type Manifest struct {
 	// still running), never zero. Additive under schema_version 2.
 	Children    []ChildRunRecord `yaml:"children,omitempty"`
 	TreeCostUSD *float64         `yaml:"tree_cost_usd,omitempty"`
+
+	// CommitsShared are the subjects of the commits in this run's range
+	// that were made while another ape session's run in the same checkout
+	// went (not its parent's, not its children's): git cannot say which
+	// made them, so neither run claims them and both list them here.
+	// Written when the run ends, absent when there are none. Additive
+	// under schema_version 2.
+	CommitsShared []string `yaml:"commits_shared,omitempty"`
 }
 
 // ChildRunRecord is one child run of an orchestrator run.
