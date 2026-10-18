@@ -259,9 +259,18 @@ type StatusReport struct {
 	// now, with their depth and parent run (D62): an apex-orchestrator run
 	// at depth 1 and its one child at depth 2. Always present ([] when none).
 	Sessions []LiveSession `json:"sessions"`
+	// Config holds the effective values skills read from ape rather than
+	// restate (D120, Q55): the defaults filled in.
+	Config StatusConfig `json:"config"`
 	// delegate is human_review's delegate skill, "" when acceptance is a
 	// person's alone (D75): next names the delegate first.
 	delegate string
+}
+
+// StatusConfig is the effective commit types and release scheme (D120).
+type StatusConfig struct {
+	CommitTypes   []string `json:"commit_types"`
+	ReleaseScheme string   `json:"release_scheme"`
 }
 
 // Status builds the report.
@@ -276,6 +285,7 @@ func (p *Project) Status() *StatusReport {
 		r.Project = baseName(p.Root)
 	}
 	r.Docs = cfg.Docs
+	r.Config = StatusConfig{CommitTypes: cfg.Commit.TypeList(), ReleaseScheme: cfg.Release.SchemeName()}
 	r.delegate = cfg.HumanReview.Skill()
 	runs, _ := cost.RunCosts(p.Root)
 	for _, run := range runs {

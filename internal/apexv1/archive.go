@@ -334,7 +334,7 @@ func (p *Project) planArchive(ci ChangeInfo) (updates []SpecUpdate, dest string,
 			"re-plan against the current spec and re-start (`ape change start " + id + "`)", Conflicts: fc}
 	}
 	// The subject template may have come to use {type} since start.
-	if fs := typeFindings(p.Rel(p.ChangeMD(id)), ci.Doc, p.commitConfig().SubjectTemplate()); len(fs) > 0 {
+	if fs := typeFindings(p.Rel(p.ChangeMD(id)), ci.Doc, p.commitConfig()); len(fs) > 0 {
 		return nil, "", &FailError{Code: CodeCheckFailed, Msg: "change " + id + " cannot be archived with the configured commit subject — fix change.md's type: (a plan change: re-start), then archive", Findings: fs}
 	}
 	updates, conflicts := p.MergeDelta(ci.Doc)

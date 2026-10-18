@@ -92,6 +92,9 @@ type Config struct {
 	// HumanReview delegates a human-review task's acceptance to a skill
 	// (D75, D76; delegate.go): absent, only a person accepts one.
 	HumanReview *HumanReviewConfig `yaml:"human_review"`
+	// Release is how apex-release proposes the next version (D120;
+	// releasecfg.go): absent, semver.
+	Release ReleaseConfig `yaml:"release"`
 }
 
 // SkillModel is one models.<skill> entry.
