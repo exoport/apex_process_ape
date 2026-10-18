@@ -2,9 +2,7 @@
 
 ## v1.0.0-rc.4 (draft)
 
-On top of rc.3, rc.2 and rc.1 below. Phase 1 of two (D90); phase 2 (the
-`ape service` depth rule, the lift follow-ups and the Stop hook's background
-work) follows.
+On top of rc.3, rc.2 and rc.1 below, built in two phases (D90).
 
 ### Project context and caps
 
@@ -58,6 +56,58 @@ work) follows.
   convention** (Q45): the line typed in its place no longer carries a
   `--no-commit` the caller did not ask for. Since rc.3, every `ape task` with
   arguments too long to type had been told not to commit.
+
+### Background work and the Stop hook (D88)
+
+- **In any ape session, the Stop hook refuses a stop while background work
+  runs**: whatever `background_tasks` lists, shell and monitor included,
+  blocks the main session's Stop — at most three times in a row, then the
+  stop is allowed and recorded with the work still running. The reason names
+  the work and says to wait for it in the turn and to run long commands in
+  the foreground. Outside an ape session it informs and never blocks.
+- **`change review --run` and `change accept --delegate` say why there is
+  no verdict**: a session that ended with live background work reports
+  `ended with live background work: <labels>` (`review.no-verdict`,
+  `delegate.fail`), with `outcome.background` in `--json`.
+- **`ape task` pairs each Stop with its own verdict**: a Stop the session
+  driver deferred (a running sub-agent) used to leave its hook verdict
+  unread, so a quick next Stop could read it as its own.
+
+### `ape service` and nesting (D83)
+
+- **Service jobs obey the nesting rule.** Every `*.run` request carries the
+  caller's stamp (`caller: {depth, run_id, parent_run, pid}`; wire v2), which
+  the new **`ape service submit`** adds from ape's own record of the session.
+  The daemon refuses a request without one, or from depth 2, with
+  `session.depth`; from depth 1 it runs only an apex-orchestrator run's
+  allow-listed task, one child at a time, as that run's child. A pre-rc.4
+  client is refused. The stamp is the client's word: the NATS credentials
+  remain the boundary.
+- **Commits made while another session's run was going** are recorded as
+  `commits_shared` in both manifests, claimed by neither.
+- **`tree_cost_usd`** is present whenever it was computed, $0 included.
+- **`ape task --help`** lists the depth-1 allow-list from the code
+  (apex-accept included).
+- **A check's idle kill lands at its deadline**, not up to 5 s later.
+- **`change review --run` takes the child lock before reading the change**,
+  so a busy orchestrator child is `session.child-running` (exit 3).
+
+### Lift (D87)
+
+- **`edited_but_hashed` lists real hashers only**: documents and evidence
+  never count, a script running `sha256sum`, `md5sum`, `shasum` or `b2sum`
+  does, files a lock file names come first, and the list is capped at 50
+  (`edited_but_hashed_total`).
+- **A possessive story id** (`Story 15.4's own`) is left as written and
+  listed in `ids_left` (`where: possessive`); an aside whose id was removed
+  goes with its brackets, across comment lines.
+- **The disposition file stays within 16 KB**, one line per file in its
+  code and CI section; the full lists are written to
+  `_apex/state/lift-disposition.json`, which is ignored and never committed.
+- **Red at the tag and after**: the failing tests are compared by name (go
+  test, pytest, cargo, jest), else by output; new failures are
+  `red-at-tag-new-failures` (`regression_new_failures`), never
+  "pre-existing".
 
 ### Wording
 

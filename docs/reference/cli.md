@@ -1319,7 +1319,9 @@ _apex/config.yaml delegates it:
     On a fail nothing is accepted: the task stays awaiting_human, ape status shows the
     verdict (JSON changes[].delegate.<T>: {verdict, reason, run, at}), exit 1
     delegate.fail (action person). A session that records no verdict is a fail, reason
-    "no verdict" (D78; its last message is never read for one)
+    "no verdict" (D78; its last message is never read for one), or, when its last Stop
+    still had background work running, reason "ended with live background work:
+    <tasks>" (D88; JSON outcome.background lists them)
   - no automatic retry on the same artefact (D78): after a fail, --delegate for that task
     refuses (delegate.already-failed, action person) until the change's tip moves
     (change/<id>'s tip; the archive folder's content once archived)
@@ -1327,7 +1329,7 @@ _apex/config.yaml delegates it:
     `ape change accept <id> <T> --delegate` again — it attaches to the running session
   - JSON: {id, task, skill, args, running, detached_id, log, task_exit, launch,
     outcome: {verdict, reason, evidence, notes, violations, voided, accepted,
-    verdict_file}}
+    verdict_file, background}}
 
 --verdict pass|fail --reason "<text>" [--evidence <path|url>]...: the delegate session
 records its verdict — only the session --delegate started for that change and task
@@ -1803,7 +1805,7 @@ and that session writes review.md and records the verdict with --verdict/--findi
 It counts as starting apex-review under the nesting rule (D62; see ape task --help):
 from a terminal (depth 0) always; from inside an ape session only from ape's own
 apex-orchestrator run, as its one child (exit 3, session.child-running, while
-another child runs); from any other session — apex-apply a person ran with ape task,
+another child runs, checked before the change is read); from any other session — apex-apply a person ran with ape task,
 say — refused (exit 2, session.depth); never from inside a review session. The
 review session is depth 2 under an orchestrator, its manifest records depth and
 parent_run, and it is stopped when that orchestrator's run ends.
@@ -1841,7 +1843,9 @@ parent_run, and it is stopped when that orchestrator's run ends.
 
 Exit codes: 0 recorded / review passed · 1 not verified, the work changed since the verify,
 --run: a fresh review, or a red re-verify of a stale one, review block (--run: findings
-in JSON "outcome"), verdict voided, or no verdict · 2 usage
+in JSON "outcome"), verdict voided, or no verdict (review.no-verdict; when the session's
+last Stop still had background work running, the message says "ended with live
+background work: <tasks>" and JSON outcome.background lists them) · 2 usage
 (bad verdict, findings file missing, --run inside a review session, or the nesting
 rule: session.depth) · 3 --run: the orchestrator's child session is running
 (session.child-running) · 75 --run: still running, call again.
@@ -3196,9 +3200,10 @@ ape hook
 Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
 
   session-start   SessionStart: adds `ape status --brief` as context
-  stop            Stop and SubagentStop: in a session ape launched, blocks a stop while the
+  stop            Stop and SubagentStop: in a session ape launched, blocks the main
+                  session's stop while background work runs, and a stop while the
                   in-progress change has a red command check (at most 3 times in a row);
-                  in a person's own session, only shows what was red
+                  in a person's own session, only shows what was red or still running
   pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
@@ -3215,7 +3220,7 @@ Subcommands:
 
 - `pre-tool` — PreToolUse hook: deny edits to specs, state.json, the archive, _apex/state and briefs, git tag writes, git push, pkill/killall, and rebases on a change branch
 - `session-start` — SessionStart hook: inject `ape status --brief` as additional context
-- `stop` — Stop/SubagentStop hook: block a stop while the in-progress change's checks are red
+- `stop` — Stop/SubagentStop hook: block a stop while background work runs or the in-progress change's checks are red
 
 ## ape hook pre-tool
 
@@ -3301,13 +3306,24 @@ Flags:
 
 ## ape hook stop
 
-Stop/SubagentStop hook: block a stop while the in-progress change's checks are red
+Stop/SubagentStop hook: block a stop while background work runs or the in-progress change's checks are red
 
 ```
 ape hook stop [flags]
 ```
 
-Stop and SubagentStop hook. When HEAD is on a change's branch, change/<id>, that
+Stop and SubagentStop hook.
+
+Background work (D88), first: in a session ape launched, the main session's Stop (not a
+SubagentStop) is blocked while the payload's background_tasks lists anything — every
+type, a backgrounded shell and a monitor included — on any branch, so in review,
+delegate and tool sessions too. The reason starts "background work is still running",
+names each task, and tells the model to wait for it in this turn, never to end the turn
+while it runs, and next time to run a long command in the foreground with a 600000 ms
+timeout. It counts toward the same 3 consecutive blocks; once they are spent the stop is
+allowed. The tasks are recorded under "background" in the verdict, whatever it is.
+
+Checks: when HEAD is on a change's branch, change/<id>, that
 change is in-progress (read from the working tree), and any of the checks it re-runs
 exits non-zero now, prints {"decision":"block","reason":"<the failing checks' last lines
 and what to do>"}. It re-runs only the checks that were red at the change's last verify
@@ -3330,10 +3346,15 @@ APE_SESSION, which every session ape spawns has and Claude Code hands to its hoo
 person's own Claude Code session (plain `claude`, the settings.json copy of the hook) it
 never blocks and runs no check: on an in-progress change whose last verify had red
 checks it allows the stop with {"systemMessage":"APEX: change <id> is in progress, and at
-its last verify … check(s) were red: …"}, shown to the person; otherwise it prints nothing.
+its last verify … check(s) were red: …"}, shown to the person, and with background work
+running it says so the same way ("APEX: the turn ended with background work still
+running: …"); otherwise it prints nothing.
 
-The verdict is also written to _apex/state/hooks/<session>[-<agent>].json, which
-is how `ape task` learns that a Stop it saw did not end the turn.
+The verdict is also written to _apex/state/hooks/<session>[-<agent>].json, and the
+main session's to the log <session>.jsonl, which is how `ape task` learns that a
+Stop it saw did not end the turn (it takes one verdict per Stop, in order), and how
+`ape change review --run` and `accept --delegate` learn that a session ended with
+live background work.
 
 Flags:
 
@@ -4041,7 +4062,9 @@ Validate the whole project and list every failure, not just the first.
                            _apex/state/.gitignore)
   lift                     development/lift-disposition.md in a project whose v1 epoch is a
                            lift commit ("apex: lift …"): the disposition list awaits review
-                           (lift.disposition-pending) until the person deletes the file
+                           (lift.disposition-pending) until the person deletes the file;
+                           its full lists, _apex/state/lift-disposition.json, are ignored
+                           state and never asked for
   config                   since the v1 epoch, a commit that changed a guarded block of
                            _apex/config.yaml — limits, checks, retries, requires, timeouts,
                            caps, regression, commit, evidence, marketplaces, plugins, tools,
@@ -4390,7 +4413,10 @@ The commit:
                  identifiers, strings and directives are listed, not edited — and
                  so are ids in a data-shaped comment, which a tool may parse: one
                  opening with a lowercase key ("# owner: …") or a record of
-                 key: value fields ("# pending: q | owner: …").
+                 key: value fields ("# pending: q | owner: …"), and so is a comment
+                 using an id as a possessive ("Story 3.2's own test"), which no
+                 removal keeps whole. An aside split over comment lines loses
+                 both brackets with its id: no line is left starting with ")".
                  Tokenized: Go (go/scanner), shell, Python, JS/TS (JSX/TSX: comments
                  that begin their line only), Dart, YAML, Makefile (recipe lines are
                  the shell's: left), C/C++. A file the tokenizer cannot read, a
@@ -4411,30 +4437,41 @@ The commit:
                  placeholder. A trailing " # …" shell comment is dropped first
   lays down      the v1 skeleton, as `ape project init --brownfield` (CLAUDE.md keeps its
                  content, loses the v0 apex:managed block and gains @AGENTS.md)
-  writes         development/lift-disposition.md: the binding-rule candidates
-                 (CLAUDE.md list items, project-context "don't miss" items, team-memory
-                 gotcha titles) with an empty Disposition column for apex-plan, then a
-                 fresh read-only review, then the person, who deletes it. Then, as
-                 summaries: code and CI that still read removed paths (CI guards over
-                 the v0 corpus show up there) and edited files a guard hashes first;
-                 ADR gaps; ids left and files not edited, counted per file;
-                 references in evidence and docs, counted; readings at the tag.
-                 development/lift-disposition.json, beside it, holds every list whole
+  writes         development/lift-disposition.md (at most 16 KB): the binding-rule
+                 candidates (CLAUDE.md list items, project-context "don't miss" items,
+                 team-memory gotcha titles) with an empty Disposition column for
+                 apex-plan, then a fresh read-only review, then the person, who deletes
+                 it. Then, as summaries: code and CI that still read removed paths, one
+                 line per file with its count and first reference (CI guards over the
+                 v0 corpus show up there), and edited files a guard hashes, first; ADR
+                 gaps; ids left and files not edited, counted per file; references in
+                 evidence and docs, counted; readings at the tag. Every list whole goes
+                 to _apex/state/lift-disposition.json after the commit: ignored by
+                 the state folder's whitelist, never committed, in this checkout only
 
 A byte-identity perimeter: a file a test, CI script or lock file hashes goes red once
 the lift edits a comment in it. The plan lists, as "hashed", the edited files that a lock
 file names, that a test or CI file names within 3 lines of a hash word (sha256,
 checksum, fingerprint, byte-identical, …), or that sit beside a hashing test that globs
-or names them — run --dry-run, then --exclude them. It is a heuristic: a copy compared
-byte for byte with no hash (an embedded mirror of a hashed file) needs its own --exclude.
+or names them — run --dry-run, then --exclude them. Documents and evidence (.md, .json,
+.log, .txt, anything under an evidence folder) never count as hashers. What a lock file
+names is listed first; at most 50 are listed, edited_but_hashed_total counts them all.
+It is a heuristic: a copy compared byte for byte with no hash (an embedded mirror of a
+hashed file) needs its own --exclude.
 
 The regression command runs twice (--no-verify-run skips both): at the tag, before
 anything is written, and at the lift commit — the baseline red gates are judged against.
-regression_verdict says whose a red is: green · red-at-tag (red there too: pre-existing,
-for apex-plan to roadmap) · red-after-lift (green at the tag: the LIFT broke it — fix it
+regression_verdict says whose a red is: green · red-at-tag (red there too, failing as it
+did: pre-existing, for apex-plan to roadmap) · red-at-tag-new-failures (red there too, but
+tests fail that did not at the tag — the LIFT broke those, named in
+regression_new_failures) · red-after-lift (green at the tag: the LIFT broke it — fix it
 in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127: a
-tool it runs is missing here, which is not a red) · red-no-baseline. The exit code stays
-0: the commit stands either way, and the verdict is in --json and the output.
+tool it runs is missing here, which is not a red) · red-no-baseline. Red at both, the
+failing tests are compared by name where the output names them (go test "--- FAIL:",
+pytest "FAILED", cargo "... FAILED", jest "✕"); otherwise by output hash, and a changed
+output stays red-at-tag with the note "the output changed after the lift", never called
+pre-existing. The exit code stays 0: the commit stands either way, and the verdict is in
+--json and the output.
 
 --from-update is how the framework's v1.0.0 migration entry runs it inside
 `ape framework update`: uncommitted changes under .claude/skills/, _apex/ (not
@@ -5714,6 +5751,23 @@ from _apex/service.yaml (or ~/.ape/service.yaml, or --config):
     - /abs/path/main-project
     - /abs/path/component-repo
 
+Jobs and the nesting rule (D62, D83): a task or prompt job is a model
+session. Every *.run request carries the caller's stamp, "caller": {depth,
+run_id, parent_run, pid}, which `ape service submit` adds from ape's own record
+of the session it runs in (see ape service submit --help). The daemon
+refuses a request without one (wire v2; a pre-rc.4 client's request is
+refused, never run) and one from depth 2 with session.depth (action stop),
+spawning nothing; a script job is refused from depth 1 too. From depth 1
+only an apex-orchestrator run's job runs — its run must be a running
+apex-orchestrator manifest in the job's project_root — and only a task of a
+skill on its allow-list, one child at a time (session.not-allowed,
+session.child-running): the job's ape task runs under the orchestrator's
+session marker, as its child (depth 2, parent_run, in its children, stopped
+when it ends). A depth-0 job runs as before. A refusal is a micro error whose
+code is the nesting code, its body {v, code, action, message}; job.status
+shows the caller. The stamp is the client's word: a raw publish can claim
+depth 0.
+
 SECURITY: anyone who can publish on the service subjects can run skills on
 this machine. Scope the NATS credential's publish/subscribe permissions to
 ape.svc.<name>.<project-slug>.> on the server — that is the real trust
@@ -5726,14 +5780,18 @@ A second signal terminates them immediately.
 Exit codes: 0 clean shutdown · 1 connect/registration failure · 2 usage or
 config error (bad --name, missing/invalid service.yaml, no NATS URL).
 
+Subcommands:
+
+- `submit` — Submit a job to an ape service daemon, stamped with the caller's session depth
+
 Examples:
 
 ```
   ape service --nats-url nats://127.0.0.1:4222 --nats-creds ./ape.creds
   ape service --name ci --drain-timeout 5m
-  # discovery + a task submission from another host:
+  # discovery + a task submission (stamped with this caller's depth):
   nats req '$SRV.PING.ape' ''
-  nats req ape.svc.ape.myproject.task.run '{"project_root":"/abs/path/myproject","skill":"apex-shard-doc"}'
+  ape service submit task '{"project_root":"/abs/path/myproject","skill":"apex-plan","args":"M1"}'
 ```
 
 Flags:
@@ -5747,6 +5805,63 @@ Flags:
 | `--name` | string | `ape` | Service name — the <name> subject segment and $SRV discovery name (run several daemons on one cluster with distinct names). |
 | `--nats-creds` | string | `—` | NATS .creds file; its user identity is the <user> token on job lifecycle events (env APE_NATS_CREDS). |
 | `--nats-url` | string | `—` | NATS server URL (env APE_NATS_URL). Required. |
+
+## ape service submit
+
+Submit a job to an ape service daemon, stamped with the caller's session depth
+
+```
+ape service submit <task|prompt|script> <request-json> [flags]
+```
+
+Send one task.run, prompt.run or script.run request to an `ape service`
+daemon and print its reply (the accepted job's id) on stdout.
+
+The request is the JSON body the endpoint takes (see ape service --help and
+docs/reference/events.md); project_root defaults to the current directory.
+ape adds the caller stamp every *.run request needs (D83):
+
+  "caller": {"depth": <n>, "run_id": "<run>", "parent_run": "<run>", "pid": <pid>}
+
+computed as `ape task` computes its own nesting depth — the session marker
+(APE_SESSION, APE_DEPTH) and the process ancestry — so a session cannot
+widen it by scrubbing its environment. Any caller in the given body is
+replaced. The daemon refuses a request without a stamp, and one from depth
+2, with session.depth (action stop). From depth 1 it accepts only an
+apex-orchestrator run's job, a task of a skill on that project's allow-list,
+one child at a time (session.not-allowed, session.child-running), and runs
+it as that orchestrator's child (depth 2, parent_run, listed in its
+children, stopped with it). From depth 0 it runs the job as before.
+
+The stamp is the client's word: a raw NATS publish can claim depth 0. The
+NATS credentials and subject permissions remain the boundary.
+
+The subject is ape.svc.<name>.<slug>.<kind>.run, the slug derived from the
+daemon's primary project: --service-root, by default the request's
+project_root.
+
+Exit codes: 0 accepted (the reply on stdout) · 1 no daemon answered, or NATS
+failed · 2 usage, a malformed request, or a refusal (session.depth,
+session.not-allowed, VALIDATION, PROJECT_NOT_ALLOWED) · 3 busy
+(session.child-running, session.orchestrator-running, BUSY_EXCLUSIVE,
+BUSY_KEY): retry later. A refusal prints the daemon's message with its code.
+
+Examples:
+
+```
+  ape service submit task '{"skill":"apex-plan","args":"M2"}'
+  ape service submit task '{"project_root":"/abs/repo","skill":"apex-orchestrator","args":"M1"}' --name ci
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--name` | string | `ape` | The daemon's --name. |
+| `--nats-creds` | string | `—` | NATS .creds file (env APE_NATS_CREDS). |
+| `--nats-url` | string | `—` | NATS server URL (env APE_NATS_URL). Required. |
+| `--service-root` | string | `—` | The daemon's primary project root, for the subject's slug (default: the request's project_root). |
+| `--timeout` | duration | `10s` | How long to wait for the daemon's reply. |
 
 ## ape sessions
 
@@ -6094,6 +6209,13 @@ judged against a skill's declaration.
 The verdict is written to the run manifest as commit_contract, so a
 failure stays diagnosable after the fact.
 
+A run's commits are the range its HEAD moved over. A commit in it that was
+made while another ape session's run in the same checkout went (not this
+run's parent orchestrator, not its own children) cannot be told apart, so
+neither run claims it: both list it under commits_shared, in the JSON
+envelope and the run manifest, and it is left out of commits and of the
+commit-message check.
+
 Usage limits (H20): when a claude.ai plan's usage limit stops the session,
 Claude Code draws its limit line ("You've hit your usage limit · resets
 11pm (Europe/Madrid)", or "Usage limit reached · limit resets …") and no
@@ -6114,14 +6236,16 @@ when a change becomes blocked — with APE_EVENT=stop|block, APE_CHANGE
 Sessions and the nesting rule (D61, D62): every skill of the v1 loop runs
 as its own ape task session, and depth counts only the model sessions ape
 launched (ape task, ape prompt, ape chat, ape change review --run, and the
-ape service task/prompt jobs, which run those commands):
+ape service task/prompt jobs, which run those commands, decided from the
+caller's stamp that ape service submit adds — see ape service --help):
   depth 0  a terminal, a Claude Code session ape did not launch, a shell,
            ape script, the service daemon: may start any session
-  depth 1  a session started from depth 0: may start a child only when it
-           is ape's own apex-orchestrator run (ape task apex-orchestrator),
+  depth 1  a session started from depth 0: may start a child only when it is
+           ape's own apex-orchestrator run (ape task apex-orchestrator),
            only a skill on its allow-list (apex-plan, apex-change,
-           apex-apply, apex-review, apex-release, and the tools: skills),
-           and one child at a time
+           apex-apply, apex-review, apex-release, apex-accept, the
+           human_review: delegate skill, and every skill the tools: slots
+           name), and one child at a time
   depth 2  a session an orchestrator started: starts nothing
 A refusal is exit 2, code session.depth or session.not-allowed (action
 stop); a second child while one runs is exit 3, session.child-running, and
@@ -6135,8 +6259,9 @@ changes nothing. Every session carries APE_DEPTH, and a child also
 APE_PARENT_RUN (the orchestrator's run) and APE_PARENT_PID (the ape process
 running it); its manifest records depth and parent_run, and it is stopped,
 termination parent_gone, when that process is gone. An orchestrator's
-manifest lists its children and tree_cost_usd when it ends (totals stay its
-own). There is no switch to turn the rule off.
+manifest lists its children and tree_cost_usd when it ends: always, $0 and
+no children included, so an absent tree_cost_usd means not computed (totals
+stay its own). There is no switch to turn the rule off.
 
 An orchestrator dispatches a skill as
   ape task <skill> --args <id> --detach --output-format json
