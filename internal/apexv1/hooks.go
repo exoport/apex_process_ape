@@ -520,7 +520,7 @@ func StopHook(ctx context.Context, payload HookPayload, opt RunOptions) StopDeci
 	var red []CheckResult
 	for i := range results {
 		if results[i].Kind == KindRegression {
-			judgeRegression(&results[i], ci.State.Regression)
+			judgeRegression(&results[i], ci.State.Regression, p.checkOutput(&results[i]))
 		}
 		if results[i].Red() {
 			red = append(red, results[i])

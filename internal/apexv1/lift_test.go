@@ -409,11 +409,14 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	require.True(t, hasProjectContext(agents, "development"), "D82: the lift's map imports project.md, as init's does")
 	require.NotNil(t, res.Regression)
 	require.Equal(t, 0, res.Regression.Exit)
-	// L4: the same command ran at the tag first, its log kept beside.
+	// L4: the same command ran at the tag first, its log kept beside —
+	// an && chain command by command (R12).
 	require.NotNil(t, res.RegressionAtTag)
 	require.Equal(t, 0, res.RegressionAtTag.Exit)
-	require.Equal(t, "_apex/state/logs/lift/regression-at-tag.log", res.RegressionAtTag.Log)
-	require.FileExists(t, filepath.Join(root, "_apex", "state", "logs", "lift", "regression-at-tag.log"))
+	require.Equal(t, "_apex/state/logs/lift/regression-1-at-tag.log", res.RegressionAtTag.Log)
+	require.Len(t, res.RegressionCommands, 2)
+	require.Equal(t, "test -f main.go", res.RegressionCommands[1].Cmd)
+	require.FileExists(t, filepath.Join(root, "_apex", "state", "logs", "lift", "regression-2-at-tag.log"))
 	require.Equal(t, LiftRegressionGreen, res.RegressionVerdict)
 
 	// CLAUDE.md keeps its rules, loses the managed block, imports the map.

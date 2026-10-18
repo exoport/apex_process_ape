@@ -540,10 +540,18 @@ changed — is undone after it and reported (JSON "stray_files"); files that wer
 before it ran are never touched.
 With "regression: <cmd>" in _apex/config.yaml (with tiers, its change tier), the
 regression command runs too (recorded in the results with kind "regression") and is judged against the change's regression
-baseline (JSON "regression": {cmd, exit, baseline_exit, pre_existing_red, failed}): it
-fails verify only when it is newly red — green at baseline, red now — or when the change
-has no baseline for this command (re-start records one). Red at baseline and still red
-is reported (pre_existing_red), not failed: the planner roadmaps it.
+baseline (JSON "regression": {cmd, exit, baseline_exit, pre_existing_red, failed,
+new_failures}): it fails verify only when it is newly red — green at baseline, red now —
+or when the change has no baseline for this command (re-start records one). Red at
+baseline and still red is reported (pre_existing_red), not failed: the planner roadmaps
+it — unless a test fails now that did not then. When both runs name their failing tests
+(go test "--- FAIL:", gotestsum "=== FAIL:", pytest, cargo, jest; the baseline's are in
+state.json regression_baseline.failing, recorded at start since rc.5), every test failing
+now must have failed at baseline, else verify fails with the new ones in new_failures
+(the first 50; new_failures_total counts them); when either run names none (a baseline
+recorded before rc.5, or one naming more than 500, which stores none, included), red at
+both is pre-existing, as before. new_failures also lists a red run's tests against a
+green baseline.
 The working tree must hold no uncommitted changes outside development/ — commit first
 (trailer "Change: <id>"): a verify belongs to a sha. HEAD must be on the change's branch,
 change/<id> (D38; else exit 1, code change.wrong-branch).
@@ -609,6 +617,7 @@ func renderVerify(cmd *cobra.Command, f *v1Flags, id string, res *apexv1.VerifyR
 		printCatchUp(w, id, res.CatchUp)
 		fmt.Fprintf(w, "change %s at %.7s: %s\n", id, res.SHA, res.Status)
 		printChecks(w, res.Results, true)
+		printNewFailures(w, res.Regression)
 		if len(res.PendingHuman) > 0 {
 			fmt.Fprintf(w, "human-review pending: %s\n", strings.Join(res.PendingHuman, ", "))
 		}

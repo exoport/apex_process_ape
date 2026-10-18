@@ -203,7 +203,9 @@ when one is configured — its milestone tier, "regression: {change: <cmd>, mile
 only needs not to be newly red: it is judged against the earliest regression baseline,
 for the same command, recorded by any change of the milestone (active or archived; a fix,
 milestone: none, is no change of any milestone and never supplies it — D40);
-red there and red now is reported (JSON run.regression.pre_existing_red), not failed.
+red there and red now is reported (JSON run.regression.pre_existing_red), not failed —
+unless, with failing tests named by both runs (as for ` + "`ape change verify`" + `), a test fails
+now that did not at that baseline: red, the names in run.regression.new_failures.
 When no change of the milestone has a baseline for the command, a red regression fails
 the gate: nothing shows it was red before the milestone's work — always the case for a
 milestone tier that differs from the change tier, which no change baselines. Timeouts:

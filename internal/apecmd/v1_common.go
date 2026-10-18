@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
@@ -221,9 +222,24 @@ func printRegression(w io.Writer, v *apexv1.RegressionVerdict) {
 		verdict = fmt.Sprintf("red (exit %d), red at baseline too: not a failure", v.Exit)
 	}
 	fmt.Fprintf(w, "  regression %s — %s: %s\n", verdict, base, v.Cmd)
+	printNewFailures(w, v)
 	if v.Exit != 0 && v.Log != "" {
 		fmt.Fprintln(w, "       full output: "+v.Log)
 	}
+}
+
+// printNewFailures names the failing tests a regression run has that its
+// baseline did not (Q47).
+func printNewFailures(w io.Writer, v *apexv1.RegressionVerdict) {
+	if v == nil || !v.Failed || len(v.NewFailures) == 0 {
+		return
+	}
+	names := v.NewFailures
+	more := ""
+	if len(names) > 10 || v.NewFailuresTotal > len(names) {
+		names, more = names[:min(len(names), 10)], fmt.Sprintf(", … (%d in all; the first %d in new_failures)", v.NewFailuresTotal, len(v.NewFailures))
+	}
+	fmt.Fprintf(w, "       failing now, not at baseline: %s%s\n", strings.Join(names, ", "), more)
 }
 
 func lastLinesOf(xs []string, n int) []string {

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -154,6 +155,24 @@ type LiftResult struct {
 	// run at the tag did not have (red-at-tag-new-failures; at most
 	// liftNewFailuresShown, the note counts them all) (R4).
 	RegressionNewFailures []string `json:"regression_new_failures,omitempty"`
+	// RegressionCommands: the regression command is a top-level && chain,
+	// so each of its commands ran on its own at both points, past a red
+	// one, and was judged on its own (R12); the regression_* fields above
+	// are then the worst command's. Absent for a command that does not
+	// split, which runs and is judged whole.
+	RegressionCommands []LiftRegressionCommand `json:"regression_commands,omitempty"`
+}
+
+// LiftRegressionCommand is one command of a split regression chain,
+// judged at the lift commit against its own run at the tag (R12).
+type LiftRegressionCommand struct {
+	Cmd string `json:"cmd"`
+	// Verdict is one of the LiftRegression* values; Note says why.
+	Verdict         string       `json:"verdict"`
+	Note            string       `json:"note"`
+	NewFailures     []string     `json:"new_failures,omitempty"`
+	Regression      *CheckResult `json:"regression,omitempty"`
+	RegressionAtTag *CheckResult `json:"regression_at_tag,omitempty"`
 }
 
 // The lift's regression verdicts: the command at the lift commit judged
@@ -215,6 +234,11 @@ type lifter struct {
 	// still in: the line numbers of the tag.
 	claudeBefore string
 	rw           *adrRewriter
+	// tagRuns are the regression command's runs at the tag, one per
+	// command of a split chain (R12), and tagLogs their logs, outside the
+	// tree until the lift's state folder exists.
+	tagRuns []CheckResult
+	tagLogs []string
 }
 
 // readRel reads a file as the tag has it — for the inputs the lift
@@ -960,7 +984,7 @@ func (lf *lifter) readings() []string {
 
 func (lf *lifter) apply() error {
 	ctx := lf.ctx
-	tagLog, cleanup, err := lf.regressionAtTag()
+	cleanup, err := lf.regressionAtTag()
 	defer cleanup()
 	if err != nil {
 		return err
@@ -1067,15 +1091,16 @@ func (lf *lifter) apply() error {
 	if err := lf.removeUntracked(); err != nil {
 		return err
 	}
-	lf.liftRegression(p, tagLog)
+	lf.liftRegression(p)
 	return nil
 }
 
 // liftRegression runs the regression command at the lift commit and
 // judges it against its run at the tag: the baseline red gates are
 // judged against (backlog 37), and the one way to tell a red the lift
-// caused from one it found (L4).
-func (lf *lifter) liftRegression(p *Project, tagLog string) {
+// caused from one it found (L4). A top-level && chain runs and is judged
+// command by command (R12).
+func (lf *lifter) liftRegression(p *Project) {
 	switch {
 	case lf.res.Gates.Regression == "":
 		lf.res.RegressionNote = "no regression command was extracted: apex-plan sets `regression:` in _apex/config.yaml"
@@ -1084,14 +1109,26 @@ func (lf *lifter) liftRegression(p *Project, tagLog string) {
 		lf.res.RegressionNote = "not run (--no-verify-run)"
 		return
 	}
-	r := p.runRegression(lf.ctx, lf.res.Gates.Regression, p.LogDir("lift"), "", lf.opt.Run)
-	lf.res.Regression = &r
-	if t := lf.res.RegressionAtTag; t != nil && tagLog != "" {
-		dst := filepath.Join(p.LogDir("lift"), "regression-at-tag.log")
-		if err := os.Rename(tagLog, dst); err == nil {
-			t.Log = p.Rel(dst)
-		} else if data, rerr := os.ReadFile(tagLog); rerr == nil && os.WriteFile(dst, data, 0o600) == nil {
-			t.Log = p.Rel(dst)
+	parts := splitTopLevelAnd(lf.res.Gates.Regression)
+	var after []CheckResult
+	if len(parts) == 1 {
+		after = []CheckResult{p.runRegression(lf.ctx, parts[0], p.LogDir("lift"), "", lf.opt.Run)}
+	} else {
+		checks := make([]PlannedCheck, len(parts))
+		for i, c := range parts {
+			checks[i] = PlannedCheck{Ref: liftPartRef(i), Kind: KindRegression, Cmd: c}
+		}
+		after = p.RunChecks(lf.ctx, p.LogDir("lift"), "", checks, lf.opt.Run)
+	}
+	for i := range lf.tagRuns {
+		if i >= len(lf.tagLogs) || lf.tagLogs[i] == "" {
+			continue
+		}
+		dst := filepath.Join(p.LogDir("lift"), filepath.Base(lf.tagLogs[i]))
+		if err := os.Rename(lf.tagLogs[i], dst); err == nil {
+			lf.tagRuns[i].Log = p.Rel(dst)
+		} else if data, rerr := os.ReadFile(lf.tagLogs[i]); rerr == nil && os.WriteFile(dst, data, 0o600) == nil {
+			lf.tagRuns[i].Log = p.Rel(dst)
 		}
 	}
 	readLog := func(c *CheckResult) string {
@@ -1101,7 +1138,60 @@ func (lf *lifter) liftRegression(p *Project, tagLog string) {
 		data, _ := os.ReadFile(filepath.Join(p.Root, filepath.FromSlash(c.Log)))
 		return string(data)
 	}
-	lf.res.RegressionVerdict, lf.res.RegressionNote, lf.res.RegressionNewFailures = judgeLiftRegression(lf.res.RegressionAtTag, &r, readLog(lf.res.RegressionAtTag), readLog(&r))
+	cmds := make([]LiftRegressionCommand, len(parts))
+	worst := 0
+	for i := range parts {
+		var tag *CheckResult
+		if i < len(lf.tagRuns) {
+			tag = &lf.tagRuns[i]
+		}
+		c := &cmds[i]
+		c.Cmd, c.Regression, c.RegressionAtTag = parts[i], &after[i], tag
+		c.Verdict, c.Note, c.NewFailures = judgeLiftRegression(tag, &after[i], readLog(tag), readLog(&after[i]))
+		if liftVerdictRank(c.Verdict) > liftVerdictRank(cmds[worst].Verdict) {
+			worst = i
+		}
+	}
+	w := cmds[worst]
+	lf.res.Regression, lf.res.RegressionAtTag = w.Regression, w.RegressionAtTag
+	lf.res.RegressionVerdict, lf.res.RegressionNote, lf.res.RegressionNewFailures = w.Verdict, w.Note, w.NewFailures
+	if len(parts) > 1 {
+		lf.res.RegressionCommands = cmds
+		lf.res.RegressionNote = splitNote(cmds, worst)
+	}
+}
+
+// liftPartRef is the ref, and log name, of a split chain's i-th command.
+func liftPartRef(i int) string { return regressionRef + "-" + strconv.Itoa(i+1) }
+
+// liftVerdictRank orders the lift's verdicts, worst highest: a red the
+// lift caused, then a red nothing can attribute, a pre-existing red, a
+// command that cannot run here, green.
+func liftVerdictRank(v string) int {
+	switch v {
+	case LiftRegressionRedAfterLift, LiftRegressionRedAtTagNewFailures:
+		return 4
+	case LiftRegressionNoBaseline:
+		return 3
+	case LiftRegressionRedAtTag:
+		return 2
+	case LiftRegressionCannotRun:
+		return 1
+	}
+	return 0
+}
+
+// splitNote is a split chain's note: the worst command's, naming it, and
+// every other command's verdict.
+func splitNote(cmds []LiftRegressionCommand, worst int) string {
+	var others []string
+	for i := range cmds {
+		if i != worst {
+			others = append(others, fmt.Sprintf("%d `%s` %s", i+1, cmds[i].Cmd, cmds[i].Verdict))
+		}
+	}
+	return fmt.Sprintf("command %d of %d, `%s` (each command of the && chain ran on its own, past a red one; the worst verdict is this one's): %s — the others: %s; each in regression_commands",
+		worst+1, len(cmds), cmds[worst].Cmd, cmds[worst].Note, strings.Join(others, ", "))
 }
 
 // removeUntracked removes the manifest's v0 skills git never tracked (an
@@ -1118,29 +1208,42 @@ func (lf *lifter) removeUntracked() error {
 
 // regressionAtTag runs the regression command at the tag, first, before
 // anything is written: HEAD is the tag (pre-flight) and the tree is
-// clean. Its log stays outside the tree until the lift's state folder
-// exists; cleanup removes it. No command, or --no-verify-run: nothing.
-func (lf *lifter) regressionAtTag() (logPath string, cleanup func(), err error) {
+// clean. A top-level && chain runs command by command, past a red one
+// (R12). Its logs stay outside the tree until the lift's state folder
+// exists; cleanup removes them. No command, or --no-verify-run: nothing.
+func (lf *lifter) regressionAtTag() (cleanup func(), err error) {
 	cleanup = func() {}
 	if lf.res.Gates.Regression == "" || lf.opt.NoVerifyRun {
-		return "", cleanup, nil
+		return cleanup, nil
 	}
 	tmp, err := os.MkdirTemp("", "ape-lift-tag-*")
 	if err != nil {
-		return "", cleanup, err
+		return cleanup, err
 	}
 	cleanup = func() { _ = os.RemoveAll(tmp) }
-	logPath = filepath.Join(tmp, "regression-at-tag.log")
 	p := &Project{Root: lf.root, DevRel: lf.devRel}
-	progressf(lf.opt.Run.Progress, "%s regression at %s started: %s", Stamp(), LiftTag, lf.res.Gates.Regression)
-	r := p.runWithRetries(lf.ctx, &PlannedCheck{Ref: regressionRef, Kind: KindRegression, Cmd: lf.res.Gates.Regression}, logPath,
-		Timeouts{}.Limits(KindRegression, lf.opt.Run.Timeout), nil, 0, p.isWorkTree(lf.ctx))
-	r.Task, r.Kind = regressionRef, KindRegression
-	lf.res.RegressionAtTag = &r
-	if lf.ctx.Err() != nil {
-		return "", cleanup, &FailError{Code: CodeRunInterrupted, Msg: "interrupted while the regression ran at " + LiftTag + " — nothing was written; lift again"}
+	parts := splitTopLevelAnd(lf.res.Gates.Regression)
+	inGit := p.isWorkTree(lf.ctx)
+	lf.tagRuns = make([]CheckResult, 0, len(parts))
+	for i, c := range parts {
+		ref, name := regressionRef, "regression-at-tag.log"
+		if len(parts) > 1 {
+			ref = liftPartRef(i)
+			name = ref + "-at-tag.log"
+		}
+		logPath := filepath.Join(tmp, name)
+		progressf(lf.opt.Run.Progress, "%s %s at %s started: %s", Stamp(), ref, LiftTag, c)
+		r := p.runWithRetries(lf.ctx, &PlannedCheck{Ref: ref, Kind: KindRegression, Cmd: c}, logPath,
+			Timeouts{}.Limits(KindRegression, lf.opt.Run.Timeout), nil, 0, inGit)
+		r.Task, r.Kind = ref, KindRegression
+		lf.tagRuns = append(lf.tagRuns, r)
+		lf.tagLogs = append(lf.tagLogs, logPath)
+		lf.res.RegressionAtTag = &lf.tagRuns[0]
+		if lf.ctx.Err() != nil {
+			return cleanup, &FailError{Code: CodeRunInterrupted, Msg: "interrupted while the regression ran at " + LiftTag + " — nothing was written; lift again"}
+		}
 	}
-	return logPath, cleanup, nil
+	return cleanup, nil
 }
 
 // movePin moves the project's ape pin to the running version (L1), and
@@ -1196,8 +1299,9 @@ func judgeLiftRegression(before, after *CheckResult, beforeOut, afterOut string)
 
 // judgeRedAtTag judges a run red at the tag and at the lift commit (R4):
 // by the failing test names when the run after the lift reports them,
-// else by the outputs' hashes. Only the same failures (or fewer), or the
-// same output, are called pre-existing.
+// else by the outputs' hashes, tool-install lines and durations left out
+// (R13). Only the same failures (or fewer), or the same output, are
+// called pre-existing.
 func judgeRedAtTag(before, after *CheckResult, tag, beforeOut, afterOut string) (verdict, note string, fresh []string) {
 	newNames, named := newFailures(beforeOut, afterOut)
 	switch {
@@ -1209,7 +1313,8 @@ func judgeRedAtTag(before, after *CheckResult, tag, beforeOut, afterOut string) 
 		}
 		return LiftRegressionRedAtTagNewFailures, fmt.Sprintf("LIFT FAILURE: red at the lift commit (exit %d) and at %s (%s), but %d failing test(s) the run at %s did not have: %s — the lift broke them (code reading a removed path, an edited file a test pins). Fix them in a commit of their own; the rest are pre-existing. Output in %s and %s",
 			after.Exit, LiftTag, tag, len(newNames), LiftTag, list, after.Log, before.Log), shown
-	case named || before.OutputSHA256 == after.OutputSHA256:
+	case named || before.OutputSHA256 == after.OutputSHA256 ||
+		(beforeOut+afterOut != "" && liftComparisonHash(beforeOut) == liftComparisonHash(afterOut)):
 		return LiftRegressionRedAtTag, fmt.Sprintf("red at the lift commit (exit %d) and at %s (%s), failing as it did there: a pre-existing failure for apex-plan to roadmap, not a lift failure; output in %s and %s", after.Exit, LiftTag, tag, after.Log, before.Log), nil
 	default:
 		return LiftRegressionRedAtTag, fmt.Sprintf("red at the tag; the output changed after the lift (exit %d at the lift commit, %s at %s), and no failing test names could be read to compare, so nothing says the red is only the tag's: diff %s with %s before calling it the tag's", after.Exit, tag, LiftTag, after.Log, before.Log), nil
