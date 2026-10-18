@@ -35,6 +35,10 @@ type RegressionBaseline struct {
 	OutputSHA256 string `json:"output_sha256"`
 	SHA          string `json:"sha"`
 	At           string `json:"at"`
+	// Failing are the failing tests the run's output named (Q47), read
+	// when it was red; none for a green run, a run whose runner names
+	// nothing ape reads, or a baseline recorded before rc.5.
+	Failing []string `json:"failing,omitempty"`
 }
 
 // RegressionVerdict judges one run of the regression command against a
@@ -55,6 +59,10 @@ type RegressionVerdict struct {
 	// PreExistingRed: red now and red at baseline — reported, not failed.
 	PreExistingRed bool `json:"pre_existing_red"`
 	Failed         bool `json:"failed"`
+	// NewFailures are the failing tests the run names that its baseline
+	// did not (Q47): what failed it when the baseline was red too, or
+	// every failing test when the baseline was green.
+	NewFailures []string `json:"new_failures,omitempty"`
 	// Reason and Detail: the run was vacuous or unrun (H11). An unrun
 	// command always fails: nothing shows it would pass.
 	Reason string `json:"reason,omitempty"`
@@ -88,20 +96,57 @@ func (p *Project) runRegression(ctx context.Context, cmd, logDir, prefix string,
 }
 
 // judgeRegression marks r PreExistingRed when it is red and so was base
-// (same command), and returns the verdict. An unrun command is never
-// pre-existing red: it is red for want of a requirement, not by its tests.
-func judgeRegression(r *CheckResult, base *RegressionBaseline) *RegressionVerdict {
+// (same command), and returns the verdict; out is r's output. Red at both
+// points is pre-existing only when nothing new fails: when the failing
+// tests were named on both sides, every one failing now must have failed
+// at baseline, else it fails with the new names (Q47: a new failure
+// behind an already-red suite); when either side named none, the exit
+// codes decide, as before rc.5. An unrun command is never pre-existing
+// red: it is red for want of a requirement, not by its tests.
+func judgeRegression(r *CheckResult, base *RegressionBaseline, out string) *RegressionVerdict {
 	v := &RegressionVerdict{Cmd: r.Cmd, Exit: r.Exit, OutputSHA256: r.OutputSHA256, Log: r.Log, Reason: r.Reason, Detail: r.Detail}
 	if base != nil && base.Cmd == r.Cmd {
 		exit := base.Exit
 		v.BaselineExit, v.BaselineSHA = &exit, base.SHA
 	}
 	if r.Exit != 0 {
-		v.PreExistingRed = r.Reason != ReasonUnrun && v.BaselineExit != nil && *v.BaselineExit != 0
+		var now []string
+		if r.Reason != ReasonUnrun {
+			now = failingTests(out)
+		}
+		switch {
+		case r.Reason == ReasonUnrun || v.BaselineExit == nil:
+		case *v.BaselineExit == 0:
+			v.NewFailures = now
+		case len(now) > 0 && len(base.Failing) > 0:
+			v.NewFailures = namesNotIn(now, base.Failing)
+			v.PreExistingRed = len(v.NewFailures) == 0
+		default:
+			v.PreExistingRed = true
+		}
 		v.Failed = !v.PreExistingRed
 	}
 	r.PreExistingRed = v.PreExistingRed
 	return v
+}
+
+// checkOutput is a check's logged output, "" when it has none.
+func (p *Project) checkOutput(r *CheckResult) string {
+	if r == nil || r.Log == "" {
+		return ""
+	}
+	data, _ := os.ReadFile(filepath.Join(p.Root, filepath.FromSlash(r.Log)))
+	return string(data)
+}
+
+// regressionBaseline is r recorded as a regression baseline at sha, with
+// the failing tests its output names when it is red (Q47).
+func (p *Project) regressionBaseline(r *CheckResult, sha string) *RegressionBaseline {
+	b := &RegressionBaseline{Cmd: r.Cmd, Exit: r.Exit, OutputSHA256: r.OutputSHA256, SHA: sha, At: Stamp()}
+	if r.Exit != 0 && r.Reason != ReasonUnrun {
+		b.Failing = failingTests(p.checkOutput(r))
+	}
+	return b
 }
 
 // rebaselineRegression records the regression baseline on a first start,
@@ -113,7 +158,7 @@ func (p *Project) rebaselineRegression(ctx context.Context, id string, st *State
 		return nil
 	}
 	r := p.runRegression(ctx, cmd, p.LogDir(id), "baseline-", opt)
-	st.Regression = &RegressionBaseline{Cmd: cmd, Exit: r.Exit, OutputSHA256: r.OutputSHA256, SHA: head, At: Stamp()}
+	st.Regression = p.regressionBaseline(&r, head)
 	return &r
 }
 

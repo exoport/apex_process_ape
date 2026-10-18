@@ -188,7 +188,7 @@ func TestGate_UnrunCommand(t *testing.T) {
 	require.Contains(t, g.Run.Why(), "gate command unrun: no-such-tool-xyz is not on PATH")
 
 	r := CheckResult{Cmd: "suite", Exit: ExitUnrun, Reason: ReasonUnrun, Detail: "x"}
-	v := judgeRegression(&r, &RegressionBaseline{Cmd: "suite", Exit: 1})
+	v := judgeRegression(&r, &RegressionBaseline{Cmd: "suite", Exit: 1}, "")
 	require.True(t, v.Failed)
 	require.False(t, v.PreExistingRed)
 }

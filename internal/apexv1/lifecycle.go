@@ -535,7 +535,8 @@ func (p *Project) verify(ctx context.Context, ci ChangeInfo, opt RunOptions, kee
 	ctx = context.WithoutCancel(ctx)
 	var regression *RegressionVerdict
 	if regressionCmd != "" {
-		regression = judgeRegression(&results[len(results)-1], st.Regression)
+		r := &results[len(results)-1]
+		regression = judgeRegression(r, st.Regression, p.checkOutput(r))
 	}
 	green := true
 	for i := range results {

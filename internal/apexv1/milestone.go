@@ -72,6 +72,9 @@ func (r *GateRun) Why() string {
 			parts = append(parts, "regression command "+g.Reason+": "+g.Detail)
 		case g.BaselineExit == nil:
 			parts = append(parts, "regression command exit "+strconv.Itoa(g.Exit)+", and no change of the milestone has a baseline for it")
+		case *g.BaselineExit != 0:
+			parts = append(parts, "regression command exit "+strconv.Itoa(g.Exit)+", red at baseline ("+g.BaselineChange+") too, but with "+
+				strconv.Itoa(len(g.NewFailures))+" failing test(s) the baseline did not have: "+strings.Join(limit(g.NewFailures, 5), ", "))
 		default:
 			parts = append(parts, "regression command exit "+strconv.Itoa(g.Exit)+", green at baseline ("+g.BaselineChange+")")
 		}
@@ -413,7 +416,8 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	}
 	if regressionCmd != "" {
 		change, base := p.milestoneRegressionBaseline(ctx, id, regressionCmd)
-		run.Regression = judgeRegression(&results[len(results)-1], base)
+		r := &results[len(results)-1]
+		run.Regression = judgeRegression(r, base, p.checkOutput(r))
 		run.Regression.BaselineChange = change
 		results = results[:len(results)-1]
 	}

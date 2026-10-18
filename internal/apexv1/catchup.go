@@ -176,7 +176,7 @@ func (p *Project) recordCatchUp(ctx context.Context, ci ChangeInfo, cu *CatchUp,
 		st.Baseline = append(st.Baseline, Baseline{Task: cu.Baseline[i].Task, Exit: cu.Baseline[i].Exit, Cmd: cu.Baseline[i].Cmd, SHA: tip})
 	}
 	if r := cu.Regression; r != nil {
-		st.Regression = &RegressionBaseline{Cmd: r.Cmd, Exit: r.Exit, OutputSHA256: r.OutputSHA256, SHA: tip, At: Stamp()}
+		st.Regression = p.regressionBaseline(r, tip)
 	}
 	if st.Verify != nil {
 		st.Verify.Stale = true
