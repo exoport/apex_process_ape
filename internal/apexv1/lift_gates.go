@@ -243,6 +243,43 @@ func newFailures(beforeOut, afterOut string) (fresh []string, named bool) {
 	return namesNotIn(after, failingTests(beforeOut)), true
 }
 
+// R17: spirometer's Flutter targets run `fvm flutter`, and fvm is on
+// PATH only in an interactive shell: each target printed "fvm: command
+// not found" and make's "*** [...] Error 127", make exited 2, and the lift
+// called it red at the tag, which hid that nothing ran. For the lift's
+// two comparison runs, a run whose output says a command was not found
+// and that it exited 127 cannot run either, as a direct exit 126 or 127
+// cannot. A change's verify and a milestone's gate keep their own rule.
+var (
+	// notFoundRe is a shell's or make's "not found": bash's and zsh's
+	// "command not found", make's own exec "No such file or directory",
+	// and dash's (/bin/sh on Debian and Ubuntu) "sh: 1: fvm: not found".
+	notFoundRe = regexp.MustCompile(`(?m)command not found|No such file or directory|^\S*sh: \d+: [^:\n]+: not found\r?$`)
+	// error127Re is make's report of a recipe line that exited 127 and
+	// stopped it: "make: *** [Makefile:88: t] Error 127", not one a -
+	// prefix let it go past ("Error 127 (ignored)").
+	error127Re = regexp.MustCompile(`(?m)\bError 127\r?$`)
+)
+
+// liftCannotRun reports a comparison run that could not run here: exit
+// 126 or 127, or red with out saying a command was not found and that
+// make got 127 from it (R17). why says which, for the note. An output
+// that names failing tests ran them (make -k went on past the 127): it is
+// a red, judged by those names.
+func liftCannotRun(r *CheckResult, out string) (cannot bool, why string) {
+	switch {
+	case r == nil || r.Exit == 0:
+		return false, ""
+	case r.Exit == 126 || r.Exit == 127:
+		return true, ""
+	}
+	out = ansiRe.ReplaceAllString(out, "")
+	if notFoundRe.MatchString(out) && error127Re.MatchString(out) && len(failingTests(out)) == 0 {
+		return true, ", where its output says a command was not found and make reported Error 127"
+	}
+	return false, ""
+}
+
 // R13: bingo prints "(re)installing …/golangci-lint-v2.13.2" on a tool's
 // first run, which is the run at the tag, and a duration differs on every
 // run; spirometer's two logs differed only in such a line, and the lift

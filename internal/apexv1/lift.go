@@ -191,8 +191,9 @@ const (
 	// commit — the lift broke it, a lift failure for the person.
 	LiftRegressionRedAfterLift = "red-after-lift"
 	// LiftRegressionCannotRun: exit 126 or 127 at the lift commit as at
-	// the tag — a tool it runs is missing or not executable here, which
-	// is not a red (D70 B).
+	// the tag, or an output saying a command was not found with make's
+	// Error 127 (R17) — a tool it runs is missing or not executable here,
+	// which is not a red (D70 B).
 	LiftRegressionCannotRun = "cannot-run"
 	// LiftRegressionNoBaseline: red at the lift commit, and the run at
 	// the tag could not run, so nothing says whose red it is.
@@ -1280,24 +1281,25 @@ func (lf *lifter) movePin() bool {
 
 // judgeLiftRegression compares the regression command at the lift commit
 // (after) with its run at the tag (before, nil when it did not run);
-// beforeOut and afterOut are their outputs, read when both are red.
+// beforeOut and afterOut are their outputs, read when a run is red.
 func judgeLiftRegression(before, after *CheckResult, beforeOut, afterOut string) (verdict, note string, fresh []string) {
-	cannotRun := func(r *CheckResult) bool { return r != nil && (r.Exit == 126 || r.Exit == 127) }
 	tag := "not run"
 	if before != nil {
 		tag = fmt.Sprintf("exit %d", before.Exit)
 	}
+	afterCannot, why := liftCannotRun(after, afterOut)
+	beforeCannot, _ := liftCannotRun(before, beforeOut)
 	switch {
 	case after.Exit == 0:
 		if before != nil && before.Exit != 0 {
 			return LiftRegressionGreen, fmt.Sprintf("green at the lift commit (red at %s, %s: check that run's log for a flaky test)", LiftTag, tag), nil
 		}
 		return LiftRegressionGreen, "green at the lift commit, as at " + LiftTag, nil
-	case cannotRun(after) && (before == nil || before.Exit != 0):
-		return LiftRegressionCannotRun, fmt.Sprintf("cannot run here (exit %d at the lift commit, %s at %s): a command it runs is missing or not executable on this machine — not a red; run it where its tools are, or set `regression:` to what can run; output in %s", after.Exit, tag, LiftTag, after.Log), nil
+	case afterCannot && (before == nil || before.Exit != 0):
+		return LiftRegressionCannotRun, fmt.Sprintf("cannot run here (exit %d at the lift commit%s, %s at %s): a command it runs is missing or not executable on this machine — not a red; run it where its tools are, or set `regression:` to what can run; output in %s", after.Exit, why, tag, LiftTag, after.Log), nil
 	case before == nil:
 		return LiftRegressionNoBaseline, fmt.Sprintf("red at the lift commit (exit %d), with no run at %s to compare: output in %s", after.Exit, LiftTag, after.Log), nil
-	case cannotRun(before):
+	case beforeCannot:
 		return LiftRegressionNoBaseline, fmt.Sprintf("red at the lift commit (exit %d); at %s it could not run (%s), so nothing says whose red it is: output in %s", after.Exit, LiftTag, tag, after.Log), nil
 	case before.Exit != 0:
 		return judgeRedAtTag(before, after, tag, beforeOut, afterOut)

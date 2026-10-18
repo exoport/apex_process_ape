@@ -124,3 +124,40 @@ func TestLiftComparisonHash(t *testing.T) {
 	require.Contains(t, note, "failing as it did there")
 	require.NotContains(t, note, "the output changed")
 }
+
+// R17, from spirometer on rc.5: its Flutter targets run `fvm flutter`, fvm
+// is not on a non-interactive shell's PATH, and make exits 2 with "Error
+// 127" — called red-at-tag, which hid that nothing ran. Such an output is
+// cannot-run at either point, as a direct exit 127 is.
+func TestJudgeLiftRegression_MakeNotFound(t *testing.T) {
+	fvm := "fvm flutter pub get\n/bin/bash: line 1: fvm: command not found\nmake: *** [Makefile:80: spiroapp-flutter-pub-get] Error 127\n"
+	exec := "fvm flutter test\nmake: fvm: No such file or directory\nmake: *** [Makefile:88: spiroapp-flutter-test] Error 127\r\n"
+	dash := "cd spiroapp && fvm flutter analyze\n/bin/sh: 1: fvm: not found\n\x1b[31mmake: *** [Makefile:84: spiroapp-flutter-analyze] Error 127\x1b[0m\n"
+	r := func(exit int, log string) *CheckResult { return &CheckResult{Exit: exit, Log: log, OutputSHA256: log} }
+	for _, out := range []string{fvm, exec, dash} {
+		v, note, fresh := judgeLiftRegression(r(2, "t.log"), r(2, "a.log"), out, out)
+		require.Equal(t, LiftRegressionCannotRun, v, out)
+		require.Empty(t, fresh)
+		require.Contains(t, note, "exit 2 at the lift commit, where its output says a command was not found and make reported Error 127, exit 2 at")
+	}
+	v, note, _ := judgeLiftRegression(r(2, "t.log"), r(2, "a.log"), "go test ./...\nok  \tx\t0.1s\nmake: *** [Makefile:3: test] Error 2\n", fvm)
+	require.Equal(t, LiftRegressionCannotRun, v, "not found after a red tag, as with exit 127")
+	require.Contains(t, note, "command was not found")
+	v, _, _ = judgeLiftRegression(r(2, "t.log"), r(1, "a.log"), fvm, "--- FAIL: TestA (0.00s)\nFAIL\n")
+	require.Equal(t, LiftRegressionNoBaseline, v, "red after a tag that could not run")
+	v, _, _ = judgeLiftRegression(r(0, "t.log"), r(2, "a.log"), "ok\n", fvm)
+	require.Equal(t, LiftRegressionRedAfterLift, v, "not found only after the lift, as with exit 127")
+
+	// A red that is not "not found and 127" stays a red.
+	for _, out := range []string{
+		"open fixtures/a.json: No such file or directory\n--- FAIL: TestA (0.00s)\nmake: *** [Makefile:3: test] Error 1\n",
+		"bash: fvm: command not found\nmake: *** [Makefile:3: test] Error 2\n",
+		"make: [Makefile:2: tools] Error 127 (ignored)\nbash: fvm: command not found\nmake: *** [Makefile:3: test] Error 1\n",
+		"make: *** [Makefile:3: test] Error 127\n",
+		// make -k went on past the 127: the tests ran, and are judged by name.
+		fvm + "--- FAIL: TestA (0.00s)\nFAIL\nmake: *** [Makefile:5: test] Error 1\nmake: Target 'all' not remade because of errors.\n",
+	} {
+		v, _, _ := judgeLiftRegression(r(2, "t.log"), r(2, "a.log"), out, out)
+		require.Equal(t, LiftRegressionRedAtTag, v, out)
+	}
+}
