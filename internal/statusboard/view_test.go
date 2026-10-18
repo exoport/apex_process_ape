@@ -95,7 +95,7 @@ func TestTheViewShowsEverySection(t *testing.T) {
 		`"title":"Outside the change flow — 1"`, `"sha":"0123456"`, `"subject":"hotfix"`,
 		`"title":"Latest run"`, `"value":"usage_limit"`, `"value":"11pm"`,
 		// freshness, bound from data
-		`"data":{"refreshed":"2026-10-17T09:00:00Z"}`,
+		`"data":{"quietSet":true,"refreshed":"2026-10-17T09:00:00Z"}`,
 	} {
 		require.Contains(t, v, want)
 	}

@@ -71,26 +71,26 @@ const (
 	invocation = "ape aboard"
 )
 
-// QUIET (D60 "the status tab updates silently"; RC3-PLAN Q1, D75).
+// QUIET (D60 "the status tab updates silently"; RC3-PLAN Q1, D75, D126).
 //
-// The tab always carries a tab-level `quiet: true`. The aboard change that
-// honours it — an agent write to a quiet tab is journaled but never stamps
-// `touched`, the unread dot on the tab and the banner inside it — is on its
-// own branch; ape bumps github.com/exoport/aboard once it is released.
+// aboard v0.4.0 honours a tab-level `quiet: true`: an agent write that
+// changes only a quiet tab's state is journaled and broadcast but stamps no
+// `touched`, so no unread dot, banner or count. Going quiet is announced
+// once (the write that turns it on, or creates a tab already quiet, is
+// stamped with a note), and a person may turn it off from the tab's menu.
 //
-// What the pinned aboard v0.3.0 does with it, measured against its own
-// server in TestQuiet_WhatAboardV030DoesToday: nothing, silently. `quiet`
-// is not a field of its tab struct, so the server drops it from the
-// document it persists, warns about it nowhere (not in `apply`'s output,
-// not in its log), and stamps `touched` on every tab an agent write
-// changes (pkg/aboard/tabs.go reconcileDoc, guarantee 2) — so until that
-// release the tab still raises the dot. A write to the FILE keeps the key.
+// ape sets quiet ONCE, as it leaves name and note alone: when it creates
+// the tab, and on the first changed write to a tab an older ape made (an
+// aboard v0.3.0 server dropped the key from what it persisted). It marks
+// that in state.data (dataQuietSet) and never sets quiet again, so a
+// person's "announce agent changes again" holds: re-setting it on every
+// write would override them, and each re-set would raise the very dot
+// quiet exists to keep down. aboard stores false as absent (omitzero), so
+// the marker is the only way to tell "never set" from "turned off".
 //
-// What keeps the dot down already: a refresh whose view is unchanged
-// writes nothing at all — a missing `quiet` is never a reason to write,
-// since v0.3.0's server drops it every time — and a write to the file (no
-// board running) never passes through the server's reconcile, so it raises
-// no dot either. Only a changed view posted to a running board does.
+// What keeps the dot down besides: a refresh whose view is unchanged
+// writes nothing at all, and a write to the FILE (no board running) never
+// passes through the server's reconcile.
 const keyQuiet = "quiet"
 
 // What Refresh did, for `ape status --board` to say. The automatic refresh
@@ -364,9 +364,11 @@ func upsert(doc map[string]any, r *apexv1.StatusReport, now time.Time) (changed 
 			// Name and note are NOT rewritten: the human may have renamed
 			// the tab, and a refresher that undoes that on every call is a
 			// bug they cannot fix.
+			if !quietSet(tab["state"]) {
+				tab[keyQuiet] = true
+			}
 			tab["type"] = "ui"
 			tab["state"] = state
-			tab[keyQuiet] = true
 			doc["tabs"] = tabs
 			return true, nil
 		}
@@ -385,11 +387,19 @@ func upsert(doc map[string]any, r *apexv1.StatusReport, now time.Time) (changed 
 			"after every state-changing v1 command. A view, not a record: if this and " +
 			"`ape status` disagree, this is wrong. Edits here are overwritten on the next refresh.",
 		"state": state,
-		// QUIET above: honoured from the aboard release after v0.3.0.
+		// QUIET above: set once, here.
 		keyQuiet: true,
 	}
 	doc["tabs"] = append(tabs, tab)
 	return true, nil
+}
+
+// quietSet reports whether ape already set the tab quiet once (QUIET).
+func quietSet(cur any) bool {
+	m, _ := cur.(map[string]any)
+	data, _ := m["data"].(map[string]any)
+	set, _ := data[dataQuietSet].(bool)
+	return set
 }
 
 // sameView compares two tab states on their component tree, ignoring

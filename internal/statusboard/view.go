@@ -51,9 +51,13 @@ var milestoneTones = map[string]string{
 }
 
 // dataRefreshed is the state.data path the freshness stamp is bound from.
-// It is the only thing in data, and the only part of the view the
+// It and dataQuietSet are all of data, the only part of the view the
 // unchanged-view comparison ignores (statusboard.go sameView).
 const dataRefreshed = "refreshed"
+
+// dataQuietSet marks that ape has set the tab quiet once (statusboard.go
+// QUIET); like the freshness stamp, the view comparison ignores it.
+const dataQuietSet = "quietSet"
 
 // buildState renders a status report as a `ui` component tree: the same
 // figures `ape status --json` reports, and nothing computed beyond them.
@@ -77,7 +81,7 @@ func buildState(r *apexv1.StatusReport, now time.Time) map[string]any {
 	}
 	return map[string]any{
 		"root": map[string]any{"type": "col", "gap": "16px", "children": compact(children)},
-		"data": map[string]any{dataRefreshed: now.UTC().Format(time.RFC3339)},
+		"data": map[string]any{dataRefreshed: now.UTC().Format(time.RFC3339), dataQuietSet: true},
 	}
 }
 
