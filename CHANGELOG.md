@@ -3,7 +3,8 @@
 ## v1.0.0-rc.6 (draft)
 
 On top of rc.5 and the candidates below: research's rc.5 lift findings R16–R22, the v0
-state readers (D141) and the docs delegate by default (D152).
+state readers (D141), the docs delegate by default (D152), and gates, archive layout,
+hot/ and the secret scan (D155).
 
 ### `ape project lift`
 
@@ -30,6 +31,37 @@ state readers (D141) and the docs delegate by default (D152).
 - **The folder tier folds per hasher in the committed disposition** (R22): "57
   files in `pkg/mdpdf` share a folder with `x_test.go` (folder match only)";
   the dry run and the JSON stay complete.
+
+### Gates, archive layout, hot/ and the secret scan (D155; class B/C)
+
+- **Gate folders:** `milestone close` (and `--accept-red`) moves the
+  milestone's `development/gates/<M>-*/` into
+  `development/archive/milestones/<M>/gate/` in the close commit (a rename in
+  history; `development/gates/lib/` stays), and records `gate_archived:
+  [{from, to}]`; approval hashes keep their approved paths and map through it.
+  `project check` gains a non-failing **`notices`** list:
+  `gate.outside-gates` for an open milestone whose gate scripts live elsewhere
+  (move them with its next re-approval). Close refuses with
+  `milestone.gate-archive-exists` when the archive's `gate/` already exists.
+- **Archived changes live in `development/archive/changes/<date>-<id>/`**;
+  every reader reads both layouts. **`ape project archive-layout`** (`--check`)
+  moves the older ones in one commit, `apex: archive layout (seq-06)`,
+  rewriting the paths their `state.json` records; framework's
+  `v1.0.0_seq-06` runs it. `--check` exits 1 with `archive.legacy-layout`.
+- **`hot/`:** `project init` and `project lift` write `hot/.gitignore`
+  (`*`) when absent, never committed; `project check` reports
+  `hot.not-ignored` (person) for a tracked or un-ignored `hot/`.
+- **Every commit ape makes is scanned for secrets** with the embedded
+  betterleaks v2 SDK (pinned exactly at **v2.0.0-rc.2**, a pre-release: bump to
+  v2.0.0 at its release; the stdlib regexp engine, no network): the lines the
+  commit adds, for exactly its paths. A hit refuses with **`commit.secret`**
+  (person), file:line and rule with the secret redacted, nothing committed;
+  move the secret to `hot/`, or a person allows a false positive by
+  fingerprint in `_apex/config.yaml` `secrets: {allow: [{fingerprint,
+  reason}]}` (guarded; read from the committed config only). Inline
+  `betterleaks:allow` markers and `.betterleaksignore` are not honoured; bingo
+  `.sum` files are skipped. A session's own commits are scanned when the
+  archive squashes them. The binary grows by about 8 MB.
 
 ### The docs delegate by default (D152; class B/C)
 
