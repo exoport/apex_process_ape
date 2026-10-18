@@ -34,6 +34,9 @@ var (
 	storyIDRe = regexp.MustCompile(`(?i)\b(?:` + storyFrag + `\s+(?:of|in|for|from)\s+)?(?:user\s+)?stor(?:y|ies)\s+#?\d+[.-]\d+[a-z]?(?:\s*(?:,|&|/|\band\b|\bor\b)\s*#?\d+[.-]\d+[a-z]?)*(?:\s*(?:[,/;]|—|–)?\s*` + storyFrag + `)*\b`)
 	// "Epic 12", "epics 3, 4".
 	epicIDRe = regexp.MustCompile(`(?i)\bepics?\s+#?\d+(?:\s*(?:,|&|/|\band\b|\bor\b)\s*#?\d+)*\b`)
+	// The last item of a story's or an epic's list: "Story 26.1, 2026-08"
+	// read "2026-08" of a date as a second story (R16).
+	storyListTailRe = regexp.MustCompile(`\s*(?:,|&|/|\band\b|\bor\b)\s*#?\d+(?:[.-]\d+[a-z]?)?$`)
 	// "DW-20261001-ab12_slug", "DW-42".
 	deferredIDRe = regexp.MustCompile(`\bDW-\d[0-9A-Za-z_-]*[0-9A-Za-z](?:\.md)?\b|\bDW-\d\b`)
 	// "(3-2)": a story key in parentheses.
@@ -80,6 +83,15 @@ func (v *liftVocab) find(s string, paths bool) [][2]int {
 			if m[1] < len(s)-1 && s[m[1]] == '-' && unicode.IsLetter(rune(s[m[1]+1])) {
 				continue
 			}
+			// "(Story 26.1, 2026-08-08)": a list item glued to more digits
+			// is a date or a version, and the story's span ends before it.
+			for re != deferredIDRe && gluedDigits(s, m[1]) {
+				tail := storyListTailRe.FindStringIndex(s[m[0]:m[1]])
+				if tail == nil {
+					break
+				}
+				m[1] = m[0] + tail[0]
+			}
 			add(m[0], m[1])
 		}
 	}
@@ -108,8 +120,9 @@ func (v *liftVocab) find(s string, paths bool) [][2]int {
 	return mergeSpans(out)
 }
 
-// possessiveRe is an id's possessive: "Story 15.4's own deliverable".
-var possessiveRe = regexp.MustCompile(`^['’]s\b`)
+// possessiveRe is an id's possessive: "Story 15.4's own deliverable",
+// or a bracketed one's, "(Story 2.3)'s own" (R21).
+var possessiveRe = regexp.MustCompile(`^[)\]]?['’]s\b`)
 
 // possessive reports an id in s that the sentence owns through it ("Story
 // 15.4's own deliverable"): no removal keeps such a sentence whole (R2).
@@ -122,6 +135,18 @@ func (v *liftVocab) possessive(s string) bool {
 		}
 	}
 	return false
+}
+
+// gluedDigits reports s[i:] opening on "-" or "." and a digit.
+func gluedDigits(s string, i int) bool {
+	return i < len(s)-1 && (s[i] == '-' || s[i] == '.') && s[i+1] >= '0' && s[i+1] <= '9'
+}
+
+// storySpan reports a span of s that opens on a story id, "Story 3.2" or
+// "Task 2 of Story 3.2".
+func storySpan(s string, sp [2]int) bool {
+	loc := storyIDRe.FindStringIndex(s[sp[0]:sp[1]])
+	return loc != nil && loc[0] == 0
 }
 
 func mergeSpans(in [][2]int) [][2]int {
@@ -259,6 +284,9 @@ func citedADRs(s string) []int {
 const (
 	idMark  = "\x01" // an id, before it is removed
 	cutMark = "\x02" // where text was removed
+	// storyMark is a story id until the asides are cut: a story's aside
+	// never goes whole (R16).
+	storyMark = "\x07"
 )
 
 // holdPair holds the brackets of a pair that was empty as written — the
@@ -276,15 +304,23 @@ const glueWords = `(?:see also|see|per|cf\.?|refs?:?|from|in|by|via|since|for|un
 var (
 	idListRe = regexp.MustCompile(idMark + `(?:\s*(?:,|;|/|&|\+|\band\b|\bor\b)\s*` + idMark + `)+`)
 	// An aside that starts with an id ("(DW-42 tracks the gap)") goes
-	// whole.
-	idAsideRe    = regexp.MustCompile(`[ \t]*[(\[]\s*(?i:` + glueWords + `\s+)?` + idMark + `[^()\[\]\x03-\x06]*[)\]]`)
+	// whole, up to a separator: "(DW-42, 2026-08-08)" keeps its date.
+	// Never a story's, whose span ends at its fragments, nor one citing
+	// an ADR (R16).
+	idAsideRe    = regexp.MustCompile(`[ \t]*[(\[]\s*(?i:` + glueWords + `\s+)?` + idMark + `[^()\[\]\x03-\x07,;/]*[)\]]`)
 	idParenRe    = regexp.MustCompile(`[ \t]*[(\[]\s*(?i:` + glueWords + `\s+)?` + idMark + `\s*[)\]]`)
 	idSentenceRe = regexp.MustCompile(`([.!?:;])\s+(?i:` + glueWords + `\s+)?` + idMark + `\s*[.;]`)
-	idLeadRe     = regexp.MustCompile(`^(?i:` + glueWords + `\s+)?` + idMark + `\s*(?:[:,;.]|—|–|--?)?\s*`)
+	idLeadRe     = regexp.MustCompile(`^(?i:` + glueWords + `\s+)?` + idMark + `\s*(?:[:,;./]|—|–|--?)?\s*`)
 	idTrailRe    = regexp.MustCompile(`\s*(?:[,;:]|—|–|--?)?\s*(?i:(?:` + glueWords + `|with|to|at|of|on|against|into)\s+)?` + idMark + `\s*([.!?]?)\s*$`)
 	// A sentence that only points at an id ("See DW-42 for the history.")
 	// goes whole.
 	idPointerRe = regexp.MustCompile(`(^|[.!?]\s+)(?i:see(?: also)?|cf\.?|refs?:?)\s+` + idMark + `[^.!?` + idMark + `]*(?:[.!?]|$)\s*`)
+	// idSepRe is an id with the separator after it: what a pointer that
+	// also cites an ADR loses ("See Story 4.2, ADR-0019 for why", R16).
+	idSepRe = regexp.MustCompile(idMark + `\s*(?:[,;/&+]|\b(?i:and|or)\b)?\s*`)
+	// idThenADRRe is an id listed before an ADR citation, which takes its
+	// place: "per Story 4.2, ADR-0019" is "per ADR-0019" (R16).
+	idThenADRRe = regexp.MustCompile(idMark + `\s*(?:[,;/&+]|\b(?i:and|or)\b)\s*(ADR-\d)`)
 	idMidGlueRe = regexp.MustCompile(`\s+(?i:` + glueWords + `)\s+` + idMark)
 	cutRe       = regexp.MustCompile(`[ \t]*[` + idMark + cutMark + `]+[ \t]*`)
 	// The separator a removal leaves next to a bracket or a punctuation
@@ -293,6 +329,8 @@ var (
 	sepCloseRe  = regexp.MustCompile(`[ \t]*(?:[,;/&+]|\b(?i:and|or))[ \t]*` + cutMark + `([)\]])`)
 	sepPunctRe  = regexp.MustCompile(`[ \t]*[,;/&+][ \t]*` + cutMark + `([,;:.!?])`)
 	emptyPairRe = regexp.MustCompile(`\(\s*\)|\[\s*\]`)
+	// bulletRe is a list item's marker: "- ", "* ", "2. ".
+	bulletRe = regexp.MustCompile(`^(?:[-*+•]|\d+[.)])[ \t]+`)
 	// emptiedPairRe is a pair a removal emptied, with the blanks before it:
 	// "Bounded ([Story 3.2]) twice" is "Bounded twice".
 	emptiedPairRe = regexp.MustCompile(`[ \t]*(?:\(\s*\)|\[\s*\])`)
@@ -317,17 +355,41 @@ func stripIDsFromText(s string, spans [][2]int) (out string, empty bool) {
 	prev := 0
 	for _, sp := range spans {
 		b.Write(held[prev:sp[0]])
-		b.WriteString(idMark)
+		if storySpan(s, sp) {
+			b.WriteString(storyMark)
+		} else {
+			b.WriteString(idMark)
+		}
 		prev = sp[1]
 	}
 	b.Write(held[prev:])
 	t := strings.TrimLeft(b.String(), " \t")
 	origTrim := strings.TrimSpace(s)
-	startsWithID := strings.HasPrefix(t, idMark) || idLeadRe.MatchString(t)
+	// A list item keeps its marker: trimmed with the separators, "- Does
+	// NOT modify …" was no longer a list item, and gofmt made the list a
+	// code block (R19). The item goes only when its text does.
+	bullet := bulletRe.FindString(t)
+	t = t[len(bullet):]
+	mark := trailingMark(s, spans)
+	pre := strings.ReplaceAll(t, storyMark, idMark)
+	startsWithID := strings.HasPrefix(pre, idMark) || idLeadRe.MatchString(pre)
 
 	t = idListRe.ReplaceAllString(t, idMark)
-	t = idPointerRe.ReplaceAllString(t, "$1")
-	t = idAsideRe.ReplaceAllString(t, cutMark)
+	t = idAsideRe.ReplaceAllStringFunc(t, func(m string) string {
+		if adrCiteRe.MatchString(m) {
+			return m
+		}
+		return cutMark
+	})
+	t = strings.ReplaceAll(t, storyMark, idMark)
+	t = idListRe.ReplaceAllString(t, idMark)
+	t = idThenADRRe.ReplaceAllString(t, "$1")
+	t = idPointerRe.ReplaceAllStringFunc(t, func(m string) string {
+		if adrCiteRe.MatchString(m) {
+			return idSepRe.ReplaceAllString(m, "")
+		}
+		return idPointerRe.ReplaceAllString(m, "$1")
+	})
 	t = idParenRe.ReplaceAllString(t, cutMark)
 	t = idSentenceRe.ReplaceAllString(t, "$1"+cutMark)
 	t = idLeadRe.ReplaceAllString(t, "")
@@ -357,7 +419,28 @@ func stripIDsFromText(s string, spans [][2]int) (out string, empty bool) {
 	if strings.HasSuffix(origTrim, ".") && !strings.ContainsAny(t[len(t)-1:], ".!?:") {
 		t += "."
 	}
-	return lead + t, false
+	if mark != "" && !strings.ContainsAny(t[len(t)-1:], ".!?,;:") {
+		t += mark
+	}
+	return lead + bullet + t, false
+}
+
+// trailingMark is the "," ";" or ":" that s ends on when no id is right
+// before it: the sentence's own, which the edit keeps — "proves," runs on
+// into the next line, "bump:" introduces it. One right after an id goes
+// with it (R20; rc.5 trimmed it from every edited line).
+func trailingMark(s string, spans [][2]int) string {
+	body := strings.TrimRight(s, " \t")
+	if body == "" || strings.IndexByte(",;:", body[len(body)-1]) < 0 {
+		return ""
+	}
+	before := len(strings.TrimRight(body[:len(body)-1], " \t"))
+	for _, sp := range spans {
+		if sp[1] == before {
+			return ""
+		}
+	}
+	return body[len(body)-1:]
 }
 
 // joinCuts closes each gap left by a removal: nothing next to punctuation

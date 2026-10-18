@@ -73,26 +73,31 @@ The commit:
                  four-digit form is the project's own: a short ADR-08 cites
                  another decision log, and is listed as unresolved, never
                  rewritten — even where the project has an ADR-0008
-  strips         epic, story and deferred ids from code comments — Story 3.2,
-                 Epic 12, (3-2) (a known story key), DW-…, paths into the deferred
-                 store or the implementation folder — keeping the rest of the comment;
-                 a comment that was only an id goes. A story takes its fragments with
-                 it (Story 3.2, Task 2 · Subtask 3.1 of Story 5.10 · AC 2), and the
-                 separator a removal leaves by a bracket or a mark goes too
-                 ("(ADR-0019, Story 3.2)" → "(ADR-0019)"). Comments only: ids in
-                 identifiers, strings and directives are listed, not edited — and
-                 so are ids in a data-shaped comment, which a tool may parse: one
-                 opening with a lowercase key ("# owner: …") or a record of
-                 key: value fields ("# pending: q | owner: …"), and so is a comment
-                 using an id or a removed path as a possessive ("Story 3.2's own
-                 test", "development/deferred/'s Gates"), which no removal keeps
-                 whole. An aside split over comment lines loses both brackets
-                 with its id, and a mark a removal leaves at the start of a line
-                 moves to the end of the line above ("(ADR-0008," over "Story
-                 1.3), extracted" → "(ADR-0008)" over "extracted"; a separator
-                 goes): no edited line starts with ")" or "." or loses the
-                 blank after its "//". Only a bracket pair the removal emptied
-                 goes: run()'s, []byte stay.
+  strips         epic, story and deferred ids from code comments — Story 3.2, Epic 12,
+                 (3-2) (a known story key), DW-…, paths into the deferred store or the
+                 implementation folder — keeping the rest of the comment; a comment
+                 line that was only an id goes, and an edited list item keeps its
+                 marker ("- ", "2. "). A story takes its fragments with it (Story 3.2,
+                 Task 2 · Subtask 3.1 of Story 5.10 · AC 2) and nothing else: what
+                 follows them is kept, ADR ids renumbered
+                 ("(Story 3.2, ADR-0019 decision 3)" → "(ADR-0019 decision 3)",
+                 "(Story 3.2, 2026-08-08)" → "(2026-08-08)"), and the separator a
+                 removal leaves by a bracket or a mark goes too
+                 ("(ADR-0019, Story 3.2)" → "(ADR-0019)"); a "," ";" or ":" ending a
+                 line goes only when the id was right before it ("proves," and "bump:"
+                 stay). Comments only: ids in identifiers, strings and directives are
+                 listed, not edited — and so are ids in a data-shaped comment, which a
+                 tool may parse: one opening with a lowercase key ("# owner: …") or a
+                 record of key: value fields ("# pending: q | owner: …"), and so is a
+                 comment using an id or a removed path as a possessive
+                 ("Story 3.2's own test", "(Story 2.3)'s own",
+                 "development/deferred/'s Gates"), which no removal keeps whole. An
+                 aside split over comment lines loses both brackets with its id, and a
+                 mark a removal leaves at the start of a line moves to the end of the
+                 line above ("(ADR-0008," over "Story 1.3), extracted" → "(ADR-0008)"
+                 over "extracted"; a separator goes): no edited line starts with ")"
+                 or "." or loses the blank after its "//". Only a bracket pair the
+                 removal emptied goes: run()'s, []byte stay.
                  Tokenized: Go (go/scanner), shell, Python, JS/TS (JSX/TSX: comments
                  that begin their line only), Dart, YAML, Makefile (recipe lines are
                  the shell's: left), C/C++. A file the tokenizer cannot read, a

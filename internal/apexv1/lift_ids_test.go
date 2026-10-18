@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -214,4 +215,136 @@ func TestEditComments_CommentRulesCompose(t *testing.T) {
 		require.NotRegexp(t, `^//\S|^//\s*\)`, l)
 	}
 	require.Contains(t, res.Left, LiftIDRef{File: "x.go", Line: 8, Text: "development/deferred/", Where: "possessive"})
+}
+
+// R16, from tenax on rc.5 (276 edited lines lost an ADR-NNNN; cortex 96,
+// radix 11, mdpdf 7, atomix 2): a story-first aside went whole, its ADR
+// citations with it — "(Story 42.1, ADR-0019)" was removed — because all
+// that followed the story counted as its fragments. A story takes only its
+// tasks, subtasks and ACs; anything after them is kept, ADR ids renumbered.
+func TestEditComments_StoryFirstAsideKeepsItsADRs(t *testing.T) {
+	rw := newADRRewriter(map[int]int{9: 4, 17: 3, 19: 7, 34: 12}, nil, "")
+	cases := map[string]string{
+		// tenax's five shapes.
+		"// Bounded (Story 47.2, ADR-0017).\n":                          "// Bounded (ADR-0003).\n",
+		"// Wired twice (Story 42.1, ADR-0019, ADR-0034) on purpose.\n": "// Wired twice (ADR-0007, ADR-0012) on purpose.\n",
+		"// Carried (Story 30.2, ADR-0034 decision 3).\n":               "// Carried (ADR-0012 decision 3).\n",
+		"// Holds (Story 42.1, ADR-0019 amendment).\n":                  "// Holds (ADR-0007 amendment).\n",
+		"// Guarded (Story 19.6/ADR-0009).\n":                           "// Guarded (ADR-0004).\n",
+		// The words after an ADR id, fragments before it, no brackets.
+		"// Honest (Story 47.2, ADR-0017 honesty invariant), always.\n": "// Honest (ADR-0003 honesty invariant), always.\n",
+		"// Gate (Story 42.1, Task 2, ADR-0019 Decision item 11).\n":    "// Gate (ADR-0007 Decision item 11).\n",
+		"// Story 42.1, ADR-0019: the gate holds.\n":                    "// ADR-0007: the gate holds.\n",
+		"// Story 42.1/ADR-0019: the gate holds.\n":                     "// ADR-0007: the gate holds.\n",
+		"// Retries. See Story 42.1, ADR-0019 for the history.\n":       "// Retries. See ADR-0007 for the history.\n",
+		"// Bounded (see Story 3.2 and ADR-0019).\n":                    "// Bounded (see ADR-0007).\n",
+		"// Bounded per Story 3.2 and ADR-0019.\n":                      "// Bounded per ADR-0007.\n",
+		"// Bounded — Story 3.2, ADR-0019.\n":                           "// Bounded — ADR-0007.\n",
+		"// Tracked (DW-42, ADR-0019).\n":                               "// Tracked (ADR-0007).\n",
+		"// Tracked (DW-42 per ADR-0019).\n":                            "// Tracked (per ADR-0007).\n",
+		// Any other text after the story: a date, prose.
+		"// Bumped v0.6.0 -> v0.8.0 (Story 26.1, 2026-08-08) for the fix.\n": "// Bumped v0.6.0 -> v0.8.0 (2026-08-08) for the fix.\n",
+		"// Moved (Epic 4, 2026-08-08) once.\n":                              "// Moved (2026-08-08) once.\n",
+		"// Moved (Story 26.1, which split it) once.\n":                      "// Moved (which split it) once.\n",
+		// The help's other order, and an aside of a story alone.
+		"// Bounded (ADR-0019, Story 3.2).\n":     "// Bounded (ADR-0007).\n",
+		"// Bounded (Story 3.2, Task 2) twice.\n": "// Bounded twice.\n",
+		// tenax's pkg/replaycore/combinator.go, a run of lines.
+		"//   - Clears ActiveTree so a subsequent Suspend() call is not\n//     rejected by the N-501 guard (Story 19.6, ADR-0009).\n": "//   - Clears ActiveTree so a subsequent Suspend() call is not\n//     rejected by the N-501 guard (ADR-0004).\n",
+		// A block comment.
+		"/* Bounded (Story 47.2, ADR-0017). */\n": "/* Bounded (ADR-0003). */\n",
+	}
+	adrs := regexp.MustCompile(`ADR-\d{4}`)
+	for in, want := range cases {
+		const head, tail = "package x\n\n", "var x = 1\n"
+		res, err := editComments("x.go", head+in+tail, langGo, testVocab(), rw)
+		require.NoError(t, err, in)
+		got := strings.TrimSuffix(strings.TrimPrefix(res.New, head), tail)
+		require.Equal(t, want, got, in)
+		require.Len(t, adrs.FindAllString(got, -1), len(adrs.FindAllString(in, -1)), "an ADR citation was lost: %q", in)
+	}
+}
+
+// R19, tenax's pkg/replaycore/combinator.go on rc.4 and rc.5: removing
+// "in story 19.7" also trimmed the bullet off "//   - Does NOT modify
+// SuspendPayload …", and gofmt then read the list as a code block, a
+// "//" line above it. A line goes only when nothing but ids is left;
+// otherwise only the id goes, and the bullet stays.
+func TestEditComments_BulletKeepsItsMarker(t *testing.T) {
+	src := "package x\n\n" +
+		"// ProgressFutureTree runs the loop.\n" +
+		"//\n" +
+		"// Contract:\n" +
+		"//   - Does NOT modify SuspendPayload or call Suspend() — those are wired in story 19.7.\n" +
+		"//   - Story 19.6: clears ActiveTree on completion.\n" +
+		"//   - Epic 12\n" +
+		"//   - The existing paths are UNCHANGED.\n" +
+		"func F() {}\n"
+	res, err := editComments("x.go", src, langGo, testVocab(), nil)
+	require.NoError(t, err)
+	want := "package x\n\n" +
+		"// ProgressFutureTree runs the loop.\n" +
+		"//\n" +
+		"// Contract:\n" +
+		"//   - Does NOT modify SuspendPayload or call Suspend() — those are wired.\n" +
+		"//   - Clears ActiveTree on completion.\n" +
+		"//   - The existing paths are UNCHANGED.\n" +
+		"func F() {}\n"
+	require.Equal(t, want, res.New)
+	out, why := gofmtLifted(src, res.New)
+	require.Empty(t, why)
+	require.Equal(t, want, out, "still a list to gofmt")
+
+	for in, want := range map[string]string{
+		" * Story 3.2: retry the publish.": " * Retry the publish.",
+		" 2. Retry the publish (DW-42).":   " 2. Retry the publish.",
+		" + see Epic 4 for why":            "",
+	} {
+		got, empty := stripIDsFromText(in, testVocab().spans(in))
+		require.Equal(t, want == "", empty, in)
+		if !empty {
+			require.Equal(t, want, got, in)
+		}
+	}
+}
+
+// R20, rc.5's dry runs (atomix 521 lines, cortex 419, tenax 291): the
+// trailing "," ";" ":" went from every edited line, not only one a
+// removal left — "proves," over the sentence's next line lost its comma,
+// and "bump:" the colon introducing the next line. A trailing mark goes
+// only when the removed text was directly before it.
+func TestStripIDsFromText_TrailingMarkOnlyWhereTheRemovalWas(t *testing.T) {
+	v := testVocab()
+	for in, want := range map[string]string{
+		" Story 18.1 (ADR-0017; FR-MEM-4, FR-MEM-5): proves,":                    " (ADR-0017; FR-MEM-4, FR-MEM-5): proves,",
+		" Bumped v0.6.0 -> v0.8.0 (Story 26.1, 2026-08-08) — not a CR-fix bump:": " Bumped v0.6.0 -> v0.8.0 (2026-08-08) — not a CR-fix bump:",
+		" Retry the publish (Story 3.2):":                                        " Retry the publish:",
+		" Story 3.2: the steps are;":                                             " The steps are;",
+		// The removal was directly before the mark: it goes, as before.
+		" Retry the publish — story 35.1,": " Retry the publish",
+		" Retries — see Story 3.2:":        " Retries",
+		" Retry the publish, Story 3.2;":   " Retry the publish",
+	} {
+		got, empty := stripIDsFromText(in, v.spans(in))
+		require.False(t, empty, in)
+		require.Equal(t, want, got, in)
+	}
+}
+
+// R21, radix and atomix on rc.5: "compose/ysql-rf3.yml (Story 2.3)'s own"
+// became "compose/ysql-rf3.yml 's own" — a bracketed id before "'s" is a
+// possessive as R2's and R10's are: listed, its line left as written.
+func TestEditComments_BracketedPossessiveListedNotEdited(t *testing.T) {
+	in := "// Reads compose/ysql-rf3.yml (Story 2.3)'s own file.\n" +
+		"// Mirrors [DW-42]’s gate.\n" +
+		"// Retry (Story 3.2).\n"
+	got, res := liftGo(t, in)
+	require.Equal(t, "// Reads compose/ysql-rf3.yml (Story 2.3)'s own file.\n"+
+		"// Mirrors [DW-42]’s gate.\n"+
+		"// Retry.\n", got)
+	require.Equal(t, []LiftIDRef{
+		{File: "x.go", Line: 3, Text: "Story 2.3", Where: "possessive"},
+		{File: "x.go", Line: 4, Text: "DW-42", Where: "possessive"},
+	}, res.Left)
+	require.Equal(t, 1, res.IDsRemoved)
 }
