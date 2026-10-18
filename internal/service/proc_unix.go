@@ -3,9 +3,12 @@
 package service
 
 import (
+	"context"
 	"os/exec"
 	"syscall"
 	"time"
+
+	"github.com/exoport/apex_process_ape/internal/proctree"
 )
 
 // procGroupKillGrace is how long a SIGTERMed child group has to exit
@@ -17,9 +20,9 @@ const procGroupKillGrace = 500 * time.Millisecond
 
 // configureProcessGroup makes the spawned child the leader of a new process
 // group (pgid == pid) so the daemon can signal the child and every
-// descendant it spawns (claude, sub-agents, the bridge) with one
-// negative-pid kill. Without this the child's grandchildren would outlive a
-// job.stop / drain.
+// descendant that stays in its group with one negative-pid kill. Without
+// this the child's grandchildren would outlive a job.stop / drain. claude
+// does not stay: terminateGroup reaches it by pid.
 func configureProcessGroup(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
@@ -27,18 +30,15 @@ func configureProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr.Setpgid = true
 }
 
-// terminateGroup sends SIGTERM to the child's whole process group, then
-// SIGKILL after the grace window. Because configureProcessGroup set
-// Setpgid, the child's pgid equals its pid, so a negative-pid kill
-// addresses the group. A non-positive pid or an already-exited group is a
-// harmless no-op (kill returns ESRCH).
+// terminateGroup stops a job: its whole process group, AND every process
+// below the child that left the group. The job's claude is one: ape task
+// runs it in a PTY of its own session, so a group kill never reached it,
+// and a claude whose ape task was SIGKILLed — before it could stop its
+// session — lived on with its Bash tool's commands. SIGTERM first, then
+// SIGKILL after the grace window (proctree.KillTree). It returns once the
+// SIGKILL is sent: the escalation used to sleep through the grace in a
+// goroutine, which a daemon exiting after a forced drain could cut short.
+// A non-positive pid is a no-op; an exited group is harmless (ESRCH).
 func terminateGroup(pid int) {
-	if pid <= 0 {
-		return
-	}
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
-	go func() {
-		time.Sleep(procGroupKillGrace)
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
-	}()
+	proctree.KillTree(context.Background(), pid, procGroupKillGrace)
 }

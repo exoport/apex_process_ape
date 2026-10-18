@@ -11,12 +11,13 @@ import (
 	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/atomicfile"
 	"github.com/exoport/apex_process_ape/internal/pipeline"
+	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/sessiondriver"
 	"gopkg.in/yaml.v3"
 )
 
-// stopGateRecorder is the `ape task` side of the APEX v1 stop gate (trial
-// decision D1).
+// stopGateRecorder is the `ape task` (and `ape prompt`) side of the APEX
+// v1 stop gate (trial decision D1).
 //
 // ape's own Stop hook tells the driver a turn ended. In a v1 project the
 // project's `ape hook stop` may have blocked that same Stop — Claude Code
@@ -106,6 +107,23 @@ func (r *stopGateRecorder) record() *pipeline.StopGateRecord {
 		} else {
 			out.Allowed++
 		}
+	}
+	return out
+}
+
+// promptRecord is record in prompt.yaml's shape: an `ape prompt` session
+// has no run manifest.
+func (r *stopGateRecorder) promptRecord() *runlog.PromptStopGate {
+	if r == nil {
+		return nil
+	}
+	rec := r.record()
+	if rec == nil {
+		return nil
+	}
+	out := &runlog.PromptStopGate{Deferrals: rec.Deferrals, Allowed: rec.Allowed}
+	for _, e := range rec.Events {
+		out.Events = append(out.Events, runlog.PromptStopGateEvent{At: e.At, Verdict: e.Verdict, Change: e.Change, Reason: e.Reason})
 	}
 	return out
 }

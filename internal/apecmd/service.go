@@ -42,9 +42,10 @@ daemon registers a NATS micro service on
 and accepts JSON request/reply jobs: task.run dispatches an ape child
 process (headless, PTY-only); job.status / job.list / job.stop manage
 them; status / health report the daemon. NATS-micro $SRV.PING /
-$SRV.INFO / $SRV.STATS discovery is available for free. prompt.run and
-script.run are registered but rejected (VALIDATION) until their runners
-ship. pipeline.run is registered and always rejected (VALIDATION): ` + "`ape pipeline`" + `
+$SRV.INFO / $SRV.STATS discovery is available for free. prompt.run runs
+ape prompt, and script.run ape script (a script_path inside the allowlist,
+or script_source only with allow_script_source: true in service.yaml).
+pipeline.run is registered and always rejected (VALIDATION): ` + "`ape pipeline`" + `
 was retired with APEX v0.
 
 Admission is keyed exclusivity, exclusive by default: a job holds its
@@ -84,7 +85,11 @@ boundary (see docs/how-to/run-ape-as-a-service.md).
 
 Shutdown is graceful: SIGINT/SIGTERM stops accepting new jobs and waits for
 in-flight children (indefinitely by default; bound it with --drain-timeout).
-A second signal terminates them immediately.
+A second signal terminates them immediately: each job's whole process tree,
+its claude session and that session's commands included, gets SIGTERM and,
+half a second later, SIGKILL; the daemon records each job's end and exits,
+about a second after the signal. job.stop stops one job the same way. (On
+Windows only the child process itself is killed.)
 
 Exit codes: 0 clean shutdown · 1 connect/registration failure · 2 usage or
 config error (bad --name, missing/invalid service.yaml, no NATS URL).`,

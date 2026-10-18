@@ -2,7 +2,8 @@
 // of ancestors, and whether a pid is alive. ape's nesting rule (D62) uses
 // it to find the ape-launched session a command runs under even when the
 // environment that says so was scrubbed: a model can rewrite its
-// environment, but not the parent of the shell its tool runs in.
+// environment, but not the parent of the shell its tool runs in. KillTree
+// stops a process and everything below it, wherever its descendants went.
 package proctree
 
 // MaxDepth bounds an ancestor walk: a process tree is never this deep, and

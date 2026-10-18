@@ -8,13 +8,17 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/exoport/apex_process_ape/internal/eventing"
 	"github.com/exoport/apex_process_ape/internal/natstest"
+	"github.com/exoport/apex_process_ape/internal/proctree"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/micro"
 )
@@ -660,4 +664,76 @@ func mustJSON(t *testing.T, v any) []byte {
 		t.Fatalf("marshal: %v", err)
 	}
 	return data
+}
+
+// rc.5 11c (Q46): a second signal stops each in-flight job's whole tree at
+// once, and the daemon records the job's end and returns within about a
+// second. The child here ignores SIGTERM, and so does its grandchild, which
+// left the job's process group for a session of its own — as the job's
+// claude does, in its PTY — holding the job log open. Before, the daemon
+// SIGKILLed the group alone, so the grandchild lived on.
+func TestSecondSignalStopsTheJobTree(t *testing.T) {
+	setsid, err := exec.LookPath("setsid")
+	if err != nil {
+		t.Skip("setsid not installed")
+	}
+	marker := filepath.Join(t.TempDir(), "grandchild.pid")
+	bin := fakeApe(t, fmt.Sprintf("trap '' TERM\n%s sh -c 'echo $$ > %s; exec sleep 60' &\nwhile :; do sleep 1; done\n", setsid, marker))
+	r := startRig(t, bin)
+	jobID := acceptedJobID(t, r, "task.run", RunRequest{ProjectRoot: r.cfg.ProjectRoot, Skill: "s"})
+
+	var grandchild int
+	for range 100 {
+		if data, err := os.ReadFile(marker); err == nil {
+			if n, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+				grandchild = n
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if grandchild <= 0 {
+		t.Fatal("the grandchild never started")
+	}
+	t.Cleanup(func() { _ = syscall.Kill(grandchild, syscall.SIGKILL) })
+
+	sigc := make(chan os.Signal, 2)
+	done := make(chan error, 1)
+	go func() { done <- drainOnSignals(context.Background(), r.d, 0, io.Discard, sigc) }()
+	sigc <- syscall.SIGTERM
+	select {
+	case <-done:
+		t.Fatal("the first signal must drain, not stop the job")
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	start := time.Now()
+	sigc <- syscall.SIGTERM
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("drain: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the daemon still waits on the job 5 s after the second signal")
+	}
+	took := time.Since(start)
+	t.Logf("second signal to drained: %s", took)
+	if took > 1500*time.Millisecond {
+		t.Errorf("the second signal took %s to stop the job; want about 1 s at most", took)
+	}
+	if info, _ := r.d.reg.Get(jobID); info.State == StateRunning {
+		t.Errorf("job %s still recorded as running", jobID)
+	}
+	gone := false
+	for range 50 { // a SIGKILLed orphan is reaped by init, not at once
+		if !proctree.Alive(grandchild) {
+			gone = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !gone {
+		t.Errorf("the grandchild in its own session (pid %d) outlived the second signal", grandchild)
+	}
 }

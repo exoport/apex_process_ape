@@ -332,7 +332,10 @@ func (d *Daemon) handleJobStop(req micro.Request) {
 		_ = req.RespondJSON(JobStopReply{V: WireVersion, Stopped: false})
 		return
 	}
-	terminateGroup(pid) // SIGTERM the child's whole process group; onExit records "stopped"
+	// SIGTERM the job's whole tree, SIGKILL after the grace; onExit records
+	// "stopped". Off the handler: the daemon lives on, so the reply need
+	// not wait out the grace.
+	go terminateGroup(pid)
 	_ = req.RespondJSON(JobStopReply{V: WireVersion, Stopped: true})
 }
 
@@ -413,15 +416,18 @@ func (d *Daemon) StopAccepting() error {
 // WaitJobs blocks until every in-flight child has exited.
 func (d *Daemon) WaitJobs() { d.jobs.Wait() }
 
-// KillAll SIGTERMs the process group of every still-running job (drain
-// escalation).
+// KillAll stops the tree of every still-running job (drain escalation),
+// all at once, and returns when each has had its SIGKILL: SIGTERM, then
+// SIGKILL after procGroupKillGrace, so within about that bound.
 func (d *Daemon) KillAll() {
+	var wg sync.WaitGroup
 	list := d.reg.List()
 	for i := range list {
 		if list[i].State == StateRunning && list[i].PID > 0 {
-			terminateGroup(list[i].PID)
+			wg.Go(func() { terminateGroup(list[i].PID) })
 		}
 	}
+	wg.Wait()
 }
 
 // RunningCount reports how many jobs are still running (test/diagnostic).

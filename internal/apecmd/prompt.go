@@ -137,6 +137,15 @@ After typing, ape presses Enter once claude has drawn the line, then
 confirms the submit through the UserPromptSubmit hook, pressing Enter up
 to twice more; a line still not submitted fails the session (exit 1).
 
+In an APEX v1 project whose .claude/settings.json registers the stop hook
+(ape hook stop), the hook decides each Stop, as under ape task: a Stop it
+blocks (background work still running, or a red check on an in-progress
+change's branch) continues the turn instead of ending the session, which
+completes on the first Stop the hook allows, or at --idle-timeout /
+--max-duration. prompt.yaml records each verdict under stop_gate. With
+--ignore-project-settings the hook does not run, and the first Stop ends
+the session.
+
 Records land under <project>/_output/ape/prompts/<prompt-id>/ (in an
 APEX v1 project, _apex/state/runs/prompts/<prompt-id>/) (runlog
 streams + copied transcript + prompt.yaml session record) and fold into
@@ -419,6 +428,13 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 
 	driver := sessiondriver.NewDriver(getRunLog, o.idleTimeout)
 	driver.SetMaxDuration(o.maxDuration)
+	// The project's stop hook decides each Stop, as under ape task (D1,
+	// D88): a Stop it blocked continues the turn, and the session ends on
+	// the first one it allows.
+	stopGate := promptStopGate(o)
+	if stopGate != nil {
+		driver.SetStopGate(stopGate.bounded(runCtx))
+	}
 
 	rt := orchestrator.NewBridgeRuntime(orchestrator.BridgeRuntimeOptions{
 		OnHook:  driver.FeedHook,
@@ -530,8 +546,23 @@ func runPromptCore(ctx context.Context, o promptOptions) (promptResult, int, err
 	status, exitCode := promptStatus(waitErr)
 	res := finishPrompt(o, driver, promptRecordExtras{
 		sessionID: driver.SessionID(), transcript: driver.TranscriptPath(), effort: effortPlan, argsFile: argsFile,
+		stopGate: stopGate,
 	}, promptID, runDir, status, start, waitErr, progressf)
 	return res, exitCode, waitErr
+}
+
+// promptStopGate is a prompt session's stop gate: the stop-gate recorder
+// ape task uses, waiting on the verdict of the project's own `ape hook
+// stop`. ape prompt passes no hooks inline, so the hook reaches the
+// session only through the project's settings, and with
+// --ignore-project-settings there is none to wait for. Outside a v1
+// project whose settings register the hook, the recorder answers every
+// Stop at once with no verdict.
+func promptStopGate(o promptOptions) *stopGateRecorder {
+	if o.ignoreProjectSettings {
+		return nil
+	}
+	return newStopGateRecorder(o.projectRoot)
 }
 
 // promptPreflight is runPromptCore's preflight (exit 2), detected before
@@ -631,6 +662,7 @@ type promptRecordExtras struct {
 	transcript string
 	effort     effort.Plan
 	argsFile   string
+	stopGate   *stopGateRecorder
 }
 
 // writePromptRecord persists prompt.yaml. Best-effort.
@@ -655,6 +687,7 @@ func writePromptRecord(runDir, promptID string, o promptOptions, x promptRecordE
 		TokensIn:                tele.Totals.InputTokens,
 		TokensOut:               tele.Totals.OutputTokens,
 		NumTurns:                tele.Totals.NumTurns,
+		StopGate:                x.stopGate.promptRecord(),
 	}
 	if len(perModel) > 0 {
 		meta.PerModel = map[string]runlog.PromptModelUsage{}
