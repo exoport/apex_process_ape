@@ -134,7 +134,8 @@ type LiftResult struct {
 	Candidates  []LiftCandidate `json:"rule_candidates"`
 	Readings    []string        `json:"readings,omitempty"`
 	Disposition string          `json:"disposition"`
-	// Report is the disposition's full lists, as JSON (L11).
+	// Report is the disposition's full lists, as JSON (L11): written to
+	// ape's ignored state folder after the commit, never committed (R3).
 	Report        string       `json:"report"`
 	Init          *InitResult  `json:"init,omitempty"`
 	CommitMessage string       `json:"commit_message"`
@@ -195,6 +196,9 @@ type lifter struct {
 	files []string
 	// hashedAll is every hashed edit; res.Hashed the first hashedCap.
 	hashedAll []LiftHashed
+	// reportJSON is the report, written to res.Report once the commit
+	// stands.
+	reportJSON string
 	// claudeBefore is CLAUDE.md with citations rewritten, managed block
 	// still in: the line numbers of the tag.
 	claudeBefore string
@@ -713,8 +717,8 @@ func (lf *lifter) plan() error {
 	lf.res.Hashed, lf.res.HashedTotal = lf.hashedAll[:min(len(lf.hashedAll), hashedCap)], len(lf.hashedAll)
 	sort.Slice(lf.res.Changed, func(i, j int) bool { return lf.res.Changed[i].File < lf.res.Changed[j].File })
 	lf.res.Disposition = lf.devRel + "/" + LiftDisposition
-	lf.res.Report = lf.devRel + "/" + LiftReport
-	lf.writes[lf.res.Report] = lf.report()
+	lf.res.Report = (&Project{Root: lf.root}).StateRel() + "/" + LiftReport
+	lf.reportJSON = lf.report()
 	lf.writes[lf.res.Disposition] = lf.disposition()
 	lf.res.CommitMessage = lf.commitMessage()
 	return nil
@@ -1040,6 +1044,11 @@ func (lf *lifter) apply() error {
 		return &FailError{Code: CodeCommitFailed, Msg: "the lift commit failed: " + err.Error() + " — `git reset --hard` restores the tree; fix the cause (identity, lock), then lift again"}
 	}
 	lf.res.Commit = HeadSHA(ctx, lf.root)
+	// The full lists: under _apex/state/, which the state whitelist
+	// ignores, so they are this checkout's and never history (R3).
+	if err := liftWrite(filepath.Join(lf.root, filepath.FromSlash(lf.res.Report)), lf.reportJSON); err != nil {
+		return &FailError{Code: CodeLiftWriteFailed, Msg: "writing " + lf.res.Report + ": " + err.Error() + " — the lift commit stands; " + lf.res.Disposition + " has the summaries"}
+	}
 	if err := lf.removeUntracked(); err != nil {
 		return err
 	}
@@ -1217,7 +1226,7 @@ func (lf *lifter) commitMessage() string {
 		fmt.Fprintf(&b, "- carries %d gate command(s) from %s into AGENTS.md and regression:\n", len(r.Gates.Commands), r.Gates.Source)
 	}
 	b.WriteString("- lays down the v1 skeleton (ape project init --brownfield)\n")
-	fmt.Fprintf(&b, "- writes %s for apex-plan and the person, its full lists in %s\n", r.Disposition, path.Base(r.Report))
+	fmt.Fprintf(&b, "- writes %s for apex-plan and the person (its full lists in %s, not committed)\n", r.Disposition, r.Report)
 	if len(r.ADRs) > 0 {
 		b.WriteString("\nADRs, old -> new:\n")
 		for i := range r.ADRs {

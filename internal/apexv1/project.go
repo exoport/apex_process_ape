@@ -270,7 +270,9 @@ func (p *Project) layoutFindings() []Finding {
 // liftDispositionFindings reports the lift's disposition list while it
 // awaits review (D49 Q14): the file exists, and the project's v1 epoch
 // is a lift commit. The person deletes it after the review; until then
-// the project is not done lifting.
+// the project is not done lifting. The full lists are ignored state
+// (R3), nothing to delete; an rc.3 lift's committed
+// <dev>/lift-disposition.json is not asked for either.
 func (p *Project) liftDispositionFindings(ctx context.Context) []Finding {
 	path := filepath.Join(p.Dev(), LiftDisposition)
 	if !fileExists(path) {
@@ -279,7 +281,7 @@ func (p *Project) liftDispositionFindings(ctx context.Context) []Finding {
 	if out, err := git(ctx, p.Root, "log", "-1", "--format=%h", "--grep=^"+LiftSubjectPrefix); err != nil || out == "" {
 		return nil
 	}
-	return []Finding{{File: p.Rel(path), Message: "the lift's disposition list awaits review: apex-plan fills it, a fresh read-only session reviews it, then the operator — delete it and lift-disposition.json when done"}}
+	return []Finding{{File: p.Rel(path), Message: "the lift's disposition list awaits review: apex-plan fills it, a fresh read-only session reviews it, then the operator — delete it when done"}}
 }
 
 var adrSupersedesRe = regexp.MustCompile(`(?m)^Supersedes:[ \t]*(ADR-\d{4})[ \t]*$`)

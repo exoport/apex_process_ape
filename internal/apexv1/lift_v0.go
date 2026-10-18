@@ -31,7 +31,9 @@ const (
 	// LiftDisposition is the file the lift writes for review, relative
 	// to the development folder (D47 Q4).
 	LiftDisposition = "lift-disposition.md"
-	// LiftReport holds the disposition's lists whole, beside it (L11).
+	// LiftReport holds the disposition's lists whole (L11), relative to
+	// ape's state folder: ignored, never committed (R3). An rc.3 lift
+	// committed it beside the disposition file; nothing reads that copy.
 	LiftReport    = "lift-disposition.json"
 	frameworkYAML = "_apex/framework.yaml"
 	configYAML    = "_apex/config.yaml"

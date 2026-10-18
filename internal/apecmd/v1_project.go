@@ -311,7 +311,9 @@ func newProjectCheckCmd() *cobra.Command {
                            _apex/state/.gitignore)
   lift                     development/lift-disposition.md in a project whose v1 epoch is a
                            lift commit ("apex: lift …"): the disposition list awaits review
-                           (lift.disposition-pending) until the person deletes the file
+                           (lift.disposition-pending) until the person deletes the file;
+                           its full lists, _apex/state/lift-disposition.json, are ignored
+                           state and never asked for
   config                   since the v1 epoch, a commit that changed a guarded block of
                            _apex/config.yaml — limits, checks, retries, requires, timeouts,
                            caps, regression, commit, evidence, marketplaces, plugins, tools,

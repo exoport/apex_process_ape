@@ -438,7 +438,7 @@ func main() { fmt.Println(greet("ADR-0004")) }
 		"- `main.go` — 4: identifier, string, directive, string (ADR id, not renumbered)",
 		"- 1 × not tokenized (.sql)",
 		"- `schema/fixed.sh` — excluded (--exclude) (1 id(s), 0 ADR citation(s))",
-		"`.github/ci.yml:2` `development/implementation/sprint-status.yaml` — reference",
+		"- `.github/ci.yml` — 1, first at line 2: `development/implementation/sprint-status.yaml`",
 		"product brief: apex-v0-final:development/planning/product-brief.md",
 		"newest sprint-change proposal: apex-v0-final:development/planning/sprint-change-proposal-2026-09.md",
 		"| ADR-0004 | [ADR-0003](decisions/0003-limit-names.md) | superseded by ADR-0004 |",
@@ -450,9 +450,9 @@ func main() { fmt.Println(greet("ADR-0004")) }
 	var report struct {
 		IDsLeft []LiftIDRef `json:"ids_left"`
 	}
-	require.NoError(t, json.Unmarshal([]byte(read(t, p, "development/lift-disposition.json")), &report))
+	require.NoError(t, json.Unmarshal([]byte(read(t, p, "_apex/state/lift-disposition.json")), &report))
 	require.Contains(t, report.IDsLeft, LiftIDRef{File: "main.go", Line: 17, Text: "Story1", Where: "identifier"})
-	require.Equal(t, "development/lift-disposition.json", res.Report)
+	require.Equal(t, "_apex/state/lift-disposition.json", res.Report)
 	require.NotContains(t, disp, "| ok |", "a list item under three words is not a rule")
 
 	// Deleted after the review, it is no finding any more.

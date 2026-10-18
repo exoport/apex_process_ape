@@ -91,5 +91,5 @@ func TestLift_HashedSkipsRecordsLocksFirstCapped(t *testing.T) {
 	require.NoError(t, err)
 	disp, err := os.ReadFile(filepath.Join(root, "development", LiftDisposition))
 	require.NoError(t, err)
-	require.Contains(t, string(disp), "- … and 11 more (in `lift-disposition.json`)")
+	require.Contains(t, string(disp), "- … and 21 more (in `_apex/state/lift-disposition.json`)")
 }

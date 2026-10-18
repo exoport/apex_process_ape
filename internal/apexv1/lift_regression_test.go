@@ -94,7 +94,10 @@ func TestLift_RegressionAtTheTag(t *testing.T) {
 
 // L11, from the dry runs: the disposition file reached 379 KB (radix),
 // most of it references to removed paths in evidence logs — past any
-// reader's cap. It summarises now; the JSON report beside it is whole.
+// reader's cap. It summarises now. R3, from rc.3: still 109 KB in radix
+// (78.6 KB of code and CI references, 195 in 115 files), and the JSON
+// report beside it a 5.8 MB commit in tenax. The file stays within 16 KB,
+// one line per code file; the report is ignored state, never committed.
 func TestLift_DispositionStaysReviewable(t *testing.T) {
 	root := liftFixture(t, false)
 	var log strings.Builder
@@ -108,6 +111,22 @@ func TestLift_DispositionStaysReviewable(t *testing.T) {
 	for i := range 30 {
 		files[fmt.Sprintf("tools/ci/guard%02d.sh", i)] = "#!/bin/sh\ntest -d development/governance/adrs\n"
 	}
+	// 200 references in 85 more code files, and 300 rule candidates.
+	for i := range 85 {
+		var sh strings.Builder
+		sh.WriteString("#!/bin/sh\n")
+		for j := range 1 + i%4 {
+			fmt.Fprintf(&sh, "cat development/implementation/sprint-status.yaml # %d\n", j)
+		}
+		files[fmt.Sprintf("tools/verify/check%02d.sh", i)] = sh.String()
+	}
+	claude, err := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
+	require.NoError(t, err)
+	var rules strings.Builder
+	for i := range 300 {
+		fmt.Fprintf(&rules, "- Rule %d: never write to the shared ledger outside a reviewed change\n", i)
+	}
+	files["CLAUDE.md"] = string(claude) + "\n## More rules\n\n" + rules.String()
 	for rel, content := range files {
 		p := filepath.Join(root, filepath.FromSlash(rel))
 		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
@@ -122,19 +141,34 @@ func TestLift_DispositionStaysReviewable(t *testing.T) {
 	require.GreaterOrEqual(t, len(res.DanglingRefs), 3030)
 	require.GreaterOrEqual(t, len(res.IDsLeft), 240)
 
+	require.GreaterOrEqual(t, len(res.Candidates), 300)
+
 	disp, err := os.ReadFile(filepath.Join(root, "development", LiftDisposition))
 	require.NoError(t, err)
-	require.Less(t, len(disp), 16<<10, "summaries, not lists")
+	require.LessOrEqual(t, len(disp), liftDispositionCap, "summaries, not lists")
 	d := string(disp)
 	require.Contains(t, d, "- `development/governance/evidence/ratchet.md` — 3000\n")
-	require.Contains(t, d, "- `tools/ci/guard00.sh:2` `development/governance/adrs` — reference\n", "code and CI references are listed")
-	require.Contains(t, d, "more file(s) (in `lift-disposition.json`)")
+	require.Contains(t, d, "- `tools/verify/check03.sh` — 4, first at line 2: `development/implementation/sprint-status.yaml`\n", "one line per code file: count and first reference")
+	require.NotContains(t, d, "check03.sh:", "never a line per reference")
+	require.Contains(t, d, "more file(s) (in `_apex/state/lift-disposition.json`)")
+	require.Contains(t, d, "more candidate(s), numbered on from", "the candidates are cut last, and said where they are")
 	require.Less(t, strings.Index(d, "## Code and CI that still read removed paths"), strings.Index(d, "## ADRs"), "what can break comes first")
 
+	// The report: whole, ignored, not in the lift commit.
+	require.Equal(t, "_apex/state/lift-disposition.json", res.Report)
 	var report liftReport
-	data, err := os.ReadFile(filepath.Join(root, "development", LiftReport))
+	data, err := os.ReadFile(filepath.Join(root, "_apex", "state", LiftReport))
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(data, &report))
 	require.Len(t, report.DanglingRefs, len(res.DanglingRefs))
 	require.Len(t, report.IDsLeft, len(res.IDsLeft))
+	require.Len(t, report.Candidates, len(res.Candidates))
+	require.Empty(t, run(t, root, "ls-files", "--", "_apex/state/lift-disposition.json", "development/lift-disposition.json"))
+	require.Equal(t, "_apex/state/lift-disposition.json", run(t, root, "check-ignore", "_apex/state/lift-disposition.json"))
+	require.Empty(t, run(t, root, "status", "--porcelain"), "the tree is clean after the lift")
+	p, err := Open(root)
+	require.NoError(t, err)
+	got := findingMessages(p.Check())
+	require.Contains(t, got, "development/lift-disposition.md: the lift's disposition list awaits review")
+	require.NotContains(t, got, "lift-disposition.json", "nothing to delete")
 }
