@@ -52,7 +52,12 @@ work) follows.
   file and the session is pointed at it, as for a line over 700 characters.
   Before, ape itself collapsed runs of spaces in `--args`. `make check-claude`
   gains `args_whitespace`, which checks the file route byte for byte on the
-  installed Claude Code.
+  installed Claude Code. The installed Claude Code keeps a typed run of
+  spaces; the collapse was ape's own.
+- **An `ape task` whose text goes to the args file keeps its commit
+  convention** (Q45): the line typed in its place no longer carries a
+  `--no-commit` the caller did not ask for. Since rc.3, every `ape task` with
+  arguments too long to type had been told not to commit.
 
 ### Wording
 
