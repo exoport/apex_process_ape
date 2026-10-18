@@ -166,13 +166,27 @@ const liftDispositionCeiling = 48 << 10
 // dispLimits bound one rendering of the disposition file: files is how
 // many files a summary names (the rest are counted; the report has them
 // all), adrs how many ADR rows are listed, rules how many binding-rule
-// candidates (-1: all).
-type dispLimits struct{ files, adrs, rules int }
+// candidates (-1: all); readerCounts puts the v0 state readers as counts,
+// not one line per file.
+type dispLimits struct {
+	files, adrs, rules int
+	readerCounts       bool
+}
 
 // dispSteps are tried in order until a rendering fits the cap: the
-// summaries down to counts, then the ADR table. The candidates are cut
-// only past the ceiling (disposition).
-var dispSteps = []dispLimits{{40, -1, -1}, {20, -1, -1}, {10, -1, -1}, {5, -1, -1}, {3, -1, -1}, {0, -1, -1}, {0, 60, -1}, {0, 30, -1}, {0, 10, -1}}
+// summaries down to counts, then the ADR table. The candidates and the v0
+// state readers are cut only past the ceiling (disposition).
+var dispSteps = []dispLimits{
+	{files: 40, adrs: -1, rules: -1},
+	{files: 20, adrs: -1, rules: -1},
+	{files: 10, adrs: -1, rules: -1},
+	{files: 5, adrs: -1, rules: -1},
+	{files: 3, adrs: -1, rules: -1},
+	{files: 0, adrs: -1, rules: -1},
+	{files: 0, adrs: 60, rules: -1},
+	{files: 0, adrs: 30, rules: -1},
+	{files: 0, adrs: 10, rules: -1},
+}
 
 // liftReport is lift-disposition.json: every list the lift made, whole.
 type liftReport struct {
@@ -185,6 +199,7 @@ type liftReport struct {
 	Skipped             []LiftSkip       `json:"skipped,omitempty"`
 	GoUnformatted       []string         `json:"go_not_formatted,omitempty"`
 	Hashed              []LiftHashed     `json:"edited_but_hashed,omitempty"`
+	V0StateReaders      []LiftV0Reader   `json:"v0_state_readers,omitempty"`
 	UnresolvedCitations []LiftIDRef      `json:"unresolved_adr_citations,omitempty"`
 	IDsLeft             []LiftIDRef      `json:"ids_left,omitempty"`
 	DanglingRefs        []LiftIDRef      `json:"references_to_removed_paths,omitempty"`
@@ -197,7 +212,7 @@ func (lf *lifter) report() string {
 	r := lf.res
 	data, err := json.MarshalIndent(liftReport{
 		Version: r.Version, Tag: LiftTag, TagSHA: r.TagSHA, Deleted: r.Deleted, ADRs: r.ADRs, Changed: r.Changed,
-		Skipped: r.Skipped, GoUnformatted: r.GoUnformatted, Hashed: lf.hashedAll, UnresolvedCitations: r.UnresolvedCitations,
+		Skipped: r.Skipped, GoUnformatted: r.GoUnformatted, Hashed: lf.hashedAll, V0StateReaders: r.V0StateReaders, UnresolvedCitations: r.UnresolvedCitations,
 		IDsLeft: r.IDsLeft, DanglingRefs: r.DanglingRefs, Candidates: r.Candidates, Gates: r.Gates, Readings: r.Readings,
 	}, "", "  ")
 	if err != nil {
@@ -207,8 +222,9 @@ func (lf *lifter) report() string {
 }
 
 // disposition renders the disposition file: within liftDispositionCap
-// when any step of dispSteps fits; else, every candidate kept, within
-// liftDispositionCeiling; else with as many candidates as fit it.
+// when any step of dispSteps fits; else, every candidate and v0 state
+// reader kept, within liftDispositionCeiling; else with the readers as
+// counts; else with as many candidates as fit it.
 func (lf *lifter) disposition() string {
 	var out string
 	for _, l := range dispSteps {
@@ -220,6 +236,10 @@ func (lf *lifter) disposition() string {
 		return out
 	}
 	last := dispSteps[len(dispSteps)-1]
+	last.readerCounts = true
+	if out = lf.dispositionWith(last); len(out) <= liftDispositionCeiling {
+		return out
+	}
 	n := sort.Search(len(lf.res.Candidates), func(n int) bool {
 		last.rules = n + 1
 		return len(lf.dispositionWith(last)) > liftDispositionCeiling
@@ -275,23 +295,23 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 	}
 
 	// What can break the build or a guard comes before what only reads.
+	writeV0Readers(&b, r.V0StateReaders, lim.readerCounts, report)
+	readers := map[string]bool{}
+	for _, v := range r.V0StateReaders {
+		readers[v.File] = true
+	}
 	code, records := lf.splitRefs(r.DanglingRefs)
+	code = slices.DeleteFunc(code, func(x LiftIDRef) bool { return readers[x.File] })
 	p("## Code and CI that still read removed paths\n\n")
 	if len(code) == 0 {
 		p("None.\n\n")
 	} else {
-		p("Kept code, scripts and CI files that name a path the lift removed — guards over the v0 corpus, tests reading the tracker: retire or repoint them (%d reference(s) in %d file(s); per file, the count and the first):\n\n", len(code), countFiles(code))
+		p("Kept code, scripts and CI files that name a path the lift removed in a comment, or in a file that is not code (.json, .gitignore, …): repoint or drop them (%d reference(s) in %d file(s); per file, the count and the first; the readers above are not repeated):\n\n", len(code), countFiles(code))
 		writeFirstRefs(&b, code, lim.files, report)
 	}
 	if len(r.Hashed) > 0 {
 		p("Edited files a test, CI script or lock file seems to pin the bytes of (re-run that guard; if it is red, the file belonged under --exclude):\n\n")
-		shown := min(len(lf.hashedAll), hashedCap, max(lim.files, 1))
-		for _, h := range lf.hashedAll[:shown] {
-			p("- `%s` — %s\n", h.File, "`"+strings.Join(h.By, "`, `")+"`")
-		}
-		if more := len(lf.hashedAll) - shown; more > 0 {
-			p("- … and %d more (in `%s`)\n", more, report)
-		}
+		lf.writeHashed(&b, lim.files, report)
 		p("\n")
 	}
 	if len(r.GoUnformatted) > 0 {
@@ -525,4 +545,111 @@ func writeList(b *strings.Builder, items []string, maxItems int, report string) 
 		fmt.Fprintf(b, "- `%s`\n", it)
 	}
 	b.WriteString("\n")
+}
+
+// writeHashed lists the hashed edits: those a lock file or a hasher names
+// one line per file, at most hashedCap and maxFiles; then those only a
+// folder ties to a hasher, one line per hasher and folder (R22: mdpdf's
+// 57 files beside one guard that hashes its fixtures, not its sources,
+// were 50 lines of the file).
+func (lf *lifter) writeHashed(b *strings.Builder, maxFiles int, report string) {
+	var named []LiftHashed
+	type group struct {
+		by, dir string
+		n       int
+	}
+	var groups []*group
+	at := map[[2]string]*group{}
+	for _, h := range lf.hashedAll {
+		if lf.hashedRank[h.File] != hashedByFolder {
+			named = append(named, h)
+			continue
+		}
+		dir := path.Dir(h.File)
+		for _, by := range h.By {
+			k := [2]string{by, dir}
+			if at[k] == nil {
+				at[k] = &group{by: by, dir: dir}
+				groups = append(groups, at[k])
+			}
+			at[k].n++
+		}
+	}
+	shown := min(len(named), hashedCap, max(maxFiles, 1))
+	for _, h := range named[:shown] {
+		fmt.Fprintf(b, "- `%s` — %s\n", h.File, "`"+strings.Join(h.By, "`, `")+"`")
+	}
+	if more := len(named) - shown; more > 0 {
+		fmt.Fprintf(b, "- … and %d more (in `%s`)\n", more, report)
+	}
+	for _, g := range groups {
+		if path.Dir(g.by) == g.dir {
+			fmt.Fprintf(b, "- %s in `%s` share a folder with `%s` (folder match only)\n", nFiles(g.n), g.dir, path.Base(g.by))
+		} else {
+			fmt.Fprintf(b, "- %s in `%s` sit in a folder `%s` names near a hash (folder match only)\n", nFiles(g.n), g.dir, g.by)
+		}
+	}
+}
+
+// nFiles is "1 file" or "n files".
+func nFiles(n int) string {
+	if n == 1 {
+		return "1 file"
+	}
+	return strconv.Itoa(n) + " files"
+}
+
+// v0ReaderReadsShown is how many paths a reader's line names; the report
+// has every one.
+const v0ReaderReadsShown = 10
+
+// writeV0Readers is the disposition's section on code and tests that read
+// deleted v0 state (D141): one line per file with what it reads, never cut
+// to fit the cap; as counts, saying so, past the ceiling.
+func writeV0Readers(b *strings.Builder, readers []LiftV0Reader, counts bool, report string) {
+	p := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
+	p("## Code and tests that read deleted v0 state\n\n")
+	if len(readers) == 0 {
+		p("None.\n\n")
+		return
+	}
+	p("Kept code, tests, scripts and CI files that name v0 state the lift deletes outside their comments — the tracker, ADR folders, deferred records — so they fail once it is gone: re-point each to its v1 state, or retire it (%s; it reads it at %s):\n\n",
+		nFiles(len(readers)), LiftTag)
+	if !counts {
+		for _, v := range readers {
+			shown := v.Reads[:min(len(v.Reads), v0ReaderReadsShown)]
+			line := "`" + strings.Join(shown, "`, `") + "`"
+			if more := len(v.Reads) - len(shown); more > 0 {
+				line += fmt.Sprintf(" and %d more (in `%s`)", more, report)
+			}
+			p("- `%s` reads %s\n", v.File, line)
+		}
+		p("\n")
+		return
+	}
+	n := map[string]int{}
+	var paths []string
+	for _, v := range readers {
+		for _, r := range v.Reads {
+			if n[r] == 0 {
+				paths = append(paths, r)
+			}
+			n[r]++
+		}
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		if a, b := n[paths[i]], n[paths[j]]; a != b {
+			return a > b
+		}
+		return paths[i] < paths[j]
+	})
+	p("Counted, not listed, past this file's %d KB ceiling: every file and what it reads is in `%s` (v0_state_readers), in the checkout that lifted. By what they read:\n\n", liftDispositionCeiling>>10, report)
+	for i, r := range paths {
+		if i == v0ReaderReadsShown {
+			p("- … and %d more path(s)\n", len(paths)-i)
+			break
+		}
+		p("- `%s` — %s\n", r, nFiles(n[r]))
+	}
+	p("\n")
 }

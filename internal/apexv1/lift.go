@@ -131,12 +131,17 @@ type LiftResult struct {
 	// tied to one by their folder (R6). A dry run lists every one; a real
 	// lift at most hashedCap (the report has all). HashedTotal counts
 	// them (R1).
-	Hashed      []LiftHashed    `json:"edited_but_hashed,omitempty"`
-	HashedTotal int             `json:"edited_but_hashed_total,omitempty"`
-	Gates       LiftGates       `json:"gates"`
-	Candidates  []LiftCandidate `json:"rule_candidates"`
-	Readings    []string        `json:"readings,omitempty"`
-	Disposition string          `json:"disposition"`
+	Hashed      []LiftHashed `json:"edited_but_hashed,omitempty"`
+	HashedTotal int          `json:"edited_but_hashed_total,omitempty"`
+	// V0StateReaders are kept code, test, script, Makefile and CI files
+	// that name v0 state the lift deletes outside their comments, with
+	// what each reads: they go red once it is gone, and are re-pointed to
+	// v1 state or retired (D141).
+	V0StateReaders []LiftV0Reader  `json:"v0_state_readers,omitempty"`
+	Gates          LiftGates       `json:"gates"`
+	Candidates     []LiftCandidate `json:"rule_candidates"`
+	Readings       []string        `json:"readings,omitempty"`
+	Disposition    string          `json:"disposition"`
 	// Report is the disposition's full lists, as JSON (L11): written to
 	// ape's ignored state folder after the commit, never committed (R3).
 	Report        string       `json:"report"`
@@ -227,6 +232,10 @@ type lifter struct {
 	// hashedAll is every hashed edit; res.Hashed the first hashedCap, in
 	// a real lift.
 	hashedAll []LiftHashed
+	// hashedRank is each hashed edit's tier (hashedByLock, …): the
+	// disposition file folds the folder tier into one line per hasher
+	// (R22).
+	hashedRank map[string]int
 	// reportJSON is the report, written to res.Report once the commit
 	// stands.
 	reportJSON string
@@ -749,6 +758,7 @@ func (lf *lifter) plan() error {
 	lf.res.Candidates = lf.candidates()
 	lf.res.Readings = lf.readings()
 	lf.res.DanglingRefs = lf.dangling()
+	lf.res.V0StateReaders = lf.v0Readers()
 	lf.hashedAll = lf.hashed()
 	lf.res.Hashed, lf.res.HashedTotal = lf.hashedAll, len(lf.hashedAll)
 	if !lf.opt.DryRun {

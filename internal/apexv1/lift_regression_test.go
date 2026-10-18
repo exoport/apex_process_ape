@@ -237,7 +237,7 @@ func TestLift_DispositionStaysReviewable(t *testing.T) {
 		var sh strings.Builder
 		sh.WriteString("#!/bin/sh\n")
 		for j := range 1 + i%4 {
-			fmt.Fprintf(&sh, "cat development/implementation/sprint-status.yaml # %d\n", j)
+			fmt.Fprintf(&sh, "# was: development/implementation/sprint-status.yaml (%d)\n", j)
 		}
 		files[fmt.Sprintf("tools/verify/check%02d.sh", i)] = sh.String()
 	}

@@ -189,6 +189,7 @@ func (lf *lifter) hashed() []LiftHashed {
 			rank[f] = best
 		}
 	}
+	lf.hashedRank = rank
 	sort.Slice(out, func(i, j int) bool {
 		if a, b := rank[out[i].File], rank[out[j].File]; a != b {
 			return a < b
