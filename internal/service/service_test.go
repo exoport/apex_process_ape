@@ -38,6 +38,12 @@ func startRig(t *testing.T, apeBin string) *testRig {
 // the D5 script gates) before it is validated and registered.
 func startRigWith(t *testing.T, apeBin string, mutate func(*Config)) *testRig {
 	t.Helper()
+	return startRigGate(t, apeBin, mutate, nil)
+}
+
+// startRigGate is startRigWith with the daemon's depth-1 SessionGate.
+func startRigGate(t *testing.T, apeBin string, mutate func(*Config), gate SessionGate) *testRig {
+	t.Helper()
 	url := natstest.RunServer(t)
 
 	root := gitRepo(t, t.TempDir())
@@ -55,7 +61,7 @@ func startRigWith(t *testing.T, apeBin string, mutate func(*Config)) *testRig {
 	}
 	t.Cleanup(func() { _ = daemonConn.Drain() })
 
-	d, err := NewDaemon(context.Background(), DaemonConfig{Name: "ape", Config: cfg, Conn: daemonConn, ApeBin: apeBin, ApeVersion: "0.0.0", NatsURL: url})
+	d, err := NewDaemon(context.Background(), DaemonConfig{Name: "ape", Config: cfg, Conn: daemonConn, ApeBin: apeBin, ApeVersion: "0.0.0", NatsURL: url, Gate: gate})
 	if err != nil {
 		t.Fatalf("NewDaemon: %v", err)
 	}
@@ -77,8 +83,18 @@ func startRigWith(t *testing.T, apeBin string, mutate func(*Config)) *testRig {
 	return &testRig{cli: cli, d: d, cfg: cfg, base: "ape.svc.ape." + eventing.ProjectSlug(root)}
 }
 
+// terminal is the caller stamp of a request from outside every ape session.
+var terminal = &CallerStamp{Depth: 0}
+
+// req sends payload to endpoint. A *.run request with no caller stamp is
+// sent as a terminal's (depth 0), as `ape service submit` would stamp it
+// there; the depth tests set their own.
 func (r *testRig) req(t *testing.T, endpoint string, payload any) *nats.Msg {
 	t.Helper()
+	if rr, ok := payload.(RunRequest); ok && rr.Caller == nil {
+		rr.Caller = terminal
+		payload = rr
+	}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -368,7 +384,7 @@ func TestGracefulDrainPrimitives(t *testing.T) {
 	}
 	// New requests are no longer served (no responder). Poll briefly in case
 	// the server-side unsubscribe settles just after StopAccepting returns.
-	payload := mustJSON(t, RunRequest{ProjectRoot: root, Skill: "s"})
+	payload := mustJSON(t, RunRequest{ProjectRoot: root, Skill: "s", Caller: terminal})
 	rejected := false
 	for range 40 {
 		if _, err := r.cli.Request(r.base+".task.run", payload, 200*time.Millisecond); err != nil {

@@ -50,9 +50,12 @@ Each endpoint's subject is the group plus the endpoint token:
 ## Wire version & compatibility
 
 Every request and reply body is versioned JSON. The current wire version is
-**`1`**.
+**`2`** (ape 1.0.0-rc.4, D83): every `*.run` request must carry the caller
+stamp (`caller`, below), and one without it is refused `session.depth`. A
+version-1 client's `*.run` request is therefore refused, never run. Nothing
+else changed.
 
-- **Replies always stamp `"v":1`.**
+- **Replies always stamp `"v":2`.**
 - **Requests may omit `"v"`** — it is treated as the current version. (The
   daemon does not reject a mismatched `"v"`; the field is informational.)
 - **The contract is additive-only.** New request/reply fields may be added
@@ -228,6 +231,30 @@ others `--quiet`, and all four `--cwd <project_root>`.
 | `nonexclusive`    | bool   | no       | —                    | Admission control. Default `false` → exclusive. See [Admission](#admission--exclusivity). |
 | `exclusivity_key` | string | no       | —                    | Admission key. Default `""`.                                          |
 | `submitted_by`    | string | no       | —                    | Advisory caller attribution, echoed into `job-accepted`/`job-end` events and `job.status`. **Not** authoritative — see [security boundary](#allowlist--script-gates-the-security-boundary). |
+| `caller`          | object | **yes**  | —                    | The caller's place in the nesting rule (D62, D83): `{depth, run_id?, parent_run?, pid?}`. `ape service submit` stamps it from ape's own record of the session it runs in. See [Caller stamp](#caller-stamp-the-nesting-rule). |
+
+### Caller stamp (the nesting rule)
+
+A task or prompt job is a model session, and the daemon (depth 0) cannot see
+the session a request comes from, so the request says it:
+
+```json
+"caller": { "depth": 1, "run_id": "20261017-175013-a188462", "parent_run": "", "pid": 4242 }
+```
+
+| `caller.depth` | The daemon |
+| --- | --- |
+| absent (no `caller`) | refuses `session.depth` (fail closed) |
+| `0` | runs the job as before |
+| `1` | runs a `task.run` only when `run_id` is a running `apex-orchestrator` manifest in `project_root`, the skill is on that project's allow-list (`session.not-allowed` otherwise; a prompt job always is), and its one child slot is free (`session.child-running`). The job's `ape task` runs under that orchestrator's session marker, as its child: depth 2, `parent_run`, listed in its `children`, stopped when it ends. A `script.run` is refused `session.depth` |
+| `2` or more | refuses `session.depth` and spawns nothing |
+
+A refusal is a micro error whose code is the nesting code and whose body is
+`{"v":2,"code":…,"action":…,"message":…}` (action `stop`, or `retry` for
+`session.child-running`). `job.status` and the `job-accepted`/`job-rejected`
+events carry the request's `caller`. The stamp is the client's word: a raw
+publish can claim `depth: 0`, so the NATS credentials and subject permissions
+remain the boundary.
 
 ### `pipeline.run`
 
@@ -316,6 +343,7 @@ and listed by `job.list`.
 | `exclusivity_key` | string            | The admission key the job holds (default `""`).                                                                |
 | `exclusive`       | bool              | Whether the job holds the key exclusively (`true` unless the request set `nonexclusive:true`).                 |
 | `submitted_by`    | string            | Advisory attribution echoed from the request. Omitted when empty.                                              |
+| `caller`          | object            | The request's [caller stamp](#caller-stamp-the-nesting-rule).                                                   |
 | `log_path`        | string            | The child's combined stdout/stderr log, at `<project_root>/_output/ape/service/<job_id>.log`. Omitted until the child has started. |
 | `exit_code`       | int               | The child's exit code. Present only once the job is terminal; omitted while `running`. `-1` when the child was signalled or failed to run. |
 
@@ -331,6 +359,9 @@ external contract — never renamed or repurposed.
 | `BUSY_EXCLUSIVE`      | the four `*.run`                     | The `exclusivity_key` is held by an exclusive job.                         |
 | `BUSY_KEY`            | the four `*.run`                     | An exclusive slot was requested while the key is held by nonexclusive jobs.|
 | `NOT_FOUND`           | `job.status`, `job.stop`             | No job with the requested `job_id`.                                        |
+| `session.depth`       | the four `*.run`                     | No caller stamp, a caller at depth 2+, a depth-1 caller that is not a running apex-orchestrator run, or a script from depth 1 (action stop). |
+| `session.not-allowed` | `task.run`, `prompt.run`             | A depth-1 orchestrator's job for a skill off its allow-list, or a prompt (action stop). |
+| `session.child-running` | `task.run`                         | The orchestrator already has a child session running (action retry).       |
 
 `job.list`, `status`, and `health` never return an error code.
 

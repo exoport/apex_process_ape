@@ -54,10 +54,18 @@ import (
 // eval's bash stand-in named `claude` gets the same answer a real session
 // does.
 //
-// The residual, documented rather than chased: a model that scrubs the
+// An `ape service` job (D83) is decided by the daemon from the caller's
+// stamp, which `ape service submit` takes from currentSession here; a
+// depth-1 orchestrator's job runs under the orchestrator's marker, so its
+// `ape task` comes through gateSession as that orchestrator's child
+// (service_submit.go).
+//
+// The residuals, documented rather than chased: a model that scrubs the
 // environment AND double-forks (setsid, nohup into a daemon) leaves no
 // ancestor ape knows. So does Windows when an ancestor has exited and its
-// pid been reused. Both need a deliberate escape, not a slip.
+// pid been reused. And a raw NATS publish to a service daemon can claim
+// depth 0 in its stamp: the NATS credentials and subject permissions remain
+// that boundary. Each needs a deliberate escape, not a slip.
 //
 // Deterministic commands (status, change new|check|start|verify|archive,
 // milestone gate|close, next add, …) never call this. There is no escape

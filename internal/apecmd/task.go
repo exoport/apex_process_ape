@@ -214,7 +214,8 @@ when a change becomes blocked — with APE_EVENT=stop|block, APE_CHANGE
 Sessions and the nesting rule (D61, D62): every skill of the v1 loop runs
 as its own ape task session, and depth counts only the model sessions ape
 launched (ape task, ape prompt, ape chat, ape change review --run, and the
-ape service task/prompt jobs, which run those commands):
+ape service task/prompt jobs, which run those commands, decided from the
+caller's stamp that ape service submit adds — see ape service --help):
   depth 0  a terminal, a Claude Code session ape did not launch, a shell,
            ape script, the service daemon: may start any session
 {{depth1}}

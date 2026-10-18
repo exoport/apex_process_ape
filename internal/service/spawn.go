@@ -247,15 +247,16 @@ func NewSpawner(apeBin, natsURL, natsCreds, eventsPrefix string, cfg *Config) (*
 }
 
 // Spawn assembles the argv, opens the per-job log, and starts the child in
-// its own process group with cwd = req.ProjectRoot. It launches a goroutine
-// that waits for exit and calls onExit(exitCode) exactly once (closing the
-// log first). It returns the child's pid and the log path. A build/start
+// its own process group with cwd = req.ProjectRoot, its environment the
+// daemon's plus env (a depth-1 caller's session marker, depth.go). It
+// launches a goroutine that waits for exit and calls onExit(exitCode)
+// exactly once (closing the log first). It returns the child's pid and the log path. A build/start
 // failure returns an error and does not call onExit.
 //
 // The child is deliberately NOT bound to a context: it must outlive the
 // request handler, and the daemon controls its lifetime explicitly via
 // terminateGroup (job.stop / drain).
-func (s *Spawner) Spawn(kind Kind, jobID string, req RunRequest, onExit func(exitCode int)) (pid int, logPath string, err error) {
+func (s *Spawner) Spawn(kind Kind, jobID string, req RunRequest, env []string, onExit func(exitCode int)) (pid int, logPath string, err error) {
 	args, err := BuildArgs(kind, req, s.cfg)
 	if err != nil {
 		return 0, "", err
@@ -281,7 +282,7 @@ func (s *Spawner) Spawn(kind Kind, jobID string, req RunRequest, onExit func(exi
 	if kind == KindScript && strings.TrimSpace(req.ScriptSource) != "" && strings.TrimSpace(req.ScriptPath) == "" {
 		cmd.Stdin = strings.NewReader(req.ScriptSource)
 	}
-	cmd.Env = s.childEnv(jobID)
+	cmd.Env = append(s.childEnv(jobID), env...)
 	configureProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
@@ -303,7 +304,7 @@ func (s *Spawner) Spawn(kind Kind, jobID string, req RunRequest, onExit func(exi
 // plus APE_JOB_ID (so child event subjects carry the job id) and the
 // resolved NATS URL/creds (so the child publishes even when the daemon was
 // configured via flags). Later entries win, so these override any inherited
-// values.
+// values; a depth-1 caller's marker goes on top of them, in Spawn.
 func (s *Spawner) childEnv(jobID string) []string {
 	env := append(os.Environ(), "APE_JOB_ID="+jobID)
 	if s.natsURL != "" {

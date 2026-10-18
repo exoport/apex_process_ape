@@ -20,6 +20,8 @@ The environment alone is not trusted: a model can run `env -u APE_SESSION ape ta
 
 What remains open, and is documented rather than chased: a model that scrubs its environment and also double-forks into a daemon leaves no ancestor ape knows. On Windows an ancestor that exited may have had its pid reused, so the walk there is best effort.
 
+An `ape service` daemon is depth 0 and cannot see where a request comes from, so from rc.4 (D83) every job carries the caller's stamp, which `ape service submit` takes from the same record: a request without one, or from depth 2, is refused with `session.depth` and nothing runs, and a depth-1 caller's job runs only for a running `apex-orchestrator` run, under the same allow-list and one-child lock, as that orchestrator's child. The stamp is the client's word: a raw NATS publish can claim depth 0, so the NATS credentials remain that boundary.
+
 There is no variable that disables the rule. A switch a session can flip is a switch a session will flip.
 
 ## Children die with their parent, and record it
