@@ -35,7 +35,7 @@ func TestProjectCheck_UnknownModels(t *testing.T) {
 			{CodeModelsUnknownField, "models.apex-apply.efort is not a field of a models entry, so it does nothing — an entry is a model name or {model, effort}: fix or drop efort"},
 			{CodeModelsUnknownField, "models.apex-apply.budget is not a field"},
 		}},
-		"both on one entry": {config: "models:\n  nope: {modle: opus}\n", want: []want{{CodeModelsUnknownSkill, "models.nope names no skill"}, {CodeModelsUnknownField, "models.nope.modle is not a field"}}},
+		"both on one entry": {config: "models:\n  nope: {modl: opus}\n", want: []want{{CodeModelsUnknownSkill, "models.nope names no skill"}, {CodeModelsUnknownField, "models.nope.modl is not a field"}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			files := baseFiles()

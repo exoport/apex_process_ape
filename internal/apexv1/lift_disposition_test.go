@@ -15,7 +15,7 @@ import (
 // candidates of about width bytes each, beside 60 code files still
 // reading a removed path, and returns the disposition file and how many
 // candidates the lift found (the fixture's own, and these).
-func liftWithCandidates(t *testing.T, n, width int) (string, int) {
+func liftWithCandidates(t *testing.T, n, width int) (disposition string, candidates int) {
 	t.Helper()
 	root := liftFixture(t, false)
 	files := map[string]string{}
@@ -86,7 +86,7 @@ func TestLift_DispositionCutsCandidatesAtTheCeiling(t *testing.T) {
 func TestLiftDispositionCeiling_IsTheCapsCeiling(t *testing.T) {
 	for _, c := range capDefs {
 		if c.key == CapAgentsMD {
-			require.Equal(t, c.ceiling, liftDispositionCeiling)
+			require.Equal(t, liftDispositionCeiling, c.ceiling)
 		}
 	}
 }

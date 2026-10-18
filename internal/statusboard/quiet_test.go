@@ -104,7 +104,9 @@ func TestUpsert_SetsQuietOnceOnAnOlderTab(t *testing.T) {
 	old.Archived = 1
 	oldState, err := normalized(buildState(old, time.Now()))
 	require.NoError(t, err)
-	delete(oldState["data"].(map[string]any), dataQuietSet)
+	data, ok := oldState["data"].(map[string]any)
+	require.True(t, ok, "the state has no data map")
+	delete(data, dataQuietSet)
 	doc := map[string]any{"tabs": []any{map[string]any{"id": "t1", "key": TabKey, "name": TabName, "type": "ui", "state": oldState}}}
 
 	changed, err := upsert(doc, sampleReport(), time.Now())

@@ -250,6 +250,37 @@ func liftCode(err error) string {
 	return ""
 }
 
+// requireLiftedADRs checks TestLift_FullRun's ADRs: renumbered in order,
+// superseded and proposed included, each converted to the v1 shape.
+func requireLiftedADRs(t *testing.T, p *Project, root string, res *LiftResult) {
+	t.Helper()
+	olds := make([]string, 0, len(res.ADRs))
+	news := make([]string, 0, len(res.ADRs))
+	for i := range res.ADRs {
+		a := &res.ADRs[i]
+		olds = append(olds, a.Old)
+		news = append(news, a.New+" "+a.Status)
+	}
+	require.Equal(t, []string{"ADR-0001", "ADR-0002", "ADR-0004", "ADR-0006", "ADR-0007"}, olds)
+	require.Equal(t, []string{"ADR-0001 accepted", "ADR-0002 accepted", "ADR-0003 superseded by ADR-0004", "ADR-0004 accepted", "ADR-0005 proposed"}, news)
+	d2 := read(t, p, "development/decisions/0003-limit-names.md")
+	require.Equal(t, "# ADR-0003: Limit names\nStatus: superseded by ADR-0004\nDate: "+gitFirstDate(ctx(), root, "development/governance/adrs/adr-0004_limit-names.md")+"\n"+
+		"Lifted from: ADR-0004, development/governance/adrs/adr-0004_limit-names.md at apex-v0-final\n\n"+
+		"## Context\nNames can be long.\n\n## Decision\nCap at 32.\n\n"+
+		"## Consequences\n_Not recorded in the v0 ADR; the section was added at the lift so the record has the v1 shape._\n\nEnforced by: review\n", d2)
+	d4 := read(t, p, "development/decisions/0004-limit-64.md")
+	require.Contains(t, d4, "# ADR-0004: Limit names to 64\nStatus: accepted\nDate: 2026-09-01\nSupersedes: ADR-0003\n")
+	require.Contains(t, d4, "32 was too short; see ADR-0003.")
+	require.Contains(t, d4, "Enforced by: go test ./...")
+	require.NotContains(t, d4, "Enforced by: review")
+	for i := range res.ADRs {
+		if a := &res.ADRs[i]; a.Old == "ADR-0004" {
+			require.Contains(t, strings.Join(a.Gaps, "\n"), "renamed `## Context`")
+			require.Contains(t, strings.Join(a.Gaps, "\n"), "no `## Consequences`")
+		}
+	}
+}
+
 func TestLift_FullRun(t *testing.T) {
 	root := liftFixture(t, true)
 	tagSHA := run(t, root, "rev-parse", "HEAD")
@@ -292,30 +323,7 @@ func TestLift_FullRun(t *testing.T) {
 	require.Contains(t, res.KeptApex, "_apex/custom-notes.md")
 
 	// ADRs: renumbered in order, superseded and proposed included.
-	olds := make([]string, 0, len(res.ADRs))
-	news := make([]string, 0, len(res.ADRs))
-	for _, a := range res.ADRs {
-		olds = append(olds, a.Old)
-		news = append(news, a.New+" "+a.Status)
-	}
-	require.Equal(t, []string{"ADR-0001", "ADR-0002", "ADR-0004", "ADR-0006", "ADR-0007"}, olds)
-	require.Equal(t, []string{"ADR-0001 accepted", "ADR-0002 accepted", "ADR-0003 superseded by ADR-0004", "ADR-0004 accepted", "ADR-0005 proposed"}, news)
-	d2 := read(t, p, "development/decisions/0003-limit-names.md")
-	require.Equal(t, "# ADR-0003: Limit names\nStatus: superseded by ADR-0004\nDate: "+gitFirstDate(ctx(), root, "development/governance/adrs/adr-0004_limit-names.md")+"\n"+
-		"Lifted from: ADR-0004, development/governance/adrs/adr-0004_limit-names.md at apex-v0-final\n\n"+
-		"## Context\nNames can be long.\n\n## Decision\nCap at 32.\n\n"+
-		"## Consequences\n_Not recorded in the v0 ADR; the section was added at the lift so the record has the v1 shape._\n\nEnforced by: review\n", d2)
-	d4 := read(t, p, "development/decisions/0004-limit-64.md")
-	require.Contains(t, d4, "# ADR-0004: Limit names to 64\nStatus: accepted\nDate: 2026-09-01\nSupersedes: ADR-0003\n")
-	require.Contains(t, d4, "32 was too short; see ADR-0003.")
-	require.Contains(t, d4, "Enforced by: go test ./...")
-	require.NotContains(t, d4, "Enforced by: review")
-	for _, a := range res.ADRs {
-		if a.Old == "ADR-0004" {
-			require.Contains(t, strings.Join(a.Gaps, "\n"), "renamed `## Context`")
-			require.Contains(t, strings.Join(a.Gaps, "\n"), "no `## Consequences`")
-		}
-	}
+	requireLiftedADRs(t, p, root, res)
 	// Every converted ADR passes the v1 shape and life checks; the
 	// disposition list is pending until the person deletes it (D49 Q14).
 	got := findingMessages(p.Check())

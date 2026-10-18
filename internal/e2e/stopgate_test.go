@@ -179,6 +179,7 @@ func TestPrompt_ProjectStopHookBlockKeepsTheSessionAlive(t *testing.T) {
 	require.NoError(t, err, "the project hook never blocked — the fixture tests nothing")
 	require.Equal(t, "turn 1 blocked\n", string(turns))
 
+	//nolint:tagliatelle // ape's snake_case --json contract
 	var res struct {
 		PromptID string `json:"prompt_id"`
 		Status   string `json:"status"`
@@ -187,6 +188,7 @@ func TestPrompt_ProjectStopHookBlockKeepsTheSessionAlive(t *testing.T) {
 	require.Equal(t, "completed", res.Status)
 	data, err := os.ReadFile(filepath.Join(project, "_apex", "state", "runs", "prompts", res.PromptID, "prompt.yaml"))
 	require.NoError(t, err)
+	//nolint:tagliatelle // prompt.yaml's snake_case record contract
 	var rec struct {
 		StopGate *struct {
 			Deferrals int `yaml:"deferrals"`
@@ -209,10 +211,10 @@ func TestPrompt_ProjectStopHookBlockKeepsTheSessionAlive(t *testing.T) {
 // change, add-wave, whose check (./wave.sh) is red: the stop hook blocks
 // every Stop there until wave.sh exists. It returns the project and the
 // environment to run ape and git in.
-func redChangeProject(t *testing.T, ape string) (string, []string) {
+func redChangeProject(t *testing.T, ape string) (project string, gitEnv []string) {
 	t.Helper()
-	project := t.TempDir()
-	gitEnv := append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
+	project = t.TempDir()
+	gitEnv = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
 		"GIT_CONFIG_GLOBAL=/dev/null", "APE_SESSION=", "CLAUDECODE=")
 	sh := func(name string, args ...string) {
 		c := exec.Command(name, args...)

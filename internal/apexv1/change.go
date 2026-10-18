@@ -200,21 +200,9 @@ func (c *Change) parseDelta(body []mdLine) {
 		var bodyLines []mdLine
 		for i := 0; i < len(curLines); i++ {
 			l := curLines[i]
-			if d.Op == OpAdded && !l.InCode && d.PurposeLine == 0 {
-				if t := strings.TrimSpace(l.Text); strings.HasPrefix(t, "Purpose:") {
-					// The whole Purpose block (Q44), so its second line
-					// does not land under the requirement heading; the
-					// blank lines ending it do not open the requirement.
-					var n int
-					d.Purpose, n = purposeBlock(curLines, i)
-					d.PurposeLine = l.N
-					i += n
-					for len(bodyLines) == 0 && i < len(curLines) && strings.TrimSpace(curLines[i].Text) == "" {
-						i++
-					}
-					i--
-					continue
-				}
+			if last, ok := takePurpose(d, curLines, i, len(bodyLines) == 0); ok {
+				i = last
+				continue
 			}
 			if d.Op == OpRemoved {
 				if t := strings.TrimSpace(l.Text); !l.InCode && strings.HasPrefix(t, "Reason:") {
@@ -383,6 +371,27 @@ func (c *Change) HumanTasks() []string {
 type reqKey struct{ Capability, Name string }
 
 func (d Delta) key() reqKey { return reqKey{d.Capability, d.Name} }
+
+// takePurpose reads ADDED delta d's Purpose block when lines[i] opens
+// its first one: the whole block (Q44), so its second line does not land
+// under the requirement heading, and — when no body line precedes it
+// (bodyEmpty) — the blank lines ending it, which do not open the
+// requirement. It returns the index of the last line it took, and false
+// when lines[i] opens no Purpose block.
+func takePurpose(d *Delta, lines []mdLine, i int, bodyEmpty bool) (last int, ok bool) {
+	l := lines[i]
+	if d.Op != OpAdded || l.InCode || d.PurposeLine != 0 || !strings.HasPrefix(strings.TrimSpace(l.Text), "Purpose:") {
+		return i, false
+	}
+	var n int
+	d.Purpose, n = purposeBlock(lines, i)
+	d.PurposeLine = l.N
+	i += n
+	for bodyEmpty && i < len(lines) && strings.TrimSpace(lines[i].Text) == "" {
+		i++
+	}
+	return i - 1, true
+}
 
 // PlanDigest is the SHA-256 of change.md minus its ## Why and ## Notes
 // sections — the plan `ape change start` freezes (items 1 and 12): the

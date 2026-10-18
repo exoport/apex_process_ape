@@ -27,7 +27,7 @@ func gotestsumLog(failing []string, dur string) string {
 // to the output hash. Its two logs hold 22 and 25 "=== FAIL:" lines whose
 // name difference is exactly the 3 tests the lift broke.
 func TestFailingTests_Gotestsum(t *testing.T) {
-	var atTag []string
+	atTag := make([]string, 0, 22)
 	for i := range 20 {
 		atTag = append(atTag, fmt.Sprintf("tools/ci TestG6_Guard%02d", i))
 	}

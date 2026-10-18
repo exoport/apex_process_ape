@@ -176,11 +176,11 @@ func drainOnSignals(ctx context.Context, daemon *Daemon, drainTimeout time.Durat
 			return nil
 		case <-sigc:
 			fmt.Fprintln(stderr, "⇣ ape service: second signal — terminating in-flight jobs")
-			daemon.KillAll()
+			daemon.KillAll() //nolint:contextcheck // the kill must outlive ctx, whose cancel may be what started the drain
 		case <-timeoutC:
 			fmt.Fprintf(stderr, "⇣ ape service: drain timeout (%s) — terminating in-flight jobs\n", drainTimeout)
-			daemon.KillAll()
-			timeoutC = nil // fire once
+			daemon.KillAll() //nolint:contextcheck // the kill must outlive ctx, whose cancel may be what started the drain
+			timeoutC = nil   // fire once
 		}
 	}
 }

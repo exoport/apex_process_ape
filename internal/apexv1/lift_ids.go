@@ -316,11 +316,11 @@ func stripIDsFromText(s string, spans [][2]int) (out string, empty bool) {
 	var b strings.Builder
 	prev := 0
 	for _, sp := range spans {
-		b.WriteString(string(held[prev:sp[0]]))
+		b.Write(held[prev:sp[0]])
 		b.WriteString(idMark)
 		prev = sp[1]
 	}
-	b.WriteString(string(held[prev:]))
+	b.Write(held[prev:])
 	t := strings.TrimLeft(b.String(), " \t")
 	origTrim := strings.TrimSpace(s)
 	startsWithID := strings.HasPrefix(t, idMark) || idLeadRe.MatchString(t)
