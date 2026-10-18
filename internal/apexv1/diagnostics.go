@@ -210,6 +210,7 @@ var findingRules = []findingRule{
 	rule("", `^AGENTS.md does not import .*project\.md`, "agents.no-project-context"),
 	rule("", `^architecture.md is .* over the .* cap \(caps.architecture_md\)`, "architecture.too-big"),
 
+	rule("", "^`Purpose:` runs to the first blank line", "change.purpose-runs-on"),
 	// rc.5 (rc5-d).
 	rule("", `^models\.\S+ (names no skill|is not a skill)`, CodeModelsUnknownSkill),
 	rule("", `^models\.\S+ is not a field of a models entry`, CodeModelsUnknownField),

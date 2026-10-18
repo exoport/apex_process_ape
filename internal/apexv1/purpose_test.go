@@ -29,12 +29,25 @@ func TestNewCapabilityPurpose(t *testing.T) {
 	for name, tc := range map[string]struct{ delta, want string }{
 		"existing capability": {"### ADDED [greeting] Requirement: Wave\nPurpose: Greets.\nx\n#### Scenario: w\n- check: true\n", "already has one"},
 		"empty":               {"### ADDED [cli] Requirement: Help\nPurpose:\n\nx\n#### Scenario: h\n- check: true\n", "`Purpose:` is empty"},
+		// No blank line after the Purpose: it takes the requirement's text
+		// (Q44), which a finding says rather than archiving it silently.
+		"runs on": {"### ADDED [cli] Requirement: Help\nPurpose: Greets.\nThe system SHALL print help.\n#### Scenario: h\n- check: true\n", "took the requirement's own text"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := fixture(t, baseFiles())
 			addChange(t, p, "add-x", changeDoc("add-x", "greeting, cli", tc.delta, "- T1 x — check: true\n"))
 			require.Contains(t, findingMessages(p.CheckChange("add-x")), tc.want)
 		})
+	}
+	// A Purpose with a blank line after it, one line or several, is not
+	// "runs on".
+	for _, delta := range []string{
+		"### ADDED [cli] Requirement: Help\nPurpose: Greets people\nwho ask.\n\nThe system SHALL print help.\n#### Scenario: h\n- check: true\n",
+		"### ADDED [cli] Requirement: Help\nPurpose: Greets.\n\nThe system SHALL print help.\n#### Scenario: h\n- check: true\n",
+	} {
+		p := fixture(t, baseFiles())
+		addChange(t, p, "add-x", changeDoc("add-x", "cli", delta, "- T1 x — check: true\n"))
+		require.NotContains(t, findingMessages(p.CheckChange("add-x")), "took the requirement's own text", delta)
 	}
 }
 
