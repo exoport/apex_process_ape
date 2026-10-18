@@ -273,30 +273,12 @@ func (p *Project) layOutConflict(ctx context.Context, ci ChangeInfo, cu *CatchUp
 	if err != nil {
 		return ci, cu, fail("cherry-pick", err)
 	}
-	st := ci.State
-	last := &st.Rebases[len(st.Rebases)-1]
 	if len(unmerged) == 0 {
 		// The net diff applies after all: commit it as the rebased code.
-		subject := "apex: " + id + " re-applied onto " + base + " as one commit"
-		if err := ScanCommit(ctx, p.Root, subject); err != nil {
-			if fe, ok := errors.AsType[*FailError](err); ok {
-				fe.Msg += "; the branch's old tip is " + oldTip + ": restore it (`git reset --hard " + short(oldTip) + "` on " + branch + "), take the secret out there, and run the command again"
-			}
-			return ci, cu, err
-		}
-		if _, err := git(ctx, p.Root, "commit", "--no-verify", "-q", "-m", subject+"\n\nChange: "+id+"\n"); err != nil {
-			return ci, cu, fail("commit", err)
-		}
-		cu.Conflicts, last.Conflicts, last.Head = nil, nil, HeadSHA(ctx, p.Root)
-		// recordCatchUp put it in-progress for a conflict there was not.
-		st.Status, st.BlockedReason = status, blocked
-		if !inArchive && (status == StatusVerified || status == StatusReviewed) {
-			st.Status = StatusInProgress
-		}
-		cu.Status = st.Status
-		err := p.saveAndCommitSubject(ctx, id, st, "apex: "+id+" rebased onto "+base)
-		return ci, cu, err
+		return ci, cu, p.commitAppliedNetDiff(ctx, ci, cu, oldTip, status, blocked, inArchive, fail)
 	}
+	st := ci.State
+	last := &st.Rebases[len(st.Rebases)-1]
 	// The state's conflict list, in the tree: committed with the
 	// resolution (the index holds unmerged paths, so ape cannot commit).
 	cu.Conflicts, last.Conflicts = unmerged, unmerged
@@ -309,6 +291,34 @@ func (p *Project) layOutConflict(ctx context.Context, ci ChangeInfo, cu *CatchUp
 	return ci, cu, &ConflictError{Code: CodeConflicted, Msg: base + " moved, and change " + id + " does not rebase onto it: the conflict is left on " + branch +
 		" (markers in the tree, HEAD on the branch, the change in-progress) — apex-apply resolves the markers (edit, `git add`, commit with trailer `Change: " + id +
 		"`), then `ape change verify " + id + "` and the review run again; the old tip is kept as " + ref, Conflicts: unmerged}
+}
+
+// commitAppliedNetDiff commits a net diff that cherry-picked cleanly as
+// the rebased code, and ends the catch-up as a clean one would: the state
+// back to status and blocked, its last rebase without conflicts. fail is
+// layOutConflict's step error.
+func (p *Project) commitAppliedNetDiff(ctx context.Context, ci ChangeInfo, cu *CatchUp, oldTip, status string, blocked *string, inArchive bool, fail func(string, error) error) error {
+	id, base, branch := ci.ID, cu.BaseBranch, ChangeBranch(ci.ID)
+	st := ci.State
+	last := &st.Rebases[len(st.Rebases)-1]
+	subject := "apex: " + id + " re-applied onto " + base + " as one commit"
+	if err := ScanCommit(ctx, p.Root, subject); err != nil {
+		if fe, ok := errors.AsType[*FailError](err); ok {
+			fe.Msg += "; the branch's old tip is " + oldTip + ": restore it (`git reset --hard " + short(oldTip) + "` on " + branch + "), take the secret out there, and run the command again"
+		}
+		return err
+	}
+	if _, err := git(ctx, p.Root, "commit", "--no-verify", "-q", "-m", subject+"\n\nChange: "+id+"\n"); err != nil {
+		return fail("commit", err)
+	}
+	cu.Conflicts, last.Conflicts, last.Head = nil, nil, HeadSHA(ctx, p.Root)
+	// recordCatchUp put it in-progress for a conflict there was not.
+	st.Status, st.BlockedReason = status, blocked
+	if !inArchive && (status == StatusVerified || status == StatusReviewed) {
+		st.Status = StatusInProgress
+	}
+	cu.Status = st.Status
+	return p.saveAndCommitSubject(ctx, id, st, "apex: "+id+" rebased onto "+base)
 }
 
 // keepPreRebaseTip records a branch tip a conflicted rebase replaces as
