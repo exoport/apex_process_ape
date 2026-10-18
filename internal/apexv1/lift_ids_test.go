@@ -307,3 +307,26 @@ func TestEditComments_BulletKeepsItsMarker(t *testing.T) {
 		}
 	}
 }
+
+// R20, rc.5's dry runs (atomix 521 lines, cortex 419, tenax 291): the
+// trailing "," ";" ":" went from every edited line, not only one a
+// removal left — "proves," over the sentence's next line lost its comma,
+// and "bump:" the colon introducing the next line. A trailing mark goes
+// only when the removed text was directly before it.
+func TestStripIDsFromText_TrailingMarkOnlyWhereTheRemovalWas(t *testing.T) {
+	v := testVocab()
+	for in, want := range map[string]string{
+		" Story 18.1 (ADR-0017; FR-MEM-4, FR-MEM-5): proves,":                    " (ADR-0017; FR-MEM-4, FR-MEM-5): proves,",
+		" Bumped v0.6.0 -> v0.8.0 (Story 26.1, 2026-08-08) — not a CR-fix bump:": " Bumped v0.6.0 -> v0.8.0 (2026-08-08) — not a CR-fix bump:",
+		" Retry the publish (Story 3.2):":                                        " Retry the publish:",
+		" Story 3.2: the steps are;":                                             " The steps are;",
+		// The removal was directly before the mark: it goes, as before.
+		" Retry the publish — story 35.1,": " Retry the publish",
+		" Retries — see Story 3.2:":        " Retries",
+		" Retry the publish, Story 3.2;":   " Retry the publish",
+	} {
+		got, empty := stripIDsFromText(in, v.spans(in))
+		require.False(t, empty, in)
+		require.Equal(t, want, got, in)
+	}
+}

@@ -83,7 +83,9 @@ The commit:
                  ("(Story 3.2, ADR-0019 decision 3)" → "(ADR-0019 decision 3)",
                  "(Story 3.2, 2026-08-08)" → "(2026-08-08)"), and the separator a
                  removal leaves by a bracket or a mark goes too
-                 ("(ADR-0019, Story 3.2)" → "(ADR-0019)"). Comments only: ids in
+                 ("(ADR-0019, Story 3.2)" → "(ADR-0019)"); a "," ";" or ":" ending
+                 a line goes only when the id was right before it ("proves," and
+                 "bump:" stay). Comments only: ids in
                  identifiers, strings and directives are listed, not edited — and
                  so are ids in a data-shaped comment, which a tool may parse: one
                  opening with a lowercase key ("# owner: …") or a record of

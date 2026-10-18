@@ -369,6 +369,7 @@ func stripIDsFromText(s string, spans [][2]int) (out string, empty bool) {
 	// code block (R19). The item goes only when its text does.
 	bullet := bulletRe.FindString(t)
 	t = t[len(bullet):]
+	mark := trailingMark(s, spans)
 	pre := strings.ReplaceAll(t, storyMark, idMark)
 	startsWithID := strings.HasPrefix(pre, idMark) || idLeadRe.MatchString(pre)
 
@@ -417,7 +418,28 @@ func stripIDsFromText(s string, spans [][2]int) (out string, empty bool) {
 	if strings.HasSuffix(origTrim, ".") && !strings.ContainsAny(t[len(t)-1:], ".!?:") {
 		t += "."
 	}
+	if mark != "" && !strings.ContainsAny(t[len(t)-1:], ".!?,;:") {
+		t += mark
+	}
 	return lead + bullet + t, false
+}
+
+// trailingMark is the "," ";" or ":" that s ends on when no id is right
+// before it: the sentence's own, which the edit keeps — "proves," runs on
+// into the next line, "bump:" introduces it. One right after an id goes
+// with it (R20; rc.5 trimmed it from every edited line).
+func trailingMark(s string, spans [][2]int) string {
+	body := strings.TrimRight(s, " \t")
+	if body == "" || strings.IndexByte(",;:", body[len(body)-1]) < 0 {
+		return ""
+	}
+	before := len(strings.TrimRight(body[:len(body)-1], " \t"))
+	for _, sp := range spans {
+		if sp[1] == before {
+			return ""
+		}
+	}
+	return body[len(body)-1:]
 }
 
 // joinCuts closes each gap left by a removal: nothing next to punctuation
