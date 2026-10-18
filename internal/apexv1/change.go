@@ -51,9 +51,9 @@ type Delta struct {
 	// Extra is a REMOVED block's first line of prose other than Reason:
 	// — text archive would drop.
 	Extra int `json:"-"`
-	// Purpose is an ADDED block's `Purpose:` line: the new capability's
-	// Purpose (item 11), kept out of the requirement text. PurposeLine is
-	// where it was.
+	// Purpose is an ADDED block's Purpose block (purposeBlock): the new
+	// capability's Purpose (item 11), kept out of the requirement text,
+	// its lines joined with "\n". PurposeLine is where it starts.
 	Purpose     string `json:"purpose,omitempty"`
 	PurposeLine int    `json:"-"`
 }
@@ -198,11 +198,21 @@ func (c *Change) parseDelta(body []mdLine) {
 		d := &c.Deltas[cur]
 		head := mdLine{N: d.Line, Text: "### " + RequirementPrefix + " " + d.Name}
 		var bodyLines []mdLine
-		for _, l := range curLines {
+		for i := 0; i < len(curLines); i++ {
+			l := curLines[i]
 			if d.Op == OpAdded && !l.InCode && d.PurposeLine == 0 {
 				if t := strings.TrimSpace(l.Text); strings.HasPrefix(t, "Purpose:") {
-					d.Purpose = strings.TrimSpace(strings.TrimPrefix(t, "Purpose:"))
+					// The whole Purpose block (Q44), so its second line
+					// does not land under the requirement heading; the
+					// blank lines ending it do not open the requirement.
+					var n int
+					d.Purpose, n = purposeBlock(curLines, i)
 					d.PurposeLine = l.N
+					i += n
+					for len(bodyLines) == 0 && i < len(curLines) && strings.TrimSpace(curLines[i].Text) == "" {
+						i++
+					}
+					i--
 					continue
 				}
 			}

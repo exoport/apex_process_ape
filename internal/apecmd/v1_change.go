@@ -265,7 +265,10 @@ func newChangeCheckCmd() *cobra.Command {
     keeps every scenario of the requirement it replaces, each with the same check
     (it may add scenarios); changed behaviour is REMOVED + ADDED under a new name.
     A name that nearly matches an existing heading (case, spacing, a typo) gets a
-    "did you mean"; an ADDED that nearly matches one is refused.
+    "did you mean"; an ADDED that nearly matches one is refused. An ADDED block of a
+    new capability may carry its "Purpose:": that line and every line after it up to a
+    blank line, heading or fenced code, kept whole as the new spec's Purpose (never in
+    the requirement)
   - nothing archive would drop: no prose before the first delta block, nothing but
     "Reason:" in a REMOVED block
   - a delta that REMOVES every requirement of a capability needs "retire: [<cap>]" in
@@ -277,6 +280,11 @@ func newChangeCheckCmd() *cobra.Command {
     "- T<n> <what> — tool: <name> — check: <command> | human-review", <name> a
     tools.design entry of _apex/config.yaml (else tools.unknown, D74; see
     `+"`ape plugins --help`"+`); ape status --json lists it under changes[].tools
+  - a human-review check is exactly "human-review": the artefact and the criteria go
+    in <what>, before " — check:". A check that starts with human-review or "human
+    review" in any case but is anything else ("human-review: read the README",
+    "Human-Review", "human-review.") would run as a shell command, and is
+    change.malformed-human-review (action replan; start refuses it)
 
 The change is checked as the branch holding its records has it, against that branch's
 specs and roadmap (D51 Q17; `+"`ape change --help`"+`): HEAD needs to be on no particular branch.

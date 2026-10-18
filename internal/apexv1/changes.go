@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -258,6 +259,10 @@ func (p *Project) checkChange(id string, withCaps bool) []Finding {
 		ids[t.ID] = true
 		if t.Check == "" && !t.Regression {
 			add(t.Line, "task "+t.ID+" has no `check: <command> | human-review` (or `regression: <command>`)")
+		}
+		if malformedHumanReview(t.Check) {
+			add(t.Line, "task "+t.ID+"'s check `"+t.Check+"` is not exactly human-review, so verify would run it as a shell command"+
+				" — write the task as `- "+t.ID+" <what> — check: "+HumanReview+"`, the artefact and the criteria in <what>, before ` — check:`")
 		}
 	}
 	return append(out, p.toolFindings(file, c)...)
@@ -710,4 +715,20 @@ func checkLoaded(ci ChangeInfo) (ChangeInfo, error) {
 		return ci, &FailError{Code: CodeNoChangeMD, Msg: "change " + id + " has no change.md"}
 	}
 	return ci, nil
+}
+
+// humanReviewLikeRe is a check whose first word is human-review or
+// "human review", in any case (Q52): what a model writes when it means a
+// person's review.
+var humanReviewLikeRe = regexp.MustCompile(`(?i)^human[- ]review\b`)
+
+// malformedHumanReview reports a check that reads as human-review but is
+// not exactly HumanReview (D111): `human-review: read the README`,
+// `Human-Review`, `human-review.`. Task.Human() takes only the exact
+// form, so verify would run any of them as a shell command and fail only
+// then. A command whose first word merely begins with the letters
+// (humanreview.sh, human-reviewer) is not one.
+func malformedHumanReview(check string) bool {
+	check = strings.TrimSpace(check)
+	return check != HumanReview && humanReviewLikeRe.MatchString(check)
 }

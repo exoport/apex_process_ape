@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -442,4 +443,66 @@ func (d *DocsConfig) UnmarshalYAML(n *yaml.Node) error {
 		}
 	}
 	return nil
+}
+
+// modelsFindings reports a models: entry that can do nothing (Q45): a key
+// that names no skill ape could launch with it — neither one of the
+// defaults init writes (modelDefaultSkills), a project or user skill, nor
+// a skill tools: or human_review names, whose sessions read models.<skill>
+// too — and an entry field other than model and effort. models: is read
+// leniently, so each is otherwise a silently ignored setting: the
+// delegate probe's `models: {effort: high}` pinned a skill named "effort".
+func (p *Project) modelsFindings() []Finding {
+	data, err := os.ReadFile(ConfigPath(p.Root))
+	if err != nil {
+		return nil
+	}
+	var doc yaml.Node
+	if yaml.Unmarshal(data, &doc) != nil {
+		return nil
+	}
+	models := topLevelValue(&doc, "models")
+	if models == nil || models.Kind != yaml.MappingNode {
+		return nil
+	}
+	known := map[string]bool{}
+	for _, s := range modelDefaultSkills() {
+		known[s] = true
+	}
+	if cfg, err := LoadConfig(p.Root); err == nil {
+		for _, slot := range ToolSlots {
+			for _, t := range cfg.Tools.Slot(slot) {
+				known[t.Skill] = true
+			}
+		}
+		if cfg.HumanReview != nil {
+			known[cfg.HumanReview.Skill()] = true
+		}
+	}
+	var out []Finding
+	for i := 0; i+1 < len(models.Content); i += 2 {
+		k, v := models.Content[i], models.Content[i+1]
+		skill := k.Value
+		switch _, _, installed := p.localSkill(skill); {
+		case skill == "model" || skill == "effort":
+			fix := "a skill's " + skill + " goes inside its entry: models.<skill>: {model: sonnet, effort: high}"
+			if skill == "effort" {
+				fix += "; the default effort of every session is the top-level effort:"
+			}
+			out = append(out, Finding{File: configYAML, Line: k.Line, Message: "models." + skill + " is not a skill — " + fix})
+		case !known[skill] && !installed:
+			out = append(out, Finding{File: configYAML, Line: k.Line, Message: "models." + skill + " names no skill installed in the project (.claude/skills/" + skill +
+				"/SKILL.md) nor one of ape's defaults (" + strings.Join(modelDefaultSkills(), ", ") + "), so it pins nothing — fix the skill name, or drop the entry"})
+		}
+		if v.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j+1 < len(v.Content); j += 2 {
+			if f := v.Content[j]; f.Value != "model" && f.Value != "effort" {
+				out = append(out, Finding{File: configYAML, Line: f.Line, Message: "models." + skill + "." + f.Value +
+					" is not a field of a models entry, so it does nothing — an entry is a model name or {model, effort}: fix or drop " + f.Value})
+			}
+		}
+	}
+	return out
 }

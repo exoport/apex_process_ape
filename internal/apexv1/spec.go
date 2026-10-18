@@ -89,17 +89,36 @@ func ParseSpec(doc string) Spec {
 		}
 	}
 	flush()
-	for _, l := range pre {
+	for i, l := range pre {
 		if lv, title := headingLevel(l); lv == 1 && s.Title == "" {
 			s.Title = title
 			continue
 		}
-		if t := strings.TrimSpace(l.Text); strings.HasPrefix(t, "Purpose:") && s.Purpose == "" {
-			s.Purpose = strings.TrimSpace(strings.TrimPrefix(t, "Purpose:"))
+		if t := strings.TrimSpace(l.Text); !l.InCode && strings.HasPrefix(t, "Purpose:") && s.Purpose == "" {
+			s.Purpose, _ = purposeBlock(pre, i)
 		}
 	}
 	s.Preamble = strings.TrimRight(joinBody(pre), "\n")
 	return s
+}
+
+// purposeBlock reads the Purpose block that starts at lines[i], a
+// `Purpose:` line (Q44): that line and every following line up to the
+// first blank line, heading or fenced code. It returns the text after
+// `Purpose:`, one line per line of the block joined with "\n", and how
+// many lines the block spans. A change's ADDED block and a spec's preamble
+// are read by the same rule, so a two-line Purpose is never split across
+// a requirement heading.
+func purposeBlock(lines []mdLine, i int) (text string, n int) {
+	parts := []string{strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[i].Text), "Purpose:"))}
+	for n = 1; i+n < len(lines); n++ {
+		l := lines[i+n]
+		if lv, _ := headingLevel(l); l.InCode || lv > 0 || strings.TrimSpace(l.Text) == "" {
+			break
+		}
+		parts = append(parts, strings.TrimSpace(l.Text))
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n")), n
 }
 
 func buildRequirement(r Requirement, lines []mdLine) Requirement {
