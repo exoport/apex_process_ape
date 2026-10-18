@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -54,5 +55,58 @@ func TestStripIDsFromText_PunctuationAndFragments(t *testing.T) {
 		}
 		require.False(t, empty, in)
 		require.Equal(t, want, got, in)
+	}
+}
+
+// R2, from cortex, radix and tenax on rc.3: "This file is Story 15.4's
+// own deliverable" became "This file is 's own deliverable" (1,941 lines
+// in cortex). A possessive id is listed and its comment left as written,
+// its ADR citations still renumbered.
+func TestEditComments_PossessiveIDListedNotEdited(t *testing.T) {
+	rw := newADRRewriter(map[int]int{17: 3}, nil, "")
+	src := "package x\n\n// This file is Story 15.4's own deliverable (ADR-0017).\n// Mirrors Story 15.2’s own generate_test.go.\n// Retry (Story 3.2).\nvar x = 1\n"
+	res, err := editComments("x.go", src, langGo, testVocab(), rw)
+	require.NoError(t, err)
+	require.Equal(t, "package x\n\n// This file is Story 15.4's own deliverable (ADR-0003).\n// Mirrors Story 15.2’s own generate_test.go.\n// Retry.\nvar x = 1\n", res.New)
+	require.Equal(t, []LiftIDRef{
+		{File: "x.go", Line: 3, Text: "Story 15.4", Where: "possessive"},
+		{File: "x.go", Line: 4, Text: "Story 15.2", Where: "possessive"},
+	}, res.Left)
+	require.Equal(t, 1, res.IDsRemoved)
+	require.Equal(t, 1, res.ADRsRewritten)
+}
+
+// R2: an aside that opens on one comment line and closes on another lost
+// one bracket — 26–34 comment lines per project began with an orphaned
+// ")" on rc.3. A "(" whose id went goes with its ")", across lines.
+func TestEditComments_ParenthesesAcrossLines(t *testing.T) {
+	v := testVocab()
+	for _, c := range []struct {
+		lang     liftLang
+		in, want string
+	}{
+		{langGo, "// Bounded (Story 3.2,\n// Task 4) holds.\n", "// Bounded\n// Task 4 holds.\n"},
+		{langGo, "// Bounded backoff (see\n// Story 3.2)\n", "// Bounded backoff\n"},
+		{langGo, "// Bounded backoff (Story 3.2\n// and Story 3.3)\n", "// Bounded backoff\n"},
+		{langGo, "// Bounded backoff (\n// Story 3.2, Task 1\n// )\n", "// Bounded backoff\n"},
+		{langGo, "// Bounded backoff\n// (Story 3.2,\n// the retry bound).\n", "// Bounded backoff\n// the retry bound.\n"},
+		{langGo, "// Bounded backoff (Story 3.2 — the\n// retry bound)\n", "// Bounded backoff (the\n// retry bound)\n"},
+		{langGo, "// Steps: 1) parse (Story 3.2,\n// Task 4) then 2) run.\n", "// Steps: 1) parse\n// Task 4 then 2) run.\n"},
+		{langShell, "# Bounded (Story 3.2,\n# Epic 4)\n# keeps it.\n", "# Bounded\n# keeps it.\n"},
+		// A run no id was stripped from is never touched.
+		{langGo, "// Bounded (\n// )\n", "// Bounded (\n// )\n"},
+	} {
+		head := "package x\n\n"
+		if c.lang == langShell {
+			head = "#!/bin/sh\n"
+		}
+		res, err := editComments("x", head+c.in+"var x = 1\n", c.lang, v, nil)
+		require.NoError(t, err, c.in)
+		require.Equal(t, head+c.want+"var x = 1\n", res.New, c.in)
+		for l := range strings.SplitSeq(res.New, "\n") {
+			if c.in != c.want {
+				require.NotRegexp(t, `^\s*(?://|#)\s*\)`, l, c.in)
+			}
+		}
 	}
 }

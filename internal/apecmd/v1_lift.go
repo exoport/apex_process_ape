@@ -83,7 +83,10 @@ The commit:
                  identifiers, strings and directives are listed, not edited — and
                  so are ids in a data-shaped comment, which a tool may parse: one
                  opening with a lowercase key ("# owner: …") or a record of
-                 key: value fields ("# pending: q | owner: …").
+                 key: value fields ("# pending: q | owner: …"), and so is a comment
+                 using an id as a possessive ("Story 3.2's own test"), which no
+                 removal keeps whole. An aside split over comment lines loses
+                 both brackets with its id: no line is left starting with ")".
                  Tokenized: Go (go/scanner), shell, Python, JS/TS (JSX/TSX: comments
                  that begin their line only), Dart, YAML, Makefile (recipe lines are
                  the shell's: left), C/C++. A file the tokenizer cannot read, a
@@ -104,30 +107,41 @@ The commit:
                  placeholder. A trailing " # …" shell comment is dropped first
   lays down      the v1 skeleton, as ` + "`ape project init --brownfield`" + ` (CLAUDE.md keeps its
                  content, loses the v0 apex:managed block and gains @AGENTS.md)
-  writes         development/lift-disposition.md: the binding-rule candidates
-                 (CLAUDE.md list items, project-context "don't miss" items, team-memory
-                 gotcha titles) with an empty Disposition column for apex-plan, then a
-                 fresh read-only review, then the person, who deletes it. Then, as
-                 summaries: code and CI that still read removed paths (CI guards over
-                 the v0 corpus show up there) and edited files a guard hashes first;
-                 ADR gaps; ids left and files not edited, counted per file;
-                 references in evidence and docs, counted; readings at the tag.
-                 development/lift-disposition.json, beside it, holds every list whole
+  writes         development/lift-disposition.md (at most 16 KB): the binding-rule
+                 candidates (CLAUDE.md list items, project-context "don't miss" items,
+                 team-memory gotcha titles) with an empty Disposition column for
+                 apex-plan, then a fresh read-only review, then the person, who deletes
+                 it. Then, as summaries: code and CI that still read removed paths, one
+                 line per file with its count and first reference (CI guards over the
+                 v0 corpus show up there), and edited files a guard hashes, first; ADR
+                 gaps; ids left and files not edited, counted per file; references in
+                 evidence and docs, counted; readings at the tag. Every list whole goes
+                 to _apex/state/lift-disposition.json after the commit: ignored by
+                 the state folder's whitelist, never committed, in this checkout only
 
 A byte-identity perimeter: a file a test, CI script or lock file hashes goes red once
 the lift edits a comment in it. The plan lists, as "hashed", the edited files that a lock
 file names, that a test or CI file names within 3 lines of a hash word (sha256,
 checksum, fingerprint, byte-identical, …), or that sit beside a hashing test that globs
-or names them — run --dry-run, then --exclude them. It is a heuristic: a copy compared
-byte for byte with no hash (an embedded mirror of a hashed file) needs its own --exclude.
+or names them — run --dry-run, then --exclude them. Documents and evidence (.md, .json,
+.log, .txt, anything under an evidence folder) never count as hashers. What a lock file
+names is listed first; at most 50 are listed, edited_but_hashed_total counts them all.
+It is a heuristic: a copy compared byte for byte with no hash (an embedded mirror of a
+hashed file) needs its own --exclude.
 
 The regression command runs twice (--no-verify-run skips both): at the tag, before
 anything is written, and at the lift commit — the baseline red gates are judged against.
-regression_verdict says whose a red is: green · red-at-tag (red there too: pre-existing,
-for apex-plan to roadmap) · red-after-lift (green at the tag: the LIFT broke it — fix it
+regression_verdict says whose a red is: green · red-at-tag (red there too, failing as it
+did: pre-existing, for apex-plan to roadmap) · red-at-tag-new-failures (red there too, but
+tests fail that did not at the tag — the LIFT broke those, named in
+regression_new_failures) · red-after-lift (green at the tag: the LIFT broke it — fix it
 in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127: a
-tool it runs is missing here, which is not a red) · red-no-baseline. The exit code stays
-0: the commit stands either way, and the verdict is in --json and the output.
+tool it runs is missing here, which is not a red) · red-no-baseline. Red at both, the
+failing tests are compared by name where the output names them (go test "--- FAIL:",
+pytest "FAILED", cargo "... FAILED", jest "✕"); otherwise by output hash, and a changed
+output stays red-at-tag with the note "the output changed after the lift", never called
+pre-existing. The exit code stays 0: the commit stands either way, and the verdict is in
+--json and the output.
 
 --from-update is how the framework's v1.0.0 migration entry runs it inside
 ` + "`ape framework update`" + `: uncommitted changes under .claude/skills/, _apex/ (not
@@ -270,6 +284,9 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 	for _, h := range r.Hashed {
 		fmt.Fprintf(w, "hashed    %s — %s seems to pin its bytes: --exclude it to keep them\n", h.File, strings.Join(h.By, ", "))
 	}
+	if more := r.HashedTotal - len(r.Hashed); more > 0 {
+		fmt.Fprintf(w, "hashed    … and %d more (in %s)\n", more, r.Report)
+	}
 	if n := len(r.DanglingRefs); n > 0 {
 		fmt.Fprintf(w, "refs      %d reference(s) to removed paths remain (listed in %s)\n", n, r.Disposition)
 	}
@@ -279,7 +296,7 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 		fmt.Fprintln(w, "gates     no ## Code Validation found: no commands, no regression")
 	}
 	fmt.Fprintf(w, "rules     %d binding-rule candidate(s) in %s\n", len(r.Candidates), r.Disposition)
-	fmt.Fprintf(w, "report    %s: every list whole (the disposition file summarises them)\n", r.Report)
+	fmt.Fprintf(w, "report    %s: every list whole, ignored by git (the disposition file summarises them)\n", r.Report)
 	if r.DryRun {
 		fmt.Fprintln(w, "commit message:")
 		for l := range strings.SplitSeq(strings.TrimRight(r.CommitMessage, "\n"), "\n") {
