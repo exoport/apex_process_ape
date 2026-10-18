@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -20,12 +21,14 @@ import (
 //	commit:
 //	  subject: "{type}: {title}"   # {type}, {title}, {id}; default "{title}"
 //	  hooks: run                   # run (default) | skip
+//	  types: [feat, fix, draft]    # change.md's type: values (D120); default CommitTypes
 //
 // shapes the squash: its subject from the template, the project's git hooks
 // run on it (only on it: ape's own status commits keep --no-verify), and
 // its body carrying the branch commits' own subjects and trailers.
 
-// CommitTypes are the values change.md's `type:` may take (D47).
+// CommitTypes are the values change.md's `type:` may take (D47) when
+// commit.types is not set; a set commit.types replaces them (D120).
 var CommitTypes = []string{"feat", "fix", "perf", "refactor", "docs", "test", "build", "ci", "chore"}
 
 // DefaultSubject is the squash subject when commit.subject is not set:
@@ -37,13 +40,25 @@ type CommitConfig struct {
 	Subject string `yaml:"subject"`
 	// Hooks is "run" (the default, also when absent) or "skip".
 	Hooks string `yaml:"hooks"`
+	// Types are the values change.md's `type:` may take (D120): absent,
+	// CommitTypes; set, they replace them (TypeList).
+	Types []string `yaml:"types"`
 }
+
+// commitTypeRe is one commit type: a lower-case token.
+var commitTypeRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 // UnmarshalYAML validates the block as it parses.
 func (c *CommitConfig) UnmarshalYAML(n *yaml.Node) error {
+	if err := checkKeys(n, "commit", "subject", "hooks", "types"); err != nil {
+		return err
+	}
 	type plain CommitConfig
 	var p plain
 	if err := n.Decode(&p); err != nil {
+		return err
+	}
+	if err := checkCommitTypes(n, p.Types); err != nil {
 		return err
 	}
 	p.Hooks = strings.TrimSpace(p.Hooks)
@@ -61,6 +76,41 @@ func (c *CommitConfig) UnmarshalYAML(n *yaml.Node) error {
 	}
 	*c = CommitConfig(p)
 	return nil
+}
+
+// checkCommitTypes validates commit.types when the key is there: a
+// non-empty list (an empty one would refuse every typed change) of
+// lower-case tokens, none twice.
+func checkCommitTypes(n *yaml.Node, types []string) error {
+	present := false
+	for i := 0; n.Kind == yaml.MappingNode && i+1 < len(n.Content); i += 2 {
+		present = present || n.Content[i].Value == "types"
+	}
+	if !present {
+		return nil
+	}
+	if len(types) == 0 {
+		return errors.New("commit.types: list at least one type, or drop the key for the default (" + strings.Join(CommitTypes, ", ") + ")")
+	}
+	seen := map[string]bool{}
+	for _, t := range types {
+		switch {
+		case !commitTypeRe.MatchString(t):
+			return fmt.Errorf("commit.types: %q is not a lower-case token (a-z, 0-9, -)", t)
+		case seen[t]:
+			return fmt.Errorf("commit.types: %q is listed twice", t)
+		}
+		seen[t] = true
+	}
+	return nil
+}
+
+// TypeList is commit.types, else CommitTypes.
+func (c CommitConfig) TypeList() []string {
+	if len(c.Types) > 0 {
+		return c.Types
+	}
+	return CommitTypes
 }
 
 // SubjectTemplate is commit.subject, else DefaultSubject.
@@ -84,16 +134,17 @@ func (p *Project) commitConfig() CommitConfig {
 	return cfg.Commit
 }
 
-// typeFindings checks change.md's `type:`: one of CommitTypes when set,
-// and set when the subject template uses {type}.
-func typeFindings(file string, c *Change, tmpl string) []Finding {
-	t := strings.TrimSpace(c.Meta.Type)
+// typeFindings checks change.md's `type:`: one of the project's commit
+// types (cc.TypeList) when set, and set when the subject template uses
+// {type}.
+func typeFindings(file string, c *Change, cc CommitConfig) []Finding {
+	t, tmpl, types := strings.TrimSpace(c.Meta.Type), cc.SubjectTemplate(), cc.TypeList()
 	switch {
 	case t == "" && strings.Contains(tmpl, "{type}"):
 		return []Finding{{File: file, Line: 1, Message: "frontmatter has no `type:`, and _apex/config.yaml's commit.subject " + fmt.Sprintf("%q", tmpl) +
-			" uses {type} — add `type: <" + strings.Join(CommitTypes, "|") + ">`"}}
-	case t != "" && !slices.Contains(CommitTypes, t):
-		return []Finding{{File: file, Line: 1, Message: "frontmatter type \"" + t + "\" is not one of " + strings.Join(CommitTypes, ", ") + " — pick the one that fits"}}
+			" uses {type} — add `type: <" + strings.Join(types, "|") + ">`"}}
+	case t != "" && !slices.Contains(types, t):
+		return []Finding{{File: file, Line: 1, Message: "frontmatter type \"" + t + "\" is not one of " + strings.Join(types, ", ") + " — pick the one that fits"}}
 	}
 	return nil
 }

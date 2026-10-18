@@ -32,13 +32,13 @@ const configAcceptedSubject = "apex: config accepted"
 // block absent on both sides is equal), so the list can name it first.
 var guardedConfigKeys = []string{
 	"limits", "checks", "retries", "requires", "timeouts", "caps", "regression",
-	"commit", "evidence", "marketplaces", "plugins", "tools", "human_review",
+	"commit", "evidence", "marketplaces", "plugins", "tools", "human_review", "release",
 }
 
 func init() {
 	findingRules = append(findingRules, rule("", `^guarded config keys`, "config.changed"))
 	DiagnosticCodes = append(DiagnosticCodes,
-		CodeDoc{"config.changed", 1, ActionPerson, "a commit since the v1 epoch changed a guarded block of _apex/config.yaml — limits, checks, retries, requires, timeouts, caps, regression, commit, evidence, marketplaces, plugins, tools or human_review — and is not ape's (`apex: …`), and no person accepted it since (`ape project accept-config --by <who>`); a revert also clears it (D50, D69, D75)"},
+		CodeDoc{"config.changed", 1, ActionPerson, "a commit since the v1 epoch changed a guarded block of _apex/config.yaml — limits, checks, retries, requires, timeouts, caps, regression, commit (commit.types included, D120), evidence, marketplaces, plugins, tools, human_review or release (D120) — and is not ape's (`apex: …`), and no person accepted it since (`ape project accept-config --by <who>`); a revert also clears it (D50, D69, D75, D120)"},
 	)
 }
 

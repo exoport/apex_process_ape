@@ -319,8 +319,8 @@ func newProjectCheckCmd() *cobra.Command {
                            state and never asked for
   config                   since the v1 epoch, a commit that changed a guarded block of
                            _apex/config.yaml — limits, checks, retries, requires, timeouts,
-                           caps, regression, commit, evidence, marketplaces, plugins, tools,
-                           human_review —
+                           caps, regression, commit (types included), evidence,
+                           marketplaces, plugins, tools, human_review, release (D120) —
                            and is not ape's (config.changed, D50) — a person reverts it or
                            accepts it: ` + "`ape project accept-config`" + `
   caps                     _apex/config.yaml caps: (D69) — sizes like 16KB, 1MiB or plain
@@ -535,6 +535,10 @@ func newStatusCmd() *cobra.Command {
     there from any branch). Not the same field as "next", the step above
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
+  - JSON "config": {commit_types, release_scheme} — the project's commit types
+    (commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore) and
+    release scheme (release.scheme: semver, the default, date or edition), defaults filled
+    in, for apex-change and apex-release (D120)
   - the latest ape task run (JSON "latest_run": {skill, run_id, status, stopped,
     resets, resets_at, message, depth, parent_run}): how it ended, e.g. "stopped:
     usage-limit, resets 2026-10-16T23:00:00+02:00" when a claude.ai usage limit

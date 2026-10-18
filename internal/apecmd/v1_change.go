@@ -243,7 +243,8 @@ func newChangeCheckCmd() *cobra.Command {
   - frontmatter id = folder, milestone in roadmap.md (or "none": a fix, D40, approved
     with `+"`ape change approve`"+`), touches non-empty kebab slugs, decisions exist in
     decisions/, paths are valid globs; type: (the archive commit's {type}, D47) one of
-    feat, fix, perf, refactor, docs, test, build, ci, chore — required only when
+    the project's commit types — _apex/config.yaml commit.types (D120), default feat,
+    fix, perf, refactor, docs, test, build, ci, chore — required only when
     _apex/config.yaml commit.subject uses {type} (change.no-type; change.bad-type);
     review_tools: [<name>, …] names tools.review entries of _apex/config.yaml whose
     when: the change matches (the orchestrator runs each before the review; else
