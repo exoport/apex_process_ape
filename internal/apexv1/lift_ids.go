@@ -111,6 +111,9 @@ func (v *liftVocab) find(s string, paths bool) [][2]int {
 		}
 		for _, m := range re.FindAllStringSubmatchIndex(s, -1) {
 			a, b := m[2], m[3]
+			if !atSegmentEnd(s, b) {
+				continue // development/implementation-notes is no removed folder (R26)
+			}
 			for b > a && strings.IndexByte(".:", s[b-1]) >= 0 {
 				b--
 			}

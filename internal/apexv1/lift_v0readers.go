@@ -73,7 +73,8 @@ func (lf *lifter) deletedFiles() []string {
 // outside their comments (codeText): by its repo-relative path (./ and
 // ../ aside, or relative to the file's folder), a path under a deleted
 // folder, or the base name of a deleted file when it has an extension and
-// no other file — deleted or kept — has it. Files and their reads by path.
+// no other file — deleted or kept — has it, where the line reads it
+// (readsByName). Files and their reads by path.
 func (lf *lifter) v0Readers() []LiftV0Reader {
 	deleted := lf.deletedFiles()
 	if len(deleted) == 0 && len(lf.untracked) == 0 {
@@ -104,8 +105,9 @@ func (lf *lifter) v0Readers() []LiftV0Reader {
 			continue
 		}
 		reads := map[string]bool{}
-		for _, tok := range pathTokens(codeText(rel, src)) {
-			if r := lf.readsDeleted(rel, tok, byBase); r != "" {
+		code := codeText(rel, src)
+		for _, tok := range pathTokenSpans(code) {
+			if r, byName := lf.readsDeleted(rel, tok.s, byBase); r != "" && (!byName || readsByName(code, tok)) {
 				reads[r] = true
 			}
 		}
@@ -122,12 +124,13 @@ func (lf *lifter) v0Readers() []LiftV0Reader {
 	return out
 }
 
-// readsDeleted is the deleted path tok names in rel, "" when none.
-func (lf *lifter) readsDeleted(rel, tok string, byBase map[string]string) string {
+// readsDeleted is the deleted path tok names in rel, "" when none, and
+// whether it names it by its base name alone.
+func (lf *lifter) readsDeleted(rel, tok string, byBase map[string]string) (string, bool) {
 	tok = strings.TrimRight(tok, ".")
 	tok = strings.TrimSuffix(tok, "/")
 	if tok == "" {
-		return ""
+		return "", false
 	}
 	var tries []string
 	if strings.HasPrefix(tok, "./") || strings.HasPrefix(tok, "../") {
@@ -149,18 +152,71 @@ func (lf *lifter) readsDeleted(rel, tok string, byBase map[string]string) string
 			continue
 		}
 		if lf.isDeleted(t) {
-			return t
+			return t, false
 		}
 		for _, u := range lf.untracked {
 			if t == u || strings.HasPrefix(t, u+"/") {
-				return t
+				return t, false
 			}
 		}
 		if f, ok := byBase[t]; ok {
-			return f
+			return f, true
 		}
 	}
-	return ""
+	return "", false
+}
+
+// R25, from mdpdf, radix, tenax and cortex on rc.6: a base name alone is
+// a word in prose as often as a path — `echo "… team-memory.md …"`,
+// t.Errorf("… (project-context.md stable exit-code map)") read nothing.
+// It reads a file only where its line is shaped for it. Line by line, as
+// the rest of the class: a weird case is missed rather than parsed.
+var (
+	// nameUseRe is a call or command that reads, lists or joins a path.
+	nameUseRe = regexp.MustCompile(`(?i)\b\w*(?:open|read|load|glob|join|stat|exists?|isfile|path)\w*\s*\(` +
+		`|(?:^|[\s;|&(` + "`" + `])(?:cat|find|ls|source|head|tail|grep|sed|awk|yq|jq|cp|mv|diff|wc)\s` +
+		`|\btest\s+-[a-z]\s|\[\[?\s+-[a-z]\s|\$\((?:wildcard|shell|file)\b|^\s*-?include\s`)
+	// nameMsgRe is a command or call whose argument is a message: echo,
+	// printf, a test's or a logger's message, an error's text.
+	nameMsgRe = regexp.MustCompile(`(?:^|[\s;|&(` + "`" + `])(?:echo|printf)\b` +
+		`|\.(?:Errorf|Fatalf|Logf|Log|Error|Fatal|Skipf|Skip)\s*\(` +
+		`|\bfmt\.(?:Errorf|Printf|Println|Fprintf|Fprintln)\s*\(|\b(?:log|logging|console)\.\w+\s*\(|\bprint\s*\(`)
+	// nameAssertRe is a testify call: its message argument is prose, its
+	// path argument a path.
+	nameAssertRe = regexp.MustCompile(`\b(?:require|assert)\.\w+\s*\(`)
+)
+
+// readsByName reports a deleted file's base name at tok in code as read:
+// the nearer of a reading call or command (nameUseRe) and a message
+// (nameMsgRe) before it on its line decides; with neither, a string that
+// is itself a path — the whole of a quoted string, or joined to a root
+// ($ROOT/x.md) — reads it. A testify call's argument is a message only
+// when it is not such a string.
+func readsByName(code string, tok pathTok) bool {
+	before := code[strings.LastIndexByte(code[:tok.at], '\n')+1 : tok.at]
+	pathShaped := tok.joined
+	if tok.at > 0 && tok.end < len(code) {
+		q := code[tok.at-1]
+		pathShaped = pathShaped || strings.IndexByte("\"'`", q) >= 0 && code[tok.end] == q
+	}
+	last := func(re *regexp.Regexp) int {
+		m := re.FindAllStringIndex(before, -1)
+		if len(m) == 0 {
+			return -1
+		}
+		return m[len(m)-1][0]
+	}
+	use, msg := last(nameUseRe), last(nameMsgRe)
+	if !pathShaped {
+		msg = max(msg, last(nameAssertRe))
+	}
+	switch {
+	case use > msg:
+		return true
+	case msg >= 0:
+		return false
+	}
+	return pathShaped
 }
 
 // pathTokens are the path-shaped words of code: each maximal run of path
@@ -169,6 +225,23 @@ func (lf *lifter) readsDeleted(rel, tok string, byBase map[string]string) string
 // ($(ROOT)/development/…, root + "/development/…"): dropped.
 func pathTokens(code string) []string {
 	var out []string
+	for _, t := range pathTokenSpans(code) {
+		out = append(out, t.s)
+	}
+	return out
+}
+
+// pathTok is one of pathTokens: s in code[at:end], joined when a root
+// before it was dropped.
+type pathTok struct {
+	s       string
+	at, end int
+	joined  bool
+}
+
+// pathTokenSpans is pathTokens with where each one is.
+func pathTokenSpans(code string) []pathTok {
+	var out []pathTok
 	for i := 0; i < len(code); {
 		if !isPathByte(code[i]) {
 			i++
@@ -178,7 +251,7 @@ func pathTokens(code string) []string {
 		for j < len(code) && isPathByte(code[j]) {
 			j++
 		}
-		tok := code[i:j]
+		tok, joined := code[i:j], false
 		var prev byte
 		if i > 0 {
 			prev = code[i-1]
@@ -187,15 +260,15 @@ func pathTokens(code string) []string {
 		case prev == '$':
 			// $ROOT/development/…: the variable is the first segment.
 			if k := strings.IndexByte(tok, '/'); k >= 0 {
-				tok = tok[k+1:]
+				tok, joined = tok[k+1:], true
 			} else {
 				tok = ""
 			}
 		case strings.HasPrefix(tok, "/") && strings.IndexByte("})\"'`", prev) >= 0:
-			tok = strings.TrimLeft(tok, "/")
+			tok, joined = strings.TrimLeft(tok, "/"), true
 		}
 		if strings.ContainsAny(tok, "/.") {
-			out = append(out, tok)
+			out = append(out, pathTok{s: tok, at: i, end: j, joined: joined})
 		}
 		i = j
 	}

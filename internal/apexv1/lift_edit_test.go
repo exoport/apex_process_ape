@@ -27,6 +27,8 @@ func TestStripIDsFromText(t *testing.T) {
 		" Bounded. See DW-42 for the history. Then retry.":        " Bounded. Then retry.",
 		" An epic 12-hour soak.":                                  " An epic 12-hour soak.",
 		" History2 is not a story.":                               " History2 is not a story.",
+		// R26: a removed folder's name only at a segment boundary.
+		" Notes in development/implementation-notes/x.md stay.": " Notes in development/implementation-notes/x.md stay.",
 	} {
 		spans := v.spans(in)
 		got, empty := stripIDsFromText(in, spans)
