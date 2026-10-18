@@ -146,7 +146,7 @@ func gluedDigits(s string, i int) bool {
 // "Task 2 of Story 3.2".
 func storySpan(s string, sp [2]int) bool {
 	loc := storyIDRe.FindStringIndex(s[sp[0]:sp[1]])
-	return loc != nil && loc[0] == 0
+	return len(loc) > 0 && loc[0] == 0
 }
 
 func mergeSpans(in [][2]int) [][2]int {

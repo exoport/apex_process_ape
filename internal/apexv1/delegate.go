@@ -591,12 +591,12 @@ func (p *Project) changeTip(ctx context.Context, id, folder string, archived boo
 }
 
 // loadChangeDoc parses a change.md; nil when it cannot be read.
-func (p *Project) loadChangeDoc(path string) *Change {
-	data, err := os.ReadFile(path)
+func (p *Project) loadChangeDoc(file string) *Change {
+	data, err := os.ReadFile(file)
 	if err != nil {
 		return nil
 	}
-	return ParseChange(p.Rel(path), string(data))
+	return ParseChange(p.Rel(file), string(data))
 }
 
 // RecordDelegateVerdict is `ape change accept <id> <task> --verdict …`:
@@ -766,15 +766,15 @@ func (p *Project) SettleDelegateRun(ctx context.Context, run *DelegateRun, backg
 		if len(line) <= 3 {
 			continue
 		}
-		path := strings.Trim(line[3:], "\"")
-		if i := strings.Index(path, " -> "); i >= 0 {
-			path = path[i+4:]
+		name := strings.Trim(line[3:], "\"")
+		if i := strings.Index(name, " -> "); i >= 0 {
+			name = name[i+4:]
 		}
 		switch {
-		case !p.delegateMayTouch(run, path):
-			violations = append(violations, "left "+path)
-		case !strings.HasPrefix(path, p.StateRel()+"/"):
-			notes = append(notes, path)
+		case !p.delegateMayTouch(run, name):
+			violations = append(violations, "left "+name)
+		case !strings.HasPrefix(name, p.StateRel()+"/"):
+			notes = append(notes, name)
 		}
 	}
 	out := &DelegateOutcome{Violations: violations, Notes: notes}
@@ -885,25 +885,25 @@ func (p *Project) dropCommittedNotes(ctx context.Context, branch string, notes m
 		return
 	}
 	for rel, data := range notes {
-		path := filepath.Join(p.Root, filepath.FromSlash(rel))
-		if cur, err := os.ReadFile(path); err == nil && bytes.Equal(cur, data) {
-			_ = os.Remove(path)
+		abs := filepath.Join(p.Root, filepath.FromSlash(rel))
+		if cur, err := os.ReadFile(abs); err == nil && bytes.Equal(cur, data) {
+			_ = os.Remove(abs)
 		}
 	}
 }
 
-func readJSON(path string, v any) bool {
-	data, err := os.ReadFile(path)
+func readJSON(file string, v any) bool {
+	data, err := os.ReadFile(file)
 	return err == nil && json.Unmarshal(data, v) == nil
 }
 
-func writeJSON(path string, v any) error {
+func writeJSON(file string, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		return err
 	}
-	return writeFileAtomic(path, string(data)+"\n")
+	return writeFileAtomic(file, string(data)+"\n")
 }

@@ -90,7 +90,8 @@ func flutterLog(failing []string, passed int) string {
 // dart's "[E]" lines are read as names: the same 15 are pre-existing, a
 // 16th is the lift's.
 func TestFailingTests_Flutter(t *testing.T) {
-	failing := []string{"/home/u/spiro/spiroapp/test/leftover_test.dart: (setUpAll)"}
+	failing := make([]string, 0, 15)
+	failing = append(failing, "/home/u/spiro/spiroapp/test/leftover_test.dart: (setUpAll)")
 	for i := range 14 {
 		failing = append(failing, fmt.Sprintf("/home/u/spiro/spiroapp/test/screen_%02d_test.dart: Screen %d shows the trace", i, i))
 	}

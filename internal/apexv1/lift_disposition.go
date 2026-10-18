@@ -176,7 +176,7 @@ type dispLimits struct {
 // dispSteps are tried in order until a rendering fits the cap: the
 // summaries down to counts, then the ADR table. The candidates and the v0
 // state readers are cut only past the ceiling (disposition).
-var dispSteps = []dispLimits{
+var dispSteps = []dispLimits{ //nolint:mnd // a table of render steps: each number is a row, not a tunable
 	{files: 40, adrs: -1, rules: -1},
 	{files: 20, adrs: -1, rules: -1},
 	{files: 10, adrs: -1, rules: -1},
@@ -620,7 +620,7 @@ func writeV0Readers(b *strings.Builder, readers []LiftV0Reader, counts bool, rep
 			shown := v.Reads[:min(len(v.Reads), v0ReaderReadsShown)]
 			line := "`" + strings.Join(shown, "`, `") + "`"
 			if more := len(v.Reads) - len(shown); more > 0 {
-				line += fmt.Sprintf(" and %d more (in `%s`)", more, report)
+				line += fmt.Sprintf(" and %d more (in %#q)", more, report)
 			}
 			p("- `%s` reads %s\n", v.File, line)
 		}
