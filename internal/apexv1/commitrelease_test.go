@@ -43,6 +43,11 @@ func TestCommitAndReleaseConfig_Parse(t *testing.T) {
 		"scheme edition":     {"release:\n  scheme: edition\n", ""},
 		"scheme bad":         {"release:\n  scheme: calver\n", `release.scheme: "calver" is not semver, date or edition`},
 		"release unknown":    {"release:\n  schema: date\n", "release.schema: not a key ape knows"},
+		"docs ok":            {"release:\n  docs: [README.md, docs/, guide/intro.md]\n", ""},
+		"docs empty":         {"release:\n  docs: []\n", "release.docs: list at least one path"},
+		"docs absolute":      {"release:\n  docs: [/etc/motd]\n", `release.docs: "/etc/motd" is not a relative path inside the project`},
+		"docs outside":       {"release:\n  docs: [../other/README.md]\n", `is not a relative path inside the project`},
+		"docs twice":         {"release:\n  docs: [docs/, docs]\n", `release.docs: "docs" is listed twice`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Open(writeConfig(t, c.cfg))
@@ -87,4 +92,23 @@ func TestStatus_Config(t *testing.T) {
 	r = p.Status()
 	require.Equal(t, []string{"draft", "edit"}, r.Config.CommitTypes)
 	require.Equal(t, ReleaseEdition, r.Config.ReleaseScheme)
+}
+
+// D129: release.docs is the project's list as written, else README.md and
+// docs/ where they exist; a listed path that does not exist is docs.missing.
+func TestReleaseDocs(t *testing.T) {
+	p := fixture(t, baseFiles())
+	require.Empty(t, p.Status().Config.ReleaseDocs, "no README.md, no docs/: none")
+	require.NotNil(t, p.Status().Config.ReleaseDocs, "[] in JSON, not null")
+	write(t, p, "README.md", "# x\n")
+	require.Equal(t, []string{"README.md"}, p.Status().Config.ReleaseDocs)
+	write(t, p, "docs/guide.md", "g\n")
+	require.Equal(t, []string{"README.md", "docs/"}, p.Status().Config.ReleaseDocs)
+
+	write(t, p, "_apex/config.yaml", "release:\n  docs: [manual/, README.md]\n")
+	require.Equal(t, []string{"manual/", "README.md"}, p.Status().Config.ReleaseDocs, "as written, existing or not")
+	fs := ClassifyFindings(p.docsFindings())
+	require.Len(t, fs, 1)
+	require.Equal(t, "docs.missing", fs[0].Code)
+	require.Contains(t, fs[0].Message, "release.docs: manual/ does not exist")
 }

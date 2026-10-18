@@ -249,6 +249,12 @@ func (p *Project) docsFindings() []Finding {
 				" does not exist — create it, or fix (or drop) docs." + d.key + " in _apex/config.yaml"})
 		}
 	}
+	for _, d := range cfg.Release.Docs {
+		if !fileOrDirExists(filepath.Join(p.Root, filepath.FromSlash(d))) {
+			out = append(out, Finding{File: configYAML, Message: "release.docs: " + d +
+				" does not exist — create it, or fix (or drop) it in _apex/config.yaml release.docs"})
+		}
+	}
 	return out
 }
 

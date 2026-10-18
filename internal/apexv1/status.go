@@ -271,6 +271,9 @@ type StatusReport struct {
 type StatusConfig struct {
 	CommitTypes   []string `json:"commit_types"`
 	ReleaseScheme string   `json:"release_scheme"`
+	// ReleaseDocs is release.docs, else README.md and docs/ where they
+	// exist (D129).
+	ReleaseDocs []string `json:"release_docs"`
 }
 
 // Status builds the report.
@@ -285,7 +288,7 @@ func (p *Project) Status() *StatusReport {
 		r.Project = baseName(p.Root)
 	}
 	r.Docs = cfg.Docs
-	r.Config = StatusConfig{CommitTypes: cfg.Commit.TypeList(), ReleaseScheme: cfg.Release.SchemeName()}
+	r.Config = StatusConfig{CommitTypes: cfg.Commit.TypeList(), ReleaseScheme: cfg.Release.SchemeName(), ReleaseDocs: cfg.Release.DocsList(p.Root)}
 	r.delegate = cfg.HumanReview.Skill()
 	runs, _ := cost.RunCosts(p.Root)
 	for _, run := range runs {
