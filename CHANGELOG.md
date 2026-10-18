@@ -94,7 +94,7 @@ wall-clock kill of a run that shows progress (D159).
   diff from its base touches nothing but the docs, the development folder and
   ape's state; otherwise `delegate.docs-scope` (action person) names the paths
   outside. The docs are the `release.docs` paths (default README.md and docs/),
-  the changelog (`docs.changelog`, else CHANGELOG.md) and `docs.user_docs`
+  and the configured `docs.changelog` and `docs.user_docs`
   (rc.6c, D158 R6b-1: a project's changelog rule makes every docs change touch
   the changelog, so without it the delegate was never granted there).
 - `human_review: {docs: person}` turns it off (guarded, `config.changed`); a

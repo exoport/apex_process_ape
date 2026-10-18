@@ -856,7 +856,7 @@ whose change.md frontmatter says docs: true with apex-accept, the default args a
 models.apex-accept — no human_review block needed — when:
   - the change's diff from its base_sha to its tip (change/<id>'s; the recorded branch
     tip once archived; a rename counts as both paths) touches only the docs — release.docs
-    paths (else README.md and docs/), the changelog (docs.changelog, else CHANGELOG.md)
+    paths (else README.md and docs/), and the configured docs.changelog
     and docs.user_docs (D158) — and the development folder (and ape's _apex/state/);
     else delegate.docs-scope (action person), naming the paths outside: a code change
     marked docs: true still stops for a person

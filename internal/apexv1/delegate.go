@@ -387,7 +387,7 @@ func (p *Project) prepareDocsDelegate(ctx context.Context, cfg Config, id, task 
 			why = "has a diff ape cannot read (" + err.Error() + ")"
 		}
 		return nil, &FailError{Code: "delegate.docs-scope", Msg: "the docs change " + id + " " + why + ", outside the docs (" + strings.Join(scope, ", ") +
-			": release.docs, the changelog and docs.user_docs) and the development folder, so its docs check " + task + " is not a delegate's by default (D152) — a person reviews it (`ape change accept " + id + " --task " + task +
+			": release.docs, docs.changelog and docs.user_docs) and the development folder, so its docs check " + task + " is not a delegate's by default (D152) — a person reviews it (`ape change accept " + id + " --task " + task +
 			" --by <who>`), or re-plans the non-docs work into a change of its own"}
 	}
 	if hr == nil {

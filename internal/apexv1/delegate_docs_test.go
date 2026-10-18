@@ -129,7 +129,7 @@ func TestDocsDelegate_RefusedOutsideTheDocs(t *testing.T) {
 		work func(p *Project)
 		want string
 	}{
-		"code":           {work: func(p *Project) { write(t, p, "main.go", "package main\n") }, want: "touches main.go, outside the docs (README.md, docs/, CHANGELOG.md: release.docs, the changelog and docs.user_docs) and the development folder"},
+		"code":           {work: func(p *Project) { write(t, p, "main.go", "package main\n") }, want: "touches main.go, outside the docs (README.md, docs/: release.docs, docs.changelog and docs.user_docs) and the development folder"},
 		"code into docs": {work: func(p *Project) { run(t, p.Root, "mv", "scripts/lint.sh", "docs/lint.sh") }, want: "touches scripts/lint.sh, outside"},
 		"config":         {work: func(p *Project) { write(t, p, "_apex/config.yaml", "notify: echo\n") }, want: "touches _apex/config.yaml, outside"},
 	} {
@@ -151,20 +151,20 @@ func TestDocsDelegate_RefusedOutsideTheDocs(t *testing.T) {
 	require.NoError(t, err)
 	p = docsWave(t, "release: {docs: [docs/]}\n", true, nil)
 	_, err = p.PrepareDelegate(ctx(), "docs-wave", "T2")
-	require.ErrorContains(t, requireFail(t, err, "delegate.docs-scope"), "touches README.md, outside the docs (docs/, CHANGELOG.md: release.docs")
+	require.ErrorContains(t, requireFail(t, err, "delegate.docs-scope"), "touches README.md, outside the docs (docs/: release.docs")
 }
 
 // D158 R6b-1: a docs change must update the changelog (the project's
-// rule, review's finding), so the docs default counts it as docs —
-// docs.changelog, else CHANGELOG.md — and docs.user_docs too.
+// rule, review's finding), so the docs default counts the configured
+// docs.changelog as docs, and docs.user_docs too.
 func TestDocsDelegate_ChangelogAndUserDocsAreDocs(t *testing.T) {
 	for name, tc := range map[string]struct {
 		cfg  string
 		work func(p *Project)
 	}{
-		"CHANGELOG.md by default": {work: func(p *Project) { write(t, p, "CHANGELOG.md", "- waving\n") }},
+		"docs.changelog CHANGELOG.md": {cfg: "docs: {changelog: CHANGELOG.md}\n", work: func(p *Project) { write(t, p, "CHANGELOG.md", "- waving\n") }},
 		"docs.changelog":          {cfg: "docs: {changelog: ./HISTORY.md}\n", work: func(p *Project) { write(t, p, "HISTORY.md", "- waving\n") }},
-		"docs.user_docs": {cfg: "docs: {user_docs: manual/}\n", work: func(p *Project) {
+		"docs.user_docs": {cfg: "docs: {changelog: CHANGELOG.md, user_docs: manual/}\n", work: func(p *Project) {
 			write(t, p, "manual/wave.md", "Waving.\n")
 			write(t, p, "CHANGELOG.md", "- waving\n")
 		}},
@@ -178,6 +178,12 @@ func TestDocsDelegate_ChangelogAndUserDocsAreDocs(t *testing.T) {
 			require.Equal(t, []DelegableTask{{Task: "T2", Reason: "docs-default"}}, p.Status().Changes[0].Delegable)
 		})
 	}
+	// Only a configured changelog counts: with no docs block, CHANGELOG.md
+	// is outside (eval P22 d).
+	p0 := docsWave(t, "", true, func(p *Project) { write(t, p, "CHANGELOG.md", "- waving\n") })
+	_, err0 := p0.PrepareDelegate(ctx(), "docs-wave", "T2")
+	require.ErrorContains(t, requireFail(t, err0, "delegate.docs-scope"), "touches CHANGELOG.md, outside the docs (README.md, docs/:")
+	require.Empty(t, p0.Status().Changes[0].Delegable)
 	// docs.changelog names the changelog: CHANGELOG.md is then no docs.
 	p := docsWave(t, "docs: {changelog: HISTORY.md}\n", true, func(p *Project) { write(t, p, "CHANGELOG.md", "- waving\n") })
 	_, err := p.PrepareDelegate(ctx(), "docs-wave", "T2")

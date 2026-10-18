@@ -119,17 +119,14 @@ func (r ReleaseConfig) DocsScope() []string {
 }
 
 // DocsDefaultScope is what the docs default (D152) counts as user-facing
-// docs: release.docs (DocsScope), the changelog — docs.changelog, else
-// CHANGELOG.md, apex-release's — and docs.user_docs (D158 R6b-1). A
-// project's changelog rule makes every docs change touch the changelog,
-// so a scope without it never granted the delegate there.
+// docs: release.docs (DocsScope) and the configured docs.changelog and
+// docs.user_docs (D158 R6b-1). A project's changelog rule makes every docs
+// change touch the changelog, so a scope without it never granted the
+// delegate there. Only a configured changelog counts: a project that names
+// none in _apex/config.yaml has made no docs claim for CHANGELOG.md.
 func (c Config) DocsDefaultScope() []string {
 	scope := slices.Clone(c.Release.DocsScope())
-	changelog := c.Docs.Changelog
-	if changelog == "" {
-		changelog = "CHANGELOG.md"
-	}
-	for _, d := range []string{changelog, c.Docs.UserDocs} {
+	for _, d := range []string{c.Docs.Changelog, c.Docs.UserDocs} {
 		if d = strings.TrimPrefix(strings.TrimSpace(d), "./"); d != "" && !inReleaseDocs(scope, d) {
 			scope = append(scope, d)
 		}
