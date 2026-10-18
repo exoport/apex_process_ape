@@ -556,11 +556,11 @@ detail}). A running board is posted to; with none running, .aboard/aboard.json i
 rewritten in place. ape never creates a board. The tab is not authoritative: it is a view
 of this report, nothing reads it back, and where the two disagree the tab is wrong. A
 refresh never changes a command's exit code or stdout (a problem is one line on stderr),
-and one that would change nothing writes nothing. The tab is marked quiet: true, so the
-board raises no unread dot or banner for ape's refreshes — from the aboard release that
-honours it. Until ape pins that release, a changed view posted to a running board still
-raises the tab's unread dot (aboard v0.3.0 ignores quiet, silently); a refresh written to
-the file, with no board running, raises none.
+and one that would change nothing writes nothing. The tab is quiet (aboard v0.4.0, D126):
+ape's refreshes raise no notification, unread dot or banner. Going quiet is announced once,
+when ape creates the tab (or first refreshes one an older ape made). ape sets quiet only
+that once: if a person turns it off from the tab's menu, it stays off, and ape's changed
+views raise the dot again.
 
 Exit codes: 0 ok · 2 usage. --board exits 0 whatever the board did.`,
 		Example: "  ape status\n  ape status --brief\n  ape status --json\n  ape status --board",

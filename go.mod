@@ -1,8 +1,6 @@
 module github.com/exoport/apex_process_ape
 
-go 1.27.0
-
-toolchain go1.27.2
+go 1.27.2
 
 require (
 	github.com/aymanbagabas/go-pty v0.2.3
@@ -14,7 +12,7 @@ require (
 	github.com/containerd/containerd/v2 v2.3.6
 	github.com/containerd/errdefs v1.0.0
 	github.com/distribution/reference v0.6.0
-	github.com/exoport/aboard v0.3.0
+	github.com/exoport/aboard v0.4.0
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	github.com/klauspost/compress v1.19.2
 	github.com/minio/selfupdate v0.6.0
