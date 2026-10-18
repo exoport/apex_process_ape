@@ -1202,7 +1202,7 @@ Move a change to the archive as abandoned, merging no delta; commit
 ape change abandon <id> --reason "<text>" [flags]
 ```
 
-Drop a change: its folder moves to development/archive/<YYYY-MM-DD>-<id>/ with
+Drop a change: its folder moves to development/archive/changes/<YYYY-MM-DD>-<id>/ with
 status abandoned and the reason recorded in state.json; its delta is NOT merged into
 specs/. Committed as "apex: <id> abandoned" with trailer "Change: <id>". The id stays
 taken. Abandon a blocked change only after planning its replacement, or with the reason
@@ -1270,7 +1270,8 @@ second argument (T<n>) or --task.
     and drops the file with the folder. With HEAD on change/<id> it is recorded there,
     as before
   - an archived change (H4): its archived state.json, under
-    development/archive/<date>-<id>/, is updated and committed on the base branch it was
+    development/archive/changes/<date>-<id>/ (or development/archive/<date>-<id>/, the
+    layout before ape project archive-layout), is updated and committed on the base branch it was
     archived into — "apex: <id> accepted <T> (archived)", trailer "Change: <id>" — from any
     branch, without a checkout when HEAD is elsewhere (refused when that branch is checked
     out in another worktree: git.base-checked-out). `ape status` lists archived changes
@@ -1531,7 +1532,7 @@ Archive a reviewed change onto its base branch (trial decision D38):
      reaches the base branch
   7. switches to the base branch, `git merge --squash change/<id>`, writes the specs,
      moves the folder, exactly as used — archive never trims it or edits change.md —
-     to development/archive/<YYYY-MM-DD>-<id>/ (status archived,
+     to development/archive/changes/<YYYY-MM-DD>-<id>/ (status archived,
      branch_tip = change/<id>'s last commit) — with "evidence: archive" in
      _apex/config.yaml (H23; default off) also its evidence/: one file per check of the
      final verify (command, exit, duration, output sha256, and the output from the log,
@@ -1769,7 +1770,8 @@ author's own commit. A change is planned on the base branch: refused while HEAD 
 change branch, change/<other> (exit 1, code branch.change-branch; `git switch <base>`).
 
 <id> is a verb-led kebab slug, ^[a-z][a-z0-9-]{2,39}$, unique across active AND archived
-changes (development/archive/, and an older ape's development/changes/archive/).
+changes (development/archive/changes/, development/archive/ itself as an older ape archived
+them, and an older ape's development/changes/archive/).
 --milestone none makes the change a fix (trial decision D40): what apex-change writes for
 a person's request outside the roadmap. It needs no roadmap entry, inherits no Out of
 scope, is approved on its own (`ape change approve <id> --by <who>`) instead of through a
@@ -3622,6 +3624,16 @@ by `ape milestone gate`. A milestone is done when this command exits 0 — never
 anyone says so. Refused, as by `ape milestone gate`, when ape holds no approval record or the
 gate changed since the approval (H2). ape records the close in milestones.json (done_at).
 
+Gate folders (D155 Q74): each folder development/gates/<M>-*/ (by name; development/gates/lib/
+is no milestone's and stays) moves, in the close commit (a rename: every file's content and
+sha256 unchanged), to development/archive/milestones/<M>/gate/ — one folder's contents into
+gate/, several each into gate/<folder>/ — beside the close evidence; --accept-red too. A
+gate outside development/gates/ (scripts/…) stays where it is. milestones.json records each
+move as gate_archived: [{from, to}] (JSON "gate_archived"); the approval's gate_files keep
+the paths as approved, so a verifier maps a path under "from" to "to" and compares the same
+sha256. A gate/ already there refuses the close before the gate runs, with nothing written
+(milestone.gate-archive-exists, action person: move it away).
+
 With "evidence: archive" in _apex/config.yaml (H23; default off), a green close writes the
 gate run's evidence to development/archive/milestones/<M>/evidence/ — one file per check
 (the gate command, every spec scenario, the regression command): command, exit, duration,
@@ -3644,8 +3656,8 @@ line inside Claude Code included) with exit 2, session.person-only. A person tag
 close.
 
 Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
-no approval record, a changed gate, or HEAD on a change branch · 2 usage, or --accept-red
-from a model session.
+no approval record, a changed gate, an archived gate/ in the way, or HEAD on a change
+branch · 2 usage, or --accept-red from a model session.
 
 Detached runs (D58 2.3): the command takes the run lock of its change (or milestone),
 _apex/state/runs/<id|M>.json, and runs in a detached worker (`ape __run`, its own
@@ -4000,6 +4012,7 @@ ape project
 Subcommands:
 
 - `accept-config` — Accept the committed _apex/config.yaml's guarded blocks (limits, checks, caps, …)
+- `archive-layout` — Move archived changes into development/archive/changes/ (the v1.0.0_seq-06 migration)
 - `check` — Validate every v1 shape and size cap; list all failures
 - `codes` — List the diagnostic codes v1 commands report in --json failures
 - `init` — Create the development/ skeleton and merge ape's hooks (never overwrites)
@@ -4013,7 +4026,7 @@ Accept the committed _apex/config.yaml's guarded blocks (limits, checks, caps, �
 ape project accept-config --by <who> [flags]
 ```
 
-Thirteen blocks of _apex/config.yaml can loosen what ape enforces, and are guarded:
+Fifteen blocks of _apex/config.yaml can loosen what ape enforces, and are guarded:
   limits        attempts, re-plans, consecutive blocks, the budget
   checks        vacuous output
   retries       red checks run again
@@ -4025,6 +4038,8 @@ Thirteen blocks of _apex/config.yaml can loosen what ape enforces, and are guard
   evidence      archive|off (off keeps no evidence)
   marketplaces, plugins, tools   what runs inside a session (hooks, MCP, skills)
   human_review  who accepts a human-review task in a person's place (D75; docs: D152)
+  release       how apex-release proposes the next version, and what it brings up to date (D120)
+  secrets       the fingerprints the commit secret scan lets through (D155; commit.secret)
 The guard compares whole blocks, either way: raising a cap or a timeout loosens as surely
 as lowering one. Since the project's v1 epoch (the newest "apex: project init" or "apex:
 lift" commit; a block committed before it, or in it, is the baseline), a commit that
@@ -4055,6 +4070,61 @@ Flags:
 | Flag | Type | Default | Description |
 | ---- | ---- | ------- | ----------- |
 | `--by` | string | `—` | who accepts (required) |
+| `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
+| `--json` | bool | `false` | machine output (JSON on stdout) |
+
+## ape project archive-layout
+
+Move archived changes into development/archive/changes/ (the v1.0.0_seq-06 migration)
+
+```
+ape project archive-layout [--check] [flags]
+```
+
+Move every archived or abandoned change still in the older layout,
+development/archive/<YYYY-MM-DD>-<id>/, into development/archive/changes/<YYYY-MM-DD>-<id>/,
+where change archive and change abandon put them (D155). The framework's migration
+v1.0.0_seq-06 runs it (command: ape project archive-layout; check: ape project
+archive-layout --check). development/archive/milestones/ stays where it is.
+
+One commit, "apex: archive layout (seq-06)": each folder moved with git mv, and in each
+moved state.json the recorded paths that named the old folder (archived_to, and an
+acceptance's evidence inside the folder) rewritten to the new one; nothing else in the
+files changes. The refs refs/apex/archive/<id> and refs/apex/abandoned/<id>, and
+state.json's tip_ref, name commits and are untouched. Idempotent: with nothing left to
+move it writes nothing and says "nothing to move" (exit 0).
+
+Every ape command reads archived changes from both layouts, always, so a project that has
+not moved yet, or a branch cut before the move, works the same either way.
+
+Refused on a change branch (branch.change-branch), with uncommitted changes (tree.dirty),
+outside a git repository (git.not-a-repo), and when a folder's new place already exists
+(archive.folder-exists, exit 3: nothing is written; a person merges the two by hand). A
+command any session may run (not person-only).
+
+--check writes nothing: exit 0 when no archived change is left in the older layout, 1
+(archive.legacy-layout, naming them) when some is — the migration's check: 0 applied,
+1 not applied.
+
+JSON: {"moved": [{"id", "from", "to"}], "rewritten": [<state.json>], "commit"}; under
+--check, "moved" lists what would move.
+
+Exit codes: 0 moved, or nothing to move (--check: nothing left) · 1 refused, or (--check)
+some left · 3 a folder's new place exists.
+
+Examples:
+
+```
+  ape project archive-layout --check
+  ape project archive-layout
+  ape project archive-layout --json
+```
+
+Flags:
+
+| Flag | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `--check` | bool | `false` | write nothing: exit 0 when nothing is left in the older layout, 1 when some is |
 | `--cwd` | string | `—` | project directory (default: the nearest parent with _apex/config.yaml or development/) |
 | `--json` | bool | `false` | machine output (JSON on stdout) |
 
@@ -4119,9 +4189,14 @@ Validate the whole project and list every failure, not just the first.
   config                   since the v1 epoch, a commit that changed a guarded block of
                            _apex/config.yaml — limits, checks, retries, requires, timeouts,
                            caps, regression, commit (types included), evidence,
-                           marketplaces, plugins, tools, human_review, release (D120) —
-                           and is not ape's (config.changed, D50) — a person reverts it or
-                           accepts it: `ape project accept-config`
+                           marketplaces, plugins, tools, human_review, release (D120),
+                           secrets (D155) — and is not ape's (config.changed, D50) — a
+                           person reverts it or accepts it: `ape project accept-config`
+  hot/                     the project's secrets (D155): when hot/ exists, git ignores a new
+                           file in it (hot/.gitignore "*", which init and the lift write, or
+                           any ignore rule), and git tracks nothing under it — else
+                           hot.not-ignored (action person: give it the .gitignore and
+                           untrack the rest, `git rm -r --cached hot/`); no hot/ is no finding
   caps                     _apex/config.yaml caps: (D69) — sizes like 16KB, 1MiB or plain
                            bytes, KB = KiB = 1024 bytes; default / hard ceiling:
                              project_md   16 KB / 48 KB    agents_md    16 KB / 48 KB
@@ -4175,6 +4250,17 @@ Validate the whole project and list every failure, not just the first.
                            user-invocable: false (tools.not-invocable); a plugin skill
                            is judged only when claude is on PATH. See ape plugins --help
 
+Notices (D155 Q73) are not findings: listed as "notice: <file>:<line>: …" lines on stderr
+and under "notices" with --json ({severity: "notice", code, message, fix, action, file,
+line}; [] when none, beside the findings on a failure too), they never change the exit.
+  gate.outside-gates       an open (proposed or approved) milestone's gate runs a script
+                           file outside development/gates/ (scripts/e2e.sh, say; a gate
+                           that runs no script file, like make e2e, has none): apex-plan
+                           writes gates into development/gates/<M>-<slug>/, and moving an
+                           approved gate's script is gate drift, so it moves with the
+                           milestone's next re-approval (before its approval, when
+                           proposed). See ape milestone close --help for the gate folders
+
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.
 
 Examples:
@@ -4211,7 +4297,8 @@ re-start), review (review again), replan (apex-change re-plans), stop (the run s
 where its meaning names a case that changes it (milestone.changes-in-flight), the diagnostic
 carries the action of the case (D49). "code" says which rule; "message" and
 "fix" are for people. Codes are stable: a new rule gets a new
-code, and a code's meaning never changes. severity is always "error" (no warning tier).
+code, and a code's meaning never changes. severity is always "error" (no warning tier);
+project check's notices, severity "notice", are no failure's diagnostics (exit 0 here).
 Exit: 1 check failed · 2 usage · 3 conflict (nothing written).
 
 Examples:
@@ -4285,6 +4372,12 @@ appended to an _apex/config.yaml that has no models: block).
   development/decisions/
   development/briefs/                each plan's input, dated and verbatim (YYYY-MM-DD-<slug>.md,
                                      written by apex-plan; never edited — see ape project check)
+  hot/.gitignore                     "*" when hot/ has no .gitignore (an existing one is kept):
+                                     hot/ holds the project's secrets, which gates and checks
+                                     read at run time ("$(cat hot/<name>)"), never as
+                                     literals. The "*" ignores the .gitignore too, so hot/
+                                     stays this checkout's and is not in the init commit
+                                     (see ape project check: hot.not-ignored)
   _apex/state/                       ape's own records (never edited by a model; never touched
                                      by ape framework update): milestones.json, decisions.json
                                      tracked; logs/, runs/, hooks/ ignored. Its .gitignore is a
@@ -4301,8 +4394,8 @@ A hook that was altered (another matcher, async, a shorter stop timeout) is repl
 by the one above; running init again changes nothing. ape task passes the same
 hooks inline as well, so its sessions have them even when settings.json does not.
 
-Everything init wrote (and settings.json when it merged hooks) is committed as
-"apex: project init", with the files it amended (CLAUDE.md, AGENTS.md, and the config
+Everything init wrote but hot/.gitignore (and settings.json when it merged hooks) is
+committed as "apex: project init", with the files it amended (CLAUDE.md, AGENTS.md, and the config
 when it was tracked and clean); other files that existed before are not touched and
 not committed. JSON: "amended" lists the files init changed, "amended_uncommitted"
 those it left out of the commit.
@@ -4508,7 +4601,9 @@ The commit:
                  shell ${…}) or a lone … — is listed, not run; Go's ./... is no
                  placeholder. A trailing " # …" shell comment is dropped first
   lays down      the v1 skeleton, as `ape project init --brownfield` (CLAUDE.md keeps its
-                 content, loses the v0 apex:managed block and gains @AGENTS.md)
+                 content, loses the v0 apex:managed block and gains @AGENTS.md),
+                 hot/.gitignore (`*`, when hot/ has none) included: it ignores
+                 itself, so it is not in the lift commit
   writes         development/lift-disposition.md (16 KB, unless its candidates need
                  more): the binding-rule candidates (CLAUDE.md list items,
                  project-context "don't miss" items, team-memory gotcha titles), EVERY
