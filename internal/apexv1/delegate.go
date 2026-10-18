@@ -523,6 +523,9 @@ type DelegateOutcome struct {
 	Accepted *Accept `json:"accepted,omitempty"`
 	// VerdictFile is the run's verdict file, project-relative.
 	VerdictFile string `json:"verdict_file,omitempty"`
+	// Background is the background work the session's last Stop reported
+	// still running, when it ended without a verdict (D88).
+	Background []string `json:"background,omitempty"`
 }
 
 // delegateMayTouch reports whether a delegate session may leave path
@@ -542,8 +545,11 @@ func (p *Project) delegateMayTouch(run *DelegateRun, rel string) bool {
 // left HEAD elsewhere, or left a file other than an accept-* note in the
 // change's assets folder has its verdict voided (recorded in the verdict
 // file) — whatever it was. A pass is then recorded as AcceptDelegated
-// records it; a fail, or no verdict, records nothing.
-func (p *Project) SettleDelegateRun(ctx context.Context, run *DelegateRun) (*DelegateOutcome, error) {
+// records it; a fail, or no verdict, records nothing. background is what
+// the session's last main-session Stop reported still running
+// (LastStopBackground): a session with no verdict and live background
+// work fails with LiveBackgroundReason rather than "no verdict" (D88).
+func (p *Project) SettleDelegateRun(ctx context.Context, run *DelegateRun, background ...string) (*DelegateOutcome, error) {
 	var violations, notes []string
 	if run.Branch != "" {
 		if cur := CurrentBranch(ctx, p.Root); cur != run.Branch {
@@ -610,8 +616,13 @@ func (p *Project) SettleDelegateRun(ctx context.Context, run *DelegateRun) (*Del
 	if v == nil {
 		// No verdict is a fail (D78), recorded as one: the session's last
 		// message is never read for a verdict.
+		reason := NoVerdictReason
+		if len(background) > 0 {
+			reason = LiveBackgroundReason(background)
+			out.Background = background
+		}
 		v = &DelegateVerdict{
-			Change: run.Change, Task: run.Task, Skill: run.Skill, Run: run.DetachedID, Verdict: "fail", Reason: NoVerdictReason,
+			Change: run.Change, Task: run.Task, Skill: run.Skill, Run: run.DetachedID, Verdict: "fail", Reason: reason,
 			At: Stamp(), ChangeTip: run.ChangeTip,
 		}
 		if err := p.saveDelegateVerdict(v); err != nil {

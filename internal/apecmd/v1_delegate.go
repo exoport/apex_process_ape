@@ -37,6 +37,16 @@ func sessionEnded(taskExit *int) string {
 	return fmt.Sprintf("ape task exited %d", *taskExit)
 }
 
+// childStopBackground is the background work a detached child session's
+// last main-session Stop reported still running (D88): what a review or
+// delegate session that ended without a verdict left unfinished.
+func childStopBackground(p *apexv1.Project, h *detachedHandle) []string {
+	if h == nil {
+		return nil
+	}
+	return p.LastStopBackground(runMainSessions(h.RunDir))
+}
+
 // childSessionEnv is the environment of a session a v1 verb starts
 // detached (a delegate, a tool): the caller's, without the review and
 // delegate markers of the session it came from — the same filter as
@@ -119,7 +129,7 @@ func runDelegateSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, t
 	if h != nil {
 		res.TaskExit = h.ExitCode
 	}
-	outcome, err := p.SettleDelegateRun(ctx, run)
+	outcome, err := p.SettleDelegateRun(ctx, run, childStopBackground(p, h)...)
 	res.Outcome = outcome
 	if err != nil {
 		// The run stays recorded: --delegate again settles it again.
@@ -132,9 +142,13 @@ func runDelegateSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, t
 			strings.Join(outcome.Violations, ", ") + ") — nothing is accepted; a person looks at it"}, res)
 	case outcome.Verdict != "pass":
 		why := outcome.Reason
-		if why == apexv1.NoVerdictReason {
+		switch {
+		case why == apexv1.NoVerdictReason:
 			// D78: a session that recorded no verdict failed the task.
 			why += " (" + sessionEnded(res.TaskExit) + "; log " + res.Log + ")"
+		case len(outcome.Background) > 0:
+			// D88: it ended its turn while its own work still ran.
+			why += " (no verdict; " + sessionEnded(res.TaskExit) + "; log " + res.Log + ")"
 		}
 		return v1Fail(cmd, f, &apexv1.FailError{Code: "delegate.fail", Msg: "the delegate failed " + task + " of " + id + ": " + why +
 			" — the task still awaits a person (`ape change accept " + id + " --task " + task + " --by <who>`)"}, res)

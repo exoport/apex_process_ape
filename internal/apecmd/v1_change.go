@@ -734,7 +734,9 @@ parent_run, and it is stopped when that orchestrator's run ends.
 
 Exit codes: 0 recorded / review passed · 1 not verified, the work changed since the verify,
 --run: a fresh review, or a red re-verify of a stale one, review block (--run: findings
-in JSON "outcome"), verdict voided, or no verdict · 2 usage
+in JSON "outcome"), verdict voided, or no verdict (review.no-verdict; when the session's
+last Stop still had background work running, the message says "ended with live
+background work: <tasks>" and JSON outcome.background lists them) · 2 usage
 (bad verdict, findings file missing, --run inside a review session, or the nesting
 rule: session.depth) · 3 --run: the orchestrator's child session is running
 (session.child-running) · 75 --run: still running, call again.`,
@@ -848,7 +850,9 @@ _apex/config.yaml delegates it:
     On a fail nothing is accepted: the task stays awaiting_human, ape status shows the
     verdict (JSON changes[].delegate.<T>: {verdict, reason, run, at}), exit 1
     delegate.fail (action person). A session that records no verdict is a fail, reason
-    "no verdict" (D78; its last message is never read for one)
+    "no verdict" (D78; its last message is never read for one), or, when its last Stop
+    still had background work running, reason "ended with live background work:
+    <tasks>" (D88; JSON outcome.background lists them)
   - no automatic retry on the same artefact (D78): after a fail, --delegate for that task
     refuses (delegate.already-failed, action person) until the change's tip moves
     (change/<id>'s tip; the archive folder's content once archived)
@@ -856,7 +860,7 @@ _apex/config.yaml delegates it:
     `+"`ape change accept <id> <T> --delegate`"+` again — it attaches to the running session
   - JSON: {id, task, skill, args, running, detached_id, log, task_exit, launch,
     outcome: {verdict, reason, evidence, notes, violations, voided, accepted,
-    verdict_file}}
+    verdict_file, background}}
 
 --verdict pass|fail --reason "<text>" [--evidence <path|url>]...: the delegate session
 records its verdict — only the session --delegate started for that change and task

@@ -21,9 +21,10 @@ func newHookCmd() *cobra.Command {
 		Long: `Claude Code hook handlers. Each reads the hook payload (JSON) on stdin.
 
   session-start   SessionStart: adds ` + "`ape status --brief`" + ` as context
-  stop            Stop and SubagentStop: in a session ape launched, blocks a stop while the
+  stop            Stop and SubagentStop: in a session ape launched, blocks the main
+                  session's stop while background work runs, and a stop while the
                   in-progress change has a red command check (at most 3 times in a row);
-                  in a person's own session, only shows what was red
+                  in a person's own session, only shows what was red or still running
   pre-tool        PreToolUse (Edit|Write|MultiEdit|NotebookEdit|Bash): denies edits to
                   development/specs/**, changes/*/state.json, archive/**, _apex/state/**,
                   an existing development/briefs/** file, and Bash commands that create,
@@ -130,8 +131,19 @@ func newHookStopCmd() *cobra.Command {
 	var f v1Flags
 	cmd := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop/SubagentStop hook: block a stop while the in-progress change's checks are red",
-		Long: `Stop and SubagentStop hook. When HEAD is on a change's branch, change/<id>, that
+		Short: "Stop/SubagentStop hook: block a stop while background work runs or the in-progress change's checks are red",
+		Long: `Stop and SubagentStop hook.
+
+Background work (D88), first: in a session ape launched, the main session's Stop (not a
+SubagentStop) is blocked while the payload's background_tasks lists anything — every
+type, a backgrounded shell and a monitor included — on any branch, so in review,
+delegate and tool sessions too. The reason starts "background work is still running",
+names each task, and tells the model to wait for it in this turn, never to end the turn
+while it runs, and next time to run a long command in the foreground with a 600000 ms
+timeout. It counts toward the same 3 consecutive blocks; once they are spent the stop is
+allowed. The tasks are recorded under "background" in the verdict, whatever it is.
+
+Checks: when HEAD is on a change's branch, change/<id>, that
 change is in-progress (read from the working tree), and any of the checks it re-runs
 exits non-zero now, prints {"decision":"block","reason":"<the failing checks' last lines
 and what to do>"}. It re-runs only the checks that were red at the change's last verify
@@ -154,10 +166,15 @@ APE_SESSION, which every session ape spawns has and Claude Code hands to its hoo
 person's own Claude Code session (plain ` + "`claude`" + `, the settings.json copy of the hook) it
 never blocks and runs no check: on an in-progress change whose last verify had red
 checks it allows the stop with {"systemMessage":"APEX: change <id> is in progress, and at
-its last verify … check(s) were red: …"}, shown to the person; otherwise it prints nothing.
+its last verify … check(s) were red: …"}, shown to the person, and with background work
+running it says so the same way ("APEX: the turn ended with background work still
+running: …"); otherwise it prints nothing.
 
-The verdict is also written to _apex/state/hooks/<session>[-<agent>].json, which
-is how ` + "`ape task`" + ` learns that a Stop it saw did not end the turn.`,
+The verdict is also written to _apex/state/hooks/<session>[-<agent>].json, and the
+main session's to the log <session>.jsonl, which is how ` + "`ape task`" + ` learns that a
+Stop it saw did not end the turn (it takes one verdict per Stop, in order), and how
+` + "`ape change review --run`" + ` and ` + "`accept --delegate`" + ` learn that a session ended with
+live background work.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			payload := readHookPayload(cmd)

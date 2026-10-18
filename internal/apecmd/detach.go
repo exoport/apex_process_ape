@@ -502,6 +502,29 @@ func sessionResult(runDir string) (string, bool) {
 	return "", false
 }
 
+// runMainSessions is the session ids of a run's main sessions (not its
+// sub-agents'), from its manifest; nil without one.
+func runMainSessions(runDir string) []string {
+	if runDir == "" {
+		return nil
+	}
+	m, err := pipeline.LoadManifest(runDir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for i := range m.Stages {
+		for j := range m.Stages[i].Steps {
+			for _, sess := range m.Stages[i].Steps[j].Sessions {
+				if sess.ParentSessionID == "" && sess.SessionID != "" {
+					out = append(out, sess.SessionID)
+				}
+			}
+		}
+	}
+	return out
+}
+
 // capUTF8 cuts s to at most n bytes, at a rune boundary.
 func capUTF8(s string, n int) (string, bool) {
 	if len(s) <= n {
