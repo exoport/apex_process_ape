@@ -25,9 +25,16 @@ type Diagnostic struct {
 	Line   int    `json:"line,omitempty"`
 }
 
-// SeverityError is the only severity: v1 has no warning tier (backlog
-// item 15) — what is worth reporting is worth failing on.
-const SeverityError = "error"
+// SeverityError is the only severity of a finding: v1 has no warning
+// tier (backlog item 15) — what is worth reporting is worth failing on.
+// SeverityNotice is not a finding: `project check`'s notices (D155 Q73)
+// are a separate list that never changes its exit, for what a person can
+// fix only at a moment of their own (a gate's scripts move with its next
+// re-approval).
+const (
+	SeverityError  = "error"
+	SeverityNotice = "notice"
+)
 
 // splitFix separates "<what> — <fix>", the shape every ape message takes,
 // into its message and its remediation.
@@ -215,6 +222,8 @@ var findingRules = []findingRule{
 	rule("", `^models\.\S+ (names no skill|is not a skill)`, CodeModelsUnknownSkill),
 	rule("", `^models\.\S+ is not a field of a models entry`, CodeModelsUnknownField),
 	rule("", `^task \S+'s check .* is not exactly human-review`, CodeMalformedHumanReview),
+	// rc.6 (rc6-e).
+	rule("", `^hot/ is not ignored by git`, CodeHotNotIgnored),
 }
 
 // UnclassifiedFinding is the code of a finding no rule matches — a

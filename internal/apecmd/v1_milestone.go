@@ -284,6 +284,16 @@ by ` + "`ape milestone gate`" + `. A milestone is done when this command exits 0
 anyone says so. Refused, as by ` + "`ape milestone gate`" + `, when ape holds no approval record or the
 gate changed since the approval (H2). ape records the close in milestones.json (done_at).
 
+Gate folders (D155 Q74): each folder development/gates/<M>-*/ (by name; development/gates/lib/
+is no milestone's and stays) moves, in the close commit (a rename: every file's content and
+sha256 unchanged), to development/archive/milestones/<M>/gate/ — one folder's contents into
+gate/, several each into gate/<folder>/ — beside the close evidence; --accept-red too. A
+gate outside development/gates/ (scripts/…) stays where it is. milestones.json records each
+move as gate_archived: [{from, to}] (JSON "gate_archived"); the approval's gate_files keep
+the paths as approved, so a verifier maps a path under "from" to "to" and compares the same
+sha256. A gate/ already there refuses the close before the gate runs, with nothing written
+(milestone.gate-archive-exists, action person: move it away).
+
 With "evidence: archive" in _apex/config.yaml (H23; default off), a green close writes the
 gate run's evidence to development/archive/milestones/<M>/evidence/ — one file per check
 (the gate command, every spec scenario, the regression command): command, exit, duration,
@@ -306,8 +316,8 @@ line inside Claude Code included) with exit 2, session.person-only. A person tag
 close.
 
 Exit codes: 0 done · 1 gate red (without --accept-red), changes in flight, not approved,
-no approval record, a changed gate, or HEAD on a change branch · 2 usage, or --accept-red
-from a model session.`,
+no approval record, a changed gate, an archived gate/ in the way, or HEAD on a change
+branch · 2 usage, or --accept-red from a model session.`,
 		Example: "  ape milestone close M1\n  ape milestone close M3 --accept-red \"ships with the known RF drift; fixed in M4\" --by diego",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -345,6 +355,9 @@ from a model session.`,
 						}
 						if a := g.AcceptRed; a != nil {
 							fmt.Fprintf(w, "recorded: closed with its gate red, accepted by %s — %s\n", a.By, a.Reason)
+						}
+						for _, a := range g.GateArchived {
+							fmt.Fprintf(w, "gate folder archived: %s/ -> %s/\n", a.From, a.To)
 						}
 					})
 				}
