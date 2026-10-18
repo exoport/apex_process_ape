@@ -190,6 +190,12 @@ var errIdle = errors.New("idle")
 // closes: CPU time its group used since the last sample counts as
 // progress, as output does (lastOut, unix nanoseconds). A check with no
 // progress for idle is cancelled with errIdle. idle <= 0 watches nothing.
+//
+// The idle verdict is judged by a timer at the exact deadline — the last
+// progress plus idle — as well as at every sample, so the kill lands at the
+// window rather than up to a sample past it (the eval measured a 15 s idle
+// killed at 20.1 s on the sample tick alone). At the deadline the CPU is
+// sampled once more, so a check busy since the last sample is not killed.
 func watchProgress(g *checkGroup, lastOut *atomic.Int64, idle time.Duration, stop <-chan struct{}, cancel context.CancelCauseFunc) {
 	if idle <= 0 {
 		<-stop
@@ -197,25 +203,31 @@ func watchProgress(g *checkGroup, lastOut *atomic.Int64, idle time.Duration, sto
 	}
 	tick := time.NewTicker(min(progressSample, idle))
 	defer tick.Stop()
+	deadline := time.NewTimer(idle)
+	defer deadline.Stop()
 	lastCPU, _ := g.cpu()
 	lastBusy := time.Now()
 	for {
+		var now time.Time
 		select {
 		case <-stop:
 			return
-		case now := <-tick.C:
-			if cpu, ok := g.cpu(); ok && cpu != lastCPU {
-				lastCPU, lastBusy = cpu, now
-			}
-			last := time.Unix(0, lastOut.Load())
-			if lastBusy.After(last) {
-				last = lastBusy
-			}
-			if now.Sub(last) >= idle {
-				cancel(errIdle)
-				return
-			}
+		case now = <-tick.C:
+		case now = <-deadline.C:
 		}
+		if cpu, ok := g.cpu(); ok && cpu != lastCPU {
+			lastCPU, lastBusy = cpu, now
+		}
+		last := time.Unix(0, lastOut.Load())
+		if lastBusy.After(last) {
+			last = lastBusy
+		}
+		left := idle - now.Sub(last)
+		if left <= 0 {
+			cancel(errIdle)
+			return
+		}
+		deadline.Reset(left)
 	}
 }
 

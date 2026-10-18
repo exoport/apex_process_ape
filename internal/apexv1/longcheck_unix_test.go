@@ -62,3 +62,21 @@ func TestRunCheck_NoOrphanAfterSIGKILL(t *testing.T) {
 		return syscall.Kill(-pgid, 0) == syscall.ESRCH
 	}, 10*time.Second, 50*time.Millisecond, "the check's process group outlived ape")
 }
+
+// The idle kill lands at the window, not at the next progress sample (eval
+// rc.3 probe L2: a 15 s idle window killed at 20.1 s, a 10 s sample late).
+// Sampling is slow here, so only the deadline timer can kill in time.
+func TestRunCheck_IdleKillAtTheDeadline(t *testing.T) {
+	needSh(t)
+	old := progressSample
+	progressSample = 2 * time.Second
+	t.Cleanup(func() { progressSample = old })
+	idle := 2500 * time.Millisecond // samples at 2 s and 4 s: the old kill was at 4 s
+	start := time.Now()
+	r := runCheck(ctx(), t.TempDir(), "sleep 30", "", TierTimeout{Idle: idle, Max: time.Minute}, nil)
+	took := time.Since(start)
+	require.Equal(t, ExitTimeout, r.Exit, r.Tail)
+	require.Equal(t, ReasonIdle, r.Reason)
+	require.GreaterOrEqual(t, took, idle)
+	require.Less(t, took, idle+time.Second, "the kill lands within a second of the idle window")
+}
