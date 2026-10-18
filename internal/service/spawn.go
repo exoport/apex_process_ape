@@ -284,6 +284,10 @@ func (s *Spawner) Spawn(kind Kind, jobID string, req RunRequest, env []string, o
 	}
 	cmd.Env = append(s.childEnv(jobID), env...)
 	configureProcessGroup(cmd)
+	// The job's end is the child's exit. Its output goes straight to the
+	// log file, so no copy waits on a descendant that kept it open; the one
+	// copy there can be — a script_source on stdin — is cut short too.
+	cmd.WaitDelay = jobWaitDelay
 
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()
@@ -299,6 +303,10 @@ func (s *Spawner) Spawn(kind Kind, jobID string, req RunRequest, env []string, o
 
 	return pid, logPath, nil
 }
+
+// jobWaitDelay bounds how long a job's end waits, after the child exited,
+// for the stdin copy of a script_source job (exec.Cmd.WaitDelay).
+const jobWaitDelay = time.Second
 
 // childEnv builds the child's environment: the daemon's own environment
 // plus APE_JOB_ID (so child event subjects carry the job id) and the

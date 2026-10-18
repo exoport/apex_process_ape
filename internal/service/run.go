@@ -139,7 +139,15 @@ func serveUntilSignal(ctx context.Context, daemon *Daemon, drainTimeout time.Dur
 	sigc := make(chan os.Signal, 2)
 	signal.Notify(sigc, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigc)
+	return drainOnSignals(ctx, daemon, drainTimeout, stderr, sigc)
+}
 
+// drainOnSignals is serveUntilSignal's choreography, on signals from sigc:
+// the first trigger (a signal, or ctx) starts the drain, and a further
+// signal or the drain timeout stops every in-flight job's tree. KillAll
+// returns once each tree has had its SIGKILL, so a forced drain ends
+// within about procGroupKillGrace of the signal, the jobs' ends recorded.
+func drainOnSignals(ctx context.Context, daemon *Daemon, drainTimeout time.Duration, stderr io.Writer, sigc <-chan os.Signal) error {
 	select {
 	case <-ctx.Done():
 	case <-sigc:
