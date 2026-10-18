@@ -187,7 +187,10 @@ func (p *Project) checkChange(id string, withCaps bool) []Finding {
 		add(1, c.MetaErr.Error())
 	}
 	for _, k := range c.UnknownKeys {
-		add(1, "frontmatter key \""+k+"\" is not one of id, milestone, touches, paths, decisions, retire, type, review_tools — fix the name, or prefix your own keys with x-")
+		add(1, "frontmatter key \""+k+"\" is not one of id, milestone, touches, paths, decisions, retire, type, review_tools, docs — fix the name, or prefix your own keys with x-")
+	}
+	if c.BadDocs != "" {
+		add(1, "frontmatter docs: is "+c.BadDocs+", not true or false — docs: true marks the milestone's docs change (D152); drop the key on any other change")
 	}
 	out = append(out, typeFindings(file, c, p.commitConfig())...)
 	if c.Meta.ID != id {
