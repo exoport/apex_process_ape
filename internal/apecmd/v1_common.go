@@ -102,6 +102,12 @@ func v1Emit(w io.Writer, f *v1Flags, v any, human func(io.Writer)) error {
 // and the one-line remediation (to stdout as JSON under --json, else to
 // stderr). partial is any result worth showing beside the failure.
 func v1Fail(cmd *cobra.Command, f *v1Flags, err error, partial any) error {
+	return v1FailWith(cmd, f, err, partial, nil)
+}
+
+// v1FailWith is v1Fail with extra top-level JSON keys (project check's
+// notices); the human output is v1Fail's.
+func v1FailWith(cmd *cobra.Command, f *v1Flags, err error, partial any, extra map[string]any) error {
 	if err == nil {
 		return nil
 	}
@@ -133,6 +139,9 @@ func v1Fail(cmd *cobra.Command, f *v1Flags, err error, partial any) error {
 		}
 		if partial != nil {
 			out["result"] = partial
+		}
+		for k, v := range extra {
+			out[k] = v
 		}
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")

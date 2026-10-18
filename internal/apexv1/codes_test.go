@@ -9,6 +9,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// noticeCodes are the codes of project check's notices (D155 Q73): the
+// only ones published with exit 0, as a notice never fails.
+var noticeCodes = []string{CodeGateOutsideGates}
+
 // The published list and the code agree: every code the source sets or a
 // finding rule yields is published with one exit, and every published code
 // is used (the unclassified fallbacks aside).
@@ -17,7 +21,11 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 	for _, c := range DiagnosticCodes {
 		_, dup := published[c.Code]
 		require.False(t, dup, "duplicate published code %s", c.Code)
-		require.Contains(t, []int{1, 2, 3}, c.Exit, c.Code)
+		if c.Exit == 0 {
+			require.Contains(t, noticeCodes, c.Code, "only a notice's code comes with exit 0")
+		} else {
+			require.Contains(t, []int{1, 2, 3}, c.Exit, c.Code)
+		}
 		require.NotEmpty(t, c.Meaning, c.Code)
 		require.Contains(t, Actions, c.Action, c.Code)
 		published[c.Code] = c.Exit
@@ -48,6 +56,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		// rc.5 (rc5-d).
 		"CodeModelsUnknownSkill": CodeModelsUnknownSkill, "CodeModelsUnknownField": CodeModelsUnknownField,
 		"CodeMalformedHumanReview": CodeMalformedHumanReview,
+		// rc.6 (rc6-e).
+		"CodeGateOutsideGates": CodeGateOutsideGates, "CodeGateArchiveExists": CodeGateArchiveExists, "CodeHotNotIgnored": CodeHotNotIgnored,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

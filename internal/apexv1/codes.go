@@ -51,6 +51,19 @@ const (
 	CodeMalformedHumanReview = "change.malformed-human-review"
 )
 
+// rc.6 (rc6-e).
+const (
+	// CodeGateOutsideGates: project check's notice (D155 Q73) for an open
+	// milestone whose gate runs scripts outside <dev>/gates/.
+	CodeGateOutsideGates = "gate.outside-gates"
+	// CodeGateArchiveExists: close cannot move the gate folders, as
+	// <dev>/archive/milestones/<M>/gate/ is there already (D155 Q74).
+	CodeGateArchiveExists = "milestone.gate-archive-exists"
+	// CodeHotNotIgnored: hot/, where secrets live, is tracked or not
+	// ignored by git (D155 Q77).
+	CodeHotNotIgnored = "hot.not-ignored"
+)
+
 // CodeDoc documents one diagnostic code.
 type CodeDoc struct {
 	Code string `json:"code"`
@@ -92,7 +105,8 @@ func ActionFor(code string) string {
 // DiagnosticCodes is the published list of every code a v1 command can
 // put in a --json diagnostic (item 13). Exit is the process status that
 // code comes with: 1 a check failed, 2 usage, 3 conflict. Finding codes
-// (from `project check` and `change check`) come with exit 1. A test
+// (from `project check` and `change check`) come with exit 1; a notice's
+// (project check's notices, D155 Q73) with 0, as it never fails. A test
 // fails when code and list disagree.
 var DiagnosticCodes = []CodeDoc{
 	// usage (exit 2)
@@ -340,5 +354,9 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeMalformedHumanReview, 1, "replan", "a task check reads as human-review but is not exactly `human-review` (D111): `human-review: <what>`, `Human-Review`, `human review …`, a trailing `.` — verify would run it as a shell command; write `- T<n> <what> — check: human-review`, the artefact and criteria in <what>"},
 	// rc.6 (rc6-d).
 	{"delegate.docs-scope", 1, "person", "accept --delegate on a docs change (change.md docs: true) with no configured delegate: its diff from base_sha to its tip touches paths outside release.docs and the development folder (named), so its docs check is not a delegate's by default (D152 Q69) — a person accepts it, or the non-docs work is re-planned into a change of its own"},
+	// rc.6 (rc6-e).
+	{CodeGateArchiveExists, 1, "person", "milestone close: the milestone has gate folders (<dev>/gates/<M>-*/) to archive, but <dev>/archive/milestones/<M>/gate/ exists already (D155 Q74): a person moves it away (or merges the folders into it), then closes again; nothing was run or written"},
+	{CodeHotNotIgnored, 1, "person", "hot/ (the project's secrets, read at run time and never committed; D155) is tracked by git or not ignored: hot/.gitignore holds the one line `*` (`ape project init` and the lift write it when absent), and `git rm -r --cached hot/` untracks what git holds there"},
+	{CodeGateOutsideGates, 0, "person", "a notice, never a finding (project check's notices; the exit is unchanged): an open milestone's gate runs scripts outside <dev>/gates/ (D155 Q73) — moving an approved gate's script is gate drift, so they move into <dev>/gates/<M>-<slug>/ with the milestone's next re-approval (before its approval, for a proposed one)"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

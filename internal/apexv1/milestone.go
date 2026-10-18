@@ -110,6 +110,10 @@ type MilestoneRecord struct {
 	// Stops are the sessions ape stopped at the milestone's enforced
 	// budget (backlog 30).
 	Stops []LimitStop `json:"stops,omitempty"`
+	// GateArchived are the gate folders close moved to the archive (D155
+	// Q74), one entry per folder: Approval.GateFiles keep the paths as
+	// approved, and ArchivedPath maps one to where it is now.
+	GateArchived []GateArchive `json:"gate_archived,omitempty"`
 }
 
 // MilestoneRecords is _apex/state/milestones.json.
@@ -340,6 +344,9 @@ type GateResult struct {
 	checks []CheckResult
 	// AcceptRed: a person closed the milestone with its gate red.
 	AcceptRed *AcceptRed `json:"accept_red,omitempty"`
+	// GateArchived: the gate folders a close moved to the archive (D155
+	// Q74), as milestones.json records them.
+	GateArchived []GateArchive `json:"gate_archived,omitempty"`
 }
 
 // RunGate runs a milestone's gate and records it; the committed record
@@ -463,9 +470,9 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 	return g, nil
 }
 
-// markDone records in milestones.json that ape closed the milestone, and
-// the red gate a person accepted, if any.
-func (p *Project) markDone(id, at string, red *AcceptRed) error {
+// markDone records in milestones.json that ape closed the milestone, the
+// red gate a person accepted, if any, and the gate folders it archived.
+func (p *Project) markDone(id, at string, red *AcceptRed, archived []GateArchive) error {
 	recs, err := p.LoadMilestoneRecords()
 	if err != nil {
 		return err
@@ -476,6 +483,9 @@ func (p *Project) markDone(id, at string, red *AcceptRed) error {
 	recs[id].DoneAt = at
 	if red != nil {
 		recs[id].AcceptRed = red
+	}
+	if len(archived) > 0 {
+		recs[id].GateArchived = archived
 	}
 	return p.saveMilestoneRecords(recs)
 }
@@ -576,6 +586,11 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 		}
 		return &GateResult{Milestone: id, Status: m.Status, InFlight: inFlight}, fe
 	}
+	// Where its gate folders go (D155 Q74), refused before the gate runs.
+	gatePlan, err := p.gateArchivePlan(id)
+	if err != nil {
+		return nil, err
+	}
 	g, err := p.runGate(ctx, id, opt)
 	if err != nil {
 		return nil, err
@@ -596,6 +611,12 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 	if err != nil {
 		return nil, err
 	}
+	// The gate folders move to the archive in the close commit, first, so
+	// a move that fails leaves the milestone open.
+	moved, err := p.archiveGateFolders(ctx, gatePlan)
+	if err != nil {
+		return nil, err
+	}
 	sha := g.Run.SHA
 	if sha == "" {
 		sha = "0000000"
@@ -612,11 +633,11 @@ func (p *Project) closeMilestone(ctx context.Context, id string, opt RunOptions,
 	if err := writeFileAtomic(p.RoadmapMD(), updated); err != nil {
 		return nil, err
 	}
-	if err := p.markDone(id, g.Run.At, red); err != nil {
+	if err := p.markDone(id, g.Run.At, red, gatePlan); err != nil {
 		return nil, err
 	}
-	g.Status, g.AcceptRed = MilestoneDone, red
-	var extra []string
+	g.Status, g.AcceptRed, g.GateArchived = MilestoneDone, red, gatePlan
+	extra := moved
 	if p.evidenceOn() {
 		if g.Evidence, err = p.writeMilestoneEvidence(id, g.checks); err != nil {
 			return g, err

@@ -348,6 +348,9 @@ func initSkeleton(ctx context.Context, root string, brownfield bool) (*InitResul
 		// A whitelist: whatever ape adds to _apex/state/ later is ignored
 		// unless it is named here.
 		{p.StateGitignore(), runlog.V1StateGitignore},
+		// hot/, the project's secrets (D155 Q77): its `*` ignores the
+		// .gitignore too, so nothing there is ever committed.
+		{p.HotGitignorePath(), HotGitignore},
 	}
 	for _, s := range steps {
 		if err := write(s.path, s.content); err != nil {
@@ -477,10 +480,11 @@ func (p *Project) trackedClean(ctx context.Context, rel string) bool {
 // clean after it (D11): only what init itself wrote — a brownfield repo's
 // own dirty files stay as they were, and so does a config init amended
 // but did not commit (AmendedUncommitted). project.json is ignored (the
-// whitelist), so it is not staged; the whitelist always is, in case
-// another ape command wrote it before init ran.
+// whitelist), so it is not staged, nor is hot/.gitignore (its own `*`
+// ignores it: staging it by name would fail); the whitelist always is, in
+// case another ape command wrote it before init ran.
 func (p *Project) initCommitPaths(res *InitResult) []string {
-	skip := map[string]bool{p.Rel(p.ProjectJSON()): true}
+	skip := map[string]bool{p.Rel(p.ProjectJSON()): true, p.Rel(p.HotGitignorePath()): true}
 	for _, u := range res.AmendedUncommitted {
 		skip[u] = true
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
@@ -76,6 +77,12 @@ appended to an _apex/config.yaml that has no models: block).
   development/decisions/
   development/briefs/                each plan's input, dated and verbatim (YYYY-MM-DD-<slug>.md,
                                      written by apex-plan; never edited — see ape project check)
+  hot/.gitignore                     "*" when hot/ has no .gitignore (an existing one is kept):
+                                     hot/ holds the project's secrets, which gates and checks
+                                     read at run time ("$(cat hot/<name>)"), never as
+                                     literals. The "*" ignores the .gitignore too, so hot/
+                                     stays this checkout's and is not in the init commit
+                                     (see ape project check: hot.not-ignored)
   _apex/state/                       ape's own records (never edited by a model; never touched
                                      by ape framework update): milestones.json, decisions.json
                                      tracked; logs/, runs/, hooks/ ignored. Its .gitignore is a
@@ -92,8 +99,8 @@ A hook that was altered (another matcher, async, a shorter stop timeout) is repl
 by the one above; running init again changes nothing. ape task passes the same
 hooks inline as well, so its sessions have them even when settings.json does not.
 
-Everything init wrote (and settings.json when it merged hooks) is committed as
-"apex: project init", with the files it amended (CLAUDE.md, AGENTS.md, and the config
+Everything init wrote but hot/.gitignore (and settings.json when it merged hooks) is
+committed as "apex: project init", with the files it amended (CLAUDE.md, AGENTS.md, and the config
 when it was tracked and clean); other files that existed before are not touched and
 not committed. JSON: "amended" lists the files init changed, "amended_uncommitted"
 those it left out of the commit.
@@ -323,6 +330,11 @@ func newProjectCheckCmd() *cobra.Command {
                            marketplaces, plugins, tools, human_review, release (D120) —
                            and is not ape's (config.changed, D50) — a person reverts it or
                            accepts it: ` + "`ape project accept-config`" + `
+  hot/                     the project's secrets (D155): when hot/ exists, git ignores a new
+                           file in it (hot/.gitignore "*", which init and the lift write, or
+                           any ignore rule), and git tracks nothing under it — else
+                           hot.not-ignored (action person: give it the .gitignore and
+                           untrack the rest, ` + "`git rm -r --cached hot/`" + `); no hot/ is no finding
   caps                     _apex/config.yaml caps: (D69) — sizes like 16KB, 1MiB or plain
                            bytes, KB = KiB = 1024 bytes; default / hard ceiling:
                              project_md   16 KB / 48 KB    agents_md    16 KB / 48 KB
@@ -376,6 +388,17 @@ func newProjectCheckCmd() *cobra.Command {
                            user-invocable: false (tools.not-invocable); a plugin skill
                            is judged only when claude is on PATH. See ape plugins --help
 
+Notices (D155 Q73) are not findings: listed as "notice: <file>:<line>: …" lines on stderr
+and under "notices" with --json ({severity: "notice", code, message, fix, action, file,
+line}; [] when none, beside the findings on a failure too), they never change the exit.
+  gate.outside-gates       an open (proposed or approved) milestone's gate runs a script
+                           file outside development/gates/ (scripts/e2e.sh, say; a gate
+                           that runs no script file, like make e2e, has none): apex-plan
+                           writes gates into development/gates/<M>-<slug>/, and moving an
+                           approved gate's script is gate drift, so it moves with the
+                           milestone's next re-approval (before its approval, when
+                           proposed). See ape milestone close --help for the gate folders
+
 Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --json) · 2 usage.`,
 		Example: "  ape project check\n  ape project check --json",
 		Args:    cobra.NoArgs,
@@ -391,20 +414,43 @@ Exit codes: 0 green · 1 findings (listed on stderr, or under "findings" with --
 			cli := apexv1.ListOnce(pluginCLIOrNil())
 			fs = append(fs, p.CheckPlugins(cmd.Context(), cli)...)
 			fs = append(fs, p.CheckPluginContents(cmd.Context(), cli)...)
+			// Notices never change the exit (D155 Q73).
+			notices := p.Notices()
+			if notices == nil {
+				notices = []apexv1.Diagnostic{}
+			}
+			if !f.json {
+				printNotices(cmd.ErrOrStderr(), notices)
+			}
 			if len(fs) > 0 {
-				return v1Fail(cmd, &f, &apexv1.FailError{
+				return v1FailWith(cmd, &f, &apexv1.FailError{
 					Code:     "project.check-failed",
 					Msg:      fmt.Sprintf("%d finding(s) — fix them and run `ape project check` again", len(fs)),
 					Findings: fs,
-				}, nil)
+				}, nil, map[string]any{"notices": notices})
 			}
-			return v1Emit(cmd.OutOrStdout(), &f, map[string]any{"ok": true, "findings": []apexv1.Finding{}}, func(w io.Writer) {
+			return v1Emit(cmd.OutOrStdout(), &f, map[string]any{"ok": true, "findings": []apexv1.Finding{}, "notices": notices}, func(w io.Writer) {
 				fmt.Fprintln(w, "project check: green")
 			})
 		},
 	}
 	addV1Flags(cmd, &f)
 	return cmd
+}
+
+// printNotices prints project check's notices, one `notice:` line each.
+func printNotices(w io.Writer, notices []apexv1.Diagnostic) {
+	for _, n := range notices {
+		loc := n.File
+		if n.Line > 0 {
+			loc += ":" + strconv.Itoa(n.Line)
+		}
+		line := "notice: " + loc + ": " + n.Message
+		if n.Fix != "" {
+			line += " — " + n.Fix
+		}
+		fmt.Fprintln(w, line)
+	}
 }
 
 func newProjectCodesCmd() *cobra.Command {
@@ -424,7 +470,8 @@ re-start), review (review again), replan (apex-change re-plans), stop (the run s
 where its meaning names a case that changes it (milestone.changes-in-flight), the diagnostic
 carries the action of the case (D49). "code" says which rule; "message" and
 "fix" are for people. Codes are stable: a new rule gets a new
-code, and a code's meaning never changes. severity is always "error" (no warning tier).
+code, and a code's meaning never changes. severity is always "error" (no warning tier);
+project check's notices, severity "notice", are no failure's diagnostics (exit 0 here).
 Exit: 1 check failed · 2 usage · 3 conflict (nothing written).`,
 		Example: "  ape project codes\n  ape project codes --json",
 		Args:    cobra.NoArgs,

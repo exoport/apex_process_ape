@@ -117,7 +117,9 @@ The commit:
                  shell ${…}) or a lone … — is listed, not run; Go's ./... is no
                  placeholder. A trailing " # …" shell comment is dropped first
   lays down      the v1 skeleton, as ` + "`ape project init --brownfield`" + ` (CLAUDE.md keeps its
-                 content, loses the v0 apex:managed block and gains @AGENTS.md)
+                 content, loses the v0 apex:managed block and gains @AGENTS.md),
+                 hot/.gitignore (` + "`*`" + `, when hot/ has none) included: it ignores
+                 itself, so it is not in the lift commit
   writes         development/lift-disposition.md (16 KB, unless its candidates need
                  more): the binding-rule candidates (CLAUDE.md list items,
                  project-context "don't miss" items, team-memory gotcha titles), EVERY

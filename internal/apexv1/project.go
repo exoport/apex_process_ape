@@ -161,6 +161,7 @@ func (p *Project) Check() []Finding {
 	add(p.humanReviewFindings()...)
 	add(p.modelsFindings()...)
 	add(p.settingsIgnoredFindings(context.Background())...)
+	add(p.hotFindings(context.Background())...)
 	add(p.provenanceFindings(context.Background())...)
 	add(p.capsConfig().OverCeiling()...)
 	caps := p.caps()
