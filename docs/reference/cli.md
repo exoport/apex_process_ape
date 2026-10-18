@@ -1636,7 +1636,8 @@ Validate one change and list every failure:
   - frontmatter id = folder, milestone in roadmap.md (or "none": a fix, D40, approved
     with `ape change approve`), touches non-empty kebab slugs, decisions exist in
     decisions/, paths are valid globs; type: (the archive commit's {type}, D47) one of
-    feat, fix, perf, refactor, docs, test, build, ci, chore — required only when
+    the project's commit types — _apex/config.yaml commit.types (D120), default feat,
+    fix, perf, refactor, docs, test, build, ci, chore — required only when
     _apex/config.yaml commit.subject uses {type} (change.no-type; change.bad-type);
     review_tools: [<name>, …] names tools.review entries of _apex/config.yaml whose
     when: the change matches (the orchestrator runs each before the review; else
@@ -1658,7 +1659,10 @@ Validate one change and list every failure:
     keeps every scenario of the requirement it replaces, each with the same check
     (it may add scenarios); changed behaviour is REMOVED + ADDED under a new name.
     A name that nearly matches an existing heading (case, spacing, a typo) gets a
-    "did you mean"; an ADDED that nearly matches one is refused.
+    "did you mean"; an ADDED that nearly matches one is refused. An ADDED block of a
+    new capability may carry its "Purpose:": that line and every line after it up to a
+    blank line, heading or fenced code, kept whole as the new spec's Purpose (never in
+    the requirement)
   - nothing archive would drop: no prose before the first delta block, nothing but
     "Reason:" in a REMOVED block
   - a delta that REMOVES every requirement of a capability needs "retire: [<cap>]" in
@@ -1670,6 +1674,11 @@ Validate one change and list every failure:
     "- T<n> <what> — tool: <name> — check: <command> | human-review", <name> a
     tools.design entry of _apex/config.yaml (else tools.unknown, D74; see
     `ape plugins --help`); ape status --json lists it under changes[].tools
+  - a human-review check is exactly "human-review": the artefact and the criteria go
+    in <what>, before " — check:". A check that starts with human-review or "human
+    review" in any case but is anything else ("human-review: read the README",
+    "Human-Review", "human-review.") would run as a shell command, and is
+    change.malformed-human-review (action replan; start refuses it)
 
 The change is checked as the branch holding its records has it, against that branch's
 specs and roadmap (D51 Q17; `ape change --help`): HEAD needs to be on no particular branch.
@@ -2103,10 +2112,18 @@ changed — is undone after it and reported (JSON "stray_files"); files that wer
 before it ran are never touched.
 With "regression: <cmd>" in _apex/config.yaml (with tiers, its change tier), the
 regression command runs too (recorded in the results with kind "regression") and is judged against the change's regression
-baseline (JSON "regression": {cmd, exit, baseline_exit, pre_existing_red, failed}): it
-fails verify only when it is newly red — green at baseline, red now — or when the change
-has no baseline for this command (re-start records one). Red at baseline and still red
-is reported (pre_existing_red), not failed: the planner roadmaps it.
+baseline (JSON "regression": {cmd, exit, baseline_exit, pre_existing_red, failed,
+new_failures}): it fails verify only when it is newly red — green at baseline, red now —
+or when the change has no baseline for this command (re-start records one). Red at
+baseline and still red is reported (pre_existing_red), not failed: the planner roadmaps
+it — unless a test fails now that did not then. When both runs name their failing tests
+(go test "--- FAIL:", gotestsum "=== FAIL:", pytest, cargo, jest; the baseline's are in
+state.json regression_baseline.failing, recorded at start since rc.5), every test failing
+now must have failed at baseline, else verify fails with the new ones in new_failures
+(the first 50; new_failures_total counts them); when either run names none (a baseline
+recorded before rc.5, or one naming more than 500, which stores none, included), red at
+both is pre-existing, as before. new_failures also lists a red run's tests against a
+green baseline.
 The working tree must hold no uncommitted changes outside development/ — commit first
 (trailer "Change: <id>"): a verify belongs to a sha. HEAD must be on the change's branch,
 change/<id> (D38; else exit 1, code change.wrong-branch).
@@ -3660,7 +3677,9 @@ when one is configured — its milestone tier, "regression: {change: <cmd>, mile
 only needs not to be newly red: it is judged against the earliest regression baseline,
 for the same command, recorded by any change of the milestone (active or archived; a fix,
 milestone: none, is no change of any milestone and never supplies it — D40);
-red there and red now is reported (JSON run.regression.pre_existing_red), not failed.
+red there and red now is reported (JSON run.regression.pre_existing_red), not failed —
+unless, with failing tests named by both runs (as for `ape change verify`), a test fails
+now that did not at that baseline: red, the names in run.regression.new_failures.
 When no change of the milestone has a baseline for the command, a red regression fails
 the gate: nothing shows it was red before the milestone's work — always the case for a
 milestone tier that differs from the change tier, which no change baselines. Timeouts:
@@ -4048,9 +4067,11 @@ Validate the whole project and list every failure, not just the first.
                            from the text of the commit that added it, in the working
                            tree or a later commit (brief.edited: restore it, write a
                            new dated brief)
-  specs/<cap>/spec.md      # title, Purpose:, "### Requirement: <name>" each with ≥ 1
-                           "#### Scenario:" and exactly one "- check: <cmd> | human-review"
-                           per scenario; ≤ caps.spec (24 KB; "split into two capabilities")
+  specs/<cap>/spec.md      # title, Purpose: (the line and those after it up to a blank
+                           line, heading or fenced code), "### Requirement: <name>" each
+                           with ≥ 1 "#### Scenario:" and exactly one "- check: <cmd> |
+                           human-review" per scenario; ≤ caps.spec (24 KB; "split into two
+                           capabilities")
   decisions/NNNN-<slug>.md # ADR-NNNN: title, Status, Date, Context/Decision/Consequences,
                            Enforced by; an accepted one recorded in decisions.json
                            (decision.accepted-unrecorded: `ape decision accept` records it)
@@ -4067,8 +4088,8 @@ Validate the whole project and list every failure, not just the first.
                            state and never asked for
   config                   since the v1 epoch, a commit that changed a guarded block of
                            _apex/config.yaml — limits, checks, retries, requires, timeouts,
-                           caps, regression, commit, evidence, marketplaces, plugins, tools,
-                           human_review —
+                           caps, regression, commit (types included), evidence,
+                           marketplaces, plugins, tools, human_review, release (D120) —
                            and is not ape's (config.changed, D50) — a person reverts it or
                            accepts it: `ape project accept-config`
   caps                     _apex/config.yaml caps: (D69) — sizes like 16KB, 1MiB or plain
@@ -4084,6 +4105,15 @@ Validate the whole project and list every failure, not just the first.
                            change_md counts change.md without ## Notes (D89); the whole
                            change.md, Notes included, has the 48 KB ceiling whatever the
                            cap (change.over-ceiling, action apply)
+  models                   each _apex/config.yaml models: key names a skill — one of the
+                           defaults `ape project init` writes, a project or user skill
+                           (.claude/skills/<key>/SKILL.md), or a skill tools: or
+                           human_review names — else models.unknown-skill: the entry pins
+                           nothing (models.effort is not a skill: a skill's effort goes
+                           inside its entry, {model, effort}; the default for every
+                           session is the top-level effort:); an entry is a model name or
+                           {model, effort}, any other field is models.unknown-field (both
+                           action person)
   docs                     each path _apex/config.yaml docs: names (changelog, user_docs)
                            exists (docs.missing: create it, or fix the path)
   .claude/settings.json    ape's hooks registered as `ape project init` writes them:
@@ -4216,7 +4246,8 @@ appended to an _apex/config.yaml that has no models: block).
                                      rc.4 to add it
   CLAUDE.md                          "@AGENTS.md"; an existing CLAUDE.md without that line
                                      gets it appended, and nothing else
-  development/project.md             vision, users, scope, out of scope, constraints (skeleton)
+  development/project.md             vision, users, scope, out of scope, constraints (skeleton);
+                                     optional: stack or tools (either name, D118), notes
   development/roadmap.md             "# Roadmap"
   development/specs/                 empty: no backfill — a spec is born from its first change
   development/changes/               the changes in flight
@@ -4414,9 +4445,15 @@ The commit:
                  so are ids in a data-shaped comment, which a tool may parse: one
                  opening with a lowercase key ("# owner: …") or a record of
                  key: value fields ("# pending: q | owner: …"), and so is a comment
-                 using an id as a possessive ("Story 3.2's own test"), which no
-                 removal keeps whole. An aside split over comment lines loses
-                 both brackets with its id: no line is left starting with ")".
+                 using an id or a removed path as a possessive ("Story 3.2's own
+                 test", "development/deferred/'s Gates"), which no removal keeps
+                 whole. An aside split over comment lines loses both brackets
+                 with its id, and a mark a removal leaves at the start of a line
+                 moves to the end of the line above ("(ADR-0008," over "Story
+                 1.3), extracted" → "(ADR-0008)" over "extracted"; a separator
+                 goes): no edited line starts with ")" or "." or loses the
+                 blank after its "//". Only a bracket pair the removal emptied
+                 goes: run()'s, []byte stay.
                  Tokenized: Go (go/scanner), shell, Python, JS/TS (JSX/TSX: comments
                  that begin their line only), Dart, YAML, Makefile (recipe lines are
                  the shell's: left), C/C++. A file the tokenizer cannot read, a
@@ -4437,27 +4474,37 @@ The commit:
                  placeholder. A trailing " # …" shell comment is dropped first
   lays down      the v1 skeleton, as `ape project init --brownfield` (CLAUDE.md keeps its
                  content, loses the v0 apex:managed block and gains @AGENTS.md)
-  writes         development/lift-disposition.md (at most 16 KB): the binding-rule
-                 candidates (CLAUDE.md list items, project-context "don't miss" items,
-                 team-memory gotcha titles) with an empty Disposition column for
-                 apex-plan, then a fresh read-only review, then the person, who deletes
-                 it. Then, as summaries: code and CI that still read removed paths, one
-                 line per file with its count and first reference (CI guards over the
-                 v0 corpus show up there), and edited files a guard hashes, first; ADR
-                 gaps; ids left and files not edited, counted per file; references in
-                 evidence and docs, counted; readings at the tag. Every list whole goes
-                 to _apex/state/lift-disposition.json after the commit: ignored by
-                 the state folder's whitelist, never committed, in this checkout only
+  writes         development/lift-disposition.md (16 KB, unless its candidates need
+                 more): the binding-rule candidates (CLAUDE.md list items,
+                 project-context "don't miss" items, team-memory gotcha titles), EVERY
+                 one, with an empty Disposition column for apex-plan, then a fresh
+                 read-only review, then the person, who deletes it. Then, as summaries:
+                 code and CI that still read removed paths, one line per file with its
+                 count and first reference (CI guards over the v0 corpus show up there),
+                 and edited files a guard hashes (at most 50), first; ADR gaps; ids left
+                 and files not edited, counted per file; references in evidence and
+                 docs, counted; readings at the tag. To fit 16 KB the summaries shrink
+                 to counts, then the ADR table to the ADRs with gaps; the candidates are
+                 never cut to fit it: the file grows past 16 KB to hold them, up to
+                 48 KB, and only past 48 KB lists the first ones and says how many more
+                 there are and where. Every list whole goes to
+                 _apex/state/lift-disposition.json after the commit: ignored by the
+                 state folder's whitelist, never committed, in this checkout only
 
 A byte-identity perimeter: a file a test, CI script or lock file hashes goes red once
 the lift edits a comment in it. The plan lists, as "hashed", the edited files that a lock
-file names, that a test or CI file names within 3 lines of a hash word (sha256,
-checksum, fingerprint, byte-identical, …), or that sit beside a hashing test that globs
-or names them — run --dry-run, then --exclude them. Documents and evidence (.md, .json,
-.log, .txt, anything under an evidence folder) never count as hashers. What a lock file
-names is listed first; at most 50 are listed, edited_but_hashed_total counts them all.
-It is a heuristic: a copy compared byte for byte with no hash (an embedded mirror of a
-hashed file) needs its own --exclude.
+file names, that a test or CI file names within 3 lines of a hash word or call (sha256,
+sha256sum, checksum, fingerprint, byte-identical, crypto/sha3, hashlib, …), or that sit
+beside a hashing test that globs or names them — run --dry-run, then --exclude them. A
+test or CI file hashes only when a hash word or call stands outside its comments: one
+that says "byte-identical" in prose hashes nothing. Documents and evidence (.md, .json,
+.log, .txt, anything under an evidence folder) never count as hashers. The order is
+how sure the match is: what a lock file names, then what a hasher names (by path, or a
+test beside the file by its name), then what only its folder ties to a hasher (a glob,
+a ReadDir). --dry-run lists every one, text and --json; a real lift's output and the
+disposition file list at most 50, edited_but_hashed_total counts them all, and the
+report has every one. It is a heuristic: a copy compared byte for byte with no hash (an
+embedded mirror of a hashed file) needs its own --exclude.
 
 The regression command runs twice (--no-verify-run skips both): at the tag, before
 anything is written, and at the lift commit — the baseline red gates are judged against.
@@ -4468,10 +4515,19 @@ regression_new_failures) · red-after-lift (green at the tag: the LIFT broke it 
 in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127: a
 tool it runs is missing here, which is not a red) · red-no-baseline. Red at both, the
 failing tests are compared by name where the output names them (go test "--- FAIL:",
-pytest "FAILED", cargo "... FAILED", jest "✕"); otherwise by output hash, and a changed
+gotestsum "=== FAIL: <pkg> <test>" and "✖ <pkg>", pytest "FAILED", cargo "... FAILED",
+jest "✕"); otherwise by output hash — tool-install lines ("(re)installing …", as bingo
+prints on a first run) and durations (0.12s, 4m19s, (12ms)) left out — and a changed
 output stays red-at-tag with the note "the output changed after the lift", never called
-pre-existing. The exit code stays 0: the commit stands either way, and the verdict is in
---json and the output.
+pre-existing. A command that is a chain joined with && at its top level (outside quotes,
+( ), { }, $( ) and backticks; ;, || and pipes stay inside a command) runs command by
+command at both points, past a red one, so a red lint cannot hide the tests after it:
+each command is judged on its own, regression_verdict and the regression_* fields are
+the worst one's, and --json lists every command in regression_commands (cmd, verdict,
+note, new_failures, regression, regression_at_tag; logs regression-<n>.log and
+regression-<n>-at-tag.log). From a command that changes the shell's state (cd, export,
+source, NAME=value, …) on, the chain stays one command. The exit code stays 0: the
+commit stands either way, and the verdict is in --json and the output.
 
 --from-update is how the framework's v1.0.0 migration entry runs it inside
 `ape framework update`: uncommitted changes under .claude/skills/, _apex/ (not
@@ -4547,6 +4603,15 @@ Single-spaced text on one line is typed exactly as before.
 After typing, ape presses Enter once claude has drawn the line, then
 confirms the submit through the UserPromptSubmit hook, pressing Enter up
 to twice more; a line still not submitted fails the session (exit 1).
+
+In an APEX v1 project whose .claude/settings.json registers the stop hook
+(ape hook stop), the hook decides each Stop, as under ape task: a Stop it
+blocks (background work still running, or a red check on an in-progress
+change's branch) continues the turn instead of ending the session, which
+completes on the first Stop the hook allows, or at --idle-timeout /
+--max-duration. prompt.yaml records each verdict under stop_gate. With
+--ignore-project-settings the hook does not run, and the first Stop ends
+the session.
 
 Records land under <project>/_output/ape/prompts/<prompt-id>/ (in an
 APEX v1 project, _apex/state/runs/prompts/<prompt-id>/) (runlog
@@ -5733,9 +5798,10 @@ daemon registers a NATS micro service on
 and accepts JSON request/reply jobs: task.run dispatches an ape child
 process (headless, PTY-only); job.status / job.list / job.stop manage
 them; status / health report the daemon. NATS-micro $SRV.PING /
-$SRV.INFO / $SRV.STATS discovery is available for free. prompt.run and
-script.run are registered but rejected (VALIDATION) until their runners
-ship. pipeline.run is registered and always rejected (VALIDATION): `ape pipeline`
+$SRV.INFO / $SRV.STATS discovery is available for free. prompt.run runs
+ape prompt, and script.run ape script (a script_path inside the allowlist,
+or script_source only with allow_script_source: true in service.yaml).
+pipeline.run is registered and always rejected (VALIDATION): `ape pipeline`
 was retired with APEX v0.
 
 Admission is keyed exclusivity, exclusive by default: a job holds its
@@ -5775,7 +5841,11 @@ boundary (see docs/how-to/run-ape-as-a-service.md).
 
 Shutdown is graceful: SIGINT/SIGTERM stops accepting new jobs and waits for
 in-flight children (indefinitely by default; bound it with --drain-timeout).
-A second signal terminates them immediately.
+A second signal terminates them immediately: each job's whole process tree,
+its claude session and that session's commands included, gets SIGTERM and,
+half a second later, SIGKILL; the daemon records each job's end and exits,
+about a second after the signal. job.stop stops one job the same way. (On
+Windows only the child process itself is killed.)
 
 Exit codes: 0 clean shutdown · 1 connect/registration failure · 2 usage or
 config error (bad --name, missing/invalid service.yaml, no NATS URL).
@@ -6037,6 +6107,10 @@ Show where the project stands, from the records ape keeps:
     there from any branch). Not the same field as "next", the step above
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
+  - JSON "config": {commit_types, release_scheme} — the project's commit types
+    (commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore) and
+    release scheme (release.scheme: semver, the default, date or edition), defaults filled
+    in, for apex-change and apex-release (D120)
   - the latest ape task run (JSON "latest_run": {skill, run_id, status, stopped,
     resets, resets_at, message, depth, parent_run}): how it ended, e.g. "stopped:
     usage-limit, resets 2026-10-16T23:00:00+02:00" when a claude.ai usage limit
@@ -6058,11 +6132,11 @@ detail}). A running board is posted to; with none running, .aboard/aboard.json i
 rewritten in place. ape never creates a board. The tab is not authoritative: it is a view
 of this report, nothing reads it back, and where the two disagree the tab is wrong. A
 refresh never changes a command's exit code or stdout (a problem is one line on stderr),
-and one that would change nothing writes nothing. The tab is marked quiet: true, so the
-board raises no unread dot or banner for ape's refreshes — from the aboard release that
-honours it. Until ape pins that release, a changed view posted to a running board still
-raises the tab's unread dot (aboard v0.3.0 ignores quiet, silently); a refresh written to
-the file, with no board running, raises none.
+and one that would change nothing writes nothing. The tab is quiet (aboard v0.4.0, D126):
+ape's refreshes raise no notification, unread dot or banner. Going quiet is announced once,
+when ape creates the tab (or first refreshes one an older ape made). ape sets quiet only
+that once: if a person turns it off from the tab's menu, it stays off, and ape's changed
+views raise the dot again.
 
 Exit codes: 0 ok · 2 usage. --board exits 0 whatever the board did.
 

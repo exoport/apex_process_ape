@@ -32,6 +32,21 @@ v0.4.0 (D126).
   or together, with no migration. The init skeleton's section names both and
   says that a pinned version is a decision (ADR), whichever name is used.
 
+### Commit types and release scheme (D120)
+
+- **`commit.types:`** (in the guarded `commit:` block) replaces the type list
+  `change check` holds change.md's `type:` to — a non-empty list of lower-case
+  tokens, none twice; absent, the rc.4 list (feat, fix, perf, refactor, docs,
+  test, build, ci, chore). `change.bad-type` names the project's list.
+- **`release.scheme:`** (a new guarded `release:` block): `semver` (the
+  default), `date` or `edition`. ape validates and guards it; apex-release
+  proposes the next version by it.
+- The `commit:` and `release:` blocks refuse unknown keys (`commit.type:` is
+  an error, not silently ignored). `ape project init` writes neither key, and a
+  missing key behaves as in rc.4: no migration. `ape status --json` gains
+  `config: {commit_types, release_scheme}`, the defaults filled in (class C,
+  additive).
+
 ### Regression judge (class C)
 
 - **Failing test names, not only exit codes** (item 11b, Q47): a change's
