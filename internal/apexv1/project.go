@@ -9,7 +9,8 @@ import (
 	"strings"
 )
 
-// Required and optional project.md sections (brief 4.1).
+// Required project.md sections (brief 4.1). The optional ones — ## Stack or
+// ## Tools (either, or both: D118) and ## Notes — are not checked.
 var (
 	projectRequired = []string{"Vision", "Users", "Scope", "Out of scope", "Constraints"}
 )

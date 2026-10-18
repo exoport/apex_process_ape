@@ -162,6 +162,23 @@ func TestValidateProjectMD(t *testing.T) {
 	require.Empty(t, ValidateProjectMD("development/project.md", big, 48<<10), "a configured cap is the one measured")
 }
 
+// D118: ## Stack and ## Tools are both optional and both valid, alone,
+// together or absent; the skeleton names both.
+func TestValidateProjectMD_StackOrTools(t *testing.T) {
+	limit := DefaultCaps().ProjectMD
+	for name, extra := range map[string]string{
+		"neither": "",
+		"stack":   "## Stack\nGo 1.27\n",
+		"tools":   "## Tools\nA word processor and a style guide.\n",
+		"both":    "## Stack\nGo\n## Tools\nmake\n",
+		"empty":   "## Tools\n",
+	} {
+		require.Empty(t, ValidateProjectMD("development/project.md", projectMD+extra, limit), name)
+	}
+	require.Contains(t, projectSkeleton, "## Stack")
+	require.Contains(t, projectSkeleton, "## Tools")
+}
+
 func TestValidateDecision(t *testing.T) {
 	good := "# ADR-0001: Use sh\nStatus: accepted\nDate: 2026-10-15\n## Context\nc\n## Decision\nd\n## Consequences\nx\nEnforced by: review\n"
 	require.Empty(t, ValidateDecision("development/decisions/0001-use-sh.md", "0001-use-sh.md", good))
