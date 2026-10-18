@@ -471,3 +471,36 @@ func TestNesting_ReviewRunFromASkillSessionIsRefused(t *testing.T) {
 	require.Equal(t, apexv1.CodeSessionDepth, out.Diagnostics[0].Code)
 	require.Equal(t, apexv1.ActionStop, out.Diagnostics[0].Action)
 }
+
+// `review --run` takes the orchestrator's child lock before it reads the
+// change (eval rc.3 probe: a second review on a draft change answered
+// change.wrong-status, not session.child-running): a busy lock is exit 3
+// whatever the change's status, and a refusal after the lock was taken
+// releases it.
+func TestNesting_ReviewRunTakesTheChildLockFirst(t *testing.T) {
+	root := v1Repo(t)
+	outsideEverySession(t)
+	_, _, err := v1Exec(t, newChangeCmd, "new", "add-wave", "--milestone", "M1", "--touches", "greeting", "--cwd", root)
+	require.NoError(t, err, "a draft change")
+	inSession(t, "task/orch-run", 1)
+	registerRow(t, orchestratorRow())
+
+	other := &sessionLaunch{depth: 2, skill: "apex-apply", parentRun: "orch-run"}
+	require.NoError(t, other.acquire(root, "detached-other"))
+	stdout, _, err := v1Exec(t, newChangeCmd, "review", "add-wave", "--run", "--json", "--cwd", root)
+	require.Equal(t, exitV1Conflict, exitCodeOf(t, err), stdout)
+	var out struct {
+		Diagnostics []apexv1.Diagnostic `json:"diagnostics"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &out), stdout)
+	require.Equal(t, apexv1.CodeChildRunning, out.Diagnostics[0].Code)
+	other.release()
+
+	// The lock free: the change is not verified, so the review is refused
+	// on its status, and the lock it took is not left behind.
+	stdout, _, err = v1Exec(t, newChangeCmd, "review", "add-wave", "--run", "--json", "--cwd", root)
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err), stdout)
+	require.Contains(t, stdout, apexv1.CodeWrongStatus)
+	_, statErr := os.Stat(filepath.Join(runlog.SessionLocksRoot(root), "child-orch-run.json"))
+	require.ErrorIs(t, statErr, os.ErrNotExist, "the refused review released its lock")
+}

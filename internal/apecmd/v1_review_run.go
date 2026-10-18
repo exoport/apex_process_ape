@@ -113,22 +113,34 @@ func runReviewSession(cmd *cobra.Command, f *v1Flags, p *apexv1.Project, id, mod
 	}
 	var verified *apexv1.VerifyResult
 	if run == nil || h == nil {
+		// An orchestrator's one child at a time, taken before anything
+		// reads the change: a second child is refused as busy
+		// (session.child-running) whatever the change's status, as a direct
+		// `ape task` is. It is held under the detached run's id, which the
+		// review session's `ape task` takes over.
+		detachedID := newDetachedID()
+		if err := launch.acquire(p.Root, detachedID); err != nil {
+			return v1Fail(cmd, f, err, nil)
+		}
 		// A reviewed change whose review went stale is verified again
 		// first, then reviewed as a verified one (D51 Q16) — under the
 		// change's run lock, so never beside a detached verify (D58 2.1).
 		lock, held, err := p.TakeRunLock(ctx, "change review", id)
 		if err != nil {
+			launch.release()
 			return v1Fail(cmd, f, err, nil)
 		}
 		if held != nil {
+			launch.release()
 			return v1Fail(cmd, f, apexv1.RunBusy(held), nil)
 		}
 		verified, err = p.ReverifyStaleReview(ctx, id, f.runOptions())
 		p.ReleaseRunLock(lock)
 		if err != nil {
+			launch.release()
 			return failReverify(cmd, f, id, verified, err)
 		}
-		if run, h, err = startReviewSession(ctx, p, id, model, effortFlag, launch); err != nil {
+		if run, h, err = startReviewSession(ctx, p, id, model, effortFlag, launch, detachedID); err != nil {
 			return v1Fail(cmd, f, err, nil)
 		}
 	}
@@ -186,15 +198,11 @@ func failReverify(cmd *cobra.Command, f *v1Flags, id string, verified *apexv1.Ve
 
 // startReviewSession starts the detached review session for a verified
 // change, on the model and effort DecideReviewLaunch picks (D22), and
-// records it.
-func startReviewSession(ctx context.Context, p *apexv1.Project, id, model, effortFlag string, session *sessionLaunch) (*apexv1.ReviewRun, *detachedHandle, error) {
+// records it. session holds its locks under detachedID; they are released
+// when the session is not started.
+func startReviewSession(ctx context.Context, p *apexv1.Project, id, model, effortFlag string, session *sessionLaunch, detachedID string) (*apexv1.ReviewRun, *detachedHandle, error) {
 	if _, err := p.PrepareReviewRun(ctx, id); err != nil {
-		return nil, nil, err
-	}
-	// An orchestrator's one child at a time, held under the detached run's
-	// id; the review session's `ape task` takes it over.
-	detachedID := newDetachedID()
-	if err := session.acquire(p.Root, detachedID); err != nil {
+		session.release()
 		return nil, nil, err
 	}
 	cfg, _ := apexv1.LoadConfig(p.Root)
