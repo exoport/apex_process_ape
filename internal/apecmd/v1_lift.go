@@ -122,16 +122,28 @@ The commit:
                  more): the binding-rule candidates (CLAUDE.md list items,
                  project-context "don't miss" items, team-memory gotcha titles), EVERY
                  one, with an empty Disposition column for apex-plan, then a fresh
-                 read-only review, then the person, who deletes it. Then, as summaries:
-                 code and CI that still read removed paths, one line per file with its
-                 count and first reference (CI guards over the v0 corpus show up there),
-                 and edited files a guard hashes (at most 50), first; ADR gaps; ids left
-                 and files not edited, counted per file; references in evidence and
-                 docs, counted; readings at the tag. To fit 16 KB the summaries shrink
-                 to counts, then the ADR table to the ADRs with gaps; the candidates are
-                 never cut to fit it: the file grows past 16 KB to hold them, up to
-                 48 KB, and only past 48 KB lists the first ones and says how many more
-                 there are and where. Every list whole goes to
+                 read-only review, then the person, who deletes it. Then "Code and
+                 tests that read deleted v0 state": every kept code, test, script,
+                 Makefile or CI file (not docs, not evidence) that names a path the
+                 lift deletes outside its comments — by its path (./ and ../ too), a
+                 path under a deleted folder, or the base name of a deleted file when
+                 it has an extension and no other file has it — one line per file with
+                 what it reads (--json and the report: v0_state_readers, {file,
+                 reads}); re-point each to v1 state or retire it. Then, as summaries:
+                 other code and CI that still names removed paths (in a comment, or a
+                 file that is not code), one line per file with its count and first
+                 reference, and edited files a guard hashes — those a lock file or a
+                 hasher names one line per file (at most 50), those only a folder ties
+                 to a hasher one line per hasher ("57 files in pkg/x share a folder
+                 with guard_test.go (folder match only)"); ADR gaps; ids left and
+                 files not edited, counted per file; references in evidence and docs,
+                 counted; readings at the tag. To fit 16 KB the summaries shrink to
+                 counts, then the ADR table to the ADRs with gaps; the candidates and
+                 the v0 state readers are never cut to fit it: the file grows past
+                 16 KB to hold them, up to 48 KB; past 48 KB the readers go to counts
+                 (saying so), and only then are the candidates cut, the file listing
+                 the first ones and saying how many more there are and where. Every
+                 list whole goes to
                  _apex/state/lift-disposition.json after the commit: ignored by the
                  state folder's whitelist, never committed, in this checkout only
 
@@ -145,9 +157,10 @@ that says "byte-identical" in prose hashes nothing. Documents and evidence (.md,
 .log, .txt, anything under an evidence folder) never count as hashers. The order is
 how sure the match is: what a lock file names, then what a hasher names (by path, or a
 test beside the file by its name), then what only its folder ties to a hasher (a glob,
-a ReadDir). --dry-run lists every one, text and --json; a real lift's output and the
-disposition file list at most 50, edited_but_hashed_total counts them all, and the
-report has every one. It is a heuristic: a copy compared byte for byte with no hash (an
+a ReadDir). --dry-run lists every one, text and --json; a real lift's output lists at
+most 50, and the disposition file at most 50 of the first two kinds and the folder kind
+as one line per hasher; edited_but_hashed_total counts them all, and the report has
+every one. It is a heuristic: a copy compared byte for byte with no hash (an
 embedded mirror of a hashed file) needs its own --exclude.
 
 The regression command runs twice (--no-verify-run skips both): at the tag, before
@@ -320,6 +333,9 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 	// A dry run lists every one: it writes no report to point at (R6).
 	if more := r.HashedTotal - len(r.Hashed); more > 0 && !r.DryRun {
 		fmt.Fprintf(w, "hashed    … and %d more (in %s)\n", more, r.Report)
+	}
+	for _, v := range r.V0StateReaders {
+		fmt.Fprintf(w, "v0 state  %s reads %s — re-point it to v1 state or retire it\n", v.File, strings.Join(v.Reads, ", "))
 	}
 	if n := len(r.DanglingRefs); n > 0 {
 		fmt.Fprintf(w, "refs      %d reference(s) to removed paths remain (listed in %s)\n", n, r.Disposition)

@@ -2,6 +2,7 @@ package apexv1
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,14 +14,21 @@ import (
 
 // liftWithCandidates lifts a fixture whose CLAUDE.md lists n binding-rule
 // candidates of about width bytes each, beside 60 code files still
-// reading a removed path, and returns the disposition file and how many
+// naming a removed path in a comment, and returns the disposition file and how many
 // candidates the lift found (the fixture's own, and these).
 func liftWithCandidates(t *testing.T, n, width int) (disposition string, candidates int) {
 	t.Helper()
+	return liftWithCandidatesAnd(t, n, width, nil)
+}
+
+// liftWithCandidatesAnd is liftWithCandidates with extra files.
+func liftWithCandidatesAnd(t *testing.T, n, width int, extra map[string]string) (disposition string, candidates int) {
+	t.Helper()
 	root := liftFixture(t, false)
 	files := map[string]string{}
+	maps.Copy(files, extra)
 	for i := range 60 {
-		files[fmt.Sprintf("tools/verify/check%02d.sh", i)] = "#!/bin/sh\ncat development/implementation/sprint-status.yaml\n"
+		files[fmt.Sprintf("tools/verify/check%02d.sh", i)] = "#!/bin/sh\n# was: development/implementation/sprint-status.yaml\necho ok\n"
 	}
 	claude, err := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
 	require.NoError(t, err)
@@ -62,7 +70,7 @@ func TestLift_DispositionKeepsEveryCandidate(t *testing.T) {
 	}
 	require.Contains(t, d, fmt.Sprintf("| %d | ", n), "the last candidate too")
 	require.NotContains(t, d, "more candidate(s)")
-	require.Contains(t, d, "- … and 61 more file(s) (in `_apex/state/lift-disposition.json`)", "the summaries are cut to counts first")
+	require.Contains(t, d, "- … and 60 more file(s) (in `_apex/state/lift-disposition.json`)", "the summaries are cut to counts first; .github/ci.yml is a v0 state reader, in its own section")
 	require.NotContains(t, d, "check00.sh")
 }
 

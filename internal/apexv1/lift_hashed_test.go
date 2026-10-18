@@ -1,6 +1,7 @@
 package apexv1
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -95,7 +96,17 @@ func TestLift_HashedSkipsRecordsLocksFirstCapped(t *testing.T) {
 	require.Equal(t, 61, res.HashedTotal)
 	disp, err := os.ReadFile(filepath.Join(root, "development", LiftDisposition))
 	require.NoError(t, err)
-	require.Contains(t, string(disp), "- … and 21 more (in `_apex/state/lift-disposition.json`)")
+	// R22, from mdpdf and pdfa on rc.5: the folder tier is one line per
+	// hasher in the file, not 50 lines of it; the report keeps every one.
+	require.Contains(t, string(disp), "- `zz/last.yaml` — `tools/ci/byte_identity.lock.yaml`\n")
+	require.Contains(t, string(disp), "- 60 files in `pkg/many` share a folder with `guard_test.go` (folder match only)\n")
+	require.NotContains(t, string(disp), "pkg/many/f00.go")
+	require.NotContains(t, string(disp), "more (in `_apex/state/lift-disposition.json`)", "nothing left to count: the folder line covers all 60")
+	var report liftReport
+	data, err := os.ReadFile(filepath.Join(root, "_apex", "state", LiftReport))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &report))
+	require.Len(t, report.Hashed, 61)
 }
 
 // The coreutils hashers name no "sha256" on a word boundary: a CI script

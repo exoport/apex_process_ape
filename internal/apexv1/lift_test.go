@@ -449,7 +449,7 @@ func main() { fmt.Println(greet("ADR-0004")) }
 		"- `main.go` — 4: identifier, string, directive, string (ADR id, not renumbered)",
 		"- 1 × not tokenized (.sql)",
 		"- `schema/fixed.sh` — excluded (--exclude) (1 id(s), 0 ADR citation(s))",
-		"- `.github/ci.yml` — 1, first at line 2: `development/implementation/sprint-status.yaml`",
+		"- `.github/ci.yml` reads `development/implementation/sprint-status.yaml`\n",
 		"product brief: apex-v0-final:development/planning/product-brief.md",
 		"newest sprint-change proposal: apex-v0-final:development/planning/sprint-change-proposal-2026-09.md",
 		"| ADR-0004 | [ADR-0003](decisions/0003-limit-names.md) | superseded by ADR-0004 |",
