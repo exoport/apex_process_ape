@@ -118,8 +118,11 @@ A byte-identity perimeter: a file a test, CI script or lock file hashes goes red
 the lift edits a comment in it. The plan lists, as "hashed", the edited files that a lock
 file names, that a test or CI file names within 3 lines of a hash word (sha256,
 checksum, fingerprint, byte-identical, …), or that sit beside a hashing test that globs
-or names them — run --dry-run, then --exclude them. It is a heuristic: a copy compared
-byte for byte with no hash (an embedded mirror of a hashed file) needs its own --exclude.
+or names them — run --dry-run, then --exclude them. Documents and evidence (.md, .json,
+.log, .txt, anything under an evidence folder) never count as hashers. What a lock file
+names is listed first; at most 50 are listed, edited_but_hashed_total counts them all.
+It is a heuristic: a copy compared byte for byte with no hash (an embedded mirror of a
+hashed file) needs its own --exclude.
 
 The regression command runs twice (--no-verify-run skips both): at the tag, before
 anything is written, and at the lift commit — the baseline red gates are judged against.
@@ -269,6 +272,9 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 	}
 	for _, h := range r.Hashed {
 		fmt.Fprintf(w, "hashed    %s — %s seems to pin its bytes: --exclude it to keep them\n", h.File, strings.Join(h.By, ", "))
+	}
+	if more := r.HashedTotal - len(r.Hashed); more > 0 {
+		fmt.Fprintf(w, "hashed    … and %d more (in %s)\n", more, r.Report)
 	}
 	if n := len(r.DanglingRefs); n > 0 {
 		fmt.Fprintf(w, "refs      %d reference(s) to removed paths remain (listed in %s)\n", n, r.Disposition)

@@ -125,8 +125,11 @@ type LiftResult struct {
 	GoUnformatted []string    `json:"go_not_formatted,omitempty"`
 	DanglingRefs  []LiftIDRef `json:"references_to_removed_paths,omitempty"`
 	// Hashed are edited files a test, CI script or lock file seems to pin
-	// the bytes of: a perimeter to --exclude before lifting (L6).
+	// the bytes of: a perimeter to --exclude before lifting (L6). Those a
+	// lock file names come first; at most hashedCap are listed (the
+	// report has all), HashedTotal counts them (R1).
 	Hashed      []LiftHashed    `json:"edited_but_hashed,omitempty"`
+	HashedTotal int             `json:"edited_but_hashed_total,omitempty"`
 	Gates       LiftGates       `json:"gates"`
 	Candidates  []LiftCandidate `json:"rule_candidates"`
 	Readings    []string        `json:"readings,omitempty"`
@@ -190,6 +193,8 @@ type lifter struct {
 	// texts caches the tracked text files read for the plan.
 	texts map[string]string
 	files []string
+	// hashedAll is every hashed edit; res.Hashed the first hashedCap.
+	hashedAll []LiftHashed
 	// claudeBefore is CLAUDE.md with citations rewritten, managed block
 	// still in: the line numbers of the tag.
 	claudeBefore string
@@ -704,7 +709,8 @@ func (lf *lifter) plan() error {
 	lf.res.Candidates = lf.candidates()
 	lf.res.Readings = lf.readings()
 	lf.res.DanglingRefs = lf.dangling()
-	lf.res.Hashed = lf.hashed()
+	lf.hashedAll = lf.hashed()
+	lf.res.Hashed, lf.res.HashedTotal = lf.hashedAll[:min(len(lf.hashedAll), hashedCap)], len(lf.hashedAll)
 	sort.Slice(lf.res.Changed, func(i, j int) bool { return lf.res.Changed[i].File < lf.res.Changed[j].File })
 	lf.res.Disposition = lf.devRel + "/" + LiftDisposition
 	lf.res.Report = lf.devRel + "/" + LiftReport

@@ -2,7 +2,9 @@ package apexv1
 
 import (
 	"path"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -15,6 +17,12 @@ import (
 // perimeter to --exclude before lifting. It is a heuristic and says so: it
 // finds the files a hashing file names, or that sit beside a hashing test
 // that globs or names them; it cannot see a hash computed elsewhere.
+//
+// R1 (the rc.3 dry runs): radix listed 228 files against 2 real, most of
+// them "hashed" by DR evidence documents that quote a sha256 beside the
+// paths they record. Documents and evidence never hash anything, so they
+// are no hashers; what a lock file names comes first, being the likeliest
+// real perimeter; and the list is capped, its total counted.
 
 // LiftHashed is one edited file and what seems to hash it.
 type LiftHashed struct {
@@ -29,14 +37,62 @@ var (
 	ciPathRe = regexp.MustCompile(`(?:^|/)(?:\.github|\.gitlab|\.circleci|ci|scripts|tools)/|(?:^|/)(?:Makefile|[^/]*\.mk|\.gitlab-ci\.ya?ml|Jenkinsfile)$`)
 	// testPathRe is a test file in the languages the lift tokenizes.
 	testPathRe = regexp.MustCompile(`_test\.go$|(?:^|/)test_[^/]*\.py$|_test\.py$|\.(?:test|spec)\.[cm]?[jt]sx?$|_test\.dart$|(?:^|/)tests?/`)
+	// evidenceDirRe is a folder of evidence anywhere in the tree
+	// (radix's tools/dr/evidence/).
+	evidenceDirRe = regexp.MustCompile(`(?i)(?:^|/)evidence/`)
 )
 
+// hashedCap bounds edited_but_hashed in the result and the disposition
+// file; the report has every one, and edited_but_hashed_total the count.
+const hashedCap = 50
+
+// isRecord reports a document or evidence file — prose, data dumps,
+// logs, or anything under an evidence folder (the configured
+// evidence_folder, or any folder named evidence): it may quote a hash
+// beside a path, but it hashes nothing.
+func (lf *lifter) isRecord(rel string) bool {
+	switch strings.ToLower(path.Ext(rel)) {
+	case ".md", ".markdown", ".json", ".jsonl", ".log", ".txt":
+		return true
+	}
+	if evidenceDirRe.MatchString(rel) {
+		return true
+	}
+	ev := lf.evidenceRel()
+	return ev != "" && strings.HasPrefix(rel, ev+"/")
+}
+
+// evidenceRel is the project's evidence_folder, relative to the root; ""
+// when unset, outside the tree, or still holding a {variable}.
+func (lf *lifter) evidenceRel() string {
+	if lf.layout == nil || lf.layout.Cfg == nil {
+		return ""
+	}
+	ev := strings.TrimSpace(lf.layout.Cfg.EvidenceFolder)
+	if ev == "" || strings.Contains(ev, "{") {
+		return ""
+	}
+	if filepath.IsAbs(ev) {
+		return lf.rel(ev)
+	}
+	ev = path.Clean(filepath.ToSlash(ev))
+	if ev == "." || strings.HasPrefix(ev, "..") {
+		return ""
+	}
+	return ev
+}
+
 // hashers are the kept text files that hash: lock files, and tests and
-// CI files that mention a hash.
+// CI files that mention a hash — never a document or evidence file. A
+// lock file counts whatever its extension (numbering.lock.json is one),
+// unless it sits in an evidence folder.
 func (lf *lifter) hashers() []string {
 	var out []string
 	for _, rel := range lf.files {
 		lock := isLockFile(rel)
+		if lf.isRecord(rel) && (!lock || evidenceDirRe.MatchString(rel)) {
+			continue
+		}
 		if !lock && !testPathRe.MatchString(rel) && !ciPathRe.MatchString(rel) {
 			continue
 		}
@@ -49,7 +105,8 @@ func (lf *lifter) hashers() []string {
 
 // hashed lists the edited files a hasher names near a hash — by path, or
 // by a glob or quoted name of their folder — or, for a test beside them,
-// by base name or a glob of their kind.
+// by base name or a glob of their kind. The files a lock file names come
+// first, then the rest, each part by path.
 func (lf *lifter) hashed() []LiftHashed {
 	hs := lf.hashers()
 	if len(hs) == 0 {
@@ -83,7 +140,13 @@ func (lf *lifter) hashed() []LiftHashed {
 			out = append(out, LiftHashed{File: f, By: by})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
+	byLock := func(h LiftHashed) bool { return slices.ContainsFunc(h.By, isLockFile) }
+	sort.Slice(out, func(i, j int) bool {
+		if a, b := byLock(out[i]), byLock(out[j]); a != b {
+			return a
+		}
+		return out[i].File < out[j].File
+	})
 	return out
 }
 

@@ -170,7 +170,7 @@ func (lf *lifter) report() string {
 	r := lf.res
 	data, err := json.MarshalIndent(liftReport{
 		Version: r.Version, Tag: LiftTag, TagSHA: r.TagSHA, Deleted: r.Deleted, ADRs: r.ADRs, Changed: r.Changed,
-		Skipped: r.Skipped, GoUnformatted: r.GoUnformatted, Hashed: r.Hashed, UnresolvedCitations: r.UnresolvedCitations,
+		Skipped: r.Skipped, GoUnformatted: r.GoUnformatted, Hashed: lf.hashedAll, UnresolvedCitations: r.UnresolvedCitations,
 		IDsLeft: r.IDsLeft, DanglingRefs: r.DanglingRefs, Candidates: r.Candidates, Gates: r.Gates, Readings: r.Readings,
 	}, "", "  ")
 	if err != nil {
@@ -234,6 +234,9 @@ func (lf *lifter) disposition() string {
 		p("Edited files a test, CI script or lock file seems to pin the bytes of (re-run that guard; if it is red, the file belonged under --exclude):\n\n")
 		for _, h := range r.Hashed {
 			p("- `%s` — %s\n", h.File, "`"+strings.Join(h.By, "`, `")+"`")
+		}
+		if more := r.HashedTotal - len(r.Hashed); more > 0 {
+			p("- … and %d more (in `%s`)\n", more, report)
 		}
 		p("\n")
 	}
