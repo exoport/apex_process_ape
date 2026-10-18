@@ -49,6 +49,11 @@ func init() {
 // newest first: an acceptance covers everything older; a commit that is
 // not ape's, not reverted, and changes a guarded block is a finding.
 func (p *Project) configFindings(ctx context.Context, epoch string) []Finding {
+	return p.configFindingsFor(ctx, epoch, guardedConfigKeys)
+}
+
+// configFindingsFor is configFindings over the blocks keys.
+func (p *Project) configFindingsFor(ctx context.Context, epoch string, keys []string) []Finding {
 	rel := configYAML
 	out, err := gitRaw(ctx, p.Root, "log", "--format=%x1e%H%x1f%s%x1f%P%x1f%b", epoch+"..HEAD", "--", rel)
 	if err != nil {
@@ -80,7 +85,7 @@ func (p *Project) configFindings(ctx context.Context, epoch string) []Finding {
 		if accepted || reverted[c.sha] || strings.HasPrefix(c.subject, "apex:") || c.parent == "" {
 			continue
 		}
-		changed := p.guardedConfigDiff(ctx, c.parent, c.sha, rel)
+		changed := p.guardedConfigDiff(ctx, c.parent, c.sha, rel, keys)
 		if len(changed) == 0 {
 			continue
 		}
@@ -106,12 +111,12 @@ func (p *Project) lastConfigAcceptance(ctx context.Context, epoch string) string
 	return out
 }
 
-// guardedConfigDiff names the guarded blocks that differ between the
+// guardedConfigDiff names the blocks of keys that differ between the
 // config at from and at to (an absent or unparseable file reads as empty).
-func (p *Project) guardedConfigDiff(ctx context.Context, from, to, rel string) []string {
+func (p *Project) guardedConfigDiff(ctx context.Context, from, to, rel string, keys []string) []string {
 	a, b := p.configBlocksAt(ctx, from, rel), p.configBlocksAt(ctx, to, rel)
 	var changed []string
-	for _, k := range guardedConfigKeys {
+	for _, k := range keys {
 		if !reflect.DeepEqual(a[k], b[k]) {
 			changed = append(changed, k)
 		}

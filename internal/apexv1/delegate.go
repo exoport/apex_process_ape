@@ -36,9 +36,11 @@ import (
 // milestone's docs change (D130). A change whose change.md frontmatter says
 // `docs: true` has its human-review tasks taken by apex-accept, with the
 // default args and model, and no human_review block — but only while the
-// change's diff from its base_sha to its tip touches nothing outside
-// release.docs and the development folder (else delegate.docs-scope, a
-// person's), so a code change marked docs: true still stops for a person.
+// change's diff from its base_sha to its tip touches nothing outside the
+// user-facing docs — release.docs, the changelog and docs.user_docs
+// (Config.DocsDefaultScope, D158) — and the development folder (else
+// delegate.docs-scope, a person's), so a code change marked docs: true
+// still stops for a person.
 // `human_review: {docs: person}` turns it off; a block with only docs:
 // delegates no other task. A configured delegate (a block with any other
 // key) takes every human-review task, the docs change's included (D78).
@@ -357,9 +359,10 @@ func (p *Project) PrepareDelegate(ctx context.Context, id, task string) (*Delega
 // docs default (D152) — apex-accept, with the default args and model —
 // takes a human-review task of a docs change (change.md docs: true) when
 // human_review.docs is not person and the change's diff from its base_sha
-// to its tip touches only release.docs and the development folder. Any
-// other task is a person's (delegate.off), as before D152. release.docs
-// bounds the default, so it is guarded here with human_review.
+// to its tip touches only the docs (Config.DocsDefaultScope) and the
+// development folder. Any other task is a person's (delegate.off), as
+// before D152. release.docs and the docs block bound the default, so they
+// are guarded here with human_review.
 func (p *Project) prepareDocsDelegate(ctx context.Context, cfg Config, id, task string) (*DelegatePlan, error) {
 	hr := cfg.HumanReview
 	tg, terr := p.delegateTarget(ctx, id, task)
@@ -370,20 +373,21 @@ func (p *Project) prepareDocsDelegate(ctx context.Context, cfg Config, id, task 
 		return nil, &FailError{Code: "delegate.off", Msg: "the docs delegate is off: _apex/config.yaml sets human_review.docs: person, so only a person accepts " + task +
 			" of the docs change " + id + " — a person runs `ape change accept " + id + " --task " + task + " --by <who>`"}
 	}
-	if err := p.refuseUnacceptedConfig(ctx, "human_review", "release"); err != nil {
+	if err := p.refuseUnacceptedConfig(ctx, "human_review", "release", "docs"); err != nil {
 		return nil, err
 	}
 	if terr != nil {
 		return nil, terr
 	}
-	outside, err := p.docsScopeOutside(ctx, cfg.Release.DocsScope(), id, tg.state)
+	scope := cfg.DocsDefaultScope()
+	outside, err := p.docsScopeOutside(ctx, scope, id, tg.state)
 	if err != nil || len(outside) > 0 {
 		why := "touches " + strings.Join(limit(outside, 10), ", ")
 		if err != nil {
 			why = "has a diff ape cannot read (" + err.Error() + ")"
 		}
-		return nil, &FailError{Code: "delegate.docs-scope", Msg: "the docs change " + id + " " + why + ", outside release.docs (" + strings.Join(cfg.Release.DocsScope(), ", ") +
-			") and the development folder, so its docs check " + task + " is not a delegate's by default (D152) — a person reviews it (`ape change accept " + id + " --task " + task +
+		return nil, &FailError{Code: "delegate.docs-scope", Msg: "the docs change " + id + " " + why + ", outside the docs (" + strings.Join(scope, ", ") +
+			": release.docs, the changelog and docs.user_docs) and the development folder, so its docs check " + task + " is not a delegate's by default (D152) — a person reviews it (`ape change accept " + id + " --task " + task +
 			" --by <who>`), or re-plans the non-docs work into a change of its own"}
 	}
 	if hr == nil {
@@ -400,7 +404,7 @@ func delegateOff(id, task string, hr *HumanReviewConfig) error {
 		why = "_apex/config.yaml's human_review block sets only docs:, which delegates no other task"
 	}
 	return &FailError{Code: "delegate.off", Msg: "delegation is off: " + why + ", so only a person accepts " + task +
-		" (the one default exception, D152: a docs change's docs check — change.md docs: true, its diff only release.docs and the development folder)" +
+		" (the one default exception, D152: a docs change's docs check — change.md docs: true, its diff only the docs and the development folder)" +
 		" — a person runs `ape change accept " + id + " --task " + task + " --by <who>`, or adds human_review: {delegate: " + DefaultDelegateSkill + "} (a person's change: config.changed guards it)"}
 }
 
@@ -425,7 +429,7 @@ func (p *Project) planDelegate(ctx context.Context, cfg Config, hr *HumanReviewC
 }
 
 // docsScopeOutside lists the paths the change's diff from its base_sha to
-// its tip touches outside docs (ReleaseConfig.DocsScope), the development folder and
+// its tip touches outside docs (Config.DocsDefaultScope), the development folder and
 // ape's state (D152 Q69 (b)): what keeps the docs default off a change
 // that is not docs only. The tip is change/<id>'s while the change is
 // unarchived, the branch tip archive recorded once archived. Renames count
@@ -470,10 +474,11 @@ func inReleaseDocs(docs []string, rel string) bool {
 var guardedKeysRe = regexp.MustCompile(`^guarded config keys \(([^)]*)\)`)
 
 // refuseUnacceptedConfig refuses delegation while one of blocks (the
-// human_review block; release too for the docs default, whose scope
-// release.docs is) is not a person's: a commit since the v1 epoch changed
-// it and no person accepted it (config.changed), or the working tree's
-// block is not the one committed at HEAD.
+// human_review block; release and docs too for the docs default, whose
+// scope they bound) is not a person's: a commit since the v1 epoch changed
+// it and no person accepted it (config.changed's rule, applied to blocks,
+// so docs, which only the delegate needs guarded, is no config.changed),
+// or the working tree's block is not the one committed at HEAD.
 func (p *Project) refuseUnacceptedConfig(ctx context.Context, blocks ...string) error {
 	if !p.isWorkTree(ctx) {
 		return nil
@@ -483,7 +488,7 @@ func (p *Project) refuseUnacceptedConfig(ctx context.Context, blocks ...string) 
 			" — a model may not delegate a person's acceptance: a person reviews it and runs `ape project accept-config --by <who>` (or reverts it)"}
 	}
 	if epoch := p.v1Epoch(ctx, "HEAD"); epoch != "" {
-		for _, f := range p.configFindings(ctx, epoch) {
+		for _, f := range p.configFindingsFor(ctx, epoch, blocks) {
 			m := guardedKeysRe.FindStringSubmatch(f.Message)
 			if len(m) < 2 {
 				continue

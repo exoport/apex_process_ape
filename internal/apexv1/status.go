@@ -625,8 +625,8 @@ func (r *StatusReport) delegateNext(c *ChangeStatus) string {
 
 // delegableTasks is cs's awaiting tasks a delegate may take now (D152
 // Q71): every one the configured delegate has not failed, or, without
-// one, a docs change's under the docs default when its diff stays in
-// release.docs and the development folder (prepareDocsDelegate's rule;
+// one, a docs change's under the docs default when its diff stays in the
+// docs (Config.DocsDefaultScope) and the development folder (prepareDocsDelegate's rule;
 // the config guard is --delegate's to apply).
 func (p *Project) delegableTasks(ctx context.Context, cfg Config, c ChangeInfo, cs *ChangeStatus) []DelegableTask {
 	hr := cfg.HumanReview
@@ -635,7 +635,7 @@ func (p *Project) delegableTasks(ctx context.Context, cfg Config, c ChangeInfo, 
 		if c.Doc == nil || !c.Doc.Meta.Docs || !hr.DocsDefault() || len(cs.AwaitingHuman) == 0 {
 			return nil
 		}
-		if outside, err := p.docsScopeOutside(ctx, cfg.Release.DocsScope(), c.ID, c.State); err != nil || len(outside) > 0 {
+		if outside, err := p.docsScopeOutside(ctx, cfg.DocsDefaultScope(), c.ID, c.State); err != nil || len(outside) > 0 {
 			return nil
 		}
 		reason = DelegableDocsDefault

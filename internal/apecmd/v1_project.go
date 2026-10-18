@@ -637,7 +637,8 @@ func newStatusCmd() *cobra.Command {
     says why. JSON changes[].delegable: [{task, reason}] (D152, omitted when none) are the
     awaiting tasks a delegate may take now — reason "configured" (human_review delegates)
     or "docs-default" (a docs change's docs check, change.md docs: true, its diff only
-    release.docs and the development folder, human_review.docs not person); a task whose
+    the docs (release.docs, the changelog, docs.user_docs) and the development folder,
+    human_review.docs not person); a task whose
     delegate failed or was voided is a person's and not listed. next names the delegate
     for the first (` + "`ape change accept <id> <T> --delegate --wait 9m`" + `) before a person
   - spend so far: the sum of finished ape task/pipeline run manifests

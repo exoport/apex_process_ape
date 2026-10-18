@@ -855,13 +855,14 @@ The one default-on exception (D152): the docs check of the milestone's docs chan
 whose change.md frontmatter says docs: true with apex-accept, the default args and
 models.apex-accept — no human_review block needed — when:
   - the change's diff from its base_sha to its tip (change/<id>'s; the recorded branch
-    tip once archived; a rename counts as both paths) touches only release.docs paths
-    (else README.md and docs/) and the development folder (and ape's _apex/state/);
+    tip once archived; a rename counts as both paths) touches only the docs — release.docs
+    paths (else README.md and docs/), the changelog (docs.changelog, else CHANGELOG.md)
+    and docs.user_docs (D158) — and the development folder (and ape's _apex/state/);
     else delegate.docs-scope (action person), naming the paths outside: a code change
     marked docs: true still stops for a person
   - human_review.docs is not person (human_review: {docs: person} turns it off:
     delegate.off); human_review and release are under the config.changed guard, and
-    --delegate refuses while either is a person's unaccepted change
+    --delegate refuses while either, or the docs block, is a person's unaccepted change
     (delegate.unaccepted-config)
 The records are the delegate's below, by "delegate:apex-accept". A configured delegate
 (a block with any key but docs:) takes every human-review task, a docs change's

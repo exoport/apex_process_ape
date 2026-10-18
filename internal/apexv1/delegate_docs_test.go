@@ -129,7 +129,7 @@ func TestDocsDelegate_RefusedOutsideTheDocs(t *testing.T) {
 		work func(p *Project)
 		want string
 	}{
-		"code":           {work: func(p *Project) { write(t, p, "main.go", "package main\n") }, want: "touches main.go, outside release.docs (README.md, docs/) and the development folder"},
+		"code":           {work: func(p *Project) { write(t, p, "main.go", "package main\n") }, want: "touches main.go, outside the docs (README.md, docs/, CHANGELOG.md: release.docs, the changelog and docs.user_docs) and the development folder"},
 		"code into docs": {work: func(p *Project) { run(t, p.Root, "mv", "scripts/lint.sh", "docs/lint.sh") }, want: "touches scripts/lint.sh, outside"},
 		"config":         {work: func(p *Project) { write(t, p, "_apex/config.yaml", "notify: echo\n") }, want: "touches _apex/config.yaml, outside"},
 	} {
@@ -151,7 +151,38 @@ func TestDocsDelegate_RefusedOutsideTheDocs(t *testing.T) {
 	require.NoError(t, err)
 	p = docsWave(t, "release: {docs: [docs/]}\n", true, nil)
 	_, err = p.PrepareDelegate(ctx(), "docs-wave", "T2")
-	require.ErrorContains(t, requireFail(t, err, "delegate.docs-scope"), "touches README.md, outside release.docs (docs/)")
+	require.ErrorContains(t, requireFail(t, err, "delegate.docs-scope"), "touches README.md, outside the docs (docs/, CHANGELOG.md: release.docs")
+}
+
+// D158 R6b-1: a docs change must update the changelog (the project's
+// rule, review's finding), so the docs default counts it as docs —
+// docs.changelog, else CHANGELOG.md — and docs.user_docs too.
+func TestDocsDelegate_ChangelogAndUserDocsAreDocs(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cfg  string
+		work func(p *Project)
+	}{
+		"CHANGELOG.md by default": {work: func(p *Project) { write(t, p, "CHANGELOG.md", "- waving\n") }},
+		"docs.changelog":          {cfg: "docs: {changelog: ./HISTORY.md}\n", work: func(p *Project) { write(t, p, "HISTORY.md", "- waving\n") }},
+		"docs.user_docs": {cfg: "docs: {user_docs: manual/}\n", work: func(p *Project) {
+			write(t, p, "manual/wave.md", "Waving.\n")
+			write(t, p, "CHANGELOG.md", "- waving\n")
+		}},
+		"release.docs and the changelog": {cfg: "release: {docs: [README.md, docs/]}\ndocs: {changelog: CHANGELOG.md}\n", work: func(p *Project) { write(t, p, "CHANGELOG.md", "- waving\n") }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := docsWave(t, tc.cfg, true, tc.work)
+			plan, err := p.PrepareDelegate(ctx(), "docs-wave", "T2")
+			require.NoError(t, err)
+			require.Equal(t, DelegableDocsDefault, plan.Reason)
+			require.Equal(t, []DelegableTask{{Task: "T2", Reason: "docs-default"}}, p.Status().Changes[0].Delegable)
+		})
+	}
+	// docs.changelog names the changelog: CHANGELOG.md is then no docs.
+	p := docsWave(t, "docs: {changelog: HISTORY.md}\n", true, func(p *Project) { write(t, p, "CHANGELOG.md", "- waving\n") })
+	_, err := p.PrepareDelegate(ctx(), "docs-wave", "T2")
+	require.ErrorContains(t, requireFail(t, err, "delegate.docs-scope"), "touches CHANGELOG.md, outside the docs (README.md, docs/, HISTORY.md:")
+	require.Empty(t, p.Status().Changes[0].Delegable)
 }
 
 // D152 Q70: human_review: {docs: person} turns the docs default off, and a
@@ -230,6 +261,21 @@ func TestDocsDelegate_ConfigGuard(t *testing.T) {
 	write(t, p, "_apex/config.yaml", "release: {docs: [README.md, greet.sh]}\n")
 	_, err = p.PrepareDelegate(ctx(), "docs-wave", "T2")
 	require.Contains(t, requireFail(t, err, "delegate.unaccepted-config").Msg, "release block differs from the one committed at HEAD")
+
+	// D158: the docs block bounds the default too — docs.user_docs: src/
+	// would hand code to the delegate — so the docs default guards it;
+	// project-wide it stays unguarded (no config.changed).
+	write(t, p, "_apex/config.yaml", "docs: {user_docs: src/}\n")
+	_, err = p.PrepareDelegate(ctx(), "docs-wave", "T2")
+	require.Contains(t, requireFail(t, err, "delegate.unaccepted-config").Msg, "docs block differs from the one committed at HEAD")
+	commitAll(t, p, "chore: the user docs")
+	require.NotContains(t, findingMessages(p.provenanceFindings(ctx())), "guarded config keys")
+	_, err = p.PrepareDelegate(ctx(), "docs-wave", "T2")
+	require.Contains(t, requireFail(t, err, "delegate.unaccepted-config").Msg, "docs block was changed by a commit no person accepted")
+	_, err = p.AcceptConfig(ctx(), "ann")
+	require.NoError(t, err)
+	_, err = p.PrepareDelegate(ctx(), "docs-wave", "T2")
+	require.NoError(t, err)
 }
 
 // change check reads docs: as a YAML boolean only (D152): any other value

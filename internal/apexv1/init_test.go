@@ -306,7 +306,7 @@ func TestConfigChanged_GuardsAKeyOutsideTheStruct(t *testing.T) {
 	fs := p.configFindings(ctx(), epoch)
 	require.Len(t, fs, 1)
 	require.Contains(t, fs[0].Message, "guarded config keys (tools) changed")
-	require.Empty(t, p.guardedConfigDiff(ctx(), epoch, epoch, configYAML), "absent on both sides: equal")
+	require.Empty(t, p.guardedConfigDiff(ctx(), epoch, epoch, configYAML, guardedConfigKeys), "absent on both sides: equal")
 
 	write(t, p, "_apex/config.yaml", "tools:\n  review:\n    - {name: lint, skill: lint-review, when: always}\nhuman_review: {delegate: apex-accept}\n")
 	commitAll(t, p, "chore: a delegate")

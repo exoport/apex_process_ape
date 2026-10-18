@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -115,6 +116,25 @@ func (r ReleaseConfig) DocsScope() []string {
 		return r.Docs
 	}
 	return DefaultReleaseDocs
+}
+
+// DocsDefaultScope is what the docs default (D152) counts as user-facing
+// docs: release.docs (DocsScope), the changelog — docs.changelog, else
+// CHANGELOG.md, apex-release's — and docs.user_docs (D158 R6b-1). A
+// project's changelog rule makes every docs change touch the changelog,
+// so a scope without it never granted the delegate there.
+func (c Config) DocsDefaultScope() []string {
+	scope := slices.Clone(c.Release.DocsScope())
+	changelog := c.Docs.Changelog
+	if changelog == "" {
+		changelog = "CHANGELOG.md"
+	}
+	for _, d := range []string{changelog, c.Docs.UserDocs} {
+		if d = strings.TrimPrefix(strings.TrimSpace(d), "./"); d != "" && !inReleaseDocs(scope, d) {
+			scope = append(scope, d)
+		}
+	}
+	return scope
 }
 
 // SchemeName is release.scheme, else semver.

@@ -4,7 +4,7 @@
 
 On top of rc.5 and the candidates below: research's rc.5 lift findings R16–R22, the v0
 state readers (D141), the docs delegate by default (D152), and gates, archive layout,
-hot/ and the secret scan (D155).
+hot/ and the secret scan (D155), and the changelog in the docs delegate's scope (D158).
 
 ### `ape project lift`
 
@@ -69,12 +69,16 @@ hot/ and the secret scan (D155).
   docs change apex-plan plans under D130 — has its human-review tasks accepted
   by the delegate (apex-accept) with no configuration, as the first default-on
   exception to "a person accepts" (D78). ape grants it only when the change's
-  diff from its base touches nothing but the `release.docs` paths (default
-  README.md and docs/), the development folder and ape's state; otherwise
-  `delegate.docs-scope` (action person) names the paths outside.
+  diff from its base touches nothing but the docs, the development folder and
+  ape's state; otherwise `delegate.docs-scope` (action person) names the paths
+  outside. The docs are the `release.docs` paths (default README.md and docs/),
+  the changelog (`docs.changelog`, else CHANGELOG.md) and `docs.user_docs`
+  (rc.6c, D158 R6b-1: a project's changelog rule makes every docs change touch
+  the changelog, so without it the delegate was never granted there).
 - `human_review: {docs: person}` turns it off (guarded, `config.changed`); a
   block with only `docs:` delegates nothing else. An unaccepted `release:`
-  edit also blocks it, since `release.docs` sets the scope.
+  or `docs:` edit also blocks it, since both set the scope (`docs:` is guarded
+  for the delegate only, not by `config.changed`).
 - `ape status --json` changes gain `delegable: [{task, reason}]`
   (`docs-default` or `configured`), and `next` names the delegate. Records are
   the delegate's: `by: delegate:apex-accept`, the run, `Accepted-By:`. A fail
