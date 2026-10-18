@@ -57,7 +57,10 @@ type manifestForRollup struct {
 	// ParentRun / Depth: the run's place in the nesting rule (D62).
 	ParentRun string `yaml:"parent_run"`
 	Depth     int    `yaml:"depth"`
-	Totals    struct {
+	// TreeCostUSD is what the run's own manifest recorded (an orchestrator
+	// run's, once it ended); nil when it recorded none.
+	TreeCostUSD *float64 `yaml:"tree_cost_usd"`
+	Totals      struct {
 		CostUSD             float64                     `yaml:"cost_usd"`
 		TokensInput         int                         `yaml:"tokens_input"`
 		TokensOutput        int                         `yaml:"tokens_output"`
@@ -318,9 +321,11 @@ type RunManifest struct {
 	ParentRun string `json:"parent_run,omitempty"`
 	Depth     int    `json:"depth,omitempty"`
 	// Children are the runs this one started, and TreeCostUSD its own cost
-	// plus theirs. Totals stay the run's own session.
+	// plus theirs. Totals stay the run's own session. TreeCostUSD is
+	// present, $0 included, for a run with children or one whose manifest
+	// recorded it (an orchestrator's); absent means not computed.
 	Children    []ChildRun `json:"children,omitempty"`
-	TreeCostUSD float64    `json:"tree_cost_usd,omitempty"`
+	TreeCostUSD *float64   `json:"tree_cost_usd,omitempty"`
 }
 
 // ChildRun is one run another run started (its manifest's parent_run).
@@ -389,8 +394,9 @@ func FindRunManifest(projectRoot, runID string) (RunManifest, bool) {
 				},
 				PerModel: perModelTotals(m.Totals.ModelUsage),
 			}
-			if len(children) > 0 {
-				rm.TreeCostUSD = m.Totals.CostUSD + childCost
+			if len(children) > 0 || m.TreeCostUSD != nil {
+				tree := m.Totals.CostUSD + childCost
+				rm.TreeCostUSD = &tree
 			}
 			return rm, true
 		}

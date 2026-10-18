@@ -24,7 +24,7 @@ There is no variable that disables the rule. A switch a session can flip is a sw
 
 ## Children die with their parent, and record it
 
-The orchestrator dispatches every skill detached: `ape task <skill> --args <id> --detach`, then `ape run wait <id> --wait 9m` until it stops exiting 75. The detached child's supervisor checks the orchestrator's ape process every two seconds; when it is gone, it stops the child the way `ape run stop` does, and the child's manifest records `termination: {kind: parent_gone}`. Each child's manifest records `depth: 2` and `parent_run`; `ape status --json` lists the live sessions with their parent, and `ape costs run <orchestrator-run>` and the orchestrator's own manifest list its children with `tree_cost_usd`. A manifest's `totals` stay its own session's, so a sum over every manifest counts each child once.
+The orchestrator dispatches every skill detached: `ape task <skill> --args <id> --detach`, then `ape run wait <id> --wait 9m` until it stops exiting 75. The detached child's supervisor checks the orchestrator's ape process every two seconds; when it is gone, it stops the child the way `ape run stop` does, and the child's manifest records `termination: {kind: parent_gone}`. Each child's manifest records `depth: 2` and `parent_run`; `ape status --json` lists the live sessions with their parent, and `ape costs run <orchestrator-run>` and the orchestrator's own manifest list its children with `tree_cost_usd` (written for every orchestrator run once it ends, `0` included, so an absent field means not computed). A manifest's `totals` stay its own session's, so a sum over every manifest counts each child once.
 
 ## Why nesting was closed before, and what changed
 

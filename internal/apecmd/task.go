@@ -195,8 +195,9 @@ changes nothing. Every session carries APE_DEPTH, and a child also
 APE_PARENT_RUN (the orchestrator's run) and APE_PARENT_PID (the ape process
 running it); its manifest records depth and parent_run, and it is stopped,
 termination parent_gone, when that process is gone. An orchestrator's
-manifest lists its children and tree_cost_usd when it ends (totals stay its
-own). There is no switch to turn the rule off.
+manifest lists its children and tree_cost_usd when it ends: always, $0 and
+no children included, so an absent tree_cost_usd means not computed (totals
+stay its own). There is no switch to turn the rule off.
 
 An orchestrator dispatches a skill as
   ape task <skill> --args <id> --detach --output-format json

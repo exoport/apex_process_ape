@@ -131,7 +131,9 @@ func newCostsRunCmd() *cobra.Command {
 				for _, c := range m.Children {
 					fmt.Printf("    %-28s %-20s $%.4f %s\n", c.Run, c.Skill, c.CostUSD, c.Status)
 				}
-				fmt.Printf("  with children: $%.4f\n", m.TreeCostUSD)
+			}
+			if m.TreeCostUSD != nil {
+				fmt.Printf("  with children: $%.4f\n", *m.TreeCostUSD)
 			}
 			return nil
 		},

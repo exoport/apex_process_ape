@@ -493,8 +493,9 @@ func watchParent(ctx context.Context, parentPID int) (watched context.Context, s
 // recordLineage writes what the run's manifest cannot know at its start:
 // termination parent_gone for a session stopped because its parent ended,
 // and, for an orchestrator run, the child runs it started with their cost
-// (children, tree_cost_usd — totals stay its own). Best-effort, like
-// recordLaunch.
+// (children, tree_cost_usd — totals stay its own). tree_cost_usd is written
+// for every orchestrator run, $0 and childless included, so its absence
+// only ever means "not computed". Best-effort, like recordLaunch.
 func recordLineage(ctx context.Context, projectRoot, skill, manifestDir string, l *sessionLaunch) {
 	gone := errors.Is(context.Cause(ctx), errParentGone)
 	if !gone && skill != apexv1.OrchestratorSkill {
@@ -505,13 +506,16 @@ func recordLineage(ctx context.Context, projectRoot, skill, manifestDir string, 
 			m.Termination = &pipeline.TerminationRecord{Kind: pipeline.TerminationParentGone, Message: fmt.Sprintf(
 				"the orchestrator run %s that started this session ended (its ape process, pid %d, is gone), and ape stopped the session", l.parentRun, l.parentPID)}
 		}
-		if children, childCost := cost.ChildRuns(projectRoot, m.RunID); len(children) > 0 {
-			m.Children = make([]pipeline.ChildRunRecord, 0, len(children))
-			for _, c := range children {
-				m.Children = append(m.Children, pipeline.ChildRunRecord{Run: c.Run, Skill: c.Skill, CostUSD: c.CostUSD, Status: c.Status})
-			}
-			m.TreeCostUSD = m.Totals.CostUSD + childCost
+		if skill != apexv1.OrchestratorSkill {
+			return
 		}
+		children, childCost := cost.ChildRuns(projectRoot, m.RunID)
+		m.Children = nil
+		for _, c := range children {
+			m.Children = append(m.Children, pipeline.ChildRunRecord{Run: c.Run, Skill: c.Skill, CostUSD: c.CostUSD, Status: c.Status})
+		}
+		tree := m.Totals.CostUSD + childCost
+		m.TreeCostUSD = &tree
 	})
 }
 

@@ -194,11 +194,13 @@ type Manifest struct {
 
 	// Children are the runs this one started (their manifests' parent_run),
 	// and TreeCostUSD this run's cost plus theirs: written when the run
-	// ends, for an orchestrator. Totals stay this session's own, so a
-	// reader that sums every manifest counts each child once. Additive under
-	// schema_version 2.
+	// ends, for an orchestrator, children or not. Totals stay this
+	// session's own, so a reader that sums every manifest counts each child
+	// once. TreeCostUSD is a pointer so that a tree that cost $0 still says
+	// so: absent means not computed (any run but an orchestrator's, or one
+	// still running), never zero. Additive under schema_version 2.
 	Children    []ChildRunRecord `yaml:"children,omitempty"`
-	TreeCostUSD float64          `yaml:"tree_cost_usd,omitempty"`
+	TreeCostUSD *float64         `yaml:"tree_cost_usd,omitempty"`
 }
 
 // ChildRunRecord is one child run of an orchestrator run.
