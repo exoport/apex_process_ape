@@ -104,7 +104,7 @@ var findingRules = []findingRule{
 	rule("", `is the old archive location`, "layout.old-archive"),
 	rule("", `is the old state folder`, "layout.old-state"),
 	rule("", `^the lift's disposition list awaits review`, "lift.disposition-pending"),
-	rule("", `^docs\.(changelog|user_docs): .* does not exist`, "docs.missing"),
+	rule("", `^(docs\.(changelog|user_docs)|release\.docs): .* does not exist`, "docs.missing"),
 	rule("", `^caps\.[a-z_]+: .* is over its .* ceiling`, CodeCapsOverCeiling),
 	rule("", `^project.md is .* over the .* cap \(caps.project_md\)`, "project.too-big"),
 	rule("", "^missing `# <Project name>`", "project.no-title"),
