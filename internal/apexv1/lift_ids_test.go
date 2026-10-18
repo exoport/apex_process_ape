@@ -264,3 +264,46 @@ func TestEditComments_StoryFirstAsideKeepsItsADRs(t *testing.T) {
 		require.Len(t, adrs.FindAllString(got, -1), len(adrs.FindAllString(in, -1)), "an ADR citation was lost: %q", in)
 	}
 }
+
+// R19, tenax's pkg/replaycore/combinator.go on rc.4 and rc.5: removing
+// "in story 19.7" also trimmed the bullet off "//   - Does NOT modify
+// SuspendPayload …", and gofmt then read the list as a code block, a
+// "//" line above it. A line goes only when nothing but ids is left;
+// otherwise only the id goes, and the bullet stays.
+func TestEditComments_BulletKeepsItsMarker(t *testing.T) {
+	src := "package x\n\n" +
+		"// ProgressFutureTree runs the loop.\n" +
+		"//\n" +
+		"// Contract:\n" +
+		"//   - Does NOT modify SuspendPayload or call Suspend() — those are wired in story 19.7.\n" +
+		"//   - Story 19.6: clears ActiveTree on completion.\n" +
+		"//   - Epic 12\n" +
+		"//   - The existing paths are UNCHANGED.\n" +
+		"func F() {}\n"
+	res, err := editComments("x.go", src, langGo, testVocab(), nil)
+	require.NoError(t, err)
+	want := "package x\n\n" +
+		"// ProgressFutureTree runs the loop.\n" +
+		"//\n" +
+		"// Contract:\n" +
+		"//   - Does NOT modify SuspendPayload or call Suspend() — those are wired.\n" +
+		"//   - Clears ActiveTree on completion.\n" +
+		"//   - The existing paths are UNCHANGED.\n" +
+		"func F() {}\n"
+	require.Equal(t, want, res.New)
+	out, why := gofmtLifted(src, res.New)
+	require.Empty(t, why)
+	require.Equal(t, want, out, "still a list to gofmt")
+
+	for in, want := range map[string]string{
+		" * Story 3.2: retry the publish.": " * Retry the publish.",
+		" 2. Retry the publish (DW-42).":   " 2. Retry the publish.",
+		" + see Epic 4 for why":            "",
+	} {
+		got, empty := stripIDsFromText(in, testVocab().spans(in))
+		require.Equal(t, want == "", empty, in)
+		if !empty {
+			require.Equal(t, want, got, in)
+		}
+	}
+}

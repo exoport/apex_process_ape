@@ -328,6 +328,8 @@ var (
 	sepCloseRe  = regexp.MustCompile(`[ \t]*(?:[,;/&+]|\b(?i:and|or))[ \t]*` + cutMark + `([)\]])`)
 	sepPunctRe  = regexp.MustCompile(`[ \t]*[,;/&+][ \t]*` + cutMark + `([,;:.!?])`)
 	emptyPairRe = regexp.MustCompile(`\(\s*\)|\[\s*\]`)
+	// bulletRe is a list item's marker: "- ", "* ", "2. ".
+	bulletRe = regexp.MustCompile(`^(?:[-*+•]|\d+[.)])[ \t]+`)
 	// emptiedPairRe is a pair a removal emptied, with the blanks before it:
 	// "Bounded ([Story 3.2]) twice" is "Bounded twice".
 	emptiedPairRe = regexp.MustCompile(`[ \t]*(?:\(\s*\)|\[\s*\])`)
@@ -362,6 +364,11 @@ func stripIDsFromText(s string, spans [][2]int) (out string, empty bool) {
 	b.Write(held[prev:])
 	t := strings.TrimLeft(b.String(), " \t")
 	origTrim := strings.TrimSpace(s)
+	// A list item keeps its marker: trimmed with the separators, "- Does
+	// NOT modify …" was no longer a list item, and gofmt made the list a
+	// code block (R19). The item goes only when its text does.
+	bullet := bulletRe.FindString(t)
+	t = t[len(bullet):]
 	pre := strings.ReplaceAll(t, storyMark, idMark)
 	startsWithID := strings.HasPrefix(pre, idMark) || idLeadRe.MatchString(pre)
 
@@ -410,7 +417,7 @@ func stripIDsFromText(s string, spans [][2]int) (out string, empty bool) {
 	if strings.HasSuffix(origTrim, ".") && !strings.ContainsAny(t[len(t)-1:], ".!?:") {
 		t += "."
 	}
-	return lead + t, false
+	return lead + bullet + t, false
 }
 
 // joinCuts closes each gap left by a removal: nothing next to punctuation
