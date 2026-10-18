@@ -133,7 +133,8 @@ func TestRecordLineage_RollsChildrenUpUnderTheOrchestrator(t *testing.T) {
 	var m pipeline.Manifest
 	require.NoError(t, yaml.Unmarshal(data, &m))
 	require.InDelta(t, 1.5, m.Totals.CostUSD, 1e-9, "totals stay the orchestrator's own")
-	require.InDelta(t, 3.75, m.TreeCostUSD, 1e-9)
+	require.NotNil(t, m.TreeCostUSD)
+	require.InDelta(t, 3.75, *m.TreeCostUSD, 1e-9)
 	require.Equal(t, []pipeline.ChildRunRecord{
 		{Run: "20261017-100100-bbb", Skill: "apex-change", CostUSD: 2, Status: "completed"},
 		{Run: "20261017-100200-ccc", Skill: "apex-apply", CostUSD: 0.25, Status: "failed"},
@@ -155,6 +156,49 @@ func TestRecordLineage_RollsChildrenUpUnderTheOrchestrator(t *testing.T) {
 	})
 	require.Contains(t, out, `"parent_run": "20261017-100000-aaa"`)
 	require.NotContains(t, out, "tree_cost_usd")
+}
+
+// An orchestrator tree that cost $0 says so (eval rc.3 probe: omitempty
+// dropped a computed 0.0, which read as "not computed"); a childless
+// orchestrator's tree is its own cost; a child records none.
+func TestRecordLineage_TreeCostZeroIsPresent(t *testing.T) {
+	root := t.TempDir()
+	write := func(skill, run, body string) string {
+		dir := filepath.Join(runlog.TasksRoot(root), skill, run)
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		require.NoError(t, os.WriteFile(pipeline.ManifestPath(dir), []byte(body), 0o644))
+		require.NoError(t, os.Symlink(filepath.Base(dir), filepath.Join(filepath.Dir(dir), "latest")))
+		return dir
+	}
+	orch := write(OrchestratorSkillForTest, "20261017-100000-aaa", "run_id: 20261017-100000-aaa\nstatus: completed\ndepth: 1\ntotals:\n  cost_usd: 0\n")
+	write("apex-change", "20261017-100100-bbb", "run_id: 20261017-100100-bbb\nstatus: completed\ndepth: 2\nparent_run: 20261017-100000-aaa\ntotals:\n  cost_usd: 0\n")
+
+	recordLineage(context.Background(), root, OrchestratorSkillForTest, runlog.TasksRoot(root), &sessionLaunch{depth: 1})
+	data, err := os.ReadFile(pipeline.ManifestPath(orch))
+	require.NoError(t, err)
+	require.Contains(t, string(data), "tree_cost_usd: 0\n")
+	t.Chdir(root)
+	out := captureStdout(t, func() {
+		cmd := newCostsRunCmd()
+		cmd.SetArgs([]string{"20261017-100000-aaa", "--output-format", "json"})
+		require.NoError(t, cmd.Execute())
+	})
+	require.Contains(t, out, `"tree_cost_usd": 0`)
+
+	// No children: the tree is the orchestrator's own cost, still written.
+	root2 := t.TempDir()
+	dir := filepath.Join(runlog.TasksRoot(root2), OrchestratorSkillForTest, "20261017-110000-ddd")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	require.NoError(t, os.WriteFile(pipeline.ManifestPath(dir), []byte("run_id: 20261017-110000-ddd\nstatus: completed\ntotals:\n  cost_usd: 0.5\n"), 0o644))
+	require.NoError(t, os.Symlink(filepath.Base(dir), filepath.Join(filepath.Dir(dir), "latest")))
+	recordLineage(context.Background(), root2, OrchestratorSkillForTest, runlog.TasksRoot(root2), &sessionLaunch{depth: 1})
+	var m pipeline.Manifest
+	data, err = os.ReadFile(pipeline.ManifestPath(dir))
+	require.NoError(t, err)
+	require.NoError(t, yaml.Unmarshal(data, &m))
+	require.NotNil(t, m.TreeCostUSD)
+	require.InDelta(t, 0.5, *m.TreeCostUSD, 1e-9)
+	require.Empty(t, m.Children)
 }
 
 // OrchestratorSkillForTest keeps the test readable.

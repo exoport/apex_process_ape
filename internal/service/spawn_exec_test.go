@@ -38,7 +38,7 @@ exit 0
 
 	done := make(chan int, 1)
 	jobID := "20260709-080000-abcdef0"
-	pid, logPath, err := sp.Spawn(KindTask, jobID, RunRequest{ProjectRoot: project, Skill: "apex-shard-doc"}, func(code int) { done <- code })
+	pid, logPath, err := sp.Spawn(KindTask, jobID, RunRequest{ProjectRoot: project, Skill: "apex-shard-doc"}, nil, func(code int) { done <- code })
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestSpawnTerminateGroupKillsChild(t *testing.T) {
 	}
 
 	done := make(chan int, 1)
-	pid, _, err := sp.Spawn(KindTask, "20260709-080000-0000000", RunRequest{ProjectRoot: project, Skill: "x"}, func(code int) { done <- code })
+	pid, _, err := sp.Spawn(KindTask, "20260709-080000-0000000", RunRequest{ProjectRoot: project, Skill: "x"}, nil, func(code int) { done <- code })
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}

@@ -144,7 +144,11 @@ micro `req.Error` with stable codes: `BUSY_EXCLUSIVE`, `BUSY_KEY`,
 > field→argv mapping, and the error set per endpoint — is
 > [`ape service` API reference](service-api.md).
 
-Every request/reply body is versioned JSON (`"v":1`). Requests:
+Every request/reply body is versioned JSON (`"v":2`). Every `*.run` request
+also carries `caller: {depth, run_id?, parent_run?, pid?}` (D83; added by `ape
+service submit`): one without it, or from depth 2, is refused `session.depth`,
+and a depth-1 caller must be a running apex-orchestrator run (see the
+[caller stamp](service-api.md#caller-stamp-the-nesting-rule)). Requests:
 
 | Endpoint | Request | Reply (or error) |
 | --- | --- | --- |

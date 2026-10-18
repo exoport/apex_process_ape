@@ -20,11 +20,13 @@ The environment alone is not trusted: a model can run `env -u APE_SESSION ape ta
 
 What remains open, and is documented rather than chased: a model that scrubs its environment and also double-forks into a daemon leaves no ancestor ape knows. On Windows an ancestor that exited may have had its pid reused, so the walk there is best effort.
 
+An `ape service` daemon is depth 0 and cannot see where a request comes from, so from rc.4 (D83) every job carries the caller's stamp, which `ape service submit` takes from the same record: a request without one, or from depth 2, is refused with `session.depth` and nothing runs, and a depth-1 caller's job runs only for a running `apex-orchestrator` run, under the same allow-list and one-child lock, as that orchestrator's child. The stamp is the client's word: a raw NATS publish can claim depth 0, so the NATS credentials remain that boundary.
+
 There is no variable that disables the rule. A switch a session can flip is a switch a session will flip.
 
 ## Children die with their parent, and record it
 
-The orchestrator dispatches every skill detached: `ape task <skill> --args <id> --detach`, then `ape run wait <id> --wait 9m` until it stops exiting 75. The detached child's supervisor checks the orchestrator's ape process every two seconds; when it is gone, it stops the child the way `ape run stop` does, and the child's manifest records `termination: {kind: parent_gone}`. Each child's manifest records `depth: 2` and `parent_run`; `ape status --json` lists the live sessions with their parent, and `ape costs run <orchestrator-run>` and the orchestrator's own manifest list its children with `tree_cost_usd`. A manifest's `totals` stay its own session's, so a sum over every manifest counts each child once.
+The orchestrator dispatches every skill detached: `ape task <skill> --args <id> --detach`, then `ape run wait <id> --wait 9m` until it stops exiting 75. The detached child's supervisor checks the orchestrator's ape process every two seconds; when it is gone, it stops the child the way `ape run stop` does, and the child's manifest records `termination: {kind: parent_gone}`. Each child's manifest records `depth: 2` and `parent_run`; `ape status --json` lists the live sessions with their parent, and `ape costs run <orchestrator-run>` and the orchestrator's own manifest list its children with `tree_cost_usd` (written for every orchestrator run once it ends, `0` included, so an absent field means not computed). A manifest's `totals` stay its own session's, so a sum over every manifest counts each child once.
 
 ## Why nesting was closed before, and what changed
 

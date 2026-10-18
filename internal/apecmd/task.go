@@ -36,8 +36,41 @@ import (
 const taskCommitDerivedSentinel = "\x01derived"
 
 // taskLongHelp is `ape task --help`'s long text, kept out of newTaskCmd
-// so the constructor reads as flags and wiring.
-const taskLongHelp = `Run one framework skill as a single-step interactive run — everything a
+// so the constructor reads as flags and wiring. The depth-1 allow-list in
+// it is generated from apexv1.CoreChildSkills, so the help names exactly
+// the skills the refusal message and the rule use.
+var taskLongHelp = strings.Replace(taskLongHelpText, "{{depth1}}", depthOneHelp(), 1)
+
+// depthOneHelp is the nesting table's depth-1 row of `ape task --help`.
+func depthOneHelp() string {
+	return hangingWrap("  depth 1  ", "           ", "a session started from depth 0: may start a child only when it is ape's own"+
+		" apex-orchestrator run (ape task apex-orchestrator), only a skill on its allow-list ("+
+		strings.Join(apexv1.CoreChildSkills, ", ")+", the human_review: delegate skill, and every skill"+
+		" the tools: slots name), and one child at a time", 76)
+}
+
+// hangingWrap fills text into lines of at most width runes, the first after
+// prefix and the rest after indent.
+func hangingWrap(prefix, indent, text string, width int) string {
+	var b strings.Builder
+	line := prefix
+	fresh := true
+	for _, w := range strings.Fields(text) {
+		if !fresh && len(line)+1+len(w) > width {
+			b.WriteString(line + "\n")
+			line, fresh = indent, true
+		}
+		if !fresh {
+			line += " "
+		}
+		line += w
+		fresh = false
+	}
+	b.WriteString(line)
+	return b.String()
+}
+
+const taskLongHelpText = `Run one framework skill as a single-step interactive run — everything a
 pipeline step gets (agent prefix, preflight, bridge hooks, manifest,
 telemetry) with all parameters passed as flags instead of a pipeline
 YAML file. Execution is PTY-interactive only: claude runs as a REPL,
@@ -154,6 +187,13 @@ judged against a skill's declaration.
 The verdict is written to the run manifest as commit_contract, so a
 failure stays diagnosable after the fact.
 
+A run's commits are the range its HEAD moved over. A commit in it that was
+made while another ape session's run in the same checkout went (not this
+run's parent orchestrator, not its own children) cannot be told apart, so
+neither run claims it: both list it under commits_shared, in the JSON
+envelope and the run manifest, and it is left out of commits and of the
+commit-message check.
+
 Usage limits (H20): when a claude.ai plan's usage limit stops the session,
 Claude Code draws its limit line ("You've hit your usage limit · resets
 11pm (Europe/Madrid)", or "Usage limit reached · limit resets …") and no
@@ -174,14 +214,11 @@ when a change becomes blocked — with APE_EVENT=stop|block, APE_CHANGE
 Sessions and the nesting rule (D61, D62): every skill of the v1 loop runs
 as its own ape task session, and depth counts only the model sessions ape
 launched (ape task, ape prompt, ape chat, ape change review --run, and the
-ape service task/prompt jobs, which run those commands):
+ape service task/prompt jobs, which run those commands, decided from the
+caller's stamp that ape service submit adds — see ape service --help):
   depth 0  a terminal, a Claude Code session ape did not launch, a shell,
            ape script, the service daemon: may start any session
-  depth 1  a session started from depth 0: may start a child only when it
-           is ape's own apex-orchestrator run (ape task apex-orchestrator),
-           only a skill on its allow-list (apex-plan, apex-change,
-           apex-apply, apex-review, apex-release, and the tools: skills),
-           and one child at a time
+{{depth1}}
   depth 2  a session an orchestrator started: starts nothing
 A refusal is exit 2, code session.depth or session.not-allowed (action
 stop); a second child while one runs is exit 3, session.child-running, and
@@ -195,8 +232,9 @@ changes nothing. Every session carries APE_DEPTH, and a child also
 APE_PARENT_RUN (the orchestrator's run) and APE_PARENT_PID (the ape process
 running it); its manifest records depth and parent_run, and it is stopped,
 termination parent_gone, when that process is gone. An orchestrator's
-manifest lists its children and tree_cost_usd when it ends (totals stay its
-own). There is no switch to turn the rule off.
+manifest lists its children and tree_cost_usd when it ends: always, $0 and
+no children included, so an absent tree_cost_usd means not computed (totals
+stay its own). There is no switch to turn the rule off.
 
 An orchestrator dispatches a skill as
   ape task <skill> --args <id> --detach --output-format json
@@ -514,8 +552,12 @@ type taskEnvelope struct {
 	ModelUsage      map[string]taskModelUsage `json:"model_usage,omitempty"`
 	Sessions        []taskSessionUsage        `json:"sessions,omitempty"`
 	Commits         []string                  `json:"commits"`
-	ManifestPath    string                    `json:"manifest_path,omitempty"`
-	TelemetryNote   string                    `json:"telemetry_note,omitempty"`
+	// CommitsShared are the commits of the run's range made while another
+	// ape session's run in the same checkout went: claimed by neither run,
+	// listed in both (commitshare.go).
+	CommitsShared []string `json:"commits_shared,omitempty"`
+	ManifestPath  string   `json:"manifest_path,omitempty"`
+	TelemetryNote string   `json:"telemetry_note,omitempty"`
 	// CommitContract is the per-dispatch commit-ownership verdict. Always
 	// emitted, including when it passed and when it had to be skipped:
 	// a consumer must be able to tell "asserted and clean" from "could
@@ -696,7 +738,17 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		return taskRun{}, &taskPreflightError{err: pfe}
 	}
 
-	subjects := gitCommitSubjectsSince(ctx, o.projectRoot, headBefore)
+	// The run's commits, less those another session's run in this checkout
+	// may have made while this one went (commitshare.go): those are
+	// commits_shared, claimed by neither run, and not asserted below.
+	runDir := pipeline.ResolveLatestRunDir(o.projectRoot, o.skill, manifestDir)
+	runID := ""
+	if runDir != "" {
+		runID = runIDFromDir(runDir)
+	}
+	subjects, shared := splitSharedCommits(o.projectRoot, runID, o.launch.parentRunOrEmpty(),
+		gitCommitsSince(ctx, o.projectRoot, headBefore), time.Now())
+	recordCommitsShared(runDir, shared)
 
 	// The two per-dispatch assertions. They run whether or not the skill
 	// itself succeeded: a run that failed halfway can still have left a
@@ -742,6 +794,7 @@ func dispatchTaskWith(ctx context.Context, o taskOptions, cfg runConfig) (taskRu
 		ExitCode:        exitCode,
 		DurationSeconds: duration.Seconds(),
 		Commits:         subjects,
+		CommitsShared:   shared,
 		CommitContract:  &contract,
 	}
 	if runErr != nil {
@@ -993,6 +1046,12 @@ func printTaskSummary(env taskEnvelope, runErr error) {
 			fmt.Fprintf(os.Stdout, "   %s\n", c)
 		}
 	}
+	if len(env.CommitsShared) > 0 {
+		fmt.Fprintf(os.Stdout, "📌 commits shared with another session's run in this checkout (claimed by neither): %d\n", len(env.CommitsShared))
+		for _, c := range env.CommitsShared {
+			fmt.Fprintf(os.Stdout, "   %s\n", c)
+		}
+	}
 	printCommitContract(env.CommitContract)
 }
 
@@ -1042,36 +1101,4 @@ func gitHeadFull(ctx context.Context, projectRoot string) string {
 		return ""
 	}
 	return strings.TrimSpace(stdout.String())
-}
-
-// gitCommitSubjectsSince returns the subjects of commits made after
-// `before` (oldest first) — the run's complete commit trail, framework
-// commits included, not just ape's boundary commit. Best-effort.
-//
-// An empty `before` means the repository had no commits when the run
-// started, so every commit reachable from HEAD was made BY the run. That
-// case has to list them rather than return nothing: the commit-ownership
-// assertion reads this list, and reporting an empty trail there would
-// accuse a declared committer of suppressing the very commit it just
-// made. A repo that still has no commits has no HEAD, the log fails, and
-// the empty result is then correct.
-func gitCommitSubjectsSince(ctx context.Context, projectRoot, before string) []string {
-	revRange := before + "..HEAD"
-	if before == "" {
-		revRange = "HEAD"
-	}
-	var stdout bytes.Buffer
-	// revRange is built from a SHA captured by rev-parse at run start, or
-	// the literal "HEAD" — never from user input.
-	cmd := exec.CommandContext(ctx, "git", "log", "--reverse", "--format=%s", revRange)
-	cmd.Dir = projectRoot
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
-		return []string{}
-	}
-	out := strings.TrimSpace(stdout.String())
-	if out == "" {
-		return []string{}
-	}
-	return strings.Split(out, "\n")
 }

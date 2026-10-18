@@ -60,13 +60,26 @@ nats req '$SRV.STATS.ape' ''     # per-endpoint request/error counters
 ## 4. Submit and manage jobs
 
 The endpoint group is `ape.svc.<name>.<project-slug>` (the daemon's banner prints
-it). Submit a job:
+it). Submit a job with `ape service submit`, which adds the caller stamp every
+`*.run` request needs (D83) — where the caller runs in ape's nesting rule:
+
+```bash
+ape service submit task '{"project_root":"/abs/path/main-project","skill":"apex-plan","args":"M1"}' \
+  --nats-url nats://127.0.0.1:4222
+# → {"v":2,"job_id":"20260709-083015-a1b2c3d","accepted":true}
+```
+
+A request without `caller` is refused `session.depth`; so is one from a session
+an orchestrator started (depth 2). From inside an apex-orchestrator run (depth 1)
+the job runs as that orchestrator's one child, for an allow-listed skill only.
+A raw `nats req` from a terminal states depth 0 itself — the stamp is the
+client's word, and the NATS credentials ("Lock it down" below) remain the boundary:
 
 ```bash
 # pipeline.run and task.run dispatch a headless `ape` child.
 nats req ape.svc.ape.main-project.task.run \
-  '{"project_root":"/abs/path/main-project","skill":"apex-shard-doc","args":"--doc prd"}'
-# → {"v":1,"job_id":"20260709-083015-a1b2c3d","accepted":true}
+  '{"project_root":"/abs/path/main-project","skill":"apex-shard-doc","args":"--doc prd","caller":{"depth":0}}'
+# → {"v":2,"job_id":"20260709-083015-a1b2c3d","accepted":true}
 
 nats req ape.svc.ape.main-project.pipeline.run \
   '{"project_root":"/abs/path/main-project","pipeline":"design","prompt":"a greeter CLI"}'
@@ -75,13 +88,13 @@ nats req ape.svc.ape.main-project.pipeline.run \
 # of "prompt" (positional text) or "handoff" (a handoff document); optional
 # "agent", "model", and "workflow":true.
 nats req ape.svc.ape.main-project.prompt.run \
-  '{"project_root":"/abs/path/main-project","prompt":"add a CHANGELOG entry","agent":"apex-agent-dev","workflow":true}'
+  '{"project_root":"/abs/path/main-project","prompt":"add a CHANGELOG entry","agent":"apex-agent-dev","workflow":true,"caller":{"depth":0}}'
 
 # script.run dispatches `ape script`. Provide EXACTLY ONE of "script_path"
 # (a file inside an allowlisted root) or "script_source" (inline Go, gated —
 # see below); "script_args" are exposed to the script as apescript.Args().
 nats req ape.svc.ape.main-project.script.run \
-  '{"project_root":"/abs/path/main-project","script_path":"ops/nightly.go","script_args":["--target","./component-a"]}'
+  '{"project_root":"/abs/path/main-project","script_path":"ops/nightly.go","script_args":["--target","./component-a"],"caller":{"depth":0}}'
 ```
 
 Manage them:

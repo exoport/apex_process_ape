@@ -39,6 +39,7 @@ type Daemon struct {
 	adm         *Admissions
 	reg         *Registry
 	spawner     *Spawner
+	gate        SessionGate // depth-1 callers (depth.go); nil refuses them
 
 	// Event identity, precomputed from the daemon credential.
 	prefix  string
@@ -67,6 +68,9 @@ type DaemonConfig struct {
 	// spawned children (a *nats.Conn does not expose the creds path).
 	NatsURL   string
 	NatsCreds string
+	// Gate checks a depth-1 caller's job (depth.go); nil refuses every
+	// depth-1 caller.
+	Gate SessionGate
 }
 
 // NewDaemon builds a Daemon. It does not touch NATS beyond storing the conn;
@@ -100,6 +104,7 @@ func NewDaemon(ctx context.Context, dc DaemonConfig) (*Daemon, error) {
 		adm:         NewAdmissions(),
 		reg:         NewRegistry(),
 		spawner:     sp,
+		gate:        dc.Gate,
 		prefix:      prefix,
 		userTok:     tok(userTok),
 		userBlk:     eventing.User{Name: dc.Identity.Name, PublicKey: dc.Identity.Subject},
@@ -158,6 +163,15 @@ func (d *Daemon) Register(svc micro.Service) error {
 	return nil
 }
 
+// RunSubject is the subject of kind's *.run endpoint on the daemon named
+// name ("" for the default) that serves serviceRoot as its primary project.
+func RunSubject(name, serviceRoot string, kind Kind) string {
+	if strings.TrimSpace(name) == "" {
+		name = defaultServiceName
+	}
+	return fmt.Sprintf("%s.%s.%s.%s.run", subjectRootSvc, name, eventing.ProjectSlug(serviceRoot), kind)
+}
+
 // runHandler dispatches one *.run endpoint for the given kind.
 func (d *Daemon) runHandler(kind Kind) micro.HandlerFunc {
 	return func(req micro.Request) { d.handleRun(kind, req) }
@@ -194,6 +208,20 @@ func (d *Daemon) handleRun(kind Kind, req micro.Request) {
 	}
 	projectSlug := eventing.ProjectSlug(rr.ProjectRoot)
 
+	// The nesting rule (D83, depth.go): before the job takes a slot or
+	// spawns anything.
+	callerEnv, refusal := admitCaller(kind, rr, d.gate)
+	if refusal != nil {
+		d.emitJobEvent(projectSlug, jobID, "job-rejected", now(), map[string]any{
+			"kind":   string(kind),
+			"reason": refusal.Code,
+			"caller": rr.Caller,
+		})
+		data, _ := json.Marshal(map[string]any{"v": WireVersion, "code": refusal.Code, "action": refusal.Action, "message": refusal.Msg})
+		_ = req.Error(refusal.Code, refusal.Error(), data)
+		return
+	}
+
 	exclusive := !rr.Nonexclusive
 	release, err := d.adm.Admit(rr.ExclusivityKey, exclusive)
 	if err != nil {
@@ -220,19 +248,21 @@ func (d *Daemon) handleRun(kind Kind, req micro.Request) {
 		ExclusivityKey: rr.ExclusivityKey,
 		Exclusive:      exclusive,
 		SubmittedBy:    rr.SubmittedBy,
+		Caller:         rr.Caller,
 	})
 	d.emitJobEvent(projectSlug, jobID, "job-accepted", startedAt, map[string]any{
 		"kind":            string(kind),
 		"exclusivity_key": rr.ExclusivityKey,
 		"exclusive":       exclusive,
 		"submitted_by":    rr.SubmittedBy,
+		"caller":          rr.Caller,
 	})
 
 	// Track the child for drain. Add before Spawn: Spawn only starts the
 	// wait goroutine (which calls onExit → Done) after a successful start,
 	// so on a Spawn error we balance with Done ourselves.
 	d.jobs.Add(1)
-	pid, logPath, err := d.spawner.Spawn(kind, jobID, rr, func(code int) {
+	pid, logPath, err := d.spawner.Spawn(kind, jobID, rr, callerEnv, func(code int) {
 		d.onJobExit(projectSlug, jobID, release, code)
 	})
 	if err != nil {

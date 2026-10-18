@@ -48,6 +48,7 @@ type Options struct {
 	ApeVersion   string        // apecmd.Version
 	ApeBin       string        // "" → os.Executable()
 	Stderr       io.Writer     // diagnostics sink (default os.Stderr)
+	Gate         SessionGate   // checks a depth-1 caller's job (depth.go)
 }
 
 // Run loads the allowlist config, connects to NATS, registers the micro
@@ -95,6 +96,7 @@ func Run(ctx context.Context, o Options) error {
 		ApeBin:       o.ApeBin,
 		NatsURL:      ncfg.URL,
 		NatsCreds:    ncfg.CredsFile,
+		Gate:         o.Gate,
 	})
 	if err != nil {
 		return err

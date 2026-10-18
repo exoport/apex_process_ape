@@ -54,10 +54,18 @@ import (
 // eval's bash stand-in named `claude` gets the same answer a real session
 // does.
 //
-// The residual, documented rather than chased: a model that scrubs the
+// An `ape service` job (D83) is decided by the daemon from the caller's
+// stamp, which `ape service submit` takes from currentSession here; a
+// depth-1 orchestrator's job runs under the orchestrator's marker, so its
+// `ape task` comes through gateSession as that orchestrator's child
+// (service_submit.go).
+//
+// The residuals, documented rather than chased: a model that scrubs the
 // environment AND double-forks (setsid, nohup into a daemon) leaves no
 // ancestor ape knows. So does Windows when an ancestor has exited and its
-// pid been reused. Both need a deliberate escape, not a slip.
+// pid been reused. And a raw NATS publish to a service daemon can claim
+// depth 0 in its stamp: the NATS credentials and subject permissions remain
+// that boundary. Each needs a deliberate escape, not a slip.
 //
 // Deterministic commands (status, change new|check|start|verify|archive,
 // milestone gate|close, next add, …) never call this. There is no escape
@@ -493,8 +501,9 @@ func watchParent(ctx context.Context, parentPID int) (watched context.Context, s
 // recordLineage writes what the run's manifest cannot know at its start:
 // termination parent_gone for a session stopped because its parent ended,
 // and, for an orchestrator run, the child runs it started with their cost
-// (children, tree_cost_usd — totals stay its own). Best-effort, like
-// recordLaunch.
+// (children, tree_cost_usd — totals stay its own). tree_cost_usd is written
+// for every orchestrator run, $0 and childless included, so its absence
+// only ever means "not computed". Best-effort, like recordLaunch.
 func recordLineage(ctx context.Context, projectRoot, skill, manifestDir string, l *sessionLaunch) {
 	gone := errors.Is(context.Cause(ctx), errParentGone)
 	if !gone && skill != apexv1.OrchestratorSkill {
@@ -505,13 +514,16 @@ func recordLineage(ctx context.Context, projectRoot, skill, manifestDir string, 
 			m.Termination = &pipeline.TerminationRecord{Kind: pipeline.TerminationParentGone, Message: fmt.Sprintf(
 				"the orchestrator run %s that started this session ended (its ape process, pid %d, is gone), and ape stopped the session", l.parentRun, l.parentPID)}
 		}
-		if children, childCost := cost.ChildRuns(projectRoot, m.RunID); len(children) > 0 {
-			m.Children = make([]pipeline.ChildRunRecord, 0, len(children))
-			for _, c := range children {
-				m.Children = append(m.Children, pipeline.ChildRunRecord{Run: c.Run, Skill: c.Skill, CostUSD: c.CostUSD, Status: c.Status})
-			}
-			m.TreeCostUSD = m.Totals.CostUSD + childCost
+		if skill != apexv1.OrchestratorSkill {
+			return
 		}
+		children, childCost := cost.ChildRuns(projectRoot, m.RunID)
+		m.Children = nil
+		for _, c := range children {
+			m.Children = append(m.Children, pipeline.ChildRunRecord{Run: c.Run, Skill: c.Skill, CostUSD: c.CostUSD, Status: c.Status})
+		}
+		tree := m.Totals.CostUSD + childCost
+		m.TreeCostUSD = &tree
 	})
 }
 

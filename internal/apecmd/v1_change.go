@@ -696,7 +696,7 @@ and that session writes review.md and records the verdict with --verdict/--findi
 It counts as starting apex-review under the nesting rule (D62; see ape task --help):
 from a terminal (depth 0) always; from inside an ape session only from ape's own
 apex-orchestrator run, as its one child (exit 3, session.child-running, while
-another child runs); from any other session — apex-apply a person ran with ape task,
+another child runs, checked before the change is read); from any other session — apex-apply a person ran with ape task,
 say — refused (exit 2, session.depth); never from inside a review session. The
 review session is depth 2 under an orchestrator, its manifest records depth and
 parent_run, and it is stopped when that orchestrator's run ends.

@@ -10,7 +10,11 @@ const subjectRootSvc = "ape.svc"
 // additive-only; bump only for a breaking change (and document it in
 // docs/reference/events.md). Requests may omit "v" (treated as current);
 // replies always stamp it.
-const WireVersion = 1
+//
+// 2 (D83): every *.run request carries the caller's stamp (caller), and one
+// without it is refused (session.depth) — a v1 request is refused, not run
+// at depth 1 as before.
+const WireVersion = 2
 
 // Stable PLAN-14 error codes, returned via micro req.Error. They are an
 // external contract frozen in docs/reference/events.md — never renamed or
@@ -103,6 +107,29 @@ type RunRequest struct {
 	// published the request is the NATS server's audit domain (per-user
 	// creds + subject permissions) — see PLAN-14 Risks.
 	SubmittedBy string `json:"submitted_by,omitempty"`
+
+	// Caller is where the request comes from under the nesting rule (D62,
+	// D83): `ape service submit` stamps it from ape's own record of the
+	// session it runs in. Required: a request without it is refused
+	// (depth.go).
+	Caller *CallerStamp `json:"caller,omitempty"`
+}
+
+// CallerStamp is the submitting process's place in the nesting rule.
+//
+//nolint:tagliatelle // snake_case is the stable, documented NATS wire contract
+type CallerStamp struct {
+	// Depth is the caller's session depth: 0 outside every ape-launched
+	// session (a terminal, a shell, ape script), 1 inside one a terminal
+	// started, 2 inside one an orchestrator started.
+	Depth int `json:"depth"`
+	// RunID is the run of the session the caller runs in (depth >= 1): the
+	// job's parent run at depth 1.
+	RunID string `json:"run_id,omitempty"`
+	// ParentRun is that session's own parent run (depth 2).
+	ParentRun string `json:"parent_run,omitempty"`
+	// PID is the submitting process, for the record.
+	PID int `json:"pid,omitempty"`
 }
 
 // RunReply is the accept response for a *.run request. A rejection is a
@@ -140,8 +167,10 @@ type JobInfo struct {
 	ExclusivityKey string    `json:"exclusivity_key"`
 	Exclusive      bool      `json:"exclusive"`
 	SubmittedBy    string    `json:"submitted_by,omitempty"`
-	LogPath        string    `json:"log_path,omitempty"`
-	ExitCode       *int      `json:"exit_code,omitempty"` // set once terminal
+	// Caller is the request's caller stamp (D83). Additive.
+	Caller   *CallerStamp `json:"caller,omitempty"`
+	LogPath  string       `json:"log_path,omitempty"`
+	ExitCode *int         `json:"exit_code,omitempty"` // set once terminal
 }
 
 // JobStatusReply wraps a JobInfo (job.status).

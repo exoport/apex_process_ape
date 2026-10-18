@@ -60,6 +60,23 @@ from _apex/service.yaml (or ~/.ape/service.yaml, or --config):
     - /abs/path/main-project
     - /abs/path/component-repo
 
+Jobs and the nesting rule (D62, D83): a task or prompt job is a model
+session. Every *.run request carries the caller's stamp, "caller": {depth,
+run_id, parent_run, pid}, which ` + "`ape service submit`" + ` adds from ape's own record
+of the session it runs in (see ape service submit --help). The daemon
+refuses a request without one (wire v2; a pre-rc.4 client's request is
+refused, never run) and one from depth 2 with session.depth (action stop),
+spawning nothing; a script job is refused from depth 1 too. From depth 1
+only an apex-orchestrator run's job runs — its run must be a running
+apex-orchestrator manifest in the job's project_root — and only a task of a
+skill on its allow-list, one child at a time (session.not-allowed,
+session.child-running): the job's ape task runs under the orchestrator's
+session marker, as its child (depth 2, parent_run, in its children, stopped
+when it ends). A depth-0 job runs as before. A refusal is a micro error whose
+code is the nesting code, its body {v, code, action, message}; job.status
+shows the caller. The stamp is the client's word: a raw publish can claim
+depth 0.
+
 SECURITY: anyone who can publish on the service subjects can run skills on
 this machine. Scope the NATS credential's publish/subscribe permissions to
 ape.svc.<name>.<project-slug>.> on the server — that is the real trust
@@ -73,9 +90,9 @@ Exit codes: 0 clean shutdown · 1 connect/registration failure · 2 usage or
 config error (bad --name, missing/invalid service.yaml, no NATS URL).`,
 		Example: `  ape service --nats-url nats://127.0.0.1:4222 --nats-creds ./ape.creds
   ape service --name ci --drain-timeout 5m
-  # discovery + a task submission from another host:
+  # discovery + a task submission (stamped with this caller's depth):
   nats req '$SRV.PING.ape' ''
-  nats req ape.svc.ape.myproject.task.run '{"project_root":"/abs/path/myproject","skill":"apex-shard-doc"}'`,
+  ape service submit task '{"project_root":"/abs/path/myproject","skill":"apex-plan","args":"M1"}'`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			projectRoot := cwdFlag
@@ -97,6 +114,7 @@ config error (bad --name, missing/invalid service.yaml, no NATS URL).`,
 				DrainTimeout: drainTimeoutFlag,
 				ApeVersion:   Version,
 				Stderr:       os.Stderr,
+				Gate:         serviceGate,
 			})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
@@ -113,6 +131,7 @@ config error (bad --name, missing/invalid service.yaml, no NATS URL).`,
 	f.StringVar(&natsCredsFlag, "nats-creds", "", "NATS .creds file; its user identity is the <user> token on job lifecycle events (env APE_NATS_CREDS).")
 	f.StringVar(&eventsPrefixFlag, "events-subject-prefix", "ape.evt", "Subject root for daemon job lifecycle events.")
 	f.DurationVar(&drainTimeoutFlag, "drain-timeout", 0, "On shutdown, wait this long for in-flight jobs before terminating them (0 = wait indefinitely; a second signal forces).")
+	cmd.AddCommand(newServiceSubmitCmd())
 	return cmd
 }
 
