@@ -42,6 +42,9 @@ var boardSkipVerbs = map[string]bool{
 	"change check": true, "change diff": true,
 	"hook session-start": true, "hook stop": true, "hook pre-tool": true,
 	"plugins sync": true, "plugins status": true,
+	// The archive layout move changes where archived changes live, not
+	// what status counts or lists.
+	"project archive-layout": true,
 }
 
 // boardGroups are the top-level commands whose leaves must each be in one

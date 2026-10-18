@@ -181,7 +181,8 @@ author's own commit. A change is planned on the base branch: refused while HEAD 
 change branch, change/<other> (exit 1, code branch.change-branch; `+"`git switch <base>`"+`).
 
 <id> is a verb-led kebab slug, ^[a-z][a-z0-9-]{2,39}$, unique across active AND archived
-changes (development/archive/, and an older ape's development/changes/archive/).
+changes (development/archive/changes/, development/archive/ itself as an older ape archived
+them, and an older ape's development/changes/archive/).
 --milestone none makes the change a fix (trial decision D40): what apex-change writes for
 a person's request outside the roadmap. It needs no roadmap entry, inherits no Out of
 scope, is approved on its own (`+"`ape change approve <id> --by <who>`"+`) instead of through a
@@ -822,7 +823,8 @@ second argument (T<n>) or --task.
     and drops the file with the folder. With HEAD on change/<id> it is recorded there,
     as before
   - an archived change (H4): its archived state.json, under
-    development/archive/<date>-<id>/, is updated and committed on the base branch it was
+    development/archive/changes/<date>-<id>/ (or development/archive/<date>-<id>/, the
+    layout before ape project archive-layout), is updated and committed on the base branch it was
     archived into — "apex: <id> accepted <T> (archived)", trailer "Change: <id>" — from any
     branch, without a checkout when HEAD is elsewhere (refused when that branch is checked
     out in another worktree: git.base-checked-out). `+"`ape status`"+` lists archived changes
@@ -1083,7 +1085,7 @@ func newChangeAbandonCmd() *cobra.Command {
 	cmd := v1ChangeLeaf(
 		`abandon <id> --reason "<text>"`,
 		"Move a change to the archive as abandoned, merging no delta; commit",
-		`Drop a change: its folder moves to development/archive/<YYYY-MM-DD>-<id>/ with
+		`Drop a change: its folder moves to development/archive/changes/<YYYY-MM-DD>-<id>/ with
 status abandoned and the reason recorded in state.json; its delta is NOT merged into
 specs/. Committed as "apex: <id> abandoned" with trailer "Change: <id>". The id stays
 taken. Abandon a blocked change only after planning its replacement, or with the reason
@@ -1171,7 +1173,7 @@ func newChangeArchiveCmd() *cobra.Command {
      reaches the base branch
   7. switches to the base branch, `+"`git merge --squash change/<id>`"+`, writes the specs,
      moves the folder, exactly as used — archive never trims it or edits change.md —
-     to development/archive/<YYYY-MM-DD>-<id>/ (status archived,
+     to development/archive/changes/<YYYY-MM-DD>-<id>/ (status archived,
      branch_tip = change/<id>'s last commit) — with "evidence: archive" in
      _apex/config.yaml (H23; default off) also its evidence/: one file per check of the
      final verify (command, exit, duration, output sha256, and the output from the log,

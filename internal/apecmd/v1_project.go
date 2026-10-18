@@ -16,7 +16,8 @@ func newProjectCmd() *cobra.Command {
 		Use:   "project",
 		Short: "Create and check an APEX v1 project layout",
 	}
-	cmd.AddCommand(newProjectInitCmd(), newProjectCheckCmd(), newProjectCodesCmd(), newProjectLiftCmd(), newProjectAcceptConfigCmd())
+	cmd.AddCommand(newProjectInitCmd(), newProjectCheckCmd(), newProjectCodesCmd(), newProjectLiftCmd(), newProjectAcceptConfigCmd(),
+		newProjectArchiveLayoutCmd())
 	return cmd
 }
 
@@ -437,6 +438,85 @@ Exit: 1 check failed · 2 usage · 3 conflict (nothing written).`,
 		},
 	}
 	cmd.Flags().BoolVar(&f.json, "json", false, "machine output (JSON on stdout)")
+	return cmd
+}
+
+func newProjectArchiveLayoutCmd() *cobra.Command {
+	var f v1Flags
+	var check bool
+	cmd := &cobra.Command{
+		Use:   "archive-layout [--check]",
+		Short: "Move archived changes into development/archive/changes/ (the v1.0.0_seq-06 migration)",
+		Long: `Move every archived or abandoned change still in the older layout,
+development/archive/<YYYY-MM-DD>-<id>/, into development/archive/changes/<YYYY-MM-DD>-<id>/,
+where change archive and change abandon put them (D155). The framework's migration
+v1.0.0_seq-06 runs it (command: ape project archive-layout; check: ape project
+archive-layout --check). development/archive/milestones/ stays where it is.
+
+One commit, "apex: archive layout (seq-06)": each folder moved with git mv, and in each
+moved state.json the recorded paths that named the old folder (archived_to, and an
+acceptance's evidence inside the folder) rewritten to the new one; nothing else in the
+files changes. The refs refs/apex/archive/<id> and refs/apex/abandoned/<id>, and
+state.json's tip_ref, name commits and are untouched. Idempotent: with nothing left to
+move it writes nothing and says "nothing to move" (exit 0).
+
+Every ape command reads archived changes from both layouts, always, so a project that has
+not moved yet, or a branch cut before the move, works the same either way.
+
+Refused on a change branch (branch.change-branch), with uncommitted changes (tree.dirty),
+outside a git repository (git.not-a-repo), and when a folder's new place already exists
+(archive.folder-exists, exit 3: nothing is written; a person merges the two by hand). A
+command any session may run (not person-only).
+
+--check writes nothing: exit 0 when no archived change is left in the older layout, 1
+(archive.legacy-layout, naming them) when some is — the migration's check: 0 applied,
+1 not applied.
+
+JSON: {"moved": [{"id", "from", "to"}], "rewritten": [<state.json>], "commit"}; under
+--check, "moved" lists what would move.
+
+Exit codes: 0 moved, or nothing to move (--check: nothing left) · 1 refused, or (--check)
+some left · 3 a folder's new place exists.`,
+		Example: "  ape project archive-layout --check\n  ape project archive-layout\n  ape project archive-layout --json",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			p, err := v1Project(&f)
+			if err != nil {
+				return err
+			}
+			if err := v1RequireInit(cmd, &f, p); err != nil {
+				return err
+			}
+			if check {
+				res, err := p.ArchiveLayoutCheck()
+				if err != nil {
+					return v1Fail(cmd, &f, err, res)
+				}
+				return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+					fmt.Fprintln(w, "archive layout: nothing left to move")
+				})
+			}
+			res, err := p.ArchiveLayout(cmd.Context())
+			if err != nil {
+				return v1Fail(cmd, &f, err, res)
+			}
+			return v1Emit(cmd.OutOrStdout(), &f, res, func(w io.Writer) {
+				if len(res.Moved) == 0 {
+					fmt.Fprintln(w, "archive layout: nothing to move")
+					return
+				}
+				for _, m := range res.Moved {
+					fmt.Fprintf(w, "moved %s → %s\n", m.From, m.To)
+				}
+				for _, r := range res.Rewritten {
+					fmt.Fprintf(w, "rewrote the old paths in %s\n", r)
+				}
+				fmt.Fprintf(w, "commit %.7s %s\n", res.Commit, apexv1.ArchiveLayoutSubject)
+			})
+		},
+	}
+	addV1Flags(cmd, &f)
+	cmd.Flags().BoolVar(&check, "check", false, "write nothing: exit 0 when nothing is left in the older layout, 1 when some is")
 	return cmd
 }
 

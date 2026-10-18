@@ -148,7 +148,7 @@ func TestArchive(t *testing.T) {
 
 	res, err := p.Archive(ctx(), "add-wave", true, RunOptions{})
 	require.NoError(t, err)
-	require.Equal(t, "development/archive/2026-10-15-add-wave", res.ArchivedTo)
+	require.Equal(t, "development/archive/changes/2026-10-15-add-wave", res.ArchivedTo, "archive writes the D155 layout")
 	require.False(t, res.Rebased, "main did not move")
 	require.False(t, res.Reverified, "only ape's own state commits moved HEAD since the verify")
 	require.Equal(t, []string{"T2"}, res.PendingHuman)
@@ -173,8 +173,8 @@ func TestArchive(t *testing.T) {
 	require.ElementsMatch(t, []string{
 		"wave.sh", "development/specs/greeting/spec.md",
 		"development/changes/add-wave/state.json", // change.md shows as renamed
-		"development/archive/2026-10-15-add-wave/change.md", "development/archive/2026-10-15-add-wave/review.md",
-		"development/archive/2026-10-15-add-wave/state.json",
+		"development/archive/changes/2026-10-15-add-wave/change.md", "development/archive/changes/2026-10-15-add-wave/review.md",
+		"development/archive/changes/2026-10-15-add-wave/state.json",
 	}, files, "the code, the merged spec and the archive move")
 	require.Equal(t, "#!/bin/sh\necho wave\n", read(t, p, "wave.sh"), "main's tree holds the change's code")
 
@@ -339,7 +339,7 @@ func TestArchive_DestinationExistsIsAConflict(t *testing.T) {
 	p := reviewedWave(t)
 	_, err := p.Accept(ctx(), "add-wave", "T2", "ann")
 	require.NoError(t, err)
-	require.NoError(t, os.MkdirAll(filepath.Join(p.ArchiveDir(), Today()+"-add-wave"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(p.ArchivedChangesDir(), Today()+"-add-wave"), 0o755))
 	_, err = p.Archive(ctx(), "add-wave", false, RunOptions{})
 	var ce *ConflictError
 	require.ErrorAs(t, err, &ce)

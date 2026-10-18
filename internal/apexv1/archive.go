@@ -193,9 +193,9 @@ type ArchiveResult struct {
 // the code, then squash-merges the branch into
 // the base branch as ONE commit — subject the change's title, trailer
 // `Change: <id>` — holding the change's code, its delta merged into
-// specs/, and its folder moved to archive/<date>-<id>/; then deletes the
-// branch. Run from the change's branch or from any other non-change
-// branch (it switches); the tree must be clean.
+// specs/, and its folder moved to archive/changes/<date>-<id>/ (D155);
+// then deletes the branch. Run from the change's branch or from any other
+// non-change branch (it switches); the tree must be clean.
 func (p *Project) Archive(ctx context.Context, id string, allowPendingHuman bool, opt RunOptions) (*ArchiveResult, error) {
 	// Archiving past a person's review is a person's call (D45).
 	if allowPendingHuman {
@@ -341,7 +341,7 @@ func (p *Project) planArchive(ci ChangeInfo) (updates []SpecUpdate, dest string,
 	if len(conflicts) > 0 {
 		return nil, "", &ConflictError{Code: CodeDeltaConflict, Msg: "the delta no longer applies to specs/ — nothing was written; re-plan the change against the current specs", Conflicts: conflicts}
 	}
-	dest = filepath.Join(p.ArchiveDir(), Today()+"-"+id)
+	dest = filepath.Join(p.ArchivedChangesDir(), Today()+"-"+id)
 	if fileOrDirExists(dest) {
 		return nil, "", &ConflictError{Code: CodeFolderExists, Msg: "archive folder " + p.Rel(dest) + " already exists — nothing was written"}
 	}
@@ -449,7 +449,7 @@ func (p *Project) writeArchive(ctx context.Context, id string, st *State, update
 			return err
 		}
 	}
-	if err := os.MkdirAll(p.ArchiveDir(), 0o755); err != nil {
+	if err := os.MkdirAll(p.ArchivedChangesDir(), 0o755); err != nil {
 		return err
 	}
 	if err := os.Rename(p.ChangeDir(id), dest); err != nil {
@@ -490,11 +490,11 @@ type AbandonResult struct {
 	TipRef    string `json:"tip_ref,omitempty"`
 }
 
-// Abandon moves a change to the archive as abandoned, merging nothing,
-// and commits the move as `apex: <id> abandoned` (trial decision D6) on
-// the base branch; a started change's branch is deleted, its tip recorded
-// as branch_tip (D38). The archived folder holds the change's files as
-// its branch last had them.
+// Abandon moves a change to archive/changes/<date>-<id>/ as abandoned
+// (D155), merging nothing, and commits the move as `apex: <id> abandoned`
+// (trial decision D6) on the base branch; a started change's branch is
+// deleted, its tip recorded as branch_tip (D38). The archived folder
+// holds the change's files as its branch last had them.
 func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResult, error) {
 	if err := p.recoverArchive(ctx); err != nil {
 		return nil, err
@@ -511,7 +511,7 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 		return p.abandonElsewhere(ctx, ci, reason)
 	}
 	folder := Today() + "-" + id
-	dest := filepath.Join(p.ArchiveDir(), folder)
+	dest := filepath.Join(p.ArchivedChangesDir(), folder)
 	if fileOrDirExists(dest) {
 		return nil, &ConflictError{Code: CodeFolderExists, Msg: "archive folder " + p.Rel(dest) + " already exists — nothing was written"}
 	}
@@ -526,7 +526,7 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 	if inGit {
 		trackedBefore, _ = git(ctx, p.Root, "ls-files", "--", p.Rel(p.ChangeDir(id)))
 	}
-	if err := os.MkdirAll(p.ArchiveDir(), 0o755); err != nil {
+	if err := os.MkdirAll(p.ArchivedChangesDir(), 0o755); err != nil {
 		return nil, err
 	}
 	if err := os.Rename(p.ChangeDir(id), dest); err != nil {
@@ -594,7 +594,7 @@ func (p *Project) abandonElsewhere(ctx context.Context, ci ChangeInfo, reason st
 		tip, _ = git(ctx, p.Root, "rev-parse", "--verify", "refs/heads/"+branch)
 	}
 	folder := Today() + "-" + id
-	destRel := p.Rel(filepath.Join(p.ArchiveDir(), folder))
+	destRel := p.Rel(filepath.Join(p.ArchivedChangesDir(), folder))
 	if _, err := git(ctx, p.Root, "rev-parse", "--verify", "--quiet", "refs/heads/"+base+":./"+destRel); err == nil {
 		return nil, &ConflictError{Code: CodeFolderExists, Msg: "archive folder " + destRel + " already exists on " + base + " — nothing was written"}
 	}

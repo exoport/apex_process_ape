@@ -394,7 +394,7 @@ func TestAbandon(t *testing.T) {
 	require.ErrorContains(t, err, "--reason")
 	res, err := p.Abandon(ctx(), "add-wave", "replaced by add-wave-v2")
 	require.NoError(t, err)
-	require.True(t, strings.HasPrefix(res.ArchivedTo, "development/archive/") && strings.HasSuffix(res.ArchivedTo, "-add-wave"), res.ArchivedTo)
+	require.True(t, strings.HasPrefix(res.ArchivedTo, "development/archive/changes/") && strings.HasSuffix(res.ArchivedTo, "-add-wave"), res.ArchivedTo)
 	require.NoDirExists(t, p.ChangeDir("add-wave"))
 	st, err := LoadState(filepath.Join(p.Root, res.ArchivedTo, "state.json"))
 	require.NoError(t, err)

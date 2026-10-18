@@ -102,29 +102,6 @@ func (p *Project) loadChange(id string) ChangeInfo {
 	return ci
 }
 
-// ArchivedIDs maps every archived change id to its archive folder name.
-func (p *Project) ArchivedIDs() map[string]string {
-	return archivedIDsIn(p.ArchiveDir())
-}
-
-// archivedIDsIn maps the change ids archived in dir to their folder names
-// (<YYYY-MM-DD>-<id>).
-func archivedIDsIn(dir string) map[string]string {
-	out := map[string]string{}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return out
-	}
-	for _, e := range entries {
-		name := e.Name()
-		if !e.IsDir() || len(name) < 12 || name[10] != '-' {
-			continue
-		}
-		out[name[11:]] = name
-	}
-	return out
-}
-
 // ActiveChanges are the changes in flight (in-progress, verified,
 // reviewed); blocked ones are not.
 func (p *Project) ActiveChanges(ctx context.Context) []ChangeInfo {
@@ -595,10 +572,11 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 	}
 	// The old archive (changes/archive/, an older ape's) is scanned too:
 	// an id is never reused, wherever it was archived.
-	for _, dir := range []string{p.ArchiveDir(), p.OldArchiveDir()} {
-		if folder, ok := archivedIDsIn(dir)[id]; ok {
-			return nil, &FailError{Code: "change.id-archived", Msg: "change " + id + " was already archived as " + p.Rel(filepath.Join(dir, folder)) + " — ids are unique across the archive; pick another"}
-		}
+	if folder, ok := p.ArchivedIDs()[id]; ok {
+		return nil, p.idArchived(id, p.archivedPath(folder))
+	}
+	if folder, ok := datedFolders(dirNames(p.OldArchiveDir()))[id]; ok {
+		return nil, p.idArchived(id, filepath.Join(p.OldArchiveDir(), folder))
 	}
 	// A fix (D40) belongs to no milestone: nothing to look up, no Out of
 	// scope to inherit.
@@ -658,6 +636,11 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 	}, nil
 }
 
+// idArchived refuses a new change whose id was archived as dir.
+func (p *Project) idArchived(id, dir string) error {
+	return &FailError{Code: "change.id-archived", Msg: "change " + id + " was already archived as " + p.Rel(dir) + " — ids are unique across the archive; pick another"}
+}
+
 // requireChange loads a change that must exist from wherever its records
 // live (anybranch.go): its branch when HEAD is not on it (D38); with HEAD
 // on another change's branch, the base branch for a change with no branch
@@ -672,7 +655,7 @@ func (p *Project) requireChange(ctx context.Context, id string) (ChangeInfo, err
 	}
 	if !dirExists(p.ChangeDir(id)) {
 		if folder, ok := p.ArchivedIDs()[id]; ok {
-			return ChangeInfo{}, &FailError{Code: "change.archived", Msg: "change " + id + " is archived (" + p.Rel(filepath.Join(p.ArchiveDir(), folder)) + ")"}
+			return ChangeInfo{}, &FailError{Code: "change.archived", Msg: "change " + id + " is archived (" + p.Rel(p.archivedPath(folder)) + ")"}
 		}
 		return ChangeInfo{}, &FailError{Code: CodeChangeNotFound, Msg: "no change " + id + " — `ape status` lists the active ones"}
 	}
@@ -702,7 +685,7 @@ func (p *Project) changeElsewhere(ctx context.Context, id string) (ci ChangeInfo
 			return ci, true, err
 		}
 	case bv.archived[id] != "":
-		return ChangeInfo{}, true, &FailError{Code: "change.archived", Msg: "change " + id + " is archived (" + p.Rel(filepath.Join(p.ArchiveDir(), bv.archived[id])) + " on " + bv.branch + ")"}
+		return ChangeInfo{}, true, &FailError{Code: "change.archived", Msg: "change " + id + " is archived (" + p.Rel(p.archivedPath(bv.archived[id])) + " on " + bv.branch + ")"}
 	}
 	return ChangeInfo{}, false, nil
 }

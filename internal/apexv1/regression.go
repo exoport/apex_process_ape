@@ -217,7 +217,7 @@ func (p *Project) archivedChanges() []ChangeInfo {
 	ids := p.ArchivedIDs()
 	out := make([]ChangeInfo, 0, len(ids))
 	for id, folder := range ids {
-		dir := filepath.Join(p.ArchiveDir(), folder)
+		dir := p.archivedPath(folder)
 		ci := ChangeInfo{ID: id}
 		ci.State, ci.Err = LoadState(filepath.Join(dir, "state.json"))
 		if doc, err := os.ReadFile(filepath.Join(dir, "change.md")); err == nil {

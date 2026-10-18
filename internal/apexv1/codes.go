@@ -340,5 +340,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeMalformedHumanReview, 1, "replan", "a task check reads as human-review but is not exactly `human-review` (D111): `human-review: <what>`, `Human-Review`, `human review …`, a trailing `.` — verify would run it as a shell command; write `- T<n> <what> — check: human-review`, the artefact and criteria in <what>"},
 	// rc.6 (rc6-d).
 	{"delegate.docs-scope", 1, "person", "accept --delegate on a docs change (change.md docs: true) with no configured delegate: its diff from base_sha to its tip touches paths outside release.docs and the development folder (named), so its docs check is not a delegate's by default (D152 Q69) — a person accepts it, or the non-docs work is re-planned into a change of its own"},
+	// rc.6 (rc6-f).
+	{"archive.legacy-layout", 1, "person", "`ape project archive-layout --check`: archived changes are left in the older layout development/archive/<date>-<id>/ (named; D155) — `ape project archive-layout` moves them into development/archive/changes/ (the framework's v1.0.0_seq-06 runs it); every command reads both layouts meanwhile"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }
