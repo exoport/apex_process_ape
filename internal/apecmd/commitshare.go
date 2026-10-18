@@ -137,7 +137,8 @@ func otherRunWindows(projectRoot, run, parentRun string) []runWindow {
 	var out []runWindow
 	seen := map[string]bool{}
 	rows, _ := sessions.Alive(sessions.Path())
-	for _, row := range rows {
+	for i := range rows {
+		row := &rows[i]
 		w := runWindow{Run: row.RunID, Parent: row.ParentRun, Start: row.StartedAt}
 		if row.RunID == "" || filepath.Clean(row.CWD) != abs || mine(w) {
 			continue
@@ -174,6 +175,7 @@ func finishedRunWindow(path string) (runWindow, bool) {
 	if err != nil {
 		return runWindow{}, false
 	}
+	//nolint:tagliatelle // the run manifest's on-disk keys (pipeline.Manifest), snake_case by contract
 	var m struct {
 		RunID     string    `yaml:"run_id"`
 		ParentRun string    `yaml:"parent_run"`

@@ -89,7 +89,7 @@ func TestDriver_StopGateDecidesStopsInArrivalOrder(t *testing.T) {
 		mu.Lock()
 		order = append(order, stopAt)
 		mu.Unlock()
-		return n < 3, true // block, block, allow
+		return n < 3, true // calls 1 and 2 block, call 3 allows
 	})
 	deferred := json.RawMessage(`{"session_id":"s","background_tasks":[{"id":"a1","type":"subagent","status":"running"}]}`)
 	d.FeedHook(stopEvent("s"))

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -72,5 +71,5 @@ func TestServiceSubmit_StampsTheCallersDepth(t *testing.T) {
 
 	_, err = submit(`{"skill":"x","bogus":1}`)
 	require.Equal(t, ExitUsage, exitCodeOf(t, err))
-	require.True(t, strings.Contains(err.Error(), "bogus"), err.Error())
+	require.Contains(t, err.Error(), "bogus")
 }

@@ -334,7 +334,7 @@ func TestDispatchTask_MalformedOwnersIsReturnedNotExited(t *testing.T) {
 
 // commitSubjects is the subjects of commits, in order.
 func commitSubjects(commits []runCommit) []string {
-	out := []string{}
+	out := make([]string, 0, len(commits))
 	for _, c := range commits {
 		out = append(out, c.Subject)
 	}

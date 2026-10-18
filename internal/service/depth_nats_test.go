@@ -38,7 +38,7 @@ func TestDepthOverNATS(t *testing.T) {
 	if got := errCode(unstamped); got != apexv1.CodeSessionDepth {
 		t.Fatalf("unstamped: code %q, want session.depth", got)
 	}
-	var body struct{ Code, Action, Message string }
+	var body refusalBody
 	if err := json.Unmarshal(unstamped.Data, &body); err != nil || body.Action != apexv1.ActionStop || body.Code != apexv1.CodeSessionDepth {
 		t.Fatalf("reply body %s (%v)", unstamped.Data, err)
 	}

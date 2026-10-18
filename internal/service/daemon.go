@@ -217,8 +217,11 @@ func (d *Daemon) handleRun(kind Kind, req micro.Request) {
 			"reason": refusal.Code,
 			"caller": rr.Caller,
 		})
-		data, _ := json.Marshal(map[string]any{"v": WireVersion, "code": refusal.Code, "action": refusal.Action, "message": refusal.Msg})
-		_ = req.Error(refusal.Code, refusal.Error(), data)
+		var body []byte
+		if data, err := json.Marshal(refusalBody{Action: refusal.Action, Code: refusal.Code, Message: refusal.Msg, V: WireVersion}); err == nil {
+			body = data
+		}
+		_ = req.Error(refusal.Code, refusal.Error(), body)
 		return
 	}
 

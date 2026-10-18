@@ -234,7 +234,7 @@ var (
 		regexp.MustCompile(`^\s*--- FAIL: (\S+)`),
 		regexp.MustCompile(`^FAIL\s+(\S+(?:\s+\[[a-z ]+ failed\])?)`),
 		regexp.MustCompile(`^(?:FAILED|ERROR) (\S+)`),
-		regexp.MustCompile(`^test (\S+) \.\.\. FAILED\s*$`),
+		regexp.MustCompile(`^test (\S+) \.{3} FAILED\s*$`),
 		regexp.MustCompile(`^\s*[✕×] (.+?)(?:\s+\(\d+(?:\.\d+)?\s*m?s\))?\s*$`),
 	}
 )

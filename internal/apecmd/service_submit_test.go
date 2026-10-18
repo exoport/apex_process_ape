@@ -1,6 +1,7 @@
 package apecmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,7 @@ func orchestratorManifest(t *testing.T, root, status string) {
 func TestServiceGate(t *testing.T) {
 	outsideEverySession(t)
 	root := t.TempDir()
-	job := func(kind service.Kind, skill string) service.RunRequest {
+	job := func(_ service.Kind, skill string) service.RunRequest {
 		return service.RunRequest{ProjectRoot: root, Skill: skill, Caller: &service.CallerStamp{Depth: 1, RunID: "orch-run"}}
 	}
 
@@ -76,11 +77,13 @@ func TestServiceGate(t *testing.T) {
 func requireCode(t *testing.T, err error, code string) {
 	t.Helper()
 	require.Error(t, err)
-	switch e := err.(type) {
-	case *apexv1.UsageError:
-		require.Equal(t, code, e.Code, e.Msg)
-	case *apexv1.ConflictError:
-		require.Equal(t, code, e.Code, e.Msg)
+	var ue *apexv1.UsageError
+	var ce *apexv1.ConflictError
+	switch {
+	case errors.As(err, &ue):
+		require.Equal(t, code, ue.Code, ue.Msg)
+	case errors.As(err, &ce):
+		require.Equal(t, code, ce.Code, ce.Msg)
 	default:
 		t.Fatalf("%T: %v", err, err)
 	}

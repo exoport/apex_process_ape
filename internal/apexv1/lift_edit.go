@@ -183,44 +183,7 @@ func editComments(rel, src string, lang liftLang, vocab *liftVocab, adr *adrRewr
 	}
 	fixParens(src, cs)
 
-	type repl struct {
-		start, end int
-		text       string
-	}
-	var repls []repl
-	for _, c := range cs {
-		s, text, newText, lineStart, le := c.seg, c.text, c.out, c.lineStart, c.le
-		if newText == text && !c.emptied {
-			continue
-		}
-		res.IDsRemoved += c.nIDs
-		res.ADRsRewritten += c.nADR
-		switch {
-		case !c.emptied:
-			repls = append(repls, repl{s.Start, s.End, newText})
-		case c.alone:
-			repls = append(repls, repl{lineStart, min(le+1, len(src)), ""})
-		case !s.Block:
-			ws := s.Start
-			for ws > lineStart && (src[ws-1] == ' ' || src[ws-1] == '\t') {
-				ws--
-			}
-			repls = append(repls, repl{ws, s.End, ""})
-		default:
-			ws := s.Start
-			for ws > lineStart && (src[ws-1] == ' ' || src[ws-1] == '\t') {
-				ws--
-			}
-			sep := ""
-			switch {
-			case strings.Contains(text, "\n"):
-				sep = "\n"
-			case ws > 0 && s.End < len(src) && isIdentByte(src[ws-1]) && isIdentByte(src[s.End]):
-				sep = " "
-			}
-			repls = append(repls, repl{ws, s.End, sep})
-		}
-	}
+	repls := commentRepls(src, cs, res)
 	if len(repls) == 0 {
 		return res, nil
 	}
@@ -237,6 +200,54 @@ func editComments(rel, src string, lang liftLang, vocab *liftVocab, adr *adrRewr
 		return nil, err
 	}
 	return res, nil
+}
+
+// commentRepl is one splice of editComments: src[start:end] becomes text.
+type commentRepl struct {
+	start, end int
+	text       string
+}
+
+// commentRepls is how each comment the lift changed is spliced into src,
+// in order: rewritten in place, or deleted with its line, its leading
+// blanks, or down to the separator it kept two tokens apart with. The ids
+// and ADR citations those comments drop are counted into res.
+func commentRepls(src string, cs []*liftComment, res *liftFileEdit) []commentRepl {
+	var repls []commentRepl
+	for _, c := range cs {
+		s, text, newText, lineStart, le := c.seg, c.text, c.out, c.lineStart, c.le
+		if newText == text && !c.emptied {
+			continue
+		}
+		res.IDsRemoved += c.nIDs
+		res.ADRsRewritten += c.nADR
+		switch {
+		case !c.emptied:
+			repls = append(repls, commentRepl{s.Start, s.End, newText})
+		case c.alone:
+			repls = append(repls, commentRepl{lineStart, min(le+1, len(src)), ""})
+		case !s.Block:
+			ws := s.Start
+			for ws > lineStart && (src[ws-1] == ' ' || src[ws-1] == '\t') {
+				ws--
+			}
+			repls = append(repls, commentRepl{ws, s.End, ""})
+		default:
+			ws := s.Start
+			for ws > lineStart && (src[ws-1] == ' ' || src[ws-1] == '\t') {
+				ws--
+			}
+			sep := ""
+			switch {
+			case strings.Contains(text, "\n"):
+				sep = "\n"
+			case ws > 0 && s.End < len(src) && isIdentByte(src[ws-1]) && isIdentByte(src[s.End]):
+				sep = " "
+			}
+			repls = append(repls, commentRepl{ws, s.End, sep})
+		}
+	}
+	return repls
 }
 
 // liftComment is one comment of a file the lift edits: as written, as

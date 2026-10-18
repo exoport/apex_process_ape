@@ -46,8 +46,12 @@ func depthOneHelp() string {
 	return hangingWrap("  depth 1  ", "           ", "a session started from depth 0: may start a child only when it is ape's own"+
 		" apex-orchestrator run (ape task apex-orchestrator), only a skill on its allow-list ("+
 		strings.Join(apexv1.CoreChildSkills, ", ")+", the human_review: delegate skill, and every skill"+
-		" the tools: slots name), and one child at a time", 76)
+		" the tools: slots name), and one child at a time", taskHelpWidth)
 }
+
+// taskHelpWidth is the column the generated depth-1 row of `ape task
+// --help`'s nesting table wraps at, beside the table's hand-written rows.
+const taskHelpWidth = 76
 
 // hangingWrap fills text into lines of at most width runes, the first after
 // prefix and the rest after indent.
@@ -55,7 +59,7 @@ func hangingWrap(prefix, indent, text string, width int) string {
 	var b strings.Builder
 	line := prefix
 	fresh := true
-	for _, w := range strings.Fields(text) {
+	for w := range strings.FieldsSeq(text) {
 		if !fresh && len(line)+1+len(w) > width {
 			b.WriteString(line + "\n")
 			line, fresh = indent, true

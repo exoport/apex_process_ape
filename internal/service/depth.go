@@ -41,14 +41,23 @@ import (
 // ConflictError, whose code and action the reply carries.
 type SessionGate func(kind Kind, req RunRequest) (env []string, err error)
 
-// Refusal is a job the nesting rule refuses: Code is the apexv1 code
+// RefusalError is a job the nesting rule refuses: Code is the apexv1 code
 // (session.depth, session.not-allowed, session.child-running,
 // session.orchestrator-running), Action its action.
-type Refusal struct {
+type RefusalError struct {
 	Code, Action, Msg string
 }
 
-func (r *Refusal) Error() string {
+// refusalBody is the data of a refused *.run reply: the refusal's code,
+// action and message, and the wire version.
+type refusalBody struct {
+	Action  string `json:"action"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	V       int    `json:"v"`
+}
+
+func (r *RefusalError) Error() string {
 	return fmt.Sprintf("%s (code %s, action %s)", r.Msg, r.Code, r.Action)
 }
 
@@ -59,10 +68,10 @@ var runIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 // admitCaller applies the nesting rule to a *.run request: the environment
 // its job's ape process gets on top of the daemon's (nil at depth 0), or
 // the refusal.
-func admitCaller(kind Kind, req RunRequest, gate SessionGate) ([]string, *Refusal) {
+func admitCaller(kind Kind, req RunRequest, gate SessionGate) ([]string, *RefusalError) {
 	verb := "ape service " + string(kind) + ".run"
-	depth := func(msg string, a ...any) *Refusal {
-		return &Refusal{Code: apexv1.CodeSessionDepth, Action: apexv1.ActionStop, Msg: verb + " refused: " + fmt.Sprintf(msg, a...)}
+	depth := func(msg string, a ...any) *RefusalError {
+		return &RefusalError{Code: apexv1.CodeSessionDepth, Action: apexv1.ActionStop, Msg: verb + " refused: " + fmt.Sprintf(msg, a...)}
 	}
 	c := req.Caller
 	switch {
@@ -90,9 +99,9 @@ func admitCaller(kind Kind, req RunRequest, gate SessionGate) ([]string, *Refusa
 	var ce *apexv1.ConflictError
 	switch {
 	case errors.As(err, &ue):
-		return nil, &Refusal{Code: ue.Code, Action: ue.Action, Msg: ue.Msg}
+		return nil, &RefusalError{Code: ue.Code, Action: ue.Action, Msg: ue.Msg}
 	case errors.As(err, &ce):
-		return nil, &Refusal{Code: ce.Code, Action: ce.Action, Msg: ce.Msg}
+		return nil, &RefusalError{Code: ce.Code, Action: ce.Action, Msg: ce.Msg}
 	}
 	return nil, depth("the caller's session could not be checked (%v) — run the job from a terminal (depth 0)", err)
 }

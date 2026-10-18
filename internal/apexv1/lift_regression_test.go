@@ -50,7 +50,9 @@ func TestFailingTests_Runners(t *testing.T) {
 		want      []string
 	}{
 		{
-			"go test", "=== RUN   TestA\n--- FAIL: TestA (0.00s)\n    --- FAIL: TestA/the_real_pack_passes (0.01s)\nFAIL\nFAIL\tgithub.com/x/alert\t0.123s\nFAIL\tgithub.com/x/cmd [build failed]\nok  \tgithub.com/x/ok\t0.1s\n",
+			// go test prints a bare FAIL line before the package's FAIL line.
+			"go test", "=== RUN   TestA\n--- FAIL: TestA (0.00s)\n    --- FAIL: TestA/the_real_pack_passes (0.01s)\nFAIL\n" +
+				"FAIL\tgithub.com/x/alert\t0.123s\nFAIL\tgithub.com/x/cmd [build failed]\nok  \tgithub.com/x/ok\t0.1s\n",
 			[]string{"TestA", "TestA/the_real_pack_passes", "github.com/x/alert", "github.com/x/cmd [build failed]"},
 		},
 		{

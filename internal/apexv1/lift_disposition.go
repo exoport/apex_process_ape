@@ -274,28 +274,7 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 	if len(r.ADRs) == 0 {
 		p("No ADRs.\n\n")
 	} else {
-		p("| Old | New | Status | Gaps |\n|---|---|---|---|\n")
-		// Short of room, the ADRs with gaps are the ones listed: every
-		// old → new is in the lift commit's message too.
-		var shown, rest []*LiftADR
-		for i := range r.ADRs {
-			if a := &r.ADRs[i]; lim.rows < 0 || len(a.Gaps) > 0 && len(shown) < lim.rows {
-				shown = append(shown, a)
-			} else {
-				rest = append(rest, a)
-			}
-		}
-		for _, a := range shown {
-			old := a.Old
-			if a.Canon {
-				old += " (canon)"
-			}
-			p("| %s | [%s](%s) | %s | %s |\n", old, a.New, strings.TrimPrefix(a.Path, lf.devRel+"/"), cell(a.Status), cell(strings.Join(a.Gaps, "; ")))
-		}
-		if len(rest) > 0 {
-			p("\n… and %d more ADR(s); every old → new is in the lift commit's message and `%s`\n", len(rest), report)
-		}
-		p("\n")
+		writeADRTable(&b, r.ADRs, lim.rows, lf.devRel, report)
 	}
 	if r.Canon != "" {
 		p("Canon: %s.\n\n", r.Canon)
@@ -340,6 +319,34 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 		p("- %s\n", s)
 	}
 	return b.String()
+}
+
+// writeADRTable is the disposition's ADR table: old → new, status and
+// gaps, at most maxRows rows (all of them when maxRows < 0).
+func writeADRTable(b *strings.Builder, adrs []LiftADR, maxRows int, devRel, report string) {
+	p := func(format string, args ...any) { fmt.Fprintf(b, format, args...) }
+	p("| Old | New | Status | Gaps |\n|---|---|---|---|\n")
+	// Short of room, the ADRs with gaps are the ones listed: every
+	// old → new is in the lift commit's message too.
+	var shown, rest []*LiftADR
+	for i := range adrs {
+		if a := &adrs[i]; maxRows < 0 || len(a.Gaps) > 0 && len(shown) < maxRows {
+			shown = append(shown, a)
+		} else {
+			rest = append(rest, a)
+		}
+	}
+	for _, a := range shown {
+		old := a.Old
+		if a.Canon {
+			old += " (canon)"
+		}
+		p("| %s | [%s](%s) | %s | %s |\n", old, a.New, strings.TrimPrefix(a.Path, devRel+"/"), cell(a.Status), cell(strings.Join(a.Gaps, "; ")))
+	}
+	if len(rest) > 0 {
+		p("\n… and %d more ADR(s); every old → new is in the lift commit's message and `%s`\n", len(rest), report)
+	}
+	p("\n")
 }
 
 // writeSkipped summarises the files the lift did not edit: a count per

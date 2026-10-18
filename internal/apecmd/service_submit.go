@@ -36,6 +36,11 @@ func callerStamp(projectRoot string) *service.CallerStamp {
 	return c
 }
 
+// probeIDBytes is the random part of the throwaway lock id serviceGate's
+// child-slot probe takes (8 hex digits): only unique for the instant the
+// probe holds it.
+const probeIDBytes = 4
+
 // serviceGate is the daemon's check of a depth-1 caller's job (the daemon
 // refuses every other non-zero depth itself): the caller's run must be a
 // running apex-orchestrator run in the job's project — its manifest, ape's
@@ -65,7 +70,7 @@ func serviceGate(kind service.Kind, req service.RunRequest) ([]string, error) {
 	// The one child at a time, looked at now so a busy slot is refused
 	// before the job is accepted; the job's ape takes the lock itself.
 	probe := &sessionLaunch{depth: 2, parentRun: c.RunID, skill: skill}
-	if err := probe.acquire(root, "svc-probe-"+randomHex(4)); err != nil {
+	if err := probe.acquire(root, "svc-probe-"+randomHex(probeIDBytes)); err != nil {
 		return nil, err
 	}
 	probe.release()
