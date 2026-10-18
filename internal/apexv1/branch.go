@@ -199,7 +199,7 @@ func (p *Project) commitChangeFolder(ctx context.Context, id, what string) error
 		return p.requireCleanTree(ctx, what)
 	}
 	if _, err := p.commitPaths(ctx, "apex: "+id+" notes", id, p.Rel(p.ChangeDir(id))); err != nil {
-		return &FailError{Code: CodeCommitFailed, Msg: "cannot commit " + folder + " before " + what + ": " + err.Error() + " — commit it yourself"}
+		return commitFailed(err, "cannot commit "+folder+" before "+what+": "+err.Error()+" — commit it yourself")
 	}
 	return nil
 }

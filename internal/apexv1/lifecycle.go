@@ -711,7 +711,7 @@ func (p *Project) saveAndCommitSubject(ctx context.Context, id string, st *State
 		return nil
 	}
 	if _, err := p.commitPaths(ctx, subject, id, p.Rel(p.StateFile(id))); err != nil {
-		return &FailError{Code: CodeCommitFailed, Msg: "state.json written but its commit failed: " + err.Error() + " — fix git (identity, lock) and re-run the command"}
+		return commitFailed(err, "state.json written but its commit failed: "+err.Error()+" — fix git (identity, lock) and re-run the command")
 	}
 	return nil
 }
@@ -781,7 +781,7 @@ func (p *Project) accept(ctx context.Context, id string, a acceptance) (*State, 
 			return nil, err
 		}
 		if _, err := p.commitWithTrailer(ctx, subject, a.trailers(id), append([]string{p.Rel(p.StateFile(id))}, a.notes...)...); err != nil {
-			return nil, &FailError{Code: CodeCommitFailed, Msg: "state.json written but its commit failed: " + err.Error() + " — fix git (identity, lock) and re-run the command"}
+			return nil, commitFailed(err, "state.json written but its commit failed: "+err.Error()+" — fix git (identity, lock) and re-run the command")
 		}
 		return st, nil
 	}

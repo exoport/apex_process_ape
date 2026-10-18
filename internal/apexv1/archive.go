@@ -416,6 +416,11 @@ func (p *Project) squashOntoBase(ctx context.Context, ci ChangeInfo, updates []S
 	// A delegate's acceptance is named in the squash (D75), whichever
 	// branch recorded it.
 	msg := p.squashMessage(ctx, res.Subject, base, branch, id, delegatedTrailers(st)...)
+	// The squash records the whole change on base: its secret is caught
+	// here at the latest (D155), and refused as a hook's refusal is.
+	if err := ScanCommit(ctx, p.Root, res.Subject); err != nil {
+		return undo(err)
+	}
 	if out, err := p.commitSquash(ctx, msg, res.Hooks); err != nil {
 		if res.Hooks && p.hasCommitHooks(ctx) {
 			return undo(&FailError{Code: CodeHookFailed, Msg: "a git hook refused the squash commit on " + base + ": " + strings.Join(lastLines(out, 15), " | ") +
@@ -554,7 +559,7 @@ func (p *Project) Abandon(ctx context.Context, id, reason string) (*AbandonResul
 	}
 	sha, err := p.commitPaths(ctx, "apex: "+id+" "+StatusAbandoned, id, paths...)
 	if err != nil {
-		return res, &FailError{Code: CodeCommitFailed, Msg: "abandoned on disk but the commit failed: " + err.Error() + " — commit " + strings.Join(paths, " ") + " yourself"}
+		return res, commitFailed(err, "abandoned on disk but the commit failed: "+err.Error()+" — commit "+strings.Join(paths, " ")+" yourself")
 	}
 	res.Commit = sha
 	if tip != "" {

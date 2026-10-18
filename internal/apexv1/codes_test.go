@@ -58,6 +58,8 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeMalformedHumanReview": CodeMalformedHumanReview,
 		// rc.6 (rc6-e).
 		"CodeGateOutsideGates": CodeGateOutsideGates, "CodeGateArchiveExists": CodeGateArchiveExists, "CodeHotNotIgnored": CodeHotNotIgnored,
+		// rc.6 (rc6-g).
+		"CodeCommitSecret": CodeCommitSecret,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

@@ -64,6 +64,13 @@ const (
 	CodeHotNotIgnored = "hot.not-ignored"
 )
 
+// rc.6 (rc6-g).
+const (
+	// CodeCommitSecret: a commit ape was about to make adds a secret
+	// (D155, secrets.go).
+	CodeCommitSecret = "commit.secret"
+)
+
 // CodeDoc documents one diagnostic code.
 type CodeDoc struct {
 	Code string `json:"code"`
@@ -360,5 +367,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeGateOutsideGates, 0, "person", "a notice, never a finding (project check's notices; the exit is unchanged): an open milestone's gate runs scripts outside <dev>/gates/ (D155 Q73) — moving an approved gate's script is gate drift, so they move into <dev>/gates/<M>-<slug>/ with the milestone's next re-approval (before its approval, for a proposed one)"},
 	// rc.6 (rc6-f).
 	{"archive.legacy-layout", 1, "person", "`ape project archive-layout --check`: archived changes are left in the older layout development/archive/<date>-<id>/ (named; D155) — `ape project archive-layout` moves them into development/archive/changes/ (the framework's v1.0.0_seq-06 runs it); every command reads both layouts meanwhile"},
+	// rc.6 (rc6-g).
+	{CodeCommitSecret, 1, "person", "a commit ape was about to make adds a secret (D155): the betterleaks default rules found one in the lines it adds — exactly what that commit records, so a person's unrelated staged file, a deleted line and unchanged context are not scanned — and nothing was committed; each is named `<file>:<line> rule <id>: <redacted>`; move it to hot/ (git-ignored) and read it from there, or, if it is not a secret, a person adds the printed {fingerprint, reason} entry to _apex/config.yaml secrets.allow (guarded: commit it and accept it with `ape project accept-config`); inline betterleaks:allow markers and .betterleaksignore are not honoured"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

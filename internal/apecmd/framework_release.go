@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/exoport/apex_process_ape/internal/apexcfg"
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 	"github.com/exoport/apex_process_ape/internal/framework"
 	"github.com/exoport/apex_process_ape/internal/runlog"
 	"github.com/exoport/apex_process_ape/internal/updatecache"
@@ -563,11 +564,18 @@ func isV1StatePath(rel string) bool {
 }
 
 // commitPaths stages paths and commits them with msg, running the
-// project's hooks. A failed commit leaves everything staged.
+// project's hooks. A failed commit leaves everything staged; so does one
+// whose added lines hold a secret (commit.secret, exit 1; D155), which
+// commits nothing — the commit takes the whole index, so the whole index
+// is scanned.
 func commitPaths(ctx context.Context, projectRoot string, paths []string, msg string) error {
 	add := append([]string{"add", "-A", "--"}, paths...)
 	if _, err := gitOut(ctx, projectRoot, add...); err != nil {
 		return usageErrExit(exitCodeCommitFailed, fmt.Errorf("staging the install: %w", err))
+	}
+	subject, _, _ := strings.Cut(msg, "\n")
+	if err := apexv1.ScanCommit(ctx, projectRoot, subject); err != nil {
+		return usageErrExit(ExitRunFailed, fmt.Errorf("%s: %w (the install is staged: take the secret out, or reset it)", apexv1.ErrorCode(err), err))
 	}
 	f, err := os.CreateTemp("", "ape-commit-msg-")
 	if err != nil {
@@ -583,7 +591,6 @@ func commitPaths(ctx context.Context, projectRoot string, paths []string, msg st
 	cmd.Dir = projectRoot
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		subject, _, _ := strings.Cut(msg, "\n")
 		fmt.Fprintf(os.Stderr, "%s", out)
 		return usageErrExit(exitCodeCommitFailed, fmt.Errorf(
 			"could not commit %q (a hook failed?): the changes are staged — fix it and commit them, or reset them", subject))

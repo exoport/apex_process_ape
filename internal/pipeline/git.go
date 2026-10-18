@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/exoport/apex_process_ape/internal/apexv1"
 )
 
 // gitStatusPorcelain returns the parsed output of `git status
@@ -44,8 +46,14 @@ func gitAddAll(ctx context.Context, projectRoot string) error {
 // the resulting commit SHA on success, or a non-nil error carrying the
 // captured stderr on failure. We never pass `--no-verify`; if the
 // repo's pre-commit hook fails, the commit fails and the caller must
-// abort the pipeline (PLAN-4 / C4.4).
+// abort the pipeline (PLAN-4 / C4.4). Before it, the index's added lines
+// are scanned for secrets, as at every commit ape makes (D155): a hit
+// commits nothing and leaves the step's work staged.
 func gitCommit(ctx context.Context, projectRoot, message string) (sha string, err error) {
+	subject, _, _ := strings.Cut(message, "\n")
+	if err := apexv1.ScanCommit(ctx, projectRoot, subject); err != nil {
+		return "", fmt.Errorf("git commit: %s: %w", apexv1.ErrorCode(err), err)
+	}
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, "git", "commit", "-m", message)
 	cmd.Dir = projectRoot

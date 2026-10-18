@@ -379,3 +379,26 @@ func readFile(t *testing.T, path string) string {
 	require.NoError(t, err)
 	return string(data)
 }
+
+// D155: the install commit is scanned like every commit ape makes; a
+// framework file that adds a secret refuses it with commit.secret (exit 1),
+// committing nothing and leaving the install staged.
+func TestFrameworkInstall_RefusesASecret(t *testing.T) {
+	withApeVersion(t, "0.4.0")
+	fw := t.TempDir()
+	fakeFrameworkForContract(t, fw)
+	token := "gh" + "p_" + "aB3dE5fG7hI9jK1mN3pQ5rS7tU9vW1xY3zA5"
+	require.NoError(t, os.WriteFile(filepath.Join(fw, framework.SubtreeSkills, "apex-foo", "SKILL.md"), []byte("# foo\n\nexport GITHUB_TOKEN="+token+"\n"), 0o644))
+	gitCommitAll(t, fw, "a leaked token")
+	gitRun(t, fw, "tag", "-a", "v1.0.0", "-m", "v1.0.0")
+	root := committedProject(t)
+	head := gitRun(t, root, "rev-parse", "HEAD")
+
+	out, err := runFramework(t, "setup", fw, root, "--no-fetch", "--no-bootstrap")
+	require.Equal(t, ExitRunFailed, exitCodeOf(t, err), out)
+	require.ErrorContains(t, err, "commit.secret: nothing was committed: chore(framework): install APEX framework v1.0.0 adds a secret: ")
+	require.ErrorContains(t, err, "apex-foo/SKILL.md:3 rule github-pat: ")
+	require.NotContains(t, err.Error(), token)
+	require.Equal(t, head, gitRun(t, root, "rev-parse", "HEAD"), "nothing was committed")
+	require.Contains(t, gitRun(t, root, "diff", "--cached", "--name-only"), "apex-foo/SKILL.md", "the install is staged")
+}

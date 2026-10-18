@@ -196,7 +196,7 @@ func (p *Project) recordCatchUp(ctx context.Context, ci ChangeInfo, cu *CatchUp,
 		return ci, err
 	}
 	if _, err := p.commitPaths(ctx, subject, ci.ID, p.Rel(p.ChangeDir(ci.ID))); err != nil {
-		return ci, &FailError{Code: CodeCommitFailed, Msg: "state.json written but its commit failed: " + err.Error() + " — fix git (identity, lock) and re-run the command"}
+		return ci, commitFailed(err, "state.json written but its commit failed: "+err.Error()+" — fix git (identity, lock) and re-run the command")
 	}
 	return ci, nil
 }
@@ -277,7 +277,14 @@ func (p *Project) layOutConflict(ctx context.Context, ci ChangeInfo, cu *CatchUp
 	last := &st.Rebases[len(st.Rebases)-1]
 	if len(unmerged) == 0 {
 		// The net diff applies after all: commit it as the rebased code.
-		if _, err := git(ctx, p.Root, "commit", "--no-verify", "-q", "-m", "apex: "+id+" re-applied onto "+base+" as one commit\n\nChange: "+id+"\n"); err != nil {
+		subject := "apex: " + id + " re-applied onto " + base + " as one commit"
+		if err := ScanCommit(ctx, p.Root, subject); err != nil {
+			if fe, ok := errors.AsType[*FailError](err); ok {
+				fe.Msg += "; the branch's old tip is " + oldTip + ": restore it (`git reset --hard " + short(oldTip) + "` on " + branch + "), take the secret out there, and run the command again"
+			}
+			return ci, cu, err
+		}
+		if _, err := git(ctx, p.Root, "commit", "--no-verify", "-q", "-m", subject+"\n\nChange: "+id+"\n"); err != nil {
 			return ci, cu, fail("commit", err)
 		}
 		cu.Conflicts, last.Conflicts, last.Head = nil, nil, HeadSHA(ctx, p.Root)

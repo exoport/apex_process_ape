@@ -13,7 +13,7 @@ func newProjectAcceptConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "accept-config --by <who>",
 		Short: "Accept the committed _apex/config.yaml's guarded blocks (limits, checks, caps, …)",
-		Long: `Thirteen blocks of _apex/config.yaml can loosen what ape enforces, and are guarded:
+		Long: `Fifteen blocks of _apex/config.yaml can loosen what ape enforces, and are guarded:
   limits        attempts, re-plans, consecutive blocks, the budget
   checks        vacuous output
   retries       red checks run again
@@ -25,6 +25,8 @@ func newProjectAcceptConfigCmd() *cobra.Command {
   evidence      archive|off (off keeps no evidence)
   marketplaces, plugins, tools   what runs inside a session (hooks, MCP, skills)
   human_review  who accepts a human-review task in a person's place (D75; docs: D152)
+  release       how apex-release proposes the next version, and what it brings up to date (D120)
+  secrets       the fingerprints the commit secret scan lets through (D155; commit.secret)
 The guard compares whole blocks, either way: raising a cap or a timeout loosens as surely
 as lowering one. Since the project's v1 epoch (the newest "apex: project init" or "apex:
 lift" commit; a block committed before it, or in it, is the baseline), a commit that

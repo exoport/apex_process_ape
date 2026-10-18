@@ -626,7 +626,7 @@ func (p *Project) NewChange(ctx context.Context, id, milestone string, touches, 
 	if p.isWorkTree(ctx) {
 		sha, err := p.commitPaths(ctx, "apex: "+id+" "+StatusDraft, id, p.Rel(p.ChangeDir(id)))
 		if err != nil {
-			return nil, &FailError{Code: CodeCommitFailed, Msg: "change written but its commit failed: " + err.Error()}
+			return nil, commitFailed(err, "change written but its commit failed: "+err.Error())
 		}
 		commit = sha
 	}

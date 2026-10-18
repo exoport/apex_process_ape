@@ -175,7 +175,7 @@ func (p *Project) milestonePaths() []string {
 func (p *Project) commitMilestone(ctx context.Context, id, what string, extra ...string) (string, error) {
 	sha, err := p.commitRecord(ctx, "apex: "+id+" "+what, "Milestone: "+id, append(p.milestonePaths(), extra...)...)
 	if err != nil {
-		return "", &FailError{Code: CodeCommitFailed, Msg: "roadmap written but its commit failed: " + err.Error() + " — fix git (identity, lock) and commit " + strings.Join(p.milestonePaths(), " ")}
+		return "", commitFailed(err, "roadmap written but its commit failed: "+err.Error()+" — fix git (identity, lock) and commit "+strings.Join(p.milestonePaths(), " "))
 	}
 	return sha, nil
 }

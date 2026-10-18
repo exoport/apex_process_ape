@@ -190,7 +190,7 @@ func (p *Project) commitHere(ctx context.Context, files map[string][]byte, rels 
 	}
 	sha, err := p.commitWithTrailer(ctx, msg, "", rels...)
 	if err != nil {
-		return "", &FailError{Code: CodeCommitFailed, Msg: "written but the commit failed: " + err.Error() + " — fix git (identity, lock) and commit " + strings.Join(rels, " ")}
+		return "", commitFailed(err, "written but the commit failed: "+err.Error()+" — fix git (identity, lock) and commit "+strings.Join(rels, " "))
 	}
 	return sha, nil
 }
@@ -235,11 +235,14 @@ func (p *Project) commitDetached(ctx context.Context, branch, tip string, files 
 	if old, _ := git(ctx, p.Root, "rev-parse", tip+"^{tree}"); old == tree {
 		return "", nil
 	}
+	subject, _, _ := strings.Cut(msg, "\n")
+	if err := scanTrees(ctx, p.Root, tip, tree, subject, rels); err != nil {
+		return "", err
+	}
 	commit, err := gitWith(ctx, p.Root, nil, []byte(strings.TrimRight(msg, "\n")+"\n"), "commit-tree", tree, "-p", tip)
 	if err != nil {
 		return "", err
 	}
-	subject, _, _ := strings.Cut(msg, "\n")
 	if _, err := git(ctx, p.Root, "update-ref", "-m", subject, "refs/heads/"+branch, commit, tip); err != nil {
 		return "", &FailError{Code: CodeRefMoved, Msg: branch + " moved while ape wrote its record there (" + err.Error() + ") — nothing was written; run the command again"}
 	}

@@ -95,6 +95,9 @@ type Config struct {
 	// Release is how apex-release proposes the next version (D120;
 	// releasecfg.go): absent, semver.
 	Release ReleaseConfig `yaml:"release"`
+	// Secrets lets values through the commit secret scan by fingerprint
+	// (D155; secrets.go): absent, none.
+	Secrets SecretsConfig `yaml:"secrets"`
 }
 
 // SkillModel is one models.<skill> entry.

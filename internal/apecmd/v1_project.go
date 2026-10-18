@@ -328,9 +328,9 @@ func newProjectCheckCmd() *cobra.Command {
   config                   since the v1 epoch, a commit that changed a guarded block of
                            _apex/config.yaml — limits, checks, retries, requires, timeouts,
                            caps, regression, commit (types included), evidence,
-                           marketplaces, plugins, tools, human_review, release (D120) —
-                           and is not ape's (config.changed, D50) — a person reverts it or
-                           accepts it: ` + "`ape project accept-config`" + `
+                           marketplaces, plugins, tools, human_review, release (D120),
+                           secrets (D155) — and is not ape's (config.changed, D50) — a
+                           person reverts it or accepts it: ` + "`ape project accept-config`" + `
   hot/                     the project's secrets (D155): when hot/ exists, git ignores a new
                            file in it (hot/.gitignore "*", which init and the lift write, or
                            any ignore rule), and git tracks nothing under it — else
