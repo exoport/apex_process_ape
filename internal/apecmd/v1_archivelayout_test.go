@@ -65,6 +65,40 @@ func TestProjectArchiveLayout(t *testing.T) {
 	require.Equal(t, head, v1Git(t, root, "rev-parse", "HEAD"), "a second run commits nothing")
 }
 
+// R27: --check --json carries "moved" at the top level — the folders left
+// to move under exit 1, [] under exit 0 — as the help says.
+func TestProjectArchiveLayout_CheckJSONCarriesMoved(t *testing.T) {
+	root := v1Repo(t)
+	type checkJSON struct {
+		Exit  int                   `json:"exit"`
+		Moved *[]apexv1.ArchiveMove `json:"moved"`
+	}
+	stdout, _, err := v1Exec(t, newProjectCmd, "archive-layout", "--check", "--json", "--cwd", root)
+	require.NoError(t, err)
+	var c checkJSON
+	require.NoError(t, json.Unmarshal([]byte(stdout), &c), stdout)
+	require.NotNil(t, c.Moved, "moved is there when nothing is left: %s", stdout)
+	require.Empty(t, *c.Moved)
+	require.Contains(t, stdout, `"moved": []`)
+
+	seedArchivedCLI(t, root, "development/archive/2026-01-01-add-hug", "add-hug")
+	seedArchivedCLI(t, root, "development/archive/changes/2026-02-01-fix-typo", "fix-typo")
+	stdout, _, err = v1Exec(t, newProjectCmd, "archive-layout", "--check", "--json", "--cwd", root)
+	require.Equal(t, 1, exitCodeOf(t, err))
+	c = checkJSON{}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &c), stdout)
+	require.Equal(t, 1, c.Exit)
+	require.NotNil(t, c.Moved, stdout)
+	require.Equal(t, []apexv1.ArchiveMove{{ID: "add-hug", From: "development/archive/2026-01-01-add-hug", To: "development/archive/changes/2026-01-01-add-hug"}}, *c.Moved)
+
+	// The move's own JSON, with nothing left, says [] too.
+	_, _, err = v1Exec(t, newProjectCmd, "archive-layout", "--cwd", root)
+	require.NoError(t, err)
+	stdout, _, err = v1Exec(t, newProjectCmd, "archive-layout", "--json", "--cwd", root)
+	require.NoError(t, err)
+	require.Contains(t, stdout, `"moved": []`)
+}
+
 // A state.json in the newer layout is judged as one in the older: only
 // ape's commits write it (D155).
 func TestProvenance_StateForgedInTheNewerLayout(t *testing.T) {
