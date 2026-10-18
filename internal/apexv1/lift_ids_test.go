@@ -330,3 +330,21 @@ func TestStripIDsFromText_TrailingMarkOnlyWhereTheRemovalWas(t *testing.T) {
 		require.Equal(t, want, got, in)
 	}
 }
+
+// R21, radix and atomix on rc.5: "compose/ysql-rf3.yml (Story 2.3)'s own"
+// became "compose/ysql-rf3.yml 's own" — a bracketed id before "'s" is a
+// possessive as R2's and R10's are: listed, its line left as written.
+func TestEditComments_BracketedPossessiveListedNotEdited(t *testing.T) {
+	in := "// Reads compose/ysql-rf3.yml (Story 2.3)'s own file.\n" +
+		"// Mirrors [DW-42]’s gate.\n" +
+		"// Retry (Story 3.2).\n"
+	got, res := liftGo(t, in)
+	require.Equal(t, "// Reads compose/ysql-rf3.yml (Story 2.3)'s own file.\n"+
+		"// Mirrors [DW-42]’s gate.\n"+
+		"// Retry.\n", got)
+	require.Equal(t, []LiftIDRef{
+		{File: "x.go", Line: 3, Text: "Story 2.3", Where: "possessive"},
+		{File: "x.go", Line: 4, Text: "DW-42", Where: "possessive"},
+	}, res.Left)
+	require.Equal(t, 1, res.IDsRemoved)
+}

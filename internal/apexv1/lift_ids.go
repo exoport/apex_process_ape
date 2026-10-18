@@ -120,8 +120,9 @@ func (v *liftVocab) find(s string, paths bool) [][2]int {
 	return mergeSpans(out)
 }
 
-// possessiveRe is an id's possessive: "Story 15.4's own deliverable".
-var possessiveRe = regexp.MustCompile(`^['’]s\b`)
+// possessiveRe is an id's possessive: "Story 15.4's own deliverable",
+// or a bracketed one's, "(Story 2.3)'s own" (R21).
+var possessiveRe = regexp.MustCompile(`^[)\]]?['’]s\b`)
 
 // possessive reports an id in s that the sentence owns through it ("Story
 // 15.4's own deliverable"): no removal keeps such a sentence whole (R2).
