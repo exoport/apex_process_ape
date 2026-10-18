@@ -433,23 +433,8 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, skips Sta
 			stageErr = fmt.Errorf("stage %q step %d: wait done: %w", stage.Name, i, waitErr)
 			stageStatus = StatusFailed
 			closeStepLog(eventLog)
-			// A stopped step's session still spent (D159 Q84): an idle,
-			// ceiling, budget, usage-limit, parent-gone or cancelled end
-			// is scanned and recorded like a finished one, so the run's
-			// totals — and the milestone spend that sums them — carry it.
-			var ev *resultEvent
-			if opts.StepTelemetryFn != nil {
-				if tele := opts.StepTelemetryFn(stage.Name, i); tele != nil {
-					ev = stepTelemetryToResultEvent(tele)
-				}
-			}
-			stopped := StatusFailed
-			if errors.Is(waitErr, context.Canceled) {
-				stopped = StatusCancelled
-			}
-			recordStep(mw, stageIdx, i+1, step,
-				models{Run: runModel, Declared: declaredModel, Effort: effortPlan},
-				opts.Prompt, stepStart, time.Now(), stopped, 1, eventsRel, ev)
+			recordStoppedStep(mw, opts, stage.Name, stageIdx, i, step,
+				models{Run: runModel, Declared: declaredModel, Effort: effortPlan}, stepStart, eventsRel, waitErr)
 			break
 		}
 
@@ -539,6 +524,25 @@ func runStageInteractive(ctx context.Context, spec *Spec, stage Stage, skips Sta
 // existing recordStep / manifestWriter API stays uniform across
 // programmatic (stream-json source) and interactive (transcript scan
 // source) exec modes.
+// recordStoppedStep records a step whose wait ended in waitErr: a stopped
+// step's session still spent (D159 Q84), so an idle, ceiling, budget,
+// usage-limit, parent-gone or cancelled end is scanned and recorded like a
+// finished one — failed, or cancelled — and the run's totals, and the
+// milestone spend that sums them, carry it.
+func recordStoppedStep(mw *manifestWriter, opts RunOptions, stage string, stageIdx, i int, step Step, m models, stepStart time.Time, eventsRel string, waitErr error) {
+	var ev *resultEvent
+	if opts.StepTelemetryFn != nil {
+		if tele := opts.StepTelemetryFn(stage, i); tele != nil {
+			ev = stepTelemetryToResultEvent(tele)
+		}
+	}
+	stopped := StatusFailed
+	if errors.Is(waitErr, context.Canceled) {
+		stopped = StatusCancelled
+	}
+	recordStep(mw, stageIdx, i+1, step, m, opts.Prompt, stepStart, time.Now(), stopped, 1, eventsRel, ev)
+}
+
 func stepTelemetryToResultEvent(t *StepTelemetry) *resultEvent {
 	if t == nil {
 		return nil

@@ -729,22 +729,12 @@ type models struct {
 // recordStep appends a StepRecord to the manifest writer, populating
 // metrics from the parsed terminal result event when present.
 //
-// `status` and `exitCode` are always StatusCompleted and 0 today, and that
-// is a statement about the CALLER, not about the parameters. runStage has
-// exactly one recordStep call and it sits after the success path: a step
-// whose WaitStepDone failed — idle timeout, detached agent, dead session —
-// breaks out of the loop before reaching it and gets no manifest record at
-// all. So a failed step is absent from the manifest rather than present
-// and marked failed.
-//
-// That is worth knowing when reading any per-step field as a rate: the
-// denominator is completed steps. It is also why the two parameters stay.
-// Removing them to satisfy the linter would harden today's single caller
-// into the signature and make recording a failed step a bigger change than
-// it should be; ev.Subtype below already flips status to failed, so the
-// parameter is load-bearing the moment a second caller exists.
-//
-//nolint:unparam // constant because the only caller is the success path — see above
+// Two callers: the success path (StatusCompleted, 0), and a step whose
+// WaitStepDone failed — idle timeout, ceiling, limit stop, dead session —
+// recorded failed (or cancelled) with whatever its transcript holds (D159
+// Q84; recordStoppedStep). Before D159 a failed step broke out of the loop
+// with no record, so a killed run's manifest showed $0; per-step rates now
+// count stopped steps in their denominator.
 func recordStep(
 	mw *manifestWriter,
 	stageIdx, stepIdx int,
