@@ -1,5 +1,100 @@
 # CHANGELOG
 
+## v1.0.0-rc.5 (draft)
+
+On top of rc.4 and the candidates below: the morning report's ape items 4–11
+(BRIEF r48), the v1.1 items moved into v1.0 (D111, D118, D120), and aboard
+v0.4.0 (D126).
+
+### Changes and project files
+
+- **A multi-line `Purpose:` stays whole** (item 4, Q44): the Purpose block is
+  the `Purpose:` line and every line after it up to the first blank line,
+  heading or fenced code. It is kept with its line breaks in `change diff`
+  and in the archived spec; before, its second line landed under the first
+  `### Requirement:` heading. JSON `purpose` joins the lines with `\n`. A
+  Purpose written straight into the requirement's text, with no blank line,
+  would take that text, so `change check` refuses it:
+  `change.purpose-runs-on` (action replan). Specs already split by an earlier
+  archive are not repaired.
+- **`change check` refuses a check that reads as human-review but is not
+  exactly `human-review`** (D111, Q52): `human-review: …`, `Human-Review`,
+  `human review …`, a trailing `.` — verify would run it as a shell command.
+  `change.malformed-human-review` (action replan) quotes the check and shows
+  the exact form; `change start` refuses it through `change.check-failed`.
+- **`ape project check` flags unknown `models:` keys** (item 5, Q45):
+  `models.unknown-skill` for a key that names no skill a session reads it for
+  (not a default, not a project or user skill, not named by `tools:` or
+  `human_review`; `models.effort` gets its own hint), and
+  `models.unknown-field` for an entry field other than `model` and `effort`.
+  Both action person.
+- **project.md takes `## Stack` or `## Tools`** (D118): both optional, alone
+  or together, with no migration. The init skeleton's section names both and
+  says that a pinned version is a decision (ADR), whichever name is used.
+
+### Regression judge (class C)
+
+- **Failing test names, not only exit codes** (item 11b, Q47): a change's
+  regression baseline records `failing` (the names its red run printed; at
+  most 500 stored, none past that). A run red now and red at baseline is
+  `pre_existing_red` only when both runs named their failures and every name
+  failing now was failing then; otherwise it fails, with `new_failures` (the
+  first 50) and `new_failures_total`. With no names on either side, the rc.4
+  exit-code rule applies, so baselines recorded before rc.5 keep working. The
+  milestone gate and the Stop hook judge the same way.
+- **The test-name parser reads gotestsum** (item 7, R11): `=== FAIL: <pkg>
+  <Test>` lines and `✖  <pkg>` package lines, beside `--- FAIL:`, pytest,
+  cargo and jest. It is shared by the lift and the regression judge.
+
+### `ape project lift`
+
+- **Comment edits** (items 6 and 10, R7–R10): a mark a removal leaves at the
+  start of a comment line moves to the end of the line above (no more `//.`,
+  which turned a gocritic lint red); a closing `)` moves up and its separator
+  goes; only a bracket pair the removal emptied is removed (`run()'s`,
+  `Lane() string` survive); a path possessive (`development/deferred/'s`) is
+  listed with `where: possessive` and left as written.
+- **Hashed files** (item 9, R1 + R6): a file counts as a hasher only on a hash
+  word or a hash call outside its comments; the list is ordered lock-named,
+  then named by a hasher, then folder matches. `--dry-run` (text and
+  `--json`) lists every file; the committed `.md` keeps its cap of 50.
+- **Binding-rule candidates are never cut** (item 8, R14): the disposition's
+  summaries go to counts first, and the file may grow to the 48 KB ceiling to
+  keep every candidate; only past that is the table cut, saying where the rest
+  are.
+- **The comparison runs** (item 10, R12 + R13): a top-level `&&` chain in the
+  regression command runs command by command at the tag and after the lift,
+  past a red one, each judged; the worst verdict wins, and `--json` lists
+  `regression_commands` (logs `regression-<n>[-at-tag].log`). A chain is not
+  split from a `cd`, `export` or other shell-state command on. With no test
+  names to compare, `(re)installing` lines and durations are ignored in the
+  output hash.
+
+### Sessions and the service
+
+- **`ape prompt` honours a blocked Stop** (item 11a), as `ape task` does since
+  D88: the session ends on the first Stop the project's hook allows, and
+  `prompt.yaml` records `stop_gate`. Measured on claude 2.1.302 with haiku: 3
+  blocks, then the allowed Stop, 36 s; bin-rc4 ended on the first, blocked,
+  Stop after 4 s.
+- **`ape service`'s second signal stops each in-flight job's whole tree**
+  (item 11c, Q46): SIGTERM, then SIGKILL half a second later, to the job's
+  process group and every process under it, its claude session included.
+  Before, a job's claude (in a PTY session of its own) could outlive the
+  daemon. The 5–16 s shutdown in the report did not reproduce.
+
+### Board
+
+- **aboard v0.4.0; the status tab is quiet** (D126, D60): ape's refreshes
+  raise no notification, unread dot or banner. Going quiet is announced once,
+  when the tab is created. ape sets quiet once (on creation, or the first
+  refresh of an older ape's tab) and leaves it alone after that, so a person
+  who turns it off from the tab's menu keeps it off.
+
+### Harness
+
+- The claude-surface baseline reviewed through Claude Code 2.1.302 (D109).
+
 ## v1.0.0-rc.4 (draft)
 
 On top of rc.3, rc.2 and rc.1 below, built in two phases (D90).
