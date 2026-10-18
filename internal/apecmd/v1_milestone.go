@@ -95,7 +95,9 @@ func newMilestoneApproveCmd() *cobra.Command {
 		Use:   "approve <M> --by <who>",
 		Short: "Write Status: approved (by <who> <ts>)",
 		Long: `Approve a proposed milestone: its Status: line becomes "approved (by <who> <ts>)", and
-milestones.json records the approval (H2): {by, at, gate_cmd, gate_files, gate_files_sha256}
+milestones.json records the approval (H2): {by, at, gate_cmd, gate_files, gate_files_sha256,
+base_sha} — base_sha the milestone's start (D130): HEAD at its first approval, kept by a
+re-approval, passed to every gate run as APE_MILESTONE_BASE (see ` + "`ape milestone gate --help`" + `)
 — the Gate: command, exactly as written, and the SHA-256 of each gate file: a script the
 command runs that is a regular file under the project root at approval. Of each simple
 command (split at ; && || | & newlines and parentheses; leading NAME=value assignments,
@@ -195,7 +197,11 @@ func newMilestoneGateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gate <M>",
 		Short: "Run the milestone's gate and record the result",
-		Long: `Run the milestone's Gate: command from the project root, and every scenario check of
+		Long: `Run the milestone's Gate: command from the project root — with APE_MILESTONE=<M> and
+APE_MILESTONE_BASE=<the milestone's start: HEAD at its first approval, ape status --json
+milestone.base_sha> in its environment (D130), so a gate can test what changed since, e.g.
+` + "`git diff --quiet \"$APE_MILESTONE_BASE\" HEAD -- docs/ && exit 1`" + `; the same two at approve's
+self-check and at close; empty base for an approval before rc.3 — and every scenario check of
 the whole spec beside it as the regression set (human-review not run; output under
 _apex/state/logs/gate-<M>/), and the project's regression command from _apex/config.yaml
 when one is configured — its milestone tier, "regression: {change: <cmd>, milestone:

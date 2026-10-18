@@ -267,7 +267,13 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string, progress 
 	if fs := ValidateRoadmap(p.Rel(p.RoadmapMD()), doc); len(filterMilestone(fs, m)) > 0 {
 		return nil, &FailError{Code: "milestone.malformed", Msg: id + " is not well-formed — fix roadmap.md before approving", Findings: filterMilestone(fs, m)}
 	}
-	selfCheck, err := p.gateSelfCheck(ctx, m, progress)
+	// The milestone's start (D130 Q60): HEAD now, at its first approval;
+	// a re-approval keeps the first one, as the Status line does.
+	base := HeadSHA(ctx, p.Root)
+	if rec != nil && rec.Approval.Base() != "" {
+		base = rec.Approval.Base()
+	}
+	selfCheck, err := p.gateSelfCheck(ctx, m, base, progress)
 	if err != nil {
 		return nil, err
 	}
@@ -292,6 +298,7 @@ func (p *Project) ApproveMilestone(ctx context.Context, id, by string, progress 
 	}
 	rec.Approval = p.newApproval(m.Gate, strings.TrimSpace(by))
 	rec.Approval.SelfCheck = selfCheck
+	rec.Approval.BaseSHA = base
 	// A person's approval resets the run of blocked changes (H19).
 	rec.ConsecutiveBlocks = 0
 	if err := p.saveMilestoneRecords(recs); err != nil {
@@ -382,7 +389,11 @@ func (p *Project) runGate(ctx context.Context, id string, opt RunOptions) (*Gate
 		return nil, &FailError{Code: "milestone.no-gate", Msg: id + " has no Gate: line"}
 	}
 	logPath := filepath.Join(p.LogsDir(), "gate-"+id+".log")
-	gate := p.RunChecks(ctx, filepath.Dir(logPath), "", []PlannedCheck{{Ref: "gate-" + id, Kind: KindGate, Cmd: m.Gate}}, opt)[0]
+	var base string
+	if recs, err := p.LoadMilestoneRecords(); err == nil && recs[id] != nil {
+		base = recs[id].Approval.Base()
+	}
+	gate := p.RunChecks(ctx, filepath.Dir(logPath), "", []PlannedCheck{{Ref: "gate-" + id, Kind: KindGate, Cmd: m.Gate, Env: gateEnv(id, base)}}, opt)[0]
 	if err := interrupted(ctx, "the gate run of "+id); err != nil {
 		return nil, err
 	}

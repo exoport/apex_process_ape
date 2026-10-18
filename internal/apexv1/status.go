@@ -20,6 +20,10 @@ type MilestoneStatus struct {
 	Gate       string   `json:"gate"`
 	Budget     *float64 `json:"budget,omitempty"`
 	GateLast   *GateRun `json:"gate_last,omitempty"`
+	// BaseSHA is the milestone's start (D130 Q60): HEAD at its first
+	// approval, what $APE_MILESTONE_BASE holds in a gate ape runs; absent
+	// before it is approved.
+	BaseSHA string `json:"base_sha,omitempty"`
 	// SpentUSD is the spend of runs started since the milestone was
 	// approved (all runs when it is not approved yet); a session stopped
 	// at the budget counts at the cost ape measured when it stopped it.
@@ -205,6 +209,9 @@ type MilestoneLine struct {
 	Status string `json:"status"`
 	// AcceptRed: a person closed it with its gate red (H22).
 	AcceptRed *AcceptRed `json:"accept_red,omitempty"`
+	// BaseSHA is the milestone's start (D130 Q60): HEAD at its first
+	// approval; absent before it is approved.
+	BaseSHA string `json:"base_sha,omitempty"`
 }
 
 // StatusReport is `ape status`.
@@ -306,13 +313,19 @@ func (p *Project) Status() *StatusReport {
 		for i := range rm.Milestones {
 			m := &rm.Milestones[i]
 			line := MilestoneLine{ID: m.ID, Title: m.Title, Status: m.Status}
-			if rec := recs[m.ID]; rec != nil && m.Status == MilestoneDone {
-				line.AcceptRed = rec.AcceptRed
+			if rec := recs[m.ID]; rec != nil {
+				line.BaseSHA = rec.Approval.Base()
+				if m.Status == MilestoneDone {
+					line.AcceptRed = rec.AcceptRed
+				}
 			}
 			r.Milestones = append(r.Milestones, line)
 		}
 		if m := rm.Current(); m != nil {
 			r.Milestone = p.milestoneStatus(m, runs, p.fixIDs(ctx))
+			if rec := recs[m.ID]; rec != nil {
+				r.Milestone.BaseSHA = rec.Approval.Base()
+			}
 		}
 	}
 
