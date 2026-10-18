@@ -1010,19 +1010,7 @@ func (lf *lifter) apply() error {
 		_ = os.WriteFile(pathsFile.Name(), []byte(strings.Join(paths, "\x00")), 0o600)
 		return []string{"--pathspec-from-file=" + pathsFile.Name(), "--pathspec-file-nul"}
 	}
-	var rm []string
-	for _, d := range lf.deletes {
-		if d == lf.rel(lf.layout.Cfg.Paths.ADRs) && len(lf.keepADR) > 0 {
-			out, _ := git(ctx, lf.root, "ls-files", "--", d)
-			for f := range strings.SplitSeq(out, "\n") {
-				if f != "" && !lf.keepADR[f] {
-					rm = append(rm, f)
-				}
-			}
-			continue
-		}
-		rm = append(rm, d)
-	}
+	rm := lf.removals()
 	if len(rm) > 0 {
 		if _, err := git(ctx, lf.root, append([]string{"rm", "-r", "-q", "--ignore-unmatch"}, pathspec(rm)...)...); err != nil {
 			return &FailError{Code: CodeLiftWriteFailed, Msg: "removing the v0 families: " + err.Error() + " — `git reset --hard` restores the tree; fix the cause, then lift again"}
@@ -1110,6 +1098,25 @@ func (lf *lifter) apply() error {
 	}
 	lf.liftRegression(p)
 	return nil
+}
+
+// removals are the paths the lift removes: the deleted v0 families, the
+// ADR folder file by file when some of its records are kept.
+func (lf *lifter) removals() []string {
+	var rm []string
+	for _, d := range lf.deletes {
+		if d == lf.rel(lf.layout.Cfg.Paths.ADRs) && len(lf.keepADR) > 0 {
+			out, _ := git(lf.ctx, lf.root, "ls-files", "--", d)
+			for f := range strings.SplitSeq(out, "\n") {
+				if f != "" && !lf.keepADR[f] {
+					rm = append(rm, f)
+				}
+			}
+			continue
+		}
+		rm = append(rm, d)
+	}
+	return rm
 }
 
 // liftRegression runs the regression command at the lift commit and

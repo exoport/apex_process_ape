@@ -71,9 +71,10 @@ func readersSeeAll(t *testing.T, p *Project, where map[string]string) {
 	}
 	r := p.Status()
 	require.Equal(t, 3, r.Archived, "status counts both layouts")
-	var awaiting []string
-	for _, c := range p.archivedAwaitingHuman() {
-		awaiting = append(awaiting, c.ID)
+	archived := p.archivedAwaitingHuman()
+	awaiting := make([]string, 0, len(archived))
+	for i := range archived {
+		awaiting = append(awaiting, archived[i].ID)
 	}
 	require.Equal(t, []string{"add-hug", "fix-typo"}, awaiting, "archived human-review tasks in both layouts")
 	all := p.archivedChanges()

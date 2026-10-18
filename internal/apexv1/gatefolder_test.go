@@ -81,9 +81,9 @@ func TestClose_ArchivesSeveralGateFolders(t *testing.T) {
 		{From: "development/gates/M1-skeleton", To: "development/archive/milestones/M1/gate/M1-skeleton"},
 	}, g.GateArchived)
 	clean(t, p, "milestone close")
-	require.FileExists(t, filepath.Join(p.Root, "development/archive/milestones/M1/gate/M1-extra/check.sh"))
-	require.FileExists(t, filepath.Join(p.Root, "development/archive/milestones/M1/gate/M1-skeleton/gate.sh"))
-	require.FileExists(t, filepath.Join(p.Root, "development/gates/M10-later/gate.sh"))
+	require.FileExists(t, filepath.Join(p.Root, "development", "archive", "milestones", "M1", "gate", "M1-extra", "check.sh"))
+	require.FileExists(t, filepath.Join(p.Root, "development", "archive", "milestones", "M1", "gate", "M1-skeleton", "gate.sh"))
+	require.FileExists(t, filepath.Join(p.Root, "development", "gates", "M10-later", "gate.sh"))
 	recs, err := p.LoadMilestoneRecords()
 	require.NoError(t, err)
 	require.Equal(t, "development/archive/milestones/M1/gate/M1-skeleton/gate.sh", recs["M1"].ArchivedPath("development/gates/M1-skeleton/gate.sh"))

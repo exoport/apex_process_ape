@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"strings"
 	"time"
@@ -140,9 +141,7 @@ func v1FailWith(cmd *cobra.Command, f *v1Flags, err error, partial any, extra ma
 		if partial != nil {
 			out["result"] = partial
 		}
-		for k, v := range extra {
-			out[k] = v
-		}
+		maps.Copy(out, extra)
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		if encErr := enc.Encode(out); encErr != nil {

@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,7 +29,7 @@ const ArchiveLayoutSubject = "apex: archive layout (seq-06)"
 
 // datedFolderRe is an archived change's folder name, <YYYY-MM-DD>-<id>:
 // milestones/ and changes/ never match, so they are never a change.
-var datedFolderRe = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}-(.+)$`)
+var datedFolderRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}-(.+)$`)
 
 // datedFolders maps the change ids of the dated folder names among names
 // to their names; of two folders of one id, the later name wins.
@@ -207,8 +208,8 @@ func (p *Project) ArchiveLayout(ctx context.Context) (*ArchiveLayoutResult, erro
 	// archive as HEAD has it.
 	var done []ArchiveMove
 	undo := func(cause string) error {
-		for i := len(done) - 1; i >= 0; i-- {
-			_ = os.Rename(filepath.Join(p.Root, filepath.FromSlash(done[i].To)), filepath.Join(p.Root, filepath.FromSlash(done[i].From)))
+		for _, m := range slices.Backward(done) {
+			_ = os.Rename(filepath.Join(p.Root, filepath.FromSlash(m.To)), filepath.Join(p.Root, filepath.FromSlash(m.From)))
 		}
 		_, _ = git(ctx, p.Root, "reset", "-q", "--", archiveRel)
 		_, _ = git(ctx, p.Root, "checkout", "-q", "--", archiveRel)

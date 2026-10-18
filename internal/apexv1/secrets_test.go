@@ -39,11 +39,11 @@ func secretRepo(t *testing.T, files map[string]string) string {
 	return root
 }
 
-func writeAt(t *testing.T, root, rel, content string) {
-	t.Helper()
+func writeAt(tb testing.TB, root, rel, content string) {
+	tb.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	require.NoError(tb, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(tb, os.WriteFile(path, []byte(content), 0o644))
 }
 
 func secretFail(t *testing.T, err error) *FailError {
@@ -119,10 +119,12 @@ func TestScanCommit_BingoSumIsSkipped(t *testing.T) {
 	writeAt(t, root, "deps.txt", sum)
 	run(t, root, "add", "-A")
 	require.Len(t, secretFail(t, ScanCommit(ctx(), root, "apex: pin")).Findings, 2, "the same lines anywhere else are flagged")
-	run(t, root, "rm", "-q", "--cached", "deps.txt")
+	run(t, root, "rm", "-q", "-f", "deps.txt")
 	writeAt(t, root, ".bingo/notes.txt", "T="+fakeToken+"\n")
 	run(t, root, "add", "-A")
-	secretFail(t, ScanCommit(ctx(), root, "apex: pin"))
+	fe := secretFail(t, ScanCommit(ctx(), root, "apex: pin"))
+	require.Len(t, fe.Findings, 1)
+	require.Equal(t, ".bingo/notes.txt", fe.Findings[0].File, "other paths under .bingo are scanned")
 }
 
 // Q80: the inline betterleaks:allow and gitleaks:allow markers do not
@@ -146,7 +148,9 @@ func TestScanCommit_AllowListFromTheCommittedConfig(t *testing.T) {
 	writeAt(t, root, configYAML, allow)
 	writeAt(t, root, "a.sh", "T="+fakeToken+"\n")
 	run(t, root, "add", "--", "a.sh")
-	secretFail(t, ScanCommit(ctx(), root, "apex: x", "a.sh"))
+	fe := secretFail(t, ScanCommit(ctx(), root, "apex: x", "a.sh"))
+	require.Len(t, fe.Findings, 1)
+	require.Equal(t, "a.sh", fe.Findings[0].File, "an allow entry only in the working tree does not count")
 
 	run(t, root, "add", "--", configYAML)
 	run(t, root, "commit", "-q", "-m", "person: allow the fake token", "--", configYAML)
@@ -186,7 +190,9 @@ func TestCommitRecord_PersonsStagedFileIsNotScanned(t *testing.T) {
 	// The same file in the pathspec is scanned, and nothing is committed.
 	head := HeadSHA(ctx(), p.Root)
 	_, err = p.commitRecord(ctx(), "apex: record", "", "mine.env")
-	secretFail(t, err)
+	fe := secretFail(t, err)
+	require.Len(t, fe.Findings, 1)
+	require.Equal(t, "mine.env", fe.Findings[0].File)
 	require.Equal(t, head, HeadSHA(ctx(), p.Root))
 }
 
@@ -221,7 +227,9 @@ func TestScanCommit_FirstCommit(t *testing.T) {
 	run(t, root, "init", "-q", "-b", "main")
 	writeAt(t, root, "a.sh", "T="+fakeToken+"\n")
 	run(t, root, "add", "-A")
-	secretFail(t, ScanCommit(ctx(), root, "apex: project init", "a.sh"))
+	fe := secretFail(t, ScanCommit(ctx(), root, "apex: project init", "a.sh"))
+	require.Len(t, fe.Findings, 1)
+	require.Equal(t, "a.sh", fe.Findings[0].File)
 	writeAt(t, root, "a.sh", "T=1\n")
 	run(t, root, "add", "-A")
 	require.NoError(t, ScanCommit(ctx(), root, "apex: project init", "a.sh"))
@@ -298,7 +306,9 @@ func TestCommitDetached_IsScanned(t *testing.T) {
 	p := startedWave(t)
 	tip := run(t, p.Root, "rev-parse", "main")
 	_, err := p.commitDetached(ctx(), "main", tip, map[string][]byte{"notes.md": []byte("T=" + fakeToken + "\n")}, []string{"notes.md"}, "apex: notes")
-	secretFail(t, err)
+	fe := secretFail(t, err)
+	require.Len(t, fe.Findings, 1)
+	require.Equal(t, "notes.md", fe.Findings[0].File)
 	require.Equal(t, tip, run(t, p.Root, "rev-parse", "main"), "main did not move")
 	sha, err := p.commitDetached(ctx(), "main", tip, map[string][]byte{"notes.md": []byte("fine\n")}, []string{"notes.md"}, "apex: notes")
 	require.NoError(t, err)
@@ -369,23 +379,23 @@ func timingRepo(tb testing.TB, large bool) string {
 		require.NoError(tb, err, string(out))
 	}
 	state := `{"id": "add-wave", "status": "verified", "base_branch": "main", "base_sha": "%s", "tasks": [%s]}` + "\n"
-	var tasks []string
+	tasks := make([]string, 0, 30)
 	for i := range 30 {
 		tasks = append(tasks, fmt.Sprintf(`{"ref": "T%d", "status": "green", "at": "2026-10-18T12:00:00Z", "log": "_apex/state/logs/verify/T%d.log"}`, i, i))
 	}
 	git("init", "-q", "-b", "main")
-	writeAt(tb.(*testing.T), root, "development/changes/add-wave/state.json", fmt.Sprintf(state, strings.Repeat("a", 40), strings.Join(tasks, ",\n")))
+	writeAt(tb, root, "development/changes/add-wave/state.json", fmt.Sprintf(state, strings.Repeat("a", 40), strings.Join(tasks, ",\n")))
 	git("add", "-A")
 	git("commit", "-q", "-m", "fixture")
 	if !large {
-		writeAt(tb.(*testing.T), root, "development/changes/add-wave/state.json", fmt.Sprintf(state, strings.Repeat("b", 40), strings.Join(tasks, ",\n")))
+		writeAt(tb, root, "development/changes/add-wave/state.json", fmt.Sprintf(state, strings.Repeat("b", 40), strings.Join(tasks, ",\n")))
 	} else {
 		var b strings.Builder
 		for i := range 100 {
 			fmt.Fprintf(&b, "\tconfig.Timeout%d := lookupTimeout(ctx, \"service-%d\", defaultTimeout) // retries=%d token_url=https://example.com/%d\n", i, i, i%7, i)
 		}
 		for i := range 2000 {
-			writeAt(tb.(*testing.T), root, fmt.Sprintf("src/pkg%02d/file%04d.go", i%40, i), "package pkg\n\n"+b.String())
+			writeAt(tb, root, fmt.Sprintf("src/pkg%02d/file%04d.go", i%40, i), "package pkg\n\n"+b.String())
 		}
 	}
 	git("add", "-A")

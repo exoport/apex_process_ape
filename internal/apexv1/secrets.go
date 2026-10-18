@@ -404,11 +404,15 @@ func scanAdded(ctx context.Context, hunks []addedHunk, allow []SecretAllow) ([]s
 	return found, nil
 }
 
+// A refusal shows redactShown characters of a secret, and never more
+// than 1/redactShare of it.
+const redactShown, redactShare = 4, 4
+
 // redactSecret shows about four characters of the value, and never more
 // than a quarter of it.
 func redactSecret(f report.Finding) string {
 	n := len([]rune(f.Match.Value))
-	keep := min(4, n/4)
+	keep := min(redactShown, n/redactShare)
 	return f.RedactedCopy(uint(100 - keep*100/n)).Match.Value
 }
 
@@ -441,11 +445,12 @@ func (s addedSource) Fragments(ctx context.Context, yield sources.FragmentsFunc)
 // `<file>:<line> rule <id>: <redacted>`, and the allow entries a person
 // may paste.
 func secretRefusal(subject string, found []secretFinding) error {
-	var list, entries []string
+	var entries []string
+	list := make([]string, 0, len(found))
 	findings := make([]Finding, 0, len(found))
 	for _, s := range found {
 		list = append(list, fmt.Sprintf("%s:%d rule %s: %s", s.Path, s.Line, s.Rule, s.Redacted))
-		entry := fmt.Sprintf(`{fingerprint: "%s", reason: "…"}`, s.Fingerprint)
+		entry := fmt.Sprintf(`{fingerprint: %q, reason: "…"}`, s.Fingerprint)
 		if !slices.Contains(entries, entry) {
 			entries = append(entries, entry)
 		}
