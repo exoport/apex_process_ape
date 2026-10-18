@@ -64,6 +64,32 @@ func TestStepLine_NoAgentPath(t *testing.T) {
 	require.Equal(t, "/apex-correct-course --autonomous --no-commit "+repl.ArgsPointer(path), line)
 }
 
+// TestStepLine_TaskStepKeepsItsCommitConvention is Q45: `ape task` sets
+// ExplicitNoCommit, so its line carries --no-commit only when the caller
+// asked for it — whether the text is typed or goes to the file. The file
+// branch once rebuilt the step from Skill and Args alone and lost the
+// flag, so every args-file task was told not to commit.
+func TestStepLine_TaskStepKeepsItsCommitConvention(t *testing.T) {
+	for name, args := range map[string]string{
+		"long":       longChange,
+		"whitespace": "Hello, Ada!  (3)",
+		"line break": "a brief\nwith two lines",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "a.args.md")
+			line, spilled, err := stepLine("", Step{Skill: "apex-plan", Args: args, ExplicitNoCommit: true}, "", path)
+			require.NoError(t, err)
+			require.True(t, spilled)
+			require.Equal(t, "/apex-plan --autonomous "+repl.ArgsPointer(path), line, "no --no-commit the caller did not ask for")
+
+			line, spilled, err = stepLine("", Step{Skill: "apex-plan", Args: "--no-commit " + args, ExplicitNoCommit: true}, "", path)
+			require.NoError(t, err)
+			require.True(t, spilled)
+			require.Equal(t, "/apex-plan --autonomous --no-commit "+repl.ArgsPointer(path), line, "the caller's own --no-commit is kept")
+		})
+	}
+}
+
 // TestStepLine_PromptFlagMovesToo — a pipeline's --prompt reaches the
 // skill as "<flag> <value>", and it is the part most likely to be long.
 func TestStepLine_PromptFlagMovesToo(t *testing.T) {

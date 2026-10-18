@@ -700,7 +700,11 @@ func stepLine(effAgent string, step Step, prompt, argsPath string) (line string,
 	if err := os.WriteFile(argsPath, []byte(strings.Join(parts, " ")+"\n"), 0o600); err != nil {
 		return "", false, fmt.Errorf("write step args: %w", err)
 	}
-	short := Step{Skill: step.Skill, Args: keep}
+	// The rest of the step stays as it was: rebuilding it from Skill and
+	// Args alone dropped ExplicitNoCommit, so every `ape task` whose text
+	// went to the file was typed with the PAT-25 --no-commit (Q45).
+	short := step
+	short.Args, short.PromptFlag = keep, ""
 	return assembleInteractivePromptLine(effAgent, short, "") + " " + repl.ArgsPointer(argsPath), true, nil
 }
 
