@@ -136,7 +136,8 @@ func (p *Project) isWorkTree(ctx context.Context) bool {
 // commitPaths stages exactly paths and commits only them (pre-commit
 // hooks skipped: these are ape's own records), with trailer
 // `Change: <changeID>`. Other staged or dirty files are left as they are.
-// A commit with nothing to record is skipped.
+// A commit with nothing to record is skipped; one whose added lines hold a
+// secret is refused (commit.secret, ScanCommit) with the paths staged.
 func (p *Project) commitPaths(ctx context.Context, subject, changeID string, paths ...string) (string, error) {
 	return p.commitWithTrailer(ctx, subject, "Change: "+changeID, paths...)
 }
@@ -161,6 +162,9 @@ func (p *Project) commitWithTrailer(ctx context.Context, subject, trailer string
 	}
 	if changed == "" {
 		return "", nil
+	}
+	if err := ScanCommit(ctx, p.Root, subject, paths...); err != nil {
+		return "", err
 	}
 	msg := subject + "\n"
 	if trailer != "" {

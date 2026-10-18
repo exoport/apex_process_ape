@@ -594,7 +594,7 @@ func (p *Project) writePluginSettings(ctx context.Context, cfg Config, before []
 	}
 	sha, err := p.commitRecord(ctx, "apex: plugins", "", p.Rel(p.SettingsJSON()))
 	if err != nil {
-		return &FailError{Code: CodeCommitFailed, Msg: "plugin settings written but their commit failed: " + err.Error()}
+		return commitFailed(err, "plugin settings written but their commit failed: "+err.Error())
 	}
 	res.Commit = sha
 	return nil

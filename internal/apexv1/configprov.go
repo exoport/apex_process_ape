@@ -16,7 +16,8 @@ import (
 // project's hooks on the squash), evidence (off keeps no evidence), and
 // marketplaces, plugins and tools (what runs inside a session: hooks, MCP
 // servers, the skills a session may start), and human_review (D75: who
-// accepts a human-review task in a person's place). Since the v1 epoch, a commit
+// accepts a human-review task in a person's place), and secrets (D155:
+// what the commit secret scan lets through). Since the v1 epoch, a commit
 // that changes one of them must be ape's own (`apex: …`), or a person
 // accepts it afterwards with `ape project accept-config`; else
 // config.changed. A revert clears it, as for spec.edited. The guard
@@ -33,12 +34,14 @@ const configAcceptedSubject = "apex: config accepted"
 var guardedConfigKeys = []string{
 	"limits", "checks", "retries", "requires", "timeouts", "caps", "regression",
 	"commit", "evidence", "marketplaces", "plugins", "tools", "human_review", "release",
+	// rc.6 (rc6-g): what the commit secret scan lets through (D155).
+	"secrets",
 }
 
 func init() {
 	findingRules = append(findingRules, rule("", `^guarded config keys`, "config.changed"))
 	DiagnosticCodes = append(DiagnosticCodes,
-		CodeDoc{"config.changed", 1, ActionPerson, "a commit since the v1 epoch changed a guarded block of _apex/config.yaml — limits, checks, retries, requires, timeouts, caps, regression, commit (commit.types included, D120), evidence, marketplaces, plugins, tools, human_review or release (D120) — and is not ape's (`apex: …`), and no person accepted it since (`ape project accept-config --by <who>`); a revert also clears it (D50, D69, D75, D120)"},
+		CodeDoc{"config.changed", 1, ActionPerson, "a commit since the v1 epoch changed a guarded block of _apex/config.yaml — limits, checks, retries, requires, timeouts, caps, regression, commit (commit.types included, D120), evidence, marketplaces, plugins, tools, human_review, release (D120) or secrets (D155) — and is not ape's (`apex: …`), and no person accepted it since (`ape project accept-config --by <who>`); a revert also clears it (D50, D69, D75, D120, D155)"},
 	)
 }
 
@@ -145,6 +148,11 @@ func (p *Project) AcceptConfig(ctx context.Context, by string) (string, error) {
 		return "", &FailError{Code: "tree.dirty", Msg: "the index holds staged changes — commit or unstage them, then accept the config"}
 	}
 	msg := configAcceptedSubject + " by " + by + "\n\nGuarded: " + strings.Join(guardedConfigKeys, ", ") + "\n"
+	// Empty by construction (a clean index): scanned all the same, as
+	// every commit ape makes is (D155).
+	if err := ScanCommit(ctx, p.Root, configAcceptedSubject+" by "+by); err != nil {
+		return "", err
+	}
 	if _, err := git(ctx, p.Root, "commit", "--allow-empty", "--no-verify", "-q", "-m", msg); err != nil {
 		return "", &FailError{Code: CodeCommitFailed, Msg: "accepting the config failed: " + err.Error() + " — fix git and run it again"}
 	}

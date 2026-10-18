@@ -1090,6 +1090,12 @@ func (lf *lifter) apply() error {
 	if _, err := git(ctx, lf.root, append([]string{"add", "-A"}, pathspec(add)...)...); err != nil {
 		return &FailError{Code: CodeCommitFailed, Msg: "staging the lift: " + err.Error() + " — `git reset --hard` restores the tree; fix the cause, then lift again"}
 	}
+	if err := ScanCommit(ctx, lf.root, "the lift commit", commit...); err != nil {
+		if fe, ok := errors.AsType[*FailError](err); ok {
+			fe.Msg += "; `git reset --hard` restores the tree, then lift again"
+		}
+		return err
+	}
 	if _, err := git(ctx, lf.root, append([]string{"commit", "--no-verify", "-q", "-m", lf.res.CommitMessage}, pathspec(commit)...)...); err != nil {
 		return &FailError{Code: CodeCommitFailed, Msg: "the lift commit failed: " + err.Error() + " — `git reset --hard` restores the tree; fix the cause (identity, lock), then lift again"}
 	}

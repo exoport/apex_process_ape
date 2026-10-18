@@ -172,7 +172,7 @@ func (p *Project) NewDecision(ctx context.Context, slug, title, supersedes strin
 	}
 	sha, err := p.commitRecord(ctx, subject, "", paths...)
 	if err != nil {
-		return res, &FailError{Code: CodeCommitFailed, Msg: "decision written but its commit failed: " + err.Error()}
+		return res, commitFailed(err, "decision written but its commit failed: "+err.Error())
 	}
 	res.Commit = sha
 	return res, nil
@@ -221,7 +221,7 @@ func (p *Project) AcceptDecision(ctx context.Context, id, by string) (*DecisionR
 	res := &DecisionResult{ID: id, Path: p.Rel(path), Status: ADRAccepted}
 	sha, err := p.commitRecord(ctx, "apex: "+id+" accepted", "", res.Path, p.Rel(p.decisionsJSON()))
 	if err != nil {
-		return res, &FailError{Code: CodeCommitFailed, Msg: "decision accepted but its commit failed: " + err.Error()}
+		return res, commitFailed(err, "decision accepted but its commit failed: "+err.Error())
 	}
 	res.Commit = sha
 	return res, nil

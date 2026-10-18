@@ -320,9 +320,9 @@ func newProjectCheckCmd() *cobra.Command {
   config                   since the v1 epoch, a commit that changed a guarded block of
                            _apex/config.yaml — limits, checks, retries, requires, timeouts,
                            caps, regression, commit (types included), evidence,
-                           marketplaces, plugins, tools, human_review, release (D120) —
-                           and is not ape's (config.changed, D50) — a person reverts it or
-                           accepts it: ` + "`ape project accept-config`" + `
+                           marketplaces, plugins, tools, human_review, release (D120),
+                           secrets (D155) — and is not ape's (config.changed, D50) — a
+                           person reverts it or accepts it: ` + "`ape project accept-config`" + `
   caps                     _apex/config.yaml caps: (D69) — sizes like 16KB, 1MiB or plain
                            bytes, KB = KiB = 1024 bytes; default / hard ceiling:
                              project_md   16 KB / 48 KB    agents_md    16 KB / 48 KB

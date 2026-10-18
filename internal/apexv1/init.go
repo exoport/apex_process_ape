@@ -273,7 +273,7 @@ func Init(ctx context.Context, root string, brownfield bool) (*InitResult, error
 	if paths := p.initCommitPaths(res); len(paths) > 0 {
 		sha, err := p.commitRecord(ctx, "apex: project init", "", paths...)
 		if err != nil {
-			return res, &FailError{Code: CodeCommitFailed, Msg: "skeleton written but its commit failed: " + err.Error()}
+			return res, commitFailed(err, "skeleton written but its commit failed: "+err.Error())
 		}
 		res.Commit = sha
 	}

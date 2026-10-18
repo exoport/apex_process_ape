@@ -51,6 +51,13 @@ const (
 	CodeMalformedHumanReview = "change.malformed-human-review"
 )
 
+// rc.6 (rc6-g).
+const (
+	// CodeCommitSecret: a commit ape was about to make adds a secret
+	// (D155, secrets.go).
+	CodeCommitSecret = "commit.secret"
+)
+
 // CodeDoc documents one diagnostic code.
 type CodeDoc struct {
 	Code string `json:"code"`
@@ -340,5 +347,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeMalformedHumanReview, 1, "replan", "a task check reads as human-review but is not exactly `human-review` (D111): `human-review: <what>`, `Human-Review`, `human review …`, a trailing `.` — verify would run it as a shell command; write `- T<n> <what> — check: human-review`, the artefact and criteria in <what>"},
 	// rc.6 (rc6-d).
 	{"delegate.docs-scope", 1, "person", "accept --delegate on a docs change (change.md docs: true) with no configured delegate: its diff from base_sha to its tip touches paths outside release.docs and the development folder (named), so its docs check is not a delegate's by default (D152 Q69) — a person accepts it, or the non-docs work is re-planned into a change of its own"},
+	// rc.6 (rc6-g).
+	{CodeCommitSecret, 1, "person", "a commit ape was about to make adds a secret (D155): the betterleaks default rules found one in the lines it adds — exactly what that commit records, so a person's unrelated staged file, a deleted line and unchanged context are not scanned — and nothing was committed; each is named `<file>:<line> rule <id>: <redacted>`; move it to hot/ (git-ignored) and read it from there, or, if it is not a secret, a person adds the printed {fingerprint, reason} entry to _apex/config.yaml secrets.allow (guarded: commit it and accept it with `ape project accept-config`); inline betterleaks:allow markers and .betterleaksignore are not honoured"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

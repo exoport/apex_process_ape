@@ -291,7 +291,7 @@ func (p *Project) recordAcceptedDecision(ctx context.Context, id, path, doc, by 
 	res := &DecisionResult{ID: id, Path: p.Rel(path), Status: ADRAccepted}
 	sha, err := p.commitRecord(ctx, "apex: "+id+" accepted (recorded)", "", p.Rel(p.decisionsJSON()))
 	if err != nil {
-		return res, &FailError{Code: CodeCommitFailed, Msg: "decision recorded but its commit failed: " + err.Error()}
+		return res, commitFailed(err, "decision recorded but its commit failed: "+err.Error())
 	}
 	res.Commit = sha
 	return res, nil
