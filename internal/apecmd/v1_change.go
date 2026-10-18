@@ -280,6 +280,11 @@ func newChangeCheckCmd() *cobra.Command {
     "- T<n> <what> — tool: <name> — check: <command> | human-review", <name> a
     tools.design entry of _apex/config.yaml (else tools.unknown, D74; see
     `+"`ape plugins --help`"+`); ape status --json lists it under changes[].tools
+  - a human-review check is exactly "human-review": the artefact and the criteria go
+    in <what>, before " — check:". A check that starts with human-review or "human
+    review" in any case but is anything else ("human-review: read the README",
+    "Human-Review", "human-review.") would run as a shell command, and is
+    change.malformed-human-review (action replan; start refuses it)
 
 The change is checked as the branch holding its records has it, against that branch's
 specs and roadmap (D51 Q17; `+"`ape change --help`"+`): HEAD needs to be on no particular branch.

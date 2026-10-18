@@ -213,6 +213,7 @@ var findingRules = []findingRule{
 	// rc.5 (rc5-d).
 	rule("", `^models\.\S+ (names no skill|is not a skill)`, CodeModelsUnknownSkill),
 	rule("", `^models\.\S+ is not a field of a models entry`, CodeModelsUnknownField),
+	rule("", `^task \S+'s check .* is not exactly human-review`, CodeMalformedHumanReview),
 }
 
 // UnclassifiedFinding is the code of a finding no rule matches — a

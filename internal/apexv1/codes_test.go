@@ -47,6 +47,7 @@ func TestDiagnosticCodes_PublishedListMatchesTheCode(t *testing.T) {
 		"CodeChangeOverCeiling": CodeChangeOverCeiling,
 		// rc.5 (rc5-d).
 		"CodeModelsUnknownSkill": CodeModelsUnknownSkill, "CodeModelsUnknownField": CodeModelsUnknownField,
+		"CodeMalformedHumanReview": CodeMalformedHumanReview,
 	}
 	for _, glob := range []string{"*.go", filepath.Join("..", "apecmd", "v1_*.go")} {
 		files, err := filepath.Glob(glob)

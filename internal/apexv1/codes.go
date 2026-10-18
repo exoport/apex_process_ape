@@ -46,6 +46,9 @@ const (
 	// than model and effort.
 	CodeModelsUnknownSkill = "models.unknown-skill"
 	CodeModelsUnknownField = "models.unknown-field"
+	// CodeMalformedHumanReview: a task check that reads as human-review
+	// but is not exactly it (D111, Q52).
+	CodeMalformedHumanReview = "change.malformed-human-review"
 )
 
 // CodeDoc documents one diagnostic code.
@@ -333,5 +336,6 @@ var DiagnosticCodes = []CodeDoc{
 	// rc.5 (rc5-d).
 	{CodeModelsUnknownSkill, 1, "person", "a _apex/config.yaml models: key names no skill a session reads it for (Q45): not one of the defaults init writes, a project or user skill (.claude/skills/<key>/SKILL.md), nor a skill tools: or human_review names — so it pins nothing; `models.effort` / `models.model` are not skills: a skill's effort goes inside its entry, {model, effort}"},
 	{CodeModelsUnknownField, 1, "person", "a _apex/config.yaml models.<skill> entry has a field other than model and effort (Q45), which does nothing: an entry is a model name or {model, effort}"},
+	{CodeMalformedHumanReview, 1, "replan", "a task check reads as human-review but is not exactly `human-review` (D111): `human-review: <what>`, `Human-Review`, `human review …`, a trailing `.` — verify would run it as a shell command; write `- T<n> <what> — check: human-review`, the artefact and criteria in <what>"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }
