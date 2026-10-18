@@ -107,27 +107,37 @@ The commit:
                  placeholder. A trailing " # …" shell comment is dropped first
   lays down      the v1 skeleton, as ` + "`ape project init --brownfield`" + ` (CLAUDE.md keeps its
                  content, loses the v0 apex:managed block and gains @AGENTS.md)
-  writes         development/lift-disposition.md (at most 16 KB): the binding-rule
-                 candidates (CLAUDE.md list items, project-context "don't miss" items,
-                 team-memory gotcha titles) with an empty Disposition column for
-                 apex-plan, then a fresh read-only review, then the person, who deletes
-                 it. Then, as summaries: code and CI that still read removed paths, one
-                 line per file with its count and first reference (CI guards over the
-                 v0 corpus show up there), and edited files a guard hashes, first; ADR
-                 gaps; ids left and files not edited, counted per file; references in
-                 evidence and docs, counted; readings at the tag. Every list whole goes
-                 to _apex/state/lift-disposition.json after the commit: ignored by
-                 the state folder's whitelist, never committed, in this checkout only
+  writes         development/lift-disposition.md (16 KB, unless its candidates need
+                 more): the binding-rule candidates (CLAUDE.md list items,
+                 project-context "don't miss" items, team-memory gotcha titles), EVERY
+                 one, with an empty Disposition column for apex-plan, then a fresh
+                 read-only review, then the person, who deletes it. Then, as summaries:
+                 code and CI that still read removed paths, one line per file with its
+                 count and first reference (CI guards over the v0 corpus show up there),
+                 and edited files a guard hashes (at most 50), first; ADR gaps; ids left
+                 and files not edited, counted per file; references in evidence and
+                 docs, counted; readings at the tag. To fit 16 KB the summaries shrink
+                 to counts, then the ADR table to the ADRs with gaps; the candidates are
+                 never cut to fit it: the file grows past 16 KB to hold them, up to
+                 48 KB, and only past 48 KB lists the first ones and says how many more
+                 there are and where. Every list whole goes to
+                 _apex/state/lift-disposition.json after the commit: ignored by the
+                 state folder's whitelist, never committed, in this checkout only
 
 A byte-identity perimeter: a file a test, CI script or lock file hashes goes red once
 the lift edits a comment in it. The plan lists, as "hashed", the edited files that a lock
-file names, that a test or CI file names within 3 lines of a hash word (sha256,
-checksum, fingerprint, byte-identical, …), or that sit beside a hashing test that globs
-or names them — run --dry-run, then --exclude them. Documents and evidence (.md, .json,
-.log, .txt, anything under an evidence folder) never count as hashers. What a lock file
-names is listed first; at most 50 are listed, edited_but_hashed_total counts them all.
-It is a heuristic: a copy compared byte for byte with no hash (an embedded mirror of a
-hashed file) needs its own --exclude.
+file names, that a test or CI file names within 3 lines of a hash word or call (sha256,
+sha256sum, checksum, fingerprint, byte-identical, crypto/sha3, hashlib, …), or that sit
+beside a hashing test that globs or names them — run --dry-run, then --exclude them. A
+test or CI file hashes only when a hash word or call stands outside its comments: one
+that says "byte-identical" in prose hashes nothing. Documents and evidence (.md, .json,
+.log, .txt, anything under an evidence folder) never count as hashers. The order is
+how sure the match is: what a lock file names, then what a hasher names (by path, or a
+test beside the file by its name), then what only its folder ties to a hasher (a glob,
+a ReadDir). --dry-run lists every one, text and --json; a real lift's output and the
+disposition file list at most 50, edited_but_hashed_total counts them all, and the
+report has every one. It is a heuristic: a copy compared byte for byte with no hash (an
+embedded mirror of a hashed file) needs its own --exclude.
 
 The regression command runs twice (--no-verify-run skips both): at the tag, before
 anything is written, and at the lift commit — the baseline red gates are judged against.
@@ -284,7 +294,8 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 	for _, h := range r.Hashed {
 		fmt.Fprintf(w, "hashed    %s — %s seems to pin its bytes: --exclude it to keep them\n", h.File, strings.Join(h.By, ", "))
 	}
-	if more := r.HashedTotal - len(r.Hashed); more > 0 {
+	// A dry run lists every one: it writes no report to point at (R6).
+	if more := r.HashedTotal - len(r.Hashed); more > 0 && !r.DryRun {
 		fmt.Fprintf(w, "hashed    … and %d more (in %s)\n", more, r.Report)
 	}
 	if n := len(r.DanglingRefs); n > 0 {
