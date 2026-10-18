@@ -3,7 +3,7 @@
 ## v1.0.0-rc.5 (draft)
 
 On top of rc.4 and the candidates below: the morning report's ape items 4–11
-(BRIEF r48), the v1.1 items moved into v1.0 (D111, D118, D120), and aboard
+(BRIEF r48), the v1.1 items moved into v1.0 (D111, D118, D120, D129), and aboard
 v0.4.0 (D126).
 
 ### Changes and project files
@@ -32,7 +32,7 @@ v0.4.0 (D126).
   or together, with no migration. The init skeleton's section names both and
   says that a pinned version is a decision (ADR), whichever name is used.
 
-### Commit types and release scheme (D120)
+### Commit types, release scheme and release docs (D120, D129)
 
 - **`commit.types:`** (in the guarded `commit:` block) replaces the type list
   `change check` holds change.md's `type:` to — a non-empty list of lower-case
@@ -41,10 +41,14 @@ v0.4.0 (D126).
 - **`release.scheme:`** (a new guarded `release:` block): `semver` (the
   default), `date` or `edition`. ape validates and guards it; apex-release
   proposes the next version by it.
+- **`release.docs:`** (D129, in the same guarded block): the files and
+  folders a release brings up to date — a non-empty list of relative paths
+  inside the project; absent, `README.md` and `docs/` where they exist. A
+  listed path that does not exist is `docs.missing` at `ape project check`.
 - The `commit:` and `release:` blocks refuse unknown keys (`commit.type:` is
   an error, not silently ignored). `ape project init` writes neither key, and a
   missing key behaves as in rc.4: no migration. `ape status --json` gains
-  `config: {commit_types, release_scheme}`, the defaults filled in (class C,
+  `config: {commit_types, release_scheme, release_docs}`, the defaults filled in (class C,
   additive).
 
 ### Regression judge (class C)

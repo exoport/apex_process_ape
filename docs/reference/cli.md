@@ -6107,10 +6107,11 @@ Show where the project stands, from the records ape keeps:
     there from any branch). Not the same field as "next", the step above
   - JSON "docs": {changelog, user_docs} from _apex/config.yaml docs: ({} when unset), for
     the skills that keep a changelog and user docs current
-  - JSON "config": {commit_types, release_scheme} — the project's commit types
-    (commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore) and
-    release scheme (release.scheme: semver, the default, date or edition), defaults filled
-    in, for apex-change and apex-release (D120)
+  - JSON "config": {commit_types, release_scheme, release_docs} — the project's commit
+    types (commit.types, default feat, fix, perf, refactor, docs, test, build, ci, chore),
+    release scheme (release.scheme: semver, the default, date or edition) and the docs a
+    release brings up to date (release.docs, default README.md and docs/ where they exist;
+    D129), defaults filled in, for apex-change and apex-release (D120)
   - the latest ape task run (JSON "latest_run": {skill, run_id, status, stopped,
     resets, resets_at, message, depth, parent_run}): how it ended, e.g. "stopped:
     usage-limit, resets 2026-10-16T23:00:00+02:00" when a claude.ai usage limit
