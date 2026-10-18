@@ -2,9 +2,11 @@ package apecmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/exoport/apex_process_ape/internal/apexv1"
@@ -139,4 +141,33 @@ func TestProjectLift_SaysWhichApeRuns(t *testing.T) {
 	}
 	require.Contains(t, stdout, "ape       "+Version+" ("+self+") runs this lift — exempt from the project's ape pin\n")
 	require.Contains(t, stdout, "pin       .bingo/ape.mod pins v0.9.0: ")
+}
+
+// R6: a dry run writes no report, so it lists every hashed file, text and
+// --json; rc.4 stopped at 50 with "… and N more (in the report)", hiding
+// real perimeter files past 50 behind a file that did not exist.
+func TestProjectLift_DryRunListsEveryHashed(t *testing.T) {
+	root := v0Repo(t)
+	guard := "package many\n\nfunc TestBytes(t *testing.T) {\n\tfiles, _ := filepath.Glob(\"*.go\")\n\t_ = sha256.New()\n}\n"
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "pkg", "many"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "pkg", "many", "guard_test.go"), []byte(guard), 0o644))
+	for i := range 60 {
+		src := fmt.Sprintf("package many\n\n// Story 3.2: part %d\nvar X%d = 1\n", i, i)
+		require.NoError(t, os.WriteFile(filepath.Join(root, "pkg", "many", fmt.Sprintf("f%02d.go", i)), []byte(src), 0o644))
+	}
+	v1Git(t, root, "add", "-A")
+	v1Git(t, root, "commit", "-q", "-m", "a guarded package")
+
+	stdout, _, err := v1Exec(t, newProjectCmd, "lift", "--dry-run", "--cwd", root)
+	require.NoError(t, err)
+	require.Equal(t, 60, strings.Count(stdout, "\nhashed    pkg/many/f"), stdout)
+	require.Contains(t, stdout, "hashed    pkg/many/f59.go — pkg/many/guard_test.go seems to pin its bytes")
+	require.NotContains(t, stdout, "… and", "no pointer to a report a dry run does not write")
+
+	stdout, _, err = v1Exec(t, newProjectCmd, "lift", "--dry-run", "--json", "--cwd", root)
+	require.NoError(t, err)
+	var plan apexv1.LiftResult
+	require.NoError(t, json.Unmarshal([]byte(stdout), &plan), stdout)
+	require.Len(t, plan.Hashed, 60)
+	require.Equal(t, 60, plan.HashedTotal)
 }

@@ -256,11 +256,11 @@ func (lf *lifter) dispositionWith(lim dispLimits) string {
 	}
 	if len(r.Hashed) > 0 {
 		p("Edited files a test, CI script or lock file seems to pin the bytes of (re-run that guard; if it is red, the file belonged under --exclude):\n\n")
-		shown := min(len(r.Hashed), max(lim.files, 1))
-		for _, h := range r.Hashed[:shown] {
+		shown := min(len(lf.hashedAll), hashedCap, max(lim.files, 1))
+		for _, h := range lf.hashedAll[:shown] {
 			p("- `%s` — %s\n", h.File, "`"+strings.Join(h.By, "`, `")+"`")
 		}
-		if more := r.HashedTotal - shown; more > 0 {
+		if more := len(lf.hashedAll) - shown; more > 0 {
 			p("- … and %d more (in `%s`)\n", more, report)
 		}
 		p("\n")
