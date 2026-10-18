@@ -150,6 +150,52 @@ func TestLift_RegressionAtTheTag(t *testing.T) {
 		require.Equal(t, []string{"TestKnownUnwiredList"}, res.RegressionNewFailures)
 		require.Contains(t, res.RegressionNote, "LIFT FAILURE")
 	})
+	t.Run("an && chain runs command by command", func(t *testing.T) {
+		// R12, tenax on mmq4: `make lint && make test`, lint red at the
+		// tag and after the lift, so make test ran at neither point —
+		// and it was green at the tag and red after, the lift's.
+		root := liftFixture(t, false)
+		require.NoError(t, os.WriteFile(filepath.Join(root, "lint.sh"), []byte("#!/bin/sh\necho 'x.go:1: unused'\nexit 1\n"), 0o755))
+		run(t, root, "add", "lint.sh")
+		run(t, root, "commit", "-q", "-m", "lint")
+		root = liftWithGatesAt(t, root, "sh ./lint.sh\ntest -f development/team-memory.md\ntrue")
+		res, err := Lift(ctx(), root, LiftOptions{})
+		require.NoError(t, err)
+		require.Equal(t, "sh ./lint.sh && test -f development/team-memory.md && true", res.Gates.Regression)
+		require.Len(t, res.RegressionCommands, 3)
+		var got []string
+		for _, c := range res.RegressionCommands {
+			got = append(got, c.Cmd+" "+c.Verdict)
+			require.NotNil(t, c.RegressionAtTag, c.Cmd)
+			require.NotEmpty(t, c.Note, c.Cmd)
+		}
+		require.Equal(t, []string{
+			"sh ./lint.sh " + LiftRegressionRedAtTag,
+			"test -f development/team-memory.md " + LiftRegressionRedAfterLift,
+			"true " + LiftRegressionGreen,
+		}, got, "each command ran at both points, past the red lint")
+		require.Equal(t, LiftRegressionRedAfterLift, res.RegressionVerdict, "the worst verdict: the lift-caused red behind the lint")
+		require.Equal(t, "test -f development/team-memory.md", res.Regression.Cmd)
+		require.Equal(t, 0, res.RegressionAtTag.Exit)
+		require.Contains(t, res.RegressionNote, "command 2 of 3, `test -f development/team-memory.md`")
+		require.Contains(t, res.RegressionNote, "LIFT FAILURE")
+		require.Contains(t, res.RegressionNote, "1 `sh ./lint.sh` red-at-tag, 3 `true` green")
+		require.Equal(t, "_apex/state/logs/lift/regression-2.log", res.RegressionCommands[1].Regression.Log)
+		require.Equal(t, "_apex/state/logs/lift/regression-2-at-tag.log", res.RegressionCommands[1].RegressionAtTag.Log)
+		require.FileExists(t, filepath.Join(root, "_apex/state/logs/lift/regression-1-at-tag.log"))
+		data, err := json.Marshal(res)
+		require.NoError(t, err)
+		require.Contains(t, string(data), `"regression_commands":[{"cmd":"sh ./lint.sh","verdict":"red-at-tag"`)
+	})
+	t.Run("a command with no top-level && runs whole", func(t *testing.T) {
+		root := liftWithGates(t, "( test -f nowhere.txt && true )")
+		res, err := Lift(ctx(), root, LiftOptions{})
+		require.NoError(t, err)
+		require.Empty(t, res.RegressionCommands)
+		require.Equal(t, "_apex/state/logs/lift/regression-at-tag.log", res.RegressionAtTag.Log)
+		require.Equal(t, "_apex/state/logs/lift/regression.log", res.Regression.Log)
+		require.Equal(t, LiftRegressionRedAtTag, res.RegressionVerdict)
+	})
 	t.Run("cannot run here", func(t *testing.T) {
 		root := liftWithGates(t, "ape-no-such-tool-xyz build")
 		res, err := Lift(ctx(), root, LiftOptions{})

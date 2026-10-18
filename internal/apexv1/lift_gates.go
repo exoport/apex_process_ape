@@ -1,6 +1,8 @@
 package apexv1
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"regexp"
 	"strconv"
 	"strings"
@@ -222,46 +224,12 @@ func indent(s, pre string) string {
 // was red at the tag for its environment (22 failures) and red after the
 // lift with 25, three of them tests reading the deleted
 // sprint-status.yaml, and the lift called all of it pre-existing. So the
-// failing tests are compared by name, for the runners whose report names
-// them; otherwise the outputs' hashes are.
-var (
-	ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
-	// failNameRes each capture a failing test (or package, or suite)
-	// name: go test's "--- FAIL: TestX/sub" and "FAIL pkg [build
-	// failed]", pytest's "FAILED path::test" and "ERROR path", cargo's
-	// "test name ... FAILED", jest's "✕ name" and "FAIL path".
-	failNameRes = []*regexp.Regexp{
-		regexp.MustCompile(`^\s*--- FAIL: (\S+)`),
-		regexp.MustCompile(`^FAIL\s+(\S+(?:\s+\[[a-z ]+ failed\])?)`),
-		regexp.MustCompile(`^(?:FAILED|ERROR) (\S+)`),
-		regexp.MustCompile(`^test (\S+) \.{3} FAILED\s*$`),
-		regexp.MustCompile(`^\s*[✕×] (.+?)(?:\s+\(\d+(?:\.\d+)?\s*m?s\))?\s*$`),
-	}
-)
+// failing tests are compared by name (failingTests), for the runners
+// whose report names them; otherwise the outputs' hashes are.
 
 // liftNewFailuresShown is how many new failing names the result and the
 // note carry; the count says the rest.
 const liftNewFailuresShown = 50
-
-// failingTests are the failing test names a red run's output reports, in
-// order, once each; nil when no runner's report could be read.
-func failingTests(out string) []string {
-	seen := map[string]bool{}
-	var names []string
-	for l := range strings.SplitSeq(ansiRe.ReplaceAllString(out, ""), "\n") {
-		l = strings.TrimRight(l, "\r")
-		for _, re := range failNameRes {
-			if m := re.FindStringSubmatch(l); m != nil {
-				if n := strings.TrimSpace(m[1]); n != "" && !seen[n] {
-					seen[n] = true
-					names = append(names, n)
-				}
-				break
-			}
-		}
-	}
-	return names
-}
 
 // newFailures compares two red runs' outputs. With failing names read
 // from the run after the lift, it returns those the tag's run did not
@@ -272,14 +240,111 @@ func newFailures(beforeOut, afterOut string) (fresh []string, named bool) {
 	if len(after) == 0 {
 		return nil, false
 	}
-	before := map[string]bool{}
-	for _, n := range failingTests(beforeOut) {
-		before[n] = true
+	return namesNotIn(after, failingTests(beforeOut)), true
+}
+
+// R13: bingo prints "(re)installing …/golangci-lint-v2.13.2" on a tool's
+// first run, which is the run at the tag, and a duration differs on every
+// run; spirometer's two logs differed only in such a line, and the lift
+// said "the output changed". The lift's comparison hash drops both; the
+// logs themselves, and a change's or milestone's regression hash, are
+// untouched.
+var (
+	reinstallingRe = regexp.MustCompile(`^\(re\)installing `)
+	// durationRe is a Go-style duration token: 0.123s, 12ms, 4m19s,
+	// 1h2m3s, 250µs — a whole word, so TestG6s or v2.13.2 stay.
+	durationRe = regexp.MustCompile(`\b\d+(?:\.\d+)?(?:ns|us|µs|ms|s|m|h)(?:\d+(?:\.\d+)?(?:ns|us|µs|ms|s|m))*\b`)
+)
+
+// liftComparisonHash is the sha256 of a regression run's output with
+// tool-install lines dropped and durations blanked (R13): what the lift
+// compares two red runs by when no failing test names could be read.
+func liftComparisonHash(out string) string {
+	var b strings.Builder
+	for l := range strings.SplitSeq(ansiRe.ReplaceAllString(out, ""), "\n") {
+		l = strings.TrimRight(l, "\r")
+		if reinstallingRe.MatchString(l) {
+			continue
+		}
+		b.WriteString(durationRe.ReplaceAllString(l, ""))
+		b.WriteByte('\n')
 	}
-	for _, n := range after {
-		if !before[n] {
-			fresh = append(fresh, n)
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
+}
+
+// R12: tenax's `regression:` is `make lint && make test && …`; lint was
+// red at the tag, so make test ran at neither point and the two tests the
+// lift broke were never seen. For its two comparison runs the lift runs
+// each command of a top-level && chain on its own.
+
+// splitTopLevelAnd splits cmd on the && outside quotes, ( ), $( ), { },
+// ${ }, backticks and escapes; ;, || and pipes are left alone (a part keeps
+// them). Unbalanced nesting or quotes (a case pattern's ")") split
+// nothing. A part that changes the shell's own state (cd, export, source,
+// an assignment, …) holds for every command after it, so the chain from
+// it on stays one part. A command with no top-level && — or one whose
+// split would leave an empty part — is the one part.
+func splitTopLevelAnd(cmd string) []string {
+	var parts []string
+	depth := 0
+	var quote byte
+	from := 0
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
+		switch {
+		case quote == '\'':
+			if c == '\'' {
+				quote = 0
+			}
+		case quote == '"' || quote == '`':
+			if c == '\\' {
+				i++
+			} else if c == quote {
+				quote = 0
+			}
+		case c == '\\':
+			i++
+		case c == '\'' || c == '"' || c == '`':
+			quote = c
+		case c == '(' || c == '{':
+			depth++
+		case c == ')' || c == '}':
+			// A ) with nothing open (a case pattern) leaves the nesting
+			// unknown: no split.
+			if depth == 0 {
+				return []string{cmd}
+			}
+			depth--
+		case c == '&' && depth == 0 && i+1 < len(cmd) && cmd[i+1] == '&':
+			parts = append(parts, strings.TrimSpace(cmd[from:i]))
+			i++
+			from = i + 1
 		}
 	}
-	return fresh, true
+	if len(parts) == 0 || depth != 0 || quote != 0 {
+		return []string{cmd}
+	}
+	parts = append(parts, strings.TrimSpace(cmd[from:]))
+	for i, p := range parts {
+		if p == "" {
+			return []string{cmd}
+		}
+		if changesShellState(p) {
+			return append(parts[:i:i], strings.Join(parts[i:], " && "))
+		}
+	}
+	return parts
+}
+
+var (
+	shellStateRe = regexp.MustCompile(`^(?:cd|pushd|popd|export|source|\.|set|shopt|ulimit|umask|alias|unset|unalias|trap|eval|exec)(?:\s|$)`)
+	assignmentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=\S*$`)
+)
+
+// changesShellState reports a command that changes what the commands
+// after it in the same shell see: a builtin like cd or export, or a bare
+// NAME=value.
+func changesShellState(part string) bool {
+	return shellStateRe.MatchString(part) || assignmentRe.MatchString(part)
 }

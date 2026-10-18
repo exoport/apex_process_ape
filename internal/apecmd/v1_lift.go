@@ -138,10 +138,19 @@ regression_new_failures) · red-after-lift (green at the tag: the LIFT broke it 
 in a commit, or reset to the tag and lift with --exclude) · cannot-run (exit 126/127: a
 tool it runs is missing here, which is not a red) · red-no-baseline. Red at both, the
 failing tests are compared by name where the output names them (go test "--- FAIL:",
-pytest "FAILED", cargo "... FAILED", jest "✕"); otherwise by output hash, and a changed
+gotestsum "=== FAIL: <pkg> <test>" and "✖ <pkg>", pytest "FAILED", cargo "... FAILED",
+jest "✕"); otherwise by output hash — tool-install lines ("(re)installing …", as bingo
+prints on a first run) and durations (0.12s, 4m19s, (12ms)) left out — and a changed
 output stays red-at-tag with the note "the output changed after the lift", never called
-pre-existing. The exit code stays 0: the commit stands either way, and the verdict is in
---json and the output.
+pre-existing. A command that is a chain joined with && at its top level (outside quotes,
+( ), { }, $( ) and backticks; ;, || and pipes stay inside a command) runs command by
+command at both points, past a red one, so a red lint cannot hide the tests after it:
+each command is judged on its own, regression_verdict and the regression_* fields are
+the worst one's, and --json lists every command in regression_commands (cmd, verdict,
+note, new_failures, regression, regression_at_tag; logs regression-<n>.log and
+regression-<n>-at-tag.log). From a command that changes the shell's state (cd, export,
+source, NAME=value, …) on, the chain stays one command. The exit code stays 0: the
+commit stands either way, and the verdict is in --json and the output.
 
 --from-update is how the framework's v1.0.0 migration entry runs it inside
 ` + "`ape framework update`" + `: uncommitted changes under .claude/skills/, _apex/ (not
@@ -313,6 +322,13 @@ func printLift(w io.Writer, r *apexv1.LiftResult) {
 		fmt.Fprintf(w, "regression exit %d [%s] — %s\n", r.Regression.Exit, r.RegressionVerdict, r.RegressionNote)
 	} else if r.RegressionNote != "" {
 		fmt.Fprintln(w, "regression "+r.RegressionNote)
+	}
+	for i, c := range r.RegressionCommands {
+		at := "not run"
+		if c.RegressionAtTag != nil {
+			at = fmt.Sprintf("exit %d", c.RegressionAtTag.Exit)
+		}
+		fmt.Fprintf(w, "  %d [%s] %s at %s, exit %d at the lift commit — %s\n", i+1, c.Verdict, at, apexv1.LiftTag, c.Regression.Exit, c.Cmd)
 	}
 	fmt.Fprintf(w, "next: apex-plan with %s (the judged v1.0.0 migration entry), then a fresh read-only review of it, then yours\n", r.Disposition)
 }
