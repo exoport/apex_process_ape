@@ -25,7 +25,9 @@ func init() {
 	)
 }
 
-var stateJSONPathRe = regexp.MustCompile(`^(changes|archive)/[^/]+/state\.json$`)
+// stateJSONPathRe is a state.json under the development folder: a change
+// in flight, or an archived one in either layout (D155).
+var stateJSONPathRe = regexp.MustCompile(`^(changes|archive|archive/changes)/[^/]+/state\.json$`)
 
 // provenanceFindings walks the history since the epoch once — the commits
 // touching specs/, changes/ or archive/, with their files — and reports

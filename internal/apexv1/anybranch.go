@@ -30,7 +30,8 @@ import (
 // rules (D38): they run the change's code, so HEAD must be where it is.
 
 // baseView is the base branch's changes, as seen from another change's
-// branch: the base's name, and the ids under its changes/ and archive/.
+// branch: the base's name, and the ids under its changes/ and archive/
+// (archived maps them as ArchivedIDs does).
 type baseView struct {
 	branch   string
 	changes  map[string]bool
@@ -47,7 +48,7 @@ func (p *Project) baseViewOf(ctx context.Context) *baseView {
 	if err != nil || !p.branchExists(ctx, base) {
 		return nil
 	}
-	v := &baseView{branch: base, changes: map[string]bool{}, archived: map[string]string{}}
+	v := &baseView{branch: base, changes: map[string]bool{}}
 	if out, err := git(ctx, p.Root, "ls-tree", "--name-only", "refs/heads/"+base+":./"+p.Rel(p.ChangesDir())); err == nil {
 		for name := range strings.SplitSeq(out, "\n") {
 			if name != "" && name != "archive" && !strings.HasPrefix(name, ".") {
@@ -55,13 +56,7 @@ func (p *Project) baseViewOf(ctx context.Context) *baseView {
 			}
 		}
 	}
-	if out, err := git(ctx, p.Root, "ls-tree", "--name-only", "refs/heads/"+base+":./"+p.Rel(p.ArchiveDir())); err == nil {
-		for name := range strings.SplitSeq(out, "\n") {
-			if len(name) > 11 && name[10] == '-' {
-				v.archived[name[11:]] = name
-			}
-		}
-	}
+	v.archived = p.archivedOn(ctx, base)
 	return v
 }
 

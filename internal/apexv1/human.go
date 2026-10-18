@@ -159,7 +159,7 @@ func (p *Project) acceptArchived(ctx context.Context, id string, a acceptance, e
 	// of the branch HEAD is on.
 	base := ""
 	if folder, ok := p.ArchivedIDs()[id]; ok {
-		if st, err := LoadState(filepath.Join(p.ArchiveDir(), folder, "state.json")); err == nil && st.BaseBranch != "" && p.branchExists(ctx, st.BaseBranch) {
+		if st, err := LoadState(filepath.Join(p.archivedPath(folder), "state.json")); err == nil && st.BaseBranch != "" && p.branchExists(ctx, st.BaseBranch) {
 			base = st.BaseBranch
 		}
 	}
@@ -174,8 +174,8 @@ func (p *Project) acceptArchived(ctx context.Context, id string, a acceptance, e
 	if folder == "" {
 		return nil, &FailError{Code: CodeChangeNotFound, Msg: "no change " + id + " in the archive on " + base + " — `ape status` lists the changes"}
 	}
-	stateRel := p.Rel(filepath.Join(p.ArchiveDir(), folder, "state.json"))
-	docRel := p.Rel(filepath.Join(p.ArchiveDir(), folder, "change.md"))
+	stateRel := p.Rel(filepath.Join(p.archivedPath(folder), "state.json"))
+	docRel := p.Rel(filepath.Join(p.archivedPath(folder), "change.md"))
 	notes, err := p.readNotes(a.notes)
 	if err != nil {
 		return nil, err
@@ -217,22 +217,13 @@ func (p *Project) acceptArchived(ctx context.Context, id string, a acceptance, e
 	return st, nil
 }
 
-// archivedFolderOn is the archive folder (<date>-<id>) of change id on
-// branch, "" when it has none.
+// archivedFolderOn is the archive folder of change id on branch, as
+// ArchivedIDs names it; "" when it has none.
 func (p *Project) archivedFolderOn(ctx context.Context, branch, id string) string {
 	if here, err := p.checkedOutHere(ctx, branch); err == nil && here {
 		return p.ArchivedIDs()[id]
 	}
-	out, err := git(ctx, p.Root, "ls-tree", "--name-only", "refs/heads/"+branch+":./"+p.Rel(p.ArchiveDir()))
-	if err != nil {
-		return ""
-	}
-	for name := range strings.SplitSeq(out, "\n") {
-		if len(name) > 11 && name[10] == '-' && name[11:] == id {
-			return name
-		}
-	}
-	return ""
+	return p.archivedOn(ctx, branch)[id]
 }
 
 // awaitingHuman is a change's human-review tasks that wait for a person:

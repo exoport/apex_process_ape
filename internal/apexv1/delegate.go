@@ -551,7 +551,7 @@ func (p *Project) archivedDelegateTarget(id, task string) (*delegateTargetInfo, 
 	if !ok {
 		return nil, &FailError{Code: CodeChangeNotFound, Msg: "the archived change " + id + " is not in this checkout's tree — run the delegate on the branch it was archived into"}
 	}
-	dir := filepath.Join(p.ArchiveDir(), name)
+	dir := p.archivedPath(name)
 	st, err := LoadState(filepath.Join(dir, "state.json"))
 	if err != nil {
 		return nil, &FailError{Code: CodeStateUnreadable, Msg: err.Error()}

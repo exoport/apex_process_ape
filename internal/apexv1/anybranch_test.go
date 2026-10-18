@@ -83,7 +83,7 @@ func TestAnyBranch_FixOnTheBaseOnly(t *testing.T) {
 	ab, err := p.Abandon(ctx(), "fix-hug", "not needed")
 	require.NoError(t, err)
 	onlyMainMoved(t, p, mainTip, "apex: fix-hug abandoned", "development/changes/fix-hug/", "development/archive/")
-	require.Equal(t, "development/archive/"+Today()+"-fix-hug", ab.ArchivedTo)
+	require.Equal(t, "development/archive/changes/"+Today()+"-fix-hug", ab.ArchivedTo)
 	require.Empty(t, ab.BranchTip)
 	require.Empty(t, p.filesAt(ctx(), "main", "development/changes/fix-hug"), "moved, not copied")
 	st, err := parseState("", []byte(run(t, p.Root, "show", "main:"+ab.ArchivedTo+"/state.json")))

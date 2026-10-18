@@ -358,5 +358,7 @@ var DiagnosticCodes = []CodeDoc{
 	{CodeGateArchiveExists, 1, "person", "milestone close: the milestone has gate folders (<dev>/gates/<M>-*/) to archive, but <dev>/archive/milestones/<M>/gate/ exists already (D155 Q74): a person moves it away (or merges the folders into it), then closes again; nothing was run or written"},
 	{CodeHotNotIgnored, 1, "person", "hot/ (the project's secrets, read at run time and never committed; D155) is tracked by git or not ignored: hot/.gitignore holds the one line `*` (`ape project init` and the lift write it when absent), and `git rm -r --cached hot/` untracks what git holds there"},
 	{CodeGateOutsideGates, 0, "person", "a notice, never a finding (project check's notices; the exit is unchanged): an open milestone's gate runs scripts outside <dev>/gates/ (D155 Q73) — moving an approved gate's script is gate drift, so they move into <dev>/gates/<M>-<slug>/ with the milestone's next re-approval (before its approval, for a proposed one)"},
+	// rc.6 (rc6-f).
+	{"archive.legacy-layout", 1, "person", "`ape project archive-layout --check`: archived changes are left in the older layout development/archive/<date>-<id>/ (named; D155) — `ape project archive-layout` moves them into development/archive/changes/ (the framework's v1.0.0_seq-06 runs it); every command reads both layouts meanwhile"},
 	{UnclassifiedFinding, 1, "stop", "a finding no rule classifies (a bug: report it)"},
 }

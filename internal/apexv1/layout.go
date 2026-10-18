@@ -221,11 +221,20 @@ func (p *Project) ChangesDir() string {
 	return filepath.Join(p.Dev(), "changes")
 }
 
-// ArchiveDir is where archived and abandoned changes live, beside
-// changes/ rather than inside it (backlog 24): changes/ holds only the
-// changes in flight.
+// ArchiveDir is development/archive/, beside changes/ rather than inside
+// it (backlog 24): changes/ holds only the changes in flight. It holds the
+// archived and abandoned changes under changes/ (ArchivedChangesDir) and
+// the closed milestones under milestones/.
 func (p *Project) ArchiveDir() string {
 	return filepath.Join(p.Dev(), "archive")
+}
+
+// ArchivedChangesDir is archive/changes/, where archive and abandon put a
+// change's folder, as <YYYY-MM-DD>-<id>/ (D155). An older ape put it in
+// archive/ itself; ArchivedIDs reads both layouts, always, and `ape
+// project archive-layout` moves the older one here (seq-06).
+func (p *Project) ArchivedChangesDir() string {
+	return filepath.Join(p.ArchiveDir(), archivedChangesSub)
 }
 
 // OldArchiveDir is changes/archive/, where an older ape archived changes.
