@@ -37,9 +37,21 @@ type RegressionBaseline struct {
 	At           string `json:"at"`
 	// Failing are the failing tests the run's output named (Q47), read
 	// when it was red; none for a green run, a run whose runner names
-	// nothing ape reads, or a baseline recorded before rc.5.
+	// nothing ape reads, a run naming more than regressionFailingCap, or
+	// a baseline recorded before rc.5.
 	Failing []string `json:"failing,omitempty"`
 }
+
+// regressionFailingCap is the most failing tests a regression baseline
+// stores: state.json is committed on the change's branch. A run naming
+// more stores none and is judged by the exit codes — a cut list would
+// make a cut name look new.
+const regressionFailingCap = 500
+
+// regressionNewFailuresShown is how many new failing tests a verdict
+// carries (a gate's is committed in milestones.json);
+// new_failures_total counts them all.
+const regressionNewFailuresShown = 50
 
 // RegressionVerdict judges one run of the regression command against a
 // baseline. Failed: red now and not red at baseline — newly red, or red
@@ -63,6 +75,9 @@ type RegressionVerdict struct {
 	// did not (Q47): what failed it when the baseline was red too, or
 	// every failing test when the baseline was green.
 	NewFailures []string `json:"new_failures,omitempty"`
+	// NewFailuresTotal counts them when there are any: new_failures holds
+	// at most regressionNewFailuresShown.
+	NewFailuresTotal int `json:"new_failures_total,omitempty"`
 	// Reason and Detail: the run was vacuous or unrun (H11). An unrun
 	// command always fails: nothing shows it would pass.
 	Reason string `json:"reason,omitempty"`
@@ -125,6 +140,9 @@ func judgeRegression(r *CheckResult, base *RegressionBaseline, out string) *Regr
 			v.PreExistingRed = true
 		}
 		v.Failed = !v.PreExistingRed
+		if v.NewFailuresTotal = len(v.NewFailures); v.NewFailuresTotal > regressionNewFailuresShown {
+			v.NewFailures = v.NewFailures[:regressionNewFailuresShown]
+		}
 	}
 	r.PreExistingRed = v.PreExistingRed
 	return v
@@ -140,11 +158,14 @@ func (p *Project) checkOutput(r *CheckResult) string {
 }
 
 // regressionBaseline is r recorded as a regression baseline at sha, with
-// the failing tests its output names when it is red (Q47).
+// the failing tests its output names when it is red (Q47) — none past
+// regressionFailingCap.
 func (p *Project) regressionBaseline(r *CheckResult, sha string) *RegressionBaseline {
 	b := &RegressionBaseline{Cmd: r.Cmd, Exit: r.Exit, OutputSHA256: r.OutputSHA256, SHA: sha, At: Stamp()}
 	if r.Exit != 0 && r.Reason != ReasonUnrun {
-		b.Failing = failingTests(p.checkOutput(r))
+		if names := failingTests(p.checkOutput(r)); len(names) <= regressionFailingCap {
+			b.Failing = names
+		}
 	}
 	return b
 }

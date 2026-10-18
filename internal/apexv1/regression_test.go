@@ -1,7 +1,10 @@
 package apexv1
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -328,4 +331,46 @@ func TestRegressionBaseline_OldStateLoads(t *testing.T) {
 	data, err := os.ReadFile(file)
 	require.NoError(t, err)
 	require.Contains(t, string(data), `"failing": [`)
+}
+
+// state.json is committed on change/<id>: a baseline stores at most
+// regressionFailingCap names, and one naming more stores none — a cut
+// list would make a cut name look new — so it is judged by the exit
+// codes. The verdict carries at most regressionNewFailuresShown new names.
+func TestRegressionBaseline_FailingCap(t *testing.T) {
+	p := fixture(t, baseFiles())
+	names := func(n int, prefix string) string {
+		var b strings.Builder
+		for i := range n {
+			fmt.Fprintf(&b, "--- FAIL: %s%03d (0.00s)\n", prefix, i)
+		}
+		return b.String()
+	}
+	logged := func(name, out string) *CheckResult {
+		write(t, p, "_apex/state/logs/"+name, out)
+		return &CheckResult{Cmd: "./suite.sh", Exit: 1, Log: "_apex/state/logs/" + name}
+	}
+
+	at := p.regressionBaseline(logged("cap500.log", names(regressionFailingCap, "TestEnv")), "c0ffee")
+	require.Len(t, at.Failing, regressionFailingCap, "500 names are stored")
+
+	base := p.regressionBaseline(logged("cap501.log", names(regressionFailingCap+1, "TestEnv")), "c0ffee")
+	require.Nil(t, base.Failing, "501 names: none stored")
+	data, err := json.Marshal(base)
+	require.NoError(t, err)
+	require.NotContains(t, string(data), `"failing"`)
+
+	now := logged("now.log", names(regressionFailingCap+1, "TestEnv")+"--- FAIL: TestNew (0.00s)\n")
+	v := judgeRegression(now, base, p.checkOutput(now))
+	require.True(t, v.PreExistingRed, "no stored names: the exit-code rule, red at both is pre-existing")
+	require.False(t, v.Failed)
+	require.Empty(t, v.NewFailures)
+
+	// Against a green baseline, every failing test is new: 51 shown as
+	// 50, with the total.
+	now = logged("many.log", names(51, "TestNew"))
+	v = judgeRegression(now, &RegressionBaseline{Cmd: "./suite.sh", Exit: 0}, p.checkOutput(now))
+	require.True(t, v.Failed)
+	require.Len(t, v.NewFailures, regressionNewFailuresShown)
+	require.Equal(t, 51, v.NewFailuresTotal)
 }

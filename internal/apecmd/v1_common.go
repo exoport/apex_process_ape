@@ -236,8 +236,8 @@ func printNewFailures(w io.Writer, v *apexv1.RegressionVerdict) {
 	}
 	names := v.NewFailures
 	more := ""
-	if len(names) > 10 {
-		names, more = names[:10], fmt.Sprintf(", … (%d in all, in new_failures)", len(v.NewFailures))
+	if len(names) > 10 || v.NewFailuresTotal > len(names) {
+		names, more = names[:min(len(names), 10)], fmt.Sprintf(", … (%d in all; the first %d in new_failures)", v.NewFailuresTotal, len(v.NewFailures))
 	}
 	fmt.Fprintf(w, "       failing now, not at baseline: %s%s\n", strings.Join(names, ", "), more)
 }

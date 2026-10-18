@@ -539,10 +539,11 @@ baseline and still red is reported (pre_existing_red), not failed: the planner r
 it — unless a test fails now that did not then. When both runs name their failing tests
 (go test "--- FAIL:", gotestsum "=== FAIL:", pytest, cargo, jest; the baseline's are in
 state.json regression_baseline.failing, recorded at start since rc.5), every test failing
-now must have failed at baseline, else verify fails with the new ones in new_failures;
-when either run names none (a baseline recorded before rc.5 included), red at both is
-pre-existing, as before. new_failures also lists a red run's tests against a green
-baseline.
+now must have failed at baseline, else verify fails with the new ones in new_failures
+(the first 50; new_failures_total counts them); when either run names none (a baseline
+recorded before rc.5, or one naming more than 500, which stores none, included), red at
+both is pre-existing, as before. new_failures also lists a red run's tests against a
+green baseline.
 The working tree must hold no uncommitted changes outside development/ — commit first
 (trailer "Change: <id>"): a verify belongs to a sha. HEAD must be on the change's branch,
 change/<id> (D38; else exit 1, code change.wrong-branch).
